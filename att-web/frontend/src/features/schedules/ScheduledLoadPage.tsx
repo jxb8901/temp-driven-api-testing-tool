@@ -184,6 +184,9 @@ export function ScheduledLoadPage({ api, packages, enabled, onOpenJob, initialDr
   const [mutationError, setMutationError] = useState('');
   const [validatedIntentReady, setValidatedIntentReady] = useState(false);
   const [validatedIntentUnavailable, setValidatedIntentUnavailable] = useState(false);
+  const [validatedDraftExpiresAt, setValidatedDraftExpiresAt] = useState<string>();
+  const [validatedIntentDraftId, setValidatedIntentDraftId] = useState<string>();
+  const [clockNow, setClockNow] = useState(Date.now());
   const [validationDiagnostics, setValidationDiagnostics] = useState<ScheduleValidationDiagnostic[]>([]);
   const [validationRequestId, setValidationRequestId] = useState('');
   const [filter, setFilter] = useState('');
@@ -214,6 +217,13 @@ export function ScheduledLoadPage({ api, packages, enabled, onOpenJob, initialDr
   const dirtyRef = useRef(false);
   const cancelConfirmation = useRef<HTMLButtonElement>(null);
   const timezoneOptions = useMemo(timeZoneChoices, []);
+  const validatedDraftExpired = Boolean(validatedIntentDraftId && validatedDraftExpiresAt
+    && (!Number.isFinite(Date.parse(validatedDraftExpiresAt)) || Date.parse(validatedDraftExpiresAt) <= clockNow));
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setClockNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   const draftSignature = JSON.stringify(draft);
   const dirty = draftSignature !== baseline;
@@ -301,6 +311,8 @@ export function ScheduledLoadPage({ api, packages, enabled, onOpenJob, initialDr
     seeded.debugTargetId = initialDraft.target?.id || '';
     seeded.inlineSnapshot = Boolean(initialDraft.draftId);
     seeded.draftId = initialDraft.draftId;
+    setValidatedIntentDraftId(initialDraft.draftId);
+    setValidatedDraftExpiresAt(initialDraft.expiresAt);
     seeded.scenario = initialDraft.scenario || '';
     setScenarioPreviewYaml(initialDraft.previewYaml || '');
     setDraft(seeded);
@@ -470,6 +482,11 @@ export function ScheduledLoadPage({ api, packages, enabled, onOpenJob, initialDr
     setMutationError('');
     setValidationDiagnostics([]); setValidationRequestId('');
     setNotice('');
+    if (validatedIntentDraftId && validatedDraftExpired) {
+      setValidatedIntentUnavailable(true);
+      setMutationError('The validated execution draft expired while this form was open. Return to the originating editor and validate again.');
+      return;
+    }
     let input;
     try { input = scheduleInputFromDraft(draft); }
     catch (error) { setMutationError(error instanceof Error ? error.message : 'Correct the schedule fields.'); return; }
@@ -492,7 +509,7 @@ export function ScheduledLoadPage({ api, packages, enabled, onOpenJob, initialDr
       const diagnostics = scheduleDiagnostics(error);
       setValidationDiagnostics(diagnostics);
       setValidationRequestId(error instanceof ApiError ? error.requestId || '' : '');
-      const missingValidatedDraft = Boolean(initialDraft?.draftId && error instanceof ApiError && error.status === 404);
+      const missingValidatedDraft = Boolean(validatedIntentDraftId && error instanceof ApiError && error.status === 404);
       setValidatedIntentUnavailable(missingValidatedDraft);
       if (missingValidatedDraft) {
         setMutationError('The validated execution draft expired or is unavailable. Return to the originating editor and validate again.');
@@ -740,6 +757,10 @@ export function ScheduledLoadPage({ api, packages, enabled, onOpenJob, initialDr
         <pre id="schedule-snapshot-content" tabIndex={0} aria-label="Validated Load scenario snapshot">{scenarioPreviewYaml}</pre>
       </details>}
       {notice && <p className="att-schedule-notice" role="status" aria-live="polite">{notice}</p>}
+      {validatedIntentDraftId && validatedDraftExpiresAt && <p className={validatedDraftExpired ? 'att-schedule-error' : 'att-schedule-hint'} role={validatedDraftExpired ? 'alert' : 'status'}>
+        {validatedDraftExpired ? 'This validated execution draft has expired. Return to the originating editor and validate again.'
+          : `Validated draft expires ${new Date(validatedDraftExpiresAt).toLocaleString()}.`}
+      </p>}
       {mutationError && <div className="att-schedule-error" role="alert" aria-live="assertive">
         <p>{mutationError}</p>
         {validationDiagnostics.length > 0 && <section aria-labelledby="schedule-validation-heading">
@@ -758,7 +779,7 @@ export function ScheduledLoadPage({ api, packages, enabled, onOpenJob, initialDr
         </section>}
         {validationRequestId && <p><strong>Request ID:</strong> <code>{validationRequestId}</code></p>}
       </div>}
-      {validatedIntentUnavailable && <button className="button button-quiet" type="button" onClick={closeEditor}>Return to originating editor</button>}
+      {(validatedIntentUnavailable || validatedDraftExpired) && <button className="button button-quiet" type="button" onClick={closeEditor}>Return to originating editor</button>}
       {actionPending && <p className="att-schedule-status" role="status" aria-live="polite" aria-busy="true">Applying the confirmed action to {schedules.find(item => item.id === actionPending)?.name || 'the schedule'}…</p>}
       {packages.status === 'loading' && <p role="status" aria-busy="true">Loading configured packages…</p>}
       {packages.status === 'error' && <p className="att-schedule-error" role="alert">Configured packages could not be loaded: {packages.error.message}</p>}

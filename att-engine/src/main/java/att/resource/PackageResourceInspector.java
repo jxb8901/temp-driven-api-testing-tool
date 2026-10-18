@@ -154,8 +154,9 @@ public final class PackageResourceInspector implements AutoCloseable {
         this.packageInputRoot = packageRoot.toAbsolutePath().normalize();
         this.configPath = configPath == null ? Paths.get("config/config.yaml") : configPath;
         Path selectedConfig = RuntimeConfigPath.resolve(this.configPath, this.packageRoot);
-        this.runtimeConfigRoot = RuntimeConfigPath.root(selectedConfig);
-        this.configResources = new PackageResourceResolver(this.runtimeConfigRoot);
+        Path runtimeConfigInputRoot = RuntimeConfigPath.root(selectedConfig);
+        this.configResources = new PackageResourceResolver(runtimeConfigInputRoot);
+        this.runtimeConfigRoot = this.configResources.packageRoot();
         this.environment = environment;
         this.safeTextSources = new HashSet<String>(
                 safeTextSources == null ? Collections.<String>emptySet() : safeTextSources);

@@ -5,7 +5,7 @@ import type { api } from '../../api';
 import { formatRoute, type LoadCatalogRouteState } from '../../router';
 import './load.css';
 
-type ScheduleIntent = { packageId: string; environment?: string; draftId: string; previewYaml?: string; executionType: 'load' };
+type ScheduleIntent = { packageId: string; environment?: string; draftId: string; previewYaml?: string; expiresAt?: string; executionType: 'load' };
 type CatalogApi = Pick<typeof api, 'listLoadCatalog' | 'validateLoadCatalogScenario' | 'submitLoadScenario' | 'listLoadJobs'>
   & Partial<Pick<typeof api, 'getDeclaredConfiguration'>>;
 type CatalogJob = JobSummary & { scenario?: string; environment?: string; model?: string };
@@ -76,6 +76,7 @@ export function LoadCatalogPage({ api, packages, inlineLoadEnabled, schedulingEn
   const [actionKey, setActionKey] = useState('');
   const actionSequenceRef = useRef(0);
   const [notice, setNotice] = useState('');
+  const [clockNow, setClockNow] = useState(Date.now());
   const [jobs, setJobs] = useState<CatalogJob[]>([]);
   const [jobsState, setJobsState] = useState<'loading' | 'ready' | 'error'>('loading');
   const [jobsError, setJobsError] = useState('');
@@ -91,6 +92,11 @@ export function LoadCatalogPage({ api, packages, inlineLoadEnabled, schedulingEn
     if (typeof scrollY === 'number') requestAnimationFrame(() => window.scrollTo(0, scrollY));
   }, []);
 
+  useEffect(() => {
+    const timer = window.setInterval(() => setClockNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+
   const invalidateEnvironmentValidation = useCallback((value: string) => {
     validationGenerationRef.current += 1;
     environmentDraftRef.current = value;
@@ -99,7 +105,7 @@ export function LoadCatalogPage({ api, packages, inlineLoadEnabled, schedulingEn
     setCatalog(current => current.map(item => item.kind === 'scenario'
       ? { ...item, validation: 'unverified', validatedEnvironment: undefined, runNow: false, schedule: false,
         diagnostic: undefined, diagnostics: undefined, requestId: undefined, scheduleDraftId: undefined,
-        schedulePreviewYaml: undefined, scheduleReason: undefined }
+        schedulePreviewYaml: undefined, scheduleDraftExpiresAt: undefined, scheduleReason: undefined }
       : item));
   }, [actionKey]);
 
@@ -279,7 +285,8 @@ export function LoadCatalogPage({ api, packages, inlineLoadEnabled, schedulingEn
         ? { ...candidate, validation: result.validation, validatedEnvironment: requestedEnvironment, model: result.model || candidate.model,
           diagnostic: undefined, diagnostics: undefined, requestId: undefined, runNow: true,
           schedule: schedulingEnabled && result.scheduleAvailable === true && Boolean(result.draftId),
-          scheduleDraftId: result.draftId, schedulePreviewYaml: result.previewYaml, scheduleReason: result.scheduleReason }
+          scheduleDraftId: result.draftId, schedulePreviewYaml: result.previewYaml,
+          scheduleDraftExpiresAt: result.expiresAt, scheduleReason: result.scheduleReason }
         : candidate));
       setNotice(`${item.path} validation refreshed for ${requestedEnvironment || 'the package default'}: ${result.validation}.`);
     } catch (error) {
@@ -331,6 +338,9 @@ export function LoadCatalogPage({ api, packages, inlineLoadEnabled, schedulingEn
       const currentValidation = item.validation === 'valid' && item.validatedEnvironment === environmentDraft;
       if (currentValidation && !item.runNow) reasons.push('Run Now is unavailable under Server policy.');
       if (!schedulingEnabled) reasons.push('Scheduling disabled by Server policy.');
+      else if (currentValidation && item.scheduleDraftId && (!item.scheduleDraftExpiresAt
+        || !Number.isFinite(Date.parse(item.scheduleDraftExpiresAt)) || Date.parse(item.scheduleDraftExpiresAt) <= clockNow))
+        reasons.push('The validated Schedule draft expired. Validate this scenario again before scheduling.');
       else if (currentValidation && !item.schedule) reasons.push(item.scheduleReason || 'Revalidate to receive a short-lived Schedule draft.');
     } else if (item.kind === 'template' && (!item.createQuickLoad || !inlineLoadEnabled)) {
       reasons.push('Quick LOAD composition is disabled by Server policy.');
@@ -396,9 +406,10 @@ export function LoadCatalogPage({ api, packages, inlineLoadEnabled, schedulingEn
               onClick={() => void validateItem(item)}>{actionKey === `validate:${item.resourceId}` ? 'Validating…' : 'Validate'}</button>}
             {item.kind === 'template' && <button className="button button-quiet" type="button" disabled={Boolean(actionKey)} onClick={() => void validateTemplate(item)}>{actionKey === `validate:${item.resourceId}` ? 'Validating…' : 'Validate'}</button>}
             {item.kind === 'scenario' && <><button className="button button-primary" type="button" disabled={!item.runNow || item.validation !== 'valid' || item.validatedEnvironment !== environmentDraft || environmentNotApplicable(item) || Boolean(actionKey)} onClick={() => void runNow(item)}>{actionKey === item.resourceId ? 'Starting…' : 'Run Now'}</button>
-              <button className="button button-quiet" type="button" disabled={!item.schedule || !item.scheduleDraftId || item.validation !== 'valid' || item.validatedEnvironment !== environmentDraft || !schedulingEnabled || environmentNotApplicable(item)} title={!schedulingEnabled ? 'Schedules are disabled by Server policy.' : item.validatedEnvironment !== environmentDraft ? 'Validate for the selected environment first.' : undefined}
+              <button className="button button-quiet" type="button" disabled={!item.schedule || !item.scheduleDraftId || !item.scheduleDraftExpiresAt || !Number.isFinite(Date.parse(item.scheduleDraftExpiresAt)) || Date.parse(item.scheduleDraftExpiresAt) <= clockNow || item.validation !== 'valid' || item.validatedEnvironment !== environmentDraft || !schedulingEnabled || environmentNotApplicable(item)} title={item.scheduleDraftExpiresAt && (!Number.isFinite(Date.parse(item.scheduleDraftExpiresAt)) || Date.parse(item.scheduleDraftExpiresAt) <= clockNow) ? 'Validated Schedule draft expired. Validate again.' : !schedulingEnabled ? 'Schedules are disabled by Server policy.' : item.validatedEnvironment !== environmentDraft ? 'Validate for the selected environment first.' : undefined}
                 onClick={() => onSchedule({ packageId: item.packageId, environment: environmentDraft || undefined,
-                  draftId: item.scheduleDraftId!, previewYaml: item.schedulePreviewYaml, executionType: 'load' })}>Schedule</button></>}
+                  draftId: item.scheduleDraftId!, previewYaml: item.schedulePreviewYaml, expiresAt: item.scheduleDraftExpiresAt, executionType: 'load' })}>Schedule</button></>}
+            {item.scheduleDraftExpiresAt && item.scheduleDraftId && <p className="att-help">Validated Schedule draft expires {new Date(item.scheduleDraftExpiresAt).toLocaleString()}.</p>}
             {item.kind === 'template' && <button className="button button-quiet" type="button" disabled={!item.createQuickLoad || !inlineLoadEnabled}
               onClick={() => onQuickLoad(item.packageId, item)}>Create Quick LOAD</button>}
             <button className="button button-quiet" type="button" onClick={() => showSource(item)}>View</button>

@@ -64,11 +64,14 @@ public final class LoadTargetValidator {
         } catch (Exception e) {
             att.validation.DiagnosticException typed = att.validation.DiagnosticException.find(e);
             if (typed != null) throw typed;
+            String dependency = "Target " + target.type() + " '" + target.id() + "' dependency validation failed";
+            String cause = e.getMessage();
             throw new att.validation.DiagnosticException(att.validation.DiagnosticCodes.LOAD_INVALID,
-                    "Invalid load target dependencies", e.getMessage(),
+                    "Invalid load target dependencies", cause == null || cause.trim().isEmpty()
+                            ? dependency : dependency + ": " + cause,
                     scenario.source() == null ? "<inline Load scenario>" : scenario.source().toString(),
                     "target", null, null, null, target.template().name(), null,
-                    "Correct the selected Template/Flow/Tool dependency before starting load scheduling.", e);
+                    "Inspect the referenced Template/Flow/Tool and its nested dependencies; fix the reported LOAD validation error before retrying.", e);
         }
     }
 

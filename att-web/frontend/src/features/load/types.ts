@@ -28,6 +28,7 @@ export interface LoadCatalogItem {
   validatedEnvironment?: string;
   scheduleDraftId?: string;
   schedulePreviewYaml?: string;
+  scheduleDraftExpiresAt?: string;
   scheduleReason?: string;
 }
 
@@ -65,9 +66,14 @@ export interface ServerDiagnostic {
   reason?: string;
   field?: string;
   path?: string;
+  file?: string;
+  sourceFile?: string;
+  resourceId?: string;
+  action?: string;
   severity?: string;
   message?: string;
   summary?: string;
+  detail?: string;
   suggestion?: string;
   line?: number;
   column?: number;

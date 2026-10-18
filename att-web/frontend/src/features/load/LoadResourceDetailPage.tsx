@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ApiError } from '../../types';
 import type { LoadCatalogDetail, ServerDiagnostic } from './types';
 import { CodeEditor } from '../code/CodeEditor';
@@ -84,6 +84,29 @@ export function LoadResourceDetailPage({ api, packageId, resourceId, environment
   const [validationDiagnostics, setValidationDiagnostics] = useState<ServerDiagnostic[]>([]);
   const [validationMessage, setValidationMessage] = useState('Validate this Scenario for the selected Environment to refresh target dependencies.');
   const [requestId, setRequestId] = useState('');
+  const identity = `${packageId}\u0000${resourceId}\u0000${environment}`;
+  const identityRef = useRef(identity);
+  identityRef.current = identity;
+  const sourceSequence = useRef(0);
+  const sourceController = useRef<AbortController | null>(null);
+  const validationSequence = useRef(0);
+  const validationController = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    sourceController.current?.abort();
+    sourceController.current = null;
+    sourceSequence.current += 1;
+    validationController.current?.abort();
+    validationController.current = null;
+    validationSequence.current += 1;
+    setSourceState('idle'); setSource({});
+    setValidationState('idle'); setValidationDiagnostics([]); setRequestId('');
+    setValidationMessage(`Validate this Scenario for ${environment || 'Package default'} to refresh target dependencies.`);
+    return () => {
+      sourceController.current?.abort();
+      validationController.current?.abort();
+    };
+  }, [packageId, resourceId, environment]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -99,38 +122,48 @@ export function LoadResourceDetailPage({ api, packageId, resourceId, environment
     return () => controller.abort();
   }, [api, packageId, resourceId]);
 
-  useEffect(() => {
-    setValidationState('idle'); setValidationDiagnostics([]); setRequestId('');
-    setValidationMessage(`Validate this Scenario for ${environment || 'Package default'} to refresh target dependencies.`);
-  }, [environment, resourceId]);
-
   async function showYamlSource() {
+    const request = ++sourceSequence.current;
+    sourceController.current?.abort();
+    const controller = new AbortController();
+    sourceController.current = controller;
+    const requestedIdentity = identityRef.current;
     setSourceState('loading'); setSource({});
     try {
-      const result = await api.getLoadSource(packageId, resourceId);
+      const result = await api.getLoadSource(packageId, resourceId, controller.signal);
+      if (controller.signal.aborted || request !== sourceSequence.current || requestedIdentity !== identityRef.current) return;
       setSource({ text: result.text, reason: result.reason, redacted: result.redacted });
       setSourceState(result.available ? 'ready' : 'unavailable');
     } catch (error) {
+      if (controller.signal.aborted || request !== sourceSequence.current || requestedIdentity !== identityRef.current) return;
       setSource({ reason: safeMessage(error instanceof Error ? error.message : 'YAML Source is unavailable under the current visibility policy.') });
       setSourceState('error');
-    }
+    } finally { if (sourceController.current === controller) sourceController.current = null; }
   }
 
   async function validateScenario() {
+    const request = ++validationSequence.current;
+    validationController.current?.abort();
+    const controller = new AbortController();
+    validationController.current = controller;
+    const requestedIdentity = identityRef.current;
+    const requestedDetail = detail;
     setValidationState('loading'); setValidationDiagnostics([]); setRequestId('');
     setValidationMessage(`Validating for ${environment || 'Package default'}…`);
     try {
-      const result = await api.validateLoadCatalogScenario(packageId, resourceId, environment || undefined);
+      const result = await api.validateLoadCatalogScenario(packageId, resourceId, environment || undefined, controller.signal);
+      if (controller.signal.aborted || request !== validationSequence.current || requestedIdentity !== identityRef.current) return;
       setValidationState('valid'); setValidationMessage(`Valid for ${environment || 'Package default'}.`);
-      if (result.model && detail) setDetail({ ...detail, model: result.model as LoadCatalogDetail['model'] });
+      if (result.model && requestedDetail) setDetail({ ...requestedDetail, model: result.model as LoadCatalogDetail['model'] });
     } catch (error) {
+      if (controller.signal.aborted || request !== validationSequence.current || requestedIdentity !== identityRef.current) return;
       setValidationState('invalid');
       setValidationMessage(safeMessage(error instanceof Error ? error.message : 'Scenario validation failed.'));
       if (error instanceof ApiError) {
         setRequestId(error.requestId || '');
         setValidationDiagnostics(safeDiagnostics(error.diagnostics));
       }
-    }
+    } finally { if (validationController.current === controller) validationController.current = null; }
   }
 
   const definition = detail?.definition || {};

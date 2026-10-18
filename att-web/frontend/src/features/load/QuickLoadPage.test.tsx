@@ -34,7 +34,9 @@ describe('QuickLoadPage', () => {
       getTargetLoadForm: vi.fn(async () => ({ target: { type: 'template' as const, id: 'checkout' }, model: 'virtualUsers' as const, input: { inputs: {}, vars: {} } })),
       createLoadDraft: vi.fn(async () => { throw new ApiError('Duration is not supported.', {
         status: 400, code: 'LOAD_VALIDATION_FAILED', requestId: 'req-quick-123',
-        diagnostics: [{ severity: 'ERROR', code: 'DURATION_INVALID', path: 'scenario.load.duration', summary: 'Use a supported duration.' }],
+        diagnostics: [{ severity: 'ERROR', code: 'DURATION_INVALID', path: 'scenario.load.duration', summary: 'Use a supported duration.',
+          detail: 'Flow checkout depends on a missing Tool; /srv/private/flow.yaml token=hidden-value',
+          suggestion: 'Add the required Tool and verify password=hidden-password.' }],
       }); }),
       submitLoadDraft: vi.fn(async () => ({ jobId: 'JOB-QUICK' })),
     } as unknown as LoadJobsApi;
@@ -51,10 +53,38 @@ describe('QuickLoadPage', () => {
     await flush();
     expect(host.textContent).toContain('DURATION_INVALID');
     expect(host.textContent).toContain('Use a supported duration.');
+    expect(host.textContent).toContain('Flow checkout depends on a missing Tool');
+    expect(host.textContent).toContain('Suggestion: Add the required Tool and verify password=[REDACTED]');
+    expect(host.textContent).not.toContain('/srv/private');
+    expect(host.textContent).not.toContain('hidden-value');
+    expect(host.textContent).not.toContain('hidden-password');
     expect(host.textContent).toContain('req-quick-123');
     const review = [...host.querySelectorAll('button')].find(button => button.textContent === 'Review field')!;
     await act(async () => review.click());
     expect(document.activeElement).toBe(host.querySelector('input[placeholder="e.g. 30s or 5m"]'));
+  });
+
+  it('renders package dependency diagnostics without offering a field focus action', async () => {
+    const api = {
+      getLoadPolicy: vi.fn(async () => ({ model: 'virtualUsers' as const, policy: { schemaVersion: 'att-load/v1.6', load: { users: 1, duration: '30s' } } })),
+      getTargetLoadForm: vi.fn(async () => ({ target: { type: 'flow' as const, id: 'checkout.v1' }, model: 'virtualUsers' as const, input: { inputs: {}, vars: {} } })),
+      createLoadDraft: vi.fn(async () => { throw new ApiError('Target validation failed.', {
+        status: 400, requestId: 'REQ-FLOW', diagnostics: [{ code: 'ATT-LOAD-001', field: 'target',
+          summary: 'Invalid load target dependencies', detail: "Target flow 'checkout.v1': required Tool 'payments.charge' is unavailable",
+          suggestion: 'Register the Tool dependency and retry.' }],
+      }); }),
+    } as unknown as LoadJobsApi;
+    await act(async () => root.render(<QuickLoadPage api={api} packageId="payments"
+      target={{ type: 'flow', resourceId: 'opaque-flow', logicalId: 'checkout.v1' }} environment="UAT" environments={['UAT']}
+      environmentState="ready" inlineLoadEnabled onEnvironmentChange={vi.fn()} onJobAccepted={vi.fn()} onCancel={vi.fn()}
+      registerUnsavedChanges={() => () => {}} />));
+    await flush();
+    await act(async () => [...host.querySelectorAll('button')].find(button => button.textContent === 'Validate')!.click());
+    await flush();
+    expect(host.textContent).toContain("Target flow 'checkout.v1'");
+    expect(host.textContent).toContain("required Tool 'payments.charge' is unavailable");
+    expect(host.textContent).toContain('Register the Tool dependency and retry.');
+    expect([...host.querySelectorAll('button')].some(button => button.textContent === 'Review field')).toBe(false);
   });
 
   it('loads the selected bundled Quick Smoke policy without submitting and validates its preview', async () => {

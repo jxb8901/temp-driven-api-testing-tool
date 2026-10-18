@@ -530,6 +530,9 @@ class ServerRuntimeTest {
                 +"      value: {name: Value, description: Value, required: true}\n");
         Files.writeString(templates.resolve("template.yaml"),"schemaVersion: att-template/v3.6\nname: FORM\ndescription: Quick Load test\nactions:\n"
                 +"  log:\n    type: log\n    message: '${EXEC.INPUT.value}'\n");
+        Path brokenFlow=Files.createDirectories(packageRoot.resolve("templates/flows/demo")).resolve("flow.yaml");
+        Files.writeString(brokenFlow,"schemaVersion: att-flow/v3.6\nid: broken.outer.v1\nname: Broken outer\ndescription: Nested dependency regression\nactions:\n"
+                +"  nested:\n    type: flow\n    use: missing.inner.v1\n");
         Path debugData=Files.createDirectories(packageRoot.resolve("debug-data")).resolve("debug.yaml");
         Files.writeString(debugData,"schemaVersion: att-testdata/v1.0\nid: debugAccounts\nrecords: [{id: 17}]\n");
         Path loadData=Files.createDirectories(packageRoot.resolve("testdata")).resolve("load.yaml");
@@ -577,6 +580,13 @@ class ServerRuntimeTest {
             body.put("model","virtualUsers");body.set("input",ServerRuntime.JSON.valueToTree(Map.of("inputs",Map.of("value","draft"),"vars",Map.of("reference","REF002"))));
             body.set("load",ServerRuntime.JSON.valueToTree(Map.of("users",1,"duration","1s")));
             body.set("testdata",ServerRuntime.JSON.valueToTree(List.of("testdata/load.yaml")));
+            com.fasterxml.jackson.databind.node.ObjectNode brokenFlowBody=body.deepCopy();
+            brokenFlowBody.set("target",ServerRuntime.JSON.valueToTree(Map.of("type","flow","id","broken.outer.v1")));
+            ServerRuntime.DraftValidationException brokenFlowError=assertThrows(ServerRuntime.DraftValidationException.class,
+                    ()->runtime.createQuickLoadDraft(brokenFlowBody,"alice"));
+            assertFalse(brokenFlowError.diagnostics.isEmpty());
+            assertTrue(brokenFlowError.diagnostics.toString().contains("missing.inner.v1"),brokenFlowError.diagnostics.toString());
+            assertTrue(brokenFlowError.diagnostics.toString().contains("suggestion"),brokenFlowError.diagnostics.toString());
             Map<String,Object> draft=runtime.createQuickLoadDraft(body,"alice");String draftId=String.valueOf(draft.get("draftId"));
             assertFalse(draft.toString().contains("debugAccounts"));assertFalse(draft.toString().contains("testdata/load.yaml"));
             assertThrows(ServerRuntime.NotFoundException.class,()->runtime.getQuickLoadDraft(draftId,"bob"));

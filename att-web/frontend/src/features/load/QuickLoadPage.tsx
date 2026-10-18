@@ -36,13 +36,22 @@ function safeDiagnosticPath(value: unknown): string | undefined {
   if (!path || path.startsWith('/') || /^[A-Za-z]:[\\/]/.test(path) || path.startsWith('\\\\')) return undefined;
   return path;
 }
+function safeDiagnosticText(value: unknown): string | undefined {
+  const text = safeDiagnosticField(value);
+  if (!text) return undefined;
+  return text.replace(/(password|passwd|token|secret|credential)(\s*[:=]\s*)[^\s,}]+/gi, '$1$2[REDACTED]')
+    .replace(/(?:[A-Za-z]:)?[/\\][^\s:]+/g, '[package path]');
+}
 function safeServerDiagnostics(value: unknown): ServerDiagnostic[] {
   if (!Array.isArray(value)) return [];
   return value.filter((item): item is Record<string, unknown> => Boolean(item && typeof item === 'object' && !Array.isArray(item)))
     .map(item => ({
       severity: safeDiagnosticField(item.severity), code: safeDiagnosticField(item.code),
       reason: safeDiagnosticField(item.reason), field: safeDiagnosticField(item.field), path: safeDiagnosticPath(item.path),
-      message: safeDiagnosticField(item.message), summary: safeDiagnosticField(item.summary),
+      message: safeDiagnosticText(item.message), summary: safeDiagnosticText(item.summary),
+      detail: safeDiagnosticText(item.detail), suggestion: safeDiagnosticText(item.suggestion),
+      file: safeDiagnosticPath(item.file), sourceFile: safeDiagnosticPath(item.sourceFile),
+      resourceId: safeDiagnosticPath(item.resourceId), action: safeDiagnosticText(item.action),
     }));
 }
 function asObject(value: unknown): JsonObject { return value && typeof value === 'object' && !Array.isArray(value) ? value as JsonObject : {}; }
@@ -301,7 +310,7 @@ export function QuickLoadPage({ api, packageId, target, initialTemplateId = '', 
         setRequestId(reason.requestId || '');
         setDiagnostics(safeServerDiagnostics(reason.diagnostics));
       }
-      setMessage('Correct the fields or retry validation.');
+      setMessage('Review the validation details below, then correct the indicated input or package dependency before retrying.');
     } finally { if (validationController.current === controller) validationController.current = null; }
   }
   async function runNow() {
@@ -317,26 +326,15 @@ export function QuickLoadPage({ api, packageId, target, initialTemplateId = '', 
   const groups = targetType === 'tool' ? [{ key: 'inputs', label: 'Inputs' }, { key: 'arguments', label: 'Tool arguments' }] : [{ key: 'inputs', label: 'Inputs' }, { key: 'vars', label: 'Variables' }];
   const targetLabel = targetType ? `${targetType} · ${logicalTargetId || 'Resolving…'}` : activeTarget ? `Unsupported target · ${activeTarget.type}` : 'Choose a Template, Flow, or Tool';
 
+  function diagnosticControl(item: ServerDiagnostic): HTMLElement | undefined {
+    const page = document.querySelector('.att-quick-load-page');
+    const field = item.path || item.field;
+    if (field === 'scenario.load.duration') return page?.querySelector<HTMLElement>('input[placeholder="e.g. 30s or 5m"]') || undefined;
+    if (field === 'scenario.load.users') return page?.querySelector<HTMLElement>('input[type="number"]') || undefined;
+    return undefined;
+  }
   function reviewDiagnostic(item: ServerDiagnostic) {
-    const heading = document.getElementById('quick-load-review');
-    const page = heading?.closest('.att-quick-load-page');
-    const raw = item.path || item.field;
-    if (raw && page) {
-      const keys = raw.toLocaleLowerCase().replace(/\[\d+\]/g, '').split(/[./: ]+/).filter(Boolean).reverse();
-      const controls = [...page.querySelectorAll<HTMLElement>('input, select, textarea, [contenteditable="true"], .cm-content')];
-      for (const key of keys) {
-        if (key.length <= 2) continue;
-        const normalizedKey = key.replace(/[^a-z0-9]/g, '');
-        const match = controls.find(control => {
-          const label = control.closest('label')?.textContent || '';
-          const searchable = [label, control.getAttribute('aria-label'), control.getAttribute('name'), control.id]
-            .filter(Boolean).join(' ').toLocaleLowerCase().replace(/[^a-z0-9]/g, '');
-          return searchable.includes(normalizedKey);
-        });
-        if (match) { match.focus(); return; }
-      }
-    }
-    heading?.focus();
+    diagnosticControl(item)?.focus();
   }
 
   return <div className="page-content att-load-page att-quick-load-page">
@@ -417,7 +415,10 @@ export function QuickLoadPage({ api, packageId, target, initialTemplateId = '', 
         {requestId && <p className="att-help">Request ID: <code>{requestId}</code></p>}
         {diagnostics.length > 0 && <ul>{diagnostics.map((item, index) => <li key={`${item.code || item.path || 'diagnostic'}-${index}`}>
           {[item.severity, item.code, item.reason, item.field, item.path].filter(Boolean).join(' · ')}{item.message || item.summary ? `: ${item.message || item.summary}` : ''}
-          {(item.field || item.path) && <button type="button" className="button button-quiet" onClick={() => reviewDiagnostic(item)}>Review field</button>}
+          {item.detail && <p>{item.detail}</p>}
+          {item.resourceId && <p>Resource: <code>{item.resourceId}</code>{item.action ? ` · ${item.action}` : ''}</p>}
+          {item.suggestion && <p>Suggestion: {item.suggestion}</p>}
+          {diagnosticControl(item) && <button type="button" className="button button-quiet" onClick={() => reviewDiagnostic(item)}>Review field</button>}
         </li>)}</ul>}
       </div>
       {draft?.previewYaml && <CodeEditor value={draft.previewYaml} language="yaml" label="Server validated Quick Load preview" readOnly />}

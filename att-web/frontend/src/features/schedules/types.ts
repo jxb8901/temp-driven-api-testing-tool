@@ -72,6 +72,7 @@ export interface ValidatedScheduleIntent {
   draftId?: string;
   scenario?: string;
   previewYaml?: string;
+  expiresAt?: string;
   executionType?: 'run' | 'load';
   legacyDebug?: boolean;
   target?: { type: string; id: string };

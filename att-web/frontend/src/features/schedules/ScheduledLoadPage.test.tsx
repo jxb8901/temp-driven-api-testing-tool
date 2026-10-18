@@ -202,6 +202,26 @@ describe('ScheduledLoadPage', () => {
     expect(onCancel).toHaveBeenCalledOnce();
   });
 
+  it('blocks saving after a catalog draft expires while the Schedule form is open', async () => {
+    const api = makeApi();
+    const onCancel = vi.fn();
+    await act(async () => root.render(<NavigationGuardContext.Provider value={navigation}>
+      <ScheduledLoadPage api={api} packages={packages} enabled onOpenJob={vi.fn()} onCancel={onCancel}
+        route={{ kind: 'schedules', view: 'new', intent: 'validated', returnTo: '#/advanced-load' }}
+        initialDraft={{ packageId: 'payments', environment: 'SIT', draftId: `C${'d'.repeat(32)}`,
+          previewYaml: 'schemaVersion: att-load/v1.7\n', expiresAt: new Date(Date.now() + 1000).toISOString() }} />
+    </NavigationGuardContext.Provider>));
+    await advance(400);
+    expect(host.textContent).toContain('Validated draft expires');
+    await advance(700);
+    expect(host.textContent).toContain('This validated execution draft has expired.');
+    await click(host.querySelector('button[type="submit"]')!);
+    expect(api.createSchedule).not.toHaveBeenCalled();
+    expect(host.textContent).toContain('Return to the originating editor');
+    await click([...host.querySelectorAll('button')].find(button => button.textContent === 'Return to originating editor')!);
+    expect(onCancel).toHaveBeenCalledOnce();
+  });
+
   it('loads an authorized edit deep link and keeps missing/forbidden definitions out of the form', async () => {
     const api = makeApi({ listSchedules: vi.fn(async () => ({ items: [sampleSchedule] })) });
     const show = async (id: string, source = api) => {

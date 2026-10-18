@@ -43,12 +43,12 @@ describe('LoadResourceDetailPage', () => {
 
     const validate = host.querySelector<HTMLButtonElement>('button[aria-label="Validate for UAT"]')!;
     await act(async () => validate.click()); await flush();
-    expect(api.validateLoadCatalogScenario).toHaveBeenCalledWith('payments', 'load/nested/nightly.yaml', 'UAT');
+    expect(api.validateLoadCatalogScenario).toHaveBeenCalledWith('payments', 'load/nested/nightly.yaml', 'UAT', expect.any(AbortSignal));
     expect(host.textContent).toContain('Valid for UAT.');
 
     const showSource = [...host.querySelectorAll('button')].find(button => button.textContent === 'Show YAML Source')!;
     await act(async () => showSource.click()); await flush();
-    expect(api.getLoadSource).toHaveBeenCalledWith('payments', 'load/nested/nightly.yaml');
+    expect(api.getLoadSource).toHaveBeenCalledWith('payments', 'load/nested/nightly.yaml', expect.any(AbortSignal));
     expect(host.textContent).toContain('YAML Source is unavailable: visibility-policy.');
     expect(onBack).not.toHaveBeenCalled();
   });
@@ -70,5 +70,42 @@ describe('LoadResourceDetailPage', () => {
     expect(host.textContent).toContain('Suggestion: Check password=[REDACTED] before retrying.');
     expect(host.textContent).not.toContain('topsecret');
     expect(host.textContent).not.toContain('/home/ci/private');
+  });
+
+  it('ignores validation and YAML source responses after identity changes', async () => {
+    const validationResults: Array<(value: { validation: string; model: string }) => void> = [];
+    let finishSourceA: ((value: { available: boolean; text?: string }) => void) | undefined;
+    const api = {
+      getLoadCatalogDetail: vi.fn(async (_packageId: string, resourceId: string) => ({ ...scenarioDetail(), resourceId, path: resourceId })),
+      getLoadSource: vi.fn((_packageId: string, resourceId: string, _signal?: AbortSignal) => resourceId === 'load/A.yaml'
+        ? new Promise<{ available: boolean; text?: string }>(resolve => { finishSourceA = resolve; })
+        : Promise.resolve({ available: true, text: 'source-B-only' })),
+      validateLoadCatalogScenario: vi.fn((_packageId: string, _resourceId: string, _environment?: string, _signal?: AbortSignal) =>
+        new Promise<{ validation: string; model: string }>(resolve => { validationResults.push(resolve); })),
+    };
+    let resourceId = 'load/A.yaml';
+    let environment = 'UAT';
+    const renderPage = () => root.render(<LoadResourceDetailPage api={api} packageId="payments" resourceId={resourceId}
+      environment={environment} environments={['SIT', 'UAT']} inlineLoadEnabled onEnvironmentChange={vi.fn()}
+      onBack={vi.fn()} onQuickLoad={vi.fn()} />);
+    await act(async () => renderPage()); await flush();
+
+    await act(async () => host.querySelector<HTMLButtonElement>('button[aria-label="Validate for UAT"]')!.click());
+    await act(async () => [...host.querySelectorAll('button')].find(button => button.textContent === 'Show YAML Source')!.click());
+    expect(api.getLoadSource).toHaveBeenCalledWith('payments', 'load/A.yaml', expect.any(AbortSignal));
+
+    resourceId = 'load/B.yaml'; environment = 'SIT';
+    await act(async () => renderPage()); await flush();
+    expect(host.textContent).not.toContain('Valid for UAT');
+    expect(host.textContent).not.toContain('source-A-secret');
+    await act(async () => validationResults[0]({ validation: 'valid', model: 'arrivalRate' }));
+    await act(async () => finishSourceA?.({ available: true, text: 'source-A-secret' }));
+    await flush();
+    expect(host.textContent).not.toContain('Valid for UAT');
+    expect(host.textContent).not.toContain('source-A-secret');
+    await act(async () => host.querySelector<HTMLButtonElement>('button[aria-label="Validate for SIT"]')!.click());
+    expect(api.validateLoadCatalogScenario).toHaveBeenLastCalledWith('payments', 'load/B.yaml', 'SIT', expect.any(AbortSignal));
+    await act(async () => validationResults[1]({ validation: 'valid', model: 'virtualUsers' })); await flush();
+    expect(host.textContent).toContain('Valid for SIT.');
   });
 });

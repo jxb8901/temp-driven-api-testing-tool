@@ -29,7 +29,7 @@ describe('LoadCatalogPage', () => {
         { packageId: 'payments', resourceId: 'load/policy.yaml', path: 'load/policy.yaml', kind: 'template', validation: 'valid', model: 'arrivalRate', workloadCount: 0, sourceAvailable: true, runNow: false, schedule: false, createQuickLoad: true },
       ], total: 2 })),
       validateLoadCatalogScenario: vi.fn(async () => ({ validation: 'valid', scheduleAvailable: true, draftId: 'C'.concat('a'.repeat(32)),
-        previewYaml: 'schemaVersion: att-load/v1.7\n' })),
+        previewYaml: 'schemaVersion: att-load/v1.7\n', expiresAt: new Date(Date.now() + 60_000).toISOString() })),
       getLoadSource: vi.fn(async () => ({ available: true, text: 'schemaVersion: att-load/v1.6\n', redacted: true })),
       submitLoadScenario: vi.fn(async () => ({ jobId: 'JOB-LOAD' })),
       listLoadJobs: vi.fn(async () => ({ items: [] })),
@@ -55,9 +55,26 @@ describe('LoadCatalogPage', () => {
     const schedule = [...host.querySelectorAll('button')].find(button => button.textContent === 'Schedule')!;
     await act(async () => schedule.click());
     expect(onSchedule).toHaveBeenCalledWith({ packageId: 'payments', environment: 'SIT', draftId: `C${'a'.repeat(32)}`,
-      previewYaml: 'schemaVersion: att-load/v1.7\n', executionType: 'load' });
+      previewYaml: 'schemaVersion: att-load/v1.7\n', expiresAt: expect.any(String), executionType: 'load' });
     await act(async () => [...host.querySelectorAll('button')].find(button => button.textContent === 'Clear filters')!.click());
     expect((host.querySelector('[aria-label="Catalog Environment for payments"]') as HTMLSelectElement).value).toBe('SIT');
+  });
+
+  it('disables Schedule and requests revalidation when the catalog draft is already expired', async () => {
+    const api = {
+      listLoadCatalog: vi.fn(async () => ({ items: [unverifiedScenario()], total: 1 })),
+      validateLoadCatalogScenario: vi.fn(async () => ({ validation: 'valid', scheduleAvailable: true,
+        draftId: `C${'b'.repeat(32)}`, expiresAt: new Date(Date.now() - 1000).toISOString() })),
+      listLoadJobs: vi.fn(async () => ({ items: [] })),
+    };
+    await act(async () => root.render(<LoadCatalogPage api={api as never} packages={{ status: 'ready', data: [{ packageId: 'payments' }] }}
+      inlineLoadEnabled schedulingEnabled environment="SIT" onEnvironmentChange={vi.fn()} onNewLoad={vi.fn()}
+      onQuickLoad={vi.fn()} onJobAccepted={vi.fn()} onOpenJob={vi.fn()} onSchedule={vi.fn()} onOpenDetail={openDetail} />));
+    await flush();
+    await act(async () => [...host.querySelectorAll('button')].find(button => button.textContent === 'Validate')!.click()); await flush();
+    const schedule = [...host.querySelectorAll('button')].find(button => button.textContent === 'Schedule') as HTMLButtonElement;
+    expect(schedule.disabled).toBe(true);
+    expect(host.textContent).toContain('The validated Schedule draft expired. Validate this scenario again before scheduling.');
   });
 
   it('offers explicit policy-template validation and refreshes its catalog status', async () => {
