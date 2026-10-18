@@ -67,13 +67,16 @@ class ServerWorkerSsePerformanceBenchmark {
         Path packageRoots = Files.createDirectories(temp.resolve("packages"));
         Path packageRoot = Files.createDirectories(packageRoots.resolve(PACKAGE_ID));
         installPackageFixture(packageRoot, caseCount);
-        SnapshotResult snapshot = new DefaultAttService().snapshot(new SnapshotRequest(packageRoot, null, null,
+        Path runtimeConfig = Files.createDirectories(temp.resolve("runtime-home/config")).resolve("config.yaml");
+        Files.writeString(runtimeConfig,"schemaVersion: att-config/v2.12\noutputDirectory: output\nenvironment: BENCHMARK\n"
+                +"testcase: {root: testcase}\ntemplates: {root: templates}\n",StandardCharsets.UTF_8);
+        SnapshotResult snapshot = new DefaultAttService().snapshot(new SnapshotRequest(packageRoot, runtimeConfig, null,
                 List.of(Path.of("testcase/event-run.xlsx")), null, Collections.emptySet(), false));
         assertEquals("PASS", snapshot.status(), "Benchmark suite snapshot must pass");
 
         Path config = temp.resolve("server.yaml");
         Path dataDir = temp.resolve("server-data");
-        writeServerConfig(config, dataDir, packageRoots, packageRoot, Math.max(8, max(concurrency)));
+        writeServerConfig(config, runtimeConfig, dataDir, packageRoots, packageRoot, Math.max(8, max(concurrency)));
         Path exploded = unpackWar(war, temp.resolve("exploded-war"));
         String oldConfig = System.getProperty("att.server.config");
         System.setProperty("att.server.config", config.toString());
@@ -512,14 +515,9 @@ class ServerWorkerSsePerformanceBenchmark {
     }
 
     private void installPackageFixture(Path root, int caseCount) throws Exception {
-        Files.createDirectories(root.resolve("config"));
         Files.createDirectories(root.resolve("testcase"));
         Files.createDirectories(root.resolve("templates/BENCH_EVENT"));
         Files.createDirectories(root.resolve("load"));
-        copyTree(Path.of("packages/default/schemas"), root.resolve("schemas"));
-        Files.writeString(root.resolve("config/config.yaml"),
-                "schemaVersion: att-config/v2.12\noutputDirectory: output\nenvironment: BENCHMARK\n"
-                        + "testcase: {root: testcase}\ntemplates: {root: templates}\n", StandardCharsets.UTF_8);
         Files.writeString(root.resolve("templates/BENCH_EVENT/template.yaml"),
                 "schemaVersion: att-template/v3.6\nname: BENCH_EVENT\ndescription: Event-heavy Server benchmark target\n"
                         + "actions:\n  writeEvent:\n    type: log\n    message: \"Server benchmark case ${META.SOURCE.caseId?}\"\n",
@@ -558,8 +556,8 @@ class ServerWorkerSsePerformanceBenchmark {
         }
     }
 
-    private void writeServerConfig(Path path, Path dataDir, Path packages, Path packageRoot, int maxConcurrent) throws Exception {
-        Files.writeString(path, "server:\n  dataDir: " + dataDir.toAbsolutePath() + "\n"
+    private void writeServerConfig(Path path, Path runtimeConfig, Path dataDir, Path packages, Path packageRoot, int maxConcurrent) throws Exception {
+        Files.writeString(path, "server:\n  runtimeConfigPath: " + runtimeConfig.toAbsolutePath() + "\n  dataDir: " + dataDir.toAbsolutePath() + "\n"
                 + "  authenticationRequired: false\n  maxEventsPerJob: 100000\n"
                 + "workers:\n  maxConcurrent: " + maxConcurrent + "\n  queuedLimit: 32\n  maxConcurrentLoad: 1\n"
                 + "packages:\n  allowedRoots:\n    - " + packages.toAbsolutePath() + "\n  entries:\n    benchmark: "

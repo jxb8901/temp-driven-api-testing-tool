@@ -60,11 +60,13 @@ class DbHelperExecutorTest {
 
     @Test void configuredDbPresentationIsAutomaticForActionsAndExpressionsAndKeepsRowsTyped() throws Exception {
         att.TestSchemas.install(tempDir);
-        Files.write(tempDir.resolve("db.yaml"), ("schemaVersion: att-dbhelper/v2.6\n"
+        Path helper = tempDir.resolve("config/dbhelpers/db.yaml");
+        Files.createDirectories(helper.getParent());
+        Files.write(helper, ("schemaVersion: att-dbhelper/v2.6\n"
                 + "id: orders\nname: Orders\ndescription: Test orders\nconnection:\n  url: jdbc:att-test:output\n  password: A100\n"
                 + "evidence:\n  sql: full\n  parameters: masked\n  output: {format: sqlplus, maxChars: 10000}\n").getBytes("UTF-8"));
         Map<String, DbHelperConfig> helpers = new att.config.DbHelperConfigLoader()
-                .load(Collections.singletonList("db.yaml"), tempDir);
+                .load(Collections.singletonList("config/dbhelpers/db.yaml"), tempDir);
         assertEquals("sqlplus", helpers.get("orders").evidenceOutput().format());
         assertEquals(10000, helpers.get("orders").evidenceOutput().maxChars());
         DbHelperExecutor executor = executor(helpers);

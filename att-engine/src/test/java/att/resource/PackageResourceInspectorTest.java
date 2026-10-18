@@ -27,9 +27,11 @@ class PackageResourceInspectorTest {
     @org.junit.jupiter.api.AfterEach void restoreDefaultPathPresentation() { att.core.PathPresentation.configure(false, false); }
 
     private PackageResourceInspector inspector() throws Exception {
-        Path root=Paths.get("").toRealPath().resolve("packages/default");
-        assertTrue(Files.isRegularFile(root.resolve("config/config.yaml")),"Tests run from the repository root");
-        return new PackageResourceInspector(root,Paths.get("config/config.yaml"),"SIT",Collections.<String>emptyList(),65536,262144);
+        Path home=Paths.get("").toRealPath();
+        Path root=home.resolve("packages/default");
+        Path config=home.resolve("config/config.yaml");
+        assertTrue(Files.isRegularFile(config),"Tests run from the repository root");
+        return new PackageResourceInspector(root,config,"SIT",Collections.<String>emptyList(),65536,262144);
     }
 
     @Test void listsConfiguredPackageResourcesWithLogicalIdsAndReferences() throws Exception {
@@ -90,6 +92,21 @@ class PackageResourceInspectorTest {
         assertThrows(IllegalArgumentException.class,()->inspector.inspect("list","template",null,null,0,3,null,null,"unknown","asc"));
     }
 
+    @Test void executionRevisionIncludesEngineRegistrySharedConfigAndEnvironmentIdentity() throws Exception {
+        Path root=packageWithTemplate("revision-context", "PAYMENT", "description: revision context");
+        Path sharedConfig=Files.createDirectories(temp.resolve("shared-runtime/config")).resolve("config.yaml");
+        writeUtf8(sharedConfig,"schemaVersion: att-config/v2.12\nenvironment: SIT\nenvironments:\n  SIT: {}\n  UAT: {}\n"
+                +"testcase: {root: testcase}\ntemplates: {root: templates}\n");
+        String sit=new PackageResourceInspector(root,sharedConfig,"SIT",Collections.<String>emptyList(),65536,262144)
+                .executionRevisionDigest();
+        String uat=new PackageResourceInspector(root,sharedConfig,"UAT",Collections.<String>emptyList(),65536,262144)
+                .executionRevisionDigest();
+        assertTrue(sit.matches("[a-f0-9]{64}"));
+        assertNotEquals(sit,uat,"An effective environment change must invalidate validated revisions");
+        assertTrue(att.validation.SchemaFiles.registryDigest().matches("[a-f0-9]{64}"),
+                "Revision identity includes the bundled registry fingerprint");
+    }
+
     @Test void loadCatalogDistinguishesPolicyTemplatesAndInvalidYamlAndRestrictsSourcePaths() throws Exception {
         Path root=packageWithTemplate("load-catalog", "PAYMENT", "description: catalog test");
         Path load=Files.createDirectories(root.resolve("load/nested"));
@@ -108,6 +125,34 @@ class PackageResourceInspectorTest {
         assertThrows(PackageResourceInspector.ResourceNotFoundException.class,()->inspector.inspectLoadSource("templates/PAYMENT/template.yaml"));
     }
 
+    @Test void loadCatalogDetailReturnsStructuredRedactedMetadataWithoutTestdataPathsOrTargetResolution() throws Exception {
+        Path root=packageWithTemplate("load-detail-safe", "PAYMENT", "description: detail test");
+        Path load=Files.createDirectories(root.resolve("load"));
+        writeUtf8(load.resolve("scenario.yaml"), "schemaVersion: att-load/v1.7\nworkloads:\n"
+                +"  - id: unresolved-target\n    target: {type: template, id: MISSING}\n"
+                +"    inputs: {password: never-return-this-secret, note: safe-value}\n"
+                +"    testdata: {generated: {scope: iteration}}\n"
+                +"    load: {users: 2, duration: 10s}\n");
+        PackageResourceInspector inspector=new PackageResourceInspector(root,Paths.get("config/config.yaml"),"SIT",
+                Collections.<String>emptyList(),65536,262144,false,false,"visibility-policy",Collections.<String>emptyList(),
+                true,Collections.<String>emptyList(),Collections.<String>emptyList());
+
+        Map<String,Object> detail=inspector.inspectLoadCatalogDetail("load/scenario.yaml",null);
+        assertEquals("scenario",detail.get("kind"));
+        assertEquals("unverified",detail.get("validation"),"View must not depend on resolving execution targets");
+        assertEquals(Boolean.FALSE,detail.get("sourceAvailable"),"Structured metadata remains available when source is hidden");
+        assertEquals("att-load/v1.7",detail.get("schemaVersion"));
+        @SuppressWarnings("unchecked") Map<String,Object> definition=(Map<String,Object>)detail.get("definition");
+        @SuppressWarnings("unchecked") List<Map<String,Object>> workloads=(List<Map<String,Object>>)definition.get("workloads");
+        assertEquals("MISSING",((Map<?,?>)workloads.get(0).get("target")).get("id"));
+        assertFalse(definition.containsKey("testdata"));
+        assertFalse(workloads.get(0).containsKey("testdata"));
+        assertFalse(detail.toString().contains("never-return-this-secret"));
+        assertFalse(detail.toString().contains("private/runtime"));
+        assertThrows(PackageResourceInspector.ResourceNotFoundException.class,
+                ()->inspector.inspectLoadCatalogDetail("templates/PAYMENT/template.yaml",null));
+    }
+
     @Test void neverReadsToolSourceWithoutAnExplicitServerAllowlist() throws Exception {
         PackageResourceInspector inspector=inspector();
         @SuppressWarnings("unchecked") Map<String,Object> page=inspector.inspect("list","tool",null,null,0,100);
@@ -118,7 +163,8 @@ class PackageResourceInspectorTest {
 
     @Test void readsToolScriptOnlyWhenItsPackageRelativePathIsAllowlisted() throws Exception {
         Path root=Paths.get("").toRealPath().resolve("packages/default");
-        PackageResourceInspector inspector=new PackageResourceInspector(root,Paths.get("config/config.yaml"),"SIT",
+        Path config=Paths.get("").toRealPath().resolve("config/config.yaml");
+        PackageResourceInspector inspector=new PackageResourceInspector(root,config,"SIT",
                 Collections.singletonList("tools/tool_group_dispatch.sh"),65536,262144);
         @SuppressWarnings("unchecked") List<Map<String,Object>> items=(List<Map<String,Object>>)inspector.inspect("list","tool",null,null,0,100).get("items");
         Map<String,Object> permitted=items.stream().filter(item->Boolean.TRUE.equals(item.get("sourceAvailable"))).findFirst().get();
@@ -583,6 +629,23 @@ class PackageResourceInspectorTest {
         assertEquals(Boolean.FALSE,response.get("templateCatalogTruncated"));
         assertThrows(Exception.class,()->inspector.inspectQuickLoadPolicy("arrivalRate","load/custom-users.yml"));
         assertThrows(IllegalArgumentException.class,()->inspector.inspectQuickLoadPolicy("arrivalRate","../outside.yaml"));
+    }
+
+    @Test void quickLoadTargetDiscoveryDoesNotDependOnLoadPolicyOrScenarioValidation() throws Exception {
+        Path root=packageWithQuickLoadTargets("quick-load-discovery-isolated");
+        Path policy=Files.createDirectories(root.resolve("load")).resolve("load.visualuser.yaml");
+        writeUtf8(policy,"schemaVersion: [not, a, valid, policy\n");
+        PackageResourceInspector inspector=new PackageResourceInspector(root,Paths.get("config/config.yaml"),"SIT",
+                Collections.<String>emptyList(),65536,262144);
+        @SuppressWarnings("unchecked") List<Map<String,Object>> items=(List<Map<String,Object>>)inspector.inspect("list","flow",null,null,0,20).get("items");
+        Map<String,Object> flow=items.stream().filter(item->"FLOW.v1".equals(item.get("logicalId"))).findFirst().orElseThrow(AssertionError::new);
+        Map<String,Object> form=inspector.inspectQuickLoadForm("flow",String.valueOf(flow.get("resourceId")),"virtualUsers",null);
+        Map<String,Object> expectedTarget=new LinkedHashMap<String,Object>();
+        expectedTarget.put("type","flow");expectedTarget.put("id","FLOW.v1");
+        assertEquals(expectedTarget,form.get("target"));
+        assertEquals(Boolean.FALSE,form.get("debugLocalTestdataOmitted"));
+        assertFalse(form.containsKey("preview"),"Target discovery must not build or validate a Load scenario");
+        assertThrows(Exception.class,()->inspector.inspectQuickLoadPolicy("virtualUsers"),"The malformed policy remains a separate Load policy error");
     }
 
     @Test void quickLoadFormsSupportEveryTargetWithAndWithoutDebugSidecars() throws Exception {

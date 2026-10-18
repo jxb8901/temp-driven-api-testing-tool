@@ -6,6 +6,7 @@ import { LoadCatalogPage } from './LoadCatalogPage';
 import { ApiError } from '../../types';
 
 vi.mock('../code/CodeEditor', () => ({ CodeEditor: ({ value }: { value: string }) => <pre>{value}</pre> }));
+const openDetail = vi.fn();
 
 let host: HTMLDivElement;
 let root: Root;
@@ -27,29 +28,53 @@ describe('LoadCatalogPage', () => {
         { ...unverifiedScenario(), validation: 'valid', validatedEnvironment: 'SIT', model: 'virtualUsers', runNow: true, schedule: true },
         { packageId: 'payments', resourceId: 'load/policy.yaml', path: 'load/policy.yaml', kind: 'template', validation: 'valid', model: 'arrivalRate', workloadCount: 0, sourceAvailable: true, runNow: false, schedule: false, createQuickLoad: true },
       ], total: 2 })),
-      validateLoadCatalogScenario: vi.fn(async () => ({ validation: 'valid' })),
+      validateLoadCatalogScenario: vi.fn(async () => ({ validation: 'valid', scheduleAvailable: true, draftId: 'C'.concat('a'.repeat(32)),
+        previewYaml: 'schemaVersion: att-load/v1.7\n', expiresAt: new Date(Date.now() + 60_000).toISOString() })),
       getLoadSource: vi.fn(async () => ({ available: true, text: 'schemaVersion: att-load/v1.6\n', redacted: true })),
       submitLoadScenario: vi.fn(async () => ({ jobId: 'JOB-LOAD' })),
       listLoadJobs: vi.fn(async () => ({ items: [] })),
     };
-    const onSchedule = vi.fn(); const onJobAccepted = vi.fn();
+    const onSchedule = vi.fn(); const onJobAccepted = vi.fn(); openDetail.mockReset();
     await act(async () => root.render(<LoadCatalogPage api={api as never} packages={{ status: 'ready', data: [{ packageId: 'payments' }] }}
       inlineLoadEnabled schedulingEnabled environment="SIT" onEnvironmentChange={vi.fn()} onNewLoad={vi.fn()}
-      onQuickLoad={vi.fn()} onJobAccepted={onJobAccepted} onOpenJob={vi.fn()} onSchedule={onSchedule} />));
+      onQuickLoad={vi.fn()} onJobAccepted={onJobAccepted} onOpenJob={vi.fn()} onSchedule={onSchedule} onOpenDetail={openDetail} />));
     await flush();
 
+    expect(host.querySelector('.att-query-filter-panel[aria-label="LOAD Catalog filters"]')).not.toBeNull();
+    expect(host.querySelector('.att-query-results-panel[aria-label="Available LOAD YAML resources"]')).not.toBeNull();
+    expect(host.querySelector('.att-query-results-panel[aria-label="Recent LOAD job results"]')).not.toBeNull();
     expect(host.textContent).toContain('Executable Scenario');
     expect(host.textContent).toContain('Load Template');
-    const validate = [...host.querySelectorAll('button')].find(button => button.textContent === 'Validate for Environment')!;
+    const validate = [...host.querySelectorAll('button')].find(button => button.textContent === 'Validate')!;
     await act(async () => validate.click()); await flush();
     expect(api.validateLoadCatalogScenario).toHaveBeenCalledWith('payments', 'load/nightly.yaml', 'SIT');
-    const preview = [...host.querySelectorAll('button')].find(button => button.textContent === 'View YAML')!;
-    await act(async () => preview.click()); await flush();
-    expect(host.textContent).toContain('Redacted read-only YAML preview');
-    expect(host.textContent).toContain('schemaVersion: att-load/v1.6');
+    const view = [...host.querySelectorAll('button')].find(button => button.textContent === 'View')!;
+    await act(async () => view.click());
+    expect(openDetail).toHaveBeenCalledWith(expect.objectContaining({ resourceId: 'load/nightly.yaml' }), 'SIT', expect.stringContaining('#/advanced-load?'));
+    expect(host.textContent).not.toContain('Redacted read-only YAML preview');
     const schedule = [...host.querySelectorAll('button')].find(button => button.textContent === 'Schedule')!;
     await act(async () => schedule.click());
-    expect(onSchedule).toHaveBeenCalledWith({ packageId: 'payments', environment: 'SIT', scenario: 'load/nightly.yaml', executionType: 'load' });
+    expect(onSchedule).toHaveBeenCalledWith({ packageId: 'payments', environment: 'SIT', draftId: `C${'a'.repeat(32)}`,
+      previewYaml: 'schemaVersion: att-load/v1.7\n', expiresAt: expect.any(String), executionType: 'load' });
+    await act(async () => [...host.querySelectorAll('button')].find(button => button.textContent === 'Clear filters')!.click());
+    expect((host.querySelector('[aria-label="Catalog Environment for payments"]') as HTMLSelectElement).value).toBe('SIT');
+  });
+
+  it('disables Schedule and requests revalidation when the catalog draft is already expired', async () => {
+    const api = {
+      listLoadCatalog: vi.fn(async () => ({ items: [unverifiedScenario()], total: 1 })),
+      validateLoadCatalogScenario: vi.fn(async () => ({ validation: 'valid', scheduleAvailable: true,
+        draftId: `C${'b'.repeat(32)}`, expiresAt: new Date(Date.now() - 1000).toISOString() })),
+      listLoadJobs: vi.fn(async () => ({ items: [] })),
+    };
+    await act(async () => root.render(<LoadCatalogPage api={api as never} packages={{ status: 'ready', data: [{ packageId: 'payments' }] }}
+      inlineLoadEnabled schedulingEnabled environment="SIT" onEnvironmentChange={vi.fn()} onNewLoad={vi.fn()}
+      onQuickLoad={vi.fn()} onJobAccepted={vi.fn()} onOpenJob={vi.fn()} onSchedule={vi.fn()} onOpenDetail={openDetail} />));
+    await flush();
+    await act(async () => [...host.querySelectorAll('button')].find(button => button.textContent === 'Validate')!.click()); await flush();
+    const schedule = [...host.querySelectorAll('button')].find(button => button.textContent === 'Schedule') as HTMLButtonElement;
+    expect(schedule.disabled).toBe(true);
+    expect(host.textContent).toContain('The validated Schedule draft expired. Validate this scenario again before scheduling.');
   });
 
   it('offers explicit policy-template validation and refreshes its catalog status', async () => {
@@ -62,7 +87,7 @@ describe('LoadCatalogPage', () => {
     };
     await act(async () => root.render(<LoadCatalogPage api={api as never} packages={{ status: 'ready', data: [{ packageId: 'payments' }] }}
       inlineLoadEnabled schedulingEnabled environment="SIT" onEnvironmentChange={vi.fn()} onNewLoad={vi.fn()}
-      onQuickLoad={vi.fn()} onJobAccepted={vi.fn()} onOpenJob={vi.fn()} onSchedule={vi.fn()} />));
+      onQuickLoad={vi.fn()} onJobAccepted={vi.fn()} onOpenJob={vi.fn()} onSchedule={vi.fn()} onOpenDetail={openDetail} />));
     await flush();
     const validate = [...host.querySelectorAll('button')].find(button => button.textContent === 'Validate')!;
     await act(async () => validate.click());
@@ -70,6 +95,45 @@ describe('LoadCatalogPage', () => {
     expect(api.listLoadCatalog).toHaveBeenLastCalledWith('payments', { query: 'load/policy.yaml', limit: 100 });
     expect(host.textContent).toContain('Policy duration is required.');
     expect(host.textContent).toContain('policy validation refreshed: invalid');
+  });
+
+  it('uses declared profile options and gives unverified scenarios a persistent actionable reason', async () => {
+    const api = {
+      getDeclaredConfiguration: vi.fn(async () => ({ environments: [
+        { name: 'SIT', state: 'active' }, { name: 'UAT', state: 'active' }, { name: 'RETIRED', state: 'disabled' },
+      ] })),
+      listLoadCatalog: vi.fn(async () => ({ items: [unverifiedScenario()], total: 1 })),
+      listLoadJobs: vi.fn(async () => ({ items: [] })),
+    };
+    await act(async () => root.render(<LoadCatalogPage api={api as never} packages={{ status: 'ready', data: [{ packageId: 'payments' }] }}
+      inlineLoadEnabled schedulingEnabled environment="" onEnvironmentChange={vi.fn()} onNewLoad={vi.fn()}
+      onQuickLoad={vi.fn()} onJobAccepted={vi.fn()} onOpenJob={vi.fn()} onSchedule={vi.fn()} onOpenDetail={openDetail} />));
+    await flush();
+    const environment = host.querySelector<HTMLSelectElement>('[aria-label="Catalog Environment for payments"]')!;
+    expect([...environment.options].map(option => option.value)).toEqual(['', 'SIT', 'UAT']);
+    expect(host.querySelector('input[aria-label="Catalog Environment"]')).toBeNull();
+    expect(host.textContent).toContain('Validate for Package default before running or scheduling.');
+    expect(host.textContent).not.toContain('Scheduling disabled by Server policy.');
+    expect((host.querySelector('button') as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it('keeps invalid diagnostics and a View details route beside disabled scenario actions', async () => {
+    const invalid = { ...unverifiedScenario(), validation: 'invalid', diagnostic: 'Target dependency is missing.', requestId: 'REQ-42',
+      diagnostics: [{ code: 'ATT-LOAD-TARGET', summary: 'Target dependency is missing.', field: 'workloads[0].target.id', suggestion: 'Choose a registered target.' }] };
+    const api = { listLoadCatalog: vi.fn(async () => ({ items: [invalid], total: 1 })), listLoadJobs: vi.fn(async () => ({ items: [] })) };
+    openDetail.mockReset();
+    await act(async () => root.render(<LoadCatalogPage api={api as never} packages={{ status: 'ready', data: [{ packageId: 'payments' }] }}
+      inlineLoadEnabled schedulingEnabled environment="" onEnvironmentChange={vi.fn()} onNewLoad={vi.fn()}
+      onQuickLoad={vi.fn()} onJobAccepted={vi.fn()} onOpenJob={vi.fn()} onSchedule={vi.fn()} onOpenDetail={openDetail} />));
+    await flush();
+    expect(host.textContent).toContain('Request ID: REQ-42');
+    expect(host.textContent).toContain('Choose a registered target.');
+    expect(host.textContent).toContain('Validation failed. Review the diagnostic details before running or scheduling.');
+    const runNow = [...host.querySelectorAll('button')].find(button => button.textContent === 'Run Now')! as HTMLButtonElement;
+    expect(runNow.disabled).toBe(true);
+    const details = [...host.querySelectorAll('button')].find(button => button.textContent === 'View details')!;
+    await act(async () => details.click());
+    expect(openDetail).toHaveBeenCalledWith(expect.objectContaining({ resourceId: 'load/nightly.yaml' }), '', expect.stringContaining('#/advanced-load'));
   });
 
   it('ignores stale validation results after the environment changes', async () => {
@@ -83,16 +147,16 @@ describe('LoadCatalogPage', () => {
     };
     await act(async () => root.render(<LoadCatalogPage api={api as never} packages={{ status: 'ready', data: [{ packageId: 'payments' }] }}
       inlineLoadEnabled schedulingEnabled environment="SIT" onEnvironmentChange={vi.fn()} onNewLoad={vi.fn()}
-      onQuickLoad={vi.fn()} onJobAccepted={vi.fn()} onOpenJob={vi.fn()} onSchedule={vi.fn()} />));
+      onQuickLoad={vi.fn()} onJobAccepted={vi.fn()} onOpenJob={vi.fn()} onSchedule={vi.fn()} onOpenDetail={openDetail} />));
     await flush();
 
-    const validate = [...host.querySelectorAll('button')].find(button => button.textContent === 'Validate for Environment')!;
+    const validate = [...host.querySelectorAll('button')].find(button => button.textContent === 'Validate')!;
     await act(async () => validate.click());
     await flush();
-    const environmentInput = [...host.querySelectorAll('input')].find(input => input.value === 'SIT')!;
+    const environmentInput = [...host.querySelectorAll('select')].find(input => input.value === 'SIT')!;
     await act(async () => {
-      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set?.call(environmentInput, 'UAT');
-      environmentInput.dispatchEvent(new Event('input', { bubbles: true }));
+      Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')?.set?.call(environmentInput, '');
+      environmentInput.dispatchEvent(new Event('change', { bubbles: true }));
     });
     await act(async () => resolveValidation({ validation: 'valid' }));
     await flush();
@@ -111,17 +175,17 @@ describe('LoadCatalogPage', () => {
     };
     await act(async () => root.render(<LoadCatalogPage api={api as never} packages={{ status: 'ready', data: [{ packageId: 'payments' }] }}
       inlineLoadEnabled schedulingEnabled environment="SIT" onEnvironmentChange={vi.fn()} onNewLoad={vi.fn()}
-      onQuickLoad={vi.fn()} onJobAccepted={vi.fn()} onOpenJob={vi.fn()} onSchedule={vi.fn()} />));
-    const environmentInput = [...host.querySelectorAll('input')].find(input => input.value === 'SIT')!;
+      onQuickLoad={vi.fn()} onJobAccepted={vi.fn()} onOpenJob={vi.fn()} onSchedule={vi.fn()} onOpenDetail={openDetail} />));
+    const environmentInput = [...host.querySelectorAll('select')].find(input => input.value === 'SIT')!;
     await act(async () => {
-      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set?.call(environmentInput, 'UAT');
-      environmentInput.dispatchEvent(new Event('input', { bubbles: true }));
+      Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')?.set?.call(environmentInput, '');
+      environmentInput.dispatchEvent(new Event('change', { bubbles: true }));
     });
     await act(async () => resolveCatalog!({ items: [unverifiedScenario()], total: 1 }));
     await flush();
     expect(host.textContent).not.toContain('Discovering package Load YAML resources');
     expect(host.textContent).toContain('load/nightly.yaml');
-    const refresh = [...host.querySelectorAll('button')].find(button => button.textContent === 'Refresh')! as HTMLButtonElement;
+    const refresh = [...host.querySelectorAll('button')].find(button => button.textContent === 'Refresh resources')! as HTMLButtonElement;
     expect(refresh.disabled).toBe(false);
   });
 
@@ -135,14 +199,14 @@ describe('LoadCatalogPage', () => {
     };
     await act(async () => root.render(<LoadCatalogPage api={api as never} packages={{ status: 'ready', data: [{ packageId: 'payments' }] }}
       inlineLoadEnabled schedulingEnabled environment="SIT" onEnvironmentChange={vi.fn()} onNewLoad={vi.fn()}
-      onQuickLoad={vi.fn()} onJobAccepted={vi.fn()} onOpenJob={vi.fn()} onSchedule={vi.fn()} />));
+      onQuickLoad={vi.fn()} onJobAccepted={vi.fn()} onOpenJob={vi.fn()} onSchedule={vi.fn()} onOpenDetail={openDetail} />));
     await flush();
     const loadMore = [...host.querySelectorAll('button')].find(button => button.textContent === 'Load more scenarios')! as HTMLButtonElement;
     await act(async () => loadMore.click());
-    const environmentInput = [...host.querySelectorAll('input')].find(input => input.value === 'SIT')!;
+    const environmentInput = [...host.querySelectorAll('select')].find(input => input.value === 'SIT')!;
     await act(async () => {
-      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set?.call(environmentInput, 'UAT');
-      environmentInput.dispatchEvent(new Event('input', { bubbles: true }));
+      Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')?.set?.call(environmentInput, '');
+      environmentInput.dispatchEvent(new Event('change', { bubbles: true }));
     });
     await act(async () => resolveAppend!({ items: [unverifiedScenario('load/next.yaml')], total: 2, nextCursor: 'next-again' }));
     await flush();
@@ -163,14 +227,14 @@ describe('LoadCatalogPage', () => {
     };
     await act(async () => root.render(<LoadCatalogPage api={api as never} packages={{ status: 'ready', data: [{ packageId: 'payments' }] }}
       inlineLoadEnabled schedulingEnabled environment="SIT" onEnvironmentChange={vi.fn()} onNewLoad={vi.fn()}
-      onQuickLoad={vi.fn()} onJobAccepted={vi.fn()} onOpenJob={vi.fn()} onSchedule={vi.fn()} />));
+      onQuickLoad={vi.fn()} onJobAccepted={vi.fn()} onOpenJob={vi.fn()} onSchedule={vi.fn()} onOpenDetail={openDetail} />));
     await flush();
     const retry = [...host.querySelectorAll('button')].find(button => button.textContent === 'Retry payments')!;
     await act(async () => retry.click());
-    const environmentInput = [...host.querySelectorAll('input')].find(input => input.value === 'SIT')!;
+    const environmentInput = [...host.querySelectorAll('select')].find(input => input.value === 'SIT')!;
     await act(async () => {
-      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set?.call(environmentInput, 'UAT');
-      environmentInput.dispatchEvent(new Event('input', { bubbles: true }));
+      Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')?.set?.call(environmentInput, '');
+      environmentInput.dispatchEvent(new Event('change', { bubbles: true }));
     });
     await act(async () => resolveRetry!({ items: [unverifiedScenario()], total: 1 }));
     await flush();
@@ -196,7 +260,7 @@ describe('LoadCatalogPage', () => {
     };
     await act(async () => root.render(<LoadCatalogPage api={api as never} packages={{ status: 'ready', data: [{ packageId: 'payments' }] }}
       inlineLoadEnabled schedulingEnabled environment="SIT" onEnvironmentChange={vi.fn()} onNewLoad={vi.fn()}
-      onQuickLoad={vi.fn()} onJobAccepted={vi.fn()} onOpenJob={vi.fn()} onSchedule={vi.fn()} />));
+      onQuickLoad={vi.fn()} onJobAccepted={vi.fn()} onOpenJob={vi.fn()} onSchedule={vi.fn()} onOpenDetail={openDetail} />));
     await flush();
     const loadMore = [...host.querySelectorAll('button')].find(button => button.textContent === 'Load more scenarios')!;
     await act(async () => loadMore.click());
@@ -232,7 +296,7 @@ describe('LoadCatalogPage', () => {
     };
     await act(async () => root.render(<LoadCatalogPage api={api as never} packages={{ status: 'ready', data: [{ packageId: 'broken' }, { packageId: 'healthy' }] }}
       inlineLoadEnabled schedulingEnabled environment="SIT" onEnvironmentChange={vi.fn()} onNewLoad={vi.fn()}
-      onQuickLoad={vi.fn()} onJobAccepted={vi.fn()} onOpenJob={vi.fn()} onSchedule={vi.fn()} />));
+      onQuickLoad={vi.fn()} onJobAccepted={vi.fn()} onOpenJob={vi.fn()} onSchedule={vi.fn()} onOpenDetail={openDetail} />));
     await flush();
 
     expect(host.textContent).toContain('load/healthy.yaml');
@@ -265,7 +329,7 @@ describe('LoadCatalogPage', () => {
     };
     await act(async () => root.render(<LoadCatalogPage api={api as never} packages={{ status: 'ready', data: [{ packageId: 'broken' }, { packageId: 'healthy' }] }}
       inlineLoadEnabled schedulingEnabled environment="SIT" onEnvironmentChange={vi.fn()} onNewLoad={vi.fn()}
-      onQuickLoad={vi.fn()} onJobAccepted={vi.fn()} onOpenJob={vi.fn()} onSchedule={vi.fn()} />));
+      onQuickLoad={vi.fn()} onJobAccepted={vi.fn()} onOpenJob={vi.fn()} onSchedule={vi.fn()} onOpenDetail={openDetail} />));
     await flush();
     const staleRetry = [...host.querySelectorAll('button')].find(button => button.textContent === 'Retry broken')!;
     const search = host.querySelector('input[type="search"]')!;

@@ -66,7 +66,8 @@ class MultiWorkloadReviewRegressionTest {
                 + "  load: {users: 1, duration: 120ms}\n"
                 + "  thresholds: {minThroughput: \">= 999999/s\"}\n");
         Path root = projectRoot();
-        FrameworkConfig config = new FrameworkConfigLoader().load(root.resolve("config/config.yaml"), root);
+        Path home = Paths.get("").toAbsolutePath().normalize();
+        FrameworkConfig config = new FrameworkConfigLoader().load(home.resolve("config/config.yaml"), home, root, "SIT");
         LoadTarget target = new LoadTargetResolver(root, config).resolve(scenario);
         LoadRunResult result;
         Path output = temp.resolve("single-out");

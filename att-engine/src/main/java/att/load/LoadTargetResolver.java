@@ -47,7 +47,8 @@ public final class LoadTargetResolver {
                 if (tool == null) throw new IllegalArgumentException("Unknown Tool '" + id + "'");
                 Map<String, Object> action = new LinkedHashMap<String, Object>();
                 action.put("type", "tool"); action.put("call", call(tool.key(), scenario.targetArguments()));
-                Path source = tool.sourceFile() == null ? projectRoot.resolve("config/config.yaml") : tool.sourceFile();
+                Path source = tool.sourceFile() == null
+                        ? att.config.RuntimeConfigPath.resolve(null, projectRoot) : tool.sourceFile();
                 StageTemplate wrapper = new StageTemplate(tool.name(), source.getParent(),
                         Collections.singletonList(new TemplateAction("loadTool", action, Version.TEMPLATE_SCHEMA)),
                         Version.TEMPLATE_SCHEMA, source);

@@ -2,6 +2,7 @@ package att.resource;
 
 import att.config.FrameworkConfig;
 import att.config.FrameworkConfigLoader;
+import att.config.RuntimeConfigPath;
 import att.config.SuiteConfigResolver;
 import att.config.ToolArgumentConfig;
 import att.config.ToolConfig;
@@ -99,6 +100,8 @@ public final class PackageResourceInspector implements AutoCloseable {
     private final Path packageRoot;
     private final Path packageInputRoot;
     private final PackageResourceResolver resources;
+    private final Path runtimeConfigRoot;
+    private final PackageResourceResolver configResources;
     private final Path configPath;
     private final String environment;
     private final Set<String> safeTextSources;
@@ -150,6 +153,10 @@ public final class PackageResourceInspector implements AutoCloseable {
         this.packageRoot = resources.packageRoot();
         this.packageInputRoot = packageRoot.toAbsolutePath().normalize();
         this.configPath = configPath == null ? Paths.get("config/config.yaml") : configPath;
+        Path selectedConfig = RuntimeConfigPath.resolve(this.configPath, this.packageRoot);
+        Path runtimeConfigInputRoot = RuntimeConfigPath.root(selectedConfig);
+        this.configResources = new PackageResourceResolver(runtimeConfigInputRoot);
+        this.runtimeConfigRoot = this.configResources.packageRoot();
         this.environment = environment;
         this.safeTextSources = new HashSet<String>(
                 safeTextSources == null ? Collections.<String>emptySet() : safeTextSources);
@@ -194,6 +201,10 @@ public final class PackageResourceInspector implements AutoCloseable {
             String logicalPath = file.logicalName();
             Map<String,Object> result = new LinkedHashMap<>();
             result.put("available", Boolean.FALSE);
+            if (protectedRuntimeConfigPath(logicalPath)) {
+                result.put("reason", "forbidden");
+                return bounded(result);
+            }
             if (!linked&&!logicalPath.startsWith("config/")) {
                 result.put("reason","forbidden");
                 return bounded(result);
@@ -737,11 +748,10 @@ public final class PackageResourceInspector implements AutoCloseable {
 
     private Index buildIndexContents() throws Exception {
         Index index = new Index();
-        Path configFile = configPath.isAbsolute() ? configPath : packageRoot.resolve(configPath);
-        configFile = resources.fromInternalPath(configFile, PackageResourceResolver.Kind.FILE).canonicalPath();
+        Path configFile = resolveConfigFile();
         if (Files.size(configFile) > MAX_CONFIG_BYTES) throw new ResourceLimitException();
-        indexFile(index, configFile);
-        FrameworkConfig config = new FrameworkConfigLoader().load(configFile, packageRoot, environment);
+        index.files.add(configFile);
+        FrameworkConfig config = new FrameworkConfigLoader().load(configFile, runtimeConfigRoot, packageRoot, environment);
         Path templatesRoot = config.templatesRoot().isAbsolute()
                 ? config.templatesRoot() : packageRoot.resolve(config.templatesRoot());
         templatesRoot = resources.fromInternalPath(templatesRoot, PackageResourceResolver.Kind.DIRECTORY).canonicalPath();
@@ -749,6 +759,7 @@ public final class PackageResourceInspector implements AutoCloseable {
         indexTemplates(index, config, templatesRoot);
         indexFlows(index, config, templatesRoot);
         indexTools(index, config);
+        indexRuntimeConfigFiles(index);
         indexCases(index, config);
         indexDebugSidecars(index, config);
         indexQuickLoadPolicies(index);
@@ -781,7 +792,7 @@ public final class PackageResourceInspector implements AutoCloseable {
         return bounded(result);
     }
 
-    /** Returns safe business defaults and a validated one-workload Quick Load preview. */
+    /** Returns safe target identity and business defaults without validating Load policy or workload. */
     public Map<String, Object> inspectQuickLoadForm(String type, String resourceId, String model,
                                                     String expectedRevisionDigest) throws Exception {
         Index index = index();
@@ -789,7 +800,20 @@ public final class PackageResourceInspector implements AutoCloseable {
         Resource resource = index.byId.get(resourceId);
         if (resource == null || !debuggable(resource.type) || !resource.type.equals(type) || !"ready".equals(resource.state))
             throw new ResourceNotFoundException();
-        return quickLoadProjection(index, resource, model, null, null, null);
+        if (!"virtualUsers".equals(model) && !"arrivalRate".equals(model))
+            throw new IllegalArgumentException("Quick Load model is invalid");
+        Map<String, Object> projectedInput = debugEngine(frameworkConfig())
+                .projectLoadBusinessInput(resource.type, resource.logicalId, null);
+        Map<String, Object> result = new LinkedHashMap<String, Object>();
+        result.put("resource", summary(resource, index));
+        result.put("target", target(resource));
+        result.put("model", model);
+        result.put("input", projectedInput.get("input"));
+        result.put("debugLocalTestdataOmitted", projectedInput.get("debugLocalTestdataOmitted"));
+        result.put("redacted", projectedInput.get("redacted"));
+        result.put("revisionDigest", index.revisionDigest);
+        result.put("redactionEnabled", Boolean.valueOf(redactionEnabled));
+        return bounded(result);
     }
 
     /** Validates business defaults and policy overrides, returning a private typed scenario for draft creation. */
@@ -1008,6 +1032,47 @@ public final class PackageResourceInspector implements AutoCloseable {
         return bounded(response);
     }
 
+    /** Returns bounded structured Load metadata with business values projected through the active redaction policy. */
+    public Map<String, Object> inspectLoadCatalogDetail(String relativePath, String expectedRevisionDigest) throws Exception {
+        if (relativePath == null || relativePath.trim().isEmpty() || relativePath.length() > 1024)
+            throw new IllegalArgumentException("Load resource ID is invalid");
+        Index index = index();
+        if (expectedRevisionDigest != null && !expectedRevisionDigest.equals(index.revisionDigest))
+            throw new StaleResourceCursorException();
+        PackageResourceResolver.PackageResource source = resources.resolvePackageRelative(relativePath, PackageResourceResolver.Kind.FILE);
+        if (!source.logicalName().startsWith("load/")) throw new ResourceNotFoundException();
+        Map<String, Object> result = new LinkedHashMap<String, Object>();
+        result.put("resourceId", source.logicalName());
+        result.put("path", source.logicalName());
+        result.put("sourceAvailable", Boolean.valueOf(loadSourceAllowed(source.canonicalPath(), source.logicalName())));
+        result.put("revisionDigest", index.revisionDigest);
+        try {
+            if (Files.size(source.canonicalPath()) > maxSourceBytes) throw new IllegalArgumentException("Load YAML exceeds the configured size limit");
+            LoadScenario scenario = new LoadScenarioLoader(packageRoot).load(source.canonicalPath());
+            Map<String, Object> definition = scenario.toMap();
+            Map<String, Object> projected = projectSafeLoadScenario(definition, debugEngine(frameworkConfig()));
+            @SuppressWarnings("unchecked") Map<String, Object> safeDefinition = (Map<String, Object>) projected.get("value");
+            boolean template = scenario.policyOnly() || !scenario.hasWorkloads();
+            result.put("kind", template ? "template" : "scenario");
+            result.put("validation", template ? "valid" : "unverified");
+            result.put("model", scenario.hasWorkloads()
+                    ? (scenario.model() == att.load.LoadScenario.Model.CLOSED ? "virtualUsers" : "arrivalRate")
+                    : policyModel(safeDefinition));
+            result.put("schemaVersion", scenario.schemaVersion());
+            result.put("workloadCount", Integer.valueOf(scenario.workloads().size()));
+            result.put("definition", safeDefinition);
+            result.put("redacted", projected.get("redacted"));
+        } catch (Exception invalid) {
+            Map<String, Object> diagnostic = safeLoadCatalogDiagnosticProjection(invalid);
+            result.put("kind", "invalid");
+            result.put("validation", "invalid");
+            result.put("workloadCount", Integer.valueOf(0));
+            result.put("diagnostic", diagnostic.get("summary"));
+            result.put("diagnostics", Collections.singletonList(diagnostic));
+        }
+        return bounded(result);
+    }
+
     /** Returns a policy-redacted read-only YAML projection for an authorized catalog entry. */
     public Map<String, Object> inspectLoadSource(String relativePath) throws Exception {
         PackageResourceResolver.PackageResource source = resources.resolvePackageRelative(relativePath, PackageResourceResolver.Kind.FILE);
@@ -1040,6 +1105,26 @@ public final class PackageResourceInspector implements AutoCloseable {
         if (message == null || message.trim().isEmpty()) return "Load YAML is invalid or unavailable.";
         return scrubSensitiveValues(message).replaceAll("(?i)(password|token|secret|credential)(\\s*[:=]\\s*)[^\\s,}]+", "$1$2[REDACTED]")
                 .replaceAll("(?:[A-Za-z]:)?[/\\\\][^\\s:]+", "[package path]");
+    }
+
+    private Map<String, Object> safeLoadCatalogDiagnosticProjection(Exception failure) {
+        Map<String, Object> diagnostic = new LinkedHashMap<String, Object>();
+        if (failure instanceof att.validation.DiagnosticException) {
+            att.validation.DiagnosticException typed = (att.validation.DiagnosticException) failure;
+            diagnostic.put("code", typed.code());
+            diagnostic.put("summary", safeLoadCatalogDiagnostic(new IllegalArgumentException(typed.summary())));
+            if (typed.field() != null) diagnostic.put("field", safeLoadCatalogDiagnostic(new IllegalArgumentException(typed.field())));
+            if (typed.suggestion() != null) diagnostic.put("suggestion", safeLoadCatalogDiagnostic(new IllegalArgumentException(typed.suggestion())));
+            if (typed.source() != null) {
+                diagnostic.put("line", typed.source().line());
+                diagnostic.put("column", typed.source().column());
+            }
+        }
+        if (!diagnostic.containsKey("summary")) {
+            diagnostic.put("code", "LOAD_CATALOG_INVALID");
+            diagnostic.put("summary", safeLoadCatalogDiagnostic(failure));
+        }
+        return diagnostic;
     }
 
     private String policyModel(Map<String, Object> scenario) {
@@ -1131,12 +1216,36 @@ public final class PackageResourceInspector implements AutoCloseable {
 
     private Map<String, Object> projectSafeLoadScenario(Map<String, Object> scenario, DebugEngine engine) {
         Map<String, Object> safe = new LinkedHashMap<String, Object>(scenario);
+        // Testdata can contain package-local filenames and generated data descriptors. Keep it out of
+        // the descriptive projection; resource details show workload configuration without paths.
+        safe.remove("testdata");
         List<Object> workloads = new ArrayList<Object>();
         boolean[] redacted = new boolean[] { false };
+        // Legacy single-workload documents store business values at the root.
+        Object rawLegacyTarget = safe.get("target");
+        if (safe.containsKey("inputs") || rawLegacyTarget instanceof Map) {
+            Map<String, Object> legacyBusiness = new LinkedHashMap<String, Object>();
+            if (safe.containsKey("inputs")) legacyBusiness.put("inputs", safe.get("inputs"));
+            Map<String, Object> legacyTarget = null;
+            if (rawLegacyTarget instanceof Map) {
+                @SuppressWarnings("unchecked") Map<String, Object> target = new LinkedHashMap<String, Object>((Map<String, Object>) rawLegacyTarget);
+                legacyTarget = target;
+                if (target.containsKey("arguments")) legacyBusiness.put("arguments", target.get("arguments"));
+            }
+            Map<String, Object> legacyProjection = engine.projectSafeValue(legacyBusiness);
+            @SuppressWarnings("unchecked") Map<String, Object> safeLegacyBusiness = (Map<String, Object>) legacyProjection.get("value");
+            redacted[0] |= Boolean.TRUE.equals(legacyProjection.get("redacted"));
+            if (safeLegacyBusiness.containsKey("inputs")) safe.put("inputs", safeLegacyBusiness.get("inputs"));
+            if (legacyTarget != null) {
+                if (safeLegacyBusiness.containsKey("arguments")) legacyTarget.put("arguments", safeLegacyBusiness.get("arguments"));
+                safe.put("target", legacyTarget);
+            }
+        }
         Object rawWorkloads = scenario.get("workloads");
         if (rawWorkloads instanceof List) for (Object rawWorkload : (List<?>) rawWorkloads) {
             if (!(rawWorkload instanceof Map)) { workloads.add(rawWorkload); continue; }
             @SuppressWarnings("unchecked") Map<String, Object> workload = new LinkedHashMap<String, Object>((Map<String, Object>) rawWorkload);
+            workload.remove("testdata");
             Map<String, Object> business = new LinkedHashMap<String, Object>();
             if (workload.containsKey("inputs")) business.put("inputs", workload.get("inputs"));
             if (workload.containsKey("vars")) business.put("vars", workload.get("vars"));
@@ -1252,14 +1361,18 @@ public final class PackageResourceInspector implements AutoCloseable {
     }
 
     private FrameworkConfig frameworkConfig() throws Exception {
-        Path file = configPath.isAbsolute() ? configPath : packageRoot.resolve(configPath);
-        file = resources.fromInternalPath(file, PackageResourceResolver.Kind.FILE).canonicalPath();
-        return new FrameworkConfigLoader().load(file, packageRoot, environment);
+        Path file = resolveConfigFile();
+        return new FrameworkConfigLoader().load(file, runtimeConfigRoot, packageRoot, environment);
     }
 
     private DebugEngine debugEngine(FrameworkConfig config) {
-        return new DebugEngine(packageRoot, config, new att.exec.IbmMqClientFactory(),
+        return new DebugEngine(packageRoot, resolveConfigFileUnchecked(), config, new att.exec.IbmMqClientFactory(),
                 redactionEnabled, sensitivePaths, sensitiveFieldPatterns);
+    }
+
+    private Path resolveConfigFileUnchecked() {
+        try { return resolveConfigFile(); }
+        catch (Exception unavailable) { return RuntimeConfigPath.resolve(configPath, packageRoot); }
     }
 
     private static boolean debuggable(String type) {
@@ -1281,17 +1394,19 @@ public final class PackageResourceInspector implements AutoCloseable {
                 ToolConfig tool = config.tools().get(resource.logicalId);
                 if (tool == null) continue;
                 String group = tool.groupId().isEmpty() ? tool.localKey() : tool.groupId();
-                indexDebugSidecar(index, packageRoot.resolve("config/tools").resolve(group + ".debug.yaml"));
+                indexDebugSidecar(index, runtimeConfigRoot.resolve("config/tools").resolve(group + ".debug.yaml"));
             }
         }
     }
 
     private void indexDebugSidecar(Index index, Path file) {
         Path candidate = file.toAbsolutePath().normalize();
-        if (!candidate.startsWith(packageRoot)) return;
-        String logicalName = packageRoot.relativize(candidate).toString().replace('\\', '/');
+        if (!candidate.startsWith(packageRoot) && !candidate.startsWith(runtimeConfigRoot)) return;
+        String logicalName = candidate.startsWith(packageRoot)
+                ? packageRoot.relativize(candidate).toString().replace('\\', '/')
+                : runtimeConfigRoot.relativize(candidate).toString().replace('\\', '/');
         try {
-            PackageResourceResolver.PackageResource resource = resources.fromInternalPath(file, PackageResourceResolver.Kind.FILE);
+            PackageResourceResolver.PackageResource resource = resolveInternal(file, PackageResourceResolver.Kind.FILE);
             index.files.add(resource.canonicalPath());
             logicalName = resource.logicalName();
             index.debugSidecars.put(logicalName, resource.canonicalPath());
@@ -1321,14 +1436,15 @@ public final class PackageResourceInspector implements AutoCloseable {
 
     private WatchRoots packageWatchRoots() throws Exception {
         WatchRoots roots = new WatchRoots();
-        Path configFile = configPath.isAbsolute() ? configPath : packageRoot.resolve(configPath);
-        configFile = resources.fromInternalPath(configFile, PackageResourceResolver.Kind.FILE).canonicalPath();
-        roots.recursive.add(configFile.getParent());
+        Path configFile = resolveConfigFile();
+        Path configDirectory = runtimeConfigRoot.resolve("config");
+        if (!Files.isSymbolicLink(configDirectory) && Files.isDirectory(configDirectory, LinkOption.NOFOLLOW_LINKS))
+            roots.recursive.add(configDirectory.toRealPath());
         Path loadDirectory = packageRoot.resolve("load").normalize();
         if (Files.isDirectory(loadDirectory, LinkOption.NOFOLLOW_LINKS) && !Files.isSymbolicLink(loadDirectory))
             addWatchRoot(loadDirectory, roots);
         else roots.direct.add(packageRoot);
-        FrameworkConfig config = new FrameworkConfigLoader().load(configFile, packageRoot, environment);
+        FrameworkConfig config = new FrameworkConfigLoader().load(configFile, runtimeConfigRoot, packageRoot, environment);
         Path templatesRoot = config.templatesRoot().isAbsolute()
                 ? config.templatesRoot() : packageRoot.resolve(config.templatesRoot());
         Path casesRoot = config.testcasesRoot().isAbsolute()
@@ -1339,7 +1455,7 @@ public final class PackageResourceInspector implements AutoCloseable {
             if (tool.sourceFile() == null) continue;
             try {
                 Path source = tool.sourceFile().isAbsolute() ? tool.sourceFile() : packageRoot.resolve(tool.sourceFile());
-                Path canonical = resources.fromInternalPath(source, PackageResourceResolver.Kind.FILE).canonicalPath();
+                Path canonical = resolveInternal(source, PackageResourceResolver.Kind.FILE).canonicalPath();
                 if (canonical.getParent() != null) roots.direct.add(canonical.getParent());
             } catch (Exception ignored) { /* invalid or external Tool descriptors are not watchable */ }
         }
@@ -1348,7 +1464,7 @@ public final class PackageResourceInspector implements AutoCloseable {
 
     private void addWatchRoot(Path candidate, WatchRoots roots) {
         try {
-            roots.recursive.add(resources.fromInternalPath(candidate, PackageResourceResolver.Kind.DIRECTORY).canonicalPath());
+            roots.recursive.add(resolveInternal(candidate, PackageResourceResolver.Kind.DIRECTORY).canonicalPath());
         } catch (Exception unavailable) {
             Path absolute = candidate.toAbsolutePath().normalize();
             Path parent = absolute.getParent();
@@ -1782,6 +1898,13 @@ public final class PackageResourceInspector implements AutoCloseable {
     }
 
     private boolean packageSourceAllowed(String logical,Path path) { return packageSourceReason(logical,path)==null; }
+
+    private static boolean protectedRuntimeConfigPath(String logical) {
+        if (logical == null) return false;
+        for (String segment : logical.split("/"))
+            if (segment.toLowerCase(Locale.ROOT).startsWith("att-server")) return true;
+        return false;
+    }
 
     private String sourceDisabledOrDenied(String logical) {
         if(!sourceBrowsingEnabled)return "source-disabled";
@@ -2255,13 +2378,18 @@ public final class PackageResourceInspector implements AutoCloseable {
     private String digestFiles(Set<Path> files, Map<String, Path> debugSidecars,
                                Map<String, Path> quickLoadPolicies) throws Exception {
         MessageDigest digest = MessageDigest.getInstance("SHA-256");
+        digest.update(utf8("ATT_ENGINE=" + att.Version.PRODUCT + ":" + att.Version.GIT_COMMIT));
+        digest.update((byte) 0);
+        digest.update(utf8("ATT_SCHEMA_REGISTRY=" + att.validation.SchemaFiles.registryDigest()));
+        digest.update((byte) 0);
+        digest.update(utf8("ATT_ENVIRONMENT=" + (environment == null ? "" : environment)));
+        digest.update((byte) 0);
         List<Path> ordered = new ArrayList<Path>(files);
         Collections.sort(ordered);
         long total = 0;
         byte[] buffer = new byte[8192];
         for (Path file : ordered) {
-            PackageResourceResolver.PackageResource resource =
-                    resources.fromInternalPath(file, PackageResourceResolver.Kind.FILE);
+            PackageResourceResolver.PackageResource resource = resolveInternal(file, PackageResourceResolver.Kind.FILE);
             byte[] name = utf8(resource.logicalName());
             digest.update(name);
             digest.update((byte) 0);
@@ -2324,9 +2452,39 @@ public final class PackageResourceInspector implements AutoCloseable {
     }
 
     private void indexFile(Index index, Path file) throws Exception {
-        PackageResourceResolver.PackageResource resource =
-                resources.fromInternalPath(file, PackageResourceResolver.Kind.FILE);
+        PackageResourceResolver.PackageResource resource = resolveInternal(file, PackageResourceResolver.Kind.FILE);
         index.files.add(resource.canonicalPath());
+    }
+
+    private Path resolveConfigFile() throws Exception {
+        Path selected = RuntimeConfigPath.resolve(configPath, packageRoot);
+        return configResources.fromInternalPath(selected, PackageResourceResolver.Kind.FILE).canonicalPath();
+    }
+
+    private PackageResourceResolver.PackageResource resolveInternal(Path path, PackageResourceResolver.Kind kind) {
+        Path absolute = path.toAbsolutePath().normalize();
+        if (absolute.startsWith(packageRoot)) return resources.fromInternalPath(absolute, kind);
+        if (absolute.startsWith(runtimeConfigRoot.resolve("config"))) return configResources.fromInternalPath(absolute, kind);
+        throw new IllegalArgumentException("ATT resource is outside the selected Package and shared config roots");
+    }
+
+    private void indexRuntimeConfigFiles(Index index) throws Exception {
+        Path configDirectory = runtimeConfigRoot.resolve("config");
+        if (Files.isSymbolicLink(configDirectory) || !Files.isDirectory(configDirectory, LinkOption.NOFOLLOW_LINKS))
+            throw new IllegalArgumentException("Shared runtime config directory is unavailable");
+        int count = 0;
+        long bytes = 0;
+        try (java.util.stream.Stream<Path> paths = Files.walk(configDirectory, 12)) {
+            for (Path candidate : (Iterable<Path>) paths::iterator) {
+                if (candidate.equals(configDirectory) || Files.isSymbolicLink(candidate) || protectedRuntimeConfigPath(
+                        runtimeConfigRoot.relativize(candidate).toString().replace('\\', '/'))) continue;
+                if (++count > 5000) throw new ResourceLimitException();
+                if (!Files.isRegularFile(candidate, LinkOption.NOFOLLOW_LINKS)) continue;
+                bytes += Files.size(candidate);
+                if (bytes > 268435456L) throw new ResourceLimitException();
+                index.files.add(configResources.fromInternalPath(candidate, PackageResourceResolver.Kind.FILE).canonicalPath());
+            }
+        }
     }
 
     private void indexFileIfPackage(Index index, Path file) {

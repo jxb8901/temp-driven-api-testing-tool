@@ -11,7 +11,7 @@
             <includes>
                 <include>.gitignore</include><include>pom.xml</include><include>att.bat</include><include>README.md</include><include>CHANGELOG.md</include>
                 <include>att-security/**</include><include>att-engine/**</include><include>att-server-api/**</include><include>att-web/**</include><include>att-remote/**</include><include>att-cli/**</include><include>att-worker/**</include><include>att-server/**</include><include>att-dist/**</include>
-                <include>config/**</include><include>packages/default/**</include><include>docs/**</include><include>examples/**</include>
+                <include>config/**</include><include>schemas/**</include><include>packages/default/**</include><include>docs/**</include><include>examples/**</include>
             </includes>
             <excludes><exclude>**/target/**</exclude><exclude>**/node_modules/**</exclude><exclude>dist/**</exclude><exclude>output/**</exclude><exclude>report/**</exclude><exclude>logs/**</exclude></excludes>
         </fileSet>

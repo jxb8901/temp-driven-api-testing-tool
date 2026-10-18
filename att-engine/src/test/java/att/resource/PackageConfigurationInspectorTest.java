@@ -350,11 +350,11 @@ class PackageConfigurationInspectorTest {
 
     @Test void generatedTestdataRequiresExplicitPreviewAndUsesTheSharedRedactionPolicy() throws Exception {
         Path root=packageRoot("generated-testdata-preview");
-        Files.createDirectories(root.resolve("config/testdata"));
+        Files.createDirectories(root.resolve("testdata"));
         String configured=baseConfig("config/dbhelpers/sit.yaml","config/dbhelpers/uat.yaml")
-                .replace("  SIT:\n    dbhelpers:","  SIT:\n    testdata: [config/testdata/generated.yaml]\n    dbhelpers:");
+                .replace("  SIT:\n    dbhelpers:","  SIT:\n    testdata: [testdata/generated.yaml]\n    dbhelpers:");
         write(root.resolve("config/config.yaml"),configured);
-        write(root.resolve("config/testdata/generated.yaml"),"schemaVersion: att-testdata/v1.0\nid: generatedAccounts\n"
+        write(root.resolve("testdata/generated.yaml"),"schemaVersion: att-testdata/v1.0\nid: generatedAccounts\n"
                 +"records:\n  generate:\n    seq:\n      from: 1000\n      to: 1120\n      format: \"%06d\"\n"
                 +"  record:\n    id: \"A-%{seq}\"\n    status: ACTIVE\n    email: customer@example.test\n"
                 +"selection:\n  strategy: sequential\n  exhaustion: stop\n");
@@ -365,7 +365,7 @@ class PackageConfigurationInspectorTest {
         assertEquals(Boolean.TRUE,required.get("generated"));
         assertEquals(Boolean.TRUE,required.get("previewRequired"));
         assertEquals(121L,required.get("recordCount"));
-        assertEquals("config/testdata/generated.yaml",required.get("source"));
+        assertEquals("testdata/generated.yaml",required.get("source"));
         assertTrue(((List<?>)required.get("records")).isEmpty());
         assertFalse(required.toString().contains("customer@example.test"));
 

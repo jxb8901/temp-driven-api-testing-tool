@@ -4,7 +4,7 @@ set -eu
 ROOT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 TEMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/att-launcher.XXXXXX")"
 SOURCE_DEBUG_FIXTURE=""
-trap 'rm -rf "$TEMP_DIR"; if [ -n "$SOURCE_DEBUG_FIXTURE" ]; then rm -rf "$ROOT_DIR/packages/default/$SOURCE_DEBUG_FIXTURE"; fi' EXIT HUP INT TERM
+trap 'rm -rf "$TEMP_DIR"; if [ -n "$SOURCE_DEBUG_FIXTURE" ]; then rm -rf "$ROOT_DIR/packages/default/$SOURCE_DEBUG_FIXTURE" "$ROOT_DIR/config/${SOURCE_DEBUG_FIXTURE##*/}"; fi' EXIT HUP INT TERM
 
 JAVA_BIN="$(command -v java)"
 DIRNAME_BIN="$(command -v dirname)"
@@ -69,11 +69,14 @@ run_commands() {
 }
 
 write_debug_fixture() {
-  root="$1"
+  package_root="$1"
+  runtime_root="$2"
   fixture_relative="target/launcher-debug-smoke-$$"
-  fixture="$root/$fixture_relative"
+  fixture="$package_root/$fixture_relative"
+  runtime_config="$runtime_root/config/${fixture_relative##*/}/config.yaml"
   mkdir -p "$fixture/templates/SIMPLE"
-  cat > "$fixture/config.yaml" <<EOF
+  mkdir -p "$(dirname "$runtime_config")"
+  cat > "$runtime_config" <<EOF
 schemaVersion: att-config/v2.12
 environment: SIT
 outputDirectory: $fixture_relative/output
@@ -101,9 +104,10 @@ run_debug() {
   path_dir="$2"
   log_file="$3"
   fixture_relative="$4"
+  runtime_config="$root/config/${fixture_relative##*/}/config.yaml"
   output="$(PATH="$path_dir" ATT_BUILD_TOOL_LOG="$log_file" \
     /bin/sh "$root/att.sh" debug template SIMPLE \
-    --config "$fixture_relative/config.yaml" \
+    --config "$runtime_config" \
     --input "$fixture_relative/templates/SIMPLE/debug.yaml" --format json --quiet)" || {
     status=$?
     echo "Debug launcher failed (exit $status): $root/att.sh debug template SIMPLE" >&2
@@ -143,7 +147,7 @@ done
 
 run_commands "$ROOT_DIR" "$MAVEN_PATH" "$MAVEN_LOG"
 run_commands "$ROOT_DIR" "$NO_MAVEN_PATH" "$NO_MAVEN_LOG"
-SOURCE_DEBUG_FIXTURE="$(write_debug_fixture "$ROOT_DIR/packages/default")"
+SOURCE_DEBUG_FIXTURE="$(write_debug_fixture "$ROOT_DIR/packages/default" "$ROOT_DIR")"
 run_debug "$ROOT_DIR" "$MAVEN_PATH" "$MAVEN_LOG" "$SOURCE_DEBUG_FIXTURE"
 run_debug "$ROOT_DIR" "$NO_MAVEN_PATH" "$NO_MAVEN_LOG" "$SOURCE_DEBUG_FIXTURE"
 
@@ -179,7 +183,7 @@ tar -xzf "$PACKAGE_ARCHIVE" -C "$PACKAGE_PARENT"
 PACKAGE_ROOT="$PACKAGE_PARENT/att-$VERSION-local"
 run_commands "$PACKAGE_ROOT" "$MAVEN_PATH" "$MAVEN_LOG"
 run_commands "$PACKAGE_ROOT" "$NO_MAVEN_PATH" "$NO_MAVEN_LOG"
-PACKAGE_DEBUG_FIXTURE="$(write_debug_fixture "$PACKAGE_ROOT/packages/default")"
+PACKAGE_DEBUG_FIXTURE="$(write_debug_fixture "$PACKAGE_ROOT/packages/default" "$PACKAGE_ROOT")"
 run_debug "$PACKAGE_ROOT" "$MAVEN_PATH" "$MAVEN_LOG" "$PACKAGE_DEBUG_FIXTURE"
 run_debug "$PACKAGE_ROOT" "$NO_MAVEN_PATH" "$MAVEN_LOG" "$PACKAGE_DEBUG_FIXTURE"
 rm -rf "$ROOT_DIR/packages/default/$SOURCE_DEBUG_FIXTURE"

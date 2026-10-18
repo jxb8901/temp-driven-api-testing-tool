@@ -55,7 +55,7 @@ class MultiWorkloadRuntimeTest {
 
     @Test void publishesWorkloadAndTargetIdentityOnlyInFrameworkDiagnostics() throws Exception {
         Path root = projectRoot();
-        FrameworkConfig config = new FrameworkConfigLoader().load(root.resolve("config/config.yaml"), root);
+        FrameworkConfig config = runtimeConfig(root);
         LoadScenario scenario = load("context.yaml",
                 "schemaVersion: att-load/v1.3\nworkloads:\n"
                 + "- id: payment\n  target: {type: tool, id: sample.getAcDate}\n"
@@ -90,7 +90,7 @@ class MultiWorkloadRuntimeTest {
 
     @Test void invalidLaterTargetFailsBeforeCoordinatorStartsAnyWorkload() throws Exception {
         Path root = projectRoot();
-        FrameworkConfig config = new FrameworkConfigLoader().load(root.resolve("config/config.yaml"), root);
+        FrameworkConfig config = runtimeConfig(root);
         LoadScenario scenario = load("invalid-target.yaml",
                 "schemaVersion: att-load/v1.3\nworkloads:\n"
                 + "- id: valid\n  target: {type: tool, id: sample.getAcDate}\n"
@@ -110,7 +110,7 @@ class MultiWorkloadRuntimeTest {
 
     private LoadRunResult execute(LoadScenario scenario, String runId) throws Exception {
         Path root = projectRoot();
-        FrameworkConfig config = new FrameworkConfigLoader().load(root.resolve("config/config.yaml"), root);
+        FrameworkConfig config = runtimeConfig(root);
         LoadScenario first = scenario.forWorkload(scenario.workloads().get(0));
         LoadTarget seedTarget = new LoadTargetResolver(root, config).resolve(first);
         LoadEvidenceStore evidence = new LoadEvidenceStore(LoadEvidencePolicy.from(scenario));
@@ -127,7 +127,7 @@ class MultiWorkloadRuntimeTest {
 
     @Test void coordinatedRunKeepsPerWorkloadSuccessCapsIndependent() throws Exception {
         Path root = projectRoot();
-        FrameworkConfig config = new FrameworkConfigLoader().load(root.resolve("config/config.yaml"), root);
+        FrameworkConfig config = runtimeConfig(root);
         LoadScenario scenario = load("evidence-per-workload.yaml",
                 "schemaVersion: att-load/v1.7\n"
                 + "evidence:\n"
@@ -173,6 +173,11 @@ class MultiWorkloadRuntimeTest {
     }
 
     private static Path projectRoot() { return Paths.get("").toAbsolutePath().normalize().resolve("packages/default"); }
+
+    private static FrameworkConfig runtimeConfig(Path packageRoot) throws Exception {
+        Path home = Paths.get("").toAbsolutePath().normalize();
+        return new FrameworkConfigLoader().load(home.resolve("config/config.yaml"), home, packageRoot, "SIT");
+    }
     private static String message(Throwable value) {
         StringBuilder result = new StringBuilder();
         while (value != null) { if (value.getMessage() != null) result.append(value.getMessage()).append('\n'); value = value.getCause(); }

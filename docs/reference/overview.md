@@ -43,7 +43,7 @@ SSHHelper --/
 
 ## Package boundaries
 
-A normal package contains `config/`, `testcase/`, `templates/`, `tools/`, `schemas/` and generated `output/`. Paths and identifiers are validated before execution. Credentials belong in environment variables or external secret handling, not committed YAML.
+Each Package contains its business resources, such as `testcase/`, `templates/`, package-local `tools/`, `testdata/`, and generated `output/`. All Packages use the shared runtime configuration under `ATT_HOME/config/`; trusted schemas are bundled with ATT. A Package does not need its own `config/` or `schemas/` directory. Paths and identifiers are validated before execution. Credentials belong in environment variables or external secret handling, not committed YAML.
 
 For a guided package build, use [Quick Start](../quick-start.md). The rest of this manual is normative lookup documentation.
 

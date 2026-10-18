@@ -12,9 +12,9 @@
 ./att.sh validate --package
 ```
 
-針對單一環境可執行 `./att.sh validate --config config/config.yaml --env SIT --package`。ATT 僅接受 [Schema and Version Matrix](appendices/schema-matrix.md) 列出的 active schemas。`schemas/history/` 中的舊 schema 僅供歷史參考，不是 runtime compatibility contract。請先更新 `schemaVersion` 並將欄位遷移至現行契約，再執行 validation。診斷會保留原始違規、檔案及 YAML 欄位位置，並提供 migration guidance；ATT 不會改寫 descriptor。例如，將 historical Render Action 改為使用 `&{path}` 的 Assign，再依[Actions and Typed Values](actions.md)傳遞 resulting String。Unsupported version 會在執行前失敗。
+針對單一環境可執行 `./att.sh validate --config config/config.yaml --env SIT --package`。ATT 使用版本相符 Engine JAR 內嵌的 registry 驗證 descriptor，完整清單見 [Schema and Version Matrix](appendices/schema-matrix.md)。Repository `schemas/` 是 build input；舊 `ATT_HOME/schemas/` 或 package-local 目錄也不是 runtime schema 來源。`schemas/history/` 的舊 schema 僅在該 Engine 明確支援時才可作為 runtime contract，否則只供歷史參考。請先更新 `schemaVersion` 並將欄位遷移至現行契約，再執行 validation。診斷會保留原始違規、檔案及 YAML 欄位位置，並提供 migration guidance；ATT 不會改寫 descriptor。例如，將 historical Render Action 改為使用 `&{path}` 的 Assign，再依[Actions and Typed Values](actions.md)傳遞 resulting String。Unsupported version 會在執行前失敗。
 
-現行 schema 位於 [`schemas/`](../../packages/default/schemas/)，較舊定義位於 [`schemas/history/`](../../packages/default/schemas/history/)。`validate --package` 會檢查 catalog 登錄的每一份 schema，即使 package 沒有使用。缺少、無法讀取、不安全或重複的註冊 schema 會硬性回報 `PACKAGE_INVALID`。Validation 不會改寫 YAML。請檢視 migration guidance、更新檔案，再針對每個選定的 `--env` 重跑 package validation。
+現行 schema 原始檔及歷史版本位於 repository `schemas/` build-input tree，不會安裝在 ATT_HOME。Runtime `validate --package` 會檢查 Engine 內嵌 catalog 登錄的每一份 schema，即使 Package 沒有使用。缺少、無法讀取、不安全或重複的嵌入 resource 會硬性回報 `PACKAGE_INVALID`。Engine 從 classpath 讀取 catalog 和 schema bytes；其 private SHA-256 cache 是經驗證的相容 materialization，不是另一個 source of truth。Validation 不會改寫 YAML。請檢視 migration guidance、更新檔案，再針對每個選定的 `--env` 重跑 package validation。
 
 Package validation 會依照 Debug execution 相同的 discovery 與 schema/input validation，檢查現有 Template、Flow、分組及未分組 Tool 的 `debug.yaml` sidecar。歷史 schema version 與不符合現行 schema 的結構會在執行 `att debug` 前回報；可選 sidecar 缺少時仍屬有效。
 

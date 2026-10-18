@@ -130,23 +130,25 @@ class MqHelperExecutorTest {
     }
     private FrameworkConfig routingConfig(String strategy,String instances) throws Exception {
         att.TestSchemas.install(tempDir);
-        Files.write(tempDir.resolve("routing.yaml"),("schemaVersion: att-mqhelper/v1.3\nid: routing\nname: Routing\ndescription: Routing\n"
+        Path helper = tempDir.resolve("config/mqhelpers/routing.yaml"); Files.createDirectories(helper.getParent());
+        Files.write(helper,("schemaVersion: att-mqhelper/v1.3\nid: routing\nname: Routing\ndescription: Routing\n"
                 +"defaults:\n  connection: {queueManager: QM1, host: localhost, port: 1414, channel: CH, password: routing-password}\n"
                 +"  message: {requestQueues: [REQUEST.A, REQUEST.B], requestQueueSelection: {strategy: "+strategy+"}, replyQueue: REPLY}\n"
                 +"selection: {strategy: roundRobin}\ninstances: "+instances+"\n").getBytes("UTF-8"));
-        Map<String,MqHelperConfig> helpers=new att.config.MqHelperConfigLoader().load(Collections.singletonList("routing.yaml"),tempDir);
+        Map<String,MqHelperConfig> helpers=new att.config.MqHelperConfigLoader().load(Collections.singletonList("config/mqhelpers/routing.yaml"),tempDir);
         return new FrameworkConfig(tempDir,tempDir,tempDir,"SIT",10000,tempDir,tempDir,
                 Collections.emptyMap(),Collections.emptyMap(),helpers,null,null,null,"","",null,null,1,"ignore","",false,ProcessOutputConfig.defaults());
     }
 
     @Test void mqSharesCredentialSafePresentationAndLoadDeferral() throws Exception {
         att.TestSchemas.install(tempDir);
-        Files.write(tempDir.resolve("mq.yaml"), ("schemaVersion: att-mqhelper/v1.2\n"
+        Path helper = tempDir.resolve("config/mqhelpers/mq.yaml"); Files.createDirectories(helper.getParent());
+        Files.write(helper, ("schemaVersion: att-mqhelper/v1.2\n"
                 + "id: broker\nname: Broker\ndescription: Test broker\n"
                 + "defaults:\n  connection: {queueManager: QM1, host: localhost, port: 1414, channel: APP, password: private-mq-token}\n"
                 + "instances: [{id: one}]\nevidence: {payload: metadata, output: {format: json, maxChars: 10000}}\n").getBytes("UTF-8"));
         Map<String, MqHelperConfig> helpers = new att.config.MqHelperConfigLoader()
-                .load(Collections.singletonList("mq.yaml"), tempDir);
+                .load(Collections.singletonList("config/mqhelpers/mq.yaml"), tempDir);
         FrameworkConfig configured = new FrameworkConfig(tempDir, tempDir, tempDir, "SIT", 10000, tempDir, tempDir,
                 Collections.emptyMap(), Collections.emptyMap(), helpers, null, null,
                 null, "", "", null, null, 1, "ignore", "", false, ProcessOutputConfig.defaults());

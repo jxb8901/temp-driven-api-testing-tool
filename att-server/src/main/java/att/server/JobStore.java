@@ -28,6 +28,11 @@ final class JobStore implements AutoCloseable {
         return null;
     }
 
+    boolean isActiveUser(String login) throws Exception {
+        Map<String,Object> user = login == null ? null : authUser(login);
+        return user != null && Boolean.TRUE.equals(user.get("active")) && "USER".equals(user.get("role"));
+    }
+
     private boolean isLocalAdmin(String login) throws Exception {
         Map<String,Object> user = login == null ? null : authUser(login);
         return user != null && Boolean.TRUE.equals(user.get("active")) && "ADMIN".equals(user.get("role"));
@@ -114,6 +119,69 @@ final class JobStore implements AutoCloseable {
                     c.commit();return schedule;
                 }
             }
+        }
+    }
+
+    /**
+     * Resolves and persists the identity used by a manual trigger. New schedules already have
+     * an executionPrincipal. For older schedules, an active USER owner is adopted as-is; an
+     * active ADMIN owner may be explicitly transferred to the active USER who presses Run Now.
+     * Missing or disabled owners stay fail-closed.
+     */
+    synchronized LoadSchedule authorizeManualScheduleExecution(String id,String principal,boolean localAuth,String now) throws Exception {
+        try(Connection c=connect()) {
+            c.setAutoCommit(false);
+            try(PreparedStatement p=c.prepareStatement("SELECT schedule_json FROM load_schedules WHERE schedule_id=? FOR UPDATE")) {
+                p.setString(1,id);
+                try(ResultSet r=p.executeQuery()) {
+                    if(!r.next()){c.rollback();return null;}
+                    LoadSchedule schedule=ServerRuntime.JSON.readValue(r.getString(1),LoadSchedule.class);
+                    boolean migrated=false,changed=false;
+                    if(localAuth) {
+                        if(!activeUser(c,principal))throw new IllegalArgumentException("Triggering user is no longer authorized");
+                        if(schedule.executionIdentityMigratedFrom!=null) {
+                            c.commit();return schedule;
+                        } else if(activeUser(c,schedule.createdBy)) {
+                            if(schedule.executionPrincipal==null||schedule.executionPrincipal.isBlank()) {
+                                schedule.executionPrincipal=schedule.createdBy;changed=true;
+                            }
+                        } else if(activeAdmin(c,schedule.createdBy)) {
+                            schedule.executionPrincipal=principal;
+                            schedule.executionIdentityMigratedFrom=schedule.createdBy;
+                            schedule.executionIdentityMigratedBy=principal;
+                            schedule.executionIdentityMigratedAt=now;
+                            migrated=true;changed=true;
+                        } else {
+                            // Preserve the occurrence history: submitScheduledJob records the
+                            // authorization failure as failed-to-submit before any Worker starts.
+                            c.commit();return schedule;
+                        }
+                    } else if(schedule.executionPrincipal==null||schedule.executionPrincipal.isBlank()) {
+                        schedule.executionPrincipal=principal;changed=true;
+                    }
+                    if(!changed){c.commit();return schedule;}
+                    schedule.updatedBy=principal;schedule.updatedAt=now;
+                    String json=ServerRuntime.JSON.writeValueAsString(schedule);
+                    try(PreparedStatement update=c.prepareStatement("UPDATE load_schedules SET schedule_json=?,enabled=?,next_run_at=?,updated_at=? WHERE schedule_id=?")) {
+                        update.setString(1,json);update.setBoolean(2,schedule.enabled);update.setString(3,schedule.nextRunAt);
+                        update.setString(4,schedule.updatedAt);update.setString(5,schedule.id);update.executeUpdate();
+                    }
+                    if(migrated)try(PreparedStatement audit=c.prepareStatement("INSERT INTO audit(principal,action,job_id,package_id,created_at,outcome) VALUES(?,? ,NULL,?,?,?)")) {
+                        audit.setString(1,principal);audit.setString(2,"SCHEDULE_IDENTITY_MIGRATE");audit.setString(3,schedule.packageId);
+                        audit.setString(4,now);audit.setString(5,"LEGACY_ADMIN_TO_USER");audit.executeUpdate();
+                    }
+                    c.commit();return schedule;
+                }
+            } catch(Exception failure) {c.rollback();throw failure;}
+        }
+    }
+
+    private static boolean activeUser(Connection c,String login) throws Exception {return activeRole(c,login,"USER");}
+    private static boolean activeAdmin(Connection c,String login) throws Exception {return activeRole(c,login,"ADMIN");}
+    private static boolean activeRole(Connection c,String login,String role) throws Exception {
+        if(login==null||login.isBlank())return false;
+        try(PreparedStatement p=c.prepareStatement("SELECT 1 FROM auth_users WHERE login_id=? AND role=? AND active=TRUE")) {
+            p.setString(1,login);p.setString(2,role);try(ResultSet r=p.executeQuery()){return r.next();}
         }
     }
     synchronized LoadSchedule setScheduleEnabled(String id,boolean enabled,String principal,String updatedAt,String nextRunAt) throws Exception {
@@ -282,64 +350,18 @@ final class JobStore implements AutoCloseable {
     }
     synchronized long activeAdminCount() throws Exception {try(Connection c=connect();Statement s=c.createStatement();ResultSet r=s.executeQuery("SELECT COUNT(*) FROM auth_users WHERE role='ADMIN' AND active=TRUE")){r.next();return r.getLong(1);}}
     boolean ownsJob(String id,String login) throws Exception {
-        String owner;
-        try(Connection c=connect();PreparedStatement p=c.prepareStatement("SELECT principal FROM jobs WHERE job_id=?")) {
-            p.setString(1,id);
-            try(ResultSet r=p.executeQuery()) {
-                if(!r.next()) return false;
-                owner=r.getString(1);
-            }
-        }
-        if(login.equals(owner)) return true;
-        String scheduleId=scheduledScheduleId(owner);
-        if(scheduleId==null) return false;
-        // Schedule administration is ADMIN-only in local-auth mode, so any local
-        // ADMIN may read scheduled-job results even when another ADMIN created them.
-        if(isLocalAdmin(login)) return true;
-        try(Connection c=connect();PreparedStatement p=c.prepareStatement("SELECT schedule_json FROM load_schedules WHERE schedule_id=?")) {
-            p.setString(1,scheduleId);
-            try(ResultSet r=p.executeQuery()) {
-                return r.next()&&login.equals(ServerRuntime.JSON.readValue(r.getString(1),LoadSchedule.class).createdBy);
-            }
+        if(!isActiveUser(login))return false;
+        try(Connection c=connect();PreparedStatement p=c.prepareStatement("SELECT 1 FROM jobs WHERE job_id=?")) {
+            p.setString(1,id);try(ResultSet r=p.executeQuery()){return r.next();}
         }
     }
     synchronized List<Map<String,Object>> listOwned(int limit,String login) throws Exception {
-        boolean admin=isLocalAdmin(login);
-        List<String> schedulePrincipals=new ArrayList<>();
-        for(LoadSchedule schedule:schedules()) {
-            if(admin||login.equals(schedule.createdBy)) {
-                schedulePrincipals.add("load-schedule:"+schedule.id);
-                schedulePrincipals.add("debug-schedule:"+schedule.id);
-            }
-        }
-        String ownerPredicate=schedulePrincipals.isEmpty()?"":" OR principal IN ("+String.join(",",java.util.Collections.nCopies(schedulePrincipals.size(),"?"))+")";
-        List<Map<String,Object>> out=new ArrayList<>();
-        try(Connection c=connect();PreparedStatement p=c.prepareStatement("SELECT job_id,command,package_id,principal,status,created_at,started_at,finished_at,exit_code FROM jobs WHERE principal=?"+ownerPredicate+" ORDER BY created_at DESC LIMIT ?")) {
-            int index=1;p.setString(index++,login);
-            for(String owner:schedulePrincipals)p.setString(index++,owner);
-            p.setInt(index,limit);
-            try(ResultSet r=p.executeQuery()) {
-                while(r.next()) {
-                    Map<String,Object> m=new LinkedHashMap<>();
-                    m.put("jobId",r.getString(1));m.put("command",r.getString(2));m.put("executionType",Job.executionType(r.getString(2)));
-                    m.put("packageId",r.getString(3));m.put("principal",r.getString(4));m.put("status",r.getString(5));
-                    m.put("createdAt",r.getString(6));m.put("startedAt",r.getString(7));m.put("finishedAt",r.getString(8));m.put("exitCode",r.getObject(9));
-                    out.add(m);
-                }
-            }
-        }
-        return out;
+        if(!isActiveUser(login))return List.of();
+        return list(limit);
     }
     synchronized List<Map<String,Object>> listOwnedLoad(int limitPlusOne,int offset,String login) throws Exception {
-        boolean admin=isLocalAdmin(login);List<String> schedulePrincipals=new ArrayList<>();
-        for(LoadSchedule schedule:schedules())if(admin||login.equals(schedule.createdBy))schedulePrincipals.add("load-schedule:"+schedule.id);
-        String ownerPredicate=schedulePrincipals.isEmpty()?"":" OR principal IN ("+String.join(",",java.util.Collections.nCopies(schedulePrincipals.size(),"?"))+")";
-        List<Map<String,Object>> out=new ArrayList<>();
-        String sql="SELECT job_id,command,package_id,principal,status,created_at,started_at,finished_at,exit_code,request_summary FROM jobs WHERE command='load' AND (principal=?"+ownerPredicate+") ORDER BY created_at DESC,job_id DESC LIMIT ? OFFSET ?";
-        try(Connection c=connect();PreparedStatement p=c.prepareStatement(sql)){
-            int index=1;p.setString(index++,login);for(String owner:schedulePrincipals)p.setString(index++,owner);p.setInt(index++,limitPlusOne);p.setInt(index,offset);
-            try(ResultSet r=p.executeQuery()){while(r.next())out.add(jobSummary(r));}
-        }return out;
+        if(!isActiveUser(login))return List.of();
+        return listLoad(limitPlusOne,offset);
     }
     synchronized List<Map<String,Object>> listLoad(int limitPlusOne,int offset) throws Exception {
         List<Map<String,Object>> out=new ArrayList<>();

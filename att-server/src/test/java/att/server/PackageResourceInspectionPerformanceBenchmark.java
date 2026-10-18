@@ -37,6 +37,11 @@ class PackageResourceInspectionPerformanceBenchmark {
         int templateCount = integerProperty("att.server.inspection.benchmark.templates", 200, 2);
         if (pageSize > 100) throw new IllegalArgumentException("pageSize must not exceed 100");
 
+        Path runtimeConfig = Files.createDirectories(temp.resolve("runtime-home/config")).resolve("config.yaml");
+        writeUtf8(runtimeConfig, "schemaVersion: att-config/v2.12\nenvironment: SIT\nenvironments:\n  SIT: {}\n  UAT: {}\n"
+                + "testcase: {root: testcase}\ntemplates: {root: templates}\ntools:\n  benchmarkEcho:\n"
+                + "    name: Benchmark Echo\n    description: Resource source benchmark\n    command: [./tools/benchmark.sh]\n"
+                + "    stdoutFormat: text\n    arguments: {}\n");
         Path packageRoot = createRepresentativePackage(temp.resolve("large-package"),
                 workbookCount, casesPerWorkbook, templateCount);
         int packageCount=integerProperty("att.server.inspection.benchmark.packages", 3, 1);
@@ -49,7 +54,7 @@ class PackageResourceInspectionPerformanceBenchmark {
                 System.getProperty("os.name", "").toLowerCase().contains("win") ? "java.exe" : "java");
         Path serverConfig = temp.resolve("inspection-benchmark-server.yaml");
         Path dataDir = temp.resolve("server-data");
-        Files.writeString(serverConfig, "server:\n  dataDir: " + yaml(dataDir)
+        Files.writeString(serverConfig, "server:\n  runtimeConfigPath: " + yaml(runtimeConfig) + "\n  dataDir: " + yaml(dataDir)
                 + "\n  javaExecutable: " + yaml(javaBin)
                 + "\n  inspection:\n    maxConcurrent: " + workers + "\n    queuedLimit: 16\n    timeoutMs: 120000\n    heapMaxMb: 512"
                 + "\n    safeTextSources:\n      benchmark:\n        - tools/benchmark.sh"
@@ -225,11 +230,6 @@ class PackageResourceInspectionPerformanceBenchmark {
     private Path createRepresentativePackage(Path root, int workbookCount, int casesPerWorkbook, int templateCount) throws Exception {
         Files.createDirectories(root.resolve("testcase"));
         Files.createDirectories(root.resolve("templates"));
-        copySchemas(root);
-        writeUtf8(root.resolve("config/config.yaml"), "schemaVersion: att-config/v2.12\nenvironment: SIT\nenvironments:\n  SIT: {}\n  UAT: {}\n"
-                + "testcase:\n  root: testcase\ntemplates:\n  root: templates\ntools:\n  benchmarkEcho:\n"
-                + "    name: Benchmark Echo\n    description: Resource source benchmark\n    command: [./tools/benchmark.sh]\n"
-                + "    stdoutFormat: text\n    arguments: {}\n");
         writeUtf8(root.resolve("tools/benchmark.sh"), "#!/bin/sh\nprintf '%s\\n' benchmark\n");
         for (int i = 0; i < templateCount; i++) {
             String name = String.format(java.util.Locale.ROOT, "TARGET_%03d", i);
@@ -263,7 +263,7 @@ class PackageResourceInspectionPerformanceBenchmark {
     }
 
     private void copySchemas(Path root) throws Exception {
-        Path source = Path.of("packages/default/schemas").toAbsolutePath().normalize();
+        Path source = Path.of("schemas").toAbsolutePath().normalize();
         try (var paths = Files.walk(source)) {
             for (Path path : (Iterable<Path>) paths::iterator) {
                 Path destination = root.resolve("schemas").resolve(source.relativize(path));

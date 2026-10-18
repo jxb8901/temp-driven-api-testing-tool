@@ -17,7 +17,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.stream.Stream;
 
-/** Bounded metadata listing for the registered package config directory. */
+/** Bounded metadata listing for the shared ATT runtime config directory. */
 public final class PackageConfigurationFileInspector {
     public static final int MAX_PAGE_SIZE = 100;
     private static final int MAX_TREE_ENTRIES = 5000;
@@ -72,7 +72,7 @@ public final class PackageConfigurationFileInspector {
             try (Stream<Path> stream = Files.walk(configRoot, MAX_TREE_DEPTH)) {
                 int visited = 0;
                 for (Path candidate : (Iterable<Path>) stream::iterator) {
-                    if (candidate.equals(configRoot) || Files.isSymbolicLink(candidate)) continue;
+                    if (candidate.equals(configRoot) || Files.isSymbolicLink(candidate) || protectedRuntimeConfig(candidate)) continue;
                     if (++visited > MAX_TREE_ENTRIES * 20) { truncated = true; break; }
                     boolean directoryNode = Files.isDirectory(candidate, LinkOption.NOFOLLOW_LINKS);
                     int depth = configRoot.relativize(candidate).getNameCount();
@@ -88,6 +88,7 @@ public final class PackageConfigurationFileInspector {
             try (Stream<Path> stream = Files.list(directory)) {
                 for (Path candidate : (Iterable<Path>) stream::iterator) {
                     if (Files.isSymbolicLink(candidate)) continue;
+                    if (protectedRuntimeConfig(candidate)) continue;
                     if (!Files.isDirectory(candidate, LinkOption.NOFOLLOW_LINKS)
                             && !Files.isRegularFile(candidate, LinkOption.NOFOLLOW_LINKS)) continue;
                     if (matches.size() == MAX_TREE_ENTRIES) { truncated = true; break; }
@@ -163,6 +164,11 @@ public final class PackageConfigurationFileInspector {
         } catch (Exception error) {
             return true;
         }
+    }
+
+    private static boolean protectedRuntimeConfig(Path path) {
+        Path name = path.getFileName();
+        return name != null && name.toString().toLowerCase(Locale.ROOT).startsWith("att-server");
     }
 
     private PackageResourceResolver.Kind kind(Path path) {

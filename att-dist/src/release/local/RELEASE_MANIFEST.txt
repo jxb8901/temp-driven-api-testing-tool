@@ -8,18 +8,22 @@ contents:
   - att.bat
   - lib/att-local-${project.version}.jar
   - lib/
-  - packages/default/config/
+  - config/
   - packages/default/templates/
   - packages/default/tools/
   - packages/default/testcase/
+  - packages/default/testdata/
   - packages/default/sql/ (when present)
-  - packages/default/schemas/
   - docs/
   - config/att-server.example.yaml
 notes:
   - ATT_HOME is the extracted install root (set by launchers; overridable via ATT_HOME / -Datt.home)
   - Package root defaults to packages/default; override with ATT_PACKAGE_ROOT
-  - ATT_HOME/config/att-server.example.yaml is a template; package configuration lives under packages/default/config/
+  - ATT_HOME/config/config.yaml and its helper descriptors are shared runtime configuration
+  - The matching ATT Engine JAR contains the authoritative runtime schema registry under att-schemas/
+  - ATT_HOME/schemas/ is not a runtime schema source and is not included in this archive
+  - The verified content-addressed schema cache lives in a private per-user temporary directory
+  - packages/default/ contains business resources and does not require config/ or schemas/
   - no active config/att-server.yaml is shipped or overwritten on upgrade
   - Optional Server config: ATT_HOME/config/att-server.yaml, discovered after -Datt.server.config and ATT_SERVER_CONFIG
   - Optional Server data directory: ATT_HOME/data/ when disjoint from every package root; data/ is not shipped

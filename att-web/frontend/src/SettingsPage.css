@@ -1,4 +1,4 @@
-.att-settings-page { max-width: 1040px; }
+.att-settings-page { max-width: none; }
 .att-settings-section { margin-top: var(--att-space-4); padding: var(--att-space-5); }
 .att-settings-section-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--att-space-4); }
 .att-settings-help { max-width: 680px; margin: var(--att-space-2) 0 0; color: var(--att-color-muted); font-size: 0.88rem; line-height: 1.5; }

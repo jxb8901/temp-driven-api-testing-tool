@@ -52,6 +52,10 @@ async function main() {
       if (method === 'GET' && path === 'auth/capabilities') {
         capabilitiesCalls++;
         return jsonResponse(route, 200, {
+          capabilities: { operate: true, accountManage: false, systemSettingsWrite: false, configurationAdmin: false },
+          operate: true,
+          accountManage: false,
+          systemSettingsWrite: false,
           configurationAdmin: false,
           inspectionCacheContext: (identityVersion === 1 ? 'a' : 'b').repeat(43),
         });
@@ -60,15 +64,15 @@ async function main() {
         return jsonResponse(route, 401, { error: { code: 'UNAUTHORIZED', summary: 'authorization header rejected: canary-401-secret' } });
       }
       if (method === 'GET' && path === 'version') {
-        return jsonResponse(route, 200, { apiVersion: '1', version: '4.2.1', inlineLoadEnabled: true, loadSchedulingEnabled: true });
+        return jsonResponse(route, 200, { apiVersion: '1', version: '4.2.1', unifiedRunVersion: 'att-execution/v1', inlineLoadEnabled: true, loadSchedulingEnabled: true });
       }
-      if (method === 'GET' && path === 'load-schedules') {
+      if (method === 'GET' && ['load-schedules', 'schedules'].includes(path)) {
         return jsonResponse(route, 200, { items: createdSchedule ? [createdSchedule] : [], total: createdSchedule ? 1 : 0 });
       }
-      if (method === 'POST' && path === 'load-schedules/preview') {
+      if (method === 'POST' && ['load-schedules/preview', 'schedules/preview'].includes(path)) {
         return jsonResponse(route, 200, { ...request.postDataJSON(), nextRunAt: '2030-01-01T00:00:00.000Z' });
       }
-      if (method === 'POST' && path === 'load-schedules') {
+      if (method === 'POST' && ['load-schedules', 'schedules'].includes(path)) {
         submittedScheduleInput = request.postDataJSON();
         createdSchedule = {
           id: 'schedule-inline-99', ...submittedScheduleInput, inlineSnapshot: true,
@@ -147,9 +151,6 @@ async function main() {
         ] : requested === 'config' ? [
           { name: 'application.yaml', path: 'config/application.yaml', kind: 'file', format: 'yaml', sourceAvailable: true, sizeBytes: 248 },
           { name: 'restricted.yaml', path: 'config/restricted.yaml', kind: 'file', format: 'yaml', sourceAvailable: false, reason: 'visibility-policy' },
-          { name: 'testdata', path: 'config/testdata', kind: 'directory' },
-        ] : requested === 'config/testdata' ? [
-          { name: 'accounts.yaml', path: 'config/testdata/accounts.yaml', kind: 'file', format: 'yaml', sourceAvailable: true, sizeBytes: 156 },
         ] : [];
         return jsonResponse(route, 200, { path: requested, items, total: items.length, nextOffset: null, truncated: false });
       }
@@ -157,13 +158,13 @@ async function main() {
         assert.equal(url.searchParams.get('path'), 'config/application.yaml');
         return jsonResponse(route, 200, {
           available: true, logicalPath: 'config/application.yaml', format: 'yaml',
-          text: 'server:\n  environment: dev\n# descriptor: config/testdata/accounts.yaml\n',
+          text: 'server:\n  environment: dev\n# descriptor: testdata/accounts.yaml\n',
         });
       }
       if (method === 'GET' && path === 'packages/payments/configuration/effective') {
         const section = url.searchParams.get('section') || 'globals';
         const entries = section === 'testdata' ? [{
-          id: 'accounts', source: 'config/testdata/accounts.yaml', generated: false,
+          id: 'accounts', source: 'testdata/accounts.yaml', generated: false,
           fields: {
             recordCount: { state: 'visible', value: 3 },
             'selection.strategy': { state: 'visible', value: 'roundRobin' },
@@ -176,7 +177,7 @@ async function main() {
           globals: { baseDir: { state: 'visible', value: 'config' } },
           sections: [{ id: 'testdata', title: 'Testdata', entries: [
             ...entries,
-            { id: 'generatedAccounts', source: 'config/testdata/generated.yaml', generated: true, fields: {
+            { id: 'generatedAccounts', source: 'testdata/generated.yaml', generated: true, fields: {
               generated: { state: 'visible', value: true },
               recordCount: { state: 'visible', value: 120 },
               'selection.strategy': { state: 'visible', value: 'sequential' },
@@ -249,6 +250,10 @@ async function main() {
         submittedInput = body.input;
         return jsonResponse(route, 200, { draftId: 'draft-99', previewYaml: 'target: checkout\nstatus: valid', expiresAt: new Date(Date.now() + 60_000).toISOString(), redacted: true });
       }
+      if (method === 'POST' && path === 'drafts/run') {
+        submittedInput = request.postDataJSON().input;
+        return jsonResponse(route, 201, { draftId: 'draft-99', executionType: 'run', previewYaml: 'target: checkout\nstatus: valid', expiresAt: new Date(Date.now() + 60_000).toISOString() });
+      }
       if (method === 'POST' && path === 'jobs/debug') {
         const body = request.postDataJSON();
         submittedPrincipal = body.principal;
@@ -259,7 +264,7 @@ async function main() {
 
     const base = `${fixture.origin}/att/ui/`;
     await page.goto(`${base}#/packages/payments/resources/template/checkout`);
-    await page.getByRole('heading', { name: 'Package Explorer' }).waitFor();
+    await page.getByRole('heading', { name: 'Resource details', exact: true }).waitFor();
     await page.getByRole('heading', { name: 'checkout' }).waitFor();
     await page.getByRole('tab', { name: 'Definition' }).focus();
     await page.keyboard.press('ArrowRight');
@@ -328,8 +333,8 @@ async function main() {
     await page.goBack();
     await page.getByRole('link', { name: 'Open package file ./refs/child.json' }).waitFor();
     await page.goBack();
-    await page.getByRole('heading', { name: 'Package Explorer' }).waitFor();
-    assert.match(page.url(), /#\/packages\/payments\/resources\/template\/checkout(?:\?detail=source)?$/);
+    await page.getByRole('heading', { name: 'Resource details', exact: true }).waitFor();
+    assert.match(page.url(), /#\/packages\/payments\/resources\/template\/checkout(?:\?detail=source&id=checkout)?$/);
 
     await page.goto(`${base}#/packages/payments/resources/template/empty`);
     await page.getByRole('heading', { name: 'empty' }).waitFor();
@@ -345,67 +350,50 @@ async function main() {
     assert.equal(comparisonText.includes('hidden') && comparisonText.includes('not declared'), true, 'configuration comparison distinguishes hidden from missing');
     await page.goto(`${base}#/packages/payments/resources/template/checkout`);
     await page.getByRole('heading', { name: 'checkout' }).waitFor();
-    await page.getByRole('button', { name: 'Run this target' }).click();
-    await page.getByText(/Hidden package-authored values are preserved/).waitFor();
-    assert.equal(await page.getByRole('button', { name: 'Schedule…' }).isDisabled(), false, 'a valid Debug form can create a validated snapshot schedule');
-    await page.getByText('Scheduling keeps this validated Debug target, environment and input snapshot. Protected package defaults remain server-managed and are not saved as schedule values.').waitFor();
-    const keepDefault = page.getByRole('checkbox', { name: /Keep hidden package default/ });
-    await keepDefault.waitFor();
-    assert.equal(await keepDefault.isChecked(), true, 'redacted defaults remain untouched until the user opts out');
-    assert.equal(await page.locator('body').innerText().then(text => text.includes('real-secret')), false, 'secret defaults are not exposed');
+    await page.getByRole('button', { name: 'Run', exact: true }).click();
+    await page.getByRole('heading', { name: 'Run', exact: true }).waitFor();
+    assert.match(page.url(), /#\/run\/payments\/template\/checkout\?(?:environment=[^&]+&)?id=checkout$/);
+    await page.getByText("Typed fields use the selected target's safe Debug defaults. Advanced JSON remains available for nested inputs.").waitFor();
+    await page.getByRole('button', { name: 'Validate', exact: true }).click();
+    try { await page.getByRole('heading', { name: 'Review', exact: true }).waitFor({ timeout: 10000 }); }
+    catch (error) {
+      console.error(JSON.stringify({ url: page.url(), body: await page.locator('body').innerText(), submittedInput }));
+      throw error;
+    }
+    assert.deepEqual(submittedInput, {
+      inputs: { credential: { $attDebugKeepDefault: '/inputs/credential' } }, vars: { retries: 2 },
+    }, 'Explorer Run uses the safe typed sidecar defaults and preserves hidden package values');
+    assert.equal(await page.getByRole('button', { name: 'Schedule…', exact: true }).isDisabled(), false);
     await page.getByRole('button', { name: 'Schedule…' }).click();
-    const debugScheduleDialog = page.getByRole('dialog');
-    await debugScheduleDialog.getByRole('heading', { name: 'New Schedule', level: 2 }).waitFor();
+    await page.waitForURL(url => url.hash.startsWith('#/schedules/new'));
+    await page.getByRole('heading', { name: 'New Schedule', exact: true }).waitFor();
     await page.getByText('Schedule form loaded from the validated RUN draft. Choose a recurrence and review the Server next-run preview.').waitFor();
-    assert.equal(await debugScheduleDialog.locator('#schedule-debug-target').inputValue(), 'template · checkout');
-    await debugScheduleDialog.getByText('Review the validated RUN definition snapshot').click();
-    assert.match(await debugScheduleDialog.locator('.att-schedule-snapshot-review pre').textContent(), /target: checkout/);
-    await debugScheduleDialog.getByText(/^Next run:/).waitFor();
-    assert.equal(await debugScheduleDialog.getByRole('button', { name: 'Save schedule' }).isDisabled(), false);
-    await debugScheduleDialog.getByRole('button', { name: 'Cancel and return to editor' }).click();
-    await debugScheduleDialog.waitFor({ state: 'detached' });
-    await keepDefault.uncheck();
-    await page.getByRole('combobox', { name: 'credential value type' }).selectOption('string');
-    await page.getByRole('textbox', { name: 'credential value' }).fill('explicit-override');
+    assert.equal(await page.locator('#schedule-debug-target').inputValue(), 'template · checkout');
+    await page.getByText('Review the validated RUN definition snapshot').click();
+    assert.match(await page.locator('.att-schedule-snapshot-review pre').textContent(), /target: checkout/);
+    await page.getByText(/^Next run:/).waitFor();
+    await page.getByRole('button', { name: 'Save schedule', exact: true }).click();
+    try { await page.locator('#schedules-title').waitFor({ timeout: 10000 }); }
+    catch (error) {
+      console.error(JSON.stringify({ url: page.url(), body: await page.locator('body').innerText(), submittedScheduleInput }));
+      throw error;
+    }
+    await page.getByText(/Saved .*\(ID: schedule-inline-99\)/).waitFor();
+    await page.getByRole('button', { name: 'View schedule history', exact: true }).waitFor();
+    assert.match(page.url(), /#\/schedules$/);
+    assert.equal(submittedScheduleInput.draftId, 'draft-99');
+    assert.equal(submittedScheduleInput.executionType, 'run');
+    assert.equal(Object.hasOwn(submittedScheduleInput, 'scenario'), false);
+    assert.equal(submittedPrincipal, undefined, 'saving the schedule must not start a job');
 
-    await page.locator('[data-nav="jobs"]').click();
-    const dialog = page.getByRole('dialog', { name: 'Discard your changes?' });
-    await dialog.waitFor({ state: 'visible' });
-    await dialog.getByRole('button', { name: 'Stay on this page' }).click();
-    await dialog.waitFor({ state: 'hidden' });
-    assert.match(page.url(), /resources\/template\/checkout$/);
-
-    await page.getByRole('button', { name: 'Reset defaults' }).click();
-    await keepDefault.waitFor();
-    assert.equal(await keepDefault.isChecked(), true, 'reset restores the redacted marker');
-    await keepDefault.uncheck();
-    await page.getByRole('combobox', { name: 'credential value type' }).selectOption('string');
-    const credentialValue = page.getByRole('textbox', { name: 'credential value' });
-    await credentialValue.fill('submitted-override');
-    assert.equal(await credentialValue.inputValue(), 'submitted-override', 'typed sidecar override stays visible before submitting');
-    await page.locator('.att-sidecar-advanced summary').click();
-    await page.waitForFunction(() => document.querySelector('.att-sidecar-advanced .cm-content')?.textContent?.includes('submitted-override'));
-    await page.getByLabel('Anonymous job label (optional)').fill('anonymous-e2e');
-    page.once('dialog', dialogEvent => dialogEvent.accept());
-    await page.getByRole('button', { name: 'Run Now' }).click();
-    await page.getByRole('heading', { name: 'Job job-debug-99' }).waitFor();
-    assert.deepEqual(submittedInput, { inputs: { credential: 'submitted-override' }, vars: { retries: 2 } });
-    assert.equal(submittedPrincipal, 'anonymous-e2e');
-    assert.equal(authorizationHeaderSeen, false, 'the anonymous flow does not add an authorization header');
-    assert.equal(JSON.stringify(submittedInput).includes('real-secret'), false);
-
-    await page.goBack();
-    await page.getByRole('heading', { name: 'checkout' }).waitFor();
-    await page.getByRole('button', { name: 'Run this target' }).click();
-    await page.getByText(/Hidden package-authored values are preserved/).waitFor();
-    await page.getByRole('checkbox', { name: /Keep hidden package default/ }).uncheck();
-    await page.getByRole('combobox', { name: 'credential value type' }).selectOption('string');
-    await page.getByRole('textbox', { name: 'credential value' }).fill('discard-me');
+    await page.goto(`${base}#/run/payments/template/checkout?environment=staging&id=checkout`);
+    await page.getByRole('heading', { name: 'Run', exact: true }).waitFor();
+    await page.getByLabel('Debug diagnostics', { exact: true }).check();
     await page.locator('[data-nav="jobs"]').click();
     const discardDialog = page.getByRole('dialog', { name: 'Discard your changes?' });
     await discardDialog.waitFor({ state: 'visible' });
     await discardDialog.getByRole('button', { name: 'Discard changes and continue' }).click();
-    await page.getByRole('heading', { name: 'Jobs' }).waitFor();
+    await page.getByRole('heading', { name: 'Jobs', exact: true }).waitFor();
     assert.match(page.url(), /#\/jobs$/);
 
     await page.setViewportSize({ width: 768, height: 1024 });
@@ -462,35 +450,40 @@ async function main() {
     assert.equal(await page.getByRole('button', { name: 'Schedule…' }).isDisabled(), false, 'validated draft enables scheduling');
     const quickLoadUrl = page.url();
     await page.getByRole('button', { name: 'Schedule…' }).click();
-    let scheduleDialog = page.getByRole('dialog');
-    await scheduleDialog.getByRole('heading', { name: 'New Schedule', level: 2 }).waitFor();
+    await page.waitForURL(url => url.hash.startsWith('#/schedules/new'));
+    await page.getByRole('heading', { name: 'New Schedule', exact: true }).waitFor();
     await page.getByText('Schedule form loaded from the validated Load draft.').waitFor();
-    assert.equal(page.url(), quickLoadUrl, 'Schedule should open without leaving the Quick Load route');
     assert.equal(await page.locator('#schedule-scenario').inputValue(), 'Validated Load snapshot');
-    await scheduleDialog.getByText('Review the validated Load scenario snapshot').click();
-    const scheduledSnapshot = await scheduleDialog.locator('.att-schedule-snapshot-review pre').textContent();
-    assert.ok(scheduledSnapshot.includes('account: A-1') && scheduledSnapshot.includes('users: 2'), 'the dialog should show the validated target inputs and load values');
+    await page.getByText('Review the validated Load scenario snapshot').click();
+    const scheduledSnapshot = await page.locator('.att-schedule-snapshot-review pre').textContent();
+    assert.ok(scheduledSnapshot.includes('account: A-1') && scheduledSnapshot.includes('users: 2'), 'the schedule page should show the validated target inputs and load values');
     await page.route(`${fixture.origin}/att/axe-core.js`, route => route.fulfill({
       status: 200, contentType: 'text/javascript', path: require.resolve('axe-core/axe.min.js'),
     }));
     await page.addScriptTag({ url: `${fixture.origin}/att/axe-core.js` });
-    await assertAxe(page, 'The Load schedule dialog should pass WCAG 2.2 AA checks');
-    await scheduleDialog.getByRole('button', { name: 'Cancel and return to editor' }).click();
-    await scheduleDialog.waitFor({ state: 'detached' });
-    assert.equal(page.url(), quickLoadUrl, 'Cancel should return to the same Quick Load route');
-    assert.equal(await page.getByRole('button', { name: 'Schedule…' }).isDisabled(), false, 'the validated Load draft should remain available after cancel');
+    await assertAxe(page, 'The Load schedule page should pass WCAG 2.2 AA checks');
+    await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+    await page.waitForURL(`**/#${quickLoadUrl.split('#')[1]}`);
+    await page.getByRole('heading', { name: 'Quick Load', level: 1 }).waitFor();
+    assert.equal(page.url(), quickLoadUrl, 'Cancel returns to the originating Quick Load route');
 
+    await page.getByRole('combobox', { name: 'Load template or preset' }).selectOption('bundled:quick-smoke');
+    await page.getByRole('button', { name: 'Validate' }).click();
+    await page.getByText('The Server accepted this draft for review.').waitFor();
     await page.getByRole('button', { name: 'Schedule…' }).click();
-    scheduleDialog = page.getByRole('dialog');
-    await scheduleDialog.getByRole('heading', { name: 'New Schedule', level: 2 }).waitFor();
+    await page.waitForURL(url => url.hash.startsWith('#/schedules/new'));
+    await page.getByRole('heading', { name: 'New Schedule', exact: true }).waitFor();
     await page.getByText(/^Next run:/).waitFor();
-    await page.getByRole('button', { name: 'Save schedule' }).click();
-    await page.getByText(/Saved Validated LOAD snapshot\. Next run:/).waitFor();
+    await page.getByRole('button', { name: 'Save schedule', exact: true }).click();
+    await page.locator('#schedules-title').waitFor();
+    await page.getByText(/Saved .*\(ID: schedule-inline-99\)/).waitFor();
+    await page.getByRole('button', { name: 'View schedule history', exact: true }).waitFor();
+    assert.match(page.url(), /#\/schedules$/);
     assert.equal(submittedScheduleInput.draftId, 'LOAD-DRAFT-QUICK-99');
-    assert.equal(Object.hasOwn(submittedScheduleInput, 'scenario'), false, 'inline scheduling submits the validated draft ID, not a scenario path');
-    await scheduleDialog.getByRole('button', { name: 'Return to editor', exact: true }).click();
-    await scheduleDialog.waitFor({ state: 'detached' });
-    assert.equal(page.url(), quickLoadUrl, 'Saving should leave the user on the originating Quick Load route');
+    assert.equal(submittedScheduleInput.executionType, 'load');
+    assert.equal(Object.hasOwn(submittedScheduleInput, 'scenario'), false, 'scheduling submits the validated draft ID, not a scenario path');
+    await page.goto(quickLoadUrl);
+    await page.getByRole('heading', { name: 'Quick Load', level: 1 }).waitFor();
     assert.deepEqual(pageErrors, [], 'Configuration and Quick Load should not produce uncaught browser errors');
 
     authFailure = true;

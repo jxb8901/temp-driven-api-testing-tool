@@ -11,7 +11,7 @@ import static org.junit.jupiter.api.Assertions.*;
 class JobStoreScheduledOwnershipTest {
     @TempDir Path temp;
 
-    @Test void scheduledJobsAreReadableByTheirCreatorAndLocalAdministratorsOnly() throws Exception {
+    @Test void activeUsersShareJobsWhileAdministratorsHaveNoOperationalAccess() throws Exception {
         Path data = Files.createDirectories(temp.resolve("data"));
         Path allowed = Files.createDirectories(temp.resolve("packages"));
         Path packageRoot = Files.createDirectories(allowed.resolve("p"));
@@ -25,6 +25,7 @@ class JobStoreScheduledOwnershipTest {
             store.createAuthUser("bob", "Bob", "x", "USER", "b");
             store.createAuthUser("carol", "Carol", "x", "ADMIN", "c");
             store.createAuthUser("dana", "Dana", "x", "ADMIN", "d");
+            store.createAuthUser("erin", "Erin", "x", "USER", "e");
             store.setAuthActive("dana", false);
 
             LoadSchedule schedule = new LoadSchedule();
@@ -38,20 +39,22 @@ class JobStoreScheduledOwnershipTest {
             store.insert(new Job("J0000000000000002", "load", "p", "load-schedule:S1", null, null), "{}");
             store.insert(new Job("J0000000000000003", "debug", "p", "alice", null, null), "{}");
 
-            assertTrue(store.ownsJob("J0000000000000001", "alice"));
-            assertTrue(store.ownsJob("J0000000000000001", "carol"));
-            assertFalse(store.ownsJob("J0000000000000001", "bob"));
+            assertFalse(store.ownsJob("J0000000000000001", "alice"));
+            assertFalse(store.ownsJob("J0000000000000001", "carol"));
+            assertTrue(store.ownsJob("J0000000000000001", "bob"));
+            assertTrue(store.ownsJob("J0000000000000001", "erin"));
             assertFalse(store.ownsJob("J0000000000000001", "dana"));
-            assertTrue(store.ownsJob("J0000000000000002", "alice"));
-            assertTrue(store.ownsJob("J0000000000000002", "carol"));
-            assertFalse(store.ownsJob("J0000000000000002", "bob"));
-            assertTrue(store.ownsJob("J0000000000000003", "alice"));
-            assertFalse(store.ownsJob("J0000000000000003", "carol"));
+            assertTrue(store.ownsJob("J0000000000000002", "bob"));
+            assertTrue(store.ownsJob("J0000000000000002", "erin"));
+            assertFalse(store.ownsJob("J0000000000000002", "carol"));
+            assertTrue(store.ownsJob("J0000000000000003", "bob"));
+            assertFalse(store.ownsJob("J0000000000000003", "alice"));
 
-            assertEquals(3, store.listOwned(100, "alice").size());
-            assertEquals(2, store.listOwned(100, "carol").size());
+            assertEquals(3, store.listOwned(100, "bob").size());
+            assertEquals(3, store.listOwned(100, "erin").size());
+            assertTrue(store.listOwned(100, "alice").isEmpty());
+            assertTrue(store.listOwned(100, "carol").isEmpty());
             assertTrue(store.listOwned(100, "dana").isEmpty());
-            assertTrue(store.listOwned(100, "bob").isEmpty());
         }
     }
 }

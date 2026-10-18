@@ -13,7 +13,7 @@ public final class TestSchemas {
     private TestSchemas() { }
 
     public static void install(Path packageRoot) throws IOException {
-        Path source = Paths.get("packages/default/schemas").toAbsolutePath().normalize();
+        Path source = Paths.get("schemas").toAbsolutePath().normalize();
         Path destination = packageRoot.toAbsolutePath().normalize().resolve("schemas");
         try (Stream<Path> paths = Files.walk(source)) {
             for (Path path : (Iterable<Path>) paths::iterator) {

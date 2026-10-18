@@ -38,6 +38,7 @@ public final class PackageValidator {
     private final att.template.DefaultBuiltInProvider builtIns = new att.template.DefaultBuiltInProvider();
     private static final Set<String> BUILT_INS = new att.template.DefaultBuiltInProvider().names();
     private final Path projectRoot;
+    private final Path runtimeConfigPath;
     private final ThreadLocal<Path> validationSourceDirectories = new ThreadLocal<Path>();
     private final ThreadLocal<Boolean> legacyDbSqlFileAllowed = new ThreadLocal<Boolean>();
     private final FrameworkConfig global;
@@ -46,11 +47,20 @@ public final class PackageValidator {
     private att.flow.FlowRegistry flows;
 
     public PackageValidator(Path projectRoot, FrameworkConfig global) {
-        this(projectRoot, global, java.io.File.separatorChar == '\\');
+        this(projectRoot, global, att.config.RuntimeConfigPath.infer(projectRoot, global), java.io.File.separatorChar == '\\');
+    }
+
+    public PackageValidator(Path projectRoot, FrameworkConfig global, Path runtimeConfigPath) {
+        this(projectRoot, global, runtimeConfigPath, java.io.File.separatorChar == '\\');
     }
 
     PackageValidator(Path projectRoot, FrameworkConfig global, boolean windows) {
+        this(projectRoot, global, att.config.RuntimeConfigPath.infer(projectRoot, global), windows);
+    }
+
+    private PackageValidator(Path projectRoot, FrameworkConfig global, Path runtimeConfigPath, boolean windows) {
         this.projectRoot = projectRoot; this.global = global; this.windows = windows;
+        this.runtimeConfigPath = runtimeConfigPath.toAbsolutePath().normalize();
         this.expressionEngine = att.template.UnifiedTemplateEngine.forProject(projectRoot);
         this.fileExpressions = new att.template.FileExpressionResolver(projectRoot);
     }
@@ -114,8 +124,10 @@ public final class PackageValidator {
     public ValidationSummary validate(ExecutionOptions options) throws Exception {
         skippedWindowsShellExecutableChecks.clear();
         try {
-            Path configured = options.configPath().isAbsolute() ? options.configPath() : projectRoot.resolve(options.configPath());
-            if (!att.core.IdentifierValidator.canonicalPath(configured, "configuration").startsWith(att.core.IdentifierValidator.canonicalPath(projectRoot, "package root")) || Files.isSymbolicLink(configured)) throw new IllegalArgumentException("Configuration escapes package root or is a symbolic link: " + options.configPath());
+            Path configured = options.configPath().toAbsolutePath().normalize();
+            if (!Files.isRegularFile(configured, java.nio.file.LinkOption.NOFOLLOW_LINKS)
+                    || Files.isSymbolicLink(configured) || !Files.isReadable(configured))
+                throw new IllegalArgumentException("Shared runtime configuration is missing, unreadable, or a symbolic link: " + options.configPath());
         } catch (Exception e) { return invalid(options.validationScope(), Collections.singletonList(diagnostic(DiagnosticCodes.PATH_INVALID, e, null))); }
         List<Diagnostic> diagnostics = new ArrayList<Diagnostic>();
         try { att.core.ExecutionIdentityFormat.validateRunIdFormat(global.run().runIdFormat()); }
@@ -222,7 +234,8 @@ public final class PackageValidator {
     }
 
     private void validateDebugSidecars(List<Diagnostic> diagnostics, StageTemplateLoader loader) throws Exception {
-        att.debug.DebugEngine debug = new att.debug.DebugEngine(projectRoot, global);
+        att.debug.DebugEngine debug = new att.debug.DebugEngine(projectRoot, runtimeConfigPath, global,
+                new att.exec.IbmMqClientFactory(), true, Collections.<String>emptyList(), Collections.<String>emptyList());
         for (String id : global.tools().keySet()) validateDebugSidecar(debug, "tool", id, diagnostics);
         for (String id : loader.paths()) validateDebugSidecar(debug, "template", id, diagnostics);
         for (att.flow.FlowDefinition flow : flows.all()) validateDebugSidecar(debug, "flow", flow.id(), diagnostics);
@@ -721,25 +734,9 @@ public final class PackageValidator {
     @SuppressWarnings("unchecked")
     private void validatePackageLayout(List<Diagnostic> diagnostics) {
         // Launchers live at ATT_HOME; package roots may be external or mounted independently.
-        for (String required : new String[]{"config/config.yaml", "testcase", "templates", "tools", "schemas/catalog.yaml"}) {
-            Path path = projectRoot.resolve(required);
-            if (!Files.exists(path)) diagnostics.add(diagnostic(DiagnosticCodes.PACKAGE_INVALID, new IllegalArgumentException("Missing required package path: " + required), path));
-        }
+        // Package roots contain business resources only. Config and schemas are ATT runtime resources.
         try { att.validation.SchemaFiles.validateCatalog(projectRoot); }
-        catch (Exception error) { diagnostics.add(diagnostic(DiagnosticCodes.PACKAGE_INVALID, error, projectRoot.resolve("schemas/catalog.yaml"))); }
-        Path catalog = projectRoot.resolve("schemas/catalog.yaml");
-        if (Files.isRegularFile(catalog)) try {
-            Object loaded = att.config.YamlSupport.parser().load(new String(Files.readAllBytes(catalog), java.nio.charset.StandardCharsets.UTF_8));
-            if (!(loaded instanceof Map) || !"att-schema-catalog/v3.0".equals(String.valueOf(((Map<?, ?>) loaded).get("schemaVersion")))) throw new IllegalArgumentException("Invalid schema catalog version");
-            Object schemas = ((Map<?, ?>) loaded).get("schemas"); if (!(schemas instanceof Map)) throw new IllegalArgumentException("Schema catalog requires schemas map");
-            for (Object value : ((Map<?, ?>) schemas).values()) {
-                Path schema = projectRoot.resolve("schemas").resolve(String.valueOf(value)).normalize();
-                if (!schema.startsWith(projectRoot.resolve("schemas").normalize()) || !Files.isRegularFile(schema) || Files.isSymbolicLink(schema)) throw new IllegalArgumentException("Missing/unsafe schema file: " + value);
-                if (schema.getFileName().toString().endsWith(".json")) att.validation.JsonSchemaVerifier.compile(schema);
-                else if (schema.getFileName().toString().endsWith(".xsd")) { javax.xml.validation.SchemaFactory factory = javax.xml.validation.SchemaFactory.newInstance(javax.xml.XMLConstants.W3C_XML_SCHEMA_NS_URI); factory.setProperty(javax.xml.XMLConstants.ACCESS_EXTERNAL_DTD, ""); factory.setProperty(javax.xml.XMLConstants.ACCESS_EXTERNAL_SCHEMA, ""); factory.newSchema(schema.toFile()); }
-                else throw new IllegalArgumentException("Unsupported catalog schema file: " + value);
-            }
-        } catch (Exception e) { diagnostics.add(diagnostic(DiagnosticCodes.PACKAGE_INVALID, e, catalog)); }
+        catch (Exception error) { diagnostics.add(diagnostic(DiagnosticCodes.PACKAGE_INVALID, error, null)); }
         try {
             Path output = projectRoot.resolve(global.outputDirectory()).normalize();
             Path ancestor = output; while (ancestor != null && !Files.exists(ancestor)) ancestor = ancestor.getParent();

@@ -59,6 +59,8 @@ public class WorkerRequest {
     public Integer inspectionOffset;
     public Integer inspectionLimit;
     public String expectedRevisionDigest;
+    /** Server-computed identity for the matching Local Runtime's embedded schemas. */
+    public String expectedSchemaRegistryDigest;
     public List<String> safeTextSources;
     /** Exact canonical external script files approved by the Server for this package. */
     public List<String> externalTextSources;

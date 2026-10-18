@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" elementFormDefault="unqualified">
+  <xs:simpleType name="valueKind">
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="string"/>
+      <xs:enumeration value="integer"/>
+      <xs:enumeration value="decimal"/>
+      <xs:enumeration value="boolean"/>
+      <xs:enumeration value="null"/>
+      <xs:enumeration value="map"/>
+      <xs:enumeration value="list"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <xs:complexType name="valueType" mixed="true">
+    <xs:choice minOccurs="0" maxOccurs="unbounded">
+      <xs:element ref="entry"/>
+      <xs:element ref="item"/>
+    </xs:choice>
+    <xs:attribute name="type" type="valueKind" use="required"/>
+  </xs:complexType>
+
+  <xs:element name="entry">
+    <xs:complexType mixed="true">
+      <xs:complexContent mixed="true">
+        <xs:extension base="valueType">
+          <xs:attribute name="name" type="xs:string" use="required"/>
+        </xs:extension>
+      </xs:complexContent>
+    </xs:complexType>
+  </xs:element>
+  <xs:element name="item" type="valueType"/>
+
+  <xs:complexType name="fieldType" mixed="true">
+    <xs:complexContent mixed="true">
+      <xs:extension base="valueType">
+        <xs:attribute name="name" type="xs:string" use="required"/>
+      </xs:extension>
+    </xs:complexContent>
+  </xs:complexType>
+
+  <xs:element name="testcases">
+    <xs:complexType>
+      <xs:sequence>
+        <xs:element name="group" minOccurs="0" maxOccurs="unbounded">
+          <xs:complexType>
+            <xs:sequence>
+              <xs:element name="case" minOccurs="0" maxOccurs="unbounded">
+                <xs:complexType>
+                  <xs:sequence>
+                    <xs:element name="tags">
+                      <xs:complexType><xs:sequence><xs:element name="tag" type="xs:string" minOccurs="0" maxOccurs="unbounded"/></xs:sequence></xs:complexType>
+                    </xs:element>
+                    <xs:element name="data">
+                      <xs:complexType><xs:sequence><xs:element name="field" type="fieldType" minOccurs="0" maxOccurs="unbounded"/></xs:sequence></xs:complexType>
+                    </xs:element>
+                    <xs:element name="stages">
+                      <xs:complexType>
+                        <xs:sequence>
+                          <xs:element name="stage" minOccurs="0" maxOccurs="unbounded">
+                            <xs:complexType><xs:sequence><xs:element name="field" type="fieldType" minOccurs="0" maxOccurs="unbounded"/></xs:sequence><xs:attribute name="key" type="xs:string" use="required"/></xs:complexType>
+                          </xs:element>
+                        </xs:sequence>
+                      </xs:complexType>
+                    </xs:element>
+                  </xs:sequence>
+                  <xs:attribute name="rowCaseId" type="xs:string" use="required"/>
+                </xs:complexType>
+              </xs:element>
+            </xs:sequence>
+            <xs:attribute name="id" type="xs:string" use="required"/>
+            <xs:attribute name="sheet" type="xs:string" use="required"/>
+          </xs:complexType>
+        </xs:element>
+      </xs:sequence>
+      <xs:attribute name="schemaVersion" use="required" fixed="att-testcases/v2.4"/>
+      <xs:attribute name="workbookId" type="xs:string" use="required"/>
+    </xs:complexType>
+  </xs:element>
+</xs:schema>

@@ -20,6 +20,10 @@ import java.nio.file.Paths;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.nio.file.StandardOpenOption;
+import java.nio.file.attribute.FileTime;
+import java.nio.channels.FileChannel;
+import java.nio.channels.FileLock;
 import org.junit.jupiter.api.io.TempDir;
 import java.util.ArrayList;
 import java.util.List;
@@ -31,13 +35,133 @@ class WorkerMainTest {
     @TempDir Path temp;
     private final ObjectMapper mapper=new ObjectMapper();
 
+    @Test void repeatedWorkerJvmsShareOneTrustedSchemaCacheAndRepairPartialExtraction() throws Exception {
+        Path temporary=temp.resolve("trusted-schema-temp");
+        Files.createDirectories(temporary);
+        String javaExecutable=Paths.get(System.getProperty("java.home"),"bin",isWindows()?"java.exe":"java").toString();
+        String classpath=System.getProperty("java.class.path");
+
+        Process first=new ProcessBuilder(javaExecutable,"-Djava.io.tmpdir="+temporary.toAbsolutePath(),"-cp",classpath,
+                TrustedSchemaCacheProcess.class.getName()).start();
+        String firstOut=read(first.getInputStream());
+        String firstErr=read(first.getErrorStream());
+        assertEquals(0,first.waitFor(),firstErr+"\n"+firstOut);
+
+        Path cacheBase;
+        try(java.util.stream.Stream<Path> paths=Files.list(temporary)) {
+            cacheBase=paths.filter(path->path.getFileName().toString().startsWith("att-trusted-schema-cache-"))
+                    .findFirst().orElseThrow(()->new AssertionError("Worker did not create the shared trusted schema cache"));
+        }
+        Path cacheRoot;
+        try(java.util.stream.Stream<Path> paths=Files.list(cacheBase)) {
+            cacheRoot=paths.filter(Files::isDirectory).findFirst().orElseThrow(()->new AssertionError("Trusted schema cache root is missing"));
+        }
+        Path catalog=cacheRoot.resolve("schemas/catalog.yaml");
+        assertTrue(Files.isRegularFile(catalog));
+        Files.delete(catalog); // Simulate a Worker being terminated during extraction.
+
+        Process second=new ProcessBuilder(javaExecutable,"-Djava.io.tmpdir="+temporary.toAbsolutePath(),"-cp",classpath,
+                TrustedSchemaCacheProcess.class.getName()).start();
+        Process third=new ProcessBuilder(javaExecutable,"-Djava.io.tmpdir="+temporary.toAbsolutePath(),"-cp",classpath,
+                TrustedSchemaCacheProcess.class.getName()).start();
+        String secondErr=read(second.getErrorStream());
+        String thirdErr=read(third.getErrorStream());
+        assertEquals(0,second.waitFor(),secondErr);
+        assertEquals(0,third.waitFor(),thirdErr);
+        assertTrue(Files.isRegularFile(catalog),"A following Worker must repair an interrupted schema extraction");
+        try(java.util.stream.Stream<Path> paths=Files.list(cacheBase)) {
+            assertEquals(1,paths.filter(Files::isDirectory).count(),"Worker JVMs must reuse one schema tree per packaged schema version");
+        }
+
+        Path protectedOld=cacheBase.resolve(repeated('0',64));
+        Path idleOld=cacheBase.resolve(repeated('1',64));
+        Path rollbackCache=cacheBase.resolve(repeated('2',64));
+        for(Path old:new Path[]{protectedOld,idleOld,rollbackCache}) {
+            Files.createDirectories(old.resolve("schemas"));
+            Files.write(old.resolve("schemas/placeholder"),new byte[]{1});
+            Files.createFile(old.resolve(".cache-use.lock"));
+        }
+        Files.setLastModifiedTime(protectedOld,FileTime.fromMillis(946684800000L));
+        Files.setLastModifiedTime(idleOld,FileTime.fromMillis(946684801000L));
+        Files.setLastModifiedTime(rollbackCache,FileTime.fromMillis(946684802000L));
+        try(FileChannel leaseChannel=FileChannel.open(protectedOld.resolve(".cache-use.lock"),StandardOpenOption.READ,StandardOpenOption.WRITE);
+            FileLock lease=leaseChannel.lock(0L,Long.MAX_VALUE,true)) {
+            Process cleanup=new ProcessBuilder(javaExecutable,"-Djava.io.tmpdir="+temporary.toAbsolutePath(),"-cp",classpath,
+                    TrustedSchemaCacheProcess.class.getName()).start();
+            String cleanupErr=read(cleanup.getErrorStream());
+            assertEquals(0,cleanup.waitFor(),cleanupErr);
+            assertTrue(Files.exists(protectedOld),"A cache leased by an older active Worker must not be deleted");
+            assertTrue(Files.exists(rollbackCache),"The immediately previous cache remains available for rollback");
+            assertFalse(Files.exists(idleOld),"An older unleased cache should be pruned");
+        }
+        Process afterWorkerExit=new ProcessBuilder(javaExecutable,"-Djava.io.tmpdir="+temporary.toAbsolutePath(),"-cp",classpath,
+                TrustedSchemaCacheProcess.class.getName()).start();
+        String cleanupAfterExitErr=read(afterWorkerExit.getErrorStream());
+        assertEquals(0,afterWorkerExit.waitFor(),cleanupAfterExitErr);
+        assertFalse(Files.exists(protectedOld),"An old cache becomes eligible after its Worker releases the OS lease");
+        try(java.util.stream.Stream<Path> paths=Files.list(cacheBase)) {
+            assertEquals(2,paths.filter(path->Files.isDirectory(path,java.nio.file.LinkOption.NOFOLLOW_LINKS)).count(),
+                    "The active and immediately previous registry caches should remain");
+        }
+    }
+
+    @Test void repairsAnInterruptedFirstExtractionWithoutLease() throws Exception {
+        Path temporary=Files.createDirectories(temp.resolve("interrupted-trusted-schema-temp"));
+        String javaExecutable=Paths.get(System.getProperty("java.home"),"bin",isWindows()?"java.exe":"java").toString();
+        String classpath=System.getProperty("java.class.path");
+        Process first=new ProcessBuilder(javaExecutable,"-Djava.io.tmpdir="+temporary.toAbsolutePath(),"-cp",classpath,
+                TrustedSchemaCacheProcess.class.getName()).start();
+        String firstOut=read(first.getInputStream());
+        String firstErr=read(first.getErrorStream());
+        assertEquals(0,first.waitFor(),firstErr+"\n"+firstOut);
+
+        Path cacheBase;
+        try(java.util.stream.Stream<Path> paths=Files.list(temporary)) {
+            cacheBase=paths.filter(path->path.getFileName().toString().startsWith("att-trusted-schema-cache-"))
+                    .findFirst().orElseThrow(()->new AssertionError("Worker did not create the shared trusted schema cache"));
+        }
+        Path cacheRoot;
+        try(java.util.stream.Stream<Path> paths=Files.list(cacheBase)) {
+            cacheRoot=paths.filter(path->path.getFileName().toString().matches("[0-9a-f]{64}"))
+                    .findFirst().orElseThrow(()->new AssertionError("Trusted schema cache root is missing"));
+        }
+        Files.delete(cacheRoot.resolve(".cache-use.lock"));
+        Files.delete(cacheRoot.resolve("schemas/catalog.yaml")); // Simulate termination before lease publication.
+
+        Process repair=new ProcessBuilder(javaExecutable,"-Djava.io.tmpdir="+temporary.toAbsolutePath(),"-cp",classpath,
+                TrustedSchemaCacheProcess.class.getName()).start();
+        String repairOut=read(repair.getInputStream());
+        String repairErr=read(repair.getErrorStream());
+        assertEquals(0,repair.waitFor(),repairErr+"\n"+repairOut);
+        assertTrue(Files.isRegularFile(cacheRoot.resolve("schemas/catalog.yaml")),
+                "A fresh Worker must replace an incomplete fingerprint directory that has no lease");
+        assertTrue(Files.isRegularFile(cacheRoot.resolve(".cache-use.lock")));
+    }
+
+    @Test void workerFailsClosedWhenServerAndEmbeddedRegistryIdentitiesDiffer() throws Exception {
+        Path temporary=Files.createDirectories(temp.resolve("registry-handshake-temp"));
+        String javaExecutable=Paths.get(System.getProperty("java.home"),"bin",isWindows()?"java.exe":"java").toString();
+        String classpath=System.getProperty("java.class.path");
+        Process worker=new ProcessBuilder(javaExecutable,"-Djava.io.tmpdir="+temporary.toAbsolutePath(),"-cp",classpath,
+                WorkerMain.class.getName()).start();
+        String request="{\"protocolVersion\":\"att-worker/v1\",\"jobId\":\"schema-check\",\"command\":\"inspect\","
+                +"\"packageRoot\":\".\",\"inspectionAction\":\"revision\",\"expectedSchemaRegistryDigest\":\""+repeated('f',64)+"\"}";
+        worker.getOutputStream().write(request.getBytes(StandardCharsets.UTF_8));
+        worker.getOutputStream().close();
+        String stdout=read(worker.getInputStream());
+        String stderr=read(worker.getErrorStream());
+        assertEquals(2,worker.waitFor(),stderr+"\n"+stdout);
+        assertTrue(stdout.contains("WORKER_SCHEMA_REGISTRY_MISMATCH"),stdout);
+        assertFalse(stdout.contains("schemas/")||stdout.contains("/tmp/"),"Registry mismatch diagnostics must not expose paths");
+    }
+
     @Test void terminatingWorkerStopsAnActiveCommandBackedTool() throws Exception {
         Path root=temp.resolve("worker-tool-termination");
         Files.createDirectories(root.resolve("config"));
         Files.createDirectories(root.resolve("templates/SLOW"));
         Files.createDirectories(root.resolve("testcase"));
         Files.createDirectories(root.resolve("tools"));
-        copyTree(Paths.get("packages/default/schemas"),root.resolve("schemas"));
+        copyTree(Paths.get("schemas"),root.resolve("schemas"));
         Path parentStarted=root.resolve("tool-parent-started.marker");
         Path started=root.resolve("tool-descendant-started.marker"), completed=root.resolve("tool-descendant-completed.marker");
         String javaExecutable=Paths.get(System.getProperty("java.home"),"bin",isWindows()?"java.exe":"java").toString();
@@ -92,7 +216,7 @@ class WorkerMainTest {
         Files.createDirectories(root.resolve("templates/SIMPLE"));
         Files.createDirectories(root.resolve("testcase"));
         Files.createDirectories(root.resolve("load"));
-        copyTree(Paths.get("packages/default/schemas"),root.resolve("schemas"));
+        copyTree(Paths.get("schemas"),root.resolve("schemas"));
         Path config=root.resolve("config/config.yaml");
         Path template=root.resolve("templates/SIMPLE/template.yaml");
         Path scenario=root.resolve("load/long-running.yaml");
@@ -180,7 +304,7 @@ class WorkerMainTest {
     @Test void workerAndDirectApiReturnEquivalentDebugOutcomesAndKeepStdoutMachineReadable() throws Exception {
         Path root=temp.resolve("package"); Files.createDirectories(root.resolve("config")); Files.createDirectories(root.resolve("templates/SIMPLE"));
         Files.createDirectories(root.resolve("testcase"));
-        copyTree(Paths.get("packages/default/schemas"),root.resolve("schemas"));
+        copyTree(Paths.get("schemas"),root.resolve("schemas"));
         Files.write(root.resolve("config/config.yaml"),("schemaVersion: att-config/v2.11\nenvironment: SIT\ntemplates: {root: templates}\ntestcase: {root: testcase}\ntools: {}\n").getBytes(StandardCharsets.UTF_8));
         Files.write(root.resolve("templates/SIMPLE/template.yaml"),("schemaVersion: att-template/v3.4\nname: SIMPLE\ndescription: worker parity\nactions: {show: {type: log, message: 'amount=${EXEC.INPUT.amount}|seed=${EXEC.VARS.seed}'}}\n").getBytes(StandardCharsets.UTF_8));
         Files.write(root.resolve("templates/SIMPLE/debug.yaml"),("schemaVersion: att-debug/v1.2\ninputs: {amount: 1}\nvars: {seed: default}\n").getBytes(StandardCharsets.UTF_8));
@@ -231,7 +355,7 @@ class WorkerMainTest {
         Path root=temp.resolve("debug-overrides-package");
         Files.createDirectories(root.resolve("config")); Files.createDirectories(root.resolve("templates/flows/debug/echo"));
         Files.createDirectories(root.resolve("templates")); Files.createDirectories(root.resolve("testcase"));
-        copyTree(Paths.get("packages/default/schemas"),root.resolve("schemas"));
+        copyTree(Paths.get("schemas"),root.resolve("schemas"));
         Files.write(root.resolve("config/config.yaml"),("schemaVersion: att-config/v2.11\nenvironment: SIT\n"
                 + "templates: {root: templates}\ntestcase: {root: testcase}\ntools:\n"
                 + "  echo:\n    name: Echo\n    description: Test echo tool\n    command: [echo, '${value}']\n"
@@ -303,7 +427,7 @@ class WorkerMainTest {
     @Test void workerAndDirectApiReturnEquivalentSmallLoadOutcomes() throws Exception {
         Path root=temp.resolve("load-package"); Files.createDirectories(root.resolve("config")); Files.createDirectories(root.resolve("templates/SIMPLE"));
         Files.createDirectories(root.resolve("testcase")); Files.createDirectories(root.resolve("load"));
-        copyTree(Paths.get("packages/default/schemas"),root.resolve("schemas"));
+        copyTree(Paths.get("schemas"),root.resolve("schemas"));
         Files.write(root.resolve("config/config.yaml"),("schemaVersion: att-config/v2.11\nenvironment: SIT\ntemplates: {root: templates}\ntestcase: {root: testcase}\ntools: {}\n").getBytes(StandardCharsets.UTF_8));
         Files.write(root.resolve("templates/SIMPLE/template.yaml"),("schemaVersion: att-template/v3.4\nname: SIMPLE\ndescription: worker load parity\nactions: {show: {type: log, message: worker-load-parity}}\n").getBytes(StandardCharsets.UTF_8));
         Files.write(root.resolve("load/scenario.yaml"),("schemaVersion: att-load/v1.6\nworkloads:\n- id: worker-parity\n  target: {type: template, id: SIMPLE}\n  load: {users: 1, duration: 20ms}\n").getBytes(StandardCharsets.UTF_8));
@@ -333,12 +457,12 @@ class WorkerMainTest {
 
     @Test void cliWorkerAndDirectApiReturnEquivalentRunOutcomes() throws Exception {
         Path root=temp.resolve("run-package"); Files.createDirectories(root.resolve("config/tools")); Files.createDirectories(root.resolve("templates")); Files.createDirectories(root.resolve("testcase")); Files.createDirectories(root.resolve("tools"));
-        copyTree(Paths.get("packages/default/schemas"),root.resolve("schemas"));
+        copyTree(Paths.get("schemas"),root.resolve("schemas"));
         Files.copy(Paths.get("packages/default/testcase/quick_start.xlsx"),root.resolve("testcase/quick_start.xlsx"));
         Files.copy(Paths.get("packages/default/testcase/quick_start.yaml"),root.resolve("testcase/quick_start.yaml"));
         Files.copy(Paths.get("packages/default/testcase/quick_start.xml"),root.resolve("testcase/quick_start.xml"));
         copyTree(Paths.get("packages/default/templates/QUICK_START"),root.resolve("templates/QUICK_START"));
-        Files.copy(Paths.get("packages/default/config/tools/sample.yaml"),root.resolve("config/tools/sample.yaml"));
+        Files.copy(Paths.get("config/tools/sample.yaml"),root.resolve("config/tools/sample.yaml"));
         Files.copy(Paths.get("packages/default/tools/get_ac_date.sh"),root.resolve("tools/get_ac_date.sh"));
         Path dispatcher=root.resolve("tools/tool_group_dispatch.sh"); Files.copy(Paths.get("packages/default/tools/tool_group_dispatch.sh"),dispatcher);
         dispatcher.toFile().setExecutable(true,true); root.resolve("tools/get_ac_date.sh").toFile().setExecutable(true,true);
@@ -396,4 +520,5 @@ class WorkerMainTest {
     private static boolean isWindowsJava8() { return isWindows() && "1.8".equals(System.getProperty("java.specification.version")); }
     private static String yamlQuote(Object value) { return "'"+String.valueOf(value).replace("'", "''")+"'"; }
     private static String read(InputStream stream) throws Exception { ByteArrayOutputStream out=new ByteArrayOutputStream(); byte[] buffer=new byte[4096]; int n; while((n=stream.read(buffer))>=0)out.write(buffer,0,n); return new String(out.toByteArray(),StandardCharsets.UTF_8); }
+    private static String repeated(char character,int count) { StringBuilder value=new StringBuilder(count); for(int index=0;index<count;index++)value.append(character); return value.toString(); }
 }

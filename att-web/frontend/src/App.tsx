@@ -2,7 +2,7 @@ import { lazy, Suspense, useCallback, useEffect, useReducer, useRef, useState } 
 import { api } from './api';
 import { AppShell, useAppShellContext } from './AppShell';
 import { DashboardPage } from './DashboardPage';
-import { useNavigationGuard, useRouteState } from './router';
+import { formatRoute, useNavigationGuard, useRouteState, type AppRoute } from './router';
 import { appReducer, initialAppState, latestServerJobWindow, serverCapabilities } from './state';
 import { RunPage } from './features/run/RunPage';
 import { ExplorerPage } from './features/explorer/ExplorerPage';
@@ -15,6 +15,7 @@ import { SettingsPage } from './SettingsPage';
 import { ConfigurationWorkspace } from './features/explorer/ConfigurationWorkspace';
 import { QuickLoadPage } from './features/load/QuickLoadPage';
 import { LoadCatalogPage } from './features/load/LoadCatalogPage';
+import { LoadResourceDetailPage } from './features/load/LoadResourceDetailPage';
 import type { ValidatedScheduleIntent } from './features/schedules/types';
 
 const ScheduledLoadPage = lazy(() => import('./features/schedules/ScheduledLoadPage').then(module => ({ default: module.ScheduledLoadPage })));
@@ -30,15 +31,10 @@ function ExplorerRouteView({ packageId, resourceRoute, inlineLoadEnabled, schedu
   resourceRoute: ExplorerPageProps['resourceRoute'];
   inlineLoadEnabled: boolean;
   schedulingEnabled: boolean;
-  onSchedule(input: ValidatedScheduleIntent): void;
+  onSchedule(input: ValidatedScheduleIntent): boolean;
 }) {
   const workspace = useAppShellContext();
   const navigation = useNavigationGuard();
-  const [environments, setEnvironments] = useState<string[]>([]);
-  const [environmentState, setEnvironmentState] = useState<'loading' | 'ready' | 'error'>('loading');
-  const [environmentReload, setEnvironmentReload] = useState(0);
-  const selectedEnvironmentRef = useRef(workspace.selectedEnvironment);
-  selectedEnvironmentRef.current = workspace.selectedEnvironment;
   const onResourceRouteChange = useCallback((resource: ExplorerPageProps['resourceRoute']) => {
     navigation.navigate(resource
       ? { kind: 'package', packageId, resource }
@@ -47,48 +43,33 @@ function ExplorerRouteView({ packageId, resourceRoute, inlineLoadEnabled, schedu
   const onJobAccepted = useCallback((jobId: string) => {
     workspace.onJobAccepted({ jobId, packageId });
   }, [packageId, workspace.onJobAccepted]);
-  const onOpenQuickLoad = useCallback((identity: { packageId: string; type: string; resourceId: string }) => {
-    navigation.navigate({ kind: 'quick-load', packageId: identity.packageId, target: { type: identity.type, resourceId: identity.resourceId }, environment: workspace.selectedEnvironment });
+  const onOpenQuickLoad = useCallback((identity: { packageId: string; type: string; resourceId: string; logicalId?: string }) => {
+    navigation.navigate({ kind: 'quick-load', packageId: identity.packageId,
+      target: { type: identity.type, resourceId: identity.resourceId, logicalId: identity.logicalId }, environment: workspace.selectedEnvironment });
   }, [navigation.navigate, workspace.selectedEnvironment]);
-  const onOpenConfiguration = useCallback((identity: { packageId: string }) => {
-    navigation.navigate({ kind: 'configuration', packageId: identity.packageId, environment: workspace.selectedEnvironment, tab: 'effective' });
+  const onRunTarget = useCallback((identity: { packageId: string; type: string; resourceId: string; logicalId?: string }) => {
+    navigation.navigate({ kind: 'run', packageId: identity.packageId,
+      target: { type: identity.type, resourceId: identity.resourceId, logicalId: identity.logicalId }, environment: workspace.selectedEnvironment });
   }, [navigation.navigate, workspace.selectedEnvironment]);
+  const onRunBatch = useCallback(() => {
+    navigation.navigate({ kind: 'run', packageId, environment: workspace.selectedEnvironment, batch: true });
+  }, [navigation.navigate, packageId, workspace.selectedEnvironment]);
   const onScheduleDebug = useCallback<NonNullable<ExplorerPageProps['onScheduleDebug']>>((input) => {
-    onSchedule(input);
+    return onSchedule(input);
   }, [onSchedule]);
-
-  useEffect(() => {
-    const controller = new AbortController();
-    setEnvironmentState('loading');
-    api.getDeclaredConfiguration(packageId, controller.signal).then(configuration => {
-      if (controller.signal.aborted) return;
-      const names = (configuration.environments || []).filter(item => item.name && item.state === 'active').map(item => item.name);
-      setEnvironments(names);
-      setEnvironmentState('ready');
-      if (selectedEnvironmentRef.current && !names.includes(selectedEnvironmentRef.current)) {
-        workspace.onEnvironmentChange('');
-      }
-    }).catch(() => {
-      if (!controller.signal.aborted) { setEnvironments([]); setEnvironmentState('error'); }
-    });
-    return () => controller.abort();
-  }, [packageId, environmentReload, workspace.onEnvironmentChange]);
 
   return <ExplorerPage key={packageId}
     api={api}
     packageId={packageId}
     resourceRoute={resourceRoute}
     environment={workspace.selectedEnvironment}
-    environments={environments}
-    environmentState={environmentState}
     registerUnsavedChanges={navigation.registerUnsavedChanges}
     onResourceRouteChange={onResourceRouteChange}
-    onEnvironmentChange={workspace.onEnvironmentChange}
-    onRetryEnvironments={() => setEnvironmentReload(value => value + 1)}
     onJobAccepted={onJobAccepted}
+    onRunTarget={target => onRunTarget({ packageId, ...target })}
+    onRunBatch={onRunBatch}
     onOpenQuickLoad={inlineLoadEnabled ? onOpenQuickLoad : undefined}
     onScheduleDebug={schedulingEnabled ? onScheduleDebug : undefined}
-    onOpenConfiguration={onOpenConfiguration}
     onOpenConfigurationFile={(path, origin, sourceReference) => navigation.navigate({ kind: 'configuration', packageId, environment: workspace.selectedEnvironment, filePath: path, fileOrigin: origin, sourceReference, tab: 'source' })}
   />;
 }
@@ -207,19 +188,26 @@ function QuickLoadRouteView({ route, inlineLoadEnabled, schedulingEnabled, onSch
   const [environments, setEnvironments] = useState<string[]>([]);
   const [environmentState, setEnvironmentState] = useState<'loading' | 'ready' | 'error'>('loading');
   const [environmentReload, setEnvironmentReload] = useState(0);
+  const [environmentNotice, setEnvironmentNotice] = useState('');
   useEffect(() => {
     const controller = new AbortController();
+    setEnvironmentState('loading'); setEnvironmentNotice('');
     api.getDeclaredConfiguration(route.packageId, controller.signal).then(configuration => {
       if (controller.signal.aborted) return;
-      setEnvironments((configuration.environments || []).filter(item => item.name && item.state === 'active').map(item => item.name));
+      const names = (configuration.environments || []).filter(item => item.name && item.state === 'active').map(item => item.name);
+      setEnvironments(names);
       setEnvironmentState('ready');
+      if (selectedEnvironment && !names.includes(selectedEnvironment)) {
+        setEnvironmentNotice(`Environment ${selectedEnvironment} is not an active profile in ${route.packageId}; Package default is selected.`);
+        navigation.navigate({ ...route, environment: '' });
+      }
     }).catch(() => { if (!controller.signal.aborted) { setEnvironments([]); setEnvironmentState('error'); } });
     return () => controller.abort();
   }, [route.packageId, environmentReload]);
   const onEnvironmentChange = useCallback((environment: string) => {
-    workspace.onEnvironmentChange(environment);
-    navigation.navigate({ ...route, environment });
-  }, [navigation.navigate, route, workspace.onEnvironmentChange]);
+    const accepted = navigation.navigate({ ...route, environment });
+    if (accepted) setEnvironmentNotice('');
+  }, [navigation.navigate, route]);
   const onCancel = useCallback(() => navigation.navigate(route.target
     ? { kind: 'package', packageId: route.packageId, resource: route.target }
     : { kind: 'load' }), [navigation.navigate, route.packageId, route.target]);
@@ -238,11 +226,52 @@ function QuickLoadRouteView({ route, inlineLoadEnabled, schedulingEnabled, onSch
     schedulingEnabled={schedulingEnabled}
     onRetryEnvironments={() => setEnvironmentReload(value => value + 1)}
     onEnvironmentChange={onEnvironmentChange}
+    environmentNotice={environmentNotice}
     onJobAccepted={onJobAccepted}
     onSchedule={onSchedule}
     onCancel={onCancel}
     registerUnsavedChanges={navigation.registerUnsavedChanges}
   />;
+}
+
+function LoadResourceRouteView({ route, inlineLoadEnabled }: {
+  route: Extract<ReturnType<typeof useRouteState>['route'], { kind: 'load-resource' }>;
+  inlineLoadEnabled: boolean;
+}) {
+  const workspace = useAppShellContext();
+  const navigation = useNavigationGuard();
+  const selectedEnvironment = route.environment ?? workspace.selectedEnvironment;
+  const [environments, setEnvironments] = useState<string[]>([]);
+  const [environmentState, setEnvironmentState] = useState<'loading' | 'ready' | 'error'>('loading');
+  const [environmentReload, setEnvironmentReload] = useState(0);
+  const [environmentNotice, setEnvironmentNotice] = useState('');
+  useEffect(() => {
+    const controller = new AbortController();
+    setEnvironmentState('loading'); setEnvironmentNotice('');
+    api.getDeclaredConfiguration(route.packageId, controller.signal).then(configuration => {
+      if (controller.signal.aborted) return;
+      const names = (configuration.environments || []).filter(item => item.name && item.state === 'active').map(item => item.name);
+      setEnvironments(names); setEnvironmentState('ready');
+      if (selectedEnvironment && !names.includes(selectedEnvironment)) {
+        setEnvironmentNotice(`Environment ${selectedEnvironment} is not an active profile in ${route.packageId}; Package default is selected.`);
+        workspace.onEnvironmentChange('');
+        navigation.navigate({ ...route, environment: '' });
+      }
+    }).catch(() => { if (!controller.signal.aborted) { setEnvironments([]); setEnvironmentState('error'); } });
+    return () => controller.abort();
+  }, [route.packageId, environmentReload]);
+  const onEnvironmentChange = useCallback((environment: string) => {
+    setEnvironmentNotice('');
+    workspace.onEnvironmentChange(environment);
+    navigation.navigate({ ...route, environment });
+  }, [navigation.navigate, route, workspace.onEnvironmentChange]);
+  return <LoadResourceDetailPage api={api} packageId={route.packageId} resourceId={route.resourceId}
+    environment={selectedEnvironment} environments={environments} environmentState={environmentState}
+    environmentNotice={environmentNotice} onRetryEnvironments={() => setEnvironmentReload(value => value + 1)} inlineLoadEnabled={inlineLoadEnabled}
+    onEnvironmentChange={onEnvironmentChange}
+    onBack={() => navigation.navigate(route.returnTo || '#/advanced-load')}
+    onQuickLoad={(packageId, detail) => navigation.navigate({ kind: 'quick-load', packageId,
+      templateId: detail.resourceId, model: detail.model || 'virtualUsers', environment: selectedEnvironment })} />;
 }
 
 export default function App() {
@@ -254,23 +283,29 @@ export default function App() {
   const jobsRequestSequence = useRef(0);
   const [selectedEnvironment, setSelectedEnvironment] = useState('');
   const [scheduleIntent, setScheduleIntent] = useState<ValidatedScheduleIntent | null>(null);
-  const [scheduleDialogOpen, setScheduleDialogOpen] = useState(false);
-  const onSchedule = useCallback((intent: ValidatedScheduleIntent) => {
+  const scheduleReturnRoute = useRef<AppRoute | null>(null);
+  const onSchedule = useCallback((intent: ValidatedScheduleIntent): boolean => {
+    scheduleReturnRoute.current = navigation.route;
+    const accepted = navigation.navigate({ kind: 'schedules', view: 'new', intent: 'validated', returnTo: formatRoute(navigation.route) });
+    if (!accepted) { scheduleReturnRoute.current = null; return false; }
     setScheduleIntent(intent);
-    setScheduleDialogOpen(true);
-  }, []);
+    return true;
+  }, [navigation.navigate, navigation.route]);
   const consumeScheduleIntent = useCallback(() => setScheduleIntent(null), []);
-  const closeScheduleDialog = useCallback(() => {
-    setScheduleDialogOpen(false);
+  const returnFromSchedule = useCallback(() => {
     setScheduleIntent(null);
-  }, []);
-  const scheduleOriginRoute = useRef(navigation.route);
+    const route = scheduleReturnRoute.current;
+    scheduleReturnRoute.current = null;
+    navigation.navigate(route || (navigation.route.kind === 'schedules' && navigation.route.returnTo
+      ? navigation.route.returnTo : { kind: 'schedules' }));
+  }, [navigation.navigate, navigation.route]);
+  const onScheduleSaved = useCallback(() => {
+    setScheduleIntent(null);
+    scheduleReturnRoute.current = null;
+    navigation.navigate({ kind: 'schedules' });
+  }, [navigation.navigate]);
   useEffect(() => {
-    if (scheduleOriginRoute.current !== navigation.route) closeScheduleDialog();
-    scheduleOriginRoute.current = navigation.route;
-  }, [navigation.route, closeScheduleDialog]);
-  useEffect(() => {
-    const routeEnvironment = navigation.route.kind === 'configuration' || navigation.route.kind === 'quick-load' ? navigation.route.environment : undefined;
+    const routeEnvironment = navigation.route.kind === 'configuration' || navigation.route.kind === 'quick-load' || navigation.route.kind === 'run' ? navigation.route.environment : undefined;
     if (routeEnvironment !== undefined) setSelectedEnvironment(routeEnvironment);
   }, [navigation.route]);
 
@@ -348,7 +383,8 @@ export default function App() {
   }, [navigation.navigate, loadJobs]);
   const capabilities = serverCapabilities(state);
   const currentRoute = navigation.route;
-  const selectedPackage = currentRoute.kind === 'run' || currentRoute.kind === 'package' || currentRoute.kind === 'load' || currentRoute.kind === 'configuration' || currentRoute.kind === 'quick-load'
+  const selectedPackage = currentRoute.kind === 'run' || currentRoute.kind === 'package' || currentRoute.kind === 'load'
+    || currentRoute.kind === 'load-resource' || currentRoute.kind === 'configuration' || currentRoute.kind === 'quick-load'
     ? currentRoute.packageId || ''
     : currentRoute.kind === 'jobs' && currentRoute.jobId && state.jobs.status === 'ready'
       ? state.jobs.data.find(job => job.jobId === currentRoute.jobId)?.packageId || ''
@@ -358,7 +394,9 @@ export default function App() {
   if (navigation.route.kind === 'dashboard') {
     content = <DashboardPage view="dashboard" state={state} onPackageChange={onPackageChange} onJobChange={onJobChange} onRetryPackages={() => void loadPackages()} onRetryJobs={() => void loadJobs()} jobsRefreshing={jobsRefreshing} jobsUpdatedAt={jobsUpdatedAt} />;
   } else if (navigation.route.kind === 'run') {
-    content = <RunPage key={navigation.route.packageId || ''} packageId={navigation.route.packageId} onAccepted={onJobAccepted} onSchedule={onSchedule} schedulingEnabled={capabilities.loadSchedulingEnabled} />;
+    content = <RunPage key={`${navigation.route.packageId || ''}:${navigation.route.target?.type || ''}:${navigation.route.target?.resourceId || ''}:${navigation.route.environment || ''}:${navigation.route.batch ? 'batch' : ''}`}
+      packageId={navigation.route.packageId} initialTarget={navigation.route.target} initialBatchMode={navigation.route.batch} initialEnvironment={navigation.route.environment ?? selectedEnvironment}
+      onAccepted={onJobAccepted} onSchedule={onSchedule} schedulingEnabled={capabilities.loadSchedulingEnabled} />;
   } else if (navigation.route.kind === 'packages') {
     content = <DashboardPage view="packages" state={state} onPackageChange={onPackageChange} onJobChange={onJobChange} onRetryPackages={() => void loadPackages()} onRetryJobs={() => void loadJobs()} jobsRefreshing={jobsRefreshing} jobsUpdatedAt={jobsUpdatedAt} />;
   } else if (navigation.route.kind === 'jobs' && navigation.route.jobId) {
@@ -368,12 +406,15 @@ export default function App() {
   } else if (navigation.route.kind === 'schedules') {
     content = <Suspense fallback={<div className="page-content" role="status" aria-busy="true">Loading Schedules…</div>}>
       <ScheduledLoadPage
-        key={`${navigation.route.view || 'list'}:${navigation.route.scheduleId || ''}`}
         route={navigation.route}
         api={api}
         packages={state.packages}
         enabled={capabilities.loadSchedulingEnabled}
         onOpenJob={onJobChange}
+        initialDraft={scheduleIntent}
+        onInitialDraftConsumed={consumeScheduleIntent}
+        onSaved={onScheduleSaved}
+        onCancel={returnFromSchedule}
       />
     </Suspense>;
   } else if (navigation.route.kind === 'settings') {
@@ -387,6 +428,9 @@ export default function App() {
     content = <QuickLoadRouteView key={`${navigation.route.packageId}:${navigation.route.target?.type || ''}:${navigation.route.target?.resourceId || ''}:${navigation.route.templateId || ''}:${navigation.route.model || ''}`}
       route={navigation.route} inlineLoadEnabled={capabilities.inlineLoadEnabled}
       schedulingEnabled={capabilities.loadSchedulingEnabled} onSchedule={onSchedule} />;
+  } else if (navigation.route.kind === 'load-resource') {
+    content = <LoadResourceRouteView key={`${navigation.route.packageId}:${navigation.route.resourceId}`} route={navigation.route}
+      inlineLoadEnabled={capabilities.inlineLoadEnabled} />;
   } else if (navigation.route.kind === 'package') {
     content = <ExplorerRouteView
       packageId={navigation.route.packageId}
@@ -409,12 +453,15 @@ export default function App() {
           inlineLoadEnabled={capabilities.inlineLoadEnabled}
           schedulingEnabled={capabilities.loadSchedulingEnabled}
           environment={selectedEnvironment}
+          catalogState={navigation.route.kind === 'load' ? navigation.route.catalog : undefined}
           onEnvironmentChange={setSelectedEnvironment}
           onNewLoad={packageId => navigation.navigate(packageId ? { kind: 'load', packageId } : { kind: 'load' })}
           onQuickLoad={(packageId, template) => navigation.navigate({ kind: 'quick-load', packageId, templateId: template.resourceId, model: template.model || 'virtualUsers', environment: selectedEnvironment })}
           onJobAccepted={jobId => onJobAccepted({ jobId, packageId: undefined })}
           onOpenJob={onJobChange}
-          onSchedule={onSchedule} />;
+          onSchedule={onSchedule}
+          onOpenDetail={(item, environment, returnTo) => navigation.navigate({ kind: 'load-resource', packageId: item.packageId,
+            resourceId: item.resourceId, environment, returnTo })} />;
   }
 
   return (
@@ -430,18 +477,6 @@ export default function App() {
       onJobAccepted={onJobAccepted}
     >
       {content}
-      {scheduleDialogOpen && <Suspense fallback={<div className="att-schedule-modal-backdrop" role="status" aria-busy="true">Loading schedule form…</div>}>
-        <ScheduledLoadPage
-          api={api}
-          packages={state.packages}
-          enabled={capabilities.loadSchedulingEnabled}
-          onOpenJob={onJobChange}
-          initialDraft={scheduleIntent}
-          onInitialDraftConsumed={consumeScheduleIntent}
-          modal
-          onClose={closeScheduleDialog}
-        />
-      </Suspense>}
     </AppShell>
   );
 }

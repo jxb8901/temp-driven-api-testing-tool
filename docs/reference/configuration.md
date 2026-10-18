@@ -1,6 +1,6 @@
 # Configuration and environments
 
-This page is the authoritative reading reference for author-authored configuration. Files in [`schemas/`](../../packages/default/schemas/) remain the machine-readable contract. Schema validation runs before cross-field and filesystem validation.
+This page is the authoritative reading reference for author-authored configuration. Files in [`schemas/`](../../schemas/) remain the machine-readable contract. Schema validation runs before cross-field and filesystem validation.
 
 ## Find a configuration task
 
@@ -15,11 +15,10 @@ This page is the authoritative reading reference for author-authored configurati
 
 | Layer | Source | Owns |
 |---|---|---|
-| Global | `config/config.yaml` | output/environment/runtime defaults, template root, reports, XML mode, global tools, group paths, DB/MQ/HTTP/SSHHelper paths, optional legacy inline SSH |
-| Tool group | configured YAML path | group identity, optional script/SSH, grouped tools |
-| Dbhelper | configured `dbhelpers` YAML path | one database identity, connection, statement timeout, transaction, limits, and evidence policy |
-| SSHHelper | configured `sshhelpers` YAML path | logical SSH ID, physical instances, defaults, selection and fan-out cap |
-| HTTPHelper | configured `httphelpers` YAML path | logical HTTP ID, base URL, defaults, pool, auth and TLS |
+| Shared runtime | `ATT_HOME/config/config.yaml` | output/environment/runtime defaults, package template roots, reports, XML mode, global tools, group paths, DB/MQ/HTTP/SSHHelper paths, optional legacy inline SSH |
+| Tool group | `ATT_HOME/config/` YAML path | group identity, optional script/SSH, grouped tools |
+| DB/MQ/SSH/HTTP helper | configured YAML under `ATT_HOME/config/` | logical resource identity, endpoint, connection, pool, timeout, and evidence policy |
+| Package Testdata | package-relative `testdata/` path | package-local Testdata descriptors registered by the selected environment |
 | Workbook | `<workbook>.yaml` | Excel mapping, stages, workbook labels |
 | Template | `template.yaml` | template identity and ordered actions |
 | CLI | command options | selection, Run ID, output override, presentation, CI formats |
@@ -71,16 +70,22 @@ ATT selects an environment through one common `att-config/v2.12` file. It does n
 Actions -> logical helper ID -> selected config -> physical descriptor -> endpoint
 ```
 
-The supported package layout is:
+The shared configuration and Package resources have separate roots:
 
 ```text
-config/
-├── config.yaml
-├── dbhelpers/{sit,uat}/orders.yaml
-└── mqhelpers/{sit,uat}/payment.yaml
+ATT_HOME/
+├── config/
+│   ├── config.yaml
+│   ├── tools/*.yaml
+│   ├── dbhelpers/{sit,uat}/orders.yaml
+│   └── mqhelpers/{sit,uat}/payment.yaml
+└── packages/<id>/
+    ├── testcase/
+    ├── templates/
+    └── testdata/accounts.yaml
 ```
 
-The common config keeps the existing templates, testcase roots, run/execution/report settings, `toolGroups`, and global `tools` registry. The profile layer contains typed DB/MQ/SSH/HTTP descriptor lists. This profile example shows DB/MQ bindings:
+The common config keeps package-relative Template and Testcase roots, run/execution/report settings, `toolGroups`, and the global `tools` registry. Tool/helper descriptors are resolved under `ATT_HOME/config/`; Testdata descriptors are resolved under the selected Package. The profile layer contains typed DB/MQ/SSH/HTTP descriptor lists. This profile example shows DB/MQ bindings:
 
 ```yaml
 # config/config.yaml
@@ -96,7 +101,7 @@ environments:
   SIT:
     dbhelpers: [config/dbhelpers/sit/orders.yaml]
     mqhelpers: [config/mqhelpers/sit/payment.yaml]
-    testdata: [config/testdata/accounts.yaml]
+    testdata: [testdata/accounts.yaml]
   UAT:
     dbhelpers: [config/dbhelpers/uat/orders.yaml]
     mqhelpers: [config/mqhelpers/uat/payment.yaml]
@@ -168,7 +173,7 @@ Use profiles when the same test package is promoted across environments and only
 
 ## Schema catalog
 
-[`schemas/catalog.yaml`](../../packages/default/schemas/catalog.yaml) is authoritative for active schema registrations. Package validation checks registrations; archived schemas do not become active runtime contracts. See the complete matrix in [Schema and Version Matrix](appendices/schema-matrix.md).
+The repository `schemas/catalog.yaml` is build input for the active schema registry embedded in the matching ATT Engine JAR. At runtime, that version-locked Classpath registry is authoritative; neither `ATT_HOME/schemas/` nor a Package-local `schemas/` directory can add or replace schemas. Package validation checks the Engine's registered resources, and archived schemas become runtime contracts only when the installed Engine supports them. See the complete matrix in [Schema and Version Matrix](appendices/schema-matrix.md).
 
 ## Set package-wide options
 
@@ -200,11 +205,11 @@ environments:
   SIT:
     dbhelpers: [config/dbhelpers/sit/orders.yaml]
     mqhelpers: [config/mqhelpers/sit/payment.yaml]
-    testdata: [config/testdata/accounts.yaml]
+    testdata: [testdata/accounts.yaml]
   UAT:
     dbhelpers: [config/dbhelpers/uat/orders.yaml]
     mqhelpers: [config/mqhelpers/uat/payment.yaml]
-    testdata: [config/testdata/accounts.yaml]
+    testdata: [testdata/accounts.yaml]
 ```
 
 ### Set runtime and package paths

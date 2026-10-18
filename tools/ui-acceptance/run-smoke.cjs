@@ -9,6 +9,9 @@ async function main() {
     context.setDefaultTimeout(10000);
     const definitions = []; const submissions = [];
     await context.route('**/api/v1/version', route => route.fulfill({ json: { version: '4.2.1', apiVersion: '1', inlineLoadEnabled: true, loadSchedulingEnabled: true, unifiedRunVersion: 'att-execution/v1' } }));
+    await context.route('**/api/v1/packages/payments/configuration*', route => route.fulfill({ json: {
+      state: 'ready', environments: [{ name: 'SIT', state: 'active' }, { name: 'UAT', state: 'active' }],
+    } }));
     await context.route('**/api/v1/drafts/run', async route => {
       definitions.push(route.request().postDataJSON());
       await route.fulfill({ status: 201, json: { draftId: 'R0123456789ABCDEF0123456789ABCDEF', executionType: 'run', expiresAt: new Date(Date.now() + 600000).toISOString(), preview: { selectedCaseIds: ['cases.default.C1'] } } });
@@ -17,20 +20,28 @@ async function main() {
       submissions.push(route.request().postDataJSON());
       await route.fulfill({ status: 202, json: { jobId: 'JOB-204', command: 'run', executionType: 'run', packageId: 'payments', status: 'QUEUED' } });
     });
+    await context.route('**/api/v1/schedules**', async route => {
+      const request = route.request();
+      const path = new URL(request.url()).pathname.split('/schedules')[1];
+      if (request.method() === 'GET') return route.fulfill({ json: { items: [] } });
+      if (path === '/preview') return route.fulfill({ json: { nextRunAt: '2030-01-01T00:00:00Z' } });
+      throw new Error(`Unexpected schedule request: ${request.method()} ${path}`);
+    });
     const page = await context.newPage(); const errors = [];
     page.on('pageerror', error => errors.push(error.message));
     await page.goto(`${fixture.origin}/att/ui/#/run/payments`);
     await page.getByRole('heading', { name: 'Run', exact: true }).waitFor();
     await page.addScriptTag({ path: require.resolve('axe-core/axe.min.js') });
     assert.deepEqual(await page.evaluate(async () => (await window.axe.run(document, { runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa', 'wcag22aa'] } })).violations.map(item => item.id)), []);
-    await page.getByLabel('Environment', { exact: true }).fill('SIT');
+    const environment = page.locator('.att-run-definition select').first();
+    await environment.selectOption('SIT');
     await page.getByLabel('Target ID', { exact: true }).fill('cases.default.C1');
     assert.equal(definitions.length, 0); assert.equal(submissions.length, 0);
     await page.getByRole('button', { name: 'Validate', exact: true }).click();
     await page.getByRole('heading', { name: 'Review', exact: true }).waitFor();
     assert.deepEqual(definitions[0].target, { type: 'case', id: 'cases.default.C1' });
     assert.equal(definitions[0].environment, 'SIT'); assert.equal(definitions[0].options.debug, false);
-    await page.getByLabel('Environment', { exact: true }).fill('UAT');
+    await environment.selectOption('UAT');
     assert.equal(await page.getByRole('heading', { name: 'Review', exact: true }).count(), 0);
     await page.getByLabel('Debug diagnostics', { exact: true }).check();
     await page.getByRole('button', { name: 'Validate', exact: true }).click();
@@ -38,9 +49,16 @@ async function main() {
     assert.equal(definitions.at(-1).environment, 'UAT'); assert.equal(definitions.at(-1).options.debug, true);
     assert.equal(submissions.length, 0);
     await page.getByRole('button', { name: 'Schedule…', exact: true }).click();
-    await page.getByRole('dialog').waitFor();
+    await page.waitForURL(url => url.hash.startsWith('#/schedules/new'));
+    await page.getByRole('heading', { name: 'New Schedule', exact: true }).waitFor();
+    await page.getByText('Schedule form loaded from the validated RUN draft.').waitFor();
+    assert.equal(await page.getByRole('dialog').count(), 0, 'the validated Schedule handoff must bypass the discard guard');
     assert.equal(submissions.length, 0, 'opening the schedule form must not execute RUN');
-    await page.getByRole('button', { name: 'Cancel and return to editor', exact: true }).click();
+    await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+    await page.waitForURL('**/#/run/payments');
+    await page.getByLabel('Target ID', { exact: true }).fill('cases.default.C1');
+    await page.getByRole('button', { name: 'Validate', exact: true }).click();
+    await page.getByRole('heading', { name: 'Review', exact: true }).waitFor();
     await page.getByRole('button', { name: 'Run Now', exact: true }).click();
     try { await page.waitForURL('**/#/jobs/JOB-204'); } catch (error) { console.error(JSON.stringify({ url: page.url(), submissions, visible: await page.locator('body').innerText() })); throw error; }
     assert.equal(submissions.length, 1);

@@ -323,7 +323,7 @@ def validate(root=ROOT):
     errors = []
     version = re.search(r"<version>([^<]+)</version>",
                         (root / "pom.xml").read_text(encoding="utf-8")).group(1).strip()
-    active = active_schemas((root / "packages/default/schemas/catalog.yaml").read_text(encoding="utf-8"))
+    active = active_schemas((root / "schemas/catalog.yaml").read_text(encoding="utf-8"))
     manifest = root / "docs/reference-manifest.txt"
     items = [s.strip() for s in manifest.read_text(encoding="utf-8").splitlines()
              if s.strip() and not s.lstrip().startswith("#")]

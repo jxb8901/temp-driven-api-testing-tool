@@ -158,7 +158,7 @@ class FrameworkEngineTest {
         writeText(projectRoot.resolve("templates/PAYMENT_INVOKE/template.yaml"),
                 "schemaVersion: att-template/v3.4\nname: PAYMENT_INVOKE\ndescription: testdata selection\nactions:\n"
                         + "  check:\n    type: assert\n    assert: \"${EXEC.INPUT.accountId} == '${EXEC.INPUT.stageAccountId}'\"\n");
-        Path descriptor = projectRoot.resolve("config/testdata/accounts.yaml");
+        Path descriptor = projectRoot.resolve("testdata/accounts.yaml");
         writeText(descriptor, testdataDescriptor("recycle"));
         Path workbook = projectRoot.resolve("testcase/testdata.xlsx");
         writeTestdataWorkbook(workbook);
