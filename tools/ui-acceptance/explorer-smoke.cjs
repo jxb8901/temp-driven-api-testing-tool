@@ -373,7 +373,7 @@ async function main() {
     assert.match(await page.locator('.att-schedule-snapshot-review pre').textContent(), /target: checkout/);
     await page.getByText(/^Next run:/).waitFor();
     await page.getByRole('button', { name: 'Save schedule', exact: true }).click();
-    try { await page.getByRole('heading', { name: 'Schedules', exact: true }).waitFor({ timeout: 10000 }); }
+    try { await page.locator('#schedules-title').waitFor({ timeout: 10000 }); }
     catch (error) {
       console.error(JSON.stringify({ url: page.url(), body: await page.locator('body').innerText(), submittedScheduleInput }));
       throw error;
