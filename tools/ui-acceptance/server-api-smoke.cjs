@@ -269,7 +269,10 @@ async function main() {
     await restoredSchedule.click();
     await page.getByRole('heading', { name: 'New Schedule', level: 2 }).waitFor();
     await page.getByText('This schedule uses the immutable LOAD scenario snapshot from your validated draft.').waitFor();
-    assert.equal(await page.locator('#schedule-scenario').count(), 0, 'the schedule route must carry a server-backed snapshot, not a mutable path field');
+    const snapshotSource = page.locator('#schedule-scenario');
+    assert.equal(await snapshotSource.count(), 1);
+    assert.equal(await snapshotSource.isDisabled(), true, 'a server-backed Load snapshot cannot be changed into a package path');
+    assert.equal(await snapshotSource.inputValue(), 'Validated Load snapshot');
     assert.equal(await page.locator('#schedule-name').inputValue(), 'Validated LOAD snapshot');
     await page.getByRole('button', { name: 'Cancel', exact: true }).click();
     await page.getByRole('heading', { name: 'LOAD Catalog', level: 1, exact: true }).waitFor();
