@@ -88,7 +88,7 @@ async function main() {
     assert.equal(edit.body.draftId, undefined);
     await page.getByRole('button', { name: 'History Functional checks', exact: true }).first().click();
     await page.waitForURL('**/#/schedules/S-RUN/history');
-    await page.getByRole('button', { name: 'O1', exact: true }).click();
+    await page.getByRole('link', { name: 'View occurrence O1', exact: true }).click();
     await page.waitForURL('**/#/schedules/S-RUN/history/O1');
     assert.equal(await page.getByRole('button', { name: 'PRIVATE', exact: true }).count(), 0);
     await page.goBack();
