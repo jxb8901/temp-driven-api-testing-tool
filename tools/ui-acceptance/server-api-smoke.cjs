@@ -262,7 +262,11 @@ async function main() {
     await page.getByRole('heading', { name: 'LOAD Catalog', level: 1, exact: true }).waitFor();
     await page.getByText('Environment: UAT', { exact: false }).waitFor();
     const restoredScenarioCard = page.locator('.att-load-catalog-card').filter({ hasText: 'load/scenario.yaml' });
-    await restoredScenarioCard.getByRole('button', { name: 'Schedule' }).click();
+    const restoredSchedule = restoredScenarioCard.getByRole('button', { name: 'Schedule' });
+    assert.equal(await restoredSchedule.isDisabled(), true, 'returning from details requires fresh validation before scheduling');
+    await restoredScenarioCard.getByRole('button', { name: 'Validate load/scenario.yaml for UAT' }).click();
+    await page.getByText(/load\/scenario\.yaml validation refreshed for UAT: valid/).waitFor();
+    await restoredSchedule.click();
     await page.getByRole('heading', { name: 'New Schedule', level: 2 }).waitFor();
     await page.getByText('This schedule uses the immutable LOAD scenario snapshot from your validated draft.').waitFor();
     assert.equal(await page.locator('#schedule-scenario').count(), 0, 'the schedule route must carry a server-backed snapshot, not a mutable path field');
