@@ -49,7 +49,7 @@ async function main() {
     assert.equal(definitions.at(-1).environment, 'UAT'); assert.equal(definitions.at(-1).options.debug, true);
     assert.equal(submissions.length, 0);
     await page.getByRole('button', { name: 'Schedule…', exact: true }).click();
-    await page.waitForURL('**/#/schedules/new');
+    await page.waitForURL(url => url.hash.startsWith('#/schedules/new'));
     await page.getByRole('heading', { name: 'New Schedule', exact: true }).waitFor();
     await page.getByText('Schedule form loaded from the validated RUN draft.').waitFor();
     assert.equal(await page.getByRole('dialog').count(), 0, 'the validated Schedule handoff must bypass the discard guard');

@@ -365,7 +365,7 @@ async function main() {
     }, 'Explorer Run uses the safe typed sidecar defaults and preserves hidden package values');
     assert.equal(await page.getByRole('button', { name: 'Schedule…', exact: true }).isDisabled(), false);
     await page.getByRole('button', { name: 'Schedule…' }).click();
-    await page.waitForURL('**/#/schedules/new');
+    await page.waitForURL(url => url.hash.startsWith('#/schedules/new'));
     await page.getByRole('heading', { name: 'New Schedule', exact: true }).waitFor();
     await page.getByText('Schedule form loaded from the validated RUN draft. Choose a recurrence and review the Server next-run preview.').waitFor();
     assert.equal(await page.locator('#schedule-debug-target').inputValue(), 'template · checkout');
@@ -450,7 +450,7 @@ async function main() {
     assert.equal(await page.getByRole('button', { name: 'Schedule…' }).isDisabled(), false, 'validated draft enables scheduling');
     const quickLoadUrl = page.url();
     await page.getByRole('button', { name: 'Schedule…' }).click();
-    await page.waitForURL('**/#/schedules/new');
+    await page.waitForURL(url => url.hash.startsWith('#/schedules/new'));
     await page.getByRole('heading', { name: 'New Schedule', exact: true }).waitFor();
     await page.getByText('Schedule form loaded from the validated Load draft.').waitFor();
     assert.equal(await page.locator('#schedule-scenario').inputValue(), 'Validated Load snapshot');
@@ -471,7 +471,7 @@ async function main() {
     await page.getByRole('button', { name: 'Validate' }).click();
     await page.getByText('The Server accepted this draft for review.').waitFor();
     await page.getByRole('button', { name: 'Schedule…' }).click();
-    await page.waitForURL('**/#/schedules/new');
+    await page.waitForURL(url => url.hash.startsWith('#/schedules/new'));
     await page.getByRole('heading', { name: 'New Schedule', exact: true }).waitFor();
     await page.getByText(/^Next run:/).waitFor();
     await page.getByRole('button', { name: 'Save schedule', exact: true }).click();

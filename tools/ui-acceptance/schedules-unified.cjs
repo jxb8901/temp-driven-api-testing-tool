@@ -62,7 +62,7 @@ async function main() {
     await filters.getByLabel('Owner').selectOption('bob');
     await page.getByText('No schedules match these filters.').waitFor();
     await page.getByRole('button', { name: 'New Schedule', exact: true }).click();
-    await page.waitForURL('**/#/schedules/new');
+    await page.waitForURL(url => url.hash.startsWith('#/schedules/new'));
     await page.locator('#schedule-name').fill('Unsaved schedule');
     await page.getByRole('button', { name: 'Cancel', exact: true }).click();
     await page.getByRole('button', { name: 'Keep editing', exact: true }).click();
@@ -124,7 +124,7 @@ async function main() {
     await page.getByLabel('Debug diagnostics', { exact: true }).check();
     await page.getByRole('button', { name: 'Validate', exact: true }).click();
     await page.getByRole('button', { name: 'Schedule…', exact: true }).click();
-    await page.waitForURL('**/#/schedules/new');
+    await page.waitForURL(url => url.hash.startsWith('#/schedules/new'));
     await page.getByRole('heading', { name: 'New Schedule', exact: true }).waitFor();
     await page.getByText('Schedule form loaded from the validated RUN draft.').waitFor();
     assert.equal(await page.getByRole('dialog').count(), 0, 'the validated Schedule handoff must bypass the discard guard');
