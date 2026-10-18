@@ -320,7 +320,18 @@ async function main() {
     const mobileActionHeight = await mobileScheduleAction.evaluate(element => element.getBoundingClientRect().height);
     assert.ok(mobileActionHeight >= 40 && mobileActionHeight <= 44,
       `schedule actions should have 40–44px mobile touch targets: ${mobileActionHeight}px`);
-    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth), false, 'Schedules must fit a phone viewport');
+    const mobileScheduleGeometry = await page.evaluate(() => ({
+      viewport: window.innerWidth,
+      documentWidth: document.documentElement.scrollWidth,
+      overflow: [...document.querySelectorAll('body *')].map(element => {
+        const rect = element.getBoundingClientRect();
+        return { tag: element.tagName.toLowerCase(), id: element.id, className: typeof element.className === 'string' ? element.className : '',
+          left: Math.round(rect.left), right: Math.round(rect.right), width: Math.round(rect.width), scrollWidth: element.scrollWidth,
+          text: (element.innerText || '').slice(0, 100) };
+      }).filter(element => element.right > window.innerWidth + 1).slice(0, 8),
+    }));
+    assert.equal(mobileScheduleGeometry.documentWidth, mobileScheduleGeometry.viewport,
+      `Schedules must fit a phone viewport: ${JSON.stringify(mobileScheduleGeometry)}`);
     await page.getByRole('button', { name: 'Open navigation' }).click();
     await page.locator('a[data-nav="scheduled-load"]').click();
     await page.getByRole('heading', { name: 'Schedules', level: 1, exact: true }).waitFor();
