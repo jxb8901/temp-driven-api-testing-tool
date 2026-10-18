@@ -192,7 +192,8 @@ async function main() {
       if (width <= 820) {
         await page.getByRole('button', { name: 'Open navigation' }).click();
         await assertRunGrid(gutter);
-        await page.getByRole('button', { name: 'Close navigation' }).click();
+        await page.keyboard.press('Escape');
+        await page.getByRole('button', { name: 'Open navigation' }).waitFor();
         await assertRunGrid(gutter);
       }
     }
