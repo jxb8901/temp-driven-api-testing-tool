@@ -20,6 +20,13 @@ async function main() {
       submissions.push(route.request().postDataJSON());
       await route.fulfill({ status: 202, json: { jobId: 'JOB-204', command: 'run', executionType: 'run', packageId: 'payments', status: 'QUEUED' } });
     });
+    await context.route('**/api/v1/schedules**', async route => {
+      const request = route.request();
+      const path = new URL(request.url()).pathname.split('/schedules')[1];
+      if (request.method() === 'GET') return route.fulfill({ json: { items: [] } });
+      if (path === '/preview') return route.fulfill({ json: { nextRunAt: '2030-01-01T00:00:00Z' } });
+      throw new Error(`Unexpected schedule request: ${request.method()} ${path}`);
+    });
     const page = await context.newPage(); const errors = [];
     page.on('pageerror', error => errors.push(error.message));
     await page.goto(`${fixture.origin}/att/ui/#/run/payments`);
@@ -42,9 +49,16 @@ async function main() {
     assert.equal(definitions.at(-1).environment, 'UAT'); assert.equal(definitions.at(-1).options.debug, true);
     assert.equal(submissions.length, 0);
     await page.getByRole('button', { name: 'Schedule…', exact: true }).click();
-    await page.getByRole('dialog').waitFor();
+    await page.waitForURL('**/#/schedules/new');
+    await page.getByRole('heading', { name: 'New Schedule', exact: true }).waitFor();
+    await page.getByText('Schedule form loaded from the validated RUN draft.').waitFor();
+    assert.equal(await page.getByRole('dialog').count(), 0, 'the validated Schedule handoff must bypass the discard guard');
     assert.equal(submissions.length, 0, 'opening the schedule form must not execute RUN');
-    await page.getByRole('button', { name: 'Stay on this page', exact: true }).click();
+    await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+    await page.waitForURL('**/#/run/payments');
+    await page.getByLabel('Target ID', { exact: true }).fill('cases.default.C1');
+    await page.getByRole('button', { name: 'Validate', exact: true }).click();
+    await page.getByRole('heading', { name: 'Review', exact: true }).waitFor();
     await page.getByRole('button', { name: 'Run Now', exact: true }).click();
     try { await page.waitForURL('**/#/jobs/JOB-204'); } catch (error) { console.error(JSON.stringify({ url: page.url(), submissions, visible: await page.locator('body').innerText() })); throw error; }
     assert.equal(submissions.length, 1);
