@@ -12,12 +12,24 @@ import java.util.Set;
 import java.util.Collections;
 import java.util.List;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Comparator;
+import java.util.TreeMap;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.ByteArrayOutputStream;
-import java.nio.file.StandardCopyOption;
+import java.nio.file.FileAlreadyExistsException;
+import java.nio.file.StandardOpenOption;
+import java.nio.channels.FileChannel;
+import java.nio.channels.FileLock;
 import java.nio.file.attribute.PosixFilePermission;
+import java.nio.file.attribute.PosixFilePermissions;
+import java.nio.file.attribute.UserPrincipal;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.nio.charset.StandardCharsets;
 import java.util.EnumSet;
+import java.util.stream.Stream;
 
 /** Resolves schemas only through the trusted registry shipped with ATT. */
 public final class SchemaFiles {
@@ -221,7 +233,7 @@ public final class SchemaFiles {
         }
     }
 
-    /** Materializes the packaged schemas so existing validators can consume them as Paths. */
+    /** Shares one private materialization per packaged schema version across Worker JVMs. */
     private static Path trustedRoot() throws IOException {
         Path cached = trustedRoot;
         if (cached != null) return cached;
@@ -240,30 +252,130 @@ public final class SchemaFiles {
                 throw new IOException("The packaged schema catalog has an unsupported version");
             Object rawSchemas = ((Map<?, ?>) loaded).get("schemas");
             if (!(rawSchemas instanceof Map) || ((Map<?, ?>) rawSchemas).isEmpty()) throw new IOException("The packaged schema registry is empty");
-
-            Path root = Files.createTempDirectory("att-trusted-schemas-");
-            restrictPermissions(root, true);
-            Path schemas = Files.createDirectory(root.resolve("schemas"));
-            restrictPermissions(schemas, true);
-            Path catalog = schemas.resolve("catalog.yaml");
-            Files.write(catalog, catalogBytes);
-            restrictPermissions(catalog, false);
-            for (Object value : ((Map<?, ?>) rawSchemas).values()) {
-                if (!(value instanceof String)) throw new IOException("The packaged schema registry contains a non-string path");
-                String relative = ((String) value).replace('\\', '/');
+            Map<String, byte[]> packagedFiles = new TreeMap<String, byte[]>();
+            packagedFiles.put("catalog.yaml", catalogBytes);
+            Set<String> filenames = new HashSet<String>();
+            for (Map.Entry<?, ?> entry : ((Map<?, ?>) rawSchemas).entrySet()) {
+                if (!(entry.getKey() instanceof String) || !(entry.getValue() instanceof String))
+                    throw new IOException("The packaged schema registry contains a non-string registration");
+                String relative = ((String) entry.getValue()).replace('\\', '/');
                 if (!relative.matches("(?:history/)?[A-Za-z0-9._-]+\\.(?:json|xsd)")) throw new IOException("The packaged schema registry contains an unsafe path");
-                Path destination = schemas.resolve(relative).normalize();
-                if (!destination.startsWith(schemas)) throw new IOException("The packaged schema registry contains a path outside schemas/");
-                Files.createDirectories(destination.getParent());
-                restrictPermissions(destination.getParent(), true);
+                String filename = relative.substring(relative.lastIndexOf('/') + 1);
+                if (!filenames.add(filename)) throw new IOException("The packaged schema registry contains duplicate schema files");
                 try (InputStream stream = loader.getResourceAsStream(RESOURCE_ROOT + relative)) {
                     if (stream == null) throw new IOException("Missing classpath resource " + RESOURCE_ROOT + relative);
-                    Files.copy(stream, destination, StandardCopyOption.REPLACE_EXISTING);
+                    packagedFiles.put(relative, readAll(stream));
                 }
-                restrictPermissions(destination, false);
+            }
+            Path cacheBase = cacheBase();
+            String fingerprint = fingerprint(packagedFiles);
+            Path root = cacheBase.resolve(fingerprint);
+            Path lockPath = cacheBase.resolve("att-trusted-schemas.lock");
+            try (FileChannel channel = FileChannel.open(lockPath, StandardOpenOption.CREATE, StandardOpenOption.WRITE, LinkOption.NOFOLLOW_LINKS);
+                 FileLock ignored = channel.lock()) {
+                restrictPermissions(lockPath, false);
+                boolean complete;
+                try { complete = cacheMatches(root, packagedFiles); }
+                catch (IOException ignoredRead) { complete = false; }
+                if (!complete) {
+                    deleteTree(root);
+                    try {
+                        createPrivateDirectory(root);
+                        Path schemas = root.resolve("schemas");
+                        createPrivateDirectory(schemas);
+                        for (Map.Entry<String, byte[]> file : packagedFiles.entrySet()) {
+                            Path destination = schemas.resolve(file.getKey()).normalize();
+                            if (!destination.startsWith(schemas)) throw new IOException("The packaged schema registry contains a path outside schemas/");
+                            createPrivateDirectory(destination.getParent());
+                            Files.write(destination, file.getValue());
+                            restrictPermissions(destination, false);
+                        }
+                    } catch (IOException | RuntimeException failure) {
+                        deleteTree(root);
+                        throw failure;
+                    }
+                    if (!cacheMatches(root, packagedFiles)) {
+                        deleteTree(root);
+                        throw new IOException("The trusted schema cache could not be verified after extraction");
+                    }
+                }
             }
             trustedRoot = root;
             return root;
+        }
+    }
+
+    private static Path cacheBase() throws IOException {
+        String username = System.getProperty("user.name", "unknown");
+        String userToken = fingerprint(Collections.singletonMap("user", username.getBytes(StandardCharsets.UTF_8))).substring(0, 20);
+        Path temporary = java.nio.file.Paths.get(System.getProperty("java.io.tmpdir")).toAbsolutePath().normalize();
+        if (Files.isSymbolicLink(temporary) || !Files.isDirectory(temporary, LinkOption.NOFOLLOW_LINKS))
+            throw new IOException("The temporary directory is unavailable");
+        Path base = temporary.resolve("att-trusted-schema-cache-" + userToken);
+        Path home = java.nio.file.Paths.get(System.getProperty("user.home", ".")).toAbsolutePath().normalize();
+        UserPrincipal expectedOwner = Files.exists(home, LinkOption.NOFOLLOW_LINKS)
+                ? Files.getOwner(home, LinkOption.NOFOLLOW_LINKS) : null;
+        if (Files.exists(base, LinkOption.NOFOLLOW_LINKS) && expectedOwner != null
+                && !expectedOwner.equals(Files.getOwner(base, LinkOption.NOFOLLOW_LINKS)))
+            throw new IOException("The trusted schema cache has an unexpected owner");
+        createPrivateDirectory(base);
+        if (expectedOwner != null && !expectedOwner.equals(Files.getOwner(base, LinkOption.NOFOLLOW_LINKS)))
+            throw new IOException("The trusted schema cache has an unexpected owner");
+        return base;
+    }
+
+    private static void createPrivateDirectory(Path directory) throws IOException {
+        if (directory == null) throw new IOException("The trusted schema cache path is invalid");
+        if (!Files.exists(directory, LinkOption.NOFOLLOW_LINKS)) {
+            try {
+                Files.createDirectory(directory, PosixFilePermissions.asFileAttribute(
+                        EnumSet.of(PosixFilePermission.OWNER_READ, PosixFilePermission.OWNER_WRITE, PosixFilePermission.OWNER_EXECUTE)));
+            } catch (UnsupportedOperationException unsupported) {
+                try { Files.createDirectory(directory); }
+                catch (FileAlreadyExistsException concurrent) { /* Another Worker created the shared directory. */ }
+            } catch (FileAlreadyExistsException concurrent) {
+                // Another Worker created the shared directory concurrently.
+            }
+        }
+        if (Files.isSymbolicLink(directory) || !Files.isDirectory(directory, LinkOption.NOFOLLOW_LINKS))
+            throw new IOException("The trusted schema cache contains an unsafe directory");
+        restrictPermissions(directory, true);
+    }
+
+    private static boolean cacheMatches(Path root, Map<String, byte[]> packagedFiles) throws IOException {
+        if (Files.isSymbolicLink(root) || !Files.isDirectory(root, LinkOption.NOFOLLOW_LINKS)) return false;
+        Path schemas = root.resolve("schemas");
+        if (Files.isSymbolicLink(schemas) || !Files.isDirectory(schemas, LinkOption.NOFOLLOW_LINKS)) return false;
+        for (Map.Entry<String, byte[]> file : packagedFiles.entrySet()) {
+            Path path = schemas.resolve(file.getKey()).normalize();
+            if (!path.startsWith(schemas) || Files.isSymbolicLink(path)
+                    || !Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS)
+                    || !Arrays.equals(Files.readAllBytes(path), file.getValue())) return false;
+        }
+        return true;
+    }
+
+    private static String fingerprint(Map<String, byte[]> files) throws IOException {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            for (Map.Entry<String, byte[]> file : new TreeMap<String, byte[]>(files).entrySet()) {
+                digest.update(file.getKey().getBytes(StandardCharsets.UTF_8));
+                digest.update((byte) 0);
+                digest.update(file.getValue());
+                digest.update((byte) 0);
+            }
+            StringBuilder result = new StringBuilder();
+            for (byte value : digest.digest()) result.append(String.format(java.util.Locale.ROOT, "%02x", value & 0xff));
+            return result.toString();
+        } catch (NoSuchAlgorithmException error) {
+            throw new IOException("SHA-256 is unavailable for the trusted schema cache", error);
+        }
+    }
+
+    private static void deleteTree(Path root) throws IOException {
+        if (!Files.exists(root, LinkOption.NOFOLLOW_LINKS)) return;
+        try (Stream<Path> paths = Files.walk(root)) {
+            for (Path path : paths.sorted(Comparator.reverseOrder()).toArray(Path[]::new)) Files.deleteIfExists(path);
         }
     }
 

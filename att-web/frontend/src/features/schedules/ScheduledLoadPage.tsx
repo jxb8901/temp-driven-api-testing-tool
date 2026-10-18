@@ -27,7 +27,7 @@ export interface ScheduledLoadPageProps {
   onOpenJob(jobId: string): void;
   initialDraft?: ValidatedScheduleIntent | null;
   onInitialDraftConsumed?(): void;
-  onSaved?(): void;
+  onSaved?(schedule: ScheduleDefinition): void;
   onCancel?(): void;
   route?: Extract<AppRoute, { kind: 'schedules' }>;
 }
@@ -175,7 +175,7 @@ function hasActiveJob(items: ScheduleOccurrence[]): boolean {
 export function ScheduledLoadPage({ api, packages, enabled, onOpenJob, initialDraft, onInitialDraftConsumed, onSaved, onCancel, route }: ScheduledLoadPageProps): React.JSX.Element {
   const navigation = useNavigationGuard();
   const [localView, setLocalView] = useState<'list' | 'new' | 'edit' | 'history'>(route?.view || 'list');
-  const view = route?.view || localView;
+  const view = route ? route.view || 'list' : localView;
   const editorOpen = view === 'new' || view === 'edit';
   const [discardRequested, setDiscardRequested] = useState(false);
   const releaseGuard = useRef<() => void>(() => {});
@@ -184,6 +184,7 @@ export function ScheduledLoadPage({ api, packages, enabled, onOpenJob, initialDr
   const [loadState, setLoadState] = useState<LoadState>(enabled ? 'loading' : 'disabled');
   const [loadError, setLoadError] = useState('');
   const [notice, setNotice] = useState('');
+  const [savedSchedule, setSavedSchedule] = useState<ScheduleDefinition | null>(null);
   const [mutationError, setMutationError] = useState('');
   const [validationDiagnostics, setValidationDiagnostics] = useState<ScheduleValidationDiagnostic[]>([]);
   const [validationRequestId, setValidationRequestId] = useState('');
@@ -426,6 +427,7 @@ export function ScheduledLoadPage({ api, packages, enabled, onOpenJob, initialDr
   }
 
   function goTo(next: 'list' | 'new' | 'edit' | 'history', schedule?: ScheduleDefinition) {
+    if (next !== 'list') setSavedSchedule(null);
     if (route) navigation.navigate({ kind: 'schedules', ...(next === 'list' ? {} : { view: next }), ...(schedule ? { scheduleId: schedule.id } : {}) });
     else setLocalView(next);
   }
@@ -480,9 +482,10 @@ export function ScheduledLoadPage({ api, packages, enabled, onOpenJob, initialDr
       const saved = editingId
         ? await api.updateSchedule(editingId, input)
         : await api.createSchedule(input);
-      setNotice(`Saved ${saved.name}. Next run: ${formatScheduleTime(saved.nextRunAt, saved.timezone)} (${saved.timezone}).`);
+      setSavedSchedule(saved);
+      setNotice('');
       releaseGuard.current();
-      onSaved?.();
+      onSaved?.(saved);
       if (!onSaved) goTo('list');
       await loadSchedules();
     } catch (error) {
@@ -551,7 +554,11 @@ export function ScheduledLoadPage({ api, packages, enabled, onOpenJob, initialDr
 
   const pageContent = <>
     {view !== 'list' && <button type="button" className="button button-quiet" onClick={editorOpen ? closeEditor : () => goTo('list')}>Back to Schedules</button>}
-    {!editorOpen && notice && <p className="att-schedule-notice" role="status">{notice}</p>}
+    {!editorOpen && savedSchedule && <div className="att-schedule-notice" role="status" aria-live="polite">
+      <p>Saved {savedSchedule.name} (ID: <code>{savedSchedule.id}</code>). Next run: {formatScheduleTime(savedSchedule.nextRunAt, savedSchedule.timezone)} ({savedSchedule.timezone}).</p>
+      <button type="button" onClick={() => openHistory(savedSchedule)}>View schedule history</button>
+    </div>}
+    {!editorOpen && !savedSchedule && notice && <p className="att-schedule-notice" role="status">{notice}</p>}
     {!editorOpen && mutationError && <p className="att-schedule-error" role="alert">{mutationError}</p>}
     {!editorOpen && actionPending && <p role="status" aria-busy="true">Applying schedule action…</p>}
     {editorOpen && loadState === 'loading' && <p role="status">Checking schedule access…</p>}

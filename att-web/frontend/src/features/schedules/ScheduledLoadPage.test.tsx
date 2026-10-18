@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act } from 'react';
+import { act, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NavigationGuardContext, type NavigationGuardApi } from '../../router';
@@ -336,7 +336,8 @@ describe('ScheduledLoadPage', () => {
       name: 'Nightly payments', packageId: 'payments', scenario: 'load/nightly.yaml', enabled: false,
       timezone: expect.any(String), cron: '0 2 * * *',
     }));
-    expect(host.textContent).toContain('Saved Nightly payments. Next run:');
+    expect(host.textContent).toContain('Saved Nightly payments');
+    expect(host.textContent).toContain('Next run:');
     expect(api.previewSchedule).toHaveBeenCalled();
     expect(vi.mocked(api.previewSchedule).mock.calls.at(-1)?.[0]).toEqual({ timezone: expect.any(String), cron: '0 2 * * *' });
     expect(navigation.registerUnsavedChanges).toHaveBeenCalledWith(true, 'Schedules changes');
@@ -394,20 +395,28 @@ describe('ScheduledLoadPage', () => {
     expect(navigation.navigate).not.toHaveBeenCalled();
   });
 
-  it('returns to the source page after saving a validated Load snapshot', async () => {
+  it('returns to Schedules after saving and keeps the saved ID, next run and History action visible', async () => {
     const api = makeApi();
     const onSaved = vi.fn();
-    await act(async () => root.render(<NavigationGuardContext.Provider value={navigation}>
-      <ScheduledLoadPage api={api} packages={packages} enabled onOpenJob={vi.fn()} route={{ kind: 'schedules', view: 'new' }} onSaved={onSaved}
-        initialDraft={{ packageId: 'payments', environment: 'SIT', draftId: 'A0123456789ABCDEF0123456789ABCDEF',
-          previewYaml: 'schemaVersion: att-load/v1.6\nworkloads: []\n' }} />
-    </NavigationGuardContext.Provider>));
+    function SaveFlow() {
+      const [view, setView] = useState<'new' | undefined>('new');
+      return <NavigationGuardContext.Provider value={navigation}>
+        <ScheduledLoadPage api={api} packages={packages} enabled onOpenJob={vi.fn()} route={{ kind: 'schedules', view }} onSaved={saved => { onSaved(saved); setView(undefined); }}
+          initialDraft={{ packageId: 'payments', environment: 'SIT', draftId: 'A0123456789ABCDEF0123456789ABCDEF',
+            previewYaml: 'schemaVersion: att-load/v1.6\nworkloads: []\n' }} />
+      </NavigationGuardContext.Provider>;
+    }
+    await act(async () => root.render(<SaveFlow />));
     await advance(300);
 
     await click(host.querySelector('.att-schedule-form-actions button[type="submit"]')!);
     await advance(0);
     expect(api.createSchedule).toHaveBeenCalledTimes(1);
-    expect(onSaved).toHaveBeenCalledTimes(1);
+    expect(onSaved).toHaveBeenCalledWith(expect.objectContaining({ id: 'S-CREATED', name: 'Validated LOAD snapshot' }));
+    expect(host.querySelector('#schedule-list-heading')).not.toBeNull();
+    expect(host.textContent).toContain('ID: S-CREATED');
+    expect(host.textContent).toContain('Next run:');
+    expect([...host.querySelectorAll('button')].some(button => button.textContent === 'View schedule history')).toBe(true);
   });
 
   it('keeps Run Now and delete behind explicit confirmation', async () => {

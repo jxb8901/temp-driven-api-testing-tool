@@ -30,7 +30,7 @@ function ExplorerRouteView({ packageId, resourceRoute, inlineLoadEnabled, schedu
   resourceRoute: ExplorerPageProps['resourceRoute'];
   inlineLoadEnabled: boolean;
   schedulingEnabled: boolean;
-  onSchedule(input: ValidatedScheduleIntent): void;
+  onSchedule(input: ValidatedScheduleIntent): boolean;
 }) {
   const workspace = useAppShellContext();
   const navigation = useNavigationGuard();
@@ -49,8 +49,11 @@ function ExplorerRouteView({ packageId, resourceRoute, inlineLoadEnabled, schedu
     navigation.navigate({ kind: 'run', packageId: identity.packageId,
       target: { type: identity.type, resourceId: identity.resourceId, logicalId: identity.logicalId }, environment: workspace.selectedEnvironment });
   }, [navigation.navigate, workspace.selectedEnvironment]);
+  const onRunBatch = useCallback(() => {
+    navigation.navigate({ kind: 'run', packageId, environment: workspace.selectedEnvironment, batch: true });
+  }, [navigation.navigate, packageId, workspace.selectedEnvironment]);
   const onScheduleDebug = useCallback<NonNullable<ExplorerPageProps['onScheduleDebug']>>((input) => {
-    onSchedule(input);
+    return onSchedule(input);
   }, [onSchedule]);
 
   return <ExplorerPage key={packageId}
@@ -62,6 +65,7 @@ function ExplorerRouteView({ packageId, resourceRoute, inlineLoadEnabled, schedu
     onResourceRouteChange={onResourceRouteChange}
     onJobAccepted={onJobAccepted}
     onRunTarget={target => onRunTarget({ packageId, ...target })}
+    onRunBatch={onRunBatch}
     onOpenQuickLoad={inlineLoadEnabled ? onOpenQuickLoad : undefined}
     onScheduleDebug={schedulingEnabled ? onScheduleDebug : undefined}
     onOpenConfigurationFile={(path, origin, sourceReference) => navigation.navigate({ kind: 'configuration', packageId, environment: workspace.selectedEnvironment, filePath: path, fileOrigin: origin, sourceReference, tab: 'source' })}
@@ -230,10 +234,12 @@ export default function App() {
   const [selectedEnvironment, setSelectedEnvironment] = useState('');
   const [scheduleIntent, setScheduleIntent] = useState<ValidatedScheduleIntent | null>(null);
   const scheduleReturnRoute = useRef<AppRoute | null>(null);
-  const onSchedule = useCallback((intent: ValidatedScheduleIntent) => {
+  const onSchedule = useCallback((intent: ValidatedScheduleIntent): boolean => {
     scheduleReturnRoute.current = navigation.route;
+    const accepted = navigation.navigate({ kind: 'schedules', view: 'new' });
+    if (!accepted) { scheduleReturnRoute.current = null; return false; }
     setScheduleIntent(intent);
-    navigation.navigate({ kind: 'schedules', view: 'new' });
+    return true;
   }, [navigation.navigate, navigation.route]);
   const consumeScheduleIntent = useCallback(() => setScheduleIntent(null), []);
   const returnFromSchedule = useCallback(() => {
@@ -241,6 +247,11 @@ export default function App() {
     const route = scheduleReturnRoute.current;
     scheduleReturnRoute.current = null;
     navigation.navigate(route || { kind: 'schedules' });
+  }, [navigation.navigate]);
+  const onScheduleSaved = useCallback(() => {
+    setScheduleIntent(null);
+    scheduleReturnRoute.current = null;
+    navigation.navigate({ kind: 'schedules' });
   }, [navigation.navigate]);
   useEffect(() => {
     const routeEnvironment = navigation.route.kind === 'configuration' || navigation.route.kind === 'quick-load' || navigation.route.kind === 'run' ? navigation.route.environment : undefined;
@@ -331,8 +342,8 @@ export default function App() {
   if (navigation.route.kind === 'dashboard') {
     content = <DashboardPage view="dashboard" state={state} onPackageChange={onPackageChange} onJobChange={onJobChange} onRetryPackages={() => void loadPackages()} onRetryJobs={() => void loadJobs()} jobsRefreshing={jobsRefreshing} jobsUpdatedAt={jobsUpdatedAt} />;
   } else if (navigation.route.kind === 'run') {
-    content = <RunPage key={`${navigation.route.packageId || ''}:${navigation.route.target?.type || ''}:${navigation.route.target?.resourceId || ''}:${navigation.route.environment || ''}`}
-      packageId={navigation.route.packageId} initialTarget={navigation.route.target} initialEnvironment={navigation.route.environment ?? selectedEnvironment}
+    content = <RunPage key={`${navigation.route.packageId || ''}:${navigation.route.target?.type || ''}:${navigation.route.target?.resourceId || ''}:${navigation.route.environment || ''}:${navigation.route.batch ? 'batch' : ''}`}
+      packageId={navigation.route.packageId} initialTarget={navigation.route.target} initialBatchMode={navigation.route.batch} initialEnvironment={navigation.route.environment ?? selectedEnvironment}
       onAccepted={onJobAccepted} onSchedule={onSchedule} schedulingEnabled={capabilities.loadSchedulingEnabled} />;
   } else if (navigation.route.kind === 'packages') {
     content = <DashboardPage view="packages" state={state} onPackageChange={onPackageChange} onJobChange={onJobChange} onRetryPackages={() => void loadPackages()} onRetryJobs={() => void loadJobs()} jobsRefreshing={jobsRefreshing} jobsUpdatedAt={jobsUpdatedAt} />;
@@ -343,7 +354,6 @@ export default function App() {
   } else if (navigation.route.kind === 'schedules') {
     content = <Suspense fallback={<div className="page-content" role="status" aria-busy="true">Loading Schedules…</div>}>
       <ScheduledLoadPage
-        key={`${navigation.route.view || 'list'}:${navigation.route.scheduleId || ''}`}
         route={navigation.route}
         api={api}
         packages={state.packages}
@@ -351,7 +361,7 @@ export default function App() {
         onOpenJob={onJobChange}
         initialDraft={scheduleIntent}
         onInitialDraftConsumed={consumeScheduleIntent}
-        onSaved={returnFromSchedule}
+        onSaved={onScheduleSaved}
         onCancel={returnFromSchedule}
       />
     </Suspense>;

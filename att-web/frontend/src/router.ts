@@ -16,7 +16,7 @@ export type AppRoute =
   | { kind: 'package'; packageId: string; resource?: ResourceRoute }
   | { kind: 'configuration'; packageId?: string; environment?: string; filePath?: string; fileOrigin?: string; sourceReference?: ResourceSourceReferenceRoute; configurationReferenceId?: string; tab?: ConfigurationTab }
   | { kind: 'quick-load'; packageId: string; target?: ResourceRoute; environment?: string; templateId?: string; model?: 'virtualUsers' | 'arrivalRate' }
-  | { kind: 'run'; packageId?: string; target?: ResourceRoute; environment?: string }
+  | { kind: 'run'; packageId?: string; target?: ResourceRoute; environment?: string; batch?: boolean }
   | { kind: 'jobs'; jobId?: string }
   | { kind: 'load'; packageId?: string }
   | { kind: 'schedules'; view?: 'new' | 'edit' | 'history'; scheduleId?: string; occurrenceId?: string }
@@ -82,7 +82,8 @@ export function parseRoute(hash: string): AppRoute {
   }
   if (parts[0] === 'run') return { kind: 'run', packageId: parts[1] || undefined,
     ...(parts[2]&&parts[3]?{target:{type:parts[2],resourceId:parts[3],...(query.get('id')?{logicalId:query.get('id')!}:{})}}:{}),
-    environment:query.has('environment')?query.get('environment')||'':undefined };
+    environment:query.has('environment')?query.get('environment')||'':undefined,
+    ...(query.get('mode') === 'batch' ? { batch: true } : {}) };
   if (parts[0] === 'jobs') return parts[1] ? { kind: 'jobs', jobId: parts[1] } : { kind: 'jobs' };
   if (parts[0] === 'advanced-load') return parts[1] ? { kind: 'load', packageId: parts[1] } : { kind: 'load' };
   if (parts[0] === 'schedules' || parts[0] === 'load-schedules' || parts[0] === 'scheduled-load') {
@@ -106,7 +107,7 @@ export function formatRoute(route: AppRoute): string {
     case 'run': {
       const root=route.packageId?'#/run/'+encodeURIComponent(route.packageId):'#/run';
       const target=route.target?'/'+encodeURIComponent(route.target.type)+'/'+encodeURIComponent(route.target.resourceId):'';
-      const query=new URLSearchParams();if(route.environment!==undefined)query.set('environment',route.environment);if(route.target?.logicalId)query.set('id',route.target.logicalId);
+      const query=new URLSearchParams();if(route.environment!==undefined)query.set('environment',route.environment);if(route.target?.logicalId)query.set('id',route.target.logicalId);if(route.batch)query.set('mode','batch');
       return root+target+(query.size?'?'+query.toString():'');
     }
     case 'packages': return '#/packages';
@@ -163,7 +164,7 @@ export function normalizeRouteHash(to: string | AppRoute): string {
 }
 
 export interface NavigationGuardApi {
-  navigate(to: string | AppRoute): void;
+  navigate(to: string | AppRoute): boolean;
   registerUnsavedChanges(isDirty: boolean, description?: string): () => void;
 }
 
@@ -215,18 +216,19 @@ export function useRouteState(): RouteState {
 
   const navigate = useCallback((to: string | AppRoute) => {
     const target = normalizeRouteHash(to);
-    if (target === committedHash.current) return;
+    if (target === committedHash.current) return true;
     if (dirtyEntries.current.size > 0) {
       showConfirmation(target);
-      return;
+      return false;
     }
     if (window.location.hash === target) {
       committedHash.current = target;
       setRoute(parseRoute(target));
-      return;
+      return true;
     }
     allowedHash.current = target;
     window.location.hash = target;
+    return true;
   }, [showConfirmation]);
 
   const confirmNavigation = useCallback(() => {

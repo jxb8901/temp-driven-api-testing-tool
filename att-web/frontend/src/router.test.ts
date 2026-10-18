@@ -24,6 +24,9 @@ describe('ATT hash route contract', () => {
     expect(parseRoute('#/jobs/J10045')).toEqual({ kind: 'jobs', jobId: 'J10045' });
     expect(parseRoute(formatRoute({ kind: 'schedules' }))).toEqual({ kind: 'schedules' });
     expect(parseRoute(formatRoute({ kind: 'settings' }))).toEqual({ kind: 'settings' });
+    expect(parseRoute(formatRoute({ kind: 'run', packageId: 'payments', environment: 'UAT', batch: true }))).toEqual({
+      kind: 'run', packageId: 'payments', environment: 'UAT', batch: true,
+    });
   });
 
   it('round-trips safe resource-source references and rejects malformed reference tokens', () => {

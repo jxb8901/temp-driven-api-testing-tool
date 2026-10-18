@@ -94,6 +94,16 @@ function resource(type: ResourceSummary['type'], resourceId: string, extra: Part
 }
 
 describe('Explorer source viewer', () => {
+  it('exposes a discoverable Batch RUN entry from the package resource catalog', async () => {
+    const onRunBatch = vi.fn();
+    const api = apiWith({ listResources: vi.fn(async () => ({ items: [resource('case', 'payments.C1')], total: 1, nextCursor: null })) });
+    await render(<ExplorerPage api={api} packageId="payments" resourceRoute={null} environment="SIT"
+      registerUnsavedChanges={() => () => {}} onResourceRouteChange={() => {}} onJobAccepted={() => {}} onRunBatch={onRunBatch} />);
+
+    click(button('Batch RUN'));
+    expect(onRunBatch).toHaveBeenCalledTimes(1);
+  });
+
   it('virtualizes a multi-thousand-line safe projection, refreshes repeatedly, and copies only displayed text', async () => {
     let version = 0;
     const source = Array.from({ length: 5000 }, (_, index) => `line-${index + 1}: ${index === 0 ? '<img src=x onerror=alert(1)>' : 'value'}`).join('\n');

@@ -195,6 +195,19 @@ for archive in "$LOCAL_ARCHIVE" "$SERVER_ARCHIVE"; do
   echo "Verified package size: $archive ($archive_size bytes)"
 done
 
+python3 - "$LOCAL_ARCHIVE" "$SERVER_ARCHIVE" "$SOURCE_ARCHIVE" <<'PYTIME'
+import sys
+import tarfile
+
+minimum_build_timestamp = 946684800  # 2000-01-01: release archives must carry a real build-era timestamp.
+for archive_path in sys.argv[1:]:
+    with tarfile.open(archive_path, "r:gz") as archive:
+        entries = [entry for entry in archive.getmembers() if entry.name.rstrip("/") != entry.name.split("/", 1)[0]]
+    stale = [entry.name for entry in entries if entry.mtime < minimum_build_timestamp]
+    if stale:
+        raise SystemExit("Release archive contains entries with unset/1980 timestamps: " + archive_path + ": " + ", ".join(stale[:10]))
+PYTIME
+
 build_timer_next "Release publication"
 cp "$LOCAL_ARCHIVE" "$DIST_DIR/$LOCAL_PACKAGE_NAME.tar.gz"
 cp "$SERVER_ARCHIVE" "$DIST_DIR/$SERVER_PACKAGE_NAME.tar.gz"

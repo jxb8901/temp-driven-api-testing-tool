@@ -31,6 +31,45 @@ class WorkerMainTest {
     @TempDir Path temp;
     private final ObjectMapper mapper=new ObjectMapper();
 
+    @Test void repeatedWorkerJvmsShareOneTrustedSchemaCacheAndRepairPartialExtraction() throws Exception {
+        Path temporary=temp.resolve("trusted-schema-temp");
+        Files.createDirectories(temporary);
+        String javaExecutable=Paths.get(System.getProperty("java.home"),"bin",isWindows()?"java.exe":"java").toString();
+        String classpath=System.getProperty("java.class.path");
+
+        Process first=new ProcessBuilder(javaExecutable,"-Djava.io.tmpdir="+temporary.toAbsolutePath(),"-cp",classpath,
+                TrustedSchemaCacheProcess.class.getName()).start();
+        String firstOut=read(first.getInputStream());
+        String firstErr=read(first.getErrorStream());
+        assertEquals(0,first.waitFor(),firstErr+"\n"+firstOut);
+
+        Path cacheBase;
+        try(java.util.stream.Stream<Path> paths=Files.list(temporary)) {
+            cacheBase=paths.filter(path->path.getFileName().toString().startsWith("att-trusted-schema-cache-"))
+                    .findFirst().orElseThrow(()->new AssertionError("Worker did not create the shared trusted schema cache"));
+        }
+        Path cacheRoot;
+        try(java.util.stream.Stream<Path> paths=Files.list(cacheBase)) {
+            cacheRoot=paths.filter(Files::isDirectory).findFirst().orElseThrow(()->new AssertionError("Trusted schema cache root is missing"));
+        }
+        Path catalog=cacheRoot.resolve("schemas/catalog.yaml");
+        assertTrue(Files.isRegularFile(catalog));
+        Files.delete(catalog); // Simulate a Worker being terminated during extraction.
+
+        Process second=new ProcessBuilder(javaExecutable,"-Djava.io.tmpdir="+temporary.toAbsolutePath(),"-cp",classpath,
+                TrustedSchemaCacheProcess.class.getName()).start();
+        Process third=new ProcessBuilder(javaExecutable,"-Djava.io.tmpdir="+temporary.toAbsolutePath(),"-cp",classpath,
+                TrustedSchemaCacheProcess.class.getName()).start();
+        String secondErr=read(second.getErrorStream());
+        String thirdErr=read(third.getErrorStream());
+        assertEquals(0,second.waitFor(),secondErr);
+        assertEquals(0,third.waitFor(),thirdErr);
+        assertTrue(Files.isRegularFile(catalog),"A following Worker must repair an interrupted schema extraction");
+        try(java.util.stream.Stream<Path> paths=Files.list(cacheBase)) {
+            assertEquals(1,paths.filter(Files::isDirectory).count(),"Worker JVMs must reuse one schema tree per packaged schema version");
+        }
+    }
+
     @Test void terminatingWorkerStopsAnActiveCommandBackedTool() throws Exception {
         Path root=temp.resolve("worker-tool-termination");
         Files.createDirectories(root.resolve("config"));

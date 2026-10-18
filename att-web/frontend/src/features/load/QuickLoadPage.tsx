@@ -21,7 +21,7 @@ interface QuickLoadPageProps {
   onRetryEnvironments?: () => void;
   onEnvironmentChange(environment: string): void;
   onJobAccepted(jobId: string): void;
-  onSchedule?(input: { packageId: string; environment?: string; draftId?: string; previewYaml?: string; scenario?: string }): void;
+  onSchedule?(input: { packageId: string; environment?: string; draftId?: string; previewYaml?: string; scenario?: string }): boolean | void;
   onCancel(): void;
   registerUnsavedChanges(isDirty: boolean, description?: string): () => void;
 }

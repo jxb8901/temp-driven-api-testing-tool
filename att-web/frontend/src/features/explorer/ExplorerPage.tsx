@@ -85,7 +85,7 @@ function ExplorerReference({ reference, onOpen }: { reference: ResourceReference
 
 export function ExplorerPage({ api, packageId, resourceRoute, environment,
   principalLabel = '', onResourceRouteChange, onJobAccepted, onPrincipalLabelChange, onOpenQuickLoad,
-  onRunTarget, onScheduleDebug, onOpenConfigurationFile, registerUnsavedChanges }: ExplorerPageProps) {
+  onRunTarget, onRunBatch, onScheduleDebug, onOpenConfigurationFile, registerUnsavedChanges }: ExplorerPageProps) {
   const initialListState = useRef(savedExplorerList(packageId)).current;
   const [query, setQuery] = useState(initialListState.query);
   const [typeFilter, setTypeFilter] = useState<ResourceSummary['type'] | 'all'>(initialListState.typeFilter);
@@ -359,8 +359,11 @@ export function ExplorerPage({ api, packageId, resourceRoute, environment,
     const expiresAt = currentDraft?.expiresAt ? Date.parse(currentDraft.expiresAt) : Number.NaN;
     if (!currentDraft || !Number.isFinite(expiresAt) || expiresAt <= Date.now() + 15_000) currentDraft = await previewDebug();
     if (!currentDraft) return;
-    onScheduleDebug({ packageId, environment: environment || undefined, draftId: currentDraft.draftId, executionType: 'run', legacyDebug: !currentDraft.draftId.startsWith('R'),
+    const wasDirty = dirtyRef.current;
+    updateDirty(false);
+    const accepted = onScheduleDebug({ packageId, environment: environment || undefined, draftId: currentDraft.draftId, executionType: 'run', legacyDebug: !currentDraft.draftId.startsWith('R'),
       previewYaml: currentDraft.previewYaml, target: { type: debugForm.target.type, id: debugForm.target.id } });
+    if (accepted === false && wasDirty) updateDirty(true);
   };
 
   const startDebug = async () => {
@@ -433,6 +436,7 @@ export function ExplorerPage({ api, packageId, resourceRoute, environment,
     <header className="att-explorer-page-heading">
       <div><p className="att-explorer-breadcrumb">Packages / {packageId} / Explorer</p><h1>{identity ? 'Resource details' : 'Package Explorer'}</h1>
         <p>{identity ? 'View the safe definition, source, and dependencies for this resource.' : 'Search, sort, and open resources. Choose an execution environment from the RUN or Quick LOAD editor.'}</p></div>
+      {!identity && onRunBatch && <button className="button button-primary" type="button" onClick={onRunBatch}>Batch RUN</button>}
     </header>
 
     <div className={`att-explorer-workspace${identity ? ' has-selected-resource' : ' is-list-first'}`}>

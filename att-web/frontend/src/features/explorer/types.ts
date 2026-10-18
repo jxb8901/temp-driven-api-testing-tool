@@ -274,9 +274,10 @@ export interface ExplorerPageProps {
   principalLabel?: string;
   onResourceRouteChange: (route: (Omit<ResourceIdentity, 'packageId'> & { logicalId?: string; tab?: 'definition' | 'source' | 'relations' }) | null) => void;
   onRunTarget?: (target: { type: string; resourceId: string; logicalId?: string }) => void;
+  onRunBatch?: () => void;
   onJobAccepted: (jobId: string) => void;
   onPrincipalLabelChange?: (label: string) => void;
   onOpenQuickLoad?: (identity: ResourceIdentity) => void;
-  onScheduleDebug?: (input: { packageId: string; environment?: string; draftId: string; previewYaml?: string; executionType: 'run' | 'load'; legacyDebug?: boolean; target: { type: DebugResourceType; id: string } }) => void;
+  onScheduleDebug?: (input: { packageId: string; environment?: string; draftId: string; previewYaml?: string; executionType: 'run' | 'load'; legacyDebug?: boolean; target: { type: DebugResourceType; id: string } }) => boolean | void;
   onOpenConfigurationFile?: (path: string, origin?: string, reference?: ResourceSourceReference) => void;
 }
