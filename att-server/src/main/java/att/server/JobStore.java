@@ -121,6 +121,69 @@ final class JobStore implements AutoCloseable {
             }
         }
     }
+
+    /**
+     * Resolves and persists the identity used by a manual trigger. New schedules already have
+     * an executionPrincipal. For older schedules, an active USER owner is adopted as-is; an
+     * active ADMIN owner may be explicitly transferred to the active USER who presses Run Now.
+     * Missing or disabled owners stay fail-closed.
+     */
+    synchronized LoadSchedule authorizeManualScheduleExecution(String id,String principal,boolean localAuth,String now) throws Exception {
+        try(Connection c=connect()) {
+            c.setAutoCommit(false);
+            try(PreparedStatement p=c.prepareStatement("SELECT schedule_json FROM load_schedules WHERE schedule_id=? FOR UPDATE")) {
+                p.setString(1,id);
+                try(ResultSet r=p.executeQuery()) {
+                    if(!r.next()){c.rollback();return null;}
+                    LoadSchedule schedule=ServerRuntime.JSON.readValue(r.getString(1),LoadSchedule.class);
+                    boolean migrated=false,changed=false;
+                    if(localAuth) {
+                        if(!activeUser(c,principal))throw new IllegalArgumentException("Triggering user is no longer authorized");
+                        if(schedule.executionIdentityMigratedFrom!=null) {
+                            c.commit();return schedule;
+                        } else if(activeUser(c,schedule.createdBy)) {
+                            if(schedule.executionPrincipal==null||schedule.executionPrincipal.isBlank()) {
+                                schedule.executionPrincipal=schedule.createdBy;changed=true;
+                            }
+                        } else if(activeAdmin(c,schedule.createdBy)) {
+                            schedule.executionPrincipal=principal;
+                            schedule.executionIdentityMigratedFrom=schedule.createdBy;
+                            schedule.executionIdentityMigratedBy=principal;
+                            schedule.executionIdentityMigratedAt=now;
+                            migrated=true;changed=true;
+                        } else {
+                            // Preserve the occurrence history: submitScheduledJob records the
+                            // authorization failure as failed-to-submit before any Worker starts.
+                            c.commit();return schedule;
+                        }
+                    } else if(schedule.executionPrincipal==null||schedule.executionPrincipal.isBlank()) {
+                        schedule.executionPrincipal=principal;changed=true;
+                    }
+                    if(!changed){c.commit();return schedule;}
+                    schedule.updatedBy=principal;schedule.updatedAt=now;
+                    String json=ServerRuntime.JSON.writeValueAsString(schedule);
+                    try(PreparedStatement update=c.prepareStatement("UPDATE load_schedules SET schedule_json=?,enabled=?,next_run_at=?,updated_at=? WHERE schedule_id=?")) {
+                        update.setString(1,json);update.setBoolean(2,schedule.enabled);update.setString(3,schedule.nextRunAt);
+                        update.setString(4,schedule.updatedAt);update.setString(5,schedule.id);update.executeUpdate();
+                    }
+                    if(migrated)try(PreparedStatement audit=c.prepareStatement("INSERT INTO audit(principal,action,job_id,package_id,created_at,outcome) VALUES(?,? ,NULL,?,?,?)")) {
+                        audit.setString(1,principal);audit.setString(2,"SCHEDULE_IDENTITY_MIGRATE");audit.setString(3,schedule.packageId);
+                        audit.setString(4,now);audit.setString(5,"LEGACY_ADMIN_TO_USER");audit.executeUpdate();
+                    }
+                    c.commit();return schedule;
+                }
+            } catch(Exception failure) {c.rollback();throw failure;}
+        }
+    }
+
+    private static boolean activeUser(Connection c,String login) throws Exception {return activeRole(c,login,"USER");}
+    private static boolean activeAdmin(Connection c,String login) throws Exception {return activeRole(c,login,"ADMIN");}
+    private static boolean activeRole(Connection c,String login,String role) throws Exception {
+        if(login==null||login.isBlank())return false;
+        try(PreparedStatement p=c.prepareStatement("SELECT 1 FROM auth_users WHERE login_id=? AND role=? AND active=TRUE")) {
+            p.setString(1,login);p.setString(2,role);try(ResultSet r=p.executeQuery()){return r.next();}
+        }
+    }
     synchronized LoadSchedule setScheduleEnabled(String id,boolean enabled,String principal,String updatedAt,String nextRunAt) throws Exception {
         try(Connection c=connect()) {
             c.setAutoCommit(false);

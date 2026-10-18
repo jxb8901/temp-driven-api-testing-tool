@@ -37,6 +37,12 @@ final class LoadSchedule {
     public int maxConcurrentRuns=1;
     public boolean enabled;
     public String createdBy;
+    /** User identity used for automatic occurrences; old records without it are migrated on manual trigger. */
+    public String executionPrincipal;
+    /** Non-null when an active USER explicitly adopted a legacy ADMIN-created schedule. */
+    public String executionIdentityMigratedFrom;
+    public String executionIdentityMigratedBy;
+    public String executionIdentityMigratedAt;
     public String createdAt;
     public String updatedBy;
     public String updatedAt;
@@ -53,7 +59,10 @@ final class LoadSchedule {
         copy.tags=tags==null?List.of():List.copyOf(tags);
         copy.config=config;copy.environment=environment;copy.timezone=timezone;copy.cron=cron;copy.runAt=runAt;
         copy.load=load==null?new LinkedHashMap<>():new LinkedHashMap<>(load);copy.maxConcurrentRuns=maxConcurrentRuns;copy.enabled=enabled;
-        copy.createdBy=createdBy;copy.createdAt=createdAt;copy.updatedBy=updatedBy;copy.updatedAt=updatedAt;copy.nextRunAt=nextRunAt;
+        copy.createdBy=createdBy;copy.executionPrincipal=executionPrincipal;
+        copy.executionIdentityMigratedFrom=executionIdentityMigratedFrom;copy.executionIdentityMigratedBy=executionIdentityMigratedBy;
+        copy.executionIdentityMigratedAt=executionIdentityMigratedAt;
+        copy.createdAt=createdAt;copy.updatedBy=updatedBy;copy.updatedAt=updatedAt;copy.nextRunAt=nextRunAt;
         return copy;
     }
 

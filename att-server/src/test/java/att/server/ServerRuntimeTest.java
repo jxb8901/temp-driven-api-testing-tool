@@ -812,10 +812,12 @@ class ServerRuntimeTest {
         Path config=Files.writeString(temp.resolve("owner-server.yaml"),"server:\n  dataDir: "+yaml(temp.resolve("owner-data"))+"\n  auth: {mode: local}\n  scheduling: {enabled: true}\nworkers: {}\npackages:\n  allowedRoots: ["+yaml(root)+"]\n  entries:\n    p: "+yaml(root)+"\n");
         try(ServerRuntime runtime=new ServerRuntime(ServerConfig.load(config),"")) {
             runtime.store.createBootstrapAdmin("keeper","Active administrator","unused","csrf");
-            runtime.store.createAuthUser("disabled","Disabled owner","unused","ADMIN","csrf");
-            runtime.store.setAuthActive("disabled",false);
+            runtime.store.createAuthUser("disabled-admin","Disabled administrator","unused","ADMIN","csrf");
+            runtime.store.setAuthActive("disabled-admin",false);
+            runtime.store.createAuthUser("disabled-user","Disabled user","unused","USER","csrf");
+            runtime.store.setAuthActive("disabled-user",false);
             runtime.store.createAuthUser("reader","Reader owner","unused","USER","csrf");
-            for(String type:List.of("run","load","debug"))for(String owner:List.of("missing","disabled")) {
+            for(String type:List.of("run","load","debug"))for(String owner:List.of("missing","disabled-admin","disabled-user")) {
                 LoadSchedule schedule=new LoadSchedule();schedule.id="S"+type+owner;schedule.name="Owner authority";schedule.jobType=type;
                 schedule.packageId="p";schedule.createdBy=owner;schedule.timezone="UTC";schedule.cron="0 2 * * *";
                 schedule.createdAt=Instant.now().toString();schedule.updatedAt=schedule.createdAt;
@@ -854,6 +856,7 @@ class ServerRuntimeTest {
         addWorkerClasspathJars(libs);
         try(ServerRuntime runtime=new ServerRuntime(ServerConfig.load(server),libs.toString())) {
             runtime.store.createAuthUser("alice","Alice","unused","USER","csrf");
+            runtime.store.createAuthUser("legacy-admin","Legacy administrator","unused","ADMIN","csrf");
             for(String environment:List.of("SIT","UAT"))for(String type:List.of("case","template","flow","tool")) {
                 var body=ServerRuntime.JSON.createObjectNode();body.put("schemaVersion",RunDefinition.VERSION);body.put("executionType","run");body.put("packageId","p");body.put("environment",environment);
                 String id=switch(type){case "case"->"cases.default.C1";case "template"->"SIMPLE";case "flow"->"simple.flow.v1";default->"version";};
@@ -866,7 +869,26 @@ class ServerRuntimeTest {
                 LoadSchedule scheduled=runtime.createLoadSchedule(ServerRuntime.JSON.valueToTree(Map.of("name",environment+" "+type,
                         "packageId","p","environment",environment,"executionType","run","draftId",draftId,
                         "timezone","UTC","cron","0 2 * * *","enabled",false)),"alice");
+                boolean migratedLegacyAdmin="SIT".equals(environment)&&"case".equals(type);
+                if(migratedLegacyAdmin) {
+                    scheduled.createdBy="legacy-admin";scheduled.executionPrincipal=null;
+                    scheduled.executionIdentityMigratedFrom=null;runtime.store.saveSchedule(scheduled);
+                }
                 Map<String,Object> occurrence=runtime.triggerLoadSchedule(scheduled.id,"alice");
+                if(migratedLegacyAdmin) {
+                    LoadSchedule migrated=runtime.loadSchedule(scheduled.id);
+                    assertEquals("legacy-admin",migrated.createdBy,"Keep the original creator for audit");
+                    assertEquals("alice",migrated.executionPrincipal);
+                    assertEquals("legacy-admin",migrated.executionIdentityMigratedFrom);
+                    assertEquals("alice",migrated.executionIdentityMigratedBy);
+                    assertNotNull(migrated.executionIdentityMigratedAt);
+                    String url="jdbc:h2:file:"+temp.resolve("unified-data/db/att-server").toString().replace('\\','/')+";DB_CLOSE_ON_EXIT=FALSE;AUTO_SERVER=FALSE";
+                    try(var connection=java.sql.DriverManager.getConnection(url,"sa","");var audit=connection.prepareStatement(
+                            "SELECT COUNT(*) FROM audit WHERE principal=? AND action=? AND outcome=?")) {
+                        audit.setString(1,"alice");audit.setString(2,"SCHEDULE_IDENTITY_MIGRATE");audit.setString(3,"LEGACY_ADMIN_TO_USER");
+                        try(var rows=audit.executeQuery()){assertTrue(rows.next());assertEquals(1,rows.getInt(1));}
+                    }
+                }
                 Map<String,Object> scheduledResult=awaitUnifiedJob(runtime,String.valueOf(occurrence.get("jobId")));
                 assertEquals("PASS",((Map<?,?>)scheduledResult.get("job")).get("status"),environment+" scheduled "+type+" "+scheduledResult);
                 assertEquals("alice",((Map<?,?>)scheduledResult.get("job")).get("principal"));

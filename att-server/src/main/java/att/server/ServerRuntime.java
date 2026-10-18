@@ -1554,7 +1554,7 @@ final class ServerRuntime implements AutoCloseable {
     LoadSchedule createLoadSchedule(JsonNode input,String principal) throws Exception {
         requireSchedulingEnabled();
         requireLocalOperator(principal);
-        LoadSchedule schedule=buildLoadSchedule(input,null,principal);schedule.id="S"+UUID.randomUUID().toString().replace("-","").toUpperCase();schedule.createdBy=principal;schedule.createdAt=clock.instant().toString();
+        LoadSchedule schedule=buildLoadSchedule(input,null,principal);schedule.id="S"+UUID.randomUUID().toString().replace("-","").toUpperCase();schedule.createdBy=principal;schedule.executionPrincipal=principal;schedule.createdAt=clock.instant().toString();
         store.createSchedule(schedule,config.scheduling.maxSchedules);store.audit(principal,"SCHEDULE_CREATE",null,schedule.packageId,"CREATED");return schedule;
     }
     Map<String,Object> previewLoadSchedule(JsonNode input) {
@@ -1597,26 +1597,39 @@ final class ServerRuntime implements AutoCloseable {
         return schedule;
     }
     void deleteLoadSchedule(String id,String principal) throws Exception {requireSchedulingEnabled();requireLocalOperator(principal);LoadSchedule schedule=store.schedule(id);if(schedule==null)throw new NotFoundException();store.deleteSchedule(id);store.audit(principal,"SCHEDULE_DELETE",null,schedule.packageId,"DELETED");}
-    Map<String,Object> triggerLoadSchedule(String id,String principal) throws Exception {requireSchedulingEnabled();requireLocalOperator(principal);LoadSchedule schedule=store.schedule(id);if(schedule==null)throw new NotFoundException();Map<String,Object> occurrence=loadScheduleScheduler.trigger(schedule);store.audit(principal,"SCHEDULE_TRIGGER",String.valueOf(occurrence.get("jobId")),schedule.packageId,String.valueOf(occurrence.get("status")));return occurrence;}
+    Map<String,Object> triggerLoadSchedule(String id,String principal) throws Exception {
+        requireSchedulingEnabled();requireLocalOperator(principal);
+        LoadSchedule schedule=store.authorizeManualScheduleExecution(id,principal,"local".equals(config.authMode),clock.instant().toString());
+        if(schedule==null)throw new NotFoundException();
+        Map<String,Object> occurrence=loadScheduleScheduler.trigger(schedule,principal);
+        store.audit(principal,"SCHEDULE_TRIGGER",String.valueOf(occurrence.get("jobId")),schedule.packageId,String.valueOf(occurrence.get("status")));
+        return occurrence;
+    }
 
     private void requireLocalOperator(String principal) throws Exception {
         if("local".equals(config.authMode)&&!store.isActiveUser(principal))throw new NotFoundException();
     }
 
-    private Map<String,Object> submitScheduledJob(LoadSchedule schedule,String occurrenceId) throws Exception {
-        if("local".equals(config.authMode)&&!store.isActiveUser(schedule.createdBy))
-            throw new IllegalArgumentException("Schedule owner is no longer authorized");
-        if("run".equals(schedule.effectiveJobType()))return submitScheduledRun(schedule,occurrenceId);
+    private Map<String,Object> submitScheduledJob(LoadSchedule schedule,String occurrenceId,String executionPrincipal) throws Exception {
+        if("local".equals(config.authMode)) {
+            if(!store.isActiveUser(executionPrincipal))throw new IllegalArgumentException("Schedule owner is no longer authorized");
+            String automaticPrincipal=schedule.executionPrincipal==null||schedule.executionPrincipal.isBlank()?schedule.createdBy:schedule.executionPrincipal;
+            if(!store.isActiveUser(automaticPrincipal))
+                throw new IllegalArgumentException("Schedule owner is no longer authorized");
+            if(schedule.executionIdentityMigratedFrom==null&&!store.isActiveUser(schedule.createdBy))
+                throw new IllegalArgumentException("Schedule owner is no longer authorized");
+        }
+        if("run".equals(schedule.effectiveJobType()))return submitScheduledRun(schedule,occurrenceId,executionPrincipal);
         return "debug".equals(schedule.effectiveJobType())
                 ? submitScheduledDebug(schedule,occurrenceId)
                 : submitScheduledLoad(schedule,occurrenceId);
     }
 
-    private Map<String,Object> submitScheduledRun(LoadSchedule schedule,String occurrenceId) throws Exception {
+    private Map<String,Object> submitScheduledRun(LoadSchedule schedule,String occurrenceId,String executionPrincipal) throws Exception {
         validateScheduledRun(schedule);
         ObjectNode input=JSON.valueToTree(schedule.runInput);applyInspectionPolicy(input,schedule.packageId);
-        Map<String,Object> accepted=submit("run",input,schedule.createdBy,true,occurrenceId,true);
-        store.audit(schedule.createdBy,"SCHEDULE_EXECUTE",String.valueOf(accepted.get("jobId")),schedule.packageId,"ACCEPTED");
+        Map<String,Object> accepted=submit("run",input,executionPrincipal,true,occurrenceId,true);
+        store.audit(executionPrincipal,"SCHEDULE_EXECUTE",String.valueOf(accepted.get("jobId")),schedule.packageId,"ACCEPTED");
         return accepted;
     }
     private void validateScheduledRun(LoadSchedule schedule) throws Exception {

@@ -11,6 +11,10 @@ export interface ScheduleDefinition {
   /** Transport adapter only: persisted Debug schedules retain their original backend type. */
   legacyDebug?: boolean;
   createdBy?: string;
+  executionPrincipal?: string;
+  executionIdentityMigratedFrom?: string;
+  executionIdentityMigratedBy?: string;
+  executionIdentityMigratedAt?: string;
   selectedCaseIds?: string[];
   revisionPolicy?: string;
   recentStatus?: string;
