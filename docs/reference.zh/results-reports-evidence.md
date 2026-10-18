@@ -22,6 +22,8 @@ HTML 發佈前經 parser 清理：保留已核准的 relative links、inline sty
 
 Inventory 不受 `server.maxArtifacts` 限制：最多 50,000 filesystem candidates、深度 64、10,000 已發佈 entries、每項 16 MiB、總 bytes 128 MiB、manifest 8 MiB。超出總量上限會使發佈失敗並保留私有來源。ZIP 使用 STORED encoding，避免重複 log 的 compression-ratio 歧義。Reader 拒絕不安全路徑、control characters、encoded traversal、重複或大小寫衝突名稱、過大或高壓縮比 entries、未列入 manifest 的 entries 及 integrity mismatch。Writer 為單一有界佇列，同時最多八個 artifact reads。
 
+Reader 在信任 manifest 前，亦會比較 ZIP central directory 與 local header。Link、special-file 或 Windows reparse attribute、file/directory prefix collision、覆寫 filename 的 extra field、comment、隱藏 prefix／record、重疊 entry、multipart archive 及 ZIP64 均會被拒絕。受限 export profile 只接受 STORED／Deflate entry 及 timestamp-only extra metadata；ATT 寫入 STORED entry。Manifest parsing 拒絕 duplicate key、尾隨 document、fractional version／size、未知 field，以及不符合 policy 的 omission 文字。ZIP 結構可讀並不代表已核准匯出。
+
 ### 檢視及下載 Job archive
 
 在 Job Details 開啟 **Artifacts**。報告清單獨立於分頁；使用 **View Report** 或 **Preview** 開啟內容。文字 viewer 提供唯讀、search、copy、line numbers，顯示最多 200,000 characters；**Load more artifacts** 載入後續頁面。**Download Artifacts (.zip)** 是唯一下載操作。解壓後可直接開啟 HTML，relative links 保持相同 archive hierarchy。

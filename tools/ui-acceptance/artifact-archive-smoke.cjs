@@ -12,6 +12,10 @@ async function main() {
   const browser = await launchBrowser();
   const online = await browser.newContext({ httpCredentials: { username: 'colleague', password: 'secret', send: 'always' } });
   const offline = await browser.newContext();
+  for (const context of [online, offline]) {
+    context.setDefaultTimeout(15_000);
+    context.setDefaultNavigationTimeout(20_000);
+  }
   const unexpectedNetwork = [];
   await offline.route(/^https?:/, route => { unexpectedNetwork.push(route.request().url()); return route.abort(); });
   try {
@@ -59,6 +63,7 @@ async function main() {
         const reportUrl = `${origin}/tools/att/api/v1/jobs/${fixture.jobId}/artifacts/view/${reportPath.split('/').map(encodeURIComponent).join('/')}`;
         await frame.waitForURL(reportUrl);
         await frame.locator('body').waitFor();
+        process.stdout.write(`  Online report loaded: ${reportPath}\n`);
         assert.equal(await frame.evaluate(() => { try { return !!parent.document.body; } catch { return false; } }), false,
           'The report must not read the application DOM');
         const relative = await frame.locator('a[href]').evaluateAll(links => links.map(link => link.getAttribute('href')).filter(href => href && !href.startsWith('#')));
@@ -70,6 +75,7 @@ async function main() {
         // Child-frame navigations participate in joint history but do not fire a main-frame load.
         await page.evaluate(() => history.back()); await frame.waitForURL(reportUrl);
         await page.evaluate(() => history.forward()); await frame.waitForURL(destination);
+        process.stdout.write(`  Online relative navigation and history passed: ${reportPath}\n`);
         await viewer.getByRole('button', { name: 'Close preview', exact: true }).click();
 
         const file = await offline.newPage();
@@ -78,6 +84,7 @@ async function main() {
         const fileUrl = pathToFileURL(path.join(fixture.offlineRoot, reportPath)).href;
         await file.goto(fileUrl);
         await file.locator('body').waitFor();
+        process.stdout.write(`  Offline report loaded: ${reportPath}\n`);
         assert.ok(await file.locator('style').count(), 'The extracted report retains self-contained styling');
         assert.deepEqual(await file.locator('a[href]').evaluateAll(links => links.map(link => link.getAttribute('href')).filter(href => href && !href.startsWith('#'))), relative);
         const controls = file.locator('#caseSearch');
@@ -92,9 +99,10 @@ async function main() {
           // file:// has no HTTP Content-Type. Chromium may hand YAML to its native downloader.
           // Verify the actual relative target bytes in that case, rather than overriding browser policy.
           const targetUrl = new URL(href, fileUrl).href;
-          const followed = Promise.race([
+          process.stdout.write(`  Following offline link: ${href}\n`);
+          const followed = Promise.any([
             file.waitForEvent('download').then(download => ({ download })),
-            file.waitForURL(targetUrl, { waitUntil: 'commit' }).then(() => ({ navigated: true })).catch(() => new Promise(() => {})),
+            file.waitForURL(targetUrl, { waitUntil: 'commit' }).then(() => ({ navigated: true })),
           ]);
           await file.locator('a[href]').evaluateAll((links, value) => links.find(link => link.getAttribute('href') === value).click(), href);
           const result = await followed;

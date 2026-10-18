@@ -30,7 +30,12 @@ final class ArtifactArchive {
     static final int MAX_CANDIDATES = 50_000;
     static final long MAX_ARCHIVE_BYTES = MAX_TOTAL_BYTES + MAX_MANIFEST_BYTES + 4L * 1024 * 1024;
     private static final Set<String> SAFE_EXTENSIONS = Set.of("txt", "log", "json", "yaml", "yml", "xml", "html", "htm", "css", "csv", "md");
-    private static final ObjectMapper JSON = new ObjectMapper();
+    private static final String OMISSION_REASON = "unsupported, unsafe, duplicate, binary, oversized, or unapproved output";
+    private static final ObjectMapper JSON = new ObjectMapper(com.fasterxml.jackson.core.JsonFactory.builder()
+            .enable(com.fasterxml.jackson.core.StreamReadFeature.STRICT_DUPLICATE_DETECTION)
+            .streamReadConstraints(com.fasterxml.jackson.core.StreamReadConstraints.builder()
+                    .maxNestingDepth(16).maxStringLength(8192).maxNumberLength(20).build()).build())
+            .enable(com.fasterxml.jackson.databind.DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
 
     @FunctionalInterface interface Publisher { byte[] publish(Path source) throws Exception; }
     record Entry(String path, String mediaType, long size, String sha256, String classification, String decision, boolean report, boolean preview) {}
@@ -82,7 +87,7 @@ final class ArtifactArchive {
                 }
                 Map<String,Object> manifest=new LinkedHashMap<>();
                 manifest.put("version",1);manifest.put("policy","att-export-safe-text-v2");manifest.put("entries",entries);manifest.put("complete",omitted==0);
-                manifest.put("omissions",omitted==0?List.of():List.of(Map.of("count",omitted,"reason","unsupported, unsafe, duplicate, binary, oversized, or unapproved output")));
+                manifest.put("omissions",omitted==0?List.of():List.of(Map.of("count",omitted,"reason",OMISSION_REASON)));
                 byte[] bytes=JSON.writeValueAsBytes(manifest);
                 if(bytes.length>MAX_MANIFEST_BYTES)throw new IllegalArgumentException("Artifact manifest exceeds limits");
                 writeEntry(zip,MANIFEST,bytes);
@@ -118,6 +123,7 @@ final class ArtifactArchive {
     static Map<String,Object> verify(Path archive, boolean digests) throws Exception {
         if (Files.isSymbolicLink(archive) || !Files.isRegularFile(archive, LinkOption.NOFOLLOW_LINKS) || Files.size(archive) > MAX_ARCHIVE_BYTES)
             throw new IllegalArgumentException("Invalid artifact archive");
+        ArtifactZipStructure.verify(archive);
         try (ZipFile zip = new ZipFile(archive.toFile())) {
             Set<String> names = new HashSet<>();
             long total = 0;
@@ -139,18 +145,21 @@ final class ArtifactArchive {
             try (InputStream input = zip.getInputStream(manifestEntry)) {
                 byte[] bytes = input.readNBytes(MAX_MANIFEST_BYTES + 1);
                 if (bytes.length != manifestEntry.getSize() || !validCrc(manifestEntry,bytes)) throw new IllegalArgumentException("Invalid manifest size");
-                manifest = JSON.readValue(bytes, Map.class);
+                try { manifest = JSON.readValue(bytes, Map.class); }
+                catch (com.fasterxml.jackson.core.JacksonException invalid) { throw new IllegalArgumentException("Invalid archive manifest"); }
             }
-            if (!(manifest.get("version") instanceof Number version) || version.intValue() != 1
+            if (manifest == null || !manifest.keySet().equals(Set.of("version", "policy", "entries", "complete", "omissions"))
+                    || !Integer.valueOf(1).equals(manifest.get("version")) || !validOmissions(manifest)
                     || !"att-export-safe-text-v2".equals(manifest.get("policy")) || !(manifest.get("entries") instanceof List<?> entries)
                     || entries.size() != count - 1) throw new IllegalArgumentException("Invalid archive manifest");
             Set<String> approved = new HashSet<>();
             for (Object value : entries) {
-                if (!(value instanceof Map<?,?> row) || !(row.get("path") instanceof String path) || !safePath(path)
+                if (!(value instanceof Map<?,?> row) || !row.keySet().equals(Set.of("path", "mediaType", "size", "sha256", "classification", "decision", "report", "preview"))
+                        || !(row.get("path") instanceof String path) || !safePath(path)
                         || MANIFEST.equalsIgnoreCase(path) || !approved.add(path.toLowerCase(Locale.ROOT)) || !SAFE_EXTENSIONS.contains(extension(path)))
                     throw new IllegalArgumentException("Invalid manifest entry");
                 ZipEntry entry = zip.getEntry(path);
-                if (entry == null || !(row.get("size") instanceof Number size) || size.longValue() != entry.getSize()
+                if (entry == null || !integral(row.get("size")) || ((Number) row.get("size")).longValue() != entry.getSize()
                         || !(row.get("sha256") instanceof String digest) || !digest.matches("[a-f0-9]{64}")
                         || !mediaType(path).equals(row.get("mediaType")) || !"textual-output".equals(row.get("classification"))
                         || !"sanitized-once".equals(row.get("decision")) || !Boolean.TRUE.equals(row.get("preview"))
@@ -163,6 +172,18 @@ final class ArtifactArchive {
             }
             return manifest;
         }
+    }
+
+    private static boolean integral(Object value) { return value instanceof Integer || value instanceof Long; }
+
+    private static boolean validOmissions(Map<String, Object> manifest) {
+        if (!(manifest.get("complete") instanceof Boolean complete) || !(manifest.get("omissions") instanceof List<?> omissions)) return false;
+        if (complete) return omissions.isEmpty();
+        if (omissions.size() != 1 || !(omissions.get(0) instanceof Map<?, ?> omission)
+                || !omission.keySet().equals(Set.of("count", "reason")) || !OMISSION_REASON.equals(omission.get("reason"))
+                || !integral(omission.get("count"))) return false;
+        long count = ((Number) omission.get("count")).longValue();
+        return count > 0 && count <= MAX_CANDIDATES;
     }
 
     private static void writeEntry(ZipOutputStream zip, String path, byte[] bytes) throws Exception {
