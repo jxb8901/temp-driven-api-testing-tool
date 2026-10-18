@@ -129,7 +129,11 @@ async function main() {
       const link = await fileLink.evaluate(element => element.outerHTML);
       throw new Error(`${error.stack || error}\nCurrent URL: ${page.url()}\nHeadings: ${headings.join(' | ')}\nNavigations: ${navigationEvents.join(' -> ')}\nPage errors: ${pageErrors.join(' | ')}\nDialogs: ${JSON.stringify(dialogs)}\nLink: ${link}\nPage: ${body}`);
     }
-    await page.getByText('<request>safe payload</request>').waitFor();
+    const payloadSource = page.locator('.att-config-source-view .att-code-editor .cm-content');
+    await payloadSource.waitFor();
+    const payloadSourceText = await payloadSource.evaluate(element => element.textContent || '');
+    assert.ok(payloadSourceText.includes('<request>safe payload</request>'),
+      `the safe package source should remain visible through CodeMirror: ${payloadSourceText}`);
     assert.equal(await page.locator('.att-code-language').last().textContent(), 'XML');
     assert.equal(await page.getByText('template-secret').count(), 0, 'classified source values must remain redacted');
 
