@@ -113,6 +113,8 @@ async function main() {
       })).filter(item => item.right > window.innerWidth + 1).slice(0, 8),
     }));
     assert.ok(mobileLayout.scrollWidth <= mobileLayout.viewport, `History must fit a phone viewport: ${JSON.stringify(mobileLayout)}`);
+    assert.ok(await page.locator('.att-occurrence-id-details summary').evaluateAll(nodes => nodes.every(node => node.getBoundingClientRect().height >= 40)),
+      'Full occurrence ID controls must meet the mobile touch target size.');
     await page.addScriptTag({ path: require.resolve('axe-core/axe.min.js') });
     assert.deepEqual(await page.evaluate(async () => (await window.axe.run(document, {
       runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa', 'wcag22aa'] },

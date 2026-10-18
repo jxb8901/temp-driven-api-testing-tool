@@ -111,6 +111,7 @@
   .att-occurrence-table th, .att-occurrence-table td { display: block; width: 100%; max-width: 100%; min-width: 0; padding: 0; border-bottom: 0; }
   .att-occurrence-table td:nth-child(4) { min-width: 0; }
   .att-occurrence-link { min-height:44px; }
+  .att-occurrence-id-details summary { min-height:44px; padding:.5rem .25rem; }
   .att-occurrence-id-details .button { min-height:44px; }
   .att-occurrence-table td::before {
     content: attr(data-label); display: block; margin-bottom: 0.15rem;
