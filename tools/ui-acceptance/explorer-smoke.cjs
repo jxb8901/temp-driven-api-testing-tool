@@ -353,13 +353,16 @@ async function main() {
     await page.getByRole('button', { name: 'Run', exact: true }).click();
     await page.getByRole('heading', { name: 'Run', exact: true }).waitFor();
     assert.match(page.url(), /#\/run\/payments\/template\/checkout\?(?:environment=[^&]+&)?id=checkout$/);
+    await page.getByText("Typed fields use the selected target's safe Debug defaults. Advanced JSON remains available for nested inputs.").waitFor();
     await page.getByRole('button', { name: 'Validate', exact: true }).click();
     try { await page.getByRole('heading', { name: 'Review', exact: true }).waitFor({ timeout: 10000 }); }
     catch (error) {
       console.error(JSON.stringify({ url: page.url(), body: await page.locator('body').innerText(), submittedInput }));
       throw error;
     }
-    assert.deepEqual(submittedInput, {}, 'Explorer starts a validated target Run with the safe empty input object');
+    assert.deepEqual(submittedInput, {
+      inputs: { credential: { $attDebugKeepDefault: '/inputs/credential' } }, vars: { retries: 2 },
+    }, 'Explorer Run uses the safe typed sidecar defaults and preserves hidden package values');
     assert.equal(await page.getByRole('button', { name: 'Schedule…', exact: true }).isDisabled(), false);
     await page.getByRole('button', { name: 'Schedule…' }).click();
     await page.waitForURL('**/#/schedules/new');
@@ -370,16 +373,21 @@ async function main() {
     assert.match(await page.locator('.att-schedule-snapshot-review pre').textContent(), /target: checkout/);
     await page.getByText(/^Next run:/).waitFor();
     await page.getByRole('button', { name: 'Save schedule', exact: true }).click();
-    try { await page.getByRole('heading', { name: 'Run', exact: true }).waitFor({ timeout: 10000 }); }
+    try { await page.getByRole('heading', { name: 'Schedules', exact: true }).waitFor({ timeout: 10000 }); }
     catch (error) {
       console.error(JSON.stringify({ url: page.url(), body: await page.locator('body').innerText(), submittedScheduleInput }));
       throw error;
     }
+    await page.getByText(/Saved .*\(ID: schedule-inline-99\)/).waitFor();
+    await page.getByRole('button', { name: 'View schedule history', exact: true }).waitFor();
+    assert.match(page.url(), /#\/schedules$/);
     assert.equal(submittedScheduleInput.draftId, 'draft-99');
     assert.equal(submittedScheduleInput.executionType, 'run');
     assert.equal(Object.hasOwn(submittedScheduleInput, 'scenario'), false);
     assert.equal(submittedPrincipal, undefined, 'saving the schedule must not start a job');
 
+    await page.goto(`${base}#/run/payments/template/checkout?environment=staging&id=checkout`);
+    await page.getByRole('heading', { name: 'Run', exact: true }).waitFor();
     await page.getByLabel('Debug diagnostics', { exact: true }).check();
     await page.locator('[data-nav="jobs"]').click();
     const discardDialog = page.getByRole('dialog', { name: 'Discard your changes?' });

@@ -23,6 +23,7 @@ import java.nio.file.StandardOpenOption;
 import java.nio.channels.FileChannel;
 import java.nio.channels.FileLock;
 import java.nio.file.attribute.PosixFilePermission;
+import java.nio.file.attribute.PosixFileAttributeView;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.nio.file.attribute.UserPrincipal;
 import java.security.MessageDigest;
@@ -313,7 +314,17 @@ public final class SchemaFiles {
             throw new IOException("The temporary directory is unavailable");
         Path base = temporary.resolve("att-trusted-schema-cache-" + userToken);
         Path home = java.nio.file.Paths.get(System.getProperty("user.home", ".")).toAbsolutePath().normalize();
-        UserPrincipal expectedOwner = Files.exists(home, LinkOption.NOFOLLOW_LINKS)
+        // Compare filesystem owners only where POSIX ownership semantics apply.
+        // Windows temp/profile folders can report different ACL owners even for
+        // directories created by the same logged-in user; inherited temp-folder
+        // ACLs provide the private fallback there.
+        boolean posixOwnerView = false;
+        try {
+            posixOwnerView = Files.getFileAttributeView(temporary, PosixFileAttributeView.class, LinkOption.NOFOLLOW_LINKS) != null;
+        } catch (UnsupportedOperationException ignored) {
+            // Fall back to the temp directory's inherited ACL on non-POSIX providers.
+        }
+        UserPrincipal expectedOwner = posixOwnerView && Files.exists(home, LinkOption.NOFOLLOW_LINKS)
                 ? Files.getOwner(home, LinkOption.NOFOLLOW_LINKS) : null;
         if (Files.exists(base, LinkOption.NOFOLLOW_LINKS) && expectedOwner != null
                 && !expectedOwner.equals(Files.getOwner(base, LinkOption.NOFOLLOW_LINKS)))
