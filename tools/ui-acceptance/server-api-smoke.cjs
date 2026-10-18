@@ -207,7 +207,10 @@ async function main() {
     await page.getByRole('heading', { name: 'Quick Load' }).waitFor();
     const quickLoadTarget = page.locator('.att-quick-load-page .att-section-heading strong');
     await quickLoadTarget.waitFor();
-    await page.getByLabel('Environment', { exact: true }).selectOption('UAT');
+    const quickLoadEnvironment = page.locator('.att-quick-load-page .att-load-grid > label').filter({ hasText: /^Environment/ }).locator('select');
+    const quickLoadLabels = await page.locator('.att-quick-load-page .att-load-grid > label').allTextContents();
+    assert.equal(await quickLoadEnvironment.count(), 1, `Quick Load must expose an Environment selector: ${JSON.stringify(quickLoadLabels)}`);
+    await quickLoadEnvironment.selectOption('UAT');
     await page.waitForFunction(() => document.querySelector('.att-quick-load-page .att-section-heading strong')?.textContent === 'flow · reference.flow.v1');
     assert.equal(await page.getByText('Target defaults are ready.', { exact: true }).count(), 1,
       'Quick Load should resolve the ready Flow and its safe defaults without validating the Load scenario');
