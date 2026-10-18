@@ -423,7 +423,7 @@ class DebugEngineTest {
                 "schemaVersion: att-template/v3.6\nname: TESTDATA\ndescription: mapped bootstrap input\nactions:\n"
                         + "  show: {type: log, message: 'copied=${EXEC.VARS.copied}|input=${EXEC.INPUT.accountId}'}\n")
                 .getBytes(StandardCharsets.UTF_8));
-        Path descriptor = project.resolve("config/testdata/accounts.yaml");
+        Path descriptor = project.resolve("testdata/accounts.yaml");
         Files.createDirectories(descriptor.getParent());
         Files.write(descriptor, ("schemaVersion: att-testdata/v1.0\nid: accounts\n"
                 + "records: [{id: 42}]\n").getBytes(StandardCharsets.UTF_8));
@@ -456,7 +456,7 @@ class DebugEngineTest {
         Files.createDirectories(descriptor.getParent());
         Files.write(descriptor, "schemaVersion: att-testdata/v1.0\nid: accounts\nrecords: [{id: 42}]\n"
                 .getBytes(StandardCharsets.UTF_8));
-        Path environmentDescriptor = project.resolve("config/testdata/environment-accounts.yaml");
+        Path environmentDescriptor = project.resolve("testdata/environment-accounts.yaml");
         Files.createDirectories(environmentDescriptor.getParent());
         Files.write(environmentDescriptor, "schemaVersion: att-testdata/v1.0\nid: accounts\nrecords: [{id: 17}]\n"
                 .getBytes(StandardCharsets.UTF_8));

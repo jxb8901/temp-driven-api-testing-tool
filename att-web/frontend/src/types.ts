@@ -50,6 +50,7 @@ export interface LocalAuthUser {
 export interface PackageSummary {
   packageId: string;
   name?: string;
+  canExecute?: boolean;
 }
 
 export type JobStatus =

@@ -39,7 +39,7 @@ public final class ApiServlet extends HttpServlet {
     @Override public void init() throws ServletException {Object r=getServletContext().getAttribute(ServerBootstrap.RUNTIME);if(!(r instanceof ServerRuntime))throw new ServletException("ATT Server runtime did not initialize");runtime=(ServerRuntime)r;}
     @Override protected void service(HttpServletRequest req,HttpServletResponse res) throws ServletException,IOException {
         long inspectionStarted=System.nanoTime();
-        boolean inspection=resourcePath(path(req))||configurationPath(path(req))||path(req).matches("/packages/[^/]+/load-catalog(?:/(?:source|validate))?");
+        boolean inspection=resourcePath(path(req))||configurationPath(path(req))||path(req).matches("/packages/[^/]+/load-catalog(?:/(?:source|validate|detail))?");
         try { serviceRequest(req,res); }
         finally { if(inspection)runtime.inspectionMetrics.record(att.metrics.InspectionMetrics.Stage.HTTP,System.nanoTime()-inspectionStarted); }
     }
@@ -53,15 +53,16 @@ public final class ApiServlet extends HttpServlet {
         try {
             if(path.startsWith("/auth/")){authGet(req,res,path,requestId);return;}
             if("/health".equals(path)){json(res,200,Map.of("status","UP","version",ServerBuildInfo.PRODUCT,"apiVersion",ServerApi.VERSION,"requestId",requestId));return;}
-            if("/version".equals(path)){json(res,200,Map.of("version",ServerBuildInfo.PRODUCT,"apiVersion",ServerApi.VERSION,"buildTime",ServerBuildInfo.BUILD_TIME,"gitCommit",ServerBuildInfo.GIT_COMMIT,"javaMinimum",17,"inlineLoadEnabled",runtime.config.inlineLoad.enabled,"loadSchedulingEnabled",runtime.config.scheduling.enabled,"unifiedRunVersion",RunDefinition.VERSION,"authMode",runtime.config.authMode,"requestId",requestId));return;}
+            if("/version".equals(path)){Map<String,Object> version=new LinkedHashMap<>();version.put("version",ServerBuildInfo.PRODUCT);version.put("apiVersion",ServerApi.VERSION);version.put("buildTime",ServerBuildInfo.BUILD_TIME);version.put("gitCommit",ServerBuildInfo.GIT_COMMIT);version.put("javaMinimum",17);version.put("inlineLoadEnabled",runtime.config.inlineLoad.enabled);version.put("loadSchedulingEnabled",runtime.config.scheduling.enabled);version.put("unifiedRunVersion",RunDefinition.VERSION);version.put("authMode",runtime.config.authMode);version.put("requestId",requestId);json(res,200,version);return;}
             boolean resourceRequest=resourcePath(path);
-            boolean loadCatalogRequest=path.matches("/packages/[^/]+/load-catalog(?:/(?:source|validate))?");
+            boolean loadCatalogRequest=path.matches("/packages/[^/]+/load-catalog(?:/(?:source|validate|detail))?");
             boolean configurationRequest=configurationPath(path);
             boolean loadPolicyRequest=loadPolicyPath(path);
             if(loadSchedulePath(path)){scheduleGet(req,res,path,requestId);return;}
             boolean draftRequest=path.matches("/drafts/[DLAR][0-9A-F]{32}");
             String principal=principal(req);if(principal==null){error(res,401,"ATT-SERVER-AUTHENTICATION-REQUIRED","An authenticated Servlet Principal is required",requestId);return;}
-            if("/metrics".equals(path)){Map<String,Object> metrics=runtime.counts();metrics.put("requestId",requestId);json(res,200,metrics);return;}
+            if("/metrics".equals(path)){if(!requireSystemAdmin(req,res,requestId))return;Map<String,Object> metrics=runtime.counts();metrics.put("requestId",requestId);json(res,200,metrics);return;}
+            if(!requireOperator(req,res,requestId))return;
             if(resourceRequest){resourceGet(req,res,path,requestId,principal);return;}
             if(loadCatalogRequest){loadCatalogGet(req,res,path,requestId,principal);return;}
             if(configurationRequest){configurationGet(req,res,path,requestId,principal);return;}
@@ -71,11 +72,12 @@ public final class ApiServlet extends HttpServlet {
                 if(draftId.startsWith("R")){Map<String,Object> response=runtime.getRunDraft(draftId,principal);response.put("requestId",requestId);json(res,200,response);}
                 else if(draftId.startsWith("L")){LoadDraft response=ServerRuntime.JSON.convertValue(runtime.getQuickLoadDraft(draftId,principal),LoadDraft.class);response.requestId=requestId;json(res,200,response);}
                 else if(draftId.startsWith("A")){LoadDraft response=ServerRuntime.JSON.convertValue(runtime.getAdvancedLoadDraft(draftId,principal),LoadDraft.class);response.requestId=requestId;json(res,200,response);}
+                else if(draftId.startsWith("C")){LoadDraft response=ServerRuntime.JSON.convertValue(runtime.getCatalogLoadDraft(draftId,principal),LoadDraft.class);response.requestId=requestId;json(res,200,response);}
                 else {DebugDraft response=ServerRuntime.JSON.convertValue(runtime.getDebugDraft(draftId,principal),DebugDraft.class);response.requestId=requestId;json(res,200,response);}
                 return;
             }
-            if("/packages".equals(path)){json(res,200,Map.of("items",runtime.packages(),"requestId",requestId));return;}
-            if(path.startsWith("/packages/")){String id=segment(path,2);json(res,200,runtime.packageView(id));return;}
+            if("/packages".equals(path)){json(res,200,Map.of("items",runtime.packages(principal),"requestId",requestId));return;}
+            if(path.startsWith("/packages/")){String id=segment(path,2);Map<String,Object> view=runtime.packageView(id,principal);view.put("requestId",requestId);json(res,200,view);return;}
             if("/jobs".equals(path)){
                 if("load".equals(req.getParameter("executionType"))) {
                     int limit=parseConfigurationLimit(req.getParameter("limit")),offset=parseOffset(req.getParameter("offset"));
@@ -112,6 +114,7 @@ public final class ApiServlet extends HttpServlet {
         if(path.startsWith("/auth/")){authPost(req,res,path,requestId);return;}
         if(authorizationPrincipal==null){error(res,401,"ATT-SERVER-AUTHENTICATION-REQUIRED","An authenticated Servlet Principal is required",requestId);return;}
         if(loadSchedulePath(path)){schedulePost(req,res,path,requestId,authorizationPrincipal);return;}
+        if(!requireOperator(req,res,requestId))return;
         boolean createRunDraft="/drafts/run".equals(path),createDebugDraft="/drafts/debug".equals(path),createQuickLoadDraft="/drafts/quick-load".equals(path),createAdvancedLoadDraft="/drafts/load".equals(path);
         String command=path.startsWith("/jobs/")?path.substring("/jobs/".length()):"";
         if(!createRunDraft&&!createDebugDraft&&!createQuickLoadDraft&&!createAdvancedLoadDraft&&!List.of("run","debug","load","validate").contains(command)){error(res,404,"ATT-SERVER-NOT-FOUND","API resource was not found",requestId);return;}
@@ -157,6 +160,7 @@ public final class ApiServlet extends HttpServlet {
         if(path.startsWith("/auth/")){authDelete(req,res,path,requestId);return;}
         if(principal==null){error(res,401,"ATT-SERVER-AUTHENTICATION-REQUIRED","An authenticated Servlet Principal is required",requestId);return;}
         if(loadSchedulePath(path)){scheduleDelete(req,res,path,requestId,principal);return;}
+        if(!requireOperator(req,res,requestId))return;
         if(!path.matches("/jobs/[^/]+")){error(res,404,"ATT-SERVER-NOT-FOUND","API resource was not found",requestId);return;}
         if(!checkOrigin(req,res,requestId,false))return;
         try{String id=segment(path,2);String status=runtime.cancel(id,principal);json(res,200,Map.of("jobId",id,"status",status,"requestId",requestId));}
@@ -170,6 +174,8 @@ public final class ApiServlet extends HttpServlet {
             if("/auth/capabilities".equals(path)) {
                 String login=principal(req);
                 if(login==null){error(res,401,"ATT-SERVER-AUTHENTICATION-REQUIRED","Authentication is required",requestId);return;}
+                boolean accountManage=systemAdminCapability(req,login);
+                boolean operate=operatorCapability(req,login);
                 boolean configurationAdmin;
                 if(runtime.auth.local(runtime.config)) {
                     Map<String,Object> user=runtime.store.authUser(login);
@@ -178,8 +184,9 @@ public final class ApiServlet extends HttpServlet {
                 res.setHeader("Cache-Control","no-store");
                 @SuppressWarnings("unchecked") Map<String,String> session=(Map<String,String>)req.getAttribute(AuthService.SESSION);
                 String sessionKey=session==null?(req.getSession(false)==null?"container":req.getSession(false).getId()):session.getOrDefault("tokenHash","");
-                String cacheContext=runtime.inspectionCacheToken(java.util.Arrays.asList(login,configurationAdmin,sessionKey,runtime.config.inspection));
-                json(res,200,Map.of("configurationAdmin",configurationAdmin,"inspectionCacheContext",cacheContext,"requestId",requestId));return;
+                String cacheContext=runtime.inspectionCacheToken(java.util.Arrays.asList(login,configurationAdmin,operate,accountManage,sessionKey,runtime.config.inspection));
+                Map<String,Object> capabilities=new LinkedHashMap<>();capabilities.put("operate",operate);capabilities.put("accountManage",accountManage);capabilities.put("systemSettingsWrite",accountManage);capabilities.put("configurationAdmin",configurationAdmin);
+                json(res,200,Map.of("capabilities",capabilities,"configurationAdmin",configurationAdmin,"inspectionCacheContext",cacheContext,"requestId",requestId));return;
             }
             if(!runtime.auth.local(runtime.config)){error(res,404,"ATT-SERVER-NOT-FOUND","Authentication resource was not found",requestId);return;}
             if("/auth/bootstrap/status".equals(path)){json(res,200,Map.of("required",runtime.auth.bootstrapRequired(),"requestId",requestId));return;}
@@ -221,8 +228,37 @@ public final class ApiServlet extends HttpServlet {
     }
     private boolean requireAdmin(HttpServletRequest req,HttpServletResponse res,String requestId)throws IOException {
         String login=principal(req);if(login==null){error(res,401,"ATT-SERVER-AUTHENTICATION-REQUIRED","Authentication is required",requestId);return false;}
-        try{Map<String,Object> user=runtime.store.authUser(login);if(user==null||!"ADMIN".equals(user.get("role"))){error(res,403,"ATT-SERVER-FORBIDDEN","Administrator access is required",requestId);return false;}return true;}
+        try{Map<String,Object> user=runtime.store.authUser(login);if(user==null||!Boolean.TRUE.equals(user.get("active"))||!"ADMIN".equals(user.get("role"))){error(res,403,"ATT-SERVER-FORBIDDEN","Administrator access is required",requestId);return false;}return true;}
         catch(Exception failure){error(res,500,"ATT-SERVER-REQUEST-FAILED","The authentication request could not be completed",requestId);return false;}
+    }
+    private boolean requireSystemAdmin(HttpServletRequest req,HttpServletResponse res,String requestId)throws IOException {
+        String login=principal(req);
+        if(login==null){error(res,401,"ATT-SERVER-AUTHENTICATION-REQUIRED","Authentication is required",requestId);return false;}
+        try {
+            if(systemAdminCapability(req,login))return true;
+            error(res,403,"ATT-SERVER-FORBIDDEN","System administrator access is required",requestId);return false;
+        } catch(Exception failure){error(res,500,"ATT-SERVER-REQUEST-FAILED","The authorization request could not be completed",requestId);return false;}
+    }
+    private boolean requireOperator(HttpServletRequest req,HttpServletResponse res,String requestId)throws IOException {
+        if(!runtime.config.scheduling.enabled&&loadSchedulePath(path(req))) {error(res,404,"ATT-SERVER-NOT-FOUND","API resource was not found",requestId);return false;}
+        String login=principal(req);
+        if(login==null){error(res,401,"ATT-SERVER-AUTHENTICATION-REQUIRED","Authentication is required",requestId);return false;}
+        try {
+            if(operatorCapability(req,login))return true;
+            error(res,403,"ATT-SERVER-OPERATIONS-REQUIRED","An active USER account with operational access is required",requestId);return false;
+        } catch(Exception failure){error(res,500,"ATT-SERVER-REQUEST-FAILED","The authorization request could not be completed",requestId);return false;}
+    }
+    private boolean systemAdminCapability(HttpServletRequest req,String login)throws Exception {
+        if(runtime.auth.local(runtime.config)) {
+            Map<String,Object> user=runtime.store.authUser(login);
+            return user!=null&&Boolean.TRUE.equals(user.get("active"))&&"ADMIN".equals(user.get("role"));
+        }
+        return !RequestIdentity.ANONYMOUS.equals(login)&&req.isUserInRole(runtime.config.authorization.adminRole);
+    }
+    private boolean operatorCapability(HttpServletRequest req,String login)throws Exception {
+        if(runtime.auth.local(runtime.config))return runtime.store.isActiveUser(login);
+        if(RequestIdentity.ANONYMOUS.equals(login))return !runtime.config.authenticationRequired&&runtime.config.authorization.allowAnonymousOperations;
+        return !req.isUserInRole(runtime.config.authorization.adminRole)&&req.isUserInRole(runtime.config.authorization.userRole);
     }
     private JsonNode authBody(HttpServletRequest req)throws IOException {byte[] bytes=req.getInputStream().readNBytes(Math.min(runtime.config.maxRequestBytes,65536)+1);if(bytes.length>Math.min(runtime.config.maxRequestBytes,65536))throw new IllegalArgumentException("Authentication request body is too large");try{return ServerRuntime.JSON.readTree(bytes);}catch(JsonProcessingException e){throw new IllegalArgumentException("Request body is not valid JSON");}}
     private static String text(JsonNode body,String name){JsonNode value=body.get(name);if(value==null||!value.isTextual())throw new IllegalArgumentException(name+" must be text");return value.asText();}
@@ -236,7 +272,7 @@ public final class ApiServlet extends HttpServlet {
 
     private void scheduleGet(HttpServletRequest req,HttpServletResponse res,String path,String requestId)throws IOException {
         String principal=principal(req);if(principal==null){error(res,401,"ATT-SERVER-AUTHENTICATION-REQUIRED","An authenticated Servlet Principal is required",requestId);return;}
-        if(!scheduleAdmin(req,res,requestId))return;
+        if(!requireOperator(req,res,requestId))return;
         try {
             String[] parts=path.split("/");
             if(parts.length==2){String type=req.getParameter("executionType");if(type!=null&&!List.of("run","load").contains(type))throw new IllegalArgumentException("executionType must be run or load");json(res,200,Map.of("items",runtime.loadSchedules().stream().filter(schedule->type==null||type.equals("load".equals(schedule.effectiveJobType())?"load":"run")).map(runtime::loadScheduleView).toList(),"requestId",requestId));return;}
@@ -255,7 +291,7 @@ public final class ApiServlet extends HttpServlet {
     }
 
     private void schedulePost(HttpServletRequest req,HttpServletResponse res,String path,String requestId,String principal)throws IOException {
-        if(!scheduleAdmin(req,res,requestId))return;
+        if(!requireOperator(req,res,requestId))return;
         if(!checkOrigin(req,res,requestId,false))return;
         String[] parts=path.split("/");
         try {
@@ -280,7 +316,7 @@ public final class ApiServlet extends HttpServlet {
         String requestId=requestId(req,res),path=path(req),principal=principal(req);
         if(!loadSchedulePath(path)){error(res,404,"ATT-SERVER-NOT-FOUND","API resource was not found",requestId);return;}
         if(principal==null){error(res,401,"ATT-SERVER-AUTHENTICATION-REQUIRED","An authenticated Servlet Principal is required",requestId);return;}
-        if(!scheduleAdmin(req,res,requestId))return;
+        if(!requireOperator(req,res,requestId))return;
         if(!checkOrigin(req,res,requestId,false))return;
         String[] parts=path.split("/");if(parts.length!=3){error(res,404,"ATT-SERVER-NOT-FOUND","API resource was not found",requestId);return;}
         JsonNode body=scheduleBody(req,res,requestId);if(body==null)return;
@@ -296,20 +332,12 @@ public final class ApiServlet extends HttpServlet {
     }
 
     private void scheduleDelete(HttpServletRequest req,HttpServletResponse res,String path,String requestId,String principal)throws IOException {
-        if(!scheduleAdmin(req,res,requestId))return;
+        if(!requireOperator(req,res,requestId))return;
         if(!checkOrigin(req,res,requestId,false))return;
         String[] parts=path.split("/");if(parts.length!=3){error(res,404,"ATT-SERVER-NOT-FOUND","API resource was not found",requestId);return;}
         try{runtime.deleteLoadSchedule(parts[2],principal);json(res,200,Map.of("scheduleId",parts[2],"status","DELETED","requestId",requestId));}
         catch(ServerRuntime.NotFoundException e){error(res,404,"ATT-SERVER-NOT-FOUND","API resource was not found",requestId);}
         catch(Exception e){error(res,500,"ATT-SERVER-REQUEST-FAILED","The schedule could not be deleted",requestId);getServletContext().log("ATT Server schedule delete failed id="+requestId,e);}
-    }
-
-    private boolean scheduleAdmin(HttpServletRequest req,HttpServletResponse res,String requestId)throws IOException {
-        if(!runtime.config.scheduling.enabled){error(res,404,"ATT-SERVER-NOT-FOUND","API resource was not found",requestId);return false;}
-        if("local".equals(runtime.config.authMode)){String login=principal(req);try{Map<String,Object> user=login==null?null:runtime.store.authUser(login);if(user!=null&&"ADMIN".equals(user.get("role")))return true;}catch(Exception ignored){}error(res,403,"ATT-SERVER-SCHEDULE-ADMIN-REQUIRED","Administrator access is required",requestId);return false;}
-        if(!runtime.config.authenticationRequired&&runtime.config.scheduling.allowAnonymousManagement)return true;
-        if(req.isUserInRole(runtime.config.scheduling.adminRole))return true;
-        error(res,403,"ATT-SERVER-SCHEDULE-ADMIN-REQUIRED","The configured schedule administrator role is required",requestId);return false;
     }
 
     private JsonNode scheduleBody(HttpServletRequest req,HttpServletResponse res,String requestId)throws IOException {
@@ -427,6 +455,7 @@ public final class ApiServlet extends HttpServlet {
             Map<String,Object> result;
             if(parts.length==5&&"source".equals(parts[4])) result=runtime.inspectLoadSource(parts[2],req.getParameter("resourceId"),principal);
             else if(parts.length==5&&"validate".equals(parts[4])) result=runtime.validateLoadCatalogScenario(parts[2],req.getParameter("resourceId"),req.getParameter("environment"),principal);
+            else if(parts.length==5&&"detail".equals(parts[4])) result=runtime.inspectLoadCatalogDetail(parts[2],req.getParameter("resourceId"),principal);
             else if(parts.length==4) result=runtime.inspectLoadCatalog(parts[2],req.getParameter("query"),parseLimit(req.getParameter("limit")),req.getParameter("cursor"),principal);
             else throw new ServerRuntime.NotFoundException();
             Object cacheRevision=result.remove("_cacheRevision");

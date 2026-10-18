@@ -149,7 +149,7 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(401, {"error": {"code": "AUTHENTICATION_REQUIRED", "summary": "Sign in to manage Scheduled Load."}})
                 return
             if scenario == "schedule-forbidden":
-                self._json(403, {"error": {"code": "SCHEDULE_ADMIN_REQUIRED", "summary": "Scheduled Load administrator role required."}})
+                self._json(403, {"error": {"code": "ATT-SERVER-OPERATIONS-REQUIRED", "summary": "An active USER account with operational access is required."}})
                 return
             if resource == "load-schedules/preview":
                 self._json(200, {"timezone": body.get("timezone", "UTC"), "cron": body.get("cron", "0 2 * * *"), "nextRunAt": "2026-10-15T18:00:00Z"})
@@ -289,7 +289,7 @@ class Handler(BaseHTTPRequestHandler):
             self._json(401, {"error": {"code": "AUTHENTICATION_REQUIRED", "summary": "Sign in to manage Scheduled Load."}})
             return True
         if scenario == "schedule-forbidden":
-            self._json(403, {"error": {"code": "SCHEDULE_ADMIN_REQUIRED", "summary": "Scheduled Load administrator role required."}})
+            self._json(403, {"error": {"code": "ATT-SERVER-OPERATIONS-REQUIRED", "summary": "An active USER account with operational access is required."}})
             return True
         if scenario == "schedule-disabled":
             self._json(404, {"error": {"code": "SCHEDULING_DISABLED", "summary": "Scheduled Load is disabled."}})
@@ -308,6 +308,19 @@ class Handler(BaseHTTPRequestHandler):
             return
         if scenario == "authenticated" and self.headers.get("Authorization") != "Basic YXR0LWZpeHR1cmU6cGFzcw==":
             self._json(401, {"error": {"code": "AUTHENTICATION_REQUIRED", "summary": "Fixture authentication is required."}})
+            return
+        if resource == "auth/capabilities":
+            admin = scenario == "auth-admin"
+            self._json(200, {
+                "capabilities": {
+                    "operate": True,
+                    "accountManage": admin,
+                    "systemSettingsWrite": admin,
+                    "configurationAdmin": admin,
+                },
+                "configurationAdmin": admin,
+                "inspectionCacheContext": "fixture",
+            })
             return
         if resource == "schedules" or resource.startswith("schedules/"):
             resource = "load-schedules" + resource[len("schedules"): ]
@@ -445,26 +458,19 @@ class Handler(BaseHTTPRequestHandler):
             if requested == "":
                 items = [
                     {"name": "config", "path": "config", "kind": "directory"},
-                    {"name": "load", "path": "load", "kind": "directory"},
                 ]
             elif requested == "config":
                 items = [
                     {"name": "application.yaml", "path": "config/application.yaml", "kind": "file", "format": "yaml", "sizeBytes": 248, "sourceAvailable": True},
                     {"name": "config.yaml", "path": "config/config.yaml", "kind": "file", "format": "yaml", "sizeBytes": 432, "sourceAvailable": True},
                     {"name": "restricted.yaml", "path": "config/restricted.yaml", "kind": "file", "format": "yaml", "sizeBytes": 96, "sourceAvailable": False, "reason": "visibility-policy"},
-                    {"name": "testdata", "path": "config/testdata", "kind": "directory"},
                 ]
-            elif requested == "config/testdata":
-                items = [{"name": "accounts.yaml", "path": "config/testdata/accounts.yaml", "kind": "file", "format": "yaml", "sizeBytes": 156, "sourceAvailable": True}]
-            elif requested == "load":
-                items = [{"name": "load.visualuser.yaml", "path": "load/load.visualuser.yaml", "kind": "file", "format": "yaml", "sizeBytes": 188, "sourceAvailable": False, "reason": "visibility-policy"}]
             else:
                 items = []
             if search:
                 all_items = [
                     {"name": "application.yaml", "path": "config/application.yaml", "kind": "file", "format": "yaml", "sizeBytes": 248, "sourceAvailable": True},
                     {"name": "config.yaml", "path": "config/config.yaml", "kind": "file", "format": "yaml", "sizeBytes": 432, "sourceAvailable": True},
-                    {"name": "accounts.yaml", "path": "config/testdata/accounts.yaml", "kind": "file", "format": "yaml", "sizeBytes": 156, "sourceAvailable": True},
                 ]
                 items = [item for item in all_items if search in item["path"].lower()]
             offset = int(query.get("offset", ["0"])[0])
@@ -476,9 +482,8 @@ class Handler(BaseHTTPRequestHandler):
         elif len(parts) == 4 and parts[:3] == ["packages", "payments", "configuration"] and parts[3] == "source":
             file_path = query.get("path", [""])[0]
             text = {
-                "config/application.yaml": "server:\n  environment: dev\n  timeout: 5s\n# descriptor: config/testdata/accounts.yaml\n",
+                "config/application.yaml": "server:\n  environment: dev\n  timeout: 5s\n# descriptor: testdata/accounts.yaml\n",
                 "config/config.yaml": "schemaVersion: att-config/v1\nprofiles:\n  - name: dev\n    config: application.yaml\n",
-                "config/testdata/accounts.yaml": "schemaVersion: att-testdata/v1\nrecords:\n  - id: account-001\n    tier: standard\n",
             }.get(file_path)
             if text is None:
                 self._json(200, {"available": False, "reason": "visibility-policy", "logicalPath": file_path, "format": "yaml"})
@@ -490,7 +495,7 @@ class Handler(BaseHTTPRequestHandler):
             section = query.get("section", ["globals"])[0]
             if section == "testdata":
                 entries = [{
-                    "id": "accounts", "source": "config/testdata/accounts.yaml", "generated": False,
+                    "id": "accounts", "source": "testdata/accounts.yaml", "generated": False,
                     "fields": {
                         "recordCount": {"state": "visible", "value": 3},
                         "selection.strategy": {"state": "visible", "value": "roundRobin"},

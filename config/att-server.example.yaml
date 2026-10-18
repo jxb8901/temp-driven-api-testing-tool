@@ -3,11 +3,18 @@
 # Copy to ATT_HOME/config/att-server.yaml or a protected external path.
 server:
   dataDir: /opt/att/data
+  runtimeConfigPath: /opt/att/config/config.yaml
   auth:
     # container preserves Tomcat Realm/SSO; local enables ATT login and local accounts.
     mode: container
   # Legacy container-mode setting. false enables shared anonymous access; never use with local mode.
   authenticationRequired: true
+  # Operations require a trusted Servlet Principal in userRole. adminRole is reserved for account and system administration.
+  authorization:
+    adminRole: ATT_ADMIN
+    userRole: ATT_USER
+    # Only works with authenticationRequired: false. Grants anonymous operational access to all API features.
+    allowAnonymousOperations: false
   # Optional. Defaults to the Java runtime hosting Tomcat.
   # javaExecutable: /usr/lib/jvm/java-17/bin/java
   maxRequestBytes: 1048576
@@ -71,10 +78,9 @@ server:
   # Recurring package-backed Load schedules are disabled unless enabled here.
   scheduling:
     enabled: false
-    # Defaults to true only when authenticationRequired is false and scheduling is enabled.
-    # Set false to keep schedule management restricted to the configured role.
+    # Anonymous operation policy is centralized in server.authorization.allowAnonymousOperations.
+    # Kept for configuration compatibility; use server.authorization for all access decisions.
     # allowAnonymousManagement: false
-    adminRole: ATT_ADMIN
     maxSchedules: 100
     minimumIntervalMinutes: 15
     pollIntervalSeconds: 10

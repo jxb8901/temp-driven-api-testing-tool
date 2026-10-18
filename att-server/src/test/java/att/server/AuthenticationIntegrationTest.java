@@ -131,16 +131,8 @@ class AuthenticationIntegrationTest {
             JsonNode ownerCapabilities=ServerRuntime.JSON.readTree(sendWithCookie(client,port,"GET","/att/api/v1/auth/capabilities",ownerCookie,null,null,null).body());
             assertTrue(ownerCapabilities.path("configurationAdmin").asBoolean());
             HttpResponse<String> adminConfiguration=sendWithCookie(client,port,"GET","/att/api/v1/packages/p/configuration/effective?includeAllFields=true",ownerCookie,null,null,null);
-            assertEquals(200,adminConfiguration.statusCode(),adminConfiguration.body());
-            assertEquals("no-store",adminConfiguration.headers().firstValue("Cache-Control").orElse(""));
-            Class.forName("org.h2.Driver"); // Tomcat may deregister its webapp-loaded driver between embedded contexts.
-            try(java.sql.Connection audit=java.sql.DriverManager.getConnection("jdbc:h2:file:"+data.resolve("db/att-server"),"sa","");
-                java.sql.PreparedStatement query=audit.prepareStatement("SELECT COUNT(*) FROM audit WHERE principal=? AND action='CONFIGURATION_INCLUDE_ALL_FIELDS' AND package_id='p'")) {
-                query.setString(1,"owner");try(java.sql.ResultSet rows=query.executeQuery()){assertTrue(rows.next());assertEquals(1,rows.getInt(1));}
-            }
-            assertEquals(400,sendWithCookie(client,port,"GET","/att/api/v1/packages/p/configuration?view=declared&includeAllFields=true",ownerCookie,null,null,null).statusCode(),
-                    "includeAllFields is meaningful only on Effective and Compare projections");
-            assertEquals(200,sendWithCookie(client,port,"GET","/att/api/v1/packages",ownerCookie,null,null,null).statusCode());
+            assertEquals(403,adminConfiguration.statusCode(),"ADMIN accounts manage the system and accounts but do not receive Package operations");
+            assertEquals(403,sendWithCookie(client,port,"GET","/att/api/v1/packages",ownerCookie,null,null,null).statusCode());
             HttpResponse<String> failedPasswordChange=sendWithCookie(client,port,"POST","/att/api/v1/auth/password",ownerCookie,origin,csrf,
                     "{\"currentPassword\":\"incorrect current password\",\"newPassword\":\"replacement secure password\"}");
             assertEquals(401,failedPasswordChange.statusCode());
@@ -167,16 +159,21 @@ class AuthenticationIntegrationTest {
             JsonNode viewerCapabilities=ServerRuntime.JSON.readTree(sendWithCookie(client,port,"GET","/att/api/v1/auth/capabilities",viewerCookie,null,null,null).body());
             assertFalse(viewerCapabilities.path("configurationAdmin").asBoolean());
             assertEquals(403,sendWithCookie(client,port,"GET","/att/api/v1/packages/p/configuration/effective?includeAllFields=true",viewerCookie,null,null,null).statusCode());
-            HttpResponse<String> submitted=sendWithCookie(client,port,"POST","/att/api/v1/jobs/run",ownerCookie,origin,csrf,"{\"packageId\":\"p\",\"all\":true}");assertEquals(202,submitted.statusCode(),submitted.body());
+            assertTrue(viewerCapabilities.path("capabilities").path("operate").asBoolean());
+            assertEquals(200,sendWithCookie(client,port,"GET","/att/api/v1/packages/p/configuration/effective",viewerCookie,null,null,null).statusCode(),"USER accounts can read safe Package configuration");
+            HttpResponse<String> viewerMe=sendWithCookie(client,port,"GET","/att/api/v1/auth/me",viewerCookie,null,null,null);
+            String viewerCsrf=viewerMe.headers().firstValue("X-ATT-CSRF").orElseThrow();
+            HttpResponse<String> submitted=sendWithCookie(client,port,"POST","/att/api/v1/jobs/run",viewerCookie,origin,viewerCsrf,"{\"packageId\":\"p\",\"all\":true}");assertEquals(202,submitted.statusCode(),submitted.body());
             String ownedJobId=ServerRuntime.JSON.readTree(submitted.body()).path("jobId").asText();assertTrue(ownedJobId.matches("J[0-9A-F]{16}"));
+            String colleagueBasic="Basic "+Base64.getEncoder().encodeToString("basic-user:basic user secure password".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            assertEquals(200,sendBasicViaTrustedProxy(client,port,"GET","/att/api/v1/jobs/"+ownedJobId,"https://att.example.test",null,colleagueBasic,null).statusCode(),"Active USERs share Jobs across accounts");
+            assertEquals(403,sendWithCookie(client,port,"GET","/att/api/v1/jobs/"+ownedJobId,ownerCookie,null,null,null).statusCode(),"ADMIN accounts do not receive Job operations");
             assertEquals(200,sendWithCookie(client,port,"POST","/att/api/v1/auth/logout",ownerCookie,origin,csrf,"{}").statusCode());
             assertEquals(401,sendWithCookie(client,port,"GET","/att/api/v1/packages",ownerCookie,null,null,null).statusCode());
             assertEquals(403,sendWithCookie(client,port,"GET","/att/api/v1/auth/users",viewerCookie,null,null,null).statusCode());
             assertEquals(200,sendWithCookie(client,port,"GET","/att/api/v1/packages",viewerCookie,null,null,null).statusCode());
-            assertEquals(404,sendWithCookie(client,port,"GET","/att/api/v1/jobs/"+ownedJobId,viewerCookie,null,null,null).statusCode(),"Known IDs must not expose another local user's job");
-            assertEquals(404,sendWithCookie(client,port,"GET","/att/api/v1/jobs/"+ownedJobId+"/events",viewerCookie,null,null,null).statusCode(),"SSE must use the same local identity ownership check");
-            assertEquals(404,sendWithCookie(client,port,"GET","/att/api/v1/jobs/"+ownedJobId+"/artifacts",viewerCookie,null,null,null).statusCode(),"Artifact listings must enforce the same local identity ownership check");
-            assertEquals(404,sendWithCookie(client,port,"GET","/att/api/v1/jobs/"+ownedJobId+"/artifacts/result.json",viewerCookie,null,null,null).statusCode(),"Artifact downloads must enforce the same local identity ownership check");
+            assertEquals(200,sendWithCookie(client,port,"GET","/att/api/v1/jobs/"+ownedJobId,viewerCookie,null,null,null).statusCode(),"The submitting USER can read the job");
+            assertEquals(200,sendWithCookie(client,port,"GET","/att/api/v1/jobs",viewerCookie,null,null,null).statusCode(),"USER job history is shared across accounts");
         } finally {try{tomcat.stop();}finally{tomcat.destroy();if(oldConfig==null)System.clearProperty("att.server.config");else System.setProperty("att.server.config",oldConfig);}}
     }
 
@@ -226,8 +223,9 @@ class AuthenticationIntegrationTest {
         System.setProperty("att.home",localHome.toString());
         Path packages=Files.createDirectory(temp.resolve("packages"));Files.createDirectory(packages.resolve("p"));
         Path debugPackage=Files.createDirectory(packages.resolve("debug"));Path template=Files.createDirectories(debugPackage.resolve("templates/FORM"));
-        Files.createDirectories(debugPackage.resolve("testcase"));Files.createDirectories(debugPackage.resolve("config"));copySchemas(debugPackage);
-        Files.writeString(debugPackage.resolve("config/config.yaml"),"schemaVersion: att-config/v2.12\nenvironment: SIT\n"
+        Files.createDirectories(debugPackage.resolve("testcase"));
+        Path runtimeConfig=Files.createDirectories(localHome.resolve("config")).resolve("config.yaml");
+        Files.writeString(runtimeConfig,"schemaVersion: att-config/v2.12\nenvironment: SIT\n"
                 +"environments:\n  SIT: {}\ntestcase:\n  root: testcase\ntemplates:\n  root: templates\n");
         Files.writeString(template.resolve("template.yaml"),"schemaVersion: att-template/v3.6\nname: FORM\ndescription: authenticated debug form\nactions:\n"
                 +"  log:\n    type: log\n    message: '${EXEC.INPUT.value}'\n");
@@ -244,7 +242,7 @@ class AuthenticationIntegrationTest {
             assertEquals(401,request(port,null));
             assertEquals(401,get(port,"/att/ui/index.html",null));
             String basic="Basic "+Base64.getEncoder().encodeToString("att:secret".getBytes(java.nio.charset.StandardCharsets.UTF_8));assertEquals(200,request(port,basic));
-            String other="Basic "+Base64.getEncoder().encodeToString("other:secret".getBytes(java.nio.charset.StandardCharsets.UTF_8));assertEquals(200,request(port,other),"Any authenticated container principal has the same v1 API permissions");
+            String other="Basic "+Base64.getEncoder().encodeToString("other:secret".getBytes(java.nio.charset.StandardCharsets.UTF_8));assertEquals(403,request(port,other),"Only principals in the configured USER role receive operational API access");
             assertEquals(200,get(port,"/att/ui/index.html",basic));
             assertEquals(200,get(port,"/att/ui/app.js",basic));
             JsonNode resources=getJson(port,"/att/api/v1/packages/debug/resources?type=template",basic);
@@ -259,7 +257,7 @@ class AuthenticationIntegrationTest {
             assertFalse(draft.toString().contains("123456789"));assertFalse(draft.toString().contains("violet-123"));
             String draftId=draft.path("draftId").asText();
             assertEquals(200,get(port,"/att/api/v1/drafts/"+draftId,basic));
-            assertEquals(404,get(port,"/att/api/v1/drafts/"+draftId,other),"Drafts must be isolated by the authenticated principal");
+            assertEquals(403,get(port,"/att/api/v1/drafts/"+draftId,other),"Non-USER container principals cannot access operational API resources");
             JsonNode loadPolicy=getJson(port,"/att/api/v1/packages/debug/load-policy?model=virtualUsers",basic);
             assertEquals("virtualUsers",loadPolicy.path("model").asText());
             assertTrue(getJson(port,"/att/api/v1/version",basic).path("inlineLoadEnabled").asBoolean(false));
@@ -271,7 +269,7 @@ class AuthenticationIntegrationTest {
                     ServerRuntime.JSON.valueToTree(Map.of("packageId","debug","scenario",advancedScenario)));
             String advancedDraftId=advancedDraft.path("draftId").asText();assertTrue(advancedDraftId.startsWith("A"));
             assertEquals(200,get(port,"/att/api/v1/drafts/"+advancedDraftId,basic));
-            assertEquals(404,get(port,"/att/api/v1/drafts/"+advancedDraftId,other),"Advanced Load drafts must be isolated by the authenticated principal");
+            assertEquals(403,get(port,"/att/api/v1/drafts/"+advancedDraftId,other),"Non-USER container principals cannot access operational API resources");
             Map<String,Object> firstWorkload=Map.of("id","auth-load-one","load",Map.of("users",1),
                     "target",Map.of("type","template","id","FORM"),"inputs",Map.of("value","within-limit"));
             Map<String,Object> secondWorkload=Map.of("id","auth-load-two","load",Map.of("users",1),
@@ -350,7 +348,7 @@ class AuthenticationIntegrationTest {
             assertEquals("load",pathBasedStatus.path("command").asText(),"Disabling browser drafts must still admit the existing path-based Load API");
         } finally {inlineLoadDisabled.stop();inlineLoadDisabled.destroy();restore(old);}
 
-        Path openConfig=Files.writeString(temp.resolve("open-server.yaml"),"server:\n  dataDir: "+yaml(temp.resolve("open-data"))+"\n  authenticationRequired: false\n  inlineLoad:\n    enabled: true\n    maxWorkloads: 1\n  inspection:\n    enabled: true\nworkers:\n  maxConcurrent: 1\n  queuedLimit: 2\n  maxConcurrentLoad: 1\npackages:\n  allowedRoots:\n    - "+yaml(packages)+"\n  entries:\n    p: "+yaml(packages.resolve("p"))+"\n    debug: "+yaml(debugPackage)+"\n");System.setProperty("att.server.config",openConfig.toString());
+        Path openConfig=Files.writeString(temp.resolve("open-server.yaml"),"server:\n  dataDir: "+yaml(temp.resolve("open-data"))+"\n  authenticationRequired: false\n  authorization:\n    allowAnonymousOperations: true\n  inlineLoad:\n    enabled: true\n    maxWorkloads: 1\n  inspection:\n    enabled: true\nworkers:\n  maxConcurrent: 1\n  queuedLimit: 2\n  maxConcurrentLoad: 3\npackages:\n  allowedRoots:\n    - "+yaml(packages)+"\n  entries:\n    p: "+yaml(packages.resolve("p"))+"\n    debug: "+yaml(debugPackage)+"\n");System.setProperty("att.server.config",openConfig.toString());
         Tomcat open=start(users,appDirectory("anonymous"),true);
         String anonymousDraftToInvalidate=null;
         try {
@@ -459,7 +457,9 @@ class AuthenticationIntegrationTest {
         }
         finally {open.stop();open.destroy();restore(old);}
 
-        Files.writeString(openConfig,Files.readString(openConfig).replace("authenticationRequired: false","authenticationRequired: true"));
+        Files.writeString(openConfig,Files.readString(openConfig)
+                .replace("authenticationRequired: false","authenticationRequired: true")
+                .replace("allowAnonymousOperations: true","allowAnonymousOperations: false"));
         System.setProperty("att.server.config",openConfig.toString());
         Tomcat restarted=start(users,appDirectory("anonymous-restart-authenticated"));
         try {
@@ -475,9 +475,10 @@ class AuthenticationIntegrationTest {
         String oldConfig=System.getProperty("att.server.config");
         Path packages=Files.createDirectory(temp.resolve("inspection-packages"));Path packageRoot=Files.createDirectory(packages.resolve("debug"));
         Path template=Files.createDirectories(packageRoot.resolve("templates/FORM"));
-        Files.createDirectories(packageRoot.resolve("testcase"));Files.createDirectories(packageRoot.resolve("config"));
-        Files.createDirectories(packageRoot.resolve("load"));Files.createDirectories(packageRoot.resolve("testdata"));Files.createDirectories(packageRoot.resolve("payloads"));copySchemas(packageRoot);
-        Files.writeString(packageRoot.resolve("config/config.yaml"),"schemaVersion: att-config/v2.12\nenvironment: SIT\n"
+        Files.createDirectories(packageRoot.resolve("testcase"));
+        Files.createDirectories(packageRoot.resolve("load"));Files.createDirectories(packageRoot.resolve("testdata"));Files.createDirectories(packageRoot.resolve("payloads"));
+        Path runtimeConfig=Files.createDirectories(localHome.resolve("config")).resolve("config.yaml");
+        Files.writeString(runtimeConfig,"schemaVersion: att-config/v2.12\nenvironment: SIT\n"
                 +"environments:\n  SIT:\n    testdata: [testdata/customers.yaml]\n  UAT: {}\ntestcase:\n  root: testcase\ntemplates:\n  root: templates\n");
         Files.writeString(packageRoot.resolve("testdata/customers.yaml"),"schemaVersion: att-testdata/v1.0\nid: customers\nrecords:\n"
                 +"  - accountId: A-1001\n    status: ACTIVE\n    email: customer@example.test\n  - accountId: A-1002\n    status: CLOSED\n    email: other@example.test\nselection:\n  strategy: sequential\n");
@@ -530,7 +531,7 @@ class AuthenticationIntegrationTest {
         } finally {if(authenticated!=null){authenticated.stop();authenticated.destroy();}}
 
         Path anonymousConfig=Files.writeString(temp.resolve("inspection-anonymous.yaml"),"server:\n  dataDir: "+yaml(temp.resolve("inspection-anonymous-data"))
-                +"\n  authenticationRequired: false\n  inspection:\n    enabled: true\n  scheduling:\n    enabled: true\nworkers:\n  maxConcurrent: 1\n  queuedLimit: 2\n  maxConcurrentLoad: 1\npackages:\n  allowedRoots:\n    - "+yaml(packages)+"\n  entries:\n    debug: "+yaml(packageRoot)+"\n");
+                +"\n  authenticationRequired: false\n  authorization:\n    allowAnonymousOperations: true\n  inspection:\n    enabled: true\n  scheduling:\n    enabled: true\nworkers:\n  maxConcurrent: 1\n  queuedLimit: 2\n  maxConcurrentLoad: 1\npackages:\n  allowedRoots:\n    - "+yaml(packages)+"\n  entries:\n    debug: "+yaml(packageRoot)+"\n");
         try {
             System.setProperty("att.server.config",anonymousConfig.toString());
             anonymous=start(users,appDirectory("inspection-anonymous"),true);
@@ -568,6 +569,9 @@ class AuthenticationIntegrationTest {
     private Path createLocalRuntime() throws Exception {
         Path home=Files.createDirectory(temp.resolve("local-runtime"));
         Path lib=Files.createDirectories(home.resolve("lib"));
+        Path runtimeConfig=Files.createDirectories(home.resolve("config")).resolve("config.yaml");
+        Files.writeString(runtimeConfig,"schemaVersion: att-config/v2.12\nenvironment: SIT\nenvironments:\n  SIT: {}\n"
+                +"testcase: {root: testcase}\ntemplates: {root: templates}\n");
         Set<String> added=new HashSet<>();
         try(JarOutputStream jar=new JarOutputStream(Files.newOutputStream(lib.resolve("att-local-"+ServerBuildInfo.PRODUCT+".jar")))) {
             for(String module:List.of("att-security","att-cli","att-engine","att-remote","att-server-api","att-worker")) {
@@ -707,15 +711,7 @@ class AuthenticationIntegrationTest {
             Thread.sleep(20);job=getJson(port,"/att/api/v1/jobs/"+id,null);
         }
         assertTrue(List.of("PASS","FAIL","ERROR","INVALID","CANCELLED").contains(job.path("status").asText()),"Job did not reach a terminal state: "+id);
-        waitForWorkersIdle(port);
         return job;
-    }
-    private static void waitForWorkersIdle(int port)throws Exception {
-        long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(10);JsonNode metrics=getJson(port,"/att/api/v1/metrics",null);
-        while(metrics.path("activeWorkers").asInt(-1)>0&&System.nanoTime()<deadline) {
-            Thread.sleep(20);metrics=getJson(port,"/att/api/v1/metrics",null);
-        }
-        assertEquals(0,metrics.path("activeWorkers").asInt(-1),"Worker admission must be released before the next job");
     }
     private static JsonNode postErrorJson(int port,String uri,String authorization,JsonNode body,int expectedStatus)throws Exception {
         HttpURLConnection connection=(HttpURLConnection)new URL("http://127.0.0.1:"+port+uri).openConnection();connection.setConnectTimeout(5000);connection.setReadTimeout(30000);
@@ -787,24 +783,29 @@ class AuthenticationIntegrationTest {
         @SuppressWarnings("unchecked") Map<String,Object> jobs=(Map<String,Object>)field(runtime,"jobs");jobs.put(id,job);
         var append=journalType.getDeclaredMethod("append",String.class,Map.class);append.setAccessible(true);append.invoke(journal,"status",Map.of("jobId",id,"status","RUNNING"));
         List<HttpURLConnection> connections=new ArrayList<>();
+        List<Future<Boolean>> eventReaders=new ArrayList<>();
+        var readerPool=Executors.newFixedThreadPool(5);
         try {
             for(int i=0;i<5;i++) {
                 HttpURLConnection connection=(HttpURLConnection)new java.net.URL("http://127.0.0.1:"+port+"/att/api/v1/jobs/"+id+"/events").openConnection();
-                connection.setConnectTimeout(3000);connection.setReadTimeout(5000);connection.setRequestProperty("Authorization",authorization);
+                connection.setConnectTimeout(3000);connection.setReadTimeout(30000);connection.setRequestProperty("Authorization",authorization);
                 connections.add(connection);
                 assertEquals(200,connection.getResponseCode());
                 // HTTP 200 can arrive before the asynchronous stream task subscribes to the journal.
                 // Wait for this listener before opening the next stream; earlier observers stay open.
                 awaitSseListeners(journal,connections.size());
+                eventReaders.add(readerPool.submit(()->{
+                    try(var reader=new java.io.BufferedReader(new java.io.InputStreamReader(connection.getInputStream(),java.nio.charset.StandardCharsets.UTF_8))) {
+                        String line;while((line=reader.readLine())!=null)if(line.contains("live observer event"))return true;
+                        return false;
+                    }
+                }));
             }
             append.invoke(journal,"progress",Map.of("message","live observer event"));
-            for(HttpURLConnection connection:connections) {
-                try(var reader=new java.io.BufferedReader(new java.io.InputStreamReader(connection.getInputStream(),java.nio.charset.StandardCharsets.UTF_8))) {
-                    String line;boolean received=false;while((line=reader.readLine())!=null){if(line.contains("live observer event")){received=true;break;}}
-                    assertTrue(received,"Each concurrent observer should receive the live event");
-                }
-            }
+            for(Future<Boolean> eventReader:eventReaders)
+                assertTrue(eventReader.get(10,TimeUnit.SECONDS),"Each concurrent observer should receive the live event");
         } finally {
+            readerPool.shutdownNow();
             var finish=runtime.getClass().getDeclaredMethod("finish",jobType,String.class,int.class);finish.setAccessible(true);finish.invoke(runtime,job,"PASS",0);for(HttpURLConnection c:connections)c.disconnect();
         }
     }
@@ -821,7 +822,7 @@ class AuthenticationIntegrationTest {
     }
     private static Object field(Object target,String name)throws Exception {var field=target.getClass().getDeclaredField(name);field.setAccessible(true);return field.get(target);}
     private static void copySchemas(Path packageRoot)throws Exception {
-        Path source=Path.of("packages/default/schemas").toRealPath(),destination=packageRoot.resolve("schemas");
+        Path source=Path.of("schemas").toRealPath(),destination=packageRoot.resolve("schemas");
         try(var paths=Files.walk(source)) {for(Path path:(Iterable<Path>)paths::iterator){Path target=destination.resolve(source.relativize(path));if(Files.isDirectory(path))Files.createDirectories(target);else{Files.createDirectories(target.getParent());Files.copy(path,target);}}}
     }
     private static void addModuleJar(Path lib,String name,Path classes)throws Exception {

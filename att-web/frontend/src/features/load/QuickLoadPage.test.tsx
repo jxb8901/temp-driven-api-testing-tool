@@ -9,7 +9,13 @@ import { ApiError } from '../../types';
 vi.mock('../code/CodeEditor', () => ({
   CodeEditor: ({ value, label }: { value: string; label: string }) => <pre aria-label={label}>{value}</pre>,
 }));
-vi.mock('../explorer/TypedSidecarForm', () => ({ TypedSidecarForm: () => <div>Target inputs</div> }));
+vi.mock('../explorer/TypedSidecarForm', () => ({
+  TypedSidecarForm: ({ value, onChange }: {
+    value: { inputs?: Record<string, unknown>; [key: string]: unknown };
+    onChange: (value: { inputs: Record<string, unknown>; [key: string]: unknown }) => void;
+  }) => <><div>Target inputs</div><input aria-label="Target input region" value={String(value.inputs?.region ?? '')}
+    onChange={event => onChange({ ...value, inputs: { ...value.inputs, region: event.currentTarget.value } })} /></>,
+}));
 
 let host: HTMLDivElement;
 let root: Root;
@@ -28,13 +34,69 @@ async function flush() {
 }
 
 describe('QuickLoadPage', () => {
+  it('reloads policy and sidecar defaults for an accepted pristine environment switch', async () => {
+    let environment = 'SIT';
+    const api = {
+      getLoadPolicy: vi.fn(async (_packageId: string, _model: 'virtualUsers' | 'arrivalRate', selectedEnvironment?: string) => ({
+        model: 'virtualUsers' as const,
+        policy: { schemaVersion: 'att-load/v1.6', load: selectedEnvironment === 'UAT' ? { users: 7, duration: '90s' } : { users: 2, duration: '30s' } },
+      })),
+      getTargetLoadForm: vi.fn(async (_packageId: string, type: LoadTargetType, resourceId: string, _model: 'virtualUsers' | 'arrivalRate', selectedEnvironment?: string) => ({
+        target: { type, id: resourceId }, model: 'virtualUsers' as const,
+        input: { inputs: { region: selectedEnvironment === 'UAT' ? 'uat-region' : 'sit-region' }, vars: {} },
+      })),
+      createLoadDraft: vi.fn(async () => ({
+        draftId: 'L0123456789ABCDEF0123456789ABCDEF', packageId: 'payments', model: 'virtualUsers' as const,
+        previewYaml: 'schemaVersion: att-load/v1.6\n', expiresAt: new Date(Date.now() + 60_000).toISOString(),
+      })),
+    } as unknown as LoadJobsApi;
+    const onEnvironmentChange = vi.fn();
+    const renderPage = () => root.render(<QuickLoadPage api={api} packageId="payments"
+      target={{ type: 'template', resourceId: 'checkout' }} environment={environment}
+      environments={['SIT', 'UAT']} environmentState="ready" inlineLoadEnabled
+      onEnvironmentChange={onEnvironmentChange} onJobAccepted={vi.fn()} onCancel={vi.fn()}
+      registerUnsavedChanges={() => () => {}} />);
+    await act(async () => renderPage());
+    await flush();
+    expect(host.querySelector<HTMLInputElement>('input[placeholder="e.g. 30s or 5m"]')?.value).toBe('30s');
+    expect(host.querySelector<HTMLInputElement>('input[aria-label="Target input region"]')?.value).toBe('sit-region');
+
+    await act(async () => {
+      const select = host.querySelectorAll('select')[2] as HTMLSelectElement;
+      select.value = 'UAT';
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+      environment = 'UAT';
+      renderPage();
+    });
+    await flush();
+
+    expect(onEnvironmentChange).toHaveBeenCalledWith('UAT');
+    expect(api.getLoadPolicy).toHaveBeenLastCalledWith('payments', 'virtualUsers', 'UAT', expect.any(AbortSignal), undefined);
+    expect(api.getTargetLoadForm).toHaveBeenLastCalledWith('payments', 'template', 'checkout', 'virtualUsers', 'UAT', expect.any(AbortSignal));
+    expect(host.querySelector<HTMLInputElement>('input[placeholder="e.g. 30s or 5m"]')?.value).toBe('90s');
+    expect(host.querySelector<HTMLInputElement>('input[type="number"]')?.value).toBe('7');
+    expect(host.querySelector<HTMLInputElement>('input[aria-label="Target input region"]')?.value).toBe('uat-region');
+
+    await act(async () => [...host.querySelectorAll('button')].find(button => button.textContent === 'Validate')!.click());
+    await flush();
+    const input = vi.mocked(api.createLoadDraft).mock.calls[0][0];
+    const scenario = input.scenario as Record<string, unknown>;
+    const workload = (scenario.workloads as Array<Record<string, unknown>>)[0];
+    expect(input.environment).toBe('UAT');
+    expect(workload.load).toEqual({ users: 7 });
+    expect(workload.inputs).toEqual({ region: 'uat-region' });
+    expect((scenario.load as Record<string, unknown>).duration).toBe('90s');
+  });
+
   it('shows server diagnostics and focuses the matching field from the review action', async () => {
     const api = {
       getLoadPolicy: vi.fn(async () => ({ model: 'virtualUsers' as const, policy: { schemaVersion: 'att-load/v1.6', load: { users: 1, duration: '30s' } } })),
       getTargetLoadForm: vi.fn(async () => ({ target: { type: 'template' as const, id: 'checkout' }, model: 'virtualUsers' as const, input: { inputs: {}, vars: {} } })),
       createLoadDraft: vi.fn(async () => { throw new ApiError('Duration is not supported.', {
         status: 400, code: 'LOAD_VALIDATION_FAILED', requestId: 'req-quick-123',
-        diagnostics: [{ severity: 'ERROR', code: 'DURATION_INVALID', path: 'scenario.load.duration', summary: 'Use a supported duration.' }],
+        diagnostics: [{ severity: 'ERROR', code: 'DURATION_INVALID', path: 'scenario.load.duration', summary: 'Use a supported duration.',
+          detail: 'Flow checkout depends on a missing Tool; /srv/private/flow.yaml token=hidden-value',
+          suggestion: 'Add the required Tool and verify password=hidden-password.' }],
       }); }),
       submitLoadDraft: vi.fn(async () => ({ jobId: 'JOB-QUICK' })),
     } as unknown as LoadJobsApi;
@@ -51,13 +113,42 @@ describe('QuickLoadPage', () => {
     await flush();
     expect(host.textContent).toContain('DURATION_INVALID');
     expect(host.textContent).toContain('Use a supported duration.');
+    expect(host.textContent).toContain('Flow checkout depends on a missing Tool');
+    expect(host.textContent).toContain('Suggestion: Add the required Tool and verify password=[REDACTED]');
+    expect(host.textContent).not.toContain('/srv/private');
+    expect(host.textContent).not.toContain('hidden-value');
+    expect(host.textContent).not.toContain('hidden-password');
     expect(host.textContent).toContain('req-quick-123');
     const review = [...host.querySelectorAll('button')].find(button => button.textContent === 'Review field')!;
     await act(async () => review.click());
     expect(document.activeElement).toBe(host.querySelector('input[placeholder="e.g. 30s or 5m"]'));
   });
 
+  it('renders package dependency diagnostics without offering a field focus action', async () => {
+    const api = {
+      getLoadPolicy: vi.fn(async () => ({ model: 'virtualUsers' as const, policy: { schemaVersion: 'att-load/v1.6', load: { users: 1, duration: '30s' } } })),
+      getTargetLoadForm: vi.fn(async () => ({ target: { type: 'flow' as const, id: 'checkout.v1' }, model: 'virtualUsers' as const, input: { inputs: {}, vars: {} } })),
+      createLoadDraft: vi.fn(async () => { throw new ApiError('Target validation failed.', {
+        status: 400, requestId: 'REQ-FLOW', diagnostics: [{ code: 'ATT-LOAD-001', field: 'target',
+          summary: 'Invalid load target dependencies', detail: "Target flow 'checkout.v1': required Tool 'payments.charge' is unavailable",
+          suggestion: 'Register the Tool dependency and retry.' }],
+      }); }),
+    } as unknown as LoadJobsApi;
+    await act(async () => root.render(<QuickLoadPage api={api} packageId="payments"
+      target={{ type: 'flow', resourceId: 'opaque-flow', logicalId: 'checkout.v1' }} environment="UAT" environments={['UAT']}
+      environmentState="ready" inlineLoadEnabled onEnvironmentChange={vi.fn()} onJobAccepted={vi.fn()} onCancel={vi.fn()}
+      registerUnsavedChanges={() => () => {}} />));
+    await flush();
+    await act(async () => [...host.querySelectorAll('button')].find(button => button.textContent === 'Validate')!.click());
+    await flush();
+    expect(host.textContent).toContain("Target flow 'checkout.v1'");
+    expect(host.textContent).toContain("required Tool 'payments.charge' is unavailable");
+    expect(host.textContent).toContain('Register the Tool dependency and retry.');
+    expect([...host.querySelectorAll('button')].some(button => button.textContent === 'Review field')).toBe(false);
+  });
+
   it('loads the selected bundled Quick Smoke policy without submitting and validates its preview', async () => {
+    const expiresAt = new Date(Date.now() + 60_000).toISOString();
     const api = {
       getLoadPolicy: vi.fn(async (_packageId: string, model: 'virtualUsers' | 'arrivalRate', _environment?: string, _signal?: AbortSignal, templateId?: string) => ({
         model,
@@ -69,15 +160,16 @@ describe('QuickLoadPage', () => {
       getTargetLoadForm: vi.fn(async () => ({ target: { type: 'template' as const, id: 'checkout' }, model: 'virtualUsers' as const, input: { inputs: { account: 'A-1' }, vars: {} } })),
       createLoadDraft: vi.fn(async () => ({
         draftId: 'L0123456789ABCDEF0123456789ABCDEF', packageId: 'payments', model: 'virtualUsers' as const,
-        previewYaml: 'schemaVersion: att-load/v1.6\n', expiresAt: new Date(Date.now() + 60_000).toISOString(),
+        previewYaml: 'schemaVersion: att-load/v1.6\n', expiresAt,
       })),
       submitLoadDraft: vi.fn(async () => ({ jobId: 'JOB-QUICK' })),
     } as unknown as LoadJobsApi;
     const onJobAccepted = vi.fn();
+    const onSchedule = vi.fn();
     await act(async () => root.render(<QuickLoadPage
       api={api} packageId="payments" target={{ type: 'template', resourceId: 'opaque:r_4f%2F' }}
       environment="" environments={['staging']} environmentState="ready" inlineLoadEnabled
-      onEnvironmentChange={vi.fn()} onJobAccepted={onJobAccepted} onCancel={vi.fn()}
+      schedulingEnabled onSchedule={onSchedule} onEnvironmentChange={vi.fn()} onJobAccepted={onJobAccepted} onCancel={vi.fn()}
       registerUnsavedChanges={() => () => {}}
     />));
     await flush();
@@ -103,6 +195,8 @@ describe('QuickLoadPage', () => {
     expect(workload.target).toEqual({ type: 'template', id: 'checkout' });
     expect(workload.load).toEqual({ users: 2 });
     expect((scenario.load as Record<string, unknown>).duration).toBe('10s');
+    await act(async () => [...host.querySelectorAll('button')].find(button => button.textContent === 'Schedule…')!.click());
+    expect(onSchedule).toHaveBeenCalledWith(expect.objectContaining({ draftId: 'L0123456789ABCDEF0123456789ABCDEF', expiresAt }));
     expect((scenario.execution as Record<string, unknown>).thinkTime).toBe('250ms');
     expect((scenario.evidence as Record<string, unknown>).mode).toBe('failures');
     expect(api.submitLoadDraft).not.toHaveBeenCalled();
@@ -295,10 +389,67 @@ describe('QuickLoadPage', () => {
     expect(api.getLoadPolicy).toHaveBeenCalledWith('payments', 'arrivalRate', undefined, expect.any(AbortSignal), 'load/nested/policy.yaml');
   });
 
+  it('keeps the logical Flow ID and shows sanitized target discovery diagnostics with retry', async () => {
+    const api = {
+      getLoadPolicy: vi.fn(async () => ({ model: 'virtualUsers' as const, policy: { schemaVersion: 'att-load/v1.6', load: { users: 1, duration: '30s' } } })),
+      getTargetLoadForm: vi.fn()
+        .mockRejectedValueOnce(new ApiError('Target defaults could not be loaded.', {
+          status: 400, code: 'QUICK_LOAD_TARGET_UNAVAILABLE', requestId: 'req-target-456',
+          diagnostics: [{ severity: 'ERROR', code: 'FLOW_DEFAULTS_UNAVAILABLE', summary: 'Retry safe target discovery.', path: '/private/server/path' }],
+        }))
+        .mockResolvedValueOnce({ target: { type: 'flow' as const, id: 'ready.flow.v1' }, model: 'virtualUsers' as const, input: { inputs: {}, vars: {} } }),
+    } as unknown as LoadJobsApi;
+    await act(async () => root.render(<QuickLoadPage api={api} packageId="payments"
+      target={{ type: 'flow', resourceId: 'opaque-flow-resource', logicalId: 'ready.flow.v1' }}
+      environment="UAT" environments={['UAT']} environmentState="ready" inlineLoadEnabled
+      onEnvironmentChange={vi.fn()} onJobAccepted={vi.fn()} onCancel={vi.fn()}
+      registerUnsavedChanges={() => () => {}} />));
+    await flush();
+
+    expect(host.querySelector('.att-section-heading strong')?.textContent).toBe('flow · ready.flow.v1');
+    expect(host.textContent).toContain('Target defaults could not be loaded.');
+    expect(host.textContent).toContain('FLOW_DEFAULTS_UNAVAILABLE');
+    expect(host.textContent).toContain('Retry safe target discovery.');
+    expect(host.textContent).toContain('req-target-456');
+    expect(host.textContent).not.toContain('/private/server/path');
+    expect([...host.querySelectorAll('button')].find(button => button.textContent === 'Validate')?.disabled).toBe(false);
+
+    await act(async () => [...host.querySelectorAll('button')].find(button => button.textContent === 'Retry target defaults')!.click());
+    await flush();
+    expect(api.getTargetLoadForm).toHaveBeenCalledTimes(2);
+    expect(api.getTargetLoadForm).toHaveBeenLastCalledWith('payments', 'flow', 'opaque-flow-resource', 'virtualUsers', 'UAT', expect.any(AbortSignal));
+    expect(host.textContent).toContain('Target defaults are ready.');
+  });
+
+  it('uses opaque resource IDs from the standalone target picker and submits the logical Flow ID', async () => {
+    const api = {
+      listTargets: vi.fn(async () => [{ type: 'flow' as const, resourceId: 'opaque-flow-resource', logicalId: 'ready.flow.v1', state: 'ready' }]),
+      getLoadPolicy: vi.fn(async () => ({ model: 'virtualUsers' as const, policy: { schemaVersion: 'att-load/v1.6', load: { users: 1, duration: '30s' } } })),
+      getTargetLoadForm: vi.fn(async () => ({ target: { type: 'flow' as const, id: 'ready.flow.v1' }, model: 'virtualUsers' as const, input: { inputs: {}, vars: {} } })),
+      createLoadDraft: vi.fn(async () => ({ draftId: 'L0123456789ABCDEF0123456789ABCDEF', packageId: 'payments', model: 'virtualUsers' as const, previewYaml: '', expiresAt: new Date(Date.now() + 60_000).toISOString() })),
+    } as unknown as LoadJobsApi;
+    await act(async () => root.render(<QuickLoadPage api={api} packageId="payments" environment="UAT"
+      environments={['UAT']} environmentState="ready" inlineLoadEnabled onEnvironmentChange={vi.fn()}
+      onJobAccepted={vi.fn()} onCancel={vi.fn()} registerUnsavedChanges={() => () => {}} />));
+    await flush();
+
+    const picker = host.querySelector<HTMLSelectElement>('select[aria-label="Quick Load target"]')!;
+    await act(async () => { picker.value = 'flow:opaque-flow-resource'; picker.dispatchEvent(new Event('change', { bubbles: true })); });
+    await flush();
+    expect(api.getTargetLoadForm).toHaveBeenCalledWith('payments', 'flow', 'opaque-flow-resource', 'virtualUsers', 'UAT', expect.any(AbortSignal));
+    expect(host.querySelector('.att-section-heading strong')?.textContent).toBe('flow · ready.flow.v1');
+
+    await act(async () => [...host.querySelectorAll('button')].find(button => button.textContent === 'Validate')!.click());
+    await flush();
+    const draftInput = vi.mocked(api.createLoadDraft).mock.calls[0][0];
+    const workload = (draftInput.scenario.workloads as Array<Record<string, unknown>>)[0];
+    expect(workload.target).toEqual({ type: 'flow', id: 'ready.flow.v1' });
+  });
+
   it('confirms before switching a package target after editing inputs', async () => {
     const api = {
       listTargets: vi.fn(async (_packageId: string, type: LoadTargetType) => type === 'template'
-        ? [{ logicalId: 'one', state: 'ready' }, { logicalId: 'two', state: 'ready' }] : []),
+        ? [{ resourceId: 'opaque-one', logicalId: 'one', state: 'ready' }, { resourceId: 'opaque-two', logicalId: 'two', state: 'ready' }] : []),
       getLoadPolicy: vi.fn(async () => ({ model: 'virtualUsers' as const, policy: { schemaVersion: 'att-load/v1.6', load: { users: 1, duration: '30s' } } })),
       getTargetLoadForm: vi.fn(async (_packageId: string, type: LoadTargetType, resourceId: string) => ({ target: { type, id: resourceId }, model: 'virtualUsers' as const, input: { inputs: {}, vars: {} } })),
     } as unknown as LoadJobsApi;
@@ -308,16 +459,16 @@ describe('QuickLoadPage', () => {
       registerUnsavedChanges={() => () => {}} />));
     await flush();
     const target = host.querySelector<HTMLSelectElement>('select[aria-label="Quick Load target"]')!;
-    await act(async () => { target.value = 'template:one'; target.dispatchEvent(new Event('change', { bubbles: true })); });
+    await act(async () => { target.value = 'template:opaque-one'; target.dispatchEvent(new Event('change', { bubbles: true })); });
     await flush();
     const duration = host.querySelector<HTMLInputElement>('input[placeholder="e.g. 30s or 5m"]')!;
     await act(async () => {
       Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(duration, '2m');
       duration.dispatchEvent(new Event('input', { bubbles: true }));
     });
-    await act(async () => { target.value = 'template:two'; target.dispatchEvent(new Event('change', { bubbles: true })); });
+    await act(async () => { target.value = 'template:opaque-two'; target.dispatchEvent(new Event('change', { bubbles: true })); });
     expect(confirm).toHaveBeenCalledOnce();
-    expect(target.value).toBe('template:one');
+    expect(target.value).toBe('template:opaque-one');
     expect(duration.value).toBe('2m');
     confirm.mockRestore();
   });

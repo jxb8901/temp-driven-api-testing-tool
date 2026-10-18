@@ -30,7 +30,7 @@ dbhelpers:
 mqhelpers:
   - config/mqhelpers/sit/payment.yaml
 testdata:
-  - config/testdata/accounts.yaml
+  - testdata/accounts.yaml
 
 report:
   mode: append-to-copy

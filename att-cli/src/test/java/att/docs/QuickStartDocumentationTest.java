@@ -60,7 +60,7 @@ class QuickStartDocumentationTest {
     void quickStartCasesExecuteThroughTheRealCli() throws Exception {
         Path root = Paths.get("").toAbsolutePath().normalize();
         Path packageRoot = root.resolve("packages/default");
-        String config = packageRoot.resolve("config/config.yaml").toString();
+        String config = root.resolve("config/config.yaml").toString();
         String suite = packageRoot.resolve("testcase/quick_start.xlsx").toString();
 
         CliResult basic = runCli(packageRoot, "run", "--config", config,

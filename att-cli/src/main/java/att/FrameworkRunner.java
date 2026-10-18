@@ -3,6 +3,7 @@ package att;
 
 import att.config.FrameworkConfig;
 import att.config.FrameworkConfigLoader;
+import att.config.RuntimeConfigPath;
 import att.report.PackageDocumentationGenerator;
 import att.report.GeneratedOutputCleaner;
 import att.report.RunArchiveBuilder;
@@ -170,7 +171,7 @@ public final class FrameworkRunner {
                         ((Number) counts.get("templates")).intValue(), ((Number) counts.get("tools")).intValue(), result.diagnostics());
                 if ("json".equals(options.format())) {
                     String json = validation.toJson();
-                    att.validation.JsonSchemaVerifier.verifyJson(root.resolve("schemas/att-validation-v2.1.schema.json"), json);
+                    att.validation.JsonSchemaVerifier.verifyJson(att.validation.SchemaFiles.resolve(root, "att-validation-v2.1.schema.json"), json);
                     System.out.println(json);
                 }
                 else {
@@ -423,7 +424,8 @@ public final class FrameworkRunner {
     }
 
     private static FrameworkConfig loadConfig(CliOptions options, Path root) throws Exception {
-        try { return new FrameworkConfigLoader().load(options.configPath(), root, options.environment()); }
+        Path config = RuntimeConfigPath.resolve(options.configPath(), root);
+        try { return new FrameworkConfigLoader().load(config, RuntimeConfigPath.root(config), root, options.environment()); }
         catch (att.validation.DiagnosticException e) { throw e; }
         catch (Exception e) {
             throw att.validation.DiagnosticException.wrap(DiagnosticCodes.CONFIG_INVALID,

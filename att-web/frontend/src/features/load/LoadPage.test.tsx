@@ -16,7 +16,7 @@ function makeApi(): LoadJobsApi {
       model: 'virtualUsers' as const, target: { type: 'template' as const, id: 'Payments.create' },
       input: { inputs: { accountId: 'acct-1', retry: 2 }, vars: { token: { $attDebugKeepDefault: 'hidden' } } }, redacted: true,
     })),
-    listTargets: vi.fn(async () => [{ type: 'template' as const, logicalId: 'Payments.create', state: 'ready' }]),
+    listTargets: vi.fn(async () => [{ type: 'template' as const, resourceId: 'opaque-payments-create', logicalId: 'Payments.create', state: 'ready' }]),
     createLoadDraft: vi.fn(async () => ({
       draftId: 'A0123456789ABCDEF0123456789ABCDEF', packageId: 'payments', model: 'virtualUsers' as const,
       previewYaml: 'schemaVersion: att-load/v1.6', expiresAt: new Date(Date.now() + 60_000).toISOString(), redacted: true,
@@ -143,7 +143,7 @@ describe('LoadPage React feature', () => {
     expect(sidecar).toBeDefined();
     await click(sidecar!);
     await flush();
-    expect(api.getTargetLoadForm).toHaveBeenCalledWith('payments', 'template', 'Payments.create', 'virtualUsers', undefined, expect.any(AbortSignal));
+    expect(api.getTargetLoadForm).toHaveBeenCalledWith('payments', 'template', 'opaque-payments-create', 'virtualUsers', undefined, expect.any(AbortSignal));
     expect(host.querySelector('input[aria-label="accountId value"]')).not.toBeNull();
     expect(host.textContent).toContain('Keep hidden package default');
     expect((host.querySelector('input[aria-label="accountId value"]') as HTMLInputElement).value).toBe('acct-1');

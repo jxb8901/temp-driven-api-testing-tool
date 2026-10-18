@@ -81,7 +81,7 @@ LOAD 排程繼續支援套件 scenario 路徑及已驗證 Load draft，沿用 sc
 
 共用 scheduler 先記錄 occurrence，再提交工作。每排程及全域 overlap 容量已滿會跳過該次；一般 Worker/Load admission 上限仍生效。重啟或延誤 misfire 不會補跑。提交失敗遵循 `server.scheduling.failurePolicy`，不會自動重試執行。取消工作只取消該次 occurrence，暫停排程則阻止未來觸發。工作與 occurrence retention 沿用 Server 上限。
 
-排程管理需要設定的管理員角色。Local auth 的 owner 在觸發時必須仍為啟用的管理員；RUN 工作以 owner 身分執行，並記錄 occurrence 與 audit。Container auth 在管理請求檢查角色；外部身分權限被撤銷時，container 管理員必須暫停相關排程。
+所有 active local `USER` 或通過 `server.authorization.userRole` 的 authenticated container principal 均可管理共用 RUN/LOAD 排程。`ADMIN` 僅有系統及帳戶管理權限。排程建立者會保留作為 audit 資訊，但不限制其他 active USER 查看、編輯、暫停、觸發或刪除排程。Local auth 的排程建立者在 scheduled RUN 觸發時必須仍是 active `USER`。Container role 會在每個管理請求檢查；背景 scheduler 無法查詢外部 realm，因此建立者失去 USER role 時，其他 operator 必須暫停排程。Scheduled RUN job 仍以建立者身分記錄 audit。
 
 ## 遷移既有用戶端
 

@@ -24,6 +24,9 @@ describe('ATT hash route contract', () => {
     expect(parseRoute('#/jobs/J10045')).toEqual({ kind: 'jobs', jobId: 'J10045' });
     expect(parseRoute(formatRoute({ kind: 'schedules' }))).toEqual({ kind: 'schedules' });
     expect(parseRoute(formatRoute({ kind: 'settings' }))).toEqual({ kind: 'settings' });
+    expect(parseRoute(formatRoute({ kind: 'run', packageId: 'payments', environment: 'UAT', batch: true }))).toEqual({
+      kind: 'run', packageId: 'payments', environment: 'UAT', batch: true,
+    });
   });
 
   it('round-trips safe resource-source references and rejects malformed reference tokens', () => {
@@ -35,6 +38,27 @@ describe('ATT hash route contract', () => {
     expect(parseRoute(formatRoute(route))).toEqual(route);
     expect(parseRoute('#/configuration/payments?tab=source&sourceType=flow&sourceResourceId=flow.checkout&sourceReferenceId=bad'))
       .not.toHaveProperty('sourceReference');
+  });
+
+  it('round-trips LOAD resource deep links and preserves LOAD Catalog return filters', () => {
+    const catalog = { kind: 'load', catalog: { query: 'nightly payments', packageFilter: 'payments', kindFilter: 'scenario',
+      modelFilter: 'arrivalRate', validationFilter: 'unverified', environment: 'UAT', scrollY: 842 } } as const;
+    const catalogHref = formatRoute(catalog);
+    expect(parseRoute(catalogHref)).toEqual(catalog);
+    const detail = { kind: 'load-resource', packageId: 'payments + ledger', resourceId: 'load/nested/nightly.yaml',
+      environment: 'UAT', returnTo: catalogHref } as const;
+    expect(parseRoute(formatRoute(detail))).toEqual(detail);
+    expect(parseRoute('#/load/resources/payments/load%2Fnested%2Fnightly.yaml?environment=UAT')).toEqual({
+      kind: 'load-resource', packageId: 'payments', resourceId: 'load/nested/nightly.yaml', environment: 'UAT',
+    });
+  });
+
+  it('keeps only a safe return route for validated Schedule handoffs', () => {
+    const route = { kind: 'schedules', view: 'new', intent: 'validated', returnTo: '#/load/resources/payments/load%2Fnested%2Fnightly.yaml?environment=UAT' } as const;
+    expect(parseRoute(formatRoute(route))).toEqual(route);
+    expect(parseRoute('#/schedules/new?intent=validated&returnTo=https%3A%2F%2Fevil.example')).toEqual({
+      kind: 'schedules', view: 'new', intent: 'validated',
+    });
   });
 
   it('round-trips opaque Configuration-source reference tokens', () => {

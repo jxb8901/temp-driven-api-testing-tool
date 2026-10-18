@@ -48,7 +48,7 @@ async function main() {
     await page.getByText(/Skipped because this schedule already reached its concurrent-run limit/).waitFor();
     const submittedRow = page.locator('.att-occurrence-table tbody tr', { hasText: 'O-SUBMITTED' });
     await submittedRow.getByText('Job Passed', { exact: true }).waitFor();
-    assert.equal(await submittedRow.locator('.att-schedule-job-state.is-enabled').count(), 1, 'a retained job shows its own outcome next to the submission status');
+    assert.equal(await submittedRow.locator('.att-status-badge.att-status-pass').count(), 1, 'a retained job shows its outcome using the shared status badge');
     const expiredRow = page.locator('.att-occurrence-table tbody tr', { hasText: 'O-EXPIRED' });
     await expiredRow.getByText('JOB-4477 · no longer available', { exact: true }).waitFor();
     assert.equal(await expiredRow.getByRole('button', { name: 'JOB-4477', exact: true }).count(), 0, 'an expired job record must stay non-navigable');
@@ -93,7 +93,7 @@ async function main() {
     await page.getByRole('button', { name: 'Run Now Automated UI schedule' }).first().click();
     await page.getByRole('button', { name: 'Confirm Run Now' }).click();
     await page.waitForURL('**/#/schedules/SCHED-CREATED/history');
-    await page.getByText('O-NOW', { exact: true }).waitFor();
+    await page.getByRole('link', { name: 'View occurrence O-NOW', exact: true }).waitFor();
     await page.locator('.att-occurrence-table tbody tr', { hasText: 'O-NOW' }).getByText('Job Queued', { exact: true }).waitFor();
     await page.getByRole('button', { name: 'JOB-4821', exact: true }).last().click();
     assert.match(page.url(), /#\/jobs\/JOB-4821$/);
@@ -139,7 +139,7 @@ async function main() {
     await selectFixture(context, fixture.origin, 'schedule-forbidden');
     await page.reload();
     await waitForScheduleList(page);
-    assert.match(await page.locator('#main-content').innerText(), /administrator role/);
+    assert.match(await page.locator('#main-content').innerText(), /operational access/);
     await selectFixture(context, fixture.origin, 'schedule-unauthenticated');
     await page.reload();
     await waitForScheduleList(page);

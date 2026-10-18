@@ -62,7 +62,7 @@ async function main() {
     await filters.getByLabel('Owner').selectOption('bob');
     await page.getByText('No schedules match these filters.').waitFor();
     await page.getByRole('button', { name: 'New Schedule', exact: true }).click();
-    await page.waitForURL('**/#/schedules/new');
+    await page.waitForURL(url => url.hash.startsWith('#/schedules/new'));
     await page.locator('#schedule-name').fill('Unsaved schedule');
     await page.getByRole('button', { name: 'Cancel', exact: true }).click();
     await page.getByRole('button', { name: 'Keep editing', exact: true }).click();
@@ -70,6 +70,9 @@ async function main() {
     await page.getByRole('button', { name: 'Back to Schedules', exact: true }).click();
     await page.getByRole('button', { name: 'Discard changes', exact: true }).click();
     await page.waitForURL('**/#/schedules');
+    await filters.getByLabel('Execution type').selectOption('all');
+    await filters.getByLabel('Owner').selectOption('');
+    await page.getByText('3 of 3 schedules shown.').waitFor();
     await page.getByRole('button', { name: 'Edit Legacy diagnostic', exact: true }).first().click();
     await page.waitForURL('**/#/schedules/S-DEBUG/edit');
     await page.reload();
@@ -85,7 +88,7 @@ async function main() {
     assert.equal(edit.body.draftId, undefined);
     await page.getByRole('button', { name: 'History Functional checks', exact: true }).first().click();
     await page.waitForURL('**/#/schedules/S-RUN/history');
-    await page.getByRole('button', { name: 'O1', exact: true }).click();
+    await page.getByRole('link', { name: 'View occurrence O1', exact: true }).click();
     await page.waitForURL('**/#/schedules/S-RUN/history/O1');
     assert.equal(await page.getByRole('button', { name: 'PRIVATE', exact: true }).count(), 0);
     await page.goBack();
@@ -110,6 +113,8 @@ async function main() {
       })).filter(item => item.right > window.innerWidth + 1).slice(0, 8),
     }));
     assert.ok(mobileLayout.scrollWidth <= mobileLayout.viewport, `History must fit a phone viewport: ${JSON.stringify(mobileLayout)}`);
+    assert.ok(await page.locator('.att-occurrence-id-details summary').evaluateAll(nodes => nodes.every(node => node.getBoundingClientRect().height >= 40)),
+      'Full occurrence ID controls must meet the mobile touch target size.');
     await page.addScriptTag({ path: require.resolve('axe-core/axe.min.js') });
     assert.deepEqual(await page.evaluate(async () => (await window.axe.run(document, {
       runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa', 'wcag22aa'] },
@@ -121,9 +126,16 @@ async function main() {
     await page.getByLabel('Debug diagnostics', { exact: true }).check();
     await page.getByRole('button', { name: 'Validate', exact: true }).click();
     await page.getByRole('button', { name: 'Schedule…', exact: true }).click();
-    await page.getByRole('dialog', { name: 'New Schedule', exact: true }).waitFor();
+    await page.waitForURL(url => url.hash.startsWith('#/schedules/new'));
+    await page.getByRole('heading', { name: 'New Schedule', exact: true }).waitFor();
+    await page.getByText('Schedule form loaded from the validated RUN draft.').waitFor();
+    assert.equal(await page.getByRole('dialog').count(), 0, 'the validated Schedule handoff must bypass the discard guard');
+    await page.getByText(/^Next run:/).waitFor();
     await page.getByRole('button', { name: 'Save schedule', exact: true }).click();
-    await page.getByRole('button', { name: 'Saved', exact: true }).waitFor();
+    await page.locator('#schedules-title').waitFor();
+    await page.getByText(/Saved .*\(ID: S-NEW\)/).waitFor();
+    await page.getByRole('button', { name: 'View schedule history', exact: true }).waitFor();
+    assert.match(page.url(), /#\/schedules$/);
     const created = mutations.find(item => item.method === 'POST' && item.path === '');
     assert.equal(created.body.executionType, 'run');
     assert.equal(created.body.draftId, 'R-FROZEN');

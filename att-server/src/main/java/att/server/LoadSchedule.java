@@ -20,6 +20,8 @@ final class LoadSchedule {
     public String scenario;
     /** Server-validated immutable scenario snapshot for schedules created from a UI draft. */
     public Map<String,Object> inlineScenario;
+    /** Marks a Server-validated package-file snapshot; this does not depend on browser Inline Load policy. */
+    public boolean catalogSnapshot;
     /** Server-validated immutable Debug input snapshot; secret defaults use path-bound keep markers. */
     public Map<String,Object> inlineDebugInput;
     public String debugTargetType;
@@ -37,6 +39,12 @@ final class LoadSchedule {
     public int maxConcurrentRuns=1;
     public boolean enabled;
     public String createdBy;
+    /** User identity used for automatic occurrences; old records without it are migrated on manual trigger. */
+    public String executionPrincipal;
+    /** Non-null when an active USER explicitly adopted a legacy ADMIN-created schedule. */
+    public String executionIdentityMigratedFrom;
+    public String executionIdentityMigratedBy;
+    public String executionIdentityMigratedAt;
     public String createdAt;
     public String updatedBy;
     public String updatedAt;
@@ -46,14 +54,17 @@ final class LoadSchedule {
         LoadSchedule copy=new LoadSchedule();
         copy.schemaVersion=schemaVersion;copy.runInput=runInput==null?null:ServerRuntime.JSON.convertValue(runInput,Map.class);
         copy.id=id;copy.name=name;copy.description=description;copy.packageId=packageId;copy.jobType=jobType==null?"load":jobType;copy.scenario=scenario;
-        copy.inlineScenario=inlineScenario==null?null:new LinkedHashMap<>(inlineScenario);copy.loadModel=loadModel;
+        copy.inlineScenario=inlineScenario==null?null:new LinkedHashMap<>(inlineScenario);copy.catalogSnapshot=catalogSnapshot;copy.loadModel=loadModel;
         copy.inlineDebugInput=inlineDebugInput==null?null:new LinkedHashMap<>(inlineDebugInput);
         copy.debugTargetType=debugTargetType;copy.debugTargetId=debugTargetId;copy.debugResourceId=debugResourceId;
         copy.expectedRevisionDigest=expectedRevisionDigest;
         copy.tags=tags==null?List.of():List.copyOf(tags);
         copy.config=config;copy.environment=environment;copy.timezone=timezone;copy.cron=cron;copy.runAt=runAt;
         copy.load=load==null?new LinkedHashMap<>():new LinkedHashMap<>(load);copy.maxConcurrentRuns=maxConcurrentRuns;copy.enabled=enabled;
-        copy.createdBy=createdBy;copy.createdAt=createdAt;copy.updatedBy=updatedBy;copy.updatedAt=updatedAt;copy.nextRunAt=nextRunAt;
+        copy.createdBy=createdBy;copy.executionPrincipal=executionPrincipal;
+        copy.executionIdentityMigratedFrom=executionIdentityMigratedFrom;copy.executionIdentityMigratedBy=executionIdentityMigratedBy;
+        copy.executionIdentityMigratedAt=executionIdentityMigratedAt;
+        copy.createdAt=createdAt;copy.updatedBy=updatedBy;copy.updatedAt=updatedAt;copy.nextRunAt=nextRunAt;
         return copy;
     }
 

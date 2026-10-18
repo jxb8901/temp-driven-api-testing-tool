@@ -22,7 +22,7 @@ class FrameworkRunnerTest {
     @Test void reportRunIdLoadsConfigWhenOutputDirectoryIsOmitted() throws Exception {
         Files.createDirectories(temp.resolve("templates"));
         Files.createDirectories(temp.resolve("testcase"));
-        Path sourceSchemas = Paths.get("packages/default/schemas");
+        Path sourceSchemas = Paths.get("schemas");
         try (java.util.stream.Stream<Path> paths = Files.walk(sourceSchemas)) {
             for (Path source : (Iterable<Path>) paths::iterator) {
                 Path destination = temp.resolve("schemas").resolve(sourceSchemas.relativize(source));

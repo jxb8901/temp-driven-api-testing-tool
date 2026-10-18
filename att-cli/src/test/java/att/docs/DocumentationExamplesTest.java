@@ -24,16 +24,17 @@ class DocumentationExamplesTest {
     @Test
     void checkedInEnvironmentAndResourceExamplesValidateThroughTheRealCli() throws Exception {
         Path root = Paths.get("").toAbsolutePath().normalize();
-        String common = root.resolve("packages/default/config/config.yaml").toString();
+        String common = root.resolve("config/config.yaml").toString();
 
-        assertAsset(root, "packages/default/config/environments/sit.yaml");
-        assertAsset(root, "packages/default/config/environments/uat.yaml");
-        assertAsset(root, "packages/default/config/dbhelpers/sit/orders.yaml");
-        assertAsset(root, "packages/default/config/dbhelpers/uat/orders.yaml");
-        assertAsset(root, "packages/default/config/mqhelpers/sit/payment.yaml");
-        assertAsset(root, "packages/default/config/mqhelpers/uat/payment.yaml");
-        assertAsset(root, "packages/default/config/tools/sample.yaml");
-        assertAsset(root, "packages/default/config/tools/orders-db.yaml");
+        assertAsset(root, "config/environments/sit.yaml");
+        assertAsset(root, "config/environments/uat.yaml");
+        assertAsset(root, "config/dbhelpers/sit/orders.yaml");
+        assertAsset(root, "config/dbhelpers/uat/orders.yaml");
+        assertAsset(root, "config/mqhelpers/sit/payment.yaml");
+        assertAsset(root, "config/mqhelpers/uat/payment.yaml");
+        assertAsset(root, "config/tools/sample.yaml");
+        assertAsset(root, "config/tools/orders-db.yaml");
+        assertAsset(root, "packages/default/testdata/accounts.yaml");
 
         for (String environment : Arrays.asList("SIT", "UAT")) {
             CliResult result = runCli(root, "validate", "--config", common, "--env", environment,
@@ -42,14 +43,14 @@ class DocumentationExamplesTest {
             assertTrue(result.stdout.contains("\"valid\":true") || result.stdout.contains("\"valid\" : true"), result.stdout);
         }
 
-        for (String config : Arrays.asList("packages/default/config/environments/sit.yaml", "packages/default/config/environments/uat.yaml")) {
+        for (String config : Arrays.asList("config/environments/sit.yaml", "config/environments/uat.yaml")) {
             CliResult result = runCli(root, "validate", "--config", root.resolve(config).toString(),
                     "--package", "--format", "json", "--quiet");
             assertEquals(0, result.exitCode, result.stderr);
         }
 
-        String commandBacked = read(root.resolve("packages/default/config/tools/sample.yaml"));
-        String callBacked = read(root.resolve("packages/default/config/tools/orders-db.yaml"));
+        String commandBacked = read(root.resolve("config/tools/sample.yaml"));
+        String callBacked = read(root.resolve("config/tools/orders-db.yaml"));
         assertTrue(commandBacked.contains("command:"), "sample.yaml must remain the documented command-backed Tool example");
         assertTrue(callBacked.contains("call:"), "orders-db.yaml must remain the documented call-backed Tool example");
     }
@@ -57,7 +58,7 @@ class DocumentationExamplesTest {
     @Test
     void documentedRunDebugAndLoadEntryPointsRemainExecutable() throws Exception {
         Path root = Paths.get("").toAbsolutePath().normalize();
-        String config = root.resolve("packages/default/config/config.yaml").toString();
+        String config = root.resolve("config/config.yaml").toString();
 
         assertAsset(root, "packages/default/testcase/payment2.xlsx");
         assertAsset(root, "packages/default/templates/PAYMENT_INVOKE/debug.yaml");

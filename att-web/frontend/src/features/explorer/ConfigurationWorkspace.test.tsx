@@ -224,7 +224,7 @@ describe('ConfigurationWorkspace', () => {
         sections: [{
           id: 'testdata',
           entries: [{
-            id: 'accounts', source: 'config/testdata/accounts.yaml',
+            id: 'accounts', source: 'testdata/accounts.yaml',
             fields: {
               recordCount: { state: 'visible' as const, value: 3 },
               'selection.strategy': { state: 'visible' as const, value: 'roundRobin' },
@@ -256,7 +256,7 @@ describe('ConfigurationWorkspace', () => {
       getDeclaredConfiguration: vi.fn(async () => ({ environments: [{ name: 'dev', state: 'active', default: true }] })),
       getEffectiveConfiguration: vi.fn(async () => ({
         state: 'ready', environment: 'dev',
-        sections: [{ id: 'testdata', entries: [{ id: 'generatedAccounts', source: 'config/testdata/generated.yaml', fields: {
+        sections: [{ id: 'testdata', entries: [{ id: 'generatedAccounts', source: 'testdata/generated.yaml', fields: {
           generated: { state: 'visible' as const, value: true },
           recordCount: { state: 'visible' as const, value: 120 },
           'selection.strategy': { state: 'visible' as const, value: 'sequential' },

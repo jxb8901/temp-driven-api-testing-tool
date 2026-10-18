@@ -83,9 +83,9 @@ function ExplorerReference({ reference, onOpen }: { reference: ResourceReference
     <span>{reference.resolution === 'unresolved' ? 'Unresolved reference' : reference.type || reference.resolution || 'unresolved'}</span></li>;
 }
 
-export function ExplorerPage({ api, packageId, resourceRoute, environment, environments = [], environmentState = 'ready',
-  principalLabel = '', onResourceRouteChange, onEnvironmentChange, onJobAccepted, onPrincipalLabelChange, onOpenQuickLoad,
-  onScheduleDebug, onOpenConfiguration, onOpenConfigurationFile, onRetryEnvironments, registerUnsavedChanges }: ExplorerPageProps) {
+export function ExplorerPage({ api, packageId, resourceRoute, environment,
+  principalLabel = '', onResourceRouteChange, onJobAccepted, onPrincipalLabelChange, onOpenQuickLoad,
+  onRunTarget, onRunBatch, onScheduleDebug, onOpenConfigurationFile, registerUnsavedChanges }: ExplorerPageProps) {
   const initialListState = useRef(savedExplorerList(packageId)).current;
   const [query, setQuery] = useState(initialListState.query);
   const [typeFilter, setTypeFilter] = useState<ResourceSummary['type'] | 'all'>(initialListState.typeFilter);
@@ -359,8 +359,11 @@ export function ExplorerPage({ api, packageId, resourceRoute, environment, envir
     const expiresAt = currentDraft?.expiresAt ? Date.parse(currentDraft.expiresAt) : Number.NaN;
     if (!currentDraft || !Number.isFinite(expiresAt) || expiresAt <= Date.now() + 15_000) currentDraft = await previewDebug();
     if (!currentDraft) return;
-    onScheduleDebug({ packageId, environment: environment || undefined, draftId: currentDraft.draftId, executionType: 'run', legacyDebug: !currentDraft.draftId.startsWith('R'),
+    const wasDirty = dirtyRef.current;
+    updateDirty(false);
+    const accepted = onScheduleDebug({ packageId, environment: environment || undefined, draftId: currentDraft.draftId, executionType: 'run', legacyDebug: !currentDraft.draftId.startsWith('R'),
       previewYaml: currentDraft.previewYaml, target: { type: debugForm.target.type, id: debugForm.target.id } });
+    if (accepted === false && wasDirty) updateDirty(true);
   };
 
   const startDebug = async () => {
@@ -402,13 +405,6 @@ export function ExplorerPage({ api, packageId, resourceRoute, environment, envir
     finally { setDetailLoading(false); }
   };
 
-  const changeEnvironment = (next: string) => {
-    if (next === environment) return;
-    if (dirtyRef.current && !window.confirm('Changing the environment will discard unsaved Debug edits. Continue?')) return;
-    if (dirtyRef.current) { resetDebug(); }
-    onEnvironmentChange(next);
-  };
-
   const changePrincipal = (next: string) => {
     setPrincipal(next); onPrincipalLabelChange?.(next);
   };
@@ -428,56 +424,65 @@ export function ExplorerPage({ api, packageId, resourceRoute, environment, envir
     const nextIndex = event.key === 'Home' ? 0 : event.key === 'End' ? tabs.length - 1
       : (currentIndex + (event.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length;
     setTab(tabs[nextIndex]);
-    if (identity) onResourceRouteChange({ type: identity.type, resourceId: identity.resourceId, tab: tabs[nextIndex] });
+    if (identity) onResourceRouteChange({ type: identity.type, resourceId: identity.resourceId, logicalId: detail?.logicalId, tab: tabs[nextIndex] });
     event.currentTarget.querySelector<HTMLButtonElement>(`[data-tab="${tabs[nextIndex]}"]`)?.focus();
   };
   const selectDetailTab = (next: DetailTab) => {
     setTab(next);
-    if (identity) onResourceRouteChange({ type: identity.type, resourceId: identity.resourceId, tab: next });
+    if (identity) onResourceRouteChange({ type: identity.type, resourceId: identity.resourceId, logicalId: detail?.logicalId, tab: next });
   };
 
-  return <main className="att-explorer-page">
+  return <main className="page-content att-explorer-page">
     <header className="att-explorer-page-heading">
-      <div><p className="att-explorer-breadcrumb">Packages / {packageId} / Explorer</p><h1>Package Explorer</h1>
-        <p>Package resources and counts are independent of runtime environment. Select an environment only when inspecting or running a resource.</p></div>
-      {identity && <label>Run, Debug, and Load environment
-        <select value={environment} onChange={event => changeEnvironment(event.currentTarget.value)} disabled={environmentState === 'loading'}>
-          <option value="">Package default</option>
-          {environment && !environments.includes(environment) && <option value={environment}>{environment}</option>}
-          {environments.map(name => <option key={name} value={name}>{name}</option>)}
-        </select>
-        {environmentState === 'loading' && <span className="att-help" role="status" aria-busy="true">Loading package environments…</span>}
-        {environmentState === 'error' && <span className="att-error" role="alert">Package environments could not be loaded.{onRetryEnvironments && <> <button type="button" onClick={onRetryEnvironments}>Retry</button></>}</span>}
-      </label>}
+      <div><p className="att-explorer-breadcrumb">Packages / {packageId} / Explorer</p><h1>{identity ? 'Resource details' : 'Package Explorer'}</h1>
+        <p>{identity ? 'View the safe definition, source, and dependencies for this resource.' : 'Search, sort, and open resources. Choose an execution environment from the RUN or Quick LOAD editor.'}</p></div>
+      {!identity && onRunBatch && <button className="button button-primary" type="button" onClick={onRunBatch}>Batch RUN</button>}
     </header>
 
-    <div className={`att-explorer-workspace${identity ? ' has-selected-resource' : ' is-list-first'}`}>
-      <aside className="att-explorer-navigation" aria-label="Resource navigation">
-        <h2>Resources</h2>
-        <label>Search resources <input type="search" value={query} maxLength={200} onChange={event => { resetListPosition(); setQuery(event.currentTarget.value); }} /></label>
-        <div className="att-explorer-categories" role="tablist" aria-label="Resource categories">
-          {([
-            ['all', 'All'], ['case', 'Test Cases'], ['template', 'Templates'], ['flow', 'Flows'], ['tool', 'Tools'],
-          ] as Array<[ResourceSummary['type'] | 'all', string]>).map(([value, label]) =>
-            <button key={value} type="button" role="tab" aria-selected={typeFilter === value}
-              onClick={() => { resetListPosition(); setTypeFilter(value); }}>{label}</button>)}
-        </div>
-        <p className="att-explorer-status" role="status" aria-live="polite">{resourceStatus}</p>
-        {resourceError && <p className="att-error" role="alert">{resourceError}<button type="button" onClick={() => (inspectionCache.clear(), setResourceRefresh(value => value + 1))}>Retry</button></p>}
-        <ResourceTree items={resources} selectedKey={selectedKey} loading={loadingResources} nextCursor={cursor} sortKey={sortKey} direction={sortDirection} onSortChange={changeSort}
-          onSelect={resource => onResourceRouteChange({ type: resource.type, resourceId: resource.resourceId })}
-          onLoadMore={() => void loadMore()} scrollContainerRef={resourceListRef} onListScroll={handleListScroll} />
-        <p className="att-explorer-total">{totalResources.toLocaleString()} {typeFilter === 'all' ? 'package resources' : typeFilter + ' resources'}</p>
+    <div className={`att-explorer-workspace${identity ? ' has-selected-resource' : ' is-list-first'}${identity ? '' : ' att-query-workspace'}`}>
+      <aside className="att-explorer-navigation" aria-label="Resource navigation" hidden={Boolean(identity)}>
+        <section className="att-query-filter-panel" aria-label="Resource filters">
+          <h2>Resources</h2>
+          <div className="att-query-filter-grid">
+            <label>Search resources <input type="search" value={query} maxLength={200} onChange={event => { resetListPosition(); setQuery(event.currentTarget.value); }} /></label>
+            <div className="att-explorer-categories" role="tablist" aria-label="Resource categories">
+              {([
+                ['all', 'All'], ['case', 'Test Cases'], ['template', 'Templates'], ['flow', 'Flows'], ['tool', 'Tools'],
+              ] as Array<[ResourceSummary['type'] | 'all', string]>).map(([value, label]) =>
+                <button key={value} type="button" role="tab" aria-selected={typeFilter === value}
+                  onClick={() => { resetListPosition(); setTypeFilter(value); }}>{label}</button>)}
+            </div>
+          </div>
+          <div className="att-query-filter-actions">
+            <button className="button button-quiet" type="button" onClick={() => { resetListPosition(); setQuery(''); setTypeFilter('all'); }}>Clear filters</button>
+            <button className="button button-quiet" type="button" disabled={loadingResources} onClick={() => (inspectionCache.clear(), setResourceRefresh(value => value + 1))}>Refresh resources</button>
+          </div>
+        </section>
+        <section className="att-query-results-panel" aria-label="Resource results">
+          <p className="att-query-result-status" role="status" aria-live="polite">{resourceStatus}</p>
+          {resourceError && <p className="att-error" role="alert">{resourceError}<button type="button" onClick={() => (inspectionCache.clear(), setResourceRefresh(value => value + 1))}>Retry</button></p>}
+          <ResourceTree items={resources} selectedKey={selectedKey} loading={loadingResources} nextCursor={cursor} sortKey={sortKey} direction={sortDirection} onSortChange={changeSort}
+            onSelect={resource => onResourceRouteChange({ type: resource.type, resourceId: resource.resourceId, logicalId: resource.logicalId })}
+            onRun={onRunTarget ? resource => onRunTarget({ type: resource.type, resourceId: resource.resourceId, logicalId: resource.logicalId }) : undefined}
+            onQuickLoad={onOpenQuickLoad ? resource => onOpenQuickLoad({ packageId, type: resource.type, resourceId: resource.resourceId, logicalId: resource.logicalId }) : undefined}
+            onLoadMore={() => void loadMore()} scrollContainerRef={resourceListRef} onListScroll={handleListScroll} />
+          <p className="att-explorer-total">{totalResources.toLocaleString()} {typeFilter === 'all' ? 'package resources' : typeFilter + ' resources'}</p>
+        </section>
       </aside>
 
       <section className="att-explorer-detail" aria-label="Resource details" hidden={!identity}>
         {!identity && <div className="att-explorer-empty-state"><h2>Select a resource</h2><p>Choose a Case, Template, Flow, or Tool from the resource list.</p></div>}
         {identity && <>
+          <button className="button button-quiet" type="button" onClick={() => onResourceRouteChange(null)}>Back to resources</button>
           <header className="att-resource-title">
             <div><p>{identity.type} · {packageId}</p><h2>{detail?.name || detail?.logicalId || identity.resourceId}</h2>
               <p>{detail?.description || detail?.logicalId || ''}</p></div>
             {detail?.state === 'invalid' && <span className="att-status-badge" data-state="error">Invalid resource</span>}
           </header>
+          <div className="att-explorer-detail-actions">
+            {onRunTarget && detail?.state !== 'invalid' && <button className="button button-primary" type="button" onClick={() => onRunTarget({ type: identity.type, resourceId: identity.resourceId, logicalId: detail?.logicalId })}>Run</button>}
+            {onOpenQuickLoad && detail?.state !== 'invalid' && ['template','flow','tool'].includes(identity.type) && <button className="button button-quiet" type="button" onClick={() => onOpenQuickLoad({ packageId, type: identity.type, resourceId: identity.resourceId, logicalId: detail?.logicalId })}>Quick LOAD</button>}
+          </div>
           {detailLoading && <p role="status">Loading resource detail…</p>}
           {detailError && <p className="att-error" role="alert">{detailError}</p>}
           <div className="att-explorer-tabs" role="tablist" aria-label="Resource content" onKeyDown={onTabsKeyDown}>
@@ -501,7 +506,7 @@ export function ExplorerPage({ api, packageId, resourceRoute, environment, envir
         </>}
       </section>
 
-      <aside className="att-explorer-inspector" aria-label="Contextual actions" hidden={!identity}>
+      <aside className="att-explorer-inspector" aria-label="Contextual actions" hidden>
         <h2>Inspector</h2>
         {!selectedResource && <p>Select a resource to view its metadata and actions.</p>}
         {selectedResource && <>
@@ -512,8 +517,7 @@ export function ExplorerPage({ api, packageId, resourceRoute, environment, envir
           <label>Anonymous job label (optional)<input value={principal} maxLength={120} onChange={event => changePrincipal(event.currentTarget.value)} /></label>
           {selectedResource.type === 'case' && <button type="button" disabled={detailLoading || !detail?.provenance?.suite || !detail.logicalId} onClick={() => void runCase()}>Run selected case</button>}
           {debugEnabled && <button type="button" aria-expanded={debugOpen} onClick={() => setDebugOpen(value => !value)}>{debugOpen ? 'Close Run' : 'Run this target'}</button>}
-          {onOpenConfiguration && identity && ['template', 'flow', 'tool'].includes(identity.type) && <button type="button" onClick={() => onOpenConfiguration(identity)}>Open in Configuration</button>}
-          {onOpenQuickLoad && debugEnabled && identity && <button type="button" onClick={() => onOpenQuickLoad(identity)}>Quick Load</button>}
+          {onOpenQuickLoad && debugEnabled && identity && <button type="button" onClick={() => onOpenQuickLoad({ ...identity, logicalId: selectedResource.logicalId })}>Quick Load</button>}
           {debugOpen && <section className="att-debug-panel" aria-labelledby="att-debug-heading">
             <h3 id="att-debug-heading">Run</h3>
             <p className="att-debug-status" role="status" aria-live="polite">{debugStatus}</p>

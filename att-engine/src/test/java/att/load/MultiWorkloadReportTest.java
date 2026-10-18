@@ -28,7 +28,7 @@ class MultiWorkloadReportTest {
                 + "  load: {arrivalRate: 5/s, duration: 250ms, maxConcurrent: 2, overloadPolicy: drop}\n"
                 + "thresholds: {errorRate: \"< 100%\"}\n").getBytes(StandardCharsets.UTF_8));
         LoadScenario scenario = new LoadScenarioLoader(root).load(scenarioFile);
-        FrameworkConfig config = new FrameworkConfigLoader().load(root.resolve("config/config.yaml"), root);
+        FrameworkConfig config = runtimeConfig(root);
         LoadScenario first = scenario.forWorkload(scenario.workloads().get(0));
         LoadTarget seedTarget = new LoadTargetResolver(root, config).resolve(first);
         LoadRunResult result;
@@ -41,7 +41,7 @@ class MultiWorkloadReportTest {
         Path summary = temp.resolve("out/load/multi-report/load-summary.json");
         String jsonText = new String(Files.readAllBytes(summary), StandardCharsets.UTF_8);
         assertDoesNotThrow(() -> att.validation.JsonSchemaVerifier.verifyJson(
-                root.resolve("schemas/att-load-summary-v1.1.schema.json"), jsonText));
+                att.validation.SchemaFiles.resolve(root, "att-load-summary-v1.1.schema.json"), jsonText));
         @SuppressWarnings("unchecked") Map<String, Object> json = att.validation.JsonSupport.mapper().readValue(jsonText, Map.class);
         assertTrue(json.containsKey("workloads"));
         @SuppressWarnings("unchecked") Map<String, Object> workloads = (Map<String, Object>) json.get("workloads");
@@ -63,7 +63,7 @@ class MultiWorkloadReportTest {
                 + "  - id: sequence\n    weight: 40\n    target: {type: tool, id: sample.getSeq, arguments: {seqLen: 8}}\n"
                 + "  load: {users: 8, duration: 1s}\n").getBytes(StandardCharsets.UTF_8));
         LoadScenario scenario = new LoadScenarioLoader(root).load(scenarioFile);
-        FrameworkConfig config = new FrameworkConfigLoader().load(root.resolve("config/config.yaml"), root);
+        FrameworkConfig config = runtimeConfig(root);
         LoadScenario firstMix = scenario.forMixEntry(scenario.workload(), scenario.workload().mix().get(0));
         LoadTarget seedTarget = new LoadTargetResolver(root, config).resolve(firstMix);
         LoadRunResult result;
@@ -74,7 +74,7 @@ class MultiWorkloadReportTest {
         Path report = new LoadReportWriter().write(temp.resolve("mixed-out"), result);
         Path summary = temp.resolve("mixed-out/load/mixed-report/load-summary.json");
         String jsonText = new String(Files.readAllBytes(summary), StandardCharsets.UTF_8);
-        att.validation.JsonSchemaVerifier.verifyJson(root.resolve("schemas/att-load-summary-v1.1.schema.json"), jsonText);
+        att.validation.JsonSchemaVerifier.verifyJson(att.validation.SchemaFiles.resolve(root, "att-load-summary-v1.1.schema.json"), jsonText);
         @SuppressWarnings("unchecked") Map<String, Object> json = att.validation.JsonSupport.mapper().readValue(jsonText, Map.class);
         @SuppressWarnings("unchecked") Map<String, Object> workloads = (Map<String, Object>) json.get("workloads");
         @SuppressWarnings("unchecked") Map<String, Object> checkout = (Map<String, Object>) workloads.get("checkout");
@@ -93,5 +93,10 @@ class MultiWorkloadReportTest {
         assertTrue(html.contains("checkout mix"));
         assertTrue(html.contains("sequence"));
         assertTrue(html.contains("mixed targets"));
+    }
+
+    private static FrameworkConfig runtimeConfig(Path packageRoot) throws Exception {
+        Path home = Paths.get("").toAbsolutePath().normalize();
+        return new FrameworkConfigLoader().load(home.resolve("config/config.yaml"), home, packageRoot, "SIT");
     }
 }

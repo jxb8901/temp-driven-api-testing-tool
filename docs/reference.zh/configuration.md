@@ -1,6 +1,6 @@
 # Configuration 與 environments
 
-本頁是作者編寫配置時的權威閱讀參考。[`schemas/`](../../packages/default/schemas/) 目錄中的文件仍是機器可讀契約。模式校驗會先於跨字段和文件系統校驗執行。
+本頁是作者編寫配置時的權威閱讀參考。[`schemas/`](../../schemas/) 目錄中的文件仍是機器可讀契約。模式校驗會先於跨字段和文件系統校驗執行。
 
 ## 按任務查找配置
 
@@ -15,7 +15,7 @@
 
 | 層級 | 來源 | 所管轄內容 |
 |---|---|---|
-| 全局 | `config/config.yaml` | 輸出目錄/環境/運行時默認值、Template 根、報告、XML 模式、全局 Tool、組路徑、可選全局 SSH |
+| 共用 runtime configuration | `ATT_HOME/config/config.yaml` | 輸出/環境/runtime 默認值、package-relative Template 根、報告、XML 模式、全局 Tool、組路徑、Helper paths、可選 inline SSH |
 | DB helper | `dbhelpers` 引用的獨立 YAML | 一個 JDBC 實例的連接、statement timeout、交易、result limit 與 evidence policy |
 | MQ helper | `mqhelpers` 引用的獨立 YAML | v1.2 IBM MQ logical group、instances、transport、response parsing、pool 與 evidence policy |
 | SSHHelper | `sshhelpers` 引用的獨立 YAML | 邏輯 SSH ID、實體 instances、defaults、selection 與 fan-out 上限 |
@@ -72,16 +72,22 @@ ATT 使用一份 common `att-config/v2.12` 加上 `environments` map 選擇環�
 Action -> logical helper ID -> selected config -> physical descriptor -> endpoint
 ```
 
-推薦目錄：
+共用配置與 Package business files 使用不同 root：
 
 ```text
-config/
-├── config.yaml
-├── dbhelpers/{sit,uat}/orders.yaml
-└── mqhelpers/{sit,uat}/payment.yaml
+ATT_HOME/
+├── config/
+│   ├── config.yaml
+│   ├── tools/*.yaml
+│   ├── dbhelpers/{sit,uat}/orders.yaml
+│   └── mqhelpers/{sit,uat}/payment.yaml
+└── packages/<id>/
+    ├── testcase/
+    ├── templates/
+    └── testdata/accounts.yaml
 ```
 
-common config 保留現有 templates、testcase root、run/execution/report 設置、`toolGroups` 和 global `tools` registry。Profile 層可配置 typed DB/MQ/SSH/HTTP descriptor lists；以下以 DB/MQ 示範：
+common config 保留 package-relative templates、testcase root、run/execution/report 設置、`toolGroups` 和 global `tools` registry。Tool/Helper descriptors 從 `ATT_HOME/config/` 解析；Testdata descriptors 則從選取的 Package 解析。Profile 層可配置 typed DB/MQ/SSH/HTTP descriptor lists；以下以 DB/MQ 示範：
 
 ```yaml
 # config/config.yaml
@@ -97,11 +103,11 @@ environments:
   SIT:
     dbhelpers: [config/dbhelpers/sit/orders.yaml]
     mqhelpers: [config/mqhelpers/sit/payment.yaml]
-    testdata: [config/testdata/accounts.yaml]
+    testdata: [testdata/accounts.yaml]
   UAT:
     dbhelpers: [config/dbhelpers/uat/orders.yaml]
     mqhelpers: [config/mqhelpers/uat/payment.yaml]
-    testdata: [config/testdata/accounts.yaml]
+    testdata: [testdata/accounts.yaml]
 ```
 
 可把 `config/environments/sit.yaml` 和 `config/environments/uat.yaml` 作為 common registry 的遷移來源，包括 `invokePaymentApi` 以及 `examples/load/closed-smoke.yaml` 使用的 `sample.getAcDate`。實際 package 不要把共用 registry 縮減成 `tools: {}` 或 `toolGroups: []`。
@@ -170,7 +176,7 @@ YAML 中可保留非 secret topology：JDBC URL、MQ host/port、queue manager�
 
 ## Schema catalog
 
-[`schemas/catalog.yaml`](../../packages/default/schemas/catalog.yaml) 是 active schema 的 source of truth。Package validation 檢查 registrations；封存 schema 不會成為 active runtime contract。完整矩陣見 [Schema and Version Matrix](appendices/schema-matrix.md)。
+Repository `schemas/catalog.yaml` 是建立版本相符 ATT Engine JAR 內嵌 registry 的 build input。Runtime 唯一權威來源是該版本鎖定的 classpath registry；`ATT_HOME/schemas/` 和 Package-local `schemas/` 均不能新增或替換 schemas。Package validation 會檢查 Engine 登錄的 resources；封存 schema 只有在安裝的 Engine 明確支援時才是 runtime contract。完整矩陣見 [Schema and Version Matrix](appendices/schema-matrix.md)。
 
 ## 設定 package-wide options
 

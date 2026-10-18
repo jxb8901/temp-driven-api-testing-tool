@@ -9,6 +9,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import static org.junit.jupiter.api.Assertions.*;
@@ -24,23 +25,24 @@ class SchemaMigrationGuidanceTest {
 
     @Test void currentAndHistoricalSchemasHaveSingleLocations() throws Exception {
         Path packageRoot = Paths.get("").toAbsolutePath().resolve("packages/default");
-        assertEquals(packageRoot.resolve("schemas/history/att-flow-v3.1.schema.json"),
-                SchemaFiles.resolve(packageRoot, "att-flow-v3.1.schema.json"));
-        assertEquals(packageRoot.resolve("schemas/history/att-flow-v3.0.schema.json"),
-                SchemaFiles.resolve(packageRoot, "att-flow-v3.0.schema.json"));
-        assertEquals(packageRoot.resolve("schemas/history/att-flow-v3.5.schema.json"),
-                SchemaFiles.resolve(packageRoot, "att-flow-v3.5.schema.json"));
-        assertEquals(packageRoot.resolve("schemas/history/att-flow-v3.4.schema.json"),
-                SchemaFiles.resolve(packageRoot, "att-flow-v3.4.schema.json"));
-        assertEquals(packageRoot.resolve("schemas/history/att-flow-v3.3.schema.json"),
-                SchemaFiles.resolve(packageRoot, "att-flow-v3.3.schema.json"));
-        assertEquals(packageRoot.resolve("schemas/history/att-template-v3.3.schema.json"),
-                SchemaFiles.resolve(packageRoot, "att-template-v3.3.schema.json"));
-        assertFalse(Files.exists(packageRoot.resolve("schemas/att-flow-v3.0.schema.json")));
-        assertFalse(Files.exists(packageRoot.resolve("schemas/att-flow-v3.3.schema.json")));
-        assertTrue(Files.exists(packageRoot.resolve("schemas/history/att-flow-v3.1.schema.json")));
-        assertTrue(Files.exists(packageRoot.resolve("schemas/history/att-flow-v3.3.schema.json")));
-        String catalog = new String(Files.readAllBytes(packageRoot.resolve("schemas/catalog.yaml")), StandardCharsets.UTF_8);
+        Path flow31=SchemaFiles.resolve(packageRoot, "att-flow-v3.1.schema.json");
+        Path flow30=SchemaFiles.resolve(packageRoot, "att-flow-v3.0.schema.json");
+        Path flow35=SchemaFiles.resolve(packageRoot, "att-flow-v3.5.schema.json");
+        Path flow34=SchemaFiles.resolve(packageRoot, "att-flow-v3.4.schema.json");
+        Path flow33=SchemaFiles.resolve(packageRoot, "att-flow-v3.3.schema.json");
+        Path template33=SchemaFiles.resolve(packageRoot, "att-template-v3.3.schema.json");
+        for(Path resolved:new Path[]{flow31,flow30,flow35,flow34,flow33,template33}) {
+            assertTrue(Files.isRegularFile(resolved));
+            assertFalse(resolved.startsWith(packageRoot), "Runtime schemas come from ATT's trusted registry");
+        }
+        assertTrue(flow31.endsWith(Paths.get("schemas/history/att-flow-v3.1.schema.json")));
+        assertTrue(flow30.endsWith(Paths.get("schemas/history/att-flow-v3.0.schema.json")));
+        assertTrue(flow35.endsWith(Paths.get("schemas/history/att-flow-v3.5.schema.json")));
+        assertTrue(flow34.endsWith(Paths.get("schemas/history/att-flow-v3.4.schema.json")));
+        assertTrue(flow33.endsWith(Paths.get("schemas/history/att-flow-v3.3.schema.json")));
+        assertTrue(template33.endsWith(Paths.get("schemas/history/att-template-v3.3.schema.json")));
+        Path sourceCatalog=Paths.get("").toAbsolutePath().resolve("schemas/catalog.yaml");
+        String catalog = new String(Files.readAllBytes(sourceCatalog), StandardCharsets.UTF_8);
         assertTrue(catalog.contains("history/att-flow-v3.0.schema.json"));
         assertTrue(catalog.contains("globalConfig: att-config-v2.12.schema.json"));
     }
@@ -129,18 +131,47 @@ class SchemaMigrationGuidanceTest {
         assertFalse(error.suggestion().contains("path:"), error.suggestion());
     }
 
-    @Test void missingRegisteredHistoricalSchemaFailsWithoutFallbackAndCatalogScanFindsUnusedGaps() throws Exception {
+    @Test void packageSchemaCopiesCannotReplaceTrustedSchemas() throws Exception {
         Path historical = root.resolve("schemas/history/att-flow-v3.0.schema.json");
         Files.delete(historical);
-        DiagnosticException pointOfUse = assertThrows(DiagnosticException.class,
-                () -> SchemaFiles.resolve(root, "att-flow-v3.0.schema.json"));
-        assertEquals(DiagnosticCodes.PACKAGE_INVALID, pointOfUse.code());
-        assertTrue(pointOfUse.detail().contains("schemas/history/att-flow-v3.0.schema.json"));
-        assertFalse(pointOfUse.detail().contains(root.toString()), pointOfUse.detail());
-        assertTrue(pointOfUse.getMessage().contains("will not skip validation")
-                || pointOfUse.detail().contains("will not skip validation"));
-        DiagnosticException proactive = assertThrows(DiagnosticException.class, () -> SchemaFiles.validateCatalog(root));
-        assertEquals(DiagnosticCodes.PACKAGE_INVALID, proactive.code());
-        assertTrue(proactive.detail().contains("att-flow-v3.0.schema.json"));
+        Path resolved=SchemaFiles.resolve(root, "att-flow-v3.0.schema.json");
+        assertTrue(Files.isRegularFile(resolved));
+        assertFalse(resolved.startsWith(root));
+        assertDoesNotThrow(() -> SchemaFiles.validateCatalog(root));
+    }
+
+    @Test void packageAndAttHomeSchemaTreesCannotOverrideEmbeddedRegistry() throws Exception {
+        String filename = "att-flow-v3.6.schema.json";
+        Path packageRoot = root.resolve("package");
+        Path attHome = root.resolve("att-home");
+        for (Path candidate : new Path[]{packageRoot, attHome}) {
+            Path schemas = candidate.resolve("schemas");
+            Files.createDirectories(schemas);
+            Files.write(schemas.resolve("catalog.yaml"), "not-the-runtime-catalog".getBytes(StandardCharsets.UTF_8));
+            Files.write(schemas.resolve(filename), "not-the-runtime-schema".getBytes(StandardCharsets.UTF_8));
+        }
+
+        Path fromPackage = SchemaFiles.resolve(packageRoot, filename);
+        Path fromAttHome = SchemaFiles.resolve(attHome, filename);
+        assertEquals(fromPackage, fromAttHome, "Runtime schema resolution is independent of Package and ATT_HOME trees");
+        assertFalse(fromPackage.startsWith(packageRoot));
+        assertFalse(fromPackage.startsWith(attHome));
+        byte[] embedded;
+        try (java.io.InputStream stream = SchemaFiles.class.getClassLoader()
+                .getResourceAsStream("att-schemas/" + filename)) {
+            assertNotNull(stream, "The official schema must be embedded in the ATT Engine JAR");
+            java.io.ByteArrayOutputStream bytes = new java.io.ByteArrayOutputStream();
+            byte[] buffer = new byte[4096];
+            int count;
+            while ((count = stream.read(buffer)) >= 0) bytes.write(buffer, 0, count);
+            embedded = bytes.toByteArray();
+        }
+        assertTrue(Arrays.equals(embedded, Files.readAllBytes(fromPackage)),
+                "Resolved bytes must match the JAR-embedded official schema");
+        assertTrue(Arrays.equals(embedded, SchemaFiles.readSchema(fromPackage).bytes()),
+                "Runtime validation must read the authoritative schema bytes from the Engine Classpath");
+        assertTrue(SchemaFiles.readSchema(fromPackage).identity().contains(SchemaFiles.registryDigest()),
+                "the in-memory validator identity must bind to the matching Engine registry digest");
+        assertDoesNotThrow(() -> SchemaFiles.validateCatalog(packageRoot));
     }
 }

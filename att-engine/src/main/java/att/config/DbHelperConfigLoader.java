@@ -35,6 +35,8 @@ public final class DbHelperConfigLoader {
             }
             Path relative = IdentifierValidator.relativePath(text, "dbhelper path");
             Path logical = resources.packageRoot().resolve(relative).normalize();
+            if (!logical.startsWith(resources.packageRoot().resolve("config")))
+                throw new IllegalArgumentException("dbhelper files must remain inside shared config/");
             if (Files.isSymbolicLink(logical)) throw new IllegalArgumentException("Unsafe DB helper file: " + text);
             Path file = resources.resolvePackageRelative(relative.toString().replace('\\', '/'), PackageResourceResolver.Kind.FILE).canonicalPath();
             if (!Files.isRegularFile(file)) {
