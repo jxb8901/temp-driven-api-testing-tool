@@ -72,6 +72,7 @@ final class ServerRuntime implements AutoCloseable {
     final AuthService auth;
     final ThreadPoolExecutor workers,streams,inspectors;
     private final ThreadPoolExecutor artifactWriters;
+    private final Semaphore artifactReadSlots=new Semaphore(8,true);
     final ConcurrentHashMap<String,Job> jobs=new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String,FutureTask<Void>> tasks=new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String,AdmissionLease> leases=new ConcurrentHashMap<>();
@@ -122,7 +123,8 @@ final class ServerRuntime implements AutoCloseable {
         inspectionWatchdogs=java.util.concurrent.Executors.newSingleThreadScheduledExecutor(r->{Thread t=new Thread(r,"att-server-inspector-watchdog");t.setDaemon(true);return t;});
         inspectionWarmup=config.inspection.enabled&&config.inspection.warmup.enabled()
                 ?java.util.concurrent.Executors.newSingleThreadScheduledExecutor(r->{Thread t=new Thread(r,"att-server-inspector-warmup");t.setDaemon(true);return t;}):null;
-        recover();cleanupExpiredJobsSafely();retention.scheduleWithFixedDelay(this::cleanupExpiredJobsSafely,1,1,TimeUnit.HOURS);
+        recover();cleanupExpiredJobsSafely();recoverArtifactArchivesSafely();retention.scheduleWithFixedDelay(this::cleanupExpiredJobsSafely,1,1,TimeUnit.HOURS);
+        retention.scheduleWithFixedDelay(this::recoverArtifactArchivesSafely,5,5,TimeUnit.MINUTES);
         retention.scheduleWithFixedDelay(this::expireDraftsSafely,1,1,TimeUnit.MINUTES);
         if(config.scheduling.enabled) {
             store.recoverScheduleExecutions();
@@ -277,7 +279,7 @@ final class ServerRuntime implements AutoCloseable {
         if("local".equals(config.authMode))requireJobOwner(id,principal);
         Job j=jobs.get(id);if(j==null){Map<String,Object> stored=store.get(id);if(stored==null||!JOB_ID.matcher(id).matches())throw new NotFoundException();return String.valueOf(stored.get("status"));}
         synchronized(j){if(j.terminal())return j.status;append(j,"status",Map.of("jobId",id,"status","CANCEL_REQUESTED"));
-            Process p=j.process;if(p==null){FutureTask<Void> task=tasks.remove(id);if(task!=null){boolean cancelled=task.cancel(false);workers.remove(task);if(cancelled){AdmissionLease lease=leases.remove(id);if(lease!=null)lease.release();}}finish(j,"CANCELLED",143);jobs.remove(id,j);}
+            Process p=j.process;if(p==null){FutureTask<Void> task=tasks.remove(id);if(task!=null){boolean cancelled=task.cancel(false);workers.remove(task);if(cancelled){AdmissionLease lease=leases.remove(id);if(lease!=null)lease.release();}}finish(j,"CANCELLED",143);scheduleArtifactArchive(id);jobs.remove(id,j);}
             else {terminateTree(p);try{if(!p.waitFor(config.gracefulStopMs,TimeUnit.MILLISECONDS)){forceTree(p);p.waitFor();}}catch(InterruptedException e){Thread.currentThread().interrupt();forceTree(p);}finish(j,"CANCELLED",143);}}
         store.audit(principal,"CANCEL",id,j.packageId,"CANCELLED");return j.status;
     }
@@ -2082,7 +2084,11 @@ final class ServerRuntime implements AutoCloseable {
         return config.dataDir.resolve("jobs").resolve(id).resolve("output").toAbsolutePath().normalize();
     }
     Path artifactArchivePath(String id) { return config.dataDir.resolve("jobs").resolve(id).resolve("artifacts.zip"); }
-    Map<String,Object> artifactIndex(String id) throws Exception {
+    boolean acquireArtifactReadSlot() { return artifactReadSlots.tryAcquire(); }
+    void releaseArtifactReadSlot() { artifactReadSlots.release(); }
+    Map<String,Object> artifactIndex(String id) throws Exception { return artifactIndex(id,0,100); }
+    Map<String,Object> artifactIndex(String id,int offset,int limit) throws Exception {
+        if(offset<0||offset>1_000_000||limit<1||limit>100)throw new IllegalArgumentException("Artifact listing pagination is invalid");
         if(store.get(id)==null)throw new NotFoundException();
         Path archive=artifactArchivePath(id),statusFile=archive.resolveSibling("archive-status.json");
         Map<String,Object> out=new LinkedHashMap<>();
@@ -2092,29 +2098,38 @@ final class ServerRuntime implements AutoCloseable {
                 if(manifest==null)throw new IllegalStateException("Archive manifest is missing");
                 Map<?,?> data;try(var input=zip.getInputStream(manifest)){data=JSON.readValue(input,Map.class);}
                 if(!(data.get("version") instanceof Number version)||version.intValue()!=1)throw new IllegalStateException("Archive manifest version is unsupported");
-                Object entries=data.get("entries");out.put("items",entries instanceof List<?>?entries:List.of());out.put("archiveStatus","READY");
+                Object entries=data.get("entries");List<?> all=entries instanceof List<?>? (List<?>)entries:List.of();
+                int start=Math.min(offset,all.size()),end=Math.min(all.size(),start+limit);
+                out.put("items",all.subList(start,end));out.put("nextOffset",end<all.size()?end:null);
+                out.put("primaryReports",all.stream().filter(item->item instanceof Map<?,?> row&&Boolean.TRUE.equals(row.get("report"))).toList());
+                out.put("archiveStatus","READY");
             }
         } else {
-            out.put("items",List.of());
+            out.put("items",List.of());out.put("nextOffset",null);out.put("primaryReports",List.of());
             out.put("archiveStatus",Files.isRegularFile(statusFile)?JSON.readTree(statusFile.toFile()).path("state").asText("FAILED"):"PENDING");
         }
         out.put("downloadPath","archive.zip");return out;
     }
     byte[] archiveEntry(String id,String requested) throws Exception {
-        if(!"READY".equals(artifactIndex(id).get("archiveStatus")))throw new NotFoundException();
-        Path archive=artifactArchivePath(id);byte[] bytes=ArtifactArchive.read(archive,requested);
-        try(java.util.zip.ZipFile zip=new java.util.zip.ZipFile(archive.toFile());var input=zip.getInputStream(zip.getEntry(ArtifactArchive.MANIFEST))) {
-            Map<?,?> manifest=JSON.readValue(input,Map.class);Object entries=manifest.get("entries");boolean approved=false;
-            if(entries instanceof List<?> list)for(Object item:list)if(item instanceof Map<?,?> row&&requested.equals(row.get("path"))&&row.get("size") instanceof Number size&&size.longValue()==bytes.length&&ArtifactArchive.sha256(bytes).equals(row.get("sha256"))){approved=true;break;}
-            if(!approved)throw new NotFoundException();
-        }
-        return bytes;
+        if(!artifactReadSlots.tryAcquire())throw new ArtifactCapacityException();
+        try {
+            if(store.get(id)==null)throw new NotFoundException();
+            Path archive=artifactArchivePath(id);if(!Files.isRegularFile(archive))throw new NotFoundException();
+            byte[] bytes=ArtifactArchive.read(archive,requested);
+            try(java.util.zip.ZipFile zip=new java.util.zip.ZipFile(archive.toFile());var input=zip.getInputStream(zip.getEntry(ArtifactArchive.MANIFEST))) {
+                Map<?,?> manifest=JSON.readValue(input,Map.class);if(!(manifest.get("version") instanceof Number version)||version.intValue()!=1)throw new NotFoundException();Object entries=manifest.get("entries");boolean approved=false;
+                if(entries instanceof List<?> list)for(Object item:list)if(item instanceof Map<?,?> row&&requested.equals(row.get("path"))&&row.get("size") instanceof Number size&&size.longValue()==bytes.length&&ArtifactArchive.sha256(bytes).equals(row.get("sha256"))){approved=true;break;}
+                if(!approved)throw new NotFoundException();
+            }
+            return bytes;
+        } finally { artifactReadSlots.release(); }
     }
     void retryArtifactArchive(String id) throws Exception {
         if(!terminal(id))throw new IllegalArgumentException("Artifacts can be published after the Job has ended");
         Files.deleteIfExists(artifactArchivePath(id).resolveSibling("archive-status.json"));scheduleArtifactArchive(id);
     }
     void scheduleArtifactArchive(String id) {
+        if(Files.isRegularFile(artifactArchivePath(id)))return;
         try { artifactWriters.execute(() -> {
             Path output=outputDirectoryForJob(id), archive=artifactArchivePath(id), status=archive.resolveSibling("archive-status.json");
             try {
@@ -2132,6 +2147,10 @@ final class ServerRuntime implements AutoCloseable {
         }); } catch(RejectedExecutionException full) {
             try { Files.writeString(artifactArchivePath(id).resolveSibling("archive-status.json"),"{\"state\":\"FAILED\",\"reason\":\"writer_capacity\",\"retryable\":true}",StandardCharsets.UTF_8); } catch(Exception ignored) { }
         }
+    }
+    private void recoverArtifactArchivesSafely() {
+        try { for(String id:store.terminalJobIds())if(!Files.isRegularFile(artifactArchivePath(id))&&Files.isDirectory(outputDirectoryForJob(id)))scheduleArtifactArchive(id); }
+        catch(Exception failure) { java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).warning("Unable to recover pending artifact publications: "+safeMessage(failure)); }
     }
     Object publicEventData(Object data,Path output,Path packageRoot) throws Exception {
         JsonNode node=JSON.valueToTree(att.server.api.internal.DiagnosticSanitizer.sanitizeValue(data));
@@ -2212,6 +2231,7 @@ final class ServerRuntime implements AutoCloseable {
     static final class StaleDraftException extends RuntimeException {}
     static final class DraftCapacityException extends RuntimeException {}
     static final class InlineLoadDisabledException extends RuntimeException {}
+    static final class ArtifactCapacityException extends RuntimeException {}
     static final class InlineLoadLimitException extends IllegalArgumentException {
         InlineLoadLimitException(String message){super(message);}
     }

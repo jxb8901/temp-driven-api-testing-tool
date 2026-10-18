@@ -23,7 +23,7 @@ import java.util.zip.ZipOutputStream;
 /** Builds the sole public representation of a Job's output. Raw Worker output is never served. */
 final class ArtifactArchive {
     static final String MANIFEST = "export-manifest-v1.json";
-    static final int MAX_ENTRIES = 500;
+    static final int MAX_ENTRIES = 10_000;
     static final long MAX_ENTRY_BYTES = 16L * 1024 * 1024;
     static final long MAX_TOTAL_BYTES = 128L * 1024 * 1024;
     private static final Set<String> SAFE_EXTENSIONS = Set.of("txt", "log", "json", "yaml", "yml", "xml", "html", "htm", "css", "csv", "md");

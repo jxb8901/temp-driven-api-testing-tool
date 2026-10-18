@@ -475,6 +475,11 @@ final class JobStore implements AutoCloseable {
         }
         return ids;
     }
+    synchronized List<String> terminalJobIds() throws Exception {
+        List<String> ids=new ArrayList<>();
+        try(Connection c=connect();Statement s=c.createStatement();ResultSet r=s.executeQuery("SELECT job_id FROM jobs WHERE status IN ('PASS','FAIL','ERROR','INVALID','CANCELLED') AND finished_at IS NOT NULL ORDER BY finished_at")) { while(r.next())ids.add(r.getString(1)); }
+        return ids;
+    }
     synchronized void deleteJob(String id) throws Exception {
         try(Connection c=connect();PreparedStatement p=c.prepareStatement("DELETE FROM jobs WHERE job_id=?")){p.setString(1,id);p.executeUpdate();}
     }

@@ -1517,12 +1517,31 @@
         status.append(document.createTextNode(' — '), retry);
       }
       list.append(status);
-      listItems(data).forEach(item => {
+      const viewItem = item => {
         const li = document.createElement('li');
         const path = String(item.path);
         li.append(link(`${api}jobs/${encodeURIComponent(id)}/artifacts/view/${path.split('/').map(encodeURIComponent).join('/')}`, `${path} (${item.size} bytes)`));
         list.append(li);
-      });
+      };
+      if (Array.isArray(data.primaryReports) && data.primaryReports.length) {
+        const heading = document.createElement('li'); text(heading, 'Reports'); list.append(heading);
+        data.primaryReports.forEach(viewItem);
+      }
+      listItems(data).filter(item => !item.report).forEach(viewItem);
+      if (data.nextOffset != null) {
+        const more = document.createElement('button'); more.type = 'button'; more.textContent = 'Load more artifacts';
+        const row = document.createElement('li'); row.append(more); list.append(row);
+        more.addEventListener('click', async () => {
+          more.disabled = true;
+          try {
+            const page = await request(`jobs/${encodeURIComponent(id)}/artifacts?offset=${encodeURIComponent(data.nextOffset)}&limit=100`);
+            if (generation !== navigation || activeJob !== id) return;
+            listItems(page).filter(item => !item.report).forEach(viewItem);
+            row.remove();
+            if (page.nextOffset != null) { data.nextOffset = page.nextOffset; list.append(row); more.disabled = false; }
+          } catch (error) { message(error.message); more.disabled = false; }
+        });
+      }
       if (data.archiveStatus === 'PENDING') setTimeout(() => { if (generation === navigation && activeJob === id) loadArtifacts(id, generation); }, 2000);
     } catch (error) {
       if (requestSequence === artifactRequestSequence && generation === navigation && activeJob === id) message(error.message);
