@@ -328,7 +328,7 @@ public final class SchemaFiles {
                 Path leasePath = root.resolve(".cache-use.lock");
                 if (Files.isSymbolicLink(leasePath)) throw new IOException("The trusted schema cache lease is unsafe");
                 FileChannel leaseChannel = FileChannel.open(leasePath, StandardOpenOption.CREATE,
-                        StandardOpenOption.WRITE, LinkOption.NOFOLLOW_LINKS);
+                        StandardOpenOption.READ, StandardOpenOption.WRITE, LinkOption.NOFOLLOW_LINKS);
                 FileLock lease;
                 try {
                     restrictPermissions(leasePath, false);
