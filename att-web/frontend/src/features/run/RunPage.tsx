@@ -192,7 +192,9 @@ export function RunPage({ packageId: initialPackage = '', initialTarget, initial
       {schedulingEnabled && <button className="button button-primary" type="button" disabled={busy} onClick={() => {
         releaseNavigationGuard.current();
         releaseNavigationGuard.current = () => {};
-        const accepted = onSchedule({ packageId: definition.packageId, environment: definition.environment, draftId: draft.draftId, executionType: 'run', legacyDebug: draft.draftId.startsWith('D'), previewYaml: draft.previewYaml || JSON.stringify(draft.preview || draft, null, 2), target: definition.target });
+        const accepted = onSchedule({ packageId: definition.packageId, environment: definition.environment, draftId: draft.draftId,
+          expiresAt: draft.expiresAt, executionType: 'run', legacyDebug: draft.draftId.startsWith('D'),
+          previewYaml: draft.previewYaml || JSON.stringify(draft.preview || draft, null, 2), target: definition.target });
         if (accepted === false) {
           releaseNavigationGuard.current = navigation.registerUnsavedChanges(true, 'Run definition changes');
           setDirty(true);

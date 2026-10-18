@@ -13,7 +13,8 @@ let host: HTMLDivElement; let root: Root;
 const onAccepted = vi.fn(); const onSchedule = vi.fn(() => true); const release = vi.fn();
 const guard = { registerUnsavedChanges: vi.fn(() => release) } as unknown as NavigationGuardApi;
 beforeEach(async () => {
-  vi.clearAllMocks(); vi.mocked(api.previewRun).mockResolvedValue({ draftId: 'R123', preview: { selectedCaseIds: ['cases.default.C1'] } });
+  vi.clearAllMocks(); vi.mocked(api.previewRun).mockResolvedValue({ draftId: 'R123', preview: { selectedCaseIds: ['cases.default.C1'] },
+    expiresAt: new Date(Date.now() + 60_000).toISOString() });
   vi.mocked(api.submitRun).mockResolvedValue({ jobId: 'J123' });
   vi.mocked(api.getDeclaredConfiguration).mockResolvedValue({ environments: [{ name: 'SIT', state: 'active' }, { name: 'UAT', state: 'active' }] });
   vi.mocked(api.getDebugForm).mockImplementation(async identity => ({
@@ -50,18 +51,19 @@ it('schedules the reviewed snapshot and diagnostic changes do not execute', asyn
   await change('Target type', 'flow'); await change('Target ID', 'payment.flow');
   await settleDebugForm();
   await click('Validate'); await click('Schedule…');
-  expect(onSchedule).toHaveBeenCalledWith(expect.objectContaining({ draftId: 'R123', executionType: 'run', target: { type: 'flow', id: 'payment.flow' } }));
+  expect(onSchedule).toHaveBeenCalledWith(expect.objectContaining({ draftId: 'R123', expiresAt: expect.any(String), executionType: 'run', target: { type: 'flow', id: 'payment.flow' } }));
   expect(api.submitRun).not.toHaveBeenCalled();
   await act(async () => (control('Debug diagnostics') as HTMLInputElement).click());
   expect(host.querySelector('[aria-label="Review RUN"]')).toBeNull();
   await click('Validate'); expect(api.previewRun).toHaveBeenLastCalledWith(expect.objectContaining({ options: { debug: true } }));
 });
 it('schedules a mixed-version resource fallback as legacy Debug', async () => {
-  vi.mocked(api.previewRun).mockResolvedValueOnce({ draftId: 'D123', preview: { target: { type: 'flow', id: 'payment.flow' } } });
+  vi.mocked(api.previewRun).mockResolvedValueOnce({ draftId: 'D123', preview: { target: { type: 'flow', id: 'payment.flow' } },
+    expiresAt: new Date(Date.now() + 60_000).toISOString() });
   await change('Target type', 'flow'); await change('Target ID', 'payment.flow');
   await settleDebugForm();
   await click('Validate'); await click('Schedule…');
-  expect(onSchedule).toHaveBeenCalledWith(expect.objectContaining({ draftId: 'D123', executionType: 'run', legacyDebug: true }));
+  expect(onSchedule).toHaveBeenCalledWith(expect.objectContaining({ draftId: 'D123', expiresAt: expect.any(String), executionType: 'run', legacyDebug: true }));
 });
 
 it.each(['case', 'template', 'flow', 'tool', 'batch'])('preserves the validated %s selection and Debug option when scheduling', async targetType => {

@@ -105,6 +105,39 @@ class WorkerMainTest {
         }
     }
 
+    @Test void repairsAnInterruptedFirstExtractionWithoutLease() throws Exception {
+        Path temporary=Files.createDirectories(temp.resolve("interrupted-trusted-schema-temp"));
+        String javaExecutable=Paths.get(System.getProperty("java.home"),"bin",isWindows()?"java.exe":"java").toString();
+        String classpath=System.getProperty("java.class.path");
+        Process first=new ProcessBuilder(javaExecutable,"-Djava.io.tmpdir="+temporary.toAbsolutePath(),"-cp",classpath,
+                TrustedSchemaCacheProcess.class.getName()).start();
+        String firstOut=read(first.getInputStream());
+        String firstErr=read(first.getErrorStream());
+        assertEquals(0,first.waitFor(),firstErr+"\n"+firstOut);
+
+        Path cacheBase;
+        try(java.util.stream.Stream<Path> paths=Files.list(temporary)) {
+            cacheBase=paths.filter(path->path.getFileName().toString().startsWith("att-trusted-schema-cache-"))
+                    .findFirst().orElseThrow(()->new AssertionError("Worker did not create the shared trusted schema cache"));
+        }
+        Path cacheRoot;
+        try(java.util.stream.Stream<Path> paths=Files.list(cacheBase)) {
+            cacheRoot=paths.filter(path->path.getFileName().toString().matches("[0-9a-f]{64}"))
+                    .findFirst().orElseThrow(()->new AssertionError("Trusted schema cache root is missing"));
+        }
+        Files.delete(cacheRoot.resolve(".cache-use.lock"));
+        Files.delete(cacheRoot.resolve("schemas/catalog.yaml")); // Simulate termination before lease publication.
+
+        Process repair=new ProcessBuilder(javaExecutable,"-Djava.io.tmpdir="+temporary.toAbsolutePath(),"-cp",classpath,
+                TrustedSchemaCacheProcess.class.getName()).start();
+        String repairOut=read(repair.getInputStream());
+        String repairErr=read(repair.getErrorStream());
+        assertEquals(0,repair.waitFor(),repairErr+"\n"+repairOut);
+        assertTrue(Files.isRegularFile(cacheRoot.resolve("schemas/catalog.yaml")),
+                "A fresh Worker must replace an incomplete fingerprint directory that has no lease");
+        assertTrue(Files.isRegularFile(cacheRoot.resolve(".cache-use.lock")));
+    }
+
     @Test void workerFailsClosedWhenServerAndEmbeddedRegistryIdentitiesDiffer() throws Exception {
         Path temporary=Files.createDirectories(temp.resolve("registry-handshake-temp"));
         String javaExecutable=Paths.get(System.getProperty("java.home"),"bin",isWindows()?"java.exe":"java").toString();

@@ -251,7 +251,7 @@ public final class SchemaFiles {
                 catch (IOException ignoredRead) { complete = false; }
                 if (!complete) {
                     if (Files.exists(root, LinkOption.NOFOLLOW_LINKS)) {
-                        deleteCacheIfUnused(root);
+                        recoverIncompleteCache(root);
                         if (Files.exists(root, LinkOption.NOFOLLOW_LINKS))
                             throw new IOException("The trusted schema cache is corrupt or still in use");
                     }
@@ -360,6 +360,25 @@ public final class SchemaFiles {
         }
         Files.deleteIfExists(leasePath);
         Files.deleteIfExists(version);
+    }
+
+    /** Recovers an incomplete fingerprint directory while holding the cache-wide initialization lock. */
+    private static void recoverIncompleteCache(Path root) throws IOException {
+        if (Files.isSymbolicLink(root)) {
+            Files.delete(root);
+            return;
+        }
+        if (!Files.isDirectory(root, LinkOption.NOFOLLOW_LINKS)) {
+            Files.deleteIfExists(root);
+            return;
+        }
+        Path leasePath = root.resolve(".cache-use.lock");
+        if (!Files.exists(leasePath, LinkOption.NOFOLLOW_LINKS)) {
+            // No lease can exist until extraction verifies; under the global lock this is abandoned partial output.
+            deleteTree(root);
+            return;
+        }
+        deleteCacheIfUnused(root);
     }
 
     private static Path cacheBase() throws IOException {

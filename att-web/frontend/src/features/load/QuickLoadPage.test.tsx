@@ -88,6 +88,7 @@ describe('QuickLoadPage', () => {
   });
 
   it('loads the selected bundled Quick Smoke policy without submitting and validates its preview', async () => {
+    const expiresAt = new Date(Date.now() + 60_000).toISOString();
     const api = {
       getLoadPolicy: vi.fn(async (_packageId: string, model: 'virtualUsers' | 'arrivalRate', _environment?: string, _signal?: AbortSignal, templateId?: string) => ({
         model,
@@ -99,15 +100,16 @@ describe('QuickLoadPage', () => {
       getTargetLoadForm: vi.fn(async () => ({ target: { type: 'template' as const, id: 'checkout' }, model: 'virtualUsers' as const, input: { inputs: { account: 'A-1' }, vars: {} } })),
       createLoadDraft: vi.fn(async () => ({
         draftId: 'L0123456789ABCDEF0123456789ABCDEF', packageId: 'payments', model: 'virtualUsers' as const,
-        previewYaml: 'schemaVersion: att-load/v1.6\n', expiresAt: new Date(Date.now() + 60_000).toISOString(),
+        previewYaml: 'schemaVersion: att-load/v1.6\n', expiresAt,
       })),
       submitLoadDraft: vi.fn(async () => ({ jobId: 'JOB-QUICK' })),
     } as unknown as LoadJobsApi;
     const onJobAccepted = vi.fn();
+    const onSchedule = vi.fn();
     await act(async () => root.render(<QuickLoadPage
       api={api} packageId="payments" target={{ type: 'template', resourceId: 'opaque:r_4f%2F' }}
       environment="" environments={['staging']} environmentState="ready" inlineLoadEnabled
-      onEnvironmentChange={vi.fn()} onJobAccepted={onJobAccepted} onCancel={vi.fn()}
+      schedulingEnabled onSchedule={onSchedule} onEnvironmentChange={vi.fn()} onJobAccepted={onJobAccepted} onCancel={vi.fn()}
       registerUnsavedChanges={() => () => {}}
     />));
     await flush();
@@ -133,6 +135,8 @@ describe('QuickLoadPage', () => {
     expect(workload.target).toEqual({ type: 'template', id: 'checkout' });
     expect(workload.load).toEqual({ users: 2 });
     expect((scenario.load as Record<string, unknown>).duration).toBe('10s');
+    await act(async () => [...host.querySelectorAll('button')].find(button => button.textContent === 'Schedule…')!.click());
+    expect(onSchedule).toHaveBeenCalledWith(expect.objectContaining({ draftId: 'L0123456789ABCDEF0123456789ABCDEF', expiresAt }));
     expect((scenario.execution as Record<string, unknown>).thinkTime).toBe('250ms');
     expect((scenario.evidence as Record<string, unknown>).mode).toBe('failures');
     expect(api.submitLoadDraft).not.toHaveBeenCalled();
