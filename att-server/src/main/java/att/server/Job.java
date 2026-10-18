@@ -22,6 +22,7 @@ final class Job {
     volatile Map<String,Object> workerMetrics;
     volatile boolean resultReceived;
     volatile Process process;
+    volatile WorkerProcessFence processFence;
     final JobEvents events;
     Job(String id,String command,String packageId,String principal,WorkerRequest request,JobEvents events){this.id=id;this.command=command;this.packageId=packageId;this.principal=principal;this.request=request;this.events=events;}
     Map<String,Object> performance(){

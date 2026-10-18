@@ -2899,9 +2899,9 @@ Inventory 不受 `server.maxArtifacts` 限制：最多 50,000 filesystem candida
 
 失敗時保留私有 output，並在可用時選擇 **Retry archive**。同時提出的 retry 會合併；若上一個 writer 正在結束，已接受的 retry 會保留為下一次 publication，不會被靜默丟棄。Restart 及定期 reconciliation 會透過相同發佈政策遷移 terminal legacy loose-output Jobs、驗證已原子提交但狀態未更新的 ZIP，並清理 staging 及剩餘 loose output；不會直接提供 legacy raw files。若來源已不存在，損壞 ZIP 無法重建，archive 會維持不可用。
 
-Worker 的 terminal RESULT 不代表 execution cleanup 已完成。Publication 會等到記憶體中的 execution 結束並釋放 admission lease。Restart 後，publication 和 retention 會檢查已保存的 Worker PID 與 start time；相符的 live process，或 start identity 未知的 live PID，會阻止 publication/deletion。Archive status `FAILED`、reason `worker_active` 會保留 private output；請在該 Worker 停止後 retry。已知但不同的 start time 表示 PID reuse，而非原本的 Worker。這些 parent-process 檢查尚不能證明任意 detached descendant 已被限制及停止。
+Worker 的 terminal RESULT 不代表 execution cleanup 已完成。Publication 會等到記憶體中的 execution 結束並釋放 admission lease。Server 每個 Job 最多保留 1,024 個已觀察的 process identity，包括 terminal delivery 前及 cancellation/error cleanup 時發現的 child。Graceful stop 和 forced escalation 使用相同 identity，即使 parent 已退出亦然；所有已觀察的 process 退出前，admission 和 publication 仍受 fence 保護。Enumeration 或 identity persistence 失敗時，該 active execution 會 fail closed。Restart 後，publication 和 retention 會檢查 Worker PID/start time 及已保存的 observed-process ledger；相符的 live process，或 start identity 未知的 live PID，會阻止 publication/deletion。Archive status `FAILED`、reason `worker_active` 會保留 private output；請在 Worker 及已記錄的 descendant 停止後 retry。已知但不同的 start time 表示 PID reuse，而非原本的 Worker。Observed-process fence 尚不能證明在 observation 前已逃離的任意 detached descendant 已被限制及停止；完整 OS-level containment 及跨平台 acceptance 仍待完成。
 
-既有 `server.jobRetentionDays` 會連同 ZIP 一併到期刪除完整 Job；active readers/writers 存在時不會刪除使用中的 archive。Classification 及發佈結果寫入不含 raw values 的 audit。失敗的發佈不會刪除唯一未封存的來源。
+既有 `server.jobRetentionDays` 會連同 ZIP 一併到期刪除完整 Job；active readers/writers 存在時會延後該次 sweep，不會阻塞 cleanup thread 或刪除使用中的 archive。Classification 及發佈結果寫入不含 raw values 的 audit。失敗的發佈不會刪除唯一未封存的來源。
 
 Run 會執行 authored Testcase，並為每個選中的 row 記錄一次 Case execution。Testcase 是 Workbook data；Case execution 是使用相同完整 Case ID 標識的 runtime result。閱讀 status、日誌、報表和 evidence 時使用 Case execution。
 

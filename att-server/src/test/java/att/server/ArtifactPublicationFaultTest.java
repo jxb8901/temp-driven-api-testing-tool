@@ -116,6 +116,53 @@ class ArtifactPublicationFaultTest {
         }
     }
 
+    @Test void restartAndRetentionKeepPrivateOutputForAnObservedChildAfterItsParentExits() throws Exception {
+        org.junit.jupiter.api.Assumptions.assumeFalse(isWindows(), "Uses a POSIX process tree fixture");
+        Path pidFile = temp.resolve("orphan.pid");
+        Process parent = new ProcessBuilder("sh", "-c", "sleep 30 >/dev/null 2>&1 & echo $! > \"$1\"; wait", "fixture", pidFile.toString()).start();
+        ProcessHandle child = null;
+        String id = "J0000000000000001";
+        try {
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+            while (!Files.exists(pidFile) && System.nanoTime() < deadline) Thread.sleep(10);
+            child = ProcessHandle.of(Long.parseLong(Files.readString(pidFile).trim())).orElseThrow();
+            WorkerProcessFence fence = new WorkerProcessFence(parent);
+            ServerConfig config;
+            try (ServerRuntime runtime = runtime(ArtifactArchive::build)) {
+                config = runtime.config;
+                Job job = terminalJob(runtime, id);
+                job.workerPid = parent.pid();job.workerStartTime = parent.info().startInstant().orElseThrow();
+                job.finishedAt = Instant.now().minus(java.time.Duration.ofDays(config.jobRetentionDays + 1L));
+                runtime.store.update(job);
+                runtime.store.rememberWorkerProcesses(id, fence.identities());
+                parent.destroy();
+                assertTrue(parent.waitFor(5, TimeUnit.SECONDS));
+                assertTrue(child.isAlive());
+                assertTrue(runtime.store.workerMayBeAlive(id), "The persisted child must fence a dead parent");
+            }
+            try (ServerRuntime restarted = new ServerRuntime(config, temp.resolve("libs").toString())) {
+                awaitState(restarted, id, "FAILED");
+                assertEquals("worker_active", restarted.artifactIndex(id).get("reason"));
+                assertNotNull(restarted.store.get(id), "Retention must preserve a Job with a known live descendant");
+                assertTrue(Files.isDirectory(restarted.outputDirectoryForJob(id)));
+                assertFalse(Files.exists(restarted.artifactArchivePath(id)));
+                child.destroyForcibly();
+                child.onExit().get(5, TimeUnit.SECONDS);
+                awaitReady(restarted, id);
+                assertFalse(new String(restarted.archiveEntry(id, "case.log"), java.nio.charset.StandardCharsets.UTF_8).contains("private-canary"));
+                long cleanupDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+                while (Files.exists(restarted.outputDirectoryForJob(id)) && System.nanoTime() < cleanupDeadline) Thread.sleep(10);
+                assertFalse(Files.exists(restarted.outputDirectoryForJob(id)));
+                // Deletion must also remove the operational process ledger (FK cascade).
+                restarted.store.deleteJob(id);
+                assertFalse(restarted.store.workerMayBeAlive(id));
+            }
+        } finally {
+            if (child != null && child.isAlive()) child.destroyForcibly();
+            parent.destroyForcibly();parent.waitFor(5, TimeUnit.SECONDS);
+        }
+    }
+
     @Test void simulatedDiskFailurePreservesPrivateSourceAndRetryPublishesOnlyApprovedBytes() throws Exception {
         AtomicInteger attempts = new AtomicInteger();
         try (ServerRuntime runtime = runtime((output, archive, publisher) -> {
@@ -207,15 +254,150 @@ class ArtifactPublicationFaultTest {
         }
     }
 
+    @Test void acceptedRetryRetentionAndAnOpenViewerCoordinateAcrossTheSameArchive() throws Exception {
+        CountDownLatch first = new CountDownLatch(1), releaseFirst = new CountDownLatch(1);
+        CountDownLatch retry = new CountDownLatch(1), releaseRetry = new CountDownLatch(1);
+        AtomicInteger attempts = new AtomicInteger();
+        try (ServerRuntime runtime = runtime((output, archive, publisher) -> {
+            if (attempts.incrementAndGet() == 1) {
+                first.countDown();
+                if (!releaseFirst.await(10, TimeUnit.SECONDS)) throw new java.io.IOException("Initial gate expired");
+                throw new java.io.IOException("Injected publication failure");
+            }
+            retry.countDown();
+            if (!releaseRetry.await(10, TimeUnit.SECONDS)) throw new java.io.IOException("Retry gate expired");
+            return ArtifactArchive.build(output, archive, publisher);
+        })) {
+            try {
+                Job job = terminalJob(runtime, "J0000000000000001");
+                runtime.scheduleArtifactArchive(job.id);
+                assertTrue(first.await(5, TimeUnit.SECONDS));
+                for (int i = 0; i < 10; i++) runtime.retryArtifactArchive(job.id);
+                job.finishedAt = Instant.now().minus(java.time.Duration.ofDays(runtime.config.jobRetentionDays + 1L));
+                runtime.store.update(job);
+                var stopRetention = new java.util.concurrent.atomic.AtomicBoolean();
+                CountDownLatch swept = new CountDownLatch(1);
+                var retention = java.util.concurrent.CompletableFuture.runAsync(() -> {
+                    try {
+                        while (!stopRetention.get()) {
+                            runtime.cleanupExpiredJobs();swept.countDown();Thread.sleep(1);
+                        }
+                    }
+                    catch (Exception failure) { throw new java.util.concurrent.CompletionException(failure); }
+                });
+                try {
+                    assertTrue(swept.await(5, TimeUnit.SECONDS));
+                    releaseFirst.countDown();
+                    assertTrue(retry.await(5, TimeUnit.SECONDS), "An accepted retry must survive the retention handoff");
+                } finally {stopRetention.set(true);retention.get(5, TimeUnit.SECONDS);}
+                assertNotNull(runtime.store.get(job.id));
+                assertTrue(Files.isDirectory(runtime.outputDirectoryForJob(job.id)));
+                releaseRetry.countDown();
+                awaitState(runtime, job.id, "READY");
+                byte[] archive = Files.readAllBytes(runtime.artifactArchivePath(job.id));
+                try (var view = runtime.openArtifactArchive(job.id, true)) {
+                    // Retention uses a nonblocking write-lock attempt: an active
+                    // viewer defers this sweep rather than blocking its thread.
+                    var expiry = java.util.concurrent.CompletableFuture.runAsync(() -> {
+                        try {runtime.cleanupExpiredJobs();}
+                        catch(Exception failure){throw new java.util.concurrent.CompletionException(failure);}
+                    });
+                    expiry.get(5,TimeUnit.SECONDS);
+                    assertNotNull(runtime.store.get(job.id), "An active archive reader must fence expiry");
+                    assertTrue(new String(runtime.archiveEntry(job.id, "case.log"), java.nio.charset.StandardCharsets.UTF_8).contains("business=unchanged"));
+                    assertArrayEquals(archive, Files.readAllBytes(runtime.artifactArchivePath(job.id)));
+                }
+                long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+                while (runtime.store.get(job.id) != null && System.nanoTime() < deadline) { runtime.cleanupExpiredJobs();Thread.sleep(10); }
+                assertNull(runtime.store.get(job.id));
+                assertFalse(Files.exists(runtime.artifactArchivePath(job.id)));
+                assertEquals(2, attempts.get());
+            } finally { releaseFirst.countDown();releaseRetry.countDown(); }
+        }
+    }
+
+    @Test void cancellationArchivesPartialOutputOnlyAfterTheSurvivingWriterIsStopped() throws Exception {
+        org.junit.jupiter.api.Assumptions.assumeFalse(isWindows(), "Uses a POSIX Worker and detached-writer fixture");
+        Path writer = Files.writeString(temp.resolve("writer.sh"), "#!/bin/sh\ntrap '' TERM\n"
+                + "printf 'password=private-cancel-canary\\nbusiness=partial\\n' >> \"$1/case.log\"\n"
+                + "touch \"$1/child.ready\"\n"
+                + "while :; do printf 'business=partial\\n' >> \"$1/case.log\"; sleep 0.02; done\n");
+        String launcher = "#!/bin/sh\nIFS= read -r request\n"
+                + "output=$(printf '%s' \"$request\" | sed 's/.*\"outputDirectory\":\"\\([^\"]*\\)\".*/\\1/')\n"
+                + "sh '" + writer + "' \"$output\" >/dev/null 2>&1 &\n"
+                + "echo $! > \"$output/child.pid\"\nwait\n";
+        var child = new java.util.concurrent.atomic.AtomicReference<ProcessHandle>();
+        AtomicInteger publications = new AtomicInteger();
+        try (ServerRuntime runtime = runtime((output, archive, publisher) -> {
+            assertNotNull(child.get());
+            assertFalse(child.get().isAlive(), "A surviving child must not write during publication");
+            publications.incrementAndGet();
+            return ArtifactArchive.build(output, archive, publisher);
+        }, launcher)) {
+            try {
+                String id = String.valueOf(runtime.submit("run", ServerRuntime.JSON.createObjectNode().put("packageId", "p"), "user-a").get("jobId"));
+                Path output = runtime.outputDirectoryForJob(id);
+                long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+                while ((!Files.exists(output.resolve("child.ready")) || !Files.exists(output.resolve("child.pid")))
+                        && System.nanoTime() < deadline) Thread.sleep(10);
+                assertTrue(Files.exists(output.resolve("child.ready")));
+                child.set(ProcessHandle.of(Long.parseLong(Files.readString(output.resolve("child.pid")).trim())).orElseThrow());
+                assertTrue(child.get().isAlive());
+                assertEquals("CANCELLED", runtime.cancel(id, "user-a"));
+                awaitReady(runtime, id);
+                assertEquals("CANCELLED", runtime.jobRecord(id).get("status"));
+                String approved = new String(runtime.archiveEntry(id, "case.log"), java.nio.charset.StandardCharsets.UTF_8);
+                assertTrue(approved.contains("business=partial"));
+                assertTrue(approved.contains("password=[REDACTED_SECRET]"));
+                assertFalse(approved.contains("private-cancel-canary"));
+                long cleanupDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+                while (Files.exists(output) && System.nanoTime() < cleanupDeadline) Thread.sleep(10);
+                assertFalse(Files.exists(output));
+                assertEquals(1, publications.get());
+                assertFalse(child.get().isAlive());
+            } finally { if (child.get() != null && child.get().isAlive()) child.get().destroyForcibly(); }
+        }
+    }
+
+    @Test void queuedCancellationPublishesItsEmptyArchiveWithoutAReconciliationRetry() throws Exception {
+        org.junit.jupiter.api.Assumptions.assumeFalse(isWindows(), "Uses a POSIX blocked Worker fixture");
+        Path started = temp.resolve("active.started");
+        String script = "#!/bin/sh\nread request\ntouch '" + started + "'\nexec sleep 60\n";
+        try (ServerRuntime runtime = runtime(ArtifactArchive::build, script, 1)) {
+            String active = String.valueOf(runtime.submit("run", ServerRuntime.JSON.createObjectNode().put("packageId", "p"), "user-a").get("jobId"));
+            try {
+                long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+                while (!Files.exists(started) && System.nanoTime() < deadline) Thread.sleep(10);
+                assertTrue(Files.exists(started));
+                String queued = String.valueOf(runtime.submit("run", ServerRuntime.JSON.createObjectNode().put("packageId", "p"), "user-b").get("jobId"));
+                assertEquals("QUEUED", runtime.jobRecord(queued).get("status"));
+                assertEquals("CANCELLED", runtime.cancel(queued, "user-b"));
+                // Poll only: a manual schedule/retry here would hide a lost initial publication.
+                awaitState(runtime, queued, "READY");
+                assertEquals("CANCELLED", runtime.jobRecord(queued).get("status"));
+                assertTrue(Files.isRegularFile(runtime.artifactArchivePath(queued)));
+                ArtifactArchive.verify(runtime.artifactArchivePath(queued), true);
+            } finally {runtime.cancel(active, "user-a");}
+        }
+    }
+
     private ServerRuntime runtime(ServerRuntime.ArtifactPublisher publisher) throws Exception {
+        return runtime(publisher, "#!/bin/sh\nread request\nprintf '%s\\n' '{\"type\":\"RESULT\",\"status\":\"PASS\",\"exitCode\":0}'\n");
+    }
+
+    private ServerRuntime runtime(ServerRuntime.ArtifactPublisher publisher, String script) throws Exception {
+        return runtime(publisher, script, 0);
+    }
+
+    private ServerRuntime runtime(ServerRuntime.ArtifactPublisher publisher, String script, int queuedLimit) throws Exception {
         Path packages = Files.createDirectories(temp.resolve("packages"));
         Path pkg = Files.createDirectories(packages.resolve("p"));
         Path launcher = temp.resolve("test-worker");
-        Files.writeString(launcher, "#!/bin/sh\nread request\nprintf '%s\\n' '{\"type\":\"RESULT\",\"status\":\"PASS\",\"exitCode\":0}'\n");
+        Files.writeString(launcher, script);
         launcher.toFile().setExecutable(true);
         Path yaml = Files.writeString(temp.resolve("server.yaml"),
                 "server:\n  dataDir: '" + temp.resolve("data") + "'\n  javaExecutable: '" + launcher + "'\n"
-                        + "workers:\n  maxConcurrent: 1\n  queuedLimit: 0\npackages:\n  allowedRoots:\n    - '" + packages + "'\n  entries:\n    p: '" + pkg + "'\n");
+                        + "workers:\n  maxConcurrent: 1\n  queuedLimit: " + queuedLimit + "\n  gracefulStopMs: 100\npackages:\n  allowedRoots:\n    - '" + packages + "'\n  entries:\n    p: '" + pkg + "'\n");
         return new ServerRuntime(ServerConfig.load(yaml), Files.createDirectories(temp.resolve("libs")).toString(),
                 ProcessBuilder::start, Clock.systemUTC(), publisher);
     }
@@ -247,5 +429,6 @@ class ArtifactPublicationFaultTest {
         } while (System.nanoTime() < deadline);
         fail("Archive did not become " + state + ": " + runtime.artifactIndex(id));
     }
+
     private static boolean isWindows() { return System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT).contains("win"); }
 }
