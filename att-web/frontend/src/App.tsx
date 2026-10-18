@@ -199,17 +199,15 @@ function QuickLoadRouteView({ route, inlineLoadEnabled, schedulingEnabled, onSch
       setEnvironmentState('ready');
       if (selectedEnvironment && !names.includes(selectedEnvironment)) {
         setEnvironmentNotice(`Environment ${selectedEnvironment} is not an active profile in ${route.packageId}; Package default is selected.`);
-        workspace.onEnvironmentChange('');
         navigation.navigate({ ...route, environment: '' });
       }
     }).catch(() => { if (!controller.signal.aborted) { setEnvironments([]); setEnvironmentState('error'); } });
     return () => controller.abort();
   }, [route.packageId, environmentReload]);
   const onEnvironmentChange = useCallback((environment: string) => {
-    setEnvironmentNotice('');
-    workspace.onEnvironmentChange(environment);
-    navigation.navigate({ ...route, environment });
-  }, [navigation.navigate, route, workspace.onEnvironmentChange]);
+    const accepted = navigation.navigate({ ...route, environment });
+    if (accepted) setEnvironmentNotice('');
+  }, [navigation.navigate, route]);
   const onCancel = useCallback(() => navigation.navigate(route.target
     ? { kind: 'package', packageId: route.packageId, resource: route.target }
     : { kind: 'load' }), [navigation.navigate, route.packageId, route.target]);
