@@ -887,6 +887,10 @@ class ServerRuntimeTest {
                             "SELECT COUNT(*) FROM audit WHERE principal=? AND action=? AND outcome=?")) {
                         audit.setString(1,"alice");audit.setString(2,"SCHEDULE_IDENTITY_MIGRATE");audit.setString(3,"LEGACY_ADMIN_TO_USER");
                         try(var rows=audit.executeQuery()){assertTrue(rows.next());assertEquals(1,rows.getInt(1));}
+                        try(var execution=connection.prepareStatement("SELECT COUNT(*) FROM audit WHERE principal=? AND action=? AND outcome=?")) {
+                            execution.setString(1,"alice");execution.setString(2,"SCHEDULE_EXECUTE");execution.setString(3,"ACCEPTED");
+                            try(var rows=execution.executeQuery()){assertTrue(rows.next());assertEquals(1,rows.getInt(1));}
+                        }
                     }
                 }
                 Map<String,Object> scheduledResult=awaitUnifiedJob(runtime,String.valueOf(occurrence.get("jobId")));

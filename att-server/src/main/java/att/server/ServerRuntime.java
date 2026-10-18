@@ -1619,18 +1619,19 @@ final class ServerRuntime implements AutoCloseable {
             if(schedule.executionIdentityMigratedFrom==null&&!store.isActiveUser(schedule.createdBy))
                 throw new IllegalArgumentException("Schedule owner is no longer authorized");
         }
-        if("run".equals(schedule.effectiveJobType()))return submitScheduledRun(schedule,occurrenceId,executionPrincipal);
-        return "debug".equals(schedule.effectiveJobType())
+        Map<String,Object> accepted="run".equals(schedule.effectiveJobType())
+                ?submitScheduledRun(schedule,occurrenceId,executionPrincipal)
+                :"debug".equals(schedule.effectiveJobType())
                 ? submitScheduledDebug(schedule,occurrenceId)
                 : submitScheduledLoad(schedule,occurrenceId);
+        store.audit(executionPrincipal,"SCHEDULE_EXECUTE",String.valueOf(accepted.get("jobId")),schedule.packageId,"ACCEPTED");
+        return accepted;
     }
 
     private Map<String,Object> submitScheduledRun(LoadSchedule schedule,String occurrenceId,String executionPrincipal) throws Exception {
         validateScheduledRun(schedule);
         ObjectNode input=JSON.valueToTree(schedule.runInput);applyInspectionPolicy(input,schedule.packageId);
-        Map<String,Object> accepted=submit("run",input,executionPrincipal,true,occurrenceId,true);
-        store.audit(executionPrincipal,"SCHEDULE_EXECUTE",String.valueOf(accepted.get("jobId")),schedule.packageId,"ACCEPTED");
-        return accepted;
+        return submit("run",input,executionPrincipal,true,occurrenceId,true);
     }
     private void validateScheduledRun(LoadSchedule schedule) throws Exception {
         Path root=packageRoot(schedule.packageId);if(root==null)throw new NotFoundException();validatePackageRoot(root);
