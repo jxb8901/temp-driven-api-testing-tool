@@ -50,6 +50,13 @@ import java.util.regex.Pattern;
 /** Owns the single-node job plane and its bounded Worker, inspector, and SSE executors. */
 final class ServerRuntime implements AutoCloseable {
     static final ObjectMapper JSON=new ObjectMapper().configure(com.fasterxml.jackson.databind.DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES,false);
+    private static final ObjectMapper ARTIFACT_JSON = new ObjectMapper(com.fasterxml.jackson.core.JsonFactory.builder()
+            .enable(com.fasterxml.jackson.core.StreamReadFeature.STRICT_DUPLICATE_DETECTION)
+            .streamReadConstraints(com.fasterxml.jackson.core.StreamReadConstraints.builder()
+                    .maxNestingDepth(64).maxStringLength(16 * 1024 * 1024).maxNumberLength(1000).build()).build())
+            .enable(com.fasterxml.jackson.databind.DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
+            .enable(com.fasterxml.jackson.databind.DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS)
+            .enable(com.fasterxml.jackson.databind.DeserializationFeature.USE_BIG_INTEGER_FOR_INTS);
     static final Pattern JOB_ID=Pattern.compile("J[0-9A-F]{16}");
     static final Pattern DRAFT_ID=Pattern.compile("D[0-9A-F]{32}");
     static final Pattern QUICK_LOAD_DRAFT_ID=Pattern.compile("L[0-9A-F]{32}");
@@ -2277,10 +2284,30 @@ final class ServerRuntime implements AutoCloseable {
     }
     private JsonNode sanitize(JsonNode node,Path output,Path packageRoot) {return sanitize(node,output,packageRoot,"");}
     private JsonNode sanitize(JsonNode node,Path output,Path packageRoot,String field) {
+        return sanitize(node,output,packageRoot,field,true);
+    }
+    private JsonNode sanitize(JsonNode node,Path output,Path packageRoot,String field,boolean protocolReferences) {
         if(node==null)return null;
-        if(node.isTextual()) {if("$attDebugKeepDefault".equals(field) || semanticLocation(field))return node;String value=node.asText();String outputPrefix=output.toString();value=replacePathPrefix(value,outputPrefix,"artifact");if(packageRoot!=null)value=replacePathPrefix(value,packageRoot.toString(),"package");return JSON.getNodeFactory().textNode(att.server.api.internal.DiagnosticSanitizer.redactAbsolutePaths(value,packageRoot));}
-        if(node.isObject()){com.fasterxml.jackson.databind.node.ObjectNode copy=JSON.createObjectNode();node.fields().forEachRemaining(e->copy.set(e.getKey(),sanitize(e.getValue(),output,packageRoot,semanticLocation(field)?field:e.getKey())));return copy;}
-        if(node.isArray()){com.fasterxml.jackson.databind.node.ArrayNode copy=JSON.createArrayNode();for(JsonNode item:node)copy.add(sanitize(item,output,packageRoot,field));return copy;}
+        if(node.isTextual()) {
+            if(protocolReferences && ("$attDebugKeepDefault".equals(field) || semanticLocation(field)))return node;
+            String value=node.asText();value=replacePathPrefix(value,output.toString(),"artifact");
+            if(packageRoot!=null)value=replacePathPrefix(value,packageRoot.toString(),"package");
+            return JSON.getNodeFactory().textNode(semanticLocation(field)?value:att.server.api.internal.DiagnosticSanitizer.redactAbsolutePaths(value,packageRoot));
+        }
+        if(node.isObject()){
+            com.fasterxml.jackson.databind.node.ObjectNode copy=JSON.createObjectNode();
+            node.fields().forEachRemaining(e->{
+                String key=e.getKey();
+                if(!protocolReferences){
+                    key=replacePathPrefix(key,output.toString(),"artifact");
+                    if(packageRoot!=null)key=replacePathPrefix(key,packageRoot.toString(),"package");
+                    key=att.server.api.internal.DiagnosticSanitizer.redactAbsolutePaths(key,packageRoot);
+                    if(copy.has(key))throw new IllegalArgumentException("Export field names collide after path projection");
+                }
+                copy.set(key,sanitize(e.getValue(),output,packageRoot,protocolReferences && semanticLocation(field)?field:e.getKey(),protocolReferences));
+            });return copy;
+        }
+        if(node.isArray()){com.fasterxml.jackson.databind.node.ArrayNode copy=JSON.createArrayNode();for(JsonNode item:node)copy.add(sanitize(item,output,packageRoot,field,protocolReferences));return copy;}
         return node.deepCopy();
     }
     private static String replacePathPrefix(String value,String prefix,String logical){if(value.equals(prefix))return logical+":";String separator=java.io.File.separator;value=value.replace(prefix+separator,logical+":");if("\\".equals(separator))value=value.replace(prefix+"/",logical+":");else value=value.replace(prefix+"\\",logical+":");return value;}
@@ -2304,16 +2331,16 @@ final class ServerRuntime implements AutoCloseable {
             try {
                 boolean json=filename.endsWith(".json");
                 Object raw;
-                if(json)raw=JSON.readValue(text,Object.class);
+                if(json)raw=ARTIFACT_JSON.readValue(text,Object.class);
                 else {
                     org.yaml.snakeyaml.LoaderOptions options=new org.yaml.snakeyaml.LoaderOptions();
                     options.setAllowDuplicateKeys(false);options.setMaxAliasesForCollections(0);options.setNestingDepthLimit(64);options.setCodePointLimit(limit);
-                    raw=new org.yaml.snakeyaml.Yaml(new org.yaml.snakeyaml.constructor.SafeConstructor(options)).load(text);
+                    raw=new org.yaml.snakeyaml.Yaml(new ArtifactYamlConstructor(options)).load(text);
                 }
-                JsonNode projected=sanitize(JSON.valueToTree(att.server.api.internal.DiagnosticSanitizer.sanitizeValue(raw)),outputDirectoryForJob(id),packageRootForJob(id));
+                JsonNode projected=sanitize(JSON.valueToTree(att.security.SecretProtection.exportValue(raw)),outputDirectoryForJob(id),packageRootForJob(id),"",false);
                 if(json)return JSON.writerWithDefaultPrettyPrinter().writeValueAsBytes(projected);
                 org.yaml.snakeyaml.DumperOptions options=new org.yaml.snakeyaml.DumperOptions();options.setDefaultFlowStyle(org.yaml.snakeyaml.DumperOptions.FlowStyle.BLOCK);
-                return new org.yaml.snakeyaml.Yaml(options).dump(JSON.convertValue(projected,Object.class)).getBytes(StandardCharsets.UTF_8);
+                return new org.yaml.snakeyaml.Yaml(options).dump(ARTIFACT_JSON.convertValue(projected,Object.class)).getBytes(StandardCharsets.UTF_8);
             } catch(Exception invalid){throw new IllegalArgumentException("Structured artifact cannot be safely published");}
         }
         text=att.server.api.internal.DiagnosticSanitizer.redactText(text);

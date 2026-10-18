@@ -65,10 +65,11 @@ class ArtifactLifecycleTest {
         }
         try(ServerRuntime runtime=new ServerRuntime(config,temp.resolve("libs").toString())) {
             awaitState(runtime,id,"READY");
+            Path staging = runtime.artifactArchivePath(id).resolveSibling(".artifact-orphan.zip.tmp");
             long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(5);
-            while(Files.exists(runtime.outputDirectoryForJob(id))&&System.nanoTime()<deadline)Thread.sleep(10);
+            while((Files.exists(runtime.outputDirectoryForJob(id))||Files.exists(staging))&&System.nanoTime()<deadline)Thread.sleep(10);
             assertFalse(Files.exists(runtime.outputDirectoryForJob(id)));
-            assertFalse(Files.exists(runtime.artifactArchivePath(id).resolveSibling(".artifact-orphan.zip.tmp")));
+            assertFalse(Files.exists(staging));
             assertEquals("safe",new String(runtime.archiveEntry(id,"case.log"),java.nio.charset.StandardCharsets.UTF_8));
         }
     }
@@ -138,6 +139,139 @@ class ArtifactLifecycleTest {
             assertThrows(IllegalArgumentException.class,()->runtime.retryArtifactArchive(id));
             Files.writeString(output.getParent().resolve("archive-status.json"),"not valid JSON");
             assertEquals("invalid_metadata",runtime.artifactIndex(id).get("reason"));
+        }
+    }
+
+    @Test void artifactPublicationCannotUseProtocolPointersOrContainersToBypassProtection() throws Exception {
+        try (ServerRuntime runtime = runtime()) {
+            String id = "J0000000000000001"; job(runtime, id, "PASS");
+            Path output = runtime.outputDirectoryForJob(id);
+            Map<String, Object> authored = Map.of(
+                    "password", Map.of("$attDebugKeepDefault", "/pointer-secret-canary"),
+                    "$attDebugKeepDefault", "/private/marker-host-canary/report.txt",
+                    "url", Map.of("arbitraryField", "/private/container-host-canary/report.txt"),
+                    "remotePath", output.resolve("case.log").toString(),
+                    "customerName", "Business Customer");
+            String json = ServerRuntime.JSON.writeValueAsString(authored);
+            Files.writeString(output.resolve("result.json"), json);
+            Files.writeString(output.resolve("result.yaml"), new org.yaml.snakeyaml.Yaml().dump(authored));
+            for (String name : List.of("result.json", "result.yaml")) {
+                byte[] projected = runtime.publicArtifact(id, output.resolve(name));
+                String text = new String(projected, java.nio.charset.StandardCharsets.UTF_8);
+                for (String forbidden : List.of("pointer-secret-canary", "marker-host-canary", "container-host-canary", output.toString()))
+                    assertFalse(text.contains(forbidden), name + " retained a protocol-only escape");
+                assertTrue(text.contains("Business Customer"));
+            }
+            assertEquals(json, Files.readString(output.resolve("result.json")), "Projection must not rewrite private source");
+            runtime.scheduleArtifactArchive(id); awaitState(runtime, id, "READY");
+            for (String name : List.of("result.json", "result.yaml")) {
+                byte[] preview = runtime.archiveEntry(id, name);
+                assertArrayEquals(ArtifactArchive.read(runtime.artifactArchivePath(id), name), preview);
+                assertFalse(new String(preview, java.nio.charset.StandardCharsets.UTF_8).contains("-canary"));
+            }
+        }
+    }
+
+    @Test void structuredJsonPublicationRejectsAmbiguityAndPreservesBusinessNumberPrecision() throws Exception {
+        try (ServerRuntime runtime = runtime()) {
+            String id = "J0000000000000001"; job(runtime, id, "PASS");
+            Path output = runtime.outputDirectoryForJob(id), invalid = output.resolve("invalid.json");
+            for (String text : List.of("{\"amount\":1,\"amount\":2}", "{\"amount\":1} {\"other\":2}",
+                    "[] trailing", "[".repeat(65) + "0" + "]".repeat(65))) {
+                Files.writeString(invalid, text);
+                assertThrows(IllegalArgumentException.class, () -> runtime.publicArtifact(id, invalid));
+            }
+            Files.writeString(output.resolve("result.json"),
+                    "{\"amount\":12345678901234567890.1234567890123456789,\"customerName\":\"Business Customer\"}");
+            byte[] published = runtime.publicArtifact(id, output.resolve("result.json"));
+            var precise = new com.fasterxml.jackson.databind.ObjectMapper()
+                    .enable(com.fasterxml.jackson.databind.DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS);
+            assertEquals(new java.math.BigDecimal("12345678901234567890.1234567890123456789"),
+                    precise.readTree(published).path("amount").decimalValue());
+            Path collision = output.resolve("collision.json");
+            Files.writeString(collision, ServerRuntime.JSON.writeValueAsString(Map.of("/host/one/name.txt", "a", "/host/two/name.txt", "b")));
+            assertThrows(IllegalArgumentException.class, () -> runtime.publicArtifact(id, collision));
+            runtime.scheduleArtifactArchive(id); awaitState(runtime, id, "READY");
+            assertArrayEquals(published, runtime.archiveEntry(id, "result.json"));
+            assertEquals(false, runtime.artifactIndex(id).get("complete"));
+            assertThrows(ServerRuntime.NotFoundException.class, () -> runtime.archiveEntry(id, "collision.json"));
+        }
+    }
+
+    @Test void yamlPublicationPreservesExactNumbersAndRejectsUnsafeOrOversizedValues() throws Exception {
+        try (ServerRuntime runtime = runtime()) {
+            String id = "J0000000000000001"; job(runtime, id, "PASS");
+            Path output = runtime.outputDirectoryForJob(id), file = output.resolve("result.yaml");
+            String decimal = "12345678901234567890.1234567890123456789";
+            Files.writeString(file, "amount: " + decimal + "\nunits: 123456789012345678901234567890\n"
+                    + "duration: 1:01.25\ncustomerName: Business Customer\n");
+            byte[] projected = runtime.publicArtifact(id, file);
+            String text = new String(projected, java.nio.charset.StandardCharsets.UTF_8);
+            assertTrue(text.contains(decimal), text);
+            assertTrue(text.contains("123456789012345678901234567890"), text);
+            assertTrue(text.contains("61.25"), text);
+            for (String invalid : List.of("value: .inf\n", "value: .NaN\n", "value: " + "1".repeat(1001),
+                    "value: 1\nvalue: 2\n", "value: !!java.lang.String unsafe\n", "first: &a [1]\nsecond: *a\n")) {
+                Files.writeString(output.resolve("invalid.yaml"), invalid);
+                assertThrows(IllegalArgumentException.class, () -> runtime.publicArtifact(id, output.resolve("invalid.yaml")));
+            }
+            runtime.scheduleArtifactArchive(id); awaitState(runtime, id, "READY");
+            assertArrayEquals(projected, runtime.archiveEntry(id, "result.yaml"));
+            assertEquals(false, runtime.artifactIndex(id).get("complete"));
+        }
+    }
+
+    @Test void realisticSecretCorpusHasOneApprovedRepresentationAcrossFormats() throws Exception {
+        try (ServerRuntime runtime = runtime()) {
+            String id = "J0000000000000001"; job(runtime, id, "FAIL");
+            Path output = runtime.outputDirectoryForJob(id);
+            Map<String,Object> response = Map.of(
+                    "customerName", "Business Customer", "amount", 12.5,
+                    "arbitraryReturnField", "Bearer export-canary-bearer",
+                    "dsn", "jdbc:postgresql://operator:export-canary-dsn@db.example/orders",
+                    "headers", Map.of("Cookie", "sid=export-canary-cookie", "Authorization", "Basic export-canary-basic"),
+                    "regulated", Map.of("classification", "secret", "arbitraryRows", List.of("export-canary-regulated")),
+                    "password=export-canary-key", "opaque",
+                    "/private/export-canary-host/key.txt", "ordinary value",
+                    "queue", "ORDERS.REQUEST", "remotePath", "/remote/inbox/ordinary.txt");
+            Files.writeString(output.resolve("evidence.json"), ServerRuntime.JSON.writeValueAsString(response));
+            Files.writeString(output.resolve("evidence.yaml"), new org.yaml.snakeyaml.Yaml().dump(response));
+            Files.writeString(output.resolve("case.log"), "Authorization: Bearer export-canary-log\nCookie: sid=export-canary-logcookie\n"
+                    + "url=postgresql://operator:export-canary-logdsn@db.example/orders\n"
+                    + "password: |\n  export-canary-multiline\n"
+                    + "-----BEGIN PRIVATE KEY-----\nexport-canary-pem\n-----END PRIVATE KEY-----\nbusiness=unchanged\n");
+            Files.writeString(output.resolve("result.xml"), "<result><credentials>export-canary-xml</credentials><business>unchanged</business></result>");
+            Files.writeString(output.resolve("report.html"), "<html><body><pre>password=export-canary-html</pre><p>business=unchanged</p>"
+                    + "<a href='evidence.json'>Evidence</a></body></html>");
+            Files.writeString(output.resolve("result.csv"), "name,password\r\nBusiness Customer,export-canary-csv\r\n");
+            Files.write(output.resolve("invalid-utf8.log"), new byte[] {(byte)0xc3, (byte)0x28});
+            Files.write(output.resolve("binary.log"), new byte[] {0, 1});
+            Map<String,byte[]> projected = new java.util.LinkedHashMap<>();
+            for (String name : List.of("evidence.json", "evidence.yaml", "case.log", "result.xml", "result.csv")) {
+                byte[] bytes = runtime.publicArtifact(id, output.resolve(name));
+                assertFalse(new String(bytes, java.nio.charset.StandardCharsets.UTF_8).contains("export-canary-"), name);
+                projected.put(name, bytes);
+            }
+            runtime.scheduleArtifactArchive(id); awaitState(runtime, id, "READY");
+            Map<String,Object> manifest = ArtifactArchive.verify(runtime.artifactArchivePath(id), true);
+            assertEquals(false, manifest.get("complete"));
+            try (var zip = new java.util.zip.ZipFile(runtime.artifactArchivePath(id).toFile())) {
+                for (Object entry : (List<?>) manifest.get("entries")) {
+                    Map<?,?> row = (Map<?,?>) entry; String name = String.valueOf(row.get("path"));
+                    byte[] preview = runtime.archiveEntry(id, name);
+                    try (var input = zip.getInputStream(zip.getEntry(name))) { assertArrayEquals(preview, input.readAllBytes()); }
+                    assertEquals(row.get("sha256"), ArtifactArchive.sha256(preview));
+                    assertFalse(new String(preview, java.nio.charset.StandardCharsets.UTF_8).contains("export-canary-"), name);
+                    if (projected.containsKey(name)) assertArrayEquals(projected.get(name), preview);
+                }
+            }
+            var business = ServerRuntime.JSON.readTree(runtime.archiveEntry(id, "evidence.json"));
+            assertEquals("Business Customer", business.path("customerName").asText());
+            assertEquals(12.5, business.path("amount").asDouble());
+            assertEquals("ORDERS.REQUEST", business.path("queue").asText());
+            assertEquals("/remote/inbox/ordinary.txt", business.path("remotePath").asText());
+            assertThrows(ServerRuntime.NotFoundException.class, () -> runtime.archiveEntry(id, "invalid-utf8.log"));
+            assertThrows(ServerRuntime.NotFoundException.class, () -> runtime.archiveEntry(id, "binary.log"));
         }
     }
 

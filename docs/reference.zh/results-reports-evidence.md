@@ -12,7 +12,11 @@ Worker 檔案在 Server 核准其最終 bytes 前，均屬 **Raw/Trusted Worker 
 
 Logs、文字、XML、HTML、CSV 會套用必要的 secret-field、authorization header、bearer/basic token、連線 URL 憑證、private key 及 cookie 保護，並投影 host-local paths。JSON/YAML（包括 Tool/DB 結果、服務回應及 Evidence）先經有界 safe loader 解析，再遞迴保護敏感欄位及明確分類為 `secret` 的 record，最後序列化為有效格式。一般 business values（包括姓名或可能受規管的資料）若不符合明確敏感規則便會保留；不提供任意 PII 自動偵測。操作 Job 的授權不等於 raw-secret 匯出權限，也沒有公開 raw-export 或 raw-file fallback。
 
-支援的敏感名稱包括 password/passphrase、token、secret、credentials、API/access/private key、authorization、cookies。敏感 business data 應放在明確敏感的欄位，或把其所屬 structured record 分類為 `secret`。
+支援的敏感名稱包括 password/passphrase、token、secret、credentials、API/access/private key、authorization、cookies。Structured field name 內符合明確 secret text 規則的內容亦會受保護；secret/path projection 後名稱衝突會拒絕該 entry，不會靜默覆寫 business field。敏感 business data 應放在明確敏感的欄位，或把其所屬 structured record 分類為 `secret`。
+
+Artifact data 不可使用 Server-issued Debug default-pointer 例外。已知私有 Job/Package prefix 即使位於 remote-location field 亦會投影；location field 不會令任意巢狀 object 免除保護。一般 remote path、queue name 等 semantic location scalar 仍屬 business value。
+
+JSON 拒絕 duplicate key、尾隨 document 及超過 64 層的 nesting。YAML 拒絕 duplicate key、collection alias 和 unsafe tag。Numeric scalar 最多 1,000 characters；finite decimal 及大型 integer 在匯出時保留精確數值，包括 YAML base-60 number。不支援的 non-finite YAML number 會令 entry 被拒絕，不會發佈經 rounding 或無效的值。
 
 HTML 發佈前經 parser 清理：保留已核准的 relative links、inline styling 及 digest allowlist 中經審核的內建 RUN search/sort script；移除其他 script、active markup、external links、base URL 及離開已核准 archive 的 navigation。缺少或排除的 evidence link 會標示 unavailable。最終 HTML 內含 offline CSP；online viewer 另加 opaque-origin sandbox、相同 restrictive CSP、禁止 forms 及 Studio-origin 權限。任意自訂 raw HTML 的 controls 因而可能與發佈版本不同。
 

@@ -119,6 +119,8 @@ async function main() {
     const goToLine = page.locator('.att-explorer-source .att-code-goto input');
     await goToLine.fill(String(referenceLine));
     await page.locator('.att-explorer-source .att-code-editor').getByRole('button', { name: 'Go' }).click();
+    const payloadResponsePromise = page.waitForResponse(response =>
+      response.request().method() === 'GET' && new URL(response.url()).pathname.endsWith('/source-file'));
     await fileLink.click();
     try {
       await page.getByRole('heading', { name: 'Configuration', level: 1 }).waitFor({ timeout: 10000 });
@@ -129,8 +131,17 @@ async function main() {
       const link = await fileLink.evaluate(element => element.outerHTML);
       throw new Error(`${error.stack || error}\nCurrent URL: ${page.url()}\nHeadings: ${headings.join(' | ')}\nNavigations: ${navigationEvents.join(' -> ')}\nPage errors: ${pageErrors.join(' | ')}\nDialogs: ${JSON.stringify(dialogs)}\nLink: ${link}\nPage: ${body}`);
     }
+    const payloadResponse = await payloadResponsePromise;
+    assert.equal(payloadResponse.status(), 200, 'the authorized payload source request must succeed');
+    const payloadProjection = await payloadResponse.json();
+    assert.equal(payloadProjection.available, true, 'the payload source must be available before rendering');
     const payloadSource = page.locator('.att-config-source-view .att-code-editor .cm-content');
-    await payloadSource.waitFor();
+    try {
+      await payloadSource.waitFor();
+    } catch (error) {
+      const view = (await page.locator('.att-config-source-view').allTextContents()).join(' | ');
+      throw new Error(`${error.stack || error}\nConfiguration source view: ${view}\nPage errors: ${pageErrors.join(' | ')}`);
+    }
     const payloadSourceText = await payloadSource.evaluate(element => element.textContent || '');
     assert.ok(payloadSourceText.includes('<request>safe payload</request>'),
       `the safe package source should remain visible through CodeMirror: ${payloadSourceText}`);

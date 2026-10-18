@@ -6,6 +6,7 @@ class SecretProtectionTest {
     @Test void protectsEveryTextFormatAndRegisteredValuesIdempotently() {
         for (String source : Arrays.asList("password=canary", "password=canary; after=ordinary", "password=canary\nmessage=ordinary", "DB_PASSWORD=canary", "refresh_token=canary", "password: {unknown: {value: canary}}", "password:\n  unknown: canary", "{\"token\":\"canary\"}", "{\"password\":\"abc\\\"suffix-canary\"}", "password: unquoted secret-canary",
                 "Authorization: Bearer canary", "Cookie: session=canary", "<s:password>canary</s:password>",
+                "<credentials><opaque>canary</opaque></credentials>", "credentials=canary",
                 "https://user:canary@host/path", "-----BEGIN PRIVATE KEY-----\ncanary\n-----END PRIVATE KEY-----",
                 "value: !secret canary", "name,password\r\nalice,\"canary\"\r\n")) {
             String safe=SecretProtection.text(source);
@@ -56,6 +57,25 @@ class SecretProtectionTest {
         assertEquals(SecretProtection.REDACTED,((Map<?,?>)SecretProtection.value(map)).get("unknown"));
         assertEquals(SecretProtection.REDACTED,SecretProtection.value(Collections.singletonMap("secret",true)));
     }
+    @Test void exportDoesNotTrustProtocolDefaultPointersAtAnyDepth() {
+        Map<String,Object> pointer = Collections.<String,Object>singletonMap("$attDebugKeepDefault", "/private-default-canary");
+        Map<String,Object> source = Collections.<String,Object>singletonMap("password", pointer);
+        assertEquals(pointer, ((Map<?,?>) SecretProtection.value(source)).get("password"), "Keep existing issued-draft protocol semantics");
+        assertEquals(SecretProtection.REDACTED, ((Map<?,?>) SecretProtection.exportValue(source)).get("password"));
+        Object nested = Arrays.asList(Collections.singletonMap("response", new Object[] {source}));
+        assertFalse(SecretProtection.exportValue(nested).toString().contains("private-default-canary"));
+        assertEquals(SecretProtection.REDACTED, SecretProtection.exportValue(Collections.singletonMap("classification", "secret")));
+    }
+
+    @Test void exportProtectsSecretsInFieldNamesAndRejectsProjectionCollisions() {
+        Map<String,Object> source = new LinkedHashMap<String,Object>();
+        source.put("password=field-name-canary", "value");
+        assertFalse(SecretProtection.exportValue(source).toString().contains("field-name-canary"));
+        assertTrue(source.containsKey("password=field-name-canary"), "Projection must not rewrite its input");
+        source.put("password=other-field-canary", "other");
+        assertThrows(IllegalArgumentException.class, () -> SecretProtection.exportValue(source));
+    }
+
     @Test void preservesAuthoredDiagnosticContent() {
         String source="payload='&{./Pacs008.xml}' ${#{./nested}} ../relative https://host/path user@host:/remote <a></a>";
         assertEquals(source,SecretProtection.text(source));
