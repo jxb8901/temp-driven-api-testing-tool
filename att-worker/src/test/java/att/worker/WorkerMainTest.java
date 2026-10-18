@@ -84,7 +84,7 @@ class WorkerMainTest {
         Files.setLastModifiedTime(protectedOld,FileTime.fromMillis(946684800000L));
         Files.setLastModifiedTime(idleOld,FileTime.fromMillis(946684801000L));
         Files.setLastModifiedTime(rollbackCache,FileTime.fromMillis(946684802000L));
-        try(FileChannel leaseChannel=FileChannel.open(protectedOld.resolve(".cache-use.lock"),StandardOpenOption.WRITE);
+        try(FileChannel leaseChannel=FileChannel.open(protectedOld.resolve(".cache-use.lock"),StandardOpenOption.READ,StandardOpenOption.WRITE);
             FileLock lease=leaseChannel.lock(0L,Long.MAX_VALUE,true)) {
             Process cleanup=new ProcessBuilder(javaExecutable,"-Djava.io.tmpdir="+temporary.toAbsolutePath(),"-cp",classpath,
                     TrustedSchemaCacheProcess.class.getName()).start();
