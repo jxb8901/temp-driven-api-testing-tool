@@ -30,7 +30,7 @@ class ArtifactDownloaderTest {
             @Override public void download(String path,Path target) throws RemoteException,java.io.IOException {paths.add(path);Files.write(target,new byte[]{'P','K'});}
         };
         Path saved=ArtifactDownloader.download(client,"J0123456789ABCDEF","artifacts.zip",temp);
-        assertEquals(temp.resolve("artifacts.zip"),saved);assertEquals(java.util.Collections.singletonList("/jobs/J0123456789ABCDEF/artifacts/archive.zip"),paths);
+        assertEquals(temp.toRealPath().resolve("artifacts.zip"),saved);assertEquals(java.util.Collections.singletonList("/jobs/J0123456789ABCDEF/artifacts/archive.zip"),paths);
         assertThrows(RemoteException.class,()->ArtifactDownloader.download(client,"J0123456789ABCDEF","artifacts.zip",temp));
         assertEquals(1,paths.size());
     }
