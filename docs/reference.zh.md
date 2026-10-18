@@ -3149,6 +3149,10 @@ CLI、Engine 及 Worker 仍相容 Java 8。ATT Server WAR 需要 Java 17+ 及外
 
 ### Studio inspection cache
 
+Resource metadata discovery 會延後處理 DB/MQ/SSH/HTTP Helper 支援的 `${ENV:NAME}`，不讀取 process secret。Resource summary 將 `metadataState` 與 `executionReadiness` 分開：`not-validated` 不代表允許 execution；`dependency-unresolved` 會為可探索的 transitive Helper reference 提供不含值的 `ATT-RESOURCE-ENV-REQUIRED` diagnostic。這些 diagnostic 只列出 requirement，並非已確認缺少 variable 或 network failure。Explorer 顯示有效 environment 與 remediation，同時保留安全 metadata。原有 Resource `state: ready` 只描述 metadata，不代表 execution readiness。
+
+Discovery 仍執行 YAML、schema、profile 及 path 檢查。Helper descriptor 格式錯誤或缺失仍可能使 indexing 失敗；僅載入所選 target dependency 的 strict loading，以及統一 automatic/manual reindex operation 尚未實作。明確 validation 和 execution 仍使用 strict configuration loading，因此不相關的 active Helper 缺少 variable 時仍可能阻塞。Metadata-only configuration 不可執行。請在 Tomcat/Worker process environment 設定所需 variable，然後重新 validate；不要加入 production placeholder credential 只為了讓 browsing 成功。
+
 Studio 將 Resource 分頁、Detail、安全 Source 及一般 Configuration projection 保存在 session memory。共用 cache 最多保留 128 個 response 及 8 MiB encoded payload；單一 response 超過 1 MiB 不會加入 cache。資料在 15 秒內視為 fresh；重新開啟較舊 view 時先顯示 cached projection，再由 background read 更新。相同 in-flight read 會合併；取消一個 consumer 不會取消其他 consumer 的 request。返回 view 時保留搜尋、排序、分頁及捲動狀態。
 
 每次重用前先檢查 authenticated inspection context。Identity、session、role 或 inspection policy 改變會清除舊 response。Package/environment selection、明確 refresh、logout、頁面暫停、新觀察到的 package revision，以及 stale cursor 或存取錯誤，會使相關 memory 失效。Configuration 和 Source content 不會寫入 localStorage、IndexedDB、service worker 或 HTTP cache。Auth/CSRF response 及 `includeAllFields` administrator response 不會加入 query cache。HTTP response 仍遵守 `Cache-Control: no-store`。

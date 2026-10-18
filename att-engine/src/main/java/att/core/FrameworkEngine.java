@@ -51,6 +51,7 @@ public class FrameworkEngine {
     }
 
     public RunSummary run(ExecutionOptions options) throws Exception {
+        config.requireExecutionConfig();
         return run(options, Collections.<att.validation.Diagnostic>emptyList());
     }
 
@@ -74,6 +75,7 @@ public class FrameworkEngine {
     }
 
     public RunSummary run(ExecutionOptions options, List<att.validation.Diagnostic> validationDiagnostics, PerformanceProfile profile) throws Exception {
+        config.requireExecutionConfig();
         Instant runStarted = options.identitySeed() == null ? Instant.now() : options.identitySeed().startedAt();
         long phaseStarted = profile.begin();
         ExecutionPlan plan = buildPlan(options, runStarted);

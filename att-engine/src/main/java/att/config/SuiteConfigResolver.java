@@ -59,12 +59,13 @@ public final class SuiteConfigResolver {
             if (stages.isEmpty()) throw new IllegalArgumentException("At least one V2 stage is required: " + sidecar);
 
             ReportConfig report = mergeReport(map.get("report"));
-            return new FrameworkConfig(global.outputDirectory(), global.reportDirectory(), global.logDirectory(),
+            FrameworkConfig resolved = new FrameworkConfig(global.outputDirectory(), global.reportDirectory(), global.logDirectory(),
                     global.environment(), global.timeoutMs(), global.templatesRoot(), global.testcasesRoot(),
                     global.tools(), global.dbHelpers(), global.mqHelpers(), global.sshHelpers(), global.httpHelpers(),
                     report, global.run(), ColumnSpecParser.sheets(sheet), caseId, tags, dataColumns, stages, headerRows,
                     global.xmlNamespaceMode(), workbookId, global.caseLogYamlAnchors(), global.processOutput(),
                     global.testdataDescriptors());
+            return global.discoveryOnly() ? resolved.forDiscovery(global.environmentRequirements()) : resolved;
         } catch (att.validation.DiagnosticException e) {
             throw YamlSupport.locate(e, sidecar, e.field());
         } catch (Exception e) {

@@ -2,6 +2,7 @@ package att.resource;
 
 import att.config.FrameworkConfig;
 import att.config.FrameworkConfigLoader;
+import att.config.EnvironmentRequirement;
 import att.config.RuntimeConfigPath;
 import att.config.SuiteConfigResolver;
 import att.config.ToolArgumentConfig;
@@ -751,7 +752,7 @@ public final class PackageResourceInspector implements AutoCloseable {
         Path configFile = resolveConfigFile();
         if (Files.size(configFile) > MAX_CONFIG_BYTES) throw new ResourceLimitException();
         index.files.add(configFile);
-        FrameworkConfig config = new FrameworkConfigLoader().load(configFile, runtimeConfigRoot, packageRoot, environment);
+        FrameworkConfig config = new FrameworkConfigLoader().loadDiscovery(configFile, runtimeConfigRoot, packageRoot, environment);
         Path templatesRoot = config.templatesRoot().isAbsolute()
                 ? config.templatesRoot() : packageRoot.resolve(config.templatesRoot());
         templatesRoot = resources.fromInternalPath(templatesRoot, PackageResourceResolver.Kind.DIRECTORY).canonicalPath();
@@ -764,6 +765,7 @@ public final class PackageResourceInspector implements AutoCloseable {
         indexDebugSidecars(index, config);
         indexQuickLoadPolicies(index);
         resolveReferences(index, config);
+        resolveReadiness(index, config);
         index.revisionDigest = digestFiles(index.files, index.debugSidecars, index.quickLoadPolicies);
         Collections.sort(index.ordered, new Comparator<Resource>() {
             @Override public int compare(Resource left, Resource right) {
@@ -780,7 +782,7 @@ public final class PackageResourceInspector implements AutoCloseable {
         Resource resource = index.byId.get(resourceId);
         if (resource == null || !debuggable(resource.type) || !resource.type.equals(type) || !"ready".equals(resource.state))
             throw new ResourceNotFoundException();
-        DebugEngine engine = debugEngine(frameworkConfig());
+        DebugEngine engine = debugEngine(discoveryConfig());
         Map<String, Object> projection = engine.projectDiscoverableInput(resource.type, resource.logicalId);
         Map<String, Object> result = new LinkedHashMap<String, Object>();
         result.put("resource", summary(resource, index));
@@ -802,7 +804,7 @@ public final class PackageResourceInspector implements AutoCloseable {
             throw new ResourceNotFoundException();
         if (!"virtualUsers".equals(model) && !"arrivalRate".equals(model))
             throw new IllegalArgumentException("Quick Load model is invalid");
-        Map<String, Object> projectedInput = debugEngine(frameworkConfig())
+        Map<String, Object> projectedInput = debugEngine(discoveryConfig())
                 .projectLoadBusinessInput(resource.type, resource.logicalId, null);
         Map<String, Object> result = new LinkedHashMap<String, Object>();
         result.put("resource", summary(resource, index));
@@ -906,7 +908,7 @@ public final class PackageResourceInspector implements AutoCloseable {
         att.load.LoadScenarioLoader loader = new att.load.LoadScenarioLoader(packageRoot);
         if (templateId != null && templateId.length() > 1024) throw new IllegalArgumentException("Load template id is invalid");
         Map<String, Object> policy = loader.loadQuickLoadPolicy(model, templateId);
-        Map<String, Object> projection = debugEngine(frameworkConfig()).projectSafeValue(policy);
+        Map<String, Object> projection = debugEngine(discoveryConfig()).projectSafeValue(policy);
         @SuppressWarnings("unchecked") Map<String, Object> safePolicy = (Map<String, Object>) projection.get("value");
         DumperOptions options = new DumperOptions();
         options.setDefaultFlowStyle(DumperOptions.FlowStyle.BLOCK);
@@ -1050,7 +1052,7 @@ public final class PackageResourceInspector implements AutoCloseable {
             if (Files.size(source.canonicalPath()) > maxSourceBytes) throw new IllegalArgumentException("Load YAML exceeds the configured size limit");
             LoadScenario scenario = new LoadScenarioLoader(packageRoot).load(source.canonicalPath());
             Map<String, Object> definition = scenario.toMap();
-            Map<String, Object> projected = projectSafeLoadScenario(definition, debugEngine(frameworkConfig()));
+            Map<String, Object> projected = projectSafeLoadScenario(definition, debugEngine(discoveryConfig()));
             @SuppressWarnings("unchecked") Map<String, Object> safeDefinition = (Map<String, Object>) projected.get("value");
             boolean template = scenario.policyOnly() || !scenario.hasWorkloads();
             result.put("kind", template ? "template" : "scenario");
@@ -1360,6 +1362,10 @@ public final class PackageResourceInspector implements AutoCloseable {
             throw new StaleResourceCursorException();
     }
 
+    private FrameworkConfig discoveryConfig() throws Exception {
+        return new FrameworkConfigLoader().loadDiscovery(resolveConfigFile(), runtimeConfigRoot, packageRoot, environment);
+    }
+
     private FrameworkConfig frameworkConfig() throws Exception {
         Path file = resolveConfigFile();
         return new FrameworkConfigLoader().load(file, runtimeConfigRoot, packageRoot, environment);
@@ -1444,7 +1450,7 @@ public final class PackageResourceInspector implements AutoCloseable {
         if (Files.isDirectory(loadDirectory, LinkOption.NOFOLLOW_LINKS) && !Files.isSymbolicLink(loadDirectory))
             addWatchRoot(loadDirectory, roots);
         else roots.direct.add(packageRoot);
-        FrameworkConfig config = new FrameworkConfigLoader().load(configFile, runtimeConfigRoot, packageRoot, environment);
+        FrameworkConfig config = new FrameworkConfigLoader().loadDiscovery(configFile, runtimeConfigRoot, packageRoot, environment);
         Path templatesRoot = config.templatesRoot().isAbsolute()
                 ? config.templatesRoot() : packageRoot.resolve(config.templatesRoot());
         Path casesRoot = config.testcasesRoot().isAbsolute()
@@ -1563,6 +1569,12 @@ public final class PackageResourceInspector implements AutoCloseable {
             resource.description = scrub(tool.description());
             resource.state = "ready";
             resource.definition = toolDefinition(tool);
+            if (tool.callBacked()) {
+                Set<String> builtIns = new att.template.DefaultBuiltInProvider().names();
+                for (String call : toolCalls(tool.call())) {
+                    if (!builtIns.contains(call)) resource.relations.add(new Relation("tool", call, null));
+                }
+            }
             Path script = permittedScript(resource, tool);
             if (script != null) {
                 resource.textSource = script;
@@ -1736,6 +1748,62 @@ public final class PackageResourceInspector implements AutoCloseable {
         return false;
     }
 
+    private void resolveReadiness(Index index, FrameworkConfig config) {
+        index.environment = config.environment();
+        for (EnvironmentRequirement requirement : config.environmentRequirements()) {
+            String key = (requirement.helperType() + "." + requirement.helperId()).toLowerCase(Locale.ROOT);
+            List<EnvironmentRequirement> requirements = index.helperRequirements.get(key);
+            if (requirements == null) {
+                requirements = new ArrayList<EnvironmentRequirement>();
+                index.helperRequirements.put(key, requirements);
+            }
+            requirements.add(requirement);
+        }
+    }
+
+    /** Resolve only the requested page's graph, with explicit limits and no secret lookup or execution. */
+    private Map<String, Object> executionReadiness(Resource resource, Index index) {
+        Map<String, Object> result = new LinkedHashMap<String, Object>();
+        List<Map<String, Object>> diagnostics = new ArrayList<Map<String, Object>>();
+        Set<String> visited = new HashSet<String>();
+        Set<String> requirementKeys = new HashSet<String>();
+        List<Resource> pending = new ArrayList<Resource>();
+        pending.add(resource);
+        boolean unresolved = false;
+        for (int cursor = 0; cursor < pending.size(); cursor++) {
+            Resource current = pending.get(cursor);
+            if (!visited.add(current.resourceId)) continue;
+            if (visited.size() > 256) {
+                unresolved = true;
+                diagnostics.add(diagnostic("ATT-RESOURCE-DEPENDENCY-LIMIT", "Validate a smaller selected dependency graph"));
+                break;
+            }
+            if (!"ready".equals(current.state)) unresolved = true;
+            for (Map<String, Object> reference : current.references) {
+                String id = (String) reference.get("resourceId");
+                if (id != null) {
+                    if (pending.size() >= 1024) { unresolved = true; continue; }
+                    pending.add(index.byId.get(id));
+                } else if ("helper".equals(reference.get("targetKind"))) {
+                    String[] parts = String.valueOf(reference.get("logicalId")).split("\\.", -1);
+                    if (parts.length != 3) continue;
+                    List<EnvironmentRequirement> requirements = index.helperRequirements.get((parts[0] + "." + parts[1]).toLowerCase(Locale.ROOT));
+                    if (requirements == null) continue;
+                    for (EnvironmentRequirement requirement : requirements) {
+                        unresolved = true;
+                        String key = requirement.helperType() + "." + requirement.helperId() + ":" + requirement.field() + ":" + requirement.variable();
+                        if (requirementKeys.add(key) && diagnostics.size() < 4) diagnostics.add(requirement.diagnostic(index.environment));
+                    }
+                } else unresolved = true;
+            }
+        }
+        result.put("state", !"ready".equals(resource.state) ? "invalid" : unresolved ? "dependency-unresolved" : "not-validated");
+        result.put("environment", index.environment);
+        result.put("diagnostics", diagnostics);
+        result.put("diagnosticsTruncated", requirementKeys.size() > diagnostics.size());
+        return result;
+    }
+
     private Map<String, Object> summary(Resource resource, Index index) {
         Map<String, Object> result = new LinkedHashMap<String, Object>();
         result.put("resourceId", resource.resourceId);
@@ -1745,6 +1813,8 @@ public final class PackageResourceInspector implements AutoCloseable {
         result.put("description", resource.description == null ? "" : scrubDescription(resource.description));
         result.put("tags", new ArrayList<String>(resource.tags));
         result.put("state", resource.state);
+        result.put("metadataState", "ready".equals(resource.state) ? "available" : "invalid");
+        result.put("executionReadiness", executionReadiness(resource, index));
         result.put("sourceAvailable", Boolean.valueOf(sourceAvailable(resource)));
         result.put("sourceReason", sourceAvailable(resource) ? null : sourceUnavailableReason(resource));
         result.put("redactionEnabled", Boolean.valueOf(redactionEnabled));
@@ -2690,6 +2760,8 @@ public final class PackageResourceInspector implements AutoCloseable {
     }
 
     private static final class Index {
+        final Map<String, List<EnvironmentRequirement>> helperRequirements = new HashMap<String, List<EnvironmentRequirement>>();
+        String environment;
         final Map<String, Resource> byId = new LinkedHashMap<String, Resource>();
         final Map<String, Resource> templateAliases = new HashMap<String, Resource>();
         final Map<String, Resource> flowAliases = new HashMap<String, Resource>();

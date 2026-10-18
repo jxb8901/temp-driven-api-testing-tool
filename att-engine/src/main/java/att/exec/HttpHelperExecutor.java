@@ -63,6 +63,7 @@ public final class HttpHelperExecutor implements AutoCloseable {
     private final AtomicBoolean closed = new AtomicBoolean(false);
 
     public HttpHelperExecutor(Path projectRoot, FrameworkConfig config) {
+        if (config != null) config.requireExecutionConfig();
         this.config = config;
     }
 

@@ -49,6 +49,8 @@ public final class ResourceInspection {
         public String description;
         public List<String> tags;
         public String state;
+        public String metadataState;
+        public ExecutionReadiness executionReadiness;
         public Boolean sourceAvailable;
         public String sourceReason;
         public Boolean redactionEnabled;
@@ -56,6 +58,13 @@ public final class ResourceInspection {
         public List<Reference> references;
         public List<Reference> referencedBy;
         public List<Diagnostic> diagnostics;
+    }
+
+    public static final class ExecutionReadiness {
+        public String state;
+        public String environment;
+        public List<Diagnostic> diagnostics;
+        public Boolean diagnosticsTruncated;
     }
 
     public static final class Reference {
@@ -69,6 +78,14 @@ public final class ResourceInspection {
     }
 
     public static final class Diagnostic {
+        public String severity;
+        public String environment;
+        public String helperType;
+        public String helperId;
+        public String descriptor;
+        public String environmentVariable;
+        public String remediation;
+
         public String code;
         public String summary;
         public String field;

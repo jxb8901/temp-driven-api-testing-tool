@@ -21,8 +21,6 @@ import java.util.jar.JarEntry;
 import java.util.jar.JarFile;
 import java.util.jar.JarInputStream;
 import java.util.jar.JarOutputStream;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -284,6 +282,7 @@ class ServerWarUiIT {
             apiJson(port, "POST", api + "/load-schedules", scheduleAdminAuth, origin,
                     scheduleRequest("Packaged UI schedule", "load/scenario.yaml"), 201);
             if ("1".equals(System.getenv("ATT_UI_SERVER_PLAYWRIGHT"))) runServerUiPlaywright(origin);
+            assertDegradedDiscoveryWithoutProcessSecrets(port, api, auth, packageRoot, localHome);
         } finally {
             try { tomcat.stop(); } finally { tomcat.destroy(); }
             if (oldConfig == null) System.clearProperty("att.server.config");
@@ -952,9 +951,40 @@ class ServerWarUiIT {
     }
 
     private static String findAsset(String html, String attribute) {
-        Matcher matcher = Pattern.compile("<(?:script|link)[^>]+\\b" + attribute + "=\\\"([^\\\"]+\\.(?:js|css))\\\"").matcher(html);
-        assertTrue(matcher.find(), "The active Vite index must reference a generated " + attribute + " asset.");
-        return matcher.group(1);
+        String selector = "src".equals(attribute) ? "script[src$=.js]" : "link[rel=stylesheet][href$=.css]";
+        org.jsoup.nodes.Element asset = org.jsoup.Jsoup.parse(html).selectFirst(selector);
+        assertNotNull(asset, "The active Vite index must reference a generated " + attribute + " asset.");
+        return asset.attr(attribute);
+    }
+
+    private static void assertDegradedDiscoveryWithoutProcessSecrets(int port, String api, String auth,
+                                                                     Path packageRoot, Path localHome) throws Exception {
+        String variable = "ATT_244_WAR_ABSENT_71F29BE6";
+        assertNull(System.getenv(variable));
+        Files.writeString(localHome.resolve("config/db-discovery.yaml"),
+                "schemaVersion: att-dbhelper/v2.6\nid: orders\nname: Orders\ndescription: Discovery fixture\n"
+                        + "connection: {url: 'jdbc:unused', password: '${ENV:" + variable + "}'}\n");
+        Files.writeString(localHome.resolve("config/config.yaml"), "\ndbhelpers: [config/db-discovery.yaml]\n",
+                java.nio.file.StandardOpenOption.APPEND);
+        Path target = Files.createDirectories(packageRoot.resolve("templates/DEGRADED"));
+        Files.writeString(target.resolve("template.yaml"),
+                "schemaVersion: att-template/v3.6\nname: DEGRADED\ndescription: Browse without credentials\nactions:\n"
+                        + "  query:\n    type: tool\n    call: \"#{db.orders.query(sql='select 1')}\"\n");
+        JsonNode resources;
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+        do {
+            resources = getJson(port, api + "/packages/payments/resources?type=template&query=DEGRADED", auth);
+            if (!resources.path("items").isEmpty()) break;
+            Thread.sleep(50);
+        } while (System.nanoTime() < deadline);
+        assertEquals(1, resources.path("items").size(), resources.toString());
+        JsonNode item = resources.path("items").get(0);
+        assertEquals("available", item.path("metadataState").asText(), item.toString());
+        assertEquals("dependency-unresolved", item.path("executionReadiness").path("state").asText());
+        assertTrue(item.path("executionReadiness").toString().contains(variable));
+        assertFalse(resources.toString().contains(localHome.toString()));
+        assertFalse(resources.toString().contains(packageRoot.toString()));
+        assertEquals(401, get(port, api + "/packages/payments/resources?type=template&query=DEGRADED", null));
     }
 
     private static int postJson(int port, String path, String authorization, String origin, String body) throws Exception {

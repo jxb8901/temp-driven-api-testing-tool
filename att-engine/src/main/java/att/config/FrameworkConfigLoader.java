@@ -40,16 +40,24 @@ public final class FrameworkConfigLoader {
     /** Loads central runtime configuration while keeping package Testdata paths package-local. */
     public FrameworkConfig load(Path path, Path runtimeConfigRoot, Path packageRoot,
                                 String selectedEnvironment) throws IOException {
-        return loadInternal(path,runtimeConfigRoot,packageRoot,selectedEnvironment,null,false);
+        return loadInternal(path,runtimeConfigRoot,packageRoot,selectedEnvironment,null,false,EnvironmentReferences.execution());
     }
 
     /** Trusted parsed root for inspection snapshots; all schema and profile validation is unchanged. */
     public FrameworkConfig loadParsed(Path path, Path projectRoot, String selectedEnvironment, Object loaded) throws IOException {
-        return loadInternal(path,projectRoot,projectRoot,selectedEnvironment,loaded,true);
+        return loadInternal(path,projectRoot,projectRoot,selectedEnvironment,loaded,true,EnvironmentReferences.execution());
+    }
+
+    /** Parses descriptors and environment requirements without reading any process secret. */
+    public FrameworkConfig loadDiscovery(Path path, Path runtimeConfigRoot, Path packageRoot,
+                                         String selectedEnvironment) throws IOException {
+        EnvironmentReferences references = EnvironmentReferences.discovery();
+        return loadInternal(path, runtimeConfigRoot, packageRoot, selectedEnvironment, null, false, references)
+                .forDiscovery(references.requirements());
     }
 
     private FrameworkConfig loadInternal(Path path, Path runtimeConfigRoot, Path packageRoot,
-                                         String selectedEnvironment, Object parsed, boolean supplied) throws IOException {
+                                         String selectedEnvironment, Object parsed, boolean supplied, EnvironmentReferences references) throws IOException {
         long inspectionStarted=System.nanoTime();
         try {
             Object loaded=supplied?parsed:YamlSupport.load(path);
@@ -103,10 +111,10 @@ public final class FrameworkConfigLoader {
             validateGlobalMappings(map);
             Map<String, ToolConfig> tools = new LinkedHashMap<String, ToolConfig>();
             Map<String, SshHelperConfig> sshHelpers = (v29 || v28 || v27)
-                    ? new SshHelperConfigLoader().load(map.get("sshhelpers"), runtimeConfigRoot)
+                    ? new SshHelperConfigLoader(references).load(map.get("sshhelpers"), runtimeConfigRoot)
                     : Collections.<String, SshHelperConfig>emptyMap();
             Map<String, HttpHelperConfig> httpHelpers = (v29 || v28)
-                    ? new HttpHelperConfigLoader().load(map.get("httphelpers"), runtimeConfigRoot)
+                    ? new HttpHelperConfigLoader(references).load(map.get("httphelpers"), runtimeConfigRoot)
                     : Collections.<String, HttpHelperConfig>emptyMap();
             SshConfig globalSsh = ssh(map.get("ssh"), "config.ssh");
             try {
@@ -119,10 +127,10 @@ public final class FrameworkConfigLoader {
                         "Check the qualified tool/group name, required metadata, declared arguments, command placeholders, and executable path.");
             }
             Map<String, DbHelperConfig> dbHelpers = (v29 || v28 || v27 || v26 || v25)
-                    ? new DbHelperConfigLoader().load(map.get("dbhelpers"), runtimeConfigRoot)
+                    ? new DbHelperConfigLoader(references).load(map.get("dbhelpers"), runtimeConfigRoot)
                     : Collections.<String, DbHelperConfig>emptyMap();
             Map<String, MqHelperConfig> mqHelpers = (v29 || v28 || v27 || v26)
-                    ? new MqHelperConfigLoader().load(map.get("mqhelpers"), runtimeConfigRoot)
+                    ? new MqHelperConfigLoader(references).load(map.get("mqhelpers"), runtimeConfigRoot)
                     : Collections.<String, MqHelperConfig>emptyMap();
             return new FrameworkConfig(relativePath(map.get("outputDirectory"), "output", "outputDirectory"),
                     Paths.get("report"), Paths.get("logs"),

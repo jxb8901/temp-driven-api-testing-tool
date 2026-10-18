@@ -385,6 +385,7 @@ public final class DebugEngine {
     }
 
     public Result run(ExecutionOptions options, att.core.PerformanceProfile performanceProfile) throws Exception {
+        config.requireExecutionConfig();
         String target = options.debugTargetType() + ":" + safeConsoleIdentity(options.debugTargetId());
         att.core.ConsoleCancellationHook cancellation = new att.core.ConsoleCancellationHook(new Runnable() {
             @Override public void run() { options.emitEvent(new att.api.ExecutionEvent(att.api.ExecutionEvent.Type.STATUS,
