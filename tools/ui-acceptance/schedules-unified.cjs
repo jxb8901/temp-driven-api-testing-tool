@@ -124,10 +124,11 @@ async function main() {
     await page.getByLabel('Debug diagnostics', { exact: true }).check();
     await page.getByRole('button', { name: 'Validate', exact: true }).click();
     await page.getByRole('button', { name: 'Schedule…', exact: true }).click();
-    await page.getByRole('dialog').waitFor();
-    assert.match(await page.getByRole('dialog').innerText(), /Discard your changes\?/);
-    await page.getByRole('button', { name: 'Discard changes and continue', exact: true }).click();
+    await page.waitForURL('**/#/schedules/new');
     await page.getByRole('heading', { name: 'New Schedule', exact: true }).waitFor();
+    await page.getByText('Schedule form loaded from the validated RUN draft.').waitFor();
+    assert.equal(await page.getByRole('dialog').count(), 0, 'the validated Schedule handoff must bypass the discard guard');
+    await page.getByText(/^Next run:/).waitFor();
     await page.getByRole('button', { name: 'Save schedule', exact: true }).click();
     await page.locator('#schedules-title').waitFor();
     await page.getByText(/Saved .*\(ID: S-NEW\)/).waitFor();
