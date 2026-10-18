@@ -71,6 +71,7 @@ final class ServerRuntime implements AutoCloseable {
     final JobStore store;
     final AuthService auth;
     final ThreadPoolExecutor workers,streams,inspectors;
+    private final ThreadPoolExecutor artifactWriters;
     final ConcurrentHashMap<String,Job> jobs=new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String,FutureTask<Void>> tasks=new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String,AdmissionLease> leases=new ConcurrentHashMap<>();
@@ -113,6 +114,7 @@ final class ServerRuntime implements AutoCloseable {
         java.util.concurrent.BlockingQueue<Runnable> queue=config.queuedLimit==0?new SynchronousQueue<>():new ArrayBlockingQueue<>(config.queuedLimit);
         workers=new ThreadPoolExecutor(config.maxConcurrent,config.maxConcurrent,0,TimeUnit.MILLISECONDS,queue,r->{Thread t=new Thread(r,"att-server-worker");t.setDaemon(true);return t;},new ThreadPoolExecutor.AbortPolicy());
         streams=new ThreadPoolExecutor(0,MAX_STREAM_OBSERVERS,30,TimeUnit.SECONDS,new SynchronousQueue<>(),r->{Thread t=new Thread(r,"att-server-sse");t.setDaemon(true);return t;},new ThreadPoolExecutor.AbortPolicy());
+        artifactWriters=new ThreadPoolExecutor(1,1,0,TimeUnit.MILLISECONDS,new ArrayBlockingQueue<>(Math.max(1,config.queuedLimit+config.maxConcurrent)),r->{Thread t=new Thread(r,"att-server-artifact-writer");t.setDaemon(true);return t;},new ThreadPoolExecutor.AbortPolicy());
         java.util.concurrent.BlockingQueue<Runnable> inspectionQueue=config.inspection.queuedLimit==0?new SynchronousQueue<>():new ArrayBlockingQueue<>(config.inspection.queuedLimit);
         inspectors=new ThreadPoolExecutor(config.inspection.maxConcurrent,config.inspection.maxConcurrent,0,TimeUnit.MILLISECONDS,inspectionQueue,r->{Thread t=new Thread(r,"att-server-inspector");t.setDaemon(true);return t;},new ThreadPoolExecutor.AbortPolicy());
         for(int i=0;i<config.inspection.maxConcurrent;i++)inspectionWorkerPool.add(new InspectionWorker());
@@ -247,7 +249,7 @@ final class ServerRuntime implements AutoCloseable {
             else if(!job.terminal()) {String state=exit==0?"PASS":"FAIL";finish(job,state,exit);}
         } catch(InterruptedException e){Thread.currentThread().interrupt();stopAfterFailure(job);if(!job.terminal())finishQuietly(job,"CANCELLED",143,"ATT-SERVER-CANCELLED","Worker was cancelled");}
           catch(Exception e){stopAfterFailure(job);if(!job.terminal())finishQuietly(job,"ERROR",3,"ATT-SERVER-WORKER-FAILED",safeMessage(e));}
-        finally {if(job.process!=null&&!job.process.isAlive()){if(job.workerTerminatedNanos==0)job.workerTerminatedNanos=System.nanoTime();job.process=null;try{store.update(job);}catch(Exception ignored){}}tasks.remove(job.id);leases.remove(job.id);if(job.terminal())jobs.remove(job.id,job);lease.release();completed.incrementAndGet();}
+        finally {if(job.process!=null&&!job.process.isAlive()){if(job.workerTerminatedNanos==0)job.workerTerminatedNanos=System.nanoTime();job.process=null;try{store.update(job);}catch(Exception ignored){}}if(job.terminal())scheduleArtifactArchive(job.id);tasks.remove(job.id);leases.remove(job.id);if(job.terminal())jobs.remove(job.id,job);lease.release();completed.incrementAndGet();}
     }
     private List<String> workerClasspath() {
         return WorkerRuntimeClasspath.entries(workerLibs,config.workerLibraryDirs);
@@ -2079,6 +2081,58 @@ final class ServerRuntime implements AutoCloseable {
     Path outputDirectoryForJob(String id) {
         return config.dataDir.resolve("jobs").resolve(id).resolve("output").toAbsolutePath().normalize();
     }
+    Path artifactArchivePath(String id) { return config.dataDir.resolve("jobs").resolve(id).resolve("artifacts.zip"); }
+    Map<String,Object> artifactIndex(String id) throws Exception {
+        if(store.get(id)==null)throw new NotFoundException();
+        Path archive=artifactArchivePath(id),statusFile=archive.resolveSibling("archive-status.json");
+        Map<String,Object> out=new LinkedHashMap<>();
+        if(Files.isRegularFile(archive)) {
+            try(java.util.zip.ZipFile zip=new java.util.zip.ZipFile(archive.toFile())) {
+                var manifest=zip.getEntry(ArtifactArchive.MANIFEST);
+                if(manifest==null)throw new IllegalStateException("Archive manifest is missing");
+                Map<?,?> data;try(var input=zip.getInputStream(manifest)){data=JSON.readValue(input,Map.class);}
+                if(!(data.get("version") instanceof Number version)||version.intValue()!=1)throw new IllegalStateException("Archive manifest version is unsupported");
+                Object entries=data.get("entries");out.put("items",entries instanceof List<?>?entries:List.of());out.put("archiveStatus","READY");
+            }
+        } else {
+            out.put("items",List.of());
+            out.put("archiveStatus",Files.isRegularFile(statusFile)?JSON.readTree(statusFile.toFile()).path("state").asText("FAILED"):"PENDING");
+        }
+        out.put("downloadPath","archive.zip");return out;
+    }
+    byte[] archiveEntry(String id,String requested) throws Exception {
+        if(!"READY".equals(artifactIndex(id).get("archiveStatus")))throw new NotFoundException();
+        Path archive=artifactArchivePath(id);byte[] bytes=ArtifactArchive.read(archive,requested);
+        try(java.util.zip.ZipFile zip=new java.util.zip.ZipFile(archive.toFile());var input=zip.getInputStream(zip.getEntry(ArtifactArchive.MANIFEST))) {
+            Map<?,?> manifest=JSON.readValue(input,Map.class);Object entries=manifest.get("entries");boolean approved=false;
+            if(entries instanceof List<?> list)for(Object item:list)if(item instanceof Map<?,?> row&&requested.equals(row.get("path"))&&row.get("size") instanceof Number size&&size.longValue()==bytes.length&&ArtifactArchive.sha256(bytes).equals(row.get("sha256"))){approved=true;break;}
+            if(!approved)throw new NotFoundException();
+        }
+        return bytes;
+    }
+    void retryArtifactArchive(String id) throws Exception {
+        if(!terminal(id))throw new IllegalArgumentException("Artifacts can be published after the Job has ended");
+        Files.deleteIfExists(artifactArchivePath(id).resolveSibling("archive-status.json"));scheduleArtifactArchive(id);
+    }
+    void scheduleArtifactArchive(String id) {
+        try { artifactWriters.execute(() -> {
+            Path output=outputDirectoryForJob(id), archive=artifactArchivePath(id), status=archive.resolveSibling("archive-status.json");
+            try {
+                if(!Files.isDirectory(output)) throw new java.io.IOException("Worker output is unavailable");
+                Files.deleteIfExists(status);
+                ArtifactArchive.build(output,archive,file->publicArtifact(id,file));
+                Files.writeString(status,"{\"state\":\"READY\",\"manifestVersion\":1}",StandardCharsets.UTF_8);
+                try { deleteTree(output); }
+                catch(Exception cleanupFailure) { java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).warning("Published artifacts but could not remove loose output for Job "+id); }
+            } catch(Exception failure) {
+                try { Files.deleteIfExists(archive); Files.writeString(status,"{\"state\":\"FAILED\",\"reason\":\"publication_failed\",\"retryable\":true}",StandardCharsets.UTF_8); }
+                catch(Exception ignored) { }
+                java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).warning("Artifact publication failed for Job "+id+": "+safeMessage(failure));
+            }
+        }); } catch(RejectedExecutionException full) {
+            try { Files.writeString(artifactArchivePath(id).resolveSibling("archive-status.json"),"{\"state\":\"FAILED\",\"reason\":\"writer_capacity\",\"retryable\":true}",StandardCharsets.UTF_8); } catch(Exception ignored) { }
+        }
+    }
     Object publicEventData(Object data,Path output,Path packageRoot) throws Exception {
         JsonNode node=JSON.valueToTree(att.server.api.internal.DiagnosticSanitizer.sanitizeValue(data));
         return sanitize(node,output,packageRoot);
@@ -2134,7 +2188,7 @@ final class ServerRuntime implements AutoCloseable {
             for(Path path:paths.sorted(java.util.Comparator.reverseOrder()).toArray(Path[]::new))Files.deleteIfExists(path);
         }
     }
-    @Override public void close(){closing=true;if(inspectionWarmup!=null)inspectionWarmup.shutdownNow();if(loadScheduleScheduler!=null)loadScheduleScheduler.close();retention.shutdownNow();inspectionWatchdogs.shutdownNow();synchronized(draftLock){runDrafts.clear();debugDrafts.clear();quickLoadDrafts.clear();advancedLoadDrafts.clear();catalogLoadDrafts.clear();}for(InspectionWorker worker:inspectionWorkerPool)worker.close();for(Job j:jobs.values())if(j.process!=null&&j.process.isAlive()){try{terminateTree(j.process);if(!j.process.waitFor(config.gracefulStopMs,TimeUnit.MILLISECONDS))forceTree(j.process);finishQuietly(j,"ERROR",143,"ATT-SERVER-INTERRUPTED","Server shutdown interrupted the Worker");}catch(Exception ignored){forceTree(j.process);}}for(Process process:inspectionProcesses.keySet())if(process.isAlive())forceTree(process);inspectors.shutdownNow();workers.shutdownNow();streams.shutdownNow();try{store.close();}catch(Exception ignored){}}
+    @Override public void close(){closing=true;if(inspectionWarmup!=null)inspectionWarmup.shutdownNow();if(loadScheduleScheduler!=null)loadScheduleScheduler.close();retention.shutdownNow();inspectionWatchdogs.shutdownNow();synchronized(draftLock){runDrafts.clear();debugDrafts.clear();quickLoadDrafts.clear();advancedLoadDrafts.clear();catalogLoadDrafts.clear();}for(InspectionWorker worker:inspectionWorkerPool)worker.close();for(Job j:jobs.values())if(j.process!=null&&j.process.isAlive()){try{terminateTree(j.process);if(!j.process.waitFor(config.gracefulStopMs,TimeUnit.MILLISECONDS))forceTree(j.process);finishQuietly(j,"ERROR",143,"ATT-SERVER-INTERRUPTED","Server shutdown interrupted the Worker");}catch(Exception ignored){forceTree(j.process);}}for(Process process:inspectionProcesses.keySet())if(process.isAlive())forceTree(process);inspectors.shutdownNow();workers.shutdownNow();streams.shutdownNow();artifactWriters.shutdown();try{store.close();}catch(Exception ignored){}}
     private static void terminateTree(Process process){process.toHandle().descendants().forEach(ProcessHandle::destroy);process.destroy();}
     private static void forceTree(Process process){process.toHandle().descendants().forEach(ProcessHandle::destroyForcibly);process.destroyForcibly();}
     @FunctionalInterface interface WorkerProcessLauncher { Process start(ProcessBuilder builder) throws java.io.IOException; }

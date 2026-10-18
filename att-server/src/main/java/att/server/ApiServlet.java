@@ -90,8 +90,10 @@ public final class ApiServlet extends HttpServlet {
             }
             if(path.startsWith("/jobs/"))runtime.requireJobOwner(segment(path,2),principal);
             if(path.matches("/jobs/[^/]+/events")){sse(req,res,segment(path,2));return;}
-            if(path.startsWith("/jobs/")&&path.contains("/artifacts/")){String prefix=path.substring(0,path.indexOf("/artifacts/"));String id=segment(prefix,2);String relative=path.substring(path.indexOf("/artifacts/")+11);sendArtifact(res,id,runtime.artifact(id,relative));return;}
-            if(path.matches("/jobs/[^/]+/artifacts")){String id=segment(path,2);json(res,200,Map.of("items",artifacts(id),"requestId",requestId));return;}
+            if(path.matches("/jobs/[^/]+/artifacts/archive\\.zip")){String id=segment(path,2);if(!"READY".equals(runtime.artifactIndex(id).get("archiveStatus")))throw new ServerRuntime.NotFoundException();Path zip=runtime.artifactArchivePath(id);long size=Files.size(zip);if(size>ArtifactArchive.MAX_TOTAL_BYTES+1024*1024)throw new ServerRuntime.NotFoundException();res.setContentType("application/zip");res.setHeader("X-Content-Type-Options","nosniff");res.setHeader("Cache-Control","private, no-store");res.setHeader("Content-Disposition","attachment; filename=\""+id+"-artifacts.zip\"");res.setContentLengthLong(size);try(var in=Files.newInputStream(zip)){in.transferTo(res.getOutputStream());}return;}
+            if(path.startsWith("/jobs/")&&path.contains("/artifacts/view/")){String prefix=path.substring(0,path.indexOf("/artifacts/view/"));String id=segment(prefix,2);String relative=path.substring(path.indexOf("/artifacts/view/")+15);byte[] bytes=runtime.archiveEntry(id,relative);String ext=relative.substring(relative.lastIndexOf('.')+1).toLowerCase(java.util.Locale.ROOT);String mime=switch(ext){case "html","htm"->"text/html";case "json"->"application/json";case "yaml","yml"->"application/yaml";case "xml"->"application/xml";case "css"->"text/css";case "csv"->"text/csv";default->"text/plain";};res.setContentType(mime+"; charset=UTF-8");res.setHeader("X-Content-Type-Options","nosniff");res.setHeader("Cache-Control","private, no-store");if("html".equals(ext)||"htm".equals(ext))res.setHeader("Content-Security-Policy","sandbox; default-src 'none'; img-src data: blob:; style-src 'unsafe-inline'; form-action 'none'; base-uri 'none'; frame-ancestors 'none'");res.setContentLengthLong(bytes.length);res.getOutputStream().write(bytes);return;}
+            if(path.startsWith("/jobs/")&&path.contains("/artifacts/"))throw new ServerRuntime.NotFoundException();
+            if(path.matches("/jobs/[^/]+/artifacts")){String id=segment(path,2);Map<String,Object> listing=runtime.artifactIndex(id);listing.put("requestId",requestId);json(res,200,listing);return;}
             if(path.matches("/jobs/[^/]+/result")){Map<String,Object> result=runtime.resultRecord(segment(path,2));result.put("requestId",requestId);json(res,200,result);return;}
             if(path.matches("/jobs/[^/]+")){Map<String,Object> view=runtime.jobRecord(segment(path,2));view.put("requestId",requestId);json(res,200,view);return;}
             error(res,404,"ATT-SERVER-NOT-FOUND","API resource was not found",requestId);
@@ -115,6 +117,7 @@ public final class ApiServlet extends HttpServlet {
         if(authorizationPrincipal==null){error(res,401,"ATT-SERVER-AUTHENTICATION-REQUIRED","An authenticated Servlet Principal is required",requestId);return;}
         if(loadSchedulePath(path)){schedulePost(req,res,path,requestId,authorizationPrincipal);return;}
         if(!requireOperator(req,res,requestId))return;
+        if(path.matches("/jobs/[^/]+/artifacts/retry")){if(!checkOrigin(req,res,requestId,false))return;try{String id=segment(path,2);runtime.requireJobOwner(id,authorizationPrincipal);runtime.retryArtifactArchive(id);json(res,202,Map.of("archiveStatus","PENDING","requestId",requestId));return;}catch(ServerRuntime.NotFoundException missing){error(res,404,"ATT-SERVER-NOT-FOUND","API resource was not found",requestId);return;}catch(IllegalArgumentException invalid){error(res,409,"ATT-SERVER-ARCHIVE-NOT-READY",safeDetail(invalid),requestId);return;}catch(Exception failure){error(res,500,"ATT-SERVER-REQUEST-FAILED","The archive retry could not be scheduled",requestId);return;}}
         boolean createRunDraft="/drafts/run".equals(path),createDebugDraft="/drafts/debug".equals(path),createQuickLoadDraft="/drafts/quick-load".equals(path),createAdvancedLoadDraft="/drafts/load".equals(path);
         String command=path.startsWith("/jobs/")?path.substring("/jobs/".length()):"";
         if(!createRunDraft&&!createDebugDraft&&!createQuickLoadDraft&&!createAdvancedLoadDraft&&!List.of("run","debug","load","validate").contains(command)){error(res,404,"ATT-SERVER-NOT-FOUND","API resource was not found",requestId);return;}
@@ -387,18 +390,6 @@ public final class ApiServlet extends HttpServlet {
             // A disconnected SSE client can make Tomcat enter COMPLETING before this worker exits.
             try{async.complete();}catch(IllegalStateException alreadyCompleting){}
         }
-    }
-    private List<Map<String,Object>> artifacts(String jobId) throws Exception {
-        runtime.jobRecord(jobId);Path root=runtime.config.dataDir.resolve("jobs").resolve(jobId).resolve("output").toRealPath();List<Map<String,Object>> items=new ArrayList<>();
-        try(var paths=Files.walk(root)){paths.filter(Files::isRegularFile).filter(p->!Files.isSymbolicLink(p)).limit(runtime.config.maxArtifacts+1L).forEach(p->{if(items.size()<runtime.config.maxArtifacts){Map<String,Object> m=new LinkedHashMap<>();m.put("path",root.relativize(p).toString().replace('\\','/'));try{m.put("size",Files.size(p));}catch(IOException ignored){}items.add(m);}});}
-        return items;
-    }
-    private void sendArtifact(HttpServletResponse response,String jobId,Path file)throws Exception {
-        byte[] safe=runtime.publicArtifact(jobId,file);
-        String name=file.getFileName().toString().replaceAll("[\r\n\"]","_");
-        response.setContentType("application/octet-stream");response.setHeader("X-Content-Type-Options","nosniff");
-        response.setHeader("Content-Disposition","attachment; filename=\""+name+"\"");
-        response.setContentLengthLong(safe.length);response.getOutputStream().write(safe);
     }
     private void resourceGet(HttpServletRequest req,HttpServletResponse res,String path,String requestId,String principal)throws IOException {
         String[] parts=path.split("/");
