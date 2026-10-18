@@ -57,7 +57,8 @@ class WindowsLauncherTest {
         assertTrue(binary.contains("<outputDirectory>packages/default/templates</outputDirectory>"));
         assertTrue(binary.contains("<outputDirectory>packages/default/testdata</outputDirectory>"));
         assertTrue(binary.contains("../config</directory>"));
-        assertTrue(binary.contains("../schemas</directory>"));
+        assertFalse(binary.contains("../schemas</directory>"),
+                "The Local archive must not install an external runtime schema source.");
         assertTrue(manifest.contains("config/att-server.example.yaml"));
         assertFalse(binary.contains("../config/att-server.yaml"));
         assertTrue(source.contains("<include>att.bat</include>"));

@@ -595,7 +595,7 @@ class PackageResourceInspectorTest {
         @SuppressWarnings("unchecked") List<Map<String,Object>> items=(List<Map<String,Object>>)inspector.inspect("list","template",null,null,0,10).get("items");
         String resourceId=String.valueOf(items.get(0).get("resourceId"));
         Map<String,Object> form=inspector.inspectQuickLoadForm("template",resourceId,"virtualUsers",null);
-        assertEquals(Boolean.FALSE,form.get("debugLocalTestdataOmitted"));
+        assertEquals(Boolean.TRUE,form.get("debugLocalTestdataOmitted"));
         assertFalse(form.toString().contains("debug-data/debug.yaml"));
         assertFalse(form.toString().contains("debugAccounts"));
 
@@ -643,7 +643,7 @@ class PackageResourceInspectorTest {
         Map<String,Object> expectedTarget=new LinkedHashMap<String,Object>();
         expectedTarget.put("type","flow");expectedTarget.put("id","FLOW.v1");
         assertEquals(expectedTarget,form.get("target"));
-        assertEquals(Boolean.TRUE,form.get("debugLocalTestdataOmitted"));
+        assertEquals(Boolean.FALSE,form.get("debugLocalTestdataOmitted"));
         assertFalse(form.containsKey("preview"),"Target discovery must not build or validate a Load scenario");
         assertThrows(Exception.class,()->inspector.inspectQuickLoadPolicy("virtualUsers"),"The malformed policy remains a separate Load policy error");
     }
