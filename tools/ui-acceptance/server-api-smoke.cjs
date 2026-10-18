@@ -212,7 +212,9 @@ async function main() {
     assert.equal(await quickLoadEnvironment.count(), 1, `Quick Load must expose an Environment selector: ${JSON.stringify(quickLoadLabels)}`);
     await quickLoadEnvironment.selectOption('UAT');
     await page.waitForFunction(() => document.querySelector('.att-quick-load-page .att-section-heading strong')?.textContent === 'flow · reference.flow.v1');
-    assert.equal(await page.getByText('Target defaults are ready.', { exact: true }).count(), 1,
+    const targetDefaultsReady = page.getByText('Target defaults are ready.', { exact: true });
+    await targetDefaultsReady.waitFor({ timeout: 15000 });
+    assert.equal(await targetDefaultsReady.count(), 1,
       'Quick Load should resolve the ready Flow and its safe defaults without validating the Load scenario');
     await page.waitForFunction(() => {
       const button = Array.from(document.querySelectorAll('button')).find(item => item.textContent?.trim() === 'Validate');
