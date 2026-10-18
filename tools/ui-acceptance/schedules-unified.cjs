@@ -70,6 +70,9 @@ async function main() {
     await page.getByRole('button', { name: 'Back to Schedules', exact: true }).click();
     await page.getByRole('button', { name: 'Discard changes', exact: true }).click();
     await page.waitForURL('**/#/schedules');
+    await filters.getByLabel('Execution type').selectOption('all');
+    await filters.getByLabel('Owner').selectOption('');
+    await page.getByText('3 of 3 schedules shown.').waitFor();
     await page.getByRole('button', { name: 'Edit Legacy diagnostic', exact: true }).first().click();
     await page.waitForURL('**/#/schedules/S-DEBUG/edit');
     await page.reload();
