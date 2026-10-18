@@ -93,7 +93,7 @@ async function main() {
     await page.getByRole('button', { name: 'Run Now Automated UI schedule' }).first().click();
     await page.getByRole('button', { name: 'Confirm Run Now' }).click();
     await page.waitForURL('**/#/schedules/SCHED-CREATED/history');
-    await page.getByText('O-NOW', { exact: true }).waitFor();
+    await page.getByRole('link', { name: 'View occurrence O-NOW', exact: true }).waitFor();
     await page.locator('.att-occurrence-table tbody tr', { hasText: 'O-NOW' }).getByText('Job Queued', { exact: true }).waitFor();
     await page.getByRole('button', { name: 'JOB-4821', exact: true }).last().click();
     assert.match(page.url(), /#\/jobs\/JOB-4821$/);
