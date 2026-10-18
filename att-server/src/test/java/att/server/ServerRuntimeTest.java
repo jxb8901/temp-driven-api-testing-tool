@@ -151,6 +151,20 @@ class ServerRuntimeTest {
             assertEquals("unverified",discovered.get("validation"),"Catalog discovery should not resolve targets for every environment.");
             Map<String,Object> environmentValidation=setupRuntime.validateLoadCatalogScenario("p","load/scenario.yaml","SIT","alice");
             assertEquals("valid",environmentValidation.get("validation"));assertEquals("virtualUsers",environmentValidation.get("model"));
+            assertEquals(Boolean.TRUE,environmentValidation.get("scheduleAvailable"));
+            assertTrue(String.valueOf(environmentValidation.get("draftId")).matches("C[0-9A-F]{32}"));
+            assertFalse(environmentValidation.containsKey("normalizedScenario"));
+            assertThrows(ServerRuntime.NotFoundException.class,()->setupRuntime.getCatalogLoadDraft(String.valueOf(environmentValidation.get("draftId")),"bob"));
+            com.fasterxml.jackson.databind.node.ObjectNode catalogScheduleRequest=ServerRuntime.JSON.createObjectNode();
+            catalogScheduleRequest.put("name","Validated Catalog scenario");catalogScheduleRequest.put("packageId","p");
+            catalogScheduleRequest.put("draftId",String.valueOf(environmentValidation.get("draftId")));
+            catalogScheduleRequest.put("environment","SIT");catalogScheduleRequest.put("timezone","UTC");catalogScheduleRequest.put("cron","0 2 * * *");
+            LoadSchedule catalogSnapshotSchedule=setupRuntime.createLoadSchedule(catalogScheduleRequest,"alice");
+            assertTrue(catalogSnapshotSchedule.catalogSnapshot);assertNull(catalogSnapshotSchedule.scenario);
+            assertNotNull(catalogSnapshotSchedule.inlineScenario);assertNotNull(catalogSnapshotSchedule.expectedRevisionDigest);
+            assertTrue(Boolean.TRUE.equals(setupRuntime.loadScheduleView(catalogSnapshotSchedule).get("inlineSnapshot")));
+            assertFalse(setupRuntime.loadScheduleView(catalogSnapshotSchedule).containsKey("inlineScenario"));
+            setupRuntime.deleteLoadSchedule(catalogSnapshotSchedule.id,"alice");
             assertThrows(Exception.class,()->setupRuntime.validateLoadCatalogScenario("p","load/bad.yaml","SIT","alice"));
             Map<String,Object> runNow=setupRuntime.submit("load",ServerRuntime.JSON.readTree(
                     "{\"packageId\":\"p\",\"scenario\":\"load/scenario.yaml\",\"environment\":\"SIT\"}"),"alice");
@@ -305,6 +319,23 @@ class ServerRuntimeTest {
             setupRuntime.setLoadScheduleEnabled(scheduleId,true,"alice");
             setupRuntime.deleteLoadSchedule(completedOnce.id,"alice");
         } finally {setupRuntime.close();}
+
+        Path noInlineConfigFile=temp.resolve("scheduled-catalog-no-inline-server.yaml");
+        Files.writeString(noInlineConfigFile,"server:\n  runtimeConfigPath: "+yaml(runtimeConfig)+"\n  dataDir: "+yaml(temp.resolve("scheduled-catalog-no-inline-data"))
+                +"\n  javaExecutable: "+yaml(javaBin)+"\n  inspection:\n    enabled: true\n    maxConcurrent: 1\n    queuedLimit: 2\n    timeoutMs: 30000\n    heapMaxMb: 256\n    redaction:\n      enabled: true\n  scheduling:\n    enabled: true\n    minimumIntervalMinutes: 1\n    maxConcurrentRuns: 1\n  inlineLoad:\n    enabled: false\nworkers:\n  maxConcurrent: 1\n  queuedLimit: 1\n  maxConcurrentLoad: 1\npackages:\n  allowedRoots:\n    - "+yaml(allowed)+"\n  entries:\n    p: "+yaml(packageRoot)+"\n");
+        ServerRuntime noInlineRuntime=new ServerRuntime(ServerConfig.load(noInlineConfigFile),libs.toString(),
+                builder->{builder.redirectError(ProcessBuilder.Redirect.INHERIT);return builder.start();},clock);
+        try {
+            Map<String,Object> validated=noInlineRuntime.validateLoadCatalogScenario("p","load/scenario.yaml","SIT","alice");
+            assertEquals(Boolean.TRUE,validated.get("scheduleAvailable"),"File-backed Schedule drafts must not depend on browser Inline Load policy.");
+            com.fasterxml.jackson.databind.node.ObjectNode snapshotRequest=ServerRuntime.JSON.createObjectNode();
+            snapshotRequest.put("name","Catalog file snapshot");snapshotRequest.put("packageId","p");snapshotRequest.put("draftId",String.valueOf(validated.get("draftId")));
+            snapshotRequest.put("environment","SIT");snapshotRequest.put("timezone","UTC");snapshotRequest.put("cron","0 2 * * *");
+            LoadSchedule fileSnapshot=noInlineRuntime.createLoadSchedule(snapshotRequest,"alice");
+            assertTrue(fileSnapshot.catalogSnapshot);assertNotNull(fileSnapshot.inlineScenario);
+            assertThrows(ServerRuntime.InlineLoadDisabledException.class,()->noInlineRuntime.createAdvancedLoadDraft(
+                    ServerRuntime.JSON.readTree("{\"packageId\":\"p\",\"scenario\":{\"schemaVersion\":\"att-load/v1.7\",\"workloads\":[]}}"),"alice"));
+        } finally {noInlineRuntime.close();}
 
         ServerRuntime runtime=new ServerRuntime(config,libs.toString(),builder->{builder.redirectError(ProcessBuilder.Redirect.INHERIT);return builder.start();},clock);
         try {

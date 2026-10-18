@@ -6,6 +6,7 @@ import org.junit.jupiter.api.io.TempDir;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.List;
 import java.util.jar.JarEntry;
 import java.util.jar.JarOutputStream;
@@ -19,6 +20,9 @@ class WorkerRuntimeClasspathTest {
         Path propertyHome=runtimeHome("property-home",ServerBuildInfo.PRODUCT);
         Path environmentHome=runtimeHome("environment-home",ServerBuildInfo.PRODUCT);
         assertEquals(propertyHome.resolve("lib"),WorkerRuntimeClasspath.resolve(propertyHome.toString(),environmentHome.toString()));
+        assertEquals(att.validation.SchemaFiles.registryDigest(),
+                WorkerRuntimeClasspath.schemaRegistryDigestIfPresent(propertyHome.resolve("lib")),
+                "Server startup and Worker classpath must agree on the embedded registry identity");
     }
 
     @Test void reportsMissingHomeAndLibraryDirectoryActionably() throws Exception {
@@ -64,6 +68,13 @@ class WorkerRuntimeClasspathTest {
             add(jar,"att/worker/WorkerMain.class",new byte[]{0});
             add(jar,"att/server/api/WorkerRequest.class",new byte[]{0});
             add(jar,"att/server/api/internal/DiagnosticSanitizer.class",new byte[]{0});
+            Path schemas=Paths.get("att-engine/src/main/resources/att-schemas");
+            try(java.util.stream.Stream<Path> paths=Files.walk(schemas)) {
+                for(Path source:(Iterable<Path>)paths.filter(Files::isRegularFile)::iterator) {
+                    String entry="att-schemas/"+schemas.relativize(source).toString().replace(java.io.File.separatorChar,'/');
+                    add(jar,entry,Files.readAllBytes(source));
+                }
+            }
         }
         return home;
     }

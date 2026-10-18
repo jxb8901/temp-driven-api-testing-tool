@@ -90,7 +90,7 @@ config/
   mqhelpers/    shared MQHelper descriptors
   environments/ complete profile examples
   att-server.example.yaml  ATT Server deployment template
-schemas/        source catalog for the ATT runtime schemas
+schemas/        repository build source for the Engine JAR schema registry (not an ATT_HOME runtime directory)
 packages/default/
   testcase/     xlsx + yaml sidecar + generated xml snapshot
   templates/    Template directories and reusable Flows
@@ -103,7 +103,7 @@ tools/          repository build, documentation, benchmark, and QA automation
 
 The source checkout and Local archive use the same `packages/default/` business-resource root and share runtime configuration from `$ATT_HOME/config/config.yaml`. `./att.sh` runs commands against that Package; `att.sh`, `att.bat`, Maven modules, and `lib/` stay at the repository or `ATT_HOME` root. Packages are registered explicitly by ATT Server and do not need their own `config/` or `schemas/` directories. In the archive, ATT Server can register `$ATT_HOME/packages/default` directly. Its `server.dataDir` can be `$ATT_HOME/data` when that path is disjoint from every registered package root; the archive does not include Server data or an active `config/att-server.yaml`. See the [Server deployment guide](docs/server-deployment.md) for config discovery and migration from earlier flat source checkouts.
 
-ATT 4.2.1 uses `att-config/v2.12`, `att-testdata/v1.0`, `att-tool-group/v2.9`, `att-dbhelper/v2.6`, `att-mqhelper/v1.3`, `att-httphelper/v1.1`, `att-template/v3.6`, `att-flow/v3.6`, and `att-load/v1.7`. `schemas/` is the source catalog used to build ATT's trusted, bundled schema registry. Runtime validation resolves schemas only from that registry; package-local catalogs and schema files cannot replace the runtime definitions, and custom packages do not need to provide a `schemas/` directory.
+ATT 4.2.1 uses `att-config/v2.12`, `att-testdata/v1.0`, `att-tool-group/v2.9`, `att-dbhelper/v2.6`, `att-mqhelper/v1.3`, `att-httphelper/v1.1`, `att-template/v3.6`, `att-flow/v3.6`, and `att-load/v1.7`. The repository `schemas/` catalog is build input only; the matching ATT Engine JAR embeds the authoritative, versioned runtime registry under `att-schemas/`. Runtime validation reads that registry from the classpath and may materialize a verified, content-addressed compatibility cache in a private per-user temporary directory; it retains the active and previous registry version and safely prunes older unused entries. `ATT_HOME/schemas/` is ignored and is not installed, and package-local catalogs or schema files cannot replace the runtime definitions.
 
 ## Build and validation
 

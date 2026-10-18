@@ -2466,7 +2466,7 @@ Use profiles when the same test package is promoted across environments and only
 
 ### Schema catalog
 
-[`schemas/catalog.yaml`](../schemas/catalog.yaml) is authoritative for active schema registrations. Package validation checks registrations; archived schemas do not become active runtime contracts. See the complete matrix in [Schema and Version Matrix](reference/appendices/schema-matrix.md).
+The repository `schemas/catalog.yaml` is build input for the active schema registry embedded in the matching ATT Engine JAR. At runtime, that version-locked Classpath registry is authoritative; neither `ATT_HOME/schemas/` nor a Package-local `schemas/` directory can add or replace schemas. Package validation checks the Engine's registered resources, and archived schemas become runtime contracts only when the installed Engine supports them. See the complete matrix in [Schema and Version Matrix](reference/appendices/schema-matrix.md).
 
 ### Set package-wide options
 
@@ -3069,9 +3069,9 @@ Run this after every workbook, sidecar, template, helper, or tool change:
 ./att.sh validate --package
 ```
 
-For one environment, use `./att.sh validate --config config/config.yaml --env SIT --package`. ATT validates descriptors against the active schemas in the [Schema and Version Matrix](reference/appendices/schema-matrix.md). Superseded schema files under `schemas/history/` are historical references, not runtime compatibility contracts. Update the declared `schemaVersion` and migrate fields to the active contract before validation. Diagnostics retain the original violation, file, and YAML field location and provide migration guidance; they never rewrite descriptors. For example, replace a historical Render Action with an Assign using `&{path}` and pass the resulting String as described in [Actions and Typed Values](reference/actions.md). Unsupported versions fail before execution.
+For one environment, use `./att.sh validate --config config/config.yaml --env SIT --package`. ATT validates descriptors against schemas in the matching ATT Engine JAR's embedded registry, listed in the [Schema and Version Matrix](reference/appendices/schema-matrix.md). The repository `schemas/` tree is build input; it and any old `ATT_HOME/schemas/` or package-local directory are not runtime schema sources. Superseded schemas under the embedded registry's `schemas/history/` are historical references, not runtime compatibility contracts unless that Engine version explicitly supports them. Update the declared `schemaVersion` and migrate fields to the active contract before validation. Diagnostics retain the original violation, file, and YAML field location and provide migration guidance; they never rewrite descriptors. For example, replace a historical Render Action with an Assign using `&{path}` and pass the resulting String as described in [Actions and Typed Values](reference/actions.md). Unsupported versions fail before execution.
 
-Current schemas are in [`schemas/`](../schemas); older definitions are under [`schemas/history/`](../schemas/history). `validate --package` checks every catalog-registered schema resource, even when the package does not use it. A missing, unreadable, unsafe, or duplicate registered schema is a hard `PACKAGE_INVALID` error. Validation never rewrites YAML. Review the migration guidance, update the file, then rerun package validation for each selected `--env`.
+Current schema sources and their historical counterparts are in the repository's `schemas/` build-input tree, which is not installed under ATT_HOME. At runtime, `validate --package` checks every schema registered in the embedded Engine catalog, even when the Package does not use it. A missing, unreadable, unsafe, or duplicate embedded resource is a hard `PACKAGE_INVALID` error. The Engine reads catalog and schema bytes from the classpath; its private SHA-256 cache is a verified compatibility materialization, not an alternate source. Validation never rewrites YAML. Review the migration guidance, update the file, then rerun package validation for each selected `--env`.
 
 Package validation also discovers existing Template, Flow and grouped or ungrouped Tool `debug.yaml` sidecars using the same discovery and schema/input validation as Debug execution. Historical schema versions and invalid current-schema structure are reported before invoking `att debug`; optional missing sidecars remain valid.
 
@@ -3216,7 +3216,7 @@ Maintainer implementation sequencing, scheduler internals and resource-owner det
 
 ## Appendix A — schema and version matrix
 
-Active schemas (source of truth: `schemas/catalog.yaml`):
+Active schemas (the matching ATT Engine JAR's embedded registry, built from `schemas/catalog.yaml`):
 
 | Artifact | Active schema |
 |---|---|
@@ -3241,7 +3241,7 @@ Active schemas (source of truth: `schemas/catalog.yaml`):
 | CI summary | att-ci-summary/v2.1 |
 | JUnit XML | att-junit/v2.1 |
 
-For the changed resource/configuration schemas, older versions are historical definitions under schemas/history; they are not active execution contracts. Unsupported versions fail validation with migration guidance. The repository catalog at schemas/catalog.yaml is authoritative. Package validation checks the registered schema resources themselves; it does not enable runtime compatibility for archived versions.
+For the changed resource/configuration schemas, older versions are historical definitions under `schemas/history/`; they are not active execution contracts unless the embedded Engine registry registers and supports them. Unsupported versions fail validation with migration guidance. The repository catalog at `schemas/catalog.yaml` is build input; at runtime, the registry embedded in the matching ATT Engine JAR is authoritative. Runtime validation reads its classpath resources and can materialize a verified, content-addressed compatibility cache in a private per-user temporary directory. The cache retains the active registry and the immediately previous version for rollback; older entries are deleted only when an exclusive OS lock confirms no Worker is using them, and interrupted cleanup is retried at the next initialization. Validation revisions bind Engine and registry identity, Package files, shared config files and selected Environment; Workers verify the registry identity supplied by the Server before handling requests. `ATT_HOME/schemas/` and package-local `schemas/` are not runtime sources and cannot override that registry. Package validation checks the Engine's registered schema resources; it does not enable compatibility for unregistered archived versions.
 
 <!-- att-docs:historical -->
 Load v1.6 and MQHelper v1.2 are compatible historical schemas supported by their loaders; their existing scalar routing and legacy evidence policies remain unchanged. New routing/quota fields require the active schema.

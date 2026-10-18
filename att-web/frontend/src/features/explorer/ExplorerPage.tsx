@@ -439,25 +439,35 @@ export function ExplorerPage({ api, packageId, resourceRoute, environment,
       {!identity && onRunBatch && <button className="button button-primary" type="button" onClick={onRunBatch}>Batch RUN</button>}
     </header>
 
-    <div className={`att-explorer-workspace${identity ? ' has-selected-resource' : ' is-list-first'}`}>
+    <div className={`att-explorer-workspace${identity ? ' has-selected-resource' : ' is-list-first'}${identity ? '' : ' att-query-workspace'}`}>
       <aside className="att-explorer-navigation" aria-label="Resource navigation" hidden={Boolean(identity)}>
-        <h2>Resources</h2>
-        <label>Search resources <input type="search" value={query} maxLength={200} onChange={event => { resetListPosition(); setQuery(event.currentTarget.value); }} /></label>
-        <div className="att-explorer-categories" role="tablist" aria-label="Resource categories">
-          {([
-            ['all', 'All'], ['case', 'Test Cases'], ['template', 'Templates'], ['flow', 'Flows'], ['tool', 'Tools'],
-          ] as Array<[ResourceSummary['type'] | 'all', string]>).map(([value, label]) =>
-            <button key={value} type="button" role="tab" aria-selected={typeFilter === value}
-              onClick={() => { resetListPosition(); setTypeFilter(value); }}>{label}</button>)}
-        </div>
-        <p className="att-explorer-status" role="status" aria-live="polite">{resourceStatus}</p>
-        {resourceError && <p className="att-error" role="alert">{resourceError}<button type="button" onClick={() => (inspectionCache.clear(), setResourceRefresh(value => value + 1))}>Retry</button></p>}
-        <ResourceTree items={resources} selectedKey={selectedKey} loading={loadingResources} nextCursor={cursor} sortKey={sortKey} direction={sortDirection} onSortChange={changeSort}
-          onSelect={resource => onResourceRouteChange({ type: resource.type, resourceId: resource.resourceId, logicalId: resource.logicalId })}
-          onRun={onRunTarget ? resource => onRunTarget({ type: resource.type, resourceId: resource.resourceId, logicalId: resource.logicalId }) : undefined}
-          onQuickLoad={onOpenQuickLoad ? resource => onOpenQuickLoad({ packageId, type: resource.type, resourceId: resource.resourceId }) : undefined}
-          onLoadMore={() => void loadMore()} scrollContainerRef={resourceListRef} onListScroll={handleListScroll} />
-        <p className="att-explorer-total">{totalResources.toLocaleString()} {typeFilter === 'all' ? 'package resources' : typeFilter + ' resources'}</p>
+        <section className="att-query-filter-panel" aria-label="Resource filters">
+          <h2>Resources</h2>
+          <div className="att-query-filter-grid">
+            <label>Search resources <input type="search" value={query} maxLength={200} onChange={event => { resetListPosition(); setQuery(event.currentTarget.value); }} /></label>
+            <div className="att-explorer-categories" role="tablist" aria-label="Resource categories">
+              {([
+                ['all', 'All'], ['case', 'Test Cases'], ['template', 'Templates'], ['flow', 'Flows'], ['tool', 'Tools'],
+              ] as Array<[ResourceSummary['type'] | 'all', string]>).map(([value, label]) =>
+                <button key={value} type="button" role="tab" aria-selected={typeFilter === value}
+                  onClick={() => { resetListPosition(); setTypeFilter(value); }}>{label}</button>)}
+            </div>
+          </div>
+          <div className="att-query-filter-actions">
+            <button className="button button-quiet" type="button" onClick={() => { resetListPosition(); setQuery(''); setTypeFilter('all'); }}>Clear filters</button>
+            <button className="button button-quiet" type="button" disabled={loadingResources} onClick={() => (inspectionCache.clear(), setResourceRefresh(value => value + 1))}>Refresh resources</button>
+          </div>
+        </section>
+        <section className="att-query-results-panel" aria-label="Resource results">
+          <p className="att-query-result-status" role="status" aria-live="polite">{resourceStatus}</p>
+          {resourceError && <p className="att-error" role="alert">{resourceError}<button type="button" onClick={() => (inspectionCache.clear(), setResourceRefresh(value => value + 1))}>Retry</button></p>}
+          <ResourceTree items={resources} selectedKey={selectedKey} loading={loadingResources} nextCursor={cursor} sortKey={sortKey} direction={sortDirection} onSortChange={changeSort}
+            onSelect={resource => onResourceRouteChange({ type: resource.type, resourceId: resource.resourceId, logicalId: resource.logicalId })}
+            onRun={onRunTarget ? resource => onRunTarget({ type: resource.type, resourceId: resource.resourceId, logicalId: resource.logicalId }) : undefined}
+            onQuickLoad={onOpenQuickLoad ? resource => onOpenQuickLoad({ packageId, type: resource.type, resourceId: resource.resourceId, logicalId: resource.logicalId }) : undefined}
+            onLoadMore={() => void loadMore()} scrollContainerRef={resourceListRef} onListScroll={handleListScroll} />
+          <p className="att-explorer-total">{totalResources.toLocaleString()} {typeFilter === 'all' ? 'package resources' : typeFilter + ' resources'}</p>
+        </section>
       </aside>
 
       <section className="att-explorer-detail" aria-label="Resource details" hidden={!identity}>
@@ -471,7 +481,7 @@ export function ExplorerPage({ api, packageId, resourceRoute, environment,
           </header>
           <div className="att-explorer-detail-actions">
             {onRunTarget && detail?.state !== 'invalid' && <button className="button button-primary" type="button" onClick={() => onRunTarget({ type: identity.type, resourceId: identity.resourceId, logicalId: detail?.logicalId })}>Run</button>}
-            {onOpenQuickLoad && detail?.state !== 'invalid' && ['template','flow','tool'].includes(identity.type) && <button className="button button-quiet" type="button" onClick={() => onOpenQuickLoad({ packageId, type: identity.type, resourceId: identity.resourceId })}>Quick LOAD</button>}
+            {onOpenQuickLoad && detail?.state !== 'invalid' && ['template','flow','tool'].includes(identity.type) && <button className="button button-quiet" type="button" onClick={() => onOpenQuickLoad({ packageId, type: identity.type, resourceId: identity.resourceId, logicalId: detail?.logicalId })}>Quick LOAD</button>}
           </div>
           {detailLoading && <p role="status">Loading resource detail…</p>}
           {detailError && <p className="att-error" role="alert">{detailError}</p>}
@@ -507,7 +517,7 @@ export function ExplorerPage({ api, packageId, resourceRoute, environment,
           <label>Anonymous job label (optional)<input value={principal} maxLength={120} onChange={event => changePrincipal(event.currentTarget.value)} /></label>
           {selectedResource.type === 'case' && <button type="button" disabled={detailLoading || !detail?.provenance?.suite || !detail.logicalId} onClick={() => void runCase()}>Run selected case</button>}
           {debugEnabled && <button type="button" aria-expanded={debugOpen} onClick={() => setDebugOpen(value => !value)}>{debugOpen ? 'Close Run' : 'Run this target'}</button>}
-          {onOpenQuickLoad && debugEnabled && identity && <button type="button" onClick={() => onOpenQuickLoad(identity)}>Quick Load</button>}
+          {onOpenQuickLoad && debugEnabled && identity && <button type="button" onClick={() => onOpenQuickLoad({ ...identity, logicalId: selectedResource.logicalId })}>Quick Load</button>}
           {debugOpen && <section className="att-debug-panel" aria-labelledby="att-debug-heading">
             <h3 id="att-debug-heading">Run</h3>
             <p className="att-debug-status" role="status" aria-live="polite">{debugStatus}</p>

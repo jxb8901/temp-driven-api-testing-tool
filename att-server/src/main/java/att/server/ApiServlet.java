@@ -39,7 +39,7 @@ public final class ApiServlet extends HttpServlet {
     @Override public void init() throws ServletException {Object r=getServletContext().getAttribute(ServerBootstrap.RUNTIME);if(!(r instanceof ServerRuntime))throw new ServletException("ATT Server runtime did not initialize");runtime=(ServerRuntime)r;}
     @Override protected void service(HttpServletRequest req,HttpServletResponse res) throws ServletException,IOException {
         long inspectionStarted=System.nanoTime();
-        boolean inspection=resourcePath(path(req))||configurationPath(path(req))||path(req).matches("/packages/[^/]+/load-catalog(?:/(?:source|validate))?");
+        boolean inspection=resourcePath(path(req))||configurationPath(path(req))||path(req).matches("/packages/[^/]+/load-catalog(?:/(?:source|validate|detail))?");
         try { serviceRequest(req,res); }
         finally { if(inspection)runtime.inspectionMetrics.record(att.metrics.InspectionMetrics.Stage.HTTP,System.nanoTime()-inspectionStarted); }
     }
@@ -55,7 +55,7 @@ public final class ApiServlet extends HttpServlet {
             if("/health".equals(path)){json(res,200,Map.of("status","UP","version",ServerBuildInfo.PRODUCT,"apiVersion",ServerApi.VERSION,"requestId",requestId));return;}
             if("/version".equals(path)){Map<String,Object> version=new LinkedHashMap<>();version.put("version",ServerBuildInfo.PRODUCT);version.put("apiVersion",ServerApi.VERSION);version.put("buildTime",ServerBuildInfo.BUILD_TIME);version.put("gitCommit",ServerBuildInfo.GIT_COMMIT);version.put("javaMinimum",17);version.put("inlineLoadEnabled",runtime.config.inlineLoad.enabled);version.put("loadSchedulingEnabled",runtime.config.scheduling.enabled);version.put("unifiedRunVersion",RunDefinition.VERSION);version.put("authMode",runtime.config.authMode);version.put("requestId",requestId);json(res,200,version);return;}
             boolean resourceRequest=resourcePath(path);
-            boolean loadCatalogRequest=path.matches("/packages/[^/]+/load-catalog(?:/(?:source|validate))?");
+            boolean loadCatalogRequest=path.matches("/packages/[^/]+/load-catalog(?:/(?:source|validate|detail))?");
             boolean configurationRequest=configurationPath(path);
             boolean loadPolicyRequest=loadPolicyPath(path);
             if(loadSchedulePath(path)){scheduleGet(req,res,path,requestId);return;}
@@ -72,6 +72,7 @@ public final class ApiServlet extends HttpServlet {
                 if(draftId.startsWith("R")){Map<String,Object> response=runtime.getRunDraft(draftId,principal);response.put("requestId",requestId);json(res,200,response);}
                 else if(draftId.startsWith("L")){LoadDraft response=ServerRuntime.JSON.convertValue(runtime.getQuickLoadDraft(draftId,principal),LoadDraft.class);response.requestId=requestId;json(res,200,response);}
                 else if(draftId.startsWith("A")){LoadDraft response=ServerRuntime.JSON.convertValue(runtime.getAdvancedLoadDraft(draftId,principal),LoadDraft.class);response.requestId=requestId;json(res,200,response);}
+                else if(draftId.startsWith("C")){LoadDraft response=ServerRuntime.JSON.convertValue(runtime.getCatalogLoadDraft(draftId,principal),LoadDraft.class);response.requestId=requestId;json(res,200,response);}
                 else {DebugDraft response=ServerRuntime.JSON.convertValue(runtime.getDebugDraft(draftId,principal),DebugDraft.class);response.requestId=requestId;json(res,200,response);}
                 return;
             }
@@ -454,6 +455,7 @@ public final class ApiServlet extends HttpServlet {
             Map<String,Object> result;
             if(parts.length==5&&"source".equals(parts[4])) result=runtime.inspectLoadSource(parts[2],req.getParameter("resourceId"),principal);
             else if(parts.length==5&&"validate".equals(parts[4])) result=runtime.validateLoadCatalogScenario(parts[2],req.getParameter("resourceId"),req.getParameter("environment"),principal);
+            else if(parts.length==5&&"detail".equals(parts[4])) result=runtime.inspectLoadCatalogDetail(parts[2],req.getParameter("resourceId"),principal);
             else if(parts.length==4) result=runtime.inspectLoadCatalog(parts[2],req.getParameter("query"),parseLimit(req.getParameter("limit")),req.getParameter("cursor"),principal);
             else throw new ServerRuntime.NotFoundException();
             Object cacheRevision=result.remove("_cacheRevision");

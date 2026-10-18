@@ -1,4 +1,4 @@
-.att-run-page { max-width: 1120px; }
+.att-run-page { max-width: none; }
 .att-run-page > p { color: var(--att-color-muted); line-height: 1.6; }
 .att-run-definition, .att-run-review { min-width: 0; margin-block: var(--att-space-5); padding: var(--att-space-5); border: 1px solid var(--att-color-border); border-radius: var(--att-radius-card); background: var(--att-color-surface); }
 .att-run-definition { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--att-space-4); }

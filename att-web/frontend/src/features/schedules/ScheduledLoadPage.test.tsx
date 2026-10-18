@@ -110,6 +110,8 @@ describe('ScheduledLoadPage', () => {
     expect(host.textContent).not.toContain('Nightly payments');
     await change(host.querySelectorAll('.att-schedule-filters select')[3] as HTMLSelectElement, 'alice');
     expect(host.textContent).toContain('No schedules match');
+    await click([...host.querySelectorAll('button')].find(button => button.textContent === 'Clear filters')!);
+    expect(host.textContent).toContain('2 of 2 schedules shown.');
     await click([...host.querySelectorAll('button')].find(button => button.textContent === 'New Schedule')!);
     expect(host.querySelector('form')).not.toBeNull();
     expect(host.querySelector('#schedule-list-heading')).toBeNull();
@@ -168,6 +170,38 @@ describe('ScheduledLoadPage', () => {
     expect(api.triggerSchedule).not.toHaveBeenCalled();
   });
 
+  it('shows an explicit return path when a validated Schedule intent is missing after refresh', async () => {
+    const api = makeApi(); const onCancel = vi.fn();
+    await act(async () => root.render(<NavigationGuardContext.Provider value={navigation}>
+      <ScheduledLoadPage api={api} packages={packages} enabled onOpenJob={vi.fn()} onCancel={onCancel}
+        route={{ kind: 'schedules', view: 'new', intent: 'validated', returnTo: '#/advanced-load?package=payments' }} />
+    </NavigationGuardContext.Provider>));
+    await advance(400);
+    expect(host.textContent).toContain('Validated execution intent unavailable');
+    expect(host.querySelector('#schedule-name')).toBeNull();
+    await click([...host.querySelectorAll('button')].find(button => button.textContent === 'Return to originating editor')!);
+    expect(onCancel).toHaveBeenCalledOnce();
+  });
+
+  it('explains an expired catalog draft and returns to the source editor after save failure', async () => {
+    const api = makeApi({ createSchedule: vi.fn(async () => { throw new ApiError('Draft unavailable', { status: 404, requestId: 'REQ-DRAFT' }); }) });
+    const onCancel = vi.fn();
+    const initialDraft = { packageId: 'payments', environment: 'SIT', draftId: `C${'a'.repeat(32)}`,
+      previewYaml: 'schemaVersion: att-load/v1.7\n', executionType: 'load' as const };
+    await act(async () => root.render(<NavigationGuardContext.Provider value={navigation}>
+      <ScheduledLoadPage api={api} packages={packages} enabled onOpenJob={vi.fn()} onCancel={onCancel} onSaved={vi.fn()}
+        route={{ kind: 'schedules', view: 'new', intent: 'validated', returnTo: '#/advanced-load?package=payments' }} initialDraft={initialDraft} />
+    </NavigationGuardContext.Provider>));
+    await advance(400);
+    await click(host.querySelector('button[type="submit"]')!);
+    expect(api.createSchedule).toHaveBeenCalledOnce();
+    expect(host.textContent).toContain('validated execution draft expired or is unavailable');
+    expect(host.textContent).toContain('Return to the originating editor');
+    expect(api.triggerSchedule).not.toHaveBeenCalled();
+    await click([...host.querySelectorAll('button')].find(button => button.textContent === 'Return to originating editor')!);
+    expect(onCancel).toHaveBeenCalledOnce();
+  });
+
   it('loads an authorized edit deep link and keeps missing/forbidden definitions out of the form', async () => {
     const api = makeApi({ listSchedules: vi.fn(async () => ({ items: [sampleSchedule] })) });
     const show = async (id: string, source = api) => {
@@ -199,10 +233,18 @@ describe('ScheduledLoadPage', () => {
     const api = makeApi({ listSchedules: vi.fn(async () => ({ items: [sampleSchedule] })) });
     const onOpenJob = await render(api);
     expect(host.querySelector('h1')?.textContent).toBe('Schedules');
+    expect(host.querySelector('.att-query-filter-panel[aria-label="Schedule filters"]')).not.toBeNull();
+    expect(host.querySelector('.att-query-results-panel[aria-label="Schedule results"]')).not.toBeNull();
     expect(host.textContent).toContain('Nightly payments');
     await click(host.querySelector('[aria-label="History Nightly payments"]')!);
     await advance(0);
     expect(host.textContent).toContain('Skipped because this schedule already reached its concurrent-run limit.');
+    const occurrenceLink = host.querySelector<HTMLAnchorElement>('.att-occurrence-link');
+    expect(occurrenceLink?.getAttribute('href')).toContain(`#/schedules/${sampleSchedule.id}/history/O-SKIPPED`);
+    expect(occurrenceLink?.getAttribute('aria-label')).toBe('View occurrence O-SKIPPED');
+    expect(host.querySelectorAll('.att-occurrence-table button.att-schedule-job-link')).toHaveLength(3);
+    expect(host.querySelector('.att-occurrence-table.att-data-table')).not.toBeNull();
+    expect(host.querySelector('.att-occurrence-table .att-status-badge.att-status-skipped')?.textContent).toBe('skipped');
     await click([...host.querySelectorAll('.att-schedule-job-link')][0]);
     expect(onOpenJob).toHaveBeenCalledWith('JOB-204');
     expect(host.textContent).toContain('JOB-099 · no longer available');
@@ -216,21 +258,43 @@ describe('ScheduledLoadPage', () => {
     await advance(0);
 
     const rowFor = (occurrenceId: string) => [...host.querySelectorAll('.att-occurrence-table tbody tr')]
-      .find(row => row.querySelector('code')?.textContent === occurrenceId)!;
-    const jobState = (occurrenceId: string) => rowFor(occurrenceId).querySelector('.att-schedule-job-state');
+      .find(row => row.querySelector('.att-occurrence-link code')?.textContent === occurrenceId)!;
+    const jobState = (occurrenceId: string) => rowFor(occurrenceId).querySelector('[data-label="Job"] .att-status-badge');
 
-    expect(rowFor('O-SUBMITTED').querySelector('.att-schedule-state')?.textContent).toBe('submitted');
+    expect(rowFor('O-SUBMITTED').querySelector('[data-label="Status"] .att-status-badge')?.textContent).toBe('submitted');
     expect(jobState('O-SUBMITTED')?.textContent).toBe('Job Passed');
-    expect(jobState('O-SUBMITTED')?.className).toContain('is-enabled');
+    expect(jobState('O-SUBMITTED')?.className).toContain('att-status-pass');
     expect(jobState('O-FAILED')?.textContent).toBe('Job Failed');
-    expect(jobState('O-FAILED')?.className).toContain('is-failed');
+    expect(jobState('O-FAILED')?.className).toContain('att-status-fail');
     expect(jobState('O-RUNNING')?.textContent).toBe('Job Running');
-    expect(jobState('O-RUNNING')?.className).toContain('is-running');
+    expect(jobState('O-RUNNING')?.className).toContain('att-status-running');
 
     const expired = rowFor('O-EXPIRED');
-    expect(expired.querySelector('.att-schedule-job-state')).toBeNull();
+    expect(expired.querySelector('[data-label="Job"] .att-status-badge')).toBeNull();
     expect(expired.querySelector('button.att-schedule-job-link')).toBeNull();
     expect(expired.querySelector('.att-schedule-job-unavailable')?.textContent).toContain('no longer available');
+  });
+
+  it('shows and copies the full occurrence ID while keeping its table link compact', async () => {
+    const occurrenceId = `OCC-${'load-run-42-'.repeat(4)}`;
+    const clipboardWrite = vi.fn(async (_value: string) => {});
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: clipboardWrite } });
+    const api = makeApi({ listSchedules: vi.fn(async () => ({ items: [sampleSchedule] })),
+      getScheduleExecutions: vi.fn(async () => ({ items: [{ ...occurrences[0], occurrenceId }] })) });
+    await render(api);
+    await click(host.querySelector('[aria-label="History Nightly payments"]')!);
+    await advance(0);
+
+    const link = host.querySelector<HTMLAnchorElement>('.att-occurrence-link')!;
+    expect(link.textContent).toContain('…');
+    expect(link.title).toBe(`Occurrence ID: ${occurrenceId}`);
+    const fullId = host.querySelector('.att-occurrence-id-details')!;
+    await click(fullId.querySelector('summary')!);
+    expect((fullId as HTMLDetailsElement).open).toBe(true);
+    expect(fullId.querySelector('code')?.textContent).toBe(occurrenceId);
+    await click(fullId.querySelector('button')!);
+    expect(clipboardWrite).toHaveBeenCalledWith(occurrenceId);
+    expect(host.textContent).toContain(`Copied full occurrence ID ${occurrenceId}.`);
   });
 
   it('labels consumed one-time schedules as completed and filters them separately', async () => {
@@ -461,7 +525,7 @@ describe('ScheduledLoadPage', () => {
     const api = makeApi({ listSchedules: vi.fn(async () => ({ items: [sampleSchedule] })), getScheduleExecutions });
     await render(api);
 
-    const jobState = () => host.querySelector('.att-schedule-job-state');
+    const jobState = () => host.querySelector('[data-label="Job"] .att-status-badge');
     await click(host.querySelector('[aria-label="History Nightly payments"]')!);
     await advance(0);
     expect(jobState()?.textContent).toBe('Job Queued');
@@ -470,7 +534,7 @@ describe('ScheduledLoadPage', () => {
     // The active job keeps the panel current without the user reopening History.
     await advance(5000);
     expect(jobState()?.textContent).toBe('Job Failed');
-    expect(jobState()?.className).toContain('is-failed');
+    expect(jobState()?.className).toContain('att-status-fail');
     expect(getScheduleExecutions).toHaveBeenCalledTimes(2);
 
     // Once the occurrence is terminal the poll timer is cleared, so no further requests are issued.

@@ -766,13 +766,19 @@ function TargetEditor({ target, packageId, environment, model, api, inlineLoadEn
 
   async function loadSidecar() {
     if (!packageId || !target.id.trim() || !inlineLoadEnabled) return;
+    const selectedTarget = targets.find(item => item.type === target.type && item.logicalId === target.id.trim());
+    if (!selectedTarget) {
+      setSidecarState('error');
+      setSidecarMessage('Select a ready package target to load its safe sidecar defaults.');
+      return;
+    }
     sidecarRequest.current?.abort();
     const controller = new AbortController();
     sidecarRequest.current = controller;
     const sequence = ++sidecarSequence.current;
     setSidecarState('loading'); setSidecarMessage('Loading safe sidecar defaults…');
     try {
-      const form = await api.getTargetLoadForm(packageId, target.type, target.id.trim(), model, environment || undefined, controller.signal);
+      const form = await api.getTargetLoadForm(packageId, target.type, selectedTarget.resourceId, model, environment || undefined, controller.signal);
       if (controller.signal.aborted || sequence !== sidecarSequence.current) return;
       const next = mergeBusinessJson(target.businessJson, target.type, form.input);
       onChange({ ...target, id: String(form.target?.id || target.id), businessJson: next });
@@ -797,7 +803,7 @@ function TargetEditor({ target, packageId, environment, model, api, inlineLoadEn
         <datalist id={listId}>{targets.map(item => <option key={item.logicalId} value={item.logicalId} />)}</datalist>
       </label>
       <div className="att-target-actions">
-        <button type="button" onClick={() => void loadSidecar()} disabled={!inlineLoadEnabled || !packageId || !target.id.trim() || sidecarState === 'loading'}>
+        <button type="button" onClick={() => void loadSidecar()} disabled={!inlineLoadEnabled || !packageId || !target.id.trim() || targetState === 'loading' || sidecarState === 'loading'}>
           {sidecarState === 'loading' ? 'Loading defaults…' : 'Load sidecar defaults'}
         </button>
         {targetState === 'loading' && <span role="status">Loading targets…</span>}

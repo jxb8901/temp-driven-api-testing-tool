@@ -114,6 +114,18 @@ public final class WorkerMain {
         if(inspectionDaemon&&!("inspect".equals(request.command))) return fail("WORKER_REQUEST_INVALID","Inspection Workers accept only inspect requests");
         jobId=request.jobId;
         if(jobId==null||jobId.trim().isEmpty()) return fail("WORKER_REQUEST_INVALID","jobId is required");
+        if(request.expectedSchemaRegistryDigest!=null) {
+            if(!request.expectedSchemaRegistryDigest.matches("[a-f0-9]{64}"))
+                return fail("WORKER_SCHEMA_REGISTRY_EXPECTATION_INVALID","The Server supplied an invalid Schema Registry identity");
+            String actual;
+            try { actual=att.validation.SchemaFiles.registryDigest(); }
+            catch(Exception unavailable) {
+                return fail("WORKER_SCHEMA_REGISTRY_UNAVAILABLE","The embedded ATT Schema Registry is unavailable; reinstall the matching Local Runtime");
+            }
+            if(!java.security.MessageDigest.isEqual(request.expectedSchemaRegistryDigest.getBytes(StandardCharsets.US_ASCII),
+                    actual.getBytes(StandardCharsets.US_ASCII)))
+                return fail("WORKER_SCHEMA_REGISTRY_MISMATCH","The Worker Schema Registry does not match the Server's validated Local Runtime; install the matching Local archive");
+        }
         long processingStarted=System.nanoTime();
         long buildsBefore=InspectionMetrics.JVM.count(INDEX_BUILD),loadsBefore=InspectionMetrics.JVM.count(CONFIG_LOAD),bytesBefore=InspectionMetrics.JVM.count(READ_BYTES);
         try {
@@ -149,6 +161,7 @@ public final class WorkerMain {
                     ||"quick-load-policy".equals(request.inspectionAction)
                     ||"load-scenario".equals(request.inspectionAction)
                     ||"load-catalog".equals(request.inspectionAction)
+                    ||"load-detail".equals(request.inspectionAction)
                     ||"load-source".equals(request.inspectionAction)
                     ||"run-input".equals(request.inspectionAction));
             if(draftInspection) {
@@ -293,6 +306,11 @@ public final class WorkerMain {
             if("load-catalog".equals(r.inspectionAction)) {
                 Map<String,Object> inspected=inspector.inspectLoadCatalog(r.inspectionQuery,
                         r.inspectionOffset==null?0:r.inspectionOffset,r.inspectionLimit==null?50:r.inspectionLimit,r.expectedRevisionDigest);
+                return new OperationResult(null,"PASS",0,0,Collections.<att.validation.Diagnostic>emptyList(),
+                        Collections.<String,String>emptyMap(),Collections.<String,Object>singletonMap("inspection",inspected));
+            }
+            if("load-detail".equals(r.inspectionAction)) {
+                Map<String,Object> inspected=inspector.inspectLoadCatalogDetail(r.inspectionPath,r.expectedRevisionDigest);
                 return new OperationResult(null,"PASS",0,0,Collections.<att.validation.Diagnostic>emptyList(),
                         Collections.<String,String>emptyMap(),Collections.<String,Object>singletonMap("inspection",inspected));
             }

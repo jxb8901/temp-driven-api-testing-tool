@@ -173,7 +173,7 @@ Use profiles when the same test package is promoted across environments and only
 
 ## Schema catalog
 
-[`schemas/catalog.yaml`](../../schemas/catalog.yaml) is authoritative for active schema registrations. Package validation checks registrations; archived schemas do not become active runtime contracts. See the complete matrix in [Schema and Version Matrix](appendices/schema-matrix.md).
+The repository `schemas/catalog.yaml` is build input for the active schema registry embedded in the matching ATT Engine JAR. At runtime, that version-locked Classpath registry is authoritative; neither `ATT_HOME/schemas/` nor a Package-local `schemas/` directory can add or replace schemas. Package validation checks the Engine's registered resources, and archived schemas become runtime contracts only when the installed Engine supports them. See the complete matrix in [Schema and Version Matrix](appendices/schema-matrix.md).
 
 ## Set package-wide options
 

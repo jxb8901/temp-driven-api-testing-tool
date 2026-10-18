@@ -9,6 +9,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import static org.junit.jupiter.api.Assertions.*;
@@ -137,5 +138,36 @@ class SchemaMigrationGuidanceTest {
         assertTrue(Files.isRegularFile(resolved));
         assertFalse(resolved.startsWith(root));
         assertDoesNotThrow(() -> SchemaFiles.validateCatalog(root));
+    }
+
+    @Test void packageAndAttHomeSchemaTreesCannotOverrideEmbeddedRegistry() throws Exception {
+        String filename = "att-flow-v3.6.schema.json";
+        Path packageRoot = root.resolve("package");
+        Path attHome = root.resolve("att-home");
+        for (Path candidate : new Path[]{packageRoot, attHome}) {
+            Path schemas = candidate.resolve("schemas");
+            Files.createDirectories(schemas);
+            Files.write(schemas.resolve("catalog.yaml"), "not-the-runtime-catalog".getBytes(StandardCharsets.UTF_8));
+            Files.write(schemas.resolve(filename), "not-the-runtime-schema".getBytes(StandardCharsets.UTF_8));
+        }
+
+        Path fromPackage = SchemaFiles.resolve(packageRoot, filename);
+        Path fromAttHome = SchemaFiles.resolve(attHome, filename);
+        assertEquals(fromPackage, fromAttHome, "Runtime schema resolution is independent of Package and ATT_HOME trees");
+        assertFalse(fromPackage.startsWith(packageRoot));
+        assertFalse(fromPackage.startsWith(attHome));
+        byte[] embedded;
+        try (java.io.InputStream stream = SchemaFiles.class.getClassLoader()
+                .getResourceAsStream("att-schemas/" + filename)) {
+            assertNotNull(stream, "The official schema must be embedded in the ATT Engine JAR");
+            java.io.ByteArrayOutputStream bytes = new java.io.ByteArrayOutputStream();
+            byte[] buffer = new byte[4096];
+            int count;
+            while ((count = stream.read(buffer)) >= 0) bytes.write(buffer, 0, count);
+            embedded = bytes.toByteArray();
+        }
+        assertTrue(Arrays.equals(embedded, Files.readAllBytes(fromPackage)),
+                "Resolved bytes must match the JAR-embedded official schema");
+        assertDoesNotThrow(() -> SchemaFiles.validateCatalog(packageRoot));
     }
 }

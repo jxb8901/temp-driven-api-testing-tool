@@ -7,7 +7,7 @@ import type {
 import type {
   JobAccepted as LoadJobAccepted, JobArtifact, JobEventHandlers, JobResultResponse,
   JobSummary as LoadJobSummary, JobView, LoadDraftInput, LoadDraftResponse, LoadModel,
-  LoadPolicyResponse, LoadTargetType, QuickLoadFormResponse, SubmitLoadDraftInput, TargetResource, LoadCatalogPage,
+  LoadPolicyResponse, LoadTargetType, QuickLoadFormResponse, SubmitLoadDraftInput, TargetResource, LoadCatalogPage, LoadCatalogDetail,
 } from './features/load/types';
 import type { RunDefinition } from './features/run/RunPage';
 import { contextRelativeReturnTo } from './contextPaths';
@@ -43,7 +43,7 @@ function isInspectionQuery(path: string, init: RequestInit): boolean {
   const [route, query] = path.split('?');
   if (new URLSearchParams(query).has('includeAllFields')) return false;
   return /^packages\/[^/]+\/resources(?:\/[^/]+\/[^/]+(?:\/(?:source|source-file))?)?$/.test(route)
-    || /^packages\/[^/]+\/load-catalog(?:\/source)?$/.test(route)
+    || /^packages\/[^/]+\/load-catalog(?:\/(?:source|detail))?$/.test(route)
     || /^packages\/[^/]+\/configuration(?:\/(?:effective|compare|files|source))?$/.test(route);
 }
 let capabilitiesFlight: { epoch: number; promise: Promise<void> } | undefined;
@@ -239,8 +239,13 @@ export const api = {
       'packages/' + encodeURIComponent(packageId) + '/load-catalog' + queryString(input), { signal });
     return { ...response, items: (response.items || []).map(item => ({ ...item, packageId })) };
   },
+  getLoadCatalogDetail(packageId: string, resourceId: string, signal?: AbortSignal): Promise<LoadCatalogDetail> {
+    return request<LoadCatalogDetail>('packages/' + encodeURIComponent(packageId) + '/load-catalog/detail' + queryString({ resourceId }), { signal })
+      .then(detail => ({ ...detail, packageId }));
+  },
   validateLoadCatalogScenario(packageId: string, resourceId: string, environment?: string, signal?: AbortSignal) {
-    return request<{ validation: string; model?: 'virtualUsers' | 'arrivalRate'; previewYaml?: string }>(
+    return request<{ validation: string; model?: 'virtualUsers' | 'arrivalRate'; previewYaml?: string;
+      scheduleAvailable?: boolean; scheduleReason?: string; draftId?: string; expiresAt?: string }>(
       'packages/' + encodeURIComponent(packageId) + '/load-catalog/validate' + queryString({ resourceId, environment }), { signal });
   },
   getLoadSource(packageId: string, resourceId: string, signal?: AbortSignal) {
@@ -269,7 +274,7 @@ export const api = {
       'packages/' + encodeURIComponent(packageId) + '/resources' + queryString({ type, limit: 100 }),
       { signal },
     );
-    return (page.items || []).map(item => ({ type, logicalId: item.logicalId || '', state: item.state || '' }));
+    return (page.items || []).map(item => ({ type, resourceId: item.resourceId, logicalId: item.logicalId || '', state: item.state || '' }));
   },
   createLoadDraft(input: LoadDraftInput, signal?: AbortSignal): Promise<LoadDraftResponse> {
     return postJson<LoadDraftResponse>('drafts/load', input, signal);

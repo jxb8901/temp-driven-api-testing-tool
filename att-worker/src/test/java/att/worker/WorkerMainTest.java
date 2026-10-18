@@ -20,6 +20,10 @@ import java.nio.file.Paths;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.nio.file.StandardOpenOption;
+import java.nio.file.attribute.FileTime;
+import java.nio.channels.FileChannel;
+import java.nio.channels.FileLock;
 import org.junit.jupiter.api.io.TempDir;
 import java.util.ArrayList;
 import java.util.List;
@@ -68,6 +72,54 @@ class WorkerMainTest {
         try(java.util.stream.Stream<Path> paths=Files.list(cacheBase)) {
             assertEquals(1,paths.filter(Files::isDirectory).count(),"Worker JVMs must reuse one schema tree per packaged schema version");
         }
+
+        Path protectedOld=cacheBase.resolve(repeated('0',64));
+        Path idleOld=cacheBase.resolve(repeated('1',64));
+        Path rollbackCache=cacheBase.resolve(repeated('2',64));
+        for(Path old:new Path[]{protectedOld,idleOld,rollbackCache}) {
+            Files.createDirectories(old.resolve("schemas"));
+            Files.write(old.resolve("schemas/placeholder"),new byte[]{1});
+            Files.createFile(old.resolve(".cache-use.lock"));
+        }
+        Files.setLastModifiedTime(protectedOld,FileTime.fromMillis(946684800000L));
+        Files.setLastModifiedTime(idleOld,FileTime.fromMillis(946684801000L));
+        Files.setLastModifiedTime(rollbackCache,FileTime.fromMillis(946684802000L));
+        try(FileChannel leaseChannel=FileChannel.open(protectedOld.resolve(".cache-use.lock"),StandardOpenOption.WRITE);
+            FileLock lease=leaseChannel.lock(0L,Long.MAX_VALUE,true)) {
+            Process cleanup=new ProcessBuilder(javaExecutable,"-Djava.io.tmpdir="+temporary.toAbsolutePath(),"-cp",classpath,
+                    TrustedSchemaCacheProcess.class.getName()).start();
+            String cleanupErr=read(cleanup.getErrorStream());
+            assertEquals(0,cleanup.waitFor(),cleanupErr);
+            assertTrue(Files.exists(protectedOld),"A cache leased by an older active Worker must not be deleted");
+            assertTrue(Files.exists(rollbackCache),"The immediately previous cache remains available for rollback");
+            assertFalse(Files.exists(idleOld),"An older unleased cache should be pruned");
+        }
+        Process afterWorkerExit=new ProcessBuilder(javaExecutable,"-Djava.io.tmpdir="+temporary.toAbsolutePath(),"-cp",classpath,
+                TrustedSchemaCacheProcess.class.getName()).start();
+        String cleanupAfterExitErr=read(afterWorkerExit.getErrorStream());
+        assertEquals(0,afterWorkerExit.waitFor(),cleanupAfterExitErr);
+        assertFalse(Files.exists(protectedOld),"An old cache becomes eligible after its Worker releases the OS lease");
+        try(java.util.stream.Stream<Path> paths=Files.list(cacheBase)) {
+            assertEquals(2,paths.filter(path->Files.isDirectory(path,java.nio.file.LinkOption.NOFOLLOW_LINKS)).count(),
+                    "The active and immediately previous registry caches should remain");
+        }
+    }
+
+    @Test void workerFailsClosedWhenServerAndEmbeddedRegistryIdentitiesDiffer() throws Exception {
+        Path temporary=Files.createDirectories(temp.resolve("registry-handshake-temp"));
+        String javaExecutable=Paths.get(System.getProperty("java.home"),"bin",isWindows()?"java.exe":"java").toString();
+        String classpath=System.getProperty("java.class.path");
+        Process worker=new ProcessBuilder(javaExecutable,"-Djava.io.tmpdir="+temporary.toAbsolutePath(),"-cp",classpath,
+                WorkerMain.class.getName()).start();
+        String request="{\"protocolVersion\":\"att-worker/v1\",\"jobId\":\"schema-check\",\"command\":\"inspect\","
+                +"\"packageRoot\":\".\",\"inspectionAction\":\"revision\",\"expectedSchemaRegistryDigest\":\""+repeated('f',64)+"\"}";
+        worker.getOutputStream().write(request.getBytes(StandardCharsets.UTF_8));
+        worker.getOutputStream().close();
+        String stdout=read(worker.getInputStream());
+        String stderr=read(worker.getErrorStream());
+        assertEquals(2,worker.waitFor(),stderr+"\n"+stdout);
+        assertTrue(stdout.contains("WORKER_SCHEMA_REGISTRY_MISMATCH"),stdout);
+        assertFalse(stdout.contains("schemas/")||stdout.contains("/tmp/"),"Registry mismatch diagnostics must not expose paths");
     }
 
     @Test void terminatingWorkerStopsAnActiveCommandBackedTool() throws Exception {
@@ -435,4 +487,5 @@ class WorkerMainTest {
     private static boolean isWindowsJava8() { return isWindows() && "1.8".equals(System.getProperty("java.specification.version")); }
     private static String yamlQuote(Object value) { return "'"+String.valueOf(value).replace("'", "''")+"'"; }
     private static String read(InputStream stream) throws Exception { ByteArrayOutputStream out=new ByteArrayOutputStream(); byte[] buffer=new byte[4096]; int n; while((n=stream.read(buffer))>=0)out.write(buffer,0,n); return new String(out.toByteArray(),StandardCharsets.UTF_8); }
+    private static String repeated(char character,int count) { StringBuilder value=new StringBuilder(count); for(int index=0;index<count;index++)value.append(character); return value.toString(); }
 }

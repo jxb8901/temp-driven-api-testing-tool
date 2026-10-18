@@ -277,7 +277,7 @@ export interface ExplorerPageProps {
   onRunBatch?: () => void;
   onJobAccepted: (jobId: string) => void;
   onPrincipalLabelChange?: (label: string) => void;
-  onOpenQuickLoad?: (identity: ResourceIdentity) => void;
+  onOpenQuickLoad?: (identity: ResourceIdentity & { logicalId?: string }) => void;
   onScheduleDebug?: (input: { packageId: string; environment?: string; draftId: string; previewYaml?: string; executionType: 'run' | 'load'; legacyDebug?: boolean; target: { type: DebugResourceType; id: string } }) => boolean | void;
   onOpenConfigurationFile?: (path: string, origin?: string, reference?: ResourceSourceReference) => void;
 }

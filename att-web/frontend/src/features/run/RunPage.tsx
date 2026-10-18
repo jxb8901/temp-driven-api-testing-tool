@@ -27,6 +27,8 @@ export function RunPage({ packageId: initialPackage = '', initialTarget, initial
   const [environment, setEnvironment] = useState(initialEnvironment);
   const [environments, setEnvironments] = useState<string[]>([]);
   const [environmentState, setEnvironmentState] = useState<'loading' | 'ready' | 'error'>('loading');
+  const [environmentReload, setEnvironmentReload] = useState(0);
+  const [environmentNotice, setEnvironmentNotice] = useState('');
   const [targetType, setType] = useState(initialBatchMode ? 'batch' : initialTarget?.type || 'case');
   const [targetId, setId] = useState(initialTarget?.logicalId || initialTarget?.resourceId || '');
   const [businessInput, setInput] = useState('{}');
@@ -52,18 +54,22 @@ export function RunPage({ packageId: initialPackage = '', initialTarget, initial
       setEnvironmentState('ready');
       return () => controller.abort();
     }
+    setEnvironmentNotice('');
     setEnvironmentState('loading');
     api.getDeclaredConfiguration(packageId, controller.signal).then(configuration => {
       if (controller.signal.aborted) return;
       const names = (configuration.environments || []).filter(item => item.name && item.state === 'active').map(item => item.name);
       setEnvironments(names);
       setEnvironmentState('ready');
-      if (environmentRef.current && !names.includes(environmentRef.current)) setEnvironment('');
+      if (environmentRef.current && !names.includes(environmentRef.current)) {
+        setEnvironmentNotice(`Environment ${environmentRef.current} is not an active profile in ${packageId}; Package default is selected.`);
+        setEnvironment('');
+      }
     }).catch(() => {
       if (!controller.signal.aborted) { setEnvironments([]); setEnvironmentState('error'); }
     });
     return () => controller.abort();
-  }, [packageId]);
+  }, [packageId, environmentReload]);
   useEffect(() => {
     if (!isDebugTarget(targetType) || !packageId.trim()) {
       setDebugForm(null);
@@ -149,14 +155,15 @@ export function RunPage({ packageId: initialPackage = '', initialTarget, initial
     <fieldset className="att-run-definition" disabled={busy}><legend>Execution definition</legend>
       {initialTarget ? <p><strong>Package:</strong> {packageId}<br /><strong>Target:</strong> {initialTarget.type} · {initialTarget.resourceId}</p>
         : <label>Package ID<input value={packageId} onChange={e => changed(() => setPackage(e.target.value))} /></label>}
-      <label>Environment<select value={environment} onChange={e => changed(() => setEnvironment(e.target.value))} disabled={environmentState !== 'ready'}>
+      <label>Environment<select value={environment} onChange={e => { setEnvironmentNotice(''); changed(() => setEnvironment(e.target.value)); }} disabled={environmentState !== 'ready'}>
         <option value="">Package default</option>{environments.map(name => <option key={name} value={name}>{name}</option>)}
       </select></label>
       {!initialTarget && <label>Target type<select value={targetType} onChange={e => changed(() => setType(e.target.value))}>
         <option value="case">Case</option><option value="template">Template</option><option value="flow">Flow</option><option value="tool">Tool</option><option value="batch">Batch selection</option>
       </select></label>}
       {!initialTarget && targetType !== 'batch' && <label>Target ID<input value={targetId} onChange={e => changed(() => setId(e.target.value))} /></label>}
-      {environmentState === 'error' && <p role="status">Environment profiles could not be loaded. Refresh this page to retry.</p>}
+      {environmentState === 'error' && <p role="alert">Environment profiles could not be loaded. Package default remains available. <button className="button button-quiet" type="button" onClick={() => setEnvironmentReload(value => value + 1)}>Retry profiles</button></p>}
+      {environmentNotice && <p role="status">{environmentNotice}</p>}
       {targetType === 'batch' ? <><p>Use suites, suiteDirectory, caseIds, tags, excludeTags, all or rerunFailed. Combined filters retain the existing CLI selection rules.</p>
         <CodeEditor label="Case selection" readOnly={false} value={selection} language="json" onChange={value => changed(() => setSelection(value))} /></>
         : isDebugTarget(targetType) ? <>

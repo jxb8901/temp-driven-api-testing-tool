@@ -295,10 +295,67 @@ describe('QuickLoadPage', () => {
     expect(api.getLoadPolicy).toHaveBeenCalledWith('payments', 'arrivalRate', undefined, expect.any(AbortSignal), 'load/nested/policy.yaml');
   });
 
+  it('keeps the logical Flow ID and shows sanitized target discovery diagnostics with retry', async () => {
+    const api = {
+      getLoadPolicy: vi.fn(async () => ({ model: 'virtualUsers' as const, policy: { schemaVersion: 'att-load/v1.6', load: { users: 1, duration: '30s' } } })),
+      getTargetLoadForm: vi.fn()
+        .mockRejectedValueOnce(new ApiError('Target defaults could not be loaded.', {
+          status: 400, code: 'QUICK_LOAD_TARGET_UNAVAILABLE', requestId: 'req-target-456',
+          diagnostics: [{ severity: 'ERROR', code: 'FLOW_DEFAULTS_UNAVAILABLE', summary: 'Retry safe target discovery.', path: '/private/server/path' }],
+        }))
+        .mockResolvedValueOnce({ target: { type: 'flow' as const, id: 'ready.flow.v1' }, model: 'virtualUsers' as const, input: { inputs: {}, vars: {} } }),
+    } as unknown as LoadJobsApi;
+    await act(async () => root.render(<QuickLoadPage api={api} packageId="payments"
+      target={{ type: 'flow', resourceId: 'opaque-flow-resource', logicalId: 'ready.flow.v1' }}
+      environment="UAT" environments={['UAT']} environmentState="ready" inlineLoadEnabled
+      onEnvironmentChange={vi.fn()} onJobAccepted={vi.fn()} onCancel={vi.fn()}
+      registerUnsavedChanges={() => () => {}} />));
+    await flush();
+
+    expect(host.querySelector('.att-section-heading strong')?.textContent).toBe('flow · ready.flow.v1');
+    expect(host.textContent).toContain('Target defaults could not be loaded.');
+    expect(host.textContent).toContain('FLOW_DEFAULTS_UNAVAILABLE');
+    expect(host.textContent).toContain('Retry safe target discovery.');
+    expect(host.textContent).toContain('req-target-456');
+    expect(host.textContent).not.toContain('/private/server/path');
+    expect([...host.querySelectorAll('button')].find(button => button.textContent === 'Validate')?.disabled).toBe(false);
+
+    await act(async () => [...host.querySelectorAll('button')].find(button => button.textContent === 'Retry target defaults')!.click());
+    await flush();
+    expect(api.getTargetLoadForm).toHaveBeenCalledTimes(2);
+    expect(api.getTargetLoadForm).toHaveBeenLastCalledWith('payments', 'flow', 'opaque-flow-resource', 'virtualUsers', 'UAT', expect.any(AbortSignal));
+    expect(host.textContent).toContain('Target defaults are ready.');
+  });
+
+  it('uses opaque resource IDs from the standalone target picker and submits the logical Flow ID', async () => {
+    const api = {
+      listTargets: vi.fn(async () => [{ type: 'flow' as const, resourceId: 'opaque-flow-resource', logicalId: 'ready.flow.v1', state: 'ready' }]),
+      getLoadPolicy: vi.fn(async () => ({ model: 'virtualUsers' as const, policy: { schemaVersion: 'att-load/v1.6', load: { users: 1, duration: '30s' } } })),
+      getTargetLoadForm: vi.fn(async () => ({ target: { type: 'flow' as const, id: 'ready.flow.v1' }, model: 'virtualUsers' as const, input: { inputs: {}, vars: {} } })),
+      createLoadDraft: vi.fn(async () => ({ draftId: 'L0123456789ABCDEF0123456789ABCDEF', packageId: 'payments', model: 'virtualUsers' as const, previewYaml: '', expiresAt: new Date(Date.now() + 60_000).toISOString() })),
+    } as unknown as LoadJobsApi;
+    await act(async () => root.render(<QuickLoadPage api={api} packageId="payments" environment="UAT"
+      environments={['UAT']} environmentState="ready" inlineLoadEnabled onEnvironmentChange={vi.fn()}
+      onJobAccepted={vi.fn()} onCancel={vi.fn()} registerUnsavedChanges={() => () => {}} />));
+    await flush();
+
+    const picker = host.querySelector<HTMLSelectElement>('select[aria-label="Quick Load target"]')!;
+    await act(async () => { picker.value = 'flow:opaque-flow-resource'; picker.dispatchEvent(new Event('change', { bubbles: true })); });
+    await flush();
+    expect(api.getTargetLoadForm).toHaveBeenCalledWith('payments', 'flow', 'opaque-flow-resource', 'virtualUsers', 'UAT', expect.any(AbortSignal));
+    expect(host.querySelector('.att-section-heading strong')?.textContent).toBe('flow · ready.flow.v1');
+
+    await act(async () => [...host.querySelectorAll('button')].find(button => button.textContent === 'Validate')!.click());
+    await flush();
+    const draftInput = vi.mocked(api.createLoadDraft).mock.calls[0][0];
+    const workload = (draftInput.scenario.workloads as Array<Record<string, unknown>>)[0];
+    expect(workload.target).toEqual({ type: 'flow', id: 'ready.flow.v1' });
+  });
+
   it('confirms before switching a package target after editing inputs', async () => {
     const api = {
       listTargets: vi.fn(async (_packageId: string, type: LoadTargetType) => type === 'template'
-        ? [{ logicalId: 'one', state: 'ready' }, { logicalId: 'two', state: 'ready' }] : []),
+        ? [{ resourceId: 'opaque-one', logicalId: 'one', state: 'ready' }, { resourceId: 'opaque-two', logicalId: 'two', state: 'ready' }] : []),
       getLoadPolicy: vi.fn(async () => ({ model: 'virtualUsers' as const, policy: { schemaVersion: 'att-load/v1.6', load: { users: 1, duration: '30s' } } })),
       getTargetLoadForm: vi.fn(async (_packageId: string, type: LoadTargetType, resourceId: string) => ({ target: { type, id: resourceId }, model: 'virtualUsers' as const, input: { inputs: {}, vars: {} } })),
     } as unknown as LoadJobsApi;
@@ -308,16 +365,16 @@ describe('QuickLoadPage', () => {
       registerUnsavedChanges={() => () => {}} />));
     await flush();
     const target = host.querySelector<HTMLSelectElement>('select[aria-label="Quick Load target"]')!;
-    await act(async () => { target.value = 'template:one'; target.dispatchEvent(new Event('change', { bubbles: true })); });
+    await act(async () => { target.value = 'template:opaque-one'; target.dispatchEvent(new Event('change', { bubbles: true })); });
     await flush();
     const duration = host.querySelector<HTMLInputElement>('input[placeholder="e.g. 30s or 5m"]')!;
     await act(async () => {
       Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(duration, '2m');
       duration.dispatchEvent(new Event('input', { bubbles: true }));
     });
-    await act(async () => { target.value = 'template:two'; target.dispatchEvent(new Event('change', { bubbles: true })); });
+    await act(async () => { target.value = 'template:opaque-two'; target.dispatchEvent(new Event('change', { bubbles: true })); });
     expect(confirm).toHaveBeenCalledOnce();
-    expect(target.value).toBe('template:one');
+    expect(target.value).toBe('template:opaque-one');
     expect(duration.value).toBe('2m');
     confirm.mockRestore();
   });

@@ -41,6 +41,12 @@ async function main() {
     assert.ok(csp.includes("style-src-attr 'unsafe-inline'"), 'CodeMirror geometry styles must be permitted for the Studio document');
     assert.ok(!csp.includes("script-src 'self' 'unsafe-inline'"), 'Studio scripts must not receive an unsafe-inline exception');
     await page.getByRole('heading', { name: 'Package Explorer' }).waitFor();
+    assert.equal(await page.locator('.att-query-filter-panel[aria-label="Resource filters"]').count(), 1,
+      'Explorer must use the shared query filter panel');
+    assert.equal(await page.locator('.att-query-results-panel[aria-label="Resource results"] .att-data-table').count(), 1,
+      'Explorer must use the shared results and data-table contract');
+    await page.getByRole('button', { name: 'Clear filters' }).click();
+    await page.getByRole('button', { name: 'Refresh resources' }).click();
     await page.getByRole('button', { name: 'Reference Flow' }).waitFor();
     await page.getByRole('button', { name: 'Reference Flow' }).click();
     await page.getByRole('heading', { name: 'Reference Flow' }).waitFor();
@@ -148,24 +154,132 @@ async function main() {
     await page.getByRole('button', { name: 'Preview first 50 generated records' }).click();
     await page.getByRole('table').getByText('A-001000', { exact: true }).waitFor();
 
-    await page.setViewportSize({ width: 768, height: 1024 });
-    await page.evaluate(() => window.scrollTo(0, 0));
-    await page.getByRole('button', { name: 'Open navigation' }).click();
-    await page.locator('a[data-nav="explorer"]').click();
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    await page.goto(`${origin}/tools/att/ui/index.html#/packages/payments`);
     await page.getByRole('heading', { name: 'Package Explorer' }).waitFor();
+    await page.getByRole('button', { name: 'Reference Flow' }).click();
+    await page.locator('.att-explorer-detail-actions').getByRole('button', { name: 'Run', exact: true }).click();
+    await page.getByRole('heading', { name: 'Run', level: 1, exact: true }).waitFor();
+    const runGrid = async () => page.evaluate(() => {
+      const chrome = document.querySelector('.page-chrome');
+      const content = document.querySelector('#main-content .page-content');
+      const heading = content?.querySelector('h1');
+      if (!chrome || !content || !heading) return null;
+      const chromeLeft = chrome.getBoundingClientRect().left + parseFloat(getComputedStyle(chrome).paddingLeft);
+      const contentLeft = content.getBoundingClientRect().left + parseFloat(getComputedStyle(content).paddingLeft);
+      return { chromeLeft, contentLeft, headingLeft: heading.getBoundingClientRect().left,
+        gutter: parseFloat(getComputedStyle(content).paddingLeft), overflow: document.documentElement.scrollWidth > window.innerWidth };
+    });
+    const assertRunGrid = async (expectedGutter) => {
+      const geometry = await runGrid();
+      assert.ok(geometry, 'RUN page and shared page chrome should be present');
+      assert.ok(Math.abs(geometry.chromeLeft - geometry.contentLeft) <= 2, `RUN content must align with page chrome: ${JSON.stringify(geometry)}`);
+      assert.ok(Math.abs(geometry.headingLeft - geometry.contentLeft) <= 2, `RUN heading must align with its content gutter: ${JSON.stringify(geometry)}`);
+      assert.equal(geometry.gutter, expectedGutter, `the shared gutter should be ${expectedGutter}px: ${JSON.stringify(geometry)}`);
+      assert.equal(geometry.overflow, false, 'RUN must not overflow the viewport');
+    };
+    await assertRunGrid(32);
+    await page.getByRole('button', { name: 'Collapse navigation' }).click();
+    await assertRunGrid(32);
+    await page.getByRole('button', { name: 'Expand navigation' }).click();
+    for (const [width, gutter] of [[1920, 32], [1440, 32], [1024, 24], [768, 24], [390, 16], [320, 16]]) {
+      await page.setViewportSize({ width, height: 1000 });
+      await assertRunGrid(gutter);
+      if (width <= 820) {
+        await page.getByRole('button', { name: 'Open navigation' }).click();
+        await assertRunGrid(gutter);
+        await page.getByRole('button', { name: 'Close navigation' }).click();
+        await assertRunGrid(gutter);
+      }
+    }
+    await page.getByRole('button', { name: 'Back to Explorer' }).click();
+    await page.getByRole('heading', { name: 'Package Explorer' }).waitFor();
+
+    await page.setViewportSize({ width: 768, height: 1024 });
     await page.getByRole('button', { name: 'Reference Flow' }).click();
     await page.locator('.att-explorer-detail-actions').getByRole('button', { name: 'Quick LOAD' }).click();
     await page.getByRole('heading', { name: 'Quick Load' }).waitFor();
     const quickLoadTarget = page.locator('.att-quick-load-page .att-section-heading strong');
     await quickLoadTarget.waitFor();
-    assert.match(await quickLoadTarget.textContent(), /^flow · /, 'Quick Load should retain the selected Flow target');
+    await page.getByLabel('Environment', { exact: true }).selectOption('UAT');
+    await page.waitForFunction(() => document.querySelector('.att-quick-load-page .att-section-heading strong')?.textContent === 'flow · reference.flow.v1');
+    assert.equal(await page.getByText('Target defaults are ready.', { exact: true }).count(), 1,
+      'Quick Load should resolve the ready Flow and its safe defaults without validating the Load scenario');
+    await page.waitForFunction(() => {
+      const button = Array.from(document.querySelectorAll('button')).find(item => item.textContent?.trim() === 'Validate');
+      return button && !button.disabled;
+    });
+    await page.getByRole('button', { name: 'Validate' }).click();
+    await page.getByText('The Server accepted this draft for review.').waitFor();
+    assert.equal(await page.getByRole('button', { name: 'Run Now' }).isDisabled(), false,
+      'a ready Flow should validate as a Quick Load target under UAT');
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth);
     assert.equal(overflow, false, 'the live Configuration and Quick Load UI must fit a tablet viewport');
+
+    await page.goto(`${origin}/tools/att/ui/index.html#/advanced-load`);
+    await page.getByRole('heading', { name: 'LOAD Catalog', level: 1, exact: true }).waitFor();
+    assert.equal(await page.locator('.att-query-filter-panel[aria-label="LOAD Catalog filters"]').count(), 1,
+      'LOAD Catalog filters must use the shared query contract');
+    assert.equal(await page.locator('.att-query-results-panel[aria-label="Available LOAD YAML resources"]').count(), 1);
+    assert.equal(await page.locator('.att-query-results-panel[aria-label="Recent LOAD job results"]').count(), 1,
+      'Catalog resources and recent jobs must remain separate result datasets');
+    await page.getByRole('button', { name: 'Clear filters' }).click();
+    const scenarioCard = page.locator('.att-load-catalog-card').filter({ hasText: 'load/scenario.yaml' });
+    await scenarioCard.waitFor();
+    const catalogEnvironment = page.getByLabel(/Catalog Environment for payments/);
+    await catalogEnvironment.selectOption('UAT');
+    await page.getByText('Environment: UAT', { exact: false }).waitFor();
+    await scenarioCard.getByRole('button', { name: 'Validate load/scenario.yaml for UAT' }).click();
+    await page.getByText(/load\/scenario\.yaml validation refreshed for UAT: valid/).waitFor();
+    assert.equal(await scenarioCard.getByRole('button', { name: 'Schedule' }).isDisabled(), false,
+      'a current UAT validation should create an authorized Schedule draft');
+    await scenarioCard.getByRole('button', { name: 'View', exact: true }).click();
+    await page.getByRole('heading', { name: 'load/scenario.yaml', level: 1 }).waitFor();
+    assert.equal(await page.locator('.att-code-editor').count(), 0, 'structured details must load before optional source');
+    await page.getByRole('button', { name: 'Show YAML Source' }).click();
+    await page.getByLabel('Load YAML Source').waitFor();
+    await page.getByRole('button', { name: 'Back to LOAD Catalog' }).click();
+    await page.getByRole('heading', { name: 'LOAD Catalog', level: 1, exact: true }).waitFor();
+    await page.getByText('Environment: UAT', { exact: false }).waitFor();
+    const restoredScenarioCard = page.locator('.att-load-catalog-card').filter({ hasText: 'load/scenario.yaml' });
+    await restoredScenarioCard.getByRole('button', { name: 'Schedule' }).click();
+    await page.getByRole('heading', { name: 'New Schedule', level: 2 }).waitFor();
+    await page.getByText('This schedule uses the immutable LOAD scenario snapshot from your validated draft.').waitFor();
+    assert.equal(await page.locator('#schedule-scenario').count(), 0, 'the schedule route must carry a server-backed snapshot, not a mutable path field');
+    assert.equal(await page.locator('#schedule-name').inputValue(), 'Validated LOAD snapshot');
+    await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+    await page.getByRole('heading', { name: 'LOAD Catalog', level: 1, exact: true }).waitFor();
+
+    await page.goto(`${origin}/tools/att/ui/index.html#/jobs`);
+    await page.getByRole('heading', { name: 'Jobs', level: 1, exact: true }).waitFor();
+    assert.equal(await page.locator('.att-query-filter-panel[aria-label="Job filters"]').count(), 1,
+      'Jobs must use the shared query filter panel');
+    assert.equal(await page.locator('.att-query-results-panel[aria-label="Job results"] .att-data-table').count(), 1,
+      'Jobs must use the shared results and data-table contract');
+    await page.getByRole('button', { name: 'Clear filters' }).click();
+    await page.getByRole('button', { name: 'Refresh jobs' }).click();
 
     await page.goto(`${origin}/tools/att/ui/index.html#/schedules`);
     await page.getByRole('heading', { name: 'Schedules', level: 1, exact: true }).waitFor();
     await page.getByText('1 of 1 schedules shown.', { exact: true }).waitFor();
+    assert.equal(await page.locator('.att-query-filter-panel[aria-label="Schedule filters"]').count(), 1,
+      'Schedules must use the shared query filter panel');
+    assert.equal(await page.locator('.att-query-results-panel[aria-label="Schedule results"] .att-data-table').count(), 1,
+      'Schedules must use the shared results and data-table contract');
     assert.equal(await page.locator('#schedule-name').count(), 0, 'the packaged Schedules landing must not render an editor');
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    const desktopScheduleAction = page.locator('.att-schedule-table .att-schedule-actions button').first();
+    const desktopActionHeight = await desktopScheduleAction.evaluate(element => element.getBoundingClientRect().height);
+    assert.ok(desktopActionHeight >= 30 && desktopActionHeight <= 34,
+      `schedule list actions should be compact at 30–34px: ${desktopActionHeight}px`);
+    await page.getByRole('button', { name: 'History Packaged UI schedule' }).click();
+    await page.getByRole('heading', { name: /Execution history/ }).waitFor();
+    const desktopHistoryAction = page.locator('.att-schedule-history .att-schedule-actions button').first();
+    const desktopHistoryHeight = await desktopHistoryAction.evaluate(element => element.getBoundingClientRect().height);
+    assert.ok(desktopHistoryHeight >= 30 && desktopHistoryHeight <= 34,
+      `history actions should match the compact list size at 30–34px: ${desktopHistoryHeight}px`);
+    await page.getByRole('button', { name: 'Close history' }).click();
+    await page.getByRole('heading', { name: 'Schedules', level: 1, exact: true }).waitFor();
     await page.getByRole('button', { name: 'New Schedule', exact: true }).click();
     await page.locator('#schedule-name').waitFor();
     await page.locator('#schedule-name').fill('Unsaved packaged check');
@@ -175,6 +289,10 @@ async function main() {
     await page.setViewportSize({ width: 390, height: 844 });
     await page.locator('.att-schedule-cards').waitFor({ state: 'visible' });
     assert.equal(await page.locator('.att-schedule-cards').isVisible(), true);
+    const mobileScheduleAction = page.locator('.att-schedule-card .att-schedule-actions button').first();
+    const mobileActionHeight = await mobileScheduleAction.evaluate(element => element.getBoundingClientRect().height);
+    assert.ok(mobileActionHeight >= 40 && mobileActionHeight <= 44,
+      `schedule actions should have 40–44px mobile touch targets: ${mobileActionHeight}px`);
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth), false, 'Schedules must fit a phone viewport');
     await page.getByRole('button', { name: 'Open navigation' }).click();
     await page.locator('a[data-nav="scheduled-load"]').click();

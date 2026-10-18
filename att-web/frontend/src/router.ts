@@ -6,6 +6,15 @@ export interface ResourceRoute {
   logicalId?: string;
   tab?: 'definition' | 'source' | 'relations';
 }
+export interface LoadCatalogRouteState {
+  query?: string;
+  packageFilter?: string;
+  kindFilter?: string;
+  modelFilter?: string;
+  validationFilter?: string;
+  environment?: string;
+  scrollY?: number;
+}
 
 export type ConfigurationTab = 'source' | 'declared' | 'effective' | 'compare' | 'testdata';
 export interface ResourceSourceReferenceRoute { type: 'case' | 'template' | 'flow' | 'tool'; resourceId: string; referenceId: string }
@@ -18,8 +27,9 @@ export type AppRoute =
   | { kind: 'quick-load'; packageId: string; target?: ResourceRoute; environment?: string; templateId?: string; model?: 'virtualUsers' | 'arrivalRate' }
   | { kind: 'run'; packageId?: string; target?: ResourceRoute; environment?: string; batch?: boolean }
   | { kind: 'jobs'; jobId?: string }
-  | { kind: 'load'; packageId?: string }
-  | { kind: 'schedules'; view?: 'new' | 'edit' | 'history'; scheduleId?: string; occurrenceId?: string }
+  | { kind: 'load'; packageId?: string; catalog?: LoadCatalogRouteState }
+  | { kind: 'load-resource'; packageId: string; resourceId: string; environment?: string; returnTo?: string }
+  | { kind: 'schedules'; view?: 'new' | 'edit' | 'history'; scheduleId?: string; occurrenceId?: string; intent?: 'validated'; returnTo?: string }
   | { kind: 'settings' };
 
 export function parseRoute(hash: string): AppRoute {
@@ -85,9 +95,29 @@ export function parseRoute(hash: string): AppRoute {
     environment:query.has('environment')?query.get('environment')||'':undefined,
     ...(query.get('mode') === 'batch' ? { batch: true } : {}) };
   if (parts[0] === 'jobs') return parts[1] ? { kind: 'jobs', jobId: parts[1] } : { kind: 'jobs' };
-  if (parts[0] === 'advanced-load') return parts[1] ? { kind: 'load', packageId: parts[1] } : { kind: 'load' };
+  if (parts[0] === 'load' && parts[1] === 'resources' && parts[2] && parts[3]) return {
+    kind: 'load-resource', packageId: parts[2], resourceId: parts[3],
+    ...(query.has('environment') ? { environment: query.get('environment') || '' } : {}),
+    ...(query.get('returnTo') ? { returnTo: query.get('returnTo')! } : {}),
+  };
+  if (parts[0] === 'advanced-load') {
+    if (parts[1]) return { kind: 'load', packageId: parts[1] };
+    const catalog: LoadCatalogRouteState = {};
+    const queryText = query.get('q'); if (queryText) catalog.query = queryText;
+    const packageFilter = query.get('package'); if (packageFilter) catalog.packageFilter = packageFilter;
+    const kindFilter = query.get('kind'); if (kindFilter) catalog.kindFilter = kindFilter;
+    const modelFilter = query.get('model'); if (modelFilter) catalog.modelFilter = modelFilter;
+    const validationFilter = query.get('validation'); if (validationFilter) catalog.validationFilter = validationFilter;
+    if (query.has('environment')) catalog.environment = query.get('environment') || '';
+    const scrollY = Number(query.get('scrollY')); if (Number.isFinite(scrollY) && scrollY > 0) catalog.scrollY = Math.min(1000000, Math.floor(scrollY));
+    return Object.keys(catalog).length ? { kind: 'load', catalog } : { kind: 'load' };
+  }
   if (parts[0] === 'schedules' || parts[0] === 'load-schedules' || parts[0] === 'scheduled-load') {
-    if (parts[1] === 'new' && parts.length === 2) return { kind: 'schedules', view: 'new' };
+    if (parts[1] === 'new' && parts.length === 2) {
+      const returnTo = query.get('returnTo');
+      return { kind: 'schedules', view: 'new', ...(query.get('intent') === 'validated' ? { intent: 'validated' } : {}),
+        ...(returnTo?.startsWith('#/') && returnTo.length <= 4096 ? { returnTo } : {}) };
+    }
     if (parts[1] && parts[2] === 'edit' && parts.length === 3) return {
       kind: 'schedules', view: 'edit', scheduleId: parts[1],
     };
@@ -148,10 +178,35 @@ export function formatRoute(route: AppRoute): string {
         + (suffix ? '?' + suffix : '');
     }
     case 'jobs': return route.jobId ? '#/jobs/' + encodeURIComponent(route.jobId) : '#/jobs';
-    case 'load': return route.packageId ? '#/advanced-load/' + encodeURIComponent(route.packageId) : '#/advanced-load';
-    case 'schedules': return '#/schedules' + (route.view === 'new' ? '/new'
-      : route.scheduleId && route.view ? '/' + encodeURIComponent(route.scheduleId) + '/' + route.view
-        + (route.view === 'history' && route.occurrenceId ? '/' + encodeURIComponent(route.occurrenceId) : '') : '');
+    case 'load': {
+      if (route.packageId) return '#/advanced-load/' + encodeURIComponent(route.packageId);
+      const query = new URLSearchParams();
+      if (route.catalog?.query) query.set('q', route.catalog.query);
+      if (route.catalog?.packageFilter && route.catalog.packageFilter !== 'all') query.set('package', route.catalog.packageFilter);
+      if (route.catalog?.kindFilter && route.catalog.kindFilter !== 'all') query.set('kind', route.catalog.kindFilter);
+      if (route.catalog?.modelFilter && route.catalog.modelFilter !== 'all') query.set('model', route.catalog.modelFilter);
+      if (route.catalog?.validationFilter && route.catalog.validationFilter !== 'all') query.set('validation', route.catalog.validationFilter);
+      if (route.catalog?.environment !== undefined) query.set('environment', route.catalog.environment);
+      if (route.catalog?.scrollY) query.set('scrollY', String(Math.floor(route.catalog.scrollY)));
+      return '#/advanced-load' + (query.size ? '?' + query.toString() : '');
+    }
+    case 'load-resource': {
+      const query = new URLSearchParams();
+      if (route.environment !== undefined) query.set('environment', route.environment);
+      if (route.returnTo) query.set('returnTo', route.returnTo);
+      return '#/load/resources/' + encodeURIComponent(route.packageId) + '/' + encodeURIComponent(route.resourceId)
+        + (query.size ? '?' + query.toString() : '');
+    }
+    case 'schedules': {
+      const path = '#/schedules' + (route.view === 'new' ? '/new'
+        : route.scheduleId && route.view ? '/' + encodeURIComponent(route.scheduleId) + '/' + route.view
+          + (route.view === 'history' && route.occurrenceId ? '/' + encodeURIComponent(route.occurrenceId) : '') : '');
+      if (route.view !== 'new' || (!route.intent && !route.returnTo)) return path;
+      const query = new URLSearchParams();
+      if (route.intent) query.set('intent', route.intent);
+      if (route.returnTo) query.set('returnTo', route.returnTo);
+      return path + '?' + query.toString();
+    }
     case 'settings': return '#/settings';
   }
 }

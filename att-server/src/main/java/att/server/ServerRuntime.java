@@ -54,6 +54,7 @@ final class ServerRuntime implements AutoCloseable {
     static final Pattern DRAFT_ID=Pattern.compile("D[0-9A-F]{32}");
     static final Pattern QUICK_LOAD_DRAFT_ID=Pattern.compile("L[0-9A-F]{32}");
     static final Pattern ADVANCED_LOAD_DRAFT_ID=Pattern.compile("A[0-9A-F]{32}");
+    static final Pattern CATALOG_LOAD_DRAFT_ID=Pattern.compile("C[0-9A-F]{32}");
     private static final Pattern INLINE_LOAD_DURATION=Pattern.compile("^([0-9]+)(ms|s|m|h)$");
     private static final Pattern INLINE_LOAD_RATE=Pattern.compile("^([1-9][0-9]*(?:\\.[0-9]+)?)/(s|m)$");
     static final int MAX_ACTIVE_DRAFTS=128, MAX_DRAFTS_PER_PRINCIPAL=16;
@@ -89,6 +90,7 @@ final class ServerRuntime implements AutoCloseable {
     private final ConcurrentHashMap<String,RunDraft> runDrafts=new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String,QuickLoadDraft> quickLoadDrafts=new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String,AdvancedLoadDraftState> advancedLoadDrafts=new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String,CatalogLoadDraftState> catalogLoadDrafts=new ConcurrentHashMap<>();
     private final List<InspectionWorker> inspectionWorkerPool=new ArrayList<>();
     private final ScheduledExecutorService inspectionWarmup;
     private volatile boolean closing;
@@ -97,6 +99,7 @@ final class ServerRuntime implements AutoCloseable {
     private final byte[] cursorKey=new byte[32];
     private final SecureRandom cursorRandom=new SecureRandom();
     private final Path workerLibs;
+    private final String workerSchemaRegistryDigest;
     ServerRuntime(ServerConfig config,String workerLibs) throws Exception {
         this(config,workerLibs,ProcessBuilder::start);
     }
@@ -105,7 +108,7 @@ final class ServerRuntime implements AutoCloseable {
     }
     ServerRuntime(ServerConfig config,String workerLibs,WorkerProcessLauncher processLauncher,Clock clock) throws Exception {
         if(Runtime.version().feature()<17)throw new IllegalStateException("ATT Server requires Java 17 or later; detected Java "+Runtime.version().feature());
-        this.config=config;this.workerLibs=workerLibs==null?null:Paths.get(workerLibs).toAbsolutePath().normalize();this.processLauncher=processLauncher;this.clock=java.util.Objects.requireNonNull(clock);this.store=new JobStore(config);this.auth=new AuthService(config,store);this.loadSlots=new Semaphore(config.maxConcurrentLoad,true);this.admissionSlots=new Semaphore(config.maxConcurrent+config.queuedLimit,true);
+        this.config=config;this.workerLibs=workerLibs==null?null:Paths.get(workerLibs).toAbsolutePath().normalize();this.workerSchemaRegistryDigest=WorkerRuntimeClasspath.schemaRegistryDigestIfPresent(this.workerLibs);this.processLauncher=processLauncher;this.clock=java.util.Objects.requireNonNull(clock);this.store=new JobStore(config);this.auth=new AuthService(config,store);this.loadSlots=new Semaphore(config.maxConcurrentLoad,true);this.admissionSlots=new Semaphore(config.maxConcurrent+config.queuedLimit,true);
         cursorRandom.nextBytes(cursorKey);
         java.util.concurrent.BlockingQueue<Runnable> queue=config.queuedLimit==0?new SynchronousQueue<>():new ArrayBlockingQueue<>(config.queuedLimit);
         workers=new ThreadPoolExecutor(config.maxConcurrent,config.maxConcurrent,0,TimeUnit.MILLISECONDS,queue,r->{Thread t=new Thread(r,"att-server-worker");t.setDaemon(true);return t;},new ThreadPoolExecutor.AbortPolicy());
@@ -160,7 +163,7 @@ final class ServerRuntime implements AutoCloseable {
         long requestReceivedNanos=System.nanoTime();
         if(!List.of("run","debug","load","validate").contains(command))throw new IllegalArgumentException("Unsupported job command");
         if(!serverIssuedDraft&&(input.has("draftId")||input.has("inlineDebugInput")||input.has("inlineLoadScenario")
-                ||input.has("expectedRevisionDigest")||input.has("draftResourceId")))
+                ||input.has("expectedRevisionDigest")||input.has("expectedSchemaRegistryDigest")||input.has("draftResourceId")))
             throw new IllegalArgumentException("Inline execution fields require a server-issued draft");
         if(serverIssuedDraft&&"load".equals(command)) {
             if(!scheduleIssued)requireInlineLoadEnabled();
@@ -175,6 +178,7 @@ final class ServerRuntime implements AutoCloseable {
         WorkerRequest request=JSON.treeToValue(input,WorkerRequest.class);
         request.protocolVersion="att-worker/v1";request.command=command;request.packageRoot=root.toString();
         request.outputDirectory=null;request.config=config.runtimeConfigPath.toString();request.environment=safeText(request.environment,128,"environment");
+        request.expectedSchemaRegistryDigest=workerSchemaRegistryDigest;
         request.runId=safeText(request.runId,128,"runId");request.debugId=safeText(request.debugId,128,"debugId");request.suiteDirectory=safeRelative(request.suiteDirectory,"suiteDirectory");
         request.scenario=safeRelative(request.scenario,"scenario");request.debugInput=safeRelative(request.debugInput,"debugInput");
         request.unsafeFailureDetails=false;
@@ -431,6 +435,17 @@ final class ServerRuntime implements AutoCloseable {
         WorkerRequest request=inspectionRequest(packageId,root,null);request.inspectionAction="load-source";request.inspectionPath=resourceId;
         return executeInspection(root,request);
     }
+    Map<String,Object> inspectLoadCatalogDetail(String packageId,String resourceId,String principal) throws Exception {
+        if(!config.inspection.enabled)throw new NotFoundException();
+        if(principal==null||principal.isBlank())throw new IllegalArgumentException("A server-resolved request identity is required");
+        if(resourceId==null||resourceId.isBlank()||resourceId.length()>1024)throw new IllegalArgumentException("resourceId is invalid");
+        Path root=packageRoot(packageId);if(root==null)throw new NotFoundException();validatePackageRoot(root);
+        WorkerRequest request=inspectionRequest(packageId,root,null);request.inspectionAction="load-detail";request.inspectionPath=resourceId;
+        Map<String,Object> result=executeInspection(root,request);
+        Object revision=result.remove("revisionDigest");
+        if(revision instanceof String)result.put("_cacheRevision",inspectionCacheToken(List.of(packageId,principal,revision)));
+        return result;
+    }
     Map<String,Object> validateLoadCatalogScenario(String packageId,String resourceId,String environment,String principal) throws Exception {
         if(!config.inspection.enabled)throw new NotFoundException();
         if(principal==null||principal.isBlank())throw new IllegalArgumentException("A server-resolved request identity is required");
@@ -439,8 +454,31 @@ final class ServerRuntime implements AutoCloseable {
         String selected=environment==null||environment.isBlank()?null:inspectionEnvironment(environment,"environment");
         WorkerRequest request=inspectionRequest(packageId,root,selected);request.inspectionAction="load-scenario";request.inspectionPath=resourceId;
         Map<String,Object> result=executeInspection(root,request);
-        result.remove("normalizedScenario");result.remove("revisionDigest");result.remove("containsSensitiveValues");
+        Object rawScenario=result.remove("normalizedScenario"),rawRevision=result.remove("revisionDigest");
+        Object rawSensitive=result.remove("containsSensitiveValues"),rawModel=result.get("model");
+        if(!(rawScenario instanceof Map)||!(rawRevision instanceof String)||!((String)rawRevision).matches("[a-f0-9]{64}")
+                ||!(rawSensitive instanceof Boolean)||!(rawModel instanceof String)
+                ||!List.of("virtualUsers","arrivalRate").contains(rawModel))
+            throw new IllegalStateException("Load validation Worker returned an invalid response");
         result.put("validation","valid");
+        result.put("scheduleAvailable",Boolean.FALSE);
+        if(!config.scheduling.enabled) result.put("scheduleReason","Scheduling is disabled by Server policy.");
+        else if(((Boolean)rawSensitive).booleanValue())
+            result.put("scheduleReason","This scenario contains sensitive values and cannot be persisted as an immutable Schedule snapshot. Keep those values in protected package defaults.");
+        else {
+            @SuppressWarnings("unchecked") Map<String,Object> scenario=(Map<String,Object>)JSON.convertValue(rawScenario,Map.class);
+            CatalogLoadDraftState draft=new CatalogLoadDraftState("C"+UUID.randomUUID().toString().replace("-","").toUpperCase(),
+                    principal,packageId,selected,resourceId,(String)rawRevision,(String)rawModel,scenario,
+                    (String)result.get("previewYaml"),clock.instant().plusMillis(DRAFT_TTL_MILLIS));
+            try {
+                synchronized(draftLock) {
+                    expireDrafts();checkDraftCapacity(principal);catalogLoadDrafts.put(draft.id,draft);
+                }
+                result.put("scheduleAvailable",Boolean.TRUE);result.put("draftId",draft.id);result.put("expiresAt",draft.expiresAt.toString());
+            } catch(DraftCapacityException full) {
+                result.put("scheduleReason","Temporary Schedule draft capacity is full. Retry validation to try again.");
+            }
+        }
         return result;
     }
     Map<String,Object> inspectDebugForm(String packageId,String type,String resourceId,String environment,String principal) throws Exception {
@@ -628,6 +666,13 @@ final class ServerRuntime implements AutoCloseable {
             return advancedLoadDraftView(draft);
         }
     }
+    Map<String,Object> getCatalogLoadDraft(String id,String principal) {
+        synchronized(draftLock) {
+            expireDrafts();CatalogLoadDraftState draft=catalogLoadDrafts.get(id);
+            if(draft==null||!draft.principal.equals(principal))throw new NotFoundException();
+            return catalogLoadDraftView(draft);
+        }
+    }
     Map<String,Object> createRunDraft(JsonNode body,String principal) throws Exception {
         RunDefinition run=RunDefinition.parse(body);
         if(principal==null||principal.isBlank())throw new IllegalArgumentException("A server-resolved request identity is required");
@@ -736,6 +781,7 @@ final class ServerRuntime implements AutoCloseable {
         if(DRAFT_ID.matcher(id==null?"":id).matches())return getDebugDraft(id,principal);
         if(QUICK_LOAD_DRAFT_ID.matcher(id==null?"":id).matches())return getQuickLoadDraft(id,principal);
         if(ADVANCED_LOAD_DRAFT_ID.matcher(id==null?"":id).matches())return getAdvancedLoadDraft(id,principal);
+        if(CATALOG_LOAD_DRAFT_ID.matcher(id==null?"":id).matches())return getCatalogLoadDraft(id,principal);
         throw new NotFoundException();
     }
     Map<String,Object> submitDebugDraft(JsonNode body,String principal) throws Exception {
@@ -907,11 +953,17 @@ final class ServerRuntime implements AutoCloseable {
         view.put("redacted",Boolean.TRUE.equals(draft.preview.get("redacted")));view.put("diagnostics",Collections.emptyList());
         view.put("expiresAt",draft.expiresAt.toString());return view;
     }
+    private Map<String,Object> catalogLoadDraftView(CatalogLoadDraftState draft) {
+        Map<String,Object> view=new LinkedHashMap<String,Object>();view.put("draftId",draft.id);view.put("packageId",draft.packageId);
+        view.put("environment",draft.environment);view.put("model",draft.model);view.put("previewYaml",draft.previewYaml);
+        view.put("redacted",Boolean.TRUE);view.put("diagnostics",Collections.emptyList());view.put("expiresAt",draft.expiresAt.toString());return view;
+    }
     private void checkDraftCapacity(String principal) {
-        long total=debugDrafts.size()+quickLoadDrafts.size()+advancedLoadDrafts.size()+runDrafts.size();
+        long total=debugDrafts.size()+quickLoadDrafts.size()+advancedLoadDrafts.size()+catalogLoadDrafts.size()+runDrafts.size();
         long owned=debugDrafts.values().stream().filter(d->d.principal.equals(principal)).count()
                 +quickLoadDrafts.values().stream().filter(d->d.principal.equals(principal)).count()
                 +advancedLoadDrafts.values().stream().filter(d->d.principal.equals(principal)).count()
+                +catalogLoadDrafts.values().stream().filter(d->d.principal.equals(principal)).count()
                 +runDrafts.values().stream().filter(d->d.principal.equals(principal)).count();
         if(total>=MAX_ACTIVE_DRAFTS||owned>=MAX_DRAFTS_PER_PRINCIPAL)throw new DraftCapacityException();
     }
@@ -920,6 +972,7 @@ final class ServerRuntime implements AutoCloseable {
         debugDrafts.entrySet().removeIf(entry->!entry.getValue().expiresAt.isAfter(now));
         quickLoadDrafts.entrySet().removeIf(entry->!entry.getValue().expiresAt.isAfter(now));
         advancedLoadDrafts.entrySet().removeIf(entry->!entry.getValue().expiresAt.isAfter(now));
+        catalogLoadDrafts.entrySet().removeIf(entry->!entry.getValue().expiresAt.isAfter(now));
     }
     private void expireDraftsSafely() {synchronized(draftLock){expireDrafts();}}
     private static void requireObject(JsonNode value,String message) {if(value==null||!value.isObject())throw new IllegalArgumentException(message);}
@@ -1141,7 +1194,7 @@ final class ServerRuntime implements AutoCloseable {
         String workerError=(String)envelope.get("errorCode");
         if("ATT-RESOURCE-NOT-FOUND".equals(workerError))throw new NotFoundException();
         if("ATT-RESOURCE-CURSOR-STALE".equals(workerError))throw new StaleCursorException();
-        if(List.of("load-catalog","load-source").contains(request.inspectionAction)) {
+        if(List.of("load-catalog","load-detail","load-source").contains(request.inspectionAction)) {
             Object rawDiagnostics=envelope.get("diagnostics");
             List<Map<String,Object>> diagnostics=rawDiagnostics instanceof List
                     ?safeInspectionDiagnostics((List<?>)rawDiagnostics,root):List.of();
@@ -1151,7 +1204,8 @@ final class ServerRuntime implements AutoCloseable {
         }
         boolean draftInspection="run-input".equals(request.inspectionAction)||"debug-input".equals(request.inspectionAction)||"debug-form".equals(request.inspectionAction)
                 ||"quick-load-input".equals(request.inspectionAction)||"quick-load-form".equals(request.inspectionAction)
-                ||"quick-load-policy".equals(request.inspectionAction)||"load-scenario".equals(request.inspectionAction);
+                ||"quick-load-policy".equals(request.inspectionAction)||"load-scenario".equals(request.inspectionAction)
+                ||"load-detail".equals(request.inspectionAction);
         if(draftInspection&&("WORKER_REQUEST_INVALID".equals(workerError)
                 ||workerError!=null&&(workerError.startsWith("ATT-DEBUG")||workerError.startsWith("ATT-LOAD"))
                 ||envelope.get("diagnostics") instanceof List&&!((List<?>)envelope.get("diagnostics")).isEmpty())) {
@@ -1345,6 +1399,7 @@ final class ServerRuntime implements AutoCloseable {
         private volatile OutputStream writer;
 
         Map<String,Object> request(Path root,WorkerRequest request) throws Exception {
+            request.expectedSchemaRegistryDigest=workerSchemaRegistryDigest;
             ensureStarted(root);
             java.util.concurrent.atomic.AtomicBoolean timedOut=new java.util.concurrent.atomic.AtomicBoolean();
             ScheduledFuture<?> watchdog=inspectionWatchdogs.schedule(()->{
@@ -1539,7 +1594,7 @@ final class ServerRuntime implements AutoCloseable {
         Map<String,Object> view=JSON.convertValue(schedule,Map.class);
         view.remove("runInput");view.put("executionType","load".equals(schedule.effectiveJobType())?"load":"run");
         view.put("revisionPolicy",schedule.runInput!=null||schedule.inlineDebugInput!=null?"reject-package-changes":"validate-current-package");
-        view.remove("inlineScenario");view.remove("inlineDebugInput");view.remove("debugResourceId");view.remove("expectedRevisionDigest");
+        view.remove("inlineScenario");view.remove("inlineDebugInput");view.remove("debugResourceId");view.remove("expectedRevisionDigest");view.remove("catalogSnapshot");
         view.put("jobType",schedule.effectiveJobType());
         view.put("inlineSnapshot",Boolean.valueOf(schedule.inlineScenario!=null||schedule.inlineDebugInput!=null||schedule.runInput!=null));
         if(schedule.runInput!=null) {
@@ -1802,7 +1857,14 @@ final class ServerRuntime implements AutoCloseable {
                 s.expectedRevisionDigest=debug.revisionDigest;s.loadModel=null;s.load=new LinkedHashMap<>();
             } else {
                 s.scenario=null;s.inlineDebugInput=null;s.debugTargetType=null;s.debugTargetId=null;s.debugResourceId=null;s.expectedRevisionDigest=null;
-                s.inlineScenario=scheduleDraftScenario(draftId,principal,s.packageId,draftEnvironment);
+                CatalogLoadDraftState catalogDraft=scheduleCatalogLoadDraft(draftId,principal,s.packageId,draftEnvironment);
+                if(catalogDraft!=null) {
+                    s.inlineScenario=deepMap(catalogDraft.scenario);s.catalogSnapshot=true;
+                    s.expectedRevisionDigest=catalogDraft.revisionDigest;s.loadModel=catalogDraft.model;
+                } else {
+                    s.inlineScenario=scheduleDraftScenario(draftId,principal,s.packageId,draftEnvironment);
+                    s.catalogSnapshot=false;
+                }
             }
         } else if("run".equals(jobType)) {
             if(s.runInput==null)throw new IllegalArgumentException("A RUN schedule requires a validated RUN draft");
@@ -1866,7 +1928,7 @@ final class ServerRuntime implements AutoCloseable {
             if(!Files.isRegularFile(scenarioPath)||!scenarioPath.toRealPath().startsWith(root.toRealPath()))throw new IllegalArgumentException("scenario must be a regular file inside the configured package");
             if(s.inlineDebugInput!=null)throw new IllegalArgumentException("A Debug snapshot cannot be changed to a Load schedule");
         } else {
-            if(!config.inlineLoad.enabled)throw new InlineLoadDisabledException();
+            if(!config.inlineLoad.enabled&&!s.catalogSnapshot)throw new InlineLoadDisabledException();
             if(scenarioInputChanged(prior,s,input))throw new IllegalArgumentException("An inline scenario snapshot is immutable; create a new schedule for changed values");
             if(s.load!=null&&!s.load.isEmpty())throw new IllegalArgumentException("Inline scenario snapshots cannot use separate Load overrides");
         }
@@ -1905,6 +1967,17 @@ final class ServerRuntime implements AutoCloseable {
                 return deepMap(advanced.scenario);
             }
             throw new NotFoundException();
+        }
+    }
+    private CatalogLoadDraftState scheduleCatalogLoadDraft(String draftId,String principal,String packageId,String environment) {
+        if(!CATALOG_LOAD_DRAFT_ID.matcher(draftId==null?"":draftId).matches())return null;
+        synchronized(draftLock) {
+            expireDrafts();CatalogLoadDraftState draft=catalogLoadDrafts.get(draftId);
+            if(draft==null)throw new NotFoundException();
+            requireLiveDraft(draft.expiresAt);
+            if(!draft.principal.equals(principal)||!draft.packageId.equals(packageId)
+                    ||!java.util.Objects.equals(draft.environment,environment))throw new NotFoundException();
+            return draft;
         }
     }
     private DebugDraft scheduleDraftDebug(String draftId,String principal,String packageId,String environment) {
@@ -2061,7 +2134,7 @@ final class ServerRuntime implements AutoCloseable {
             for(Path path:paths.sorted(java.util.Comparator.reverseOrder()).toArray(Path[]::new))Files.deleteIfExists(path);
         }
     }
-    @Override public void close(){closing=true;if(inspectionWarmup!=null)inspectionWarmup.shutdownNow();if(loadScheduleScheduler!=null)loadScheduleScheduler.close();retention.shutdownNow();inspectionWatchdogs.shutdownNow();synchronized(draftLock){runDrafts.clear();debugDrafts.clear();quickLoadDrafts.clear();advancedLoadDrafts.clear();}for(InspectionWorker worker:inspectionWorkerPool)worker.close();for(Job j:jobs.values())if(j.process!=null&&j.process.isAlive()){try{terminateTree(j.process);if(!j.process.waitFor(config.gracefulStopMs,TimeUnit.MILLISECONDS))forceTree(j.process);finishQuietly(j,"ERROR",143,"ATT-SERVER-INTERRUPTED","Server shutdown interrupted the Worker");}catch(Exception ignored){forceTree(j.process);}}for(Process process:inspectionProcesses.keySet())if(process.isAlive())forceTree(process);inspectors.shutdownNow();workers.shutdownNow();streams.shutdownNow();try{store.close();}catch(Exception ignored){}}
+    @Override public void close(){closing=true;if(inspectionWarmup!=null)inspectionWarmup.shutdownNow();if(loadScheduleScheduler!=null)loadScheduleScheduler.close();retention.shutdownNow();inspectionWatchdogs.shutdownNow();synchronized(draftLock){runDrafts.clear();debugDrafts.clear();quickLoadDrafts.clear();advancedLoadDrafts.clear();catalogLoadDrafts.clear();}for(InspectionWorker worker:inspectionWorkerPool)worker.close();for(Job j:jobs.values())if(j.process!=null&&j.process.isAlive()){try{terminateTree(j.process);if(!j.process.waitFor(config.gracefulStopMs,TimeUnit.MILLISECONDS))forceTree(j.process);finishQuietly(j,"ERROR",143,"ATT-SERVER-INTERRUPTED","Server shutdown interrupted the Worker");}catch(Exception ignored){forceTree(j.process);}}for(Process process:inspectionProcesses.keySet())if(process.isAlive())forceTree(process);inspectors.shutdownNow();workers.shutdownNow();streams.shutdownNow();try{store.close();}catch(Exception ignored){}}
     private static void terminateTree(Process process){process.toHandle().descendants().forEach(ProcessHandle::destroy);process.destroy();}
     private static void forceTree(Process process){process.toHandle().descendants().forEach(ProcessHandle::destroyForcibly);process.destroyForcibly();}
     @FunctionalInterface interface WorkerProcessLauncher { Process start(ProcessBuilder builder) throws java.io.IOException; }
@@ -2140,6 +2213,17 @@ final class ServerRuntime implements AutoCloseable {
             this.id=id;this.principal=principal;this.packageId=packageId;this.environment=environment;
             this.model=model;this.revisionDigest=revisionDigest;this.scenario=deepMap(scenario);
             this.preview=deepMap(preview);this.expiresAt=expiresAt;
+        }
+    }
+    private static final class CatalogLoadDraftState {
+        final String id,principal,packageId,environment,resourceId,revisionDigest,model,previewYaml;
+        final Map<String,Object> scenario;
+        final Instant expiresAt;
+        CatalogLoadDraftState(String id,String principal,String packageId,String environment,String resourceId,
+                              String revisionDigest,String model,Map<String,Object> scenario,String previewYaml,Instant expiresAt) {
+            this.id=id;this.principal=principal;this.packageId=packageId;this.environment=environment;
+            this.resourceId=resourceId;this.revisionDigest=revisionDigest;this.model=model;
+            this.scenario=deepMap(scenario);this.previewYaml=previewYaml;this.expiresAt=expiresAt;
         }
     }
     private static Map<String,Object> deepMap(Map<String,Object> source) {

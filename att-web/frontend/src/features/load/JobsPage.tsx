@@ -291,17 +291,19 @@ function JobsList({ api, principal = '', onOpenJob }: JobsFeatureProps) {
   };
   const start = filtered.length ? currentPage * PAGE_SIZE + 1 : 0;
   const end = Math.min((currentPage + 1) * PAGE_SIZE, filtered.length);
+  const clearFilters = () => {
+    setServerPrincipal(''); setStatus(''); setPackageId(''); setCommand('');
+    setFromDate(''); setToDate(''); setSort('newest'); setPage(0);
+  };
 
-  return <div className="page-content att-jobs-page" aria-labelledby="jobs-title">
+  return <div className="page-content att-jobs-page att-query-workspace" aria-labelledby="jobs-title">
     <header className="att-feature-header">
       <div><p className="att-eyebrow">Jobs and results</p><h1 id="jobs-title">Jobs</h1>
         <p>Search and review jobs returned by the ATT Server.</p></div>
-      <button type="button" onClick={() => { setPage(0); setRefreshVersion(value => value + 1); }} disabled={state === 'loading' || state === 'refreshing'}>
-        {state === 'refreshing' ? 'Refreshing…' : 'Refresh jobs'}
-      </button>
     </header>
 
-    <section className="att-jobs-filter-panel" aria-label="Job filters">
+    <section className="att-query-filter-panel att-jobs-filter-panel" aria-label="Job filters">
+      <div className="att-query-filter-grid">
       <label>Principal search (Server filter)
         <input value={serverPrincipal} onChange={event => { setServerPrincipal(event.currentTarget.value); setPage(0); }} />
       </label>
@@ -325,15 +327,23 @@ function JobsList({ api, principal = '', onOpenJob }: JobsFeatureProps) {
           <option value="newest">Newest first</option><option value="oldest">Oldest first</option><option value="id">Job ID A–Z</option>
         </select>
       </label>
+      </div>
+      <div className="att-query-filter-actions">
+        <button className="button button-quiet" type="button" onClick={clearFilters}>Clear filters</button>
+        <button className="button button-quiet" type="button" onClick={() => { setPage(0); setRefreshVersion(value => value + 1); }} disabled={state === 'loading' || state === 'refreshing'}>
+          {state === 'refreshing' ? 'Refreshing…' : 'Refresh jobs'}
+        </button>
+      </div>
     </section>
+    <section className="att-query-results-panel" aria-label="Job results">
     <p className="att-list-coverage" role="note">Filters and sorting apply to the API-loaded rows. The API returns at most 100 jobs; principal search is performed by the Server. No environment field is returned for this list.</p>
-    <p className="att-list-count" role="status" aria-live="polite" aria-busy={state === 'loading' || state === 'refreshing'}>
+    <p className="att-list-count att-query-result-status" role="status" aria-live="polite" aria-busy={state === 'loading' || state === 'refreshing'}>
       {state === 'loading' ? 'Loading jobs…' : state === 'refreshing' ? `Refreshing ${rows.length} loaded jobs…` : `Showing ${start}–${end} of ${filtered.length} matching loaded jobs (page ${currentPage + 1} of ${pageCount}).`}
     </p>
     {error && <div className="att-inline-error" role="alert">{error}{rows.length > 0 && ' Showing the last successful result.'}</div>}
-    {state === 'error' && rows.length === 0 ? <section className="att-empty-state"><h2>Jobs unavailable</h2><p>{error}</p><button type="button" onClick={() => setRefreshVersion(value => value + 1)}>Try again</button></section>
-      : filtered.length === 0 && state === 'ready' ? <section className="att-empty-state"><h2>No matching jobs</h2><p>{rows.length ? 'No loaded jobs match these filters.' : 'The Server returned no jobs for this principal search.'}</p></section>
-        : <div className="att-table-scroll"><table className="att-jobs-table">
+    {state === 'error' && rows.length === 0 ? <section className="att-empty-state att-query-empty-state"><h2>Jobs unavailable</h2><p>{error}</p><button type="button" onClick={() => setRefreshVersion(value => value + 1)}>Try again</button></section>
+      : filtered.length === 0 && state === 'ready' ? <section className="att-empty-state att-query-empty-state"><h2>No matching jobs</h2><p>{rows.length ? 'No loaded jobs match these filters.' : 'The Server returned no jobs for this principal search.'}</p></section>
+        : <div className="att-table-scroll"><table className="att-jobs-table att-data-table">
           <caption>Jobs returned by the Server; most recently created first by default</caption>
           <thead><tr><th scope="col">Job ID</th><th scope="col">Package</th><th scope="col">Type</th><th scope="col">Principal</th><th scope="col">Status</th><th scope="col">Created</th><th scope="col">Open</th></tr></thead>
           <tbody>{pageRows.map(job => <tr key={job.jobId}>
@@ -343,11 +353,12 @@ function JobsList({ api, principal = '', onOpenJob }: JobsFeatureProps) {
             <td><button type="button" onClick={() => onOpenJob(job.jobId)}>Open details</button></td>
           </tr>)}</tbody>
         </table></div>}
-    {filtered.length > PAGE_SIZE && <nav className="att-pagination" aria-label="Loaded jobs pages">
+    {filtered.length > PAGE_SIZE && <nav className="att-pagination att-query-pagination" aria-label="Loaded jobs pages">
       <button type="button" onClick={() => setPage(value => Math.max(0, value - 1))} disabled={currentPage === 0}>Previous</button>
       <span>Page {currentPage + 1} of {pageCount}</span>
       <button type="button" onClick={() => setPage(value => Math.min(pageCount - 1, value + 1))} disabled={currentPage >= pageCount - 1}>Next</button>
     </nav>}
+    </section>
   </div>;
 }
 

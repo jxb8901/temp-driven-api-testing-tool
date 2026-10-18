@@ -783,24 +783,29 @@ class AuthenticationIntegrationTest {
         @SuppressWarnings("unchecked") Map<String,Object> jobs=(Map<String,Object>)field(runtime,"jobs");jobs.put(id,job);
         var append=journalType.getDeclaredMethod("append",String.class,Map.class);append.setAccessible(true);append.invoke(journal,"status",Map.of("jobId",id,"status","RUNNING"));
         List<HttpURLConnection> connections=new ArrayList<>();
+        List<Future<Boolean>> eventReaders=new ArrayList<>();
+        var readerPool=Executors.newFixedThreadPool(5);
         try {
             for(int i=0;i<5;i++) {
                 HttpURLConnection connection=(HttpURLConnection)new java.net.URL("http://127.0.0.1:"+port+"/att/api/v1/jobs/"+id+"/events").openConnection();
-                connection.setConnectTimeout(3000);connection.setReadTimeout(5000);connection.setRequestProperty("Authorization",authorization);
+                connection.setConnectTimeout(3000);connection.setReadTimeout(30000);connection.setRequestProperty("Authorization",authorization);
                 connections.add(connection);
                 assertEquals(200,connection.getResponseCode());
                 // HTTP 200 can arrive before the asynchronous stream task subscribes to the journal.
                 // Wait for this listener before opening the next stream; earlier observers stay open.
                 awaitSseListeners(journal,connections.size());
+                eventReaders.add(readerPool.submit(()->{
+                    try(var reader=new java.io.BufferedReader(new java.io.InputStreamReader(connection.getInputStream(),java.nio.charset.StandardCharsets.UTF_8))) {
+                        String line;while((line=reader.readLine())!=null)if(line.contains("live observer event"))return true;
+                        return false;
+                    }
+                }));
             }
             append.invoke(journal,"progress",Map.of("message","live observer event"));
-            for(HttpURLConnection connection:connections) {
-                try(var reader=new java.io.BufferedReader(new java.io.InputStreamReader(connection.getInputStream(),java.nio.charset.StandardCharsets.UTF_8))) {
-                    String line;boolean received=false;while((line=reader.readLine())!=null){if(line.contains("live observer event")){received=true;break;}}
-                    assertTrue(received,"Each concurrent observer should receive the live event");
-                }
-            }
+            for(Future<Boolean> eventReader:eventReaders)
+                assertTrue(eventReader.get(10,TimeUnit.SECONDS),"Each concurrent observer should receive the live event");
         } finally {
+            readerPool.shutdownNow();
             var finish=runtime.getClass().getDeclaredMethod("finish",jobType,String.class,int.class);finish.setAccessible(true);finish.invoke(runtime,job,"PASS",0);for(HttpURLConnection c:connections)c.disconnect();
         }
     }

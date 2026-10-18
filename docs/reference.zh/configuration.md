@@ -176,7 +176,7 @@ YAML 中可保留非 secret topology：JDBC URL、MQ host/port、queue manager�
 
 ## Schema catalog
 
-[`schemas/catalog.yaml`](../../schemas/catalog.yaml) 是 active schema 的 source of truth。Package validation 檢查 registrations；封存 schema 不會成為 active runtime contract。完整矩陣見 [Schema and Version Matrix](appendices/schema-matrix.md)。
+Repository `schemas/catalog.yaml` 是建立版本相符 ATT Engine JAR 內嵌 registry 的 build input。Runtime 唯一權威來源是該版本鎖定的 classpath registry；`ATT_HOME/schemas/` 和 Package-local `schemas/` 均不能新增或替換 schemas。Package validation 會檢查 Engine 登錄的 resources；封存 schema 只有在安裝的 Engine 明確支援時才是 runtime contract。完整矩陣見 [Schema and Version Matrix](appendices/schema-matrix.md)。
 
 ## 設定 package-wide options
 

@@ -23,7 +23,12 @@ export interface LoadCatalogItem {
   schedule: boolean;
   createQuickLoad: boolean;
   diagnostic?: string;
+  diagnostics?: ServerDiagnostic[];
+  requestId?: string;
   validatedEnvironment?: string;
+  scheduleDraftId?: string;
+  schedulePreviewYaml?: string;
+  scheduleReason?: string;
 }
 
 export interface LoadCatalogPage {
@@ -32,8 +37,25 @@ export interface LoadCatalogPage {
   nextCursor?: string | null;
 }
 
+export interface LoadCatalogDetail {
+  packageId: string;
+  resourceId: string;
+  path: string;
+  kind: 'scenario' | 'template' | 'invalid' | string;
+  validation: string;
+  model?: LoadModel | null;
+  schemaVersion?: string;
+  workloadCount: number;
+  sourceAvailable: boolean;
+  definition?: Record<string, unknown>;
+  diagnostics?: ServerDiagnostic[];
+  diagnostic?: string;
+  redacted?: boolean;
+}
+
 export interface TargetResource {
   type: LoadTargetType;
+  resourceId: string;
   logicalId: string;
   state: string;
 }
@@ -46,6 +68,9 @@ export interface ServerDiagnostic {
   severity?: string;
   message?: string;
   summary?: string;
+  suggestion?: string;
+  line?: number;
+  column?: number;
 }
 
 export interface LoadPolicyResponse {
@@ -163,6 +188,7 @@ export interface JobEventHandlers {
 /** Feature boundary. Shared api.ts implements these operations; components never build REST paths. */
 export interface LoadJobsApi {
   listLoadCatalog?(packageId: string, input?: { query?: string; cursor?: string; limit?: number }, signal?: AbortSignal): Promise<LoadCatalogPage>;
+  getLoadCatalogDetail?(packageId: string, resourceId: string, signal?: AbortSignal): Promise<LoadCatalogDetail>;
   getLoadSource?(packageId: string, resourceId: string, signal?: AbortSignal): Promise<{ available: boolean; logicalPath?: string; text?: string; redacted?: boolean; reason?: string }>;
   submitLoadScenario?(input: { packageId: string; scenario: string; environment?: string }): Promise<JobAccepted>;
   listLoadJobs?(input?: { offset?: number; limit?: number; signal?: AbortSignal }): Promise<{ items: JobSummary[]; nextOffset?: number | null }>;

@@ -20,6 +20,8 @@ final class LoadSchedule {
     public String scenario;
     /** Server-validated immutable scenario snapshot for schedules created from a UI draft. */
     public Map<String,Object> inlineScenario;
+    /** Marks a Server-validated package-file snapshot; this does not depend on browser Inline Load policy. */
+    public boolean catalogSnapshot;
     /** Server-validated immutable Debug input snapshot; secret defaults use path-bound keep markers. */
     public Map<String,Object> inlineDebugInput;
     public String debugTargetType;
@@ -52,7 +54,7 @@ final class LoadSchedule {
         LoadSchedule copy=new LoadSchedule();
         copy.schemaVersion=schemaVersion;copy.runInput=runInput==null?null:ServerRuntime.JSON.convertValue(runInput,Map.class);
         copy.id=id;copy.name=name;copy.description=description;copy.packageId=packageId;copy.jobType=jobType==null?"load":jobType;copy.scenario=scenario;
-        copy.inlineScenario=inlineScenario==null?null:new LinkedHashMap<>(inlineScenario);copy.loadModel=loadModel;
+        copy.inlineScenario=inlineScenario==null?null:new LinkedHashMap<>(inlineScenario);copy.catalogSnapshot=catalogSnapshot;copy.loadModel=loadModel;
         copy.inlineDebugInput=inlineDebugInput==null?null:new LinkedHashMap<>(inlineDebugInput);
         copy.debugTargetType=debugTargetType;copy.debugTargetId=debugTargetId;copy.debugResourceId=debugResourceId;
         copy.expectedRevisionDigest=expectedRevisionDigest;

@@ -94,6 +94,27 @@ function resource(type: ResourceSummary['type'], resourceId: string, extra: Part
 }
 
 describe('Explorer source viewer', () => {
+  it('uses the shared query panels and exposes Clear filters and Refresh resources', async () => {
+    const api = apiWith({ listResources: vi.fn(async () => ({ items: [resource('flow', 'payments.flow')], total: 1, nextCursor: null })) });
+    await render(<ExplorerPage api={api} packageId="payments" resourceRoute={null} environment="SIT"
+      registerUnsavedChanges={() => () => {}} onResourceRouteChange={() => {}} onJobAccepted={() => {}} />);
+
+    expect(container.querySelector('.att-query-filter-panel[aria-label="Resource filters"]')).not.toBeNull();
+    expect(container.querySelector('.att-query-results-panel[aria-label="Resource results"]')).not.toBeNull();
+    expect(container.querySelector('.att-explorer-table.att-data-table')).not.toBeNull();
+    click(button('Templates'));
+    await new Promise(resolve => window.setTimeout(resolve, 10));
+    await settle();
+    expect(vi.mocked(api.listResources).mock.calls.at(-1)?.[1].type).toBe('template');
+    click(button('Clear filters'));
+    await new Promise(resolve => window.setTimeout(resolve, 10));
+    await settle();
+    expect(container.querySelector('[role="tab"][aria-selected="true"]')?.textContent).toBe('All');
+    click(button('Refresh resources'));
+    await settle();
+    expect(api.listResources).toHaveBeenCalledTimes(4);
+  });
+
   it('exposes a discoverable Batch RUN entry from the package resource catalog', async () => {
     const onRunBatch = vi.fn();
     const api = apiWith({ listResources: vi.fn(async () => ({ items: [resource('case', 'payments.C1')], total: 1, nextCursor: null })) });

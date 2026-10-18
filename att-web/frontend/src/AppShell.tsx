@@ -66,6 +66,7 @@ function routeTitle(route: AppRoute): string {
   if (route.kind === 'quick-load') return 'Quick Load';
   if (route.kind === 'jobs') return route.jobId ? 'Job ' + route.jobId : 'Jobs and results';
   if (route.kind === 'load') return route.packageId ? 'Advanced Load' : 'Load testing';
+  if (route.kind === 'load-resource') return route.resourceId.split('/').pop() || 'Load resource';
   if (route.kind === 'schedules') return 'Schedules';
   if (route.kind === 'settings') return 'Settings';
   return 'Dashboard';
@@ -76,7 +77,7 @@ function activeNavigation(route: AppRoute): string {
   if (route.kind === 'configuration') return 'configuration';
   if (route.kind === 'quick-load') return 'load-testing';
   if (route.kind === 'jobs') return 'jobs';
-  if (route.kind === 'load') return 'load-testing';
+  if (route.kind === 'load' || route.kind === 'load-resource') return 'load-testing';
   if (route.kind === 'schedules') return 'scheduled-load';
   if (route.kind === 'settings') return 'settings';
   return 'dashboard';

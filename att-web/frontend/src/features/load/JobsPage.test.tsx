@@ -163,6 +163,8 @@ describe('JobsPage React feature', () => {
     await act(async () => root.render(<JobsPage api={api} onOpenJob={onOpenJob} onShowList={vi.fn()} />));
     await advance();
     expect(host.textContent).toContain('JOB-RUN');
+    expect(host.querySelector('.att-query-filter-panel[aria-label="Job filters"]')).not.toBeNull();
+    expect(host.querySelector('.att-query-results-panel[aria-label="Job results"]')).not.toBeNull();
 
     const status = host.querySelector('.att-jobs-filter-panel select') as HTMLSelectElement;
     await act(async () => {
@@ -186,6 +188,9 @@ describe('JobsPage React feature', () => {
     expect(host.textContent).not.toContain('JOB-NEW');
     expect(host.textContent).toContain('at most 100 jobs');
     expect(listJobs).toHaveBeenCalledTimes(2);
+    await click([...host.querySelectorAll('button')].find(button => button.textContent === 'Clear filters')!);
+    expect((host.querySelector('.att-jobs-filter-panel select') as HTMLSelectElement).value).toBe('');
+    expect(host.textContent).toContain('JOB-NEW');
   });
 
   it('does not overwrite a terminal SSE event with a delayed cancel response', async () => {

@@ -8,7 +8,7 @@ import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
 import java.util.stream.Stream;
 
-/** Installs the real catalog and schema tree into isolated package fixtures. */
+/** Copies repository schema source files into fixtures for direct Path-verifier tests. */
 public final class TestSchemas {
     private TestSchemas() { }
 

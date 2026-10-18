@@ -30,7 +30,7 @@ export function ResourceTree({ items, selectedKey, loading, nextCursor, sortKey,
   return <section className="att-explorer-tree" aria-label="Package resources">
     <p className="att-explorer-table-hint">Column sorting applies to all matching resources before pagination.</p>
     <div ref={scrollContainerRef} onScroll={onListScroll} className="att-explorer-table-scroll">
-      <table className="att-explorer-table">
+      <table className="att-explorer-table att-data-table">
         <thead><tr>
           <th scope="col" aria-sort={sortKey === 'name' ? direction === 'desc' ? 'descending' : 'ascending' : 'none'}>{sortLabel('name', 'Name')}</th>
           <th scope="col" aria-sort={sortKey === 'type' ? direction === 'desc' ? 'descending' : 'ascending' : 'none'}>{sortLabel('type', 'Type')}</th>

@@ -10,7 +10,7 @@ ATT Server 4.2.1 提供單節點控制平面，讓用戶透過版本化 REST API
 4. 將 `$ATT_HOME/config/att-server.example.yaml` 複製至 `$ATT_HOME/config/att-server.yaml` 或受保護的外部路徑，更新絕對路徑，並勿將憑證放入 package。升級時不可覆寫既有的 active config。
 5. 將 `att-server-4.2.1.war` 部署至 Tomcat 10.1+。Tomcat 可直接部署 packed WAR；隔離的 Worker 會從 `$ATT_HOME/lib` 載入版本相符的 `att-local-4.2.1.jar`。
 
-Local archive 解壓後的目錄就是共享安裝及部署根目錄 `ATT_HOME`。此目錄包含 launcher 及 `lib/att-local-4.2.1.jar` 中共用的 Worker/Engine runtime；請在 Server WAR 旁安裝版本相符的 Local archive。每個 `ATT_HOME/lib` 只保留一個有版本號的 `att-local-<version>.jar`。可執行的 package 內容位於 `packages/<id>/`；Server state 位於另外設定的 `server.dataDir`。Archive 只包含 `config/att-server.example.yaml` 範本，不會包含 active 的 `config/att-server.yaml` 或 `data/` 目錄。
+Local archive 解壓後的目錄就是共享安裝及部署根目錄 `ATT_HOME`。此目錄包含 launcher 及 `lib/att-local-4.2.1.jar` 中共用的 Worker/Engine runtime；升級或 rollback 時，必須同時部署版本相符的 Local archive 與 Server WAR。Startup 會驗證 Worker JAR 版本及內嵌 Schema Registry；每個 Worker 處理請求前也會確認 Registry identity 與 Server 驗證過的 runtime 相符。每個 `ATT_HOME/lib` 只保留一個有版本號的 `att-local-<version>.jar`。可執行的 package 內容位於 `packages/<id>/`；Server state 位於另外設定的 `server.dataDir`。Archive 只包含 `config/att-server.example.yaml` 範本，不會包含 active 的 `config/att-server.yaml` 或 `data/` 目錄。
 
 Server 依次尋找 JVM property `-Datt.server.config`、環境變數 `ATT_SERVER_CONFIG`，再尋找 `$ATT_HOME/config/att-server.yaml`。最後一個路徑的 `ATT_HOME` 先取自 `-Datt.home`，再取自 `ATT_HOME` 環境變數。若選定的 config 不存在、不可讀或無效，Server 會在診斷中指出其路徑並停止啟動，不會改用其他來源。沒有明確來源或可用的預設 config 時，啟動錯誤會提供設定指引。
 
@@ -30,7 +30,6 @@ att/                              # ATT_HOME
     config.yaml                   # 共用 Engine/Worker 設定
     tools/                        # 共用 Tool 定義
     dbhelpers/                    # 共用 helper descriptors
-  schemas/                        # source catalog；runtime 使用內嵌的受信任副本
   data/                           # 選用的 server.dataDir，由 Tomcat 管理
   packages/default/               # 完整 package root
     testcase/
@@ -39,7 +38,7 @@ att/                              # ATT_HOME
     tools/                        # package-local scripts
 ```
 
-遷移舊版平面 Local 安裝前先備份，並將新版 archive 解壓到暫存目錄。保留一份經管理員審核的共用 `config/config.yaml`，並將共用 Tool/helper descriptors 放在 ATT_HOME 的 `config/`。若舊安裝的不同 package 使用不同設定，請先人工合併；ATT runtime 不會選擇或合併 package 內的設定。受信任 schema 移至 ATT_HOME `schemas/`。將 `testcase/`、`templates/`、`load/`、頂層 `tools/`、`sql/` 及 Testdata descriptors 放到各自已註冊的 Package。Package scripts 位於 `packages/<id>/tools/`，與 ATT_HOME `config/tools/` 的共用 Tool 定義分開。遷移 runtime 設定時排除 `att-server.example.yaml` 及 `att-server.yaml`。既有 active Server config 應留在 `ATT_HOME/config/att-server.yaml` 或受保護的外部路徑。在新 Package 通過驗證及執行前，保留舊的平面目錄。將 Server registry entries 更新至 Package root，並為 Tomcat 設定 `ATT_HOME` 或 `-Datt.home`。Server state 必須留在 Package root 以外；Local archive 不包含 `data/` 或 active Server config。
+遷移舊版平面 Local 安裝前先備份，並將新版 archive 解壓到暫存目錄。保留一份經管理員審核的共用 `config/config.yaml`，並將共用 Tool/helper descriptors 放在 ATT_HOME 的 `config/`。若舊安裝的不同 package 使用不同設定，請先人工合併；ATT runtime 不會選擇或合併 package 內的設定。請勿將舊 schema 複製至 ATT_HOME 或 Package：runtime validation 只使用版本相符的 ATT Engine JAR 內嵌 registry，既有 `ATT_HOME/schemas/` 目錄會被忽略。將 `testcase/`、`templates/`、`load/`、頂層 `tools/`、`sql/` 及 Testdata descriptors 放到各自已註冊的 Package。Package scripts 位於 `packages/<id>/tools/`，與 ATT_HOME `config/tools/` 的共用 Tool 定義分開。遷移 runtime 設定時排除 `att-server.example.yaml` 及 `att-server.yaml`。既有 active Server config 應留在 `ATT_HOME/config/att-server.yaml` 或受保護的外部路徑。在新 Package 通過驗證及執行前，保留舊的平面目錄。將 Server registry entries 更新至 Package root，並為 Tomcat 設定 `ATT_HOME` 或 `-Datt.home`。Server state 必須留在 Package root 以外；Local archive 不包含 `data/` 或 active Server config。
 
 ## 設定
 

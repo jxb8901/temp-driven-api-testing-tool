@@ -9,13 +9,14 @@ import './load.css';
 interface QuickLoadPageProps {
   api: LoadJobsApi;
   packageId: string;
-  target?: { type: string; resourceId: string };
+  target?: { type: string; resourceId: string; logicalId?: string };
   initialTemplateId?: string;
   initialModel?: LoadModel;
   backLabel?: string;
   environment: string;
   environments: string[];
   environmentState: 'loading' | 'ready' | 'error';
+  environmentNotice?: string;
   inlineLoadEnabled: boolean;
   schedulingEnabled?: boolean;
   onRetryEnvironments?: () => void;
@@ -34,6 +35,15 @@ function safeDiagnosticPath(value: unknown): string | undefined {
   const path = safeDiagnosticField(value);
   if (!path || path.startsWith('/') || /^[A-Za-z]:[\\/]/.test(path) || path.startsWith('\\\\')) return undefined;
   return path;
+}
+function safeServerDiagnostics(value: unknown): ServerDiagnostic[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((item): item is Record<string, unknown> => Boolean(item && typeof item === 'object' && !Array.isArray(item)))
+    .map(item => ({
+      severity: safeDiagnosticField(item.severity), code: safeDiagnosticField(item.code),
+      reason: safeDiagnosticField(item.reason), field: safeDiagnosticField(item.field), path: safeDiagnosticPath(item.path),
+      message: safeDiagnosticField(item.message), summary: safeDiagnosticField(item.summary),
+    }));
 }
 function asObject(value: unknown): JsonObject { return value && typeof value === 'object' && !Array.isArray(value) ? value as JsonObject : {}; }
 function validTarget(type: string): type is LoadTargetType { return type === 'template' || type === 'flow' || type === 'tool'; }
@@ -93,11 +103,11 @@ function makeScenario(policy: JsonObject, model: LoadModel, id: string, targetTy
   return scenario;
 }
 
-export function QuickLoadPage({ api, packageId, target, initialTemplateId = '', initialModel = 'virtualUsers', backLabel, environment, environments, environmentState, inlineLoadEnabled, schedulingEnabled = false, onEnvironmentChange, onJobAccepted, onSchedule, onCancel, onRetryEnvironments, registerUnsavedChanges }: QuickLoadPageProps) {
-  const [selectedTarget, setSelectedTarget] = useState<{ type: LoadTargetType; resourceId: string } | null>(target && validTarget(target.type) ? { type: target.type, resourceId: target.resourceId } : null);
+export function QuickLoadPage({ api, packageId, target, initialTemplateId = '', initialModel = 'virtualUsers', backLabel, environment, environments, environmentState, environmentNotice, inlineLoadEnabled, schedulingEnabled = false, onEnvironmentChange, onJobAccepted, onSchedule, onCancel, onRetryEnvironments, registerUnsavedChanges }: QuickLoadPageProps) {
+  const [selectedTarget, setSelectedTarget] = useState<{ type: LoadTargetType; resourceId: string; logicalId: string } | null>(target && validTarget(target.type) ? { type: target.type, resourceId: target.resourceId, logicalId: target.logicalId || '' } : null);
   const activeTarget = target ?? selectedTarget;
   const targetType = activeTarget && validTarget(activeTarget.type) ? activeTarget.type : null;
-  const [targetOptions, setTargetOptions] = useState<Array<{ type: LoadTargetType; logicalId: string; state: string }>>([]);
+  const [targetOptions, setTargetOptions] = useState<Array<{ type: LoadTargetType; resourceId: string; logicalId: string; state: string }>>([]);
   const [targetListState, setTargetListState] = useState<'loading' | 'ready' | 'error'>('loading');
   const [model, setModel] = useState<LoadModel>(initialModel);
   const [templateId, setTemplateId] = useState(initialTemplateId);
@@ -123,10 +133,15 @@ export function QuickLoadPage({ api, packageId, target, initialTemplateId = '', 
   const [error, setError] = useState('');
   const [diagnostics, setDiagnostics] = useState<ServerDiagnostic[]>([]);
   const [requestId, setRequestId] = useState('');
-  const [logicalTargetId, setLogicalTargetId] = useState('');
+  const [logicalTargetId, setLogicalTargetId] = useState(target?.logicalId || '');
+  const [sidecarState, setSidecarState] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
+  const [sidecarError, setSidecarError] = useState('');
+  const [sidecarDiagnostics, setSidecarDiagnostics] = useState<ServerDiagnostic[]>([]);
+  const [sidecarRequestId, setSidecarRequestId] = useState('');
+  const [sidecarRefresh, setSidecarRefresh] = useState(0);
   const [confirming, setConfirming] = useState(false);
   const [resetKey, setResetKey] = useState(0);
-  const identityKey = activeTarget ? `${packageId}:${activeTarget.type}:${activeTarget.resourceId}` : `${packageId}:select-target`;
+  const identityKey = activeTarget ? `${packageId}:${activeTarget.type}:${activeTarget.resourceId}:${activeTarget.logicalId || ''}` : `${packageId}:select-target`;
   const availableTemplates = templates;
   const previousIdentity = useRef(identityKey);
   const dirtyRef = useRef(false);
@@ -171,7 +186,7 @@ export function QuickLoadPage({ api, packageId, target, initialTemplateId = '', 
   useEffect(() => () => { validationController.current?.abort(); }, []);
   useEffect(() => {
     const identityChanged = previousIdentity.current !== identityKey;
-    if (identityChanged) { previousIdentity.current = identityKey; invalidateDraft(); dirtyRef.current = false; setDirty(false); setBusiness({ inputs: {}, vars: {} }); setLogicalTargetId(''); }
+    if (identityChanged) { previousIdentity.current = identityKey; invalidateDraft(); dirtyRef.current = false; setDirty(false); setBusiness({ inputs: {}, vars: {} }); setLogicalTargetId(activeTarget?.logicalId || ''); }
     const resetForPolicySelection = pendingModelPolicySelection.current || pendingTemplatePolicySelection.current;
     const preserveDraft = dirtyRef.current && !identityChanged && !resetForPolicySelection;
     const controller = new AbortController(); const request = ++policySequence.current;
@@ -210,6 +225,7 @@ export function QuickLoadPage({ api, packageId, target, initialTemplateId = '', 
     if (!packageId || !targetType || !inlineLoadEnabled) return;
     const controller = new AbortController(); const request = ++sidecarSequence.current;
     if (!activeTarget) return () => controller.abort();
+    setSidecarState('loading'); setSidecarError(''); setSidecarDiagnostics([]); setSidecarRequestId('');
     api.getTargetLoadForm(packageId, targetType, activeTarget.resourceId, model, environment || undefined, controller.signal).then(form => {
       if (controller.signal.aborted || request !== sidecarSequence.current) return;
       const resolvedId = typeof form.target?.id === 'string' ? form.target.id : '';
@@ -219,10 +235,17 @@ export function QuickLoadPage({ api, packageId, target, initialTemplateId = '', 
       templateBusiness.current = defaults;
       if (!dirtyRef.current) setBusiness(defaults);
       setResetKey(value => value + 1);
-      setMessage(form.redacted ? 'Safe target defaults loaded. Sensitive values remain protected by the Server.' : 'Target defaults loaded from the package debug sidecar.');
-    }).catch(() => { if (!controller.signal.aborted && request === sidecarSequence.current) setMessage('No safe debug sidecar defaults were available. You can add inputs manually.'); });
+      setSidecarState('ready');
+      setMessage(form.redacted ? 'Safe target defaults are ready. Sensitive values remain protected by the Server.' : 'Target defaults are ready. Add inputs manually if needed.');
+    }).catch(reason => {
+      if (controller.signal.aborted || request !== sidecarSequence.current) return;
+      setSidecarState('error');
+      setSidecarError(reason instanceof Error ? reason.message : 'Safe target defaults are unavailable.');
+      setSidecarDiagnostics(reason instanceof ApiError ? safeServerDiagnostics(reason.diagnostics) : []);
+      setSidecarRequestId(reason instanceof ApiError ? reason.requestId || '' : '');
+    });
     return () => controller.abort();
-  }, [api, packageId, targetType, activeTarget?.resourceId, identityKey, model, environment, inlineLoadEnabled]);
+  }, [api, packageId, targetType, activeTarget?.resourceId, identityKey, model, environment, inlineLoadEnabled, sidecarRefresh]);
 
   function change<T>(setter: (value: T) => void, value: T) { invalidateDraft(); setter(value); setPreset('custom'); dirtyRef.current = true; setDirty(true); }
   function selectTemplate(nextTemplateId: string) {
@@ -276,12 +299,7 @@ export function QuickLoadPage({ api, packageId, target, initialTemplateId = '', 
       setDraftState('error'); setError(reason instanceof Error ? reason.message : 'Quick Load validation failed.');
       if (reason instanceof ApiError) {
         setRequestId(reason.requestId || '');
-        const raw = reason.diagnostics;
-        setDiagnostics(Array.isArray(raw) ? raw.filter((item): item is Record<string, unknown> => Boolean(item && typeof item === 'object' && !Array.isArray(item))).map(item => ({
-          severity: safeDiagnosticField(item.severity), code: safeDiagnosticField(item.code),
-          reason: safeDiagnosticField(item.reason), field: safeDiagnosticField(item.field), path: safeDiagnosticPath(item.path),
-          message: safeDiagnosticField(item.message), summary: safeDiagnosticField(item.summary),
-        })) : []);
+        setDiagnostics(safeServerDiagnostics(reason.diagnostics));
       }
       setMessage('Correct the fields or retry validation.');
     } finally { if (validationController.current === controller) validationController.current = null; }
@@ -334,14 +352,14 @@ export function QuickLoadPage({ api, packageId, target, initialTemplateId = '', 
       <div className="att-section-heading"><div><h2 id="quick-load-target">Target</h2><p>{activeTarget ? 'The selected resource is fixed for this Quick Load.' : 'Choose a target from this package to compose one workload.'}</p></div><strong>{targetLabel}</strong></div>
       {!target && <label>Package target<select aria-label="Quick Load target" value={selectedTarget ? `${selectedTarget.type}:${selectedTarget.resourceId}` : ''}
         onChange={event => {
-          const [type, ...id] = event.currentTarget.value.split(':');
-          const next = type && id.length && validTarget(type) ? { type, resourceId: id.join(':') } : null;
+          const selected = targetOptions.find(item => `${item.type}:${item.resourceId}` === event.currentTarget.value);
+          const next = selected ? { type: selected.type, resourceId: selected.resourceId, logicalId: selected.logicalId } : null;
           if (next?.type === selectedTarget?.type && next?.resourceId === selectedTarget?.resourceId) return;
           if (dirtyRef.current && !window.confirm('Replace the current Quick Load settings and inputs with a new target?')) return;
           invalidateDraft(); dirtyRef.current = false; setDirty(false);
-          setSelectedTarget(next); setBusiness({ inputs: {}, vars: {} }); setLogicalTargetId('');
+          setSelectedTarget(next); setBusiness({ inputs: {}, vars: {} }); setLogicalTargetId(next?.logicalId || '');
         }}>
-        <option value="">Select a Template, Flow, or Tool</option>{targetOptions.map(item => <option key={`${item.type}:${item.logicalId}`} value={`${item.type}:${item.logicalId}`}>{item.type} · {item.logicalId} · {item.state}</option>)}
+        <option value="">Select a Template, Flow, or Tool</option>{targetOptions.map(item => <option key={`${item.type}:${item.resourceId}`} value={`${item.type}:${item.resourceId}`}>{item.type} · {item.logicalId} · {item.state}</option>)}
       </select>{targetListState === 'loading' && <small role="status">Loading package targets…</small>}{targetListState === 'error' && <small role="alert">Package targets could not be loaded. Retry from the Explorer.</small>}</label>}
       <div className="att-load-grid">
         <label>Load template / preset<select aria-label="Load template or preset" value={templateId} onChange={event => selectTemplate(event.currentTarget.value)} disabled={!policy || !inlineLoadEnabled}>
@@ -356,13 +374,24 @@ export function QuickLoadPage({ api, packageId, target, initialTemplateId = '', 
         {model === 'arrivalRate' && <label>Maximum concurrent<input type="number" min="1" step="1" value={maxConcurrent} onChange={event => change(setMaxConcurrent, event.currentTarget.value)} /></label>}
         <label>Duration<input value={duration} onChange={event => change(setDuration, event.currentTarget.value)} placeholder="e.g. 30s or 5m" /></label>
       </div>
-      {environmentState === 'loading' && <p role="status">Loading package environments…</p>}{environmentState === 'error' && <p className="att-help">Environment profiles are unavailable; the package default remains selectable.{onRetryEnvironments && <> <button type="button" onClick={onRetryEnvironments}>Retry</button></>}</p>}
+      {environmentState === 'loading' && <p role="status">Loading package environments…</p>}{environmentState === 'error' && <p className="att-help" role="alert">Environment profiles are unavailable; the package default remains selectable.{onRetryEnvironments && <> <button className="button button-quiet" type="button" onClick={onRetryEnvironments}>Retry profiles</button></>}</p>}
+      {environmentNotice && <p role="status">{environmentNotice}</p>}
       <p className="att-help">{policyMessage}</p>
     </section>
     <section className="att-load-section" aria-labelledby="quick-load-inputs">
       <div className="att-section-heading"><div><h2 id="quick-load-inputs">Inputs and variables</h2><p>Values from the safe debug sidecar stay editable as ATT-authored literals.</p></div>
         <button type="button" onClick={() => { invalidateDraft(); setBusiness(templateBusiness.current); setResetKey(value => value + 1); setPreset('custom'); dirtyRef.current = true; setDirty(true); }}>Reset inputs to sidecar defaults</button></div>
       <TypedSidecarForm value={business} groups={groups} resetKey={resetKey} onChange={next => { invalidateDraft(); setBusiness(next); setBusinessValid(true); setPreset('custom'); dirtyRef.current = true; setDirty(true); }} onValidityChange={setBusinessValid} />
+      {sidecarState === 'loading' && <p role="status">Loading safe target defaults…</p>}
+      {sidecarState === 'ready' && <p role="status">Target defaults are ready.</p>}
+      {sidecarState === 'error' && <div className="att-inline-error" role="alert">
+        <p>{sidecarError}</p>
+        {sidecarRequestId && <p className="att-help">Request ID: <code>{sidecarRequestId}</code></p>}
+        {sidecarDiagnostics.length > 0 && <ul>{sidecarDiagnostics.map((item, index) => <li key={`${item.code || item.path || 'sidecar-diagnostic'}-${index}`}>
+          {[item.severity, item.code, item.reason, item.field, item.path].filter(Boolean).join(' · ')}{item.message || item.summary ? `: ${item.message || item.summary}` : ''}
+        </li>)}</ul>}
+        <button type="button" onClick={() => setSidecarRefresh(value => value + 1)}>Retry target defaults</button>
+      </div>}
     </section>
     <section className="att-load-section" aria-labelledby="quick-load-advanced">
       <button className="att-quick-load-disclosure" type="button" aria-expanded={advancedOpen} onClick={() => setAdvancedOpen(value => !value)}>Advanced Settings {advancedOpen ? '−' : '+'}</button>

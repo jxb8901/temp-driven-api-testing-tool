@@ -121,20 +121,47 @@ rm -rf "$ROOT_DIR/target/release"; mkdir -p "$LOCAL_WORK" "$SERVER_WORK" "$DIST_
 tar -xzf "$LOCAL_ARCHIVE" -C "$LOCAL_WORK"
 LOCAL_PACKAGE_DIR="$LOCAL_WORK/$LOCAL_PACKAGE_NAME"
 LOCAL_PACKAGE_ROOT="$LOCAL_PACKAGE_DIR/packages/default"
-for required in att.sh att.bat lib config/att-server.example.yaml config/config.yaml config/dbhelpers config/mqhelpers config/tools schemas/catalog.yaml packages/default/testcase packages/default/templates packages/default/testdata packages/default/tools; do
+for required in att.sh att.bat lib config/att-server.example.yaml config/config.yaml config/dbhelpers config/mqhelpers config/tools packages/default/testcase packages/default/templates packages/default/testdata packages/default/tools; do
   if [ ! -e "$LOCAL_PACKAGE_DIR/$required" ]; then echo "Local archive is missing required layout path: $required" >&2; exit 2; fi
 done
+if [ -e "$LOCAL_PACKAGE_DIR/schemas" ]; then
+  echo "Local archive must not install an ATT_HOME/schemas runtime source: $LOCAL_ARCHIVE" >&2; exit 2
+fi
 LOCAL_RUNTIME_JAR="$LOCAL_PACKAGE_DIR/lib/att-local-${VERSION}.jar"
 if [ ! -f "$LOCAL_RUNTIME_JAR" ]; then
   echo "Local archive is missing its combined ATT runtime: lib/att-local-${VERSION}.jar" >&2; exit 2
 fi
-python3 - "$LOCAL_RUNTIME_JAR" <<'PYZIP'
-import sys, zipfile
-required = {"att-build.properties", "att/FrameworkRunner.class", "att/worker/WorkerMain.class"}
-with zipfile.ZipFile(sys.argv[1]) as archive:
-    missing = required.difference(archive.namelist())
-if missing:
-    raise SystemExit("Local runtime jar is incomplete: " + ", ".join(sorted(missing)))
+python3 - "$LOCAL_RUNTIME_JAR" "$ROOT_DIR/att-engine/src/main/resources/att-schemas" <<'PYZIP'
+import collections
+import pathlib
+import sys
+import zipfile
+
+jar_path = pathlib.Path(sys.argv[1])
+schema_source = pathlib.Path(sys.argv[2])
+with zipfile.ZipFile(jar_path) as archive:
+    names = archive.namelist()
+    required = {"att-build.properties", "att/FrameworkRunner.class", "att/worker/WorkerMain.class"}
+    missing = required.difference(names)
+    if missing:
+        raise SystemExit("Local runtime jar is incomplete: " + ", ".join(sorted(missing)))
+    embedded_names = [name for name in names if name.startswith("att-schemas/") and not name.endswith("/")]
+    duplicates = sorted(name for name, count in collections.Counter(embedded_names).items() if count != 1)
+    expected = {
+        "att-schemas/" + path.relative_to(schema_source).as_posix(): path.read_bytes()
+        for path in schema_source.rglob("*") if path.is_file()
+    }
+    actual = {name: archive.read(name) for name in embedded_names}
+    missing_schemas = sorted(set(expected).difference(actual))
+    extra_schemas = sorted(set(actual).difference(expected))
+    changed_schemas = sorted(name for name in set(expected).intersection(actual) if expected[name] != actual[name])
+if duplicates or missing_schemas or extra_schemas or changed_schemas:
+    details = []
+    if duplicates: details.append("duplicate entries=" + ", ".join(duplicates[:10]))
+    if missing_schemas: details.append("missing entries=" + ", ".join(missing_schemas[:10]))
+    if extra_schemas: details.append("unexpected entries=" + ", ".join(extra_schemas[:10]))
+    if changed_schemas: details.append("source/JAR bytes differ=" + ", ".join(changed_schemas[:10]))
+    raise SystemExit("Local runtime schema registry does not match the Engine build: " + "; ".join(details))
 PYZIP
 if [ -e "$LOCAL_PACKAGE_DIR/config/att-server.yaml" ] || [ -e "$LOCAL_PACKAGE_ROOT/config/att-server.yaml" ] || [ -e "$LOCAL_PACKAGE_DIR/data" ]; then
   echo "Local archive must not contain an active Server config or Server data directory" >&2; exit 2

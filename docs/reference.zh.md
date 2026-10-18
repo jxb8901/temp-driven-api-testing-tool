@@ -2423,7 +2423,7 @@ YAML 中可保留非 secret topology：JDBC URL、MQ host/port、queue manager�
 
 ### Schema catalog
 
-[`schemas/catalog.yaml`](../schemas/catalog.yaml) 是 active schema 的 source of truth。Package validation 檢查 registrations；封存 schema 不會成為 active runtime contract。完整矩陣見 [Schema and Version Matrix](reference.zh/appendices/schema-matrix.md)。
+Repository `schemas/catalog.yaml` 是建立版本相符 ATT Engine JAR 內嵌 registry 的 build input。Runtime 唯一權威來源是該版本鎖定的 classpath registry；`ATT_HOME/schemas/` 和 Package-local `schemas/` 均不能新增或替換 schemas。Package validation 會檢查 Engine 登錄的 resources；封存 schema 只有在安裝的 Engine 明確支援時才是 runtime contract。完整矩陣見 [Schema and Version Matrix](reference.zh/appendices/schema-matrix.md)。
 
 ### 設定 package-wide options
 
@@ -2984,9 +2984,9 @@ ATT prefixes Case log blocks whose section or nested status is ERROR, FAIL or IN
 ./att.sh validate --package
 ```
 
-針對單一環境可執行 `./att.sh validate --config config/config.yaml --env SIT --package`。ATT 僅接受 [Schema and Version Matrix](reference.zh/appendices/schema-matrix.md) 列出的 active schemas。`schemas/history/` 中的舊 schema 僅供歷史參考，不是 runtime compatibility contract。請先更新 `schemaVersion` 並將欄位遷移至現行契約，再執行 validation。診斷會保留原始違規、檔案及 YAML 欄位位置，並提供 migration guidance；ATT 不會改寫 descriptor。例如，將 historical Render Action 改為使用 `&{path}` 的 Assign，再依[Actions and Typed Values](reference.zh/actions.md)傳遞 resulting String。Unsupported version 會在執行前失敗。
+針對單一環境可執行 `./att.sh validate --config config/config.yaml --env SIT --package`。ATT 使用版本相符 Engine JAR 內嵌的 registry 驗證 descriptor，完整清單見 [Schema and Version Matrix](reference.zh/appendices/schema-matrix.md)。Repository `schemas/` 是 build input；舊 `ATT_HOME/schemas/` 或 package-local 目錄也不是 runtime schema 來源。`schemas/history/` 的舊 schema 僅在該 Engine 明確支援時才可作為 runtime contract，否則只供歷史參考。請先更新 `schemaVersion` 並將欄位遷移至現行契約，再執行 validation。診斷會保留原始違規、檔案及 YAML 欄位位置，並提供 migration guidance；ATT 不會改寫 descriptor。例如，將 historical Render Action 改為使用 `&{path}` 的 Assign，再依[Actions and Typed Values](reference.zh/actions.md)傳遞 resulting String。Unsupported version 會在執行前失敗。
 
-現行 schema 位於 [`schemas/`](../schemas)，較舊定義位於 [`schemas/history/`](../schemas/history)。`validate --package` 會檢查 catalog 登錄的每一份 schema，即使 package 沒有使用。缺少、無法讀取、不安全或重複的註冊 schema 會硬性回報 `PACKAGE_INVALID`。Validation 不會改寫 YAML。請檢視 migration guidance、更新檔案，再針對每個選定的 `--env` 重跑 package validation。
+現行 schema 原始檔及歷史版本位於 repository `schemas/` build-input tree，不會安裝在 ATT_HOME。Runtime `validate --package` 會檢查 Engine 內嵌 catalog 登錄的每一份 schema，即使 Package 沒有使用。缺少、無法讀取、不安全或重複的嵌入 resource 會硬性回報 `PACKAGE_INVALID`。Engine 從 classpath 讀取 catalog 和 schema bytes；其 private SHA-256 cache 是經驗證的相容 materialization，不是另一個 source of truth。Validation 不會改寫 YAML。請檢視 migration guidance、更新檔案，再針對每個選定的 `--env` 重跑 package validation。
 
 Package validation 會依照 Debug execution 相同的 discovery 與 schema/input validation，檢查現有 Template、Flow、分組及未分組 Tool 的 `debug.yaml` sidecar。歷史 schema version 與不符合現行 schema 的結構會在執行 `att debug` 前回報；可選 sidecar 缺少時仍屬有效。
 
@@ -3131,7 +3131,7 @@ Maintainer implementation sequencing、scheduler internals、resource-owner deta
 
 ## Appendix A — schema 與 version matrix
 
-現行 active schemas（source of truth：`schemas/catalog.yaml`）：
+現行 active schemas（由版本相符 ATT Engine JAR 內嵌 registry 提供，repository `schemas/catalog.yaml` 為其 build input）：
 
 | Artifact | 現行 schema |
 |---|---|
@@ -3156,7 +3156,7 @@ Maintainer implementation sequencing、scheduler internals、resource-owner deta
 | CI summary | att-ci-summary/v2.1 |
 | JUnit XML | att-junit/v2.1 |
 
-本次調整的 resource/config schema 舊版本已移至 schemas/history，僅供歷史參考，不是 active execution contract。Unsupported version 會在 validation 失敗並提供 migration guidance。schemas/catalog.yaml 是 repository authoritative catalog。Package validation 會驗證已註冊的 schema resource 本身；封存不代表舊版本仍有 runtime compatibility。
+本次調整的 resource/config schema 舊版本位於 `schemas/history/`，除非嵌入的 Engine registry 登錄且支援，否則僅供歷史參考，不是 active execution contract。Unsupported version 會在 validation 失敗並提供 migration guidance。Repository `schemas/catalog.yaml` 僅為 build input；runtime 唯一權威來源是版本相符 ATT Engine JAR 內嵌 registry。Runtime 會從 classpath 讀取資源，並可在 private per-user temporary directory 建立經驗證、以內容 SHA-256 定位的相容快取。快取會保留目前及緊接上一版 registry 供 rollback；只有取得排他 OS lock 並確認沒有 Worker 使用後，才會刪除較舊版本。若清理中斷，下一次初始化會重試。Validation revision 會綁定 Engine/registry identity、Package files、shared config files 及選定 Environment；Worker 處理請求前會驗證 Server 傳入的 registry identity。`ATT_HOME/schemas/` 及 package-local `schemas/` 不是 runtime 來源，也不能覆寫 registry。Package validation 會驗證 Engine 登錄的 schema resources；封存 schema 不會自動成為可用的 runtime contract。
 
 <!-- att-docs:historical -->
 Load v1.6 及 MQHelper v1.2 是 loader 支援的相容歷史 schema；既有 scalar routing 及 legacy evidence policy 維持。新路由／配額欄位須使用 active schema。

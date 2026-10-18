@@ -791,7 +791,7 @@ public final class PackageResourceInspector implements AutoCloseable {
         return bounded(result);
     }
 
-    /** Returns safe business defaults and a validated one-workload Quick Load preview. */
+    /** Returns safe target identity and business defaults without validating Load policy or workload. */
     public Map<String, Object> inspectQuickLoadForm(String type, String resourceId, String model,
                                                     String expectedRevisionDigest) throws Exception {
         Index index = index();
@@ -799,7 +799,20 @@ public final class PackageResourceInspector implements AutoCloseable {
         Resource resource = index.byId.get(resourceId);
         if (resource == null || !debuggable(resource.type) || !resource.type.equals(type) || !"ready".equals(resource.state))
             throw new ResourceNotFoundException();
-        return quickLoadProjection(index, resource, model, null, null, null);
+        if (!"virtualUsers".equals(model) && !"arrivalRate".equals(model))
+            throw new IllegalArgumentException("Quick Load model is invalid");
+        Map<String, Object> projectedInput = debugEngine(frameworkConfig())
+                .projectLoadBusinessInput(resource.type, resource.logicalId, null);
+        Map<String, Object> result = new LinkedHashMap<String, Object>();
+        result.put("resource", summary(resource, index));
+        result.put("target", target(resource));
+        result.put("model", model);
+        result.put("input", projectedInput.get("input"));
+        result.put("debugLocalTestdataOmitted", projectedInput.get("debugLocalTestdataOmitted"));
+        result.put("redacted", projectedInput.get("redacted"));
+        result.put("revisionDigest", index.revisionDigest);
+        result.put("redactionEnabled", Boolean.valueOf(redactionEnabled));
+        return bounded(result);
     }
 
     /** Validates business defaults and policy overrides, returning a private typed scenario for draft creation. */
@@ -1018,6 +1031,47 @@ public final class PackageResourceInspector implements AutoCloseable {
         return bounded(response);
     }
 
+    /** Returns bounded structured Load metadata with business values projected through the active redaction policy. */
+    public Map<String, Object> inspectLoadCatalogDetail(String relativePath, String expectedRevisionDigest) throws Exception {
+        if (relativePath == null || relativePath.trim().isEmpty() || relativePath.length() > 1024)
+            throw new IllegalArgumentException("Load resource ID is invalid");
+        Index index = index();
+        if (expectedRevisionDigest != null && !expectedRevisionDigest.equals(index.revisionDigest))
+            throw new StaleResourceCursorException();
+        PackageResourceResolver.PackageResource source = resources.resolvePackageRelative(relativePath, PackageResourceResolver.Kind.FILE);
+        if (!source.logicalName().startsWith("load/")) throw new ResourceNotFoundException();
+        Map<String, Object> result = new LinkedHashMap<String, Object>();
+        result.put("resourceId", source.logicalName());
+        result.put("path", source.logicalName());
+        result.put("sourceAvailable", Boolean.valueOf(loadSourceAllowed(source.canonicalPath(), source.logicalName())));
+        result.put("revisionDigest", index.revisionDigest);
+        try {
+            if (Files.size(source.canonicalPath()) > maxSourceBytes) throw new IllegalArgumentException("Load YAML exceeds the configured size limit");
+            LoadScenario scenario = new LoadScenarioLoader(packageRoot).load(source.canonicalPath());
+            Map<String, Object> definition = scenario.toMap();
+            Map<String, Object> projected = projectSafeLoadScenario(definition, debugEngine(frameworkConfig()));
+            @SuppressWarnings("unchecked") Map<String, Object> safeDefinition = (Map<String, Object>) projected.get("value");
+            boolean template = scenario.policyOnly() || !scenario.hasWorkloads();
+            result.put("kind", template ? "template" : "scenario");
+            result.put("validation", template ? "valid" : "unverified");
+            result.put("model", scenario.hasWorkloads()
+                    ? (scenario.model() == att.load.LoadScenario.Model.CLOSED ? "virtualUsers" : "arrivalRate")
+                    : policyModel(safeDefinition));
+            result.put("schemaVersion", scenario.schemaVersion());
+            result.put("workloadCount", Integer.valueOf(scenario.workloads().size()));
+            result.put("definition", safeDefinition);
+            result.put("redacted", projected.get("redacted"));
+        } catch (Exception invalid) {
+            Map<String, Object> diagnostic = safeLoadCatalogDiagnosticProjection(invalid);
+            result.put("kind", "invalid");
+            result.put("validation", "invalid");
+            result.put("workloadCount", Integer.valueOf(0));
+            result.put("diagnostic", diagnostic.get("summary"));
+            result.put("diagnostics", Collections.singletonList(diagnostic));
+        }
+        return bounded(result);
+    }
+
     /** Returns a policy-redacted read-only YAML projection for an authorized catalog entry. */
     public Map<String, Object> inspectLoadSource(String relativePath) throws Exception {
         PackageResourceResolver.PackageResource source = resources.resolvePackageRelative(relativePath, PackageResourceResolver.Kind.FILE);
@@ -1050,6 +1104,26 @@ public final class PackageResourceInspector implements AutoCloseable {
         if (message == null || message.trim().isEmpty()) return "Load YAML is invalid or unavailable.";
         return scrubSensitiveValues(message).replaceAll("(?i)(password|token|secret|credential)(\\s*[:=]\\s*)[^\\s,}]+", "$1$2[REDACTED]")
                 .replaceAll("(?:[A-Za-z]:)?[/\\\\][^\\s:]+", "[package path]");
+    }
+
+    private Map<String, Object> safeLoadCatalogDiagnosticProjection(Exception failure) {
+        Map<String, Object> diagnostic = new LinkedHashMap<String, Object>();
+        if (failure instanceof att.validation.DiagnosticException) {
+            att.validation.DiagnosticException typed = (att.validation.DiagnosticException) failure;
+            diagnostic.put("code", typed.code());
+            diagnostic.put("summary", safeLoadCatalogDiagnostic(new IllegalArgumentException(typed.summary())));
+            if (typed.field() != null) diagnostic.put("field", safeLoadCatalogDiagnostic(new IllegalArgumentException(typed.field())));
+            if (typed.suggestion() != null) diagnostic.put("suggestion", safeLoadCatalogDiagnostic(new IllegalArgumentException(typed.suggestion())));
+            if (typed.source() != null) {
+                if (typed.source().line() != null) diagnostic.put("line", typed.source().line());
+                if (typed.source().column() != null) diagnostic.put("column", typed.source().column());
+            }
+        }
+        if (!diagnostic.containsKey("summary")) {
+            diagnostic.put("code", "LOAD_CATALOG_INVALID");
+            diagnostic.put("summary", safeLoadCatalogDiagnostic(failure));
+        }
+        return diagnostic;
     }
 
     private String policyModel(Map<String, Object> scenario) {
@@ -1141,12 +1215,36 @@ public final class PackageResourceInspector implements AutoCloseable {
 
     private Map<String, Object> projectSafeLoadScenario(Map<String, Object> scenario, DebugEngine engine) {
         Map<String, Object> safe = new LinkedHashMap<String, Object>(scenario);
+        // Testdata can contain package-local filenames and generated data descriptors. Keep it out of
+        // the descriptive projection; resource details show workload configuration without paths.
+        safe.remove("testdata");
         List<Object> workloads = new ArrayList<Object>();
         boolean[] redacted = new boolean[] { false };
+        // Legacy single-workload documents store business values at the root.
+        Object rawLegacyTarget = safe.get("target");
+        if (safe.containsKey("inputs") || rawLegacyTarget instanceof Map) {
+            Map<String, Object> legacyBusiness = new LinkedHashMap<String, Object>();
+            if (safe.containsKey("inputs")) legacyBusiness.put("inputs", safe.get("inputs"));
+            Map<String, Object> legacyTarget = null;
+            if (rawLegacyTarget instanceof Map) {
+                @SuppressWarnings("unchecked") Map<String, Object> target = new LinkedHashMap<String, Object>((Map<String, Object>) rawLegacyTarget);
+                legacyTarget = target;
+                if (target.containsKey("arguments")) legacyBusiness.put("arguments", target.get("arguments"));
+            }
+            Map<String, Object> legacyProjection = engine.projectSafeValue(legacyBusiness);
+            @SuppressWarnings("unchecked") Map<String, Object> safeLegacyBusiness = (Map<String, Object>) legacyProjection.get("value");
+            redacted[0] |= Boolean.TRUE.equals(legacyProjection.get("redacted"));
+            if (safeLegacyBusiness.containsKey("inputs")) safe.put("inputs", safeLegacyBusiness.get("inputs"));
+            if (legacyTarget != null) {
+                if (safeLegacyBusiness.containsKey("arguments")) legacyTarget.put("arguments", safeLegacyBusiness.get("arguments"));
+                safe.put("target", legacyTarget);
+            }
+        }
         Object rawWorkloads = scenario.get("workloads");
         if (rawWorkloads instanceof List) for (Object rawWorkload : (List<?>) rawWorkloads) {
             if (!(rawWorkload instanceof Map)) { workloads.add(rawWorkload); continue; }
             @SuppressWarnings("unchecked") Map<String, Object> workload = new LinkedHashMap<String, Object>((Map<String, Object>) rawWorkload);
+            workload.remove("testdata");
             Map<String, Object> business = new LinkedHashMap<String, Object>();
             if (workload.containsKey("inputs")) business.put("inputs", workload.get("inputs"));
             if (workload.containsKey("vars")) business.put("vars", workload.get("vars"));
@@ -2279,7 +2377,11 @@ public final class PackageResourceInspector implements AutoCloseable {
     private String digestFiles(Set<Path> files, Map<String, Path> debugSidecars,
                                Map<String, Path> quickLoadPolicies) throws Exception {
         MessageDigest digest = MessageDigest.getInstance("SHA-256");
-        digest.update(utf8("ATT_ENGINE=" + att.Version.PRODUCT));
+        digest.update(utf8("ATT_ENGINE=" + att.Version.PRODUCT + ":" + att.Version.GIT_COMMIT));
+        digest.update((byte) 0);
+        digest.update(utf8("ATT_SCHEMA_REGISTRY=" + att.validation.SchemaFiles.registryDigest()));
+        digest.update((byte) 0);
+        digest.update(utf8("ATT_ENVIRONMENT=" + (environment == null ? "" : environment)));
         digest.update((byte) 0);
         List<Path> ordered = new ArrayList<Path>(files);
         Collections.sort(ordered);

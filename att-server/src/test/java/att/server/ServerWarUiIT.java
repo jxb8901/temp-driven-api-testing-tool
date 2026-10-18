@@ -522,7 +522,7 @@ class ServerWarUiIT {
         Path nestedTool = Files.createDirectories(packageRoot.resolve("tools/mq")).resolve("check-queue.sh");
         Path configRoot = Files.createDirectories(localHome.resolve("config"));
         Files.writeString(configRoot.resolve("config.yaml"),
-                "schemaVersion: att-config/v2.12\nenvironment: SIT\nenvironments:\n  SIT:\n    testdata: [testdata/generated.yaml]\n"
+                "schemaVersion: att-config/v2.12\nenvironment: SIT\nenvironments:\n  SIT:\n    testdata: [testdata/generated.yaml]\n  UAT: {}\n"
                         + "testcase:\n  root: testcase\ntemplates:\n  root: templates\ntools:\n  checkQueue:\n"
                         + "    name: Check queue\n    description: Nested Tool script default source\n"
                         + "    command: [bash, tools/mq/check-queue.sh]\n    stdoutFormat: text\n    arguments: {}\n");
