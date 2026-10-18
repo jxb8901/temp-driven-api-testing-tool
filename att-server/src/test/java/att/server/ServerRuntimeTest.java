@@ -850,7 +850,7 @@ class ServerRuntimeTest {
         Files.writeString(root.resolve("testcase/cases.yaml"),"schemaVersion: att-sidecar/v2.2\nid: cases\nexcel:\n  sheet: default=Cases\n  caseId: ID\n  tags: Tags\nstages:\n  - key: main\n    template: Template\n    required: true\n");
         new att.api.DefaultAttService().snapshot(new att.api.SnapshotRequest(root,runtimeConfig,"SIT",List.of(workbook),null,java.util.Set.of(),false));
         Path server=temp.resolve("unified-server.yaml");
-        Files.writeString(server,"server:\n  runtimeConfigPath: "+yaml(runtimeConfig)+"\n  dataDir: "+yaml(temp.resolve("unified-data"))+"\n  javaExecutable: "+yaml(javaBin)+"\n  inspection:\n    enabled: true\n    timeoutMs: 30000\n  scheduling:\n    enabled: true\nworkers:\n  maxConcurrent: 1\n  queuedLimit: 2\npackages:\n  allowedRoots: ["+yaml(root)+"]\n  entries:\n    p: "+yaml(root)+"\n");
+        Files.writeString(server,"server:\n  runtimeConfigPath: "+yaml(runtimeConfig)+"\n  dataDir: "+yaml(temp.resolve("unified-data"))+"\n  javaExecutable: "+yaml(javaBin)+"\n  auth: {mode: local}\n  inspection:\n    enabled: true\n    timeoutMs: 30000\n  scheduling:\n    enabled: true\nworkers:\n  maxConcurrent: 1\n  queuedLimit: 2\npackages:\n  allowedRoots: ["+yaml(root)+"]\n  entries:\n    p: "+yaml(root)+"\n");
         Path libs=Files.createDirectory(temp.resolve("unified-libs"));
         for(String module:List.of("att-worker","att-engine","att-server-api","att-security"))addModuleJar(libs,module,Path.of(module+"/target/classes"));
         addWorkerClasspathJars(libs);
