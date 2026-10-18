@@ -1115,8 +1115,8 @@ public final class PackageResourceInspector implements AutoCloseable {
             if (typed.field() != null) diagnostic.put("field", safeLoadCatalogDiagnostic(new IllegalArgumentException(typed.field())));
             if (typed.suggestion() != null) diagnostic.put("suggestion", safeLoadCatalogDiagnostic(new IllegalArgumentException(typed.suggestion())));
             if (typed.source() != null) {
-                if (typed.source().line() != null) diagnostic.put("line", typed.source().line());
-                if (typed.source().column() != null) diagnostic.put("column", typed.source().column());
+                diagnostic.put("line", typed.source().line());
+                diagnostic.put("column", typed.source().column());
             }
         }
         if (!diagnostic.containsKey("summary")) {
