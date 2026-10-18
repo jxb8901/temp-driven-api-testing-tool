@@ -248,7 +248,7 @@ async function main() {
     await page.getByRole('heading', { name: 'load/scenario.yaml', level: 1 }).waitFor();
     assert.equal(await page.locator('.att-code-editor').count(), 0, 'structured details must load before optional source');
     await page.getByRole('button', { name: 'Show YAML Source' }).click();
-    await page.getByLabel('Load YAML Source').waitFor();
+    await page.getByRole('region', { name: 'Load YAML Source', exact: true }).waitFor();
     await page.getByRole('button', { name: 'Back to LOAD Catalog' }).click();
     await page.getByRole('heading', { name: 'LOAD Catalog', level: 1, exact: true }).waitFor();
     await page.getByText('Environment: UAT', { exact: false }).waitFor();
