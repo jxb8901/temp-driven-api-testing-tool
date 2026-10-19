@@ -38,10 +38,9 @@ class InspectionCacheRuntimeTest {
     @Test void startupWarmupIsNonblockingAndRetryBoundedForUnavailableWorkers() throws Exception {
         Path root=fixture("unavailable");AtomicInteger attempts=new AtomicInteger();
         ServerConfig config=config(root,1,"    warmup:\n      enabled: true\n      keys: [{packageId: p}]\n");
-        long start=System.nanoTime();
         ServerRuntime runtime=new ServerRuntime(config,libs().toString(),builder->{attempts.incrementAndGet();throw new IOException("Unavailable");});
         try {
-            assertTrue(TimeUnit.NANOSECONDS.toMillis(System.nanoTime()-start)<2000,"Warmup must not wait for a Worker during startup");
+            assertEquals(0,attempts.get(),"Warmup must not wait for a Worker during startup");
             await(()->attempts.get()==3);
             Thread.sleep(1200);assertEquals(3,attempts.get());
         } finally {runtime.close();}

@@ -3,13 +3,18 @@ package att.load;
 import att.console.ExecutionConsoleFormatter;
 import att.core.ResultStatus;
 
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
-import java.util.concurrent.TimeUnit;
+import java.util.function.Consumer;
 
 /**
- * Bounded LOAD console projection for the Worker. Successful iterations update counters only;
- * a progress line is produced on the configured interval, and errors are rate-limited.
+ * Bounded LOAD console projection for the Worker. Successful iterations update counters only.
+ * Progress is emitted at most once per interval, from iteration callbacks or from a timer while
+ * the run is active and no callbacks arrive. Errors are rate-limited.
  * The line text comes from {@link ExecutionConsoleFormatter}.
  */
 public final class LoadConsoleSampler {
@@ -30,16 +35,27 @@ public final class LoadConsoleSampler {
     private final AtomicLong suppressedErrors = new AtomicLong();
     private final AtomicBoolean startEmitted = new AtomicBoolean();
     private final AtomicBoolean finished = new AtomicBoolean();
+    private final AtomicBoolean periodicArmed = new AtomicBoolean();
     private final Object errorLock = new Object();
+    private final Consumer<String> periodicSink;
+    private volatile ScheduledExecutorService periodic;
     private volatile String model = "unknown";
-    private volatile long lastProgressNanos;
+    private final AtomicLong lastProgressNanos = new AtomicLong();
     private volatile long lastErrorNanos;
 
     public LoadConsoleSampler(String runId) {
-        this(runId, 5000L, 1000L);
+        this(runId, 5000L, 1000L, null);
+    }
+
+    public LoadConsoleSampler(String runId, Consumer<String> periodicProgress) {
+        this(runId, 5000L, 1000L, periodicProgress);
     }
 
     public LoadConsoleSampler(String runId, long intervalMs, long errorIntervalMs) {
+        this(runId, intervalMs, errorIntervalMs, null);
+    }
+
+    public LoadConsoleSampler(String runId, long intervalMs, long errorIntervalMs, Consumer<String> periodicProgress) {
         String supplied = runId == null ? "" : runId.trim();
         if (supplied.isEmpty()) this.runId = "unknown";
         else {
@@ -48,6 +64,7 @@ public final class LoadConsoleSampler {
         }
         this.intervalNanos = TimeUnit.MILLISECONDS.toNanos(Math.max(1L, intervalMs));
         this.errorIntervalNanos = TimeUnit.MILLISECONDS.toNanos(Math.max(0L, errorIntervalMs));
+        this.periodicSink = periodicProgress;
     }
 
     /** One start line for the run. Later calls return null. */
@@ -63,7 +80,8 @@ public final class LoadConsoleSampler {
         adoptRunId(observedRunId);
         if (!startEmitted.compareAndSet(false, true)) return null;
         model = ExecutionConsoleFormatter.token(loadModel, "unknown");
-        lastProgressNanos = System.nanoTime();
+        lastProgressNanos.set(System.nanoTime());
+        armPeriodic();
         return ExecutionConsoleFormatter.loadStart(runId, model, null);
     }
 
@@ -90,17 +108,60 @@ public final class LoadConsoleSampler {
             String error = errorLine(event);
             if (error != null) return error;
         }
-        long now = System.nanoTime();
-        if (lastProgressNanos != 0L && now - lastProgressNanos >= intervalNanos) {
-            lastProgressNanos = now;
-            return progress("PROGRESS", null);
-        }
+        if (claimProgress(System.nanoTime())) return progress("PROGRESS", null);
         return null;
     }
 
     public String finish(String status) {
         if (!finished.compareAndSet(false, true)) return null;
+        stopPeriodic();
         return progress("COMPLETE", ExecutionConsoleFormatter.token(status, "UNKNOWN"));
+    }
+
+    private void armPeriodic() {
+        if (periodicSink == null || !periodicArmed.compareAndSet(false, true)) return;
+        ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor(new ThreadFactory() {
+            @Override public Thread newThread(Runnable task) {
+                Thread thread = new Thread(task, "att-load-console-sampler");
+                thread.setDaemon(true);
+                return thread;
+            }
+        });
+        periodic = scheduler;
+        long intervalMs = Math.max(1L, TimeUnit.NANOSECONDS.toMillis(intervalNanos));
+        scheduler.scheduleAtFixedRate(new Runnable() {
+            @Override public void run() {
+                try { publishPeriodic(); }
+                catch (RuntimeException ignored) { /* One failed snapshot must not cancel later intervals. */ }
+            }
+        }, intervalMs, intervalMs, TimeUnit.MILLISECONDS);
+    }
+
+    private void publishPeriodic() {
+        if (finished.get() || !claimProgress(System.nanoTime()) || finished.get()) return;
+        String line = progress("PROGRESS", null);
+        if (line != null) periodicSink.accept(line);
+    }
+
+    private void stopPeriodic() {
+        ScheduledExecutorService scheduler = periodic;
+        if (scheduler == null) return;
+        scheduler.shutdownNow();
+        try {
+            if (!scheduler.awaitTermination(2, TimeUnit.SECONDS)) scheduler.shutdownNow();
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            scheduler.shutdownNow();
+        }
+    }
+
+    /** One progress line per interval across iteration threads and the periodic timer. */
+    private boolean claimProgress(long now) {
+        while (true) {
+            long previous = lastProgressNanos.get();
+            if (previous == 0L || now - previous < intervalNanos) return false;
+            if (lastProgressNanos.compareAndSet(previous, now)) return true;
+        }
     }
 
     private void adoptRunId(String observed) {

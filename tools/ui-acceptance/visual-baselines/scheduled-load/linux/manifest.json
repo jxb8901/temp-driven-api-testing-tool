@@ -1,6 +1,6 @@
 {
   "repositoryVersion": "4.2.1",
-  "generatedAt": "2026-10-17T06:29:00.008Z",
+  "generatedAt": "2026-10-19T12:00:27.968Z",
   "platform": "linux",
   "architecture": "x64",
   "maxChangedPixelRatio": 0.04,
@@ -169,5 +169,5 @@
       "file": "webkit-scheduled-390-dark.png"
     }
   ],
-  "reviewReason": "Issue #235 intentionally unifies RUN/LOAD Schedules; reviewed replacement Linux captures for the new list-first layout."
+  "reviewReason": "Reviewed Linux captures from master CI run 39248395835 (28cdf158). The #/load-schedules page is the unified Schedules list from #247 and #249 (filters, Nightly payments, Weekly settlement, Hourly auth). These 18 captures replace the 2026-10-17 baselines."
 }

@@ -561,13 +561,16 @@ final class JobStore implements AutoCloseable {
         }
         return ids;
     }
+    static final int STORAGE_CANDIDATE_PAGE = 200;
+    /** Tests lower this with {@code ServerRuntime.storageCandidateBatchLimit} to reach the sweep budget. */
+    int storageCandidatePage = STORAGE_CANDIDATE_PAGE;
     synchronized List<Map<String,Object>> storageCandidates() throws Exception { return storageCandidates(null, null); }
     synchronized List<Map<String,Object>> storageCandidates(String afterFinishedAt, String afterJobId) throws Exception {
         List<Map<String,Object>> rows=new ArrayList<>();
         boolean page=afterFinishedAt!=null&&afterJobId!=null;
-        String sql="SELECT job_id,finished_at,command,status,artifact_recovery,worker_quarantined FROM jobs WHERE status IN ('PASS','FAIL','ERROR','INVALID','CANCELLED') AND finished_at IS NOT NULL AND (retention_state IS NULL OR retention_state='')"
+        String sql="SELECT job_id,finished_at,command,status,artifact_recovery,worker_quarantined FROM jobs WHERE status IN ('PASS','FAIL','ERROR','INVALID','CANCELLED') AND finished_at IS NOT NULL AND (retention_state IS NULL OR retention_state='') AND worker_quarantined=FALSE AND artifact_recovery=FALSE"
                 +(page?" AND (finished_at>? OR (finished_at=? AND job_id>?))":"")
-                +" ORDER BY finished_at ASC, job_id ASC LIMIT 200";
+                +" ORDER BY finished_at ASC, job_id ASC LIMIT "+storageCandidatePage;
         try(Connection c=connect();PreparedStatement p=c.prepareStatement(sql)) {
             if(page){p.setString(1,afterFinishedAt);p.setString(2,afterFinishedAt);p.setString(3,afterJobId);}
             try(ResultSet r=p.executeQuery()) {
