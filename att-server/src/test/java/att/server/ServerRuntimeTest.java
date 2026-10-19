@@ -447,12 +447,15 @@ class ServerRuntimeTest {
             assertEquals("declared",declared.get("state"));
             assertTrue(declared.toString().contains("SIT"));assertTrue(declared.toString().contains("UAT"));
             Map<String,Object> effective=runtime.inspectConfiguration("p","effective","SIT",null,"alice");
-            assertEquals("ready",effective.get("state"),effective.toString());assertEquals("SIT",effective.get("environment"));
+            assertEquals("degraded",effective.get("state"),effective.toString());assertEquals("SIT",effective.get("environment"));
+            assertEquals("not-validated",effective.get("executionReadiness"));
+            assertTrue(effective.toString().contains("ORDERS_DB_PASSWORD"));
             assertTrue(effective.toString().contains("config/dbhelpers/sit/orders.yaml"),effective.toString());
             Map<String,Object> defaultEffective=runtime.inspectConfiguration("p","effective",null,null,"globals",0,50,"alice");
-            assertEquals("ready",defaultEffective.get("state"),defaultEffective.toString());assertEquals("SIT",defaultEffective.get("environment"));
+            assertEquals("degraded",defaultEffective.get("state"),defaultEffective.toString());assertEquals("SIT",defaultEffective.get("environment"));
             Map<String,Object> comparison=runtime.inspectConfiguration("p","compare","SIT","UAT","dbhelpers",0,50,"alice");
-            assertEquals("ready",comparison.get("state"));
+            assertEquals("degraded",comparison.get("state"));
+            assertEquals("not-validated",comparison.get("executionReadiness"));
             @SuppressWarnings("unchecked") List<Map<String,Object>> fields=(List<Map<String,Object>>)comparison.get("fields");
             Map<String,Object> visibleUrl=fields.stream().filter(item->"dbhelpers.orders.url".equals(item.get("path"))).findFirst().orElseThrow(AssertionError::new);
             assertEquals("changed",visibleUrl.get("change"));
@@ -462,7 +465,8 @@ class ServerRuntimeTest {
             String publicData=declared+" "+effective+" "+comparison;
             assertTrue(publicData.contains("jdbc:postgresql://sit-db.example.internal:5432/orders"));
             assertTrue(publicData.contains("jdbc:postgresql://uat-db.example.internal:5432/orders"));
-            assertFalse(publicData.contains("inspection-test-password"));assertFalse(publicData.contains(packageRoot.toString()));
+            assertFalse(publicData.contains("inspection-test-password"));assertFalse(publicData.contains("inspection-test-user"));
+            assertFalse(publicData.contains(packageRoot.toString()));
             assertFalse(publicData.contains(sharedRuntimeConfig.toString()));
         } finally {runtime.close();}
     }

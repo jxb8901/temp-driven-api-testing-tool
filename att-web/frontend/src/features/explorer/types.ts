@@ -178,6 +178,7 @@ export interface TestdataRecordsResponse {
 
 export interface ConfigurationResponse {
   state?: string;
+  executionReadiness?: 'not-validated';
   view?: 'declared' | 'effective' | 'compare' | string;
   environment?: string;
   leftEnvironment?: string;

@@ -56,6 +56,14 @@ public final class FrameworkConfigLoader {
                 .forDiscovery(references.requirements(), references.helperFailures());
     }
 
+    /** Trusted parsed metadata snapshot; never resolves process environment values. */
+    public FrameworkConfig loadDiscoveryParsed(Path path, Path projectRoot, String selectedEnvironment,
+                                               Object loaded) throws IOException {
+        EnvironmentReferences references = EnvironmentReferences.discovery();
+        return loadInternal(path, projectRoot, projectRoot, selectedEnvironment, loaded, true, references)
+                .forDiscovery(references.requirements(), references.helperFailures());
+    }
+
     private FrameworkConfig loadInternal(Path path, Path runtimeConfigRoot, Path packageRoot,
                                          String selectedEnvironment, Object parsed, boolean supplied, EnvironmentReferences references) throws IOException {
         long inspectionStarted=System.nanoTime();

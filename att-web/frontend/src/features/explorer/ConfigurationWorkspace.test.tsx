@@ -50,7 +50,10 @@ describe('ConfigurationWorkspace', () => {
       getResource: vi.fn(async () => ({ resource: { type: 'template', resourceId: 'x' } })),
       getSafeSource: vi.fn(async () => ({ available: false })),
       getDeclaredConfiguration: vi.fn(async () => ({ environments: [], sections: [] })),
-      getEffectiveConfiguration: vi.fn(async () => ({ sections: [] })),
+      getEffectiveConfiguration: vi.fn(async () => ({ state: 'degraded', sections: [], diagnostics: [{
+        code: 'ATT-RESOURCE-ENV-REQUIRED', summary: 'Execution requires environment variable DB_PASSWORD',
+        descriptor: 'config/dbhelpers/sit.yaml', remediation: 'Configure the Worker environment, then validate the selected target.',
+      }] })),
       compareConfiguration: vi.fn(async () => ({ fields: [] })),
       listConfigurationFiles: vi.fn(async () => ({ items: [], total: 0 })),
       getConfigurationFileSource: vi.fn(async () => ({ available: false })),
@@ -70,6 +73,9 @@ describe('ConfigurationWorkspace', () => {
     expect(host.textContent).not.toContain('Show more DB fields (sensitive values stay hidden)');
     await showTab('Effective');
     expect(host.textContent).toContain('Show more DB fields (sensitive values stay hidden)');
+    expect(host.textContent).toContain('ATT-RESOURCE-ENV-REQUIRED');
+    expect(host.textContent).toContain('Execution dependencies have not been validated.');
+    expect(host.textContent).toContain('DB_PASSWORD');
     expect(api.getDeclaredConfiguration).toHaveBeenCalledWith('payments', expect.any(AbortSignal));
     await showTab('Compare');
     expect(host.textContent).toContain('Show more DB fields (sensitive values stay hidden)');

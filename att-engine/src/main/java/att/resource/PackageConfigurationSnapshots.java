@@ -51,7 +51,7 @@ public final class PackageConfigurationSnapshots {
             Set<Path> dependencies=effective?dependencies(resolver,file,raw,environment):Collections.singleton(file);
             Fingerprint first=fingerprint(resolver,dependencies,effective);
             if(!Arrays.equals(before,digestFile(resolver,file,new long[]{0})))continue;
-            FrameworkConfig parsed=effective?new FrameworkConfigLoader().loadParsed(file,resolver.packageRoot(),environment,raw):null;
+            FrameworkConfig parsed=effective?new FrameworkConfigLoader().loadDiscoveryParsed(file,resolver.packageRoot(),environment,raw):null;
             Fingerprint after=fingerprint(resolver,dependencies,effective);
             if(!Arrays.equals(first.digest,after.digest))continue;
             Snapshot snapshot=new Snapshot(raw,parsed,dependencies,after.digest,after.bytes*16L);
@@ -81,19 +81,22 @@ public final class PackageConfigurationSnapshots {
 
     private Set<Path> dependencies(PackageResourceResolver resolver,Path config,Map<?,?> raw,String environment) {
         Set<Path> paths=new TreeSet<Path>();paths.add(config);
-        addPaths(resolver,paths,raw.get("toolGroups"));
+        addPaths(resolver,paths,raw.get("toolGroups"),false);
         Map<?,?> profile=Collections.emptyMap();
         String selected=environment==null&&raw.get("environment") instanceof String?((String)raw.get("environment")).trim():environment;
         if(raw.get("environments") instanceof Map)for(Map.Entry<?,?> item:((Map<?,?>)raw.get("environments")).entrySet())
             if(String.valueOf(item.getKey()).equalsIgnoreCase(selected)&&item.getValue() instanceof Map)profile=(Map<?,?>)item.getValue();
         for(String name:Arrays.asList("dbhelpers","mqhelpers","sshhelpers","httphelpers","testdata"))
-            addPaths(resolver,paths,profile.containsKey(name)?profile.get(name):raw.get(name));
+            addPaths(resolver,paths,profile.containsKey(name)?profile.get(name):raw.get(name),!"testdata".equals(name));
         return paths;
     }
-    private void addPaths(PackageResourceResolver resolver,Set<Path> paths,Object configured) {
+    private void addPaths(PackageResourceResolver resolver,Set<Path> paths,Object configured,boolean allowMissing) {
         if(configured instanceof Iterable)for(Object path:(Iterable<?>)configured)if(path instanceof String) {
-            Path canonical=resolver.resolvePackageRelative(((String)path).replace('\\','/'),PackageResourceResolver.Kind.FILE).canonicalPath();
-            if(Files.isSymbolicLink(resolver.packageRoot().resolve((String)path)))throw new IllegalArgumentException("Unsafe configuration dependency");
+            Path authored=resolver.packageRoot().resolve(att.core.IdentifierValidator.relativePath(((String)path).replace('\\','/'),"configuration dependency")).normalize();
+            for(Path ancestor=authored;!ancestor.equals(resolver.packageRoot());ancestor=ancestor.getParent())
+                if(Files.isSymbolicLink(ancestor))throw new IllegalArgumentException("Unsafe configuration dependency");
+            Path canonical=allowMissing?resolver.internalCandidate(authored)
+                    :resolver.resolvePackageRelative(((String)path).replace('\\','/'),PackageResourceResolver.Kind.FILE).canonicalPath();
             // Retain the authored path too: canonical re-resolution detects symlink and rename changes.
             paths.add(resolver.packageRoot().resolve((String)path).normalize());
             paths.add(canonical);
@@ -120,7 +123,13 @@ public final class PackageConfigurationSnapshots {
         MessageDigest digest=MessageDigest.getInstance("SHA-256");long[] bytes={0};
         for(Path path:paths) {
             digest.update(resolver.packageRoot().relativize(path).toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));
-            digest.update((byte)0);digest.update(digestFile(resolver,path,bytes));
+            digest.update((byte)0);
+            for(Path ancestor=path;!ancestor.equals(resolver.packageRoot());ancestor=ancestor.getParent())
+                if(Files.isSymbolicLink(ancestor))throw new IllegalArgumentException("Unsafe configuration dependency");
+            resolver.internalCandidate(path);
+            boolean present=Files.exists(path,LinkOption.NOFOLLOW_LINKS);
+            digest.update((byte)(present?1:0));
+            if(present)digest.update(digestFile(resolver,path,bytes));
         }
         return new Fingerprint(digest.digest(),bytes[0]);
     }

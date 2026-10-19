@@ -20,6 +20,54 @@ class PackageConfigurationInspectorTest {
     @org.junit.jupiter.api.BeforeEach void enableServerPathPresentation() { att.core.PathPresentation.configure(true, true); }
     @org.junit.jupiter.api.AfterEach void restoreDefaultPathPresentation() { att.core.PathPresentation.configure(false, false); }
 
+    @Test void effectiveAndCompareAreValueFreeDiscoveryNotExecutionValidation() throws Exception {
+        Path root = packageRoot("degraded-config");
+        write(root.resolve("config/dbhelpers/sit.yaml"), helper("jdbc:postgresql://localhost/orders",
+                "${ENV:ORDERS_DB_USERNAME}", "${ENV:ATT_CONFIGURATION_MISSING_SECRET_244}", true));
+        PackageConfigurationSnapshots cache = new PackageConfigurationSnapshots();
+        PackageConfigurationInspector inspector = inspector(root).withSnapshots(cache, "discovery");
+        Map<String,Object> effective = inspector.inspect("effective", "SIT", null);
+        assertEquals("degraded", effective.get("state"));
+        assertEquals("not-validated", effective.get("executionReadiness"));
+        assertTrue(effective.toString().contains("ATT_CONFIGURATION_MISSING_SECRET_244"));
+        assertTrue(effective.toString().contains("ORDERS_DB_USERNAME"));
+        assertFalse(effective.toString().contains("profile-test"));
+        assertFalse(effective.toString().contains(root.toString()));
+        assertTrue(cache.get(root, Paths.get("config/config.yaml"), "SIT", "discovery", true).config.discoveryOnly());
+        assertThrows(IllegalStateException.class, () -> cache.get(root, Paths.get("config/config.yaml"),
+                "SIT", "discovery", true).config.requireExecutionConfig());
+        Map<String,Object> compared = inspector.inspect("compare", "SIT", "UAT", "dbhelpers", 0, 50);
+        assertEquals("degraded", compared.get("state"));
+        assertFalse(((List<?>)compared.get("fields")).isEmpty());
+        assertFalse(compared.toString().contains("profile-test"));
+        assertEquals("ready", inspector.inspect("effective", "UAT", null).get("state"));
+        assertThrows(Exception.class, () -> new att.config.FrameworkConfigLoader().load(
+                root.resolve("config/config.yaml"), root, "SIT"));
+    }
+
+    @Test void unavailableAndMalformedHelpersDegradeWithoutRemovingUnrelatedMetadata() throws Exception {
+        Path root = packageRoot("broken-helper-config");
+        Path helper = root.resolve("config/dbhelpers/sit.yaml");
+        Files.delete(helper);
+        PackageConfigurationSnapshots cache = new PackageConfigurationSnapshots();
+        PackageConfigurationInspector inspector = inspector(root).withSnapshots(cache, "repair");
+        Map<String,Object> missing = inspector.inspect("effective", "SIT", null);
+        assertEquals("degraded", missing.get("state"));
+        assertTrue(missing.toString().contains("ATT-RESOURCE-HELPER-UNAVAILABLE"));
+        assertFalse(((Map<?,?>)missing.get("globals")).isEmpty());
+        PackageConfigurationSnapshots.Snapshot absent = cache.get(root, Paths.get("config/config.yaml"), "SIT", "repair", true);
+        assertSame(absent, cache.get(root, Paths.get("config/config.yaml"), "SIT", "repair", true));
+        write(helper, "not: [valid\nsecret: do-not-disclose\n");
+        Map<String,Object> malformed = inspector.inspect("effective", "SIT", null);
+        assertEquals("degraded", malformed.get("state"));
+        assertTrue(malformed.toString().contains("ATT-RESOURCE-HELPER-INVALID"));
+        assertFalse(malformed.toString().contains("do-not-disclose"));
+        assertFalse(malformed.toString().contains(root.toString()));
+        write(helper, helper("jdbc:postgresql://localhost/orders", "fixed-user", "fixed-secret", true));
+        assertEquals("ready", inspector.inspect("effective", "SIT", null).get("state"));
+        assertNotSame(absent, cache.get(root, Paths.get("config/config.yaml"), "SIT", "repair", true));
+    }
+
     @Test void snapshotsReuseParsedProfilesAndReconcileDependencyContentWithoutMtimeHints() throws Exception {
         Path root=packageRoot("cached-profiles");
         PackageConfigurationSnapshots cache=new PackageConfigurationSnapshots();
@@ -40,7 +88,8 @@ class PackageConfigurationInspectorTest {
         assertSame(uat,cache.get(root,Paths.get("config/config.yaml"),"UAT",context,true));
         assertNotSame(updated,cache.get(root,Paths.get("config/config.yaml"),"SIT","policy-b",true));
         Files.move(dependency,dependency.resolveSibling("renamed.yaml"));
-        assertThrows(Exception.class,()->cache.get(root,Paths.get("config/config.yaml"),"SIT",context,true));
+        PackageConfigurationSnapshots.Snapshot absent=cache.get(root,Paths.get("config/config.yaml"),"SIT",context,true);
+        assertFalse(absent.config.helperDiscoveryFailures().isEmpty());
         Files.move(dependency.resolveSibling("renamed.yaml"),dependency);
         assertNotSame(updated,cache.get(root,Paths.get("config/config.yaml"),"SIT",context,true));
     }

@@ -990,6 +990,17 @@ class ServerWarUiIT {
         assertFalse(resources.toString().contains(localHome.toString()));
         assertFalse(resources.toString().contains(packageRoot.toString()));
         assertEquals(401, get(port, api + "/packages/payments/resources?type=template&query=DEGRADED", null));
+        String effectiveRoute = api + "/packages/payments/configuration/effective?environment=SIT&section=dbhelpers&limit=50";
+        JsonNode effective = getJson(port, effectiveRoute, auth);
+        assertEquals("degraded", effective.path("state").asText(), effective.toString());
+        assertEquals("not-validated", effective.path("executionReadiness").asText());
+        assertTrue(effective.path("diagnostics").toString().contains(variable));
+        assertTrue(effective.path("diagnostics").toString().contains("ATT-RESOURCE-HELPER-UNAVAILABLE"));
+        assertTrue(effective.path("diagnostics").toString().contains("ATT-RESOURCE-HELPER-INVALID"));
+        assertFalse(effective.toString().contains("PRIVATE_HELPER_SOURCE_CANARY"));
+        assertFalse(effective.toString().contains(localHome.toString()));
+        assertFalse(effective.toString().contains(packageRoot.toString()));
+        assertEquals(401, get(port, effectiveRoute, null));
     }
 
     private static int postJson(int port, String path, String authorization, String origin, String body) throws Exception {

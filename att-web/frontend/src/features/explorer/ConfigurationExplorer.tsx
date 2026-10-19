@@ -255,6 +255,16 @@ export function ConfigurationExplorer({ api, packageId, environment, onEnvironme
       <label>Filter fields <input type="search" value={query} maxLength={200} onChange={event => setQuery(event.currentTarget.value)} /></label>
     </div>
     <p role="status" aria-live="polite">{status}</p>
+    {!!data?.diagnostics?.length && <aside aria-label="Configuration readiness" role="note">
+      <p>{data.state === 'degraded'
+        ? 'Configuration metadata is available where valid. Execution dependencies have not been validated.'
+        : 'Configuration diagnostics'}</p>
+      <ul>{data.diagnostics.map((diagnostic, index) => <li key={`${diagnostic.code}-${index}`}>
+        <strong>{diagnostic.code}</strong>: {diagnostic.summary}
+        {diagnostic.descriptor && <span> ({diagnostic.descriptor})</span>}
+        {diagnostic.remediation && <p>{diagnostic.remediation}</p>}
+      </li>)}</ul>
+    </aside>}
     {error && <p className="att-error" role="alert">{error}</p>}
     {mode === 'declared' && data && <div className="att-config-results">
       <h3>Environment profiles</h3>
