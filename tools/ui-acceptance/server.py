@@ -132,8 +132,6 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(200, {"updated": True})
                 return
             parts = [unquote(part) for part in resource.strip("/").split("/") if part]
-        if parts and parts[0] == "configuration":
-            parts = ["packages", "payments"] + parts
             if len(parts) == 4 and parts[:2] == ["auth", "users"] and parts[3] == "password":
                 self.server.auth_password_resets.append(parts[2])
                 self._json(200, {"updated": True})
@@ -332,6 +330,8 @@ class Handler(BaseHTTPRequestHandler):
             user_role = "ADMIN" if scenario == "auth-admin" else "USER"
             self._json(200, {"loginId": user["loginId"], "displayName": user["displayName"], "role": user_role, "csrfToken": "csrf-fixture"}, {"X-ATT-CSRF": "csrf-fixture"})
             return
+        if parts and parts[0] == "configuration":
+            parts = ["packages", "payments"] + parts
         if scenario in {"auth-admin", "auth-user", "auth-container"} and parts == ["auth", "bootstrap", "status"]:
             self._json(200, {"required": False})
             return

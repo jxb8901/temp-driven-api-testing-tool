@@ -176,6 +176,7 @@ export interface JobResultResponse {
 
 export interface JobArtifact {
   path: string;
+  sha256?: string;
   size?: number;
   report?: boolean;
   mediaType?: string;

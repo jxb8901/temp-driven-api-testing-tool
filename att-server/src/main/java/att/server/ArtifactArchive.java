@@ -123,11 +123,33 @@ final class ArtifactArchive {
     }
 
     static byte[] read(Path archive, String requested) throws Exception {
-        if (!safePath(requested) || MANIFEST.equals(requested)) throw new IllegalArgumentException("Invalid archive entry path");
-        Map<String,Object> manifest = verify(archive, false);
-        Map<?,?> approved = ((List<?>) manifest.get("entries")).stream().filter(item -> item instanceof Map<?,?> row && requested.equals(row.get("path")))
-                .map(item -> (Map<?,?>)item).findFirst().orElseThrow(java.io.FileNotFoundException::new);
-        try (ZipFile zip = new ZipFile(archive.toFile())) {
+        try (VerifiedRead read = openVerified(archive, false)) { return read.read(requested); }
+    }
+
+    /** Request-scoped handle: verify structure once, pin that ZIP, check every requested payload. */
+    static final class VerifiedRead implements AutoCloseable {
+        private final ZipFile zip;
+        private final Map<String, Map<?,?>> entries;
+        final Map<String,Object> manifest;
+        private VerifiedRead(ZipFile zip, Map<String,Object> manifest) {
+            this.zip = zip;
+            Map<String,Map<?,?>> indexed = new java.util.HashMap<>();
+            List<Map<?,?>> rows = new ArrayList<>();
+            for (Object value : (List<?>) manifest.get("entries")) {
+                Map<?,?> row = Map.copyOf((Map<?,?>) value);
+                rows.add(row);
+                indexed.put((String) row.get("path"), row);
+            }
+            entries = Map.copyOf(indexed);
+            Map<String,Object> snapshot = new LinkedHashMap<>(manifest);
+            snapshot.put("entries", List.copyOf(rows));
+            snapshot.put("omissions", ((List<?>) manifest.get("omissions")).stream().map(value -> Map.copyOf((Map<?,?>) value)).toList());
+            this.manifest = Map.copyOf(snapshot);
+        }
+        byte[] read(String requested) throws Exception {
+            if (!safePath(requested) || MANIFEST.equals(requested)) throw new IllegalArgumentException("Invalid archive entry path");
+            Map<?,?> approved = entries.get(requested);
+            if (approved == null) throw new java.io.FileNotFoundException();
             ZipEntry entry = zip.getEntry(requested);
             if (entry == null || entry.isDirectory() || entry.getSize() < 0 || entry.getSize() > MAX_ENTRY_BYTES) throw new java.io.FileNotFoundException();
             try (InputStream input = zip.getInputStream(entry)) {
@@ -136,62 +158,78 @@ final class ArtifactArchive {
                 return bytes;
             }
         }
+        @Override public void close() throws java.io.IOException { zip.close(); }
+    }
+
+    static VerifiedRead openVerified(Path archive, boolean digests) throws Exception {
+        var before = Files.readAttributes(archive, java.nio.file.attribute.BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
+        if (before.isSymbolicLink() || !before.isRegularFile() || before.size() > MAX_ARCHIVE_BYTES)
+            throw new IllegalArgumentException("Invalid artifact archive");
+        ArtifactZipStructure.verify(archive);
+        ZipFile zip = new ZipFile(archive.toFile());
+        try {
+            Map<String,Object> manifest = verifyManifest(zip, digests);
+            var after = Files.readAttributes(archive, java.nio.file.attribute.BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
+            if (!after.isRegularFile() || before.size() != after.size() || !before.lastModifiedTime().equals(after.lastModifiedTime())
+                    || !java.util.Objects.equals(before.fileKey(), after.fileKey()))
+                throw new IllegalArgumentException("Artifact archive changed during verification");
+            return new VerifiedRead(zip, manifest);
+        } catch (Exception failure) { zip.close(); throw failure; }
     }
 
     /** Validate the entire directory against the bounded manifest before trusting any entry. */
-    @SuppressWarnings("unchecked")
     static Map<String,Object> verify(Path archive, boolean digests) throws Exception {
-        if (Files.isSymbolicLink(archive) || !Files.isRegularFile(archive, LinkOption.NOFOLLOW_LINKS) || Files.size(archive) > MAX_ARCHIVE_BYTES)
-            throw new IllegalArgumentException("Invalid artifact archive");
-        ArtifactZipStructure.verify(archive);
-        try (ZipFile zip = new ZipFile(archive.toFile())) {
-            Set<String> names = new HashSet<>();
-            long total = 0;
-            int count = 0;
-            var directory = zip.entries();
-            while (directory.hasMoreElements()) {
-                ZipEntry entry = directory.nextElement();
-                long cap = MANIFEST.equals(entry.getName()) ? MAX_MANIFEST_BYTES : MAX_ENTRY_BYTES;
-                if (++count > MAX_ENTRIES + 1 || !safePath(entry.getName()) || entry.isDirectory()
-                        || !names.add(entry.getName().toLowerCase(Locale.ROOT)) || entry.getSize() < 0 || entry.getSize() > cap
-                        || entry.getCompressedSize() < 0 || entry.getSize() > Math.max(1, entry.getCompressedSize()) * 200L)
-                    throw new IllegalArgumentException("Unsafe archive directory");
-                if (!MANIFEST.equals(entry.getName())) total += entry.getSize();
-                if (total > MAX_TOTAL_BYTES) throw new IllegalArgumentException("Archive total exceeds limits");
-            }
-            ZipEntry manifestEntry = zip.getEntry(MANIFEST);
-            if (manifestEntry == null) throw new IllegalArgumentException("Archive manifest is missing");
-            Map<String,Object> manifest;
-            try (InputStream input = zip.getInputStream(manifestEntry)) {
-                byte[] bytes = input.readNBytes(MAX_MANIFEST_BYTES + 1);
-                if (bytes.length != manifestEntry.getSize() || !validCrc(manifestEntry,bytes)) throw new IllegalArgumentException("Invalid manifest size");
-                try { manifest = JSON.readValue(bytes, Map.class); }
-                catch (com.fasterxml.jackson.core.JacksonException invalid) { throw new IllegalArgumentException("Invalid archive manifest"); }
-            }
-            if (manifest == null || !manifest.keySet().equals(Set.of("version", "policy", "entries", "complete", "omissions"))
-                    || !Integer.valueOf(1).equals(manifest.get("version")) || !validOmissions(manifest)
-                    || !"att-export-safe-text-v2".equals(manifest.get("policy")) || !(manifest.get("entries") instanceof List<?> entries)
-                    || entries.size() != count - 1) throw new IllegalArgumentException("Invalid archive manifest");
-            Set<String> approved = new HashSet<>();
-            for (Object value : entries) {
-                if (!(value instanceof Map<?,?> row) || !row.keySet().equals(Set.of("path", "mediaType", "size", "sha256", "classification", "decision", "report", "preview"))
-                        || !(row.get("path") instanceof String path) || !safePath(path)
-                        || MANIFEST.equalsIgnoreCase(path) || !approved.add(path.toLowerCase(Locale.ROOT)) || !SAFE_EXTENSIONS.contains(extension(path)))
-                    throw new IllegalArgumentException("Invalid manifest entry");
-                ZipEntry entry = zip.getEntry(path);
-                if (entry == null || !integral(row.get("size")) || ((Number) row.get("size")).longValue() != entry.getSize()
-                        || !(row.get("sha256") instanceof String digest) || !digest.matches("[a-f0-9]{64}")
-                        || !mediaType(path).equals(row.get("mediaType")) || !"textual-output".equals(row.get("classification"))
-                        || !"sanitized-once".equals(row.get("decision")) || !Boolean.TRUE.equals(row.get("preview"))
-                        || !Boolean.valueOf(Set.of("html","htm").contains(extension(path))).equals(row.get("report")))
-                    throw new IllegalArgumentException("Archive does not match manifest");
-                if (digests) try (InputStream input = zip.getInputStream(entry)) {
-                    byte[] bytes = input.readNBytes((int)MAX_ENTRY_BYTES + 1);
-                    if (bytes.length != entry.getSize() || !sha256(bytes).equals(digest) || !validCrc(entry,bytes)) throw new IllegalArgumentException("Archive integrity check failed");
-                }
-            }
-            return manifest;
+        try (VerifiedRead read = openVerified(archive, digests)) { return read.manifest; }
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Map<String,Object> verifyManifest(ZipFile zip, boolean digests) throws Exception {
+        Set<String> names = new HashSet<>();
+        long total = 0;
+        int count = 0;
+        var directory = zip.entries();
+        while (directory.hasMoreElements()) {
+            ZipEntry entry = directory.nextElement();
+            long cap = MANIFEST.equals(entry.getName()) ? MAX_MANIFEST_BYTES : MAX_ENTRY_BYTES;
+            if (++count > MAX_ENTRIES + 1 || !safePath(entry.getName()) || entry.isDirectory()
+                    || !names.add(entry.getName().toLowerCase(Locale.ROOT)) || entry.getSize() < 0 || entry.getSize() > cap
+                    || entry.getCompressedSize() < 0 || entry.getSize() > Math.max(1, entry.getCompressedSize()) * 200L)
+                throw new IllegalArgumentException("Unsafe archive directory");
+            if (!MANIFEST.equals(entry.getName())) total += entry.getSize();
+            if (total > MAX_TOTAL_BYTES) throw new IllegalArgumentException("Archive total exceeds limits");
         }
+        ZipEntry manifestEntry = zip.getEntry(MANIFEST);
+        if (manifestEntry == null) throw new IllegalArgumentException("Archive manifest is missing");
+        Map<String,Object> manifest;
+        try (InputStream input = zip.getInputStream(manifestEntry)) {
+            byte[] bytes = input.readNBytes(MAX_MANIFEST_BYTES + 1);
+            if (bytes.length != manifestEntry.getSize() || !validCrc(manifestEntry,bytes)) throw new IllegalArgumentException("Invalid manifest size");
+            try { manifest = JSON.readValue(bytes, Map.class); }
+            catch (com.fasterxml.jackson.core.JacksonException invalid) { throw new IllegalArgumentException("Invalid archive manifest"); }
+        }
+        if (manifest == null || !manifest.keySet().equals(Set.of("version", "policy", "entries", "complete", "omissions"))
+                || !Integer.valueOf(1).equals(manifest.get("version")) || !validOmissions(manifest)
+                || !"att-export-safe-text-v2".equals(manifest.get("policy")) || !(manifest.get("entries") instanceof List<?> entries)
+                || entries.size() != count - 1) throw new IllegalArgumentException("Invalid archive manifest");
+        Set<String> approved = new HashSet<>();
+        for (Object value : entries) {
+            if (!(value instanceof Map<?,?> row) || !row.keySet().equals(Set.of("path", "mediaType", "size", "sha256", "classification", "decision", "report", "preview"))
+                    || !(row.get("path") instanceof String path) || !safePath(path)
+                    || MANIFEST.equalsIgnoreCase(path) || !approved.add(path.toLowerCase(Locale.ROOT)) || !SAFE_EXTENSIONS.contains(extension(path)))
+                throw new IllegalArgumentException("Invalid manifest entry");
+            ZipEntry entry = zip.getEntry(path);
+            if (entry == null || !integral(row.get("size")) || ((Number) row.get("size")).longValue() != entry.getSize()
+                    || !(row.get("sha256") instanceof String digest) || !digest.matches("[a-f0-9]{64}")
+                    || !mediaType(path).equals(row.get("mediaType")) || !"textual-output".equals(row.get("classification"))
+                    || !"sanitized-once".equals(row.get("decision")) || !Boolean.TRUE.equals(row.get("preview"))
+                    || !Boolean.valueOf(Set.of("html","htm").contains(extension(path))).equals(row.get("report")))
+                throw new IllegalArgumentException("Archive does not match manifest");
+            if (digests) try (InputStream input = zip.getInputStream(entry)) {
+                byte[] bytes = input.readNBytes((int)MAX_ENTRY_BYTES + 1);
+                if (bytes.length != entry.getSize() || !sha256(bytes).equals(digest) || !validCrc(entry,bytes)) throw new IllegalArgumentException("Archive integrity check failed");
+            }
+        }
+        return manifest;
     }
 
     private static boolean integral(Object value) { return value instanceof Integer || value instanceof Long; }

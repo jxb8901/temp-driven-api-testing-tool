@@ -2226,13 +2226,14 @@ final class ServerRuntime implements AutoCloseable {
     }
     byte[] archiveEntry(String id,String requested) throws Exception {
         if(!ArtifactArchive.safePath(requested)||ArtifactArchive.MANIFEST.equalsIgnoreCase(requested))throw new IllegalArgumentException("Invalid archive entry path");
-        try(ArtifactRead read=openArtifactArchive(id,false)) { return ArtifactArchive.read(read.path,requested); }
+        try(ArtifactRead read=openArtifactArchive(id,false)) { return read.verified.read(requested); }
         catch(java.io.FileNotFoundException missing){throw new NotFoundException();}
     }
     final class ArtifactRead implements AutoCloseable {
         final Path path;
-        ArtifactRead(Path path){this.path=path;}
-        @Override public void close(){artifactLifecycle.readLock().unlock();artifactReadSlots.release();}
+        final ArtifactArchive.VerifiedRead verified;
+        ArtifactRead(Path path,ArtifactArchive.VerifiedRead verified){this.path=path;this.verified=verified;}
+        @Override public void close() throws java.io.IOException {try {verified.close();} finally {artifactLifecycle.readLock().unlock();artifactReadSlots.release();}}
     }
     ArtifactRead openArtifactArchive(String id,boolean digests) throws Exception {
         if(!artifactReadSlots.tryAcquire())throw new ArtifactCapacityException();
@@ -2242,9 +2243,10 @@ final class ServerRuntime implements AutoCloseable {
             if(store.workerQuarantined(id))throw new ArchiveUnavailableException();
             Path archive=artifactArchivePath(id),status=archive.resolveSibling("archive-status.json");
             if(!"READY".equals(readArchiveStatus(status).path("state").asText()))throw new ArchiveUnavailableException();
-            try { ArtifactArchive.verify(archive,digests); }
+            ArtifactArchive.VerifiedRead verified;
+            try { verified=ArtifactArchive.openVerified(archive,digests); }
             catch(Exception invalid){throw new ArchiveUnavailableException();}
-            return new ArtifactRead(archive);
+            return new ArtifactRead(archive,verified);
         } catch(Exception failure){artifactLifecycle.readLock().unlock();artifactReadSlots.release();throw failure;}
     }
     private void archiveStatus(String id,String state,String reason) throws Exception {

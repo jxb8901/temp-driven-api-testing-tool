@@ -3,6 +3,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { JobsPage } from './JobsPage';
+import { JobArtifacts } from './JobArtifacts';
 import type { JobEventHandlers, JobResultResponse, JobStatus, JobSummary, JobView, LoadJobsApi } from './types';
 
 const sampleJob: JobView = {
@@ -219,6 +220,45 @@ describe('JobsPage React feature', () => {
     expect(api.getJobArtifactArchive).toHaveBeenCalledTimes(2);
     expect(panel.textContent).toContain('nested/evidence.json');
     expect(panel.querySelector('iframe')).toBe(frame);
+  });
+
+  it('reconciles 150 visible artifacts without closing an unchanged report on manual refresh', async () => {
+    const report = { path: 'load/report/index.html', report: true, size: 900, sha256: 'original' };
+    let changed = false;
+    let present = true;
+    const items = Array.from({ length: 150 }, (_, i) => ({ path: `evidence/${i}.log`, size: 5, sha256: 'same' }));
+    const api = makeApi({
+      getJobArtifactArchive: vi.fn(async (_id: string, offset = 0) => ({ archiveStatus: 'READY' as const,
+        primaryReports: present ? [{ ...report, sha256: changed ? 'replaced' : report.sha256 }] : [],
+        items: items.slice(offset, offset + 100), nextOffset: offset ? null : 100 })),
+      getJobArtifactText: vi.fn(async () => '<html><head><meta http-equiv="Content-Security-Policy" content="default-src \'none\'; script-src \'sha256-reviewed\'; style-src \'unsafe-inline\'"></head><body>Preserved report</body></html>'),
+    });
+    await act(async () => root.render(<JobArtifacts api={api} jobId="JOB-204" refresh={0} />));
+    await advance();
+    await click([...host.querySelectorAll('button')].find(button => button.textContent === 'Load more artifacts')!);
+    await click([...host.querySelectorAll('button')].find(button => button.textContent?.startsWith('View Report:'))!);
+    await advance();
+    const frame = host.querySelector('iframe');
+    expect(frame).not.toBeNull();
+    await act(async () => root.render(<JobArtifacts api={api} jobId="JOB-204" refresh={1} />));
+    await advance();
+    expect(host.textContent).toContain('evidence/149.log');
+    expect(host.querySelector('iframe')).toBe(frame);
+    expect(api.getJobArtifactArchive).toHaveBeenCalledTimes(4);
+    expect(api.getJobArtifactText).toHaveBeenCalledTimes(1);
+    changed = true;
+    await act(async () => root.render(<JobArtifacts api={api} jobId="JOB-204" refresh={2} />));
+    await advance();
+    expect(host.querySelector('[aria-label="Artifact preview"]')).toBeNull();
+    await click([...host.querySelectorAll('button')].find(button => button.textContent?.startsWith('View Report:'))!);
+    await advance();
+    present = false;
+    await act(async () => root.render(<JobArtifacts api={api} jobId="JOB-204" refresh={3} />));
+    await advance();
+    expect(host.querySelector('[aria-label="Artifact preview"]')).toBeNull();
+    await act(async () => root.render(<JobArtifacts api={api} jobId="OTHER" refresh={2} />));
+    await advance();
+    expect(host.textContent).not.toContain('evidence/149.log');
   });
 
   it('polls archive status separately from the terminal job result and retries failures', async () => {

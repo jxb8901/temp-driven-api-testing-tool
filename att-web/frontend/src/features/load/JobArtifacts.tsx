@@ -22,18 +22,38 @@ export function JobArtifacts({ api, jobId, refresh, onMetrics }: { api: LoadJobs
   const [text, setText] = useState<string | null>(null);
   const [previewError, setPreviewError] = useState('');
   const sequence = useRef(0);
+  const loadedCount = useRef(0);
+
+  useEffect(() => {
+    loadedCount.current = 0;
+    setArchive(null); setSelected(null); setBusy(false);
+  }, [jobId, api]);
 
   useEffect(() => {
     const controller = new AbortController();
     const current = ++sequence.current;
     let timer: ReturnType<typeof setTimeout> | undefined;
-    setArchive(null); setError(''); setSelected(null); setBusy(false);
+    setError(''); setBusy(false);
     async function load() {
       try {
-        const data: JobArtifactArchive = features.getJobArtifactArchive ? await features.getJobArtifactArchive(jobId, 0, controller.signal)
+        let data: JobArtifactArchive = features.getJobArtifactArchive ? await features.getJobArtifactArchive(jobId, 0, controller.signal)
           : { archiveStatus: 'READY' as const, items: await api.getJobArtifacts(jobId, controller.signal), primaryReports: [] };
+        // Reconcile the already-visible prefix instead of replacing it with page one.
+        while (data.archiveStatus === 'READY' && data.items.length < loadedCount.current && data.nextOffset != null && features.getJobArtifactArchive) {
+          const offset = data.nextOffset;
+          const page = await features.getJobArtifactArchive(jobId, offset, controller.signal);
+          if (page.archiveStatus !== 'READY') { data = page; break; }
+          data = { ...page, items: [...data.items, ...page.items] };
+          if (page.nextOffset != null && page.nextOffset <= offset) throw new Error('Invalid artifact pagination.');
+        }
         if (controller.signal.aborted || current !== sequence.current) return;
+        loadedCount.current = data.items.length;
         setArchive(data);
+        setSelected(previous => {
+          if (!previous) return null;
+          const entry = [...data.items, ...data.primaryReports].find(item => item.path === previous.path);
+          return data.archiveStatus === 'READY' && entry && entry.size === previous.size && entry.sha256 === previous.sha256 ? previous : null;
+        });
         onMetrics?.(data.archiveMetrics || null);
         if (['PENDING', 'ARCHIVING'].includes(data.archiveStatus) || data.archiveMetrics?.outcome === 'RUNNING') timer = setTimeout(() => void load(), 2000);
       } catch (reason) { if (!controller.signal.aborted) setError(reason instanceof Error ? reason.message : 'Artifacts are unavailable.'); }
@@ -61,6 +81,7 @@ export function JobArtifacts({ api, jobId, refresh, onMetrics }: { api: LoadJobs
       const data = await features.getJobArtifactArchive(jobId, archive.nextOffset);
       if (current !== sequence.current) return;
       if (data.archiveStatus !== 'READY') { setVersion(value => value + 1); return; }
+      loadedCount.current += data.items.length;
       setArchive(previous => previous ? { ...data, items: [...previous.items, ...data.items] } : data);
     } catch (reason) { if (current === sequence.current) setError(reason instanceof Error ? reason.message : 'Artifacts could not be loaded.'); }
     finally { if (current === sequence.current) setBusy(false); }

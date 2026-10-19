@@ -31,6 +31,45 @@ class ArtifactArchiveTest {
         assertThrows(IllegalArgumentException.class,()->ArtifactArchive.read(archive,"../secret.txt"));
     }
 
+    @Test void repeatedLargeLoadPreviewsUseOnePinnedVerifiedDirectoryAndRejectNewCorruption() throws Exception {
+        Path output=Files.createDirectory(temporary.resolve("large-load"));
+        for(int i=0;i<2048;i++) {
+            Path file=output.resolve("workload-"+(i%4)+"/case-"+i+".log");
+            Files.createDirectories(file.getParent());Files.writeString(file,"evidence "+i);
+        }
+        Path archive=temporary.resolve("large.zip");ArtifactArchive.build(output,archive,Files::readAllBytes);
+        long started=System.nanoTime();
+        for(int i=0;i<8;i++)assertEquals("evidence "+i,new String(ArtifactArchive.read(archive,"workload-"+(i%4)+"/case-"+i+".log"),StandardCharsets.UTF_8));
+        System.out.println("2048-entry archive, 8 independent previews: "+((System.nanoTime()-started)/1_000_000)+" ms");
+        started=System.nanoTime();
+        try(var read=ArtifactArchive.openVerified(archive,false)) {
+            assertEquals(2048,((java.util.List<?>)read.manifest.get("entries")).size());
+            assertThrows(UnsupportedOperationException.class,()->((java.util.List<?>)read.manifest.get("entries")).clear());
+            // Replace the pathname: the verified handle must keep using its original inode,
+            // never reopen or rewalk the replacement directory for each preview.
+            Path replacement=temporary.resolve("replacement.zip");Files.writeString(replacement,"corrupt replacement");
+            Files.move(replacement,archive,java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+            for(int i=0;i<128;i++)assertEquals("evidence "+i,new String(read.read("workload-"+(i%4)+"/case-"+i+".log"),StandardCharsets.UTF_8));
+            assertThrows(java.io.FileNotFoundException.class,()->read.read("unapproved.log"));
+            assertThrows(Exception.class,()->ArtifactArchive.openVerified(archive,false));
+        }
+        System.out.println("2048-entry verified context + 128 digest/CRC previews: "+((System.nanoTime()-started)/1_000_000)+" ms");
+    }
+
+    @Test void pinnedPreviewStillRejectsInPlacePayloadTampering() throws Exception {
+        Path output=Files.createDirectory(temporary.resolve("mutable-output"));
+        String payload="unique-approved-value";
+        Files.writeString(output.resolve("case.log"),payload);
+        Path archive=temporary.resolve("mutable.zip");ArtifactArchive.build(output,archive,Files::readAllBytes);
+        try(var read=ArtifactArchive.openVerified(archive,false)) {
+            byte[] bytes=Files.readAllBytes(archive);
+            int offset=new String(bytes,StandardCharsets.ISO_8859_1).indexOf(payload);
+            assertTrue(offset>=0);
+            try(var file=new java.io.RandomAccessFile(archive.toFile(),"rw")) {file.seek(offset);file.writeByte('X');}
+            assertThrows(IllegalArgumentException.class,()->read.read("case.log"));
+        }
+    }
+
     @Test void rejectsUnsafeAndEncodedArchivePaths() {
         assertFalse(ArtifactArchive.safePath("../secret.txt"));
         assertFalse(ArtifactArchive.safePath("a/%2e%2e/secret.txt"));

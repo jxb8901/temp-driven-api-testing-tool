@@ -67,7 +67,9 @@ describe('authenticated isolated report preview', () => {
       await Promise.resolve();
     });
     expect(readText).toHaveBeenCalledWith('JOB-1', 'case.log', expect.any(AbortSignal));
-    expect(host.textContent).toContain('Authenticated case log');
+    await act(async () => {
+      await vi.waitFor(() => expect(host.textContent).toContain('Authenticated case log'));
+    });
     await act(async () => { (host.querySelector('button') as HTMLButtonElement).click(); await Promise.resolve(); });
     expect(host.querySelector('iframe')?.getAttribute('srcdoc')).toContain('Safe report');
   });
