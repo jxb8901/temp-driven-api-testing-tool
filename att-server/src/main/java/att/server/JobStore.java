@@ -52,6 +52,7 @@ final class JobStore implements AutoCloseable {
             s.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS worker_quarantined BOOLEAN DEFAULT FALSE NOT NULL");
             s.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS artifact_recovery BOOLEAN DEFAULT TRUE NOT NULL");
             s.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS retention_state VARCHAR(16)");
+            s.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS retention_bytes BIGINT");
             s.execute("CREATE INDEX IF NOT EXISTS jobs_artifact_recovery_idx ON jobs(artifact_recovery,job_id)");
             s.execute("CREATE TABLE IF NOT EXISTS job_worker_processes (job_id VARCHAR(80) NOT NULL, process_pid BIGINT NOT NULL, process_start_time VARCHAR(40), PRIMARY KEY(job_id,process_pid), FOREIGN KEY(job_id) REFERENCES jobs(job_id) ON DELETE CASCADE)");
             s.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS schedule_occurrence_id VARCHAR(160)");
@@ -378,7 +379,7 @@ final class JobStore implements AutoCloseable {
     }
     synchronized List<Map<String,Object>> listLoad(int limitPlusOne,int offset) throws Exception {
         List<Map<String,Object>> out=new ArrayList<>();
-        try(Connection c=connect();PreparedStatement p=c.prepareStatement("SELECT job_id,command,package_id,principal,status,created_at,started_at,finished_at,exit_code,request_summary FROM jobs WHERE command='load' ORDER BY created_at DESC,job_id DESC LIMIT ? OFFSET ?")){
+        try(Connection c=connect();PreparedStatement p=c.prepareStatement("SELECT job_id,command,package_id,principal,status,created_at,started_at,finished_at,exit_code,request_summary FROM jobs WHERE command='load' AND (retention_state IS NULL OR retention_state<>'DELETING') ORDER BY created_at DESC,job_id DESC LIMIT ? OFFSET ?")){
             p.setInt(1,limitPlusOne);p.setInt(2,offset);try(ResultSet r=p.executeQuery()){while(r.next())out.add(jobSummary(r));}
         }return out;
     }
@@ -532,9 +533,26 @@ final class JobStore implements AutoCloseable {
         }
     }
     synchronized boolean markDeleting(String id, Instant finishedAtOrBefore) throws Exception {
-        try(Connection c=connect();PreparedStatement p=c.prepareStatement("UPDATE jobs SET retention_state='DELETING' WHERE job_id=? AND worker_quarantined=FALSE AND artifact_recovery=FALSE AND status IN ('PASS','FAIL','ERROR','INVALID','CANCELLED') AND finished_at IS NOT NULL AND finished_at<=? AND (retention_state IS NULL OR retention_state='')")) {
-            p.setString(1,id);p.setString(2,finishedAtOrBefore.toString());return p.executeUpdate()==1;
+        return markDeleting(id, finishedAtOrBefore, null);
+    }
+    synchronized boolean markDeleting(String id, Instant finishedAtOrBefore, Long bytes) throws Exception {
+        try(Connection c=connect();PreparedStatement p=c.prepareStatement("UPDATE jobs SET retention_state='DELETING', retention_bytes=? WHERE job_id=? AND worker_quarantined=FALSE AND artifact_recovery=FALSE AND status IN ('PASS','FAIL','ERROR','INVALID','CANCELLED') AND finished_at IS NOT NULL AND finished_at<=? AND (retention_state IS NULL OR retention_state='')")) {
+            if(bytes==null||bytes<0)p.setNull(1,java.sql.Types.BIGINT);else p.setLong(1,bytes);
+            p.setString(2,id);p.setString(3,finishedAtOrBefore.toString());return p.executeUpdate()==1;
         }
+    }
+    synchronized Long retentionBytes(String id) throws Exception {
+        try(Connection c=connect();PreparedStatement p=c.prepareStatement("SELECT retention_bytes FROM jobs WHERE job_id=?")) {
+            p.setString(1,id);try(ResultSet r=p.executeQuery()){if(!r.next()||r.getObject(1)==null)return null;return r.getLong(1);}
+        }
+    }
+    /** Records one DELETED storage-eviction audit for a Job. A repeated call after a crash does not insert another row. */
+    synchronized void auditStorageEviction(String jobId, String outcome) throws Exception {
+        if(jobId==null||outcome==null||!outcome.startsWith("DELETED"))throw new IllegalArgumentException("Storage eviction audit is incomplete");
+        try(Connection c=connect();PreparedStatement existing=c.prepareStatement("SELECT 1 FROM audit WHERE action='JOB_STORAGE_EVICT' AND job_id=? AND outcome LIKE 'DELETED%'")) {
+            existing.setString(1,jobId);try(ResultSet r=existing.executeQuery()){if(r.next())return;}
+        }
+        audit("system:job-retention","JOB_STORAGE_EVICT",jobId,null,outcome);
     }
     synchronized List<String> deletingJobIds() throws Exception {
         List<String> ids=new ArrayList<>();

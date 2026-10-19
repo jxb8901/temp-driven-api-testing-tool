@@ -7,8 +7,10 @@ import org.junit.jupiter.api.io.TempDir;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -120,6 +122,84 @@ class ServerJobStorageTest {
         } finally { runtime.close(); }
     }
 
+    @Test void hidingDeletingLoadJobsOmitsThemFromGenericAndLoadLists() throws Exception {
+        Clock clock = Clock.fixed(Instant.parse("2026-06-01T00:00:00Z"), ZoneOffset.UTC);
+        ServerRuntime runtime = runtime("load-list", quota(0), clock);
+        try {
+            String deleting = "J0000000000000051";
+            String visible = "J0000000000000052";
+            seed(runtime, deleting, "load", "PASS", Instant.parse("2026-01-01T00:00:00Z"), false, mib(1));
+            seed(runtime, visible, "load", "PASS", Instant.parse("2026-01-02T00:00:00Z"), false, mib(1));
+            assertTrue(runtime.store.markDeleting(deleting, clock.instant()));
+            assertNull(runtime.store.get(deleting));
+            assertTrue(listed(runtime.store.list(100), deleting).isEmpty());
+            assertTrue(listed(runtime.store.listLoad(100, 0), deleting).isEmpty());
+            assertEquals(1, listed(runtime.store.list(100), visible).size());
+            assertEquals(1, listed(runtime.store.listLoad(100, 0), visible).size());
+        } finally { runtime.close(); }
+    }
+
+    @Test void reconcileAfterCrashAuditsEachDeletionOnce() throws Exception {
+        Clock clock = Clock.fixed(Instant.parse("2026-06-01T00:00:00Z"), ZoneOffset.UTC);
+        Path yaml = temp.resolve("reconcile-audit-server.yaml");
+        Files.writeString(yaml, serverYaml("reconcile-audit", quota(0), 30));
+        String libs = Files.createDirectories(temp.resolve("reconcile-audit-libs")).toString();
+        String pending = "J0000000000000061";
+        String alreadyAudited = "J0000000000000062";
+        long pendingBytes;
+        long auditedBytes;
+        ServerRuntime runtime = new ServerRuntime(ServerConfig.load(yaml), libs, ProcessBuilder::start, clock);
+        try {
+            Path pendingDirectory = seed(runtime, pending, "load", "PASS", Instant.parse("2026-01-01T00:00:00Z"), false, mib(2.2));
+            Path auditedDirectory = seed(runtime, alreadyAudited, "PASS", Instant.parse("2026-01-02T00:00:00Z"), false, mib(1.1));
+            pendingBytes = JobDirectoryUsage.directoryBytes(pendingDirectory);
+            auditedBytes = JobDirectoryUsage.directoryBytes(auditedDirectory);
+            assertTrue(pendingBytes > 0 && auditedBytes > 0);
+            assertTrue(runtime.store.markDeleting(pending, clock.instant(), pendingBytes));
+            assertTrue(runtime.store.markDeleting(alreadyAudited, clock.instant(), auditedBytes));
+            runtime.store.auditStorageEviction(alreadyAudited, "DELETED:" + auditedBytes);
+            assertTrue(Files.exists(pendingDirectory));
+            assertTrue(Files.exists(auditedDirectory));
+        } finally { runtime.close(); }
+
+        ServerRuntime restarted = new ServerRuntime(ServerConfig.load(yaml), libs, ProcessBuilder::start, clock);
+        try {
+            assertFalse(Files.exists(runtime.config.dataDir.resolve("jobs").resolve(pending)));
+            assertFalse(Files.exists(runtime.config.dataDir.resolve("jobs").resolve(alreadyAudited)));
+            assertFalse(restarted.store.jobRowExists(pending));
+            assertFalse(restarted.store.jobRowExists(alreadyAudited));
+            List<String> outcomes = restarted.store.auditOutcomes("JOB_STORAGE_EVICT");
+            assertEquals(List.of("DELETED:" + auditedBytes, "DELETED:" + pendingBytes), outcomes);
+            assertTrue(restarted.reconcileDeletingJobs());
+            restarted.store.auditStorageEviction(pending, "DELETED:" + pendingBytes);
+            restarted.store.auditStorageEviction(alreadyAudited, "DELETED:0");
+            assertEquals(outcomes, restarted.store.auditOutcomes("JOB_STORAGE_EVICT"));
+        } finally { restarted.close(); }
+    }
+
+    @Test void ageExpiryDoesNotApplyTheSizeMinimum() throws Exception {
+        Clock clock = Clock.systemUTC();
+        ServerRuntime runtime = runtime("mixed-retention", quota(72), clock, 1);
+        try {
+            String recent = "J0000000000000071";
+            String older = "J0000000000000072";
+            Instant now = clock.instant();
+            seed(runtime, recent, "PASS", now.minus(Duration.ofHours(25)), false, mib(1.6));
+            seed(runtime, older, "PASS", now.minus(Duration.ofDays(10)), false, mib(1.6));
+            runtime.cleanupJobStorage();
+            assertNotNull(runtime.store.get(recent));
+            assertTrue(Files.exists(jobDir(runtime, recent)));
+            assertNull(runtime.store.get(older));
+            assertFalse(Files.exists(jobDir(runtime, older)));
+            assertEquals("ok", storage(runtime).get("state"));
+            assertEquals(1, runtime.store.auditOutcomes("JOB_STORAGE_EVICT").stream().filter(outcome -> outcome.startsWith("DELETED:")).count());
+            runtime.cleanupExpiredJobs();
+            assertNull(runtime.store.get(recent));
+            assertFalse(Files.exists(jobDir(runtime, recent)));
+            assertEquals(1, runtime.store.auditOutcomes("JOB_STORAGE_EVICT").stream().filter(outcome -> outcome.startsWith("DELETED:")).count());
+        } finally { runtime.close(); }
+    }
+
     @Test void doesNotFollowSymlinksOrDeleteWhenMeasurementIsIncomplete() throws Exception {
         Clock clock = Clock.fixed(Instant.parse("2026-06-01T00:00:00Z"), ZoneOffset.UTC);
         ServerRuntime runtime = runtime("unsafe", quota(0), clock);
@@ -180,16 +260,28 @@ class ServerJobStorageTest {
         return storage;
     }
 
+    private static List<Map<String, Object>> listed(List<Map<String, Object>> rows, String id) {
+        return rows.stream().filter(row -> id.equals(row.get("jobId"))).toList();
+    }
+
     private Path seed(ServerRuntime runtime, String id, String status, Instant finished, boolean recovery, long bytes) throws Exception {
-        Path directory = seedRow(runtime, id, status, finished, recovery);
+        return seed(runtime, id, "run", status, finished, recovery, bytes);
+    }
+
+    private Path seed(ServerRuntime runtime, String id, String command, String status, Instant finished, boolean recovery, long bytes) throws Exception {
+        Path directory = seedRow(runtime, id, command, status, finished, recovery);
         Files.createDirectories(directory.resolve("output"));
         writeBytes(directory.resolve("artifacts.zip"), bytes);
         return directory;
     }
 
     private Path seedRow(ServerRuntime runtime, String id, String status, Instant finished, boolean recovery) throws Exception {
+        return seedRow(runtime, id, "run", status, finished, recovery);
+    }
+
+    private Path seedRow(ServerRuntime runtime, String id, String command, String status, Instant finished, boolean recovery) throws Exception {
         Path directory = Files.createDirectories(jobDir(runtime, id));
-        Job job = new Job(id, "run", "p", "ci", new att.server.api.WorkerRequest(), new JobEvents(directory.resolve("events.jsonl"), 100));
+        Job job = new Job(id, command, "p", "ci", new att.server.api.WorkerRequest(), new JobEvents(directory.resolve("events.jsonl"), 100));
         job.status = status;
         job.finishedAt = finished;
         runtime.store.insert(job, "{}");
@@ -220,16 +312,24 @@ class ServerJobStorageTest {
     }
 
     private ServerRuntime runtime(String name, String storage, Clock clock) throws Exception {
+        return runtime(name, storage, clock, 30);
+    }
+
+    private ServerRuntime runtime(String name, String storage, Clock clock, int retentionDays) throws Exception {
         Path yaml = temp.resolve(name + "-server.yaml");
-        Files.writeString(yaml, serverYaml(name, storage));
+        Files.writeString(yaml, serverYaml(name, storage, retentionDays));
         return new ServerRuntime(ServerConfig.load(yaml), Files.createDirectory(temp.resolve(name + "-libs")).toString(), ProcessBuilder::start, clock);
     }
 
     private String serverYaml(String name, String storage) throws Exception {
+        return serverYaml(name, storage, 30);
+    }
+
+    private String serverYaml(String name, String storage, int retentionDays) throws Exception {
         Path allowed = Files.createDirectories(temp.resolve(name + "-packages"));
         Path pkg = Files.createDirectories(allowed.resolve("p"));
         Path data = temp.resolve(name + "-data");
-        return "server:\n  dataDir: " + data + "\n  javaExecutable: " + Path.of(System.getProperty("java.home"), "bin", "java") + "\n  jobRetentionDays: 30\n"
+        return "server:\n  dataDir: " + data + "\n  javaExecutable: " + Path.of(System.getProperty("java.home"), "bin", "java") + "\n  jobRetentionDays: " + retentionDays + "\n"
                 + (storage == null ? "" : storage)
                 + "workers:\n  maxConcurrent: 1\n  queuedLimit: 1\n  maxConcurrentLoad: 1\npackages:\n  allowedRoots:\n    - " + allowed + "\n  entries:\n    p: " + pkg + "\n";
     }

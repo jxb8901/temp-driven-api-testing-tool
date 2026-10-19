@@ -2523,12 +2523,13 @@ final class ServerRuntime implements AutoCloseable {
                     if(storageProtected(candidate, cutoff, id) || jobs.containsKey(id) || pendingArtifactJobs.contains(id) || store.workerMayBeAlive(id)) { protectedJobs++; eligible--; continue; }
                     Path directory=jobsRoot.resolve(id);
                     if(Files.isSymbolicLink(directory)) { protectedJobs++; eligible--; continue; }
-                    if(!store.markDeleting(id, cutoff)) { protectedJobs++; eligible--; continue; }
-                    long bytes=measurement.jobBytes.getOrDefault(id, JobDirectoryUsage.directoryBytes(directory));
+                    Long measured=measurement.jobBytes.get(id);
+                    long bytes=measured!=null?measured:JobDirectoryUsage.directoryBytes(directory);
+                    if(!store.markDeleting(id, cutoff, bytes<0?null:bytes)) { protectedJobs++; eligible--; continue; }
                     if(bytes<0 || !JobDirectoryUsage.deleteJobDirectory(directory)) { java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).warning("Job "+id+" was marked for storage deletion and will be reconciled"); continue; }
+                    store.auditStorageEviction(id, deletedOutcome(bytes));
                     store.deleteJob(id);
                     deleted++; reclaimed=saturatedAdd(reclaimed, Math.max(0L, bytes)); remaining=Math.max(0L, remaining-Math.max(0L, bytes));
-                    store.audit("system:job-retention","JOB_STORAGE_EVICT",id,null,deletedOutcome(bytes));
                 } finally { artifactLifecycle.writeLock().unlock(); }
             }
             if(deferred) break;
@@ -2571,7 +2572,7 @@ final class ServerRuntime implements AutoCloseable {
                     if(jobs.containsKey(id) || pendingArtifactJobs.contains(id) || store.jobRowExists(id) || store.workerMayBeAlive(id)) continue;
                     if(!JobDirectoryUsage.deleteJobDirectory(child)) continue;
                     sweep.deleted++; sweep.reclaimed=saturatedAdd(sweep.reclaimed, bytes); sweep.remaining=Math.max(0L, sweep.remaining-bytes); remaining=sweep.remaining;
-                    store.audit("system:job-retention","JOB_STORAGE_EVICT",id,null,deletedOutcome(bytes));
+                    store.auditStorageEviction(id, deletedOutcome(bytes));
                 } finally { artifactLifecycle.writeLock().unlock(); }
             }
         }
@@ -2584,7 +2585,10 @@ final class ServerRuntime implements AutoCloseable {
             try {
                 if(jobs.containsKey(id) || pendingArtifactJobs.contains(id) || store.workerMayBeAlive(id)) return false;
                 Path directory=config.dataDir.resolve("jobs").resolve(id);
+                Long recorded=store.retentionBytes(id);
+                long bytes=recorded!=null?recorded:JobDirectoryUsage.directoryBytes(directory);
                 if(!JobDirectoryUsage.deleteJobDirectory(directory)) return false;
+                store.auditStorageEviction(id, deletedOutcome(bytes));
                 store.deleteJob(id);
             } finally { artifactLifecycle.writeLock().unlock(); }
         }
@@ -2654,7 +2658,11 @@ final class ServerRuntime implements AutoCloseable {
         } catch(Exception invalid) { return null; }
     }
     private static long saturatedAdd(long left,long right) { return right>0 && left>Long.MAX_VALUE-right ? Long.MAX_VALUE : left+Math.max(0L,right); }
-    private static String deletedOutcome(long bytes) { String outcome="DELETED:"+Math.max(0L,bytes); return outcome.length()<=32?outcome:"DELETED"; }
+    private static String deletedOutcome(long bytes) {
+        if(bytes<0) return "DELETED";
+        String outcome="DELETED:"+bytes;
+        return outcome.length()<=32?outcome:"DELETED";
+    }
     private static final class OrphanSweep {
         int deleted; long reclaimed; long remaining; boolean deferred;
         OrphanSweep(long remaining){this.remaining=remaining;}
