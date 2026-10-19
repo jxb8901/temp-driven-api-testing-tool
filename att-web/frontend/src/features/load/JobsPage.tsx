@@ -44,6 +44,11 @@ function displayValue(value: unknown): string {
   catch { return String(value); }
 }
 
+function eventJournalTruncated(event: JobEvent): boolean {
+  const data = event.data;
+  return Boolean(data && typeof data === 'object' && !Array.isArray(data) && (data as Record<string, unknown>).historyTruncated === true);
+}
+
 function consoleText(event: JobEvent): string {
   const data = event.data;
   if (!data || typeof data !== 'object' || Array.isArray(data)) return '';
@@ -442,6 +447,7 @@ function JobDetail({ api, jobId, onShowList, confirmCancel }: JobsFeatureProps &
   const eventsProgrammaticScroll = useRef(false);
   const streamCompleted = useRef(false);
   const eventSeq = useRef(0);
+  const [journalTruncated, setJournalTruncated] = useState(false);
   const [cancelState, setCancelState] = useState<'idle' | 'pending' | 'error'>('idle');
   const [cancelError, setCancelError] = useState('');
   const [detailRefresh, setDetailRefresh] = useState(0);
@@ -478,6 +484,7 @@ function JobDetail({ api, jobId, onShowList, confirmCancel }: JobsFeatureProps &
     let disposed = false;
     setConnection('connecting');
     setEvents([]);
+    setJournalTruncated(false);
     setConsoleFloor(0);
     streamCompleted.current = false;
     const unsubscribe = api.subscribeJob(jobId, {
@@ -485,6 +492,7 @@ function JobDetail({ api, jobId, onShowList, confirmCancel }: JobsFeatureProps &
       onError: () => { if (!disposed && !streamCompleted.current) setConnection('reconnecting'); },
       onEvent: event => {
         if (disposed) return;
+        if (eventJournalTruncated(event)) setJournalTruncated(true);
         if (event.type === 'result') { streamCompleted.current = true; setConnection('completed'); }
         if (event.type === 'status' || event.type === 'result') {
           const payload = event.data && typeof event.data === 'object' && !Array.isArray(event.data)
@@ -547,12 +555,8 @@ function JobDetail({ api, jobId, onShowList, confirmCancel }: JobsFeatureProps &
       .map(event => consoleText(event))
       .filter(line => !query || line.toLocaleLowerCase().includes(query));
   }, [orderedEvents, consoleFloor, liveSearch]);
-  const historyTruncated = orderedEvents.some(event => {
-    const id = Number(event.id);
-    if (Number.isFinite(id) && id > 1) return orderedEvents.every(item => !Number.isFinite(Number(item.id)) || Number(item.id) > 1);
-    const data = event.data;
-    return Boolean(data && typeof data === 'object' && !Array.isArray(data) && (data as Record<string, unknown>).historyTruncated === true);
-  });
+  const historyTruncated = journalTruncated || orderedEvents.some(eventJournalTruncated);
+  const browserTruncated = events.length >= MAX_EVENTS;
   const buckets = metricBuckets(metrics?.buckets).slice(0, MAX_BUCKET_ROWS);
   const charts = metricSeries(buckets);
 
@@ -692,7 +696,7 @@ function JobDetail({ api, jobId, onShowList, confirmCancel }: JobsFeatureProps &
         <button type="button" aria-pressed={consoleMaximized} onClick={toggleConsoleMaximize}>{consoleMaximized ? 'Restore' : 'Maximize'}</button>
       </div>
       {eventCopyStatus && <p role="status">{eventCopyStatus}</p>}
-      {(historyTruncated || events.length >= MAX_EVENTS) && <p role="note">{historyTruncated ? 'Earlier journal events are no longer retained. ' : ''}{events.length >= MAX_EVENTS ? `This browser keeps the latest ${MAX_EVENTS} events.` : ''}</p>}
+      {(historyTruncated || browserTruncated) && <p role="note">{historyTruncated && <span>Earlier journal events are no longer retained.</span>}{historyTruncated && browserTruncated && ' '}{browserTruncated && <span>This browser keeps the latest {MAX_EVENTS} events.</span>}</p>}
       {visibleConsole.length ? <div ref={consoleShellRef} className="att-console-shell" data-maximized={consoleMaximized ? 'true' : 'false'} style={consoleMaximized
         ? { position: 'fixed', top: maximizeTop, left: 12, right: 12, bottom: 12, height: 'auto', maxHeight: 'none', zIndex: 30 }
         : { height: consoleHeight }}>

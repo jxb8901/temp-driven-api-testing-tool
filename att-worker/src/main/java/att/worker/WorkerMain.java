@@ -214,7 +214,7 @@ public final class WorkerMain {
         if("load".equals(r.command)) { Map<String,Object> t=r.target==null?Collections.<String,Object>emptyMap():r.target; Map<String,String> l=r.load==null?Collections.<String,String>emptyMap():r.load;
             loadSampler=new att.load.LoadConsoleSampler(r.runId);
             att.load.LoadEventListener observer = event -> { try {
-                String start=loadSampler.startLine(event.model());
+                String start=loadSampler.startLine(event.model(), event.runId());
                 if(start!=null) emit(WorkerEvent.Type.PROGRESS, fields("console", start, "runId", event.runId(), "phase", "START"));
                 Map<String,Object> payload=event.toMap(root);
                 String line=loadSampler.onEvent(event);

@@ -589,4 +589,47 @@ describe('JobsPage React feature', () => {
     expect(shell.style.height).toBe(`${before + 64}px`);
     expect(live.querySelector('[aria-label="Resize live output"]')).not.toBeNull();
   });
+
+  it('does not treat the browser event window as a truncated Server journal', async () => {
+    const api = makeApi();
+    await act(async () => root.render(<JobsPage api={api} jobId="JOB-204" onOpenJob={vi.fn()} onShowList={vi.fn()} confirmCancel={() => true} />));
+    const handlers = vi.mocked(api.subscribeJob).mock.calls[0][1];
+    await act(async () => {
+      for (let id = 1; id <= 501; id += 1) handlers.onEvent({ id: String(id), type: 'log', data: { message: `event-${id}` } });
+    });
+    const note = host.querySelector('#job-panel-live [role="note"]');
+    expect(note?.textContent ?? '').not.toContain('Earlier journal events');
+    expect(note?.textContent).toContain('This browser keeps the latest 500 events.');
+    const ids = [...host.querySelectorAll('#job-panel-events code')].map(node => node.textContent);
+    expect(ids).toHaveLength(500);
+    expect(ids).not.toContain('#1');
+    expect(ids[0]).toBe('#2');
+    expect(ids.at(-1)).toBe('#501');
+  });
+
+  it('keeps the Server truncation warning after the flagged event leaves the browser window', async () => {
+    const api = makeApi();
+    await act(async () => root.render(<JobsPage api={api} jobId="JOB-204" onOpenJob={vi.fn()} onShowList={vi.fn()} confirmCancel={() => true} />));
+    const handlers = vi.mocked(api.subscribeJob).mock.calls[0][1];
+    await act(async () => {
+      handlers.onEvent({ id: '1', type: 'log', data: { historyTruncated: true, message: 'oldest retained boundary' } });
+      handlers.onEvent({ id: '2', type: 'log', data: { message: 'still in the journal' } });
+    });
+    const early = host.querySelector('#job-panel-live [role="note"]');
+    expect(early?.textContent).toContain('Earlier journal events are no longer retained.');
+    expect(early?.textContent ?? '').not.toContain('This browser keeps the latest 500 events.');
+    await act(async () => {
+      for (let id = 3; id <= 501; id += 1) handlers.onEvent({ id: String(id), type: 'log', data: { message: `event-${id}` } });
+    });
+    const note = host.querySelector('#job-panel-live [role="note"]');
+    expect(note?.textContent).toContain('Earlier journal events are no longer retained.');
+    expect(note?.textContent).toContain('This browser keeps the latest 500 events.');
+    const ids = [...host.querySelectorAll('#job-panel-events code')].map(node => node.textContent);
+    expect(ids).toHaveLength(500);
+    expect(ids).not.toContain('#1');
+    expect(ids[0]).toBe('#2');
+    await act(async () => root.render(<JobsPage api={api} jobId="JOB-205" onOpenJob={vi.fn()} onShowList={vi.fn()} confirmCancel={() => true} />));
+    expect(host.querySelector('#job-panel-live [role="note"]')).toBeNull();
+    expect(api.subscribeJob).toHaveBeenCalledTimes(2);
+  });
 });

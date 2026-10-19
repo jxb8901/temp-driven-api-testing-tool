@@ -13,7 +13,8 @@ import java.util.concurrent.TimeUnit;
  * The line text comes from {@link ExecutionConsoleFormatter}.
  */
 public final class LoadConsoleSampler {
-    private final String runId;
+    private volatile String runId;
+    private final AtomicBoolean runIdAdopted = new AtomicBoolean();
     private final long intervalNanos;
     private final long errorIntervalNanos;
     private final long startedNanos = System.nanoTime();
@@ -39,13 +40,27 @@ public final class LoadConsoleSampler {
     }
 
     public LoadConsoleSampler(String runId, long intervalMs, long errorIntervalMs) {
-        this.runId = ExecutionConsoleFormatter.token(runId, "unknown");
+        String supplied = runId == null ? "" : runId.trim();
+        if (supplied.isEmpty()) this.runId = "unknown";
+        else {
+            this.runId = ExecutionConsoleFormatter.token(supplied, "unknown");
+            this.runIdAdopted.set(true);
+        }
         this.intervalNanos = TimeUnit.MILLISECONDS.toNanos(Math.max(1L, intervalMs));
         this.errorIntervalNanos = TimeUnit.MILLISECONDS.toNanos(Math.max(0L, errorIntervalMs));
     }
 
     /** One start line for the run. Later calls return null. */
     public String startLine(String loadModel) {
+        return startLine(loadModel, null);
+    }
+
+    /**
+     * One start line for the run. When the request omitted {@code runId}, {@code observedRunId}
+     * is the id the load engine assigned and is used for this line and every later line.
+     */
+    public String startLine(String loadModel, String observedRunId) {
+        adoptRunId(observedRunId);
         if (!startEmitted.compareAndSet(false, true)) return null;
         model = ExecutionConsoleFormatter.token(loadModel, "unknown");
         lastProgressNanos = System.nanoTime();
@@ -55,6 +70,7 @@ public final class LoadConsoleSampler {
     /** Returns a console line, or null when this iteration should stay off the console. */
     public String onEvent(LoadEvent event) {
         if (event == null || finished.get()) return null;
+        adoptRunId(event.runId());
         if (event.model() != null) model = ExecutionConsoleFormatter.token(event.model(), model);
         if (event.scheduled()) scheduled.incrementAndGet();
         if (event.started()) started.incrementAndGet();
@@ -85,6 +101,11 @@ public final class LoadConsoleSampler {
     public String finish(String status) {
         if (!finished.compareAndSet(false, true)) return null;
         return progress("COMPLETE", ExecutionConsoleFormatter.token(status, "UNKNOWN"));
+    }
+
+    private void adoptRunId(String observed) {
+        if (observed == null || observed.trim().isEmpty()) return;
+        if (runIdAdopted.compareAndSet(false, true)) runId = ExecutionConsoleFormatter.token(observed, "unknown");
     }
 
     private String errorLine(LoadEvent event) {

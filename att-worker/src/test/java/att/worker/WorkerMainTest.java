@@ -494,6 +494,50 @@ class WorkerMainTest {
         assertEquals(toMap(direct.summary().get("metrics")).keySet(),toMap(cliResult.get("metrics")).keySet());
     }
 
+    @Test void workerLoadWithoutRunIdPrintsTheGeneratedRunId() throws Exception {
+        Path root=temp.resolve("load-generated-id"); Files.createDirectories(root.resolve("config")); Files.createDirectories(root.resolve("templates/SIMPLE"));
+        Files.createDirectories(root.resolve("testcase")); Files.createDirectories(root.resolve("load"));
+        copyTree(Paths.get("schemas"),root.resolve("schemas"));
+        Files.write(root.resolve("config/config.yaml"),("schemaVersion: att-config/v2.11\nenvironment: SIT\ntemplates: {root: templates}\ntestcase: {root: testcase}\ntools: {}\n").getBytes(StandardCharsets.UTF_8));
+        Files.write(root.resolve("templates/SIMPLE/template.yaml"),("schemaVersion: att-template/v3.4\nname: SIMPLE\ndescription: generated load id\nactions: {show: {type: log, message: generated-load-id}}\n").getBytes(StandardCharsets.UTF_8));
+        Files.write(root.resolve("load/scenario.yaml"),("schemaVersion: att-load/v1.6\nworkloads:\n- id: generated-id\n  target: {type: template, id: SIMPLE}\n  load: {users: 1, duration: 20ms}\n").getBytes(StandardCharsets.UTF_8));
+        String request=mapper.writeValueAsString(fields("protocolVersion","att-worker/v1","jobId","worker-generated-load","command","load","packageRoot",root.toString(),"scenario","load/scenario.yaml"));
+        Process process=new ProcessBuilder(Paths.get(System.getProperty("java.home"),"bin","java").toString(),"-cp",System.getProperty("java.class.path"),WorkerMain.class.getName()).start();
+        process.getOutputStream().write(request.getBytes(StandardCharsets.UTF_8)); process.getOutputStream().close();
+        String stdout=read(process.getInputStream()); String stderr=read(process.getErrorStream());
+        assertEquals(0,process.waitFor(),stderr+"\n"+stdout);
+        String[] lines=stdout.trim().split("\\R");
+        JsonNode terminal=mapper.readTree(lines[lines.length-1]);
+        assertEquals("RESULT",terminal.get("type").asText());
+        String executionId=terminal.get("result").get("executionId").asText();
+        assertTrue(executionId.startsWith("load-")&&executionId.length()>"load-".length(),executionId);
+        boolean sawStart=false, sawComplete=false;
+        for(String line:lines) {
+            JsonNode event=mapper.readTree(line);
+            if(!event.hasNonNull("console")) continue;
+            String console=event.get("console").asText();
+            assertFalse(console.contains("runId=unknown"),console);
+            if(console.contains("[LOAD]")) assertTrue(console.contains("runId="+executionId),console);
+            if(console.contains("[LOAD] START")) sawStart=true;
+            if(console.contains("[LOAD] COMPLETE")) sawComplete=true;
+        }
+        assertTrue(sawStart,stdout);
+        assertTrue(sawComplete,stdout);
+        assertTrue(terminal.get("console").asText().contains("runId="+executionId),terminal.toString());
+
+        String failed=mapper.writeValueAsString(fields("protocolVersion","att-worker/v1","jobId","worker-load-before-events","command","load","packageRoot",root.toString(),"scenario","load/missing.yaml"));
+        Process early=new ProcessBuilder(Paths.get(System.getProperty("java.home"),"bin","java").toString(),"-cp",System.getProperty("java.class.path"),WorkerMain.class.getName()).start();
+        early.getOutputStream().write(failed.getBytes(StandardCharsets.UTF_8)); early.getOutputStream().close();
+        String earlyOut=read(early.getInputStream()); String earlyErr=read(early.getErrorStream());
+        int earlyExit=early.waitFor();
+        assertTrue(earlyExit!=0,earlyErr+"\n"+earlyOut);
+        String[] earlyLines=earlyOut.trim().split("\\R");
+        JsonNode earlyTerminal=mapper.readTree(earlyLines[earlyLines.length-1]);
+        assertEquals("RESULT",earlyTerminal.get("type").asText(),earlyOut);
+        assertTrue(earlyTerminal.hasNonNull("console"),earlyOut);
+        assertTrue(earlyTerminal.get("console").asText().startsWith("[LOAD] COMPLETE runId=unknown"),earlyTerminal.get("console").asText());
+    }
+
     @Test void cliWorkerAndDirectApiReturnEquivalentRunOutcomes() throws Exception {
         Path root=temp.resolve("run-package"); Files.createDirectories(root.resolve("config/tools")); Files.createDirectories(root.resolve("templates")); Files.createDirectories(root.resolve("testcase")); Files.createDirectories(root.resolve("tools"));
         copyTree(Paths.get("schemas"),root.resolve("schemas"));
