@@ -150,6 +150,9 @@ async function main() {
     await selectFixture(context, fixture.origin, 'loaded');
     await page.reload();
     await page.goto(base);
+    // Navigation load can precede the lazy React shell mounting on a busy runner.
+    await page.locator('.summary-card').first().waitFor();
+    await page.locator('.skip-link').waitFor({ state: 'attached' });
     await page.keyboard.press('Tab');
     assert.equal(await page.evaluate(() => document.activeElement.classList.contains('skip-link')), true, 'the first Tab should focus the skip link');
     assert.equal(await page.locator('.skip-link').evaluate(node => node.getBoundingClientRect().top >= 0), true, 'the focused skip link should be visible');

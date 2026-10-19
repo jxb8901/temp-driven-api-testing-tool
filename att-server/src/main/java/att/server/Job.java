@@ -20,6 +20,7 @@ final class Job {
     volatile Integer exitCode;
     volatile String resultJson,diagnosticJson;
     volatile Map<String,Object> workerMetrics;
+    volatile Map<String,Object> protocolDiagnostic;
     volatile boolean resultReceived;
     volatile Process process;
     volatile WorkerProcessFence processFence;

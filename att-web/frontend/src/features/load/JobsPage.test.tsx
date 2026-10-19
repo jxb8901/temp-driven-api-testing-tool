@@ -213,6 +213,12 @@ describe('JobsPage React feature', () => {
     expect(frame.hasAttribute('src')).toBe(false); // no anonymous navigation to protected API
     expect(frame.getAttribute('srcdoc')).toContain('Authenticated report');
     expect(api.getJobArtifactText).toHaveBeenCalledWith('JOB-204', 'load/run/report/index.html', expect.any(AbortSignal));
+    await act(async () => vi.mocked(api.subscribeJob).mock.calls[0][1].onEvent({ type: 'status', data: { status: 'PASS' } }));
+    expect(api.getJob).toHaveBeenCalledTimes(2);
+    expect(api.getJobResult).toHaveBeenCalledTimes(2);
+    expect(api.getJobArtifactArchive).toHaveBeenCalledTimes(2);
+    expect(panel.textContent).toContain('nested/evidence.json');
+    expect(panel.querySelector('iframe')).toBe(frame);
   });
 
   it('polls archive status separately from the terminal job result and retries failures', async () => {

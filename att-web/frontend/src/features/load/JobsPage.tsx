@@ -384,6 +384,7 @@ function JobDetail({ api, jobId, onShowList, confirmCancel }: JobsFeatureProps &
   const [cancelState, setCancelState] = useState<'idle' | 'pending' | 'error'>('idle');
   const [cancelError, setCancelError] = useState('');
   const [detailRefresh, setDetailRefresh] = useState(0);
+  const [terminalRefresh, setTerminalRefresh] = useState(0);
   const [archiveMetrics, setArchiveMetrics] = useState<ArtifactArchiveMetrics | null>(null);
   useEffect(() => setArchiveMetrics(null), [jobId]);
   const cancellationLock = useRef(false);
@@ -410,7 +411,7 @@ function JobDetail({ api, jobId, onShowList, confirmCancel }: JobsFeatureProps &
       if (!controller.signal.aborted) { setResultError(toError(error, 'Job result is not available.').message); setResultState('error'); }
     });
     return () => controller.abort();
-  }, [api, jobId, detailRefresh]);
+  }, [api, jobId, detailRefresh, terminalRefresh]);
 
   useEffect(() => {
     let disposed = false;
@@ -433,7 +434,7 @@ function JobDetail({ api, jobId, onShowList, confirmCancel }: JobsFeatureProps &
           // Reconcile both REST snapshots once, outside the state updater.
           if (!terminalReconciled.current && (terminal || event.type === 'result')) {
             terminalReconciled.current = true;
-            setDetailRefresh(value => value + 1);
+            setTerminalRefresh(value => value + 1);
           }
         }
         setEvents(current => event.id && current.some(existing => existing.id === event.id) ? current
