@@ -90,12 +90,40 @@ public final class ApiServlet extends HttpServlet {
             }
             if(path.startsWith("/jobs/"))runtime.requireJobOwner(segment(path,2),principal);
             if(path.matches("/jobs/[^/]+/events")){sse(req,res,segment(path,2));return;}
-            if(path.startsWith("/jobs/")&&path.contains("/artifacts/")){String prefix=path.substring(0,path.indexOf("/artifacts/"));String id=segment(prefix,2);String relative=path.substring(path.indexOf("/artifacts/")+11);sendArtifact(res,id,runtime.artifact(id,relative));return;}
-            if(path.matches("/jobs/[^/]+/artifacts")){String id=segment(path,2);json(res,200,Map.of("items",artifacts(id),"requestId",requestId));return;}
+            if(path.matches("/jobs/[^/]+/artifacts/archive\\.zip")){
+                String id=segment(path,2);
+                try(ServerRuntime.ArtifactRead read=runtime.openArtifactArchive(id,true)) {
+                    long size=read.length();
+                    res.setContentType("application/zip");res.setHeader("X-Content-Type-Options","nosniff");res.setHeader("Cache-Control","private, no-store");
+                    res.setHeader("Content-Disposition","attachment; filename=\""+id+"-artifacts.zip\"");res.setContentLengthLong(size);
+                    read.writeTo(res.getOutputStream());
+                }
+                return;
+            }
+            if(path.startsWith("/jobs/")&&path.contains("/artifacts/view/")) {
+                int boundary=path.indexOf("/artifacts/view/");
+                String id=segment(path.substring(0,boundary),2),relative=path.substring(boundary+"/artifacts/view/".length());
+                byte[] bytes=runtime.archiveEntry(id,relative);
+                String ext=relative.substring(relative.lastIndexOf('.')+1).toLowerCase(java.util.Locale.ROOT);
+                boolean html="html".equals(ext)||"htm".equals(ext);
+                String mime=html?"text/html":"css".equals(ext)?"text/css":"text/plain";
+                res.setHeader("X-Frame-Options","SAMEORIGIN");res.setHeader("Referrer-Policy","no-referrer");
+                res.setContentType(mime+"; charset=UTF-8");res.setHeader("X-Content-Type-Options","nosniff");
+                res.setHeader("Cache-Control","private, no-store");res.setHeader("Content-Disposition","inline");
+                // Text destinations must remain navigable inside the report iframe, not inherit API frame denial.
+                String policy=html?"sandbox allow-scripts; "+ArtifactHtmlPolicy.CONTENT_POLICY
+                        :"sandbox; default-src 'none'; base-uri 'none'; form-action 'none'";
+                res.setHeader("Content-Security-Policy",policy+"; frame-ancestors 'self'");
+                res.setContentLengthLong(bytes.length);res.getOutputStream().write(bytes);return;
+            }
+            if(path.startsWith("/jobs/")&&path.contains("/artifacts/"))throw new ServerRuntime.NotFoundException();
+            if(path.matches("/jobs/[^/]+/artifacts")){String id=segment(path,2);Map<String,Object> listing=runtime.artifactIndex(id,parseOffset(req.getParameter("offset")),parseConfigurationLimit(req.getParameter("limit")));listing.put("requestId",requestId);json(res,200,listing);return;}
             if(path.matches("/jobs/[^/]+/result")){Map<String,Object> result=runtime.resultRecord(segment(path,2));result.put("requestId",requestId);json(res,200,result);return;}
             if(path.matches("/jobs/[^/]+")){Map<String,Object> view=runtime.jobRecord(segment(path,2));view.put("requestId",requestId);json(res,200,view);return;}
             error(res,404,"ATT-SERVER-NOT-FOUND","API resource was not found",requestId);
-        } catch(ServerRuntime.InlineLoadDisabledException e){error(res,403,"ATT-SERVER-INLINE-LOAD-DISABLED","Browser-submitted Load is disabled by Server configuration",requestId);}
+        } catch(ServerRuntime.ArchiveUnavailableException e){error(res,409,"ATT-SERVER-ARCHIVE-UNAVAILABLE","Artifact archive is pending, failed, or unavailable; refresh the archive status",requestId);}
+          catch(ServerRuntime.ArtifactCapacityException e){error(res,503,"ATT-SERVER-ARTIFACT-CAPACITY","Artifact preview capacity is full; retry shortly",requestId);}
+          catch(ServerRuntime.InlineLoadDisabledException e){error(res,403,"ATT-SERVER-INLINE-LOAD-DISABLED","Browser-submitted Load is disabled by Server configuration",requestId);}
           catch(ServerRuntime.InlineLoadLimitException e){error(res,400,"ATT-SERVER-INLINE-LOAD-LIMIT",safeDetail(e),requestId);}
           catch(ServerRuntime.DraftValidationException e){error(res,400,"ATT-SERVER-INVALID-REQUEST",e.getMessage(),requestId,e.diagnostics);}
           catch(ServerRuntime.InspectionConfigurationException e){error(res,422,"ATT-CFG-001",e.summary(),requestId,e.diagnostics);}
@@ -115,6 +143,7 @@ public final class ApiServlet extends HttpServlet {
         if(authorizationPrincipal==null){error(res,401,"ATT-SERVER-AUTHENTICATION-REQUIRED","An authenticated Servlet Principal is required",requestId);return;}
         if(loadSchedulePath(path)){schedulePost(req,res,path,requestId,authorizationPrincipal);return;}
         if(!requireOperator(req,res,requestId))return;
+        if(path.matches("/jobs/[^/]+/artifacts/retry")){if(!checkOrigin(req,res,requestId,false))return;try{String id=segment(path,2);runtime.requireJobOwner(id,authorizationPrincipal);runtime.retryArtifactArchive(id);json(res,202,Map.of("archiveStatus","PENDING","requestId",requestId));return;}catch(ServerRuntime.NotFoundException missing){error(res,404,"ATT-SERVER-NOT-FOUND","API resource was not found",requestId);return;}catch(IllegalArgumentException invalid){error(res,409,"ATT-SERVER-ARCHIVE-NOT-READY",safeDetail(invalid),requestId);return;}catch(Exception failure){error(res,500,"ATT-SERVER-REQUEST-FAILED","The archive retry could not be scheduled",requestId);return;}}
         boolean createRunDraft="/drafts/run".equals(path),createDebugDraft="/drafts/debug".equals(path),createQuickLoadDraft="/drafts/quick-load".equals(path),createAdvancedLoadDraft="/drafts/load".equals(path);
         String command=path.startsWith("/jobs/")?path.substring("/jobs/".length()):"";
         if(!createRunDraft&&!createDebugDraft&&!createQuickLoadDraft&&!createAdvancedLoadDraft&&!List.of("run","debug","load","validate").contains(command)){error(res,404,"ATT-SERVER-NOT-FOUND","API resource was not found",requestId);return;}
@@ -388,18 +417,6 @@ public final class ApiServlet extends HttpServlet {
             try{async.complete();}catch(IllegalStateException alreadyCompleting){}
         }
     }
-    private List<Map<String,Object>> artifacts(String jobId) throws Exception {
-        runtime.jobRecord(jobId);Path root=runtime.config.dataDir.resolve("jobs").resolve(jobId).resolve("output").toRealPath();List<Map<String,Object>> items=new ArrayList<>();
-        try(var paths=Files.walk(root)){paths.filter(Files::isRegularFile).filter(p->!Files.isSymbolicLink(p)).limit(runtime.config.maxArtifacts+1L).forEach(p->{if(items.size()<runtime.config.maxArtifacts){Map<String,Object> m=new LinkedHashMap<>();m.put("path",root.relativize(p).toString().replace('\\','/'));try{m.put("size",Files.size(p));}catch(IOException ignored){}items.add(m);}});}
-        return items;
-    }
-    private void sendArtifact(HttpServletResponse response,String jobId,Path file)throws Exception {
-        byte[] safe=runtime.publicArtifact(jobId,file);
-        String name=file.getFileName().toString().replaceAll("[\r\n\"]","_");
-        response.setContentType("application/octet-stream");response.setHeader("X-Content-Type-Options","nosniff");
-        response.setHeader("Content-Disposition","attachment; filename=\""+name+"\"");
-        response.setContentLengthLong(safe.length);response.getOutputStream().write(safe);
-    }
     private void resourceGet(HttpServletRequest req,HttpServletResponse res,String path,String requestId,String principal)throws IOException {
         String[] parts=path.split("/");
         try {
@@ -471,8 +488,12 @@ public final class ApiServlet extends HttpServlet {
           catch(Exception e){throw new IOException(e);}
     }
     private void configurationGet(HttpServletRequest req,HttpServletResponse res,String path,String requestId,String principal)throws IOException {
-        String[] parts=path.split("/");
+        boolean shared=path.equals("/configuration")||path.startsWith("/configuration/");
+        // Reuse validation and response policy, never resolve a registered Package for shared views.
+        String[] parts=(shared?"/packages/_/configuration"+path.substring("/configuration".length()):path).split("/");
         try {
+            if(shared&&parts.length==5&&"declared".equals(parts[4]))parts=java.util.Arrays.copyOf(parts,4);
+            if(shared&&parts.length>5)throw new ServerRuntime.NotFoundException();
             if(parts.length==7&&"packages".equals(parts[1])&&!parts[2].isEmpty()&&"configuration".equals(parts[3])
                     &&"testdata".equals(parts[4])&&"records".equals(parts[6])) {
                 boolean previewGenerated=parseOptionalBoolean(req.getParameter("previewGenerated"),"previewGenerated");
@@ -481,7 +502,7 @@ public final class ApiServlet extends HttpServlet {
                 records.put("requestId",requestId);json(res,200,records);return;
             }
             if(parts.length<4||!"packages".equals(parts[1])||parts[2].isEmpty()||!"configuration".equals(parts[3]))throw new ServerRuntime.NotFoundException();
-            String packageId=parts[2],action;
+            String packageId=shared?"":parts[2],action;
             if(parts.length==4) {
                 String view=req.getParameter("view");
                 if(view!=null&&!"declared".equals(view))throw new IllegalArgumentException("view must be declared");
@@ -512,6 +533,7 @@ public final class ApiServlet extends HttpServlet {
                 res.setHeader("Cache-Control","no-store");
                 runtime.store.audit(principal,"CONFIGURATION_INCLUDE_ALL_FIELDS",null,packageId,"SUCCESS");
             }
+            res.setHeader("Cache-Control","no-store");
             Map<String,Object> result=runtime.inspectConfiguration(packageId,action,environment,otherEnvironment,section,
                     offset,limit,inspectionPath,inspectionOrigin,inspectionQuery,includeInherited,inspectionReferenceId,includeAllFields,principal);
             if("declared".equals(action)||"effective".equals(action)||"compare".equals(action)) {
@@ -565,7 +587,7 @@ public final class ApiServlet extends HttpServlet {
     private static boolean parseOptionalBoolean(String raw,String name){if(raw==null||raw.isEmpty())return false;if("true".equalsIgnoreCase(raw))return true;if("false".equalsIgnoreCase(raw))return false;throw new IllegalArgumentException(name+" must be true or false");}
     private static String principalSearch(HttpServletRequest req){String value=req.getParameter("principal");if(value==null)return null;value=value.strip();if(value.codePointCount(0,value.length())>120)throw new IllegalArgumentException("principal search must be at most 120 characters");for(int i=0;i<value.length();i++)if(Character.isISOControl(value.charAt(i)))throw new IllegalArgumentException("principal search contains an invalid character");return value.isEmpty()?null:value;}
     private static boolean resourcePath(String path){return path.matches("/packages/[^/]+/resources(?:/.*)?");}
-    private static boolean configurationPath(String path){return path.matches("/packages/[^/]+/configuration(?:/.*)?");}
+    private static boolean configurationPath(String path){return path.matches("/packages/[^/]+/configuration(?:/.*)?")||path.matches("/configuration(?:/.*)?");}
     private static boolean loadPolicyPath(String path){return path.matches("/packages/[^/]+/load-policy");}
     private static boolean isJson(String value){if(value==null)return false;String[] parts=value.split(";",2);return "application/json".equalsIgnoreCase(parts[0].trim());}
     private boolean checkOrigin(HttpServletRequest req,HttpServletResponse res,String requestId,boolean force)throws IOException {

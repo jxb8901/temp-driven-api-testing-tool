@@ -56,6 +56,10 @@ public final class PackageConfigurationInspector {
     private final Path configPath;
     private PackageConfigurationSnapshots snapshots;
     private Object snapshotContext;
+    private boolean sharedRuntime;
+
+    /** Shared views never resolve Package-local Testdata records or dependencies. */
+    public PackageConfigurationInspector forSharedRuntime() { sharedRuntime=true; return this; }
     private final PackageResourceResolver resources;
     private final PackageResourceResolver configResources;
     private final int maxResponseBytes;
@@ -139,7 +143,7 @@ public final class PackageConfigurationInspector {
         Map<?,?> raw = cached == null ? readConfig() : cached.raw;
         validateReferencedFiles(raw, safeEnvironment);
         Path file = configFile();
-        FrameworkConfig config = cached == null ? new FrameworkConfigLoader().load(file, RuntimeConfigPath.root(file), packageRoot, safeEnvironment) : cached.config;
+        FrameworkConfig config = cached == null ? new FrameworkConfigLoader().loadDiscovery(file, RuntimeConfigPath.root(file), packageRoot, safeEnvironment) : cached.config;
         TestdataDescriptor selected = null;
         String selectedSource = null;
         for (Path path : config.testdataDescriptors()) {
@@ -274,7 +278,7 @@ public final class PackageConfigurationInspector {
             Map<?, ?> raw = cached == null ? readConfig() : cached.raw;
             validateReferencedFiles(raw, safeEnvironment);
             Path file = configFile();
-            FrameworkConfig config = cached == null ? new FrameworkConfigLoader().load(file, RuntimeConfigPath.root(file), packageRoot, safeEnvironment) : cached.config;
+            FrameworkConfig config = cached == null ? new FrameworkConfigLoader().loadDiscovery(file, RuntimeConfigPath.root(file), packageRoot, safeEnvironment) : cached.config;
             return snapshot(raw, config, "effective", section, offset, limit, query);
         } catch (ConfigurationLimitException exceeded) {
             throw exceeded;
@@ -304,14 +308,15 @@ public final class PackageConfigurationInspector {
         result.put("redactionEnabled", Boolean.valueOf(redactionEnabled));
         result.put("includeInherited", Boolean.valueOf(includeInherited));
         List<Map<String, Object>> diagnostics = new ArrayList<Map<String, Object>>();
-        if (!"ready".equals(left.get("state"))) diagnostics.addAll(diagnostics(left));
-        if (!"ready".equals(right.get("state"))) diagnostics.addAll(diagnostics(right));
-        if (!diagnostics.isEmpty()) {
+        diagnostics.addAll(diagnostics(left));
+        diagnostics.addAll(diagnostics(right));
+        if ("invalid".equals(left.get("state")) || "invalid".equals(right.get("state"))) {
             result.put("state", "invalid");
             result.put("diagnostics", diagnostics);
             result.put("fields", Collections.emptyList());
             return result;
         }
+        result.put("executionReadiness", "not-validated");
         if (!sectionExists(left, selectedSection) && !sectionExists(right, selectedSection))
             throw new IllegalArgumentException("Unknown configuration section");
         @SuppressWarnings("unchecked") Map<String, Map<String, Object>> leftFields = flatten(left);
@@ -355,7 +360,7 @@ public final class PackageConfigurationInspector {
             }
             fields.add(item);
         }
-        result.put("state", "ready");
+        result.put("state", diagnostics.isEmpty() ? "ready" : "degraded");
         if (limit > 0) {
             if (offset > fields.size()) throw new IllegalArgumentException("offset exceeds the current comparison");
             int start = Math.min(offset, fields.size());
@@ -442,7 +447,7 @@ public final class PackageConfigurationInspector {
         String httpOrigin = origin(raw, environment, "httphelpers");
         sections.add(httpSection(config.httpHelpers(), httpOrigin));
         sections.add(toolSection(config.tools()));
-        sections.add(testdataSection(config, origin(raw, environment, "testdata")));
+        if(!sharedRuntime)sections.add(testdataSection(config, origin(raw, environment, "testdata")));
         if (selectedSection != null) for (Map<String,Object> section : sections) {
             if (!selectedSection.equals(section.get("id"))) continue;
             @SuppressWarnings("unchecked") List<Map<String,Object>> entries=(List<Map<String,Object>>)section.get("entries");
@@ -455,7 +460,17 @@ public final class PackageConfigurationInspector {
         }
         result.put("redactionEnabled", Boolean.valueOf(redactionEnabled));
         result.put("sections", sections);
-        result.put("diagnostics", Collections.emptyList());
+        List<Map<String,Object>> readiness = new ArrayList<Map<String,Object>>();
+        for (att.config.EnvironmentRequirement requirement : config.environmentRequirements())
+            if (readiness.size() < 4) readiness.add(requirement.diagnostic(environment));
+        for (att.config.HelperDiscoveryFailure failure : config.helperDiscoveryFailures())
+            if (readiness.size() < 4) readiness.add(failure.diagnostic(environment));
+        int omitted = config.environmentRequirements().size() + config.helperDiscoveryFailures().size() - readiness.size();
+        if (omitted > 0) readiness.add(diagnostic("ATT-CONFIG-DEPENDENCIES-TRUNCATED",
+                omitted + " additional dependency requirements or unavailable Helpers; validate the selected execution target for details"));
+        result.put("diagnostics", readiness);
+        result.put("executionReadiness", "not-validated");
+        if (!readiness.isEmpty()) result.put("state", "degraded");
         hideSensitiveFields(result);
         if (limit > 0) {
             Map<String, Object> selected = null;
@@ -851,7 +866,7 @@ public final class PackageConfigurationInspector {
     private PackageConfigurationSnapshots.Snapshot configurationSnapshot(String environment) throws Exception {
         if(snapshots == null)return null;
         if(!configFile().startsWith(packageRoot))return null;
-        try { return snapshots.get(packageRoot,configPath,environment,snapshotContext,true); }
+        try { return snapshots.get(packageRoot,configPath,environment,snapshotContext,true,sharedRuntime); }
         catch(Exception unavailable) { return null; } // Cache failures preserve the original uncached validation path.
     }
 
@@ -884,9 +899,15 @@ public final class PackageConfigurationInspector {
             }
         }
         for (String key : RESOURCE_LISTS) {
+            if(sharedRuntime&&"testdata".equals(key))continue;
             Object configured = profile != null && profile.containsKey(key) ? profile.get(key) : raw.get(key);
             for (Object value : listOrEmpty(configured)) {
                 if (!(value instanceof String)) continue;
+                if (!"testdata".equals(key) && !Files.exists(configResources.internalCandidate(
+                        RuntimeConfigPath.root(configFile()).resolve(String.valueOf(value))), java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
+                    if (++count > MAX_REFERENCED_FILES) throw new ConfigurationLimitException();
+                    continue; // The discovery loader still validates the path and reports unavailable Helpers.
+                }
                 totalBytes = checkDescriptorLimit(++count, totalBytes, String.valueOf(value), !"testdata".equals(key));
             }
         }

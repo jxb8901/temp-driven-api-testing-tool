@@ -15,6 +15,11 @@ import java.util.Set;
 
 /** Strict, package-contained loader for att-sshhelper/v1.0 descriptors. */
 public final class SshHelperConfigLoader {
+    private final EnvironmentReferences environmentReferences;
+
+    public SshHelperConfigLoader() { this(EnvironmentReferences.execution()); }
+    SshHelperConfigLoader(EnvironmentReferences environmentReferences) { this.environmentReferences = environmentReferences; }
+
     public Map<String, SshHelperConfig> load(Object configured, Path projectRoot) throws Exception {
         if (configured == null) return Collections.emptyMap();
         if (!(configured instanceof List)) throw new IllegalArgumentException("sshhelpers must be a list of YAML paths");
@@ -39,7 +44,7 @@ public final class SshHelperConfigLoader {
             Map<?, ?> map = (Map<?, ?>) loaded;
             Path schema = att.validation.SchemaFiles.resolve(projectRoot, "att-sshhelper-v1.0.schema.json");
             JsonSchemaVerifier.verify(schema, map);
-            SshHelperConfig helper = parse(map);
+            SshHelperConfig helper = new SshHelperConfigLoader(environmentReferences.forHelper("ssh", map.get("id"), relative.toString().replace('\\', '/'))).parse(map);
             if (!ids.add(helper.id().toLowerCase(Locale.ROOT))) throw new IllegalArgumentException("Duplicate SSH helper id ignoring case: " + helper.id());
             result.put(helper.id(), helper);
         }
@@ -80,10 +85,7 @@ public final class SshHelperConfigLoader {
             java.util.regex.Matcher secret = java.util.regex.Pattern.compile("\\$\\{ENV:([A-Za-z_][A-Za-z0-9_]*)}").matcher(configuredIdentity);
             boolean fromEnvironment = secret.matches();
             String identity = configuredIdentity;
-            if (fromEnvironment) {
-                identity = System.getenv(secret.group(1));
-                if (identity == null || identity.trim().isEmpty()) throw new IllegalArgumentException("sshhelper identityFile references missing or empty environment variable " + secret.group(1));
-            }
+            if (fromEnvironment) identity = environmentReferences.resolve(configuredIdentity, "sshhelper.instances[" + instanceId + "].identityFile", true);
             instances.put(instanceId, new SshConfig(host, user, port, identity, fromEnvironment));
         }
         if (instances.size() > 1 && strategy.isEmpty()) throw new IllegalArgumentException("sshhelper.selection.strategy is required for multiple instances");

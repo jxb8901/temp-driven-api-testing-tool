@@ -94,6 +94,24 @@ function resource(type: ResourceSummary['type'], resourceId: string, extra: Part
 }
 
 describe('Explorer source viewer', () => {
+  it('distinguishes browseable metadata from unresolved execution dependencies', async () => {
+    const target = resource('template', 'dependent', {
+      metadataState: 'available',
+      executionReadiness: { state: 'dependency-unresolved', environment: 'SIT', diagnostics: [{
+        code: 'ATT-RESOURCE-ENV-REQUIRED', summary: 'Execution requires environment variable ORDERS_DB_PASSWORD',
+        remediation: 'Configure the Worker environment, then validate the selected target.',
+      }] },
+    });
+    const api = apiWith({ getResource: vi.fn(async () => ({ resource: target, definition: { name: 'Dependent' } })) });
+    await render(<ExplorerPage api={api} packageId="payments" resourceRoute={{ type: 'template', resourceId: 'dependent' }} environment="SIT"
+      registerUnsavedChanges={() => () => {}} onResourceRouteChange={() => {}} onJobAccepted={() => {}} />);
+    const readiness = container.querySelector('[aria-label="Execution readiness"]');
+    expect(readiness?.textContent).toContain('Metadata available');
+    expect(readiness?.textContent).toContain('Execution dependencies unresolved (SIT)');
+    expect(readiness?.textContent).toContain('ORDERS_DB_PASSWORD');
+    expect(container.querySelector('[aria-label="Safe resource definition"]')).not.toBeNull();
+  });
+
   it('uses the shared query panels and exposes Clear filters and Refresh resources', async () => {
     const api = apiWith({ listResources: vi.fn(async () => ({ items: [resource('flow', 'payments.flow')], total: 1, nextCursor: null })) });
     await render(<ExplorerPage api={api} packageId="payments" resourceRoute={null} environment="SIT"

@@ -29,6 +29,8 @@ The fixture prefers the packaged Maven UI, then `att-web/frontend/dist`, and fal
 
 The issue-216 integration check also runs Playwright against the packaged WAR while `ServerWarUiIT` has authenticated stock Tomcat mounted at the non-root `/tools/att` context. It uses the real API without route interception to open a Flow's server-projected XML reference, inspect allowed and withheld configuration sources, preview generated Testdata, and open Quick Load at a tablet viewport. CI installs this harness and its browsers before Maven, then sets `ATT_UI_SERVER_PLAYWRIGHT=1` for `mvn clean verify`. To run it locally, install the harness and browser dependencies as above, then run `ATT_UI_SERVER_PLAYWRIGHT=1 mvn -B -ntp clean verify` from the repository root.
 
+The #236/#243 packaged archive check uses `ServerWarUiIT#packagedWarPublishesRunAndMultiWorkloadLoadArchives` and `artifact-archive-smoke.cjs`. Real RUN and multi-workload LOAD jobs produce the fixtures. The Java test compares every published ZIP entry with the authorized preview response, validates extracted relative-link targets, checks cross-USER access and denied identities, and waits for loose-output cleanup. With `ATT_UI_SERVER_PLAYWRIGHT=1`, the browser opens Studio as another USER, downloads the same finalized ZIP, checks the read-only text viewer and opaque-origin report iframe, follows online report links with back/forward, and opens extracted reports over `file://` with HTTP(S) requests blocked. Offline navigation, self-contained styles and built-in RUN search controls must work without ATT Server access. This check does not prove arbitrary detached-process containment or all failure/concurrency cases.
+
 Run the Scheduled Load workflow and accessibility check with:
 
 ```sh

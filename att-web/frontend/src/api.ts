@@ -165,7 +165,7 @@ function artifactUrl(jobId: string, path: string): string {
   if (!segments.length || segments.some(segment => !segment || segment === '.' || segment === '..')) return '#invalid-artifact';
   const base = apiBaseUrl();
   const encodedPath = segments.map(encodeURIComponent).join('/');
-  const url = new URL('jobs/' + encodeURIComponent(jobId) + '/artifacts/' + encodedPath, base);
+  const url = new URL('jobs/' + encodeURIComponent(jobId) + '/artifacts/view/' + encodedPath, base);
   if (url.origin !== base.origin || !url.pathname.startsWith(base.pathname)) return '#invalid-artifact';
   return url.toString();
 }
@@ -321,10 +321,10 @@ export const api = {
     return request<SourceProjection>(resourcePath(identity) + '/source-file' + queryString({ referenceId, origin }), { signal });
   },
   getDeclaredConfiguration(packageId: string, signal?: AbortSignal): Promise<ConfigurationResponse> {
-    return request<ConfigurationResponse>('packages/' + encodeURIComponent(packageId) + '/configuration' + queryString({ view: 'declared' }), { signal });
+    return request<ConfigurationResponse>((packageId ? 'packages/' + encodeURIComponent(packageId) + '/configuration' : 'configuration') + queryString({ view: 'declared' }), { signal });
   },
   getEffectiveConfiguration(packageId: string, query: EffectiveConfigurationQuery, signal?: AbortSignal): Promise<ConfigurationResponse> {
-    return request<ConfigurationResponse>('packages/' + encodeURIComponent(packageId) + '/configuration/effective' + queryString({
+    return request<ConfigurationResponse>((packageId ? 'packages/' + encodeURIComponent(packageId) + '/configuration/effective' : 'configuration/effective') + queryString({
       environment: query.environment,
       section: query.section,
       query: query.query,
@@ -334,7 +334,7 @@ export const api = {
     }), { signal });
   },
   compareConfiguration(packageId: string, query: ConfigurationComparisonQuery, signal?: AbortSignal): Promise<ConfigurationResponse> {
-    return request<ConfigurationResponse>('packages/' + encodeURIComponent(packageId) + '/configuration/compare' + queryString({
+    return request<ConfigurationResponse>((packageId ? 'packages/' + encodeURIComponent(packageId) + '/configuration/compare' : 'configuration/compare') + queryString({
       left: query.left,
       right: query.right,
       section: query.section,
@@ -345,10 +345,10 @@ export const api = {
     }), { signal });
   },
   listConfigurationFiles(packageId: string, path?: string, search?: string, offset = 0, signal?: AbortSignal): Promise<ConfigurationFilePage> {
-    return request<ConfigurationFilePage>('packages/' + encodeURIComponent(packageId) + '/configuration/files' + queryString({ path, query: search, offset, limit: 100 }), { signal });
+    return request<ConfigurationFilePage>((packageId ? 'packages/' + encodeURIComponent(packageId) + '/configuration/files' : 'configuration/files') + queryString({ path, query: search, offset, limit: 100 }), { signal });
   },
   getConfigurationFileSource(packageId: string, path: string, origin?: string, signal?: AbortSignal, referenceId?: string): Promise<SourceProjection> {
-    return request<SourceProjection>('packages/' + encodeURIComponent(packageId) + '/configuration/source' + queryString({ path, origin, referenceId }), { signal });
+    return request<SourceProjection>((packageId ? 'packages/' + encodeURIComponent(packageId) + '/configuration/source' : 'configuration/source') + queryString({ path, origin, referenceId }), { signal });
   },
   getTestdataRecords(packageId: string, descriptorId: string, query: { environment?: string; offset?: number; limit?: number; previewGenerated?: boolean }, signal?: AbortSignal): Promise<TestdataRecordsResponse> {
     return request<TestdataRecordsResponse>('packages/' + encodeURIComponent(packageId) + '/configuration/testdata/' + encodeURIComponent(descriptorId) + '/records' + queryString(query), { signal });

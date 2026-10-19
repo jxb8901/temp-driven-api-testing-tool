@@ -58,6 +58,7 @@ public final class SshResourceExecutor {
     SshResourceExecutor(Path projectRoot, FrameworkConfig config, SshCommandRunner commandRunner,
                         SshTransferClient transferClient) {
         this.projectRoot = projectRoot.toAbsolutePath().normalize();
+        if (config != null) config.requireExecutionConfig();
         this.config = config;
         this.commandRunner = commandRunner;
         this.transferClient = transferClient;

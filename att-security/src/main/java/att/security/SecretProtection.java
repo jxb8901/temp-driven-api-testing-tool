@@ -9,7 +9,7 @@ import java.util.regex.*;
  */
 public final class SecretProtection {
     public static final String REDACTED = "[REDACTED_SECRET]";
-    private static final String NAMES = "password|passwd|passphrase|token|secret|api[-_]?key|authorization|credential|private[-_]?key|cookie|set-cookie|access[-_]?key|identityfile|truststorepassword|client[-_]?secret";
+    private static final String NAMES = "password|passwd|passphrase|token|secret|api[-_]?key|authorization|credentials?|private[-_]?key|cookie|set-cookie|access[-_]?key|identityfile|truststorepassword|client[-_]?secret";
     private static final Pattern MARKER = Pattern.compile("\\[REDACTED(?:_SECRET)?\\]");
     private static final Pattern ASSIGNMENT = Pattern.compile("(?i)((?<![A-Za-z0-9])(?:" + NAMES + ")\\b[\\\"']?[ \\t]*[=:][ \\t]*)");
     private static final Pattern SENSITIVE_BLOCK_KEY = Pattern.compile("(?i)((?<![A-Za-z0-9])(?:" + NAMES + ")\\b[\\\"\']?[ \\t]*[=:][ \\t]*+)");
@@ -345,8 +345,12 @@ public final class SecretProtection {
                 && ((String)pointer).indexOf('\n')<0 && ((String)pointer).indexOf('\r')<0;
     }
 
-    public static Object value(Object input) { return value(input, new IdentityHashMap<Object,Boolean>(), 0); }
-    private static Object value(Object input, IdentityHashMap<Object,Boolean> active, int depth) {
+    public static Object value(Object input) { return value(input, new IdentityHashMap<Object,Boolean>(), 0, true); }
+
+    /** Raw output is not a Server-issued Debug draft and cannot carry opaque default references. */
+    public static Object exportValue(Object input) { return value(input, new IdentityHashMap<Object,Boolean>(), 0, false); }
+
+    private static Object value(Object input, IdentityHashMap<Object,Boolean> active, int depth, boolean allowDefaultReferences) {
         if (input == null || input instanceof Boolean || input instanceof Number) return input;
         if (input instanceof CharSequence || input instanceof Character) return text(input.toString());
         if (depth > 64 || active.put(input, Boolean.TRUE) != null) return REDACTED;
@@ -355,22 +359,24 @@ public final class SecretProtection {
                 Map<String,Object> safe = new LinkedHashMap<String,Object>();
                 for (Map.Entry<?,?> e : ((Map<?,?>)input).entrySet()) {
                     String key = e.getKey() instanceof String ? (String)e.getKey() : "[UNKNOWN_KEY]";
+                    String publicKey = allowDefaultReferences ? key : text(key);
+                    if (!allowDefaultReferences && safe.containsKey(publicKey)) throw new IllegalArgumentException("Export field names collide after protection");
                     Object child = e.getValue();
-                    if (sensitiveName(key) && keepDefaultReference(child)) {
-                        safe.put(key, Collections.singletonMap("$attDebugKeepDefault", ((Map<?,?>)child).get("$attDebugKeepDefault")));
+                    if (allowDefaultReferences && sensitiveName(key) && keepDefaultReference(child)) {
+                        safe.put(publicKey, Collections.singletonMap("$attDebugKeepDefault", ((Map<?,?>)child).get("$attDebugKeepDefault")));
                     } else if (sensitiveName(key) && child instanceof Map && "hidden".equals(((Map<?,?>)child).get("state"))) {
                         Map<String,Object> protectedField = new LinkedHashMap<String,Object>();
                         protectedField.put("state", "hidden"); protectedField.put("value", "[REDACTED]");
-                        protectedField.put("reasonCode", "MANDATORY_SECRET"); safe.put(key, protectedField);
-                    } else safe.put(key, sensitiveName(key) ? REDACTED : value(child, active, depth + 1));
+                        protectedField.put("reasonCode", "MANDATORY_SECRET"); safe.put(publicKey, protectedField);
+                    } else safe.put(publicKey, sensitiveName(key) ? REDACTED : value(child, active, depth + 1, allowDefaultReferences));
                 }
                 // Explicitly tagged secret records protect the entire record, including unknown layouts.
                 if (Boolean.TRUE.equals(((Map<?,?>)input).get("secret")) || "secret".equals(((Map<?,?>)input).get("classification"))) return REDACTED;
                 return safe;
             }
             List<Object> safe = new ArrayList<Object>();
-            if (input instanceof Iterable<?>) { for (Object item : (Iterable<?>)input) safe.add(value(item, active, depth + 1)); return safe; }
-            if (input.getClass().isArray()) { for (int i = 0; i < Array.getLength(input); i++) safe.add(value(Array.get(input, i), active, depth + 1)); return safe; }
+            if (input instanceof Iterable<?>) { for (Object item : (Iterable<?>)input) safe.add(value(item, active, depth + 1, allowDefaultReferences)); return safe; }
+            if (input.getClass().isArray()) { for (int i = 0; i < Array.getLength(input); i++) safe.add(value(Array.get(input, i), active, depth + 1, allowDefaultReferences)); return safe; }
             return REDACTED;
         } finally { active.remove(input); }
     }

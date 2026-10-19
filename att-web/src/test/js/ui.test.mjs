@@ -184,7 +184,7 @@ function boot({ hash = '', version = '1', inlineLoadEnabled = true, versionInfo 
     else if (path.startsWith('packages/')) result = { packageId: path.substring(9) };
     else if (/^jobs(?:\?|$)/.test(path)) result = { items: [] };
     else if (/^jobs\/(run|debug|load|validate)$/.test(path) && options.method === 'POST') result = { jobId: 'J1' };
-    else if (/^jobs\/[^/]+\/artifacts$/.test(path)) result = { items: artifactItems };
+    else if (/^jobs\/[^/]+\/artifacts$/.test(path)) result = { archiveStatus: 'READY', items: artifactItems, primaryReports: [] };
     else if (/^jobs\/[^/]+\/result$/.test(path)) result = { result: { passed: 1 }, diagnostic: null };
     else if (/^jobs\/[^/]+$/.test(path) && options.method === 'DELETE') result = { status: 'CANCEL_REQUESTED' };
     else if (/^jobs\/[^/]+$/.test(path)) result = { jobId: path.split('/')[1], status: state.jobStatus, packageId: 'payments', command: 'run' };
@@ -750,13 +750,30 @@ test('job SSE receives progress while artifact discovery is still pending', asyn
 
   ui.resolveArtifacts(0, {
     ok: true, status: 200, headers: { get: () => 'application/json' },
-    json: async () => ({ items: [{ path: 'report/index.html', size: 42 }] })
+    json: async () => ({ archiveStatus: 'READY', items: [{ path: 'report/index.html', size: 42 }] })
   });
-  await waitFor(() => ui.node('artifacts').children.length === 1, 'artifact listing');
-  assert.match(ui.node('artifacts').children[0].children[0].textContent, /report\/index\.html/);
+  await waitFor(() => ui.node('artifacts').children.length === 2, 'archive status and artifact listing');
+  assert.match(ui.node('artifacts').children[0].textContent, /Artifact archive: READY/);
+  assert.match(ui.node('artifacts').children[1].children[0].textContent, /report\/index\.html/);
 });
 
 
+
+test('a terminal job continues archive polling through ARCHIVING without another SSE result', async () => {
+  const ui = boot({ hash: '#/jobs/J1', jobStatus: 'PASS', deferArtifacts: true });
+  await waitFor(() => ui.pendingArtifacts.length === 1, 'initial archive lookup');
+  ui.resolveArtifacts(0, {
+    ok: true, status: 200, headers: { get: () => 'application/json' },
+    json: async () => ({ archiveStatus: 'ARCHIVING', items: [] })
+  });
+  await waitFor(() => ui.pendingArtifacts.length === 2, 'archive completion poll', 4000);
+  ui.resolveArtifacts(1, {
+    ok: true, status: 200, headers: { get: () => 'application/json' },
+    json: async () => ({ archiveStatus: 'READY', items: [{ path: 'report.html', size: 12 }] })
+  });
+  await waitFor(() => allText(ui.node('artifacts')).includes('report.html'), 'final report after background publication');
+  assert.match(allText(ui.node('artifacts')), /Artifact archive: READY/);
+});
 
 test('a late initial artifact response cannot replace the terminal report list', async () => {
   const ui = boot({ hash: '#/jobs/J1', deferArtifacts: true });
@@ -766,18 +783,18 @@ test('a late initial artifact response cannot replace the terminal report list',
 
   ui.resolveArtifacts(1, {
     ok: true, status: 200, headers: { get: () => 'application/json' },
-    json: async () => ({ items: [{ path: 'reports/final.html', size: 128 }] })
+    json: async () => ({ archiveStatus: 'READY', items: [{ path: 'reports/final.html', size: 128 }] })
   });
-  await waitFor(() => ui.node('artifacts').children.length === 1, 'terminal report listing');
-  assert.match(ui.node('artifacts').children[0].children[0].textContent, /reports\/final\.html/);
+  await waitFor(() => ui.node('artifacts').children.length === 2, 'archive status and terminal report listing');
+  assert.match(ui.node('artifacts').children[1].children[0].textContent, /reports\/final\.html/);
 
   ui.resolveArtifacts(0, {
     ok: true, status: 200, headers: { get: () => 'application/json' },
     json: async () => ({ items: [] })
   });
   await new Promise(resolve => setImmediate(resolve));
-  assert.equal(ui.node('artifacts').children.length, 1);
-  assert.match(ui.node('artifacts').children[0].children[0].textContent, /reports\/final\.html/);
+  assert.equal(ui.node('artifacts').children.length, 2);
+  assert.match(ui.node('artifacts').children[1].children[0].textContent, /reports\/final\.html/);
 });
 
 
@@ -787,7 +804,7 @@ test('terminal job SSE and artifacts load before a deferred result response', as
     artifactItems: [{ path: 'report.html', size: 12 }]
   });
   await waitFor(() => ui.pendingResults.length === 1, 'deferred terminal result');
-  await waitFor(() => ui.streams.length === 1 && ui.node('artifacts').children.length === 1,
+  await waitFor(() => ui.streams.length === 1 && ui.node('artifacts').children.length === 2,
     'terminal SSE and artifact list');
   assert.equal(ui.node('result').textContent, '');
   assert.ok(ui.calls.some(call => call.path === 'jobs/J1/events' || call.path === 'jobs/J1/artifacts'));
@@ -797,7 +814,7 @@ test('terminal job SSE and artifacts load before a deferred result response', as
     json: async () => ({ result: { passed: 1 }, diagnostic: null })
   });
   await waitFor(() => ui.node('result').textContent.includes('PASS'), 'terminal result');
-  assert.match(ui.node('artifacts').children[0].children[0].textContent, /report\.html/);
+  assert.match(ui.node('artifacts').children[1].children[0].textContent, /report\.html/);
 });
 
 test('bounds and deduplicates event history, then closes terminal SSE', async () => {

@@ -19,6 +19,11 @@ import java.util.Set;
 
 /** Validates selected environment HTTPHelper descriptors before any network I/O. */
 public final class HttpHelperConfigLoader {
+    private final EnvironmentReferences environmentReferences;
+
+    public HttpHelperConfigLoader() { this(EnvironmentReferences.execution()); }
+    HttpHelperConfigLoader(EnvironmentReferences environmentReferences) { this.environmentReferences = environmentReferences; }
+
     public Map<String, HttpHelperConfig> load(Object configured, Path projectRoot) throws Exception {
         if (configured == null) return Collections.emptyMap();
         if (!(configured instanceof List)) throw new IllegalArgumentException("httphelpers must be a list of YAML paths");
@@ -49,7 +54,8 @@ public final class HttpHelperConfigLoader {
                             + "'; ATT supports only " + Version.HTTPHELPER_SCHEMA + ". See docs/reference/appendices/migrations.md.");
                 Path schema = att.validation.SchemaFiles.resolveVersion(projectRoot, String.valueOf(map.get("schemaVersion")));
                 JsonSchemaVerifier.verify(schema, map);
-                helper = parse(map, root, resources).withEvidenceOutput(map.get("evidence"));
+                helper = new HttpHelperConfigLoader(environmentReferences.forHelper("http", map.get("id"), relative.toString().replace('\\', '/')))
+                        .parse(map, root, resources).withEvidenceOutput(map.get("evidence"));
             } catch (Exception error) {
                 JsonSchemaVerifier.SchemaValidationException invalid = JsonSchemaVerifier.SchemaValidationException.find(error);
                 String field = invalid == null ? "httphelper" : invalid.field();
@@ -158,16 +164,11 @@ public final class HttpHelperConfigLoader {
         }
         return result;
     }
-    private static String secret(Object value, String field) {
+    private String secret(Object value, String field) {
         if (value == null) return "";
         if (!(value instanceof String)) throw new IllegalArgumentException("HTTP " + field + " must be a string");
         String configured = (String) value;
-        if (configured.matches("\\$\\{ENV:[A-Za-z_][A-Za-z0-9_]*}")) {
-            String name = configured.substring(6, configured.length() - 1);
-            String resolved = System.getenv(name);
-            if (resolved == null || resolved.isEmpty()) throw new IllegalArgumentException("HTTP " + field + " references missing or empty environment variable " + name);
-            return resolved;
-        }
+        if (configured.startsWith("${ENV:")) return environmentReferences.resolve(configured, "httphelper." + field, true);
         if (configured.contains("${")) throw new IllegalArgumentException("HTTP " + field + " has an invalid environment reference");
         return configured;
     }

@@ -2,6 +2,7 @@
 import { act, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { inspectionCache } from '../../inspectionCache';
 import { ConfigurationWorkspace } from './ConfigurationWorkspace';
 import type { ExplorerApi, ResourceSourceReference } from './types';
 
@@ -44,13 +45,42 @@ function Harness({ api, sourceReference, canRevealAdminFields = false }: { api: 
 }
 
 describe('ConfigurationWorkspace', () => {
+  it('loads shared views with All packages and does not reload them on package selection', async () => {
+    const api = {
+      getDeclaredConfiguration: vi.fn(async () => ({ environments: [{ name: 'SIT', state: 'active' }], sections: [] })),
+      listConfigurationFiles: vi.fn(async () => ({ items: [], total: 0 })),
+    } as unknown as ExplorerApi;
+    const render = (packageId: string, tab: 'source' | 'testdata' = 'source') => <ConfigurationWorkspace api={api}
+      packages={[{ packageId: 'default' }, { packageId: 'jeffreyjiang' }]} packageId={packageId} environment="SIT"
+      tab={tab} onPackageChange={vi.fn()} onEnvironmentChange={vi.fn()} onFileChange={vi.fn()} onTabChange={vi.fn()} onOpenResource={vi.fn()} />;
+    await act(async () => root.render(render('')));
+    await flush();
+    expect(host.textContent).not.toContain('Choose a package');
+    expect(host.querySelector('select[aria-label="Testdata package"]')).toBeNull();
+    expect(api.getDeclaredConfiguration).toHaveBeenCalledWith('', expect.any(AbortSignal));
+    const reads = vi.mocked(api.getDeclaredConfiguration).mock.calls.length;
+    const listings = vi.mocked(api.listConfigurationFiles!).mock.calls.length;
+    for (const packageId of ['default', 'jeffreyjiang', 'removed-package']) {
+      await act(async () => { inspectionCache.select(packageId, 'SIT'); root.render(render(packageId)); });
+      await flush();
+    }
+    expect(api.getDeclaredConfiguration).toHaveBeenCalledTimes(reads);
+    expect(api.listConfigurationFiles).toHaveBeenCalledTimes(listings);
+    await act(async () => root.render(render('', 'testdata')));
+    expect(host.querySelector('select[aria-label="Testdata package"]')).not.toBeNull();
+    expect(host.textContent).toContain('Package-local records');
+  });
+
   it('limits the additional DB fields option to Effective and Compare and explains protected views', async () => {
     const api = {
       listResources: vi.fn(async () => ({ items: [], total: 0 })),
       getResource: vi.fn(async () => ({ resource: { type: 'template', resourceId: 'x' } })),
       getSafeSource: vi.fn(async () => ({ available: false })),
       getDeclaredConfiguration: vi.fn(async () => ({ environments: [], sections: [] })),
-      getEffectiveConfiguration: vi.fn(async () => ({ sections: [] })),
+      getEffectiveConfiguration: vi.fn(async () => ({ state: 'degraded', sections: [], diagnostics: [{
+        code: 'ATT-RESOURCE-ENV-REQUIRED', summary: 'Execution requires environment variable DB_PASSWORD',
+        descriptor: 'config/dbhelpers/sit.yaml', remediation: 'Configure the Worker environment, then validate the selected target.',
+      }] })),
       compareConfiguration: vi.fn(async () => ({ fields: [] })),
       listConfigurationFiles: vi.fn(async () => ({ items: [], total: 0 })),
       getConfigurationFileSource: vi.fn(async () => ({ available: false })),
@@ -70,7 +100,10 @@ describe('ConfigurationWorkspace', () => {
     expect(host.textContent).not.toContain('Show more DB fields (sensitive values stay hidden)');
     await showTab('Effective');
     expect(host.textContent).toContain('Show more DB fields (sensitive values stay hidden)');
-    expect(api.getDeclaredConfiguration).toHaveBeenCalledWith('payments', expect.any(AbortSignal));
+    expect(host.textContent).toContain('ATT-RESOURCE-ENV-REQUIRED');
+    expect(host.textContent).toContain('Execution dependencies have not been validated.');
+    expect(host.textContent).toContain('DB_PASSWORD');
+    expect(api.getDeclaredConfiguration).toHaveBeenCalledWith('', expect.any(AbortSignal));
     await showTab('Compare');
     expect(host.textContent).toContain('Show more DB fields (sensitive values stay hidden)');
     await showTab('Source');
@@ -104,7 +137,7 @@ describe('ConfigurationWorkspace', () => {
     await flush();
     await act(async () => host.querySelector<HTMLButtonElement>('[role="tree"] button[role="treeitem"]')?.click());
     await flush();
-    expect(api.getConfigurationFileSource).toHaveBeenCalledWith('payments', 'config/main.yaml', undefined, expect.any(AbortSignal), undefined);
+    expect(api.getConfigurationFileSource).toHaveBeenCalledWith('', 'config/main.yaml', undefined, expect.any(AbortSignal), undefined);
     expect(host.querySelector('pre[aria-label^="Safe source"]')?.textContent).toBe('name: base\npayload: &{./refs/child.json}');
     expect(host.textContent).toContain('The Server did not authorize any referenced files for navigation from this source.');
     expect([...host.querySelectorAll('button')].some(button => button.textContent === 'Open linked file')).toBe(false);
@@ -129,7 +162,7 @@ describe('ConfigurationWorkspace', () => {
     await act(async()=>root.render(<Harness api={api}/>));await flush();
     await act(async()=>host.querySelector<HTMLButtonElement>('[role="tree"] button[role="treeitem"]')?.click());await flush();
     await act(async()=>[...host.querySelectorAll<HTMLButtonElement>('button')].find(button=>button.textContent==='Open linked file')?.click());await flush();
-    expect(getConfigurationFileSource).toHaveBeenLastCalledWith('payments','config/refs/child.json','config/main.yaml',expect.any(AbortSignal),referenceId);
+    expect(getConfigurationFileSource).toHaveBeenLastCalledWith('','config/refs/child.json','config/main.yaml',expect.any(AbortSignal),referenceId);
     expect(host.querySelector('pre[aria-label^="Safe source"]')?.textContent).toBe('{"status":"ok"}');
   });
 
@@ -173,6 +206,43 @@ describe('ConfigurationWorkspace', () => {
     await press(parent, 'ArrowLeft');
     expect(parent.getAttribute('aria-expanded')).toBe('false');
     expect(tree.textContent).not.toContain('one.yaml');
+  });
+
+  it.each([false, true])('defers background inspections until selected source settles (failure=%s)', async failure => {
+    let resolveSource!: (value: { available: boolean; text: string }) => void;
+    let rejectSource!: (reason: Error) => void;
+    const pending = new Promise<{ available: boolean; text: string }>((resolve, reject) => { resolveSource = resolve; rejectSource = reject; });
+    const getResourceSourceFile = vi.fn(() => pending);
+    const getDeclaredConfiguration = vi.fn(async () => ({ environments: [] }));
+    const listConfigurationFiles = vi.fn(async () => ({ items: [], total: 0 }));
+    const api = { getResourceSourceFile, getDeclaredConfiguration, listConfigurationFiles } as unknown as ExplorerApi;
+    await act(async () => root.render(<Harness api={api} sourceReference={{ type: 'flow', resourceId: 'checkout', referenceId: 'b'.repeat(64) }} />));
+    await flush();
+    expect(getResourceSourceFile).toHaveBeenCalledTimes(1);
+    expect(getDeclaredConfiguration).not.toHaveBeenCalled();
+    expect(listConfigurationFiles).not.toHaveBeenCalled();
+    await act(async () => {
+      if (failure) rejectSource(new Error('Source unavailable'));
+      else resolveSource({ available: true, text: '<request>selected first</request>' });
+    });
+    await flush();
+    expect(getDeclaredConfiguration).toHaveBeenCalledTimes(1);
+    expect(listConfigurationFiles).toHaveBeenCalledTimes(1);
+    expect(host.textContent).toContain(failure ? 'Could not load safe source.' : '<request>selected first</request>');
+  });
+
+  it('does not start deferred metadata after leaving the workspace', async () => {
+    let resolveSource!: (value: { available: boolean; text: string }) => void;
+    const pending = new Promise<{ available: boolean; text: string }>(resolve => { resolveSource = resolve; });
+    const getDeclaredConfiguration = vi.fn();
+    const listConfigurationFiles = vi.fn();
+    const api = { getResourceSourceFile: vi.fn(() => pending), getDeclaredConfiguration, listConfigurationFiles } as unknown as ExplorerApi;
+    await act(async () => root.render(<Harness api={api} sourceReference={{ type: 'flow', resourceId: 'checkout', referenceId: 'b'.repeat(64) }} />));
+    await act(async () => root.render(null));
+    await act(async () => resolveSource({ available: true, text: '<request>stale</request>' }));
+    await flush();
+    expect(getDeclaredConfiguration).not.toHaveBeenCalled();
+    expect(listConfigurationFiles).not.toHaveBeenCalled();
   });
 
   it('opens a projected template payload by its resource reference id', async () => {

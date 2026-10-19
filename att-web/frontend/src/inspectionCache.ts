@@ -11,6 +11,7 @@ export class InspectionQueryCache {
   private sessionListeners = new Set<() => void>();
   private bytes = 0;
   private generation = 0;
+  sharedEpoch = 0;
   private context = '';
   sessionEpoch = 0;
   private selection = '';
@@ -22,8 +23,9 @@ export class InspectionQueryCache {
   subscribe = (listener: () => void) => { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; };
   subscribeSession = (listener: () => void) => { this.sessionListeners.add(listener); return () => { this.sessionListeners.delete(listener); }; };
   private notify() { for (const listener of this.listeners) listener(); }
-  clear(preserveViews = false) {
+  clear(preserveViews = false, selectionOnly = false) {
     this.generation++;
+    if (!selectionOnly) this.sharedEpoch++;
     for (const flight of this.flights.values()) flight.controller.abort();
     this.flights.clear(); this.entries.clear(); this.revisions.clear(); this.bytes = 0;
     if (!preserveViews) this.views.clear();
@@ -42,7 +44,7 @@ export class InspectionQueryCache {
   }
   select(packageId: string, environment: string) {
     const next = JSON.stringify([packageId, environment]);
-    if (this.selection !== next) { this.selection = next; this.clear(); }
+    if (this.selection !== next) { this.selection = next; this.clear(false, true); }
   }
   getView<T>(key: string): T | undefined { return this.views.get(key) as T | undefined; }
   setView<T>(key: string, value: T) {

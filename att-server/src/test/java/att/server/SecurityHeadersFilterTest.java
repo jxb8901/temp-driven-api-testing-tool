@@ -40,6 +40,9 @@ class SecurityHeadersFilterTest {
         Matcher htmlNonce = Pattern.compile("<script nonce=\"([^\"]+)\"").matcher(body.toString(StandardCharsets.UTF_8));
         assertTrue(htmlNonce.find(), body.toString(StandardCharsets.UTF_8));
         assertEquals(policyNonce.group(1), htmlNonce.group(1));
+        assertTrue(policy.contains("script-src 'self' 'nonce-" + htmlNonce.group(1) + "'"),
+                "Only the nonce-bearing Studio document may run the isolated report navigation bridge.");
+
     }
 
     @Test void redirectsOnlyGetRequestsAtTheContextRootToTheContextRelativeStudio() throws Exception {
@@ -63,6 +66,9 @@ class SecurityHeadersFilterTest {
         HttpServletResponse response = response(headers, new ByteArrayOutputStream(), new int[]{200}, new boolean[]{false}, new String[]{null});
         new SecurityHeadersFilter().doFilter(request("GET", "/att", "/att/api/v1/version"), response, (req, res) -> { });
         assertTrue(headers.get("Content-Security-Policy").contains("style-src-attr 'none'"));
+        assertTrue(headers.get("Content-Security-Policy").contains("script-src 'self';"),
+                "Non-Studio pages must not receive a script nonce allowance.");
+
     }
 
     private static void assertRootRedirect(String method, String contextPath, String requestUri, String expected) throws Exception {

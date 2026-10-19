@@ -168,6 +168,36 @@ class AuthenticationIntegrationTest {
             String colleagueBasic="Basic "+Base64.getEncoder().encodeToString("basic-user:basic user secure password".getBytes(java.nio.charset.StandardCharsets.UTF_8));
             assertEquals(200,sendBasicViaTrustedProxy(client,port,"GET","/att/api/v1/jobs/"+ownedJobId,"https://att.example.test",null,colleagueBasic,null).statusCode(),"Active USERs share Jobs across accounts");
             assertEquals(403,sendWithCookie(client,port,"GET","/att/api/v1/jobs/"+ownedJobId,ownerCookie,null,null,null).statusCode(),"ADMIN accounts do not receive Job operations");
+            String archiveJobId=ownedJobId;
+            String artifactBase="/att/api/v1/jobs/"+archiveJobId+"/artifacts";
+            long archiveDeadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(30);
+            JsonNode archiveIndex;
+            do {
+                archiveIndex=ServerRuntime.JSON.readTree(sendWithCookie(client,port,"GET",artifactBase,viewerCookie,null,null,null).body());
+                if("READY".equals(archiveIndex.path("archiveStatus").asText())&&!Files.exists(data.resolve("jobs").resolve(archiveJobId).resolve("output")))break;
+                Thread.sleep(20);
+            } while(System.nanoTime()<archiveDeadline);
+            assertEquals("READY",archiveIndex.path("archiveStatus").asText());
+            Path archiveOutput=Files.createDirectory(temp.resolve("approved-archive-fixture"));
+            Files.writeString(archiveOutput.resolve("case.log"),"password=export-canary\nbusiness=preserved\n");
+            Files.writeString(archiveOutput.resolve("report.html"),"<html><a href=\"case.log\">Case log</a><script>fetch('/api/v1/jobs')</script></html>");
+            ArtifactArchive.build(archiveOutput,data.resolve("jobs").resolve(archiveJobId).resolve("artifacts.zip"),file->
+                    att.server.api.internal.DiagnosticSanitizer.redactText(Files.readString(file)).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            for(String route:List.of(artifactBase,artifactBase+"/archive.zip",artifactBase+"/view/case.log",artifactBase+"/view/report.html")) {
+                assertEquals(200,sendWithCookie(client,port,"GET",route,viewerCookie,null,null,null).statusCode(),route);
+                assertEquals(200,sendBasicViaTrustedProxy(client,port,"GET",route,"https://att.example.test",null,colleagueBasic,null).statusCode(),"Every USER may read another USER's approved archive: "+route);
+                assertEquals(403,sendWithCookie(client,port,"GET",route,ownerCookie,null,null,null).statusCode(),"ADMIN-only access denied: "+route);
+                assertEquals(401,send(client,port,"GET",route,null,null,null).statusCode(),"Anonymous access denied: "+route);
+            }
+            HttpResponse<String> archivedLog=sendWithCookie(client,port,"GET",artifactBase+"/view/case.log",viewerCookie,null,null,null);
+            assertEquals("sandbox; default-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'self'",archivedLog.headers().firstValue("Content-Security-Policy").orElseThrow());
+            assertFalse(archivedLog.body().contains("export-canary"));assertTrue(archivedLog.body().contains("business=preserved"));
+            assertTrue(archivedLog.headers().firstValue("Content-Type").orElseThrow().startsWith("text/plain"));
+            HttpResponse<String> archivedHtml=sendWithCookie(client,port,"GET",artifactBase+"/view/report.html",viewerCookie,null,null,null);
+            assertTrue(archivedHtml.headers().firstValue("Content-Security-Policy").orElseThrow().contains("sandbox allow-scripts; default-src 'none'"));
+            assertEquals("SAMEORIGIN",archivedHtml.headers().firstValue("X-Frame-Options").orElseThrow());
+            assertEquals("private, no-store",archivedHtml.headers().firstValue("Cache-Control").orElseThrow());
+            assertEquals(404,sendWithCookie(client,port,"GET",artifactBase+"/case.log",viewerCookie,null,null,null).statusCode(),"Loose file routes stay closed");
             assertEquals(200,sendWithCookie(client,port,"POST","/att/api/v1/auth/logout",ownerCookie,origin,csrf,"{}").statusCode());
             assertEquals(401,sendWithCookie(client,port,"GET","/att/api/v1/packages",ownerCookie,null,null,null).statusCode());
             assertEquals(403,sendWithCookie(client,port,"GET","/att/api/v1/auth/users",viewerCookie,null,null,null).statusCode());
@@ -449,13 +479,14 @@ class AuthenticationIntegrationTest {
             JsonNode blankLabelJob=waitForTerminalJob(port,blankLabelAccepted.path("jobId").asText());
             assertEquals("anonymous",blankLabelJob.path("principal").asText(),"A blank label uses the same stable default as an omitted label");
             assertRemoteNoAuthCommands(port);
-            assertTrue(auditCount(temp.resolve("open-data"),"anonymous")>0,"Unlabelled anonymous jobs keep the shared default identity in audit records");
-            assertTrue(auditCount(temp.resolve("open-data"),"Bob(anonym)")>0,"Named anonymous job submissions use their server-formatted principal in audit records");
             JsonNode pendingDraft=postJsonViaTrustedProxy(port,"/att/api/v1/drafts/debug",null,
                     ServerRuntime.JSON.valueToTree(Map.of("packageId","debug","target",Map.of("type","template","id","FORM"),"input",form.path("input"))),201);
             anonymousDraftToInvalidate=pendingDraft.path("draftId").asText();
         }
         finally {open.stop();open.destroy();restore(old);}
+
+        assertTrue(auditCount(temp.resolve("open-data"),"anonymous")>0,"Unlabelled anonymous jobs keep the shared default identity in audit records");
+        assertTrue(auditCount(temp.resolve("open-data"),"Bob(anonym)")>0,"Named anonymous job submissions use their server-formatted principal in audit records");
 
         Files.writeString(openConfig,Files.readString(openConfig)
                 .replace("authenticationRequired: false","authenticationRequired: true")

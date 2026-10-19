@@ -1,6 +1,10 @@
+import { StatusBadge } from './StatusBadge';
+import { ArchiveMetrics } from './ArchiveMetrics';
+import type { ArtifactArchiveMetrics } from './types';
 import { useEffect, useMemo, useRef, useState, type ChangeEvent, type KeyboardEvent } from 'react';
 import './load.css';
-import type { JobArtifact, JobEvent, JobResultResponse, JobStatus, JobSummary, JobView, JobsFeatureProps } from './types';
+import { JobArtifacts } from './JobArtifacts';
+import type { JobEvent, JobResultResponse, JobStatus, JobSummary, JobView, JobsFeatureProps } from './types';
 
 function executionType(job: JobSummary): string { return job.executionType || (job.command === 'debug' ? 'run' : job.command); }
 
@@ -223,7 +227,7 @@ function unique(values: Array<string | undefined>): string[] {
 }
 
 export function JobsPage(props: JobsFeatureProps) {
-  return props.jobId ? <JobDetail {...props} jobId={props.jobId} /> : <JobsList {...props} />;
+  return props.jobId ? <JobDetail key={props.jobId} {...props} jobId={props.jobId} /> : <JobsList {...props} />;
 }
 
 function JobsList({ api, principal = '', onOpenJob }: JobsFeatureProps) {
@@ -369,9 +373,6 @@ function JobDetail({ api, jobId, onShowList, confirmCancel }: JobsFeatureProps &
   const [result, setResult] = useState<JobResultResponse | null>(null);
   const [resultState, setResultState] = useState<LoadState>('loading');
   const [resultError, setResultError] = useState('');
-  const [artifacts, setArtifacts] = useState<JobArtifact[]>([]);
-  const [artifactState, setArtifactState] = useState<LoadState>('loading');
-  const [artifactError, setArtifactError] = useState('');
   const [activeTab, setActiveTab] = useState<JobTab>('overview');
   const [connection, setConnection] = useState<'connecting' | 'connected' | 'reconnecting'>('connecting');
   const [events, setEvents] = useState<JobEvent[]>([]);
@@ -384,17 +385,24 @@ function JobDetail({ api, jobId, onShowList, confirmCancel }: JobsFeatureProps &
   const [cancelState, setCancelState] = useState<'idle' | 'pending' | 'error'>('idle');
   const [cancelError, setCancelError] = useState('');
   const [detailRefresh, setDetailRefresh] = useState(0);
+  const [terminalRefresh, setTerminalRefresh] = useState(0);
+  const [archiveMetrics, setArchiveMetrics] = useState<ArtifactArchiveMetrics | null>(null);
+  useEffect(() => setArchiveMetrics(null), [jobId]);
   const cancellationLock = useRef(false);
+  const terminalStatus = useRef<JobStatus | null>(null);
+  const terminalReconciled = useRef(false);
   const liveStatus = useMemo(() => [...events].reverse().find(event => event.type === 'status'), [events]);
 
   useEffect(() => {
     const controller = new AbortController();
     setJobState(job ? 'refreshing' : 'loading');
     setResultState(result ? 'refreshing' : 'loading');
-    setArtifactState(artifacts.length ? 'refreshing' : 'loading');
-    setDetailError(''); setResultError(''); setArtifactError('');
+    setDetailError(''); setResultError('');
     api.getJob(jobId, controller.signal).then(value => {
-      if (!controller.signal.aborted) { setJob(value); setJobState('ready'); }
+      if (!controller.signal.aborted) {
+        setJob(terminalStatus.current ? { ...value, status: terminalStatus.current } : value);
+        setJobState('ready');
+      }
     }).catch(error => {
       if (!controller.signal.aborted) { setDetailError(toError(error, 'Job detail could not be loaded.').message); setJobState('error'); }
     });
@@ -403,31 +411,38 @@ function JobDetail({ api, jobId, onShowList, confirmCancel }: JobsFeatureProps &
     }).catch(error => {
       if (!controller.signal.aborted) { setResultError(toError(error, 'Job result is not available.').message); setResultState('error'); }
     });
-    api.getJobArtifacts(jobId, controller.signal).then(value => {
-      if (!controller.signal.aborted) { setArtifacts(value); setArtifactState('ready'); }
-    }).catch(error => {
-      if (!controller.signal.aborted) { setArtifactError(toError(error, 'Job artifacts are not available.').message); setArtifactState('error'); }
-    });
     return () => controller.abort();
-  }, [api, jobId, detailRefresh]);
+  }, [api, jobId, detailRefresh, terminalRefresh]);
 
   useEffect(() => {
+    let disposed = false;
     setConnection('connecting');
     setEvents([]);
-    return api.subscribeJob(jobId, {
-      onOpen: () => setConnection('connected'),
-      onError: () => setConnection('reconnecting'),
-      onEvent: event => setEvents(current => {
-        if (event.id && current.some(existing => existing.id === event.id)) return current;
-        if (event.type === 'status') {
+    const unsubscribe = api.subscribeJob(jobId, {
+      onOpen: () => { if (!disposed) setConnection('connected'); },
+      onError: () => { if (!disposed) setConnection('reconnecting'); },
+      onEvent: event => {
+        if (disposed) return;
+        if (event.type === 'status' || event.type === 'result') {
           const payload = event.data && typeof event.data === 'object' && !Array.isArray(event.data)
             ? (event.data as Record<string, unknown>).status
             : event.data;
-          if (typeof payload === 'string' && payload) setJob(currentJob => currentJob ? { ...currentJob, status: payload } : currentJob);
+          const terminal = typeof payload === 'string' && ['PASS', 'FAIL', 'ERROR', 'INVALID', 'CANCELLED'].includes(payload);
+          if (terminal) terminalStatus.current = payload;
+          if (typeof payload === 'string' && payload) setJob(currentJob => currentJob
+            ? { ...currentJob, status: terminalStatus.current || payload } : currentJob);
+          // Status and result can arrive separately or be replayed on reconnect.
+          // Reconcile both REST snapshots once, outside the state updater.
+          if (!terminalReconciled.current && (terminal || event.type === 'result')) {
+            terminalReconciled.current = true;
+            setTerminalRefresh(value => value + 1);
+          }
         }
-        return [...current, { ...event, receivedAt: event.receivedAt || new Date().toISOString() }].slice(-MAX_EVENTS);
-      }),
+        setEvents(current => event.id && current.some(existing => existing.id === event.id) ? current
+          : [...current, { ...event, receivedAt: event.receivedAt || new Date().toISOString() }].slice(-MAX_EVENTS));
+      },
     });
+    return () => { disposed = true; unsubscribe(); };
   }, [api, jobId]);
 
   async function cancel() {
@@ -582,29 +597,23 @@ function JobDetail({ api, jobId, onShowList, confirmCancel }: JobsFeatureProps &
     </section>
     <section className="att-job-panel" role="tabpanel" id="job-panel-artifacts" aria-labelledby="job-tab-artifacts" hidden={activeTab !== 'artifacts'} tabIndex={0}>
       <h2>Artifacts</h2>
-      {artifactState === 'loading' && <p role="status" aria-busy="true">Loading artifacts…</p>}
-      {artifactError && <p role="alert" className="att-inline-error">{artifactError}</p>}
-      {artifactState === 'ready' && artifacts.length === 0 && <p>No artifacts were returned for this job.</p>}
-      {artifacts.length > 0 && <ul>{artifacts.map(item => <li key={item.path}><a href={api.artifactHref(jobId, item.path)}>{item.path}</a>{typeof item.size === 'number' && <span> · {item.size.toLocaleString()} bytes</span>}</li>)}</ul>}
+      <JobArtifacts key={jobId} api={api} jobId={jobId} refresh={detailRefresh} onMetrics={setArchiveMetrics} />
     </section>
     <section className="att-job-panel" role="tabpanel" id="job-panel-metrics" aria-labelledby="job-tab-metrics" hidden={activeTab !== 'metrics'} tabIndex={0}>
       <h2>Metrics</h2>
       <p className="att-help">Only values returned by the job API are shown. Server timings and Worker JVM metrics are separate from Load result metrics.</p>
       {job && <MetricTable title="Server timings" rows={numericRows(job.performance?.timings)} unit="ms" />}
       {job && <MetricTable title="Worker metrics" rows={numericRows(job.performance?.worker)} />}
+      <ArchiveMetrics value={archiveMetrics || job?.archiveMetrics} />
       {metrics && <MetricTable title="Load result metrics" rows={loadMetricRows(metrics)} />}
       {!metrics && <p role="status">{resultState === 'loading' || resultState === 'refreshing' ? 'Load result metrics are loading.' : job?.command === 'load' ? 'No Load metrics summary was returned. No chart or derived metric is shown.' : 'This command has no Load metric summary.'}</p>}
       {buckets.length > 0 && charts.map(series => <TimeSeriesChart key={series.field} series={series} />)}
       {buckets.length > 0 && !charts.length && <p role="status">The Server returned buckets, but this view cannot chart them without timestamps and complete numeric samples. Raw returned values remain available in the table.</p>}
       {buckets.length > 0 && <BucketTable buckets={buckets} />}
       {metrics && !buckets.length && <p role="status">No time-series buckets were returned. Summary metrics are shown in the table above.</p>}
-      {!job?.performance?.timings && !job?.performance?.worker && !metrics && resultState !== 'loading' && <p role="status">The API did not return metrics for this job.</p>}
+      {!job?.performance?.timings && !job?.performance?.worker && !archiveMetrics && !job?.archiveMetrics && !metrics && resultState !== 'loading' && <p role="status">The API did not return metrics for this job.</p>}
     </section>
   </div>;
-}
-
-function StatusBadge({ status }: { status: JobStatus }) {
-  return <span className={`att-status-badge att-status-${String(status).toLowerCase().replace(/[^a-z0-9]+/g, '-')}`}>{status}</span>;
 }
 
 function MetricTable({ title, rows, unit = '' }: { title: string; rows: Array<[string, number]>; unit?: string }) {

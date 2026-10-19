@@ -99,7 +99,7 @@ function KeyboardDialog({ open, mode, showScheduledLoad, selectedPackage, access
   const commands: Array<{ label: string; description: string; route: AppRoute }> = accessCapabilities.operate ? [
     { label: 'Dashboard', description: 'Dashboard overview', route: { kind: 'dashboard' } },
     { label: 'Explorer', description: 'Choose a package, browse resources, and run targets', route: selectedPackage ? { kind: 'package', packageId: selectedPackage } : { kind: 'packages' } },
-    { label: 'Configuration', description: 'Inspect package configuration and Testdata', route: selectedPackage ? { kind: 'configuration', packageId: selectedPackage } : { kind: 'configuration' } },
+    { label: 'Configuration', description: 'Inspect shared runtime configuration and Package-local Testdata', route: selectedPackage ? { kind: 'configuration', packageId: selectedPackage } : { kind: 'configuration' } },
     { label: 'Load testing', description: 'Create a validated Load job', route: { kind: 'load' } },
     { label: 'Jobs and results', description: 'Inspect recent jobs', route: { kind: 'jobs' } },
     ...(showScheduledLoad ? [{ label: 'Schedules', description: 'Manage RUN and LOAD schedules', route: { kind: 'schedules' } as AppRoute }] : []),
@@ -379,9 +379,7 @@ export function AppShell({
   });
   const packageHref = selectedPackage ? '#/packages/' + encodeURIComponent(selectedPackage) : '#/packages';
   const loadHref = '#/advanced-load';
-  const configurationHref = formatRoute(selectedPackage
-    ? { kind: 'configuration', packageId: selectedPackage, environment: selectedEnvironment }
-    : { kind: 'configuration' });
+  const configurationHref = formatRoute({ kind: 'configuration', environment: selectedEnvironment });
   const changeThemePreference = (preference: ThemePreference) => {
     setThemePreference(preference);
     if (preference === 'system') {

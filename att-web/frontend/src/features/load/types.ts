@@ -153,6 +153,7 @@ export interface JobSummary {
 }
 
 export interface JobView extends JobSummary {
+  archiveMetrics?: ArtifactArchiveMetrics | null;
   performance?: {
     timings?: Record<string, unknown>;
     worker?: Record<string, unknown>;
@@ -175,7 +176,46 @@ export interface JobResultResponse {
 
 export interface JobArtifact {
   path: string;
+  sha256?: string;
   size?: number;
+  report?: boolean;
+  mediaType?: string;
+}
+
+export interface ArtifactArchiveMetrics {
+  version: number;
+  attempts: number;
+  retries: number;
+  outcome: string;
+  failurePhase?: string | null;
+  failureReason?: string | null;
+  queueWaitMs?: number | null;
+  publicationWallMs?: number | null;
+  scanClassificationRedactionMs?: number | null;
+  zipWriteMs?: number | null;
+  verificationFsyncMs?: number | null;
+  cleanupMs?: number | null;
+  writerCpuMs?: number | null;
+  writerAllocatedBytes?: number | null;
+  sourceFiles?: number | null;
+  sourceBytes?: number | null;
+  includedEntries?: number | null;
+  omittedEntries?: number | null;
+  includedBytes?: number | null;
+  zipBytes?: number | null;
+  compressionRatio?: number | null;
+}
+
+export interface JobArtifactArchive {
+  archiveSizeBytes?: number | null;
+  archiveMetrics?: ArtifactArchiveMetrics | null;
+  archiveStatus: 'PENDING' | 'ARCHIVING' | 'READY' | 'FAILED' | 'EXPIRED';
+  items: JobArtifact[];
+  primaryReports: JobArtifact[];
+  nextOffset?: number | null;
+  complete?: boolean;
+  omissions?: Array<{ count: number; reason: string }>;
+  retryable?: boolean;
 }
 
 export interface JobEvent {
@@ -214,6 +254,10 @@ export interface LoadJobsApi {
   getJob(jobId: string, signal?: AbortSignal): Promise<JobView>;
   getJobResult(jobId: string, signal?: AbortSignal): Promise<JobResultResponse>;
   getJobArtifacts(jobId: string, signal?: AbortSignal): Promise<JobArtifact[]>;
+  getJobArtifactArchive?(jobId: string, offset?: number, signal?: AbortSignal): Promise<JobArtifactArchive>;
+  getJobArtifactText?(jobId: string, path: string, signal?: AbortSignal): Promise<string>;
+  retryJobArtifactArchive?(jobId: string): Promise<unknown>;
+  artifactArchiveHref?(jobId: string): string;
   cancelJob(jobId: string): Promise<{ jobId: string; status: JobStatus }>;
   subscribeJob(jobId: string, handlers: JobEventHandlers): () => void;
   artifactHref(jobId: string, path: string): string;

@@ -147,6 +147,7 @@ public class ToolInvoker {
     private ToolInvocationResult invoke(String invocationId, String toolName, Map<String, Object> input,
             CaseRuntimeContext context, CaseExecutionLog log, boolean recordAction, Long actionTimeoutMs,
             String saveAs, boolean overwrite, ToolConfig tool, SshHelperConfig resolvedHelper) throws Exception {
+        config.requireExecutionConfig();
         if (tool == null) {
             throw new att.validation.DiagnosticException(att.validation.DiagnosticCodes.TOOL_INVALID,
                     "Unknown configured tool '" + toolName + "'", "Available tools: " + String.join(", ", config.tools().keySet()),

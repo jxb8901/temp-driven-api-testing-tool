@@ -1508,12 +1508,41 @@
       const data = await request(`jobs/${encodeURIComponent(id)}/artifacts`);
       if (requestSequence !== artifactRequestSequence || generation !== navigation || activeJob !== id) return;
       const list = byId('artifacts'); list.replaceChildren();
-      listItems(data).forEach(item => {
+      const status = document.createElement('li');
+      text(status, `Artifact archive: ${String(data.archiveStatus || 'PENDING')}`);
+      if (data.archiveStatus === 'READY') status.append(document.createTextNode(' — '), link(`${api}jobs/${encodeURIComponent(id)}/artifacts/archive.zip`, 'Download Artifacts (.zip)'));
+      else if (data.archiveStatus === 'FAILED') {
+        const retry = document.createElement('button'); retry.type = 'button'; retry.textContent = 'Retry archive';
+        retry.addEventListener('click', async () => { retry.disabled = true; try { await request(`jobs/${encodeURIComponent(id)}/artifacts/retry`, { method:'POST', body:{} }); await loadArtifacts(id, generation); } catch (error) { message(error.message); retry.disabled = false; } });
+        status.append(document.createTextNode(' — '), retry);
+      }
+      list.append(status);
+      const viewItem = item => {
         const li = document.createElement('li');
         const path = String(item.path);
-        li.append(link(`${api}jobs/${encodeURIComponent(id)}/artifacts/${path.split('/').map(encodeURIComponent).join('/')}`, `${path} (${item.size} bytes)`));
+        li.append(link(`${api}jobs/${encodeURIComponent(id)}/artifacts/view/${path.split('/').map(encodeURIComponent).join('/')}`, `${path} (${item.size} bytes)`));
         list.append(li);
-      });
+      };
+      if (Array.isArray(data.primaryReports) && data.primaryReports.length) {
+        const heading = document.createElement('li'); text(heading, 'Reports'); list.append(heading);
+        data.primaryReports.forEach(viewItem);
+      }
+      listItems(data).filter(item => !item.report).forEach(viewItem);
+      if (data.nextOffset != null) {
+        const more = document.createElement('button'); more.type = 'button'; more.textContent = 'Load more artifacts';
+        const row = document.createElement('li'); row.append(more); list.append(row);
+        more.addEventListener('click', async () => {
+          more.disabled = true;
+          try {
+            const page = await request(`jobs/${encodeURIComponent(id)}/artifacts?offset=${encodeURIComponent(data.nextOffset)}&limit=100`);
+            if (generation !== navigation || activeJob !== id) return;
+            listItems(page).filter(item => !item.report).forEach(viewItem);
+            row.remove();
+            if (page.nextOffset != null) { data.nextOffset = page.nextOffset; list.append(row); more.disabled = false; }
+          } catch (error) { message(error.message); more.disabled = false; }
+        });
+      }
+      if (data.archiveStatus === 'PENDING' || data.archiveStatus === 'ARCHIVING') setTimeout(() => { if (generation === navigation && activeJob === id) loadArtifacts(id, generation); }, 2000);
     } catch (error) {
       if (requestSequence === artifactRequestSequence && generation === navigation && activeJob === id) message(error.message);
     }

@@ -20,6 +20,82 @@ class PackageConfigurationInspectorTest {
     @org.junit.jupiter.api.BeforeEach void enableServerPathPresentation() { att.core.PathPresentation.configure(true, true); }
     @org.junit.jupiter.api.AfterEach void restoreDefaultPathPresentation() { att.core.PathPresentation.configure(false, false); }
 
+    @Test void sharedRuntimeIgnoresPackageRecordsAndReconcilesConfigRevision() throws Exception {
+        Path root=packageRoot("shared-runtime");
+        Path file=root.resolve("config/config.yaml");
+        write(file,baseConfig("config/dbhelpers/sit.yaml","config/dbhelpers/uat.yaml")
+                +"testdata: [testdata/package-only.yaml]\n");
+        PackageConfigurationSnapshots snapshots=new PackageConfigurationSnapshots();
+        PackageConfigurationInspector shared=inspector(root).forSharedRuntime().withSnapshots(snapshots,"shared");
+        Map<String,Object> sit=shared.inspect("effective","SIT",null);
+        assertEquals("ready",sit.get("state"));
+        assertFalse(sit.toString().contains("Testdata descriptors"));
+        assertThrows(Exception.class,()->snapshots.get(root,file,"SIT","shared",true,false),
+                "A shared snapshot must not bypass Package-local Testdata validation");
+        assertEquals("SIT",sit.get("environment"));
+        assertEquals("UAT",shared.inspect("effective","UAT",null).get("environment"));
+        assertFalse(sit.toString().contains("sit-secret"));
+        assertFalse(sit.toString().contains(root.toString()));
+        assertEquals("invalid",inspector(root).inspect("effective","SIT",null).get("state"),
+                "Package-scoped record inspection still requires the actual local descriptor");
+        byte[] revision=snapshots.get(root,file,"SIT","shared",true,true).revision;
+        write(root.resolve("config/dbhelpers/sit.yaml"),helper("jdbc:postgresql://changed.internal/orders","user","secret",false).replace("Orders database","Revised database"));
+        assertEquals("ready",shared.inspect("effective","SIT",null).get("state"));
+        assertFalse(java.util.Arrays.equals(revision,snapshots.get(root,file,"SIT","shared",true,true).revision));
+        write(file,"invalid: [");
+        assertEquals("invalid",shared.inspect("effective","SIT",null).get("state"));
+        Files.delete(file);
+        assertEquals("invalid",shared.inspect("declared",null,null).get("state"));
+    }
+
+    @Test void effectiveAndCompareAreValueFreeDiscoveryNotExecutionValidation() throws Exception {
+        Path root = packageRoot("degraded-config");
+        write(root.resolve("config/dbhelpers/sit.yaml"), helper("jdbc:postgresql://localhost/orders",
+                "${ENV:ORDERS_DB_USERNAME}", "${ENV:ATT_CONFIGURATION_MISSING_SECRET_244}", true));
+        PackageConfigurationSnapshots cache = new PackageConfigurationSnapshots();
+        PackageConfigurationInspector inspector = inspector(root).withSnapshots(cache, "discovery");
+        Map<String,Object> effective = inspector.inspect("effective", "SIT", null);
+        assertEquals("degraded", effective.get("state"));
+        assertEquals("not-validated", effective.get("executionReadiness"));
+        assertTrue(effective.toString().contains("ATT_CONFIGURATION_MISSING_SECRET_244"));
+        assertTrue(effective.toString().contains("ORDERS_DB_USERNAME"));
+        assertFalse(effective.toString().contains("profile-test"));
+        assertFalse(effective.toString().contains(root.toString()));
+        assertTrue(cache.get(root, Paths.get("config/config.yaml"), "SIT", "discovery", true).config.discoveryOnly());
+        assertThrows(IllegalStateException.class, () -> cache.get(root, Paths.get("config/config.yaml"),
+                "SIT", "discovery", true).config.requireExecutionConfig());
+        Map<String,Object> compared = inspector.inspect("compare", "SIT", "UAT", "dbhelpers", 0, 50);
+        assertEquals("degraded", compared.get("state"));
+        assertFalse(((List<?>)compared.get("fields")).isEmpty());
+        assertFalse(compared.toString().contains("profile-test"));
+        assertEquals("ready", inspector.inspect("effective", "UAT", null).get("state"));
+        assertThrows(Exception.class, () -> new att.config.FrameworkConfigLoader().load(
+                root.resolve("config/config.yaml"), root, "SIT"));
+    }
+
+    @Test void unavailableAndMalformedHelpersDegradeWithoutRemovingUnrelatedMetadata() throws Exception {
+        Path root = packageRoot("broken-helper-config");
+        Path helper = root.resolve("config/dbhelpers/sit.yaml");
+        Files.delete(helper);
+        PackageConfigurationSnapshots cache = new PackageConfigurationSnapshots();
+        PackageConfigurationInspector inspector = inspector(root).withSnapshots(cache, "repair");
+        Map<String,Object> missing = inspector.inspect("effective", "SIT", null);
+        assertEquals("degraded", missing.get("state"));
+        assertTrue(missing.toString().contains("ATT-RESOURCE-HELPER-UNAVAILABLE"));
+        assertFalse(((Map<?,?>)missing.get("globals")).isEmpty());
+        PackageConfigurationSnapshots.Snapshot absent = cache.get(root, Paths.get("config/config.yaml"), "SIT", "repair", true);
+        assertSame(absent, cache.get(root, Paths.get("config/config.yaml"), "SIT", "repair", true));
+        write(helper, "not: [valid\nsecret: do-not-disclose\n");
+        Map<String,Object> malformed = inspector.inspect("effective", "SIT", null);
+        assertEquals("degraded", malformed.get("state"));
+        assertTrue(malformed.toString().contains("ATT-RESOURCE-HELPER-INVALID"));
+        assertFalse(malformed.toString().contains("do-not-disclose"));
+        assertFalse(malformed.toString().contains(root.toString()));
+        write(helper, helper("jdbc:postgresql://localhost/orders", "fixed-user", "fixed-secret", true));
+        assertEquals("ready", inspector.inspect("effective", "SIT", null).get("state"));
+        assertNotSame(absent, cache.get(root, Paths.get("config/config.yaml"), "SIT", "repair", true));
+    }
+
     @Test void snapshotsReuseParsedProfilesAndReconcileDependencyContentWithoutMtimeHints() throws Exception {
         Path root=packageRoot("cached-profiles");
         PackageConfigurationSnapshots cache=new PackageConfigurationSnapshots();
@@ -40,7 +116,8 @@ class PackageConfigurationInspectorTest {
         assertSame(uat,cache.get(root,Paths.get("config/config.yaml"),"UAT",context,true));
         assertNotSame(updated,cache.get(root,Paths.get("config/config.yaml"),"SIT","policy-b",true));
         Files.move(dependency,dependency.resolveSibling("renamed.yaml"));
-        assertThrows(Exception.class,()->cache.get(root,Paths.get("config/config.yaml"),"SIT",context,true));
+        PackageConfigurationSnapshots.Snapshot absent=cache.get(root,Paths.get("config/config.yaml"),"SIT",context,true);
+        assertFalse(absent.config.helperDiscoveryFailures().isEmpty());
         Files.move(dependency.resolveSibling("renamed.yaml"),dependency);
         assertNotSame(updated,cache.get(root,Paths.get("config/config.yaml"),"SIT",context,true));
     }

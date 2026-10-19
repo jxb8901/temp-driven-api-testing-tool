@@ -3,6 +3,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { JobsPage } from './JobsPage';
+import { JobArtifacts } from './JobArtifacts';
 import type { JobEventHandlers, JobResultResponse, JobStatus, JobSummary, JobView, LoadJobsApi } from './types';
 
 const sampleJob: JobView = {
@@ -66,6 +67,217 @@ async function click(element: Element) {
 }
 
 describe('JobsPage React feature', () => {
+  it.each([
+    ['PASS', 'status'], ['FAIL', 'status'], ['ERROR', 'status'], ['INVALID', 'status'], ['CANCELLED', 'status'], ['ERROR', 'result'],
+  ])('reconciles final metrics/results once after %s %s SSE', async (status, type) => {
+    const running = { ...sampleJob, status: 'RUNNING', performance: undefined };
+    const finished = { ...running, status, performance: { worker: { sampleCount: 3, heapPeakUsedBytes: 34660872, processCpuTimeMs: 3521 } } };
+    const getJob = vi.fn().mockResolvedValueOnce(running).mockResolvedValue(finished);
+    const getJobResult = vi.fn().mockResolvedValueOnce({ job: running, result: null }).mockResolvedValue({
+      job: finished, result: { status, diagnostic: { code: 'CONNECTION_ERROR', message: 'org.postgresql.Driver is unavailable' } },
+    });
+    const api = makeApi({ getJob, getJobResult });
+    await act(async () => root.render(<JobsPage api={api} jobId="JOB-204" onOpenJob={vi.fn()} onShowList={vi.fn()} />));
+    expect(host.querySelector('#job-panel-metrics')?.textContent).not.toContain('heapPeakUsedBytes');
+    expect(host.querySelector('#job-panel-results')?.textContent).toContain('The Server has not returned a result payload.');
+    const handlers = vi.mocked(api.subscribeJob).mock.calls[0][1];
+    await act(async () => handlers.onEvent({ id: 'terminal', type, data: { status } }));
+    await click(host.querySelector('#job-tab-metrics')!);
+    expect(host.querySelector('#job-panel-metrics')?.textContent).toContain('heapPeakUsedBytes');
+    expect(host.querySelector('#job-panel-metrics')?.textContent).toContain('processCpuTimeMs');
+    await click(host.querySelector('#job-tab-results')!);
+    expect(host.querySelector('#job-panel-results')?.textContent).toContain('CONNECTION_ERROR');
+    expect(host.querySelector('#job-panel-results')?.textContent).toContain('org.postgresql.Driver');
+    expect(host.querySelector('#job-panel-results')?.textContent).not.toContain('The Server has not returned a result payload.');
+    await act(async () => {
+      handlers.onError(); handlers.onOpen();
+      handlers.onEvent({ id: 'terminal', type, data: { status } });
+      handlers.onEvent({ id: 'replayed-status', type: 'status', data: { status } });
+      handlers.onEvent({ id: 'replayed-result', type: 'result', data: { status } });
+    });
+    expect(getJob).toHaveBeenCalledTimes(2);
+    expect(getJobResult).toHaveBeenCalledTimes(2);
+    expect(api.subscribeJob).toHaveBeenCalledTimes(1);
+  });
+
+  it('retains the explicit terminal diagnostic when the Worker truly returned no result', async () => {
+    const getJobResult = vi.fn().mockResolvedValueOnce({ job: sampleJob, result: null }).mockResolvedValue({
+      job: { ...sampleJob, status: 'ERROR' }, result: null,
+      diagnostic: { code: 'ATT-SERVER-WORKER-EXITED', summary: 'Worker exited before delivering a terminal result' },
+    });
+    const api = makeApi({ getJobResult });
+    await act(async () => root.render(<JobsPage api={api} jobId="JOB-204" onOpenJob={vi.fn()} onShowList={vi.fn()} />));
+    await act(async () => vi.mocked(api.subscribeJob).mock.calls[0][1].onEvent({ type: 'result', data: {} }));
+    expect(host.querySelector('#job-panel-results')?.textContent).toContain('ATT-SERVER-WORKER-EXITED');
+    expect(host.querySelector('.att-raw-result')).toBeNull();
+    expect(getJobResult).toHaveBeenCalledTimes(2);
+  });
+
+  it('aborts initial snapshots and ignores their late responses after terminal SSE', async () => {
+    const initialJob = deferred<JobView>();
+    const initialResult = deferred<JobResultResponse>();
+    const finished = { ...sampleJob, status: 'ERROR', performance: { worker: { sampleCount: 3 } } };
+    const getJob = vi.fn().mockReturnValueOnce(initialJob.promise).mockResolvedValue(finished);
+    const getJobResult = vi.fn().mockReturnValueOnce(initialResult.promise).mockResolvedValue({ job: finished, result: { status: 'ERROR', code: 'CONNECTION_ERROR' } });
+    const api = makeApi({ getJob, getJobResult });
+    await act(async () => root.render(<JobsPage api={api} jobId="JOB-204" onOpenJob={vi.fn()} onShowList={vi.fn()} />));
+    await act(async () => vi.mocked(api.subscribeJob).mock.calls[0][1].onEvent({ type: 'status', data: { status: 'ERROR' } }));
+    expect(getJob.mock.calls[0][1].aborted).toBe(true);
+    expect(getJobResult.mock.calls[0][1].aborted).toBe(true);
+    await act(async () => { initialJob.resolve(sampleJob); initialResult.resolve({ job: sampleJob, result: null }); });
+    expect(host.querySelector('.att-job-actions')?.textContent).toContain('ERROR');
+    expect(host.querySelector('#job-panel-results')?.textContent).toContain('CONNECTION_ERROR');
+    expect(host.querySelector('#job-panel-metrics')?.textContent).toContain('sampleCount');
+  });
+
+  it('aborts terminal reconciliation on job change and ignores old stream callbacks', async () => {
+    const lateJob = deferred<JobView>();
+    const lateResult = deferred<JobResultResponse>();
+    const getJob = vi.fn().mockResolvedValueOnce(sampleJob).mockReturnValueOnce(lateJob.promise)
+      .mockResolvedValue({ ...sampleJob, jobId: 'JOB-NEW', status: 'RUNNING', performance: undefined });
+    const getJobResult = vi.fn().mockResolvedValueOnce({ job: sampleJob, result: null }).mockReturnValueOnce(lateResult.promise)
+      .mockResolvedValue({ job: { ...sampleJob, jobId: 'JOB-NEW' }, result: null });
+    const unsubscribe = vi.fn();
+    const api = makeApi({ getJob, getJobResult, subscribeJob: vi.fn(() => unsubscribe) });
+    await act(async () => root.render(<JobsPage api={api} jobId="JOB-204" onOpenJob={vi.fn()} onShowList={vi.fn()} />));
+    const old = vi.mocked(api.subscribeJob).mock.calls[0][1];
+    await act(async () => old.onEvent({ type: 'status', data: { status: 'ERROR' } }));
+    await act(async () => root.render(<JobsPage api={api} jobId="JOB-NEW" onOpenJob={vi.fn()} onShowList={vi.fn()} />));
+    expect(getJob.mock.calls[1][1].aborted).toBe(true);
+    expect(getJobResult.mock.calls[1][1].aborted).toBe(true);
+    expect(unsubscribe).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      lateJob.resolve({ ...sampleJob, status: 'ERROR' });
+      lateResult.resolve({ job: sampleJob, result: { code: 'OLD-JOB-RESULT' } });
+      old.onEvent({ type: 'result', data: { status: 'ERROR' } }); old.onError();
+    });
+    expect(host.querySelector('.att-job-actions')?.textContent).toContain('RUNNING');
+    expect(host.textContent).not.toContain('OLD-JOB-RESULT');
+    expect(getJob).toHaveBeenCalledTimes(3);
+    await act(async () => vi.mocked(api.subscribeJob).mock.calls[1][1].onEvent({ type: 'status', data: { status: 'PASS' } }));
+    expect(getJob).toHaveBeenCalledTimes(4);
+    expect(getJobResult).toHaveBeenCalledTimes(4);
+  });
+
+  it.each([
+    ['READY', 0, '0 B'], ['READY', 25190, '24.6 KB'], ['READY', 1099511627776, '1 TB'],
+    ['READY', -1, null], ['READY', null, null], ['PENDING', 25190, null],
+    ['ARCHIVING', 25190, null], ['FAILED', 25190, null],
+  ] as const)('shows truthful ZIP size for %s and %s bytes', async (archiveStatus, archiveSizeBytes, expected) => {
+    const api=makeApi({getJobArtifactArchive: vi.fn(async () => ({ archiveStatus, archiveSizeBytes, items: [], primaryReports: [] })), artifactArchiveHref: () => '/archive.zip'});
+    await act(async () => root.render(<JobsPage api={api} jobId="JOB-204" onOpenJob={vi.fn()} onShowList={vi.fn()} />));
+    await advance();
+    const link=host.querySelector('#job-panel-artifacts a');
+    if(archiveStatus !== 'READY') expect(link).toBeNull();
+    else expect(link?.textContent).toBe('Download Artifacts (.zip)' + (expected ? ` — ${expected}` : ''));
+  });
+
+  it('shows independent Server archive metrics for an ERROR job without Load results', async () => {
+    const archiveMetrics={version:1, attempts:2, retries:1, outcome:'READY', zipBytes:500, publicationWallMs:12, writerCpuMs:null, writerAllocatedBytes:null};
+    const api=makeApi({ getJob:vi.fn(async () => ({...sampleJob,status:'ERROR',command:'run'})),
+      getJobResult:vi.fn(async () => { throw new Error('No Worker result'); }),
+      getJobArtifactArchive:vi.fn(async () => ({archiveStatus:'READY' as const, items:[], primaryReports:[], archiveMetrics})),
+    });
+    await act(async () => root.render(<JobsPage api={api} jobId="JOB-204" onOpenJob={vi.fn()} onShowList={vi.fn()} />));
+    await advance();
+    const metrics=host.querySelector('[aria-label="Artifact archive metrics"]');
+    expect(metrics?.textContent).toContain('Outcome: READY');
+    expect(metrics?.textContent).toContain('Unavailable');
+    expect(metrics?.textContent).toContain('not retained heap / peak');
+    expect(metrics?.textContent).toContain('Retries');
+    expect(metrics?.textContent).toContain('500');
+  });
+
+  it('discovers reports independently of pagination and offers only an archive download', async () => {
+    const report = { path: 'load/run/report/index.html', report: true, size: 900 };
+    const api = makeApi({
+      getJobArtifactArchive: vi.fn(async (_id: string, offset?: number) => ({ archiveStatus: 'READY' as const, primaryReports: [report],
+        items: [{ path: offset ? 'nested/evidence.json' : 'case.log', size: 5 }], nextOffset: offset ? null : 100,
+        complete: false, omissions: [{ count: 1, reason: 'unsupported output' }] })),
+      artifactArchiveHref: () => '/archive.zip',
+      getJobArtifactText: vi.fn(async () => '<html><head><meta http-equiv="Content-Security-Policy" content="default-src \'none\'; script-src \'sha256-reviewed\'; style-src \'unsafe-inline\'"></head><body><h1>Authenticated report</h1></body></html>'),
+    });
+    await act(async () => root.render(<JobsPage api={api} jobId="JOB-204" onOpenJob={vi.fn()} onShowList={vi.fn()} />));
+    await advance();
+    const panel = host.querySelector('#job-panel-artifacts')!;
+    expect(panel.textContent).toContain('View Report: load/run/report/index.html');
+    expect([...panel.querySelectorAll('a')].map(link => link.textContent)).toEqual(['Download Artifacts (.zip)']);
+    expect(panel.textContent).toContain('Some output was excluded');
+    await click([...panel.querySelectorAll('button')].find(button => button.textContent === 'Load more artifacts')!);
+    expect(panel.textContent).toContain('nested/evidence.json');
+    expect(panel.textContent).toContain('case.log');
+    await click([...panel.querySelectorAll('button')].find(button => button.textContent?.startsWith('View Report:'))!);
+    await advance();
+    const frame = panel.querySelector('iframe')!;
+    expect(frame.getAttribute('sandbox')).toBe('allow-scripts');
+    expect(frame.hasAttribute('allow-same-origin')).toBe(false);
+    expect(frame.hasAttribute('src')).toBe(false); // no anonymous navigation to protected API
+    expect(frame.getAttribute('srcdoc')).toContain('Authenticated report');
+    expect(api.getJobArtifactText).toHaveBeenCalledWith('JOB-204', 'load/run/report/index.html', expect.any(AbortSignal));
+    await act(async () => vi.mocked(api.subscribeJob).mock.calls[0][1].onEvent({ type: 'status', data: { status: 'PASS' } }));
+    expect(api.getJob).toHaveBeenCalledTimes(2);
+    expect(api.getJobResult).toHaveBeenCalledTimes(2);
+    expect(api.getJobArtifactArchive).toHaveBeenCalledTimes(2);
+    expect(panel.textContent).toContain('nested/evidence.json');
+    expect(panel.querySelector('iframe')).toBe(frame);
+  });
+
+  it('reconciles 150 visible artifacts without closing an unchanged report on manual refresh', async () => {
+    const report = { path: 'load/report/index.html', report: true, size: 900, sha256: 'original' };
+    let changed = false;
+    let present = true;
+    const items = Array.from({ length: 150 }, (_, i) => ({ path: `evidence/${i}.log`, size: 5, sha256: 'same' }));
+    const api = makeApi({
+      getJobArtifactArchive: vi.fn(async (_id: string, offset = 0) => ({ archiveStatus: 'READY' as const,
+        primaryReports: present ? [{ ...report, sha256: changed ? 'replaced' : report.sha256 }] : [],
+        items: items.slice(offset, offset + 100), nextOffset: offset ? null : 100 })),
+      getJobArtifactText: vi.fn(async () => '<html><head><meta http-equiv="Content-Security-Policy" content="default-src \'none\'; script-src \'sha256-reviewed\'; style-src \'unsafe-inline\'"></head><body>Preserved report</body></html>'),
+    });
+    await act(async () => root.render(<JobArtifacts api={api} jobId="JOB-204" refresh={0} />));
+    await advance();
+    await click([...host.querySelectorAll('button')].find(button => button.textContent === 'Load more artifacts')!);
+    await click([...host.querySelectorAll('button')].find(button => button.textContent?.startsWith('View Report:'))!);
+    await advance();
+    const frame = host.querySelector('iframe');
+    expect(frame).not.toBeNull();
+    await act(async () => root.render(<JobArtifacts api={api} jobId="JOB-204" refresh={1} />));
+    await advance();
+    expect(host.textContent).toContain('evidence/149.log');
+    expect(host.querySelector('iframe')).toBe(frame);
+    expect(api.getJobArtifactArchive).toHaveBeenCalledTimes(4);
+    expect(api.getJobArtifactText).toHaveBeenCalledTimes(1);
+    changed = true;
+    await act(async () => root.render(<JobArtifacts api={api} jobId="JOB-204" refresh={2} />));
+    await advance();
+    expect(host.querySelector('[aria-label="Artifact preview"]')).toBeNull();
+    await click([...host.querySelectorAll('button')].find(button => button.textContent?.startsWith('View Report:'))!);
+    await advance();
+    present = false;
+    await act(async () => root.render(<JobArtifacts api={api} jobId="JOB-204" refresh={3} />));
+    await advance();
+    expect(host.querySelector('[aria-label="Artifact preview"]')).toBeNull();
+    await act(async () => root.render(<JobArtifacts api={api} jobId="OTHER" refresh={2} />));
+    await advance();
+    expect(host.textContent).not.toContain('evidence/149.log');
+  });
+
+  it('polls archive status separately from the terminal job result and retries failures', async () => {
+    const getArchive = vi.fn().mockResolvedValueOnce({ archiveStatus: 'PENDING', items: [], primaryReports: [] })
+      .mockResolvedValueOnce({ archiveStatus: 'FAILED', items: [], primaryReports: [], retryable: true })
+      .mockResolvedValue({ archiveStatus: 'READY', items: [], primaryReports: [] });
+    const retryArchive = vi.fn(async () => ({}));
+    const api = makeApi({ getJob: vi.fn(async () => ({ ...sampleJob, status: 'PASS' })), getJobArtifactArchive: getArchive, retryJobArtifactArchive: retryArchive });
+    await act(async () => root.render(<JobsPage api={api} jobId="JOB-204" onOpenJob={vi.fn()} onShowList={vi.fn()} />));
+    await advance();
+    expect(host.querySelector('#job-panel-artifacts')?.textContent).toContain('PENDING');
+    await advance(2100);
+    const retryButton = [...host.querySelectorAll('button')].find(button => button.textContent === 'Retry archive')!;
+    await click(retryButton);await advance();
+    expect(retryArchive).toHaveBeenCalledWith('JOB-204');
+    expect(host.querySelector('#job-panel-artifacts')?.textContent).toContain('READY');
+    expect(host.querySelector('#job-panel-overview')?.textContent).toContain('PASS');
+  });
+
   it('renders stable job tabs and API-backed content for a loaded job', async () => {
     const api = makeApi();
     await act(async () => root.render(<JobsPage api={api} jobId="JOB-204" onOpenJob={vi.fn()} onShowList={vi.fn()} confirmCancel={() => true} />));

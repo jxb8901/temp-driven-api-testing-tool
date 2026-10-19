@@ -10,6 +10,7 @@ public final class ConfigurationInspection {
     public static final class Response {
         public String view;
         public String state;
+        public String executionReadiness;
         public String schemaVersion;
         public String environment;
         public String leftEnvironment;
@@ -33,5 +34,14 @@ public final class ConfigurationInspection {
     public static final class Diagnostic {
         public String code;
         public String summary;
+        public String severity;
+        public String environment;
+        public String helperType;
+        public String helperId;
+        public String descriptor;
+        public String field;
+        public String environmentVariable;
+        public String remediation;
+        public String state;
     }
 }

@@ -78,7 +78,11 @@ async function main() {
     await dialog.getByText('The new password replaces the existing one and revokes all active sessions for this user.').waitFor();
     await dialog.getByLabel('New password', { exact: true }).fill('reset jane secure password');
     await dialog.getByLabel('Confirm new password', { exact: true }).fill('reset jane secure password');
+    const resetResponse = page.waitForResponse(response => response.url().endsWith('/api/v1/auth/users/jane/password') && response.request().method() === 'POST');
     await dialog.getByRole('button', { name: 'Confirm', exact: true }).click();
+    const reset = await resetResponse;
+    assert.equal(reset.status(), 200, 'Password reset endpoint must succeed before waiting for UI feedback');
+    assert.equal((await reset.json()).updated, true);
     await page.getByRole('status').getByText('Password reset. The user must sign in again.').waitFor();
 
     await page.getByRole('button', { name: 'Disable: jane' }).click();

@@ -17,6 +17,11 @@ import java.util.Set;
 
 /** Loads the explicit list of active att-dbhelper/v2.6 configuration files. */
 public final class DbHelperConfigLoader {
+    private final EnvironmentReferences environmentReferences;
+
+    public DbHelperConfigLoader() { this(EnvironmentReferences.execution()); }
+    DbHelperConfigLoader(EnvironmentReferences environmentReferences) { this.environmentReferences = environmentReferences; }
+
     public Map<String, DbHelperConfig> load(Object configured, Path projectRoot) throws Exception {
         if (configured == null) return Collections.emptyMap();
         if (!(configured instanceof Iterable)) throw new IllegalArgumentException("dbhelpers must be a list of package-relative YAML paths");
@@ -50,7 +55,8 @@ public final class DbHelperConfigLoader {
                     throw new IllegalArgumentException("Unsupported dbhelper schemaVersion '" + map.get("schemaVersion")
                             + "'; ATT supports only " + att.Version.DBHELPER_SCHEMA + ". See docs/reference/appendices/migrations.md.");
                 JsonSchemaVerifier.verify(att.validation.SchemaFiles.resolveVersion(projectRoot, String.valueOf(map.get("schemaVersion"))), map);
-                helper = parse(map, file).withEvidenceOutput(map.get("evidence"));
+                helper = new DbHelperConfigLoader(environmentReferences.forHelper("db", map.get("id"), relative.toString().replace('\\', '/')))
+                        .parse(map, file).withEvidenceOutput(map.get("evidence"));
             } catch (Exception error) {
                 JsonSchemaVerifier.SchemaValidationException invalid = JsonSchemaVerifier.SchemaValidationException.find(error);
                 String field = invalid == null ? "dbhelper" : invalid.field();
@@ -149,11 +155,7 @@ public final class DbHelperConfigLoader {
     }
 
     private String environment(String value, String owner) {
-        java.util.regex.Matcher matcher = java.util.regex.Pattern.compile("\\$\\{ENV:([A-Za-z_][A-Za-z0-9_]*)}").matcher(value);
-        if (!matcher.matches()) return value;
-        String resolved = System.getenv(matcher.group(1));
-        if (resolved == null) throw new IllegalArgumentException(owner + " references missing environment variable " + matcher.group(1));
-        return resolved;
+        return environmentReferences.resolve(value, owner, true);
     }
 
     private boolean bool(Object value, boolean fallback, String owner) {

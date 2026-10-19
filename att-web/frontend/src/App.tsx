@@ -11,7 +11,7 @@ import type { ExplorerPageProps, ResourceSourceReference } from './features/expl
 const LoadPage = lazy(() => import('./features/load/LoadPage').then(module => ({ default: module.LoadPage })));
 const JobsPage = lazy(() => import('./features/load/JobsPage').then(module => ({ default: module.JobsPage })));
 import type { LoadJobsApi, PackageOption } from './features/load/types';
-import { SettingsPage } from './SettingsPage';
+const SettingsPage = lazy(() => import('./SettingsPage').then(module => ({ default: module.SettingsPage })));
 import { ConfigurationWorkspace } from './features/explorer/ConfigurationWorkspace';
 import { QuickLoadPage } from './features/load/QuickLoadPage';
 import { LoadCatalogPage } from './features/load/LoadCatalogPage';
@@ -418,7 +418,7 @@ export default function App() {
       />
     </Suspense>;
   } else if (navigation.route.kind === 'settings') {
-    content = <SettingsPage />;
+    content = <Suspense fallback={<div role="status">Loading settings...</div>}><SettingsPage /></Suspense>;
   } else if (navigation.route.kind === 'configuration') {
     const packageOptions = state.packages.status === 'ready'
       ? state.packages.data.map(item => ({ packageId: item.packageId, displayName: item.name }))

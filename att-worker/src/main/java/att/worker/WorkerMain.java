@@ -8,6 +8,7 @@ import att.resource.PackageConfigurationInspector;
 import att.resource.PackageConfigurationFileInspector;
 import att.config.RuntimeConfigPath;
 import att.server.api.internal.DiagnosticSanitizer;
+import att.server.api.internal.WorkerProtocol;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.core.JsonParser;
@@ -35,9 +36,11 @@ public final class WorkerMain {
     private final LinkedHashMap<String,Map<String,Object>> inspectionAggregates=new LinkedHashMap<String,Map<String,Object>>(16,.75f,true);
     private String jobId;
     private boolean inspectionDaemon;
+    private boolean inspectionRequest;
     private int inspectionResponseLimit=262144;
     private long inspectionResponseBytes;
     private Map<String,Object> lastInspectionMetrics;
+    private Path executionOutput;
     private WorkerMain(PrintStream protocol) { this.protocol=protocol; }
     public static void main(String[] args) throws Exception {
         // Trusted evidence retains original diagnostics. Protocol secrets are protected
@@ -103,6 +106,7 @@ public final class WorkerMain {
     }
 
     private int executeRequest(JsonNode input) throws Exception {
+        inspectionRequest=false;
         inspectionResponseBytes=0;inspectionResponseLimit=262144;
         if(input==null) { emit(WorkerEvent.Type.STATUS,fields("status","RUNNING")); return fail("WORKER_REQUEST_INVALID","A JSON request is required"); }
         if(input.hasNonNull("jobId")) jobId=input.get("jobId").asText();
@@ -110,6 +114,7 @@ public final class WorkerMain {
         emit(WorkerEvent.Type.STATUS,fields("status","RUNNING"));
         try { request=mapper.treeToValue(input,WorkerRequest.class); if(request.maxResponseBytes!=null)inspectionResponseLimit=request.maxResponseBytes; }
         catch(Exception error) { return fail("WORKER_REQUEST_INVALID","Unable to decode Worker request"); }
+        inspectionRequest="inspect".equals(request.command);
         if(!PROTOCOL.equals(request.protocolVersion)) return fail("WORKER_PROTOCOL_UNSUPPORTED","Unsupported protocolVersion; expected "+PROTOCOL);
         if(inspectionDaemon&&!("inspect".equals(request.command))) return fail("WORKER_REQUEST_INVALID","Inspection Workers accept only inspect requests");
         jobId=request.jobId;
@@ -192,6 +197,7 @@ public final class WorkerMain {
         if(r.packageRoot==null||r.packageRoot.trim().isEmpty()) throw new IllegalArgumentException("packageRoot is required");
         Path root=Paths.get(r.packageRoot).toAbsolutePath().normalize();
         Path config=path(r.config); Path output=path(r.outputDirectory);
+        executionOutput=output==null?null:(output.isAbsolute()?output:root.resolve(output)).normalize();
         AttService service=new DefaultAttService();
         if("run".equals(r.command)&&r.expectedRevisionDigest!=null) verifyRevision(root,config,r);
         if("run".equals(r.command)&&r.target!=null) {
@@ -231,6 +237,7 @@ public final class WorkerMain {
                     PackageConfigurationInspector inspector = new PackageConfigurationInspector(root, config,
                             maxResponseBytes, Boolean.TRUE.equals(r.redactionEnabled), r.sensitivePaths, r.sensitiveFieldPatterns,
                             Boolean.TRUE.equals(r.inspectionIncludeAllFields));
+                    if(Boolean.TRUE.equals(r.inspectionSharedConfiguration))inspector.forSharedRuntime();
                     if(inspectionDaemon)inspector.withSnapshots(configurationSnapshots,att.server.api.internal.InspectionCacheIdentity.context(root,r));
                     inspected = inspector.inspect(r.inspectionAction,
                             r.inspectionEnvironment, r.inspectionOtherEnvironment, r.inspectionSection,
@@ -448,6 +455,15 @@ public final class WorkerMain {
             // Authored results, diagnostics and Worker telemetry still pass the sanitizer.
             safe.put("inspectionMetrics",metrics);
         } else safe=DiagnosticSanitizer.sanitize(data);
+        if(!inspectionDaemon&&!inspectionRequest) {
+            WorkerProtocol.Frame frame=WorkerProtocol.encode(mapper,new WorkerEvent(type,jobId,safe).toMap(),WorkerProtocol.MAX_FRAME_BYTES);
+            if(frame.oversized()) {
+                Map<String,Object> bounded=boundedEvent(type,safe,frame.sizeBytes);
+                frame=WorkerProtocol.encode(mapper,new WorkerEvent(type,boundedText(jobId,128),bounded).toMap(),WorkerProtocol.MAX_FRAME_BYTES);
+            }
+            frame.writeTo(protocol);protocol.write('\n');protocol.flush();
+            return;
+        }
         String line=mapper.writeValueAsString(new WorkerEvent(type,jobId,safe).toMap());
         long bytes=line.getBytes(StandardCharsets.UTF_8).length+1L;
         if(inspectionDaemon&&type==WorkerEvent.Type.RESULT&&safe.containsKey("inspectionMetrics")
@@ -460,6 +476,50 @@ public final class WorkerMain {
         }
         protocol.println(line);protocol.flush();
         if(inspectionDaemon)inspectionResponseBytes+=bytes;
+    }
+    private Map<String,Object> boundedEvent(WorkerEvent.Type type,Map<String,Object> safe,long size) {
+        Map<String,Object> bounded=fields("truncated",true,"protocolLimit",fields("code","ATT-WORKER-EVENT-TRUNCATED",
+                "eventType",type.name(),"sizeBytes",size,"limitBytes",WorkerProtocol.MAX_FRAME_BYTES));
+        for(String key:new String[]{"status","code","message","executionId","caseId","stage","action"})
+            if(safe.get(key) instanceof String)bounded.put(key,boundedText(safe.get(key),512));
+        for(String key:new String[]{"exitCode","durationMs"})if(safe.get(key) instanceof Number)bounded.put(key,safe.get(key));
+        if(type==WorkerEvent.Type.RESULT) {
+            Object value=safe.get("result");
+            Map<?,?> original=value instanceof Map?(Map<?,?>)value:Collections.emptyMap();
+            Map<String,Object> result=fields("status",bounded.get("status"),"exitCode",bounded.get("exitCode"),"truncated",true);
+            if(original.get("executionId") instanceof String)result.put("executionId",boundedText(original.get("executionId"),256));
+            if(original.get("durationMs") instanceof Number)result.put("durationMs",original.get("durationMs"));
+            List<Map<String,Object>> diagnostics=new ArrayList<Map<String,Object>>();
+            Object source=original.get("diagnostics");
+            if(source instanceof Iterable)for(Object item:(Iterable<?>)source) {
+                if(diagnostics.size()==4)break;
+                if(!(item instanceof Map))continue;
+                Map<String,Object> diagnostic=new LinkedHashMap<String,Object>();
+                for(String key:new String[]{"code","summary","message","detail","suggestion"})
+                    if(((Map<?,?>)item).get(key) instanceof String)diagnostic.put(key,boundedText(((Map<?,?>)item).get(key),512));
+                if(!diagnostic.isEmpty())diagnostics.add(diagnostic);
+            }
+            diagnostics.add(fields("code","ATT-WORKER-EVENT-TRUNCATED","summary","Large result details were omitted from the Worker protocol; inspect the published artifacts"));
+            result.put("diagnostics",diagnostics);
+            if(executionOutput!=null)try {
+                java.nio.file.Files.createDirectories(executionOutput);
+                try(java.io.OutputStream out=java.nio.file.Files.newOutputStream(executionOutput.resolve("worker-protocol-result.json"),
+                        java.nio.file.StandardOpenOption.CREATE_NEW,java.nio.file.StandardOpenOption.WRITE)) {
+                    mapper.writeValue(out,safe);
+                }
+                result.put("detailsArtifact","worker-protocol-result.json");
+            } catch(Exception unavailable) { result.put("detailsUnavailable",true); }
+            bounded.put("result",result);
+            bounded.put("workerMetrics",safe.get("workerMetrics"));
+        }
+        return bounded;
+    }
+    private static String boundedText(Object value,int limit) {
+        if(value==null)return null;
+        String text=String.valueOf(value);
+        if(text.length()<=limit)return text;
+        int end=Character.isHighSurrogate(text.charAt(limit-1))?limit-1:limit;
+        return text.substring(0,end);
     }
     private void recordInspectionAggregate(WorkerRequest request,long started,long buildsBefore,long loadsBefore,long bytesBefore) {
         if(!inspectionDaemon)return;

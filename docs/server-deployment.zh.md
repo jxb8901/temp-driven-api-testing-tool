@@ -225,7 +225,7 @@ Local session 使用不透明的 server-side identifier，登入時會輪替，�
 
 工具只會更新所選的現有 `ADMIN` row；若帳戶已停用，會重新啟用，並更新密碼雜湊及 CSRF token、撤銷該帳戶所有 session，以及記錄 `ADMIN_RECOVERY` audit event。工具不會修改 bootstrap claim 或建立 bootstrap token。若找不到現有資料庫、資料庫無法開啟，或指定帳戶不是 `ADMIN`，復原會失敗且不會建立帳戶。請保護備份、暫存解壓目錄及 `server.dataDir`，並視為 Server 憑證處理。
 
-Local mode 的所有用戶在 v1 均可存取相同 package。Draft 及提交的工作歸屬於已驗證的 login ID；其他用戶即使猜中 ID，也無法存取該 draft 或 job。同一歸屬檢查亦保護 job 狀態、結果、SSE、artifacts 及取消操作。Container mode 保留現有授權行為。
+Local mode 的所有 active USER 均可存取同一操作範圍內的 package、工作狀態、結果、SSE、已核准 artifacts 及取消操作；工作建立者只作 audit 記錄，不是 owner-only 存取限制。Draft 仍只供建立者使用。ADMIN-only 身分不會自動取得 USER 操作權限；container mode 同樣按操作角色授權。
 
 匿名 job submission 可在最外層 JSON 加入選填的 `principal` label，只供顯示及 audit 使用。Server 會 trim 並以 Unicode 正規化 label、驗證長度及字元，然後在既有 job/audit `principal` 欄位加上 `(anonym)` 後綴，例如 `Bob(anonym)`。省略時維持既有值 `anonymous`；caller 不可自行提交保留後綴。此 label 由 caller 自行聲稱，不會改變授權、draft 存取、job 可見範圍、artifact 存取、取消或排程。驗證模式永遠使用 Servlet Principal，並忽略提交的 label。此歸屬資料不會傳給 Worker，也不會放進 ATT expression Context；不會新增持久化欄位或回應欄位。
 
@@ -273,8 +273,10 @@ Local mode 的所有用戶在 v1 均可存取相同 package。Draft 及提交的
 | `GET` | `/jobs`、`/jobs/{jobId}` | 列出近期工作或讀取狀態 |
 | `GET` | `/jobs/{jobId}/result` | 讀取標準結果及診斷 |
 | `GET` | `/jobs/{jobId}/events` | 接收保留及即時事件 |
-| `GET` | `/jobs/{jobId}/artifacts` | 列出輸出檔案 |
-| `GET` | `/jobs/{jobId}/artifacts/{path}` | 下載輸出檔案 |
+| `GET` | `/jobs/{jobId}/artifacts?offset=0&limit=100` | 讀取 Archive 狀態、分頁索引及獨立的完整報告清單 |
+| `GET` | `/jobs/{jobId}/artifacts/archive.zip` | 下載已完成並驗證的唯一 artifacts ZIP |
+| `GET` | `/jobs/{jobId}/artifacts/view/{path}` | 從 ZIP 預覽已核准 entry；HTML 使用隔離 sandbox |
+| `POST` | `/jobs/{jobId}/artifacts/retry` | 私有來源仍存在時重試發佈；須通過 Origin/CSRF 檢查 |
 | `DELETE` | `/jobs/{jobId}` | 取消執行中工作並保留歷史 |
 | `GET`、`POST` | `/load-schedules` | 列出或建立排程（active USER 操作權限） |
 | `POST` | `/load-schedules/preview` | 只驗證 timezone/cron 並預覽執行時間（active USER 操作權限） |
@@ -476,6 +478,11 @@ Server 會驗證完整 scenario 並 resolve 所有 target，不會排程流量�
 設定檢查使用與 package resource 相同、受界限限制的 inspection Worker。以下唯讀 endpoint 使用 Server 解析出的已驗證或匿名身份：
 
 ```http
+GET /api/v1/configuration/declared
+GET /api/v1/configuration/effective?environment=SIT
+GET /api/v1/configuration/compare?left=SIT&right=UAT&section=dbhelpers
+GET /api/v1/configuration/files?path=config&limit=100
+GET /api/v1/configuration/source?path=config/config.yaml
 GET /api/v1/packages/payments/configuration?view=declared
 GET /api/v1/packages/payments/configuration/effective?environment=SIT
 GET /api/v1/packages/payments/configuration/effective?environment=SIT&section=dbhelpers&offset=0&limit=50

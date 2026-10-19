@@ -20,8 +20,10 @@ final class Job {
     volatile Integer exitCode;
     volatile String resultJson,diagnosticJson;
     volatile Map<String,Object> workerMetrics;
+    volatile Map<String,Object> protocolDiagnostic;
     volatile boolean resultReceived;
     volatile Process process;
+    volatile WorkerProcessFence processFence;
     final JobEvents events;
     Job(String id,String command,String packageId,String principal,WorkerRequest request,JobEvents events){this.id=id;this.command=command;this.packageId=packageId;this.principal=principal;this.request=request;this.events=events;}
     Map<String,Object> performance(){

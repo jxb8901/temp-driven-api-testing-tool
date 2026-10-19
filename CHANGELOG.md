@@ -2,6 +2,7 @@
 
 # ATT 4.2.1 - 2026-10-16
 
+- Publish bounded, sanitized RUN/LOAD Job artifacts as atomic ZIP archives with a versioned integrity manifest, shared USER authorization, ZIP-backed previews, retryable failures, and removal of loose output after verification (#236, #243).
 - Unify functional execution as RUN with optional Debug diagnostics, validated drafts, frozen Case selections, shared RUN/LOAD schedules and one-time triggers; preserve absolute shared-config paths in immutable RUN schedule snapshots (#220).
 - Preserve legacy CLI, Debug, Case Run and Load schedule interfaces; add Studio Run and bilingual migration contracts (#220).
 - Fix Studio startup and scheduled-job ownership: lazy-load Load, keep unsaved Debug drafts across cache invalidation, list only active environments with retry, refresh occurrence status and history, and validate independent Load evidence caps (#231).

@@ -89,6 +89,7 @@ public final class DbHelperExecutor implements AutoCloseable {
 
     public DbHelperExecutor(Path projectRoot, FrameworkConfig config, DbConnectionProvider connectionProvider) {
         this.projectRoot = projectRoot.toAbsolutePath().normalize();
+        if (config != null) config.requireExecutionConfig();
         this.helpers = config == null ? Collections.<String, DbHelperConfig>emptyMap() : config.dbHelpers();
         this.connectionProvider = connectionProvider;
     }

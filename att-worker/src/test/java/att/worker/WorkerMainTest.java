@@ -282,6 +282,45 @@ class WorkerMainTest {
         assertTrue(result.path("workerMetrics").path("sampleCount").asLong()>0,result.toString());
     }
 
+    @Test void oversizedCaseLogDoesNotLoseMissingJdbcDriverError() throws Exception {
+        Path root=temp.resolve("large-jdbc-error");
+        Files.createDirectories(root.resolve("config/dbhelpers"));Files.createDirectories(root.resolve("templates/JDBC"));
+        Files.createDirectories(root.resolve("testcase"));
+        Files.write(root.resolve("config/config.yaml"),("schemaVersion: att-config/v2.12\nenvironment: SIT\n"
+                +"templates: {root: templates}\ntestcase: {root: testcase}\ndbhelpers: [config/dbhelpers/orders.yaml]\n").getBytes(StandardCharsets.UTF_8));
+        String driver="missing.Driver";
+        Files.write(root.resolve("config/dbhelpers/orders.yaml"),("schemaVersion: att-dbhelper/v2.6\nid: orders\nname: Orders\ndescription: missing JDBC driver\n"
+                +"connection:\n  driverClass: "+driver+"\n  url: jdbc:missing:test\n").getBytes(StandardCharsets.UTF_8));
+        Files.write(root.resolve("templates/JDBC/template.yaml"),("schemaVersion: att-template/v3.6\nname: JDBC\ndescription: large driver failure\nactions:\n"
+                +"  largeLog:\n    type: log\n    message: '"+repeated('x',1100000)+"'\n"
+                +"  query:\n    type: tool\n    call: \"#{db.orders.query(sql='select 1')}\"\n").getBytes(StandardCharsets.UTF_8));
+        Files.write(root.resolve("templates/JDBC/debug.yaml"),"schemaVersion: att-debug/v1.2\ninputs: {}\n".getBytes(StandardCharsets.UTF_8));
+        Path output=root.resolve("output");Path stderr=temp.resolve("large-jdbc-stderr.log");
+        String request=mapper.writeValueAsString(fields("protocolVersion","att-worker/v1","jobId","jdbc-job","command","debug",
+                "packageRoot",root.toString(),"outputDirectory",output.toString(),"debugId","jdbc-error","target",fields("type","template","id","JDBC")));
+        Process worker=new ProcessBuilder(Paths.get(System.getProperty("java.home"),"bin",isWindows()?"java.exe":"java").toString(),
+                "-cp",System.getProperty("java.class.path"),WorkerMain.class.getName()).redirectError(stderr.toFile()).start();
+        worker.getOutputStream().write(request.getBytes(StandardCharsets.UTF_8));worker.getOutputStream().close();
+        JsonNode terminal=null;String diagnostic="";boolean truncatedLog=false;
+        try(java.io.BufferedInputStream stream=new java.io.BufferedInputStream(worker.getInputStream())) {
+            att.server.api.internal.WorkerProtocol.Frame frame;
+            while((frame=att.server.api.internal.WorkerProtocol.read(stream,att.server.api.internal.WorkerProtocol.MAX_FRAME_BYTES))!=null) {
+                assertFalse(frame.oversized(),"No Worker frame may exceed the shared UTF-8 budget");
+                JsonNode event=mapper.readTree(frame.text());if("RESULT".equals(event.path("type").asText()))terminal=event;
+                if("LOG".equals(event.path("type").asText())&&event.path("truncated").asBoolean())truncatedLog=true;
+                if("DIAGNOSTIC".equals(event.path("type").asText()))diagnostic=event.toString().substring(0,Math.min(2000,event.toString().length()));
+            }
+        }
+        if(terminal!=null) {String detail=terminal.path("result").toString();diagnostic+=detail.substring(0,Math.min(2000,detail.length()));}
+        assertTrue(worker.waitFor(30,java.util.concurrent.TimeUnit.SECONDS));assertEquals(3,worker.exitValue(),diagnostic);
+        assertNotNull(terminal);assertEquals("ERROR",terminal.path("status").asText());assertEquals(3,terminal.path("exitCode").asInt());
+        assertTrue(truncatedLog,"The large Case log must exercise bounded LOG emission");
+        assertTrue(terminal.path("workerMetrics").path("sampleCount").asLong()>0);
+        String evidence=new String(Files.readAllBytes(output.resolve("debug/jdbc-error/result.yaml")),StandardCharsets.UTF_8);
+        assertTrue(evidence.contains("CONNECTION_ERROR"));
+        assertTrue(evidence.contains(driver));
+    }
+
     @Test void malformedEmptyTruncatedAndMultipleRequestsHaveStructuredTerminalFailure() throws Exception {
         for (String request : java.util.Arrays.asList("", "{\"protocolVersion\":", "{not-json",
                 "{\"protocolVersion\":\"att-worker/v1\",\"jobId\":\"multi\",\"command\":\"validate\",\"packageRoot\":\".\"} {}")) {

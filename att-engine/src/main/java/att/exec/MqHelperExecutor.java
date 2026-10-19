@@ -45,6 +45,7 @@ public final class MqHelperExecutor {
 
     public MqHelperExecutor(Path projectRoot, FrameworkConfig config, MqTransport.Factory factory) {
         this.projectRoot = projectRoot.toAbsolutePath().normalize();
+        if (config != null) config.requireExecutionConfig();
         this.config = config;
         this.factory = factory == null ? new IbmMqClientFactory() : factory;
     }

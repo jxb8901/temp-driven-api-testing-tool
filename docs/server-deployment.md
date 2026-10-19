@@ -294,8 +294,10 @@ All endpoints use `/api/v1`. Requests and responses use JSON unless the endpoint
 | `GET` | `/jobs`, `/jobs/{jobId}` | List recent jobs or read job status |
 | `GET` | `/jobs/{jobId}/result` | Read the canonical result and diagnostic |
 | `GET` | `/jobs/{jobId}/events` | Observe retained and live job events |
-| `GET` | `/jobs/{jobId}/artifacts` | List output files |
-| `GET` | `/jobs/{jobId}/artifacts/{path}` | Download one output file |
+| `GET` | `/jobs/{jobId}/artifacts` | Archive status, paginated approved entries and primary reports |
+| `GET` | `/jobs/{jobId}/artifacts/archive.zip` | Download the finalized Job ZIP |
+| `GET` | `/jobs/{jobId}/artifacts/view/{path}` | Preview an approved ZIP entry |
+| `POST` | `/jobs/{jobId}/artifacts/retry` | Retry terminal Job publication |
 | `DELETE` | `/jobs/{jobId}` | Cancel an active job; retain its history |
 | `GET`, `POST` | `/load-schedules` | List schedules or create one (active USER operational access) |
 | `POST` | `/load-schedules/preview` | Validate timezone/cron and preview occurrence times only (active USER operational access) |
@@ -343,7 +345,7 @@ Browser Quick and Advanced Load endpoints return `403 ATT-SERVER-INLINE-LOAD-DIS
 
 Job records include an additive `performance` object when measurements are available. `performance.timings` uses monotonic elapsed time for admission, queue wait, Worker preparation/spawn, Worker-ready (first `STATUS`), execution-ready (first `PROGRESS` or `LOG`), Worker lifetime, and result-to-termination. `performance.worker` records heap, live-thread, GC, process CPU, and sampled peak RSS metrics from the isolated Worker. Sampling is event-triggered and limited to one sample per 100 ms; brief peaks can be missed. RSS is available on Linux `/proc` systems only. Worker resource metrics are included in the canonical job record and survive Server restart.
 
-`GET /jobs` returns the latest 100 jobs. Add `?principal=<text>` to search case-insensitively within the existing `principal` property; matching is applied before the 100-row limit. Search uses substring matching, so `alice` also matches `alice(anonym)`. The Web UI and `att remote jobs --principal <text>` use this filter. Historical rows retain their saved value, including older `anonymous` rows. Submission payloads are not persisted; metadata stores only the command and package ID summary. Engine results and diagnostics are persisted as control-plane metadata. Larger reports, logs, and other evidence remain under the job output directory.
+`GET /jobs` returns the latest 100 jobs. Add `?principal=<text>` to search case-insensitively within the existing `principal` property; matching is applied before the 100-row limit. Search uses substring matching, so `alice` also matches `alice(anonym)`. The Web UI and `att remote jobs --principal <text>` use this filter. Historical rows retain their saved value, including older `anonymous` rows. Submission payloads are not persisted; metadata stores only the command and package ID summary. Engine results and diagnostics are persisted as control-plane metadata. Reports, logs and approved evidence are persisted in the verified Job artifact ZIP after asynchronous publication. See [publication policy and recovery](reference/results-reports-evidence.md#att-server-job-artifact-publication).
 
 Resource discovery accepts `case`, `template`, `flow`, or `tool` as the optional `type`. List pages default to 50 items and allow up to 100; continuation cursors are encrypted, bound to the resolved request identity and query, and rejected with `409` if package content changes. In anonymous mode, all callers share the same cursor identity. The explorer returns logical resource IDs, safe projections, provenance, relationships, and stable diagnostics. YAML source responses are parsed and sanitized projections, not original file bytes. Under the default `safe-package-files` policy, eligible bounded package-local Tool text is available without a per-file allowlist; `allowlist-only` requires the exact package-relative entry in `server.inspection.safeTextSources`. External scripts require an exact canonical per-package allowlist beneath a configured external root, and their filesystem paths are never returned. Deny-glob entries match package-relative paths for package files and canonical paths relative to the most specific configured external root for external files. Safe `&{...}` references in Template/Flow and Configuration source can open eligible package-local text through a bounded source route; the Server canonicalizes each target, enforces extension, deny-path, encoding, size, and visibility rules, and requires a Server-issued opaque reference bound to the package and origin. The separate Configuration source route applies the same policy to eligible text under `config/`; it is not a general filesystem browser. Raw configuration, Testdata descriptors, and Debug sidecars are not exposed through the resource-source route; eligible non-sensitive configuration and Testdata text is available through the Configuration route. Credentials and personal-data values remain protected regardless of the display-masking setting. Discovery never executes Tools or exposes a filesystem browser. The inspection queue, Worker heap, timeout, and response bounds are independent of normal job execution.
 
@@ -497,6 +499,11 @@ Submit only the package and draft ID to `POST /api/v1/jobs/load`. The Server che
 Configuration inspection uses the same bounded inspection Worker as package resources. These read-only endpoints use the resolved authenticated or anonymous identity:
 
 ```http
+GET /api/v1/configuration/declared
+GET /api/v1/configuration/effective?environment=SIT
+GET /api/v1/configuration/compare?left=SIT&right=UAT&section=dbhelpers
+GET /api/v1/configuration/files?path=config&limit=100
+GET /api/v1/configuration/source?path=config/config.yaml
 GET /api/v1/packages/payments/configuration?view=declared
 GET /api/v1/packages/payments/configuration/effective?environment=SIT
 GET /api/v1/packages/payments/configuration/effective?environment=SIT&section=dbhelpers&offset=0&limit=50
@@ -540,7 +547,7 @@ Send `Last-Event-ID` after reconnecting to replay retained events with greater I
 
 `DELETE /jobs/{jobId}` requests graceful Worker termination, waits up to `gracefulStopMs`, and then force-terminates only that Worker if needed. The job record remains available. A Server restart does not automatically rerun jobs that were not terminal.
 
-Artifact paths are relative to the job output directory. Absolute paths, traversal, and symlink escapes are rejected. The Server does not expose general filesystem browsing or package mutation APIs.
+Public Artifact paths are logical paths inside the verified Job ZIP. Loose Worker output is private and has no direct download route. Absolute paths, traversal, and symlink escapes are rejected. The Server does not expose general filesystem browsing or package mutation APIs.
 
 ## Distribution and compatibility
 

@@ -19,6 +19,11 @@ import java.util.Set;
 
 /** Loads the explicit list of active att-mqhelper/v1.3 and compatible v1.2 descriptor files. */
 public final class MqHelperConfigLoader {
+    private final EnvironmentReferences environmentReferences;
+
+    public MqHelperConfigLoader() { this(EnvironmentReferences.execution()); }
+    MqHelperConfigLoader(EnvironmentReferences environmentReferences) { this.environmentReferences = environmentReferences; }
+
     public Map<String, MqHelperConfig> load(Object configured, Path projectRoot) throws Exception {
         if (configured == null) return Collections.emptyMap();
         if (!(configured instanceof Iterable)) throw new IllegalArgumentException("mqhelpers must be a list of package-relative YAML paths");
@@ -60,7 +65,7 @@ public final class MqHelperConfigLoader {
                 Path schema = schema(projectRoot, map);
                 String declared = String.valueOf(map.get("schemaVersion"));
                 JsonSchemaVerifier.verify(schema, map);
-                helper = parse(map, file);
+                helper = new MqHelperConfigLoader(environmentReferences.forHelper("mq", map.get("id"), relative.toString().replace('\\', '/'))).parse(map, file);
             } catch (Exception error) {
                 JsonSchemaVerifier.SchemaValidationException invalid = JsonSchemaVerifier.SchemaValidationException.find(error);
                 String field = invalid == null ? "mqhelper" : invalid.field();
@@ -365,12 +370,7 @@ public final class MqHelperConfigLoader {
     private String environment(Object value, String owner) {
         if (value == null) return "";
         String result = SchemaSupport.string(value, owner, false);
-        java.util.regex.Matcher matcher = java.util.regex.Pattern.compile("\\$\\{ENV:([A-Za-z_][A-Za-z0-9_]*)}").matcher(result);
-        if (!matcher.matches()) return result;
-        String variable = matcher.group(1);
-        String resolved = System.getenv(variable);
-        if (resolved == null) throw new IllegalArgumentException(owner + " references missing environment variable " + variable);
-        return resolved;
+        return environmentReferences.resolve(result, owner, true);
     }
 
     private boolean containsUnsafeConnectionText(String value) { return value.matches(".*[\\s\\p{Cntrl}].*"); }

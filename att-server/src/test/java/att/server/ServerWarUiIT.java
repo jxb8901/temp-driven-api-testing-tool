@@ -21,13 +21,135 @@ import java.util.jar.JarEntry;
 import java.util.jar.JarFile;
 import java.util.jar.JarInputStream;
 import java.util.jar.JarOutputStream;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 import static org.junit.jupiter.api.Assertions.*;
 
 class ServerWarUiIT {
     @TempDir Path temp;
+
+    @Test
+    void packagedWarPublishesRunAndMultiWorkloadLoadArchives() throws Exception {
+        Path war=Path.of(System.getProperty("att.server.war"));
+        assertTrue(Files.isRegularFile(war));
+        Path home=createScheduledLocalRuntime();
+        Path packages=Files.createDirectories(temp.resolve("packages"));
+        Path pkg=Files.createDirectory(packages.resolve("payments"));
+        writeScheduledPackage(pkg,home);
+        copySchemas(pkg);
+        Files.writeString(pkg.resolve("templates/SCHEDULED/debug.yaml"),"schemaVersion: att-debug/v1.2\ninputs: {}\n");
+        try(var book=new org.apache.poi.xssf.usermodel.XSSFWorkbook();var out=Files.newOutputStream(pkg.resolve("testcase/archive.xlsx"))) {
+            var sheet=book.createSheet("Cases");var header=sheet.createRow(0);header.createCell(0).setCellValue("ID");header.createCell(1).setCellValue("Template");header.createCell(2).setCellValue("Tags");
+            var row=sheet.createRow(1);row.createCell(0).setCellValue("C1");row.createCell(1).setCellValue("name: SCHEDULED");row.createCell(2).setCellValue("smoke");book.write(out);
+        }
+        Files.writeString(pkg.resolve("testcase/archive.yaml"),"schemaVersion: att-sidecar/v2.2\nid: archive\nexcel:\n  sheet: default=Cases\n  caseId: ID\n  tags: Tags\nstages:\n  - key: main\n    template: Template\n    required: true\n");
+        new att.api.DefaultAttService().snapshot(new att.api.SnapshotRequest(pkg,home.resolve("config/config.yaml"),"SIT",List.of(pkg.resolve("testcase/archive.xlsx")),null,Set.of(),false));
+        Files.writeString(pkg.resolve("load/archive.yaml"),
+                "schemaVersion: att-load/v1.6\nevidence:\n  mode: all\nworkloads:\n"
+                +"  - id: first\n    target: {type: template, id: SCHEDULED}\n    load: {users: 1, duration: 300ms}\n    execution: {thinkTime: 50ms}\n"
+                +"  - id: second\n    target: {type: template, id: SCHEDULED}\n    load: {users: 1, duration: 300ms}\n    execution: {thinkTime: 50ms}\n");
+        Path config=Files.writeString(temp.resolve("server.yaml"),
+                "server:\n  runtimeConfigPath: "+yaml(home.resolve("config/config.yaml"))+"\n  dataDir: "+yaml(temp.resolve("data"))+"\n  authenticationRequired: true\n"
+                +"workers:\n  maxConcurrent: 1\n  queuedLimit: 1\npackages:\n  allowedRoots:\n    - "+yaml(packages)+"\n  entries:\n    payments: "+yaml(pkg)+"\n");
+        Path users=Files.writeString(temp.resolve("users.xml"),"<tomcat-users><role rolename=\"ATT_USER\"/><role rolename=\"ATT_ADMIN\"/>"
+                +"<user username=\"att\" password=\"secret\" roles=\"ATT_USER\"/><user username=\"colleague\" password=\"secret\" roles=\"ATT_USER\"/>"
+                +"<user username=\"admin\" password=\"secret\" roles=\"ATT_ADMIN\"/></tomcat-users>");
+        String oldConfig=System.getProperty("att.server.config"),oldHome=System.getProperty("att.home");
+        System.setProperty("att.server.config",config.toString());System.setProperty("att.home",home.toString());
+        Tomcat tomcat=new Tomcat();tomcat.setBaseDir(temp.resolve("tomcat").toString());tomcat.setPort(0);tomcat.getConnector();
+        MemoryRealm realm=new MemoryRealm();realm.setPathname(users.toString());tomcat.getEngine().setRealm(realm);
+        ((StandardHost)tomcat.getHost()).setUnpackWARs(false);tomcat.addWebapp("/tools/att",war.toString());
+        try {
+            tomcat.start();int port=tomcat.getConnector().getLocalPort();String origin="http://127.0.0.1:"+port,api="/tools/att/api/v1";
+            String auth=basic("att"),peer=basic("colleague"),admin=basic("admin");
+            var fixtures=new java.util.ArrayList<Map<String,Object>>();
+            for(String command:List.of("run","load")) {
+                Object input="run".equals(command)?Map.of("packageId","payments","suites",List.of("testcase/archive.xlsx"))
+                        :Map.of("packageId","payments","scenario","load/archive.yaml");
+                String id=apiJsonResponse(port,"POST",api+"/jobs/"+command,auth,origin,input,202).path("jobId").asText();
+                JsonNode index=awaitArchive(port,api,id,peer);
+                assertEquals("PASS",getJson(port,api+"/jobs/"+id,peer).path("status").asText(),getJson(port,api+"/jobs/"+id+"/result",peer).toString());
+                assertTrue(index.path("primaryReports").size()>0,index.toString());
+                String archiveRoute=api+"/jobs/"+id+"/artifacts/archive.zip";
+                HttpURLConnection download=open(port,archiveRoute,peer);byte[] bytes;
+                try {
+                    assertEquals(200,download.getResponseCode());assertEquals("application/zip",download.getContentType());
+                    assertTrue(download.getHeaderField("Content-Disposition").contains("attachment"));
+                    try(var in=download.getInputStream()){bytes=in.readAllBytes();}
+                } finally {download.disconnect();}
+                Path zip=Files.write(temp.resolve(id+".zip"),bytes);JsonNode manifest=ServerRuntime.JSON.valueToTree(ArtifactArchive.verify(zip,true));
+                assertEquals(bytes.length,index.path("archiveSizeBytes").asLong());
+                long metricsDeadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(10);
+                JsonNode archiveMetrics;
+                do {
+                    archiveMetrics=getJson(port,api+"/jobs/"+id,peer).path("archiveMetrics");
+                    if("READY".equals(archiveMetrics.path("outcome").asText()))break;
+                    Thread.sleep(20);
+                }while(System.nanoTime()<metricsDeadline);
+                assertEquals("READY",archiveMetrics.path("outcome").asText(),archiveMetrics.toString());
+                assertEquals(bytes.length,archiveMetrics.path("zipBytes").asLong());
+                assertTrue(archiveMetrics.path("includedEntries").asLong()>0);
+                assertFalse(archiveMetrics.toString().contains(pkg.toString()));
+                Path extracted=Files.createDirectory(temp.resolve(id+"-offline"));
+                try(var archive=new java.util.zip.ZipFile(zip.toFile())) {
+                    for(JsonNode entry:manifest.path("entries")) {
+                        String logical=entry.path("path").asText();byte[] published;
+                        try(var in=archive.getInputStream(archive.getEntry(logical))){published=in.readAllBytes();}
+                        HttpURLConnection preview=open(port,api+"/jobs/"+id+"/artifacts/view/"+encodeEntry(logical),peer);
+                        try {
+                            assertEquals(200,preview.getResponseCode(),logical);assertTrue(preview.getHeaderField("Cache-Control").contains("no-store"));
+                            assertFalse(preview.getHeaderField("Content-Disposition").contains("attachment"));
+                            try(var in=preview.getInputStream()){assertArrayEquals(published,in.readAllBytes(),logical);}
+                            if(entry.path("report").asBoolean())assertTrue(preview.getHeaderField("Content-Security-Policy").contains("sandbox allow-scripts"));
+                            else assertTrue(preview.getHeaderField("Content-Security-Policy").contains("sandbox; default-src 'none'"));
+                            assertTrue(preview.getHeaderField("Content-Security-Policy").contains("frame-ancestors 'self'"));
+                        } finally {preview.disconnect();}
+                        Path target=extracted.resolve(logical).normalize();assertTrue(target.startsWith(extracted));
+                        Files.createDirectories(target.getParent());Files.write(target,published);
+                    }
+                }
+                for(JsonNode report:index.path("primaryReports")) {
+                    Path html=extracted.resolve(report.path("path").asText());
+                    for(var link:org.jsoup.Jsoup.parse(Files.readString(html)).select("a[href]")) {
+                        java.net.URI href=new java.net.URI(link.attr("href"));assertFalse(href.isAbsolute());
+                        Path destination=href.getPath().isEmpty()?html:html.getParent().resolve(href.getPath()).normalize();
+                        assertTrue(Files.isRegularFile(destination),link.outerHtml());
+                    }
+                }
+                for(String route:List.of(api+"/jobs/"+id+"/artifacts",archiveRoute,
+                        api+"/jobs/"+id+"/artifacts/view/"+encodeEntry(index.path("primaryReports").get(0).path("path").asText()))) {
+                    assertEquals(401,get(port,route,null));assertEquals(403,get(port,route,admin));assertEquals(200,get(port,route,auth));
+                }
+                long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(5);
+                Path output=temp.resolve("data/jobs").resolve(id).resolve("output");
+                while(Files.exists(output)&&System.nanoTime()<deadline)Thread.sleep(10);
+                assertFalse(Files.exists(output),"Verified publication must remove loose output");
+                assertEquals(404,get(port,api+"/jobs/"+id+"/artifacts/"+encodeEntry(index.path("primaryReports").get(0).path("path").asText()),peer));
+                fixtures.add(Map.of("jobId",id,"archivePath",zip.toString(),"offlineRoot",extracted.toString(),"reports",index.path("primaryReports"),"entries",manifest.path("entries")));
+            }
+            if("1".equals(System.getenv("ATT_UI_SERVER_PLAYWRIGHT"))) {
+                Path fixture=Files.write(temp.resolve("archive-browser.json"),ServerRuntime.JSON.writeValueAsBytes(fixtures));
+                Path log=temp.resolve("archive-browser.log");
+                Process browser=new ProcessBuilder("node","artifact-archive-smoke.cjs",origin,fixture.toString())
+                        .directory(Path.of("tools/ui-acceptance").toFile()).redirectErrorStream(true).redirectOutput(log.toFile()).start();
+                if(!browser.waitFor(120,TimeUnit.SECONDS)){browser.destroyForcibly();fail("Archive browser timeout: "+Files.readString(log));}
+                assertEquals(0,browser.exitValue(),Files.readString(log));
+            }
+        } finally {
+            try{tomcat.stop();}finally{tomcat.destroy();}
+            if(oldConfig==null)System.clearProperty("att.server.config");else System.setProperty("att.server.config",oldConfig);
+            if(oldHome==null)System.clearProperty("att.home");else System.setProperty("att.home",oldHome);
+        }
+    }
+
+    private static String basic(String username) {return "Basic "+Base64.getEncoder().encodeToString((username+":secret").getBytes(java.nio.charset.StandardCharsets.UTF_8));}
+    private static String encodeEntry(String path) {return java.util.Arrays.stream(path.split("/")).map(p->java.net.URLEncoder.encode(p,java.nio.charset.StandardCharsets.UTF_8).replace("+","%20")).collect(java.util.stream.Collectors.joining("/"));}
+    private static JsonNode awaitArchive(int port,String api,String id,String auth) throws Exception {
+        long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(45);JsonNode index;
+        do {index=getJson(port,api+"/jobs/"+id+"/artifacts",auth);if("READY".equals(index.path("archiveStatus").asText()))return index;
+            assertNotEquals("FAILED",index.path("archiveStatus").asText(),index.toString());Thread.sleep(30);
+        }while(System.nanoTime()<deadline);
+        fail("Archive did not become READY: "+index);return index;
+    }
 
     @Test
     void packagedWarServesAuthenticatedUiAssetsUnderNonRootContext() throws Exception {
@@ -53,7 +175,7 @@ class ServerWarUiIT {
                         + "\n    safeTextSources:\n      payments:\n        - config/tools/att-helper.sh\n"
                         + "  scheduling:\n    enabled: true\n    adminRole: ATT_SCHEDULE_ADMIN\n"
                         + "workers:\n  maxConcurrent: 1\n  queuedLimit: 1\n  maxConcurrentLoad: 1\n"
-                        + "packages:\n  allowedRoots:\n    - " + yaml(packages) + "\n  entries:\n    payments: " + yaml(packageRoot) + "\n");
+                        + "packages:\n  allowedRoots:\n    - " + yaml(packages) + "\n  entries:\n    payments: " + yaml(packageRoot) + "\n    default: "+yaml(Files.createDirectory(packages.resolve("default")))+"\n    jeffreyjiang: "+yaml(Files.createDirectory(packages.resolve("jeffreyjiang")))+"\n");
         String oldConfig = System.getProperty("att.server.config");
         String oldHome = System.getProperty("att.home");
         System.setProperty("att.server.config", config.toString());
@@ -77,6 +199,7 @@ class ServerWarUiIT {
             assertEquals(401, get(port, "/tools/att/ui/index.html", null));
             String auth = "Basic " + Base64.getEncoder().encodeToString(
                     "att:secret".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            assertSharedConfiguration(port,"/tools/att/api/v1",auth);
             String scheduleAdminAuth = "Basic " + Base64.getEncoder().encodeToString(
                     "schedule-admin:secret".getBytes(java.nio.charset.StandardCharsets.UTF_8));
             String systemAdminAuth = "Basic " + Base64.getEncoder().encodeToString(
@@ -172,6 +295,7 @@ class ServerWarUiIT {
             apiJson(port, "POST", api + "/load-schedules", scheduleAdminAuth, origin,
                     scheduleRequest("Packaged UI schedule", "load/scenario.yaml"), 201);
             if ("1".equals(System.getenv("ATT_UI_SERVER_PLAYWRIGHT"))) runServerUiPlaywright(origin);
+            assertDegradedDiscoveryWithoutProcessSecrets(port, api, auth, packageRoot, localHome);
         } finally {
             try { tomcat.stop(); } finally { tomcat.destroy(); }
             if (oldConfig == null) System.clearProperty("att.server.config");
@@ -288,6 +412,7 @@ class ServerWarUiIT {
                     + java.net.URLEncoder.encode("config/config.yaml", java.nio.charset.StandardCharsets.UTF_8), ordinary);
             assertTrue(safeConfigSource.path("available").asBoolean());
             assertTrue(safeConfigSource.path("text").asText().contains("testcase:"));
+            assertSharedConfiguration(port,api,ordinary);
             String recordsPath = api + "/packages/payments/configuration/testdata/generatedAccounts/records?environment=SIT&limit=5";
             assertEquals(401, get(port, recordsPath, null), "Testdata records remain behind the Tomcat authentication boundary.");
             JsonNode generatedMetadata = getJson(port, recordsPath, ordinary);
@@ -574,11 +699,11 @@ class ServerWarUiIT {
         assertFalse(publicText.contains(packageRoot.toString()),publicText);
         assertTrue(publicText.contains("flow.yaml"),publicText);
         assertTrue(publicText.contains("line") || publicText.contains("sourceColumn"),publicText);
-        JsonNode artifacts=getJson(port,api+"/jobs/"+jobId+"/artifacts",auth);
+        JsonNode artifacts=awaitArchive(port,api,jobId,auth);
         boolean checked=false;
         for(JsonNode item:artifacts.path("items")) if(item.path("path").asText().endsWith("case.log")) {
             String path=item.path("path").asText();
-            String log=getText(port,api+"/jobs/"+jobId+"/artifacts/"+path,auth);
+            String log=getText(port,api+"/jobs/"+jobId+"/artifacts/view/"+encodeEntry(path),auth);
             assertTrue(log.contains(expression),log);assertFalse(log.contains(packageRoot.toString()),log);checked=true;
         }
         assertTrue(checked,"Failed Debug must retain its diagnostic Case Log");
@@ -840,9 +965,82 @@ class ServerWarUiIT {
     }
 
     private static String findAsset(String html, String attribute) {
-        Matcher matcher = Pattern.compile("<(?:script|link)[^>]+\\b" + attribute + "=\\\"([^\\\"]+\\.(?:js|css))\\\"").matcher(html);
-        assertTrue(matcher.find(), "The active Vite index must reference a generated " + attribute + " asset.");
-        return matcher.group(1);
+        String selector = "src".equals(attribute) ? "script[src$=.js]" : "link[rel=stylesheet][href$=.css]";
+        org.jsoup.nodes.Element asset = org.jsoup.Jsoup.parse(html).selectFirst(selector);
+        assertNotNull(asset, "The active Vite index must reference a generated " + attribute + " asset.");
+        return asset.attr(attribute);
+    }
+
+    private static void assertDegradedDiscoveryWithoutProcessSecrets(int port, String api, String auth,
+                                                                     Path packageRoot, Path localHome) throws Exception {
+        String variable = "ATT_244_WAR_ABSENT_71F29BE6";
+        assertNull(System.getenv(variable));
+        Files.writeString(localHome.resolve("config/db-discovery.yaml"),
+                "schemaVersion: att-dbhelper/v2.6\nid: orders\nname: Orders\ndescription: Discovery fixture\n"
+                        + "connection: {url: 'jdbc:unused', password: '${ENV:" + variable + "}'}\n");
+        Files.writeString(localHome.resolve("config/db-invalid.yaml"), "[invalid: PRIVATE_HELPER_SOURCE_CANARY\n");
+        Files.writeString(localHome.resolve("config/config.yaml"),
+                "\ndbhelpers: [config/db-discovery.yaml, config/db-absent.yaml, config/db-invalid.yaml]\n",
+                java.nio.file.StandardOpenOption.APPEND);
+        Path target = Files.createDirectories(packageRoot.resolve("templates/DEGRADED"));
+        Files.writeString(target.resolve("template.yaml"),
+                "schemaVersion: att-template/v3.6\nname: DEGRADED\ndescription: Browse without credentials\nactions:\n"
+                        + "  query:\n    type: tool\n    call: \"#{db.orders.query(sql='select 1')}\"\n");
+        JsonNode resources;
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+        do {
+            resources = getJson(port, api + "/packages/payments/resources?type=template&query=DEGRADED", auth);
+            if (!resources.path("items").isEmpty()) break;
+            Thread.sleep(50);
+        } while (System.nanoTime() < deadline);
+        assertEquals(1, resources.path("items").size(), resources.toString());
+        JsonNode item = resources.path("items").get(0);
+        assertEquals("available", item.path("metadataState").asText(), item.toString());
+        assertEquals("dependency-unresolved", item.path("executionReadiness").path("state").asText());
+        assertTrue(item.path("executionReadiness").toString().contains(variable));
+        assertTrue(resources.path("diagnostics").toString().contains("ATT-RESOURCE-HELPER-UNAVAILABLE"));
+        assertTrue(resources.path("diagnostics").toString().contains("ATT-RESOURCE-HELPER-INVALID"));
+        assertFalse(resources.toString().contains("PRIVATE_HELPER_SOURCE_CANARY"));
+        assertFalse(resources.toString().contains(localHome.toString()));
+        assertFalse(resources.toString().contains(packageRoot.toString()));
+        assertEquals(401, get(port, api + "/packages/payments/resources?type=template&query=DEGRADED", null));
+        String effectiveRoute = api + "/packages/payments/configuration/effective?environment=SIT&section=dbhelpers&limit=50";
+        JsonNode effective = getJson(port, effectiveRoute, auth);
+        assertEquals("degraded", effective.path("state").asText(), effective.toString());
+        assertEquals("not-validated", effective.path("executionReadiness").asText());
+        assertTrue(effective.path("diagnostics").toString().contains(variable));
+        assertTrue(effective.path("diagnostics").toString().contains("ATT-RESOURCE-HELPER-UNAVAILABLE"));
+        assertTrue(effective.path("diagnostics").toString().contains("ATT-RESOURCE-HELPER-INVALID"));
+        assertFalse(effective.toString().contains("PRIVATE_HELPER_SOURCE_CANARY"));
+        assertFalse(effective.toString().contains(localHome.toString()));
+        assertFalse(effective.toString().contains(packageRoot.toString()));
+        assertEquals(401, get(port, effectiveRoute, null));
+    }
+
+    private static void assertSharedConfiguration(int port,String api,String ordinary) throws Exception {
+        assertEquals(401,get(port,api+"/configuration/declared",null));
+        JsonNode globalDeclared=getJson(port,api+"/configuration/declared",ordinary);
+        assertEquals("declared",globalDeclared.path("state").asText());
+        assertEquals("ready",getJson(port,api+"/configuration/files?limit=100",ordinary).path("state").asText());
+        JsonNode globalSource=getJson(port,api+"/configuration/source?path=config/config.yaml",ordinary);
+        assertEquals(getJson(port,api+"/packages/payments/configuration/source?path=config/config.yaml",ordinary).path("text"),globalSource.path("text"));
+        assertTrue(globalSource.path("available").asBoolean());
+        assertFalse(globalSource.toString().contains("helper-secret"));
+        assertNotEquals("invalid",getJson(port,api+"/configuration/effective?environment=SIT",ordinary).path("state").asText());
+        assertEquals("ready",getJson(port,api+"/configuration/compare?left=SIT&right=UAT&section=dbhelpers",ordinary).path("state").asText());
+        assertEquals(403,get(port,api+"/configuration/effective?includeAllFields=true",ordinary));
+        assertEquals(404,get(port,api+"/configuration/testdata/generatedAccounts/records",ordinary));
+        JsonNode origin=getJson(port,api+"/configuration/source?path=config/source-references.yaml",ordinary);
+        JsonNode reference=null;
+        for(JsonNode item:origin.path("fileReferences"))
+            if("config/tools/att-helper.sh".equals(item.path("logicalPath").asText()))reference=item;
+        assertNotNull(reference,origin.toString());
+        String linked="/configuration/source?path=config/tools/att-helper.sh&origin=config/source-references.yaml&referenceId="+reference.path("referenceId").asText();
+        assertTrue(getJson(port,api+linked,ordinary).path("available").asBoolean());
+        assertEquals(404,get(port,api+"/packages/payments"+linked,ordinary),"Shared references cannot cross into Package-scoped routes");
+        assertEquals(404,get(port,api+"/configuration/source?path=packages/default/private.yaml",ordinary));
+        assertEquals(404,get(port,api+"/configuration/source?path=config/../packages/default/private.yaml",ordinary));
+
     }
 
     private static int postJson(int port, String path, String authorization, String origin, String body) throws Exception {

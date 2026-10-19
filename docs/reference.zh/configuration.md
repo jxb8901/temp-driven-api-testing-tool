@@ -2,6 +2,15 @@
 
 本頁是作者編寫配置時的權威閱讀參考。[`schemas/`](../../schemas/) 目錄中的文件仍是機器可讀契約。模式校驗會先於跨字段和文件系統校驗執行。
 
+
+## Studio 共用 Configuration
+
+在 **All packages** 下直接開啟 **Configuration**。Source、Declared、Effective 及 Compare 使用單一 `server.runtimeConfigPath`，不要求選取 Package，也不會回退至 default Package。Environment 只切換 effective values，不切換設定來源樹；設定無效或不可用時顯示明確狀態。
+
+只有 **Testdata** 要求選取已註冊 Package；records 和 Resource 連結保持 Package-local。共用檢視不解析 Testdata records，Declared 中的 Testdata 路徑只屬設定 metadata。變更全域 Package 選取不會重新載入或取代共用 Configuration。
+
+已驗證的 `/api/v1/configuration/{declared|effective|compare|files|source}` API 沿用 bounded inspector、source policy、遮蔽及額外欄位授權。回應使用 `Cache-Control: no-store`，瀏覽器不快取 projection。Worker parsed snapshot 按共用設定及 descriptor 內容 revision、Environment 和 access/redaction policy 隔離，不以任意 Package ID 作識別。既有 Package-scoped Configuration routes 保留相容性及 Testdata 用途。
+
 ## 按任務查找配置
 
 | 任務 | 從這裡開始 |

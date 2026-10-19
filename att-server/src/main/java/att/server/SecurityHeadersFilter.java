@@ -67,7 +67,8 @@ public final class SecurityHeadersFilter implements Filter {
         // attributes for editor geometry. Keep the attribute exception on the Studio document
         // only; API, login, downloads, and other responses keep inline styles disabled.
         String styleAttributes = studioDocument ? "'unsafe-inline'" : "'none'";
-        return "default-src 'self'; script-src 'self'; style-src 'self' " + source
+        return "default-src 'self'; script-src 'self'" + (studioDocument ? " " + source : "")
+                + "; style-src 'self' " + source
                 + "; style-src-elem 'self' " + source
                 + "; style-src-attr " + styleAttributes
                 + "; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'";

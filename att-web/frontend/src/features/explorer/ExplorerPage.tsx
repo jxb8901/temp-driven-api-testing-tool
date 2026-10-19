@@ -479,6 +479,15 @@ export function ExplorerPage({ api, packageId, resourceRoute, environment,
               <p>{detail?.description || detail?.logicalId || ''}</p></div>
             {detail?.state === 'invalid' && <span className="att-status-badge" data-state="error">Invalid resource</span>}
           </header>
+          {detail?.executionReadiness && <section aria-label="Execution readiness" className="att-diagnostic">
+            <p>Metadata {detail.metadataState === 'available' ? 'available' : 'invalid'} · Execution {detail.executionReadiness.state === 'dependency-unresolved'
+              ? 'dependencies unresolved' : detail.executionReadiness.state === 'invalid' ? 'invalid' : 'not validated'}
+              {detail.executionReadiness.environment ? ` (${detail.executionReadiness.environment})` : ''}.</p>
+            {detail.executionReadiness.diagnostics?.map((item, index) => <p key={`${item.code}:${index}`}>
+              {item.code ? `${item.code}: ` : ''}{item.summary}{item.remediation ? ` ${item.remediation}` : ''}
+            </p>)}
+            {detail.executionReadiness.diagnosticsTruncated && <p>Additional requirements are omitted. Validate the selected target for complete execution checks.</p>}
+          </section>}
           <div className="att-explorer-detail-actions">
             {onRunTarget && detail?.state !== 'invalid' && <button className="button button-primary" type="button" onClick={() => onRunTarget({ type: identity.type, resourceId: identity.resourceId, logicalId: detail?.logicalId })}>Run</button>}
             {onOpenQuickLoad && detail?.state !== 'invalid' && ['template','flow','tool'].includes(identity.type) && <button className="button button-quiet" type="button" onClick={() => onOpenQuickLoad({ packageId, type: identity.type, resourceId: identity.resourceId, logicalId: detail?.logicalId })}>Quick LOAD</button>}

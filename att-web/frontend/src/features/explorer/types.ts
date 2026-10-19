@@ -17,6 +17,13 @@ export interface ResourceSummary {
   name?: string;
   description?: string;
   state?: string;
+  metadataState?: 'available' | 'invalid';
+  executionReadiness?: {
+    state: 'not-validated' | 'dependency-unresolved' | 'invalid';
+    environment?: string;
+    diagnostics?: Diagnostic[];
+    diagnosticsTruncated?: boolean;
+  };
   sourceAvailable?: boolean;
   sourceReason?: string | null;
   redactionEnabled?: boolean;
@@ -43,6 +50,9 @@ export interface Diagnostic {
   summary?: string;
   resourceId?: string;
   field?: string;
+  environmentVariable?: string;
+  descriptor?: string;
+  remediation?: string;
 }
 
 export interface ResourcePage {
@@ -168,6 +178,7 @@ export interface TestdataRecordsResponse {
 
 export interface ConfigurationResponse {
   state?: string;
+  executionReadiness?: 'not-validated';
   view?: 'declared' | 'effective' | 'compare' | string;
   environment?: string;
   leftEnvironment?: string;

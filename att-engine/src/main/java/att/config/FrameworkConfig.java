@@ -11,6 +11,9 @@ import java.util.Map;
 
 /** Immutable global or suite-resolved V2 configuration. */
 public final class FrameworkConfig {
+    private final List<EnvironmentRequirement> environmentRequirements;
+    private final List<HelperDiscoveryFailure> helperDiscoveryFailures;
+    private final boolean discoveryOnly;
     private final Path outputDirectory;
     private final Path reportDirectory;
     private final Path logDirectory;
@@ -175,6 +178,9 @@ public final class FrameworkConfig {
                            List<StageConfig> stages, int headerRows, String xmlNamespaceMode, String workbookId,
                            boolean caseLogYamlAnchors, ProcessOutputConfig processOutput,
                            List<Path> testdataDescriptors) {
+        this.discoveryOnly = false;
+        this.environmentRequirements = Collections.emptyList();
+        this.helperDiscoveryFailures = Collections.emptyList();
         this.outputDirectory = outputDirectory == null ? Paths.get("output") : outputDirectory;
         this.reportDirectory = reportDirectory == null ? Paths.get("report") : reportDirectory;
         this.logDirectory = logDirectory == null ? Paths.get("logs") : logDirectory;
@@ -203,6 +209,47 @@ public final class FrameworkConfig {
         this.testdataDescriptors = testdataDescriptors == null ? Collections.<Path>emptyList()
                 : new ArrayList<Path>(testdataDescriptors);
         if (!("ignore".equals(this.xmlNamespaceMode) || "preserve".equals(this.xmlNamespaceMode))) throw new IllegalArgumentException("xml.namespaceMode must be ignore or preserve");
+    }
+
+    private FrameworkConfig(FrameworkConfig source, List<EnvironmentRequirement> requirements, List<HelperDiscoveryFailure> failures) {
+        this.discoveryOnly = true;
+        this.helperDiscoveryFailures = Collections.unmodifiableList(new ArrayList<HelperDiscoveryFailure>(failures));
+        this.environmentRequirements = Collections.unmodifiableList(new ArrayList<EnvironmentRequirement>(requirements));
+        this.outputDirectory = source.outputDirectory;
+        this.reportDirectory = source.reportDirectory;
+        this.logDirectory = source.logDirectory;
+        this.environment = source.environment;
+        this.timeoutMs = source.timeoutMs;
+        this.templatesRoot = source.templatesRoot;
+        this.testcasesRoot = source.testcasesRoot;
+        this.tools = source.tools;
+        this.dbHelpers = source.dbHelpers;
+        this.mqHelpers = source.mqHelpers;
+        this.sshHelpers = source.sshHelpers;
+        this.httpHelpers = source.httpHelpers;
+        this.report = source.report;
+        this.run = source.run;
+        this.sheetGroups = source.sheetGroups;
+        this.caseIdColumn = source.caseIdColumn;
+        this.tagsColumn = source.tagsColumn;
+        this.dataColumns = source.dataColumns;
+        this.stages = source.stages;
+        this.headerRows = source.headerRows;
+        this.xmlNamespaceMode = source.xmlNamespaceMode;
+        this.workbookId = source.workbookId;
+        this.caseLogYamlAnchors = source.caseLogYamlAnchors;
+        this.processOutput = source.processOutput;
+        this.testdataDescriptors = source.testdataDescriptors;
+    }
+
+    FrameworkConfig forDiscovery(List<EnvironmentRequirement> requirements, List<HelperDiscoveryFailure> failures) {
+        return new FrameworkConfig(this, requirements, failures);
+    }
+    public List<HelperDiscoveryFailure> helperDiscoveryFailures() { return helperDiscoveryFailures; }
+    public boolean discoveryOnly() { return discoveryOnly; }
+    public List<EnvironmentRequirement> environmentRequirements() { return environmentRequirements; }
+    public void requireExecutionConfig() {
+        if (discoveryOnly) throw new IllegalStateException("Metadata configuration cannot execute; validate and reload execution dependencies first");
     }
 
     public Path outputDirectory() { return outputDirectory; }

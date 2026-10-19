@@ -40,16 +40,32 @@ public final class FrameworkConfigLoader {
     /** Loads central runtime configuration while keeping package Testdata paths package-local. */
     public FrameworkConfig load(Path path, Path runtimeConfigRoot, Path packageRoot,
                                 String selectedEnvironment) throws IOException {
-        return loadInternal(path,runtimeConfigRoot,packageRoot,selectedEnvironment,null,false);
+        return loadInternal(path,runtimeConfigRoot,packageRoot,selectedEnvironment,null,false,EnvironmentReferences.execution());
     }
 
     /** Trusted parsed root for inspection snapshots; all schema and profile validation is unchanged. */
     public FrameworkConfig loadParsed(Path path, Path projectRoot, String selectedEnvironment, Object loaded) throws IOException {
-        return loadInternal(path,projectRoot,projectRoot,selectedEnvironment,loaded,true);
+        return loadInternal(path,projectRoot,projectRoot,selectedEnvironment,loaded,true,EnvironmentReferences.execution());
+    }
+
+    /** Parses descriptors and environment requirements without reading any process secret. */
+    public FrameworkConfig loadDiscovery(Path path, Path runtimeConfigRoot, Path packageRoot,
+                                         String selectedEnvironment) throws IOException {
+        EnvironmentReferences references = EnvironmentReferences.discovery();
+        return loadInternal(path, runtimeConfigRoot, packageRoot, selectedEnvironment, null, false, references)
+                .forDiscovery(references.requirements(), references.helperFailures());
+    }
+
+    /** Trusted parsed metadata snapshot; never resolves process environment values. */
+    public FrameworkConfig loadDiscoveryParsed(Path path, Path projectRoot, String selectedEnvironment,
+                                               Object loaded) throws IOException {
+        EnvironmentReferences references = EnvironmentReferences.discovery();
+        return loadInternal(path, projectRoot, projectRoot, selectedEnvironment, loaded, true, references)
+                .forDiscovery(references.requirements(), references.helperFailures());
     }
 
     private FrameworkConfig loadInternal(Path path, Path runtimeConfigRoot, Path packageRoot,
-                                         String selectedEnvironment, Object parsed, boolean supplied) throws IOException {
+                                         String selectedEnvironment, Object parsed, boolean supplied, EnvironmentReferences references) throws IOException {
         long inspectionStarted=System.nanoTime();
         try {
             Object loaded=supplied?parsed:YamlSupport.load(path);
@@ -103,26 +119,30 @@ public final class FrameworkConfigLoader {
             validateGlobalMappings(map);
             Map<String, ToolConfig> tools = new LinkedHashMap<String, ToolConfig>();
             Map<String, SshHelperConfig> sshHelpers = (v29 || v28 || v27)
-                    ? new SshHelperConfigLoader().load(map.get("sshhelpers"), runtimeConfigRoot)
+                    ? HelperDiscoveryLoader.load("ssh", map.get("sshhelpers"), runtimeConfigRoot, references,
+                            new SshHelperConfigLoader(references)::load)
                     : Collections.<String, SshHelperConfig>emptyMap();
             Map<String, HttpHelperConfig> httpHelpers = (v29 || v28)
-                    ? new HttpHelperConfigLoader().load(map.get("httphelpers"), runtimeConfigRoot)
+                    ? HelperDiscoveryLoader.load("http", map.get("httphelpers"), runtimeConfigRoot, references,
+                            new HttpHelperConfigLoader(references)::load)
                     : Collections.<String, HttpHelperConfig>emptyMap();
             SshConfig globalSsh = ssh(map.get("ssh"), "config.ssh");
             try {
                 addTools(map.get("tools"), tools, "", Collections.<String>emptyList(), globalSsh, "", "", "tools", path,
                         v29 || v28 || v27 || v26, !(v29 || v28 || v27 || v26), v29, v210);
-                if (v29 || v28 || v27 || v26 || v25 || v22) addToolGroups(map.get("toolGroups"), runtimeConfigRoot, tools, sshHelpers);
+                if (v29 || v28 || v27 || v26 || v25 || v22) addToolGroups(map.get("toolGroups"), runtimeConfigRoot, tools, sshHelpers, references.isDiscovery());
             } catch (Exception e) {
                 throw att.validation.DiagnosticException.wrap(att.validation.DiagnosticCodes.TOOL_INVALID,
                         "Invalid tool configuration", e, path.toString(), "tools/toolGroups",
                         "Check the qualified tool/group name, required metadata, declared arguments, command placeholders, and executable path.");
             }
             Map<String, DbHelperConfig> dbHelpers = (v29 || v28 || v27 || v26 || v25)
-                    ? new DbHelperConfigLoader().load(map.get("dbhelpers"), runtimeConfigRoot)
+                    ? HelperDiscoveryLoader.load("db", map.get("dbhelpers"), runtimeConfigRoot, references,
+                            new DbHelperConfigLoader(references)::load)
                     : Collections.<String, DbHelperConfig>emptyMap();
             Map<String, MqHelperConfig> mqHelpers = (v29 || v28 || v27 || v26)
-                    ? new MqHelperConfigLoader().load(map.get("mqhelpers"), runtimeConfigRoot)
+                    ? HelperDiscoveryLoader.load("mq", map.get("mqhelpers"), runtimeConfigRoot, references,
+                            new MqHelperConfigLoader(references)::load)
                     : Collections.<String, MqHelperConfig>emptyMap();
             return new FrameworkConfig(relativePath(map.get("outputDirectory"), "output", "outputDirectory"),
                     Paths.get("report"), Paths.get("logs"),
@@ -571,7 +591,7 @@ public final class FrameworkConfigLoader {
     }
 
     private static void addToolGroups(Object configured, Path projectRoot, Map<String, ToolConfig> tools,
-                                      Map<String, SshHelperConfig> sshHelpers) throws IOException {
+                                      Map<String, SshHelperConfig> sshHelpers, boolean discovery) throws IOException {
         if (configured == null) return;
         if (!(configured instanceof Iterable)) throw new IllegalArgumentException("toolGroups must be a list");
         Set<Path> paths = new LinkedHashSet<Path>();
@@ -588,12 +608,12 @@ public final class FrameworkConfigLoader {
             Path file = resources.resolvePackageRelative(relative.toString().replace('\\', '/'), PackageResourceResolver.Kind.FILE).canonicalPath();
             if (!Files.isRegularFile(file)) throw new IllegalArgumentException("Missing/unsafe tool group file: " + value);
             if (!paths.add(file)) throw new IllegalArgumentException("Duplicate tool group path: " + value);
-            loadToolGroup(file, projectRoot, tools, ids, sshHelpers);
+            loadToolGroup(file, projectRoot, tools, ids, sshHelpers, discovery);
         }
     }
 
     private static void loadToolGroup(Path file, Path projectRoot, Map<String, ToolConfig> tools, Set<String> ids,
-                                      Map<String, SshHelperConfig> sshHelpers) {
+                                      Map<String, SshHelperConfig> sshHelpers, boolean discovery) {
         try {
             Map<?, ?> group = yaml(file, "Tool group");
             att.testdata.TestdataSyntax.rejectDirectReferences(group, "Tool group " + file.getFileName());
@@ -634,7 +654,8 @@ public final class FrameworkConfigLoader {
                 }
                 boolean found = false;
                 for (String helperId : sshHelpers.keySet()) if (helperId.equalsIgnoreCase(sshHelper)) { sshHelper = helperId; found = true; break; }
-                if (!found) throw new IllegalArgumentException("Unknown SSH helper '" + sshHelper + "' in tool group " + id);
+                // Keep the authored binding for readiness diagnostics; strict loads still reject it.
+                if (!found && !discovery) throw new IllegalArgumentException("Unknown SSH helper '" + sshHelper + "' in tool group " + id);
             } else ssh = ssh(group.get("ssh"), "tool group " + id + ".ssh");
             if (!(group.get("tools") instanceof Map) || ((Map<?, ?>) group.get("tools")).isEmpty()) throw new IllegalArgumentException("Tool group tools must be a non-empty map: " + id);
             int toolCountBefore = tools.size();

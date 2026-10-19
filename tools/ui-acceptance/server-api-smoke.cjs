@@ -119,6 +119,8 @@ async function main() {
     const goToLine = page.locator('.att-explorer-source .att-code-goto input');
     await goToLine.fill(String(referenceLine));
     await page.locator('.att-explorer-source .att-code-editor').getByRole('button', { name: 'Go' }).click();
+    const payloadResponsePromise = page.waitForResponse(response =>
+      response.request().method() === 'GET' && new URL(response.url()).pathname.endsWith('/source-file'));
     await fileLink.click();
     try {
       await page.getByRole('heading', { name: 'Configuration', level: 1 }).waitFor({ timeout: 10000 });
@@ -129,8 +131,17 @@ async function main() {
       const link = await fileLink.evaluate(element => element.outerHTML);
       throw new Error(`${error.stack || error}\nCurrent URL: ${page.url()}\nHeadings: ${headings.join(' | ')}\nNavigations: ${navigationEvents.join(' -> ')}\nPage errors: ${pageErrors.join(' | ')}\nDialogs: ${JSON.stringify(dialogs)}\nLink: ${link}\nPage: ${body}`);
     }
+    const payloadResponse = await payloadResponsePromise;
+    assert.equal(payloadResponse.status(), 200, 'the authorized payload source request must succeed');
+    const payloadProjection = await payloadResponse.json();
+    assert.equal(payloadProjection.available, true, 'the payload source must be available before rendering');
     const payloadSource = page.locator('.att-config-source-view .att-code-editor .cm-content');
-    await payloadSource.waitFor();
+    try {
+      await payloadSource.waitFor();
+    } catch (error) {
+      const view = (await page.locator('.att-config-source-view').allTextContents()).join(' | ');
+      throw new Error(`${error.stack || error}\nConfiguration source view: ${view}\nPage errors: ${pageErrors.join(' | ')}`);
+    }
     const payloadSourceText = await payloadSource.evaluate(element => element.textContent || '');
     assert.ok(payloadSourceText.includes('<request>safe payload</request>'),
       `the safe package source should remain visible through CodeMirror: ${payloadSourceText}`);
@@ -139,6 +150,12 @@ async function main() {
 
     await page.goBack();
     await page.getByRole('heading', { name: 'Reference Flow' }).waitFor();
+    for (const packageId of ['', 'default', 'jeffreyjiang']) {
+      await page.goto(`${origin}/tools/att/ui/index.html#/configuration${packageId ? '/' + packageId : ''}?tab=source`);
+      await page.getByRole('heading', { name: 'Configuration', level: 1 }).waitFor();
+      assert.equal(await page.getByRole('combobox', { name: 'Package', exact: true }).count(), 0);
+      await page.getByRole('treeitem', { name: /config/ }).waitFor();
+    }
     await page.locator('a[data-nav="configuration"]').click();
     await page.getByRole('heading', { name: 'Configuration', level: 1 }).waitFor();
     await page.getByRole('tab', { name: 'Source' }).click();
@@ -153,6 +170,7 @@ async function main() {
     await page.getByText(/Safe read-only source/).waitFor();
 
     await page.getByRole('tab', { name: 'Testdata' }).click();
+    await page.getByRole('combobox', { name: 'Testdata package', exact: true }).selectOption('payments');
     await page.getByRole('heading', { name: 'Testdata' }).waitFor();
     await page.getByRole('button', { name: 'generatedAccounts' }).click();
     await page.getByRole('button', { name: 'Preview first 50 generated records' }).click();

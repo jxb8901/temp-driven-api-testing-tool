@@ -10,7 +10,6 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.yaml.snakeyaml.DumperOptions;
 import org.yaml.snakeyaml.Yaml;
 
-import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
@@ -50,6 +49,13 @@ import java.util.regex.Pattern;
 /** Owns the single-node job plane and its bounded Worker, inspector, and SSE executors. */
 final class ServerRuntime implements AutoCloseable {
     static final ObjectMapper JSON=new ObjectMapper().configure(com.fasterxml.jackson.databind.DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES,false);
+    private static final ObjectMapper ARTIFACT_JSON = new ObjectMapper(com.fasterxml.jackson.core.JsonFactory.builder()
+            .enable(com.fasterxml.jackson.core.StreamReadFeature.STRICT_DUPLICATE_DETECTION)
+            .streamReadConstraints(com.fasterxml.jackson.core.StreamReadConstraints.builder()
+                    .maxNestingDepth(64).maxStringLength(16 * 1024 * 1024).maxNumberLength(1000).build()).build())
+            .enable(com.fasterxml.jackson.databind.DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
+            .enable(com.fasterxml.jackson.databind.DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS)
+            .enable(com.fasterxml.jackson.databind.DeserializationFeature.USE_BIG_INTEGER_FOR_INTS);
     static final Pattern JOB_ID=Pattern.compile("J[0-9A-F]{16}");
     static final Pattern DRAFT_ID=Pattern.compile("D[0-9A-F]{32}");
     static final Pattern QUICK_LOAD_DRAFT_ID=Pattern.compile("L[0-9A-F]{32}");
@@ -71,6 +77,12 @@ final class ServerRuntime implements AutoCloseable {
     final JobStore store;
     final AuthService auth;
     final ThreadPoolExecutor workers,streams,inspectors;
+    private final ThreadPoolExecutor artifactWriters;
+    private final ArtifactPublisher artifactPublisher;
+    private final Semaphore artifactReadSlots=new Semaphore(8,true);
+    private final Set<String> pendingArtifactJobs=ConcurrentHashMap.newKeySet();
+    private final Set<String> requestedArtifactRetries=ConcurrentHashMap.newKeySet();
+    private final java.util.concurrent.locks.ReentrantReadWriteLock artifactLifecycle=new java.util.concurrent.locks.ReentrantReadWriteLock(true);
     final ConcurrentHashMap<String,Job> jobs=new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String,FutureTask<Void>> tasks=new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String,AdmissionLease> leases=new ConcurrentHashMap<>();
@@ -78,6 +90,10 @@ final class ServerRuntime implements AutoCloseable {
     private final Semaphore loadSlots,admissionSlots;
     final Semaphore streamSlots=new Semaphore(MAX_STREAM_OBSERVERS,true);
     private final ScheduledExecutorService retention;
+    private final ScheduledExecutorService artifactMaintenance;
+    private final java.util.concurrent.ConcurrentLinkedQueue<Job> deferredWorkerReleases=new java.util.concurrent.ConcurrentLinkedQueue<>();
+    private final Set<String> deferredWorkerReleaseIds=ConcurrentHashMap.newKeySet();
+    private String artifactRecoveryCursor="";
     private final ScheduledExecutorService inspectionWatchdogs;
     private final LoadScheduleScheduler loadScheduleScheduler;
     private final WorkerProcessLauncher processLauncher;
@@ -107,20 +123,27 @@ final class ServerRuntime implements AutoCloseable {
         this(config,workerLibs,processLauncher,Clock.systemUTC());
     }
     ServerRuntime(ServerConfig config,String workerLibs,WorkerProcessLauncher processLauncher,Clock clock) throws Exception {
+        this(config,workerLibs,processLauncher,clock,ArtifactArchive::build);
+    }
+    ServerRuntime(ServerConfig config,String workerLibs,WorkerProcessLauncher processLauncher,Clock clock,ArtifactPublisher artifactPublisher) throws Exception {
         if(Runtime.version().feature()<17)throw new IllegalStateException("ATT Server requires Java 17 or later; detected Java "+Runtime.version().feature());
-        this.config=config;this.workerLibs=workerLibs==null?null:Paths.get(workerLibs).toAbsolutePath().normalize();this.workerSchemaRegistryDigest=WorkerRuntimeClasspath.schemaRegistryDigestIfPresent(this.workerLibs);this.processLauncher=processLauncher;this.clock=java.util.Objects.requireNonNull(clock);this.store=new JobStore(config);this.auth=new AuthService(config,store);this.loadSlots=new Semaphore(config.maxConcurrentLoad,true);this.admissionSlots=new Semaphore(config.maxConcurrent+config.queuedLimit,true);
+        this.config=config;this.artifactPublisher=java.util.Objects.requireNonNull(artifactPublisher);this.workerLibs=workerLibs==null?null:Paths.get(workerLibs).toAbsolutePath().normalize();this.workerSchemaRegistryDigest=WorkerRuntimeClasspath.schemaRegistryDigestIfPresent(this.workerLibs);this.processLauncher=processLauncher;this.clock=java.util.Objects.requireNonNull(clock);this.store=new JobStore(config);this.auth=new AuthService(config,store);this.loadSlots=new Semaphore(config.maxConcurrentLoad,true);this.admissionSlots=new Semaphore(config.maxConcurrent+config.queuedLimit,true);
         cursorRandom.nextBytes(cursorKey);
         java.util.concurrent.BlockingQueue<Runnable> queue=config.queuedLimit==0?new SynchronousQueue<>():new ArrayBlockingQueue<>(config.queuedLimit);
         workers=new ThreadPoolExecutor(config.maxConcurrent,config.maxConcurrent,0,TimeUnit.MILLISECONDS,queue,r->{Thread t=new Thread(r,"att-server-worker");t.setDaemon(true);return t;},new ThreadPoolExecutor.AbortPolicy());
         streams=new ThreadPoolExecutor(0,MAX_STREAM_OBSERVERS,30,TimeUnit.SECONDS,new SynchronousQueue<>(),r->{Thread t=new Thread(r,"att-server-sse");t.setDaemon(true);return t;},new ThreadPoolExecutor.AbortPolicy());
+        artifactWriters=new ThreadPoolExecutor(1,1,0,TimeUnit.MILLISECONDS,new ArrayBlockingQueue<>(Math.max(1,config.queuedLimit+config.maxConcurrent)),r->{Thread t=new Thread(r,"att-server-artifact-writer");t.setDaemon(true);return t;},new ThreadPoolExecutor.AbortPolicy());
         java.util.concurrent.BlockingQueue<Runnable> inspectionQueue=config.inspection.queuedLimit==0?new SynchronousQueue<>():new ArrayBlockingQueue<>(config.inspection.queuedLimit);
         inspectors=new ThreadPoolExecutor(config.inspection.maxConcurrent,config.inspection.maxConcurrent,0,TimeUnit.MILLISECONDS,inspectionQueue,r->{Thread t=new Thread(r,"att-server-inspector");t.setDaemon(true);return t;},new ThreadPoolExecutor.AbortPolicy());
         for(int i=0;i<config.inspection.maxConcurrent;i++)inspectionWorkerPool.add(new InspectionWorker());
         retention=java.util.concurrent.Executors.newSingleThreadScheduledExecutor(r->{Thread t=new Thread(r,"att-server-retention");t.setDaemon(true);return t;});
+        artifactMaintenance=java.util.concurrent.Executors.newSingleThreadScheduledExecutor(r->{Thread t=new Thread(r,"att-server-artifact-maintenance");t.setDaemon(true);return t;});
         inspectionWatchdogs=java.util.concurrent.Executors.newSingleThreadScheduledExecutor(r->{Thread t=new Thread(r,"att-server-inspector-watchdog");t.setDaemon(true);return t;});
         inspectionWarmup=config.inspection.enabled&&config.inspection.warmup.enabled()
                 ?java.util.concurrent.Executors.newSingleThreadScheduledExecutor(r->{Thread t=new Thread(r,"att-server-inspector-warmup");t.setDaemon(true);return t;}):null;
-        recover();cleanupExpiredJobsSafely();retention.scheduleWithFixedDelay(this::cleanupExpiredJobsSafely,1,1,TimeUnit.HOURS);
+        recover();cleanupExpiredJobsSafely();recoverArtifactArchivesSafely();retention.scheduleWithFixedDelay(this::cleanupExpiredJobsSafely,1,1,TimeUnit.HOURS);
+        artifactMaintenance.scheduleWithFixedDelay(this::recoverArtifactArchivesSafely,5,5,TimeUnit.MINUTES);
+        artifactMaintenance.scheduleWithFixedDelay(this::reconcileWorkerReleases,1,1,TimeUnit.SECONDS);
         retention.scheduleWithFixedDelay(this::expireDraftsSafely,1,1,TimeUnit.MINUTES);
         if(config.scheduling.enabled) {
             store.recoverScheduleExecutions();
@@ -237,27 +260,77 @@ final class ServerRuntime implements AutoCloseable {
                 command.add("-cp");command.add(cp);command.add("att.worker.WorkerMain");
                 ProcessBuilder builder=new ProcessBuilder(command);
                 builder.directory(packageRoot(job.packageId).toFile());
-                job.workerSpawnStartedNanos=System.nanoTime();process=processLauncher.start(builder);job.workerSpawnedNanos=System.nanoTime();job.process=process;job.workerPid=process.pid();job.workerStartTime=process.info().startInstant().orElse(Instant.now());job.startedAt=Instant.now();transition(job,"RUNNING");
+                job.workerSpawnStartedNanos=System.nanoTime();process=processLauncher.start(builder);job.workerSpawnedNanos=System.nanoTime();job.process=process;job.processFence=new WorkerProcessFence(process);job.workerPid=process.pid();job.workerStartTime=process.info().startInstant().orElse(Instant.now());job.startedAt=Instant.now();transition(job,"RUNNING");rememberWorkerProcesses(job,job.processFence);
             }
             Thread stderr=new Thread(()->{try(var in=process.getErrorStream()){byte[] buf=new byte[8192];while(in.read(buf)>=0){/* drain; protocol and safe diagnostics use stdout */}}catch(Exception ignored){}});stderr.setDaemon(true);stderr.start();
             try(var out=process.getOutputStream()){out.write(JSON.writeValueAsBytes(job.request));out.write('\n');out.flush();}
-            try(BufferedReader reader=new BufferedReader(new InputStreamReader(process.getInputStream(),StandardCharsets.UTF_8))){String line;while((line=readBoundedLine(reader,1024*1024))!=null){if("\u0000OVERSIZED".equals(line)){append(job,"diagnostic",Map.of("code","ATT-SERVER-WORKER-EVENT-TOO-LARGE","summary","Worker event exceeded the protocol limit"));continue;}handleWorkerEvent(job,line);}}
+            try(var reader=new java.io.BufferedInputStream(process.getInputStream())) {
+                att.server.api.internal.WorkerProtocol.Frame frame;
+                while((frame=att.server.api.internal.WorkerProtocol.read(reader,att.server.api.internal.WorkerProtocol.MAX_FRAME_BYTES))!=null) {
+                    if(frame.oversized()){recordProtocolLimit(job,frame);continue;}
+                    handleWorkerEvent(job,frame.text());
+                }
+            }
             int exit=process.waitFor();job.workerTerminatedNanos=System.nanoTime();job.exitCode=exit;
-            if(!job.resultReceived&&!job.terminal()){job.diagnosticJson=JSON.writeValueAsString(Map.of("code","ATT-SERVER-WORKER-EXITED","summary","Worker exited before delivering a terminal result","exitCode",exit));append(job,"diagnostic",JSON.readValue(job.diagnosticJson,Map.class));finish(job,"ERROR",exit==0?3:exit);}
+            if(!job.resultReceived&&!job.terminal()){recordWorkerExit(job,exit);finish(job,"ERROR",exit==0?3:exit);}
             else if(!job.terminal()) {String state=exit==0?"PASS":"FAIL";finish(job,state,exit);}
-        } catch(InterruptedException e){Thread.currentThread().interrupt();stopAfterFailure(job);if(!job.terminal())finishQuietly(job,"CANCELLED",143,"ATT-SERVER-CANCELLED","Worker was cancelled");}
-          catch(Exception e){stopAfterFailure(job);if(!job.terminal())finishQuietly(job,"ERROR",3,"ATT-SERVER-WORKER-FAILED",safeMessage(e));}
-        finally {if(job.process!=null&&!job.process.isAlive()){if(job.workerTerminatedNanos==0)job.workerTerminatedNanos=System.nanoTime();job.process=null;try{store.update(job);}catch(Exception ignored){}}tasks.remove(job.id);leases.remove(job.id);if(job.terminal())jobs.remove(job.id,job);lease.release();completed.incrementAndGet();}
+        } catch(InterruptedException e){Thread.currentThread().interrupt();stopWorkerTree(job);if(!job.terminal())finishQuietly(job,"CANCELLED",143,"ATT-SERVER-CANCELLED","Worker was cancelled");}
+          catch(Exception e){stopWorkerTree(job);if(!job.terminal())finishQuietly(job,"ERROR",3,"ATT-SERVER-WORKER-FAILED",safeMessage(e));}
+        finally {
+            stopWorkerTree(job);
+            boolean stopped=job.processFence==null ? job.process==null||!job.process.isAlive() : job.processFence.stopped();
+            if(stopped&&job.process!=null){if(job.workerTerminatedNanos==0)job.workerTerminatedNanos=System.nanoTime();job.process=null;if(!closing)try{store.update(job);}catch(Exception ignored){}}
+            tasks.remove(job.id);completed.incrementAndGet();
+            // A terminal RESULT is not the execution cleanup fence. Publish only
+            // after cleanup and admission release, never while this Job is active.
+            if(!releaseStoppedWorker(job,lease)&&!closing&&deferredWorkerReleaseIds.add(job.id))deferredWorkerReleases.add(job);
+        }
+    }
+    int reconcileWorkerReleases() {
+        int budget=Math.min(64,deferredWorkerReleases.size());
+        int attempted=0;
+        for(int i=0;i<budget&&!closing;i++) {
+            Job job=deferredWorkerReleases.poll();if(job==null)break;
+            attempted++;
+            AdmissionLease lease=leases.get(job.id);
+            if(lease==null||releaseStoppedWorker(job,lease))deferredWorkerReleaseIds.remove(job.id);
+            else deferredWorkerReleases.add(job);
+        }
+        return attempted;
+    }
+    private boolean releaseStoppedWorker(Job job,AdmissionLease lease) {
+        try {if((job.processFence!=null&&!job.processFence.observedStopped())||(job.process!=null&&job.process.isAlive()))return false;}
+        catch(RuntimeException unavailable){return false;}
+        if(job.processFence!=null&&!job.processFence.verified()) {
+            // Reclaim execution capacity only after known processes exit and a durable
+            // quarantine independently prohibits publication AND retention across restart.
+            try {store.quarantineWorker(job.id);}
+            catch(Exception unavailable){return false;}
+        }
+        if(job.workerTerminatedNanos==0)job.workerTerminatedNanos=System.nanoTime();
+        job.process=null;
+        if(!closing)try{store.update(job);}catch(Exception ignored){}
+        leases.remove(job.id,lease);lease.release();
+        if(job.terminal()){jobs.remove(job.id,job);scheduleArtifactArchive(job.id);}
+        return true;
     }
     private List<String> workerClasspath() {
         return WorkerRuntimeClasspath.entries(workerLibs,config.workerLibraryDirs);
     }
-    private void stopAfterFailure(Job job) {
+    private void stopWorkerTree(Job job) {
         Process process=job.process;
-        if(process==null||!process.isAlive())return;
-        terminateTree(process);
-        try {if(!process.waitFor(config.gracefulStopMs,TimeUnit.MILLISECONDS)){forceTree(process);process.waitFor();}}
-        catch(InterruptedException interrupted){Thread.currentThread().interrupt();forceTree(process);}
+        if(process==null)return;
+        WorkerProcessFence fence=job.processFence;
+        if(fence==null){fence=new WorkerProcessFence(process);job.processFence=fence;}
+        fence.observe();
+        if(!closing)rememberWorkerProcesses(job,fence);
+        try {fence.stop(config.gracefulStopMs);}
+        catch(InterruptedException interrupted){fence.force();Thread.currentThread().interrupt();}
+        finally {if(!closing)rememberWorkerProcesses(job,fence);}
+    }
+    private void rememberWorkerProcesses(Job job,WorkerProcessFence fence) {
+        try {store.rememberWorkerProcesses(job.id,fence.identities());if(!fence.verified())store.quarantineWorker(job.id);}
+        catch(Exception unavailable){fence.unverified();}
     }
     void handleWorkerEvent(Job job,String line) throws Exception {
         JsonNode event=JSON.readTree(line);if(event==null||!event.isObject())return;
@@ -267,16 +340,30 @@ final class ServerRuntime implements AutoCloseable {
         if(("PROGRESS".equals(type)||"LOG".equals(type))&&job.executionReadyNanos==0)job.executionReadyNanos=eventNanos;
         switch(type){case "STATUS"->{String status=event.path("status").asText("");if("RUNNING".equals(status)&&"PREPARING".equals(job.status))transition(job,"RUNNING");}
             case "PROGRESS"->append(job,"progress",safe);case "LOG"->append(job,"log",safe);case "DIAGNOSTIC"->{job.diagnosticJson=JSON.writeValueAsString(safe);store.update(job);append(job,"diagnostic",safe);}
-            case "RESULT"->{job.resultReceivedNanos=eventNanos;Object workerMetrics=safe.get("workerMetrics");if(workerMetrics instanceof Map<?,?>)job.workerMetrics=(Map<String,Object>)workerMetrics;String status=event.path("status").asText("ERROR");int code=event.path("exitCode").asInt(3);Object result=safe.get("result");job.resultJson=result==null?"{}":JSON.writeValueAsString(result);job.resultReceived=true;finish(job,normalizeTerminal(status),code);}
+            case "RESULT"->{if(job.processFence!=null){job.processFence.observe();rememberWorkerProcesses(job,job.processFence);}job.resultReceivedNanos=eventNanos;Object workerMetrics=safe.get("workerMetrics");if(workerMetrics instanceof Map<?,?>)job.workerMetrics=(Map<String,Object>)workerMetrics;String status=event.path("status").asText("ERROR");int code=event.path("exitCode").asInt(3);Object result=safe.get("result");job.resultJson=result==null?"{}":JSON.writeValueAsString(result);job.resultReceived=true;finish(job,normalizeTerminal(status),code);}
             default->append(job,"log",Map.of("message","Worker emitted an unrecognized event"));}
+    }
+    void recordProtocolLimit(Job job,att.server.api.internal.WorkerProtocol.Frame frame) throws Exception {
+        Map<String,Object> diagnostic=Map.of("code","ATT-SERVER-WORKER-EVENT-TOO-LARGE",
+                "summary","Worker event exceeded the UTF-8 protocol byte limit","eventType",frame.eventType(),
+                "sizeBytes",frame.sizeBytes,"limitBytes",frame.limitBytes);
+        job.protocolDiagnostic=diagnostic;job.diagnosticJson=JSON.writeValueAsString(diagnostic);
+        store.update(job);append(job,"diagnostic",diagnostic);
+    }
+    void recordWorkerExit(Job job,int exit) throws Exception {
+        Map<String,Object> fallback=Map.of("code","ATT-SERVER-WORKER-EXITED",
+                "summary","Worker exited before delivering a terminal result","exitCode",exit);
+        Map<String,Object> diagnostic=new LinkedHashMap<>(job.protocolDiagnostic==null?fallback:job.protocolDiagnostic);
+        if(job.protocolDiagnostic!=null)diagnostic.put("workerExit",fallback);
+        job.diagnosticJson=JSON.writeValueAsString(diagnostic);append(job,"diagnostic",diagnostic);
     }
     private String normalizeTerminal(String s){return List.of("PASS","FAIL","ERROR","INVALID","CANCELLED").contains(s)?s:"ERROR";}
     String cancel(String id,String principal) throws Exception {
         if("local".equals(config.authMode))requireJobOwner(id,principal);
         Job j=jobs.get(id);if(j==null){Map<String,Object> stored=store.get(id);if(stored==null||!JOB_ID.matcher(id).matches())throw new NotFoundException();return String.valueOf(stored.get("status"));}
         synchronized(j){if(j.terminal())return j.status;append(j,"status",Map.of("jobId",id,"status","CANCEL_REQUESTED"));
-            Process p=j.process;if(p==null){FutureTask<Void> task=tasks.remove(id);if(task!=null){boolean cancelled=task.cancel(false);workers.remove(task);if(cancelled){AdmissionLease lease=leases.remove(id);if(lease!=null)lease.release();}}finish(j,"CANCELLED",143);jobs.remove(id,j);}
-            else {terminateTree(p);try{if(!p.waitFor(config.gracefulStopMs,TimeUnit.MILLISECONDS)){forceTree(p);p.waitFor();}}catch(InterruptedException e){Thread.currentThread().interrupt();forceTree(p);}finish(j,"CANCELLED",143);}}
+            Process p=j.process;if(p==null){FutureTask<Void> task=tasks.remove(id);if(task!=null){boolean cancelled=task.cancel(false);workers.remove(task);if(cancelled){AdmissionLease lease=leases.remove(id);if(lease!=null)lease.release();}}finish(j,"CANCELLED",143);jobs.remove(id,j);scheduleArtifactArchive(id);}
+            else {stopWorkerTree(j);finish(j,"CANCELLED",143);}}
         store.audit(principal,"CANCEL",id,j.packageId,"CANCELLED");return j.status;
     }
     void requireJobOwner(String id,String principal) throws Exception {
@@ -308,6 +395,7 @@ final class ServerRuntime implements AutoCloseable {
         record.remove("resultJson");record.remove("diagnosticJson");
         String performance=(String)record.remove("performanceJson");
         if(performance!=null&&!performance.isBlank())record.put("performance",JSON.readValue(performance,Map.class));
+        record.put("archiveMetrics",store.archiveMetrics(id));
         return record;
     }
     Map<String,Object> resultRecord(String id) throws Exception {
@@ -1137,7 +1225,12 @@ final class ServerRuntime implements AutoCloseable {
                                             boolean includeAllFields,String principal) throws Exception {
         if(!config.inspection.enabled)throw new NotFoundException();
         if(principal==null||principal.isBlank())throw new IllegalArgumentException("A server-resolved request identity is required");
-        Path root=packageRoot(packageId);if(root==null)throw new NotFoundException();validatePackageRoot(root);
+        boolean shared=packageId==null||packageId.isEmpty();
+        if(shared&&"testdata-records".equals(action))throw new NotFoundException();
+        Path root=shared?ServerConfig.runtimeConfigRoot(config.runtimeConfigPath):packageRoot(packageId);
+        if(root==null)throw new NotFoundException();
+        if(!shared)validatePackageRoot(root);
+        String scope=shared?"":packageId;
         if(!List.of("declared","effective","compare","testdata-records","files","source").contains(action))
             throw new IllegalArgumentException("Unsupported configuration inspection action");
         if(offset<0||limit<0||limit>100||"testdata-records".equals(action)&&limit<1)
@@ -1153,11 +1246,13 @@ final class ServerRuntime implements AutoCloseable {
         if("source".equals(action)&&(inspectionPath==null||inspectionPath.isBlank()))
             throw new IllegalArgumentException("A package-relative source path is required");
         if("source".equals(action)) {
+            if(shared&&(!Path.of(inspectionPath).normalize().startsWith(Path.of("config"))
+                    ||inspectionOrigin!=null&&!Path.of(inspectionOrigin).normalize().startsWith(Path.of("config"))))throw new NotFoundException();
             if(inspectionReferenceId==null||inspectionReferenceId.isBlank()) {
                 if((inspectionOrigin!=null&&!inspectionOrigin.isBlank())||!inspectionPath.startsWith("config/"))throw new NotFoundException();
             } else {
                 JsonNode claim=decodeConfigurationSourceReference(inspectionReferenceId);
-                if(!packageId.equals(claim.path("packageId").asText())
+                if(!scope.equals(claim.path("packageId").asText())
                         ||!java.util.Objects.equals(inspectionOrigin,claim.path("origin").asText())
                         ||!java.util.Objects.equals(inspectionPath,claim.path("target").asText()))throw new NotFoundException();
             }
@@ -1169,7 +1264,13 @@ final class ServerRuntime implements AutoCloseable {
             other=inspectionEnvironment(otherEnvironment,"right environment");
             if(selected.equalsIgnoreCase(other))throw new IllegalArgumentException("left and right environments must differ");
         }
-        WorkerRequest request=inspectionRequest(packageId,root,selected);
+        WorkerRequest request=inspectionRequest(scope,root,selected);
+        request.inspectionSharedConfiguration=shared;
+        if(shared) {
+            request.safeTextSources=config.inspection.safeTextSources.values().stream().flatMap(List::stream)
+                    .filter(path->path.startsWith("config/")).distinct().sorted().toList();
+            request.externalTextSources=List.of();request.externalSourceRoots=List.of();
+        }
         request.inspectionAction=action;request.inspectionType="configuration";request.inspectionEnvironment=selected;request.inspectionOtherEnvironment=other;
         request.inspectionSection=section;request.inspectionIncludeInherited=Boolean.valueOf(includeInherited);
         request.inspectionIncludeAllFields=Boolean.valueOf(includeAllFields);
@@ -1178,7 +1279,7 @@ final class ServerRuntime implements AutoCloseable {
         request.inspectionPath=inspectionPath;request.inspectionOrigin=inspectionOrigin;request.inspectionQuery=inspectionQuery;
         request.inspectionReferenceId=inspectionReferenceId;
         Map<String,Object> inspected=executeInspection(root,request);
-        if("source".equals(action))signConfigurationSourceReferences(packageId,inspected);
+        if("source".equals(action))signConfigurationSourceReferences(scope,inspected);
         return inspected;
     }
     private Map<String,Object> executeInspection(Path root,WorkerRequest request) throws Exception {
@@ -1400,7 +1501,7 @@ final class ServerRuntime implements AutoCloseable {
 
         Map<String,Object> request(Path root,WorkerRequest request) throws Exception {
             request.expectedSchemaRegistryDigest=workerSchemaRegistryDigest;
-            ensureStarted(root);
+            ensureStarted(root,Boolean.TRUE.equals(request.inspectionSharedConfiguration));
             java.util.concurrent.atomic.AtomicBoolean timedOut=new java.util.concurrent.atomic.AtomicBoolean();
             ScheduledFuture<?> watchdog=inspectionWatchdogs.schedule(()->{
                 timedOut.set(true);
@@ -1476,12 +1577,14 @@ final class ServerRuntime implements AutoCloseable {
             }
         }
 
-        private void ensureStarted(Path root) throws Exception {
+        private void ensureStarted(Path root,boolean shared) throws Exception {
             if(closing)throw new InterruptedException("Server is shutting down");
             Process current=process;
             if(current!=null&&current.isAlive())return;
             discard();
-            validatePackageRoot(root);
+            if(shared) {
+                if(!root.equals(ServerConfig.runtimeConfigRoot(config.runtimeConfigPath)))throw new NotFoundException();
+            } else validatePackageRoot(root);
             List<String> classpathEntries=workerClasspath();
             String cp=String.join(java.io.File.pathSeparator,classpathEntries);
             ProcessBuilder builder=new ProcessBuilder(config.javaExecutable.toString(),"-Xmx"+config.inspection.heapMaxMb+"m",
@@ -1548,6 +1651,10 @@ final class ServerRuntime implements AutoCloseable {
         Object rawOrigin=source.get("logicalPath"),rawReferences=source.get("fileReferences");
         if(!(rawOrigin instanceof String)||!(rawReferences instanceof List))return;
         String origin=(String)rawOrigin;
+        if(packageId.isEmpty()) {
+            ((List<?>)rawReferences).removeIf(raw->!(raw instanceof Map)
+                    ||!String.valueOf(((Map<?,?>)raw).get("logicalPath")).startsWith("config/"));
+        }
         for(Object raw:(List<?>)rawReferences)if(raw instanceof Map) {
             @SuppressWarnings("unchecked") Map<String,Object> reference=(Map<String,Object>)raw;
             Object target=reference.get("logicalPath");
@@ -1557,6 +1664,7 @@ final class ServerRuntime implements AutoCloseable {
     private String encodeConfigurationSourceReference(String packageId,String origin,String target) throws Exception {
         Map<String,Object> payload=new LinkedHashMap<>();payload.put("kind","configuration-source-reference");
         payload.put("packageId",packageId);payload.put("origin",origin);payload.put("target",target);
+        if(packageId.isEmpty())payload.put("scope","shared-configuration");
         byte[] nonce=new byte[12];cursorRandom.nextBytes(nonce);
         Cipher cipher=Cipher.getInstance("AES/GCM/NoPadding");cipher.init(Cipher.ENCRYPT_MODE,new SecretKeySpec(cursorKey,"AES"),new GCMParameterSpec(128,nonce));
         byte[] encrypted=cipher.doFinal(JSON.writeValueAsBytes(payload));byte[] token=new byte[nonce.length+encrypted.length];
@@ -1571,7 +1679,7 @@ final class ServerRuntime implements AutoCloseable {
             Cipher cipher=Cipher.getInstance("AES/GCM/NoPadding");cipher.init(Cipher.DECRYPT_MODE,new SecretKeySpec(cursorKey,"AES"),new GCMParameterSpec(128,nonce));
             JsonNode claim=JSON.readTree(cipher.doFinal(encrypted));
             if(!"configuration-source-reference".equals(claim.path("kind").asText())
-                    ||claim.path("packageId").asText().isBlank()||claim.path("origin").asText().isBlank()
+                    ||(claim.path("packageId").asText().isBlank()&&!"shared-configuration".equals(claim.path("scope").asText()))||claim.path("origin").asText().isBlank()
                     ||claim.path("target").asText().isBlank())throw new IllegalArgumentException();
             return claim;
         } catch(Exception invalid) { throw new NotFoundException(); }
@@ -2079,6 +2187,187 @@ final class ServerRuntime implements AutoCloseable {
     Path outputDirectoryForJob(String id) {
         return config.dataDir.resolve("jobs").resolve(id).resolve("output").toAbsolutePath().normalize();
     }
+    Path artifactArchivePath(String id) { return config.dataDir.resolve("jobs").resolve(id).resolve("artifacts.zip"); }
+    boolean acquireArtifactReadSlot() { return artifactReadSlots.tryAcquire(); }
+    void releaseArtifactReadSlot() { artifactReadSlots.release(); }
+    Map<String,Object> artifactIndex(String id) throws Exception { return artifactIndex(id,0,100); }
+    Map<String,Object> artifactIndex(String id,int offset,int limit) throws Exception {
+        if(offset<0||offset>1_000_000||limit<1||limit>100)throw new IllegalArgumentException("Artifact listing pagination is invalid");
+        if(!artifactReadSlots.tryAcquire())throw new ArtifactCapacityException();
+        artifactLifecycle.readLock().lock();
+        try {
+            if(store.get(id)==null)throw new NotFoundException();
+            Path archive=artifactArchivePath(id),statusFile=archive.resolveSibling("archive-status.json");
+            Map<String,Object> out=new LinkedHashMap<>();
+            JsonNode publication=readArchiveStatus(statusFile);
+            String state=publication.path("state").asText("FAILED");
+            out.put("reason",publication.path("reason").asText(""));
+            boolean quarantined=store.workerQuarantined(id);
+            if(quarantined){state="FAILED";out.put("reason","worker_unverified");}
+            if(Files.isRegularFile(archive)&&"READY".equals(state)) {
+                try {
+                    Map<String,Object> data=ArtifactArchive.verify(archive,false);
+                    long archiveSize=Files.size(archive);
+                    List<?> all=(List<?>)data.get("entries");
+                    int start=Math.min(offset,all.size()),end=Math.min(all.size(),start+limit);
+                    out.put("items",all.subList(start,end));out.put("nextOffset",end<all.size()?end:null);
+                    out.put("primaryReports",all.stream().filter(item->item instanceof Map<?,?> row&&Boolean.TRUE.equals(row.get("report"))).toList());
+                    out.put("archiveStatus","READY");out.put("omissions",data.get("omissions"));out.put("complete",data.get("complete"));
+                    out.put("archiveSizeBytes",archiveSize);
+                } catch(Exception corrupt) { state="FAILED"; }
+            }
+            if(!out.containsKey("archiveStatus")) {
+                out.put("items",List.of());out.put("nextOffset",null);out.put("primaryReports",List.of());out.put("archiveStatus",state);
+            }
+            out.put("retryable",!quarantined&&"FAILED".equals(out.get("archiveStatus"))&&Files.isDirectory(outputDirectoryForJob(id)));
+            out.put("archiveMetrics",store.archiveMetrics(id));
+            out.put("downloadPath","archive.zip");return out;
+        } finally {artifactLifecycle.readLock().unlock();artifactReadSlots.release();}
+    }
+    byte[] archiveEntry(String id,String requested) throws Exception {
+        if(!ArtifactArchive.safePath(requested)||ArtifactArchive.MANIFEST.equalsIgnoreCase(requested))throw new IllegalArgumentException("Invalid archive entry path");
+        try(ArtifactRead read=openArtifactArchive(id,false)) { return read.verified.read(requested); }
+        catch(java.io.FileNotFoundException missing){throw new NotFoundException();}
+    }
+    final class ArtifactRead implements AutoCloseable {
+        final Path path;
+        final ArtifactArchive.VerifiedRead verified;
+        final ArtifactDownload download;
+        ArtifactRead(Path path,ArtifactArchive.VerifiedRead verified,ArtifactDownload download){this.path=path;this.verified=verified;this.download=download;}
+        long length(){return download.length;}
+        void writeTo(java.io.OutputStream output) throws java.io.IOException {download.writeTo(output);}
+        @Override public void close() throws java.io.IOException {try {if(download!=null)download.close();else verified.close();} finally {artifactLifecycle.readLock().unlock();artifactReadSlots.release();}}
+    }
+    ArtifactRead openArtifactArchive(String id,boolean digests) throws Exception {
+        if(!artifactReadSlots.tryAcquire())throw new ArtifactCapacityException();
+        artifactLifecycle.readLock().lock();
+        try {
+            if(store.get(id)==null)throw new NotFoundException();
+            if(store.workerQuarantined(id))throw new ArchiveUnavailableException();
+            Path archive=artifactArchivePath(id),status=archive.resolveSibling("archive-status.json");
+            if(!"READY".equals(readArchiveStatus(status).path("state").asText()))throw new ArchiveUnavailableException();
+            ArtifactArchive.VerifiedRead verified=null;ArtifactDownload download=null;
+            try { if(digests)download=ArtifactDownload.open(archive);else verified=ArtifactArchive.openVerified(archive,false); }
+            catch(Exception invalid){throw new ArchiveUnavailableException();}
+            return new ArtifactRead(archive,verified,download);
+        } catch(Exception failure){artifactLifecycle.readLock().unlock();artifactReadSlots.release();throw failure;}
+    }
+    private void archiveStatus(String id,String state,String reason) throws Exception {
+        Path target=artifactArchivePath(id).resolveSibling("archive-status.json");
+        Files.createDirectories(target.getParent());
+        Path temporary=Files.createTempFile(target.getParent(),".archive-status-",".tmp");
+        try {
+            Files.write(temporary,JSON.writeValueAsBytes(Map.of("state",state,"reason",reason,"manifestVersion",1)));
+            try(var channel=java.nio.channels.FileChannel.open(temporary,java.nio.file.StandardOpenOption.WRITE)){channel.force(true);}
+            Files.move(temporary,target,java.nio.file.StandardCopyOption.ATOMIC_MOVE,java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+        } finally { Files.deleteIfExists(temporary); }
+    }
+    private static JsonNode readArchiveStatus(Path status) {
+        try {
+            if(!Files.isRegularFile(status))return JSON.valueToTree(Map.of("state","PENDING"));
+            if(Files.size(status)>4096)throw new IllegalArgumentException();
+            JsonNode value=JSON.readTree(status.toFile());
+            if(value==null||!Set.of("PENDING","ARCHIVING","READY","FAILED").contains(value.path("state").asText()))throw new IllegalArgumentException();
+            return value;
+        } catch(Exception invalid){return JSON.valueToTree(Map.of("state","FAILED","reason","invalid_metadata"));}
+    }
+    void retryArtifactArchive(String id) throws Exception {
+        if(!terminal(id))throw new IllegalArgumentException("Artifacts can be published after the Job has ended");
+        if(store.workerQuarantined(id))throw new IllegalArgumentException("Artifacts require independent recovery after Worker quarantine");
+        if(!Files.isDirectory(outputDirectoryForJob(id)))throw new IllegalArgumentException("Private source output is unavailable for retry");
+        store.artifactRecoveryNeeded(id,true);
+        requestedArtifactRetries.add(id);
+        scheduleArtifactArchive(id);
+    }
+    void scheduleArtifactArchive(String id) {
+        if(closing||!pendingArtifactJobs.add(id))return;
+        requestedArtifactRetries.remove(id);
+        final long queuedAt=System.nanoTime();
+        try { artifactWriters.execute(() -> {
+            artifactLifecycle.readLock().lock();
+            Path output=outputDirectoryForJob(id), archive=artifactArchivePath(id);
+            ArtifactMetricsRecorder metrics=null;
+            try {
+                if(store.get(id)==null||!terminal(id))return;
+                if(jobs.containsKey(id))return;
+                var previous=store.archiveMetrics(id);
+                metrics=new ArtifactMetricsRecorder(queuedAt,previous==null?1:Math.min(Long.MAX_VALUE-1,previous.attempts)+1);
+                metrics.phase("worker_fence");
+                ArtifactMetricsRecorder.CURRENT.set(metrics);
+                store.archiveMetrics(id,metrics.value);
+                store.artifactRecoveryNeeded(id,true);
+                if(store.workerQuarantined(id)) {
+                    metrics.fail("worker_unverified");
+                    archiveStatus(id,"FAILED","worker_unverified");
+                    store.artifactRecoveryNeeded(id,false);
+                    return;
+                }
+                if(store.workerMayBeAlive(id)) {
+                    metrics.fail("worker_active");
+                    archiveStatus(id,"FAILED","worker_active");
+                    return;
+                }
+                if(Files.isRegularFile(archive)) {
+                    metrics.phase("verification_fsync");
+                    try { ArtifactArchive.verify(archive,true); }
+                    catch(Exception corrupt) {
+                        if(!Files.isDirectory(output))throw corrupt;
+                        Files.delete(archive);
+                    }
+                }
+                if(!Files.isRegularFile(archive)) {
+                    metrics.phase("publication");
+                    archiveStatus(id,"ARCHIVING","");
+                    if(!Files.isDirectory(output))throw new java.io.IOException("Worker output is unavailable");
+                    cleanupArtifactStaging(archive.getParent());
+                    artifactPublisher.publish(output,archive,file->publicArtifact(id,file));
+                }
+                metrics.phase("publication");
+                archiveStatus(id,"READY","");
+                store.audit("SYSTEM","ARTIFACT_PUBLICATION",id,null,"READY");
+                metrics.value.zipBytes=Files.size(archive);
+                metrics.value.outcome="READY";
+                metrics.phase("cleanup");
+                try {deleteTree(output);cleanupArtifactStaging(archive.getParent());store.artifactRecoveryNeeded(id,false);}
+                catch(Exception cleanupFailure){metrics.fail("cleanup_failed");metrics.value.outcome="CLEANUP_PENDING";java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).warning("Artifact cleanup will be retried for Job "+id);}
+            } catch(Exception failure) {
+                boolean policy=failure instanceof IllegalArgumentException;
+                if(metrics!=null&&metrics.value.failurePhase==null)metrics.fail(policy?"policy_limit":"publication_failed");
+                try {archiveStatus(id,"FAILED",policy?"policy_limit":"publication_failed");store.audit("SYSTEM","ARTIFACT_PUBLICATION",id,null,policy?"REJECTED_POLICY":"FAILED_IO");}catch(Exception ignored){}
+                java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).warning("Artifact publication failed for Job "+id);
+            } finally {
+                ArtifactMetricsRecorder.CURRENT.remove();
+                if(metrics!=null) {
+                    metrics.finish();
+                    try {store.archiveMetrics(id,metrics.value);}
+                    catch(Exception unavailable){java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).warning("Unable to persist artifact metrics for Job "+id);}
+                }
+                pendingArtifactJobs.remove(id);
+                // Transfer an accepted retry before releasing the retention
+                // fence, so expiry cannot delete its source between writers.
+                try {if(requestedArtifactRetries.remove(id))scheduleArtifactArchive(id);}
+                finally {artifactLifecycle.readLock().unlock();}
+            }
+        }); } catch(RejectedExecutionException full) {
+            pendingArtifactJobs.remove(id);
+            // Recovery retries when writer capacity becomes available; a retry cannot replace a READY state.
+        }
+    }
+    private static void cleanupArtifactStaging(Path jobDirectory) throws Exception {
+        try(var files=Files.list(jobDirectory)) {
+            for(Path file:files.filter(p->{String name=p.getFileName().toString();return name.startsWith(".artifact-export-")||name.startsWith(".artifact-")&&name.endsWith(".zip.tmp")||name.startsWith(".archive-status-")&&name.endsWith(".tmp");}).toList())deleteTree(file);
+        }
+    }
+    synchronized int recoverArtifactArchives() throws Exception {
+        List<String> ids=store.artifactRecoveryJobIds(artifactRecoveryCursor,64);
+        if(ids.isEmpty()){artifactRecoveryCursor="";return 0;}
+        for(String id:ids){artifactRecoveryCursor=id;scheduleArtifactArchive(id);}
+        return ids.size();
+    }
+    private void recoverArtifactArchivesSafely() {
+        try {recoverArtifactArchives();}
+        catch(Exception failure){java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).warning("Unable to recover pending artifact publications");}
+    }
     Object publicEventData(Object data,Path output,Path packageRoot) throws Exception {
         JsonNode node=JSON.valueToTree(att.server.api.internal.DiagnosticSanitizer.sanitizeValue(data));
         return sanitize(node,output,packageRoot);
@@ -2093,18 +2382,37 @@ final class ServerRuntime implements AutoCloseable {
     }
     private JsonNode sanitize(JsonNode node,Path output,Path packageRoot) {return sanitize(node,output,packageRoot,"");}
     private JsonNode sanitize(JsonNode node,Path output,Path packageRoot,String field) {
+        return sanitize(node,output,packageRoot,field,true);
+    }
+    private JsonNode sanitize(JsonNode node,Path output,Path packageRoot,String field,boolean protocolReferences) {
         if(node==null)return null;
-        if(node.isTextual()) {if("$attDebugKeepDefault".equals(field) || semanticLocation(field))return node;String value=node.asText();String outputPrefix=output.toString();value=replacePathPrefix(value,outputPrefix,"artifact");if(packageRoot!=null)value=replacePathPrefix(value,packageRoot.toString(),"package");return JSON.getNodeFactory().textNode(att.server.api.internal.DiagnosticSanitizer.redactAbsolutePaths(value,packageRoot));}
-        if(node.isObject()){com.fasterxml.jackson.databind.node.ObjectNode copy=JSON.createObjectNode();node.fields().forEachRemaining(e->copy.set(e.getKey(),sanitize(e.getValue(),output,packageRoot,semanticLocation(field)?field:e.getKey())));return copy;}
-        if(node.isArray()){com.fasterxml.jackson.databind.node.ArrayNode copy=JSON.createArrayNode();for(JsonNode item:node)copy.add(sanitize(item,output,packageRoot,field));return copy;}
+        if(node.isTextual()) {
+            if(protocolReferences && ("$attDebugKeepDefault".equals(field) || semanticLocation(field)))return node;
+            String value=node.asText();value=replacePathPrefix(value,output.toString(),"artifact");
+            if(packageRoot!=null)value=replacePathPrefix(value,packageRoot.toString(),"package");
+            return JSON.getNodeFactory().textNode(semanticLocation(field)?value:att.server.api.internal.DiagnosticSanitizer.redactAbsolutePaths(value,packageRoot));
+        }
+        if(node.isObject()){
+            com.fasterxml.jackson.databind.node.ObjectNode copy=JSON.createObjectNode();
+            node.fields().forEachRemaining(e->{
+                String key=e.getKey();
+                if(!protocolReferences){
+                    key=replacePathPrefix(key,output.toString(),"artifact");
+                    if(packageRoot!=null)key=replacePathPrefix(key,packageRoot.toString(),"package");
+                    key=att.server.api.internal.DiagnosticSanitizer.redactAbsolutePaths(key,packageRoot);
+                    if(copy.has(key))throw new IllegalArgumentException("Export field names collide after path projection");
+                }
+                copy.set(key,sanitize(e.getValue(),output,packageRoot,protocolReferences && semanticLocation(field)?field:e.getKey(),protocolReferences));
+            });return copy;
+        }
+        if(node.isArray()){com.fasterxml.jackson.databind.node.ArrayNode copy=JSON.createArrayNode();for(JsonNode item:node)copy.add(sanitize(item,output,packageRoot,field,protocolReferences));return copy;}
         return node.deepCopy();
     }
     private static String replacePathPrefix(String value,String prefix,String logical){if(value.equals(prefix))return logical+":";String separator=java.io.File.separator;value=value.replace(prefix+separator,logical+":");if("\\".equals(separator))value=value.replace(prefix+"/",logical+":");else value=value.replace(prefix+"\\",logical+":");return value;}
     static String safeMessage(Exception e){String m=att.server.api.internal.DiagnosticSanitizer.redactAbsolutePaths(att.server.api.internal.DiagnosticSanitizer.redactText(e.getMessage()));return m.isEmpty()?"ATT Worker execution failed":m.length()>500?m.substring(0,500):m;}
-    private static String readBoundedLine(BufferedReader reader,int limit) throws java.io.IOException {StringBuilder line=new StringBuilder();boolean oversized=false;int c;while((c=reader.read())!=-1){if(c=='\n')break;if(c=='\r')continue;if(line.length()<limit)line.append((char)c);else oversized=true;}if(c==-1&&line.isEmpty()&&!oversized)return null;return oversized?"\u0000OVERSIZED":line.toString();}
     JobEvents events(String id) throws Exception {if(!JOB_ID.matcher(id).matches()||store.get(id)==null)throw new NotFoundException();Job active=jobs.get(id);return active==null?new JobEvents(config.dataDir.resolve("jobs").resolve(id).resolve("events.jsonl"),config.maxEventsPerJob):active.events;}
     boolean terminal(String id) throws Exception {Job active=jobs.get(id);if(active!=null)return active.terminal();Map<String,Object> row=store.get(id);if(row==null)throw new NotFoundException();return List.of("PASS","FAIL","ERROR","INVALID","CANCELLED").contains(row.get("status"));}
-    /** Downloads are projections; raw trusted evidence stays on disk. Binary disclosure has no public policy. */
+    /** One-time export projection; no public GET reads trusted Worker files. */
     byte[] publicArtifact(String id, Path file) throws Exception {
         final int limit=16*1024*1024;
         byte[] bytes;
@@ -2115,6 +2423,23 @@ final class ServerRuntime implements AutoCloseable {
                 .onUnmappableCharacter(java.nio.charset.CodingErrorAction.REPORT).decode(java.nio.ByteBuffer.wrap(bytes)).toString(); }
         catch(java.nio.charset.CharacterCodingException invalid){throw new IllegalArgumentException("Binary artifacts require trusted filesystem access");}
         if(text.indexOf('\0')>=0)throw new IllegalArgumentException("Binary artifacts require trusted filesystem access");
+        String filename=file.getFileName().toString().toLowerCase(java.util.Locale.ROOT);
+        if(filename.endsWith(".json")||filename.endsWith(".yaml")||filename.endsWith(".yml")) {
+            try {
+                boolean json=filename.endsWith(".json");
+                Object raw;
+                if(json)raw=ARTIFACT_JSON.readValue(text,Object.class);
+                else {
+                    org.yaml.snakeyaml.LoaderOptions options=new org.yaml.snakeyaml.LoaderOptions();
+                    options.setAllowDuplicateKeys(false);options.setMaxAliasesForCollections(0);options.setNestingDepthLimit(64);options.setCodePointLimit(limit);
+                    raw=new org.yaml.snakeyaml.Yaml(new ArtifactYamlConstructor(options)).load(text);
+                }
+                JsonNode projected=sanitize(JSON.valueToTree(att.security.SecretProtection.exportValue(raw)),outputDirectoryForJob(id),packageRootForJob(id),"",false);
+                if(json)return JSON.writerWithDefaultPrettyPrinter().writeValueAsBytes(projected);
+                org.yaml.snakeyaml.DumperOptions options=new org.yaml.snakeyaml.DumperOptions();options.setDefaultFlowStyle(org.yaml.snakeyaml.DumperOptions.FlowStyle.BLOCK);
+                return new org.yaml.snakeyaml.Yaml(options).dump(ARTIFACT_JSON.convertValue(projected,Object.class)).getBytes(StandardCharsets.UTF_8);
+            } catch(Exception invalid){throw new IllegalArgumentException("Structured artifact cannot be safely published");}
+        }
         text=att.server.api.internal.DiagnosticSanitizer.redactText(text);
         text=replacePathPrefix(text,outputDirectoryForJob(id).toString(),"artifact");
         text=att.server.api.internal.DiagnosticSanitizer.redactAbsolutePaths(text,packageRootForJob(id));
@@ -2123,10 +2448,14 @@ final class ServerRuntime implements AutoCloseable {
     Path artifact(String id,String requested) throws Exception {Map<String,Object> row=store.get(id);if(row==null)throw new NotFoundException();Job j=jobs.get(id);if(j!=null)return artifact(j,requested);Path base=config.dataDir.resolve("jobs").resolve(id).resolve("output").toRealPath();Path relative=Paths.get(requested);if(relative.isAbsolute())throw new IllegalArgumentException("Artifact path must be relative to job output");Path candidate=base.resolve(relative).normalize();if(!candidate.startsWith(base)||!Files.exists(candidate,java.nio.file.LinkOption.NOFOLLOW_LINKS))throw new NotFoundException();Path walk=base;for(Path part:base.relativize(candidate)){walk=walk.resolve(part);if(Files.isSymbolicLink(walk))throw new NotFoundException();}Path real=candidate.toRealPath();if(!real.startsWith(base)||!Files.isRegularFile(real))throw new NotFoundException();return real;}
     void cleanupExpiredJobs() throws Exception {
         Instant cutoff=Instant.now().minus(java.time.Duration.ofDays(config.jobRetentionDays));
-        for(String id:store.expiredJobIds(cutoff))if(!jobs.containsKey(id))try{
-            deleteTree(config.dataDir.resolve("jobs").resolve(id));store.deleteJob(id);
-        }catch(Exception failure){java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).warning("Unable to remove expired ATT Server job "+id+": "+safeMessage(failure));}
+        if(!artifactLifecycle.writeLock().tryLock())return;
+        try {
+            for(String id:store.expiredJobIds(cutoff))if(!jobs.containsKey(id)&&!pendingArtifactJobs.contains(id)&&!store.workerMayBeAlive(id))try{
+                deleteTree(config.dataDir.resolve("jobs").resolve(id));store.deleteJob(id);
+            }catch(Exception failure){java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).warning("Unable to remove expired ATT Server job "+id);}
+        } finally {artifactLifecycle.writeLock().unlock();}
     }
+
     private void cleanupExpiredJobsSafely(){try{cleanupExpiredJobs();}catch(Exception e){java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).warning("Unable to clean expired ATT Server jobs: "+safeMessage(e));}}
     private static void deleteTree(Path root)throws java.io.IOException {
         if(!Files.exists(root,java.nio.file.LinkOption.NOFOLLOW_LINKS))return;
@@ -2134,10 +2463,11 @@ final class ServerRuntime implements AutoCloseable {
             for(Path path:paths.sorted(java.util.Comparator.reverseOrder()).toArray(Path[]::new))Files.deleteIfExists(path);
         }
     }
-    @Override public void close(){closing=true;if(inspectionWarmup!=null)inspectionWarmup.shutdownNow();if(loadScheduleScheduler!=null)loadScheduleScheduler.close();retention.shutdownNow();inspectionWatchdogs.shutdownNow();synchronized(draftLock){runDrafts.clear();debugDrafts.clear();quickLoadDrafts.clear();advancedLoadDrafts.clear();catalogLoadDrafts.clear();}for(InspectionWorker worker:inspectionWorkerPool)worker.close();for(Job j:jobs.values())if(j.process!=null&&j.process.isAlive()){try{terminateTree(j.process);if(!j.process.waitFor(config.gracefulStopMs,TimeUnit.MILLISECONDS))forceTree(j.process);finishQuietly(j,"ERROR",143,"ATT-SERVER-INTERRUPTED","Server shutdown interrupted the Worker");}catch(Exception ignored){forceTree(j.process);}}for(Process process:inspectionProcesses.keySet())if(process.isAlive())forceTree(process);inspectors.shutdownNow();workers.shutdownNow();streams.shutdownNow();try{store.close();}catch(Exception ignored){}}
+    @Override public void close(){closing=true;if(inspectionWarmup!=null)inspectionWarmup.shutdownNow();if(loadScheduleScheduler!=null)loadScheduleScheduler.close();retention.shutdownNow();artifactMaintenance.shutdownNow();inspectionWatchdogs.shutdownNow();synchronized(draftLock){runDrafts.clear();debugDrafts.clear();quickLoadDrafts.clear();advancedLoadDrafts.clear();catalogLoadDrafts.clear();}for(InspectionWorker worker:inspectionWorkerPool)worker.close();for(Job j:jobs.values())if(j.process!=null){try{if(j.processFence!=null){j.processFence.observe();rememberWorkerProcesses(j,j.processFence);}stopWorkerTree(j);finishQuietly(j,"ERROR",143,"ATT-SERVER-INTERRUPTED","Server shutdown interrupted the Worker");}catch(Exception ignored){if(j.processFence!=null)j.processFence.force();else forceTree(j.process);}}for(Process process:inspectionProcesses.keySet())if(process.isAlive())forceTree(process);inspectors.shutdownNow();workers.shutdownNow();streams.shutdownNow();try{workers.awaitTermination(30,TimeUnit.SECONDS);}catch(InterruptedException interrupted){Thread.currentThread().interrupt();}artifactWriters.shutdown();try{if(!artifactWriters.awaitTermination(30,TimeUnit.SECONDS))artifactWriters.shutdownNow();}catch(InterruptedException interrupted){artifactWriters.shutdownNow();Thread.currentThread().interrupt();}try{store.close();}catch(Exception ignored){}}
     private static void terminateTree(Process process){process.toHandle().descendants().forEach(ProcessHandle::destroy);process.destroy();}
     private static void forceTree(Process process){process.toHandle().descendants().forEach(ProcessHandle::destroyForcibly);process.destroyForcibly();}
     @FunctionalInterface interface WorkerProcessLauncher { Process start(ProcessBuilder builder) throws java.io.IOException; }
+    @FunctionalInterface interface ArtifactPublisher { Path publish(Path output,Path archive,ArtifactArchive.Publisher publisher) throws Exception; }
     private static final class AdmissionLease {
         private final Semaphore admission,load;private final java.util.concurrent.atomic.AtomicBoolean released=new java.util.concurrent.atomic.AtomicBoolean();
         AdmissionLease(Semaphore admission,Semaphore load){this.admission=admission;this.load=load;}
@@ -2158,6 +2488,8 @@ final class ServerRuntime implements AutoCloseable {
     static final class StaleDraftException extends RuntimeException {}
     static final class DraftCapacityException extends RuntimeException {}
     static final class InlineLoadDisabledException extends RuntimeException {}
+    static final class ArtifactCapacityException extends RuntimeException {}
+    static final class ArchiveUnavailableException extends RuntimeException {}
     static final class InlineLoadLimitException extends IllegalArgumentException {
         InlineLoadLimitException(String message){super(message);}
     }
