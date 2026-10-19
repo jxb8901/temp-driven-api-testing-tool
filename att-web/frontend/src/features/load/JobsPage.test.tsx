@@ -73,6 +73,7 @@ describe('JobsPage React feature', () => {
         items: [{ path: offset ? 'nested/evidence.json' : 'case.log', size: 5 }], nextOffset: offset ? null : 100,
         complete: false, omissions: [{ count: 1, reason: 'unsupported output' }] })),
       artifactArchiveHref: () => '/archive.zip',
+      getJobArtifactText: vi.fn(async () => '<html><head><meta http-equiv="Content-Security-Policy" content="default-src \'none\'; script-src \'sha256-reviewed\'; style-src \'unsafe-inline\'"></head><body><h1>Authenticated report</h1></body></html>'),
     });
     await act(async () => root.render(<JobsPage api={api} jobId="JOB-204" onOpenJob={vi.fn()} onShowList={vi.fn()} />));
     await advance();
@@ -84,9 +85,13 @@ describe('JobsPage React feature', () => {
     expect(panel.textContent).toContain('nested/evidence.json');
     expect(panel.textContent).toContain('case.log');
     await click([...panel.querySelectorAll('button')].find(button => button.textContent?.startsWith('View Report:'))!);
+    await advance();
     const frame = panel.querySelector('iframe')!;
     expect(frame.getAttribute('sandbox')).toBe('allow-scripts');
-    expect(frame.getAttribute('src')).toContain('load/run/report/index.html');
+    expect(frame.hasAttribute('allow-same-origin')).toBe(false);
+    expect(frame.hasAttribute('src')).toBe(false); // no anonymous navigation to protected API
+    expect(frame.getAttribute('srcdoc')).toContain('Authenticated report');
+    expect(api.getJobArtifactText).toHaveBeenCalledWith('JOB-204', 'load/run/report/index.html', expect.any(AbortSignal));
   });
 
   it('polls archive status separately from the terminal job result and retries failures', async () => {

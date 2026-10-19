@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { CodeEditor, detectCodeLanguage } from '../code/CodeEditor';
+import { ReportPreview } from './ReportPreview';
 import { api as serverApi } from '../../api';
 import { artifactApi } from './artifactApi';
 import type { JobArtifact, JobArtifactArchive, LoadJobsApi } from './types';
@@ -82,10 +83,11 @@ export function JobArtifacts({ api, jobId, refresh }: { api: LoadJobsApi; jobId:
     </>}
     {selected && <section aria-label="Artifact preview">
       <h3>{selected.path}</h3><button type="button" onClick={() => setSelected(null)}>Close preview</button>
-      {/\.html?$/i.test(selected.path) ? <>
-        <p>Report links navigate inside this isolated viewer. Use browser back and forward to return.</p>
-        <iframe title={`Report: ${selected.path}`} sandbox="allow-scripts" referrerPolicy="no-referrer" src={api.artifactHref(jobId, selected.path)} style={{ width: '100%', minHeight: '65vh', border: 0 }} />
-      </> : <>
+      {/\.html?$/i.test(selected.path) ? (
+        features.getJobArtifactText
+          ? <ReportPreview key={jobId + ':' + selected.path} jobId={jobId} path={selected.path} readText={features.getJobArtifactText} />
+          : <p role="alert">Authenticated report preview is unavailable.</p>
+      ) : <>
         {previewError ? <p role="alert">{previewError}</p> : text === null ? <p role="status">Loading preview...</p>
           : text.length === 0 ? <p>Artifact is empty.</p>
             : <><p>Read-only preview{ text.length > 200_000 ? '; showing the first 200,000 characters' : '' }.</p><CodeEditor value={text} readOnly language={detectCodeLanguage(selected.path)} sourcePath={selected.path} label={`${selected.path}; line numbers shown`} maxCharacters={200_000} /></>}
