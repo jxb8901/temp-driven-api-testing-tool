@@ -181,6 +181,43 @@ describe('ConfigurationWorkspace', () => {
     expect(tree.textContent).not.toContain('one.yaml');
   });
 
+  it.each([false, true])('defers background inspections until selected source settles (failure=%s)', async failure => {
+    let resolveSource!: (value: { available: boolean; text: string }) => void;
+    let rejectSource!: (reason: Error) => void;
+    const pending = new Promise<{ available: boolean; text: string }>((resolve, reject) => { resolveSource = resolve; rejectSource = reject; });
+    const getResourceSourceFile = vi.fn(() => pending);
+    const getDeclaredConfiguration = vi.fn(async () => ({ environments: [] }));
+    const listConfigurationFiles = vi.fn(async () => ({ items: [], total: 0 }));
+    const api = { getResourceSourceFile, getDeclaredConfiguration, listConfigurationFiles } as unknown as ExplorerApi;
+    await act(async () => root.render(<Harness api={api} sourceReference={{ type: 'flow', resourceId: 'checkout', referenceId: 'b'.repeat(64) }} />));
+    await flush();
+    expect(getResourceSourceFile).toHaveBeenCalledTimes(1);
+    expect(getDeclaredConfiguration).not.toHaveBeenCalled();
+    expect(listConfigurationFiles).not.toHaveBeenCalled();
+    await act(async () => {
+      if (failure) rejectSource(new Error('Source unavailable'));
+      else resolveSource({ available: true, text: '<request>selected first</request>' });
+    });
+    await flush();
+    expect(getDeclaredConfiguration).toHaveBeenCalledTimes(1);
+    expect(listConfigurationFiles).toHaveBeenCalledTimes(1);
+    expect(host.textContent).toContain(failure ? 'Could not load safe source.' : '<request>selected first</request>');
+  });
+
+  it('does not start deferred metadata after leaving the workspace', async () => {
+    let resolveSource!: (value: { available: boolean; text: string }) => void;
+    const pending = new Promise<{ available: boolean; text: string }>(resolve => { resolveSource = resolve; });
+    const getDeclaredConfiguration = vi.fn();
+    const listConfigurationFiles = vi.fn();
+    const api = { getResourceSourceFile: vi.fn(() => pending), getDeclaredConfiguration, listConfigurationFiles } as unknown as ExplorerApi;
+    await act(async () => root.render(<Harness api={api} sourceReference={{ type: 'flow', resourceId: 'checkout', referenceId: 'b'.repeat(64) }} />));
+    await act(async () => root.render(null));
+    await act(async () => resolveSource({ available: true, text: '<request>stale</request>' }));
+    await flush();
+    expect(getDeclaredConfiguration).not.toHaveBeenCalled();
+    expect(listConfigurationFiles).not.toHaveBeenCalled();
+  });
+
   it('opens a projected template payload by its resource reference id', async () => {
     const referenceId = 'b'.repeat(64);
     const nestedReferenceId = 'd'.repeat(64);

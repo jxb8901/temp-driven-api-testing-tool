@@ -65,6 +65,7 @@ export function ConfigurationWorkspace({ api, packages, packageId, environment, 
   const [inspectorOpen, setInspectorOpen] = useState(true);
   const [includeAllFields, setIncludeAllFields] = useState(false);
   const requestRefs = useRef(new Map<string, AbortController>());
+  const sourceFlight = useRef<Promise<void>>(Promise.resolve());
   const profiles = useMemo(() => (declared?.environments || []).filter(item => item.name && item.state === 'active'), [declared]);
   const selectedFile = useMemo(() => {
     const listed = Object.values(directoryMap).flatMap(item => item.items).find(item => item.path === (source?.logicalPath || filePath));
@@ -104,23 +105,14 @@ export function ConfigurationWorkspace({ api, packages, packageId, environment, 
   }, [api, packageId]);
 
   useEffect(() => {
-    requestRefs.current.forEach(controller => controller.abort()); requestRefs.current.clear();
-    setDirectoryMap({}); setExpanded(new Set([''])); setSearchResults(null); setTreeError(''); setSource(null); setSourceError(''); setDeclared(null);
-    if (!packageId) return;
-    void loadDirectory('');
-    const controller = new AbortController();
-    api.getDeclaredConfiguration(packageId, controller.signal).then(result => { if (!controller.signal.aborted) setDeclared(result); }).catch(() => { if (!controller.signal.aborted) setDeclared(null); });
-    return () => { controller.abort(); requestRefs.current.forEach(item => item.abort()); requestRefs.current.clear(); };
-  }, [api, packageId, loadDirectory, inspectionRefresh]);
-
-  useEffect(() => {
+    sourceFlight.current = Promise.resolve();
     if (tab !== 'source' || !filePath || !packageId) { setSource(null); setSourceError(''); return; }
     const controller = new AbortController(); setSourceLoading(true); setSource(null); setSourceError('');
     const sourceRequest = sourceReference
       ? api.getResourceSourceFile?.({ packageId, type: sourceReference.type, resourceId: sourceReference.resourceId }, sourceReference.referenceId, controller.signal, fileOrigin)
       : api.getConfigurationFileSource?.(packageId, filePath, fileOrigin, controller.signal, configurationReferenceId);
     if (!sourceRequest) { setSource({ text: '', format: '', available: false, reason: 'unsupported' }); setSourceLoading(false); return () => controller.abort(); }
-    sourceRequest.then(result => { if (!controller.signal.aborted) setSource({
+    sourceFlight.current = sourceRequest.then(result => { if (!controller.signal.aborted) setSource({
       text: result.text || '', format: result.format || filePath.split('.').pop() || 'text', logicalPath: result.logicalPath, available: result.available, reason: result.reason, fileReferences: result.fileReferences,
     }); }).catch(error => { if (!controller.signal.aborted) setSourceError(errorText(error, 'load safe source')); })
       .finally(() => { if (!controller.signal.aborted) setSourceLoading(false); });
@@ -128,15 +120,34 @@ export function ConfigurationWorkspace({ api, packages, packageId, environment, 
   }, [api, packageId, filePath, fileOrigin, sourceReference?.type, sourceReference?.resourceId, sourceReference?.referenceId, configurationReferenceId, tab, inspectionRefresh]);
 
   useEffect(() => {
+    requestRefs.current.forEach(controller => controller.abort()); requestRefs.current.clear();
+    setDirectoryMap({}); setExpanded(new Set([''])); setSearchResults(null); setTreeError(''); setDeclared(null);
+    if (!packageId) return;
+    const controller = new AbortController();
+    // A deep-linked source gets the bounded inspection slot before background metadata.
+    void sourceFlight.current.then(() => {
+      if (controller.signal.aborted) return;
+      void loadDirectory('');
+      void api.getDeclaredConfiguration(packageId, controller.signal).then(result => { if (!controller.signal.aborted) setDeclared(result); }).catch(() => { if (!controller.signal.aborted) setDeclared(null); });
+    });
+    return () => { controller.abort(); requestRefs.current.forEach(item => item.abort()); requestRefs.current.clear(); };
+  }, [api, packageId, loadDirectory, inspectionRefresh]);
+
+  useEffect(() => {
     if (!filePath || !filePath.startsWith('config/') || !packageId) return;
     const segments = filePath.split('/').filter(Boolean);
     if (segments.length < 2) return;
-    let parent = '';
-    for (const segment of segments.slice(0, -1)) {
-      parent = parent ? `${parent}/${segment}` : segment;
-      setExpanded(current => new Set(current).add(parent));
-      if (!directoryMap[parent]) void loadDirectory(parent);
-    }
+    let cancelled = false;
+    void sourceFlight.current.then(() => {
+      if (cancelled) return;
+      let parent = '';
+      for (const segment of segments.slice(0, -1)) {
+        parent = parent ? `${parent}/${segment}` : segment;
+        setExpanded(current => new Set(current).add(parent));
+        if (!directoryMap[parent]) void loadDirectory(parent);
+      }
+    });
+    return () => { cancelled = true; };
   }, [filePath, packageId, directoryMap, loadDirectory]);
 
   async function search(event: React.FormEvent) {
