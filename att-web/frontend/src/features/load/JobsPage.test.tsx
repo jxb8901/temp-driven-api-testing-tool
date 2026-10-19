@@ -492,4 +492,101 @@ describe('JobsPage React feature', () => {
     expect(host.querySelector('#job-panel-live')?.textContent).toContain('completed');
     expect(host.querySelector('#job-panel-live')?.textContent).not.toContain('Reconnecting to live output');
   });
+
+  it('keeps a resizable terminal console and an independent, informative events view', async () => {
+    const api = makeApi();
+    await act(async () => root.render(<JobsPage api={api} jobId="JOB-204" onOpenJob={vi.fn()} onShowList={vi.fn()} confirmCancel={() => true} />));
+    const handlers = vi.mocked(api.subscribeJob).mock.calls[0]?.[1];
+    await act(async () => handlers?.onEvent({
+      id: '1', type: 'progress',
+      data: { status: 'RUNNING', phase: 'STEADY', sequence: 4, message: 'steady progress', metrics: { completed: 4, failed: 0 } },
+    }));
+    await act(async () => handlers?.onEvent({ id: '2', type: 'log', data: { console: '[LOAD] status=RUNNING phase=STEADY', message: 'console line' } }));
+
+    await click(host.querySelector('#job-tab-events')!);
+    const events = host.querySelector('#job-panel-events')!;
+    const first = events.querySelector('details')!;
+    expect(first.open).toBe(true);
+    expect(first.querySelector('.att-event-preview')?.textContent).toContain('status=RUNNING');
+    expect(first.querySelector('.att-event-preview')?.textContent).toContain('phase=STEADY');
+    expect(first.querySelector('.att-event-preview')?.textContent).toContain('sequence=4');
+    expect(first.querySelector('.att-event-preview')?.textContent).toContain('message=steady progress');
+    expect(first.querySelector('.att-event-preview')?.textContent).toContain('metrics=completed=4, failed=0');
+    expect(first.querySelector('pre.att-event-payload')?.textContent).toContain('"phase": "STEADY"');
+    await click(first.querySelector('summary')!);
+    expect(first.open).toBe(false);
+    expect(first.querySelector('.att-event-preview')?.textContent).toContain('status=RUNNING');
+    await click([...events.querySelectorAll('button')].find(button => button.textContent === 'Expand all')!);
+    expect(events.querySelector('details')?.open).toBe(true);
+    await click([...events.querySelectorAll('button')].find(button => button.textContent === 'Collapse all')!);
+    expect([...events.querySelectorAll('details')].every(item => !item.open)).toBe(true);
+
+    const list = events.querySelector('.att-job-events') as HTMLElement;
+    Object.defineProperty(list, 'scrollHeight', { configurable: true, value: 800 });
+    Object.defineProperty(list, 'clientHeight', { configurable: true, value: 200 });
+    await click([...events.querySelectorAll('button')].find(button => button.textContent === 'Resume auto-scroll')!);
+    expect(list.scrollTop).toBe(800);
+    list.scrollTop = 40;
+    await act(async () => { list.dispatchEvent(new Event('scroll', { bubbles: true })); });
+    expect([...events.querySelectorAll('button')].some(button => button.textContent === 'Resume auto-scroll')).toBe(true);
+    await act(async () => handlers?.onEvent({ id: '3', type: 'progress', data: { status: 'RUNNING', phase: 'STEADY', sequence: 5, message: 'still arriving' } }));
+    expect(list.scrollTop).toBe(40);
+    expect(api.subscribeJob).toHaveBeenCalledTimes(1);
+    const logFilter = events.querySelector<HTMLInputElement>('input[aria-label="log"]')!;
+    await click(logFilter);
+    expect(events.textContent).toContain('sequence=5');
+    expect(events.textContent).not.toContain('console line');
+    expect(events.querySelector<HTMLInputElement>('[aria-label="Events auto-scroll"]')?.checked).toBe(true);
+    await click(host.querySelector('#job-tab-live')!);
+    const live = host.querySelector('#job-panel-live')!;
+    const liveScroll = live.querySelector<HTMLInputElement>('[aria-label="Live output auto-scroll"]')!;
+    expect(liveScroll.checked).toBe(true);
+    await click(liveScroll);
+    expect(liveScroll.checked).toBe(false);
+    await click(host.querySelector('#job-tab-events')!);
+    expect(host.querySelector<HTMLInputElement>('#job-panel-events [aria-label="Events auto-scroll"]')?.checked).toBe(true);
+    expect([...host.querySelector('#job-panel-events')!.querySelectorAll('button')].some(button => button.textContent === 'Resume auto-scroll')).toBe(true);
+    await click(host.querySelector('#job-tab-live')!);
+    expect(host.querySelector<HTMLInputElement>('#job-panel-live [aria-label="Live output auto-scroll"]')?.checked).toBe(false);
+
+    const search = live.querySelector<HTMLInputElement>('[aria-label="Search output"]')!;
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+      setter?.call(search, 'STEADY');
+      search.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    const consoleView = live.querySelector('pre.att-console') as HTMLElement;
+    expect(consoleView).not.toBeNull();
+    expect(consoleView.style.backgroundColor.replace(/\s/g, '')).toMatch(/rgb\(13,17,23\)|#0d1117/i);
+    expect(consoleView.style.color.replace(/\s/g, '')).toMatch(/rgb\(245,247,250\)|#f5f7fa/i);
+    expect(consoleView.style.whiteSpace).toBe('pre');
+    expect(consoleView.style.overflow).toBe('auto');
+    expect(consoleView.textContent).toContain('[LOAD] status=RUNNING phase=STEADY');
+    const shell = live.querySelector('.att-console-shell') as HTMLElement;
+    const resize = live.querySelector('[aria-label="Resize live output"]') as HTMLElement;
+    expect(resize).not.toBeNull();
+    expect(live.textContent).toContain('Maximize');
+    const before = Number(resize.getAttribute('aria-valuenow'));
+    await act(async () => {
+      resize.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, clientY: 100, pointerId: 1 }));
+      resize.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, clientY: 164, pointerId: 1 }));
+      resize.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, clientY: 164, pointerId: 1 }));
+    });
+    expect(Number(resize.getAttribute('aria-valuenow'))).toBe(before + 64);
+    expect(shell.style.height).toBe(`${before + 64}px`);
+    const tabs = host.querySelector('[role="tablist"]')!;
+    await click([...live.querySelectorAll('button')].find(button => button.textContent === 'Maximize')!);
+    expect(shell.getAttribute('data-maximized')).toBe('true');
+    expect(shell.style.position).toBe('fixed');
+    expect(shell.contains(tabs)).toBe(false);
+    expect(host.querySelector('#job-tab-overview')).not.toBeNull();
+    expect(search.value).toBe('STEADY');
+    expect(consoleView.textContent).toContain('[LOAD] status=RUNNING phase=STEADY');
+    expect(api.subscribeJob).toHaveBeenCalledTimes(1);
+    await click(shell.querySelector('button')!);
+    expect(shell.getAttribute('data-maximized')).toBe('false');
+    expect(shell.style.position).toBe('');
+    expect(shell.style.height).toBe(`${before + 64}px`);
+    expect(live.querySelector('[aria-label="Resize live output"]')).not.toBeNull();
+  });
 });
