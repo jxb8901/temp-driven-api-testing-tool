@@ -14,3 +14,11 @@ These instructions apply to the entire ATT repository.
 6. **Report the result in chat with the PR comment link.** Never claim that comments were posted unless the GitHub action confirmed success. If permissions or tooling prevent posting, explain the limitation and provide a ready-to-paste review instead.
 
 Keep this rule limited to **PR review requests**. Ordinary architecture discussions, code questions, or issue reviews do not require unsolicited PR comments.
+
+## Cloud Agent development
+
+The Cloud Agent image provides JDK 21 and Maven 3.8.7. `install` compiles the reactor with `mvn -B -ntp -DskipTests -T 1 compile`. That command also builds the server UI; the frontend Maven plugin downloads Node 22.22.2. `att.sh` and `att.bat` run prebuilt classes and do not compile.
+
+Offline `snapshot`, `run`, `debug`, and `load` load the SIT profile in `config/config.yaml`. That profile references `ORDERS_DB_USERNAME`, `ORDERS_DB_PASSWORD`, `PAYMENT_MQ_USERNAME`, and `PAYMENT_MQ_PASSWORD`. `att.sh` fills `att-validation-placeholder` only when the command is `validate`. Login shells, and interactive shells that source `~/.bashrc`, export those same placeholders when the variables are unset. Export real credentials to override them. The checked-in Quick Start cases do not open a database or MQ connection.
+
+Canonical checks stay the ones in the README: `./att.sh version`, `./att.sh validate --package`, `./att.sh run --suite testcase/quick_start.xlsx --case quickStart.default.QS001`, `mvn -B -ntp -pl att-engine,att-cli,att-worker -am test`, and `npm test` in `att-web/frontend`. On a memory-constrained machine, run `./build.sh` with `MAVEN_OPTS="-Xmx1024m" ATT_MAVEN_THREADS=1`.
