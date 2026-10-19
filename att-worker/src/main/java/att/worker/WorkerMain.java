@@ -212,7 +212,7 @@ public final class WorkerMain {
             if(r.expectedRevisionDigest!=null) verifyRevision(root,config,r);
             return service.debug(new DebugRequest(root,config,r.environment,output,r.runId,text(t,"type"),text(t,"id"),path(r.debugInput),bool(r.unsafeFailureDetails),event -> emitExecution(event),r.debugId,r.overrides,false,null,r.inlineDebugInput)); }
         if("load".equals(r.command)) { Map<String,Object> t=r.target==null?Collections.<String,Object>emptyMap():r.target; Map<String,String> l=r.load==null?Collections.<String,String>emptyMap():r.load;
-            loadSampler=new att.load.LoadConsoleSampler(r.runId);
+            loadSampler=new att.load.LoadConsoleSampler(r.runId, line -> { try { emit(WorkerEvent.Type.PROGRESS, fields("console", line, "phase", "PROGRESS")); } catch(Exception error) { throw new IllegalStateException(error); } });
             att.load.LoadEventListener observer = event -> { try {
                 String start=loadSampler.startLine(event.model(), event.runId());
                 if(start!=null) emit(WorkerEvent.Type.PROGRESS, fields("console", start, "runId", event.runId(), "phase", "START"));
@@ -456,7 +456,7 @@ public final class WorkerMain {
                 ? WorkerEvent.Type.PROGRESS : WorkerEvent.Type.LOG;
         try { emit(type,data); } catch(Exception error) { throw new IllegalStateException(error); }
     }
-    private void emit(WorkerEvent.Type type,Map<String,Object> data) throws Exception {
+    private synchronized void emit(WorkerEvent.Type type,Map<String,Object> data) throws Exception {
         resourceTelemetry.sample();
         Map<String,Object> safe;
         if(inspectionDaemon&&type==WorkerEvent.Type.RESULT&&data.containsKey("inspectionMetrics")) {

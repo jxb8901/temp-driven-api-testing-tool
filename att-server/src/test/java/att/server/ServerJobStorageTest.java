@@ -200,6 +200,40 @@ class ServerJobStorageTest {
         } finally { runtime.close(); }
     }
 
+    @Test void sweepBudgetDoesNotClaimQuotaUnmetWhileEligibleJobsRemain() throws Exception {
+        Clock clock = Clock.fixed(Instant.parse("2026-06-01T00:00:00Z"), ZoneOffset.UTC);
+        ServerRuntime runtime = runtime("partial-sweep", quota(0), clock);
+        try {
+            runtime.storageCandidateBatchLimit = 1;
+            runtime.store.storageCandidatePage = 2;
+            Instant oldest = Instant.parse("2026-01-01T00:00:00Z");
+            String first = "J0000000000000001";
+            String second = "J0000000000000002";
+            String kept = "J0000000000000003";
+            seed(runtime, first, "PASS", oldest.plusSeconds(1), false, mib(1.2));
+            seed(runtime, second, "PASS", oldest.plusSeconds(2), false, mib(1.2));
+            seed(runtime, kept, "PASS", oldest.plusSeconds(3), false, mib(3.1));
+            runtime.cleanupJobStorage();
+            assertNull(runtime.store.get(first));
+            assertNull(runtime.store.get(second));
+            assertFalse(Files.exists(jobDir(runtime, first)));
+            assertFalse(Files.exists(jobDir(runtime, second)));
+            assertNotNull(runtime.store.get(kept));
+            assertTrue(Files.exists(jobDir(runtime, kept)));
+            Map<String, Object> partial = storage(runtime);
+            assertEquals("partial", partial.get("state"));
+            assertEquals(Boolean.FALSE, partial.get("quotaUnmet"));
+            assertTrue(runtime.store.auditOutcomes("JOB_STORAGE_EVICT").contains("SWEEP_PARTIAL"));
+            assertFalse(runtime.store.auditOutcomes("JOB_STORAGE_EVICT").contains("QUOTA_UNMET"));
+            runtime.cleanupJobStorage();
+            assertNull(runtime.store.get(kept));
+            assertFalse(Files.exists(jobDir(runtime, kept)));
+            assertEquals("ok", storage(runtime).get("state"));
+            assertEquals(Boolean.FALSE, storage(runtime).get("quotaUnmet"));
+            assertFalse(runtime.store.auditOutcomes("JOB_STORAGE_EVICT").contains("QUOTA_UNMET"));
+        } finally { runtime.close(); }
+    }
+
     @Test void doesNotFollowSymlinksOrDeleteWhenMeasurementIsIncomplete() throws Exception {
         Clock clock = Clock.fixed(Instant.parse("2026-06-01T00:00:00Z"), ZoneOffset.UTC);
         ServerRuntime runtime = runtime("unsafe", quota(0), clock);

@@ -84,6 +84,8 @@ final class ServerRuntime implements AutoCloseable {
     private final Set<String> requestedArtifactRetries=ConcurrentHashMap.newKeySet();
     private final java.util.concurrent.locks.ReentrantReadWriteLock artifactLifecycle=new java.util.concurrent.locks.ReentrantReadWriteLock(true);
     final ConcurrentHashMap<String,Job> jobs=new ConcurrentHashMap<>();
+    /** Pages of {@link JobStore#STORAGE_CANDIDATE_PAGE} examined in one size sweep. Tests lower this to hit the boundary. */
+    int storageCandidateBatchLimit=50;
     private final ConcurrentHashMap<String,FutureTask<Void>> tasks=new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String,AdmissionLease> leases=new ConcurrentHashMap<>();
     private final AtomicLong completed=new AtomicLong();
@@ -2505,12 +2507,12 @@ final class ServerRuntime implements AutoCloseable {
         long remaining=measurement.bytes;
         int deleted=0, eligible=0, protectedJobs=0, batches=0;
         long reclaimed=0L;
-        boolean deferred=false, quotaUnmet=false;
+        boolean deferred=false, candidatesExhausted=false, batchLimitReached=false;
         String afterFinished=null, afterId=null;
-        while(remaining>config.jobStorage.cleanupTargetBytes && batches<50) {
+        while(remaining>config.jobStorage.cleanupTargetBytes && batches<storageCandidateBatchLimit) {
             batches++;
             List<Map<String,Object>> page=store.storageCandidates(afterFinished, afterId);
-            if(page.isEmpty()) { quotaUnmet=true; break; }
+            if(page.isEmpty()) { candidatesExhausted=true; break; }
             int deletedAtStart=deleted;
             for(Map<String,Object> candidate:page) {
                 String id=String.valueOf(candidate.get("jobId"));
@@ -2533,17 +2535,23 @@ final class ServerRuntime implements AutoCloseable {
                 } finally { artifactLifecycle.writeLock().unlock(); }
             }
             if(deferred) break;
-            if(deleted==deletedAtStart && page.size()<200) { quotaUnmet=remaining>config.jobStorage.cleanupTargetBytes; break; }
+            if(deleted==deletedAtStart && page.size()<store.storageCandidatePage) { candidatesExhausted=true; break; }
+        }
+        if(!deferred && !candidatesExhausted && batches>=storageCandidateBatchLimit && remaining>config.jobStorage.cleanupTargetBytes) {
+            if(store.storageCandidates(afterFinished, afterId).isEmpty()) candidatesExhausted=true;
+            else batchLimitReached=true;
         }
         if(!deferred && remaining>config.jobStorage.cleanupTargetBytes) {
             OrphanSweep orphans=deleteEligibleOrphans(jobsRoot, measurement, remaining);
             if(orphans.deferred) deferred=true;
             deleted+=orphans.deleted; reclaimed=saturatedAdd(reclaimed, orphans.reclaimed); remaining=orphans.remaining;
-            if(!deferred && remaining>config.jobStorage.cleanupTargetBytes && orphans.deleted==0) quotaUnmet=true;
         }
-        String state=deferred?"deferred":quotaUnmet?"quota_unmet":"ok";
-        publishStorageReport(state, measurement.complete?remaining:null, measurement.complete, eligible, protectedJobs, deleted, reclaimed, quotaUnmet && !deferred);
-        if(quotaUnmet && !deferred) store.audit("system:job-retention","JOB_STORAGE_EVICT",null,null,"QUOTA_UNMET");
+        boolean stillOver=!deferred && remaining>config.jobStorage.cleanupTargetBytes;
+        boolean quotaUnmet=stillOver && !batchLimitReached;
+        String state=deferred?"deferred":stillOver && batchLimitReached?"partial":quotaUnmet?"quota_unmet":"ok";
+        publishStorageReport(state, measurement.complete?remaining:null, measurement.complete, eligible, protectedJobs, deleted, reclaimed, quotaUnmet);
+        if(quotaUnmet) store.audit("system:job-retention","JOB_STORAGE_EVICT",null,null,"QUOTA_UNMET");
+        else if(stillOver && batchLimitReached) store.audit("system:job-retention","JOB_STORAGE_EVICT",null,null,"SWEEP_PARTIAL");
     }
     private boolean storageProtected(Map<String,Object> candidate, Instant cutoff, String id) {
         if(Boolean.TRUE.equals(candidate.get("artifactRecovery")) || Boolean.TRUE.equals(candidate.get("quarantined"))) return true;
@@ -2645,7 +2653,7 @@ final class ServerRuntime implements AutoCloseable {
             Path status=storageStatusPath();
             if(!Files.isRegularFile(status) || Files.size(status)>65536) return null;
             JsonNode node=JSON.readTree(status.toFile());
-            if(node==null || !node.isObject() || !"ok".equals(node.path("state").asText()) && !"quota_unmet".equals(node.path("state").asText()) && !"measurement_failed".equals(node.path("state").asText()) && !"deferred".equals(node.path("state").asText()) && !"unknown".equals(node.path("state").asText())) return null;
+            if(node==null || !node.isObject() || !"ok".equals(node.path("state").asText()) && !"quota_unmet".equals(node.path("state").asText()) && !"partial".equals(node.path("state").asText()) && !"measurement_failed".equals(node.path("state").asText()) && !"deferred".equals(node.path("state").asText()) && !"unknown".equals(node.path("state").asText())) return null;
             Map<String,Object> loaded=JSON.convertValue(node,Map.class);
             loaded.put("enabled",true);
             loaded.put("maxTotalBytes",config.jobStorage.maxTotalBytes);

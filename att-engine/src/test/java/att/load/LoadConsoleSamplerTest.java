@@ -3,6 +3,16 @@ package att.load;
 import att.core.ResultStatus;
 import org.junit.jupiter.api.Test;
 
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+import java.util.concurrent.CyclicBarrier;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
+
 import static org.junit.jupiter.api.Assertions.*;
 
 class LoadConsoleSamplerTest {
@@ -63,5 +73,70 @@ class LoadConsoleSamplerTest {
         assertNull(omitted.onEvent(LoadEvent.completed("load-too-late", "closed", "STEADY", "after", "VU-1", 1, 1L, 2L, 5L, ResultStatus.ERROR)));
         LoadConsoleSampler supplied = new LoadConsoleSampler("requested-id");
         assertTrue(supplied.finish("ERROR").startsWith("[LOAD] COMPLETE runId=requested-id status=ERROR"));
+    }
+
+    @Test void emitsPeriodicProgressWithoutEventsAndStopsWhenFinished() throws Exception {
+        List<String> ticks = Collections.synchronizedList(new ArrayList<String>());
+        LoadConsoleSampler sampler = new LoadConsoleSampler("load-idle", 40L, 1000L, ticks::add);
+        assertEquals("[LOAD] START runId=load-idle model=closed", sampler.startLine("closed"));
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
+        while (ticks.size() < 2 && System.nanoTime() < deadline) Thread.sleep(5L);
+        List<String> during = new ArrayList<String>(ticks);
+        assertTrue(during.size() >= 2, during.toString());
+        for (String line : during) {
+            assertTrue(line.startsWith("[LOAD] PROGRESS runId=load-idle"), line);
+            assertFalse(line.contains("COMPLETE"), line);
+        }
+        int beforeFinish = ticks.size();
+        String complete = sampler.finish("PASS");
+        assertTrue(complete.startsWith("[LOAD] COMPLETE runId=load-idle status=PASS"));
+        Thread.sleep(120L);
+        assertEquals(beforeFinish, ticks.size(), ticks.toString());
+    }
+
+    @Test void concurrentIterationsAndTheTimerShareOneProgressInterval() throws Exception {
+        List<String> ticks = Collections.synchronizedList(new ArrayList<String>());
+        LoadConsoleSampler sampler = new LoadConsoleSampler("load-race", 80L, 1000L, ticks::add);
+        assertNotNull(sampler.startLine("closed"));
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
+        while (ticks.isEmpty() && System.nanoTime() < deadline) Thread.sleep(5L);
+        assertEquals(1, ticks.size(), ticks.toString());
+        int eventProgress = 0;
+        long until = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(30);
+        while (System.nanoTime() < until) {
+            String line = sampler.onEvent(LoadEvent.completed("load-race", "closed", "STEADY", "iter",
+                    "VU-1", 1, 1L, 2L, 5L, ResultStatus.PASS));
+            if (line != null && line.contains("[LOAD] PROGRESS")) eventProgress++;
+        }
+        assertEquals(0, eventProgress);
+        assertEquals(1, ticks.size(), ticks.toString());
+
+        LoadConsoleSampler burst = new LoadConsoleSampler("load-burst", 30L, 1000L);
+        assertNotNull(burst.startLine("closed"));
+        Thread.sleep(40L);
+        int threads = 16;
+        ExecutorService pool = Executors.newFixedThreadPool(threads);
+        CyclicBarrier barrier = new CyclicBarrier(threads);
+        AtomicInteger progress = new AtomicInteger();
+        List<Future<?>> tasks = new ArrayList<Future<?>>();
+        for (int i = 0; i < threads; i++) {
+            final int id = i;
+            tasks.add(pool.submit(new Runnable() {
+                @Override public void run() {
+                    try { barrier.await(2, TimeUnit.SECONDS); }
+                    catch (Exception error) { throw new IllegalStateException(error); }
+                    String line = burst.onEvent(LoadEvent.completed("load-burst", "closed", "STEADY", "iter-" + id,
+                            "VU-" + id, id + 1L, 1L, 2L, 5L, ResultStatus.PASS));
+                    if (line != null && line.contains("[LOAD] PROGRESS")) progress.incrementAndGet();
+                }
+            }));
+        }
+        for (Future<?> task : tasks) assertNull(task.get(5, TimeUnit.SECONDS));
+        pool.shutdownNow();
+        assertEquals(1, progress.get());
+        assertTrue(sampler.finish("PASS").startsWith("[LOAD] COMPLETE runId=load-race"));
+        assertTrue(burst.finish("PASS").startsWith("[LOAD] COMPLETE runId=load-burst"));
+        Thread.sleep(200L);
+        assertEquals(1, ticks.size(), ticks.toString());
     }
 }
