@@ -352,9 +352,10 @@ class ServerWarUiIT {
         Path packageRoot = Files.createDirectories(packages.resolve("payments"));
         writeScheduledPackage(packageRoot, localHome);
         Path users = Files.writeString(temp.resolve("scheduled-tomcat-users.xml"),
-                "<tomcat-users><role rolename=\"ATT_USER\"/>"
+                "<tomcat-users><role rolename=\"ATT_USER\"/><role rolename=\"ATT_ADMIN\"/>"
                         + "<user username=\"att\" password=\"secret\" roles=\"ATT_USER\"/>"
-                        + "<user username=\"schedule-admin\" password=\"secret\" roles=\"ATT_USER\"/></tomcat-users>");
+                        + "<user username=\"schedule-admin\" password=\"secret\" roles=\"ATT_USER\"/>"
+                        + "<user username=\"system-admin\" password=\"secret\" roles=\"ATT_ADMIN\"/></tomcat-users>");
         Path javaBin = Path.of(System.getProperty("java.home"), "bin", System.getProperty("os.name", "").toLowerCase().contains("win") ? "java.exe" : "java");
         Path config = Files.writeString(temp.resolve("scheduled-war-server.yaml"),
                 "server:\n  runtimeConfigPath: " + yaml(localHome.resolve("config/config.yaml")) + "\n  dataDir: " + yaml(temp.resolve("scheduled-war-data")) + "\n  javaExecutable: " + yaml(javaBin)
@@ -370,6 +371,7 @@ class ServerWarUiIT {
         Tomcat tomcat = null;
         String admin = "Basic " + Base64.getEncoder().encodeToString("schedule-admin:secret".getBytes(java.nio.charset.StandardCharsets.UTF_8));
         String ordinary = "Basic " + Base64.getEncoder().encodeToString("att:secret".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        String systemAdmin = "Basic " + Base64.getEncoder().encodeToString("system-admin:secret".getBytes(java.nio.charset.StandardCharsets.UTF_8));
         String api = "/tools/att/api/v1";
         String firstScheduleId;
         String secondScheduleId;
@@ -482,7 +484,8 @@ class ServerWarUiIT {
             assertEquals("PASS",getJson(port,runJobPath+"/result",admin).path("job").path("status").asText());
             assertTrue(firstSseEventId(port,runJobPath+"/events",admin)>0);
             assertTrue(sseDataUntil(port,runJobPath+"/events",admin,"[RUN]").contains("[RUN]"),"RUN live output must include a shared console line");
-            JsonNode metrics=getJson(port,api+"/metrics",admin);
+            assertEquals(403,get(port,api+"/metrics",admin),"System metrics stay restricted to the system administrator role.");
+            JsonNode metrics=getJson(port,api+"/metrics",systemAdmin);
             assertFalse(metrics.path("jobStorage").path("enabled").asBoolean());
             assertEquals("disabled",metrics.path("jobStorage").path("state").asText());
             assertTrue(metrics.path("jobStorage").path("totalBytes").isNull()||metrics.path("jobStorage").path("totalBytes").isMissingNode());
