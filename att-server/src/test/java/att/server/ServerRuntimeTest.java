@@ -316,7 +316,6 @@ class ServerRuntimeTest {
             assertEquals("Completed once renamed",completedEdited.name);assertEquals("Post-run notes",completedEdited.description);
             assertEquals("2026-10-13T09:30:00Z",completedEdited.runAt);assertNull(completedEdited.nextRunAt,"A consumed one-time schedule must remain completed after a metadata-only update.");
             clock.current=beforeCompletedEdit;
-            setupRuntime.setLoadScheduleEnabled(scheduleId,true,"alice");
             setupRuntime.deleteLoadSchedule(completedOnce.id,"alice");
         } finally {setupRuntime.close();}
 
@@ -339,6 +338,9 @@ class ServerRuntimeTest {
 
         ServerRuntime runtime=new ServerRuntime(config,libs.toString(),builder->{builder.redirectError(ProcessBuilder.Redirect.INHERIT);return builder.start();},clock);
         try {
+            // Resume only after the runtime that observed the clock jump has stopped.
+            // Its scheduler can still see that jump and would misfire this cron forward.
+            runtime.setLoadScheduleEnabled(scheduleId,true,"alice");
             LoadSchedule restored=runtime.loadSchedule(scheduleId);
             assertEquals("alice",restored.createdBy);assertEquals("2026-10-12T18:00:00Z",restored.nextRunAt);
             Map<String,Object> occurrence=runtime.triggerLoadSchedule(scheduleId,"operator");
@@ -1024,7 +1026,7 @@ class ServerRuntimeTest {
         }
     }
     private static final class MutableClock extends Clock {
-        private Instant current=Instant.now();
+        private volatile Instant current=Instant.now();
         MutableClock(){}
         MutableClock(Instant initial){current=initial;}
         @Override public ZoneId getZone(){return java.time.ZoneOffset.UTC;}
