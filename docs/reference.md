@@ -77,6 +77,7 @@ Status: Normative end-user documentation; generated from modular sources
   - [Tool timeout precedence](#tool-timeout-precedence)
   - [Direct DB timeout and retry eligibility](#direct-db-timeout-and-retry-eligibility)
 - [Configuration and environments](#configuration-and-environments)
+  - [Shared Configuration in Studio](#shared-configuration-in-studio)
   - [Find a configuration task](#find-a-configuration-task)
   - [Configuration layers and precedence](#configuration-layers-and-precedence)
   - [Ignore or disable ATT-owned configuration with `x-`](#ignore-or-disable-att-owned-configuration-with-x)
@@ -2295,6 +2296,15 @@ Direct `update` Actions support `timeoutMs` but deliberately reject `retry`. A t
 ## Configuration and environments
 
 This page is the authoritative reading reference for author-authored configuration. Files in [`schemas/`](../schemas) remain the machine-readable contract. Schema validation runs before cross-field and filesystem validation.
+
+
+### Shared Configuration in Studio
+
+Open **Configuration** with **All packages** selected. Source, Declared, Effective and Compare inspect the single `server.runtimeConfigPath` configuration without choosing or falling back to a Package. Choose an Environment to change effective values, not the source tree. Invalid or unavailable configuration produces an explicit configuration state.
+
+Only **Testdata** asks for a registered Package: descriptor records and resource links remain Package-local. Shared views omit resolved Testdata records; declared Testdata paths remain configuration metadata. Changing the global Package selection does not refresh or replace shared Configuration.
+
+The authenticated `/api/v1/configuration/{declared|effective|compare|files|source}` API uses the existing bounded inspector, source policy, masking and additional-field authorization. Responses use `Cache-Control: no-store`; browser projections are not cached. Worker parsed snapshots reconcile shared configuration/descriptor content revisions and Environment, with separate access/redaction-policy identities, never an arbitrary Package ID. Package-scoped Configuration routes remain available for compatibility and Testdata inspection.
 
 ### Find a configuration task
 

@@ -1,3 +1,4 @@
+const path = require('node:path');
 const assert = require('node:assert/strict');
 const { launchBrowser, selectFixture, startFixture, stopFixture } = require('./browser-support.cjs');
 
@@ -132,19 +133,19 @@ async function main() {
           return jsonResponse(route, 200, { available: true, logicalPath: 'templates/checkout/payloads/refs/child.json', format: 'json', text: '{"ok":true}', fileReferences: [] });
         }
       }
-      if (method === 'GET' && path === 'packages/payments/configuration') {
+      if (method === 'GET' && (path === 'packages/payments/configuration' || path === 'configuration')) {
         return jsonResponse(route, 200, {
           state: 'ready', globals: {}, sections: [],
           environments: [{ name: 'staging', state: 'active', default: true }, { name: 'production', state: 'active' }],
         });
       }
-      if (method === 'GET' && path === 'packages/payments/configuration/compare') {
+      if (method === 'GET' && (path === 'packages/payments/configuration/compare' || path === 'configuration/compare')) {
         return jsonResponse(route, 200, {
           state: 'ready', leftEnvironment: 'staging', rightEnvironment: 'production',
           fields: [{ path: 'database.password', left: { state: 'hidden' }, right: { state: 'missing' }, change: 'changed' }],
         });
       }
-      if (method === 'GET' && path === 'packages/payments/configuration/files') {
+      if (method === 'GET' && (path === 'packages/payments/configuration/files' || path === 'configuration/files')) {
         const requested = url.searchParams.get('path') || '';
         const items = requested === '' ? [
           { name: 'config', path: 'config', kind: 'directory' },
@@ -154,14 +155,14 @@ async function main() {
         ] : [];
         return jsonResponse(route, 200, { path: requested, items, total: items.length, nextOffset: null, truncated: false });
       }
-      if (method === 'GET' && path === 'packages/payments/configuration/source') {
+      if (method === 'GET' && (path === 'packages/payments/configuration/source' || path === 'configuration/source')) {
         assert.equal(url.searchParams.get('path'), 'config/application.yaml');
         return jsonResponse(route, 200, {
           available: true, logicalPath: 'config/application.yaml', format: 'yaml',
           text: 'server:\n  environment: dev\n# descriptor: testdata/accounts.yaml\n',
         });
       }
-      if (method === 'GET' && path === 'packages/payments/configuration/effective') {
+      if (method === 'GET' && (path === 'packages/payments/configuration/effective' || path === 'configuration/effective')) {
         const section = url.searchParams.get('section') || 'globals';
         const entries = section === 'testdata' ? [{
           id: 'accounts', source: 'testdata/accounts.yaml', generated: false,
@@ -397,7 +398,13 @@ async function main() {
     assert.match(page.url(), /#\/jobs$/);
 
     await page.setViewportSize({ width: 768, height: 1024 });
-    await page.goto(`${base}#/configuration/payments?tab=source`);
+    await page.goto(`${base}#/configuration?tab=source`);
+    await page.getByRole('heading', { name: 'Configuration', level: 1 }).waitFor();
+    assert.equal(await page.getByRole('combobox', { name: 'Package', exact: true }).count(), 0);
+    assert.equal(await page.getByText('Configuration is scoped to a registered package.', { exact: true }).count(), 0);
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.screenshot({ animations: 'disabled', fullPage: true, path: path.join(process.env.ATT_UI_SCREENSHOT_DIR || '/tmp', 'att-shared-configuration-mobile.png') });
+    await page.setViewportSize({ width: 1280, height: 900 });
     await page.getByRole('heading', { name: 'Configuration', level: 1 }).waitFor();
     const configurationTree = page.getByRole('tree', { name: 'Configuration file tree' });
     const configurationFolder = configurationTree.locator('[role="treeitem"][data-path="config"]');
@@ -423,6 +430,7 @@ async function main() {
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth), true, 'the Configuration workspace has no horizontal overflow at tablet width');
     await page.setViewportSize({ width: 1440, height: 1000 });
     await page.getByRole('tab', { name: 'Testdata' }).click();
+    await page.getByRole('combobox', { name: 'Testdata package', exact: true }).selectOption('payments');
     await page.getByRole('table').filter({ hasText: 'account-001' }).waitFor();
     assert.equal(await page.locator('.att-testdata-table-scroll').last().innerText().then(text => text.includes('account-001')), true);
     await page.getByRole('button', { name: /generatedAccounts/ }).click();

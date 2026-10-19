@@ -443,6 +443,15 @@ class ServerRuntimeTest {
             return builder.start();
         });
         try {
+            Map<String,Object> sharedDeclared=runtime.inspectConfiguration("","declared",null,null,"alice");
+            assertEquals("declared",sharedDeclared.get("state"));
+            assertEquals(runtime.inspectConfiguration("p","declared",null,null,"alice"),sharedDeclared);
+            Map<String,Object> sharedSit=runtime.inspectConfiguration("","effective","SIT",null,"alice");
+            assertNotEquals("invalid",sharedSit.get("state"));
+            assertFalse(sharedSit.toString().contains("Testdata descriptors"));
+            Map<String,Object> sharedCompare=runtime.inspectConfiguration("","compare","SIT","UAT","dbhelpers",0,50,"alice");
+            assertEquals("degraded",sharedCompare.get("state"));
+            assertThrows(ServerRuntime.NotFoundException.class,()->runtime.inspectConfiguration("","testdata-records","SIT",null,"accounts",0,50,"alice"));
             Map<String,Object> declared=runtime.inspectConfiguration("p","declared",null,null,"alice");
             assertEquals("declared",declared.get("state"));
             assertTrue(declared.toString().contains("SIT"));assertTrue(declared.toString().contains("UAT"));

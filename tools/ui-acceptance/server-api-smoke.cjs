@@ -150,6 +150,12 @@ async function main() {
 
     await page.goBack();
     await page.getByRole('heading', { name: 'Reference Flow' }).waitFor();
+    for (const packageId of ['', 'default', 'jeffreyjiang']) {
+      await page.goto(`${origin}/tools/att/ui/index.html#/configuration${packageId ? '/' + packageId : ''}?tab=source`);
+      await page.getByRole('heading', { name: 'Configuration', level: 1 }).waitFor();
+      assert.equal(await page.getByRole('combobox', { name: 'Package', exact: true }).count(), 0);
+      await page.getByRole('treeitem', { name: /config/ }).waitFor();
+    }
     await page.locator('a[data-nav="configuration"]').click();
     await page.getByRole('heading', { name: 'Configuration', level: 1 }).waitFor();
     await page.getByRole('tab', { name: 'Source' }).click();
@@ -164,6 +170,7 @@ async function main() {
     await page.getByText(/Safe read-only source/).waitFor();
 
     await page.getByRole('tab', { name: 'Testdata' }).click();
+    await page.getByRole('combobox', { name: 'Testdata package', exact: true }).selectOption('payments');
     await page.getByRole('heading', { name: 'Testdata' }).waitFor();
     await page.getByRole('button', { name: 'generatedAccounts' }).click();
     await page.getByRole('button', { name: 'Preview first 50 generated records' }).click();

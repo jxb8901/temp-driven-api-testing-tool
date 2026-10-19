@@ -20,6 +20,34 @@ class PackageConfigurationInspectorTest {
     @org.junit.jupiter.api.BeforeEach void enableServerPathPresentation() { att.core.PathPresentation.configure(true, true); }
     @org.junit.jupiter.api.AfterEach void restoreDefaultPathPresentation() { att.core.PathPresentation.configure(false, false); }
 
+    @Test void sharedRuntimeIgnoresPackageRecordsAndReconcilesConfigRevision() throws Exception {
+        Path root=packageRoot("shared-runtime");
+        Path file=root.resolve("config/config.yaml");
+        write(file,baseConfig("config/dbhelpers/sit.yaml","config/dbhelpers/uat.yaml")
+                +"testdata: [testdata/package-only.yaml]\n");
+        PackageConfigurationSnapshots snapshots=new PackageConfigurationSnapshots();
+        PackageConfigurationInspector shared=inspector(root).forSharedRuntime().withSnapshots(snapshots,"shared");
+        Map<String,Object> sit=shared.inspect("effective","SIT",null);
+        assertEquals("ready",sit.get("state"));
+        assertFalse(sit.toString().contains("Testdata descriptors"));
+        assertThrows(Exception.class,()->snapshots.get(root,file,"SIT","shared",true,false),
+                "A shared snapshot must not bypass Package-local Testdata validation");
+        assertEquals("SIT",sit.get("environment"));
+        assertEquals("UAT",shared.inspect("effective","UAT",null).get("environment"));
+        assertFalse(sit.toString().contains("sit-secret"));
+        assertFalse(sit.toString().contains(root.toString()));
+        assertEquals("invalid",inspector(root).inspect("effective","SIT",null).get("state"),
+                "Package-scoped record inspection still requires the actual local descriptor");
+        byte[] revision=snapshots.get(root,file,"SIT","shared",true,true).revision;
+        write(root.resolve("config/dbhelpers/sit.yaml"),helper("jdbc:postgresql://changed.internal/orders","user","secret",false).replace("Orders database","Revised database"));
+        assertEquals("ready",shared.inspect("effective","SIT",null).get("state"));
+        assertFalse(java.util.Arrays.equals(revision,snapshots.get(root,file,"SIT","shared",true,true).revision));
+        write(file,"invalid: [");
+        assertEquals("invalid",shared.inspect("effective","SIT",null).get("state"));
+        Files.delete(file);
+        assertEquals("invalid",shared.inspect("declared",null,null).get("state"));
+    }
+
     @Test void effectiveAndCompareAreValueFreeDiscoveryNotExecutionValidation() throws Exception {
         Path root = packageRoot("degraded-config");
         write(root.resolve("config/dbhelpers/sit.yaml"), helper("jdbc:postgresql://localhost/orders",

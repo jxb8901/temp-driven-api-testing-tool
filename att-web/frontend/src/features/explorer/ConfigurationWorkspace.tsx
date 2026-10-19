@@ -30,7 +30,7 @@ function errorText(error: unknown, action: string): string {
   const status = typeof error === 'object' && error !== null && 'status' in error ? Number((error as { status?: unknown }).status) : 0;
   if (status === 401) return 'Your session has expired. Sign in again, then retry.';
   if (status === 403) return `You do not have permission to ${action}.`;
-  if (status === 404) return 'The package or selected configuration file no longer exists. Refresh the package.';
+  if (status === 404) return 'The selected configuration file is unavailable. Refresh Configuration.';
   if (status === 413) return 'The Server declined this projection because it exceeds the configured safety limit.';
   if (status === 429 || status === 503 || status === 504) return 'This inspection request is temporarily unavailable. Retry shortly.';
   if (status) return `${action} failed (HTTP ${status}).`;
@@ -50,7 +50,7 @@ function safeCell(value: unknown): string {
 }
 
 export function ConfigurationWorkspace({ api, packages, packageId, environment, filePath, fileOrigin, sourceReference, configurationReferenceId, tab, onPackageChange, onEnvironmentChange, onFileChange, onTabChange, onOpenResource, canRevealAdminFields = false }: ConfigurationWorkspaceProps) {
-  const inspectionRefresh = useInspectionRefresh();
+  const inspectionRefresh = useInspectionRefresh(true);
   const [declared, setDeclared] = useState<Awaited<ReturnType<ExplorerApi['getDeclaredConfiguration']>> | null>(null);
   const [directoryMap, setDirectoryMap] = useState<Record<string, DirectoryState>>({});
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set(['']));
@@ -77,7 +77,6 @@ export function ConfigurationWorkspace({ api, packages, packageId, environment, 
   }, [directoryMap, filePath, source]);
 
   const loadDirectory = useCallback(async (path = '', query?: string, offset = 0) => {
-    if (!packageId) return;
     if (!api.listConfigurationFiles) { setTreeError('This Server does not provide the bounded Configuration file tree yet.'); return; }
     const key = (query ? 'search:' + query : path) + ':' + offset;
     requestRefs.current.get(key)?.abort();
@@ -85,7 +84,7 @@ export function ConfigurationWorkspace({ api, packages, packageId, environment, 
     if (query) setTreeError('');
     else setDirectoryMap(current => ({ ...current, [path]: { items: current[path]?.items || [], loading: true, error: '' } }));
     try {
-      const page = await api.listConfigurationFiles(packageId, query ? undefined : path, query, offset, controller.signal);
+      const page = await api.listConfigurationFiles('', query ? undefined : path, query, offset, controller.signal);
       if (controller.signal.aborted) return;
       if (query) {
         setSearchResults(current => offset > 0 ? [...(current || []), ...(page.items || [])] : page.items || []);
@@ -102,39 +101,38 @@ export function ConfigurationWorkspace({ api, packages, packageId, environment, 
       if (query) setTreeError(message);
       else setDirectoryMap(current => ({ ...current, [path]: { items: current[path]?.items || [], loading: false, error: message } }));
     } finally { if (requestRefs.current.get(key) === controller) requestRefs.current.delete(key); }
-  }, [api, packageId]);
+  }, [api]);
 
   useEffect(() => {
     sourceFlight.current = Promise.resolve();
-    if (tab !== 'source' || !filePath || !packageId) { setSource(null); setSourceError(''); return; }
+    if (tab !== 'source' || !filePath || (sourceReference && !packageId)) { setSource(null); setSourceError(''); return; }
     const controller = new AbortController(); setSourceLoading(true); setSource(null); setSourceError('');
     const sourceRequest = sourceReference
       ? api.getResourceSourceFile?.({ packageId, type: sourceReference.type, resourceId: sourceReference.resourceId }, sourceReference.referenceId, controller.signal, fileOrigin)
-      : api.getConfigurationFileSource?.(packageId, filePath, fileOrigin, controller.signal, configurationReferenceId);
+      : api.getConfigurationFileSource?.('', filePath, fileOrigin, controller.signal, configurationReferenceId);
     if (!sourceRequest) { setSource({ text: '', format: '', available: false, reason: 'unsupported' }); setSourceLoading(false); return () => controller.abort(); }
     sourceFlight.current = sourceRequest.then(result => { if (!controller.signal.aborted) setSource({
       text: result.text || '', format: result.format || filePath.split('.').pop() || 'text', logicalPath: result.logicalPath, available: result.available, reason: result.reason, fileReferences: result.fileReferences,
     }); }).catch(error => { if (!controller.signal.aborted) setSourceError(errorText(error, 'load safe source')); })
       .finally(() => { if (!controller.signal.aborted) setSourceLoading(false); });
     return () => controller.abort();
-  }, [api, packageId, filePath, fileOrigin, sourceReference?.type, sourceReference?.resourceId, sourceReference?.referenceId, configurationReferenceId, tab, inspectionRefresh]);
+  }, [api, sourceReference ? packageId : '', filePath, fileOrigin, sourceReference?.type, sourceReference?.resourceId, sourceReference?.referenceId, configurationReferenceId, tab, inspectionRefresh]);
 
   useEffect(() => {
     requestRefs.current.forEach(controller => controller.abort()); requestRefs.current.clear();
     setDirectoryMap({}); setExpanded(new Set([''])); setSearchResults(null); setTreeError(''); setDeclared(null);
-    if (!packageId) return;
     const controller = new AbortController();
     // A deep-linked source gets the bounded inspection slot before background metadata.
     void sourceFlight.current.then(() => {
       if (controller.signal.aborted) return;
       void loadDirectory('');
-      void api.getDeclaredConfiguration(packageId, controller.signal).then(result => { if (!controller.signal.aborted) setDeclared(result); }).catch(() => { if (!controller.signal.aborted) setDeclared(null); });
+      void api.getDeclaredConfiguration('', controller.signal).then(result => { if (!controller.signal.aborted) setDeclared(result); }).catch(() => { if (!controller.signal.aborted) setDeclared(null); });
     });
     return () => { controller.abort(); requestRefs.current.forEach(item => item.abort()); requestRefs.current.clear(); };
-  }, [api, packageId, loadDirectory, inspectionRefresh]);
+  }, [api, loadDirectory, inspectionRefresh]);
 
   useEffect(() => {
-    if (!filePath || !filePath.startsWith('config/') || !packageId) return;
+    if (!filePath || !filePath.startsWith('config/')) return;
     const segments = filePath.split('/').filter(Boolean);
     if (segments.length < 2) return;
     let cancelled = false;
@@ -148,7 +146,7 @@ export function ConfigurationWorkspace({ api, packages, packageId, environment, 
       }
     });
     return () => { cancelled = true; };
-  }, [filePath, packageId, directoryMap, loadDirectory]);
+  }, [filePath, directoryMap, loadDirectory]);
 
   async function search(event: React.FormEvent) {
     event.preventDefault();
@@ -235,20 +233,18 @@ export function ConfigurationWorkspace({ api, packages, packageId, environment, 
     <header className="att-configuration-page-heading">
       <div><p className="eyebrow">Shared runtime configuration</p><h1>Configuration</h1><p>Inspect centrally managed configuration and package Testdata safely. This view is read-only.</p></div>
       <div className="att-configuration-context">
-        <label>Package<select aria-label="Package" value={packageId} onChange={event => onPackageChange(event.currentTarget.value)}>
+        {tab === 'testdata' && <label>Testdata package<select aria-label="Testdata package" value={packageId} onChange={event => onPackageChange(event.currentTarget.value)}>
           <option value="">Choose a package</option>{packages.map(item => <option key={item.packageId} value={item.packageId}>{item.displayName || item.packageId}</option>)}
-        </select></label>
-        {packageId && <label>Environment<select aria-label="Configuration environment" value={environment} onChange={event => onEnvironmentChange(event.currentTarget.value)}>
-          <option value="">Package default</option>{profiles.map(item => <option key={item.name} value={item.name}>{item.name}{item.default ? ' · default' : ''}</option>)}
         </select></label>}
+        <label>Environment<select aria-label="Configuration environment" value={environment} onChange={event => onEnvironmentChange(event.currentTarget.value)}>
+          <option value="">Runtime default</option>{profiles.map(item => <option key={item.name} value={item.name}>{item.name}{item.default ? ' · default' : ''}</option>)}
+        </select></label>
         <button type="button" aria-expanded={inspectorOpen} onClick={() => setInspectorOpen(value => !value)}>Inspector {inspectorOpen ? 'on' : 'off'}</button>
         {canRevealAdminFields && (tab === 'effective' || tab === 'compare') && <label className="att-config-all-fields-toggle"><input type="checkbox" checked={includeAllFields} onChange={event => setIncludeAllFields(event.currentTarget.checked)} /> Show more DB fields (sensitive values stay hidden)</label>}
       </div>
     </header>
-    {!packageId ? <section className="att-config-select-package"><h2>Choose a package</h2><p>Configuration is scoped to a registered package.</p>
-      {packages.length ? <ul>{packages.map(item => <li key={item.packageId}><button type="button" onClick={() => onPackageChange(item.packageId)}>{item.displayName || item.packageId}</button></li>)}</ul> : <p>No registered packages are available.</p>}
-    </section> : <div className={`att-configuration-layout${inspectorOpen ? '' : ' inspector-collapsed'}`}>
-      <aside className="att-configuration-tree" aria-label="Package configuration files">
+    <div className={`att-configuration-layout${inspectorOpen ? '' : ' inspector-collapsed'}`}>
+      <aside className="att-configuration-tree" aria-label="Shared configuration files">
         <h2>Configuration files</h2>
         <form onSubmit={event => void search(event)} className="att-config-search"><label htmlFor="att-config-file-search">Search files</label>
           <div><input id="att-config-file-search" type="search" value={searchText} onChange={event => setSearchText(event.currentTarget.value)} placeholder="Search paths" />
@@ -281,7 +277,7 @@ export function ConfigurationWorkspace({ api, packages, packageId, environment, 
           {tabs.map(item => <button key={item.id} type="button" role="tab" aria-selected={tab === item.id} onClick={() => onTabChange(item.id)}>{item.label}</button>)}
         </div>
         {tab === 'source' && <section className="att-config-source-view" aria-label="Safe configuration source">
-          <div className="att-config-source-heading"><div><h2>{source?.logicalPath || filePath || 'Select a configuration file'}</h2><p>{source?.format ? `${source.format.toUpperCase()} · ` : ''}{source?.available ? 'Safe read-only source' : source?.reason ? `Source unavailable (${source.reason})` : 'Select a file from the package tree.'}</p></div></div>
+          <div className="att-config-source-heading"><div><h2>{source?.logicalPath || filePath || 'Select a configuration file'}</h2><p>{source?.format ? `${source.format.toUpperCase()} · ` : ''}{source?.available ? 'Safe read-only source' : source?.reason ? `Source unavailable (${source.reason})` : 'Select a file from the shared configuration tree.'}</p></div></div>
           {sourceLoading && <p role="status">Loading safe configuration source…</p>}
           {sourceError && <p className="att-error" role="alert">{sourceError}<button type="button" onClick={() => filePath && void loadDirectory(filePath.split('/').slice(0, -1).join('/'))}>Refresh file list</button></p>}
           {source && !source.available && <div className="att-config-unavailable"><h3>Source is not available</h3><p>The Server withheld or could not read this file. Its path and safe metadata remain visible.</p></div>}
@@ -296,10 +292,11 @@ export function ConfigurationWorkspace({ api, packages, packageId, environment, 
           {!filePath && !sourceLoading && <div className="att-config-empty"><h3>Select a file</h3><p>Choose a configuration file to inspect its safe source.</p></div>}
         </section>}
         {(tab === 'declared' || tab === 'effective' || tab === 'compare') && <ConfigurationExplorer
-          api={api} packageId={packageId} environment={environment} onEnvironmentChange={onEnvironmentChange}
+          api={api} packageId="" environment={environment} onEnvironmentChange={onEnvironmentChange}
           initialMode={tab} showEnvironmentSelector={false} onViewChange={onTabChange} includeAllFields={includeAllFields}
         />}
-        {tab === 'testdata' && <TestdataCatalog api={api} packageId={packageId} environment={environment} onSourceFile={onFileChange} onOpenResource={onOpenResource} />}
+        {tab === 'testdata' && !packageId && <p>Choose a Testdata package to inspect Package-local records. Shared configuration does not require a Package.</p>}
+        {tab === 'testdata' && packageId && <TestdataCatalog api={api} packageId={packageId} environment={environment} onOpenResource={onOpenResource} />}
       </section>
       {inspectorOpen && <aside className="att-configuration-inspector" aria-label="Configuration inspector">
         <h2>Inspector</h2>
@@ -308,12 +305,12 @@ export function ConfigurationWorkspace({ api, packages, packageId, environment, 
             <div><dt>Type</dt><dd>{selectedFile.kind === 'directory' ? 'Directory' : selectedFile.format || selectedFile.path.split('.').pop()?.toUpperCase() || 'File'}</dd></div>
             <div><dt>Size</dt><dd>{selectedFile.sizeBytes == null ? 'Not provided' : `${selectedFile.sizeBytes.toLocaleString()} bytes`}</dd></div>
             <div><dt>Source</dt><dd>{selectedFile.sourceAvailable === false ? selectedFile.reason || 'Unavailable by Server policy' : 'Safe source available'}</dd></div>
-            <div><dt>Environment</dt><dd>{environment || 'Package default'}</dd></div></dl>
+            <div><dt>Environment</dt><dd>{environment || 'Runtime default'}</dd></div></dl>
           {refs.length > 0 && <><h3>Related resources</h3><ul>{refs.map((reference, index) => <ReferenceLink key={`${reference.type}:${reference.resourceId}:${index}`} reference={reference} onOpen={onOpenResource} />)}</ul></>}
           {selectedFile.diagnostics?.map((diagnostic, index) => <p className="att-diagnostic" key={`${diagnostic.code}:${index}`}>{diagnostic.code ? `${diagnostic.code}: ` : ''}{diagnostic.summary}</p>)}
         </>}
       </aside>}
-    </div>}
+    </div>
   </div>;
 }
 
@@ -350,7 +347,7 @@ function observedType(value: unknown): string {
   return typeof value;
 }
 
-function TestdataCatalog({ api, packageId, environment, onSourceFile, onOpenResource }: { api: ExplorerApi; packageId: string; environment: string; onSourceFile(path?: string): void; onOpenResource(resource: { type: string; resourceId: string }): void }) {
+function TestdataCatalog({ api, packageId, environment, onOpenResource }: { api: ExplorerApi; packageId: string; environment: string; onOpenResource(resource: { type: string; resourceId: string }): void }) {
   const [entries, setEntries] = useState<ConfigurationEntry[]>([]);
   const [selectedId, setSelectedId] = useState('');
   const [response, setResponse] = useState<TestdataRecordsResponse | null>(null);
@@ -443,7 +440,7 @@ function TestdataCatalog({ api, packageId, environment, onSourceFile, onOpenReso
       </nav>
       <div className="att-testdata-detail">
     {selectedEntry ? <>
-      <dl className="att-testdata-meta"><div><dt>Descriptor</dt><dd>{selectedEntry.id}</dd></div><div><dt>Source</dt><dd>{selectedEntry.source ? <button type="button" onClick={() => onSourceFile(selectedEntry.source)}>{selectedEntry.source}</button> : 'Not provided'}</dd></div>
+      <dl className="att-testdata-meta"><div><dt>Descriptor</dt><dd>{selectedEntry.id}</dd></div><div><dt>Source</dt><dd>{selectedEntry.source ? <span title="Package-local descriptor, not a shared Configuration source">{packageId}: {selectedEntry.source}</span> : 'Not provided'}</dd></div>
         <div><dt>Generated</dt><dd>{isGenerated ? 'Yes' : 'No'}</dd></div><div><dt>Records</dt><dd>{response?.recordCount?.toLocaleString() || displayField(selectedEntry, 'recordCount')}</dd></div>
         <div><dt>Selection</dt><dd>{displayField(selectedEntry, 'selection.strategy')}</dd></div><div><dt>Exhaustion</dt><dd>{displayField(selectedEntry, 'selection.exhaustion')}</dd></div>
         <div><dt>Environment origin</dt><dd>{selectedEntry.fields?.['selection.strategy']?.origin || 'Server projection'}</dd></div></dl>

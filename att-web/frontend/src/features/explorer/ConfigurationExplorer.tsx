@@ -18,8 +18,8 @@ interface ConfigurationExplorerProps {
 function errorText(error: unknown): string {
   const status = typeof error === 'object' && error !== null && 'status' in error ? Number((error as { status?: unknown }).status) : 0;
   if (status === 401) return 'Your session has expired. Sign in again to inspect configuration.';
-  if (status === 403) return 'Configuration inspection is not permitted for this package.';
-  if (status === 404) return 'The package or selected environment no longer exists. Refresh the package list.';
+  if (status === 403) return 'Configuration inspection is not permitted.';
+  if (status === 404) return 'The configuration or selected environment is unavailable. Refresh Configuration.';
   if (status === 500) return 'The Server could not inspect this configuration. Retry the request.';
   if (status) return `Configuration inspection failed (HTTP ${status}). Retry the request.`;
   return 'Configuration is unavailable. Check the connection and retry.';
@@ -56,7 +56,7 @@ function flattenEntries(response: ConfigurationResponse, section: string): Array
 }
 
 export function ConfigurationExplorer({ api, packageId, environment, onEnvironmentChange, initialMode, showEnvironmentSelector = true, onViewChange, includeAllFields = false }: ConfigurationExplorerProps) {
-  const inspectionRefresh = useInspectionRefresh();
+  const inspectionRefresh = useInspectionRefresh(!packageId);
   const initializedPackage = useRef<string | null>(null);
   const [mode, setMode] = useState<ConfigMode>(initialMode || 'declared');
   const [data, setData] = useState<ConfigurationResponse | null>(null);

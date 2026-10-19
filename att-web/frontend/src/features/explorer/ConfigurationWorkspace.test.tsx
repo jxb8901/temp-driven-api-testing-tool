@@ -2,6 +2,7 @@
 import { act, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { inspectionCache } from '../../inspectionCache';
 import { ConfigurationWorkspace } from './ConfigurationWorkspace';
 import type { ExplorerApi, ResourceSourceReference } from './types';
 
@@ -44,6 +45,32 @@ function Harness({ api, sourceReference, canRevealAdminFields = false }: { api: 
 }
 
 describe('ConfigurationWorkspace', () => {
+  it('loads shared views with All packages and does not reload them on package selection', async () => {
+    const api = {
+      getDeclaredConfiguration: vi.fn(async () => ({ environments: [{ name: 'SIT', state: 'active' }], sections: [] })),
+      listConfigurationFiles: vi.fn(async () => ({ items: [], total: 0 })),
+    } as unknown as ExplorerApi;
+    const render = (packageId: string, tab: 'source' | 'testdata' = 'source') => <ConfigurationWorkspace api={api}
+      packages={[{ packageId: 'default' }, { packageId: 'jeffreyjiang' }]} packageId={packageId} environment="SIT"
+      tab={tab} onPackageChange={vi.fn()} onEnvironmentChange={vi.fn()} onFileChange={vi.fn()} onTabChange={vi.fn()} onOpenResource={vi.fn()} />;
+    await act(async () => root.render(render('')));
+    await flush();
+    expect(host.textContent).not.toContain('Choose a package');
+    expect(host.querySelector('select[aria-label="Testdata package"]')).toBeNull();
+    expect(api.getDeclaredConfiguration).toHaveBeenCalledWith('', expect.any(AbortSignal));
+    const reads = vi.mocked(api.getDeclaredConfiguration).mock.calls.length;
+    const listings = vi.mocked(api.listConfigurationFiles!).mock.calls.length;
+    for (const packageId of ['default', 'jeffreyjiang', 'removed-package']) {
+      await act(async () => { inspectionCache.select(packageId, 'SIT'); root.render(render(packageId)); });
+      await flush();
+    }
+    expect(api.getDeclaredConfiguration).toHaveBeenCalledTimes(reads);
+    expect(api.listConfigurationFiles).toHaveBeenCalledTimes(listings);
+    await act(async () => root.render(render('', 'testdata')));
+    expect(host.querySelector('select[aria-label="Testdata package"]')).not.toBeNull();
+    expect(host.textContent).toContain('Package-local records');
+  });
+
   it('limits the additional DB fields option to Effective and Compare and explains protected views', async () => {
     const api = {
       listResources: vi.fn(async () => ({ items: [], total: 0 })),
@@ -76,7 +103,7 @@ describe('ConfigurationWorkspace', () => {
     expect(host.textContent).toContain('ATT-RESOURCE-ENV-REQUIRED');
     expect(host.textContent).toContain('Execution dependencies have not been validated.');
     expect(host.textContent).toContain('DB_PASSWORD');
-    expect(api.getDeclaredConfiguration).toHaveBeenCalledWith('payments', expect.any(AbortSignal));
+    expect(api.getDeclaredConfiguration).toHaveBeenCalledWith('', expect.any(AbortSignal));
     await showTab('Compare');
     expect(host.textContent).toContain('Show more DB fields (sensitive values stay hidden)');
     await showTab('Source');
@@ -110,7 +137,7 @@ describe('ConfigurationWorkspace', () => {
     await flush();
     await act(async () => host.querySelector<HTMLButtonElement>('[role="tree"] button[role="treeitem"]')?.click());
     await flush();
-    expect(api.getConfigurationFileSource).toHaveBeenCalledWith('payments', 'config/main.yaml', undefined, expect.any(AbortSignal), undefined);
+    expect(api.getConfigurationFileSource).toHaveBeenCalledWith('', 'config/main.yaml', undefined, expect.any(AbortSignal), undefined);
     expect(host.querySelector('pre[aria-label^="Safe source"]')?.textContent).toBe('name: base\npayload: &{./refs/child.json}');
     expect(host.textContent).toContain('The Server did not authorize any referenced files for navigation from this source.');
     expect([...host.querySelectorAll('button')].some(button => button.textContent === 'Open linked file')).toBe(false);
@@ -135,7 +162,7 @@ describe('ConfigurationWorkspace', () => {
     await act(async()=>root.render(<Harness api={api}/>));await flush();
     await act(async()=>host.querySelector<HTMLButtonElement>('[role="tree"] button[role="treeitem"]')?.click());await flush();
     await act(async()=>[...host.querySelectorAll<HTMLButtonElement>('button')].find(button=>button.textContent==='Open linked file')?.click());await flush();
-    expect(getConfigurationFileSource).toHaveBeenLastCalledWith('payments','config/refs/child.json','config/main.yaml',expect.any(AbortSignal),referenceId);
+    expect(getConfigurationFileSource).toHaveBeenLastCalledWith('','config/refs/child.json','config/main.yaml',expect.any(AbortSignal),referenceId);
     expect(host.querySelector('pre[aria-label^="Safe source"]')?.textContent).toBe('{"status":"ok"}');
   });
 

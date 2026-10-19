@@ -290,3 +290,11 @@
 .att-load-job-row time{color:var(--muted,#66727a);font-size:.82rem;text-align:right}
 .att-load-source-panel{position:relative}
 @media(max-width:520px){.att-load-job-row{grid-template-columns:1fr auto}.att-load-job-row time{grid-column:1/-1;text-align:left}.att-load-catalog-card-heading{flex-direction:column}.att-load-catalog-actions .button{flex:1 1 calc(50% - 8px);min-height:42px}}
+
+.att-archive-metrics-help { color: var(--att-color-muted, #637087); font-size: .875rem; }
+.att-archive-metrics th[scope="row"] { font-weight: 400; overflow-wrap: anywhere; }
+.att-archive-metrics .att-data-table td, .att-archive-metrics .att-data-table th[scope="col"]:last-child {
+  text-align: right; white-space: nowrap; font-weight: 400; font-variant-numeric: tabular-nums;
+}
+.att-archive-metrics caption { font-size: .8rem; }
+.att-archive-metric-group th { color: var(--att-color-muted, #637087); font-size: .8rem; padding-top: var(--att-space-3, .75rem); }

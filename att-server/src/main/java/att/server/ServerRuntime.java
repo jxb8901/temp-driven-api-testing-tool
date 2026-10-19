@@ -1225,7 +1225,12 @@ final class ServerRuntime implements AutoCloseable {
                                             boolean includeAllFields,String principal) throws Exception {
         if(!config.inspection.enabled)throw new NotFoundException();
         if(principal==null||principal.isBlank())throw new IllegalArgumentException("A server-resolved request identity is required");
-        Path root=packageRoot(packageId);if(root==null)throw new NotFoundException();validatePackageRoot(root);
+        boolean shared=packageId==null||packageId.isEmpty();
+        if(shared&&"testdata-records".equals(action))throw new NotFoundException();
+        Path root=shared?ServerConfig.runtimeConfigRoot(config.runtimeConfigPath):packageRoot(packageId);
+        if(root==null)throw new NotFoundException();
+        if(!shared)validatePackageRoot(root);
+        String scope=shared?"":packageId;
         if(!List.of("declared","effective","compare","testdata-records","files","source").contains(action))
             throw new IllegalArgumentException("Unsupported configuration inspection action");
         if(offset<0||limit<0||limit>100||"testdata-records".equals(action)&&limit<1)
@@ -1241,11 +1246,13 @@ final class ServerRuntime implements AutoCloseable {
         if("source".equals(action)&&(inspectionPath==null||inspectionPath.isBlank()))
             throw new IllegalArgumentException("A package-relative source path is required");
         if("source".equals(action)) {
+            if(shared&&(!Path.of(inspectionPath).normalize().startsWith(Path.of("config"))
+                    ||inspectionOrigin!=null&&!Path.of(inspectionOrigin).normalize().startsWith(Path.of("config"))))throw new NotFoundException();
             if(inspectionReferenceId==null||inspectionReferenceId.isBlank()) {
                 if((inspectionOrigin!=null&&!inspectionOrigin.isBlank())||!inspectionPath.startsWith("config/"))throw new NotFoundException();
             } else {
                 JsonNode claim=decodeConfigurationSourceReference(inspectionReferenceId);
-                if(!packageId.equals(claim.path("packageId").asText())
+                if(!scope.equals(claim.path("packageId").asText())
                         ||!java.util.Objects.equals(inspectionOrigin,claim.path("origin").asText())
                         ||!java.util.Objects.equals(inspectionPath,claim.path("target").asText()))throw new NotFoundException();
             }
@@ -1257,7 +1264,13 @@ final class ServerRuntime implements AutoCloseable {
             other=inspectionEnvironment(otherEnvironment,"right environment");
             if(selected.equalsIgnoreCase(other))throw new IllegalArgumentException("left and right environments must differ");
         }
-        WorkerRequest request=inspectionRequest(packageId,root,selected);
+        WorkerRequest request=inspectionRequest(scope,root,selected);
+        request.inspectionSharedConfiguration=shared;
+        if(shared) {
+            request.safeTextSources=config.inspection.safeTextSources.values().stream().flatMap(List::stream)
+                    .filter(path->path.startsWith("config/")).distinct().sorted().toList();
+            request.externalTextSources=List.of();request.externalSourceRoots=List.of();
+        }
         request.inspectionAction=action;request.inspectionType="configuration";request.inspectionEnvironment=selected;request.inspectionOtherEnvironment=other;
         request.inspectionSection=section;request.inspectionIncludeInherited=Boolean.valueOf(includeInherited);
         request.inspectionIncludeAllFields=Boolean.valueOf(includeAllFields);
@@ -1266,7 +1279,7 @@ final class ServerRuntime implements AutoCloseable {
         request.inspectionPath=inspectionPath;request.inspectionOrigin=inspectionOrigin;request.inspectionQuery=inspectionQuery;
         request.inspectionReferenceId=inspectionReferenceId;
         Map<String,Object> inspected=executeInspection(root,request);
-        if("source".equals(action))signConfigurationSourceReferences(packageId,inspected);
+        if("source".equals(action))signConfigurationSourceReferences(scope,inspected);
         return inspected;
     }
     private Map<String,Object> executeInspection(Path root,WorkerRequest request) throws Exception {
@@ -1488,7 +1501,7 @@ final class ServerRuntime implements AutoCloseable {
 
         Map<String,Object> request(Path root,WorkerRequest request) throws Exception {
             request.expectedSchemaRegistryDigest=workerSchemaRegistryDigest;
-            ensureStarted(root);
+            ensureStarted(root,Boolean.TRUE.equals(request.inspectionSharedConfiguration));
             java.util.concurrent.atomic.AtomicBoolean timedOut=new java.util.concurrent.atomic.AtomicBoolean();
             ScheduledFuture<?> watchdog=inspectionWatchdogs.schedule(()->{
                 timedOut.set(true);
@@ -1564,12 +1577,14 @@ final class ServerRuntime implements AutoCloseable {
             }
         }
 
-        private void ensureStarted(Path root) throws Exception {
+        private void ensureStarted(Path root,boolean shared) throws Exception {
             if(closing)throw new InterruptedException("Server is shutting down");
             Process current=process;
             if(current!=null&&current.isAlive())return;
             discard();
-            validatePackageRoot(root);
+            if(shared) {
+                if(!root.equals(ServerConfig.runtimeConfigRoot(config.runtimeConfigPath)))throw new NotFoundException();
+            } else validatePackageRoot(root);
             List<String> classpathEntries=workerClasspath();
             String cp=String.join(java.io.File.pathSeparator,classpathEntries);
             ProcessBuilder builder=new ProcessBuilder(config.javaExecutable.toString(),"-Xmx"+config.inspection.heapMaxMb+"m",
@@ -1636,6 +1651,10 @@ final class ServerRuntime implements AutoCloseable {
         Object rawOrigin=source.get("logicalPath"),rawReferences=source.get("fileReferences");
         if(!(rawOrigin instanceof String)||!(rawReferences instanceof List))return;
         String origin=(String)rawOrigin;
+        if(packageId.isEmpty()) {
+            ((List<?>)rawReferences).removeIf(raw->!(raw instanceof Map)
+                    ||!String.valueOf(((Map<?,?>)raw).get("logicalPath")).startsWith("config/"));
+        }
         for(Object raw:(List<?>)rawReferences)if(raw instanceof Map) {
             @SuppressWarnings("unchecked") Map<String,Object> reference=(Map<String,Object>)raw;
             Object target=reference.get("logicalPath");
@@ -1645,6 +1664,7 @@ final class ServerRuntime implements AutoCloseable {
     private String encodeConfigurationSourceReference(String packageId,String origin,String target) throws Exception {
         Map<String,Object> payload=new LinkedHashMap<>();payload.put("kind","configuration-source-reference");
         payload.put("packageId",packageId);payload.put("origin",origin);payload.put("target",target);
+        if(packageId.isEmpty())payload.put("scope","shared-configuration");
         byte[] nonce=new byte[12];cursorRandom.nextBytes(nonce);
         Cipher cipher=Cipher.getInstance("AES/GCM/NoPadding");cipher.init(Cipher.ENCRYPT_MODE,new SecretKeySpec(cursorKey,"AES"),new GCMParameterSpec(128,nonce));
         byte[] encrypted=cipher.doFinal(JSON.writeValueAsBytes(payload));byte[] token=new byte[nonce.length+encrypted.length];
@@ -1659,7 +1679,7 @@ final class ServerRuntime implements AutoCloseable {
             Cipher cipher=Cipher.getInstance("AES/GCM/NoPadding");cipher.init(Cipher.DECRYPT_MODE,new SecretKeySpec(cursorKey,"AES"),new GCMParameterSpec(128,nonce));
             JsonNode claim=JSON.readTree(cipher.doFinal(encrypted));
             if(!"configuration-source-reference".equals(claim.path("kind").asText())
-                    ||claim.path("packageId").asText().isBlank()||claim.path("origin").asText().isBlank()
+                    ||(claim.path("packageId").asText().isBlank()&&!"shared-configuration".equals(claim.path("scope").asText()))||claim.path("origin").asText().isBlank()
                     ||claim.path("target").asText().isBlank())throw new IllegalArgumentException();
             return claim;
         } catch(Exception invalid) { throw new NotFoundException(); }

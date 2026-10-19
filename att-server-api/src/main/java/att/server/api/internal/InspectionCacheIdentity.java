@@ -16,7 +16,8 @@ public final class InspectionCacheIdentity {
         Collections.addAll(inputs,root.toRealPath().toString(),request.config==null?"config/config.yaml":request.config,
                 request.maxSourceBytes==null?65536:request.maxSourceBytes,
                 request.maxResponseBytes==null?262144:request.maxResponseBytes,
-                Boolean.TRUE.equals(request.sourceBrowsingEnabled),request.sourceBrowsingPolicy,Boolean.TRUE.equals(request.redactionEnabled));
+                Boolean.TRUE.equals(request.sourceBrowsingEnabled),request.sourceBrowsingPolicy,Boolean.TRUE.equals(request.redactionEnabled),
+                Boolean.TRUE.equals(request.inspectionSharedConfiguration),Boolean.TRUE.equals(request.inspectionIncludeAllFields));
         for(List<String> values:Arrays.asList(request.safeTextSources,request.externalTextSources,request.externalSourceRoots,
                 request.sourceDenyGlobs,request.sensitivePaths,request.sensitiveFieldPatterns)) {
             List<String> sorted=new ArrayList<String>(values==null?Collections.<String>emptyList():values);Collections.sort(sorted);inputs.add(sorted);

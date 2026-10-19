@@ -1,3 +1,4 @@
+import { StatusBadge } from './StatusBadge';
 import { ArchiveMetrics } from './ArchiveMetrics';
 import type { ArtifactArchiveMetrics } from './types';
 import { useEffect, useMemo, useRef, useState, type ChangeEvent, type KeyboardEvent } from 'react';
@@ -613,10 +614,6 @@ function JobDetail({ api, jobId, onShowList, confirmCancel }: JobsFeatureProps &
       {!job?.performance?.timings && !job?.performance?.worker && !archiveMetrics && !job?.archiveMetrics && !metrics && resultState !== 'loading' && <p role="status">The API did not return metrics for this job.</p>}
     </section>
   </div>;
-}
-
-function StatusBadge({ status }: { status: JobStatus }) {
-  return <span className={`att-status-badge att-status-${String(status).toLowerCase().replace(/[^a-z0-9]+/g, '-')}`}>{status}</span>;
 }
 
 function MetricTable({ title, rows, unit = '' }: { title: string; rows: Array<[string, number]>; unit?: string }) {

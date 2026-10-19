@@ -289,6 +289,7 @@ jobs:
         run: |
           npm run smoke
           npm run smoke:explorer
+          npm run smoke:archive-metrics
           npm run smoke:run
           npm run smoke:auth
           npm run smoke:scheduled-load

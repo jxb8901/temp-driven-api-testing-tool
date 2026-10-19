@@ -488,8 +488,12 @@ public final class ApiServlet extends HttpServlet {
           catch(Exception e){throw new IOException(e);}
     }
     private void configurationGet(HttpServletRequest req,HttpServletResponse res,String path,String requestId,String principal)throws IOException {
-        String[] parts=path.split("/");
+        boolean shared=path.equals("/configuration")||path.startsWith("/configuration/");
+        // Reuse validation and response policy, never resolve a registered Package for shared views.
+        String[] parts=(shared?"/packages/_/configuration"+path.substring("/configuration".length()):path).split("/");
         try {
+            if(shared&&parts.length==5&&"declared".equals(parts[4]))parts=java.util.Arrays.copyOf(parts,4);
+            if(shared&&parts.length>5)throw new ServerRuntime.NotFoundException();
             if(parts.length==7&&"packages".equals(parts[1])&&!parts[2].isEmpty()&&"configuration".equals(parts[3])
                     &&"testdata".equals(parts[4])&&"records".equals(parts[6])) {
                 boolean previewGenerated=parseOptionalBoolean(req.getParameter("previewGenerated"),"previewGenerated");
@@ -498,7 +502,7 @@ public final class ApiServlet extends HttpServlet {
                 records.put("requestId",requestId);json(res,200,records);return;
             }
             if(parts.length<4||!"packages".equals(parts[1])||parts[2].isEmpty()||!"configuration".equals(parts[3]))throw new ServerRuntime.NotFoundException();
-            String packageId=parts[2],action;
+            String packageId=shared?"":parts[2],action;
             if(parts.length==4) {
                 String view=req.getParameter("view");
                 if(view!=null&&!"declared".equals(view))throw new IllegalArgumentException("view must be declared");
@@ -529,6 +533,7 @@ public final class ApiServlet extends HttpServlet {
                 res.setHeader("Cache-Control","no-store");
                 runtime.store.audit(principal,"CONFIGURATION_INCLUDE_ALL_FIELDS",null,packageId,"SUCCESS");
             }
+            res.setHeader("Cache-Control","no-store");
             Map<String,Object> result=runtime.inspectConfiguration(packageId,action,environment,otherEnvironment,section,
                     offset,limit,inspectionPath,inspectionOrigin,inspectionQuery,includeInherited,inspectionReferenceId,includeAllFields,principal);
             if("declared".equals(action)||"effective".equals(action)||"compare".equals(action)) {
@@ -582,7 +587,7 @@ public final class ApiServlet extends HttpServlet {
     private static boolean parseOptionalBoolean(String raw,String name){if(raw==null||raw.isEmpty())return false;if("true".equalsIgnoreCase(raw))return true;if("false".equalsIgnoreCase(raw))return false;throw new IllegalArgumentException(name+" must be true or false");}
     private static String principalSearch(HttpServletRequest req){String value=req.getParameter("principal");if(value==null)return null;value=value.strip();if(value.codePointCount(0,value.length())>120)throw new IllegalArgumentException("principal search must be at most 120 characters");for(int i=0;i<value.length();i++)if(Character.isISOControl(value.charAt(i)))throw new IllegalArgumentException("principal search contains an invalid character");return value.isEmpty()?null:value;}
     private static boolean resourcePath(String path){return path.matches("/packages/[^/]+/resources(?:/.*)?");}
-    private static boolean configurationPath(String path){return path.matches("/packages/[^/]+/configuration(?:/.*)?");}
+    private static boolean configurationPath(String path){return path.matches("/packages/[^/]+/configuration(?:/.*)?")||path.matches("/configuration(?:/.*)?");}
     private static boolean loadPolicyPath(String path){return path.matches("/packages/[^/]+/load-policy");}
     private static boolean isJson(String value){if(value==null)return false;String[] parts=value.split(";",2);return "application/json".equalsIgnoreCase(parts[0].trim());}
     private boolean checkOrigin(HttpServletRequest req,HttpServletResponse res,String requestId,boolean force)throws IOException {

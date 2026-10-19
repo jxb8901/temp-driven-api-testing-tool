@@ -478,6 +478,11 @@ Server 會驗證完整 scenario 並 resolve 所有 target，不會排程流量�
 設定檢查使用與 package resource 相同、受界限限制的 inspection Worker。以下唯讀 endpoint 使用 Server 解析出的已驗證或匿名身份：
 
 ```http
+GET /api/v1/configuration/declared
+GET /api/v1/configuration/effective?environment=SIT
+GET /api/v1/configuration/compare?left=SIT&right=UAT&section=dbhelpers
+GET /api/v1/configuration/files?path=config&limit=100
+GET /api/v1/configuration/source?path=config/config.yaml
 GET /api/v1/packages/payments/configuration?view=declared
 GET /api/v1/packages/payments/configuration/effective?environment=SIT
 GET /api/v1/packages/payments/configuration/effective?environment=SIT&section=dbhelpers&offset=0&limit=50

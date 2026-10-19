@@ -499,6 +499,11 @@ Submit only the package and draft ID to `POST /api/v1/jobs/load`. The Server che
 Configuration inspection uses the same bounded inspection Worker as package resources. These read-only endpoints use the resolved authenticated or anonymous identity:
 
 ```http
+GET /api/v1/configuration/declared
+GET /api/v1/configuration/effective?environment=SIT
+GET /api/v1/configuration/compare?left=SIT&right=UAT&section=dbhelpers
+GET /api/v1/configuration/files?path=config&limit=100
+GET /api/v1/configuration/source?path=config/config.yaml
 GET /api/v1/packages/payments/configuration?view=declared
 GET /api/v1/packages/payments/configuration/effective?environment=SIT
 GET /api/v1/packages/payments/configuration/effective?environment=SIT&section=dbhelpers&offset=0&limit=50

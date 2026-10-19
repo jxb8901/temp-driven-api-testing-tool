@@ -132,6 +132,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(200, {"updated": True})
                 return
             parts = [unquote(part) for part in resource.strip("/").split("/") if part]
+        if parts and parts[0] == "configuration":
+            parts = ["packages", "payments"] + parts
             if len(parts) == 4 and parts[:2] == ["auth", "users"] and parts[3] == "password":
                 self.server.auth_password_resets.append(parts[2])
                 self._json(200, {"updated": True})

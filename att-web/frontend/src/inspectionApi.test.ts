@@ -7,6 +7,21 @@ describe('inspection transport caching', () => {
   beforeEach(() => inspectionCache.resetSession());
   afterEach(() => { inspectionCache.resetSession(); vi.unstubAllGlobals(); });
 
+  it('routes shared configuration without a Package and never reuses a stale HTTP projection', async () => {
+    const reads = vi.fn(async (_url: URL, init: RequestInit) => { expect(init.cache).toBe('no-store'); return json({ state: 'ready' }); });
+    vi.stubGlobal('fetch', reads);
+    await api.getDeclaredConfiguration('');
+    await api.getEffectiveConfiguration('', { environment: 'SIT' });
+    await api.compareConfiguration('', { left: 'SIT', right: 'UAT', section: 'dbhelpers' });
+    await api.listConfigurationFiles!('', '', undefined, 0);
+    await api.getConfigurationFileSource!('', 'config/config.yaml');
+    const paths = reads.mock.calls.map(([url]) => url.pathname);
+    expect(paths.every(path => path.includes('/configuration') && !path.includes('/packages/'))).toBe(true);
+    inspectionCache.select('jeffreyjiang', 'SIT');
+    await api.getDeclaredConfiguration('');
+    expect(reads).toHaveBeenCalledTimes(6);
+  });
+
   it('reuses pages, detail, safe source and ordinary configuration after a live context check', async () => {
     const reads = vi.fn();
     vi.stubGlobal('fetch', vi.fn(async (url: URL, init: RequestInit) => {

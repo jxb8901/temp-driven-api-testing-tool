@@ -175,7 +175,7 @@ class ServerWarUiIT {
                         + "\n    safeTextSources:\n      payments:\n        - config/tools/att-helper.sh\n"
                         + "  scheduling:\n    enabled: true\n    adminRole: ATT_SCHEDULE_ADMIN\n"
                         + "workers:\n  maxConcurrent: 1\n  queuedLimit: 1\n  maxConcurrentLoad: 1\n"
-                        + "packages:\n  allowedRoots:\n    - " + yaml(packages) + "\n  entries:\n    payments: " + yaml(packageRoot) + "\n");
+                        + "packages:\n  allowedRoots:\n    - " + yaml(packages) + "\n  entries:\n    payments: " + yaml(packageRoot) + "\n    default: "+yaml(Files.createDirectory(packages.resolve("default")))+"\n    jeffreyjiang: "+yaml(Files.createDirectory(packages.resolve("jeffreyjiang")))+"\n");
         String oldConfig = System.getProperty("att.server.config");
         String oldHome = System.getProperty("att.home");
         System.setProperty("att.server.config", config.toString());
@@ -199,6 +199,7 @@ class ServerWarUiIT {
             assertEquals(401, get(port, "/tools/att/ui/index.html", null));
             String auth = "Basic " + Base64.getEncoder().encodeToString(
                     "att:secret".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            assertSharedConfiguration(port,"/tools/att/api/v1",auth);
             String scheduleAdminAuth = "Basic " + Base64.getEncoder().encodeToString(
                     "schedule-admin:secret".getBytes(java.nio.charset.StandardCharsets.UTF_8));
             String systemAdminAuth = "Basic " + Base64.getEncoder().encodeToString(
@@ -411,6 +412,7 @@ class ServerWarUiIT {
                     + java.net.URLEncoder.encode("config/config.yaml", java.nio.charset.StandardCharsets.UTF_8), ordinary);
             assertTrue(safeConfigSource.path("available").asBoolean());
             assertTrue(safeConfigSource.path("text").asText().contains("testcase:"));
+            assertSharedConfiguration(port,api,ordinary);
             String recordsPath = api + "/packages/payments/configuration/testdata/generatedAccounts/records?environment=SIT&limit=5";
             assertEquals(401, get(port, recordsPath, null), "Testdata records remain behind the Tomcat authentication boundary.");
             JsonNode generatedMetadata = getJson(port, recordsPath, ordinary);
@@ -1013,6 +1015,32 @@ class ServerWarUiIT {
         assertFalse(effective.toString().contains(localHome.toString()));
         assertFalse(effective.toString().contains(packageRoot.toString()));
         assertEquals(401, get(port, effectiveRoute, null));
+    }
+
+    private static void assertSharedConfiguration(int port,String api,String ordinary) throws Exception {
+        assertEquals(401,get(port,api+"/configuration/declared",null));
+        JsonNode globalDeclared=getJson(port,api+"/configuration/declared",ordinary);
+        assertEquals("declared",globalDeclared.path("state").asText());
+        assertEquals("ready",getJson(port,api+"/configuration/files?limit=100",ordinary).path("state").asText());
+        JsonNode globalSource=getJson(port,api+"/configuration/source?path=config/config.yaml",ordinary);
+        assertEquals(getJson(port,api+"/packages/payments/configuration/source?path=config/config.yaml",ordinary).path("text"),globalSource.path("text"));
+        assertTrue(globalSource.path("available").asBoolean());
+        assertFalse(globalSource.toString().contains("helper-secret"));
+        assertNotEquals("invalid",getJson(port,api+"/configuration/effective?environment=SIT",ordinary).path("state").asText());
+        assertEquals("ready",getJson(port,api+"/configuration/compare?left=SIT&right=UAT&section=dbhelpers",ordinary).path("state").asText());
+        assertEquals(403,get(port,api+"/configuration/effective?includeAllFields=true",ordinary));
+        assertEquals(404,get(port,api+"/configuration/testdata/generatedAccounts/records",ordinary));
+        JsonNode origin=getJson(port,api+"/configuration/source?path=config/source-references.yaml",ordinary);
+        JsonNode reference=null;
+        for(JsonNode item:origin.path("fileReferences"))
+            if("config/tools/att-helper.sh".equals(item.path("logicalPath").asText()))reference=item;
+        assertNotNull(reference,origin.toString());
+        String linked="/configuration/source?path=config/tools/att-helper.sh&origin=config/source-references.yaml&referenceId="+reference.path("referenceId").asText();
+        assertTrue(getJson(port,api+linked,ordinary).path("available").asBoolean());
+        assertEquals(404,get(port,api+"/packages/payments"+linked,ordinary),"Shared references cannot cross into Package-scoped routes");
+        assertEquals(404,get(port,api+"/configuration/source?path=packages/default/private.yaml",ordinary));
+        assertEquals(404,get(port,api+"/configuration/source?path=config/../packages/default/private.yaml",ordinary));
+
     }
 
     private static int postJson(int port, String path, String authorization, String origin, String body) throws Exception {

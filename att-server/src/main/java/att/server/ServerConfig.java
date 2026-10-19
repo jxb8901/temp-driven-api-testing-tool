@@ -160,7 +160,7 @@ public final class ServerConfig {
         return Paths.get("config/config.yaml").toAbsolutePath().normalize();
     }
 
-    private static Path runtimeConfigRoot(Path runtimeConfigPath) {
+    static Path runtimeConfigRoot(Path runtimeConfigPath) {
         Path absolute=runtimeConfigPath.toAbsolutePath().normalize();
         Path parent=absolute.getParent();
         for(Path current=parent;current!=null;current=current.getParent())

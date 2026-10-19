@@ -25,6 +25,28 @@ async function main() {
     for (const fixture of fixtures) {
       process.stdout.write(`Checking archive ${fixture.jobId}\n`);
       await page.goto(`${origin}/tools/att/ui/index.html#/jobs/${fixture.jobId}`);
+      await page.getByRole('tab', { name: 'Metrics', exact: true }).click();
+      const metrics = page.getByRole('region', { name: 'Artifact archive metrics', exact: true });
+      await metrics.locator('.att-status-badge').filter({ hasText: 'READY' }).waitFor();
+      assert.equal(await metrics.locator('.att-table-scroll .att-data-table').count(), 1);
+      for (const [width, theme] of [[1280, 'light'], [390, 'light'], [390, 'dark']]) {
+        await page.setViewportSize({ width, height: 900 });
+        await page.evaluate(theme => { document.documentElement.dataset.theme = theme; }, theme);
+        const geometry = await metrics.evaluate(section => {
+          const table = section.querySelector('table');
+          const value = table.querySelector('td');
+          return { alignment: getComputedStyle(value).textAlign, weight: getComputedStyle(value).fontWeight,
+            tableWidth: table.getBoundingClientRect().width, scrollWidth: section.querySelector('.att-table-scroll').clientWidth,
+            overflow: document.documentElement.scrollWidth > window.innerWidth };
+        });
+        assert.equal(geometry.alignment, 'right');
+        assert.equal(geometry.weight, '400');
+        assert.ok(geometry.tableWidth >= geometry.scrollWidth - 2);
+        assert.equal(geometry.overflow, false, 'Metrics must not overflow the page');
+        await page.evaluate(() => window.scrollTo(0, 0));
+        await page.screenshot({ fullPage: true, animations: 'disabled', path: path.join(process.env.ATT_UI_SCREENSHOT_DIR || path.dirname(fixturePath), `archive-metrics-${fixture.jobId}-${width}-${theme}.png`) });
+      }
+      await page.setViewportSize({ width: 1280, height: 900 });
       await page.getByRole('tab', { name: 'Artifacts', exact: true }).click();
       const archive = page.getByRole('region', { name: 'Job artifact archive', exact: true });
       await archive.getByText('Artifact Archive: READY', { exact: true }).waitFor();

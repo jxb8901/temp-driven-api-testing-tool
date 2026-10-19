@@ -56,6 +56,10 @@ public final class PackageConfigurationInspector {
     private final Path configPath;
     private PackageConfigurationSnapshots snapshots;
     private Object snapshotContext;
+    private boolean sharedRuntime;
+
+    /** Shared views never resolve Package-local Testdata records or dependencies. */
+    public PackageConfigurationInspector forSharedRuntime() { sharedRuntime=true; return this; }
     private final PackageResourceResolver resources;
     private final PackageResourceResolver configResources;
     private final int maxResponseBytes;
@@ -443,7 +447,7 @@ public final class PackageConfigurationInspector {
         String httpOrigin = origin(raw, environment, "httphelpers");
         sections.add(httpSection(config.httpHelpers(), httpOrigin));
         sections.add(toolSection(config.tools()));
-        sections.add(testdataSection(config, origin(raw, environment, "testdata")));
+        if(!sharedRuntime)sections.add(testdataSection(config, origin(raw, environment, "testdata")));
         if (selectedSection != null) for (Map<String,Object> section : sections) {
             if (!selectedSection.equals(section.get("id"))) continue;
             @SuppressWarnings("unchecked") List<Map<String,Object>> entries=(List<Map<String,Object>>)section.get("entries");
@@ -862,7 +866,7 @@ public final class PackageConfigurationInspector {
     private PackageConfigurationSnapshots.Snapshot configurationSnapshot(String environment) throws Exception {
         if(snapshots == null)return null;
         if(!configFile().startsWith(packageRoot))return null;
-        try { return snapshots.get(packageRoot,configPath,environment,snapshotContext,true); }
+        try { return snapshots.get(packageRoot,configPath,environment,snapshotContext,true,sharedRuntime); }
         catch(Exception unavailable) { return null; } // Cache failures preserve the original uncached validation path.
     }
 
@@ -895,6 +899,7 @@ public final class PackageConfigurationInspector {
             }
         }
         for (String key : RESOURCE_LISTS) {
+            if(sharedRuntime&&"testdata".equals(key))continue;
             Object configured = profile != null && profile.containsKey(key) ? profile.get(key) : raw.get(key);
             for (Object value : listOrEmpty(configured)) {
                 if (!(value instanceof String)) continue;
