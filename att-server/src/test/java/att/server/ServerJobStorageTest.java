@@ -234,6 +234,86 @@ class ServerJobStorageTest {
         } finally { runtime.close(); }
     }
 
+    @Test void protectedPrefixCannotStarveAnEligibleJobBeyondTheSweepBudget() throws Exception {
+        Clock clock = Clock.fixed(Instant.parse("2026-06-01T00:00:00Z"), ZoneOffset.UTC);
+        ServerRuntime stable = runtime("protected-prefix", quota(0), clock);
+        try {
+            stable.storageCandidateBatchLimit = 1;
+            stable.store.storageCandidatePage = 2;
+            Instant oldest = Instant.parse("2026-01-01T00:00:00Z");
+            String quarantined = "J0000000000000081";
+            String recovering = "J0000000000000082";
+            String eligible = "J0000000000000083";
+            seed(stable, quarantined, "PASS", oldest.plusSeconds(1), false, mib(1.2));
+            stable.store.quarantineWorker(quarantined);
+            seed(stable, recovering, "PASS", oldest.plusSeconds(2), true, mib(1.2));
+            seed(stable, eligible, "PASS", oldest.plusSeconds(3), false, mib(1.2));
+            stable.cleanupJobStorage();
+            assertNull(stable.store.get(eligible));
+            assertFalse(Files.exists(jobDir(stable, eligible)));
+            assertNotNull(stable.store.get(quarantined));
+            assertNotNull(stable.store.get(recovering));
+            assertTrue(Files.exists(jobDir(stable, quarantined)));
+            assertTrue(Files.exists(jobDir(stable, recovering)));
+            assertEquals("quota_unmet", storage(stable).get("state"));
+            assertEquals(Boolean.TRUE, storage(stable).get("quotaUnmet"));
+            assertTrue(stable.store.auditOutcomes("JOB_STORAGE_EVICT").contains("QUOTA_UNMET"));
+            assertFalse(storage(stable).containsKey("candidateAfterJobId"));
+        } finally { stable.close(); }
+
+        ServerRuntime resumed = runtime("scan-cursor", quota(0), clock);
+        try {
+            resumed.storageCandidateBatchLimit = 1;
+            resumed.store.storageCandidatePage = 2;
+            Instant oldest = Instant.parse("2026-01-01T00:00:00Z");
+            String firstLink = "J0000000000000091";
+            String secondLink = "J0000000000000092";
+            String eligible = "J0000000000000093";
+            Path outside = Files.createDirectory(temp.resolve("cursor-outside"));
+            Files.writeString(outside.resolve("secret.txt"), "do-not-delete");
+            linkJob(resumed, firstLink, outside, oldest.plusSeconds(1));
+            linkJob(resumed, secondLink, outside, oldest.plusSeconds(2));
+            seed(resumed, eligible, "PASS", oldest.plusSeconds(3), false, mib(3.1));
+            resumed.cleanupJobStorage();
+            assertNotNull(resumed.store.get(eligible));
+            assertTrue(Files.exists(jobDir(resumed, eligible)));
+            assertEquals("partial", storage(resumed).get("state"));
+            assertEquals(Boolean.FALSE, storage(resumed).get("quotaUnmet"));
+            assertTrue(resumed.store.auditOutcomes("JOB_STORAGE_EVICT").contains("SWEEP_PARTIAL"));
+            assertFalse(resumed.store.auditOutcomes("JOB_STORAGE_EVICT").contains("QUOTA_UNMET"));
+            String status = Files.readString(resumed.config.dataDir.resolve("job-storage-status.json"));
+            assertTrue(status.contains("\"candidateAfterJobId\":\"" + secondLink + "\""));
+            assertFalse(storage(resumed).containsKey("candidateAfterJobId"));
+            resumed.cleanupJobStorage();
+            assertNull(resumed.store.get(eligible));
+            assertFalse(Files.exists(jobDir(resumed, eligible)));
+            assertTrue(Files.isSymbolicLink(jobDir(resumed, firstLink)));
+            assertTrue(Files.isSymbolicLink(jobDir(resumed, secondLink)));
+            assertEquals("do-not-delete", Files.readString(outside.resolve("secret.txt")));
+            assertFalse(resumed.store.auditOutcomes("JOB_STORAGE_EVICT").contains("QUOTA_UNMET"));
+        } finally { resumed.close(); }
+
+        ServerRuntime wrapped = runtime("scan-wrap", quota(0), clock);
+        try {
+            String id = "J0000000000000094";
+            Instant finished = Instant.parse("2026-01-01T00:00:04Z");
+            seed(wrapped, id, "PASS", finished, false, mib(3.1));
+            wrapped.storageScanAfterFinished = finished.toString();
+            wrapped.storageScanAfterId = id;
+            wrapped.cleanupJobStorage();
+            assertNull(wrapped.store.get(id));
+            assertFalse(Files.exists(jobDir(wrapped, id)));
+            assertFalse(wrapped.store.auditOutcomes("JOB_STORAGE_EVICT").contains("QUOTA_UNMET"));
+        } finally { wrapped.close(); }
+    }
+
+    private void linkJob(ServerRuntime runtime, String id, Path outside, Instant finished) throws Exception {
+        Path link = jobDir(runtime, id);
+        Files.createDirectories(link.getParent());
+        Files.createSymbolicLink(link, outside);
+        seedRow(runtime, id, "PASS", finished, false);
+    }
+
     @Test void doesNotFollowSymlinksOrDeleteWhenMeasurementIsIncomplete() throws Exception {
         Clock clock = Clock.fixed(Instant.parse("2026-06-01T00:00:00Z"), ZoneOffset.UTC);
         ServerRuntime runtime = runtime("unsafe", quota(0), clock);
