@@ -71,9 +71,12 @@ final class WorkerProcessFence {
         return !incomplete && observedStopped();
     }
 
-    private synchronized boolean observedStopped() {
-        return !root.isAlive() && observed.values().stream().noneMatch(Identity::alive);
+    synchronized boolean observedStopped() {
+        try {return !root.isAlive() && observed.values().stream().noneMatch(Identity::alive);}
+        catch(RuntimeException unavailable){incomplete=true;return false;}
     }
+
+    boolean verified() { return !incomplete; }
 
     synchronized List<ProcessIdentity> identities() {
         return observed.values().stream().map(identity -> new ProcessIdentity(identity.handle.pid(), identity.start)).toList();

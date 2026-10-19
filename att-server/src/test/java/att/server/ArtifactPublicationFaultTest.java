@@ -3,6 +3,8 @@ package att.server;
 import att.server.api.WorkerRequest;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -17,6 +19,77 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class ArtifactPublicationFaultTest {
     @TempDir Path temp;
+
+    @ParameterizedTest
+    @ValueSource(strings={"unverified", "ledger-failure", "quarantine-store-failure", "load"})
+    void incompleteProofReleasesCapacityOnlyAfterDurableQuarantine(String failure) throws Exception {
+        org.junit.jupiter.api.Assumptions.assumeFalse(isWindows(), "Uses a POSIX Worker protocol fixture");
+        Path gate=temp.resolve("finish-worker");
+        String script="#!/bin/sh\nread request\nwhile [ ! -f '"+gate+"' ]; do sleep 0.02; done\n"
+                +"printf '%s\\n' '{\"type\":\"RESULT\",\"status\":\"PASS\",\"exitCode\":0}'\n";
+        String command="load".equals(failure)?"load":"run";
+        ServerConfig config;
+        String first;
+        try(ServerRuntime runtime=runtime(ArtifactArchive::build,script)) {
+            config=runtime.config;
+            var request=ServerRuntime.JSON.createObjectNode().put("packageId","p");
+            first=String.valueOf(runtime.submit(command,request,"user-a").get("jobId"));
+            Job job=runtime.jobs.get(first);
+            long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(5);
+            while(job.processFence==null&&System.nanoTime()<deadline)Thread.sleep(10);
+            assertNotNull(job.processFence);
+            Files.writeString(runtime.outputDirectoryForJob(first).resolve("case.log"),"password=private-canary");
+            if(!"ledger-failure".equals(failure))job.processFence.unverified();
+            if("ledger-failure".equals(failure))sql(config,"ALTER TABLE job_worker_processes RENAME TO unavailable_worker_processes");
+            if("quarantine-store-failure".equals(failure))sql(config,"ALTER TABLE jobs RENAME COLUMN worker_quarantined TO unavailable_quarantine");
+            Files.writeString(gate,"");
+            if("quarantine-store-failure".equals(failure)) {
+                deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(5);
+                while((!job.terminal()||job.process.isAlive())&&System.nanoTime()<deadline)Thread.sleep(10);
+                assertTrue(job.terminal());assertFalse(job.process.isAlive());
+                deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(5);
+                int attempts=0;
+                while(attempts==0&&System.nanoTime()<deadline){attempts=runtime.reconcileWorkerReleases();if(attempts==0)Thread.sleep(10);}
+                assertTrue(attempts>0,"Exercise an actual deferred quarantine write while the store is unavailable");
+                assertThrows(ServerRuntime.QueueFullException.class,()->runtime.submit(command,request,"user-b"),
+                        "A failed quarantine write cannot release capacity or erase the active fence");
+                assertTrue(runtime.jobs.containsKey(first));
+                sql(config,"ALTER TABLE jobs RENAME COLUMN unavailable_quarantine TO worker_quarantined");
+            }
+            deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(10);
+            while(runtime.jobs.containsKey(first)&&System.nanoTime()<deadline)Thread.sleep(10);
+            assertFalse(runtime.jobs.containsKey(first),"Known-process exit must eventually reclaim the running permit");
+            assertTrue(runtime.store.workerQuarantined(first));
+            awaitState(runtime,first,"FAILED");
+            assertEquals("worker_unverified",runtime.artifactIndex(first).get("reason"));
+            assertFalse(Files.exists(runtime.artifactArchivePath(first)));
+            assertTrue(Files.isDirectory(runtime.outputDirectoryForJob(first)));
+            if("ledger-failure".equals(failure))sql(config,"ALTER TABLE unavailable_worker_processes RENAME TO job_worker_processes");
+            String second=String.valueOf(runtime.submit(command,request,"user-b").get("jobId"));
+            awaitReady(runtime,second);
+            job.finishedAt=Instant.now().minus(java.time.Duration.ofDays(config.jobRetentionDays+1L));
+            runtime.store.update(job);runtime.cleanupExpiredJobs();
+            assertNotNull(runtime.store.get(first));
+        }
+        try(ServerRuntime restarted=new ServerRuntime(config,temp.resolve("libs").toString())) {
+            assertTrue(restarted.store.workerQuarantined(first));
+            assertTrue(restarted.store.workerMayBeAlive(first));
+            assertThrows(IllegalArgumentException.class,()->restarted.retryArtifactArchive(first));
+            assertEquals(false,restarted.artifactIndex(first).get("retryable"));
+            assertEquals("worker_unverified",restarted.artifactIndex(first).get("reason"));
+            assertThrows(ServerRuntime.ArchiveUnavailableException.class,()->restarted.openArtifactArchive(first,true));
+            restarted.cleanupExpiredJobs();
+            assertNotNull(restarted.store.get(first));
+            assertTrue(Files.isDirectory(restarted.outputDirectoryForJob(first)));
+            assertFalse(Files.exists(restarted.artifactArchivePath(first)));
+        }
+    }
+
+    private static void sql(ServerConfig config,String sql) throws Exception {
+        String url="jdbc:h2:file:"+config.dataDir.resolve("db/att-server").toString().replace('\\','/')
+                +";DB_CLOSE_ON_EXIT=FALSE;AUTO_SERVER=FALSE";
+        try(var connection=java.sql.DriverManager.getConnection(url,"sa","");var statement=connection.createStatement()){statement.execute(sql);}
+    }
 
     @Test void terminalResultDoesNotBypassTheActiveExecutionFence() throws Exception {
         AtomicInteger publications = new AtomicInteger();
@@ -397,7 +470,7 @@ class ArtifactPublicationFaultTest {
         launcher.toFile().setExecutable(true);
         Path yaml = Files.writeString(temp.resolve("server.yaml"),
                 "server:\n  dataDir: '" + temp.resolve("data") + "'\n  javaExecutable: '" + launcher + "'\n"
-                        + "workers:\n  maxConcurrent: 1\n  queuedLimit: " + queuedLimit + "\n  gracefulStopMs: 100\npackages:\n  allowedRoots:\n    - '" + packages + "'\n  entries:\n    p: '" + pkg + "'\n");
+                        + "workers:\n  maxConcurrent: 1\n  maxConcurrentLoad: 1\n  queuedLimit: " + queuedLimit + "\n  gracefulStopMs: 100\npackages:\n  allowedRoots:\n    - '" + packages + "'\n  entries:\n    p: '" + pkg + "'\n");
         return new ServerRuntime(ServerConfig.load(yaml), Files.createDirectories(temp.resolve("libs")).toString(),
                 ProcessBuilder::start, Clock.systemUTC(), publisher);
     }

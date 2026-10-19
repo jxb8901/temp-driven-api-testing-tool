@@ -48,6 +48,9 @@ final class JobStore implements AutoCloseable {
             s.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS worker_start_time VARCHAR(40)");
             s.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS att_version VARCHAR(32) DEFAULT 'unknown' NOT NULL");
             s.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS performance_json CLOB");
+            s.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS worker_quarantined BOOLEAN DEFAULT FALSE NOT NULL");
+            s.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS artifact_recovery BOOLEAN DEFAULT TRUE NOT NULL");
+            s.execute("CREATE INDEX IF NOT EXISTS jobs_artifact_recovery_idx ON jobs(artifact_recovery,job_id)");
             s.execute("CREATE TABLE IF NOT EXISTS job_worker_processes (job_id VARCHAR(80) NOT NULL, process_pid BIGINT NOT NULL, process_start_time VARCHAR(40), PRIMARY KEY(job_id,process_pid), FOREIGN KEY(job_id) REFERENCES jobs(job_id) ON DELETE CASCADE)");
             s.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS schedule_occurrence_id VARCHAR(160)");
             s.execute("CREATE UNIQUE INDEX IF NOT EXISTS jobs_schedule_occurrence_uq ON jobs(schedule_occurrence_id)");
@@ -471,15 +474,35 @@ final class JobStore implements AutoCloseable {
     }
     synchronized List<String> expiredJobIds(Instant before) throws Exception {
         List<String> ids=new ArrayList<>();
-        try(Connection c=connect();PreparedStatement p=c.prepareStatement("SELECT job_id FROM jobs WHERE status IN ('PASS','FAIL','ERROR','INVALID','CANCELLED') AND finished_at IS NOT NULL AND finished_at < ? ORDER BY finished_at LIMIT 500")) {
+        try(Connection c=connect();PreparedStatement p=c.prepareStatement("SELECT job_id FROM jobs WHERE worker_quarantined=FALSE AND status IN ('PASS','FAIL','ERROR','INVALID','CANCELLED') AND finished_at IS NOT NULL AND finished_at < ? ORDER BY finished_at LIMIT 500")) {
             p.setString(1,before.toString());try(ResultSet r=p.executeQuery()){while(r.next())ids.add(r.getString(1));}
         }
         return ids;
     }
-    synchronized List<String> terminalJobIds() throws Exception {
+    synchronized List<String> artifactRecoveryJobIds(String after,int limit) throws Exception {
+        if(limit<1||limit>64)throw new IllegalArgumentException("Invalid recovery batch size");
         List<String> ids=new ArrayList<>();
-        try(Connection c=connect();Statement s=c.createStatement();ResultSet r=s.executeQuery("SELECT job_id FROM jobs WHERE status IN ('PASS','FAIL','ERROR','INVALID','CANCELLED') AND finished_at IS NOT NULL ORDER BY finished_at")) { while(r.next())ids.add(r.getString(1)); }
+        try(Connection c=connect();PreparedStatement p=c.prepareStatement("SELECT job_id FROM jobs WHERE artifact_recovery=TRUE AND job_id>? AND status IN ('PASS','FAIL','ERROR','INVALID','CANCELLED') AND finished_at IS NOT NULL ORDER BY job_id LIMIT ?")) {
+            p.setString(1,after);p.setInt(2,limit);try(ResultSet r=p.executeQuery()){while(r.next())ids.add(r.getString(1));}
+        }
         return ids;
+    }
+    synchronized void artifactRecoveryNeeded(String id,boolean needed) throws Exception {
+        try(Connection c=connect();PreparedStatement p=c.prepareStatement("UPDATE jobs SET artifact_recovery=? WHERE job_id=?")) {
+            p.setBoolean(1,needed);p.setString(2,id);p.executeUpdate();
+        }
+    }
+    synchronized void quarantineWorker(String id) throws Exception {
+        try(Connection c=connect();PreparedStatement p=c.prepareStatement("UPDATE jobs SET worker_quarantined=TRUE WHERE job_id=?")) {
+            p.setString(1,id);if(p.executeUpdate()!=1)throw new IllegalStateException("Job quarantine could not be persisted");
+            // Do not depend on the database's delayed-write window before freeing admission.
+            try(Statement checkpoint=c.createStatement()){checkpoint.execute("CHECKPOINT SYNC");}
+        }
+    }
+    synchronized boolean workerQuarantined(String id) throws Exception {
+        try(Connection c=connect();PreparedStatement p=c.prepareStatement("SELECT worker_quarantined FROM jobs WHERE job_id=?")) {
+            p.setString(1,id);try(ResultSet r=p.executeQuery()){return r.next()&&r.getBoolean(1);}
+        }
     }
     synchronized void deleteJob(String id) throws Exception {
         try(Connection c=connect();PreparedStatement p=c.prepareStatement("DELETE FROM jobs WHERE job_id=?")){p.setString(1,id);p.executeUpdate();}
@@ -503,6 +526,7 @@ final class JobStore implements AutoCloseable {
 
     /** Terminal delivery/parent exit do not prove observed descendants have exited. */
     synchronized boolean workerMayBeAlive(String id) throws Exception {
+        if(workerQuarantined(id))return true;
         try(Connection c=connect();PreparedStatement p=c.prepareStatement("SELECT worker_pid,worker_start_time FROM jobs WHERE job_id=? UNION ALL SELECT process_pid,process_start_time FROM job_worker_processes WHERE job_id=?")) {
             p.setString(1,id);p.setString(2,id);
             try(ResultSet r=p.executeQuery()) {

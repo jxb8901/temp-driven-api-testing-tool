@@ -23,6 +23,8 @@ class WorkerProcessFenceTest {
                     "Unknown containment is not a reason to wait after all known processes exited");
             assertFalse(parent.isAlive());
             assertFalse(fence.stopped(), "A partial proof must never authorize publication");
+            assertTrue(fence.observedStopped(), "Known-process exit permits durable quarantine, not publication");
+            assertFalse(fence.verified());
             CountDownLatch callback = new CountDownLatch(1);
             fence.whenStopped(callback::countDown);
             assertFalse(callback.await(100, TimeUnit.MILLISECONDS));

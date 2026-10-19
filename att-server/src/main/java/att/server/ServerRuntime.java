@@ -91,6 +91,10 @@ final class ServerRuntime implements AutoCloseable {
     private final Semaphore loadSlots,admissionSlots;
     final Semaphore streamSlots=new Semaphore(MAX_STREAM_OBSERVERS,true);
     private final ScheduledExecutorService retention;
+    private final ScheduledExecutorService artifactMaintenance;
+    private final java.util.concurrent.ConcurrentLinkedQueue<Job> deferredWorkerReleases=new java.util.concurrent.ConcurrentLinkedQueue<>();
+    private final Set<String> deferredWorkerReleaseIds=ConcurrentHashMap.newKeySet();
+    private String artifactRecoveryCursor="";
     private final ScheduledExecutorService inspectionWatchdogs;
     private final LoadScheduleScheduler loadScheduleScheduler;
     private final WorkerProcessLauncher processLauncher;
@@ -134,11 +138,13 @@ final class ServerRuntime implements AutoCloseable {
         inspectors=new ThreadPoolExecutor(config.inspection.maxConcurrent,config.inspection.maxConcurrent,0,TimeUnit.MILLISECONDS,inspectionQueue,r->{Thread t=new Thread(r,"att-server-inspector");t.setDaemon(true);return t;},new ThreadPoolExecutor.AbortPolicy());
         for(int i=0;i<config.inspection.maxConcurrent;i++)inspectionWorkerPool.add(new InspectionWorker());
         retention=java.util.concurrent.Executors.newSingleThreadScheduledExecutor(r->{Thread t=new Thread(r,"att-server-retention");t.setDaemon(true);return t;});
+        artifactMaintenance=java.util.concurrent.Executors.newSingleThreadScheduledExecutor(r->{Thread t=new Thread(r,"att-server-artifact-maintenance");t.setDaemon(true);return t;});
         inspectionWatchdogs=java.util.concurrent.Executors.newSingleThreadScheduledExecutor(r->{Thread t=new Thread(r,"att-server-inspector-watchdog");t.setDaemon(true);return t;});
         inspectionWarmup=config.inspection.enabled&&config.inspection.warmup.enabled()
                 ?java.util.concurrent.Executors.newSingleThreadScheduledExecutor(r->{Thread t=new Thread(r,"att-server-inspector-warmup");t.setDaemon(true);return t;}):null;
         recover();cleanupExpiredJobsSafely();recoverArtifactArchivesSafely();retention.scheduleWithFixedDelay(this::cleanupExpiredJobsSafely,1,1,TimeUnit.HOURS);
-        retention.scheduleWithFixedDelay(this::recoverArtifactArchivesSafely,5,5,TimeUnit.MINUTES);
+        artifactMaintenance.scheduleWithFixedDelay(this::recoverArtifactArchivesSafely,5,5,TimeUnit.MINUTES);
+        artifactMaintenance.scheduleWithFixedDelay(this::reconcileWorkerReleases,1,1,TimeUnit.SECONDS);
         retention.scheduleWithFixedDelay(this::expireDraftsSafely,1,1,TimeUnit.MINUTES);
         if(config.scheduling.enabled) {
             store.recoverScheduleExecutions();
@@ -255,7 +261,7 @@ final class ServerRuntime implements AutoCloseable {
                 command.add("-cp");command.add(cp);command.add("att.worker.WorkerMain");
                 ProcessBuilder builder=new ProcessBuilder(command);
                 builder.directory(packageRoot(job.packageId).toFile());
-                job.workerSpawnStartedNanos=System.nanoTime();process=processLauncher.start(builder);job.workerSpawnedNanos=System.nanoTime();job.process=process;job.processFence=new WorkerProcessFence(process);job.workerPid=process.pid();job.workerStartTime=process.info().startInstant().orElse(Instant.now());job.startedAt=Instant.now();transition(job,"RUNNING");store.rememberWorkerProcesses(job.id,job.processFence.identities());
+                job.workerSpawnStartedNanos=System.nanoTime();process=processLauncher.start(builder);job.workerSpawnedNanos=System.nanoTime();job.process=process;job.processFence=new WorkerProcessFence(process);job.workerPid=process.pid();job.workerStartTime=process.info().startInstant().orElse(Instant.now());job.startedAt=Instant.now();transition(job,"RUNNING");rememberWorkerProcesses(job,job.processFence);
             }
             Thread stderr=new Thread(()->{try(var in=process.getErrorStream()){byte[] buf=new byte[8192];while(in.read(buf)>=0){/* drain; protocol and safe diagnostics use stdout */}}catch(Exception ignored){}});stderr.setDaemon(true);stderr.start();
             try(var out=process.getOutputStream()){out.write(JSON.writeValueAsBytes(job.request));out.write('\n');out.flush();}
@@ -272,22 +278,36 @@ final class ServerRuntime implements AutoCloseable {
             tasks.remove(job.id);completed.incrementAndGet();
             // A terminal RESULT is not the execution cleanup fence. Publish only
             // after cleanup and admission release, never while this Job is active.
-            if(stopped)releaseStoppedWorker(job,lease);
-            else {
-                // A failed/interrupted kill must not free capacity or expose files
-                // until every captured process reports exit. Keep the Job as a fence.
-                if(job.processFence!=null)job.processFence.whenStopped(()->releaseStoppedWorker(job,lease));
-                else job.process.onExit().thenRun(()->releaseStoppedWorker(job,lease));
-            }
+            if(!releaseStoppedWorker(job,lease)&&!closing&&deferredWorkerReleaseIds.add(job.id))deferredWorkerReleases.add(job);
         }
     }
-    private void releaseStoppedWorker(Job job,AdmissionLease lease) {
-        if((job.processFence!=null&&!job.processFence.stopped())||(job.process!=null&&job.process.isAlive()))return;
+    int reconcileWorkerReleases() {
+        int budget=Math.min(64,deferredWorkerReleases.size());
+        int attempted=0;
+        for(int i=0;i<budget&&!closing;i++) {
+            Job job=deferredWorkerReleases.poll();if(job==null)break;
+            attempted++;
+            AdmissionLease lease=leases.get(job.id);
+            if(lease==null||releaseStoppedWorker(job,lease))deferredWorkerReleaseIds.remove(job.id);
+            else deferredWorkerReleases.add(job);
+        }
+        return attempted;
+    }
+    private boolean releaseStoppedWorker(Job job,AdmissionLease lease) {
+        try {if((job.processFence!=null&&!job.processFence.observedStopped())||(job.process!=null&&job.process.isAlive()))return false;}
+        catch(RuntimeException unavailable){return false;}
+        if(job.processFence!=null&&!job.processFence.verified()) {
+            // Reclaim execution capacity only after known processes exit and a durable
+            // quarantine independently prohibits publication AND retention across restart.
+            try {store.quarantineWorker(job.id);}
+            catch(Exception unavailable){return false;}
+        }
         if(job.workerTerminatedNanos==0)job.workerTerminatedNanos=System.nanoTime();
         job.process=null;
         if(!closing)try{store.update(job);}catch(Exception ignored){}
         leases.remove(job.id,lease);lease.release();
         if(job.terminal()){jobs.remove(job.id,job);scheduleArtifactArchive(job.id);}
+        return true;
     }
     private List<String> workerClasspath() {
         return WorkerRuntimeClasspath.entries(workerLibs,config.workerLibraryDirs);
@@ -304,7 +324,7 @@ final class ServerRuntime implements AutoCloseable {
         finally {if(!closing)rememberWorkerProcesses(job,fence);}
     }
     private void rememberWorkerProcesses(Job job,WorkerProcessFence fence) {
-        try {store.rememberWorkerProcesses(job.id,fence.identities());}
+        try {store.rememberWorkerProcesses(job.id,fence.identities());if(!fence.verified())store.quarantineWorker(job.id);}
         catch(Exception unavailable){fence.unverified();}
     }
     void handleWorkerEvent(Job job,String line) throws Exception {
@@ -315,7 +335,7 @@ final class ServerRuntime implements AutoCloseable {
         if(("PROGRESS".equals(type)||"LOG".equals(type))&&job.executionReadyNanos==0)job.executionReadyNanos=eventNanos;
         switch(type){case "STATUS"->{String status=event.path("status").asText("");if("RUNNING".equals(status)&&"PREPARING".equals(job.status))transition(job,"RUNNING");}
             case "PROGRESS"->append(job,"progress",safe);case "LOG"->append(job,"log",safe);case "DIAGNOSTIC"->{job.diagnosticJson=JSON.writeValueAsString(safe);store.update(job);append(job,"diagnostic",safe);}
-            case "RESULT"->{if(job.processFence!=null){job.processFence.observe();store.rememberWorkerProcesses(job.id,job.processFence.identities());}job.resultReceivedNanos=eventNanos;Object workerMetrics=safe.get("workerMetrics");if(workerMetrics instanceof Map<?,?>)job.workerMetrics=(Map<String,Object>)workerMetrics;String status=event.path("status").asText("ERROR");int code=event.path("exitCode").asInt(3);Object result=safe.get("result");job.resultJson=result==null?"{}":JSON.writeValueAsString(result);job.resultReceived=true;finish(job,normalizeTerminal(status),code);}
+            case "RESULT"->{if(job.processFence!=null){job.processFence.observe();rememberWorkerProcesses(job,job.processFence);}job.resultReceivedNanos=eventNanos;Object workerMetrics=safe.get("workerMetrics");if(workerMetrics instanceof Map<?,?>)job.workerMetrics=(Map<String,Object>)workerMetrics;String status=event.path("status").asText("ERROR");int code=event.path("exitCode").asInt(3);Object result=safe.get("result");job.resultJson=result==null?"{}":JSON.writeValueAsString(result);job.resultReceived=true;finish(job,normalizeTerminal(status),code);}
             default->append(job,"log",Map.of("message","Worker emitted an unrecognized event"));}
     }
     private String normalizeTerminal(String s){return List.of("PASS","FAIL","ERROR","INVALID","CANCELLED").contains(s)?s:"ERROR";}
@@ -2142,6 +2162,8 @@ final class ServerRuntime implements AutoCloseable {
             JsonNode publication=readArchiveStatus(statusFile);
             String state=publication.path("state").asText("FAILED");
             out.put("reason",publication.path("reason").asText(""));
+            boolean quarantined=store.workerQuarantined(id);
+            if(quarantined){state="FAILED";out.put("reason","worker_unverified");}
             if(Files.isRegularFile(archive)&&"READY".equals(state)) {
                 try {
                     Map<String,Object> data=ArtifactArchive.verify(archive,false);
@@ -2155,7 +2177,7 @@ final class ServerRuntime implements AutoCloseable {
             if(!out.containsKey("archiveStatus")) {
                 out.put("items",List.of());out.put("nextOffset",null);out.put("primaryReports",List.of());out.put("archiveStatus",state);
             }
-            out.put("retryable","FAILED".equals(out.get("archiveStatus"))&&Files.isDirectory(outputDirectoryForJob(id)));
+            out.put("retryable",!quarantined&&"FAILED".equals(out.get("archiveStatus"))&&Files.isDirectory(outputDirectoryForJob(id)));
             out.put("downloadPath","archive.zip");return out;
         } finally {artifactLifecycle.readLock().unlock();artifactReadSlots.release();}
     }
@@ -2174,6 +2196,7 @@ final class ServerRuntime implements AutoCloseable {
         artifactLifecycle.readLock().lock();
         try {
             if(store.get(id)==null)throw new NotFoundException();
+            if(store.workerQuarantined(id))throw new ArchiveUnavailableException();
             Path archive=artifactArchivePath(id),status=archive.resolveSibling("archive-status.json");
             if(!"READY".equals(readArchiveStatus(status).path("state").asText()))throw new ArchiveUnavailableException();
             try { ArtifactArchive.verify(archive,digests); }
@@ -2202,7 +2225,9 @@ final class ServerRuntime implements AutoCloseable {
     }
     void retryArtifactArchive(String id) throws Exception {
         if(!terminal(id))throw new IllegalArgumentException("Artifacts can be published after the Job has ended");
+        if(store.workerQuarantined(id))throw new IllegalArgumentException("Artifacts require independent recovery after Worker quarantine");
         if(!Files.isDirectory(outputDirectoryForJob(id)))throw new IllegalArgumentException("Private source output is unavailable for retry");
+        store.artifactRecoveryNeeded(id,true);
         requestedArtifactRetries.add(id);
         scheduleArtifactArchive(id);
     }
@@ -2215,6 +2240,12 @@ final class ServerRuntime implements AutoCloseable {
             try {
                 if(store.get(id)==null||!terminal(id))return;
                 if(jobs.containsKey(id))return;
+                store.artifactRecoveryNeeded(id,true);
+                if(store.workerQuarantined(id)) {
+                    archiveStatus(id,"FAILED","worker_unverified");
+                    store.artifactRecoveryNeeded(id,false);
+                    return;
+                }
                 if(store.workerMayBeAlive(id)) {
                     archiveStatus(id,"FAILED","worker_active");
                     return;
@@ -2234,7 +2265,7 @@ final class ServerRuntime implements AutoCloseable {
                 }
                 archiveStatus(id,"READY","");
                 store.audit("SYSTEM","ARTIFACT_PUBLICATION",id,null,"READY");
-                try {deleteTree(output);cleanupArtifactStaging(archive.getParent());}
+                try {deleteTree(output);cleanupArtifactStaging(archive.getParent());store.artifactRecoveryNeeded(id,false);}
                 catch(Exception cleanupFailure){java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).warning("Artifact cleanup will be retried for Job "+id);}
             } catch(Exception failure) {
                 boolean policy=failure instanceof IllegalArgumentException;
@@ -2257,18 +2288,15 @@ final class ServerRuntime implements AutoCloseable {
             for(Path file:files.filter(p->{String name=p.getFileName().toString();return name.startsWith(".artifact-export-")||name.startsWith(".artifact-")&&name.endsWith(".zip.tmp")||name.startsWith(".archive-status-")&&name.endsWith(".tmp");}).toList())deleteTree(file);
         }
     }
+    synchronized int recoverArtifactArchives() throws Exception {
+        List<String> ids=store.artifactRecoveryJobIds(artifactRecoveryCursor,64);
+        if(ids.isEmpty()){artifactRecoveryCursor="";return 0;}
+        for(String id:ids){artifactRecoveryCursor=id;scheduleArtifactArchive(id);}
+        return ids.size();
+    }
     private void recoverArtifactArchivesSafely() {
-        try {for(String id:store.terminalJobIds()) {
-            Path archive=artifactArchivePath(id);
-            boolean unfinished=Files.isDirectory(outputDirectoryForJob(id));
-            if(!unfinished&&Files.isRegularFile(archive)) {
-                Path status=archive.resolveSibling("archive-status.json");
-                try {unfinished=!Files.isRegularFile(status)||!"READY".equals(JSON.readTree(status.toFile()).path("state").asText());}
-                catch(Exception invalid){unfinished=true;}
-                if(!unfinished)try(var files=Files.list(archive.getParent())){unfinished=files.anyMatch(p->p.getFileName().toString().startsWith(".artifact-"));}
-            }
-            if(unfinished)scheduleArtifactArchive(id);
-        }} catch(Exception failure){java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).warning("Unable to recover pending artifact publications");}
+        try {recoverArtifactArchives();}
+        catch(Exception failure){java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).warning("Unable to recover pending artifact publications");}
     }
     Object publicEventData(Object data,Path output,Path packageRoot) throws Exception {
         JsonNode node=JSON.valueToTree(att.server.api.internal.DiagnosticSanitizer.sanitizeValue(data));
@@ -2366,7 +2394,7 @@ final class ServerRuntime implements AutoCloseable {
             for(Path path:paths.sorted(java.util.Comparator.reverseOrder()).toArray(Path[]::new))Files.deleteIfExists(path);
         }
     }
-    @Override public void close(){closing=true;if(inspectionWarmup!=null)inspectionWarmup.shutdownNow();if(loadScheduleScheduler!=null)loadScheduleScheduler.close();retention.shutdownNow();inspectionWatchdogs.shutdownNow();synchronized(draftLock){runDrafts.clear();debugDrafts.clear();quickLoadDrafts.clear();advancedLoadDrafts.clear();catalogLoadDrafts.clear();}for(InspectionWorker worker:inspectionWorkerPool)worker.close();for(Job j:jobs.values())if(j.process!=null){try{if(j.processFence!=null){j.processFence.observe();rememberWorkerProcesses(j,j.processFence);}stopWorkerTree(j);finishQuietly(j,"ERROR",143,"ATT-SERVER-INTERRUPTED","Server shutdown interrupted the Worker");}catch(Exception ignored){if(j.processFence!=null)j.processFence.force();else forceTree(j.process);}}for(Process process:inspectionProcesses.keySet())if(process.isAlive())forceTree(process);inspectors.shutdownNow();workers.shutdownNow();streams.shutdownNow();try{workers.awaitTermination(30,TimeUnit.SECONDS);}catch(InterruptedException interrupted){Thread.currentThread().interrupt();}artifactWriters.shutdown();try{if(!artifactWriters.awaitTermination(30,TimeUnit.SECONDS))artifactWriters.shutdownNow();}catch(InterruptedException interrupted){artifactWriters.shutdownNow();Thread.currentThread().interrupt();}try{store.close();}catch(Exception ignored){}}
+    @Override public void close(){closing=true;if(inspectionWarmup!=null)inspectionWarmup.shutdownNow();if(loadScheduleScheduler!=null)loadScheduleScheduler.close();retention.shutdownNow();artifactMaintenance.shutdownNow();inspectionWatchdogs.shutdownNow();synchronized(draftLock){runDrafts.clear();debugDrafts.clear();quickLoadDrafts.clear();advancedLoadDrafts.clear();catalogLoadDrafts.clear();}for(InspectionWorker worker:inspectionWorkerPool)worker.close();for(Job j:jobs.values())if(j.process!=null){try{if(j.processFence!=null){j.processFence.observe();rememberWorkerProcesses(j,j.processFence);}stopWorkerTree(j);finishQuietly(j,"ERROR",143,"ATT-SERVER-INTERRUPTED","Server shutdown interrupted the Worker");}catch(Exception ignored){if(j.processFence!=null)j.processFence.force();else forceTree(j.process);}}for(Process process:inspectionProcesses.keySet())if(process.isAlive())forceTree(process);inspectors.shutdownNow();workers.shutdownNow();streams.shutdownNow();try{workers.awaitTermination(30,TimeUnit.SECONDS);}catch(InterruptedException interrupted){Thread.currentThread().interrupt();}artifactWriters.shutdown();try{if(!artifactWriters.awaitTermination(30,TimeUnit.SECONDS))artifactWriters.shutdownNow();}catch(InterruptedException interrupted){artifactWriters.shutdownNow();Thread.currentThread().interrupt();}try{store.close();}catch(Exception ignored){}}
     private static void terminateTree(Process process){process.toHandle().descendants().forEach(ProcessHandle::destroy);process.destroy();}
     private static void forceTree(Process process){process.toHandle().descendants().forEach(ProcessHandle::destroyForcibly);process.destroyForcibly();}
     @FunctionalInterface interface WorkerProcessLauncher { Process start(ProcessBuilder builder) throws java.io.IOException; }
