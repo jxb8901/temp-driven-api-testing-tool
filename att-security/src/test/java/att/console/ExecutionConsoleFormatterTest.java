@@ -87,7 +87,9 @@ class ExecutionConsoleFormatterTest {
     @Test void publishedLinesOmitNestedValuesAndBoundLength() {
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("executionEventType", "LOG");
-        data.put("message", "x".repeat(5000));
+        char[] padding = new char[5000];
+        java.util.Arrays.fill(padding, 'x');
+        data.put("message", new String(padding));
         Map<String, Object> nested = new LinkedHashMap<String, Object>();
         nested.put("password", "hidden-secret");
         data.put("nested", nested);
