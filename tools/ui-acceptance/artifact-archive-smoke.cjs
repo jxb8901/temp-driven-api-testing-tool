@@ -155,6 +155,9 @@ async function main() {
             assert.deepEqual(await fs.readFile(await result.download.path()), await fs.readFile(new URL(targetUrl)));
           } else assert.equal(file.url(), targetUrl);
         }
+        // Chromium displays text/log targets as a navigation. Closing the page
+        // while that file:// document is current intermittently never returns.
+        await file.goto(fileUrl);
         assert.deepEqual(offlineErrors, [], 'Extracted reports must work without application scripts');
         await file.close();
       }
