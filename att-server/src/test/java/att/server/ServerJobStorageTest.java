@@ -307,6 +307,57 @@ class ServerJobStorageTest {
         } finally { wrapped.close(); }
     }
 
+    @Test void resumedSweepThatFinishesTheProtectedTailAtTheBudgetReportsQuotaUnmet() throws Exception {
+        Clock clock = Clock.fixed(Instant.parse("2026-06-01T00:00:00Z"), ZoneOffset.UTC);
+        Path yaml = temp.resolve("protected-tail-server.yaml");
+        Files.writeString(yaml, serverYaml("protected-tail", quota(0), 3650));
+        String libs = Files.createDirectories(temp.resolve("protected-tail-libs")).toString();
+        String weight = "J00000000000000A1";
+        String[] links = {"J00000000000000A2", "J00000000000000A3", "J00000000000000A4", "J00000000000000A5"};
+        Path outside = Files.createDirectory(temp.resolve("protected-tail-outside"));
+        Files.writeString(outside.resolve("secret.txt"), "do-not-delete");
+        ServerRuntime runtime = new ServerRuntime(ServerConfig.load(yaml), libs, ProcessBuilder::start, clock);
+        try {
+            runtime.storageCandidateBatchLimit = 1;
+            runtime.store.storageCandidatePage = 2;
+            Instant oldest = Instant.parse("2026-01-01T00:00:00Z");
+            seed(runtime, weight, "PASS", oldest, false, mib(3.1));
+            runtime.store.quarantineWorker(weight);
+            for (int i = 0; i < links.length; i++) linkJob(runtime, links[i], outside, oldest.plusSeconds(i + 1));
+            runtime.cleanupJobStorage();
+            assertEquals("partial", storage(runtime).get("state"));
+            assertEquals(Boolean.FALSE, storage(runtime).get("quotaUnmet"));
+            assertTrue(runtime.store.auditOutcomes("JOB_STORAGE_EVICT").contains("SWEEP_PARTIAL"));
+            assertFalse(runtime.store.auditOutcomes("JOB_STORAGE_EVICT").contains("QUOTA_UNMET"));
+            String status = Files.readString(runtime.config.dataDir.resolve("job-storage-status.json"));
+            assertTrue(status.contains("\"candidateAfterJobId\":\"" + links[1] + "\""));
+            assertTrue(status.contains("\"candidateCycleCoveredHead\":true"));
+            assertFalse(storage(runtime).containsKey("candidateCycleCoveredHead"));
+            assertNotNull(runtime.store.get(weight));
+            for (String id : links) assertTrue(Files.isSymbolicLink(jobDir(runtime, id)), id);
+        } finally { runtime.close(); }
+
+        ServerRuntime.skipInitialStorageSweep = true;
+        try {
+            ServerRuntime restarted = new ServerRuntime(ServerConfig.load(yaml), libs, ProcessBuilder::start, clock);
+            try {
+                restarted.storageCandidateBatchLimit = 1;
+                restarted.store.storageCandidatePage = 2;
+                restarted.cleanupJobStorage();
+                assertEquals("quota_unmet", storage(restarted).get("state"));
+                assertEquals(Boolean.TRUE, storage(restarted).get("quotaUnmet"));
+                assertTrue(restarted.store.auditOutcomes("JOB_STORAGE_EVICT").contains("QUOTA_UNMET"));
+                String status = Files.readString(restarted.config.dataDir.resolve("job-storage-status.json"));
+                assertFalse(status.contains("candidateAfterJobId"));
+                assertFalse(status.contains("candidateCycleCoveredHead"));
+                assertNotNull(restarted.store.get(weight));
+                assertTrue(Files.exists(jobDir(restarted, weight)));
+                for (String id : links) assertTrue(Files.isSymbolicLink(jobDir(restarted, id)), id);
+                assertEquals("do-not-delete", Files.readString(outside.resolve("secret.txt")));
+            } finally { restarted.close(); }
+        } finally { ServerRuntime.skipInitialStorageSweep = false; }
+    }
+
     private void linkJob(ServerRuntime runtime, String id, Path outside, Instant finished) throws Exception {
         Path link = jobDir(runtime, id);
         Files.createDirectories(link.getParent());
