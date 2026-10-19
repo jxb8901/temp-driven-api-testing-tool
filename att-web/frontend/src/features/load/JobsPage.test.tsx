@@ -67,6 +67,98 @@ async function click(element: Element) {
 
 describe('JobsPage React feature', () => {
   it.each([
+    ['PASS', 'status'], ['FAIL', 'status'], ['ERROR', 'status'], ['INVALID', 'status'], ['CANCELLED', 'status'], ['ERROR', 'result'],
+  ])('reconciles final metrics/results once after %s %s SSE', async (status, type) => {
+    const running = { ...sampleJob, status: 'RUNNING', performance: undefined };
+    const finished = { ...running, status, performance: { worker: { sampleCount: 3, heapPeakUsedBytes: 34660872, processCpuTimeMs: 3521 } } };
+    const getJob = vi.fn().mockResolvedValueOnce(running).mockResolvedValue(finished);
+    const getJobResult = vi.fn().mockResolvedValueOnce({ job: running, result: null }).mockResolvedValue({
+      job: finished, result: { status, diagnostic: { code: 'CONNECTION_ERROR', message: 'org.postgresql.Driver is unavailable' } },
+    });
+    const api = makeApi({ getJob, getJobResult });
+    await act(async () => root.render(<JobsPage api={api} jobId="JOB-204" onOpenJob={vi.fn()} onShowList={vi.fn()} />));
+    expect(host.querySelector('#job-panel-metrics')?.textContent).not.toContain('heapPeakUsedBytes');
+    expect(host.querySelector('#job-panel-results')?.textContent).toContain('The Server has not returned a result payload.');
+    const handlers = vi.mocked(api.subscribeJob).mock.calls[0][1];
+    await act(async () => handlers.onEvent({ id: 'terminal', type, data: { status } }));
+    await click(host.querySelector('#job-tab-metrics')!);
+    expect(host.querySelector('#job-panel-metrics')?.textContent).toContain('heapPeakUsedBytes');
+    expect(host.querySelector('#job-panel-metrics')?.textContent).toContain('processCpuTimeMs');
+    await click(host.querySelector('#job-tab-results')!);
+    expect(host.querySelector('#job-panel-results')?.textContent).toContain('CONNECTION_ERROR');
+    expect(host.querySelector('#job-panel-results')?.textContent).toContain('org.postgresql.Driver');
+    expect(host.querySelector('#job-panel-results')?.textContent).not.toContain('The Server has not returned a result payload.');
+    await act(async () => {
+      handlers.onError(); handlers.onOpen();
+      handlers.onEvent({ id: 'terminal', type, data: { status } });
+      handlers.onEvent({ id: 'replayed-status', type: 'status', data: { status } });
+      handlers.onEvent({ id: 'replayed-result', type: 'result', data: { status } });
+    });
+    expect(getJob).toHaveBeenCalledTimes(2);
+    expect(getJobResult).toHaveBeenCalledTimes(2);
+    expect(api.subscribeJob).toHaveBeenCalledTimes(1);
+  });
+
+  it('retains the explicit terminal diagnostic when the Worker truly returned no result', async () => {
+    const getJobResult = vi.fn().mockResolvedValueOnce({ job: sampleJob, result: null }).mockResolvedValue({
+      job: { ...sampleJob, status: 'ERROR' }, result: null,
+      diagnostic: { code: 'ATT-SERVER-WORKER-EXITED', summary: 'Worker exited before delivering a terminal result' },
+    });
+    const api = makeApi({ getJobResult });
+    await act(async () => root.render(<JobsPage api={api} jobId="JOB-204" onOpenJob={vi.fn()} onShowList={vi.fn()} />));
+    await act(async () => vi.mocked(api.subscribeJob).mock.calls[0][1].onEvent({ type: 'result', data: {} }));
+    expect(host.querySelector('#job-panel-results')?.textContent).toContain('ATT-SERVER-WORKER-EXITED');
+    expect(host.querySelector('.att-raw-result')).toBeNull();
+    expect(getJobResult).toHaveBeenCalledTimes(2);
+  });
+
+  it('aborts initial snapshots and ignores their late responses after terminal SSE', async () => {
+    const initialJob = deferred<JobView>();
+    const initialResult = deferred<JobResultResponse>();
+    const finished = { ...sampleJob, status: 'ERROR', performance: { worker: { sampleCount: 3 } } };
+    const getJob = vi.fn().mockReturnValueOnce(initialJob.promise).mockResolvedValue(finished);
+    const getJobResult = vi.fn().mockReturnValueOnce(initialResult.promise).mockResolvedValue({ job: finished, result: { status: 'ERROR', code: 'CONNECTION_ERROR' } });
+    const api = makeApi({ getJob, getJobResult });
+    await act(async () => root.render(<JobsPage api={api} jobId="JOB-204" onOpenJob={vi.fn()} onShowList={vi.fn()} />));
+    await act(async () => vi.mocked(api.subscribeJob).mock.calls[0][1].onEvent({ type: 'status', data: { status: 'ERROR' } }));
+    expect(getJob.mock.calls[0][1].aborted).toBe(true);
+    expect(getJobResult.mock.calls[0][1].aborted).toBe(true);
+    await act(async () => { initialJob.resolve(sampleJob); initialResult.resolve({ job: sampleJob, result: null }); });
+    expect(host.querySelector('.att-job-actions')?.textContent).toContain('ERROR');
+    expect(host.querySelector('#job-panel-results')?.textContent).toContain('CONNECTION_ERROR');
+    expect(host.querySelector('#job-panel-metrics')?.textContent).toContain('sampleCount');
+  });
+
+  it('aborts terminal reconciliation on job change and ignores old stream callbacks', async () => {
+    const lateJob = deferred<JobView>();
+    const lateResult = deferred<JobResultResponse>();
+    const getJob = vi.fn().mockResolvedValueOnce(sampleJob).mockReturnValueOnce(lateJob.promise)
+      .mockResolvedValue({ ...sampleJob, jobId: 'JOB-NEW', status: 'RUNNING', performance: undefined });
+    const getJobResult = vi.fn().mockResolvedValueOnce({ job: sampleJob, result: null }).mockReturnValueOnce(lateResult.promise)
+      .mockResolvedValue({ job: { ...sampleJob, jobId: 'JOB-NEW' }, result: null });
+    const unsubscribe = vi.fn();
+    const api = makeApi({ getJob, getJobResult, subscribeJob: vi.fn(() => unsubscribe) });
+    await act(async () => root.render(<JobsPage api={api} jobId="JOB-204" onOpenJob={vi.fn()} onShowList={vi.fn()} />));
+    const old = vi.mocked(api.subscribeJob).mock.calls[0][1];
+    await act(async () => old.onEvent({ type: 'status', data: { status: 'ERROR' } }));
+    await act(async () => root.render(<JobsPage api={api} jobId="JOB-NEW" onOpenJob={vi.fn()} onShowList={vi.fn()} />));
+    expect(getJob.mock.calls[1][1].aborted).toBe(true);
+    expect(getJobResult.mock.calls[1][1].aborted).toBe(true);
+    expect(unsubscribe).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      lateJob.resolve({ ...sampleJob, status: 'ERROR' });
+      lateResult.resolve({ job: sampleJob, result: { code: 'OLD-JOB-RESULT' } });
+      old.onEvent({ type: 'result', data: { status: 'ERROR' } }); old.onError();
+    });
+    expect(host.querySelector('.att-job-actions')?.textContent).toContain('RUNNING');
+    expect(host.textContent).not.toContain('OLD-JOB-RESULT');
+    expect(getJob).toHaveBeenCalledTimes(3);
+    await act(async () => vi.mocked(api.subscribeJob).mock.calls[1][1].onEvent({ type: 'status', data: { status: 'PASS' } }));
+    expect(getJob).toHaveBeenCalledTimes(4);
+    expect(getJobResult).toHaveBeenCalledTimes(4);
+  });
+
+  it.each([
     ['READY', 0, '0 B'], ['READY', 25190, '24.6 KB'], ['READY', 1099511627776, '1 TB'],
     ['READY', -1, null], ['READY', null, null], ['PENDING', 25190, null],
     ['ARCHIVING', 25190, null], ['FAILED', 25190, null],

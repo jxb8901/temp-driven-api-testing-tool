@@ -226,7 +226,7 @@ function unique(values: Array<string | undefined>): string[] {
 }
 
 export function JobsPage(props: JobsFeatureProps) {
-  return props.jobId ? <JobDetail {...props} jobId={props.jobId} /> : <JobsList {...props} />;
+  return props.jobId ? <JobDetail key={props.jobId} {...props} jobId={props.jobId} /> : <JobsList {...props} />;
 }
 
 function JobsList({ api, principal = '', onOpenJob }: JobsFeatureProps) {
@@ -387,6 +387,8 @@ function JobDetail({ api, jobId, onShowList, confirmCancel }: JobsFeatureProps &
   const [archiveMetrics, setArchiveMetrics] = useState<ArtifactArchiveMetrics | null>(null);
   useEffect(() => setArchiveMetrics(null), [jobId]);
   const cancellationLock = useRef(false);
+  const terminalStatus = useRef<JobStatus | null>(null);
+  const terminalReconciled = useRef(false);
   const liveStatus = useMemo(() => [...events].reverse().find(event => event.type === 'status'), [events]);
 
   useEffect(() => {
@@ -395,7 +397,10 @@ function JobDetail({ api, jobId, onShowList, confirmCancel }: JobsFeatureProps &
     setResultState(result ? 'refreshing' : 'loading');
     setDetailError(''); setResultError('');
     api.getJob(jobId, controller.signal).then(value => {
-      if (!controller.signal.aborted) { setJob(value); setJobState('ready'); }
+      if (!controller.signal.aborted) {
+        setJob(terminalStatus.current ? { ...value, status: terminalStatus.current } : value);
+        setJobState('ready');
+      }
     }).catch(error => {
       if (!controller.signal.aborted) { setDetailError(toError(error, 'Job detail could not be loaded.').message); setJobState('error'); }
     });
@@ -408,22 +413,34 @@ function JobDetail({ api, jobId, onShowList, confirmCancel }: JobsFeatureProps &
   }, [api, jobId, detailRefresh]);
 
   useEffect(() => {
+    let disposed = false;
     setConnection('connecting');
     setEvents([]);
-    return api.subscribeJob(jobId, {
-      onOpen: () => setConnection('connected'),
-      onError: () => setConnection('reconnecting'),
-      onEvent: event => setEvents(current => {
-        if (event.id && current.some(existing => existing.id === event.id)) return current;
-        if (event.type === 'status') {
+    const unsubscribe = api.subscribeJob(jobId, {
+      onOpen: () => { if (!disposed) setConnection('connected'); },
+      onError: () => { if (!disposed) setConnection('reconnecting'); },
+      onEvent: event => {
+        if (disposed) return;
+        if (event.type === 'status' || event.type === 'result') {
           const payload = event.data && typeof event.data === 'object' && !Array.isArray(event.data)
             ? (event.data as Record<string, unknown>).status
             : event.data;
-          if (typeof payload === 'string' && payload) setJob(currentJob => currentJob ? { ...currentJob, status: payload } : currentJob);
+          const terminal = typeof payload === 'string' && ['PASS', 'FAIL', 'ERROR', 'INVALID', 'CANCELLED'].includes(payload);
+          if (terminal) terminalStatus.current = payload;
+          if (typeof payload === 'string' && payload) setJob(currentJob => currentJob
+            ? { ...currentJob, status: terminalStatus.current || payload } : currentJob);
+          // Status and result can arrive separately or be replayed on reconnect.
+          // Reconcile both REST snapshots once, outside the state updater.
+          if (!terminalReconciled.current && (terminal || event.type === 'result')) {
+            terminalReconciled.current = true;
+            setDetailRefresh(value => value + 1);
+          }
         }
-        return [...current, { ...event, receivedAt: event.receivedAt || new Date().toISOString() }].slice(-MAX_EVENTS);
-      }),
+        setEvents(current => event.id && current.some(existing => existing.id === event.id) ? current
+          : [...current, { ...event, receivedAt: event.receivedAt || new Date().toISOString() }].slice(-MAX_EVENTS));
+      },
     });
+    return () => { disposed = true; unsubscribe(); };
   }, [api, jobId]);
 
   async function cancel() {
