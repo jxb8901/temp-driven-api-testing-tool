@@ -481,6 +481,11 @@ class ServerWarUiIT {
             awaitJobStatus(port,runJobPath,admin,"PASS");
             assertEquals("PASS",getJson(port,runJobPath+"/result",admin).path("job").path("status").asText());
             assertTrue(firstSseEventId(port,runJobPath+"/events",admin)>0);
+            assertTrue(sseDataUntil(port,runJobPath+"/events",admin,"[RUN]").contains("[RUN]"),"RUN live output must include a shared console line");
+            JsonNode metrics=getJson(port,api+"/metrics",admin);
+            assertFalse(metrics.path("jobStorage").path("enabled").asBoolean());
+            assertEquals("disabled",metrics.path("jobStorage").path("state").asText());
+            assertTrue(metrics.path("jobStorage").path("totalBytes").isNull()||metrics.path("jobStorage").path("totalBytes").isMissingNode());
             assertEquals(404,apiStatus(port,"POST",api+"/jobs/run",admin,origin,Map.of("packageId","payments","draftId",runDraftId)));
             assertEquals(200,apiStatus(port,"DELETE",api+"/schedules/"+runSchedule.path("id").asText(),admin,origin,null));
 
@@ -567,6 +572,8 @@ class ServerWarUiIT {
             assertEquals("global-scheduled-load-capacity", secondHistory.path("items").get(0).path("reason").asText());
 
             long eventCursor = firstSseEventId(port, api + "/jobs/" + jobId + "/events", admin);
+            assertTrue(sseDataUntil(port, api + "/jobs/" + jobId + "/events", admin, "[LOAD]").contains("[LOAD]"),
+                    "LOAD live output must include a bounded console line");
             assertEquals(200, apiStatus(port, "DELETE", api + "/jobs/" + jobId, admin, origin, null));
             awaitJobStatus(port, api + "/jobs/" + jobId, admin, "CANCELLED");
             assertLastEventIdResume(port, api + "/jobs/" + jobId + "/events", admin, eventCursor);
@@ -707,6 +714,8 @@ class ServerWarUiIT {
             assertTrue(log.contains(expression),log);assertFalse(log.contains(packageRoot.toString()),log);checked=true;
         }
         assertTrue(checked,"Failed Debug must retain its diagnostic Case Log");
+        assertTrue(sseDataUntil(port,api+"/jobs/"+jobId+"/events",auth,"[DEBUG]").contains("[DEBUG]"),
+                "DEBUG live output must include a shared console line");
     }
 
     private static void writeReferenceFlowSource(Path packageRoot) throws Exception {
@@ -845,6 +854,23 @@ class ServerWarUiIT {
         } while (System.nanoTime() < deadline);
         assertEquals(expected, job.path("status").asText(), "Job did not reach its expected terminal state.");
         return job;
+    }
+
+    private static String sseDataUntil(int port, String path, String authorization, String needle) throws Exception {
+        HttpURLConnection connection = open(port, path, authorization);
+        connection.setReadTimeout(5000);
+        StringBuilder data = new StringBuilder();
+        try {
+            assertEquals(200, connection.getResponseCode(), "GET " + path);
+            try (var reader = new java.io.BufferedReader(new java.io.InputStreamReader(connection.getInputStream(), java.nio.charset.StandardCharsets.UTF_8))) {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    if (line.startsWith("data: ")) data.append(line.substring(6));
+                    if (data.indexOf(needle) >= 0) return data.toString();
+                }
+            }
+        } finally { connection.disconnect(); }
+        return data.toString();
     }
 
     private static long firstSseEventId(int port, String path, String authorization) throws Exception {

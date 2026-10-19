@@ -2,6 +2,8 @@
 
 # ATT 4.2.1 - 2026-10-16
 
+- Share one plain-text console formatter across CLI, Worker, and Server so Studio Live Output shows RUN, DEBUG, and bounded LOAD lines from the Job event journal (#258).
+- Add an optional size quota for `dataDir/jobs` that evicts the oldest complete Jobs, hides a Job while it is deleting, and reports the sweep without counting or compacting H2 (#259).
 - Publish bounded, sanitized RUN/LOAD Job artifacts as atomic ZIP archives with a versioned integrity manifest, shared USER authorization, ZIP-backed previews, retryable failures, and removal of loose output after verification (#236, #243).
 - Unify functional execution as RUN with optional Debug diagnostics, validated drafts, frozen Case selections, shared RUN/LOAD schedules and one-time triggers; preserve absolute shared-config paths in immutable RUN schedule snapshots (#220).
 - Preserve legacy CLI, Debug, Case Run and Load schedule interfaces; add Studio Run and bilingual migration contracts (#220).

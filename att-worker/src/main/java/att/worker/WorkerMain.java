@@ -41,6 +41,8 @@ public final class WorkerMain {
     private long inspectionResponseBytes;
     private Map<String,Object> lastInspectionMetrics;
     private Path executionOutput;
+    private att.load.LoadConsoleSampler loadSampler;
+    private String loadSummaryLine;
     private WorkerMain(PrintStream protocol) { this.protocol=protocol; }
     public static void main(String[] args) throws Exception {
         // Trusted evidence retains original diagnostics. Protocol secrets are protected
@@ -188,6 +190,7 @@ public final class WorkerMain {
                 String resourceId=request.inspectionTargetId==null?request.inspectionResourceId:request.inspectionTargetId;
                 if(resourceId!=null)diagnostic.put("resourceId",DiagnosticSanitizer.redactText(resourceId));
             }
+            if(loadSampler!=null&&loadSummaryLine==null) loadSummaryLine=loadSampler.finish(status);
             emit(WorkerEvent.Type.DIAGNOSTIC,diagnostic);
             emitResult(fields("status",status,"exitCode",exit,"result",fields("executionId",null,"status",status,"exitCode",exit)));
             return exit;
@@ -209,14 +212,24 @@ public final class WorkerMain {
             if(r.expectedRevisionDigest!=null) verifyRevision(root,config,r);
             return service.debug(new DebugRequest(root,config,r.environment,output,r.runId,text(t,"type"),text(t,"id"),path(r.debugInput),bool(r.unsafeFailureDetails),event -> emitExecution(event),r.debugId,r.overrides,false,null,r.inlineDebugInput)); }
         if("load".equals(r.command)) { Map<String,Object> t=r.target==null?Collections.<String,Object>emptyMap():r.target; Map<String,String> l=r.load==null?Collections.<String,String>emptyMap():r.load;
-            att.load.LoadEventListener observer = event -> { try { emit(WorkerEvent.Type.PROGRESS, event.toMap(root)); } catch(Exception error) { throw new IllegalStateException(error); } };
+            loadSampler=new att.load.LoadConsoleSampler(r.runId);
+            att.load.LoadEventListener observer = event -> { try {
+                String start=loadSampler.startLine(event.model());
+                if(start!=null) emit(WorkerEvent.Type.PROGRESS, fields("console", start, "runId", event.runId(), "phase", "START"));
+                Map<String,Object> payload=event.toMap(root);
+                String line=loadSampler.onEvent(event);
+                if(line!=null) payload.put("console", line);
+                emit(WorkerEvent.Type.PROGRESS, payload);
+            } catch(Exception error) { throw new IllegalStateException(error); } };
+            att.api.OperationResult loadResult;
             if(r.inlineLoadScenario!=null) {
                 if(r.expectedRevisionDigest!=null) verifyRevision(root,config,r);
                 att.load.LoadScenario parsed=new att.load.LoadScenarioLoader(root).loadInline(r.inlineLoadScenario);
-                return service.load(new LoadRequest(root,config,r.environment,output,r.runId,null,null,null,
+                loadResult=service.load(new LoadRequest(root,config,r.environment,output,r.runId,null,null,null,
                         null,null,null,null,null,null,null,null,null,r.overrides,observer,parsed,false));
-            }
-            return service.load(new LoadRequest(root,config,r.environment,output,r.runId,path(r.scenario),optionalText(t,"type"),optionalText(t,"id"),l.get("users"),l.get("arrivalRate"),l.get("warmup"),l.get("rampUp"),l.get("duration"),l.get("rampDown"),l.get("thinkTime"),l.get("maxConcurrent"),l.get("overloadPolicy"),r.overrides,observer)); }
+            } else loadResult=service.load(new LoadRequest(root,config,r.environment,output,r.runId,path(r.scenario),optionalText(t,"type"),optionalText(t,"id"),l.get("users"),l.get("arrivalRate"),l.get("warmup"),l.get("rampUp"),l.get("duration"),l.get("rampDown"),l.get("thinkTime"),l.get("maxConcurrent"),l.get("overloadPolicy"),r.overrides,observer));
+            loadSummaryLine=loadSampler.finish(loadResult.status());
+            return loadResult; }
         if("validate".equals(r.command)) return service.validate(new ValidateRequest(root,config,r.environment,paths(r.suites),path(r.suiteDirectory),set(r.caseIds),set(r.tags),set(r.excludeTags),bool(r.all),r.validationScope));
         if("snapshot".equals(r.command)) return service.snapshot(new SnapshotRequest(root,config,r.environment,paths(r.suites),path(r.suiteDirectory),set(r.caseIds),bool(r.all)));
         if("inspect".equals(r.command)) {
@@ -437,6 +450,7 @@ public final class WorkerMain {
         if(event.stage()!=null)data.put("stage",event.stage()); if(event.action()!=null)data.put("action",event.action());
         if(event.status()!=null)data.put("status",event.status()); if(event.durationMs()!=null)data.put("durationMs",event.durationMs());
         if(event.message()!=null)data.put("message",event.message()); data.putAll(event.data());
+        data.put("executionEventType",event.type().name());
         WorkerEvent.Type type=event.type()==att.api.ExecutionEvent.Type.PROGRESS||event.type()==att.api.ExecutionEvent.Type.STATUS
                 ||event.type()==att.api.ExecutionEvent.Type.DEBUG
                 ? WorkerEvent.Type.PROGRESS : WorkerEvent.Type.LOG;
@@ -456,6 +470,7 @@ public final class WorkerMain {
             safe.put("inspectionMetrics",metrics);
         } else safe=DiagnosticSanitizer.sanitize(data);
         if(!inspectionDaemon&&!inspectionRequest) {
+            attachConsole(type,safe);
             WorkerProtocol.Frame frame=WorkerProtocol.encode(mapper,new WorkerEvent(type,jobId,safe).toMap(),WorkerProtocol.MAX_FRAME_BYTES);
             if(frame.oversized()) {
                 Map<String,Object> bounded=boundedEvent(type,safe,frame.sizeBytes);
@@ -477,11 +492,31 @@ public final class WorkerMain {
         protocol.println(line);protocol.flush();
         if(inspectionDaemon)inspectionResponseBytes+=bytes;
     }
+    private void attachConsole(WorkerEvent.Type type,Map<String,Object> safe) {
+        Object existing=safe.get("console");
+        if(existing instanceof String) {
+            safe.put("console",publishConsole((String)existing));
+            return;
+        }
+        if(safe.get("executionEventType") instanceof String) {
+            String line=att.console.ExecutionConsoleFormatter.formatPayload(safe,att.console.ExecutionConsoleFormatter.Options.published());
+            if(line!=null&&!line.isEmpty()) safe.put("console",publishConsole(line));
+            return;
+        }
+        if(type==WorkerEvent.Type.RESULT&&loadSummaryLine!=null) {
+            safe.put("console",publishConsole(loadSummaryLine));
+            loadSummaryLine=null;
+        }
+    }
+    private static String publishConsole(String line) {
+        return DiagnosticSanitizer.redactAbsolutePaths(DiagnosticSanitizer.redactText(line));
+    }
     private Map<String,Object> boundedEvent(WorkerEvent.Type type,Map<String,Object> safe,long size) {
         Map<String,Object> bounded=fields("truncated",true,"protocolLimit",fields("code","ATT-WORKER-EVENT-TRUNCATED",
                 "eventType",type.name(),"sizeBytes",size,"limitBytes",WorkerProtocol.MAX_FRAME_BYTES));
-        for(String key:new String[]{"status","code","message","executionId","caseId","stage","action"})
+        for(String key:new String[]{"status","code","message","executionId","caseId","stage","action","executionEventType"})
             if(safe.get(key) instanceof String)bounded.put(key,boundedText(safe.get(key),512));
+        if(safe.get("console") instanceof String)bounded.put("console",boundedText(safe.get("console"),512));
         for(String key:new String[]{"exitCode","durationMs"})if(safe.get(key) instanceof Number)bounded.put(key,safe.get(key));
         if(type==WorkerEvent.Type.RESULT) {
             Object value=safe.get("result");

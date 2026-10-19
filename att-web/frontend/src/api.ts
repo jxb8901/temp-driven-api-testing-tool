@@ -18,6 +18,23 @@ import type {
 } from './features/schedules/types';
 import { normalizeSchedule, scheduleTransport } from './features/schedules/types';
 
+export interface ServerJobStorageMetrics {
+  enabled?: boolean;
+  maxTotalBytes?: number | null;
+  cleanupTargetBytes?: number | null;
+  minRetentionHours?: number | null;
+  cleanupIntervalMinutes?: number | null;
+  state?: string;
+  totalBytes?: number | null;
+  measurementComplete?: boolean | null;
+  eligibleJobs?: number | null;
+  protectedJobs?: number | null;
+  lastSweepAt?: string | null;
+  deletedJobs?: number | null;
+  reclaimedBytes?: number | null;
+  quotaUnmet?: boolean;
+}
+
 let csrfToken = '';
 let localAuthMode = false;
 let unifiedRunSupported = false;
@@ -415,6 +432,9 @@ export const api = {
   },
   deleteSchedule(id: string, signal?: AbortSignal): Promise<DeleteScheduleResponse> {
     return request<DeleteScheduleResponse>(schedulesPath() + '/' + encodeURIComponent(id), { method: 'DELETE', signal });
+  },
+  getServerMetrics(signal?: AbortSignal): Promise<{ jobStorage?: ServerJobStorageMetrics }> {
+    return request<{ jobStorage?: ServerJobStorageMetrics }>('metrics', { signal });
   },
   getScheduleExecutions(id: string, limit = 100, signal?: AbortSignal): Promise<ApiEnvelope<ScheduleOccurrence>> {
     return request<ApiEnvelope<ScheduleOccurrence>>(

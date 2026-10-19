@@ -68,7 +68,7 @@ public final class LoadConsoleProgress implements LoadEventListener, AutoCloseab
             }
         }) : null;
         if (verbose) {
-            emit("[LOAD] START runId=" + this.runId + " model=" + model + " " + configuration(scenario));
+            emit(att.console.ExecutionConsoleFormatter.loadStart(this.runId, model, configuration(scenario)));
             reporter.scheduleAtFixedRate(new Runnable() {
                 @Override public void run() { printProgress("PROGRESS", null); }
             }, Math.max(1L, intervalMs), Math.max(1L, intervalMs), TimeUnit.MILLISECONDS);
@@ -124,17 +124,14 @@ public final class LoadConsoleProgress implements LoadEventListener, AutoCloseab
     private void reportError(LoadEvent event) {
         String status = event.dropped() ? "DROPPED"
                 : event.status() == null ? "ERROR" : event.status().name();
-        StringBuilder line = new StringBuilder("[LOAD] ERROR runId=").append(runId)
-                .append(" workload=").append(safe(event.workloadId(), "default"))
-                .append(" sequence=").append(event.sequence())
-                .append(" status=").append(status);
-        String errorType = safe(event.errorType(), "");
-        if (!errorType.isEmpty()) line.append(" errorType=").append(errorType);
+        String line = att.console.ExecutionConsoleFormatter.loadError(runId,
+                att.console.ExecutionConsoleFormatter.token(event.workloadId(), "default"), event.sequence(), status,
+                att.console.ExecutionConsoleFormatter.token(event.errorType(), ""));
         long now = System.nanoTime();
         synchronized (errorLock) {
             if (errorIntervalNanos == 0L || lastErrorNanos == 0L || now - lastErrorNanos >= errorIntervalNanos) {
                 lastErrorNanos = now;
-                emit(line.toString());
+                emit(line);
             } else suppressedErrors.incrementAndGet();
         }
     }
@@ -142,14 +139,9 @@ public final class LoadConsoleProgress implements LoadEventListener, AutoCloseab
     private void printProgress(String label, String terminalStatus) {
         if ("PROGRESS".equals(label) && finished.get()) return;
         if ("SUMMARY".equals(label)) {
-            StringBuilder summary = new StringBuilder("[LOAD] SUMMARY runId=").append(runId)
-                    .append(" model=").append(model).append(" status=").append(terminalStatus)
-                    .append(" completed=").append(completed.get()).append(" pass=").append(passed.get())
-                    .append(" fail=").append(failed.get()).append(" error=").append(errors.get())
-                    .append(" dropped=").append(dropped.get());
             long suppressed = suppressedErrors.getAndSet(0L);
-            if (suppressed > 0L) summary.append(" suppressedErrors=").append(suppressed);
-            emit(summary.toString());
+            emit(att.console.ExecutionConsoleFormatter.loadSummary(runId, model, terminalStatus, completed.get(),
+                    passed.get(), failed.get(), errors.get(), dropped.get(), suppressed));
             return;
         }
         long elapsedMs = Math.max(0L, TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedNanos));
@@ -159,22 +151,9 @@ public final class LoadConsoleProgress implements LoadEventListener, AutoCloseab
         double meanLatency = samples == 0L ? 0.0 : (double) latencyTotalMs.get() / samples;
         long active = Math.max(0L, started.get() - completeCount);
         long suppressed = suppressedErrors.getAndSet(0L);
-        StringBuilder line = new StringBuilder("[LOAD] ").append(label)
-                .append(" runId=").append(runId);
-        if (terminalStatus != null) line.append(" status=").append(terminalStatus);
-        line.append(" elapsedMs=").append(elapsedMs)
-                .append(" scheduled=").append(scheduled.get())
-                .append(" started=").append(started.get())
-                .append(" completed=").append(completeCount)
-                .append(" active=").append(active)
-                .append(" pass=").append(passed.get())
-                .append(" fail=").append(failed.get())
-                .append(" error=").append(errors.get())
-                .append(" dropped=").append(dropped.get())
-                .append(" throughputPerSec=").append(String.format(Locale.ROOT, "%.2f", throughput))
-                .append(" meanLatencyMs=").append(String.format(Locale.ROOT, "%.2f", meanLatency));
-        if (suppressed > 0L) line.append(" suppressedErrors=").append(suppressed);
-        emit(line.toString());
+        emit(att.console.ExecutionConsoleFormatter.loadProgress(label, runId, terminalStatus, elapsedMs,
+                scheduled.get(), started.get(), completeCount, active, passed.get(), failed.get(), errors.get(),
+                dropped.get(), throughput, meanLatency, suppressed));
     }
 
     private void emit(String line) {
@@ -201,8 +180,6 @@ public final class LoadConsoleProgress implements LoadEventListener, AutoCloseab
     }
 
     private static String safe(String value, String fallback) {
-        if (value == null || value.isEmpty()) return fallback;
-        String normalized = value.replaceAll("[^A-Za-z0-9_.:-]", "_");
-        return normalized.length() <= 96 ? normalized : normalized.substring(0, 96);
+        return att.console.ExecutionConsoleFormatter.token(value, fallback);
     }
 }

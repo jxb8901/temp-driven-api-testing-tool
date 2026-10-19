@@ -56,7 +56,7 @@ Source 分頁只載入 Server 提供的安全 source projection。畫面最多�
 
 Advanced Load route 使用有型別的控制項設定 duration 單位、Virtual Users、Arrival Rate、最大並行數及 think time。Target sidecar 預設值會為 `inputs`、`vars` 及 Tool `arguments` 提供有型別 scalar 控制項；巢狀值保留在 Advanced JSON。表單會按 model 顯示適用限制，但驗證、policy 上限、draft 過期、package revision 及執行仍以 Server 為準。確認後，UI 會提交同一份由 Server 簽發的 draft；回應已遮蔽時不會提供預覽複製或匯出。
 
-Jobs route 載入 Server 回傳的最新工作列（最多 100 筆）。狀態、套件、類型、建立日期篩選、排序及用戶端分頁只作用於已載入列；Principal 搜尋會送到 Server。此 API 不會回傳工作所屬 environment，因此 UI 不提供 environment 篩選。重新整理等待回應時會保留所選篩選及排序。工作詳細資料提供穩定的 Overview、Live logs、Events、Results、Artifacts 及 Metrics 分頁。原生同源 `EventSource` 會使用瀏覽器的 `Last-Event-ID` 重新連線；取消前需要確認，UI 會等候 Server 狀態事件。Metrics 只顯示工作及結果 endpoint 實際回傳的值；Server timing 與 Worker JVM 資料會和 Load 結果指標分開呈現，結果沒有 time-series buckets 時不會推算 throughput 圖表。
+Jobs route 載入 Server 回傳的最新工作列（最多 100 筆）。狀態、套件、類型、建立日期篩選、排序及用戶端分頁只作用於已載入列；Principal 搜尋會送到 Server。此 API 不會回傳工作所屬 environment，因此 UI 不提供 environment 篩選。重新整理等待回應時會保留所選篩選及排序。工作詳細資料提供穩定的 Overview、即時輸出、Events、Results、Artifacts 及 Metrics 分頁。即時輸出只把 Server 的 `console` 欄位以純文字顯示在唯讀終端檢視；瀏覽器不會把事件 JSON 另排成第二份主控台。Events 保留結構化 JSON。清除即時檢視只會隱藏這個瀏覽器已經收到的內容。系統管理員在 metrics endpoint 允許時，可於設定頁看到 Job 目錄用量，並註明該數字不是 H2 檔案，而且不會壓縮 H2。原生同源 `EventSource` 會使用瀏覽器的 `Last-Event-ID` 重新連線；取消前需要確認，UI 會等候 Server 狀態事件。Metrics 只顯示工作及結果 endpoint 實際回傳的值；Server timing 與 Worker JVM 資料會和 Load 結果指標分開呈現，結果沒有 time-series buckets 時不會推算 throughput 圖表。
 
 Explorer 是 React 與 TypeScript 單頁 UI，於 `att-web` Maven resource 階段使用 Vite 建置。Maven 會把產生的靜態資源複製至 `META-INF/resources/ui/`；Server WAR 再將它們封裝供 Tomcat 提供。Node.js 只用於建置階段。部署後的 UI 呼叫同源公開 REST API，無需額外 Node 程序或前端服務。
 

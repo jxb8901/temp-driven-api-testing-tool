@@ -148,12 +148,22 @@ final class JobEvents {
 
     boolean isClosed() { return false; }
 
+    synchronized boolean truncatedHistory() {
+        return !events.isEmpty() && events.firstKey() > 1L;
+    }
+
+    synchronized long oldestId() {
+        return events.isEmpty() ? -1L : events.firstKey();
+    }
+
     private Map<String, Object> boundedPayload(Map<String, ?> data) throws Exception {
         Map<String, Object> payload = new LinkedHashMap<>(data);
         if (JSON.writeValueAsBytes(payload).length > MAX_EVENT_DATA_BYTES) {
+            Object console = payload.get("console");
             payload.clear();
             payload.put("truncated", true);
             payload.put("summary", "Event payload exceeded the retained event size limit");
+            if (console instanceof String text && !text.isEmpty()) payload.put("console", text.length() <= 4000 ? text : text.substring(0, 4000));
         }
         return payload;
     }

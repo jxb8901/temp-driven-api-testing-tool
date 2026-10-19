@@ -1,4 +1,7 @@
+import { useEffect, useState } from 'react';
 import { useAppShellContext, type ThemePreference } from './AppShell';
+import { api, type ServerJobStorageMetrics } from './api';
+import { ApiError } from './types';
 import { authUiText } from './authUiText';
 import { UserManagementPanel } from './UserManagement';
 import './SettingsPage.css';
@@ -24,6 +27,7 @@ export function SettingsPage() {
       </header>
 
       {(accessCapabilities.accountManage || authMode === 'container') && <UserManagementPanel />}
+      {accessCapabilities.systemSettingsWrite && <ServerStoragePanel />}
 
       <section className="panel att-settings-section" aria-labelledby="appearance-title">
         <div className="att-settings-section-heading">
@@ -105,4 +109,52 @@ export function SettingsPage() {
       </section>
     </section>
   );
+}
+
+function ServerStoragePanel() {
+  const [report, setReport] = useState<ServerJobStorageMetrics | null>(null);
+  const [message, setMessage] = useState('');
+  useEffect(() => {
+    const controller = new AbortController();
+    api.getServerMetrics(controller.signal).then(value => {
+      if (!controller.signal.aborted) setReport(value.jobStorage || null);
+    }).catch(error => {
+      if (controller.signal.aborted) return;
+      setMessage(error instanceof ApiError && (error.status === 401 || error.status === 403)
+        ? 'Server storage metrics require system administration.'
+        : 'Server storage metrics are unavailable.');
+    });
+    return () => controller.abort();
+  }, []);
+  const measured = typeof report?.totalBytes === 'number';
+  return <section className="panel att-settings-section" aria-labelledby="server-storage-title">
+    <div className="att-settings-section-heading">
+      <div>
+        <h2 id="server-storage-title">Server storage</h2>
+        <p className="att-settings-help">Job directory usage under server.dataDir/jobs. This is not the H2 database file, and retention does not compact H2.</p>
+      </div>
+    </div>
+    {message && <p role="status">{message}</p>}
+    {report && <dl className="att-job-overview">
+      <div><dt>Size limits</dt><dd>{report.enabled ? 'Enabled' : 'Disabled'}</dd></div>
+      <div><dt>State</dt><dd>{report.state || 'Not reported'}</dd></div>
+      <div><dt>Job directories</dt><dd>{report.enabled ? (measured ? formatBytes(report.totalBytes) : 'Not measured') : 'Not measured while size limits are disabled'}</dd></div>
+      <div><dt>High watermark</dt><dd>{report.enabled ? formatBytes(report.maxTotalBytes) : 'Not configured'}</dd></div>
+      <div><dt>Cleanup target</dt><dd>{report.enabled ? formatBytes(report.cleanupTargetBytes) : 'Not configured'}</dd></div>
+      <div><dt>Minimum retention</dt><dd>{report.minRetentionHours ?? 'Not reported'} hours</dd></div>
+      <div><dt>Last sweep</dt><dd>{report.lastSweepAt || 'No sweep recorded'}</dd></div>
+      <div><dt>Last sweep deletions</dt><dd>{report.deletedJobs ?? 'Not reported'}</dd></div>
+      <div><dt>Last sweep reclaimed</dt><dd>{typeof report.reclaimedBytes === 'number' ? formatBytes(report.reclaimedBytes) : 'Not reported'}</dd></div>
+    </dl>}
+  </section>;
+}
+
+function formatBytes(value?: number | null): string {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) return 'Not measured';
+  if (value < 1024) return `${value} B`;
+  const units = ['KiB', 'MiB', 'GiB', 'TiB'];
+  let amount = value / 1024;
+  let unit = 0;
+  while (amount >= 1024 && unit < units.length - 1) { amount /= 1024; unit += 1; }
+  return `${new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 }).format(amount)} ${units[unit]}`;
 }

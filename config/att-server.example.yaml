@@ -22,6 +22,16 @@ server:
   maxArtifacts: 1000
   # Terminal job metadata, event journals, and artifacts are removed after this many days.
   jobRetentionDays: 30
+  # Optional size quota for dataDir/jobs only. Disabled unless enabled is true.
+  # maxTotalSizeMb and a smaller cleanupTargetSizeMb are required when enabled.
+  # MiB values use 1024*1024 bytes. H2 is not counted or compacted.
+  # maxSingleJobSizeMb is not supported.
+  # jobStorage:
+  #   enabled: false
+  #   maxTotalSizeMb: 10240
+  #   cleanupTargetSizeMb: 8192
+  #   minRetentionHours: 24
+  #   cleanupIntervalMinutes: 60
   # Read-only package discovery. Each inspector runs in a bounded one-shot Worker.
   inspection:
     enabled: true

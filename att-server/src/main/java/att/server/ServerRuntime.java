@@ -98,6 +98,7 @@ final class ServerRuntime implements AutoCloseable {
     private final LoadScheduleScheduler loadScheduleScheduler;
     private final WorkerProcessLauncher processLauncher;
     private final Clock clock;
+    private volatile Map<String,Object> jobStorageReport;
     private final ConcurrentHashMap<Process,Boolean> inspectionProcesses=new ConcurrentHashMap<>();
     private final Object draftLock=new Object();
     private final ConcurrentHashMap<String,DebugDraft> debugDrafts=new ConcurrentHashMap<>();
@@ -141,7 +142,8 @@ final class ServerRuntime implements AutoCloseable {
         inspectionWatchdogs=java.util.concurrent.Executors.newSingleThreadScheduledExecutor(r->{Thread t=new Thread(r,"att-server-inspector-watchdog");t.setDaemon(true);return t;});
         inspectionWarmup=config.inspection.enabled&&config.inspection.warmup.enabled()
                 ?java.util.concurrent.Executors.newSingleThreadScheduledExecutor(r->{Thread t=new Thread(r,"att-server-inspector-warmup");t.setDaemon(true);return t;}):null;
-        recover();cleanupExpiredJobsSafely();recoverArtifactArchivesSafely();retention.scheduleWithFixedDelay(this::cleanupExpiredJobsSafely,1,1,TimeUnit.HOURS);
+        recover();reconcileDeletingJobsSafely();cleanupExpiredJobsSafely();recoverArtifactArchivesSafely();retention.scheduleWithFixedDelay(this::cleanupExpiredJobsSafely,1,1,TimeUnit.HOURS);
+        if(config.jobStorage.enabled){cleanupJobStorageSafely();retention.scheduleWithFixedDelay(this::cleanupJobStorageSafely,config.jobStorage.cleanupIntervalMinutes,config.jobStorage.cleanupIntervalMinutes,TimeUnit.MINUTES);}
         artifactMaintenance.scheduleWithFixedDelay(this::recoverArtifactArchivesSafely,5,5,TimeUnit.MINUTES);
         artifactMaintenance.scheduleWithFixedDelay(this::reconcileWorkerReleases,1,1,TimeUnit.SECONDS);
         retention.scheduleWithFixedDelay(this::expireDraftsSafely,1,1,TimeUnit.MINUTES);
@@ -166,11 +168,14 @@ final class ServerRuntime implements AutoCloseable {
             } catch(Exception ignored) { }
         }
         for(String id:store.staleJobIds()) {
+            Map<String,Object> row=store.get(id);
+            String mode=executionMode(row==null?null:String.valueOf(row.get("command")));
             store.interruptStale(id);
             Path journal=config.dataDir.resolve("jobs").resolve(id).resolve("events.jsonl");
             JobEvents events=new JobEvents(journal,config.maxEventsPerJob);
-            events.append("diagnostic",Map.of("code","ATT-SERVER-INTERRUPTED","summary","Job was interrupted by Server restart and was not rerun"));
-            events.append("result",Map.of("jobId",id,"status","ERROR"));
+            String summary="Job was interrupted by Server restart and was not rerun";
+            events.append("diagnostic",Map.of("code","ATT-SERVER-INTERRUPTED","summary",summary,"console",publishConsole(att.console.ExecutionConsoleFormatter.diagnostic(mode,"ATT-SERVER-INTERRUPTED",summary))));
+            events.append("result",Map.of("jobId",id,"status","ERROR","console",publishConsole(att.console.ExecutionConsoleFormatter.lifecycle(mode,id,"ERROR",null))));
         }
     }
     Map<String,Object> submit(String command,JsonNode input,String principal) throws Exception {
@@ -340,7 +345,7 @@ final class ServerRuntime implements AutoCloseable {
         if(("PROGRESS".equals(type)||"LOG".equals(type))&&job.executionReadyNanos==0)job.executionReadyNanos=eventNanos;
         switch(type){case "STATUS"->{String status=event.path("status").asText("");if("RUNNING".equals(status)&&"PREPARING".equals(job.status))transition(job,"RUNNING");}
             case "PROGRESS"->append(job,"progress",safe);case "LOG"->append(job,"log",safe);case "DIAGNOSTIC"->{job.diagnosticJson=JSON.writeValueAsString(safe);store.update(job);append(job,"diagnostic",safe);}
-            case "RESULT"->{if(job.processFence!=null){job.processFence.observe();rememberWorkerProcesses(job,job.processFence);}job.resultReceivedNanos=eventNanos;Object workerMetrics=safe.get("workerMetrics");if(workerMetrics instanceof Map<?,?>)job.workerMetrics=(Map<String,Object>)workerMetrics;String status=event.path("status").asText("ERROR");int code=event.path("exitCode").asInt(3);Object result=safe.get("result");job.resultJson=result==null?"{}":JSON.writeValueAsString(result);job.resultReceived=true;finish(job,normalizeTerminal(status),code);}
+            case "RESULT"->{if(job.processFence!=null){job.processFence.observe();rememberWorkerProcesses(job,job.processFence);}job.resultReceivedNanos=eventNanos;Object workerMetrics=safe.get("workerMetrics");if(workerMetrics instanceof Map<?,?>)job.workerMetrics=(Map<String,Object>)workerMetrics;String status=event.path("status").asText("ERROR");int code=event.path("exitCode").asInt(3);Object result=safe.get("result");job.resultJson=result==null?"{}":JSON.writeValueAsString(result);job.resultReceived=true;Object console=safe.get("console");finish(job,normalizeTerminal(status),code,console instanceof String consoleLine?consoleLine:null);}
             default->append(job,"log",Map.of("message","Worker emitted an unrecognized event"));}
     }
     void recordProtocolLimit(Job job,att.server.api.internal.WorkerProtocol.Frame frame) throws Exception {
@@ -2152,7 +2157,7 @@ final class ServerRuntime implements AutoCloseable {
         result.put("workers",daemons);
         return result;
     }
-    Map<String,Object> counts() throws Exception {Map<String,Object> m=new LinkedHashMap<>();for(String s:List.of("QUEUED","PREPARING","RUNNING","PASS","FAIL","ERROR","INVALID","CANCELLED"))m.put(s.toLowerCase(),store.count(s));m.put("inspection",inspectionStatistics());m.put("queueDepth",workers.getQueue().size());m.put("activeWorkers",workers.getActiveCount());m.put("completedSinceStart",completed.get());m.put("loadSchedulingEnabled",config.scheduling.enabled);if(config.scheduling.enabled){m.put("loadSchedules",store.scheduleCount());m.put("activeScheduledLoads",store.activeScheduledCount(null));m.put("loadScheduleMetrics",store.scheduleMetrics());}return m;}
+    Map<String,Object> counts() throws Exception {Map<String,Object> m=new LinkedHashMap<>();for(String s:List.of("QUEUED","PREPARING","RUNNING","PASS","FAIL","ERROR","INVALID","CANCELLED"))m.put(s.toLowerCase(),store.count(s));m.put("inspection",inspectionStatistics());m.put("queueDepth",workers.getQueue().size());m.put("activeWorkers",workers.getActiveCount());m.put("completedSinceStart",completed.get());m.put("loadSchedulingEnabled",config.scheduling.enabled);if(config.scheduling.enabled){m.put("loadSchedules",store.scheduleCount());m.put("activeScheduledLoads",store.activeScheduledCount(null));m.put("loadScheduleMetrics",store.scheduleMetrics());}m.put("jobStorage",jobStorageSnapshot());return m;}
     Path artifact(Job job,String requested) throws Exception {
         if(requested==null||requested.isBlank())throw new IllegalArgumentException("artifact path is required");
         Path base=config.dataDir.resolve("jobs").resolve(job.id).resolve("output").toRealPath();Path relative=Paths.get(requested);
@@ -2163,9 +2168,32 @@ final class ServerRuntime implements AutoCloseable {
     }
     private void transition(Job j,String next) throws Exception {synchronized(j){if(j.terminal())return;j.status=next;if("RUNNING".equals(next))j.startedAt=Instant.now();store.update(j);append(j,"status",Map.of("jobId",j.id,"status",next));}}
     // terminal() shares this monitor; SSE also waits for JobEvents' result marker before closing.
-    void finish(Job j,String status,int code) throws Exception {synchronized(j){if(j.terminal())return;j.status=status;j.exitCode=code;j.finishedAt=Instant.now();store.update(j);append(j,"status",Map.of("jobId",j.id,"status",status));Map<String,Object> result=new LinkedHashMap<>();result.put("jobId",j.id);result.put("status",status);result.put("exitCode",code);result.put("result",j.resultJson==null?null:publicJson(j.id,j.resultJson));append(j,"result",result);}}
+    void finish(Job j,String status,int code) throws Exception {finish(j,status,code,null);}
+    void finish(Job j,String status,int code,String console) throws Exception {synchronized(j){if(j.terminal())return;j.status=status;j.exitCode=code;j.finishedAt=Instant.now();store.update(j);append(j,"status",Map.of("jobId",j.id,"status",status));Map<String,Object> result=new LinkedHashMap<>();result.put("jobId",j.id);result.put("status",status);result.put("exitCode",code);result.put("result",j.resultJson==null?null:publicJson(j.id,j.resultJson));if(console!=null&&!console.isBlank())result.put("console",console);append(j,"result",result);}}
     private void finishQuietly(Job j,String status,int code,String diagnostic,String message){try{j.diagnosticJson=JSON.writeValueAsString(Map.of("code",diagnostic,"summary",message));append(j,"diagnostic",JSON.readValue(j.diagnosticJson,Map.class));finish(j,status,code);}catch(Exception ignored){j.status=status;j.exitCode=code;j.finishedAt=Instant.now();}}
-    private void append(Job j,String type,Map<String,?> data) throws Exception {j.events.append(type,data);}
+    private void append(Job j,String type,Map<String,?> data) throws Exception {
+        Map<String,Object> payload=new LinkedHashMap<>();if(data!=null)data.forEach(payload::put);
+        Object existing=payload.get("console");
+        if(existing instanceof String line&&!line.isBlank()) payload.put("console",publishConsole(line));
+        else {String line=lifecycleConsole(j,type,payload);if(line!=null&&!line.isBlank())payload.put("console",publishConsole(line));}
+        j.events.append(type,payload);
+    }
+    private static String lifecycleConsole(Job j,String type,Map<String,Object> payload) {
+        String mode=executionMode(j==null?null:j.command);
+        String jobId=payload.get("jobId") instanceof String id&&!id.isBlank()?id:j==null?"unknown":j.id;
+        if("status".equals(type)) return att.console.ExecutionConsoleFormatter.lifecycle(mode,jobId,String.valueOf(payload.get("status")),null);
+        if("result".equals(type)) return att.console.ExecutionConsoleFormatter.lifecycle(mode,jobId,String.valueOf(payload.get("status")),payload.get("exitCode") instanceof Number number?number.intValue():null);
+        if("diagnostic".equals(type)) return att.console.ExecutionConsoleFormatter.diagnostic(mode,payload.get("code") instanceof String code?code:null,payload.get("summary") instanceof String summary?summary:null);
+        return null;
+    }
+    private static String executionMode(String command) {
+        if("debug".equals(command)) return "DEBUG";
+        if("load".equals(command)) return "LOAD";
+        return "RUN";
+    }
+    private static String publishConsole(String line) {
+        return att.server.api.internal.DiagnosticSanitizer.redactAbsolutePaths(att.server.api.internal.DiagnosticSanitizer.redactText(line));
+    }
     private static String required(JsonNode node,String name){JsonNode v=node.get(name);if(v==null||!v.isTextual()||v.asText().isBlank())throw new IllegalArgumentException(name+" is required");return v.asText();}
     private static String safeText(String s,int max,String name){if(s!=null&&(s.length()>max||s.contains("\n")||s.contains("\r")))throw new IllegalArgumentException("Invalid "+name);return s;}
     private static String safeRelative(String s,String name){if(s==null||s.isBlank())return null;Path p=Paths.get(s);if(p.isAbsolute()||p.normalize().startsWith("..")||s.indexOf('\0')>=0)throw new IllegalArgumentException(name+" must stay inside PACKAGE_ROOT");return p.normalize().toString();}
@@ -2370,7 +2398,13 @@ final class ServerRuntime implements AutoCloseable {
     }
     Object publicEventData(Object data,Path output,Path packageRoot) throws Exception {
         JsonNode node=JSON.valueToTree(att.server.api.internal.DiagnosticSanitizer.sanitizeValue(data));
-        return sanitize(node,output,packageRoot);
+        JsonNode sanitized=sanitize(node,output,packageRoot);
+        if(sanitized instanceof ObjectNode object && !object.hasNonNull("console")) {
+            Map<String,Object> payload=JSON.convertValue(object,Map.class);
+            String line=att.console.ExecutionConsoleFormatter.formatPayload(payload,att.console.ExecutionConsoleFormatter.Options.published());
+            if(line!=null&&!line.isBlank()) object.put("console",publishConsole(line));
+        }
+        return sanitized;
     }
     private JsonNode publicJson(String id,String json) throws Exception {
         JsonNode node=JSON.readTree(json);Object safe=att.server.api.internal.DiagnosticSanitizer.sanitizeValue(JSON.convertValue(node,Object.class));node=JSON.valueToTree(safe);Path output=config.dataDir.resolve("jobs").resolve(id).resolve("output").toAbsolutePath().normalize();
@@ -2458,10 +2492,172 @@ final class ServerRuntime implements AutoCloseable {
 
     private void cleanupExpiredJobsSafely(){try{cleanupExpiredJobs();}catch(Exception e){java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).warning("Unable to clean expired ATT Server jobs: "+safeMessage(e));}}
     private static void deleteTree(Path root)throws java.io.IOException {
-        if(!Files.exists(root,java.nio.file.LinkOption.NOFOLLOW_LINKS))return;
-        try(java.util.stream.Stream<Path> paths=Files.walk(root)){
-            for(Path path:paths.sorted(java.util.Comparator.reverseOrder()).toArray(Path[]::new))Files.deleteIfExists(path);
+        if(!JobDirectoryUsage.deleteJobDirectory(root)) throw new java.io.IOException("Refusing to delete a symbolic link");
+    }
+    void cleanupJobStorage() throws Exception {
+        if(!config.jobStorage.enabled) return;
+        if(!reconcileDeletingJobs()) { publishStorageReport("deferred",null,null,null,null,0,0L,false); return; }
+        Path jobsRoot=config.dataDir.resolve("jobs");
+        JobDirectoryUsage.Measurement measurement=JobDirectoryUsage.measure(jobsRoot);
+        if(!measurement.complete) { publishStorageReport("measurement_failed",null,false,null,null,0,0L,false); return; }
+        if(measurement.bytes<=config.jobStorage.maxTotalBytes) { publishStorageReport("ok",measurement.bytes,true,0,0,0,0L,false); return; }
+        Instant cutoff=clock.instant().minus(java.time.Duration.ofHours(config.jobStorage.minRetentionHours));
+        long remaining=measurement.bytes;
+        int deleted=0, eligible=0, protectedJobs=0, batches=0;
+        long reclaimed=0L;
+        boolean deferred=false, quotaUnmet=false;
+        String afterFinished=null, afterId=null;
+        while(remaining>config.jobStorage.cleanupTargetBytes && batches<50) {
+            batches++;
+            List<Map<String,Object>> page=store.storageCandidates(afterFinished, afterId);
+            if(page.isEmpty()) { quotaUnmet=true; break; }
+            int deletedAtStart=deleted;
+            for(Map<String,Object> candidate:page) {
+                String id=String.valueOf(candidate.get("jobId"));
+                afterFinished=String.valueOf(candidate.get("finishedAt")); afterId=id;
+                if(remaining<=config.jobStorage.cleanupTargetBytes) break;
+                if(storageProtected(candidate, cutoff, id)) { protectedJobs++; continue; }
+                eligible++;
+                if(!artifactLifecycle.writeLock().tryLock()) { deferred=true; break; }
+                try {
+                    if(storageProtected(candidate, cutoff, id) || jobs.containsKey(id) || pendingArtifactJobs.contains(id) || store.workerMayBeAlive(id)) { protectedJobs++; eligible--; continue; }
+                    Path directory=jobsRoot.resolve(id);
+                    if(Files.isSymbolicLink(directory)) { protectedJobs++; eligible--; continue; }
+                    if(!store.markDeleting(id, cutoff)) { protectedJobs++; eligible--; continue; }
+                    long bytes=measurement.jobBytes.getOrDefault(id, JobDirectoryUsage.directoryBytes(directory));
+                    if(bytes<0 || !JobDirectoryUsage.deleteJobDirectory(directory)) { java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).warning("Job "+id+" was marked for storage deletion and will be reconciled"); continue; }
+                    store.deleteJob(id);
+                    deleted++; reclaimed=saturatedAdd(reclaimed, Math.max(0L, bytes)); remaining=Math.max(0L, remaining-Math.max(0L, bytes));
+                    store.audit("system:job-retention","JOB_STORAGE_EVICT",id,null,deletedOutcome(bytes));
+                } finally { artifactLifecycle.writeLock().unlock(); }
+            }
+            if(deferred) break;
+            if(deleted==deletedAtStart && page.size()<200) { quotaUnmet=remaining>config.jobStorage.cleanupTargetBytes; break; }
         }
+        if(!deferred && remaining>config.jobStorage.cleanupTargetBytes) {
+            OrphanSweep orphans=deleteEligibleOrphans(jobsRoot, measurement, remaining);
+            if(orphans.deferred) deferred=true;
+            deleted+=orphans.deleted; reclaimed=saturatedAdd(reclaimed, orphans.reclaimed); remaining=orphans.remaining;
+            if(!deferred && remaining>config.jobStorage.cleanupTargetBytes && orphans.deleted==0) quotaUnmet=true;
+        }
+        String state=deferred?"deferred":quotaUnmet?"quota_unmet":"ok";
+        publishStorageReport(state, measurement.complete?remaining:null, measurement.complete, eligible, protectedJobs, deleted, reclaimed, quotaUnmet && !deferred);
+        if(quotaUnmet && !deferred) store.audit("system:job-retention","JOB_STORAGE_EVICT",null,null,"QUOTA_UNMET");
+    }
+    private boolean storageProtected(Map<String,Object> candidate, Instant cutoff, String id) {
+        if(Boolean.TRUE.equals(candidate.get("artifactRecovery")) || Boolean.TRUE.equals(candidate.get("quarantined"))) return true;
+        if(jobs.containsKey(id) || pendingArtifactJobs.contains(id)) return true;
+        Object finished=candidate.get("finishedAt");
+        if(!(finished instanceof String text) || text.compareTo(cutoff.toString())>0) return true;
+        return false;
+    }
+    private OrphanSweep deleteEligibleOrphans(Path jobsRoot, JobDirectoryUsage.Measurement measurement, long remaining) throws Exception {
+        OrphanSweep sweep=new OrphanSweep(remaining);
+        if(!Files.isDirectory(jobsRoot, java.nio.file.LinkOption.NOFOLLOW_LINKS)) return sweep;
+        Instant staleBefore=clock.instant().minus(java.time.Duration.ofMinutes(15));
+        try(var children=Files.newDirectoryStream(jobsRoot)) {
+            for(Path child:children) {
+                if(remaining<=config.jobStorage.cleanupTargetBytes) break;
+                Path name=child.getFileName();
+                if(name==null || !JOB_ID.matcher(name.toString()).matches()) continue;
+                String id=name.toString();
+                if(jobs.containsKey(id) || store.jobRowExists(id) || Files.isSymbolicLink(child)) continue;
+                var attributes=Files.readAttributes(child, java.nio.file.attribute.BasicFileAttributes.class, java.nio.file.LinkOption.NOFOLLOW_LINKS);
+                if(attributes.isSymbolicLink() || attributes.lastModifiedTime().toInstant().isAfter(staleBefore)) continue;
+                long bytes=measurement.jobBytes.getOrDefault(id, -1L);
+                if(bytes<0) continue;
+                if(!artifactLifecycle.writeLock().tryLock()) { sweep.deferred=true; return sweep; }
+                try {
+                    if(jobs.containsKey(id) || pendingArtifactJobs.contains(id) || store.jobRowExists(id) || store.workerMayBeAlive(id)) continue;
+                    if(!JobDirectoryUsage.deleteJobDirectory(child)) continue;
+                    sweep.deleted++; sweep.reclaimed=saturatedAdd(sweep.reclaimed, bytes); sweep.remaining=Math.max(0L, sweep.remaining-bytes); remaining=sweep.remaining;
+                    store.audit("system:job-retention","JOB_STORAGE_EVICT",id,null,deletedOutcome(bytes));
+                } finally { artifactLifecycle.writeLock().unlock(); }
+            }
+        }
+        return sweep;
+    }
+    boolean reconcileDeletingJobs() throws Exception {
+        for(String id:store.deletingJobIds()) {
+            if(jobs.containsKey(id) || pendingArtifactJobs.contains(id)) return false;
+            if(!artifactLifecycle.writeLock().tryLock()) return false;
+            try {
+                if(jobs.containsKey(id) || pendingArtifactJobs.contains(id) || store.workerMayBeAlive(id)) return false;
+                Path directory=config.dataDir.resolve("jobs").resolve(id);
+                if(!JobDirectoryUsage.deleteJobDirectory(directory)) return false;
+                store.deleteJob(id);
+            } finally { artifactLifecycle.writeLock().unlock(); }
+        }
+        return true;
+    }
+    private void reconcileDeletingJobsSafely(){try{reconcileDeletingJobs();}catch(Exception e){java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).warning("Unable to reconcile deleting ATT Server jobs: "+safeMessage(e));}}
+    private void cleanupJobStorageSafely(){try{cleanupJobStorage();}catch(Exception e){java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).warning("Unable to apply ATT Server job storage limits: "+safeMessage(e));}}
+    private void publishStorageReport(String state,Long totalBytes,Boolean complete,Integer eligible,Integer protectedJobs,int deletedJobs,long reclaimedBytes,boolean quotaUnmet) {
+        Map<String,Object> report=storageSnapshot(state,totalBytes,complete,eligible,protectedJobs,clock.instant().toString(),deletedJobs,reclaimedBytes,quotaUnmet);
+        jobStorageReport=report;
+        try { writeStorageStatus(report); } catch(Exception failure) { java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).warning("Unable to persist job storage status"); }
+    }
+    private Map<String,Object> jobStorageSnapshot() {
+        if(!config.jobStorage.enabled) return storageSnapshot("disabled",null,null,null,null,null,null,null,false);
+        Map<String,Object> current=jobStorageReport;
+        if(current!=null) return current;
+        Map<String,Object> loaded=readStorageStatus();
+        if(loaded!=null) { jobStorageReport=loaded; return loaded; }
+        return storageSnapshot("unknown",null,null,null,null,null,null,null,false);
+    }
+    private Map<String,Object> storageSnapshot(String state,Long totalBytes,Boolean complete,Integer eligible,Integer protectedJobs,String lastSweepAt,Integer deletedJobs,Long reclaimedBytes,boolean quotaUnmet) {
+        Map<String,Object> report=new LinkedHashMap<>();
+        ServerConfig.JobStorage quota=config.jobStorage;
+        report.put("enabled",quota.enabled);
+        report.put("maxTotalBytes",quota.enabled?quota.maxTotalBytes:null);
+        report.put("cleanupTargetBytes",quota.enabled?quota.cleanupTargetBytes:null);
+        report.put("minRetentionHours",quota.minRetentionHours);
+        report.put("cleanupIntervalMinutes",quota.cleanupIntervalMinutes);
+        report.put("maxSingleJobBytes",null);
+        report.put("state",state);
+        report.put("totalBytes",totalBytes);
+        report.put("measurementComplete",complete);
+        report.put("eligibleJobs",eligible);
+        report.put("protectedJobs",protectedJobs);
+        report.put("lastSweepAt",lastSweepAt);
+        report.put("deletedJobs",deletedJobs);
+        report.put("reclaimedBytes",reclaimedBytes);
+        report.put("quotaUnmet",quotaUnmet);
+        return report;
+    }
+    private Path storageStatusPath() { return config.dataDir.resolve("job-storage-status.json"); }
+    private void writeStorageStatus(Map<String,Object> report) throws Exception {
+        Path target=storageStatusPath();
+        Files.createDirectories(target.getParent());
+        Path temporary=Files.createTempFile(target.getParent(),".job-storage-status-",".tmp");
+        try {
+            Files.write(temporary,JSON.writeValueAsBytes(report));
+            try(var channel=java.nio.channels.FileChannel.open(temporary,java.nio.file.StandardOpenOption.WRITE)){channel.force(true);}
+            Files.move(temporary,target,java.nio.file.StandardCopyOption.ATOMIC_MOVE,java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+        } finally { Files.deleteIfExists(temporary); }
+    }
+    private Map<String,Object> readStorageStatus() {
+        try {
+            Path status=storageStatusPath();
+            if(!Files.isRegularFile(status) || Files.size(status)>65536) return null;
+            JsonNode node=JSON.readTree(status.toFile());
+            if(node==null || !node.isObject() || !"ok".equals(node.path("state").asText()) && !"quota_unmet".equals(node.path("state").asText()) && !"measurement_failed".equals(node.path("state").asText()) && !"deferred".equals(node.path("state").asText()) && !"unknown".equals(node.path("state").asText())) return null;
+            Map<String,Object> loaded=JSON.convertValue(node,Map.class);
+            loaded.put("enabled",true);
+            loaded.put("maxTotalBytes",config.jobStorage.maxTotalBytes);
+            loaded.put("cleanupTargetBytes",config.jobStorage.cleanupTargetBytes);
+            loaded.put("minRetentionHours",config.jobStorage.minRetentionHours);
+            loaded.put("cleanupIntervalMinutes",config.jobStorage.cleanupIntervalMinutes);
+            loaded.put("maxSingleJobBytes",null);
+            if(loaded.get("totalBytes") instanceof Number number && number.longValue()<0) loaded.put("totalBytes",null);
+            return loaded;
+        } catch(Exception invalid) { return null; }
+    }
+    private static long saturatedAdd(long left,long right) { return right>0 && left>Long.MAX_VALUE-right ? Long.MAX_VALUE : left+Math.max(0L,right); }
+    private static String deletedOutcome(long bytes) { String outcome="DELETED:"+Math.max(0L,bytes); return outcome.length()<=32?outcome:"DELETED"; }
+    private static final class OrphanSweep {
+        int deleted; long reclaimed; long remaining; boolean deferred;
+        OrphanSweep(long remaining){this.remaining=remaining;}
     }
     @Override public void close(){closing=true;if(inspectionWarmup!=null)inspectionWarmup.shutdownNow();if(loadScheduleScheduler!=null)loadScheduleScheduler.close();retention.shutdownNow();artifactMaintenance.shutdownNow();inspectionWatchdogs.shutdownNow();synchronized(draftLock){runDrafts.clear();debugDrafts.clear();quickLoadDrafts.clear();advancedLoadDrafts.clear();catalogLoadDrafts.clear();}for(InspectionWorker worker:inspectionWorkerPool)worker.close();for(Job j:jobs.values())if(j.process!=null){try{if(j.processFence!=null){j.processFence.observe();rememberWorkerProcesses(j,j.processFence);}stopWorkerTree(j);finishQuietly(j,"ERROR",143,"ATT-SERVER-INTERRUPTED","Server shutdown interrupted the Worker");}catch(Exception ignored){if(j.processFence!=null)j.processFence.force();else forceTree(j.process);}}for(Process process:inspectionProcesses.keySet())if(process.isAlive())forceTree(process);inspectors.shutdownNow();workers.shutdownNow();streams.shutdownNow();try{workers.awaitTermination(30,TimeUnit.SECONDS);}catch(InterruptedException interrupted){Thread.currentThread().interrupt();}artifactWriters.shutdown();try{if(!artifactWriters.awaitTermination(30,TimeUnit.SECONDS))artifactWriters.shutdownNow();}catch(InterruptedException interrupted){artifactWriters.shutdownNow();Thread.currentThread().interrupt();}try{store.close();}catch(Exception ignored){}}
     private static void terminateTree(Process process){process.toHandle().descendants().forEach(ProcessHandle::destroy);process.destroy();}

@@ -75,13 +75,12 @@ public final class FrameworkRunner {
                     System.out.println(att.validation.JsonSupport.write(output));
                 } else {
                     String consoleStatus = "INVALID".equals(debug.status()) ? "ERROR" : debug.status();
-                    System.out.println("DEBUG " + consoleStatus + " | Target: " + options.debugTargetType() + " " + options.debugTargetId()
-                            + " | Duration: " + debug.durationMs() + "ms");
+                    System.out.println(att.console.ExecutionConsoleFormatter.debugComplete(consoleStatus, options.debugTargetType(), options.debugTargetId(), debug.durationMs()));
                     if (!options.quiet()) {
-                        System.out.println("Log: " + cliDisplayPath(debug.paths().get("log"), root));
-                        System.out.println("Result: " + cliDisplayPath(debug.paths().get("result"), root));
+                        System.out.println(att.console.ExecutionConsoleFormatter.labeledPath("Log", cliDisplayPath(debug.paths().get("log"), root)));
+                        System.out.println(att.console.ExecutionConsoleFormatter.labeledPath("Result", cliDisplayPath(debug.paths().get("result"), root)));
                         if (debug.paths().containsKey("performance"))
-                            System.out.println("Performance: " + cliDisplayPath(debug.paths().get("performance"), root));
+                            System.out.println(att.console.ExecutionConsoleFormatter.labeledPath("Performance", cliDisplayPath(debug.paths().get("performance"), root)));
                     }
                     if (!debug.diagnostics().isEmpty()) System.err.println(att.core.PathPresentation.displayText(
                             att.validation.DiagnosticRenderer.exception(debug.diagnostics().get(0)), root));
@@ -124,8 +123,8 @@ public final class FrameworkRunner {
                     System.out.println(att.validation.JsonSupport.write(output));
                 }
                 else {
-                    System.out.println("Report: " + att.core.PathPresentation.displayPath(Paths.get(loadResult.paths().get("report")), root));
-                    if (!options.quiet()) System.out.println("Metrics: " + loadResult.summary().get("metrics"));
+                    System.out.println(att.console.ExecutionConsoleFormatter.reportLine(att.core.PathPresentation.displayPath(Paths.get(loadResult.paths().get("report")), root)));
+                    if (!options.quiet()) System.out.println(att.console.ExecutionConsoleFormatter.metricsLine(loadResult.summary().get("metrics")));
                 }
                 if (loadResult.exitCode() != 0) System.exit(loadResult.exitCode());
                 return;
@@ -205,18 +204,17 @@ public final class FrameworkRunner {
                 return;
             } else if (!options.quiet()) {
                 java.util.Map<String,Object> summary = run.summary();
-                System.out.printf(options.verbose() ? "[4/4] Complete: total=%s, passed=%s, failed=%s, error=%s, skipped=%s, invalid=%s%n"
-                                : "Complete: total=%s, passed=%s, failed=%s, error=%s, skipped=%s, invalid=%s%n",
-                        summary.get("total"), summary.get("passed"), summary.get("failed"), summary.get("error"), summary.get("skipped"), summary.get("invalid"));
-                if (run.paths().get("report") != null) System.out.println("Report: " + att.core.PathPresentation.displayPath(Paths.get(run.paths().get("report")), root));
+                System.out.println(att.console.ExecutionConsoleFormatter.runComplete(options.verbose(),
+                        summary.get("total"), summary.get("passed"), summary.get("failed"), summary.get("error"), summary.get("skipped"), summary.get("invalid")));
+                if (run.paths().get("report") != null) System.out.println(att.console.ExecutionConsoleFormatter.reportLine(att.core.PathPresentation.displayPath(Paths.get(run.paths().get("report")), root)));
             } else {
                 java.util.Map<String,Object> summary = run.summary();
-                System.out.printf("Complete: total=%s, passed=%s, failed=%s, error=%s, skipped=%s, invalid=%s%n",
-                        summary.get("total"), summary.get("passed"), summary.get("failed"), summary.get("error"), summary.get("skipped"), summary.get("invalid"));
-                if (run.paths().get("report") != null) System.out.println("Report: " + att.core.PathPresentation.displayPath(Paths.get(run.paths().get("report")), root));
+                System.out.println(att.console.ExecutionConsoleFormatter.runComplete(false,
+                        summary.get("total"), summary.get("passed"), summary.get("failed"), summary.get("error"), summary.get("skipped"), summary.get("invalid")));
+                if (run.paths().get("report") != null) System.out.println(att.console.ExecutionConsoleFormatter.reportLine(att.core.PathPresentation.displayPath(Paths.get(run.paths().get("report")), root)));
                 for (java.util.Map<String,Object> failure : run.caseFailures()) {
-                    System.err.println("[RUN] " + failure.get("status") + " case=" + failure.get("caseId")
-                            + " caseLog=" + cliDisplayPath((String) failure.get("caseLog"), root));
+                    System.err.println(att.console.ExecutionConsoleFormatter.quietFailure(failure.get("status"), failure.get("caseId"),
+                            cliDisplayPath((String) failure.get("caseLog"), root)));
                 }
             }
             if (run.exitCode() != 0) System.exit(run.exitCode());
@@ -291,136 +289,9 @@ public final class FrameworkRunner {
     }
 
     private static String renderExecutionEvent(att.api.ExecutionEvent event, Path root) {
-        java.util.Map<String,Object> data = event.data();
-        Object kind = data.get("event");
-        if ("RUN_VALIDATION_SUMMARY".equals(kind)
-                || (event.type() == att.api.ExecutionEvent.Type.PROGRESS && "VALIDATION_PASS".equals(event.status())))
-            return "[1/4] V" + data.get("productVersion") + " validation PASS: "
-                + data.get("suites") + " suites, " + data.get("cases") + " cases, " + data.get("templates") + " templates, " + data.get("tools") + " tools";
-        if ("RUN_SELECTION_SUMMARY".equals(kind)) return "[2/4] Selected: " + data.get("cases") + " cases from " + data.get("suites") + " suites";
-        if ("RUN_EXECUTION_START".equals(kind)) return "[3/4] " + event.message();
-        if ("VALIDATION_DIAGNOSTIC".equals(kind)) {
-            Object value = data.get("diagnostic");
-            if (value instanceof java.util.Map) return renderValidationDiagnostic(
-                    (java.util.Map<?,?>) att.core.PathPresentation.displayStructure(value, root));
-        }
-        if ("DEBUG_STARTED".equals(kind)) return "[DEBUG] START target=" + data.get("targetType") + ":" + data.get("targetId")
-                + " input=" + data.get("input") + " output=" + data.get("output");
-        if ("DEBUG_INPUT_RESOLVED".equals(kind)) return "[DEBUG] INPUT target=" + data.get("targetType") + ":" + data.get("targetId")
-                + " case=" + event.caseId() + " resolved=" + data.get("resolved");
-        if ("RUN_QUEUED".equals(kind)) return "[RUN] queued: " + event.message();
-        if ("RUN_STARTED".equals(kind)) return "[RUN] id=" + event.runId() + " suites=" + data.get("suites") + " output=" + data.get("output");
-        if ("RUN_CANCELLED".equals(kind)) return "[RUN] CANCELLED runId=" + event.runId();
-        if ("SUITE_STARTED".equals(kind)) return "[SUITE] file=" + data.get("file") + " cases=" + data.get("cases");
-        if ("CASE_STARTED".equals(kind)) return "[CASE] id=" + event.caseId() + " status=START";
-        if ("CASE_FINISHED".equals(kind)) return "[CASE] id=" + event.caseId() + " status=" + event.status() + " durationMs=" + event.durationMs();
-        if ("CASE_LOG_PATH".equals(kind)) return "[CASE-LOG] case=" + event.caseId() + " file=" + data.get("file");
-        if ("STAGE_STARTED".equals(kind)) return "[STAGE] case=" + event.caseId() + " stage=" + event.stage() + " template=" + data.get("template") + " status=START";
-        if ("STAGE_FINISHED".equals(kind)) return "[STAGE] case=" + event.caseId() + " stage=" + event.stage() + " template=" + data.get("template") + " status=" + event.status() + " durationMs=" + event.durationMs();
-        if ("ACTION_FINISHED".equals(kind)) return "[ACTION] case=" + event.caseId() + " stage=" + event.stage() + " action=" + event.action() + " status=" + event.status()
-                + (data.get("detail") == null ? "" : " message=" + data.get("detail"));
-        if (event.type() == att.api.ExecutionEvent.Type.CASE_LOG) return "[CASE-LOG case=" + event.caseId() + "] " + event.message();
-        if (event.type() == att.api.ExecutionEvent.Type.STATUS && "SNAPSHOT_UPDATED".equals(event.status())) return event.message();
-        if (event.type() == att.api.ExecutionEvent.Type.STATUS && "CANCELLED".equals(event.status()) && data.get("target") != null)
-            return "[DEBUG] CANCELLED target=" + data.get("target");
-        return event.message();
-    }
-
-    private static String renderValidationDiagnostic(java.util.Map<?,?> diagnostic) {
-        StringBuilder out = new StringBuilder();
-        appendDiagnosticLines(out, "  [" + diagnostic.get("severity") + "] " + diagnostic.get("code") + ": ",
-                "\n    ", diagnostic.get("message"));
-        java.util.Map<?,?> source = diagnostic.get("source") instanceof java.util.Map
-                ? (java.util.Map<?,?>) diagnostic.get("source") : java.util.Collections.emptyMap();
-        String[] locationKeys = {"file", "field", "sheet", "row", "column", "template", "action"};
-        java.util.List<String> location = new java.util.ArrayList<String>();
-        for (String key : locationKeys) addLocation(location, key, diagnostic.get(key));
-        addLocation(location, "sourceFile", source.get("file"));
-        addLocation(location, "line", source.get("line"));
-        addLocation(location, "sourceColumn", source.get("column"));
-        addLocation(location, "endLine", source.get("endLine"));
-        addLocation(location, "endColumn", source.get("endColumn"));
-        if (!location.isEmpty()) out.append("\n    location: ").append(String.join(", ", location));
-        appendDiagnosticContext(out, diagnostic.get("context"));
-        appendDiagnosticSource(out, source);
-        appendDiagnosticSchemaViolations(out, diagnostic.get("schemaViolations"));
-        Object occurrences = diagnostic.get("occurrences");
-        if (occurrences instanceof Number && ((Number) occurrences).intValue() > 1) {
-            out.append("\n    occurrences: ").append(occurrences);
-            Object affected = diagnostic.get("affectedCases");
-            if (affected instanceof Iterable) {
-                out.append("\n    affected cases:");
-                for (Object item : (Iterable<?>) affected) out.append("\n      - ").append(flatMap(item));
-            }
-        }
-        appendDiagnosticLines(out, "\n    suggestion: ", "\n      ", diagnostic.get("suggestion"));
-        return out.toString();
-    }
-
-    private static void appendDiagnosticContext(StringBuilder out, Object value) {
-        if (!(value instanceof java.util.Map)) return;
-        for (java.util.Map.Entry<?,?> item : ((java.util.Map<?,?>) value).entrySet())
-            out.append('\n').append("    ").append(item.getKey()).append(": ").append(item.getValue());
-    }
-
-    private static void appendDiagnosticSource(StringBuilder out, java.util.Map<?,?> source) {
-        Object excerptValue = source.get("excerpt");
-        if (excerptValue == null) return;
-        String[] lines = String.valueOf(excerptValue).split("\\r?\\n", -1);
-        int line = number(source.get("line"), 1);
-        int column = number(source.get("column"), 1);
-        int start = number(source.get("excerptStartLine"), line);
-        int caretLine = Math.max(0, Math.min(lines.length - 1, line - start));
-        String markedLine = lines[caretLine];
-        int spaces = Math.min(Math.max(0, column - 1), markedLine.length());
-        for (int index = 0; index < lines.length; index++) {
-            out.append('\n').append("    ").append(lines[index]);
-            if (index == caretLine) {
-                out.append('\n').append("    ");
-                for (int col = 0; col < spaces; col++) out.append(markedLine.charAt(col) == '\t' ? '\t' : ' ');
-                out.append('^');
-            }
-        }
-    }
-
-    private static void appendDiagnosticSchemaViolations(StringBuilder out, Object value) {
-        if (!(value instanceof Iterable)) return;
-        java.util.Iterator<?> iterator = ((Iterable<?>) value).iterator();
-        if (!iterator.hasNext()) return;
-        out.append("\n    schemaViolations:");
-        while (iterator.hasNext()) {
-            Object item = iterator.next();
-            if (!(item instanceof java.util.Map)) { out.append("\n      ").append(item); continue; }
-            java.util.Map<?,?> violation = (java.util.Map<?,?>) item;
-            out.append("\n      ");
-            Object path = violation.get("path"), keyword = violation.get("keyword"), message = violation.get("message");
-            if (path != null && !String.valueOf(path).isEmpty()) out.append(path).append(' ');
-            if (keyword != null && !String.valueOf(keyword).isEmpty()) out.append('[').append(keyword).append("] ");
-            out.append(message == null ? violation : message);
-        }
-    }
-
-    private static void addLocation(java.util.List<String> location, String key, Object value) {
-        if (value != null && !String.valueOf(value).isEmpty()) location.add(key + "=" + value);
-    }
-
-    private static void appendDiagnosticLines(StringBuilder out, String first, String rest, Object value) {
-        if (value == null) return;
-        String[] lines = String.valueOf(value).split("\\r?\\n", -1);
-        out.append(first).append(lines[0]);
-        for (int i = 1; i < lines.length; i++) out.append(rest).append(lines[i]);
-    }
-
-    private static int number(Object value, int fallback) {
-        return value instanceof Number ? ((Number) value).intValue() : fallback;
-    }
-
-    private static String flatMap(Object value) {
-        if (!(value instanceof java.util.Map)) return String.valueOf(value);
-        java.util.List<String> items = new java.util.ArrayList<String>();
-        for (java.util.Map.Entry<?,?> entry : ((java.util.Map<?,?>) value).entrySet())
-            items.add(entry.getKey() + "=" + entry.getValue());
-        return String.join(", ", items);
+        return att.console.ExecutionConsoleFormatter.format(event.type().name(), event.runId(), event.caseId(),
+                event.stage(), event.action(), event.status(), event.durationMs(), event.message(), event.data(),
+                att.console.ExecutionConsoleFormatter.Options.cli(value -> att.core.PathPresentation.displayStructure(value, root)));
     }
 
     private static FrameworkConfig loadConfig(CliOptions options, Path root) throws Exception {
