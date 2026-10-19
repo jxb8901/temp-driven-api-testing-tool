@@ -33,11 +33,12 @@ public final class ServerConfig {
     public final InlineLoad inlineLoad;
     public final Scheduling scheduling;
     public final Authorization authorization;
+    public final JobStorage jobStorage;
 
     private ServerConfig(Path dataDir, Path runtimeConfigPath, Path javaExecutable, int maxConcurrent, int queuedLimit,
                          int maxConcurrentLoad, int gracefulStopMs, int jobRetentionDays,
                          int workerHeapInitialMb, int workerHeapMaxMb, int maxRequestBytes,
-                         int maxEventsPerJob, int maxArtifacts, boolean authenticationRequired, String authMode, Security security, Map<String, Path> packages, List<Path> allowedRoots, List<Path> workerLibraryDirs, Inspection inspection, InlineLoad inlineLoad, Scheduling scheduling, Authorization authorization) {
+                         int maxEventsPerJob, int maxArtifacts, boolean authenticationRequired, String authMode, Security security, Map<String, Path> packages, List<Path> allowedRoots, List<Path> workerLibraryDirs, Inspection inspection, InlineLoad inlineLoad, Scheduling scheduling, Authorization authorization, JobStorage jobStorage) {
         this.dataDir=dataDir; this.runtimeConfigPath=runtimeConfigPath; this.javaExecutable=javaExecutable; this.maxConcurrent=maxConcurrent;
         this.queuedLimit=queuedLimit; this.maxConcurrentLoad=maxConcurrentLoad; this.gracefulStopMs=gracefulStopMs;this.jobRetentionDays=jobRetentionDays;
         this.workerHeapInitialMb=workerHeapInitialMb;this.workerHeapMaxMb=workerHeapMaxMb;
@@ -49,6 +50,7 @@ public final class ServerConfig {
         this.inlineLoad=inlineLoad;
         this.scheduling=scheduling;
         this.authorization=authorization;
+        this.jobStorage=jobStorage;
     }
 
     public static ServerConfig load(Path file) throws Exception {
@@ -114,6 +116,7 @@ public final class ServerConfig {
         if(heapInitial>0&&heapMax==0)throw new IllegalArgumentException("workers.heapInitialMb requires workers.heapMaxMb");
         if(heapInitial>heapMax)throw new IllegalArgumentException("workers.heapInitialMb must not exceed workers.heapMaxMb");
         int retention=intValue(server,"jobRetentionDays",30,1,3650);
+        JobStorage jobStorage=jobStorage(server.get("jobStorage"));
         int request=intValue(server,"maxRequestBytes",1048576,1024,16777216), events=intValue(server,"maxEventsPerJob",10000,100,1000000),
             artifacts=intValue(server,"maxArtifacts",1000,1,100000);boolean authenticationRequired=boolValue(server,"authenticationRequired",true);
         Map<?,?> auth=server.get("auth")==null?Collections.emptyMap():map(server.get("auth"),"server.auth");
@@ -133,7 +136,7 @@ public final class ServerConfig {
         for(Path packageRoot:resolved.values()) if(packageRoot.startsWith(realData)||realData.startsWith(packageRoot))
             throw new IllegalArgumentException("server.dataDir must be separate from configured package roots");
         privateDirectory(realData);privateDirectory(realData.resolve("db"));privateDirectory(realData.resolve("jobs"));
-        return new ServerConfig(realData,runtimeConfig,java,max,queue,load,stop,retention,heapInitial,heapMax,request,events,artifacts,authenticationRequired,authMode,security,resolved,allowed,workerLibraries,inspection,inlineLoad,scheduling,authorization);
+        return new ServerConfig(realData,runtimeConfig,java,max,queue,load,stop,retention,heapInitial,heapMax,request,events,artifacts,authenticationRequired,authMode,security,resolved,allowed,workerLibraries,inspection,inlineLoad,scheduling,authorization,jobStorage);
     }
 
     public static Path configPath() {
@@ -502,5 +505,48 @@ public final class ServerConfig {
         }
         public List<String> safeTextSources(String packageId) { return safeTextSources.getOrDefault(packageId,List.of()); }
         public List<String> externalTextSources(String packageId) { return externalTextSources.getOrDefault(packageId,List.of()); }
+    }
+
+    /** Size quota for {@code server.dataDir/jobs}. Disabled unless explicitly configured. */
+    public static final class JobStorage {
+        public static final JobStorage DISABLED = new JobStorage(false, 0L, 0L, 24, 60);
+        public final boolean enabled;
+        public final long maxTotalBytes, cleanupTargetBytes;
+        public final int minRetentionHours, cleanupIntervalMinutes;
+
+        private JobStorage(boolean enabled, long maxTotalBytes, long cleanupTargetBytes, int minRetentionHours, int cleanupIntervalMinutes) {
+            this.enabled=enabled; this.maxTotalBytes=maxTotalBytes; this.cleanupTargetBytes=cleanupTargetBytes;
+            this.minRetentionHours=minRetentionHours; this.cleanupIntervalMinutes=cleanupIntervalMinutes;
+        }
+    }
+
+    private static JobStorage jobStorage(Object node) {
+        if (node == null) return JobStorage.DISABLED;
+        Map<?,?> values = map(node, "server.jobStorage");
+        Set<String> allowed = Set.of("enabled", "maxTotalSizeMb", "cleanupTargetSizeMb", "minRetentionHours", "cleanupIntervalMinutes");
+        for (Object key : values.keySet()) if (!(key instanceof String name) || !allowed.contains(name)) {
+            if ("maxSingleJobSizeMb".equals(String.valueOf(key)))
+                throw new IllegalArgumentException("server.jobStorage.maxSingleJobSizeMb is not supported; an individual Job is not deleted only because it is large");
+            throw new IllegalArgumentException("server.jobStorage contains an unknown setting");
+        }
+        boolean enabled = boolValue(values, "enabled", false);
+        int minHours = intValue(values, "minRetentionHours", 24, 0, 87600);
+        int interval = intValue(values, "cleanupIntervalMinutes", 60, 1, 1440);
+        if (!enabled) return new JobStorage(false, 0L, 0L, minHours, interval);
+        if (!values.containsKey("maxTotalSizeMb") || !values.containsKey("cleanupTargetSizeMb"))
+            throw new IllegalArgumentException("server.jobStorage.maxTotalSizeMb and cleanupTargetSizeMb are required when size limits are enabled");
+        long maxMb = longMb(values, "maxTotalSizeMb");
+        long targetMb = longMb(values, "cleanupTargetSizeMb");
+        if (targetMb >= maxMb) throw new IllegalArgumentException("server.jobStorage.cleanupTargetSizeMb must be less than maxTotalSizeMb");
+        return new JobStorage(true, maxMb * 1024L * 1024L, targetMb * 1024L * 1024L, minHours, interval);
+    }
+
+    private static long longMb(Map<?,?> map, String key) {
+        Object value = map.get(key);
+        if (!(value instanceof Number number)) throw new IllegalArgumentException("server.jobStorage."+key+" must be an integer");
+        double exact = number.doubleValue();
+        if (exact != Math.rint(exact) || exact < 1 || exact > 10_485_760)
+            throw new IllegalArgumentException("server.jobStorage."+key+" must be an integer number of MiB from 1 to 10485760");
+        return number.longValue();
     }
 }

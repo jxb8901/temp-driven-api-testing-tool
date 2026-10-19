@@ -405,7 +405,7 @@ public final class ApiServlet extends HttpServlet {
                 wakeup.poll(15,TimeUnit.SECONDS);
                 if(sessionHash!=null&&!runtime.auth.sessionStillValid(sessionHash))break;
                 List<Map<String,Object>> events=journal.after(cursor,100);
-                for(Map<String,Object> event:events){long id=((Number)event.get("id")).longValue();out.print("id: "+id+"\nevent: "+event.get("event")+"\ndata: "+ServerRuntime.JSON.writeValueAsString(runtime.publicEventData(event.get("data"),outputDirectory,packageRoot))+"\n\n");cursor=id;}
+                for(Map<String,Object> event:events){long id=((Number)event.get("id")).longValue();Object projected=runtime.publicEventData(event.get("data"),outputDirectory,packageRoot);if(projected instanceof com.fasterxml.jackson.databind.node.ObjectNode node && journal.truncatedHistory() && id==journal.oldestId()) node.put("historyTruncated",true);out.print("id: "+id+"\nevent: "+event.get("event")+"\ndata: "+ServerRuntime.JSON.writeValueAsString(projected)+"\n\n");cursor=id;}
                 if(!events.isEmpty()){out.flush();if(out.checkError())return;lastWrite=System.nanoTime();}
                 if(journal.hasMore(cursor)){wakeup.offer(Boolean.TRUE);continue;}
                 if(runtime.terminal(jobId)&&journal.resultDeliveredThrough(cursor)&&!journal.hasMore(cursor))break;

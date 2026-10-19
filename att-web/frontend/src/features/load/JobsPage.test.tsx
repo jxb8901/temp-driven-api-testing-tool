@@ -284,7 +284,7 @@ describe('JobsPage React feature', () => {
     await act(async () => { await Promise.resolve(); });
 
     const tabs = [
-      ['Overview', 'overview'], ['Live events', 'live'], ['Events', 'events'],
+      ['Overview', 'overview'], ['Live Output', 'live'], ['Events', 'events'],
       ['Results', 'results'], ['Artifacts', 'artifacts'], ['Metrics', 'metrics'],
     ];
     expect([...host.querySelectorAll('[role="tab"]')].map(tab => tab.textContent)).toEqual(tabs.map(([label]) => label));
@@ -309,14 +309,15 @@ describe('JobsPage React feature', () => {
     expect(subscribe).toBeDefined();
     await act(async () => {
       subscribe?.onOpen();
-      subscribe?.onEvent({ id: 'evt-1', type: 'log', data: { message: 'worker ready' } });
+      subscribe?.onEvent({ id: 'evt-1', type: 'log', data: { message: 'worker ready', console: '[RUN] worker ready' } });
       subscribe?.onEvent({ id: 'evt-2', type: 'status', data: { status: 'CANCELLED' } });
     });
     expect(host.querySelector('#job-panel-overview')?.textContent).toContain('CANCELLED');
     const liveTab = host.querySelector('#job-tab-live');
     expect(liveTab).not.toBeNull();
     await click(liveTab!);
-    expect(host.querySelector('#job-panel-live')?.textContent).toContain('worker ready');
+    expect(host.querySelector('#job-panel-live pre.att-console')?.textContent).toContain('[RUN] worker ready');
+    expect(host.querySelector('#job-panel-live pre.att-console')?.innerHTML).not.toContain('<');
     expect(host.querySelector('#job-panel-live')?.textContent).toContain('connected');
   });
 
@@ -447,11 +448,12 @@ describe('JobsPage React feature', () => {
       handlers?.onEvent({ id: '4', type: 'diagnostic', data: { code: 'ATT-EXAMPLE', summary: 'safe warning' } });
       handlers?.onEvent({ id: '2', type: 'progress', data: { message: 'half complete' } });
     });
-    await click(host.querySelector('#job-tab-live')!);
-    const panel = host.querySelector('#job-panel-live')!;
-    const labels = [...panel.querySelectorAll('.att-job-events li strong')].map(item => item.textContent);
+    await click(host.querySelector('#job-tab-events')!);
+    const panel = host.querySelector('#job-panel-events')!;
+    const labels = [...panel.querySelectorAll('.att-job-events summary strong')].map(item => item.textContent);
     expect(labels).toEqual(['status', 'progress', 'log', 'diagnostic', 'result']);
     expect(panel.querySelector('.att-job-events time')?.getAttribute('datetime')).toBeTruthy();
+    expect(panel.textContent).toContain('"message": "worker log"');
 
     const eventType = (type: string) => panel.querySelector<HTMLInputElement>(`input[aria-label="${type}"]`)!;
     for (const type of ['log', 'diagnostic', 'result']) await click(eventType(type));
@@ -462,7 +464,18 @@ describe('JobsPage React feature', () => {
     expect(panel.querySelectorAll('.att-job-events li')).toHaveLength(6);
     expect(api.subscribeJob).toHaveBeenCalledTimes(1);
     expect(panel.querySelector('[aria-label="Search events"]')).not.toBeNull();
-    expect([...panel.querySelectorAll('button')].some(button => button.textContent === 'Copy visible events')).toBe(true);
+
+    await click(host.querySelector('#job-tab-live')!);
+    const live = host.querySelector('#job-panel-live')!;
+    expect(live.textContent).toContain('This Job has no console lines');
+    await act(async () => handlers?.onEvent({ id: '7', type: 'log', data: { message: '<b>secret</b>', console: '[RUN] case=one\n[RUN] case=two' } }));
+    expect(live.querySelector('pre.att-console')?.textContent).toBe('[RUN] case=one\n[RUN] case=two');
+    expect(live.querySelector('pre.att-console')?.innerHTML).not.toContain('<b>');
+    expect([...live.querySelectorAll('button')].some(button => button.textContent === 'Copy Output')).toBe(true);
+    await click([...live.querySelectorAll('button')].find(button => button.textContent === 'Clear view')!);
+    expect(live.querySelector('pre.att-console')).toBeNull();
+    await act(async () => handlers?.onEvent({ id: '8', type: 'log', data: { console: '[RUN] after clear' } }));
+    expect(live.querySelector('pre.att-console')?.textContent).toBe('[RUN] after clear');
   });
 
   it('distinguishes an open stream with no events from reconnecting', async () => {
@@ -471,8 +484,152 @@ describe('JobsPage React feature', () => {
     const handlers = vi.mocked(api.subscribeJob).mock.calls[0]?.[1];
     await click(host.querySelector('#job-tab-live')!);
     await act(async () => handlers?.onOpen());
-    expect(host.querySelector('#job-panel-live')?.textContent).toContain('Connected; no events have been emitted yet.');
+    expect(host.querySelector('#job-panel-live')?.textContent).toContain('Connected; no console lines have been emitted yet.');
     await act(async () => handlers?.onError());
-    expect(host.querySelector('#job-panel-live')?.textContent).toContain('Reconnecting to live events; no recent events are available.');
+    expect(host.querySelector('#job-panel-live')?.textContent).toContain('Reconnecting to live output; no recent console lines are available.');
+    await act(async () => handlers?.onEvent({ id: '9', type: 'result', data: { status: 'PASS', console: '[RUN] status=PASS jobId=JOB-204 exitCode=0' } }));
+    await act(async () => handlers?.onError());
+    expect(host.querySelector('#job-panel-live')?.textContent).toContain('completed');
+    expect(host.querySelector('#job-panel-live')?.textContent).not.toContain('Reconnecting to live output');
+  });
+
+  it('keeps a resizable terminal console and an independent, informative events view', async () => {
+    const api = makeApi();
+    await act(async () => root.render(<JobsPage api={api} jobId="JOB-204" onOpenJob={vi.fn()} onShowList={vi.fn()} confirmCancel={() => true} />));
+    const handlers = vi.mocked(api.subscribeJob).mock.calls[0]?.[1];
+    await act(async () => handlers?.onEvent({
+      id: '1', type: 'progress',
+      data: { status: 'RUNNING', phase: 'STEADY', sequence: 4, message: 'steady progress', metrics: { completed: 4, failed: 0 } },
+    }));
+    await act(async () => handlers?.onEvent({ id: '2', type: 'log', data: { console: '[LOAD] status=RUNNING phase=STEADY', message: 'console line' } }));
+
+    await click(host.querySelector('#job-tab-events')!);
+    const events = host.querySelector('#job-panel-events')!;
+    const first = events.querySelector('details')!;
+    expect(first.open).toBe(true);
+    expect(first.querySelector('.att-event-preview')?.textContent).toContain('status=RUNNING');
+    expect(first.querySelector('.att-event-preview')?.textContent).toContain('phase=STEADY');
+    expect(first.querySelector('.att-event-preview')?.textContent).toContain('sequence=4');
+    expect(first.querySelector('.att-event-preview')?.textContent).toContain('message=steady progress');
+    expect(first.querySelector('.att-event-preview')?.textContent).toContain('metrics=completed=4, failed=0');
+    expect(first.querySelector('pre.att-event-payload')?.textContent).toContain('"phase": "STEADY"');
+    await click(first.querySelector('summary')!);
+    expect(first.open).toBe(false);
+    expect(first.querySelector('.att-event-preview')?.textContent).toContain('status=RUNNING');
+    await click([...events.querySelectorAll('button')].find(button => button.textContent === 'Expand all')!);
+    expect(events.querySelector('details')?.open).toBe(true);
+    await click([...events.querySelectorAll('button')].find(button => button.textContent === 'Collapse all')!);
+    expect([...events.querySelectorAll('details')].every(item => !item.open)).toBe(true);
+
+    const list = events.querySelector('.att-job-events') as HTMLElement;
+    Object.defineProperty(list, 'scrollHeight', { configurable: true, value: 800 });
+    Object.defineProperty(list, 'clientHeight', { configurable: true, value: 200 });
+    await click([...events.querySelectorAll('button')].find(button => button.textContent === 'Resume auto-scroll')!);
+    expect(list.scrollTop).toBe(800);
+    list.scrollTop = 40;
+    await act(async () => { list.dispatchEvent(new Event('scroll', { bubbles: true })); });
+    expect([...events.querySelectorAll('button')].some(button => button.textContent === 'Resume auto-scroll')).toBe(true);
+    await act(async () => handlers?.onEvent({ id: '3', type: 'progress', data: { status: 'RUNNING', phase: 'STEADY', sequence: 5, message: 'still arriving' } }));
+    expect(list.scrollTop).toBe(40);
+    expect(api.subscribeJob).toHaveBeenCalledTimes(1);
+    const logFilter = events.querySelector<HTMLInputElement>('input[aria-label="log"]')!;
+    await click(logFilter);
+    expect(events.textContent).toContain('sequence=5');
+    expect(events.textContent).not.toContain('console line');
+    expect(events.querySelector<HTMLInputElement>('[aria-label="Events auto-scroll"]')?.checked).toBe(true);
+    await click(host.querySelector('#job-tab-live')!);
+    const live = host.querySelector('#job-panel-live')!;
+    const liveScroll = live.querySelector<HTMLInputElement>('[aria-label="Live output auto-scroll"]')!;
+    expect(liveScroll.checked).toBe(true);
+    await click(liveScroll);
+    expect(liveScroll.checked).toBe(false);
+    await click(host.querySelector('#job-tab-events')!);
+    expect(host.querySelector<HTMLInputElement>('#job-panel-events [aria-label="Events auto-scroll"]')?.checked).toBe(true);
+    expect([...host.querySelector('#job-panel-events')!.querySelectorAll('button')].some(button => button.textContent === 'Resume auto-scroll')).toBe(true);
+    await click(host.querySelector('#job-tab-live')!);
+    expect(host.querySelector<HTMLInputElement>('#job-panel-live [aria-label="Live output auto-scroll"]')?.checked).toBe(false);
+
+    const search = live.querySelector<HTMLInputElement>('[aria-label="Search output"]')!;
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+      setter?.call(search, 'STEADY');
+      search.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    const consoleView = live.querySelector('pre.att-console') as HTMLElement;
+    expect(consoleView).not.toBeNull();
+    expect(consoleView.style.backgroundColor.replace(/\s/g, '')).toMatch(/rgb\(13,17,23\)|#0d1117/i);
+    expect(consoleView.style.color.replace(/\s/g, '')).toMatch(/rgb\(245,247,250\)|#f5f7fa/i);
+    expect(consoleView.style.whiteSpace).toBe('pre');
+    expect(consoleView.style.overflow).toBe('auto');
+    expect(consoleView.textContent).toContain('[LOAD] status=RUNNING phase=STEADY');
+    const shell = live.querySelector('.att-console-shell') as HTMLElement;
+    const resize = live.querySelector('[aria-label="Resize live output"]') as HTMLElement;
+    expect(resize).not.toBeNull();
+    expect(live.textContent).toContain('Maximize');
+    const before = Number(resize.getAttribute('aria-valuenow'));
+    await act(async () => {
+      resize.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, clientY: 100, pointerId: 1 }));
+      resize.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, clientY: 164, pointerId: 1 }));
+      resize.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, clientY: 164, pointerId: 1 }));
+    });
+    expect(Number(resize.getAttribute('aria-valuenow'))).toBe(before + 64);
+    expect(shell.style.height).toBe(`${before + 64}px`);
+    const tabs = host.querySelector('[role="tablist"]')!;
+    await click([...live.querySelectorAll('button')].find(button => button.textContent === 'Maximize')!);
+    expect(shell.getAttribute('data-maximized')).toBe('true');
+    expect(shell.style.position).toBe('fixed');
+    expect(shell.contains(tabs)).toBe(false);
+    expect(host.querySelector('#job-tab-overview')).not.toBeNull();
+    expect(search.value).toBe('STEADY');
+    expect(consoleView.textContent).toContain('[LOAD] status=RUNNING phase=STEADY');
+    expect(api.subscribeJob).toHaveBeenCalledTimes(1);
+    await click(shell.querySelector('button')!);
+    expect(shell.getAttribute('data-maximized')).toBe('false');
+    expect(shell.style.position).toBe('');
+    expect(shell.style.height).toBe(`${before + 64}px`);
+    expect(live.querySelector('[aria-label="Resize live output"]')).not.toBeNull();
+  });
+
+  it('does not treat the browser event window as a truncated Server journal', async () => {
+    const api = makeApi();
+    await act(async () => root.render(<JobsPage api={api} jobId="JOB-204" onOpenJob={vi.fn()} onShowList={vi.fn()} confirmCancel={() => true} />));
+    const handlers = vi.mocked(api.subscribeJob).mock.calls[0][1];
+    await act(async () => {
+      for (let id = 1; id <= 501; id += 1) handlers.onEvent({ id: String(id), type: 'log', data: { message: `event-${id}` } });
+    });
+    const note = host.querySelector('#job-panel-live [role="note"]');
+    expect(note?.textContent ?? '').not.toContain('Earlier journal events');
+    expect(note?.textContent).toContain('This browser keeps the latest 500 events.');
+    const ids = [...host.querySelectorAll('#job-panel-events code')].map(node => node.textContent);
+    expect(ids).toHaveLength(500);
+    expect(ids).not.toContain('#1');
+    expect(ids[0]).toBe('#2');
+    expect(ids.at(-1)).toBe('#501');
+  });
+
+  it('keeps the Server truncation warning after the flagged event leaves the browser window', async () => {
+    const api = makeApi();
+    await act(async () => root.render(<JobsPage api={api} jobId="JOB-204" onOpenJob={vi.fn()} onShowList={vi.fn()} confirmCancel={() => true} />));
+    const handlers = vi.mocked(api.subscribeJob).mock.calls[0][1];
+    await act(async () => {
+      handlers.onEvent({ id: '1', type: 'log', data: { historyTruncated: true, message: 'oldest retained boundary' } });
+      handlers.onEvent({ id: '2', type: 'log', data: { message: 'still in the journal' } });
+    });
+    const early = host.querySelector('#job-panel-live [role="note"]');
+    expect(early?.textContent).toContain('Earlier journal events are no longer retained.');
+    expect(early?.textContent ?? '').not.toContain('This browser keeps the latest 500 events.');
+    await act(async () => {
+      for (let id = 3; id <= 501; id += 1) handlers.onEvent({ id: String(id), type: 'log', data: { message: `event-${id}` } });
+    });
+    const note = host.querySelector('#job-panel-live [role="note"]');
+    expect(note?.textContent).toContain('Earlier journal events are no longer retained.');
+    expect(note?.textContent).toContain('This browser keeps the latest 500 events.');
+    const ids = [...host.querySelectorAll('#job-panel-events code')].map(node => node.textContent);
+    expect(ids).toHaveLength(500);
+    expect(ids).not.toContain('#1');
+    expect(ids[0]).toBe('#2');
+    await act(async () => root.render(<JobsPage api={api} jobId="JOB-205" onOpenJob={vi.fn()} onShowList={vi.fn()} confirmCancel={() => true} />));
+    expect(host.querySelector('#job-panel-live [role="note"]')).toBeNull();
+    expect(api.subscribeJob).toHaveBeenCalledTimes(2);
   });
 });

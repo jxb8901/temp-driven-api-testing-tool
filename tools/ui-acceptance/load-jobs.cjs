@@ -84,7 +84,7 @@ async function main() {
           return route.fulfill({
             status: 200,
             contentType: 'text/event-stream; charset=utf-8',
-            body: 'id: 1\nevent: status\ndata: {"status":"RUNNING"}\nretry: 50\n\n',
+            body: 'id: 1\nevent: status\ndata: {"status":"RUNNING","console":"[LOAD] status=RUNNING jobId=JOB-LOAD-204"}\nretry: 50\n\n',
           });
         }
         if (eventConnectionCount > 1) {
@@ -134,7 +134,7 @@ async function main() {
     assert.equal(reconnected, true, 'EventSource should retry the stream after a connection ends');
 
     const tabs = [
-      ['Overview', 'Status'], ['Live events', 'Live events'], ['Events', 'Events'],
+      ['Overview', 'Status'], ['Live Output', '[LOAD] status=RUNNING jobId=JOB-LOAD-204'], ['Events', 'Events'],
       ['Results', 'Results'], ['Artifacts', 'Artifacts'], ['Metrics', 'Metrics'],
     ];
     for (const [name, content] of tabs) {
