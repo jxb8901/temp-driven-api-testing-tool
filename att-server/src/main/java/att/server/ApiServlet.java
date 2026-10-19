@@ -93,10 +93,10 @@ public final class ApiServlet extends HttpServlet {
             if(path.matches("/jobs/[^/]+/artifacts/archive\\.zip")){
                 String id=segment(path,2);
                 try(ServerRuntime.ArtifactRead read=runtime.openArtifactArchive(id,true)) {
-                    Path zip=read.path;long size=Files.size(zip);
+                    long size=read.length();
                     res.setContentType("application/zip");res.setHeader("X-Content-Type-Options","nosniff");res.setHeader("Cache-Control","private, no-store");
                     res.setHeader("Content-Disposition","attachment; filename=\""+id+"-artifacts.zip\"");res.setContentLengthLong(size);
-                    try(var in=Files.newInputStream(zip)){in.transferTo(res.getOutputStream());}
+                    read.writeTo(res.getOutputStream());
                 }
                 return;
             }
