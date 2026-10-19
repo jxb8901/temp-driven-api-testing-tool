@@ -135,7 +135,10 @@ jobs:
         # Each test class gets a separate JVM, isolating Tomcat, global properties,
         # authentication state and temporary database files. Tests within a class
         # remain sequential; no tests or assertions are excluded.
-        run: mvn -B -ntp -U -T 1C -pl att-worker,att-server -am -Datt.skipJava8ModuleTests=true -Datt.skipFrontendUnitTests=true -DforkCount=2 -DreuseForks=false test
+        # ubuntu-24.04 has 4 vCPUs. Four forks overlap the long Server classes.
+        # Each test JVM is capped so four forks plus their Worker processes fit
+        # in the runner without raising the job timeout.
+        run: mvn -B -ntp -U -T 1C -pl att-worker,att-server -am -Datt.skipJava8ModuleTests=true -Datt.skipFrontendUnitTests=true -DforkCount=4 -DreuseForks=false -DargLine=-Xmx2g test
 
       - name: Upload Server unit reports on failure
         if: failure()
