@@ -43,6 +43,12 @@ final class ArtifactArchive {
     private ArtifactArchive() {}
 
     static Path build(Path output, Path archive, Publisher publisher) throws Exception {
+        ArtifactMetricsRecorder metrics = ArtifactMetricsRecorder.CURRENT.get();
+        if (metrics != null) {
+            metrics.phase("scan_classification_redaction");
+            metrics.value.sourceFiles=0L;metrics.value.sourceBytes=0L;
+            metrics.value.includedEntries=0L;metrics.value.omittedEntries=0L;metrics.value.includedBytes=0L;
+        }
         if (Files.isSymbolicLink(output)) throw new IllegalArgumentException("Job output root must not be a symbolic link");
         Path requestedRoot=output.toAbsolutePath().normalize(),root=output.toRealPath();
         if (!root.equals(requestedRoot.getParent().toRealPath().resolve(requestedRoot.getFileName()))) throw new IllegalArgumentException("Job output escaped its private directory");
@@ -59,31 +65,38 @@ final class ArtifactArchive {
             for(Path candidate:candidates) {
                 if(root.relativize(candidate).getNameCount()>=64&&Files.isDirectory(candidate,LinkOption.NOFOLLOW_LINKS))throw new IllegalArgumentException("Artifact directory depth exceeds limits");
                 if(candidate.equals(root)||Files.isDirectory(candidate,LinkOption.NOFOLLOW_LINKS))continue;
-                if(Files.isSymbolicLink(candidate)||!Files.isRegularFile(candidate,LinkOption.NOFOLLOW_LINKS)){omitted++;continue;}
+                if(Files.isSymbolicLink(candidate)||!Files.isRegularFile(candidate,LinkOption.NOFOLLOW_LINKS)){omitted++;if(metrics!=null)metrics.value.omittedEntries=(long)omitted;continue;}
                 if(!candidate.toRealPath().startsWith(root))throw new IllegalArgumentException("Artifact escaped its private directory");
+                if(metrics!=null)metrics.source(Files.size(candidate));
                 String relative=root.relativize(candidate).toString().replace('\\','/'),lower=relative.toLowerCase(Locale.ROOT);
-                if(!safePath(relative)||lower.equals(MANIFEST)||!SAFE_EXTENSIONS.contains(extension(relative))||names.contains(lower)){omitted++;continue;}
+                if(!safePath(relative)||lower.equals(MANIFEST)||!SAFE_EXTENSIONS.contains(extension(relative))||names.contains(lower)){omitted++;if(metrics!=null)metrics.value.omittedEntries=(long)omitted;continue;}
                 if(approved.size()>=MAX_ENTRIES)throw new IllegalArgumentException("Artifact entry count exceeds limits");
                 long sourceSize=Files.size(candidate);
-                if(sourceSize>MAX_ENTRY_BYTES){omitted++;continue;}
+                if(sourceSize>MAX_ENTRY_BYTES){omitted++;if(metrics!=null)metrics.value.omittedEntries=(long)omitted;continue;}
                 byte[] bytes;
-                try{bytes=publisher.publish(candidate);}catch(IllegalArgumentException rejected){omitted++;continue;}
-                if(bytes.length>MAX_ENTRY_BYTES){omitted++;continue;}
+                try{bytes=publisher.publish(candidate);}catch(IllegalArgumentException rejected){omitted++;if(metrics!=null)metrics.value.omittedEntries=(long)omitted;continue;}
+                if(bytes.length>MAX_ENTRY_BYTES){omitted++;if(metrics!=null)metrics.value.omittedEntries=(long)omitted;continue;}
                 if(total+bytes.length>MAX_TOTAL_BYTES)throw new IllegalArgumentException("Artifact total size exceeds limits");
                 names.add(lower);approved.add(relative);total+=bytes.length;
                 Path target=exports.resolve(relative);Files.createDirectories(target.getParent());Files.write(target,bytes);
             }
             // Resolve report links only after classification, so omitted evidence never leaves a dangling raw link.
             Set<String> paths=Set.copyOf(approved);List<Entry> entries=new ArrayList<>();total=0;
+            if(metrics!=null)metrics.phase("zip_write");
             try(ZipOutputStream zip=new ZipOutputStream(Files.newOutputStream(staging))) {
                 for(String relative:approved) {
                     byte[] bytes=Files.readAllBytes(exports.resolve(relative));
                     boolean report=Set.of("html","htm").contains(extension(relative));
-                    if(report)bytes=ArtifactHtmlPolicy.publish(bytes,relative,paths);
+                    if(report) {
+                        if(metrics!=null)metrics.phase("scan_classification_redaction");
+                        bytes=ArtifactHtmlPolicy.publish(bytes,relative,paths);
+                        if(metrics!=null)metrics.phase("zip_write");
+                    }
                     if(bytes.length>MAX_ENTRY_BYTES||total+bytes.length>MAX_TOTAL_BYTES)throw new IllegalArgumentException("Final artifact size exceeds limits");
                     total+=bytes.length;
                     entries.add(new Entry(relative,mediaType(relative),bytes.length,sha256(bytes),"textual-output","sanitized-once",report,true));
                     writeEntry(zip,relative,bytes);
+                    if(metrics!=null){metrics.value.includedEntries++;metrics.value.includedBytes+=bytes.length;}
                 }
                 Map<String,Object> manifest=new LinkedHashMap<>();
                 manifest.put("version",1);manifest.put("policy","att-export-safe-text-v2");manifest.put("entries",entries);manifest.put("complete",omitted==0);
@@ -92,11 +105,18 @@ final class ArtifactArchive {
                 if(bytes.length>MAX_MANIFEST_BYTES)throw new IllegalArgumentException("Artifact manifest exceeds limits");
                 writeEntry(zip,MANIFEST,bytes);
             }
+            if(metrics!=null)metrics.phase("verification_fsync");
             verify(staging,true);
             try(var channel=java.nio.channels.FileChannel.open(staging,java.nio.file.StandardOpenOption.WRITE)){channel.force(true);}
             Files.move(staging,destination,StandardCopyOption.ATOMIC_MOVE,StandardCopyOption.REPLACE_EXISTING);
-            published=true;return destination;
+            published=true;
+            if(metrics!=null)metrics.value.zipBytes=Files.size(destination);
+            return destination;
+        } catch(Exception failure) {
+            if(metrics!=null)metrics.fail(failure instanceof IllegalArgumentException?"policy_limit":"publication_failed");
+            throw failure;
         } finally {
+            if(metrics!=null)metrics.phase("cleanup");
             if(!published)Files.deleteIfExists(staging);
             try(var paths=Files.walk(exports)){for(Path file:paths.sorted(Comparator.reverseOrder()).toList())Files.deleteIfExists(file);}
         }

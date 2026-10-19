@@ -30,7 +30,10 @@ async function main() {
       await archive.getByText('Artifact Archive: READY', { exact: true }).waitFor();
       assert.equal(await archive.locator('a').count(), 1, 'Only the finalized ZIP has a download link');
       const downloadPromise = page.waitForEvent('download');
-      await archive.getByRole('link', { name: 'Download Artifacts (.zip)', exact: true }).click();
+      const archiveLink = archive.getByRole('link', { name: /^Download Artifacts \(\.zip\) — / });
+      const archiveBytes = (await fs.stat(fixture.archivePath)).size;
+      assert.equal(await archiveLink.getAttribute('title'), `${archiveBytes} bytes`);
+      await archiveLink.click();
       const download = await downloadPromise;
       assert.equal(await download.failure(), null);
       assert.deepEqual(await fs.readFile(await download.path()), await fs.readFile(fixture.archivePath));
@@ -56,25 +59,42 @@ async function main() {
       for (const report of fixture.reports) {
         const reportPath = report.path;
         process.stdout.write(`Checking online/offline report ${reportPath}\n`);
-        await archive.getByRole('button', { name: `View Report: ${reportPath}`, exact: true }).click();
-        const iframe = page.locator(`iframe[title=${JSON.stringify(`Report: ${reportPath}`)}]`);
-        assert.equal(await iframe.getAttribute('sandbox'), 'allow-scripts');
-        const frame = await (await iframe.elementHandle()).contentFrame();
         const reportUrl = `${origin}/tools/att/api/v1/jobs/${fixture.jobId}/artifacts/view/${reportPath.split('/').map(encodeURIComponent).join('/')}`;
-        await frame.waitForURL(reportUrl);
+        const reportResponse = page.waitForResponse(response => response.url() === reportUrl && response.status() === 200);
+        await archive.getByRole('button', { name: `View Report: ${reportPath}`, exact: true }).click();
+        await reportResponse;
+        const iframe = page.locator(`iframe[title=${JSON.stringify(`Report: ${reportPath}`)}]`);
+        await iframe.waitFor();
+        assert.equal(await iframe.getAttribute('sandbox'), 'allow-scripts');
+        assert.equal(await iframe.getAttribute('src'), null, 'No anonymous iframe API navigation');
+        assert.ok((await iframe.getAttribute('srcdoc')).includes('Content-Security-Policy'));
+        const frame = await (await iframe.elementHandle()).contentFrame();
+        // Chromium can retain a blank frame bookkeeping URL for srcdoc; inspect the document itself.
+        await frame.waitForFunction(() => location.href === 'about:srcdoc');
         await frame.locator('body').waitFor();
+        assert.equal(await frame.evaluate(() => location.href), 'about:srcdoc');
         process.stdout.write(`  Online report loaded: ${reportPath}\n`);
         assert.equal(await frame.evaluate(() => { try { return !!parent.document.body; } catch { return false; } }), false,
           'The report must not read the application DOM');
-        const relative = await frame.locator('a[href]').evaluateAll(links => links.map(link => link.getAttribute('href')).filter(href => href && !href.startsWith('#')));
-        assert.ok(relative.length > 0, `Report ${reportPath} must retain real relative navigation`);
+        const relative = await frame.locator('a[data-att-report-link]').evaluateAll(links => links.map(link => link.getAttribute('data-att-report-link')));
+        assert.ok(relative.length > 0, `Report ${reportPath} must retain bridged relative navigation`);
         const destination = new URL(relative[0], reportUrl).href;
-        await frame.locator('a[href]').evaluateAll((links, href) => links.find(link => link.getAttribute('href') === href).click(), relative[0]);
-        await frame.waitForURL(destination);
-        assert.ok(frame.url().startsWith(`${origin}/tools/att/api/v1/jobs/${fixture.jobId}/artifacts/view/`));
-        // Child-frame navigations participate in joint history but do not fire a main-frame load.
-        await page.evaluate(() => history.back()); await frame.waitForURL(reportUrl);
-        await page.evaluate(() => history.forward()); await frame.waitForURL(destination);
+        const linkedResponse = page.waitForResponse(response => response.url() === destination && response.status() === 200);
+        await frame.locator('a[data-att-report-link]').first().click();
+        await linkedResponse;
+        const reportViewer = viewer.getByRole('region', { name: 'Isolated authenticated report preview', exact: true });
+        const destinationPath = decodeURIComponent(new URL(destination).pathname.split('/artifacts/view/')[1]);
+        await reportViewer.getByText(destinationPath, { exact: true }).waitFor();
+        if (/\.html?$/i.test(destinationPath)) await reportViewer.locator('iframe').waitFor();
+        else await reportViewer.locator('.cm-content').waitFor();
+        const backResponse = page.waitForResponse(response => response.url() === reportUrl && response.status() === 200);
+        await reportViewer.getByRole('button', { name: 'Report back', exact: true }).click();
+        await backResponse;
+        await reportViewer.locator(`iframe[title=${JSON.stringify(`Report: ${reportPath}`)}]`).waitFor();
+        const forwardResponse = page.waitForResponse(response => response.url() === destination && response.status() === 200);
+        await reportViewer.getByRole('button', { name: 'Report forward', exact: true }).click();
+        await forwardResponse;
+        await reportViewer.getByText(destinationPath, { exact: true }).waitFor();
         process.stdout.write(`  Online relative navigation and history passed: ${reportPath}\n`);
         await viewer.getByRole('button', { name: 'Close preview', exact: true }).click();
 

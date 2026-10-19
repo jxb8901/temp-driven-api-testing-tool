@@ -153,6 +153,7 @@ export interface JobSummary {
 }
 
 export interface JobView extends JobSummary {
+  archiveMetrics?: ArtifactArchiveMetrics | null;
   performance?: {
     timings?: Record<string, unknown>;
     worker?: Record<string, unknown>;
@@ -180,7 +181,33 @@ export interface JobArtifact {
   mediaType?: string;
 }
 
+export interface ArtifactArchiveMetrics {
+  version: number;
+  attempts: number;
+  retries: number;
+  outcome: string;
+  failurePhase?: string | null;
+  failureReason?: string | null;
+  queueWaitMs?: number | null;
+  publicationWallMs?: number | null;
+  scanClassificationRedactionMs?: number | null;
+  zipWriteMs?: number | null;
+  verificationFsyncMs?: number | null;
+  cleanupMs?: number | null;
+  writerCpuMs?: number | null;
+  writerAllocatedBytes?: number | null;
+  sourceFiles?: number | null;
+  sourceBytes?: number | null;
+  includedEntries?: number | null;
+  omittedEntries?: number | null;
+  includedBytes?: number | null;
+  zipBytes?: number | null;
+  compressionRatio?: number | null;
+}
+
 export interface JobArtifactArchive {
+  archiveSizeBytes?: number | null;
+  archiveMetrics?: ArtifactArchiveMetrics | null;
   archiveStatus: 'PENDING' | 'ARCHIVING' | 'READY' | 'FAILED' | 'EXPIRED';
   items: JobArtifact[];
   primaryReports: JobArtifact[];

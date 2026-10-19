@@ -48,6 +48,7 @@ final class JobStore implements AutoCloseable {
             s.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS worker_start_time VARCHAR(40)");
             s.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS att_version VARCHAR(32) DEFAULT 'unknown' NOT NULL");
             s.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS performance_json CLOB");
+            s.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS archive_metrics_json CLOB");
             s.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS worker_quarantined BOOLEAN DEFAULT FALSE NOT NULL");
             s.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS artifact_recovery BOOLEAN DEFAULT TRUE NOT NULL");
             s.execute("CREATE INDEX IF NOT EXISTS jobs_artifact_recovery_idx ON jobs(artifact_recovery,job_id)");
@@ -479,6 +480,24 @@ final class JobStore implements AutoCloseable {
         }
         return ids;
     }
+    synchronized att.server.api.ArtifactArchiveMetrics archiveMetrics(String id) throws Exception {
+        try(Connection c=connect();PreparedStatement p=c.prepareStatement("SELECT archive_metrics_json FROM jobs WHERE job_id=?")) {
+            p.setString(1,id);
+            try(ResultSet r=p.executeQuery()) {
+                if(!r.next())return null;
+                String json=r.getString(1);
+                return json==null?null:ServerRuntime.JSON.readValue(json,att.server.api.ArtifactArchiveMetrics.class);
+            }
+        }
+    }
+    synchronized void archiveMetrics(String id,att.server.api.ArtifactArchiveMetrics metrics) throws Exception {
+        String json=ServerRuntime.JSON.writeValueAsString(metrics);
+        if(json.length()>8192)throw new IllegalArgumentException("Archive metrics exceed limits");
+        try(Connection c=connect();PreparedStatement p=c.prepareStatement("UPDATE jobs SET archive_metrics_json=? WHERE job_id=?")) {
+            p.setString(1,json);p.setString(2,id);p.executeUpdate();
+        }
+    }
+
     synchronized List<String> artifactRecoveryJobIds(String after,int limit) throws Exception {
         if(limit<1||limit>64)throw new IllegalArgumentException("Invalid recovery batch size");
         List<String> ids=new ArrayList<>();

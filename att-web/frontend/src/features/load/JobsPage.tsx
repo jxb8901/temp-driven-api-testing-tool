@@ -1,3 +1,5 @@
+import { ArchiveMetrics } from './ArchiveMetrics';
+import type { ArtifactArchiveMetrics } from './types';
 import { useEffect, useMemo, useRef, useState, type ChangeEvent, type KeyboardEvent } from 'react';
 import './load.css';
 import { JobArtifacts } from './JobArtifacts';
@@ -382,6 +384,8 @@ function JobDetail({ api, jobId, onShowList, confirmCancel }: JobsFeatureProps &
   const [cancelState, setCancelState] = useState<'idle' | 'pending' | 'error'>('idle');
   const [cancelError, setCancelError] = useState('');
   const [detailRefresh, setDetailRefresh] = useState(0);
+  const [archiveMetrics, setArchiveMetrics] = useState<ArtifactArchiveMetrics | null>(null);
+  useEffect(() => setArchiveMetrics(null), [jobId]);
   const cancellationLock = useRef(false);
   const liveStatus = useMemo(() => [...events].reverse().find(event => event.type === 'status'), [events]);
 
@@ -574,20 +578,21 @@ function JobDetail({ api, jobId, onShowList, confirmCancel }: JobsFeatureProps &
     </section>
     <section className="att-job-panel" role="tabpanel" id="job-panel-artifacts" aria-labelledby="job-tab-artifacts" hidden={activeTab !== 'artifacts'} tabIndex={0}>
       <h2>Artifacts</h2>
-      <JobArtifacts key={jobId} api={api} jobId={jobId} refresh={detailRefresh} />
+      <JobArtifacts key={jobId} api={api} jobId={jobId} refresh={detailRefresh} onMetrics={setArchiveMetrics} />
     </section>
     <section className="att-job-panel" role="tabpanel" id="job-panel-metrics" aria-labelledby="job-tab-metrics" hidden={activeTab !== 'metrics'} tabIndex={0}>
       <h2>Metrics</h2>
       <p className="att-help">Only values returned by the job API are shown. Server timings and Worker JVM metrics are separate from Load result metrics.</p>
       {job && <MetricTable title="Server timings" rows={numericRows(job.performance?.timings)} unit="ms" />}
       {job && <MetricTable title="Worker metrics" rows={numericRows(job.performance?.worker)} />}
+      <ArchiveMetrics value={archiveMetrics || job?.archiveMetrics} />
       {metrics && <MetricTable title="Load result metrics" rows={loadMetricRows(metrics)} />}
       {!metrics && <p role="status">{resultState === 'loading' || resultState === 'refreshing' ? 'Load result metrics are loading.' : job?.command === 'load' ? 'No Load metrics summary was returned. No chart or derived metric is shown.' : 'This command has no Load metric summary.'}</p>}
       {buckets.length > 0 && charts.map(series => <TimeSeriesChart key={series.field} series={series} />)}
       {buckets.length > 0 && !charts.length && <p role="status">The Server returned buckets, but this view cannot chart them without timestamps and complete numeric samples. Raw returned values remain available in the table.</p>}
       {buckets.length > 0 && <BucketTable buckets={buckets} />}
       {metrics && !buckets.length && <p role="status">No time-series buckets were returned. Summary metrics are shown in the table above.</p>}
-      {!job?.performance?.timings && !job?.performance?.worker && !metrics && resultState !== 'loading' && <p role="status">The API did not return metrics for this job.</p>}
+      {!job?.performance?.timings && !job?.performance?.worker && !archiveMetrics && !job?.archiveMetrics && !metrics && resultState !== 'loading' && <p role="status">The API did not return metrics for this job.</p>}
     </section>
   </div>;
 }

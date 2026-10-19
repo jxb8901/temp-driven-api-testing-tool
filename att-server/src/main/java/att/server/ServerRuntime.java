@@ -376,6 +376,7 @@ final class ServerRuntime implements AutoCloseable {
         record.remove("resultJson");record.remove("diagnosticJson");
         String performance=(String)record.remove("performanceJson");
         if(performance!=null&&!performance.isBlank())record.put("performance",JSON.readValue(performance,Map.class));
+        record.put("archiveMetrics",store.archiveMetrics(id));
         return record;
     }
     Map<String,Object> resultRecord(String id) throws Exception {
@@ -2167,17 +2168,20 @@ final class ServerRuntime implements AutoCloseable {
             if(Files.isRegularFile(archive)&&"READY".equals(state)) {
                 try {
                     Map<String,Object> data=ArtifactArchive.verify(archive,false);
+                    long archiveSize=Files.size(archive);
                     List<?> all=(List<?>)data.get("entries");
                     int start=Math.min(offset,all.size()),end=Math.min(all.size(),start+limit);
                     out.put("items",all.subList(start,end));out.put("nextOffset",end<all.size()?end:null);
                     out.put("primaryReports",all.stream().filter(item->item instanceof Map<?,?> row&&Boolean.TRUE.equals(row.get("report"))).toList());
                     out.put("archiveStatus","READY");out.put("omissions",data.get("omissions"));out.put("complete",data.get("complete"));
+                    out.put("archiveSizeBytes",archiveSize);
                 } catch(Exception corrupt) { state="FAILED"; }
             }
             if(!out.containsKey("archiveStatus")) {
                 out.put("items",List.of());out.put("nextOffset",null);out.put("primaryReports",List.of());out.put("archiveStatus",state);
             }
             out.put("retryable",!quarantined&&"FAILED".equals(out.get("archiveStatus"))&&Files.isDirectory(outputDirectoryForJob(id)));
+            out.put("archiveMetrics",store.archiveMetrics(id));
             out.put("downloadPath","archive.zip");return out;
         } finally {artifactLifecycle.readLock().unlock();artifactReadSlots.release();}
     }
@@ -2234,23 +2238,33 @@ final class ServerRuntime implements AutoCloseable {
     void scheduleArtifactArchive(String id) {
         if(closing||!pendingArtifactJobs.add(id))return;
         requestedArtifactRetries.remove(id);
+        final long queuedAt=System.nanoTime();
         try { artifactWriters.execute(() -> {
             artifactLifecycle.readLock().lock();
             Path output=outputDirectoryForJob(id), archive=artifactArchivePath(id);
+            ArtifactMetricsRecorder metrics=null;
             try {
                 if(store.get(id)==null||!terminal(id))return;
                 if(jobs.containsKey(id))return;
+                var previous=store.archiveMetrics(id);
+                metrics=new ArtifactMetricsRecorder(queuedAt,previous==null?1:Math.min(Long.MAX_VALUE-1,previous.attempts)+1);
+                metrics.phase("worker_fence");
+                ArtifactMetricsRecorder.CURRENT.set(metrics);
+                store.archiveMetrics(id,metrics.value);
                 store.artifactRecoveryNeeded(id,true);
                 if(store.workerQuarantined(id)) {
+                    metrics.fail("worker_unverified");
                     archiveStatus(id,"FAILED","worker_unverified");
                     store.artifactRecoveryNeeded(id,false);
                     return;
                 }
                 if(store.workerMayBeAlive(id)) {
+                    metrics.fail("worker_active");
                     archiveStatus(id,"FAILED","worker_active");
                     return;
                 }
                 if(Files.isRegularFile(archive)) {
+                    metrics.phase("verification_fsync");
                     try { ArtifactArchive.verify(archive,true); }
                     catch(Exception corrupt) {
                         if(!Files.isDirectory(output))throw corrupt;
@@ -2258,20 +2272,32 @@ final class ServerRuntime implements AutoCloseable {
                     }
                 }
                 if(!Files.isRegularFile(archive)) {
+                    metrics.phase("publication");
                     archiveStatus(id,"ARCHIVING","");
                     if(!Files.isDirectory(output))throw new java.io.IOException("Worker output is unavailable");
                     cleanupArtifactStaging(archive.getParent());
                     artifactPublisher.publish(output,archive,file->publicArtifact(id,file));
                 }
+                metrics.phase("publication");
                 archiveStatus(id,"READY","");
                 store.audit("SYSTEM","ARTIFACT_PUBLICATION",id,null,"READY");
+                metrics.value.zipBytes=Files.size(archive);
+                metrics.value.outcome="READY";
+                metrics.phase("cleanup");
                 try {deleteTree(output);cleanupArtifactStaging(archive.getParent());store.artifactRecoveryNeeded(id,false);}
-                catch(Exception cleanupFailure){java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).warning("Artifact cleanup will be retried for Job "+id);}
+                catch(Exception cleanupFailure){metrics.fail("cleanup_failed");metrics.value.outcome="CLEANUP_PENDING";java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).warning("Artifact cleanup will be retried for Job "+id);}
             } catch(Exception failure) {
                 boolean policy=failure instanceof IllegalArgumentException;
+                if(metrics!=null&&metrics.value.failurePhase==null)metrics.fail(policy?"policy_limit":"publication_failed");
                 try {archiveStatus(id,"FAILED",policy?"policy_limit":"publication_failed");store.audit("SYSTEM","ARTIFACT_PUBLICATION",id,null,policy?"REJECTED_POLICY":"FAILED_IO");}catch(Exception ignored){}
                 java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).warning("Artifact publication failed for Job "+id);
             } finally {
+                ArtifactMetricsRecorder.CURRENT.remove();
+                if(metrics!=null) {
+                    metrics.finish();
+                    try {store.archiveMetrics(id,metrics.value);}
+                    catch(Exception unavailable){java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).warning("Unable to persist artifact metrics for Job "+id);}
+                }
                 pendingArtifactJobs.remove(id);
                 // Transfer an accepted retry before releasing the retention
                 // fence, so expiry cannot delete its source between writers.

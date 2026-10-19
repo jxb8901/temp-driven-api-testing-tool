@@ -77,6 +77,18 @@ class ServerWarUiIT {
                     try(var in=download.getInputStream()){bytes=in.readAllBytes();}
                 } finally {download.disconnect();}
                 Path zip=Files.write(temp.resolve(id+".zip"),bytes);JsonNode manifest=ServerRuntime.JSON.valueToTree(ArtifactArchive.verify(zip,true));
+                assertEquals(bytes.length,index.path("archiveSizeBytes").asLong());
+                long metricsDeadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(10);
+                JsonNode archiveMetrics;
+                do {
+                    archiveMetrics=getJson(port,api+"/jobs/"+id,peer).path("archiveMetrics");
+                    if("READY".equals(archiveMetrics.path("outcome").asText()))break;
+                    Thread.sleep(20);
+                }while(System.nanoTime()<metricsDeadline);
+                assertEquals("READY",archiveMetrics.path("outcome").asText(),archiveMetrics.toString());
+                assertEquals(bytes.length,archiveMetrics.path("zipBytes").asLong());
+                assertTrue(archiveMetrics.path("includedEntries").asLong()>0);
+                assertFalse(archiveMetrics.toString().contains(pkg.toString()));
                 Path extracted=Files.createDirectory(temp.resolve(id+"-offline"));
                 try(var archive=new java.util.zip.ZipFile(zip.toFile())) {
                     for(JsonNode entry:manifest.path("entries")) {

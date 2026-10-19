@@ -3,9 +3,16 @@ import { CodeEditor, detectCodeLanguage } from '../code/CodeEditor';
 import { ReportPreview } from './ReportPreview';
 import { api as serverApi } from '../../api';
 import { artifactApi } from './artifactApi';
-import type { JobArtifact, JobArtifactArchive, LoadJobsApi } from './types';
+import type { ArtifactArchiveMetrics, JobArtifact, JobArtifactArchive, LoadJobsApi } from './types';
 
-export function JobArtifacts({ api, jobId, refresh }: { api: LoadJobsApi; jobId: string; refresh: number }) {
+export function formatArchiveSize(bytes: number | null | undefined): string | null {
+  if (bytes == null || !Number.isFinite(bytes) || bytes < 0) return null;
+  const units = ['B', 'KB', 'MB', 'GB', 'TB', 'PB'];
+  const index = bytes === 0 ? 0 : Math.min(units.length - 1, Math.floor(Math.log(bytes) / Math.log(1024)));
+  return `${(bytes / 1024 ** Math.max(0, index)).toLocaleString(undefined, { maximumFractionDigits: index > 0 ? 1 : 0 })} ${units[Math.max(0, index)]}`;
+}
+
+export function JobArtifacts({ api, jobId, refresh, onMetrics }: { api: LoadJobsApi; jobId: string; refresh: number; onMetrics?: (metrics: ArtifactArchiveMetrics | null) => void }) {
   const features = api === serverApi ? artifactApi : api;
   const [archive, setArchive] = useState<JobArtifactArchive | null>(null);
   const [error, setError] = useState('');
@@ -23,16 +30,17 @@ export function JobArtifacts({ api, jobId, refresh }: { api: LoadJobsApi; jobId:
     setArchive(null); setError(''); setSelected(null); setBusy(false);
     async function load() {
       try {
-        const data = features.getJobArtifactArchive ? await features.getJobArtifactArchive(jobId, 0, controller.signal)
+        const data: JobArtifactArchive = features.getJobArtifactArchive ? await features.getJobArtifactArchive(jobId, 0, controller.signal)
           : { archiveStatus: 'READY' as const, items: await api.getJobArtifacts(jobId, controller.signal), primaryReports: [] };
         if (controller.signal.aborted || current !== sequence.current) return;
         setArchive(data);
-        if (['PENDING', 'ARCHIVING'].includes(data.archiveStatus)) timer = setTimeout(() => void load(), 2000);
+        onMetrics?.(data.archiveMetrics || null);
+        if (['PENDING', 'ARCHIVING'].includes(data.archiveStatus) || data.archiveMetrics?.outcome === 'RUNNING') timer = setTimeout(() => void load(), 2000);
       } catch (reason) { if (!controller.signal.aborted) setError(reason instanceof Error ? reason.message : 'Artifacts are unavailable.'); }
     }
     void load();
     return () => { controller.abort(); if (timer) clearTimeout(timer); };
-  }, [api, features, jobId, refresh, version]);
+  }, [api, features, jobId, refresh, version, onMetrics]);
 
   useEffect(() => {
     setText(null); setPreviewError('');
@@ -73,7 +81,7 @@ export function JobArtifacts({ api, jobId, refresh }: { api: LoadJobsApi; jobId:
       <p role="status">Artifact Archive: {archive.archiveStatus}</p>
       {archive.archiveStatus === 'FAILED' && <p>The archive could not be published. {archive.retryable && features.retryJobArtifactArchive && <button type="button" disabled={busy} onClick={() => void retry()}>Retry archive</button>}</p>}
       {archive.archiveStatus === 'READY' && <>
-        {features.artifactArchiveHref && <a href={features.artifactArchiveHref(jobId)}>Download Artifacts (.zip)</a>}
+        {features.artifactArchiveHref && <a href={features.artifactArchiveHref(jobId)} title={formatArchiveSize(archive.archiveSizeBytes) ? `${archive.archiveSizeBytes} bytes` : undefined}>Download Artifacts (.zip){formatArchiveSize(archive.archiveSizeBytes) && ` — ${formatArchiveSize(archive.archiveSizeBytes)}`}</a>}
         {archive.complete === false && <p role="note">Some output was excluded by the publication policy. {archive.omissions?.map(item => `${item.count}: ${item.reason}`).join('; ')}</p>}
         {archive.primaryReports.length > 0 && <><h3>Reports</h3><ul>{archive.primaryReports.map(entry)}</ul></>}
         <ul>{archive.items.filter(item => !item.report).map(entry)}</ul>

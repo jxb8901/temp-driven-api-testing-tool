@@ -16,6 +16,76 @@ import static org.junit.jupiter.api.Assertions.*;
 class ArtifactLifecycleTest {
     @TempDir Path temp;
 
+    @Test void persistsArchiveMetricsAcrossFailureRetryAndRestartWithoutChangingExecution() throws Exception {
+        ServerConfig config;
+        String id="J0000000000000001";
+        try(ServerRuntime runtime=runtime()) {
+            config=runtime.config;
+            job(runtime,id,"ERROR");
+            Files.delete(runtime.outputDirectoryForJob(id));
+            runtime.scheduleArtifactArchive(id);
+            var failed=awaitMetrics(runtime,id,"FAILED");
+            assertEquals(1,failed.attempts);assertEquals(0,failed.retries);
+            assertEquals("publication_failed",failed.failureReason);
+            assertEquals("publication",failed.failurePhase);
+            assertNull(failed.sourceBytes);assertNull(failed.zipBytes);
+            assertNull(runtime.artifactIndex(id).get("archiveSizeBytes"));
+            Path output=Files.createDirectory(runtime.outputDirectoryForJob(id));
+            Files.writeString(output.resolve("private-canary.log"),"password=private-canary-secret\nbusiness=retained\n");
+            Files.write(output.resolve("binary.bin"),new byte[]{0,1,2});
+            runtime.retryArtifactArchive(id);
+            var ready=awaitMetrics(runtime,id,"READY");
+            assertEquals(2,ready.attempts);assertEquals(1,ready.retries);
+            assertNull(ready.failurePhase);assertNull(ready.failureReason);
+            assertEquals(2,ready.sourceFiles);assertTrue(ready.sourceBytes>3);
+            assertEquals(1,ready.includedEntries);assertEquals(1,ready.omittedEntries);
+            assertEquals(Files.size(runtime.artifactArchivePath(id)),ready.zipBytes);
+            assertEquals(ready.zipBytes,runtime.artifactIndex(id).get("archiveSizeBytes"));
+            assertNotNull(ready.compressionRatio);
+            for(Double elapsed:List.of(ready.queueWaitMs,ready.publicationWallMs,ready.scanClassificationRedactionMs,
+                    ready.zipWriteMs,ready.verificationFsyncMs,ready.cleanupMs))assertTrue(elapsed>=0);
+            assertTrue(ready.writerCpuMs==null||ready.writerCpuMs>=0);
+            assertTrue(ready.writerAllocatedBytes==null||ready.writerAllocatedBytes>=0);
+            String json=ServerRuntime.JSON.writeValueAsString(runtime.jobRecord(id).get("archiveMetrics"));
+            assertFalse(json.contains("private-canary"));assertFalse(json.contains(output.toString()));
+            assertEquals("ERROR",runtime.jobRecord(id).get("status"));
+        }
+        try(ServerRuntime restarted=new ServerRuntime(config,temp.resolve("libs").toString())) {
+            var persisted=restarted.store.archiveMetrics(id);
+            assertEquals(2,persisted.attempts);assertEquals("READY",persisted.outcome);
+            assertEquals(persisted.zipBytes,restarted.artifactIndex(id).get("archiveSizeBytes"));
+            restarted.store.quarantineWorker(id);
+            assertEquals("FAILED",restarted.artifactIndex(id).get("archiveStatus"));
+            assertNull(restarted.artifactIndex(id).get("archiveSizeBytes"));
+        }
+    }
+
+    @Test void emptyArchiveHasRealZeroCountsButUnsupportedMeasurementsStayNull() throws Exception {
+        try(ServerRuntime runtime=runtime()) {
+            String id="J0000000000000001";job(runtime,id,"CANCELLED");
+            runtime.scheduleArtifactArchive(id);
+            var metrics=awaitMetrics(runtime,id,"READY");
+            assertEquals(0,metrics.sourceFiles);assertEquals(0,metrics.sourceBytes);
+            assertEquals(0,metrics.includedEntries);assertEquals(0,metrics.omittedEntries);
+            assertTrue(metrics.zipBytes>0);assertEquals(0.0,metrics.compressionRatio);
+        }
+        ArtifactMetricsRecorder unavailable=new ArtifactMetricsRecorder(System.nanoTime(),1,false);
+        unavailable.finish();
+        assertNull(unavailable.value.writerCpuMs);assertNull(unavailable.value.writerAllocatedBytes);
+        assertNull(unavailable.value.zipWriteMs);
+        assertNotNull(unavailable.value.publicationWallMs);
+    }
+
+    private att.server.api.ArtifactArchiveMetrics awaitMetrics(ServerRuntime runtime,String id,String outcome) throws Exception {
+        long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(20);
+        do {
+            var metrics=runtime.store.archiveMetrics(id);
+            if(metrics!=null&&outcome.equals(metrics.outcome))return metrics;
+            Thread.sleep(20);
+        }while(System.nanoTime()<deadline);
+        fail("Archive metrics did not reach "+outcome);return null;
+    }
+
     @Test void archivesEveryTerminalOutcomeAndPreservesExactPreviewBytes() throws Exception {
         try(ServerRuntime runtime=runtime()) {
             int counter=0;
@@ -127,6 +197,7 @@ class ArtifactLifecycleTest {
             assertThrows(ServerRuntime.ArchiveUnavailableException.class,()->runtime.archiveEntry(id,"case.log"));
             assertTrue(Files.readString(output.resolve("case.log")).contains("private-canary"),"Failure must retain private source, not publish it");
             runtime.retryArtifactArchive(id);awaitState(runtime,id,"READY");
+            awaitMetrics(runtime,id,"READY");
             String published=new String(runtime.archiveEntry(id,"case.log"),java.nio.charset.StandardCharsets.UTF_8);
             assertFalse(published.contains("private-canary"));assertTrue(published.contains("business=retained"));
             long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(5);
