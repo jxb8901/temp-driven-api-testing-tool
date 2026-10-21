@@ -140,6 +140,7 @@ export interface JobSummary {
   pinned?: boolean;
   pinnedAt?: string | null;
   pinnedBy?: string | null;
+  pinReason?: string | null;
   executionType?: string;
   scenario?: string;
   environment?: string;
@@ -261,7 +262,9 @@ export interface LoadJobsApi {
   getJobArtifactText?(jobId: string, path: string, signal?: AbortSignal): Promise<string>;
   retryJobArtifactArchive?(jobId: string): Promise<unknown>;
   artifactArchiveHref?(jobId: string): string;
-  pinJob?(jobId: string, pinned: boolean): Promise<JobView>;
+  pinJob?(jobId: string, pinned: boolean, pinReason?: string): Promise<JobView>;
+  pinJobs?(jobIds: string[], pinned: boolean, pinReason?: string): Promise<Array<{ jobId: string; outcome: string }>>;
+  deleteJob?(jobId: string): Promise<{ jobId: string; outcome: string }>;
   deleteJobs?(jobIds: string[]): Promise<Array<{ jobId: string; outcome: string }>>;
   cancelJob(jobId: string): Promise<{ jobId: string; status: JobStatus }>;
   subscribeJob(jobId: string, handlers: JobEventHandlers): () => void;
