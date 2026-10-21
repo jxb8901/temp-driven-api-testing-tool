@@ -31,4 +31,16 @@ const compressedBytes = gzipSync(Buffer.concat(await Promise.all(
 const limitBytes = 150 * 1024;
 console.log('ATT UI initial asset budget: ' + compressedBytes + ' / ' + limitBytes + ' bytes gzip');
 console.log('Included entry and static imports: ' + files.join(', '));
+
+const lazyChunks = entries
+  .filter(([, chunk]) => chunk.isDynamicEntry || (chunk.isEntry && !includedFiles.has(chunk.file)))
+  .flatMap(([, chunk]) => [chunk.file, ...(chunk.css || [])])
+  .filter(file => /\.(?:js|css)$/.test(file))
+  .filter((file, index, all) => all.indexOf(file) === index)
+  .map(async file => ({ file, gzipBytes: gzipSync(await readFile(resolve(outputRoot, file))).byteLength }));
+const lazyChunkSizes = await Promise.all(lazyChunks);
+if (lazyChunkSizes.length) {
+  console.log('ATT UI lazy chunk gzip sizes (informational):');
+  for (const chunk of lazyChunkSizes) console.log('  ' + chunk.file + ': ' + chunk.gzipBytes + ' bytes gzip');
+}
 if (compressedBytes > limitBytes) throw new Error('ATT UI initial static assets exceed the 150 KiB gzip review budget.');

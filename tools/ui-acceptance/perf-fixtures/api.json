@@ -1,0 +1,57 @@
+{
+  "version": {
+    "apiVersion": "1",
+    "version": "4.2.2",
+    "inlineLoadEnabled": true,
+    "loadSchedulingEnabled": true,
+    "unifiedRunVersion": "att-execution/v1"
+  },
+  "capabilities": {
+    "capabilities": {
+      "operate": true,
+      "accountManage": true,
+      "systemSettingsWrite": true,
+      "configurationAdmin": true
+    },
+    "configurationAdmin": true
+  },
+  "packages": {
+    "items": [
+      { "packageId": "payments", "name": "Payments", "canExecute": true },
+      { "packageId": "ledger", "name": "Ledger", "canExecute": true }
+    ]
+  },
+  "metrics": {
+    "jobStorage": {
+      "totalBytes": 12345678,
+      "retainedJobCount": 100,
+      "configuredMaxBytes": 100000000,
+      "cleanupTargetBytes": 80000000,
+      "enabled": true
+    }
+  },
+  "configuration": {
+    "state": "ready",
+    "environments": [
+      { "name": "SIT", "state": "active", "default": true },
+      { "name": "UAT", "state": "active" }
+    ],
+    "globals": {
+      "http.timeoutMs": { "state": "visible", "value": 5000, "origin": "fixture" }
+    },
+    "sections": []
+  },
+  "configurationFiles": {
+    "items": [
+      { "name": "config.yaml", "path": "config/config.yaml", "kind": "file", "sizeBytes": 512, "format": "yaml", "sourceAvailable": true }
+    ],
+    "total": 1,
+    "nextOffset": null
+  },
+  "configurationSource": {
+    "available": true,
+    "logicalPath": "config/config.yaml",
+    "format": "yaml",
+    "text": "environment: SIT\n"
+  }
+}

@@ -9,3 +9,5 @@ logs/
 .DS_Store
 tools/__pycache__/
 tools/ui-acceptance/artifacts/
+# Raw browser performance output; curated reports belong under docs/system-design/perf/.
+tools/ui-acceptance/artifacts/perf/

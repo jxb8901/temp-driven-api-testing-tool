@@ -1,0 +1,13 @@
+{
+  "jobId": "PERF-JOB-266",
+  "packageId": "payments",
+  "eventTypes": ["status", "progress", "log", "diagnostic", "result"],
+  "steadyRates": [10, 50, 200],
+  "steadyDurationMs": 1000,
+  "burstEvents": 10000,
+  "retainedEvents": 500,
+  "metricBuckets": [100, 1000, 4096],
+  "jobs": 100,
+  "schedules": 100,
+  "routes": ["dashboard", "explorer", "configuration", "load", "jobs", "schedules", "settings"]
+}
