@@ -70,3 +70,60 @@ review, not pass/fail gates.
 For a curated baseline, copy the reviewed report to
 `docs/system-design/perf/` with its environment metadata. Do not present the
 synthetic fixture as Server, Worker, JVM, or end-to-end throughput evidence.
+
+## UI behavior covered by issue #266
+
+### Display chart samples
+
+`TimeSeriesChart` keeps the complete Server-returned metric series for the
+table and any future export or tooltip consumers. When a series contains more
+than `CHART_DISPLAY_POINT_THRESHOLD` points, the chart uses a display-only
+min/max-per-bucket sample. The default threshold is 1,000 points. Sampled
+points retain their original values and `epochMs` coordinates; the chart does
+not interpolate or change percentiles. The chart visibly and accessibly labels
+the result as `display sample: N of M points`, and the paged table remains the
+exact returned data.
+
+The PR0/PR3 Chromium baseline showed why this threshold is useful: the
+4,096-bucket scenario mounted about 33,040 DOM nodes and recorded three long
+tasks, compared with about 11,368 nodes for 1,000 buckets. The threshold is
+therefore a measured display guard, not a data-retention limit. The 4,096-point
+case is still supported and remains fully available through the table.
+
+### Isolate countdowns and catalog requests
+
+Schedule expiry and LOAD Catalog draft expiry use an isolated countdown hook.
+It creates a one-second timer only while a draft is counting down, clears the
+timer when the draft expires or the component unmounts, and pauses it while the
+document is hidden. Only the countdown/action subtree updates; the page body
+does not receive a one-second clock state update. A Catalog refresh fetches up
+to four packages concurrently, then flattens results in package order. The
+existing generation and abort guards still discard stale or cancelled results.
+
+### Split one route
+
+Explorer's JavaScript is loaded on demand. `explorer.css` stays in the initial
+bundle because TypedSidecarForm and ConfigurationExplorer also use it outside
+the Explorer route; moving it would change the cascade order, so that split is
+a separate follow-up. Navigation continues to use
+the existing hash route and navigation guard, so deep links, back/forward
+navigation, and dirty-navigation prompts keep their existing behavior. While
+the route chunk loads, the UI exposes a `role="status"` message instead of an
+empty main region. Production remains a static Vite bundle served under
+`/att/ui/`; Node.js is still development-only.
+
+The route figures below are reviewed informational values from the current
+build. They are entry chunk plus directly associated CSS gzip sizes and are
+not CI failure thresholds.
+
+| Route | Lazy entry gzip | Reviewed informational budget |
+| --- | ---: | ---: |
+| Explorer | 8,263 bytes | 16 KiB |
+| Load | 13,179 bytes | 20 KiB |
+| Jobs | 14,772 bytes | 20 KiB |
+| Schedules | 15,545 bytes | 20 KiB |
+| Settings | 6,192 bytes | 12 KiB |
+| Job console | 758 bytes | 4 KiB |
+
+The initial static dependency budget remains 150 KiB gzip. The current build is
+144,838 bytes gzip; the PR0 baseline was 150,759 bytes gzip.

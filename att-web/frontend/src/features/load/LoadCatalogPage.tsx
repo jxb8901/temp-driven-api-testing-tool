@@ -3,6 +3,7 @@ import { ApiError, type AsyncState, type JobSummary } from '../../types';
 import type { LoadCatalogItem, PackageOption, ServerDiagnostic } from './types';
 import type { api } from '../../api';
 import { formatRoute, type LoadCatalogRouteState } from '../../router';
+import { useCountdownNow } from '../../useCountdownNow';
 import './load.css';
 
 type ScheduleIntent = { packageId: string; environment?: string; draftId: string; previewYaml?: string; expiresAt?: string; executionType: 'load' };
@@ -10,6 +11,7 @@ type CatalogApi = Pick<typeof api, 'listLoadCatalog' | 'validateLoadCatalogScena
   & Partial<Pick<typeof api, 'getDeclaredConfiguration'>>;
 type CatalogJob = JobSummary & { scenario?: string; environment?: string; model?: string };
 type CatalogFailure = { message: string; suggestion?: string; cursor?: string; query: string; retrying?: boolean };
+const CATALOG_FETCH_CONCURRENCY = 4;
 
 function catalogFailure(error: unknown, cursor: string | undefined, query: string): CatalogFailure {
   const first = error instanceof ApiError && Array.isArray(error.diagnostics) ? error.diagnostics[0] : undefined;
@@ -76,7 +78,6 @@ export function LoadCatalogPage({ api, packages, inlineLoadEnabled, schedulingEn
   const [actionKey, setActionKey] = useState('');
   const actionSequenceRef = useRef(0);
   const [notice, setNotice] = useState('');
-  const [clockNow, setClockNow] = useState(Date.now());
   const [jobs, setJobs] = useState<CatalogJob[]>([]);
   const [jobsState, setJobsState] = useState<'loading' | 'ready' | 'error'>('loading');
   const [jobsError, setJobsError] = useState('');
@@ -90,11 +91,6 @@ export function LoadCatalogPage({ api, packages, inlineLoadEnabled, schedulingEn
   useEffect(() => {
     const scrollY = initialCatalogState?.scrollY;
     if (typeof scrollY === 'number') requestAnimationFrame(() => window.scrollTo(0, scrollY));
-  }, []);
-
-  useEffect(() => {
-    const timer = window.setInterval(() => setClockNow(Date.now()), 1000);
-    return () => window.clearInterval(timer);
   }, []);
 
   const invalidateEnvironmentValidation = useCallback((value: string) => {
@@ -154,26 +150,44 @@ export function LoadCatalogPage({ api, packages, inlineLoadEnabled, schedulingEn
     }
     setCatalogError('');
     try {
-    const gathered: LoadCatalogItem[] = [];
     const currentCursors = catalogCursorsRef.current;
     const nextCursors: Record<string, string> = append ? { ...currentCursors } : {};
     const failures: Record<string, CatalogFailure> = append
       ? Object.fromEntries(Object.entries(catalogFailuresRef.current).map(([packageId, failure]) => [packageId, { ...failure, retrying: false }]))
       : {};
-    for (const pkg of packages.data) {
+    const tasks = packages.data.flatMap(pkg => {
       const cursor = append ? currentCursors[pkg.packageId] : undefined;
-      if (append && !cursor) continue;
-      delete failures[pkg.packageId];
-      try {
-        const page = await api.listLoadCatalog(pkg.packageId, { query: query.trim() || undefined, cursor, limit: 100 }, signal);
-        if (signal.aborted || requestGeneration !== catalogGenerationRef.current) return;
-        gathered.push(...page.items);
-        if (page.nextCursor) nextCursors[pkg.packageId] = page.nextCursor;
-        else delete nextCursors[pkg.packageId];
-      } catch (error) {
-        if (signal.aborted || requestGeneration !== catalogGenerationRef.current) return;
-        failures[pkg.packageId] = catalogFailure(error, cursor, query.trim());
+      return append && !cursor ? [] : [{ pkg, cursor }];
+    });
+    const results: Array<{ items: LoadCatalogItem[]; nextCursor?: string | null; failure?: CatalogFailure }> = [];
+    let nextTask = 0;
+    const worker = async () => {
+      while (true) {
+        const taskIndex = nextTask++;
+        if (taskIndex >= tasks.length) return;
+        const { pkg, cursor } = tasks[taskIndex];
+        delete failures[pkg.packageId];
+        try {
+          const page = await api.listLoadCatalog(pkg.packageId, { query: query.trim() || undefined, cursor, limit: 100 }, signal);
+          if (signal.aborted || requestGeneration !== catalogGenerationRef.current) return;
+          results[taskIndex] = { items: page.items, nextCursor: page.nextCursor };
+        } catch (error) {
+          if (signal.aborted || requestGeneration !== catalogGenerationRef.current) return;
+          results[taskIndex] = { items: [], failure: catalogFailure(error, cursor, query.trim()) };
+        }
       }
+    };
+    await Promise.all(Array.from({ length: Math.min(CATALOG_FETCH_CONCURRENCY, tasks.length) }, () => worker()));
+    if (signal.aborted || requestGeneration !== catalogGenerationRef.current) return;
+    const gathered: LoadCatalogItem[] = [];
+    for (let index = 0; index < tasks.length; index += 1) {
+      const { pkg } = tasks[index];
+      const result = results[index];
+      if (!result) continue;
+      gathered.push(...result.items);
+      if (result.nextCursor) nextCursors[pkg.packageId] = result.nextCursor;
+      else delete nextCursors[pkg.packageId];
+      if (result.failure) failures[pkg.packageId] = result.failure;
     }
     if (!signal.aborted && requestGeneration === catalogGenerationRef.current) {
       setCatalog(current => append ? [...current, ...gathered] : gathered);
@@ -339,7 +353,7 @@ export function LoadCatalogPage({ api, packages, inlineLoadEnabled, schedulingEn
       if (currentValidation && !item.runNow) reasons.push('Run Now is unavailable under Server policy.');
       if (!schedulingEnabled) reasons.push('Scheduling disabled by Server policy.');
       else if (currentValidation && item.scheduleDraftId && (!item.scheduleDraftExpiresAt
-        || !Number.isFinite(Date.parse(item.scheduleDraftExpiresAt)) || Date.parse(item.scheduleDraftExpiresAt) <= clockNow))
+        || !Number.isFinite(Date.parse(item.scheduleDraftExpiresAt))))
         reasons.push('The validated Schedule draft expired. Validate this scenario again before scheduling.');
       else if (currentValidation && !item.schedule) reasons.push(item.scheduleReason || 'Revalidate to receive a short-lived Schedule draft.');
     } else if (item.kind === 'template' && (!item.createQuickLoad || !inlineLoadEnabled)) {
@@ -400,23 +414,14 @@ export function LoadCatalogPage({ api, packages, inlineLoadEnabled, schedulingEn
           {item.diagnostic && <div className="att-load-catalog-invalid-summary"><p className="att-inline-error" role="status">{item.diagnostic}{item.requestId ? ` Request ID: ${item.requestId}` : ''}</p>
             <button className="button button-quiet" type="button" onClick={() => showSource(item)}>View details</button></div>}
           {item.diagnostics?.length ? <CatalogDiagnostics items={item.diagnostics} onViewDetails={() => showSource(item)} /> : null}
-          <div className="att-load-catalog-actions">
-            {item.kind === 'scenario' && <button className="button button-quiet" type="button" aria-label={`Validate ${item.path} for ${environmentDraft || 'Package default'}`}
-              disabled={Boolean(actionKey) || environmentNotApplicable(item) || Boolean(environmentDraft && environmentProfilesState !== 'ready')}
-              onClick={() => void validateItem(item)}>{actionKey === `validate:${item.resourceId}` ? 'Validating…' : 'Validate'}</button>}
-            {item.kind === 'template' && <button className="button button-quiet" type="button" disabled={Boolean(actionKey)} onClick={() => void validateTemplate(item)}>{actionKey === `validate:${item.resourceId}` ? 'Validating…' : 'Validate'}</button>}
-            {item.kind === 'scenario' && <><button className="button button-primary" type="button" disabled={!item.runNow || item.validation !== 'valid' || item.validatedEnvironment !== environmentDraft || environmentNotApplicable(item) || Boolean(actionKey)} onClick={() => void runNow(item)}>{actionKey === item.resourceId ? 'Starting…' : 'Run Now'}</button>
-              <button className="button button-quiet" type="button" disabled={!item.schedule || !item.scheduleDraftId || !item.scheduleDraftExpiresAt || !Number.isFinite(Date.parse(item.scheduleDraftExpiresAt)) || Date.parse(item.scheduleDraftExpiresAt) <= clockNow || item.validation !== 'valid' || item.validatedEnvironment !== environmentDraft || !schedulingEnabled || environmentNotApplicable(item)} title={item.scheduleDraftExpiresAt && (!Number.isFinite(Date.parse(item.scheduleDraftExpiresAt)) || Date.parse(item.scheduleDraftExpiresAt) <= clockNow) ? 'Validated Schedule draft expired. Validate again.' : !schedulingEnabled ? 'Schedules are disabled by Server policy.' : item.validatedEnvironment !== environmentDraft ? 'Validate for the selected environment first.' : undefined}
-                onClick={() => onSchedule({ packageId: item.packageId, environment: environmentDraft || undefined,
-                  draftId: item.scheduleDraftId!, previewYaml: item.schedulePreviewYaml, expiresAt: item.scheduleDraftExpiresAt, executionType: 'load' })}>Schedule</button></>}
-            {item.scheduleDraftExpiresAt && item.scheduleDraftId && <p className="att-help">Validated Schedule draft expires {new Date(item.scheduleDraftExpiresAt).toLocaleString()}.</p>}
-            {item.kind === 'template' && <button className="button button-quiet" type="button" disabled={!item.createQuickLoad || !inlineLoadEnabled}
-              onClick={() => onQuickLoad(item.packageId, item)}>Create Quick LOAD</button>}
-            <button className="button button-quiet" type="button" onClick={() => showSource(item)}>View</button>
-          </div>
-          {disabledReasons(item).length > 0 && <ul className="att-load-action-reasons" aria-label={`Unavailable actions for ${item.path}`}>
-            {disabledReasons(item).map(reason => <li key={reason}>{reason}</li>)}
-          </ul>}
+          <CatalogActionControls item={item} actionKey={actionKey} environmentDraft={environmentDraft}
+            environmentProfilesState={environmentProfilesState} inlineLoadEnabled={inlineLoadEnabled}
+            schedulingEnabled={schedulingEnabled} environmentNotApplicable={environmentNotApplicable}
+            getDisabledReasons={disabledReasons} onValidate={() => void validateItem(item)}
+            onValidateTemplate={() => void validateTemplate(item)} onRunNow={() => void runNow(item)}
+            onSchedule={() => onSchedule({ packageId: item.packageId, environment: environmentDraft || undefined,
+              draftId: item.scheduleDraftId!, previewYaml: item.schedulePreviewYaml, expiresAt: item.scheduleDraftExpiresAt, executionType: 'load' })}
+            onQuickLoad={() => onQuickLoad(item.packageId, item)} onView={() => void showSource(item)} />
         </article>)}
       </div>}
       {Object.keys(catalogCursors).length > 0 && <button className="button button-quiet" type="button" disabled={catalogMoreLoading || catalogState === 'loading'}
@@ -452,6 +457,56 @@ export function LoadCatalogPage({ api, packages, inlineLoadEnabled, schedulingEn
       </section>
     </section>
   </div>;
+}
+
+function CatalogActionControls({ item, actionKey, environmentDraft, environmentProfilesState, inlineLoadEnabled,
+  schedulingEnabled, environmentNotApplicable, getDisabledReasons, onValidate, onValidateTemplate, onRunNow,
+  onSchedule, onQuickLoad, onView }: {
+  item: LoadCatalogItem; actionKey: string; environmentDraft: string;
+  environmentProfilesState: 'loading' | 'ready' | 'error'; inlineLoadEnabled: boolean; schedulingEnabled: boolean;
+  environmentNotApplicable(item: LoadCatalogItem): boolean; getDisabledReasons(item: LoadCatalogItem): string[];
+  onValidate(): void; onValidateTemplate(): void; onRunNow(): void; onSchedule(): void; onQuickLoad(): void; onView(): void;
+}): React.JSX.Element {
+  const reasons = getDisabledReasons(item);
+  return <>
+    <div className="att-load-catalog-actions">
+      {item.kind === 'scenario' && <button className="button button-quiet" type="button" aria-label={`Validate ${item.path} for ${environmentDraft || 'Package default'}`}
+        disabled={Boolean(actionKey) || environmentNotApplicable(item) || Boolean(environmentDraft && environmentProfilesState !== 'ready')}
+        onClick={onValidate}>{actionKey === `validate:${item.resourceId}` ? 'Validating…' : 'Validate'}</button>}
+      {item.kind === 'template' && <button className="button button-quiet" type="button" disabled={Boolean(actionKey)} onClick={onValidateTemplate}>{actionKey === `validate:${item.resourceId}` ? 'Validating…' : 'Validate'}</button>}
+      {item.kind === 'scenario' && <>
+        <button className="button button-primary" type="button" disabled={!item.runNow || item.validation !== 'valid' || item.validatedEnvironment !== environmentDraft || environmentNotApplicable(item) || Boolean(actionKey)} onClick={onRunNow}>{actionKey === item.resourceId ? 'Starting…' : 'Run Now'}</button>
+        <CatalogScheduleAction item={item} environmentDraft={environmentDraft} schedulingEnabled={schedulingEnabled}
+          environmentNotApplicable={environmentNotApplicable} onSchedule={onSchedule} />
+      </>}
+      {item.kind === 'template' && <button className="button button-quiet" type="button" disabled={!item.createQuickLoad || !inlineLoadEnabled} onClick={onQuickLoad}>Create Quick LOAD</button>}
+      <button className="button button-quiet" type="button" onClick={onView}>View</button>
+    </div>
+    {reasons.length > 0 && <ul className="att-load-action-reasons" aria-label={`Unavailable actions for ${item.path}`}>
+      {reasons.map(reason => <li key={reason}>{reason}</li>)}
+    </ul>}
+  </>;
+}
+
+function CatalogScheduleAction({ item, environmentDraft, schedulingEnabled, environmentNotApplicable, onSchedule }: {
+  item: LoadCatalogItem; environmentDraft: string; schedulingEnabled: boolean;
+  environmentNotApplicable(item: LoadCatalogItem): boolean; onSchedule(): void;
+}): React.JSX.Element {
+  const expiresAt = item.scheduleDraftExpiresAt;
+  const active = Boolean(expiresAt && item.scheduleDraftId && Number.isFinite(Date.parse(expiresAt)) && Date.parse(expiresAt) > Date.now());
+  const now = useCountdownNow(active);
+  const scheduleExpired = Boolean(expiresAt && (!Number.isFinite(Date.parse(expiresAt)) || Date.parse(expiresAt) <= now));
+  const scheduleDisabled = !item.schedule || !item.scheduleDraftId || !expiresAt || scheduleExpired
+    || item.validation !== 'valid' || item.validatedEnvironment !== environmentDraft || !schedulingEnabled || environmentNotApplicable(item);
+  return <>
+    <button className="button button-quiet" type="button" disabled={scheduleDisabled}
+      title={scheduleExpired ? 'Validated Schedule draft expired. Validate again.' : !schedulingEnabled ? 'Schedules are disabled by Server policy.' : item.validatedEnvironment !== environmentDraft ? 'Validate for the selected environment first.' : undefined}
+      onClick={onSchedule}>Schedule</button>
+    {expiresAt && item.scheduleDraftId && <p className="att-help">Validated Schedule draft expires {new Date(expiresAt).toLocaleString()}.</p>}
+    {scheduleExpired && <ul className="att-load-action-reasons" aria-label={`Unavailable actions for ${item.path}`}>
+      <li>The validated Schedule draft expired. Validate this scenario again before scheduling.</li>
+    </ul>}
+  </>;
 }
 
 function CatalogDiagnostics({ items, onViewDetails }: { items: ServerDiagnostic[]; onViewDetails(): void }) {

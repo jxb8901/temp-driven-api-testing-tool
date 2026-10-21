@@ -159,6 +159,36 @@ export type MetricSeries = {
   points: Array<{ epochMs: number; value: number }>;
 };
 
+/** The chart remains readable while the table retains every returned bucket. */
+export const CHART_DISPLAY_POINT_THRESHOLD = 1000;
+
+export function downsampleMetricPoints(
+  points: MetricSeries['points'],
+  maxPoints = CHART_DISPLAY_POINT_THRESHOLD,
+): MetricSeries['points'] {
+  if (points.length <= maxPoints || maxPoints < 3) return points;
+
+  const interior = points.slice(1, -1);
+  const bucketCount = Math.max(1, Math.min(Math.floor((maxPoints - 2) / 2), interior.length));
+  const sampled: MetricSeries['points'] = [points[0]];
+  for (let bucket = 0; bucket < bucketCount; bucket += 1) {
+    const start = Math.floor(bucket * interior.length / bucketCount);
+    const end = Math.max(start + 1, Math.floor((bucket + 1) * interior.length / bucketCount));
+    let minIndex = start;
+    let maxIndex = start;
+    for (let index = start + 1; index < end; index += 1) {
+      if (interior[index].value < interior[minIndex].value) minIndex = index;
+      if (interior[index].value > interior[maxIndex].value) maxIndex = index;
+    }
+    for (const index of [minIndex, maxIndex].sort((left, right) => left - right)) {
+      const point = interior[index];
+      if (sampled[sampled.length - 1] !== point) sampled.push(point);
+    }
+  }
+  sampled.push(points[points.length - 1]);
+  return sampled;
+}
+
 function metricBuckets(value: unknown): MetricBucket[] {
   const entries: Array<[string, unknown]> = Array.isArray(value)
     ? value.map((bucket, index) => [String(index), bucket])
@@ -711,7 +741,7 @@ const MetricTable = memo(function MetricTable({ title, rows, unit = '' }: { titl
   </section>;
 });
 
-const TimeSeriesChart = memo(function TimeSeriesChart({ series }: { series: MetricSeries }) {
+export const TimeSeriesChart = memo(function TimeSeriesChart({ series }: { series: MetricSeries }) {
   const width = 820;
   const height = 250;
   const left = 62;
@@ -720,13 +750,14 @@ const TimeSeriesChart = memo(function TimeSeriesChart({ series }: { series: Metr
   const bottom = 42;
   const plotWidth = width - left - right;
   const plotHeight = height - top - bottom;
-  const firstTime = series.points[0].epochMs;
-  const lastTime = series.points[series.points.length - 1].epochMs;
-  const maxValue = Math.max(1, ...series.points.map(point => point.value));
+  const displayPoints = downsampleMetricPoints(series.points);
+  const firstTime = displayPoints[0].epochMs;
+  const lastTime = displayPoints[displayPoints.length - 1].epochMs;
+  const maxValue = Math.max(1, ...displayPoints.map(point => point.value));
   const timeSpan = Math.max(1, lastTime - firstTime);
   const titleId = 'att-chart-' + series.field + '-title';
   const descId = 'att-chart-' + series.field + '-description';
-  const coordinates = series.points.map(point => ({
+  const coordinates = displayPoints.map(point => ({
     x: left + ((point.epochMs - firstTime) / timeSpan) * plotWidth,
     y: top + (1 - point.value / maxValue) * plotHeight,
   }));
@@ -736,11 +767,12 @@ const TimeSeriesChart = memo(function TimeSeriesChart({ series }: { series: Metr
   return <figure className="att-metric-chart" aria-labelledby={titleId}>
     <figcaption>
       <h3 id={titleId}>{series.label}</h3>
-      <p>Y axis: {series.unit}. X axis: bucket start time in {timezone}. Each point is a value returned by the Server; no points are interpolated.</p>
+      <p>Y axis: {series.unit}. X axis: bucket start time in {timezone}. Each displayed point is an exact value returned by the Server; no points are interpolated.</p>
+      {displayPoints.length < series.points.length && <p role="status">display sample: {displayPoints.length} of {series.points.length} points. The table retains all returned buckets.</p>}
     </figcaption>
     <svg className="att-metric-chart-svg" viewBox={'0 0 ' + width + ' ' + height} role="img" aria-label={series.label + ' by bucket start time'} aria-describedby={descId}>
       <title>{series.label} by bucket start time</title>
-      <desc id={descId}>{series.points.length} ordered server samples from {formatBucketTime(firstTime)} to {formatBucketTime(lastTime)}.</desc>
+      <desc id={descId}>{displayPoints.length < series.points.length ? `display sample: ${displayPoints.length} of ${series.points.length} points; ` : ''}{series.points.length} ordered server samples from {formatBucketTime(firstTime)} to {formatBucketTime(lastTime)}. Displayed coordinates and values are returned server points.</desc>
       {[0, 0.25, 0.5, 0.75, 1].map(fraction => {
         const y = top + (1 - fraction) * plotHeight;
         return <g className="att-metric-chart-grid" key={fraction}>

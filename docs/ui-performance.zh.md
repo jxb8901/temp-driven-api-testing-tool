@@ -60,3 +60,53 @@ duplicate/missing order diagnostics 是 review evidence，不是 pass/fail gate�
 Curated baseline 應在 review 後放入 `docs/system-design/perf/`，並保留完整
 environment metadata。不要把 synthetic fixture 當成 Server、Worker、JVM
 或 end-to-end throughput evidence。
+
+## Issue #266 涵蓋的 UI 行為
+
+### 顯示圖表 samples
+
+`TimeSeriesChart` 會保留 Server 回傳的完整 metric series，供 table 及未來的
+export 或 tooltip consumer 使用。當 series 超過
+`CHART_DISPLAY_POINT_THRESHOLD` 點時，圖表只使用 display-only 的
+min/max-per-bucket sample。預設 threshold 是 1,000 點。Sampled points 保留
+原有的 values 及 `epochMs` coordinates；圖表不會 interpolate，也不會改變
+percentiles。圖表會以可見且 accessible 的
+`display sample: N of M points` 標籤說明狀態，而 paged table 仍然顯示完整的
+Server 回傳資料。
+
+PR0/PR3 的 Chromium baseline 說明此 threshold 的 measured 理由：4,096-bucket
+scenario 約 mount 33,040 個 DOM nodes，並記錄三個 long tasks；1,000 buckets
+則約為 11,368 個 nodes。因此 threshold 是 display guard，不是 data-retention
+limit。4,096-point case 仍受支援，完整資料仍可由 table 取得。
+
+### Isolate countdown 與 Catalog requests
+
+Schedule expiry 及 LOAD Catalog draft expiry 使用 isolated countdown hook。只有
+draft 正在倒數時才建立 one-second timer；draft 到期或 component unmount 時會
+clear timer，document hidden 時會 pause。只有 countdown/action subtree 會更新，
+page body 不會因 one-second clock state 而更新。Catalog refresh 最多同時 fetch
+四個 package，完成後按 package order flatten results；現有 generation 及 abort
+guards 仍會捨棄 stale 或 cancelled results。
+
+### Split 一個 route
+
+Explorer 的 JavaScript 改為 on-demand 載入。`explorer.css` 仍留在 initial bundle，因為 TypedSidecarForm 及 ConfigurationExplorer 在 Explorer route 以外也會使用；搬移它會改變 cascade 順序，因此該拆分另作後續處理。Navigation 仍使用現有 hash route
+及 navigation guard，因此 deep links、back/forward navigation 及
+dirty-navigation prompts 的既有行為保持不變。Route chunk 載入期間，UI 會顯示
+`role="status"` message，而不是空白 main region。Production 仍是部署在
+`/att/ui/` 下的 static Vite bundle；Node.js 仍只供 development 使用。
+
+下表是目前 build 的 reviewed informational 數值。數值包括 route entry chunk
+及直接關聯的 CSS gzip 大小，不是 CI failure threshold。
+
+| Route | Lazy entry gzip | Reviewed informational budget |
+| --- | ---: | ---: |
+| Explorer | 8,263 bytes | 16 KiB |
+| Load | 13,179 bytes | 20 KiB |
+| Jobs | 14,772 bytes | 20 KiB |
+| Schedules | 15,545 bytes | 20 KiB |
+| Settings | 6,192 bytes | 12 KiB |
+| Job console | 758 bytes | 4 KiB |
+
+Initial static dependency budget 仍是 150 KiB gzip。目前 build 是 144,838 bytes
+gzip；PR0 baseline 是 150,759 bytes gzip。

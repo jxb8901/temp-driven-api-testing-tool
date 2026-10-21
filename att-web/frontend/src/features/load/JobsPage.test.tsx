@@ -2,7 +2,7 @@
 import { act, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ArtifactsPanel, BucketTable, JobOverview, JobsPage, MetricsPanel, type MetricBucket, type MetricSeries } from './JobsPage';
+import { ArtifactsPanel, BucketTable, JobOverview, JobsPage, MetricsPanel, TimeSeriesChart, downsampleMetricPoints, CHART_DISPLAY_POINT_THRESHOLD, type MetricBucket, type MetricSeries } from './JobsPage';
 import { JobArtifacts } from './JobArtifacts';
 import { ApiError } from '../../types';
 import type { JobEventHandlers, JobResultResponse, JobStatus, JobSummary, JobView, LoadJobsApi } from './types';
@@ -74,6 +74,27 @@ function selectedRows(): string[] {
 }
 
 describe('JobsPage React feature', () => {
+  it('downsamples only the chart display and preserves exact extrema and coordinates', () => {
+    const points = Array.from({ length: CHART_DISPLAY_POINT_THRESHOLD + 240 }, (_, index) => ({
+      epochMs: 1_800_000_000_000 + index * 1000,
+      value: index === 300 ? -40 : index === 900 ? 900 : index % 17,
+    }));
+    const sampled = downsampleMetricPoints(points);
+    expect(sampled.length).toBeLessThanOrEqual(CHART_DISPLAY_POINT_THRESHOLD);
+    expect(sampled[0]).toBe(points[0]);
+    expect(sampled.at(-1)).toBe(points.at(-1));
+    expect(sampled).toContain(points[300]);
+    expect(sampled).toContain(points[900]);
+    expect(points).toHaveLength(CHART_DISPLAY_POINT_THRESHOLD + 240);
+  });
+
+  it('labels a downsampled chart and keeps the full series available to its table caller', async () => {
+    const points = Array.from({ length: CHART_DISPLAY_POINT_THRESHOLD + 1 }, (_, index) => ({ epochMs: 1_800_000_000_000 + index * 1000, value: index }));
+    await act(async () => root.render(<TimeSeriesChart series={{ field: 'p95Ms', label: 'p95 latency', unit: 'milliseconds', points }} />));
+    expect(host.textContent).toContain(`display sample: ${CHART_DISPLAY_POINT_THRESHOLD} of ${points.length} points`);
+    expect(host.querySelector('[role="status"]')?.textContent).toContain('display sample:');
+  });
+
   it('keeps Overview, Metrics, and Artifacts profiler subtrees stable during 50 event flushes', async () => {
     const api = makeApi();
     const profilerCommits: Record<string, number> = { overview: 0, metrics: 0, artifacts: 0 };
