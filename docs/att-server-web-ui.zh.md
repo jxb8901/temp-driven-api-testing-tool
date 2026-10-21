@@ -54,6 +54,14 @@ Source 分頁只載入 Server 提供的安全 source projection。畫面最多�
 
 ## React Load Builder 與 Jobs/Results
 
+### 分離及還原 Job 主控台
+
+在 **Live Output**、**Events** 或 Job 詳情標題選擇 **Open floating console**。這個非 modal 主控台會留在 Studio shell 上方；切換 Explorer、Configuration、Load testing、Jobs 或 Settings 時不會卸載。它顯示 Job ID、RUN／DEBUG／LOAD 類型、狀態、SSE 狀態、可搜尋的 Live Output、結構化 Events、暫停／繼續、複製、最大化／還原及關閉控制項。桌面版可拖曳 **Move console**，或用方向鍵移動；可拖曳角落控制項，或用方向鍵調整大小。面板會限制在 viewport 內；較小螢幕會改為全螢幕 sheet。
+
+每個 Studio 分頁只有一個 floating console。開啟另一個 Job 前會要求確認 **Switch Job**。**Minimize** 會保留底部 console chip 及一條有界的該瀏覽器分頁 SSE 訂閱，使狀態和新事件保持更新，但不會渲染隱藏的事件列；所選 view、搜尋、篩選及捲動偏好會保留在 session 記憶體。**Close** 會釋放該訂閱。以上控制項都不會取消或停止 Job。
+
+選擇 **Open Job console in a new tab** 可開啟專注的 `#/jobs/{jobId}/console?view=live` 或 `view=events` 頁面。連結是同源、已編碼並使用 `noopener`；重新整理、直接開啟，以及 `/att/ui/` 等非根 context path 都可使用。每個瀏覽器分頁有自己的 SSE 連線。使用 **Open full Job details** 返回完整 Job 頁面。Session 過期或未授權會沿用現有重新登入路徑；缺少的 Job 會安全顯示訊息，不會暴露 log。瀏覽器最多保留 500 筆事件；Server 不再保留較早歷史時會顯示 journal truncation。
+
 Advanced Load route 使用有型別的控制項設定 duration 單位、Virtual Users、Arrival Rate、最大並行數及 think time。Target sidecar 預設值會為 `inputs`、`vars` 及 Tool `arguments` 提供有型別 scalar 控制項；巢狀值保留在 Advanced JSON。表單會按 model 顯示適用限制，但驗證、policy 上限、draft 過期、package revision 及執行仍以 Server 為準。確認後，UI 會提交同一份由 Server 簽發的 draft；回應已遮蔽時不會提供預覽複製或匯出。
 
 Jobs route 載入 Server 回傳的最新工作列（最多 100 筆）。狀態、套件、類型、建立日期篩選、排序及用戶端分頁只作用於已載入列；Principal 搜尋會送到 Server。此 API 不會回傳工作所屬 environment，因此 UI 不提供 environment 篩選。重新整理等待回應時會保留所選篩選及排序。工作詳細資料提供穩定的 Overview、即時輸出、Events、Results、Artifacts 及 Metrics 分頁。即時輸出只把 Server 的 `console` 欄位以純文字顯示在唯讀終端檢視，預設為黑底白字等寬文字。主控台可垂直調整高度，也可最大化到工作控制項下方的可用區域，且不會離開此頁，也不會丟掉目前的搜尋、捲動位置或事件串流。瀏覽器不會把事件 JSON 另排成第二份主控台。Events 保留結構化 JSON，預設展開每個事件內容，並可個別或全部收合。它的自動捲動與即時輸出分開：向上捲動或開啟較舊的事件會暫停，繼續時會跳到最新的可見事件，且不會重新連線。清除即時檢視只會隱藏這個瀏覽器已經收到的內容。系統管理員在 metrics endpoint 允許時，可於設定頁看到 Job 目錄用量，並註明該數字不是 H2 檔案，而且不會壓縮 H2。原生同源 `EventSource` 會使用瀏覽器的 `Last-Event-ID` 重新連線；取消前需要確認，UI 會等候 Server 狀態事件。Metrics 只顯示工作及結果 endpoint 實際回傳的值；Server timing 與 Worker JVM 資料會和 Load 結果指標分開呈現，結果沒有 time-series buckets 時不會推算 throughput 圖表。
