@@ -60,7 +60,7 @@ Source 分頁只載入 Server 提供的安全 source projection。畫面最多�
 
 每個 Studio 分頁只有一個 floating console。開啟另一個 Job 前會要求確認 **Switch Job**。**Minimize** 會保留底部 console chip 及一條有界的該瀏覽器分頁 SSE 訂閱，使狀態和新事件保持更新，但不會渲染隱藏的事件列；所選 view、搜尋、篩選及捲動偏好會保留在 session 記憶體。**Close** 會釋放該訂閱。以上控制項都不會取消或停止 Job。
 
-選擇 **Open Job console in a new tab** 可開啟專注的 `#/jobs/{jobId}/console?view=live` 或 `view=events` 頁面。連結是同源、已編碼並使用 `noopener`；重新整理、直接開啟，以及 `/att/ui/` 等非根 context path 都可使用。每個瀏覽器分頁有自己的 SSE 連線。使用 **Open full Job details** 返回完整 Job 頁面。Session 過期或未授權會沿用現有重新登入路徑；缺少的 Job 會安全顯示訊息，不會暴露 log。瀏覽器最多保留 500 筆事件；Server 不再保留較早歷史時會顯示 journal truncation。
+選擇 **Open Job console in a new tab** 可開啟專注的 `#/jobs/{jobId}/console?view=live` 或 `view=events` 頁面。連結是同源、已編碼並使用 `noopener`；重新整理、直接開啟，以及 `/att/ui/` 等非根 context path 都可使用。每個瀏覽器分頁有自己的 SSE 連線。使用 **Open full Job details** 返回完整 Job 頁面。Session 過期或未授權會沿用現有重新登入路徑；缺少的 Job 會安全顯示訊息，不會暴露 log。瀏覽器每個 Job、每個分頁最多保留 500 筆事件；這個 500-event window 內的去重記錄於 issue #266。Server 不再保留較早歷史時會顯示 journal truncation。
 
 Advanced Load route 使用有型別的控制項設定 duration 單位、Virtual Users、Arrival Rate、最大並行數及 think time。Target sidecar 預設值會為 `inputs`、`vars` 及 Tool `arguments` 提供有型別 scalar 控制項；巢狀值保留在 Advanced JSON。表單會按 model 顯示適用限制，但驗證、policy 上限、draft 過期、package revision 及執行仍以 Server 為準。確認後，UI 會提交同一份由 Server 簽發的 draft；回應已遮蔽時不會提供預覽複製或匯出。
 
