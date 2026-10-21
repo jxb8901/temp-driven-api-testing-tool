@@ -311,7 +311,7 @@ public final class LoadMetrics implements LoadEventListener {
             sample.put("workloadId",LoadFailureDiagnostic.safe(event.workloadId()));sample.put("mixId",LoadFailureDiagnostic.safe(event.mixId()));
             sample.put("iterationId",LoadFailureDiagnostic.safe(event.iterationId()));sample.put("sequence",event.sequence());
             sample.put("phase",LoadFailureDiagnostic.safe(event.phase()));sample.put("timestamp",java.time.Instant.ofEpochMilli(event.completedAtEpochMs()).toString());
-            sample.put("status",event.status().name());sample.put("type",LoadFailureDiagnostic.safe(event.errorType()));
+            sample.put("status",event.status().name());sample.put("type",event.errorType());
             sample.putAll(event.failureDiagnostic());
             if(!sample.containsKey("code"))sample.put("code",event.status().name());
             if(!sample.containsKey("summary"))sample.put("summary","Iteration returned "+event.status());
@@ -321,7 +321,7 @@ public final class LoadMetrics implements LoadEventListener {
     }
 
     private void recordError(LoadEvent event) {
-        String type = LoadFailureDiagnostic.safe(event.errorType());
+        String type = event.errorType();
         if (type == null || type.trim().isEmpty()) type = event.status().name();
         AtomicLong count = errorClassifications.get(type);
         if (count == null) {
@@ -388,7 +388,8 @@ public final class LoadMetrics implements LoadEventListener {
         private final String name;
         private final ConcurrentLatencyReservoir latencies = new ConcurrentLatencyReservoir(MAX_BUCKET_LATENCIES);
         private final AtomicLong startAt = new AtomicLong(Long.MAX_VALUE), endAt = new AtomicLong();
-        private final Map<String,Long> classifications = new LinkedHashMap<String,Long>();
+        private final ConcurrentHashMap<String, LongAdder> classifications = new ConcurrentHashMap<String, LongAdder>();
+        private final Object classificationLock = new Object();
         private final LongAdder scheduled = new LongAdder(), started = new LongAdder(), completed = new LongAdder();
         private final LongAdder success = new LongAdder(), failure = new LongAdder(), runtimeError = new LongAdder(), dropped = new LongAdder();
         private final LongAdder measuredScheduled = new LongAdder(), measuredStarted = new LongAdder(), measuredCompleted = new LongAdder();
@@ -416,12 +417,7 @@ public final class LoadMetrics implements LoadEventListener {
             if (event.dropped()) { dropped.increment(); if (measured) measuredDropped.increment(); }
             if (event.completed()) {
                 completed.increment();
-                if(event.status()!=null && event.status()!=ResultStatus.PASS) synchronized(classifications) {
-                    String type=LoadFailureDiagnostic.safe(event.errorType());
-                    if(type.isEmpty())type=event.status().name();
-                    if(!classifications.containsKey(type) && classifications.size()>=MAX_ERROR_CLASSIFICATIONS)type="OTHER";
-                    classifications.put(type,classifications.containsKey(type)?classifications.get(type)+1:1L);
-                }
+                if(event.status()!=null && event.status()!=ResultStatus.PASS) recordClassification(event);
                 if (event.status() == ResultStatus.PASS) { success.increment(); if (measured) measuredSuccess.increment(); }
                 else if (event.status() == ResultStatus.ERROR || event.status() == ResultStatus.INVALID) {
                     runtimeError.increment(); if (measured) measuredRuntimeError.increment();
@@ -446,6 +442,27 @@ public final class LoadMetrics implements LoadEventListener {
             schedulerLagCount.increment(); schedulerLagSumMs.add(lag); updateMax(schedulerLagMaxMs, lag);
         }
 
+        private void recordClassification(LoadEvent event) {
+            String type = event.errorType();
+            if (type == null || type.trim().isEmpty()) type = event.status().name();
+            LongAdder count = classifications.get(type);
+            if (count == null) {
+                synchronized (classificationLock) {
+                    count = classifications.get(type);
+                    if (count == null) {
+                        if (classifications.size() >= MAX_ERROR_CLASSIFICATIONS) type = "OTHER";
+                        count = classifications.get(type);
+                        if (count == null) {
+                            LongAdder candidate = new LongAdder();
+                            LongAdder previous = classifications.putIfAbsent(type, candidate);
+                            count = previous == null ? candidate : previous;
+                        }
+                    }
+                }
+            }
+            count.increment();
+        }
+
         private Map<String, Object> toMap() {
             long[] sorted = latencies.snapshot(); Arrays.sort(sorted);
             long start = startAt.get(), end = endAt.get();
@@ -462,7 +479,8 @@ public final class LoadMetrics implements LoadEventListener {
             double seconds = Math.max(0.001, durationMs / 1000.0);
             Map<String, Object> result = new LinkedHashMap<String, Object>();
             result.put("phase", name);
-            synchronized(classifications){result.put("errorClassifications",new LinkedHashMap<String,Long>(classifications));}
+            Map<String,Long> classificationSnapshot=new java.util.TreeMap<String,Long>();for(Map.Entry<String,LongAdder> entry:classifications.entrySet())classificationSnapshot.put(entry.getKey(),entry.getValue().sum());
+            result.put("errorClassifications",new LinkedHashMap<String,Long>(classificationSnapshot));
             result.put("startAtEpochMs", start == Long.MAX_VALUE ? 0L : start);
             result.put("endAtEpochMs", end); result.put("durationMs", durationMs);
             result.put("measured", !"WARMUP".equals(name));
@@ -555,7 +573,7 @@ public final class LoadMetrics implements LoadEventListener {
                 }
                 if (event.status() == ResultStatus.ERROR || event.status() == ResultStatus.INVALID) runtimeError.increment();
                 if (event.status() != null && event.status() != ResultStatus.PASS) {
-                    String type = LoadFailureDiagnostic.safe(event.errorType());
+                    String type = event.errorType();
                     if (type == null || type.trim().isEmpty()) type = event.status().name();
                     AtomicLong count = errors.get(type);
                     if (count == null) {

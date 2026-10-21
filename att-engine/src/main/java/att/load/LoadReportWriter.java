@@ -47,7 +47,11 @@ public final class LoadReportWriter {
         html.append("<p class=\"note\">Run ").append(escape(result.startedAt().toString())).append(" to ").append(escape(result.endedAt().toString()));
         html.append(" (duration ").append(display(summary.get("durationMs"))).append(" ms). Load output is isolated below this run directory.</p></header>");
 
-        html.append("<p>Thresholds: ").append(result.thresholds().passed()?"PASS":"FAIL")
+        List<ThresholdResult> thresholdResults=result.thresholds().results();
+        String thresholdSummary;
+        if(thresholdResults.isEmpty())thresholdSummary="none configured";
+        else {int passed=0;for(ThresholdResult item:thresholdResults)if(item.passed())passed++;thresholdSummary=passed+" passed / "+(thresholdResults.size()-passed)+" failed";}
+        html.append("<p>Thresholds: ").append(thresholdSummary)
                 .append(" / Execution: ").append(escape(status)).append(" (runtime errors, all phases: ")
                 .append(count(metrics.get("runtimeError"))).append(")</p>");
         appendKpis(html, result, metrics);
@@ -96,8 +100,10 @@ public final class LoadReportWriter {
                     .append(escape(JsonSupport.write(samples))).append("</pre>");
         } else html.append("<p>No lightweight failure samples were recorded.</p>");
         for(Map.Entry<String,LoadRunResult> workload:result.workloads().entrySet()) {
-            html.append("<h3>").append(escape(workload.getKey())).append("</h3><pre>")
-                    .append(escape(JsonSupport.write(workload.getValue().metrics().values().get("failureDiagnostics")))).append("</pre>");
+            html.append("<h3>").append(escape(workload.getKey())).append("</h3>");
+            Object workloadSamples=workload.getValue().metrics().values().get("failureDiagnostics");
+            if(workloadSamples instanceof List && !((List<?>)workloadSamples).isEmpty())html.append("<pre>").append(escape(JsonSupport.write(workloadSamples))).append("</pre>");
+            else html.append("<p>No lightweight failure samples were recorded.</p>");
         }
         html.append("</section>");
     }

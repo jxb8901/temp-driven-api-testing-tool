@@ -2,6 +2,7 @@ package att.load;
 
 import att.config.FrameworkConfig;
 import att.config.FrameworkConfigLoader;
+import att.core.ResultStatus;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -9,6 +10,9 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.time.Instant;
+import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -93,6 +97,86 @@ class MultiWorkloadReportTest {
         assertTrue(html.contains("checkout mix"));
         assertTrue(html.contains("sequence"));
         assertTrue(html.contains("mixed targets"));
+    }
+
+    @Test void exactAggregateWorkloadMixAndPhaseRatesMatchJsonYamlAndHtml() throws Exception {
+        Path root=Paths.get("").toAbsolutePath().normalize().resolve("packages/default");
+        Path source=temp.resolve("exact-breakdown.yaml");
+        Files.write(source,("schemaVersion: att-load/v1.7\nworkloads:\n"
+                +"- id: checkout\n  target: {type: template, id: CHECKOUT}\n  load: {users: 1, duration: 1s}\n"
+                +"- id: payments\n  mix:\n"
+                +"  - {id: http, weight: 50, target: {type: template, id: HTTP}}\n"
+                +"  - {id: mq, weight: 50, target: {type: template, id: MQ}}\n"
+                +"  load: {users: 1, duration: 1s}\n").getBytes(StandardCharsets.UTF_8));
+        LoadScenario scenario=new LoadScenarioLoader(root).load(source);
+        LoadScenario checkoutScenario=scenario.forWorkload(scenario.workloads().get(0));
+        LoadScenario paymentsScenario=scenario.forWorkload(scenario.workloads().get(1));
+        LoadMetrics checkout=collector(ResultStatus.PASS,ResultStatus.FAIL);
+        LoadMetrics http=collector(ResultStatus.PASS,ResultStatus.FAIL);
+        LoadMetrics mq=collector(ResultStatus.PASS,ResultStatus.ERROR);
+        LoadMetrics payments=collector(ResultStatus.PASS,ResultStatus.FAIL,ResultStatus.PASS,ResultStatus.ERROR);
+        LoadMetrics aggregate=collector(ResultStatus.PASS,ResultStatus.FAIL,ResultStatus.PASS,ResultStatus.FAIL,ResultStatus.PASS,ResultStatus.ERROR);
+        Map<String,Object> mixes=new LinkedHashMap<String,Object>();
+        mixes.put("http",mix("template","HTTP",2,http.snapshot()));mixes.put("mq",mix("template","MQ",2,mq.snapshot()));
+        Map<String,Object> paymentResources=new LinkedHashMap<String,Object>();paymentResources.put("mix",mixes);
+        LoadRunResult checkoutResult=new LoadRunResult("exact-checkout",checkoutScenario,Instant.ofEpochMilli(1000),Instant.ofEpochMilli(2000),checkout.snapshot());
+        LoadRunResult paymentsResult=new LoadRunResult("exact-payments",paymentsScenario,Instant.ofEpochMilli(1000),Instant.ofEpochMilli(2000),payments.snapshot(),LoadThresholdSummary.empty(),Collections.<String,Object>emptyMap(),paymentResources);
+        Map<String,LoadRunResult> workloads=new LinkedHashMap<String,LoadRunResult>();workloads.put("checkout",checkoutResult);workloads.put("payments",paymentsResult);
+        LoadRunResult result=new LoadRunResult("exact",scenario,Instant.ofEpochMilli(1000),Instant.ofEpochMilli(2000),aggregate.snapshot(),LoadThresholdSummary.empty(),Collections.<String,Object>emptyMap(),Collections.<String,Object>emptyMap(),workloads);
+        Path report=new LoadReportWriter().write(temp,result);String html=new String(Files.readAllBytes(report),StandardCharsets.UTF_8);
+        assertRateCells(aggregate.snapshot().values(),1.0/3.0,1.0/6.0,.5,3.0);
+        assertRateCells(checkout.snapshot().values(),.5,0,.5,1.0);assertRateCells(payments.snapshot().values(),.25,.25,.5,2.0);
+        assertRateCells(http.snapshot().values(),.5,0,.5,1.0);assertRateCells(mq.snapshot().values(),0,.5,.5,1.0);
+        assertTrue(html.contains("checkout"));assertTrue(html.contains("payments mix"));assertTrue(html.contains("50.00%"));assertTrue(html.contains("1.000/s"));
+        assertTrue(html.contains("Thresholds: none configured / Execution: ERROR"));
+        assertTrue(html.contains("<div class=\"kpi\"><span class=\"muted\">SUT Fail %</span><strong>33.33%</strong><small>2 / 6 measured completions</small></div>"));
+        assertTrue(html.contains("<div class=\"kpi\"><span class=\"muted\">Runtime Error %</span><strong>16.67%</strong><small>1 / 6 measured completions</small></div>"));
+        assertTrue(html.contains("<div class=\"kpi\"><span class=\"muted\">Total Error %</span><strong>50.00%</strong><small>3 / 6 measured completions</small></div>"));
+        assertEquals("<tr><td><b>checkout</b></td><td>template:CHECKOUT</td><td>closed</td><td>1 users</td><td>2.000/s</td><td>1.000/s</td><td>100 ms</td><td><span title=\"1 / 2 measured completions\">50.00%</span></td><td><span title=\"0 / 2 measured completions\">0.00%</span></td><td><span title=\"1 / 2 measured completions\">50.00%</span></td><td>0.00%</td><td>none</td><td class=\"pass\">PASS</td></tr>", row(html,"checkout"));
+        assertEquals("<tr><td><b>payments</b></td><td>2 mixed targets</td><td>closed</td><td>1 users</td><td>4.000/s</td><td>2.000/s</td><td>100 ms</td><td><span title=\"1 / 4 measured completions\">25.00%</span></td><td><span title=\"1 / 4 measured completions\">25.00%</span></td><td><span title=\"2 / 4 measured completions\">50.00%</span></td><td>0.00%</td><td>none</td><td class=\"fail\">ERROR</td></tr>", row(html,"payments"));
+        assertEquals("<tr><td>http</td><td>template:HTTP</td><td>50</td><td>2 (50.0%)</td><td>2.000/s</td><td>1.000/s</td><td>100 ms</td><td><span title=\"1 / 2 measured completions\">50.00%</span></td><td><span title=\"0 / 2 measured completions\">0.00%</span></td><td><span title=\"1 / 2 measured completions\">50.00%</span></td></tr>", row(html,"http"));
+        assertEquals("<tr><td>mq</td><td>template:MQ</td><td>50</td><td>2 (50.0%)</td><td>2.000/s</td><td>1.000/s</td><td>100 ms</td><td><span title=\"0 / 2 measured completions\">0.00%</span></td><td><span title=\"1 / 2 measured completions\">50.00%</span></td><td><span title=\"1 / 2 measured completions\">50.00%</span></td></tr>", row(html,"mq"));
+        assertFalse(html.contains("<pre>null</pre>"));
+        @SuppressWarnings("unchecked") Map<String,Object> json=att.validation.JsonSupport.mapper().readValue(temp.resolve("load/exact/load-summary.json").toFile(),Map.class);
+        @SuppressWarnings("unchecked") Map<String,Object> yaml=(Map<String,Object>)new org.yaml.snakeyaml.Yaml().load(Files.newInputStream(temp.resolve("load/exact/load-summary.yaml")));
+        assertSummaryConsistency(json,yaml,"metrics");
+        @SuppressWarnings("unchecked") Map<String,Object> jsonWorkloads=(Map<String,Object>)json.get("workloads");
+        @SuppressWarnings("unchecked") Map<String,Object> yamlWorkloads=(Map<String,Object>)yaml.get("workloads");
+        for(String id:new String[]{"checkout","payments"})assertNestedMetricConsistency((Map<?,?>)jsonWorkloads.get(id),(Map<?,?>)yamlWorkloads.get(id));
+        @SuppressWarnings("unchecked") Map<String,Map<String,Object>> phases=(Map<String,Map<String,Object>>)((Map<String,Object>)json.get("metrics")).get("phases");
+        @SuppressWarnings("unchecked") Map<String,Map<String,Object>> yamlPhases=(Map<String,Map<String,Object>>)((Map<String,Object>)yaml.get("metrics")).get("phases");
+        assertRateCells(phases.get("STEADY"),1.0/3.0,1.0/6.0,.5,30.0);
+        assertNestedMetricConsistency(phases.get("STEADY"),yamlPhases.get("STEADY"));
+    }
+
+    private LoadMetrics collector(att.core.ResultStatus... statuses) {
+        LoadScenario base=new LoadScenario(Paths.get("scenario.yaml"),"template","T",Collections.emptyMap(),Collections.emptyMap(),LoadScenario.Model.CLOSED,1,0.0,null,
+                java.time.Duration.ZERO,java.time.Duration.ZERO,java.time.Duration.ofSeconds(1),java.time.Duration.ZERO,java.time.Duration.ZERO,0,"",Collections.emptyMap(),Collections.emptyMap());
+        LoadMetrics result=LoadMetrics.forScenario(base,1000,1000);for(int i=0;i<statuses.length;i++)result.onEvent(LoadEvent.completed("r","closed","STEADY","i"+i,"u",i,1000,1000,1100,statuses[i]));result.finish(2000);return result;
+    }
+    private static Map<String,Object> mix(String type,String id,long selected,LoadMetricsSnapshot snapshot) {
+        Map<String,Object> result=new LinkedHashMap<String,Object>(),target=new LinkedHashMap<String,Object>();target.put("type",type);target.put("id",id);
+        result.put("target",target);result.put("configuredWeight",50);result.put("selectedCount",selected);result.put("selectedPercent",50.0);result.put("metrics",snapshot.values());return result;
+    }
+    private static void assertRateCells(Map<String,Object> metrics,double sut,double runtime,double total,double successful) {
+        assertEquals(sut,((Number)metrics.get("sutErrorRate")).doubleValue(),.000001);assertEquals(runtime,((Number)metrics.get("runtimeErrorRate")).doubleValue(),.000001);
+        assertEquals(total,((Number)metrics.get("totalErrorRate")).doubleValue(),.000001);assertEquals(successful,((Number)metrics.get("successfulThroughput")).doubleValue(),.000001);
+    }
+    private static void assertSummaryConsistency(Map<String,Object> json,Map<String,Object> yaml,String key) {assertNestedMetricConsistency((Map<?,?>)json.get(key),(Map<?,?>)yaml.get(key));}
+    private static void assertNestedMetricConsistency(Map<?,?> json,Map<?,?> yaml) {
+        Map<?,?> jsonMetrics=json.containsKey("metrics")?(Map<?,?>)json.get("metrics"):json;Map<?,?> yamlMetrics=yaml.containsKey("metrics")?(Map<?,?>)yaml.get("metrics"):yaml;
+        assertEquals(((Number)jsonMetrics.get("sutErrorRate")).doubleValue(),((Number)yamlMetrics.get("sutErrorRate")).doubleValue());
+        assertEquals(((Number)jsonMetrics.get("runtimeErrorRate")).doubleValue(),((Number)yamlMetrics.get("runtimeErrorRate")).doubleValue());
+        assertEquals(((Number)jsonMetrics.get("totalErrorRate")).doubleValue(),((Number)yamlMetrics.get("totalErrorRate")).doubleValue());
+        assertEquals(((Number)jsonMetrics.get("successfulThroughput")).doubleValue(),((Number)yamlMetrics.get("successfulThroughput")).doubleValue());
+    }
+    private static String row(String html,String marker) {
+        int start=html.indexOf("<tr><td><b>"+marker+"</b>");
+        if(start<0)start=html.indexOf("<tr><td>"+marker+"</td>");
+        assertTrue(start>=0,marker);
+        int end=html.indexOf("</tr>",start);
+        assertTrue(end>start,marker);
+        return html.substring(start,end+5);
     }
 
     private static FrameworkConfig runtimeConfig(Path packageRoot) throws Exception {

@@ -21,12 +21,23 @@ public final class LoadEvent {
                       long scheduledAtEpochMs, long startedAtEpochMs, long completedAtEpochMs, long schedulerLagMs,
                       long latencyMs, boolean scheduled, boolean started, boolean completed, boolean dropped,
                       ResultStatus status, String errorType, EvidenceRef evidence) {
+        this(runId, workloadId, targetType, targetId, model, phase, iterationId, userId, sequence,
+                scheduledAtEpochMs, startedAtEpochMs, completedAtEpochMs, schedulerLagMs, latencyMs, scheduled,
+                started, completed, dropped, status, errorType, evidence, true);
+    }
+
+    private LoadEvent(String runId, String workloadId, String targetType, String targetId,
+                      String model, String phase, String iterationId, String userId, long sequence,
+                      long scheduledAtEpochMs, long startedAtEpochMs, long completedAtEpochMs, long schedulerLagMs,
+                      long latencyMs, boolean scheduled, boolean started, boolean completed, boolean dropped,
+                      ResultStatus status, String errorType, EvidenceRef evidence, boolean sanitizeErrorType) {
         this.runId = runId; this.workloadId = workloadId; this.targetType = targetType; this.targetId = targetId;
         this.model = model; this.phase = phase; this.iterationId = iterationId; this.userId = userId;
         this.sequence = sequence; this.scheduledAtEpochMs = scheduledAtEpochMs; this.startedAtEpochMs = startedAtEpochMs;
         this.completedAtEpochMs = completedAtEpochMs; this.schedulerLagMs = schedulerLagMs; this.latencyMs = latencyMs;
         this.scheduled = scheduled; this.started = started; this.completed = completed; this.dropped = dropped; this.status = status;
-        this.errorType = errorType; this.evidence = evidence;
+        this.errorType = errorType == null ? null : sanitizeErrorType ? LoadFailureDiagnostic.safeCode(errorType) : errorType;
+        this.evidence = evidence;
         this.mixId = null;
     }
 
@@ -48,8 +59,9 @@ public final class LoadEvent {
 
     /** Adds the configured workload and fixed-target identity to retained event data. */
     public LoadEvent withWorkloadIdentity(String workload, String type, String target) {
-        LoadEvent event = new LoadEvent(runId, workload, type, target, model, phase, iterationId, userId, sequence, scheduledAtEpochMs, startedAtEpochMs,
-                completedAtEpochMs, schedulerLagMs, latencyMs, scheduled, started, completed, dropped, status, errorType, evidence);
+        LoadEvent event = new LoadEvent(runId, workload, type, target, model, phase, iterationId, userId, sequence,
+                scheduledAtEpochMs, startedAtEpochMs, completedAtEpochMs, schedulerLagMs, latencyMs, scheduled, started,
+                completed, dropped, status, errorType, evidence, false);
         event.failureDiagnostic=failureDiagnostic;
         return mixId == null ? event : new LoadEvent(event, mixId, type, target);
     }

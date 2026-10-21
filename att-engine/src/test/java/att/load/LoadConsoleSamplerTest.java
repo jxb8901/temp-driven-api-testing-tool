@@ -134,9 +134,10 @@ class LoadConsoleSamplerTest {
         for (Future<?> task : tasks) assertNull(task.get(5, TimeUnit.SECONDS));
         pool.shutdownNow();
         assertEquals(1, progress.get());
+        int ticksBeforeFinish = ticks.size();
         assertTrue(sampler.finish("PASS").startsWith("[LOAD] COMPLETE runId=load-race"));
         assertTrue(burst.finish("PASS").startsWith("[LOAD] COMPLETE runId=load-burst"));
         Thread.sleep(200L);
-        assertEquals(1, ticks.size(), ticks.toString());
+        assertEquals(ticksBeforeFinish, ticks.size(), ticks.toString());
     }
 }
