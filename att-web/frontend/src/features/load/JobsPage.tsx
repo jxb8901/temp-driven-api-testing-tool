@@ -6,7 +6,7 @@ import './load.css';
 import { JobArtifacts } from './JobArtifacts';
 import type { JobEvent, JobResultResponse, JobStatus, JobSummary, JobView, JobsFeatureProps } from './types';
 import { JobConsoleView } from './JobConsoleView';
-import { useJobConsole } from './JobConsoleProvider';
+import { useJobConsole } from './JobConsoleContext';
 import { useJobEventStream } from './useJobEventStream';
 
 function executionType(job: JobSummary): string { return job.executionType || (job.command === 'debug' ? 'run' : job.command); }

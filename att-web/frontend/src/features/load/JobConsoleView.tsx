@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerE
 import { formatRoute } from '../../router';
 import type { JobEvent, JobView, LoadJobsApi } from './types';
 import { MAX_EVENTS, useJobEventStream, type JobStreamEvent } from './useJobEventStream';
+import './JobConsoleView.css';
 
 export type JobConsoleViewMode = 'live' | 'events';
 
@@ -205,10 +206,10 @@ export function JobConsoleView({
 
   return <section className={'att-job-console-view' + (compact ? ' att-job-console-compact' : '')} aria-label={`Job ${jobId} console`}>
     <header className="att-console-view-heading">
-      <div><p className="att-eyebrow">{executionType(job)} console</p><h2>Job {jobId}</h2>
+      <div><p className="att-eyebrow">{executionType(job)} console</p><h2 title={`Job ${jobId}`}>Job {jobId}</h2>
         <p className="att-console-meta"><span>{job?.status || 'Status unavailable'}</span><span role="status">SSE {stream.connection}</span></p></div>
       <div className="att-console-view-actions">
-        <a href={formatRoute({ kind: 'jobs', jobId })}>Open full Job details</a>
+        <a href={formatRoute({ kind: 'jobs', jobId })} aria-label="Open full Job details" title="Open full Job details">Details</a>
         {onMinimize && <button type="button" aria-label="Minimize Job console" title="Minimize" onClick={onMinimize}>−</button>}
         <button type="button" aria-label={(onMaximize ? maximized : localMaximized) ? 'Restore Job console' : 'Maximize Job console'} title={(onMaximize ? maximized : localMaximized) ? 'Restore' : 'Maximize'} onClick={onMaximize || (() => setLocalMaximized(value => !value))}>{(onMaximize ? maximized : localMaximized) ? 'Restore' : 'Maximize'}</button>
         <a href={consoleRouteUrl(jobId, view)} target="_blank" rel="noopener noreferrer" aria-label="Open Job console in a new tab" onClick={onOpenNewTab}>↗ New tab</a>

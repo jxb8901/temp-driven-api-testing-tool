@@ -402,7 +402,7 @@ export function AppShell({
   return (
     <NavigationGuardContext.Provider value={navigation}>
       <AppShellContext.Provider value={{ selectedPackage, selectedEnvironment, themePreference, uiLocale, uiLocalePreference, authMode: versionData?.authMode, currentUser, accessCapabilities, canRevealConfigurationFields, onPackageChange, onEnvironmentChange, onThemePreferenceChange: changeThemePreference, onUiLocaleChange: changeUiLocale, onJobAccepted }}>
-      <JobConsoleProvider>
+      <JobConsoleProvider jobsApi={api}>
       <div className={'app-layout' + (collapsed ? ' is-collapsed' : '') + (mobileNavigationOpen ? ' mobile-nav-open' : '')} data-page={currentPage}>
         <a className="skip-link" href="#main-content">Skip to main content</a>
         <button className="sidebar-backdrop" type="button" aria-label="Close navigation" aria-hidden={!mobileNavigationOpen} onClick={() => setMobileNavigationOpen(false)} tabIndex={-1} />
