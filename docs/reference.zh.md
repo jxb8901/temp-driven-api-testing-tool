@@ -1,7 +1,7 @@
-# ATT v4.2.1 使用手冊與參考
+# ATT v4.2.2 使用手冊與參考
 
 Author: Jeffrey + ChatGPT
-Version: 4.2.1
+Version: 4.2.2
 Status: 規範性使用者文件；由模組化來源自動生成
 
 <!-- GENERATED FILE. Edit docs/reference*/ modules, not this combined output. -->
@@ -926,7 +926,7 @@ RUN 是 Case、選定 Cases 或單一 Template/Flow/Tool 的功能執行模型�
 
 ### 統一 RUN 與排程
 
-ATT 4.2.1 將功能性單次執行統一為 **RUN**，支援 Case、Template、Flow、Tool，以及所選 Case 批次。**Debug** 是 RUN 的診斷選項。**LOAD** 保留效能引擎、負載控制和專用報告。
+ATT 4.2.2 將功能性單次執行統一為 **RUN**，支援 Case、Template、Flow、Tool，以及所選 Case 批次。**Debug** 是 RUN 的診斷選項。**LOAD** 保留效能引擎、負載控制和專用報告。
 
 #### 驗證及執行 RUN
 
@@ -1011,7 +1011,7 @@ LOAD 排程繼續支援套件 scenario 路徑及已驗證 Load draft，沿用 sc
 
 #### 遷移既有用戶端
 
-| 既有介面 | 4.2.1 對應 |
+| 既有介面 | 4.2.2 對應 |
 |---|---|
 | CLI `validate`、`run`、`report` | 保留驗證、Case RUN、報告命令 |
 | CLI `--suite`、`--suite-dir`、`--case`、`--tag`、`--rerun-failed` | 保留選取行為；Server 批次使用 `selection` |
@@ -1020,7 +1020,7 @@ LOAD 排程繼續支援套件 scenario 路徑及已驗證 Load draft，沿用 sc
 | `/load-schedules`、`jobType:load/debug` | 共用 scheduler 相容路徑，保留既有定義 |
 | `/jobs/...`、既有 Studio 工作/結果連結 | 保留共用 history、取消、事件與結果路徑 |
 
-4.2.1 沒有移除舊 endpoint。`GET /api/v1/version` 公開 `unifiedRunVersion:att-execution/v1`。新 Studio Resource表單在舊 Server 缺少此能力時，可使用舊 Debug draft。統一 Case/batch draft 需要 4.2.1；舊部署可繼續使用 Explorer Case 操作。Server/Worker 應配套部署，舊 Worker 不支援Resource RUN dispatch。
+4.2.2 沒有移除舊 endpoint。`GET /api/v1/version` 公開 `unifiedRunVersion:att-execution/v1`。新 Studio Resource表單在舊 Server 缺少此能力時，可使用舊 Debug draft。統一 Case/batch draft 需要 4.2.2；舊部署可繼續使用 Explorer Case 操作。Server/Worker 應配套部署，舊 Worker 不支援Resource RUN dispatch。
 
 持久化使用既有 H2 table 的附加 JSON 欄位，不改寫舊 LOAD row。降版前先停止排程、匯出新定義、移除 RUN/單次定義，再還原升級前資料庫備份，避免舊 scheduler 把 RUN 當成 LOAD。保留的 artifact 與資料庫 metadata 分開儲存。
 
@@ -1543,6 +1543,22 @@ ID 必須非空、安全且為單一路徑 segment，並在 Load run 內唯一�
 
 
 execIdFormat 只允許 deterministic、side-effect-free built-ins；external calls、seq.next()、random、clock 與 filesystem functions 都會被拒絕。Schema migration 見 [Migration Notes](reference.zh/appendices/migrations.md)。
+
+#### 錯誤率與失敗診斷（4.2.2）
+
+測量階段完成項目分為 PASS、SUT 失敗及執行期 ERROR/INVALID。Warm-up 不計入測量錯誤率，但仍可使執行結果成為 ERROR。產生器丟棄獨立計算。
+
+| 指標 | 分子 / 分母 |
+| --- | --- |
+| `sutErrorRate`／原有 `errorRate` 門檻 | `measuredFailure / measuredCompleted` |
+| `runtimeErrorRate` | `measuredRuntimeError / measuredCompleted` |
+| `totalErrorRate` | `(measuredFailure + measuredRuntimeError) / measuredCompleted` |
+| `completedThroughput` | 全部測量完成數 / 測量秒數 |
+| `successfulThroughput` | 測量 PASS 數 / 測量秒數 |
+
+可選的 `runtimeErrorRate`、`totalErrorRate` 門檻採用百分比比較，例如 `{errorRate: '< 1%', totalErrorRate: '< 1%'}`。`errorRate` 保留僅計 SUT FAIL 的含義，不包含執行期錯誤或丟棄。Thresholds PASS 可與 Execution ERROR 同時出現；門檻通過或完成 TPS 均不代表執行成功。沒有測量完成項目時，JSON/YAML 的錯誤率維持數值零以相容舊消費者，HTML 顯示 N/A。
+
+Runtime failures / Failure diagnosis 顯示全部／測量執行期錯誤數，並於每個彙總、workload 或 mix 收集器保留最多 100 個已遮罩的輕量失敗樣本。樣本包含 iteration、序號、階段、時間、workload/mix、結果、分類、診斷來源／代碼／摘要及證據狀態；達到樣本上限後仍完整計數。排程器例外與執行器回傳失敗分開顯示；公開資料不含 stack trace、已分類秘密或主機路徑。保留的 Case Log 可從 Evidence 區段連結開啟。`NO_CASE_LOG`、`WORKSPACE_MISSING`、`EVIDENCE_IO_ERROR`、`EVIDENCE_MATERIALIZATION_ERROR`、`NOT_RETAINED_BY_POLICY` 分別說明證據缺失原因，不改變 iteration 結果，也不額外計為一次失敗。
 
 ## Resources 與 integrations
 
@@ -2799,7 +2815,7 @@ Load 以 scenario 為基礎；明確提供的 workload option 會先覆蓋對應
 
 ### 路徑顯示
 
-本機 CLI 預設顯示絕對路徑。加入 `--substitute-package-root`，可將 package 內路徑顯示為 `$ATT_PACKAGE_ROOT` 或 `$ATT_PACKAGE_ROOT/<relative-path>`；加入 `--substitute-external-basename`，可將其他絕對路徑顯示為 `$EXTERNAL/<basename>`。兩個 option 可獨立使用，適用於 `run`、`validate`、`snapshot`、`debug` 及 `load` 的人類可讀診斷、結構化結果與顯示的報表路徑。這只會改變呈現方式，不會改變檔案存取或儲存的 package data。這些 CLI options 只適用於本機 CLI；為避免洩露 host path，Server Worker 在 API 和 Studio 輸出中一律強制啟用兩種替換，並優先於 CLI 設定。升級至 4.2.1 後，如要恢復舊有本機 CLI 呈現方式，請明確加入相應旗標。
+本機 CLI 預設顯示絕對路徑。加入 `--substitute-package-root`，可將 package 內路徑顯示為 `$ATT_PACKAGE_ROOT` 或 `$ATT_PACKAGE_ROOT/<relative-path>`；加入 `--substitute-external-basename`，可將其他絕對路徑顯示為 `$EXTERNAL/<basename>`。兩個 option 可獨立使用，適用於 `run`、`validate`、`snapshot`、`debug` 及 `load` 的人類可讀診斷、結構化結果與顯示的報表路徑。這只會改變呈現方式，不會改變檔案存取或儲存的 package data。這些 CLI options 只適用於本機 CLI；為避免洩露 host path，Server Worker 在 API 和 Studio 輸出中一律強制啟用兩種替換，並優先於 CLI 設定。升級至 4.2.2 後，如要恢復舊有本機 CLI 呈現方式，請明確加入相應旗標。
 
 ```sh
 ./att.sh validate --package --substitute-package-root
@@ -3128,7 +3144,7 @@ Assertion 為 false 會令 Case execution 變成 FAIL。無效表達式語法/�
 ```json
 {
   "schemaVersion": "att-validation/v2.1",
-  "attVersion": "4.2.1",
+  "attVersion": "4.2.2",
   "valid": false,
   "mode": "package",
   "summary": {"errors": 1, "warnings": 0, "suites": 1, "cases": 22, "templates": 7, "tools": 7},
@@ -3167,7 +3183,7 @@ python3 tools/validate_reference_content.py
 ./att.sh validate --package
 ```
 
-`build.sh` 會執行 release gate、重新生成 modular Reference Manual、建立 application jar 和 release archive，並 smoke-test 解壓後的 local package。Reference generation 另外需要 Python 3 與 Pandoc。它會輸出供 CLI 使用的 `att-4.2.1-local.tar.gz`、包含 WAR 和部署指南的 `att-4.2.1-server.tar.gz`，以及 source archive `att-4.2.1-src.tar.gz`。每個 binary archive 均須小於 25 MB。Local package 不再包含 WAR 或其中重複的 runtime library。
+`build.sh` 會執行 release gate、重新生成 modular Reference Manual、建立 application jar 和 release archive，並 smoke-test 解壓後的 local package。Reference generation 另外需要 Python 3 與 Pandoc。它會輸出供 CLI 使用的 `att-4.2.2-local.tar.gz`、包含 WAR 和部署指南的 `att-4.2.2-server.tar.gz`，以及 source archive `att-4.2.2-src.tar.gz`。每個 binary archive 均須小於 25 MB。Local package 不再包含 WAR 或其中重複的 runtime library。
 
 ### Runtime dependencies
 
@@ -3377,7 +3393,7 @@ Timeout range、evidence sample bound、result limit、pool size 等 operational
 
 #### 為什麼 `Att.bat` 會要求 Maven，或者為什麼 `.sh` Tool 在 windows 上失敗？
 
-在二進制發布中，`att.bat` 會找到有版本號的 runtime JAR，例如 `lib\att-local-4.2.1.jar`，只需要 Java 8+。每個 `ATT_HOME/lib` 只保留一個 `att-local-<version>.jar`，讓啟動器能明確選取 runtime。源碼樹中，`att.bat` 會在 Maven 位於 `PATH` 時使用 Maven；沒有 Maven 時，需要已有的 `target\classes`。先用 `att.bat version` 確認啟動器後再校驗套件。
+在二進制發布中，`att.bat` 會找到有版本號的 runtime JAR，例如 `lib\att-local-4.2.2.jar`，只需要 Java 8+。每個 `ATT_HOME/lib` 只保留一個 `att-local-<version>.jar`，讓啟動器能明確選取 runtime。源碼樹中，`att.bat` 會在 Maven 位於 `PATH` 時使用 Maven；沒有 Maven 時，需要已有的 `target\classes`。先用 `att.bat version` 確認啟動器後再校驗套件。
 
 啟動器讓 ATT 自身跨平臺；它無法翻譯外部 Tool 可執行文件。請為 Windows 配置 `.bat`、`.cmd`、PowerShell 腳本（需要顯式 `powershell`/`pwsh` argv）或原生可執行文件，而不是 POSIX-only `.sh`。PATH 校驗遵循 Windows `PATHEXT`，因此如 `pwsh` 這類名稱可解析為 `pwsh.exe`。維護多平臺版本時，請保持參數契約和 stdout 輸出格式一致。
 

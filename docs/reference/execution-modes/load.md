@@ -274,3 +274,19 @@ IDs must be non-empty, path-safe single segments and unique within the Load run.
 
 
 execIdFormat permits deterministic, side-effect-free built-ins only; external calls, seq.next(), random, clock and filesystem functions are rejected. See [Migration Notes](../appendices/migrations.md) for schema migration.
+
+## Error rates and failure diagnosis (4.2.2)
+
+Measured completions are divided into PASS, SUT failures, and runtime ERROR/INVALID. Warm-up is excluded from measured rates; it can still make execution ERROR. Generator drops remain separate.
+
+| Metric | Numerator / denominator |
+| --- | --- |
+| `sutErrorRate` / existing `errorRate` threshold | `measuredFailure / measuredCompleted` |
+| `runtimeErrorRate` | `measuredRuntimeError / measuredCompleted` |
+| `totalErrorRate` | `(measuredFailure + measuredRuntimeError) / measuredCompleted` |
+| `completedThroughput` | all measured completions / measured seconds |
+| `successfulThroughput` | measured PASS completions / measured seconds |
+
+Optional `runtimeErrorRate` and `totalErrorRate` thresholds use the same percentage comparisons as `errorRate`, for example `{errorRate: '< 1%', totalErrorRate: '< 1%'}`. `errorRate` remains SUT FAIL-only and excludes runtime errors and drops. Thresholds PASS and Execution ERROR can coexist; neither thresholds nor completed TPS imply successful execution. Rates in JSON/YAML remain numeric zero when no measured completions exist, for compatibility; the HTML report shows N/A.
+
+The Runtime failures / Failure diagnosis section shows total/measured runtime counters and at most 100 sanitized lightweight failure samples per aggregate, workload or mix collector. Each sample identifies iteration, sequence, phase, timestamp, workload/mix, outcome, classification, diagnostic source/code/summary and evidence state. Counts stay complete after sample limits are reached. Scheduler exceptions are distinguished from returned executor failures; public samples omit stack traces, classified secrets and host paths. Retained Case Logs are linked in the Evidence section. `NO_CASE_LOG`, `WORKSPACE_MISSING`, `EVIDENCE_IO_ERROR`, `EVIDENCE_MATERIALIZATION_ERROR` and `NOT_RETAINED_BY_POLICY` explain missing evidence independently of the iteration outcome. An evidence failure is not another failed iteration.

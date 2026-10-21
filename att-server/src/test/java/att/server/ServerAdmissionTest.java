@@ -50,6 +50,8 @@ class ServerAdmissionTest {
             String id="J1234567890ABCDEF";Path directory=runtime.config.dataDir.resolve("jobs").resolve(id);Files.createDirectories(directory.resolve("output"));
             Files.writeString(directory.resolve("output/report.txt"),"expired");Job job=new Job(id,"run","p","ci",new WorkerRequest(),new JobEvents(directory.resolve("events.jsonl"),100));
             job.status="PASS";job.finishedAt=Instant.now().minusSeconds(TimeUnit.DAYS.toSeconds(2));runtime.store.insert(job,"{}");runtime.store.update(job);
+            runtime.cleanupExpiredJobs();assertNotNull(runtime.store.get(id),"Artifact recovery must finish before age deletion");
+            runtime.store.artifactRecoveryNeeded(id,false);
             runtime.cleanupExpiredJobs();assertNull(runtime.store.get(id));assertFalse(Files.exists(directory));
         } finally {runtime.close();}
     }

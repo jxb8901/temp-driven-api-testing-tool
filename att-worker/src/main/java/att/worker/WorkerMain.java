@@ -108,6 +108,7 @@ public final class WorkerMain {
     }
 
     private int executeRequest(JsonNode input) throws Exception {
+        consoleOptions=att.console.ExecutionConsoleFormatter.Options.published();
         inspectionRequest=false;
         inspectionResponseBytes=0;inspectionResponseLimit=262144;
         if(input==null) { emit(WorkerEvent.Type.STATUS,fields("status","RUNNING")); return fail("WORKER_REQUEST_INVALID","A JSON request is required"); }
@@ -116,6 +117,10 @@ public final class WorkerMain {
         emit(WorkerEvent.Type.STATUS,fields("status","RUNNING"));
         try { request=mapper.treeToValue(input,WorkerRequest.class); if(request.maxResponseBytes!=null)inspectionResponseLimit=request.maxResponseBytes; }
         catch(Exception error) { return fail("WORKER_REQUEST_INVALID","Unable to decode Worker request"); }
+        try { consoleOptions=att.console.ExecutionConsoleFormatter.Options.published(
+                request.liveOutputMaxEntryChars==null?4000:request.liveOutputMaxEntryChars,
+                request.liveOutputMaxEntryLines==null?40:request.liveOutputMaxEntryLines); }
+        catch(IllegalArgumentException error) { return fail("WORKER_REQUEST_INVALID",error.getMessage()); }
         inspectionRequest="inspect".equals(request.command);
         if(!PROTOCOL.equals(request.protocolVersion)) return fail("WORKER_PROTOCOL_UNSUPPORTED","Unsupported protocolVersion; expected "+PROTOCOL);
         if(inspectionDaemon&&!("inspect".equals(request.command))) return fail("WORKER_REQUEST_INVALID","Inspection Workers accept only inspect requests");
@@ -492,6 +497,7 @@ public final class WorkerMain {
         protocol.println(line);protocol.flush();
         if(inspectionDaemon)inspectionResponseBytes+=bytes;
     }
+    private att.console.ExecutionConsoleFormatter.Options consoleOptions=att.console.ExecutionConsoleFormatter.Options.published();
     private void attachConsole(WorkerEvent.Type type,Map<String,Object> safe) {
         Object existing=safe.get("console");
         if(existing instanceof String) {
@@ -499,7 +505,7 @@ public final class WorkerMain {
             return;
         }
         if(safe.get("executionEventType") instanceof String) {
-            String line=att.console.ExecutionConsoleFormatter.formatPayload(safe,att.console.ExecutionConsoleFormatter.Options.published());
+            String line=att.console.ExecutionConsoleFormatter.formatPayload(safe,consoleOptions);
             if(line!=null&&!line.isEmpty()) safe.put("console",publishConsole(line));
             return;
         }
@@ -508,8 +514,8 @@ public final class WorkerMain {
             loadSummaryLine=null;
         }
     }
-    private static String publishConsole(String line) {
-        return DiagnosticSanitizer.redactAbsolutePaths(DiagnosticSanitizer.redactText(line));
+    private String publishConsole(String line) {
+        return att.console.ExecutionConsoleFormatter.present(DiagnosticSanitizer.redactAbsolutePaths(DiagnosticSanitizer.redactText(line)),consoleOptions);
     }
     private Map<String,Object> boundedEvent(WorkerEvent.Type type,Map<String,Object> safe,long size) {
         Map<String,Object> bounded=fields("truncated",true,"protocolLimit",fields("code","ATT-WORKER-EVENT-TRUNCATED",

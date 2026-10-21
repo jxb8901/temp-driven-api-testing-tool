@@ -191,6 +191,7 @@ public final class ClosedVuScheduler implements LoadScheduler {
             att.core.ResultStatus status;
             String errorType = null;
             EvidenceRef evidence = null;
+            java.util.Map<String,Object> failureDiagnostic=java.util.Collections.emptyMap();
             LoadSchedulerSupport.emit(metrics, listener, tag(LoadEvent.started(runId, "closed", phase, iterationId, userId,
                     sequenceValue, scheduledAt, iterationStarted), iterationRequest));
             if (cancelledBeforeStart) {
@@ -205,15 +206,16 @@ public final class ClosedVuScheduler implements LoadScheduler {
                     if (result.evidenceRef() == null) result.discardTransientWorkspace();
                     if (result.testdataStopRequested()) cancelled.set(true);
                     status = result.status(); errorType = LoadSchedulerSupport.errorType(result); evidence = result.evidenceRef();
+                    if(status!=att.core.ResultStatus.PASS)failureDiagnostic=LoadFailureDiagnostic.result(result);
                 } catch (RuntimeException failure) {
                     if (evidenceStore != null && !evidenceStore.claimFailureEvidence(iterationId, scenario.workloadId())) evidenceStore.releaseEvidence(iterationId);
-                    status = att.core.ResultStatus.ERROR; errorType = "RUNTIME_ERROR";
+                    status = att.core.ResultStatus.ERROR; errorType = "LOAD_ITERATION_EXCEPTION";failureDiagnostic=LoadFailureDiagnostic.exception(failure);
                 }
             }
             long completedAt = timing.now();
             try {
                 LoadSchedulerSupport.emit(metrics, listener, tag(LoadEvent.completion(runId, "closed", phase, iterationId, userId,
-                        sequenceValue, scheduledAt, iterationStarted, completedAt, status, errorType, evidence), iterationRequest));
+                        sequenceValue, scheduledAt, iterationStarted, completedAt, status, errorType, evidence).withFailureDiagnostic(failureDiagnostic), iterationRequest));
             } finally {
                 if(evidenceStore!=null)evidenceStore.releaseEvidence(iterationId);
                 completions.offer(new VuCompletion(user, completedAt));

@@ -34,11 +34,12 @@ public final class ServerConfig {
     public final Scheduling scheduling;
     public final Authorization authorization;
     public final JobStorage jobStorage;
+    public final LiveOutput liveOutput;
 
     private ServerConfig(Path dataDir, Path runtimeConfigPath, Path javaExecutable, int maxConcurrent, int queuedLimit,
                          int maxConcurrentLoad, int gracefulStopMs, int jobRetentionDays,
                          int workerHeapInitialMb, int workerHeapMaxMb, int maxRequestBytes,
-                         int maxEventsPerJob, int maxArtifacts, boolean authenticationRequired, String authMode, Security security, Map<String, Path> packages, List<Path> allowedRoots, List<Path> workerLibraryDirs, Inspection inspection, InlineLoad inlineLoad, Scheduling scheduling, Authorization authorization, JobStorage jobStorage) {
+                         int maxEventsPerJob, int maxArtifacts, boolean authenticationRequired, String authMode, Security security, Map<String, Path> packages, List<Path> allowedRoots, List<Path> workerLibraryDirs, Inspection inspection, InlineLoad inlineLoad, Scheduling scheduling, Authorization authorization, JobStorage jobStorage, LiveOutput liveOutput) {
         this.dataDir=dataDir; this.runtimeConfigPath=runtimeConfigPath; this.javaExecutable=javaExecutable; this.maxConcurrent=maxConcurrent;
         this.queuedLimit=queuedLimit; this.maxConcurrentLoad=maxConcurrentLoad; this.gracefulStopMs=gracefulStopMs;this.jobRetentionDays=jobRetentionDays;
         this.workerHeapInitialMb=workerHeapInitialMb;this.workerHeapMaxMb=workerHeapMaxMb;
@@ -50,7 +51,7 @@ public final class ServerConfig {
         this.inlineLoad=inlineLoad;
         this.scheduling=scheduling;
         this.authorization=authorization;
-        this.jobStorage=jobStorage;
+        this.jobStorage=jobStorage;this.liveOutput=liveOutput;
     }
 
     public static ServerConfig load(Path file) throws Exception {
@@ -117,6 +118,7 @@ public final class ServerConfig {
         if(heapInitial>heapMax)throw new IllegalArgumentException("workers.heapInitialMb must not exceed workers.heapMaxMb");
         int retention=intValue(server,"jobRetentionDays",30,1,3650);
         JobStorage jobStorage=jobStorage(server.get("jobStorage"));
+        LiveOutput liveOutput=liveOutput(server.get("liveOutput"));
         int request=intValue(server,"maxRequestBytes",1048576,1024,16777216), events=intValue(server,"maxEventsPerJob",10000,100,1000000),
             artifacts=intValue(server,"maxArtifacts",1000,1,100000);boolean authenticationRequired=boolValue(server,"authenticationRequired",true);
         Map<?,?> auth=server.get("auth")==null?Collections.emptyMap():map(server.get("auth"),"server.auth");
@@ -136,7 +138,7 @@ public final class ServerConfig {
         for(Path packageRoot:resolved.values()) if(packageRoot.startsWith(realData)||realData.startsWith(packageRoot))
             throw new IllegalArgumentException("server.dataDir must be separate from configured package roots");
         privateDirectory(realData);privateDirectory(realData.resolve("db"));privateDirectory(realData.resolve("jobs"));
-        return new ServerConfig(realData,runtimeConfig,java,max,queue,load,stop,retention,heapInitial,heapMax,request,events,artifacts,authenticationRequired,authMode,security,resolved,allowed,workerLibraries,inspection,inlineLoad,scheduling,authorization,jobStorage);
+        return new ServerConfig(realData,runtimeConfig,java,max,queue,load,stop,retention,heapInitial,heapMax,request,events,artifacts,authenticationRequired,authMode,security,resolved,allowed,workerLibraries,inspection,inlineLoad,scheduling,authorization,jobStorage,liveOutput);
     }
 
     public static Path configPath() {
@@ -505,6 +507,29 @@ public final class ServerConfig {
         }
         public List<String> safeTextSources(String packageId) { return safeTextSources.getOrDefault(packageId,List.of()); }
         public List<String> externalTextSources(String packageId) { return externalTextSources.getOrDefault(packageId,List.of()); }
+    }
+
+    /** Immutable published console projection limits for a Server runtime. */
+    public static final class LiveOutput {
+        public final int maxEntryChars, maxEntryLines;
+        private LiveOutput(int chars, int lines) { maxEntryChars=chars;maxEntryLines=lines; }
+    }
+
+    private static LiveOutput liveOutput(Object node) {
+        Map<?,?> values=node==null?Collections.emptyMap():map(node,"server.liveOutput");
+        for(Object key:values.keySet()) if(!Set.of("maxEntryChars","maxEntryLines").contains(key))
+            throw new IllegalArgumentException("server.liveOutput contains an unknown setting: "+key);
+        return new LiveOutput(liveOutputLimit(values,"maxEntryChars",4000,32000),
+                liveOutputLimit(values,"maxEntryLines",40,200));
+    }
+
+    private static int liveOutputLimit(Map<?,?> values,String key,int fallback,int maximum) {
+        if(!values.containsKey(key))return fallback;
+        Object value=values.get(key);
+        if(!(value instanceof Byte || value instanceof Short || value instanceof Integer || value instanceof Long)
+                || ((Number)value).longValue()<1 || ((Number)value).longValue()>maximum)
+            throw new IllegalArgumentException("server.liveOutput."+key+" must be an integer between 1 and "+maximum);
+        return ((Number)value).intValue();
     }
 
     /** Size quota for {@code server.dataDir/jobs}. Disabled unless explicitly configured. */

@@ -151,6 +151,7 @@ public final class FixedArrivalRateScheduler implements LoadScheduler {
                 att.core.ResultStatus status = att.core.ResultStatus.ERROR;
                 String errorType = "RUNTIME_ERROR";
                 EvidenceRef evidence = null;
+                java.util.Map<String,Object> failureDiagnostic=java.util.Collections.emptyMap();
                 try {
                     LoadSchedulerSupport.emit(metrics, listener, tag(LoadEvent.started(runId, "arrivalRate", phase, id, null,
                             sequenceValue, dueAt, iterationStarted)));
@@ -181,16 +182,17 @@ public final class FixedArrivalRateScheduler implements LoadScheduler {
                         if (result.evidenceRef() == null) result.discardTransientWorkspace();
                         if (result.testdataStopRequested()) cancelled.set(true);
                         status = result.status(); errorType = LoadSchedulerSupport.errorType(result); evidence = result.evidenceRef();
+                        if(status!=att.core.ResultStatus.PASS)failureDiagnostic=LoadFailureDiagnostic.result(result);
                     }
                 } catch (RuntimeException error) {
                     if (evidenceStore != null && !evidenceStore.claimFailureEvidence(id, scenario.workloadId())) evidenceStore.releaseEvidence(id);
-                    status = att.core.ResultStatus.ERROR; errorType = "RUNTIME_ERROR";
+                    status = att.core.ResultStatus.ERROR; errorType = "LOAD_ITERATION_EXCEPTION";failureDiagnostic=LoadFailureDiagnostic.exception(error);
                 }
                 finally {
                     long completedAt = timing.now();
                     try {
                         LoadSchedulerSupport.emit(metrics, listener, tag(LoadEvent.completion(runId, "arrivalRate", phase, id, null,
-                                sequenceValue, dueAt, iterationStarted, completedAt, status, errorType, evidence)));
+                                sequenceValue, dueAt, iterationStarted, completedAt, status, errorType, evidence).withFailureDiagnostic(failureDiagnostic)));
                     } finally {
                         if(evidenceStore!=null)evidenceStore.releaseEvidence(id);
                         inFlight.decrementAndGet();

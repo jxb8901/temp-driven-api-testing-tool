@@ -299,8 +299,8 @@ export const api = {
   submitLoadDraft(input: SubmitLoadDraftInput): Promise<LoadJobAccepted> {
     return postJson<LoadJobAccepted>('jobs/load', input);
   },
-  async listJobs(input: { principal?: string; signal?: AbortSignal } = {}): Promise<LoadJobSummary[]> {
-    const envelope = await request<ApiEnvelope<LoadJobSummary>>('jobs' + queryString({ principal: input.principal }), { signal: input.signal });
+  async listJobs(input: { principal?: string; pinnedOnly?: boolean; signal?: AbortSignal } = {}): Promise<LoadJobSummary[]> {
+    const envelope = await request<ApiEnvelope<LoadJobSummary>>('jobs' + queryString({ principal: input.principal, pinnedOnly: input.pinnedOnly }), { signal: input.signal });
     return Array.isArray(envelope.items) ? envelope.items.slice(0, 100) : [];
   },
   getJob(jobId: string, signal?: AbortSignal): Promise<JobView> {
@@ -312,6 +312,13 @@ export const api = {
   async getJobArtifacts(jobId: string, signal?: AbortSignal): Promise<JobArtifact[]> {
     const envelope = await request<ApiEnvelope<JobArtifact>>('jobs/' + encodeURIComponent(jobId) + '/artifacts', { signal });
     return Array.isArray(envelope.items) ? envelope.items : [];
+  },
+  pinJob(jobId: string, pinned: boolean): Promise<JobView> {
+    return request<JobView>('jobs/' + encodeURIComponent(jobId) + '/pin', { method: 'POST', body: JSON.stringify({ pinned }) });
+  },
+  async deleteJobs(jobIds: string[]): Promise<Array<{ jobId: string; outcome: string }>> {
+    const response = await request<{ items: Array<{ jobId: string; outcome: string }> }>('jobs/delete', { method: 'POST', body: JSON.stringify({ jobIds, confirm: true }) });
+    return response.items;
   },
   cancelJob(jobId: string): Promise<{ jobId: string; status: LoadJobSummary['status'] }> {
     return request<{ jobId: string; status: LoadJobSummary['status'] }>('jobs/' + encodeURIComponent(jobId), { method: 'DELETE' });

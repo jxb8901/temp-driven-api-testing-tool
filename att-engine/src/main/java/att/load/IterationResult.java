@@ -27,6 +27,7 @@ public final class IterationResult {
     private final boolean evidenceRetained;
     private final CaseExecutionLog evidenceLog;
     private final Path transientWorkspace;
+    private String evidenceFailureReason;
 
     IterationResult(String iterationId, ResultStatus status, Duration duration, CaseRuntimeContext context,
                     List<ValidationResult> validations, Path outputDirectory, att.validation.Diagnostic diagnostic) {
@@ -82,6 +83,14 @@ public final class IterationResult {
     public Path outputDirectory() { return outputDirectory; }
     public att.validation.Diagnostic diagnostic() { return diagnostic; }
 
+    public String evidenceFailureReason() {
+        if(evidenceFailureReason!=null)return evidenceFailureReason;
+        if(evidenceRetained && evidenceDirectory!=null && Files.isRegularFile(evidenceDirectory.resolve("case.log")))return "RETAINED";
+        if(evidenceLog==null)return "NO_CASE_LOG";
+        if(evidenceDirectory==null)return "WORKSPACE_MISSING";
+        return "NOT_RETAINED_BY_POLICY";
+    }
+
     /** Materializes deferred failure evidence after a post-completion retention claim. */
     IterationResult materializeEvidence() {
         if (evidenceRetained || evidenceLog == null || evidenceDirectory == null) return this;
@@ -103,11 +112,12 @@ public final class IterationResult {
                 Files.write(retainedCase, caseYaml);
                 linkOrCopy(retainedCase, outputDirectory.resolve("case.yaml"));
             }
-            if (!Files.isRegularFile(evidenceDirectory.resolve("case.log"))) return this;
+            if (!Files.isRegularFile(evidenceDirectory.resolve("case.log"))) { evidenceFailureReason="NO_CASE_LOG";return this; }
             deleteWorkspace(transientWorkspace);
             return new IterationResult(iterationId, executionId, status, duration, context, validations,
                     outputDirectory, evidenceDirectory, diagnostic, true, null, null);
-        } catch (IOException | RuntimeException ignored) {
+        } catch (IOException | RuntimeException error) {
+            evidenceFailureReason=error instanceof IOException?"EVIDENCE_IO_ERROR":"EVIDENCE_MATERIALIZATION_ERROR";
             deletePartialWorkspace();
             return this;
         } finally {

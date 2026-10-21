@@ -8,6 +8,27 @@ import java.util.Map;
 import static org.junit.jupiter.api.Assertions.*;
 
 class ExecutionConsoleFormatterTest {
+    @Test void explicitPublishedPolicyIsIndependentAndRedactsBeforeTruncation() {
+        String text="x".repeat(8000)+" password=hidden";
+        assertEquals(8016, text.length());
+        String expanded=ExecutionConsoleFormatter.present(text,ExecutionConsoleFormatter.Options.published(16000,100));
+        assertFalse(expanded.contains("hidden"));assertFalse(expanded.contains("[truncated]"));
+        assertTrue(ExecutionConsoleFormatter.present(text,ExecutionConsoleFormatter.Options.published()).endsWith("[truncated]"));
+        assertTrue(ExecutionConsoleFormatter.present("a\nb\nc",ExecutionConsoleFormatter.Options.published(16000,2)).endsWith("[truncated]"));
+        String unicode=ExecutionConsoleFormatter.present("aaa\uD83D\uDE00",ExecutionConsoleFormatter.Options.published(4,40));
+        assertEquals("aaa [truncated]",unicode);
+        assertThrows(IllegalArgumentException.class,()->ExecutionConsoleFormatter.Options.published(32001,40));
+        assertThrows(IllegalArgumentException.class,()->ExecutionConsoleFormatter.Options.published(4000,201));
+    }
+
+    @Test void expandedLinePolicyPreservesOneHundredLinesAndNormalizesControls() {
+        String lines=java.util.stream.IntStream.rangeClosed(1,100).mapToObj(i->"line-"+i).collect(java.util.stream.Collectors.joining("\r\n"));
+        String expanded=ExecutionConsoleFormatter.present(lines,ExecutionConsoleFormatter.Options.published(16000,100));
+        assertTrue(expanded.endsWith("line-100"));assertFalse(expanded.contains("[truncated]"));assertFalse(expanded.contains("\r"));
+        assertTrue(ExecutionConsoleFormatter.present(lines,ExecutionConsoleFormatter.Options.published()).contains("[truncated]"));
+        assertEquals("ab",ExecutionConsoleFormatter.present("a\u0000\u0007b",ExecutionConsoleFormatter.Options.published()));
+    }
+
     @Test void rendersRunDebugAndLoadLinesFromTheSameFields() {
         Map<String, Object> finished = new LinkedHashMap<String, Object>();
         finished.put("event", "CASE_FINISHED");

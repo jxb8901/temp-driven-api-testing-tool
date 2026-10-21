@@ -38,6 +38,20 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class FixedArrivalRateSchedulerTest {
     @TempDir Path testdataRoot;
 
+    @Test void oneSchedulerExceptionRetainsClassifiedDiagnosticWithoutCaseLog() throws Exception {
+        LoadScenario scenario=scenario(10,0,0,500,0,1);
+        java.util.concurrent.atomic.AtomicInteger calls=new java.util.concurrent.atomic.AtomicInteger();
+        LoadRunResult result=new FixedArrivalRateScheduler(scenario,request -> {
+            if(calls.incrementAndGet()==2)throw new IllegalArgumentException("MQ put inhibited password=secret /private/host/path");
+            return result(request.iterationId());
+        },"one-error",null,LoadSchedulerTiming.system()).run();
+        assertEquals(ResultStatus.ERROR,result.status());
+        assertEquals(1,result.metrics().longValue("runtimeError"));assertEquals(1,result.metrics().longValue("measuredRuntimeError"));
+        String samples=att.validation.JsonSupport.write(result.metrics().value("failureDiagnostics"));
+        assertTrue(samples.contains("IllegalArgumentException"));assertTrue(samples.contains("MQ put inhibited"));
+        assertFalse(samples.contains("password=secret"));assertFalse(samples.contains("/private/host"));
+    }
+
     @Test
     void absoluteArrivalPlanUsesDeterministicPhaseAreas() {
         LoadScenario scenario = scenario(100.0, 0L, 1000L, 1000L, 1000L, 4);

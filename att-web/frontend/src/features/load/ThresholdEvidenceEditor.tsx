@@ -18,7 +18,9 @@ interface Props {
   onValidityChange(key: string, message: string): void;
 }
 const commonMetrics = [
-  { key: 'errorRate', label: 'Error rate', units: ['%'], unit: '%' },
+  { key: 'errorRate', label: 'SUT fail rate (FAIL only)', units: ['%'], unit: '%' },
+  { key: 'runtimeErrorRate', label: 'Runtime error rate', units: ['%'], unit: '%' },
+  { key: 'totalErrorRate', label: 'Total error rate', units: ['%'], unit: '%' },
   { key: 'p95', label: 'P95 latency', units: ['ms'], unit: 'ms' },
   { key: 'p99', label: 'P99 latency', units: ['ms'], unit: 'ms' },
   { key: 'minThroughput', label: 'Minimum throughput', units: ['/s', '/m'], unit: '/s' },

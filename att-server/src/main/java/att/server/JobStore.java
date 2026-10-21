@@ -53,6 +53,10 @@ final class JobStore implements AutoCloseable {
             s.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS artifact_recovery BOOLEAN DEFAULT TRUE NOT NULL");
             s.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS retention_state VARCHAR(16)");
             s.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS retention_bytes BIGINT");
+            s.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS pinned BOOLEAN DEFAULT FALSE NOT NULL");
+            s.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS pinned_at VARCHAR(40)");
+            s.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS pinned_by VARCHAR(256)");
+            s.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS retention_actor VARCHAR(256)");
             s.execute("CREATE INDEX IF NOT EXISTS jobs_artifact_recovery_idx ON jobs(artifact_recovery,job_id)");
             s.execute("CREATE TABLE IF NOT EXISTS job_worker_processes (job_id VARCHAR(80) NOT NULL, process_pid BIGINT NOT NULL, process_start_time VARCHAR(40), PRIMARY KEY(job_id,process_pid), FOREIGN KEY(job_id) REFERENCES jobs(job_id) ON DELETE CASCADE)");
             s.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS schedule_occurrence_id VARCHAR(160)");
@@ -379,7 +383,7 @@ final class JobStore implements AutoCloseable {
     }
     synchronized List<Map<String,Object>> listLoad(int limitPlusOne,int offset) throws Exception {
         List<Map<String,Object>> out=new ArrayList<>();
-        try(Connection c=connect();PreparedStatement p=c.prepareStatement("SELECT job_id,command,package_id,principal,status,created_at,started_at,finished_at,exit_code,request_summary FROM jobs WHERE command='load' AND (retention_state IS NULL OR retention_state<>'DELETING') ORDER BY created_at DESC,job_id DESC LIMIT ? OFFSET ?")){
+        try(Connection c=connect();PreparedStatement p=c.prepareStatement("SELECT job_id,command,package_id,principal,status,created_at,started_at,finished_at,exit_code,request_summary,pinned,pinned_at,pinned_by FROM jobs WHERE command='load' AND (retention_state IS NULL OR retention_state<>'DELETING') ORDER BY created_at DESC,job_id DESC LIMIT ? OFFSET ?")){
             p.setInt(1,limitPlusOne);p.setInt(2,offset);try(ResultSet r=p.executeQuery()){while(r.next())out.add(jobSummary(r));}
         }return out;
     }
@@ -387,6 +391,7 @@ final class JobStore implements AutoCloseable {
         Map<String,Object> m=new LinkedHashMap<>();m.put("jobId",r.getString(1));m.put("command",r.getString(2));m.put("executionType",Job.executionType(r.getString(2)));
         m.put("packageId",r.getString(3));m.put("principal",r.getString(4));m.put("status",r.getString(5));m.put("createdAt",r.getString(6));
         m.put("startedAt",r.getString(7));m.put("finishedAt",r.getString(8));m.put("exitCode",r.getObject(9));
+        m.put("pinned",r.getBoolean(11));m.put("pinnedAt",r.getString(12));m.put("pinnedBy",r.getString(13));
         String summary=r.getString(10);
         if(summary!=null&&!summary.isBlank())try {
             @SuppressWarnings("unchecked") Map<String,Object> details=ServerRuntime.JSON.readValue(summary,Map.class);
@@ -484,7 +489,7 @@ final class JobStore implements AutoCloseable {
     }
     synchronized List<String> expiredJobIds(Instant before) throws Exception {
         List<String> ids=new ArrayList<>();
-        try(Connection c=connect();PreparedStatement p=c.prepareStatement("SELECT job_id FROM jobs WHERE worker_quarantined=FALSE AND status IN ('PASS','FAIL','ERROR','INVALID','CANCELLED') AND finished_at IS NOT NULL AND finished_at < ? ORDER BY finished_at LIMIT 500")) {
+        try(Connection c=connect();PreparedStatement p=c.prepareStatement("SELECT job_id FROM jobs WHERE pinned=FALSE AND worker_quarantined=FALSE AND artifact_recovery=FALSE AND (retention_state IS NULL OR retention_state='') AND status IN ('PASS','FAIL','ERROR','INVALID','CANCELLED') AND finished_at IS NOT NULL AND finished_at < ? ORDER BY finished_at LIMIT 500")) {
             p.setString(1,before.toString());try(ResultSet r=p.executeQuery()){while(r.next())ids.add(r.getString(1));}
         }
         return ids;
@@ -536,11 +541,40 @@ final class JobStore implements AutoCloseable {
         return markDeleting(id, finishedAtOrBefore, null);
     }
     synchronized boolean markDeleting(String id, Instant finishedAtOrBefore, Long bytes) throws Exception {
-        try(Connection c=connect();PreparedStatement p=c.prepareStatement("UPDATE jobs SET retention_state='DELETING', retention_bytes=? WHERE job_id=? AND worker_quarantined=FALSE AND artifact_recovery=FALSE AND status IN ('PASS','FAIL','ERROR','INVALID','CANCELLED') AND finished_at IS NOT NULL AND finished_at<=? AND (retention_state IS NULL OR retention_state='')")) {
+        try(Connection c=connect();PreparedStatement p=c.prepareStatement("UPDATE jobs SET retention_state='DELETING', retention_bytes=? WHERE job_id=? AND pinned=FALSE AND worker_quarantined=FALSE AND artifact_recovery=FALSE AND status IN ('PASS','FAIL','ERROR','INVALID','CANCELLED') AND finished_at IS NOT NULL AND finished_at<=? AND (retention_state IS NULL OR retention_state='')")) {
             if(bytes==null||bytes<0)p.setNull(1,java.sql.Types.BIGINT);else p.setLong(1,bytes);
             p.setString(2,id);p.setString(3,finishedAtOrBefore.toString());return p.executeUpdate()==1;
         }
     }
+    synchronized boolean setPinned(String id,boolean pinned,String actor) throws Exception {
+        try(Connection c=connect()) {
+            c.setAutoCommit(false);
+            try {
+                boolean previous;
+                try(PreparedStatement p=c.prepareStatement("SELECT pinned FROM jobs WHERE job_id=? AND command IN ('run','debug','load') AND status IN ('PASS','FAIL','ERROR','INVALID','CANCELLED') AND (retention_state IS NULL OR retention_state='') FOR UPDATE")) {
+                    p.setString(1,id);try(ResultSet r=p.executeQuery()){if(!r.next())return false;previous=r.getBoolean(1);}
+                }
+                try(PreparedStatement p=c.prepareStatement("UPDATE jobs SET pinned=?,pinned_at=?,pinned_by=? WHERE job_id=?")) {
+                    p.setBoolean(1,pinned);p.setString(2,pinned?Instant.now().toString():null);p.setString(3,pinned?bounded(actor,256):null);p.setString(4,id);p.executeUpdate();
+                }
+                try(PreparedStatement p=c.prepareStatement("INSERT INTO audit(principal,action,job_id,created_at,outcome) VALUES(?,?,?,?,?)")) {
+                    p.setString(1,bounded(actor,256));p.setString(2,"JOB_PIN");p.setString(3,id);p.setString(4,Instant.now().toString());p.setString(5,previous+"->"+pinned);p.executeUpdate();
+                }
+                c.commit();return true;
+            } catch(Exception error){c.rollback();throw error;}
+        }
+    }
+    synchronized boolean markManualDeleting(String id,String actor) throws Exception {
+        try(Connection c=connect();PreparedStatement p=c.prepareStatement("UPDATE jobs SET retention_state='DELETING',retention_actor=? WHERE job_id=? AND pinned=FALSE AND worker_quarantined=FALSE AND artifact_recovery=FALSE AND status IN ('PASS','FAIL','ERROR','INVALID','CANCELLED') AND finished_at IS NOT NULL AND (retention_state IS NULL OR retention_state='')")) {
+            p.setString(1,bounded(actor,256));p.setString(2,id);return p.executeUpdate()==1;
+        }
+    }
+    synchronized String deletionActor(String id) throws Exception {
+        try(Connection c=connect();PreparedStatement p=c.prepareStatement("SELECT retention_actor FROM jobs WHERE job_id=?")) {
+            p.setString(1,id);try(ResultSet r=p.executeQuery()){return r.next()?r.getString(1):null;}
+        }
+    }
+
     synchronized Long retentionBytes(String id) throws Exception {
         try(Connection c=connect();PreparedStatement p=c.prepareStatement("SELECT retention_bytes FROM jobs WHERE job_id=?")) {
             p.setString(1,id);try(ResultSet r=p.executeQuery()){if(!r.next()||r.getObject(1)==null)return null;return r.getLong(1);}
@@ -568,7 +602,7 @@ final class JobStore implements AutoCloseable {
     synchronized List<Map<String,Object>> storageCandidates(String afterFinishedAt, String afterJobId) throws Exception {
         List<Map<String,Object>> rows=new ArrayList<>();
         boolean page=afterFinishedAt!=null&&afterJobId!=null;
-        String sql="SELECT job_id,finished_at,command,status,artifact_recovery,worker_quarantined FROM jobs WHERE status IN ('PASS','FAIL','ERROR','INVALID','CANCELLED') AND finished_at IS NOT NULL AND (retention_state IS NULL OR retention_state='') AND worker_quarantined=FALSE AND artifact_recovery=FALSE"
+        String sql="SELECT job_id,finished_at,command,status,artifact_recovery,worker_quarantined,pinned FROM jobs WHERE status IN ('PASS','FAIL','ERROR','INVALID','CANCELLED') AND finished_at IS NOT NULL AND (retention_state IS NULL OR retention_state='') AND worker_quarantined=FALSE AND artifact_recovery=FALSE"
                 +(page?" AND (finished_at>? OR (finished_at=? AND job_id>?))":"")
                 +" ORDER BY finished_at ASC, job_id ASC LIMIT "+storageCandidatePage;
         try(Connection c=connect();PreparedStatement p=c.prepareStatement(sql)) {
@@ -577,7 +611,7 @@ final class JobStore implements AutoCloseable {
                 while(r.next()) {
                     Map<String,Object> row=new LinkedHashMap<>();
                     row.put("jobId",r.getString(1));row.put("finishedAt",r.getString(2));row.put("command",r.getString(3));row.put("status",r.getString(4));
-                    row.put("artifactRecovery",r.getBoolean(5));row.put("quarantined",r.getBoolean(6));
+                    row.put("pinned",r.getBoolean(7));row.put("artifactRecovery",r.getBoolean(5));row.put("quarantined",r.getBoolean(6));
                     rows.add(row);
                 }
             }
@@ -646,17 +680,20 @@ final class JobStore implements AutoCloseable {
         return list(limit,null);
     }
     synchronized List<java.util.Map<String,Object>> list(int limit,String principalSearch) throws Exception {
+        return list(limit,principalSearch,false);
+    }
+    synchronized List<java.util.Map<String,Object>> list(int limit,String principalSearch,boolean pinnedOnly) throws Exception {
         List<java.util.Map<String,Object>> out=new ArrayList<>();
         String filter=principalSearch==null||principalSearch.isEmpty()?null:principalSearch;
-        String sql="SELECT job_id,command,package_id,principal,status,created_at,started_at,finished_at,exit_code,result_json,diagnostic_json FROM jobs WHERE (retention_state IS NULL OR retention_state<>'DELETING') "+(filter==null?"":"AND LOCATE(LOWER(?),LOWER(principal))>0 ")+"ORDER BY created_at DESC LIMIT ?";
+        String sql="SELECT job_id,command,package_id,principal,status,created_at,started_at,finished_at,exit_code,result_json,diagnostic_json,pinned,pinned_at,pinned_by FROM jobs WHERE (retention_state IS NULL OR retention_state<>'DELETING') "+(pinnedOnly?"AND pinned=TRUE ":"")+(filter==null?"":"AND LOCATE(LOWER(?),LOWER(principal))>0 ")+"ORDER BY created_at DESC LIMIT ?";
         try(Connection c=connect();PreparedStatement p=c.prepareStatement(sql)) {
-            int index=1;if(filter!=null)p.setString(index++,filter);p.setInt(index,limit);try(ResultSet r=p.executeQuery()){while(r.next()){var m=new java.util.LinkedHashMap<String,Object>();m.put("jobId",r.getString(1));m.put("command",r.getString(2));m.put("executionType",Job.executionType(r.getString(2)));m.put("packageId",r.getString(3));m.put("principal",r.getString(4));m.put("status",r.getString(5));m.put("createdAt",r.getString(6));m.put("startedAt",r.getString(7));m.put("finishedAt",r.getString(8));m.put("exitCode",r.getObject(9));out.add(m);}}
+            int index=1;if(filter!=null)p.setString(index++,filter);p.setInt(index,limit);try(ResultSet r=p.executeQuery()){while(r.next()){var m=new java.util.LinkedHashMap<String,Object>();m.put("jobId",r.getString(1));m.put("command",r.getString(2));m.put("executionType",Job.executionType(r.getString(2)));m.put("packageId",r.getString(3));m.put("principal",r.getString(4));m.put("status",r.getString(5));m.put("createdAt",r.getString(6));m.put("startedAt",r.getString(7));m.put("finishedAt",r.getString(8));m.put("exitCode",r.getObject(9));m.put("pinned",r.getBoolean(12));m.put("pinnedAt",r.getString(13));m.put("pinnedBy",r.getString(14));out.add(m);}}
         } return out;
     }
     // Job reads own their connection and result data; allow API polling alongside writes.
     java.util.Map<String,Object> get(String id) throws Exception {
-        try(Connection c=connect();PreparedStatement p=c.prepareStatement("SELECT job_id,command,package_id,principal,status,created_at,started_at,finished_at,worker_pid,exit_code,result_json,diagnostic_json,att_version,performance_json,retention_state FROM jobs WHERE job_id=?")) {
-            p.setString(1,id);try(ResultSet r=p.executeQuery()){if(!r.next()||"DELETING".equals(r.getString(15)))return null;var m=new java.util.LinkedHashMap<String,Object>();m.put("jobId",r.getString(1));m.put("command",r.getString(2));m.put("executionType",Job.executionType(r.getString(2)));m.put("packageId",r.getString(3));m.put("principal",r.getString(4));m.put("status",r.getString(5));m.put("createdAt",r.getString(6));m.put("startedAt",r.getString(7));m.put("finishedAt",r.getString(8));m.put("workerPid",r.getObject(9));m.put("exitCode",r.getObject(10));m.put("resultJson",r.getString(11));m.put("diagnosticJson",r.getString(12));m.put("attVersion",r.getString(13));m.put("performanceJson",r.getString(14));return m;}}
+        try(Connection c=connect();PreparedStatement p=c.prepareStatement("SELECT job_id,command,package_id,principal,status,created_at,started_at,finished_at,worker_pid,exit_code,result_json,diagnostic_json,att_version,performance_json,retention_state,pinned,pinned_at,pinned_by FROM jobs WHERE job_id=?")) {
+            p.setString(1,id);try(ResultSet r=p.executeQuery()){if(!r.next()||"DELETING".equals(r.getString(15)))return null;var m=new java.util.LinkedHashMap<String,Object>();m.put("jobId",r.getString(1));m.put("command",r.getString(2));m.put("executionType",Job.executionType(r.getString(2)));m.put("packageId",r.getString(3));m.put("principal",r.getString(4));m.put("status",r.getString(5));m.put("createdAt",r.getString(6));m.put("startedAt",r.getString(7));m.put("finishedAt",r.getString(8));m.put("workerPid",r.getObject(9));m.put("exitCode",r.getObject(10));m.put("resultJson",r.getString(11));m.put("diagnosticJson",r.getString(12));m.put("attVersion",r.getString(13));m.put("performanceJson",r.getString(14));m.put("pinned",r.getBoolean(16));m.put("pinnedAt",r.getString(17));m.put("pinnedBy",r.getString(18));return m;}}
     }
     private Connection connect() throws Exception{return DriverManager.getConnection(url,"sa","");}
     private static String text(Instant value){return value==null?null:value.toString();}

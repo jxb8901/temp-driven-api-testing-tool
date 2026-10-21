@@ -280,8 +280,40 @@ export function JobsPage(props: JobsFeatureProps) {
   return props.jobId ? <JobDetail key={props.jobId} {...props} jobId={props.jobId} /> : <JobsList {...props} />;
 }
 
+function DeleteJobs({ api, jobs, onDone, onCancel }: { api: JobsFeatureProps['api']; jobs: JobSummary[]; onDone: (outcomes: Array<{jobId: string; outcome: string}>) => void; onCancel: () => void }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const eligible = jobs.filter(job => isTerminalStatus(job.status) && !job.pinned);
+  async function remove() {
+    if (!api.deleteJobs) return;
+    setBusy(true); setError('');
+    try { onDone(await api.deleteJobs(eligible.map(job => job.jobId))); }
+    catch (reason) { setError(toError(reason, 'Deletion failed; refresh and retry.').message); setBusy(false); }
+  }
+  return <section role="dialog" aria-modal="true" aria-label="Confirm irreversible Job deletion" className="att-job-panel">
+    <h2>Delete {eligible.length} of {jobs.length} selected Jobs permanently?</h2>
+    <p>This irreversible action removes each eligible Job record, results, events/logs, archive and stored artifacts. Package sources and schedules are preserved.</p>
+    <ul>{jobs.map(job => <li key={job.jobId}><code>{job.jobId}</code> — {job.command}, {job.packageId}, {job.status}, {job.principal || 'Unknown principal'}{job.pinned ? ' — protected: unpin first' : !isTerminalStatus(job.status) ? ' — skipped: active Job' : ' — delete'}</li>)}</ul>
+    {error && <p role="alert">{error}</p>}
+    <button type="button" disabled={busy} onClick={onCancel}>Keep Jobs</button>
+    <button type="button" disabled={busy || !eligible.length} onClick={() => void remove()}>{busy ? 'Deleting…' : `Permanently delete ${eligible.length} Jobs`}</button>
+  </section>;
+}
+
 function JobsList({ api, principal = '', onOpenJob }: JobsFeatureProps) {
   const [rows, setRows] = useState<JobSummary[]>([]);
+  const [selected, setSelected] = useState<string[]>([]);
+  const [pinnedOnly, setPinnedOnly] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [actionStatus, setActionStatus] = useState('');
+  const [actionBusy, setActionBusy] = useState(false);
+  async function pinRow(job: JobSummary) {
+    if (!api.pinJob) return;
+    setActionBusy(true);
+    try { const updated = await api.pinJob(job.jobId, !job.pinned); setRows(current => current.map(row => row.jobId === job.jobId ? updated : row)); }
+    catch (reason) { setActionStatus(toError(reason, 'Pin change failed.').message); }
+    finally { setActionBusy(false); }
+  }
   const [state, setState] = useState<LoadState>('loading');
   const [error, setError] = useState('');
   const [serverPrincipal, setServerPrincipal] = useState(principal);
@@ -302,10 +334,11 @@ function JobsList({ api, principal = '', onOpenJob }: JobsFeatureProps) {
     setState(previous => previous === 'ready' || previous === 'refreshing' ? 'refreshing' : 'loading');
     setError('');
     debounce = setTimeout(() => {
-      api.listJobs({ principal: serverPrincipal.trim() || undefined, signal: controller.signal })
+      api.listJobs({ principal: serverPrincipal.trim() || undefined, signal: controller.signal, ...(pinnedOnly ? {pinnedOnly: true} : {}) })
         .then(items => {
           if (controller.signal.aborted || current !== sequence.current) return;
           setRows(items.slice(0, 100));
+          setSelected(current => current.filter(id => items.some(job => job.jobId === id)));
           setState('ready');
         })
         .catch(reason => {
@@ -318,14 +351,14 @@ function JobsList({ api, principal = '', onOpenJob }: JobsFeatureProps) {
       if (debounce) clearTimeout(debounce);
       controller.abort();
     };
-  }, [api, serverPrincipal, refreshVersion]);
+  }, [api, serverPrincipal, refreshVersion, pinnedOnly]);
 
   const filtered = useMemo(() => {
     const start = fromDate ? new Date(`${fromDate}T00:00:00`).getTime() : Number.NEGATIVE_INFINITY;
     const end = toDate ? new Date(`${toDate}T23:59:59.999`).getTime() : Number.POSITIVE_INFINITY;
     return rows.filter(job => {
       const created = dateKey(job.createdAt || '');
-      return (!status || job.status === status)
+      return (!pinnedOnly || job.pinned) && (!status || job.status === status)
         && (!packageId || job.packageId === packageId)
         && (!command || executionType(job) === command)
         && created >= start && created <= end;
@@ -334,7 +367,7 @@ function JobsList({ api, principal = '', onOpenJob }: JobsFeatureProps) {
       const difference = dateKey(a.createdAt || '') - dateKey(b.createdAt || '');
       return sort === 'oldest' ? difference : -difference;
     });
-  }, [rows, status, packageId, command, fromDate, toDate, sort]);
+  }, [rows, status, packageId, command, fromDate, toDate, sort, pinnedOnly]);
 
   const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const currentPage = Math.min(page, pageCount - 1);
@@ -346,7 +379,7 @@ function JobsList({ api, principal = '', onOpenJob }: JobsFeatureProps) {
   const start = filtered.length ? currentPage * PAGE_SIZE + 1 : 0;
   const end = Math.min((currentPage + 1) * PAGE_SIZE, filtered.length);
   const clearFilters = () => {
-    setServerPrincipal(''); setStatus(''); setPackageId(''); setCommand('');
+    setPinnedOnly(false); setServerPrincipal(''); setStatus(''); setPackageId(''); setCommand('');
     setFromDate(''); setToDate(''); setSort('newest'); setPage(0);
   };
 
@@ -361,6 +394,7 @@ function JobsList({ api, principal = '', onOpenJob }: JobsFeatureProps) {
       <label>Principal search (Server filter)
         <input value={serverPrincipal} onChange={event => { setServerPrincipal(event.currentTarget.value); setPage(0); }} />
       </label>
+      <label><input type="checkbox" checked={pinnedOnly} onChange={event => {setPinnedOnly(event.currentTarget.checked);setPage(0);}} /> Pinned only</label>
       <label>Status
         <select value={status} onChange={resetPage(setStatus)}><option value="">All loaded statuses</option>{status && !rows.some(job => job.status === status) && <option value={status}>{status} (not in latest loaded rows)</option>}{unique(rows.map(job => job.status)).map(value => <option key={value}>{value}</option>)}</select>
       </label>
@@ -390,21 +424,32 @@ function JobsList({ api, principal = '', onOpenJob }: JobsFeatureProps) {
       </div>
     </section>
     <section className="att-query-results-panel" aria-label="Job results">
-    <p className="att-list-coverage" role="note">Filters and sorting apply to the API-loaded rows. The API returns at most 100 jobs; principal search is performed by the Server. No environment field is returned for this list.</p>
+    <p className="att-list-coverage" role="note">Filters and sorting apply to the API-loaded rows. The API returns at most 100 jobs; principal search and Pinned only are performed by the Server. No environment field is returned for this list.</p>
     <p className="att-list-count att-query-result-status" role="status" aria-live="polite" aria-busy={state === 'loading' || state === 'refreshing'}>
       {state === 'loading' ? 'Loading jobs…' : state === 'refreshing' ? `Refreshing ${rows.length} loaded jobs…` : `Showing ${start}–${end} of ${filtered.length} matching loaded jobs (page ${currentPage + 1} of ${pageCount}).`}
     </p>
+    {api.deleteJobs && <div className="att-query-filter-actions"><span>{selected.length} selected across loaded pages</span>
+      <button type="button" disabled={!selected.length} onClick={() => setSelected([])}>Clear selection</button>
+      <button type="button" disabled={!selected.length || actionBusy} onClick={() => setConfirmDelete(true)}>Delete selected</button>
+    </div>}
+    {actionStatus && <p role="status">{actionStatus}</p>}
+    {confirmDelete && <DeleteJobs api={api} jobs={rows.filter(job => selected.includes(job.jobId))} onCancel={() => setConfirmDelete(false)} onDone={outcomes => {
+      setConfirmDelete(false);setActionStatus(outcomes.map(item => `${item.jobId}: ${item.outcome}`).join('; '));
+      const removed=outcomes.filter(item => item.outcome === 'DELETED' || item.outcome === 'ALREADY_UNAVAILABLE').map(item => item.jobId);
+      setRows(current => current.filter(job => !removed.includes(job.jobId)));setSelected(current => current.filter(id => !removed.includes(id)));setRefreshVersion(value => value + 1);
+    }} />}
     {error && <div className="att-inline-error" role="alert">{error}{rows.length > 0 && ' Showing the last successful result.'}</div>}
     {state === 'error' && rows.length === 0 ? <section className="att-empty-state att-query-empty-state"><h2>Jobs unavailable</h2><p>{error}</p><button type="button" onClick={() => setRefreshVersion(value => value + 1)}>Try again</button></section>
       : filtered.length === 0 && state === 'ready' ? <section className="att-empty-state att-query-empty-state"><h2>No matching jobs</h2><p>{rows.length ? 'No loaded jobs match these filters.' : 'The Server returned no jobs for this principal search.'}</p></section>
         : <div className="att-table-scroll"><table className="att-jobs-table att-data-table">
           <caption>Jobs returned by the Server; most recently created first by default</caption>
-          <thead><tr><th scope="col">Job ID</th><th scope="col">Package</th><th scope="col">Type</th><th scope="col">Principal</th><th scope="col">Status</th><th scope="col">Created</th><th scope="col">Open</th></tr></thead>
+          <thead><tr>{api.deleteJobs && <th scope="col"><input type="checkbox" aria-label="Select all on this page" checked={pageRows.length > 0 && pageRows.every(job => selected.includes(job.jobId))} onChange={event => {const checked=event.currentTarget.checked;setSelected(current => checked ? [...new Set([...current, ...pageRows.map(job => job.jobId)])] : current.filter(id => !pageRows.some(job => job.jobId === id)));}} /></th>}<th scope="col">Job ID</th><th scope="col">Package</th><th scope="col">Type</th><th scope="col">Principal</th><th scope="col">Status</th><th scope="col">Created</th><th scope="col">Open</th></tr></thead>
           <tbody>{pageRows.map(job => <tr key={job.jobId}>
+            {api.deleteJobs && <td><input type="checkbox" aria-label={`Select ${job.jobId}`} checked={selected.includes(job.jobId)} onChange={event => {const checked=event.currentTarget.checked;setSelected(current => checked ? [...current, job.jobId] : current.filter(id => id !== job.jobId));}} /></td>}
             <th scope="row"><button type="button" className="att-link-button" onClick={() => onOpenJob(job.jobId)}>{job.jobId}</button></th>
             <td>{job.packageId}</td><td>{executionType(job)}</td><td>{job.principal || 'Not reported'}</td>
             <td><StatusBadge status={job.status} /></td><td><time dateTime={job.createdAt || undefined}>{dateTime(job.createdAt)}</time></td>
-            <td><button type="button" onClick={() => onOpenJob(job.jobId)}>Open details</button></td>
+            <td>{job.pinned && <span>📌 Pinned</span>}{api.pinJob && isTerminalStatus(job.status) && <button type="button" disabled={actionBusy} onClick={() => void pinRow(job)}>{job.pinned ? "Unpin" : "Pin"}</button>}<button type="button" onClick={() => onOpenJob(job.jobId)}>Open details</button></td>
           </tr>)}</tbody>
         </table></div>}
     {filtered.length > PAGE_SIZE && <nav className="att-pagination att-query-pagination" aria-label="Loaded jobs pages">
@@ -418,6 +463,9 @@ function JobsList({ api, principal = '', onOpenJob }: JobsFeatureProps) {
 
 function JobDetail({ api, jobId, onShowList, confirmCancel }: JobsFeatureProps & { jobId: string }) {
   const [job, setJob] = useState<JobView | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [jobActionBusy, setJobActionBusy] = useState(false);
+  const [jobActionStatus, setJobActionStatus] = useState('');
   const [jobState, setJobState] = useState<LoadState>('loading');
   const [detailError, setDetailError] = useState('');
   const [result, setResult] = useState<JobResultResponse | null>(null);
@@ -662,10 +710,15 @@ function JobDetail({ api, jobId, onShowList, confirmCancel }: JobsFeatureProps &
         <h1 id="job-title">Job {jobId}</h1><p>Server status, live output, results, artifacts and reported metrics.</p></div>
       <div className="att-job-actions">
         <StatusBadge status={jobStatus} />
+        {job?.pinned && <span title={`Pinned by ${job.pinnedBy || 'operator'} at ${job.pinnedAt || 'unknown time'}`}>📌 Pinned</span>}
+        {job && isTerminalStatus(job.status) && api.pinJob && <button type="button" disabled={jobActionBusy} onClick={async () => {setJobActionBusy(true);try {setJob(await api.pinJob!(jobId,!job.pinned));}catch(error){setJobActionStatus(toError(error,'Pin change failed.').message);}finally{setJobActionBusy(false);}}}>{job.pinned ? 'Unpin' : 'Pin'}</button>}
+        {job && isTerminalStatus(job.status) && api.deleteJobs && <button type="button" disabled={jobActionBusy || job.pinned} title={job.pinned ? 'Unpin before deletion' : undefined} onClick={() => setConfirmDelete(true)}>Delete Job</button>}
         {canCancel && <button className="att-button-danger" type="button" onClick={() => void cancel()} disabled={cancelState === 'pending'}>{cancelState === 'pending' ? 'Cancel requested…' : 'Cancel job'}</button>}
         <button type="button" onClick={retry} disabled={jobState === 'loading' || jobState === 'refreshing'}>{jobState === 'refreshing' ? 'Refreshing…' : 'Refresh details'}</button>
       </div>
     </header>
+    {jobActionStatus && <p role="status">{jobActionStatus}</p>}
+    {confirmDelete && job && <DeleteJobs api={api} jobs={[job]} onCancel={() => setConfirmDelete(false)} onDone={outcomes => {setConfirmDelete(false);if(outcomes.some(item => item.outcome === 'DELETED' || item.outcome === 'ALREADY_UNAVAILABLE'))onShowList();else setJobActionStatus(outcomes.map(item => item.outcome).join('; '));}} />}
     {jobState === 'loading' && <p role="status" aria-busy="true">Loading job {jobId}…</p>}
     {detailError && <div role="alert" className="att-inline-error">{detailError}<button type="button" onClick={retry}>Retry</button></div>}
     {cancelError && <p role="alert" className="att-inline-error">{cancelError}</p>}
@@ -686,7 +739,7 @@ function JobDetail({ api, jobId, onShowList, confirmCancel }: JobsFeatureProps &
     </section>
     <section ref={eventPanelRef} className="att-job-panel" role="tabpanel" id="job-panel-live" aria-labelledby="job-tab-live" hidden={activeTab !== 'live'} tabIndex={0}>
       <div className="att-live-heading"><h2>Live Output</h2><span role="status" data-state={connection}>SSE {connection}</span></div>
-      <p className="att-help">Live Output shows the Server console lines for this Job. It does not format events in the browser. EventSource reconnects from the last delivered event ID.</p>
+      <p className="att-help">Live Output shows the Server console lines for this Job. It does not format events in the browser. EventSource reconnects from the last delivered event ID. [truncated] marks an entry shortened upstream; [truncated by journal] marks the journal byte limit. Event payload truncation is reported separately from dropped history.</p>
       <div className="att-event-controls" aria-label="Live output controls">
         <label>Search output<input aria-label="Search output" type="search" value={liveSearch} onChange={event => setLiveSearch(event.currentTarget.value)} placeholder="Search console lines" /></label>
         <label><input type="checkbox" aria-label="Live output auto-scroll" checked={liveAutoScroll} onChange={event => setLiveAutoScroll(event.currentTarget.checked)} /> Auto-scroll</label>
@@ -696,6 +749,8 @@ function JobDetail({ api, jobId, onShowList, confirmCancel }: JobsFeatureProps &
         <button type="button" aria-pressed={consoleMaximized} onClick={toggleConsoleMaximize}>{consoleMaximized ? 'Restore' : 'Maximize'}</button>
       </div>
       {eventCopyStatus && <p role="status">{eventCopyStatus}</p>}
+      {events.some(event => event.data && typeof event.data === 'object' && 'journalLimit' in event.data) && <p role="note">Some event payload fields were truncated by the journal byte budget. A preserved console preview can still be complete; [truncated by journal] marks a shortened console entry.</p>}
+      {events.some(event => event.data && typeof event.data === 'object' && 'protocolLimit' in event.data) && <p role="note">Some event payload fields were truncated by the Worker protocol limit. Inspect artifacts for retained full details.</p>}
       {(historyTruncated || browserTruncated) && <p role="note">{historyTruncated && <span>Earlier journal events are no longer retained.</span>}{historyTruncated && browserTruncated && ' '}{browserTruncated && <span>This browser keeps the latest {MAX_EVENTS} events.</span>}</p>}
       {visibleConsole.length ? <div ref={consoleShellRef} className="att-console-shell" data-maximized={consoleMaximized ? 'true' : 'false'} style={consoleMaximized
         ? { position: 'fixed', top: maximizeTop, left: 12, right: 12, bottom: 12, height: 'auto', maxHeight: 'none', zIndex: 30 }
@@ -731,11 +786,16 @@ function JobDetail({ api, jobId, onShowList, confirmCancel }: JobsFeatureProps &
         const open = eventOpenOverride[key] ?? eventsExpanded;
         const preview = eventPreview(event);
         const last = index === visibleEvents.length - 1;
-        return <li key={key}><details open={open}><summary onClick={click => { click.preventDefault(); setEventOpen(key, !open, last); }}><strong>{event.type}</strong>{event.id && <code>#{event.id}</code>}{timestamp && <time dateTime={timestamp}>{dateTime(timestamp)}</time>}{preview && <span className="att-event-preview">{preview}</span>}</summary><pre className="att-event-payload">{displayValue(event.data).slice(0, MAX_LINE_LENGTH)}</pre></details></li>;
+        return <li key={key}><details open={open}><summary onClick={click => { click.preventDefault(); setEventOpen(key, !open, last); }}><strong>{event.type}</strong>{event.id && <code>#{event.id}</code>}{timestamp && <time dateTime={timestamp}>{dateTime(timestamp)}</time>}{preview && <span className="att-event-preview">{preview}</span>}</summary><pre className="att-event-payload">{displayValue(event.data).slice(0, MAX_LINE_LENGTH)}</pre>{displayValue(event.data).length > MAX_LINE_LENGTH && <details><summary>Events preview clipped — expand retained payload</summary><pre>{displayValue(event.data).slice(0, 65536)}</pre>{displayValue(event.data).length > 65536 && <p>Retained payload display limited to 65,536 characters.</p>}</details>}</details></li>;
       })}</ol> : <p>{events.length ? 'No events match the current filters.' : 'No SSE events have been returned.'}</p>}
     </section>
     <section className="att-job-panel" role="tabpanel" id="job-panel-results" aria-labelledby="job-tab-results" hidden={activeTab !== 'results'} tabIndex={0}>
       <h2>Results</h2>
+      {Boolean(result?.result?.metrics) && <section aria-label="Failure diagnosis"><h3>Failure diagnosis</h3>
+        <p>Runtime errors (all phases): {displayValue((result!.result!.metrics as Record<string, unknown>).runtimeError ?? 0)}; measured runtime errors: {displayValue((result!.result!.metrics as Record<string, unknown>).measuredRuntimeError ?? 0)}.</p>
+        <p>Thresholds and execution outcome are independent. Completed TPS includes unsuccessful completions; successfulThroughput counts PASS only.</p>
+        <pre>{displayValue((result!.result!.metrics as Record<string, unknown>).failureDiagnostics ?? [])}</pre>
+      </section>}
       {resultState === 'loading' && <p role="status" aria-busy="true">Loading result…</p>}
       {resultState === 'refreshing' && <p role="status" aria-busy="true">Refreshing result…</p>}
       {resultError && <p role="alert" className="att-inline-error">{resultError}</p>}

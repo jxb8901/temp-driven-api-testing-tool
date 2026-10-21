@@ -78,7 +78,7 @@ class ArtifactRecoveryTest {
             String url="jdbc:h2:file:"+config.dataDir.resolve("db/att-server").toString().replace('\\','/')
                     +";DB_CLOSE_ON_EXIT=FALSE;AUTO_SERVER=FALSE";
             try(var connection=DriverManager.getConnection(url,"sa","");var statement=connection.prepareStatement(
-                    "INSERT INTO jobs(job_id,command,package_id,principal,status,created_at,finished_at,att_version,request_summary,worker_quarantined) VALUES(?,'run','p','test','PASS',?,?,'test','{}',?)")) {
+                    "INSERT INTO jobs(job_id,command,package_id,principal,status,created_at,finished_at,att_version,request_summary,worker_quarantined,artifact_recovery) VALUES(?,'run','p','test','PASS',?,?,'test','{}',?,FALSE)")) {
                 for(int i=1;i<=502;i++) {
                     statement.setString(1,id(i));statement.setString(2,Instant.EPOCH.toString());
                     statement.setString(3,Instant.EPOCH.plusSeconds(i).toString());statement.setBoolean(4,i<=501);statement.addBatch();

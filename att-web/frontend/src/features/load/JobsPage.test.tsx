@@ -67,6 +67,51 @@ async function click(element: Element) {
 }
 
 describe('JobsPage React feature', () => {
+  it('keeps expanded published console text and distinguishes journal truncation from preview clipping', async () => {
+    const api=makeApi();
+    await act(async () => root.render(<JobsPage api={api} jobId="JOB-204" onOpenJob={vi.fn()} onShowList={vi.fn()} />));
+    const handlers=vi.mocked(api.subscribeJob).mock.calls[0][1];
+    const text='diagnostic '+ 'x'.repeat(8000) + ' expanded-entry-end';
+    await act(async () => handlers.onEvent({id:'1',type:'log',data:{console:text,truncated:true,journalLimit:{limitBytes:65536}}}));
+    await click(host.querySelector('#job-tab-live')!);
+    expect(host.querySelector('[aria-label="Live output"]')?.textContent).toBe(text);
+    expect(host.querySelector('#job-panel-live')?.textContent).toContain('Some event payload fields were truncated by the journal');
+    await click(host.querySelector('#job-tab-events')!);
+    expect(host.querySelector('#job-panel-events')?.textContent).toContain('Events preview clipped');
+    expect(host.querySelector('#job-panel-events details details pre')?.textContent).toContain('expanded-entry-end');
+  });
+
+  it('selects only the current page and confirms eligible deletions while preserving pinned selections', async () => {
+    const rows=Array.from({length: 30}, (_, index) => ({...sampleJob, jobId: `J${index}`, status: 'PASS' as const, pinned: index===0}));
+    const deleteJobs=vi.fn(async (ids: string[]) => ids.map(jobId => ({jobId, outcome: 'DELETED'})));
+    const api=makeApi({listJobs: vi.fn(async () => rows), deleteJobs, pinJob: vi.fn()});
+    await act(async () => root.render(<JobsPage api={api} onOpenJob={vi.fn()} onShowList={vi.fn()} />));await advance();
+    await click(host.querySelector('[aria-label="Select all on this page"]')!);
+    expect(host.textContent).toContain('25 selected across loaded pages');
+    const button=(text: string) => [...host.querySelectorAll('button')].find(item => item.textContent===text)!;
+    await click(button('Delete selected'));
+    expect(deleteJobs).not.toHaveBeenCalled();
+    expect(host.querySelector('[role="dialog"]')?.textContent).toContain('protected: unpin first');
+    await click(button('Keep Jobs'));expect(deleteJobs).not.toHaveBeenCalled();
+    await click(button('Delete selected'));await click(button('Permanently delete 24 Jobs'));
+    expect(deleteJobs.mock.calls[0][0]).toHaveLength(24);
+    expect(deleteJobs.mock.calls[0][0]).not.toContain('J0');
+    expect(deleteJobs.mock.calls[0][0]).not.toContain('J25');
+  });
+
+  it('pins a terminal Job in details and deletes it only after unpin and explicit confirmation', async () => {
+    const job={...sampleJob,status: 'PASS' as const,pinned: true};
+    const pinJob=vi.fn(async () => ({...job,pinned:false}));
+    const deleteJobs=vi.fn(async () => [{jobId:job.jobId,outcome:'DELETED'}]);
+    const onShowList=vi.fn();
+    await act(async () => root.render(<JobsPage api={makeApi({getJob:vi.fn(async () => job),pinJob,deleteJobs})} jobId={job.jobId} onOpenJob={vi.fn()} onShowList={onShowList} />));
+    const button=(text: string) => [...host.querySelectorAll('button')].find(item => item.textContent===text)!;
+    expect((button('Delete Job') as HTMLButtonElement).disabled).toBe(true);
+    await click(button('Unpin'));expect(pinJob).toHaveBeenCalledWith(job.jobId,false);
+    await click(button('Delete Job'));expect(deleteJobs).not.toHaveBeenCalled();
+    await click(button('Permanently delete 1 Jobs'));expect(onShowList).toHaveBeenCalled();
+  });
+
   it.each([
     ['PASS', 'status'], ['FAIL', 'status'], ['ERROR', 'status'], ['INVALID', 'status'], ['CANCELLED', 'status'], ['ERROR', 'result'],
   ])('reconciles final metrics/results once after %s %s SSE', async (status, type) => {

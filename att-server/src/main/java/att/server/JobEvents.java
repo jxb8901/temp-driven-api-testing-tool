@@ -158,14 +158,36 @@ final class JobEvents {
 
     private Map<String, Object> boundedPayload(Map<String, ?> data) throws Exception {
         Map<String, Object> payload = new LinkedHashMap<>(data);
-        if (JSON.writeValueAsBytes(payload).length > MAX_EVENT_DATA_BYTES) {
+        int originalBytes=JSON.writeValueAsBytes(payload).length;
+        if (originalBytes > MAX_EVENT_DATA_BYTES) {
             Object console = payload.get("console");
             payload.clear();
             payload.put("truncated", true);
+            payload.put("journalLimit",Map.of("code","ATT-JOURNAL-EVENT-TRUNCATED","sizeBytes",originalBytes,"limitBytes",MAX_EVENT_DATA_BYTES));
             payload.put("summary", "Event payload exceeded the retained event size limit");
-            if (console instanceof String text && !text.isEmpty()) payload.put("console", text.length() <= 4000 ? text : text.substring(0, 4000));
+            if (console instanceof String text && !text.isEmpty()) {
+                // Keep the full published projection when it fits. JSON escaping and UTF-8,
+                // rather than Java character count, determine the retained byte budget.
+                payload.put("console", text);
+                if (JSON.writeValueAsBytes(payload).length > MAX_EVENT_DATA_BYTES) {
+                    payload.put("consoleTruncated", true);
+                    int low=0, high=text.length();
+                    while(low<high) {
+                        int mid=(low+high+1)/2;
+                        payload.put("console", consolePrefix(text,mid));
+                        if(JSON.writeValueAsBytes(payload).length<=MAX_EVENT_DATA_BYTES)low=mid;
+                        else high=mid-1;
+                    }
+                    payload.put("console",consolePrefix(text,low));
+                }
+            }
         }
         return payload;
+    }
+
+    private static String consolePrefix(String text,int length) {
+        if(length>0 && Character.isHighSurrogate(text.charAt(length-1)))length--;
+        return text.substring(0,length)+" [truncated by journal]";
     }
 
     private void trimRetainedEvents() {

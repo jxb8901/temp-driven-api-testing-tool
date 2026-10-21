@@ -274,3 +274,19 @@ ID 必須非空、安全且為單一路徑 segment，並在 Load run 內唯一�
 
 
 execIdFormat 只允許 deterministic、side-effect-free built-ins；external calls、seq.next()、random、clock 與 filesystem functions 都會被拒絕。Schema migration 見 [Migration Notes](../appendices/migrations.md)。
+
+## 錯誤率與失敗診斷（4.2.2）
+
+測量階段完成項目分為 PASS、SUT 失敗及執行期 ERROR/INVALID。Warm-up 不計入測量錯誤率，但仍可使執行結果成為 ERROR。產生器丟棄獨立計算。
+
+| 指標 | 分子 / 分母 |
+| --- | --- |
+| `sutErrorRate`／原有 `errorRate` 門檻 | `measuredFailure / measuredCompleted` |
+| `runtimeErrorRate` | `measuredRuntimeError / measuredCompleted` |
+| `totalErrorRate` | `(measuredFailure + measuredRuntimeError) / measuredCompleted` |
+| `completedThroughput` | 全部測量完成數 / 測量秒數 |
+| `successfulThroughput` | 測量 PASS 數 / 測量秒數 |
+
+可選的 `runtimeErrorRate`、`totalErrorRate` 門檻採用百分比比較，例如 `{errorRate: '< 1%', totalErrorRate: '< 1%'}`。`errorRate` 保留僅計 SUT FAIL 的含義，不包含執行期錯誤或丟棄。Thresholds PASS 可與 Execution ERROR 同時出現；門檻通過或完成 TPS 均不代表執行成功。沒有測量完成項目時，JSON/YAML 的錯誤率維持數值零以相容舊消費者，HTML 顯示 N/A。
+
+Runtime failures / Failure diagnosis 顯示全部／測量執行期錯誤數，並於每個彙總、workload 或 mix 收集器保留最多 100 個已遮罩的輕量失敗樣本。樣本包含 iteration、序號、階段、時間、workload/mix、結果、分類、診斷來源／代碼／摘要及證據狀態；達到樣本上限後仍完整計數。排程器例外與執行器回傳失敗分開顯示；公開資料不含 stack trace、已分類秘密或主機路徑。保留的 Case Log 可從 Evidence 區段連結開啟。`NO_CASE_LOG`、`WORKSPACE_MISSING`、`EVIDENCE_IO_ERROR`、`EVIDENCE_MATERIALIZATION_ERROR`、`NOT_RETAINED_BY_POLICY` 分別說明證據缺失原因，不改變 iteration 結果，也不額外計為一次失敗。

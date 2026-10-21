@@ -18,6 +18,72 @@ import static org.junit.jupiter.api.Assertions.*;
 class ServerJobStorageTest {
     @TempDir Path temp;
 
+    @Test void pinnedJobsSurviveAgeQuotaAndRestartAndRequireUnpinBeforeManualDelete() throws Exception {
+        ServerRuntime runtime=runtime("pins",quota(0),Clock.systemUTC());
+        String run="J0000000000000901", load="J0000000000000902", other="J0000000000000903";
+        Instant old=Instant.parse("2020-01-01T00:00:00Z");
+        ServerConfig config=runtime.config;
+        try {
+            seed(runtime,run,"run","PASS",old,false,mib(2));
+            seed(runtime,load,"load","ERROR",old,false,mib(2));
+            seed(runtime,other,"PASS",old,false,mib(1));
+            runtime.pinJob(run,true,"operator");runtime.pinJob(load,true,"operator");
+            assertTrue(Boolean.TRUE.equals(runtime.store.get(run).get("pinned")));
+            assertEquals("operator",runtime.store.get(run).get("pinnedBy"));
+            assertEquals(1,runtime.store.list(1,null,true).size());
+            assertTrue(runtime.store.list(100,null,true).stream().allMatch(row->Boolean.TRUE.equals(row.get("pinned"))));
+            runtime.cleanupExpiredJobs();
+            assertNull(runtime.store.get(other));assertNotNull(runtime.store.get(run));
+            runtime.cleanupJobStorage();assertEquals(true,storage(runtime).get("quotaUnmet"));
+            assertTrue(Files.exists(jobDir(runtime,run).resolve("artifacts.zip")));
+            var outcomes=runtime.deleteJobs(List.of(run,load),"operator");
+            assertTrue(outcomes.stream().allMatch(row->"PINNED_UNPIN_FIRST".equals(row.get("outcome"))));
+        } finally {runtime.close();}
+        try(ServerRuntime restarted=new ServerRuntime(config,Files.createDirectory(temp.resolve("pins-restart-libs")).toString(),ProcessBuilder::start)) {
+            assertEquals(true,restarted.store.get(run).get("pinned"));
+            assertEquals(true,restarted.store.get(load).get("pinned"));
+            assertTrue(Files.exists(jobDir(restarted,load).resolve("artifacts.zip")));
+            restarted.pinJob(run,false,"second-operator");
+            assertEquals("DELETED",restarted.deleteJob(run,"second-operator").get("outcome"));
+            assertFalse(Files.exists(jobDir(restarted,run)));assertNull(restarted.store.get(run));
+            assertEquals("ALREADY_UNAVAILABLE",restarted.deleteJob(run,"second-operator").get("outcome"));
+            assertEquals(true,restarted.store.get(load).get("pinned"));
+            assertThrows(ServerRuntime.NotFoundException.class,()->restarted.pinJob(run,true,"operator"));
+            assertThrows(IllegalArgumentException.class,()->restarted.deleteJobs(List.of("../outside"),"operator"));
+            assertEquals(List.of("false->true","false->true","true->false"),restarted.store.auditOutcomes("JOB_PIN"));
+        }
+    }
+
+    @Test void staleRetentionCandidateCannotDeleteNewPinAndBusyJobsStayIntact() throws Exception {
+        try(ServerRuntime runtime=runtime("pin-fences",null,Clock.systemUTC())) {
+            String id="J0000000000000904", busy="J0000000000000905";
+            seed(runtime,id,"PASS",Instant.parse("2020-01-01T00:00:00Z"),false,1024);
+            assertFalse(runtime.store.storageCandidates().isEmpty());
+            runtime.pinJob(id,true,"operator");
+            assertFalse(runtime.store.markDeleting(id,Instant.now()));
+            seed(runtime,busy,"RUNNING",Instant.now(),false,1024);
+            assertEquals("NOT_QUIESCENT",runtime.deleteJob(busy,"operator").get("outcome"));
+            assertTrue(Files.exists(jobDir(runtime,busy)));
+            assertThrows(IllegalArgumentException.class,()->runtime.pinJob(busy,true,"operator"));
+        }
+    }
+
+    @Test void mixedManualDeleteReportsEveryTargetAndRecoveryFinishesDurableDeletion() throws Exception {
+        try(ServerRuntime runtime=runtime("manual-bulk",null,Clock.systemUTC())) {
+            Instant old=Instant.parse("2020-01-01T00:00:00Z");
+            String pinned="J0000000000000911", eligible="J0000000000000912", active="J0000000000000913", pending="J0000000000000914";
+            for(String id:List.of(pinned,eligible,pending))seed(runtime,id,"PASS",old,false,1024);
+            seed(runtime,active,"RUNNING",old,false,1024);runtime.pinJob(pinned,true,"operator");
+            assertTrue(runtime.store.markManualDeleting(pending,"operator"));
+            assertFalse(runtime.store.setPinned(pending,true,"operator"));
+            var results=runtime.deleteJobs(List.of(pinned,eligible,active,pending,eligible),"operator");
+            assertEquals(List.of("PINNED_UNPIN_FIRST","DELETED","NOT_QUIESCENT","DELETION_IN_PROGRESS"),results.stream().map(row->row.get("outcome")).toList());
+            assertTrue(runtime.reconcileDeletingJobs());assertFalse(Files.exists(jobDir(runtime,pending)));assertFalse(runtime.store.jobRowExists(pending));
+            assertNotNull(runtime.store.get(pinned));assertNotNull(runtime.store.get(active));
+            assertTrue(runtime.store.auditOutcomes("JOB_DELETE").contains("DELETED_AFTER_RECOVERY"));
+        }
+    }
+
     @Test void sizeLimitsStayDisabledUntilConfigured() throws Exception {
         ServerRuntime runtime = runtime("disabled", null, Clock.systemUTC());
         try {

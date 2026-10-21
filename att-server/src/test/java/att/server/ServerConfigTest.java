@@ -9,6 +9,23 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class ServerConfigTest {
     @TempDir Path temp;
+    @Test void validatesLiveOutputPolicyAndKeepsPublishedDefaults() throws Exception {
+        Path pkg=Files.createDirectory(temp.resolve("live-package"));
+        Path file=temp.resolve("live-server.yaml");
+        String base="server:\n  dataDir: "+yaml(temp.resolve("live-data"))+"\n";
+        String tail="workers: {}\npackages:\n  allowedRoots: ["+yaml(pkg)+"]\n  entries:\n    p: "+yaml(pkg)+"\n";
+        Files.writeString(file,base+tail);
+        assertEquals(4000,ServerConfig.load(file).liveOutput.maxEntryChars);
+        assertEquals(40,ServerConfig.load(file).liveOutput.maxEntryLines);
+        Files.writeString(file,base+"  liveOutput: {maxEntryChars: 16000, maxEntryLines: 100}\n"+tail);
+        assertEquals(16000,ServerConfig.load(file).liveOutput.maxEntryChars);
+        assertEquals(100,ServerConfig.load(file).liveOutput.maxEntryLines);
+        for(String invalid:List.of("maxEntryChars: 0","maxEntryChars: 32001","maxEntryChars: 1.5", "maxEntryChars: '16000'", "maxEntryLines: 201", "maxEntryLines: true", "unknown: 5")) {
+            Files.writeString(file,base+"  liveOutput: {"+invalid+"}\n"+tail);
+            assertThrows(IllegalArgumentException.class,()->ServerConfig.load(file),invalid);
+        }
+    }
+
 
     @Test void boundsWarmupKeysToTwoEntriesPerWorkerAndRetainsLazyDefaults() throws Exception {
         Path pkg=Files.createDirectory(temp.resolve("warmup-package"));

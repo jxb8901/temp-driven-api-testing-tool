@@ -18,9 +18,15 @@ server:
   # Optional. Defaults to the Java runtime hosting Tomcat.
   # javaExecutable: /usr/lib/jvm/java-17/bin/java
   maxRequestBytes: 1048576
+  # Published RUN/Debug/LOAD entry policy. Restart Server; applies to new Jobs.
+  # Integer ranges: chars 1..32000, lines 1..200. Defaults shown below.
+  # The journal independently retains at most 65536 JSON-encoded UTF-8 bytes/event.
+  liveOutput:
+    maxEntryChars: 4000
+    maxEntryLines: 40
   maxEventsPerJob: 10000
   maxArtifacts: 1000
-  # Terminal job metadata, event journals, and artifacts are removed after this many days.
+  # Unpinned terminal Job metadata, journals and artifacts are removed after this many days.
   jobRetentionDays: 30
   # Optional size quota for dataDir/jobs only. Disabled unless enabled is true.
   # maxTotalSizeMb and a smaller cleanupTargetSizeMb are required when enabled.

@@ -12,6 +12,49 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class JobEventsTest {
     @TempDir Path temp;
+    @Test void concurrentExpandedEntriesKeepReplayBoundedAndReportMeasuredCost() throws Exception {
+        int jobs=4,count=200;
+        java.util.concurrent.ExecutorService pool=java.util.concurrent.Executors.newFixedThreadPool(jobs);
+        long started=System.nanoTime();
+        try {
+            List<java.util.concurrent.Future<Long>> tasks=new java.util.ArrayList<>();
+            for(int j=0;j<jobs;j++) {
+                Path file=temp.resolve("cost-"+j+".jsonl");
+                tasks.add(pool.submit(()-> {
+                    JobEvents journal=new JobEvents(file,100,Runnable::run);
+                    String text="diagnostic "+"x".repeat(15900);
+                    for(int i=0;i<count;i++)journal.append("log",Map.of("console",text));
+                    JobEvents replay=new JobEvents(file,100,Runnable::run);
+                    assertEquals(100,replay.after(0).size());
+                    assertEquals(text,((Map<?,?>)replay.after(0).get(0).get("data")).get("console"));
+                    return Files.size(file);
+                }));
+            }
+            long bytes=0;for(var task:tasks)bytes+=task.get(30,TimeUnit.SECONDS);
+            System.out.println("Expanded Live Output check: jobs="+jobs+", events="+(jobs*count)+", elapsedMs="+TimeUnit.NANOSECONDS.toMillis(System.nanoTime()-started)+", retainedJournalBytes="+bytes);
+            assertTrue(bytes<20_000_000,"Compacted journals must stay proportional to bounded history");
+        } finally {pool.shutdownNow();}
+    }
+    @Test void largerConsoleSurvivesJournalAndReplayWithStrictEncodedByteLimit() throws Exception {
+        Path file=temp.resolve("expanded.jsonl");
+        JobEvents journal=new JobEvents(file,100,Runnable::run);
+        String console="long diagnostic "+"x".repeat(15000);
+        journal.append("log",Map.of("console",console,"largeOtherField","x".repeat(70000)));
+        Map<?,?> retained=(Map<?,?>)journal.after(0).get(0).get("data");
+        assertEquals(console,retained.get("console"));assertEquals(true,retained.get("truncated"));
+        for(String text:List.of("界".repeat(32000),"\u0001".repeat(32000),"\uD83D\uDE00".repeat(16000))) {
+            journal.append("log",Map.of("console",text));
+            Map<?,?> payload=(Map<?,?>)journal.after(journal.latest()-1).get(0).get("data");
+            assertTrue(new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsBytes(payload).length<=65536);
+            if(!text.equals(payload.get("console"))) {
+                assertEquals(true,payload.get("consoleTruncated"));
+                assertTrue(payload.get("console").toString().endsWith("[truncated by journal]"));
+            }
+        }
+        JobEvents replay=new JobEvents(file,100,Runnable::run);
+        assertEquals(console,((Map<?,?>)replay.after(0).get(0).get("data")).get("console"));
+    }
+
     @Test void retainedEventsUseIncreasingJobLocalIdsAndReplayAfterLastEventId() throws Exception {
         Path file=temp.resolve("events.jsonl");JobEvents events=new JobEvents(file,3);
         events.append("status",Map.of("status","QUEUED"));events.append("status",Map.of("status","RUNNING"));events.append("result",Map.of("status","PASS"));

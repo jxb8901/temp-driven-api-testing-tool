@@ -128,7 +128,7 @@ async function main() {
     }
     await fs.writeFile(path.join(outputDirectory, 'manifest.json'), `${JSON.stringify({
       generatedAt: new Date().toISOString(),
-      repositoryVersion: '4.2.1',
+      repositoryVersion: '4.2.2',
       browser: await browser.version(),
       playwright: require('playwright/package.json').version,
       fixtureOrigin: fixture.origin,

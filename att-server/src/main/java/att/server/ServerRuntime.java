@@ -214,6 +214,7 @@ final class ServerRuntime implements AutoCloseable {
         if(root==null)throw new IllegalArgumentException("Unknown packageId");
         validatePackageRoot(root);
         WorkerRequest request=JSON.treeToValue(input,WorkerRequest.class);
+        request.liveOutputMaxEntryChars=config.liveOutput.maxEntryChars;request.liveOutputMaxEntryLines=config.liveOutput.maxEntryLines;
         request.protocolVersion="att-worker/v1";request.command=command;request.packageRoot=root.toString();
         request.outputDirectory=null;request.config=config.runtimeConfigPath.toString();request.environment=safeText(request.environment,128,"environment");
         request.expectedSchemaRegistryDigest=workerSchemaRegistryDigest;
@@ -381,13 +382,59 @@ final class ServerRuntime implements AutoCloseable {
             else {stopWorkerTree(j);finish(j,"CANCELLED",143);}}
         store.audit(principal,"CANCEL",id,j.packageId,"CANCELLED");return j.status;
     }
+    Map<String,Object> pinJob(String id,boolean pinned,String actor) throws Exception {
+        requireJobOwner(id,actor);
+        if(!artifactLifecycle.writeLock().tryLock())throw new IllegalArgumentException("Job archive is busy; retry pin change");
+        try {
+            if(!store.setPinned(id,pinned,actor)){store.audit(actor,"JOB_PIN",id,null,"REJECTED");throw new IllegalArgumentException("Only terminal RUN/Debug/LOAD Jobs not being deleted can be pinned");}
+            return jobRecord(id);
+        } finally {artifactLifecycle.writeLock().unlock();}
+    }
+    List<Map<String,Object>> deleteJobs(List<String> ids,String actor) throws Exception {
+        if(ids==null||ids.isEmpty()||ids.size()>100)throw new IllegalArgumentException("Select 1 to 100 Job IDs");
+        for(String id:ids)if(id==null||!JOB_ID.matcher(id).matches())throw new IllegalArgumentException("Invalid Job ID");
+        List<Map<String,Object>> results=new ArrayList<>();
+        for(String id:new java.util.LinkedHashSet<>(ids)) {
+            try {results.add(deleteJob(id,actor));}
+            catch(NotFoundException unavailable){results.add(deletionOutcome(id,actor,"UNAVAILABLE"));}
+        }
+        return results;
+    }
+    private Map<String,Object> deletionOutcome(String id,String actor,String outcome) throws Exception {
+        store.audit(actor,"JOB_DELETE",id,null,outcome);
+        return Map.of("jobId",id,"outcome",outcome);
+    }
+    Map<String,Object> deleteJob(String id,String actor) throws Exception {
+        if(id==null||!JOB_ID.matcher(id).matches())throw new IllegalArgumentException("Invalid Job ID");
+        if("local".equals(config.authMode)&&!store.isActiveUser(actor))throw new NotFoundException();
+        if(!store.jobRowExists(id))return deletionOutcome(id,actor,"ALREADY_UNAVAILABLE");
+        if(store.get(id)==null)return deletionOutcome(id,actor,"DELETION_IN_PROGRESS");
+        requireJobOwner(id,actor);
+        if(!artifactLifecycle.writeLock().tryLock())return deletionOutcome(id,actor,"ARCHIVE_BUSY");
+        try {
+            Map<String,Object> row=store.get(id);
+            if(row==null)return deletionOutcome(id,actor,"DELETION_IN_PROGRESS");
+            if(Boolean.TRUE.equals(row.get("pinned")))return deletionOutcome(id,actor,"PINNED_UNPIN_FIRST");
+            if(jobs.containsKey(id)||pendingArtifactJobs.contains(id)||store.workerMayBeAlive(id))return deletionOutcome(id,actor,"JOB_BUSY");
+            if(!store.markManualDeleting(id,actor))return deletionOutcome(id,actor,"NOT_QUIESCENT");
+            try {
+                deleteTree(config.dataDir.resolve("jobs").resolve(id));
+                store.audit(actor,"JOB_DELETE",id,null,"DELETED");store.deleteJob(id);
+                return Map.of("jobId",id,"outcome","DELETED");
+            } catch(Exception incomplete) {return deletionOutcome(id,actor,"DELETION_PENDING_RECOVERY");}
+        } finally {artifactLifecycle.writeLock().unlock();}
+    }
+
     void requireJobOwner(String id,String principal) throws Exception {
         if(!JOB_ID.matcher(id).matches())throw new NotFoundException();
         if(store.get(id)==null)throw new NotFoundException();
         if("local".equals(config.authMode)&&!store.isActiveUser(principal))throw new NotFoundException();
     }
     List<Map<String,Object>> jobsFor(String principal,String search) throws Exception {
-        return store.list(100,search);
+        return jobsFor(principal,search,false);
+    }
+    List<Map<String,Object>> jobsFor(String principal,String search,boolean pinnedOnly) throws Exception {
+        return store.list(100,search,pinnedOnly);
     }
     List<Map<String,Object>> loadJobsFor(String principal,int offset,int limit) throws Exception {
         if(principal==null||principal.isBlank())throw new IllegalArgumentException("A server-resolved request identity is required");
@@ -403,7 +450,17 @@ final class ServerRuntime implements AutoCloseable {
         if(active!=null) {
             // Terminal status must not become visible before finish() has persisted
             // the result, diagnostic, and final event. All of these share the Job monitor.
-            synchronized(active) { return active.view(); }
+            synchronized(active) {
+                Map<String,Object> view=active.view();
+                view.put("pinned",false);
+                // Only terminal jobs can be pinned. Keep active polling independent
+                // of database connection/flush costs.
+                if(active.terminal()) {
+                    Map<String,Object> persisted=store.get(id);
+                    if(persisted!=null)for(String key:List.of("pinned","pinnedAt","pinnedBy"))view.put(key,persisted.get(key));
+                }
+                return view;
+            }
         }
         Map<String,Object> record=store.get(id);if(record==null)throw new NotFoundException();
         record.put("executionType",Job.executionType(String.valueOf(record.get("command"))));
@@ -2495,7 +2552,7 @@ final class ServerRuntime implements AutoCloseable {
         if(!artifactLifecycle.writeLock().tryLock())return;
         try {
             for(String id:store.expiredJobIds(cutoff))if(!jobs.containsKey(id)&&!pendingArtifactJobs.contains(id)&&!store.workerMayBeAlive(id))try{
-                deleteTree(config.dataDir.resolve("jobs").resolve(id));store.deleteJob(id);
+                if(store.markDeleting(id,cutoff)){deleteTree(config.dataDir.resolve("jobs").resolve(id));store.deleteJob(id);}
             }catch(Exception failure){java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).warning("Unable to remove expired ATT Server job "+id);}
         } finally {artifactLifecycle.writeLock().unlock();}
     }
@@ -2606,7 +2663,7 @@ final class ServerRuntime implements AutoCloseable {
         if(!(finished instanceof String text) || !text.equals(storageScanAfterFinished)) { storageScanAfterFinished=null; storageScanAfterId=null; }
     }
     private boolean storageProtected(Map<String,Object> candidate, Instant cutoff, String id) {
-        if(Boolean.TRUE.equals(candidate.get("artifactRecovery")) || Boolean.TRUE.equals(candidate.get("quarantined"))) return true;
+        if(Boolean.TRUE.equals(candidate.get("pinned")) || Boolean.TRUE.equals(candidate.get("artifactRecovery")) || Boolean.TRUE.equals(candidate.get("quarantined"))) return true;
         if(jobs.containsKey(id) || pendingArtifactJobs.contains(id)) return true;
         Object finished=candidate.get("finishedAt");
         if(!(finished instanceof String text) || text.compareTo(cutoff.toString())>0) return true;
@@ -2648,7 +2705,9 @@ final class ServerRuntime implements AutoCloseable {
                 Long recorded=store.retentionBytes(id);
                 long bytes=recorded!=null?recorded:JobDirectoryUsage.directoryBytes(directory);
                 if(!JobDirectoryUsage.deleteJobDirectory(directory)) return false;
-                store.auditStorageEviction(id, deletedOutcome(bytes));
+                String actor=store.deletionActor(id);
+                if(actor==null)store.auditStorageEviction(id, deletedOutcome(bytes));
+                else store.audit(actor,"JOB_DELETE",id,null,"DELETED_AFTER_RECOVERY");
                 store.deleteJob(id);
             } finally { artifactLifecycle.writeLock().unlock(); }
         }

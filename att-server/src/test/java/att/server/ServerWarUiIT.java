@@ -36,6 +36,9 @@ class ServerWarUiIT {
         Path pkg=Files.createDirectory(packages.resolve("payments"));
         writeScheduledPackage(pkg,home);
         copySchemas(pkg);
+        String expandedMessage="EXPANDED_ENTRY_BEGIN "+"x".repeat(8000)+" EXPANDED_ENTRY_END";
+        Path expandedTemplate=pkg.resolve("templates/SCHEDULED/template.yaml");
+        Files.writeString(expandedTemplate,Files.readString(expandedTemplate).replace("scheduled Load integration",expandedMessage));
         Files.writeString(pkg.resolve("templates/SCHEDULED/debug.yaml"),"schemaVersion: att-debug/v1.2\ninputs: {}\n");
         try(var book=new org.apache.poi.xssf.usermodel.XSSFWorkbook();var out=Files.newOutputStream(pkg.resolve("testcase/archive.xlsx"))) {
             var sheet=book.createSheet("Cases");var header=sheet.createRow(0);header.createCell(0).setCellValue("ID");header.createCell(1).setCellValue("Template");header.createCell(2).setCellValue("Tags");
@@ -49,6 +52,7 @@ class ServerWarUiIT {
                 +"  - id: second\n    target: {type: template, id: SCHEDULED}\n    load: {users: 1, duration: 300ms}\n    execution: {thinkTime: 50ms}\n");
         Path config=Files.writeString(temp.resolve("server.yaml"),
                 "server:\n  runtimeConfigPath: "+yaml(home.resolve("config/config.yaml"))+"\n  dataDir: "+yaml(temp.resolve("data"))+"\n  authenticationRequired: true\n"
+                +"  liveOutput: {maxEntryChars: 16000, maxEntryLines: 100}\n"
                 +"workers:\n  maxConcurrent: 1\n  queuedLimit: 1\npackages:\n  allowedRoots:\n    - "+yaml(packages)+"\n  entries:\n    payments: "+yaml(pkg)+"\n");
         Path users=Files.writeString(temp.resolve("users.xml"),"<tomcat-users><role rolename=\"ATT_USER\"/><role rolename=\"ATT_ADMIN\"/>"
                 +"<user username=\"att\" password=\"secret\" roles=\"ATT_USER\"/><user username=\"colleague\" password=\"secret\" roles=\"ATT_USER\"/>"
@@ -63,10 +67,14 @@ class ServerWarUiIT {
             String auth=basic("att"),peer=basic("colleague"),admin=basic("admin");
             var fixtures=new java.util.ArrayList<Map<String,Object>>();
             for(String command:List.of("run","load")) {
-                Object input="run".equals(command)?Map.of("packageId","payments","suites",List.of("testcase/archive.xlsx"))
+                Object input="run".equals(command)?Map.of("packageId","payments","suites",List.of("testcase/archive.xlsx"),"liveOutputMaxEntryChars",1,"liveOutputMaxEntryLines",1)
                         :Map.of("packageId","payments","scenario","load/archive.yaml");
                 String id=apiJsonResponse(port,"POST",api+"/jobs/"+command,auth,origin,input,202).path("jobId").asText();
                 JsonNode index=awaitArchive(port,api,id,peer);
+                if("run".equals(command)) {
+                    String replay=sseDataUntil(port,api+"/jobs/"+id+"/events",peer,"EXPANDED_ENTRY_END");
+                    assertTrue(replay.contains(expandedMessage),"Configured console preview must survive Worker, journal and SSE replay");
+                }
                 assertEquals("PASS",getJson(port,api+"/jobs/"+id,peer).path("status").asText(),getJson(port,api+"/jobs/"+id+"/result",peer).toString());
                 assertTrue(index.path("primaryReports").size()>0,index.toString());
                 String archiveRoute=api+"/jobs/"+id+"/artifacts/archive.zip";
@@ -133,6 +141,31 @@ class ServerWarUiIT {
                         .directory(Path.of("tools/ui-acceptance").toFile()).redirectErrorStream(true).redirectOutput(log.toFile()).start();
                 if(!browser.waitFor(120,TimeUnit.SECONDS)){browser.destroyForcibly();fail("Archive browser timeout: "+Files.readString(log));}
                 assertEquals(0,browser.exitValue(),Files.readString(log));
+            }
+            for(Map<String,Object> fixture:fixtures) {
+                String id=String.valueOf(fixture.get("jobId"));
+                apiJsonResponse(port,"POST",api+"/jobs/"+id+"/pin",peer,origin,Map.of("pinned",true),200);
+            }
+            tomcat.stop();tomcat.start();port=tomcat.getConnector().getLocalPort();origin="http://127.0.0.1:"+port;
+            JsonNode pinnedJobs=getJson(port,api+"/jobs?pinnedOnly=true",peer).path("items");
+            assertEquals(2,pinnedJobs.size());
+            for(JsonNode pinnedJob:pinnedJobs)assertTrue(pinnedJob.path("pinned").asBoolean());
+            String selectedId=String.valueOf(fixtures.get(0).get("jobId"));
+            apiJsonResponse(port,"POST",api+"/jobs/delete",peer,origin,Map.of("confirm",false,"jobIds",List.of(selectedId)),400);
+            apiJsonResponse(port,"POST",api+"/jobs/delete",peer,origin,Map.of("confirm",true,"jobIds",java.util.Collections.nCopies(101,selectedId)),400);
+            for(Map<String,Object> fixture:fixtures) {
+                String id=String.valueOf(fixture.get("jobId"));
+                assertTrue(getJson(port,api+"/jobs/"+id,auth).path("pinned").asBoolean(),"Pin must survive Tomcat restart");
+                assertEquals(200,get(port,api+"/jobs/"+id+"/artifacts/archive.zip",auth));
+
+                JsonNode pinned=apiJsonResponse(port,"POST",api+"/jobs/"+id+"/pin",peer,origin,Map.of("pinned",true),200);
+                assertTrue(pinned.path("pinned").asBoolean());
+                assertEquals("PINNED_UNPIN_FIRST",apiJsonResponse(port,"POST",api+"/jobs/"+id+"/delete",auth,origin,Map.of("confirm",true),200).path("outcome").asText());
+                apiJsonResponse(port,"POST",api+"/jobs/"+id+"/pin",admin,origin,Map.of("pinned",false),403);
+                apiJsonResponse(port,"POST",api+"/jobs/"+id+"/pin",auth,origin,Map.of("pinned",false),200);
+                assertEquals("DELETED",apiJsonResponse(port,"POST",api+"/jobs/"+id+"/delete",peer,origin,Map.of("confirm",true),200).path("outcome").asText());
+                for(String suffix:List.of("","/result","/events","/artifacts","/artifacts/archive.zip"))assertEquals(404,get(port,api+"/jobs/"+id+suffix,auth));
+                assertFalse(Files.exists(temp.resolve("data/jobs").resolve(id)));
             }
         } finally {
             try{tomcat.stop();}finally{tomcat.destroy();}
