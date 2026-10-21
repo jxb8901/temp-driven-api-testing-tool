@@ -16,9 +16,20 @@ async function main() {
       {
         name: 'dashboard', fixture: 'loaded', route: '',
         wait: async page => {
+          await page.getByRole('region', { name: 'Dashboard summary', exact: true }).waitFor();
+          if (await page.locator('.summary-card').count() !== 6) throw new Error('The Dashboard summary cards did not render.');
+          await page.locator('.summary-card').filter({ hasText: 'Configured packages' })
+            .getByText('2', { exact: true }).waitFor();
+          await page.locator('#jobs-state').getByText(/recent job row/i).waitFor();
+          await page.getByRole('list', { name: 'Recent jobs' }).getByText('JOB-4821', { exact: true }).waitFor();
+        },
+      },
+      {
+        name: 'packages', fixture: 'loaded', route: '#/packages',
+        wait: async page => {
+          await page.getByRole('heading', { name: 'Explorer', exact: true }).waitFor();
           await page.locator('.package-list li').first().waitFor();
           if (await page.locator('.package-list li').count() !== 2) throw new Error('The fixture packages did not load.');
-          await page.locator('#jobs-state').getByText(/recent job row/i).waitFor();
         },
       },
       {
@@ -34,7 +45,7 @@ async function main() {
         name: 'explorer-debug', fixture: 'explorer-workspace',
         route: '#/packages/payments/resources/template/checkout',
         wait: async page => {
-          await page.getByRole('heading', { name: 'Package Explorer' }).waitFor();
+          await page.getByRole('heading', { name: 'Resource details', level: 1, exact: true }).waitFor();
           await page.getByRole('heading', { name: 'checkout' }).waitFor();
           await page.locator('.att-code-editor[aria-label="Safe resource definition"] .cm-line')
             .filter({ hasText: '"name"' }).waitFor();
@@ -63,7 +74,7 @@ async function main() {
         name: 'load-builder', fixture: 'load-workspace', route: '#/advanced-load/payments',
         wait: async page => {
           await page.getByRole('heading', { name: 'New Load scenario' }).waitFor();
-          await page.getByText(/Safe policy defaults loaded|Policy defaults loaded/i).waitFor();
+          await page.getByRole('status').getByText('Policy defaults loaded. Server validation is required before starting.', { exact: true }).waitFor();
         },
       },
       {

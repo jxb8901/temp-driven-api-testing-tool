@@ -1,9 +1,9 @@
 {
-  "generatedAt": "2026-10-14T18:55:13.078Z",
-  "repositoryVersion": "4.2.0",
-  "browser": "155.0.8059.41",
+  "generatedAt": "2026-10-21T21:23:21.732Z",
+  "repositoryVersion": "4.2.2",
+  "browser": "155.0.8059.85",
   "playwright": "1.62.1",
-  "fixtureOrigin": "http://127.0.0.1:57061",
+  "fixtureOrigin": "http://127.0.0.1:55958",
   "captures": [
     {
       "file": "dashboard-1440-light.png",
@@ -26,6 +26,28 @@
       "theme": "dark",
       "fixture": "loaded synthetic API data",
       "page": "/att/ui/"
+    },
+    {
+      "file": "packages-1440-light.png",
+      "screen": "packages",
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      },
+      "theme": "light",
+      "fixture": "loaded synthetic API data",
+      "page": "/att/ui/#/packages"
+    },
+    {
+      "file": "packages-1440-dark.png",
+      "screen": "packages",
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      },
+      "theme": "dark",
+      "fixture": "loaded synthetic API data",
+      "page": "/att/ui/#/packages"
     },
     {
       "file": "explorer-list-1440-light.png",
