@@ -1,9 +1,9 @@
 {
-  "generatedAt": "2026-10-21T21:23:21.732Z",
+  "generatedAt": "2026-10-21T22:02:48.622Z",
   "repositoryVersion": "4.2.2",
   "browser": "155.0.8059.85",
   "playwright": "1.62.1",
-  "fixtureOrigin": "http://127.0.0.1:55958",
+  "fixtureOrigin": "http://127.0.0.1:60073",
   "captures": [
     {
       "file": "dashboard-1440-light.png",
@@ -173,6 +173,28 @@
     {
       "file": "job-results-1440-dark.png",
       "screen": "job-results",
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      },
+      "theme": "dark",
+      "fixture": "load-workspace synthetic API data",
+      "page": "/att/ui/#/jobs/JOB-LOAD-204"
+    },
+    {
+      "file": "job-console-floating-1440-light.png",
+      "screen": "job-console-floating",
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      },
+      "theme": "light",
+      "fixture": "load-workspace synthetic API data",
+      "page": "/att/ui/#/jobs/JOB-LOAD-204"
+    },
+    {
+      "file": "job-console-floating-1440-dark.png",
+      "screen": "job-console-floating",
       "viewport": {
         "width": 1440,
         "height": 1000
