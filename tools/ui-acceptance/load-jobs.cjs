@@ -133,6 +133,23 @@ async function main() {
     await Promise.race([resumed, new Promise((_, reject) => setTimeout(() => reject(new Error('EventSource did not reconnect after the stream closed')), 5000))]);
     assert.equal(reconnected, true, 'EventSource should retry the stream after a connection ends');
 
+    await page.getByRole('button', { name: 'Open floating console' }).click();
+    const floating = page.locator(`[aria-label="Floating console for Job ${jobId}"]`);
+    await floating.waitFor();
+    await page.getByRole('link', { name: 'Explorer', exact: true }).click();
+    await page.waitForURL(/#\/packages/);
+    assert.equal(await page.locator(`[aria-label="Floating console for Job ${jobId}"]`).count(), 1, 'floating console should survive a Studio route change');
+    await page.goto(`${base}#/jobs/${jobId}`);
+    await page.getByRole('heading', { name: `Job ${jobId}` }).waitFor();
+    const floatingAfterRoute = page.locator(`[aria-label="Floating console for Job ${jobId}"]`);
+    await floatingAfterRoute.getByRole('button', { name: 'Minimize Job console' }).click();
+    assert.equal(await page.locator('.att-console-minimized-host .att-job-events').count(), 0, 'minimized console should not render hidden event rows');
+    await page.getByRole('button', { name: `Restore console for Job ${jobId}` }).click();
+    const newTab = page.locator(`[aria-label="Floating console for Job ${jobId}"]`).getByRole('link', { name: 'Open Job console in a new tab' });
+    assert.equal(await newTab.getAttribute('target'), '_blank');
+    assert.match(await newTab.getAttribute('rel') || '', /noopener/);
+    assert.match(await newTab.getAttribute('href') || '', new RegExp(`#\\/jobs\\/${jobId}\\/console\\?view=live`));
+
     const tabs = [
       ['Overview', 'Status'], ['Live Output', '[LOAD] status=RUNNING jobId=JOB-LOAD-204'], ['Events', 'Events'],
       ['Results', 'Results'], ['Artifacts', 'Artifacts'], ['Metrics', 'Metrics'],

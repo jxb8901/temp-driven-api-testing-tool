@@ -9,6 +9,7 @@ import { contextRelativeReturnTo } from './contextPaths';
 import { applyUiLocale, detectUiLocale, readUiLocale, readUiLocalePreference, saveUiLocalePreference, type UiLocale, type UiLocalePreference } from './uiLocale';
 import { ChangePasswordDialog } from './ChangePasswordDialog';
 import type { LocalAuthUser } from './types';
+import { JobConsoleProvider } from './features/load/JobConsoleProvider';
 
 export type ThemePreference = 'system' | 'light' | 'dark';
 export interface AccessCapabilities { operate: boolean; accountManage: boolean; systemSettingsWrite: boolean; configurationAdmin: boolean }
@@ -65,6 +66,7 @@ function routeTitle(route: AppRoute): string {
   if (route.kind === 'configuration') return route.filePath?.split('/').filter(Boolean).pop() || 'Configuration';
   if (route.kind === 'quick-load') return 'Quick Load';
   if (route.kind === 'jobs') return route.jobId ? 'Job ' + route.jobId : 'Jobs and results';
+  if (route.kind === 'job-console') return 'Job ' + route.jobId + ' console';
   if (route.kind === 'load') return route.packageId ? 'Advanced Load' : 'Load testing';
   if (route.kind === 'load-resource') return route.resourceId.split('/').pop() || 'Load resource';
   if (route.kind === 'schedules') return 'Schedules';
@@ -76,7 +78,7 @@ function activeNavigation(route: AppRoute): string {
   if (route.kind === 'run' || route.kind === 'packages' || route.kind === 'package') return 'explorer';
   if (route.kind === 'configuration') return 'configuration';
   if (route.kind === 'quick-load') return 'load-testing';
-  if (route.kind === 'jobs') return 'jobs';
+  if (route.kind === 'jobs' || route.kind === 'job-console') return 'jobs';
   if (route.kind === 'load' || route.kind === 'load-resource') return 'load-testing';
   if (route.kind === 'schedules') return 'scheduled-load';
   if (route.kind === 'settings') return 'settings';
@@ -400,6 +402,7 @@ export function AppShell({
   return (
     <NavigationGuardContext.Provider value={navigation}>
       <AppShellContext.Provider value={{ selectedPackage, selectedEnvironment, themePreference, uiLocale, uiLocalePreference, authMode: versionData?.authMode, currentUser, accessCapabilities, canRevealConfigurationFields, onPackageChange, onEnvironmentChange, onThemePreferenceChange: changeThemePreference, onUiLocaleChange: changeUiLocale, onJobAccepted }}>
+      <JobConsoleProvider>
       <div className={'app-layout' + (collapsed ? ' is-collapsed' : '') + (mobileNavigationOpen ? ' mobile-nav-open' : '')} data-page={currentPage}>
         <a className="skip-link" href="#main-content">Skip to main content</a>
         <button className="sidebar-backdrop" type="button" aria-label="Close navigation" aria-hidden={!mobileNavigationOpen} onClick={() => setMobileNavigationOpen(false)} tabIndex={-1} />
@@ -490,7 +493,7 @@ export function AppShell({
                   {route.packageId && <Breadcrumb label={route.packageId} href={packageHref} navigate={navigate} />}
                   {route.packageId && <Breadcrumb label="Advanced Load" navigate={navigate} />}
                 </>}
-                {route.kind === 'jobs' && <>
+                {(route.kind === 'jobs' || route.kind === 'job-console') && <>
                   <Breadcrumb label="Jobs and results" href={route.jobId ? '#/jobs' : undefined} navigate={navigate} />
                   {route.jobId && <Breadcrumb label={'Job ' + route.jobId} navigate={navigate} />}
                 </>}
@@ -520,6 +523,7 @@ export function AppShell({
         <KeyboardDialog open={keyboardMode !== null} mode={keyboardMode || 'palette'} showScheduledLoad={showScheduledLoad&&accessCapabilities.operate} selectedPackage={selectedPackage} accessCapabilities={accessCapabilities}
           onClose={() => setKeyboardMode(null)} onNavigate={target => { navigate(target); setKeyboardMode(null); setMobileNavigationOpen(false); }} />
       </div>
+      </JobConsoleProvider>
       </AppShellContext.Provider>
     </NavigationGuardContext.Provider>
   );

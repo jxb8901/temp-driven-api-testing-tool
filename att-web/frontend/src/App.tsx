@@ -19,6 +19,7 @@ import { LoadResourceDetailPage } from './features/load/LoadResourceDetailPage';
 import type { ValidatedScheduleIntent } from './features/schedules/types';
 
 const ScheduledLoadPage = lazy(() => import('./features/schedules/ScheduledLoadPage').then(module => ({ default: module.ScheduledLoadPage })));
+const StandaloneJobConsolePage = lazy(() => import('./features/load/StandaloneJobConsolePage').then(module => ({ default: module.StandaloneJobConsolePage })));
 
 function asError(value: unknown): Error {
   return value instanceof Error ? value : new Error('The ATT Server request could not be completed.');
@@ -399,6 +400,8 @@ export default function App() {
       onAccepted={onJobAccepted} onSchedule={onSchedule} schedulingEnabled={capabilities.loadSchedulingEnabled} />;
   } else if (navigation.route.kind === 'packages') {
     content = <DashboardPage view="packages" state={state} onPackageChange={onPackageChange} onJobChange={onJobChange} onRetryPackages={() => void loadPackages()} onRetryJobs={() => void loadJobs()} jobsRefreshing={jobsRefreshing} jobsUpdatedAt={jobsUpdatedAt} />;
+  } else if (navigation.route.kind === 'job-console') {
+    content = <Suspense fallback={<div className="page-content" role="status" aria-busy="true">Loading Job console…</div>}><StandaloneJobConsolePage jobId={navigation.route.jobId} view={navigation.route.view} /></Suspense>;
   } else if (navigation.route.kind === 'jobs' && navigation.route.jobId) {
     content = <Suspense fallback={<div role="status">Loading jobs…</div>}><JobsPage api={loadJobsApi} jobId={navigation.route.jobId} onOpenJob={onJobChange} onShowList={() => navigation.navigate({ kind: 'jobs' })} /></Suspense>;
   } else if (navigation.route.kind === 'jobs') {
