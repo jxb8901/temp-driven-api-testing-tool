@@ -197,6 +197,12 @@ function pageInstrumentation() {
         state.incomingEvents += 1;
         state.lastEventAt = performance.now();
         state.lastEventId = event.lastEventId || null;
+        state.lastEventDisplayedAt = 0;
+        try {
+          const data = JSON.parse(event.data);
+          if (data && typeof data.console === 'string') { state.lastConsoleLine = data.console; state.lastConsoleAt = state.lastEventAt; state.lastConsoleDisplayedAt = 0; }
+        } catch { /* non-JSON payloads have no console line */ }
+        if (type === 'result') { state.terminalEventAt = state.lastEventAt; state.terminalDisplayedAt = 0; }
         return listener.call(this, event);
       };
       return nativeAddEventListener.call(this, type, wrapped, options);
@@ -215,7 +221,28 @@ function pageInstrumentation() {
   const longTaskObserver = window.PerformanceObserver && new PerformanceObserver(list => state.longTasks.push(...list.getEntries().map(entry => entry.duration)));
   try { longTaskObserver?.observe({ type: 'longtask', buffered: true }); } catch { /* Firefox/WebKit may not expose longtask. */ }
   let previousFrame = performance.now();
-  const frame = now => { state.frameDurations.push(now - previousFrame); previousFrame = now; requestAnimationFrame(frame); };
+  // Display latency: the first frame on which the newest event's ID (Events
+  // view, `#id`) or console line (Live Output) is in the DOM, and the first
+  // frame after the terminal event on which a terminal status is shown.
+  const displayed = id => {
+    const root = document.body;
+    if (!root || !id) return false;
+    for (const code of root.querySelectorAll('.att-job-events code')) if (code.textContent === `#${id}`) return true;
+    return false;
+  };
+  const consoleDisplayed = line => {
+    const consoleText = document.querySelector('.att-console')?.textContent || '';
+    return Boolean(line) && (consoleText.endsWith(line) || consoleText.includes(`${line}\n`));
+  };
+  const terminalShown = () => [...document.querySelectorAll('.att-status-badge')].some(badge => badge.textContent === 'PASS')
+    || [...document.querySelectorAll('[role="status"]')].some(node => node.textContent === 'SSE completed');
+  const frame = now => {
+    state.frameDurations.push(now - previousFrame); previousFrame = now;
+    if (state.lastEventAt && !state.lastEventDisplayedAt && displayed(state.lastEventId)) state.lastEventDisplayedAt = performance.now();
+    if (state.lastConsoleAt && !state.lastConsoleDisplayedAt && consoleDisplayed(state.lastConsoleLine)) state.lastConsoleDisplayedAt = performance.now();
+    if (state.terminalEventAt && !state.terminalDisplayedAt && terminalShown()) state.terminalDisplayedAt = performance.now();
+    requestAnimationFrame(frame);
+  };
   requestAnimationFrame(frame);
   const observeMutations = () => {
     const mutationObserver = new MutationObserver(() => { state.mutationBatches += 1; });
@@ -235,23 +262,19 @@ async function installFixtureRoutes(page, plan) {
     if (requestUrl.pathname.endsWith('/events')) {
       eventConnections += 1;
       plan.sseRequests = eventConnections;
-      const lastEventId = Number(route.request().headers()['last-event-id'] || 0);
-      let events;
+      const lastEventId = Number((await route.request().allHeaders())['last-event-id'] || 0);
       if (plan.stream === 'burst') {
-        // Send the complete burst in one response. The completed response makes
-        // EventSource reconnect; the empty replay response verifies that the
-        // client supplies Last-Event-ID without making the UI process 10k twice.
-        events = lastEventId ? [] : makeEvents(1, fixtureSpec.burstEvents, true);
-      } else {
-        const count = plan.stream === 'steady' ? Math.max(1, Math.round((plan.rate * fixtureSpec.steadyDurationMs) / 1000)) : fixtureSpec.retainedEvents;
-        events = makeEvents(lastEventId ? lastEventId + 1 : 1, count, true);
+        // Playwright-fulfilled SSE responses never carry Last-Event-ID on the
+        // browser's reconnect, so the burst is served by the real fixture
+        // server, which records the reconnect cursor (/__perf/last-event-ids).
+        const target = new URL('/__perf/burst-events', requestUrl.origin);
+        target.searchParams.set('count', String(fixtureSpec.burstEvents));
+        await route.continue({ url: target.toString() });
+        return;
       }
-      // Build the burst as ten journal-sized batches. Playwright buffers route
-      // fulfillment, but preserving these batch boundaries keeps the fixture
-      // aligned with journal.after(cursor, 100) without changing reconnects.
-      const chunks = [];
-      for (let offset = 0; offset < events.length; offset += 1000) chunks.push(sseBody(events.slice(offset, offset + 1000)));
-      await route.fulfill({ status: 200, headers: { 'cache-control': 'no-cache', 'connection': 'keep-alive', 'content-type': 'text/event-stream' }, body: plan.stream === 'burst' ? chunks.join('') : sseBody(events) });
+      const count = plan.stream === 'steady' ? Math.max(1, Math.round((plan.rate * fixtureSpec.steadyDurationMs) / 1000)) : fixtureSpec.retainedEvents;
+      const events = makeEvents(lastEventId ? lastEventId + 1 : 1, count, true);
+      await route.fulfill({ status: 200, headers: { 'cache-control': 'no-cache', 'connection': 'keep-alive', 'content-type': 'text/event-stream' }, body: sseBody(events) });
       return;
     }
     await jsonResponse(route, apiPayload(requestUrl.pathname, requestUrl, plan));
@@ -311,8 +334,10 @@ async function collectMetrics(page, inputLatencyMs) {
       incomingEvents: state.incomingEvents,
       renderedEvents: renderedCount,
       renderedConsoleLines,
-      latestDisplayedEventDelayMs: state.lastEventAt && renderedCount ? performance.now() - state.lastEventAt : null,
-      terminalStatusDelayMs: state.lastEventAt && document.body.textContent?.match(/Passed|PASS|completed/i) ? performance.now() - state.lastEventAt : null,
+      // Events view: newest event ID; Live Output: newest console-bearing event.
+      latestDisplayedEventDelayMs: state.lastEventAt && state.lastEventDisplayedAt ? state.lastEventDisplayedAt - state.lastEventAt
+        : state.lastConsoleAt && state.lastConsoleDisplayedAt ? state.lastConsoleDisplayedAt - state.lastConsoleAt : null,
+      terminalStatusDelayMs: state.terminalEventAt && state.terminalDisplayedAt ? state.terminalDisplayedAt - state.terminalEventAt : null,
       duplicateEventIds: duplicates,
       missingEventIds: missing,
       eventOrderMatchesJournal,
@@ -395,6 +420,11 @@ async function runScenario(context, origin, scenario) {
     if (count > 1) state.pageErrors.push({ step: 'EventSource instance invariant', message: `Job ${jobId} created ${count} EventSource instances in one tab.` });
   }
   if (scenario.stream === 'burst' && metrics.sseRequestCount < 2) state.pageErrors.push({ step: 'SSE reconnect fixture', message: 'The 10,000-event burst did not observe the required Last-Event-ID reconnect.' });
+  if (scenario.stream === 'burst') {
+    const response = await page.request.get(new URL('/__perf/last-event-ids?reset=1', page.url()).toString());
+    metrics.reconnectLastEventIds = (await response.json()).lastEventIds;
+  }
+  if (scenario.stream === 'burst' && !metrics.reconnectLastEventIds.includes(fixtureSpec.burstEvents)) state.pageErrors.push({ step: 'SSE reconnect fixture', message: `The burst reconnect resumed from Last-Event-ID ${metrics.reconnectLastEventIds.join(', ') || 'none'} instead of ${fixtureSpec.burstEvents}.` });
   const durationMs = Date.now() - started;
   await page.close().catch(() => {});
   return { name: scenario.name, crashed: state.crashed, crashStep: state.crashStep, crashElapsedMs: state.crashElapsedMs, metrics: { ...metrics, durationMs }, pageErrors: state.pageErrors };

@@ -51,6 +51,16 @@ EventSource instance counts, transferred JS/CSS resource bytes, and per-chunk
 gzip sizes from the Vite manifest. The report also records the machine, OS,
 CPU count, browser and Playwright versions, commit, and reduced-motion setting.
 
+Displayed-event delay is the time from the newest event reaching the
+page's EventSource listener to the first animation frame on which that event
+is in the DOM: its `#id` in the Events view, or its console line in Live
+Output. Terminal delay is the time from the terminal `result` event to the
+first frame that shows a `PASS` status badge or `SSE completed`. The 10,000-
+event burst is served by the fixture server rather than Playwright route
+fulfilment, because Chromium does not send `Last-Event-ID` when it reconnects
+to a fulfilled response; the server records the reconnect cursor, and the
+run reports an error unless the reconnect resumed from event 10,000.
+
 The harness reports median (p50) and p95 values while preserving every raw
 sample. It has no numeric thresholds yet. It exits non-zero only for browser
 page/render errors or more than one EventSource instance for a Job in a tab;

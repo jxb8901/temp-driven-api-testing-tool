@@ -50,6 +50,8 @@ instance 數量、JS/CSS transferred bytes，以及從 Vite manifest 計算的�
 chunk gzip size。Report 亦記錄 machine、OS、CPU count、browser、Playwright
 version、commit 及 reduced-motion 設定。
 
+Displayed-event delay 是從最新事件到達頁面 EventSource listener，到該事件首次出現在 DOM 的 animation frame 之間的時間：Events 檢視以其 `#id` 判斷，Live Output 以其 console 行判斷。Terminal delay 是從終端 `result` 事件到首次顯示 `PASS` 狀態標籤或 `SSE completed` 的 frame 之間的時間。10,000 筆事件 burst 由 fixture server 提供，而非 Playwright route fulfilment，因為 Chromium 重新連線到 fulfil 的回應時不會送出 `Last-Event-ID`；server 會記錄重新連線的 cursor，若重新連線不是從第 10,000 筆事件繼續，本次執行會回報錯誤。
+
 Harness 會保留所有 raw samples，並計算 median（p50）及 p95。現階段沒有
 numeric thresholds；只有 browser page/render error 或同一 tab 的同一 Job
 出現多於一個 EventSource instance 才會以 non-zero 結束。效能數字及
