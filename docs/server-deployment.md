@@ -598,7 +598,7 @@ Select individual rows or Select all on this page, then Delete selected; selecti
 Authenticated operator endpoints use the existing origin/CSRF and shared USER authorization rules:
 
 - `POST /api/v1/jobs/{jobId}/pin` with `{"pinned":true,"pinReason":"release evidence"}` or `false`; an ineligible pin returns `409 ATT-SERVER-JOB-NOT-ELIGIBLE`.
-- `POST /api/v1/jobs/pin` with `{"pinned":true,"pinReason":"release evidence","jobIds":[...]}`; the response contains one `PINNED`, `UNPINNED`, `NOT_ELIGIBLE`, or unavailable outcome per ID.
+- `POST /api/v1/jobs/pin` with `{"pinned":true,"pinReason":"release evidence","jobIds":[...]}`; the response contains one `PINNED`, `UNPINNED`, `NOT_ELIGIBLE`, or `UNAVAILABLE` outcome per ID.
 - `POST /api/v1/jobs/{jobId}/delete` with `{"confirm":true}`; returns `200` for `DELETED` or `ALREADY_UNAVAILABLE`, `202` for `DELETION_PENDING_RECOVERY`, `409` for refusal outcomes such as `PINNED_UNPIN_FIRST`, busy, or not quiescent; a Job that no longer exists returns `200` with `ALREADY_UNAVAILABLE`, and `404` is returned only when the caller may not see the Job. A `409` response still contains the outcome map, not an error envelope.
 - `POST /api/v1/jobs/delete` with `{"confirm":true,"jobIds":["J0123456789ABCDEF"]}`; maximum 100 IDs, deduplicated, action body maximum 16384 bytes or the smaller configured request limit.
 

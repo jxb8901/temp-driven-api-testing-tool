@@ -573,7 +573,7 @@ USER 操作者可在 Jobs 列或詳情 Pin／Unpin 已終止 RUN、Debug、LOAD 
 以下端點沿用認證、origin／CSRF 與共用 USER 權限：
 
 - `POST /api/v1/jobs/{jobId}/pin`：`{"pinned":true,"pinReason":"release evidence"}` 或 `false`；不合資格的 Pin 回傳 `409 ATT-SERVER-JOB-NOT-ELIGIBLE`。
-- `POST /api/v1/jobs/pin`：`{"pinned":true,"pinReason":"release evidence","jobIds":[...]}`；每個 ID 回傳 `PINNED`、`UNPINNED`、`NOT_ELIGIBLE` 或不可用結果。
+- `POST /api/v1/jobs/pin`：`{"pinned":true,"pinReason":"release evidence","jobIds":[...]}`；每個 ID 回傳 `PINNED`、`UNPINNED`、`NOT_ELIGIBLE` 或 `UNAVAILABLE` 結果。
 - `POST /api/v1/jobs/{jobId}/delete`：`{"confirm":true}`；`DELETED` 或 `ALREADY_UNAVAILABLE` 回傳 `200`，`DELETION_PENDING_RECOVERY` 回傳 `202`，釘選、忙碌或未安全靜止等拒絕回傳 `409`；已不存在的 Job 以 `200` 回傳 `ALREADY_UNAVAILABLE`，只有呼叫者無權查看該 Job 時才回傳 `404`。`409` 回應仍是 outcome map，不是 error envelope。
 - `POST /api/v1/jobs/delete`：`{"confirm":true,"jobIds":["J0123456789ABCDEF"]}`；最多 100 個 ID，去除重複，body 上限 16384 bytes 或設定的較小 request limit。
 
