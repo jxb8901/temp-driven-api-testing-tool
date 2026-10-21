@@ -148,7 +148,7 @@ describe('JobsPage React feature', () => {
     const deleteJobs=vi.fn(async () => [
       {jobId:'J0',outcome:'DELETED'},
       {jobId:'J1',outcome:'PINNED_UNPIN_FIRST'},
-      {jobId:'J2',outcome:'NOT_QUIESCENT'},
+      {jobId:'J2',outcome:'NOT_TERMINAL'},
     ]);
     await act(async () => root.render(<JobsPage api={makeApi({listJobs: vi.fn(async () => rows),deleteJobs})} onOpenJob={vi.fn()} onShowList={vi.fn()} />));
     await advance();
@@ -173,7 +173,7 @@ describe('JobsPage React feature', () => {
     await click([...host.querySelectorAll('button')].find(button => button.textContent === 'Delete selected')!);
     await click([...host.querySelectorAll('button')].find(button => button.textContent === 'Permanently delete 2 Jobs')!);
     expect(host.textContent).toContain('J1: Protected: unpin first');
-    expect(host.textContent).toContain('J2: Not deletable while active');
+    expect(host.textContent).toContain('J2: Not terminal');
     expect((host.querySelector('[aria-label="Select J1"]') as HTMLInputElement).checked).toBe(true);
     expect(selectedRows()).toContain('J1');
     expect(selectedRows()).not.toContain('J0');
@@ -207,6 +207,74 @@ describe('JobsPage React feature', () => {
     await click([...host.querySelectorAll('button')].find(button => button.textContent === 'Permanently delete 1 Jobs')!);
     expect(host.textContent).toContain('J0: Unknown outcome: Future server code');
     expect((host.querySelector('[aria-label="Select J0"]') as HTMLInputElement).checked).toBe(true);
+  });
+
+  it.each([
+    ['DELETED', 'Deleted'],
+    ['ALREADY_UNAVAILABLE', 'Already removed'],
+    ['DELETION_PENDING_RECOVERY', 'Pending recovery (will finish automatically)'],
+    ['PINNED_UNPIN_FIRST', 'Protected: unpin first'],
+    ['NOT_TERMINAL', 'Not terminal'],
+    ['JOB_BUSY', 'Busy, retry later'],
+    ['ARCHIVE_BUSY', 'Busy, retry later'],
+    ['UNAVAILABLE', 'Not found'],
+  ])('labels server deletion outcome %s as %s', async (outcome, label) => {
+    const rows = [{...sampleJob, jobId: 'J0', status: 'PASS' as const}];
+    const deleteJobs = vi.fn(async () => [{jobId: 'J0', outcome}]);
+    await act(async () => root.render(<JobsPage api={makeApi({listJobs: vi.fn(async () => rows), deleteJobs})} onOpenJob={vi.fn()} onShowList={vi.fn()} />));
+    await advance();
+    await click(host.querySelector('[aria-label="Select J0"]')!);
+    await click([...host.querySelectorAll('button')].find(button => button.textContent === 'Delete selected')!);
+    await click([...host.querySelectorAll('button')].find(button => button.textContent === 'Permanently delete 1 Jobs')!);
+    expect(host.textContent).toContain(`J0: ${label}`);
+  });
+
+  it('re-fetches rows after bulk pin so the row shows Pinned and Unpin', async () => {
+    const initialRows = [{...sampleJob, jobId: 'J0', status: 'PASS' as const, pinned: false}];
+    const refreshedRows = [{...initialRows[0], pinned: true, pinReason: 'release evidence'}];
+    const listJobs = vi.fn().mockResolvedValueOnce(initialRows).mockResolvedValue(refreshedRows);
+    const pinJobs = vi.fn(async () => [{jobId: 'J0', outcome: 'PINNED'}]);
+    const pinJob = vi.fn();
+    await act(async () => root.render(<JobsPage api={makeApi({listJobs, pinJobs, pinJob})} onOpenJob={vi.fn()} onShowList={vi.fn()} />));
+    await advance();
+    await click(host.querySelector('[aria-label="Select J0"]')!);
+    await click([...host.querySelectorAll('button')].find(button => button.textContent === 'Pin selected')!);
+    await click([...host.querySelectorAll('button')].find(button => button.textContent === 'Pin selected Jobs')!);
+    await advance();
+    expect(listJobs).toHaveBeenCalledTimes(2);
+    const row = host.querySelector('tbody tr')!;
+    expect(row.textContent).toContain('📌 Pinned');
+    expect([...row.querySelectorAll('button')].some(button => button.textContent === 'Unpin')).toBe(true);
+  });
+
+  it.each([
+    ['PINNED', 'Pinned', false],
+    ['UNPINNED', 'Unpinned', true],
+    ['NOT_ELIGIBLE', 'Not eligible for pinning', false],
+    ['UNAVAILABLE', 'Not found', false],
+  ])('labels server pin outcome %s as %s', async (outcome, label, initiallyPinned) => {
+    const rows = [{...sampleJob, jobId: 'J0', status: 'PASS' as const, pinned: initiallyPinned}];
+    const pinJobs = vi.fn(async () => [{jobId: 'J0', outcome}]);
+    await act(async () => root.render(<JobsPage api={makeApi({listJobs: vi.fn(async () => rows), pinJobs})} onOpenJob={vi.fn()} onShowList={vi.fn()} />));
+    await advance();
+    await click(host.querySelector('[aria-label="Select J0"]')!);
+    const action = initiallyPinned ? 'Unpin selected' : 'Pin selected';
+    await click([...host.querySelectorAll('button')].find(button => button.textContent === action)!);
+    if (!initiallyPinned) await click([...host.querySelectorAll('button')].find(button => button.textContent === 'Pin selected Jobs')!);
+    expect(host.textContent).toContain(`J0: ${label}`);
+  });
+
+  it('re-fetches the list after bulk delete', async () => {
+    const rows = [{...sampleJob, jobId: 'J0', status: 'PASS' as const, pinned: false}];
+    const listJobs = vi.fn().mockResolvedValue(rows);
+    const deleteJobs = vi.fn(async () => [{jobId: 'J0', outcome: 'DELETION_PENDING_RECOVERY'}]);
+    await act(async () => root.render(<JobsPage api={makeApi({listJobs, deleteJobs})} onOpenJob={vi.fn()} onShowList={vi.fn()} />));
+    await advance();
+    await click(host.querySelector('[aria-label="Select J0"]')!);
+    await click([...host.querySelectorAll('button')].find(button => button.textContent === 'Delete selected')!);
+    await click([...host.querySelectorAll('button')].find(button => button.textContent === 'Permanently delete 1 Jobs')!);
+    await advance();
+    expect(listJobs).toHaveBeenCalledTimes(2);
   });
 
   it('collects a pin reason and supports bulk pin outcomes', async () => {

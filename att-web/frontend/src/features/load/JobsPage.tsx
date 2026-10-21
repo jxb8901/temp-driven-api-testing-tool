@@ -33,12 +33,11 @@ const tabs: Array<{ id: JobTab; label: string }> = [
 const DELETE_OUTCOME_LABELS: Record<string, string> = {
   DELETED: 'Deleted',
   ALREADY_UNAVAILABLE: 'Already removed',
+  DELETION_PENDING_RECOVERY: 'Pending recovery (will finish automatically)',
   PINNED_UNPIN_FIRST: 'Protected: unpin first',
+  NOT_TERMINAL: 'Not terminal',
   JOB_BUSY: 'Busy, retry later',
   ARCHIVE_BUSY: 'Busy, retry later',
-  NOT_QUIESCENT: 'Not deletable while active',
-  DELETION_IN_PROGRESS: 'Deletion already in progress',
-  DELETION_PENDING_RECOVERY: 'Pending recovery (will finish automatically)',
   UNAVAILABLE: 'Not found',
 };
 
@@ -404,6 +403,7 @@ function JobsList({ api, principal = '', onOpenJob }: JobsFeatureProps) {
     try {
       const outcomes = await api.pinJobs(targets.map(job => job.jobId), pinned, pinned && reason ? reason : undefined);
       setActionStatus(outcomes.slice(0, 100).map(item => `${item.jobId}: ${outcomeLabel(item.outcome, PIN_OUTCOME_LABELS)}`).join('; '));
+      setRefreshVersion(value => value + 1);
     }
     catch (reason) { setActionStatus(toError(reason, 'Bulk pin change failed.').message); }
     finally { setActionBusy(false); }
@@ -540,6 +540,7 @@ function JobsList({ api, principal = '', onOpenJob }: JobsFeatureProps) {
       setConfirmDelete(false);setActionStatus(outcomes.map(item => `${item.jobId}: ${outcomeLabel(item.outcome, DELETE_OUTCOME_LABELS)}`).join('; '));
       const removed=outcomes.filter(item => item.outcome === 'DELETED' || item.outcome === 'ALREADY_UNAVAILABLE').map(item => item.jobId);
       setRows(current => current.filter(job => !removed.includes(job.jobId)));setSelected(current => current.filter(id => !removed.includes(id)));
+      setRefreshVersion(value => value + 1);
     }} />}
     {error && <div className="att-inline-error" role="alert">{error}{rows.length > 0 && ' Showing the last successful result.'}</div>}
     {state === 'error' && rows.length === 0 ? <section className="att-empty-state att-query-empty-state"><h2>Jobs unavailable</h2><p>{error}</p><button type="button" onClick={() => setRefreshVersion(value => value + 1)}>Try again</button></section>
