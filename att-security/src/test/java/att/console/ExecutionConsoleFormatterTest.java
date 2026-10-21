@@ -9,7 +9,7 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class ExecutionConsoleFormatterTest {
     @Test void explicitPublishedPolicyIsIndependentAndRedactsBeforeTruncation() {
-        String text="x".repeat(8000)+" password=hidden";
+        String text=String.join("",java.util.Collections.nCopies(8000,"x"))+" password=hidden";
         assertEquals(8016, text.length());
         String expanded=ExecutionConsoleFormatter.present(text,ExecutionConsoleFormatter.Options.published(16000,100));
         assertFalse(expanded.contains("hidden"));assertFalse(expanded.contains("[truncated]"));
