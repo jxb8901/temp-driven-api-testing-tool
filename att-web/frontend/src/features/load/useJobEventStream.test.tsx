@@ -1,19 +1,29 @@
 // @vitest-environment jsdom
-import { act } from 'react';
+import { act, StrictMode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { JobEventHandlers, LoadJobsApi } from './types';
 import { MAX_EVENTS, useJobEventStream } from './useJobEventStream';
 
 function makeApi() {
-  let handler: JobEventHandlers | undefined;
-  const api = { subscribeJob: vi.fn((_jobId: string, next: JobEventHandlers) => { handler = next; return vi.fn(); }) } as unknown as LoadJobsApi;
-  return { api, handler: () => handler! };
+  const subscriptions: Array<{ jobId: string; handlers: JobEventHandlers; active: boolean }> = [];
+  const api = {
+    subscribeJob: vi.fn((jobId: string, handlers: JobEventHandlers) => {
+      const subscription = { jobId, handlers, active: true };
+      subscriptions.push(subscription);
+      return vi.fn(() => { subscription.active = false; });
+    }),
+  } as unknown as LoadJobsApi;
+  return {
+    api,
+    active: (jobId?: string) => subscriptions.filter(subscription => subscription.active && (!jobId || subscription.jobId === jobId)),
+    latestHandler: (jobId: string) => subscriptions.filter(subscription => subscription.jobId === jobId).at(-1)?.handlers,
+  };
 }
 
-function Consumer({ api, jobId }: { api: LoadJobsApi; jobId: string }) {
+function Consumer({ api, jobId, name = jobId }: { api: LoadJobsApi; jobId: string; name?: string }) {
   const stream = useJobEventStream(api, jobId);
-  return <output data-job={jobId} data-count={stream.events.length} data-connection={stream.connection}>{stream.events.map(event => event.id).join(',')}</output>;
+  return <output data-name={name} data-job={jobId} data-count={stream.events.length} data-connection={stream.connection}>{stream.events.map(event => event.id).join(',')}</output>;
 }
 
 describe('useJobEventStream', () => {
@@ -26,14 +36,14 @@ describe('useJobEventStream', () => {
   afterEach(() => { act(() => root.unmount()); host.remove(); });
 
   it('shares one bounded subscription and releases it after the last consumer', async () => {
-    const { api, handler } = makeApi();
+    const { api, latestHandler } = makeApi();
     await act(async () => root.render(<><Consumer api={api} jobId="J1" /><Consumer api={api} jobId="J1" /></>));
     expect(api.subscribeJob).toHaveBeenCalledTimes(1);
-    handler().onOpen();
-    for (let index = 0; index < MAX_EVENTS + 25; index++) handler().onEvent({ id: String(index), type: 'log', data: { console: String(index) } });
+    latestHandler('J1')?.onOpen();
+    for (let index = 0; index < MAX_EVENTS + 25; index++) latestHandler('J1')?.onEvent({ id: String(index), type: 'log', data: { console: String(index) } });
     await act(async () => await Promise.resolve());
     expect(host.querySelector('output')?.getAttribute('data-count')).toBe(String(MAX_EVENTS));
-    handler().onEvent({ id: String(MAX_EVENTS + 24), type: 'log', data: 'duplicate' });
+    latestHandler('J1')?.onEvent({ id: String(MAX_EVENTS + 24), type: 'log', data: 'duplicate' });
     expect(host.querySelector('output')?.textContent).not.toContain('duplicate');
     const unsubscribe = vi.mocked(api.subscribeJob).mock.results[0].value as ReturnType<typeof vi.fn>;
     await act(async () => root.render(<Consumer api={api} jobId="J1" />));
@@ -42,13 +52,62 @@ describe('useJobEventStream', () => {
     expect(unsubscribe).toHaveBeenCalledTimes(1);
   });
 
+  it('reuses one live entry after release and resubscribe when a second consumer mounts', async () => {
+    const { api, active, latestHandler } = makeApi();
+    await act(async () => root.render(<StrictMode><Consumer api={api} jobId="J1" name="first" /></StrictMode>));
+    expect(api.subscribeJob).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(api.subscribeJob).mock.results[0].value).toHaveBeenCalledTimes(1);
+    expect(active('J1')).toHaveLength(1);
+
+    await act(async () => root.render(
+      <StrictMode>
+        <Consumer api={api} jobId="J1" name="first" />
+        <Consumer api={api} jobId="J1" name="second" />
+      </StrictMode>,
+    ));
+    expect(api.subscribeJob).toHaveBeenCalledTimes(2);
+    expect(active('J1')).toHaveLength(1);
+
+    await act(async () => latestHandler('J1')?.onEvent({ id: 'shared', type: 'log', data: { console: 'shared' } }));
+    expect(host.querySelector('[data-name="first"]')?.textContent).toBe('shared');
+    expect(host.querySelector('[data-name="second"]')?.textContent).toBe('shared');
+  });
+
+  it('keeps one active subscription for two StrictMode consumers and releases it on unmount', async () => {
+    const { api, active } = makeApi();
+    await act(async () => root.render(
+      <StrictMode>
+        <Consumer api={api} jobId="J1" name="first" />
+        <Consumer api={api} jobId="J1" name="second" />
+      </StrictMode>,
+    ));
+    expect(active('J1')).toHaveLength(1);
+
+    await act(async () => root.unmount());
+    expect(active('J1')).toHaveLength(0);
+  });
+
   it('disposes the old Job stream when a consumer switches Job', async () => {
-    const first = makeApi();
-    await act(async () => root.render(<Consumer api={first.api} jobId="J1" />));
-    const firstUnsubscribe = vi.mocked(first.api.subscribeJob).mock.results[0].value as ReturnType<typeof vi.fn>;
-    const second = makeApi();
-    await act(async () => root.render(<Consumer api={second.api} jobId="J2" />));
-    expect(firstUnsubscribe).toHaveBeenCalledTimes(1);
-    expect(second.api.subscribeJob).toHaveBeenCalledWith('J2', expect.anything());
+    const { api, active } = makeApi();
+    await act(async () => root.render(<Consumer api={api} jobId="J1" />));
+    expect(active('J1')).toHaveLength(1);
+
+    await act(async () => root.render(<Consumer api={api} jobId="J2" />));
+    expect(active('J1')).toHaveLength(0);
+    expect(active('J2')).toHaveLength(1);
+    expect(api.subscribeJob).toHaveBeenLastCalledWith('J2', expect.anything());
+  });
+
+  it('shows existing events to a consumer that mounts later', async () => {
+    const { api, active, latestHandler } = makeApi();
+    await act(async () => root.render(<Consumer api={api} jobId="J1" name="first" />));
+    await act(async () => latestHandler('J1')?.onEvent({ id: 'earlier', type: 'log', data: { console: 'earlier' } }));
+
+    await act(async () => root.render(<>
+      <Consumer api={api} jobId="J1" name="first" />
+      <Consumer api={api} jobId="J1" name="second" />
+    </>));
+    expect(active('J1')).toHaveLength(1);
+    expect(host.querySelector('[data-name="second"]')?.textContent).toBe('earlier');
   });
 });

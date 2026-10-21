@@ -74,6 +74,7 @@ function start(api: LoadJobsApi, jobId: string, entry: Entry): void {
       // the Job Details status projection still updates immediately.
       const terminal = event.type === 'result';
       if (terminal) entry.connection = 'completed';
+      // Cross-window de-duplication/ring buffer/monotonic cursor is tracked in #266 (P1-A/P1-E).
       if (!event.id || !entry.events.some(existing => existing.id === event.id)) {
         entry.events = [...entry.events, {
           ...event,
@@ -92,7 +93,8 @@ function release(api: LoadJobsApi, jobId: string, entry: Entry): void {
   if (entry.consumerCount !== 0) return;
   entry.unsubscribe?.();
   entry.unsubscribe = undefined;
-  stores.get(api as object)?.delete(jobId);
+  const byJob = stores.get(api as object);
+  if (byJob?.get(jobId) === entry) byJob.delete(jobId);
 }
 
 /**
@@ -101,8 +103,8 @@ function release(api: LoadJobsApi, jobId: string, entry: Entry): void {
  * EventSource itself retains Last-Event-ID for reconnect/replay.
  */
 export function useJobEventStream(api: LoadJobsApi, jobId: string): JobEventStreamSnapshot {
-  const entry = useMemo(() => entryFor(api, jobId), [api, jobId]);
   const subscribe = useMemo(() => (listener: () => void) => {
+    const entry = entryFor(api, jobId);
     entry.listeners.add(listener);
     entry.consumerCount += 1;
     start(api, jobId, entry);
@@ -110,7 +112,7 @@ export function useJobEventStream(api: LoadJobsApi, jobId: string): JobEventStre
       entry.listeners.delete(listener);
       release(api, jobId, entry);
     };
-  }, [api, entry, jobId]);
-  const getSnapshot = () => entry.snapshot;
+  }, [api, jobId]);
+  const getSnapshot = useMemo(() => () => entryFor(api, jobId).snapshot, [api, jobId]);
   return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 }
