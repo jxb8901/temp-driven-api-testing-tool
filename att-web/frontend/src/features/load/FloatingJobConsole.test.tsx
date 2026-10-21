@@ -44,12 +44,20 @@ describe('FloatingJobConsole', () => {
     const move = host.querySelector<HTMLButtonElement>('.att-console-drag-handle')!;
     const resize = host.querySelector<HTMLDivElement>('.att-floating-console-resize')!;
     expect(document.activeElement).toBe(move);
+    expect(resize.getAttribute('aria-orientation')).toBe('vertical');
+    expect(resize.getAttribute('aria-valuemin')).toBe('360');
+    expect(resize.getAttribute('aria-valuemax')).toBeTruthy();
+    const initialWidthValue = resize.getAttribute('aria-valuenow');
+    expect(initialWidthValue).toBe(host.querySelector<HTMLElement>('.att-floating-console')!.style.width.replace('px', ''));
+    expect(resize.getAttribute('aria-valuetext')).toContain(`${initialWidthValue}px wide`);
     const initialLeft = host.querySelector<HTMLElement>('.att-floating-console')!.style.left;
     act(() => move.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true })));
     expect(host.querySelector<HTMLElement>('.att-floating-console')!.style.left).not.toBe(initialLeft);
     const initialWidth = host.querySelector<HTMLElement>('.att-floating-console')!.style.width;
     act(() => resize.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true })));
     expect(host.querySelector<HTMLElement>('.att-floating-console')!.style.width).not.toBe(initialWidth);
+    expect(resize.getAttribute('aria-valuenow')).not.toBe(initialWidthValue);
+    expect(resize.getAttribute('aria-valuetext')).toContain(`${resize.getAttribute('aria-valuenow')}px wide`);
   });
 
   it('focuses and requires confirmation before switching Job', () => {

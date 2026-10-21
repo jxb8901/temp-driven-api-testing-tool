@@ -17,6 +17,8 @@ interface FloatingJobConsoleProps {
 
 const MIN_WIDTH = 360;
 const MIN_HEIGHT = 280;
+const DEFAULT_WIDTH = 640;
+const DEFAULT_HEIGHT = 420;
 
 function clamp(value: number, min: number, max: number): number { return Math.max(min, Math.min(max, value)); }
 
@@ -24,7 +26,7 @@ export function FloatingJobConsole({ api, request, minimized, onMinimize, onRest
   const [job, setJob] = useState<JobView | null>(request.job || null);
   const [consoleView, setConsoleView] = useState<JobConsoleViewMode>(request.view);
   const [position, setPosition] = useState({ left: 0, top: 0 });
-  const [size, setSize] = useState({ width: 560, height: 460 });
+  const [size, setSize] = useState({ width: DEFAULT_WIDTH, height: DEFAULT_HEIGHT });
   const [maximized, setMaximized] = useState(false);
   const [dragging, setDragging] = useState(false);
   const panelRef = useRef<HTMLElement>(null);
@@ -105,10 +107,13 @@ export function FloatingJobConsole({ api, request, minimized, onMinimize, onRest
   function stopResize() { resizeOrigin.current = null; }
 
   const panelStyle = maximized ? undefined : { left: position.left, top: position.top, width: size.width, height: size.height };
+  const maxResizeWidth = typeof window === 'undefined' ? DEFAULT_WIDTH : Math.max(MIN_WIDTH, window.innerWidth - 16);
   return <section ref={panelRef} className={minimized ? 'att-console-minimized-host' : 'att-floating-console' + (dragging ? ' is-dragging' : '') + (maximized ? ' is-maximized' : '')} style={minimized ? undefined : panelStyle} aria-label={`Floating console for Job ${request.jobId}`}>
     {!minimized && <button className="att-console-drag-handle" type="button" aria-label="Move Job console; use arrow keys to reposition" title="Drag to move; arrow keys also move the console" onPointerDown={startDrag} onPointerMove={moveDrag} onPointerUp={stopDrag} onPointerCancel={stopDrag} onKeyDown={moveByKeyboard}>Move console</button>}
-    <JobConsoleView api={api} jobId={request.jobId} job={job} view={consoleView} onViewChange={setConsoleView} minimized={minimized} onRestore={onRestore} onMinimize={onMinimize} onMaximize={() => setMaximized(value => !value)} maximized={maximized} onClose={onClose} />
+    <JobConsoleView api={api} jobId={request.jobId} job={job} view={consoleView} onViewChange={setConsoleView} minimized={minimized} onRestore={onRestore} onMinimize={onMinimize} onMaximize={() => setMaximized(value => !value)} maximized={maximized} onClose={onClose} compact />
     {!minimized && onSwitchRequest && <div ref={switchDialogRef} className="att-console-switch-confirm" role="alertdialog" aria-label="Confirm switching Job console"><p>Switch this console from Job {request.jobId} to Job {onSwitchRequest.jobId}?</p><button type="button" onClick={onConfirmSwitch}>Switch Job</button><button type="button" onClick={onCancelSwitch}>Keep current Job</button></div>}
-    {!minimized && !maximized && <div className="att-floating-console-resize" role="separator" aria-label="Resize Job console; use arrow keys" tabIndex={0} onPointerDown={startResize} onPointerMove={moveResize} onPointerUp={stopResize} onPointerCancel={stopResize} onKeyDown={resizeByKeyboard} />}
+    {!minimized && !maximized && <div className="att-floating-console-resize" role="separator" aria-label="Resize Job console; use arrow keys" aria-orientation="vertical" aria-valuemin={MIN_WIDTH} aria-valuemax={maxResizeWidth} aria-valuenow={size.width} aria-valuetext={`${size.width}px wide × ${size.height}px high`} tabIndex={0} onPointerDown={startResize} onPointerMove={moveResize} onPointerUp={stopResize} onPointerCancel={stopResize} onKeyDown={resizeByKeyboard} />}
   </section>;
 }
+
+export default FloatingJobConsole;

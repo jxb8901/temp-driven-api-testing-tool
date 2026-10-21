@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
 import { act, StrictMode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
+import { renderToString } from 'react-dom/server';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { JobEventHandlers, LoadJobsApi } from './types';
-import { MAX_EVENTS, useJobEventStream } from './useJobEventStream';
+import { hasJobEventStreamEntryForTesting, MAX_EVENTS, useJobEventStream } from './useJobEventStream';
 
 function makeApi() {
   const subscriptions: Array<{ jobId: string; handlers: JobEventHandlers; active: boolean }> = [];
@@ -34,6 +35,13 @@ describe('useJobEventStream', () => {
     (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   });
   afterEach(() => { act(() => root.unmount()); host.remove(); });
+
+  it('keeps a render without subscribing read-only and does not create a store entry', () => {
+    const { api } = makeApi();
+    expect(renderToString(<Consumer api={api} jobId="J1" />)).toContain('data-job="J1"');
+    expect(api.subscribeJob).not.toHaveBeenCalled();
+    expect(hasJobEventStreamEntryForTesting(api, 'J1')).toBe(false);
+  });
 
   it('shares one bounded subscription and releases it after the last consumer', async () => {
     const { api, latestHandler } = makeApi();

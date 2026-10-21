@@ -21,6 +21,9 @@ interface Entry extends JobEventStreamSnapshot {
 }
 
 const stores = new WeakMap<object, Map<string, Entry>>();
+const EMPTY_SNAPSHOT: JobEventStreamSnapshot = {
+  events: [], connection: 'connecting', journalTruncated: false,
+};
 
 function eventJournalTruncated(event: JobEvent): boolean {
   const data = event.data;
@@ -49,6 +52,11 @@ function entryFor(api: LoadJobsApi, jobId: string): Entry {
     byJob.set(jobId, entry);
   }
   return entry;
+}
+
+/** Exposed for the unit test that guards the read-only render path. */
+export function hasJobEventStreamEntryForTesting(api: LoadJobsApi, jobId: string): boolean {
+  return stores.get(api as object)?.has(jobId) ?? false;
 }
 
 function start(api: LoadJobsApi, jobId: string, entry: Entry): void {
@@ -113,6 +121,6 @@ export function useJobEventStream(api: LoadJobsApi, jobId: string): JobEventStre
       release(api, jobId, entry);
     };
   }, [api, jobId]);
-  const getSnapshot = useMemo(() => () => entryFor(api, jobId).snapshot, [api, jobId]);
+  const getSnapshot = useMemo(() => () => stores.get(api as object)?.get(jobId)?.snapshot ?? EMPTY_SNAPSHOT, [api, jobId]);
   return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 }
