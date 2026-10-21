@@ -148,7 +148,7 @@ public final class ApiServlet extends HttpServlet {
         if(loadSchedulePath(path)){schedulePost(req,res,path,requestId,authorizationPrincipal);return;}
         if(!requireOperator(req,res,requestId))return;
         if(path.matches("/jobs/[^/]+/artifacts/retry")){if(!checkOrigin(req,res,requestId,false))return;try{String id=segment(path,2);runtime.requireJobOwner(id,authorizationPrincipal);runtime.retryArtifactArchive(id);json(res,202,Map.of("archiveStatus","PENDING","requestId",requestId));return;}catch(ServerRuntime.NotFoundException missing){error(res,404,"ATT-SERVER-NOT-FOUND","API resource was not found",requestId);return;}catch(IllegalArgumentException invalid){error(res,409,"ATT-SERVER-ARCHIVE-NOT-READY",safeDetail(invalid),requestId);return;}catch(Exception failure){error(res,500,"ATT-SERVER-REQUEST-FAILED","The archive retry could not be scheduled",requestId);return;}}
-        if("/jobs/delete".equals(path)||path.matches("/jobs/[^/]+/(pin|delete)")) {
+        if("/jobs/delete".equals(path)||"/jobs/pin".equals(path)||path.matches("/jobs/[^/]+/(pin|delete)")) {
             if(!checkOrigin(req,res,requestId,false))return;
             try {
                 if(!isJson(req.getContentType())){error(res,415,"ATT-SERVER-UNSUPPORTED-MEDIA-TYPE","Content-Type must be application/json",requestId);return;}
@@ -158,7 +158,13 @@ public final class ApiServlet extends HttpServlet {
                 if(input==null||!input.isObject())throw new IllegalArgumentException("A JSON object is required");
                 if(path.endsWith("/pin")) {
                     if(!input.path("pinned").isBoolean())throw new IllegalArgumentException("pinned must be a boolean");
-                    json(res,200,runtime.pinJob(segment(path,2),input.get("pinned").booleanValue(),authorizationPrincipal));
+                    String reason=input.path("pinReason").isMissingNode()||input.path("pinReason").isNull()?null:input.path("pinReason").isTextual()?input.path("pinReason").asText():null;
+                    if(input.has("pinReason")&&!input.path("pinReason").isNull()&&!input.path("pinReason").isTextual())throw new IllegalArgumentException("pinReason must be a string");
+                    if("/jobs/pin".equals(path)) {
+                        JsonNode ids=input.get("jobIds");if(ids==null||!ids.isArray()||ids.size()<1||ids.size()>100)throw new IllegalArgumentException("Select 1 to 100 Job IDs");
+                        List<String> selected=new java.util.ArrayList<>();for(JsonNode id:ids){if(!id.isTextual())throw new IllegalArgumentException("Job IDs must be strings");selected.add(id.asText());}
+                        json(res,200,Map.of("items",runtime.pinJobs(selected,input.get("pinned").booleanValue(),reason,authorizationPrincipal),"requestId",requestId));
+                    } else json(res,200,runtime.pinJob(segment(path,2),input.get("pinned").booleanValue(),reason,authorizationPrincipal));
                 } else {
                     if(!input.path("confirm").isBoolean()||!input.path("confirm").booleanValue())throw new IllegalArgumentException("Explicit deletion confirmation is required");
                     if("/jobs/delete".equals(path)) {
@@ -166,9 +172,11 @@ public final class ApiServlet extends HttpServlet {
                         List<String> selected=new java.util.ArrayList<>();
                         for(JsonNode id:ids){if(!id.isTextual())throw new IllegalArgumentException("Job IDs must be strings");selected.add(id.asText());}
                         json(res,200,Map.of("items",runtime.deleteJobs(selected,authorizationPrincipal),"requestId",requestId));
-                    } else json(res,200,runtime.deleteJob(segment(path,2),authorizationPrincipal));
+                    } else {Map<String,Object> outcome=runtime.deleteJob(segment(path,2),authorizationPrincipal);String value=String.valueOf(outcome.get("outcome"));
+                        int status="DELETED".equals(value)||"ALREADY_UNAVAILABLE".equals(value)?200:"DELETION_PENDING_RECOVERY".equals(value)?202:409;json(res,status,outcome);}
                 }
             } catch(ServerRuntime.NotFoundException missing){error(res,404,"ATT-SERVER-NOT-FOUND","Job was not found or is unavailable",requestId);}
+              catch(ServerRuntime.JobConflictException conflict){error(res,409,conflict.code,safeDetail(new IllegalArgumentException(conflict.getMessage())),requestId);}
               catch(IllegalArgumentException invalid){error(res,400,"ATT-SERVER-INVALID-REQUEST",safeDetail(invalid),requestId);}
               catch(Exception failed){error(res,500,"ATT-SERVER-JOB-ACTION-FAILED","Job action could not be completed",requestId);}
             return;
@@ -640,4 +648,3 @@ public final class ApiServlet extends HttpServlet {
     }
     static String safeDetail(IllegalArgumentException e){String m=e.getMessage();if(m==null)return "Invalid request";m=att.server.api.internal.DiagnosticSanitizer.redactAbsolutePaths(att.server.api.internal.DiagnosticSanitizer.redactText(m));return m.length()>300?m.substring(0,300):m;}
 }
-

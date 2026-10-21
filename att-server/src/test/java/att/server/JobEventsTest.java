@@ -55,6 +55,20 @@ class JobEventsTest {
         assertEquals(console,((Map<?,?>)replay.after(0).get(0).get("data")).get("console"));
     }
 
+    @Test void oversizedStatusEventKeepsStructuredIdentityAndReportsDroppedFields() throws Exception {
+        JobEvents journal=new JobEvents(temp.resolve("structured.jsonl"),10,Runnable::run);
+        Map<String,Object> event=new java.util.LinkedHashMap<>();event.put("status","FAIL");event.put("executionEventType","CASE_FINISHED");
+        event.put("caseId","case-17");event.put("executionId","run-9");event.put("stage","verify");event.put("code","ATT-CASE-FAILED");
+        event.put("console","界".repeat(32000));event.put("largeDetails","x".repeat(70000));
+        journal.append("status",event);Map<?,?> payload=(Map<?,?>)journal.after(0).get(0).get("data");
+        assertEquals("FAIL",payload.get("status"));assertEquals("CASE_FINISHED",payload.get("executionEventType"));
+        assertEquals("case-17",payload.get("caseId"));assertEquals("run-9",payload.get("executionId"));
+        assertTrue(((List<?>)payload.get("droppedFields")).contains("largeDetails"));
+        assertTrue(new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsBytes(payload).length<=65536);
+        JobEvents replay=new JobEvents(temp.resolve("structured.jsonl"),10,Runnable::run);Map<?,?> replayed=(Map<?,?>)replay.after(0).get(0).get("data");
+        assertEquals("FAIL",replayed.get("status"));assertEquals("CASE_FINISHED",replayed.get("executionEventType"));
+    }
+
     @Test void retainedEventsUseIncreasingJobLocalIdsAndReplayAfterLastEventId() throws Exception {
         Path file=temp.resolve("events.jsonl");JobEvents events=new JobEvents(file,3);
         events.append("status",Map.of("status","QUEUED"));events.append("status",Map.of("status","RUNNING"));events.append("result",Map.of("status","PASS"));

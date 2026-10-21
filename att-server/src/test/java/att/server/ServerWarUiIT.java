@@ -151,6 +151,14 @@ class ServerWarUiIT {
             assertEquals(2,pinnedJobs.size());
             for(JsonNode pinnedJob:pinnedJobs)assertTrue(pinnedJob.path("pinned").asBoolean());
             String selectedId=String.valueOf(fixtures.get(0).get("jobId"));
+            String secondId=String.valueOf(fixtures.get(1).get("jobId"));
+            apiJsonResponse(port,"POST",api+"/jobs/pin",peer,origin,Map.of("pinned",false,"jobIds",List.of(selectedId,"../bad")),400);
+            assertTrue(getJson(port,api+"/jobs/"+selectedId,peer).path("pinned").asBoolean(),"Bulk validation must finish before changing any Job");
+            JsonNode bulkUnpin=apiJsonResponse(port,"POST",api+"/jobs/pin",peer,origin,Map.of("pinned",false,"jobIds",List.of(selectedId,secondId,selectedId)),200).path("items");
+            assertEquals(2,bulkUnpin.size());assertTrue(java.util.stream.StreamSupport.stream(bulkUnpin.spliterator(),false).allMatch(item->"UNPINNED".equals(item.path("outcome").asText())));
+            JsonNode bulkPin=apiJsonResponse(port,"POST",api+"/jobs/pin",peer,origin,Map.of("pinned",true,"pinReason"," password=bulk-pin-secret ","jobIds",List.of(selectedId,secondId)),200).path("items");
+            assertEquals(2,bulkPin.size());assertTrue(java.util.stream.StreamSupport.stream(bulkPin.spliterator(),false).allMatch(item->"PINNED".equals(item.path("outcome").asText())));
+            assertEquals("password=[REDACTED_SECRET]",getJson(port,api+"/jobs/"+selectedId,peer).path("pinReason").asText());
             apiJsonResponse(port,"POST",api+"/jobs/delete",peer,origin,Map.of("confirm",false,"jobIds",List.of(selectedId)),400);
             apiJsonResponse(port,"POST",api+"/jobs/delete",peer,origin,Map.of("confirm",true,"jobIds",java.util.Collections.nCopies(101,selectedId)),400);
             for(Map<String,Object> fixture:fixtures) {
@@ -160,10 +168,11 @@ class ServerWarUiIT {
 
                 JsonNode pinned=apiJsonResponse(port,"POST",api+"/jobs/"+id+"/pin",peer,origin,Map.of("pinned",true),200);
                 assertTrue(pinned.path("pinned").asBoolean());
-                assertEquals("PINNED_UNPIN_FIRST",apiJsonResponse(port,"POST",api+"/jobs/"+id+"/delete",auth,origin,Map.of("confirm",true),200).path("outcome").asText());
+                assertEquals("PINNED_UNPIN_FIRST",apiJsonResponse(port,"POST",api+"/jobs/"+id+"/delete",auth,origin,Map.of("confirm",true),409).path("outcome").asText());
                 apiJsonResponse(port,"POST",api+"/jobs/"+id+"/pin",admin,origin,Map.of("pinned",false),403);
                 apiJsonResponse(port,"POST",api+"/jobs/"+id+"/pin",auth,origin,Map.of("pinned",false),200);
                 assertEquals("DELETED",apiJsonResponse(port,"POST",api+"/jobs/"+id+"/delete",peer,origin,Map.of("confirm",true),200).path("outcome").asText());
+                assertEquals("ALREADY_UNAVAILABLE",apiJsonResponse(port,"POST",api+"/jobs/"+id+"/delete",peer,origin,Map.of("confirm",true),200).path("outcome").asText());
                 for(String suffix:List.of("","/result","/events","/artifacts","/artifacts/archive.zip"))assertEquals(404,get(port,api+"/jobs/"+id+suffix,auth));
                 assertFalse(Files.exists(temp.resolve("data/jobs").resolve(id)));
             }
