@@ -17,6 +17,13 @@ export interface JobEventStreamSnapshot {
   readonly gaps: number;
 }
 
+export interface JobEventStatusSnapshot {
+  readonly status?: string;
+  readonly text?: string;
+  readonly eventRevision: number;
+  readonly resultEvent: boolean;
+}
+
 class EventRing {
   private readonly slots: Array<JobStreamEvent | undefined> = new Array(MAX_EVENTS);
   private start = 0;
@@ -71,6 +78,8 @@ interface Entry {
   duplicatesIgnored: number;
   staleIgnored: number;
   gaps: number;
+  status?: string;
+  statusSnapshot: JobEventStatusSnapshot;
   snapshot: JobEventStreamSnapshot;
   listeners: Set<() => void>;
   unsubscribe?: () => void;
@@ -88,6 +97,7 @@ const EMPTY_SNAPSHOT: JobEventStreamSnapshot = Object.freeze({
   events: EMPTY_EVENTS, connection: 'connecting', journalTruncated: false,
   duplicatesIgnored: 0, staleIgnored: 0, gaps: 0,
 });
+const EMPTY_STATUS_SNAPSHOT: JobEventStatusSnapshot = Object.freeze({ status: undefined, text: undefined, eventRevision: 0, resultEvent: false });
 const TERMINAL_STATUSES = new Set(['PASS', 'FAIL', 'ERROR', 'INVALID', 'CANCELLED']);
 
 function eventJournalTruncated(event: JobEvent): boolean {
@@ -116,6 +126,17 @@ function eventStatus(event: JobEvent): string | undefined {
   const status = data && typeof data === 'object' && !Array.isArray(data)
     ? (data as Record<string, unknown>).status : data;
   return typeof status === 'string' ? status : undefined;
+}
+
+function eventStatusText(event: JobEvent): string | undefined {
+  const data = event.data;
+  if (typeof data === 'string') return data;
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return undefined;
+  const record = data as Record<string, unknown>;
+  for (const key of ['message', 'summary', 'status', 'text']) {
+    if (typeof record[key] === 'string') return record[key] as string;
+  }
+  return undefined;
 }
 
 function hasTerminalStatus(event: JobEvent): boolean {
@@ -177,6 +198,7 @@ function entryFor(api: LoadJobsApi, jobId: string): Entry {
       buffer: new EventRing(), idIndex: new BoundedIdIndex(),
       connection: 'connecting', journalTruncated: false,
       duplicatesIgnored: 0, staleIgnored: 0, gaps: 0,
+      statusSnapshot: EMPTY_STATUS_SNAPSHOT,
       listeners: new Set(), nextSequence: 0, consumerCount: 0, dirty: false,
       snapshot: EMPTY_SNAPSHOT,
     };
@@ -233,6 +255,16 @@ function ingest(entry: Entry, event: JobEvent): boolean {
     receivedAt: event.receivedAt || new Date().toISOString(),
     consoleText: strippedConsoleText(event),
   });
+  if (event.type === 'status' || event.type === 'result') {
+    const status = eventStatus(event);
+    if (status) entry.status = status;
+    entry.statusSnapshot = Object.freeze({
+      status: entry.status,
+      text: eventStatusText(event),
+      eventRevision: entry.statusSnapshot.eventRevision + 1,
+      resultEvent: event.type === 'result',
+    });
+  }
   entry.buffer.append(stored);
   entry.dirty = true;
   return true;
@@ -310,4 +342,32 @@ export function useJobEventStream(api: LoadJobsApi, jobId: string): JobEventStre
   }, [api, jobId]);
   const getSnapshot = useMemo(() => () => stores.get(api as object)?.get(jobId)?.snapshot ?? EMPTY_SNAPSHOT, [api, jobId]);
   return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+}
+
+/**
+ * A narrow subscription for status reconciliation. The returned snapshot only
+ * changes for status/result events, so ordinary log/progress bursts do not
+ * rerender Job Overview or its parent.
+ */
+export function useJobEventStatus(api: LoadJobsApi, jobId: string, fallbackStatus?: string): JobEventStatusSnapshot {
+  const fallback = useMemo<JobEventStatusSnapshot>(() => Object.freeze({
+    status: fallbackStatus,
+    text: undefined,
+    eventRevision: 0,
+    resultEvent: false,
+  }), [fallbackStatus]);
+  const subscribe = useMemo(() => (listener: () => void) => {
+    const entry = entryFor(api, jobId);
+    entry.listeners.add(listener);
+    entry.consumerCount += 1;
+    start(api, jobId, entry);
+    return () => {
+      entry.listeners.delete(listener);
+      release(api, jobId, entry);
+    };
+  }, [api, jobId]);
+  const getSnapshot = useMemo(() => () => stores.get(api as object)?.get(jobId)?.statusSnapshot ?? fallback, [api, jobId, fallback]);
+  const snapshot = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+  return snapshot.status === undefined && fallbackStatus !== undefined && snapshot.eventRevision === 0
+    ? fallback : snapshot;
 }

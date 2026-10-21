@@ -64,6 +64,8 @@ Source 分頁只載入 Server 提供的安全 source projection。畫面最多�
 
 瀏覽器會立即把事件寫入最多 500 筆的有界 buffer，並以固定 100 ms 週期發布一般顯示 snapshot。Document 隱藏時會暫停發布顯示 snapshot，重新顯示時再發布當時的有界 snapshot。終端 `result` 事件、終端 `status` 事件、取消請求狀態及連線錯誤狀態轉換會立即發布。最後一個 consumer 關閉後，timer 及原生 `EventSource` 都會釋放。
 
+Events 清單只渲染捲動位置附近的列（並以 spacer 保持捲軸及清單位置正確），事件 payload 在展開前保持收合，搜尋則涵蓋完整的 500 筆視窗，而非只搜尋已渲染列。Metrics 分頁會繪製所有回傳的 bucket（最多 4,096 個），其無障礙 bucket 表格每頁顯示 100 列，提供 Previous 與 Next 控制項及 `Showing rows` 狀態。
+
 Server Journal Event ID 是 append order 的排序鍵。UI 按 callback 到達次序處理，不會按 timestamp 重新排序。數字 ID 必須遞增：小於或等於 last-seen cursor 的 ID 會視為 stale 或 duplicate replay 而忽略；向前出現 gap 是合法情況，只會計入診斷。非數字 ID 使用有界的 recent-ID index 去重。原生 `EventSource` 仍使用 `Last-Event-ID` 重新連線；重疊 replay 即使已離開可見 window，或在 **Clear view** 後到達，也不會再次出現。
 
 這些限制屬於不同層次。瀏覽器只顯示最近 500 筆已接受事件，不代表保留完整 Job 歷史。Server journal 決定可 replay 的範圍，較早 journal 歷史已截斷時會明確報告。#265 追蹤的 per-entry 限制會在發布前或期間縮短單一文字或 payload 欄位；瀏覽器不會重建或重新格式化這些 protocol 資料。

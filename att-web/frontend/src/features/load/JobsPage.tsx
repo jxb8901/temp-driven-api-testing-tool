@@ -1,18 +1,19 @@
 import { StatusBadge } from './StatusBadge';
 import { ArchiveMetrics } from './ArchiveMetrics';
 import type { ArtifactArchiveMetrics } from './types';
-import { useEffect, useMemo, useRef, useState, type ChangeEvent, type KeyboardEvent } from 'react';
+import { memo, Profiler, useEffect, useMemo, useRef, useState, type ChangeEvent, type KeyboardEvent } from 'react';
 import './load.css';
 import { JobArtifacts } from './JobArtifacts';
-import type { JobEvent, JobResultResponse, JobStatus, JobSummary, JobView, JobsFeatureProps } from './types';
+import type { JobResultResponse, JobStatus, JobSummary, JobView, JobsFeatureProps } from './types';
 import { JobConsoleView } from './JobConsoleView';
 import { useJobConsole } from './JobConsoleContext';
-import { useJobEventStream } from './useJobEventStream';
+import { useJobEventStatus } from './useJobEventStream';
 
 function executionType(job: JobSummary): string { return job.executionType || (job.command === 'debug' ? 'run' : job.command); }
 
 const PAGE_SIZE = 25;
 const MAX_BUCKET_ROWS = 4096;
+const BUCKET_PAGE_SIZE = 100;
 
 type LoadState = 'loading' | 'refreshing' | 'ready' | 'error';
 type JobTab = 'overview' | 'live' | 'events' | 'results' | 'artifacts' | 'metrics';
@@ -57,28 +58,29 @@ function isTerminalStatus(status: JobStatus): boolean {
   return !['QUEUED', 'PREPARING', 'RUNNING', 'CANCEL_REQUESTED'].includes(status);
 }
 
+const LOCAL_TIME_ZONE = (() => {
+  try { return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'; }
+  catch { return 'UTC'; }
+})();
+const DATE_TIME_FORMATTER = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'medium' });
+const BUCKET_TIME_FORMATTER = new Intl.DateTimeFormat(undefined, {
+  year: 'numeric', month: 'short', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit',
+  timeZone: LOCAL_TIME_ZONE, timeZoneName: 'short',
+});
+const CHART_TIME_FORMATTER = new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit', timeZone: LOCAL_TIME_ZONE });
+const METRIC_NUMBER_FORMATTER = new Intl.NumberFormat(undefined, { maximumFractionDigits: 3 });
+const CHART_NUMBER_FORMATTER = new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 });
+
 function displayValue(value: unknown): string {
   if (typeof value === 'string') return value;
   try { return JSON.stringify(value, null, 2); }
   catch { return String(value); }
 }
 
-function eventText(event: JobEvent): string {
-  const data = event.data;
-  if (typeof data === 'string') return data;
-  if (data && typeof data === 'object' && !Array.isArray(data)) {
-    const record = data as Record<string, unknown>;
-    for (const key of ['message', 'summary', 'status', 'text']) {
-      if (typeof record[key] === 'string') return record[key] as string;
-    }
-  }
-  return displayValue(data);
-}
-
 function dateTime(value?: string | null): string {
   if (!value) return 'Not reported';
   const time = Date.parse(value);
-  return Number.isFinite(time) ? new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'medium' }).format(time) : value;
+  return Number.isFinite(time) ? DATE_TIME_FORMATTER.format(time) : value;
 }
 
 function numericRows(value: unknown, prefix = '', depth = 0, rows: Array<[string, number]> = []): Array<[string, number]> {
@@ -149,8 +151,8 @@ function EvidenceQuotaSummary({ payload }: { payload: JobResultResponse | null }
   </section>;
 }
 
-type MetricBucket = { key: string; values: Record<string, unknown>; epochMs: number | null };
-type MetricSeries = {
+export type MetricBucket = { key: string; values: Record<string, unknown>; epochMs: number | null };
+export type MetricSeries = {
   field: string;
   label: string;
   unit: string;
@@ -204,21 +206,15 @@ function metricSeries(buckets: MetricBucket[]): MetricSeries[] {
 }
 
 function browserTimeZone(): string {
-  try { return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'; }
-  catch { return 'UTC'; }
+  return LOCAL_TIME_ZONE;
 }
 
 function formatBucketTime(epochMs: number): string {
-  return new Intl.DateTimeFormat(undefined, {
-    year: 'numeric', month: 'short', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit',
-    timeZone: browserTimeZone(), timeZoneName: 'short',
-  }).format(epochMs);
+  return BUCKET_TIME_FORMATTER.format(epochMs);
 }
 
-function formatChartTime(epochMs: number, timezone: string): string {
-  return new Intl.DateTimeFormat(undefined, {
-    hour: '2-digit', minute: '2-digit', second: '2-digit', timeZone: timezone,
-  }).format(epochMs);
+function formatChartTime(epochMs: number, _timezone: string): string {
+  return CHART_TIME_FORMATTER.format(epochMs);
 }
 
 function loadMetricRows(metrics: Record<string, unknown> | null): Array<[string, number]> {
@@ -234,6 +230,65 @@ function dateKey(value: string): number {
 function unique(values: Array<string | undefined>): string[] {
   return [...new Set(values.filter((value): value is string => Boolean(value)))].sort((a, b) => a.localeCompare(b));
 }
+
+export const JobOverview = memo(function JobOverview({ job, status, statusText, jobState, hidden, onProfilerCommit }: { job: JobView | null; status: JobStatus; statusText?: string; jobState: LoadState; hidden: boolean; onProfilerCommit?: () => void }) {
+  return <section className="att-job-panel" role="tabpanel" id="job-panel-overview" aria-labelledby="job-tab-overview" hidden={hidden} tabIndex={0}>
+    <Profiler id="job-overview-content" onRender={() => onProfilerCommit?.()}>{job ? <dl className="att-job-overview">
+      <div><dt>Job ID</dt><dd>{job.jobId}</dd></div><div><dt>Status</dt><dd><StatusBadge status={status} /></dd></div>
+      <div><dt>Execution type</dt><dd>{executionType(job)}</dd></div><div><dt>Command</dt><dd>{job.command || 'Not reported'}</dd></div><div><dt>Package</dt><dd>{job.packageId || 'Not reported'}</dd></div>
+      <div><dt>Principal</dt><dd>{job.principal || 'Not reported'}</dd></div><div><dt>Created</dt><dd><time dateTime={job.createdAt || undefined}>{dateTime(job.createdAt)}</time></dd></div>
+      <div><dt>Started</dt><dd><time dateTime={job.startedAt || undefined}>{dateTime(job.startedAt)}</time></dd></div><div><dt>Finished</dt><dd><time dateTime={job.finishedAt || undefined}>{dateTime(job.finishedAt)}</time></dd></div>
+      <div><dt>Exit code</dt><dd>{job.exitCode ?? 'Not reported'}</dd></div>
+      {job.pinned && <div><dt>Pin reason</dt><dd>{job.pinReason || 'Not provided'}</dd></div>}
+    </dl> : jobState !== 'loading' && <p>Job details are unavailable.</p>}</Profiler>
+    {statusText && <p className="att-live-status" role="status">Latest live status event: {statusText}</p>}
+  </section>;
+});
+
+const LiveOutputPanel = memo(function LiveOutputPanel({ api, jobId, job, hidden }: { api: JobsFeatureProps['api']; jobId: string; job: JobView | null; hidden: boolean }) {
+  return <section className="att-job-panel" role="tabpanel" id="job-panel-live" aria-labelledby="job-tab-live" hidden={hidden} tabIndex={0}>
+    <JobConsoleView api={api} jobId={jobId} job={job} view="live" showSwitcher={false} />
+  </section>;
+});
+
+const StructuredEventsPanel = memo(function StructuredEventsPanel({ api, jobId, job, hidden }: { api: JobsFeatureProps['api']; jobId: string; job: JobView | null; hidden: boolean }) {
+  return <section className="att-job-panel" role="tabpanel" id="job-panel-events" aria-labelledby="job-tab-events" hidden={hidden} tabIndex={0}>
+    <JobConsoleView api={api} jobId={jobId} job={job} view="events" showSwitcher={false} />
+  </section>;
+});
+
+export const ArtifactsPanel = memo(function ArtifactsPanel({ api, jobId, refresh, onMetrics, hidden, onProfilerCommit }: { api: JobsFeatureProps['api']; jobId: string; refresh: number; onMetrics: (metrics: ArtifactArchiveMetrics | null) => void; hidden: boolean; onProfilerCommit?: () => void }) {
+  return <section className="att-job-panel" role="tabpanel" id="job-panel-artifacts" aria-labelledby="job-tab-artifacts" hidden={hidden} tabIndex={0}>
+    <Profiler id="job-artifacts-content" onRender={() => onProfilerCommit?.()}><h2>Artifacts</h2>
+      <JobArtifacts key={jobId} api={api} jobId={jobId} refresh={refresh} onMetrics={onMetrics} /></Profiler>
+  </section>;
+});
+
+export const MetricsPanel = memo(function MetricsPanel({ job, metrics, resultState, archiveMetrics, buckets, charts, hidden, onProfilerCommit }: {
+  job: JobView | null;
+  metrics: Record<string, unknown> | null;
+  resultState: LoadState;
+  archiveMetrics: ArtifactArchiveMetrics | null;
+  buckets: MetricBucket[];
+  charts: MetricSeries[];
+  hidden: boolean;
+  onProfilerCommit?: () => void;
+}) {
+  return <section className="att-job-panel" role="tabpanel" id="job-panel-metrics" aria-labelledby="job-tab-metrics" hidden={hidden} tabIndex={0}>
+    <Profiler id="job-metrics-content" onRender={() => onProfilerCommit?.()}><h2>Metrics</h2>
+    <p className="att-help">Only values returned by the job API are shown. Server timings and Worker JVM metrics are separate from Load result metrics.</p>
+    {job && <MetricTable title="Server timings" rows={numericRows(job.performance?.timings)} unit="ms" />}
+    {job && <MetricTable title="Worker metrics" rows={numericRows(job.performance?.worker)} />}
+    <ArchiveMetrics value={archiveMetrics || job?.archiveMetrics} />
+    {metrics && <MetricTable title="Load result metrics" rows={loadMetricRows(metrics)} />}
+    {!metrics && <p role="status">{resultState === 'loading' || resultState === 'refreshing' ? 'Load result metrics are loading.' : job?.command === 'load' ? 'No Load metrics summary was returned. No chart or derived metric is shown.' : 'This command has no Load metric summary.'}</p>}
+    {buckets.length > 0 && charts.map(series => <TimeSeriesChart key={series.field} series={series} />)}
+    {buckets.length > 0 && !charts.length && <p role="status">The Server returned buckets, but this view cannot chart them without timestamps and complete numeric samples. Raw returned values remain available in the table.</p>}
+    {buckets.length > 0 && <BucketTable buckets={buckets} />}
+    {metrics && !buckets.length && <p role="status">No time-series buckets were returned. Summary metrics are shown in the table above.</p>}
+    {!job?.performance?.timings && !job?.performance?.worker && !archiveMetrics && !job?.archiveMetrics && !metrics && resultState !== 'loading' && <p role="status">The API did not return metrics for this job.</p>}</Profiler>
+  </section>;
+});
 
 export function JobsPage(props: JobsFeatureProps) {
   return props.jobId ? <JobDetail key={props.jobId} {...props} jobId={props.jobId} /> : <JobsList {...props} />;
@@ -494,8 +549,6 @@ function JobDetail({ api, jobId, onShowList, confirmCancel }: JobsFeatureProps &
   const [resultState, setResultState] = useState<LoadState>('loading');
   const [resultError, setResultError] = useState('');
   const [activeTab, setActiveTab] = useState<JobTab>('overview');
-  const stream = useJobEventStream(api, jobId);
-  const events = stream.events;
   const [cancelState, setCancelState] = useState<'idle' | 'pending' | 'error'>('idle');
   const [cancelError, setCancelError] = useState('');
   const [detailRefresh, setDetailRefresh] = useState(0);
@@ -505,44 +558,46 @@ function JobDetail({ api, jobId, onShowList, confirmCancel }: JobsFeatureProps &
   const cancellationLock = useRef(false);
   const terminalStatus = useRef<JobStatus | null>(null);
   const terminalReconciled = useRef(false);
+  const requestSequence = useRef(0);
   const consoleContext = useJobConsole();
-  const liveStatus = useMemo(() => [...events].reverse().find(event => event.type === 'status'), [events]);
+  const statusSnapshot = useJobEventStatus(api, jobId, job?.status);
+  const selectedStatus = (statusSnapshot.status || job?.status || 'UNKNOWN') as JobStatus;
+  const displayedJob = useMemo(() => job && selectedStatus !== job.status ? { ...job, status: selectedStatus } : job, [job, selectedStatus]);
 
   useEffect(() => {
     const controller = new AbortController();
+    const sequence = ++requestSequence.current;
+    // SSE status always wins over the REST snapshot when the page chooses the displayed status,
+    // so a newer status event must not discard this response (that would leave the detail empty).
+    const isCurrent = () => !controller.signal.aborted && sequence === requestSequence.current;
     setJobState(job ? 'refreshing' : 'loading');
     setResultState(result ? 'refreshing' : 'loading');
     setDetailError(''); setResultError('');
     api.getJob(jobId, controller.signal).then(value => {
-      if (!controller.signal.aborted) {
+      if (isCurrent()) {
         setJob(terminalStatus.current ? { ...value, status: terminalStatus.current } : value);
         setJobState('ready');
       }
     }).catch(error => {
-      if (!controller.signal.aborted) { setDetailError(toError(error, 'Job detail could not be loaded.').message); setJobState('error'); }
+      if (isCurrent()) { setDetailError(toError(error, 'Job detail could not be loaded.').message); setJobState('error'); }
     });
     api.getJobResult(jobId, controller.signal).then(value => {
-      if (!controller.signal.aborted) { setResult(value); setResultState('ready'); }
+      if (isCurrent()) { setResult(value); setResultState('ready'); }
     }).catch(error => {
-      if (!controller.signal.aborted) { setResultError(toError(error, 'Job result is not available.').message); setResultState('error'); }
+      if (isCurrent()) { setResultError(toError(error, 'Job result is not available.').message); setResultState('error'); }
     });
     return () => controller.abort();
   }, [api, jobId, detailRefresh, terminalRefresh]);
 
   useEffect(() => {
-    for (const event of stream.events) {
-      if (event.type !== 'status' && event.type !== 'result') continue;
-      const payload = event.data && typeof event.data === 'object' && !Array.isArray(event.data)
-        ? (event.data as Record<string, unknown>).status : event.data;
-      const terminal = typeof payload === 'string' && ['PASS', 'FAIL', 'ERROR', 'INVALID', 'CANCELLED'].includes(payload);
-      if (terminal) terminalStatus.current = payload;
-      if (typeof payload === 'string' && payload) setJob(currentJob => currentJob ? { ...currentJob, status: terminalStatus.current || payload } : currentJob);
-      if (!terminalReconciled.current && (terminal || event.type === 'result')) {
-        terminalReconciled.current = true;
-        setTerminalRefresh(value => value + 1);
-      }
+    if (statusSnapshot.eventRevision === 0) return;
+    const terminal = Boolean(statusSnapshot.status && isTerminalStatus(statusSnapshot.status as JobStatus));
+    if (terminal) terminalStatus.current = statusSnapshot.status as JobStatus;
+    if (!terminalReconciled.current && (terminal || statusSnapshot.resultEvent)) {
+      terminalReconciled.current = true;
+      setTerminalRefresh(value => value + 1);
     }
-  }, [stream.events]);
+  }, [statusSnapshot]);
 
   async function changeJobPin(pinned: boolean, reason = '') {
     setJobActionBusy(true); setPinReasonOpen(false);
@@ -552,7 +607,7 @@ function JobDetail({ api, jobId, onShowList, confirmCancel }: JobsFeatureProps &
   }
 
   async function cancel() {
-    if (!job || cancellationLock.current || !['QUEUED', 'PREPARING', 'RUNNING'].includes(job.status)) return;
+    if (!job || cancellationLock.current || !['QUEUED', 'PREPARING', 'RUNNING'].includes(jobStatus)) return;
     cancellationLock.current = true;
     const allowed = await (confirmCancel || (message => window.confirm(message)))(`Cancel job ${job.jobId}? The Server will stop it when cancellation is safe.`);
     if (!allowed) { cancellationLock.current = false; return; }
@@ -574,11 +629,11 @@ function JobDetail({ api, jobId, onShowList, confirmCancel }: JobsFeatureProps &
   }
 
   const retry = () => setDetailRefresh(value => value + 1);
-  const jobStatus = job?.status || 'UNKNOWN';
-  const canCancel = Boolean(job && ['QUEUED', 'PREPARING', 'RUNNING'].includes(job.status));
-  const metrics = resultMetrics(result);
-  const buckets = metricBuckets(metrics?.buckets).slice(0, MAX_BUCKET_ROWS);
-  const charts = metricSeries(buckets);
+  const jobStatus = selectedStatus;
+  const canCancel = Boolean(job && ['QUEUED', 'PREPARING', 'RUNNING'].includes(jobStatus));
+  const metrics = useMemo(() => resultMetrics(result), [result]);
+  const buckets = useMemo(() => metricBuckets(metrics?.buckets).slice(0, MAX_BUCKET_ROWS), [metrics]);
+  const charts = useMemo(() => metricSeries(buckets), [buckets]);
 
   function onTabKeyDown(event: KeyboardEvent<HTMLDivElement>) {
     const index = tabs.findIndex(tab => tab.id === activeTab);
@@ -601,15 +656,15 @@ function JobDetail({ api, jobId, onShowList, confirmCancel }: JobsFeatureProps &
         <StatusBadge status={jobStatus} />
         <button type="button" onClick={() => consoleContext.openConsole({ jobId, view: activeTab === 'events' ? 'events' : 'live', job })}>Open floating console</button>
         {job?.pinned && <span title={`Pinned by ${job.pinnedBy || 'operator'} at ${job.pinnedAt || 'unknown time'}${job.pinReason ? ` · ${job.pinReason}` : ''}`}>📌 Pinned</span>}
-        {job && isTerminalStatus(job.status) && api.pinJob && <button type="button" disabled={jobActionBusy} onClick={() => job.pinned ? void changeJobPin(false) : setPinReasonOpen(true)}>{job.pinned ? 'Unpin' : 'Pin'}</button>}
-        {job && isTerminalStatus(job.status) && (api.deleteJob || api.deleteJobs) && <button type="button" disabled={jobActionBusy || job.pinned} title={job.pinned ? 'Unpin before deletion' : undefined} onClick={() => setConfirmDelete(true)}>Delete Job</button>}
+        {job && isTerminalStatus(jobStatus) && api.pinJob && <button type="button" disabled={jobActionBusy} onClick={() => job.pinned ? void changeJobPin(false) : setPinReasonOpen(true)}>{job.pinned ? 'Unpin' : 'Pin'}</button>}
+        {job && isTerminalStatus(jobStatus) && (api.deleteJob || api.deleteJobs) && <button type="button" disabled={jobActionBusy || job.pinned} title={job.pinned ? 'Unpin before deletion' : undefined} onClick={() => setConfirmDelete(true)}>Delete Job</button>}
         {canCancel && <button className="att-button-danger" type="button" onClick={() => void cancel()} disabled={cancelState === 'pending'}>{cancelState === 'pending' ? 'Cancel requested…' : 'Cancel job'}</button>}
         <button type="button" onClick={retry} disabled={jobState === 'loading' || jobState === 'refreshing'}>{jobState === 'refreshing' ? 'Refreshing…' : 'Refresh details'}</button>
       </div>
     </header>
     {jobActionStatus && <p role="status">{jobActionStatus}</p>}
     {pinReasonOpen && job && <PinReasonForm title={`Pin ${job.jobId}`} busy={jobActionBusy} onSubmit={reason => void changeJobPin(true, reason)} onCancel={() => setPinReasonOpen(false)} />}
-    {confirmDelete && job && (api.deleteJob || api.deleteJobs) && <DeleteJobs jobs={[job]} onDelete={jobIds => api.deleteJob
+    {confirmDelete && displayedJob && (api.deleteJob || api.deleteJobs) && <DeleteJobs jobs={[displayedJob]} onDelete={jobIds => api.deleteJob
       ? api.deleteJob(jobIds[0]).then(outcome => [outcome])
       : api.deleteJobs!(jobIds)} onCancel={() => setConfirmDelete(false)} onDone={outcomes => {
         setConfirmDelete(false);
@@ -624,23 +679,9 @@ function JobDetail({ api, jobId, onShowList, confirmCancel }: JobsFeatureProps &
     <div className="att-job-tabs" role="tablist" aria-label={`Job ${jobId} sections`} onKeyDown={onTabKeyDown}>
       {tabs.map(tab => <button key={tab.id} type="button" role="tab" id={`job-tab-${tab.id}`} aria-controls={`job-panel-${tab.id}`} aria-selected={activeTab === tab.id} tabIndex={activeTab === tab.id ? 0 : -1} onClick={() => setActiveTab(tab.id)}>{tab.label}</button>)}
     </div>
-    <section className="att-job-panel" role="tabpanel" id="job-panel-overview" aria-labelledby="job-tab-overview" hidden={activeTab !== 'overview'} tabIndex={0}>
-      {job ? <dl className="att-job-overview">
-        <div><dt>Job ID</dt><dd>{job.jobId}</dd></div><div><dt>Status</dt><dd><StatusBadge status={job.status} /></dd></div>
-        <div><dt>Execution type</dt><dd>{executionType(job)}</dd></div><div><dt>Command</dt><dd>{job.command || 'Not reported'}</dd></div><div><dt>Package</dt><dd>{job.packageId || 'Not reported'}</dd></div>
-        <div><dt>Principal</dt><dd>{job.principal || 'Not reported'}</dd></div><div><dt>Created</dt><dd><time dateTime={job.createdAt || undefined}>{dateTime(job.createdAt)}</time></dd></div>
-        <div><dt>Started</dt><dd><time dateTime={job.startedAt || undefined}>{dateTime(job.startedAt)}</time></dd></div><div><dt>Finished</dt><dd><time dateTime={job.finishedAt || undefined}>{dateTime(job.finishedAt)}</time></dd></div>
-        <div><dt>Exit code</dt><dd>{job.exitCode ?? 'Not reported'}</dd></div>
-        {job.pinned && <div><dt>Pin reason</dt><dd>{job.pinReason || 'Not provided'}</dd></div>}
-      </dl> : jobState !== 'loading' && <p>Job details are unavailable.</p>}
-      {liveStatus && <p className="att-live-status" role="status">Latest live status event: {eventText(liveStatus)}</p>}
-    </section>
-    <section className="att-job-panel" role="tabpanel" id="job-panel-live" aria-labelledby="job-tab-live" hidden={activeTab !== 'live'} tabIndex={0}>
-      <JobConsoleView api={api} jobId={jobId} job={job} view="live" showSwitcher={false} />
-    </section>
-    <section className="att-job-panel" role="tabpanel" id="job-panel-events" aria-labelledby="job-tab-events" hidden={activeTab !== 'events'} tabIndex={0}>
-      <JobConsoleView api={api} jobId={jobId} job={job} view="events" showSwitcher={false} />
-    </section>
+    <JobOverview job={job} status={jobStatus} statusText={statusSnapshot.text} jobState={jobState} hidden={activeTab !== 'overview'} />
+    <LiveOutputPanel api={api} jobId={jobId} job={displayedJob} hidden={activeTab !== 'live'} />
+    <StructuredEventsPanel api={api} jobId={jobId} job={displayedJob} hidden={activeTab !== 'events'} />
     <section className="att-job-panel" role="tabpanel" id="job-panel-results" aria-labelledby="job-tab-results" hidden={activeTab !== 'results'} tabIndex={0}>
       <h2>Results</h2>
       {Boolean(result?.result?.metrics) && <section aria-label="Failure diagnosis"><h3>Failure diagnosis</h3>
@@ -657,36 +698,20 @@ function JobDetail({ api, jobId, onShowList, confirmCancel }: JobsFeatureProps &
         {result.result && <details open><summary>Raw result payload</summary><pre className="att-raw-result">{displayValue(result.result)}</pre></details>}
       </>}
     </section>
-    <section className="att-job-panel" role="tabpanel" id="job-panel-artifacts" aria-labelledby="job-tab-artifacts" hidden={activeTab !== 'artifacts'} tabIndex={0}>
-      <h2>Artifacts</h2>
-      <JobArtifacts key={jobId} api={api} jobId={jobId} refresh={detailRefresh} onMetrics={setArchiveMetrics} />
-    </section>
-    <section className="att-job-panel" role="tabpanel" id="job-panel-metrics" aria-labelledby="job-tab-metrics" hidden={activeTab !== 'metrics'} tabIndex={0}>
-      <h2>Metrics</h2>
-      <p className="att-help">Only values returned by the job API are shown. Server timings and Worker JVM metrics are separate from Load result metrics.</p>
-      {job && <MetricTable title="Server timings" rows={numericRows(job.performance?.timings)} unit="ms" />}
-      {job && <MetricTable title="Worker metrics" rows={numericRows(job.performance?.worker)} />}
-      <ArchiveMetrics value={archiveMetrics || job?.archiveMetrics} />
-      {metrics && <MetricTable title="Load result metrics" rows={loadMetricRows(metrics)} />}
-      {!metrics && <p role="status">{resultState === 'loading' || resultState === 'refreshing' ? 'Load result metrics are loading.' : job?.command === 'load' ? 'No Load metrics summary was returned. No chart or derived metric is shown.' : 'This command has no Load metric summary.'}</p>}
-      {buckets.length > 0 && charts.map(series => <TimeSeriesChart key={series.field} series={series} />)}
-      {buckets.length > 0 && !charts.length && <p role="status">The Server returned buckets, but this view cannot chart them without timestamps and complete numeric samples. Raw returned values remain available in the table.</p>}
-      {buckets.length > 0 && <BucketTable buckets={buckets} />}
-      {metrics && !buckets.length && <p role="status">No time-series buckets were returned. Summary metrics are shown in the table above.</p>}
-      {!job?.performance?.timings && !job?.performance?.worker && !archiveMetrics && !job?.archiveMetrics && !metrics && resultState !== 'loading' && <p role="status">The API did not return metrics for this job.</p>}
-    </section>
+    <ArtifactsPanel api={api} jobId={jobId} refresh={detailRefresh} onMetrics={setArchiveMetrics} hidden={activeTab !== 'artifacts'} />
+    <MetricsPanel job={job} metrics={metrics} resultState={resultState} archiveMetrics={archiveMetrics} buckets={buckets} charts={charts} hidden={activeTab !== 'metrics'} />
   </div>;
 }
 
-function MetricTable({ title, rows, unit = '' }: { title: string; rows: Array<[string, number]>; unit?: string }) {
+const MetricTable = memo(function MetricTable({ title, rows, unit = '' }: { title: string; rows: Array<[string, number]>; unit?: string }) {
   return <section className="att-metric-section" aria-label={title}><h3>{title}</h3>
     {rows.length ? <div className="att-table-scroll"><table><caption>{title} returned by the ATT API</caption><thead><tr><th scope="col">Field</th><th scope="col">Returned value</th></tr></thead><tbody>
-      {rows.map(([name, value]) => <tr key={name}><th scope="row">{name}</th><td>{new Intl.NumberFormat(undefined, { maximumFractionDigits: 3 }).format(value)}{unit && <span> {unit}</span>}</td></tr>)}
+      {rows.map(([name, value]) => <tr key={name}><th scope="row">{name}</th><td>{METRIC_NUMBER_FORMATTER.format(value)}{unit && <span> {unit}</span>}</td></tr>)}
     </tbody></table></div> : <p role="status">No {title.toLowerCase()} were returned.</p>}
   </section>;
-}
+});
 
-function TimeSeriesChart({ series }: { series: MetricSeries }) {
+const TimeSeriesChart = memo(function TimeSeriesChart({ series }: { series: MetricSeries }) {
   const width = 820;
   const height = 250;
   const left = 62;
@@ -699,7 +724,6 @@ function TimeSeriesChart({ series }: { series: MetricSeries }) {
   const lastTime = series.points[series.points.length - 1].epochMs;
   const maxValue = Math.max(1, ...series.points.map(point => point.value));
   const timeSpan = Math.max(1, lastTime - firstTime);
-  const numberFormat = new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 });
   const titleId = 'att-chart-' + series.field + '-title';
   const descId = 'att-chart-' + series.field + '-description';
   const coordinates = series.points.map(point => ({
@@ -721,7 +745,7 @@ function TimeSeriesChart({ series }: { series: MetricSeries }) {
         const y = top + (1 - fraction) * plotHeight;
         return <g className="att-metric-chart-grid" key={fraction}>
           <line x1={left} x2={width - right} y1={y} y2={y} />
-          <text x={left - 8} y={y + 4} textAnchor="end">{numberFormat.format(maxValue * fraction)}</text>
+          <text x={left - 8} y={y + 4} textAnchor="end">{CHART_NUMBER_FORMATTER.format(maxValue * fraction)}</text>
         </g>;
       })}
       <line className="att-metric-chart-axis" x1={left} x2={left} y1={top} y2={height - bottom} />
@@ -733,17 +757,30 @@ function TimeSeriesChart({ series }: { series: MetricSeries }) {
       <text className="att-metric-chart-time" x={width - right} y={height - 10} textAnchor="end">{formatChartTime(lastTime, timezone)}</text>
     </svg>
   </figure>;
-}
+});
 
-function BucketTable({ buckets }: { buckets: MetricBucket[] }) {
-  const columns = unique(buckets.flatMap(bucket => Object.keys(bucket.values)));
+export const BucketTable = memo(function BucketTable({ buckets }: { buckets: MetricBucket[] }) {
+  const [page, setPage] = useState(0);
+  const columns = useMemo(() => unique(buckets.flatMap(bucket => Object.keys(bucket.values))), [buckets]);
+  const pageCount = Math.max(1, Math.ceil(buckets.length / BUCKET_PAGE_SIZE));
+  const currentPage = Math.min(page, pageCount - 1);
+  const start = currentPage * BUCKET_PAGE_SIZE;
+  const pageRows = buckets.slice(start, start + BUCKET_PAGE_SIZE);
+  const end = start + pageRows.length;
+  useEffect(() => setPage(0), [buckets]);
   return <section className="att-metric-section" aria-label="Returned Load time-series buckets">
     <h3>Load time-series buckets</h3><p>Table alternative using the exact bucket fields returned by the Server; timestamps are shown in the local timezone, and no points are interpolated.</p>
-    <div className="att-table-scroll"><table><caption>{buckets.length} returned buckets, capped at {MAX_BUCKET_ROWS} rows by this view</caption><thead><tr><th scope="col">Bucket start ({browserTimeZone()})</th>{columns.map(key => <th scope="col" key={key}>{key}</th>)}</tr></thead>
-      <tbody>{buckets.map(bucket => <tr key={bucket.key}>
+    <p role="status">Showing rows {buckets.length ? start + 1 : 0}–{end} of {buckets.length}.</p>
+    <div className="att-table-scroll"><table aria-rowcount={buckets.length + 1}><caption>{buckets.length} returned buckets; this view shows {BUCKET_PAGE_SIZE} rows per page.</caption><thead><tr><th scope="col">Bucket start ({browserTimeZone()})</th>{columns.map(key => <th scope="col" key={key}>{key}</th>)}</tr></thead>
+      <tbody>{pageRows.map((bucket, index) => <tr key={bucket.key} aria-rowindex={start + index + 2}>
         <td>{bucket.epochMs === null ? bucket.key : <time dateTime={new Date(bucket.epochMs).toISOString()}>{formatBucketTime(bucket.epochMs)}</time>}</td>
         {columns.map(key => <td key={key}>{displayValue(bucket.values[key] ?? '')}</td>)}
       </tr>)}</tbody>
     </table></div>
+    {pageCount > 1 && <nav className="att-pagination" aria-label="Load time-series bucket pages">
+      <button type="button" aria-label="Previous bucket page" onClick={() => setPage(value => Math.max(0, value - 1))} disabled={currentPage === 0}>Previous</button>
+      <span>Page {currentPage + 1} of {pageCount}</span>
+      <button type="button" aria-label="Next bucket page" onClick={() => setPage(value => Math.min(pageCount - 1, value + 1))} disabled={currentPage >= pageCount - 1}>Next</button>
+    </nav>}
   </section>;
-}
+});

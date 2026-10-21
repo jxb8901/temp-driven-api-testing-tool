@@ -95,7 +95,7 @@ async function main() {
           await floating.getByRole('tab', { name: 'Live Output', exact: true }).waitFor();
           await floating.getByRole('tab', { name: 'Events', exact: true }).waitFor();
           await floating.getByRole('tab', { name: 'Events', exact: true }).click();
-          await floating.locator('.att-job-events li').first().waitFor();
+          await floating.locator('.att-job-events li:not([aria-hidden])').first().waitFor();
           await floating.getByRole('tab', { name: 'Live Output', exact: true }).click();
           await floating.getByText('This Job has no console lines. Structured events remain on the Events tab.', { exact: true }).waitFor();
         },

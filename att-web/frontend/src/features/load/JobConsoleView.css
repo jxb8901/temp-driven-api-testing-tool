@@ -43,6 +43,7 @@
 .att-job-events { max-height: 36rem; overflow: auto; padding-inline-start: 1.7rem; }
 .att-job-events li { margin-block: var(--att-space-2, .5rem); padding: var(--att-space-2, .5rem); border-bottom: 1px solid var(--att-color-border, #dce2ec); }
 .att-job-events li > pre { margin-block: var(--att-space-1, .25rem); }
+.att-job-events li.att-event-virtual-spacer { display: block; margin: 0; padding: 0; border: 0; }
 .att-job-events code { color: var(--att-color-muted, #637087); font-size: .8rem; }
 .att-job-events strong, .att-job-events code { margin-right: var(--att-space-2, .5rem); }
 .att-console-shell { display: flex; flex-direction: column; min-height: 12rem; max-height: min(70vh, 60rem); border: 1px solid #2a3344; border-radius: var(--att-radius-control, .55rem); background: #0d1117; overflow: hidden; }
