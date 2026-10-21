@@ -48,15 +48,6 @@ function eventText(event: JobEvent): string {
   return displayValue(data);
 }
 
-function consoleText(event: JobEvent): string {
-  const data = event.data;
-  if (!data || typeof data !== 'object' || Array.isArray(data)) return '';
-  const value = (data as Record<string, unknown>).console;
-  return typeof value === 'string' ? value
-    .replace(/\u001B\[[0-?]*[ -/]*[@-~]/g, '')
-    .replace(/\u001B\][^\u0007]*(?:\u0007|\u001B\\)/g, '') : '';
-}
-
 function eventPreview(event: JobEvent): string {
   const data = event.data;
   if (!data || typeof data !== 'object' || Array.isArray(data)) return eventText(event);
@@ -80,13 +71,6 @@ function eventTimestamp(event: JobEvent): string {
   const value = [data.timestamp, data.createdAt, data.time, data.at, event.receivedAt]
     .find(item => typeof item === 'string' && Number.isFinite(Date.parse(item)));
   return typeof value === 'string' ? value : '';
-}
-
-function chronologicalEvents(events: JobStreamEvent[]): JobStreamEvent[] {
-  return events.map((event, index) => ({ event, index })).sort((left, right) => {
-    const a = Number(left.event.id); const b = Number(right.event.id);
-    return Number.isFinite(a) && Number.isFinite(b) ? a - b : left.index - right.index;
-  }).map(item => item.event);
 }
 
 function dateTime(value: string): string {
@@ -138,10 +122,12 @@ export function JobConsoleView({
   const [copyStatus, setCopyStatus] = useState('');
   const consoleRef = useRef<HTMLPreElement>(null);
   const eventsRef = useRef<HTMLOListElement>(null);
-  const events = useMemo(() => chronologicalEvents(stream.events), [stream.events]);
+  // The shared store already exposes authoritative Server journal append order.
+  // Never timestamp-sort or repair stale IDs in this presentation layer.
+  const events = stream.events;
   const liveLines = useMemo(() => {
     const query = liveSearch.trim().toLocaleLowerCase();
-    return events.filter(event => event.seq > consoleFloor).map(consoleText).filter(line => line && (!query || line.toLocaleLowerCase().includes(query)));
+    return events.filter(event => event.seq > consoleFloor).map(event => event.consoleText).filter(line => line && (!query || line.toLocaleLowerCase().includes(query)));
   }, [events, liveSearch, consoleFloor]);
   const visibleEvents = useMemo(() => {
     const query = eventSearch.trim().toLocaleLowerCase();

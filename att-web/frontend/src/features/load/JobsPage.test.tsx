@@ -80,6 +80,7 @@ describe('JobsPage React feature', () => {
     const handlers=vi.mocked(api.subscribeJob).mock.calls[0][1];
     const text='diagnostic '+ 'x'.repeat(8000) + ' expanded-entry-end';
     await act(async () => handlers.onEvent({id:'1',type:'log',data:{console:text,truncated:true,journalLimit:{limitBytes:65536}}}));
+    await advance(100);
     await click(host.querySelector('#job-tab-live')!);
     expect(host.querySelector('[aria-label="Live output"]')?.textContent).toBe(text);
     expect(host.querySelector('#job-panel-live')?.textContent).toContain('Some event payload fields were truncated by the journal');
@@ -99,6 +100,7 @@ describe('JobsPage React feature', () => {
     await click([...host.querySelectorAll('button')].find(button => button.textContent === 'Collapse all')!);
     await act(async () => vi.mocked(api.subscribeJob).mock.calls[0][1].onEvent({ id: 'lazy', type: 'diagnostic', data }));
     expect(toJson).not.toHaveBeenCalled();
+    await advance(100);
     const event = host.querySelector('#job-panel-events .att-job-events details')!;
     expect(event.querySelector('pre')).toBeNull();
     await click(event.querySelector('summary')!);
@@ -679,16 +681,16 @@ describe('JobsPage React feature', () => {
     expect(panel.querySelector('canvas, svg')).toBeNull();
   });
 
-  it('shows all event types in chronological order and filters without reconnecting or dropping new events', async () => {
+  it('shows all event types in Server append order and filters without reconnecting or dropping new events', async () => {
     const api = makeApi();
     await act(async () => root.render(<JobsPage api={api} jobId="JOB-204" onOpenJob={vi.fn()} onShowList={vi.fn()} confirmCancel={() => true} />));
     const handlers = vi.mocked(api.subscribeJob).mock.calls[0]?.[1];
     await act(async () => {
-      handlers?.onEvent({ id: '5', type: 'result', data: { status: 'PASS' } });
-      handlers?.onEvent({ id: '3', type: 'log', data: { message: 'worker log' } });
       handlers?.onEvent({ id: '1', type: 'status', data: { status: 'RUNNING' } });
-      handlers?.onEvent({ id: '4', type: 'diagnostic', data: { code: 'ATT-EXAMPLE', summary: 'safe warning' } });
       handlers?.onEvent({ id: '2', type: 'progress', data: { message: 'half complete' } });
+      handlers?.onEvent({ id: '3', type: 'log', data: { message: 'worker log' } });
+      handlers?.onEvent({ id: '4', type: 'diagnostic', data: { code: 'ATT-EXAMPLE', summary: 'safe warning' } });
+      handlers?.onEvent({ id: '5', type: 'result', data: { status: 'PASS' } });
     });
     await click(host.querySelector('#job-tab-events')!);
     const panel = host.querySelector('#job-panel-events')!;
@@ -701,6 +703,7 @@ describe('JobsPage React feature', () => {
     for (const type of ['log', 'diagnostic', 'result']) await click(eventType(type));
     expect(panel.querySelectorAll('.att-job-events li')).toHaveLength(2);
     await act(async () => handlers?.onEvent({ id: '6', type: 'progress', data: { message: 'still connected' } }));
+    await advance(100);
     expect(panel.querySelectorAll('.att-job-events li')).toHaveLength(3);
     await click(panel.querySelector<HTMLInputElement>('[aria-label="All Events"]')!);
     expect(panel.querySelectorAll('.att-job-events li')).toHaveLength(6);
@@ -711,12 +714,17 @@ describe('JobsPage React feature', () => {
     const live = host.querySelector('#job-panel-live')!;
     expect(live.textContent).toContain('This Job has no console lines');
     await act(async () => handlers?.onEvent({ id: '7', type: 'log', data: { message: '<b>secret</b>', console: '[RUN] case=one\n[RUN] case=two' } }));
+    await advance(100);
     expect(live.querySelector('pre.att-console')?.textContent).toBe('[RUN] case=one\n[RUN] case=two');
     expect(live.querySelector('pre.att-console')?.innerHTML).not.toContain('<b>');
     expect([...live.querySelectorAll('button')].some(button => button.textContent === 'Copy Output')).toBe(true);
     await click([...live.querySelectorAll('button')].find(button => button.textContent === 'Clear view')!);
     expect(live.querySelector('pre.att-console')).toBeNull();
+    await act(async () => handlers?.onEvent({ id: '7', type: 'log', data: { console: '[RUN] replay must stay cleared' } }));
+    await advance(100);
+    expect(live.querySelector('pre.att-console')).toBeNull();
     await act(async () => handlers?.onEvent({ id: '8', type: 'log', data: { console: '[RUN] after clear' } }));
+    await advance(100);
     expect(live.querySelector('pre.att-console')?.textContent).toBe('[RUN] after clear');
   });
 
@@ -744,6 +752,7 @@ describe('JobsPage React feature', () => {
       data: { status: 'RUNNING', phase: 'STEADY', sequence: 4, message: 'steady progress', metrics: { completed: 4, failed: 0 } },
     }));
     await act(async () => handlers?.onEvent({ id: '2', type: 'log', data: { console: '[LOAD] status=RUNNING phase=STEADY', message: 'console line' } }));
+    await advance(100);
 
     await click(host.querySelector('#job-tab-events')!);
     const events = host.querySelector('#job-panel-events')!;
@@ -772,6 +781,7 @@ describe('JobsPage React feature', () => {
     await act(async () => { list.dispatchEvent(new Event('scroll', { bubbles: true })); });
     expect([...events.querySelectorAll('button')].some(button => button.textContent === 'Resume auto-scroll')).toBe(true);
     await act(async () => handlers?.onEvent({ id: '3', type: 'progress', data: { status: 'RUNNING', phase: 'STEADY', sequence: 5, message: 'still arriving' } }));
+    await advance(100);
     expect(list.scrollTop).toBe(40);
     expect(api.subscribeJob).toHaveBeenCalledTimes(1);
     const logFilter = events.querySelector<HTMLInputElement>('input[aria-label="log"]')!;
@@ -839,6 +849,7 @@ describe('JobsPage React feature', () => {
     await act(async () => {
       for (let id = 1; id <= 501; id += 1) handlers.onEvent({ id: String(id), type: 'log', data: { message: `event-${id}` } });
     });
+    await advance(100);
     const note = host.querySelector('#job-panel-live [role="note"]');
     expect(note?.textContent ?? '').not.toContain('Earlier journal events');
     expect(note?.textContent).toContain('This browser keeps the latest 500 events.');
@@ -857,12 +868,14 @@ describe('JobsPage React feature', () => {
       handlers.onEvent({ id: '1', type: 'log', data: { historyTruncated: true, message: 'oldest retained boundary' } });
       handlers.onEvent({ id: '2', type: 'log', data: { message: 'still in the journal' } });
     });
+    await advance(100);
     const early = host.querySelector('#job-panel-live [role="note"]');
     expect(early?.textContent).toContain('Earlier journal events are no longer retained.');
     expect(early?.textContent ?? '').not.toContain('This browser keeps the latest 500 events.');
     await act(async () => {
       for (let id = 3; id <= 501; id += 1) handlers.onEvent({ id: String(id), type: 'log', data: { message: `event-${id}` } });
     });
+    await advance(100);
     const note = host.querySelector('#job-panel-live [role="note"]');
     expect(note?.textContent).toContain('Earlier journal events are no longer retained.');
     expect(note?.textContent).toContain('This browser keeps the latest 500 events.');

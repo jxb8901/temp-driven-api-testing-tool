@@ -4,7 +4,15 @@ import { createRoot, type Root } from 'react-dom/client';
 import { renderToString } from 'react-dom/server';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { JobEventHandlers, LoadJobsApi } from './types';
-import { hasJobEventStreamEntryForTesting, MAX_EVENTS, useJobEventStream } from './useJobEventStream';
+import {
+  EVENT_FLUSH_INTERVAL_MS,
+  hasJobEventStreamEntryForTesting,
+  jobEventStreamStateForTesting,
+  MAX_EVENTS,
+  MAX_TRACKED_EVENT_IDS,
+  useJobEventStream,
+  type JobEventStreamSnapshot,
+} from './useJobEventStream';
 
 function makeApi() {
   const subscriptions: Array<{ jobId: string; handlers: JobEventHandlers; active: boolean }> = [];
@@ -22,19 +30,48 @@ function makeApi() {
   };
 }
 
-function Consumer({ api, jobId, name = jobId }: { api: LoadJobsApi; jobId: string; name?: string }) {
+function Consumer({ api, jobId, name = jobId, onSnapshot }: {
+  api: LoadJobsApi;
+  jobId: string;
+  name?: string;
+  onSnapshot?: (snapshot: JobEventStreamSnapshot) => void;
+}) {
   const stream = useJobEventStream(api, jobId);
-  return <output data-name={name} data-job={jobId} data-count={stream.events.length} data-connection={stream.connection}>{stream.events.map(event => event.id).join(',')}</output>;
+  onSnapshot?.(stream);
+  return <output
+    data-name={name}
+    data-job={jobId}
+    data-count={stream.events.length}
+    data-connection={stream.connection}
+    data-duplicates={stream.duplicatesIgnored}
+    data-stale={stream.staleIgnored}
+    data-gaps={stream.gaps}
+    data-console={stream.events.map(event => event.consoleText).filter(Boolean).join('\n')}
+  >{stream.events.map(event => event.id).join(',')}</output>;
 }
 
 describe('useJobEventStream', () => {
   let host: HTMLDivElement;
   let root: Root;
+
   beforeEach(() => {
-    host = document.createElement('div'); document.body.append(host); root = createRoot(host);
+    vi.useFakeTimers();
+    host = document.createElement('div');
+    document.body.append(host);
+    root = createRoot(host);
     (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   });
-  afterEach(() => { act(() => root.unmount()); host.remove(); });
+
+  afterEach(() => {
+    act(() => root.unmount());
+    host.remove();
+    vi.restoreAllMocks();
+    vi.useRealTimers();
+  });
+
+  async function flush(): Promise<void> {
+    await act(async () => { await vi.advanceTimersByTimeAsync(EVENT_FLUSH_INTERVAL_MS); });
+  }
 
   it('keeps a render without subscribing read-only and does not create a store entry', () => {
     const { api } = makeApi();
@@ -43,21 +80,189 @@ describe('useJobEventStream', () => {
     expect(hasJobEventStreamEntryForTesting(api, 'J1')).toBe(false);
   });
 
-  it('shares one bounded subscription and releases it after the last consumer', async () => {
+  it('keeps a 10k-event burst bounded and publishes the correct last 500 in ID order', async () => {
     const { api, latestHandler } = makeApi();
-    await act(async () => root.render(<><Consumer api={api} jobId="J1" /><Consumer api={api} jobId="J1" /></>));
+    await act(async () => root.render(<><Consumer api={api} jobId="J1" name="first" /><Consumer api={api} jobId="J1" name="second" /></>));
     expect(api.subscribeJob).toHaveBeenCalledTimes(1);
-    latestHandler('J1')?.onOpen();
-    for (let index = 0; index < MAX_EVENTS + 25; index++) latestHandler('J1')?.onEvent({ id: String(index), type: 'log', data: { console: String(index) } });
-    await act(async () => await Promise.resolve());
+
+    act(() => {
+      for (let id = 1; id <= 10_000; id += 1) latestHandler('J1')?.onEvent({ id: String(id), type: 'log', data: { console: String(id) } });
+    });
+    expect(host.querySelector('output')?.getAttribute('data-count')).toBe('0');
+    expect(jobEventStreamStateForTesting(api, 'J1')?.idIndexSize).toBe(MAX_TRACKED_EVENT_IDS);
+    expect(jobEventStreamStateForTesting(api, 'J1')?.timerPending).toBe(true);
+
+    await flush();
+    const ids = host.querySelector('output')!.textContent!.split(',');
+    expect(ids).toHaveLength(MAX_EVENTS);
+    expect(ids[0]).toBe('9501');
+    expect(ids.at(-1)).toBe('10000');
     expect(host.querySelector('output')?.getAttribute('data-count')).toBe(String(MAX_EVENTS));
-    latestHandler('J1')?.onEvent({ id: String(MAX_EVENTS + 24), type: 'log', data: 'duplicate' });
-    expect(host.querySelector('output')?.textContent).not.toContain('duplicate');
-    const unsubscribe = vi.mocked(api.subscribeJob).mock.results[0].value as ReturnType<typeof vi.fn>;
+
+    act(() => latestHandler('J1')?.onEvent({ id: '1', type: 'log', data: 'evicted-index replay' }));
+    await flush();
+    expect(host.querySelector('output')?.getAttribute('data-stale')).toBe('1');
+    expect(host.querySelector('output')?.textContent?.split(',')[0]).toBe('9501');
+  });
+
+  it('ignores duplicates within and older than the visible window, including non-numeric IDs', async () => {
+    const { api, latestHandler } = makeApi();
     await act(async () => root.render(<Consumer api={api} jobId="J1" />));
-    expect(unsubscribe).not.toHaveBeenCalled();
-    await act(async () => root.unmount());
-    expect(unsubscribe).toHaveBeenCalledTimes(1);
+    act(() => {
+      for (let id = 1; id <= 600; id += 1) latestHandler('J1')?.onEvent({ id: String(id), type: 'log', data: id });
+      latestHandler('J1')?.onEvent({ id: '1', type: 'log', data: 'older than the visible window' });
+      latestHandler('J1')?.onEvent({ id: '550', type: 'log', data: 'within the visible window' });
+      latestHandler('J1')?.onEvent({ id: 'opaque-id', type: 'log', data: 'accepted once' });
+      latestHandler('J1')?.onEvent({ id: 'opaque-id', type: 'log', data: 'opaque duplicate' });
+    });
+    await flush();
+
+    const output = host.querySelector('output')!;
+    expect(output.getAttribute('data-count')).toBe(String(MAX_EVENTS));
+    expect(output.getAttribute('data-duplicates')).toBe('3');
+    expect(output.textContent?.endsWith('opaque-id')).toBe(true);
+    expect(output.textContent?.split(',').filter(id => id === '550')).toHaveLength(1);
+  });
+
+  it('deduplicates reconnect replay overlap without changing append order', async () => {
+    const { api, latestHandler } = makeApi();
+    await act(async () => root.render(<Consumer api={api} jobId="J1" />));
+    act(() => {
+      latestHandler('J1')?.onEvent({ id: '1', type: 'log', data: 'one' });
+      latestHandler('J1')?.onEvent({ id: '2', type: 'log', data: 'two' });
+      latestHandler('J1')?.onEvent({ id: '3', type: 'log', data: 'three' });
+    });
+    await flush();
+    act(() => { latestHandler('J1')?.onError(); latestHandler('J1')?.onOpen(); });
+    act(() => {
+      latestHandler('J1')?.onEvent({ id: '2', type: 'log', data: 'replay two' });
+      latestHandler('J1')?.onEvent({ id: '3', type: 'log', data: 'replay three' });
+      latestHandler('J1')?.onEvent({ id: '4', type: 'log', data: 'four' });
+    });
+    await flush();
+
+    const output = host.querySelector('output')!;
+    expect(output.textContent).toBe('1,2,3,4');
+    expect(output.getAttribute('data-duplicates')).toBe('2');
+    expect(output.getAttribute('data-connection')).toBe('connected');
+  });
+
+  it('ignores an unseen stale numeric ID and counts numeric gaps without treating them as faults', async () => {
+    const { api, latestHandler } = makeApi();
+    await act(async () => root.render(<Consumer api={api} jobId="J1" />));
+    act(() => {
+      latestHandler('J1')?.onEvent({ id: '100', type: 'log', data: 'first' });
+      latestHandler('J1')?.onEvent({ id: '102', type: 'log', data: 'gap is allowed' });
+      latestHandler('J1')?.onEvent({ id: '101', type: 'log', data: 'stale and unseen' });
+    });
+    await flush();
+
+    const output = host.querySelector('output')!;
+    expect(output.textContent).toBe('100,102');
+    expect(output.getAttribute('data-stale')).toBe('1');
+    expect(output.getAttribute('data-gaps')).toBe('1');
+  });
+
+  it('publishes terminal status immediately without waiting for the ordinary flush', async () => {
+    const { api, latestHandler } = makeApi();
+    await act(async () => root.render(<Consumer api={api} jobId="J1" />));
+    await act(async () => latestHandler('J1')?.onEvent({ id: '1', type: 'status', data: { status: 'PASS' } }));
+    expect(host.querySelector('output')?.textContent).toBe('1');
+    expect(jobEventStreamStateForTesting(api, 'J1')?.timerPending).toBe(false);
+  });
+
+  it('publishes cancellation-request feedback immediately', async () => {
+    const { api, latestHandler } = makeApi();
+    await act(async () => root.render(<Consumer api={api} jobId="J1" />));
+    await act(async () => latestHandler('J1')?.onEvent({ id: '1', type: 'status', data: { status: 'CANCEL_REQUESTED' } }));
+    expect(host.querySelector('output')?.textContent).toBe('1');
+    expect(jobEventStreamStateForTesting(api, 'J1')?.timerPending).toBe(false);
+  });
+
+  it('coalesces many ordinary events into one presentation publish', async () => {
+    const { api, latestHandler } = makeApi();
+    const renders = vi.fn();
+    await act(async () => root.render(<Consumer api={api} jobId="J1" onSnapshot={renders} />));
+    renders.mockClear();
+
+    act(() => {
+      for (let id = 1; id <= 200; id += 1) latestHandler('J1')?.onEvent({ id: String(id), type: 'progress', data: id });
+    });
+    expect(renders).not.toHaveBeenCalled();
+    await flush();
+    expect(renders).toHaveBeenCalledTimes(1);
+  });
+
+  it('suppresses ordinary hidden-document publishes and publishes once when visible', async () => {
+    let hidden = true;
+    vi.spyOn(document, 'hidden', 'get').mockImplementation(() => hidden);
+    const { api, latestHandler } = makeApi();
+    const renders = vi.fn();
+    await act(async () => root.render(<Consumer api={api} jobId="J1" onSnapshot={renders} />));
+    renders.mockClear();
+
+    act(() => {
+      latestHandler('J1')?.onOpen();
+      latestHandler('J1')?.onEvent({ id: '1', type: 'log', data: 'one' });
+      latestHandler('J1')?.onEvent({ id: '2', type: 'log', data: 'two' });
+    });
+    expect(jobEventStreamStateForTesting(api, 'J1')?.timerPending).toBe(false);
+    await flush();
+    expect(renders).not.toHaveBeenCalled();
+
+    hidden = false;
+    await act(async () => document.dispatchEvent(new Event('visibilitychange')));
+    expect(renders).toHaveBeenCalledTimes(1);
+    expect(host.querySelector('output')?.textContent).toBe('1,2');
+    expect(host.querySelector('output')?.getAttribute('data-connection')).toBe('connected');
+  });
+
+  it('publishes terminal events immediately even while the document is hidden', async () => {
+    vi.spyOn(document, 'hidden', 'get').mockReturnValue(true);
+    const { api, latestHandler } = makeApi();
+    await act(async () => root.render(<Consumer api={api} jobId="J1" />));
+    await act(async () => latestHandler('J1')?.onEvent({ id: '1', type: 'result', data: { status: 'PASS' } }));
+    expect(host.querySelector('output')?.textContent).toBe('1');
+    expect(host.querySelector('output')?.getAttribute('data-connection')).toBe('completed');
+  });
+
+  it('strips and stores console text once during ingest', async () => {
+    const consoleValue = vi.fn(() => '\u001b[31mred\u001b[0m');
+    const data = Object.defineProperty({}, 'console', { enumerable: true, get: consoleValue });
+    const { api, latestHandler } = makeApi();
+    await act(async () => root.render(<Consumer api={api} jobId="J1" />));
+    act(() => latestHandler('J1')?.onEvent({ id: '1', type: 'log', data }));
+    await flush();
+
+    expect(consoleValue).toHaveBeenCalledTimes(1);
+    expect(host.querySelector('output')?.getAttribute('data-console')).toBe('red');
+  });
+
+  it('does not replace an immutable snapshot when an immediate state transition is unchanged', async () => {
+    const { api, latestHandler } = makeApi();
+    await act(async () => root.render(<Consumer api={api} jobId="J1" />));
+    act(() => latestHandler('J1')?.onOpen());
+    const first = jobEventStreamStateForTesting(api, 'J1')!.snapshot;
+    expect(Object.isFrozen(first)).toBe(true);
+    expect(Object.isFrozen(first.events)).toBe(true);
+    act(() => latestHandler('J1')?.onOpen());
+    await flush();
+    expect(jobEventStreamStateForTesting(api, 'J1')!.snapshot).toBe(first);
+  });
+
+  it('shares one subscription, clears its timer, and closes EventSource after the last release', async () => {
+    const { api, active, latestHandler } = makeApi();
+    await act(async () => root.render(<><Consumer api={api} jobId="J1" name="first" /><Consumer api={api} jobId="J1" name="second" /></>));
+    expect(api.subscribeJob).toHaveBeenCalledTimes(1);
+    act(() => latestHandler('J1')?.onEvent({ id: '1', type: 'log', data: 'pending' }));
+    expect(jobEventStreamStateForTesting(api, 'J1')?.timerPending).toBe(true);
+
+    await act(async () => root.render(<Consumer api={api} jobId="J1" name="first" />));
+    expect(active('J1')).toHaveLength(1);
+    await act(async () => root.render(<></>));
+    expect(active('J1')).toHaveLength(0);
+    expect(hasJobEventStreamEntryForTesting(api, 'J1')).toBe(false);
+    expect(vi.getTimerCount()).toBe(0);
   });
 
   it('reuses one live entry after release and resubscribe when a second consumer mounts', async () => {
@@ -76,9 +281,10 @@ describe('useJobEventStream', () => {
     expect(api.subscribeJob).toHaveBeenCalledTimes(2);
     expect(active('J1')).toHaveLength(1);
 
-    await act(async () => latestHandler('J1')?.onEvent({ id: 'shared', type: 'log', data: { console: 'shared' } }));
-    expect(host.querySelector('[data-name="first"]')?.textContent).toBe('shared');
-    expect(host.querySelector('[data-name="second"]')?.textContent).toBe('shared');
+    act(() => latestHandler('J1')?.onEvent({ id: 'opaque', type: 'log', data: { console: 'shared' } }));
+    await flush();
+    expect(host.querySelector('[data-name="first"]')?.textContent).toBe('opaque');
+    expect(host.querySelector('[data-name="second"]')?.textContent).toBe('opaque');
   });
 
   it('keeps one active subscription for two StrictMode consumers and releases it on unmount', async () => {
@@ -91,7 +297,7 @@ describe('useJobEventStream', () => {
     ));
     expect(active('J1')).toHaveLength(1);
 
-    await act(async () => root.unmount());
+    await act(async () => root.render(<></>));
     expect(active('J1')).toHaveLength(0);
   });
 
@@ -106,16 +312,17 @@ describe('useJobEventStream', () => {
     expect(api.subscribeJob).toHaveBeenLastCalledWith('J2', expect.anything());
   });
 
-  it('shows existing events to a consumer that mounts later', async () => {
+  it('shows flushed existing events to a consumer that mounts later', async () => {
     const { api, active, latestHandler } = makeApi();
     await act(async () => root.render(<Consumer api={api} jobId="J1" name="first" />));
-    await act(async () => latestHandler('J1')?.onEvent({ id: 'earlier', type: 'log', data: { console: 'earlier' } }));
+    act(() => latestHandler('J1')?.onEvent({ id: 'opaque', type: 'log', data: { console: 'earlier' } }));
+    await flush();
 
     await act(async () => root.render(<>
       <Consumer api={api} jobId="J1" name="first" />
       <Consumer api={api} jobId="J1" name="second" />
     </>));
     expect(active('J1')).toHaveLength(1);
-    expect(host.querySelector('[data-name="second"]')?.textContent).toBe('earlier');
+    expect(host.querySelector('[data-name="second"]')?.textContent).toBe('opaque');
   });
 });

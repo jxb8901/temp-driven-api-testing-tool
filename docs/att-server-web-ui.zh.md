@@ -60,11 +60,17 @@ Source 分頁只載入 Server 提供的安全 source projection。畫面最多�
 
 每個 Studio 分頁只有一個 floating console。開啟另一個 Job 前會要求確認 **Switch Job**。**Minimize** 會保留底部 console chip 及一條有界的該瀏覽器分頁 SSE 訂閱，使狀態和新事件保持更新，但不會渲染隱藏的事件列；所選 view、搜尋、篩選及捲動偏好會保留在 session 記憶體。**Close** 會釋放該訂閱。以上控制項都不會取消或停止 Job。
 
-選擇 **Open Job console in a new tab** 可開啟專注的 `#/jobs/{jobId}/console?view=live` 或 `view=events` 頁面。連結是同源、已編碼並使用 `noopener`；重新整理、直接開啟，以及 `/att/ui/` 等非根 context path 都可使用。每個瀏覽器分頁有自己的 SSE 連線。使用 **Open full Job details** 返回完整 Job 頁面。Session 過期或未授權會沿用現有重新登入路徑；缺少的 Job 會安全顯示訊息，不會暴露 log。瀏覽器每個 Job、每個分頁最多保留 500 筆事件；這個 500-event window 內的去重記錄於 issue #266。Server 不再保留較早歷史時會顯示 journal truncation。
+選擇 **Open Job console in a new tab** 可開啟專注的 `#/jobs/{jobId}/console?view=live` 或 `view=events` 頁面。連結是同源、已編碼並使用 `noopener`；重新整理、直接開啟，以及 `/att/ui/` 等非根 context path 都可使用。每個瀏覽器分頁有自己的 SSE 連線；同一分頁內的 Job Details、floating console 及 standalone console 會共用同一個每 Job stream。使用 **Open full Job details** 返回完整 Job 頁面。Session 過期或未授權會沿用現有重新登入路徑；缺少的 Job 會安全顯示訊息，不會暴露 log。
+
+瀏覽器會立即把事件寫入最多 500 筆的有界 buffer，並以固定 100 ms 週期發布一般顯示 snapshot。Document 隱藏時會暫停發布顯示 snapshot，重新顯示時再發布當時的有界 snapshot。終端 `result` 事件、終端 `status` 事件、取消請求狀態及連線錯誤狀態轉換會立即發布。最後一個 consumer 關閉後，timer 及原生 `EventSource` 都會釋放。
+
+Server Journal Event ID 是 append order 的排序鍵。UI 按 callback 到達次序處理，不會按 timestamp 重新排序。數字 ID 必須遞增：小於或等於 last-seen cursor 的 ID 會視為 stale 或 duplicate replay 而忽略；向前出現 gap 是合法情況，只會計入診斷。非數字 ID 使用有界的 recent-ID index 去重。原生 `EventSource` 仍使用 `Last-Event-ID` 重新連線；重疊 replay 即使已離開可見 window，或在 **Clear view** 後到達，也不會再次出現。
+
+這些限制屬於不同層次。瀏覽器只顯示最近 500 筆已接受事件，不代表保留完整 Job 歷史。Server journal 決定可 replay 的範圍，較早 journal 歷史已截斷時會明確報告。#265 追蹤的 per-entry 限制會在發布前或期間縮短單一文字或 payload 欄位；瀏覽器不會重建或重新格式化這些 protocol 資料。
 
 Advanced Load route 使用有型別的控制項設定 duration 單位、Virtual Users、Arrival Rate、最大並行數及 think time。Target sidecar 預設值會為 `inputs`、`vars` 及 Tool `arguments` 提供有型別 scalar 控制項；巢狀值保留在 Advanced JSON。表單會按 model 顯示適用限制，但驗證、policy 上限、draft 過期、package revision 及執行仍以 Server 為準。確認後，UI 會提交同一份由 Server 簽發的 draft；回應已遮蔽時不會提供預覽複製或匯出。
 
-Jobs route 載入 Server 回傳的最新工作列（最多 100 筆）。狀態、套件、類型、建立日期篩選、排序及用戶端分頁只作用於已載入列；Principal 搜尋會送到 Server。此 API 不會回傳工作所屬 environment，因此 UI 不提供 environment 篩選。重新整理等待回應時會保留所選篩選及排序。工作詳細資料提供穩定的 Overview、即時輸出、Events、Results、Artifacts 及 Metrics 分頁。即時輸出只把 Server 的 `console` 欄位以純文字顯示在唯讀終端檢視，預設為黑底白字等寬文字。主控台可垂直調整高度，也可最大化到工作控制項下方的可用區域，且不會離開此頁，也不會丟掉目前的搜尋、捲動位置或事件串流。瀏覽器不會把事件 JSON 另排成第二份主控台。Events 保留結構化 JSON，預設展開每個事件內容，並可個別或全部收合。它的自動捲動與即時輸出分開：向上捲動或開啟較舊的事件會暫停，繼續時會跳到最新的可見事件，且不會重新連線。清除即時檢視只會隱藏這個瀏覽器已經收到的內容。系統管理員在 metrics endpoint 允許時，可於設定頁看到 Job 目錄用量，並註明該數字不是 H2 檔案，而且不會壓縮 H2。原生同源 `EventSource` 會使用瀏覽器的 `Last-Event-ID` 重新連線；取消前需要確認，UI 會等候 Server 狀態事件。Metrics 只顯示工作及結果 endpoint 實際回傳的值；Server timing 與 Worker JVM 資料會和 Load 結果指標分開呈現，結果沒有 time-series buckets 時不會推算 throughput 圖表。
+Jobs route 載入 Server 回傳的最新工作列（最多 100 筆）。狀態、套件、類型、建立日期篩選、排序及用戶端分頁只作用於已載入列；Principal 搜尋會送到 Server。此 API 不會回傳工作所屬 environment，因此 UI 不提供 environment 篩選。重新整理等待回應時會保留所選篩選及排序。工作詳細資料提供穩定的 Overview、即時輸出、Events、Results、Artifacts 及 Metrics 分頁。即時輸出只把 Server 的 `console` 欄位以純文字顯示在唯讀終端檢視，預設為黑底白字等寬文字。瀏覽器會在 ingest 每個事件時移除一次 ANSI control sequence；儲存的文字只供顯示，不會更改 event payload。主控台可垂直調整高度，也可最大化到工作控制項下方的可用區域，且不會離開此頁，也不會丟掉目前的搜尋、捲動位置或事件串流。瀏覽器不會把事件 JSON 另排成第二份主控台。Events 保留結構化 JSON，預設展開每個事件內容，並可個別或全部收合。它的自動捲動與即時輸出分開：向上捲動或開啟較舊的事件會暫停，繼續時會跳到最新的可見事件，且不會重新連線。清除即時檢視只會隱藏這個瀏覽器已經收到的內容。系統管理員在 metrics endpoint 允許時，可於設定頁看到 Job 目錄用量，並註明該數字不是 H2 檔案，而且不會壓縮 H2。原生同源 `EventSource` 會使用瀏覽器的 `Last-Event-ID` 重新連線；取消前需要確認，UI 會等候 Server 狀態事件。Metrics 只顯示工作及結果 endpoint 實際回傳的值；Server timing 與 Worker JVM 資料會和 Load 結果指標分開呈現，結果沒有 time-series buckets 時不會推算 throughput 圖表。
 
 Explorer 是 React 與 TypeScript 單頁 UI，於 `att-web` Maven resource 階段使用 Vite 建置。Maven 會把產生的靜態資源複製至 `META-INF/resources/ui/`；Server WAR 再將它們封裝供 Tomcat 提供。Node.js 只用於建置階段。部署後的 UI 呼叫同源公開 REST API，無需額外 Node 程序或前端服務。
 
