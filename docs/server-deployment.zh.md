@@ -278,6 +278,10 @@ Local mode 的所有 active USER 均可存取同一操作範圍內的 package、
 | `GET` | `/jobs/{jobId}/artifacts/view/{path}` | 從 ZIP 預覽已核准 entry；HTML 使用隔離 sandbox |
 | `POST` | `/jobs/{jobId}/artifacts/retry` | 私有來源仍存在時重試發佈；須通過 Origin/CSRF 檢查 |
 | `DELETE` | `/jobs/{jobId}` | 取消執行中工作並保留歷史 |
+| `POST` | `/jobs/{jobId}/delete` | 確認後手動刪除整個 Job；回傳 `200`、`202` 或 `409` outcome map |
+| `POST` | `/jobs/{jobId}/pin` | Pin 或 Unpin 一個合資格的終止 Job；可選 `pinReason` |
+| `POST` | `/jobs/pin` | Pin 或 Unpin 最多 100 個 Job，逐一回傳結果 |
+| `POST` | `/jobs/delete` | 批次刪除最多 100 個 Job，逐一回傳結果 |
 | `GET`、`POST` | `/load-schedules` | 列出或建立排程（active USER 操作權限） |
 | `POST` | `/load-schedules/preview` | 只驗證 timezone/cron 並預覽執行時間（active USER 操作權限） |
 | `GET`、`PATCH`、`DELETE` | `/load-schedules/{scheduleId}` | 讀取、編輯或刪除排程（active USER 操作權限） |
@@ -551,7 +555,7 @@ server:
 
 重新啟動 Server 後，新提交的 RUN、Debug、LOAD Job 使用固定的可信政策；Package YAML 或 REST 欄位不能提升限制。CLI 維持 16000 字元／80 行，Case Log 與 artifacts 維持各自政策。舊 journal 只保留已儲存文字，不能恢復曾被截斷內容。小數、字串數字、越界值及未知設定會使啟動驗證失敗。
 
-Worker 在截斷前遮罩秘密並移除 ANSI／控制字元。字元或行數超限顯示 `[truncated]`。Journal 每筆 payload 在 UTF-8 JSON 編碼後最多 65536 bytes；優先保留完整 console，其他欄位過大時以 `truncated: true` 明示省略。Console 本身超限則加入 `consoleTruncated: true` 與 `[truncated by journal]`。Worker protocol 仍限制為 1 MiB；多位元組及 JSON escaping 可較早耗盡 journal 預算。
+Worker 在截斷前遮罩秘密並移除 ANSI／控制字元。字元或行數超限顯示 `[truncated]`。Journal 每筆 payload 在 UTF-8 JSON 編碼後最多 65536 bytes。Payload 過大時，會保留結構化 allow-list 欄位 `status`、`code`、`message`、`executionId`、`caseId`、`stage`、`action`、`executionEventType`（字串最多 512 字元），以及數值 `exitCode`、`durationMs`；最多以 `droppedFields` 記錄 32 個被省略的欄位名稱。Payload 會包含 `truncated: true`、`journalLimit` 及有界的摘要。可行時保留完整 console；若 console 單獨超出 byte 預算，會加入 `consoleTruncated: true` 與 `[truncated by journal]`。Worker protocol 仍限制為 1 MiB；多位元組及 JSON escaping 可較早耗盡 journal 預算。
 
 Studio 保留最近 500 筆瀏覽器事件；瀏覽器歷史淘汰與 journal 歷史到期各有提示。Events 預覽 4000 字元，提供明確展開，最多顯示 65536 個已保留字元；展開不能還原上游截斷內容。
 
@@ -562,16 +566,17 @@ Studio 保留最近 500 筆瀏覽器事件；瀏覽器歷史淘汰與 journal �
 
 ## 釘選證據與手動刪除 Job（4.2.2）
 
-USER 操作者可在 Jobs 列或詳情 Pin／Unpin 已終止 RUN、Debug、LOAD Job。H2 持久保存共用屬性 `pinned`、`pinnedAt`、`pinnedBy`，重新啟動後仍保留，所有授權操作者可見。Pinned only 以 `GET /api/v1/jobs?pinnedOnly=true` 查詢 Server 歷史，亦能找到預設最新 100 個 Jobs 以外的舊釘選記錄，每次最多回傳 100 個相符 Jobs。Pin 不會到期，既有按日齡／容量清理均保護完整 Job 與 archive。Pinned bytes 仍計入配額；受保護 Job 導致無法達標時，顯示 `quota_unmet` 並保留證據。清理週期與門檻不變。
+USER 操作者可在 Jobs 列或詳情 Pin／Unpin 已終止 RUN、Debug、LOAD Job。H2 持久保存共用屬性 `pinned`、`pinnedAt`、`pinnedBy`、`pinReason`，重新啟動後仍保留，所有授權操作者可見。`pinReason` 會 trim、最多 200 字元、拒絕控制字元、遮罩秘密，並以 `job.pinReason` 回傳。Pinned only 以 `GET /api/v1/jobs?pinnedOnly=true` 查詢 Server 歷史，亦能找到預設最新 100 個 Jobs 以外的舊釘選記錄，每次最多回傳 100 個相符 Jobs。Pin 不會到期，既有按日齡／容量清理均保護完整 Job 與 archive。Pinned bytes 仍計入配額；受保護 Job 導致無法達標時，顯示 `quota_unmet` 並保留證據。清理週期與門檻不變。
 
 逐列勾選或 Select all on this page 後使用 Delete selected；跨已載入頁面的選取明確保留。確認畫面列出精確 Job IDs，標明保護／活動中項目；詳情使用相同刪除確認。永久刪除移除 Job 記錄、結果、事件／日誌、archive 與 Job 目錄；不影響其他 Jobs、Package 原始碼或 Schedule。Pinned Job 必須先 Unpin。忙碌、可能存活、隔離或復原中的 Job 會回報逐項拒絕／延後原因；安全靜止後再重新整理重試。Schedule occurrence 歷史保留，顯示 Job 已不可用。
 
 以下端點沿用認證、origin／CSRF 與共用 USER 權限：
 
-- `POST /api/v1/jobs/{jobId}/pin`：`{"pinned":true}` 或 `false`。
-- `POST /api/v1/jobs/{jobId}/delete`：`{"confirm":true}`。
+- `POST /api/v1/jobs/{jobId}/pin`：`{"pinned":true,"pinReason":"release evidence"}` 或 `false`；不合資格的 Pin 回傳 `409 ATT-SERVER-JOB-NOT-ELIGIBLE`。
+- `POST /api/v1/jobs/pin`：`{"pinned":true,"pinReason":"release evidence","jobIds":[...]}`；每個 ID 回傳 `PINNED`、`UNPINNED`、`NOT_ELIGIBLE` 或不可用結果。
+- `POST /api/v1/jobs/{jobId}/delete`：`{"confirm":true}`；`DELETED` 或 `ALREADY_UNAVAILABLE` 回傳 `200`，`DELETION_PENDING_RECOVERY` 回傳 `202`，釘選、忙碌或未安全靜止等拒絕回傳 `409`；已不存在的 Job 以 `200` 回傳 `ALREADY_UNAVAILABLE`，只有呼叫者無權查看該 Job 時才回傳 `404`。`409` 回應仍是 outcome map，不是 error envelope。
 - `POST /api/v1/jobs/delete`：`{"confirm":true,"jobIds":["J0123456789ABCDEF"]}`；最多 100 個 ID，去除重複，body 上限 16384 bytes 或設定的較小 request limit。
 
-`DELETE /api/v1/jobs/{jobId}` 保留原有取消含義；手動刪除不會取消活動中 Job。Pin、刪除、archive 讀寫與清理共用生命週期鎖。持久 DELETING 狀態會在部分刪除期間隱藏端點，啟動復原完成檔案與 metadata 清除；部分刪除顯示 `DELETION_PENDING_RECOVERY`，不回報成功。最少量 audit 保存操作者、時間、Job、結果；Pin 記錄舊／新旗標。刪除不立即壓縮 H2。
+`DELETE /api/v1/jobs/{jobId}` 保留取消含義；`POST /api/v1/jobs/{jobId}/delete` 的手動刪除不會取消活動中 Job。Pin 不會等待 archive lock；刪除及 archive 讀寫仍受生命週期 fencing 約束。持久 DELETING 狀態會在部分刪除期間隱藏端點；啟動及每小時 reconciliation 都會完成檔案與 metadata 清除，即使沒有啟用 job-storage 配額。部分刪除顯示 `DELETION_PENDING_RECOVERY`，不回報成功。最少量 audit 保存操作者、時間、Job、結果；Pin 記錄舊／新旗標。刪除不立即壓縮 H2。
 
 Pin 是操作層保留保護，並非法律／WORM hold。主機檔案系統遺失、管理員在系統外刪除或災難復原仍需獨立備份。

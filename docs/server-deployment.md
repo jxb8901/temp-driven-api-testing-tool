@@ -299,6 +299,10 @@ All endpoints use `/api/v1`. Requests and responses use JSON unless the endpoint
 | `GET` | `/jobs/{jobId}/artifacts/view/{path}` | Preview an approved ZIP entry |
 | `POST` | `/jobs/{jobId}/artifacts/retry` | Retry terminal Job publication |
 | `DELETE` | `/jobs/{jobId}` | Cancel an active job; retain its history |
+| `POST` | `/jobs/{jobId}/delete` | Confirmed manual whole-Job deletion; returns `200`, `202`, or `409` outcome maps |
+| `POST` | `/jobs/{jobId}/pin` | Pin or unpin one eligible terminal Job; accepts optional `pinReason` |
+| `POST` | `/jobs/pin` | Pin or unpin up to 100 Jobs and return one outcome per ID |
+| `POST` | `/jobs/delete` | Bulk-delete up to 100 Jobs and return one outcome per ID |
 | `GET`, `POST` | `/load-schedules` | List schedules or create one (active USER operational access) |
 | `POST` | `/load-schedules/preview` | Validate timezone/cron and preview occurrence times only (active USER operational access) |
 | `GET`, `PATCH`, `DELETE` | `/load-schedules/{scheduleId}` | Read, edit, or delete a schedule (active USER operational access) |
@@ -576,7 +580,7 @@ server:
 
 Restart the Server to load changes. Each newly submitted RUN, Debug or LOAD Job receives a fixed trusted policy. Package YAML and REST request fields cannot increase it. CLI presentation remains 16000 characters / 80 lines; Case Logs and artifacts keep their own policies. Existing journals retain their stored text; larger settings cannot restore discarded text. Invalid, fractional, quoted numeric, out-of-range or unknown settings fail startup.
 
-Worker projection redacts secrets before truncation and strips ANSI/control characters. A character or line limit produces `[truncated]`. The journal retains at most 65536 bytes per event payload after UTF-8 JSON encoding. It keeps the full configured console preview when possible and drops oversized other fields with `truncated: true`; if console alone exceeds that byte budget, it adds `consoleTruncated: true` and `[truncated by journal]`. The Worker protocol remains capped at 1 MiB. Multibyte characters and JSON escaping can exhaust the journal budget before the character limit.
+Worker projection redacts secrets before truncation and strips ANSI/control characters. A character or line limit produces `[truncated]`. The journal retains at most 65536 bytes per event payload after UTF-8 JSON encoding. For an oversized payload it keeps the structured allow-list fields `status`, `code`, `message`, `executionId`, `caseId`, `stage`, `action`, and `executionEventType` as strings bounded to 512 characters, plus numeric `exitCode` and `durationMs`; it records up to 32 omitted field names in `droppedFields`. The payload includes `truncated: true`, a `journalLimit` object, and a bounded summary. The configured console preview is retained when possible; if console alone exceeds the byte budget, it adds `consoleTruncated: true` and `[truncated by journal]`. The Worker protocol remains capped at 1 MiB. Multibyte characters and JSON escaping can exhaust the journal budget before the character limit.
 
 The Studio Live Output history holds 500 recent events. Dropped browser history and expired journal history have separate notices. The Events tab initially previews 4000 characters and provides an explicit expansion of the retained payload up to 65536 displayed characters. Expansion cannot recover upstream truncation.
 
@@ -587,16 +591,17 @@ Reproduce the bounded concurrent journal/replay check with `mvn -pl att-server -
 
 ## Pinned evidence and manual Job deletion (4.2.2)
 
-USER operators can Pin/Unpin terminal RUN, Debug and LOAD Jobs from Jobs rows or details. Pins are shared durable H2 properties (`pinned`, `pinnedAt`, `pinnedBy`), visible to all authorized operators and preserved across restart. Pinned only queries Server history (`GET /api/v1/jobs?pinnedOnly=true`), including pins older than the default 100 newest Jobs, and returns at most 100 matching Jobs. A pin has no expiry and protects the entire Job, including its archive, from existing age/size cleanup. Pinned bytes still count toward quota usage; when protected Jobs prevent the target, storage reports `quota_unmet` and leaves them intact. Existing retention intervals and thresholds do not change.
+USER operators can Pin/Unpin terminal RUN, Debug and LOAD Jobs from Jobs rows or details. Pins are shared durable H2 properties (`pinned`, `pinnedAt`, `pinnedBy`, `pinReason`), visible to all authorized operators and preserved across restart. `pinReason` is trimmed, limited to 200 characters, rejects control characters, is secret-redacted, and is returned as `job.pinReason`. Pinned only queries Server history (`GET /api/v1/jobs?pinnedOnly=true`), including pins older than the default 100 newest Jobs, and returns at most 100 matching Jobs. A pin has no expiry and protects the entire Job, including its archive, from existing age/size cleanup. Pinned bytes still count toward quota usage; when protected Jobs prevent the target, storage reports `quota_unmet` and leaves them intact. Existing retention intervals and thresholds do not change.
 
 Select individual rows or Select all on this page, then Delete selected; selections persist explicitly across loaded pages. The confirmation lists the exact Job IDs and identifies protected/active Jobs. Detail deletion uses the same confirmation. Delete permanently removes the Job record, result, events/logs, archive and Job directory; unselected Jobs, package sources and schedules remain. Pinned Jobs require Unpin first. A busy, possibly-live, quarantined or recovering Job is rejected/deferred with a per-Job outcome. Refresh and retry after it becomes quiescent. Schedule occurrence history remains and shows unavailable Job references.
 
 Authenticated operator endpoints use the existing origin/CSRF and shared USER authorization rules:
 
-- `POST /api/v1/jobs/{jobId}/pin` with `{"pinned":true}` or `false`.
-- `POST /api/v1/jobs/{jobId}/delete` with `{"confirm":true}`.
+- `POST /api/v1/jobs/{jobId}/pin` with `{"pinned":true,"pinReason":"release evidence"}` or `false`; an ineligible pin returns `409 ATT-SERVER-JOB-NOT-ELIGIBLE`.
+- `POST /api/v1/jobs/pin` with `{"pinned":true,"pinReason":"release evidence","jobIds":[...]}`; the response contains one `PINNED`, `UNPINNED`, `NOT_ELIGIBLE`, or unavailable outcome per ID.
+- `POST /api/v1/jobs/{jobId}/delete` with `{"confirm":true}`; returns `200` for `DELETED` or `ALREADY_UNAVAILABLE`, `202` for `DELETION_PENDING_RECOVERY`, `409` for refusal outcomes such as `PINNED_UNPIN_FIRST`, busy, or not quiescent; a Job that no longer exists returns `200` with `ALREADY_UNAVAILABLE`, and `404` is returned only when the caller may not see the Job. A `409` response still contains the outcome map, not an error envelope.
 - `POST /api/v1/jobs/delete` with `{"confirm":true,"jobIds":["J0123456789ABCDEF"]}`; maximum 100 IDs, deduplicated, action body maximum 16384 bytes or the smaller configured request limit.
 
-`DELETE /api/v1/jobs/{jobId}` retains its existing cancellation meaning. Manual deletion never cancels an active Job. Deletion and pin changes serialize with archive reads/writes and retention. A durable DELETING record hides endpoints during incomplete deletion; startup reconciliation finishes removing files/metadata. A partial deletion reports `DELETION_PENDING_RECOVERY`, never success. Minimal audit records retain actor, time, target and outcome; pin audit includes old/new flags. Deletion does not compact H2 immediately.
+`DELETE /api/v1/jobs/{jobId}` retains its cancellation meaning. Manual deletion through `POST /api/v1/jobs/{jobId}/delete` never cancels an active Job. Pin changes do not wait on archive locks; deletion and archive reads/writes remain lifecycle-fenced. A durable DELETING record hides endpoints during incomplete deletion; startup and hourly reconciliation finish removing files/metadata, including when job-storage quota is disabled. A partial deletion reports `DELETION_PENDING_RECOVERY`, never success. Minimal audit records retain actor, time, target and outcome; pin audit includes old/new flags. Deletion does not compact H2 immediately.
 
 Pins are operational retention protection. Use independent backups for Server filesystem loss, administrator out-of-band deletion and disaster recovery; pins are not legal/WORM holds.
