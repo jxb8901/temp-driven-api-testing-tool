@@ -25,7 +25,15 @@ public final class LoadRunResources implements AutoCloseable {
     private final PooledMqTransportFactory mqFactory;
     private final AtomicBoolean closed = new AtomicBoolean(false);
     private final AtomicLong executionSequence = new AtomicLong();
-    private final java.util.concurrent.atomic.AtomicReference<String> identityRun = new java.util.concurrent.atomic.AtomicReference<String>();
+    private static final class ExecutionIdentity {
+        final String runId, prefix;
+        ExecutionIdentity(String runId) {
+            this.runId = runId;
+            this.prefix = LoadExecutionIdPattern.executionPrefix(runId);
+            LoadExecutionIdPattern.requireSafe(prefix + "-execution-" + Long.MAX_VALUE);
+        }
+    }
+    private final java.util.concurrent.atomic.AtomicReference<ExecutionIdentity> identityRun = new java.util.concurrent.atomic.AtomicReference<ExecutionIdentity>();
     private final AtomicLong lastResourceMetricSampleNanos = new AtomicLong(Long.MIN_VALUE);
     private final AtomicLong resourceMetricSamples = new AtomicLong();
     private final java.util.Set<Path> initializedExecutionNamespaces = java.util.concurrent.ConcurrentHashMap.newKeySet();
@@ -68,26 +76,24 @@ public final class LoadRunResources implements AutoCloseable {
     }
     public String nextExecutionId(String runId) {
         ensureOpen();
-        String owner = identityRun.get();
+        ExecutionIdentity owner = identityRun.get();
         if (owner == null) {
-            LoadExecutionIdPattern.requireSafe(runId);
-            LoadExecutionIdPattern.requireSafe(runId + "-execution-" + Long.MAX_VALUE);
-            identityRun.compareAndSet(null, runId);
+            identityRun.compareAndSet(null, new ExecutionIdentity(runId));
             owner = identityRun.get();
         }
-        if (!owner.equals(runId)) throw new IllegalArgumentException("Load resources belong to a different run identity");
+        if (!owner.runId.equals(runId)) throw new IllegalArgumentException("Load resources belong to a different run identity");
         long sequence;
         do {
             sequence = executionSequence.get();
             if (sequence == Long.MAX_VALUE) throw new IllegalStateException("Load execution identity sequence exhausted");
         } while (!executionSequence.compareAndSet(sequence, sequence + 1));
-        return runId + "-execution-" + (sequence + 1);
+        return owner.prefix + "-execution-" + (sequence + 1);
     }
     /** Validates an isolated run output namespace once, before any iteration writes into it. */
     public void initializeExecutionNamespace(Path runDirectory) throws IOException {
         ensureOpen();
         Path run = runDirectory.toAbsolutePath().normalize();
-        LoadExecutionIdPattern.requireSafe(run.getFileName().toString() + "-execution-" + Long.MAX_VALUE);
+        new ExecutionIdentity(run.getFileName().toString());
         if (Files.isSymbolicLink(run) || Files.isSymbolicLink(run.getParent()))
             throw new IllegalArgumentException("Load output namespace cannot follow symlinks: " + run);
         // Schedulers initialize before starting workers. Standalone executor

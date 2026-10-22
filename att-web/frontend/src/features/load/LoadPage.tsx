@@ -18,6 +18,8 @@ export type TargetDraft = { type: LoadTargetType; id: string; businessJson: stri
 export type MixDraft = TargetDraft & { entryId: string; weight: string };
 export type WorkloadDraft = {
   id: string;
+  loadPolicy?: JsonObject;
+  executionPolicy?: JsonObject;
   users: string;
   arrivalRate: string;
   maxConcurrent: string;
@@ -50,7 +52,7 @@ export function newWorkload(id: number, policy: JsonObject = {}): WorkloadDraft 
     users: String(load.users ?? 1),
     arrivalRate: String(load.arrivalRate ?? '1/s'),
     maxConcurrent: String(load.maxConcurrent ?? 1),
-    thinkTime: typeof execution.thinkTime === 'string' ? execution.thinkTime : '',
+    thinkTime: typeof execution.thinkTime === 'string' ? execution.thinkTime : execution.thinkTime && typeof execution.thinkTime === 'object' ? { min: String(asObject(execution.thinkTime).min ?? ''), max: String(asObject(execution.thinkTime).max ?? '') } : '',
     structure: 'single',
     testdataJson: '{}',
     thresholdsJson: '{}',
@@ -123,13 +125,14 @@ export function makeScenario(
   scenario.workloads = workloads.map(workload => {
     const row: JsonObject = { id: workload.id.trim(), load: {} };
     if (!row.id) throw new Error('Every workload needs an ID.');
-    const load: JsonObject = {};
+    const load: JsonObject = { ...workload.loadPolicy };
+    const execution: JsonObject = { ...workload.executionPolicy };
     if (model === 'virtualUsers') {
       const users = Number(workload.users);
       if (!Number.isSafeInteger(users) || users < 1) throw new Error(`Workload ${row.id} needs a positive whole number of users.`);
       load.users = users;
       const thinkTime = parseThinkTime(workload.thinkTime);
-      if (thinkTime) row.execution = { thinkTime };
+      if (thinkTime) execution.thinkTime = thinkTime; else delete execution.thinkTime;
     } else {
       if (!workload.arrivalRate.trim()) throw new Error(`Workload ${row.id} needs an arrival rate.`);
       const maxConcurrent = Number(workload.maxConcurrent);
@@ -137,6 +140,7 @@ export function makeScenario(
       Object.assign(load, { arrivalRate: workload.arrivalRate.trim(), maxConcurrent, overloadPolicy: 'drop' });
     }
     row.load = load;
+    if (Object.keys(execution).length) row.execution = execution;
     const testdata = parseObjectJson(workload.testdataJson, `Workload ${row.id} Testdata`);
     const thresholds = parseObjectJson(workload.thresholdsJson, `Workload ${row.id} thresholds`);
     const evidence = parseObjectJson(workload.evidenceJson, `Workload ${row.id} evidence`);

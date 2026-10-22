@@ -70,6 +70,23 @@ class LoadTemplateCatalogTest {
         assertEquals("B", scenario.workloads().get(1).mix().get(0).inputs().get("source"));
     }
 
+    @Test void workloadBindingsMergeAfterDefaultsAndTargetBindingsWithoutLosingDistinctKeys() throws Exception {
+        Map<String,Object> definition = LoadTemplateCatalog.builtin("single-vu");
+        Map<String,Object> descriptor = obj("schemaVersion", LoadTemplateCatalog.BINDINGS_SCHEMA, "bindings", obj(
+                "workload-1", obj("target", obj("type", "template", "id", "A",
+                        "inputs", obj("region", "HK", "targetWins", "target", "workloadWins", "target"),
+                        "vars", obj("region", "HK", "targetWins", "target", "workloadWins", "target")),
+                        "inputs", obj("customerId", 123, "workloadWins", "workload"),
+                        "vars", obj("customerId", 123, "workloadWins", "workload"))));
+        LoadWorkload workload = new LoadTemplateCatalog(root).compose(definition, descriptor, (type,id) -> obj(
+                "inputs", obj("defaultOnly", true, "targetWins", "default", "workloadWins", "default"),
+                "vars", obj("defaultOnly", true, "targetWins", "default", "workloadWins", "default"))).workloads().get(0);
+        Map<String,Object> expected = obj("defaultOnly", true, "region", "HK", "customerId", 123,
+                "targetWins", "target", "workloadWins", "workload");
+        assertEquals(expected, workload.inputs());
+        assertEquals(expected, workload.vars());
+    }
+
     @Test void rejectsIncompleteExtraUnsafeAndWrongModelInputsBeforeExecution() throws Exception {
         LoadTemplateCatalog catalog = new LoadTemplateCatalog(root);
         Map<String,Object> definition = LoadTemplateCatalog.builtin("multi-vu");

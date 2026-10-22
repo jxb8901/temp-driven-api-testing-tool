@@ -42,6 +42,25 @@ class LoadExecutionIdPatternTest {
         }
     }
 
+    @Test void acceptsExistingRunIdContractWithDeterministicBoundedExecutionSegments() throws Exception {
+        installConfig();
+        FrameworkConfig config = new FrameworkConfigLoader().load(root.resolve("config.yaml"), root);
+        assertEquals(68, LoadExecutionIdPattern.executionPrefix(String.join("", Collections.nCopies(128, "測"))).length());
+        Set<String> prefixes = new HashSet<>();
+        for (String id : Arrays.asList("測試2026", "my run", "a..b", "_run", "run!", String.join("", Collections.nCopies(128, "x")))) {
+            assertEquals(id, att.core.IdentifierValidator.runId(id));
+            String prefix = LoadExecutionIdPattern.executionPrefix(id);
+            assertTrue(prefixes.add(prefix));
+            assertEquals(prefix, LoadExecutionIdPattern.executionPrefix(id));
+            try (LoadRunResources resources = new LoadRunResources(root, config)) {
+                resources.initializeExecutionNamespace(root.resolve("output/load").resolve(id));
+                assertEquals(prefix + "-execution-1", resources.nextExecutionId(id));
+                LoadExecutionIdPattern.requireSafe(resources.nextExecutionId(id));
+                assertThrows(IllegalArgumentException.class, () -> resources.nextExecutionId("OTHER"));
+            }
+        }
+    }
+
     @Test void rejectsUnsafeOrOverlongRunIdsAndNeverWrapsSequence() throws Exception {
         installConfig();
         FrameworkConfig config = new FrameworkConfigLoader().load(root.resolve("config.yaml"), root);

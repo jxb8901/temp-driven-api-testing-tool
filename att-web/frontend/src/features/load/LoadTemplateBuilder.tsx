@@ -55,7 +55,7 @@ export function LoadTemplateBuilder(props: LoadFeatureProps & { templateId: stri
           setAdvanced({ execution: JSON.stringify(value.policy.execution || {}), testdata: JSON.stringify(value.policy.testdata || []), thresholds: JSON.stringify(value.policy.thresholds || {}), evidence: JSON.stringify(value.policy.evidence || {}), seed: String(value.policy.seed ?? '') });
           setWorkloads(value.workloads.map((row, index) => {
             const policy = { ...value.policy, load: { ...object(value.policy.load), ...object(row.load) }, execution: { ...object(value.policy.execution), ...object(row.execution) } };
-            return { ...newWorkload(index + 1, policy), id: row.id, structure: value.mode.endsWith('mix') ? 'mix' : 'single',
+            return { ...newWorkload(index + 1, policy), loadPolicy: clone(object(row.load)), executionPolicy: clone(object(row.execution)), id: row.id, structure: value.mode.endsWith('mix') ? 'mix' : 'single',
               thresholdsJson: JSON.stringify(row.thresholds || {}), evidenceJson: JSON.stringify(row.evidence || {}),
               mix: (row.mix || []).map(slot => ({ ...newTarget(), entryId: slot.id, weight: String(slot.weight) })) };
           }));

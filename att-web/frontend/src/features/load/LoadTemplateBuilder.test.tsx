@@ -58,3 +58,29 @@ it('ignores a previous package validation response after changing package',async
  expect([...host.querySelectorAll('button')].find(button=>button.textContent?.includes('Run Now'))!.disabled).toBe(true);
  expect(host.textContent).not.toContain('Validation passed.');
 });
+
+
+it('round-trips workload timing, ramps and ranged think time while applying deliberate edits', async () => {
+ const source = { ...definition, workloads: definition.workloads.map((row,index) => ({ ...row,
+  load: { users: 10 + index, duration: `${20 + index}s`, warmup: `${index + 1}s`, rampUp: '2s', rampDown: '3s' },
+  execution: { thinkTime: { min: '10ms', max: '50ms' } },
+ })) };
+ endpoints.listLoadTemplates.mockResolvedValue({ items: [{ id: 'builtin:multi-workload-mix', validation: 'valid', definition: source }], revisionDigest: 'source-revision' });
+ await render(); await bindAllTargets();
+ endpoints.createLoadTemplateDraft.mockResolvedValue({ draftId:'A1', expiresAt:new Date(Date.now()+60000).toISOString(), previewYaml:'safe' });
+ await click('Validate');
+ let composed = endpoints.createLoadTemplateDraft.mock.calls[0][2].definition;
+ source.workloads.forEach((row,index) => {
+  expect(composed.workloads[index].load).toEqual(row.load);
+  expect(composed.workloads[index].execution).toEqual(row.execution);
+ });
+ await click('Configure');
+ const dialog = host.querySelector('dialog[aria-label="Configure Workload"]')!;
+ const users = dialog.querySelector('input[type="number"]')!;
+ await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!.call(users,'17'); users.dispatchEvent(new Event('input',{bubbles:true})); });
+ await click('Save',dialog); await click('Validate');
+ composed = endpoints.createLoadTemplateDraft.mock.calls[1][2].definition;
+ expect(composed.workloads[0].load).toEqual({ ...source.workloads[0].load, users:17 });
+ expect(composed.workloads[0].execution).toEqual(source.workloads[0].execution);
+ expect(composed.workloads[1].load).toEqual(source.workloads[1].load);
+});

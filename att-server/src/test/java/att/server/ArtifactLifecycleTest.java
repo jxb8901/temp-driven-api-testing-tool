@@ -205,6 +205,9 @@ class ArtifactLifecycleTest {
             assertFalse(Files.exists(output));
             Files.writeString(runtime.artifactArchivePath(id),"corrupt after source cleanup");
             runtime.scheduleArtifactArchive(id);awaitState(runtime,id,"FAILED");
+            // A corrupt READY archive already reads as FAILED before its writer finishes.
+            // Await persisted completion before replacing the status file below.
+            awaitMetrics(runtime,id,"FAILED");
             assertEquals(false,runtime.artifactIndex(id).get("retryable"));
             assertThrows(ServerRuntime.ArchiveUnavailableException.class,()->runtime.openArtifactArchive(id,true));
             assertThrows(IllegalArgumentException.class,()->runtime.retryArtifactArchive(id));

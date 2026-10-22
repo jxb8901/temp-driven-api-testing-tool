@@ -113,7 +113,7 @@ public final class LoadTemplateCatalog {
                 bind(workload, map(binding.get("target")), defaults);
             }
             for (String field : Arrays.asList("inputs", "vars", "testdata"))
-                if (binding.containsKey(field)) workload.put(field, copy(map(binding.get(field))));
+                if (binding.containsKey(field)) workload.put(field, merged(map(workload.get(field)), map(binding.get(field))));
             Map<String,Object> load = merged(map(scenario.get("load")), map(workload.get("load")));
             if (arrival != load.containsKey("arrivalRate") || arrival == load.containsKey("users"))
                 throw invalid("workloads." + id + ".load", "Pacing must match template mode " + mode);
