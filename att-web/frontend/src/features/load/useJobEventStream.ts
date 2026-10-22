@@ -3,6 +3,7 @@ import type { JobEvent, JobEventHandlers, LoadJobsApi } from './types';
 
 export const MAX_EVENTS = 500;
 export const EVENT_FLUSH_INTERVAL_MS = 100;
+export const COUNTER_FLUSH_INTERVAL_MS = 1000;
 export const MAX_TRACKED_EVENT_IDS = 2000;
 
 export type JobStreamConnection = 'connecting' | 'connected' | 'reconnecting' | 'completed';
@@ -87,7 +88,9 @@ interface Entry {
   lastNumericId?: bigint;
   consumerCount: number;
   dirty: boolean;
+  pendingCounters: boolean;
   flushTimer?: ReturnType<typeof setTimeout>;
+  counterFlushTimer?: ReturnType<typeof setTimeout>;
   visibilityListener?: () => void;
 }
 
@@ -157,9 +160,16 @@ function clearFlushTimer(entry: Entry): void {
   entry.flushTimer = undefined;
 }
 
+function clearCounterFlushTimer(entry: Entry): void {
+  if (entry.counterFlushTimer === undefined) return;
+  clearTimeout(entry.counterFlushTimer);
+  entry.counterFlushTimer = undefined;
+}
+
 function publish(entry: Entry): void {
-  if (!entry.dirty) return;
+  if (!entry.dirty && !entry.pendingCounters) return;
   clearFlushTimer(entry);
+  clearCounterFlushTimer(entry);
   entry.snapshot = Object.freeze({
     events: entry.buffer.snapshot(),
     connection: entry.connection,
@@ -169,6 +179,7 @@ function publish(entry: Entry): void {
     gaps: entry.gaps,
   });
   entry.dirty = false;
+  entry.pendingCounters = false;
   for (const listener of entry.listeners) listener();
 }
 
@@ -181,9 +192,23 @@ function scheduleFlush(entry: Entry): void {
   }, EVENT_FLUSH_INTERVAL_MS);
 }
 
+/** Counter-only replay diagnostics use one slower coalesced publication. */
+function scheduleCounterFlush(entry: Entry): void {
+  if (!entry.pendingCounters || entry.consumerCount === 0 || entry.counterFlushTimer !== undefined || isHidden()) return;
+  entry.counterFlushTimer = setTimeout(() => {
+    entry.counterFlushTimer = undefined;
+    if (!isHidden()) publish(entry);
+  }, COUNTER_FLUSH_INTERVAL_MS);
+}
+
 function markChanged(entry: Entry, immediate: boolean): void {
   entry.dirty = true;
   if (immediate) publish(entry); else scheduleFlush(entry);
+}
+
+function markCountersChanged(entry: Entry): void {
+  entry.pendingCounters = true;
+  scheduleCounterFlush(entry);
 }
 
 function entryFor(api: LoadJobsApi, jobId: string): Entry {
@@ -199,7 +224,7 @@ function entryFor(api: LoadJobsApi, jobId: string): Entry {
       connection: 'connecting', journalTruncated: false,
       duplicatesIgnored: 0, staleIgnored: 0, gaps: 0,
       statusSnapshot: EMPTY_STATUS_SNAPSHOT,
-      listeners: new Set(), nextSequence: 0, consumerCount: 0, dirty: false,
+      listeners: new Set(), nextSequence: 0, consumerCount: 0, dirty: false, pendingCounters: false,
       snapshot: EMPTY_SNAPSHOT,
     };
     byJob.set(jobId, entry);
@@ -214,7 +239,7 @@ export function jobEventStreamStateForTesting(api: LoadJobsApi, jobId: string): 
   timerPending: boolean;
 } | undefined {
   const entry = stores.get(api as object)?.get(jobId);
-  return entry && { snapshot: entry.snapshot, idIndexSize: entry.idIndex.count, timerPending: entry.flushTimer !== undefined };
+  return entry && { snapshot: entry.snapshot, idIndexSize: entry.idIndex.count, timerPending: entry.flushTimer !== undefined || entry.counterFlushTimer !== undefined };
 }
 
 /** Exposed for the unit test that guards the read-only render path. */
@@ -233,17 +258,18 @@ function ingest(entry: Entry, event: JobEvent): boolean {
   if (numericId !== undefined && entry.lastNumericId !== undefined && numericId <= entry.lastNumericId) {
     if (id && entry.idIndex.has(id)) entry.duplicatesIgnored += 1;
     else entry.staleIgnored += 1;
-    entry.dirty = true;
+    markCountersChanged(entry);
     return false;
   }
   if (id && numericId === undefined && entry.idIndex.has(id)) {
     entry.duplicatesIgnored += 1;
-    entry.dirty = true;
+    markCountersChanged(entry);
     return false;
   }
 
-  // Server journal append order is authoritative. Numeric gaps are diagnostic
-  // only; stale/replayed IDs are rejected above and are never appended later.
+  // Server append order is authoritative, and the Server never sends an ID at
+  // or below Last-Event-ID. Gaps are diagnostic; stale/replayed IDs are never
+  // inserted or re-sorted by the browser.
   if (numericId !== undefined) {
     if (entry.lastNumericId !== undefined && numericId > entry.lastNumericId + 1n) entry.gaps += 1;
     entry.lastNumericId = numericId;
@@ -275,7 +301,10 @@ function start(api: LoadJobsApi, jobId: string, entry: Entry): void {
   entry.connection = 'connecting';
   if (typeof document !== 'undefined') {
     entry.visibilityListener = () => {
-      if (document.hidden) clearFlushTimer(entry);
+      if (document.hidden) {
+        clearFlushTimer(entry);
+        clearCounterFlushTimer(entry);
+      }
       else publish(entry);
     };
     document.addEventListener('visibilitychange', entry.visibilityListener);
@@ -310,6 +339,7 @@ function release(api: LoadJobsApi, jobId: string, entry: Entry): void {
   entry.consumerCount = Math.max(0, entry.consumerCount - 1);
   if (entry.consumerCount !== 0) return;
   clearFlushTimer(entry);
+  clearCounterFlushTimer(entry);
   if (entry.visibilityListener && typeof document !== 'undefined') {
     document.removeEventListener('visibilitychange', entry.visibilityListener);
     entry.visibilityListener = undefined;
@@ -325,9 +355,10 @@ function release(api: LoadJobsApi, jobId: string, entry: Entry): void {
  * Job share one EventSource; the source is released after the last consumer.
  * EventSource itself retains Last-Event-ID for reconnect/replay. Ingest is
  * immediate, while ordinary immutable presentation snapshots publish every
- * 100 ms and pause while the document is hidden. Terminal/error state bypasses
- * that delay. Numeric Event IDs follow the monotonic Server journal cursor;
- * gaps are allowed and stale replay never enters the append-ordered buffer.
+ * 100 ms and counter-only snapshots publish every 1,000 ms. Publications pause
+ * while the document is hidden. Terminal/error state bypasses that delay.
+ * Numeric Event IDs follow the monotonic Server journal cursor; gaps are
+ * allowed and stale replay never enters the append-ordered buffer.
  */
 export function useJobEventStream(api: LoadJobsApi, jobId: string): JobEventStreamSnapshot {
   const subscribe = useMemo(() => (listener: () => void) => {

@@ -3,6 +3,8 @@ package att.server;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.io.BufferedReader;
+import java.nio.ByteBuffer;
+import java.nio.channels.SeekableByteChannel;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -82,9 +84,25 @@ final class JobEvents {
                     }
                 }
             }
+            terminatePartialFinalLine(file);
             if (events.size() > capacity) {
                 trimRetainedEvents();
                 scheduleCompaction();
+            }
+        }
+    }
+
+    /** Keeps a skipped torn final record from absorbing the next valid append. */
+    private static void terminatePartialFinalLine(Path file) throws Exception {
+        try (SeekableByteChannel channel = Files.newByteChannel(file, StandardOpenOption.READ)) {
+            long size = channel.size();
+            if (size == 0L) return;
+            channel.position(size - 1L);
+            ByteBuffer lastByte = ByteBuffer.allocate(1);
+            if (channel.read(lastByte) != 1) return;
+            byte value = lastByte.array()[0];
+            if (value != '\n' && value != '\r') {
+                Files.writeString(file, "\n", StandardCharsets.UTF_8, StandardOpenOption.APPEND);
             }
         }
     }

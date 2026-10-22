@@ -795,6 +795,29 @@ describe('JobsPage React feature', () => {
     expect(live.querySelector('pre.att-console')?.textContent).toBe('[RUN] after clear');
   });
 
+  it('shows non-live stream diagnostics only when replay or gap counters are non-zero', async () => {
+    const api = makeApi();
+    await act(async () => root.render(<JobsPage api={api} jobId="JOB-204" onOpenJob={vi.fn()} onShowList={vi.fn()} confirmCancel={() => true} />));
+    await click(host.querySelector('#job-tab-events')!);
+    const panel = host.querySelector('#job-panel-events')!;
+    expect([...panel.querySelectorAll('p.att-help')].some(item => item.textContent?.startsWith('Stream diagnostics:'))).toBe(false);
+
+    const handlers = vi.mocked(api.subscribeJob).mock.calls[0][1];
+    act(() => {
+      handlers.onEvent({ id: '1', type: 'log', data: 'one' });
+      handlers.onEvent({ id: '3', type: 'log', data: 'three' });
+      handlers.onEvent({ id: '2', type: 'log', data: 'late two' });
+      handlers.onEvent({ id: '3', type: 'log', data: 'duplicate three' });
+      handlers.onEvent({ id: '3', type: 'log', data: 'duplicate three again' });
+    });
+    await advance(100);
+
+    const diagnostics = [...panel.querySelectorAll('p.att-help')]
+      .find(item => item.textContent?.startsWith('Stream diagnostics:'))!;
+    expect(diagnostics.textContent).toBe('Stream diagnostics: 2 duplicate and 1 out-of-order replayed events ignored; 1 ID gap.');
+    expect(diagnostics.getAttribute('role')).toBeNull();
+  });
+
   it('distinguishes an open stream with no events from reconnecting', async () => {
     const api = makeApi();
     await act(async () => root.render(<JobsPage api={api} jobId="JOB-204" onOpenJob={vi.fn()} onShowList={vi.fn()} confirmCancel={() => true} />));

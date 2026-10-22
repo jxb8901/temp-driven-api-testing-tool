@@ -79,6 +79,50 @@ class JobEventsTest {
         assertEquals(true,reopened.after(3).get(0).get("data").toString().contains("truncated"));
         assertTrue(Files.size(file)>0);
     }
+
+    @Test void idsRemainStrictlyIncreasingAcrossTrimCompactionReopenAndATornFinalLine() throws Exception {
+        Path file=temp.resolve("monotonic-recovery.jsonl");
+        JobEvents journal=new JobEvents(file,3,Runnable::run);
+        List<Long> appended=new java.util.ArrayList<>(),delivered=new java.util.ArrayList<>();
+        AutoCloseable subscription=journal.listen(event->delivered.add(((Number)event.get("id")).longValue()));
+        for(int i=1;i<=140;i++)appended.add(((Number)journal.append("progress",Map.of("sequence",i)).get("id")).longValue());
+        subscription.close();
+
+        assertEquals(140,journal.latest());
+        assertEquals(15,Files.readAllLines(file).size(),"ID 128 compacts to the retained three before later appends");
+        JobEvents reopened=new JobEvents(file,3,Runnable::run);
+        assertEquals(3,Files.readAllLines(file).size(),"Reopen compacts the trimmed retention window");
+        AutoCloseable reopenedSubscription=reopened.listen(event->delivered.add(((Number)event.get("id")).longValue()));
+        appended.add(((Number)reopened.append("log",Map.of("message","after reopen")).get("id")).longValue());
+        reopenedSubscription.close();
+
+        Files.write(file,"{\"id\":999".getBytes(java.nio.charset.StandardCharsets.UTF_8),java.nio.file.StandardOpenOption.APPEND);
+        JobEvents recoveredFromTornTail=new JobEvents(file,3,Runnable::run);
+        long recoveredId=((Number)recoveredFromTornTail.append("log",Map.of("message","after torn tail")).get("id")).longValue();
+        appended.add(recoveredId);
+
+        for(int index=1;index<appended.size();index++) {
+            assertTrue(appended.get(index)>appended.get(index-1),"Every append ID must be strictly increasing");
+        }
+        assertEquals(142L,recoveredId,"The torn undelivered record must not advance or reset the complete journal cursor");
+        assertTrue(delivered.stream().allMatch(id->recoveredId>id),"The recovered ID must exceed every ID delivered to a listener");
+
+        JobEvents reopenedAgain=new JobEvents(file,3,Runnable::run);
+        assertEquals(142,reopenedAgain.latest(),"The append after a torn tail must remain a separate durable record");
+    }
+
+    @Test void replayAfterCursorNeverReturnsThatCursorOrAnEarlierIdAfterReopen() throws Exception {
+        Path file=temp.resolve("strict-after-reopen.jsonl");
+        JobEvents journal=new JobEvents(file,4,Runnable::run);
+        for(int id=1;id<=8;id++)journal.append("progress",Map.of("sequence",id));
+
+        JobEvents reopened=new JobEvents(file,4,Runnable::run);
+        for(long cursor:List.of(0L,4L,6L,8L)) {
+            assertTrue(reopened.after(cursor).stream()
+                    .map(event->((Number)event.get("id")).longValue())
+                    .allMatch(id->id>cursor),"Replay must be strictly after cursor "+cursor);
+        }
+    }
     @Test void slowObserverNotificationsAreBoundedWhileJournalRetainsEveryEvent() throws Exception {
         JobEvents events=new JobEvents(temp.resolve("fanout.jsonl"),10);java.util.concurrent.ArrayBlockingQueue<Boolean> wakeup=new java.util.concurrent.ArrayBlockingQueue<>(1);
         AutoCloseable subscription=events.listen(event->wakeup.offer(Boolean.TRUE));

@@ -72,6 +72,17 @@ function dateTime(value: string): string {
   return Number.isFinite(time) ? CONSOLE_DATE_TIME_FORMATTER.format(time) : value;
 }
 
+function streamDiagnostics(duplicatesIgnored: number, staleIgnored: number, gaps: number): string {
+  const parts: string[] = [];
+  const ignored: string[] = [];
+  if (duplicatesIgnored) ignored.push(`${duplicatesIgnored} duplicate`);
+  if (staleIgnored) ignored.push(`${staleIgnored} out-of-order`);
+  const ignoredTotal = duplicatesIgnored + staleIgnored;
+  if (ignored.length) parts.push(`${ignored.join(' and ')} replayed event${ignoredTotal === 1 ? '' : 's'} ignored`);
+  if (gaps) parts.push(`${gaps} ID gap${gaps === 1 ? '' : 's'}`);
+  return parts.length ? `Stream diagnostics: ${parts.join('; ')}.` : '';
+}
+
 function eventJournalTruncated(event: JobEvent): boolean {
   return Boolean(event.data && typeof event.data === 'object' && !Array.isArray(event.data)
     && (event.data as Record<string, unknown>).historyTruncated === true);
@@ -202,6 +213,7 @@ export function JobConsoleView({
   const browserTruncated = stream.events.length >= MAX_EVENTS;
   const journalEntryTruncated = events.some(event => Boolean(event.data && typeof event.data === 'object' && !Array.isArray(event.data) && 'journalLimit' in event.data));
   const protocolEntryTruncated = events.some(event => Boolean(event.data && typeof event.data === 'object' && !Array.isArray(event.data) && 'protocolLimit' in event.data));
+  const diagnostics = streamDiagnostics(stream.duplicatesIgnored, stream.staleIgnored, stream.gaps);
 
   useEffect(() => {
     if (view !== 'live' || !liveAutoScroll || liveScrollPaused) return;
@@ -359,6 +371,7 @@ export function JobConsoleView({
     {journalEntryTruncated && <p role="note">Some event payload fields were truncated by the journal byte budget. A preserved console preview can still be complete; [truncated by journal] marks a shortened console entry.</p>}
     {protocolEntryTruncated && <p role="note">Some event payload fields were truncated by the Worker protocol limit. Inspect artifacts for retained full details.</p>}
     {(historyTruncated || browserTruncated) && <p role="note">{historyTruncated && <span>Earlier journal events are no longer retained.</span>}{historyTruncated && browserTruncated && ' '}{browserTruncated && <span>This browser keeps the latest {MAX_EVENTS} events.</span>}</p>}
+    {diagnostics && <p className="att-help">{diagnostics}</p>}
     {view === 'live' ? <>
       <p className="att-help">Live Output shows Server console lines. ANSI control sequences are removed safely for display.</p>
       {liveLines.length ? <div className="att-console-shell" data-maximized={(onMaximize ? maximized : localMaximized) ? 'true' : 'false'} style={(onMaximize ? maximized : localMaximized) ? { position: 'fixed', top: 12, left: 12, right: 12, bottom: 12, height: 'auto', maxHeight: 'none', zIndex: 50 } : { height: consoleHeight }}>

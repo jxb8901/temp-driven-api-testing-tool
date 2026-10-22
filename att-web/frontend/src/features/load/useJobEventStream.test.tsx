@@ -5,6 +5,7 @@ import { renderToString } from 'react-dom/server';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { JobEventHandlers, LoadJobsApi } from './types';
 import {
+  COUNTER_FLUSH_INTERVAL_MS,
   EVENT_FLUSH_INTERVAL_MS,
   hasJobEventStreamEntryForTesting,
   jobEventStreamStateForTesting,
@@ -100,7 +101,7 @@ describe('useJobEventStream', () => {
     expect(host.querySelector('output')?.getAttribute('data-count')).toBe(String(MAX_EVENTS));
 
     act(() => latestHandler('J1')?.onEvent({ id: '1', type: 'log', data: 'evicted-index replay' }));
-    await flush();
+    await act(async () => { await vi.advanceTimersByTimeAsync(COUNTER_FLUSH_INTERVAL_MS); });
     expect(host.querySelector('output')?.getAttribute('data-stale')).toBe('1');
     expect(host.querySelector('output')?.textContent?.split(',')[0]).toBe('9501');
   });
@@ -163,6 +164,25 @@ describe('useJobEventStream', () => {
     expect(output.getAttribute('data-gaps')).toBe('1');
   });
 
+  it('out-of-order IDs: later-arriving lower IDs are counted stale and not inserted', async () => {
+    const { api, latestHandler } = makeApi();
+    await act(async () => root.render(<Consumer api={api} jobId="J1" />));
+    act(() => {
+      latestHandler('J1')?.onEvent({ id: '1', type: 'log', data: 'one' });
+      latestHandler('J1')?.onEvent({ id: '3', type: 'log', data: 'three' });
+      latestHandler('J1')?.onEvent({ id: '2', type: 'log', data: 'late two' });
+      latestHandler('J1')?.onEvent({ id: '4', type: 'log', data: 'four' });
+      latestHandler('J1')?.onEvent({ id: '3', type: 'log', data: 'duplicate three' });
+    });
+    await flush();
+
+    const output = host.querySelector('output')!;
+    expect(output.textContent).toBe('1,3,4');
+    expect(output.getAttribute('data-stale')).toBe('1');
+    expect(output.getAttribute('data-duplicates')).toBe('1');
+    expect(output.getAttribute('data-gaps')).toBe('1');
+  });
+
   it('publishes terminal status immediately without waiting for the ordinary flush', async () => {
     const { api, latestHandler } = makeApi();
     await act(async () => root.render(<Consumer api={api} jobId="J1" />));
@@ -191,6 +211,28 @@ describe('useJobEventStream', () => {
     expect(renders).not.toHaveBeenCalled();
     await flush();
     expect(renders).toHaveBeenCalledTimes(1);
+  });
+
+  it('coalesces 50 counter-only duplicate replays into one trailing publish', async () => {
+    const { api, latestHandler } = makeApi();
+    const renders = vi.fn();
+    await act(async () => root.render(<Consumer api={api} jobId="J1" onSnapshot={renders} />));
+    act(() => latestHandler('J1')?.onEvent({ id: '1', type: 'log', data: 'original' }));
+    await flush();
+    renders.mockClear();
+
+    await act(async () => {
+      for (let replay = 0; replay < 50; replay += 1) {
+        latestHandler('J1')?.onEvent({ id: '1', type: 'log', data: `replay-${replay}` });
+        await vi.advanceTimersByTimeAsync(18);
+      }
+    });
+    expect(renders).not.toHaveBeenCalled();
+    expect(host.querySelector('output')?.getAttribute('data-duplicates')).toBe('0');
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(COUNTER_FLUSH_INTERVAL_MS - 900); });
+    expect(renders).toHaveBeenCalledTimes(1);
+    expect(host.querySelector('output')?.getAttribute('data-duplicates')).toBe('50');
   });
 
   it('suppresses ordinary hidden-document publishes and publishes once when visible', async () => {
