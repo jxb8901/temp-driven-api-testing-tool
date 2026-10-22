@@ -246,7 +246,8 @@ async function main() {
     await standaloneEventsTab.page().locator('.att-job-events').first().waitFor();
     assert.equal(await createdEventSourceCount(page), 1, 'the standalone console tab should create exactly one EventSource for the terminal Job replay');
     await assertAxe(page, 'Standalone Job console should pass the configured WCAG accessibility rules');
-    await page.getByRole('link', { name: 'Open full Job details' }).click();
+    assert.equal(await page.getByRole('link', { name: 'Open full Job details' }).count(), 0, 'standalone console must keep the fixed Job without a details navigation action');
+    await page.goto(`${base}#/jobs/${jobId}`);
     await page.waitForURL(new RegExp(`#\\/jobs\\/${jobId}$`));
     await page.getByRole('heading', { name: `Job ${jobId}`, level: 1, exact: true }).waitFor();
 
