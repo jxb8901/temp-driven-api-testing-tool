@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { ApiError, type AsyncState, type PackageSummary } from '../../types';
 import { formatRoute, useNavigationGuard, type AppRoute } from '../../router';
+import { useCountdownNow } from '../../useCountdownNow';
 import type { SchedulesApi, ScheduleDefinition, ScheduleOccurrence, ValidatedScheduleIntent } from './types';
 import {
   createScheduleDraft, cronForDraft, draftFromSchedule, explainOccurrence,
@@ -164,6 +165,25 @@ function jobStatusLabel(status: string): string {
 const ACTIVE_JOB_STATUSES = ['QUEUED', 'PREPARING', 'RUNNING', 'CANCEL_REQUESTED'];
 const HISTORY_REFRESH_MS = 5000;
 
+function ValidatedDraftExpiry({ draftId, expiresAt, unavailable = false, onReturn }: {
+  draftId?: string;
+  expiresAt?: string;
+  unavailable?: boolean;
+  onReturn(): void;
+}): React.JSX.Element | null {
+  const active = Boolean(draftId && expiresAt && Number.isFinite(Date.parse(expiresAt)) && Date.parse(expiresAt) > Date.now());
+  const now = useCountdownNow(active);
+  if (!draftId || (!expiresAt && !unavailable)) return null;
+  const expired = unavailable || !expiresAt || !Number.isFinite(Date.parse(expiresAt)) || Date.parse(expiresAt) <= now;
+  return <>
+    <p className={expired ? 'att-schedule-error' : 'att-schedule-hint'} role={expired ? 'alert' : 'status'}>
+      {expired ? `${unavailable ? 'This validated execution draft has expired or is unavailable.' : 'This validated execution draft has expired.'} Return to the originating editor and validate again.`
+        : `Validated draft expires ${new Date(expiresAt).toLocaleString()}.`}
+    </p>
+    {expired && <button className="button button-quiet" type="button" onClick={onReturn}>Return to originating editor</button>}
+  </>;
+}
+
 function hasActiveJob(items: ScheduleOccurrence[]): boolean {
   return items.some(item => Boolean(item.jobStatus) && ACTIVE_JOB_STATUSES.includes(String(item.jobStatus).toUpperCase()));
 }
@@ -186,7 +206,6 @@ export function ScheduledLoadPage({ api, packages, enabled, onOpenJob, initialDr
   const [validatedIntentUnavailable, setValidatedIntentUnavailable] = useState(false);
   const [validatedDraftExpiresAt, setValidatedDraftExpiresAt] = useState<string>();
   const [validatedIntentDraftId, setValidatedIntentDraftId] = useState<string>();
-  const [clockNow, setClockNow] = useState(Date.now());
   const [validationDiagnostics, setValidationDiagnostics] = useState<ScheduleValidationDiagnostic[]>([]);
   const [validationRequestId, setValidationRequestId] = useState('');
   const [filter, setFilter] = useState('');
@@ -217,14 +236,6 @@ export function ScheduledLoadPage({ api, packages, enabled, onOpenJob, initialDr
   const dirtyRef = useRef(false);
   const cancelConfirmation = useRef<HTMLButtonElement>(null);
   const timezoneOptions = useMemo(timeZoneChoices, []);
-  const validatedDraftExpired = Boolean(validatedIntentDraftId && validatedDraftExpiresAt
-    && (!Number.isFinite(Date.parse(validatedDraftExpiresAt)) || Date.parse(validatedDraftExpiresAt) <= clockNow));
-
-  useEffect(() => {
-    const timer = window.setInterval(() => setClockNow(Date.now()), 1000);
-    return () => window.clearInterval(timer);
-  }, []);
-
   const draftSignature = JSON.stringify(draft);
   const dirty = draftSignature !== baseline;
   dirtyRef.current = dirty;
@@ -482,8 +493,9 @@ export function ScheduledLoadPage({ api, packages, enabled, onOpenJob, initialDr
     setMutationError('');
     setValidationDiagnostics([]); setValidationRequestId('');
     setNotice('');
-    if (validatedIntentDraftId && validatedDraftExpired) {
-      setValidatedIntentUnavailable(true);
+    const validatedDraftExpired = Boolean(validatedIntentDraftId && validatedDraftExpiresAt
+      && (!Number.isFinite(Date.parse(validatedDraftExpiresAt)) || Date.parse(validatedDraftExpiresAt) <= Date.now()));
+    if (validatedDraftExpired) {
       setMutationError('The validated execution draft expired while this form was open. Return to the originating editor and validate again.');
       return;
     }
@@ -757,10 +769,7 @@ export function ScheduledLoadPage({ api, packages, enabled, onOpenJob, initialDr
         <pre id="schedule-snapshot-content" tabIndex={0} aria-label="Validated Load scenario snapshot">{scenarioPreviewYaml}</pre>
       </details>}
       {notice && <p className="att-schedule-notice" role="status" aria-live="polite">{notice}</p>}
-      {validatedIntentDraftId && validatedDraftExpiresAt && <p className={validatedDraftExpired ? 'att-schedule-error' : 'att-schedule-hint'} role={validatedDraftExpired ? 'alert' : 'status'}>
-        {validatedDraftExpired ? 'This validated execution draft has expired. Return to the originating editor and validate again.'
-          : `Validated draft expires ${new Date(validatedDraftExpiresAt).toLocaleString()}.`}
-      </p>}
+      <ValidatedDraftExpiry draftId={validatedIntentDraftId} expiresAt={validatedDraftExpiresAt} unavailable={validatedIntentUnavailable} onReturn={closeEditor} />
       {mutationError && <div className="att-schedule-error" role="alert" aria-live="assertive">
         <p>{mutationError}</p>
         {validationDiagnostics.length > 0 && <section aria-labelledby="schedule-validation-heading">
@@ -779,7 +788,6 @@ export function ScheduledLoadPage({ api, packages, enabled, onOpenJob, initialDr
         </section>}
         {validationRequestId && <p><strong>Request ID:</strong> <code>{validationRequestId}</code></p>}
       </div>}
-      {(validatedIntentUnavailable || validatedDraftExpired) && <button className="button button-quiet" type="button" onClick={closeEditor}>Return to originating editor</button>}
       {actionPending && <p className="att-schedule-status" role="status" aria-live="polite" aria-busy="true">Applying the confirmed action to {schedules.find(item => item.id === actionPending)?.name || 'the schedule'}…</p>}
       {packages.status === 'loading' && <p role="status" aria-busy="true">Loading configured packages…</p>}
       {packages.status === 'error' && <p className="att-schedule-error" role="alert">Configured packages could not be loaded: {packages.error.message}</p>}

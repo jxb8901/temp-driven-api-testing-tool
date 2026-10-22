@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ComponentProps } from 'react';
 import type { JobEventHandlers, LoadJobsApi } from './types';
 import { FloatingJobConsole } from './FloatingJobConsole';
+import { EVENT_FLUSH_INTERVAL_MS } from './useJobEventStream';
 
 const job = { jobId: 'J1', command: 'run', executionType: 'run', packageId: 'demo', status: 'RUNNING' as const };
 
@@ -84,20 +85,26 @@ describe('FloatingJobConsole', () => {
     expect(onCancelSwitch).not.toHaveBeenCalled();
   });
 
-  it('keeps floating header controls above the maximized console shell', () => {
-    const { handler } = renderConsole();
-    act(() => handler()?.onEvent({ id: 'log-1', type: 'log', data: { console: '[RUN] live line' } }));
-    const maximize = host.querySelector<HTMLButtonElement>('[aria-label="Maximize Job console"]')!;
-    act(() => maximize.click());
+  it('keeps floating header controls above the maximized console shell', async () => {
+    vi.useFakeTimers();
+    try {
+      const { handler } = renderConsole();
+      act(() => handler()?.onEvent({ id: 'log-1', type: 'log', data: { console: '[RUN] live line' } }));
+      await act(async () => { await vi.advanceTimersByTimeAsync(EVENT_FLUSH_INTERVAL_MS); });
+      const maximize = host.querySelector<HTMLButtonElement>('[aria-label="Maximize Job console"]')!;
+      act(() => maximize.click());
 
-    const shell = host.querySelector<HTMLElement>('.att-console-shell')!;
-    expect(shell.dataset.maximized).toBe('true');
-    expect(shell.style.position).not.toBe('fixed');
-    expect(shell.style.zIndex).toBe('');
-    expect(host.querySelector('[aria-label="Restore Job console"]')).not.toBeNull();
-    expect(host.querySelector('[aria-label="Minimize Job console"]')).not.toBeNull();
-    expect(host.querySelector('[aria-label="Close Job console"]')).not.toBeNull();
-    expect(host.querySelector('[role="tablist"][aria-label="Console view"] [role="tab"]')).not.toBeNull();
+      const shell = host.querySelector<HTMLElement>('.att-console-shell')!;
+      expect(shell.dataset.maximized).toBe('true');
+      expect(shell.style.position).not.toBe('fixed');
+      expect(shell.style.zIndex).toBe('');
+      expect(host.querySelector('[aria-label="Restore Job console"]')).not.toBeNull();
+      expect(host.querySelector('[aria-label="Minimize Job console"]')).not.toBeNull();
+      expect(host.querySelector('[aria-label="Close Job console"]')).not.toBeNull();
+      expect(host.querySelector('[role="tablist"][aria-label="Console view"] [role="tab"]')).not.toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('projects terminal stream status while minimized and after restore, despite late nonterminal updates', async () => {

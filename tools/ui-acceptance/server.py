@@ -85,6 +85,14 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:
         request = urlsplit(self.path)
+        if request.path == "/__perf/burst-events":
+            self._perf_burst_events(parse_qs(request.query))
+            return
+        if request.path == "/__perf/last-event-ids":
+            self._json(200, {"lastEventIds": list(self.server.perf_last_event_ids)})
+            if parse_qs(request.query).get("reset") == ["1"]:
+                self.server.perf_last_event_ids.clear()
+            return
         if request.path.startswith("/att/api/v1/"):
             self._api(request.path.removeprefix("/att/api/v1/"), parse_qs(request.query))
             return
@@ -567,6 +575,45 @@ class Handler(BaseHTTPRequestHandler):
             data = []
         self._json(200, {"items": data})
 
+    def _perf_burst_events(self, query: dict[str, list[str]]) -> None:
+        """Burst stream for tools/ui-acceptance/ui-perf.cjs (#266).
+
+        Real HTTP (not Playwright fulfilment) so Chromium sends Last-Event-ID
+        on its automatic reconnect. The first response carries the burst
+        without a terminal event and closes; a reconnect is recorded and gets
+        the remaining events plus the terminal result.
+        """
+        count = int((query.get("count") or ["10000"])[0])
+        last_event_id = int(self.headers.get("Last-Event-ID") or 0)
+        if last_event_id:
+            self.server.perf_last_event_ids.append(last_event_id)
+        start = last_event_id + 1 if last_event_id else 1
+        lines = ["retry: 5\n\n"]
+        for event_id in range(start, count + 1):
+            if event_id == 1:
+                kind, data = "status", {"status": "RUNNING", "sequence": 1, "console": "Performance fixture started", "message": "Performance fixture started"}
+            elif event_id % 19 == 0:
+                kind, data = "diagnostic", {"severity": "INFO", "sequence": event_id, "message": f"diagnostic {event_id}"}
+            elif event_id % 3 == 0:
+                kind, data = "progress", {"status": "RUNNING", "sequence": event_id, "progress": event_id % 100, "console": f"perf event {event_id}"}
+            else:
+                kind, data = "log", {"sequence": event_id, "console": f"perf event {event_id}", "message": f"event {event_id}"}
+            lines.append(f"id: {event_id}\nevent: {kind}\ndata: {json.dumps(data, separators=(',', ':'))}\n\n")
+        if last_event_id:
+            lines.append(f"id: {count + 1}\nevent: result\ndata: {json.dumps({'status': 'PASS', 'sequence': count + 1, 'message': 'Performance fixture complete'})}\n\n")
+        body = "".join(lines).encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        try:
+            for offset in range(0, len(body), 1 << 16):
+                self.wfile.write(body[offset:offset + (1 << 16)])
+                self.wfile.flush()
+        except (BrokenPipeError, ConnectionResetError):
+            pass
+
     def _events(self) -> None:
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream; charset=utf-8")
@@ -629,6 +676,7 @@ def main() -> None:
     server.valid_drafts = set()
     server.cancel_requested = False
     server.job_list_requests = 0
+    server.perf_last_event_ids = []
     server.auth_users = [
         {"loginId": "admin", "displayName": "Studio Admin", "role": "ADMIN", "active": True},
         {"loginId": "jane", "displayName": "Jane Tester", "role": "USER", "active": True},

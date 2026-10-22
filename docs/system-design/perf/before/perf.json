@@ -1,0 +1,6080 @@
+{
+  "label": "before",
+  "generatedAt": "2026-10-21T23:50:54.629Z",
+  "fixture": {
+    "jobId": "PERF-JOB-266",
+    "packageId": "payments",
+    "eventTypes": [
+      "status",
+      "progress",
+      "log",
+      "diagnostic",
+      "result"
+    ],
+    "steadyRates": [
+      10,
+      50,
+      200
+    ],
+    "steadyDurationMs": 1000,
+    "burstEvents": 10000,
+    "retainedEvents": 500,
+    "metricBuckets": [
+      100,
+      1000,
+      4096
+    ],
+    "jobs": 100,
+    "schedules": 100,
+    "routes": [
+      "dashboard",
+      "explorer",
+      "configuration",
+      "load",
+      "jobs",
+      "schedules",
+      "settings"
+    ]
+  },
+  "environment": {
+    "gitCommit": "3e03207ab92e61b2faa506c3b29489bc73aacdea",
+    "os": "darwin 25.1.0 arm64",
+    "cpuCount": 8,
+    "browser": "chromium",
+    "browserVersion": "155.0.8059.85",
+    "playwrightVersion": "1.62.1",
+    "reducedMotion": false,
+    "uiDist": "/Users/jeffrey/dev/temp-driven-api-testing-tool/.git/att-review/dist-before"
+  },
+  "scenarios": [
+    {
+      "name": "live-steady-10/s",
+      "samples": [
+        {
+          "repeat": 1,
+          "metrics": {
+            "routeReadyMs": 986.8000000119209,
+            "longTaskCount": 1,
+            "longTaskOver50Ms": 1,
+            "maxLongTaskMs": 73,
+            "mutationBatches": 24,
+            "frameCount": 69,
+            "frameOver16Ms": 68,
+            "domNodes": 194,
+            "jsHeapBytes": 5568787,
+            "incomingEvents": 11,
+            "renderedEvents": 10,
+            "renderedConsoleLines": 10,
+            "latestDisplayedEventDelayMs": 1,
+            "terminalStatusDelayMs": 0.800000011920929,
+            "duplicateEventIds": 0,
+            "missingEventIds": 0,
+            "eventOrderMatchesJournal": null,
+            "eventSourceInstances": {
+              "PERF-JOB-266": 1
+            },
+            "inputToNextPaintMs": 37,
+            "transferredJsCssBytes": 582430,
+            "resourceCountJsCss": 8,
+            "sseRequestCount": 1,
+            "durationMs": 1239,
+            "eventSourceInstancesTotal": 1
+          },
+          "pageErrors": []
+        },
+        {
+          "repeat": 2,
+          "metrics": {
+            "routeReadyMs": 899.2999999523163,
+            "longTaskCount": 0,
+            "longTaskOver50Ms": 0,
+            "maxLongTaskMs": 0,
+            "mutationBatches": 24,
+            "frameCount": 65,
+            "frameOver16Ms": 64,
+            "domNodes": 194,
+            "jsHeapBytes": 5552487,
+            "incomingEvents": 11,
+            "renderedEvents": 10,
+            "renderedConsoleLines": 10,
+            "latestDisplayedEventDelayMs": 0.7999999523162842,
+            "terminalStatusDelayMs": 0.699999988079071,
+            "duplicateEventIds": 0,
+            "missingEventIds": 0,
+            "eventOrderMatchesJournal": null,
+            "eventSourceInstances": {
+              "PERF-JOB-266": 1
+            },
+            "inputToNextPaintMs": 33.10000002384186,
+            "transferredJsCssBytes": 582430,
+            "resourceCountJsCss": 8,
+            "sseRequestCount": 1,
+            "durationMs": 1098,
+            "eventSourceInstancesTotal": 1
+          },
+          "pageErrors": []
+        },
+        {
+          "repeat": 3,
+          "metrics": {
+            "routeReadyMs": 894.0999999642372,
+            "longTaskCount": 1,
+            "longTaskOver50Ms": 0,
+            "maxLongTaskMs": 50,
+            "mutationBatches": 24,
+            "frameCount": 62,
+            "frameOver16Ms": 62,
+            "domNodes": 194,
+            "jsHeapBytes": 5451090,
+            "incomingEvents": 11,
+            "renderedEvents": 10,
+            "renderedConsoleLines": 10,
+            "latestDisplayedEventDelayMs": 1.100000023841858,
+            "terminalStatusDelayMs": 0.6000000238418579,
+            "duplicateEventIds": 0,
+            "missingEventIds": 0,
+            "eventOrderMatchesJournal": null,
+            "eventSourceInstances": {
+              "PERF-JOB-266": 1
+            },
+            "inputToNextPaintMs": 23.69999998807907,
+            "transferredJsCssBytes": 582430,
+            "resourceCountJsCss": 8,
+            "sseRequestCount": 1,
+            "durationMs": 1122,
+            "eventSourceInstancesTotal": 1
+          },
+          "pageErrors": []
+        }
+      ],
+      "summary": {
+        "routeReadyMs": {
+          "median": 899.2999999523163,
+          "p95": 978.0500000059604,
+          "raw": [
+            986.8000000119209,
+            899.2999999523163,
+            894.0999999642372
+          ]
+        },
+        "longTaskCount": {
+          "median": 1,
+          "p95": 1,
+          "raw": [
+            1,
+            0,
+            1
+          ]
+        },
+        "longTaskOver50Ms": {
+          "median": 0,
+          "p95": 0.8999999999999999,
+          "raw": [
+            1,
+            0,
+            0
+          ]
+        },
+        "maxLongTaskMs": {
+          "median": 50,
+          "p95": 70.7,
+          "raw": [
+            73,
+            0,
+            50
+          ]
+        },
+        "mutationBatches": {
+          "median": 24,
+          "p95": 24,
+          "raw": [
+            24,
+            24,
+            24
+          ]
+        },
+        "frameCount": {
+          "median": 65,
+          "p95": 68.6,
+          "raw": [
+            69,
+            65,
+            62
+          ]
+        },
+        "frameOver16Ms": {
+          "median": 64,
+          "p95": 67.6,
+          "raw": [
+            68,
+            64,
+            62
+          ]
+        },
+        "domNodes": {
+          "median": 194,
+          "p95": 194,
+          "raw": [
+            194,
+            194,
+            194
+          ]
+        },
+        "jsHeapBytes": {
+          "median": 5552487,
+          "p95": 5567157,
+          "raw": [
+            5568787,
+            5552487,
+            5451090
+          ]
+        },
+        "incomingEvents": {
+          "median": 11,
+          "p95": 11,
+          "raw": [
+            11,
+            11,
+            11
+          ]
+        },
+        "renderedEvents": {
+          "median": 10,
+          "p95": 10,
+          "raw": [
+            10,
+            10,
+            10
+          ]
+        },
+        "renderedConsoleLines": {
+          "median": 10,
+          "p95": 10,
+          "raw": [
+            10,
+            10,
+            10
+          ]
+        },
+        "latestDisplayedEventDelayMs": {
+          "median": 1,
+          "p95": 1.0900000214576722,
+          "raw": [
+            1,
+            0.7999999523162842,
+            1.100000023841858
+          ]
+        },
+        "terminalStatusDelayMs": {
+          "median": 0.699999988079071,
+          "p95": 0.7900000095367432,
+          "raw": [
+            0.800000011920929,
+            0.699999988079071,
+            0.6000000238418579
+          ]
+        },
+        "duplicateEventIds": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "missingEventIds": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "inputToNextPaintMs": {
+          "median": 33.10000002384186,
+          "p95": 36.61000000238418,
+          "raw": [
+            37,
+            33.10000002384186,
+            23.69999998807907
+          ]
+        },
+        "transferredJsCssBytes": {
+          "median": 582430,
+          "p95": 582430,
+          "raw": [
+            582430,
+            582430,
+            582430
+          ]
+        },
+        "resourceCountJsCss": {
+          "median": 8,
+          "p95": 8,
+          "raw": [
+            8,
+            8,
+            8
+          ]
+        },
+        "sseRequestCount": {
+          "median": 1,
+          "p95": 1,
+          "raw": [
+            1,
+            1,
+            1
+          ]
+        },
+        "durationMs": {
+          "median": 1122,
+          "p95": 1227.3,
+          "raw": [
+            1239,
+            1098,
+            1122
+          ]
+        },
+        "eventSourceInstancesTotal": {
+          "median": 1,
+          "p95": 1,
+          "raw": [
+            1,
+            1,
+            1
+          ]
+        },
+        "crashed": {
+          "count": 0,
+          "total": 3
+        },
+        "crashSteps": []
+      }
+    },
+    {
+      "name": "live-steady-50/s",
+      "samples": [
+        {
+          "repeat": 1,
+          "metrics": {
+            "routeReadyMs": 897.5,
+            "longTaskCount": 0,
+            "longTaskOver50Ms": 0,
+            "maxLongTaskMs": 0,
+            "mutationBatches": 64,
+            "frameCount": 66,
+            "frameOver16Ms": 65,
+            "domNodes": 194,
+            "jsHeapBytes": 6307049,
+            "incomingEvents": 51,
+            "renderedEvents": 48,
+            "renderedConsoleLines": 48,
+            "latestDisplayedEventDelayMs": 1.5,
+            "terminalStatusDelayMs": 1.300000011920929,
+            "duplicateEventIds": 0,
+            "missingEventIds": 0,
+            "eventOrderMatchesJournal": null,
+            "eventSourceInstances": {
+              "PERF-JOB-266": 1
+            },
+            "inputToNextPaintMs": 32.19999998807907,
+            "transferredJsCssBytes": 582430,
+            "resourceCountJsCss": 8,
+            "sseRequestCount": 1,
+            "durationMs": 1126,
+            "eventSourceInstancesTotal": 1
+          },
+          "pageErrors": []
+        },
+        {
+          "repeat": 2,
+          "metrics": {
+            "routeReadyMs": 895.9000000357628,
+            "longTaskCount": 0,
+            "longTaskOver50Ms": 0,
+            "maxLongTaskMs": 0,
+            "mutationBatches": 64,
+            "frameCount": 64,
+            "frameOver16Ms": 63,
+            "domNodes": 194,
+            "jsHeapBytes": 6119448,
+            "incomingEvents": 51,
+            "renderedEvents": 48,
+            "renderedConsoleLines": 48,
+            "latestDisplayedEventDelayMs": 1.399999976158142,
+            "terminalStatusDelayMs": 1.0999999642372131,
+            "duplicateEventIds": 0,
+            "missingEventIds": 0,
+            "eventOrderMatchesJournal": null,
+            "eventSourceInstances": {
+              "PERF-JOB-266": 1
+            },
+            "inputToNextPaintMs": 30.399999976158142,
+            "transferredJsCssBytes": 582430,
+            "resourceCountJsCss": 8,
+            "sseRequestCount": 1,
+            "durationMs": 1099,
+            "eventSourceInstancesTotal": 1
+          },
+          "pageErrors": []
+        },
+        {
+          "repeat": 3,
+          "metrics": {
+            "routeReadyMs": 897.3000000119209,
+            "longTaskCount": 0,
+            "longTaskOver50Ms": 0,
+            "maxLongTaskMs": 0,
+            "mutationBatches": 64,
+            "frameCount": 65,
+            "frameOver16Ms": 64,
+            "domNodes": 194,
+            "jsHeapBytes": 6081301,
+            "incomingEvents": 51,
+            "renderedEvents": 48,
+            "renderedConsoleLines": 48,
+            "latestDisplayedEventDelayMs": 1.399999976158142,
+            "terminalStatusDelayMs": 1.100000023841858,
+            "duplicateEventIds": 0,
+            "missingEventIds": 0,
+            "eventOrderMatchesJournal": null,
+            "eventSourceInstances": {
+              "PERF-JOB-266": 1
+            },
+            "inputToNextPaintMs": 23.80000001192093,
+            "transferredJsCssBytes": 582430,
+            "resourceCountJsCss": 8,
+            "sseRequestCount": 1,
+            "durationMs": 1106,
+            "eventSourceInstancesTotal": 1
+          },
+          "pageErrors": []
+        }
+      ],
+      "summary": {
+        "routeReadyMs": {
+          "median": 897.3000000119209,
+          "p95": 897.4800000011921,
+          "raw": [
+            897.5,
+            895.9000000357628,
+            897.3000000119209
+          ]
+        },
+        "longTaskCount": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "longTaskOver50Ms": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "maxLongTaskMs": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "mutationBatches": {
+          "median": 64,
+          "p95": 64,
+          "raw": [
+            64,
+            64,
+            64
+          ]
+        },
+        "frameCount": {
+          "median": 65,
+          "p95": 65.9,
+          "raw": [
+            66,
+            64,
+            65
+          ]
+        },
+        "frameOver16Ms": {
+          "median": 64,
+          "p95": 64.9,
+          "raw": [
+            65,
+            63,
+            64
+          ]
+        },
+        "domNodes": {
+          "median": 194,
+          "p95": 194,
+          "raw": [
+            194,
+            194,
+            194
+          ]
+        },
+        "jsHeapBytes": {
+          "median": 6119448,
+          "p95": 6288288.9,
+          "raw": [
+            6307049,
+            6119448,
+            6081301
+          ]
+        },
+        "incomingEvents": {
+          "median": 51,
+          "p95": 51,
+          "raw": [
+            51,
+            51,
+            51
+          ]
+        },
+        "renderedEvents": {
+          "median": 48,
+          "p95": 48,
+          "raw": [
+            48,
+            48,
+            48
+          ]
+        },
+        "renderedConsoleLines": {
+          "median": 48,
+          "p95": 48,
+          "raw": [
+            48,
+            48,
+            48
+          ]
+        },
+        "latestDisplayedEventDelayMs": {
+          "median": 1.399999976158142,
+          "p95": 1.4899999976158143,
+          "raw": [
+            1.5,
+            1.399999976158142,
+            1.399999976158142
+          ]
+        },
+        "terminalStatusDelayMs": {
+          "median": 1.100000023841858,
+          "p95": 1.2800000131130218,
+          "raw": [
+            1.300000011920929,
+            1.0999999642372131,
+            1.100000023841858
+          ]
+        },
+        "duplicateEventIds": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "missingEventIds": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "inputToNextPaintMs": {
+          "median": 30.399999976158142,
+          "p95": 32.01999998688698,
+          "raw": [
+            32.19999998807907,
+            30.399999976158142,
+            23.80000001192093
+          ]
+        },
+        "transferredJsCssBytes": {
+          "median": 582430,
+          "p95": 582430,
+          "raw": [
+            582430,
+            582430,
+            582430
+          ]
+        },
+        "resourceCountJsCss": {
+          "median": 8,
+          "p95": 8,
+          "raw": [
+            8,
+            8,
+            8
+          ]
+        },
+        "sseRequestCount": {
+          "median": 1,
+          "p95": 1,
+          "raw": [
+            1,
+            1,
+            1
+          ]
+        },
+        "durationMs": {
+          "median": 1106,
+          "p95": 1124,
+          "raw": [
+            1126,
+            1099,
+            1106
+          ]
+        },
+        "eventSourceInstancesTotal": {
+          "median": 1,
+          "p95": 1,
+          "raw": [
+            1,
+            1,
+            1
+          ]
+        },
+        "crashed": {
+          "count": 0,
+          "total": 3
+        },
+        "crashSteps": []
+      }
+    },
+    {
+      "name": "live-steady-200/s",
+      "samples": [
+        {
+          "repeat": 1,
+          "metrics": {
+            "routeReadyMs": 902.3000000119209,
+            "longTaskCount": 1,
+            "longTaskOver50Ms": 1,
+            "maxLongTaskMs": 74,
+            "mutationBatches": 214,
+            "frameCount": 59,
+            "frameOver16Ms": 59,
+            "domNodes": 194,
+            "jsHeapBytes": 6862255,
+            "incomingEvents": 201,
+            "renderedEvents": 190,
+            "renderedConsoleLines": 190,
+            "latestDisplayedEventDelayMs": 2.100000023841858,
+            "terminalStatusDelayMs": 1.600000023841858,
+            "duplicateEventIds": 0,
+            "missingEventIds": 0,
+            "eventOrderMatchesJournal": null,
+            "eventSourceInstances": {
+              "PERF-JOB-266": 1
+            },
+            "inputToNextPaintMs": 28.5,
+            "transferredJsCssBytes": 582430,
+            "resourceCountJsCss": 8,
+            "sseRequestCount": 1,
+            "durationMs": 1105,
+            "eventSourceInstancesTotal": 1
+          },
+          "pageErrors": []
+        },
+        {
+          "repeat": 2,
+          "metrics": {
+            "routeReadyMs": 893.6000000238419,
+            "longTaskCount": 1,
+            "longTaskOver50Ms": 1,
+            "maxLongTaskMs": 68,
+            "mutationBatches": 214,
+            "frameCount": 62,
+            "frameOver16Ms": 61,
+            "domNodes": 194,
+            "jsHeapBytes": 5487325,
+            "incomingEvents": 201,
+            "renderedEvents": 190,
+            "renderedConsoleLines": 190,
+            "latestDisplayedEventDelayMs": 1.5999999642372131,
+            "terminalStatusDelayMs": 1.199999988079071,
+            "duplicateEventIds": 0,
+            "missingEventIds": 0,
+            "eventOrderMatchesJournal": null,
+            "eventSourceInstances": {
+              "PERF-JOB-266": 1
+            },
+            "inputToNextPaintMs": 29.600000023841858,
+            "transferredJsCssBytes": 582430,
+            "resourceCountJsCss": 8,
+            "sseRequestCount": 1,
+            "durationMs": 1099,
+            "eventSourceInstancesTotal": 1
+          },
+          "pageErrors": []
+        },
+        {
+          "repeat": 3,
+          "metrics": {
+            "routeReadyMs": 899.1999999880791,
+            "longTaskCount": 1,
+            "longTaskOver50Ms": 1,
+            "maxLongTaskMs": 78,
+            "mutationBatches": 214,
+            "frameCount": 61,
+            "frameOver16Ms": 60,
+            "domNodes": 194,
+            "jsHeapBytes": 5513269,
+            "incomingEvents": 201,
+            "renderedEvents": 190,
+            "renderedConsoleLines": 190,
+            "latestDisplayedEventDelayMs": 1.699999988079071,
+            "terminalStatusDelayMs": 1.2999999523162842,
+            "duplicateEventIds": 0,
+            "missingEventIds": 0,
+            "eventOrderMatchesJournal": null,
+            "eventSourceInstances": {
+              "PERF-JOB-266": 1
+            },
+            "inputToNextPaintMs": 23.899999976158142,
+            "transferredJsCssBytes": 582430,
+            "resourceCountJsCss": 8,
+            "sseRequestCount": 1,
+            "durationMs": 1105,
+            "eventSourceInstancesTotal": 1
+          },
+          "pageErrors": []
+        }
+      ],
+      "summary": {
+        "routeReadyMs": {
+          "median": 899.1999999880791,
+          "p95": 901.9900000095367,
+          "raw": [
+            902.3000000119209,
+            893.6000000238419,
+            899.1999999880791
+          ]
+        },
+        "longTaskCount": {
+          "median": 1,
+          "p95": 1,
+          "raw": [
+            1,
+            1,
+            1
+          ]
+        },
+        "longTaskOver50Ms": {
+          "median": 1,
+          "p95": 1,
+          "raw": [
+            1,
+            1,
+            1
+          ]
+        },
+        "maxLongTaskMs": {
+          "median": 74,
+          "p95": 77.6,
+          "raw": [
+            74,
+            68,
+            78
+          ]
+        },
+        "mutationBatches": {
+          "median": 214,
+          "p95": 214,
+          "raw": [
+            214,
+            214,
+            214
+          ]
+        },
+        "frameCount": {
+          "median": 61,
+          "p95": 61.9,
+          "raw": [
+            59,
+            62,
+            61
+          ]
+        },
+        "frameOver16Ms": {
+          "median": 60,
+          "p95": 60.9,
+          "raw": [
+            59,
+            61,
+            60
+          ]
+        },
+        "domNodes": {
+          "median": 194,
+          "p95": 194,
+          "raw": [
+            194,
+            194,
+            194
+          ]
+        },
+        "jsHeapBytes": {
+          "median": 5513269,
+          "p95": 6727356.4,
+          "raw": [
+            6862255,
+            5487325,
+            5513269
+          ]
+        },
+        "incomingEvents": {
+          "median": 201,
+          "p95": 201,
+          "raw": [
+            201,
+            201,
+            201
+          ]
+        },
+        "renderedEvents": {
+          "median": 190,
+          "p95": 190,
+          "raw": [
+            190,
+            190,
+            190
+          ]
+        },
+        "renderedConsoleLines": {
+          "median": 190,
+          "p95": 190,
+          "raw": [
+            190,
+            190,
+            190
+          ]
+        },
+        "latestDisplayedEventDelayMs": {
+          "median": 1.699999988079071,
+          "p95": 2.060000020265579,
+          "raw": [
+            2.100000023841858,
+            1.5999999642372131,
+            1.699999988079071
+          ]
+        },
+        "terminalStatusDelayMs": {
+          "median": 1.2999999523162842,
+          "p95": 1.5700000166893004,
+          "raw": [
+            1.600000023841858,
+            1.199999988079071,
+            1.2999999523162842
+          ]
+        },
+        "duplicateEventIds": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "missingEventIds": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "inputToNextPaintMs": {
+          "median": 28.5,
+          "p95": 29.49000002145767,
+          "raw": [
+            28.5,
+            29.600000023841858,
+            23.899999976158142
+          ]
+        },
+        "transferredJsCssBytes": {
+          "median": 582430,
+          "p95": 582430,
+          "raw": [
+            582430,
+            582430,
+            582430
+          ]
+        },
+        "resourceCountJsCss": {
+          "median": 8,
+          "p95": 8,
+          "raw": [
+            8,
+            8,
+            8
+          ]
+        },
+        "sseRequestCount": {
+          "median": 1,
+          "p95": 1,
+          "raw": [
+            1,
+            1,
+            1
+          ]
+        },
+        "durationMs": {
+          "median": 1105,
+          "p95": 1105,
+          "raw": [
+            1105,
+            1099,
+            1105
+          ]
+        },
+        "eventSourceInstancesTotal": {
+          "median": 1,
+          "p95": 1,
+          "raw": [
+            1,
+            1,
+            1
+          ]
+        },
+        "crashed": {
+          "count": 0,
+          "total": 3
+        },
+        "crashSteps": []
+      }
+    },
+    {
+      "name": "live-burst-10k-replay-reconnect",
+      "samples": [
+        {
+          "repeat": 1,
+          "metrics": {
+            "routeReadyMs": 370192.8000000119,
+            "longTaskCount": 20,
+            "longTaskOver50Ms": 20,
+            "maxLongTaskMs": 361064,
+            "mutationBatches": 10016,
+            "frameCount": 97,
+            "frameOver16Ms": 95,
+            "domNodes": 4000,
+            "jsHeapBytes": 65809991,
+            "incomingEvents": 10001,
+            "renderedEvents": 474,
+            "renderedConsoleLines": 0,
+            "latestDisplayedEventDelayMs": 223.5999999642372,
+            "terminalStatusDelayMs": 224.5,
+            "duplicateEventIds": 0,
+            "missingEventIds": 0,
+            "eventOrderMatchesJournal": true,
+            "eventSourceInstances": {
+              "PERF-JOB-266": 1
+            },
+            "inputToNextPaintMs": 1693,
+            "transferredJsCssBytes": 582430,
+            "resourceCountJsCss": 8,
+            "sseRequestCount": 2,
+            "reconnectLastEventIds": [
+              10000
+            ],
+            "durationMs": 385494,
+            "eventSourceInstancesTotal": 1
+          },
+          "pageErrors": [
+            {
+              "step": "open #/jobs/PERF-JOB-266/console?view=events",
+              "message": "locator.waitFor: Timeout 8000ms exceeded.\nCall log:\n  - waiting for getByRole('heading', { name: 'Job PERF-JOB-266', exact: true }).first() to be visible\n"
+            }
+          ]
+        },
+        {
+          "repeat": 2,
+          "metrics": {
+            "routeReadyMs": 389295,
+            "longTaskCount": 28,
+            "longTaskOver50Ms": 28,
+            "maxLongTaskMs": 374370,
+            "mutationBatches": 10015,
+            "frameCount": 108,
+            "frameOver16Ms": 107,
+            "domNodes": 4000,
+            "jsHeapBytes": 59067785,
+            "incomingEvents": 10001,
+            "renderedEvents": 474,
+            "renderedConsoleLines": 0,
+            "latestDisplayedEventDelayMs": 36.09999996423721,
+            "terminalStatusDelayMs": 38.80000001192093,
+            "duplicateEventIds": 0,
+            "missingEventIds": 0,
+            "eventOrderMatchesJournal": true,
+            "eventSourceInstances": {
+              "PERF-JOB-266": 1
+            },
+            "inputToNextPaintMs": 1795.6000000238419,
+            "transferredJsCssBytes": 582430,
+            "resourceCountJsCss": 8,
+            "sseRequestCount": 2,
+            "reconnectLastEventIds": [
+              10000
+            ],
+            "durationMs": 400515,
+            "eventSourceInstancesTotal": 1
+          },
+          "pageErrors": [
+            {
+              "step": "open #/jobs/PERF-JOB-266/console?view=events",
+              "message": "locator.waitFor: Timeout 8000ms exceeded.\nCall log:\n  - waiting for getByRole('heading', { name: 'Job PERF-JOB-266', exact: true }).first() to be visible\n"
+            }
+          ]
+        },
+        {
+          "repeat": 3,
+          "metrics": {
+            "routeReadyMs": 417189.2999999523,
+            "longTaskCount": 10,
+            "longTaskOver50Ms": 10,
+            "maxLongTaskMs": 399678,
+            "mutationBatches": 10016,
+            "frameCount": 102,
+            "frameOver16Ms": 101,
+            "domNodes": 4000,
+            "jsHeapBytes": 14640240,
+            "incomingEvents": 10001,
+            "renderedEvents": 474,
+            "renderedConsoleLines": 0,
+            "latestDisplayedEventDelayMs": 207.60000002384186,
+            "terminalStatusDelayMs": 208.10000002384186,
+            "duplicateEventIds": 0,
+            "missingEventIds": 0,
+            "eventOrderMatchesJournal": true,
+            "eventSourceInstances": {
+              "PERF-JOB-266": 1
+            },
+            "inputToNextPaintMs": 1908.699999988079,
+            "transferredJsCssBytes": 582430,
+            "resourceCountJsCss": 8,
+            "sseRequestCount": 2,
+            "reconnectLastEventIds": [
+              10000
+            ],
+            "durationMs": 427777,
+            "eventSourceInstancesTotal": 1
+          },
+          "pageErrors": [
+            {
+              "step": "open #/jobs/PERF-JOB-266/console?view=events",
+              "message": "locator.waitFor: Timeout 8000ms exceeded.\nCall log:\n  - waiting for getByRole('heading', { name: 'Job PERF-JOB-266', exact: true }).first() to be visible\n"
+            }
+          ]
+        }
+      ],
+      "summary": {
+        "routeReadyMs": {
+          "median": 389295,
+          "p95": 414399.8699999571,
+          "raw": [
+            370192.8000000119,
+            389295,
+            417189.2999999523
+          ]
+        },
+        "longTaskCount": {
+          "median": 20,
+          "p95": 27.2,
+          "raw": [
+            20,
+            28,
+            10
+          ]
+        },
+        "longTaskOver50Ms": {
+          "median": 20,
+          "p95": 27.2,
+          "raw": [
+            20,
+            28,
+            10
+          ]
+        },
+        "maxLongTaskMs": {
+          "median": 374370,
+          "p95": 397147.2,
+          "raw": [
+            361064,
+            374370,
+            399678
+          ]
+        },
+        "mutationBatches": {
+          "median": 10016,
+          "p95": 10016,
+          "raw": [
+            10016,
+            10015,
+            10016
+          ]
+        },
+        "frameCount": {
+          "median": 102,
+          "p95": 107.4,
+          "raw": [
+            97,
+            108,
+            102
+          ]
+        },
+        "frameOver16Ms": {
+          "median": 101,
+          "p95": 106.4,
+          "raw": [
+            95,
+            107,
+            101
+          ]
+        },
+        "domNodes": {
+          "median": 4000,
+          "p95": 4000,
+          "raw": [
+            4000,
+            4000,
+            4000
+          ]
+        },
+        "jsHeapBytes": {
+          "median": 59067785,
+          "p95": 65135770.4,
+          "raw": [
+            65809991,
+            59067785,
+            14640240
+          ]
+        },
+        "incomingEvents": {
+          "median": 10001,
+          "p95": 10001,
+          "raw": [
+            10001,
+            10001,
+            10001
+          ]
+        },
+        "renderedEvents": {
+          "median": 474,
+          "p95": 474,
+          "raw": [
+            474,
+            474,
+            474
+          ]
+        },
+        "renderedConsoleLines": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "latestDisplayedEventDelayMs": {
+          "median": 207.60000002384186,
+          "p95": 221.99999997019768,
+          "raw": [
+            223.5999999642372,
+            36.09999996423721,
+            207.60000002384186
+          ]
+        },
+        "terminalStatusDelayMs": {
+          "median": 208.10000002384186,
+          "p95": 222.8600000023842,
+          "raw": [
+            224.5,
+            38.80000001192093,
+            208.10000002384186
+          ]
+        },
+        "duplicateEventIds": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "missingEventIds": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "inputToNextPaintMs": {
+          "median": 1795.6000000238419,
+          "p95": 1897.3899999916553,
+          "raw": [
+            1693,
+            1795.6000000238419,
+            1908.699999988079
+          ]
+        },
+        "transferredJsCssBytes": {
+          "median": 582430,
+          "p95": 582430,
+          "raw": [
+            582430,
+            582430,
+            582430
+          ]
+        },
+        "resourceCountJsCss": {
+          "median": 8,
+          "p95": 8,
+          "raw": [
+            8,
+            8,
+            8
+          ]
+        },
+        "sseRequestCount": {
+          "median": 2,
+          "p95": 2,
+          "raw": [
+            2,
+            2,
+            2
+          ]
+        },
+        "durationMs": {
+          "median": 400515,
+          "p95": 425050.8,
+          "raw": [
+            385494,
+            400515,
+            427777
+          ]
+        },
+        "eventSourceInstancesTotal": {
+          "median": 1,
+          "p95": 1,
+          "raw": [
+            1,
+            1,
+            1
+          ]
+        },
+        "crashed": {
+          "count": 0,
+          "total": 3
+        },
+        "crashSteps": []
+      }
+    },
+    {
+      "name": "job-detail-500-retained-events",
+      "samples": [
+        {
+          "repeat": 1,
+          "metrics": {
+            "routeReadyMs": 5308.200000047684,
+            "longTaskCount": 2,
+            "longTaskOver50Ms": 2,
+            "maxLongTaskMs": 4727,
+            "mutationBatches": 514,
+            "frameCount": 41,
+            "frameOver16Ms": 40,
+            "domNodes": 4000,
+            "jsHeapBytes": 14736915,
+            "incomingEvents": 501,
+            "renderedEvents": 474,
+            "renderedConsoleLines": 0,
+            "latestDisplayedEventDelayMs": 20.900000035762787,
+            "terminalStatusDelayMs": 21,
+            "duplicateEventIds": 0,
+            "missingEventIds": 0,
+            "eventOrderMatchesJournal": true,
+            "eventSourceInstances": {
+              "PERF-JOB-266": 1
+            },
+            "inputToNextPaintMs": 34.09999996423721,
+            "transferredJsCssBytes": 582430,
+            "resourceCountJsCss": 8,
+            "sseRequestCount": 1,
+            "durationMs": 5514,
+            "eventSourceInstancesTotal": 1
+          },
+          "pageErrors": []
+        },
+        {
+          "repeat": 2,
+          "metrics": {
+            "routeReadyMs": 6324.699999988079,
+            "longTaskCount": 2,
+            "longTaskOver50Ms": 2,
+            "maxLongTaskMs": 5683,
+            "mutationBatches": 514,
+            "frameCount": 46,
+            "frameOver16Ms": 45,
+            "domNodes": 4000,
+            "jsHeapBytes": 10861380,
+            "incomingEvents": 501,
+            "renderedEvents": 474,
+            "renderedConsoleLines": 0,
+            "latestDisplayedEventDelayMs": 28.5,
+            "terminalStatusDelayMs": 28.69999998807907,
+            "duplicateEventIds": 0,
+            "missingEventIds": 0,
+            "eventOrderMatchesJournal": true,
+            "eventSourceInstances": {
+              "PERF-JOB-266": 1
+            },
+            "inputToNextPaintMs": 34.69999998807907,
+            "transferredJsCssBytes": 582430,
+            "resourceCountJsCss": 8,
+            "sseRequestCount": 1,
+            "durationMs": 6610,
+            "eventSourceInstancesTotal": 1
+          },
+          "pageErrors": []
+        },
+        {
+          "repeat": 3,
+          "metrics": {
+            "routeReadyMs": 5935.199999988079,
+            "longTaskCount": 2,
+            "longTaskOver50Ms": 2,
+            "maxLongTaskMs": 5296,
+            "mutationBatches": 514,
+            "frameCount": 44,
+            "frameOver16Ms": 43,
+            "domNodes": 4000,
+            "jsHeapBytes": 10656745,
+            "incomingEvents": 501,
+            "renderedEvents": 474,
+            "renderedConsoleLines": 0,
+            "latestDisplayedEventDelayMs": 25.400000035762787,
+            "terminalStatusDelayMs": 25.700000047683716,
+            "duplicateEventIds": 0,
+            "missingEventIds": 0,
+            "eventOrderMatchesJournal": true,
+            "eventSourceInstances": {
+              "PERF-JOB-266": 1
+            },
+            "inputToNextPaintMs": 27.69999998807907,
+            "transferredJsCssBytes": 582430,
+            "resourceCountJsCss": 8,
+            "sseRequestCount": 1,
+            "durationMs": 6236,
+            "eventSourceInstancesTotal": 1
+          },
+          "pageErrors": []
+        }
+      ],
+      "summary": {
+        "routeReadyMs": {
+          "median": 5935.199999988079,
+          "p95": 6285.749999988079,
+          "raw": [
+            5308.200000047684,
+            6324.699999988079,
+            5935.199999988079
+          ]
+        },
+        "longTaskCount": {
+          "median": 2,
+          "p95": 2,
+          "raw": [
+            2,
+            2,
+            2
+          ]
+        },
+        "longTaskOver50Ms": {
+          "median": 2,
+          "p95": 2,
+          "raw": [
+            2,
+            2,
+            2
+          ]
+        },
+        "maxLongTaskMs": {
+          "median": 5296,
+          "p95": 5644.3,
+          "raw": [
+            4727,
+            5683,
+            5296
+          ]
+        },
+        "mutationBatches": {
+          "median": 514,
+          "p95": 514,
+          "raw": [
+            514,
+            514,
+            514
+          ]
+        },
+        "frameCount": {
+          "median": 44,
+          "p95": 45.8,
+          "raw": [
+            41,
+            46,
+            44
+          ]
+        },
+        "frameOver16Ms": {
+          "median": 43,
+          "p95": 44.8,
+          "raw": [
+            40,
+            45,
+            43
+          ]
+        },
+        "domNodes": {
+          "median": 4000,
+          "p95": 4000,
+          "raw": [
+            4000,
+            4000,
+            4000
+          ]
+        },
+        "jsHeapBytes": {
+          "median": 10861380,
+          "p95": 14349361.5,
+          "raw": [
+            14736915,
+            10861380,
+            10656745
+          ]
+        },
+        "incomingEvents": {
+          "median": 501,
+          "p95": 501,
+          "raw": [
+            501,
+            501,
+            501
+          ]
+        },
+        "renderedEvents": {
+          "median": 474,
+          "p95": 474,
+          "raw": [
+            474,
+            474,
+            474
+          ]
+        },
+        "renderedConsoleLines": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "latestDisplayedEventDelayMs": {
+          "median": 25.400000035762787,
+          "p95": 28.19000000357628,
+          "raw": [
+            20.900000035762787,
+            28.5,
+            25.400000035762787
+          ]
+        },
+        "terminalStatusDelayMs": {
+          "median": 25.700000047683716,
+          "p95": 28.399999994039536,
+          "raw": [
+            21,
+            28.69999998807907,
+            25.700000047683716
+          ]
+        },
+        "duplicateEventIds": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "missingEventIds": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "inputToNextPaintMs": {
+          "median": 34.09999996423721,
+          "p95": 34.639999985694885,
+          "raw": [
+            34.09999996423721,
+            34.69999998807907,
+            27.69999998807907
+          ]
+        },
+        "transferredJsCssBytes": {
+          "median": 582430,
+          "p95": 582430,
+          "raw": [
+            582430,
+            582430,
+            582430
+          ]
+        },
+        "resourceCountJsCss": {
+          "median": 8,
+          "p95": 8,
+          "raw": [
+            8,
+            8,
+            8
+          ]
+        },
+        "sseRequestCount": {
+          "median": 1,
+          "p95": 1,
+          "raw": [
+            1,
+            1,
+            1
+          ]
+        },
+        "durationMs": {
+          "median": 6236,
+          "p95": 6572.6,
+          "raw": [
+            5514,
+            6610,
+            6236
+          ]
+        },
+        "eventSourceInstancesTotal": {
+          "median": 1,
+          "p95": 1,
+          "raw": [
+            1,
+            1,
+            1
+          ]
+        },
+        "crashed": {
+          "count": 0,
+          "total": 3
+        },
+        "crashSteps": []
+      }
+    },
+    {
+      "name": "metrics-100-buckets",
+      "samples": [
+        {
+          "repeat": 1,
+          "metrics": {
+            "routeReadyMs": 4457.5,
+            "longTaskCount": 1,
+            "longTaskOver50Ms": 1,
+            "maxLongTaskMs": 3913,
+            "mutationBatches": 507,
+            "frameCount": 55,
+            "frameOver16Ms": 55,
+            "domNodes": 5068,
+            "jsHeapBytes": 33061433,
+            "incomingEvents": 501,
+            "renderedEvents": 473,
+            "renderedConsoleLines": 473,
+            "latestDisplayedEventDelayMs": 18.80000001192093,
+            "terminalStatusDelayMs": 18.899999976158142,
+            "duplicateEventIds": 0,
+            "missingEventIds": 0,
+            "eventOrderMatchesJournal": true,
+            "eventSourceInstances": {
+              "PERF-JOB-266": 1
+            },
+            "inputToNextPaintMs": null,
+            "transferredJsCssBytes": 629713,
+            "resourceCountJsCss": 8,
+            "sseRequestCount": 1,
+            "durationMs": 5008,
+            "eventSourceInstancesTotal": 1
+          },
+          "pageErrors": [
+            {
+              "step": "pageerror",
+              "message": "Minified React error #185; visit https://react.dev/errors/185 for the full message or use the non-minified dev environment for full errors and additional helpful warnings."
+            },
+            {
+              "step": "pageerror",
+              "message": "Minified React error #185; visit https://react.dev/errors/185 for the full message or use the non-minified dev environment for full errors and additional helpful warnings."
+            },
+            {
+              "step": "pageerror",
+              "message": "Minified React error #185; visit https://react.dev/errors/185 for the full message or use the non-minified dev environment for full errors and additional helpful warnings."
+            },
+            {
+              "step": "pageerror",
+              "message": "Minified React error #185; visit https://react.dev/errors/185 for the full message or use the non-minified dev environment for full errors and additional helpful warnings."
+            },
+            {
+              "step": "pageerror",
+              "message": "Minified React error #185; visit https://react.dev/errors/185 for the full message or use the non-minified dev environment for full errors and additional helpful warnings."
+            },
+            {
+              "step": "pageerror",
+              "message": "Minified React error #185; visit https://react.dev/errors/185 for the full message or use the non-minified dev environment for full errors and additional helpful warnings."
+            },
+            {
+              "step": "pageerror",
+              "message": "Minified React error #185; visit https://react.dev/errors/185 for the full message or use the non-minified dev environment for full errors and additional helpful warnings."
+            },
+            {
+              "step": "pageerror",
+              "message": "Minified React error #185; visit https://react.dev/errors/185 for the full message or use the non-minified dev environment for full errors and additional helpful warnings."
+            },
+            {
+              "step": "pageerror",
+              "message": "Minified React error #185; visit https://react.dev/errors/185 for the full message or use the non-minified dev environment for full errors and additional helpful warnings."
+            }
+          ]
+        },
+        {
+          "repeat": 2,
+          "metrics": {
+            "routeReadyMs": 4911.5,
+            "longTaskCount": 2,
+            "longTaskOver50Ms": 2,
+            "maxLongTaskMs": 4265,
+            "mutationBatches": 507,
+            "frameCount": 57,
+            "frameOver16Ms": 57,
+            "domNodes": 5068,
+            "jsHeapBytes": 14443279,
+            "incomingEvents": 501,
+            "renderedEvents": 473,
+            "renderedConsoleLines": 473,
+            "latestDisplayedEventDelayMs": 21.80000001192093,
+            "terminalStatusDelayMs": 22,
+            "duplicateEventIds": 0,
+            "missingEventIds": 0,
+            "eventOrderMatchesJournal": true,
+            "eventSourceInstances": {
+              "PERF-JOB-266": 1
+            },
+            "inputToNextPaintMs": null,
+            "transferredJsCssBytes": 629713,
+            "resourceCountJsCss": 8,
+            "sseRequestCount": 1,
+            "durationMs": 5752,
+            "eventSourceInstancesTotal": 1
+          },
+          "pageErrors": [
+            {
+              "step": "pageerror",
+              "message": "Minified React error #185; visit https://react.dev/errors/185 for the full message or use the non-minified dev environment for full errors and additional helpful warnings."
+            },
+            {
+              "step": "pageerror",
+              "message": "Minified React error #185; visit https://react.dev/errors/185 for the full message or use the non-minified dev environment for full errors and additional helpful warnings."
+            },
+            {
+              "step": "pageerror",
+              "message": "Minified React error #185; visit https://react.dev/errors/185 for the full message or use the non-minified dev environment for full errors and additional helpful warnings."
+            },
+            {
+              "step": "pageerror",
+              "message": "Minified React error #185; visit https://react.dev/errors/185 for the full message or use the non-minified dev environment for full errors and additional helpful warnings."
+            },
+            {
+              "step": "pageerror",
+              "message": "Minified React error #185; visit https://react.dev/errors/185 for the full message or use the non-minified dev environment for full errors and additional helpful warnings."
+            },
+            {
+              "step": "pageerror",
+              "message": "Minified React error #185; visit https://react.dev/errors/185 for the full message or use the non-minified dev environment for full errors and additional helpful warnings."
+            },
+            {
+              "step": "pageerror",
+              "message": "Minified React error #185; visit https://react.dev/errors/185 for the full message or use the non-minified dev environment for full errors and additional helpful warnings."
+            },
+            {
+              "step": "pageerror",
+              "message": "Minified React error #185; visit https://react.dev/errors/185 for the full message or use the non-minified dev environment for full errors and additional helpful warnings."
+            },
+            {
+              "step": "pageerror",
+              "message": "Minified React error #185; visit https://react.dev/errors/185 for the full message or use the non-minified dev environment for full errors and additional helpful warnings."
+            }
+          ]
+        },
+        {
+          "repeat": 3,
+          "metrics": {
+            "routeReadyMs": 4992.5,
+            "longTaskCount": 1,
+            "longTaskOver50Ms": 1,
+            "maxLongTaskMs": 4297,
+            "mutationBatches": 507,
+            "frameCount": 56,
+            "frameOver16Ms": 56,
+            "domNodes": 5068,
+            "jsHeapBytes": 15733091,
+            "incomingEvents": 501,
+            "renderedEvents": 473,
+            "renderedConsoleLines": 473,
+            "latestDisplayedEventDelayMs": 23.69999998807907,
+            "terminalStatusDelayMs": 24.099999964237213,
+            "duplicateEventIds": 0,
+            "missingEventIds": 0,
+            "eventOrderMatchesJournal": true,
+            "eventSourceInstances": {
+              "PERF-JOB-266": 1
+            },
+            "inputToNextPaintMs": null,
+            "transferredJsCssBytes": 629713,
+            "resourceCountJsCss": 8,
+            "sseRequestCount": 1,
+            "durationMs": 5787,
+            "eventSourceInstancesTotal": 1
+          },
+          "pageErrors": [
+            {
+              "step": "pageerror",
+              "message": "Minified React error #185; visit https://react.dev/errors/185 for the full message or use the non-minified dev environment for full errors and additional helpful warnings."
+            },
+            {
+              "step": "pageerror",
+              "message": "Minified React error #185; visit https://react.dev/errors/185 for the full message or use the non-minified dev environment for full errors and additional helpful warnings."
+            },
+            {
+              "step": "pageerror",
+              "message": "Minified React error #185; visit https://react.dev/errors/185 for the full message or use the non-minified dev environment for full errors and additional helpful warnings."
+            },
+            {
+              "step": "pageerror",
+              "message": "Minified React error #185; visit https://react.dev/errors/185 for the full message or use the non-minified dev environment for full errors and additional helpful warnings."
+            },
+            {
+              "step": "pageerror",
+              "message": "Minified React error #185; visit https://react.dev/errors/185 for the full message or use the non-minified dev environment for full errors and additional helpful warnings."
+            },
+            {
+              "step": "pageerror",
+              "message": "Minified React error #185; visit https://react.dev/errors/185 for the full message or use the non-minified dev environment for full errors and additional helpful warnings."
+            },
+            {
+              "step": "pageerror",
+              "message": "Minified React error #185; visit https://react.dev/errors/185 for the full message or use the non-minified dev environment for full errors and additional helpful warnings."
+            },
+            {
+              "step": "pageerror",
+              "message": "Minified React error #185; visit https://react.dev/errors/185 for the full message or use the non-minified dev environment for full errors and additional helpful warnings."
+            },
+            {
+              "step": "pageerror",
+              "message": "Minified React error #185; visit https://react.dev/errors/185 for the full message or use the non-minified dev environment for full errors and additional helpful warnings."
+            }
+          ]
+        }
+      ],
+      "summary": {
+        "routeReadyMs": {
+          "median": 4911.5,
+          "p95": 4984.4,
+          "raw": [
+            4457.5,
+            4911.5,
+            4992.5
+          ]
+        },
+        "longTaskCount": {
+          "median": 1,
+          "p95": 1.9,
+          "raw": [
+            1,
+            2,
+            1
+          ]
+        },
+        "longTaskOver50Ms": {
+          "median": 1,
+          "p95": 1.9,
+          "raw": [
+            1,
+            2,
+            1
+          ]
+        },
+        "maxLongTaskMs": {
+          "median": 4265,
+          "p95": 4293.8,
+          "raw": [
+            3913,
+            4265,
+            4297
+          ]
+        },
+        "mutationBatches": {
+          "median": 507,
+          "p95": 507,
+          "raw": [
+            507,
+            507,
+            507
+          ]
+        },
+        "frameCount": {
+          "median": 56,
+          "p95": 56.9,
+          "raw": [
+            55,
+            57,
+            56
+          ]
+        },
+        "frameOver16Ms": {
+          "median": 56,
+          "p95": 56.9,
+          "raw": [
+            55,
+            57,
+            56
+          ]
+        },
+        "domNodes": {
+          "median": 5068,
+          "p95": 5068,
+          "raw": [
+            5068,
+            5068,
+            5068
+          ]
+        },
+        "jsHeapBytes": {
+          "median": 15733091,
+          "p95": 31328598.799999997,
+          "raw": [
+            33061433,
+            14443279,
+            15733091
+          ]
+        },
+        "incomingEvents": {
+          "median": 501,
+          "p95": 501,
+          "raw": [
+            501,
+            501,
+            501
+          ]
+        },
+        "renderedEvents": {
+          "median": 473,
+          "p95": 473,
+          "raw": [
+            473,
+            473,
+            473
+          ]
+        },
+        "renderedConsoleLines": {
+          "median": 473,
+          "p95": 473,
+          "raw": [
+            473,
+            473,
+            473
+          ]
+        },
+        "latestDisplayedEventDelayMs": {
+          "median": 21.80000001192093,
+          "p95": 23.509999990463257,
+          "raw": [
+            18.80000001192093,
+            21.80000001192093,
+            23.69999998807907
+          ]
+        },
+        "terminalStatusDelayMs": {
+          "median": 22,
+          "p95": 23.88999996781349,
+          "raw": [
+            18.899999976158142,
+            22,
+            24.099999964237213
+          ]
+        },
+        "duplicateEventIds": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "missingEventIds": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "transferredJsCssBytes": {
+          "median": 629713,
+          "p95": 629713,
+          "raw": [
+            629713,
+            629713,
+            629713
+          ]
+        },
+        "resourceCountJsCss": {
+          "median": 8,
+          "p95": 8,
+          "raw": [
+            8,
+            8,
+            8
+          ]
+        },
+        "sseRequestCount": {
+          "median": 1,
+          "p95": 1,
+          "raw": [
+            1,
+            1,
+            1
+          ]
+        },
+        "durationMs": {
+          "median": 5752,
+          "p95": 5783.5,
+          "raw": [
+            5008,
+            5752,
+            5787
+          ]
+        },
+        "eventSourceInstancesTotal": {
+          "median": 1,
+          "p95": 1,
+          "raw": [
+            1,
+            1,
+            1
+          ]
+        },
+        "crashed": {
+          "count": 0,
+          "total": 3
+        },
+        "crashSteps": []
+      }
+    },
+    {
+      "name": "metrics-1000-buckets",
+      "samples": [
+        {
+          "repeat": 1,
+          "metrics": {
+            "routeReadyMs": 4456,
+            "longTaskCount": 3,
+            "longTaskOver50Ms": 3,
+            "maxLongTaskMs": 3888,
+            "mutationBatches": 508,
+            "frameCount": 59,
+            "frameOver16Ms": 58,
+            "domNodes": 11368,
+            "jsHeapBytes": 15054603,
+            "incomingEvents": 501,
+            "renderedEvents": 473,
+            "renderedConsoleLines": 473,
+            "latestDisplayedEventDelayMs": 15.899999976158142,
+            "terminalStatusDelayMs": 16.100000023841858,
+            "duplicateEventIds": 0,
+            "missingEventIds": 0,
+            "eventOrderMatchesJournal": true,
+            "eventSourceInstances": {
+              "PERF-JOB-266": 1
+            },
+            "inputToNextPaintMs": null,
+            "transferredJsCssBytes": 629713,
+            "resourceCountJsCss": 8,
+            "sseRequestCount": 1,
+            "durationMs": 6218,
+            "eventSourceInstancesTotal": 1
+          },
+          "pageErrors": [
+            {
+              "step": "pageerror",
+              "message": "Minified React error #185; visit https://react.dev/errors/185 for the full message or use the non-minified dev environment for full errors and additional helpful warnings."
+            },
+            {
+              "step": "pageerror",
+              "message": "Minified React error #185; visit https://react.dev/errors/185 for the full message or use the non-minified dev environment for full errors and additional helpful warnings."
+            },
+            {
+              "step": "pageerror",
+              "message": "Minified React error #185; visit https://react.dev/errors/185 for the full message or use the non-minified dev environment for full errors and additional helpful warnings."
+            },
+            {
+              "step": "pageerror",
+              "message": "Minified React error #185; visit https://react.dev/errors/185 for the full message or use the non-minified dev environment for full errors and additional helpful warnings."
+            },
+            {
+              "step": "pageerror",
+              "message": "Minified React error #185; visit https://react.dev/errors/185 for the full message or use the non-minified dev environment for full errors and additional helpful warnings."
+            },
+            {
+              "step": "pageerror",
+              "message": "Minified React error #185; visit https://react.dev/errors/185 for the full message or use the non-minified dev environment for full errors and additional helpful warnings."
+            },
+            {
+              "step": "pageerror",
+              "message": "Minified React error #185; visit https://react.dev/errors/185 for the full message or use the non-minified dev environment for full errors and additional helpful warnings."
+            },
+            {
+              "step": "pageerror",
+              "message": "Minified React error #185; visit https://react.dev/errors/185 for the full message or use the non-minified dev environment for full errors and additional helpful warnings."
+            },
+            {
+              "step": "pageerror",
+              "message": "Minified React error #185; visit https://react.dev/errors/185 for the full message or use the non-minified dev environment for full errors and additional helpful warnings."
+            }
+          ]
+        },
+        {
+          "repeat": 2,
+          "metrics": {
+            "routeReadyMs": 4957.199999988079,
+            "longTaskCount": 3,
+            "longTaskOver50Ms": 3,
+            "maxLongTaskMs": 4353,
+            "mutationBatches": 506,
+            "frameCount": 56,
+            "frameOver16Ms": 56,
+            "domNodes": 11368,
+            "jsHeapBytes": 14488203,
+            "incomingEvents": 501,
+            "renderedEvents": 473,
+            "renderedConsoleLines": 473,
+            "latestDisplayedEventDelayMs": 39.5,
+            "terminalStatusDelayMs": 39.700000047683716,
+            "duplicateEventIds": 0,
+            "missingEventIds": 0,
+            "eventOrderMatchesJournal": true,
+            "eventSourceInstances": {
+              "PERF-JOB-266": 1
+            },
+            "inputToNextPaintMs": null,
+            "transferredJsCssBytes": 629713,
+            "resourceCountJsCss": 8,
+            "sseRequestCount": 1,
+            "durationMs": 6751,
+            "eventSourceInstancesTotal": 1
+          },
+          "pageErrors": [
+            {
+              "step": "pageerror",
+              "message": "Minified React error #185; visit https://react.dev/errors/185 for the full message or use the non-minified dev environment for full errors and additional helpful warnings."
+            },
+            {
+              "step": "pageerror",
+              "message": "Minified React error #185; visit https://react.dev/errors/185 for the full message or use the non-minified dev environment for full errors and additional helpful warnings."
+            },
+            {
+              "step": "pageerror",
+              "message": "Minified React error #185; visit https://react.dev/errors/185 for the full message or use the non-minified dev environment for full errors and additional helpful warnings."
+            },
+            {
+              "step": "pageerror",
+              "message": "Minified React error #185; visit https://react.dev/errors/185 for the full message or use the non-minified dev environment for full errors and additional helpful warnings."
+            },
+            {
+              "step": "pageerror",
+              "message": "Minified React error #185; visit https://react.dev/errors/185 for the full message or use the non-minified dev environment for full errors and additional helpful warnings."
+            },
+            {
+              "step": "pageerror",
+              "message": "Minified React error #185; visit https://react.dev/errors/185 for the full message or use the non-minified dev environment for full errors and additional helpful warnings."
+            },
+            {
+              "step": "pageerror",
+              "message": "Minified React error #185; visit https://react.dev/errors/185 for the full message or use the non-minified dev environment for full errors and additional helpful warnings."
+            },
+            {
+              "step": "pageerror",
+              "message": "Minified React error #185; visit https://react.dev/errors/185 for the full message or use the non-minified dev environment for full errors and additional helpful warnings."
+            },
+            {
+              "step": "pageerror",
+              "message": "Minified React error #185; visit https://react.dev/errors/185 for the full message or use the non-minified dev environment for full errors and additional helpful warnings."
+            }
+          ]
+        },
+        {
+          "repeat": 3,
+          "metrics": {
+            "routeReadyMs": 4906.700000047684,
+            "longTaskCount": 3,
+            "longTaskOver50Ms": 3,
+            "maxLongTaskMs": 4255,
+            "mutationBatches": 506,
+            "frameCount": 55,
+            "frameOver16Ms": 55,
+            "domNodes": 11368,
+            "jsHeapBytes": 13914523,
+            "incomingEvents": 501,
+            "renderedEvents": 473,
+            "renderedConsoleLines": 473,
+            "latestDisplayedEventDelayMs": 16.30000001192093,
+            "terminalStatusDelayMs": 16.5,
+            "duplicateEventIds": 0,
+            "missingEventIds": 0,
+            "eventOrderMatchesJournal": true,
+            "eventSourceInstances": {
+              "PERF-JOB-266": 1
+            },
+            "inputToNextPaintMs": null,
+            "transferredJsCssBytes": 629713,
+            "resourceCountJsCss": 8,
+            "sseRequestCount": 1,
+            "durationMs": 6937,
+            "eventSourceInstancesTotal": 1
+          },
+          "pageErrors": [
+            {
+              "step": "pageerror",
+              "message": "Minified React error #185; visit https://react.dev/errors/185 for the full message or use the non-minified dev environment for full errors and additional helpful warnings."
+            },
+            {
+              "step": "pageerror",
+              "message": "Minified React error #185; visit https://react.dev/errors/185 for the full message or use the non-minified dev environment for full errors and additional helpful warnings."
+            },
+            {
+              "step": "pageerror",
+              "message": "Minified React error #185; visit https://react.dev/errors/185 for the full message or use the non-minified dev environment for full errors and additional helpful warnings."
+            },
+            {
+              "step": "pageerror",
+              "message": "Minified React error #185; visit https://react.dev/errors/185 for the full message or use the non-minified dev environment for full errors and additional helpful warnings."
+            },
+            {
+              "step": "pageerror",
+              "message": "Minified React error #185; visit https://react.dev/errors/185 for the full message or use the non-minified dev environment for full errors and additional helpful warnings."
+            },
+            {
+              "step": "pageerror",
+              "message": "Minified React error #185; visit https://react.dev/errors/185 for the full message or use the non-minified dev environment for full errors and additional helpful warnings."
+            },
+            {
+              "step": "pageerror",
+              "message": "Minified React error #185; visit https://react.dev/errors/185 for the full message or use the non-minified dev environment for full errors and additional helpful warnings."
+            },
+            {
+              "step": "pageerror",
+              "message": "Minified React error #185; visit https://react.dev/errors/185 for the full message or use the non-minified dev environment for full errors and additional helpful warnings."
+            },
+            {
+              "step": "pageerror",
+              "message": "Minified React error #185; visit https://react.dev/errors/185 for the full message or use the non-minified dev environment for full errors and additional helpful warnings."
+            }
+          ]
+        }
+      ],
+      "summary": {
+        "routeReadyMs": {
+          "median": 4906.700000047684,
+          "p95": 4952.14999999404,
+          "raw": [
+            4456,
+            4957.199999988079,
+            4906.700000047684
+          ]
+        },
+        "longTaskCount": {
+          "median": 3,
+          "p95": 3,
+          "raw": [
+            3,
+            3,
+            3
+          ]
+        },
+        "longTaskOver50Ms": {
+          "median": 3,
+          "p95": 3,
+          "raw": [
+            3,
+            3,
+            3
+          ]
+        },
+        "maxLongTaskMs": {
+          "median": 4255,
+          "p95": 4343.2,
+          "raw": [
+            3888,
+            4353,
+            4255
+          ]
+        },
+        "mutationBatches": {
+          "median": 506,
+          "p95": 507.8,
+          "raw": [
+            508,
+            506,
+            506
+          ]
+        },
+        "frameCount": {
+          "median": 56,
+          "p95": 58.7,
+          "raw": [
+            59,
+            56,
+            55
+          ]
+        },
+        "frameOver16Ms": {
+          "median": 56,
+          "p95": 57.8,
+          "raw": [
+            58,
+            56,
+            55
+          ]
+        },
+        "domNodes": {
+          "median": 11368,
+          "p95": 11368,
+          "raw": [
+            11368,
+            11368,
+            11368
+          ]
+        },
+        "jsHeapBytes": {
+          "median": 14488203,
+          "p95": 14997963,
+          "raw": [
+            15054603,
+            14488203,
+            13914523
+          ]
+        },
+        "incomingEvents": {
+          "median": 501,
+          "p95": 501,
+          "raw": [
+            501,
+            501,
+            501
+          ]
+        },
+        "renderedEvents": {
+          "median": 473,
+          "p95": 473,
+          "raw": [
+            473,
+            473,
+            473
+          ]
+        },
+        "renderedConsoleLines": {
+          "median": 473,
+          "p95": 473,
+          "raw": [
+            473,
+            473,
+            473
+          ]
+        },
+        "latestDisplayedEventDelayMs": {
+          "median": 16.30000001192093,
+          "p95": 37.18000000119209,
+          "raw": [
+            15.899999976158142,
+            39.5,
+            16.30000001192093
+          ]
+        },
+        "terminalStatusDelayMs": {
+          "median": 16.5,
+          "p95": 37.38000004291534,
+          "raw": [
+            16.100000023841858,
+            39.700000047683716,
+            16.5
+          ]
+        },
+        "duplicateEventIds": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "missingEventIds": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "transferredJsCssBytes": {
+          "median": 629713,
+          "p95": 629713,
+          "raw": [
+            629713,
+            629713,
+            629713
+          ]
+        },
+        "resourceCountJsCss": {
+          "median": 8,
+          "p95": 8,
+          "raw": [
+            8,
+            8,
+            8
+          ]
+        },
+        "sseRequestCount": {
+          "median": 1,
+          "p95": 1,
+          "raw": [
+            1,
+            1,
+            1
+          ]
+        },
+        "durationMs": {
+          "median": 6751,
+          "p95": 6918.4,
+          "raw": [
+            6218,
+            6751,
+            6937
+          ]
+        },
+        "eventSourceInstancesTotal": {
+          "median": 1,
+          "p95": 1,
+          "raw": [
+            1,
+            1,
+            1
+          ]
+        },
+        "crashed": {
+          "count": 0,
+          "total": 3
+        },
+        "crashSteps": []
+      }
+    },
+    {
+      "name": "metrics-4096-buckets",
+      "samples": [
+        {
+          "repeat": 1,
+          "metrics": {
+            "routeReadyMs": 4409.5,
+            "longTaskCount": 3,
+            "longTaskOver50Ms": 3,
+            "maxLongTaskMs": 3879,
+            "mutationBatches": 508,
+            "frameCount": 58,
+            "frameOver16Ms": 57,
+            "domNodes": 33040,
+            "jsHeapBytes": 44191990,
+            "incomingEvents": 501,
+            "renderedEvents": 473,
+            "renderedConsoleLines": 473,
+            "latestDisplayedEventDelayMs": 15.5,
+            "terminalStatusDelayMs": 15.800000011920929,
+            "duplicateEventIds": 0,
+            "missingEventIds": 0,
+            "eventOrderMatchesJournal": true,
+            "eventSourceInstances": {
+              "PERF-JOB-266": 1
+            },
+            "inputToNextPaintMs": null,
+            "transferredJsCssBytes": 629713,
+            "resourceCountJsCss": 8,
+            "sseRequestCount": 1,
+            "durationMs": 6991,
+            "eventSourceInstancesTotal": 1
+          },
+          "pageErrors": [
+            {
+              "step": "pageerror",
+              "message": "Minified React error #185; visit https://react.dev/errors/185 for the full message or use the non-minified dev environment for full errors and additional helpful warnings."
+            },
+            {
+              "step": "pageerror",
+              "message": "Minified React error #185; visit https://react.dev/errors/185 for the full message or use the non-minified dev environment for full errors and additional helpful warnings."
+            },
+            {
+              "step": "pageerror",
+              "message": "Minified React error #185; visit https://react.dev/errors/185 for the full message or use the non-minified dev environment for full errors and additional helpful warnings."
+            },
+            {
+              "step": "pageerror",
+              "message": "Minified React error #185; visit https://react.dev/errors/185 for the full message or use the non-minified dev environment for full errors and additional helpful warnings."
+            },
+            {
+              "step": "pageerror",
+              "message": "Minified React error #185; visit https://react.dev/errors/185 for the full message or use the non-minified dev environment for full errors and additional helpful warnings."
+            },
+            {
+              "step": "pageerror",
+              "message": "Minified React error #185; visit https://react.dev/errors/185 for the full message or use the non-minified dev environment for full errors and additional helpful warnings."
+            },
+            {
+              "step": "pageerror",
+              "message": "Minified React error #185; visit https://react.dev/errors/185 for the full message or use the non-minified dev environment for full errors and additional helpful warnings."
+            },
+            {
+              "step": "pageerror",
+              "message": "Minified React error #185; visit https://react.dev/errors/185 for the full message or use the non-minified dev environment for full errors and additional helpful warnings."
+            },
+            {
+              "step": "pageerror",
+              "message": "Minified React error #185; visit https://react.dev/errors/185 for the full message or use the non-minified dev environment for full errors and additional helpful warnings."
+            }
+          ]
+        },
+        {
+          "repeat": 2,
+          "metrics": {
+            "routeReadyMs": 4944.199999988079,
+            "longTaskCount": 4,
+            "longTaskOver50Ms": 4,
+            "maxLongTaskMs": 4313,
+            "mutationBatches": 506,
+            "frameCount": 57,
+            "frameOver16Ms": 56,
+            "domNodes": 33040,
+            "jsHeapBytes": 37222256,
+            "incomingEvents": 501,
+            "renderedEvents": 473,
+            "renderedConsoleLines": 473,
+            "latestDisplayedEventDelayMs": 28.100000023841858,
+            "terminalStatusDelayMs": 28.30000001192093,
+            "duplicateEventIds": 0,
+            "missingEventIds": 0,
+            "eventOrderMatchesJournal": true,
+            "eventSourceInstances": {
+              "PERF-JOB-266": 1
+            },
+            "inputToNextPaintMs": null,
+            "transferredJsCssBytes": 629713,
+            "resourceCountJsCss": 8,
+            "sseRequestCount": 1,
+            "durationMs": 7826,
+            "eventSourceInstancesTotal": 1
+          },
+          "pageErrors": [
+            {
+              "step": "pageerror",
+              "message": "Minified React error #185; visit https://react.dev/errors/185 for the full message or use the non-minified dev environment for full errors and additional helpful warnings."
+            },
+            {
+              "step": "pageerror",
+              "message": "Minified React error #185; visit https://react.dev/errors/185 for the full message or use the non-minified dev environment for full errors and additional helpful warnings."
+            },
+            {
+              "step": "pageerror",
+              "message": "Minified React error #185; visit https://react.dev/errors/185 for the full message or use the non-minified dev environment for full errors and additional helpful warnings."
+            },
+            {
+              "step": "pageerror",
+              "message": "Minified React error #185; visit https://react.dev/errors/185 for the full message or use the non-minified dev environment for full errors and additional helpful warnings."
+            },
+            {
+              "step": "pageerror",
+              "message": "Minified React error #185; visit https://react.dev/errors/185 for the full message or use the non-minified dev environment for full errors and additional helpful warnings."
+            },
+            {
+              "step": "pageerror",
+              "message": "Minified React error #185; visit https://react.dev/errors/185 for the full message or use the non-minified dev environment for full errors and additional helpful warnings."
+            },
+            {
+              "step": "pageerror",
+              "message": "Minified React error #185; visit https://react.dev/errors/185 for the full message or use the non-minified dev environment for full errors and additional helpful warnings."
+            },
+            {
+              "step": "pageerror",
+              "message": "Minified React error #185; visit https://react.dev/errors/185 for the full message or use the non-minified dev environment for full errors and additional helpful warnings."
+            },
+            {
+              "step": "pageerror",
+              "message": "Minified React error #185; visit https://react.dev/errors/185 for the full message or use the non-minified dev environment for full errors and additional helpful warnings."
+            }
+          ]
+        },
+        {
+          "repeat": 3,
+          "metrics": {
+            "routeReadyMs": 4820.700000047684,
+            "longTaskCount": 5,
+            "longTaskOver50Ms": 4,
+            "maxLongTaskMs": 4188,
+            "mutationBatches": 507,
+            "frameCount": 57,
+            "frameOver16Ms": 56,
+            "domNodes": 33040,
+            "jsHeapBytes": 37230583,
+            "incomingEvents": 501,
+            "renderedEvents": 473,
+            "renderedConsoleLines": 473,
+            "latestDisplayedEventDelayMs": 18.30000001192093,
+            "terminalStatusDelayMs": 18.69999998807907,
+            "duplicateEventIds": 0,
+            "missingEventIds": 0,
+            "eventOrderMatchesJournal": true,
+            "eventSourceInstances": {
+              "PERF-JOB-266": 1
+            },
+            "inputToNextPaintMs": null,
+            "transferredJsCssBytes": 629713,
+            "resourceCountJsCss": 8,
+            "sseRequestCount": 1,
+            "durationMs": 7408,
+            "eventSourceInstancesTotal": 1
+          },
+          "pageErrors": [
+            {
+              "step": "pageerror",
+              "message": "Minified React error #185; visit https://react.dev/errors/185 for the full message or use the non-minified dev environment for full errors and additional helpful warnings."
+            },
+            {
+              "step": "pageerror",
+              "message": "Minified React error #185; visit https://react.dev/errors/185 for the full message or use the non-minified dev environment for full errors and additional helpful warnings."
+            },
+            {
+              "step": "pageerror",
+              "message": "Minified React error #185; visit https://react.dev/errors/185 for the full message or use the non-minified dev environment for full errors and additional helpful warnings."
+            },
+            {
+              "step": "pageerror",
+              "message": "Minified React error #185; visit https://react.dev/errors/185 for the full message or use the non-minified dev environment for full errors and additional helpful warnings."
+            },
+            {
+              "step": "pageerror",
+              "message": "Minified React error #185; visit https://react.dev/errors/185 for the full message or use the non-minified dev environment for full errors and additional helpful warnings."
+            },
+            {
+              "step": "pageerror",
+              "message": "Minified React error #185; visit https://react.dev/errors/185 for the full message or use the non-minified dev environment for full errors and additional helpful warnings."
+            },
+            {
+              "step": "pageerror",
+              "message": "Minified React error #185; visit https://react.dev/errors/185 for the full message or use the non-minified dev environment for full errors and additional helpful warnings."
+            },
+            {
+              "step": "pageerror",
+              "message": "Minified React error #185; visit https://react.dev/errors/185 for the full message or use the non-minified dev environment for full errors and additional helpful warnings."
+            },
+            {
+              "step": "pageerror",
+              "message": "Minified React error #185; visit https://react.dev/errors/185 for the full message or use the non-minified dev environment for full errors and additional helpful warnings."
+            }
+          ]
+        }
+      ],
+      "summary": {
+        "routeReadyMs": {
+          "median": 4820.700000047684,
+          "p95": 4931.8499999940395,
+          "raw": [
+            4409.5,
+            4944.199999988079,
+            4820.700000047684
+          ]
+        },
+        "longTaskCount": {
+          "median": 4,
+          "p95": 4.9,
+          "raw": [
+            3,
+            4,
+            5
+          ]
+        },
+        "longTaskOver50Ms": {
+          "median": 4,
+          "p95": 4,
+          "raw": [
+            3,
+            4,
+            4
+          ]
+        },
+        "maxLongTaskMs": {
+          "median": 4188,
+          "p95": 4300.5,
+          "raw": [
+            3879,
+            4313,
+            4188
+          ]
+        },
+        "mutationBatches": {
+          "median": 507,
+          "p95": 507.9,
+          "raw": [
+            508,
+            506,
+            507
+          ]
+        },
+        "frameCount": {
+          "median": 57,
+          "p95": 57.9,
+          "raw": [
+            58,
+            57,
+            57
+          ]
+        },
+        "frameOver16Ms": {
+          "median": 56,
+          "p95": 56.9,
+          "raw": [
+            57,
+            56,
+            56
+          ]
+        },
+        "domNodes": {
+          "median": 33040,
+          "p95": 33040,
+          "raw": [
+            33040,
+            33040,
+            33040
+          ]
+        },
+        "jsHeapBytes": {
+          "median": 37230583,
+          "p95": 43495849.3,
+          "raw": [
+            44191990,
+            37222256,
+            37230583
+          ]
+        },
+        "incomingEvents": {
+          "median": 501,
+          "p95": 501,
+          "raw": [
+            501,
+            501,
+            501
+          ]
+        },
+        "renderedEvents": {
+          "median": 473,
+          "p95": 473,
+          "raw": [
+            473,
+            473,
+            473
+          ]
+        },
+        "renderedConsoleLines": {
+          "median": 473,
+          "p95": 473,
+          "raw": [
+            473,
+            473,
+            473
+          ]
+        },
+        "latestDisplayedEventDelayMs": {
+          "median": 18.30000001192093,
+          "p95": 27.120000022649762,
+          "raw": [
+            15.5,
+            28.100000023841858,
+            18.30000001192093
+          ]
+        },
+        "terminalStatusDelayMs": {
+          "median": 18.69999998807907,
+          "p95": 27.340000009536745,
+          "raw": [
+            15.800000011920929,
+            28.30000001192093,
+            18.69999998807907
+          ]
+        },
+        "duplicateEventIds": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "missingEventIds": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "transferredJsCssBytes": {
+          "median": 629713,
+          "p95": 629713,
+          "raw": [
+            629713,
+            629713,
+            629713
+          ]
+        },
+        "resourceCountJsCss": {
+          "median": 8,
+          "p95": 8,
+          "raw": [
+            8,
+            8,
+            8
+          ]
+        },
+        "sseRequestCount": {
+          "median": 1,
+          "p95": 1,
+          "raw": [
+            1,
+            1,
+            1
+          ]
+        },
+        "durationMs": {
+          "median": 7408,
+          "p95": 7784.2,
+          "raw": [
+            6991,
+            7826,
+            7408
+          ]
+        },
+        "eventSourceInstancesTotal": {
+          "median": 1,
+          "p95": 1,
+          "raw": [
+            1,
+            1,
+            1
+          ]
+        },
+        "crashed": {
+          "count": 0,
+          "total": 3
+        },
+        "crashSteps": []
+      }
+    },
+    {
+      "name": "jobs-list-100-filter-sort",
+      "samples": [
+        {
+          "repeat": 1,
+          "metrics": {
+            "routeReadyMs": 893.6999999880791,
+            "longTaskCount": 0,
+            "longTaskOver50Ms": 0,
+            "maxLongTaskMs": 0,
+            "mutationBatches": 10,
+            "frameCount": 61,
+            "frameOver16Ms": 60,
+            "domNodes": 604,
+            "jsHeapBytes": 5675791,
+            "incomingEvents": 0,
+            "renderedEvents": 0,
+            "renderedConsoleLines": 0,
+            "latestDisplayedEventDelayMs": null,
+            "terminalStatusDelayMs": null,
+            "duplicateEventIds": 0,
+            "missingEventIds": 0,
+            "eventOrderMatchesJournal": null,
+            "eventSourceInstances": {},
+            "inputToNextPaintMs": null,
+            "transferredJsCssBytes": 629713,
+            "resourceCountJsCss": 8,
+            "sseRequestCount": 0,
+            "durationMs": 1048,
+            "eventSourceInstancesTotal": 0
+          },
+          "pageErrors": []
+        },
+        {
+          "repeat": 2,
+          "metrics": {
+            "routeReadyMs": 919.5,
+            "longTaskCount": 0,
+            "longTaskOver50Ms": 0,
+            "maxLongTaskMs": 0,
+            "mutationBatches": 10,
+            "frameCount": 61,
+            "frameOver16Ms": 60,
+            "domNodes": 604,
+            "jsHeapBytes": 5672765,
+            "incomingEvents": 0,
+            "renderedEvents": 0,
+            "renderedConsoleLines": 0,
+            "latestDisplayedEventDelayMs": null,
+            "terminalStatusDelayMs": null,
+            "duplicateEventIds": 0,
+            "missingEventIds": 0,
+            "eventOrderMatchesJournal": null,
+            "eventSourceInstances": {},
+            "inputToNextPaintMs": null,
+            "transferredJsCssBytes": 629713,
+            "resourceCountJsCss": 8,
+            "sseRequestCount": 0,
+            "durationMs": 1069,
+            "eventSourceInstancesTotal": 0
+          },
+          "pageErrors": []
+        },
+        {
+          "repeat": 3,
+          "metrics": {
+            "routeReadyMs": 894.2000000476837,
+            "longTaskCount": 0,
+            "longTaskOver50Ms": 0,
+            "maxLongTaskMs": 0,
+            "mutationBatches": 10,
+            "frameCount": 60,
+            "frameOver16Ms": 60,
+            "domNodes": 604,
+            "jsHeapBytes": 5673291,
+            "incomingEvents": 0,
+            "renderedEvents": 0,
+            "renderedConsoleLines": 0,
+            "latestDisplayedEventDelayMs": null,
+            "terminalStatusDelayMs": null,
+            "duplicateEventIds": 0,
+            "missingEventIds": 0,
+            "eventOrderMatchesJournal": null,
+            "eventSourceInstances": {},
+            "inputToNextPaintMs": null,
+            "transferredJsCssBytes": 629713,
+            "resourceCountJsCss": 8,
+            "sseRequestCount": 0,
+            "durationMs": 1049,
+            "eventSourceInstancesTotal": 0
+          },
+          "pageErrors": []
+        }
+      ],
+      "summary": {
+        "routeReadyMs": {
+          "median": 894.2000000476837,
+          "p95": 916.9700000047684,
+          "raw": [
+            893.6999999880791,
+            919.5,
+            894.2000000476837
+          ]
+        },
+        "longTaskCount": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "longTaskOver50Ms": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "maxLongTaskMs": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "mutationBatches": {
+          "median": 10,
+          "p95": 10,
+          "raw": [
+            10,
+            10,
+            10
+          ]
+        },
+        "frameCount": {
+          "median": 61,
+          "p95": 61,
+          "raw": [
+            61,
+            61,
+            60
+          ]
+        },
+        "frameOver16Ms": {
+          "median": 60,
+          "p95": 60,
+          "raw": [
+            60,
+            60,
+            60
+          ]
+        },
+        "domNodes": {
+          "median": 604,
+          "p95": 604,
+          "raw": [
+            604,
+            604,
+            604
+          ]
+        },
+        "jsHeapBytes": {
+          "median": 5673291,
+          "p95": 5675541,
+          "raw": [
+            5675791,
+            5672765,
+            5673291
+          ]
+        },
+        "incomingEvents": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "renderedEvents": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "renderedConsoleLines": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "duplicateEventIds": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "missingEventIds": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "transferredJsCssBytes": {
+          "median": 629713,
+          "p95": 629713,
+          "raw": [
+            629713,
+            629713,
+            629713
+          ]
+        },
+        "resourceCountJsCss": {
+          "median": 8,
+          "p95": 8,
+          "raw": [
+            8,
+            8,
+            8
+          ]
+        },
+        "sseRequestCount": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "durationMs": {
+          "median": 1049,
+          "p95": 1067,
+          "raw": [
+            1048,
+            1069,
+            1049
+          ]
+        },
+        "eventSourceInstancesTotal": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "crashed": {
+          "count": 0,
+          "total": 3
+        },
+        "crashSteps": []
+      }
+    },
+    {
+      "name": "schedules-100-countdown",
+      "samples": [
+        {
+          "repeat": 1,
+          "metrics": {
+            "routeReadyMs": 926.8000000119209,
+            "longTaskCount": 0,
+            "longTaskOver50Ms": 0,
+            "maxLongTaskMs": 0,
+            "mutationBatches": 14,
+            "frameCount": 68,
+            "frameOver16Ms": 67,
+            "domNodes": 5927,
+            "jsHeapBytes": 10419061,
+            "incomingEvents": 0,
+            "renderedEvents": 0,
+            "renderedConsoleLines": 0,
+            "latestDisplayedEventDelayMs": null,
+            "terminalStatusDelayMs": null,
+            "duplicateEventIds": 0,
+            "missingEventIds": 0,
+            "eventOrderMatchesJournal": null,
+            "eventSourceInstances": {},
+            "inputToNextPaintMs": 50.39999997615814,
+            "transferredJsCssBytes": 618899,
+            "resourceCountJsCss": 7,
+            "sseRequestCount": 0,
+            "durationMs": 1190,
+            "eventSourceInstancesTotal": 0
+          },
+          "pageErrors": []
+        },
+        {
+          "repeat": 2,
+          "metrics": {
+            "routeReadyMs": 921.4000000357628,
+            "longTaskCount": 0,
+            "longTaskOver50Ms": 0,
+            "maxLongTaskMs": 0,
+            "mutationBatches": 14,
+            "frameCount": 68,
+            "frameOver16Ms": 67,
+            "domNodes": 5927,
+            "jsHeapBytes": 10392828,
+            "incomingEvents": 0,
+            "renderedEvents": 0,
+            "renderedConsoleLines": 0,
+            "latestDisplayedEventDelayMs": null,
+            "terminalStatusDelayMs": null,
+            "duplicateEventIds": 0,
+            "missingEventIds": 0,
+            "eventOrderMatchesJournal": null,
+            "eventSourceInstances": {},
+            "inputToNextPaintMs": 37.69999998807907,
+            "transferredJsCssBytes": 618899,
+            "resourceCountJsCss": 7,
+            "sseRequestCount": 0,
+            "durationMs": 1160,
+            "eventSourceInstancesTotal": 0
+          },
+          "pageErrors": []
+        },
+        {
+          "repeat": 3,
+          "metrics": {
+            "routeReadyMs": 918.4000000357628,
+            "longTaskCount": 0,
+            "longTaskOver50Ms": 0,
+            "maxLongTaskMs": 0,
+            "mutationBatches": 14,
+            "frameCount": 65,
+            "frameOver16Ms": 65,
+            "domNodes": 5927,
+            "jsHeapBytes": 10347228,
+            "incomingEvents": 0,
+            "renderedEvents": 0,
+            "renderedConsoleLines": 0,
+            "latestDisplayedEventDelayMs": null,
+            "terminalStatusDelayMs": null,
+            "duplicateEventIds": 0,
+            "missingEventIds": 0,
+            "eventOrderMatchesJournal": null,
+            "eventSourceInstances": {},
+            "inputToNextPaintMs": 38.59999996423721,
+            "transferredJsCssBytes": 618899,
+            "resourceCountJsCss": 7,
+            "sseRequestCount": 0,
+            "durationMs": 1168,
+            "eventSourceInstancesTotal": 0
+          },
+          "pageErrors": []
+        }
+      ],
+      "summary": {
+        "routeReadyMs": {
+          "median": 921.4000000357628,
+          "p95": 926.2600000143051,
+          "raw": [
+            926.8000000119209,
+            921.4000000357628,
+            918.4000000357628
+          ]
+        },
+        "longTaskCount": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "longTaskOver50Ms": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "maxLongTaskMs": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "mutationBatches": {
+          "median": 14,
+          "p95": 14,
+          "raw": [
+            14,
+            14,
+            14
+          ]
+        },
+        "frameCount": {
+          "median": 68,
+          "p95": 68,
+          "raw": [
+            68,
+            68,
+            65
+          ]
+        },
+        "frameOver16Ms": {
+          "median": 67,
+          "p95": 67,
+          "raw": [
+            67,
+            67,
+            65
+          ]
+        },
+        "domNodes": {
+          "median": 5927,
+          "p95": 5927,
+          "raw": [
+            5927,
+            5927,
+            5927
+          ]
+        },
+        "jsHeapBytes": {
+          "median": 10392828,
+          "p95": 10416437.7,
+          "raw": [
+            10419061,
+            10392828,
+            10347228
+          ]
+        },
+        "incomingEvents": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "renderedEvents": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "renderedConsoleLines": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "duplicateEventIds": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "missingEventIds": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "inputToNextPaintMs": {
+          "median": 38.59999996423721,
+          "p95": 49.21999997496605,
+          "raw": [
+            50.39999997615814,
+            37.69999998807907,
+            38.59999996423721
+          ]
+        },
+        "transferredJsCssBytes": {
+          "median": 618899,
+          "p95": 618899,
+          "raw": [
+            618899,
+            618899,
+            618899
+          ]
+        },
+        "resourceCountJsCss": {
+          "median": 7,
+          "p95": 7,
+          "raw": [
+            7,
+            7,
+            7
+          ]
+        },
+        "sseRequestCount": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "durationMs": {
+          "median": 1168,
+          "p95": 1187.8,
+          "raw": [
+            1190,
+            1160,
+            1168
+          ]
+        },
+        "eventSourceInstancesTotal": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "crashed": {
+          "count": 0,
+          "total": 3
+        },
+        "crashSteps": []
+      }
+    },
+    {
+      "name": "navigation-cold-dashboard",
+      "samples": [
+        {
+          "repeat": 1,
+          "metrics": {
+            "routeReadyMs": 135.60000002384186,
+            "longTaskCount": 0,
+            "longTaskOver50Ms": 0,
+            "maxLongTaskMs": 0,
+            "mutationBatches": 7,
+            "frameCount": 15,
+            "frameOver16Ms": 13,
+            "domNodes": 258,
+            "jsHeapBytes": 4226801,
+            "incomingEvents": 0,
+            "renderedEvents": 0,
+            "renderedConsoleLines": 0,
+            "latestDisplayedEventDelayMs": null,
+            "terminalStatusDelayMs": null,
+            "duplicateEventIds": 0,
+            "missingEventIds": 0,
+            "eventOrderMatchesJournal": null,
+            "eventSourceInstances": {},
+            "inputToNextPaintMs": null,
+            "transferredJsCssBytes": 557025,
+            "resourceCountJsCss": 5,
+            "sseRequestCount": 0,
+            "durationMs": 261,
+            "eventSourceInstancesTotal": 0
+          },
+          "pageErrors": []
+        },
+        {
+          "repeat": 2,
+          "metrics": {
+            "routeReadyMs": 138.60000002384186,
+            "longTaskCount": 0,
+            "longTaskOver50Ms": 0,
+            "maxLongTaskMs": 0,
+            "mutationBatches": 6,
+            "frameCount": 13,
+            "frameOver16Ms": 12,
+            "domNodes": 258,
+            "jsHeapBytes": 4105742,
+            "incomingEvents": 0,
+            "renderedEvents": 0,
+            "renderedConsoleLines": 0,
+            "latestDisplayedEventDelayMs": null,
+            "terminalStatusDelayMs": null,
+            "duplicateEventIds": 0,
+            "missingEventIds": 0,
+            "eventOrderMatchesJournal": null,
+            "eventSourceInstances": {},
+            "inputToNextPaintMs": null,
+            "transferredJsCssBytes": 557025,
+            "resourceCountJsCss": 5,
+            "sseRequestCount": 0,
+            "durationMs": 266,
+            "eventSourceInstancesTotal": 0
+          },
+          "pageErrors": []
+        },
+        {
+          "repeat": 3,
+          "metrics": {
+            "routeReadyMs": 126.30000001192093,
+            "longTaskCount": 0,
+            "longTaskOver50Ms": 0,
+            "maxLongTaskMs": 0,
+            "mutationBatches": 6,
+            "frameCount": 14,
+            "frameOver16Ms": 13,
+            "domNodes": 258,
+            "jsHeapBytes": 4085425,
+            "incomingEvents": 0,
+            "renderedEvents": 0,
+            "renderedConsoleLines": 0,
+            "latestDisplayedEventDelayMs": null,
+            "terminalStatusDelayMs": null,
+            "duplicateEventIds": 0,
+            "missingEventIds": 0,
+            "eventOrderMatchesJournal": null,
+            "eventSourceInstances": {},
+            "inputToNextPaintMs": null,
+            "transferredJsCssBytes": 557025,
+            "resourceCountJsCss": 5,
+            "sseRequestCount": 0,
+            "durationMs": 253,
+            "eventSourceInstancesTotal": 0
+          },
+          "pageErrors": []
+        }
+      ],
+      "summary": {
+        "routeReadyMs": {
+          "median": 135.60000002384186,
+          "p95": 138.30000002384185,
+          "raw": [
+            135.60000002384186,
+            138.60000002384186,
+            126.30000001192093
+          ]
+        },
+        "longTaskCount": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "longTaskOver50Ms": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "maxLongTaskMs": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "mutationBatches": {
+          "median": 6,
+          "p95": 6.9,
+          "raw": [
+            7,
+            6,
+            6
+          ]
+        },
+        "frameCount": {
+          "median": 14,
+          "p95": 14.9,
+          "raw": [
+            15,
+            13,
+            14
+          ]
+        },
+        "frameOver16Ms": {
+          "median": 13,
+          "p95": 13,
+          "raw": [
+            13,
+            12,
+            13
+          ]
+        },
+        "domNodes": {
+          "median": 258,
+          "p95": 258,
+          "raw": [
+            258,
+            258,
+            258
+          ]
+        },
+        "jsHeapBytes": {
+          "median": 4105742,
+          "p95": 4214695.1,
+          "raw": [
+            4226801,
+            4105742,
+            4085425
+          ]
+        },
+        "incomingEvents": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "renderedEvents": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "renderedConsoleLines": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "duplicateEventIds": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "missingEventIds": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "transferredJsCssBytes": {
+          "median": 557025,
+          "p95": 557025,
+          "raw": [
+            557025,
+            557025,
+            557025
+          ]
+        },
+        "resourceCountJsCss": {
+          "median": 5,
+          "p95": 5,
+          "raw": [
+            5,
+            5,
+            5
+          ]
+        },
+        "sseRequestCount": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "durationMs": {
+          "median": 261,
+          "p95": 265.5,
+          "raw": [
+            261,
+            266,
+            253
+          ]
+        },
+        "eventSourceInstancesTotal": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "crashed": {
+          "count": 0,
+          "total": 3
+        },
+        "crashSteps": []
+      }
+    },
+    {
+      "name": "navigation-cold-explorer",
+      "samples": [
+        {
+          "repeat": 1,
+          "metrics": {
+            "routeReadyMs": 126.30000001192093,
+            "longTaskCount": 0,
+            "longTaskOver50Ms": 0,
+            "maxLongTaskMs": 0,
+            "mutationBatches": 11,
+            "frameCount": 17,
+            "frameOver16Ms": 17,
+            "domNodes": 214,
+            "jsHeapBytes": 4452832,
+            "incomingEvents": 0,
+            "renderedEvents": 0,
+            "renderedConsoleLines": 0,
+            "latestDisplayedEventDelayMs": null,
+            "terminalStatusDelayMs": null,
+            "duplicateEventIds": 0,
+            "missingEventIds": 0,
+            "eventOrderMatchesJournal": null,
+            "eventSourceInstances": {},
+            "inputToNextPaintMs": 23.69999998807907,
+            "transferredJsCssBytes": 557025,
+            "resourceCountJsCss": 5,
+            "sseRequestCount": 0,
+            "durationMs": 317,
+            "eventSourceInstancesTotal": 0
+          },
+          "pageErrors": []
+        },
+        {
+          "repeat": 2,
+          "metrics": {
+            "routeReadyMs": 144.69999998807907,
+            "longTaskCount": 0,
+            "longTaskOver50Ms": 0,
+            "maxLongTaskMs": 0,
+            "mutationBatches": 11,
+            "frameCount": 16,
+            "frameOver16Ms": 16,
+            "domNodes": 214,
+            "jsHeapBytes": 4439536,
+            "incomingEvents": 0,
+            "renderedEvents": 0,
+            "renderedConsoleLines": 0,
+            "latestDisplayedEventDelayMs": null,
+            "terminalStatusDelayMs": null,
+            "duplicateEventIds": 0,
+            "missingEventIds": 0,
+            "eventOrderMatchesJournal": null,
+            "eventSourceInstances": {},
+            "inputToNextPaintMs": 27.5,
+            "transferredJsCssBytes": 557025,
+            "resourceCountJsCss": 5,
+            "sseRequestCount": 0,
+            "durationMs": 326,
+            "eventSourceInstancesTotal": 0
+          },
+          "pageErrors": []
+        },
+        {
+          "repeat": 3,
+          "metrics": {
+            "routeReadyMs": 126.19999998807907,
+            "longTaskCount": 0,
+            "longTaskOver50Ms": 0,
+            "maxLongTaskMs": 0,
+            "mutationBatches": 11,
+            "frameCount": 19,
+            "frameOver16Ms": 17,
+            "domNodes": 214,
+            "jsHeapBytes": 4374816,
+            "incomingEvents": 0,
+            "renderedEvents": 0,
+            "renderedConsoleLines": 0,
+            "latestDisplayedEventDelayMs": null,
+            "terminalStatusDelayMs": null,
+            "duplicateEventIds": 0,
+            "missingEventIds": 0,
+            "eventOrderMatchesJournal": null,
+            "eventSourceInstances": {},
+            "inputToNextPaintMs": 26,
+            "transferredJsCssBytes": 557025,
+            "resourceCountJsCss": 5,
+            "sseRequestCount": 0,
+            "durationMs": 320,
+            "eventSourceInstancesTotal": 0
+          },
+          "pageErrors": []
+        }
+      ],
+      "summary": {
+        "routeReadyMs": {
+          "median": 126.30000001192093,
+          "p95": 142.85999999046325,
+          "raw": [
+            126.30000001192093,
+            144.69999998807907,
+            126.19999998807907
+          ]
+        },
+        "longTaskCount": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "longTaskOver50Ms": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "maxLongTaskMs": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "mutationBatches": {
+          "median": 11,
+          "p95": 11,
+          "raw": [
+            11,
+            11,
+            11
+          ]
+        },
+        "frameCount": {
+          "median": 17,
+          "p95": 18.8,
+          "raw": [
+            17,
+            16,
+            19
+          ]
+        },
+        "frameOver16Ms": {
+          "median": 17,
+          "p95": 17,
+          "raw": [
+            17,
+            16,
+            17
+          ]
+        },
+        "domNodes": {
+          "median": 214,
+          "p95": 214,
+          "raw": [
+            214,
+            214,
+            214
+          ]
+        },
+        "jsHeapBytes": {
+          "median": 4439536,
+          "p95": 4451502.4,
+          "raw": [
+            4452832,
+            4439536,
+            4374816
+          ]
+        },
+        "incomingEvents": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "renderedEvents": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "renderedConsoleLines": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "duplicateEventIds": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "missingEventIds": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "inputToNextPaintMs": {
+          "median": 26,
+          "p95": 27.35,
+          "raw": [
+            23.69999998807907,
+            27.5,
+            26
+          ]
+        },
+        "transferredJsCssBytes": {
+          "median": 557025,
+          "p95": 557025,
+          "raw": [
+            557025,
+            557025,
+            557025
+          ]
+        },
+        "resourceCountJsCss": {
+          "median": 5,
+          "p95": 5,
+          "raw": [
+            5,
+            5,
+            5
+          ]
+        },
+        "sseRequestCount": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "durationMs": {
+          "median": 320,
+          "p95": 325.4,
+          "raw": [
+            317,
+            326,
+            320
+          ]
+        },
+        "eventSourceInstancesTotal": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "crashed": {
+          "count": 0,
+          "total": 3
+        },
+        "crashSteps": []
+      }
+    },
+    {
+      "name": "navigation-cold-configuration",
+      "samples": [
+        {
+          "repeat": 1,
+          "metrics": {
+            "routeReadyMs": 127,
+            "longTaskCount": 0,
+            "longTaskOver50Ms": 0,
+            "maxLongTaskMs": 0,
+            "mutationBatches": 10,
+            "frameCount": 17,
+            "frameOver16Ms": 16,
+            "domNodes": 237,
+            "jsHeapBytes": 4402191,
+            "incomingEvents": 0,
+            "renderedEvents": 0,
+            "renderedConsoleLines": 0,
+            "latestDisplayedEventDelayMs": null,
+            "terminalStatusDelayMs": null,
+            "duplicateEventIds": 0,
+            "missingEventIds": 0,
+            "eventOrderMatchesJournal": null,
+            "eventSourceInstances": {},
+            "inputToNextPaintMs": 25.299999952316284,
+            "transferredJsCssBytes": 557025,
+            "resourceCountJsCss": 5,
+            "sseRequestCount": 0,
+            "durationMs": 309,
+            "eventSourceInstancesTotal": 0
+          },
+          "pageErrors": []
+        },
+        {
+          "repeat": 2,
+          "metrics": {
+            "routeReadyMs": 145.4000000357628,
+            "longTaskCount": 0,
+            "longTaskOver50Ms": 0,
+            "maxLongTaskMs": 0,
+            "mutationBatches": 11,
+            "frameCount": 18,
+            "frameOver16Ms": 17,
+            "domNodes": 237,
+            "jsHeapBytes": 4426735,
+            "incomingEvents": 0,
+            "renderedEvents": 0,
+            "renderedConsoleLines": 0,
+            "latestDisplayedEventDelayMs": null,
+            "terminalStatusDelayMs": null,
+            "duplicateEventIds": 0,
+            "missingEventIds": 0,
+            "eventOrderMatchesJournal": null,
+            "eventSourceInstances": {},
+            "inputToNextPaintMs": 25.599999964237213,
+            "transferredJsCssBytes": 557025,
+            "resourceCountJsCss": 5,
+            "sseRequestCount": 0,
+            "durationMs": 342,
+            "eventSourceInstancesTotal": 0
+          },
+          "pageErrors": []
+        },
+        {
+          "repeat": 3,
+          "metrics": {
+            "routeReadyMs": 127.09999996423721,
+            "longTaskCount": 0,
+            "longTaskOver50Ms": 0,
+            "maxLongTaskMs": 0,
+            "mutationBatches": 11,
+            "frameCount": 17,
+            "frameOver16Ms": 17,
+            "domNodes": 237,
+            "jsHeapBytes": 4415464,
+            "incomingEvents": 0,
+            "renderedEvents": 0,
+            "renderedConsoleLines": 0,
+            "latestDisplayedEventDelayMs": null,
+            "terminalStatusDelayMs": null,
+            "duplicateEventIds": 0,
+            "missingEventIds": 0,
+            "eventOrderMatchesJournal": null,
+            "eventSourceInstances": {},
+            "inputToNextPaintMs": 27.30000001192093,
+            "transferredJsCssBytes": 557025,
+            "resourceCountJsCss": 5,
+            "sseRequestCount": 0,
+            "durationMs": 315,
+            "eventSourceInstancesTotal": 0
+          },
+          "pageErrors": []
+        }
+      ],
+      "summary": {
+        "routeReadyMs": {
+          "median": 127.09999996423721,
+          "p95": 143.57000002861022,
+          "raw": [
+            127,
+            145.4000000357628,
+            127.09999996423721
+          ]
+        },
+        "longTaskCount": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "longTaskOver50Ms": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "maxLongTaskMs": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "mutationBatches": {
+          "median": 11,
+          "p95": 11,
+          "raw": [
+            10,
+            11,
+            11
+          ]
+        },
+        "frameCount": {
+          "median": 17,
+          "p95": 17.9,
+          "raw": [
+            17,
+            18,
+            17
+          ]
+        },
+        "frameOver16Ms": {
+          "median": 17,
+          "p95": 17,
+          "raw": [
+            16,
+            17,
+            17
+          ]
+        },
+        "domNodes": {
+          "median": 237,
+          "p95": 237,
+          "raw": [
+            237,
+            237,
+            237
+          ]
+        },
+        "jsHeapBytes": {
+          "median": 4415464,
+          "p95": 4425607.9,
+          "raw": [
+            4402191,
+            4426735,
+            4415464
+          ]
+        },
+        "incomingEvents": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "renderedEvents": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "renderedConsoleLines": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "duplicateEventIds": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "missingEventIds": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "inputToNextPaintMs": {
+          "median": 25.599999964237213,
+          "p95": 27.130000007152557,
+          "raw": [
+            25.299999952316284,
+            25.599999964237213,
+            27.30000001192093
+          ]
+        },
+        "transferredJsCssBytes": {
+          "median": 557025,
+          "p95": 557025,
+          "raw": [
+            557025,
+            557025,
+            557025
+          ]
+        },
+        "resourceCountJsCss": {
+          "median": 5,
+          "p95": 5,
+          "raw": [
+            5,
+            5,
+            5
+          ]
+        },
+        "sseRequestCount": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "durationMs": {
+          "median": 315,
+          "p95": 339.3,
+          "raw": [
+            309,
+            342,
+            315
+          ]
+        },
+        "eventSourceInstancesTotal": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "crashed": {
+          "count": 0,
+          "total": 3
+        },
+        "crashSteps": []
+      }
+    },
+    {
+      "name": "navigation-cold-load",
+      "samples": [
+        {
+          "repeat": 1,
+          "metrics": {
+            "routeReadyMs": 156.5999999642372,
+            "longTaskCount": 0,
+            "longTaskOver50Ms": 0,
+            "maxLongTaskMs": 0,
+            "mutationBatches": 14,
+            "frameCount": 23,
+            "frameOver16Ms": 22,
+            "domNodes": 4099,
+            "jsHeapBytes": 8943048,
+            "incomingEvents": 0,
+            "renderedEvents": 0,
+            "renderedConsoleLines": 0,
+            "latestDisplayedEventDelayMs": null,
+            "terminalStatusDelayMs": null,
+            "duplicateEventIds": 0,
+            "missingEventIds": 0,
+            "eventOrderMatchesJournal": null,
+            "eventSourceInstances": {},
+            "inputToNextPaintMs": 30.30000001192093,
+            "transferredJsCssBytes": 557025,
+            "resourceCountJsCss": 5,
+            "sseRequestCount": 0,
+            "durationMs": 408,
+            "eventSourceInstancesTotal": 0
+          },
+          "pageErrors": []
+        },
+        {
+          "repeat": 2,
+          "metrics": {
+            "routeReadyMs": 154.80000001192093,
+            "longTaskCount": 0,
+            "longTaskOver50Ms": 0,
+            "maxLongTaskMs": 0,
+            "mutationBatches": 14,
+            "frameCount": 23,
+            "frameOver16Ms": 22,
+            "domNodes": 4099,
+            "jsHeapBytes": 8946067,
+            "incomingEvents": 0,
+            "renderedEvents": 0,
+            "renderedConsoleLines": 0,
+            "latestDisplayedEventDelayMs": null,
+            "terminalStatusDelayMs": null,
+            "duplicateEventIds": 0,
+            "missingEventIds": 0,
+            "eventOrderMatchesJournal": null,
+            "eventSourceInstances": {},
+            "inputToNextPaintMs": 28,
+            "transferredJsCssBytes": 557025,
+            "resourceCountJsCss": 5,
+            "sseRequestCount": 0,
+            "durationMs": 412,
+            "eventSourceInstancesTotal": 0
+          },
+          "pageErrors": []
+        },
+        {
+          "repeat": 3,
+          "metrics": {
+            "routeReadyMs": 157.30000001192093,
+            "longTaskCount": 0,
+            "longTaskOver50Ms": 0,
+            "maxLongTaskMs": 0,
+            "mutationBatches": 14,
+            "frameCount": 23,
+            "frameOver16Ms": 22,
+            "domNodes": 4099,
+            "jsHeapBytes": 9032905,
+            "incomingEvents": 0,
+            "renderedEvents": 0,
+            "renderedConsoleLines": 0,
+            "latestDisplayedEventDelayMs": null,
+            "terminalStatusDelayMs": null,
+            "duplicateEventIds": 0,
+            "missingEventIds": 0,
+            "eventOrderMatchesJournal": null,
+            "eventSourceInstances": {},
+            "inputToNextPaintMs": 30.600000023841858,
+            "transferredJsCssBytes": 557025,
+            "resourceCountJsCss": 5,
+            "sseRequestCount": 0,
+            "durationMs": 405,
+            "eventSourceInstancesTotal": 0
+          },
+          "pageErrors": []
+        }
+      ],
+      "summary": {
+        "routeReadyMs": {
+          "median": 156.5999999642372,
+          "p95": 157.23000000715257,
+          "raw": [
+            156.5999999642372,
+            154.80000001192093,
+            157.30000001192093
+          ]
+        },
+        "longTaskCount": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "longTaskOver50Ms": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "maxLongTaskMs": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "mutationBatches": {
+          "median": 14,
+          "p95": 14,
+          "raw": [
+            14,
+            14,
+            14
+          ]
+        },
+        "frameCount": {
+          "median": 23,
+          "p95": 23,
+          "raw": [
+            23,
+            23,
+            23
+          ]
+        },
+        "frameOver16Ms": {
+          "median": 22,
+          "p95": 22,
+          "raw": [
+            22,
+            22,
+            22
+          ]
+        },
+        "domNodes": {
+          "median": 4099,
+          "p95": 4099,
+          "raw": [
+            4099,
+            4099,
+            4099
+          ]
+        },
+        "jsHeapBytes": {
+          "median": 8946067,
+          "p95": 9024221.2,
+          "raw": [
+            8943048,
+            8946067,
+            9032905
+          ]
+        },
+        "incomingEvents": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "renderedEvents": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "renderedConsoleLines": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "duplicateEventIds": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "missingEventIds": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "inputToNextPaintMs": {
+          "median": 30.30000001192093,
+          "p95": 30.570000022649765,
+          "raw": [
+            30.30000001192093,
+            28,
+            30.600000023841858
+          ]
+        },
+        "transferredJsCssBytes": {
+          "median": 557025,
+          "p95": 557025,
+          "raw": [
+            557025,
+            557025,
+            557025
+          ]
+        },
+        "resourceCountJsCss": {
+          "median": 5,
+          "p95": 5,
+          "raw": [
+            5,
+            5,
+            5
+          ]
+        },
+        "sseRequestCount": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "durationMs": {
+          "median": 408,
+          "p95": 411.6,
+          "raw": [
+            408,
+            412,
+            405
+          ]
+        },
+        "eventSourceInstancesTotal": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "crashed": {
+          "count": 0,
+          "total": 3
+        },
+        "crashSteps": []
+      }
+    },
+    {
+      "name": "navigation-cold-jobs",
+      "samples": [
+        {
+          "repeat": 1,
+          "metrics": {
+            "routeReadyMs": 900.3999999761581,
+            "longTaskCount": 0,
+            "longTaskOver50Ms": 0,
+            "maxLongTaskMs": 0,
+            "mutationBatches": 9,
+            "frameCount": 59,
+            "frameOver16Ms": 59,
+            "domNodes": 604,
+            "jsHeapBytes": 4949325,
+            "incomingEvents": 0,
+            "renderedEvents": 0,
+            "renderedConsoleLines": 0,
+            "latestDisplayedEventDelayMs": null,
+            "terminalStatusDelayMs": null,
+            "duplicateEventIds": 0,
+            "missingEventIds": 0,
+            "eventOrderMatchesJournal": null,
+            "eventSourceInstances": {},
+            "inputToNextPaintMs": null,
+            "transferredJsCssBytes": 629713,
+            "resourceCountJsCss": 8,
+            "sseRequestCount": 0,
+            "durationMs": 1034,
+            "eventSourceInstancesTotal": 0
+          },
+          "pageErrors": []
+        },
+        {
+          "repeat": 2,
+          "metrics": {
+            "routeReadyMs": 897,
+            "longTaskCount": 0,
+            "longTaskOver50Ms": 0,
+            "maxLongTaskMs": 0,
+            "mutationBatches": 9,
+            "frameCount": 59,
+            "frameOver16Ms": 59,
+            "domNodes": 604,
+            "jsHeapBytes": 4950169,
+            "incomingEvents": 0,
+            "renderedEvents": 0,
+            "renderedConsoleLines": 0,
+            "latestDisplayedEventDelayMs": null,
+            "terminalStatusDelayMs": null,
+            "duplicateEventIds": 0,
+            "missingEventIds": 0,
+            "eventOrderMatchesJournal": null,
+            "eventSourceInstances": {},
+            "inputToNextPaintMs": null,
+            "transferredJsCssBytes": 629713,
+            "resourceCountJsCss": 8,
+            "sseRequestCount": 0,
+            "durationMs": 1028,
+            "eventSourceInstancesTotal": 0
+          },
+          "pageErrors": []
+        },
+        {
+          "repeat": 3,
+          "metrics": {
+            "routeReadyMs": 892.2000000476837,
+            "longTaskCount": 0,
+            "longTaskOver50Ms": 0,
+            "maxLongTaskMs": 0,
+            "mutationBatches": 8,
+            "frameCount": 59,
+            "frameOver16Ms": 59,
+            "domNodes": 604,
+            "jsHeapBytes": 4920332,
+            "incomingEvents": 0,
+            "renderedEvents": 0,
+            "renderedConsoleLines": 0,
+            "latestDisplayedEventDelayMs": null,
+            "terminalStatusDelayMs": null,
+            "duplicateEventIds": 0,
+            "missingEventIds": 0,
+            "eventOrderMatchesJournal": null,
+            "eventSourceInstances": {},
+            "inputToNextPaintMs": null,
+            "transferredJsCssBytes": 629713,
+            "resourceCountJsCss": 8,
+            "sseRequestCount": 0,
+            "durationMs": 1023,
+            "eventSourceInstancesTotal": 0
+          },
+          "pageErrors": []
+        }
+      ],
+      "summary": {
+        "routeReadyMs": {
+          "median": 897,
+          "p95": 900.0599999785424,
+          "raw": [
+            900.3999999761581,
+            897,
+            892.2000000476837
+          ]
+        },
+        "longTaskCount": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "longTaskOver50Ms": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "maxLongTaskMs": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "mutationBatches": {
+          "median": 9,
+          "p95": 9,
+          "raw": [
+            9,
+            9,
+            8
+          ]
+        },
+        "frameCount": {
+          "median": 59,
+          "p95": 59,
+          "raw": [
+            59,
+            59,
+            59
+          ]
+        },
+        "frameOver16Ms": {
+          "median": 59,
+          "p95": 59,
+          "raw": [
+            59,
+            59,
+            59
+          ]
+        },
+        "domNodes": {
+          "median": 604,
+          "p95": 604,
+          "raw": [
+            604,
+            604,
+            604
+          ]
+        },
+        "jsHeapBytes": {
+          "median": 4949325,
+          "p95": 4950084.6,
+          "raw": [
+            4949325,
+            4950169,
+            4920332
+          ]
+        },
+        "incomingEvents": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "renderedEvents": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "renderedConsoleLines": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "duplicateEventIds": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "missingEventIds": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "transferredJsCssBytes": {
+          "median": 629713,
+          "p95": 629713,
+          "raw": [
+            629713,
+            629713,
+            629713
+          ]
+        },
+        "resourceCountJsCss": {
+          "median": 8,
+          "p95": 8,
+          "raw": [
+            8,
+            8,
+            8
+          ]
+        },
+        "sseRequestCount": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "durationMs": {
+          "median": 1028,
+          "p95": 1033.4,
+          "raw": [
+            1034,
+            1028,
+            1023
+          ]
+        },
+        "eventSourceInstancesTotal": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "crashed": {
+          "count": 0,
+          "total": 3
+        },
+        "crashSteps": []
+      }
+    },
+    {
+      "name": "navigation-cold-schedules",
+      "samples": [
+        {
+          "repeat": 1,
+          "metrics": {
+            "routeReadyMs": 916.1000000238419,
+            "longTaskCount": 0,
+            "longTaskOver50Ms": 0,
+            "maxLongTaskMs": 0,
+            "mutationBatches": 12,
+            "frameCount": 63,
+            "frameOver16Ms": 63,
+            "domNodes": 5927,
+            "jsHeapBytes": 9525229,
+            "incomingEvents": 0,
+            "renderedEvents": 0,
+            "renderedConsoleLines": 0,
+            "latestDisplayedEventDelayMs": null,
+            "terminalStatusDelayMs": null,
+            "duplicateEventIds": 0,
+            "missingEventIds": 0,
+            "eventOrderMatchesJournal": null,
+            "eventSourceInstances": {},
+            "inputToNextPaintMs": 24,
+            "transferredJsCssBytes": 618899,
+            "resourceCountJsCss": 7,
+            "sseRequestCount": 0,
+            "durationMs": 1121,
+            "eventSourceInstancesTotal": 0
+          },
+          "pageErrors": []
+        },
+        {
+          "repeat": 2,
+          "metrics": {
+            "routeReadyMs": 922.6000000238419,
+            "longTaskCount": 0,
+            "longTaskOver50Ms": 0,
+            "maxLongTaskMs": 0,
+            "mutationBatches": 12,
+            "frameCount": 63,
+            "frameOver16Ms": 63,
+            "domNodes": 5927,
+            "jsHeapBytes": 9519597,
+            "incomingEvents": 0,
+            "renderedEvents": 0,
+            "renderedConsoleLines": 0,
+            "latestDisplayedEventDelayMs": null,
+            "terminalStatusDelayMs": null,
+            "duplicateEventIds": 0,
+            "missingEventIds": 0,
+            "eventOrderMatchesJournal": null,
+            "eventSourceInstances": {},
+            "inputToNextPaintMs": 27,
+            "transferredJsCssBytes": 618899,
+            "resourceCountJsCss": 7,
+            "sseRequestCount": 0,
+            "durationMs": 1126,
+            "eventSourceInstancesTotal": 0
+          },
+          "pageErrors": []
+        },
+        {
+          "repeat": 3,
+          "metrics": {
+            "routeReadyMs": 903.5,
+            "longTaskCount": 1,
+            "longTaskOver50Ms": 0,
+            "maxLongTaskMs": 50,
+            "mutationBatches": 12,
+            "frameCount": 64,
+            "frameOver16Ms": 63,
+            "domNodes": 5927,
+            "jsHeapBytes": 9562521,
+            "incomingEvents": 0,
+            "renderedEvents": 0,
+            "renderedConsoleLines": 0,
+            "latestDisplayedEventDelayMs": null,
+            "terminalStatusDelayMs": null,
+            "duplicateEventIds": 0,
+            "missingEventIds": 0,
+            "eventOrderMatchesJournal": null,
+            "eventSourceInstances": {},
+            "inputToNextPaintMs": 25.30000001192093,
+            "transferredJsCssBytes": 618899,
+            "resourceCountJsCss": 7,
+            "sseRequestCount": 0,
+            "durationMs": 1113,
+            "eventSourceInstancesTotal": 0
+          },
+          "pageErrors": []
+        }
+      ],
+      "summary": {
+        "routeReadyMs": {
+          "median": 916.1000000238419,
+          "p95": 921.9500000238419,
+          "raw": [
+            916.1000000238419,
+            922.6000000238419,
+            903.5
+          ]
+        },
+        "longTaskCount": {
+          "median": 0,
+          "p95": 0.8999999999999999,
+          "raw": [
+            0,
+            0,
+            1
+          ]
+        },
+        "longTaskOver50Ms": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "maxLongTaskMs": {
+          "median": 0,
+          "p95": 44.99999999999999,
+          "raw": [
+            0,
+            0,
+            50
+          ]
+        },
+        "mutationBatches": {
+          "median": 12,
+          "p95": 12,
+          "raw": [
+            12,
+            12,
+            12
+          ]
+        },
+        "frameCount": {
+          "median": 63,
+          "p95": 63.9,
+          "raw": [
+            63,
+            63,
+            64
+          ]
+        },
+        "frameOver16Ms": {
+          "median": 63,
+          "p95": 63,
+          "raw": [
+            63,
+            63,
+            63
+          ]
+        },
+        "domNodes": {
+          "median": 5927,
+          "p95": 5927,
+          "raw": [
+            5927,
+            5927,
+            5927
+          ]
+        },
+        "jsHeapBytes": {
+          "median": 9525229,
+          "p95": 9558791.8,
+          "raw": [
+            9525229,
+            9519597,
+            9562521
+          ]
+        },
+        "incomingEvents": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "renderedEvents": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "renderedConsoleLines": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "duplicateEventIds": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "missingEventIds": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "inputToNextPaintMs": {
+          "median": 25.30000001192093,
+          "p95": 26.830000001192094,
+          "raw": [
+            24,
+            27,
+            25.30000001192093
+          ]
+        },
+        "transferredJsCssBytes": {
+          "median": 618899,
+          "p95": 618899,
+          "raw": [
+            618899,
+            618899,
+            618899
+          ]
+        },
+        "resourceCountJsCss": {
+          "median": 7,
+          "p95": 7,
+          "raw": [
+            7,
+            7,
+            7
+          ]
+        },
+        "sseRequestCount": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "durationMs": {
+          "median": 1121,
+          "p95": 1125.5,
+          "raw": [
+            1121,
+            1126,
+            1113
+          ]
+        },
+        "eventSourceInstancesTotal": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "crashed": {
+          "count": 0,
+          "total": 3
+        },
+        "crashSteps": []
+      }
+    },
+    {
+      "name": "navigation-cold-settings",
+      "samples": [
+        {
+          "repeat": 1,
+          "metrics": {
+            "routeReadyMs": 897.6000000238419,
+            "longTaskCount": 0,
+            "longTaskOver50Ms": 0,
+            "maxLongTaskMs": 0,
+            "mutationBatches": 9,
+            "frameCount": 60,
+            "frameOver16Ms": 59,
+            "domNodes": 275,
+            "jsHeapBytes": 4278525,
+            "incomingEvents": 0,
+            "renderedEvents": 0,
+            "renderedConsoleLines": 0,
+            "latestDisplayedEventDelayMs": null,
+            "terminalStatusDelayMs": null,
+            "duplicateEventIds": 0,
+            "missingEventIds": 0,
+            "eventOrderMatchesJournal": null,
+            "eventSourceInstances": {},
+            "inputToNextPaintMs": null,
+            "transferredJsCssBytes": 582150,
+            "resourceCountJsCss": 7,
+            "sseRequestCount": 0,
+            "durationMs": 1031,
+            "eventSourceInstancesTotal": 0
+          },
+          "pageErrors": []
+        },
+        {
+          "repeat": 2,
+          "metrics": {
+            "routeReadyMs": 929,
+            "longTaskCount": 1,
+            "longTaskOver50Ms": 0,
+            "maxLongTaskMs": 50,
+            "mutationBatches": 9,
+            "frameCount": 59,
+            "frameOver16Ms": 59,
+            "domNodes": 275,
+            "jsHeapBytes": 4311520,
+            "incomingEvents": 0,
+            "renderedEvents": 0,
+            "renderedConsoleLines": 0,
+            "latestDisplayedEventDelayMs": null,
+            "terminalStatusDelayMs": null,
+            "duplicateEventIds": 0,
+            "missingEventIds": 0,
+            "eventOrderMatchesJournal": null,
+            "eventSourceInstances": {},
+            "inputToNextPaintMs": null,
+            "transferredJsCssBytes": 582150,
+            "resourceCountJsCss": 7,
+            "sseRequestCount": 0,
+            "durationMs": 1062,
+            "eventSourceInstancesTotal": 0
+          },
+          "pageErrors": []
+        },
+        {
+          "repeat": 3,
+          "metrics": {
+            "routeReadyMs": 898.1999999880791,
+            "longTaskCount": 0,
+            "longTaskOver50Ms": 0,
+            "maxLongTaskMs": 0,
+            "mutationBatches": 9,
+            "frameCount": 61,
+            "frameOver16Ms": 60,
+            "domNodes": 275,
+            "jsHeapBytes": 4290793,
+            "incomingEvents": 0,
+            "renderedEvents": 0,
+            "renderedConsoleLines": 0,
+            "latestDisplayedEventDelayMs": null,
+            "terminalStatusDelayMs": null,
+            "duplicateEventIds": 0,
+            "missingEventIds": 0,
+            "eventOrderMatchesJournal": null,
+            "eventSourceInstances": {},
+            "inputToNextPaintMs": null,
+            "transferredJsCssBytes": 582150,
+            "resourceCountJsCss": 7,
+            "sseRequestCount": 0,
+            "durationMs": 1031,
+            "eventSourceInstancesTotal": 0
+          },
+          "pageErrors": []
+        }
+      ],
+      "summary": {
+        "routeReadyMs": {
+          "median": 898.1999999880791,
+          "p95": 925.919999998808,
+          "raw": [
+            897.6000000238419,
+            929,
+            898.1999999880791
+          ]
+        },
+        "longTaskCount": {
+          "median": 0,
+          "p95": 0.8999999999999999,
+          "raw": [
+            0,
+            1,
+            0
+          ]
+        },
+        "longTaskOver50Ms": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "maxLongTaskMs": {
+          "median": 0,
+          "p95": 44.99999999999999,
+          "raw": [
+            0,
+            50,
+            0
+          ]
+        },
+        "mutationBatches": {
+          "median": 9,
+          "p95": 9,
+          "raw": [
+            9,
+            9,
+            9
+          ]
+        },
+        "frameCount": {
+          "median": 60,
+          "p95": 60.9,
+          "raw": [
+            60,
+            59,
+            61
+          ]
+        },
+        "frameOver16Ms": {
+          "median": 59,
+          "p95": 59.9,
+          "raw": [
+            59,
+            59,
+            60
+          ]
+        },
+        "domNodes": {
+          "median": 275,
+          "p95": 275,
+          "raw": [
+            275,
+            275,
+            275
+          ]
+        },
+        "jsHeapBytes": {
+          "median": 4290793,
+          "p95": 4309447.3,
+          "raw": [
+            4278525,
+            4311520,
+            4290793
+          ]
+        },
+        "incomingEvents": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "renderedEvents": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "renderedConsoleLines": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "duplicateEventIds": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "missingEventIds": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "transferredJsCssBytes": {
+          "median": 582150,
+          "p95": 582150,
+          "raw": [
+            582150,
+            582150,
+            582150
+          ]
+        },
+        "resourceCountJsCss": {
+          "median": 7,
+          "p95": 7,
+          "raw": [
+            7,
+            7,
+            7
+          ]
+        },
+        "sseRequestCount": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "durationMs": {
+          "median": 1031,
+          "p95": 1058.9,
+          "raw": [
+            1031,
+            1062,
+            1031
+          ]
+        },
+        "eventSourceInstancesTotal": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "crashed": {
+          "count": 0,
+          "total": 3
+        },
+        "crashSteps": []
+      }
+    },
+    {
+      "name": "navigation-warm-core-routes",
+      "samples": [
+        {
+          "repeat": 1,
+          "metrics": {
+            "routeReadyMs": 136.60000002384186,
+            "longTaskCount": 0,
+            "longTaskOver50Ms": 0,
+            "maxLongTaskMs": 0,
+            "mutationBatches": 24,
+            "frameCount": 37,
+            "frameOver16Ms": 37,
+            "domNodes": 265,
+            "jsHeapBytes": 8161519,
+            "incomingEvents": 0,
+            "renderedEvents": 0,
+            "renderedConsoleLines": 0,
+            "latestDisplayedEventDelayMs": null,
+            "terminalStatusDelayMs": null,
+            "duplicateEventIds": 0,
+            "missingEventIds": 0,
+            "eventOrderMatchesJournal": null,
+            "eventSourceInstances": {},
+            "inputToNextPaintMs": null,
+            "transferredJsCssBytes": 716712,
+            "resourceCountJsCss": 12,
+            "sseRequestCount": 0,
+            "durationMs": 665,
+            "eventSourceInstancesTotal": 0
+          },
+          "pageErrors": []
+        },
+        {
+          "repeat": 2,
+          "metrics": {
+            "routeReadyMs": 174.9000000357628,
+            "longTaskCount": 0,
+            "longTaskOver50Ms": 0,
+            "maxLongTaskMs": 0,
+            "mutationBatches": 26,
+            "frameCount": 36,
+            "frameOver16Ms": 36,
+            "domNodes": 265,
+            "jsHeapBytes": 8186068,
+            "incomingEvents": 0,
+            "renderedEvents": 0,
+            "renderedConsoleLines": 0,
+            "latestDisplayedEventDelayMs": null,
+            "terminalStatusDelayMs": null,
+            "duplicateEventIds": 0,
+            "missingEventIds": 0,
+            "eventOrderMatchesJournal": null,
+            "eventSourceInstances": {},
+            "inputToNextPaintMs": null,
+            "transferredJsCssBytes": 716712,
+            "resourceCountJsCss": 12,
+            "sseRequestCount": 0,
+            "durationMs": 718,
+            "eventSourceInstancesTotal": 0
+          },
+          "pageErrors": []
+        },
+        {
+          "repeat": 3,
+          "metrics": {
+            "routeReadyMs": 141.30000001192093,
+            "longTaskCount": 0,
+            "longTaskOver50Ms": 0,
+            "maxLongTaskMs": 0,
+            "mutationBatches": 24,
+            "frameCount": 36,
+            "frameOver16Ms": 36,
+            "domNodes": 265,
+            "jsHeapBytes": 8195121,
+            "incomingEvents": 0,
+            "renderedEvents": 0,
+            "renderedConsoleLines": 0,
+            "latestDisplayedEventDelayMs": null,
+            "terminalStatusDelayMs": null,
+            "duplicateEventIds": 0,
+            "missingEventIds": 0,
+            "eventOrderMatchesJournal": null,
+            "eventSourceInstances": {},
+            "inputToNextPaintMs": null,
+            "transferredJsCssBytes": 716712,
+            "resourceCountJsCss": 12,
+            "sseRequestCount": 0,
+            "durationMs": 668,
+            "eventSourceInstancesTotal": 0
+          },
+          "pageErrors": []
+        }
+      ],
+      "summary": {
+        "routeReadyMs": {
+          "median": 141.30000001192093,
+          "p95": 171.5400000333786,
+          "raw": [
+            136.60000002384186,
+            174.9000000357628,
+            141.30000001192093
+          ]
+        },
+        "longTaskCount": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "longTaskOver50Ms": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "maxLongTaskMs": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "mutationBatches": {
+          "median": 24,
+          "p95": 25.8,
+          "raw": [
+            24,
+            26,
+            24
+          ]
+        },
+        "frameCount": {
+          "median": 36,
+          "p95": 36.9,
+          "raw": [
+            37,
+            36,
+            36
+          ]
+        },
+        "frameOver16Ms": {
+          "median": 36,
+          "p95": 36.9,
+          "raw": [
+            37,
+            36,
+            36
+          ]
+        },
+        "domNodes": {
+          "median": 265,
+          "p95": 265,
+          "raw": [
+            265,
+            265,
+            265
+          ]
+        },
+        "jsHeapBytes": {
+          "median": 8186068,
+          "p95": 8194215.7,
+          "raw": [
+            8161519,
+            8186068,
+            8195121
+          ]
+        },
+        "incomingEvents": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "renderedEvents": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "renderedConsoleLines": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "duplicateEventIds": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "missingEventIds": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "transferredJsCssBytes": {
+          "median": 716712,
+          "p95": 716712,
+          "raw": [
+            716712,
+            716712,
+            716712
+          ]
+        },
+        "resourceCountJsCss": {
+          "median": 12,
+          "p95": 12,
+          "raw": [
+            12,
+            12,
+            12
+          ]
+        },
+        "sseRequestCount": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "durationMs": {
+          "median": 668,
+          "p95": 713,
+          "raw": [
+            665,
+            718,
+            668
+          ]
+        },
+        "eventSourceInstancesTotal": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "crashed": {
+          "count": 0,
+          "total": 3
+        },
+        "crashSteps": []
+      }
+    },
+    {
+      "name": "resilience-hidden-tab-and-paused-scroll",
+      "samples": [
+        {
+          "repeat": 1,
+          "metrics": {
+            "routeReadyMs": 898.1999999880791,
+            "longTaskCount": 0,
+            "longTaskOver50Ms": 0,
+            "maxLongTaskMs": 0,
+            "mutationBatches": 64,
+            "frameCount": 64,
+            "frameOver16Ms": 64,
+            "domNodes": 194,
+            "jsHeapBytes": 6346360,
+            "incomingEvents": 51,
+            "renderedEvents": 48,
+            "renderedConsoleLines": 48,
+            "latestDisplayedEventDelayMs": 1.2000000476837158,
+            "terminalStatusDelayMs": 1.0999999642372131,
+            "duplicateEventIds": 0,
+            "missingEventIds": 0,
+            "eventOrderMatchesJournal": null,
+            "eventSourceInstances": {
+              "PERF-JOB-266": 1
+            },
+            "inputToNextPaintMs": 29.399999976158142,
+            "transferredJsCssBytes": 582430,
+            "resourceCountJsCss": 8,
+            "sseRequestCount": 1,
+            "durationMs": 1100,
+            "eventSourceInstancesTotal": 1
+          },
+          "pageErrors": []
+        },
+        {
+          "repeat": 2,
+          "metrics": {
+            "routeReadyMs": 908.3999999761581,
+            "longTaskCount": 0,
+            "longTaskOver50Ms": 0,
+            "maxLongTaskMs": 0,
+            "mutationBatches": 63,
+            "frameCount": 63,
+            "frameOver16Ms": 63,
+            "domNodes": 194,
+            "jsHeapBytes": 6301650,
+            "incomingEvents": 51,
+            "renderedEvents": 48,
+            "renderedConsoleLines": 48,
+            "latestDisplayedEventDelayMs": 2,
+            "terminalStatusDelayMs": 1.9000000357627869,
+            "duplicateEventIds": 0,
+            "missingEventIds": 0,
+            "eventOrderMatchesJournal": null,
+            "eventSourceInstances": {
+              "PERF-JOB-266": 1
+            },
+            "inputToNextPaintMs": 29.19999998807907,
+            "transferredJsCssBytes": 582430,
+            "resourceCountJsCss": 8,
+            "sseRequestCount": 1,
+            "durationMs": 1119,
+            "eventSourceInstancesTotal": 1
+          },
+          "pageErrors": []
+        },
+        {
+          "repeat": 3,
+          "metrics": {
+            "routeReadyMs": 904.1000000238419,
+            "longTaskCount": 1,
+            "longTaskOver50Ms": 1,
+            "maxLongTaskMs": 51,
+            "mutationBatches": 64,
+            "frameCount": 64,
+            "frameOver16Ms": 63,
+            "domNodes": 194,
+            "jsHeapBytes": 6346246,
+            "incomingEvents": 51,
+            "renderedEvents": 48,
+            "renderedConsoleLines": 48,
+            "latestDisplayedEventDelayMs": 1.199999988079071,
+            "terminalStatusDelayMs": 1.100000023841858,
+            "duplicateEventIds": 0,
+            "missingEventIds": 0,
+            "eventOrderMatchesJournal": null,
+            "eventSourceInstances": {
+              "PERF-JOB-266": 1
+            },
+            "inputToNextPaintMs": 20.900000035762787,
+            "transferredJsCssBytes": 582430,
+            "resourceCountJsCss": 8,
+            "sseRequestCount": 1,
+            "durationMs": 1094,
+            "eventSourceInstancesTotal": 1
+          },
+          "pageErrors": []
+        }
+      ],
+      "summary": {
+        "routeReadyMs": {
+          "median": 904.1000000238419,
+          "p95": 907.9699999809266,
+          "raw": [
+            898.1999999880791,
+            908.3999999761581,
+            904.1000000238419
+          ]
+        },
+        "longTaskCount": {
+          "median": 0,
+          "p95": 0.8999999999999999,
+          "raw": [
+            0,
+            0,
+            1
+          ]
+        },
+        "longTaskOver50Ms": {
+          "median": 0,
+          "p95": 0.8999999999999999,
+          "raw": [
+            0,
+            0,
+            1
+          ]
+        },
+        "maxLongTaskMs": {
+          "median": 0,
+          "p95": 45.9,
+          "raw": [
+            0,
+            0,
+            51
+          ]
+        },
+        "mutationBatches": {
+          "median": 64,
+          "p95": 64,
+          "raw": [
+            64,
+            63,
+            64
+          ]
+        },
+        "frameCount": {
+          "median": 64,
+          "p95": 64,
+          "raw": [
+            64,
+            63,
+            64
+          ]
+        },
+        "frameOver16Ms": {
+          "median": 63,
+          "p95": 63.9,
+          "raw": [
+            64,
+            63,
+            63
+          ]
+        },
+        "domNodes": {
+          "median": 194,
+          "p95": 194,
+          "raw": [
+            194,
+            194,
+            194
+          ]
+        },
+        "jsHeapBytes": {
+          "median": 6346246,
+          "p95": 6346348.6,
+          "raw": [
+            6346360,
+            6301650,
+            6346246
+          ]
+        },
+        "incomingEvents": {
+          "median": 51,
+          "p95": 51,
+          "raw": [
+            51,
+            51,
+            51
+          ]
+        },
+        "renderedEvents": {
+          "median": 48,
+          "p95": 48,
+          "raw": [
+            48,
+            48,
+            48
+          ]
+        },
+        "renderedConsoleLines": {
+          "median": 48,
+          "p95": 48,
+          "raw": [
+            48,
+            48,
+            48
+          ]
+        },
+        "latestDisplayedEventDelayMs": {
+          "median": 1.2000000476837158,
+          "p95": 1.9200000047683714,
+          "raw": [
+            1.2000000476837158,
+            2,
+            1.199999988079071
+          ]
+        },
+        "terminalStatusDelayMs": {
+          "median": 1.100000023841858,
+          "p95": 1.820000034570694,
+          "raw": [
+            1.0999999642372131,
+            1.9000000357627869,
+            1.100000023841858
+          ]
+        },
+        "duplicateEventIds": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "missingEventIds": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "inputToNextPaintMs": {
+          "median": 29.19999998807907,
+          "p95": 29.379999977350234,
+          "raw": [
+            29.399999976158142,
+            29.19999998807907,
+            20.900000035762787
+          ]
+        },
+        "transferredJsCssBytes": {
+          "median": 582430,
+          "p95": 582430,
+          "raw": [
+            582430,
+            582430,
+            582430
+          ]
+        },
+        "resourceCountJsCss": {
+          "median": 8,
+          "p95": 8,
+          "raw": [
+            8,
+            8,
+            8
+          ]
+        },
+        "sseRequestCount": {
+          "median": 1,
+          "p95": 1,
+          "raw": [
+            1,
+            1,
+            1
+          ]
+        },
+        "durationMs": {
+          "median": 1100,
+          "p95": 1117.1,
+          "raw": [
+            1100,
+            1119,
+            1094
+          ]
+        },
+        "eventSourceInstancesTotal": {
+          "median": 1,
+          "p95": 1,
+          "raw": [
+            1,
+            1,
+            1
+          ]
+        },
+        "crashed": {
+          "count": 0,
+          "total": 3
+        },
+        "crashSteps": []
+      }
+    }
+  ],
+  "bundleGzip": [
+    {
+      "source": "_JobConsoleView-B3Te_dle.js",
+      "file": "assets/JobConsoleView-B3Te_dle.js",
+      "dynamic": false,
+      "rawBytes": 13980,
+      "gzipBytes": 5006
+    },
+    {
+      "source": "_JobConsoleView-B3Te_dle.js",
+      "file": "assets/JobConsoleView-Bg5UxAnQ.css",
+      "dynamic": false,
+      "rawBytes": 9099,
+      "gzipBytes": 2207
+    },
+    {
+      "source": "_dist-DE1Lrzs1.js",
+      "file": "assets/dist-DE1Lrzs1.js",
+      "dynamic": false,
+      "rawBytes": 26884,
+      "gzipBytes": 8740
+    },
+    {
+      "source": "_jsx-runtime-Dk72oS4N.js",
+      "file": "assets/jsx-runtime-Dk72oS4N.js",
+      "dynamic": false,
+      "rawBytes": 8774,
+      "gzipBytes": 3345
+    },
+    {
+      "source": "_preload-helper-CRzLMJPS.js",
+      "file": "assets/preload-helper-CRzLMJPS.js",
+      "dynamic": false,
+      "rawBytes": 1534,
+      "gzipBytes": 802
+    },
+    {
+      "source": "_types-C3LSnZ5x.js",
+      "file": "assets/types-C3LSnZ5x.js",
+      "dynamic": false,
+      "rawBytes": 251,
+      "gzipBytes": 165
+    },
+    {
+      "source": "index.html",
+      "file": "assets/index-BJ8FU8gP.js",
+      "dynamic": false,
+      "rawBytes": 471918,
+      "gzipBytes": 134367
+    },
+    {
+      "source": "index.html",
+      "file": "assets/index-BCpAGL0g.css",
+      "dynamic": false,
+      "rawBytes": 73048,
+      "gzipBytes": 12432
+    },
+    {
+      "source": "node_modules/@codemirror/lang-json/dist/index.js",
+      "file": "assets/dist-CzaXXnCI.js",
+      "dynamic": true,
+      "rawBytes": 2061,
+      "gzipBytes": 1267
+    },
+    {
+      "source": "node_modules/@codemirror/lang-sql/dist/index.js",
+      "file": "assets/dist-Cn2dFRcN.js",
+      "dynamic": true,
+      "rawBytes": 15924,
+      "gzipBytes": 6888
+    },
+    {
+      "source": "node_modules/@codemirror/lang-xml/dist/index.js",
+      "file": "assets/dist-CuS1qwX2.js",
+      "dynamic": true,
+      "rawBytes": 14381,
+      "gzipBytes": 5718
+    },
+    {
+      "source": "node_modules/@codemirror/lang-yaml/dist/index.js",
+      "file": "assets/dist-C4dvjZ1J.js",
+      "dynamic": true,
+      "rawBytes": 11628,
+      "gzipBytes": 5080
+    },
+    {
+      "source": "node_modules/@codemirror/language/dist/index.js",
+      "file": "assets/dist-DVzxfVxq.js",
+      "dynamic": true,
+      "rawBytes": 297687,
+      "gzipBytes": 95529
+    },
+    {
+      "source": "node_modules/@codemirror/legacy-modes/mode/shell.js",
+      "file": "assets/shell-DwuoZtxw.js",
+      "dynamic": true,
+      "rawBytes": 2434,
+      "gzipBytes": 1186
+    },
+    {
+      "source": "node_modules/yaml/browser/index.js",
+      "file": "assets/browser-CraaQKji.js",
+      "dynamic": true,
+      "rawBytes": 95953,
+      "gzipBytes": 29580
+    },
+    {
+      "source": "src/SettingsPage.tsx",
+      "file": "assets/SettingsPage-zIZvQThq.js",
+      "dynamic": true,
+      "rawBytes": 18693,
+      "gzipBytes": 4870
+    },
+    {
+      "source": "src/SettingsPage.tsx",
+      "file": "assets/SettingsPage-6aA7xbkL.css",
+      "dynamic": true,
+      "rawBytes": 5832,
+      "gzipBytes": 1423
+    },
+    {
+      "source": "src/features/code/codemirrorRuntime.ts",
+      "file": "assets/codemirrorRuntime-CpNtfrLp.js",
+      "dynamic": true,
+      "rawBytes": 75215,
+      "gzipBytes": 24873
+    },
+    {
+      "source": "src/features/load/FloatingJobConsole.tsx",
+      "file": "assets/FloatingJobConsole-DYgisyi2.js",
+      "dynamic": true,
+      "rawBytes": 4408,
+      "gzipBytes": 1688
+    },
+    {
+      "source": "src/features/load/JobsPage.tsx",
+      "file": "assets/JobsPage-B-xiegMv.js",
+      "dynamic": true,
+      "rawBytes": 48709,
+      "gzipBytes": 14169
+    },
+    {
+      "source": "src/features/load/LoadPage.tsx",
+      "file": "assets/LoadPage-CrRtHbxz.js",
+      "dynamic": true,
+      "rawBytes": 49336,
+      "gzipBytes": 13179
+    },
+    {
+      "source": "src/features/load/StandaloneJobConsolePage.tsx",
+      "file": "assets/StandaloneJobConsolePage-DZFUGwqy.js",
+      "dynamic": true,
+      "rawBytes": 1426,
+      "gzipBytes": 755
+    },
+    {
+      "source": "src/features/schedules/ScheduledLoadPage.tsx",
+      "file": "assets/ScheduledLoadPage-C_BzeHB6.js",
+      "dynamic": true,
+      "rawBytes": 48476,
+      "gzipBytes": 12988
+    },
+    {
+      "source": "src/features/schedules/ScheduledLoadPage.tsx",
+      "file": "assets/ScheduledLoadPage-27rod9YQ.css",
+      "dynamic": true,
+      "rawBytes": 12798,
+      "gzipBytes": 2602
+    }
+  ]
+}

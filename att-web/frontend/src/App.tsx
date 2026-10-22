@@ -5,8 +5,10 @@ import { DashboardPage } from './DashboardPage';
 import { formatRoute, useNavigationGuard, useRouteState, type AppRoute } from './router';
 import { appReducer, initialAppState, latestServerJobWindow, serverCapabilities } from './state';
 import { RunPage } from './features/run/RunPage';
-import { ExplorerPage } from './features/explorer/ExplorerPage';
+// explorer.css stays eager: TypedSidecarForm and ConfigurationExplorer use it
+// outside the lazy Explorer route, and moving it would change cascade order.
 import './features/explorer/explorer.css';
+const ExplorerPage = lazy(() => import('./features/explorer/ExplorerPage').then(module => ({ default: module.ExplorerPage })));
 import type { ExplorerPageProps, ResourceSourceReference } from './features/explorer/types';
 const LoadPage = lazy(() => import('./features/load/LoadPage').then(module => ({ default: module.LoadPage })));
 const JobsPage = lazy(() => import('./features/load/JobsPage').then(module => ({ default: module.JobsPage })));
@@ -435,13 +437,15 @@ export default function App() {
     content = <LoadResourceRouteView key={`${navigation.route.packageId}:${navigation.route.resourceId}`} route={navigation.route}
       inlineLoadEnabled={capabilities.inlineLoadEnabled} />;
   } else if (navigation.route.kind === 'package') {
-    content = <ExplorerRouteView
-      packageId={navigation.route.packageId}
-      resourceRoute={navigation.route.resource || null}
-      inlineLoadEnabled={capabilities.inlineLoadEnabled}
-      schedulingEnabled={capabilities.loadSchedulingEnabled}
-      onSchedule={onSchedule}
-    />;
+    content = <Suspense fallback={<div className="page-content" role="status" aria-busy="true">Loading Explorer…</div>}>
+      <ExplorerRouteView
+        packageId={navigation.route.packageId}
+        resourceRoute={navigation.route.resource || null}
+        inlineLoadEnabled={capabilities.inlineLoadEnabled}
+        schedulingEnabled={capabilities.loadSchedulingEnabled}
+        onSchedule={onSchedule}
+      />
+    </Suspense>;
   } else {
     const packageOptions = state.packages.status === 'ready'
       ? state.packages.data.map(item => ({ packageId: item.packageId, displayName: item.name }))

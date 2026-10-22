@@ -1,0 +1,5739 @@
+{
+  "label": "after",
+  "generatedAt": "2026-10-22T00:13:19.538Z",
+  "fixture": {
+    "jobId": "PERF-JOB-266",
+    "packageId": "payments",
+    "eventTypes": [
+      "status",
+      "progress",
+      "log",
+      "diagnostic",
+      "result"
+    ],
+    "steadyRates": [
+      10,
+      50,
+      200
+    ],
+    "steadyDurationMs": 1000,
+    "burstEvents": 10000,
+    "retainedEvents": 500,
+    "metricBuckets": [
+      100,
+      1000,
+      4096
+    ],
+    "jobs": 100,
+    "schedules": 100,
+    "routes": [
+      "dashboard",
+      "explorer",
+      "configuration",
+      "load",
+      "jobs",
+      "schedules",
+      "settings"
+    ]
+  },
+  "environment": {
+    "gitCommit": "3e03207ab92e61b2faa506c3b29489bc73aacdea",
+    "os": "darwin 25.1.0 arm64",
+    "cpuCount": 8,
+    "browser": "chromium",
+    "browserVersion": "155.0.8059.85",
+    "playwrightVersion": "1.62.1",
+    "reducedMotion": false,
+    "uiDist": "/Users/jeffrey/dev/temp-driven-api-testing-tool/att-web/frontend/dist"
+  },
+  "scenarios": [
+    {
+      "name": "live-steady-10/s",
+      "samples": [
+        {
+          "repeat": 1,
+          "metrics": {
+            "routeReadyMs": 926.5,
+            "longTaskCount": 1,
+            "longTaskOver50Ms": 1,
+            "maxLongTaskMs": 52,
+            "mutationBatches": 11,
+            "frameCount": 64,
+            "frameOver16Ms": 64,
+            "domNodes": 194,
+            "jsHeapBytes": 5216280,
+            "incomingEvents": 11,
+            "renderedEvents": 10,
+            "renderedConsoleLines": 10,
+            "latestDisplayedEventDelayMs": 7.699999988079071,
+            "terminalStatusDelayMs": 7.699999988079071,
+            "duplicateEventIds": 0,
+            "missingEventIds": 0,
+            "eventOrderMatchesJournal": null,
+            "eventSourceInstances": {
+              "PERF-JOB-266": 1
+            },
+            "inputToNextPaintMs": 30.399999976158142,
+            "transferredJsCssBytes": 562767,
+            "resourceCountJsCss": 8,
+            "sseRequestCount": 1,
+            "durationMs": 1148,
+            "eventSourceInstancesTotal": 1
+          },
+          "pageErrors": []
+        },
+        {
+          "repeat": 2,
+          "metrics": {
+            "routeReadyMs": 888.9000000357628,
+            "longTaskCount": 0,
+            "longTaskOver50Ms": 0,
+            "maxLongTaskMs": 0,
+            "mutationBatches": 13,
+            "frameCount": 63,
+            "frameOver16Ms": 63,
+            "domNodes": 194,
+            "jsHeapBytes": 5353733,
+            "incomingEvents": 11,
+            "renderedEvents": 10,
+            "renderedConsoleLines": 10,
+            "latestDisplayedEventDelayMs": 4,
+            "terminalStatusDelayMs": 4.100000023841858,
+            "duplicateEventIds": 0,
+            "missingEventIds": 0,
+            "eventOrderMatchesJournal": null,
+            "eventSourceInstances": {
+              "PERF-JOB-266": 1
+            },
+            "inputToNextPaintMs": 28.69999998807907,
+            "transferredJsCssBytes": 562767,
+            "resourceCountJsCss": 8,
+            "sseRequestCount": 1,
+            "durationMs": 1097,
+            "eventSourceInstancesTotal": 1
+          },
+          "pageErrors": []
+        },
+        {
+          "repeat": 3,
+          "metrics": {
+            "routeReadyMs": 888.8000000119209,
+            "longTaskCount": 0,
+            "longTaskOver50Ms": 0,
+            "maxLongTaskMs": 0,
+            "mutationBatches": 12,
+            "frameCount": 63,
+            "frameOver16Ms": 63,
+            "domNodes": 194,
+            "jsHeapBytes": 5229176,
+            "incomingEvents": 11,
+            "renderedEvents": 10,
+            "renderedConsoleLines": 10,
+            "latestDisplayedEventDelayMs": 6.399999976158142,
+            "terminalStatusDelayMs": 6.5,
+            "duplicateEventIds": 0,
+            "missingEventIds": 0,
+            "eventOrderMatchesJournal": null,
+            "eventSourceInstances": {
+              "PERF-JOB-266": 1
+            },
+            "inputToNextPaintMs": 23.19999998807907,
+            "transferredJsCssBytes": 562767,
+            "resourceCountJsCss": 8,
+            "sseRequestCount": 1,
+            "durationMs": 1097,
+            "eventSourceInstancesTotal": 1
+          },
+          "pageErrors": []
+        }
+      ],
+      "summary": {
+        "routeReadyMs": {
+          "median": 888.9000000357628,
+          "p95": 922.7400000035763,
+          "raw": [
+            926.5,
+            888.9000000357628,
+            888.8000000119209
+          ]
+        },
+        "longTaskCount": {
+          "median": 0,
+          "p95": 0.8999999999999999,
+          "raw": [
+            1,
+            0,
+            0
+          ]
+        },
+        "longTaskOver50Ms": {
+          "median": 0,
+          "p95": 0.8999999999999999,
+          "raw": [
+            1,
+            0,
+            0
+          ]
+        },
+        "maxLongTaskMs": {
+          "median": 0,
+          "p95": 46.8,
+          "raw": [
+            52,
+            0,
+            0
+          ]
+        },
+        "mutationBatches": {
+          "median": 12,
+          "p95": 12.9,
+          "raw": [
+            11,
+            13,
+            12
+          ]
+        },
+        "frameCount": {
+          "median": 63,
+          "p95": 63.9,
+          "raw": [
+            64,
+            63,
+            63
+          ]
+        },
+        "frameOver16Ms": {
+          "median": 63,
+          "p95": 63.9,
+          "raw": [
+            64,
+            63,
+            63
+          ]
+        },
+        "domNodes": {
+          "median": 194,
+          "p95": 194,
+          "raw": [
+            194,
+            194,
+            194
+          ]
+        },
+        "jsHeapBytes": {
+          "median": 5229176,
+          "p95": 5341277.3,
+          "raw": [
+            5216280,
+            5353733,
+            5229176
+          ]
+        },
+        "incomingEvents": {
+          "median": 11,
+          "p95": 11,
+          "raw": [
+            11,
+            11,
+            11
+          ]
+        },
+        "renderedEvents": {
+          "median": 10,
+          "p95": 10,
+          "raw": [
+            10,
+            10,
+            10
+          ]
+        },
+        "renderedConsoleLines": {
+          "median": 10,
+          "p95": 10,
+          "raw": [
+            10,
+            10,
+            10
+          ]
+        },
+        "latestDisplayedEventDelayMs": {
+          "median": 6.399999976158142,
+          "p95": 7.5699999868869785,
+          "raw": [
+            7.699999988079071,
+            4,
+            6.399999976158142
+          ]
+        },
+        "terminalStatusDelayMs": {
+          "median": 6.5,
+          "p95": 7.579999989271164,
+          "raw": [
+            7.699999988079071,
+            4.100000023841858,
+            6.5
+          ]
+        },
+        "duplicateEventIds": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "missingEventIds": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "inputToNextPaintMs": {
+          "median": 28.69999998807907,
+          "p95": 30.229999977350236,
+          "raw": [
+            30.399999976158142,
+            28.69999998807907,
+            23.19999998807907
+          ]
+        },
+        "transferredJsCssBytes": {
+          "median": 562767,
+          "p95": 562767,
+          "raw": [
+            562767,
+            562767,
+            562767
+          ]
+        },
+        "resourceCountJsCss": {
+          "median": 8,
+          "p95": 8,
+          "raw": [
+            8,
+            8,
+            8
+          ]
+        },
+        "sseRequestCount": {
+          "median": 1,
+          "p95": 1,
+          "raw": [
+            1,
+            1,
+            1
+          ]
+        },
+        "durationMs": {
+          "median": 1097,
+          "p95": 1142.9,
+          "raw": [
+            1148,
+            1097,
+            1097
+          ]
+        },
+        "eventSourceInstancesTotal": {
+          "median": 1,
+          "p95": 1,
+          "raw": [
+            1,
+            1,
+            1
+          ]
+        },
+        "crashed": {
+          "count": 0,
+          "total": 3
+        },
+        "crashSteps": []
+      }
+    },
+    {
+      "name": "live-steady-50/s",
+      "samples": [
+        {
+          "repeat": 1,
+          "metrics": {
+            "routeReadyMs": 888.6000000238419,
+            "longTaskCount": 0,
+            "longTaskOver50Ms": 0,
+            "maxLongTaskMs": 0,
+            "mutationBatches": 13,
+            "frameCount": 66,
+            "frameOver16Ms": 64,
+            "domNodes": 194,
+            "jsHeapBytes": 5357995,
+            "incomingEvents": 51,
+            "renderedEvents": 48,
+            "renderedConsoleLines": 48,
+            "latestDisplayedEventDelayMs": 10.399999976158142,
+            "terminalStatusDelayMs": 10.399999976158142,
+            "duplicateEventIds": 0,
+            "missingEventIds": 0,
+            "eventOrderMatchesJournal": null,
+            "eventSourceInstances": {
+              "PERF-JOB-266": 1
+            },
+            "inputToNextPaintMs": 36.80000001192093,
+            "transferredJsCssBytes": 562767,
+            "resourceCountJsCss": 8,
+            "sseRequestCount": 1,
+            "durationMs": 1118,
+            "eventSourceInstancesTotal": 1
+          },
+          "pageErrors": []
+        },
+        {
+          "repeat": 2,
+          "metrics": {
+            "routeReadyMs": 888.3999999761581,
+            "longTaskCount": 0,
+            "longTaskOver50Ms": 0,
+            "maxLongTaskMs": 0,
+            "mutationBatches": 13,
+            "frameCount": 63,
+            "frameOver16Ms": 62,
+            "domNodes": 194,
+            "jsHeapBytes": 5361356,
+            "incomingEvents": 51,
+            "renderedEvents": 48,
+            "renderedConsoleLines": 48,
+            "latestDisplayedEventDelayMs": 4.599999964237213,
+            "terminalStatusDelayMs": 4.599999964237213,
+            "duplicateEventIds": 0,
+            "missingEventIds": 0,
+            "eventOrderMatchesJournal": null,
+            "eventSourceInstances": {
+              "PERF-JOB-266": 1
+            },
+            "inputToNextPaintMs": 21.099999964237213,
+            "transferredJsCssBytes": 562767,
+            "resourceCountJsCss": 8,
+            "sseRequestCount": 1,
+            "durationMs": 1077,
+            "eventSourceInstancesTotal": 1
+          },
+          "pageErrors": []
+        },
+        {
+          "repeat": 3,
+          "metrics": {
+            "routeReadyMs": 897.2999999523163,
+            "longTaskCount": 0,
+            "longTaskOver50Ms": 0,
+            "maxLongTaskMs": 0,
+            "mutationBatches": 13,
+            "frameCount": 63,
+            "frameOver16Ms": 63,
+            "domNodes": 194,
+            "jsHeapBytes": 5369069,
+            "incomingEvents": 51,
+            "renderedEvents": 48,
+            "renderedConsoleLines": 48,
+            "latestDisplayedEventDelayMs": 10.100000023841858,
+            "terminalStatusDelayMs": 10.100000023841858,
+            "duplicateEventIds": 0,
+            "missingEventIds": 0,
+            "eventOrderMatchesJournal": null,
+            "eventSourceInstances": {
+              "PERF-JOB-266": 1
+            },
+            "inputToNextPaintMs": 26.69999998807907,
+            "transferredJsCssBytes": 562767,
+            "resourceCountJsCss": 8,
+            "sseRequestCount": 1,
+            "durationMs": 1107,
+            "eventSourceInstancesTotal": 1
+          },
+          "pageErrors": []
+        }
+      ],
+      "summary": {
+        "routeReadyMs": {
+          "median": 888.6000000238419,
+          "p95": 896.4299999594689,
+          "raw": [
+            888.6000000238419,
+            888.3999999761581,
+            897.2999999523163
+          ]
+        },
+        "longTaskCount": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "longTaskOver50Ms": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "maxLongTaskMs": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "mutationBatches": {
+          "median": 13,
+          "p95": 13,
+          "raw": [
+            13,
+            13,
+            13
+          ]
+        },
+        "frameCount": {
+          "median": 63,
+          "p95": 65.7,
+          "raw": [
+            66,
+            63,
+            63
+          ]
+        },
+        "frameOver16Ms": {
+          "median": 63,
+          "p95": 63.9,
+          "raw": [
+            64,
+            62,
+            63
+          ]
+        },
+        "domNodes": {
+          "median": 194,
+          "p95": 194,
+          "raw": [
+            194,
+            194,
+            194
+          ]
+        },
+        "jsHeapBytes": {
+          "median": 5361356,
+          "p95": 5368297.7,
+          "raw": [
+            5357995,
+            5361356,
+            5369069
+          ]
+        },
+        "incomingEvents": {
+          "median": 51,
+          "p95": 51,
+          "raw": [
+            51,
+            51,
+            51
+          ]
+        },
+        "renderedEvents": {
+          "median": 48,
+          "p95": 48,
+          "raw": [
+            48,
+            48,
+            48
+          ]
+        },
+        "renderedConsoleLines": {
+          "median": 48,
+          "p95": 48,
+          "raw": [
+            48,
+            48,
+            48
+          ]
+        },
+        "latestDisplayedEventDelayMs": {
+          "median": 10.100000023841858,
+          "p95": 10.369999980926513,
+          "raw": [
+            10.399999976158142,
+            4.599999964237213,
+            10.100000023841858
+          ]
+        },
+        "terminalStatusDelayMs": {
+          "median": 10.100000023841858,
+          "p95": 10.369999980926513,
+          "raw": [
+            10.399999976158142,
+            4.599999964237213,
+            10.100000023841858
+          ]
+        },
+        "duplicateEventIds": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "missingEventIds": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "inputToNextPaintMs": {
+          "median": 26.69999998807907,
+          "p95": 35.79000000953674,
+          "raw": [
+            36.80000001192093,
+            21.099999964237213,
+            26.69999998807907
+          ]
+        },
+        "transferredJsCssBytes": {
+          "median": 562767,
+          "p95": 562767,
+          "raw": [
+            562767,
+            562767,
+            562767
+          ]
+        },
+        "resourceCountJsCss": {
+          "median": 8,
+          "p95": 8,
+          "raw": [
+            8,
+            8,
+            8
+          ]
+        },
+        "sseRequestCount": {
+          "median": 1,
+          "p95": 1,
+          "raw": [
+            1,
+            1,
+            1
+          ]
+        },
+        "durationMs": {
+          "median": 1107,
+          "p95": 1116.9,
+          "raw": [
+            1118,
+            1077,
+            1107
+          ]
+        },
+        "eventSourceInstancesTotal": {
+          "median": 1,
+          "p95": 1,
+          "raw": [
+            1,
+            1,
+            1
+          ]
+        },
+        "crashed": {
+          "count": 0,
+          "total": 3
+        },
+        "crashSteps": []
+      }
+    },
+    {
+      "name": "live-steady-200/s",
+      "samples": [
+        {
+          "repeat": 1,
+          "metrics": {
+            "routeReadyMs": 892.9000000357628,
+            "longTaskCount": 0,
+            "longTaskOver50Ms": 0,
+            "maxLongTaskMs": 0,
+            "mutationBatches": 13,
+            "frameCount": 64,
+            "frameOver16Ms": 63,
+            "domNodes": 194,
+            "jsHeapBytes": 5427759,
+            "incomingEvents": 201,
+            "renderedEvents": 190,
+            "renderedConsoleLines": 190,
+            "latestDisplayedEventDelayMs": 10.699999988079071,
+            "terminalStatusDelayMs": 10.699999988079071,
+            "duplicateEventIds": 0,
+            "missingEventIds": 0,
+            "eventOrderMatchesJournal": null,
+            "eventSourceInstances": {
+              "PERF-JOB-266": 1
+            },
+            "inputToNextPaintMs": 25.899999976158142,
+            "transferredJsCssBytes": 562767,
+            "resourceCountJsCss": 8,
+            "sseRequestCount": 1,
+            "durationMs": 1106,
+            "eventSourceInstancesTotal": 1
+          },
+          "pageErrors": []
+        },
+        {
+          "repeat": 2,
+          "metrics": {
+            "routeReadyMs": 895.4000000357628,
+            "longTaskCount": 0,
+            "longTaskOver50Ms": 0,
+            "maxLongTaskMs": 0,
+            "mutationBatches": 13,
+            "frameCount": 64,
+            "frameOver16Ms": 64,
+            "domNodes": 194,
+            "jsHeapBytes": 5539542,
+            "incomingEvents": 201,
+            "renderedEvents": 190,
+            "renderedConsoleLines": 190,
+            "latestDisplayedEventDelayMs": 6.199999988079071,
+            "terminalStatusDelayMs": 6.199999988079071,
+            "duplicateEventIds": 0,
+            "missingEventIds": 0,
+            "eventOrderMatchesJournal": null,
+            "eventSourceInstances": {
+              "PERF-JOB-266": 1
+            },
+            "inputToNextPaintMs": 33.80000001192093,
+            "transferredJsCssBytes": 562767,
+            "resourceCountJsCss": 8,
+            "sseRequestCount": 1,
+            "durationMs": 1103,
+            "eventSourceInstancesTotal": 1
+          },
+          "pageErrors": []
+        },
+        {
+          "repeat": 3,
+          "metrics": {
+            "routeReadyMs": 896.3999999761581,
+            "longTaskCount": 0,
+            "longTaskOver50Ms": 0,
+            "maxLongTaskMs": 0,
+            "mutationBatches": 13,
+            "frameCount": 65,
+            "frameOver16Ms": 64,
+            "domNodes": 194,
+            "jsHeapBytes": 5428984,
+            "incomingEvents": 201,
+            "renderedEvents": 190,
+            "renderedConsoleLines": 190,
+            "latestDisplayedEventDelayMs": 11.800000011920929,
+            "terminalStatusDelayMs": 11.800000011920929,
+            "duplicateEventIds": 0,
+            "missingEventIds": 0,
+            "eventOrderMatchesJournal": null,
+            "eventSourceInstances": {
+              "PERF-JOB-266": 1
+            },
+            "inputToNextPaintMs": 30.400000035762787,
+            "transferredJsCssBytes": 562767,
+            "resourceCountJsCss": 8,
+            "sseRequestCount": 1,
+            "durationMs": 1098,
+            "eventSourceInstancesTotal": 1
+          },
+          "pageErrors": []
+        }
+      ],
+      "summary": {
+        "routeReadyMs": {
+          "median": 895.4000000357628,
+          "p95": 896.2999999821186,
+          "raw": [
+            892.9000000357628,
+            895.4000000357628,
+            896.3999999761581
+          ]
+        },
+        "longTaskCount": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "longTaskOver50Ms": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "maxLongTaskMs": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "mutationBatches": {
+          "median": 13,
+          "p95": 13,
+          "raw": [
+            13,
+            13,
+            13
+          ]
+        },
+        "frameCount": {
+          "median": 64,
+          "p95": 64.9,
+          "raw": [
+            64,
+            64,
+            65
+          ]
+        },
+        "frameOver16Ms": {
+          "median": 64,
+          "p95": 64,
+          "raw": [
+            63,
+            64,
+            64
+          ]
+        },
+        "domNodes": {
+          "median": 194,
+          "p95": 194,
+          "raw": [
+            194,
+            194,
+            194
+          ]
+        },
+        "jsHeapBytes": {
+          "median": 5428984,
+          "p95": 5528486.2,
+          "raw": [
+            5427759,
+            5539542,
+            5428984
+          ]
+        },
+        "incomingEvents": {
+          "median": 201,
+          "p95": 201,
+          "raw": [
+            201,
+            201,
+            201
+          ]
+        },
+        "renderedEvents": {
+          "median": 190,
+          "p95": 190,
+          "raw": [
+            190,
+            190,
+            190
+          ]
+        },
+        "renderedConsoleLines": {
+          "median": 190,
+          "p95": 190,
+          "raw": [
+            190,
+            190,
+            190
+          ]
+        },
+        "latestDisplayedEventDelayMs": {
+          "median": 10.699999988079071,
+          "p95": 11.690000009536742,
+          "raw": [
+            10.699999988079071,
+            6.199999988079071,
+            11.800000011920929
+          ]
+        },
+        "terminalStatusDelayMs": {
+          "median": 10.699999988079071,
+          "p95": 11.690000009536742,
+          "raw": [
+            10.699999988079071,
+            6.199999988079071,
+            11.800000011920929
+          ]
+        },
+        "duplicateEventIds": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "missingEventIds": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "inputToNextPaintMs": {
+          "median": 30.400000035762787,
+          "p95": 33.460000014305116,
+          "raw": [
+            25.899999976158142,
+            33.80000001192093,
+            30.400000035762787
+          ]
+        },
+        "transferredJsCssBytes": {
+          "median": 562767,
+          "p95": 562767,
+          "raw": [
+            562767,
+            562767,
+            562767
+          ]
+        },
+        "resourceCountJsCss": {
+          "median": 8,
+          "p95": 8,
+          "raw": [
+            8,
+            8,
+            8
+          ]
+        },
+        "sseRequestCount": {
+          "median": 1,
+          "p95": 1,
+          "raw": [
+            1,
+            1,
+            1
+          ]
+        },
+        "durationMs": {
+          "median": 1103,
+          "p95": 1105.7,
+          "raw": [
+            1106,
+            1103,
+            1098
+          ]
+        },
+        "eventSourceInstancesTotal": {
+          "median": 1,
+          "p95": 1,
+          "raw": [
+            1,
+            1,
+            1
+          ]
+        },
+        "crashed": {
+          "count": 0,
+          "total": 3
+        },
+        "crashSteps": []
+      }
+    },
+    {
+      "name": "live-burst-10k-replay-reconnect",
+      "samples": [
+        {
+          "repeat": 1,
+          "metrics": {
+            "routeReadyMs": 888.1999999880791,
+            "longTaskCount": 1,
+            "longTaskOver50Ms": 1,
+            "maxLongTaskMs": 54,
+            "mutationBatches": 21,
+            "frameCount": 60,
+            "frameOver16Ms": 59,
+            "domNodes": 282,
+            "jsHeapBytes": 7505073,
+            "incomingEvents": 10001,
+            "renderedEvents": 9,
+            "renderedConsoleLines": 0,
+            "latestDisplayedEventDelayMs": 2.399999976158142,
+            "terminalStatusDelayMs": 2.5,
+            "duplicateEventIds": 0,
+            "missingEventIds": 0,
+            "eventOrderMatchesJournal": true,
+            "eventSourceInstances": {
+              "PERF-JOB-266": 1
+            },
+            "inputToNextPaintMs": 33.69999998807907,
+            "transferredJsCssBytes": 562767,
+            "resourceCountJsCss": 8,
+            "sseRequestCount": 2,
+            "reconnectLastEventIds": [
+              10000
+            ],
+            "durationMs": 1101,
+            "eventSourceInstancesTotal": 1
+          },
+          "pageErrors": []
+        },
+        {
+          "repeat": 2,
+          "metrics": {
+            "routeReadyMs": 887.5999999642372,
+            "longTaskCount": 0,
+            "longTaskOver50Ms": 0,
+            "maxLongTaskMs": 0,
+            "mutationBatches": 21,
+            "frameCount": 62,
+            "frameOver16Ms": 62,
+            "domNodes": 282,
+            "jsHeapBytes": 7510756,
+            "incomingEvents": 10001,
+            "renderedEvents": 9,
+            "renderedConsoleLines": 0,
+            "latestDisplayedEventDelayMs": 9,
+            "terminalStatusDelayMs": 9.100000023841858,
+            "duplicateEventIds": 0,
+            "missingEventIds": 0,
+            "eventOrderMatchesJournal": true,
+            "eventSourceInstances": {
+              "PERF-JOB-266": 1
+            },
+            "inputToNextPaintMs": 30.100000023841858,
+            "transferredJsCssBytes": 562767,
+            "resourceCountJsCss": 8,
+            "sseRequestCount": 2,
+            "reconnectLastEventIds": [
+              10000
+            ],
+            "durationMs": 1097,
+            "eventSourceInstancesTotal": 1
+          },
+          "pageErrors": []
+        },
+        {
+          "repeat": 3,
+          "metrics": {
+            "routeReadyMs": 889.6999999880791,
+            "longTaskCount": 1,
+            "longTaskOver50Ms": 0,
+            "maxLongTaskMs": 50,
+            "mutationBatches": 20,
+            "frameCount": 59,
+            "frameOver16Ms": 58,
+            "domNodes": 282,
+            "jsHeapBytes": 7444224,
+            "incomingEvents": 10001,
+            "renderedEvents": 9,
+            "renderedConsoleLines": 0,
+            "latestDisplayedEventDelayMs": 9.300000011920929,
+            "terminalStatusDelayMs": 9.300000011920929,
+            "duplicateEventIds": 0,
+            "missingEventIds": 0,
+            "eventOrderMatchesJournal": true,
+            "eventSourceInstances": {
+              "PERF-JOB-266": 1
+            },
+            "inputToNextPaintMs": 33.19999998807907,
+            "transferredJsCssBytes": 562767,
+            "resourceCountJsCss": 8,
+            "sseRequestCount": 2,
+            "reconnectLastEventIds": [
+              10000
+            ],
+            "durationMs": 1062,
+            "eventSourceInstancesTotal": 1
+          },
+          "pageErrors": []
+        }
+      ],
+      "summary": {
+        "routeReadyMs": {
+          "median": 888.1999999880791,
+          "p95": 889.5499999880791,
+          "raw": [
+            888.1999999880791,
+            887.5999999642372,
+            889.6999999880791
+          ]
+        },
+        "longTaskCount": {
+          "median": 1,
+          "p95": 1,
+          "raw": [
+            1,
+            0,
+            1
+          ]
+        },
+        "longTaskOver50Ms": {
+          "median": 0,
+          "p95": 0.8999999999999999,
+          "raw": [
+            1,
+            0,
+            0
+          ]
+        },
+        "maxLongTaskMs": {
+          "median": 50,
+          "p95": 53.6,
+          "raw": [
+            54,
+            0,
+            50
+          ]
+        },
+        "mutationBatches": {
+          "median": 21,
+          "p95": 21,
+          "raw": [
+            21,
+            21,
+            20
+          ]
+        },
+        "frameCount": {
+          "median": 60,
+          "p95": 61.8,
+          "raw": [
+            60,
+            62,
+            59
+          ]
+        },
+        "frameOver16Ms": {
+          "median": 59,
+          "p95": 61.7,
+          "raw": [
+            59,
+            62,
+            58
+          ]
+        },
+        "domNodes": {
+          "median": 282,
+          "p95": 282,
+          "raw": [
+            282,
+            282,
+            282
+          ]
+        },
+        "jsHeapBytes": {
+          "median": 7505073,
+          "p95": 7510187.7,
+          "raw": [
+            7505073,
+            7510756,
+            7444224
+          ]
+        },
+        "incomingEvents": {
+          "median": 10001,
+          "p95": 10001,
+          "raw": [
+            10001,
+            10001,
+            10001
+          ]
+        },
+        "renderedEvents": {
+          "median": 9,
+          "p95": 9,
+          "raw": [
+            9,
+            9,
+            9
+          ]
+        },
+        "renderedConsoleLines": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "latestDisplayedEventDelayMs": {
+          "median": 9,
+          "p95": 9.270000010728836,
+          "raw": [
+            2.399999976158142,
+            9,
+            9.300000011920929
+          ]
+        },
+        "terminalStatusDelayMs": {
+          "median": 9.100000023841858,
+          "p95": 9.280000013113021,
+          "raw": [
+            2.5,
+            9.100000023841858,
+            9.300000011920929
+          ]
+        },
+        "duplicateEventIds": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "missingEventIds": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "inputToNextPaintMs": {
+          "median": 33.19999998807907,
+          "p95": 33.649999988079074,
+          "raw": [
+            33.69999998807907,
+            30.100000023841858,
+            33.19999998807907
+          ]
+        },
+        "transferredJsCssBytes": {
+          "median": 562767,
+          "p95": 562767,
+          "raw": [
+            562767,
+            562767,
+            562767
+          ]
+        },
+        "resourceCountJsCss": {
+          "median": 8,
+          "p95": 8,
+          "raw": [
+            8,
+            8,
+            8
+          ]
+        },
+        "sseRequestCount": {
+          "median": 2,
+          "p95": 2,
+          "raw": [
+            2,
+            2,
+            2
+          ]
+        },
+        "durationMs": {
+          "median": 1097,
+          "p95": 1100.6,
+          "raw": [
+            1101,
+            1097,
+            1062
+          ]
+        },
+        "eventSourceInstancesTotal": {
+          "median": 1,
+          "p95": 1,
+          "raw": [
+            1,
+            1,
+            1
+          ]
+        },
+        "crashed": {
+          "count": 0,
+          "total": 3
+        },
+        "crashSteps": []
+      }
+    },
+    {
+      "name": "job-detail-500-retained-events",
+      "samples": [
+        {
+          "repeat": 1,
+          "metrics": {
+            "routeReadyMs": 895.8000000119209,
+            "longTaskCount": 0,
+            "longTaskOver50Ms": 0,
+            "maxLongTaskMs": 0,
+            "mutationBatches": 17,
+            "frameCount": 64,
+            "frameOver16Ms": 64,
+            "domNodes": 282,
+            "jsHeapBytes": 5773968,
+            "incomingEvents": 501,
+            "renderedEvents": 9,
+            "renderedConsoleLines": 0,
+            "latestDisplayedEventDelayMs": 18.80000001192093,
+            "terminalStatusDelayMs": 13.099999964237213,
+            "duplicateEventIds": 0,
+            "missingEventIds": 0,
+            "eventOrderMatchesJournal": true,
+            "eventSourceInstances": {
+              "PERF-JOB-266": 1
+            },
+            "inputToNextPaintMs": 32.5,
+            "transferredJsCssBytes": 562767,
+            "resourceCountJsCss": 8,
+            "sseRequestCount": 1,
+            "durationMs": 1102,
+            "eventSourceInstancesTotal": 1
+          },
+          "pageErrors": []
+        },
+        {
+          "repeat": 2,
+          "metrics": {
+            "routeReadyMs": 888.0999999642372,
+            "longTaskCount": 0,
+            "longTaskOver50Ms": 0,
+            "maxLongTaskMs": 0,
+            "mutationBatches": 17,
+            "frameCount": 64,
+            "frameOver16Ms": 64,
+            "domNodes": 282,
+            "jsHeapBytes": 5622664,
+            "incomingEvents": 501,
+            "renderedEvents": 9,
+            "renderedConsoleLines": 0,
+            "latestDisplayedEventDelayMs": 17.899999976158142,
+            "terminalStatusDelayMs": 12.399999976158142,
+            "duplicateEventIds": 0,
+            "missingEventIds": 0,
+            "eventOrderMatchesJournal": true,
+            "eventSourceInstances": {
+              "PERF-JOB-266": 1
+            },
+            "inputToNextPaintMs": 31.69999998807907,
+            "transferredJsCssBytes": 562767,
+            "resourceCountJsCss": 8,
+            "sseRequestCount": 1,
+            "durationMs": 1097,
+            "eventSourceInstancesTotal": 1
+          },
+          "pageErrors": []
+        },
+        {
+          "repeat": 3,
+          "metrics": {
+            "routeReadyMs": 889.7000000476837,
+            "longTaskCount": 0,
+            "longTaskOver50Ms": 0,
+            "maxLongTaskMs": 0,
+            "mutationBatches": 17,
+            "frameCount": 64,
+            "frameOver16Ms": 64,
+            "domNodes": 282,
+            "jsHeapBytes": 5755941,
+            "incomingEvents": 501,
+            "renderedEvents": 9,
+            "renderedConsoleLines": 0,
+            "latestDisplayedEventDelayMs": 17.69999998807907,
+            "terminalStatusDelayMs": 12,
+            "duplicateEventIds": 0,
+            "missingEventIds": 0,
+            "eventOrderMatchesJournal": true,
+            "eventSourceInstances": {
+              "PERF-JOB-266": 1
+            },
+            "inputToNextPaintMs": 31.600000023841858,
+            "transferredJsCssBytes": 562767,
+            "resourceCountJsCss": 8,
+            "sseRequestCount": 1,
+            "durationMs": 1097,
+            "eventSourceInstancesTotal": 1
+          },
+          "pageErrors": []
+        }
+      ],
+      "summary": {
+        "routeReadyMs": {
+          "median": 889.7000000476837,
+          "p95": 895.1900000154972,
+          "raw": [
+            895.8000000119209,
+            888.0999999642372,
+            889.7000000476837
+          ]
+        },
+        "longTaskCount": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "longTaskOver50Ms": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "maxLongTaskMs": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "mutationBatches": {
+          "median": 17,
+          "p95": 17,
+          "raw": [
+            17,
+            17,
+            17
+          ]
+        },
+        "frameCount": {
+          "median": 64,
+          "p95": 64,
+          "raw": [
+            64,
+            64,
+            64
+          ]
+        },
+        "frameOver16Ms": {
+          "median": 64,
+          "p95": 64,
+          "raw": [
+            64,
+            64,
+            64
+          ]
+        },
+        "domNodes": {
+          "median": 282,
+          "p95": 282,
+          "raw": [
+            282,
+            282,
+            282
+          ]
+        },
+        "jsHeapBytes": {
+          "median": 5755941,
+          "p95": 5772165.3,
+          "raw": [
+            5773968,
+            5622664,
+            5755941
+          ]
+        },
+        "incomingEvents": {
+          "median": 501,
+          "p95": 501,
+          "raw": [
+            501,
+            501,
+            501
+          ]
+        },
+        "renderedEvents": {
+          "median": 9,
+          "p95": 9,
+          "raw": [
+            9,
+            9,
+            9
+          ]
+        },
+        "renderedConsoleLines": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "latestDisplayedEventDelayMs": {
+          "median": 17.899999976158142,
+          "p95": 18.71000000834465,
+          "raw": [
+            18.80000001192093,
+            17.899999976158142,
+            17.69999998807907
+          ]
+        },
+        "terminalStatusDelayMs": {
+          "median": 12.399999976158142,
+          "p95": 13.029999965429306,
+          "raw": [
+            13.099999964237213,
+            12.399999976158142,
+            12
+          ]
+        },
+        "duplicateEventIds": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "missingEventIds": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "inputToNextPaintMs": {
+          "median": 31.69999998807907,
+          "p95": 32.41999999880791,
+          "raw": [
+            32.5,
+            31.69999998807907,
+            31.600000023841858
+          ]
+        },
+        "transferredJsCssBytes": {
+          "median": 562767,
+          "p95": 562767,
+          "raw": [
+            562767,
+            562767,
+            562767
+          ]
+        },
+        "resourceCountJsCss": {
+          "median": 8,
+          "p95": 8,
+          "raw": [
+            8,
+            8,
+            8
+          ]
+        },
+        "sseRequestCount": {
+          "median": 1,
+          "p95": 1,
+          "raw": [
+            1,
+            1,
+            1
+          ]
+        },
+        "durationMs": {
+          "median": 1097,
+          "p95": 1101.5,
+          "raw": [
+            1102,
+            1097,
+            1097
+          ]
+        },
+        "eventSourceInstancesTotal": {
+          "median": 1,
+          "p95": 1,
+          "raw": [
+            1,
+            1,
+            1
+          ]
+        },
+        "crashed": {
+          "count": 0,
+          "total": 3
+        },
+        "crashSteps": []
+      }
+    },
+    {
+      "name": "metrics-100-buckets",
+      "samples": [
+        {
+          "repeat": 1,
+          "metrics": {
+            "routeReadyMs": 904.6000000238419,
+            "longTaskCount": 0,
+            "longTaskOver50Ms": 0,
+            "maxLongTaskMs": 0,
+            "mutationBatches": 16,
+            "frameCount": 65,
+            "frameOver16Ms": 63,
+            "domNodes": 1160,
+            "jsHeapBytes": 6513666,
+            "incomingEvents": 501,
+            "renderedEvents": 473,
+            "renderedConsoleLines": 473,
+            "latestDisplayedEventDelayMs": 7.599999964237213,
+            "terminalStatusDelayMs": 7.599999964237213,
+            "duplicateEventIds": 0,
+            "missingEventIds": 0,
+            "eventOrderMatchesJournal": true,
+            "eventSourceInstances": {
+              "PERF-JOB-266": 1
+            },
+            "inputToNextPaintMs": null,
+            "transferredJsCssBytes": 612244,
+            "resourceCountJsCss": 8,
+            "sseRequestCount": 1,
+            "durationMs": 1108,
+            "eventSourceInstancesTotal": 1
+          },
+          "pageErrors": []
+        },
+        {
+          "repeat": 2,
+          "metrics": {
+            "routeReadyMs": 900.5999999642372,
+            "longTaskCount": 0,
+            "longTaskOver50Ms": 0,
+            "maxLongTaskMs": 0,
+            "mutationBatches": 14,
+            "frameCount": 64,
+            "frameOver16Ms": 64,
+            "domNodes": 1160,
+            "jsHeapBytes": 6457317,
+            "incomingEvents": 501,
+            "renderedEvents": 473,
+            "renderedConsoleLines": 473,
+            "latestDisplayedEventDelayMs": 8.5,
+            "terminalStatusDelayMs": 8.5,
+            "duplicateEventIds": 0,
+            "missingEventIds": 0,
+            "eventOrderMatchesJournal": true,
+            "eventSourceInstances": {
+              "PERF-JOB-266": 1
+            },
+            "inputToNextPaintMs": null,
+            "transferredJsCssBytes": 612244,
+            "resourceCountJsCss": 8,
+            "sseRequestCount": 1,
+            "durationMs": 1105,
+            "eventSourceInstancesTotal": 1
+          },
+          "pageErrors": []
+        },
+        {
+          "repeat": 3,
+          "metrics": {
+            "routeReadyMs": 901.8999999761581,
+            "longTaskCount": 0,
+            "longTaskOver50Ms": 0,
+            "maxLongTaskMs": 0,
+            "mutationBatches": 15,
+            "frameCount": 65,
+            "frameOver16Ms": 64,
+            "domNodes": 1160,
+            "jsHeapBytes": 6452910,
+            "incomingEvents": 501,
+            "renderedEvents": 473,
+            "renderedConsoleLines": 473,
+            "latestDisplayedEventDelayMs": 9.399999976158142,
+            "terminalStatusDelayMs": 9.300000011920929,
+            "duplicateEventIds": 0,
+            "missingEventIds": 0,
+            "eventOrderMatchesJournal": true,
+            "eventSourceInstances": {
+              "PERF-JOB-266": 1
+            },
+            "inputToNextPaintMs": null,
+            "transferredJsCssBytes": 612244,
+            "resourceCountJsCss": 8,
+            "sseRequestCount": 1,
+            "durationMs": 1117,
+            "eventSourceInstancesTotal": 1
+          },
+          "pageErrors": []
+        }
+      ],
+      "summary": {
+        "routeReadyMs": {
+          "median": 901.8999999761581,
+          "p95": 904.3300000190735,
+          "raw": [
+            904.6000000238419,
+            900.5999999642372,
+            901.8999999761581
+          ]
+        },
+        "longTaskCount": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "longTaskOver50Ms": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "maxLongTaskMs": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "mutationBatches": {
+          "median": 15,
+          "p95": 15.9,
+          "raw": [
+            16,
+            14,
+            15
+          ]
+        },
+        "frameCount": {
+          "median": 65,
+          "p95": 65,
+          "raw": [
+            65,
+            64,
+            65
+          ]
+        },
+        "frameOver16Ms": {
+          "median": 64,
+          "p95": 64,
+          "raw": [
+            63,
+            64,
+            64
+          ]
+        },
+        "domNodes": {
+          "median": 1160,
+          "p95": 1160,
+          "raw": [
+            1160,
+            1160,
+            1160
+          ]
+        },
+        "jsHeapBytes": {
+          "median": 6457317,
+          "p95": 6508031.1,
+          "raw": [
+            6513666,
+            6457317,
+            6452910
+          ]
+        },
+        "incomingEvents": {
+          "median": 501,
+          "p95": 501,
+          "raw": [
+            501,
+            501,
+            501
+          ]
+        },
+        "renderedEvents": {
+          "median": 473,
+          "p95": 473,
+          "raw": [
+            473,
+            473,
+            473
+          ]
+        },
+        "renderedConsoleLines": {
+          "median": 473,
+          "p95": 473,
+          "raw": [
+            473,
+            473,
+            473
+          ]
+        },
+        "latestDisplayedEventDelayMs": {
+          "median": 8.5,
+          "p95": 9.309999978542328,
+          "raw": [
+            7.599999964237213,
+            8.5,
+            9.399999976158142
+          ]
+        },
+        "terminalStatusDelayMs": {
+          "median": 8.5,
+          "p95": 9.220000010728835,
+          "raw": [
+            7.599999964237213,
+            8.5,
+            9.300000011920929
+          ]
+        },
+        "duplicateEventIds": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "missingEventIds": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "transferredJsCssBytes": {
+          "median": 612244,
+          "p95": 612244,
+          "raw": [
+            612244,
+            612244,
+            612244
+          ]
+        },
+        "resourceCountJsCss": {
+          "median": 8,
+          "p95": 8,
+          "raw": [
+            8,
+            8,
+            8
+          ]
+        },
+        "sseRequestCount": {
+          "median": 1,
+          "p95": 1,
+          "raw": [
+            1,
+            1,
+            1
+          ]
+        },
+        "durationMs": {
+          "median": 1108,
+          "p95": 1116.1,
+          "raw": [
+            1108,
+            1105,
+            1117
+          ]
+        },
+        "eventSourceInstancesTotal": {
+          "median": 1,
+          "p95": 1,
+          "raw": [
+            1,
+            1,
+            1
+          ]
+        },
+        "crashed": {
+          "count": 0,
+          "total": 3
+        },
+        "crashSteps": []
+      }
+    },
+    {
+      "name": "metrics-1000-buckets",
+      "samples": [
+        {
+          "repeat": 1,
+          "metrics": {
+            "routeReadyMs": 902.4000000357628,
+            "longTaskCount": 0,
+            "longTaskOver50Ms": 0,
+            "maxLongTaskMs": 0,
+            "mutationBatches": 15,
+            "frameCount": 63,
+            "frameOver16Ms": 63,
+            "domNodes": 1183,
+            "jsHeapBytes": 7147174,
+            "incomingEvents": 501,
+            "renderedEvents": 473,
+            "renderedConsoleLines": 473,
+            "latestDisplayedEventDelayMs": 19.599999964237213,
+            "terminalStatusDelayMs": 19.599999964237213,
+            "duplicateEventIds": 0,
+            "missingEventIds": 0,
+            "eventOrderMatchesJournal": true,
+            "eventSourceInstances": {
+              "PERF-JOB-266": 1
+            },
+            "inputToNextPaintMs": null,
+            "transferredJsCssBytes": 612244,
+            "resourceCountJsCss": 8,
+            "sseRequestCount": 1,
+            "durationMs": 1126,
+            "eventSourceInstancesTotal": 1
+          },
+          "pageErrors": []
+        },
+        {
+          "repeat": 2,
+          "metrics": {
+            "routeReadyMs": 903.3000000119209,
+            "longTaskCount": 0,
+            "longTaskOver50Ms": 0,
+            "maxLongTaskMs": 0,
+            "mutationBatches": 15,
+            "frameCount": 64,
+            "frameOver16Ms": 63,
+            "domNodes": 1183,
+            "jsHeapBytes": 7361018,
+            "incomingEvents": 501,
+            "renderedEvents": 473,
+            "renderedConsoleLines": 473,
+            "latestDisplayedEventDelayMs": 7.399999976158142,
+            "terminalStatusDelayMs": 7.399999976158142,
+            "duplicateEventIds": 0,
+            "missingEventIds": 0,
+            "eventOrderMatchesJournal": true,
+            "eventSourceInstances": {
+              "PERF-JOB-266": 1
+            },
+            "inputToNextPaintMs": null,
+            "transferredJsCssBytes": 612244,
+            "resourceCountJsCss": 8,
+            "sseRequestCount": 1,
+            "durationMs": 1122,
+            "eventSourceInstancesTotal": 1
+          },
+          "pageErrors": []
+        },
+        {
+          "repeat": 3,
+          "metrics": {
+            "routeReadyMs": 902.3000000119209,
+            "longTaskCount": 0,
+            "longTaskOver50Ms": 0,
+            "maxLongTaskMs": 0,
+            "mutationBatches": 15,
+            "frameCount": 66,
+            "frameOver16Ms": 65,
+            "domNodes": 1183,
+            "jsHeapBytes": 7790674,
+            "incomingEvents": 501,
+            "renderedEvents": 473,
+            "renderedConsoleLines": 473,
+            "latestDisplayedEventDelayMs": 8.5,
+            "terminalStatusDelayMs": 8.5,
+            "duplicateEventIds": 0,
+            "missingEventIds": 0,
+            "eventOrderMatchesJournal": true,
+            "eventSourceInstances": {
+              "PERF-JOB-266": 1
+            },
+            "inputToNextPaintMs": null,
+            "transferredJsCssBytes": 612244,
+            "resourceCountJsCss": 8,
+            "sseRequestCount": 1,
+            "durationMs": 1112,
+            "eventSourceInstancesTotal": 1
+          },
+          "pageErrors": []
+        }
+      ],
+      "summary": {
+        "routeReadyMs": {
+          "median": 902.4000000357628,
+          "p95": 903.2100000143051,
+          "raw": [
+            902.4000000357628,
+            903.3000000119209,
+            902.3000000119209
+          ]
+        },
+        "longTaskCount": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "longTaskOver50Ms": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "maxLongTaskMs": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "mutationBatches": {
+          "median": 15,
+          "p95": 15,
+          "raw": [
+            15,
+            15,
+            15
+          ]
+        },
+        "frameCount": {
+          "median": 64,
+          "p95": 65.8,
+          "raw": [
+            63,
+            64,
+            66
+          ]
+        },
+        "frameOver16Ms": {
+          "median": 63,
+          "p95": 64.8,
+          "raw": [
+            63,
+            63,
+            65
+          ]
+        },
+        "domNodes": {
+          "median": 1183,
+          "p95": 1183,
+          "raw": [
+            1183,
+            1183,
+            1183
+          ]
+        },
+        "jsHeapBytes": {
+          "median": 7361018,
+          "p95": 7747708.4,
+          "raw": [
+            7147174,
+            7361018,
+            7790674
+          ]
+        },
+        "incomingEvents": {
+          "median": 501,
+          "p95": 501,
+          "raw": [
+            501,
+            501,
+            501
+          ]
+        },
+        "renderedEvents": {
+          "median": 473,
+          "p95": 473,
+          "raw": [
+            473,
+            473,
+            473
+          ]
+        },
+        "renderedConsoleLines": {
+          "median": 473,
+          "p95": 473,
+          "raw": [
+            473,
+            473,
+            473
+          ]
+        },
+        "latestDisplayedEventDelayMs": {
+          "median": 8.5,
+          "p95": 18.48999996781349,
+          "raw": [
+            19.599999964237213,
+            7.399999976158142,
+            8.5
+          ]
+        },
+        "terminalStatusDelayMs": {
+          "median": 8.5,
+          "p95": 18.48999996781349,
+          "raw": [
+            19.599999964237213,
+            7.399999976158142,
+            8.5
+          ]
+        },
+        "duplicateEventIds": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "missingEventIds": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "transferredJsCssBytes": {
+          "median": 612244,
+          "p95": 612244,
+          "raw": [
+            612244,
+            612244,
+            612244
+          ]
+        },
+        "resourceCountJsCss": {
+          "median": 8,
+          "p95": 8,
+          "raw": [
+            8,
+            8,
+            8
+          ]
+        },
+        "sseRequestCount": {
+          "median": 1,
+          "p95": 1,
+          "raw": [
+            1,
+            1,
+            1
+          ]
+        },
+        "durationMs": {
+          "median": 1122,
+          "p95": 1125.6,
+          "raw": [
+            1126,
+            1122,
+            1112
+          ]
+        },
+        "eventSourceInstancesTotal": {
+          "median": 1,
+          "p95": 1,
+          "raw": [
+            1,
+            1,
+            1
+          ]
+        },
+        "crashed": {
+          "count": 0,
+          "total": 3
+        },
+        "crashSteps": []
+      }
+    },
+    {
+      "name": "metrics-4096-buckets",
+      "samples": [
+        {
+          "repeat": 1,
+          "metrics": {
+            "routeReadyMs": 915.5,
+            "longTaskCount": 0,
+            "longTaskOver50Ms": 0,
+            "maxLongTaskMs": 0,
+            "mutationBatches": 16,
+            "frameCount": 64,
+            "frameOver16Ms": 64,
+            "domNodes": 1183,
+            "jsHeapBytes": 10177696,
+            "incomingEvents": 501,
+            "renderedEvents": 473,
+            "renderedConsoleLines": 473,
+            "latestDisplayedEventDelayMs": 6.5,
+            "terminalStatusDelayMs": 6.5,
+            "duplicateEventIds": 0,
+            "missingEventIds": 0,
+            "eventOrderMatchesJournal": true,
+            "eventSourceInstances": {
+              "PERF-JOB-266": 1
+            },
+            "inputToNextPaintMs": null,
+            "transferredJsCssBytes": 612244,
+            "resourceCountJsCss": 8,
+            "sseRequestCount": 1,
+            "durationMs": 1134,
+            "eventSourceInstancesTotal": 1
+          },
+          "pageErrors": []
+        },
+        {
+          "repeat": 2,
+          "metrics": {
+            "routeReadyMs": 911.8000000119209,
+            "longTaskCount": 0,
+            "longTaskOver50Ms": 0,
+            "maxLongTaskMs": 0,
+            "mutationBatches": 15,
+            "frameCount": 63,
+            "frameOver16Ms": 63,
+            "domNodes": 1183,
+            "jsHeapBytes": 10167951,
+            "incomingEvents": 501,
+            "renderedEvents": 473,
+            "renderedConsoleLines": 473,
+            "latestDisplayedEventDelayMs": 8.100000023841858,
+            "terminalStatusDelayMs": 8.200000047683716,
+            "duplicateEventIds": 0,
+            "missingEventIds": 0,
+            "eventOrderMatchesJournal": true,
+            "eventSourceInstances": {
+              "PERF-JOB-266": 1
+            },
+            "inputToNextPaintMs": null,
+            "transferredJsCssBytes": 612244,
+            "resourceCountJsCss": 8,
+            "sseRequestCount": 1,
+            "durationMs": 1132,
+            "eventSourceInstancesTotal": 1
+          },
+          "pageErrors": []
+        },
+        {
+          "repeat": 3,
+          "metrics": {
+            "routeReadyMs": 908.1999999880791,
+            "longTaskCount": 0,
+            "longTaskOver50Ms": 0,
+            "maxLongTaskMs": 0,
+            "mutationBatches": 16,
+            "frameCount": 65,
+            "frameOver16Ms": 64,
+            "domNodes": 1183,
+            "jsHeapBytes": 10746789,
+            "incomingEvents": 501,
+            "renderedEvents": 473,
+            "renderedConsoleLines": 473,
+            "latestDisplayedEventDelayMs": 7.100000023841858,
+            "terminalStatusDelayMs": 7.100000023841858,
+            "duplicateEventIds": 0,
+            "missingEventIds": 0,
+            "eventOrderMatchesJournal": true,
+            "eventSourceInstances": {
+              "PERF-JOB-266": 1
+            },
+            "inputToNextPaintMs": null,
+            "transferredJsCssBytes": 612244,
+            "resourceCountJsCss": 8,
+            "sseRequestCount": 1,
+            "durationMs": 1121,
+            "eventSourceInstancesTotal": 1
+          },
+          "pageErrors": []
+        }
+      ],
+      "summary": {
+        "routeReadyMs": {
+          "median": 911.8000000119209,
+          "p95": 915.1300000011921,
+          "raw": [
+            915.5,
+            911.8000000119209,
+            908.1999999880791
+          ]
+        },
+        "longTaskCount": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "longTaskOver50Ms": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "maxLongTaskMs": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "mutationBatches": {
+          "median": 16,
+          "p95": 16,
+          "raw": [
+            16,
+            15,
+            16
+          ]
+        },
+        "frameCount": {
+          "median": 64,
+          "p95": 64.9,
+          "raw": [
+            64,
+            63,
+            65
+          ]
+        },
+        "frameOver16Ms": {
+          "median": 64,
+          "p95": 64,
+          "raw": [
+            64,
+            63,
+            64
+          ]
+        },
+        "domNodes": {
+          "median": 1183,
+          "p95": 1183,
+          "raw": [
+            1183,
+            1183,
+            1183
+          ]
+        },
+        "jsHeapBytes": {
+          "median": 10177696,
+          "p95": 10689879.7,
+          "raw": [
+            10177696,
+            10167951,
+            10746789
+          ]
+        },
+        "incomingEvents": {
+          "median": 501,
+          "p95": 501,
+          "raw": [
+            501,
+            501,
+            501
+          ]
+        },
+        "renderedEvents": {
+          "median": 473,
+          "p95": 473,
+          "raw": [
+            473,
+            473,
+            473
+          ]
+        },
+        "renderedConsoleLines": {
+          "median": 473,
+          "p95": 473,
+          "raw": [
+            473,
+            473,
+            473
+          ]
+        },
+        "latestDisplayedEventDelayMs": {
+          "median": 7.100000023841858,
+          "p95": 8.000000023841858,
+          "raw": [
+            6.5,
+            8.100000023841858,
+            7.100000023841858
+          ]
+        },
+        "terminalStatusDelayMs": {
+          "median": 7.100000023841858,
+          "p95": 8.09000004529953,
+          "raw": [
+            6.5,
+            8.200000047683716,
+            7.100000023841858
+          ]
+        },
+        "duplicateEventIds": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "missingEventIds": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "transferredJsCssBytes": {
+          "median": 612244,
+          "p95": 612244,
+          "raw": [
+            612244,
+            612244,
+            612244
+          ]
+        },
+        "resourceCountJsCss": {
+          "median": 8,
+          "p95": 8,
+          "raw": [
+            8,
+            8,
+            8
+          ]
+        },
+        "sseRequestCount": {
+          "median": 1,
+          "p95": 1,
+          "raw": [
+            1,
+            1,
+            1
+          ]
+        },
+        "durationMs": {
+          "median": 1132,
+          "p95": 1133.8,
+          "raw": [
+            1134,
+            1132,
+            1121
+          ]
+        },
+        "eventSourceInstancesTotal": {
+          "median": 1,
+          "p95": 1,
+          "raw": [
+            1,
+            1,
+            1
+          ]
+        },
+        "crashed": {
+          "count": 0,
+          "total": 3
+        },
+        "crashSteps": []
+      }
+    },
+    {
+      "name": "jobs-list-100-filter-sort",
+      "samples": [
+        {
+          "repeat": 1,
+          "metrics": {
+            "routeReadyMs": 894.3999999761581,
+            "longTaskCount": 0,
+            "longTaskOver50Ms": 0,
+            "maxLongTaskMs": 0,
+            "mutationBatches": 8,
+            "frameCount": 60,
+            "frameOver16Ms": 60,
+            "domNodes": 604,
+            "jsHeapBytes": 5391247,
+            "incomingEvents": 0,
+            "renderedEvents": 0,
+            "renderedConsoleLines": 0,
+            "latestDisplayedEventDelayMs": null,
+            "terminalStatusDelayMs": null,
+            "duplicateEventIds": 0,
+            "missingEventIds": 0,
+            "eventOrderMatchesJournal": null,
+            "eventSourceInstances": {},
+            "inputToNextPaintMs": null,
+            "transferredJsCssBytes": 612244,
+            "resourceCountJsCss": 8,
+            "sseRequestCount": 0,
+            "durationMs": 1044,
+            "eventSourceInstancesTotal": 0
+          },
+          "pageErrors": []
+        },
+        {
+          "repeat": 2,
+          "metrics": {
+            "routeReadyMs": 896.7999999523163,
+            "longTaskCount": 0,
+            "longTaskOver50Ms": 0,
+            "maxLongTaskMs": 0,
+            "mutationBatches": 10,
+            "frameCount": 60,
+            "frameOver16Ms": 59,
+            "domNodes": 604,
+            "jsHeapBytes": 5630712,
+            "incomingEvents": 0,
+            "renderedEvents": 0,
+            "renderedConsoleLines": 0,
+            "latestDisplayedEventDelayMs": null,
+            "terminalStatusDelayMs": null,
+            "duplicateEventIds": 0,
+            "missingEventIds": 0,
+            "eventOrderMatchesJournal": null,
+            "eventSourceInstances": {},
+            "inputToNextPaintMs": null,
+            "transferredJsCssBytes": 612244,
+            "resourceCountJsCss": 8,
+            "sseRequestCount": 0,
+            "durationMs": 1044,
+            "eventSourceInstancesTotal": 0
+          },
+          "pageErrors": []
+        },
+        {
+          "repeat": 3,
+          "metrics": {
+            "routeReadyMs": 897.3999999761581,
+            "longTaskCount": 0,
+            "longTaskOver50Ms": 0,
+            "maxLongTaskMs": 0,
+            "mutationBatches": 10,
+            "frameCount": 62,
+            "frameOver16Ms": 61,
+            "domNodes": 604,
+            "jsHeapBytes": 5528782,
+            "incomingEvents": 0,
+            "renderedEvents": 0,
+            "renderedConsoleLines": 0,
+            "latestDisplayedEventDelayMs": null,
+            "terminalStatusDelayMs": null,
+            "duplicateEventIds": 0,
+            "missingEventIds": 0,
+            "eventOrderMatchesJournal": null,
+            "eventSourceInstances": {},
+            "inputToNextPaintMs": null,
+            "transferredJsCssBytes": 612244,
+            "resourceCountJsCss": 8,
+            "sseRequestCount": 0,
+            "durationMs": 1043,
+            "eventSourceInstancesTotal": 0
+          },
+          "pageErrors": []
+        }
+      ],
+      "summary": {
+        "routeReadyMs": {
+          "median": 896.7999999523163,
+          "p95": 897.339999973774,
+          "raw": [
+            894.3999999761581,
+            896.7999999523163,
+            897.3999999761581
+          ]
+        },
+        "longTaskCount": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "longTaskOver50Ms": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "maxLongTaskMs": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "mutationBatches": {
+          "median": 10,
+          "p95": 10,
+          "raw": [
+            8,
+            10,
+            10
+          ]
+        },
+        "frameCount": {
+          "median": 60,
+          "p95": 61.8,
+          "raw": [
+            60,
+            60,
+            62
+          ]
+        },
+        "frameOver16Ms": {
+          "median": 60,
+          "p95": 60.9,
+          "raw": [
+            60,
+            59,
+            61
+          ]
+        },
+        "domNodes": {
+          "median": 604,
+          "p95": 604,
+          "raw": [
+            604,
+            604,
+            604
+          ]
+        },
+        "jsHeapBytes": {
+          "median": 5528782,
+          "p95": 5620519,
+          "raw": [
+            5391247,
+            5630712,
+            5528782
+          ]
+        },
+        "incomingEvents": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "renderedEvents": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "renderedConsoleLines": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "duplicateEventIds": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "missingEventIds": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "transferredJsCssBytes": {
+          "median": 612244,
+          "p95": 612244,
+          "raw": [
+            612244,
+            612244,
+            612244
+          ]
+        },
+        "resourceCountJsCss": {
+          "median": 8,
+          "p95": 8,
+          "raw": [
+            8,
+            8,
+            8
+          ]
+        },
+        "sseRequestCount": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "durationMs": {
+          "median": 1044,
+          "p95": 1044,
+          "raw": [
+            1044,
+            1044,
+            1043
+          ]
+        },
+        "eventSourceInstancesTotal": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "crashed": {
+          "count": 0,
+          "total": 3
+        },
+        "crashSteps": []
+      }
+    },
+    {
+      "name": "schedules-100-countdown",
+      "samples": [
+        {
+          "repeat": 1,
+          "metrics": {
+            "routeReadyMs": 912.9000000357628,
+            "longTaskCount": 0,
+            "longTaskOver50Ms": 0,
+            "maxLongTaskMs": 0,
+            "mutationBatches": 14,
+            "frameCount": 65,
+            "frameOver16Ms": 65,
+            "domNodes": 5927,
+            "jsHeapBytes": 10322502,
+            "incomingEvents": 0,
+            "renderedEvents": 0,
+            "renderedConsoleLines": 0,
+            "latestDisplayedEventDelayMs": null,
+            "terminalStatusDelayMs": null,
+            "duplicateEventIds": 0,
+            "missingEventIds": 0,
+            "eventOrderMatchesJournal": null,
+            "eventSourceInstances": {},
+            "inputToNextPaintMs": 37.80000001192093,
+            "transferredJsCssBytes": 593568,
+            "resourceCountJsCss": 7,
+            "sseRequestCount": 0,
+            "durationMs": 1155,
+            "eventSourceInstancesTotal": 0
+          },
+          "pageErrors": []
+        },
+        {
+          "repeat": 2,
+          "metrics": {
+            "routeReadyMs": 914.1000000238419,
+            "longTaskCount": 0,
+            "longTaskOver50Ms": 0,
+            "maxLongTaskMs": 0,
+            "mutationBatches": 13,
+            "frameCount": 66,
+            "frameOver16Ms": 65,
+            "domNodes": 5927,
+            "jsHeapBytes": 10243006,
+            "incomingEvents": 0,
+            "renderedEvents": 0,
+            "renderedConsoleLines": 0,
+            "latestDisplayedEventDelayMs": null,
+            "terminalStatusDelayMs": null,
+            "duplicateEventIds": 0,
+            "missingEventIds": 0,
+            "eventOrderMatchesJournal": null,
+            "eventSourceInstances": {},
+            "inputToNextPaintMs": 39.19999998807907,
+            "transferredJsCssBytes": 593568,
+            "resourceCountJsCss": 7,
+            "sseRequestCount": 0,
+            "durationMs": 1161,
+            "eventSourceInstancesTotal": 0
+          },
+          "pageErrors": []
+        },
+        {
+          "repeat": 3,
+          "metrics": {
+            "routeReadyMs": 913.3999999761581,
+            "longTaskCount": 0,
+            "longTaskOver50Ms": 0,
+            "maxLongTaskMs": 0,
+            "mutationBatches": 14,
+            "frameCount": 65,
+            "frameOver16Ms": 64,
+            "domNodes": 5927,
+            "jsHeapBytes": 10352049,
+            "incomingEvents": 0,
+            "renderedEvents": 0,
+            "renderedConsoleLines": 0,
+            "latestDisplayedEventDelayMs": null,
+            "terminalStatusDelayMs": null,
+            "duplicateEventIds": 0,
+            "missingEventIds": 0,
+            "eventOrderMatchesJournal": null,
+            "eventSourceInstances": {},
+            "inputToNextPaintMs": 40.39999997615814,
+            "transferredJsCssBytes": 593568,
+            "resourceCountJsCss": 7,
+            "sseRequestCount": 0,
+            "durationMs": 1145,
+            "eventSourceInstancesTotal": 0
+          },
+          "pageErrors": []
+        }
+      ],
+      "summary": {
+        "routeReadyMs": {
+          "median": 913.3999999761581,
+          "p95": 914.0300000190734,
+          "raw": [
+            912.9000000357628,
+            914.1000000238419,
+            913.3999999761581
+          ]
+        },
+        "longTaskCount": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "longTaskOver50Ms": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "maxLongTaskMs": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "mutationBatches": {
+          "median": 14,
+          "p95": 14,
+          "raw": [
+            14,
+            13,
+            14
+          ]
+        },
+        "frameCount": {
+          "median": 65,
+          "p95": 65.9,
+          "raw": [
+            65,
+            66,
+            65
+          ]
+        },
+        "frameOver16Ms": {
+          "median": 65,
+          "p95": 65,
+          "raw": [
+            65,
+            65,
+            64
+          ]
+        },
+        "domNodes": {
+          "median": 5927,
+          "p95": 5927,
+          "raw": [
+            5927,
+            5927,
+            5927
+          ]
+        },
+        "jsHeapBytes": {
+          "median": 10322502,
+          "p95": 10349094.3,
+          "raw": [
+            10322502,
+            10243006,
+            10352049
+          ]
+        },
+        "incomingEvents": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "renderedEvents": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "renderedConsoleLines": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "duplicateEventIds": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "missingEventIds": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "inputToNextPaintMs": {
+          "median": 39.19999998807907,
+          "p95": 40.279999977350236,
+          "raw": [
+            37.80000001192093,
+            39.19999998807907,
+            40.39999997615814
+          ]
+        },
+        "transferredJsCssBytes": {
+          "median": 593568,
+          "p95": 593568,
+          "raw": [
+            593568,
+            593568,
+            593568
+          ]
+        },
+        "resourceCountJsCss": {
+          "median": 7,
+          "p95": 7,
+          "raw": [
+            7,
+            7,
+            7
+          ]
+        },
+        "sseRequestCount": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "durationMs": {
+          "median": 1155,
+          "p95": 1160.4,
+          "raw": [
+            1155,
+            1161,
+            1145
+          ]
+        },
+        "eventSourceInstancesTotal": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "crashed": {
+          "count": 0,
+          "total": 3
+        },
+        "crashSteps": []
+      }
+    },
+    {
+      "name": "navigation-cold-dashboard",
+      "samples": [
+        {
+          "repeat": 1,
+          "metrics": {
+            "routeReadyMs": 129.9000000357628,
+            "longTaskCount": 0,
+            "longTaskOver50Ms": 0,
+            "maxLongTaskMs": 0,
+            "mutationBatches": 7,
+            "frameCount": 13,
+            "frameOver16Ms": 13,
+            "domNodes": 258,
+            "jsHeapBytes": 4156296,
+            "incomingEvents": 0,
+            "renderedEvents": 0,
+            "renderedConsoleLines": 0,
+            "latestDisplayedEventDelayMs": null,
+            "terminalStatusDelayMs": null,
+            "duplicateEventIds": 0,
+            "missingEventIds": 0,
+            "eventOrderMatchesJournal": null,
+            "eventSourceInstances": {},
+            "inputToNextPaintMs": null,
+            "transferredJsCssBytes": 531456,
+            "resourceCountJsCss": 5,
+            "sseRequestCount": 0,
+            "durationMs": 258,
+            "eventSourceInstancesTotal": 0
+          },
+          "pageErrors": []
+        },
+        {
+          "repeat": 2,
+          "metrics": {
+            "routeReadyMs": 129.79999995231628,
+            "longTaskCount": 0,
+            "longTaskOver50Ms": 0,
+            "maxLongTaskMs": 0,
+            "mutationBatches": 7,
+            "frameCount": 15,
+            "frameOver16Ms": 14,
+            "domNodes": 258,
+            "jsHeapBytes": 4156575,
+            "incomingEvents": 0,
+            "renderedEvents": 0,
+            "renderedConsoleLines": 0,
+            "latestDisplayedEventDelayMs": null,
+            "terminalStatusDelayMs": null,
+            "duplicateEventIds": 0,
+            "missingEventIds": 0,
+            "eventOrderMatchesJournal": null,
+            "eventSourceInstances": {},
+            "inputToNextPaintMs": null,
+            "transferredJsCssBytes": 531456,
+            "resourceCountJsCss": 5,
+            "sseRequestCount": 0,
+            "durationMs": 256,
+            "eventSourceInstancesTotal": 0
+          },
+          "pageErrors": []
+        },
+        {
+          "repeat": 3,
+          "metrics": {
+            "routeReadyMs": 126,
+            "longTaskCount": 0,
+            "longTaskOver50Ms": 0,
+            "maxLongTaskMs": 0,
+            "mutationBatches": 7,
+            "frameCount": 14,
+            "frameOver16Ms": 13,
+            "domNodes": 258,
+            "jsHeapBytes": 4094537,
+            "incomingEvents": 0,
+            "renderedEvents": 0,
+            "renderedConsoleLines": 0,
+            "latestDisplayedEventDelayMs": null,
+            "terminalStatusDelayMs": null,
+            "duplicateEventIds": 0,
+            "missingEventIds": 0,
+            "eventOrderMatchesJournal": null,
+            "eventSourceInstances": {},
+            "inputToNextPaintMs": null,
+            "transferredJsCssBytes": 531456,
+            "resourceCountJsCss": 5,
+            "sseRequestCount": 0,
+            "durationMs": 253,
+            "eventSourceInstancesTotal": 0
+          },
+          "pageErrors": []
+        }
+      ],
+      "summary": {
+        "routeReadyMs": {
+          "median": 129.79999995231628,
+          "p95": 129.89000002741813,
+          "raw": [
+            129.9000000357628,
+            129.79999995231628,
+            126
+          ]
+        },
+        "longTaskCount": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "longTaskOver50Ms": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "maxLongTaskMs": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "mutationBatches": {
+          "median": 7,
+          "p95": 7,
+          "raw": [
+            7,
+            7,
+            7
+          ]
+        },
+        "frameCount": {
+          "median": 14,
+          "p95": 14.9,
+          "raw": [
+            13,
+            15,
+            14
+          ]
+        },
+        "frameOver16Ms": {
+          "median": 13,
+          "p95": 13.9,
+          "raw": [
+            13,
+            14,
+            13
+          ]
+        },
+        "domNodes": {
+          "median": 258,
+          "p95": 258,
+          "raw": [
+            258,
+            258,
+            258
+          ]
+        },
+        "jsHeapBytes": {
+          "median": 4156296,
+          "p95": 4156547.1,
+          "raw": [
+            4156296,
+            4156575,
+            4094537
+          ]
+        },
+        "incomingEvents": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "renderedEvents": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "renderedConsoleLines": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "duplicateEventIds": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "missingEventIds": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "transferredJsCssBytes": {
+          "median": 531456,
+          "p95": 531456,
+          "raw": [
+            531456,
+            531456,
+            531456
+          ]
+        },
+        "resourceCountJsCss": {
+          "median": 5,
+          "p95": 5,
+          "raw": [
+            5,
+            5,
+            5
+          ]
+        },
+        "sseRequestCount": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "durationMs": {
+          "median": 256,
+          "p95": 257.8,
+          "raw": [
+            258,
+            256,
+            253
+          ]
+        },
+        "eventSourceInstancesTotal": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "crashed": {
+          "count": 0,
+          "total": 3
+        },
+        "crashSteps": []
+      }
+    },
+    {
+      "name": "navigation-cold-explorer",
+      "samples": [
+        {
+          "repeat": 1,
+          "metrics": {
+            "routeReadyMs": 887.0999999642372,
+            "longTaskCount": 0,
+            "longTaskOver50Ms": 0,
+            "maxLongTaskMs": 0,
+            "mutationBatches": 11,
+            "frameCount": 65,
+            "frameOver16Ms": 64,
+            "domNodes": 215,
+            "jsHeapBytes": 4594487,
+            "incomingEvents": 0,
+            "renderedEvents": 0,
+            "renderedConsoleLines": 0,
+            "latestDisplayedEventDelayMs": null,
+            "terminalStatusDelayMs": null,
+            "duplicateEventIds": 0,
+            "missingEventIds": 0,
+            "eventOrderMatchesJournal": null,
+            "eventSourceInstances": {},
+            "inputToNextPaintMs": 40.19999998807907,
+            "transferredJsCssBytes": 559255,
+            "resourceCountJsCss": 6,
+            "sseRequestCount": 0,
+            "durationMs": 1095,
+            "eventSourceInstancesTotal": 0
+          },
+          "pageErrors": []
+        },
+        {
+          "repeat": 2,
+          "metrics": {
+            "routeReadyMs": 887,
+            "longTaskCount": 0,
+            "longTaskOver50Ms": 0,
+            "maxLongTaskMs": 0,
+            "mutationBatches": 12,
+            "frameCount": 63,
+            "frameOver16Ms": 63,
+            "domNodes": 215,
+            "jsHeapBytes": 4647951,
+            "incomingEvents": 0,
+            "renderedEvents": 0,
+            "renderedConsoleLines": 0,
+            "latestDisplayedEventDelayMs": null,
+            "terminalStatusDelayMs": null,
+            "duplicateEventIds": 0,
+            "missingEventIds": 0,
+            "eventOrderMatchesJournal": null,
+            "eventSourceInstances": {},
+            "inputToNextPaintMs": 25.299999952316284,
+            "transferredJsCssBytes": 559255,
+            "resourceCountJsCss": 6,
+            "sseRequestCount": 0,
+            "durationMs": 1081,
+            "eventSourceInstancesTotal": 0
+          },
+          "pageErrors": []
+        },
+        {
+          "repeat": 3,
+          "metrics": {
+            "routeReadyMs": 893.1999999880791,
+            "longTaskCount": 0,
+            "longTaskOver50Ms": 0,
+            "maxLongTaskMs": 0,
+            "mutationBatches": 12,
+            "frameCount": 63,
+            "frameOver16Ms": 63,
+            "domNodes": 215,
+            "jsHeapBytes": 4649263,
+            "incomingEvents": 0,
+            "renderedEvents": 0,
+            "renderedConsoleLines": 0,
+            "latestDisplayedEventDelayMs": null,
+            "terminalStatusDelayMs": null,
+            "duplicateEventIds": 0,
+            "missingEventIds": 0,
+            "eventOrderMatchesJournal": null,
+            "eventSourceInstances": {},
+            "inputToNextPaintMs": 26,
+            "transferredJsCssBytes": 559255,
+            "resourceCountJsCss": 6,
+            "sseRequestCount": 0,
+            "durationMs": 1084,
+            "eventSourceInstancesTotal": 0
+          },
+          "pageErrors": []
+        }
+      ],
+      "summary": {
+        "routeReadyMs": {
+          "median": 887.0999999642372,
+          "p95": 892.5899999856949,
+          "raw": [
+            887.0999999642372,
+            887,
+            893.1999999880791
+          ]
+        },
+        "longTaskCount": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "longTaskOver50Ms": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "maxLongTaskMs": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "mutationBatches": {
+          "median": 12,
+          "p95": 12,
+          "raw": [
+            11,
+            12,
+            12
+          ]
+        },
+        "frameCount": {
+          "median": 63,
+          "p95": 64.8,
+          "raw": [
+            65,
+            63,
+            63
+          ]
+        },
+        "frameOver16Ms": {
+          "median": 63,
+          "p95": 63.9,
+          "raw": [
+            64,
+            63,
+            63
+          ]
+        },
+        "domNodes": {
+          "median": 215,
+          "p95": 215,
+          "raw": [
+            215,
+            215,
+            215
+          ]
+        },
+        "jsHeapBytes": {
+          "median": 4647951,
+          "p95": 4649131.8,
+          "raw": [
+            4594487,
+            4647951,
+            4649263
+          ]
+        },
+        "incomingEvents": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "renderedEvents": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "renderedConsoleLines": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "duplicateEventIds": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "missingEventIds": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "inputToNextPaintMs": {
+          "median": 26,
+          "p95": 38.77999998927116,
+          "raw": [
+            40.19999998807907,
+            25.299999952316284,
+            26
+          ]
+        },
+        "transferredJsCssBytes": {
+          "median": 559255,
+          "p95": 559255,
+          "raw": [
+            559255,
+            559255,
+            559255
+          ]
+        },
+        "resourceCountJsCss": {
+          "median": 6,
+          "p95": 6,
+          "raw": [
+            6,
+            6,
+            6
+          ]
+        },
+        "sseRequestCount": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "durationMs": {
+          "median": 1084,
+          "p95": 1093.9,
+          "raw": [
+            1095,
+            1081,
+            1084
+          ]
+        },
+        "eventSourceInstancesTotal": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "crashed": {
+          "count": 0,
+          "total": 3
+        },
+        "crashSteps": []
+      }
+    },
+    {
+      "name": "navigation-cold-configuration",
+      "samples": [
+        {
+          "repeat": 1,
+          "metrics": {
+            "routeReadyMs": 120.5,
+            "longTaskCount": 0,
+            "longTaskOver50Ms": 0,
+            "maxLongTaskMs": 0,
+            "mutationBatches": 11,
+            "frameCount": 17,
+            "frameOver16Ms": 15,
+            "domNodes": 237,
+            "jsHeapBytes": 4378866,
+            "incomingEvents": 0,
+            "renderedEvents": 0,
+            "renderedConsoleLines": 0,
+            "latestDisplayedEventDelayMs": null,
+            "terminalStatusDelayMs": null,
+            "duplicateEventIds": 0,
+            "missingEventIds": 0,
+            "eventOrderMatchesJournal": null,
+            "eventSourceInstances": {},
+            "inputToNextPaintMs": 26,
+            "transferredJsCssBytes": 531456,
+            "resourceCountJsCss": 5,
+            "sseRequestCount": 0,
+            "durationMs": 301,
+            "eventSourceInstancesTotal": 0
+          },
+          "pageErrors": []
+        },
+        {
+          "repeat": 2,
+          "metrics": {
+            "routeReadyMs": 126.10000002384186,
+            "longTaskCount": 0,
+            "longTaskOver50Ms": 0,
+            "maxLongTaskMs": 0,
+            "mutationBatches": 10,
+            "frameCount": 17,
+            "frameOver16Ms": 16,
+            "domNodes": 237,
+            "jsHeapBytes": 4377542,
+            "incomingEvents": 0,
+            "renderedEvents": 0,
+            "renderedConsoleLines": 0,
+            "latestDisplayedEventDelayMs": null,
+            "terminalStatusDelayMs": null,
+            "duplicateEventIds": 0,
+            "missingEventIds": 0,
+            "eventOrderMatchesJournal": null,
+            "eventSourceInstances": {},
+            "inputToNextPaintMs": 25.69999998807907,
+            "transferredJsCssBytes": 531456,
+            "resourceCountJsCss": 5,
+            "sseRequestCount": 0,
+            "durationMs": 314,
+            "eventSourceInstancesTotal": 0
+          },
+          "pageErrors": []
+        },
+        {
+          "repeat": 3,
+          "metrics": {
+            "routeReadyMs": 124.89999997615814,
+            "longTaskCount": 0,
+            "longTaskOver50Ms": 0,
+            "maxLongTaskMs": 0,
+            "mutationBatches": 9,
+            "frameCount": 18,
+            "frameOver16Ms": 17,
+            "domNodes": 237,
+            "jsHeapBytes": 4324670,
+            "incomingEvents": 0,
+            "renderedEvents": 0,
+            "renderedConsoleLines": 0,
+            "latestDisplayedEventDelayMs": null,
+            "terminalStatusDelayMs": null,
+            "duplicateEventIds": 0,
+            "missingEventIds": 0,
+            "eventOrderMatchesJournal": null,
+            "eventSourceInstances": {},
+            "inputToNextPaintMs": 27.299999952316284,
+            "transferredJsCssBytes": 531456,
+            "resourceCountJsCss": 5,
+            "sseRequestCount": 0,
+            "durationMs": 310,
+            "eventSourceInstancesTotal": 0
+          },
+          "pageErrors": []
+        }
+      ],
+      "summary": {
+        "routeReadyMs": {
+          "median": 124.89999997615814,
+          "p95": 125.98000001907349,
+          "raw": [
+            120.5,
+            126.10000002384186,
+            124.89999997615814
+          ]
+        },
+        "longTaskCount": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "longTaskOver50Ms": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "maxLongTaskMs": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "mutationBatches": {
+          "median": 10,
+          "p95": 10.9,
+          "raw": [
+            11,
+            10,
+            9
+          ]
+        },
+        "frameCount": {
+          "median": 17,
+          "p95": 17.9,
+          "raw": [
+            17,
+            17,
+            18
+          ]
+        },
+        "frameOver16Ms": {
+          "median": 16,
+          "p95": 16.9,
+          "raw": [
+            15,
+            16,
+            17
+          ]
+        },
+        "domNodes": {
+          "median": 237,
+          "p95": 237,
+          "raw": [
+            237,
+            237,
+            237
+          ]
+        },
+        "jsHeapBytes": {
+          "median": 4377542,
+          "p95": 4378733.6,
+          "raw": [
+            4378866,
+            4377542,
+            4324670
+          ]
+        },
+        "incomingEvents": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "renderedEvents": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "renderedConsoleLines": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "duplicateEventIds": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "missingEventIds": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "inputToNextPaintMs": {
+          "median": 26,
+          "p95": 27.169999957084656,
+          "raw": [
+            26,
+            25.69999998807907,
+            27.299999952316284
+          ]
+        },
+        "transferredJsCssBytes": {
+          "median": 531456,
+          "p95": 531456,
+          "raw": [
+            531456,
+            531456,
+            531456
+          ]
+        },
+        "resourceCountJsCss": {
+          "median": 5,
+          "p95": 5,
+          "raw": [
+            5,
+            5,
+            5
+          ]
+        },
+        "sseRequestCount": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "durationMs": {
+          "median": 310,
+          "p95": 313.6,
+          "raw": [
+            301,
+            314,
+            310
+          ]
+        },
+        "eventSourceInstancesTotal": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "crashed": {
+          "count": 0,
+          "total": 3
+        },
+        "crashSteps": []
+      }
+    },
+    {
+      "name": "navigation-cold-load",
+      "samples": [
+        {
+          "repeat": 1,
+          "metrics": {
+            "routeReadyMs": 191.30000001192093,
+            "longTaskCount": 0,
+            "longTaskOver50Ms": 0,
+            "maxLongTaskMs": 0,
+            "mutationBatches": 13,
+            "frameCount": 21,
+            "frameOver16Ms": 21,
+            "domNodes": 4099,
+            "jsHeapBytes": 9506007,
+            "incomingEvents": 0,
+            "renderedEvents": 0,
+            "renderedConsoleLines": 0,
+            "latestDisplayedEventDelayMs": null,
+            "terminalStatusDelayMs": null,
+            "duplicateEventIds": 0,
+            "missingEventIds": 0,
+            "eventOrderMatchesJournal": null,
+            "eventSourceInstances": {},
+            "inputToNextPaintMs": 21.899999976158142,
+            "transferredJsCssBytes": 531456,
+            "resourceCountJsCss": 5,
+            "sseRequestCount": 0,
+            "durationMs": 397,
+            "eventSourceInstancesTotal": 0
+          },
+          "pageErrors": []
+        },
+        {
+          "repeat": 2,
+          "metrics": {
+            "routeReadyMs": 180.39999997615814,
+            "longTaskCount": 0,
+            "longTaskOver50Ms": 0,
+            "maxLongTaskMs": 0,
+            "mutationBatches": 13,
+            "frameCount": 20,
+            "frameOver16Ms": 20,
+            "domNodes": 4099,
+            "jsHeapBytes": 9482244,
+            "incomingEvents": 0,
+            "renderedEvents": 0,
+            "renderedConsoleLines": 0,
+            "latestDisplayedEventDelayMs": null,
+            "terminalStatusDelayMs": null,
+            "duplicateEventIds": 0,
+            "missingEventIds": 0,
+            "eventOrderMatchesJournal": null,
+            "eventSourceInstances": {},
+            "inputToNextPaintMs": 21.899999976158142,
+            "transferredJsCssBytes": 531456,
+            "resourceCountJsCss": 5,
+            "sseRequestCount": 0,
+            "durationMs": 383,
+            "eventSourceInstancesTotal": 0
+          },
+          "pageErrors": []
+        },
+        {
+          "repeat": 3,
+          "metrics": {
+            "routeReadyMs": 163.20000004768372,
+            "longTaskCount": 0,
+            "longTaskOver50Ms": 0,
+            "maxLongTaskMs": 0,
+            "mutationBatches": 13,
+            "frameCount": 21,
+            "frameOver16Ms": 21,
+            "domNodes": 4099,
+            "jsHeapBytes": 9543527,
+            "incomingEvents": 0,
+            "renderedEvents": 0,
+            "renderedConsoleLines": 0,
+            "latestDisplayedEventDelayMs": null,
+            "terminalStatusDelayMs": null,
+            "duplicateEventIds": 0,
+            "missingEventIds": 0,
+            "eventOrderMatchesJournal": null,
+            "eventSourceInstances": {},
+            "inputToNextPaintMs": 36.5,
+            "transferredJsCssBytes": 531456,
+            "resourceCountJsCss": 5,
+            "sseRequestCount": 0,
+            "durationMs": 403,
+            "eventSourceInstancesTotal": 0
+          },
+          "pageErrors": []
+        }
+      ],
+      "summary": {
+        "routeReadyMs": {
+          "median": 180.39999997615814,
+          "p95": 190.21000000834465,
+          "raw": [
+            191.30000001192093,
+            180.39999997615814,
+            163.20000004768372
+          ]
+        },
+        "longTaskCount": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "longTaskOver50Ms": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "maxLongTaskMs": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "mutationBatches": {
+          "median": 13,
+          "p95": 13,
+          "raw": [
+            13,
+            13,
+            13
+          ]
+        },
+        "frameCount": {
+          "median": 21,
+          "p95": 21,
+          "raw": [
+            21,
+            20,
+            21
+          ]
+        },
+        "frameOver16Ms": {
+          "median": 21,
+          "p95": 21,
+          "raw": [
+            21,
+            20,
+            21
+          ]
+        },
+        "domNodes": {
+          "median": 4099,
+          "p95": 4099,
+          "raw": [
+            4099,
+            4099,
+            4099
+          ]
+        },
+        "jsHeapBytes": {
+          "median": 9506007,
+          "p95": 9539775,
+          "raw": [
+            9506007,
+            9482244,
+            9543527
+          ]
+        },
+        "incomingEvents": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "renderedEvents": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "renderedConsoleLines": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "duplicateEventIds": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "missingEventIds": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "inputToNextPaintMs": {
+          "median": 21.899999976158142,
+          "p95": 35.03999999761581,
+          "raw": [
+            21.899999976158142,
+            21.899999976158142,
+            36.5
+          ]
+        },
+        "transferredJsCssBytes": {
+          "median": 531456,
+          "p95": 531456,
+          "raw": [
+            531456,
+            531456,
+            531456
+          ]
+        },
+        "resourceCountJsCss": {
+          "median": 5,
+          "p95": 5,
+          "raw": [
+            5,
+            5,
+            5
+          ]
+        },
+        "sseRequestCount": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "durationMs": {
+          "median": 397,
+          "p95": 402.4,
+          "raw": [
+            397,
+            383,
+            403
+          ]
+        },
+        "eventSourceInstancesTotal": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "crashed": {
+          "count": 0,
+          "total": 3
+        },
+        "crashSteps": []
+      }
+    },
+    {
+      "name": "navigation-cold-jobs",
+      "samples": [
+        {
+          "repeat": 1,
+          "metrics": {
+            "routeReadyMs": 896.2000000476837,
+            "longTaskCount": 0,
+            "longTaskOver50Ms": 0,
+            "maxLongTaskMs": 0,
+            "mutationBatches": 9,
+            "frameCount": 59,
+            "frameOver16Ms": 59,
+            "domNodes": 604,
+            "jsHeapBytes": 4852392,
+            "incomingEvents": 0,
+            "renderedEvents": 0,
+            "renderedConsoleLines": 0,
+            "latestDisplayedEventDelayMs": null,
+            "terminalStatusDelayMs": null,
+            "duplicateEventIds": 0,
+            "missingEventIds": 0,
+            "eventOrderMatchesJournal": null,
+            "eventSourceInstances": {},
+            "inputToNextPaintMs": null,
+            "transferredJsCssBytes": 612244,
+            "resourceCountJsCss": 8,
+            "sseRequestCount": 0,
+            "durationMs": 1028,
+            "eventSourceInstancesTotal": 0
+          },
+          "pageErrors": []
+        },
+        {
+          "repeat": 2,
+          "metrics": {
+            "routeReadyMs": 897.6000000238419,
+            "longTaskCount": 0,
+            "longTaskOver50Ms": 0,
+            "maxLongTaskMs": 0,
+            "mutationBatches": 9,
+            "frameCount": 59,
+            "frameOver16Ms": 59,
+            "domNodes": 604,
+            "jsHeapBytes": 4936405,
+            "incomingEvents": 0,
+            "renderedEvents": 0,
+            "renderedConsoleLines": 0,
+            "latestDisplayedEventDelayMs": null,
+            "terminalStatusDelayMs": null,
+            "duplicateEventIds": 0,
+            "missingEventIds": 0,
+            "eventOrderMatchesJournal": null,
+            "eventSourceInstances": {},
+            "inputToNextPaintMs": null,
+            "transferredJsCssBytes": 612244,
+            "resourceCountJsCss": 8,
+            "sseRequestCount": 0,
+            "durationMs": 1032,
+            "eventSourceInstancesTotal": 0
+          },
+          "pageErrors": []
+        },
+        {
+          "repeat": 3,
+          "metrics": {
+            "routeReadyMs": 896.8999999761581,
+            "longTaskCount": 0,
+            "longTaskOver50Ms": 0,
+            "maxLongTaskMs": 0,
+            "mutationBatches": 9,
+            "frameCount": 60,
+            "frameOver16Ms": 59,
+            "domNodes": 604,
+            "jsHeapBytes": 4966041,
+            "incomingEvents": 0,
+            "renderedEvents": 0,
+            "renderedConsoleLines": 0,
+            "latestDisplayedEventDelayMs": null,
+            "terminalStatusDelayMs": null,
+            "duplicateEventIds": 0,
+            "missingEventIds": 0,
+            "eventOrderMatchesJournal": null,
+            "eventSourceInstances": {},
+            "inputToNextPaintMs": null,
+            "transferredJsCssBytes": 612244,
+            "resourceCountJsCss": 8,
+            "sseRequestCount": 0,
+            "durationMs": 1030,
+            "eventSourceInstancesTotal": 0
+          },
+          "pageErrors": []
+        }
+      ],
+      "summary": {
+        "routeReadyMs": {
+          "median": 896.8999999761581,
+          "p95": 897.5300000190734,
+          "raw": [
+            896.2000000476837,
+            897.6000000238419,
+            896.8999999761581
+          ]
+        },
+        "longTaskCount": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "longTaskOver50Ms": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "maxLongTaskMs": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "mutationBatches": {
+          "median": 9,
+          "p95": 9,
+          "raw": [
+            9,
+            9,
+            9
+          ]
+        },
+        "frameCount": {
+          "median": 59,
+          "p95": 59.9,
+          "raw": [
+            59,
+            59,
+            60
+          ]
+        },
+        "frameOver16Ms": {
+          "median": 59,
+          "p95": 59,
+          "raw": [
+            59,
+            59,
+            59
+          ]
+        },
+        "domNodes": {
+          "median": 604,
+          "p95": 604,
+          "raw": [
+            604,
+            604,
+            604
+          ]
+        },
+        "jsHeapBytes": {
+          "median": 4936405,
+          "p95": 4963077.4,
+          "raw": [
+            4852392,
+            4936405,
+            4966041
+          ]
+        },
+        "incomingEvents": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "renderedEvents": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "renderedConsoleLines": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "duplicateEventIds": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "missingEventIds": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "transferredJsCssBytes": {
+          "median": 612244,
+          "p95": 612244,
+          "raw": [
+            612244,
+            612244,
+            612244
+          ]
+        },
+        "resourceCountJsCss": {
+          "median": 8,
+          "p95": 8,
+          "raw": [
+            8,
+            8,
+            8
+          ]
+        },
+        "sseRequestCount": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "durationMs": {
+          "median": 1030,
+          "p95": 1031.8,
+          "raw": [
+            1028,
+            1032,
+            1030
+          ]
+        },
+        "eventSourceInstancesTotal": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "crashed": {
+          "count": 0,
+          "total": 3
+        },
+        "crashSteps": []
+      }
+    },
+    {
+      "name": "navigation-cold-schedules",
+      "samples": [
+        {
+          "repeat": 1,
+          "metrics": {
+            "routeReadyMs": 924.2000000476837,
+            "longTaskCount": 0,
+            "longTaskOver50Ms": 0,
+            "maxLongTaskMs": 0,
+            "mutationBatches": 12,
+            "frameCount": 64,
+            "frameOver16Ms": 64,
+            "domNodes": 5927,
+            "jsHeapBytes": 9443537,
+            "incomingEvents": 0,
+            "renderedEvents": 0,
+            "renderedConsoleLines": 0,
+            "latestDisplayedEventDelayMs": null,
+            "terminalStatusDelayMs": null,
+            "duplicateEventIds": 0,
+            "missingEventIds": 0,
+            "eventOrderMatchesJournal": null,
+            "eventSourceInstances": {},
+            "inputToNextPaintMs": 24.599999964237213,
+            "transferredJsCssBytes": 593568,
+            "resourceCountJsCss": 7,
+            "sseRequestCount": 0,
+            "durationMs": 1138,
+            "eventSourceInstancesTotal": 0
+          },
+          "pageErrors": []
+        },
+        {
+          "repeat": 2,
+          "metrics": {
+            "routeReadyMs": 916.4000000357628,
+            "longTaskCount": 0,
+            "longTaskOver50Ms": 0,
+            "maxLongTaskMs": 0,
+            "mutationBatches": 12,
+            "frameCount": 63,
+            "frameOver16Ms": 63,
+            "domNodes": 5927,
+            "jsHeapBytes": 9500897,
+            "incomingEvents": 0,
+            "renderedEvents": 0,
+            "renderedConsoleLines": 0,
+            "latestDisplayedEventDelayMs": null,
+            "terminalStatusDelayMs": null,
+            "duplicateEventIds": 0,
+            "missingEventIds": 0,
+            "eventOrderMatchesJournal": null,
+            "eventSourceInstances": {},
+            "inputToNextPaintMs": 25,
+            "transferredJsCssBytes": 593568,
+            "resourceCountJsCss": 7,
+            "sseRequestCount": 0,
+            "durationMs": 1121,
+            "eventSourceInstancesTotal": 0
+          },
+          "pageErrors": []
+        },
+        {
+          "repeat": 3,
+          "metrics": {
+            "routeReadyMs": 908.6999999880791,
+            "longTaskCount": 0,
+            "longTaskOver50Ms": 0,
+            "maxLongTaskMs": 0,
+            "mutationBatches": 12,
+            "frameCount": 63,
+            "frameOver16Ms": 63,
+            "domNodes": 5927,
+            "jsHeapBytes": 9489582,
+            "incomingEvents": 0,
+            "renderedEvents": 0,
+            "renderedConsoleLines": 0,
+            "latestDisplayedEventDelayMs": null,
+            "terminalStatusDelayMs": null,
+            "duplicateEventIds": 0,
+            "missingEventIds": 0,
+            "eventOrderMatchesJournal": null,
+            "eventSourceInstances": {},
+            "inputToNextPaintMs": 26.5,
+            "transferredJsCssBytes": 593568,
+            "resourceCountJsCss": 7,
+            "sseRequestCount": 0,
+            "durationMs": 1116,
+            "eventSourceInstancesTotal": 0
+          },
+          "pageErrors": []
+        }
+      ],
+      "summary": {
+        "routeReadyMs": {
+          "median": 916.4000000357628,
+          "p95": 923.4200000464916,
+          "raw": [
+            924.2000000476837,
+            916.4000000357628,
+            908.6999999880791
+          ]
+        },
+        "longTaskCount": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "longTaskOver50Ms": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "maxLongTaskMs": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "mutationBatches": {
+          "median": 12,
+          "p95": 12,
+          "raw": [
+            12,
+            12,
+            12
+          ]
+        },
+        "frameCount": {
+          "median": 63,
+          "p95": 63.9,
+          "raw": [
+            64,
+            63,
+            63
+          ]
+        },
+        "frameOver16Ms": {
+          "median": 63,
+          "p95": 63.9,
+          "raw": [
+            64,
+            63,
+            63
+          ]
+        },
+        "domNodes": {
+          "median": 5927,
+          "p95": 5927,
+          "raw": [
+            5927,
+            5927,
+            5927
+          ]
+        },
+        "jsHeapBytes": {
+          "median": 9489582,
+          "p95": 9499765.5,
+          "raw": [
+            9443537,
+            9500897,
+            9489582
+          ]
+        },
+        "incomingEvents": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "renderedEvents": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "renderedConsoleLines": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "duplicateEventIds": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "missingEventIds": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "inputToNextPaintMs": {
+          "median": 25,
+          "p95": 26.35,
+          "raw": [
+            24.599999964237213,
+            25,
+            26.5
+          ]
+        },
+        "transferredJsCssBytes": {
+          "median": 593568,
+          "p95": 593568,
+          "raw": [
+            593568,
+            593568,
+            593568
+          ]
+        },
+        "resourceCountJsCss": {
+          "median": 7,
+          "p95": 7,
+          "raw": [
+            7,
+            7,
+            7
+          ]
+        },
+        "sseRequestCount": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "durationMs": {
+          "median": 1121,
+          "p95": 1136.3,
+          "raw": [
+            1138,
+            1121,
+            1116
+          ]
+        },
+        "eventSourceInstancesTotal": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "crashed": {
+          "count": 0,
+          "total": 3
+        },
+        "crashSteps": []
+      }
+    },
+    {
+      "name": "navigation-cold-settings",
+      "samples": [
+        {
+          "repeat": 1,
+          "metrics": {
+            "routeReadyMs": 895.7999999523163,
+            "longTaskCount": 0,
+            "longTaskOver50Ms": 0,
+            "maxLongTaskMs": 0,
+            "mutationBatches": 9,
+            "frameCount": 59,
+            "frameOver16Ms": 59,
+            "domNodes": 275,
+            "jsHeapBytes": 4180429,
+            "incomingEvents": 0,
+            "renderedEvents": 0,
+            "renderedConsoleLines": 0,
+            "latestDisplayedEventDelayMs": null,
+            "terminalStatusDelayMs": null,
+            "duplicateEventIds": 0,
+            "missingEventIds": 0,
+            "eventOrderMatchesJournal": null,
+            "eventSourceInstances": {},
+            "inputToNextPaintMs": null,
+            "transferredJsCssBytes": 556586,
+            "resourceCountJsCss": 7,
+            "sseRequestCount": 0,
+            "durationMs": 1027,
+            "eventSourceInstancesTotal": 0
+          },
+          "pageErrors": []
+        },
+        {
+          "repeat": 2,
+          "metrics": {
+            "routeReadyMs": 897,
+            "longTaskCount": 0,
+            "longTaskOver50Ms": 0,
+            "maxLongTaskMs": 0,
+            "mutationBatches": 8,
+            "frameCount": 59,
+            "frameOver16Ms": 58,
+            "domNodes": 275,
+            "jsHeapBytes": 4192753,
+            "incomingEvents": 0,
+            "renderedEvents": 0,
+            "renderedConsoleLines": 0,
+            "latestDisplayedEventDelayMs": null,
+            "terminalStatusDelayMs": null,
+            "duplicateEventIds": 0,
+            "missingEventIds": 0,
+            "eventOrderMatchesJournal": null,
+            "eventSourceInstances": {},
+            "inputToNextPaintMs": null,
+            "transferredJsCssBytes": 556586,
+            "resourceCountJsCss": 7,
+            "sseRequestCount": 0,
+            "durationMs": 1030,
+            "eventSourceInstancesTotal": 0
+          },
+          "pageErrors": []
+        },
+        {
+          "repeat": 3,
+          "metrics": {
+            "routeReadyMs": 892.1000000238419,
+            "longTaskCount": 0,
+            "longTaskOver50Ms": 0,
+            "maxLongTaskMs": 0,
+            "mutationBatches": 8,
+            "frameCount": 59,
+            "frameOver16Ms": 59,
+            "domNodes": 275,
+            "jsHeapBytes": 4129902,
+            "incomingEvents": 0,
+            "renderedEvents": 0,
+            "renderedConsoleLines": 0,
+            "latestDisplayedEventDelayMs": null,
+            "terminalStatusDelayMs": null,
+            "duplicateEventIds": 0,
+            "missingEventIds": 0,
+            "eventOrderMatchesJournal": null,
+            "eventSourceInstances": {},
+            "inputToNextPaintMs": null,
+            "transferredJsCssBytes": 556586,
+            "resourceCountJsCss": 7,
+            "sseRequestCount": 0,
+            "durationMs": 1026,
+            "eventSourceInstancesTotal": 0
+          },
+          "pageErrors": []
+        }
+      ],
+      "summary": {
+        "routeReadyMs": {
+          "median": 895.7999999523163,
+          "p95": 896.8799999952316,
+          "raw": [
+            895.7999999523163,
+            897,
+            892.1000000238419
+          ]
+        },
+        "longTaskCount": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "longTaskOver50Ms": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "maxLongTaskMs": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "mutationBatches": {
+          "median": 8,
+          "p95": 8.9,
+          "raw": [
+            9,
+            8,
+            8
+          ]
+        },
+        "frameCount": {
+          "median": 59,
+          "p95": 59,
+          "raw": [
+            59,
+            59,
+            59
+          ]
+        },
+        "frameOver16Ms": {
+          "median": 59,
+          "p95": 59,
+          "raw": [
+            59,
+            58,
+            59
+          ]
+        },
+        "domNodes": {
+          "median": 275,
+          "p95": 275,
+          "raw": [
+            275,
+            275,
+            275
+          ]
+        },
+        "jsHeapBytes": {
+          "median": 4180429,
+          "p95": 4191520.6,
+          "raw": [
+            4180429,
+            4192753,
+            4129902
+          ]
+        },
+        "incomingEvents": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "renderedEvents": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "renderedConsoleLines": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "duplicateEventIds": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "missingEventIds": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "transferredJsCssBytes": {
+          "median": 556586,
+          "p95": 556586,
+          "raw": [
+            556586,
+            556586,
+            556586
+          ]
+        },
+        "resourceCountJsCss": {
+          "median": 7,
+          "p95": 7,
+          "raw": [
+            7,
+            7,
+            7
+          ]
+        },
+        "sseRequestCount": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "durationMs": {
+          "median": 1027,
+          "p95": 1029.7,
+          "raw": [
+            1027,
+            1030,
+            1026
+          ]
+        },
+        "eventSourceInstancesTotal": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "crashed": {
+          "count": 0,
+          "total": 3
+        },
+        "crashSteps": []
+      }
+    },
+    {
+      "name": "navigation-warm-core-routes",
+      "samples": [
+        {
+          "repeat": 1,
+          "metrics": {
+            "routeReadyMs": 131.5,
+            "longTaskCount": 0,
+            "longTaskOver50Ms": 0,
+            "maxLongTaskMs": 0,
+            "mutationBatches": 19,
+            "frameCount": 35,
+            "frameOver16Ms": 35,
+            "domNodes": 266,
+            "jsHeapBytes": 7816665,
+            "incomingEvents": 0,
+            "renderedEvents": 0,
+            "renderedConsoleLines": 0,
+            "latestDisplayedEventDelayMs": null,
+            "terminalStatusDelayMs": null,
+            "duplicateEventIds": 0,
+            "missingEventIds": 0,
+            "eventOrderMatchesJournal": null,
+            "eventSourceInstances": {},
+            "inputToNextPaintMs": null,
+            "transferredJsCssBytes": 727285,
+            "resourceCountJsCss": 13,
+            "sseRequestCount": 0,
+            "durationMs": 670,
+            "eventSourceInstancesTotal": 0
+          },
+          "pageErrors": []
+        },
+        {
+          "repeat": 2,
+          "metrics": {
+            "routeReadyMs": 126.79999995231628,
+            "longTaskCount": 0,
+            "longTaskOver50Ms": 0,
+            "maxLongTaskMs": 0,
+            "mutationBatches": 21,
+            "frameCount": 37,
+            "frameOver16Ms": 35,
+            "domNodes": 266,
+            "jsHeapBytes": 7833014,
+            "incomingEvents": 0,
+            "renderedEvents": 0,
+            "renderedConsoleLines": 0,
+            "latestDisplayedEventDelayMs": null,
+            "terminalStatusDelayMs": null,
+            "duplicateEventIds": 0,
+            "missingEventIds": 0,
+            "eventOrderMatchesJournal": null,
+            "eventSourceInstances": {},
+            "inputToNextPaintMs": null,
+            "transferredJsCssBytes": 727285,
+            "resourceCountJsCss": 13,
+            "sseRequestCount": 0,
+            "durationMs": 655,
+            "eventSourceInstancesTotal": 0
+          },
+          "pageErrors": []
+        },
+        {
+          "repeat": 3,
+          "metrics": {
+            "routeReadyMs": 129.5999999642372,
+            "longTaskCount": 0,
+            "longTaskOver50Ms": 0,
+            "maxLongTaskMs": 0,
+            "mutationBatches": 20,
+            "frameCount": 34,
+            "frameOver16Ms": 34,
+            "domNodes": 266,
+            "jsHeapBytes": 7824905,
+            "incomingEvents": 0,
+            "renderedEvents": 0,
+            "renderedConsoleLines": 0,
+            "latestDisplayedEventDelayMs": null,
+            "terminalStatusDelayMs": null,
+            "duplicateEventIds": 0,
+            "missingEventIds": 0,
+            "eventOrderMatchesJournal": null,
+            "eventSourceInstances": {},
+            "inputToNextPaintMs": null,
+            "transferredJsCssBytes": 727285,
+            "resourceCountJsCss": 13,
+            "sseRequestCount": 0,
+            "durationMs": 654,
+            "eventSourceInstancesTotal": 0
+          },
+          "pageErrors": []
+        }
+      ],
+      "summary": {
+        "routeReadyMs": {
+          "median": 129.5999999642372,
+          "p95": 131.30999999642373,
+          "raw": [
+            131.5,
+            126.79999995231628,
+            129.5999999642372
+          ]
+        },
+        "longTaskCount": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "longTaskOver50Ms": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "maxLongTaskMs": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "mutationBatches": {
+          "median": 20,
+          "p95": 20.9,
+          "raw": [
+            19,
+            21,
+            20
+          ]
+        },
+        "frameCount": {
+          "median": 35,
+          "p95": 36.8,
+          "raw": [
+            35,
+            37,
+            34
+          ]
+        },
+        "frameOver16Ms": {
+          "median": 35,
+          "p95": 35,
+          "raw": [
+            35,
+            35,
+            34
+          ]
+        },
+        "domNodes": {
+          "median": 266,
+          "p95": 266,
+          "raw": [
+            266,
+            266,
+            266
+          ]
+        },
+        "jsHeapBytes": {
+          "median": 7824905,
+          "p95": 7832203.1,
+          "raw": [
+            7816665,
+            7833014,
+            7824905
+          ]
+        },
+        "incomingEvents": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "renderedEvents": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "renderedConsoleLines": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "duplicateEventIds": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "missingEventIds": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "transferredJsCssBytes": {
+          "median": 727285,
+          "p95": 727285,
+          "raw": [
+            727285,
+            727285,
+            727285
+          ]
+        },
+        "resourceCountJsCss": {
+          "median": 13,
+          "p95": 13,
+          "raw": [
+            13,
+            13,
+            13
+          ]
+        },
+        "sseRequestCount": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "durationMs": {
+          "median": 655,
+          "p95": 668.5,
+          "raw": [
+            670,
+            655,
+            654
+          ]
+        },
+        "eventSourceInstancesTotal": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "crashed": {
+          "count": 0,
+          "total": 3
+        },
+        "crashSteps": []
+      }
+    },
+    {
+      "name": "resilience-hidden-tab-and-paused-scroll",
+      "samples": [
+        {
+          "repeat": 1,
+          "metrics": {
+            "routeReadyMs": 890.7999999523163,
+            "longTaskCount": 0,
+            "longTaskOver50Ms": 0,
+            "maxLongTaskMs": 0,
+            "mutationBatches": 13,
+            "frameCount": 63,
+            "frameOver16Ms": 62,
+            "domNodes": 194,
+            "jsHeapBytes": 5427768,
+            "incomingEvents": 51,
+            "renderedEvents": 48,
+            "renderedConsoleLines": 48,
+            "latestDisplayedEventDelayMs": 10.099999964237213,
+            "terminalStatusDelayMs": 10.199999988079071,
+            "duplicateEventIds": 0,
+            "missingEventIds": 0,
+            "eventOrderMatchesJournal": null,
+            "eventSourceInstances": {
+              "PERF-JOB-266": 1
+            },
+            "inputToNextPaintMs": 29.899999976158142,
+            "transferredJsCssBytes": 562767,
+            "resourceCountJsCss": 8,
+            "sseRequestCount": 1,
+            "durationMs": 1094,
+            "eventSourceInstancesTotal": 1
+          },
+          "pageErrors": []
+        },
+        {
+          "repeat": 2,
+          "metrics": {
+            "routeReadyMs": 891.8999999761581,
+            "longTaskCount": 0,
+            "longTaskOver50Ms": 0,
+            "maxLongTaskMs": 0,
+            "mutationBatches": 13,
+            "frameCount": 63,
+            "frameOver16Ms": 63,
+            "domNodes": 194,
+            "jsHeapBytes": 5363108,
+            "incomingEvents": 51,
+            "renderedEvents": 48,
+            "renderedConsoleLines": 48,
+            "latestDisplayedEventDelayMs": 4.900000035762787,
+            "terminalStatusDelayMs": 4.800000011920929,
+            "duplicateEventIds": 0,
+            "missingEventIds": 0,
+            "eventOrderMatchesJournal": null,
+            "eventSourceInstances": {
+              "PERF-JOB-266": 1
+            },
+            "inputToNextPaintMs": 27.100000023841858,
+            "transferredJsCssBytes": 562767,
+            "resourceCountJsCss": 8,
+            "sseRequestCount": 1,
+            "durationMs": 1096,
+            "eventSourceInstancesTotal": 1
+          },
+          "pageErrors": []
+        },
+        {
+          "repeat": 3,
+          "metrics": {
+            "routeReadyMs": 898.6999999880791,
+            "longTaskCount": 0,
+            "longTaskOver50Ms": 0,
+            "maxLongTaskMs": 0,
+            "mutationBatches": 12,
+            "frameCount": 64,
+            "frameOver16Ms": 63,
+            "domNodes": 194,
+            "jsHeapBytes": 5309784,
+            "incomingEvents": 51,
+            "renderedEvents": 48,
+            "renderedConsoleLines": 48,
+            "latestDisplayedEventDelayMs": 11.199999988079071,
+            "terminalStatusDelayMs": 11.199999988079071,
+            "duplicateEventIds": 0,
+            "missingEventIds": 0,
+            "eventOrderMatchesJournal": null,
+            "eventSourceInstances": {
+              "PERF-JOB-266": 1
+            },
+            "inputToNextPaintMs": 25.899999976158142,
+            "transferredJsCssBytes": 562767,
+            "resourceCountJsCss": 8,
+            "sseRequestCount": 1,
+            "durationMs": 1105,
+            "eventSourceInstancesTotal": 1
+          },
+          "pageErrors": []
+        }
+      ],
+      "summary": {
+        "routeReadyMs": {
+          "median": 891.8999999761581,
+          "p95": 898.019999986887,
+          "raw": [
+            890.7999999523163,
+            891.8999999761581,
+            898.6999999880791
+          ]
+        },
+        "longTaskCount": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "longTaskOver50Ms": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "maxLongTaskMs": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "mutationBatches": {
+          "median": 13,
+          "p95": 13,
+          "raw": [
+            13,
+            13,
+            12
+          ]
+        },
+        "frameCount": {
+          "median": 63,
+          "p95": 63.9,
+          "raw": [
+            63,
+            63,
+            64
+          ]
+        },
+        "frameOver16Ms": {
+          "median": 63,
+          "p95": 63,
+          "raw": [
+            62,
+            63,
+            63
+          ]
+        },
+        "domNodes": {
+          "median": 194,
+          "p95": 194,
+          "raw": [
+            194,
+            194,
+            194
+          ]
+        },
+        "jsHeapBytes": {
+          "median": 5363108,
+          "p95": 5421302,
+          "raw": [
+            5427768,
+            5363108,
+            5309784
+          ]
+        },
+        "incomingEvents": {
+          "median": 51,
+          "p95": 51,
+          "raw": [
+            51,
+            51,
+            51
+          ]
+        },
+        "renderedEvents": {
+          "median": 48,
+          "p95": 48,
+          "raw": [
+            48,
+            48,
+            48
+          ]
+        },
+        "renderedConsoleLines": {
+          "median": 48,
+          "p95": 48,
+          "raw": [
+            48,
+            48,
+            48
+          ]
+        },
+        "latestDisplayedEventDelayMs": {
+          "median": 10.099999964237213,
+          "p95": 11.089999985694885,
+          "raw": [
+            10.099999964237213,
+            4.900000035762787,
+            11.199999988079071
+          ]
+        },
+        "terminalStatusDelayMs": {
+          "median": 10.199999988079071,
+          "p95": 11.099999988079071,
+          "raw": [
+            10.199999988079071,
+            4.800000011920929,
+            11.199999988079071
+          ]
+        },
+        "duplicateEventIds": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "missingEventIds": {
+          "median": 0,
+          "p95": 0,
+          "raw": [
+            0,
+            0,
+            0
+          ]
+        },
+        "inputToNextPaintMs": {
+          "median": 27.100000023841858,
+          "p95": 29.619999980926515,
+          "raw": [
+            29.899999976158142,
+            27.100000023841858,
+            25.899999976158142
+          ]
+        },
+        "transferredJsCssBytes": {
+          "median": 562767,
+          "p95": 562767,
+          "raw": [
+            562767,
+            562767,
+            562767
+          ]
+        },
+        "resourceCountJsCss": {
+          "median": 8,
+          "p95": 8,
+          "raw": [
+            8,
+            8,
+            8
+          ]
+        },
+        "sseRequestCount": {
+          "median": 1,
+          "p95": 1,
+          "raw": [
+            1,
+            1,
+            1
+          ]
+        },
+        "durationMs": {
+          "median": 1096,
+          "p95": 1104.1,
+          "raw": [
+            1094,
+            1096,
+            1105
+          ]
+        },
+        "eventSourceInstancesTotal": {
+          "median": 1,
+          "p95": 1,
+          "raw": [
+            1,
+            1,
+            1
+          ]
+        },
+        "crashed": {
+          "count": 0,
+          "total": 3
+        },
+        "crashSteps": []
+      }
+    }
+  ],
+  "bundleGzip": [
+    {
+      "source": "_JobConsoleView-B3Oy1sG2.js",
+      "file": "assets/JobConsoleView-B3Oy1sG2.js",
+      "dynamic": false,
+      "rawBytes": 19800,
+      "gzipBytes": 6789
+    },
+    {
+      "source": "_JobConsoleView-B3Oy1sG2.js",
+      "file": "assets/JobConsoleView-C6X2GHD8.css",
+      "dynamic": false,
+      "rawBytes": 9185,
+      "gzipBytes": 2231
+    },
+    {
+      "source": "_dist-DE1Lrzs1.js",
+      "file": "assets/dist-DE1Lrzs1.js",
+      "dynamic": false,
+      "rawBytes": 26884,
+      "gzipBytes": 8740
+    },
+    {
+      "source": "_jsx-runtime-Dk72oS4N.js",
+      "file": "assets/jsx-runtime-Dk72oS4N.js",
+      "dynamic": false,
+      "rawBytes": 8774,
+      "gzipBytes": 3345
+    },
+    {
+      "source": "_preload-helper-CRzLMJPS.js",
+      "file": "assets/preload-helper-CRzLMJPS.js",
+      "dynamic": false,
+      "rawBytes": 1534,
+      "gzipBytes": 802
+    },
+    {
+      "source": "_types-C3LSnZ5x.js",
+      "file": "assets/types-C3LSnZ5x.js",
+      "dynamic": false,
+      "rawBytes": 251,
+      "gzipBytes": 165
+    },
+    {
+      "source": "index.html",
+      "file": "assets/index-WOAWwU84.js",
+      "dynamic": false,
+      "rawBytes": 446349,
+      "gzipBytes": 128208
+    },
+    {
+      "source": "index.html",
+      "file": "assets/index-BCpAGL0g.css",
+      "dynamic": false,
+      "rawBytes": 73048,
+      "gzipBytes": 12432
+    },
+    {
+      "source": "node_modules/@codemirror/lang-json/dist/index.js",
+      "file": "assets/dist-CzaXXnCI.js",
+      "dynamic": true,
+      "rawBytes": 2061,
+      "gzipBytes": 1267
+    },
+    {
+      "source": "node_modules/@codemirror/lang-sql/dist/index.js",
+      "file": "assets/dist-Cn2dFRcN.js",
+      "dynamic": true,
+      "rawBytes": 15924,
+      "gzipBytes": 6888
+    },
+    {
+      "source": "node_modules/@codemirror/lang-xml/dist/index.js",
+      "file": "assets/dist-CuS1qwX2.js",
+      "dynamic": true,
+      "rawBytes": 14381,
+      "gzipBytes": 5718
+    },
+    {
+      "source": "node_modules/@codemirror/lang-yaml/dist/index.js",
+      "file": "assets/dist-C4dvjZ1J.js",
+      "dynamic": true,
+      "rawBytes": 11628,
+      "gzipBytes": 5080
+    },
+    {
+      "source": "node_modules/@codemirror/language/dist/index.js",
+      "file": "assets/dist-DVzxfVxq.js",
+      "dynamic": true,
+      "rawBytes": 297687,
+      "gzipBytes": 95529
+    },
+    {
+      "source": "node_modules/@codemirror/legacy-modes/mode/shell.js",
+      "file": "assets/shell-DwuoZtxw.js",
+      "dynamic": true,
+      "rawBytes": 2434,
+      "gzipBytes": 1186
+    },
+    {
+      "source": "node_modules/yaml/browser/index.js",
+      "file": "assets/browser-CraaQKji.js",
+      "dynamic": true,
+      "rawBytes": 95953,
+      "gzipBytes": 29580
+    },
+    {
+      "source": "src/SettingsPage.tsx",
+      "file": "assets/SettingsPage-Dka-qb6I.js",
+      "dynamic": true,
+      "rawBytes": 18698,
+      "gzipBytes": 4874
+    },
+    {
+      "source": "src/SettingsPage.tsx",
+      "file": "assets/SettingsPage-6aA7xbkL.css",
+      "dynamic": true,
+      "rawBytes": 5832,
+      "gzipBytes": 1423
+    },
+    {
+      "source": "src/features/code/codemirrorRuntime.ts",
+      "file": "assets/codemirrorRuntime-CpNtfrLp.js",
+      "dynamic": true,
+      "rawBytes": 75215,
+      "gzipBytes": 24873
+    },
+    {
+      "source": "src/features/explorer/ExplorerPage.tsx",
+      "file": "assets/ExplorerPage-C-Pyr9zy.js",
+      "dynamic": true,
+      "rawBytes": 27499,
+      "gzipBytes": 8263
+    },
+    {
+      "source": "src/features/load/FloatingJobConsole.tsx",
+      "file": "assets/FloatingJobConsole-6D1S_xZs.js",
+      "dynamic": true,
+      "rawBytes": 4408,
+      "gzipBytes": 1690
+    },
+    {
+      "source": "src/features/load/JobsPage.tsx",
+      "file": "assets/JobsPage-DFlSe53Y.js",
+      "dynamic": true,
+      "rawBytes": 50903,
+      "gzipBytes": 14772
+    },
+    {
+      "source": "src/features/load/LoadPage.tsx",
+      "file": "assets/LoadPage-DRjSTEP1.js",
+      "dynamic": true,
+      "rawBytes": 49336,
+      "gzipBytes": 13179
+    },
+    {
+      "source": "src/features/load/StandaloneJobConsolePage.tsx",
+      "file": "assets/StandaloneJobConsolePage-7xkGXEN-.js",
+      "dynamic": true,
+      "rawBytes": 1426,
+      "gzipBytes": 758
+    },
+    {
+      "source": "src/features/schedules/ScheduledLoadPage.tsx",
+      "file": "assets/ScheduledLoadPage-67UsKqW2.js",
+      "dynamic": true,
+      "rawBytes": 48714,
+      "gzipBytes": 13073
+    },
+    {
+      "source": "src/features/schedules/ScheduledLoadPage.tsx",
+      "file": "assets/ScheduledLoadPage-27rod9YQ.css",
+      "dynamic": true,
+      "rawBytes": 12798,
+      "gzipBytes": 2602
+    }
+  ]
+}

@@ -14,7 +14,7 @@ beforeEach(() => {
   host = document.createElement('div'); document.body.append(host); root = createRoot(host);
   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 });
-afterEach(async () => { await act(async () => root.unmount()); host.remove(); });
+afterEach(async () => { await act(async () => root.unmount()); host.remove(); vi.useRealTimers(); });
 async function flush() { await act(async () => { await new Promise(resolve => window.setTimeout(resolve, 0)); }); }
 
 function unverifiedScenario(path = 'load/nightly.yaml') {
@@ -22,6 +22,35 @@ function unverifiedScenario(path = 'load/nightly.yaml') {
 }
 
 describe('LoadCatalogPage', () => {
+  it('discovers package catalogs with a concurrency cap of four while preserving package order', async () => {
+    let active = 0;
+    let maximumActive = 0;
+    const pending = new Map<string, (page: unknown) => void>();
+    const api = {
+      listLoadCatalog: vi.fn((packageId: string) => new Promise(resolve => {
+        active += 1;
+        maximumActive = Math.max(maximumActive, active);
+        pending.set(packageId, (page: unknown) => { active -= 1; resolve(page); });
+      })),
+      listLoadJobs: vi.fn(async () => ({ items: [] })),
+    };
+    const packageIds = ['p0', 'p1', 'p2', 'p3', 'p4', 'p5'];
+    await act(async () => root.render(<LoadCatalogPage api={api as never} packages={{ status: 'ready', data: packageIds.map(packageId => ({ packageId })) }}
+      inlineLoadEnabled schedulingEnabled environment="" onEnvironmentChange={vi.fn()} onNewLoad={vi.fn()}
+      onQuickLoad={vi.fn()} onJobAccepted={vi.fn()} onOpenJob={vi.fn()} onSchedule={vi.fn()} onOpenDetail={openDetail} />));
+    expect(api.listLoadCatalog).toHaveBeenCalledTimes(4);
+    expect(maximumActive).toBe(4);
+
+    for (const packageId of packageIds.slice(0, 4)) pending.get(packageId)!({ items: [{ ...unverifiedScenario(`${packageId}.yaml`), packageId }], total: 1 });
+    await flush();
+    expect(api.listLoadCatalog).toHaveBeenCalledTimes(6);
+    expect(maximumActive).toBe(4);
+    for (const packageId of packageIds.slice(4)) pending.get(packageId)!({ items: [{ ...unverifiedScenario(`${packageId}.yaml`), packageId }], total: 1 });
+    await flush();
+
+    expect([...host.querySelectorAll('.att-load-catalog-card h3')].map(node => node.textContent)).toEqual(packageIds.map(id => `${id}.yaml`));
+  });
+
   it('shows validated scenarios and policy templates, previews safe source, and schedules the selected package file', async () => {
     const api = {
       listLoadCatalog: vi.fn(async () => ({ items: [

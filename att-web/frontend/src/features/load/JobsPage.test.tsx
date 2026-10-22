@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
-import { act } from 'react';
+import { act, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { JobsPage } from './JobsPage';
+import { ArtifactsPanel, BucketTable, JobOverview, JobsPage, MetricsPanel, TimeSeriesChart, downsampleMetricPoints, CHART_DISPLAY_POINT_THRESHOLD, type MetricBucket, type MetricSeries } from './JobsPage';
 import { JobArtifacts } from './JobArtifacts';
 import { ApiError } from '../../types';
 import type { JobEventHandlers, JobResultResponse, JobStatus, JobSummary, JobView, LoadJobsApi } from './types';
@@ -74,12 +74,80 @@ function selectedRows(): string[] {
 }
 
 describe('JobsPage React feature', () => {
+  it('downsamples only the chart display and preserves exact extrema and coordinates', () => {
+    const points = Array.from({ length: CHART_DISPLAY_POINT_THRESHOLD + 240 }, (_, index) => ({
+      epochMs: 1_800_000_000_000 + index * 1000,
+      value: index === 300 ? -40 : index === 900 ? 900 : index % 17,
+    }));
+    const sampled = downsampleMetricPoints(points);
+    expect(sampled.length).toBeLessThanOrEqual(CHART_DISPLAY_POINT_THRESHOLD);
+    expect(sampled[0]).toBe(points[0]);
+    expect(sampled.at(-1)).toBe(points.at(-1));
+    expect(sampled).toContain(points[300]);
+    expect(sampled).toContain(points[900]);
+    expect(points).toHaveLength(CHART_DISPLAY_POINT_THRESHOLD + 240);
+  });
+
+  it('labels a downsampled chart and keeps the full series available to its table caller', async () => {
+    const points = Array.from({ length: CHART_DISPLAY_POINT_THRESHOLD + 1 }, (_, index) => ({ epochMs: 1_800_000_000_000 + index * 1000, value: index }));
+    await act(async () => root.render(<TimeSeriesChart series={{ field: 'p95Ms', label: 'p95 latency', unit: 'milliseconds', points }} />));
+    expect(host.textContent).toContain(`display sample: ${CHART_DISPLAY_POINT_THRESHOLD} of ${points.length} points`);
+    expect(host.querySelector('[role="status"]')?.textContent).toContain('display sample:');
+  });
+
+  it('keeps Overview, Metrics, and Artifacts profiler subtrees stable during 50 event flushes', async () => {
+    const api = makeApi();
+    const profilerCommits: Record<string, number> = { overview: 0, metrics: 0, artifacts: 0 };
+    const onMetrics = vi.fn();
+    const emptyBuckets: MetricBucket[] = [];
+    const emptyCharts: MetricSeries[] = [];
+    const onOverviewProfiler = () => { profilerCommits.overview += 1; };
+    const onMetricsProfiler = () => { profilerCommits.metrics += 1; };
+    const onArtifactsProfiler = () => { profilerCommits.artifacts += 1; };
+    function Harness() {
+      const [events, setEvents] = useState(0);
+      return <>
+        <button type="button" onClick={() => setEvents(value => value + 50)}>Ingest events</button><output>{events}</output>
+        <JobOverview job={sampleJob} status={sampleJob.status} jobState="ready" hidden onProfilerCommit={onOverviewProfiler} />
+        <MetricsPanel job={sampleJob} metrics={null} resultState="ready" archiveMetrics={null} buckets={emptyBuckets} charts={emptyCharts} hidden onProfilerCommit={onMetricsProfiler} />
+        <ArtifactsPanel api={api} jobId={sampleJob.jobId} refresh={0} onMetrics={onMetrics} hidden onProfilerCommit={onArtifactsProfiler} />
+      </>;
+    }
+    await act(async () => root.render(<Harness />));
+    await act(async () => { await Promise.resolve(); });
+    const before = { ...profilerCommits };
+    await click(host.querySelector('button')!);
+    expect(host.querySelector('output')?.textContent).toBe('50');
+    expect(profilerCommits).toEqual(before);
+  });
+
+  it('paginates 4096 exact buckets without mounting all rows and keeps keyboard paging accessible', async () => {
+    const buckets: MetricBucket[] = Array.from({ length: 4096 }, (_, index) => ({
+      key: String(index), epochMs: 1_800_000_000_000 + index * 1000,
+      values: { completedTps: index + 0.25, p95Ms: index + 1 },
+    }));
+    await act(async () => root.render(<BucketTable buckets={buckets} />));
+    const table = host.querySelector('table')!;
+    expect(table.getAttribute('aria-rowcount')).toBe('4097');
+    expect(host.querySelectorAll('tbody tr')).toHaveLength(100);
+    expect(host.textContent).toContain('Showing rows 1–100 of 4096');
+    expect(host.textContent).toContain('0.25');
+    expect(host.textContent).not.toContain('4095.25');
+    const next = host.querySelector<HTMLButtonElement>('[aria-label="Next bucket page"]')!;
+    await act(async () => { next.focus(); next.click(); });
+    expect(host.textContent).toContain('Showing rows 101–200 of 4096');
+    expect(host.querySelectorAll('tbody tr')).toHaveLength(100);
+    expect(host.textContent).toContain('100.25');
+    expect(host.querySelector('tbody tr')?.getAttribute('aria-rowindex')).toBe('102');
+  });
+
   it('keeps expanded published console text and distinguishes journal truncation from preview clipping', async () => {
     const api=makeApi();
     await act(async () => root.render(<JobsPage api={api} jobId="JOB-204" onOpenJob={vi.fn()} onShowList={vi.fn()} />));
     const handlers=vi.mocked(api.subscribeJob).mock.calls[0][1];
     const text='diagnostic '+ 'x'.repeat(8000) + ' expanded-entry-end';
     await act(async () => handlers.onEvent({id:'1',type:'log',data:{console:text,truncated:true,journalLimit:{limitBytes:65536}}}));
+    await advance(100);
     await click(host.querySelector('#job-tab-live')!);
     expect(host.querySelector('[aria-label="Live output"]')?.textContent).toBe(text);
     expect(host.querySelector('#job-panel-live')?.textContent).toContain('Some event payload fields were truncated by the journal');
@@ -99,6 +167,7 @@ describe('JobsPage React feature', () => {
     await click([...host.querySelectorAll('button')].find(button => button.textContent === 'Collapse all')!);
     await act(async () => vi.mocked(api.subscribeJob).mock.calls[0][1].onEvent({ id: 'lazy', type: 'diagnostic', data }));
     expect(toJson).not.toHaveBeenCalled();
+    await advance(100);
     const event = host.querySelector('#job-panel-events .att-job-events details')!;
     expect(event.querySelector('pre')).toBeNull();
     await click(event.querySelector('summary')!);
@@ -679,16 +748,16 @@ describe('JobsPage React feature', () => {
     expect(panel.querySelector('canvas, svg')).toBeNull();
   });
 
-  it('shows all event types in chronological order and filters without reconnecting or dropping new events', async () => {
+  it('shows all event types in Server append order and filters without reconnecting or dropping new events', async () => {
     const api = makeApi();
     await act(async () => root.render(<JobsPage api={api} jobId="JOB-204" onOpenJob={vi.fn()} onShowList={vi.fn()} confirmCancel={() => true} />));
     const handlers = vi.mocked(api.subscribeJob).mock.calls[0]?.[1];
     await act(async () => {
-      handlers?.onEvent({ id: '5', type: 'result', data: { status: 'PASS' } });
-      handlers?.onEvent({ id: '3', type: 'log', data: { message: 'worker log' } });
       handlers?.onEvent({ id: '1', type: 'status', data: { status: 'RUNNING' } });
-      handlers?.onEvent({ id: '4', type: 'diagnostic', data: { code: 'ATT-EXAMPLE', summary: 'safe warning' } });
       handlers?.onEvent({ id: '2', type: 'progress', data: { message: 'half complete' } });
+      handlers?.onEvent({ id: '3', type: 'log', data: { message: 'worker log' } });
+      handlers?.onEvent({ id: '4', type: 'diagnostic', data: { code: 'ATT-EXAMPLE', summary: 'safe warning' } });
+      handlers?.onEvent({ id: '5', type: 'result', data: { status: 'PASS' } });
     });
     await click(host.querySelector('#job-tab-events')!);
     const panel = host.querySelector('#job-panel-events')!;
@@ -699,11 +768,12 @@ describe('JobsPage React feature', () => {
 
     const eventType = (type: string) => panel.querySelector<HTMLInputElement>(`input[aria-label="${type}"]`)!;
     for (const type of ['log', 'diagnostic', 'result']) await click(eventType(type));
-    expect(panel.querySelectorAll('.att-job-events li')).toHaveLength(2);
+    expect(panel.querySelectorAll('.att-job-events li:not([aria-hidden])')).toHaveLength(2);
     await act(async () => handlers?.onEvent({ id: '6', type: 'progress', data: { message: 'still connected' } }));
-    expect(panel.querySelectorAll('.att-job-events li')).toHaveLength(3);
+    await advance(100);
+    expect(panel.querySelectorAll('.att-job-events li:not([aria-hidden])')).toHaveLength(3);
     await click(panel.querySelector<HTMLInputElement>('[aria-label="All Events"]')!);
-    expect(panel.querySelectorAll('.att-job-events li')).toHaveLength(6);
+    expect(panel.querySelectorAll('.att-job-events li:not([aria-hidden])')).toHaveLength(6);
     expect(api.subscribeJob).toHaveBeenCalledTimes(1);
     expect(panel.querySelector('[aria-label="Search events"]')).not.toBeNull();
 
@@ -711,13 +781,41 @@ describe('JobsPage React feature', () => {
     const live = host.querySelector('#job-panel-live')!;
     expect(live.textContent).toContain('This Job has no console lines');
     await act(async () => handlers?.onEvent({ id: '7', type: 'log', data: { message: '<b>secret</b>', console: '[RUN] case=one\n[RUN] case=two' } }));
+    await advance(100);
     expect(live.querySelector('pre.att-console')?.textContent).toBe('[RUN] case=one\n[RUN] case=two');
     expect(live.querySelector('pre.att-console')?.innerHTML).not.toContain('<b>');
     expect([...live.querySelectorAll('button')].some(button => button.textContent === 'Copy Output')).toBe(true);
     await click([...live.querySelectorAll('button')].find(button => button.textContent === 'Clear view')!);
     expect(live.querySelector('pre.att-console')).toBeNull();
+    await act(async () => handlers?.onEvent({ id: '7', type: 'log', data: { console: '[RUN] replay must stay cleared' } }));
+    await advance(100);
+    expect(live.querySelector('pre.att-console')).toBeNull();
     await act(async () => handlers?.onEvent({ id: '8', type: 'log', data: { console: '[RUN] after clear' } }));
+    await advance(100);
     expect(live.querySelector('pre.att-console')?.textContent).toBe('[RUN] after clear');
+  });
+
+  it('shows non-live stream diagnostics only when replay or gap counters are non-zero', async () => {
+    const api = makeApi();
+    await act(async () => root.render(<JobsPage api={api} jobId="JOB-204" onOpenJob={vi.fn()} onShowList={vi.fn()} confirmCancel={() => true} />));
+    await click(host.querySelector('#job-tab-events')!);
+    const panel = host.querySelector('#job-panel-events')!;
+    expect([...panel.querySelectorAll('p.att-help')].some(item => item.textContent?.startsWith('Stream diagnostics:'))).toBe(false);
+
+    const handlers = vi.mocked(api.subscribeJob).mock.calls[0][1];
+    act(() => {
+      handlers.onEvent({ id: '1', type: 'log', data: 'one' });
+      handlers.onEvent({ id: '3', type: 'log', data: 'three' });
+      handlers.onEvent({ id: '2', type: 'log', data: 'late two' });
+      handlers.onEvent({ id: '3', type: 'log', data: 'duplicate three' });
+      handlers.onEvent({ id: '3', type: 'log', data: 'duplicate three again' });
+    });
+    await advance(100);
+
+    const diagnostics = [...panel.querySelectorAll('p.att-help')]
+      .find(item => item.textContent?.startsWith('Stream diagnostics:'))!;
+    expect(diagnostics.textContent).toBe('Stream diagnostics: 2 duplicate and 1 out-of-order replayed events ignored; 1 ID gap.');
+    expect(diagnostics.getAttribute('role')).toBeNull();
   });
 
   it('distinguishes an open stream with no events from reconnecting', async () => {
@@ -744,6 +842,7 @@ describe('JobsPage React feature', () => {
       data: { status: 'RUNNING', phase: 'STEADY', sequence: 4, message: 'steady progress', metrics: { completed: 4, failed: 0 } },
     }));
     await act(async () => handlers?.onEvent({ id: '2', type: 'log', data: { console: '[LOAD] status=RUNNING phase=STEADY', message: 'console line' } }));
+    await advance(100);
 
     await click(host.querySelector('#job-tab-events')!);
     const events = host.querySelector('#job-panel-events')!;
@@ -772,6 +871,7 @@ describe('JobsPage React feature', () => {
     await act(async () => { list.dispatchEvent(new Event('scroll', { bubbles: true })); });
     expect([...events.querySelectorAll('button')].some(button => button.textContent === 'Resume auto-scroll')).toBe(true);
     await act(async () => handlers?.onEvent({ id: '3', type: 'progress', data: { status: 'RUNNING', phase: 'STEADY', sequence: 5, message: 'still arriving' } }));
+    await advance(100);
     expect(list.scrollTop).toBe(40);
     expect(api.subscribeJob).toHaveBeenCalledTimes(1);
     const logFilter = events.querySelector<HTMLInputElement>('input[aria-label="log"]')!;
@@ -839,14 +939,22 @@ describe('JobsPage React feature', () => {
     await act(async () => {
       for (let id = 1; id <= 501; id += 1) handlers.onEvent({ id: String(id), type: 'log', data: { message: `event-${id}` } });
     });
+    await advance(100);
     const note = host.querySelector('#job-panel-live [role="note"]');
     expect(note?.textContent ?? '').not.toContain('Earlier journal events');
     expect(note?.textContent).toContain('This browser keeps the latest 500 events.');
     const ids = [...host.querySelectorAll('#job-panel-events code')].map(node => node.textContent);
-    expect(ids).toHaveLength(500);
+    expect(ids.length).toBeGreaterThan(0);
+    expect(ids.length).toBeLessThan(100);
     expect(ids).not.toContain('#1');
     expect(ids[0]).toBe('#2');
-    expect(ids.at(-1)).toBe('#501');
+    const search = host.querySelector<HTMLInputElement>('#job-panel-events [aria-label="Search events"]')!;
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+      setter?.call(search, 'event-501');
+      search.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    expect([...host.querySelectorAll('#job-panel-events code')].map(node => node.textContent)).toContain('#501');
   });
 
   it('keeps the Server truncation warning after the flagged event leaves the browser window', async () => {
@@ -857,17 +965,20 @@ describe('JobsPage React feature', () => {
       handlers.onEvent({ id: '1', type: 'log', data: { historyTruncated: true, message: 'oldest retained boundary' } });
       handlers.onEvent({ id: '2', type: 'log', data: { message: 'still in the journal' } });
     });
+    await advance(100);
     const early = host.querySelector('#job-panel-live [role="note"]');
     expect(early?.textContent).toContain('Earlier journal events are no longer retained.');
     expect(early?.textContent ?? '').not.toContain('This browser keeps the latest 500 events.');
     await act(async () => {
       for (let id = 3; id <= 501; id += 1) handlers.onEvent({ id: String(id), type: 'log', data: { message: `event-${id}` } });
     });
+    await advance(100);
     const note = host.querySelector('#job-panel-live [role="note"]');
     expect(note?.textContent).toContain('Earlier journal events are no longer retained.');
     expect(note?.textContent).toContain('This browser keeps the latest 500 events.');
     const ids = [...host.querySelectorAll('#job-panel-events code')].map(node => node.textContent);
-    expect(ids).toHaveLength(500);
+    expect(ids.length).toBeGreaterThan(0);
+    expect(ids.length).toBeLessThan(100);
     expect(ids).not.toContain('#1');
     expect(ids[0]).toBe('#2');
     await act(async () => root.render(<JobsPage api={api} jobId="JOB-205" onOpenJob={vi.fn()} onShowList={vi.fn()} confirmCancel={() => true} />));
