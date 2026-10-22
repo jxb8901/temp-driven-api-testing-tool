@@ -86,6 +86,12 @@ class ServerRuntimeJobReplayTest {
             assertEquals("package-revision-changed",runtime.triggerLoadSchedule(pauseId,"alice").get("reason"));
             assertFalse(runtime.loadSchedule(pauseId).enabled);assertEquals("package-revision-changed",runtime.loadSchedule(pauseId).autoPauseReason);
             assertThrows(ServerRuntime.ScheduleSourceChangedException.class,()->runtime.setLoadScheduleEnabled(pauseId,true,"alice"));
+            Map<String,Object> accepted=runtime.triggerLoadSchedule(ignoreId,"alice");assertEquals("submitted",accepted.get("status"),accepted.toString());
+            await(runtime,String.valueOf(accepted.get("jobId")));
+            assertEquals(stored,runtime.loadSchedule(ignoreId).expectedRevisionDigest);
+            assertEquals(ignore.runInput,runtime.loadSchedule(ignoreId).runInput);
+            assertEquals(1,runtime.store.auditOutcomes("SCHEDULE_SOURCE_REVALIDATED").size());
+            assertTrue(runtime.store.auditOutcomes("SCHEDULE_SOURCE_REVALIDATED").get(0).contains("stored="+stored));
             Files.writeString(unrelated,originalUnrelated);
             clock.advance(Duration.ofMinutes(16));
             Map<String,Object> restored=runtime.triggerLoadSchedule(strictId,"alice");assertEquals("submitted",restored.get("status"),restored.toString());
@@ -93,12 +99,6 @@ class ServerRuntimeJobReplayTest {
             assertNull(runtime.loadSchedule(strictId).sourceStatus,"A successful execution after restoring the pinned package must clear current stale status");
             assertEquals(stored,runtime.loadSchedule(strictId).currentRevisionDigest);
             assertEquals(1,runtime.store.auditOutcomes("SCHEDULE_SOURCE_RESTORED").size());
-            Map<String,Object> accepted=runtime.triggerLoadSchedule(ignoreId,"alice");assertEquals("submitted",accepted.get("status"),accepted.toString());
-            await(runtime,String.valueOf(accepted.get("jobId")));
-            assertEquals(stored,runtime.loadSchedule(ignoreId).expectedRevisionDigest);
-            assertEquals(ignore.runInput,runtime.loadSchedule(ignoreId).runInput);
-            assertEquals(1,runtime.store.auditOutcomes("SCHEDULE_SOURCE_REVALIDATED").size());
-            assertTrue(runtime.store.auditOutcomes("SCHEDULE_SOURCE_REVALIDATED").get(0).contains("stored="+stored));
         }
         try(ServerRuntime runtime=fixture.open(clock)) {
             assertEquals("Renamed stale RUN",runtime.loadSchedule(strictId).name);
