@@ -73,7 +73,7 @@ class ServerWarUiIT {
                 JsonNode index=awaitArchive(port,api,id,peer);
                 if("run".equals(command)) {
                     String replay=sseDataUntil(port,api+"/jobs/"+id+"/events",peer,"EXPANDED_ENTRY_END");
-                    assertTrue(replay.contains(expandedMessage),"Configured console preview must survive Worker, journal and SSE replay");
+                    assertTrue(replay.contains(expandedMessage),"Configured console preview must survive Worker, journal and SSE replay: "+replay);
                 }
                 assertEquals("PASS",getJson(port,api+"/jobs/"+id,peer).path("status").asText(),getJson(port,api+"/jobs/"+id+"/result",peer).toString());
                 assertTrue(index.path("primaryReports").size()>0,index.toString());

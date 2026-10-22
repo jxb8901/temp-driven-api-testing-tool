@@ -411,6 +411,9 @@ final class ServerRuntime implements AutoCloseable {
         if(rerunOfJobId!=null&&executionSpec==null)throw new IllegalArgumentException("Safe execution snapshot is no longer available");
         if(executionSpec!=null) {
             JobExecutionSpec captured=JobExecutionSpec.parse(executionSpec);request.expectedRevisionDigest=captured.revision();
+            // Legacy direct submissions also need the policy used to compute the retained revision.
+            ObjectNode policy=JSON.createObjectNode();applyInspectionPolicy(policy,packageId);
+            JSON.readerForUpdating(request).readValue(policy);
             JsonNode exact=captured.definition().path("selection").get("caseIds");
             if(exact!=null) {request.caseIds=JSON.convertValue(exact,List.class);request.tags=null;request.excludeTags=null;request.all=false;request.rerunFailed=false;}
         }
