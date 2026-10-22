@@ -15,6 +15,16 @@ import static org.junit.jupiter.api.Assertions.*;
 class MultiWorkloadScenarioTest {
     @TempDir Path temp;
 
+    @Test void acceptsRuntimeAndTotalErrorThresholdsInAggregateAndWorkloadSchemas() throws Exception {
+        LoadScenario scenario=load("error-thresholds.yaml","schemaVersion: att-load/v1.7\n"
+                +"thresholds: {errorRate: '< 1%', runtimeErrorRate: '<= 50%', totalErrorRate: '== 50%'}\n"
+                +"workloads:\n  - id: payment\n    target: {type: tool, id: sample.getAcDate}\n"
+                +"    load: {users: 1, duration: 1s}\n    thresholds: {runtimeErrorRate: '< 1%', totalErrorRate: '< 1%'}\n");
+        assertEquals("<= 50%",scenario.thresholds().get("runtimeErrorRate"));
+        assertEquals("< 1%",scenario.workloads().get(0).thresholds().get("totalErrorRate"));
+        assertThrows(RuntimeException.class,()->load("invalid-error-unit.yaml","schemaVersion: att-load/v1.7\nthresholds: {runtimeErrorRate: '< 1ms'}\nworkloads:\n  - id: payment\n    target: {type: tool, id: sample.getAcDate}\n    load: {users: 1, duration: 1s}\n"));
+    }
+
     @Test void parsesIndependentArrivalWorkloadsAndAggregatesConfiguredRate() throws Exception {
         LoadScenario scenario = load("arrival.yaml",
                 "schemaVersion: att-load/v1.3\n"

@@ -14,18 +14,30 @@ public final class LoadEvent {
     private final ResultStatus status;
     private final String errorType;
     private final EvidenceRef evidence;
+    private Map<String,Object> failureDiagnostic=java.util.Collections.emptyMap();
 
     private LoadEvent(String runId, String workloadId, String targetType, String targetId,
                       String model, String phase, String iterationId, String userId, long sequence,
                       long scheduledAtEpochMs, long startedAtEpochMs, long completedAtEpochMs, long schedulerLagMs,
                       long latencyMs, boolean scheduled, boolean started, boolean completed, boolean dropped,
                       ResultStatus status, String errorType, EvidenceRef evidence) {
+        this(runId, workloadId, targetType, targetId, model, phase, iterationId, userId, sequence,
+                scheduledAtEpochMs, startedAtEpochMs, completedAtEpochMs, schedulerLagMs, latencyMs, scheduled,
+                started, completed, dropped, status, errorType, evidence, true);
+    }
+
+    private LoadEvent(String runId, String workloadId, String targetType, String targetId,
+                      String model, String phase, String iterationId, String userId, long sequence,
+                      long scheduledAtEpochMs, long startedAtEpochMs, long completedAtEpochMs, long schedulerLagMs,
+                      long latencyMs, boolean scheduled, boolean started, boolean completed, boolean dropped,
+                      ResultStatus status, String errorType, EvidenceRef evidence, boolean sanitizeErrorType) {
         this.runId = runId; this.workloadId = workloadId; this.targetType = targetType; this.targetId = targetId;
         this.model = model; this.phase = phase; this.iterationId = iterationId; this.userId = userId;
         this.sequence = sequence; this.scheduledAtEpochMs = scheduledAtEpochMs; this.startedAtEpochMs = startedAtEpochMs;
         this.completedAtEpochMs = completedAtEpochMs; this.schedulerLagMs = schedulerLagMs; this.latencyMs = latencyMs;
         this.scheduled = scheduled; this.started = started; this.completed = completed; this.dropped = dropped; this.status = status;
-        this.errorType = errorType; this.evidence = evidence;
+        this.errorType = errorType == null ? null : sanitizeErrorType ? LoadFailureDiagnostic.safeCode(errorType) : errorType;
+        this.evidence = evidence;
         this.mixId = null;
     }
 
@@ -37,7 +49,7 @@ public final class LoadEvent {
         this.completedAtEpochMs = source.completedAtEpochMs; this.schedulerLagMs = source.schedulerLagMs;
         this.latencyMs = source.latencyMs; this.scheduled = source.scheduled; this.started = source.started;
         this.completed = source.completed; this.dropped = source.dropped; this.status = source.status;
-        this.errorType = source.errorType; this.evidence = source.evidence;
+        this.errorType = source.errorType; this.evidence = source.evidence;this.failureDiagnostic=source.failureDiagnostic;
     }
 
     /** Returns the same event attributed to one configured workload. */
@@ -47,13 +59,21 @@ public final class LoadEvent {
 
     /** Adds the configured workload and fixed-target identity to retained event data. */
     public LoadEvent withWorkloadIdentity(String workload, String type, String target) {
-        LoadEvent event = new LoadEvent(runId, workload, type, target, model, phase, iterationId, userId, sequence, scheduledAtEpochMs, startedAtEpochMs,
-                completedAtEpochMs, schedulerLagMs, latencyMs, scheduled, started, completed, dropped, status, errorType, evidence);
+        LoadEvent event = new LoadEvent(runId, workload, type, target, model, phase, iterationId, userId, sequence,
+                scheduledAtEpochMs, startedAtEpochMs, completedAtEpochMs, schedulerLagMs, latencyMs, scheduled, started,
+                completed, dropped, status, errorType, evidence, false);
+        event.failureDiagnostic=failureDiagnostic;
         return mixId == null ? event : new LoadEvent(event, mixId, type, target);
     }
     public LoadEvent withMixIdentity(String mix, String type, String target) {
         return new LoadEvent(this, mix, type, target);
     }
+
+    LoadEvent withFailureDiagnostic(Map<String,Object> value) {
+        LoadEvent copy=new LoadEvent(this,mixId,targetType,targetId);
+        copy.failureDiagnostic=java.util.Collections.unmodifiableMap(new LinkedHashMap<String,Object>(value));return copy;
+    }
+    public Map<String,Object> failureDiagnostic() { return failureDiagnostic; }
 
     public static LoadEvent completed(String runId, String model, String phase, String iterationId, String userId,
                                       long sequence, long scheduledAt, long startedAt, long completedAt, ResultStatus status) {
@@ -124,6 +144,7 @@ public final class LoadEvent {
     public Map<String, Object> toMap() { return toMap(null); }
     public Map<String, Object> toMap(java.nio.file.Path base) {
         Map<String, Object> result = new LinkedHashMap<String, Object>();
+        if(!failureDiagnostic.isEmpty())result.put("failureDiagnostic",failureDiagnostic);
         result.put("runId", runId); if (workloadId != null) result.put("workloadId", workloadId);
         if (mixId != null) result.put("mixId", mixId);
         if (targetType != null) result.put("targetType", targetType);

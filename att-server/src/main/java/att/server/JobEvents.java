@@ -158,14 +158,43 @@ final class JobEvents {
 
     private Map<String, Object> boundedPayload(Map<String, ?> data) throws Exception {
         Map<String, Object> payload = new LinkedHashMap<>(data);
-        if (JSON.writeValueAsBytes(payload).length > MAX_EVENT_DATA_BYTES) {
+        int originalBytes=JSON.writeValueAsBytes(payload).length;
+        if (originalBytes > MAX_EVENT_DATA_BYTES) {
             Object console = payload.get("console");
+            Map<String,Object> retained=new LinkedHashMap<>();
+            for(String key:new String[]{"status","code","message","executionId","caseId","stage","action","executionEventType"})if(payload.get(key) instanceof String)retained.put(key,boundedText(payload.get(key),512));
+            for(String key:new String[]{"exitCode","durationMs"})if(payload.get(key) instanceof Number number)retained.put(key,number.longValue());
+            List<String> dropped=new ArrayList<>();for(String key:payload.keySet())if(!retained.containsKey(key)&&!"console".equals(key)&&dropped.size()<32)dropped.add(boundedText(key,128));
             payload.clear();
+            payload.putAll(retained);
             payload.put("truncated", true);
+            payload.put("journalLimit",Map.of("code","ATT-JOURNAL-EVENT-TRUNCATED","sizeBytes",originalBytes,"limitBytes",MAX_EVENT_DATA_BYTES));
             payload.put("summary", "Event payload exceeded the retained event size limit");
-            if (console instanceof String text && !text.isEmpty()) payload.put("console", text.length() <= 4000 ? text : text.substring(0, 4000));
+            if(!dropped.isEmpty())payload.put("droppedFields",dropped);
+            if (console instanceof String text && !text.isEmpty()) {
+                // Keep the full published projection when it fits. JSON escaping and UTF-8,
+                // rather than Java character count, determine the retained byte budget.
+                payload.put("console", text);
+                if (JSON.writeValueAsBytes(payload).length > MAX_EVENT_DATA_BYTES) {
+                    payload.put("consoleTruncated", true);
+                    int low=0, high=text.length();
+                    while(low<high) {
+                        int mid=(low+high+1)/2;
+                        payload.put("console", consolePrefix(text,mid));
+                        if(JSON.writeValueAsBytes(payload).length<=MAX_EVENT_DATA_BYTES)low=mid;
+                        else high=mid-1;
+                    }
+                    payload.put("console",consolePrefix(text,low));
+                }
+            }
         }
         return payload;
+    }
+    private static String boundedText(Object value,int limit){String text=String.valueOf(value);if(text.length()<=limit)return text;if(limit>0&&Character.isHighSurrogate(text.charAt(limit-1)))limit--;return text.substring(0,limit);}
+
+    private static String consolePrefix(String text,int length) {
+        if(length>0 && Character.isHighSurrogate(text.charAt(length-1)))length--;
+        return text.substring(0,length)+" [truncated by journal]";
     }
 
     private void trimRetainedEvents() {

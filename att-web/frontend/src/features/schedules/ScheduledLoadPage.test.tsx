@@ -295,6 +295,16 @@ describe('ScheduledLoadPage', () => {
     expect(expired.querySelector('.att-schedule-job-unavailable')?.textContent).toContain('no longer available');
   });
 
+  it('renders a linked deleted job as unavailable without a job link', async () => {
+    const deleted = { ...occurrences[0], occurrenceId: 'O-DELETED', jobId: 'JOB-DELETED', jobStatus: null };
+    const api = makeApi({ listSchedules: vi.fn(async () => ({ items: [sampleSchedule] })), getScheduleExecutions: vi.fn(async () => ({ items: [deleted] })) });
+    await render(api);
+    await click(host.querySelector('[aria-label="History Nightly payments"]')!);
+    await advance(0);
+    expect(host.querySelector('.att-schedule-job-unavailable')?.textContent).toContain('JOB-DELETED · no longer available');
+    expect(host.querySelector('button.att-schedule-job-link')).toBeNull();
+  });
+
   it('shows and copies the full occurrence ID while keeping its table link compact', async () => {
     const occurrenceId = `OCC-${'load-run-42-'.repeat(4)}`;
     const clipboardWrite = vi.fn(async (_value: string) => {});

@@ -756,7 +756,7 @@ public final class LoadScenarioLoader {
             Matcher matcher = Pattern.compile("^(<|<=|>|>=|==)\\s*([0-9]+(?:\\.[0-9]+)?)(%|ms|/s|/m)$").matcher(value);
             if (!matcher.matches()) throw failure(field, field + " must use its documented operator and unit");
             String unit = matcher.group(3);
-            if (("errorRate".equals(entry.getKey()) || "droppedRate".equals(entry.getKey())) && !"%".equals(unit))
+            if (("errorRate".equals(entry.getKey()) || "runtimeErrorRate".equals(entry.getKey()) || "totalErrorRate".equals(entry.getKey()) || "droppedRate".equals(entry.getKey())) && !"%".equals(unit))
                 throw failure(field, field + " must use %");
             if ("achievedArrivalRate".equals(entry.getKey()) && !("%".equals(unit) || "/s".equals(unit) || "/m".equals(unit)))
                 throw failure(field, field + " must use %, /s, or /m");

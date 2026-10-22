@@ -54,6 +54,12 @@ function parseBody(text: string): unknown {
   }
 }
 
+function isJobActionOutcome(value: unknown): value is { jobId: string; outcome: string } {
+  return Boolean(value && typeof value === 'object'
+    && typeof (value as { jobId?: unknown }).jobId === 'string'
+    && typeof (value as { outcome?: unknown }).outcome === 'string');
+}
+
 /** Same-origin JSON transport shared by the Server UI feature modules. */
 function isInspectionQuery(path: string, init: RequestInit): boolean {
   if ((init.method || 'GET').toUpperCase() !== 'GET') return false;
@@ -118,9 +124,11 @@ async function transport<T>(path: string, init: RequestInit = {}): Promise<T> {
   const nextCsrf = response.headers.get('X-ATT-CSRF');
   if (nextCsrf) csrfToken = nextCsrf;
   const body = parseBody(await response.text());
+  if (response.status === 409 && isJobActionOutcome(body)) return body as T;
   if (!response.ok) {
-    const payload = body && typeof body === 'object' ? body as { error?: ApiErrorBody; requestId?: string; diagnostics?: unknown } : {};
+    const payload = body && typeof body === 'object' ? body as { error?: ApiErrorBody; code?: string; message?: string; detail?: string; requestId?: string; diagnostics?: unknown } : {};
     const detail = payload.error;
+    const message = detail?.summary || detail?.message || detail?.detail || payload.message || payload.detail;
     if (isInspectionQuery(path, init) && [401, 403, 404, 409].includes(response.status)) {
       const packageMatch = /^packages\/([^/]+)\//.exec(path);
       if (packageMatch) inspectionCache.invalidatePackage(decodeURIComponent(packageMatch[1]));
@@ -129,11 +137,11 @@ async function transport<T>(path: string, init: RequestInit = {}): Promise<T> {
       const returnTo = contextRelativeReturnTo(location.pathname, location.search, location.hash);
       location.assign(new URL('login.html?returnTo=' + encodeURIComponent(returnTo), document.baseURI).toString());
     }
-    throw new ApiError(detail?.summary || ('ATT API request failed (' + response.status + ').'), {
+    throw new ApiError(message || ('ATT API request failed (' + response.status + ').'), {
       status: response.status,
-      code: detail?.code,
+      code: detail?.code || payload.code,
       requestId: payload.requestId || response.headers.get('X-Request-Id') || undefined,
-      details: detail?.detail,
+      details: detail?.detail || payload.detail,
       diagnostics: payload.diagnostics,
     });
   }
@@ -299,8 +307,8 @@ export const api = {
   submitLoadDraft(input: SubmitLoadDraftInput): Promise<LoadJobAccepted> {
     return postJson<LoadJobAccepted>('jobs/load', input);
   },
-  async listJobs(input: { principal?: string; signal?: AbortSignal } = {}): Promise<LoadJobSummary[]> {
-    const envelope = await request<ApiEnvelope<LoadJobSummary>>('jobs' + queryString({ principal: input.principal }), { signal: input.signal });
+  async listJobs(input: { principal?: string; pinnedOnly?: boolean; signal?: AbortSignal } = {}): Promise<LoadJobSummary[]> {
+    const envelope = await request<ApiEnvelope<LoadJobSummary>>('jobs' + queryString({ principal: input.principal, pinnedOnly: input.pinnedOnly }), { signal: input.signal });
     return Array.isArray(envelope.items) ? envelope.items.slice(0, 100) : [];
   },
   getJob(jobId: string, signal?: AbortSignal): Promise<JobView> {
@@ -312,6 +320,22 @@ export const api = {
   async getJobArtifacts(jobId: string, signal?: AbortSignal): Promise<JobArtifact[]> {
     const envelope = await request<ApiEnvelope<JobArtifact>>('jobs/' + encodeURIComponent(jobId) + '/artifacts', { signal });
     return Array.isArray(envelope.items) ? envelope.items : [];
+  },
+  pinJob(jobId: string, pinned: boolean, pinReason?: string): Promise<JobView> {
+    const body = pinReason === undefined ? { pinned } : { pinned, pinReason };
+    return request<JobView>('jobs/' + encodeURIComponent(jobId) + '/pin', { method: 'POST', body: JSON.stringify(body) });
+  },
+  async pinJobs(jobIds: string[], pinned: boolean, pinReason?: string): Promise<Array<{ jobId: string; outcome: string }>> {
+    const body = pinReason === undefined ? { pinned, jobIds } : { pinned, pinReason, jobIds };
+    const response = await request<{ items: Array<{ jobId: string; outcome: string }> }>('jobs/pin', { method: 'POST', body: JSON.stringify(body) });
+    return response.items;
+  },
+  deleteJob(jobId: string): Promise<{ jobId: string; outcome: string }> {
+    return request<{ jobId: string; outcome: string }>('jobs/' + encodeURIComponent(jobId) + '/delete', { method: 'POST', body: JSON.stringify({ confirm: true }) });
+  },
+  async deleteJobs(jobIds: string[]): Promise<Array<{ jobId: string; outcome: string }>> {
+    const response = await request<{ items: Array<{ jobId: string; outcome: string }> }>('jobs/delete', { method: 'POST', body: JSON.stringify({ jobIds, confirm: true }) });
+    return response.items;
   },
   cancelJob(jobId: string): Promise<{ jobId: string; status: LoadJobSummary['status'] }> {
     return request<{ jobId: string; status: LoadJobSummary['status'] }>('jobs/' + encodeURIComponent(jobId), { method: 'DELETE' });

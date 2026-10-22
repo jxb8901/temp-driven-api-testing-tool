@@ -213,7 +213,7 @@ final class ServerRuntime implements AutoCloseable {
         String packageId=required(input,"packageId");Path root=packageRoot(packageId);
         if(root==null)throw new IllegalArgumentException("Unknown packageId");
         validatePackageRoot(root);
-        WorkerRequest request=JSON.treeToValue(input,WorkerRequest.class);
+        WorkerRequest request=applyWorkerPolicy(JSON.treeToValue(input,WorkerRequest.class));
         request.protocolVersion="att-worker/v1";request.command=command;request.packageRoot=root.toString();
         request.outputDirectory=null;request.config=config.runtimeConfigPath.toString();request.environment=safeText(request.environment,128,"environment");
         request.expectedSchemaRegistryDigest=workerSchemaRegistryDigest;
@@ -278,7 +278,7 @@ final class ServerRuntime implements AutoCloseable {
                 job.workerSpawnStartedNanos=System.nanoTime();process=processLauncher.start(builder);job.workerSpawnedNanos=System.nanoTime();job.process=process;job.processFence=new WorkerProcessFence(process);job.workerPid=process.pid();job.workerStartTime=process.info().startInstant().orElse(Instant.now());job.startedAt=Instant.now();transition(job,"RUNNING");rememberWorkerProcesses(job,job.processFence);
             }
             Thread stderr=new Thread(()->{try(var in=process.getErrorStream()){byte[] buf=new byte[8192];while(in.read(buf)>=0){/* drain; protocol and safe diagnostics use stdout */}}catch(Exception ignored){}});stderr.setDaemon(true);stderr.start();
-            try(var out=process.getOutputStream()){out.write(JSON.writeValueAsBytes(job.request));out.write('\n');out.flush();}
+            try(var out=process.getOutputStream()){out.write(workerRequestBytes(job.request));out.write('\n');out.flush();}
             try(var reader=new java.io.BufferedInputStream(process.getInputStream())) {
                 att.server.api.internal.WorkerProtocol.Frame frame;
                 while((frame=att.server.api.internal.WorkerProtocol.read(reader,att.server.api.internal.WorkerProtocol.MAX_FRAME_BYTES))!=null) {
@@ -381,13 +381,90 @@ final class ServerRuntime implements AutoCloseable {
             else {stopWorkerTree(j);finish(j,"CANCELLED",143);}}
         store.audit(principal,"CANCEL",id,j.packageId,"CANCELLED");return j.status;
     }
+    Map<String,Object> pinJob(String id,boolean pinned,String actor) throws Exception {return pinJob(id,pinned,null,actor);}
+    Map<String,Object> pinJob(String id,boolean pinned,String reason,String actor) throws Exception {
+        if(id==null||!JOB_ID.matcher(id).matches())throw new NotFoundException();
+        if("local".equals(config.authMode)&&!store.isActiveUser(actor))throw new NotFoundException();
+        String safeReason=pinReason(pinned?reason:null);
+        if(!store.setPinned(id,pinned,actor,safeReason)){
+            if(!store.jobRowExists(id))throw new NotFoundException();
+            store.audit(actor,"JOB_PIN",id,null,"REJECTED");
+            throw new JobConflictException("ATT-SERVER-JOB-NOT-ELIGIBLE","Only terminal RUN/Debug/LOAD Jobs not being deleted can be pinned");
+        }
+        return jobRecord(id);
+    }
+    List<Map<String,Object>> pinJobs(List<String> ids,boolean pinned,String reason,String actor) throws Exception {
+        if(ids==null||ids.isEmpty()||ids.size()>100)throw new IllegalArgumentException("Select 1 to 100 Job IDs");
+        for(String id:ids)if(id==null||!JOB_ID.matcher(id).matches())throw new IllegalArgumentException("Invalid Job ID");
+        String safeReason=pinReason(pinned?reason:null);List<Map<String,Object>> outcomes=new ArrayList<>();
+        for(String id:new java.util.LinkedHashSet<>(ids)) {
+            try {pinJob(id,pinned,safeReason,actor);outcomes.add(Map.of("jobId",id,"outcome",pinned?"PINNED":"UNPINNED"));}
+            catch(NotFoundException missing){outcomes.add(Map.of("jobId",id,"outcome","UNAVAILABLE"));}
+            catch(JobConflictException conflict){outcomes.add(Map.of("jobId",id,"outcome","NOT_ELIGIBLE"));}
+        }
+        return outcomes;
+    }
+    private static String pinReason(String reason) {
+        if(reason==null)return null;String trimmed=reason.trim();if(trimmed.isEmpty())return null;
+        if(trimmed.length()>200)throw new IllegalArgumentException("pinReason must be at most 200 characters");
+        for(int i=0;i<trimmed.length();i++)if(Character.isISOControl(trimmed.charAt(i)))throw new IllegalArgumentException("pinReason must not contain control characters");
+        String safe=att.security.SecretProtection.text(trimmed);
+        if(safe.length()>200)throw new IllegalArgumentException("pinReason must be at most 200 characters after secret redaction");
+        return safe;
+    }
+    List<Map<String,Object>> deleteJobs(List<String> ids,String actor) throws Exception {
+        if(ids==null||ids.isEmpty()||ids.size()>100)throw new IllegalArgumentException("Select 1 to 100 Job IDs");
+        for(String id:ids)if(id==null||!JOB_ID.matcher(id).matches())throw new IllegalArgumentException("Invalid Job ID");
+        List<Map<String,Object>> results=new ArrayList<>();
+        for(String id:new java.util.LinkedHashSet<>(ids)) {
+            try {results.add(deleteJob(id,actor));}
+            catch(NotFoundException unavailable){results.add(deletionOutcome(id,actor,"UNAVAILABLE"));}
+        }
+        return results;
+    }
+    private Map<String,Object> deletionOutcome(String id,String actor,String outcome) throws Exception {
+        store.audit(actor,"JOB_DELETE",id,null,outcome);
+        return Map.of("jobId",id,"outcome",outcome);
+    }
+    Map<String,Object> deleteJob(String id,String actor) throws Exception {
+        if(id==null||!JOB_ID.matcher(id).matches())throw new IllegalArgumentException("Invalid Job ID");
+        if("local".equals(config.authMode)&&!store.isActiveUser(actor))throw new NotFoundException();
+        if(!store.jobRowExists(id))return deletionOutcome(id,actor,"ALREADY_UNAVAILABLE");
+        if(store.get(id)==null)return deletionOutcome(id,actor,"DELETION_PENDING_RECOVERY");
+        requireJobOwner(id,actor);
+        if(!artifactLifecycle.writeLock().tryLock())return deletionOutcome(id,actor,"ARCHIVE_BUSY");
+        try {
+            Map<String,Object> row=store.get(id);
+            if(row==null)return deletionOutcome(id,actor,"DELETION_PENDING_RECOVERY");
+            if(Boolean.TRUE.equals(row.get("pinned")))return deletionOutcome(id,actor,"PINNED_UNPIN_FIRST");
+            if(!List.of("PASS","FAIL","ERROR","INVALID","CANCELLED").contains(row.get("status")))return deletionOutcome(id,actor,"NOT_TERMINAL");
+            if(jobs.containsKey(id)||pendingArtifactJobs.contains(id)||store.workerMayBeAlive(id))return deletionOutcome(id,actor,"JOB_BUSY");
+            if(!store.markManualDeleting(id,actor)) {
+                if(!store.jobRowExists(id))return deletionOutcome(id,actor,"ALREADY_UNAVAILABLE");
+                Map<String,Object> current=store.get(id);
+                if(current==null)return deletionOutcome(id,actor,"DELETION_PENDING_RECOVERY");
+                if(Boolean.TRUE.equals(current.get("pinned")))return deletionOutcome(id,actor,"PINNED_UNPIN_FIRST");
+                if(!List.of("PASS","FAIL","ERROR","INVALID","CANCELLED").contains(current.get("status")))return deletionOutcome(id,actor,"NOT_TERMINAL");
+                return deletionOutcome(id,actor,"JOB_BUSY");
+            }
+            try {
+                deleteTree(config.dataDir.resolve("jobs").resolve(id));
+                store.deleteJobWithAudit(id,actor,"JOB_DELETE","DELETED");
+                return Map.of("jobId",id,"outcome","DELETED");
+            } catch(Exception incomplete) {return deletionOutcome(id,actor,"DELETION_PENDING_RECOVERY");}
+        } finally {artifactLifecycle.writeLock().unlock();}
+    }
+
     void requireJobOwner(String id,String principal) throws Exception {
         if(!JOB_ID.matcher(id).matches())throw new NotFoundException();
         if(store.get(id)==null)throw new NotFoundException();
         if("local".equals(config.authMode)&&!store.isActiveUser(principal))throw new NotFoundException();
     }
     List<Map<String,Object>> jobsFor(String principal,String search) throws Exception {
-        return store.list(100,search);
+        return jobsFor(principal,search,false);
+    }
+    List<Map<String,Object>> jobsFor(String principal,String search,boolean pinnedOnly) throws Exception {
+        return store.list(100,search,pinnedOnly);
     }
     List<Map<String,Object>> loadJobsFor(String principal,int offset,int limit) throws Exception {
         if(principal==null||principal.isBlank())throw new IllegalArgumentException("A server-resolved request identity is required");
@@ -403,7 +480,17 @@ final class ServerRuntime implements AutoCloseable {
         if(active!=null) {
             // Terminal status must not become visible before finish() has persisted
             // the result, diagnostic, and final event. All of these share the Job monitor.
-            synchronized(active) { return active.view(); }
+            synchronized(active) {
+                Map<String,Object> view=active.view();
+                view.put("pinned",false);
+                // Only terminal jobs can be pinned. Keep active polling independent
+                // of database connection/flush costs.
+                if(active.terminal()) {
+                    Map<String,Object> persisted=store.get(id);
+                    if(persisted!=null)for(String key:List.of("pinned","pinnedAt","pinnedBy","pinReason"))view.put(key,persisted.get(key));
+                }
+                return view;
+            }
         }
         Map<String,Object> record=store.get(id);if(record==null)throw new NotFoundException();
         record.put("executionType",Job.executionType(String.valueOf(record.get("command"))));
@@ -798,7 +885,7 @@ final class ServerRuntime implements AutoCloseable {
             input.set("inlineDebugInput",JSON.valueToTree(resourceDebugDraft.input));
             input.put("draftResourceId",resourceDebugDraft.resourceId);revision=resourceDebugDraft.revisionDigest;
         } else {
-            WorkerRequest request=JSON.treeToValue(input,WorkerRequest.class);
+            WorkerRequest request=applyWorkerPolicy(JSON.treeToValue(input,WorkerRequest.class));
             request.protocolVersion="att-worker/v1";request.command="inspect";request.packageRoot=root.toString();
             request.jobId="I"+UUID.randomUUID().toString().replace("-","");request.inspectionAction="run-input";
             request.config=config.runtimeConfigPath.toString();
@@ -1014,7 +1101,7 @@ final class ServerRuntime implements AutoCloseable {
     private void requireLiveDraft(Instant expiresAt) {
         if(!expiresAt.isAfter(clock.instant()))throw new StaleDraftException();
     }
-    private WorkerRequest inspectionRequest(String packageId,Path root,String environment) {
+    WorkerRequest inspectionRequest(String packageId,Path root,String environment) {
         WorkerRequest request=new WorkerRequest();request.protocolVersion="att-worker/v1";request.jobId="I"+UUID.randomUUID().toString().replace("-","");request.command="inspect";
         request.packageRoot=root.toString();request.config=config.runtimeConfigPath.toString();request.environment=environment;
         request.maxResponseBytes=config.inspection.maxResponseBytes;request.maxSourceBytes=config.inspection.maxSourceBytes;
@@ -1024,7 +1111,14 @@ final class ServerRuntime implements AutoCloseable {
         request.sourceBrowsingEnabled=config.inspection.sourceBrowsingEnabled;request.sourceBrowsingPolicy=config.inspection.sourcePolicy;
         request.sourceDenyGlobs=config.inspection.sourceDenyGlobs;request.redactionEnabled=config.inspection.redactionEnabled;
         request.sensitivePaths=config.inspection.sensitivePaths;request.sensitiveFieldPatterns=config.inspection.sensitiveFieldPatterns;
+        return applyWorkerPolicy(request);
+    }
+    WorkerRequest applyWorkerPolicy(WorkerRequest request) {
+        request.liveOutputMaxEntryChars=config.liveOutput.maxEntryChars;request.liveOutputMaxEntryLines=config.liveOutput.maxEntryLines;
         return request;
+    }
+    byte[] workerRequestBytes(WorkerRequest request) throws Exception {
+        return JSON.writeValueAsBytes(applyWorkerPolicy(request));
     }
     private void applyInspectionPolicy(com.fasterxml.jackson.databind.node.ObjectNode request,String packageId) {
         request.set("safeTextSources",JSON.valueToTree(config.inspection.safeTextSources(packageId)));
@@ -1523,7 +1617,7 @@ final class ServerRuntime implements AutoCloseable {
                 kill();
             },config.inspection.timeoutMs,TimeUnit.MILLISECONDS);
             try {
-                writer.write(JSON.writeValueAsBytes(request));
+                writer.write(workerRequestBytes(request));
                 writer.write('\n');
                 writer.flush();
                 JsonNode result=null;
@@ -2336,13 +2430,12 @@ final class ServerRuntime implements AutoCloseable {
                 store.artifactRecoveryNeeded(id,true);
                 if(store.workerQuarantined(id)) {
                     metrics.fail("worker_unverified");
-                    archiveStatus(id,"FAILED","worker_unverified");
-                    store.artifactRecoveryNeeded(id,false);
+                    finishArtifactFailure(id,"worker_unverified","FAILED_IO");
                     return;
                 }
                 if(store.workerMayBeAlive(id)) {
                     metrics.fail("worker_active");
-                    archiveStatus(id,"FAILED","worker_active");
+                    finishArtifactFailure(id,"worker_active","FAILED_IO");
                     return;
                 }
                 if(Files.isRegularFile(archive)) {
@@ -2362,16 +2455,17 @@ final class ServerRuntime implements AutoCloseable {
                 }
                 metrics.phase("publication");
                 archiveStatus(id,"READY","");
-                store.audit("SYSTEM","ARTIFACT_PUBLICATION",id,null,"READY");
                 metrics.value.zipBytes=Files.size(archive);
                 metrics.value.outcome="READY";
                 metrics.phase("cleanup");
                 try {deleteTree(output);cleanupArtifactStaging(archive.getParent());store.artifactRecoveryNeeded(id,false);}
                 catch(Exception cleanupFailure){metrics.fail("cleanup_failed");metrics.value.outcome="CLEANUP_PENDING";java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).warning("Artifact cleanup will be retried for Job "+id);}
+                try {store.audit("SYSTEM","ARTIFACT_PUBLICATION",id,null,"READY");}
+                catch(Exception auditFailure){java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).warning("Unable to audit artifact publication for Job "+id);}
             } catch(Exception failure) {
                 boolean policy=failure instanceof IllegalArgumentException;
                 if(metrics!=null&&metrics.value.failurePhase==null)metrics.fail(policy?"policy_limit":"publication_failed");
-                try {archiveStatus(id,"FAILED",policy?"policy_limit":"publication_failed");store.audit("SYSTEM","ARTIFACT_PUBLICATION",id,null,policy?"REJECTED_POLICY":"FAILED_IO");}catch(Exception ignored){}
+                finishArtifactFailure(id,policy?"policy_limit":"publication_failed",policy?"REJECTED_POLICY":"FAILED_IO");
                 java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).warning("Artifact publication failed for Job "+id);
             } finally {
                 ArtifactMetricsRecorder.CURRENT.remove();
@@ -2390,6 +2484,11 @@ final class ServerRuntime implements AutoCloseable {
             pendingArtifactJobs.remove(id);
             // Recovery retries when writer capacity becomes available; a retry cannot replace a READY state.
         }
+    }
+    private void finishArtifactFailure(String id,String reason,String auditOutcome) {
+        try {archiveStatus(id,"FAILED",reason);}catch(Exception ignored){}
+        try {store.artifactRecoveryNeeded(id,false);}catch(Exception ignored){}
+        try {store.audit("SYSTEM","ARTIFACT_PUBLICATION",id,null,auditOutcome);}catch(Exception ignored){}
     }
     private static void cleanupArtifactStaging(Path jobDirectory) throws Exception {
         try(var files=Files.list(jobDirectory)) {
@@ -2492,10 +2591,12 @@ final class ServerRuntime implements AutoCloseable {
     Path artifact(String id,String requested) throws Exception {Map<String,Object> row=store.get(id);if(row==null)throw new NotFoundException();Job j=jobs.get(id);if(j!=null)return artifact(j,requested);Path base=config.dataDir.resolve("jobs").resolve(id).resolve("output").toRealPath();Path relative=Paths.get(requested);if(relative.isAbsolute())throw new IllegalArgumentException("Artifact path must be relative to job output");Path candidate=base.resolve(relative).normalize();if(!candidate.startsWith(base)||!Files.exists(candidate,java.nio.file.LinkOption.NOFOLLOW_LINKS))throw new NotFoundException();Path walk=base;for(Path part:base.relativize(candidate)){walk=walk.resolve(part);if(Files.isSymbolicLink(walk))throw new NotFoundException();}Path real=candidate.toRealPath();if(!real.startsWith(base)||!Files.isRegularFile(real))throw new NotFoundException();return real;}
     void cleanupExpiredJobs() throws Exception {
         Instant cutoff=Instant.now().minus(java.time.Duration.ofDays(config.jobRetentionDays));
+        try {reconcileDeletingJobs();}
+        catch(Exception failure){java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).warning("Unable to reconcile deleting ATT Server jobs: "+safeMessage(failure));}
         if(!artifactLifecycle.writeLock().tryLock())return;
         try {
             for(String id:store.expiredJobIds(cutoff))if(!jobs.containsKey(id)&&!pendingArtifactJobs.contains(id)&&!store.workerMayBeAlive(id))try{
-                deleteTree(config.dataDir.resolve("jobs").resolve(id));store.deleteJob(id);
+                if(store.markDeleting(id,cutoff)){deleteTree(config.dataDir.resolve("jobs").resolve(id));store.deleteJob(id);}
             }catch(Exception failure){java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).warning("Unable to remove expired ATT Server job "+id);}
         } finally {artifactLifecycle.writeLock().unlock();}
     }
@@ -2548,8 +2649,7 @@ final class ServerRuntime implements AutoCloseable {
                     long bytes=measured!=null?measured:JobDirectoryUsage.directoryBytes(directory);
                     if(!store.markDeleting(id, cutoff, bytes<0?null:bytes)) { protectedJobs++; eligible--; continue; }
                     if(bytes<0 || !JobDirectoryUsage.deleteJobDirectory(directory)) { java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).warning("Job "+id+" was marked for storage deletion and will be reconciled"); continue; }
-                    store.auditStorageEviction(id, deletedOutcome(bytes));
-                    store.deleteJob(id);
+                    store.deleteJobWithAudit(id,"system:job-retention","JOB_STORAGE_EVICT",deletedOutcome(bytes));
                     deleted++; reclaimed=saturatedAdd(reclaimed, Math.max(0L, bytes)); remaining=Math.max(0L, remaining-Math.max(0L, bytes));
                 } finally { artifactLifecycle.writeLock().unlock(); }
             }
@@ -2606,7 +2706,7 @@ final class ServerRuntime implements AutoCloseable {
         if(!(finished instanceof String text) || !text.equals(storageScanAfterFinished)) { storageScanAfterFinished=null; storageScanAfterId=null; }
     }
     private boolean storageProtected(Map<String,Object> candidate, Instant cutoff, String id) {
-        if(Boolean.TRUE.equals(candidate.get("artifactRecovery")) || Boolean.TRUE.equals(candidate.get("quarantined"))) return true;
+        if(Boolean.TRUE.equals(candidate.get("pinned")) || Boolean.TRUE.equals(candidate.get("artifactRecovery")) || Boolean.TRUE.equals(candidate.get("quarantined"))) return true;
         if(jobs.containsKey(id) || pendingArtifactJobs.contains(id)) return true;
         Object finished=candidate.get("finishedAt");
         if(!(finished instanceof String text) || text.compareTo(cutoff.toString())>0) return true;
@@ -2639,20 +2739,25 @@ final class ServerRuntime implements AutoCloseable {
         return sweep;
     }
     boolean reconcileDeletingJobs() throws Exception {
+        boolean complete=true;
         for(String id:store.deletingJobIds()) {
-            if(jobs.containsKey(id) || pendingArtifactJobs.contains(id)) return false;
-            if(!artifactLifecycle.writeLock().tryLock()) return false;
+            if(jobs.containsKey(id) || pendingArtifactJobs.contains(id)) {complete=false;continue;}
+            if(!artifactLifecycle.writeLock().tryLock()) {complete=false;continue;}
             try {
-                if(jobs.containsKey(id) || pendingArtifactJobs.contains(id) || store.workerMayBeAlive(id)) return false;
+                if(jobs.containsKey(id) || pendingArtifactJobs.contains(id) || store.workerMayBeAlive(id)) {complete=false;continue;}
                 Path directory=config.dataDir.resolve("jobs").resolve(id);
                 Long recorded=store.retentionBytes(id);
                 long bytes=recorded!=null?recorded:JobDirectoryUsage.directoryBytes(directory);
-                if(!JobDirectoryUsage.deleteJobDirectory(directory)) return false;
-                store.auditStorageEviction(id, deletedOutcome(bytes));
-                store.deleteJob(id);
+                if(!JobDirectoryUsage.deleteJobDirectory(directory)) {complete=false;continue;}
+                String actor=store.deletionActor(id);
+                if(actor==null)store.deleteJobWithAudit(id,"system:job-retention","JOB_STORAGE_EVICT",deletedOutcome(bytes));
+                else store.deleteJobWithAudit(id,actor,"JOB_DELETE","DELETED_AFTER_RECOVERY");
+            } catch(Exception failure) {
+                complete=false;
+                java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).warning("Unable to reconcile deleting ATT Server job "+id+": "+safeMessage(failure));
             } finally { artifactLifecycle.writeLock().unlock(); }
         }
-        return true;
+        return complete;
     }
     private void reconcileDeletingJobsSafely(){try{reconcileDeletingJobs();}catch(Exception e){java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).warning("Unable to reconcile deleting ATT Server jobs: "+safeMessage(e));}}
     private void cleanupJobStorageSafely(){try{cleanupJobStorage();}catch(Exception e){java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).warning("Unable to apply ATT Server job storage limits: "+safeMessage(e));}}
@@ -2747,6 +2852,7 @@ final class ServerRuntime implements AutoCloseable {
         void release(){if(released.compareAndSet(false,true)){admission.release();if(load!=null)load.release();}}
     }
     static final class QueueFullException extends RuntimeException {QueueFullException(String m){super(m);}}
+    static final class JobConflictException extends RuntimeException {final String code;JobConflictException(String code,String message){super(message);this.code=code;}}
     static final class NotFoundException extends RuntimeException {}
     static final class ScheduleConflictException extends RuntimeException {}
     static final class InspectionCapacityException extends RuntimeException {}

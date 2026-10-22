@@ -8,6 +8,40 @@ import java.util.Map;
 import static org.junit.jupiter.api.Assertions.*;
 
 class ExecutionConsoleFormatterTest {
+    @Test void explicitPublishedPolicyIsIndependentAndRedactsBeforeTruncation() {
+        String text=String.join("",java.util.Collections.nCopies(8000,"x"))+" password=hidden";
+        assertEquals(8016, text.length());
+        String expanded=ExecutionConsoleFormatter.present(text,ExecutionConsoleFormatter.Options.published(16000,100));
+        assertFalse(expanded.contains("hidden"));assertFalse(expanded.contains("[truncated]"));
+        assertTrue(ExecutionConsoleFormatter.present(text,ExecutionConsoleFormatter.Options.published()).endsWith("[truncated]"));
+        assertTrue(ExecutionConsoleFormatter.present("a\nb\nc",ExecutionConsoleFormatter.Options.published(16000,2)).endsWith("[truncated]"));
+        String unicode=ExecutionConsoleFormatter.present("aaa\uD83D\uDE00",ExecutionConsoleFormatter.Options.published(4,40));
+        assertEquals("aaa [truncated]",unicode);
+        String boundary=String.join("",java.util.Collections.nCopies(3990,"x"))+" password=hunter2secret";
+        String boundaryOutput=ExecutionConsoleFormatter.present(boundary,ExecutionConsoleFormatter.Options.published(4000,40));
+        for(String leaked:java.util.Arrays.asList("hunter","hunter2","hunter2secret"))assertFalse(boundaryOutput.contains(leaked),leaked);
+        StringBuilder lineBoundary=new StringBuilder();
+        for(int i=0;i<39;i++)lineBoundary.append("safe-").append(i).append('\n');
+        lineBoundary.append("password=hunter2secret\nnot-published");
+        String lineOutput=ExecutionConsoleFormatter.present(lineBoundary.toString(),ExecutionConsoleFormatter.Options.published(16000,40));
+        for(String leaked:java.util.Arrays.asList("hunter","hunter2","hunter2secret"))assertFalse(lineOutput.contains(leaked),leaked);
+        String surrogateBoundary=String.join("",java.util.Collections.nCopies(15999,"x"))+"\uD83D\uDE00 password=hunter2secret";
+        String surrogateOutput=ExecutionConsoleFormatter.present(surrogateBoundary,ExecutionConsoleFormatter.Options.published(16000,100));
+        assertFalse(surrogateOutput.contains("hunter"));
+        assertFalse(surrogateOutput.contains("\uFFFD"));
+        assertFalse(surrogateOutput.endsWith("\uD83D"));
+        assertThrows(IllegalArgumentException.class,()->ExecutionConsoleFormatter.Options.published(32001,40));
+        assertThrows(IllegalArgumentException.class,()->ExecutionConsoleFormatter.Options.published(4000,201));
+    }
+
+    @Test void expandedLinePolicyPreservesOneHundredLinesAndNormalizesControls() {
+        String lines=java.util.stream.IntStream.rangeClosed(1,100).mapToObj(i->"line-"+i).collect(java.util.stream.Collectors.joining("\r\n"));
+        String expanded=ExecutionConsoleFormatter.present(lines,ExecutionConsoleFormatter.Options.published(16000,100));
+        assertTrue(expanded.endsWith("line-100"));assertFalse(expanded.contains("[truncated]"));assertFalse(expanded.contains("\r"));
+        assertTrue(ExecutionConsoleFormatter.present(lines,ExecutionConsoleFormatter.Options.published()).contains("[truncated]"));
+        assertEquals("ab",ExecutionConsoleFormatter.present("a\u0000\u0007b",ExecutionConsoleFormatter.Options.published()));
+    }
+
     @Test void rendersRunDebugAndLoadLinesFromTheSameFields() {
         Map<String, Object> finished = new LinkedHashMap<String, Object>();
         finished.put("event", "CASE_FINISHED");

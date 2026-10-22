@@ -15,7 +15,7 @@ import static org.junit.jupiter.api.Assertions.*;
 class ArtifactRecoveryTest {
     @TempDir Path temp;
 
-    @Test void recoverySkipsReadyHistoryAndPagesOnlyUnfinishedTerminalJobs() throws Exception {
+    @Test void recoverySkipsReadyHistoryPagesUnfinishedJobsAndClearsAttemptedFailures() throws Exception {
         ServerConfig config=config();
         try(ServerRuntime runtime=new ServerRuntime(config,temp.resolve("libs").toString())) {
             String url="jdbc:h2:file:"+config.dataDir.resolve("db/att-server").toString().replace('\\','/')
@@ -36,11 +36,13 @@ class ArtifactRecoveryTest {
             assertEquals(64,runtime.recoverArtifactArchives());
             assertEquals(2,runtime.recoverArtifactArchives());
             assertEquals(0,runtime.recoverArtifactArchives(),"Each pass has a fixed budget and advances its cursor");
-            assertEquals(64,runtime.recoverArtifactArchives(),"Unfinished failures remain eligible on the next cycle");
+            assertEquals(64,runtime.recoverArtifactArchives(),"Capacity-rejected, unattempted publications remain eligible on the next cycle");
             assertFalse(Files.exists(config.dataDir.resolve("jobs").resolve(id(1))),"READY history is never passed to the filesystem writer");
         }
         try(JobStore reopened=new JobStore(config)) {
-            assertEquals(id(2049),reopened.artifactRecoveryJobIds("",64).get(0),"Recovery eligibility survives restart");
+            var remaining=reopened.artifactRecoveryJobIds("",64);
+            assertEquals(64,remaining.size(),"Unattempted recovery eligibility survives restart");
+            assertFalse(remaining.contains(id(2049)),"A terminal failed publication must leave the recovery queue");
         }
     }
 
@@ -78,7 +80,7 @@ class ArtifactRecoveryTest {
             String url="jdbc:h2:file:"+config.dataDir.resolve("db/att-server").toString().replace('\\','/')
                     +";DB_CLOSE_ON_EXIT=FALSE;AUTO_SERVER=FALSE";
             try(var connection=DriverManager.getConnection(url,"sa","");var statement=connection.prepareStatement(
-                    "INSERT INTO jobs(job_id,command,package_id,principal,status,created_at,finished_at,att_version,request_summary,worker_quarantined) VALUES(?,'run','p','test','PASS',?,?,'test','{}',?)")) {
+                    "INSERT INTO jobs(job_id,command,package_id,principal,status,created_at,finished_at,att_version,request_summary,worker_quarantined,artifact_recovery) VALUES(?,'run','p','test','PASS',?,?,'test','{}',?,FALSE)")) {
                 for(int i=1;i<=502;i++) {
                     statement.setString(1,id(i));statement.setString(2,Instant.EPOCH.toString());
                     statement.setString(3,Instant.EPOCH.plusSeconds(i).toString());statement.setBoolean(4,i<=501);statement.addBatch();

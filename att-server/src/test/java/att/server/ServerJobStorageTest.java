@@ -18,6 +18,121 @@ import static org.junit.jupiter.api.Assertions.*;
 class ServerJobStorageTest {
     @TempDir Path temp;
 
+    @Test void pinnedJobsSurviveAgeQuotaAndRestartAndRequireUnpinBeforeManualDelete() throws Exception {
+        ServerRuntime runtime=runtime("pins",quota(0),Clock.systemUTC());
+        String run="J0000000000000901", load="J0000000000000902", other="J0000000000000903";
+        Instant old=Instant.parse("2020-01-01T00:00:00Z");
+        ServerConfig config=runtime.config;
+        try {
+            seed(runtime,run,"run","PASS",old,false,mib(2));
+            seed(runtime,load,"load","ERROR",old,false,mib(2));
+            seed(runtime,other,"PASS",old,false,mib(1));
+            runtime.pinJob(run,true,"operator");runtime.pinJob(load,true,"operator");
+            assertTrue(Boolean.TRUE.equals(runtime.store.get(run).get("pinned")));
+            assertEquals("operator",runtime.store.get(run).get("pinnedBy"));
+            assertEquals(1,runtime.store.list(1,null,true).size());
+            assertTrue(runtime.store.list(100,null,true).stream().allMatch(row->Boolean.TRUE.equals(row.get("pinned"))));
+            runtime.cleanupExpiredJobs();
+            assertNull(runtime.store.get(other));assertNotNull(runtime.store.get(run));
+            runtime.cleanupJobStorage();assertEquals(true,storage(runtime).get("quotaUnmet"));
+            assertTrue(Files.exists(jobDir(runtime,run).resolve("artifacts.zip")));
+            var outcomes=runtime.deleteJobs(List.of(run,load),"operator");
+            assertTrue(outcomes.stream().allMatch(row->"PINNED_UNPIN_FIRST".equals(row.get("outcome"))));
+        } finally {runtime.close();}
+        try(ServerRuntime restarted=new ServerRuntime(config,Files.createDirectory(temp.resolve("pins-restart-libs")).toString(),ProcessBuilder::start)) {
+            assertEquals(true,restarted.store.get(run).get("pinned"));
+            assertEquals(true,restarted.store.get(load).get("pinned"));
+            assertTrue(Files.exists(jobDir(restarted,load).resolve("artifacts.zip")));
+            restarted.pinJob(run,false,"second-operator");
+            assertEquals("DELETED",restarted.deleteJob(run,"second-operator").get("outcome"));
+            assertFalse(Files.exists(jobDir(restarted,run)));assertNull(restarted.store.get(run));
+            assertEquals("ALREADY_UNAVAILABLE",restarted.deleteJob(run,"second-operator").get("outcome"));
+            assertEquals(true,restarted.store.get(load).get("pinned"));
+            assertThrows(ServerRuntime.NotFoundException.class,()->restarted.pinJob(run,true,"operator"));
+            assertThrows(IllegalArgumentException.class,()->restarted.deleteJobs(List.of("../outside"),"operator"));
+            assertEquals(List.of("false->true","false->true","true->false"),restarted.store.auditOutcomes("JOB_PIN"));
+        }
+    }
+
+    @Test void everyWorkerRequestSerializationOverridesRestSuppliedLiveOutputPolicy() throws Exception {
+        try(ServerRuntime runtime=runtime("inspection-policy",null,Clock.systemUTC())) {
+            ObjectNode rest=ServerRuntime.JSON.createObjectNode();rest.put("packageId","p");rest.put("liveOutputMaxEntryChars",1);rest.put("liveOutputMaxEntryLines",1);
+            var submit=ServerRuntime.JSON.treeToValue(rest,att.server.api.WorkerRequest.class);
+            var runInput=ServerRuntime.JSON.treeToValue(rest,att.server.api.WorkerRequest.class);
+            var inspection=runtime.inspectionRequest("p",runtime.config.packages.get("p"),null);
+            inspection.liveOutputMaxEntryChars=1;inspection.liveOutputMaxEntryLines=1;
+            for(var request:List.of(submit,runInput,inspection)) {
+                var serialized=ServerRuntime.JSON.readValue(runtime.workerRequestBytes(request),att.server.api.WorkerRequest.class);
+                assertEquals(runtime.config.liveOutput.maxEntryChars,serialized.liveOutputMaxEntryChars);
+                assertEquals(runtime.config.liveOutput.maxEntryLines,serialized.liveOutputMaxEntryLines);
+            }
+        }
+    }
+
+    @Test void staleRetentionCandidateCannotDeleteNewPinAndBusyJobsStayIntact() throws Exception {
+        try(ServerRuntime runtime=runtime("pin-fences",null,Clock.systemUTC())) {
+            String id="J0000000000000904", busy="J0000000000000905";
+            seed(runtime,id,"PASS",Instant.parse("2020-01-01T00:00:00Z"),false,1024);
+            assertFalse(runtime.store.storageCandidates().isEmpty());
+            runtime.pinJob(id,true,"operator");
+            assertFalse(runtime.store.markDeleting(id,Instant.now()));
+            seed(runtime,busy,"RUNNING",Instant.now(),false,1024);
+            assertEquals("NOT_TERMINAL",runtime.deleteJob(busy,"operator").get("outcome"));
+            assertTrue(Files.exists(jobDir(runtime,busy)));
+            assertThrows(ServerRuntime.JobConflictException.class,()->runtime.pinJob(busy,true,"operator"));
+        }
+    }
+
+    @Test void pinUsesTheJobRowFenceWhileAnotherJobsArchiveDownloadIsOpen() throws Exception {
+        try(ServerRuntime runtime=runtime("pin-during-download",null,Clock.systemUTC())) {
+            Instant finished=Instant.parse("2026-01-01T00:00:00Z");String downloading="J0000000000000906",pin="J0000000000000907";
+            Path source=Files.createDirectories(jobDir(runtime,downloading).resolve("output"));Files.writeString(source.resolve("report.txt"),"download");
+            seedRow(runtime,downloading,"PASS",finished,false);ArtifactArchive.build(source,runtime.artifactArchivePath(downloading),file->runtime.publicArtifact(downloading,file));
+            Files.writeString(jobDir(runtime,downloading).resolve("archive-status.json"),"{\"state\":\"READY\",\"reason\":\"\",\"manifestVersion\":1}");
+            seed(runtime,pin,"PASS",finished,false,1024);
+            try(ServerRuntime.ArtifactRead open=runtime.openArtifactArchive(downloading,true)) {
+                Map<String,Object> pinned=runtime.pinJob(pin,true,"release evidence","operator");
+                assertEquals(true,pinned.get("pinned"));assertEquals("release evidence",pinned.get("pinReason"));
+            }
+        }
+    }
+
+    @Test void bulkPinReasonIsBoundedSanitizedAndReturnsPerJobOutcomes() throws Exception {
+        try(ServerRuntime runtime=runtime("bulk-pin",null,Clock.systemUTC())) {
+            Instant finished=Instant.parse("2026-01-01T00:00:00Z");String first="J0000000000000908",second="J0000000000000909",running="J000000000000090A";
+            seed(runtime,first,"PASS",finished,false,128);seed(runtime,second,"load","FAIL",finished,false,128);seed(runtime,running,"RUNNING",finished,false,128);
+            List<Map<String,Object>> outcomes=runtime.pinJobs(List.of(first,second,running),true," password=pin-secret ","operator");
+            assertEquals(List.of("PINNED","PINNED","NOT_ELIGIBLE"),outcomes.stream().map(row->row.get("outcome")).toList());
+            assertEquals("password=[REDACTED_SECRET]",runtime.store.get(first).get("pinReason"));
+            assertEquals("password=[REDACTED_SECRET]",listed(runtime.store.list(100),first).get(0).get("pinReason"));
+            assertEquals("password=[REDACTED_SECRET]",listed(runtime.store.listLoad(100,0),second).get(0).get("pinReason"));
+            String activeId="J000000000000090B";Path activeDirectory=Files.createDirectories(jobDir(runtime,activeId));
+            Job active=new Job(activeId,"run","p","ci",new att.server.api.WorkerRequest(),new JobEvents(activeDirectory.resolve("events.jsonl"),100));
+            active.status="PASS";active.finishedAt=finished;runtime.store.insert(active,"{}");runtime.store.update(active);runtime.store.artifactRecoveryNeeded(activeId,false);runtime.jobs.put(activeId,active);
+            assertEquals("active terminal",runtime.pinJob(activeId,true,"active terminal","operator").get("pinReason"));
+            assertThrows(IllegalArgumentException.class,()->runtime.pinJob(first,true,"x".repeat(201),"operator"));
+            assertThrows(IllegalArgumentException.class,()->runtime.pinJob(first,true,"bad\nreason","operator"));
+            assertEquals(List.of("UNPINNED","UNPINNED"),runtime.pinJobs(List.of(first,second),false,null,"operator").stream().map(row->row.get("outcome")).toList());
+            assertNull(runtime.store.get(first).get("pinReason"));assertNull(runtime.store.get(second).get("pinReason"));
+        }
+    }
+
+    @Test void mixedManualDeleteReportsEveryTargetAndRecoveryFinishesDurableDeletion() throws Exception {
+        try(ServerRuntime runtime=runtime("manual-bulk",null,Clock.systemUTC())) {
+            Instant old=Instant.parse("2020-01-01T00:00:00Z");
+            String pinned="J0000000000000911", eligible="J0000000000000912", active="J0000000000000913", pending="J0000000000000914";
+            for(String id:List.of(pinned,eligible,pending))seed(runtime,id,"PASS",old,false,1024);
+            seed(runtime,active,"RUNNING",old,false,1024);runtime.pinJob(pinned,true,"operator");
+            assertTrue(runtime.store.markManualDeleting(pending,"operator"));
+            assertFalse(runtime.store.setPinned(pending,true,"operator"));
+            var results=runtime.deleteJobs(List.of(pinned,eligible,active,pending,eligible),"operator");
+            assertEquals(List.of("PINNED_UNPIN_FIRST","DELETED","NOT_TERMINAL","DELETION_PENDING_RECOVERY"),results.stream().map(row->row.get("outcome")).toList());
+            assertTrue(runtime.reconcileDeletingJobs());assertFalse(Files.exists(jobDir(runtime,pending)));assertFalse(runtime.store.jobRowExists(pending));
+            assertNotNull(runtime.store.get(pinned));assertNotNull(runtime.store.get(active));
+            assertTrue(runtime.store.auditOutcomes("JOB_DELETE").contains("DELETED_AFTER_RECOVERY"));
+        }
+    }
+
     @Test void sizeLimitsStayDisabledUntilConfigured() throws Exception {
         ServerRuntime runtime = runtime("disabled", null, Clock.systemUTC());
         try {
@@ -31,6 +146,74 @@ class ServerJobStorageTest {
             assertEquals("disabled", storage.get("state"));
             assertNull(storage.get("totalBytes"));
         } finally { runtime.close(); }
+    }
+
+    @Test void hourlyAgeSweepReconcilesPendingManualDeletionWhenStorageQuotaIsDisabled() throws Exception {
+        try(ServerRuntime runtime=runtime("disabled-reconcile",null,Clock.systemUTC())) {
+            String id="J0000000000000920";Path directory=seed(runtime,id,"PASS",Instant.parse("2020-01-01T00:00:00Z"),false,1024);
+            assertTrue(runtime.store.markManualDeleting(id,"operator"));assertTrue(Files.exists(directory));
+            runtime.cleanupExpiredJobs();assertFalse(runtime.store.jobRowExists(id));assertFalse(Files.exists(directory));
+            assertTrue(runtime.store.auditOutcomes("JOB_DELETE").contains("DELETED_AFTER_RECOVERY"));
+        }
+    }
+
+    @Test void failedArchiveStillAgesOutWhilePinnedFailedArchiveIsProtected() throws Exception {
+        ServerConfig config;
+        try(ServerRuntime runtime=runtime("failed-retention",null,Clock.systemUTC(),1,(output,archive,publisher)->{throw new java.io.IOException("forced publication failure");})) {
+            config=runtime.config;
+            Instant old=Instant.parse("2020-01-01T00:00:00Z");String failed="J0000000000000921",pinned="J0000000000000922";
+            for(String id:List.of(failed,pinned)) {
+                Path output=Files.createDirectories(jobDir(runtime,id).resolve("output"));Files.writeString(output.resolve("case.log"),"password=pin-secret /private/secret");
+                Job job=new Job(id,"run","p","test",new att.server.api.WorkerRequest(),new JobEvents(jobDir(runtime,id).resolve("events.jsonl"),100));
+                job.status="ERROR";job.finishedAt=old;runtime.store.insert(job,"{}");runtime.store.update(job);runtime.scheduleArtifactArchive(id);
+            }
+            long deadline=System.nanoTime()+Duration.ofSeconds(10).toNanos();
+            while((runtime.store.artifactRecoveryJobIds("",64).contains(failed)||runtime.store.artifactRecoveryJobIds("",64).contains(pinned))&&System.nanoTime()<deadline)Thread.sleep(10);
+            assertFalse(runtime.store.artifactRecoveryJobIds("",64).contains(failed));assertFalse(runtime.store.artifactRecoveryJobIds("",64).contains(pinned));
+            assertEquals("FAILED",runtime.artifactIndex(failed).get("archiveStatus"));assertEquals("FAILED",runtime.artifactIndex(pinned).get("archiveStatus"));
+            runtime.pinJob(pinned,true,"retain failed evidence","operator");
+        }
+        try(ServerRuntime restarted=new ServerRuntime(config,Files.createDirectory(temp.resolve("failed-retention-restart-libs")).toString())) {
+            restarted.cleanupExpiredJobs();
+            assertNull(restarted.store.get("J0000000000000921"));assertNotNull(restarted.store.get("J0000000000000922"));assertTrue(Files.exists(jobDir(restarted,"J0000000000000922")));
+        }
+    }
+
+    @Test void quarantinedHistoryDoesNotBlockBoundedAgeDeletion() throws Exception {
+        try(ServerRuntime runtime=runtime("quarantine-page",null,Clock.systemUTC(),1)) {
+            Instant old=Instant.parse("2020-01-01T00:00:00Z");String ordinary="J0000000000000923";
+            seedQuarantinedRows(runtime,502,old);
+            seed(runtime,ordinary,"PASS",old,false,1024);
+            runtime.cleanupExpiredJobs();
+            assertNull(runtime.store.get(ordinary));assertFalse(Files.exists(jobDir(runtime,ordinary)));
+            assertTrue(runtime.store.jobRowExists("J0000000000000001"));
+        }
+    }
+
+    @Test void unreconcilableDeletingJobDoesNotBlockAgeDeletionOrDeleteSymlinkTarget() throws Exception {
+        org.junit.jupiter.api.Assumptions.assumeFalse(System.getProperty("os.name","").toLowerCase(java.util.Locale.ROOT).contains("win"));
+        try(ServerRuntime runtime=runtime("deleting-symlink",null,Clock.systemUTC(),1)) {
+            Instant old=Instant.parse("2020-01-01T00:00:00Z");String deleting="J0000000000000924",ordinary="J0000000000000925";
+            Path source=Files.createDirectories(temp.resolve("deleting-symlink-target"));Files.writeString(source.resolve("keep.txt"),"retain target");
+            Path jobDirectory=seed(runtime,deleting,"PASS",old,false,1024);assertTrue(JobDirectoryUsage.deleteJobDirectory(jobDirectory));Files.createSymbolicLink(jobDirectory,source);
+            assertTrue(runtime.store.markManualDeleting(deleting,"operator"));
+            seed(runtime,ordinary,"PASS",old,false,1024);
+            runtime.cleanupExpiredJobs();
+            assertFalse(runtime.reconcileDeletingJobs());
+            assertNull(runtime.store.get(ordinary));assertFalse(Files.exists(jobDir(runtime,ordinary)));
+            assertTrue(runtime.store.jobRowExists(deleting));assertTrue(Files.isSymbolicLink(jobDirectory));
+            assertTrue(Files.readString(source.resolve("keep.txt")).contains("retain target"));
+        }
+    }
+
+    @Test void bulkPinValidatesAllIdsBeforePinningAnyJob() throws Exception {
+        try(ServerRuntime runtime=runtime("bulk-pin-atomic",null,Clock.systemUTC())) {
+            String valid="J0000000000000926";seed(runtime,valid,"PASS",Instant.parse("2026-01-01T00:00:00Z"),false,128);
+            assertThrows(IllegalArgumentException.class,()->runtime.pinJobs(List.of(valid,"../bad"),true,null,"operator"));
+            assertThrows(IllegalArgumentException.class,()->runtime.pinJobs(List.of(valid),true,"bad\nreason","operator"));
+            assertEquals(false,runtime.store.get(valid).get("pinned"));
+            assertEquals(1,runtime.pinJobs(List.of(valid,valid),true,"duplicate","operator").size());
+        }
     }
 
     @Test void rejectsUnsupportedSingleJobLimitAndUnknownKeys() throws Exception {
@@ -455,6 +638,19 @@ class ServerJobStorageTest {
         return directory;
     }
 
+    private static void seedQuarantinedRows(ServerRuntime runtime,int count,Instant finished) throws Exception {
+        String url="jdbc:h2:file:"+runtime.config.dataDir.resolve("db/att-server").toString().replace('\\','/')+";DB_CLOSE_ON_EXIT=FALSE;AUTO_SERVER=FALSE";
+        try(var connection=java.sql.DriverManager.getConnection(url,"sa","");var insert=connection.prepareStatement(
+                "INSERT INTO jobs(job_id,command,package_id,principal,status,created_at,finished_at,att_version,request_summary,artifact_recovery,worker_quarantined) VALUES(?,?,?,?,?,?,?,?,?,?,?)")) {
+            connection.setAutoCommit(false);
+            for(int i=1;i<=count;i++) {
+                insert.setString(1,String.format("J%016X",i));insert.setString(2,"run");insert.setString(3,"p");insert.setString(4,"ci");insert.setString(5,"PASS");
+                insert.setString(6,finished.toString());insert.setString(7,finished.toString());insert.setString(8,"test");insert.setString(9,"{}");insert.setBoolean(10,false);insert.setBoolean(11,true);insert.addBatch();
+            }
+            insert.executeBatch();connection.commit();
+        }
+    }
+
     private static Path jobDir(ServerRuntime runtime, String id) { return runtime.config.dataDir.resolve("jobs").resolve(id); }
 
     private static long mib(double value) { return (long) (value * 1024 * 1024); }
@@ -481,9 +677,13 @@ class ServerJobStorageTest {
     }
 
     private ServerRuntime runtime(String name, String storage, Clock clock, int retentionDays) throws Exception {
+        return runtime(name,storage,clock,retentionDays,ArtifactArchive::build);
+    }
+
+    private ServerRuntime runtime(String name, String storage, Clock clock, int retentionDays, ServerRuntime.ArtifactPublisher publisher) throws Exception {
         Path yaml = temp.resolve(name + "-server.yaml");
         Files.writeString(yaml, serverYaml(name, storage, retentionDays));
-        return new ServerRuntime(ServerConfig.load(yaml), Files.createDirectory(temp.resolve(name + "-libs")).toString(), ProcessBuilder::start, clock);
+        return new ServerRuntime(ServerConfig.load(yaml), Files.createDirectory(temp.resolve(name + "-libs")).toString(), ProcessBuilder::start, clock, publisher);
     }
 
     private String serverYaml(String name, String storage) throws Exception {

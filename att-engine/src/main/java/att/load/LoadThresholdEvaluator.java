@@ -15,7 +15,7 @@ import java.util.regex.Pattern;
 public final class LoadThresholdEvaluator {
     private static final Pattern EXPRESSION = Pattern.compile("^(<|<=|>|>=|==)\\s*([0-9]+(?:\\.[0-9]+)?)(%|ms|/s|/m)$");
     private static final Set<String> SUPPORTED = Collections.unmodifiableSet(new LinkedHashSet<String>(Arrays.asList(
-            "errorRate", "p95", "p99", "minThroughput", "droppedRate", "achievedArrivalRate")));
+            "errorRate", "runtimeErrorRate", "totalErrorRate", "p95", "p99", "minThroughput", "droppedRate", "achievedArrivalRate")));
 
     static boolean isSupportedName(String name) { return SUPPORTED.contains(name); }
 
@@ -43,7 +43,7 @@ public final class LoadThresholdEvaluator {
     }
 
     private void validateUnit(String name, String unit) {
-        if (("errorRate".equals(name) || "droppedRate".equals(name)) && !"%".equals(unit))
+        if (("errorRate".equals(name) || "runtimeErrorRate".equals(name) || "totalErrorRate".equals(name) || "droppedRate".equals(name)) && !"%".equals(unit))
             throw new IllegalArgumentException(name + " threshold must use %");
         if (("p95".equals(name) || "p99".equals(name)) && !"ms".equals(unit))
             throw new IllegalArgumentException(name + " threshold must use ms");
@@ -57,6 +57,7 @@ public final class LoadThresholdEvaluator {
     private double actual(LoadScenario scenario, String name, String unit, LoadMetricsSnapshot metrics) {
         if (!isSupportedName(name)) throw new IllegalArgumentException("Unsupported threshold: " + name);
         if ("errorRate".equals(name)) return metrics.doubleValue("sutErrorRate");
+        if ("runtimeErrorRate".equals(name) || "totalErrorRate".equals(name)) return metrics.doubleValue(name);
         if ("droppedRate".equals(name)) return metrics.doubleValue("droppedRate");
         if ("p95".equals(name)) return metrics.doubleValue("p95Ms");
         if ("p99".equals(name)) return metrics.doubleValue("p99Ms");

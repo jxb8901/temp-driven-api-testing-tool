@@ -43,11 +43,19 @@ public final class LoadReportWriter {
         html.append("</style></head><body><main>");
         html.append("<header class=\"panel\"><h1>ATT Load ").append(escape(result.runId())).append("</h1>");
         html.append("<p class=\"muted\">Model: <b>").append(escape(result.scenario().model().wireName())).append("</b> · ");
-        html.append("Status: <span class=\"badge ").append(statusClass).append("\">").append(escape(status)).append("</span> · Exit code: <b>").append(result.exitCode()).append("</b></p>");
+        html.append("Execution: <span class=\"badge ").append(statusClass).append("\">").append(escape(status)).append("</span> · Exit code: <b>").append(result.exitCode()).append("</b></p>");
         html.append("<p class=\"note\">Run ").append(escape(result.startedAt().toString())).append(" to ").append(escape(result.endedAt().toString()));
         html.append(" (duration ").append(display(summary.get("durationMs"))).append(" ms). Load output is isolated below this run directory.</p></header>");
 
+        List<ThresholdResult> thresholdResults=result.thresholds().results();
+        String thresholdSummary;
+        if(thresholdResults.isEmpty())thresholdSummary="none configured";
+        else {int passed=0;for(ThresholdResult item:thresholdResults)if(item.passed())passed++;thresholdSummary=passed+" passed / "+(thresholdResults.size()-passed)+" failed";}
+        html.append("<p>Thresholds: ").append(thresholdSummary)
+                .append(" / Execution: ").append(escape(status)).append(" (runtime errors, all phases: ")
+                .append(count(metrics.get("runtimeError"))).append(")</p>");
         appendKpis(html, result, metrics);
+        appendFailureDiagnosis(html,result,metrics);
         appendModelSemantics(html, result, metrics);
         appendPhaseTable(html, result, summary);
         appendMetricsTable(html, metrics);
@@ -65,11 +73,49 @@ public final class LoadReportWriter {
         return html.toString();
     }
 
+    private static long numeric(Map<String,Object> metrics,String key) {
+        Object value=metrics.get(key);return value instanceof Number?((Number)value).longValue():0L;
+    }
+    private String errorCounts(Map<String,Object> metrics,String key) {
+        long numerator=key==null?numeric(metrics,"measuredFailure")+numeric(metrics,"measuredRuntimeError"):numeric(metrics,key);
+        return numerator+" / "+numeric(metrics,"measuredCompleted")+" measured completions";
+    }
+    private String errorRate(Map<String,Object> metrics,String key) {
+        return numeric(metrics,"measuredCompleted")==0?"N/A":percent(metrics.get(key));
+    }
+    private String rateCells(Map<String,Object> metrics) {
+        return "<span title=\""+errorCounts(metrics,"measuredFailure")+"\">"+errorRate(metrics,"sutErrorRate")+"</span></td><td>"
+                +"<span title=\""+errorCounts(metrics,"measuredRuntimeError")+"\">"+errorRate(metrics,"runtimeErrorRate")+"</span></td><td>"
+                +"<span title=\""+errorCounts(metrics,null)+"\">"+errorRate(metrics,"totalErrorRate")+"</span>";
+    }
+
+    private void appendFailureDiagnosis(StringBuilder html,LoadRunResult result,Map<String,Object> metrics) {
+        html.append("<section class=\"panel\"><h2>Runtime failures / Failure diagnosis</h2><p>Runtime errors (all phases): ")
+                .append(count(metrics.get("runtimeError"))).append("; measured runtime errors: ")
+                .append(count(metrics.get("measuredRuntimeError"))).append(". Warm-up errors affect execution outcome, but are excluded from measured rates.</p>");
+        html.append("<p>Classifications: ").append(escape(display(metrics.get("errorClassifications")))).append("</p>");
+        Object samples=metrics.get("failureDiagnostics");
+        if(samples instanceof List && !((List<?>)samples).isEmpty()) {
+            html.append("<p>At most 100 lightweight failure samples per collector; counts remain complete. Retained Case Log links appear in the Evidence section. Evidence availability is independent of iteration outcome.</p><pre>")
+                    .append(escape(JsonSupport.write(samples))).append("</pre>");
+        } else html.append("<p>No lightweight failure samples were recorded.</p>");
+        for(Map.Entry<String,LoadRunResult> workload:result.workloads().entrySet()) {
+            html.append("<h3>").append(escape(workload.getKey())).append("</h3>");
+            Object workloadSamples=workload.getValue().metrics().values().get("failureDiagnostics");
+            if(workloadSamples instanceof List && !((List<?>)workloadSamples).isEmpty())html.append("<pre>").append(escape(JsonSupport.write(workloadSamples))).append("</pre>");
+            else html.append("<p>No lightweight failure samples were recorded.</p>");
+        }
+        html.append("</section>");
+    }
+
     private void appendKpis(StringBuilder html, LoadRunResult result, Map<String, Object> metrics) {
         html.append("<section class=\"panel\"><h2>Run overview</h2><div class=\"kpis\">");
         kpi(html, "Completed TPS", rate(metrics.get("completedThroughput")), "measured completed iterations per second");
         kpi(html, "p95 latency", metrics.get("p95Ms"), "milliseconds, bounded reservoir");
-        kpi(html, "SUT error rate", percent(metrics.get("sutErrorRate")), "application failures; runtime errors separate");
+        kpi(html, "Successful TPS", rate(metrics.get("successfulThroughput")), "measured PASS iterations per second");
+        kpi(html, "SUT Fail %", errorRate(metrics,"sutErrorRate"), errorCounts(metrics,"measuredFailure"));
+        kpi(html, "Runtime Error %", errorRate(metrics,"runtimeErrorRate"), errorCounts(metrics,"measuredRuntimeError"));
+        kpi(html, "Total Error %", errorRate(metrics,"totalErrorRate"), errorCounts(metrics,null));
         if (result.scenario().model() == LoadScenario.Model.ARRIVAL_RATE) {
             kpi(html, "Configured arrival", rate(metrics.get("configuredArrivalRatePerSecond")), "target generator rate /s");
             kpi(html, "Achieved scheduling", rate(metrics.get("measuredAchievedArrivalRate")), "started iterations /s, measured phases");
@@ -106,7 +152,7 @@ public final class LoadReportWriter {
         if (!(timingValue instanceof Map)) { html.append("<p class=\"empty\">No phase timing available.</p></section>"); return; }
         Object phasesValue = ((Map<?, ?>) timingValue).get("phases");
         if (!(phasesValue instanceof List)) { html.append("<p class=\"empty\">No phase timing available.</p></section>"); return; }
-        html.append("<div class=\"scroll\"><table><thead><tr><th>Phase</th><th>Configured window</th><th>Measured</th><th>Scheduled</th><th>Started</th><th>Completed</th><th>Failures</th><th>Drops</th><th>TPS</th><th>p95</th></tr></thead><tbody>");
+        html.append("<div class=\"scroll\"><table><thead><tr><th>Phase</th><th>Configured window</th><th>Measured</th><th>Scheduled</th><th>Started</th><th>Completed</th><th>Failures</th><th>Runtime errors</th><th>SUT Fail %</th><th>Runtime Error %</th><th>Total Error %</th><th>Drops</th><th>Completed TPS</th><th>Successful TPS</th><th>p95</th><th>Classifications</th></tr></thead><tbody>");
         for (Object item : (List<?>) phasesValue) {
             if (!(item instanceof Map)) continue;
             Map<?, ?> configured = (Map<?, ?>) item; String phase = String.valueOf(configured.get("phase"));
@@ -120,9 +166,13 @@ public final class LoadReportWriter {
                     .append(display(actualValue(actual, "started", 0L))).append("</td><td>")
                     .append(display(actualValue(actual, "completed", 0L))).append("</td><td>")
                     .append(display(actualValue(actual, "failure", 0L))).append("</td><td>")
+                    .append(display(actualValue(actual, "runtimeError", 0L))).append("</td><td>")
+                    .append(rateCells(actual==null?Collections.<String,Object>emptyMap():actual)).append("</td><td>")
                     .append(display(actualValue(actual, "dropped", 0L))).append("</td><td>")
                     .append(rate(actualValue(actual, "completedThroughput", 0.0))).append("</td><td>")
-                    .append(display(actualValue(actual, "p95Ms", 0L))).append(" ms</td></tr>");
+                    .append(rate(actualValue(actual, "successfulThroughput", 0.0))).append("</td><td>")
+                    .append(display(actualValue(actual, "p95Ms", 0L))).append(" ms</td><td>")
+                    .append(escape(display(actualValue(actual,"errorClassifications",Collections.emptyMap())))).append("</td></tr>");
         }
         html.append("</tbody></table></div></section>");
     }
@@ -140,7 +190,7 @@ public final class LoadReportWriter {
         if (result.workloads().isEmpty()) return;
         html.append("<section class=\"panel\"><h2>Workloads</h2>");
         html.append("<p class=\"note\">Each workload is independently paced. Overall latency percentiles above come from the aggregate raw-latency collector, not an average of workload percentiles.</p>");
-        html.append("<div class=\"scroll\"><table><thead><tr><th>Workload</th><th>Target</th><th>Model</th><th>Configured load</th><th>Completed TPS</th><th>P95</th><th>Error</th><th>Drop</th><th>Thresholds</th><th>Status</th></tr></thead><tbody>");
+        html.append("<div class=\"scroll\"><table><thead><tr><th>Workload</th><th>Target</th><th>Model</th><th>Configured load</th><th>Completed TPS</th><th>Successful TPS</th><th>P95</th><th>SUT Fail %</th><th>Runtime Error %</th><th>Total Error %</th><th>Drop</th><th>Thresholds</th><th>Status</th></tr></thead><tbody>");
         for (Map.Entry<String, LoadRunResult> entry : result.workloads().entrySet()) {
             LoadRunResult child = entry.getValue();
             Map<String, Object> metrics = child.metrics().values();
@@ -154,8 +204,9 @@ public final class LoadReportWriter {
             html.append("<tr><td><b>").append(escape(entry.getKey())).append("</b></td><td>").append(escape(target))
                     .append("</td><td>").append(escape(child.scenario().model().wireName())).append("</td><td>")
                     .append(escape(configured)).append("</td><td>").append(rate(metrics.get("completedThroughput")))
+                    .append("</td><td>").append(rate(metrics.get("successfulThroughput")))
                     .append("</td><td>").append(display(metrics.get("p95Ms"))).append(" ms</td><td>")
-                    .append(percent(metrics.get("sutErrorRate"))).append("</td><td>").append(percent(metrics.get("droppedRate")))
+                    .append(rateCells(metrics)).append("</td><td>").append(percent(metrics.get("droppedRate")))
                     .append("</td><td>").append(escape(workloadThresholdSummary(child.thresholds().results())))
                     .append("</td><td class=\"").append("PASS".equals(childStatus) ? "pass\">" : "fail\">")
                     .append(escape(childStatus)).append("</td></tr>");
@@ -166,7 +217,7 @@ public final class LoadReportWriter {
             if (!child.scenario().workload().mixed()) continue;
             Object raw = child.resources().get("mix");
             if (!(raw instanceof Map)) continue;
-            html.append("<h3>").append(escape(entry.getKey())).append(" mix").append("</h3><div class=\"scroll\"><table><thead><tr><th>Mix entry</th><th>Target</th><th>Weight</th><th>Selected</th><th>Completed TPS</th><th>P95</th><th>Error</th></tr></thead><tbody>");
+            html.append("<h3>").append(escape(entry.getKey())).append(" mix").append("</h3><div class=\"scroll\"><table><thead><tr><th>Mix entry</th><th>Target</th><th>Weight</th><th>Selected</th><th>Completed TPS</th><th>Successful TPS</th><th>P95</th><th>SUT Fail %</th><th>Runtime Error %</th><th>Total Error %</th></tr></thead><tbody>");
             @SuppressWarnings("unchecked") Map<String, Object> mixes = (Map<String, Object>) raw;
             for (Map.Entry<String, Object> mix : mixes.entrySet()) {
                 if (!(mix.getValue() instanceof Map)) continue;
@@ -178,8 +229,9 @@ public final class LoadReportWriter {
                         .append(escape(display(item.get("configuredWeight")))).append("</td><td>")
                         .append(escape(display(item.get("selectedCount")) + " (" + display(item.get("selectedPercent")) + "%)"))
                         .append("</td><td>").append(rate(mixMetrics.get("completedThroughput"))).append("</td><td>")
+                        .append(rate(mixMetrics.get("successfulThroughput"))).append("</td><td>")
                         .append(display(mixMetrics.get("p95Ms"))).append(" ms</td><td>")
-                        .append(percent(mixMetrics.get("sutErrorRate"))).append("</td></tr>");
+                        .append(rateCells(mixMetrics)).append("</td></tr>");
             }
             html.append("</tbody></table></div>");
         }
@@ -191,7 +243,7 @@ public final class LoadReportWriter {
         StringBuilder result = new StringBuilder();
         for (ThresholdResult threshold : thresholds) {
             if (result.length() > 0) result.append("; ");
-            result.append(threshold.name()).append(' ').append(threshold.expression())
+            result.append("errorRate".equals(threshold.name()) ? "errorRate (SUT FAIL-only)" : threshold.name()).append(' ').append(threshold.expression())
                     .append(" (actual ").append(threshold.actual()).append(") ")
                     .append(threshold.passed() ? "PASS" : "FAIL");
             if (threshold.diagnostic() != null && !threshold.diagnostic().trim().isEmpty())
@@ -205,7 +257,7 @@ public final class LoadReportWriter {
         if (thresholds.isEmpty()) { html.append("<p class=\"empty\">No thresholds configured.</p></section>"); return; }
         html.append("<div class=\"scroll\"><table><thead><tr><th>Name</th><th>Expected</th><th>Actual</th><th>Status</th><th>Diagnostic</th></tr></thead><tbody>");
         for (ThresholdResult threshold : thresholds) {
-            html.append("<tr><td>").append(escape(threshold.name())).append("</td><td>").append(escape(threshold.expression())).append("</td><td>")
+            html.append("<tr><td>").append(escape("errorRate".equals(threshold.name())?"errorRate (SUT FAIL-only)":threshold.name())).append("</td><td>").append(escape(threshold.expression())).append("</td><td>")
                     .append(escape(threshold.actual())).append("</td><td class=\"").append(threshold.passed() ? "pass\">PASS" : "fail\">FAIL")
                     .append("</td><td>").append(escape(threshold.diagnostic())).append("</td></tr>");
         }

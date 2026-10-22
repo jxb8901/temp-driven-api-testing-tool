@@ -5,6 +5,9 @@ import java.util.Map;
 
 /** Versioned wire request. Paths are interpreted relative to packageRoot when not absolute. */
 public class WorkerRequest {
+    /** Trusted Server policy, snapshotted for each new Job. */
+    public Integer liveOutputMaxEntryChars;
+    public Integer liveOutputMaxEntryLines;
     public String protocolVersion;
     public String jobId;
     public String command;

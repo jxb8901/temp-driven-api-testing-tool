@@ -1,5 +1,14 @@
 # Changelog
 
+# ATT 4.2.2 - 2026-10-21
+
+- Distinguish measured SUT failures, runtime/total errors, successful throughput and execution outcome in Load summaries/reports; add optional runtime/total thresholds and bounded failure diagnostics independent of full evidence (#263).
+- Persist shared Job pins, protect pinned evidence from existing retention, and support confirmed single/bulk whole-Job deletion with lifecycle fencing and audit records (#264).
+- Configure published Live Output entry limits through trusted per-Job Worker policy, with bounded UTF-8 journal retention and explicit truncation indicators (#265).
+- Round-1 review fixes: lazily render and cache Events payloads, add accessible deletion confirmation with readable outcomes and 202 recovery status, surface pin/delete conflict messages, and support pin reasons plus bulk pin actions.
+- Correct whole-Job deletion to use confirmed `POST /api/v1/jobs/{jobId}/delete`, preserve `DELETE /api/v1/jobs/{jobId}` cancellation, and surface 409 deletion outcome maps in Studio.
+- Document the structured Live Output journal allow-list and `droppedFields`, complete pin/deletion status-code and reconciliation contracts, and describe current Load report threshold and failure-sample wording.
+
 # ATT 4.2.1 - 2026-10-16
 
 - Share one plain-text console formatter across CLI, Worker, and Server so Studio Live Output shows RUN, DEBUG, and bounded LOAD lines from the Job event journal (#258).

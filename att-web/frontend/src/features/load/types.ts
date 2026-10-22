@@ -137,6 +137,10 @@ export interface JobAccepted {
 }
 
 export interface JobSummary {
+  pinned?: boolean;
+  pinnedAt?: string | null;
+  pinnedBy?: string | null;
+  pinReason?: string | null;
   executionType?: string;
   scenario?: string;
   environment?: string;
@@ -250,7 +254,7 @@ export interface LoadJobsApi {
   listTargets(packageId: string, type: LoadTargetType, signal?: AbortSignal): Promise<TargetResource[]>;
   createLoadDraft(input: LoadDraftInput, signal?: AbortSignal): Promise<LoadDraftResponse>;
   submitLoadDraft(input: SubmitLoadDraftInput): Promise<JobAccepted>;
-  listJobs(input?: { principal?: string; signal?: AbortSignal }): Promise<JobSummary[]>;
+  listJobs(input?: { principal?: string; pinnedOnly?: boolean; signal?: AbortSignal }): Promise<JobSummary[]>;
   getJob(jobId: string, signal?: AbortSignal): Promise<JobView>;
   getJobResult(jobId: string, signal?: AbortSignal): Promise<JobResultResponse>;
   getJobArtifacts(jobId: string, signal?: AbortSignal): Promise<JobArtifact[]>;
@@ -258,6 +262,10 @@ export interface LoadJobsApi {
   getJobArtifactText?(jobId: string, path: string, signal?: AbortSignal): Promise<string>;
   retryJobArtifactArchive?(jobId: string): Promise<unknown>;
   artifactArchiveHref?(jobId: string): string;
+  pinJob?(jobId: string, pinned: boolean, pinReason?: string): Promise<JobView>;
+  pinJobs?(jobIds: string[], pinned: boolean, pinReason?: string): Promise<Array<{ jobId: string; outcome: string }>>;
+  deleteJob?(jobId: string): Promise<{ jobId: string; outcome: string }>;
+  deleteJobs?(jobIds: string[]): Promise<Array<{ jobId: string; outcome: string }>>;
   cancelJob(jobId: string): Promise<{ jobId: string; status: JobStatus }>;
   subscribeJob(jobId: string, handlers: JobEventHandlers): () => void;
   artifactHref(jobId: string, path: string): string;

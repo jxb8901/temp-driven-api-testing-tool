@@ -50,7 +50,13 @@ public final class ExecutionConsoleFormatter {
 
         /** Safe projection stored in the Job journal and shown as Live Output. */
         public static Options published() {
-            return new Options(true, null, PUBLISHED_MAX_CHARS, PUBLISHED_MAX_LINES);
+            return published(PUBLISHED_MAX_CHARS, PUBLISHED_MAX_LINES);
+        }
+
+        public static Options published(int maxChars, int maxLines) {
+            if (maxChars < 1 || maxChars > 32000 || maxLines < 1 || maxLines > 200)
+                throw new IllegalArgumentException("Published console limits must be 1..32000 chars and 1..200 lines");
+            return new Options(true, null, maxChars, maxLines);
         }
     }
 
@@ -221,10 +227,10 @@ public final class ExecutionConsoleFormatter {
                 || "CASE_LOG".equals(executionType) || "WARNING".equals(executionType) || "DEBUG".equals(executionType);
     }
 
-    private static String present(String value, Options options) {
+    public static String present(String value, Options options) {
         if (value == null) return null;
         String text = ANSI.matcher(value).replaceAll("");
-        if (options.redact) text = SecretProtection.text(text);
+        if (options.redact) { text = SecretProtection.text(text).replace("\r\n","\n").replace('\r','\n');text=text.replaceAll("[\\x00-\\x08\\x0B\\x0C\\x0E-\\x1F\\x7F]", ""); }
         text = limitLines(text, options.maxLines);
         if (text.length() > options.maxChars) {
             int end = options.maxChars;

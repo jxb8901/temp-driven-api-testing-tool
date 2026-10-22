@@ -6,6 +6,7 @@ export interface ApiEnvelope<T> {
 export interface ApiErrorBody {
   code?: string;
   summary?: string;
+  message?: string;
   detail?: string;
 }
 

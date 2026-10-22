@@ -51,6 +51,24 @@ class LoadScheduleSchedulerTest {
         }
     }
 
+    @Test void manualDeletionKeepsScheduleOccurrenceButMakesLinkedJobUnavailableImmediately() throws Exception {
+        org.junit.jupiter.api.Assumptions.assumeFalse(System.getProperty("os.name","").toLowerCase(java.util.Locale.ROOT).contains("win"));
+        ServerConfig config=config("manual-delete-history",1,"continue",1);String scheduleId="SMANUALDELETE",occurrence="SMANUALDELETE-1",jobId="J00000000000002A0";
+        try(ServerRuntime runtime=new ServerRuntime(config,Files.createDirectories(temp.resolve("manual-delete-libs")).toString(),ProcessBuilder::start)) {
+            runtime.store.saveSchedule(schedule(scheduleId,Instant.parse("2026-01-01T00:00:00Z")));
+            runtime.store.insertManualOccurrence(scheduleId,occurrence,Instant.parse("2026-01-01T00:00:00Z"));
+            Job job=job(config,occurrence,jobId,"load-schedule:"+scheduleId);job.status="PASS";job.finishedAt=Instant.parse("2026-01-01T00:00:01Z");
+            runtime.store.insert(job,"{}");runtime.store.update(job);runtime.store.artifactRecoveryNeeded(jobId,false);runtime.store.updateOccurrence(occurrence,"submitted",null,jobId);
+            Path outside=Files.createDirectories(temp.resolve("manual-delete-history-target"));Files.writeString(outside.resolve("keep.txt"),"keep");
+            Files.delete(config.dataDir.resolve("jobs").resolve(jobId));Files.createSymbolicLink(config.dataDir.resolve("jobs").resolve(jobId),outside);
+            assertEquals("PASS",runtime.store.scheduleExecution(occurrence).get("jobStatus"));
+            assertEquals("DELETION_PENDING_RECOVERY",runtime.deleteJob(jobId,"operator").get("outcome"));
+            Map<String,Object> retained=runtime.store.scheduleExecution(occurrence);assertNotNull(retained);assertEquals(jobId,retained.get("jobId"));assertNull(retained.get("jobStatus"));
+            Map<String,Object> listed=runtime.store.scheduleExecutions(scheduleId,10).get(0);assertEquals(occurrence,listed.get("occurrenceId"));assertNull(listed.get("jobStatus"));
+            assertTrue(runtime.store.jobRowExists(jobId));assertTrue(Files.exists(outside.resolve("keep.txt")));
+        }
+    }
+
     @Test void skipsOverlappingRunsPerScheduleAndAcrossTheGlobalSchedulerCap() throws Exception {
         MutableClock clock=new MutableClock(Instant.parse("2026-01-01T00:00:00Z"));
         ServerConfig config=config("overlap",1,"continue",1);

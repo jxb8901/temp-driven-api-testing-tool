@@ -63,7 +63,7 @@ class WorkerRuntimeClasspathTest {
         Path lib=Files.createDirectories(home.resolve("lib"));
         Path bundle=lib.resolve(bundleName());
         try(JarOutputStream jar=new JarOutputStream(Files.newOutputStream(bundle))) {
-            add(jar,"att-build.properties",("att.version="+version+"\n").getBytes(StandardCharsets.UTF_8));
+            add(jar,"att-build.properties",("att.version="+version+"\natt.gitCommit="+ServerBuildInfo.GIT_COMMIT+"\n").getBytes(StandardCharsets.UTF_8));
             add(jar,"att/security/SecretProtection.class",new byte[]{0});
             add(jar,"att/worker/WorkerMain.class",new byte[]{0});
             add(jar,"att/server/api/WorkerRequest.class",new byte[]{0});
