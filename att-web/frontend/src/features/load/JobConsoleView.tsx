@@ -145,15 +145,14 @@ const EventRow = memo(function EventRow({ event, index, total, expanded, onToggl
   expanded: boolean;
   onToggle: (event: MouseEvent<HTMLElement>, index: number, key: string, expanded: boolean) => void;
   onKeyDown: (event: KeyboardEvent<HTMLElement>, index: number) => void;
-  onHeight: (key: string, height: number) => void;
+  onHeight: (row: HTMLLIElement, key: string) => void | (() => void);
 }) {
   const key = event.id || `${event.seq}-${event.type}`;
   const ref = useRef<HTMLLIElement>(null);
   const preview = useMemo(() => eventPreview(event), [event]);
   const timestamp = eventTimestamp(event);
   useLayoutEffect(() => {
-    const height = ref.current?.getBoundingClientRect().height || ref.current?.offsetHeight || 0;
-    if (height > 0) onHeight(key, height);
+    if (ref.current) return onHeight(ref.current, key);
   }, [key, expanded, onHeight]);
   return <li ref={ref} key={key} value={index + 1} aria-setsize={total} aria-posinset={index + 1}>
     <details open={expanded}>
@@ -198,6 +197,8 @@ export function JobConsoleView({
   const [eventsScrollTop, setEventsScrollTop] = useState(0);
   const [eventsViewportHeight, setEventsViewportHeight] = useState(576);
   const [eventHeights, setEventHeights] = useState<Map<string, number>>(() => new Map());
+  const eventResizeObserver = useRef<ResizeObserver | null>(null);
+  const eventResizeTargets = useRef(new WeakMap<Element, string>());
   // The shared store already exposes authoritative Server journal append order.
   // Never timestamp-sort or repair stale IDs in this presentation layer.
   const events = stream.events;
@@ -210,15 +211,19 @@ export function JobConsoleView({
     if (statusProjection.terminalStatus) terminalStatuses.current.set(jobId, statusProjection.terminalStatus);
   }, [jobId, statusProjection.terminalStatus]);
   const displayedStatus = statusProjection.status || job?.status || 'Unknown';
-  const liveLines = useMemo(() => {
+  const liveEvents = useMemo(() => {
     const query = liveSearch.trim().toLocaleLowerCase();
-    return events.filter(event => event.seq > consoleFloor).map(event => event.consoleText).filter(line => line && (!query || line.toLocaleLowerCase().includes(query)));
+    return events.filter(event => event.seq > consoleFloor && event.consoleText
+      && (!query || event.consoleText.toLocaleLowerCase().includes(query)));
   }, [events, liveSearch, consoleFloor]);
+  const liveLines = useMemo(() => liveEvents.map(event => event.consoleText), [liveEvents]);
+  const liveTailIdentity = liveEvents.length ? liveEvents[liveEvents.length - 1]!.seq : null;
   const visibleEvents = useMemo(() => {
     const query = eventSearch.trim().toLocaleLowerCase();
     return events.filter(event => (eventTypeFilter.length === EVENT_TYPES.length || eventTypeFilter.includes(event.type))
       && (!query || eventSearchText(event).includes(query)));
   }, [events, eventSearch, eventTypeFilter]);
+  const visibleEventsTailIdentity = visibleEvents.length ? visibleEvents[visibleEvents.length - 1]!.seq : null;
   const eventMetrics = useMemo(() => {
     const offsets = [0];
     for (const event of visibleEvents) {
@@ -245,6 +250,40 @@ export function JobConsoleView({
   const protocolEntryTruncated = events.some(event => Boolean(event.data && typeof event.data === 'object' && !Array.isArray(event.data) && 'protocolLimit' in event.data));
   const diagnostics = streamDiagnostics(stream.duplicatesIgnored, stream.staleIgnored, stream.gaps);
 
+  const onEventHeight = useCallback((key: string, height: number) => {
+    setEventHeights(current => {
+      if (current.get(key) === height) return current;
+      const next = new Map(current).set(key, height);
+      while (next.size > MAX_EVENTS) next.delete(next.keys().next().value!);
+      return next;
+    });
+  }, []);
+  const observeEventRow = useCallback((row: HTMLLIElement, key: string) => {
+    const measure = () => {
+      const height = row.getBoundingClientRect().height || row.offsetHeight || 0;
+      if (height > 0) onEventHeight(key, height);
+    };
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
+    if (!eventResizeObserver.current) {
+      eventResizeObserver.current = new ResizeObserver(entries => {
+        for (const entry of entries) {
+          const target = entry.target as HTMLLIElement;
+          const observedKey = eventResizeTargets.current.get(target);
+          const height = target.getBoundingClientRect().height || target.offsetHeight || 0;
+          if (observedKey && height > 0) onEventHeight(observedKey, height);
+        }
+      });
+    }
+    eventResizeTargets.current.set(row, key);
+    eventResizeObserver.current.observe(row);
+    return () => {
+      eventResizeTargets.current.delete(row);
+      eventResizeObserver.current?.unobserve(row);
+    };
+  }, [onEventHeight]);
+  useEffect(() => () => eventResizeObserver.current?.disconnect(), []);
+
   useEffect(() => {
     if (view !== 'live' || !liveAutoScroll || liveScrollPaused) return;
     const console = consoleRef.current;
@@ -256,7 +295,7 @@ export function JobConsoleView({
     }
     console.scrollTop = console.scrollHeight;
     liveAtBottomRef.current = true;
-  }, [view, liveAutoScroll, liveScrollPaused, liveLines.length, maximized, localMaximized, consoleHeight]);
+  }, [view, liveAutoScroll, liveScrollPaused, liveLines.length, liveTailIdentity, maximized, localMaximized, consoleHeight]);
   useEffect(() => {
     if (view !== 'events' || !eventsAutoScroll || eventsScrollPaused) return;
     const list = eventsRef.current;
@@ -268,7 +307,7 @@ export function JobConsoleView({
     }
     list.scrollTop = list.scrollHeight;
     eventsAtBottomRef.current = true;
-  }, [view, eventsAutoScroll, eventsScrollPaused, visibleEvents.length]);
+  }, [view, eventsAutoScroll, eventsScrollPaused, visibleEvents.length, visibleEventsTailIdentity, eventMetrics.totalHeight]);
   useEffect(() => {
     if (view !== 'events') return;
     const list = eventsRef.current;
@@ -280,14 +319,6 @@ export function JobConsoleView({
     if (eventsRef.current) eventsRef.current.scrollTop = 0;
   }, [eventSearch, eventTypeFilter]);
 
-  const onEventHeight = useCallback((key: string, height: number) => {
-    setEventHeights(current => {
-      if (current.get(key) === height) return current;
-      const next = new Map(current).set(key, height);
-      while (next.size > MAX_EVENTS) next.delete(next.keys().next().value!);
-      return next;
-    });
-  }, []);
   const onEventsScroll = useCallback(() => {
     const list = eventsRef.current;
     if (!list) return;
@@ -415,7 +446,7 @@ export function JobConsoleView({
         const index = eventMetrics.start + offset;
         const key = event.id || `${event.seq}-${event.type}`;
         return <EventRow key={key} event={event} index={index} total={visibleEvents.length} expanded={eventOpen[key] ?? eventsExpanded}
-          onToggle={onEventToggle} onKeyDown={onEventKeyDown} onHeight={onEventHeight} />;
+          onToggle={onEventToggle} onKeyDown={onEventKeyDown} onHeight={observeEventRow} />;
       })}
       <VirtualSpacer height={eventMetrics.totalHeight - eventMetrics.offsets[eventMetrics.end]} className="att-event-virtual-spacer" />
     </ol> : <p role="status">{events.length ? 'No events match the current filters.' : 'No SSE events have been returned.'}</p>}
