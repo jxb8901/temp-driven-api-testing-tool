@@ -8,6 +8,7 @@
 - Round-1 review fixes: lazily render and cache Events payloads, add accessible deletion confirmation with readable outcomes and 202 recovery status, surface pin/delete conflict messages, and support pin reasons plus bulk pin actions.
 - Correct whole-Job deletion to use confirmed `POST /api/v1/jobs/{jobId}/delete`, preserve `DELETE /api/v1/jobs/{jobId}` cancellation, and surface 409 deletion outcome maps in Studio.
 - Document the structured Live Output journal allow-list and `droppedFields`, complete pin/deletion status-code and reconciliation contracts, and describe current Load report threshold and failure-sample wording.
+- Add a persistent detachable Job Console for RUN, DEBUG, and LOAD monitoring: floating, minimize/restore, drag/resize, Live Output and Events views, and encoded same-origin standalone console tabs with shared bounded per-tab SSE streams (#267).
 
 # ATT 4.2.1 - 2026-10-16
 

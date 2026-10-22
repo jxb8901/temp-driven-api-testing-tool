@@ -86,6 +86,21 @@ async function main() {
         },
       },
       {
+        name: 'job-console-floating', fixture: 'load-workspace', route: '#/jobs/JOB-LOAD-204',
+        wait: async page => {
+          await page.getByRole('heading', { name: 'Job JOB-LOAD-204' }).waitFor();
+          await page.getByRole('button', { name: 'Open floating console' }).click();
+          const floating = page.locator('[aria-label="Floating console for Job JOB-LOAD-204"]');
+          await floating.getByRole('heading', { name: 'Job JOB-LOAD-204', exact: true }).waitFor();
+          await floating.getByRole('tab', { name: 'Live Output', exact: true }).waitFor();
+          await floating.getByRole('tab', { name: 'Events', exact: true }).waitFor();
+          await floating.getByRole('tab', { name: 'Events', exact: true }).click();
+          await floating.locator('.att-job-events li').first().waitFor();
+          await floating.getByRole('tab', { name: 'Live Output', exact: true }).click();
+          await floating.getByText('This Job has no console lines. Structured events remain on the Events tab.', { exact: true }).waitFor();
+        },
+      },
+      {
         name: 'scheduled-load', fixture: 'scheduled-workspace', route: '#/load-schedules',
         wait: async page => {
           await page.getByRole('heading', { name: 'Schedules', level: 1, exact: true }).waitFor();

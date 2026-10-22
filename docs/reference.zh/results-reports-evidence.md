@@ -28,6 +28,12 @@ Inventory 不受 `server.maxArtifacts` 限制：最多 50,000 filesystem candida
 
 Reader 在信任 manifest 前，亦會比較 ZIP central directory 與 local header。Link、special-file 或 Windows reparse attribute、file/directory prefix collision、覆寫 filename 的 extra field、comment、隱藏 prefix／record、重疊 entry、multipart archive 及 ZIP64 均會被拒絕。受限 export profile 只接受 STORED／Deflate entry 及 timestamp-only extra metadata；ATT 寫入 STORED entry。Manifest parsing 拒絕 duplicate key、尾隨 document、fractional version／size、未知 field，以及不符合 policy 的 omission 文字。ZIP 結構可讀並不代表已核准匯出。
 
+### 分離及還原 Job 主控台
+
+Studio 可從 Live Output、Events 或 Job 詳情標題開啟非 modal floating console。使用者切換 Studio 其他頁面時它仍會保留；每個瀏覽器分頁只允許一個 console，切換至另一個 Job 必須明確確認。Minimize 會留下底部 chip，保留一條有界的分頁 SSE 訂閱，但不會渲染隱藏的事件列；Close 會釋放訂閱。兩者都不會取消 Job。主控台可用滑鼠或鍵盤移動及調整大小，小螢幕會改為全螢幕 sheet。
+
+**Open Job console in a new tab** 使用已編碼的同源 hash route，例如 `#/jobs/{jobId}/console?view=events`，並使用 `noopener`。重新整理、直接連結及非根 context path 都支援；每個瀏覽器分頁有自己的 SSE 連線。主控台在同一分頁與 Job Details 共用 stream，最多保留 500 筆事件，保留 EventSource `Last-Event-ID` 重新連線行為，並顯示 journal truncation。未授權或缺少的 Job 會使用現有重新登入路徑或安全的 unavailable 訊息。
+
 ### 檢視及下載 Job archive
 
 在 Job Details 開啟 **Artifacts**。報告清單獨立於分頁；使用 **View Report** 或 **Preview** 開啟內容。文字 viewer 提供唯讀、search、copy、line numbers，顯示最多 200,000 characters；**Load more artifacts** 載入後續頁面。**Download Artifacts (.zip)** 是唯一下載操作。解壓後可直接開啟 HTML，relative links 保持相同 archive hierarchy。

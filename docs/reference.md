@@ -2994,6 +2994,12 @@ Readers also check the ZIP central directory against local headers before trusti
 
 ZIP downloads use a request-private snapshot in the JVM's OS temporary directory. The Server copies at most 140 MiB per download, verifies the complete copied ZIP and all entry digests before setting download headers, and streams the same open snapshot with its captured length. Each 64 KiB buffer is checked against its captured SHA-256 before writing, so later replacement or in-place modification of the published pathname cannot substitute response bytes. The existing eight-reader limit also bounds concurrent download snapshots; allow temporary disk space for these copies. Normal completion, disconnect and failed approval close/delete the copy. Abrupt process termination can leave temporary files for OS or operator cleanup. Entry previews retain their separate request-scoped verified ZIP handle and per-entry digest/CRC checks.
 
+#### Detach and restore a Job console
+
+Studio can open a non-modal floating console from Live Output, Events, or the Job detail header. It remains mounted while the user navigates elsewhere in Studio, and one console is allowed per browser tab. Switching to another Job requires explicit confirmation. Minimize leaves a bottom chip and keeps one bounded per-tab SSE subscription without rendering hidden event rows; Close releases the subscription. Neither action cancels the Job. The console can be moved and resized with pointer or keyboard controls and becomes a full-screen sheet on small viewports.
+
+The **Open Job console in a new tab** link uses an encoded same-origin hash route such as `#/jobs/{jobId}/console?view=events` with `noopener`. It supports refresh, direct links, and non-root context paths. Each browser tab has its own SSE connection. The console shares the Job Details stream within a tab, keeps at most 500 events, preserves EventSource `Last-Event-ID` reconnect behavior, and reports journal truncation. Unauthorized or missing Jobs use the existing re-authentication or safe-unavailable message.
+
 #### View and download a Job archive
 
 In Job Details, open **Artifacts**. Reports appear independently of listing pagination. Choose **View Report** or **Preview** for read-only text with search, copy and line numbers. Text rendering is capped at 200,000 characters. Use **Load more artifacts** for subsequent pages. **Download Artifacts (.zip)** is the sole download action. Extract the ZIP and open its HTML report for offline browsing; relative links preserve the same archive hierarchy.

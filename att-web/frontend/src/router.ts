@@ -27,6 +27,7 @@ export type AppRoute =
   | { kind: 'quick-load'; packageId: string; target?: ResourceRoute; environment?: string; templateId?: string; model?: 'virtualUsers' | 'arrivalRate' }
   | { kind: 'run'; packageId?: string; target?: ResourceRoute; environment?: string; batch?: boolean }
   | { kind: 'jobs'; jobId?: string }
+  | { kind: 'job-console'; jobId: string; view?: 'live' | 'events' }
   | { kind: 'load'; packageId?: string; catalog?: LoadCatalogRouteState }
   | { kind: 'load-resource'; packageId: string; resourceId: string; environment?: string; returnTo?: string }
   | { kind: 'schedules'; view?: 'new' | 'edit' | 'history'; scheduleId?: string; occurrenceId?: string; intent?: 'validated'; returnTo?: string }
@@ -94,7 +95,13 @@ export function parseRoute(hash: string): AppRoute {
     ...(parts[2]&&parts[3]?{target:{type:parts[2],resourceId:parts[3],...(query.get('id')?{logicalId:query.get('id')!}:{})}}:{}),
     environment:query.has('environment')?query.get('environment')||'':undefined,
     ...(query.get('mode') === 'batch' ? { batch: true } : {}) };
-  if (parts[0] === 'jobs') return parts[1] ? { kind: 'jobs', jobId: parts[1] } : { kind: 'jobs' };
+  if (parts[0] === 'jobs') {
+    if (parts[1] && parts[2] === 'console' && parts.length === 3) {
+      const view = query.get('view');
+      return { kind: 'job-console', jobId: parts[1], ...(view === 'live' || view === 'events' ? { view } : {}) };
+    }
+    return parts[1] ? { kind: 'jobs', jobId: parts[1] } : { kind: 'jobs' };
+  }
   if (parts[0] === 'load' && parts[1] === 'resources' && parts[2] && parts[3]) return {
     kind: 'load-resource', packageId: parts[2], resourceId: parts[3],
     ...(query.has('environment') ? { environment: query.get('environment') || '' } : {}),
@@ -178,6 +185,10 @@ export function formatRoute(route: AppRoute): string {
         + (suffix ? '?' + suffix : '');
     }
     case 'jobs': return route.jobId ? '#/jobs/' + encodeURIComponent(route.jobId) : '#/jobs';
+    case 'job-console': {
+      const view = route.view ? '?view=' + encodeURIComponent(route.view) : '';
+      return '#/jobs/' + encodeURIComponent(route.jobId) + '/console' + view;
+    }
     case 'load': {
       if (route.packageId) return '#/advanced-load/' + encodeURIComponent(route.packageId);
       const query = new URLSearchParams();

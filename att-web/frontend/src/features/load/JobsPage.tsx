@@ -1,23 +1,18 @@
 import { StatusBadge } from './StatusBadge';
 import { ArchiveMetrics } from './ArchiveMetrics';
 import type { ArtifactArchiveMetrics } from './types';
-import { useEffect, useMemo, useRef, useState, type ChangeEvent, type KeyboardEvent, type PointerEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type ChangeEvent, type KeyboardEvent } from 'react';
 import './load.css';
 import { JobArtifacts } from './JobArtifacts';
 import type { JobEvent, JobResultResponse, JobStatus, JobSummary, JobView, JobsFeatureProps } from './types';
+import { JobConsoleView } from './JobConsoleView';
+import { useJobConsole } from './JobConsoleContext';
+import { useJobEventStream } from './useJobEventStream';
 
 function executionType(job: JobSummary): string { return job.executionType || (job.command === 'debug' ? 'run' : job.command); }
 
 const PAGE_SIZE = 25;
-const MAX_EVENTS = 500;
-const MAX_LINE_LENGTH = 4000;
 const MAX_BUCKET_ROWS = 4096;
-const CONSOLE_MIN_HEIGHT = 192;
-const CONSOLE_DEFAULT_HEIGHT = 384;
-const CONSOLE_MAX_HEIGHT = 960;
-const TERMINAL_BACKGROUND = '#0d1117';
-const TERMINAL_FOREGROUND = '#f5f7fa';
-const EVENT_TYPES = ['status', 'progress', 'log', 'diagnostic', 'result'] as const;
 
 type LoadState = 'loading' | 'refreshing' | 'ready' | 'error';
 type JobTab = 'overview' | 'live' | 'events' | 'results' | 'artifacts' | 'metrics';
@@ -68,21 +63,6 @@ function displayValue(value: unknown): string {
   catch { return String(value); }
 }
 
-function eventJournalTruncated(event: JobEvent): boolean {
-  const data = event.data;
-  return Boolean(data && typeof data === 'object' && !Array.isArray(data) && (data as Record<string, unknown>).historyTruncated === true);
-}
-
-function consoleText(event: JobEvent): string {
-  const data = event.data;
-  if (!data || typeof data !== 'object' || Array.isArray(data)) return '';
-  const value = (data as Record<string, unknown>).console;
-  if (typeof value !== 'string') return '';
-  return value
-    .replace(/\u001B\[[0-?]*[ -/]*[@-~]/g, '')
-    .replace(/\u001B\][^\u0007]*(?:\u0007|\u001B\\)/g, '');
-}
-
 function eventText(event: JobEvent): string {
   const data = event.data;
   if (typeof data === 'string') return data;
@@ -93,51 +73,6 @@ function eventText(event: JobEvent): string {
     }
   }
   return displayValue(data);
-}
-
-function consoleMaxHeight(): number {
-  if (typeof window === 'undefined') return CONSOLE_MAX_HEIGHT;
-  return Math.max(CONSOLE_MIN_HEIGHT, Math.min(CONSOLE_MAX_HEIGHT, Math.floor(window.innerHeight * 0.7)));
-}
-
-function clampConsoleHeight(height: number): number {
-  return Math.min(consoleMaxHeight(), Math.max(CONSOLE_MIN_HEIGHT, Math.round(height)));
-}
-
-function eventPreview(event: JobEvent): string {
-  const data = event.data;
-  if (!data || typeof data !== 'object' || Array.isArray(data)) return eventText(event);
-  const record = data as Record<string, unknown>;
-  const parts: string[] = [];
-  for (const key of ['status', 'phase', 'sequence', 'message', 'error', 'summary']) {
-    const value = record[key];
-    if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') parts.push(`${key}=${value}`);
-  }
-  const metrics = record.metrics;
-  if (metrics && typeof metrics === 'object' && !Array.isArray(metrics)) {
-    const compact = Object.entries(metrics as Record<string, unknown>)
-      .filter((entry): entry is [string, string | number | boolean] => ['string', 'number', 'boolean'].includes(typeof entry[1]))
-      .slice(0, 6)
-      .map(([key, value]) => `${key}=${value}`)
-      .join(', ');
-    if (compact) parts.push(`metrics=${compact}`);
-  }
-  return parts.join(' · ');
-}
-
-function eventTimestamp(event: JobEvent): string {
-  const data = event.data && typeof event.data === 'object' && !Array.isArray(event.data)
-    ? event.data as Record<string, unknown> : {};
-  const candidate = [data.timestamp, data.createdAt, data.time, data.at, event.receivedAt]
-    .find(value => typeof value === 'string' && Number.isFinite(Date.parse(value)));
-  return typeof candidate === 'string' ? candidate : '';
-}
-
-function chronologicalEvents<T extends JobEvent>(events: T[]): T[] {
-  return events.map((event, index) => ({ event, index })).sort((left, right) => {
-    const a = Number(left.event.id); const b = Number(right.event.id);
-    return Number.isFinite(a) && Number.isFinite(b) ? a - b : left.index - right.index;
-  }).map(item => item.event);
 }
 
 function dateTime(value?: string | null): string {
@@ -361,24 +296,6 @@ function PinReasonForm({ title, busy, onSubmit, onCancel }: { title: string; bus
   </form>;
 }
 
-function PayloadDetails({ payload }: { payload: string }) {
-  const [open, setOpen] = useState(false);
-  return <details open={open} onToggle={event => setOpen(event.currentTarget.open)}>
-    <summary onClick={event => { event.preventDefault(); setOpen(value => !value); }}>Events preview clipped — expand retained payload</summary>
-    {open && <pre>{payload.slice(0, 65536)}</pre>}
-    {open && payload.length > 65536 && <p>Retained payload display limited to 65,536 characters.</p>}
-  </details>;
-}
-
-function EventPayload({ open, getPayload }: { open: boolean; getPayload: () => string }) {
-  if (!open) return null;
-  const payload = getPayload();
-  return <>
-    <pre className="att-event-payload">{payload.slice(0, MAX_LINE_LENGTH)}</pre>
-    {payload.length > MAX_LINE_LENGTH && <PayloadDetails payload={payload} />}
-  </>;
-}
-
 function JobsList({ api, principal = '', onOpenJob }: JobsFeatureProps) {
   const [rows, setRows] = useState<JobSummary[]>([]);
   const [selected, setSelected] = useState<string[]>([]);
@@ -577,30 +494,8 @@ function JobDetail({ api, jobId, onShowList, confirmCancel }: JobsFeatureProps &
   const [resultState, setResultState] = useState<LoadState>('loading');
   const [resultError, setResultError] = useState('');
   const [activeTab, setActiveTab] = useState<JobTab>('overview');
-  const [connection, setConnection] = useState<'connecting' | 'connected' | 'reconnecting' | 'completed'>('connecting');
-  const [events, setEvents] = useState<Array<JobEvent & { seq: number }>>([]);
-  const [eventTypeFilter, setEventTypeFilter] = useState<string[]>([...EVENT_TYPES]);
-  const [eventSearch, setEventSearch] = useState('');
-  const [liveSearch, setLiveSearch] = useState('');
-  const [consoleFloor, setConsoleFloor] = useState(0);
-  const [liveAutoScroll, setLiveAutoScroll] = useState(true);
-  const [liveScrollPaused, setLiveScrollPaused] = useState(false);
-  const [consoleHeight, setConsoleHeight] = useState(CONSOLE_DEFAULT_HEIGHT);
-  const [consoleMaximized, setConsoleMaximized] = useState(false);
-  const [maximizeTop, setMaximizeTop] = useState(128);
-  const [eventsAutoScroll, setEventsAutoScroll] = useState(true);
-  const [eventsScrollPaused, setEventsScrollPaused] = useState(false);
-  const [eventsExpanded, setEventsExpanded] = useState(true);
-  const [eventOpenOverride, setEventOpenOverride] = useState<Record<string, boolean>>({});
-  const [eventCopyStatus, setEventCopyStatus] = useState('');
-  const eventPanelRef = useRef<HTMLElement>(null);
-  const consoleRef = useRef<HTMLPreElement>(null);
-  const consoleShellRef = useRef<HTMLDivElement>(null);
-  const eventsListRef = useRef<HTMLOListElement>(null);
-  const eventsProgrammaticScroll = useRef(false);
-  const streamCompleted = useRef(false);
-  const eventSeq = useRef(0);
-  const [journalTruncated, setJournalTruncated] = useState(false);
+  const stream = useJobEventStream(api, jobId);
+  const events = stream.events;
   const [cancelState, setCancelState] = useState<'idle' | 'pending' | 'error'>('idle');
   const [cancelError, setCancelError] = useState('');
   const [detailRefresh, setDetailRefresh] = useState(0);
@@ -610,8 +505,8 @@ function JobDetail({ api, jobId, onShowList, confirmCancel }: JobsFeatureProps &
   const cancellationLock = useRef(false);
   const terminalStatus = useRef<JobStatus | null>(null);
   const terminalReconciled = useRef(false);
+  const consoleContext = useJobConsole();
   const liveStatus = useMemo(() => [...events].reverse().find(event => event.type === 'status'), [events]);
-  const eventPayloadCache = useRef(new Map<string, { data: unknown; value: string }>());
 
   useEffect(() => {
     const controller = new AbortController();
@@ -635,40 +530,19 @@ function JobDetail({ api, jobId, onShowList, confirmCancel }: JobsFeatureProps &
   }, [api, jobId, detailRefresh, terminalRefresh]);
 
   useEffect(() => {
-    let disposed = false;
-    setConnection('connecting');
-    setEvents([]);
-    setJournalTruncated(false);
-    setConsoleFloor(0);
-    streamCompleted.current = false;
-    const unsubscribe = api.subscribeJob(jobId, {
-      onOpen: () => { if (!disposed && !streamCompleted.current) setConnection('connected'); },
-      onError: () => { if (!disposed && !streamCompleted.current) setConnection('reconnecting'); },
-      onEvent: event => {
-        if (disposed) return;
-        if (eventJournalTruncated(event)) setJournalTruncated(true);
-        if (event.type === 'result') { streamCompleted.current = true; setConnection('completed'); }
-        if (event.type === 'status' || event.type === 'result') {
-          const payload = event.data && typeof event.data === 'object' && !Array.isArray(event.data)
-            ? (event.data as Record<string, unknown>).status
-            : event.data;
-          const terminal = typeof payload === 'string' && ['PASS', 'FAIL', 'ERROR', 'INVALID', 'CANCELLED'].includes(payload);
-          if (terminal) terminalStatus.current = payload;
-          if (typeof payload === 'string' && payload) setJob(currentJob => currentJob
-            ? { ...currentJob, status: terminalStatus.current || payload } : currentJob);
-          // Status and result can arrive separately or be replayed on reconnect.
-          // Reconcile both REST snapshots once, outside the state updater.
-          if (!terminalReconciled.current && (terminal || event.type === 'result')) {
-            terminalReconciled.current = true;
-            setTerminalRefresh(value => value + 1);
-          }
-        }
-        setEvents(current => event.id && current.some(existing => existing.id === event.id) ? current
-          : [...current, { ...event, seq: ++eventSeq.current, receivedAt: event.receivedAt || new Date().toISOString() }].slice(-MAX_EVENTS));
-      },
-    });
-    return () => { disposed = true; unsubscribe(); };
-  }, [api, jobId]);
+    for (const event of stream.events) {
+      if (event.type !== 'status' && event.type !== 'result') continue;
+      const payload = event.data && typeof event.data === 'object' && !Array.isArray(event.data)
+        ? (event.data as Record<string, unknown>).status : event.data;
+      const terminal = typeof payload === 'string' && ['PASS', 'FAIL', 'ERROR', 'INVALID', 'CANCELLED'].includes(payload);
+      if (terminal) terminalStatus.current = payload;
+      if (typeof payload === 'string' && payload) setJob(currentJob => currentJob ? { ...currentJob, status: terminalStatus.current || payload } : currentJob);
+      if (!terminalReconciled.current && (terminal || event.type === 'result')) {
+        terminalReconciled.current = true;
+        setTerminalRefresh(value => value + 1);
+      }
+    }
+  }, [stream.events]);
 
   async function changeJobPin(pinned: boolean, reason = '') {
     setJobActionBusy(true); setPinReasonOpen(false);
@@ -703,113 +577,8 @@ function JobDetail({ api, jobId, onShowList, confirmCancel }: JobsFeatureProps &
   const jobStatus = job?.status || 'UNKNOWN';
   const canCancel = Boolean(job && ['QUEUED', 'PREPARING', 'RUNNING'].includes(job.status));
   const metrics = resultMetrics(result);
-  const orderedEvents = useMemo(() => chronologicalEvents(events), [events]);
-  const visibleEvents = useMemo(() => {
-    const query = eventSearch.trim().toLocaleLowerCase();
-    const allEventTypesSelected = eventTypeFilter.length === EVENT_TYPES.length;
-    return orderedEvents.filter(event => (allEventTypesSelected || eventTypeFilter.includes(event.type))
-      && (!query || `${event.type} ${event.id || ''} ${JSON.stringify(event.data)}`.toLocaleLowerCase().includes(query)));
-  }, [orderedEvents, eventTypeFilter, eventSearch]);
-  const visibleConsole = useMemo(() => {
-    const query = liveSearch.trim().toLocaleLowerCase();
-    return orderedEvents.filter(event => event.seq > consoleFloor && consoleText(event))
-      .map(event => consoleText(event))
-      .filter(line => !query || line.toLocaleLowerCase().includes(query));
-  }, [orderedEvents, consoleFloor, liveSearch]);
-  const historyTruncated = journalTruncated || orderedEvents.some(eventJournalTruncated);
-  const browserTruncated = events.length >= MAX_EVENTS;
   const buckets = metricBuckets(metrics?.buckets).slice(0, MAX_BUCKET_ROWS);
   const charts = metricSeries(buckets);
-  function eventPayload(event: JobEvent & { seq: number }, key: string): string {
-    const cached = eventPayloadCache.current.get(key);
-    if (cached && cached.data === event.data) return cached.value;
-    const value = displayValue(event.data);
-    eventPayloadCache.current.set(key, { data: event.data, value });
-    return value;
-  }
-
-  const latestVisibleEventId = visibleEvents.at(-1)?.id;
-  useEffect(() => {
-    if (activeTab !== 'live' || !liveAutoScroll || liveScrollPaused) return;
-    const view = consoleRef.current;
-    if (view) view.scrollTop = view.scrollHeight;
-  }, [activeTab, liveAutoScroll, liveScrollPaused, visibleConsole.length, consoleMaximized, consoleHeight]);
-  useEffect(() => {
-    if (activeTab !== 'events' || !eventsAutoScroll || eventsScrollPaused) return;
-    const list = eventsListRef.current;
-    if (!list) return;
-    eventsProgrammaticScroll.current = true;
-    list.scrollTop = list.scrollHeight;
-    eventsProgrammaticScroll.current = false;
-  }, [activeTab, eventsAutoScroll, eventsScrollPaused, visibleEvents.length, latestVisibleEventId]);
-
-  async function copyEvents() {
-    const value = visibleConsole.join('\n');
-    try {
-      await navigator.clipboard.writeText(value);
-      setEventCopyStatus(`${visibleConsole.length} lines copied.`);
-    } catch {
-      setEventCopyStatus('Clipboard access is unavailable.');
-    }
-  }
-
-  function toggleEventType(type: string, checked: boolean) {
-    setEventTypeFilter(current => checked
-      ? current.includes(type) ? current : [...current, type]
-      : current.filter(item => item !== type));
-  }
-
-  function toggleAllEventTypes(checked: boolean) {
-    setEventTypeFilter(checked ? [...EVENT_TYPES] : []);
-  }
-
-  function toggleConsoleMaximize() {
-    if (!consoleMaximized) {
-      const top = consoleShellRef.current?.getBoundingClientRect().top ?? 128;
-      const limit = Math.max(CONSOLE_MIN_HEIGHT, window.innerHeight - CONSOLE_MIN_HEIGHT - 16);
-      setMaximizeTop(Math.max(8, Math.min(Math.round(top), limit)));
-    }
-    setConsoleMaximized(value => !value);
-  }
-
-  function onConsoleResizePointerDown(event: PointerEvent<HTMLDivElement>) {
-    event.preventDefault();
-    const origin = { y: event.clientY, height: consoleHeight };
-    const target = event.currentTarget;
-    try { target.setPointerCapture(event.pointerId); } catch { /* Pointer capture is unavailable in some test environments. */ }
-    const move = (ev: globalThis.PointerEvent) => setConsoleHeight(clampConsoleHeight(origin.height + ev.clientY - origin.y));
-    const stop = () => {
-      target.removeEventListener('pointermove', move);
-      target.removeEventListener('pointerup', stop);
-      target.removeEventListener('pointercancel', stop);
-    };
-    target.addEventListener('pointermove', move);
-    target.addEventListener('pointerup', stop);
-    target.addEventListener('pointercancel', stop);
-  }
-
-  function onConsoleResizeKeyDown(event: KeyboardEvent<HTMLDivElement>) {
-    const step = event.shiftKey ? 48 : 24;
-    if (event.key === 'ArrowDown') setConsoleHeight(height => clampConsoleHeight(height + step));
-    else if (event.key === 'ArrowUp') setConsoleHeight(height => clampConsoleHeight(height - step));
-    else if (event.key === 'Home') setConsoleHeight(CONSOLE_MIN_HEIGHT);
-    else if (event.key === 'End') setConsoleHeight(consoleMaxHeight());
-    else return;
-    event.preventDefault();
-  }
-
-  function onEventsScroll() {
-    if (eventsProgrammaticScroll.current || !eventsAutoScroll) return;
-    const list = eventsListRef.current;
-    if (!list) return;
-    const gap = list.scrollHeight - list.scrollTop - list.clientHeight;
-    if (gap > 32) setEventsScrollPaused(true);
-  }
-
-  function setEventOpen(key: string, open: boolean, last: boolean) {
-    setEventOpenOverride(current => ({ ...current, [key]: open }));
-    if (!last) setEventsScrollPaused(true);
-  }
 
   function onTabKeyDown(event: KeyboardEvent<HTMLDivElement>) {
     const index = tabs.findIndex(tab => tab.id === activeTab);
@@ -830,6 +599,7 @@ function JobDetail({ api, jobId, onShowList, confirmCancel }: JobsFeatureProps &
         <h1 id="job-title">Job {jobId}</h1><p>Server status, live output, results, artifacts and reported metrics.</p></div>
       <div className="att-job-actions">
         <StatusBadge status={jobStatus} />
+        <button type="button" onClick={() => consoleContext.openConsole({ jobId, view: activeTab === 'events' ? 'events' : 'live', job })}>Open floating console</button>
         {job?.pinned && <span title={`Pinned by ${job.pinnedBy || 'operator'} at ${job.pinnedAt || 'unknown time'}${job.pinReason ? ` · ${job.pinReason}` : ''}`}>📌 Pinned</span>}
         {job && isTerminalStatus(job.status) && api.pinJob && <button type="button" disabled={jobActionBusy} onClick={() => job.pinned ? void changeJobPin(false) : setPinReasonOpen(true)}>{job.pinned ? 'Unpin' : 'Pin'}</button>}
         {job && isTerminalStatus(job.status) && (api.deleteJob || api.deleteJobs) && <button type="button" disabled={jobActionBusy || job.pinned} title={job.pinned ? 'Unpin before deletion' : undefined} onClick={() => setConfirmDelete(true)}>Delete Job</button>}
@@ -865,57 +635,11 @@ function JobDetail({ api, jobId, onShowList, confirmCancel }: JobsFeatureProps &
       </dl> : jobState !== 'loading' && <p>Job details are unavailable.</p>}
       {liveStatus && <p className="att-live-status" role="status">Latest live status event: {eventText(liveStatus)}</p>}
     </section>
-    <section ref={eventPanelRef} className="att-job-panel" role="tabpanel" id="job-panel-live" aria-labelledby="job-tab-live" hidden={activeTab !== 'live'} tabIndex={0}>
-      <div className="att-live-heading"><h2>Live Output</h2><span role="status" data-state={connection}>SSE {connection}</span></div>
-      <p className="att-help">Live Output shows the Server console lines for this Job. It does not format events in the browser. EventSource reconnects from the last delivered event ID. [truncated] marks an entry shortened upstream; [truncated by journal] marks the journal byte limit. Event payload truncation is reported separately from dropped history.</p>
-      <div className="att-event-controls" aria-label="Live output controls">
-        <label>Search output<input aria-label="Search output" type="search" value={liveSearch} onChange={event => setLiveSearch(event.currentTarget.value)} placeholder="Search console lines" /></label>
-        <label><input type="checkbox" aria-label="Live output auto-scroll" checked={liveAutoScroll} onChange={event => setLiveAutoScroll(event.currentTarget.checked)} /> Auto-scroll</label>
-        <button type="button" onClick={() => setLiveScrollPaused(value => !value)} aria-pressed={liveScrollPaused}>{liveScrollPaused ? 'Resume auto-scroll' : 'Pause auto-scroll'}</button>
-        <button type="button" onClick={() => void copyEvents()} disabled={!visibleConsole.length}>Copy Output</button>
-        <button type="button" onClick={() => setConsoleFloor(events.reduce((floor, event) => Math.max(floor, event.seq), consoleFloor))}>Clear view</button>
-        <button type="button" aria-pressed={consoleMaximized} onClick={toggleConsoleMaximize}>{consoleMaximized ? 'Restore' : 'Maximize'}</button>
-      </div>
-      {eventCopyStatus && <p role="status">{eventCopyStatus}</p>}
-      {events.some(event => event.data && typeof event.data === 'object' && 'journalLimit' in event.data) && <p role="note">Some event payload fields were truncated by the journal byte budget. A preserved console preview can still be complete; [truncated by journal] marks a shortened console entry.</p>}
-      {events.some(event => event.data && typeof event.data === 'object' && 'protocolLimit' in event.data) && <p role="note">Some event payload fields were truncated by the Worker protocol limit. Inspect artifacts for retained full details.</p>}
-      {(historyTruncated || browserTruncated) && <p role="note">{historyTruncated && <span>Earlier journal events are no longer retained.</span>}{historyTruncated && browserTruncated && ' '}{browserTruncated && <span>This browser keeps the latest {MAX_EVENTS} events.</span>}</p>}
-      {visibleConsole.length ? <div ref={consoleShellRef} className="att-console-shell" data-maximized={consoleMaximized ? 'true' : 'false'} style={consoleMaximized
-        ? { position: 'fixed', top: maximizeTop, left: 12, right: 12, bottom: 12, height: 'auto', maxHeight: 'none', zIndex: 30 }
-        : { height: consoleHeight }}>
-        {consoleMaximized && <div className="att-console-maximized-bar"><button type="button" onClick={toggleConsoleMaximize}>Restore</button></div>}
-        <pre ref={consoleRef} className="att-console" aria-label="Live output" data-appearance="terminal" style={{ background: TERMINAL_BACKGROUND, color: TERMINAL_FOREGROUND, whiteSpace: 'pre', overflow: 'auto' }}>{visibleConsole.join('\n')}</pre>
-        {!consoleMaximized && <div role="separator" aria-orientation="horizontal" aria-label="Resize live output" aria-valuemin={CONSOLE_MIN_HEIGHT} aria-valuemax={consoleMaxHeight()} aria-valuenow={consoleHeight} tabIndex={0} className="att-console-resize" onPointerDown={onConsoleResizePointerDown} onKeyDown={onConsoleResizeKeyDown} />}
-      </div>
-        : <p role="status">{events.length ? (liveSearch.trim() ? 'No console lines match the current search.' : 'This Job has no console lines. Structured events remain on the Events tab.')
-          : connection === 'completed' ? 'The Job has finished and no console lines were recorded.'
-            : connection === 'connected' ? 'Connected; no console lines have been emitted yet.'
-            : connection === 'reconnecting' ? 'Reconnecting to live output; no recent console lines are available.'
-              : 'Connecting to live output…'}</p>}
+    <section className="att-job-panel" role="tabpanel" id="job-panel-live" aria-labelledby="job-tab-live" hidden={activeTab !== 'live'} tabIndex={0}>
+      <JobConsoleView api={api} jobId={jobId} job={job} view="live" showSwitcher={false} />
     </section>
     <section className="att-job-panel" role="tabpanel" id="job-panel-events" aria-labelledby="job-tab-events" hidden={activeTab !== 'events'} tabIndex={0}>
-      <h2>Events</h2><p role="status">SSE {connection}; {events.length} recent events retained in this view.</p>
-      <div className="att-event-controls" aria-label="Event controls">
-        <fieldset className="att-event-type-filters"><legend>Filter event type</legend>
-          <label><input type="checkbox" aria-label="All Events" checked={eventTypeFilter.length === EVENT_TYPES.length}
-            onChange={event => toggleAllEventTypes(event.currentTarget.checked)} /> All Events</label>
-          {EVENT_TYPES.map(type => <label key={type}><input type="checkbox" aria-label={type}
-            checked={eventTypeFilter.includes(type)} onChange={event => toggleEventType(type, event.currentTarget.checked)} /> {type}</label>)}
-        </fieldset>
-        <label>Search events<input aria-label="Search events" type="search" value={eventSearch} onChange={event => setEventSearch(event.currentTarget.value)} placeholder="Search event JSON" /></label>
-        <label><input type="checkbox" aria-label="Events auto-scroll" checked={eventsAutoScroll} onChange={event => setEventsAutoScroll(event.currentTarget.checked)} /> Auto-scroll</label>
-        <button type="button" aria-pressed={eventsScrollPaused} onClick={() => setEventsScrollPaused(value => !value)}>{eventsScrollPaused ? 'Resume auto-scroll' : 'Pause auto-scroll'}</button>
-        <button type="button" onClick={() => { setEventsExpanded(true); setEventOpenOverride({}); }}>Expand all</button>
-        <button type="button" onClick={() => { setEventsExpanded(false); setEventOpenOverride({}); setEventsScrollPaused(true); }}>Collapse all</button>
-      </div>
-      {visibleEvents.length ? <ol ref={eventsListRef} className="att-job-events" aria-label="Structured job events" onScroll={onEventsScroll}>{visibleEvents.map((event, index) => {
-        const timestamp = eventTimestamp(event);
-        const key = event.id || `${event.seq}-${event.type}`;
-        const open = eventOpenOverride[key] ?? eventsExpanded;
-        const preview = eventPreview(event);
-        const last = index === visibleEvents.length - 1;
-        return <li key={key}><details open={open}><summary onClick={click => { click.preventDefault(); setEventOpen(key, !open, last); }}><strong>{event.type}</strong>{event.id && <code>#{event.id}</code>}{timestamp && <time dateTime={timestamp}>{dateTime(timestamp)}</time>}{preview && <span className="att-event-preview">{preview}</span>}</summary><EventPayload open={open} getPayload={() => eventPayload(event, key)} /></details></li>;
-      })}</ol> : <p>{events.length ? 'No events match the current filters.' : 'No SSE events have been returned.'}</p>}
+      <JobConsoleView api={api} jobId={jobId} job={job} view="events" showSwitcher={false} />
     </section>
     <section className="att-job-panel" role="tabpanel" id="job-panel-results" aria-labelledby="job-tab-results" hidden={activeTab !== 'results'} tabIndex={0}>
       <h2>Results</h2>
