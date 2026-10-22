@@ -1,6 +1,6 @@
 {
   "label": "before",
-  "generatedAt": "2026-10-21T22:47:54.588Z",
+  "generatedAt": "2026-10-21T23:50:54.629Z",
   "fixture": {
     "jobId": "PERF-JOB-266",
     "packageId": "payments",
@@ -37,7 +37,7 @@
     ]
   },
   "environment": {
-    "gitCommit": "6b319979db7475bbe482e9ef1fafdbca463fb6d8",
+    "gitCommit": "3e03207ab92e61b2faa506c3b29489bc73aacdea",
     "os": "darwin 25.1.0 arm64",
     "cpuCount": 8,
     "browser": "chromium",
@@ -53,31 +53,31 @@
         {
           "repeat": 1,
           "metrics": {
-            "routeReadyMs": 912.3999999761581,
-            "longTaskCount": 0,
-            "longTaskOver50Ms": 0,
-            "maxLongTaskMs": 0,
+            "routeReadyMs": 986.8000000119209,
+            "longTaskCount": 1,
+            "longTaskOver50Ms": 1,
+            "maxLongTaskMs": 73,
             "mutationBatches": 24,
-            "frameCount": 66,
-            "frameOver16Ms": 65,
+            "frameCount": 69,
+            "frameOver16Ms": 68,
             "domNodes": 194,
-            "jsHeapBytes": 5532833,
+            "jsHeapBytes": 5568787,
             "incomingEvents": 11,
             "renderedEvents": 10,
             "renderedConsoleLines": 10,
-            "latestDisplayedEventDelayMs": 697.8000000119209,
-            "terminalStatusDelayMs": 697.9000000357628,
+            "latestDisplayedEventDelayMs": 1,
+            "terminalStatusDelayMs": 0.800000011920929,
             "duplicateEventIds": 0,
             "missingEventIds": 0,
             "eventOrderMatchesJournal": null,
             "eventSourceInstances": {
               "PERF-JOB-266": 1
             },
-            "inputToNextPaintMs": 33.30000001192093,
+            "inputToNextPaintMs": 37,
             "transferredJsCssBytes": 582430,
             "resourceCountJsCss": 8,
             "sseRequestCount": 1,
-            "durationMs": 1135,
+            "durationMs": 1239,
             "eventSourceInstancesTotal": 1
           },
           "pageErrors": []
@@ -85,31 +85,31 @@
         {
           "repeat": 2,
           "metrics": {
-            "routeReadyMs": 892.3999999761581,
+            "routeReadyMs": 899.2999999523163,
             "longTaskCount": 0,
             "longTaskOver50Ms": 0,
             "maxLongTaskMs": 0,
             "mutationBatches": 24,
-            "frameCount": 64,
-            "frameOver16Ms": 63,
+            "frameCount": 65,
+            "frameOver16Ms": 64,
             "domNodes": 194,
-            "jsHeapBytes": 5407029,
+            "jsHeapBytes": 5552487,
             "incomingEvents": 11,
             "renderedEvents": 10,
             "renderedConsoleLines": 10,
-            "latestDisplayedEventDelayMs": 646.5,
-            "terminalStatusDelayMs": 646.5,
+            "latestDisplayedEventDelayMs": 0.7999999523162842,
+            "terminalStatusDelayMs": 0.699999988079071,
             "duplicateEventIds": 0,
             "missingEventIds": 0,
             "eventOrderMatchesJournal": null,
             "eventSourceInstances": {
               "PERF-JOB-266": 1
             },
-            "inputToNextPaintMs": 20.400000035762787,
+            "inputToNextPaintMs": 33.10000002384186,
             "transferredJsCssBytes": 582430,
             "resourceCountJsCss": 8,
             "sseRequestCount": 1,
-            "durationMs": 1079,
+            "durationMs": 1098,
             "eventSourceInstancesTotal": 1
           },
           "pageErrors": []
@@ -117,31 +117,31 @@
         {
           "repeat": 3,
           "metrics": {
-            "routeReadyMs": 894.1999999880791,
-            "longTaskCount": 0,
+            "routeReadyMs": 894.0999999642372,
+            "longTaskCount": 1,
             "longTaskOver50Ms": 0,
-            "maxLongTaskMs": 0,
+            "maxLongTaskMs": 50,
             "mutationBatches": 24,
-            "frameCount": 63,
-            "frameOver16Ms": 63,
+            "frameCount": 62,
+            "frameOver16Ms": 62,
             "domNodes": 194,
-            "jsHeapBytes": 5399836,
+            "jsHeapBytes": 5451090,
             "incomingEvents": 11,
             "renderedEvents": 10,
             "renderedConsoleLines": 10,
-            "latestDisplayedEventDelayMs": 673.1000000238419,
-            "terminalStatusDelayMs": 673.1000000238419,
+            "latestDisplayedEventDelayMs": 1.100000023841858,
+            "terminalStatusDelayMs": 0.6000000238418579,
             "duplicateEventIds": 0,
             "missingEventIds": 0,
             "eventOrderMatchesJournal": null,
             "eventSourceInstances": {
               "PERF-JOB-266": 1
             },
-            "inputToNextPaintMs": 28.100000023841858,
+            "inputToNextPaintMs": 23.69999998807907,
             "transferredJsCssBytes": 582430,
             "resourceCountJsCss": 8,
             "sseRequestCount": 1,
-            "durationMs": 1107,
+            "durationMs": 1122,
             "eventSourceInstancesTotal": 1
           },
           "pageErrors": []
@@ -149,39 +149,39 @@
       ],
       "summary": {
         "routeReadyMs": {
-          "median": 894.1999999880791,
-          "p95": 910.5799999773502,
+          "median": 899.2999999523163,
+          "p95": 978.0500000059604,
           "raw": [
-            912.3999999761581,
-            892.3999999761581,
-            894.1999999880791
+            986.8000000119209,
+            899.2999999523163,
+            894.0999999642372
           ]
         },
         "longTaskCount": {
-          "median": 0,
-          "p95": 0,
+          "median": 1,
+          "p95": 1,
           "raw": [
+            1,
             0,
-            0,
-            0
+            1
           ]
         },
         "longTaskOver50Ms": {
           "median": 0,
-          "p95": 0,
+          "p95": 0.8999999999999999,
           "raw": [
-            0,
+            1,
             0,
             0
           ]
         },
         "maxLongTaskMs": {
-          "median": 0,
-          "p95": 0,
+          "median": 50,
+          "p95": 70.7,
           "raw": [
+            73,
             0,
-            0,
-            0
+            50
           ]
         },
         "mutationBatches": {
@@ -194,21 +194,21 @@
           ]
         },
         "frameCount": {
-          "median": 64,
-          "p95": 65.8,
+          "median": 65,
+          "p95": 68.6,
           "raw": [
-            66,
-            64,
-            63
+            69,
+            65,
+            62
           ]
         },
         "frameOver16Ms": {
-          "median": 63,
-          "p95": 64.8,
+          "median": 64,
+          "p95": 67.6,
           "raw": [
-            65,
-            63,
-            63
+            68,
+            64,
+            62
           ]
         },
         "domNodes": {
@@ -221,12 +221,12 @@
           ]
         },
         "jsHeapBytes": {
-          "median": 5407029,
-          "p95": 5520252.6,
+          "median": 5552487,
+          "p95": 5567157,
           "raw": [
-            5532833,
-            5407029,
-            5399836
+            5568787,
+            5552487,
+            5451090
           ]
         },
         "incomingEvents": {
@@ -257,21 +257,21 @@
           ]
         },
         "latestDisplayedEventDelayMs": {
-          "median": 673.1000000238419,
-          "p95": 695.330000013113,
+          "median": 1,
+          "p95": 1.0900000214576722,
           "raw": [
-            697.8000000119209,
-            646.5,
-            673.1000000238419
+            1,
+            0.7999999523162842,
+            1.100000023841858
           ]
         },
         "terminalStatusDelayMs": {
-          "median": 673.1000000238419,
-          "p95": 695.4200000345706,
+          "median": 0.699999988079071,
+          "p95": 0.7900000095367432,
           "raw": [
-            697.9000000357628,
-            646.5,
-            673.1000000238419
+            0.800000011920929,
+            0.699999988079071,
+            0.6000000238418579
           ]
         },
         "duplicateEventIds": {
@@ -293,12 +293,12 @@
           ]
         },
         "inputToNextPaintMs": {
-          "median": 28.100000023841858,
-          "p95": 32.780000013113025,
+          "median": 33.10000002384186,
+          "p95": 36.61000000238418,
           "raw": [
-            33.30000001192093,
-            20.400000035762787,
-            28.100000023841858
+            37,
+            33.10000002384186,
+            23.69999998807907
           ]
         },
         "transferredJsCssBytes": {
@@ -329,12 +329,12 @@
           ]
         },
         "durationMs": {
-          "median": 1107,
-          "p95": 1132.2,
+          "median": 1122,
+          "p95": 1227.3,
           "raw": [
-            1135,
-            1079,
-            1107
+            1239,
+            1098,
+            1122
           ]
         },
         "eventSourceInstancesTotal": {
@@ -359,31 +359,31 @@
         {
           "repeat": 1,
           "metrics": {
-            "routeReadyMs": 894.5,
+            "routeReadyMs": 897.5,
             "longTaskCount": 0,
             "longTaskOver50Ms": 0,
             "maxLongTaskMs": 0,
             "mutationBatches": 64,
-            "frameCount": 64,
-            "frameOver16Ms": 63,
+            "frameCount": 66,
+            "frameOver16Ms": 65,
             "domNodes": 194,
-            "jsHeapBytes": 6303960,
+            "jsHeapBytes": 6307049,
             "incomingEvents": 51,
             "renderedEvents": 48,
             "renderedConsoleLines": 48,
-            "latestDisplayedEventDelayMs": 663.2000000476837,
-            "terminalStatusDelayMs": 663.3000000119209,
+            "latestDisplayedEventDelayMs": 1.5,
+            "terminalStatusDelayMs": 1.300000011920929,
             "duplicateEventIds": 0,
             "missingEventIds": 0,
             "eventOrderMatchesJournal": null,
             "eventSourceInstances": {
               "PERF-JOB-266": 1
             },
-            "inputToNextPaintMs": 27,
+            "inputToNextPaintMs": 32.19999998807907,
             "transferredJsCssBytes": 582430,
             "resourceCountJsCss": 8,
             "sseRequestCount": 1,
-            "durationMs": 1109,
+            "durationMs": 1126,
             "eventSourceInstancesTotal": 1
           },
           "pageErrors": []
@@ -391,31 +391,31 @@
         {
           "repeat": 2,
           "metrics": {
-            "routeReadyMs": 893.5,
+            "routeReadyMs": 895.9000000357628,
             "longTaskCount": 0,
             "longTaskOver50Ms": 0,
             "maxLongTaskMs": 0,
             "mutationBatches": 64,
-            "frameCount": 65,
-            "frameOver16Ms": 64,
+            "frameCount": 64,
+            "frameOver16Ms": 63,
             "domNodes": 194,
-            "jsHeapBytes": 6313315,
+            "jsHeapBytes": 6119448,
             "incomingEvents": 51,
             "renderedEvents": 48,
             "renderedConsoleLines": 48,
-            "latestDisplayedEventDelayMs": 654.4000000357628,
-            "terminalStatusDelayMs": 654.4000000357628,
+            "latestDisplayedEventDelayMs": 1.399999976158142,
+            "terminalStatusDelayMs": 1.0999999642372131,
             "duplicateEventIds": 0,
             "missingEventIds": 0,
             "eventOrderMatchesJournal": null,
             "eventSourceInstances": {
               "PERF-JOB-266": 1
             },
-            "inputToNextPaintMs": 28.69999998807907,
+            "inputToNextPaintMs": 30.399999976158142,
             "transferredJsCssBytes": 582430,
             "resourceCountJsCss": 8,
             "sseRequestCount": 1,
-            "durationMs": 1097,
+            "durationMs": 1099,
             "eventSourceInstancesTotal": 1
           },
           "pageErrors": []
@@ -423,31 +423,31 @@
         {
           "repeat": 3,
           "metrics": {
-            "routeReadyMs": 891.5,
+            "routeReadyMs": 897.3000000119209,
             "longTaskCount": 0,
             "longTaskOver50Ms": 0,
             "maxLongTaskMs": 0,
             "mutationBatches": 64,
-            "frameCount": 63,
-            "frameOver16Ms": 62,
+            "frameCount": 65,
+            "frameOver16Ms": 64,
             "domNodes": 194,
-            "jsHeapBytes": 6297958,
+            "jsHeapBytes": 6081301,
             "incomingEvents": 51,
             "renderedEvents": 48,
             "renderedConsoleLines": 48,
-            "latestDisplayedEventDelayMs": 648.6999999880791,
-            "terminalStatusDelayMs": 648.6999999880791,
+            "latestDisplayedEventDelayMs": 1.399999976158142,
+            "terminalStatusDelayMs": 1.100000023841858,
             "duplicateEventIds": 0,
             "missingEventIds": 0,
             "eventOrderMatchesJournal": null,
             "eventSourceInstances": {
               "PERF-JOB-266": 1
             },
-            "inputToNextPaintMs": 28.30000001192093,
+            "inputToNextPaintMs": 23.80000001192093,
             "transferredJsCssBytes": 582430,
             "resourceCountJsCss": 8,
             "sseRequestCount": 1,
-            "durationMs": 1094,
+            "durationMs": 1106,
             "eventSourceInstancesTotal": 1
           },
           "pageErrors": []
@@ -455,12 +455,12 @@
       ],
       "summary": {
         "routeReadyMs": {
-          "median": 893.5,
-          "p95": 894.4,
+          "median": 897.3000000119209,
+          "p95": 897.4800000011921,
           "raw": [
-            894.5,
-            893.5,
-            891.5
+            897.5,
+            895.9000000357628,
+            897.3000000119209
           ]
         },
         "longTaskCount": {
@@ -500,21 +500,21 @@
           ]
         },
         "frameCount": {
-          "median": 64,
-          "p95": 64.9,
+          "median": 65,
+          "p95": 65.9,
           "raw": [
+            66,
             64,
-            65,
-            63
+            65
           ]
         },
         "frameOver16Ms": {
-          "median": 63,
-          "p95": 63.9,
+          "median": 64,
+          "p95": 64.9,
           "raw": [
+            65,
             63,
-            64,
-            62
+            64
           ]
         },
         "domNodes": {
@@ -527,12 +527,12 @@
           ]
         },
         "jsHeapBytes": {
-          "median": 6303960,
-          "p95": 6312379.5,
+          "median": 6119448,
+          "p95": 6288288.9,
           "raw": [
-            6303960,
-            6313315,
-            6297958
+            6307049,
+            6119448,
+            6081301
           ]
         },
         "incomingEvents": {
@@ -563,21 +563,21 @@
           ]
         },
         "latestDisplayedEventDelayMs": {
-          "median": 654.4000000357628,
-          "p95": 662.3200000464916,
+          "median": 1.399999976158142,
+          "p95": 1.4899999976158143,
           "raw": [
-            663.2000000476837,
-            654.4000000357628,
-            648.6999999880791
+            1.5,
+            1.399999976158142,
+            1.399999976158142
           ]
         },
         "terminalStatusDelayMs": {
-          "median": 654.4000000357628,
-          "p95": 662.4100000143051,
+          "median": 1.100000023841858,
+          "p95": 1.2800000131130218,
           "raw": [
-            663.3000000119209,
-            654.4000000357628,
-            648.6999999880791
+            1.300000011920929,
+            1.0999999642372131,
+            1.100000023841858
           ]
         },
         "duplicateEventIds": {
@@ -599,12 +599,12 @@
           ]
         },
         "inputToNextPaintMs": {
-          "median": 28.30000001192093,
-          "p95": 28.659999990463255,
+          "median": 30.399999976158142,
+          "p95": 32.01999998688698,
           "raw": [
-            27,
-            28.69999998807907,
-            28.30000001192093
+            32.19999998807907,
+            30.399999976158142,
+            23.80000001192093
           ]
         },
         "transferredJsCssBytes": {
@@ -635,12 +635,12 @@
           ]
         },
         "durationMs": {
-          "median": 1097,
-          "p95": 1107.8,
+          "median": 1106,
+          "p95": 1124,
           "raw": [
-            1109,
-            1097,
-            1094
+            1126,
+            1099,
+            1106
           ]
         },
         "eventSourceInstancesTotal": {
@@ -665,31 +665,31 @@
         {
           "repeat": 1,
           "metrics": {
-            "routeReadyMs": 887,
+            "routeReadyMs": 902.3000000119209,
             "longTaskCount": 1,
             "longTaskOver50Ms": 1,
-            "maxLongTaskMs": 75,
+            "maxLongTaskMs": 74,
             "mutationBatches": 214,
-            "frameCount": 62,
-            "frameOver16Ms": 61,
+            "frameCount": 59,
+            "frameOver16Ms": 59,
             "domNodes": 194,
-            "jsHeapBytes": 5363899,
+            "jsHeapBytes": 6862255,
             "incomingEvents": 201,
             "renderedEvents": 190,
             "renderedConsoleLines": 190,
-            "latestDisplayedEventDelayMs": 595,
-            "terminalStatusDelayMs": 595.1999999880791,
+            "latestDisplayedEventDelayMs": 2.100000023841858,
+            "terminalStatusDelayMs": 1.600000023841858,
             "duplicateEventIds": 0,
             "missingEventIds": 0,
             "eventOrderMatchesJournal": null,
             "eventSourceInstances": {
               "PERF-JOB-266": 1
             },
-            "inputToNextPaintMs": 33.69999998807907,
+            "inputToNextPaintMs": 28.5,
             "transferredJsCssBytes": 582430,
             "resourceCountJsCss": 8,
             "sseRequestCount": 1,
-            "durationMs": 1089,
+            "durationMs": 1105,
             "eventSourceInstancesTotal": 1
           },
           "pageErrors": []
@@ -697,27 +697,27 @@
         {
           "repeat": 2,
           "metrics": {
-            "routeReadyMs": 891.1999999880791,
+            "routeReadyMs": 893.6000000238419,
             "longTaskCount": 1,
             "longTaskOver50Ms": 1,
             "maxLongTaskMs": 68,
             "mutationBatches": 214,
-            "frameCount": 61,
-            "frameOver16Ms": 60,
+            "frameCount": 62,
+            "frameOver16Ms": 61,
             "domNodes": 194,
-            "jsHeapBytes": 5483314,
+            "jsHeapBytes": 5487325,
             "incomingEvents": 201,
             "renderedEvents": 190,
             "renderedConsoleLines": 190,
-            "latestDisplayedEventDelayMs": 604,
-            "terminalStatusDelayMs": 604,
+            "latestDisplayedEventDelayMs": 1.5999999642372131,
+            "terminalStatusDelayMs": 1.199999988079071,
             "duplicateEventIds": 0,
             "missingEventIds": 0,
             "eventOrderMatchesJournal": null,
             "eventSourceInstances": {
               "PERF-JOB-266": 1
             },
-            "inputToNextPaintMs": 27.80000001192093,
+            "inputToNextPaintMs": 29.600000023841858,
             "transferredJsCssBytes": 582430,
             "resourceCountJsCss": 8,
             "sseRequestCount": 1,
@@ -729,31 +729,31 @@
         {
           "repeat": 3,
           "metrics": {
-            "routeReadyMs": 894.1999999880791,
+            "routeReadyMs": 899.1999999880791,
             "longTaskCount": 1,
             "longTaskOver50Ms": 1,
-            "maxLongTaskMs": 69,
+            "maxLongTaskMs": 78,
             "mutationBatches": 214,
-            "frameCount": 62,
-            "frameOver16Ms": 61,
+            "frameCount": 61,
+            "frameOver16Ms": 60,
             "domNodes": 194,
-            "jsHeapBytes": 5477191,
+            "jsHeapBytes": 5513269,
             "incomingEvents": 201,
             "renderedEvents": 190,
             "renderedConsoleLines": 190,
-            "latestDisplayedEventDelayMs": 604.5,
-            "terminalStatusDelayMs": 604.5,
+            "latestDisplayedEventDelayMs": 1.699999988079071,
+            "terminalStatusDelayMs": 1.2999999523162842,
             "duplicateEventIds": 0,
             "missingEventIds": 0,
             "eventOrderMatchesJournal": null,
             "eventSourceInstances": {
               "PERF-JOB-266": 1
             },
-            "inputToNextPaintMs": 29.80000001192093,
+            "inputToNextPaintMs": 23.899999976158142,
             "transferredJsCssBytes": 582430,
             "resourceCountJsCss": 8,
             "sseRequestCount": 1,
-            "durationMs": 1099,
+            "durationMs": 1105,
             "eventSourceInstancesTotal": 1
           },
           "pageErrors": []
@@ -761,12 +761,12 @@
       ],
       "summary": {
         "routeReadyMs": {
-          "median": 891.1999999880791,
-          "p95": 893.8999999880791,
+          "median": 899.1999999880791,
+          "p95": 901.9900000095367,
           "raw": [
-            887,
-            891.1999999880791,
-            894.1999999880791
+            902.3000000119209,
+            893.6000000238419,
+            899.1999999880791
           ]
         },
         "longTaskCount": {
@@ -788,12 +788,12 @@
           ]
         },
         "maxLongTaskMs": {
-          "median": 69,
-          "p95": 74.4,
+          "median": 74,
+          "p95": 77.6,
           "raw": [
-            75,
+            74,
             68,
-            69
+            78
           ]
         },
         "mutationBatches": {
@@ -806,21 +806,21 @@
           ]
         },
         "frameCount": {
-          "median": 62,
-          "p95": 62,
+          "median": 61,
+          "p95": 61.9,
           "raw": [
+            59,
             62,
-            61,
-            62
+            61
           ]
         },
         "frameOver16Ms": {
-          "median": 61,
-          "p95": 61,
+          "median": 60,
+          "p95": 60.9,
           "raw": [
+            59,
             61,
-            60,
-            61
+            60
           ]
         },
         "domNodes": {
@@ -833,12 +833,12 @@
           ]
         },
         "jsHeapBytes": {
-          "median": 5477191,
-          "p95": 5482701.7,
+          "median": 5513269,
+          "p95": 6727356.4,
           "raw": [
-            5363899,
-            5483314,
-            5477191
+            6862255,
+            5487325,
+            5513269
           ]
         },
         "incomingEvents": {
@@ -869,21 +869,21 @@
           ]
         },
         "latestDisplayedEventDelayMs": {
-          "median": 604,
-          "p95": 604.45,
+          "median": 1.699999988079071,
+          "p95": 2.060000020265579,
           "raw": [
-            595,
-            604,
-            604.5
+            2.100000023841858,
+            1.5999999642372131,
+            1.699999988079071
           ]
         },
         "terminalStatusDelayMs": {
-          "median": 604,
-          "p95": 604.45,
+          "median": 1.2999999523162842,
+          "p95": 1.5700000166893004,
           "raw": [
-            595.1999999880791,
-            604,
-            604.5
+            1.600000023841858,
+            1.199999988079071,
+            1.2999999523162842
           ]
         },
         "duplicateEventIds": {
@@ -905,12 +905,12 @@
           ]
         },
         "inputToNextPaintMs": {
-          "median": 29.80000001192093,
-          "p95": 33.309999990463254,
+          "median": 28.5,
+          "p95": 29.49000002145767,
           "raw": [
-            33.69999998807907,
-            27.80000001192093,
-            29.80000001192093
+            28.5,
+            29.600000023841858,
+            23.899999976158142
           ]
         },
         "transferredJsCssBytes": {
@@ -941,12 +941,12 @@
           ]
         },
         "durationMs": {
-          "median": 1099,
-          "p95": 1099,
+          "median": 1105,
+          "p95": 1105,
           "raw": [
-            1089,
+            1105,
             1099,
-            1099
+            1105
           ]
         },
         "eventSourceInstancesTotal": {
@@ -971,7 +971,35 @@
         {
           "repeat": 1,
           "metrics": {
-            "eventSourceInstancesTotal": 0
+            "routeReadyMs": 370192.8000000119,
+            "longTaskCount": 20,
+            "longTaskOver50Ms": 20,
+            "maxLongTaskMs": 361064,
+            "mutationBatches": 10016,
+            "frameCount": 97,
+            "frameOver16Ms": 95,
+            "domNodes": 4000,
+            "jsHeapBytes": 65809991,
+            "incomingEvents": 10001,
+            "renderedEvents": 474,
+            "renderedConsoleLines": 0,
+            "latestDisplayedEventDelayMs": 223.5999999642372,
+            "terminalStatusDelayMs": 224.5,
+            "duplicateEventIds": 0,
+            "missingEventIds": 0,
+            "eventOrderMatchesJournal": true,
+            "eventSourceInstances": {
+              "PERF-JOB-266": 1
+            },
+            "inputToNextPaintMs": 1693,
+            "transferredJsCssBytes": 582430,
+            "resourceCountJsCss": 8,
+            "sseRequestCount": 2,
+            "reconnectLastEventIds": [
+              10000
+            ],
+            "durationMs": 385494,
+            "eventSourceInstancesTotal": 1
           },
           "pageErrors": [
             {
@@ -983,182 +1011,171 @@
         {
           "repeat": 2,
           "metrics": {
-            "routeReadyMs": 432352.10000002384,
-            "longTaskCount": 31,
-            "longTaskOver50Ms": 31,
-            "maxLongTaskMs": 411615,
-            "mutationBatches": 10013,
-            "frameCount": 109,
+            "routeReadyMs": 389295,
+            "longTaskCount": 28,
+            "longTaskOver50Ms": 28,
+            "maxLongTaskMs": 374370,
+            "mutationBatches": 10015,
+            "frameCount": 108,
             "frameOver16Ms": 107,
             "domNodes": 4000,
-            "jsHeapBytes": 7821198,
+            "jsHeapBytes": 59067785,
             "incomingEvents": 10001,
             "renderedEvents": 474,
             "renderedConsoleLines": 0,
-            "latestDisplayedEventDelayMs": 44837.89999997616,
-            "terminalStatusDelayMs": 44838.19999998808,
+            "latestDisplayedEventDelayMs": 36.09999996423721,
+            "terminalStatusDelayMs": 38.80000001192093,
             "duplicateEventIds": 0,
             "missingEventIds": 0,
             "eventOrderMatchesJournal": true,
             "eventSourceInstances": {
               "PERF-JOB-266": 1
             },
-            "inputToNextPaintMs": 15814.199999988079,
+            "inputToNextPaintMs": 1795.6000000238419,
             "transferredJsCssBytes": 582430,
             "resourceCountJsCss": 8,
-            "sseRequestCount": 1,
-            "durationMs": 456778,
+            "sseRequestCount": 2,
+            "reconnectLastEventIds": [
+              10000
+            ],
+            "durationMs": 400515,
             "eventSourceInstancesTotal": 1
           },
           "pageErrors": [
             {
               "step": "open #/jobs/PERF-JOB-266/console?view=events",
               "message": "locator.waitFor: Timeout 8000ms exceeded.\nCall log:\n  - waiting for getByRole('heading', { name: 'Job PERF-JOB-266', exact: true }).first() to be visible\n"
-            },
-            {
-              "step": "SSE reconnect fixture",
-              "message": "The 10,000-event burst did not observe the required Last-Event-ID reconnect."
             }
           ]
         },
         {
           "repeat": 3,
           "metrics": {
-            "routeReadyMs": 231446,
-            "longTaskCount": 4,
-            "longTaskOver50Ms": 4,
-            "maxLongTaskMs": 229651,
-            "mutationBatches": 10011,
-            "frameCount": 72,
-            "frameOver16Ms": 72,
+            "routeReadyMs": 417189.2999999523,
+            "longTaskCount": 10,
+            "longTaskOver50Ms": 10,
+            "maxLongTaskMs": 399678,
+            "mutationBatches": 10016,
+            "frameCount": 102,
+            "frameOver16Ms": 101,
             "domNodes": 4000,
-            "jsHeapBytes": 58296100,
+            "jsHeapBytes": 14640240,
             "incomingEvents": 10001,
             "renderedEvents": 474,
             "renderedConsoleLines": 0,
-            "latestDisplayedEventDelayMs": 2581,
-            "terminalStatusDelayMs": 2581.300000011921,
+            "latestDisplayedEventDelayMs": 207.60000002384186,
+            "terminalStatusDelayMs": 208.10000002384186,
             "duplicateEventIds": 0,
             "missingEventIds": 0,
             "eventOrderMatchesJournal": true,
             "eventSourceInstances": {
               "PERF-JOB-266": 1
             },
-            "inputToNextPaintMs": 133.69999998807907,
+            "inputToNextPaintMs": 1908.699999988079,
             "transferredJsCssBytes": 582430,
             "resourceCountJsCss": 8,
-            "sseRequestCount": 1,
-            "durationMs": 232616,
+            "sseRequestCount": 2,
+            "reconnectLastEventIds": [
+              10000
+            ],
+            "durationMs": 427777,
             "eventSourceInstancesTotal": 1
           },
           "pageErrors": [
             {
               "step": "open #/jobs/PERF-JOB-266/console?view=events",
               "message": "locator.waitFor: Timeout 8000ms exceeded.\nCall log:\n  - waiting for getByRole('heading', { name: 'Job PERF-JOB-266', exact: true }).first() to be visible\n"
-            },
-            {
-              "step": "SSE reconnect fixture",
-              "message": "The 10,000-event burst did not observe the required Last-Event-ID reconnect."
             }
           ]
         }
       ],
       "summary": {
-        "eventSourceInstancesTotal": {
-          "median": 1,
-          "p95": 1,
-          "raw": [
-            0,
-            1,
-            1
-          ]
-        },
         "routeReadyMs": {
-          "median": 331899.0500000119,
-          "p95": 422306.7950000226,
+          "median": 389295,
+          "p95": 414399.8699999571,
           "raw": [
-            null,
-            432352.10000002384,
-            231446
+            370192.8000000119,
+            389295,
+            417189.2999999523
           ]
         },
         "longTaskCount": {
-          "median": 17.5,
-          "p95": 29.65,
+          "median": 20,
+          "p95": 27.2,
           "raw": [
-            null,
-            31,
-            4
+            20,
+            28,
+            10
           ]
         },
         "longTaskOver50Ms": {
-          "median": 17.5,
-          "p95": 29.65,
+          "median": 20,
+          "p95": 27.2,
           "raw": [
-            null,
-            31,
-            4
+            20,
+            28,
+            10
           ]
         },
         "maxLongTaskMs": {
-          "median": 320633,
-          "p95": 402516.8,
+          "median": 374370,
+          "p95": 397147.2,
           "raw": [
-            null,
-            411615,
-            229651
+            361064,
+            374370,
+            399678
           ]
         },
         "mutationBatches": {
-          "median": 10012,
-          "p95": 10012.9,
+          "median": 10016,
+          "p95": 10016,
           "raw": [
-            null,
-            10013,
-            10011
+            10016,
+            10015,
+            10016
           ]
         },
         "frameCount": {
-          "median": 90.5,
-          "p95": 107.15,
+          "median": 102,
+          "p95": 107.4,
           "raw": [
-            null,
-            109,
-            72
+            97,
+            108,
+            102
           ]
         },
         "frameOver16Ms": {
-          "median": 89.5,
-          "p95": 105.25,
+          "median": 101,
+          "p95": 106.4,
           "raw": [
-            null,
+            95,
             107,
-            72
+            101
           ]
         },
         "domNodes": {
           "median": 4000,
           "p95": 4000,
           "raw": [
-            null,
+            4000,
             4000,
             4000
           ]
         },
         "jsHeapBytes": {
-          "median": 33058649,
-          "p95": 55772354.9,
+          "median": 59067785,
+          "p95": 65135770.4,
           "raw": [
-            null,
-            7821198,
-            58296100
+            65809991,
+            59067785,
+            14640240
           ]
         },
         "incomingEvents": {
           "median": 10001,
           "p95": 10001,
           "raw": [
-            null,
+            10001,
             10001,
             10001
           ]
@@ -1167,7 +1184,7 @@
           "median": 474,
           "p95": 474,
           "raw": [
-            null,
+            474,
             474,
             474
           ]
@@ -1176,34 +1193,34 @@
           "median": 0,
           "p95": 0,
           "raw": [
-            null,
+            0,
             0,
             0
           ]
         },
         "latestDisplayedEventDelayMs": {
-          "median": 23709.44999998808,
-          "p95": 42725.05499997735,
+          "median": 207.60000002384186,
+          "p95": 221.99999997019768,
           "raw": [
-            null,
-            44837.89999997616,
-            2581
+            223.5999999642372,
+            36.09999996423721,
+            207.60000002384186
           ]
         },
         "terminalStatusDelayMs": {
-          "median": 23709.75,
-          "p95": 42725.35499998927,
+          "median": 208.10000002384186,
+          "p95": 222.8600000023842,
           "raw": [
-            null,
-            44838.19999998808,
-            2581.300000011921
+            224.5,
+            38.80000001192093,
+            208.10000002384186
           ]
         },
         "duplicateEventIds": {
           "median": 0,
           "p95": 0,
           "raw": [
-            null,
+            0,
             0,
             0
           ]
@@ -1212,25 +1229,25 @@
           "median": 0,
           "p95": 0,
           "raw": [
-            null,
+            0,
             0,
             0
           ]
         },
         "inputToNextPaintMs": {
-          "median": 7973.949999988079,
-          "p95": 15030.174999988078,
+          "median": 1795.6000000238419,
+          "p95": 1897.3899999916553,
           "raw": [
-            null,
-            15814.199999988079,
-            133.69999998807907
+            1693,
+            1795.6000000238419,
+            1908.699999988079
           ]
         },
         "transferredJsCssBytes": {
           "median": 582430,
           "p95": 582430,
           "raw": [
-            null,
+            582430,
             582430,
             582430
           ]
@@ -1239,27 +1256,36 @@
           "median": 8,
           "p95": 8,
           "raw": [
-            null,
+            8,
             8,
             8
           ]
         },
         "sseRequestCount": {
-          "median": 1,
-          "p95": 1,
+          "median": 2,
+          "p95": 2,
           "raw": [
-            null,
-            1,
-            1
+            2,
+            2,
+            2
           ]
         },
         "durationMs": {
-          "median": 344697,
-          "p95": 445569.9,
+          "median": 400515,
+          "p95": 425050.8,
           "raw": [
-            null,
-            456778,
-            232616
+            385494,
+            400515,
+            427777
+          ]
+        },
+        "eventSourceInstancesTotal": {
+          "median": 1,
+          "p95": 1,
+          "raw": [
+            1,
+            1,
+            1
           ]
         },
         "crashed": {
@@ -1275,31 +1301,31 @@
         {
           "repeat": 1,
           "metrics": {
-            "routeReadyMs": 5319.100000023842,
+            "routeReadyMs": 5308.200000047684,
             "longTaskCount": 2,
             "longTaskOver50Ms": 2,
-            "maxLongTaskMs": 4713,
+            "maxLongTaskMs": 4727,
             "mutationBatches": 514,
-            "frameCount": 42,
-            "frameOver16Ms": 42,
+            "frameCount": 41,
+            "frameOver16Ms": 40,
             "domNodes": 4000,
-            "jsHeapBytes": 14791387,
+            "jsHeapBytes": 14736915,
             "incomingEvents": 501,
             "renderedEvents": 474,
             "renderedConsoleLines": 0,
-            "latestDisplayedEventDelayMs": 324.5,
-            "terminalStatusDelayMs": 324.7000000476837,
+            "latestDisplayedEventDelayMs": 20.900000035762787,
+            "terminalStatusDelayMs": 21,
             "duplicateEventIds": 0,
             "missingEventIds": 0,
             "eventOrderMatchesJournal": true,
             "eventSourceInstances": {
               "PERF-JOB-266": 1
             },
-            "inputToNextPaintMs": 21.19999998807907,
+            "inputToNextPaintMs": 34.09999996423721,
             "transferredJsCssBytes": 582430,
             "resourceCountJsCss": 8,
             "sseRequestCount": 1,
-            "durationMs": 5556,
+            "durationMs": 5514,
             "eventSourceInstancesTotal": 1
           },
           "pageErrors": []
@@ -1307,31 +1333,31 @@
         {
           "repeat": 2,
           "metrics": {
-            "routeReadyMs": 5217.300000011921,
+            "routeReadyMs": 6324.699999988079,
             "longTaskCount": 2,
             "longTaskOver50Ms": 2,
-            "maxLongTaskMs": 4620,
+            "maxLongTaskMs": 5683,
             "mutationBatches": 514,
-            "frameCount": 44,
-            "frameOver16Ms": 43,
+            "frameCount": 46,
+            "frameOver16Ms": 45,
             "domNodes": 4000,
-            "jsHeapBytes": 8297353,
+            "jsHeapBytes": 10861380,
             "incomingEvents": 501,
             "renderedEvents": 474,
             "renderedConsoleLines": 0,
-            "latestDisplayedEventDelayMs": 336.9000000357628,
-            "terminalStatusDelayMs": 337.10000002384186,
+            "latestDisplayedEventDelayMs": 28.5,
+            "terminalStatusDelayMs": 28.69999998807907,
             "duplicateEventIds": 0,
             "missingEventIds": 0,
             "eventOrderMatchesJournal": true,
             "eventSourceInstances": {
               "PERF-JOB-266": 1
             },
-            "inputToNextPaintMs": 23.5,
+            "inputToNextPaintMs": 34.69999998807907,
             "transferredJsCssBytes": 582430,
             "resourceCountJsCss": 8,
             "sseRequestCount": 1,
-            "durationMs": 5471,
+            "durationMs": 6610,
             "eventSourceInstancesTotal": 1
           },
           "pageErrors": []
@@ -1339,31 +1365,31 @@
         {
           "repeat": 3,
           "metrics": {
-            "routeReadyMs": 5301.599999964237,
+            "routeReadyMs": 5935.199999988079,
             "longTaskCount": 2,
             "longTaskOver50Ms": 2,
-            "maxLongTaskMs": 4695,
+            "maxLongTaskMs": 5296,
             "mutationBatches": 514,
-            "frameCount": 47,
-            "frameOver16Ms": 46,
+            "frameCount": 44,
+            "frameOver16Ms": 43,
             "domNodes": 4000,
-            "jsHeapBytes": 10787755,
+            "jsHeapBytes": 10656745,
             "incomingEvents": 501,
             "renderedEvents": 474,
             "renderedConsoleLines": 0,
-            "latestDisplayedEventDelayMs": 368.69999998807907,
-            "terminalStatusDelayMs": 369,
+            "latestDisplayedEventDelayMs": 25.400000035762787,
+            "terminalStatusDelayMs": 25.700000047683716,
             "duplicateEventIds": 0,
             "missingEventIds": 0,
             "eventOrderMatchesJournal": true,
             "eventSourceInstances": {
               "PERF-JOB-266": 1
             },
-            "inputToNextPaintMs": 35.80000001192093,
+            "inputToNextPaintMs": 27.69999998807907,
             "transferredJsCssBytes": 582430,
             "resourceCountJsCss": 8,
             "sseRequestCount": 1,
-            "durationMs": 5560,
+            "durationMs": 6236,
             "eventSourceInstancesTotal": 1
           },
           "pageErrors": []
@@ -1371,12 +1397,12 @@
       ],
       "summary": {
         "routeReadyMs": {
-          "median": 5301.599999964237,
-          "p95": 5317.350000017881,
+          "median": 5935.199999988079,
+          "p95": 6285.749999988079,
           "raw": [
-            5319.100000023842,
-            5217.300000011921,
-            5301.599999964237
+            5308.200000047684,
+            6324.699999988079,
+            5935.199999988079
           ]
         },
         "longTaskCount": {
@@ -1398,12 +1424,12 @@
           ]
         },
         "maxLongTaskMs": {
-          "median": 4695,
-          "p95": 4711.2,
+          "median": 5296,
+          "p95": 5644.3,
           "raw": [
-            4713,
-            4620,
-            4695
+            4727,
+            5683,
+            5296
           ]
         },
         "mutationBatches": {
@@ -1417,20 +1443,20 @@
         },
         "frameCount": {
           "median": 44,
-          "p95": 46.7,
+          "p95": 45.8,
           "raw": [
-            42,
-            44,
-            47
+            41,
+            46,
+            44
           ]
         },
         "frameOver16Ms": {
           "median": 43,
-          "p95": 45.7,
+          "p95": 44.8,
           "raw": [
-            42,
-            43,
-            46
+            40,
+            45,
+            43
           ]
         },
         "domNodes": {
@@ -1443,12 +1469,12 @@
           ]
         },
         "jsHeapBytes": {
-          "median": 10787755,
-          "p95": 14391023.8,
+          "median": 10861380,
+          "p95": 14349361.5,
           "raw": [
-            14791387,
-            8297353,
-            10787755
+            14736915,
+            10861380,
+            10656745
           ]
         },
         "incomingEvents": {
@@ -1479,21 +1505,21 @@
           ]
         },
         "latestDisplayedEventDelayMs": {
-          "median": 336.9000000357628,
-          "p95": 365.51999999284743,
+          "median": 25.400000035762787,
+          "p95": 28.19000000357628,
           "raw": [
-            324.5,
-            336.9000000357628,
-            368.69999998807907
+            20.900000035762787,
+            28.5,
+            25.400000035762787
           ]
         },
         "terminalStatusDelayMs": {
-          "median": 337.10000002384186,
-          "p95": 365.8100000023842,
+          "median": 25.700000047683716,
+          "p95": 28.399999994039536,
           "raw": [
-            324.7000000476837,
-            337.10000002384186,
-            369
+            21,
+            28.69999998807907,
+            25.700000047683716
           ]
         },
         "duplicateEventIds": {
@@ -1515,12 +1541,12 @@
           ]
         },
         "inputToNextPaintMs": {
-          "median": 23.5,
-          "p95": 34.57000001072883,
+          "median": 34.09999996423721,
+          "p95": 34.639999985694885,
           "raw": [
-            21.19999998807907,
-            23.5,
-            35.80000001192093
+            34.09999996423721,
+            34.69999998807907,
+            27.69999998807907
           ]
         },
         "transferredJsCssBytes": {
@@ -1551,12 +1577,12 @@
           ]
         },
         "durationMs": {
-          "median": 5556,
-          "p95": 5559.6,
+          "median": 6236,
+          "p95": 6572.6,
           "raw": [
-            5556,
-            5471,
-            5560
+            5514,
+            6610,
+            6236
           ]
         },
         "eventSourceInstancesTotal": {
@@ -1581,20 +1607,20 @@
         {
           "repeat": 1,
           "metrics": {
-            "routeReadyMs": 7824.300000011921,
+            "routeReadyMs": 4457.5,
             "longTaskCount": 1,
             "longTaskOver50Ms": 1,
-            "maxLongTaskMs": 7143,
-            "mutationBatches": 506,
-            "frameCount": 57,
-            "frameOver16Ms": 56,
+            "maxLongTaskMs": 3913,
+            "mutationBatches": 507,
+            "frameCount": 55,
+            "frameOver16Ms": 55,
             "domNodes": 5068,
-            "jsHeapBytes": 10754912,
+            "jsHeapBytes": 33061433,
             "incomingEvents": 501,
             "renderedEvents": 473,
             "renderedConsoleLines": 473,
-            "latestDisplayedEventDelayMs": 1649.699999988079,
-            "terminalStatusDelayMs": 1650,
+            "latestDisplayedEventDelayMs": 18.80000001192093,
+            "terminalStatusDelayMs": 18.899999976158142,
             "duplicateEventIds": 0,
             "missingEventIds": 0,
             "eventOrderMatchesJournal": true,
@@ -1605,7 +1631,7 @@
             "transferredJsCssBytes": 629713,
             "resourceCountJsCss": 8,
             "sseRequestCount": 1,
-            "durationMs": 9225,
+            "durationMs": 5008,
             "eventSourceInstancesTotal": 1
           },
           "pageErrors": [
@@ -1650,20 +1676,20 @@
         {
           "repeat": 2,
           "metrics": {
-            "routeReadyMs": 4488.199999988079,
-            "longTaskCount": 1,
-            "longTaskOver50Ms": 1,
-            "maxLongTaskMs": 3919,
+            "routeReadyMs": 4911.5,
+            "longTaskCount": 2,
+            "longTaskOver50Ms": 2,
+            "maxLongTaskMs": 4265,
             "mutationBatches": 507,
-            "frameCount": 54,
-            "frameOver16Ms": 52,
+            "frameCount": 57,
+            "frameOver16Ms": 57,
             "domNodes": 5068,
-            "jsHeapBytes": 7841773,
+            "jsHeapBytes": 14443279,
             "incomingEvents": 501,
             "renderedEvents": 473,
             "renderedConsoleLines": 473,
-            "latestDisplayedEventDelayMs": 1435.8999999761581,
-            "terminalStatusDelayMs": 1436.0999999642372,
+            "latestDisplayedEventDelayMs": 21.80000001192093,
+            "terminalStatusDelayMs": 22,
             "duplicateEventIds": 0,
             "missingEventIds": 0,
             "eventOrderMatchesJournal": true,
@@ -1674,7 +1700,7 @@
             "transferredJsCssBytes": 629713,
             "resourceCountJsCss": 8,
             "sseRequestCount": 1,
-            "durationMs": 5778,
+            "durationMs": 5752,
             "eventSourceInstancesTotal": 1
           },
           "pageErrors": [
@@ -1719,20 +1745,20 @@
         {
           "repeat": 3,
           "metrics": {
-            "routeReadyMs": 4524.599999964237,
+            "routeReadyMs": 4992.5,
             "longTaskCount": 1,
             "longTaskOver50Ms": 1,
-            "maxLongTaskMs": 3928,
-            "mutationBatches": 508,
-            "frameCount": 57,
+            "maxLongTaskMs": 4297,
+            "mutationBatches": 507,
+            "frameCount": 56,
             "frameOver16Ms": 56,
             "domNodes": 5068,
-            "jsHeapBytes": 14330027,
+            "jsHeapBytes": 15733091,
             "incomingEvents": 501,
             "renderedEvents": 473,
             "renderedConsoleLines": 473,
-            "latestDisplayedEventDelayMs": 859.3000000119209,
-            "terminalStatusDelayMs": 859.5,
+            "latestDisplayedEventDelayMs": 23.69999998807907,
+            "terminalStatusDelayMs": 24.099999964237213,
             "duplicateEventIds": 0,
             "missingEventIds": 0,
             "eventOrderMatchesJournal": true,
@@ -1743,7 +1769,7 @@
             "transferredJsCssBytes": 629713,
             "resourceCountJsCss": 8,
             "sseRequestCount": 1,
-            "durationMs": 5215,
+            "durationMs": 5787,
             "eventSourceInstancesTotal": 1
           },
           "pageErrors": [
@@ -1788,65 +1814,65 @@
       ],
       "summary": {
         "routeReadyMs": {
-          "median": 4524.599999964237,
-          "p95": 7494.330000007152,
+          "median": 4911.5,
+          "p95": 4984.4,
           "raw": [
-            7824.300000011921,
-            4488.199999988079,
-            4524.599999964237
+            4457.5,
+            4911.5,
+            4992.5
           ]
         },
         "longTaskCount": {
           "median": 1,
-          "p95": 1,
+          "p95": 1.9,
           "raw": [
             1,
-            1,
+            2,
             1
           ]
         },
         "longTaskOver50Ms": {
           "median": 1,
-          "p95": 1,
+          "p95": 1.9,
           "raw": [
             1,
-            1,
+            2,
             1
           ]
         },
         "maxLongTaskMs": {
-          "median": 3928,
-          "p95": 6821.5,
+          "median": 4265,
+          "p95": 4293.8,
           "raw": [
-            7143,
-            3919,
-            3928
+            3913,
+            4265,
+            4297
           ]
         },
         "mutationBatches": {
           "median": 507,
-          "p95": 507.9,
+          "p95": 507,
           "raw": [
-            506,
             507,
-            508
+            507,
+            507
           ]
         },
         "frameCount": {
-          "median": 57,
-          "p95": 57,
+          "median": 56,
+          "p95": 56.9,
           "raw": [
+            55,
             57,
-            54,
-            57
+            56
           ]
         },
         "frameOver16Ms": {
           "median": 56,
-          "p95": 56,
+          "p95": 56.9,
           "raw": [
-            56,
-            52,
+            55,
+            57,
             56
           ]
         },
@@ -1860,12 +1886,12 @@
           ]
         },
         "jsHeapBytes": {
-          "median": 10754912,
-          "p95": 13972515.5,
+          "median": 15733091,
+          "p95": 31328598.799999997,
           "raw": [
-            10754912,
-            7841773,
-            14330027
+            33061433,
+            14443279,
+            15733091
           ]
         },
         "incomingEvents": {
@@ -1896,21 +1922,21 @@
           ]
         },
         "latestDisplayedEventDelayMs": {
-          "median": 1435.8999999761581,
-          "p95": 1628.319999986887,
+          "median": 21.80000001192093,
+          "p95": 23.509999990463257,
           "raw": [
-            1649.699999988079,
-            1435.8999999761581,
-            859.3000000119209
+            18.80000001192093,
+            21.80000001192093,
+            23.69999998807907
           ]
         },
         "terminalStatusDelayMs": {
-          "median": 1436.0999999642372,
-          "p95": 1628.6099999964238,
+          "median": 22,
+          "p95": 23.88999996781349,
           "raw": [
-            1650,
-            1436.0999999642372,
-            859.5
+            18.899999976158142,
+            22,
+            24.099999964237213
           ]
         },
         "duplicateEventIds": {
@@ -1959,12 +1985,12 @@
           ]
         },
         "durationMs": {
-          "median": 5778,
-          "p95": 8880.3,
+          "median": 5752,
+          "p95": 5783.5,
           "raw": [
-            9225,
-            5778,
-            5215
+            5008,
+            5752,
+            5787
           ]
         },
         "eventSourceInstancesTotal": {
@@ -1989,20 +2015,20 @@
         {
           "repeat": 1,
           "metrics": {
-            "routeReadyMs": 48492.30000001192,
-            "longTaskCount": 6,
-            "longTaskOver50Ms": 6,
-            "maxLongTaskMs": 47754,
-            "mutationBatches": 507,
-            "frameCount": 57,
-            "frameOver16Ms": 56,
+            "routeReadyMs": 4456,
+            "longTaskCount": 3,
+            "longTaskOver50Ms": 3,
+            "maxLongTaskMs": 3888,
+            "mutationBatches": 508,
+            "frameCount": 59,
+            "frameOver16Ms": 58,
             "domNodes": 11368,
-            "jsHeapBytes": 12245629,
+            "jsHeapBytes": 15054603,
             "incomingEvents": 501,
             "renderedEvents": 473,
             "renderedConsoleLines": 473,
-            "latestDisplayedEventDelayMs": 3104.2999999523163,
-            "terminalStatusDelayMs": 3104.899999976158,
+            "latestDisplayedEventDelayMs": 15.899999976158142,
+            "terminalStatusDelayMs": 16.100000023841858,
             "duplicateEventIds": 0,
             "missingEventIds": 0,
             "eventOrderMatchesJournal": true,
@@ -2013,7 +2039,7 @@
             "transferredJsCssBytes": 629713,
             "resourceCountJsCss": 8,
             "sseRequestCount": 1,
-            "durationMs": 51262,
+            "durationMs": 6218,
             "eventSourceInstancesTotal": 1
           },
           "pageErrors": [
@@ -2024,10 +2050,6 @@
             {
               "step": "pageerror",
               "message": "Minified React error #185; visit https://react.dev/errors/185 for the full message or use the non-minified dev environment for full errors and additional helpful warnings."
-            },
-            {
-              "step": "open #/jobs/PERF-JOB-266",
-              "message": "locator.waitFor: Timeout 8000ms exceeded.\nCall log:\n  - waiting for getByRole('heading', { name: 'Job PERF-JOB-266', exact: true }).first() to be visible\n"
             },
             {
               "step": "pageerror",
@@ -2062,20 +2084,20 @@
         {
           "repeat": 2,
           "metrics": {
-            "routeReadyMs": 4523.699999988079,
+            "routeReadyMs": 4957.199999988079,
             "longTaskCount": 3,
             "longTaskOver50Ms": 3,
-            "maxLongTaskMs": 3860,
-            "mutationBatches": 507,
-            "frameCount": 55,
-            "frameOver16Ms": 53,
+            "maxLongTaskMs": 4353,
+            "mutationBatches": 506,
+            "frameCount": 56,
+            "frameOver16Ms": 56,
             "domNodes": 11368,
-            "jsHeapBytes": 18594783,
+            "jsHeapBytes": 14488203,
             "incomingEvents": 501,
             "renderedEvents": 473,
             "renderedConsoleLines": 473,
-            "latestDisplayedEventDelayMs": 1737.3999999761581,
-            "terminalStatusDelayMs": 1738.1000000238419,
+            "latestDisplayedEventDelayMs": 39.5,
+            "terminalStatusDelayMs": 39.700000047683716,
             "duplicateEventIds": 0,
             "missingEventIds": 0,
             "eventOrderMatchesJournal": true,
@@ -2086,7 +2108,7 @@
             "transferredJsCssBytes": 629713,
             "resourceCountJsCss": 8,
             "sseRequestCount": 1,
-            "durationMs": 6020,
+            "durationMs": 6751,
             "eventSourceInstancesTotal": 1
           },
           "pageErrors": [
@@ -2131,20 +2153,20 @@
         {
           "repeat": 3,
           "metrics": {
-            "routeReadyMs": 4472.899999976158,
-            "longTaskCount": 4,
+            "routeReadyMs": 4906.700000047684,
+            "longTaskCount": 3,
             "longTaskOver50Ms": 3,
-            "maxLongTaskMs": 3901,
-            "mutationBatches": 508,
-            "frameCount": 56,
+            "maxLongTaskMs": 4255,
+            "mutationBatches": 506,
+            "frameCount": 55,
             "frameOver16Ms": 55,
             "domNodes": 11368,
-            "jsHeapBytes": 14176771,
+            "jsHeapBytes": 13914523,
             "incomingEvents": 501,
             "renderedEvents": 473,
             "renderedConsoleLines": 473,
-            "latestDisplayedEventDelayMs": 1927.1000000238419,
-            "terminalStatusDelayMs": 1927.3999999761581,
+            "latestDisplayedEventDelayMs": 16.30000001192093,
+            "terminalStatusDelayMs": 16.5,
             "duplicateEventIds": 0,
             "missingEventIds": 0,
             "eventOrderMatchesJournal": true,
@@ -2155,7 +2177,7 @@
             "transferredJsCssBytes": 629713,
             "resourceCountJsCss": 8,
             "sseRequestCount": 1,
-            "durationMs": 6249,
+            "durationMs": 6937,
             "eventSourceInstancesTotal": 1
           },
           "pageErrors": [
@@ -2200,65 +2222,65 @@
       ],
       "summary": {
         "routeReadyMs": {
-          "median": 4523.699999988079,
-          "p95": 44095.440000009534,
+          "median": 4906.700000047684,
+          "p95": 4952.14999999404,
           "raw": [
-            48492.30000001192,
-            4523.699999988079,
-            4472.899999976158
+            4456,
+            4957.199999988079,
+            4906.700000047684
           ]
         },
         "longTaskCount": {
-          "median": 4,
-          "p95": 5.8,
+          "median": 3,
+          "p95": 3,
           "raw": [
-            6,
             3,
-            4
+            3,
+            3
           ]
         },
         "longTaskOver50Ms": {
           "median": 3,
-          "p95": 5.699999999999999,
+          "p95": 3,
           "raw": [
-            6,
+            3,
             3,
             3
           ]
         },
         "maxLongTaskMs": {
-          "median": 3901,
-          "p95": 43368.7,
+          "median": 4255,
+          "p95": 4343.2,
           "raw": [
-            47754,
-            3860,
-            3901
+            3888,
+            4353,
+            4255
           ]
         },
         "mutationBatches": {
-          "median": 507,
-          "p95": 507.9,
+          "median": 506,
+          "p95": 507.8,
           "raw": [
-            507,
-            507,
-            508
+            508,
+            506,
+            506
           ]
         },
         "frameCount": {
           "median": 56,
-          "p95": 56.9,
+          "p95": 58.7,
           "raw": [
-            57,
-            55,
-            56
+            59,
+            56,
+            55
           ]
         },
         "frameOver16Ms": {
-          "median": 55,
-          "p95": 55.9,
+          "median": 56,
+          "p95": 57.8,
           "raw": [
+            58,
             56,
-            53,
             55
           ]
         },
@@ -2272,12 +2294,12 @@
           ]
         },
         "jsHeapBytes": {
-          "median": 14176771,
-          "p95": 18152981.8,
+          "median": 14488203,
+          "p95": 14997963,
           "raw": [
-            12245629,
-            18594783,
-            14176771
+            15054603,
+            14488203,
+            13914523
           ]
         },
         "incomingEvents": {
@@ -2308,21 +2330,21 @@
           ]
         },
         "latestDisplayedEventDelayMs": {
-          "median": 1927.1000000238419,
-          "p95": 2986.5799999594688,
+          "median": 16.30000001192093,
+          "p95": 37.18000000119209,
           "raw": [
-            3104.2999999523163,
-            1737.3999999761581,
-            1927.1000000238419
+            15.899999976158142,
+            39.5,
+            16.30000001192093
           ]
         },
         "terminalStatusDelayMs": {
-          "median": 1927.3999999761581,
-          "p95": 2987.149999976158,
+          "median": 16.5,
+          "p95": 37.38000004291534,
           "raw": [
-            3104.899999976158,
-            1738.1000000238419,
-            1927.3999999761581
+            16.100000023841858,
+            39.700000047683716,
+            16.5
           ]
         },
         "duplicateEventIds": {
@@ -2371,12 +2393,12 @@
           ]
         },
         "durationMs": {
-          "median": 6249,
-          "p95": 46760.7,
+          "median": 6751,
+          "p95": 6918.4,
           "raw": [
-            51262,
-            6020,
-            6249
+            6218,
+            6751,
+            6937
           ]
         },
         "eventSourceInstancesTotal": {
@@ -2401,158 +2423,20 @@
         {
           "repeat": 1,
           "metrics": {
-            "routeReadyMs": 5183.600000023842,
+            "routeReadyMs": 4409.5,
             "longTaskCount": 3,
             "longTaskOver50Ms": 3,
-            "maxLongTaskMs": 3816,
-            "mutationBatches": 507,
-            "frameCount": 55,
-            "frameOver16Ms": 54,
+            "maxLongTaskMs": 3879,
+            "mutationBatches": 508,
+            "frameCount": 58,
+            "frameOver16Ms": 57,
             "domNodes": 33040,
-            "jsHeapBytes": 44211687,
+            "jsHeapBytes": 44191990,
             "incomingEvents": 501,
             "renderedEvents": 473,
             "renderedConsoleLines": 473,
-            "latestDisplayedEventDelayMs": 2780.399999976158,
-            "terminalStatusDelayMs": 2782,
-            "duplicateEventIds": 0,
-            "missingEventIds": 0,
-            "eventOrderMatchesJournal": true,
-            "eventSourceInstances": {
-              "PERF-JOB-266": 1
-            },
-            "inputToNextPaintMs": null,
-            "transferredJsCssBytes": 629713,
-            "resourceCountJsCss": 8,
-            "sseRequestCount": 1,
-            "durationMs": 7031,
-            "eventSourceInstancesTotal": 1
-          },
-          "pageErrors": [
-            {
-              "step": "pageerror",
-              "message": "Minified React error #185; visit https://react.dev/errors/185 for the full message or use the non-minified dev environment for full errors and additional helpful warnings."
-            },
-            {
-              "step": "pageerror",
-              "message": "Minified React error #185; visit https://react.dev/errors/185 for the full message or use the non-minified dev environment for full errors and additional helpful warnings."
-            },
-            {
-              "step": "pageerror",
-              "message": "Minified React error #185; visit https://react.dev/errors/185 for the full message or use the non-minified dev environment for full errors and additional helpful warnings."
-            },
-            {
-              "step": "pageerror",
-              "message": "Minified React error #185; visit https://react.dev/errors/185 for the full message or use the non-minified dev environment for full errors and additional helpful warnings."
-            },
-            {
-              "step": "pageerror",
-              "message": "Minified React error #185; visit https://react.dev/errors/185 for the full message or use the non-minified dev environment for full errors and additional helpful warnings."
-            },
-            {
-              "step": "pageerror",
-              "message": "Minified React error #185; visit https://react.dev/errors/185 for the full message or use the non-minified dev environment for full errors and additional helpful warnings."
-            },
-            {
-              "step": "pageerror",
-              "message": "Minified React error #185; visit https://react.dev/errors/185 for the full message or use the non-minified dev environment for full errors and additional helpful warnings."
-            },
-            {
-              "step": "pageerror",
-              "message": "Minified React error #185; visit https://react.dev/errors/185 for the full message or use the non-minified dev environment for full errors and additional helpful warnings."
-            },
-            {
-              "step": "pageerror",
-              "message": "Minified React error #185; visit https://react.dev/errors/185 for the full message or use the non-minified dev environment for full errors and additional helpful warnings."
-            }
-          ]
-        },
-        {
-          "repeat": 2,
-          "metrics": {
-            "routeReadyMs": 4345.5,
-            "longTaskCount": 3,
-            "longTaskOver50Ms": 3,
-            "maxLongTaskMs": 3818,
-            "mutationBatches": 507,
-            "frameCount": 56,
-            "frameOver16Ms": 55,
-            "domNodes": 33040,
-            "jsHeapBytes": 44208380,
-            "incomingEvents": 501,
-            "renderedEvents": 473,
-            "renderedConsoleLines": 473,
-            "latestDisplayedEventDelayMs": 2544.099999964237,
-            "terminalStatusDelayMs": 2545.099999964237,
-            "duplicateEventIds": 0,
-            "missingEventIds": 0,
-            "eventOrderMatchesJournal": true,
-            "eventSourceInstances": {
-              "PERF-JOB-266": 1
-            },
-            "inputToNextPaintMs": null,
-            "transferredJsCssBytes": 629713,
-            "resourceCountJsCss": 8,
-            "sseRequestCount": 1,
-            "durationMs": 6793,
-            "eventSourceInstancesTotal": 1
-          },
-          "pageErrors": [
-            {
-              "step": "pageerror",
-              "message": "Minified React error #185; visit https://react.dev/errors/185 for the full message or use the non-minified dev environment for full errors and additional helpful warnings."
-            },
-            {
-              "step": "pageerror",
-              "message": "Minified React error #185; visit https://react.dev/errors/185 for the full message or use the non-minified dev environment for full errors and additional helpful warnings."
-            },
-            {
-              "step": "pageerror",
-              "message": "Minified React error #185; visit https://react.dev/errors/185 for the full message or use the non-minified dev environment for full errors and additional helpful warnings."
-            },
-            {
-              "step": "pageerror",
-              "message": "Minified React error #185; visit https://react.dev/errors/185 for the full message or use the non-minified dev environment for full errors and additional helpful warnings."
-            },
-            {
-              "step": "pageerror",
-              "message": "Minified React error #185; visit https://react.dev/errors/185 for the full message or use the non-minified dev environment for full errors and additional helpful warnings."
-            },
-            {
-              "step": "pageerror",
-              "message": "Minified React error #185; visit https://react.dev/errors/185 for the full message or use the non-minified dev environment for full errors and additional helpful warnings."
-            },
-            {
-              "step": "pageerror",
-              "message": "Minified React error #185; visit https://react.dev/errors/185 for the full message or use the non-minified dev environment for full errors and additional helpful warnings."
-            },
-            {
-              "step": "pageerror",
-              "message": "Minified React error #185; visit https://react.dev/errors/185 for the full message or use the non-minified dev environment for full errors and additional helpful warnings."
-            },
-            {
-              "step": "pageerror",
-              "message": "Minified React error #185; visit https://react.dev/errors/185 for the full message or use the non-minified dev environment for full errors and additional helpful warnings."
-            }
-          ]
-        },
-        {
-          "repeat": 3,
-          "metrics": {
-            "routeReadyMs": 5207.099999964237,
-            "longTaskCount": 3,
-            "longTaskOver50Ms": 3,
-            "maxLongTaskMs": 3918,
-            "mutationBatches": 506,
-            "frameCount": 57,
-            "frameOver16Ms": 56,
-            "domNodes": 33040,
-            "jsHeapBytes": 44192404,
-            "incomingEvents": 501,
-            "renderedEvents": 473,
-            "renderedConsoleLines": 473,
-            "latestDisplayedEventDelayMs": 2636.599999964237,
-            "terminalStatusDelayMs": 2638.399999976158,
+            "latestDisplayedEventDelayMs": 15.5,
+            "terminalStatusDelayMs": 15.800000011920929,
             "duplicateEventIds": 0,
             "missingEventIds": 0,
             "eventOrderMatchesJournal": true,
@@ -2604,69 +2488,207 @@
               "message": "Minified React error #185; visit https://react.dev/errors/185 for the full message or use the non-minified dev environment for full errors and additional helpful warnings."
             }
           ]
+        },
+        {
+          "repeat": 2,
+          "metrics": {
+            "routeReadyMs": 4944.199999988079,
+            "longTaskCount": 4,
+            "longTaskOver50Ms": 4,
+            "maxLongTaskMs": 4313,
+            "mutationBatches": 506,
+            "frameCount": 57,
+            "frameOver16Ms": 56,
+            "domNodes": 33040,
+            "jsHeapBytes": 37222256,
+            "incomingEvents": 501,
+            "renderedEvents": 473,
+            "renderedConsoleLines": 473,
+            "latestDisplayedEventDelayMs": 28.100000023841858,
+            "terminalStatusDelayMs": 28.30000001192093,
+            "duplicateEventIds": 0,
+            "missingEventIds": 0,
+            "eventOrderMatchesJournal": true,
+            "eventSourceInstances": {
+              "PERF-JOB-266": 1
+            },
+            "inputToNextPaintMs": null,
+            "transferredJsCssBytes": 629713,
+            "resourceCountJsCss": 8,
+            "sseRequestCount": 1,
+            "durationMs": 7826,
+            "eventSourceInstancesTotal": 1
+          },
+          "pageErrors": [
+            {
+              "step": "pageerror",
+              "message": "Minified React error #185; visit https://react.dev/errors/185 for the full message or use the non-minified dev environment for full errors and additional helpful warnings."
+            },
+            {
+              "step": "pageerror",
+              "message": "Minified React error #185; visit https://react.dev/errors/185 for the full message or use the non-minified dev environment for full errors and additional helpful warnings."
+            },
+            {
+              "step": "pageerror",
+              "message": "Minified React error #185; visit https://react.dev/errors/185 for the full message or use the non-minified dev environment for full errors and additional helpful warnings."
+            },
+            {
+              "step": "pageerror",
+              "message": "Minified React error #185; visit https://react.dev/errors/185 for the full message or use the non-minified dev environment for full errors and additional helpful warnings."
+            },
+            {
+              "step": "pageerror",
+              "message": "Minified React error #185; visit https://react.dev/errors/185 for the full message or use the non-minified dev environment for full errors and additional helpful warnings."
+            },
+            {
+              "step": "pageerror",
+              "message": "Minified React error #185; visit https://react.dev/errors/185 for the full message or use the non-minified dev environment for full errors and additional helpful warnings."
+            },
+            {
+              "step": "pageerror",
+              "message": "Minified React error #185; visit https://react.dev/errors/185 for the full message or use the non-minified dev environment for full errors and additional helpful warnings."
+            },
+            {
+              "step": "pageerror",
+              "message": "Minified React error #185; visit https://react.dev/errors/185 for the full message or use the non-minified dev environment for full errors and additional helpful warnings."
+            },
+            {
+              "step": "pageerror",
+              "message": "Minified React error #185; visit https://react.dev/errors/185 for the full message or use the non-minified dev environment for full errors and additional helpful warnings."
+            }
+          ]
+        },
+        {
+          "repeat": 3,
+          "metrics": {
+            "routeReadyMs": 4820.700000047684,
+            "longTaskCount": 5,
+            "longTaskOver50Ms": 4,
+            "maxLongTaskMs": 4188,
+            "mutationBatches": 507,
+            "frameCount": 57,
+            "frameOver16Ms": 56,
+            "domNodes": 33040,
+            "jsHeapBytes": 37230583,
+            "incomingEvents": 501,
+            "renderedEvents": 473,
+            "renderedConsoleLines": 473,
+            "latestDisplayedEventDelayMs": 18.30000001192093,
+            "terminalStatusDelayMs": 18.69999998807907,
+            "duplicateEventIds": 0,
+            "missingEventIds": 0,
+            "eventOrderMatchesJournal": true,
+            "eventSourceInstances": {
+              "PERF-JOB-266": 1
+            },
+            "inputToNextPaintMs": null,
+            "transferredJsCssBytes": 629713,
+            "resourceCountJsCss": 8,
+            "sseRequestCount": 1,
+            "durationMs": 7408,
+            "eventSourceInstancesTotal": 1
+          },
+          "pageErrors": [
+            {
+              "step": "pageerror",
+              "message": "Minified React error #185; visit https://react.dev/errors/185 for the full message or use the non-minified dev environment for full errors and additional helpful warnings."
+            },
+            {
+              "step": "pageerror",
+              "message": "Minified React error #185; visit https://react.dev/errors/185 for the full message or use the non-minified dev environment for full errors and additional helpful warnings."
+            },
+            {
+              "step": "pageerror",
+              "message": "Minified React error #185; visit https://react.dev/errors/185 for the full message or use the non-minified dev environment for full errors and additional helpful warnings."
+            },
+            {
+              "step": "pageerror",
+              "message": "Minified React error #185; visit https://react.dev/errors/185 for the full message or use the non-minified dev environment for full errors and additional helpful warnings."
+            },
+            {
+              "step": "pageerror",
+              "message": "Minified React error #185; visit https://react.dev/errors/185 for the full message or use the non-minified dev environment for full errors and additional helpful warnings."
+            },
+            {
+              "step": "pageerror",
+              "message": "Minified React error #185; visit https://react.dev/errors/185 for the full message or use the non-minified dev environment for full errors and additional helpful warnings."
+            },
+            {
+              "step": "pageerror",
+              "message": "Minified React error #185; visit https://react.dev/errors/185 for the full message or use the non-minified dev environment for full errors and additional helpful warnings."
+            },
+            {
+              "step": "pageerror",
+              "message": "Minified React error #185; visit https://react.dev/errors/185 for the full message or use the non-minified dev environment for full errors and additional helpful warnings."
+            },
+            {
+              "step": "pageerror",
+              "message": "Minified React error #185; visit https://react.dev/errors/185 for the full message or use the non-minified dev environment for full errors and additional helpful warnings."
+            }
+          ]
         }
       ],
       "summary": {
         "routeReadyMs": {
-          "median": 5183.600000023842,
-          "p95": 5204.749999970198,
+          "median": 4820.700000047684,
+          "p95": 4931.8499999940395,
           "raw": [
-            5183.600000023842,
-            4345.5,
-            5207.099999964237
+            4409.5,
+            4944.199999988079,
+            4820.700000047684
           ]
         },
         "longTaskCount": {
-          "median": 3,
-          "p95": 3,
+          "median": 4,
+          "p95": 4.9,
           "raw": [
             3,
-            3,
-            3
+            4,
+            5
           ]
         },
         "longTaskOver50Ms": {
-          "median": 3,
-          "p95": 3,
+          "median": 4,
+          "p95": 4,
           "raw": [
             3,
-            3,
-            3
+            4,
+            4
           ]
         },
         "maxLongTaskMs": {
-          "median": 3818,
-          "p95": 3908,
+          "median": 4188,
+          "p95": 4300.5,
           "raw": [
-            3816,
-            3818,
-            3918
+            3879,
+            4313,
+            4188
           ]
         },
         "mutationBatches": {
           "median": 507,
-          "p95": 507,
+          "p95": 507.9,
           "raw": [
-            507,
-            507,
-            506
+            508,
+            506,
+            507
           ]
         },
         "frameCount": {
-          "median": 56,
-          "p95": 56.9,
+          "median": 57,
+          "p95": 57.9,
           "raw": [
-            55,
-            56,
+            58,
+            57,
             57
           ]
         },
         "frameOver16Ms": {
-          "median": 55,
-          "p95": 55.9,
+          "median": 56,
+          "p95": 56.9,
           "raw": [
-            54,
-            55,
+            57,
+            56,
             56
           ]
         },
@@ -2680,12 +2702,12 @@
           ]
         },
         "jsHeapBytes": {
-          "median": 44208380,
-          "p95": 44211356.3,
+          "median": 37230583,
+          "p95": 43495849.3,
           "raw": [
-            44211687,
-            44208380,
-            44192404
+            44191990,
+            37222256,
+            37230583
           ]
         },
         "incomingEvents": {
@@ -2716,21 +2738,21 @@
           ]
         },
         "latestDisplayedEventDelayMs": {
-          "median": 2636.599999964237,
-          "p95": 2766.019999974966,
+          "median": 18.30000001192093,
+          "p95": 27.120000022649762,
           "raw": [
-            2780.399999976158,
-            2544.099999964237,
-            2636.599999964237
+            15.5,
+            28.100000023841858,
+            18.30000001192093
           ]
         },
         "terminalStatusDelayMs": {
-          "median": 2638.399999976158,
-          "p95": 2767.6399999976156,
+          "median": 18.69999998807907,
+          "p95": 27.340000009536745,
           "raw": [
-            2782,
-            2545.099999964237,
-            2638.399999976158
+            15.800000011920929,
+            28.30000001192093,
+            18.69999998807907
           ]
         },
         "duplicateEventIds": {
@@ -2779,12 +2801,12 @@
           ]
         },
         "durationMs": {
-          "median": 6991,
-          "p95": 7027,
+          "median": 7408,
+          "p95": 7784.2,
           "raw": [
-            7031,
-            6793,
-            6991
+            6991,
+            7826,
+            7408
           ]
         },
         "eventSourceInstancesTotal": {
@@ -2809,15 +2831,15 @@
         {
           "repeat": 1,
           "metrics": {
-            "routeReadyMs": 892.6999999880791,
+            "routeReadyMs": 893.6999999880791,
             "longTaskCount": 0,
             "longTaskOver50Ms": 0,
             "maxLongTaskMs": 0,
-            "mutationBatches": 9,
-            "frameCount": 62,
+            "mutationBatches": 10,
+            "frameCount": 61,
             "frameOver16Ms": 60,
             "domNodes": 604,
-            "jsHeapBytes": 5448712,
+            "jsHeapBytes": 5675791,
             "incomingEvents": 0,
             "renderedEvents": 0,
             "renderedConsoleLines": 0,
@@ -2831,7 +2853,7 @@
             "transferredJsCssBytes": 629713,
             "resourceCountJsCss": 8,
             "sseRequestCount": 0,
-            "durationMs": 1045,
+            "durationMs": 1048,
             "eventSourceInstancesTotal": 0
           },
           "pageErrors": []
@@ -2839,15 +2861,15 @@
         {
           "repeat": 2,
           "metrics": {
-            "routeReadyMs": 898.3000000119209,
+            "routeReadyMs": 919.5,
             "longTaskCount": 0,
             "longTaskOver50Ms": 0,
             "maxLongTaskMs": 0,
-            "mutationBatches": 9,
-            "frameCount": 60,
+            "mutationBatches": 10,
+            "frameCount": 61,
             "frameOver16Ms": 60,
             "domNodes": 604,
-            "jsHeapBytes": 5449628,
+            "jsHeapBytes": 5672765,
             "incomingEvents": 0,
             "renderedEvents": 0,
             "renderedConsoleLines": 0,
@@ -2861,7 +2883,7 @@
             "transferredJsCssBytes": 629713,
             "resourceCountJsCss": 8,
             "sseRequestCount": 0,
-            "durationMs": 1042,
+            "durationMs": 1069,
             "eventSourceInstancesTotal": 0
           },
           "pageErrors": []
@@ -2869,15 +2891,15 @@
         {
           "repeat": 3,
           "metrics": {
-            "routeReadyMs": 901.1999999880791,
+            "routeReadyMs": 894.2000000476837,
             "longTaskCount": 0,
             "longTaskOver50Ms": 0,
             "maxLongTaskMs": 0,
-            "mutationBatches": 9,
-            "frameCount": 62,
+            "mutationBatches": 10,
+            "frameCount": 60,
             "frameOver16Ms": 60,
             "domNodes": 604,
-            "jsHeapBytes": 5606388,
+            "jsHeapBytes": 5673291,
             "incomingEvents": 0,
             "renderedEvents": 0,
             "renderedConsoleLines": 0,
@@ -2891,7 +2913,7 @@
             "transferredJsCssBytes": 629713,
             "resourceCountJsCss": 8,
             "sseRequestCount": 0,
-            "durationMs": 1054,
+            "durationMs": 1049,
             "eventSourceInstancesTotal": 0
           },
           "pageErrors": []
@@ -2899,12 +2921,12 @@
       ],
       "summary": {
         "routeReadyMs": {
-          "median": 898.3000000119209,
-          "p95": 900.9099999904632,
+          "median": 894.2000000476837,
+          "p95": 916.9700000047684,
           "raw": [
-            892.6999999880791,
-            898.3000000119209,
-            901.1999999880791
+            893.6999999880791,
+            919.5,
+            894.2000000476837
           ]
         },
         "longTaskCount": {
@@ -2935,21 +2957,21 @@
           ]
         },
         "mutationBatches": {
-          "median": 9,
-          "p95": 9,
+          "median": 10,
+          "p95": 10,
           "raw": [
-            9,
-            9,
-            9
+            10,
+            10,
+            10
           ]
         },
         "frameCount": {
-          "median": 62,
-          "p95": 62,
+          "median": 61,
+          "p95": 61,
           "raw": [
-            62,
-            60,
-            62
+            61,
+            61,
+            60
           ]
         },
         "frameOver16Ms": {
@@ -2971,12 +2993,12 @@
           ]
         },
         "jsHeapBytes": {
-          "median": 5449628,
-          "p95": 5590712,
+          "median": 5673291,
+          "p95": 5675541,
           "raw": [
-            5448712,
-            5449628,
-            5606388
+            5675791,
+            5672765,
+            5673291
           ]
         },
         "incomingEvents": {
@@ -3052,12 +3074,12 @@
           ]
         },
         "durationMs": {
-          "median": 1045,
-          "p95": 1053.1,
+          "median": 1049,
+          "p95": 1067,
           "raw": [
-            1045,
-            1042,
-            1054
+            1048,
+            1069,
+            1049
           ]
         },
         "eventSourceInstancesTotal": {
@@ -3082,15 +3104,15 @@
         {
           "repeat": 1,
           "metrics": {
-            "routeReadyMs": 907.3000000119209,
+            "routeReadyMs": 926.8000000119209,
             "longTaskCount": 0,
             "longTaskOver50Ms": 0,
             "maxLongTaskMs": 0,
-            "mutationBatches": 13,
-            "frameCount": 67,
-            "frameOver16Ms": 66,
+            "mutationBatches": 14,
+            "frameCount": 68,
+            "frameOver16Ms": 67,
             "domNodes": 5927,
-            "jsHeapBytes": 10309425,
+            "jsHeapBytes": 10419061,
             "incomingEvents": 0,
             "renderedEvents": 0,
             "renderedConsoleLines": 0,
@@ -3100,11 +3122,11 @@
             "missingEventIds": 0,
             "eventOrderMatchesJournal": null,
             "eventSourceInstances": {},
-            "inputToNextPaintMs": 38.19999998807907,
+            "inputToNextPaintMs": 50.39999997615814,
             "transferredJsCssBytes": 618899,
             "resourceCountJsCss": 7,
             "sseRequestCount": 0,
-            "durationMs": 1142,
+            "durationMs": 1190,
             "eventSourceInstancesTotal": 0
           },
           "pageErrors": []
@@ -3112,7 +3134,7 @@
         {
           "repeat": 2,
           "metrics": {
-            "routeReadyMs": 915.6000000238419,
+            "routeReadyMs": 921.4000000357628,
             "longTaskCount": 0,
             "longTaskOver50Ms": 0,
             "maxLongTaskMs": 0,
@@ -3120,7 +3142,7 @@
             "frameCount": 68,
             "frameOver16Ms": 67,
             "domNodes": 5927,
-            "jsHeapBytes": 10383420,
+            "jsHeapBytes": 10392828,
             "incomingEvents": 0,
             "renderedEvents": 0,
             "renderedConsoleLines": 0,
@@ -3130,11 +3152,11 @@
             "missingEventIds": 0,
             "eventOrderMatchesJournal": null,
             "eventSourceInstances": {},
-            "inputToNextPaintMs": 51.5,
+            "inputToNextPaintMs": 37.69999998807907,
             "transferredJsCssBytes": 618899,
             "resourceCountJsCss": 7,
             "sseRequestCount": 0,
-            "durationMs": 1179,
+            "durationMs": 1160,
             "eventSourceInstancesTotal": 0
           },
           "pageErrors": []
@@ -3142,15 +3164,15 @@
         {
           "repeat": 3,
           "metrics": {
-            "routeReadyMs": 913.8999999761581,
+            "routeReadyMs": 918.4000000357628,
             "longTaskCount": 0,
             "longTaskOver50Ms": 0,
             "maxLongTaskMs": 0,
             "mutationBatches": 14,
-            "frameCount": 68,
-            "frameOver16Ms": 67,
+            "frameCount": 65,
+            "frameOver16Ms": 65,
             "domNodes": 5927,
-            "jsHeapBytes": 10355250,
+            "jsHeapBytes": 10347228,
             "incomingEvents": 0,
             "renderedEvents": 0,
             "renderedConsoleLines": 0,
@@ -3160,11 +3182,11 @@
             "missingEventIds": 0,
             "eventOrderMatchesJournal": null,
             "eventSourceInstances": {},
-            "inputToNextPaintMs": 51.90000003576279,
+            "inputToNextPaintMs": 38.59999996423721,
             "transferredJsCssBytes": 618899,
             "resourceCountJsCss": 7,
             "sseRequestCount": 0,
-            "durationMs": 1164,
+            "durationMs": 1168,
             "eventSourceInstancesTotal": 0
           },
           "pageErrors": []
@@ -3172,12 +3194,12 @@
       ],
       "summary": {
         "routeReadyMs": {
-          "median": 913.8999999761581,
-          "p95": 915.4300000190735,
+          "median": 921.4000000357628,
+          "p95": 926.2600000143051,
           "raw": [
-            907.3000000119209,
-            915.6000000238419,
-            913.8999999761581
+            926.8000000119209,
+            921.4000000357628,
+            918.4000000357628
           ]
         },
         "longTaskCount": {
@@ -3211,7 +3233,7 @@
           "median": 14,
           "p95": 14,
           "raw": [
-            13,
+            14,
             14,
             14
           ]
@@ -3220,18 +3242,18 @@
           "median": 68,
           "p95": 68,
           "raw": [
-            67,
             68,
-            68
+            68,
+            65
           ]
         },
         "frameOver16Ms": {
           "median": 67,
           "p95": 67,
           "raw": [
-            66,
             67,
-            67
+            67,
+            65
           ]
         },
         "domNodes": {
@@ -3244,12 +3266,12 @@
           ]
         },
         "jsHeapBytes": {
-          "median": 10355250,
-          "p95": 10380603,
+          "median": 10392828,
+          "p95": 10416437.7,
           "raw": [
-            10309425,
-            10383420,
-            10355250
+            10419061,
+            10392828,
+            10347228
           ]
         },
         "incomingEvents": {
@@ -3298,12 +3320,12 @@
           ]
         },
         "inputToNextPaintMs": {
-          "median": 51.5,
-          "p95": 51.860000032186505,
+          "median": 38.59999996423721,
+          "p95": 49.21999997496605,
           "raw": [
-            38.19999998807907,
-            51.5,
-            51.90000003576279
+            50.39999997615814,
+            37.69999998807907,
+            38.59999996423721
           ]
         },
         "transferredJsCssBytes": {
@@ -3334,12 +3356,12 @@
           ]
         },
         "durationMs": {
-          "median": 1164,
-          "p95": 1177.5,
+          "median": 1168,
+          "p95": 1187.8,
           "raw": [
-            1142,
-            1179,
-            1164
+            1190,
+            1160,
+            1168
           ]
         },
         "eventSourceInstancesTotal": {
@@ -3364,15 +3386,15 @@
         {
           "repeat": 1,
           "metrics": {
-            "routeReadyMs": 135.10000002384186,
+            "routeReadyMs": 135.60000002384186,
             "longTaskCount": 0,
             "longTaskOver50Ms": 0,
             "maxLongTaskMs": 0,
             "mutationBatches": 7,
-            "frameCount": 13,
+            "frameCount": 15,
             "frameOver16Ms": 13,
             "domNodes": 258,
-            "jsHeapBytes": 4194357,
+            "jsHeapBytes": 4226801,
             "incomingEvents": 0,
             "renderedEvents": 0,
             "renderedConsoleLines": 0,
@@ -3386,7 +3408,7 @@
             "transferredJsCssBytes": 557025,
             "resourceCountJsCss": 5,
             "sseRequestCount": 0,
-            "durationMs": 263,
+            "durationMs": 261,
             "eventSourceInstancesTotal": 0
           },
           "pageErrors": []
@@ -3394,15 +3416,15 @@
         {
           "repeat": 2,
           "metrics": {
-            "routeReadyMs": 126.40000003576279,
+            "routeReadyMs": 138.60000002384186,
             "longTaskCount": 0,
             "longTaskOver50Ms": 0,
             "maxLongTaskMs": 0,
-            "mutationBatches": 7,
-            "frameCount": 12,
+            "mutationBatches": 6,
+            "frameCount": 13,
             "frameOver16Ms": 12,
             "domNodes": 258,
-            "jsHeapBytes": 4199138,
+            "jsHeapBytes": 4105742,
             "incomingEvents": 0,
             "renderedEvents": 0,
             "renderedConsoleLines": 0,
@@ -3416,7 +3438,7 @@
             "transferredJsCssBytes": 557025,
             "resourceCountJsCss": 5,
             "sseRequestCount": 0,
-            "durationMs": 255,
+            "durationMs": 266,
             "eventSourceInstancesTotal": 0
           },
           "pageErrors": []
@@ -3424,15 +3446,15 @@
         {
           "repeat": 3,
           "metrics": {
-            "routeReadyMs": 123.39999997615814,
+            "routeReadyMs": 126.30000001192093,
             "longTaskCount": 0,
             "longTaskOver50Ms": 0,
             "maxLongTaskMs": 0,
-            "mutationBatches": 7,
+            "mutationBatches": 6,
             "frameCount": 14,
             "frameOver16Ms": 13,
             "domNodes": 258,
-            "jsHeapBytes": 4225264,
+            "jsHeapBytes": 4085425,
             "incomingEvents": 0,
             "renderedEvents": 0,
             "renderedConsoleLines": 0,
@@ -3446,7 +3468,7 @@
             "transferredJsCssBytes": 557025,
             "resourceCountJsCss": 5,
             "sseRequestCount": 0,
-            "durationMs": 249,
+            "durationMs": 253,
             "eventSourceInstancesTotal": 0
           },
           "pageErrors": []
@@ -3454,12 +3476,12 @@
       ],
       "summary": {
         "routeReadyMs": {
-          "median": 126.40000003576279,
-          "p95": 134.23000002503395,
+          "median": 135.60000002384186,
+          "p95": 138.30000002384185,
           "raw": [
-            135.10000002384186,
-            126.40000003576279,
-            123.39999997615814
+            135.60000002384186,
+            138.60000002384186,
+            126.30000001192093
           ]
         },
         "longTaskCount": {
@@ -3490,20 +3512,20 @@
           ]
         },
         "mutationBatches": {
-          "median": 7,
-          "p95": 7,
+          "median": 6,
+          "p95": 6.9,
           "raw": [
             7,
-            7,
-            7
+            6,
+            6
           ]
         },
         "frameCount": {
-          "median": 13,
-          "p95": 13.9,
+          "median": 14,
+          "p95": 14.9,
           "raw": [
+            15,
             13,
-            12,
             14
           ]
         },
@@ -3526,12 +3548,12 @@
           ]
         },
         "jsHeapBytes": {
-          "median": 4199138,
-          "p95": 4222651.4,
+          "median": 4105742,
+          "p95": 4214695.1,
           "raw": [
-            4194357,
-            4199138,
-            4225264
+            4226801,
+            4105742,
+            4085425
           ]
         },
         "incomingEvents": {
@@ -3607,12 +3629,12 @@
           ]
         },
         "durationMs": {
-          "median": 255,
-          "p95": 262.2,
+          "median": 261,
+          "p95": 265.5,
           "raw": [
-            263,
-            255,
-            249
+            261,
+            266,
+            253
           ]
         },
         "eventSourceInstancesTotal": {
@@ -3637,7 +3659,7 @@
         {
           "repeat": 1,
           "metrics": {
-            "routeReadyMs": 126,
+            "routeReadyMs": 126.30000001192093,
             "longTaskCount": 0,
             "longTaskOver50Ms": 0,
             "maxLongTaskMs": 0,
@@ -3645,7 +3667,7 @@
             "frameCount": 17,
             "frameOver16Ms": 17,
             "domNodes": 214,
-            "jsHeapBytes": 4426396,
+            "jsHeapBytes": 4452832,
             "incomingEvents": 0,
             "renderedEvents": 0,
             "renderedConsoleLines": 0,
@@ -3655,11 +3677,11 @@
             "missingEventIds": 0,
             "eventOrderMatchesJournal": null,
             "eventSourceInstances": {},
-            "inputToNextPaintMs": 26.799999952316284,
+            "inputToNextPaintMs": 23.69999998807907,
             "transferredJsCssBytes": 557025,
             "resourceCountJsCss": 5,
             "sseRequestCount": 0,
-            "durationMs": 319,
+            "durationMs": 317,
             "eventSourceInstancesTotal": 0
           },
           "pageErrors": []
@@ -3667,15 +3689,15 @@
         {
           "repeat": 2,
           "metrics": {
-            "routeReadyMs": 122.19999998807907,
+            "routeReadyMs": 144.69999998807907,
             "longTaskCount": 0,
             "longTaskOver50Ms": 0,
             "maxLongTaskMs": 0,
             "mutationBatches": 11,
-            "frameCount": 17,
-            "frameOver16Ms": 17,
+            "frameCount": 16,
+            "frameOver16Ms": 16,
             "domNodes": 214,
-            "jsHeapBytes": 4321645,
+            "jsHeapBytes": 4439536,
             "incomingEvents": 0,
             "renderedEvents": 0,
             "renderedConsoleLines": 0,
@@ -3685,11 +3707,11 @@
             "missingEventIds": 0,
             "eventOrderMatchesJournal": null,
             "eventSourceInstances": {},
-            "inputToNextPaintMs": 27,
+            "inputToNextPaintMs": 27.5,
             "transferredJsCssBytes": 557025,
             "resourceCountJsCss": 5,
             "sseRequestCount": 0,
-            "durationMs": 315,
+            "durationMs": 326,
             "eventSourceInstancesTotal": 0
           },
           "pageErrors": []
@@ -3697,15 +3719,15 @@
         {
           "repeat": 3,
           "metrics": {
-            "routeReadyMs": 127.5,
+            "routeReadyMs": 126.19999998807907,
             "longTaskCount": 0,
             "longTaskOver50Ms": 0,
             "maxLongTaskMs": 0,
             "mutationBatches": 11,
-            "frameCount": 18,
+            "frameCount": 19,
             "frameOver16Ms": 17,
             "domNodes": 214,
-            "jsHeapBytes": 4307095,
+            "jsHeapBytes": 4374816,
             "incomingEvents": 0,
             "renderedEvents": 0,
             "renderedConsoleLines": 0,
@@ -3715,11 +3737,11 @@
             "missingEventIds": 0,
             "eventOrderMatchesJournal": null,
             "eventSourceInstances": {},
-            "inputToNextPaintMs": 24.19999998807907,
+            "inputToNextPaintMs": 26,
             "transferredJsCssBytes": 557025,
             "resourceCountJsCss": 5,
             "sseRequestCount": 0,
-            "durationMs": 309,
+            "durationMs": 320,
             "eventSourceInstancesTotal": 0
           },
           "pageErrors": []
@@ -3727,12 +3749,12 @@
       ],
       "summary": {
         "routeReadyMs": {
-          "median": 126,
-          "p95": 127.35,
+          "median": 126.30000001192093,
+          "p95": 142.85999999046325,
           "raw": [
-            126,
-            122.19999998807907,
-            127.5
+            126.30000001192093,
+            144.69999998807907,
+            126.19999998807907
           ]
         },
         "longTaskCount": {
@@ -3773,11 +3795,11 @@
         },
         "frameCount": {
           "median": 17,
-          "p95": 17.9,
+          "p95": 18.8,
           "raw": [
             17,
-            17,
-            18
+            16,
+            19
           ]
         },
         "frameOver16Ms": {
@@ -3785,7 +3807,7 @@
           "p95": 17,
           "raw": [
             17,
-            17,
+            16,
             17
           ]
         },
@@ -3799,12 +3821,12 @@
           ]
         },
         "jsHeapBytes": {
-          "median": 4321645,
-          "p95": 4415920.9,
+          "median": 4439536,
+          "p95": 4451502.4,
           "raw": [
-            4426396,
-            4321645,
-            4307095
+            4452832,
+            4439536,
+            4374816
           ]
         },
         "incomingEvents": {
@@ -3853,12 +3875,12 @@
           ]
         },
         "inputToNextPaintMs": {
-          "median": 26.799999952316284,
-          "p95": 26.97999999523163,
+          "median": 26,
+          "p95": 27.35,
           "raw": [
-            26.799999952316284,
-            27,
-            24.19999998807907
+            23.69999998807907,
+            27.5,
+            26
           ]
         },
         "transferredJsCssBytes": {
@@ -3889,12 +3911,12 @@
           ]
         },
         "durationMs": {
-          "median": 315,
-          "p95": 318.6,
+          "median": 320,
+          "p95": 325.4,
           "raw": [
-            319,
-            315,
-            309
+            317,
+            326,
+            320
           ]
         },
         "eventSourceInstancesTotal": {
@@ -3919,15 +3941,15 @@
         {
           "repeat": 1,
           "metrics": {
-            "routeReadyMs": 121,
+            "routeReadyMs": 127,
             "longTaskCount": 0,
             "longTaskOver50Ms": 0,
             "maxLongTaskMs": 0,
-            "mutationBatches": 11,
-            "frameCount": 16,
+            "mutationBatches": 10,
+            "frameCount": 17,
             "frameOver16Ms": 16,
             "domNodes": 237,
-            "jsHeapBytes": 4403314,
+            "jsHeapBytes": 4402191,
             "incomingEvents": 0,
             "renderedEvents": 0,
             "renderedConsoleLines": 0,
@@ -3937,11 +3959,11 @@
             "missingEventIds": 0,
             "eventOrderMatchesJournal": null,
             "eventSourceInstances": {},
-            "inputToNextPaintMs": 26.30000001192093,
+            "inputToNextPaintMs": 25.299999952316284,
             "transferredJsCssBytes": 557025,
             "resourceCountJsCss": 5,
             "sseRequestCount": 0,
-            "durationMs": 300,
+            "durationMs": 309,
             "eventSourceInstancesTotal": 0
           },
           "pageErrors": []
@@ -3949,15 +3971,15 @@
         {
           "repeat": 2,
           "metrics": {
-            "routeReadyMs": 128.70000004768372,
+            "routeReadyMs": 145.4000000357628,
             "longTaskCount": 0,
             "longTaskOver50Ms": 0,
             "maxLongTaskMs": 0,
             "mutationBatches": 11,
-            "frameCount": 17,
+            "frameCount": 18,
             "frameOver16Ms": 17,
             "domNodes": 237,
-            "jsHeapBytes": 4415251,
+            "jsHeapBytes": 4426735,
             "incomingEvents": 0,
             "renderedEvents": 0,
             "renderedConsoleLines": 0,
@@ -3967,11 +3989,11 @@
             "missingEventIds": 0,
             "eventOrderMatchesJournal": null,
             "eventSourceInstances": {},
-            "inputToNextPaintMs": 24,
+            "inputToNextPaintMs": 25.599999964237213,
             "transferredJsCssBytes": 557025,
             "resourceCountJsCss": 5,
             "sseRequestCount": 0,
-            "durationMs": 322,
+            "durationMs": 342,
             "eventSourceInstancesTotal": 0
           },
           "pageErrors": []
@@ -3979,15 +4001,15 @@
         {
           "repeat": 3,
           "metrics": {
-            "routeReadyMs": 124.59999996423721,
+            "routeReadyMs": 127.09999996423721,
             "longTaskCount": 0,
             "longTaskOver50Ms": 0,
             "maxLongTaskMs": 0,
-            "mutationBatches": 10,
+            "mutationBatches": 11,
             "frameCount": 17,
             "frameOver16Ms": 17,
             "domNodes": 237,
-            "jsHeapBytes": 4415074,
+            "jsHeapBytes": 4415464,
             "incomingEvents": 0,
             "renderedEvents": 0,
             "renderedConsoleLines": 0,
@@ -3997,7 +4019,7 @@
             "missingEventIds": 0,
             "eventOrderMatchesJournal": null,
             "eventSourceInstances": {},
-            "inputToNextPaintMs": 26.100000023841858,
+            "inputToNextPaintMs": 27.30000001192093,
             "transferredJsCssBytes": 557025,
             "resourceCountJsCss": 5,
             "sseRequestCount": 0,
@@ -4009,12 +4031,12 @@
       ],
       "summary": {
         "routeReadyMs": {
-          "median": 124.59999996423721,
-          "p95": 128.29000003933908,
+          "median": 127.09999996423721,
+          "p95": 143.57000002861022,
           "raw": [
-            121,
-            128.70000004768372,
-            124.59999996423721
+            127,
+            145.4000000357628,
+            127.09999996423721
           ]
         },
         "longTaskCount": {
@@ -4048,17 +4070,17 @@
           "median": 11,
           "p95": 11,
           "raw": [
+            10,
             11,
-            11,
-            10
+            11
           ]
         },
         "frameCount": {
           "median": 17,
-          "p95": 17,
+          "p95": 17.9,
           "raw": [
-            16,
             17,
+            18,
             17
           ]
         },
@@ -4081,12 +4103,12 @@
           ]
         },
         "jsHeapBytes": {
-          "median": 4415074,
-          "p95": 4415233.3,
+          "median": 4415464,
+          "p95": 4425607.9,
           "raw": [
-            4403314,
-            4415251,
-            4415074
+            4402191,
+            4426735,
+            4415464
           ]
         },
         "incomingEvents": {
@@ -4135,12 +4157,12 @@
           ]
         },
         "inputToNextPaintMs": {
-          "median": 26.100000023841858,
-          "p95": 26.28000001311302,
+          "median": 25.599999964237213,
+          "p95": 27.130000007152557,
           "raw": [
-            26.30000001192093,
-            24,
-            26.100000023841858
+            25.299999952316284,
+            25.599999964237213,
+            27.30000001192093
           ]
         },
         "transferredJsCssBytes": {
@@ -4172,10 +4194,10 @@
         },
         "durationMs": {
           "median": 315,
-          "p95": 321.3,
+          "p95": 339.3,
           "raw": [
-            300,
-            322,
+            309,
+            342,
             315
           ]
         },
@@ -4201,37 +4223,7 @@
         {
           "repeat": 1,
           "metrics": {
-            "routeReadyMs": 152,
-            "longTaskCount": 0,
-            "longTaskOver50Ms": 0,
-            "maxLongTaskMs": 0,
-            "mutationBatches": 14,
-            "frameCount": 21,
-            "frameOver16Ms": 21,
-            "domNodes": 4099,
-            "jsHeapBytes": 9040648,
-            "incomingEvents": 0,
-            "renderedEvents": 0,
-            "renderedConsoleLines": 0,
-            "latestDisplayedEventDelayMs": null,
-            "terminalStatusDelayMs": null,
-            "duplicateEventIds": 0,
-            "missingEventIds": 0,
-            "eventOrderMatchesJournal": null,
-            "eventSourceInstances": {},
-            "inputToNextPaintMs": 23.299999952316284,
-            "transferredJsCssBytes": 557025,
-            "resourceCountJsCss": 5,
-            "sseRequestCount": 0,
-            "durationMs": 388,
-            "eventSourceInstancesTotal": 0
-          },
-          "pageErrors": []
-        },
-        {
-          "repeat": 2,
-          "metrics": {
-            "routeReadyMs": 144.5,
+            "routeReadyMs": 156.5999999642372,
             "longTaskCount": 0,
             "longTaskOver50Ms": 0,
             "maxLongTaskMs": 0,
@@ -4239,7 +4231,7 @@
             "frameCount": 23,
             "frameOver16Ms": 22,
             "domNodes": 4099,
-            "jsHeapBytes": 9040561,
+            "jsHeapBytes": 8943048,
             "incomingEvents": 0,
             "renderedEvents": 0,
             "renderedConsoleLines": 0,
@@ -4249,11 +4241,41 @@
             "missingEventIds": 0,
             "eventOrderMatchesJournal": null,
             "eventSourceInstances": {},
-            "inputToNextPaintMs": 30,
+            "inputToNextPaintMs": 30.30000001192093,
             "transferredJsCssBytes": 557025,
             "resourceCountJsCss": 5,
             "sseRequestCount": 0,
-            "durationMs": 390,
+            "durationMs": 408,
+            "eventSourceInstancesTotal": 0
+          },
+          "pageErrors": []
+        },
+        {
+          "repeat": 2,
+          "metrics": {
+            "routeReadyMs": 154.80000001192093,
+            "longTaskCount": 0,
+            "longTaskOver50Ms": 0,
+            "maxLongTaskMs": 0,
+            "mutationBatches": 14,
+            "frameCount": 23,
+            "frameOver16Ms": 22,
+            "domNodes": 4099,
+            "jsHeapBytes": 8946067,
+            "incomingEvents": 0,
+            "renderedEvents": 0,
+            "renderedConsoleLines": 0,
+            "latestDisplayedEventDelayMs": null,
+            "terminalStatusDelayMs": null,
+            "duplicateEventIds": 0,
+            "missingEventIds": 0,
+            "eventOrderMatchesJournal": null,
+            "eventSourceInstances": {},
+            "inputToNextPaintMs": 28,
+            "transferredJsCssBytes": 557025,
+            "resourceCountJsCss": 5,
+            "sseRequestCount": 0,
+            "durationMs": 412,
             "eventSourceInstancesTotal": 0
           },
           "pageErrors": []
@@ -4261,15 +4283,15 @@
         {
           "repeat": 3,
           "metrics": {
-            "routeReadyMs": 145.5999999642372,
+            "routeReadyMs": 157.30000001192093,
             "longTaskCount": 0,
             "longTaskOver50Ms": 0,
             "maxLongTaskMs": 0,
             "mutationBatches": 14,
-            "frameCount": 21,
-            "frameOver16Ms": 20,
+            "frameCount": 23,
+            "frameOver16Ms": 22,
             "domNodes": 4099,
-            "jsHeapBytes": 8843375,
+            "jsHeapBytes": 9032905,
             "incomingEvents": 0,
             "renderedEvents": 0,
             "renderedConsoleLines": 0,
@@ -4279,11 +4301,11 @@
             "missingEventIds": 0,
             "eventOrderMatchesJournal": null,
             "eventSourceInstances": {},
-            "inputToNextPaintMs": 23.600000023841858,
+            "inputToNextPaintMs": 30.600000023841858,
             "transferredJsCssBytes": 557025,
             "resourceCountJsCss": 5,
             "sseRequestCount": 0,
-            "durationMs": 402,
+            "durationMs": 405,
             "eventSourceInstancesTotal": 0
           },
           "pageErrors": []
@@ -4291,12 +4313,12 @@
       ],
       "summary": {
         "routeReadyMs": {
-          "median": 145.5999999642372,
-          "p95": 151.3599999964237,
+          "median": 156.5999999642372,
+          "p95": 157.23000000715257,
           "raw": [
-            152,
-            144.5,
-            145.5999999642372
+            156.5999999642372,
+            154.80000001192093,
+            157.30000001192093
           ]
         },
         "longTaskCount": {
@@ -4336,21 +4358,21 @@
           ]
         },
         "frameCount": {
-          "median": 21,
-          "p95": 22.8,
+          "median": 23,
+          "p95": 23,
           "raw": [
-            21,
             23,
-            21
+            23,
+            23
           ]
         },
         "frameOver16Ms": {
-          "median": 21,
-          "p95": 21.9,
+          "median": 22,
+          "p95": 22,
           "raw": [
-            21,
             22,
-            20
+            22,
+            22
           ]
         },
         "domNodes": {
@@ -4363,12 +4385,12 @@
           ]
         },
         "jsHeapBytes": {
-          "median": 9040561,
-          "p95": 9040639.3,
+          "median": 8946067,
+          "p95": 9024221.2,
           "raw": [
-            9040648,
-            9040561,
-            8843375
+            8943048,
+            8946067,
+            9032905
           ]
         },
         "incomingEvents": {
@@ -4417,12 +4439,12 @@
           ]
         },
         "inputToNextPaintMs": {
-          "median": 23.600000023841858,
-          "p95": 29.360000002384187,
+          "median": 30.30000001192093,
+          "p95": 30.570000022649765,
           "raw": [
-            23.299999952316284,
-            30,
-            23.600000023841858
+            30.30000001192093,
+            28,
+            30.600000023841858
           ]
         },
         "transferredJsCssBytes": {
@@ -4453,12 +4475,12 @@
           ]
         },
         "durationMs": {
-          "median": 390,
-          "p95": 400.8,
+          "median": 408,
+          "p95": 411.6,
           "raw": [
-            388,
-            390,
-            402
+            408,
+            412,
+            405
           ]
         },
         "eventSourceInstancesTotal": {
@@ -4483,45 +4505,15 @@
         {
           "repeat": 1,
           "metrics": {
-            "routeReadyMs": 892.5,
+            "routeReadyMs": 900.3999999761581,
             "longTaskCount": 0,
             "longTaskOver50Ms": 0,
             "maxLongTaskMs": 0,
             "mutationBatches": 9,
-            "frameCount": 61,
-            "frameOver16Ms": 60,
+            "frameCount": 59,
+            "frameOver16Ms": 59,
             "domNodes": 604,
-            "jsHeapBytes": 4776962,
-            "incomingEvents": 0,
-            "renderedEvents": 0,
-            "renderedConsoleLines": 0,
-            "latestDisplayedEventDelayMs": null,
-            "terminalStatusDelayMs": null,
-            "duplicateEventIds": 0,
-            "missingEventIds": 0,
-            "eventOrderMatchesJournal": null,
-            "eventSourceInstances": {},
-            "inputToNextPaintMs": null,
-            "transferredJsCssBytes": 629713,
-            "resourceCountJsCss": 8,
-            "sseRequestCount": 0,
-            "durationMs": 1026,
-            "eventSourceInstancesTotal": 0
-          },
-          "pageErrors": []
-        },
-        {
-          "repeat": 2,
-          "metrics": {
-            "routeReadyMs": 898.0999999642372,
-            "longTaskCount": 0,
-            "longTaskOver50Ms": 0,
-            "maxLongTaskMs": 0,
-            "mutationBatches": 9,
-            "frameCount": 61,
-            "frameOver16Ms": 60,
-            "domNodes": 604,
-            "jsHeapBytes": 4979836,
+            "jsHeapBytes": 4949325,
             "incomingEvents": 0,
             "renderedEvents": 0,
             "renderedConsoleLines": 0,
@@ -4541,17 +4533,17 @@
           "pageErrors": []
         },
         {
-          "repeat": 3,
+          "repeat": 2,
           "metrics": {
-            "routeReadyMs": 892.9000000357628,
+            "routeReadyMs": 897,
             "longTaskCount": 0,
             "longTaskOver50Ms": 0,
             "maxLongTaskMs": 0,
             "mutationBatches": 9,
-            "frameCount": 60,
+            "frameCount": 59,
             "frameOver16Ms": 59,
             "domNodes": 604,
-            "jsHeapBytes": 4877081,
+            "jsHeapBytes": 4950169,
             "incomingEvents": 0,
             "renderedEvents": 0,
             "renderedConsoleLines": 0,
@@ -4565,7 +4557,37 @@
             "transferredJsCssBytes": 629713,
             "resourceCountJsCss": 8,
             "sseRequestCount": 0,
-            "durationMs": 1027,
+            "durationMs": 1028,
+            "eventSourceInstancesTotal": 0
+          },
+          "pageErrors": []
+        },
+        {
+          "repeat": 3,
+          "metrics": {
+            "routeReadyMs": 892.2000000476837,
+            "longTaskCount": 0,
+            "longTaskOver50Ms": 0,
+            "maxLongTaskMs": 0,
+            "mutationBatches": 8,
+            "frameCount": 59,
+            "frameOver16Ms": 59,
+            "domNodes": 604,
+            "jsHeapBytes": 4920332,
+            "incomingEvents": 0,
+            "renderedEvents": 0,
+            "renderedConsoleLines": 0,
+            "latestDisplayedEventDelayMs": null,
+            "terminalStatusDelayMs": null,
+            "duplicateEventIds": 0,
+            "missingEventIds": 0,
+            "eventOrderMatchesJournal": null,
+            "eventSourceInstances": {},
+            "inputToNextPaintMs": null,
+            "transferredJsCssBytes": 629713,
+            "resourceCountJsCss": 8,
+            "sseRequestCount": 0,
+            "durationMs": 1023,
             "eventSourceInstancesTotal": 0
           },
           "pageErrors": []
@@ -4573,12 +4595,12 @@
       ],
       "summary": {
         "routeReadyMs": {
-          "median": 892.9000000357628,
-          "p95": 897.5799999713897,
+          "median": 897,
+          "p95": 900.0599999785424,
           "raw": [
-            892.5,
-            898.0999999642372,
-            892.9000000357628
+            900.3999999761581,
+            897,
+            892.2000000476837
           ]
         },
         "longTaskCount": {
@@ -4614,24 +4636,24 @@
           "raw": [
             9,
             9,
-            9
+            8
           ]
         },
         "frameCount": {
-          "median": 61,
-          "p95": 61,
+          "median": 59,
+          "p95": 59,
           "raw": [
-            61,
-            61,
-            60
+            59,
+            59,
+            59
           ]
         },
         "frameOver16Ms": {
-          "median": 60,
-          "p95": 60,
+          "median": 59,
+          "p95": 59,
           "raw": [
-            60,
-            60,
+            59,
+            59,
             59
           ]
         },
@@ -4645,12 +4667,12 @@
           ]
         },
         "jsHeapBytes": {
-          "median": 4877081,
-          "p95": 4969560.5,
+          "median": 4949325,
+          "p95": 4950084.6,
           "raw": [
-            4776962,
-            4979836,
-            4877081
+            4949325,
+            4950169,
+            4920332
           ]
         },
         "incomingEvents": {
@@ -4726,12 +4748,12 @@
           ]
         },
         "durationMs": {
-          "median": 1027,
-          "p95": 1033.3,
+          "median": 1028,
+          "p95": 1033.4,
           "raw": [
-            1026,
             1034,
-            1027
+            1028,
+            1023
           ]
         },
         "eventSourceInstancesTotal": {
@@ -4756,15 +4778,15 @@
         {
           "repeat": 1,
           "metrics": {
-            "routeReadyMs": 910.4000000357628,
+            "routeReadyMs": 916.1000000238419,
             "longTaskCount": 0,
             "longTaskOver50Ms": 0,
             "maxLongTaskMs": 0,
             "mutationBatches": 12,
             "frameCount": 63,
-            "frameOver16Ms": 62,
+            "frameOver16Ms": 63,
             "domNodes": 5927,
-            "jsHeapBytes": 9509532,
+            "jsHeapBytes": 9525229,
             "incomingEvents": 0,
             "renderedEvents": 0,
             "renderedConsoleLines": 0,
@@ -4774,11 +4796,11 @@
             "missingEventIds": 0,
             "eventOrderMatchesJournal": null,
             "eventSourceInstances": {},
-            "inputToNextPaintMs": 24.400000035762787,
+            "inputToNextPaintMs": 24,
             "transferredJsCssBytes": 618899,
             "resourceCountJsCss": 7,
             "sseRequestCount": 0,
-            "durationMs": 1111,
+            "durationMs": 1121,
             "eventSourceInstancesTotal": 0
           },
           "pageErrors": []
@@ -4786,15 +4808,15 @@
         {
           "repeat": 2,
           "metrics": {
-            "routeReadyMs": 907.8000000119209,
+            "routeReadyMs": 922.6000000238419,
             "longTaskCount": 0,
             "longTaskOver50Ms": 0,
             "maxLongTaskMs": 0,
             "mutationBatches": 12,
-            "frameCount": 65,
-            "frameOver16Ms": 64,
+            "frameCount": 63,
+            "frameOver16Ms": 63,
             "domNodes": 5927,
-            "jsHeapBytes": 9493112,
+            "jsHeapBytes": 9519597,
             "incomingEvents": 0,
             "renderedEvents": 0,
             "renderedConsoleLines": 0,
@@ -4804,11 +4826,11 @@
             "missingEventIds": 0,
             "eventOrderMatchesJournal": null,
             "eventSourceInstances": {},
-            "inputToNextPaintMs": 39.5,
+            "inputToNextPaintMs": 27,
             "transferredJsCssBytes": 618899,
             "resourceCountJsCss": 7,
             "sseRequestCount": 0,
-            "durationMs": 1127,
+            "durationMs": 1126,
             "eventSourceInstancesTotal": 0
           },
           "pageErrors": []
@@ -4816,15 +4838,15 @@
         {
           "repeat": 3,
           "metrics": {
-            "routeReadyMs": 913.1999999880791,
-            "longTaskCount": 0,
+            "routeReadyMs": 903.5,
+            "longTaskCount": 1,
             "longTaskOver50Ms": 0,
-            "maxLongTaskMs": 0,
+            "maxLongTaskMs": 50,
             "mutationBatches": 12,
-            "frameCount": 63,
-            "frameOver16Ms": 62,
+            "frameCount": 64,
+            "frameOver16Ms": 63,
             "domNodes": 5927,
-            "jsHeapBytes": 9520356,
+            "jsHeapBytes": 9562521,
             "incomingEvents": 0,
             "renderedEvents": 0,
             "renderedConsoleLines": 0,
@@ -4834,11 +4856,11 @@
             "missingEventIds": 0,
             "eventOrderMatchesJournal": null,
             "eventSourceInstances": {},
-            "inputToNextPaintMs": 24.100000023841858,
+            "inputToNextPaintMs": 25.30000001192093,
             "transferredJsCssBytes": 618899,
             "resourceCountJsCss": 7,
             "sseRequestCount": 0,
-            "durationMs": 1115,
+            "durationMs": 1113,
             "eventSourceInstancesTotal": 0
           },
           "pageErrors": []
@@ -4846,21 +4868,21 @@
       ],
       "summary": {
         "routeReadyMs": {
-          "median": 910.4000000357628,
-          "p95": 912.9199999928475,
+          "median": 916.1000000238419,
+          "p95": 921.9500000238419,
           "raw": [
-            910.4000000357628,
-            907.8000000119209,
-            913.1999999880791
+            916.1000000238419,
+            922.6000000238419,
+            903.5
           ]
         },
         "longTaskCount": {
           "median": 0,
-          "p95": 0,
+          "p95": 0.8999999999999999,
           "raw": [
             0,
             0,
-            0
+            1
           ]
         },
         "longTaskOver50Ms": {
@@ -4874,11 +4896,11 @@
         },
         "maxLongTaskMs": {
           "median": 0,
-          "p95": 0,
+          "p95": 44.99999999999999,
           "raw": [
             0,
             0,
-            0
+            50
           ]
         },
         "mutationBatches": {
@@ -4892,20 +4914,20 @@
         },
         "frameCount": {
           "median": 63,
-          "p95": 64.8,
+          "p95": 63.9,
           "raw": [
             63,
-            65,
-            63
+            63,
+            64
           ]
         },
         "frameOver16Ms": {
-          "median": 62,
-          "p95": 63.8,
+          "median": 63,
+          "p95": 63,
           "raw": [
-            62,
-            64,
-            62
+            63,
+            63,
+            63
           ]
         },
         "domNodes": {
@@ -4918,12 +4940,12 @@
           ]
         },
         "jsHeapBytes": {
-          "median": 9509532,
-          "p95": 9519273.6,
+          "median": 9525229,
+          "p95": 9558791.8,
           "raw": [
-            9509532,
-            9493112,
-            9520356
+            9525229,
+            9519597,
+            9562521
           ]
         },
         "incomingEvents": {
@@ -4972,12 +4994,12 @@
           ]
         },
         "inputToNextPaintMs": {
-          "median": 24.400000035762787,
-          "p95": 37.99000000357628,
+          "median": 25.30000001192093,
+          "p95": 26.830000001192094,
           "raw": [
-            24.400000035762787,
-            39.5,
-            24.100000023841858
+            24,
+            27,
+            25.30000001192093
           ]
         },
         "transferredJsCssBytes": {
@@ -5008,12 +5030,12 @@
           ]
         },
         "durationMs": {
-          "median": 1115,
-          "p95": 1125.8,
+          "median": 1121,
+          "p95": 1125.5,
           "raw": [
-            1111,
-            1127,
-            1115
+            1121,
+            1126,
+            1113
           ]
         },
         "eventSourceInstancesTotal": {
@@ -5038,37 +5060,7 @@
         {
           "repeat": 1,
           "metrics": {
-            "routeReadyMs": 894.8000000119209,
-            "longTaskCount": 0,
-            "longTaskOver50Ms": 0,
-            "maxLongTaskMs": 0,
-            "mutationBatches": 9,
-            "frameCount": 57,
-            "frameOver16Ms": 57,
-            "domNodes": 275,
-            "jsHeapBytes": 4303706,
-            "incomingEvents": 0,
-            "renderedEvents": 0,
-            "renderedConsoleLines": 0,
-            "latestDisplayedEventDelayMs": null,
-            "terminalStatusDelayMs": null,
-            "duplicateEventIds": 0,
-            "missingEventIds": 0,
-            "eventOrderMatchesJournal": null,
-            "eventSourceInstances": {},
-            "inputToNextPaintMs": null,
-            "transferredJsCssBytes": 582150,
-            "resourceCountJsCss": 7,
-            "sseRequestCount": 0,
-            "durationMs": 1026,
-            "eventSourceInstancesTotal": 0
-          },
-          "pageErrors": []
-        },
-        {
-          "repeat": 2,
-          "metrics": {
-            "routeReadyMs": 891.7000000476837,
+            "routeReadyMs": 897.6000000238419,
             "longTaskCount": 0,
             "longTaskOver50Ms": 0,
             "maxLongTaskMs": 0,
@@ -5076,7 +5068,7 @@
             "frameCount": 60,
             "frameOver16Ms": 59,
             "domNodes": 275,
-            "jsHeapBytes": 4301230,
+            "jsHeapBytes": 4278525,
             "incomingEvents": 0,
             "renderedEvents": 0,
             "renderedConsoleLines": 0,
@@ -5090,7 +5082,37 @@
             "transferredJsCssBytes": 582150,
             "resourceCountJsCss": 7,
             "sseRequestCount": 0,
-            "durationMs": 1023,
+            "durationMs": 1031,
+            "eventSourceInstancesTotal": 0
+          },
+          "pageErrors": []
+        },
+        {
+          "repeat": 2,
+          "metrics": {
+            "routeReadyMs": 929,
+            "longTaskCount": 1,
+            "longTaskOver50Ms": 0,
+            "maxLongTaskMs": 50,
+            "mutationBatches": 9,
+            "frameCount": 59,
+            "frameOver16Ms": 59,
+            "domNodes": 275,
+            "jsHeapBytes": 4311520,
+            "incomingEvents": 0,
+            "renderedEvents": 0,
+            "renderedConsoleLines": 0,
+            "latestDisplayedEventDelayMs": null,
+            "terminalStatusDelayMs": null,
+            "duplicateEventIds": 0,
+            "missingEventIds": 0,
+            "eventOrderMatchesJournal": null,
+            "eventSourceInstances": {},
+            "inputToNextPaintMs": null,
+            "transferredJsCssBytes": 582150,
+            "resourceCountJsCss": 7,
+            "sseRequestCount": 0,
+            "durationMs": 1062,
             "eventSourceInstancesTotal": 0
           },
           "pageErrors": []
@@ -5098,15 +5120,15 @@
         {
           "repeat": 3,
           "metrics": {
-            "routeReadyMs": 898.6999999880791,
+            "routeReadyMs": 898.1999999880791,
             "longTaskCount": 0,
             "longTaskOver50Ms": 0,
             "maxLongTaskMs": 0,
             "mutationBatches": 9,
-            "frameCount": 59,
-            "frameOver16Ms": 59,
+            "frameCount": 61,
+            "frameOver16Ms": 60,
             "domNodes": 275,
-            "jsHeapBytes": 4290949,
+            "jsHeapBytes": 4290793,
             "incomingEvents": 0,
             "renderedEvents": 0,
             "renderedConsoleLines": 0,
@@ -5120,7 +5142,7 @@
             "transferredJsCssBytes": 582150,
             "resourceCountJsCss": 7,
             "sseRequestCount": 0,
-            "durationMs": 1032,
+            "durationMs": 1031,
             "eventSourceInstancesTotal": 0
           },
           "pageErrors": []
@@ -5128,20 +5150,20 @@
       ],
       "summary": {
         "routeReadyMs": {
-          "median": 894.8000000119209,
-          "p95": 898.3099999904632,
+          "median": 898.1999999880791,
+          "p95": 925.919999998808,
           "raw": [
-            894.8000000119209,
-            891.7000000476837,
-            898.6999999880791
+            897.6000000238419,
+            929,
+            898.1999999880791
           ]
         },
         "longTaskCount": {
           "median": 0,
-          "p95": 0,
+          "p95": 0.8999999999999999,
           "raw": [
             0,
-            0,
+            1,
             0
           ]
         },
@@ -5156,10 +5178,10 @@
         },
         "maxLongTaskMs": {
           "median": 0,
-          "p95": 0,
+          "p95": 44.99999999999999,
           "raw": [
             0,
-            0,
+            50,
             0
           ]
         },
@@ -5173,21 +5195,21 @@
           ]
         },
         "frameCount": {
-          "median": 59,
-          "p95": 59.9,
+          "median": 60,
+          "p95": 60.9,
           "raw": [
-            57,
             60,
-            59
+            59,
+            61
           ]
         },
         "frameOver16Ms": {
           "median": 59,
-          "p95": 59,
+          "p95": 59.9,
           "raw": [
-            57,
             59,
-            59
+            59,
+            60
           ]
         },
         "domNodes": {
@@ -5200,12 +5222,12 @@
           ]
         },
         "jsHeapBytes": {
-          "median": 4301230,
-          "p95": 4303458.4,
+          "median": 4290793,
+          "p95": 4309447.3,
           "raw": [
-            4303706,
-            4301230,
-            4290949
+            4278525,
+            4311520,
+            4290793
           ]
         },
         "incomingEvents": {
@@ -5281,12 +5303,12 @@
           ]
         },
         "durationMs": {
-          "median": 1026,
-          "p95": 1031.4,
+          "median": 1031,
+          "p95": 1058.9,
           "raw": [
-            1026,
-            1023,
-            1032
+            1031,
+            1062,
+            1031
           ]
         },
         "eventSourceInstancesTotal": {
@@ -5311,15 +5333,15 @@
         {
           "repeat": 1,
           "metrics": {
-            "routeReadyMs": 133.80000001192093,
+            "routeReadyMs": 136.60000002384186,
             "longTaskCount": 0,
             "longTaskOver50Ms": 0,
             "maxLongTaskMs": 0,
             "mutationBatches": 24,
-            "frameCount": 38,
+            "frameCount": 37,
             "frameOver16Ms": 37,
             "domNodes": 265,
-            "jsHeapBytes": 8181517,
+            "jsHeapBytes": 8161519,
             "incomingEvents": 0,
             "renderedEvents": 0,
             "renderedConsoleLines": 0,
@@ -5333,7 +5355,7 @@
             "transferredJsCssBytes": 716712,
             "resourceCountJsCss": 12,
             "sseRequestCount": 0,
-            "durationMs": 660,
+            "durationMs": 665,
             "eventSourceInstancesTotal": 0
           },
           "pageErrors": []
@@ -5341,15 +5363,15 @@
         {
           "repeat": 2,
           "metrics": {
-            "routeReadyMs": 127.69999998807907,
+            "routeReadyMs": 174.9000000357628,
             "longTaskCount": 0,
             "longTaskOver50Ms": 0,
             "maxLongTaskMs": 0,
-            "mutationBatches": 24,
-            "frameCount": 37,
+            "mutationBatches": 26,
+            "frameCount": 36,
             "frameOver16Ms": 36,
             "domNodes": 265,
-            "jsHeapBytes": 8179096,
+            "jsHeapBytes": 8186068,
             "incomingEvents": 0,
             "renderedEvents": 0,
             "renderedConsoleLines": 0,
@@ -5363,7 +5385,7 @@
             "transferredJsCssBytes": 716712,
             "resourceCountJsCss": 12,
             "sseRequestCount": 0,
-            "durationMs": 655,
+            "durationMs": 718,
             "eventSourceInstancesTotal": 0
           },
           "pageErrors": []
@@ -5371,15 +5393,15 @@
         {
           "repeat": 3,
           "metrics": {
-            "routeReadyMs": 123.20000004768372,
+            "routeReadyMs": 141.30000001192093,
             "longTaskCount": 0,
             "longTaskOver50Ms": 0,
             "maxLongTaskMs": 0,
             "mutationBatches": 24,
-            "frameCount": 37,
+            "frameCount": 36,
             "frameOver16Ms": 36,
             "domNodes": 265,
-            "jsHeapBytes": 8157440,
+            "jsHeapBytes": 8195121,
             "incomingEvents": 0,
             "renderedEvents": 0,
             "renderedConsoleLines": 0,
@@ -5393,7 +5415,7 @@
             "transferredJsCssBytes": 716712,
             "resourceCountJsCss": 12,
             "sseRequestCount": 0,
-            "durationMs": 649,
+            "durationMs": 668,
             "eventSourceInstancesTotal": 0
           },
           "pageErrors": []
@@ -5401,12 +5423,12 @@
       ],
       "summary": {
         "routeReadyMs": {
-          "median": 127.69999998807907,
-          "p95": 133.19000000953673,
+          "median": 141.30000001192093,
+          "p95": 171.5400000333786,
           "raw": [
-            133.80000001192093,
-            127.69999998807907,
-            123.20000004768372
+            136.60000002384186,
+            174.9000000357628,
+            141.30000001192093
           ]
         },
         "longTaskCount": {
@@ -5438,20 +5460,20 @@
         },
         "mutationBatches": {
           "median": 24,
-          "p95": 24,
+          "p95": 25.8,
           "raw": [
             24,
-            24,
+            26,
             24
           ]
         },
         "frameCount": {
-          "median": 37,
-          "p95": 37.9,
+          "median": 36,
+          "p95": 36.9,
           "raw": [
-            38,
             37,
-            37
+            36,
+            36
           ]
         },
         "frameOver16Ms": {
@@ -5473,12 +5495,12 @@
           ]
         },
         "jsHeapBytes": {
-          "median": 8179096,
-          "p95": 8181274.9,
+          "median": 8186068,
+          "p95": 8194215.7,
           "raw": [
-            8181517,
-            8179096,
-            8157440
+            8161519,
+            8186068,
+            8195121
           ]
         },
         "incomingEvents": {
@@ -5554,12 +5576,12 @@
           ]
         },
         "durationMs": {
-          "median": 655,
-          "p95": 659.5,
+          "median": 668,
+          "p95": 713,
           "raw": [
-            660,
-            655,
-            649
+            665,
+            718,
+            668
           ]
         },
         "eventSourceInstancesTotal": {
@@ -5584,59 +5606,27 @@
         {
           "repeat": 1,
           "metrics": {
-            "routeReadyMs": 890.6999999880791,
+            "routeReadyMs": 898.1999999880791,
             "longTaskCount": 0,
             "longTaskOver50Ms": 0,
             "maxLongTaskMs": 0,
             "mutationBatches": 64,
             "frameCount": 64,
-            "frameOver16Ms": 63,
+            "frameOver16Ms": 64,
             "domNodes": 194,
-            "jsHeapBytes": 6324096,
+            "jsHeapBytes": 6346360,
             "incomingEvents": 51,
             "renderedEvents": 48,
             "renderedConsoleLines": 48,
-            "latestDisplayedEventDelayMs": 654.6000000238419,
-            "terminalStatusDelayMs": 654.6999999880791,
+            "latestDisplayedEventDelayMs": 1.2000000476837158,
+            "terminalStatusDelayMs": 1.0999999642372131,
             "duplicateEventIds": 0,
             "missingEventIds": 0,
             "eventOrderMatchesJournal": null,
             "eventSourceInstances": {
               "PERF-JOB-266": 1
             },
-            "inputToNextPaintMs": 29.5,
-            "transferredJsCssBytes": 582430,
-            "resourceCountJsCss": 8,
-            "sseRequestCount": 1,
-            "durationMs": 1096,
-            "eventSourceInstancesTotal": 1
-          },
-          "pageErrors": []
-        },
-        {
-          "repeat": 2,
-          "metrics": {
-            "routeReadyMs": 894.3000000119209,
-            "longTaskCount": 0,
-            "longTaskOver50Ms": 0,
-            "maxLongTaskMs": 0,
-            "mutationBatches": 64,
-            "frameCount": 62,
-            "frameOver16Ms": 62,
-            "domNodes": 194,
-            "jsHeapBytes": 6084876,
-            "incomingEvents": 51,
-            "renderedEvents": 48,
-            "renderedConsoleLines": 48,
-            "latestDisplayedEventDelayMs": 659.9000000357628,
-            "terminalStatusDelayMs": 659.9000000357628,
-            "duplicateEventIds": 0,
-            "missingEventIds": 0,
-            "eventOrderMatchesJournal": null,
-            "eventSourceInstances": {
-              "PERF-JOB-266": 1
-            },
-            "inputToNextPaintMs": 28.69999998807907,
+            "inputToNextPaintMs": 29.399999976158142,
             "transferredJsCssBytes": 582430,
             "resourceCountJsCss": 8,
             "sseRequestCount": 1,
@@ -5646,33 +5636,65 @@
           "pageErrors": []
         },
         {
-          "repeat": 3,
+          "repeat": 2,
           "metrics": {
-            "routeReadyMs": 890.9000000357628,
+            "routeReadyMs": 908.3999999761581,
             "longTaskCount": 0,
             "longTaskOver50Ms": 0,
             "maxLongTaskMs": 0,
-            "mutationBatches": 64,
-            "frameCount": 65,
-            "frameOver16Ms": 64,
+            "mutationBatches": 63,
+            "frameCount": 63,
+            "frameOver16Ms": 63,
             "domNodes": 194,
-            "jsHeapBytes": 6040776,
+            "jsHeapBytes": 6301650,
             "incomingEvents": 51,
             "renderedEvents": 48,
             "renderedConsoleLines": 48,
-            "latestDisplayedEventDelayMs": 665.5,
-            "terminalStatusDelayMs": 665.5999999642372,
+            "latestDisplayedEventDelayMs": 2,
+            "terminalStatusDelayMs": 1.9000000357627869,
             "duplicateEventIds": 0,
             "missingEventIds": 0,
             "eventOrderMatchesJournal": null,
             "eventSourceInstances": {
               "PERF-JOB-266": 1
             },
-            "inputToNextPaintMs": 25.399999976158142,
+            "inputToNextPaintMs": 29.19999998807907,
             "transferredJsCssBytes": 582430,
             "resourceCountJsCss": 8,
             "sseRequestCount": 1,
-            "durationMs": 1108,
+            "durationMs": 1119,
+            "eventSourceInstancesTotal": 1
+          },
+          "pageErrors": []
+        },
+        {
+          "repeat": 3,
+          "metrics": {
+            "routeReadyMs": 904.1000000238419,
+            "longTaskCount": 1,
+            "longTaskOver50Ms": 1,
+            "maxLongTaskMs": 51,
+            "mutationBatches": 64,
+            "frameCount": 64,
+            "frameOver16Ms": 63,
+            "domNodes": 194,
+            "jsHeapBytes": 6346246,
+            "incomingEvents": 51,
+            "renderedEvents": 48,
+            "renderedConsoleLines": 48,
+            "latestDisplayedEventDelayMs": 1.199999988079071,
+            "terminalStatusDelayMs": 1.100000023841858,
+            "duplicateEventIds": 0,
+            "missingEventIds": 0,
+            "eventOrderMatchesJournal": null,
+            "eventSourceInstances": {
+              "PERF-JOB-266": 1
+            },
+            "inputToNextPaintMs": 20.900000035762787,
+            "transferredJsCssBytes": 582430,
+            "resourceCountJsCss": 8,
+            "sseRequestCount": 1,
+            "durationMs": 1094,
             "eventSourceInstancesTotal": 1
           },
           "pageErrors": []
@@ -5680,39 +5702,39 @@
       ],
       "summary": {
         "routeReadyMs": {
-          "median": 890.9000000357628,
-          "p95": 893.9600000143051,
+          "median": 904.1000000238419,
+          "p95": 907.9699999809266,
           "raw": [
-            890.6999999880791,
-            894.3000000119209,
-            890.9000000357628
+            898.1999999880791,
+            908.3999999761581,
+            904.1000000238419
           ]
         },
         "longTaskCount": {
           "median": 0,
-          "p95": 0,
+          "p95": 0.8999999999999999,
           "raw": [
             0,
             0,
-            0
+            1
           ]
         },
         "longTaskOver50Ms": {
           "median": 0,
-          "p95": 0,
+          "p95": 0.8999999999999999,
           "raw": [
             0,
             0,
-            0
+            1
           ]
         },
         "maxLongTaskMs": {
           "median": 0,
-          "p95": 0,
+          "p95": 45.9,
           "raw": [
             0,
             0,
-            0
+            51
           ]
         },
         "mutationBatches": {
@@ -5720,26 +5742,26 @@
           "p95": 64,
           "raw": [
             64,
-            64,
+            63,
             64
           ]
         },
         "frameCount": {
           "median": 64,
-          "p95": 64.9,
+          "p95": 64,
           "raw": [
             64,
-            62,
-            65
+            63,
+            64
           ]
         },
         "frameOver16Ms": {
           "median": 63,
           "p95": 63.9,
           "raw": [
+            64,
             63,
-            62,
-            64
+            63
           ]
         },
         "domNodes": {
@@ -5752,12 +5774,12 @@
           ]
         },
         "jsHeapBytes": {
-          "median": 6084876,
-          "p95": 6300174,
+          "median": 6346246,
+          "p95": 6346348.6,
           "raw": [
-            6324096,
-            6084876,
-            6040776
+            6346360,
+            6301650,
+            6346246
           ]
         },
         "incomingEvents": {
@@ -5788,21 +5810,21 @@
           ]
         },
         "latestDisplayedEventDelayMs": {
-          "median": 659.9000000357628,
-          "p95": 664.9400000035763,
+          "median": 1.2000000476837158,
+          "p95": 1.9200000047683714,
           "raw": [
-            654.6000000238419,
-            659.9000000357628,
-            665.5
+            1.2000000476837158,
+            2,
+            1.199999988079071
           ]
         },
         "terminalStatusDelayMs": {
-          "median": 659.9000000357628,
-          "p95": 665.0299999713898,
+          "median": 1.100000023841858,
+          "p95": 1.820000034570694,
           "raw": [
-            654.6999999880791,
-            659.9000000357628,
-            665.5999999642372
+            1.0999999642372131,
+            1.9000000357627869,
+            1.100000023841858
           ]
         },
         "duplicateEventIds": {
@@ -5824,12 +5846,12 @@
           ]
         },
         "inputToNextPaintMs": {
-          "median": 28.69999998807907,
-          "p95": 29.419999998807906,
+          "median": 29.19999998807907,
+          "p95": 29.379999977350234,
           "raw": [
-            29.5,
-            28.69999998807907,
-            25.399999976158142
+            29.399999976158142,
+            29.19999998807907,
+            20.900000035762787
           ]
         },
         "transferredJsCssBytes": {
@@ -5861,11 +5883,11 @@
         },
         "durationMs": {
           "median": 1100,
-          "p95": 1107.2,
+          "p95": 1117.1,
           "raw": [
-            1096,
             1100,
-            1108
+            1119,
+            1094
           ]
         },
         "eventSourceInstancesTotal": {
