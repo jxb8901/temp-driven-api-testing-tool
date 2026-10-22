@@ -123,8 +123,13 @@ final class WorkerProcessFence {
         List<CompletableFuture<?>> exits = new ArrayList<>();
         synchronized (this) {
             if (incomplete) return; // An incomplete enumeration cannot authorize publication.
-            exits.add(root.onExit());
-            for (Identity identity : observed.values()) if (identity.alive()) exits.add(identity.handle.onExit());
+            // Descendant exit monitoring may allocate additional JVM process reapers.
+            Thread caller=Thread.currentThread();ClassLoader previous=caller.getContextClassLoader();
+            caller.setContextClassLoader(ClassLoader.getPlatformClassLoader());
+            try {
+                exits.add(root.onExit());
+                for (Identity identity : observed.values()) if (identity.alive()) exits.add(identity.handle.onExit());
+            } finally {caller.setContextClassLoader(previous);}
         }
         // Completion may run synchronously; never call Job/store code under the fence monitor.
         CompletableFuture.allOf(exits.toArray(CompletableFuture[]::new)).thenRun(action);

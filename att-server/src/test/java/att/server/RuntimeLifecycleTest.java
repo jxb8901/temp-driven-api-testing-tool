@@ -52,6 +52,24 @@ class RuntimeLifecycleTest {
             try(ServerRuntime reopened=new ServerRuntime(config,null)){assertFalse(compactions(reopened).isShutdown());}
         } finally {release.countDown();runtime.close();}
     }
+    @Test void processLaunchUsesJvmLoaderAndRestoresCallerOnSuccessAndFailure() throws Exception {
+        ClassLoader original=Thread.currentThread().getContextClassLoader();
+        java.util.concurrent.atomic.AtomicBoolean fail=new java.util.concurrent.atomic.AtomicBoolean(true);
+        try(ServerRuntime runtime=new ServerRuntime(config(),null,builder->{
+            assertSame(ClassLoader.getPlatformClassLoader(),Thread.currentThread().getContextClassLoader());
+            if(fail.getAndSet(false))throw new java.io.IOException("launch failed");
+            return builder.start();
+        })) {
+            ProcessBuilder command=new ProcessBuilder(Path.of(System.getProperty("java.home"),"bin","java").toString(),"-version")
+                    .redirectOutput(ProcessBuilder.Redirect.DISCARD).redirectError(ProcessBuilder.Redirect.DISCARD);
+            assertThrows(java.io.IOException.class,()->runtime.startWorkerProcess(command));
+            assertSame(original,Thread.currentThread().getContextClassLoader());
+            Process process=runtime.startWorkerProcess(command);
+            try {assertTrue(process.waitFor(5,TimeUnit.SECONDS));}
+            finally {process.destroyForcibly();}
+            assertSame(original,Thread.currentThread().getContextClassLoader());
+        }
+    }
     @Test void sharedH2RegistrationSurvivesOneStoreClosingAndReloadsAfterLastClose() throws Exception {
         ServerConfig config=config();JobStore first=new JobStore(config),second=new JobStore(config);
         try {

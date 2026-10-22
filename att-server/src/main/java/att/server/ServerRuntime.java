@@ -459,6 +459,14 @@ final class ServerRuntime implements AutoCloseable {
         }
         } finally {admissionLifecycle.readLock().unlock();}
     }
+    Process startWorkerProcess(ProcessBuilder builder) throws java.io.IOException {
+        // JDK 17 process reapers inherit the spawning thread's context loader.
+        // They belong to the JVM and may outlive this WAR even after every child exits.
+        Thread caller=Thread.currentThread();ClassLoader previous=caller.getContextClassLoader();
+        caller.setContextClassLoader(ClassLoader.getPlatformClassLoader());
+        try {return processLauncher.start(builder);}
+        finally {caller.setContextClassLoader(previous);}
+    }
     private void startStderrDrainer(Process process,String name) {
         Thread thread=new Thread(()->{
             try(var input=process.getErrorStream()){byte[] buffer=new byte[8192];while(input.read(buffer)>=0){} }
@@ -487,7 +495,7 @@ final class ServerRuntime implements AutoCloseable {
                 command.add("-cp");command.add(cp);command.add("att.worker.WorkerMain");
                 ProcessBuilder builder=new ProcessBuilder(command);
                 builder.directory(packageRoot(job.packageId).toFile());
-                job.workerSpawnStartedNanos=System.nanoTime();process=processLauncher.start(builder);job.workerSpawnedNanos=System.nanoTime();job.process=process;job.processFence=new WorkerProcessFence(process);job.workerPid=process.pid();job.workerStartTime=process.info().startInstant().orElse(Instant.now());job.startedAt=Instant.now();transition(job,"RUNNING");rememberWorkerProcesses(job,job.processFence);
+                job.workerSpawnStartedNanos=System.nanoTime();process=startWorkerProcess(builder);job.workerSpawnedNanos=System.nanoTime();job.process=process;job.processFence=new WorkerProcessFence(process);job.workerPid=process.pid();job.workerStartTime=process.info().startInstant().orElse(Instant.now());job.startedAt=Instant.now();transition(job,"RUNNING");rememberWorkerProcesses(job,job.processFence);
             }
             startStderrDrainer(process,"att-server-worker-stderr");
             try(var out=process.getOutputStream()){out.write(workerRequestBytes(job.request));out.write('\n');out.flush();}
@@ -1915,7 +1923,7 @@ final class ServerRuntime implements AutoCloseable {
                     "-cp",cp,"att.worker.WorkerMain","--inspection-daemon");
             builder.directory(root.toFile());
             long startupStarted=System.nanoTime();
-            Process started=processLauncher.start(builder);
+            Process started=startWorkerProcess(builder);
             inspectionMetrics.record(STARTUP,System.nanoTime()-startupStarted);
             process=started;
             inspectionProcesses.put(started,Boolean.TRUE);
