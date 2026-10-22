@@ -296,6 +296,7 @@ jobs:
           npm run smoke
           npm run smoke:explorer
           npm run smoke:archive-metrics
+          npm run smoke:load-templates
           npm run smoke:load-jobs
           npm run smoke:job-replay
           npm run smoke:run

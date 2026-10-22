@@ -741,11 +741,14 @@ final class ServerRuntime implements AutoCloseable {
         return store.list(100,search,pinnedOnly);
     }
     List<Map<String,Object>> loadJobsFor(String principal,int offset,int limit) throws Exception {
+        return loadJobsFor(principal,offset,limit,null,false);
+    }
+    List<Map<String,Object>> loadJobsFor(String principal,int offset,int limit,String search,boolean pinnedOnly) throws Exception {
         if(principal==null||principal.isBlank())throw new IllegalArgumentException("A server-resolved request identity is required");
         if(offset<0||offset>1000000||limit<1||limit>100)throw new IllegalArgumentException("Load job pagination is invalid");
         int fetch=limit==Integer.MAX_VALUE?limit:limit+1;
         if("local".equals(config.authMode)&&!store.isActiveUser(principal))throw new NotFoundException();
-        return store.listLoad(fetch,offset);
+        return store.listLoad(fetch,offset,search,pinnedOnly);
     }
     Job job(String id){if(!JOB_ID.matcher(id).matches())throw new NotFoundException();Job j=jobs.get(id);if(j==null)throw new NotFoundException();return j;}
     Map<String,Object> jobRecord(String id) throws Exception {
@@ -975,6 +978,20 @@ final class ServerRuntime implements AutoCloseable {
         request.inspectionAction="quick-load-policy";request.loadModel=model;request.inspectionPath=templateId;
         Map<String,Object> result=executeInspection(root,request);result.remove("revisionDigest");return result;
     }
+    Map<String,Object> inspectLoadTemplates(String packageId,String query,int offset,int limit,String principal) throws Exception {
+        if(!config.inspection.enabled)throw new NotFoundException();
+        requireInlineLoadEnabled();
+        if(principal==null||principal.isBlank())throw new IllegalArgumentException("A server-resolved request identity is required");
+        Path root=packageRoot(packageId);if(root==null)throw new NotFoundException();validatePackageRoot(root);
+        WorkerRequest request=inspectionRequest(packageId,root,null);
+        request.inspectionAction="load-templates";request.inspectionQuery=query;request.inspectionOffset=offset;request.inspectionLimit=limit;
+        Map<String,Object> result=executeInspection(root,request);
+        result.put("limits",Map.of("maxWorkloads",config.inlineLoad.maxWorkloads,"maxTargets",config.inlineLoad.maxTargets,
+                "maxTotalUsers",config.inlineLoad.maxTotalUsers,"maxAggregateArrivalRatePerSecond",config.inlineLoad.maxAggregateArrivalRatePerSecond,
+                "maxConcurrentPerWorkload",config.inlineLoad.maxConcurrentPerWorkload,"maxTotalConcurrent",config.inlineLoad.maxTotalConcurrent,
+                "maxDurationSeconds",config.inlineLoad.maxDurationSeconds));
+        return result;
+    }
     private Map<String,Object> inspectDebugFormInternal(String packageId,String type,String resourceId,String environment,
                                                         String principal) throws Exception {
         if(!config.inspection.enabled)throw new NotFoundException();
@@ -1082,12 +1099,13 @@ final class ServerRuntime implements AutoCloseable {
         if(principal==null||principal.isBlank())throw new IllegalArgumentException("A server-resolved request identity is required");
         if(!config.inspection.enabled)throw new NotFoundException();
         requireInlineLoadEnabled();
-        requireObject(input,"A JSON object is required");requireOnlyFields(input,"packageId","environment","scenario");
+        requireObject(input,"A JSON object is required");requireOnlyFields(input,"packageId","environment","scenario","templateComposition");
         String packageId=required(input,"packageId");Path root=packageRoot(packageId);if(root==null)throw new NotFoundException();validatePackageRoot(root);
         String environment=optionalText(input,"environment");if(environment!=null)environment=inspectionEnvironment(environment,"environment");
-        JsonNode scenarioNode=input.get("scenario");requireObject(scenarioNode,"scenario must be a JSON object");
+        if(input.has("scenario")&&input.has("templateComposition"))throw new IllegalArgumentException("Choose scenario or templateComposition");
+        JsonNode scenarioNode=input.has("templateComposition")?input.get("templateComposition"):input.get("scenario");requireObject(scenarioNode,"scenario must be a JSON object");
         @SuppressWarnings("unchecked") Map<String,Object> scenarioInput=(Map<String,Object>)JSON.convertValue(scenarioNode,Map.class);
-        WorkerRequest request=inspectionRequest(packageId,root,environment);request.inspectionAction="load-scenario";request.inlineLoadScenario=scenarioInput;
+        WorkerRequest request=inspectionRequest(packageId,root,environment);request.inspectionAction=input.has("templateComposition")?"load-template-compose":"load-scenario";request.inlineLoadScenario=scenarioInput;
         Map<String,Object> inspected=executeInspection(root,request);
         Object rawScenario=inspected.remove("normalizedScenario"),rawDigest=inspected.remove("revisionDigest");
         Object rawSensitive=inspected.remove("containsSensitiveValues");
@@ -1702,6 +1720,7 @@ final class ServerRuntime implements AutoCloseable {
         }
         boolean draftInspection="run-input".equals(request.inspectionAction)||"debug-input".equals(request.inspectionAction)||"debug-form".equals(request.inspectionAction)
                 ||"quick-load-input".equals(request.inspectionAction)||"quick-load-form".equals(request.inspectionAction)
+                ||"load-templates".equals(request.inspectionAction)||"load-template-compose".equals(request.inspectionAction)
                 ||"quick-load-policy".equals(request.inspectionAction)||"load-scenario".equals(request.inspectionAction)
                 ||"load-detail".equals(request.inspectionAction);
         if(draftInspection&&("WORKER_REQUEST_INVALID".equals(workerError)

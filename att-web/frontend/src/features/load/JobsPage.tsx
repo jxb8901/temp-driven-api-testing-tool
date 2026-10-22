@@ -384,7 +384,7 @@ function PinReasonForm({ title, busy, onSubmit, onCancel }: { title: string; bus
   </form>;
 }
 
-function JobsList({ api, principal = '', onOpenJob, onSchedule, onEditSchedule }: JobsFeatureProps) {
+function JobsList({ api, principal = '', onOpenJob, onSchedule, onEditSchedule, executionType: initialExecutionType, onExecutionTypeChange }: JobsFeatureProps) {
   const [rows, setRows] = useState<JobSummary[]>([]);
   const [selected, setSelected] = useState<string[]>([]);
   const [pinnedOnly, setPinnedOnly] = useState(false);
@@ -418,7 +418,10 @@ function JobsList({ api, principal = '', onOpenJob, onSchedule, onEditSchedule }
   const [serverPrincipal, setServerPrincipal] = useState(principal);
   const [status, setStatus] = useState('');
   const [packageId, setPackageId] = useState('');
-  const [command, setCommand] = useState('');
+  const [command, setCommand] = useState(initialExecutionType || '');
+  const [nextLoadOffset, setNextLoadOffset] = useState<number | null>(null);
+  const [loadMoreBusy, setLoadMoreBusy] = useState(false);
+  useEffect(() => { setCommand(previous => initialExecutionType || (previous === 'load' ? '' : previous)); setPage(0); }, [initialExecutionType]);
   const [fromDate, setFromDate] = useState('');
   const [toDate, setToDate] = useState('');
   const [sort, setSort] = useState<'newest' | 'oldest' | 'id'>('newest');
@@ -433,7 +436,9 @@ function JobsList({ api, principal = '', onOpenJob, onSchedule, onEditSchedule }
     setState(previous => previous === 'ready' || previous === 'refreshing' ? 'refreshing' : 'loading');
     setError('');
     debounce = setTimeout(() => {
-      api.listJobs({ principal: serverPrincipal.trim() || undefined, signal: controller.signal, ...(pinnedOnly ? {pinnedOnly: true} : {}) })
+      (command === 'load' && api.listLoadJobs
+        ? api.listLoadJobs({ offset: 0, limit: 100, principal: serverPrincipal.trim() || undefined, ...(pinnedOnly ? { pinnedOnly: true } : {}), signal: controller.signal }).then(result => { if (current === sequence.current) setNextLoadOffset(result.nextOffset ?? null); return result.items; })
+        : api.listJobs({ principal: serverPrincipal.trim() || undefined, signal: controller.signal, ...(pinnedOnly ? {pinnedOnly: true} : {}) }).then(items => { if (current === sequence.current) setNextLoadOffset(null); return items; }))
         .then(items => {
           if (controller.signal.aborted || current !== sequence.current) return;
           setRows(items.slice(0, 100));
@@ -450,7 +455,7 @@ function JobsList({ api, principal = '', onOpenJob, onSchedule, onEditSchedule }
       if (debounce) clearTimeout(debounce);
       controller.abort();
     };
-  }, [api, serverPrincipal, refreshVersion, pinnedOnly]);
+  }, [api, serverPrincipal, refreshVersion, pinnedOnly, command]);
 
   const filtered = useMemo(() => {
     const start = fromDate ? new Date(`${fromDate}T00:00:00`).getTime() : Number.NEGATIVE_INFINITY;
@@ -479,7 +484,7 @@ function JobsList({ api, principal = '', onOpenJob, onSchedule, onEditSchedule }
   const end = Math.min((currentPage + 1) * PAGE_SIZE, filtered.length);
   const clearFilters = () => {
     setPinnedOnly(false); setServerPrincipal(''); setStatus(''); setPackageId(''); setCommand('');
-    setFromDate(''); setToDate(''); setSort('newest'); setPage(0);
+    setFromDate(''); setToDate(''); setSort('newest'); setPage(0); onExecutionTypeChange?.(undefined);
   };
 
   return <div className="page-content att-jobs-page att-query-workspace" aria-labelledby="jobs-title">
@@ -501,7 +506,7 @@ function JobsList({ api, principal = '', onOpenJob, onSchedule, onEditSchedule }
         <select value={packageId} onChange={resetPage(setPackageId)}><option value="">All loaded packages</option>{packageId && !rows.some(job => job.packageId === packageId) && <option value={packageId}>{packageId} (not in latest loaded rows)</option>}{unique(rows.map(job => job.packageId)).map(value => <option key={value}>{value}</option>)}</select>
       </label>
       <label>Type
-        <select value={command} onChange={resetPage(setCommand)}><option value="">All loaded types</option>{command && !rows.some(job => executionType(job) === command) && <option value={command}>{command} (not in latest loaded rows)</option>}{unique(rows.map(executionType)).map(value => <option key={value}>{value}</option>)}</select>
+        <select value={command} onChange={event => { const value = event.currentTarget.value; setCommand(value); setPage(0); onExecutionTypeChange?.(value === 'load' ? 'load' : undefined); }}><option value="">All loaded types</option><option value="load">LOAD (Server filter)</option>{command && command !== 'load' && !rows.some(job => executionType(job) === command) && <option value={command}>{command} (not in latest loaded rows)</option>}{unique(rows.map(executionType)).filter(value => value !== 'load').map(value => <option key={value}>{value}</option>)}</select>
       </label>
       <label>Created from
         <input type="date" value={fromDate} onChange={resetPage(setFromDate)} />
@@ -523,7 +528,14 @@ function JobsList({ api, principal = '', onOpenJob, onSchedule, onEditSchedule }
       </div>
     </section>
     <section className="att-query-results-panel" aria-label="Job results">
-    <p className="att-list-coverage" role="note">Filters and sorting apply to the API-loaded rows. The API returns at most 100 jobs; principal search and Pinned only are performed by the Server. No environment field is returned for this list.</p>
+    <p className="att-list-coverage" role="note">{command === 'load' ? 'LOAD, principal search and Pinned only are filtered by the authorized Server query before pagination, newest first. Other filters apply to loaded LOAD rows.' : 'Filters and sorting apply to at most 100 jobs loaded from the API; principal search and Pinned only are performed by the Server.'}</p>
+    {command === 'load' && nextLoadOffset != null && <button type="button" disabled={loadMoreBusy} onClick={async () => {
+      if (!api.listLoadJobs) return; const version = sequence.current; setLoadMoreBusy(true);
+      try { const result = await api.listLoadJobs({ offset: nextLoadOffset, limit: 100, principal: serverPrincipal.trim() || undefined, ...(pinnedOnly ? { pinnedOnly: true } : {}) }); if (version === sequence.current) { setRows(current => [...current, ...result.items]); setNextLoadOffset(result.nextOffset ?? null); } }
+      catch (error) { if (version === sequence.current) setError(toError(error, 'LOAD jobs could not be loaded.').message); }
+      finally { setLoadMoreBusy(false); }
+    }}>Load older LOAD Jobs</button>}
+
     <p className="att-list-count att-query-result-status" role="status" aria-live="polite" aria-busy={state === 'loading' || state === 'refreshing'}>
       {state === 'loading' ? 'Loading jobs…' : state === 'refreshing' ? `Refreshing ${rows.length} loaded jobs…` : `Showing ${start}–${end} of ${filtered.length} matching loaded jobs (page ${currentPage + 1} of ${pageCount}).`}
     </p>

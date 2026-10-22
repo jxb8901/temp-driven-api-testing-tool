@@ -374,7 +374,7 @@ class LoadScenarioTest {
         Path project = project();
         Path scenarioFile = write(project, "v14-defaults.yaml", "schemaVersion: att-load/v1.4\n"
                 + "load: {duration: 5s, warmup: 1s}\n"
-                + "execution: {thinkTime: 10ms, execIdFormat: '${EXEC.LOAD.WORKLOAD_ID}-${EXEC.LOAD.ITERATION}'}\n"
+                + "execution: {thinkTime: 10ms}\n"
                 + "thresholds: {p95: '< 100ms'}\n"
                 + "workloads:\n"
                 + "  - id: first\n    target: {type: template, id: LOAD_TEMPLATE}\n    load: {users: 3}\n    thresholds: {p99: '< 200ms'}\n"
@@ -388,7 +388,6 @@ class LoadScenarioTest {
         assertEquals("< 200ms", scenario.workload("first").thresholds().get("p99"));
         assertFalse(scenario.workload("first").thresholds().containsKey("p95"));
         assertTrue(scenario.workload("second").thresholds().isEmpty());
-        assertEquals("${EXEC.LOAD.WORKLOAD_ID}-${EXEC.LOAD.ITERATION}", scenario.execIdFormat());
 
         Path singleFile = write(project, "v14-single.yaml", "schemaVersion: att-load/v1.4\n"
                 + "load: {users: 2, duration: 5s}\n"
@@ -632,7 +631,7 @@ class LoadScenarioTest {
                     now, now, now + 1, result.status(), result.evidenceRef()));
             assertTrue(evidence.events().isEmpty());
             assertEquals(0, evidence.write(outputRoot.resolve("load/metrics-run")).get("count"));
-            assertFalse(Files.exists(outputRoot.resolve("load/metrics-run")));
+            assertFalse(Files.exists(outputRoot.resolve("load/metrics-run/executions")));
         } finally { resources.close(); }
     }
 
@@ -686,7 +685,7 @@ class LoadScenarioTest {
             assertEquals(ResultStatus.PASS, result.status(), result.diagnostic() == null ? "" : result.diagnostic().toString());
             assertEquals("false", result.context().resolve("ACTIONS.probe.output.result"));
             assertFalse(Files.exists(result.outputDirectory()), "metrics-only non-file iterations must keep EXEC.OUTPUT_DIR logical");
-            assertFalse(Files.exists(outputRoot.resolve("load/metrics-probe-run")));
+            assertFalse(Files.exists(outputRoot.resolve("load/metrics-probe-run/executions")));
         } finally { resources.close(); }
     }
 
@@ -757,7 +756,7 @@ class LoadScenarioTest {
                     now, now, now + 1, result.status(), result.evidenceRef()));
             assertTrue(evidence.events().isEmpty());
             assertEquals(0, evidence.write(outputRoot.resolve("load/reserved-run")).get("count"));
-            assertFalse(Files.exists(outputRoot.resolve("load/reserved-run")));
+            assertFalse(Files.exists(outputRoot.resolve("load/reserved-run/executions")));
         } finally { resources.close(); }
     }
 

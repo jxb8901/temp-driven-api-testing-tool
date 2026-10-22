@@ -1,4 +1,4 @@
-schemaVersion: att-load/v1.7
+schemaVersion: att-load/v1.8
 workloads:
 - id: account-date
   target:
@@ -27,5 +27,3 @@ workloads:
 thresholds:
   errorRate: < 1%
   minThroughput: '>= 1/s'
-execution:
-  execIdFormat: ${EXEC.RUN_ID}-${EXEC.LOAD.WORKLOAD_ID}-arrival-${EXEC.LOAD.ITERATION}

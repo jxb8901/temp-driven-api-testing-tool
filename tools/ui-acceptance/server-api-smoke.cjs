@@ -256,12 +256,16 @@ async function main() {
     assert.equal(overflow, false, 'the live Configuration and Quick Load UI must fit a tablet viewport');
 
     await page.goto(`${origin}/tools/att/ui/index.html#/advanced-load`);
-    await page.getByRole('heading', { name: 'LOAD Catalog', level: 1, exact: true }).waitFor();
+    await page.getByRole('heading', { name: 'Load testing', level: 1, exact: true }).waitFor();
+    await page.locator('.att-template-presets article').nth(5).waitFor();
+    assert.equal(await page.locator('.att-template-presets article').count(), 6);
+    await page.getByRole('button', { name: '☷ Scenarios', exact: true }).click();
+    await page.getByRole('heading', { name: 'Scenarios', level: 1, exact: true }).waitFor();
     assert.equal(await page.locator('.att-query-filter-panel[aria-label="LOAD Catalog filters"]').count(), 1,
       'LOAD Catalog filters must use the shared query contract');
     assert.equal(await page.locator('.att-query-results-panel[aria-label="Available LOAD YAML resources"]').count(), 1);
-    assert.equal(await page.locator('.att-query-results-panel[aria-label="Recent LOAD job results"]').count(), 1,
-      'Catalog resources and recent jobs must remain separate result datasets');
+    assert.equal(await page.locator('.att-query-results-panel[aria-label="Recent LOAD job results"]').count(), 0,
+      'Scenarios must not duplicate Jobs and results');
     await page.getByRole('button', { name: 'Clear filters' }).click();
     const scenarioCard = page.locator('.att-load-catalog-card').filter({ hasText: 'load/scenario.yaml' });
     await scenarioCard.waitFor();
@@ -278,7 +282,7 @@ async function main() {
     await page.getByRole('button', { name: 'Show YAML Source' }).click();
     await page.getByRole('region', { name: 'Load YAML Source', exact: true }).waitFor();
     await page.getByRole('button', { name: 'Back to LOAD Catalog' }).click();
-    await page.getByRole('heading', { name: 'LOAD Catalog', level: 1, exact: true }).waitFor();
+    await page.getByRole('heading', { name: 'Scenarios', level: 1, exact: true }).waitFor();
     await page.getByText('Environment: UAT', { exact: false }).waitFor();
     const restoredScenarioCard = page.locator('.att-load-catalog-card').filter({ hasText: 'load/scenario.yaml' });
     const restoredSchedule = restoredScenarioCard.getByRole('button', { name: 'Schedule' });
@@ -294,7 +298,7 @@ async function main() {
     assert.equal(await snapshotSource.inputValue(), 'Validated Load snapshot');
     assert.equal(await page.locator('#schedule-name').inputValue(), 'Validated LOAD snapshot');
     await page.getByRole('button', { name: 'Cancel', exact: true }).click();
-    await page.getByRole('heading', { name: 'LOAD Catalog', level: 1, exact: true }).waitFor();
+    await page.getByRole('heading', { name: 'Scenarios', level: 1, exact: true }).waitFor();
 
     await page.goto(`${origin}/tools/att/ui/index.html#/jobs`);
     await page.getByRole('heading', { name: 'Jobs', level: 1, exact: true }).waitFor();

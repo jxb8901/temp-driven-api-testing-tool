@@ -58,7 +58,7 @@ describe('LoadCatalogPage', () => {
         { packageId: 'payments', resourceId: 'load/policy.yaml', path: 'load/policy.yaml', kind: 'template', validation: 'valid', model: 'arrivalRate', workloadCount: 0, sourceAvailable: true, runNow: false, schedule: false, createQuickLoad: true },
       ], total: 2 })),
       validateLoadCatalogScenario: vi.fn(async () => ({ validation: 'valid', scheduleAvailable: true, draftId: 'C'.concat('a'.repeat(32)),
-        previewYaml: 'schemaVersion: att-load/v1.7\n', expiresAt: new Date(Date.now() + 60_000).toISOString() })),
+        previewYaml: 'schemaVersion: att-load/v1.8\n', expiresAt: new Date(Date.now() + 60_000).toISOString() })),
       getLoadSource: vi.fn(async () => ({ available: true, text: 'schemaVersion: att-load/v1.6\n', redacted: true })),
       submitLoadScenario: vi.fn(async () => ({ jobId: 'JOB-LOAD' })),
       listLoadJobs: vi.fn(async () => ({ items: [] })),
@@ -71,9 +71,10 @@ describe('LoadCatalogPage', () => {
 
     expect(host.querySelector('.att-query-filter-panel[aria-label="LOAD Catalog filters"]')).not.toBeNull();
     expect(host.querySelector('.att-query-results-panel[aria-label="Available LOAD YAML resources"]')).not.toBeNull();
-    expect(host.querySelector('.att-query-results-panel[aria-label="Recent LOAD job results"]')).not.toBeNull();
+    expect(host.querySelector('.att-query-results-panel[aria-label="Recent LOAD job results"]')).toBeNull();
+    expect(api.listLoadJobs).not.toHaveBeenCalled();
     expect(host.textContent).toContain('Executable Scenario');
-    expect(host.textContent).toContain('Load Template');
+    expect(host.textContent).toContain('Legacy Quick Load Policy');
     const validate = [...host.querySelectorAll('button')].find(button => button.textContent === 'Validate')!;
     await act(async () => validate.click()); await flush();
     expect(api.validateLoadCatalogScenario).toHaveBeenCalledWith('payments', 'load/nightly.yaml', 'SIT');
@@ -84,7 +85,7 @@ describe('LoadCatalogPage', () => {
     const schedule = [...host.querySelectorAll('button')].find(button => button.textContent === 'Schedule')!;
     await act(async () => schedule.click());
     expect(onSchedule).toHaveBeenCalledWith({ packageId: 'payments', environment: 'SIT', draftId: `C${'a'.repeat(32)}`,
-      previewYaml: 'schemaVersion: att-load/v1.7\n', expiresAt: expect.any(String), executionType: 'load' });
+      previewYaml: 'schemaVersion: att-load/v1.8\n', expiresAt: expect.any(String), executionType: 'load' });
     await act(async () => [...host.querySelectorAll('button')].find(button => button.textContent === 'Clear filters')!.click());
     expect((host.querySelector('[aria-label="Catalog Environment for payments"]') as HTMLSelectElement).value).toBe('SIT');
   });
@@ -310,7 +311,7 @@ describe('LoadCatalogPage', () => {
     expect([...host.querySelectorAll('button')].some(button => button.textContent === 'Load more scenarios')).toBe(false);
   });
 
-  it('keeps healthy package resources and recent jobs available when one package fails, with package retry', async () => {
+  it('keeps healthy package resources available without fetching job history when one package fails, with package retry', async () => {
     let brokenAttempts = 0;
     let healthyPages = 0;
     const api = {
@@ -329,7 +330,8 @@ describe('LoadCatalogPage', () => {
     await flush();
 
     expect(host.textContent).toContain('load/healthy.yaml');
-    expect(host.textContent).toContain('JOB-LOAD-1');
+    expect(host.textContent).not.toContain('JOB-LOAD-1');
+    expect(api.listLoadJobs).not.toHaveBeenCalled();
     expect(host.textContent).toContain('broken: Worker configuration is missing');
     expect(host.textContent).toContain('Configure required Tomcat environment variables.');
     const loadMore = [...host.querySelectorAll('button')].find(button => button.textContent === 'Load more scenarios')!;

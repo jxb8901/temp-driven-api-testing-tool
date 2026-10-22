@@ -70,8 +70,8 @@ async function main() {
       await page.getByRole('button', { name: 'J-load', exact: true }).click();
       await page.waitForURL(url => url.hash === '#/jobs/J-load');
     }
-    await page.goto(base + '#/advanced-load');
-    const history = page.locator('.att-load-job-row').filter({ has: page.getByRole('button', { name: 'J-load', exact: true }) });
+    await page.goto(base + '#/jobs?type=load');
+    const history = page.getByRole('row').filter({ has: page.getByRole('button', { name: 'J-load', exact: true }) });
     await history.getByRole('button', { name: 'Rerun', exact: true }).click();
     await page.getByRole('region', { name: 'Review rerun J-load' }).getByRole('button', { name: 'Cancel', exact: true }).click();
     await page.goto(base + '#/jobs/J-old');

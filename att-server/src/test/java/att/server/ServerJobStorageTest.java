@@ -18,6 +18,22 @@ import static org.junit.jupiter.api.Assertions.*;
 class ServerJobStorageTest {
     @TempDir Path temp;
 
+    @Test void loadQueryFiltersBeforePaginationAndHonorsPrincipalAndPins() throws Exception {
+        try (ServerRuntime runtime=runtime("load-query",null,Clock.systemUTC())) {
+            Instant finished=Instant.parse("2026-01-01T00:00:00Z");
+            for(int index=1;index<=6;index++) {
+                String id=String.format("J%016d",index);
+                seedRow(runtime,id,index%2==0?"load":"run","PASS",finished,false);
+            }
+            assertEquals(List.of("J0000000000000006","J0000000000000004"),runtime.store.listLoad(2,0,"CI",false).stream().map(row->row.get("jobId")).toList());
+            assertEquals("J0000000000000002",runtime.store.listLoad(2,2,"ci",false).get(0).get("jobId"));
+            assertTrue(runtime.store.listLoad(10,0,"missing",false).isEmpty());
+            runtime.pinJob("J0000000000000002",true,"ci");
+            assertEquals("J0000000000000002",runtime.store.listLoad(1,0,null,true).get(0).get("jobId"));
+            assertTrue(runtime.store.listLoad(1,1,null,true).isEmpty());
+        }
+    }
+
     @Test void pinnedJobsSurviveAgeQuotaAndRestartAndRequireUnpinBeforeManualDelete() throws Exception {
         ServerRuntime runtime=runtime("pins",quota(0),Clock.systemUTC());
         String run="J0000000000000901", load="J0000000000000902", other="J0000000000000903";

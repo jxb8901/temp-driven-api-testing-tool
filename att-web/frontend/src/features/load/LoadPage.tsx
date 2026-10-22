@@ -14,9 +14,9 @@ import type {
 
 type JsonObject = Record<string, unknown>;
 type ThinkTime = string | { min: string; max: string };
-type TargetDraft = { type: LoadTargetType; id: string; businessJson: string; businessValid: boolean };
-type MixDraft = TargetDraft & { id: string; weight: string };
-type WorkloadDraft = {
+export type TargetDraft = { type: LoadTargetType; id: string; businessJson: string; businessValid: boolean };
+export type MixDraft = TargetDraft & { entryId: string; weight: string };
+export type WorkloadDraft = {
   id: string;
   users: string;
   arrivalRate: string;
@@ -31,18 +31,18 @@ type WorkloadDraft = {
   target: TargetDraft;
   mix: MixDraft[];
 };
-type TimingDraft = { warmup: string; rampUp: string; duration: string; rampDown: string };
+export type TimingDraft = { warmup: string; rampUp: string; duration: string; rampDown: string };
 
 const emptyBusiness = (type: LoadTargetType): JsonObject => ({
   inputs: {},
   ...(type === 'tool' ? { arguments: {} } : { vars: {} }),
 });
 
-function newTarget(type: LoadTargetType = 'template'): TargetDraft {
+export function newTarget(type: LoadTargetType = 'template'): TargetDraft {
   return { type, id: '', businessJson: JSON.stringify(emptyBusiness(type), null, 2), businessValid: true };
 }
 
-function newWorkload(id: number, policy: JsonObject = {}): WorkloadDraft {
+export function newWorkload(id: number, policy: JsonObject = {}): WorkloadDraft {
   const load = asObject(policy.load);
   const execution = asObject(policy.execution);
   return {
@@ -104,14 +104,14 @@ function businessForTarget(raw: string, type: LoadTargetType): { inputs: JsonObj
   return type === 'tool' ? { inputs, vars: {}, arguments: args } : { inputs, vars, arguments: {} };
 }
 
-function makeScenario(
+export function makeScenario(
   policy: JsonObject,
   model: LoadModel,
   timing: TimingDraft,
   workloads: WorkloadDraft[],
   advanced: { execution: string; testdata: string; thresholds: string; evidence: string; seed: string },
 ): JsonObject {
-  const scenario: JsonObject = { ...policy, schemaVersion: String(policy.schemaVersion || 'att-load/v1.7') };
+  const scenario: JsonObject = { ...policy, schemaVersion: String(policy.schemaVersion || 'att-load/v1.8') };
   const rootLoad = { ...asObject(policy.load) };
   for (const field of ['warmup', 'rampUp', 'duration', 'rampDown'] as const) {
     const value = timing[field].trim();
@@ -153,11 +153,12 @@ function makeScenario(
         if (!entry.businessValid) throw new Error(`Mix target ${entry.id} has invalid business values.`);
         const weight = Number(entry.weight);
         if (!Number.isSafeInteger(weight) || weight < 1) throw new Error(`Mix target ${entry.id} needs a positive whole-number weight.`);
-        if (!entry.id.trim()) throw new Error('Every mix target needs an ID.');
+        if (!entry.entryId.trim()) throw new Error('Every mix target needs an ID.');
+        if (!entry.id.trim()) throw new Error('Every mix target needs a bound Target.');
         const values = businessForTarget(entry.businessJson, entry.type);
         const target: JsonObject = { type: entry.type, id: entry.id.trim() };
         if (entry.type === 'tool' && Object.keys(values.arguments).length) target.arguments = values.arguments;
-        const mix: JsonObject = { id: entry.id.trim(), weight, target };
+        const mix: JsonObject = { id: entry.entryId.trim(), weight, target };
         if (Object.keys(values.inputs).length) mix.inputs = values.inputs;
         if (entry.type !== 'tool' && Object.keys(values.vars).length) mix.vars = values.vars;
         return mix;
@@ -187,7 +188,7 @@ function makeScenario(
   if (Object.keys(thresholds).length) scenario.thresholds = thresholds; else delete scenario.thresholds;
   if (Object.keys(evidence).length) scenario.evidence = evidence; else delete scenario.evidence;
   if (evidence.maxFailureSamples != null || evidence.maxSuccessSamples != null
-      || evidence.quotaScope != null || evidence.defaults != null) scenario.schemaVersion = 'att-load/v1.7';
+      || evidence.quotaScope != null || evidence.defaults != null) scenario.schemaVersion = 'att-load/v1.8';
   if (advanced.seed.trim()) {
     const seed = Number(advanced.seed);
     if (!Number.isSafeInteger(seed)) throw new Error('Seed must be a safe integer.');
@@ -196,7 +197,7 @@ function makeScenario(
   return scenario;
 }
 
-function initialTiming(policy: JsonObject): TimingDraft {
+export function initialTiming(policy: JsonObject): TimingDraft {
   const load = asObject(policy.load);
   return {
     warmup: String(load.warmup ?? ''),
@@ -555,7 +556,7 @@ export function LoadPage(props: LoadFeatureProps): React.JSX.Element {
   );
 }
 
-function DurationField({ label, value, onChange, required = false }: { label: string; value: string; onChange: (value: string) => void; required?: boolean }): React.JSX.Element {
+export function DurationField({ label, value, onChange, required = false }: { label: string; value: string; onChange: (value: string) => void; required?: boolean }): React.JSX.Element {
   const match = /^(\d+)(ms|s|m|h)$/.exec(value.trim());
   const [amount, setAmount] = useState(match?.[1] || '');
   const [unit, setUnit] = useState(match?.[2] || 's');
@@ -580,7 +581,7 @@ function DurationField({ label, value, onChange, required = false }: { label: st
   </fieldset>;
 }
 
-function ThinkTimeField({ value, onChange, disabled }: { value: ThinkTime; onChange: (value: ThinkTime) => void; disabled: boolean }): React.JSX.Element {
+export function ThinkTimeField({ value, onChange, disabled }: { value: ThinkTime; onChange: (value: ThinkTime) => void; disabled: boolean }): React.JSX.Element {
   const range = typeof value !== 'string';
   const fixedValue = typeof value === 'string' ? value : '';
   const [fixedAmount, setFixedAmount] = useState(/^(\d+)(ms|s|m|h)$/.exec(fixedValue)?.[1] || '');
@@ -650,10 +651,10 @@ function WorkloadEditor({
       <BusinessValuesEditor label="Workload mix defaults" json={workload.mixDefaultsJson} groups={['inputs', 'vars']} onChange={mixDefaultsJson => onChange({ ...workload, mixDefaultsJson })}
         onValidityChange={mixDefaultsValid => { if (workload.mixDefaultsValid !== mixDefaultsValid) onChange({ ...workload, mixDefaultsValid }); }} />
       <div className="att-mix-target-list">
-        {workload.mix.map((entry, mixIndex) => <fieldset className="att-mix-target" key={entry.id}>
+        {workload.mix.map((entry, mixIndex) => <fieldset className="att-mix-target" key={entry.entryId}>
           <legend>Mix target {mixIndex + 1}</legend>
-          <label>Entry ID<input value={entry.id} onChange={event => onChange({ ...workload, mix: workload.mix.map(item => item.id === entry.id ? { ...item, id: event.target.value } : item) })} /></label>
-          <label>Weight<input type="number" min="1" step="1" value={entry.weight} onChange={event => onChange({ ...workload, mix: workload.mix.map(item => item.id === entry.id ? { ...item, weight: event.target.value } : item) })} /></label>
+          <label>Entry ID<input value={entry.entryId} onChange={event => onChange({ ...workload, mix: workload.mix.map(item => item.entryId === entry.entryId ? { ...item, entryId: event.target.value } : item) })} /></label>
+          <label>Weight<input type="number" min="1" step="1" value={entry.weight} onChange={event => onChange({ ...workload, mix: workload.mix.map(item => item.entryId === entry.entryId ? { ...item, weight: event.target.value } : item) })} /></label>
           <TargetEditor
             target={entry}
             packageId={packageId}
@@ -661,9 +662,9 @@ function WorkloadEditor({
             model={model}
             api={api}
             inlineLoadEnabled={inlineLoadEnabled}
-            onChange={target => onChange({ ...workload, mix: workload.mix.map(item => item.id === entry.id ? { ...item, ...target } : item) })}
+            onChange={target => onChange({ ...workload, mix: workload.mix.map(item => item.entryId === entry.entryId ? { ...item, ...target } : item) })}
           />
-          <button type="button" onClick={() => onChange({ ...workload, mix: workload.mix.filter(item => item.id !== entry.id) })}>Remove mix target</button>
+          <button type="button" onClick={() => onChange({ ...workload, mix: workload.mix.filter(item => item.entryId !== entry.entryId) })}>Remove mix target</button>
         </fieldset>)}
       </div>
       <button type="button" onClick={() => onChange({ ...workload, mix: [...workload.mix, newMixDraft(workload.mix.length + 1)] })}>Add mix target</button>
@@ -686,7 +687,7 @@ function WorkloadEditor({
 }
 
 function newMixDraft(index: number): MixDraft {
-  return { ...newTarget(), id: `mix-${index}`, weight: '1' };
+  return { ...newTarget(), entryId: `mix-${index}`, weight: '1' };
 }
 
 function RateField({ value, onChange }: { value: string; onChange: (value: string) => void }): React.JSX.Element {
@@ -714,7 +715,7 @@ function RateField({ value, onChange }: { value: string; onChange: (value: strin
   </fieldset>;
 }
 
-function TargetEditor({ target, packageId, environment, model, api, inlineLoadEnabled, onChange }: {
+export function TargetEditor({ target, packageId, environment, model, api, inlineLoadEnabled, onChange }: {
   target: TargetDraft;
   packageId: string;
   environment: string;
@@ -885,13 +886,13 @@ function BusinessValuesEditor({ label, json, groups, onChange, onValidityChange,
   </section>;
 }
 
-function JsonObjectField({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }): React.JSX.Element {
+export function JsonObjectField({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }): React.JSX.Element {
   return <div className="att-json-field"><span>{label}</span><CodeEditor value={value} language="json" label={label} readOnly={false} onChange={onChange} />
     <span className="att-help">JSON object; final validation is performed by the Server.</span>
   </div>;
 }
 
-function JsonArrayField({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }): React.JSX.Element {
+export function JsonArrayField({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }): React.JSX.Element {
   return <div className="att-json-field"><span>{label}</span><CodeEditor value={value} language="json" label={label} readOnly={false} onChange={onChange} />
     <span className="att-help">JSON array of package-relative paths.</span>
   </div>;

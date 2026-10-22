@@ -15,7 +15,8 @@
     "smoke:cross-browser": "node cross-browser.cjs",
     "screenshots": "node screenshots.cjs",
     "smoke:run": "node run-smoke.cjs",
-    "perf": "node ui-perf.cjs"
+    "perf": "node ui-perf.cjs",
+    "smoke:load-templates": "node load-templates.cjs"
   },
   "devDependencies": {
     "axe-core": "4.11.4",

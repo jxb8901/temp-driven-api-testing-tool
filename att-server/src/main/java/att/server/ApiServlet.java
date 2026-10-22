@@ -63,6 +63,11 @@ public final class ApiServlet extends HttpServlet {
             String principal=principal(req);if(principal==null){error(res,401,"ATT-SERVER-AUTHENTICATION-REQUIRED","An authenticated Servlet Principal is required",requestId);return;}
             if("/metrics".equals(path)){if(!requireSystemAdmin(req,res,requestId))return;Map<String,Object> metrics=runtime.counts();metrics.put("requestId",requestId);json(res,200,metrics);return;}
             if(!requireOperator(req,res,requestId))return;
+            if(path.matches("/packages/[^/]+/load-templates")) {
+                Map<String,Object> response=runtime.inspectLoadTemplates(segment(path,2),req.getParameter("query"),
+                        parseOffset(req.getParameter("offset")),parseLimit(req.getParameter("limit")),principal);
+                response.put("requestId",requestId);res.setHeader("Cache-Control","no-store");json(res,200,response);return;
+            }
             if(resourceRequest){resourceGet(req,res,path,requestId,principal);return;}
             if(loadCatalogRequest){loadCatalogGet(req,res,path,requestId,principal);return;}
             if(configurationRequest){configurationGet(req,res,path,requestId,principal);return;}
@@ -81,7 +86,9 @@ public final class ApiServlet extends HttpServlet {
             if("/jobs".equals(path)){
                 if("load".equals(req.getParameter("executionType"))) {
                     int limit=parseConfigurationLimit(req.getParameter("limit")),offset=parseOffset(req.getParameter("offset"));
-                    List<Map<String,Object>> items=runtime.loadJobsFor(principal,offset,limit);
+                    String pinned=req.getParameter("pinnedOnly");
+                    if(pinned!=null&&!List.of("true","false").contains(pinned))throw new IllegalArgumentException("pinnedOnly must be true or false");
+                    List<Map<String,Object>> items=runtime.loadJobsFor(principal,offset,limit,principalSearch(req),"true".equals(pinned));
                     Integer next=items.size()>limit?Integer.valueOf(offset+limit):null;
                     if(next!=null)items=items.subList(0,limit);
                     Map<String,Object> response=new LinkedHashMap<>();response.put("items",items);response.put("nextOffset",next);response.put("requestId",requestId);json(res,200,response);

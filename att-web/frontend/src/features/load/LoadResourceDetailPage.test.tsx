@@ -19,7 +19,7 @@ async function flush() { await act(async () => { await new Promise(resolve => wi
 
 function scenarioDetail(): LoadCatalogDetail {
   return { packageId: 'payments', resourceId: 'load/nested/nightly.yaml', path: 'load/nested/nightly.yaml', kind: 'scenario',
-    validation: 'unverified', model: 'virtualUsers', schemaVersion: 'att-load/v1.7', workloadCount: 1, sourceAvailable: false,
+    validation: 'unverified', model: 'virtualUsers', schemaVersion: 'att-load/v1.8', workloadCount: 1, sourceAvailable: false,
     definition: { load: { users: 2, duration: '30s' }, workloads: [{ id: 'nightly', target: { type: 'flow', id: 'FLOW.v1' },
       inputs: { password: { '$att': 'keep-default' } }, load: { users: 2, duration: '30s' } }] }, redacted: true };
 }
@@ -39,7 +39,7 @@ describe('LoadResourceDetailPage', () => {
     expect(host.textContent).toContain('FLOW.v1');
     expect(host.textContent).toContain('keep-default');
     expect(api.getLoadSource).not.toHaveBeenCalled();
-    expect(host.textContent).not.toContain('schemaVersion: att-load/v1.7');
+    expect(host.textContent).not.toContain('schemaVersion: att-load/v1.8');
 
     const validate = host.querySelector<HTMLButtonElement>('button[aria-label="Validate for UAT"]')!;
     await act(async () => validate.click()); await flush();

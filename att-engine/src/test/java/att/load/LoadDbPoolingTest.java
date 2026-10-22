@@ -145,7 +145,7 @@ class LoadDbPoolingTest {
         FrameworkConfig config = framework(db("orders", url, 1, 500L, onEnd));
         LoadTarget target = target(project(), template(singleQuery()));
         try (LoadRunResources resources = new LoadRunResources(tempDir, config)) {
-            IterationResult result = new IterationExecutor(tempDir, config, target, resources, tempDir.resolve("output"))
+            IterationResult result = new IterationExecutor(tempDir, config, target, resources, tempDir.resolve("output-" + onEnd))
                     .execute(request("transaction-" + onEnd));
             assertEquals(ResultStatus.PASS, result.status());
             assertEquals(0, resources.dbPool("orders").active());

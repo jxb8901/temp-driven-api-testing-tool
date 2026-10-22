@@ -141,7 +141,7 @@ class PackageResourceInspectorTest {
         assertEquals("scenario",detail.get("kind"));
         assertEquals("unverified",detail.get("validation"),"View must not depend on resolving execution targets");
         assertEquals(Boolean.FALSE,detail.get("sourceAvailable"),"Structured metadata remains available when source is hidden");
-        assertEquals("att-load/v1.7",detail.get("schemaVersion"));
+        assertEquals("att-load/v1.8",detail.get("schemaVersion"));
         @SuppressWarnings("unchecked") Map<String,Object> definition=(Map<String,Object>)detail.get("definition");
         @SuppressWarnings("unchecked") List<Map<String,Object>> workloads=(List<Map<String,Object>>)definition.get("workloads");
         assertEquals("MISSING",((Map<?,?>)workloads.get(0).get("target")).get("id"));
@@ -816,7 +816,8 @@ class PackageResourceInspectorTest {
                     ()->inspector.verifyRevision(revision));
             assertTrue(inspector.indexBuildCount()>=2,
                     "authoritative revision checks must rebuild content even when the cached snapshot appears current");
-            long deadline=System.nanoTime()+java.util.concurrent.TimeUnit.SECONDS.toNanos(2);
+            // macOS polling WatchService can deliver changes after several seconds.
+            long deadline=System.nanoTime()+java.util.concurrent.TimeUnit.SECONDS.toNanos(10);
             while(inspector.packageChangeVersion()==version&&System.nanoTime()<deadline)Thread.sleep(20);
             assertNotEquals(version,inspector.packageChangeVersion(),"package file changes should invalidate the watched snapshot");
             assertThrows(PackageResourceInspector.StaleResourceCursorException.class,
@@ -871,6 +872,19 @@ class PackageResourceInspectorTest {
         Map<String,Object> page=inspector.inspect("list","case",null,null,0,10);
         assertTrue(page.toString().contains("ATT-RESOURCE-CASE-ROOT-UNAVAILABLE"));
         assertFalse(page.toString().contains(root.toString()));
+    }
+
+    @Test void templateCatalogRevisionIsStableAcrossEnvironmentAndSourcesAreNotLegacyScenarios() throws Exception {
+        Path root=packageWithQuickLoadTargets("new-template-catalog");
+        Path source=Files.createDirectories(root.resolve("load/templates")).resolve("vu.yaml");
+        writeUtf8(source,new org.yaml.snakeyaml.Yaml().dump(att.load.LoadTemplateCatalog.builtin("multi-vu")));
+        PackageResourceInspector discovery=new PackageResourceInspector(root,root.resolve("config/config.yaml"),null,Collections.<String>emptyList(),65536,262144);
+        PackageResourceInspector selected=new PackageResourceInspector(root,root.resolve("config/config.yaml"),"SIT",Collections.<String>emptyList(),65536,262144);
+        assertEquals(discovery.inspectLoadTemplates(null,0,100).get("revisionDigest"),selected.inspectLoadTemplates(null,0,100).get("revisionDigest"));
+        assertEquals(0,((List<?>)selected.inspectLoadCatalog(null,0,100,null).get("items")).size());
+        Map<String,Object> policy=selected.inspectQuickLoadPolicy("virtualUsers","catalog:builtin:single-vu");
+        assertEquals("att-load/v1.8",((Map<?,?>)policy.get("policy")).get("schemaVersion"));
+        assertThrows(IllegalArgumentException.class,()->selected.inspectQuickLoadPolicy("arrivalRate","catalog:builtin:single-vu"));
     }
 
     private Path packageWithTemplate(String directory,String name,String extraField) throws Exception {

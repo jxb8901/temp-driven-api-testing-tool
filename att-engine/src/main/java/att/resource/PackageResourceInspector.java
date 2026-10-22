@@ -908,7 +908,25 @@ public final class PackageResourceInspector implements AutoCloseable {
         Index index = index();
         att.load.LoadScenarioLoader loader = new att.load.LoadScenarioLoader(packageRoot);
         if (templateId != null && templateId.length() > 1024) throw new IllegalArgumentException("Load template id is invalid");
-        Map<String, Object> policy = loader.loadQuickLoadPolicy(model, templateId);
+        Map<String, Object> policy;
+        if (templateId != null && templateId.startsWith("catalog:")) {
+            Map<String,Object> definition = new att.load.LoadTemplateCatalog(packageRoot).load(templateId.substring(8));
+            String mode = String.valueOf(definition.get("mode"));
+            if (!("single-vu".equals(mode) || "single-tps".equals(mode))
+                    || "single-tps".equals(mode) != "arrivalRate".equals(model))
+                throw new IllegalArgumentException("The selected new-catalog template is incompatible with this Quick Load model");
+            @SuppressWarnings("unchecked") Map<String,Object> defaults = (Map<String,Object>)definition.get("policy");
+            policy = att.load.LoadIsolation.deepCopyMap(defaults);
+            @SuppressWarnings("unchecked") Map<String,Object> workload = ((List<Map<String,Object>>)definition.get("workloads")).get(0);
+            for (String key : java.util.Arrays.asList("load", "execution", "thresholds", "evidence")) {
+                @SuppressWarnings("unchecked") Map<String,Object> rootValues = (Map<String,Object>)policy.get(key);
+                @SuppressWarnings("unchecked") Map<String,Object> local = (Map<String,Object>)workload.get(key);
+                Map<String,Object> merged = att.load.LoadIsolation.deepCopyMap(rootValues);
+                if (local != null) merged.putAll(local);
+                if (!merged.isEmpty()) policy.put(key, merged);
+            }
+            policy.put("schemaVersion", att.Version.LOAD_SCHEMA_CURRENT);
+        } else policy = loader.loadQuickLoadPolicy(model, templateId);
         Map<String, Object> projection = debugEngine(discoveryConfig()).projectSafeValue(policy);
         @SuppressWarnings("unchecked") Map<String, Object> safePolicy = (Map<String, Object>) projection.get("value");
         DumperOptions options = new DumperOptions();
@@ -925,6 +943,30 @@ public final class PackageResourceInspector implements AutoCloseable {
         result.put("templateCatalogTruncated", Boolean.valueOf(catalog.truncated));
         result.put("revisionDigest", index.revisionDigest);
         return bounded(result);
+    }
+
+    /** New templates are read without an Environment or a target and never start execution. */
+    public Map<String,Object> inspectLoadTemplates(String query, int offset, int limit) throws Exception {
+        Map<String,Object> result = new att.load.LoadTemplateCatalog(packageRoot).list(query, offset, limit);
+        result.put("revisionDigest", new att.load.LoadTemplateCatalog(packageRoot).sourceRevision());
+        return bounded(result);
+    }
+
+    public Map<String,Object> composeLoadTemplate(Map<String,Object> input) throws Exception {
+        if (!new att.load.LoadTemplateCatalog(packageRoot).sourceRevision().equals(input.get("revision"))) throw new StaleResourceCursorException();
+        for (String field : input.keySet())
+            if (!java.util.Arrays.asList("templateId", "revision", "definition", "bindings").contains(field))
+                throw new IllegalArgumentException("Unknown Load Template composition field: " + field);
+        att.load.LoadTemplateCatalog catalog = new att.load.LoadTemplateCatalog(packageRoot);
+        Map<String,Object> original = catalog.load(String.valueOf(input.get("templateId")));
+        @SuppressWarnings("unchecked") Map<String,Object> definition = input.containsKey("definition")
+                ? (Map<String,Object>)input.get("definition") : original;
+        if (!original.get("mode").equals(definition.get("mode"))) throw new IllegalArgumentException("Template mode changed; reselect the template");
+        @SuppressWarnings("unchecked") Map<String,Object> bindings = (Map<String,Object>)input.get("bindings");
+        DebugEngine engine = debugEngine(frameworkConfig());
+        att.load.LoadScenario scenario = catalog.compose(definition, bindings,
+                (type,id) -> engine.loadBootstrapInputForLoad(type,id));
+        return validateLoadScenario(scenario.toMap());
     }
 
     /** Validates a full inline Load scenario and every target closure without scheduling traffic. */
@@ -988,6 +1030,7 @@ public final class PackageResourceInspector implements AutoCloseable {
         List<Path> matches = new ArrayList<Path>();
         for (Path candidate : candidates) {
             String logical = packageRoot.relativize(candidate).toString().replace('\\', '/');
+            if (logical.startsWith("load/templates/") || logical.startsWith("load/bindings/")) continue;
             if (needle.isEmpty() || logical.toLowerCase(Locale.ROOT).contains(needle)) matches.add(candidate);
         }
         if (offset > matches.size()) throw new IllegalArgumentException("Load catalog cursor is stale");

@@ -385,6 +385,18 @@ class Handler(BaseHTTPRequestHandler):
                 return
             self._json(404, {"error": {"code": "FIXTURE_NOT_FOUND", "summary": "No fixture route is defined."}})
             return
+        elif len(parts) == 3 and parts[0] == "packages" and parts[2] == "load-templates":
+            modes = ["single-vu", "single-tps", "single-workload-mix", "multi-vu", "multi-tps", "multi-workload-mix"]
+            names = ["Single VU", "Single TPS", "Single Workload Mix", "Multi-workload VU", "Multi-workload TPS", "Multi-workload Mix"]
+            items = []
+            for mode, name in zip(modes, names):
+                arrival = mode.endswith("tps")
+                rows = [{"id": "workload-" + str(i + 1), **({"mix": [{"id": "slot-1", "weight": 70}, {"id": "slot-2", "weight": 30}]} if mode.endswith("mix") else {})} for i in range(2 if mode.startswith("multi-") else 1)]
+                load = {"arrivalRate": "1/s", "maxConcurrent": 1, "overloadPolicy": "drop", "duration": "10s"} if arrival else {"users": 1, "duration": "10s"}
+                definition = {"schemaVersion": "att-load-template/v1", "name": name, "mode": mode, "policy": {"load": load}, "workloads": rows}
+                items.append({"id": "builtin:" + mode, "name": name, "mode": mode, "schemaVersion": "att-load-template/v1", "builtin": True, "validation": "valid", "definition": definition})
+            self._json(200, {"items": items, "total": 6, "revisionDigest": "a" * 64})
+            return
         elif len(parts) == 3 and parts[:2] == ["packages", "payments"] and parts[2] == "load-policy":
             self._json(200, {
                 "model": query.get("model", ["virtualUsers"])[0],

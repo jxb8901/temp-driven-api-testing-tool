@@ -88,6 +88,7 @@ public final class IterationExecutor implements LoadIterationRunner {
 
     @Override public IterationResult execute(IterationRequest request) {
         resources.ensureOpen();
+        String executionId = resources.nextExecutionId(request.runId());
         Path runOutput = outputRoot.resolve("load").resolve(safe(request.runId())).toAbsolutePath().normalize();
         if (!runOutput.equals(initializedRunOutput)) {
             try { initializeOutputNamespace(runOutput); }
@@ -98,7 +99,6 @@ public final class IterationExecutor implements LoadIterationRunner {
         Path executionWorkspace = null;
         Path transientWorkspace = null;
         Path evidenceDirectory = null;
-        String executionId = request.iterationId();
         CaseRuntimeContext context = null;
         List<ValidationResult> results = new ArrayList<ValidationResult>();
         CaseExecutionLog log = null;
@@ -120,15 +120,7 @@ public final class IterationExecutor implements LoadIterationRunner {
                     context.replaceInputValuesFromFrozenSnapshot(testdataResolver.resolveFrozenLoadInput(request.inputs(), context,
                             request.userId(), request.iterationId(), request.testdataOrdinal(),
                             request.testdataWaitAllowed()));
-                executionId = target.execIdFormat().isEmpty()
-                        ? resources.nextDefaultExecutionId(request.runId())
-                        : LoadExecutionIdPattern.evaluate(target.execIdFormat(),
-                                "closed".equals(request.model()) ? LoadScenario.Model.CLOSED : LoadScenario.Model.ARRIVAL_RATE,
-                                context, identityEngine, null);
-                resources.reserveExecutionId(executionId, request, !target.execIdFormat().isEmpty(), runOutput);
             } catch (Exception invalidId) {
-                executionId = resources.nextDefaultExecutionId(request.runId());
-                resources.reserveExecutionId(executionId, request, false, runOutput);
                 executionWorkspace = executionWorkspace(request, executionId);
                 context.finishExecutionIdInitialization(executionId, executionWorkspace, executionWorkspace.resolve("case.log"));
                 log = executionLog(executionWorkspace.resolve("case.log"), request);

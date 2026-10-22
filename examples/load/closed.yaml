@@ -1,4 +1,4 @@
-schemaVersion: att-load/v1.7
+schemaVersion: att-load/v1.8
 workloads:
 - target:
     type: template
@@ -15,5 +15,3 @@ workloads:
     errorRate: < 1%
     p95: < 800ms
   id: closed
-execution:
-  execIdFormat: ${EXEC.RUN_ID}-${EXEC.LOAD.WORKLOAD_ID}-${EXEC.LOAD.USER_ID}-${EXEC.LOAD.ITERATION}

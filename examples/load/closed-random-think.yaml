@@ -1,4 +1,4 @@
-schemaVersion: att-load/v1.7
+schemaVersion: att-load/v1.8
 seed: 12345
 evidence:
   mode: metrics
@@ -14,5 +14,3 @@ workloads:
       min: 100ms
       max: 300ms
   id: closed-random-think
-execution:
-  execIdFormat: ${EXEC.RUN_ID}-${EXEC.LOAD.WORKLOAD_ID}-${EXEC.LOAD.USER_ID}-${EXEC.LOAD.ITERATION}

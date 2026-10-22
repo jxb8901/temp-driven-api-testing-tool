@@ -1,0 +1,123 @@
+{
+  "type": "object",
+  "properties": {
+    "schemaVersion": {
+      "const": "att-load-bindings/v1"
+    },
+    "bindings": {
+      "type": "object",
+      "minProperties": 1,
+      "maxProperties": 128,
+      "propertyNames": {
+        "type": "string",
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$"
+      },
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "prototype": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$"
+          },
+          "target": {
+            "type": "object",
+            "properties": {
+              "type": {
+                "enum": [
+                  "template",
+                  "flow",
+                  "tool"
+                ]
+              },
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              "prototype": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$"
+              },
+              "inputs": {
+                "type": "object"
+              },
+              "vars": {
+                "type": "object"
+              },
+              "arguments": {
+                "type": "object"
+              }
+            },
+            "required": [
+              "type",
+              "id"
+            ],
+            "additionalProperties": false
+          },
+          "mix": {
+            "type": "object",
+            "minProperties": 2,
+            "maxProperties": 128,
+            "propertyNames": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$"
+            },
+            "additionalProperties": {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "enum": [
+                    "template",
+                    "flow",
+                    "tool"
+                  ]
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256
+                },
+                "prototype": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$"
+                },
+                "inputs": {
+                  "type": "object"
+                },
+                "vars": {
+                  "type": "object"
+                },
+                "arguments": {
+                  "type": "object"
+                }
+              },
+              "required": [
+                "type",
+                "id"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "inputs": {
+            "type": "object"
+          },
+          "vars": {
+            "type": "object"
+          },
+          "testdata": {
+            "type": "object"
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "bindings"
+  ],
+  "additionalProperties": false,
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:att:schema:att-load-bindings:v1"
+}

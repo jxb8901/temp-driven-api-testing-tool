@@ -257,8 +257,14 @@ export const api = {
   getJobs(signal?: AbortSignal): Promise<ApiEnvelope<JobSummary>> {
     return request<ApiEnvelope<JobSummary>>('jobs', { signal });
   },
-  listLoadJobs(input: { offset?: number; limit?: number; signal?: AbortSignal } = {}) {
-    return request<{ items: JobSummary[]; nextOffset?: number | null }>('jobs' + queryString({ executionType: 'load', offset: input.offset, limit: input.limit }), { signal: input.signal });
+  listLoadJobs(input: { offset?: number; limit?: number; principal?: string; pinnedOnly?: boolean; signal?: AbortSignal } = {}) {
+    return request<{ items: JobSummary[]; nextOffset?: number | null }>('jobs' + queryString({ executionType: 'load', offset: input.offset, limit: input.limit, principal: input.principal, pinnedOnly: input.pinnedOnly }), { signal: input.signal });
+  },
+  listLoadTemplates(packageId: string, query = '', offset = 0, signal?: AbortSignal): Promise<import('./features/load/templateTypes').LoadTemplatePage> {
+    return request('packages/' + encodeURIComponent(packageId) + '/load-templates' + queryString({ query, offset, limit: 100 }), { signal });
+  },
+  createLoadTemplateDraft(packageId: string, environment: string, templateComposition: Record<string, unknown>, signal?: AbortSignal): Promise<LoadDraftResponse> {
+    return postJson('drafts/load', { packageId, environment: environment || undefined, templateComposition }, signal);
   },
   async listLoadCatalog(packageId: string, input: { query?: string; cursor?: string; limit?: number } = {}, signal?: AbortSignal): Promise<LoadCatalogPage> {
     const response = await request<Omit<LoadCatalogPage, 'items'> & { items: Array<Omit<LoadCatalogPage['items'][number], 'packageId'>> }>(
