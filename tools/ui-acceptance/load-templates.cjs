@@ -10,7 +10,7 @@ const { launchBrowser, startFixture, stopFixture } = require('./browser-support.
   assert.equal(await page.locator('.att-template-presets article').count(),6);
   assert.equal(calls.filter(url=>url.includes('/load-catalog')||url.includes('/jobs?')).length,0,'Templates must not fetch legacy resources or jobs');
   await page.locator('.att-template-presets article').nth(5).getByRole('button',{name:'＋ Create Load',exact:true}).click();
-  await page.getByRole('heading',{name:'Multi-workload Mix',exact:true}).waitFor();
+  await page.getByRole('heading',{name:'Multi-workload Mix',level:1,exact:true}).waitFor();
   assert.match(await page.locator('body').innerText(),/2 Workloads · 4 Target bindings · 0 Unique targets/);
   await page.getByRole('button',{name:'⤨ Edit Mix',exact:true}).first().click();
   const dialog=page.getByRole('dialog',{name:'Edit Mix',exact:true});await dialog.waitFor();
@@ -23,7 +23,7 @@ const { launchBrowser, startFixture, stopFixture } = require('./browser-support.
   const settings=page.getByRole('dialog',{name:'Common Settings',exact:true});await settings.waitFor();
   assert.ok(await settings.evaluate(element=>element.getBoundingClientRect().width)<=390);
   await settings.getByRole('button',{name:'Cancel',exact:true}).click();
-  await page.screenshot({path:'/private/tmp/att-load-template-mobile.png',fullPage:true});
+  await page.screenshot({path:process.env.ATT_UI_SCREENSHOT || require('node:path').join(require('node:os').tmpdir(),'att-load-template-mobile.png'),fullPage:true});
   assert.equal(calls.filter(url=>url.includes('/jobs/load')||url.includes('/drafts/load')).length,0,'Editing never starts traffic or validation');
   assert.deepEqual(errors,[]);console.log('Load template non-root browser checks passed: six modes, no history fetch, nested modal Cancel/Escape, mobile bounds, no traffic.');
  } finally {if(browser)await browser.close();await stopFixture(fixture);}
