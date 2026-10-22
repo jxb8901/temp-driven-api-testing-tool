@@ -90,7 +90,7 @@ public final class FrameworkRunner {
             }
             if ("load".equals(options.command())) {
                 if (options.listLoadTemplates()) {
-                    java.util.Map<String,Object> catalog = new att.load.LoadTemplateCatalog(root).list("", 0, 100);
+                    java.util.Map<String,Object> catalog = LoadTemplateCommand.list(root);
                     if ("json".equals(options.format())) System.out.println(att.validation.JsonSupport.write(catalog));
                     else System.out.println(new org.yaml.snakeyaml.Yaml().dump(catalog));
                     return;

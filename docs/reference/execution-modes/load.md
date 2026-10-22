@@ -280,6 +280,8 @@ The **Scenarios** tab retains executable YAML and **Legacy Quick Load Policy** p
 
 Built-ins use `builtin:<mode>`. Put package templates in `load/templates/` and bindings in `load/bindings/`. Files must be package-relative, schema-valid, at most 256 KiB, and within the bounded catalog scan. Templates contain structural/pacing defaults only, never target IDs or business values. A template cannot execute until every slot is bound. For example:
 
+Catalog inspection pages contain at most 100 items and also honor the configured serialized response budget (256 KiB by default). Follow `nextOffset` until it is null: each page retains complete definitions, so the same query and offset retrieve the corresponding definitions without a separate detail call. A definition that cannot fit even alone is listed as `response-too-large` without its definition; reduce its size for Studio, or compose it directly by file reference in the CLI. CLI `load --list-templates` follows every page automatically and retains the scan-limit `truncated` indicator.
+
 ```yaml
 schemaVersion: att-load-template/v1
 name: Independent mixed pools
