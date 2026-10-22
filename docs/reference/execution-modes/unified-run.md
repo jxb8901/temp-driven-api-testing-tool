@@ -106,7 +106,7 @@ In **Jobs**, **Job Details**, or **LOAD Catalog → Recent LOAD Jobs**, select *
 
 Replay uses the previous safe snapshot with `revisionPolicy: reject-package-changes`. It never silently switches to the latest package file. If the package, runtime configuration or dependencies change, configure and validate a new run. Newly retained safe definitions survive draft expiry and Server restart; confirmation drafts expire after ten minutes and must then be rebuilt. The Server validates the current account, package, environment, schema, capability and execution limits again.
 
-Historical Jobs without a retained definition show **Rerun unavailable for this historical job**. Validation-only Jobs, failed safe retention, and classified submitted inputs cannot be replayed exactly. Configure a new run and provide missing credentials through the normal protected input flow. Never reconstruct an execution from logs, artifacts or redacted previews. Safe definitions are limited to 256 KiB and exclude Worker transport fields and host roots.
+Historical Jobs without a retained definition show **Rerun unavailable for this historical job**. Validation-only Jobs, failed safe retention, and classified submitted inputs cannot be replayed exactly. Legacy direct submissions with raw overrides or unresolved `rerunFailed` history selection require a new validated draft before safe retention. Configure a new run and provide missing credentials through the normal protected input flow. Never reconstruct an execution from logs, artifacts or redacted previews. Safe definitions are limited to 256 KiB and exclude Worker transport fields and host roots.
 
 The Job lifecycle API uses the following endpoints under `/api/v1`:
 

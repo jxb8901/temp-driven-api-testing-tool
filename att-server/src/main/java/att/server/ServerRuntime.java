@@ -192,6 +192,8 @@ final class ServerRuntime implements AutoCloseable {
     private JobExecutionSpec captureExecutionSpec(String command,JsonNode input,String principal,String scheduleOccurrenceId) throws Exception {
         if(!config.inspection.enabled||!List.of("run","debug","load").contains(command))return null;
         if(input.path("dryRun").asBoolean(false))throw new IllegalArgumentException("Validation-only execution cannot be replayed as a runnable job");
+        if(input.path("rerunFailed").asBoolean(false)||input.hasNonNull("overrides")&&input.path("overrides").size()>0)
+            throw new IllegalArgumentException("Legacy history selectors or raw overrides require a validated draft before safe retention");
         String packageId=required(input,"packageId");Path root=packageRoot(packageId);
         String environment=optionalText(input,"environment");
         ObjectNode definition=JSON.createObjectNode();definition.put("executionType",Job.executionType(command));definition.put("packageId",packageId);
@@ -329,7 +331,7 @@ final class ServerRuntime implements AutoCloseable {
         String intent=required(body,"intentId");if(!intent.matches("[a-f0-9-]{36}"))throw new IllegalArgumentException("Invalid replay intent");
         synchronized(replayLock) {
             ownedExecutionSpec(id,principal);
-            String accepted=store.replayJob(principal,intent,id);if(accepted!=null)return jobRecord(accepted);
+            String accepted=store.replayJob(principal,intent,id);if(accepted!=null){requireJobOwner(accepted,principal);return jobRecord(accepted);}
             ReplayReview review=replayReviews.get(intent);
             if(review==null||!review.source.equals(id)||!review.principal.equals(principal)||!review.expiresAt.isAfter(clock.instant()))throw new NotFoundException();
             Map<String,String> record=ownedExecutionSpec(id,principal);JobExecutionSpec spec=JobExecutionSpec.parse(record.get("spec"));

@@ -78,9 +78,9 @@ class ServerRuntimeJobReplayTest {
                 Map<String,Object> metadata=runtime.jobReplay(original,"alice");assertEquals(true,metadata.get("available"),type+": "+metadata);
                 assertFalse(metadata.toString().contains(fixture.root.toString()),"No host roots in browser replay data");
                 assertThrows(ServerRuntime.NotFoundException.class,()->runtime.jobReplay(original,"bob"));
-                @SuppressWarnings("unchecked") Map<String,Object> retained=(Map<String,Object>)metadata.get("definition");
-                assertEquals(!"case".equals(type),((Map<?,?>)retained.get("options")).get("debug"));
-                if("batch".equals(type))assertEquals(List.of("cases.default.C1"),((Map<?,?>)retained.get("selection")).get("caseIds"));
+                JsonNode retained=ServerRuntime.JSON.valueToTree(metadata.get("definition"));
+                assertEquals(!"case".equals(type),retained.path("options").path("debug").asBoolean());
+                if("batch".equals(type))assertEquals(List.of("cases.default.C1"),ServerRuntime.JSON.convertValue(retained.path("selection").path("caseIds"),List.class));
                 Map<String,Object> before=runtime.jobRecord(original);String originalResult=(String)runtime.store.get(original).get("resultJson");
                 Map<String,Object> review=runtime.createJobReplayDraft(original,"alice");
                 var confirmation=ServerRuntime.JSON.valueToTree(Map.of("confirm",true,"intentId",review.get("intentId")));
@@ -154,6 +154,9 @@ class ServerRuntimeJobReplayTest {
             runtime.store.insert(historical,"{\"scenario\":\"loads/smoke.yaml\"}");
             assertEquals(false,runtime.jobReplay(historical.id,"alice").get("available"));
             assertThrows(IllegalArgumentException.class,()->runtime.createJobReplayDraft(historical.id,"alice"));
+            String raw=String.valueOf(runtime.submit("load",ServerRuntime.JSON.valueToTree(Map.of("packageId","p","scenario","loads/smoke.yaml","overrides",List.of("inputs.password=NEVER-RETAIN-RAW-OVERRIDE"))),"alice").get("jobId"));
+            assertNull(runtime.store.executionSpec(raw).get("spec"),"Raw overrides must never be silently omitted from a retained definition");
+            assertFalse(runtime.store.executionSpec(raw).toString().contains("NEVER-RETAIN-RAW-OVERRIDE"));
         }
     }
 
@@ -184,8 +187,8 @@ class ServerRuntimeJobReplayTest {
             assertEquals(schedule.id,runtime.jobReplay(original,"alice").get("originatingScheduleId"));
             runtime.deleteLoadSchedule(schedule.id,"alice");
             Map<String,Object> review=runtime.createJobReplayDraft(original,"alice");
-            assertEquals("run",((Map<?,?>)review.get("definition")).get("executionType"));
-            assertEquals(true,((Map<?,?>)((Map<?,?>)review.get("definition")).get("options")).get("debug"));
+            assertEquals("run",ServerRuntime.JSON.valueToTree(review.get("definition")).path("executionType").asText());
+            assertEquals(true,ServerRuntime.JSON.valueToTree(review.get("definition")).path("options").path("debug").asBoolean());
             String id=String.valueOf(runtime.rerunJob(original,ServerRuntime.JSON.valueToTree(Map.of("intentId",review.get("intentId"),"confirm",true)),"alice").get("jobId"));await(runtime,id);
             assertEquals("run",runtime.jobRecord(id).get("command"));assertFalse(runtime.jobReplay(id,"alice").containsKey("originatingScheduleId"));
         }

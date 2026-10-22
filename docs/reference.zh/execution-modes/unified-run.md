@@ -106,7 +106,7 @@ LOAD 排程繼續支援套件 scenario 路徑及已驗證 Load draft，沿用 sc
 
 Replay 使用先前的安全 snapshot，並採用 `revisionPolicy: reject-package-changes`，不會自動改用最新 package 檔案。Package、runtime configuration 或相依 Resource變更後，請重新設定並驗證新執行。新保留的安全定義可在 draft 到期及 Server 重啟後使用；確認 draft 的有效期為十分鐘，到期後須重新建立。Server 會再次檢查目前帳戶、package、environment、schema、功能開關及執行限制。
 
-未保留執行定義的歷史 Job 會顯示 **Rerun unavailable for this historical job**。僅驗證的 Job、安全保留失敗或包含已分類敏感輸入的 Job，不能進行精確 replay。請設定新執行，並透過正常的受保護輸入流程補充憑證。不可從 log、artifact 或已遮罩預覽重建執行。安全定義上限為 256 KiB，不包含 Worker transport 欄位及主機根目錄。
+未保留執行定義的歷史 Job 會顯示 **Rerun unavailable for this historical job**。僅驗證的 Job、安全保留失敗或包含已分類敏感輸入的 Job，不能進行精確 replay。含有原始 overrides 或未解析 `rerunFailed` 歷史選擇的舊式直接提交，須先建立新的驗證 draft 才能安全保留。請設定新執行，並透過正常的受保護輸入流程補充憑證。不可從 log、artifact 或已遮罩預覽重建執行。安全定義上限為 256 KiB，不包含 Worker transport 欄位及主機根目錄。
 
 Job lifecycle API 在 `/api/v1` 下提供以下 endpoint：
 
