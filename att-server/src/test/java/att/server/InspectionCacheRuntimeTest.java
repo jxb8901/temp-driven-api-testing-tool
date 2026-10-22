@@ -79,7 +79,9 @@ class InspectionCacheRuntimeTest {
 
     @Test void timeoutDiscardsAffinityAndTheNextInteractiveRequestUsesAReplacement() throws Exception {
         Path root=fixture("timeout");ServerConfig initial=config(root,1,"");
-        Path configFile=temp.resolve("server.yaml");Files.writeString(configFile,Files.readString(configFile).replace("timeoutMs: 10000","timeoutMs: 2000"));
+        Path configFile=temp.resolve("server.yaml");
+        // Keep the normal cold-start budget for the replacement JVM on shared CI runners.
+        // SilentInspector exceeds that budget deterministically.
         AtomicInteger starts=new AtomicInteger();
         try(ServerRuntime runtime=new ServerRuntime(ServerConfig.load(configFile),libs().toString(),builder->{
             if(starts.getAndIncrement()==0)return new ProcessBuilder(initial.javaExecutable.toString(),"-cp",

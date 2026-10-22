@@ -68,7 +68,17 @@ class ServerWarUiIT {
                 ClassLoader oldLoader=context.getLoader().getClassLoader();
                 tomcat.getHost().removeChild(context);
                 assertTrue(pool.isTerminated(),"Compaction queue must drain before context destruction returns");
-                assertFalse(Thread.getAllStackTraces().keySet().stream().anyMatch(thread->thread.isAlive()&&(thread.getContextClassLoader()==oldLoader||thread.getName().equals("att-server-event-compactor"))),"No old WAR thread may survive undeploy");
+                // Executor termination can precede the final thread exit by a scheduling turn.
+                long threadDeadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(10);
+                java.util.List<String> surviving;
+                do {
+                    surviving=Thread.getAllStackTraces().entrySet().stream()
+                            .filter(entry->entry.getKey().isAlive()&&(entry.getKey().getContextClassLoader()==oldLoader||entry.getKey().getName().equals("att-server-event-compactor")))
+                            .map(entry->entry.getKey().getName()+" "+java.util.Arrays.toString(entry.getValue())).toList();
+                    if(surviving.isEmpty())break;
+                    Thread.sleep(20);
+                }while(System.nanoTime()<threadDeadline);
+                assertTrue(surviving.isEmpty(),"Old WAR threads survived undeploy: "+surviving);
             }
             assertFalse(warnings.stream().anyMatch(message->message.contains("att-server-event-compactor")||message.contains("org.h2.Driver")),warnings.toString());
         } finally {
