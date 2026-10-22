@@ -58,6 +58,8 @@ final class LoadSchedule {
     public String updatedBy;
     public String updatedAt;
     public String nextRunAt;
+    /** Execution-only result from the latest inspection; never persisted with the schedule definition. */
+    transient boolean validatedSensitiveSource;
 
     LoadSchedule copy() {
         LoadSchedule copy=new LoadSchedule();
@@ -75,6 +77,7 @@ final class LoadSchedule {
         copy.executionIdentityMigratedFrom=executionIdentityMigratedFrom;copy.executionIdentityMigratedBy=executionIdentityMigratedBy;
         copy.executionIdentityMigratedAt=executionIdentityMigratedAt;
         copy.createdAt=createdAt;copy.updatedBy=updatedBy;copy.updatedAt=updatedAt;copy.nextRunAt=nextRunAt;
+        copy.validatedSensitiveSource=validatedSensitiveSource;
         return copy;
     }
 

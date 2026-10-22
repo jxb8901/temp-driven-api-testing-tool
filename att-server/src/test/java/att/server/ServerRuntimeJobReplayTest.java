@@ -74,7 +74,8 @@ class ServerRuntimeJobReplayTest {
             LoadSchedule pause=runtime.createLoadSchedule(pauseRequest,"alice");pauseId=pause.id;
             var ignoreRequest=((com.fasterxml.jackson.databind.node.ObjectNode)request).deepCopy().put("packageChangePolicy","ignore");
             LoadSchedule ignore=runtime.createLoadSchedule(ignoreRequest,"alice");ignoreId=ignore.id;
-            Path unrelated=fixture.root.resolve("templates/BAD/template.yaml");Files.writeString(unrelated,Files.readString(unrelated)+"# unrelated change\n");
+            Path unrelated=fixture.root.resolve("templates/BAD/template.yaml");String originalUnrelated=Files.readString(unrelated);
+            Files.writeString(unrelated,originalUnrelated+"# unrelated change\n");
             Map<String,Object> blocked=runtime.triggerLoadSchedule(strictId,"alice");
             assertEquals("package-revision-changed",blocked.get("reason"));assertNull(blocked.get("jobId"));
             assertTrue(runtime.loadSchedule(strictId).enabled);
@@ -85,6 +86,12 @@ class ServerRuntimeJobReplayTest {
             assertEquals("package-revision-changed",runtime.triggerLoadSchedule(pauseId,"alice").get("reason"));
             assertFalse(runtime.loadSchedule(pauseId).enabled);assertEquals("package-revision-changed",runtime.loadSchedule(pauseId).autoPauseReason);
             assertThrows(ServerRuntime.ScheduleSourceChangedException.class,()->runtime.setLoadScheduleEnabled(pauseId,true,"alice"));
+            Files.writeString(unrelated,originalUnrelated);
+            Map<String,Object> restored=runtime.triggerLoadSchedule(strictId,"alice");assertEquals("submitted",restored.get("status"),restored.toString());
+            await(runtime,String.valueOf(restored.get("jobId")));
+            assertNull(runtime.loadSchedule(strictId).sourceStatus,"A successful execution after restoring the pinned package must clear current stale status");
+            assertEquals(stored,runtime.loadSchedule(strictId).currentRevisionDigest);
+            assertEquals(1,runtime.store.auditOutcomes("SCHEDULE_SOURCE_RESTORED").size());
             Map<String,Object> accepted=runtime.triggerLoadSchedule(ignoreId,"alice");assertEquals("submitted",accepted.get("status"),accepted.toString());
             await(runtime,String.valueOf(accepted.get("jobId")));
             assertEquals(stored,runtime.loadSchedule(ignoreId).expectedRevisionDigest);
@@ -108,6 +115,55 @@ class ServerRuntimeJobReplayTest {
         }
     }
 
+    @Test void fileBackedLoadSchedulesPinAndEnforceTheirCreationRevision() throws Exception {
+        Fixture fixture=fixture();String strictId,pauseId,strictRevision;
+        try(ServerRuntime runtime=fixture.open()) {
+            users(runtime);
+            var strictRequest=ServerRuntime.JSON.valueToTree(Map.of("name","Strict file Load","executionType","load","packageId","p","environment","SIT",
+                    "scenario","loads/smoke.yaml","timezone","UTC","cron","0 2 * * *","enabled",true));
+            LoadSchedule strict=runtime.createLoadSchedule(strictRequest,"alice");strictId=strict.id;strictRevision=strict.expectedRevisionDigest;
+            assertNotNull(strictRevision,"New file-backed schedules must pin their validated package revision");
+            var pauseRequest=((com.fasterxml.jackson.databind.node.ObjectNode)strictRequest).deepCopy().put("name","Paused file Load").put("packageChangePolicy","pause");
+            LoadSchedule pause=runtime.createLoadSchedule(pauseRequest,"alice");pauseId=pause.id;
+            assertNotNull(pause.expectedRevisionDigest);
+            Path scenario=fixture.root.resolve("loads/smoke.yaml");
+            Files.writeString(scenario,Files.readString(scenario).replace("duration: 1s","duration: 2s"));
+            Map<String,Object> strictResult=runtime.triggerLoadSchedule(strictId,"alice");
+            assertEquals("package-revision-changed",strictResult.get("reason"));assertNull(strictResult.get("jobId"));
+            assertTrue(runtime.loadSchedule(strictId).enabled);
+            Map<String,Object> pauseResult=runtime.triggerLoadSchedule(pauseId,"alice");
+            assertEquals("package-revision-changed",pauseResult.get("reason"));assertNull(pauseResult.get("jobId"));
+            assertFalse(runtime.loadSchedule(pauseId).enabled);
+            assertEquals(strictRevision,runtime.loadSchedule(strictId).expectedRevisionDigest);
+        }
+    }
+
+    @Test void fullAdmissionRejectsLegacySubmissionBeforeInspectionCapacityIsConsumed() throws Exception {
+        Fixture fixture=fixture();
+        String contents=Files.readString(fixture.server);
+        String constrained=contents.replace("  inspection:\n    enabled: true\n    timeoutMs: 30000",
+                "  inspection:\n    enabled: true\n    maxConcurrent: 1\n    queuedLimit: 0\n    timeoutMs: 30000");
+        assertNotEquals(contents,constrained,"Test fixture must configure a single unqueued inspector");
+        Files.writeString(fixture.server,constrained);
+        try(ServerRuntime runtime=fixture.open()) {
+            var inspectorsField=ServerRuntime.class.getDeclaredField("inspectors");inspectorsField.setAccessible(true);
+            java.util.concurrent.ThreadPoolExecutor inspectors=(java.util.concurrent.ThreadPoolExecutor)inspectorsField.get(runtime);
+            java.util.concurrent.CountDownLatch inspectionStarted=new java.util.concurrent.CountDownLatch(1),releaseInspection=new java.util.concurrent.CountDownLatch(1);
+            inspectors.execute(()->{inspectionStarted.countDown();try{releaseInspection.await();}catch(InterruptedException stopped){Thread.currentThread().interrupt();}});
+            assertTrue(inspectionStarted.await(5,java.util.concurrent.TimeUnit.SECONDS));
+            var slotsField=ServerRuntime.class.getDeclaredField("admissionSlots");slotsField.setAccessible(true);
+            java.util.concurrent.Semaphore slots=(java.util.concurrent.Semaphore)slotsField.get(runtime);int held=0;
+            while(slots.tryAcquire())held++;
+            try {
+                assertTrue(held>0);
+                long dispatches=runtime.inspectionMetrics.count(att.metrics.InspectionMetrics.Stage.DISPATCH);
+                assertThrows(ServerRuntime.QueueFullException.class,()->runtime.submit("run",ServerRuntime.JSON.valueToTree(Map.of("packageId","p")),"alice"));
+                assertEquals(dispatches,runtime.inspectionMetrics.count(att.metrics.InspectionMetrics.Stage.DISPATCH),
+                        "A capacity-rejected legacy request must not dispatch an inspection Worker");
+            } finally {releaseInspection.countDown();slots.release(held);}
+        }
+    }
+
     @Test void runTargetsAndExactBatchSelectionsAreRevalidatedAndIndependent() throws Exception {
         Fixture fixture=fixture();
         try(ServerRuntime runtime=fixture.open()) {
@@ -122,7 +178,10 @@ class ServerRuntimeJobReplayTest {
                     if(!"case".equals(type))definition.putObject("input");
                 }
                 Map<String,Object> draft=runtime.createRunDraft(definition,"alice");
+                long inspectionsBeforeSubmit=runtime.inspectionMetrics.count(att.metrics.InspectionMetrics.Stage.DISPATCH);
                 String original=String.valueOf(runtime.submitRunDraft(submit(String.valueOf(draft.get("draftId"))),"alice","alice").get("jobId"));await(runtime,original);
+                assertEquals(inspectionsBeforeSubmit+1,runtime.inspectionMetrics.count(att.metrics.InspectionMetrics.Stage.DISPATCH),
+                        "Draft submission should perform only its freshness check, not re-inspect the validated RUN input");
                 Map<String,Object> metadata=runtime.jobReplay(original,"alice");assertEquals(true,metadata.get("available"),type+": "+metadata);
                 assertFalse(metadata.toString().contains(fixture.root.toString()),"No host roots in browser replay data");
                 assertThrows(ServerRuntime.NotFoundException.class,()->runtime.jobReplay(original,"bob"));
@@ -154,11 +213,17 @@ class ServerRuntimeJobReplayTest {
             JsonNode scenario=ServerRuntime.JSON.valueToTree(Map.of("schemaVersion","att-load/v1.6","workloads",List.of(Map.of("id","inline","target",Map.of("type","template","id","SIMPLE"),"load",Map.of("users",1,"duration","1s")))));
             var body=ServerRuntime.JSON.createObjectNode();body.put("packageId","p");body.put("environment","SIT");body.set("scenario",scenario);
             Map<String,Object> draft=runtime.createAdvancedLoadDraft(body,"alice");
+            long inspectionsBeforeSubmit=runtime.inspectionMetrics.count(att.metrics.InspectionMetrics.Stage.DISPATCH);
             inlineJob=String.valueOf(runtime.submitAdvancedLoadDraft(submit(String.valueOf(draft.get("draftId"))),"alice").get("jobId"));await(runtime,inlineJob);
+            assertEquals(inspectionsBeforeSubmit+1,runtime.inspectionMetrics.count(att.metrics.InspectionMetrics.Stage.DISPATCH),
+                    "Advanced Load submission should perform only its freshness check, not validate the scenario twice");
             var quick=ServerRuntime.JSON.createObjectNode();quick.put("packageId","p");quick.put("environment","SIT");quick.put("model","virtualUsers");
             quick.putObject("target").put("type","template").put("id","SIMPLE");quick.putObject("input");quick.set("load",ServerRuntime.JSON.valueToTree(Map.of("users",1,"duration","1s")));
             Map<String,Object> quickDraft=runtime.createQuickLoadDraft(quick,"alice");
+            inspectionsBeforeSubmit=runtime.inspectionMetrics.count(att.metrics.InspectionMetrics.Stage.DISPATCH);
             quickJob=String.valueOf(runtime.submitQuickLoadDraft(submit(String.valueOf(quickDraft.get("draftId"))),"alice").get("jobId"));await(runtime,quickJob);
+            assertEquals(inspectionsBeforeSubmit+1,runtime.inspectionMetrics.count(att.metrics.InspectionMetrics.Stage.DISPATCH),
+                    "Quick Load submission should perform only its freshness check, not validate the scenario twice");
             Map<String,Object> unused=runtime.createAdvancedLoadDraft(body,"alice");clock.advance(Duration.ofMinutes(11));
             assertThrows(ServerRuntime.NotFoundException.class,()->runtime.getAdvancedLoadDraft(String.valueOf(unused.get("draftId")),"alice"));
         }

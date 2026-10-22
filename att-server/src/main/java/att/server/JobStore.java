@@ -5,6 +5,7 @@ import java.sql.DriverManager;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.Statement;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -13,6 +14,7 @@ import java.util.Map;
 
 /** H2-backed bounded control-plane metadata store. Evidence remains on disk under each job directory. */
 final class JobStore implements AutoCloseable {
+    static final Duration REPLAY_INTENT_RETENTION=Duration.ofDays(30);
     private static final Object DRIVER_LIFECYCLE=new Object();
     private static int openStores;
     private volatile boolean closed;
@@ -77,7 +79,10 @@ final class JobStore implements AutoCloseable {
             s.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS execution_spec CLOB");
             s.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS replay_owner VARCHAR(256)");
             s.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS originating_schedule_id VARCHAR(40)");
-            s.execute("CREATE TABLE IF NOT EXISTS job_replay_intents (principal VARCHAR(256) NOT NULL, intent_id VARCHAR(80) NOT NULL, source_job_id VARCHAR(80) NOT NULL, job_id VARCHAR(80) NOT NULL, PRIMARY KEY(principal,intent_id))");
+            s.execute("CREATE TABLE IF NOT EXISTS job_replay_intents (principal VARCHAR(256) NOT NULL, intent_id VARCHAR(80) NOT NULL, source_job_id VARCHAR(80) NOT NULL, job_id VARCHAR(80) NOT NULL, expires_at BIGINT, PRIMARY KEY(principal,intent_id))");
+            s.execute("ALTER TABLE job_replay_intents ADD COLUMN IF NOT EXISTS expires_at BIGINT");
+            s.execute("UPDATE job_replay_intents SET expires_at="+(System.currentTimeMillis()+REPLAY_INTENT_RETENTION.toMillis())+" WHERE expires_at IS NULL");
+            s.execute("CREATE INDEX IF NOT EXISTS job_replay_intents_expiry_idx ON job_replay_intents(expires_at)");
             s.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS replay_unavailable VARCHAR(240)");
             s.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS rerun_of_job_id VARCHAR(80)");
             s.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS replay_intent VARCHAR(80)");
@@ -102,8 +107,9 @@ final class JobStore implements AutoCloseable {
                 try(PreparedStatement p=c.prepareStatement("INSERT INTO jobs(job_id,command,package_id,principal,status,created_at,att_version,request_summary,schedule_occurrence_id,execution_spec,replay_unavailable,rerun_of_job_id,replay_intent,replay_owner,originating_schedule_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)")) {
                     p.setString(1,job.id);p.setString(2,job.command);p.setString(3,job.packageId);p.setString(4,job.principal);p.setString(5,job.status);p.setString(6,job.createdAt.toString());p.setString(7,ServerBuildInfo.PRODUCT);p.setString(8,summary);p.setString(9,job.scheduleOccurrenceId);p.setString(10,job.executionSpec);p.setString(11,job.replayUnavailable);p.setString(12,job.rerunOfJobId);p.setString(13,job.replayIntent);p.setString(14,job.replayOwner);p.setString(15,job.originatingScheduleId);p.executeUpdate();
                 }
-                if(job.replayIntent!=null)try(PreparedStatement p=c.prepareStatement("INSERT INTO job_replay_intents(principal,intent_id,source_job_id,job_id) VALUES(?,?,?,?)")) {
-                    p.setString(1,job.principal);p.setString(2,job.replayIntent);p.setString(3,job.rerunOfJobId);p.setString(4,job.id);p.executeUpdate();
+                if(job.replayIntent!=null)try(PreparedStatement p=c.prepareStatement("INSERT INTO job_replay_intents(principal,intent_id,source_job_id,job_id,expires_at) VALUES(?,?,?,?,?)")) {
+                    p.setString(1,job.principal);p.setString(2,job.replayIntent);p.setString(3,job.rerunOfJobId);p.setString(4,job.id);
+                    p.setLong(5,job.createdAt.plus(REPLAY_INTENT_RETENTION).toEpochMilli());p.executeUpdate();
                 }
                 c.commit();
             } catch(Exception failure){c.rollback();throw failure;}
@@ -121,8 +127,14 @@ final class JobStore implements AutoCloseable {
         }
     }
     synchronized String replayJob(String principal,String intent,String source) throws Exception {
-        try(Connection c=connect();PreparedStatement p=c.prepareStatement("SELECT job_id FROM job_replay_intents WHERE principal=? AND intent_id=? AND source_job_id=?")) {
-            p.setString(1,principal);p.setString(2,intent);p.setString(3,source);try(ResultSet r=p.executeQuery()){return r.next()?r.getString(1):null;}
+        try(Connection c=connect();PreparedStatement p=c.prepareStatement("SELECT job_id FROM job_replay_intents WHERE principal=? AND intent_id=? AND source_job_id=? AND expires_at>?")) {
+            p.setString(1,principal);p.setString(2,intent);p.setString(3,source);p.setLong(4,System.currentTimeMillis());
+            try(ResultSet r=p.executeQuery()){return r.next()?r.getString(1):null;}
+        }
+    }
+    synchronized int expireReplayIntents(long nowMillis) throws Exception {
+        try(Connection c=connect();PreparedStatement p=c.prepareStatement("DELETE FROM job_replay_intents WHERE expires_at<=?")) {
+            p.setLong(1,nowMillis);return p.executeUpdate();
         }
     }
 
@@ -270,11 +282,15 @@ final class JobStore implements AutoCloseable {
                     if(!rows.next()){c.rollback();return;}
                     LoadSchedule current=ServerRuntime.JSON.readValue(rows.getString(1),LoadSchedule.class);
                     if(!java.util.Objects.equals(current.updatedAt,expected.updatedAt)||!java.util.Objects.equals(current.expectedRevisionDigest,expected.expectedRevisionDigest)){c.rollback();return;}
+                    boolean newlyObserved=!"package-revision-changed".equals(current.sourceStatus)||!java.util.Objects.equals(current.currentRevisionDigest,currentRevision);
                     boolean autoPause=pause&&current.enabled;
                     current.sourceStatus="package-revision-changed";current.currentRevisionDigest=currentRevision;
                     if(autoPause){current.enabled=false;current.autoPauseReason="package-revision-changed";current.autoPausedAt=at;current.updatedAt=at;current.updatedBy="system:load-scheduler";}
                     try(PreparedStatement update=c.prepareStatement("UPDATE load_schedules SET schedule_json=?,enabled=?,updated_at=? WHERE schedule_id=?")) {
                         update.setString(1,ServerRuntime.JSON.writeValueAsString(current));update.setBoolean(2,current.enabled);update.setString(3,current.updatedAt);update.setString(4,current.id);update.executeUpdate();
+                    }
+                    if(newlyObserved)try(PreparedStatement audit=c.prepareStatement("INSERT INTO audit(principal,action,package_id,created_at,outcome) VALUES('system:load-scheduler','SCHEDULE_SOURCE_CHANGED',?,?,?)")) {
+                        audit.setString(1,current.packageId);audit.setString(2,at);audit.setString(3,"schedule="+current.id+";stored="+current.expectedRevisionDigest+";current="+currentRevision);audit.executeUpdate();
                     }
                     if(autoPause)try(PreparedStatement audit=c.prepareStatement("INSERT INTO audit(principal,action,package_id,created_at,outcome) VALUES('system:load-scheduler','SCHEDULE_AUTO_PAUSE',?,?,?)")) {
                         audit.setString(1,current.packageId);audit.setString(2,at);audit.setString(3,"package-revision-changed;schedule="+current.id);audit.executeUpdate();
@@ -282,6 +298,30 @@ final class JobStore implements AutoCloseable {
                     c.commit();
                 }
             }
+        }
+    }
+    synchronized void recordScheduleSourceRestored(LoadSchedule expected,String currentRevision,String at) throws Exception {
+        try(Connection c=connect()) {
+            c.setAutoCommit(false);
+            try(PreparedStatement select=c.prepareStatement("SELECT schedule_json FROM load_schedules WHERE schedule_id=? FOR UPDATE")) {
+                select.setString(1,expected.id);
+                try(ResultSet rows=select.executeQuery()) {
+                    if(!rows.next()){c.rollback();return;}
+                    LoadSchedule current=ServerRuntime.JSON.readValue(rows.getString(1),LoadSchedule.class);
+                    if(!java.util.Objects.equals(current.updatedAt,expected.updatedAt)||!java.util.Objects.equals(current.expectedRevisionDigest,expected.expectedRevisionDigest)){c.rollback();return;}
+                    boolean restored="package-revision-changed".equals(current.sourceStatus)
+                            ||!java.util.Objects.equals(current.currentRevisionDigest,currentRevision);
+                    if(!restored){c.rollback();return;}
+                    current.sourceStatus=null;current.currentRevisionDigest=currentRevision;
+                    try(PreparedStatement update=c.prepareStatement("UPDATE load_schedules SET schedule_json=? WHERE schedule_id=?")) {
+                        update.setString(1,ServerRuntime.JSON.writeValueAsString(current));update.setString(2,current.id);update.executeUpdate();
+                    }
+                    try(PreparedStatement audit=c.prepareStatement("INSERT INTO audit(principal,action,package_id,created_at,outcome) VALUES('system:load-scheduler','SCHEDULE_SOURCE_RESTORED',?,?,?)")) {
+                        audit.setString(1,current.packageId);audit.setString(2,at);audit.setString(3,"schedule="+current.id+";revision="+currentRevision);audit.executeUpdate();
+                    }
+                    c.commit();
+                }
+            } catch(Exception failure){c.rollback();throw failure;}
         }
     }
     synchronized boolean advanceAndClaim(LoadSchedule expected,String occurrenceId,String nextFire) throws Exception {
