@@ -40,6 +40,7 @@ export function LoadTemplateBuilder(props: LoadFeatureProps & { templateId: stri
   useEffect(() => { const unregister = navigation.registerUnsavedChanges(dirty || Boolean(edit && edit.kind !== 'review'), 'Load Template draft'); unregisterDirty.current = unregister; return unregister; }, [dirty, edit, navigation.registerUnsavedChanges]);
   useEffect(() => {
     const controller = new AbortController(); const version = ++loadSequence.current;
+    ++sequence.current; setBusy(false);
     setDefinition(null); setDraft(null); setDirty(false); setEdit(null); setMessage('Loading template…');
     (async () => {
       let offset = 0;
@@ -117,6 +118,13 @@ export function LoadTemplateBuilder(props: LoadFeatureProps & { templateId: stri
     catch (error) { setDraft(null); setMessage(error instanceof Error ? error.message : 'Run was not accepted.'); }
     finally { setBusy(false); }
   }
+  function schedule() {
+    if (!draft || Date.parse(draft.expiresAt) <= Date.now() || busy || !props.onSchedule) return;
+    unregisterDirty.current?.();
+    const accepted = props.onSchedule({ packageId, environment, draftId: draft.draftId, previewYaml: draft.previewYaml, expiresAt: draft.expiresAt });
+    if (accepted === false) unregisterDirty.current = navigation.registerUnsavedChanges(dirty, 'Load Template draft');
+    else setDirty(false);
+  }
   const targets = workloads.flatMap(row => row.structure === 'mix' ? row.mix : [row.target]);
   const unique = new Set(targets.filter(target => target.id).map(target => `${target.type}:${target.id}`)).size;
   const valid = Boolean(draft && Date.parse(draft.expiresAt) > Date.now());
@@ -136,13 +144,14 @@ export function LoadTemplateBuilder(props: LoadFeatureProps & { templateId: stri
     {definition && <>
       <button className="button button-quiet" type="button" onClick={() => setEdit({ kind: 'settings', timing: clone(timing), advanced: clone(advanced) })}>⚙ Common Settings</button>
       {!multiple && mixed ? <><label>Shared users <input type="number" min="1" value={workloads[0]?.users || ''} onChange={event => update(0,{ ...workloads[0], users: event.target.value })} /></label>{workloads[0] && mixTable(workloads[0], value => update(0,value), slot => setEdit({ kind: 'target', index: 0, slot, value: clone(workloads[0].mix[slot]) }))}</> :
-        <div className="att-table-scroll"><table className="att-data-table"><thead><tr><th>Workload</th><th>{mixed ? 'Mix / bindings' : 'Target'}</th><th>{model === 'virtualUsers' ? 'Users' : 'Target TPS / maximum concurrent'}</th><th>Actions</th></tr></thead><tbody>{workloads.map((row,index) => <tr key={row.id}>
-          <td>{row.id}</td><td>{mixed ? `${row.mix.length} bindings · ${row.mix.map(slot => slot.weight).join(' / ')}` : row.target.id || 'Unbound'}</td><td>{model === 'virtualUsers' ? row.users : `${row.arrivalRate} / ${row.maxConcurrent}`}</td>
+        <div className="att-table-scroll"><table className="att-data-table"><thead><tr><th>Workload</th><th>{mixed ? 'Mix / bindings' : 'Target'}</th><th>{model === 'virtualUsers' ? 'Users' : 'Target TPS / maximum concurrent'}</th><th>Readiness</th><th>Actions</th></tr></thead><tbody>{workloads.map((row,index) => <tr key={row.id}>
+          <td>{row.id}</td><td>{mixed ? <>{row.mix.length} bindings · {row.mix.map(slot => slot.weight).join(' / ')}<div className="att-mix-distribution" role="img" aria-label={`Weights for ${row.id}: ${row.mix.map(slot => slot.weight).join(' / ')}`}>{row.mix.map((slot,index) => <span key={slot.entryId} style={{ flexGrow: Math.max(0,Number(slot.weight) || 0),background: `hsl(${index * 83 % 360} 55% 45%)` }} />)}</div></> : row.target.id || 'Unbound'}</td><td>{model === 'virtualUsers' ? row.users : `${row.arrivalRate} / ${row.maxConcurrent}`}</td>
+          <td>{(mixed ? row.mix.every(slot => slot.id) : row.target.id) ? (valid ? 'Validated' : 'Bound; validate') : 'Choose Target'}</td>
           <td><button className="button button-quiet" type="button" onClick={() => setEdit({ kind: mixed ? 'mix' : 'target', index, value: clone(mixed ? row : row.target) } as Edit)}>{mixed ? '⤨ Edit Mix' : '⚙ Choose Target'}</button><button className="button button-quiet" type="button" onClick={() => setEdit({ kind: 'workload', index, value: clone(row) })}>⚙ Configure</button>
             <button className="button button-quiet" type="button" disabled={workloads.length <= 2} onClick={() => change(workloads.filter((_,i) => i !== index))}>− Remove</button><button className="button button-quiet" type="button" disabled={index === 0} onClick={() => { const next = [...workloads]; [next[index-1],next[index]] = [next[index],next[index-1]]; change(next); }}>↑ Move up</button><button className="button button-quiet" type="button" disabled={workloads.length >= Math.min(128,limits.maxWorkloads) || targets.length + (mixed ? workloads[0]?.mix.length || 2 : 1) > limits.maxTargets} onClick={() => change([...workloads,{ ...clone(row),id: `workload-${++slots.current}` }])}>⧉ Duplicate</button></td>
         </tr>)}</tbody></table></div>}
       {multiple && <button className="button button-quiet" type="button" disabled={workloads.length >= Math.min(128,limits.maxWorkloads) || targets.length + (mixed ? workloads[0]?.mix.length || 2 : 1) > limits.maxTargets} onClick={() => { const row = clone(workloads[0]); row.id = `workload-${++slots.current}`; row.target = newTarget(); row.mix = row.mix.map(slot => ({ ...slot, ...newTarget() })); change([...workloads,row]); }}>＋ Add Workload</button>}
-      <footer className="att-load-actions"><button className="button button-quiet" type="button" onClick={() => void validate()} disabled={busy || !props.inlineLoadEnabled}>✓ Validate</button><button className="button button-quiet" type="button" disabled={!valid} onClick={() => setEdit({ kind: 'review' })}>▤ Review YAML</button><button className="button button-quiet" type="button" disabled={!valid || busy} onClick={() => void run()}>▶ Run Now</button><button className="button button-quiet" type="button" disabled={!valid || !props.schedulingEnabled || busy} onClick={() => draft && props.onSchedule?.({ packageId, environment, draftId: draft.draftId, previewYaml: draft.previewYaml })}>◷ Schedule…</button></footer>
+      <footer className="att-load-actions"><button className="button button-quiet" type="button" onClick={() => void validate()} disabled={busy || !props.inlineLoadEnabled}>✓ Validate</button><button className="button button-quiet" type="button" disabled={!valid} onClick={() => setEdit({ kind: 'review' })}>▤ Review YAML</button><button className="button button-quiet" type="button" disabled={!valid || busy} onClick={() => void run()}>▶ Run Now</button><button className="button button-quiet" type="button" disabled={!valid || !props.schedulingEnabled || !props.onSchedule || busy} onClick={schedule}>◷ Schedule…</button></footer>
     </>}
     {edit && <LoadDialog title={edit.kind === 'review' ? 'Review Scenario' : edit.kind === 'settings' ? 'Common Settings' : edit.kind === 'mix' ? 'Edit Mix' : edit.kind === 'target' ? 'Configure Target' : 'Configure Workload'} onCancel={close} onSave={edit.kind === 'review' ? undefined : save}>
       {edit.kind === 'review' && <CodeEditor label="Validated scenario YAML" language="yaml" value={draft?.previewYaml || ''} readOnly />}

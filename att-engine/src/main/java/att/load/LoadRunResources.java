@@ -95,7 +95,7 @@ public final class LoadRunResources implements AutoCloseable {
         if (initializedExecutionNamespaces.contains(run)) return;
         synchronized (initializedExecutionNamespaces) {
             if (initializedExecutionNamespaces.contains(run)) return;
-            for (String name : new String[] {"samples", "failures", "executions"}) {
+            for (String name : new String[] {"samples", "failures", "executions", "report", ".exec-id-reservations"}) {
                 Path directory = run.resolve(name);
                 if (Files.exists(directory)) {
                     if (Files.isSymbolicLink(directory) || !Files.isDirectory(directory))
@@ -106,6 +106,9 @@ public final class LoadRunResources implements AutoCloseable {
                     }
                 }
             }
+            for (String name : new String[] {"load-summary.json", "load-summary.yaml"})
+                if (Files.exists(run.resolve(name), java.nio.file.LinkOption.NOFOLLOW_LINKS))
+                    throw new IllegalArgumentException("Load output namespace contains a retained summary: " + run);
             Files.createDirectories(run);
             // One durable claim per Run, never per iteration. A restarted/second owner must use a new Run ID.
             Files.write(run.resolve(".execution-owner"), new byte[] {1},

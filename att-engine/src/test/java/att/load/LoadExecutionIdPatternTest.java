@@ -95,6 +95,19 @@ class LoadExecutionIdPatternTest {
             assertThrows(IllegalArgumentException.class, () -> resources.initializeExecutionNamespace(run));
         }
     }
+    @Test void rejectsLegacyMetricsOnlySummaryWithoutOverwritingIt() throws Exception {
+        installConfig();
+        Path run = root.resolve("legacy/load/RUN");
+        Files.createDirectories(run);
+        Path summary = run.resolve("load-summary.json");
+        Files.write(summary, "retained".getBytes("UTF-8"));
+        try (LoadRunResources resources = new LoadRunResources(root, new FrameworkConfigLoader().load(root.resolve("config.yaml"), root))) {
+            assertThrows(IllegalArgumentException.class, () -> resources.initializeExecutionNamespace(run));
+            assertEquals("retained", new String(Files.readAllBytes(summary), "UTF-8"));
+            assertFalse(Files.exists(run.resolve(".execution-owner")));
+        }
+    }
+
     private void installConfig() throws Exception {
         att.TestSchemas.install(root);
         Files.write(root.resolve("config.yaml"), "schemaVersion: att-config/v2.11\n".getBytes("UTF-8"));

@@ -14,14 +14,8 @@ const definition = { schemaVersion: 'att-load-template/v1', name: 'Independent p
 beforeEach(() => { host=document.createElement('div');document.body.append(host);root=createRoot(host);(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT=true; endpoints.listLoadTemplates.mockResolvedValue({ items: [{ id: 'builtin:multi-workload-mix',validation: 'valid',definition }],revisionDigest: 'source-revision' }); endpoints.createLoadTemplateDraft.mockReset(); });
 afterEach(async () => { await act(async () => root.unmount());host.remove(); });
 async function click(text: string,within: Element = host) { await act(async () => { const button=[...within.querySelectorAll('button')].find(node => node.textContent?.includes(text));if(!button)throw new Error(`Missing ${text}`);button.click(); }); }
-async function render() { await act(async () => root.render(<NavigationGuardContext.Provider value={{ navigate: vi.fn(),registerUnsavedChanges: () => vi.fn() }}><LoadTemplateBuilder api={{} as never} packages={[{packageId:'p'}]} selectedPackage="p" selectedEnvironment="SIT" onPackageChange={vi.fn()} onEnvironmentChange={vi.fn()} onJobAccepted={vi.fn()} inlineLoadEnabled schedulingEnabled templateId="builtin:multi-workload-mix" /></NavigationGuardContext.Provider>)); }
-it('isolates nested mix edits until Save and composes stable IDs separately from repeated typed Targets',async () => {
- await render();
- await click('Edit Mix');
- await click('Choose / Configure',host.querySelector('dialog')!);await click('Bind typed Target');
- await click('Save',host.querySelector('dialog[aria-label="Configure Mix Target"]')!);
- await click('Cancel',host.querySelector('dialog[aria-label="Edit Mix"]')!);
- expect(host.textContent).not.toContain('SAME');
+async function render(packageId = "p") { await act(async () => root.render(<NavigationGuardContext.Provider value={{ navigate: vi.fn(),registerUnsavedChanges: () => vi.fn() }}><LoadTemplateBuilder api={{} as never} packages={[{packageId:'p'}]} selectedPackage={packageId} selectedEnvironment="SIT" onPackageChange={vi.fn()} onEnvironmentChange={vi.fn()} onJobAccepted={vi.fn()} inlineLoadEnabled schedulingEnabled templateId="builtin:multi-workload-mix" /></NavigationGuardContext.Provider>)); }
+async function bindAllTargets() {
  for(let row=0;row<2;row++) {
   await act(async () => ([...host.querySelectorAll('button')].filter(button => button.textContent?.includes('Edit Mix'))[row]).click());
   for(let slot=0;slot<2;slot++) {
@@ -31,6 +25,15 @@ it('isolates nested mix edits until Save and composes stable IDs separately from
   }
   await click('Save',host.querySelector('dialog[aria-label="Edit Mix"]')!);
  }
+}
+it('isolates nested mix edits until Save and composes stable IDs separately from repeated typed Targets',async () => {
+ await render();
+ await click('Edit Mix');
+ await click('Choose / Configure',host.querySelector('dialog')!);await click('Bind typed Target');
+ await click('Save',host.querySelector('dialog[aria-label="Configure Mix Target"]')!);
+ await click('Cancel',host.querySelector('dialog[aria-label="Edit Mix"]')!);
+ expect(host.textContent).not.toContain('SAME');
+ await bindAllTargets();
  expect(host.textContent).toContain('2 Workloads · 4 Target bindings · 1 Unique targets · 20 total VU');
  endpoints.createLoadTemplateDraft.mockResolvedValue({ draftId: 'A1',expiresAt:new Date(Date.now()+60000).toISOString(),previewYaml:'safe' });
  await click('Validate');
@@ -42,4 +45,16 @@ it('isolates nested mix edits until Save and composes stable IDs separately from
  expect([...host.querySelectorAll('button')].find(button=>button.textContent?.includes('Run Now'))!.disabled).toBe(false);
  await click('Duplicate');
  expect([...host.querySelectorAll('button')].find(button=>button.textContent?.includes('Run Now'))!.disabled).toBe(true);
+});
+
+it('ignores a previous package validation response after changing package',async () => {
+ await render();
+ await bindAllTargets();
+ let resolve!: (value: unknown) => void;
+ endpoints.createLoadTemplateDraft.mockImplementation(() => new Promise(done => { resolve=done; }));
+ await click('Validate');
+ await render('other');
+ await act(async () => resolve({ draftId:'OLD',expiresAt:new Date(Date.now()+60000).toISOString(),previewYaml:'old package' }));
+ expect([...host.querySelectorAll('button')].find(button=>button.textContent?.includes('Run Now'))!.disabled).toBe(true);
+ expect(host.textContent).not.toContain('Validation passed.');
 });
