@@ -42,8 +42,8 @@ class ServerRuntimeJobReplayTest {
         for(String module:List.of("att-worker","att-engine","att-server-api","att-security"))ServerRuntimeTestSupport.addModuleJar(libs,module,Path.of(module+"/target/classes"));
         ServerRuntimeTestSupport.addWorkerClasspathJars(libs);
 
-        Files.createDirectories(root.resolve("loads"));
-        Files.writeString(root.resolve("loads/smoke.yaml"),"schemaVersion: att-load/v1.6\nworkloads:\n  - id: smoke\n    target: {type: template, id: SIMPLE}\n    load: {users: 1, duration: 1s}\n");
+        Files.createDirectories(root.resolve("load"));
+        Files.writeString(root.resolve("load/smoke.yaml"),"schemaVersion: att-load/v1.6\nworkloads:\n  - id: smoke\n    target: {type: template, id: SIMPLE}\n    load: {users: 1, duration: 1s}\n");
         return new Fixture(root,server,libs);
     }
     private static void users(ServerRuntime runtime) throws Exception {
@@ -86,18 +86,19 @@ class ServerRuntimeJobReplayTest {
             assertEquals("package-revision-changed",runtime.triggerLoadSchedule(pauseId,"alice").get("reason"));
             assertFalse(runtime.loadSchedule(pauseId).enabled);assertEquals("package-revision-changed",runtime.loadSchedule(pauseId).autoPauseReason);
             assertThrows(ServerRuntime.ScheduleSourceChangedException.class,()->runtime.setLoadScheduleEnabled(pauseId,true,"alice"));
-            Files.writeString(unrelated,originalUnrelated);
-            Map<String,Object> restored=runtime.triggerLoadSchedule(strictId,"alice");assertEquals("submitted",restored.get("status"),restored.toString());
-            await(runtime,String.valueOf(restored.get("jobId")));
-            assertNull(runtime.loadSchedule(strictId).sourceStatus,"A successful execution after restoring the pinned package must clear current stale status");
-            assertEquals(stored,runtime.loadSchedule(strictId).currentRevisionDigest);
-            assertEquals(1,runtime.store.auditOutcomes("SCHEDULE_SOURCE_RESTORED").size());
             Map<String,Object> accepted=runtime.triggerLoadSchedule(ignoreId,"alice");assertEquals("submitted",accepted.get("status"),accepted.toString());
             await(runtime,String.valueOf(accepted.get("jobId")));
             assertEquals(stored,runtime.loadSchedule(ignoreId).expectedRevisionDigest);
             assertEquals(ignore.runInput,runtime.loadSchedule(ignoreId).runInput);
             assertEquals(1,runtime.store.auditOutcomes("SCHEDULE_SOURCE_REVALIDATED").size());
             assertTrue(runtime.store.auditOutcomes("SCHEDULE_SOURCE_REVALIDATED").get(0).contains("stored="+stored));
+            Files.writeString(unrelated,originalUnrelated);
+            clock.advance(Duration.ofMinutes(16));
+            Map<String,Object> restored=runtime.triggerLoadSchedule(strictId,"alice");assertEquals("submitted",restored.get("status"),restored.toString());
+            await(runtime,String.valueOf(restored.get("jobId")));
+            assertNull(runtime.loadSchedule(strictId).sourceStatus,"A successful execution after restoring the pinned package must clear current stale status");
+            assertEquals(stored,runtime.loadSchedule(strictId).currentRevisionDigest);
+            assertEquals(1,runtime.store.auditOutcomes("SCHEDULE_SOURCE_RESTORED").size());
         }
         try(ServerRuntime runtime=fixture.open(clock)) {
             assertEquals("Renamed stale RUN",runtime.loadSchedule(strictId).name);
@@ -120,13 +121,13 @@ class ServerRuntimeJobReplayTest {
         try(ServerRuntime runtime=fixture.open()) {
             users(runtime);
             var strictRequest=ServerRuntime.JSON.valueToTree(Map.of("name","Strict file Load","executionType","load","packageId","p","environment","SIT",
-                    "scenario","loads/smoke.yaml","timezone","UTC","cron","0 2 * * *","enabled",true));
+                    "scenario","load/smoke.yaml","timezone","UTC","cron","0 2 * * *","enabled",true));
             LoadSchedule strict=runtime.createLoadSchedule(strictRequest,"alice");strictId=strict.id;strictRevision=strict.expectedRevisionDigest;
             assertNotNull(strictRevision,"New file-backed schedules must pin their validated package revision");
             var pauseRequest=((com.fasterxml.jackson.databind.node.ObjectNode)strictRequest).deepCopy().put("name","Paused file Load").put("packageChangePolicy","pause");
             LoadSchedule pause=runtime.createLoadSchedule(pauseRequest,"alice");pauseId=pause.id;
             assertNotNull(pause.expectedRevisionDigest);
-            Path scenario=fixture.root.resolve("loads/smoke.yaml");
+            Path scenario=fixture.root.resolve("load/smoke.yaml");
             Files.writeString(scenario,Files.readString(scenario).replace("duration: 1s","duration: 2s"));
             Map<String,Object> strictResult=runtime.triggerLoadSchedule(strictId,"alice");
             assertEquals("package-revision-changed",strictResult.get("reason"));assertNull(strictResult.get("jobId"));
@@ -209,7 +210,7 @@ class ServerRuntimeJobReplayTest {
         var clock=new ServerRuntimeTestSupport.MutableClock();
         try(ServerRuntime runtime=fixture.open(clock)) {
             users(runtime);
-            original=String.valueOf(runtime.submit("load",ServerRuntime.JSON.valueToTree(Map.of("packageId","p","scenario","loads/smoke.yaml","environment","SIT")),"alice").get("jobId"));await(runtime,original);
+            original=String.valueOf(runtime.submit("load",ServerRuntime.JSON.valueToTree(Map.of("packageId","p","scenario","load/smoke.yaml","environment","SIT")),"alice").get("jobId"));await(runtime,original);
             JsonNode scenario=ServerRuntime.JSON.valueToTree(Map.of("schemaVersion","att-load/v1.6","workloads",List.of(Map.of("id","inline","target",Map.of("type","template","id","SIMPLE"),"load",Map.of("users",1,"duration","1s")))));
             var body=ServerRuntime.JSON.createObjectNode();body.put("packageId","p");body.put("environment","SIT");body.set("scenario",scenario);
             Map<String,Object> draft=runtime.createAdvancedLoadDraft(body,"alice");
@@ -264,10 +265,10 @@ class ServerRuntimeJobReplayTest {
             assertEquals(false,runtime.jobReplay(id,"alice").get("available"));
             assertThrows(IllegalArgumentException.class,()->runtime.createJobReplayDraft(id,"alice"));
             Job historical=new Job("J1234567890ABCDEF","load","p","alice",new att.server.api.WorkerRequest(),new JobEvents(temp.resolve("historical.jsonl"),100));
-            runtime.store.insert(historical,"{\"scenario\":\"loads/smoke.yaml\"}");
+            runtime.store.insert(historical,"{\"scenario\":\"load/smoke.yaml\"}");
             assertEquals(false,runtime.jobReplay(historical.id,"alice").get("available"));
             assertThrows(IllegalArgumentException.class,()->runtime.createJobReplayDraft(historical.id,"alice"));
-            String raw=String.valueOf(runtime.submit("load",ServerRuntime.JSON.valueToTree(Map.of("packageId","p","scenario","loads/smoke.yaml","overrides",List.of("inputs.password=NEVER-RETAIN-RAW-OVERRIDE"))),"alice").get("jobId"));
+            String raw=String.valueOf(runtime.submit("load",ServerRuntime.JSON.valueToTree(Map.of("packageId","p","scenario","load/smoke.yaml","overrides",List.of("inputs.password=NEVER-RETAIN-RAW-OVERRIDE"))),"alice").get("jobId"));
             assertNull(runtime.store.executionSpec(raw).get("spec"),"Raw overrides must never be silently omitted from a retained definition");
             assertFalse(runtime.store.executionSpec(raw).toString().contains("NEVER-RETAIN-RAW-OVERRIDE"));
         }
@@ -276,7 +277,7 @@ class ServerRuntimeJobReplayTest {
     @Test void packageYamlReplayHonorsPolicyWithoutRequiringBrowserInlineLoadAndDeletedJobsFailClosed() throws Exception {
         Fixture fixture=fixture();String original;
         try(ServerRuntime runtime=fixture.open()) {
-            users(runtime);original=String.valueOf(runtime.submit("load",ServerRuntime.JSON.valueToTree(Map.of("packageId","p","scenario","loads/smoke.yaml")),"alice").get("jobId"));await(runtime,original);
+            users(runtime);original=String.valueOf(runtime.submit("load",ServerRuntime.JSON.valueToTree(Map.of("packageId","p","scenario","load/smoke.yaml")),"alice").get("jobId"));await(runtime,original);
         }
         Files.writeString(fixture.server,Files.readString(fixture.server).replace("inlineLoad: {enabled: true}","inlineLoad: {enabled: false}"));
         try(ServerRuntime runtime=fixture.open()) {
