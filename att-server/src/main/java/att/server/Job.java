@@ -7,7 +7,8 @@ import java.util.Map;
 
 final class Job {
     final String id,command,packageId,principal;
-    String scheduleOccurrenceId;
+    String scheduleOccurrenceId, originatingScheduleId;
+    String executionSpec, replayUnavailable, rerunOfJobId, replayIntent, replayOwner;
     final Instant createdAt=Instant.now();
     volatile long requestReceivedNanos=System.nanoTime();
     volatile long admittedNanos,workerStartedNanos,workerSpawnStartedNanos,workerSpawnedNanos;
@@ -44,7 +45,7 @@ final class Job {
     private static void addDuration(Map<String,Object> target,String name,long start,long end){
         if(start>0&&end>=start)target.put(name,(end-start)/1_000_000.0);
     }
-    Map<String,Object> view(){Map<String,Object> m=new LinkedHashMap<>();m.put("jobId",id);m.put("command",command);m.put("executionType",executionType(command));m.put("packageId",packageId);m.put("principal",principal);m.put("status",status);m.put("createdAt",createdAt.toString());m.put("startedAt",startedAt==null?null:startedAt.toString());m.put("finishedAt",finishedAt==null?null:finishedAt.toString());m.put("exitCode",exitCode);Map<String,Object> performance=performance();if(!performance.isEmpty())m.put("performance",performance);return m;}
+    Map<String,Object> view(){Map<String,Object> m=new LinkedHashMap<>();m.put("jobId",id);if(rerunOfJobId!=null)m.put("rerunOfJobId",rerunOfJobId);m.put("command",command);m.put("executionType",executionType(command));m.put("packageId",packageId);m.put("principal",principal);m.put("status",status);m.put("createdAt",createdAt.toString());m.put("startedAt",startedAt==null?null:startedAt.toString());m.put("finishedAt",finishedAt==null?null:finishedAt.toString());m.put("exitCode",exitCode);Map<String,Object> performance=performance();if(!performance.isEmpty())m.put("performance",performance);return m;}
     static String executionType(String command){return "debug".equals(command)?"run":command;}
     synchronized boolean terminal(){return "PASS".equals(status)||"FAIL".equals(status)||"ERROR".equals(status)||"INVALID".equals(status)||"CANCELLED".equals(status);}
 }

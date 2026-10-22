@@ -12,6 +12,7 @@ final class LoadSchedule {
     public Map<String,Object> runInput;
     public String id;
     public String name;
+    public String sourceJobId;
     public String description;
     public List<String> tags=List.of();
     public String packageId;
@@ -53,7 +54,7 @@ final class LoadSchedule {
     LoadSchedule copy() {
         LoadSchedule copy=new LoadSchedule();
         copy.schemaVersion=schemaVersion;copy.runInput=runInput==null?null:ServerRuntime.JSON.convertValue(runInput,Map.class);
-        copy.id=id;copy.name=name;copy.description=description;copy.packageId=packageId;copy.jobType=jobType==null?"load":jobType;copy.scenario=scenario;
+        copy.sourceJobId=sourceJobId;copy.id=id;copy.name=name;copy.description=description;copy.packageId=packageId;copy.jobType=jobType==null?"load":jobType;copy.scenario=scenario;
         copy.inlineScenario=inlineScenario==null?null:new LinkedHashMap<>(inlineScenario);copy.catalogSnapshot=catalogSnapshot;copy.loadModel=loadModel;
         copy.inlineDebugInput=inlineDebugInput==null?null:new LinkedHashMap<>(inlineDebugInput);
         copy.debugTargetType=debugTargetType;copy.debugTargetId=debugTargetId;copy.debugResourceId=debugResourceId;

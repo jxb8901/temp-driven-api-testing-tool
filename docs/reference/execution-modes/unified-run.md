@@ -1,6 +1,6 @@
 # Unified RUN and schedules
 
-ATT 4.2.2 represents functional one-shot execution as **RUN**. A RUN executes a Case, Template, Flow, Tool, or a selected batch of Cases. **Debug** is an optional diagnostic mode of RUN. **LOAD** retains its performance engine, pacing controls and specialized reports.
+ATT 4.2.3 represents functional one-shot execution as **RUN**. A RUN executes a Case, Template, Flow, Tool, or a selected batch of Cases. **Debug** is an optional diagnostic mode of RUN. **LOAD** retains its performance engine, pacing controls and specialized reports.
 
 ## Validate and execute a RUN
 
@@ -85,7 +85,7 @@ Every active local `USER` or authenticated container principal in `server.author
 
 ## Migrate existing clients
 
-| Existing interface | Mapping in 4.2.2 |
+| Existing interface | Mapping in 4.2.3 |
 |---|---|
 | CLI `validate`, `run`, `report` | Existing validation, Case RUN and report commands remain valid |
 | CLI `--suite`, `--suite-dir`, `--case`, `--tag`, `--rerun-failed` | Existing selectors retain their behavior; Server batches use `selection` |
@@ -94,6 +94,26 @@ Every active local `USER` or authenticated container principal in `server.author
 | `/load-schedules`, legacy `jobType:load/debug` | Shared scheduler compatibility routes; existing definitions remain readable |
 | `/jobs/...`, saved Studio job/result links | Existing shared history, cancellation, events and results routes |
 
-No legacy endpoint is removed in 4.2.2. `GET /api/v1/version` advertises `unifiedRunVersion:att-execution/v1`. New Studio resource forms can fall back to legacy Debug drafts when an older Server lacks this capability. Unified Case/batch drafts require 4.2.2; use the existing Explorer Case action on older deployments. Deploy matching Server/Worker components together; older Workers do not implement resource RUN dispatch.
+No legacy endpoint is removed in 4.2.3. `GET /api/v1/version` advertises `unifiedRunVersion:att-execution/v1`. New Studio resource forms can fall back to legacy Debug drafts when an older Server lacks this capability. Unified Case/batch drafts require 4.2.3; use the existing Explorer Case action on older deployments. Deploy matching Server/Worker components together; older Workers do not implement resource RUN dispatch.
 
 Schedule persistence adds JSON fields in the existing H2 tables, leaving legacy LOAD rows unchanged. Before downgrade, stop scheduling, export new definitions, remove RUN/one-time definitions and restore the pre-upgrade database backup. An older scheduler must not interpret a new RUN definition as LOAD. Retained job artifacts remain separate from database metadata.
+
+## Rerun or schedule a Job
+
+In **Jobs**, **Job Details**, or **LOAD Catalog → Recent LOAD Jobs**, select **Rerun** or **Schedule / Reschedule…**. The Server revalidates the retained definition before displaying a confirmation. Review the package, environment, exact RUN target or selected cases, Debug option, or LOAD scenario and pacing. **Confirm rerun** creates an independent Job and opens its Details. The original results and evidence remain intact.
+
+**Continue to New Schedule** opens the unified creation form. Choose the name, recurrence, timezone, overlap limit and enabled state, review the occurrence preview, then save. Opening this form does not create or edit a schedule. **View / Edit originating schedule** opens the existing authorized schedule; it is a separate action from creating a new schedule or running again now.
+
+Replay uses the previous safe snapshot with `revisionPolicy: reject-package-changes`. It never silently switches to the latest package file. If the package, runtime configuration or dependencies change, configure and validate a new run. Newly retained safe definitions survive draft expiry and Server restart; confirmation drafts expire after ten minutes and must then be rebuilt. The Server validates the current account, package, environment, schema, capability and execution limits again.
+
+Historical Jobs without a retained definition show **Rerun unavailable for this historical job**. Validation-only Jobs, failed safe retention, and classified submitted inputs cannot be replayed exactly. Configure a new run and provide missing credentials through the normal protected input flow. Never reconstruct an execution from logs, artifacts or redacted previews. Safe definitions are limited to 256 KiB and exclude Worker transport fields and host roots.
+
+The Job lifecycle API uses the following endpoints under `/api/v1`:
+
+| Method and path | Result |
+| --- | --- |
+| `GET /jobs/{jobId}/replay` | Authorized safe definition, availability reason, revision policy and originating schedule link when available. |
+| `POST /jobs/{jobId}/replay-draft` with `{}` | Revalidated RUN/LOAD draft plus an opaque `intentId`; creates no execution or schedule. |
+| `POST /jobs/{jobId}/rerun` with `{"intentId":"...","confirm":true}` | New independent Job, HTTP 202 and `Location`; retries with the same intent return the accepted Job. |
+
+Use the returned `draftId`, package, environment and canonical `executionType: run | load` in the normal `POST /schedules` creation contract. Debug remains `options.debug` on RUN. A rerun exposes `rerunOfJobId`; schedules created from a Job retain authorized `sourceJobId` provenance. Replay access is restricted to the submitting identity or retained schedule execution owner. Deleted or inaccessible Jobs fail with 404. A stale source fails with 409; capacity and validation failures follow the normal submission contracts. Repeating an accepted intent after its output Job is deleted fails safely instead of launching another execution.

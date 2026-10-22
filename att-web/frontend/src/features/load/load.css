@@ -288,3 +288,7 @@
 }
 .att-archive-metrics caption { font-size: .8rem; }
 .att-archive-metric-group th { color: var(--att-color-muted, #637087); font-size: .8rem; padding-top: var(--att-space-3, .75rem); }
+
+.att-replay-actions { display: inline-flex; gap: .4rem; flex-wrap: wrap; }
+.att-replay-review { flex-basis: 100%; max-width: min(48rem, 100%); padding: 1rem; border: 1px solid var(--border-color, #aaa); border-radius: .4rem; background: var(--surface-color, #fff); color: var(--text-color, #222); }
+.att-replay-review pre { max-height: 24rem; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }

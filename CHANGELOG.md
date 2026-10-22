@@ -1,5 +1,11 @@
 # Changelog
 
+# ATT 4.2.3 - 2026-10-22
+
+- Retain bounded, versioned safe RUN/LOAD execution definitions for Job rerun and schedule creation, with current-source validation and explicit historical/unsafe-input fallback (#237).
+- Add confirmation reviews in Jobs, Job Details and LOAD history; submit independent Jobs with durable replay intents and `rerunOfJobId` lineage.
+- Open the unified New Schedule form from a revalidated Job snapshot, retain source-job provenance, and distinguish originating schedule edits from new schedule creation.
+
 # ATT 4.2.2 - 2026-10-21
 
 - Distinguish measured SUT failures, runtime/total errors, successful throughput and execution outcome in Load summaries/reports; add optional runtime/total thresholds and bounded failure diagnostics independent of full evidence (#263).

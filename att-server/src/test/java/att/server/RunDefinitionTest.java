@@ -76,4 +76,13 @@ class RunDefinitionTest {
             assertThrows(IllegalArgumentException.class,()->parse(request(body)),body);
         assertThrows(IllegalArgumentException.class,()->parse(request("\"selection\":{\"all\":true}").replace("att-execution/v1","att-execution/v2")));
     }
+
+    @Test void retainedFrozenCasesUseTheResolvedBatchLimitWithoutChangingThePublicSelectorLimit() {
+        var definition=ServerRuntime.JSON.createObjectNode();definition.put("schemaVersion",RunDefinition.VERSION);definition.put("executionType","run");definition.put("packageId","p");
+        var cases=definition.putObject("selection").putArray("caseIds");for(int i=0;i<1001;i++)cases.add("suite.C"+i);
+        assertThrows(IllegalArgumentException.class,()->RunDefinition.parse(definition));
+        assertEquals(1001,RunDefinition.parseRetained(definition).workerInput.path("caseIds").size());
+        for(int i=1001;i<=10000;i++)cases.add("suite.C"+i);
+        assertThrows(IllegalArgumentException.class,()->RunDefinition.parseRetained(definition));
+    }
 }

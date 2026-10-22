@@ -64,4 +64,27 @@ class JobStoreTest {
         assertEquals(4096L,((Number)((Map<?,?>)performance.get("worker")).get("heapPeakUsedBytes")).longValue());
         store.close();
     }
+
+    @Test void replayIntentsAndOwnershipSurviveRestartAndOutputDeletion() throws Exception {
+        Path pkg=Files.createDirectory(temp.resolve("replay-package"));Path configFile=temp.resolve("replay-server.yaml");
+        Files.writeString(configFile,"server:\n  dataDir: "+temp.resolve("replay-data")+"\nworkers: {}\npackages:\n  allowedRoots: ["+pkg+"]\n  entries:\n    p: "+pkg+"\n");
+        ServerConfig config=ServerConfig.load(configFile);
+        Job job=new Job("J1111111111111111","run","p","alice",new WorkerRequest(),new JobEvents(temp.resolve("replay-events.jsonl"),100));
+        job.replayOwner="alice";job.rerunOfJobId="J0000000000000000";job.replayIntent="intent";
+        var definition=ServerRuntime.JSON.createObjectNode();definition.put("schemaVersion",RunDefinition.VERSION);definition.put("executionType","run");definition.put("packageId","p");definition.putObject("selection").putArray("caseIds").add("suite.C1");
+        job.executionSpec=new JobExecutionSpec(definition,"a".repeat(64),null).json();
+        try(JobStore store=new JobStore(config)){store.insert(job,"{}");}
+        try(JobStore restored=new JobStore(config)) {
+            assertEquals(job.executionSpec,restored.executionSpec(job.id).get("spec"));
+            assertEquals("alice",restored.executionSpec(job.id).get("principal"));
+            assertNull(restored.replayJob("bob","intent",job.rerunOfJobId));
+            assertEquals(job.id,restored.replayJob("alice","intent",job.rerunOfJobId));
+            restored.deleteJob(job.id);
+            assertEquals(job.id,restored.replayJob("alice","intent",job.rerunOfJobId),"Deletion must not turn a retry into a new execution");
+            Job duplicate=new Job("J2222222222222222","run","p","alice",new WorkerRequest(),new JobEvents(temp.resolve("duplicate.jsonl"),100));
+            duplicate.replayIntent=job.replayIntent;duplicate.rerunOfJobId=job.rerunOfJobId;
+            assertThrows(Exception.class,()->restored.insert(duplicate,"{}"));
+            assertNull(restored.get(duplicate.id),"Rejected intent must roll back Job insertion too");
+        }
+    }
 }

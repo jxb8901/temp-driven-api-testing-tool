@@ -684,7 +684,7 @@ export function ScheduledLoadPage({ api, packages, enabled, onOpenJob, initialDr
               <td data-label="Next run">{formatScheduleTime(schedule.nextRunAt, schedule.timezone)}</td>
               <td data-label="Status"><ScheduleStateBadge schedule={schedule} />{schedule.createdBy && <small>Owner · {schedule.createdBy}</small>}{schedule.recentStatus && <small>{schedule.recentStatus}</small>}</td>
               <td data-label="Actions"><div className="att-schedule-actions">
-                <button type="button" onClick={() => openHistory(schedule)} aria-label={`History ${schedule.name}`}>History</button>
+                <>{schedule.sourceJobId && <button type="button" onClick={() => onOpenJob(schedule.sourceJobId!)}>Source Job</button>}</><button type="button" onClick={() => openHistory(schedule)} aria-label={`History ${schedule.name}`}>History</button>
                 <button type="button" onClick={() => editSchedule(schedule)} aria-label={`Edit ${schedule.name}`}>Edit</button>
                 <button type="button" onClick={() => setPendingConfirmation({ action: 'toggle', schedule })} disabled={Boolean(actionPending)} aria-label={`${schedule.enabled ? 'Pause' : 'Resume'} ${schedule.name}`}>{schedule.enabled ? 'Pause' : 'Resume'}</button>
                 <button type="button" onClick={() => setPendingConfirmation({ action: 'run', schedule })} disabled={actionPending === schedule.id} aria-label={`Run Now ${schedule.name}`}>Run Now</button>
@@ -702,7 +702,7 @@ export function ScheduledLoadPage({ api, packages, enabled, onOpenJob, initialDr
               {schedule.recentStatus && <div><dt>Recent status</dt><dd>{schedule.recentStatus}</dd></div>}
               <div><dt>Recurrence</dt><dd>{recurrenceLabel(schedule)}</dd></div><div><dt>Next run · {schedule.timezone}</dt><dd>{formatScheduleTime(schedule.nextRunAt, schedule.timezone)}</dd></div></dl>
             <div className="att-schedule-actions">
-              <button type="button" onClick={() => openHistory(schedule)} aria-label={`History ${schedule.name}`}>History</button>
+              <>{schedule.sourceJobId && <button type="button" onClick={() => onOpenJob(schedule.sourceJobId!)}>Source Job</button>}</><button type="button" onClick={() => openHistory(schedule)} aria-label={`History ${schedule.name}`}>History</button>
               <button type="button" onClick={() => editSchedule(schedule)} aria-label={`Edit ${schedule.name}`}>Edit</button>
               <button type="button" onClick={() => setPendingConfirmation({ action: 'toggle', schedule })} disabled={Boolean(actionPending)} aria-label={`${schedule.enabled ? 'Pause' : 'Resume'} ${schedule.name}`}>{schedule.enabled ? 'Pause' : 'Resume'}</button>
               <button type="button" onClick={() => setPendingConfirmation({ action: 'run', schedule })} disabled={actionPending === schedule.id} aria-label={`Run Now ${schedule.name}`}>Run Now</button>

@@ -1,3 +1,5 @@
+import { formatRoute } from "../../router";
+import { JobReplayActions } from "./JobReplayActions";
 import { StatusBadge } from './StatusBadge';
 import { ArchiveMetrics } from './ArchiveMetrics';
 import type { ArtifactArchiveMetrics } from './types';
@@ -266,6 +268,7 @@ export const JobOverview = memo(function JobOverview({ job, status, statusText, 
     <Profiler id="job-overview-content" onRender={() => onProfilerCommit?.()}>{job ? <dl className="att-job-overview">
       <div><dt>Job ID</dt><dd>{job.jobId}</dd></div><div><dt>Status</dt><dd><StatusBadge status={status} /></dd></div>
       <div><dt>Execution type</dt><dd>{executionType(job)}</dd></div><div><dt>Command</dt><dd>{job.command || 'Not reported'}</dd></div><div><dt>Package</dt><dd>{job.packageId || 'Not reported'}</dd></div>
+      {job.rerunOfJobId && <div><dt>Rerun of</dt><dd><a href={formatRoute({ kind: 'jobs', jobId: job.rerunOfJobId })}>{job.rerunOfJobId}</a></dd></div>}
       <div><dt>Principal</dt><dd>{job.principal || 'Not reported'}</dd></div><div><dt>Created</dt><dd><time dateTime={job.createdAt || undefined}>{dateTime(job.createdAt)}</time></dd></div>
       <div><dt>Started</dt><dd><time dateTime={job.startedAt || undefined}>{dateTime(job.startedAt)}</time></dd></div><div><dt>Finished</dt><dd><time dateTime={job.finishedAt || undefined}>{dateTime(job.finishedAt)}</time></dd></div>
       <div><dt>Exit code</dt><dd>{job.exitCode ?? 'Not reported'}</dd></div>
@@ -381,7 +384,7 @@ function PinReasonForm({ title, busy, onSubmit, onCancel }: { title: string; bus
   </form>;
 }
 
-function JobsList({ api, principal = '', onOpenJob }: JobsFeatureProps) {
+function JobsList({ api, principal = '', onOpenJob, onSchedule, onEditSchedule }: JobsFeatureProps) {
   const [rows, setRows] = useState<JobSummary[]>([]);
   const [selected, setSelected] = useState<string[]>([]);
   const [pinnedOnly, setPinnedOnly] = useState(false);
@@ -555,7 +558,7 @@ function JobsList({ api, principal = '', onOpenJob }: JobsFeatureProps) {
             <th scope="row"><button type="button" className="att-link-button" onClick={() => onOpenJob(job.jobId)}>{job.jobId}</button></th>
             <td>{job.packageId}</td><td>{executionType(job)}</td><td>{job.principal || 'Not reported'}</td>
             <td><StatusBadge status={job.status} /></td><td><time dateTime={job.createdAt || undefined}>{dateTime(job.createdAt)}</time></td>
-            <td>{job.pinned && <span title={`Pinned${job.pinReason ? `: ${job.pinReason}` : ''}`}>📌 Pinned</span>}{api.pinJob && isTerminalStatus(job.status) && <button type="button" disabled={actionBusy} onClick={() => job.pinned ? void pinRow(job, '') : setPinTarget(job)}>{job.pinned ? "Unpin" : "Pin"}</button>}<button type="button" onClick={() => onOpenJob(job.jobId)}>Open details</button></td>
+            <td>{job.pinned && <span title={`Pinned${job.pinReason ? `: ${job.pinReason}` : ''}`}>📌 Pinned</span>}{api.pinJob && isTerminalStatus(job.status) && <button type="button" disabled={actionBusy} onClick={() => job.pinned ? void pinRow(job, '') : setPinTarget(job)}>{job.pinned ? "Unpin" : "Pin"}</button>}<button type="button" onClick={() => onOpenJob(job.jobId)}>Open details</button><JobReplayActions api={api} configuration={{ executionType: executionType(job), packageId: job.packageId }} jobId={job.jobId} onOpenJob={onOpenJob} onSchedule={onSchedule} onEditSchedule={onEditSchedule} /></td>
           </tr>)}</tbody>
         </table></div>}
     {filtered.length > PAGE_SIZE && <nav className="att-pagination att-query-pagination" aria-label="Loaded jobs pages">
@@ -567,7 +570,7 @@ function JobsList({ api, principal = '', onOpenJob }: JobsFeatureProps) {
   </div>;
 }
 
-function JobDetail({ api, jobId, onShowList, confirmCancel }: JobsFeatureProps & { jobId: string }) {
+function JobDetail({ api, jobId, onShowList, confirmCancel, onOpenJob, onSchedule, onEditSchedule }: JobsFeatureProps & { jobId: string }) {
   const [job, setJob] = useState<JobView | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [jobActionBusy, setJobActionBusy] = useState(false);
@@ -684,6 +687,7 @@ function JobDetail({ api, jobId, onShowList, confirmCancel }: JobsFeatureProps &
         <h1 id="job-title">Job {jobId}</h1><p>Server status, live output, results, artifacts and reported metrics.</p></div>
       <div className="att-job-actions">
         <StatusBadge status={jobStatus} />
+        <JobReplayActions api={api} configuration={job ? { executionType: executionType(job), packageId: job.packageId } : undefined} jobId={jobId} onOpenJob={onOpenJob} onSchedule={onSchedule} onEditSchedule={onEditSchedule} />
         <button type="button" onClick={() => consoleContext.openConsole({ jobId, view: activeTab === 'events' ? 'events' : 'live', job })}>Open floating console</button>
         {job?.pinned && <span title={`Pinned by ${job.pinnedBy || 'operator'} at ${job.pinnedAt || 'unknown time'}${job.pinReason ? ` · ${job.pinReason}` : ''}`}>📌 Pinned</span>}
         {job && isTerminalStatus(jobStatus) && api.pinJob && <button type="button" disabled={jobActionBusy} onClick={() => job.pinned ? void changeJobPin(false) : setPinReasonOpen(true)}>{job.pinned ? 'Unpin' : 'Pin'}</button>}

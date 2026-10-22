@@ -1,6 +1,7 @@
 import type { ApiEnvelope } from '../../types';
 
 export interface ScheduleDefinition {
+  sourceJobId?: string;
   id: string;
   name: string;
   description?: string | null;

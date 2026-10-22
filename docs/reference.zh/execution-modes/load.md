@@ -275,7 +275,7 @@ ID 必須非空、安全且為單一路徑 segment，並在 Load run 內唯一�
 
 execIdFormat 只允許 deterministic、side-effect-free built-ins；external calls、seq.next()、random、clock 與 filesystem functions 都會被拒絕。Schema migration 見 [Migration Notes](../appendices/migrations.md)。
 
-## 錯誤率與失敗診斷（4.2.2）
+## 錯誤率與失敗診斷（4.2.3）
 
 測量階段完成項目分為 PASS、SUT 失敗及執行期 ERROR/INVALID。Warm-up 不計入測量錯誤率，但仍可使執行結果成為 ERROR。產生器丟棄獨立計算。
 

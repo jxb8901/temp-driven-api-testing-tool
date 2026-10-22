@@ -188,6 +188,172 @@ final class ServerRuntime implements AutoCloseable {
             events.append("result",Map.of("jobId",id,"status","ERROR","console",publishConsole(att.console.ExecutionConsoleFormatter.lifecycle(mode,id,"ERROR",null))));
         }
     }
+    /** Capture only validator-approved data; never serialize WorkerRequest or inspection previews. */
+    private JobExecutionSpec captureExecutionSpec(String command,JsonNode input,String principal,String scheduleOccurrenceId) throws Exception {
+        if(!config.inspection.enabled||!List.of("run","debug","load").contains(command))return null;
+        if(input.path("dryRun").asBoolean(false))throw new IllegalArgumentException("Validation-only execution cannot be replayed as a runnable job");
+        String packageId=required(input,"packageId");Path root=packageRoot(packageId);
+        String environment=optionalText(input,"environment");
+        ObjectNode definition=JSON.createObjectNode();definition.put("executionType",Job.executionType(command));definition.put("packageId",packageId);
+        if(input.has("environment"))definition.set("environment",input.get("environment").deepCopy());
+        String revision;
+        if("load".equals(command)) {
+            LoadSchedule source=new LoadSchedule();source.packageId=packageId;source.environment=environment;
+            source.scenario=input.path("scenario").isTextual()?safeRelative(input.path("scenario").asText(),"scenario"):null;
+            if(input.has("inlineLoadScenario"))source.inlineScenario=JSON.convertValue(input.get("inlineLoadScenario"),Map.class);
+            if(input.has("load"))source.load=JSON.convertValue(input.get("load"),Map.class);
+            ValidatedScheduledScenario validated=validateScheduleScenario(root,source);
+            if(validated.containsSensitiveValues)throw new IllegalArgumentException("Sensitive execution inputs require secure re-entry");
+            definition.set("scenario",JSON.valueToTree(validated.scenario));revision=validated.revisionDigest;
+        } else {
+            definition.put("schemaVersion",RunDefinition.VERSION);
+            ObjectNode options=definition.putObject("options");options.put("debug","debug".equals(command)||input.path("diagnosticMode").asBoolean(false));
+            if(input.has("target")) {
+                ObjectNode debug=JSON.createObjectNode();debug.put("packageId",packageId);
+                if(environment!=null)debug.put("environment",environment);
+                debug.set("target",input.get("target"));
+                JsonNode submitted=input.get("inlineDebugInput");
+                // Prefer the original validated override, preserving omission, null and expressions.
+                for(RunDraft draft:runDrafts.values())if(draft.workerInput.equals(input)&&draft.resourceDebugDraft!=null)submitted=JSON.valueToTree(draft.resourceDebugDraft.scheduleInput);
+                for(DebugDraft draft:debugDrafts.values())if(draft.revisionDigest.equals(input.path("expectedRevisionDigest").asText())&&draft.resourceId.equals(input.path("draftResourceId").asText())&&draft.principal.equals(principal))submitted=JSON.valueToTree(draft.scheduleInput);
+                if(submitted==null)throw new IllegalArgumentException("Source inputs were not retained");
+                debug.set("input",submitted);DebugDraft validated=buildDebugDraft(debug,principal);
+                if(validated.containsSensitiveValues)throw new IllegalArgumentException("Sensitive execution inputs require secure re-entry");
+                definition.set("target",input.get("target").deepCopy());definition.set("input",JSON.valueToTree(validated.scheduleInput));revision=validated.revisionDigest;
+            } else {
+                WorkerRequest request=applyWorkerPolicy(JSON.treeToValue(input,WorkerRequest.class));
+                request.protocolVersion="att-worker/v1";request.command="inspect";request.packageRoot=root.toString();request.config=config.runtimeConfigPath.toString();
+                request.jobId="I"+UUID.randomUUID().toString().replace("-","");request.inspectionAction="run-input";
+                ObjectNode policy=JSON.createObjectNode();applyInspectionPolicy(policy,packageId);JSON.readerForUpdating(request).readValue(policy);
+                Map<String,Object> inspected=executeInspection(root,request);
+                Object selected=inspected.get("selectedCaseIds");if(!(selected instanceof List<?> ids)||ids.isEmpty())throw new IllegalArgumentException("Exact case selection is unavailable");
+                ObjectNode selection=definition.putObject("selection");selection.set("caseIds",JSON.valueToTree(selected));
+                for(String field:List.of("suites","suiteDirectory"))if(input.has(field))selection.set(field,input.get(field).deepCopy());
+                if(input.has("failFast"))options.set("failFast",input.get("failFast").deepCopy());
+                revision=String.valueOf(inspected.get("revisionDigest"));
+            }
+        }
+        if(input.hasNonNull("expectedRevisionDigest")&&!input.path("expectedRevisionDigest").asText().equals(revision))throw new StaleDraftException();
+        String sourcePath=input.path("scenario").isTextual()?input.path("scenario").asText():null;
+        if(sourcePath==null&&scheduleOccurrenceId!=null&&"load".equals(command)) {
+            Map<String,Object> occurrence=store.scheduleExecution(scheduleOccurrenceId);
+            LoadSchedule source=occurrence==null?null:store.schedule(String.valueOf(occurrence.get("scheduleId")));
+            if(source!=null) {
+                sourcePath=source.scenario;
+                if(sourcePath==null&&source.sourceJobId!=null) {
+                    Map<String,String> parent=store.executionSpec(source.sourceJobId);
+                    if(parent!=null&&parent.get("spec")!=null)sourcePath=JobExecutionSpec.parse(parent.get("spec")).value.path("sourcePath").asText(null);
+                }
+            }
+        }
+        return new JobExecutionSpec(definition,revision,sourcePath);
+    }
+
+    private void verifyReplayRevision(String packageId,String environment,String revision) throws Exception {
+        try {verifyPackageRevision(packageId,environment,revision);}
+        catch(StaleCursorException stale){throw new StaleDraftException();}
+    }
+
+    private final Object replayLock=new Object();
+    private final Map<String,ReplayReview> replayReviews=new java.util.concurrent.ConcurrentHashMap<>();
+    private record ReplayReview(String source,String principal,String draftId,String packageId,String executionType,Instant expiresAt) {}
+
+    private Map<String,String> ownedExecutionSpec(String id,String principal) throws Exception {
+        requireLocalOperator(principal);requireJobOwner(id,principal);
+        Map<String,String> record=store.executionSpec(id);if(record==null)throw new NotFoundException();
+        boolean owned=principal.equals(record.get("principal"));
+        if(!owned&&record.get("occurrenceId")!=null) {
+            Map<String,Object> occurrence=store.scheduleExecution(record.get("occurrenceId"));
+            LoadSchedule schedule=occurrence==null?null:store.schedule(String.valueOf(occurrence.get("scheduleId")));
+            owned=schedule!=null&&(principal.equals(schedule.createdBy)||principal.equals(schedule.executionPrincipal));
+        }
+        if(!owned)throw new NotFoundException();
+        return record;
+    }
+    Map<String,Object> jobReplay(String id,String principal) throws Exception {
+        Map<String,String> record=ownedExecutionSpec(id,principal);Map<String,Object> view=new LinkedHashMap<>();
+        view.put("jobId",id);view.put("available",record.get("spec")!=null);
+        if(record.get("spec")==null)view.put("reason",record.get("reason")==null?"Rerun unavailable for this historical job. Configure a new run from the current package.":record.get("reason"));
+        else {
+            JobExecutionSpec spec=JobExecutionSpec.parse(record.get("spec"));
+            view.put("definition",spec.definition());view.put("revisionPolicy","reject-package-changes");view.put("revision",spec.revision());
+            if(spec.value.has("sourcePath"))view.put("sourcePath",spec.value.get("sourcePath").asText());
+        }
+        if(record.get("rerunOfJobId")!=null)view.put("rerunOfJobId",record.get("rerunOfJobId"));
+        if((record.get("originatingScheduleId")!=null||record.get("occurrenceId")!=null)&&config.scheduling.enabled) {
+            Map<String,Object> occurrence=record.get("occurrenceId")==null?null:store.scheduleExecution(record.get("occurrenceId"));
+            String scheduleId=record.get("originatingScheduleId");
+            if(scheduleId==null&&occurrence!=null)scheduleId=String.valueOf(occurrence.get("scheduleId"));
+            LoadSchedule schedule=scheduleId==null?null:store.schedule(scheduleId);
+            if(schedule!=null&&(principal.equals(schedule.createdBy)||principal.equals(schedule.executionPrincipal)))view.put("originatingScheduleId",schedule.id);
+        }
+        return view;
+    }
+    Map<String,Object> createJobReplayDraft(String id,String principal) throws Exception {
+        if(!config.inspection.enabled)throw new IllegalArgumentException("Replay requires package inspection to be enabled by the Server");
+        synchronized(replayLock) {
+            Map<String,String> record=ownedExecutionSpec(id,principal);
+            if(record.get("spec")==null)throw new IllegalArgumentException("Rerun unavailable for this historical or unsafe job. Configure a new run and supply missing inputs.");
+            JobExecutionSpec spec=JobExecutionSpec.parse(record.get("spec"));ObjectNode definition=spec.definition();
+            String packageId=required(definition,"packageId"),environment=optionalText(definition,"environment");
+            verifyReplayRevision(packageId,environment,spec.revision());
+            boolean run="run".equals(definition.path("executionType").asText());
+            Map<String,Object> draft;
+            if(run)draft=createRunDraft(definition,principal,true);
+            else if(spec.value.has("sourcePath")) {
+                String path=safeRelative(spec.value.path("sourcePath").asText(),"scenario");validatePackagePath(packageRoot(packageId),path,"scenario");
+                LoadSchedule source=new LoadSchedule();source.packageId=packageId;source.environment=environment;
+                source.inlineScenario=JSON.convertValue(definition.get("scenario"),Map.class);
+                ValidatedScheduledScenario validated=validateScheduleScenario(packageRoot(packageId),source);
+                if(validated.containsSensitiveValues||!spec.revision().equals(validated.revisionDigest))throw new StaleDraftException();
+                CatalogLoadDraftState retained=new CatalogLoadDraftState("C"+UUID.randomUUID().toString().replace("-","").toUpperCase(),principal,packageId,environment,path,spec.revision(),validated.model,validated.scenario,null,clock.instant().plusMillis(DRAFT_TTL_MILLIS));
+                synchronized(draftLock){expireDrafts();checkDraftCapacity(principal);catalogLoadDrafts.put(retained.id,retained);}
+                draft=catalogLoadDraftView(retained);
+            } else {
+                ObjectNode input=definition.deepCopy();input.remove("executionType");draft=createAdvancedLoadDraft(input,principal);
+            }
+            String draftId=String.valueOf(draft.get("draftId"));
+            // The fresh validator must agree with the retained package revision too.
+            if(run&&!runDraft(draftId,principal,packageId).revision.equals(spec.revision()))throw new StaleDraftException();
+            if(!run&&advancedLoadDrafts.containsKey(draftId)&&!advancedLoadDrafts.get(draftId).revisionDigest.equals(spec.revision()))throw new StaleDraftException();
+            replayReviews.entrySet().removeIf(entry->!entry.getValue().expiresAt.isAfter(clock.instant()));
+            if(replayReviews.size()>=MAX_ACTIVE_DRAFTS)throw new DraftCapacityException();
+            String intent=UUID.randomUUID().toString();Instant expires=clock.instant().plusMillis(DRAFT_TTL_MILLIS);
+            replayReviews.put(intent,new ReplayReview(id,principal,draftId,packageId,run?"run":"load",expires));
+            Map<String,Object> result=new LinkedHashMap<>(jobReplay(id,principal));result.put("intentId",intent);result.put("draftId",draftId);result.put("expiresAt",expires.toString());result.put("preview",draft);return result;
+        }
+    }
+    Map<String,Object> rerunJob(String id,JsonNode body,String principal) throws Exception {
+        requireOnlyFields(body,"intentId","confirm");
+        if(!body.path("confirm").isBoolean()||!body.path("confirm").booleanValue())throw new IllegalArgumentException("Positive replay confirmation is required");
+        String intent=required(body,"intentId");if(!intent.matches("[a-f0-9-]{36}"))throw new IllegalArgumentException("Invalid replay intent");
+        synchronized(replayLock) {
+            ownedExecutionSpec(id,principal);
+            String accepted=store.replayJob(principal,intent,id);if(accepted!=null)return jobRecord(accepted);
+            ReplayReview review=replayReviews.get(intent);
+            if(review==null||!review.source.equals(id)||!review.principal.equals(principal)||!review.expiresAt.isAfter(clock.instant()))throw new NotFoundException();
+            Map<String,String> record=ownedExecutionSpec(id,principal);JobExecutionSpec spec=JobExecutionSpec.parse(record.get("spec"));
+            verifyReplayRevision(review.packageId,optionalText(spec.definition(),"environment"),spec.revision());
+            ObjectNode input;
+            if("run".equals(review.executionType))input=runDraft(review.draftId,principal,review.packageId).workerInput.deepCopy();
+            else {
+                AdvancedLoadDraftState draft=advancedLoadDrafts.get(review.draftId);CatalogLoadDraftState catalog=catalogLoadDrafts.get(review.draftId);
+                if(draft==null&&catalog==null)throw new NotFoundException();
+                Instant expires=draft==null?catalog.expiresAt:draft.expiresAt;
+                if(!expires.isAfter(clock.instant()))throw new NotFoundException();
+                input=JSON.createObjectNode();input.put("packageId",review.packageId);
+                String environment=draft==null?catalog.environment:draft.environment;
+                if(environment!=null)input.put("environment",environment);
+                input.set("inlineLoadScenario",JSON.valueToTree(draft==null?catalog.scenario:draft.scenario));input.put("expectedRevisionDigest",spec.revision());
+            }
+            applyInspectionPolicy(input,review.packageId);
+            Map<String,Object> result=submit(review.executionType,input,principal,true,null,"load".equals(review.executionType)&&spec.value.has("sourcePath"),id,intent);
+            store.audit(principal,"JOB_RERUN",String.valueOf(result.get("jobId")),review.packageId,"ACCEPTED");
+            runDrafts.remove(review.draftId);advancedLoadDrafts.remove(review.draftId);catalogLoadDrafts.remove(review.draftId);replayReviews.remove(intent);
+            return result;
+        }
+    }
+
     Map<String,Object> submit(String command,JsonNode input,String principal) throws Exception {
         return submit(command,input,principal,false);
     }
@@ -198,6 +364,9 @@ final class ServerRuntime implements AutoCloseable {
         return submit(command,input,principal,serverIssuedDraft,scheduleOccurrenceId,false);
     }
     private Map<String,Object> submit(String command,JsonNode input,String principal,boolean serverIssuedDraft,String scheduleOccurrenceId,boolean scheduleIssued) throws Exception {
+        return submit(command,input,principal,serverIssuedDraft,scheduleOccurrenceId,scheduleIssued,null,null);
+    }
+    private Map<String,Object> submit(String command,JsonNode input,String principal,boolean serverIssuedDraft,String scheduleOccurrenceId,boolean scheduleIssued,String rerunOfJobId,String replayIntent) throws Exception {
         long requestReceivedNanos=System.nanoTime();
         if(!List.of("run","debug","load","validate").contains(command))throw new IllegalArgumentException("Unsupported job command");
         if(!serverIssuedDraft&&(input.has("draftId")||input.has("inlineDebugInput")||input.has("inlineLoadScenario")
@@ -226,6 +395,26 @@ final class ServerRuntime implements AutoCloseable {
         if(request.suites!=null)for(String suite:request.suites)validatePackagePath(root,suite,"suites");
         if("debug".equals(command)||("run".equals(command)&&request.target!=null))validateTarget(request.target);
         if("load".equals(command)&&request.target!=null)validateTarget(request.target);
+
+        String replayOwner=config.authenticationRequired?principal:RequestIdentity.ANONYMOUS,originatingScheduleId=null;
+        if(scheduleOccurrenceId!=null) {
+            Map<String,Object> occurrence=store.scheduleExecution(scheduleOccurrenceId);
+            LoadSchedule source=occurrence==null?null:store.schedule(String.valueOf(occurrence.get("scheduleId")));
+            if(source!=null){replayOwner=source.executionPrincipal==null?source.createdBy:source.executionPrincipal;originatingScheduleId=source.id;}
+        }
+        String executionSpec=null,replayUnavailable=null;
+        try {
+            if(rerunOfJobId!=null)executionSpec=ownedExecutionSpec(rerunOfJobId,principal).get("spec");
+            else {JobExecutionSpec captured=captureExecutionSpec(command,input,replayOwner,scheduleOccurrenceId);if(captured!=null)executionSpec=captured.json();}
+        }
+        catch(Exception unavailable) {replayUnavailable="Exact rerun is unavailable: source validation or safe input retention failed. Configure a new run and supply missing inputs.";}
+        if(rerunOfJobId!=null&&executionSpec==null)throw new IllegalArgumentException("Safe execution snapshot is no longer available");
+        if(executionSpec!=null) {
+            JobExecutionSpec captured=JobExecutionSpec.parse(executionSpec);request.expectedRevisionDigest=captured.revision();
+            JsonNode exact=captured.definition().path("selection").get("caseIds");
+            if(exact!=null) {request.caseIds=JSON.convertValue(exact,List.class);request.tags=null;request.excludeTags=null;request.all=false;request.rerunFailed=false;}
+        }
+        if(executionSpec==null&&replayUnavailable==null)replayUnavailable="This job type or Server capability does not support safe replay. Configure a new run.";
         boolean loadAdmission="load".equals(command);
         if(loadAdmission&&!loadSlots.tryAcquire()){store.audit(principal,"SUBMIT",null,packageId,"REJECTED_LOAD_CAPACITY");throw new QueueFullException("Load capacity is full; retry after a Load job completes");}
         if(!admissionSlots.tryAcquire()){if(loadAdmission)loadSlots.release();store.audit(principal,"SUBMIT",null,packageId,"REJECTED_QUEUE_FULL");throw new QueueFullException("Worker capacity is full; retry after a job completes");}
@@ -236,6 +425,7 @@ final class ServerRuntime implements AutoCloseable {
             jobPath=config.dataDir.resolve("jobs").resolve(id);Files.createDirectories(jobPath.resolve("output"));final Path activeJobPath=jobPath;
             JobEvents events=new JobEvents(jobPath.resolve("events.jsonl"),config.maxEventsPerJob);
             Job job=new Job(id,command,packageId,principal,request,events);job.scheduleOccurrenceId=scheduleOccurrenceId;job.requestReceivedNanos=requestReceivedNanos;
+            job.executionSpec=executionSpec;job.replayUnavailable=replayUnavailable;job.rerunOfJobId=rerunOfJobId;job.replayIntent=replayIntent;job.replayOwner=replayOwner;job.originatingScheduleId=originatingScheduleId;
             Map<String,Object> summaryFields=new LinkedHashMap<>();summaryFields.put("command",command);summaryFields.put("packageId",packageId);
             if(request.scenario!=null)summaryFields.put("scenario",request.scenario);
             if(request.environment!=null&&!request.environment.isBlank())summaryFields.put("environment",request.environment);
@@ -493,6 +683,8 @@ final class ServerRuntime implements AutoCloseable {
             }
         }
         Map<String,Object> record=store.get(id);if(record==null)throw new NotFoundException();
+        Map<String,String> replayMetadata=store.executionSpec(id);
+        if(replayMetadata!=null&&replayMetadata.get("rerunOfJobId")!=null)record.put("rerunOfJobId",replayMetadata.get("rerunOfJobId"));
         record.put("executionType",Job.executionType(String.valueOf(record.get("command"))));
         record.remove("resultJson");record.remove("diagnosticJson");
         String performance=(String)record.remove("performanceJson");
@@ -863,8 +1055,9 @@ final class ServerRuntime implements AutoCloseable {
             return catalogLoadDraftView(draft);
         }
     }
-    Map<String,Object> createRunDraft(JsonNode body,String principal) throws Exception {
-        RunDefinition run=RunDefinition.parse(body);
+    Map<String,Object> createRunDraft(JsonNode body,String principal) throws Exception {return createRunDraft(body,principal,false);}
+    private Map<String,Object> createRunDraft(JsonNode body,String principal,boolean retainedSelection) throws Exception {
+        RunDefinition run=retainedSelection?RunDefinition.parseRetained(body):RunDefinition.parse(body);
         if(principal==null||principal.isBlank())throw new IllegalArgumentException("A server-resolved request identity is required");
         if(!config.inspection.enabled)throw new NotFoundException();
         String packageId=run.workerInput.path("packageId").asText();
@@ -1807,9 +2000,14 @@ final class ServerRuntime implements AutoCloseable {
     private static boolean containsControl(String value){for(int i=0;i<value.length();i++)if(Character.isISOControl(value.charAt(i)))return true;return false;}
     List<LoadSchedule> loadSchedules() throws Exception {requireSchedulingEnabled();return store.schedules();}
     LoadSchedule loadSchedule(String id) throws Exception {requireSchedulingEnabled();LoadSchedule schedule=store.schedule(id);if(schedule==null)throw new NotFoundException();return schedule;}
+    Map<String,Object> loadScheduleView(LoadSchedule schedule,String principal) {
+        Map<String,Object> view=loadScheduleView(schedule);
+        if(schedule.sourceJobId!=null)try {ownedExecutionSpec(schedule.sourceJobId,principal);view.put("sourceJobId",schedule.sourceJobId);}catch(Exception unavailable){}
+        return view;
+    }
     Map<String,Object> loadScheduleView(LoadSchedule schedule) {
         Map<String,Object> view=JSON.convertValue(schedule,Map.class);
-        view.remove("runInput");view.put("executionType","load".equals(schedule.effectiveJobType())?"load":"run");
+        view.remove("sourceJobId");view.remove("runInput");view.put("executionType","load".equals(schedule.effectiveJobType())?"load":"run");
         view.put("revisionPolicy",schedule.runInput!=null||schedule.inlineDebugInput!=null?"reject-package-changes":"validate-current-package");
         view.remove("inlineScenario");view.remove("inlineDebugInput");view.remove("debugResourceId");view.remove("expectedRevisionDigest");view.remove("catalogSnapshot");
         view.put("jobType",schedule.effectiveJobType());
@@ -1827,6 +2025,14 @@ final class ServerRuntime implements AutoCloseable {
         requireSchedulingEnabled();
         requireLocalOperator(principal);
         LoadSchedule schedule=buildLoadSchedule(input,null,principal);schedule.id="S"+UUID.randomUUID().toString().replace("-","").toUpperCase();schedule.createdBy=principal;schedule.executionPrincipal=principal;schedule.createdAt=clock.instant().toString();
+        if(input.hasNonNull("draftId"))for(ReplayReview review:replayReviews.values())if(review.draftId.equals(input.path("draftId").asText())&&review.principal.equals(principal)) {
+            ownedExecutionSpec(review.source,principal);
+            if(!review.expiresAt.isAfter(clock.instant()))throw new NotFoundException();
+            schedule.sourceJobId=review.source;
+            JobExecutionSpec spec=JobExecutionSpec.parse(store.executionSpec(review.source).get("spec"));
+            verifyPackageRevision(schedule.packageId,schedule.environment,spec.revision());
+            schedule.expectedRevisionDigest=spec.revision();
+        }
         store.createSchedule(schedule,config.scheduling.maxSchedules);store.audit(principal,"SCHEDULE_CREATE",null,schedule.packageId,"CREATED");return schedule;
     }
     Map<String,Object> previewLoadSchedule(JsonNode input) {
@@ -1977,6 +2183,7 @@ final class ServerRuntime implements AutoCloseable {
     }
 
     private ValidatedScheduledScenario validateScheduleScenario(Path root,LoadSchedule schedule) throws Exception {
+        if(schedule.sourceJobId!=null&&schedule.expectedRevisionDigest!=null)verifyPackageRevision(schedule.packageId,schedule.environment,schedule.expectedRevisionDigest);
         Map<String,Object> requested=schedule.inlineScenario==null?readScheduledScenario(root,schedule.scenario):deepMap(schedule.inlineScenario);
         ValidatedScheduledScenario validated=validateScheduledScenario(root,schedule,requested,schedule.inlineScenario==null);
         if(schedule.load!=null&&!schedule.load.isEmpty()) {
