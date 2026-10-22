@@ -18,6 +18,13 @@ async function main() {
   const pageErrors = [];
   const consoleErrors = [];
   const navigationEvents = [];
+  const inspectionRequests = [];
+  page.on('response', response => {
+    if (/\/(load-catalog|configuration|load-templates)(?:[/?]|$)/.test(response.url())) inspectionRequests.push(`${response.status()} ${new URL(response.url()).pathname}`);
+  });
+  page.on('requestfailed', request => {
+    if (/\/(load-catalog|configuration|load-templates)(?:[/?]|$)/.test(request.url())) inspectionRequests.push(`${request.failure()?.errorText} ${new URL(request.url()).pathname}`);
+  });
   page.on('pageerror', error => pageErrors.push(error.message));
   page.on('console', message => { if (message.type() === 'error') consoleErrors.push(message.text()); });
   page.on('framenavigated', frame => { if (frame === page.mainFrame()) navigationEvents.push(frame.url()); });
@@ -259,7 +266,12 @@ async function main() {
     await page.getByRole('heading', { name: 'Load testing', level: 1, exact: true }).waitFor();
     await page.locator('.att-template-presets article').nth(5).waitFor();
     assert.equal(await page.locator('.att-template-presets article').count(), 6);
+    const catalogResponse = page.waitForResponse(response =>
+      new URL(response.url()).pathname.endsWith('/packages/payments/load-catalog'));
     await page.getByRole('button', { name: '☷ Scenarios', exact: true }).click();
+    const catalogResult = await catalogResponse;
+    assert.equal(catalogResult.status(), 200,
+      `Payments catalog discovery failed: ${catalogResult.status()} ${await catalogResult.text()}`);
     await page.getByRole('heading', { name: 'Scenarios', level: 1, exact: true }).waitFor();
     assert.equal(await page.locator('.att-query-filter-panel[aria-label="LOAD Catalog filters"]').count(), 1,
       'LOAD Catalog filters must use the shared query contract');
@@ -364,6 +376,9 @@ async function main() {
     assert.deepEqual(pageErrors, [], 'the live ATT Studio UI must not throw browser errors');
     assert.deepEqual(consoleErrors.filter(message => /content security policy|refused to apply inline style/i.test(message)), [], 'the live Studio must not produce CSP console errors');
     process.stdout.write('Packaged-WAR Playwright API smoke passed under /tools/att; source references, Configuration, Testdata, and Quick Load used the real Server API.\n');
+  } catch (error) {
+    const state = await page.locator('.att-load-catalog').innerText({ timeout: 1000 }).catch(() => 'Catalog not mounted');
+    throw new Error(`${error.message}\nInspection requests: ${JSON.stringify(inspectionRequests)}\nCatalog state: ${state}`);
   } finally {
     await context.close();
     await browser.close();
