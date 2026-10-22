@@ -11,6 +11,7 @@ const MAX_LINE_LENGTH = 4000;
 const CONSOLE_MIN_HEIGHT = 192;
 const CONSOLE_DEFAULT_HEIGHT = 384;
 const CONSOLE_MAX_HEIGHT = 960;
+const TERMINAL_JOB_STATUSES = new Set(['PASS', 'FAIL', 'ERROR', 'INVALID', 'CANCELLED']);
 
 export interface JobConsoleViewProps {
   api: LoadJobsApi;
@@ -89,6 +90,26 @@ function chronologicalEvents(events: JobStreamEvent[]): JobStreamEvent[] {
   }).map(item => item.event);
 }
 
+function statusFromEvent(event: JobStreamEvent): string | null {
+  if (event.type !== 'status' && event.type !== 'result') return null;
+  const payload = event.data && typeof event.data === 'object' && !Array.isArray(event.data)
+    ? (event.data as Record<string, unknown>).status : event.data;
+  return typeof payload === 'string' && payload ? payload : null;
+}
+
+function projectJobStatus(events: JobStreamEvent[], retainedTerminalStatus: string | null): { status: string | null; terminalStatus: string | null } {
+  let status = retainedTerminalStatus;
+  let terminalStatus = retainedTerminalStatus;
+  for (const event of events) {
+    if (terminalStatus) continue;
+    const candidate = statusFromEvent(event);
+    if (!candidate || (event.type === 'result' && !TERMINAL_JOB_STATUSES.has(candidate))) continue;
+    status = candidate;
+    if (TERMINAL_JOB_STATUSES.has(candidate)) terminalStatus = candidate;
+  }
+  return { status: terminalStatus || status, terminalStatus };
+}
+
 function dateTime(value: string): string {
   const time = Date.parse(value);
   return Number.isFinite(time) ? new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'medium' }).format(time) : value;
@@ -138,7 +159,16 @@ export function JobConsoleView({
   const [copyStatus, setCopyStatus] = useState('');
   const consoleRef = useRef<HTMLPreElement>(null);
   const eventsRef = useRef<HTMLOListElement>(null);
+  const terminalStatuses = useRef(new Map<string, string>());
   const events = useMemo(() => chronologicalEvents(stream.events), [stream.events]);
+  const statusProjection = useMemo(
+    () => projectJobStatus(events, terminalStatuses.current.get(jobId) || null),
+    [events, jobId],
+  );
+  useEffect(() => {
+    if (statusProjection.terminalStatus) terminalStatuses.current.set(jobId, statusProjection.terminalStatus);
+  }, [jobId, statusProjection.terminalStatus]);
+  const displayedStatus = statusProjection.status || job?.status || 'Unknown';
   const liveLines = useMemo(() => {
     const query = liveSearch.trim().toLocaleLowerCase();
     return events.filter(event => event.seq > consoleFloor).map(consoleText).filter(line => line && (!query || line.toLocaleLowerCase().includes(query)));
@@ -201,13 +231,13 @@ export function JobConsoleView({
   }
 
   if (minimized) return <button type="button" className="att-console-chip" aria-label={`Restore console for Job ${jobId}`} onClick={onRestore}>
-    <strong>Console · {jobId}</strong><span>{job?.status || 'Unknown'} · SSE {stream.connection}</span>
+    <strong>Console · {jobId}</strong><span>{displayedStatus} · SSE {stream.connection}</span>
   </button>;
 
   return <section className={'att-job-console-view' + (compact ? ' att-job-console-compact' : '')} aria-label={`Job ${jobId} console`}>
     <header className="att-console-view-heading">
       <div><p className="att-eyebrow">{executionType(job)} console</p><h2 title={`Job ${jobId}`}>Job {jobId}</h2>
-        <p className="att-console-meta"><span>{job?.status || 'Status unavailable'}</span><span role="status">SSE {stream.connection}</span></p></div>
+        <p className="att-console-meta"><span>{displayedStatus}</span><span role="status">SSE {stream.connection}</span></p></div>
       <div className="att-console-view-actions">
         <a href={formatRoute({ kind: 'jobs', jobId })} aria-label="Open full Job details" title="Open full Job details">Details</a>
         {onMinimize && <button type="button" aria-label="Minimize Job console" title="Minimize" onClick={onMinimize}>−</button>}
@@ -235,7 +265,7 @@ export function JobConsoleView({
     {(historyTruncated || browserTruncated) && <p role="note">{historyTruncated && <span>Earlier journal events are no longer retained.</span>}{historyTruncated && browserTruncated && ' '}{browserTruncated && <span>This browser keeps the latest {MAX_EVENTS} events.</span>}</p>}
     {view === 'live' ? <>
       <p className="att-help">Live Output shows Server console lines. ANSI control sequences are removed safely for display.</p>
-      {liveLines.length ? <div className="att-console-shell" data-maximized={(onMaximize ? maximized : localMaximized) ? 'true' : 'false'} style={(onMaximize ? maximized : localMaximized) ? { position: 'fixed', top: 12, left: 12, right: 12, bottom: 12, height: 'auto', maxHeight: 'none', zIndex: 50 } : { height: consoleHeight }}>
+      {liveLines.length ? <div className="att-console-shell" data-maximized={(onMaximize ? maximized : localMaximized) ? 'true' : 'false'} style={!onMaximize && localMaximized ? { position: 'fixed', top: 12, left: 12, right: 12, bottom: 12, height: 'auto', maxHeight: 'none', zIndex: 50 } : { height: consoleHeight }}>
         {(!onMaximize && localMaximized) && <div className="att-console-maximized-bar"><button type="button" onClick={() => setLocalMaximized(false)}>Restore</button></div>}
         <pre ref={consoleRef} className="att-console" aria-label="Live output" data-appearance="terminal" style={{ background: '#0d1117', color: '#f5f7fa', whiteSpace: 'pre', overflow: 'auto' }}>{liveLines.join('\n')}</pre>
         {!(onMaximize ? maximized : localMaximized) && <div role="separator" aria-orientation="horizontal" aria-label="Resize live output" aria-valuemin={CONSOLE_MIN_HEIGHT} aria-valuemax={consoleMaxHeight()} aria-valuenow={consoleHeight} tabIndex={0} className="att-console-resize" onPointerDown={resizeConsole} onKeyDown={resizeConsoleByKeyboard} />}

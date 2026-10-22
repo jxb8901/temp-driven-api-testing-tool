@@ -152,6 +152,26 @@ async function main() {
     await floating.getByRole('heading', { name: `Job ${jobId}`, exact: true }).waitFor();
     await floating.getByText('[LOAD] status=RUNNING jobId=JOB-LOAD-204', { exact: true }).waitFor();
     assert.equal(await openEventSourceCount(page), 1, 'Job Details and the floating console should share exactly one open EventSource');
+    await floating.getByRole('button', { name: 'Maximize Job console' }).click();
+    const maximizedFloating = page.locator(`[aria-label="Floating console for Job ${jobId}"]`);
+    const restoreConsole = maximizedFloating.getByRole('button', { name: 'Restore Job console' });
+    const minimizeConsole = maximizedFloating.getByRole('button', { name: 'Minimize Job console' });
+    const closeConsole = maximizedFloating.getByRole('button', { name: 'Close Job console' });
+    assert.equal(await maximizedFloating.evaluate(element => element.classList.contains('is-maximized')), true, 'Maximize should expand the floating console panel');
+    await assertPointerReachable(page, restoreConsole, 'Restore should receive pointer input above maximized output');
+    await assertPointerReachable(page, minimizeConsole, 'Minimize should receive pointer input above maximized output');
+    await assertPointerReachable(page, closeConsole, 'Close should receive pointer input above maximized output');
+    const maximizedLiveTab = maximizedFloating.getByRole('tab', { name: 'Live Output', exact: true });
+    const maximizedEventsTab = maximizedFloating.getByRole('tab', { name: 'Events', exact: true });
+    assert.equal(await maximizedLiveTab.isVisible(), true, 'Live Output view switch should remain visible while maximized');
+    assert.equal(await maximizedEventsTab.isVisible(), true, 'Events view switch should remain visible while maximized');
+    await maximizedLiveTab.focus();
+    await page.keyboard.press('ArrowRight');
+    assert.equal(await page.evaluate(() => document.activeElement?.id), await maximizedEventsTab.getAttribute('id'), 'view switch should remain keyboard reachable while maximized');
+    await maximizedLiveTab.click();
+    assert.equal(await maximizedLiveTab.getAttribute('aria-selected'), 'true', 'Live Output should be selectable again while maximized');
+    await restoreConsole.click();
+    assert.equal(await maximizedFloating.evaluate(element => element.classList.contains('is-maximized')), false, 'Restore should return the floating console to its normal size');
     await assertAxe(page, 'Job Details with the floating console open should pass the configured WCAG accessibility rules');
     await page.evaluate(() => { window.location.hash = '#/packages'; });
     await page.waitForURL(/#\/packages/);
@@ -259,6 +279,15 @@ async function assertAxe(page, message) {
   assert.deepEqual(audit.violations.map(({ id, impact, help, nodes }) => ({
     id, impact, help, selectors: nodes.map(node => node.target),
   })), [], message);
+}
+
+async function assertPointerReachable(page, locator, message) {
+  assert.equal(await locator.isVisible(), true, message);
+  assert.equal(await locator.evaluate(element => {
+    const bounds = element.getBoundingClientRect();
+    const target = document.elementFromPoint(bounds.left + bounds.width / 2, bounds.top + bounds.height / 2);
+    return target === element || element.contains(target);
+  }), true, message);
 }
 
 async function createdEventSourceCount(page) {
