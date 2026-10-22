@@ -52,6 +52,20 @@ describe('JobConsoleView', () => {
     expect(host.querySelector('[aria-label="Restore console for Job J/1"]')).not.toBeNull();
   });
 
+  it('keeps standalone controls tied to one Job and renders an empty output surface', async () => {
+    const { api } = makeApi(); const onViewChange = vi.fn();
+    await act(async () => root.render(<JobConsoleView api={api} jobId={job.jobId} job={job} standalone view="live" onViewChange={onViewChange} onMinimize={vi.fn()} onClose={vi.fn()} />));
+    expect(host.querySelector('.att-console-shell')).not.toBeNull();
+    expect(host.querySelector('pre.att-console')).not.toBeNull();
+    expect(host.querySelector('[role="separator"]')).toBeNull();
+    expect(host.textContent).not.toMatch(/Details|New tab|Minimize|Close console/);
+    const events = [...host.querySelectorAll('button')].find(button => button.textContent === 'Events')!;
+    await act(async () => events.click());
+    expect(onViewChange).toHaveBeenCalledWith('events');
+    expect(api.subscribeJob).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(api.subscribeJob).mock.calls[0][0]).toBe(job.jobId);
+  });
+
   it('builds an encoded same-origin noopener console URL', () => {
     const value = new URL(consoleRouteUrl(job.jobId, 'events'));
     expect(value.origin).toBe(window.location.origin);

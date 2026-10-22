@@ -60,6 +60,54 @@ class ServerRuntimeJobReplayTest {
         }
         fail("Job did not finish: "+id);
     }
+    @Test void schedulePoliciesPreserveSourceAndAllowStaleMetadataEditsAcrossRestart() throws Exception {
+        Fixture fixture=fixture();String strictId,pauseId,ignoreId,stored;
+        ServerRuntimeTestSupport.MutableClock clock=new ServerRuntimeTestSupport.MutableClock(Instant.parse("2026-10-22T00:00:00Z"));
+        try(ServerRuntime runtime=fixture.open(clock)) {
+            users(runtime);
+            var definition=ServerRuntime.JSON.createObjectNode();definition.put("schemaVersion",RunDefinition.VERSION);definition.put("executionType","run");definition.put("packageId","p");definition.put("environment","SIT");
+            definition.putObject("target").put("type","template").put("id","SIMPLE");definition.putObject("input");
+            Map<String,Object> draft=runtime.createRunDraft(definition,"alice");
+            var request=ServerRuntime.JSON.valueToTree(Map.of("name","Policy test","executionType","run","packageId","p","environment","SIT","draftId",draft.get("draftId"),"timezone","UTC","cron","0 2 * * *","enabled",true));
+            LoadSchedule strict=runtime.createLoadSchedule(request,"alice");strictId=strict.id;stored=strict.expectedRevisionDigest;
+            var pauseRequest=((com.fasterxml.jackson.databind.node.ObjectNode)request).deepCopy().put("packageChangePolicy","pause");
+            LoadSchedule pause=runtime.createLoadSchedule(pauseRequest,"alice");pauseId=pause.id;
+            var ignoreRequest=((com.fasterxml.jackson.databind.node.ObjectNode)request).deepCopy().put("packageChangePolicy","ignore");
+            LoadSchedule ignore=runtime.createLoadSchedule(ignoreRequest,"alice");ignoreId=ignore.id;
+            Path unrelated=fixture.root.resolve("templates/BAD/template.yaml");Files.writeString(unrelated,Files.readString(unrelated)+"# unrelated change\n");
+            Map<String,Object> blocked=runtime.triggerLoadSchedule(strictId,"alice");
+            assertEquals("package-revision-changed",blocked.get("reason"));assertNull(blocked.get("jobId"));
+            assertTrue(runtime.loadSchedule(strictId).enabled);
+            clock.advance(Duration.ofSeconds(1));
+            LoadSchedule renamed=runtime.updateLoadSchedule(strictId,ServerRuntime.JSON.valueToTree(Map.of("name","Renamed stale RUN","cron","0 3 * * *","description","metadata remains editable","tags",List.of("stale"))),"alice");
+            assertEquals(stored,renamed.expectedRevisionDigest);assertEquals("package-revision-changed",renamed.sourceStatus);
+            assertEquals(strict.runInput,renamed.runInput);
+            assertEquals("package-revision-changed",runtime.triggerLoadSchedule(pauseId,"alice").get("reason"));
+            assertFalse(runtime.loadSchedule(pauseId).enabled);assertEquals("package-revision-changed",runtime.loadSchedule(pauseId).autoPauseReason);
+            assertThrows(ServerRuntime.ScheduleSourceChangedException.class,()->runtime.setLoadScheduleEnabled(pauseId,true,"alice"));
+            Map<String,Object> accepted=runtime.triggerLoadSchedule(ignoreId,"alice");assertEquals("submitted",accepted.get("status"),accepted.toString());
+            await(runtime,String.valueOf(accepted.get("jobId")));
+            assertEquals(stored,runtime.loadSchedule(ignoreId).expectedRevisionDigest);
+            assertEquals(ignore.runInput,runtime.loadSchedule(ignoreId).runInput);
+            assertEquals(1,runtime.store.auditOutcomes("SCHEDULE_SOURCE_REVALIDATED").size());
+            assertTrue(runtime.store.auditOutcomes("SCHEDULE_SOURCE_REVALIDATED").get(0).contains("stored="+stored));
+        }
+        try(ServerRuntime runtime=fixture.open(clock)) {
+            assertEquals("Renamed stale RUN",runtime.loadSchedule(strictId).name);
+            assertFalse(runtime.loadSchedule(pauseId).enabled);assertEquals(stored,runtime.loadSchedule(ignoreId).expectedRevisionDigest);
+            Path target=fixture.root.resolve("templates/SIMPLE/template.yaml");
+            Files.writeString(target,Files.readString(target).replace("message: once","message: compatible latest target"));
+            clock.advance(Duration.ofMinutes(16));
+            Map<String,Object> compatible=runtime.triggerLoadSchedule(ignoreId,"alice");assertEquals("submitted",compatible.get("status"),compatible.toString());
+            await(runtime,String.valueOf(compatible.get("jobId")));
+            assertEquals(stored,runtime.loadSchedule(ignoreId).expectedRevisionDigest);
+            clock.advance(Duration.ofMinutes(16));
+            Files.delete(target);
+            Map<String,Object> invalid=runtime.triggerLoadSchedule(ignoreId,"alice");
+            assertEquals("failed-to-submit",invalid.get("status"));assertNull(invalid.get("jobId"));
+        }
+    }
+
     @Test void runTargetsAndExactBatchSelectionsAreRevalidatedAndIndependent() throws Exception {
         Fixture fixture=fixture();
         try(ServerRuntime runtime=fixture.open()) {

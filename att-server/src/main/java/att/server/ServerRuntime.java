@@ -77,6 +77,7 @@ final class ServerRuntime implements AutoCloseable {
     final JobStore store;
     final AuthService auth;
     final ThreadPoolExecutor workers,streams,inspectors;
+    private final ThreadPoolExecutor eventCompactions=new ThreadPoolExecutor(2,2,0,TimeUnit.MILLISECONDS,new ArrayBlockingQueue<>(1024),r->{Thread t=new Thread(r,"att-server-event-compactor");t.setDaemon(true);return t;},new ThreadPoolExecutor.AbortPolicy());
     private final ThreadPoolExecutor artifactWriters;
     private final ArtifactPublisher artifactPublisher;
     private final Semaphore artifactReadSlots=new Semaphore(8,true);
@@ -105,7 +106,7 @@ final class ServerRuntime implements AutoCloseable {
     private final Set<String> deferredWorkerReleaseIds=ConcurrentHashMap.newKeySet();
     private String artifactRecoveryCursor="";
     private final ScheduledExecutorService inspectionWatchdogs;
-    private final LoadScheduleScheduler loadScheduleScheduler;
+    private LoadScheduleScheduler loadScheduleScheduler;
     private final WorkerProcessLauncher processLauncher;
     private final Clock clock;
     private volatile Map<String,Object> jobStorageReport;
@@ -121,6 +122,8 @@ final class ServerRuntime implements AutoCloseable {
     private final List<InspectionWorker> inspectionWorkerPool=new ArrayList<>();
     private final ScheduledExecutorService inspectionWarmup;
     private volatile boolean closing;
+    private final java.util.concurrent.locks.ReentrantReadWriteLock admissionLifecycle=new java.util.concurrent.locks.ReentrantReadWriteLock(true);
+    private final ConcurrentHashMap<Thread,Process> stderrDrainers=new ConcurrentHashMap<>();
     final InspectionMetrics inspectionMetrics=new InspectionMetrics();
     private final AtomicLong inspectionWorkerSelection=new AtomicLong();
     private final byte[] cursorKey=new byte[32];
@@ -138,7 +141,7 @@ final class ServerRuntime implements AutoCloseable {
     }
     ServerRuntime(ServerConfig config,String workerLibs,WorkerProcessLauncher processLauncher,Clock clock,ArtifactPublisher artifactPublisher) throws Exception {
         if(Runtime.version().feature()<17)throw new IllegalStateException("ATT Server requires Java 17 or later; detected Java "+Runtime.version().feature());
-        this.config=config;this.artifactPublisher=java.util.Objects.requireNonNull(artifactPublisher);this.workerLibs=workerLibs==null?null:Paths.get(workerLibs).toAbsolutePath().normalize();this.workerSchemaRegistryDigest=WorkerRuntimeClasspath.schemaRegistryDigestIfPresent(this.workerLibs);this.processLauncher=processLauncher;this.clock=java.util.Objects.requireNonNull(clock);this.store=new JobStore(config);this.auth=new AuthService(config,store);this.loadSlots=new Semaphore(config.maxConcurrentLoad,true);this.admissionSlots=new Semaphore(config.maxConcurrent+config.queuedLimit,true);
+        this.config=config;this.artifactPublisher=java.util.Objects.requireNonNull(artifactPublisher);this.workerLibs=workerLibs==null?null:Paths.get(workerLibs).toAbsolutePath().normalize();this.workerSchemaRegistryDigest=WorkerRuntimeClasspath.schemaRegistryDigestIfPresent(this.workerLibs);this.processLauncher=processLauncher;this.clock=java.util.Objects.requireNonNull(clock);this.store=new JobStore(config);try{this.auth=new AuthService(config,store);}catch(Exception failed){store.close();throw failed;}this.loadSlots=new Semaphore(config.maxConcurrentLoad,true);this.admissionSlots=new Semaphore(config.maxConcurrent+config.queuedLimit,true);
         cursorRandom.nextBytes(cursorKey);
         java.util.concurrent.BlockingQueue<Runnable> queue=config.queuedLimit==0?new SynchronousQueue<>():new ArrayBlockingQueue<>(config.queuedLimit);
         workers=new ThreadPoolExecutor(config.maxConcurrent,config.maxConcurrent,0,TimeUnit.MILLISECONDS,queue,r->{Thread t=new Thread(r,"att-server-worker");t.setDaemon(true);return t;},new ThreadPoolExecutor.AbortPolicy());
@@ -152,6 +155,7 @@ final class ServerRuntime implements AutoCloseable {
         inspectionWatchdogs=java.util.concurrent.Executors.newSingleThreadScheduledExecutor(r->{Thread t=new Thread(r,"att-server-inspector-watchdog");t.setDaemon(true);return t;});
         inspectionWarmup=config.inspection.enabled&&config.inspection.warmup.enabled()
                 ?java.util.concurrent.Executors.newSingleThreadScheduledExecutor(r->{Thread t=new Thread(r,"att-server-inspector-warmup");t.setDaemon(true);return t;}):null;
+        try {
         recover();reconcileDeletingJobsSafely();cleanupExpiredJobsSafely();recoverArtifactArchivesSafely();retention.scheduleWithFixedDelay(this::cleanupExpiredJobsSafely,1,1,TimeUnit.HOURS);
         if(config.jobStorage.enabled){if(!skipInitialStorageSweep)cleanupJobStorageSafely();retention.scheduleWithFixedDelay(this::cleanupJobStorageSafely,config.jobStorage.cleanupIntervalMinutes,config.jobStorage.cleanupIntervalMinutes,TimeUnit.MINUTES);}
         artifactMaintenance.scheduleWithFixedDelay(this::recoverArtifactArchivesSafely,5,5,TimeUnit.MINUTES);
@@ -166,6 +170,7 @@ final class ServerRuntime implements AutoCloseable {
         if(inspectionWarmup!=null)inspectionWarmup.scheduleWithFixedDelay(this::warmInspectionSafely,250,250,TimeUnit.MILLISECONDS);
         if(config.inspection.enabled&&!config.inspection.redactionEnabled)java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).warning("Inspection masking is disabled; ordinary package values are visible to authorized callers, while classified secrets remain protected");
         if(!config.security.checkCrossOrigin)java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).warning("server.security.checkCrossOrigin is disabled; configure trusted proxy origin handling and retain local-auth CSRF protection");
+        } catch(Exception failed) {close();throw failed;}
     }
     private void recover() throws Exception {
         for(Map<String,Object> stale:store.staleWorkers()) {
@@ -182,7 +187,7 @@ final class ServerRuntime implements AutoCloseable {
             String mode=executionMode(row==null?null:String.valueOf(row.get("command")));
             store.interruptStale(id);
             Path journal=config.dataDir.resolve("jobs").resolve(id).resolve("events.jsonl");
-            JobEvents events=new JobEvents(journal,config.maxEventsPerJob);
+            JobEvents events=new JobEvents(journal,config.maxEventsPerJob,eventCompactions);
             String summary="Job was interrupted by Server restart and was not rerun";
             events.append("diagnostic",Map.of("code","ATT-SERVER-INTERRUPTED","summary",summary,"console",publishConsole(att.console.ExecutionConsoleFormatter.diagnostic(mode,"ATT-SERVER-INTERRUPTED",summary))));
             events.append("result",Map.of("jobId",id,"status","ERROR","console",publishConsole(att.console.ExecutionConsoleFormatter.lifecycle(mode,id,"ERROR",null))));
@@ -369,6 +374,9 @@ final class ServerRuntime implements AutoCloseable {
         return submit(command,input,principal,serverIssuedDraft,scheduleOccurrenceId,scheduleIssued,null,null);
     }
     private Map<String,Object> submit(String command,JsonNode input,String principal,boolean serverIssuedDraft,String scheduleOccurrenceId,boolean scheduleIssued,String rerunOfJobId,String replayIntent) throws Exception {
+        admissionLifecycle.readLock().lock();
+        try {
+        if(closing)throw new QueueFullException("Server is shutting down");
         long requestReceivedNanos=System.nanoTime();
         if(!List.of("run","debug","load","validate").contains(command))throw new IllegalArgumentException("Unsupported job command");
         if(!serverIssuedDraft&&(input.has("draftId")||input.has("inlineDebugInput")||input.has("inlineLoadScenario")
@@ -428,7 +436,7 @@ final class ServerRuntime implements AutoCloseable {
         try {
             id="J"+UUID.randomUUID().toString().replace("-","").substring(0,16).toUpperCase();request.jobId=id;
             jobPath=config.dataDir.resolve("jobs").resolve(id);Files.createDirectories(jobPath.resolve("output"));final Path activeJobPath=jobPath;
-            JobEvents events=new JobEvents(jobPath.resolve("events.jsonl"),config.maxEventsPerJob);
+            JobEvents events=new JobEvents(jobPath.resolve("events.jsonl"),config.maxEventsPerJob,eventCompactions);
             Job job=new Job(id,command,packageId,principal,request,events);job.scheduleOccurrenceId=scheduleOccurrenceId;job.requestReceivedNanos=requestReceivedNanos;
             job.executionSpec=executionSpec;job.replayUnavailable=replayUnavailable;job.rerunOfJobId=rerunOfJobId;job.replayIntent=replayIntent;job.replayOwner=replayOwner;job.originatingScheduleId=originatingScheduleId;
             Map<String,Object> summaryFields=new LinkedHashMap<>();summaryFields.put("command",command);summaryFields.put("packageId",packageId);
@@ -449,6 +457,14 @@ final class ServerRuntime implements AutoCloseable {
                 lease.release();if(failure instanceof QueueFullException)try{store.audit(principal,"SUBMIT",id,packageId,"REJECTED_QUEUE_FULL");}catch(Exception ignored){} }
             throw failure;
         }
+        } finally {admissionLifecycle.readLock().unlock();}
+    }
+    private void startStderrDrainer(Process process,String name) {
+        Thread thread=new Thread(()->{
+            try(var input=process.getErrorStream()){byte[] buffer=new byte[8192];while(input.read(buffer)>=0){} }
+            catch(Exception ignored){}finally{stderrDrainers.remove(Thread.currentThread());}
+        },name);
+        thread.setDaemon(true);stderrDrainers.put(thread,process);thread.start();
     }
     private void execute(Job job,Path jobPath,AdmissionLease lease) {
         job.workerStartedNanos=System.nanoTime();
@@ -459,6 +475,7 @@ final class ServerRuntime implements AutoCloseable {
                 // cancellation that wins before launch prevents the Worker from starting;
                 // one that follows launch always sees and terminates that exact process.
                 if(job.terminal())return;
+                if(closing){finishQuietly(job,"ERROR",143,"ATT-SERVER-INTERRUPTED","Server shutdown stopped the queued Worker");return;}
                 transition(job,"PREPARING");
                 validatePackageRoot(packageRoot(job.packageId));
                 job.request.outputDirectory=jobPath.resolve("output").toRealPath().toString();
@@ -472,7 +489,7 @@ final class ServerRuntime implements AutoCloseable {
                 builder.directory(packageRoot(job.packageId).toFile());
                 job.workerSpawnStartedNanos=System.nanoTime();process=processLauncher.start(builder);job.workerSpawnedNanos=System.nanoTime();job.process=process;job.processFence=new WorkerProcessFence(process);job.workerPid=process.pid();job.workerStartTime=process.info().startInstant().orElse(Instant.now());job.startedAt=Instant.now();transition(job,"RUNNING");rememberWorkerProcesses(job,job.processFence);
             }
-            Thread stderr=new Thread(()->{try(var in=process.getErrorStream()){byte[] buf=new byte[8192];while(in.read(buf)>=0){/* drain; protocol and safe diagnostics use stdout */}}catch(Exception ignored){}});stderr.setDaemon(true);stderr.start();
+            startStderrDrainer(process,"att-server-worker-stderr");
             try(var out=process.getOutputStream()){out.write(workerRequestBytes(job.request));out.write('\n');out.flush();}
             try(var reader=new java.io.BufferedInputStream(process.getInputStream())) {
                 att.server.api.internal.WorkerProtocol.Frame frame;
@@ -1905,13 +1922,7 @@ final class ServerRuntime implements AutoCloseable {
             writer=started.getOutputStream();
             reader=new InspectionProtocolReader(new InputStreamReader(started.getInputStream(),StandardCharsets.UTF_8));
             if(closing){discard();throw new InterruptedException("Server is shutting down");}
-            Thread stderr=new Thread(()->{
-                try(java.io.InputStream in=started.getErrorStream()) {
-                    byte[] buffer=new byte[8192];while(in.read(buffer)>=0) { }
-                } catch(Exception ignored) { }
-            },"att-server-inspector-stderr");
-            stderr.setDaemon(true);
-            stderr.start();
+            startStderrDrainer(started,"att-server-inspector-stderr");
         }
 
         private void kill() {
@@ -1938,7 +1949,9 @@ final class ServerRuntime implements AutoCloseable {
 
         @Override public void close() {
             Process current=process;
-            kill();lock.lock();
+            kill();
+            try {if(!lock.tryLock(5,TimeUnit.SECONDS)){java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).warning("Inspection Worker cleanup lock did not quiesce");return;}}
+            catch(InterruptedException interrupted){Thread.currentThread().interrupt();return;}
             try {
                 discard();
                 if(current!=null)try{current.waitFor(config.gracefulStopMs,TimeUnit.MILLISECONDS);}
@@ -2013,7 +2026,9 @@ final class ServerRuntime implements AutoCloseable {
     Map<String,Object> loadScheduleView(LoadSchedule schedule) {
         Map<String,Object> view=JSON.convertValue(schedule,Map.class);
         view.remove("sourceJobId");view.remove("runInput");view.put("executionType","load".equals(schedule.effectiveJobType())?"load":"run");
-        view.put("revisionPolicy",schedule.runInput!=null||schedule.inlineDebugInput!=null?"reject-package-changes":"validate-current-package");
+        view.put("revisionPolicy",schedule.expectedRevisionDigest!=null?effectivePackageChangePolicy(schedule):"validate-current-package");
+        view.put("effectivePackageChangePolicy",effectivePackageChangePolicy(schedule));view.put("serverPackageChangePolicy",config.scheduling.packageChangePolicy);
+        view.put("storedRevisionDigest",schedule.expectedRevisionDigest);view.remove("packageRootIdentity");
         view.remove("inlineScenario");view.remove("inlineDebugInput");view.remove("debugResourceId");view.remove("expectedRevisionDigest");view.remove("catalogSnapshot");
         view.put("jobType",schedule.effectiveJobType());
         view.put("inlineSnapshot",Boolean.valueOf(schedule.inlineScenario!=null||schedule.inlineDebugInput!=null||schedule.runInput!=null));
@@ -2070,9 +2085,12 @@ final class ServerRuntime implements AutoCloseable {
     LoadSchedule setLoadScheduleEnabled(String id,boolean enabled,String principal) throws Exception {
         requireLocalOperator(principal);
         requireSchedulingEnabled();Instant now=clock.instant();LoadSchedule schedule;
+        LoadSchedule current=store.schedule(id);if(current==null)throw new NotFoundException();
+        if(enabled)validateScheduleForActivation(current,principal);
+        String next=enabled?(current.runAt==null?nextRun(current.cron,current.timezone,now).toString():futureRunAt(current.runAt)):null;
         synchronized(store) {
-            LoadSchedule current=store.schedule(id);if(current==null)throw new NotFoundException();
-            String next=enabled?(current.runAt==null?nextRun(current.cron,current.timezone,now).toString():futureRunAt(current.runAt)):null;
+            LoadSchedule latest=store.schedule(id);if(latest==null)throw new NotFoundException();
+            if(!java.util.Objects.equals(current.updatedAt,latest.updatedAt))throw new ScheduleConflictException();
             schedule=store.setScheduleEnabled(id,enabled,principal,now.toString(),next);
         }
         if(schedule==null)throw new NotFoundException();
@@ -2094,14 +2112,7 @@ final class ServerRuntime implements AutoCloseable {
     }
 
     private Map<String,Object> submitScheduledJob(LoadSchedule schedule,String occurrenceId,String executionPrincipal) throws Exception {
-        if("local".equals(config.authMode)) {
-            if(!store.isActiveUser(executionPrincipal))throw new IllegalArgumentException("Schedule owner is no longer authorized");
-            String automaticPrincipal=schedule.executionPrincipal==null||schedule.executionPrincipal.isBlank()?schedule.createdBy:schedule.executionPrincipal;
-            if(!store.isActiveUser(automaticPrincipal))
-                throw new IllegalArgumentException("Schedule owner is no longer authorized");
-            if(schedule.executionIdentityMigratedFrom==null&&!store.isActiveUser(schedule.createdBy))
-                throw new IllegalArgumentException("Schedule owner is no longer authorized");
-        }
+        schedule=prepareScheduledExecution(schedule,executionPrincipal);
         Map<String,Object> accepted="run".equals(schedule.effectiveJobType())
                 ?submitScheduledRun(schedule,occurrenceId,executionPrincipal)
                 :"debug".equals(schedule.effectiveJobType())
@@ -2119,14 +2130,67 @@ final class ServerRuntime implements AutoCloseable {
     private void validateScheduledRun(LoadSchedule schedule) throws Exception {
         Path root=packageRoot(schedule.packageId);if(root==null)throw new NotFoundException();validatePackageRoot(root);
         if(schedule.runInput==null||schedule.expectedRevisionDigest==null)throw new IllegalArgumentException("Scheduled RUN snapshot is incomplete");
-        if(schedule.inlineDebugInput!=null)validateScheduledDebugInput(root,schedule);
-        else {
-            WorkerRequest request=inspectionRequest(schedule.packageId,root,schedule.environment);
-            request.config=config.runtimeConfigPath.toString();
-            request.inspectionAction="revision";request.expectedRevisionDigest=schedule.expectedRevisionDigest;
-            try { executeInspection(root,request); }
-            catch(StaleCursorException stale) {throw new StaleDraftException();}
+        if(schedule.inlineDebugInput!=null){validateScheduledDebugInput(root,schedule);return;}
+        WorkerRequest request=JSON.convertValue(schedule.runInput,WorkerRequest.class);
+        request=applyWorkerPolicy(request);request.protocolVersion="att-worker/v1";request.command="inspect";
+        request.jobId="I"+UUID.randomUUID().toString().replace("-","");request.packageRoot=root.toString();
+        request.config=config.runtimeConfigPath.toString();request.inspectionAction="run-input";
+        ObjectNode policy=JSON.createObjectNode();applyInspectionPolicy(policy,schedule.packageId);JSON.readerForUpdating(request).readValue(policy);
+        Map<String,Object> inspected=executeInspection(root,request);
+        if(!(inspected.get("selectedCaseIds") instanceof List<?> ids)||!(schedule.runInput.get("caseIds") instanceof List<?> saved)
+                ||!new java.util.HashSet<>(ids).equals(new java.util.HashSet<>(saved)))throw new IllegalArgumentException("Scheduled RUN case selection changed; review a replacement schedule");
+        requireScheduleRevision(schedule,String.valueOf(inspected.get("revisionDigest")));
+    }
+
+    private String effectivePackageChangePolicy(LoadSchedule schedule){return schedule.packageChangePolicy==null?config.scheduling.packageChangePolicy:schedule.packageChangePolicy;}
+    private static String packageRootIdentity(Path root) throws Exception {
+        return java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256").digest(root.toRealPath().toString().getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+    }
+    private void requireScheduleRevision(LoadSchedule schedule,String revision) {
+        if(schedule.expectedRevisionDigest!=null&&!schedule.expectedRevisionDigest.equals(revision))
+            throw new ScheduleSourceChangedException(schedule.expectedRevisionDigest,revision,effectivePackageChangePolicy(schedule));
+    }
+    private void validateScheduleForActivation(LoadSchedule schedule,String principal) throws Exception {prepareScheduledExecution(schedule,principal);}
+
+    /** Returns an execution-only copy. Stored inputs and their original revision remain immutable. */
+    private LoadSchedule prepareScheduledExecution(LoadSchedule original,String principal) throws Exception {
+        if("local".equals(config.authMode)) {
+            if(!store.isActiveUser(principal))throw new IllegalArgumentException("Schedule owner is no longer authorized");
+            String automaticPrincipal=original.executionPrincipal==null||original.executionPrincipal.isBlank()?original.createdBy:original.executionPrincipal;
+            if(!store.isActiveUser(automaticPrincipal))
+                throw new IllegalArgumentException("Schedule owner is no longer authorized");
+            if(original.executionIdentityMigratedFrom==null&&!store.isActiveUser(original.createdBy))
+                throw new IllegalArgumentException("Schedule owner is no longer authorized");
         }
+        Path root=packageRoot(original.packageId);
+        if(root==null||!Files.isDirectory(root,java.nio.file.LinkOption.NOFOLLOW_LINKS))throw new IllegalArgumentException("Configured schedule package is no longer available");
+        validatePackageRoot(root);
+        if(original.packageRootIdentity!=null&&!original.packageRootIdentity.equals(packageRootIdentity(root)))throw new IllegalArgumentException("Schedule package registration changed; review a replacement schedule");
+        LoadSchedule execution=original.copy();
+        if(original.expectedRevisionDigest!=null) {
+            WorkerRequest request=inspectionRequest(original.packageId,root,original.environment);
+            request.config=config.runtimeConfigPath.toString();request.inspectionAction="revision";
+            String current=String.valueOf(executeInspection(root,request).get("revisionDigest"));
+            if(!current.matches("[a-f0-9]{64}"))throw new IllegalStateException("Schedule revision validation did not return a revision");
+            if(!current.equals(original.expectedRevisionDigest)) {
+                String policy=effectivePackageChangePolicy(original);
+                if(!"ignore".equals(policy))throw new ScheduleSourceChangedException(original.expectedRevisionDigest,current,policy);
+                // Legacy records lack the registration identity needed to safely opt into a different source.
+                if(original.packageRootIdentity==null)throw new IllegalArgumentException("This legacy schedule requires a reviewed replacement before revalidating a changed package");
+                execution.expectedRevisionDigest=current;
+                if(execution.runInput!=null)execution.runInput.put("expectedRevisionDigest",current);
+                validateScheduleInputs(root,execution);
+                store.recordScheduleSourceChange(original,current,false,clock.instant().toString());
+                store.audit(principal,"SCHEDULE_SOURCE_REVALIDATED",null,original.packageId,"schedule="+original.id+";stored="+original.expectedRevisionDigest+";current="+current+";policy="+policy+";source="+(original.packageChangePolicy==null?"server":"schedule"));
+                return execution;
+            }
+        }
+        validateScheduleInputs(root,execution);return execution;
+    }
+    private void validateScheduleInputs(Path root,LoadSchedule schedule) throws Exception {
+        if("run".equals(schedule.effectiveJobType()))validateScheduledRun(schedule);
+        else if("debug".equals(schedule.effectiveJobType()))validateScheduledDebugInput(root,schedule);
+        else validateScheduleScenario(root,schedule);
     }
 
     private Map<String,Object> submitScheduledLoad(LoadSchedule schedule,String occurrenceId) throws Exception {
@@ -2182,13 +2246,11 @@ final class ServerRuntime implements AutoCloseable {
         if(((Boolean)rawSensitive).booleanValue())
             throw new IllegalArgumentException("A Debug schedule cannot store submitted credentials, private values, or other classified sensitive fields. Keep classified package defaults protected or remove them from the override.");
         String digest=(String)rawDigest;
-        if(!schedule.expectedRevisionDigest.equals(digest))
-            throw new IllegalArgumentException("The package changed after this Debug schedule was created; create a new schedule from a fresh preview");
+        requireScheduleRevision(schedule,digest);
         return digest;
     }
 
     private ValidatedScheduledScenario validateScheduleScenario(Path root,LoadSchedule schedule) throws Exception {
-        if(schedule.sourceJobId!=null&&schedule.expectedRevisionDigest!=null)verifyPackageRevision(schedule.packageId,schedule.environment,schedule.expectedRevisionDigest);
         Map<String,Object> requested=schedule.inlineScenario==null?readScheduledScenario(root,schedule.scenario):deepMap(schedule.inlineScenario);
         ValidatedScheduledScenario validated=validateScheduledScenario(root,schedule,requested,schedule.inlineScenario==null);
         if(schedule.load!=null&&!schedule.load.isEmpty()) {
@@ -2197,6 +2259,7 @@ final class ServerRuntime implements AutoCloseable {
         }
         if(schedule.inlineScenario!=null&&validated.containsSensitiveValues)
             throw new IllegalArgumentException("An inline schedule cannot store credentials, private values, or other classified sensitive fields. Remove them from the Load draft or keep them in package-managed configuration.");
+        requireScheduleRevision(schedule,validated.revisionDigest);
         validateScheduledLoadLimits(config.inlineLoad,validated.scenario);schedule.loadModel=validated.model;return validated;
     }
 
@@ -2242,13 +2305,22 @@ final class ServerRuntime implements AutoCloseable {
 
     private LoadSchedule buildLoadSchedule(JsonNode input,LoadSchedule prior,String principal) throws Exception {
         if(input==null||!input.isObject())throw new IllegalArgumentException("A JSON object is required");
-        Set<String> allowed=Set.of("name","description","tags","packageId","jobType","executionType","schemaVersion","scenario","draftId","config","environment","timezone","cron","runAt","load","maxConcurrentRuns","enabled");
+        Set<String> allowed=Set.of("name","description","tags","packageId","jobType","executionType","schemaVersion","scenario","draftId","config","environment","timezone","cron","runAt","load","maxConcurrentRuns","enabled","packageChangePolicy");
         input.fieldNames().forEachRemaining(key->{if(!allowed.contains(key))throw new IllegalArgumentException("Unknown schedule field: "+key);});
         if(input.has("schemaVersion")&&!"att-schedule/v2".equals(fieldText(input,"schemaVersion",null,true)))throw new IllegalArgumentException("Unsupported schedule schemaVersion");
         LoadSchedule s=prior==null?new LoadSchedule():prior.copy();
         s.name=fieldText(input,"name",s.name,true);s.description=fieldText(input,"description",s.description,false);
         if(input.has("tags"))s.tags=scheduleTags(input.get("tags"));else if(s.tags==null)s.tags=List.of();
         s.packageId=fieldText(input,"packageId",s.packageId,true);
+        if(input.has("packageChangePolicy")) {
+            s.packageChangePolicy=fieldText(input,"packageChangePolicy",null,false);
+            if(s.packageChangePolicy!=null&&!Set.of("strict","pause","ignore").contains(s.packageChangePolicy))throw new IllegalArgumentException("packageChangePolicy must be strict, pause, ignore or null for the server default");
+        }
+        boolean validateExecution=prior==null||!prior.enabled&&input.path("enabled").asBoolean(false)||prior!=null&&(
+                input.has("scenario")&&!java.util.Objects.equals(input.path("scenario").asText(),prior.scenario)
+                ||input.has("load")&&!input.get("load").equals(JSON.valueToTree(prior.load))
+                ||!java.util.Objects.equals(s.packageId,prior.packageId)
+                ||input.has("environment")&&!sameOptionalText(fieldText(input,"environment",null,false),prior.environment));
         String jobType=fieldText(input,"jobType",prior==null?"load":prior.effectiveJobType(),false);
         if(jobType==null||jobType.isBlank())jobType="load";
         if(input.has("executionType")) {
@@ -2346,15 +2418,15 @@ final class ServerRuntime implements AutoCloseable {
             if(!s.packageId.equals(snapshot.path("packageId").asText())||!java.util.Objects.equals(s.environment,expectedEnvironment)||!sameRuntimeConfig)
                 throw new IllegalArgumentException("A RUN snapshot is immutable; create a new schedule for changed values");
             if(input.has("scenario")||s.load!=null&&!s.load.isEmpty())throw new IllegalArgumentException("RUN schedules cannot use Load fields");
-            validateScheduledRun(s);
+            if(validateExecution&&prior==null)validateScheduledRun(s);
         } else if("debug".equals(s.effectiveJobType())) {
             if(s.config!=null&&!"config/config.yaml".equals(s.config))throw new IllegalArgumentException("A Debug schedule must use the configuration validated by the Debug draft");
             if(prior!=null&&debugSnapshotInputChanged(prior,s,input))throw new IllegalArgumentException("A Debug snapshot is immutable; create a new schedule for changed values");
-            validateScheduledDebugInput(root,s);
+            if(validateExecution&&prior==null)validateScheduledDebugInput(root,s);
         } else if(s.inlineScenario==null) {
             s.scenario=safeRelative(s.scenario,"scenario");if(s.scenario==null)throw new IllegalArgumentException("scenario or draftId is required");
-            validatePackagePath(root,s.scenario,"scenario");Path scenarioPath=root.resolve(s.scenario).normalize();
-            if(!Files.isRegularFile(scenarioPath)||!scenarioPath.toRealPath().startsWith(root.toRealPath()))throw new IllegalArgumentException("scenario must be a regular file inside the configured package");
+            if(validateExecution){validatePackagePath(root,s.scenario,"scenario");Path scenarioPath=root.resolve(s.scenario).normalize();
+            if(!Files.isRegularFile(scenarioPath)||!scenarioPath.toRealPath().startsWith(root.toRealPath()))throw new IllegalArgumentException("scenario must be a regular file inside the configured package");}
             if(s.inlineDebugInput!=null)throw new IllegalArgumentException("A Debug snapshot cannot be changed to a Load schedule");
         } else {
             if(!config.inlineLoad.enabled&&!s.catalogSnapshot)throw new InlineLoadDisabledException();
@@ -2367,9 +2439,14 @@ final class ServerRuntime implements AutoCloseable {
             cron.validateTimezoneMinimumInterval(zone,config.scheduling.minimumIntervalMinutes,clock.instant());
         } else if(prior==null||!LoadSchedule.sameInstant(s.runAt,prior.runAt)||!prior.enabled&&s.enabled)
             s.runAt=futureRunAt(s.runAt);
-        if("load".equals(s.effectiveJobType())) {
+        if(validateExecution&&prior==null&&"load".equals(s.effectiveJobType())) {
             ValidatedScheduledScenario validated=validateScheduleScenario(root,s);
             if(s.inlineScenario!=null)s.inlineScenario=deepMap(validated.scenario);
+        }
+        if(prior==null)s.packageRootIdentity=packageRootIdentity(root);
+        else if(validateExecution) {
+            if("load".equals(s.effectiveJobType())&&s.inlineScenario==null&&!java.util.Objects.equals(prior.packageId,s.packageId))s.packageRootIdentity=packageRootIdentity(root);
+            validateScheduleForActivation(s,principal);
         }
         s.nextRunAt=s.runAt==null?nextRun(s.cron,s.timezone,clock.instant()).toString():s.runAt;
         s.updatedBy=principal;s.updatedAt=clock.instant().toString();return s;
@@ -2765,7 +2842,7 @@ final class ServerRuntime implements AutoCloseable {
     }
     private static String replacePathPrefix(String value,String prefix,String logical){if(value.equals(prefix))return logical+":";String separator=java.io.File.separator;value=value.replace(prefix+separator,logical+":");if("\\".equals(separator))value=value.replace(prefix+"/",logical+":");else value=value.replace(prefix+"\\",logical+":");return value;}
     static String safeMessage(Exception e){String m=att.server.api.internal.DiagnosticSanitizer.redactAbsolutePaths(att.server.api.internal.DiagnosticSanitizer.redactText(e.getMessage()));return m.isEmpty()?"ATT Worker execution failed":m.length()>500?m.substring(0,500):m;}
-    JobEvents events(String id) throws Exception {if(!JOB_ID.matcher(id).matches()||store.get(id)==null)throw new NotFoundException();Job active=jobs.get(id);return active==null?new JobEvents(config.dataDir.resolve("jobs").resolve(id).resolve("events.jsonl"),config.maxEventsPerJob):active.events;}
+    JobEvents events(String id) throws Exception {if(!JOB_ID.matcher(id).matches()||store.get(id)==null)throw new NotFoundException();Job active=jobs.get(id);return active==null?new JobEvents(config.dataDir.resolve("jobs").resolve(id).resolve("events.jsonl"),config.maxEventsPerJob,eventCompactions):active.events;}
     boolean terminal(String id) throws Exception {Job active=jobs.get(id);if(active!=null)return active.terminal();Map<String,Object> row=store.get(id);if(row==null)throw new NotFoundException();return List.of("PASS","FAIL","ERROR","INVALID","CANCELLED").contains(row.get("status"));}
     /** One-time export projection; no public GET reads trusted Worker files. */
     byte[] publicArtifact(String id, Path file) throws Exception {
@@ -3053,7 +3130,53 @@ final class ServerRuntime implements AutoCloseable {
         int deleted; long reclaimed; long remaining; boolean deferred;
         OrphanSweep(long remaining){this.remaining=remaining;}
     }
-    @Override public void close(){closing=true;if(inspectionWarmup!=null)inspectionWarmup.shutdownNow();if(loadScheduleScheduler!=null)loadScheduleScheduler.close();retention.shutdownNow();artifactMaintenance.shutdownNow();inspectionWatchdogs.shutdownNow();synchronized(draftLock){runDrafts.clear();debugDrafts.clear();quickLoadDrafts.clear();advancedLoadDrafts.clear();catalogLoadDrafts.clear();}for(InspectionWorker worker:inspectionWorkerPool)worker.close();for(Job j:jobs.values())if(j.process!=null){try{if(j.processFence!=null){j.processFence.observe();rememberWorkerProcesses(j,j.processFence);}stopWorkerTree(j);finishQuietly(j,"ERROR",143,"ATT-SERVER-INTERRUPTED","Server shutdown interrupted the Worker");}catch(Exception ignored){if(j.processFence!=null)j.processFence.force();else forceTree(j.process);}}for(Process process:inspectionProcesses.keySet())if(process.isAlive())forceTree(process);inspectors.shutdownNow();workers.shutdownNow();streams.shutdownNow();try{workers.awaitTermination(30,TimeUnit.SECONDS);}catch(InterruptedException interrupted){Thread.currentThread().interrupt();}artifactWriters.shutdown();try{if(!artifactWriters.awaitTermination(30,TimeUnit.SECONDS))artifactWriters.shutdownNow();}catch(InterruptedException interrupted){artifactWriters.shutdownNow();Thread.currentThread().interrupt();}try{store.close();}catch(Exception ignored){}}
+    @Override public synchronized void close() {
+        admissionLifecycle.writeLock().lock();
+        try {if(closing)return;closing=true;}finally{admissionLifecycle.writeLock().unlock();}
+        if(inspectionWarmup!=null)inspectionWarmup.shutdownNow();
+        if(loadScheduleScheduler!=null)loadScheduleScheduler.close();
+        retention.shutdownNow();artifactMaintenance.shutdownNow();inspectionWatchdogs.shutdownNow();
+        synchronized(draftLock){runDrafts.clear();debugDrafts.clear();quickLoadDrafts.clear();advancedLoadDrafts.clear();catalogLoadDrafts.clear();replayReviews.clear();}
+        inspectors.shutdownNow();workers.shutdownNow();streams.shutdownNow();
+        for(InspectionWorker worker:inspectionWorkerPool)worker.close();
+        for(Job j:jobs.values())if(j.process!=null) {
+            try {if(j.processFence!=null){j.processFence.observe();rememberWorkerProcesses(j,j.processFence);}stopWorkerTree(j);finishQuietly(j,"ERROR",143,"ATT-SERVER-INTERRUPTED","Server shutdown interrupted the Worker");}
+            catch(Exception ignored){if(j.processFence!=null)j.processFence.force();else forceTree(j.process);}
+        }
+        for(Process process:inspectionProcesses.keySet())if(process.isAlive())forceTree(process);
+        terminateExecutor(workers,"workers");terminateExecutor(inspectors,"inspectors");terminateExecutor(streams,"SSE streams");
+        terminateExecutor(retention,"retention");terminateExecutor(artifactMaintenance,"artifact maintenance");terminateExecutor(inspectionWatchdogs,"inspection watchdogs");
+        if(inspectionWarmup!=null)terminateExecutor(inspectionWarmup,"inspection warmup");
+        for(Job job:jobs.values())if(!job.terminal()) {
+            FutureTask<Void> task=tasks.remove(job.id);if(task!=null)task.cancel(false);
+            finishQuietly(job,"ERROR",143,"ATT-SERVER-INTERRUPTED","Server shutdown stopped the queued Worker");
+            AdmissionLease lease=leases.remove(job.id);if(lease!=null)lease.release();
+            jobs.remove(job.id,job);scheduleArtifactArchive(job.id);
+        }
+        long stderrDeadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(5);
+        for(var entry:stderrDrainers.entrySet()) {
+            try {entry.getValue().getErrorStream().close();long remaining=stderrDeadline-System.nanoTime();if(remaining>0)entry.getKey().join(Math.max(1,TimeUnit.NANOSECONDS.toMillis(remaining)));}
+            catch(InterruptedException interrupted){Thread.currentThread().interrupt();break;}catch(Exception ignored){}
+        }
+        // Worker/SSE producers are quiescent before artifact writers and journal compactions drain.
+        artifactWriters.shutdown();terminateExecutor(artifactWriters,"artifact writers");
+        eventCompactions.shutdown();terminateExecutor(eventCompactions,"event compactions");
+        try {store.close();}catch(Exception failed){java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).log(java.util.logging.Level.WARNING,"ATT database cleanup failed",failed);}
+    }
+    static void terminateExecutor(java.util.concurrent.ExecutorService executor,String name) {
+        boolean interrupted=false;
+        try {
+            if(!executor.awaitTermination(30,TimeUnit.SECONDS)) {
+                executor.shutdownNow();
+                if(!executor.awaitTermination(5,TimeUnit.SECONDS))java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).warning("ATT executor did not terminate: "+name);
+            }
+        } catch(InterruptedException stopped) {
+            interrupted=true;executor.shutdownNow();
+            try {if(!executor.awaitTermination(5,TimeUnit.SECONDS))java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).warning("ATT executor still active after interruption: "+name);}
+            catch(InterruptedException again){interrupted=true;}
+        } finally {if(interrupted)Thread.currentThread().interrupt();}
+    }
+
     private static void terminateTree(Process process){process.toHandle().descendants().forEach(ProcessHandle::destroy);process.destroy();}
     private static void forceTree(Process process){process.toHandle().descendants().forEach(ProcessHandle::destroyForcibly);process.destroyForcibly();}
     @FunctionalInterface interface WorkerProcessLauncher { Process start(ProcessBuilder builder) throws java.io.IOException; }
@@ -3066,6 +3189,10 @@ final class ServerRuntime implements AutoCloseable {
     static final class QueueFullException extends RuntimeException {QueueFullException(String m){super(m);}}
     static final class JobConflictException extends RuntimeException {final String code;JobConflictException(String code,String message){super(message);this.code=code;}}
     static final class NotFoundException extends RuntimeException {}
+    static final class ScheduleSourceChangedException extends IllegalArgumentException {
+        final String storedRevision,currentRevision,policy;
+        ScheduleSourceChangedException(String stored,String current,String policy){super("package-revision-changed");this.storedRevision=stored;this.currentRevision=current;this.policy=policy;}
+    }
     static final class ScheduleConflictException extends RuntimeException {}
     static final class InspectionCapacityException extends RuntimeException {}
     static final class InspectionConfigurationException extends RuntimeException {

@@ -199,6 +199,9 @@ jobs:
           ATT_UI_SERVER_PLAYWRIGHT: "1"
         run: ./build.sh
 
+      - name: Verify same-JVM redeploy on Tomcat 11
+        run: mvn -B -ntp -Ptomcat-11 -pl att-server -am -Datt.skipJava8ModuleTests=true -Datt.skipFrontendUnitTests=true -Datt.skipServerUnitTests=true '-Dit.test=ServerWarUiIT#repeatedRedeployReleasesCompactorsAndJdbcWhilePreservingSchedulesAndJournals' verify
+
       - name: Upload Local and Server release packages
         uses: actions/upload-artifact@v4
         with:

@@ -348,8 +348,10 @@ export default function App() {
       if (version.apiVersion !== '1') throw new Error('Incompatible ATT Server API version: expected v1.');
       if (controller.signal.aborted) return;
       dispatch({ type: 'version/ready', data: version });
-      void loadPackages(controller.signal);
-      void loadJobs(controller.signal);
+      if (navigation.route.kind !== 'job-console') {
+        void loadPackages(controller.signal);
+        void loadJobs(controller.signal);
+      }
     }).catch(error => {
       if (controller.signal.aborted) return;
       const reason = asError(error);
@@ -358,7 +360,7 @@ export default function App() {
       dispatch({ type: 'jobs/error', error: reason });
     });
     return () => controller.abort();
-  }, [loadJobs, loadPackages]);
+  }, [loadJobs, loadPackages, navigation.route.kind === 'job-console']);
 
   const previousRouteKind = useRef(navigation.route.kind);
   useEffect(() => {

@@ -27,6 +27,18 @@ describe('AppShell', () => {
     });
   });
 
+  it('renders standalone consoles without global navigation or a floating console host', async () => {
+    host = document.createElement('div'); document.body.append(host); root = createRoot(host);
+    const navigation: RouteState = { route: { kind: 'job-console', jobId: 'J1', view: 'live' }, pendingNavigation: null, pendingDescription: '', isDirty: false,
+      navigate: vi.fn(), registerUnsavedChanges: vi.fn(() => () => {}), confirmNavigation: vi.fn(), cancelNavigation: vi.fn() };
+    await act(async () => { root?.render(<AppShell route={navigation.route} navigation={navigation}
+      serverVersion={{ status: 'ready', data: { apiVersion: '1', inlineLoadEnabled: true } }} selectedPackage="" selectedEnvironment="" onPackageChange={vi.fn()} onEnvironmentChange={vi.fn()} onJobAccepted={vi.fn()}>
+      <p>Fixed Job console</p></AppShell>); await Promise.resolve(); });
+    expect(host.querySelector('.att-standalone-console-shell')).not.toBeNull();
+    expect(host.querySelector('aside, nav, header, footer, .att-breadcrumbs, .att-floating-job-console')).toBeNull();
+    expect(host.textContent).toContain('Fixed Job console');
+  });
+
   it('invalidates refilled inspection state without remounting on tab and back-forward restores', async () => {
     host = document.createElement('div'); document.body.append(host); root = createRoot(host);
     const navigation: RouteState = {

@@ -83,3 +83,10 @@ The UI checks the Server API version before loading job data. Terminal SSE resul
 The console is delivered as static `att-web` JAR resources under `META-INF/resources/ui/` and packaged in the Server WAR. Relative URLs support non-root Tomcat context paths without a separate frontend service or runtime Node.js dependency. The Server applies a same-origin content security policy and rejects state-changing browser requests with an unexpected `Origin`; no credentialed CORS policy is needed. Browser-rendered API text is inserted as text, and the event list is bounded to 500 entries.
 
 For fields without a public discovery schema, the UI uses safe sidecar data for typed scalar controls and provides Advanced JSON for nested values. Server validation remains authoritative; browser-side validation and filtering are not authorization boundaries.
+
+
+### Schedule routes and standalone console (4.2.3)
+
+History → Back to list → Edit resolves both the route view and schedule ID. Refreshing the authorized list preserves unsaved edits in the same form; missing or forbidden definitions show an unavailable state. Legacy RUN definitions without an editable validated snapshot explain how to review a replacement RUN.
+
+A console opened in a new tab uses `#/jobs/{encodedJobId}/console?view=live|events`. It loads only that Job and retains authentication, theme, session handling and SSE controls. Studio navigation, context selectors, footer and floating-window actions are absent. Live Output and Events fill the remaining viewport below their controls, including empty output. Switching views updates the URL while retaining the same Job. Embedded and floating consoles keep their existing layouts.

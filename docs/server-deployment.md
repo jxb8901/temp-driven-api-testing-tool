@@ -172,6 +172,7 @@ server:
     pollIntervalSeconds: 10
     maxConcurrentRuns: 1
     failurePolicy: continue
+    packageChangePolicy: strict
     maxExecutionsPerSchedule: 10000
 workers:
   maxConcurrent: 8
@@ -605,3 +606,16 @@ Authenticated operator endpoints use the existing origin/CSRF and shared USER au
 `DELETE /api/v1/jobs/{jobId}` retains its cancellation meaning. Manual deletion through `POST /api/v1/jobs/{jobId}/delete` never cancels an active Job. Pin changes do not wait on archive locks; deletion and archive reads/writes remain lifecycle-fenced. A durable DELETING record hides endpoints during incomplete deletion; startup and hourly reconciliation finish removing files/metadata, including when job-storage quota is disabled. A partial deletion reports `DELETION_PENDING_RECOVERY`, never success. Minimal audit records retain actor, time, target and outcome; pin audit includes old/new flags. Deletion does not compact H2 immediately.
 
 Pins are operational retention protection. Use independent backups for Server filesystem loss, administrator out-of-band deletion and disaster recovery; pins are not legal/WORM holds.
+
+
+## Schedule package changes and runtime shutdown (4.2.3)
+
+Set `server.scheduling.packageChangePolicy` to `strict` (default), `pause`, or `ignore`. Unknown values prevent startup. Each schedule can override `packageChangePolicy`; `null` or an omitted value inherits the Server default, including older persisted schedules. Studio labels these choices **Default (Server)**, **Strict**, **Auto-pause**, and **Revalidate latest**.
+
+- **Strict** rejects a changed retained revision with occurrence reason `package-revision-changed` and leaves the definition enabled and blocked. It preserves the original inputs and digest.
+- **Auto-pause** records the same reason and atomically pauses only the affected definition, records its reason/time, and writes one `SCHEDULE_AUTO_PAUSE` audit entry. A concurrent definition edit prevents an outdated pause decision from changing that definition.
+- **Revalidate latest** bypasses only equality with the retained package digest. The current registered package root, execution identity, typed target, exact Case IDs, schemas, environment, protected input classification, and limits remain validated. The Worker receives a fresh digest and checks it again before execution. The stored definition remains immutable. Audit action `SCHEDULE_SOURCE_REVALIDATED` records both revisions and whether the policy came from the Server or the schedule. Records predating the private package-registration identity pin require a reviewed replacement before accepting a changed source under this policy.
+
+Policy is checked before recurring and manual submissions and when enabling/resuming. New schedules always require current validated inputs. Name, description, tags, recurrence, timezone, and policy can be saved on a stale schedule without replacing its source or clearing its stale/paused state. RUN inputs, target, package and environment remain immutable; validate a new RUN and create a replacement schedule to change them. Package-wide digests include shared configuration and Engine/schema identity. A change to an unrelated package file can therefore trigger the policy; target dependency digests remain a later optimization. Legacy file-backed LOAD definitions without a retained digest continue to validate their current package scenario on every firing.
+
+The Server owns the bounded event-compaction executor used by new, recovered, and subsequently read journals. Shutdown rejects new Jobs, stops scheduling and retention producers, terminates Worker/inspection/SSE activity, drains artifact writers and queued compactions, and then closes database ownership. Every executor wait is bounded; interrupted compaction leaves the append journal available for recovery. Repeated close calls are safe. H2 registrations are reference-counted across runtimes sharing the ATT classloader; the last close deregisters only H2 drivers owned by that classloader. Container-owned JDBC drivers remain registered. Tests exercise three deployments in one Tomcat JVM, including compaction and retained schedule/journal reads after redeploy; CI also runs the redeploy case on Tomcat 11.

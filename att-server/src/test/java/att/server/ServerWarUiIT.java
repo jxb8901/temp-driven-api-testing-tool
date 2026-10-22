@@ -27,6 +27,55 @@ import static org.junit.jupiter.api.Assertions.*;
 class ServerWarUiIT {
     @TempDir Path temp;
 
+    @Test void repeatedRedeployReleasesCompactorsAndJdbcWhilePreservingSchedulesAndJournals() throws Exception {
+        Path war=Path.of(System.getProperty("att.server.war"));assertTrue(Files.isRegularFile(war));
+        Path home=createScheduledLocalRuntime(),packages=Files.createDirectories(temp.resolve("redeploy-packages")),pkg=Files.createDirectory(packages.resolve("payments"));
+        writeScheduledPackage(pkg,home);copySchemas(pkg);
+        Path scenario=pkg.resolve("load/scenario.yaml");Files.writeString(scenario,Files.readString(scenario).replace("duration: 30s","duration: 1s"));
+        Path config=Files.writeString(temp.resolve("redeploy-server.yaml"),"server:\n  runtimeConfigPath: "+yaml(home.resolve("config/config.yaml"))+"\n  dataDir: "+yaml(temp.resolve("redeploy-data"))+"\n  authenticationRequired: true\n  inspection: {enabled: true}\n  scheduling: {enabled: true}\nworkers: {maxConcurrent: 1, queuedLimit: 1}\npackages:\n  allowedRoots: ["+yaml(packages)+"]\n  entries: {payments: "+yaml(pkg)+"}\n");
+        Path users=Files.writeString(temp.resolve("redeploy-users.xml"),"<tomcat-users><role rolename=\"ATT_USER\"/><user username=\"att\" password=\"secret\" roles=\"ATT_USER\"/></tomcat-users>");
+        String oldConfig=System.getProperty("att.server.config"),oldHome=System.getProperty("att.home");
+        System.setProperty("att.server.config",config.toString());System.setProperty("att.home",home.toString());
+        java.util.List<String> warnings=new java.util.concurrent.CopyOnWriteArrayList<>();
+        java.util.logging.Logger logger=java.util.logging.Logger.getLogger("org.apache.catalina.loader.WebappClassLoaderBase");
+        java.util.logging.Handler capture=new java.util.logging.Handler(){public void publish(java.util.logging.LogRecord r){warnings.add(r.getMessage()+" "+java.util.Arrays.toString(r.getParameters()));}public void flush(){}public void close(){}};
+        logger.addHandler(capture);
+        Tomcat tomcat=new Tomcat();tomcat.setBaseDir(temp.resolve("redeploy-tomcat").toString());tomcat.setPort(0);tomcat.getConnector();
+        MemoryRealm realm=new MemoryRealm();realm.setPathname(users.toString());tomcat.getEngine().setRealm(realm);((StandardHost)tomcat.getHost()).setUnpackWARs(false);
+        String jobId=null,scheduleId=null;
+        try {
+            tomcat.start();int port=tomcat.getConnector().getLocalPort();String api="/tools/att/api/v1",auth=basic("att"),origin="http://127.0.0.1:"+port;
+            for(int cycle=0;cycle<3;cycle++) {
+                org.apache.catalina.Context context=tomcat.addWebapp("/tools/att",war.toString());
+                assertTrue(context.getState().isAvailable(),"Redeployed context must start in the same Tomcat JVM");
+                if(jobId!=null) {
+                    assertEquals("PASS",getJson(port,api+"/jobs/"+jobId,auth).path("status").asText());
+                    assertEquals(scheduleId,getJson(port,api+"/schedules/"+scheduleId,auth).path("id").asText());
+                    assertTrue(sseDataUntil(port,api+"/jobs/"+jobId+"/events",auth,"REDEPLOY_JOURNAL").contains("REDEPLOY_JOURNAL"));
+                } else {
+                    scheduleId=apiJsonResponse(port,"POST",api+"/schedules",auth,origin,Map.of("name","Redeploy schedule","packageId","payments","scenario","load/scenario.yaml","timezone","UTC","cron","0 2 * * *","enabled",false),201).path("id").asText();
+                }
+                jobId=apiJsonResponse(port,"POST",api+"/jobs/load",auth,origin,Map.of("packageId","payments","scenario","load/scenario.yaml"),202).path("jobId").asText();
+                awaitArchive(port,api,jobId,auth);
+                Object runtime=context.getServletContext().getAttribute("att.server.runtime");Class<?> runtimeClass=runtime.getClass();
+                var eventsMethod=runtimeClass.getDeclaredMethod("events",String.class);eventsMethod.setAccessible(true);Object events=eventsMethod.invoke(runtime,jobId);
+                var append=events.getClass().getDeclaredMethod("append",String.class,Map.class);append.setAccessible(true);
+                var poolField=runtimeClass.getDeclaredField("eventCompactions");poolField.setAccessible(true);var pool=(java.util.concurrent.ThreadPoolExecutor)poolField.get(runtime);
+                for(int event=0;event<256;event++)append.invoke(events,"log",Map.of("console","REDEPLOY_JOURNAL "+event));
+                long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(10);
+                while(pool.getCompletedTaskCount()==0&&System.nanoTime()<deadline)Thread.sleep(10);
+                assertTrue(pool.getCompletedTaskCount()>0,"Exercise the WAR-owned compactor before undeploy");
+                ClassLoader oldLoader=context.getLoader().getClassLoader();
+                tomcat.getHost().removeChild(context);
+                assertTrue(pool.isTerminated(),"Compaction queue must drain before context destruction returns");
+                assertFalse(Thread.getAllStackTraces().keySet().stream().anyMatch(thread->thread.isAlive()&&(thread.getContextClassLoader()==oldLoader||thread.getName().equals("att-server-event-compactor"))),"No old WAR thread may survive undeploy");
+            }
+            assertFalse(warnings.stream().anyMatch(message->message.contains("att-server-event-compactor")||message.contains("org.h2.Driver")),warnings.toString());
+        } finally {
+            try{tomcat.stop();tomcat.destroy();}finally{logger.removeHandler(capture);if(oldConfig==null)System.clearProperty("att.server.config");else System.setProperty("att.server.config",oldConfig);if(oldHome==null)System.clearProperty("att.home");else System.setProperty("att.home",oldHome);}
+        }
+    }
+
     @Test
     void packagedWarPublishesRunAndMultiWorkloadLoadArchives() throws Exception {
         Path war=Path.of(System.getProperty("att.server.war"));

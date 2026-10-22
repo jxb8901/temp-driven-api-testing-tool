@@ -8,11 +8,12 @@ async function main() {
     context.setDefaultTimeout(15000);
     const jobs = new Map(['run', 'load'].map(type => ['J-' + type, { jobId: 'J-' + type, command: type, executionType: type, packageId: 'payments', principal: 'alice', status: 'PASS' }]));
     jobs.set('J-old', { jobId: 'J-old', command: 'load', packageId: 'payments', status: 'PASS' });
-    const submits = [], saves = []; let schedules = []; let sequence = 0;
+    const submits = [], saves = [], broadRequests = []; let schedules = []; let sequence = 0;
     const nextRunAt = '2099-01-01T02:00:00Z';
     await context.route('**/api/v1/**', async route => {
       const request = route.request(), method = request.method(), url = new URL(request.url());
       const path = decodeURIComponent(url.pathname.split('/api/v1/')[1] || '');
+      if (path === 'jobs' || path === 'packages') broadRequests.push(path);
       const json = (body, status = 200) => route.fulfill({ status, json: body });
       if (path === 'version') return json({ version: '4.2.3', apiVersion: '1', inlineLoadEnabled: true, loadSchedulingEnabled: true, unifiedRunVersion: 'att-execution/v1' });
       if (path === 'packages') return json({ items: [{ packageId: 'payments', name: 'Payments' }] });
@@ -29,7 +30,7 @@ async function main() {
           submits.push(request.postDataJSON()); const created = { ...job, jobId: 'J-new-' + (++sequence), rerunOfJobId: id }; jobs.set(created.jobId, created); return json(created, 202);
         }
         if (action === 'result') return json({ job, result: { status: 'PASS' } });
-        if (action === 'events') return route.fulfill({ contentType: 'text/event-stream', body: 'event: status\ndata: {"status":"PASS"}\n\n' });
+        if (action === 'events') return route.fulfill({ contentType: 'text/event-stream', body: Array.from({ length: 550 }, (_, index) => 'id: ' + (index + 1) + '\nevent: log\ndata: ' + JSON.stringify({ console: 'RETAINED_OUTPUT ' + index }) + '\n\n').join('') + 'id: 551\nevent: status\ndata: {"status":"PASS"}\n\n' });
         if (action === 'artifacts') return json({ items: [] });
         if (!action) return json(job);
       }
@@ -89,8 +90,52 @@ async function main() {
     await page.getByRole('dialog', { name: 'Discard your changes?' }).waitFor({ state: 'hidden' });
     await page.keyboard.press('Escape');
     assert.equal(await page.getByRole('region', { name: 'Review rerun J-load' }).count(), 0);
+    // Same mounted route: history -> list -> edit, then cancel/back/forward.
+    await page.goto(base + '#/schedules/S-1/history');
+    await page.getByRole('heading', { name: /Execution history/ }).waitFor();
+    await page.getByRole('button', { name: 'Back to Schedules', exact: true }).click();
+    await page.getByRole('button', { name: 'Edit run from job', exact: true }).click();
+    await page.locator('#schedule-name').waitFor();
+    assert.equal(await page.locator('#schedule-name').inputValue(), 'run from job');
+    await page.locator('#schedule-name').fill('Dirty name');
+    await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+    await page.getByRole('button', { name: 'Discard changes', exact: true }).click();
+    await page.waitForURL(url => url.hash === '#/schedules');
+    await page.locator('#schedule-list-heading').waitFor();
+    await page.goBack();
+    await page.locator('#schedule-name').waitFor();
+    assert.equal(await page.locator('#schedule-name').inputValue(), 'run from job');
+    await page.goForward();
+    await page.waitForURL(url => url.hash === '#/schedules');
+    // A 640x450 CSS viewport also exercises the effective layout of a 1280x900 window at 200% zoom.
+    // Standalone pages load only the URL-bound Job, and fill the available viewport.
+    for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 844 }, { width: 768, height: 600 }, { width: 640, height: 450 }]) {
+      await page.setViewportSize(viewport);
+      const before = broadRequests.length;
+      await page.goto(base + '#/jobs/J-load/console?view=live');
+      await page.locator('.att-standalone-console pre.att-console').waitFor();
+      await page.getByText('RETAINED_OUTPUT 549', { exact: false }).waitFor();
+      assert.equal(broadRequests.length, before, 'Standalone must not load broad jobs or packages');
+      assert.equal(await page.locator('aside, nav, .app-header, .att-breadcrumbs, footer, .att-floating-console, [role="separator"]').count(), 0);
+      assert.equal(await page.getByRole('link', { name: /Open full Job details|Open Job console in a new tab/ }).count(), 0);
+      for (const view of ['events', 'live']) {
+        await page.getByRole('tab', { name: view === 'live' ? 'Live Output' : 'Events', exact: true }).click();
+        await page.waitForURL(url => url.hash === '#/jobs/J-load/console?view=' + view);
+        const surface = page.locator(view === 'live' ? 'pre.att-console' : 'ol.att-job-events');
+        await surface.waitFor();
+        const box = await surface.boundingBox();
+        assert.ok(box.height > 70 && box.y + box.height >= viewport.height - 24, JSON.stringify({ viewport, view, box }));
+        assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth));
+      }
+      await page.reload();
+      await page.locator('.att-standalone-console pre.att-console').waitFor();
+    }
+    if (process.env.ATT_UI_SCREENSHOT) await page.screenshot({ path: process.env.ATT_UI_SCREENSHOT });
+    await page.goto(base + '#/jobs/missing/console');
+    await page.getByRole('heading', { name: 'Job console unavailable' }).waitFor();
+    assert.equal(await page.locator('aside, nav, .app-header, footer').count(), 0);
     assert.deepEqual(errors, []); await context.close();
-    console.log('Job replay acceptance passed: RUN/LOAD list → review → independent Job → unified Schedule, historical fallback, mobile and keyboard Cancel.');
+    console.log('4.2.3 acceptance passed: RUN/LOAD replay and Schedule, History/List/Edit, standalone fixed-Job navigation, virtualized Events, viewport fill, mobile, reload and safe missing-Job state.');
   } finally { await browser.close(); await stopFixture(fixture); }
 }
 main().catch(error => { console.error(error); process.exitCode = 1; });

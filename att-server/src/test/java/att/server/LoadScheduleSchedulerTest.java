@@ -25,6 +25,21 @@ import static org.junit.jupiter.api.Assertions.*;
 class LoadScheduleSchedulerTest {
     @TempDir Path temp;
 
+    @Test void typedRevisionMismatchPausesOnlyTheExpectedDefinitionAndIsIdempotent() throws Exception {
+        MutableClock clock=new MutableClock(Instant.parse("2026-01-01T00:00:00Z"));ServerConfig config=config("source-change",1,"continue",1);
+        try(JobStore store=new JobStore(config);LoadScheduleScheduler scheduler=new LoadScheduleScheduler(config.scheduling,store,(schedule,id)->{throw new ServerRuntime.ScheduleSourceChangedException("old","new","pause");},clock)) {
+            LoadSchedule affected=schedule("SAFFECTED",clock.instant());affected.expectedRevisionDigest="old";store.saveSchedule(affected);
+            LoadSchedule other=schedule("SOTHER",clock.instant().plusSeconds(600));store.saveSchedule(other);
+            scheduler.processDue();scheduler.processDue();
+            assertFalse(store.schedule(affected.id).enabled);assertTrue(store.schedule(other.id).enabled);
+            assertEquals("package-revision-changed",store.scheduleExecutions(affected.id,10).get(0).get("reason"));
+            assertEquals(1,store.auditOutcomes("SCHEDULE_AUTO_PAUSE").size());
+            LoadSchedule changed=store.schedule(other.id);changed.updatedAt="newer-edit";store.saveSchedule(changed);
+            store.recordScheduleSourceChange(other,"new",true,clock.instant().plusSeconds(1).toString());
+            assertTrue(store.schedule(other.id).enabled,"A stale automatic decision cannot pause a concurrently edited definition");
+        }
+    }
+
     @Test void oneTimeRunAndLoadOccurrencesAreClaimedOnceAndMissesAreNotReplayed() throws Exception {
         MutableClock clock=new MutableClock(Instant.parse("2026-01-01T00:00:00Z"));
         ServerConfig config=config("one-time",1,"continue",2);
@@ -126,13 +141,13 @@ class LoadScheduleSchedulerTest {
             String orphan="SMISFIRE-manual-orphan";store.insertManualOccurrence(late.id,orphan,clock.instant());
             String jobOccurrence="SMISFIRE-manual-linked";store.insertManualOccurrence(late.id,jobOccurrence,clock.instant());
         Job linked=job(config,jobOccurrence,"J0000000000000099");store.insert(linked,"{}");
-            store.close();
+            String persistedNextRun=store.schedule(late.id).nextRunAt;store.close();
             try(JobStore recovered=new JobStore(config)) {
                 recovered.recoverScheduleExecutions();
                 assertEquals("failed-to-submit",recovered.scheduleExecution(orphan).get("status"));
                 assertEquals("submitted",recovered.scheduleExecution(jobOccurrence).get("status"));
                 assertEquals(linked.id,recovered.scheduleExecution(jobOccurrence).get("jobId"));
-                assertEquals(store.schedule(late.id).nextRunAt,recovered.schedule(late.id).nextRunAt,"the next planned occurrence persists across store restart");
+                assertEquals(persistedNextRun,recovered.schedule(late.id).nextRunAt,"the next planned occurrence persists across store restart");
             }
         }
     }

@@ -29,6 +29,14 @@ final class LoadSchedule {
     public String debugTargetId;
     public String debugResourceId;
     public String expectedRevisionDigest;
+    /** Null inherits the server default, including for migrated records. */
+    public String packageChangePolicy;
+    /** Server-private identity pin; never expose a host filesystem path. */
+    public String packageRootIdentity;
+    public String sourceStatus;
+    public String currentRevisionDigest;
+    public String autoPauseReason;
+    public String autoPausedAt;
     public String loadModel;
     public String config;
     public String environment;
@@ -58,7 +66,8 @@ final class LoadSchedule {
         copy.inlineScenario=inlineScenario==null?null:new LinkedHashMap<>(inlineScenario);copy.catalogSnapshot=catalogSnapshot;copy.loadModel=loadModel;
         copy.inlineDebugInput=inlineDebugInput==null?null:new LinkedHashMap<>(inlineDebugInput);
         copy.debugTargetType=debugTargetType;copy.debugTargetId=debugTargetId;copy.debugResourceId=debugResourceId;
-        copy.expectedRevisionDigest=expectedRevisionDigest;
+        copy.expectedRevisionDigest=expectedRevisionDigest;copy.packageChangePolicy=packageChangePolicy;copy.packageRootIdentity=packageRootIdentity;
+        copy.sourceStatus=sourceStatus;copy.currentRevisionDigest=currentRevisionDigest;copy.autoPauseReason=autoPauseReason;copy.autoPausedAt=autoPausedAt;
         copy.tags=tags==null?List.of():List.copyOf(tags);
         copy.config=config;copy.environment=environment;copy.timezone=timezone;copy.cron=cron;copy.runAt=runAt;
         copy.load=load==null?new LinkedHashMap<>():new LinkedHashMap<>(load);copy.maxConcurrentRuns=maxConcurrentRuns;copy.enabled=enabled;

@@ -241,6 +241,48 @@ describe('ScheduledLoadPage', () => {
     expect(host.querySelector('form')).toBeNull();
   });
 
+  it('resolves history/list/edit by view and ID without resetting dirty edits on refresh', async () => {
+    const other = { ...sampleSchedule, id: 'S-OTHER', name: 'Other schedule' };
+    const api = makeApi({ listSchedules: vi.fn(async () => ({ items: [sampleSchedule, other] })) });
+    let activeApi = api;
+    const show = async (view?: 'edit' | 'history', scheduleId?: string) => {
+      await act(async () => root.render(<NavigationGuardContext.Provider value={navigation}>
+        <ScheduledLoadPage api={activeApi} packages={packages} enabled onOpenJob={vi.fn()} route={{ kind: 'schedules', view, scheduleId }} />
+      </NavigationGuardContext.Provider>));
+      await advance();
+    };
+    await show('history', sampleSchedule.id);
+    expect(host.querySelector('#schedule-history-heading')).not.toBeNull();
+    await show();
+    await show('edit', sampleSchedule.id);
+    expect((host.querySelector('#schedule-name') as HTMLInputElement).value).toBe(sampleSchedule.name);
+    await change(host.querySelector('#schedule-name')!, 'Unsaved name');
+    activeApi = { ...api, listSchedules: vi.fn(async () => ({ items: [{ ...sampleSchedule }, { ...other }] })) };
+    await show('edit', sampleSchedule.id);
+    expect((host.querySelector('#schedule-name') as HTMLInputElement).value).toBe('Unsaved name');
+    await show('history', other.id);
+    await show('edit', other.id);
+    expect((host.querySelector('#schedule-name') as HTMLInputElement).value).toBe(other.name);
+    await show('edit', 'missing');
+    expect(host.querySelector('form')).toBeNull();
+    expect(host.textContent).toContain('unavailable');
+    await show();
+    await show('edit', sampleSchedule.id);
+    expect((host.querySelector('#schedule-name') as HTMLInputElement).value).toBe(sampleSchedule.name);
+  });
+
+  it('explains legacy RUN replacement without presenting a LOAD form', async () => {
+    const legacy = { ...sampleSchedule, executionType: 'run' as const, inlineSnapshot: false };
+    const api = makeApi({ listSchedules: vi.fn(async () => ({ items: [legacy] })) });
+    await act(async () => root.render(<NavigationGuardContext.Provider value={navigation}>
+      <ScheduledLoadPage api={api} packages={packages} enabled onOpenJob={vi.fn()} route={{ kind: 'schedules', view: 'edit', scheduleId: legacy.id }} />
+    </NavigationGuardContext.Provider>));
+    await advance();
+    expect(host.textContent).toContain('legacy RUN record has no editable validated snapshot');
+    expect(host.textContent).toContain('Choose and validate RUN');
+    expect(host.querySelector('#schedule-scenario')).toBeNull();
+  });
+
   it('requires explicit confirmation before resuming a paused definition', async () => {
     const api = makeApi({ listSchedules: vi.fn(async () => ({ items: [{ ...sampleSchedule, enabled: false }] })) });
     await render(api);

@@ -9,6 +9,19 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class ServerConfigTest {
     @TempDir Path temp;
+    @Test void schedulePackagePolicyDefaultsToStrictAndRejectsUnknownValues() throws Exception {
+        Path pkg=Files.createDirectory(temp.resolve("policy-package")),file=temp.resolve("policy-server.yaml");
+        String base="server:\n  dataDir: "+yaml(temp.resolve("policy-data"))+"\n";
+        String tail="workers: {}\npackages:\n  allowedRoots: ["+yaml(pkg)+"]\n  entries: {p: "+yaml(pkg)+"}\n";
+        Files.writeString(file,base+tail);assertEquals("strict",ServerConfig.load(file).scheduling.packageChangePolicy);
+        for(String policy:List.of("strict","pause","ignore")) {
+            Files.writeString(file,base+"  scheduling: {packageChangePolicy: "+policy+"}\n"+tail);
+            assertEquals(policy,ServerConfig.load(file).scheduling.packageChangePolicy);
+        }
+        Files.writeString(file,base+"  scheduling: {packageChangePolicy: skip}\n"+tail);
+        assertThrows(IllegalArgumentException.class,()->ServerConfig.load(file));
+    }
+
     @Test void validatesLiveOutputPolicyAndKeepsPublishedDefaults() throws Exception {
         Path pkg=Files.createDirectory(temp.resolve("live-package"));
         Path file=temp.resolve("live-server.yaml");

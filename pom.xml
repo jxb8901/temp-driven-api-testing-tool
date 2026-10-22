@@ -74,4 +74,10 @@
             </plugins>
         </pluginManagement>
     </build>
+    <profiles>
+        <profile>
+            <id>tomcat-11</id>
+            <properties><tomcat.test.version>11.0.14</tomcat.test.version><jakarta.servlet.version>6.1.0</jakarta.servlet.version></properties>
+        </profile>
+    </profiles>
 </project>

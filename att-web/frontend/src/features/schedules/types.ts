@@ -1,6 +1,15 @@
 import type { ApiEnvelope } from '../../types';
+export type PackageChangePolicy = 'strict' | 'pause' | 'ignore';
 
 export interface ScheduleDefinition {
+  packageChangePolicy?: PackageChangePolicy | null;
+  effectivePackageChangePolicy?: PackageChangePolicy;
+  serverPackageChangePolicy?: PackageChangePolicy;
+  storedRevisionDigest?: string;
+  currentRevisionDigest?: string;
+  sourceStatus?: string;
+  autoPauseReason?: string;
+  autoPausedAt?: string;
   sourceJobId?: string;
   id: string;
   name: string;
@@ -37,6 +46,7 @@ export interface ScheduleDefinition {
 }
 
 export interface ScheduleInput {
+  packageChangePolicy?: PackageChangePolicy | null;
   name: string;
   description: string;
   tags: string[];

@@ -294,15 +294,19 @@ export function ScheduledLoadPage({ api, packages, enabled, onOpenJob, initialDr
     return () => window.removeEventListener('beforeunload', beforeUnload);
   }, [dirty, editorOpen]);
 
-  // Resolve bookmarked edit/history views only from the authorized list response.
+  // Resolve each authorized route intent once; list refresh must not reset dirty edits.
   useEffect(() => {
-    if (!route?.scheduleId || loadState !== 'ready' || loadedRoute.current === route.scheduleId) return;
-    const schedule = schedules.find(item => item.id === route.scheduleId);
-    if (!schedule) return;
-    loadedRoute.current = route.scheduleId;
-    if (route.view === 'edit') loadEditor(schedule);
-    if (route.view === 'history') setHistorySchedule(schedule);
-  }, [route, loadState, schedules]);
+    const key = route?.scheduleId && (route.view === 'edit' || route.view === 'history') ? `${route.view}:${route.scheduleId}` : '';
+    if (!key) { loadedRoute.current = ''; return; }
+    if (loadState !== 'ready') return;
+    const schedule = schedules.find(item => item.id === route?.scheduleId);
+    if (!schedule) { loadedRoute.current = ''; setEditingId(''); setHistorySchedule(null); return; }
+    if (loadedRoute.current === key) return;
+    loadedRoute.current = key;
+    if (route?.view === 'edit') loadEditor(schedule);
+    if (route?.view === 'history') setHistorySchedule(schedule);
+  }, [route?.view, route?.scheduleId, loadState, schedules]);
+
 
   useEffect(() => {
     if (editorOpen) document.getElementById('schedule-editor-heading')?.focus();
@@ -715,7 +719,7 @@ export function ScheduledLoadPage({ api, packages, enabled, onOpenJob, initialDr
     </section>
     </>}
 
-    {view === 'history' && historySchedule && <section className="att-schedule-panel att-schedule-history" aria-labelledby="schedule-history-heading">
+    {view === 'history' && historySchedule && (!route?.scheduleId || historySchedule.id === route.scheduleId) && <section className="att-schedule-panel att-schedule-history" aria-labelledby="schedule-history-heading">
       <div className="att-schedule-section-heading"><div><h2 id="schedule-history-heading" tabIndex={-1}>Execution history · {historySchedule.name}</h2><p>Latest 100 occurrences. Skips and submission failures remain visible even when no job was created. Occurrences whose job is still queued or running refresh automatically.</p></div>
         <div className="att-schedule-actions">
           <button className="button button-quiet" type="button" disabled={history.status === 'loading'} onClick={() => setHistoryRefresh(value => value + 1)}>Refresh history</button>
@@ -749,7 +753,7 @@ export function ScheduledLoadPage({ api, packages, enabled, onOpenJob, initialDr
       {route?.occurrenceId && history.status === 'ready' && !history.items.some(item => item.occurrenceId === route.occurrenceId) && <p role="status">This occurrence is outside the latest 100 retained records or is no longer available.</p>}
     </section>}
 
-    {!missingValidatedIntent && editorOpen && loadState === 'ready' && (view !== 'edit' || editingId) && <section className="att-schedule-panel att-schedule-editor" aria-labelledby="schedule-editor-heading">
+    {!missingValidatedIntent && editorOpen && loadState === 'ready' && (view !== 'edit' || (editingId && (!route?.scheduleId || editingId === route.scheduleId) && schedules.some(item => item.id === editingId))) && <section className="att-schedule-panel att-schedule-editor" aria-labelledby="schedule-editor-heading">
       <div className="att-schedule-section-heading"><div><h2 id="schedule-editor-heading" tabIndex={-1}>{editingId ? `Edit schedule: ${draft.name || editingId}` : 'New Schedule'}</h2>
         <p>{draft.inlineSnapshot ? `This schedule uses the immutable ${draft.executionType === 'run' ? 'RUN definition' : 'LOAD scenario'} snapshot from your validated draft.` : 'Scenario paths are package-relative. The next-run preview checks recurrence times only; the Server validates the package scenario before saving and again before each scheduled run.'}</p></div>
         <button type="button" className="button button-quiet" onClick={closeEditor} disabled={saving}>Cancel</button>
@@ -760,10 +764,10 @@ export function ScheduledLoadPage({ api, packages, enabled, onOpenJob, initialDr
           <option value="load">LOAD</option><option value="run">RUN</option>
         </select>
       </label>}
-      {draft.executionType === 'run' && !draft.inlineSnapshot && <p>Validate a Case, Template, Flow, Tool or batch selection first, then choose Schedule from Review.
+      {draft.executionType === 'run' && !draft.inlineSnapshot && <p>{editingId && 'This legacy RUN record has no editable validated snapshot. Create a reviewed replacement; the stored RUN definition will be preserved. '}Validate a Case, Template, Flow, Tool or batch selection first, then choose Schedule from Review.
         <button type="button" className="button button-primary" onClick={() => navigation.navigate({ kind: 'run' })}>Choose and validate RUN</button>
       </p>}
-      <p className="att-schedule-hint">Missed runs are skipped without backfill. Overlap and global capacity limits skip occurrences. History and job retention follow Server policy. Package revisions are revalidated before execution; RUN snapshots reject changed package resources. DST can skip a local time or repeat it twice.</p>
+      <p className="att-schedule-hint">Missed runs are skipped without backfill. Overlap and global capacity limits skip occurrences. History and job retention follow Server policy. Stored execution inputs remain immutable; the package-change policy controls changed revisions. DST can skip a local time or repeat it twice.</p>
       {scenarioPreviewYaml && <details className="att-schedule-snapshot-review">
         <summary>Review the validated {draft.executionType === 'run' ? 'RUN definition' : 'LOAD scenario'} snapshot</summary>
         <pre id="schedule-snapshot-content" tabIndex={0} aria-label="Validated Load scenario snapshot">{scenarioPreviewYaml}</pre>
@@ -840,6 +844,19 @@ export function ScheduledLoadPage({ api, packages, enabled, onOpenJob, initialDr
             <input id="schedule-cron" value={draft.cron} onChange={event => updateDraft('cron', event.currentTarget.value)} maxLength={120} placeholder="0 2 * * 1-5" required aria-describedby="schedule-cron-help" />
             <span id="schedule-cron-help" className="att-schedule-hint">Five fields; lists, ranges and steps are validated by the Server.</span>
           </label>}
+          <label htmlFor="schedule-package-policy">Package changes
+            <select id="schedule-package-policy" value={draft.packageChangePolicy || ''} onChange={event => updateDraft('packageChangePolicy', event.currentTarget.value as ScheduleDraft['packageChangePolicy'])}>
+              <option value="">Default (Server)</option><option value="strict">Strict</option><option value="pause">Auto-pause</option><option value="ignore">Revalidate latest</option>
+            </select>
+            <span className="att-schedule-hint">Strict blocks changed packages. Auto-pause also pauses this schedule. Revalidate latest validates the stored inputs against the current package before each run.</span>
+          </label>
+          {editingId && (() => { const saved = schedules.find(item => item.id === editingId); return saved ? <div className="att-schedule-source-status">
+            <p>Effective package-change policy: {saved.effectivePackageChangePolicy || 'strict'} · Server default: {saved.serverPackageChangePolicy || 'strict'}</p>
+            {saved.sourceStatus && <p role="status">Package revision changed. Metadata and recurrence can still be saved. Review a replacement from the current package to change execution inputs.</p>}
+            {saved.storedRevisionDigest && <p>Stored revision: <code>{saved.storedRevisionDigest}</code>{saved.currentRevisionDigest && <> · Current revision: <code>{saved.currentRevisionDigest}</code></>}</p>}
+            {saved.autoPauseReason && <p>Automatically paused: {saved.autoPauseReason} · {saved.autoPausedAt}</p>}
+            {saved.sourceStatus && <a href={formatRoute({ kind: saved.executionType === 'run' ? 'run' : 'load' })}>Review a replacement {saved.executionType.toUpperCase()}</a>}
+          </div> : null; })()}
           <label htmlFor="schedule-overlap">Maximum overlapping runs
             <input id="schedule-overlap" type="number" min="1" step="1" value={draft.maxConcurrentRuns} onChange={event => updateDraft('maxConcurrentRuns', event.currentTarget.value)} required />
             <span className="att-schedule-hint">When this limit or the Server's global capacity is reached, that occurrence is recorded as skipped.</span>
@@ -864,7 +881,7 @@ export function ScheduledLoadPage({ api, packages, enabled, onOpenJob, initialDr
           {preview.status === 'ready' && <ol className="att-schedule-occurrence-preview" aria-label="Next five scheduled occurrences">
             {(preview.nextOccurrences || []).map(instant => <li key={instant}>{formatScheduleTime(instant, draft.timezone)}</li>)}
           </ol>}
-          <p className="att-schedule-hint">This preview calculates the next five occurrence times from timezone and cron. It does not validate the package or test snapshot. The Server validates the full schedule when you save and validates it again before submitting each occurrence; it applies timezone and DST rules and records actual occurrences in UTC. Saving an unchanged trigger keeps the schedule the Server already holds, so a completed one-time schedule can still be renamed or re-described.</p>
+          <p className="att-schedule-hint">This preview calculates the next five occurrence times from timezone and cron. It does not validate the package or test snapshot. The Server validates new or activated schedules and every occurrence. Metadata and recurrence edits preserve the stored source and its status; it applies timezone and DST rules and records actual occurrences in UTC. Saving an unchanged trigger keeps the schedule the Server already holds, so a completed one-time schedule can still be renamed or re-described.</p>
         </section>
         <label className="att-schedule-enable"><input type="checkbox" checked={draft.enabled} onChange={event => updateDraft('enabled', event.currentTarget.checked)} /> Enable after saving</label>
         </fieldset>

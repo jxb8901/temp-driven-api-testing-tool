@@ -151,6 +151,7 @@ server:
     pollIntervalSeconds: 10
     maxConcurrentRuns: 1
     failurePolicy: continue
+    packageChangePolicy: strict
     maxExecutionsPerSchedule: 10000
 workers:
   maxConcurrent: 8
@@ -580,3 +581,16 @@ USER 操作者可在 Jobs 列或詳情 Pin／Unpin 已終止 RUN、Debug、LOAD 
 `DELETE /api/v1/jobs/{jobId}` 保留取消含義；`POST /api/v1/jobs/{jobId}/delete` 的手動刪除不會取消活動中 Job。Pin 不會等待 archive lock；刪除及 archive 讀寫仍受生命週期 fencing 約束。持久 DELETING 狀態會在部分刪除期間隱藏端點；啟動及每小時 reconciliation 都會完成檔案與 metadata 清除，即使沒有啟用 job-storage 配額。部分刪除顯示 `DELETION_PENDING_RECOVERY`，不回報成功。最少量 audit 保存操作者、時間、Job、結果；Pin 記錄舊／新旗標。刪除不立即壓縮 H2。
 
 Pin 是操作層保留保護，並非法律／WORM hold。主機檔案系統遺失、管理員在系統外刪除或災難復原仍需獨立備份。
+
+
+## 排程 package 變更及 runtime 關閉（4.2.3）
+
+`server.scheduling.packageChangePolicy` 接受 `strict`（預設）、`pause` 或 `ignore`；未知值會阻止啟動。每個排程可透過 `packageChangePolicy` 覆寫；`null` 或未設定時沿用 Server 預設，舊有記錄亦然。Studio 選項為 **Default (Server)**、**Strict**、**Auto-pause** 及 **Revalidate latest**。
+
+- **Strict**：保留的 revision 改變時，以 `package-revision-changed` 記錄拒絕提交；排程維持啟用但受阻，原有輸入及 digest 保留。
+- **Auto-pause**：記錄相同原因，並以原子操作只暫停受影響排程，保留原因及時間，寫入一次 `SCHEDULE_AUTO_PAUSE` audit。若期間定義已被編輯，舊的暫停決策不會覆蓋新定義。
+- **Revalidate latest**：只略過與保留 package digest 的相等檢查。仍驗證目前註冊的 package root、執行身分、typed target、精確 Case IDs、schema、environment、受保護輸入分類及限制。Worker 接收新的 digest，並於執行前再次檢查；儲存的定義保持不可變。`SCHEDULE_SOURCE_REVALIDATED` audit 記錄兩個 revision 及 policy 來自 Server 或排程。早於私有 package 註冊身分 pin 的舊記錄，在接受變更來源前需要重新審閱並建立替代排程。
+
+週期與手動提交，以及啟用／恢復時均會檢查 policy。新排程必須通過目前輸入驗證。來源過期時仍可儲存名稱、描述、tags、週期、timezone 及 policy，而不更換來源或清除 stale／paused 狀態。RUN 輸入、target、package 及 environment 不可原地更換；需要重新驗證 RUN 並建立替代排程。Package-wide digest 包括共用設定及 Engine／schema 身分，因此無關 package 檔案的修改也可能觸發 policy；target dependency digest 留待後續最佳化。沒有保留 digest 的舊檔案式 LOAD 定義，繼續在每次觸發時驗證目前 package scenario。
+
+Server 擁有有界的 event-compaction executor，供新建、恢復及之後讀取的 journal 使用。關閉時拒絕新 Job，停止排程及 retention producer，結束 Worker／inspection／SSE 活動，再排空 artifact writer 及 compaction queue，最後釋放資料庫。每個 executor 等待都有時間上限；中斷 compaction 後仍可從 append journal 恢復。重複關閉安全。共用 ATT classloader 的 runtime 以引用計數管理 H2 註冊，最後關閉時只移除該 classloader 擁有的 H2 driver；container 擁有的 JDBC driver 保留。測試在同一 Tomcat JVM 部署三次，執行 compaction 並於重新部署後讀回排程及 journal；CI 亦在 Tomcat 11 執行此案例。

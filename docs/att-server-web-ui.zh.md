@@ -83,3 +83,10 @@ UI 會在載入工作資料前檢查 Server API 版本。工作到達最終狀�
 主控台以 `att-web` JAR 中 `META-INF/resources/ui/` 的靜態資源提供，並封裝於 Server WAR。相對 URL 支援非根 Tomcat context path，無需額外前端服務或執行期 Node.js。Server 套用同源 Content Security Policy，並拒絕帶有非預期 `Origin` 的狀態變更瀏覽器請求；無需設定含憑證的 CORS。API 文字以純文字方式插入 DOM，事件清單最多保留 500 筆。
 
 對尚無公開 discovery schema 的欄位，UI 會使用安全 sidecar 資料提供 typed scalar 控制項，並以 Advanced JSON 編輯巢狀值。Server 驗證仍是權威來源；瀏覽器端驗證與篩選不構成授權邊界。
+
+
+### 排程 route 與獨立 console（4.2.3）
+
+History → Back to list → Edit 會同時按 route view 及 schedule ID 載入。重新整理已授權清單時保留同一表單的未儲存修改；不存在或禁止存取的定義顯示不可用狀態。沒有可編輯 validated snapshot 的舊 RUN 定義會說明如何審閱替代 RUN。
+
+新分頁 console 使用 `#/jobs/{encodedJobId}/console?view=live|events`，只載入該 Job，保留驗證、theme、session 處理及 SSE 控制。頁面不包含 Studio 導覽、context selector、footer 或浮動視窗操作。Live Output 及 Events 會填滿控制列下方的剩餘 viewport，包括沒有輸出的情況。切換 view 會更新 URL 並維持相同 Job。內嵌及浮動 console 保持既有版面。
