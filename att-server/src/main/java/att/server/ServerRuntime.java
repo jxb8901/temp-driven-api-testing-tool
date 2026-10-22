@@ -1276,7 +1276,6 @@ final class ServerRuntime implements AutoCloseable {
             internal.set("inlineDebugInput",JSON.valueToTree(draft.input));
             internal.put("expectedRevisionDigest",draft.revisionDigest);internal.put("draftResourceId",draft.resourceId);
             applyInspectionPolicy(internal,draft.packageId);
-            verifyPackageRevision(draft.packageId,draft.environment,draft.revisionDigest);
             requireLiveDraft(draft);
             JobExecutionSpec retained=draft.containsSensitiveValues?null:capturePrevalidatedExecutionSpec("debug",internal,null);
             Map<String,Object> accepted=submit("debug",internal,persistedPrincipal,true,null,false,null,null,retained);
