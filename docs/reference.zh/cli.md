@@ -181,7 +181,7 @@ Load 以 scenario 為基礎；明確提供的 workload option 會先覆蓋對應
 
 ## 路徑顯示
 
-本機 CLI 預設顯示絕對路徑。加入 `--substitute-package-root`，可將 package 內路徑顯示為 `$ATT_PACKAGE_ROOT` 或 `$ATT_PACKAGE_ROOT/<relative-path>`；加入 `--substitute-external-basename`，可將其他絕對路徑顯示為 `$EXTERNAL/<basename>`。兩個 option 可獨立使用，適用於 `run`、`validate`、`snapshot`、`debug` 及 `load` 的人類可讀診斷、結構化結果與顯示的報表路徑。這只會改變呈現方式，不會改變檔案存取或儲存的 package data。這些 CLI options 只適用於本機 CLI；為避免洩露 host path，Server Worker 在 API 和 Studio 輸出中一律強制啟用兩種替換，並優先於 CLI 設定。升級至 4.2.2 後，如要恢復舊有本機 CLI 呈現方式，請明確加入相應旗標。
+本機 CLI 預設顯示絕對路徑。加入 `--substitute-package-root`，可將 package 內路徑顯示為 `$ATT_PACKAGE_ROOT` 或 `$ATT_PACKAGE_ROOT/<relative-path>`；加入 `--substitute-external-basename`，可將其他絕對路徑顯示為 `$EXTERNAL/<basename>`。兩個 option 可獨立使用，適用於 `run`、`validate`、`snapshot`、`debug` 及 `load` 的人類可讀診斷、結構化結果與顯示的報表路徑。這只會改變呈現方式，不會改變檔案存取或儲存的 package data。這些 CLI options 只適用於本機 CLI；為避免洩露 host path，Server Worker 在 API 和 Studio 輸出中一律強制啟用兩種替換，並優先於 CLI 設定。升級至 4.2.3 後，如要恢復舊有本機 CLI 呈現方式，請明確加入相應旗標。
 
 ```sh
 ./att.sh validate --package --substitute-package-root

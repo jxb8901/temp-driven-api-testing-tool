@@ -387,7 +387,7 @@ public final class ServerConfig {
     private static Scheduling scheduling(Object raw,boolean authenticationRequired,int maxConcurrentLoad,boolean inspectionEnabled,String systemAdminRole) {
         Map<?,?> values=raw==null?Collections.emptyMap():map(raw,"server.scheduling");
         Set<String> allowed=Set.of("enabled","allowAnonymousManagement","adminRole","maxSchedules",
-                "minimumIntervalMinutes","pollIntervalSeconds","maxConcurrentRuns","failurePolicy","maxExecutionsPerSchedule");
+                "minimumIntervalMinutes","pollIntervalSeconds","maxConcurrentRuns","failurePolicy","maxExecutionsPerSchedule","packageChangePolicy");
         for(Object key:values.keySet())if(!(key instanceof String)||!allowed.contains(key))
             throw new IllegalArgumentException("server.scheduling contains an unknown setting");
         boolean enabled=boolValue(values,"enabled",false);
@@ -404,7 +404,9 @@ public final class ServerConfig {
         if(concurrent>maxConcurrentLoad)throw new IllegalArgumentException("server.scheduling.maxConcurrentRuns must not exceed workers.maxConcurrentLoad");
         Object rawFailurePolicy=values.get("failurePolicy");String failurePolicy=rawFailurePolicy==null?"continue":string(rawFailurePolicy,"server.scheduling.failurePolicy");
         if(!Set.of("continue","pauseAfterSubmitFailure").contains(failurePolicy))throw new IllegalArgumentException("server.scheduling.failurePolicy must be continue or pauseAfterSubmitFailure");
-        return new Scheduling(enabled,allowAnonymous,role,schedules,minimum,poll,concurrent,failurePolicy,history);
+        String packageChangePolicy=values.get("packageChangePolicy")==null?"strict":string(values.get("packageChangePolicy"),"server.scheduling.packageChangePolicy");
+        if(!Set.of("strict","pause","ignore").contains(packageChangePolicy))throw new IllegalArgumentException("server.scheduling.packageChangePolicy must be strict, pause or ignore");
+        return new Scheduling(enabled,allowAnonymous,role,schedules,minimum,poll,concurrent,failurePolicy,history,packageChangePolicy);
     }
 
     private static Authorization authorization(Object raw,boolean authenticationRequired) {
@@ -460,14 +462,14 @@ public final class ServerConfig {
     public static final class Scheduling {
         public final boolean enabled,allowAnonymousManagement;
         public final String adminRole;
-        public final String failurePolicy;
+        public final String failurePolicy,packageChangePolicy;
         public final int maxSchedules,minimumIntervalMinutes,pollIntervalSeconds,maxConcurrentRuns,maxExecutionsPerSchedule;
         private Scheduling(boolean enabled,boolean allowAnonymousManagement,String adminRole,int maxSchedules,
-                           int minimumIntervalMinutes,int pollIntervalSeconds,int maxConcurrentRuns,String failurePolicy,int maxExecutionsPerSchedule) {
+                           int minimumIntervalMinutes,int pollIntervalSeconds,int maxConcurrentRuns,String failurePolicy,int maxExecutionsPerSchedule,String packageChangePolicy) {
             this.enabled=enabled;this.allowAnonymousManagement=allowAnonymousManagement;this.adminRole=adminRole;
             this.maxSchedules=maxSchedules;this.minimumIntervalMinutes=minimumIntervalMinutes;
             this.pollIntervalSeconds=pollIntervalSeconds;this.maxConcurrentRuns=maxConcurrentRuns;this.failurePolicy=failurePolicy;
-            this.maxExecutionsPerSchedule=maxExecutionsPerSchedule;
+            this.maxExecutionsPerSchedule=maxExecutionsPerSchedule;this.packageChangePolicy=packageChangePolicy;
         }
     }
 

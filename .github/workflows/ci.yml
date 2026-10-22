@@ -199,6 +199,9 @@ jobs:
           ATT_UI_SERVER_PLAYWRIGHT: "1"
         run: ./build.sh
 
+      - name: Verify same-JVM redeploy on Tomcat 11
+        run: mvn -B -ntp -Ptomcat-11 -pl att-server -am -Datt.skipJava8ModuleTests=true -Datt.skipFrontendUnitTests=true -Datt.skipServerUnitTests=true '-Dit.test=ServerWarUiIT#repeatedRedeployReleasesCompactorsAndJdbcWhilePreservingSchedulesAndJournals' verify
+
       - name: Upload Local and Server release packages
         uses: actions/upload-artifact@v4
         with:
@@ -294,6 +297,7 @@ jobs:
           npm run smoke:explorer
           npm run smoke:archive-metrics
           npm run smoke:load-jobs
+          npm run smoke:job-replay
           npm run smoke:run
           npm run smoke:auth
           npm run smoke:scheduled-load

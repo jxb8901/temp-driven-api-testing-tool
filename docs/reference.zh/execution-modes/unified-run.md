@@ -1,6 +1,6 @@
 # 統一 RUN 與排程
 
-ATT 4.2.2 將功能性單次執行統一為 **RUN**，支援 Case、Template、Flow、Tool，以及所選 Case 批次。**Debug** 是 RUN 的診斷選項。**LOAD** 保留效能引擎、負載控制和專用報告。
+ATT 4.2.3 將功能性單次執行統一為 **RUN**，支援 Case、Template、Flow、Tool，以及所選 Case 批次。**Debug** 是 RUN 的診斷選項。**LOAD** 保留效能引擎、負載控制和專用報告。
 
 ## 驗證及執行 RUN
 
@@ -85,7 +85,7 @@ LOAD 排程繼續支援套件 scenario 路徑及已驗證 Load draft，沿用 sc
 
 ## 遷移既有用戶端
 
-| 既有介面 | 4.2.2 對應 |
+| 既有介面 | 4.2.3 對應 |
 |---|---|
 | CLI `validate`、`run`、`report` | 保留驗證、Case RUN、報告命令 |
 | CLI `--suite`、`--suite-dir`、`--case`、`--tag`、`--rerun-failed` | 保留選取行為；Server 批次使用 `selection` |
@@ -94,6 +94,26 @@ LOAD 排程繼續支援套件 scenario 路徑及已驗證 Load draft，沿用 sc
 | `/load-schedules`、`jobType:load/debug` | 共用 scheduler 相容路徑，保留既有定義 |
 | `/jobs/...`、既有 Studio 工作/結果連結 | 保留共用 history、取消、事件與結果路徑 |
 
-4.2.2 沒有移除舊 endpoint。`GET /api/v1/version` 公開 `unifiedRunVersion:att-execution/v1`。新 Studio Resource表單在舊 Server 缺少此能力時，可使用舊 Debug draft。統一 Case/batch draft 需要 4.2.2；舊部署可繼續使用 Explorer Case 操作。Server/Worker 應配套部署，舊 Worker 不支援Resource RUN dispatch。
+4.2.3 沒有移除舊 endpoint。`GET /api/v1/version` 公開 `unifiedRunVersion:att-execution/v1`。新 Studio Resource表單在舊 Server 缺少此能力時，可使用舊 Debug draft。統一 Case/batch draft 需要 4.2.3；舊部署可繼續使用 Explorer Case 操作。Server/Worker 應配套部署，舊 Worker 不支援Resource RUN dispatch。
 
 持久化使用既有 H2 table 的附加 JSON 欄位，不改寫舊 LOAD row。降版前先停止排程、匯出新定義、移除 RUN/單次定義，再還原升級前資料庫備份，避免舊 scheduler 把 RUN 當成 LOAD。保留的 artifact 與資料庫 metadata 分開儲存。
+
+## 重新執行 Job 或建立排程
+
+在 **Jobs**、**Job Details** 或 **LOAD Catalog → Recent LOAD Jobs** 選擇 **Rerun** 或 **Schedule / Reschedule…**。Server 會重新驗證保留的執行定義，再顯示確認內容。檢查 package、environment、RUN target 或精確 Case 選擇、Debug 選項，或 LOAD scenario 與負載參數。**Confirm rerun** 建立獨立的新 Job，並開啟其 Details；原本的結果與證據保持完整。
+
+**Continue to New Schedule** 開啟統一的新增排程表單。設定名稱、頻率、時區、重疊執行上限及啟用狀態，檢查執行時間預覽後儲存。單純開啟表單不會建立或修改排程。**View / Edit originating schedule** 開啟仍存在且獲授權的來源排程；這與建立新排程或立即重跑是不同操作。
+
+Replay 使用先前的安全 snapshot，並採用 `revisionPolicy: reject-package-changes`，不會自動改用最新 package 檔案。Package、runtime configuration 或相依 Resource變更後，請重新設定並驗證新執行。新保留的安全定義可在 draft 到期及 Server 重啟後使用；確認 draft 的有效期為十分鐘，到期後須重新建立。Server 會再次檢查目前帳戶、package、environment、schema、功能開關及執行限制。
+
+未保留執行定義的歷史 Job 會顯示 **Rerun unavailable for this historical job**。僅驗證的 Job、安全保留失敗或包含已分類敏感輸入的 Job，不能進行精確 replay。含有原始 overrides 或未解析 `rerunFailed` 歷史選擇的舊式直接提交，須先建立新的驗證 draft 才能安全保留。請設定新執行，並透過正常的受保護輸入流程補充憑證。不可從 log、artifact 或已遮罩預覽重建執行。安全定義上限為 256 KiB，不包含 Worker transport 欄位及主機根目錄。
+
+Job lifecycle API 在 `/api/v1` 下提供以下 endpoint：
+
+| Method 與 path | 結果 |
+| --- | --- |
+| `GET /jobs/{jobId}/replay` | 已授權的安全定義、不可用原因、revision policy，以及仍可用的來源排程連結。 |
+| `POST /jobs/{jobId}/replay-draft`，body 為 `{}` | 重新驗證的 RUN/LOAD draft 與不透明的 `intentId`；不會建立執行或排程。 |
+| `POST /jobs/{jobId}/rerun`，body 為 `{"intentId":"...","confirm":true}` | 回傳獨立新 Job、HTTP 202 及 `Location`；相同 intent 的重試回傳已接受的 Job。 |
+
+在正常的 `POST /schedules` 建立合約中，使用回傳的 `draftId`、package、environment 及標準 `executionType: run | load`。Debug 維持 RUN 的 `options.debug`。重跑 Job 提供 `rerunOfJobId`；由 Job 建立的排程保留獲授權的 `sourceJobId` 來源資訊。Replay 僅限提交者身分或已保留的排程執行擁有者。已刪除或無權存取的 Job 回傳 404；來源過期回傳 409；容量及驗證錯誤沿用正常提交合約。若已接受 intent 的輸出 Job 被刪除，再次使用該 intent 會安全失敗，不會新增執行。

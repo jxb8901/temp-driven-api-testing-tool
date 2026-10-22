@@ -1,3 +1,4 @@
+import { JobReplayActions } from "./JobReplayActions";
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ApiError, type AsyncState, type JobSummary } from '../../types';
 import type { LoadCatalogItem, PackageOption, ServerDiagnostic } from './types';
@@ -8,7 +9,7 @@ import './load.css';
 
 type ScheduleIntent = { packageId: string; environment?: string; draftId: string; previewYaml?: string; expiresAt?: string; executionType: 'load' };
 type CatalogApi = Pick<typeof api, 'listLoadCatalog' | 'validateLoadCatalogScenario' | 'submitLoadScenario' | 'listLoadJobs'>
-  & Partial<Pick<typeof api, 'getDeclaredConfiguration'>>;
+  & Partial<Pick<typeof api, 'getDeclaredConfiguration' | 'getJobReplay' | 'createJobReplayDraft' | 'rerunJob'>>;
 type CatalogJob = JobSummary & { scenario?: string; environment?: string; model?: string };
 type CatalogFailure = { message: string; suggestion?: string; cursor?: string; query: string; retrying?: boolean };
 const CATALOG_FETCH_CONCURRENCY = 4;
@@ -452,6 +453,9 @@ export function LoadCatalogPage({ api, packages, inlineLoadEnabled, schedulingEn
           {job.finishedAt && <time title="Finished">Finished {new Date(job.finishedAt).toLocaleString()}</time>}
           {jobDuration(job) && <span>Duration {jobDuration(job)}</span>}</span>
         <button className="button button-quiet" type="button" onClick={() => onOpenJob(job.jobId)}>View Results</button>
+        <JobReplayActions api={api} configuration={{ executionType: "load", packageId: job.packageId }} jobId={job.jobId} onOpenJob={onOpenJob} onSchedule={schedulingEnabled ? intent => {
+          if (intent.executionType === 'load' && intent.draftId) onSchedule({ ...intent, executionType: 'load', draftId: intent.draftId });
+        } : undefined} />
       </div>)}</div>}
       {jobsMore !== null && <button className="button button-quiet" type="button" onClick={() => void loadJobs(jobsMore, true)} disabled={jobsState === 'loading'}>Load more LOAD jobs</button>}
       </section>

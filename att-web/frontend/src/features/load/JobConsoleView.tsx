@@ -29,6 +29,7 @@ export interface JobConsoleViewProps {
   onMaximize?: () => void;
   maximized?: boolean;
   onOpenNewTab?: () => void;
+  standalone?: boolean;
   compact?: boolean;
   showSwitcher?: boolean;
 }
@@ -172,7 +173,7 @@ export function consoleRouteUrl(jobId: string, view: JobConsoleViewMode = 'live'
 
 export function JobConsoleView({
   api, jobId, job, view: requestedView = 'live', onViewChange, minimized = false, onRestore,
-  onClose, onMinimize, onMaximize, maximized = false, onOpenNewTab, compact = false, showSwitcher = true,
+  onClose, onMinimize, onMaximize, maximized = false, onOpenNewTab, compact = false, showSwitcher = true, standalone = false,
 }: JobConsoleViewProps) {
   const stream = useJobEventStream(api, jobId);
   const [localView, setLocalView] = useState<JobConsoleViewMode>(requestedView);
@@ -407,13 +408,13 @@ export function JobConsoleView({
     <header className="att-console-view-heading">
       <div><p className="att-eyebrow">{executionType(job)} console</p><h2 title={`Job ${jobId}`}>Job {jobId}</h2>
         <p className="att-console-meta"><span>{displayedStatus}</span><span role="status">SSE {stream.connection}</span></p></div>
-      <div className="att-console-view-actions">
+      {!standalone && <div className="att-console-view-actions">
         <a href={formatRoute({ kind: 'jobs', jobId })} aria-label="Open full Job details" title="Open full Job details">Details</a>
         {onMinimize && <button type="button" aria-label="Minimize Job console" title="Minimize" onClick={onMinimize}>−</button>}
         <button type="button" aria-label={(onMaximize ? maximized : localMaximized) ? 'Restore Job console' : 'Maximize Job console'} title={(onMaximize ? maximized : localMaximized) ? 'Restore' : 'Maximize'} onClick={onMaximize || (() => setLocalMaximized(value => !value))}>{(onMaximize ? maximized : localMaximized) ? 'Restore' : 'Maximize'}</button>
         <a href={consoleRouteUrl(jobId, view)} target="_blank" rel="noopener noreferrer" aria-label="Open Job console in a new tab" onClick={onOpenNewTab}>↗ New tab</a>
         {onClose && <button type="button" aria-label="Close Job console" title="Close" onClick={onClose}>×</button>}
-      </div>
+      </div>}
     </header>
     {stream.connection === 'reconnecting' && <p className="att-help" role="status">The SSE stream is reconnecting. The Server may be at its concurrent observer limit; the browser will retry with its last event ID.</p>}
     {showSwitcher && <div className="att-console-switcher" role="tablist" aria-label="Console view" onKeyDown={onTabsKeyDown}>
@@ -435,10 +436,10 @@ export function JobConsoleView({
     {diagnostics && <p className="att-help">{diagnostics}</p>}
     {view === 'live' ? <>
       <p className="att-help">Live Output shows Server console lines. ANSI control sequences are removed safely for display.</p>
-      {liveLines.length ? <div className="att-console-shell" data-maximized={(onMaximize ? maximized : localMaximized) ? 'true' : 'false'} style={!onMaximize && localMaximized ? { position: 'fixed', top: 12, left: 12, right: 12, bottom: 12, height: 'auto', maxHeight: 'none', zIndex: 50 } : { height: consoleHeight }}>
+      {(liveLines.length || standalone) ? <div className="att-console-shell" data-maximized={(onMaximize ? maximized : localMaximized) ? 'true' : 'false'} style={!onMaximize && localMaximized ? { position: 'fixed', top: 12, left: 12, right: 12, bottom: 12, height: 'auto', maxHeight: 'none', zIndex: 50 } : { height: consoleHeight }}>
         {(!onMaximize && localMaximized) && <div className="att-console-maximized-bar"><button type="button" onClick={() => setLocalMaximized(false)}>Restore</button></div>}
-        <pre ref={consoleRef} className="att-console" aria-label="Live output" data-appearance="terminal" onScroll={onLiveScroll} style={{ background: '#0d1117', color: '#f5f7fa', whiteSpace: 'pre', overflow: 'auto' }}>{liveLines.join('\n')}</pre>
-        {!(onMaximize ? maximized : localMaximized) && <div role="separator" aria-orientation="horizontal" aria-label="Resize live output" aria-valuemin={CONSOLE_MIN_HEIGHT} aria-valuemax={consoleMaxHeight()} aria-valuenow={consoleHeight} tabIndex={0} className="att-console-resize" onPointerDown={resizeConsole} onKeyDown={resizeConsoleByKeyboard} />}
+        <pre ref={consoleRef} className="att-console" aria-label="Live output" data-appearance="terminal" onScroll={onLiveScroll} style={{ background: '#0d1117', color: '#f5f7fa', whiteSpace: 'pre', overflow: 'auto' }}>{liveLines.length ? liveLines.join('\n') : 'No console lines match the current view. Waiting for available output…'}</pre>
+        {!standalone && !(onMaximize ? maximized : localMaximized) && <div role="separator" aria-orientation="horizontal" aria-label="Resize live output" aria-valuemin={CONSOLE_MIN_HEIGHT} aria-valuemax={consoleMaxHeight()} aria-valuenow={consoleHeight} tabIndex={0} className="att-console-resize" onPointerDown={resizeConsole} onKeyDown={resizeConsoleByKeyboard} />}
       </div> : <p role="status">{events.length ? (liveSearch.trim() ? 'No console lines match the current search.' : 'This Job has no console lines. Structured events remain on the Events tab.') : stream.connection === 'completed' ? 'The Job has finished and no console lines were recorded.' : stream.connection === 'reconnecting' ? 'Reconnecting to live output; no recent console lines are available.' : 'Connected; no console lines have been emitted yet.'}</p>}
     </> : visibleEvents.length ? <ol ref={eventsRef} className="att-job-events" aria-label="Structured job events" onScroll={onEventsScroll}>
       <VirtualSpacer height={eventMetrics.offsets[eventMetrics.start]} className="att-event-virtual-spacer" />

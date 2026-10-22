@@ -1,8 +1,9 @@
-import type { ScheduleDefinition, ScheduleInput } from './types';
+import type { ScheduleDefinition, ScheduleInput, PackageChangePolicy } from './types';
 
 export type ScheduleRecurrence = 'daily' | 'weekly' | 'cron' | 'once';
 
 export interface ScheduleDraft {
+  packageChangePolicy?: PackageChangePolicy | '';
   executionType: 'run' | 'load';
   legacyDebug?: boolean;
   debugTargetType: string;
@@ -54,7 +55,7 @@ export function isIanaTimeZone(value: string): boolean {
 
 export function createScheduleDraft(timezone = localTimeZone()): ScheduleDraft {
   return {
-    executionType: 'load', debugTargetType: '', debugTargetId: '',
+    executionType: 'load', packageChangePolicy: '', debugTargetType: '', debugTargetId: '',
     name: '', description: '', tags: '', packageId: '', scenario: '', inlineSnapshot: false, config: '', environment: '', timezone,
     recurrence: 'daily', runAt: '', timeOfDay: '02:00', dayOfWeek: '1-5', cron: '', maxConcurrentRuns: '1', load: '{}', enabled: false,
   };
@@ -93,7 +94,7 @@ function cronTime(match: RegExpExecArray): string | null {
 
 export function draftFromSchedule(schedule: ScheduleDefinition): ScheduleDraft {
   return {
-    executionType: schedule.executionType, legacyDebug: schedule.legacyDebug,
+    executionType: schedule.executionType, legacyDebug: schedule.legacyDebug, packageChangePolicy: schedule.packageChangePolicy || '',
     debugTargetType: schedule.debugTarget?.type || '', debugTargetId: schedule.debugTarget?.id || '',
     name: schedule.name || '', description: schedule.description || '', tags: (schedule.tags || []).join(', '),
     packageId: schedule.packageId || '', scenario: schedule.scenario || '', inlineSnapshot: schedule.inlineSnapshot === true, config: schedule.config || '',
@@ -122,6 +123,7 @@ export function scheduleInputFromDraft(draft: ScheduleDraft): ScheduleInput {
   if (!isIanaTimeZone(draft.timezone)) throw new Error('Enter a valid IANA timezone, such as Asia/Hong_Kong.');
   const input: ScheduleInput = {
     name: draft.name.trim(), description: draft.description.trim(), tags,
+    packageChangePolicy: draft.packageChangePolicy || null,
     packageId: draft.packageId, executionType: draft.executionType, schemaVersion: 'att-schedule/v2',
     ...(draft.legacyDebug ? { legacyDebug: true } : {}), config: 'config/config.yaml',
     environment: draft.environment.trim(), timezone: draft.timezone.trim(), cron,
@@ -152,6 +154,7 @@ export function formatScheduleTime(value: string | null | undefined, timezone: s
 
 export function explainOccurrence(reason?: string | null): string {
   if (!reason) return '';
+  if (reason === 'package-revision-changed') return 'The package revision changed. Review the stored source and package-change policy before running again.';
   if (reason.startsWith('misfire-no-backfill')) return 'Missed times are recorded as skipped; the Server does not replay them after a restart or late poll.';
   if (reason === 'schedule-overlap-limit') return 'Skipped because this schedule already reached its concurrent-run limit.';
   if (reason === 'global-scheduled-load-capacity' || reason === 'global-scheduled-job-capacity') return 'Skipped because the Server reached its scheduled-job capacity.';

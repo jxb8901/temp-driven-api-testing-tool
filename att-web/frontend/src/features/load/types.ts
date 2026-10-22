@@ -1,3 +1,4 @@
+import type { ValidatedScheduleIntent } from "../schedules/types";
 export type LoadModel = 'virtualUsers' | 'arrivalRate';
 export type LoadTargetType = 'template' | 'flow' | 'tool';
 export type JobStatus =
@@ -137,6 +138,7 @@ export interface JobAccepted {
 }
 
 export interface JobSummary {
+  rerunOfJobId?: string;
   pinned?: boolean;
   pinnedAt?: string | null;
   pinnedBy?: string | null;
@@ -237,6 +239,10 @@ export interface JobEventHandlers {
 
 /** Feature boundary. Shared api.ts implements these operations; components never build REST paths. */
 export interface LoadJobsApi {
+  getJobReplay?(jobId: string): Promise<JobReplay>;
+  createJobReplayDraft?(jobId: string): Promise<JobReplay>;
+  rerunJob?(jobId: string, intentId: string): Promise<{ jobId: string }>;
+
   listLoadCatalog?(packageId: string, input?: { query?: string; cursor?: string; limit?: number }, signal?: AbortSignal): Promise<LoadCatalogPage>;
   getLoadCatalogDetail?(packageId: string, resourceId: string, signal?: AbortSignal): Promise<LoadCatalogDetail>;
   getLoadSource?(packageId: string, resourceId: string, signal?: AbortSignal): Promise<{ available: boolean; logicalPath?: string; text?: string; redacted?: boolean; reason?: string }>;
@@ -290,10 +296,20 @@ export interface LoadFeatureProps {
 }
 
 export interface JobsFeatureProps {
+  onSchedule?(intent: ValidatedScheduleIntent): void;
+  onEditSchedule?(id: string): void;
+
   api: LoadJobsApi;
   jobId?: string;
   principal?: string;
   onOpenJob: (jobId: string) => void;
   onShowList: () => void;
   confirmCancel?: (message: string) => boolean | Promise<boolean>;
+}
+
+export interface JobReplay {
+  jobId: string; available: boolean; reason?: string; rerunOfJobId?: string; originatingScheduleId?: string;
+  revisionPolicy?: string; revision?: string; sourcePath?: string;
+  definition?: { executionType: 'run' | 'load'; packageId: string; environment?: string | null; [key: string]: unknown };
+  intentId?: string; draftId?: string; expiresAt?: string;
 }

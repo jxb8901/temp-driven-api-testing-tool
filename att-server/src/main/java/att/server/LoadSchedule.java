@@ -12,6 +12,7 @@ final class LoadSchedule {
     public Map<String,Object> runInput;
     public String id;
     public String name;
+    public String sourceJobId;
     public String description;
     public List<String> tags=List.of();
     public String packageId;
@@ -28,6 +29,14 @@ final class LoadSchedule {
     public String debugTargetId;
     public String debugResourceId;
     public String expectedRevisionDigest;
+    /** Null inherits the server default, including for migrated records. */
+    public String packageChangePolicy;
+    /** Server-private identity pin; never expose a host filesystem path. */
+    public String packageRootIdentity;
+    public String sourceStatus;
+    public String currentRevisionDigest;
+    public String autoPauseReason;
+    public String autoPausedAt;
     public String loadModel;
     public String config;
     public String environment;
@@ -49,15 +58,18 @@ final class LoadSchedule {
     public String updatedBy;
     public String updatedAt;
     public String nextRunAt;
+    /** Execution-only result from the latest inspection; never persisted with the schedule definition. */
+    transient boolean validatedSensitiveSource;
 
     LoadSchedule copy() {
         LoadSchedule copy=new LoadSchedule();
         copy.schemaVersion=schemaVersion;copy.runInput=runInput==null?null:ServerRuntime.JSON.convertValue(runInput,Map.class);
-        copy.id=id;copy.name=name;copy.description=description;copy.packageId=packageId;copy.jobType=jobType==null?"load":jobType;copy.scenario=scenario;
+        copy.sourceJobId=sourceJobId;copy.id=id;copy.name=name;copy.description=description;copy.packageId=packageId;copy.jobType=jobType==null?"load":jobType;copy.scenario=scenario;
         copy.inlineScenario=inlineScenario==null?null:new LinkedHashMap<>(inlineScenario);copy.catalogSnapshot=catalogSnapshot;copy.loadModel=loadModel;
         copy.inlineDebugInput=inlineDebugInput==null?null:new LinkedHashMap<>(inlineDebugInput);
         copy.debugTargetType=debugTargetType;copy.debugTargetId=debugTargetId;copy.debugResourceId=debugResourceId;
-        copy.expectedRevisionDigest=expectedRevisionDigest;
+        copy.expectedRevisionDigest=expectedRevisionDigest;copy.packageChangePolicy=packageChangePolicy;copy.packageRootIdentity=packageRootIdentity;
+        copy.sourceStatus=sourceStatus;copy.currentRevisionDigest=currentRevisionDigest;copy.autoPauseReason=autoPauseReason;copy.autoPausedAt=autoPausedAt;
         copy.tags=tags==null?List.of():List.copyOf(tags);
         copy.config=config;copy.environment=environment;copy.timezone=timezone;copy.cron=cron;copy.runAt=runAt;
         copy.load=load==null?new LinkedHashMap<>():new LinkedHashMap<>(load);copy.maxConcurrentRuns=maxConcurrentRuns;copy.enabled=enabled;
@@ -65,6 +77,7 @@ final class LoadSchedule {
         copy.executionIdentityMigratedFrom=executionIdentityMigratedFrom;copy.executionIdentityMigratedBy=executionIdentityMigratedBy;
         copy.executionIdentityMigratedAt=executionIdentityMigratedAt;
         copy.createdAt=createdAt;copy.updatedBy=updatedBy;copy.updatedAt=updatedAt;copy.nextRunAt=nextRunAt;
+        copy.validatedSensitiveSource=validatedSensitiveSource;
         return copy;
     }
 

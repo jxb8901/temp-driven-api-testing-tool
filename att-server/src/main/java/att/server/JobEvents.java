@@ -16,11 +16,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.NavigableMap;
 import java.util.TreeMap;
-import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.Executor;
 import java.util.concurrent.RejectedExecutionException;
-import java.util.concurrent.ThreadPoolExecutor;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
@@ -32,12 +29,6 @@ final class JobEvents {
     private static final int COMPACT_EVERY_EVENTS = 128;
     private static final int MAX_COMPACTION_TAIL_EVENTS = 32;
     private static final Object[] COMPACTION_LOCKS = new Object[64];
-    private static final ThreadPoolExecutor COMPACTIONS = new ThreadPoolExecutor(
-            2, 2, 0L, TimeUnit.MILLISECONDS, new ArrayBlockingQueue<>(1024), runnable -> {
-                Thread thread = new Thread(runnable, "att-server-event-compactor");
-                thread.setDaemon(true);
-                return thread;
-            }, new ThreadPoolExecutor.AbortPolicy());
 
     static {
         for (int i = 0; i < COMPACTION_LOCKS.length; i++) COMPACTION_LOCKS[i] = new Object();
@@ -56,7 +47,7 @@ final class JobEvents {
             new java.util.concurrent.CopyOnWriteArrayList<>();
 
     JobEvents(Path file, int capacity) throws Exception {
-        this(file, capacity, COMPACTIONS, () -> { });
+        this(file, capacity, Runnable::run, () -> { });
     }
 
     JobEvents(Path file, int capacity, Executor compactionExecutor) throws Exception {
@@ -246,6 +237,8 @@ final class JobEvents {
         } catch (RejectedExecutionException full) {
             compactionScheduled.set(false);
             compactionAgain.set(false);
+            // The append-only journal is durable; a later append or restart retries compaction.
+            java.util.logging.Logger.getLogger(JobEvents.class.getName()).fine("Compaction deferred: executor unavailable; journal remains recoverable");
         }
     }
 

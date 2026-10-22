@@ -16,7 +16,10 @@ final class RunDefinition {
         this.definition=definition;this.workerInput=workerInput;this.resourceTarget=resourceTarget;this.debug=debug;
     }
 
-    static RunDefinition parse(JsonNode value) {
+    static RunDefinition parse(JsonNode value) {return parse(value,false);}
+    /** Only server-retained selections may contain the full resolved 10000-case batch. */
+    static RunDefinition parseRetained(JsonNode value) {return parse(value,true);}
+    private static RunDefinition parse(JsonNode value,boolean retained) {
         fields(value,"schemaVersion","executionType","packageId","environment","config","target","selection","input","options");
         if(!VERSION.equals(text(value,"schemaVersion")))throw invalid("Unsupported execution schemaVersion");
         if(!"run".equals(text(value,"executionType")))throw invalid("executionType must be run");
@@ -42,7 +45,8 @@ final class RunDefinition {
             boolean positive=false;
             for(String name:new String[]{"suites","caseIds","tags","excludeTags"})if(selection.has(name)) {
                 JsonNode list=selection.get(name);
-                if(!list.isArray()||list.isEmpty()||list.size()>1000)throw invalid(name+" must be a nonempty array of at most 1000 strings");
+                int maximum=retained&&"caseIds".equals(name)?10000:1000;
+                if(!list.isArray()||list.isEmpty()||list.size()>maximum)throw invalid(name+" must be a nonempty array of at most "+maximum+" strings");
                 Set<String> unique=new java.util.HashSet<>();
                 for(JsonNode entry:list) {
                     if(!entry.isTextual()||entry.asText().isBlank()||entry.asText().length()>512||entry.asText().chars().anyMatch(Character::isISOControl))throw invalid(name+" contains an invalid value");

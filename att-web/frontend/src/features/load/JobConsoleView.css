@@ -66,3 +66,18 @@
 .att-event-controls select, .att-event-controls input[type="search"] { min-height:2.25rem; min-width:10rem; padding:.4rem .55rem; border:1px solid var(--att-color-border, #dce2ec); border-radius:var(--att-radius-control, .55rem); background:var(--att-color-surface, #fff); color:var(--att-color-text, #182237); font:inherit; }
 .att-event-controls button { min-height:2.25rem; padding:.4rem .65rem; border:1px solid var(--att-color-border, #dce2ec); border-radius:var(--att-radius-control, .55rem); background:var(--att-color-surface, #fff); color:var(--att-color-text, #182237); font:inherit; cursor:pointer; }
 .att-event-controls button:focus-visible, .att-event-controls select:focus-visible, .att-event-controls input:focus-visible { outline:0; box-shadow:var(--att-focus-ring, 0 0 0 3px rgb(49 87 200 / .2)); }
+
+/* Dedicated URL-bound monitoring page; Studio and floating layouts stay independent. */
+.att-standalone-console-shell { height: 100vh; height: 100dvh; min-width: 0; min-height: 0; overflow: hidden; box-sizing: border-box; padding: max(.5rem, env(safe-area-inset-top)) max(.5rem, env(safe-area-inset-right)) max(.5rem, env(safe-area-inset-bottom)) max(.5rem, env(safe-area-inset-left)); background: var(--att-color-surface); }
+.att-standalone-console { height: 100%; min-height: 0; min-width: 0; overflow: hidden; }
+.att-standalone-console .att-job-console-view { display: flex; flex-direction: column; height: 100%; min-height: 0; min-width: 0; gap: .4rem; }
+.att-standalone-console .att-console-view-heading, .att-standalone-console .att-console-switcher, .att-standalone-console .att-event-controls { flex: 0 0 auto; margin: 0; }
+.att-standalone-console .att-console-shell { flex: 1 1 0; height: auto !important; min-height: 0; max-height: none; }
+.att-standalone-console pre.att-console { flex: 1 1 0; min-height: 0; max-height: none; margin: 0; border: 0; border-radius: 0; }
+.att-standalone-console .att-job-events { flex: 1 1 0; min-height: 0; max-height: none; margin: 0; overflow: auto; }
+.att-standalone-console .att-job-console-view > p:last-child { flex: 1 1 0; min-height: 0; overflow: auto; }
+.att-standalone-console .att-console-view-heading .att-eyebrow { margin: 0; }
+.att-standalone-console .att-event-controls { padding: .4rem; gap: .35rem; }
+.att-standalone-console .att-event-controls input[type="search"] { min-width: 0; width: min(14rem, 70vw); }
+
+.att-standalone-console .att-job-console-view > p { flex: 0 0 auto; margin: .15rem 0; }

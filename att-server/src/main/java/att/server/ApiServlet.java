@@ -93,6 +93,7 @@ public final class ApiServlet extends HttpServlet {
                 return;
             }
             if(path.startsWith("/jobs/"))runtime.requireJobOwner(segment(path,2),principal);
+            if(path.matches("/jobs/[^/]+/replay")){Map<String,Object> replay=runtime.jobReplay(segment(path,2),principal);replay.put("requestId",requestId);json(res,200,replay);return;}
             if(path.matches("/jobs/[^/]+/events")){sse(req,res,segment(path,2));return;}
             if(path.matches("/jobs/[^/]+/artifacts/archive\\.zip")){
                 String id=segment(path,2);
@@ -181,9 +182,10 @@ public final class ApiServlet extends HttpServlet {
               catch(Exception failed){error(res,500,"ATT-SERVER-JOB-ACTION-FAILED","Job action could not be completed",requestId);}
             return;
         }
+        boolean createReplayDraft=path.matches("/jobs/[^/]+/replay-draft"),rerunJob=path.matches("/jobs/[^/]+/rerun");
         boolean createRunDraft="/drafts/run".equals(path),createDebugDraft="/drafts/debug".equals(path),createQuickLoadDraft="/drafts/quick-load".equals(path),createAdvancedLoadDraft="/drafts/load".equals(path);
         String command=path.startsWith("/jobs/")?path.substring("/jobs/".length()):"";
-        if(!createRunDraft&&!createDebugDraft&&!createQuickLoadDraft&&!createAdvancedLoadDraft&&!List.of("run","debug","load","validate").contains(command)){error(res,404,"ATT-SERVER-NOT-FOUND","API resource was not found",requestId);return;}
+        if(!createReplayDraft&&!rerunJob&&!createRunDraft&&!createDebugDraft&&!createQuickLoadDraft&&!createAdvancedLoadDraft&&!List.of("run","debug","load","validate").contains(command)){error(res,404,"ATT-SERVER-NOT-FOUND","API resource was not found",requestId);return;}
         try {
             if(!isJson(req.getContentType())){error(res,415,"ATT-SERVER-UNSUPPORTED-MEDIA-TYPE","Content-Type must be application/json",requestId);return;}
             if(!checkOrigin(req,res,requestId,false))return;
@@ -193,6 +195,8 @@ public final class ApiServlet extends HttpServlet {
             try{input=ServerRuntime.JSON.readTree(body);}catch(JsonProcessingException malformed){error(res,400,"ATT-SERVER-INVALID-REQUEST","Request body is not valid JSON",requestId);return;}
             if(input==null||!input.isObject())throw new IllegalArgumentException("A JSON object is required");
             RequestIdentity identity=RequestIdentity.resolve(runtime.config.authenticationRequired,authorizationPrincipal,input);
+            if(createReplayDraft){if(input.size()!=0)throw new IllegalArgumentException("Replay review accepts an empty object");Map<String,Object> draft=runtime.createJobReplayDraft(segment(path,2),identity.authorizationPrincipal());draft.put("requestId",requestId);json(res,201,draft);return;}
+            if(rerunJob){Map<String,Object> job=runtime.rerunJob(segment(path,2),input,identity.authorizationPrincipal());job.put("requestId",requestId);res.setHeader("Location",req.getContextPath()+"/api/v1/jobs/"+job.get("jobId"));json(res,202,job);return;}
             if(createRunDraft){Map<String,Object> draft=runtime.createRunDraft(input,identity.authorizationPrincipal());draft.put("requestId",requestId);json(res,201,draft);return;}
             if(createDebugDraft){DebugDraft draft=ServerRuntime.JSON.convertValue(runtime.createDebugDraft(input,identity.authorizationPrincipal()),DebugDraft.class);draft.requestId=requestId;json(res,201,draft);return;}
             if(createQuickLoadDraft){LoadDraft draft=ServerRuntime.JSON.convertValue(runtime.createQuickLoadDraft(input,identity.authorizationPrincipal()),LoadDraft.class);draft.requestId=requestId;json(res,201,draft);return;}
@@ -341,9 +345,9 @@ public final class ApiServlet extends HttpServlet {
         if(!requireOperator(req,res,requestId))return;
         try {
             String[] parts=path.split("/");
-            if(parts.length==2){String type=req.getParameter("executionType");if(type!=null&&!List.of("run","load").contains(type))throw new IllegalArgumentException("executionType must be run or load");json(res,200,Map.of("items",runtime.loadSchedules().stream().filter(schedule->type==null||type.equals("load".equals(schedule.effectiveJobType())?"load":"run")).map(runtime::loadScheduleView).toList(),"requestId",requestId));return;}
+            if(parts.length==2){String type=req.getParameter("executionType");if(type!=null&&!List.of("run","load").contains(type))throw new IllegalArgumentException("executionType must be run or load");json(res,200,Map.of("items",runtime.loadSchedules().stream().filter(schedule->type==null||type.equals("load".equals(schedule.effectiveJobType())?"load":"run")).map(schedule->runtime.loadScheduleView(schedule,principal)).toList(),"requestId",requestId));return;}
             String id=parts[2];
-            if(parts.length==3){LoadSchedule item=runtime.loadSchedule(id);Map<String,Object> view=runtime.loadScheduleView(item);view.put("requestId",requestId);json(res,200,view);return;}
+            if(parts.length==3){LoadSchedule item=runtime.loadSchedule(id);Map<String,Object> view=runtime.loadScheduleView(item,principal);view.put("requestId",requestId);json(res,200,view);return;}
             if(parts.length==4&&"executions".equals(parts[3])){int limit=parseScheduleLimit(req.getParameter("limit"));json(res,200,Map.of("items",runtime.loadScheduleExecutions(id,limit),"scheduleId",id,"requestId",requestId));return;}
             error(res,404,"ATT-SERVER-NOT-FOUND","API resource was not found",requestId);
         } catch(ServerRuntime.NotFoundException e){error(res,404,"ATT-SERVER-NOT-FOUND","API resource was not found",requestId);}
@@ -361,14 +365,15 @@ public final class ApiServlet extends HttpServlet {
         if(!checkOrigin(req,res,requestId,false))return;
         String[] parts=path.split("/");
         try {
-            if(parts.length==2){JsonNode body=scheduleBody(req,res,requestId);if(body==null)return;LoadSchedule item=runtime.createLoadSchedule(body,principal);res.setHeader("Location",req.getContextPath()+"/api/v1/load-schedules/"+item.id);Map<String,Object> view=runtime.loadScheduleView(item);view.put("requestId",requestId);json(res,201,view);return;}
+            if(parts.length==2){JsonNode body=scheduleBody(req,res,requestId);if(body==null)return;LoadSchedule item=runtime.createLoadSchedule(body,principal);res.setHeader("Location",req.getContextPath()+"/api/v1/load-schedules/"+item.id);Map<String,Object> view=runtime.loadScheduleView(item,principal);view.put("requestId",requestId);json(res,201,view);return;}
             if(parts.length==3&&"preview".equals(parts[2])){JsonNode body=scheduleBody(req,res,requestId);if(body==null)return;Map<String,Object> preview=new LinkedHashMap<>(runtime.previewLoadSchedule(body));preview.put("requestId",requestId);json(res,200,preview);return;}
             if(parts.length==4&&"trigger".equals(parts[3])){Map<String,Object> result=runtime.triggerLoadSchedule(parts[2],principal);result.put("requestId",requestId);json(res,202,result);return;}
             if(parts.length==4&&("pause".equals(parts[3])||"resume".equals(parts[3]))) {
-                LoadSchedule item=runtime.setLoadScheduleEnabled(parts[2],"resume".equals(parts[3]),principal);Map<String,Object> view=runtime.loadScheduleView(item);view.put("requestId",requestId);json(res,200,view);return;
+                LoadSchedule item=runtime.setLoadScheduleEnabled(parts[2],"resume".equals(parts[3]),principal);Map<String,Object> view=runtime.loadScheduleView(item,principal);view.put("requestId",requestId);json(res,200,view);return;
             }
             error(res,404,"ATT-SERVER-NOT-FOUND","API resource was not found",requestId);
         } catch(ServerRuntime.NotFoundException e){error(res,404,"ATT-SERVER-NOT-FOUND","API resource was not found",requestId);}
+          catch(ServerRuntime.ScheduleSourceChangedException e){error(res,409,"ATT-SERVER-SCHEDULE-SOURCE-CHANGED","package-revision-changed",requestId);}
           catch(ServerRuntime.DraftValidationException e){error(res,400,"ATT-SERVER-INVALID-REQUEST",e.getMessage(),requestId,e.diagnostics);}
           catch(ServerRuntime.StaleDraftException e){error(res,409,"ATT-SERVER-DRAFT-STALE","The validated execution draft expired or changed; validate it again",requestId);}
           catch(ServerRuntime.InspectionCapacityException e){error(res,503,"ATT-SERVER-INSPECTION-CAPACITY","Package inspection capacity is full; retry shortly",requestId);}
@@ -386,8 +391,9 @@ public final class ApiServlet extends HttpServlet {
         if(!checkOrigin(req,res,requestId,false))return;
         String[] parts=path.split("/");if(parts.length!=3){error(res,404,"ATT-SERVER-NOT-FOUND","API resource was not found",requestId);return;}
         JsonNode body=scheduleBody(req,res,requestId);if(body==null)return;
-        try{LoadSchedule item=runtime.updateLoadSchedule(parts[2],body,principal);Map<String,Object> view=runtime.loadScheduleView(item);view.put("requestId",requestId);json(res,200,view);}
+        try{LoadSchedule item=runtime.updateLoadSchedule(parts[2],body,principal);Map<String,Object> view=runtime.loadScheduleView(item,principal);view.put("requestId",requestId);json(res,200,view);}
         catch(ServerRuntime.NotFoundException e){error(res,404,"ATT-SERVER-NOT-FOUND","API resource was not found",requestId);}
+        catch(ServerRuntime.ScheduleSourceChangedException e){error(res,409,"ATT-SERVER-SCHEDULE-SOURCE-CHANGED","package-revision-changed",requestId);}
         catch(ServerRuntime.ScheduleConflictException e){error(res,409,"ATT-SERVER-SCHEDULE-CHANGED","The schedule changed while it was being edited; reload it and retry",requestId);}
         catch(ServerRuntime.DraftValidationException e){error(res,400,"ATT-SERVER-INVALID-REQUEST",e.getMessage(),requestId,e.diagnostics);}
         catch(ServerRuntime.InspectionCapacityException e){error(res,503,"ATT-SERVER-INSPECTION-CAPACITY","Package inspection capacity is full; retry shortly",requestId);}

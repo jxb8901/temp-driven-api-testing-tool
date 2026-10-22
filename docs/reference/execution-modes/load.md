@@ -275,7 +275,7 @@ IDs must be non-empty, path-safe single segments and unique within the Load run.
 
 execIdFormat permits deterministic, side-effect-free built-ins only; external calls, seq.next(), random, clock and filesystem functions are rejected. See [Migration Notes](../appendices/migrations.md) for schema migration.
 
-## Error rates and failure diagnosis (4.2.2)
+## Error rates and failure diagnosis (4.2.3)
 
 Measured completions are divided into PASS, SUT failures, and runtime ERROR/INVALID. Warm-up is excluded from measured rates; it can still make execution ERROR. Generator drops remain separate.
 

@@ -116,6 +116,9 @@ final class LoadScheduleScheduler implements AutoCloseable {
         try {
             Map<String,Object> job=submitter.submit(schedule,occurrenceId,executionPrincipal);
             store.updateOccurrence(occurrenceId,"submitted",null,String.valueOf(job.get("jobId")));
+        } catch(ServerRuntime.ScheduleSourceChangedException changed) {
+            store.updateOccurrence(occurrenceId,"failed-to-submit","package-revision-changed",null);
+            store.recordScheduleSourceChange(schedule,changed.currentRevision,"pause".equals(changed.policy),clock.instant().toString());
         } catch(Exception failure) {
             String reason=ServerRuntime.safeMessage(failure);
             store.updateOccurrence(occurrenceId,"failed-to-submit",reason.length()>240?reason.substring(0,240):reason,null);

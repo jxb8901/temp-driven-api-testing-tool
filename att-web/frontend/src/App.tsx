@@ -348,8 +348,10 @@ export default function App() {
       if (version.apiVersion !== '1') throw new Error('Incompatible ATT Server API version: expected v1.');
       if (controller.signal.aborted) return;
       dispatch({ type: 'version/ready', data: version });
-      void loadPackages(controller.signal);
-      void loadJobs(controller.signal);
+      if (navigation.route.kind !== 'job-console') {
+        void loadPackages(controller.signal);
+        void loadJobs(controller.signal);
+      }
     }).catch(error => {
       if (controller.signal.aborted) return;
       const reason = asError(error);
@@ -358,7 +360,7 @@ export default function App() {
       dispatch({ type: 'jobs/error', error: reason });
     });
     return () => controller.abort();
-  }, [loadJobs, loadPackages]);
+  }, [loadJobs, loadPackages, navigation.route.kind === 'job-console']);
 
   const previousRouteKind = useRef(navigation.route.kind);
   useEffect(() => {
@@ -405,9 +407,9 @@ export default function App() {
   } else if (navigation.route.kind === 'job-console') {
     content = <Suspense fallback={<div className="page-content" role="status" aria-busy="true">Loading Job console…</div>}><StandaloneJobConsolePage jobId={navigation.route.jobId} view={navigation.route.view} /></Suspense>;
   } else if (navigation.route.kind === 'jobs' && navigation.route.jobId) {
-    content = <Suspense fallback={<div role="status">Loading jobs…</div>}><JobsPage api={loadJobsApi} jobId={navigation.route.jobId} onOpenJob={onJobChange} onShowList={() => navigation.navigate({ kind: 'jobs' })} /></Suspense>;
+    content = <Suspense fallback={<div role="status">Loading jobs…</div>}><JobsPage api={loadJobsApi} onSchedule={capabilities.loadSchedulingEnabled ? onSchedule : undefined} onEditSchedule={id => navigation.navigate({ kind: 'schedules', view: 'edit', scheduleId: id })} jobId={navigation.route.jobId} onOpenJob={onJobChange} onShowList={() => navigation.navigate({ kind: 'jobs' })} /></Suspense>;
   } else if (navigation.route.kind === 'jobs') {
-    content = <Suspense fallback={<div role="status">Loading jobs…</div>}><JobsPage api={loadJobsApi} onOpenJob={onJobChange} onShowList={() => navigation.navigate({ kind: 'jobs' })} /></Suspense>;
+    content = <Suspense fallback={<div role="status">Loading jobs…</div>}><JobsPage api={loadJobsApi} onSchedule={capabilities.loadSchedulingEnabled ? onSchedule : undefined} onEditSchedule={id => navigation.navigate({ kind: 'schedules', view: 'edit', scheduleId: id })} onOpenJob={onJobChange} onShowList={() => navigation.navigate({ kind: 'jobs' })} /></Suspense>;
   } else if (navigation.route.kind === 'schedules') {
     content = <Suspense fallback={<div className="page-content" role="status" aria-busy="true">Loading Schedules…</div>}>
       <ScheduledLoadPage

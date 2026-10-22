@@ -346,6 +346,7 @@ export function AppShell({
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
+      if (route.kind === 'job-console') return;
       const target = event.target as HTMLElement | null;
       const editable = Boolean(target && (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName)));
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
@@ -363,7 +364,7 @@ export function AppShell({
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [keyboardMode, mobileNavigationOpen]);
+  }, [keyboardMode, mobileNavigationOpen, route.kind]);
 
   useEffect(() => {
     if (!mobileNavigationOpen) return;
@@ -402,7 +403,9 @@ export function AppShell({
   return (
     <NavigationGuardContext.Provider value={navigation}>
       <AppShellContext.Provider value={{ selectedPackage, selectedEnvironment, themePreference, uiLocale, uiLocalePreference, authMode: versionData?.authMode, currentUser, accessCapabilities, canRevealConfigurationFields, onPackageChange, onEnvironmentChange, onThemePreferenceChange: changeThemePreference, onUiLocaleChange: changeUiLocale, onJobAccepted }}>
-      <JobConsoleProvider jobsApi={api}>
+      {route.kind === 'job-console' ? <main key={inspectionSessionEpoch} id="main-content" className="att-standalone-console-shell" tabIndex={-1}>
+        {capabilitiesResolved ? children : <div role="status" aria-busy="true">Checking ATT access…</div>}
+      </main> : <JobConsoleProvider jobsApi={api}>
       <div className={'app-layout' + (collapsed ? ' is-collapsed' : '') + (mobileNavigationOpen ? ' mobile-nav-open' : '')} data-page={currentPage}>
         <a className="skip-link" href="#main-content">Skip to main content</a>
         <button className="sidebar-backdrop" type="button" aria-label="Close navigation" aria-hidden={!mobileNavigationOpen} onClick={() => setMobileNavigationOpen(false)} tabIndex={-1} />
@@ -442,7 +445,7 @@ export function AppShell({
               <span className="nav-icon" aria-hidden="true">⚙</span><span className="nav-label">Settings</span>
             </a>}
           </nav>
-          <div className="sidebar-footer"><span>ATT Server</span><span className="sidebar-version">{versionData?.version || '4.2.2'}</span></div>
+          <div className="sidebar-footer"><span>ATT Server</span><span className="sidebar-version">{versionData?.version || '4.2.3'}</span></div>
         </aside>
 
         <div className="app-frame">
@@ -493,7 +496,7 @@ export function AppShell({
                   {route.packageId && <Breadcrumb label={route.packageId} href={packageHref} navigate={navigate} />}
                   {route.packageId && <Breadcrumb label="Advanced Load" navigate={navigate} />}
                 </>}
-                {(route.kind === 'jobs' || route.kind === 'job-console') && <>
+                {route.kind === 'jobs' && <>
                   <Breadcrumb label="Jobs and results" href={route.jobId ? '#/jobs' : undefined} navigate={navigate} />
                   {route.jobId && <Breadcrumb label={'Job ' + route.jobId} navigate={navigate} />}
                 </>}
@@ -523,7 +526,7 @@ export function AppShell({
         <KeyboardDialog open={keyboardMode !== null} mode={keyboardMode || 'palette'} showScheduledLoad={showScheduledLoad&&accessCapabilities.operate} selectedPackage={selectedPackage} accessCapabilities={accessCapabilities}
           onClose={() => setKeyboardMode(null)} onNavigate={target => { navigate(target); setKeyboardMode(null); setMobileNavigationOpen(false); }} />
       </div>
-      </JobConsoleProvider>
+      </JobConsoleProvider>}
       </AppShellContext.Provider>
     </NavigationGuardContext.Provider>
   );

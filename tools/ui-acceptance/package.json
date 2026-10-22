@@ -1,12 +1,13 @@
 {
   "name": "att-ui-acceptance",
   "private": true,
-  "version": "4.2.2",
+  "version": "4.2.3",
   "description": "Development-only browser smoke, accessibility, and screenshot checks for ATT's static UI.",
   "scripts": {
     "smoke": "node smoke.cjs",
     "smoke:explorer": "node explorer-smoke.cjs",
     "smoke:archive-metrics": "node archive-metrics.cjs",
+    "smoke:job-replay": "node job-replay.cjs",
     "smoke:load-jobs": "node load-jobs.cjs",
     "smoke:scheduled-load": "node scheduled-load.cjs",
     "smoke:schedules": "node schedules-unified.cjs",

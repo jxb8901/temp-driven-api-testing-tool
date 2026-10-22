@@ -1,3 +1,4 @@
+import type { JobReplay } from "./features/load/types";
 import { ApiError, type ApiEnvelope, type ApiErrorBody, type JobSummary, type LocalAuthUser, type PackageSummary, type ServerVersion } from './types';
 import type {
   AcceptedJob, ConfigurationComparisonQuery, ConfigurationFilePage, ConfigurationResponse, DebugDraftRequest, DraftResponse,
@@ -310,6 +311,15 @@ export const api = {
   async listJobs(input: { principal?: string; pinnedOnly?: boolean; signal?: AbortSignal } = {}): Promise<LoadJobSummary[]> {
     const envelope = await request<ApiEnvelope<LoadJobSummary>>('jobs' + queryString({ principal: input.principal, pinnedOnly: input.pinnedOnly }), { signal: input.signal });
     return Array.isArray(envelope.items) ? envelope.items.slice(0, 100) : [];
+  },
+  getJobReplay(jobId: string): Promise<JobReplay> {
+    return request<JobReplay>('jobs/' + encodeURIComponent(jobId) + '/replay');
+  },
+  createJobReplayDraft(jobId: string): Promise<JobReplay> {
+    return postJson<JobReplay>('jobs/' + encodeURIComponent(jobId) + '/replay-draft', {});
+  },
+  rerunJob(jobId: string, intentId: string): Promise<{ jobId: string }> {
+    return postJson<{ jobId: string }>('jobs/' + encodeURIComponent(jobId) + '/rerun', { intentId, confirm: true });
   },
   getJob(jobId: string, signal?: AbortSignal): Promise<JobView> {
     return request<JobView>('jobs/' + encodeURIComponent(jobId), { signal });

@@ -292,7 +292,7 @@ public final class WorkerMain {
             if("revision".equals(r.inspectionAction)) {
                 inspector.verifyRevision(r.expectedRevisionDigest);
                 return new OperationResult(null,"PASS",0,0,Collections.<att.validation.Diagnostic>emptyList(),
-                        Collections.<String,String>emptyMap(),Collections.<String,Object>singletonMap("inspection",Collections.<String,Object>emptyMap()));
+                        Collections.<String,String>emptyMap(),Collections.<String,Object>singletonMap("inspection",Collections.<String,Object>singletonMap("revisionDigest",inspector.executionRevisionDigest())));
             }
             if("debug-form".equals(r.inspectionAction)) {
                 Map<String,Object> inspected=inspector.inspectDebugForm(r.inspectionType,r.inspectionResourceId,r.expectedRevisionDigest);
