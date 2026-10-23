@@ -23,4 +23,7 @@ public final class ArtifactArchiveMetrics {
     public Long includedBytes;
     public Long zipBytes;
     public Double compressionRatio;
+    public Long temporaryExportFiles;
+    public Long temporaryExportBytes;
+    public Long memoryExportPeakBytes;
 }

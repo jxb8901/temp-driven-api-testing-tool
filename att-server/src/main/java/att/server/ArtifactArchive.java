@@ -28,6 +28,7 @@ final class ArtifactArchive {
     static final long MAX_TOTAL_BYTES = 128L * 1024 * 1024;
     static final int MAX_MANIFEST_BYTES = 8 * 1024 * 1024;
     static final int MAX_CANDIDATES = 50_000;
+    static final long MAX_MEMORY_EXPORT_BYTES = 8L * 1024 * 1024;
     static final long MAX_ARCHIVE_BYTES = MAX_TOTAL_BYTES + MAX_MANIFEST_BYTES + 4L * 1024 * 1024;
     private static final Set<String> SAFE_EXTENSIONS = Set.of("txt", "log", "json", "yaml", "yml", "xml", "html", "htm", "css", "csv", "md");
     private static final String OMISSION_REASON = "unsupported, unsafe, duplicate, binary, oversized, or unapproved output";
@@ -43,11 +44,18 @@ final class ArtifactArchive {
     private ArtifactArchive() {}
 
     static Path build(Path output, Path archive, Publisher publisher) throws Exception {
+        return build(output,archive,publisher,MAX_MEMORY_EXPORT_BYTES);
+    }
+
+    /** The zero-budget path also provides a controlled disk-staging benchmark. */
+    static Path build(Path output, Path archive, Publisher publisher,long memoryBudget) throws Exception {
+        if(memoryBudget<0||memoryBudget>MAX_MEMORY_EXPORT_BYTES)throw new IllegalArgumentException("Artifact memory budget exceeds limits");
         ArtifactMetricsRecorder metrics = ArtifactMetricsRecorder.CURRENT.get();
         if (metrics != null) {
             metrics.phase("scan_classification_redaction");
             metrics.value.sourceFiles=0L;metrics.value.sourceBytes=0L;
             metrics.value.includedEntries=0L;metrics.value.omittedEntries=0L;metrics.value.includedBytes=0L;
+            metrics.value.temporaryExportFiles=0L;metrics.value.temporaryExportBytes=0L;metrics.value.memoryExportPeakBytes=0L;
         }
         if (Files.isSymbolicLink(output)) throw new IllegalArgumentException("Job output root must not be a symbolic link");
         Path requestedRoot=output.toAbsolutePath().normalize(),root=output.toRealPath();
@@ -59,6 +67,7 @@ final class ArtifactArchive {
         try {
             List<Path> candidates=inventory(root);
             Set<String> names=new HashSet<>();List<String> approved=new ArrayList<>();long total=0;int omitted=0;
+            Map<String,byte[]> memoryExports=new LinkedHashMap<>();long retained=0;
             for(Path candidate:candidates) {
                 if(root.relativize(candidate).getNameCount()>=64&&Files.isDirectory(candidate,LinkOption.NOFOLLOW_LINKS))throw new IllegalArgumentException("Artifact directory depth exceeds limits");
                 if(candidate.equals(root)||Files.isDirectory(candidate,LinkOption.NOFOLLOW_LINKS))continue;
@@ -75,14 +84,23 @@ final class ArtifactArchive {
                 if(bytes.length>MAX_ENTRY_BYTES){omitted++;if(metrics!=null)metrics.value.omittedEntries=(long)omitted;continue;}
                 if(total+bytes.length>MAX_TOTAL_BYTES)throw new IllegalArgumentException("Artifact total size exceeds limits");
                 names.add(lower);approved.add(relative);total+=bytes.length;
-                Path target=exports.resolve(relative);Files.createDirectories(target.getParent());Files.write(target,bytes);
+                if(bytes.length<=memoryBudget-retained) {
+                    memoryExports.put(relative,bytes);retained+=bytes.length;
+                    if(metrics!=null)metrics.value.memoryExportPeakBytes=retained;
+                } else {
+                    Path target=exports.resolve(relative);Files.createDirectories(target.getParent());Files.write(target,bytes);
+                    if(metrics!=null){metrics.value.temporaryExportFiles++;metrics.value.temporaryExportBytes+=bytes.length;}
+                }
             }
             // Resolve report links only after classification, so omitted evidence never leaves a dangling raw link.
             Set<String> paths=Set.copyOf(approved);List<Entry> entries=new ArrayList<>();total=0;
             if(metrics!=null)metrics.phase("zip_write");
             try(ZipOutputStream zip=new ZipOutputStream(Files.newOutputStream(staging))) {
                 for(String relative:approved) {
-                    byte[] bytes=Files.readAllBytes(exports.resolve(relative));
+                    // Both paths contain only Publisher-approved bytes from pass 1.
+                    // Never reopen raw output after approval or sanitize twice.
+                    byte[] bytes=memoryExports.remove(relative);
+                    if(bytes==null)bytes=Files.readAllBytes(exports.resolve(relative));
                     boolean report=Set.of("html","htm").contains(extension(relative));
                     if(report) {
                         if(metrics!=null)metrics.phase("scan_classification_redaction");
