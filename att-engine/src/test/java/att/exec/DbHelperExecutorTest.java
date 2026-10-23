@@ -153,6 +153,43 @@ class DbHelperExecutorTest {
         }
     }
 
+    @Test void pooledHelpersKeepIndependentStatementAndCaseLifecyclesWithinOneCase() throws Exception {
+        DbHelperConfig statement = new DbHelperConfig("statementDb", "Statement DB", "Statement DB",
+                "jdbc:att-test:multi-statement", "user", "secret", "", Collections.<String, String>emptyMap(),
+                false, "driverDefault", 5, "statement", "commit", 10, 1024, 8192, "hash", "masked", 1, 0, 250L, null);
+        DbHelperConfig caseScoped = new DbHelperConfig("caseDb", "Case DB", "Case DB",
+                "jdbc:att-test:multi-case", "user", "secret", "", Collections.<String, String>emptyMap(),
+                false, "driverDefault", 5, "case", "rollback", 10, 1024, 8192, "hash", "masked", 1, 0, 250L, null);
+        Map<String, DbHelperConfig> helpers = new LinkedHashMap<String, DbHelperConfig>();
+        helpers.put(statement.id(), statement);
+        helpers.put(caseScoped.id(), caseScoped);
+        att.load.HikariDbConnectionProvider provider = new att.load.HikariDbConnectionProvider();
+        att.load.HikariDbPool statementPool = provider.pool(statement);
+        att.load.HikariDbPool casePool = provider.pool(caseScoped);
+        try (DbHelperExecutor executor = new DbHelperExecutor(tempDir,
+                frameworkConfig(Collections.<String, ToolConfig>emptyMap(), helpers), provider);
+             CaseExecutionLog log = new CaseExecutionLog(tempDir.resolve("multi-helper.log"))) {
+            executor.beginCase();
+            assertTrue(executor.execute("statementDb", "query", "select ONE", "inline", Collections.emptyList(), "s1").success());
+            assertTrue(executor.execute("caseDb", "query", "select ONE", "inline", Collections.emptyList(), "c1").success());
+            assertTrue(executor.execute("statementDb", "update", "update audit set status='DONE'", "inline", Collections.emptyList(), "s2").success());
+            assertTrue(executor.execute("caseDb", "update", "update audit set status='DONE'", "inline", Collections.emptyList(), "c2").success());
+
+            assertEquals(0, statementPool.active());
+            assertEquals(1, casePool.active());
+            assertEquals(2L, statementPool.metrics().get("borrowCount"));
+            assertEquals(2L, statementPool.metrics().get("releasedConnections"));
+            assertEquals(1L, casePool.metrics().get("borrowCount"));
+            assertEquals(2L, casePool.metrics().get("statementCount"));
+
+            assertTrue(executor.finishCase(context(), log).isEmpty());
+            assertEquals(0, statementPool.active());
+            assertEquals(0, casePool.active());
+            assertEquals(1L, casePool.metrics().get("releasedConnections"));
+            assertEquals(1, driver.states.get("jdbc:att-test:multi-case").rollbacks);
+        }
+    }
+
     @Test void configuredDbPresentationIsAutomaticForActionsAndExpressionsAndKeepsRowsTyped() throws Exception {
         att.TestSchemas.install(tempDir);
         Path helper = tempDir.resolve("config/dbhelpers/db.yaml");
@@ -310,6 +347,38 @@ class DbHelperExecutorTest {
             provider.close();
         }
         assertTrue(driver.states.get("jdbc:att-test:hikari").closes >= 1);
+    }
+
+    @Test void executorClassifiesPoolTimeoutWithoutLeakingConnectionOrSqlDetails() throws Exception {
+        String url = "jdbc:att-test:executor-timeout?token=url-secret";
+        DbHelperConfig config = new DbHelperConfig("timeout", "Timeout", "Timeout DB", url,
+                "user", "password-secret", "", Collections.<String, String>emptyMap(), false, "driverDefault", 5,
+                "statement", "rollback", 10, 1024, 8192, "hash", "masked", 1, 0, 250L, null);
+        att.load.HikariDbConnectionProvider provider = new att.load.HikariDbConnectionProvider();
+        att.load.HikariDbPool pool = provider.pool(config);
+        try (DbHelperExecutor executor = new DbHelperExecutor(tempDir,
+                frameworkConfig(Collections.<String, ToolConfig>emptyMap(), Collections.singletonMap("timeout", config)), provider)) {
+            Connection held = pool.borrow();
+            try {
+                DbInvocationResult timedOut = executor.execute("timeout", "query", "select 'sql-secret'", "inline",
+                        Collections.emptyList(), "pool-timeout");
+                assertFalse(timedOut.success());
+                Map<?, ?> error = (Map<?, ?>) ((Map<?, ?>) timedOut.result()).get("error");
+                assertEquals("DB_POOL_TIMEOUT", error.get("type"));
+                String diagnostics = String.valueOf(error.get("message")) + timedOut.evidence();
+                assertFalse(diagnostics.contains("password-secret"));
+                assertFalse(diagnostics.contains(url));
+                assertFalse(diagnostics.contains("url-secret"));
+                assertFalse(diagnostics.contains("sql-secret"));
+                assertEquals(1L, pool.metrics().get("borrowTimeouts"));
+                assertEquals(0L, pool.metrics().get("statementCount"));
+            } finally {
+                held.close();
+            }
+            assertTrue(executor.execute("timeout", "query", "select ONE", "inline", Collections.emptyList(), "recovered").success());
+            assertEquals(0, pool.active());
+            assertEquals(1L, pool.metrics().get("statementCount"));
+        }
     }
 
     @Test void keepsRowsAsAListAndReportsLimitsAndDuplicateLabels() throws Exception {
