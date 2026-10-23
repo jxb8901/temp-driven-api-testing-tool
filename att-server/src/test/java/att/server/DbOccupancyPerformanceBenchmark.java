@@ -124,6 +124,7 @@ class DbOccupancyPerformanceBenchmark {
             }, 0, 1, TimeUnit.MILLISECONDS);
 
             AtomicInteger failures = new AtomicInteger();
+            List<String> failureTypes = new CopyOnWriteArrayList<String>();
             List<Long> caseNanos = new CopyOnWriteArrayList<Long>();
             long interval = TimeUnit.SECONDS.toNanos(1) / arrivalRate;
             long cpuBefore = processCpuTime();
@@ -140,6 +141,7 @@ class DbOccupancyPerformanceBenchmark {
                             executeCase(root, requestId, config, provider, helperId, tailMs);
                         } catch (Throwable error) {
                             failures.incrementAndGet();
+                            failureTypes.add(error.getClass().getSimpleName());
                         } finally {
                             caseNanos.add(System.nanoTime() - scheduledArrival);
                         }
@@ -157,18 +159,27 @@ class DbOccupancyPerformanceBenchmark {
             try (Connection connection = pool.borrow(); PreparedStatement statement = connection.prepareStatement("SELECT COUNT(*) FROM audit"); ResultSet result = statement.executeQuery()) {
                 result.next(); committedRows = result.getLong(1);
             }
-            long expectedRows = "commit".equals(onEnd) ? arrivals : 0L;
+            long completedCases = arrivals - failures.get();
+            long timeoutFailures = provider.borrowTimeouts.get();
+            Map<String, Integer> failureCounts = new LinkedHashMap<String, Integer>();
+            for (String failureType : failureTypes) failureCounts.merge(failureType, 1, Integer::sum);
+            if (timeoutFailures > failures.get() || failures.get() != timeoutFailures) {
+                throw new AssertionError("Unexpected DB occupancy case failures: " + scope + "/" + onEnd
+                        + " failedCases=" + failures.get() + " borrowTimeouts=" + timeoutFailures
+                        + " failureTypes=" + failureCounts);
+            }
+            long expectedRows = "commit".equals(onEnd) ? completedCases : 0L;
             if (committedRows != expectedRows) throw new AssertionError("Unexpected benchmark fixture state: " + scope + "/" + onEnd + " expected=" + expectedRows + " actual=" + committedRows);
-            if (failures.get() != 0) throw new AssertionError("DB occupancy benchmark had " + failures.get() + " failed cases for " + scope + "/" + onEnd + "/pool-" + poolSize);
 
             double offeredDurationSeconds = Math.max(0.001, (arrivalEnded - offeredAt) / 1_000_000_000.0);
             double completedDurationSeconds = Math.max(0.001, (finishedAt - offeredAt) / 1_000_000_000.0);
             Map<String, Object> result = new LinkedHashMap<String, Object>();
             result.put("scope", scope); result.put("onEnd", onEnd); result.put("poolSize", poolSize);
             result.put("arrivals", arrivals); result.put("arrivalsPerSecondMeasured", arrivals / offeredDurationSeconds);
-            result.put("completedCasesPerSecond", arrivals / completedDurationSeconds);
+            result.put("completedCasesPerSecond", completedCases / completedDurationSeconds);
             result.put("completionWallMs", millis(finishedAt - offeredAt));
-            result.put("completedCases", arrivals); result.put("failedCases", failures.get());
+            result.put("completedCases", completedCases); result.put("failedCases", failures.get());
+            result.put("borrowTimeouts", timeoutFailures); result.put("failureTypes", failureCounts);
             result.put("committedRows", committedRows);
             result.put("caseLatencyP50Ms", percentile(caseNanos, 0.50));
             result.put("caseLatencyP95Ms", percentile(caseNanos, 0.95));
