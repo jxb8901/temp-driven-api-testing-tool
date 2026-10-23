@@ -57,10 +57,7 @@ final class ArtifactArchive {
         Path exports=Files.createTempDirectory(destination.getParent(),".artifact-export-");
         boolean published=false;
         try {
-            List<Path> candidates;
-            try(var paths=Files.walk(root,64)){candidates=paths.limit(MAX_CANDIDATES+1L).toList();}
-            if(candidates.size()>MAX_CANDIDATES)throw new IllegalArgumentException("Artifact inventory exceeds limits");
-            candidates=candidates.stream().sorted(Comparator.comparing(p->root.relativize(p).toString())).toList();
+            List<Path> candidates=inventory(root);
             Set<String> names=new HashSet<>();List<String> approved=new ArrayList<>();long total=0;int omitted=0;
             for(Path candidate:candidates) {
                 if(root.relativize(candidate).getNameCount()>=64&&Files.isDirectory(candidate,LinkOption.NOFOLLOW_LINKS))throw new IllegalArgumentException("Artifact directory depth exceeds limits");
@@ -120,6 +117,37 @@ final class ArtifactArchive {
             if(!published)Files.deleteIfExists(staging);
             try(var paths=Files.walk(exports)){for(Path file:paths.sorted(Comparator.reverseOrder()).toList())Files.deleteIfExists(file);}
         }
+    }
+
+    /** Prune only the established private LOAD bookkeeping namespace. Never follow links. */
+    private static List<Path> inventory(Path root) throws java.io.IOException {
+        List<Path> candidates = new ArrayList<>();
+        Files.walkFileTree(root, Set.of(), 64, new java.nio.file.SimpleFileVisitor<Path>() {
+            private void count(Path path) {
+                if (candidates.size() >= MAX_CANDIDATES)
+                    throw new IllegalArgumentException("Artifact inventory exceeds limits");
+                candidates.add(path);
+            }
+            @Override public java.nio.file.FileVisitResult preVisitDirectory(Path directory,
+                    java.nio.file.attribute.BasicFileAttributes attributes) {
+                Path relative = root.relativize(directory);
+                // Exact spelling and position: aliases, arbitrary hidden folders
+                // and symlinks remain untrusted candidates with the usual bounds.
+                if (relative.getNameCount() == 3 && "load".equals(relative.getName(0).toString())
+                        && ".exec-id-reservations".equals(relative.getName(2).toString()))
+                    return java.nio.file.FileVisitResult.SKIP_SUBTREE;
+                count(directory);
+                return java.nio.file.FileVisitResult.CONTINUE;
+            }
+            @Override public java.nio.file.FileVisitResult visitFile(Path file,
+                    java.nio.file.attribute.BasicFileAttributes attributes) {
+                if (attributes.isDirectory()) throw new IllegalArgumentException("Artifact directory depth exceeds limits");
+                count(file);
+                return java.nio.file.FileVisitResult.CONTINUE;
+            }
+        });
+        candidates.sort(Comparator.comparing(path -> root.relativize(path).toString()));
+        return candidates;
     }
 
     static byte[] read(Path archive, String requested) throws Exception {

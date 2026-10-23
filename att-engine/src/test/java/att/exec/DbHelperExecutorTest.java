@@ -58,6 +58,101 @@ class DbHelperExecutorTest {
         DriverManager.deregisterDriver(driver);
     }
 
+    @Test void pooledStatementOccupancyAndCaseFinalizationMatrix() throws Exception {
+        for (String scope : Arrays.asList("statement", "case")) for (String onEnd : Arrays.asList("commit", "rollback")) {
+            String id = scope + onEnd;
+            DbHelperConfig config = new DbHelperConfig(id, id, id, "jdbc:att-test:" + id,
+                    "user", "secret", "", Collections.<String, String>emptyMap(), false, "driverDefault", 5,
+                    scope, onEnd, 10, 1024, 8192, "hash", "masked", 1, 0, 250L, null);
+            att.load.HikariDbConnectionProvider provider = new att.load.HikariDbConnectionProvider();
+            att.load.HikariDbPool pool = provider.pool(config);
+            try (DbHelperExecutor executor = new DbHelperExecutor(tempDir,
+                    frameworkConfig(Collections.<String, ToolConfig>emptyMap(), Collections.singletonMap(id, config)), provider);
+                 CaseExecutionLog log = new CaseExecutionLog(tempDir.resolve(id + ".log"))) {
+                executor.beginCase();
+                long started = System.nanoTime();
+                assertTrue(executor.execute(id, "query", "select ONE", "inline", Collections.emptyList(), "first").success());
+                double sqlMs = (System.nanoTime() - started) / 1_000_000.0;
+                boolean held = Boolean.getBoolean("att.db.baseline") || "case".equals(scope);
+                assertEquals(held ? 1 : 0, pool.active(), scope + "/" + onEnd);
+                if (held) assertThrows(DbConnectionProvider.PoolTimeoutException.class, pool::borrow);
+                else try (Connection other = pool.borrow()) { assertFalse(other.isClosed()); }
+                // The non-DB tail is represented by a deterministic acquisition
+                // attempt, not a flaky scheduling/sleep assertion.
+                assertTrue(executor.execute(id, "update", "update audit set status='DONE'", "inline", Collections.emptyList(), "second").success());
+                CaseRuntimeContext context = context();
+                assertTrue(executor.finishCase(context, log).isEmpty());
+                String expected = "statement".equals(scope) && "commit".equals(onEnd) ? "AUTO_COMMITTED"
+                        : "case".equals(scope) && "commit".equals(onEnd) ? "COMMITTED" : "ROLLED_BACK";
+                assertEquals(expected, context.resolve("CASE.DB." + id + ".state"));
+                assertEquals(0, pool.active());
+                assertEquals(2L, pool.metrics().get("statementCount"));
+                assertEquals("statement".equals(scope) ? 2L : 1L, pool.metrics().get("releasedConnections"));
+                assertTrue(((Number) pool.metrics().get("totalConnectionHoldMs")).doubleValue() > 0);
+                executor.abortCase();
+                System.out.println("DB_OCCUPANCY scope=" + scope + " onEnd=" + onEnd + " queryMs=" + sqlMs
+                        + " borrowCount=" + pool.borrowCount() + " borrowTimeouts=" + pool.borrowTimeouts());
+            }
+        }
+    }
+
+    @Test void pooledStatementErrorsReleaseBeforeTheNextActionAndPreserveFailureEvidence() throws Exception {
+        for (String onEnd : Arrays.asList("commit", "rollback")) {
+            DbHelperConfig config = new DbHelperConfig("db", "DB", "DB", "jdbc:att-test:error-" + onEnd,
+                    "user", "secret", "", Collections.<String, String>emptyMap(), false, "driverDefault", 5,
+                    "statement", onEnd, 10, 1024, 8192, "hash", "masked", 1, 0, 250L, null);
+            att.load.HikariDbConnectionProvider provider = new att.load.HikariDbConnectionProvider();
+            att.load.HikariDbPool pool = provider.pool(config);
+            try (DbHelperExecutor executor = new DbHelperExecutor(tempDir,
+                    frameworkConfig(Collections.<String, ToolConfig>emptyMap(), Collections.singletonMap("db", config)), provider)) {
+                executor.beginCase();
+                for (String operation : Arrays.asList("query", "update")) {
+                    DbInvocationResult failure = executor.execute("db", operation, "FAIL", "inline", Collections.emptyList(), "failure");
+                    assertFalse(failure.success());
+                    assertEquals("SQL_ERROR", ((Map<?, ?>) ((Map<?, ?>) failure.result()).get("error")).get("type"));
+                    assertEquals(0, pool.active());
+                    assertTrue(executor.execute("db", "query", "select ONE", "inline", Collections.emptyList(), "reacquire").success());
+                    assertEquals(0, pool.active());
+                }
+                assertEquals(4L, pool.metrics().get("releasedConnections"));
+                executor.abortCase();
+                executor.abortCase();
+                assertEquals(4L, pool.metrics().get("releasedConnections"));
+            }
+        }
+    }
+
+    @Test void pooledStatementWaitsForInFlightCancellationBeforeReturningTheConnection() throws Exception {
+        String url = "jdbc:att-test:cancel-fence";
+        DbHelperConfig config = new DbHelperConfig("db", "DB", "DB", url,
+                "user", "secret", "", Collections.<String, String>emptyMap(), false, "driverDefault", 5,
+                "statement", "rollback", 10, 1024, 8192, "hash", "masked", 1, 0, 250L, null);
+        att.load.HikariDbConnectionProvider provider = new att.load.HikariDbConnectionProvider();
+        att.load.HikariDbPool pool = provider.pool(config);
+        final FakeState state = driver.states.get(url);
+        java.util.concurrent.ExecutorService worker = java.util.concurrent.Executors.newSingleThreadExecutor();
+        DbHelperExecutor executor = new DbHelperExecutor(tempDir,
+                frameworkConfig(Collections.<String, ToolConfig>emptyMap(), Collections.singletonMap("db", config)), provider);
+        try {
+            java.util.concurrent.Future<DbInvocationResult> result = worker.submit(() -> executor.execute("db", "query",
+                    "select WAIT_CANCEL", "inline", Collections.emptyList(), "cancelled", 10L));
+            assertTrue(state.queryReturned.await(5, java.util.concurrent.TimeUnit.SECONDS));
+            assertFalse(result.isDone());
+            assertEquals(1, pool.active());
+            state.allowCancelReturn.countDown();
+            DbInvocationResult failure = result.get(5, java.util.concurrent.TimeUnit.SECONDS);
+            assertEquals("TIMEOUT", ((Map<?, ?>) ((Map<?, ?>) failure.result()).get("error")).get("type"));
+            assertEquals(0, pool.active());
+            assertEquals(1L, pool.metrics().get("releasedConnections"));
+        } finally {
+            state.allowCancelReturn.countDown();
+            worker.shutdownNow();
+            assertTrue(worker.awaitTermination(5, java.util.concurrent.TimeUnit.SECONDS));
+            executor.closeAll();
+            executor.close();
+        }
+    }
+
     @Test void configuredDbPresentationIsAutomaticForActionsAndExpressionsAndKeepsRowsTyped() throws Exception {
         att.TestSchemas.install(tempDir);
         Path helper = tempDir.resolve("config/dbhelpers/db.yaml");
@@ -716,6 +811,9 @@ class DbHelperExecutorTest {
         String lastSql;
         boolean autoCommit, closed, commitFails;
         final List<Object> boundValues = new ArrayList<Object>();
+        final java.util.concurrent.CountDownLatch cancelStarted = new java.util.concurrent.CountDownLatch(1);
+        final java.util.concurrent.CountDownLatch queryReturned = new java.util.concurrent.CountDownLatch(1);
+        final java.util.concurrent.CountDownLatch allowCancelReturn = new java.util.concurrent.CountDownLatch(1);
     }
 
     private static final class FakeDriver implements Driver {
@@ -769,7 +867,18 @@ class DbHelperExecutorTest {
                     if ("setQueryTimeout".equals(name)) { state.lastQueryTimeout = (Integer) args[0]; return null; }
                     if ("setObject".equals(name)) { state.boundValues.add(args[1]); return null; }
                     if ("setMaxRows".equals(name) || "close".equals(name)) return null;
+                    if ("cancel".equals(name) && sql.contains("WAIT_CANCEL")) {
+                        state.cancelStarted.countDown();
+                        if (!state.allowCancelReturn.await(5, java.util.concurrent.TimeUnit.SECONDS))
+                            throw new SQLException("test cancellation timed out");
+                        return null;
+                    }
                     if ("executeQuery".equals(name)) {
+                        if (sql.contains("WAIT_CANCEL")) {
+                            if (!state.cancelStarted.await(5, java.util.concurrent.TimeUnit.SECONDS))
+                                throw new SQLException("test cancellation did not start");
+                            state.queryReturned.countDown();
+                        }
                         state.executions++;
                         if (sql.contains("FAIL_PRIVATE")) throw new SQLException("rejected parameter "
                                 + state.boundValues.get(state.boundValues.size() - 1), "42000", 99);

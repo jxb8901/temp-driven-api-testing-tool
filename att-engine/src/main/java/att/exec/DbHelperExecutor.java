@@ -216,6 +216,10 @@ public final class DbHelperExecutor implements AutoCloseable {
                 result = failure(operation, "SQL_ERROR", safeMessage(error, config),
                         error instanceof SQLException ? (SQLException) error : null, managed);
                 recordInternalFailure(result, error, "db." + operation, config, log);
+            } finally {
+                // executeStatement has closed its ResultSet/Statement and joined
+                // cancellation before this pooled handle can be returned.
+                managed.releaseIndependentStatement();
             }
         }
         Map<String, Object> evidence = evidence(config, invocationId, operation, source, sql, values,
@@ -308,6 +312,7 @@ public final class DbHelperExecutor implements AutoCloseable {
                     ? "DB_POOL_TIMEOUT" : "CONNECTION_ERROR";
             throw new DbFailure(type, error);
         }
+        long statementStarted = System.nanoTime();
         try (PreparedStatement statement = connection.prepareStatement(sql)) {
             int effectiveTimeoutSeconds = managed.config.timeoutSeconds();
             if (timeoutMs != null) {
@@ -329,15 +334,20 @@ public final class DbHelperExecutor implements AutoCloseable {
             Map<String, Object> result;
             final AtomicBoolean timeoutTriggered = new AtomicBoolean(false);
             final AtomicBoolean cancellationConfirmed = new AtomicBoolean(false);
+            final Object cancellationFence = new Object();
+            final AtomicBoolean statementComplete = new AtomicBoolean(false);
             final java.util.concurrent.atomic.AtomicReference<String> cancellationError = new java.util.concurrent.atomic.AtomicReference<String>();
             ScheduledFuture<?> cancellation = null;
             if (timeoutMs != null) {
                 final PreparedStatement cancellable = statement;
                 cancellation = TIMEOUTS.schedule(new Runnable() {
                     @Override public void run() {
+                        synchronized (cancellationFence) {
+                        if (statementComplete.get()) return;
                         timeoutTriggered.set(true);
                         try { cancellable.cancel(); cancellationConfirmed.set(true); }
                         catch (SQLException error) { cancellationError.set(safeMessage(error, managed.config)); }
+                        }
                     }
                 }, timeoutMs.longValue(), TimeUnit.MILLISECONDS);
             }
@@ -357,8 +367,14 @@ public final class DbHelperExecutor implements AutoCloseable {
                 throw new DbFailure(timeoutTriggered.get() ? "TIMEOUT" : "SQL_ERROR", error,
                         timeoutTriggered.get() ? timeoutDetail(timeoutMs, cancellationConfirmed.get(), cancellationError.get()) : null);
             } finally {
-                if (cancellation != null) cancellation.cancel(false);
+                synchronized (cancellationFence) {
+                    statementComplete.set(true);
+                    if (cancellation != null) cancellation.cancel(false);
+                }
             }
+            if (timeoutTriggered.get()) throw new DbFailure("TIMEOUT",
+                    new SQLTimeoutException("Tool Action timeout exceeded " + timeoutMs + "ms"),
+                    timeoutDetail(timeoutMs, cancellationConfirmed.get(), cancellationError.get()));
             try { managed.afterSuccess(); }
             catch (SQLException error) { throw new DbFailure("SQL_ERROR", error); }
             updateTransactionState(result, managed);
@@ -369,6 +385,8 @@ public final class DbHelperExecutor implements AutoCloseable {
             throw new DbFailure("TIMEOUT", error);
         } catch (SQLException error) {
             throw new DbFailure("SQL_ERROR", error);
+        } finally {
+            if (connectionProvider != null) connectionProvider.statementFinished(managed.config.id(), System.nanoTime() - statementStarted);
         }
     }
 
@@ -607,6 +625,8 @@ public final class DbHelperExecutor implements AutoCloseable {
         Connection connection;
         boolean rollbackOnly;
         boolean usedInCase;
+        boolean openedInCase;
+        long borrowedNanos;
         final Map<String, Object> cache = new LinkedHashMap<String, Object>();
 
         ManagedConnection(DbHelperConfig config) { this.config = config; }
@@ -614,6 +634,7 @@ public final class DbHelperExecutor implements AutoCloseable {
         void beginCase() {
             rollbackOnly = false;
             usedInCase = false;
+            openedInCase = false;
             if (connection == null) return;
             try {
                 if (connection.isClosed()) { connection = null; return; }
@@ -626,7 +647,8 @@ public final class DbHelperExecutor implements AutoCloseable {
 
         Connection connection() throws Exception {
             if (connection != null && !connection.isClosed()) return connection;
-            if (connectionProvider != null) connection = connectionProvider.open(config);
+            if (connection != null) close();
+            if (connectionProvider != null) { connection = connectionProvider.open(config); borrowedNanos = System.nanoTime(); }
             else {
                 if (!config.driverClass().isEmpty()) Class.forName(config.driverClass());
                 Properties properties = new Properties();
@@ -640,7 +662,12 @@ public final class DbHelperExecutor implements AutoCloseable {
             connection.setReadOnly(config.readOnly());
             int isolation = isolation(config.isolation());
             if (isolation != -1) connection.setTransactionIsolation(isolation);
+            openedInCase = true;
             return connection;
+        }
+
+        void releaseIndependentStatement() {
+            if (connectionProvider != null && "statement".equals(config.transactionScope())) close();
         }
 
         void afterSuccess() throws SQLException {
@@ -664,7 +691,8 @@ public final class DbHelperExecutor implements AutoCloseable {
             outcome.put("error", null);
             try {
                 if (connection == null || connection.isClosed()) {
-                    outcome.put("state", "NOT_OPENED");
+                    outcome.put("state", openedInCase && "statement".equals(config.transactionScope())
+                            ? state() : "NOT_OPENED");
                 } else if (connection.getAutoCommit()) {
                     outcome.put("state", "AUTO_COMMITTED");
                 } else if ("statement".equals(config.transactionScope())) {
@@ -712,6 +740,10 @@ public final class DbHelperExecutor implements AutoCloseable {
         void close() {
             if (connection != null) try { connection.close(); } catch (Exception ignored) { }
             connection = null;
+            if (borrowedNanos != 0) {
+                if (connectionProvider != null) connectionProvider.released(config.id(), System.nanoTime() - borrowedNanos);
+                borrowedNanos = 0;
+            }
         }
 
         boolean hasCached(String key) {

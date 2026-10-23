@@ -50,6 +50,7 @@ public class CommandRunner {
                              Map<String, String> environment) throws IOException, InterruptedException {
         if (commandArguments.isEmpty()) throw new IOException("Tool command is blank");
         ProcessBuilder builder = new ProcessBuilder(commandArguments);
+        att.security.ExecutionEnvironment.apply(builder.environment());
         if (workingDirectory != null) builder.directory(workingDirectory.toFile());
         if (environment != null && !environment.isEmpty()) builder.environment().putAll(environment);
         Process process = builder.start();

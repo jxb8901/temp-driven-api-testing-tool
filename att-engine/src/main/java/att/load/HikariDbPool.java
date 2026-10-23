@@ -22,6 +22,10 @@ public final class HikariDbPool implements AutoCloseable {
     private final AtomicLong borrowTimeouts = new AtomicLong();
     private final AtomicLong borrowFailures = new AtomicLong();
     private final AtomicLong borrowWaitNanos = new AtomicLong();
+    private final AtomicLong holdNanos = new AtomicLong(), holdCount = new AtomicLong();
+    private final AtomicLong statementNanos = new AtomicLong(), statementCount = new AtomicLong();
+    private final java.util.concurrent.atomic.AtomicInteger activePeak = new java.util.concurrent.atomic.AtomicInteger();
+    private final java.util.concurrent.atomic.AtomicInteger waitingPeak = new java.util.concurrent.atomic.AtomicInteger();
     public HikariDbPool(DbHelperConfig config) {
         this.helperId = config.id();
         HikariConfig hikari = new HikariConfig();
@@ -36,9 +40,11 @@ public final class HikariDbPool implements AutoCloseable {
     public String helperId() { return helperId; }
     public Connection borrow() throws SQLException {
         long started = System.nanoTime();
+        waitingPeak.accumulateAndGet(waiting(), Math::max);
         try {
             Connection connection = dataSource.getConnection();
             borrowCount.incrementAndGet();
+            activePeak.accumulateAndGet(active(), Math::max);
             return connection;
         } catch (SQLException error) {
             if (isPoolTimeout(error)) {
@@ -48,6 +54,7 @@ public final class HikariDbPool implements AutoCloseable {
             borrowFailures.incrementAndGet();
             throw error;
         } finally {
+            waitingPeak.accumulateAndGet(waiting(), Math::max);
             borrowWaitNanos.addAndGet(System.nanoTime() - started);
         }
     }
@@ -59,6 +66,8 @@ public final class HikariDbPool implements AutoCloseable {
     public long borrowTimeouts() { return borrowTimeouts.get(); }
     public long borrowFailures() { return borrowFailures.get(); }
     public long totalBorrowWaitMs() { return java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(borrowWaitNanos.get()); }
+    void recordHold(long nanos) { holdNanos.addAndGet(Math.max(0, nanos)); holdCount.incrementAndGet(); }
+    void recordStatement(long nanos) { statementNanos.addAndGet(Math.max(0, nanos)); statementCount.incrementAndGet(); }
     public Map<String, Object> metrics() {
         Map<String, Object> result = new LinkedHashMap<String, Object>();
         result.put("helperId", helperId); result.put("maxSize", maxSize); result.put("minIdle", minIdle);
@@ -66,6 +75,12 @@ public final class HikariDbPool implements AutoCloseable {
         result.put("total", total()); result.put("waiting", waiting()); result.put("borrowCount", borrowCount());
         result.put("borrowTimeouts", borrowTimeouts()); result.put("borrowFailures", borrowFailures());
         result.put("totalBorrowWaitMs", totalBorrowWaitMs());
+        result.put("totalConnectionHoldMs", holdNanos.get() / 1_000_000.0);
+        result.put("releasedConnections", holdCount.get());
+        result.put("totalStatementMs", statementNanos.get() / 1_000_000.0);
+        result.put("statementCount", statementCount.get());
+        result.put("activePeak", activePeak.get());
+        result.put("observedWaitingPeak", waitingPeak.get());
         return result;
     }
     private boolean isPoolTimeout(SQLException error) {

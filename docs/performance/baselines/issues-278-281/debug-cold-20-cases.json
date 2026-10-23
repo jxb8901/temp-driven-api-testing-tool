@@ -1,0 +1,85 @@
+{
+  "schemaVersion" : "att-server-debug-draft-pipeline-benchmark/v1",
+  "measuredAtUtc" : "2026-10-23T00:08:15.723778Z",
+  "sourceRevision" : "unspecified",
+  "runtime" : {
+    "availableProcessors" : 8,
+    "javaVersion" : "26.0.1",
+    "architecture" : "aarch64",
+    "os" : "Mac OS X",
+    "attVersion" : "4.2.3"
+  },
+  "fixture" : {
+    "totalCases" : 20,
+    "target" : "template:FORM",
+    "casesPerWorkbook" : 20,
+    "workbookCount" : 1
+  },
+  "settings" : {
+    "runs" : 5,
+    "inspectionWorkerConcurrency" : 1,
+    "warmups" : 0,
+    "measurement" : "ServerRuntime API pipeline; no browser rendering"
+  },
+  "samples" : [ {
+    "sample" : 0,
+    "status" : "PASS",
+    "formMs" : 28.251,
+    "draftCreateMs" : 41.400541,
+    "previewMs" : 0.236375,
+    "submitMs" : 24.386291,
+    "submitToFirstEventMs" : 28.0525,
+    "draftCreateToFirstEventMs" : 29.294334,
+    "wholePipelineToFirstEventMs" : 99.644125,
+    "firstEventToCompletionMs" : 647.930541,
+    "firstEvent" : "status"
+  }, {
+    "sample" : 1,
+    "status" : "PASS",
+    "formMs" : 12.962375,
+    "draftCreateMs" : 12.858625,
+    "previewMs" : 0.179167,
+    "submitMs" : 3.396958,
+    "submitToFirstEventMs" : 3.76575,
+    "draftCreateToFirstEventMs" : 3.94775,
+    "wholePipelineToFirstEventMs" : 29.804375,
+    "firstEventToCompletionMs" : 664.812667,
+    "firstEvent" : "status"
+  }, {
+    "sample" : 2,
+    "status" : "PASS",
+    "formMs" : 12.25875,
+    "draftCreateMs" : 11.790584,
+    "previewMs" : 0.162792,
+    "submitMs" : 5.748208,
+    "submitToFirstEventMs" : 6.132416,
+    "draftCreateToFirstEventMs" : 6.298458,
+    "wholePipelineToFirstEventMs" : 30.375125,
+    "firstEventToCompletionMs" : 651.905292,
+    "firstEvent" : "status"
+  }, {
+    "sample" : 3,
+    "status" : "PASS",
+    "formMs" : 10.599417,
+    "draftCreateMs" : 15.606916,
+    "previewMs" : 0.1355,
+    "submitMs" : 2.918958,
+    "submitToFirstEventMs" : 3.20175,
+    "draftCreateToFirstEventMs" : 3.340292,
+    "wholePipelineToFirstEventMs" : 29.614959,
+    "firstEventToCompletionMs" : 672.250125,
+    "firstEvent" : "status"
+  }, {
+    "sample" : 4,
+    "status" : "PASS",
+    "formMs" : 10.372834,
+    "draftCreateMs" : 11.19475,
+    "previewMs" : 0.090833,
+    "submitMs" : 8.478625,
+    "submitToFirstEventMs" : 8.836833,
+    "draftCreateToFirstEventMs" : 8.932208,
+    "wholePipelineToFirstEventMs" : 30.529417,
+    "firstEventToCompletionMs" : 769.230083,
+    "firstEvent" : "status"
+  } ]
+}

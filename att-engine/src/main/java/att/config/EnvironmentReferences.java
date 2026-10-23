@@ -60,7 +60,7 @@ final class EnvironmentReferences {
             requirements.add(new EnvironmentRequirement(helperType, helperId, descriptor, field, variable));
             return configured;
         }
-        String value = System.getenv(variable);
+        String value = att.security.ExecutionEnvironment.get(variable);
         if (value == null || (nonEmpty && value.trim().isEmpty()))
             throw new IllegalArgumentException(field + " references missing or empty environment variable " + variable);
         return value;

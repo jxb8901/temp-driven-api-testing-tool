@@ -36,6 +36,7 @@ public final class WorkerMain {
     private final LinkedHashMap<String,Map<String,Object>> inspectionAggregates=new LinkedHashMap<String,Map<String,Object>>(16,.75f,true);
     private String jobId;
     private boolean inspectionDaemon;
+    private boolean prewarmed;
     private boolean inspectionRequest;
     private int inspectionResponseLimit=262144;
     private long inspectionResponseBytes;
@@ -53,6 +54,21 @@ public final class WorkerMain {
         WorkerMain worker=new WorkerMain(protocol);
         if(args.length==1&&"--inspection-daemon".equals(args[0])) {
             worker.executeInspectionDaemon();
+            return;
+        }
+        if(args.length==1&&"--prewarmed-one-shot".equals(args[0])) {
+            worker.prewarmed=true;
+            // Initialize shared machinery without loading any Package/configuration
+            // or environment secrets. stdin remains open until exactly one lease.
+            Class.forName("att.api.DefaultAttService");
+            Map<String,Object> ready=fields("type","READY","protocolVersion","att-prewarm/v1",
+                    "productVersion",att.Version.PRODUCT,"gitCommit",att.Version.GIT_COMMIT,
+                    "schemaRegistryDigest",att.validation.SchemaFiles.registryDigest(),
+                    "cwd",Paths.get("").toRealPath().toString());
+            WorkerProtocol.Frame frame=WorkerProtocol.encode(worker.mapper,ready,8192);
+            frame.writeTo(protocol);protocol.println();protocol.flush();
+            int exit=worker.execute();
+            if(exit!=0)System.exit(exit);
             return;
         }
         if(args.length!=0) {
@@ -124,6 +140,18 @@ public final class WorkerMain {
         inspectionRequest="inspect".equals(request.command);
         if(!PROTOCOL.equals(request.protocolVersion)) return fail("WORKER_PROTOCOL_UNSUPPORTED","Unsupported protocolVersion; expected "+PROTOCOL);
         if(inspectionDaemon&&!("inspect".equals(request.command))) return fail("WORKER_REQUEST_INVALID","Inspection Workers accept only inspect requests");
+        if(prewarmed) {
+            if(!("run".equals(request.command)||"debug".equals(request.command)))
+                return fail("WORKER_REQUEST_INVALID","Prewarmed Workers accept only one RUN/DEBUG Job");
+            if(request.packageRoot==null||!Paths.get(request.packageRoot).toRealPath().equals(Paths.get("").toRealPath()))
+                return fail("WORKER_REQUEST_INVALID","Prewarmed Worker package affinity mismatch");
+            try { att.security.ExecutionEnvironment.assign(request.executionEnvironment); }
+            catch(IllegalArgumentException|IllegalStateException invalid) {
+                return fail("WORKER_REQUEST_INVALID","Invalid one-shot execution environment");
+            }
+        } else if(request.executionEnvironment!=null) {
+            return fail("WORKER_REQUEST_INVALID","Execution environment requires the prewarm protocol");
+        }
         jobId=request.jobId;
         if(jobId==null||jobId.trim().isEmpty()) return fail("WORKER_REQUEST_INVALID","jobId is required");
         if(request.expectedSchemaRegistryDigest!=null) {

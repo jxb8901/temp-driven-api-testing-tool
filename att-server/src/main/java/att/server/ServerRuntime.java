@@ -130,6 +130,7 @@ final class ServerRuntime implements AutoCloseable {
     private final SecureRandom cursorRandom=new SecureRandom();
     private final Path workerLibs;
     private final String workerSchemaRegistryDigest;
+    private ExecutionWorkerPool executionWorkers;
     ServerRuntime(ServerConfig config,String workerLibs) throws Exception {
         this(config,workerLibs,ProcessBuilder::start);
     }
@@ -167,6 +168,8 @@ final class ServerRuntime implements AutoCloseable {
             loadScheduleScheduler=new LoadScheduleScheduler(config.scheduling,store,this::submitScheduledJob,clock);
             loadScheduleScheduler.start();
         } else loadScheduleScheduler=null;
+        executionWorkers=new ExecutionWorkerPool(config,id->workerBuilder(true,id),this::startWorkerProcess,
+                ()->ExecutionWorkerPool.fingerprint(this.workerLibs,config.workerLibraryDirs),workerSchemaRegistryDigest);
         if(inspectionWarmup!=null)inspectionWarmup.scheduleWithFixedDelay(this::warmInspectionSafely,250,250,TimeUnit.MILLISECONDS);
         if(config.inspection.enabled&&!config.inspection.redactionEnabled)java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).warning("Inspection masking is disabled; ordinary package values are visible to authorized callers, while classified secrets remain protected");
         if(!config.security.checkCrossOrigin)java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).warning("server.security.checkCrossOrigin is disabled; configure trusted proxy origin handling and retain local-auth CSRF protection");
@@ -530,6 +533,7 @@ final class ServerRuntime implements AutoCloseable {
     }
     private void execute(Job job,Path jobPath,AdmissionLease lease) {
         job.workerStartedNanos=System.nanoTime();
+        ExecutionWorkerPool.Lease warm=null;
         try {
             Process process;
             synchronized(job) {
@@ -541,18 +545,20 @@ final class ServerRuntime implements AutoCloseable {
                 transition(job,"PREPARING");
                 validatePackageRoot(packageRoot(job.packageId));
                 job.request.outputDirectory=jobPath.resolve("output").toRealPath().toString();
-                List<String> classpathEntries=workerClasspath();
-                String cp=String.join(java.io.File.pathSeparator,classpathEntries);
-                List<String> command=new ArrayList<>();command.add(config.javaExecutable.toString());
-                if(config.workerHeapInitialMb>0)command.add("-Xms"+config.workerHeapInitialMb+"m");
-                if(config.workerHeapMaxMb>0)command.add("-Xmx"+config.workerHeapMaxMb+"m");
-                command.add("-cp");command.add(cp);command.add("att.worker.WorkerMain");
-                ProcessBuilder builder=new ProcessBuilder(command);
-                builder.directory(packageRoot(job.packageId).toFile());
-                job.workerSpawnStartedNanos=System.nanoTime();process=startWorkerProcess(builder);job.workerSpawnedNanos=System.nanoTime();job.process=process;job.processFence=new WorkerProcessFence(process);job.workerPid=process.pid();job.workerStartTime=process.info().startInstant().orElse(Instant.now());job.startedAt=Instant.now();transition(job,"RUNNING");rememberWorkerProcesses(job,job.processFence);
+                if(("run".equals(job.command)||"debug".equals(job.command))&&environmentFitsPrewarm()) {
+                    long leaseStart=System.nanoTime();warm=executionWorkers.lease(job.packageId);
+                    job.prewarmLeaseMs=(System.nanoTime()-leaseStart)/1_000_000.0;
+                }
+                ProcessBuilder coldBuilder=warm==null?workerBuilder(false,job.packageId):null;
+                job.workerSpawnStartedNanos=System.nanoTime();
+                process=warm==null?startWorkerProcess(coldBuilder):warm.process;
+                job.workerSpawnedNanos=System.nanoTime();job.process=process;job.processFence=warm==null?new WorkerProcessFence(process):warm.fence;
+                if(warm!=null){job.workerDispatch="warm";job.prewarmBootstrapMs=(warm.readyNanos-warm.startedNanos)/1_000_000.0;}
+                job.workerPid=process.pid();job.workerStartTime=process.info().startInstant().orElse(Instant.now());job.startedAt=Instant.now();transition(job,"RUNNING");rememberWorkerProcesses(job,job.processFence);
+                if(warm!=null)warm.transferred();
             }
             startStderrDrainer(process,"att-server-worker-stderr");
-            try(var out=process.getOutputStream()){out.write(workerRequestBytes(job.request));out.write('\n');out.flush();}
+            try(var out=process.getOutputStream()){out.write(workerRequestBytes(job.request,warm!=null));out.write('\n');out.flush();}
             try(var reader=new java.io.BufferedInputStream(process.getInputStream())) {
                 att.server.api.internal.WorkerProtocol.Frame frame;
                 while((frame=att.server.api.internal.WorkerProtocol.read(reader,att.server.api.internal.WorkerProtocol.MAX_FRAME_BYTES))!=null) {
@@ -567,6 +573,7 @@ final class ServerRuntime implements AutoCloseable {
           catch(Exception e){stopWorkerTree(job);if(!job.terminal())finishQuietly(job,"ERROR",3,"ATT-SERVER-WORKER-FAILED",safeMessage(e));}
         finally {
             stopWorkerTree(job);
+            if(warm!=null&&job.processFence!=null&&job.processFence.stopped())try{warm.transferred();}catch(Exception ignored) { }
             boolean stopped=job.processFence==null ? job.process==null||!job.process.isAlive() : job.processFence.stopped();
             if(stopped&&job.process!=null){if(job.workerTerminatedNanos==0)job.workerTerminatedNanos=System.nanoTime();job.process=null;if(!closing)try{store.update(job);}catch(Exception ignored){}}
             tasks.remove(job.id);completed.incrementAndGet();
@@ -605,6 +612,24 @@ final class ServerRuntime implements AutoCloseable {
     }
     private List<String> workerClasspath() {
         return WorkerRuntimeClasspath.entries(workerLibs,config.workerLibraryDirs);
+    }
+    private ProcessBuilder workerBuilder(boolean prewarm,String packageId) {
+        List<String> command=new ArrayList<>();command.add(config.javaExecutable.toString());
+        if(config.workerHeapInitialMb>0)command.add("-Xms"+config.workerHeapInitialMb+"m");
+        if(config.workerHeapMaxMb>0)command.add("-Xmx"+config.workerHeapMaxMb+"m");
+        command.add("-cp");command.add(String.join(java.io.File.pathSeparator,workerClasspath()));command.add("att.worker.WorkerMain");
+        if(prewarm)command.add("--prewarmed-one-shot");
+        return new ProcessBuilder(command).directory(packageRoot(packageId).toFile());
+    }
+    private boolean environmentFitsPrewarm() {
+        // JVM bootstrap options cannot be applied after READY. Keep those
+        // deployments on the existing cold path with their original semantics.
+        for(String key:List.of("JAVA_TOOL_OPTIONS","JDK_JAVA_OPTIONS","_JAVA_OPTIONS"))
+            if(System.getenv(key)!=null&&!System.getenv(key).isBlank())return false;
+        long chars=0;
+        if(System.getenv().size()>4096)return false;
+        for(var entry:System.getenv().entrySet())chars+=entry.getKey().length()+(long)entry.getValue().length();
+        return chars<=131072;
     }
     private void stopWorkerTree(Job job) {
         Process process=job.process;
@@ -1415,11 +1440,18 @@ final class ServerRuntime implements AutoCloseable {
         return applyWorkerPolicy(request);
     }
     WorkerRequest applyWorkerPolicy(WorkerRequest request) {
+        request.executionEnvironment=null;
         request.liveOutputMaxEntryChars=config.liveOutput.maxEntryChars;request.liveOutputMaxEntryLines=config.liveOutput.maxEntryLines;
         return request;
     }
     byte[] workerRequestBytes(WorkerRequest request) throws Exception {
         return JSON.writeValueAsBytes(applyWorkerPolicy(request));
+    }
+    private byte[] workerRequestBytes(WorkerRequest request,boolean warm) throws Exception {
+        if(!warm)return workerRequestBytes(request);
+        var value=JSON.valueToTree(applyWorkerPolicy(request));
+        ((com.fasterxml.jackson.databind.node.ObjectNode)value).set("executionEnvironment",JSON.valueToTree(System.getenv()));
+        return JSON.writeValueAsBytes(value);
     }
     private void applyInspectionPolicy(com.fasterxml.jackson.databind.node.ObjectNode request,String packageId) {
         request.set("safeTextSources",JSON.valueToTree(config.inspection.safeTextSources(packageId)));
@@ -2654,7 +2686,8 @@ final class ServerRuntime implements AutoCloseable {
         result.put("workers",daemons);
         return result;
     }
-    Map<String,Object> counts() throws Exception {Map<String,Object> m=new LinkedHashMap<>();for(String s:List.of("QUEUED","PREPARING","RUNNING","PASS","FAIL","ERROR","INVALID","CANCELLED"))m.put(s.toLowerCase(),store.count(s));m.put("inspection",inspectionStatistics());m.put("queueDepth",workers.getQueue().size());m.put("activeWorkers",workers.getActiveCount());m.put("completedSinceStart",completed.get());m.put("loadSchedulingEnabled",config.scheduling.enabled);if(config.scheduling.enabled){m.put("loadSchedules",store.scheduleCount());m.put("activeScheduledLoads",store.activeScheduledCount(null));m.put("loadScheduleMetrics",store.scheduleMetrics());}m.put("jobStorage",jobStorageSnapshot());return m;}
+    Map<String,Object> executionPoolStatistics() { return executionWorkers==null?Map.of("enabled",false):executionWorkers.metrics(); }
+    Map<String,Object> counts() throws Exception {Map<String,Object> m=new LinkedHashMap<>();for(String s:List.of("QUEUED","PREPARING","RUNNING","PASS","FAIL","ERROR","INVALID","CANCELLED"))m.put(s.toLowerCase(),store.count(s));m.put("inspection",inspectionStatistics());m.put("executionPool",executionPoolStatistics());m.put("queueDepth",workers.getQueue().size());m.put("activeWorkers",workers.getActiveCount());m.put("completedSinceStart",completed.get());m.put("loadSchedulingEnabled",config.scheduling.enabled);if(config.scheduling.enabled){m.put("loadSchedules",store.scheduleCount());m.put("activeScheduledLoads",store.activeScheduledCount(null));m.put("loadScheduleMetrics",store.scheduleMetrics());}m.put("jobStorage",jobStorageSnapshot());return m;}
     Path artifact(Job job,String requested) throws Exception {
         if(requested==null||requested.isBlank())throw new IllegalArgumentException("artifact path is required");
         Path base=config.dataDir.resolve("jobs").resolve(job.id).resolve("output").toRealPath();Path relative=Paths.get(requested);
@@ -3238,6 +3271,7 @@ final class ServerRuntime implements AutoCloseable {
         admissionLifecycle.writeLock().lock();
         try {if(closing)return;closing=true;}finally{admissionLifecycle.writeLock().unlock();}
         if(inspectionWarmup!=null)inspectionWarmup.shutdownNow();
+        if(executionWorkers!=null)executionWorkers.close();
         if(loadScheduleScheduler!=null)loadScheduleScheduler.close();
         retention.shutdownNow();artifactMaintenance.shutdownNow();inspectionWatchdogs.shutdownNow();
         synchronized(draftLock){runDrafts.clear();debugDrafts.clear();quickLoadDrafts.clear();advancedLoadDrafts.clear();catalogLoadDrafts.clear();replayReviews.clear();}

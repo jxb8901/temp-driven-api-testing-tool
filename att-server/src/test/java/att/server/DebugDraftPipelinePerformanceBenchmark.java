@@ -33,6 +33,7 @@ class DebugDraftPipelinePerformanceBenchmark {
         int workbookCount = integerProperty("att.server.benchmark.debugDraft.workbooks", 5, 1);
         int casesPerWorkbook = integerProperty("att.server.benchmark.debugDraft.casesPerWorkbook", 300, 1);
         int runs = integerProperty("att.server.benchmark.debugDraft.runs", 3, 1);
+        boolean prewarm=Boolean.getBoolean("att.server.benchmark.debugDraft.prewarm");
         Path packageRoots = Files.createDirectories(temp.resolve("packages"));
         Path packageRoot = Files.createDirectories(packageRoots.resolve("benchmark"));
         installPackage(packageRoot, workbookCount, casesPerWorkbook);
@@ -47,10 +48,12 @@ class DebugDraftPipelinePerformanceBenchmark {
         Files.writeString(serverYaml,
                 "server:\n  runtimeConfigPath: " + yaml(runtimeConfig) + "\n  dataDir: " + yaml(dataDir) + "\n  javaExecutable: " + yaml(javaBin)
                         + "\n  inspection:\n    maxConcurrent: 1\n    queuedLimit: 2\n    timeoutMs: 60000\n    heapMaxMb: 512\n"
-                        + "workers:\n  maxConcurrent: 1\n  queuedLimit: 2\n  maxConcurrentLoad: 1\n"
+                        + "workers:\n  maxConcurrent: 1\n  queuedLimit: 2\n  maxConcurrentLoad: 1\n  heapMaxMb: 256\n"
+                        + (prewarm?"  executionPool: {enabled: true, minIdle: 1, maxIdle: 2, heapBudgetMb: 512, packageIds: [benchmark]}\n":"")
                         + "packages:\n  allowedRoots:\n    - " + yaml(packageRoots) + "\n  entries:\n    benchmark: " + yaml(packageRoot) + "\n",
                 StandardCharsets.UTF_8);
         Path webInfLib = Files.createDirectory(temp.resolve("WEB-INF-lib"));
+        addModuleJar(webInfLib, "att-security", Path.of("att-security/target/classes"));
         addModuleJar(webInfLib, "att-worker", Path.of("att-worker/target/classes"));
         addModuleJar(webInfLib, "att-engine", Path.of("att-engine/target/classes"));
         addModuleJar(webInfLib, "att-server-api", Path.of("att-server-api/target/classes"));
@@ -85,6 +88,7 @@ class DebugDraftPipelinePerformanceBenchmark {
             report.put("settings", Map.of("runs", runs, "warmups", 0,
                     "inspectionWorkerConcurrency", 1, "measurement", "ServerRuntime API pipeline; no browser rendering"));
             report.put("samples", samples);
+            report.put("executionPool",runtime.executionPoolStatistics());
 
             Path output = Path.of(System.getProperty("att.server.benchmark.debugDraft.output",
                     "att-server/target/debug-draft-pipeline-benchmark.json")).toAbsolutePath().normalize();
@@ -147,10 +151,17 @@ class DebugDraftPipelinePerformanceBenchmark {
                 "Benchmark Debug Worker should finish: " + record);
         assertEquals("PASS", record.get("status"), "Benchmark Debug target should pass");
         long completedAt = System.nanoTime();
+        while (!hasTerminationTiming(record) && System.nanoTime() < jobDeadline) {
+            Thread.sleep(10);
+            record=runtime.jobRecord(jobId);
+        }
+        assertTrue(hasTerminationTiming(record),"Worker termination timing must be durable before the sample ends");
+        long terminatedAt=System.nanoTime();
 
         Map<String, Object> sample = new LinkedHashMap<>();
         sample.put("sample", sampleIndex);
         sample.put("status", record.get("status"));
+        sample.put("performance",record.get("performance"));
         sample.put("formMs", formMs);
         sample.put("draftCreateMs", createMs);
         sample.put("previewMs", previewMs);
@@ -159,8 +170,17 @@ class DebugDraftPipelinePerformanceBenchmark {
         sample.put("draftCreateToFirstEventMs", millisBetween(draftCreatedAt, firstEventAt));
         sample.put("wholePipelineToFirstEventMs", millisBetween(pipelineStarted, firstEventAt));
         sample.put("firstEventToCompletionMs", millisBetween(firstEventAt, completedAt));
+        sample.put("submitToTerminationMs",millisBetween(submitStartedAt,terminatedAt));
+        sample.put("terminalToTerminationObservedMs",millisBetween(completedAt,terminatedAt));
         sample.put("firstEvent", events.get(0).get("event"));
         return sample;
+    }
+
+    private boolean hasTerminationTiming(Map<String,Object> record) {
+        Object performance=record.get("performance");
+        if(!(performance instanceof Map<?,?> value))return false;
+        Object timings=value.get("timings");
+        return timings instanceof Map<?,?> fields&&fields.containsKey("resultToTerminationMs");
     }
 
     private void installPackage(Path root, int workbookCount, int casesPerWorkbook) throws Exception {

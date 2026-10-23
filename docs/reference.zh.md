@@ -1866,6 +1866,12 @@ DBHelper 擁有 descriptor 定義的 connection/statement limit、query timeout�
 
 Query result byte limit 逐 row 累加；CLOB UTF-8 bytes 在讀取 chunks 時計算，使限制檢查隨結果大小線性成長。
 
+LOAD 的 run-scoped connection provider 在 `scope: statement` 的每次 statement transaction、結果 materialization、statement close 及 cancellation cleanup 完成後歸還 connection；後續 DB Action 重新借用。`statement/commit` 使用 JDBC auto-commit；`statement/rollback` 在歸還前 rollback。Query/update failure 亦在 cleanup 後歸還，不會自動重試 SQL。
+
+`scope: case` 保留 shared connection 至 Case finalization，維持 read-your-writes 與 rollback-only 行為；預設仍為 `case/rollback`。直接 RUN/DEBUG connection 的生命週期維持原狀。只有各 Action 獨立時才明確選用 statement scope；由 Case scope 改為 statement scope 會改變 transaction 語意。
+
+LOAD `resources.db` 按 helper 增加 aggregate `totalConnectionHoldMs`、`releasedConnections`、`totalStatementMs`、`statementCount`、`activePeak` 及 sampled `observedWaitingPeak`，並保留原有 borrow count/wait/timeout metrics。Hold time 從借用成功至 close 完成；statement time 不含 pool acquisition，但包含結果與 resource cleanup。Sampled waiting peak 可能未捕捉短暫等待；所有 counter 都不包含 SQL、參數、URL 或 credential。`DB_POOL_TIMEOUT` 仍表示 SQL 執行前 acquisition 失敗；SQL timeout 與 Tool Action timeout 是獨立預算。
+
 validate、docs、snapshot 與 dry-run 都不會打開 DB Connection。dbhelper 文件路徑、ID、字段、SQL 文件和 template call 會在執行前校驗。
 
 DB/MQ/HTTP 共用 `evidence.output: {format: json, maxChars: 10000}` presentation policy；支援 `text`、`json`、`yaml`、`xml`、`sqlplus`，後者要求 DB query/update result。`maxChars` 預設 10000，範圍 1–1000000；formatted text 先遮蔽 credential，再按字元確定性截斷，並保留 `format`／`text`／`truncated`。Formatting failure 只寫入有界 `outputError`，不改變 typed `output.result` 或 operation status。Run/Debug 的正常 resource invocation 自動將 snapshot 寫入 Action evidence 和 Case log，不需要額外 Log Action；SQL、parameter、MQ payload metadata、HTTP status/header 等 diagnostics 維持各自契約。Load 不會在每個 iteration 立即 stringify；僅 retained iteration 在 `resource-output.yaml` materialize，`evidence.resources.output: none` 完全跳過。Credential 不會因 presentation 被新增到 evidence。

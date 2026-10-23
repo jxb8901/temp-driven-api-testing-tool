@@ -8,6 +8,23 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.*;
 
 class ServerConfigTest {
+    @Test void prewarmIsOptInAndRequiresBoundedHeapAndRegisteredAffinity() throws Exception {
+        Path pkg=Files.createDirectories(temp.resolve("prewarm-package"));Path file=temp.resolve("prewarm.yaml");
+        String head="server:\n  dataDir: "+yaml(temp.resolve("prewarm-data"))+"\n";
+        String tail="packages:\n  allowedRoots: ["+yaml(pkg)+"]\n  entries:\n    p: "+yaml(pkg)+"\n";
+        Files.writeString(file,head+"workers: {}\n"+tail);
+        assertFalse(ServerConfig.load(file).executionPool.enabled);
+        String valid="enabled: true, minIdle: 1, maxIdle: 2, heapBudgetMb: 256, packageIds: [p]";
+        Files.writeString(file,head+"workers:\n  heapMaxMb: 128\n  executionPool: {"+valid+"}\n"+tail);
+        assertTrue(ServerConfig.load(file).executionPool.enabled);
+        for(String invalid:List.of(valid.replace("256","128"),valid.replace("[p]","[]"),valid.replace("[p]","[missing]"),
+                valid.replace("minIdle: 1","minIdle: 3"),valid+", unknown: 1",valid+", strategy: persistent")) {
+            Files.writeString(file,head+"workers:\n  heapMaxMb: 128\n  executionPool: {"+invalid+"}\n"+tail);
+            assertThrows(IllegalArgumentException.class,()->ServerConfig.load(file),invalid);
+        }
+        Files.writeString(file,head+"workers:\n  executionPool: {"+valid+"}\n"+tail);
+        assertThrows(IllegalArgumentException.class,()->ServerConfig.load(file));
+    }
     @TempDir Path temp;
     @Test void schedulePackagePolicyDefaultsToStrictAndRejectsUnknownValues() throws Exception {
         Path pkg=Files.createDirectory(temp.resolve("policy-package")),file=temp.resolve("policy-server.yaml");
