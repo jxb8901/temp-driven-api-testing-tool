@@ -3,8 +3,10 @@ package att.server;
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.Executors;
@@ -104,6 +106,76 @@ final class ProcessTreeResourceSampler implements AutoCloseable {
                 "physicalIoSource", physicalIoAvailable ? "/proc/<pid>/io read_bytes/write_bytes" : "unavailable on this host",
                 "sampleCount", sampleCount.get(),
                 "samplingIntervalMs", intervalMs);
+    }
+
+    /** Sample only the supplied Worker processes while an execution pool is idle. */
+    static Map<String, Object> sampleProcesses(List<Process> processes, int samples, long intervalMs) throws Exception {
+        if (processes.isEmpty() || samples < 1 || intervalMs < 0)
+            throw new IllegalArgumentException("Worker resource sampling requires processes, samples, and a nonnegative interval");
+        List<Long> pids = processes.stream().map(Process::pid).toList();
+        List<Long> peakRssBytes = new ArrayList<>(java.util.Collections.nCopies(pids.size(), 0L));
+        List<IoCounters> firstIo = new ArrayList<>(java.util.Collections.nCopies(pids.size(), null));
+        List<IoCounters> lastIo = new ArrayList<>(java.util.Collections.nCopies(pids.size(), null));
+        long peakTotalRssBytes = 0L;
+        int completedSamples = 0;
+        for (int sample = 0; sample < samples; sample++) {
+            if (sample > 0 && intervalMs > 0) Thread.sleep(intervalMs);
+            String pidArgument = pids.stream().map(String::valueOf).collect(java.util.stream.Collectors.joining(","));
+            Process ps = new ProcessBuilder("ps", "-p", pidArgument, "-o", "pid=,rss=")
+                    .redirectErrorStream(true).start();
+            Map<Long, Long> rssKb = new HashMap<>();
+            try (BufferedReader reader = new BufferedReader(new InputStreamReader(ps.getInputStream(), StandardCharsets.UTF_8))) {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    String[] fields = line.trim().split("\\s+");
+                    if (fields.length != 2) continue;
+                    try { rssKb.put(Long.parseLong(fields[0]), Long.parseLong(fields[1])); }
+                    catch (NumberFormatException ignored) { }
+                }
+            }
+            if (!ps.waitFor(2, TimeUnit.SECONDS)) {
+                ps.destroyForcibly();
+                if (!ps.waitFor(2, TimeUnit.SECONDS)) throw new IllegalStateException("ps sampler did not exit");
+            }
+            if (ps.exitValue() != 0) throw new IllegalStateException("ps failed while sampling Worker resources");
+            long totalRssBytes = 0L;
+            for (int index = 0; index < pids.size(); index++) {
+                long pid = pids.get(index);
+                Long residentKb = rssKb.get(pid);
+                if (residentKb == null || !processes.get(index).isAlive())
+                    throw new IllegalStateException("An idle Worker exited or became unobservable during resource sampling");
+                long residentBytes = Math.multiplyExact(residentKb, 1024L);
+                peakRssBytes.set(index, Math.max(peakRssBytes.get(index), residentBytes));
+                totalRssBytes = saturatingAdd(totalRssBytes, residentBytes);
+                IoCounters counters = readIoCounters(pid);
+                if (sample == 0) firstIo.set(index, counters);
+                lastIo.set(index, counters);
+            }
+            peakTotalRssBytes = Math.max(peakTotalRssBytes, totalRssBytes);
+            completedSamples++;
+        }
+        boolean physicalIoAvailable = firstIo.stream().allMatch(value -> value != null)
+                && lastIo.stream().allMatch(value -> value != null);
+        long readBytes = 0L;
+        long writeBytes = 0L;
+        if (physicalIoAvailable) {
+            for (int index = 0; index < pids.size(); index++) {
+                readBytes = saturatingAdd(readBytes, Math.max(0L, lastIo.get(index).readBytes - firstIo.get(index).readBytes));
+                writeBytes = saturatingAdd(writeBytes, Math.max(0L, lastIo.get(index).writeBytes - firstIo.get(index).writeBytes));
+            }
+        }
+        Map<String, Object> result = new java.util.LinkedHashMap<>();
+        result.put("scope", "idle execution Worker processes only");
+        result.put("workerCount", processes.size());
+        result.put("sampleCount", completedSamples);
+        result.put("samplingIntervalMs", intervalMs);
+        result.put("peakTotalResidentBytes", peakTotalRssBytes);
+        result.put("peakResidentBytesPerWorker", peakRssBytes);
+        result.put("physicalIoAvailable", physicalIoAvailable);
+        result.put("kernelReadBytesDuringIdle", readBytes);
+        result.put("kernelWriteBytesDuringIdle", writeBytes);
+        result.put("physicalIoSource", physicalIoAvailable ? "/proc/<pid>/io read_bytes/write_bytes" : "unavailable on this host");
+        return result;
     }
 
     @Override public void close() {

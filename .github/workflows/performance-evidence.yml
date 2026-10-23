@@ -1,0 +1,121 @@
+name: Performance evidence
+
+on:
+  push:
+    tags:
+      - "performance-evidence-*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  capture:
+    name: Same-host baseline and feature measurements
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout tagged source and fetch master
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: maven
+
+      - name: Set up pinned Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22.22.2"
+          cache: npm
+          cache-dependency-path: att-web/frontend/package-lock.json
+
+      - name: Build master baseline packages on this runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin master --depth=1
+          git worktree add --detach "$RUNNER_TEMP/att-master-baseline" origin/master
+          (cd "$RUNNER_TEMP/att-master-baseline" && mvn -B -ntp -T 1C -pl att-dist -am \
+            -DskipTests=true -Datt.skipJava8ModuleTests=true \
+            -Datt.skipFrontendUnitTests=true -Datt.skipServerUnitTests=true clean package)
+          master_version="$(sed -n 's:.*<version>\([^<]*\)</version>.*:\1:p' \
+            "$RUNNER_TEMP/att-master-baseline/pom.xml" | head -n 1)"
+          mkdir -p "$RUNNER_TEMP/att-performance-packages/master"
+          cp "$RUNNER_TEMP/att-master-baseline/att-server/target/att-server-$master_version.war" \
+            "$RUNNER_TEMP/att-performance-packages/master/att-server.war"
+          cp "$RUNNER_TEMP/att-master-baseline/att-dist/target/att-$master_version-local.tar.gz" \
+            "$RUNNER_TEMP/att-performance-packages/master/att-local.tar.gz"
+          feature_version="$(sed -n 's:.*<version>\([^<]*\)</version>.*:\1:p' pom.xml | head -n 1)"
+          printf 'ATT_PERF_VERSION=%s\n' "$feature_version" >> "$GITHUB_ENV"
+
+      - name: Build tagged feature packages on this runner
+        run: |
+          mvn -B -ntp -T 1C -pl att-dist -am \
+            -DskipTests=true -Datt.skipJava8ModuleTests=true \
+            -Datt.skipFrontendUnitTests=true -Datt.skipServerUnitTests=true clean package
+          mkdir -p "$RUNNER_TEMP/att-performance-packages/feature"
+          cp "att-server/target/att-server-$ATT_PERF_VERSION.war" \
+            "$RUNNER_TEMP/att-performance-packages/feature/att-server.war"
+          cp "att-dist/target/att-$ATT_PERF_VERSION-local.tar.gz" \
+            "$RUNNER_TEMP/att-performance-packages/feature/att-local.tar.gz"
+
+      - name: Capture artifact scale, arrival fixtures, and idle prewarm resources
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/target/performance-evidence/arrival-fixtures"
+          mvn -B -ntp -pl att-server -am test \
+            -Dtest=ArtifactInventoryTest,ArtifactArrivalWorkloadFixtureTest,ArtifactPipelinePerformanceBenchmark,PrewarmResourcePerformanceBenchmark \
+            -Dsurefire.failIfNoSpecifiedTests=false \
+            -Dskip.npm=true -Dskip.installnodenpm=true -Datt.skipFrontendUnitTests=true \
+            -Datt.archive.samples=5 \
+            -Datt.archive.output="$GITHUB_WORKSPACE/target/performance-evidence/artifact-pipeline-resource-scale.json" \
+            -Datt.archive.arrivalFixtureDirectory="$GITHUB_WORKSPACE/target/performance-evidence/arrival-fixtures" \
+            -Datt.server.benchmark.prewarmResources=true \
+            -Datt.server.benchmark.prewarmResources.output="$GITHUB_WORKSPACE/target/performance-evidence/prewarm-worker-resource-matrix.json" \
+            -Datt.benchmark.commit="$GITHUB_SHA"
+
+      - name: Capture same-host master and feature RUN, DEBUG, LOAD, and Validate matrix
+        shell: bash
+        run: |
+          set -euo pipefail
+          for case_count in 20 200 1000; do
+            for revision in master feature; do
+              package_dir="$RUNNER_TEMP/att-performance-packages/$revision"
+              observers=none
+              if [ "$case_count" = 20 ]; then observers=none,fast,slow; fi
+              mkdir -p "$GITHUB_WORKSPACE/target/performance-evidence"
+              mvn -B -ntp -pl att-server -am test \
+                -Dtest=ServerWorkerSsePerformanceBenchmark \
+                -Dsurefire.failIfNoSpecifiedTests=false \
+                -Dskip.npm=true -Dskip.installnodenpm=true -Datt.skipFrontendUnitTests=true \
+                -Datt.server.war="$package_dir/att-server.war" \
+                -Datt.server.benchmark.localArchive="$package_dir/att-local.tar.gz" \
+                -Datt.server.benchmark.workerSse=true \
+                -Datt.server.benchmark.workerSse.cases="$case_count" \
+                -Datt.server.benchmark.workerSse.events=1000 \
+                -Datt.server.benchmark.workerSse.runs=2 \
+                -Datt.server.benchmark.workerSse.warmups=1 \
+                -Datt.server.benchmark.workerSse.slowDelayMs=0 \
+                -Datt.server.benchmark.workerSse.workers=1,4 \
+                -Datt.server.benchmark.workerSse.observers="$observers" \
+                -Datt.benchmark.processResources=true \
+                -Datt.server.benchmark.workerSse.output="$GITHUB_WORKSPACE/target/performance-evidence/server-worker-$revision-$case_count.json" \
+                -Datt.benchmark.commit="$GITHUB_SHA"
+            done
+          done
+
+      - name: Upload raw performance evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: performance-evidence-${{ github.sha }}
+          path: |
+            target/performance-evidence/
+            att-server/target/surefire-reports/
+          if-no-files-found: warn
+          retention-days: 30

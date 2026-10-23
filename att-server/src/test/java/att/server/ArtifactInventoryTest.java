@@ -5,6 +5,7 @@ import org.junit.jupiter.api.io.TempDir;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Map;
 import static org.junit.jupiter.api.Assertions.*;
 
 class ArtifactInventoryTest {
@@ -36,6 +37,32 @@ class ArtifactInventoryTest {
         }
         System.out.println("INVENTORY_BENCHMARK privateFiles=100004 baseline=" + Boolean.getBoolean("att.inventory.baseline")
                 + " publicationMs=" + (System.nanoTime() - started) / 1_000_000.0);
+    }
+
+    @Test void reservationFilesAtCandidateBoundaryArePrunedAcrossSiblingRunNamespaces() throws Exception {
+        Path output = Files.createDirectory(temporary.resolve("boundary-output"));
+        int filesPerRun = ArtifactArchive.MAX_CANDIDATES / 2;
+        for (String run : List.of("one", "two")) {
+            Path reservations = Files.createDirectories(output.resolve("load/" + run + "/.exec-id-reservations"));
+            for (int i = 0; i < filesPerRun; i++) Files.createFile(reservations.resolve(i + ".id"));
+        }
+        Files.writeString(output.resolve("load/report.json"), "{\"status\":\"PASS\"}");
+
+        long started = System.nanoTime();
+        Path archive = temporary.resolve("boundary-artifacts.zip");
+        ArtifactArchive.build(output, archive, source -> {
+            assertEquals(output.resolve("load/report.json").toRealPath(), source);
+            return Files.readAllBytes(source);
+        });
+
+        Map<?, ?> manifest = ArtifactArchive.verify(archive, true);
+        assertEquals(true, manifest.get("complete"));
+        assertEquals(List.of(), manifest.get("omissions"));
+        assertEquals(1, ((List<?>) manifest.get("entries")).size());
+        assertEquals("{\"status\":\"PASS\"}",
+                new String(ArtifactArchive.read(archive, "load/report.json"), java.nio.charset.StandardCharsets.UTF_8));
+        System.out.println("INVENTORY_BENCHMARK privateFiles=" + ArtifactArchive.MAX_CANDIDATES
+                + " siblingRunNamespaces=2 publicationMs=" + (System.nanoTime() - started) / 1_000_000.0);
     }
 
     @Test void similarlyNamedDirectoriesAndSymlinksAreNotTrustedPrivateSubtrees() throws Exception {

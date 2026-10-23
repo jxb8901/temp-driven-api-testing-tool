@@ -68,6 +68,8 @@ class ServerWorkerSsePerformanceBenchmark {
         int slowDelayMs = integerProperty("att.server.benchmark.workerSse.slowDelayMs", 1, 0);
         int soakSeconds = integerProperty("att.server.benchmark.workerSse.soakSeconds", 0, 0);
         int[] concurrency = integerListProperty("att.server.benchmark.workerSse.workers", new int[]{1, 4, 8});
+        List<String> observerModes = stringListProperty("att.server.benchmark.workerSse.observers",
+                List.of("none", "fast", "slow"));
 
         Path packageRoots = Files.createDirectories(temp.resolve("packages"));
         Path packageRoot = Files.createDirectories(packageRoots.resolve(PACKAGE_ID));
@@ -102,14 +104,14 @@ class ServerWorkerSsePerformanceBenchmark {
             report.put("environment", environment());
             report.put("settings", Map.of("caseCount", caseCount, "warmups", warmups, "runs", runs,
                     "workerConcurrency", Arrays.stream(concurrency).boxed().toList(),
-                    "observerModes", List.of("none", "fast", "slow"), "syntheticReplayEventsPerJob", replayEvents,
+                    "observerModes", observerModes, "syntheticReplayEventsPerJob", replayEvents,
                     "slowReaderDelayMsPerEvent", slowDelayMs, "soakSeconds", soakSeconds, "maxEventsPerJob", 100000,
                     "processResourceSampling", Boolean.getBoolean("att.benchmark.processResources")));
 
             List<Map<String, Object>> workerScenarios = new ArrayList<>();
             Map<Integer, List<String>> replayJobIds = new LinkedHashMap<>();
             for (int workerCount : concurrency) {
-                for (String observerMode : List.of("none", "fast", "slow")) {
+                for (String observerMode : observerModes) {
                     List<Map<String, Object>> samples = new ArrayList<>();
                     for (int sampleIndex = 0; sampleIndex < warmups + runs; sampleIndex++) {
                         Map<String, Object> sample = measureRunBatch(server.port, workerCount, observerMode,
@@ -734,6 +736,17 @@ class ServerWorkerSsePerformanceBenchmark {
         if (configured == null || configured.isBlank()) return fallback;
         return Arrays.stream(configured.split(",")).map(String::trim).filter(value -> !value.isEmpty())
                 .mapToInt(Integer::parseInt).toArray();
+    }
+
+    private static List<String> stringListProperty(String name, List<String> fallback) {
+        String configured = System.getProperty(name);
+        if (configured == null || configured.isBlank()) return fallback;
+        List<String> values = Arrays.stream(configured.split(","))
+                .map(String::trim).filter(value -> !value.isEmpty()).toList();
+        if (values.isEmpty() || values.stream().anyMatch(value -> !List.of("none", "fast", "slow").contains(value))
+                || values.stream().distinct().count() != values.size())
+            throw new IllegalArgumentException(name + " must be a unique comma-separated list of none, fast, or slow");
+        return values;
     }
 
     private static int max(int[] values) { return Arrays.stream(values).max().orElse(1); }

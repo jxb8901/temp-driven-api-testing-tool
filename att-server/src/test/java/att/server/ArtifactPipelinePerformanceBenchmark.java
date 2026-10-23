@@ -93,9 +93,15 @@ class ArtifactPipelinePerformanceBenchmark {
         report.put("processors",Runtime.getRuntime().availableProcessors());report.put("maxHeapBytes",Runtime.getRuntime().maxMemory());
         report.put("commit",System.getProperty("att.benchmark.commit","unspecified"));report.put("seed",280);report.put("warmup",2);report.put("measurements",rows);
         report.put("memoryBudgetBytes",memoryBudget);
+        Path arrivalFixtureRoot = Path.of(System.getProperty("att.archive.arrivalFixtureDirectory",
+                "target/artifact-arrival-fixtures")).toAbsolutePath().normalize();
+        report.put("arrivalGenerationFixtures", ArtifactArrivalWorkloadFixtures.generate(
+                arrivalFixtureRoot,
+                Integer.getInteger("att.archive.arrivalFixtureSeconds",1)));
         Path destination=Path.of(System.getProperty("att.archive.output","target/artifact-pipeline-benchmark.json"));
         Files.createDirectories(destination.toAbsolutePath().getParent());
         ServerRuntime.JSON.writerWithDefaultPrettyPrinter().writeValue(destination.toFile(),report);
         System.out.println("Artifact pipeline benchmark written to "+destination.toAbsolutePath());
     }
+
 }

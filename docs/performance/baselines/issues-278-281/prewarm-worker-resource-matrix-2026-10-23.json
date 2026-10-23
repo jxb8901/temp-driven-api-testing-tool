@@ -1,0 +1,71 @@
+{
+  "schemaVersion" : "att-execution-prewarm-resource-benchmark/v1",
+  "sourceRevision" : "274726b8e0ffb09ec2bcb7aeac2e58dea62ada97",
+  "environment" : {
+    "maxHeapBytes" : 2147483648,
+    "javaVersion" : "26.0.1",
+    "javaVm" : "OpenJDK 64-Bit Server VM",
+    "architecture" : "aarch64",
+    "processors" : 8,
+    "os" : "Mac OS X 26.1"
+  },
+  "settings" : {
+    "poolSizes" : [ 1, 2, 4 ],
+    "workerHeapMaxMb" : 128,
+    "idleSamplingIntervalMs" : 250,
+    "scope" : "execution Worker JVMs only; no Jobs submitted during sampling",
+    "idleSampleCount" : 9
+  },
+  "scenarios" : [ {
+    "idlePoolSlots" : 1,
+    "readyWorkers" : 1,
+    "poolReadyMs" : 284.242541,
+    "workerHeapMaxMb" : 128,
+    "resources" : {
+      "scope" : "idle execution Worker processes only",
+      "workerCount" : 1,
+      "sampleCount" : 9,
+      "samplingIntervalMs" : 250,
+      "peakTotalResidentBytes" : 104300544,
+      "peakResidentBytesPerWorker" : [ 104300544 ],
+      "physicalIoAvailable" : false,
+      "kernelReadBytesDuringIdle" : 0,
+      "kernelWriteBytesDuringIdle" : 0,
+      "physicalIoSource" : "unavailable on this host"
+    }
+  }, {
+    "idlePoolSlots" : 2,
+    "readyWorkers" : 2,
+    "poolReadyMs" : 787.044208,
+    "workerHeapMaxMb" : 128,
+    "resources" : {
+      "scope" : "idle execution Worker processes only",
+      "workerCount" : 2,
+      "sampleCount" : 9,
+      "samplingIntervalMs" : 250,
+      "peakTotalResidentBytes" : 203653120,
+      "peakResidentBytesPerWorker" : [ 104087552, 99565568 ],
+      "physicalIoAvailable" : false,
+      "kernelReadBytesDuringIdle" : 0,
+      "kernelWriteBytesDuringIdle" : 0,
+      "physicalIoSource" : "unavailable on this host"
+    }
+  }, {
+    "idlePoolSlots" : 4,
+    "readyWorkers" : 4,
+    "poolReadyMs" : 1857.093333,
+    "workerHeapMaxMb" : 128,
+    "resources" : {
+      "scope" : "idle execution Worker processes only",
+      "workerCount" : 4,
+      "sampleCount" : 9,
+      "samplingIntervalMs" : 250,
+      "peakTotalResidentBytes" : 417923072,
+      "peakResidentBytesPerWorker" : [ 103727104, 104677376, 102367232, 107151360 ],
+      "physicalIoAvailable" : false,
+      "kernelReadBytesDuringIdle" : 0,
+      "kernelWriteBytesDuringIdle" : 0,
+      "physicalIoSource" : "unavailable on this host"
+    }
+  } ]
+}
