@@ -24,6 +24,10 @@ mvn -B -ntp -pl att-server -am \
 
 基準測試會綁定本機 loopback HTTP port，並使用指定 WAR 啟動本機 Worker。`att.home` 必須指向已解壓且版本相符的 ATT Local 發佈目錄，當中須有 `lib/att-local-<version>.jar`；預設來源目錄不會提供這個 Runtime classpath。比較時請使用相同 ATT 版本及來源的已封裝 WAR 和 Local 發佈目錄。結果會受 JVM、硬件、檔案系統及主機負載影響；Server 指標峰值是抽樣值，可能錯過非常短暫的高峰。Load 使用產生的本機 Template 工作負載，並不量度外部被測系統。
 
+## 已記錄的 4.2.3 HTTP 基準
+
+[API 矩陣擷取結果](../performance/baselines/issues-278-281/server-worker-sse-api-matrix.json)使用每個 Run 工作 20 個案例、1 及 4 個並行 Worker、無/快速/慢速 SSE 訂閱者、一次預熱、兩次正式測量，以及 1,000 個合成重播事件。測試機為 8 核心 Apple Silicon、macOS 26.1、OpenJDK 26.0.1。單一 Worker 的 Run 批次總時間中位數為 0.98–1.10 秒，4 個 Worker 時為 2.15–2.30 秒。套件範圍 Validate 通過，用時 614 毫秒；單次 Debug 和 Load 工作亦通過，分別用時 489 毫秒及 4.46 秒。Run 各模式有兩次正式樣本；單一命令各只有一個樣本。此合成擷取證明 HTTP 和 Worker 路徑正常運作，但不是受控前後比較，也不是效能門檻。
+
 ## 已記錄的 4.0.1 效能數據
 
 [Issue 177 完整擷取結果](baselines/issue-177-server-worker-sse-4.0.1.json)使用每個 Run 工作 100 個案例、一次預熱、兩次正式測量、1/4/8 個並行 Worker，以及 10,000 個合成重播事件。測試機為 8 核心 Apple Silicon、macOS 26.1、OpenJDK 26.0.1。視訂閱者模式而定，批次總時間在 1 個 Worker 時為 2.85–3.29 秒、4 個 Worker 時為 7.64–9.31 秒、8 個 Worker 時為 14.54–17.84 秒。觀察到的批次吞吐量中位數分別為 0.316–0.327、0.449–0.521 及 0.469–0.534 工作/秒。每項設定只有兩次正式測量，數據只供描述參考。

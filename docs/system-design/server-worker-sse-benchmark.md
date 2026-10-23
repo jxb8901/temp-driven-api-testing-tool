@@ -24,6 +24,10 @@ By default, each Run job has 300 cases; the matrix uses 1, 4, and 8 concurrent W
 
 The benchmark binds a loopback HTTP port and starts local Worker processes from the supplied WAR. `att.home` must point to an extracted matching ATT Local distribution containing `lib/att-local-<version>.jar`; the default source tree does not supply that runtime classpath. Use a packaged WAR and Local distribution for the same ATT version and source under comparison. Results depend on JVM, hardware, filesystem, and host load; Server metric peaks are sampled, and very short peaks may be missed. Load uses the generated local template workload and does not measure an external system under test.
 
+## Recorded 4.2.3 HTTP matrix
+
+The [API matrix capture](../performance/baselines/issues-278-281/server-worker-sse-api-matrix.json) used 20 cases per Run job, 1 and 4 concurrent Workers, no/fast/slow SSE observers, one warmup and two measured runs, plus 1,000 synthetic replay events. On an 8-core Apple Silicon Mac running macOS 26.1 and OpenJDK 26.0.1, median Run-batch wall time ranged from 0.98–1.10 s at one Worker and 2.15–2.30 s at four Workers. Package-scope Validate passed in 614 ms; one Debug and one Load job passed in 489 ms and 4.46 s. Only the Run modes have two measured samples; the command results are single samples. This synthetic capture exercises the HTTP and Worker path but is not a controlled before/after comparison or a performance threshold.
+
 ## Recorded 4.0.1 capture
 
 The [full issue 177 capture](baselines/issue-177-server-worker-sse-4.0.1.json) used 100 cases per Run job, one warmup, two measured runs, 1/4/8 concurrent Workers, and 10,000 synthetic replay events. On an 8-core Apple Silicon Mac running macOS 26.1 and OpenJDK 26.0.1, batch wall time ranged from 2.85–3.29 s at one Worker, 7.64–9.31 s at four, and 14.54–17.84 s at eight, depending on observer mode. The median observed batch throughput ranged from 0.316–0.327, 0.449–0.521, and 0.469–0.534 jobs/s respectively. Each setting has two measured runs, so these figures are descriptive only.
