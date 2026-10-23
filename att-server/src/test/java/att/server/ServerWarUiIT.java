@@ -31,7 +31,9 @@ class ServerWarUiIT {
                                             List<String> artifactPaths, List<String> primaryReports,
                                             boolean loggedParityMarker) { }
     private record PackagedWarModeCapture(PackagedExecutionCapture run, PackagedExecutionCapture debug,
-                                          PackagedExecutionCapture failedRun, PackagedExecutionCapture failedDebug) { }
+                                          PackagedExecutionCapture failedRun, PackagedExecutionCapture failedDebug,
+                                          PackagedExecutionCapture cancelledRun, PackagedExecutionCapture cancelledDebug,
+                                          PackagedExecutionCapture timedOutRun, PackagedExecutionCapture timedOutDebug) { }
 
     @Test void repeatedRedeployReleasesCompactorsAndJdbcWhilePreservingSchedulesAndJournals() throws Exception {
         Path war=Path.of(System.getProperty("att.server.war"));assertTrue(Files.isRegularFile(war));
@@ -119,6 +121,22 @@ class ServerWarUiIT {
                 +"  message: {type: log, message: packaged-war-parity}\n"
                 +"  fail: {type: assert, assert: '#{1 == 2}'}\n");
         Files.writeString(failingTemplate.resolve("debug.yaml"),"schemaVersion: att-debug/v1.2\ninputs: {}\n");
+        for(String target:List.of("HOLD","TIMEOUT")) {
+            Path targetTemplate=Files.createDirectories(pkg.resolve("templates").resolve(target));
+            String timeout=target.equals("TIMEOUT")?", timeoutMs: 300":"";
+            Files.writeString(targetTemplate.resolve("template.yaml"),"schemaVersion: att-template/v3.6\nname: "+target+"\n"
+                    +"description: Packaged WAR "+target.toLowerCase(java.util.Locale.ROOT)+" parity\nactions:\n"
+                    +"  hold: {type: tool, call: '#{hold()}'"+timeout+"}\n");
+            Files.writeString(targetTemplate.resolve("debug.yaml"),"schemaVersion: att-debug/v1.2\ninputs: {}\n");
+        }
+        Path holdScript=Files.createDirectories(pkg.resolve("tools")).resolve("hold.sh");
+        Files.writeString(holdScript,"#!/bin/sh\nprintf '%s' \"$$\" > \"$ATT_ROOT_DIR/tools/child.pid\"\n"
+                +"touch \"$ATT_ROOT_DIR/tools/started\"\nexec sleep 60\n");
+        holdScript.toFile().setExecutable(true);
+        Files.writeString(home.resolve("config/config.yaml"),"schemaVersion: att-config/v2.12\nenvironment: SIT\n"
+                +"environments: {SIT: {}}\ntestcase: {root: testcase}\ntemplates: {root: templates}\n"
+                +"tools:\n  hold:\n    name: Hold\n    description: Packaged WAR lifecycle parity fixture\n"
+                +"    command: [./tools/hold.sh]\n    stdoutFormat: text\n    arguments: {}\n");
         copySchemas(pkg);
         Path users=Files.writeString(temp.resolve("parity-tomcat-users.xml"),
                 "<tomcat-users><role rolename=\"ATT_USER\"/><user username=\"att\" password=\"secret\" roles=\"ATT_USER\"/></tomcat-users>");
@@ -130,6 +148,12 @@ class ServerWarUiIT {
             assertPackagedParity(cold.debug(),warm.debug(),"DEBUG","PASS");
             assertPackagedParity(cold.failedRun(),warm.failedRun(),"failed RUN","FAIL");
             assertPackagedParity(cold.failedDebug(),warm.failedDebug(),"failed DEBUG","FAIL");
+            assertPackagedParity(cold.cancelledRun(),warm.cancelledRun(),"cancelled RUN","CANCELLED",false);
+            assertPackagedParity(cold.cancelledDebug(),warm.cancelledDebug(),"cancelled DEBUG","CANCELLED",false);
+            assertPackagedParity(cold.timedOutRun(),warm.timedOutRun(),"timed-out RUN",null,false);
+            assertPackagedParity(cold.timedOutDebug(),warm.timedOutDebug(),"timed-out DEBUG",null,false);
+            assertNotEquals("PASS",cold.timedOutRun().status(),"Cold RUN Tool timeout must be terminal failure");
+            assertNotEquals("PASS",cold.timedOutDebug().status(),"Cold DEBUG Tool timeout must be terminal failure");
             assertEquals("cold",cold.run().dispatch());assertEquals("cold",cold.debug().dispatch());
             assertEquals("warm",warm.run().dispatch());assertEquals("warm",warm.debug().dispatch());
         } finally {
@@ -168,7 +192,15 @@ class ServerWarUiIT {
             PackagedExecutionCapture failedDebug=executePackagedDraft(port,api,auth,origin,"debug","PARITY_FAIL","FAIL",prewarm);
             if(prewarm)assertNotEquals(failedDebugLease,awaitPrewarmedPids(runtime).get(0),
                     "A failed packaged DEBUG must also be replaced after its one Job");
-            return new PackagedWarModeCapture(run,debug,failedRun,failedDebug);
+            PackagedExecutionCapture cancelledRun=executePackagedInterruptedDraft(port,api,auth,origin,pkg,runtime,
+                    "run","HOLD",true,prewarm);
+            PackagedExecutionCapture cancelledDebug=executePackagedInterruptedDraft(port,api,auth,origin,pkg,runtime,
+                    "debug","HOLD",true,prewarm);
+            PackagedExecutionCapture timedOutRun=executePackagedInterruptedDraft(port,api,auth,origin,pkg,runtime,
+                    "run","TIMEOUT",false,prewarm);
+            PackagedExecutionCapture timedOutDebug=executePackagedInterruptedDraft(port,api,auth,origin,pkg,runtime,
+                    "debug","TIMEOUT",false,prewarm);
+            return new PackagedWarModeCapture(run,debug,failedRun,failedDebug,cancelledRun,cancelledDebug,timedOutRun,timedOutDebug);
         } finally {try{tomcat.stop();}finally{tomcat.destroy();}}
     }
 
@@ -200,14 +232,63 @@ class ServerWarUiIT {
                 artifactPaths,primaryReports,true);
     }
 
+    private PackagedExecutionCapture executePackagedInterruptedDraft(int port,String api,String auth,String origin,
+                                                                     Path pkg,Object runtime,String type,String template,
+                                                                     boolean cancel,boolean prewarm) throws Exception {
+        Path started=pkg.resolve("tools/started"),childPid=pkg.resolve("tools/child.pid");
+        Files.deleteIfExists(started);Files.deleteIfExists(childPid);
+        long previousLease=prewarm?awaitPrewarmedPids(runtime).get(0):0L;
+        Map<String,Object> definition=type.equals("run")
+                ?Map.of("schemaVersion","att-execution/v1","executionType","run","packageId","parity","environment","SIT",
+                        "target",Map.of("type","template","id",template),"input",Map.of(),"options",Map.of("debug",false))
+                :Map.of("packageId","parity","target",Map.of("type","template","id",template),"input",Map.of());
+        JsonNode draft=apiJsonResponse(port,"POST",api+(type.equals("run")?"/drafts/run":"/drafts/debug"),auth,origin,definition,201);
+        JsonNode accepted=apiJsonResponse(port,"POST",api+"/jobs/"+type,auth,origin,
+                Map.of("packageId","parity","draftId",draft.path("draftId").asText()),202);
+        String id=accepted.path("jobId").asText(),jobPath=api+"/jobs/"+id;
+        long startDeadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(20);
+        while((!Files.exists(started)||!Files.exists(childPid))&&System.nanoTime()<startDeadline)Thread.sleep(10);
+        assertTrue(Files.exists(started)&&Files.exists(childPid),type+" "+template+" Tool must start before cancellation/timeout evidence");
+        long toolPid=Long.parseLong(Files.readString(childPid).trim());
+        if(cancel) {
+            JsonNode cancelled=apiJsonResponse(port,"DELETE",api+"/jobs/"+id,auth,origin,null,200);
+            assertEquals("CANCELLED",cancelled.path("status").asText());
+        }
+        JsonNode job=awaitTerminalJobStatus(port,jobPath,auth);
+        String dispatch=job.path("performance").path("workerDispatch").asText();
+        assertEquals(prewarm?"warm":"cold",dispatch,type+" must use the expected "+template+" dispatch path");
+        JsonNode result=getJson(port,jobPath+"/result",auth);
+        assertEquals(job.path("status").asText(),result.path("job").path("status").asText(),result.toString());
+        JsonNode archive=awaitArchive(port,api,id,auth);
+        List<String> artifactPaths=java.util.stream.StreamSupport.stream(archive.path("items").spliterator(),false)
+                .map(item->item.path("path").asText()).sorted().toList();
+        List<String> primaryReports=java.util.stream.StreamSupport.stream(archive.path("primaryReports").spliterator(),false)
+                .map(item->item.path("path").asText()).sorted().toList();
+        long processDeadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(15);
+        while(ProcessHandle.of(toolPid).map(ProcessHandle::isAlive).orElse(false)&&System.nanoTime()<processDeadline)Thread.sleep(20);
+        assertFalse(ProcessHandle.of(toolPid).map(ProcessHandle::isAlive).orElse(false),type+" "+template+" Tool child must be reaped");
+        if(prewarm)assertNotEquals(previousLease,awaitPrewarmedPids(runtime).get(0),
+                "A completed or interrupted "+type+" must consume and replace exactly one Worker");
+        return new PackagedExecutionCapture(dispatch,job.path("status").asText(),result.path("job").path("status").asText(),
+                artifactPaths,primaryReports,false);
+    }
+
     private static void assertPackagedParity(PackagedExecutionCapture cold,PackagedExecutionCapture warm,
                                              String type,String expectedStatus) {
-        assertEquals(expectedStatus,cold.status(),type+" cold Job status");assertEquals(expectedStatus,warm.status(),type+" warm Job status");
+        assertPackagedParity(cold,warm,type,expectedStatus,true);
+    }
+
+    private static void assertPackagedParity(PackagedExecutionCapture cold,PackagedExecutionCapture warm,
+                                             String type,String expectedStatus,boolean requireLogMarker) {
+        if(expectedStatus!=null) {
+            assertEquals(expectedStatus,cold.status(),type+" cold Job status");
+            assertEquals(expectedStatus,warm.status(),type+" warm Job status");
+        }
         assertEquals(cold.status(),warm.status(),type+" terminal status");
         assertEquals(cold.resultStatus(),warm.resultStatus(),type+" result status");
         assertEquals(cold.artifactPaths(),warm.artifactPaths(),type+" artifact inventory");
         assertEquals(cold.primaryReports(),warm.primaryReports(),type+" primary report inventory");
-        assertTrue(cold.loggedParityMarker()&&warm.loggedParityMarker(),type+" logs must remain visible across dispatch modes");
+        if(requireLogMarker)assertTrue(cold.loggedParityMarker()&&warm.loggedParityMarker(),type+" logs must remain visible across dispatch modes");
     }
 
     private static List<Long> awaitPrewarmedPids(Object runtime) throws Exception {
@@ -1108,6 +1189,19 @@ class ServerWarUiIT {
             Thread.sleep(50);
         } while (System.nanoTime() < deadline);
         assertEquals(expected, job.path("status").asText(), "Job did not reach its expected terminal state.");
+        return job;
+    }
+
+    private static JsonNode awaitTerminalJobStatus(int port,String path,String authorization) throws Exception {
+        Set<String> terminal=Set.of("PASS","FAIL","ERROR","INVALID","CANCELLED","TIMEOUT","TIMED_OUT");
+        long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(30);
+        JsonNode job;
+        do {
+            job=getJson(port,path,authorization);
+            if(terminal.contains(job.path("status").asText()))return job;
+            Thread.sleep(50);
+        } while(System.nanoTime()<deadline);
+        fail("Job did not reach a terminal state: "+job);
         return job;
     }
 
