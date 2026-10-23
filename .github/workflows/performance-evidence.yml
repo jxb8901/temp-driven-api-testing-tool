@@ -2,6 +2,8 @@ name: Performance evidence
 
 on:
   push:
+    branches:
+      - "feature/issues-278-281-performance"
     tags:
       - "performance-evidence-*"
   workflow_dispatch:
@@ -11,6 +13,8 @@ permissions:
 
 jobs:
   capture:
+    # One-off branch captures require a marker commit; routine branch pushes skip this long benchmark.
+    if: ${{ github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/performance-evidence-') || (github.ref == 'refs/heads/feature/issues-278-281-performance' && contains(github.event.head_commit.message, '[performance-evidence]')) }}
     name: Same-host baseline and feature measurements
     runs-on: ubuntu-24.04
     timeout-minutes: 45
@@ -131,7 +135,7 @@ jobs:
                 -Datt.server.benchmark.workerSse=true \
                 -Datt.server.benchmark.workerSse.cases="$case_count" \
                 -Datt.server.benchmark.workerSse.events=1000 \
-                -Datt.server.benchmark.workerSse.runs=2 \
+                -Datt.server.benchmark.workerSse.runs=6 \
                 -Datt.server.benchmark.workerSse.warmups=1 \
                 -Datt.server.benchmark.workerSse.slowDelayMs=0 \
                 -Datt.server.benchmark.workerSse.workers=1,4 \
