@@ -32,7 +32,8 @@ class DebugDraftPipelinePerformanceBenchmark {
         assumeTrue(Boolean.getBoolean("att.server.benchmark.debugDraft"), "opt-in local benchmark");
         int workbookCount = integerProperty("att.server.benchmark.debugDraft.workbooks", 5, 1);
         int casesPerWorkbook = integerProperty("att.server.benchmark.debugDraft.casesPerWorkbook", 300, 1);
-        int runs = integerProperty("att.server.benchmark.debugDraft.runs", 3, 1);
+        int warmups = integerProperty("att.server.benchmark.debugDraft.warmups", 5, 0);
+        int runs = integerProperty("att.server.benchmark.debugDraft.runs", 20, 1);
         boolean prewarm=Boolean.getBoolean("att.server.benchmark.debugDraft.prewarm");
         Path packageRoots = Files.createDirectories(temp.resolve("packages"));
         Path packageRoot = Files.createDirectories(packageRoots.resolve("benchmark"));
@@ -67,17 +68,22 @@ class DebugDraftPipelinePerformanceBenchmark {
                     .filter(item -> "FORM".equals(item.get("logicalId")))
                     .findFirst().orElseThrow(AssertionError::new);
             String resourceId = String.valueOf(target.get("resourceId"));
+            List<Map<String, Object>> warmupSamples = new ArrayList<>();
+            for (int warmup = 0; warmup < warmups; warmup++)
+                warmupSamples.add(measurePipeline(runtime, resourceId, -warmup - 1, prewarm));
+            assertDispatchSamples(warmupSamples,prewarm?"warm":"cold",prewarm);
             List<Map<String, Object>> samples = new ArrayList<>();
             for (int sampleIndex = 0; sampleIndex < runs; sampleIndex++) {
-                samples.add(measurePipeline(runtime, resourceId, sampleIndex));
+                samples.add(measurePipeline(runtime, resourceId, sampleIndex, prewarm));
             }
+            assertDispatchSamples(samples,prewarm?"warm":"cold",prewarm);
             Map<String,Object> compatibility=null;
             if(prewarm&&Boolean.getBoolean("att.server.benchmark.debugDraft.verifyCompatibility")) {
                 String original=Files.readString(runtimeConfig);
                 Files.writeString(runtimeConfig.getParent().resolve("cold-db.yaml"),"schemaVersion: att-dbhelper/v2.6\nid: unused\nname: Unused DB\ndescription: Native environment fallback\nconnection: {url: 'jdbc:unavailable:no-connection'}\n");
                 try {
                     Files.writeString(runtimeConfig,original+"\ndbhelpers: [config/cold-db.yaml]\n");
-                    Map<String,Object> cold=measurePipeline(runtime,resourceId,runs);
+                    Map<String,Object> cold=measurePipeline(runtime,resourceId,runs,false);
                     compatibility=(Map<String,Object>)cold.get("performance");
                     assertEquals("cold",compatibility.get("workerDispatch"));
                     assertEquals("native_resource_environment",compatibility.get("prewarmFallbackReason"));
@@ -97,10 +103,12 @@ class DebugDraftPipelinePerformanceBenchmark {
                     "casesPerWorkbook", casesPerWorkbook,
                     "totalCases", workbookCount * casesPerWorkbook,
                     "target", "template:FORM"));
-            report.put("settings", Map.of("runs", runs, "warmups", 0,
-                    "inspectionWorkerConcurrency", 1, "measurement", "ServerRuntime API pipeline; no browser rendering"));
+            report.put("settings", Map.of("runs", runs, "warmups", warmups,
+                    "prewarmEnabled", prewarm, "inspectionWorkerConcurrency", 1,
+                    "measurement", "ServerRuntime API pipeline; no browser rendering"));
+            report.put("warmupSamples", warmupSamples);
             report.put("samples", samples);
-            report.put("executionPool",runtime.executionPoolStatistics());
+            report.put("summary", summarize(samples));
             if(compatibility!=null)report.put("nativeEnvironmentFallback",compatibility);
 
             Path output = Path.of(System.getProperty("att.server.benchmark.debugDraft.output",
@@ -114,7 +122,7 @@ class DebugDraftPipelinePerformanceBenchmark {
         }
     }
 
-    private Map<String, Object> measurePipeline(ServerRuntime runtime, String resourceId, int sampleIndex) throws Exception {
+    private Map<String, Object> measurePipeline(ServerRuntime runtime, String resourceId, int sampleIndex, boolean prewarm) throws Exception {
         long pipelineStarted = System.nanoTime();
         long started = System.nanoTime();
         Map<String, Object> form = runtime.inspectDebugForm("benchmark", "template", resourceId, null, "benchmark-user");
@@ -138,20 +146,23 @@ class DebugDraftPipelinePerformanceBenchmark {
         com.fasterxml.jackson.databind.node.ObjectNode submit = ServerRuntime.JSON.createObjectNode();
         submit.put("packageId", "benchmark");
         submit.put("draftId", draftId);
+        if(prewarm)awaitWarmWorker(runtime,30);
         started = System.nanoTime();
         long submitStartedAt = started;
         Map<String, Object> accepted = runtime.submitDebugDraft(submit, "benchmark-user");
         double submitMs = millisSince(started);
         String jobId = String.valueOf(accepted.get("jobId"));
 
-        long firstEventDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+        long firstMeaningfulEventDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
         List<Map<String, Object>> events = runtime.events(jobId).after(0);
-        while (events.isEmpty() && System.nanoTime() < firstEventDeadline) {
+        Map<String,Object> firstMeaningfulEvent=firstMeaningfulEvent(events);
+        while (firstMeaningfulEvent==null && System.nanoTime() < firstMeaningfulEventDeadline) {
             Thread.sleep(2);
             events = runtime.events(jobId).after(0);
+            firstMeaningfulEvent=firstMeaningfulEvent(events);
         }
-        assertTrue(!events.isEmpty(), "Accepted Debug job should publish its first event");
-        long firstEventAt = System.nanoTime();
+        assertTrue(firstMeaningfulEvent!=null, "Accepted Debug job should publish a LOG or PROGRESS event");
+        long firstMeaningfulEventAt = System.nanoTime();
 
         long jobDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30);
         Map<String, Object> record = runtime.jobRecord(jobId);
@@ -173,20 +184,79 @@ class DebugDraftPipelinePerformanceBenchmark {
 
         Map<String, Object> sample = new LinkedHashMap<>();
         sample.put("sample", sampleIndex);
+        sample.put("kind",sampleIndex<0?"warmup":"measured");
         sample.put("status", record.get("status"));
         sample.put("performance",record.get("performance"));
         sample.put("formMs", formMs);
         sample.put("draftCreateMs", createMs);
         sample.put("previewMs", previewMs);
         sample.put("submitMs", submitMs);
-        sample.put("submitToFirstEventMs", millisBetween(submitStartedAt, firstEventAt));
-        sample.put("draftCreateToFirstEventMs", millisBetween(draftCreatedAt, firstEventAt));
-        sample.put("wholePipelineToFirstEventMs", millisBetween(pipelineStarted, firstEventAt));
-        sample.put("firstEventToCompletionMs", millisBetween(firstEventAt, completedAt));
+        sample.put("submitToFirstMeaningfulEventMs", millisBetween(submitStartedAt, firstMeaningfulEventAt));
+        sample.put("draftCreateToFirstMeaningfulEventMs", millisBetween(draftCreatedAt, firstMeaningfulEventAt));
+        sample.put("wholePipelineToFirstMeaningfulEventMs", millisBetween(pipelineStarted, firstMeaningfulEventAt));
+        sample.put("firstMeaningfulEventToCompletionMs", millisBetween(firstMeaningfulEventAt, completedAt));
         sample.put("submitToTerminationMs",millisBetween(submitStartedAt,terminatedAt));
         sample.put("terminalToTerminationObservedMs",millisBetween(completedAt,terminatedAt));
-        sample.put("firstEvent", events.get(0).get("event"));
+        sample.put("firstMeaningfulEvent", firstMeaningfulEvent.get("event"));
         return sample;
+    }
+
+    private Map<String,Object> firstMeaningfulEvent(List<Map<String,Object>> events) {
+        return events.stream().filter(event->List.of("log","progress").contains(String.valueOf(event.get("event"))))
+                .findFirst().orElse(null);
+    }
+
+    private void awaitWarmWorker(ServerRuntime runtime,int timeoutSeconds) throws Exception {
+        java.lang.reflect.Method statistics;
+        try {
+            statistics=runtime.getClass().getDeclaredMethod("executionPoolStatistics");
+            statistics.setAccessible(true);
+        } catch(NoSuchMethodException unavailableOnMaster) {
+            throw new IllegalStateException("The feature benchmark requested prewarming but the Server has no execution pool",unavailableOnMaster);
+        }
+        long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(timeoutSeconds);
+        while(System.nanoTime()<deadline) {
+            Object value=statistics.invoke(runtime);
+            if(value instanceof Map<?,?> metrics&&metrics.get("ready") instanceof Number ready&&ready.intValue()>0)return;
+            Thread.sleep(20);
+        }
+        throw new IllegalStateException("A prewarmed execution Worker did not become READY within "+timeoutSeconds+" seconds");
+    }
+
+    private Map<String,Object> summarize(List<Map<String,Object>> samples) {
+        Map<String,Object> summary=new LinkedHashMap<>();
+        Map<String,Integer> dispatchCounts=new LinkedHashMap<>();
+        for(Map<String,Object> sample:samples) {
+            Object raw=sample.get("performance");
+            if(raw instanceof Map<?,?> performance) {
+                Object dispatch=performance.get("workerDispatch");
+                dispatchCounts.merge(dispatch==null?"cold":String.valueOf(dispatch),1,Integer::sum);
+            }
+        }
+        summary.put("workerDispatchCounts",dispatchCounts);
+        for(String metric:List.of("formMs","draftCreateMs","previewMs","submitMs","submitToFirstMeaningfulEventMs",
+                "draftCreateToFirstMeaningfulEventMs","wholePipelineToFirstMeaningfulEventMs",
+                "firstMeaningfulEventToCompletionMs","submitToTerminationMs")) {
+            List<Double> values=samples.stream().map(sample->sample.get(metric)).filter(Number.class::isInstance)
+                    .map(Number.class::cast).map(Number::doubleValue).sorted().toList();
+            if(values.isEmpty())continue;
+            summary.put(metric,Map.of("p50",percentile(values,0.50),"p95",percentile(values,0.95)));
+        }
+        return summary;
+    }
+
+    private void assertDispatchSamples(List<Map<String,Object>> samples,String expected,boolean requireMetric) {
+        for(Map<String,Object> sample:samples) {
+            Object raw=sample.get("performance");
+            if(!(raw instanceof Map<?,?> performance))throw new AssertionError("Debug Job performance metrics are missing");
+            Object dispatch=performance.get("workerDispatch");
+            if(dispatch==null&&!requireMetric)continue; // Master predates the explicit cold/warm field.
+            assertEquals(expected,dispatch,"Every measured pipeline must use the selected cold/warm dispatch path");
+        }
+    }
+
+    private static double percentile(List<Double> sorted,double fraction) {
+        return sorted.get(Math.min(sorted.size()-1,(int)Math.ceil(sorted.size()*fraction)-1));
     }
 
     private boolean hasTerminationTiming(Map<String,Object> record) {

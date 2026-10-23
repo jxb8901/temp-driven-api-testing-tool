@@ -24,6 +24,21 @@ This inventory covers the Studio and Server routes at the merged PR #282 baselin
 
 Implementation anchors: `att-web/frontend/src/api.ts`, `features/explorer/ExplorerPage.tsx`, `features/run/RunPage.tsx`, `features/load/QuickLoadPage.tsx`, `features/load/LoadPage.tsx`, `ApiServlet`, `ServerRuntime`, and `WorkerMain`. `TypedSidecarForm` edits values; its enclosing page owns draft validation.
 
+## Server-side route regressions
+
+The route inventory is backed by ServerRuntime boundary tests rather than a second dispatcher implementation:
+
+- Explorer resource list, detail, source and pagination reuse: `ServerRuntimeInspectionTest.listsPackageResourcesThroughTheBoundedInspectorWorkerAndSignsPaginationCursors`.
+- Declared/effective/compare configuration and testdata-record pagination: `ServerRuntimeInspectionTest.returnsDeclaredEffectiveAndComparisonConfigurationThroughTheBoundedInspectorWorker` and `ServerRuntimeInspectionTest.pagesTestdataRecordsThroughTheBoundedInspectorWorker`.
+- Debug form, normalized draft ownership, classified-default redaction and stale-source rejection: `ServerRuntimeInspectionTest.validatesDebugDraftsWithoutDisclosingDefaultsAndRejectsStalePrincipalBoundSubmissions`.
+- RUN selection and stale package revision: `ServerRuntimeUnifiedRunTest`.
+- Quick Load draft validation and stale revision: `ServerRuntimeQuickLoadTest`.
+- Advanced Load/catalog and schedule validation: `ServerRuntimeScheduleTest`.
+- Replay draft revalidation and durable one-shot Validate Job behavior: `ServerRuntimeJobReplayTest` and `ServerRuntimeTest`.
+- Public authenticated `POST /jobs/validate` integration: `AuthenticationIntegrationTest`.
+
+Engine-level testdata preview coverage additionally exercises classified-field redaction, pagination bounds, generated-value caps and missing descriptors in `PackageConfigurationInspectorTest.pagesTestdataPreviewAndKeepsClassifiedFieldsProtectedWhenMaskingIsOff` and adjacent testdata-preview cases.
+
 ## Cache and admission boundaries
 
 The Inspector affinity key includes package, runtime/configuration and environment. Existing resource/configuration inspectors watch package sources and discard their bounded snapshots on change or watcher uncertainty. Sensitive field and source-browsing policy are part of the Inspector context; browser caching is additionally scoped by the server-issued authorization/masking context. Refresh and changed source must not revive another context's cached projection.

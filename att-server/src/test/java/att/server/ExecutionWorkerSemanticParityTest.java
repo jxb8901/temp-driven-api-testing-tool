@@ -15,6 +15,7 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
+import java.util.function.BooleanSupplier;
 import java.util.zip.ZipFile;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -27,8 +28,10 @@ class ExecutionWorkerSemanticParityTest {
         Path allowed=Files.createDirectories(temp.resolve("allowed"));
         Path pkg=Files.createDirectories(allowed.resolve("p"));
         Files.createDirectories(pkg.resolve("templates/SIMPLE"));
+        Files.createDirectories(pkg.resolve("templates/BAD"));
         Files.createDirectories(pkg.resolve("testcase"));
         Files.writeString(pkg.resolve("templates/SIMPLE/template.yaml"),"schemaVersion: att-template/v3.6\nname: SIMPLE\ndescription: Cold and warm parity fixture\nactions:\n  message: {type: log, message: parity-once}\n");
+        Files.writeString(pkg.resolve("templates/BAD/template.yaml"),"schemaVersion: att-template/v3.6\nname: BAD\ndescription: Failed cold and warm parity fixture\nactions:\n  check: {type: assert, assert: '#{1 == 2}'}\n");
         Path runtimeConfig=temp.resolve("runtime-home/config/config.yaml");
         Files.createDirectories(runtimeConfig.getParent());
         Files.writeString(runtimeConfig,"schemaVersion: att-config/v2.12\nenvironment: SIT\nenvironments: {SIT: {}}\ntestcase: {root: testcase}\ntemplates: {root: templates}\n");
@@ -37,6 +40,7 @@ class ExecutionWorkerSemanticParityTest {
             Sheet sheet=book.createSheet("Cases");Row header=sheet.createRow(0);
             header.createCell(0).setCellValue("ID");header.createCell(1).setCellValue("Tags");header.createCell(2).setCellValue("Template");
             Row row=sheet.createRow(1);row.createCell(0).setCellValue("C1");row.createCell(1).setCellValue("smoke");row.createCell(2).setCellValue("name: SIMPLE");
+            Row failing=sheet.createRow(2);failing.createCell(0).setCellValue("C2");failing.createCell(1).setCellValue("failure");failing.createCell(2).setCellValue("name: BAD");
             book.write(out);
         }
         Files.writeString(pkg.resolve("testcase/cases.yaml"),"schemaVersion: att-sidecar/v2.2\nid: cases\nexcel:\n  sheet: default=Cases\n  caseId: ID\n  tags: Tags\nstages:\n  - key: main\n    template: Template\n    required: true\n");
@@ -48,13 +52,64 @@ class ExecutionWorkerSemanticParityTest {
             ServerRuntimeTestSupport.addModuleJar(libs,module,Path.of(module+"/target/classes"));
         ServerRuntimeTestSupport.addWorkerClasspathJars(libs);
 
-        RunCapture cold=execute(false,allowed,pkg,runtimeConfig,libs,"cold");
-        RunCapture warm=execute(true,allowed,pkg,runtimeConfig,libs,"warm");
+        RunCapture cold=execute(false,allowed,pkg,runtimeConfig,libs,"cases.default.C1","cold");
+        RunCapture warm=execute(true,allowed,pkg,runtimeConfig,libs,"cases.default.C1","warm");
 
+        assertEquivalent("PASS",cold,warm);
+
+        RunCapture coldFailure=execute(false,allowed,pkg,runtimeConfig,libs,"cases.default.C2","cold-failure");
+        RunCapture warmFailure=execute(true,allowed,pkg,runtimeConfig,libs,"cases.default.C2","warm-failure");
+        assertEquivalent("FAIL",coldFailure,warmFailure);
+    }
+
+    @Test void warmAndColdCancellationAndActionTimeoutHaveEquivalentTerminalEvidence() throws Exception {
+        org.junit.jupiter.api.Assumptions.assumeFalse(System.getProperty("os.name","").toLowerCase().contains("win"),
+                "Uses a POSIX child Tool fixture");
+        Path allowed=Files.createDirectories(temp.resolve("lifecycle-allowed"));
+        Path pkg=Files.createDirectories(allowed.resolve("p"));
+        Path templates=Files.createDirectories(pkg.resolve("templates"));
+        Files.createDirectories(pkg.resolve("testcase"));
+        Path tools=Files.createDirectories(pkg.resolve("tools"));
+        Path holdScript=tools.resolve("hold.sh");
+        Files.writeString(holdScript,"#!/bin/sh\n"
+                +"printf '%s' \"$$\" > \"$ATT_ROOT_DIR/tools/child.pid\"\n"
+                +"touch \"$ATT_ROOT_DIR/tools/started\"\n"
+                +"exec sleep 60\n");
+        holdScript.toFile().setExecutable(true);
+        Files.writeString(Files.createDirectories(templates.resolve("HOLD")).resolve("template.yaml"),
+                "schemaVersion: att-template/v3.6\nname: HOLD\ndescription: Cancellation parity fixture\n"
+                        +"actions:\n  hold: {type: tool, call: '#{hold()}'}\n");
+        Files.writeString(Files.createDirectories(templates.resolve("TIMEOUT")).resolve("template.yaml"),
+                "schemaVersion: att-template/v3.6\nname: TIMEOUT\ndescription: Timeout parity fixture\n"
+                        +"actions:\n  hold: {type: tool, call: '#{hold()}', timeoutMs: 300}\n");
+        Path runtimeConfig=temp.resolve("lifecycle-runtime/config/config.yaml");
+        Files.createDirectories(runtimeConfig.getParent());
+        Files.writeString(runtimeConfig,"schemaVersion: att-config/v2.12\nenvironment: SIT\nenvironments: {SIT: {}}\n"
+                +"templates: {root: templates}\ntestcase: {root: testcase}\n"
+                +"tools:\n  hold:\n    name: Hold\n    description: Hold the Worker for lifecycle parity checks\n"
+                +"    command: [./tools/hold.sh]\n    stdoutFormat: text\n    arguments: {}\n");
+        Path libs=Files.createDirectories(temp.resolve("lifecycle-libs"));
+        for(String module:List.of("att-worker","att-engine","att-server-api","att-security"))
+            ServerRuntimeTestSupport.addModuleJar(libs,module,Path.of(module+"/target/classes"));
+        ServerRuntimeTestSupport.addWorkerClasspathJars(libs);
+
+        TerminalCapture coldCancel=executeInterrupted(false,allowed,pkg,runtimeConfig,libs,"HOLD",true,"cold-cancel");
+        TerminalCapture warmCancel=executeInterrupted(true,allowed,pkg,runtimeConfig,libs,"HOLD",true,"warm-cancel");
+        assertEquals("CANCELLED",coldCancel.status);
+        assertEquals(coldCancel,warmCancel,"Cancellation state, event, diagnostic, archive and history must match");
+
+        TerminalCapture coldTimeout=executeInterrupted(false,allowed,pkg,runtimeConfig,libs,"TIMEOUT",false,"cold-timeout");
+        TerminalCapture warmTimeout=executeInterrupted(true,allowed,pkg,runtimeConfig,libs,"TIMEOUT",false,"warm-timeout");
+        assertNotEquals("PASS",coldTimeout.status);
+        assertEquals(coldTimeout.status,warmTimeout.status,"A Tool timeout must have the same terminal state");
+        assertEquals(coldTimeout,warmTimeout,"Timeout state, event, diagnostic, archive and history must match");
+    }
+
+    private void assertEquivalent(String expectedStatus,RunCapture cold,RunCapture warm) {
         assertEquals("cold",cold.dispatch);
         assertEquals("warm",warm.dispatch);
         assertEquals(cold.status,warm.status);
-        assertEquals("PASS",warm.status);
+        assertEquals(expectedStatus,warm.status);
         assertEquals(cold.exitCode,warm.exitCode);
         assertEquals(cold.eventNames,warm.eventNames,"The event stream must keep the same order and terminal marker");
         assertTrue(warm.eventNames.contains("result"));
@@ -68,7 +123,7 @@ class ExecutionWorkerSemanticParityTest {
         assertEquals(cold.historyStatus,warm.historyStatus,"Job history must retain the same terminal state");
     }
 
-    private RunCapture execute(boolean enabled,Path allowed,Path pkg,Path runtimeConfig,Path libs,String name) throws Exception {
+    private RunCapture execute(boolean enabled,Path allowed,Path pkg,Path runtimeConfig,Path libs,String targetCase,String name) throws Exception {
         Path data=temp.resolve(name+"-data");
         Path serverConfig=temp.resolve(name+"-server.yaml");
         String pool=enabled?"  executionPool: {enabled: true, minIdle: 1, maxIdle: 1, heapBudgetMb: 128, packageIds: [p]}\n":"";
@@ -82,7 +137,7 @@ class ExecutionWorkerSemanticParityTest {
             if(enabled)awaitReady(runtime,15);
             var definition=ServerRuntime.JSON.createObjectNode();
             definition.put("schemaVersion",RunDefinition.VERSION);definition.put("executionType","run");definition.put("packageId","p");
-            definition.set("target",ServerRuntime.JSON.valueToTree(Map.of("type","case","id","cases.default.C1")));
+            definition.set("target",ServerRuntime.JSON.valueToTree(Map.of("type","case","id",targetCase)));
             definition.set("options",ServerRuntime.JSON.valueToTree(Map.of("debug",false)));
             Map<String,Object> draft=runtime.createRunDraft(definition,"alice");
             Map<String,Object> accepted=runtime.submitRunDraft(ServerRuntime.JSON.valueToTree(Map.of("packageId","p","draftId",draft.get("draftId"))),"alice","alice");
@@ -118,6 +173,63 @@ class ExecutionWorkerSemanticParityTest {
         }
     }
 
+    private TerminalCapture executeInterrupted(boolean enabled,Path allowed,Path pkg,Path runtimeConfig,Path libs,
+                                               String template,boolean cancel,String name) throws Exception {
+        Path started=pkg.resolve("tools/started"),childPid=pkg.resolve("tools/child.pid");
+        Files.deleteIfExists(started);Files.deleteIfExists(childPid);
+        Path data=temp.resolve(name+"-data"),serverConfig=temp.resolve(name+"-server.yaml");
+        String pool=enabled?"  executionPool: {enabled: true, minIdle: 1, maxIdle: 1, heapBudgetMb: 128, packageIds: [p]}\n":"";
+        Files.writeString(serverConfig,"server:\n  runtimeConfigPath: "+ServerRuntimeTestSupport.yaml(runtimeConfig)+"\n"
+                +"  dataDir: "+ServerRuntimeTestSupport.yaml(data)+"\n  auth: {mode: local}\n"
+                +"  inspection: {enabled: true, maxConcurrent: 1, timeoutMs: 30000}\n"
+                +"workers:\n  maxConcurrent: 1\n  queuedLimit: 1\n  heapMaxMb: 128\n"+pool
+                +"packages:\n  allowedRoots: ["+ServerRuntimeTestSupport.yaml(allowed)+"]\n  entries:\n    p: "+ServerRuntimeTestSupport.yaml(pkg)+"\n");
+        try(ServerRuntime runtime=new ServerRuntime(ServerConfig.load(serverConfig),libs.toString())) {
+            runtime.store.createAuthUser("alice","Alice","unused","USER","csrf");
+            if(enabled)awaitReady(runtime,15);
+            var definition=ServerRuntime.JSON.createObjectNode();
+            definition.put("schemaVersion",RunDefinition.VERSION);definition.put("executionType","run");definition.put("packageId","p");
+            definition.set("target",ServerRuntime.JSON.valueToTree(Map.of("type","template","id",template)));
+            definition.set("input",ServerRuntime.JSON.createObjectNode());definition.set("options",ServerRuntime.JSON.valueToTree(Map.of("debug",false)));
+            Map<String,Object> draft=runtime.createRunDraft(definition,"alice");
+            Map<String,Object> accepted=runtime.submitRunDraft(ServerRuntime.JSON.valueToTree(
+                    Map.of("packageId","p","draftId",draft.get("draftId"))),"alice","alice");
+            String id=String.valueOf(accepted.get("jobId"));
+            Job job=runtime.jobs.get(id);
+            await(()->Files.exists(started)&&Files.exists(childPid)&&job.workerPid!=null,20);
+            long workerPid=job.workerPid;
+            long toolPid=Long.parseLong(Files.readString(childPid));
+            if(cancel)assertEquals("CANCELLED",runtime.cancel(id,"alice"));
+            Map<String,Object> result=ServerRuntimeTestSupport.awaitUnifiedJob(runtime,id);
+            await(()->!ProcessHandle.of(workerPid).map(ProcessHandle::isAlive).orElse(false)
+                    &&!ProcessHandle.of(toolPid).map(ProcessHandle::isAlive).orElse(false),15);
+            awaitArchive(runtime,id,20);
+            Map<?,?> row=(Map<?,?>)result.get("job");
+            List<Map<String,Object>> events=runtime.events(id).after(0);
+            List<String> eventNames=events.stream().map(event->String.valueOf(event.get("event"))).toList();
+            List<String> logs=new ArrayList<>();
+            for(Map<String,Object> event:events)if("log".equals(event.get("event"))) {
+                Map<?,?> payload=(Map<?,?>)event.get("data");
+                Object message=payload.get("console");if(message==null)message=payload.get("message");
+                if(message!=null)logs.add(normalizeLog(String.valueOf(message)));
+            }
+            List<String> reportEntries;
+            try(ZipFile archive=new ZipFile(runtime.artifactArchivePath(id).toFile())) {
+                reportEntries=archive.stream().filter(entry->!entry.isDirectory())
+                        .map(entry->stableRunPath(entry.getName())).sorted().toList();
+            }
+            Map<String,Object> index=runtime.artifactIndex(id);
+            List<String> primaryReports=new ArrayList<>();
+            for(Object raw:(List<?>)index.get("primaryReports"))if(raw instanceof Map<?,?> entry)
+                primaryReports.add(stableRunPath(String.valueOf(entry.get("path"))));
+            Map<String,Object> history=runtime.store.listOwned(100,"alice").stream()
+                    .filter(item->id.equals(item.get("jobId"))).findFirst().orElseThrow();
+            return new TerminalCapture(String.valueOf(row.get("status")),String.valueOf(row.get("exitCode")),eventNames,logs,
+                    stableResult(result.get("result")),stableResult(result.get("diagnostic")),reportEntries,primaryReports,
+                    String.valueOf(history.get("status")));
+        }
+    }
+
     private static void awaitReady(ServerRuntime runtime,int seconds) throws Exception {
         long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(seconds);
         while(System.nanoTime()<deadline) {
@@ -134,6 +246,12 @@ class ExecutionWorkerSemanticParityTest {
         assertEquals("READY",runtime.artifactIndex(id).get("archiveStatus"));
     }
 
+    private static void await(BooleanSupplier condition,int seconds) throws Exception {
+        long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(seconds);
+        while(!condition.getAsBoolean()&&System.nanoTime()<deadline)Thread.sleep(20);
+        assertTrue(condition.getAsBoolean(),"Lifecycle condition did not complete within "+seconds+" seconds");
+    }
+
     private static JsonNode stableResult(Object raw) {
         JsonNode result=ServerRuntime.JSON.valueToTree(raw);
         dropMeasuredDurations(result);
@@ -142,6 +260,11 @@ class ExecutionWorkerSemanticParityTest {
 
     private static String stableRunPath(String path) {
         return path.replaceAll("^\\d{8}-\\d{6}/","<run>/");
+    }
+
+    private static String normalizeLog(String message) {
+        return message.replaceAll("\\b[0-9]{8}-[0-9]{6}\\b","<run>")
+                .replaceAll("durationMs: ?[0-9]+","durationMs: <measured>");
     }
 
     private static void dropMeasuredDurations(JsonNode node) {
@@ -159,4 +282,7 @@ class ExecutionWorkerSemanticParityTest {
     private record RunCapture(String dispatch,String status,String exitCode,List<String> eventNames,List<String> logMessages,
                               Object resultPayload,Object diagnostic,List<String> reportEntries,List<String> primaryReportPaths,
                               String historyStatus) { }
+    private record TerminalCapture(String status,String exitCode,List<String> eventNames,List<String> logMessages,
+                                   Object resultPayload,Object diagnostic,List<String> reportEntries,List<String> primaryReportPaths,
+                                   String historyStatus) { }
 }

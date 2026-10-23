@@ -79,6 +79,39 @@ jobs:
             -Datt.server.benchmark.prewarmResources.output="$GITHUB_WORKSPACE/target/performance-evidence/prewarm-worker-resource-matrix.json" \
             -Datt.benchmark.commit="$GITHUB_SHA"
 
+      - name: Compare cold and prewarmed Debug draft latency on this runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$GITHUB_WORKSPACE/target/performance-evidence"
+          master="$RUNNER_TEMP/att-master-baseline"
+          mkdir -p "$master/att-server/src/test/java/att/server"
+          cp att-server/src/test/java/att/server/DebugDraftPipelinePerformanceBenchmark.java \
+            "$master/att-server/src/test/java/att/server/DebugDraftPipelinePerformanceBenchmark.java"
+          master_sha="$(git -C "$master" rev-parse HEAD)"
+          (cd "$master" && mvn -B -ntp -pl att-server -am test \
+            -Dtest=DebugDraftPipelinePerformanceBenchmark \
+            -Dsurefire.failIfNoSpecifiedTests=false \
+            -Dskip.npm=true -Dskip.installnodenpm=true -Datt.skipFrontendUnitTests=true \
+            -Datt.skipJava8ModuleTests=true \
+            -Datt.server.benchmark.debugDraft=true \
+            -Datt.server.benchmark.debugDraft.prewarm=false \
+            -Datt.server.benchmark.debugDraft.warmups=5 \
+            -Datt.server.benchmark.debugDraft.runs=20 \
+            -Datt.server.benchmark.debugDraft.revision="$master_sha" \
+            -Datt.server.benchmark.debugDraft.output="$GITHUB_WORKSPACE/target/performance-evidence/debug-draft-master.json")
+          mvn -B -ntp -pl att-server -am test \
+            -Dtest=DebugDraftPipelinePerformanceBenchmark \
+            -Dsurefire.failIfNoSpecifiedTests=false \
+            -Dskip.npm=true -Dskip.installnodenpm=true -Datt.skipFrontendUnitTests=true \
+            -Datt.skipJava8ModuleTests=true \
+            -Datt.server.benchmark.debugDraft=true \
+            -Datt.server.benchmark.debugDraft.prewarm=true \
+            -Datt.server.benchmark.debugDraft.warmups=5 \
+            -Datt.server.benchmark.debugDraft.runs=20 \
+            -Datt.server.benchmark.debugDraft.revision="$GITHUB_SHA" \
+            -Datt.server.benchmark.debugDraft.output="$GITHUB_WORKSPACE/target/performance-evidence/debug-draft-feature.json"
+
       - name: Capture same-host master and feature RUN, DEBUG, LOAD, and Validate matrix
         shell: bash
         run: |
