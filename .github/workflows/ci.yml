@@ -242,7 +242,9 @@ jobs:
           cache: maven
 
       - name: Verify same-JVM redeploy lifecycle on Tomcat 11
-        run: mvn -B -ntp -Ptomcat-11 -pl att-server -am -Datt.skipJava8ModuleTests=true -Datt.skipFrontendUnitTests=true -Datt.skipServerUnitTests=true '-Dit.test=ServerWarUiIT#repeatedRedeployReleasesCompactorsAndJdbcWhilePreservingSchedulesAndJournals' verify
+        # ServerWarUiIT assembles a Local runtime from att-worker/target/classes,
+        # so include Worker explicitly even though it is not a Server dependency.
+        run: mvn -B -ntp -Ptomcat-11 -pl att-worker,att-server -am -Datt.skipJava8ModuleTests=true -Datt.skipFrontendUnitTests=true -Datt.skipServerUnitTests=true '-Dit.test=ServerWarUiIT#repeatedRedeployReleasesCompactorsAndJdbcWhilePreservingSchedulesAndJournals' verify
 
       - name: Upload Tomcat 11 test reports on failure
         if: failure()
