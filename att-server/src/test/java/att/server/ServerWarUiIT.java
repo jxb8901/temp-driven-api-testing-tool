@@ -30,7 +30,8 @@ class ServerWarUiIT {
     private record PackagedExecutionCapture(String dispatch, String status, String resultStatus,
                                             List<String> artifactPaths, List<String> primaryReports,
                                             boolean loggedParityMarker) { }
-    private record PackagedWarModeCapture(PackagedExecutionCapture run, PackagedExecutionCapture debug) { }
+    private record PackagedWarModeCapture(PackagedExecutionCapture run, PackagedExecutionCapture debug,
+                                          PackagedExecutionCapture failedRun, PackagedExecutionCapture failedDebug) { }
 
     @Test void repeatedRedeployReleasesCompactorsAndJdbcWhilePreservingSchedulesAndJournals() throws Exception {
         Path war=Path.of(System.getProperty("att.server.war"));assertTrue(Files.isRegularFile(war));
@@ -112,6 +113,12 @@ class ServerWarUiIT {
                 +"description: Packaged WAR cold and warm execution parity\nactions:\n"
                 +"  message: {type: log, message: packaged-war-parity}\n");
         Files.writeString(template.resolve("debug.yaml"),"schemaVersion: att-debug/v1.2\ninputs: {}\n");
+        Path failingTemplate=Files.createDirectories(pkg.resolve("templates/PARITY_FAIL"));
+        Files.writeString(failingTemplate.resolve("template.yaml"),"schemaVersion: att-template/v3.6\nname: PARITY_FAIL\n"
+                +"description: Packaged WAR cold and warm failure parity\nactions:\n"
+                +"  message: {type: log, message: packaged-war-parity}\n"
+                +"  fail: {type: assert, assert: '#{1 == 2}'}\n");
+        Files.writeString(failingTemplate.resolve("debug.yaml"),"schemaVersion: att-debug/v1.2\ninputs: {}\n");
         copySchemas(pkg);
         Path users=Files.writeString(temp.resolve("parity-tomcat-users.xml"),
                 "<tomcat-users><role rolename=\"ATT_USER\"/><user username=\"att\" password=\"secret\" roles=\"ATT_USER\"/></tomcat-users>");
@@ -119,8 +126,10 @@ class ServerWarUiIT {
         try {
             PackagedWarModeCapture cold=exercisePackagedWarMode(war,home,allowed,pkg,users,false);
             PackagedWarModeCapture warm=exercisePackagedWarMode(war,home,allowed,pkg,users,true);
-            assertPackagedParity(cold.run(),warm.run(),"RUN");
-            assertPackagedParity(cold.debug(),warm.debug(),"DEBUG");
+            assertPackagedParity(cold.run(),warm.run(),"RUN","PASS");
+            assertPackagedParity(cold.debug(),warm.debug(),"DEBUG","PASS");
+            assertPackagedParity(cold.failedRun(),warm.failedRun(),"failed RUN","FAIL");
+            assertPackagedParity(cold.failedDebug(),warm.failedDebug(),"failed DEBUG","FAIL");
             assertEquals("cold",cold.run().dispatch());assertEquals("cold",cold.debug().dispatch());
             assertEquals("warm",warm.run().dispatch());assertEquals("warm",warm.debug().dispatch());
         } finally {
@@ -147,33 +156,40 @@ class ServerWarUiIT {
             int port=tomcat.getConnector().getLocalPort();String api="/tools/att/api/v1",auth=basic("att"),origin="http://127.0.0.1:"+port;
             Object runtime=context.getServletContext().getAttribute("att.server.runtime");
             long runLease=prewarm?awaitPrewarmedPids(runtime).get(0):0L;
-            PackagedExecutionCapture run=executePackagedDraft(port,api,auth,origin,"run",prewarm);
+            PackagedExecutionCapture run=executePackagedDraft(port,api,auth,origin,"run","PARITY","PASS",prewarm);
             long debugLease=prewarm?awaitPrewarmedPids(runtime).get(0):0L;
             if(prewarm)assertNotEquals(runLease,debugLease,"A completed packaged RUN must be replaced before DEBUG dispatch");
-            PackagedExecutionCapture debug=executePackagedDraft(port,api,auth,origin,"debug",prewarm);
-            if(prewarm)assertNotEquals(debugLease,awaitPrewarmedPids(runtime).get(0),
-                    "A completed packaged DEBUG must also be replaced after its one Job");
-            return new PackagedWarModeCapture(run,debug);
+            PackagedExecutionCapture debug=executePackagedDraft(port,api,auth,origin,"debug","PARITY","PASS",prewarm);
+            long failedRunLease=prewarm?awaitPrewarmedPids(runtime).get(0):0L;
+            if(prewarm)assertNotEquals(debugLease,failedRunLease,"A completed packaged DEBUG must be replaced before a failing RUN");
+            PackagedExecutionCapture failedRun=executePackagedDraft(port,api,auth,origin,"run","PARITY_FAIL","FAIL",prewarm);
+            long failedDebugLease=prewarm?awaitPrewarmedPids(runtime).get(0):0L;
+            if(prewarm)assertNotEquals(failedRunLease,failedDebugLease,"A failed packaged RUN must still consume exactly one Worker Job");
+            PackagedExecutionCapture failedDebug=executePackagedDraft(port,api,auth,origin,"debug","PARITY_FAIL","FAIL",prewarm);
+            if(prewarm)assertNotEquals(failedDebugLease,awaitPrewarmedPids(runtime).get(0),
+                    "A failed packaged DEBUG must also be replaced after its one Job");
+            return new PackagedWarModeCapture(run,debug,failedRun,failedDebug);
         } finally {try{tomcat.stop();}finally{tomcat.destroy();}}
     }
 
     private PackagedExecutionCapture executePackagedDraft(int port,String api,String auth,String origin,
-                                                          String type,boolean prewarm) throws Exception {
+                                                          String type,String template,String expectedStatus,
+                                                          boolean prewarm) throws Exception {
         Map<String,Object> definition=type.equals("run")
                 ?Map.of("schemaVersion","att-execution/v1","executionType","run","packageId","parity","environment","SIT",
-                        "target",Map.of("type","template","id","PARITY"),"input",Map.of(),"options",Map.of("debug",false))
-                :Map.of("packageId","parity","target",Map.of("type","template","id","PARITY"),"input",Map.of());
+                        "target",Map.of("type","template","id",template),"input",Map.of(),"options",Map.of("debug",false))
+                :Map.of("packageId","parity","target",Map.of("type","template","id",template),"input",Map.of());
         JsonNode draft=apiJsonResponse(port,"POST",api+(type.equals("run")?"/drafts/run":"/drafts/debug"),auth,origin,definition,201);
         JsonNode accepted=apiJsonResponse(port,"POST",api+"/jobs/"+type,auth,origin,
                 Map.of("packageId","parity","draftId",draft.path("draftId").asText()),202);
         String id=accepted.path("jobId").asText(),jobPath=api+"/jobs/"+id;
-        JsonNode job=awaitJobStatus(port,jobPath,auth,"PASS");
+        JsonNode job=awaitJobStatus(port,jobPath,auth,expectedStatus);
         String dispatch=job.path("performance").path("workerDispatch").asText();
         assertEquals(prewarm?"warm":"cold",dispatch,type+" must use the expected dispatch path");
         String logData=sseDataUntil(port,jobPath+"/events",auth,"packaged-war-parity");
         assertTrue(logData.contains("packaged-war-parity"),type+" must preserve the packaged Worker log event");
         JsonNode result=getJson(port,jobPath+"/result",auth);
-        assertEquals("PASS",result.path("job").path("status").asText(),result.toString());
+        assertEquals(expectedStatus,result.path("job").path("status").asText(),result.toString());
         JsonNode archive=awaitArchive(port,api,id,auth);
         List<String> artifactPaths=java.util.stream.StreamSupport.stream(archive.path("items").spliterator(),false)
                 .map(item->item.path("path").asText()).sorted().toList();
@@ -184,8 +200,9 @@ class ServerWarUiIT {
                 artifactPaths,primaryReports,true);
     }
 
-    private static void assertPackagedParity(PackagedExecutionCapture cold,PackagedExecutionCapture warm,String type) {
-        assertEquals("PASS",cold.status(),type+" cold Job status");assertEquals("PASS",warm.status(),type+" warm Job status");
+    private static void assertPackagedParity(PackagedExecutionCapture cold,PackagedExecutionCapture warm,
+                                             String type,String expectedStatus) {
+        assertEquals(expectedStatus,cold.status(),type+" cold Job status");assertEquals(expectedStatus,warm.status(),type+" warm Job status");
         assertEquals(cold.status(),warm.status(),type+" terminal status");
         assertEquals(cold.resultStatus(),warm.resultStatus(),type+" result status");
         assertEquals(cold.artifactPaths(),warm.artifactPaths(),type+" artifact inventory");
