@@ -145,6 +145,8 @@ public final class WorkerMain {
                 return fail("WORKER_REQUEST_INVALID","Prewarmed Workers accept only one RUN/DEBUG Job");
             if(request.packageRoot==null||!Paths.get(request.packageRoot).toRealPath().equals(Paths.get("").toRealPath()))
                 return fail("WORKER_REQUEST_INVALID","Prewarmed Worker package affinity mismatch");
+            if(request.expectedRevisionDigest==null)
+                return fail("WORKER_REQUEST_INVALID","Prewarmed execution requires an immutable package revision");
             try { att.security.ExecutionEnvironment.assign(request.executionEnvironment); }
             catch(IllegalArgumentException|IllegalStateException invalid) {
                 return fail("WORKER_REQUEST_INVALID","Invalid one-shot execution environment");
@@ -323,6 +325,10 @@ public final class WorkerMain {
                 return new OperationResult(null,"PASS",0,0,Collections.<att.validation.Diagnostic>emptyList(),
                         Collections.<String,String>emptyMap(),Collections.<String,Object>singletonMap("inspection",Collections.<String,Object>singletonMap("revisionDigest",inspector.executionRevisionDigest())));
             }
+            if("prewarm-eligibility".equals(r.inspectionAction)) {
+                return new OperationResult(null,"PASS",0,0,Collections.<att.validation.Diagnostic>emptyList(),
+                        Collections.<String,String>emptyMap(),Collections.<String,Object>singletonMap("inspection",inspector.prewarmEligibility()));
+            }
             if("debug-form".equals(r.inspectionAction)) {
                 Map<String,Object> inspected=inspector.inspectDebugForm(r.inspectionType,r.inspectionResourceId,r.expectedRevisionDigest);
                 return new OperationResult(null,"PASS",0,0,Collections.<att.validation.Diagnostic>emptyList(),
@@ -394,7 +400,7 @@ public final class WorkerMain {
         throw new IllegalArgumentException("Unsupported Worker command: "+r.command);
     }
 
-    private static void verifyRevision(Path root,Path config,WorkerRequest request) throws Exception {
+    private void verifyRevision(Path root,Path config,WorkerRequest request) throws Exception {
         String policy=request.sourceBrowsingPolicy==null?"allowlist-only":request.sourceBrowsingPolicy;
         boolean sourceBrowsingEnabled=!Boolean.FALSE.equals(request.sourceBrowsingEnabled);
         boolean redactionEnabled=!Boolean.FALSE.equals(request.redactionEnabled);
@@ -404,7 +410,8 @@ public final class WorkerMain {
                 request.maxResponseBytes==null?262144:request.maxResponseBytes,true,
                 sourceBrowsingEnabled,policy,request.sourceDenyGlobs,redactionEnabled,
                 request.sensitivePaths,request.sensitiveFieldPatterns)) {
-            inspector.verifyRevision(request.expectedRevisionDigest);
+            if(prewarmed)inspector.verifyPrewarmRevision(request.expectedRevisionDigest);
+            else inspector.verifyRevision(request.expectedRevisionDigest);
         }
     }
 

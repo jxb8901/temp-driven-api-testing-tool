@@ -753,6 +753,11 @@ public final class PackageResourceInspector implements AutoCloseable {
         if (Files.size(configFile) > MAX_CONFIG_BYTES) throw new ResourceLimitException();
         index.files.add(configFile);
         FrameworkConfig config = new FrameworkConfigLoader().loadDiscovery(configFile, runtimeConfigRoot, packageRoot, environment);
+        // In-JVM resource libraries may read native getenv(), which cannot be
+        // replaced by the one-shot framework environment overlay after READY.
+        index.prewarmCompatible=config.helperDiscoveryFailures().isEmpty()
+                &&config.dbHelpers().isEmpty()&&config.mqHelpers().isEmpty()
+                &&config.sshHelpers().isEmpty()&&config.httpHelpers().isEmpty();
         Path templatesRoot = config.templatesRoot().isAbsolute()
                 ? config.templatesRoot() : packageRoot.resolve(config.templatesRoot());
         templatesRoot = resources.fromInternalPath(templatesRoot, PackageResourceResolver.Kind.DIRECTORY).canonicalPath();
@@ -1353,11 +1358,12 @@ public final class PackageResourceInspector implements AutoCloseable {
                                                   Map<String, Object> input) throws Exception {
         if (!debuggable(type) || logicalId == null || logicalId.trim().isEmpty() || logicalId.length() > 512)
             throw new ResourceNotFoundException();
-        Index index = index();
+        Index index = refreshedIndexForVerification();
         Resource resource = index.resolve(type, logicalId);
         if (resource == null || !"ready".equals(resource.state)) throw new ResourceNotFoundException();
         DebugEngine engine = debugEngine(frameworkConfig());
         Map<String, Object> projection = engine.validateInlineInput(type, resource.logicalId, input);
+        verifyRevision(index.revisionDigest);
         Map<String, Object> result = new LinkedHashMap<String, Object>();
         result.put("resource", summary(resource, index));
         result.put("target", target(resource));
@@ -1371,6 +1377,23 @@ public final class PackageResourceInspector implements AutoCloseable {
 
     /** Revision used to bind a validated functional selection to package content. */
     public String executionRevisionDigest() throws Exception { return refreshedIndexForVerification().revisionDigest; }
+
+    /** Internal capability uses the same fresh revision boundary as draft admission. */
+    public Map<String,Object> prewarmEligibility() throws Exception {
+        Index index=refreshedIndexForVerification();
+        Map<String,Object> result=new LinkedHashMap<String,Object>();
+        result.put("eligible",Boolean.valueOf(index.prewarmCompatible));
+        result.put("revisionDigest",index.revisionDigest);
+        return result;
+    }
+
+    /** Rebuilds from source at the execution boundary, never trusts cached eligibility. */
+    public void verifyPrewarmRevision(String expectedRevisionDigest) throws Exception {
+        Index index=refreshedIndexForVerification();
+        if(expectedRevisionDigest==null)throw new IllegalArgumentException("Prewarmed execution requires an immutable package revision");
+        requireExpectedRevision(index,expectedRevisionDigest);
+        if(!index.prewarmCompatible)throw new IllegalArgumentException("Package requires a cold Worker environment");
+    }
 
     /** Checks a Server-issued draft revision without returning the digest to the caller. */
     public void verifyRevision(String expectedRevisionDigest) throws Exception {
@@ -2824,6 +2847,7 @@ public final class PackageResourceInspector implements AutoCloseable {
         final Map<String, Path> debugSidecars = new TreeMap<String, Path>();
         final Map<String, Path> quickLoadPolicies = new TreeMap<String, Path>();
         String revisionDigest;
+        boolean prewarmCompatible;
 
         void add(Resource resource) {
             Resource prior = byId.put(resource.resourceId, resource);

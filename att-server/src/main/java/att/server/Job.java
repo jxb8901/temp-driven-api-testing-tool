@@ -24,6 +24,8 @@ final class Job {
     volatile Map<String,Object> protocolDiagnostic;
     volatile boolean resultReceived;
     volatile String workerDispatch="cold";
+    volatile String prewarmFallbackReason;
+    volatile Double prewarmEligibilityMs;
     volatile Double prewarmLeaseMs,prewarmBootstrapMs;
     volatile Process process;
     volatile WorkerProcessFence processFence;
@@ -41,6 +43,8 @@ final class Job {
         addDuration(timings,"resultToTerminationMs",resultReceivedNanos,workerTerminatedNanos);
         Map<String,Object> performance=new LinkedHashMap<>();
         performance.put("workerDispatch",workerDispatch);
+        if(prewarmFallbackReason!=null)performance.put("prewarmFallbackReason",prewarmFallbackReason);
+        if(prewarmEligibilityMs!=null)timings.put("prewarmEligibilityMs",prewarmEligibilityMs);
         if(prewarmLeaseMs!=null)timings.put("prewarmLeaseMs",prewarmLeaseMs);
         if(prewarmBootstrapMs!=null)timings.put("prewarmBootstrapMs",prewarmBootstrapMs);
         addDuration(timings,"firstMeaningfulEventMs",requestReceivedNanos,executionReadyNanos);

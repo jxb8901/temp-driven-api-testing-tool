@@ -158,12 +158,9 @@ class ServerRuntimeInspectionTest {
             assertArrayEquals(originalSidecar,Files.readAllBytes(debugSidecar),"Draft creation must not modify the package sidecar");
 
             Files.writeString(debugSidecar,"schemaVersion: att-debug/v1.2\ninputs:\n  value: changed\n");
-            Map<String,Object> accepted=runtime.submitDebugDraft(ServerRuntime.JSON.readTree("{\"packageId\":\"p\",\"draftId\":\""+draftId+"\"}"),"alice");
-            String jobId=String.valueOf(accepted.get("jobId"));long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(25);
-            Map<String,Object> record=runtime.jobRecord(jobId);
-            while(!List.of("PASS","FAIL","ERROR","INVALID","CANCELLED").contains(record.get("status"))&&System.nanoTime()<deadline){Thread.sleep(20);record=runtime.jobRecord(jobId);}
-            assertEquals("INVALID",record.get("status"),String.valueOf(runtime.resultRecord(jobId)));
-            String events=runtime.events(jobId).after(0).toString();assertTrue(events.contains("ATT-SERVER-DRAFT-STALE"),events);
+            assertThrows(ServerRuntime.StaleDraftException.class,()->runtime.submitDebugDraft(
+                    ServerRuntime.JSON.readTree("{\"packageId\":\"p\",\"draftId\":\""+draftId+"\"}"),"alice"));
+            assertThrows(ServerRuntime.NotFoundException.class,()->runtime.getDebugDraft(draftId,"alice"));
             assertTrue(Files.exists(debugSidecar));
         } finally {runtime.close();}
     }

@@ -71,6 +71,18 @@ class DebugDraftPipelinePerformanceBenchmark {
             for (int sampleIndex = 0; sampleIndex < runs; sampleIndex++) {
                 samples.add(measurePipeline(runtime, resourceId, sampleIndex));
             }
+            Map<String,Object> compatibility=null;
+            if(prewarm&&Boolean.getBoolean("att.server.benchmark.debugDraft.verifyCompatibility")) {
+                String original=Files.readString(runtimeConfig);
+                Files.writeString(runtimeConfig.getParent().resolve("cold-db.yaml"),"schemaVersion: att-dbhelper/v2.6\nid: unused\nname: Unused DB\ndescription: Native environment fallback\nconnection: {url: 'jdbc:unavailable:no-connection'}\n");
+                try {
+                    Files.writeString(runtimeConfig,original+"\ndbhelpers: [config/cold-db.yaml]\n");
+                    Map<String,Object> cold=measurePipeline(runtime,resourceId,runs);
+                    compatibility=(Map<String,Object>)cold.get("performance");
+                    assertEquals("cold",compatibility.get("workerDispatch"));
+                    assertEquals("native_resource_environment",compatibility.get("prewarmFallbackReason"));
+                } finally {Files.writeString(runtimeConfig,original);}
+            }
 
             Map<String, Object> report = new LinkedHashMap<>();
             report.put("schemaVersion", "att-server-debug-draft-pipeline-benchmark/v1");
@@ -89,6 +101,7 @@ class DebugDraftPipelinePerformanceBenchmark {
                     "inspectionWorkerConcurrency", 1, "measurement", "ServerRuntime API pipeline; no browser rendering"));
             report.put("samples", samples);
             report.put("executionPool",runtime.executionPoolStatistics());
+            if(compatibility!=null)report.put("nativeEnvironmentFallback",compatibility);
 
             Path output = Path.of(System.getProperty("att.server.benchmark.debugDraft.output",
                     "att-server/target/debug-draft-pipeline-benchmark.json")).toAbsolutePath().normalize();
@@ -149,7 +162,7 @@ class DebugDraftPipelinePerformanceBenchmark {
         }
         assertTrue(List.of("PASS", "FAIL", "ERROR", "INVALID", "CANCELLED").contains(record.get("status")),
                 "Benchmark Debug Worker should finish: " + record);
-        assertEquals("PASS", record.get("status"), "Benchmark Debug target should pass");
+        assertEquals("PASS", record.get("status"), "Benchmark Debug target should pass: "+record+" events="+runtime.events(jobId).after(0));
         long completedAt = System.nanoTime();
         while (!hasTerminationTiming(record) && System.nanoTime() < jobDeadline) {
             Thread.sleep(10);

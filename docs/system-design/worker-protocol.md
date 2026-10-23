@@ -1,6 +1,6 @@
 # ATT Worker protocol v1
 
-`att-worker` is an internal process adapter for future ATT Server work. It is not a new public CLI command and does not implement ATT Server. Each process accepts one JSON request on stdin, invokes one typed `AttService` operation directly, writes JSON Lines records to stdout, and exits.
+`att-worker` is the internal process adapter used by ATT Server. Each normal process accepts one JSON request on stdin, invokes one typed `AttService` operation directly, writes JSON Lines records to stdout, and exits. Inspection daemons are read-only and reject execution commands. The opt-in [one-shot prewarm handshake](execution-prewarm.md) precedes the same single execution request and does not permit cross-Job JVM reuse.
 
 ## Request
 

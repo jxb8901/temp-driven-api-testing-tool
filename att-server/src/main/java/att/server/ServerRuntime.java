@@ -535,6 +535,8 @@ final class ServerRuntime implements AutoCloseable {
         job.workerStartedNanos=System.nanoTime();
         ExecutionWorkerPool.Lease warm=null;
         try {
+            // Inspector work must not hold the cancellation/process-publication lock.
+            String warmRevision=prewarmRevision(job);
             Process process;
             synchronized(job) {
                 // Publish the process while holding the same lock used by cancel(). A
@@ -545,9 +547,11 @@ final class ServerRuntime implements AutoCloseable {
                 transition(job,"PREPARING");
                 validatePackageRoot(packageRoot(job.packageId));
                 job.request.outputDirectory=jobPath.resolve("output").toRealPath().toString();
-                if(("run".equals(job.command)||"debug".equals(job.command))&&environmentFitsPrewarm()) {
+                if(warmRevision!=null) {
                     long leaseStart=System.nanoTime();warm=executionWorkers.lease(job.packageId);
                     job.prewarmLeaseMs=(System.nanoTime()-leaseStart)/1_000_000.0;
+                    if(warm!=null)job.request.expectedRevisionDigest=warmRevision;
+                    else job.prewarmFallbackReason="no_ready_worker";
                 }
                 ProcessBuilder coldBuilder=warm==null?workerBuilder(false,job.packageId):null;
                 job.workerSpawnStartedNanos=System.nanoTime();
@@ -624,12 +628,34 @@ final class ServerRuntime implements AutoCloseable {
     private boolean environmentFitsPrewarm() {
         // JVM bootstrap options cannot be applied after READY. Keep those
         // deployments on the existing cold path with their original semantics.
-        for(String key:List.of("JAVA_TOOL_OPTIONS","JDK_JAVA_OPTIONS","_JAVA_OPTIONS"))
+        for(String key:List.of("JAVA_TOOL_OPTIONS","JDK_JAVA_OPTIONS","_JAVA_OPTIONS","JAVA_FONTS","FONTCONFIG_FILE","FONTCONFIG_PATH"))
             if(System.getenv(key)!=null&&!System.getenv(key).isBlank())return false;
         long chars=0;
         if(System.getenv().size()>4096)return false;
         for(var entry:System.getenv().entrySet())chars+=entry.getKey().length()+(long)entry.getValue().length();
         return chars<=131072;
+    }
+    private String prewarmRevision(Job job) throws InterruptedException {
+        if(!config.executionPool.enabled||!config.executionPool.packageIds.contains(job.packageId)
+                ||!("run".equals(job.command)||"debug".equals(job.command)))return null;
+        if(!environmentFitsPrewarm()) {job.prewarmFallbackReason="startup_environment";return null;}
+        if(!config.workerLibraryDirs.isEmpty()) {job.prewarmFallbackReason="addon_libraries";return null;}
+        if(!config.inspection.enabled) {job.prewarmFallbackReason="inspection_disabled";return null;}
+        long before=System.nanoTime();
+        try {
+            WorkerRequest request=inspectionRequest(job.packageId,packageRoot(job.packageId),job.request.environment);
+            request.inspectionAction="prewarm-eligibility";
+            Map<String,Object> eligibility=executeInspection(packageRoot(job.packageId),request);
+            if(!Boolean.TRUE.equals(eligibility.get("eligible"))) {job.prewarmFallbackReason="native_resource_environment";return null;}
+            Object raw=eligibility.get("revisionDigest");
+            if(!(raw instanceof String revision)||!revision.matches("[a-f0-9]{64}")) {job.prewarmFallbackReason="unverified_revision";return null;}
+            if(job.request.expectedRevisionDigest!=null&&!job.request.expectedRevisionDigest.equals(revision)) {
+                job.prewarmFallbackReason="revision_changed";return null;
+            }
+            return revision;
+        } catch(InterruptedException interrupted) {throw interrupted;}
+        catch(Exception unavailable) {job.prewarmFallbackReason="inspection_unavailable";return null;}
+        finally {job.prewarmEligibilityMs=(System.nanoTime()-before)/1_000_000.0;}
     }
     private void stopWorkerTree(Job job) {
         Process process=job.process;
@@ -1313,6 +1339,7 @@ final class ServerRuntime implements AutoCloseable {
         boolean submitted=false;
         try {
             requireLiveDraft(draft);
+            verifyPackageRevision(draft.packageId,draft.environment,draft.revisionDigest);
             com.fasterxml.jackson.databind.node.ObjectNode internal=JSON.createObjectNode();
             internal.put("packageId",draft.packageId);if(draft.environment!=null)internal.put("environment",draft.environment);
             internal.set("target",JSON.valueToTree(Map.of("type",draft.targetType,"id",draft.targetId)));

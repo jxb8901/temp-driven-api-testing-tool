@@ -87,13 +87,43 @@ class PrewarmedWorkerTest {
         JsonNode value=mapper.readTree(frame.get(10,TimeUnit.SECONDS));
         assertEquals("READY",value.path("type").asText(),new String(Files.readAllBytes(errors.get(process)),StandardCharsets.UTF_8));return value;
     }
-    private Map<String,Object> request(Path root,String command) {
+    private Map<String,Object> request(Path root,String command) throws Exception {
         Map<String,Object> result=new LinkedHashMap<String,Object>();
         result.put("protocolVersion","att-worker/v1");result.put("jobId","prewarm-test");result.put("command",command);
         result.put("packageRoot",root.toString());result.put("runId","test");
+        try(att.resource.PackageResourceInspector inspector=new att.resource.PackageResourceInspector(root,root.resolve("config/config.yaml"),null,
+                Collections.<String>emptyList(),65536,262144)) {
+            result.put("expectedRevisionDigest",inspector.executionRevisionDigest());
+        }
         result.put("outputDirectory",root.resolve("output").toString());
         Map<String,String> target=new LinkedHashMap<String,String>();target.put("type","template");target.put("id","ENV");
         result.put("target",target);return result;
+    }
+
+    @Test void resourceClientOrChangedRevisionCannotExecuteInsideWarmJvm() throws Exception {
+        Path root=fixture();
+        for(String variant:Arrays.asList("native","stale","missing-revision")) {
+            Process process=start(root);
+            try {
+                ready(process);Map<String,Object> request=request(root,"debug");
+                request.put("executionEnvironment",Collections.emptyMap());
+                if("native".equals(variant)) {
+                    Files.write(root.resolve("config/db.yaml"),("schemaVersion: att-dbhelper/v2.6\nid: db\nname: DB\ndescription: Cold native client\n"
+                            +"connection: {url: 'jdbc:unavailable:no-connection'}\n").getBytes(StandardCharsets.UTF_8));
+                    Files.write(root.resolve("config/config.yaml"),"\ndbhelpers: [config/db.yaml]\n".getBytes(StandardCharsets.UTF_8),StandardOpenOption.APPEND);
+                    request=request(root,"debug");request.put("executionEnvironment",Collections.emptyMap());
+                } else if("stale".equals(variant)) {
+                    Files.write(root.resolve("templates/ENV/template.yaml"),"\n# revision changed after eligibility\n".getBytes(StandardCharsets.UTF_8),StandardOpenOption.APPEND);
+                } else request.remove("expectedRevisionDigest");
+                String output=assign(process,mapper.writeValueAsString(request));
+                assertNotEquals(0,process.exitValue(),variant+" "+output);
+                assertEquals(1,countResults(output));assertFalse(Files.exists(root.resolve("business-started")));
+                if("native".equals(variant)) {
+                    String config=new String(Files.readAllBytes(root.resolve("config/config.yaml")),StandardCharsets.UTF_8);
+                    Files.write(root.resolve("config/config.yaml"),config.replace("\ndbhelpers: [config/db.yaml]\n","").getBytes(StandardCharsets.UTF_8));
+                }
+            } finally {process.destroyForcibly();}
+        }
     }
     private String assign(Process process,String request) throws Exception {
         process.getOutputStream().write(request.getBytes(StandardCharsets.UTF_8));process.getOutputStream().close();
