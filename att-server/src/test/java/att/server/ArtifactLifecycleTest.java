@@ -132,14 +132,23 @@ class ArtifactLifecycleTest {
             ArtifactArchive.build(output,runtime.artifactArchivePath(id),file->runtime.publicArtifact(id,file));
             Files.writeString(output.getParent().resolve("archive-status.json"),"{\"state\":\"ARCHIVING\"}");
             Files.writeString(output.getParent().resolve(".artifact-orphan.zip.tmp"),"incomplete");
+            Path abandonedExports=Files.createDirectories(output.getParent().resolve(".artifact-export-orphan/nested"));
+            Files.writeString(abandonedExports.resolve("case.log"),"sanitized-but-uncommitted");
+            Files.writeString(output.getParent().resolve(".archive-status-orphan.tmp"),"incomplete status");
         }
         try(ServerRuntime runtime=new ServerRuntime(config,temp.resolve("libs").toString())) {
             awaitState(runtime,id,"READY");
-            Path staging = runtime.artifactArchivePath(id).resolveSibling(".artifact-orphan.zip.tmp");
+            Path jobDirectory=runtime.artifactArchivePath(id).getParent();
+            Path staging = jobDirectory.resolve(".artifact-orphan.zip.tmp");
+            Path abandonedExports=jobDirectory.resolve(".artifact-export-orphan");
+            Path abandonedStatus=jobDirectory.resolve(".archive-status-orphan.tmp");
             long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(5);
-            while((Files.exists(runtime.outputDirectoryForJob(id))||Files.exists(staging))&&System.nanoTime()<deadline)Thread.sleep(10);
+            while((Files.exists(runtime.outputDirectoryForJob(id))||Files.exists(staging)
+                    ||Files.exists(abandonedExports)||Files.exists(abandonedStatus))&&System.nanoTime()<deadline)Thread.sleep(10);
             assertFalse(Files.exists(runtime.outputDirectoryForJob(id)));
             assertFalse(Files.exists(staging));
+            assertFalse(Files.exists(abandonedExports));
+            assertFalse(Files.exists(abandonedStatus));
             assertEquals("safe",new String(runtime.archiveEntry(id,"case.log"),java.nio.charset.StandardCharsets.UTF_8));
         }
     }
