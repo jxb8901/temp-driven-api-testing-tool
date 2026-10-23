@@ -27,6 +27,11 @@ import static org.junit.jupiter.api.Assertions.*;
 class ServerWarUiIT {
     @TempDir Path temp;
 
+    private record PackagedExecutionCapture(String dispatch, String status, String resultStatus,
+                                            List<String> artifactPaths, List<String> primaryReports,
+                                            boolean loggedParityMarker) { }
+    private record PackagedWarModeCapture(PackagedExecutionCapture run, PackagedExecutionCapture debug) { }
+
     @Test void repeatedRedeployReleasesCompactorsAndJdbcWhilePreservingSchedulesAndJournals() throws Exception {
         Path war=Path.of(System.getProperty("att.server.war"));assertTrue(Files.isRegularFile(war));
         Path home=createScheduledLocalRuntime(),packages=Files.createDirectories(temp.resolve("redeploy-packages")),pkg=Files.createDirectory(packages.resolve("payments"));
@@ -92,6 +97,100 @@ class ServerWarUiIT {
         } finally {
             try{tomcat.stop();tomcat.destroy();}finally{logger.removeHandler(capture);if(oldConfig==null)System.clearProperty("att.server.config");else System.setProperty("att.server.config",oldConfig);if(oldHome==null)System.clearProperty("att.home");else System.setProperty("att.home",oldHome);}
         }
+    }
+
+    @Test void packagedWarRunAndDebugKeepColdEquivalentResultsWhenLeasingOneShotWorkers() throws Exception {
+        Path war=Path.of(System.getProperty("att.server.war"));assertTrue(Files.isRegularFile(war));
+        Path home=createScheduledLocalRuntime();
+        Files.createDirectories(home.resolve("config"));
+        Files.writeString(home.resolve("config/config.yaml"),"schemaVersion: att-config/v2.12\nenvironment: SIT\n"
+                +"environments: {SIT: {}}\ntestcase: {root: testcase}\ntemplates: {root: templates}\n");
+        Path allowed=Files.createDirectories(temp.resolve("parity-allowed"));
+        Path pkg=Files.createDirectories(allowed.resolve("parity"));
+        Path template=Files.createDirectories(pkg.resolve("templates/PARITY"));
+        Files.writeString(template.resolve("template.yaml"),"schemaVersion: att-template/v3.6\nname: PARITY\n"
+                +"description: Packaged WAR cold and warm execution parity\nactions:\n"
+                +"  message: {type: log, message: packaged-war-parity}\n");
+        Files.writeString(template.resolve("debug.yaml"),"schemaVersion: att-debug/v1.2\ninputs: {}\n");
+        copySchemas(pkg);
+        Path users=Files.writeString(temp.resolve("parity-tomcat-users.xml"),
+                "<tomcat-users><role rolename=\"ATT_USER\"/><user username=\"att\" password=\"secret\" roles=\"ATT_USER\"/></tomcat-users>");
+        String oldConfig=System.getProperty("att.server.config"),oldHome=System.getProperty("att.home");
+        try {
+            PackagedWarModeCapture cold=exercisePackagedWarMode(war,home,allowed,pkg,users,false);
+            PackagedWarModeCapture warm=exercisePackagedWarMode(war,home,allowed,pkg,users,true);
+            assertPackagedParity(cold.run(),warm.run(),"RUN");
+            assertPackagedParity(cold.debug(),warm.debug(),"DEBUG");
+            assertEquals("cold",cold.run().dispatch());assertEquals("cold",cold.debug().dispatch());
+            assertEquals("warm",warm.run().dispatch());assertEquals("warm",warm.debug().dispatch());
+        } finally {
+            if(oldConfig==null)System.clearProperty("att.server.config");else System.setProperty("att.server.config",oldConfig);
+            if(oldHome==null)System.clearProperty("att.home");else System.setProperty("att.home",oldHome);
+        }
+    }
+
+    private PackagedWarModeCapture exercisePackagedWarMode(Path war,Path home,Path allowed,Path pkg,Path users,
+                                                           boolean prewarm) throws Exception {
+        Path config=Files.writeString(temp.resolve("parity-server-"+prewarm+".yaml"),"server:\n  runtimeConfigPath: "+yaml(home.resolve("config/config.yaml"))
+                +"\n  dataDir: "+yaml(temp.resolve("parity-data-"+prewarm))+"\n  javaExecutable: "+yaml(Path.of(System.getProperty("java.home"),"bin",System.getProperty("os.name","").toLowerCase().contains("win")?"java.exe":"java"))
+                +"\n  authenticationRequired: true\n  inspection: {enabled: true, maxConcurrent: 1, queuedLimit: 4, timeoutMs: 30000, heapMaxMb: 256}\n"
+                +"workers:\n  maxConcurrent: 1\n  queuedLimit: 1\n  heapMaxMb: 128\n"
+                +(prewarm?"  executionPool: {enabled: true, minIdle: 1, maxIdle: 1, heapBudgetMb: 128, packageIds: [parity]}\n":"")
+                +"packages:\n  allowedRoots: ["+yaml(allowed)+"]\n  entries: {parity: "+yaml(pkg)+"}\n");
+        System.setProperty("att.server.config",config.toString());System.setProperty("att.home",home.toString());
+        Tomcat tomcat=new Tomcat();tomcat.setBaseDir(temp.resolve("parity-tomcat-"+prewarm).toString());tomcat.setPort(0);tomcat.getConnector();
+        MemoryRealm realm=new MemoryRealm();realm.setPathname(users.toString());tomcat.getEngine().setRealm(realm);
+        ((StandardHost)tomcat.getHost()).setUnpackWARs(false);
+        org.apache.catalina.Context context=tomcat.addWebapp("/tools/att",war.toString());
+        try {
+            tomcat.start();assertTrue(context.getState().isAvailable());
+            int port=tomcat.getConnector().getLocalPort();String api="/tools/att/api/v1",auth=basic("att"),origin="http://127.0.0.1:"+port;
+            Object runtime=context.getServletContext().getAttribute("att.server.runtime");
+            long runLease=prewarm?awaitPrewarmedPids(runtime).get(0):0L;
+            PackagedExecutionCapture run=executePackagedDraft(port,api,auth,origin,"run",prewarm);
+            long debugLease=prewarm?awaitPrewarmedPids(runtime).get(0):0L;
+            if(prewarm)assertNotEquals(runLease,debugLease,"A completed packaged RUN must be replaced before DEBUG dispatch");
+            PackagedExecutionCapture debug=executePackagedDraft(port,api,auth,origin,"debug",prewarm);
+            if(prewarm)assertNotEquals(debugLease,awaitPrewarmedPids(runtime).get(0),
+                    "A completed packaged DEBUG must also be replaced after its one Job");
+            return new PackagedWarModeCapture(run,debug);
+        } finally {try{tomcat.stop();}finally{tomcat.destroy();}}
+    }
+
+    private PackagedExecutionCapture executePackagedDraft(int port,String api,String auth,String origin,
+                                                          String type,boolean prewarm) throws Exception {
+        Map<String,Object> definition=type.equals("run")
+                ?Map.of("schemaVersion","att-execution/v1","executionType","run","packageId","parity","environment","SIT",
+                        "target",Map.of("type","template","id","PARITY"),"input",Map.of(),"options",Map.of("debug",false))
+                :Map.of("packageId","parity","target",Map.of("type","template","id","PARITY"),"input",Map.of());
+        JsonNode draft=apiJsonResponse(port,"POST",api+(type.equals("run")?"/drafts/run":"/drafts/debug"),auth,origin,definition,201);
+        JsonNode accepted=apiJsonResponse(port,"POST",api+"/jobs/"+type,auth,origin,
+                Map.of("packageId","parity","draftId",draft.path("draftId").asText()),202);
+        String id=accepted.path("jobId").asText(),jobPath=api+"/jobs/"+id;
+        JsonNode job=awaitJobStatus(port,jobPath,auth,"PASS");
+        String dispatch=job.path("performance").path("workerDispatch").asText();
+        assertEquals(prewarm?"warm":"cold",dispatch,type+" must use the expected dispatch path");
+        String logData=sseDataUntil(port,jobPath+"/events",auth,"packaged-war-parity");
+        assertTrue(logData.contains("packaged-war-parity"),type+" must preserve the packaged Worker log event");
+        JsonNode result=getJson(port,jobPath+"/result",auth);
+        assertEquals("PASS",result.path("job").path("status").asText(),result.toString());
+        JsonNode archive=awaitArchive(port,api,id,auth);
+        List<String> artifactPaths=java.util.stream.StreamSupport.stream(archive.path("items").spliterator(),false)
+                .map(item->item.path("path").asText()).sorted().toList();
+        List<String> primaryReports=java.util.stream.StreamSupport.stream(archive.path("primaryReports").spliterator(),false)
+                .map(item->item.path("path").asText()).sorted().toList();
+        assertFalse(artifactPaths.isEmpty(),"A completed packaged Job must publish its verified artifact archive");
+        return new PackagedExecutionCapture(dispatch,job.path("status").asText(),result.path("job").path("status").asText(),
+                artifactPaths,primaryReports,true);
+    }
+
+    private static void assertPackagedParity(PackagedExecutionCapture cold,PackagedExecutionCapture warm,String type) {
+        assertEquals("PASS",cold.status(),type+" cold Job status");assertEquals("PASS",warm.status(),type+" warm Job status");
+        assertEquals(cold.status(),warm.status(),type+" terminal status");
+        assertEquals(cold.resultStatus(),warm.resultStatus(),type+" result status");
+        assertEquals(cold.artifactPaths(),warm.artifactPaths(),type+" artifact inventory");
+        assertEquals(cold.primaryReports(),warm.primaryReports(),type+" primary report inventory");
+        assertTrue(cold.loggedParityMarker()&&warm.loggedParityMarker(),type+" logs must remain visible across dispatch modes");
     }
 
     private static List<Long> awaitPrewarmedPids(Object runtime) throws Exception {
