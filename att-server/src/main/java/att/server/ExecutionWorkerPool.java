@@ -1,6 +1,7 @@
 package att.server;
 
 import att.server.api.internal.WorkerProtocol;
+import com.fasterxml.jackson.databind.JsonNode;
 import java.nio.file.*;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.time.Instant;
@@ -44,6 +45,11 @@ final class ExecutionWorkerPool implements AutoCloseable {
             return start.equals(actual);
         }
     }
+    private record RecoveryIdentity(long pid,Instant start) { }
+    private static final class InvalidRecoveryMarkerException extends Exception {
+        InvalidRecoveryMarkerException(String message) { super(message); }
+        InvalidRecoveryMarkerException(String message,Throwable cause) { super(message,cause); }
+    }
     private final ServerConfig config;
     private final Builders builders;
     private final Starter starter;
@@ -51,9 +57,11 @@ final class ExecutionWorkerPool implements AutoCloseable {
     private final String schemaDigest;
     private final Path registry;
     private final List<Idle> owned=new ArrayList<>();
+    private final Set<String> demandedPackages=new HashSet<>();
     private final ScheduledExecutorService maintenance,watchdogs;
     private final AtomicLong starts=new AtomicLong(),leases=new AtomicLong(),fallbacks=new AtomicLong(),failures=new AtomicLong();
     private boolean closed;
+    private boolean recoveryUncertain;
     private int nextPackage,consecutiveFailures;
     private long retryAfter;
 
@@ -64,7 +72,7 @@ final class ExecutionWorkerPool implements AutoCloseable {
         recoverIdleProcesses();
         maintenance=Executors.newSingleThreadScheduledExecutor(r->thread(r,"att-server-execution-prewarm"));
         watchdogs=Executors.newSingleThreadScheduledExecutor(r->thread(r,"att-server-prewarm-watchdog"));
-        if(config.executionPool.enabled)maintenance.scheduleWithFixedDelay(this::maintain,0,250,TimeUnit.MILLISECONDS);
+        if(config.executionPool.enabled&&!recoveryUncertain)maintenance.scheduleWithFixedDelay(this::maintain,0,250,TimeUnit.MILLISECONDS);
     }
     private static Thread thread(Runnable task,String name) {
         Thread result=new Thread(task,name);result.setDaemon(true);
@@ -88,7 +96,20 @@ final class ExecutionWorkerPool implements AutoCloseable {
             catch(Exception changed) {idle.retired=true;continue;}
             iterator.remove();leases.incrementAndGet();return new Lease(idle);
         }
+        if(config.executionPool.packageIds.contains(packageId))demandedPackages.add(packageId);
         fallbacks.incrementAndGet();return null;
+    }
+
+    /** Cheap, non-reserving availability check before package inspection. */
+    synchronized boolean hasReadyCapacity(String packageId) {
+        if(closed||!config.executionPool.enabled||!config.executionPool.packageIds.contains(packageId))return false;
+        long now=System.nanoTime(),idleLimit=TimeUnit.MILLISECONDS.toNanos(config.executionPool.idleTimeoutMs);
+        boolean available=owned.stream().anyMatch(idle->idle.packageId.equals(packageId)&&!idle.retired
+                &&idle.readyNanos!=0&&now-idle.readyNanos<=idleLimit&&idle.fence!=null&&idle.fence.verified()
+                &&idle.fence.identities().size()==1&&idle.process!=null&&idle.process.isAlive());
+        if(available)demandedPackages.remove(packageId);
+        else {demandedPackages.add(packageId);fallbacks.incrementAndGet();}
+        return available;
     }
 
     private void maintain() {
@@ -104,8 +125,12 @@ final class ExecutionWorkerPool implements AutoCloseable {
                             ||(idle.readyNanos!=0&&System.nanoTime()-idle.readyNanos>TimeUnit.MILLISECONDS.toNanos(config.executionPool.idleTimeoutMs)))) idle.retired=true;
                     if(idle.retired&&stop(idle))it.remove();
                 }
-                if(owned.size()>=config.executionPool.minIdle||owned.size()>=config.executionPool.maxIdle||System.nanoTime()<retryAfter)return;
-                String id=config.executionPool.packageIds.get(nextPackage++%config.executionPool.packageIds.size());
+                if(owned.size()>=config.executionPool.maxIdle||System.nanoTime()<retryAfter)return;
+                String id=nextDemandedPackage();
+                if(id==null) {
+                    if(owned.size()>=config.executionPool.minIdle)return;
+                    id=config.executionPool.packageIds.get(nextPackage++%config.executionPool.packageIds.size());
+                }
                 create=new Idle(id,current,config.packages.get(id).toRealPath(),registry.resolve(UUID.randomUUID()+".json"));
                 owned.add(create);
             }
@@ -120,12 +145,21 @@ final class ExecutionWorkerPool implements AutoCloseable {
         }
     }
 
+    private String nextDemandedPackage() {
+        int count=config.executionPool.packageIds.size();
+        for(int i=0;i<count;i++) {
+            String id=config.executionPool.packageIds.get(nextPackage++%count);
+            if(demandedPackages.contains(id)&&owned.stream().noneMatch(idle->idle.packageId.equals(id)))return id;
+        }
+        return null;
+    }
+
     private void start(Idle idle) throws Exception {
         ProcessBuilder builder=builders.create(idle.packageId);
         // Native platform bootstrap variables only. All application environment
         // values are sent on stdin after assignment, never retained by idle JVMs.
         Map<String,String> bootstrap=new HashMap<>();
-        for(String key:List.of("SystemRoot","WINDIR","TEMP","TMP","TMPDIR","LANG","LC_ALL"))
+        for(String key:List.of("SystemRoot","WINDIR","TEMP","TMP","TMPDIR","LANG","LC_ALL","TZ"))
             if(builder.environment().containsKey(key))bootstrap.put(key,builder.environment().get(key));
         builder.environment().clear();builder.environment().putAll(bootstrap);
         builder.directory(idle.root.toFile());
@@ -154,7 +188,7 @@ final class ExecutionWorkerPool implements AutoCloseable {
                 idle.fence.observe();
                 if(!idle.fence.verified()||idle.fence.identities().size()!=1)throw new IllegalStateException("Idle Worker containment was not proven");
                 if(closed||!idle.process.isAlive()||!idle.fingerprint.equals(fingerprint.current())) {idle.retired=true;return;}
-                idle.readyNanos=System.nanoTime();consecutiveFailures=0;retryAfter=0;
+                idle.readyNanos=System.nanoTime();demandedPackages.remove(idle.packageId);consecutiveFailures=0;retryAfter=0;
             }
         } finally { watchdog.cancel(false); }
     }
@@ -185,42 +219,82 @@ final class ExecutionWorkerPool implements AutoCloseable {
             List<Path> markers=files.limit(4097).toList();
             if(markers.size()>4096)throw new IllegalStateException("Prewarm recovery inventory exceeds its limit");
             for(Path marker:markers) {
-                if(Files.isSymbolicLink(marker)||Files.size(marker)>65536)throw new IllegalStateException("Invalid prewarm recovery marker");
-                var data=ServerRuntime.JSON.readTree(Files.readAllBytes(marker));
-                if(data.path("version").asInt()!=1||!data.path("processes").isArray()||data.path("processes").size()>1024)
-                    throw new IllegalStateException("Invalid prewarm recovery identity");
-                Map<Long,RecoveryProcess> survivors=new LinkedHashMap<>();
-                // Capture every known identity before signalling the parent: after
-                // its exit a surviving child may have been reparented already.
-                for(var row:data.path("processes")) {
-                    long pid=row.path("pid").asLong();Instant start=Instant.parse(row.path("start").asText());
-                    ProcessHandle handle=ProcessHandle.of(pid).orElse(null);
-                    if(handle!=null&&handle.isAlive()) {
-                        Instant actual=handle.info().startInstant().orElseThrow(()->new IllegalStateException("Prewarm recovery identity unavailable"));
-                        if(!start.equals(actual))continue; // Recycled PID is never ours to signal.
-                        survivors.put(pid,new RecoveryProcess(handle,start));
-                        try(var descendants=handle.descendants()) {
-                            var iterator=descendants.iterator();
-                            while(iterator.hasNext()) {
-                                ProcessHandle child=iterator.next();
-                                if(!child.isAlive())continue;
-                                Instant childStart=child.info().startInstant().orElseThrow(()->new IllegalStateException("Prewarm recovery descendant identity unavailable"));
-                                survivors.put(child.pid(),new RecoveryProcess(child,childStart));
-                                if(survivors.size()>1024)throw new IllegalStateException("Prewarm recovery process inventory exceeds its limit");
-                            }
-                        }
-                    }
+                String name=marker.getFileName().toString();
+                boolean pending=name.startsWith(".prewarm-")&&name.endsWith(".pending");
+                boolean committed=!name.startsWith(".")&&name.endsWith(".json");
+                if(!pending&&!committed)throw new IllegalStateException("Invalid prewarm recovery marker");
+                List<RecoveryIdentity> identities;
+                try { identities=readRecoveryIdentities(marker); }
+                catch(InvalidRecoveryMarkerException invalid) {
+                    if(!pending)throw invalid;
+                    // A partial temp file has no trustworthy process identity. Do not
+                    // signal from it or block Server startup; retain the evidence and
+                    // stay cold-only until the uncertain state is resolved.
+                    recoveryUncertain=true;continue;
                 }
-                List<RecoveryProcess> targets=new ArrayList<>(survivors.values());
-                Collections.reverse(targets);
-                for(var target:targets)if(target.alive())target.handle().destroyForcibly();
-                long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(5);
-                for(var target:targets) {
-                    while(target.alive()&&System.nanoTime()<deadline)Thread.sleep(10);
-                    if(target.alive())throw new IllegalStateException("Prewarm recovery cleanup is uncertain");
+                catch(java.io.IOException unavailable) {
+                    if(!pending)throw unavailable;
+                    recoveryUncertain=true;continue;
                 }
+                recoverProcesses(identities);
                 Files.delete(marker);
             }
+        }
+    }
+
+    private List<RecoveryIdentity> readRecoveryIdentities(Path marker) throws Exception {
+        if(Files.isSymbolicLink(marker)||!Files.isRegularFile(marker,LinkOption.NOFOLLOW_LINKS)||Files.size(marker)>65536)
+            throw new InvalidRecoveryMarkerException("Invalid prewarm recovery marker");
+        byte[] bytes=Files.readAllBytes(marker);
+        JsonNode data;
+        try { data=ServerRuntime.JSON.readTree(bytes); }
+        catch(java.io.IOException malformed) {
+            throw new InvalidRecoveryMarkerException("Invalid prewarm recovery marker",malformed);
+        }
+        if(data==null||data.path("version").asInt()!=1||!data.path("processes").isArray()
+                ||data.path("processes").size()==0||data.path("processes").size()>1024)
+            throw new InvalidRecoveryMarkerException("Invalid prewarm recovery identity");
+        List<RecoveryIdentity> identities=new ArrayList<>();
+        for(JsonNode row:data.path("processes")) {
+            if(!row.isObject()||!row.path("pid").isIntegralNumber()||!row.path("pid").canConvertToLong()||!row.path("start").isTextual())
+                throw new InvalidRecoveryMarkerException("Invalid prewarm recovery identity");
+            long pid=row.path("pid").asLong();
+            if(pid<=0)throw new InvalidRecoveryMarkerException("Invalid prewarm recovery identity");
+            try { identities.add(new RecoveryIdentity(pid,Instant.parse(row.path("start").asText()))); }
+            catch(RuntimeException malformed) { throw new InvalidRecoveryMarkerException("Invalid prewarm recovery identity",malformed); }
+        }
+        return identities;
+    }
+
+    private void recoverProcesses(List<RecoveryIdentity> identities) throws Exception {
+        Map<Long,RecoveryProcess> survivors=new LinkedHashMap<>();
+        // Capture every known identity before signalling the parent: after
+        // its exit a surviving child may have been reparented already.
+        for(RecoveryIdentity identity:identities) {
+            ProcessHandle handle=ProcessHandle.of(identity.pid()).orElse(null);
+            if(handle!=null&&handle.isAlive()) {
+                Instant actual=handle.info().startInstant().orElseThrow(()->new IllegalStateException("Prewarm recovery identity unavailable"));
+                if(!identity.start().equals(actual))continue; // Recycled PID is never ours to signal.
+                survivors.put(identity.pid(),new RecoveryProcess(handle,identity.start()));
+                try(var descendants=handle.descendants()) {
+                    var iterator=descendants.iterator();
+                    while(iterator.hasNext()) {
+                        ProcessHandle child=iterator.next();
+                        if(!child.isAlive())continue;
+                        Instant childStart=child.info().startInstant().orElseThrow(()->new IllegalStateException("Prewarm recovery descendant identity unavailable"));
+                        survivors.put(child.pid(),new RecoveryProcess(child,childStart));
+                        if(survivors.size()>1024)throw new IllegalStateException("Prewarm recovery process inventory exceeds its limit");
+                    }
+                }
+            }
+        }
+        List<RecoveryProcess> targets=new ArrayList<>(survivors.values());
+        Collections.reverse(targets);
+        for(var target:targets)if(target.alive())target.handle().destroyForcibly();
+        long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(5);
+        for(var target:targets) {
+            while(target.alive()&&System.nanoTime()<deadline)Thread.sleep(10);
+            if(target.alive())throw new IllegalStateException("Prewarm recovery cleanup is uncertain");
         }
     }
 
@@ -240,7 +314,8 @@ final class ExecutionWorkerPool implements AutoCloseable {
         long ready=owned.stream().filter(idle->idle.readyNanos!=0&&!idle.retired).count();
         Map<String,Object> metrics=new LinkedHashMap<>(Map.of("enabled",config.executionPool.enabled,"owned",owned.size(),"ready",ready,
                 "starts",starts.get(),"leases",leases.get(),"coldFallbacks",fallbacks.get(),"startupFailures",failures.get(),
-                "maxIdle",config.executionPool.maxIdle,"idleHeapCapMb",(long)config.executionPool.maxIdle*config.workerHeapMaxMb));
+                "maxIdle",config.executionPool.maxIdle,"recoveryUncertain",recoveryUncertain,
+                "idleHeapCapMb",(long)config.executionPool.maxIdle*config.workerHeapMaxMb));
         long cpu=0;boolean available=true;
         for(Idle idle:owned)if(idle.process!=null) {
             var duration=idle.process.info().totalCpuDuration();

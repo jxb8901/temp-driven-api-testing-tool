@@ -130,7 +130,7 @@ final class ServerRuntime implements AutoCloseable {
     private final SecureRandom cursorRandom=new SecureRandom();
     private final Path workerLibs;
     private final String workerSchemaRegistryDigest;
-    private ExecutionWorkerPool executionWorkers;
+    ExecutionWorkerPool executionWorkers;
     ServerRuntime(ServerConfig config,String workerLibs) throws Exception {
         this(config,workerLibs,ProcessBuilder::start);
     }
@@ -635,12 +635,13 @@ final class ServerRuntime implements AutoCloseable {
         for(var entry:System.getenv().entrySet())chars+=entry.getKey().length()+(long)entry.getValue().length();
         return chars<=131072;
     }
-    private String prewarmRevision(Job job) throws InterruptedException {
+    String prewarmRevision(Job job) throws InterruptedException {
         if(!config.executionPool.enabled||!config.executionPool.packageIds.contains(job.packageId)
                 ||!("run".equals(job.command)||"debug".equals(job.command)))return null;
         if(!environmentFitsPrewarm()) {job.prewarmFallbackReason="startup_environment";return null;}
         if(!config.workerLibraryDirs.isEmpty()) {job.prewarmFallbackReason="addon_libraries";return null;}
         if(!config.inspection.enabled) {job.prewarmFallbackReason="inspection_disabled";return null;}
+        if(!executionWorkers.hasReadyCapacity(job.packageId)) {job.prewarmFallbackReason="no_ready_worker";return null;}
         long before=System.nanoTime();
         try {
             WorkerRequest request=inspectionRequest(job.packageId,packageRoot(job.packageId),job.request.environment);

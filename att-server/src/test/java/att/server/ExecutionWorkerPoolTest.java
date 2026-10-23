@@ -104,6 +104,96 @@ class ExecutionWorkerPoolTest {
         }
     }
 
+    @Test void incompletePendingMarkersKeepStartupAvailableAndPoolCold() throws Exception {
+        int index=0;
+        for(String content:List.of("","{\"version\":1"))for(boolean enabled:List.of(false,true)) {
+            Path base=temp.resolve("incomplete-pending-"+(index++));ServerConfig config=config(base,enabled,List.of("p"),1,2);
+            Path registry=Files.createDirectories(config.dataDir.resolve("prewarm"));
+            Path pending=registry.resolve(".prewarm-interrupted.pending");Files.writeString(pending,content);
+            List<Process> started=new CopyOnWriteArrayList<>();
+            try(ExecutionWorkerPool pool=new ExecutionWorkerPool(config,id->builder(false),builder->{
+                Process process=builder.start();started.add(process);return process;
+            },()->"v1","a".repeat(64))) {
+                assertTrue((Boolean)pool.metrics().get("recoveryUncertain"));
+                assertEquals(0L,pool.metrics().get("starts"));
+                assertTrue(Files.exists(pending),"Unparseable identity evidence must be retained");
+                Thread.sleep(600);
+                assertTrue(started.isEmpty(),"An uncertain recovery boot must not create idle Workers");
+                assertEquals(0L,pool.metrics().get("starts"));
+            }
+            for(Process process:started)assertFalse(process.isAlive());
+        }
+    }
+
+    @Test void validPendingAndCommittedMarkersRecoverWithPoolEnabledOrDisabled() throws Exception {
+        int index=0;
+        for(String suffix:List.of(".pending",".json"))for(boolean enabled:List.of(false,true)) {
+            Path base=temp.resolve("valid-recovery-"+(index++));ServerConfig config=config(base,enabled,List.of("p"),0,1);
+            Path registry=Files.createDirectories(config.dataDir.resolve("prewarm"));
+            ProcessBuilder abandonedBuilder=builder(false);abandonedBuilder.environment().remove("POOL_SECRET");
+            abandonedBuilder.command().add("child");Process abandoned=abandonedBuilder.start();
+            Path marker=registry.resolve(suffix.equals(".pending")?".prewarm-crashed.pending":"crashed.json");
+            try {
+                Files.write(marker,ServerRuntime.JSON.writeValueAsBytes(Map.of("version",1,"processes",List.of(
+                        Map.of("pid",abandoned.pid(),"start",abandoned.info().startInstant().orElseThrow().toString())))));
+                try(ExecutionWorkerPool recovered=new ExecutionWorkerPool(config,id->{
+                    throw new AssertionError("minIdle=0 must not start an idle process");
+                },ProcessBuilder::start,()->"v1","a".repeat(64))) {
+                    assertFalse(abandoned.isAlive(),"Recovery must stop the recorded process");
+                    assertFalse(Files.exists(marker),"Recovered identity markers must be removed only after cleanup");
+                    assertEquals(0L,recovered.metrics().get("starts"));
+                    assertFalse((Boolean)recovered.metrics().get("recoveryUncertain"));
+                }
+            } finally {
+                abandoned.destroyForcibly();abandoned.waitFor(5,TimeUnit.SECONDS);
+            }
+        }
+    }
+
+    @Test void warmAndColdWorkersStartWithTheSameExplicitTimezone() throws Exception {
+        Path base=temp.resolve("timezone-pool");ServerConfig config=config(base,true,List.of("p"),1,1);
+        Path packageRoot=config.packages.get("p");Path warmZone=temp.resolve("warm-zone.txt");Path coldZone=temp.resolve("cold-zone.txt");
+        List<Process> started=new CopyOnWriteArrayList<>();Process cold=null;
+        try(ExecutionWorkerPool pool=new ExecutionWorkerPool(config,id->{
+            ProcessBuilder process=builder(false);process.environment().put("TZ","Asia/Hong_Kong");
+            process.command().addAll(List.of("timezone",warmZone.toString()));return process;
+        },builder->{Process process=builder.start();started.add(process);return process;},()->"v1","a".repeat(64))) {
+            await(()->((Number)pool.metrics().get("ready")).intValue()==1&&Files.exists(warmZone));
+            ProcessBuilder coldBuilder=builder(false);coldBuilder.environment().remove("POOL_SECRET");
+            coldBuilder.environment().put("TZ","Asia/Hong_Kong");coldBuilder.directory(packageRoot.toFile());
+            coldBuilder.command().addAll(List.of("timezone",coldZone.toString()));cold=coldBuilder.start();
+            Process coldProcess=cold;await(()->Files.exists(coldZone));
+            assertEquals(Files.readString(coldZone),Files.readString(warmZone));
+            assertEquals("Asia/Hong_Kong",Files.readString(warmZone));
+            coldProcess.getOutputStream().close();assertTrue(coldProcess.waitFor(5,TimeUnit.SECONDS));
+        } finally {
+            if(cold!=null){cold.destroyForcibly();cold.waitFor(5,TimeUnit.SECONDS);}
+        }
+        for(Process process:started)assertFalse(process.isAlive());
+    }
+
+    @Test void demandedPackageGetsFairWarmCapacityBeyondGlobalMinIdle() throws Exception {
+        Path base=temp.resolve("package-fairness");ServerConfig config=config(base,true,List.of("a","b"),1,2);
+        Path aCwd=temp.resolve("a-cwd.txt"),bCwd=temp.resolve("b-cwd.txt");List<Process> started=new CopyOnWriteArrayList<>();
+        try(ExecutionWorkerPool pool=new ExecutionWorkerPool(config,id->{
+            ProcessBuilder process=builder(false);process.command().addAll(List.of("cwd",("a".equals(id)?aCwd:bCwd).toString()));return process;
+        },builder->{Process process=builder.start();started.add(process);return process;},()->"v1","a".repeat(64))) {
+            await(()->Files.exists(aCwd)||Files.exists(bCwd));
+            String firstId=Files.exists(aCwd)?"a":"b",secondId="a".equals(firstId)?"b":"a";
+            Path firstCwd="a".equals(firstId)?aCwd:bCwd,secondCwd="a".equals(secondId)?aCwd:bCwd;
+            Path firstRoot=config.packages.get(firstId),secondRoot=config.packages.get(secondId);
+            await(()->pool.hasReadyCapacity(firstId)&&Files.exists(firstCwd));
+            assertEquals(firstRoot.toRealPath().toString(),Files.readString(firstCwd));
+            assertFalse(pool.hasReadyCapacity(secondId),"The other package initially has no idle reservation");
+            await(()->pool.hasReadyCapacity(secondId)&&Files.exists(secondCwd));
+            assertEquals(secondRoot.toRealPath().toString(),Files.readString(secondCwd));
+            assertTrue(pool.hasReadyCapacity(firstId),"Demand expansion must retain the first package's idle Worker");
+            ExecutionWorkerPool.Lease lease=pool.lease(secondId);assertNotNull(lease);
+            lease.process.destroyForcibly();assertTrue(lease.process.waitFor(5,TimeUnit.SECONDS));lease.transferred();
+        }
+        for(Process process:started)assertFalse(process.isAlive());
+    }
+
     @Test void incompleteIdleFenceCannotBeLeasedOrEraseRecoveryEvidence() throws Exception {
         ServerConfig config=config();ExecutionWorkerPool pool=new ExecutionWorkerPool(config,id->builder(false),ProcessBuilder::start,()->"v1","a".repeat(64));
         try {
@@ -137,10 +227,19 @@ class ExecutionWorkerPoolTest {
     }
 
     private ServerConfig config() throws Exception {
-        Path pkg=Files.createDirectories(temp.resolve("packages/p"));Path yaml=temp.resolve("server.yaml");
-        Files.writeString(yaml,"server:\n  dataDir: "+temp.resolve("data")+"\nworkers:\n  heapMaxMb: 128\n"
-                +"  executionPool: {enabled: true, minIdle: 1, maxIdle: 2, heapBudgetMb: 256, packageIds: [p]}\n"
-                +"packages:\n  allowedRoots: ["+pkg.getParent()+"]\n  entries:\n    p: "+pkg+"\n");
+        return config(temp,true,List.of("p"),1,2);
+    }
+    private ServerConfig config(Path base,boolean enabled,List<String> ids,int minIdle,int maxIdle) throws Exception {
+        Files.createDirectories(base);Path allowed=Files.createDirectories(base.resolve("packages"));
+        Map<String,Path> packages=new LinkedHashMap<>();
+        for(String id:ids)packages.put(id,Files.createDirectories(allowed.resolve(id)));
+        Path yaml=base.resolve("server.yaml");StringBuilder source=new StringBuilder("server:\n  dataDir: ").append(base.resolve("data"))
+                .append("\nworkers:\n  heapMaxMb: 128\n  executionPool: {enabled: ").append(enabled)
+                .append(", minIdle: ").append(minIdle).append(", maxIdle: ").append(maxIdle)
+                .append(", heapBudgetMb: 256, packageIds: [").append(String.join(", ",ids)).append("]}\npackages:\n  allowedRoots: [")
+                .append(allowed).append("]\n  entries:\n");
+        for(Map.Entry<String,Path> entry:packages.entrySet())source.append("    ").append(entry.getKey()).append(": ").append(entry.getValue()).append('\n');
+        Files.writeString(yaml,source);
         return ServerConfig.load(yaml);
     }
     private ProcessBuilder builder(boolean invalid) {

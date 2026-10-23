@@ -23,6 +23,10 @@ public final class ExecutionPoolProcessFixture {
                 }
             } finally {Files.deleteIfExists(staged);}
         }
+        if(args.length>1&&"timezone".equals(args[0]))
+            Files.writeString(Path.of(args[1]),java.time.ZoneId.systemDefault().getId());
+        if(args.length>1&&"cwd".equals(args[0]))
+            Files.writeString(Path.of(args[1]),Path.of("").toRealPath().toString());
         Map<String,Object> ready=Map.of("type","READY","protocolVersion",args.length>0&&"invalid".equals(args[0])?"invalid":"att-prewarm/v1",
                 "productVersion",ServerBuildInfo.PRODUCT,"gitCommit",ServerBuildInfo.GIT_COMMIT,
                 "schemaRegistryDigest","a".repeat(64),"cwd",Path.of("").toRealPath().toString());
