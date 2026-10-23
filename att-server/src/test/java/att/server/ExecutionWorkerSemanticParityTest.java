@@ -24,7 +24,7 @@ import static org.junit.jupiter.api.Assertions.*;
 class ExecutionWorkerSemanticParityTest {
     @TempDir Path temp;
 
-    @Test void warmAndColdSuccessfulRunsHaveEquivalentStateEventsAndReports() throws Exception {
+    @Test void warmAndColdRunAndDebugPassAndFailHaveEquivalentStateEventsAndReports() throws Exception {
         Path allowed=Files.createDirectories(temp.resolve("allowed"));
         Path pkg=Files.createDirectories(allowed.resolve("p"));
         Files.createDirectories(pkg.resolve("templates/SIMPLE"));
@@ -32,6 +32,9 @@ class ExecutionWorkerSemanticParityTest {
         Files.createDirectories(pkg.resolve("testcase"));
         Files.writeString(pkg.resolve("templates/SIMPLE/template.yaml"),"schemaVersion: att-template/v3.6\nname: SIMPLE\ndescription: Cold and warm parity fixture\nactions:\n  message: {type: log, message: parity-once}\n");
         Files.writeString(pkg.resolve("templates/BAD/template.yaml"),"schemaVersion: att-template/v3.6\nname: BAD\ndescription: Failed cold and warm parity fixture\nactions:\n  check: {type: assert, assert: '#{1 == 2}'}\n");
+        for(String template:List.of("SIMPLE","BAD"))
+            Files.writeString(pkg.resolve("templates").resolve(template).resolve("debug.yaml"),
+                    "schemaVersion: att-debug/v1.2\ninputs: {value: parity-once}\n");
         Path runtimeConfig=temp.resolve("runtime-home/config/config.yaml");
         Files.createDirectories(runtimeConfig.getParent());
         Files.writeString(runtimeConfig,"schemaVersion: att-config/v2.12\nenvironment: SIT\nenvironments: {SIT: {}}\ntestcase: {root: testcase}\ntemplates: {root: templates}\n");
@@ -56,13 +59,23 @@ class ExecutionWorkerSemanticParityTest {
         RunCapture warm=execute(true,allowed,pkg,runtimeConfig,libs,"cases.default.C1","warm");
 
         assertEquivalent("PASS",cold,warm);
+        assertRunReport(cold);assertRunReport(warm);
 
         RunCapture coldFailure=execute(false,allowed,pkg,runtimeConfig,libs,"cases.default.C2","cold-failure");
         RunCapture warmFailure=execute(true,allowed,pkg,runtimeConfig,libs,"cases.default.C2","warm-failure");
         assertEquivalent("FAIL",coldFailure,warmFailure);
+        assertRunReport(coldFailure);assertRunReport(warmFailure);
+
+        RunCapture coldDebug=executeDebug(false,allowed,pkg,runtimeConfig,libs,"SIMPLE","cold-debug");
+        RunCapture warmDebug=executeDebug(true,allowed,pkg,runtimeConfig,libs,"SIMPLE","warm-debug");
+        assertEquivalent("PASS",coldDebug,warmDebug);
+
+        RunCapture coldDebugFailure=executeDebug(false,allowed,pkg,runtimeConfig,libs,"BAD","cold-debug-failure");
+        RunCapture warmDebugFailure=executeDebug(true,allowed,pkg,runtimeConfig,libs,"BAD","warm-debug-failure");
+        assertEquivalent("FAIL",coldDebugFailure,warmDebugFailure);
     }
 
-    @Test void warmAndColdCancellationAndActionTimeoutHaveEquivalentTerminalEvidence() throws Exception {
+    @Test void warmAndColdRunAndDebugCancellationAndToolTimeoutHaveEquivalentTerminalEvidence() throws Exception {
         org.junit.jupiter.api.Assumptions.assumeFalse(System.getProperty("os.name","").toLowerCase().contains("win"),
                 "Uses a POSIX child Tool fixture");
         Path allowed=Files.createDirectories(temp.resolve("lifecycle-allowed"));
@@ -82,6 +95,8 @@ class ExecutionWorkerSemanticParityTest {
         Files.writeString(Files.createDirectories(templates.resolve("TIMEOUT")).resolve("template.yaml"),
                 "schemaVersion: att-template/v3.6\nname: TIMEOUT\ndescription: Timeout parity fixture\n"
                         +"actions:\n  hold: {type: tool, call: '#{hold()}', timeoutMs: 300}\n");
+        for(String template:List.of("HOLD","TIMEOUT"))
+            Files.writeString(templates.resolve(template).resolve("debug.yaml"),"schemaVersion: att-debug/v1.2\ninputs: {}\n");
         Path runtimeConfig=temp.resolve("lifecycle-runtime/config/config.yaml");
         Files.createDirectories(runtimeConfig.getParent());
         Files.writeString(runtimeConfig,"schemaVersion: att-config/v2.12\nenvironment: SIT\nenvironments: {SIT: {}}\n"
@@ -93,16 +108,29 @@ class ExecutionWorkerSemanticParityTest {
             ServerRuntimeTestSupport.addModuleJar(libs,module,Path.of(module+"/target/classes"));
         ServerRuntimeTestSupport.addWorkerClasspathJars(libs);
 
-        TerminalCapture coldCancel=executeInterrupted(false,allowed,pkg,runtimeConfig,libs,"HOLD",true,"cold-cancel");
-        TerminalCapture warmCancel=executeInterrupted(true,allowed,pkg,runtimeConfig,libs,"HOLD",true,"warm-cancel");
+        TerminalCapture coldCancel=executeInterrupted(false,allowed,pkg,runtimeConfig,libs,"HOLD",true,false,"cold-cancel");
+        TerminalCapture warmCancel=executeInterrupted(true,allowed,pkg,runtimeConfig,libs,"HOLD",true,false,"warm-cancel");
         assertEquals("CANCELLED",coldCancel.status);
-        assertEquals(coldCancel,warmCancel,"Cancellation state, event, diagnostic, archive and history must match");
+        assertEquals("cold",coldCancel.dispatch);assertEquals("warm",warmCancel.dispatch);
+        assertTerminalEquivalent(coldCancel,warmCancel,"Cancellation state, event, diagnostic, archive and history must match");
 
-        TerminalCapture coldTimeout=executeInterrupted(false,allowed,pkg,runtimeConfig,libs,"TIMEOUT",false,"cold-timeout");
-        TerminalCapture warmTimeout=executeInterrupted(true,allowed,pkg,runtimeConfig,libs,"TIMEOUT",false,"warm-timeout");
+        TerminalCapture coldTimeout=executeInterrupted(false,allowed,pkg,runtimeConfig,libs,"TIMEOUT",false,false,"cold-timeout");
+        TerminalCapture warmTimeout=executeInterrupted(true,allowed,pkg,runtimeConfig,libs,"TIMEOUT",false,false,"warm-timeout");
         assertNotEquals("PASS",coldTimeout.status);
-        assertEquals(coldTimeout.status,warmTimeout.status,"A Tool timeout must have the same terminal state");
-        assertEquals(coldTimeout,warmTimeout,"Timeout state, event, diagnostic, archive and history must match");
+        assertEquals("cold",coldTimeout.dispatch);assertEquals("warm",warmTimeout.dispatch);
+        assertTerminalEquivalent(coldTimeout,warmTimeout,"Timeout state, event, diagnostic, archive and history must match");
+
+        TerminalCapture coldDebugCancel=executeInterrupted(false,allowed,pkg,runtimeConfig,libs,"HOLD",true,true,"cold-debug-cancel");
+        TerminalCapture warmDebugCancel=executeInterrupted(true,allowed,pkg,runtimeConfig,libs,"HOLD",true,true,"warm-debug-cancel");
+        assertEquals("CANCELLED",coldDebugCancel.status);
+        assertEquals("cold",coldDebugCancel.dispatch);assertEquals("warm",warmDebugCancel.dispatch);
+        assertTerminalEquivalent(coldDebugCancel,warmDebugCancel,"DEBUG cancellation evidence must match across dispatch paths");
+
+        TerminalCapture coldDebugTimeout=executeInterrupted(false,allowed,pkg,runtimeConfig,libs,"TIMEOUT",false,true,"cold-debug-timeout");
+        TerminalCapture warmDebugTimeout=executeInterrupted(true,allowed,pkg,runtimeConfig,libs,"TIMEOUT",false,true,"warm-debug-timeout");
+        assertNotEquals("PASS",coldDebugTimeout.status);
+        assertEquals("cold",coldDebugTimeout.dispatch);assertEquals("warm",warmDebugTimeout.dispatch);
+        assertTerminalEquivalent(coldDebugTimeout,warmDebugTimeout,"DEBUG Tool-timeout evidence must match across dispatch paths");
     }
 
     private void assertEquivalent(String expectedStatus,RunCapture cold,RunCapture warm) {
@@ -118,9 +146,26 @@ class ExecutionWorkerSemanticParityTest {
         assertEquals(cold.diagnostic,warm.diagnostic,"The public diagnostic must match");
         assertEquals(cold.reportEntries,warm.reportEntries,"The published report inventory must match");
         assertEquals(cold.primaryReportPaths,warm.primaryReportPaths,"The primary Job Report set must match");
-        assertTrue(cold.reportEntries.stream().anyMatch(path->path.endsWith("latest-run.yaml")||path.endsWith("run.yaml")),
-                "The fixture should publish a report artifact");
+        assertFalse(cold.reportEntries.isEmpty(),"The fixture should publish report artifacts for both RUN and DEBUG");
         assertEquals(cold.historyStatus,warm.historyStatus,"Job history must retain the same terminal state");
+    }
+
+    private void assertRunReport(RunCapture capture) {
+        assertTrue(capture.reportEntries.stream().anyMatch(path->path.endsWith("latest-run.yaml")||path.endsWith("run.yaml")),
+                "The RUN fixture should publish its run report");
+        assertFalse(capture.primaryReportPaths.isEmpty(),"The RUN fixture should identify primary Job Reports");
+    }
+
+    private void assertTerminalEquivalent(TerminalCapture cold,TerminalCapture warm,String message) {
+        assertEquals(cold.status,warm.status,message+": status");
+        assertEquals(cold.exitCode,warm.exitCode,message+": exit code");
+        assertEquals(cold.eventNames,warm.eventNames,message+": event order");
+        assertEquals(cold.logMessages,warm.logMessages,message+": logs");
+        assertEquals(cold.resultPayload,warm.resultPayload,message+": result");
+        assertEquals(cold.diagnostic,warm.diagnostic,message+": diagnostic");
+        assertEquals(cold.reportEntries,warm.reportEntries,message+": report inventory");
+        assertEquals(cold.primaryReportPaths,warm.primaryReportPaths,message+": primary reports");
+        assertEquals(cold.historyStatus,warm.historyStatus,message+": Job history");
     }
 
     private RunCapture execute(boolean enabled,Path allowed,Path pkg,Path runtimeConfig,Path libs,String targetCase,String name) throws Exception {
@@ -144,37 +189,63 @@ class ExecutionWorkerSemanticParityTest {
             String id=String.valueOf(accepted.get("jobId"));
             Map<String,Object> result=ServerRuntimeTestSupport.awaitUnifiedJob(runtime,id);
             awaitArchive(runtime,id,15);
-            Map<?,?> job=(Map<?,?>)result.get("job");
-            Map<?,?> performance=(Map<?,?>)job.get("performance");
-            String dispatch=String.valueOf(performance.get("workerDispatch"));
-            List<Map<String,Object>> events=runtime.events(id).after(0);
-            List<String> eventNames=events.stream().map(event->String.valueOf(event.get("event"))).toList();
-            List<String> logMessages=new ArrayList<>();
-            for(Map<String,Object> event:events)if("log".equals(event.get("event"))) {
-                Map<?,?> payload=(Map<?,?>)event.get("data");
-                Object message=payload.get("console");if(message==null)message=payload.get("message");
-                if(message!=null&&String.valueOf(message).contains("parity-once"))logMessages.add("parity-once");
-            }
-            List<String> reportEntries;
-            try(ZipFile archive=new ZipFile(runtime.artifactArchivePath(id).toFile())) {
-                reportEntries=archive.stream().filter(entry->!entry.isDirectory()).map(entry->stableRunPath(entry.getName())).sorted().toList();
-            }
-            Map<String,Object> index=runtime.artifactIndex(id);
-            List<String> primaryReports=new ArrayList<>();
-            for(Object raw:(List<?>)index.get("primaryReports")) {
-                if(raw instanceof Map<?,?> entry)primaryReports.add(stableRunPath(String.valueOf(entry.get("path"))));
-            }
-            List<Map<String,Object>> history=runtime.store.listOwned(100,"alice");
-            Map<?,?> historyRow=history.stream().filter(row->id.equals(row.get("jobId"))).findFirst().orElseThrow();
-            Object resultPayload=stableResult(result.get("result"));
-            Object diagnostic=result.get("diagnostic");
-            return new RunCapture(dispatch,String.valueOf(job.get("status")),String.valueOf(job.get("exitCode")),eventNames,
-                    logMessages,resultPayload,diagnostic,reportEntries,primaryReports,String.valueOf(historyRow.get("status")));
+            return captureRun(runtime,id,result);
         }
     }
 
+    private RunCapture executeDebug(boolean enabled,Path allowed,Path pkg,Path runtimeConfig,Path libs,String template,String name) throws Exception {
+        Path data=temp.resolve(name+"-data"),serverConfig=temp.resolve(name+"-server.yaml");
+        String pool=enabled?"  executionPool: {enabled: true, minIdle: 1, maxIdle: 1, heapBudgetMb: 128, packageIds: [p]}\n":"";
+        Files.writeString(serverConfig,"server:\n  runtimeConfigPath: "+ServerRuntimeTestSupport.yaml(runtimeConfig)+"\n"
+                +"  dataDir: "+ServerRuntimeTestSupport.yaml(data)+"\n  auth: {mode: local}\n"
+                +"  inspection: {enabled: true, maxConcurrent: 1, timeoutMs: 30000}\n"
+                +"workers:\n  maxConcurrent: 1\n  queuedLimit: 1\n  heapMaxMb: 128\n"+pool
+                +"packages:\n  allowedRoots: ["+ServerRuntimeTestSupport.yaml(allowed)+"]\n  entries:\n    p: "+ServerRuntimeTestSupport.yaml(pkg)+"\n");
+        try(ServerRuntime runtime=new ServerRuntime(ServerConfig.load(serverConfig),libs.toString())) {
+            runtime.store.createAuthUser("alice","Alice","unused","USER","csrf");
+            if(enabled)awaitReady(runtime,15);
+            var definition=ServerRuntime.JSON.createObjectNode();definition.put("packageId","p");
+            definition.set("target",ServerRuntime.JSON.valueToTree(Map.of("type","template","id",template)));
+            definition.set("input",ServerRuntime.JSON.createObjectNode());
+            Map<String,Object> draft=runtime.createDebugDraft(definition,"alice");
+            Map<String,Object> accepted=runtime.submitDebugDraft(ServerRuntime.JSON.valueToTree(
+                    Map.of("packageId","p","draftId",draft.get("draftId"))),"alice");
+            String id=String.valueOf(accepted.get("jobId"));
+            Map<String,Object> result=ServerRuntimeTestSupport.awaitUnifiedJob(runtime,id);
+            awaitArchive(runtime,id,15);
+            return captureRun(runtime,id,result);
+        }
+    }
+
+    private RunCapture captureRun(ServerRuntime runtime,String id,Map<String,Object> result) throws Exception {
+        Map<?,?> job=(Map<?,?>)result.get("job");
+        Map<?,?> performance=(Map<?,?>)job.get("performance");
+        String dispatch=String.valueOf(performance.get("workerDispatch"));
+        List<Map<String,Object>> events=runtime.events(id).after(0);
+        List<String> eventNames=events.stream().map(event->String.valueOf(event.get("event"))).toList();
+        List<String> logMessages=new ArrayList<>();
+        for(Map<String,Object> event:events)if("log".equals(event.get("event"))) {
+            Map<?,?> payload=(Map<?,?>)event.get("data");
+            Object message=payload.get("console");if(message==null)message=payload.get("message");
+            if(message!=null&&String.valueOf(message).contains("parity-once"))logMessages.add("parity-once");
+        }
+        List<String> reportEntries;
+        try(ZipFile archive=new ZipFile(runtime.artifactArchivePath(id).toFile())) {
+            reportEntries=archive.stream().filter(entry->!entry.isDirectory()).map(entry->stableRunPath(entry.getName())).sorted().toList();
+        }
+        Map<String,Object> index=runtime.artifactIndex(id);
+        List<String> primaryReports=new ArrayList<>();
+        for(Object raw:(List<?>)index.get("primaryReports"))if(raw instanceof Map<?,?> entry)
+            primaryReports.add(stableRunPath(String.valueOf(entry.get("path"))));
+        List<Map<String,Object>> history=runtime.store.listOwned(100,"alice");
+        Map<?,?> historyRow=history.stream().filter(row->id.equals(row.get("jobId"))).findFirst().orElseThrow();
+        return new RunCapture(dispatch,String.valueOf(job.get("status")),String.valueOf(job.get("exitCode")),eventNames,
+                logMessages,stableResult(result.get("result")),result.get("diagnostic"),reportEntries,primaryReports,
+                String.valueOf(historyRow.get("status")));
+    }
+
     private TerminalCapture executeInterrupted(boolean enabled,Path allowed,Path pkg,Path runtimeConfig,Path libs,
-                                               String template,boolean cancel,String name) throws Exception {
+                                               String template,boolean cancel,boolean debug,String name) throws Exception {
         Path started=pkg.resolve("tools/started"),childPid=pkg.resolve("tools/child.pid");
         Files.deleteIfExists(started);Files.deleteIfExists(childPid);
         Path data=temp.resolve(name+"-data"),serverConfig=temp.resolve(name+"-server.yaml");
@@ -187,13 +258,22 @@ class ExecutionWorkerSemanticParityTest {
         try(ServerRuntime runtime=new ServerRuntime(ServerConfig.load(serverConfig),libs.toString())) {
             runtime.store.createAuthUser("alice","Alice","unused","USER","csrf");
             if(enabled)awaitReady(runtime,15);
-            var definition=ServerRuntime.JSON.createObjectNode();
-            definition.put("schemaVersion",RunDefinition.VERSION);definition.put("executionType","run");definition.put("packageId","p");
-            definition.set("target",ServerRuntime.JSON.valueToTree(Map.of("type","template","id",template)));
-            definition.set("input",ServerRuntime.JSON.createObjectNode());definition.set("options",ServerRuntime.JSON.valueToTree(Map.of("debug",false)));
-            Map<String,Object> draft=runtime.createRunDraft(definition,"alice");
-            Map<String,Object> accepted=runtime.submitRunDraft(ServerRuntime.JSON.valueToTree(
-                    Map.of("packageId","p","draftId",draft.get("draftId"))),"alice","alice");
+            Map<String,Object> accepted;
+            if(debug) {
+                var definition=ServerRuntime.JSON.createObjectNode();definition.put("packageId","p");
+                definition.set("target",ServerRuntime.JSON.valueToTree(Map.of("type","template","id",template)));
+                definition.set("input",ServerRuntime.JSON.createObjectNode());
+                Map<String,Object> draft=runtime.createDebugDraft(definition,"alice");
+                accepted=runtime.submitDebugDraft(ServerRuntime.JSON.valueToTree(Map.of("packageId","p","draftId",draft.get("draftId"))),"alice");
+            } else {
+                var definition=ServerRuntime.JSON.createObjectNode();
+                definition.put("schemaVersion",RunDefinition.VERSION);definition.put("executionType","run");definition.put("packageId","p");
+                definition.set("target",ServerRuntime.JSON.valueToTree(Map.of("type","template","id",template)));
+                definition.set("input",ServerRuntime.JSON.createObjectNode());definition.set("options",ServerRuntime.JSON.valueToTree(Map.of("debug",false)));
+                Map<String,Object> draft=runtime.createRunDraft(definition,"alice");
+                accepted=runtime.submitRunDraft(ServerRuntime.JSON.valueToTree(
+                        Map.of("packageId","p","draftId",draft.get("draftId"))),"alice","alice");
+            }
             String id=String.valueOf(accepted.get("jobId"));
             Job job=runtime.jobs.get(id);
             await(()->Files.exists(started)&&Files.exists(childPid)&&job.workerPid!=null,20);
@@ -205,6 +285,8 @@ class ExecutionWorkerSemanticParityTest {
                     &&!ProcessHandle.of(toolPid).map(ProcessHandle::isAlive).orElse(false),15);
             awaitArchive(runtime,id,20);
             Map<?,?> row=(Map<?,?>)result.get("job");
+            Map<?,?> performance=(Map<?,?>)row.get("performance");
+            String dispatch=String.valueOf(performance.get("workerDispatch"));
             List<Map<String,Object>> events=runtime.events(id).after(0);
             List<String> eventNames=events.stream().map(event->String.valueOf(event.get("event"))).toList();
             List<String> logs=new ArrayList<>();
@@ -224,7 +306,7 @@ class ExecutionWorkerSemanticParityTest {
                 primaryReports.add(stableRunPath(String.valueOf(entry.get("path"))));
             Map<String,Object> history=runtime.store.listOwned(100,"alice").stream()
                     .filter(item->id.equals(item.get("jobId"))).findFirst().orElseThrow();
-            return new TerminalCapture(String.valueOf(row.get("status")),String.valueOf(row.get("exitCode")),eventNames,logs,
+            return new TerminalCapture(dispatch,String.valueOf(row.get("status")),String.valueOf(row.get("exitCode")),eventNames,logs,
                     stableResult(result.get("result")),stableResult(result.get("diagnostic")),reportEntries,primaryReports,
                     String.valueOf(history.get("status")));
         }
@@ -282,7 +364,7 @@ class ExecutionWorkerSemanticParityTest {
     private record RunCapture(String dispatch,String status,String exitCode,List<String> eventNames,List<String> logMessages,
                               Object resultPayload,Object diagnostic,List<String> reportEntries,List<String> primaryReportPaths,
                               String historyStatus) { }
-    private record TerminalCapture(String status,String exitCode,List<String> eventNames,List<String> logMessages,
+    private record TerminalCapture(String dispatch,String status,String exitCode,List<String> eventNames,List<String> logMessages,
                                    Object resultPayload,Object diagnostic,List<String> reportEntries,List<String> primaryReportPaths,
                                    String historyStatus) { }
 }

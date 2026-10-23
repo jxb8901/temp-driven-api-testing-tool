@@ -65,7 +65,7 @@ class ServerRuntimeInspectionTest {
         Path descriptor=Files.createDirectories(packageRoot.resolve("testdata")).resolve("accounts.yaml");
         Files.writeString(descriptor,"schemaVersion: att-testdata/v1.0\nid: accounts\nselection: {strategy: sequential}\nrecords:\n"
                 +"  - {accountId: A-1001, status: ACTIVE}\n  - {accountId: A-1002, status: CLOSED}\n");
-        Path runtimeConfig=Files.createDirectories(packageRoot.resolve("config")).resolve("config.yaml");
+        Path runtimeConfig=Files.createDirectories(temp.resolve("testdata-inspection-runtime/config")).resolve("config.yaml");
         Files.createDirectories(packageRoot.resolve("templates"));
         Files.createDirectories(packageRoot.resolve("testcase"));
         Files.writeString(runtimeConfig,"schemaVersion: att-config/v2.12\nenvironment: SIT\n"
