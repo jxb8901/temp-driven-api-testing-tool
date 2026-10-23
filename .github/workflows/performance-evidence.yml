@@ -103,6 +103,11 @@ jobs:
                 -Datt.server.benchmark.workerSse.slowDelayMs=0 \
                 -Datt.server.benchmark.workerSse.workers=1,4 \
                 -Datt.server.benchmark.workerSse.observers="$observers" \
+                -Datt.server.benchmark.mixedInspection=true \
+                -Datt.server.benchmark.mixedInspection.warmups=2 \
+                -Datt.server.benchmark.mixedInspection.runs=12 \
+                -Datt.server.benchmark.mixedInspection.validationBurst=4 \
+                -Datt.server.benchmark.mixedInspection.validationUsers=128 \
                 -Datt.benchmark.processResources=true \
                 -Datt.server.benchmark.workerSse.output="$GITHUB_WORKSPACE/target/performance-evidence/server-worker-$revision-$case_count.json" \
                 -Datt.benchmark.commit="$GITHUB_SHA"

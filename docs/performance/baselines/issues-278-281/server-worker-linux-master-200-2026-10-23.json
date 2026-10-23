@@ -1,0 +1,828 @@
+{
+  "schemaVersion" : "att-server-worker-sse-benchmark/v1",
+  "runtime" : {
+    "workerRuntimeSha256" : "e0ba5e23de29dd1a72ba459e48b1b85686e5e0abfd9f86a94a5e024b4619c1f7",
+    "warSha256" : "040f95e314e8c69787f172999b8c584ccc7889150dbd9ad0c2da8455bb372784",
+    "version" : "4.2.3"
+  },
+  "environment" : {
+    "javaVersion" : "17.0.20.1",
+    "javaVm" : "OpenJDK 64-Bit Server VM",
+    "os" : "Linux 6.17.0-1022-azure",
+    "architecture" : "amd64",
+    "processors" : 4,
+    "maxHeapBytes" : 4192206848,
+    "liveThreads" : 19,
+    "capturedAt" : "2026-10-23T07:50:55.704357034Z"
+  },
+  "settings" : {
+    "soakSeconds" : 0,
+    "syntheticReplayEventsPerJob" : 1000,
+    "observerModes" : [ "none" ],
+    "runs" : 2,
+    "processResourceSampling" : true,
+    "slowReaderDelayMsPerEvent" : 0,
+    "maxEventsPerJob" : 100000,
+    "workerConcurrency" : [ 1, 4 ],
+    "warmups" : 1,
+    "caseCount" : 200
+  },
+  "workerScenarios" : [ {
+    "workerConcurrency" : 1,
+    "observerMode" : "none",
+    "measuredRuns" : 2,
+    "samples" : [ {
+      "workerConcurrency" : 1,
+      "observerMode" : "none",
+      "caseCountPerJob" : 200,
+      "jobCount" : 1,
+      "status" : "PASS",
+      "totalWallMs" : 8449.52977,
+      "jobsPerSecond" : 0.11834978125652548,
+      "serverMetricsPeak" : {
+        "activeWorkersPeak" : 1,
+        "queueDepthPeak" : 0
+      },
+      "jobs" : [ {
+        "jobId" : "JFDFC43CF45C94599",
+        "status" : "PASS",
+        "performance" : {
+          "timings" : {
+            "admissionMs" : 590.876548,
+            "queueWaitMs" : 3.292094,
+            "workerPreparationMs" : 7.000508,
+            "workerSpawnMs" : 9.685879,
+            "workerReadyMs" : 719.326295,
+            "executionReadyMs" : 2810.223811
+          },
+          "worker" : {
+            "sampling" : "event-triggered; at most one sample per 100 ms",
+            "sampleCount" : 32,
+            "heapUsedBytes" : 64948208,
+            "heapPeakUsedBytes" : 92526864,
+            "heapCommittedBytes" : 163577856,
+            "heapPeakCommittedBytes" : 266338304,
+            "heapMaxBytes" : 4192206848,
+            "rssMetricsAvailable" : true,
+            "rssPeakBytes" : 296738816,
+            "liveThreads" : 6,
+            "liveThreadsPeak" : 6,
+            "gcMetricsAvailable" : true,
+            "gcCollectionCount" : 8,
+            "gcCollectionTimeMs" : 55,
+            "processCpuSupported" : true,
+            "processCpuTimeMs" : 13470,
+            "processCpuPercent" : 189.39575770676305
+          }
+        },
+        "journalEventCount" : 2211,
+        "journalBytesOnDisk" : 1127909
+      } ],
+      "sseReaders" : [ ],
+      "jobIds" : [ "JFDFC43CF45C94599" ],
+      "processResources" : {
+        "kernelReadBytes" : 4096,
+        "kernelWriteBytes" : 19349504,
+        "sampleCount" : 161,
+        "physicalIoSource" : "/proc/<pid>/io read_bytes/write_bytes",
+        "samplingIntervalMs" : 25,
+        "peakResidentBytes" : 873091072,
+        "physicalIoAvailable" : true,
+        "scope" : "test-process-and-descendants",
+        "available" : true
+      }
+    }, {
+      "workerConcurrency" : 1,
+      "observerMode" : "none",
+      "caseCountPerJob" : 200,
+      "jobCount" : 1,
+      "status" : "PASS",
+      "totalWallMs" : 6558.098003,
+      "jobsPerSecond" : 0.15248323516094917,
+      "serverMetricsPeak" : {
+        "activeWorkersPeak" : 1,
+        "queueDepthPeak" : 0
+      },
+      "jobs" : [ {
+        "jobId" : "J050FB284036E4215",
+        "status" : "PASS",
+        "performance" : {
+          "timings" : {
+            "admissionMs" : 302.01775,
+            "queueWaitMs" : 6.131604,
+            "workerPreparationMs" : 2.032112,
+            "workerSpawnMs" : 5.593291,
+            "workerReadyMs" : 795.086246,
+            "executionReadyMs" : 2474.392152,
+            "workerLifetimeMs" : 6203.302577,
+            "resultToTerminationMs" : 28.057741
+          },
+          "worker" : {
+            "sampling" : "event-triggered; at most one sample per 100 ms",
+            "sampleCount" : 24,
+            "heapUsedBytes" : 62280992,
+            "heapPeakUsedBytes" : 100368504,
+            "heapCommittedBytes" : 163577856,
+            "heapPeakCommittedBytes" : 266338304,
+            "heapMaxBytes" : 4192206848,
+            "rssMetricsAvailable" : true,
+            "rssPeakBytes" : 299315200,
+            "liveThreads" : 6,
+            "liveThreadsPeak" : 6,
+            "gcMetricsAvailable" : true,
+            "gcCollectionCount" : 8,
+            "gcCollectionTimeMs" : 48,
+            "processCpuSupported" : true,
+            "processCpuTimeMs" : 13010,
+            "processCpuPercent" : 238.1917350413023
+          }
+        },
+        "journalEventCount" : 2211,
+        "journalBytesOnDisk" : 1127777
+      } ],
+      "sseReaders" : [ ],
+      "jobIds" : [ "J050FB284036E4215" ],
+      "processResources" : {
+        "kernelReadBytes" : 0,
+        "kernelWriteBytes" : 19439616,
+        "sampleCount" : 134,
+        "physicalIoSource" : "/proc/<pid>/io read_bytes/write_bytes",
+        "samplingIntervalMs" : 25,
+        "peakResidentBytes" : 930672640,
+        "physicalIoAvailable" : true,
+        "scope" : "test-process-and-descendants",
+        "available" : true
+      }
+    } ]
+  }, {
+    "workerConcurrency" : 4,
+    "observerMode" : "none",
+    "measuredRuns" : 2,
+    "samples" : [ {
+      "workerConcurrency" : 4,
+      "observerMode" : "none",
+      "caseCountPerJob" : 200,
+      "jobCount" : 4,
+      "status" : "PASS",
+      "totalWallMs" : 21214.493734,
+      "jobsPerSecond" : 0.18855033969485155,
+      "serverMetricsPeak" : {
+        "activeWorkersPeak" : 4,
+        "queueDepthPeak" : 0
+      },
+      "jobs" : [ {
+        "jobId" : "JA3F2C6DDE1AF4792",
+        "status" : "PASS",
+        "performance" : {
+          "timings" : {
+            "admissionMs" : 200.166353,
+            "queueWaitMs" : 1.391477,
+            "workerPreparationMs" : 1.367462,
+            "workerSpawnMs" : 4.335876,
+            "workerReadyMs" : 1168.352017,
+            "executionReadyMs" : 7607.048774,
+            "workerLifetimeMs" : 20852.599099,
+            "resultToTerminationMs" : 88.981425
+          },
+          "worker" : {
+            "sampling" : "event-triggered; at most one sample per 100 ms",
+            "sampleCount" : 84,
+            "heapUsedBytes" : 64833216,
+            "heapPeakUsedBytes" : 102941760,
+            "heapCommittedBytes" : 163577856,
+            "heapPeakCommittedBytes" : 266338304,
+            "heapMaxBytes" : 4192206848,
+            "rssMetricsAvailable" : true,
+            "rssPeakBytes" : 307642368,
+            "liveThreads" : 6,
+            "liveThreadsPeak" : 6,
+            "gcMetricsAvailable" : true,
+            "gcCollectionCount" : 8,
+            "gcCollectionTimeMs" : 125,
+            "processCpuSupported" : true,
+            "processCpuTimeMs" : 14210,
+            "processCpuPercent" : 71.7706440017105
+          }
+        },
+        "journalEventCount" : 2211,
+        "journalBytesOnDisk" : 1128366
+      }, {
+        "jobId" : "JC15C87C56CE54852",
+        "status" : "PASS",
+        "performance" : {
+          "timings" : {
+            "admissionMs" : 314.411681,
+            "queueWaitMs" : 2.288547,
+            "workerPreparationMs" : 2.936974,
+            "workerSpawnMs" : 3.932505,
+            "workerReadyMs" : 1444.750273,
+            "executionReadyMs" : 6302.11447,
+            "workerLifetimeMs" : 19098.848395,
+            "resultToTerminationMs" : 115.424977
+          },
+          "worker" : {
+            "sampling" : "event-triggered; at most one sample per 100 ms",
+            "sampleCount" : 80,
+            "heapUsedBytes" : 94087168,
+            "heapPeakUsedBytes" : 102595648,
+            "heapCommittedBytes" : 163577856,
+            "heapPeakCommittedBytes" : 266338304,
+            "heapMaxBytes" : 4192206848,
+            "rssMetricsAvailable" : true,
+            "rssPeakBytes" : 300208128,
+            "liveThreads" : 6,
+            "liveThreadsPeak" : 6,
+            "gcMetricsAvailable" : true,
+            "gcCollectionCount" : 9,
+            "gcCollectionTimeMs" : 190,
+            "processCpuSupported" : true,
+            "processCpuTimeMs" : 13910,
+            "processCpuPercent" : 78.46393684473982
+          }
+        },
+        "journalEventCount" : 2211,
+        "journalBytesOnDisk" : 1128340
+      }, {
+        "jobId" : "J22A56FE851DE4F78",
+        "status" : "PASS",
+        "performance" : {
+          "timings" : {
+            "admissionMs" : 446.602834,
+            "queueWaitMs" : 1.845052,
+            "workerPreparationMs" : 2.298463,
+            "workerSpawnMs" : 10.756394,
+            "workerReadyMs" : 1664.484551,
+            "executionReadyMs" : 6821.567244,
+            "workerLifetimeMs" : 19889.95066,
+            "resultToTerminationMs" : 134.822365
+          },
+          "worker" : {
+            "sampling" : "event-triggered; at most one sample per 100 ms",
+            "sampleCount" : 78,
+            "heapUsedBytes" : 60389576,
+            "heapPeakUsedBytes" : 104584448,
+            "heapCommittedBytes" : 163577856,
+            "heapPeakCommittedBytes" : 266338304,
+            "heapMaxBytes" : 4192206848,
+            "rssMetricsAvailable" : true,
+            "rssPeakBytes" : 296882176,
+            "liveThreads" : 6,
+            "liveThreadsPeak" : 6,
+            "gcMetricsAvailable" : true,
+            "gcCollectionCount" : 8,
+            "gcCollectionTimeMs" : 106,
+            "processCpuSupported" : true,
+            "processCpuTimeMs" : 13870,
+            "processCpuPercent" : 75.8794858970881
+          }
+        },
+        "journalEventCount" : 2211,
+        "journalBytesOnDisk" : 1128280
+      }, {
+        "jobId" : "J736CBEEA88D84009",
+        "status" : "PASS",
+        "performance" : {
+          "timings" : {
+            "admissionMs" : 586.473179,
+            "queueWaitMs" : 5.882325,
+            "workerPreparationMs" : 1.340251,
+            "workerSpawnMs" : 9.913548,
+            "workerReadyMs" : 1867.779528,
+            "executionReadyMs" : 5546.062473,
+            "workerLifetimeMs" : 19591.047531,
+            "resultToTerminationMs" : 47.308422
+          },
+          "worker" : {
+            "sampling" : "event-triggered; at most one sample per 100 ms",
+            "sampleCount" : 89,
+            "heapUsedBytes" : 94084600,
+            "heapPeakUsedBytes" : 104456328,
+            "heapCommittedBytes" : 163577856,
+            "heapPeakCommittedBytes" : 266338304,
+            "heapMaxBytes" : 4192206848,
+            "rssMetricsAvailable" : true,
+            "rssPeakBytes" : 290775040,
+            "liveThreads" : 6,
+            "liveThreadsPeak" : 6,
+            "gcMetricsAvailable" : true,
+            "gcCollectionCount" : 7,
+            "gcCollectionTimeMs" : 98,
+            "processCpuSupported" : true,
+            "processCpuTimeMs" : 14080,
+            "processCpuPercent" : 79.04232158348248
+          }
+        },
+        "journalEventCount" : 2211,
+        "journalBytesOnDisk" : 1128404
+      } ],
+      "sseReaders" : [ ],
+      "jobIds" : [ "JA3F2C6DDE1AF4792", "JC15C87C56CE54852", "J22A56FE851DE4F78", "J736CBEEA88D84009" ],
+      "processResources" : {
+        "kernelReadBytes" : 0,
+        "kernelWriteBytes" : 75808768,
+        "sampleCount" : 266,
+        "physicalIoSource" : "/proc/<pid>/io read_bytes/write_bytes",
+        "samplingIntervalMs" : 25,
+        "peakResidentBytes" : 2266501120,
+        "physicalIoAvailable" : true,
+        "scope" : "test-process-and-descendants",
+        "available" : true
+      }
+    }, {
+      "workerConcurrency" : 4,
+      "observerMode" : "none",
+      "caseCountPerJob" : 200,
+      "jobCount" : 4,
+      "status" : "PASS",
+      "totalWallMs" : 19131.410959,
+      "jobsPerSecond" : 0.20908024026938157,
+      "serverMetricsPeak" : {
+        "activeWorkersPeak" : 4,
+        "queueDepthPeak" : 0
+      },
+      "jobs" : [ {
+        "jobId" : "J118072D325914164",
+        "status" : "PASS",
+        "performance" : {
+          "timings" : {
+            "admissionMs" : 442.421474,
+            "queueWaitMs" : 4.26277,
+            "workerPreparationMs" : 1.261193,
+            "workerSpawnMs" : 3.924942,
+            "workerReadyMs" : 1075.21977,
+            "executionReadyMs" : 4985.795873,
+            "workerLifetimeMs" : 16390.717243,
+            "resultToTerminationMs" : 75.651406
+          },
+          "worker" : {
+            "sampling" : "event-triggered; at most one sample per 100 ms",
+            "sampleCount" : 72,
+            "heapUsedBytes" : 64655632,
+            "heapPeakUsedBytes" : 104968528,
+            "heapCommittedBytes" : 163577856,
+            "heapPeakCommittedBytes" : 266338304,
+            "heapMaxBytes" : 4192206848,
+            "rssMetricsAvailable" : true,
+            "rssPeakBytes" : 298172416,
+            "liveThreads" : 6,
+            "liveThreadsPeak" : 6,
+            "gcMetricsAvailable" : true,
+            "gcCollectionCount" : 8,
+            "gcCollectionTimeMs" : 125,
+            "processCpuSupported" : true,
+            "processCpuTimeMs" : 12950,
+            "processCpuPercent" : 84.46698549276712
+          }
+        },
+        "journalEventCount" : 2211,
+        "journalBytesOnDisk" : 1128270
+      }, {
+        "jobId" : "J47792FD5A1A94AFE",
+        "status" : "PASS",
+        "performance" : {
+          "timings" : {
+            "admissionMs" : 302.88012,
+            "queueWaitMs" : 0.655242,
+            "workerPreparationMs" : 1.889224,
+            "workerSpawnMs" : 3.734033,
+            "workerReadyMs" : 1195.429443,
+            "executionReadyMs" : 6443.859195,
+            "workerLifetimeMs" : 17243.525422,
+            "resultToTerminationMs" : 104.416417
+          },
+          "worker" : {
+            "sampling" : "event-triggered; at most one sample per 100 ms",
+            "sampleCount" : 66,
+            "heapUsedBytes" : 90087904,
+            "heapPeakUsedBytes" : 104645248,
+            "heapCommittedBytes" : 163577856,
+            "heapPeakCommittedBytes" : 266338304,
+            "heapMaxBytes" : 4192206848,
+            "rssMetricsAvailable" : true,
+            "rssPeakBytes" : 292978688,
+            "liveThreads" : 6,
+            "liveThreadsPeak" : 6,
+            "gcMetricsAvailable" : true,
+            "gcCollectionCount" : 9,
+            "gcCollectionTimeMs" : 150,
+            "processCpuSupported" : true,
+            "processCpuTimeMs" : 12590,
+            "processCpuPercent" : 78.31824321828768
+          }
+        },
+        "journalEventCount" : 2211,
+        "journalBytesOnDisk" : 1128218
+      }, {
+        "jobId" : "J3089C3CEC9054C8E",
+        "status" : "PASS",
+        "performance" : {
+          "timings" : {
+            "admissionMs" : 425.188573,
+            "queueWaitMs" : 2.456794,
+            "workerPreparationMs" : 3.505924,
+            "workerSpawnMs" : 4.748908,
+            "workerReadyMs" : 1393.616093,
+            "executionReadyMs" : 6531.716629,
+            "workerLifetimeMs" : 17688.092226,
+            "resultToTerminationMs" : 82.093648
+          },
+          "worker" : {
+            "sampling" : "event-triggered; at most one sample per 100 ms",
+            "sampleCount" : 77,
+            "heapUsedBytes" : 94225792,
+            "heapPeakUsedBytes" : 104769408,
+            "heapCommittedBytes" : 163577856,
+            "heapPeakCommittedBytes" : 266338304,
+            "heapMaxBytes" : 4192206848,
+            "rssMetricsAvailable" : true,
+            "rssPeakBytes" : 305999872,
+            "liveThreads" : 6,
+            "liveThreadsPeak" : 6,
+            "gcMetricsAvailable" : true,
+            "gcCollectionCount" : 9,
+            "gcCollectionTimeMs" : 218,
+            "processCpuSupported" : true,
+            "processCpuTimeMs" : 13390,
+            "processCpuPercent" : 82.02741421596744
+          }
+        },
+        "journalEventCount" : 2211,
+        "journalBytesOnDisk" : 1128310
+      }, {
+        "jobId" : "J63B8B4DAB2234B32",
+        "status" : "PASS",
+        "performance" : {
+          "timings" : {
+            "admissionMs" : 466.439804,
+            "queueWaitMs" : 1.435259,
+            "workerPreparationMs" : 10.722181,
+            "workerSpawnMs" : 2.623304,
+            "workerReadyMs" : 1263.437301,
+            "executionReadyMs" : 7050.974582,
+            "workerLifetimeMs" : 17431.318905,
+            "resultToTerminationMs" : 33.006915
+          },
+          "worker" : {
+            "sampling" : "event-triggered; at most one sample per 100 ms",
+            "sampleCount" : 72,
+            "heapUsedBytes" : 94081488,
+            "heapPeakUsedBytes" : 104519440,
+            "heapCommittedBytes" : 163577856,
+            "heapPeakCommittedBytes" : 266338304,
+            "heapMaxBytes" : 4192206848,
+            "rssMetricsAvailable" : true,
+            "rssPeakBytes" : 298844160,
+            "liveThreads" : 6,
+            "liveThreadsPeak" : 6,
+            "gcMetricsAvailable" : true,
+            "gcCollectionCount" : 7,
+            "gcCollectionTimeMs" : 120,
+            "processCpuSupported" : true,
+            "processCpuTimeMs" : 13680,
+            "processCpuPercent" : 84.1133107711654
+          }
+        },
+        "journalEventCount" : 2211,
+        "journalBytesOnDisk" : 1128262
+      } ],
+      "sseReaders" : [ ],
+      "jobIds" : [ "J118072D325914164", "J47792FD5A1A94AFE", "J3089C3CEC9054C8E", "J63B8B4DAB2234B32" ],
+      "processResources" : {
+        "kernelReadBytes" : 0,
+        "kernelWriteBytes" : 75124736,
+        "sampleCount" : 253,
+        "physicalIoSource" : "/proc/<pid>/io read_bytes/write_bytes",
+        "samplingIntervalMs" : 25,
+        "peakResidentBytes" : 2274512896,
+        "physicalIoAvailable" : true,
+        "scope" : "test-process-and-descendants",
+        "available" : true
+      }
+    } ]
+  } ],
+  "eventHeavyCommands" : [ {
+    "command" : "debug",
+    "jobId" : "J15D073AC6F0C443D",
+    "status" : "PASS",
+    "wallMs" : 1207.290089,
+    "journalEventCount" : 11,
+    "performance" : {
+      "timings" : {
+        "admissionMs" : 1.784867,
+        "queueWaitMs" : 0.042701,
+        "workerPreparationMs" : 1.066476,
+        "workerSpawnMs" : 4.265352,
+        "workerReadyMs" : 384.013272,
+        "executionReadyMs" : 573.42404,
+        "workerLifetimeMs" : 1172.11696,
+        "resultToTerminationMs" : 14.225647
+      },
+      "worker" : {
+        "sampling" : "event-triggered; at most one sample per 100 ms",
+        "sampleCount" : 3,
+        "heapUsedBytes" : 25257472,
+        "heapPeakUsedBytes" : 23160320,
+        "heapCommittedBytes" : 266338304,
+        "heapPeakCommittedBytes" : 266338304,
+        "heapMaxBytes" : 4192206848,
+        "rssMetricsAvailable" : true,
+        "rssPeakBytes" : 132882432,
+        "liveThreads" : 6,
+        "liveThreadsPeak" : 6,
+        "gcMetricsAvailable" : true,
+        "gcCollectionCount" : 1,
+        "gcCollectionTimeMs" : 4,
+        "processCpuSupported" : true,
+        "processCpuTimeMs" : 1960,
+        "processCpuPercent" : 241.01433628035826
+      }
+    },
+    "serverMetricsPeak" : {
+      "activeWorkersPeak" : 1,
+      "queueDepthPeak" : 0
+    },
+    "processResources" : {
+      "kernelReadBytes" : 0,
+      "kernelWriteBytes" : 4448256,
+      "sampleCount" : 28,
+      "physicalIoSource" : "/proc/<pid>/io read_bytes/write_bytes",
+      "samplingIntervalMs" : 25,
+      "peakResidentBytes" : 1252114432,
+      "physicalIoAvailable" : true,
+      "scope" : "test-process-and-descendants",
+      "available" : true
+    }
+  }, {
+    "command" : "load",
+    "jobId" : "J1DB913DEA7DE4FD7",
+    "status" : "PASS",
+    "wallMs" : 5317.55589,
+    "journalEventCount" : 806,
+    "performance" : {
+      "timings" : {
+        "admissionMs" : 33.442976,
+        "queueWaitMs" : 0.039817,
+        "workerPreparationMs" : 1.82294,
+        "workerSpawnMs" : 6.661655,
+        "workerReadyMs" : 395.123078,
+        "executionReadyMs" : 703.023076,
+        "workerLifetimeMs" : 5213.282321,
+        "resultToTerminationMs" : 18.839046
+      },
+      "worker" : {
+        "sampling" : "event-triggered; at most one sample per 100 ms",
+        "sampleCount" : 41,
+        "heapUsedBytes" : 138496512,
+        "heapPeakUsedBytes" : 138496512,
+        "heapCommittedBytes" : 266338304,
+        "heapPeakCommittedBytes" : 266338304,
+        "heapMaxBytes" : 4192206848,
+        "rssMetricsAvailable" : true,
+        "rssPeakBytes" : 235962368,
+        "liveThreads" : 6,
+        "liveThreadsPeak" : 14,
+        "gcMetricsAvailable" : true,
+        "gcCollectionCount" : 1,
+        "gcCollectionTimeMs" : 4,
+        "processCpuSupported" : true,
+        "processCpuTimeMs" : 4030,
+        "processCpuPercent" : 83.53114427208641
+      }
+    },
+    "serverMetricsPeak" : {
+      "activeWorkersPeak" : 1,
+      "queueDepthPeak" : 0
+    },
+    "processResources" : {
+      "kernelReadBytes" : 0,
+      "kernelWriteBytes" : 20840448,
+      "sampleCount" : 144,
+      "physicalIoSource" : "/proc/<pid>/io read_bytes/write_bytes",
+      "samplingIntervalMs" : 25,
+      "peakResidentBytes" : 1349861376,
+      "physicalIoAvailable" : true,
+      "scope" : "test-process-and-descendants",
+      "available" : true
+    }
+  } ],
+  "packageValidation" : {
+    "command" : "validate",
+    "jobId" : "JB0A0E3E5F96348CA",
+    "status" : "PASS",
+    "wallMs" : 1776.626595,
+    "journalEventCount" : 5,
+    "performance" : {
+      "timings" : {
+        "admissionMs" : 3.762287,
+        "queueWaitMs" : 0.036746,
+        "workerPreparationMs" : 1.550096,
+        "workerSpawnMs" : 1.409119,
+        "workerReadyMs" : 339.505449,
+        "workerLifetimeMs" : 1743.608192,
+        "resultToTerminationMs" : 20.413667
+      },
+      "worker" : {
+        "sampling" : "event-triggered; at most one sample per 100 ms",
+        "sampleCount" : 2,
+        "heapUsedBytes" : 30547792,
+        "heapPeakUsedBytes" : 30547792,
+        "heapCommittedBytes" : 62914560,
+        "heapPeakCommittedBytes" : 266338304,
+        "heapMaxBytes" : 4192206848,
+        "rssMetricsAvailable" : true,
+        "rssPeakBytes" : 152907776,
+        "liveThreads" : 6,
+        "liveThreadsPeak" : 6,
+        "gcMetricsAvailable" : true,
+        "gcCollectionCount" : 2,
+        "gcCollectionTimeMs" : 12,
+        "processCpuSupported" : true,
+        "processCpuTimeMs" : 3980,
+        "processCpuPercent" : 286.8865746929452
+      }
+    },
+    "serverMetricsPeak" : {
+      "activeWorkersPeak" : 1,
+      "queueDepthPeak" : 0
+    },
+    "processResources" : {
+      "kernelReadBytes" : 0,
+      "kernelWriteBytes" : 425984,
+      "sampleCount" : 46,
+      "physicalIoSource" : "/proc/<pid>/io read_bytes/write_bytes",
+      "samplingIntervalMs" : 25,
+      "peakResidentBytes" : 1327546368,
+      "physicalIoAvailable" : true,
+      "scope" : "test-process-and-descendants",
+      "available" : true
+    }
+  },
+  "sseReplay" : [ {
+    "workerConcurrency" : 1,
+    "syntheticEventsAndPayload" : "progress events with 192-byte fixed payload; appended after completed real Worker jobs",
+    "jobs" : [ {
+      "jobId" : "J050FB284036E4215",
+      "lastEventId" : 2211,
+      "appendedEvents" : 1000,
+      "appendMs" : 21.30865,
+      "appendEventsPerSecond" : 46929.2986650961,
+      "journalBytesOnDisk" : 1396670
+    } ],
+    "parallelReplay" : [ {
+      "jobId" : "J050FB284036E4215",
+      "lastEventId" : 2211,
+      "eventCount" : 1000,
+      "firstEventId" : 2212,
+      "timeToFirstEventMs" : 43.63265,
+      "lastEventIdReceived" : 3211,
+      "bytes" : 262638,
+      "wallMs" : 102.621714,
+      "eventsPerSecond" : 9744.526387466107,
+      "consumerDelayMsPerEvent" : 0
+    } ],
+    "parallelReplayWallMs" : 104.465075,
+    "lastEventIdResume" : {
+      "jobId" : "J050FB284036E4215",
+      "lastEventId" : 2211,
+      "eventCount" : 1000,
+      "firstEventId" : 2212,
+      "timeToFirstEventMs" : 25.356181,
+      "lastEventIdReceived" : 3211,
+      "bytes" : 262638,
+      "wallMs" : 87.487048,
+      "eventsPerSecond" : 11430.263368813175,
+      "consumerDelayMsPerEvent" : 0
+    },
+    "slowConsumerReplay" : {
+      "jobId" : "J050FB284036E4215",
+      "lastEventId" : 2211,
+      "eventCount" : 1000,
+      "firstEventId" : 2212,
+      "timeToFirstEventMs" : 18.239534,
+      "lastEventIdReceived" : 3211,
+      "bytes" : 262638,
+      "wallMs" : 103.778497,
+      "eventsPerSecond" : 9635.907523308995,
+      "consumerDelayMsPerEvent" : 0
+    }
+  }, {
+    "workerConcurrency" : 4,
+    "syntheticEventsAndPayload" : "progress events with 192-byte fixed payload; appended after completed real Worker jobs",
+    "jobs" : [ {
+      "jobId" : "J118072D325914164",
+      "lastEventId" : 2211,
+      "appendedEvents" : 1000,
+      "appendMs" : 18.973044,
+      "appendEventsPerSecond" : 52706.355395581224,
+      "journalBytesOnDisk" : 1397163
+    }, {
+      "jobId" : "J47792FD5A1A94AFE",
+      "lastEventId" : 2211,
+      "appendedEvents" : 1000,
+      "appendMs" : 15.069265,
+      "appendEventsPerSecond" : 66360.23721130393,
+      "journalBytesOnDisk" : 1397111
+    }, {
+      "jobId" : "J3089C3CEC9054C8E",
+      "lastEventId" : 2211,
+      "appendedEvents" : 1000,
+      "appendMs" : 9.784894,
+      "appendEventsPerSecond" : 102198.34777975112,
+      "journalBytesOnDisk" : 1397203
+    }, {
+      "jobId" : "J63B8B4DAB2234B32",
+      "lastEventId" : 2211,
+      "appendedEvents" : 1000,
+      "appendMs" : 9.91516,
+      "appendEventsPerSecond" : 100855.6594144724,
+      "journalBytesOnDisk" : 1397155
+    } ],
+    "parallelReplay" : [ {
+      "jobId" : "J118072D325914164",
+      "lastEventId" : 2211,
+      "eventCount" : 1000,
+      "firstEventId" : 2212,
+      "timeToFirstEventMs" : 43.764358,
+      "lastEventIdReceived" : 3211,
+      "bytes" : 262638,
+      "wallMs" : 120.566086,
+      "eventsPerSecond" : 8294.206382381857,
+      "consumerDelayMsPerEvent" : 0
+    }, {
+      "jobId" : "J47792FD5A1A94AFE",
+      "lastEventId" : 2211,
+      "eventCount" : 1000,
+      "firstEventId" : 2212,
+      "timeToFirstEventMs" : 59.431807,
+      "lastEventIdReceived" : 3211,
+      "bytes" : 262638,
+      "wallMs" : 189.092191,
+      "eventsPerSecond" : 5288.425686494901,
+      "consumerDelayMsPerEvent" : 0
+    }, {
+      "jobId" : "J3089C3CEC9054C8E",
+      "lastEventId" : 2211,
+      "eventCount" : 1000,
+      "firstEventId" : 2212,
+      "timeToFirstEventMs" : 44.926704,
+      "lastEventIdReceived" : 3211,
+      "bytes" : 262638,
+      "wallMs" : 145.833603,
+      "eventsPerSecond" : 6857.130177329569,
+      "consumerDelayMsPerEvent" : 0
+    }, {
+      "jobId" : "J63B8B4DAB2234B32",
+      "lastEventId" : 2211,
+      "eventCount" : 1000,
+      "firstEventId" : 2212,
+      "timeToFirstEventMs" : 26.21815,
+      "lastEventIdReceived" : 3211,
+      "bytes" : 262638,
+      "wallMs" : 113.035868,
+      "eventsPerSecond" : 8846.749422935382,
+      "consumerDelayMsPerEvent" : 0
+    } ],
+    "parallelReplayWallMs" : 189.872006,
+    "lastEventIdResume" : {
+      "jobId" : "J118072D325914164",
+      "lastEventId" : 2211,
+      "eventCount" : 1000,
+      "firstEventId" : 2212,
+      "timeToFirstEventMs" : 25.608576,
+      "lastEventIdReceived" : 3211,
+      "bytes" : 262638,
+      "wallMs" : 97.976317,
+      "eventsPerSecond" : 10206.548180413845,
+      "consumerDelayMsPerEvent" : 0
+    },
+    "slowConsumerReplay" : {
+      "jobId" : "J118072D325914164",
+      "lastEventId" : 2211,
+      "eventCount" : 1000,
+      "firstEventId" : 2212,
+      "timeToFirstEventMs" : 13.349649,
+      "lastEventIdReceived" : 3211,
+      "bytes" : 262638,
+      "wallMs" : 62.667042,
+      "eventsPerSecond" : 15957.351234162288,
+      "consumerDelayMsPerEvent" : 0
+    }
+  } ],
+  "restartReplay" : {
+    "jobId" : "J118072D325914164",
+    "lastEventId" : 2211,
+    "replay" : {
+      "jobId" : "J118072D325914164",
+      "lastEventId" : 2211,
+      "eventCount" : 1000,
+      "firstEventId" : 2212,
+      "timeToFirstEventMs" : 136.664858,
+      "lastEventIdReceived" : 3211,
+      "bytes" : 262638,
+      "wallMs" : 258.458934,
+      "eventsPerSecond" : 3869.0866070042684,
+      "consumerDelayMsPerEvent" : 0
+    },
+    "serverRestarted" : true
+  }
+}

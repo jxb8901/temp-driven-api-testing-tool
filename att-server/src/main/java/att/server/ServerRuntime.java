@@ -35,6 +35,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
 import java.util.concurrent.FutureTask;
+import java.util.concurrent.PriorityBlockingQueue;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
@@ -69,6 +70,7 @@ final class ServerRuntime implements AutoCloseable {
     private static final int TESTDATA_RECORD_MAX_PAGE_SIZE=100;
     static final long DRAFT_TTL_MILLIS=TimeUnit.MINUTES.toMillis(10);
     static final int MAX_STREAM_OBSERVERS=32;
+    private static final int INSPECTION_EXPLORER_PRIORITY_BURST=3;
     private static final class ValidatedScheduledScenario {
         final Map<String,Object> scenario;final String revisionDigest,model;final boolean containsSensitiveValues;
         ValidatedScheduledScenario(Map<String,Object> scenario,String revisionDigest,String model,boolean containsSensitiveValues){this.scenario=scenario;this.revisionDigest=revisionDigest;this.model=model;this.containsSensitiveValues=containsSensitiveValues;}
@@ -99,6 +101,7 @@ final class ServerRuntime implements AutoCloseable {
     private final ConcurrentHashMap<String,AdmissionLease> leases=new ConcurrentHashMap<>();
     private final AtomicLong completed=new AtomicLong();
     private final Semaphore loadSlots,admissionSlots;
+    private final Semaphore inspectionTaskSlots;
     final Semaphore streamSlots=new Semaphore(MAX_STREAM_OBSERVERS,true);
     private final ScheduledExecutorService retention;
     private final ScheduledExecutorService artifactMaintenance;
@@ -126,6 +129,9 @@ final class ServerRuntime implements AutoCloseable {
     private final ConcurrentHashMap<Thread,Process> stderrDrainers=new ConcurrentHashMap<>();
     final InspectionMetrics inspectionMetrics=new InspectionMetrics();
     private final AtomicLong inspectionWorkerSelection=new AtomicLong();
+    private final AtomicLong inspectionTaskSequence=new AtomicLong();
+    private final java.util.concurrent.atomic.AtomicInteger inspectionExplorerPriorityCredits=
+            new java.util.concurrent.atomic.AtomicInteger(INSPECTION_EXPLORER_PRIORITY_BURST);
     private final byte[] cursorKey=new byte[32];
     private final SecureRandom cursorRandom=new SecureRandom();
     private final Path workerLibs;
@@ -148,7 +154,8 @@ final class ServerRuntime implements AutoCloseable {
         workers=new ThreadPoolExecutor(config.maxConcurrent,config.maxConcurrent,0,TimeUnit.MILLISECONDS,queue,r->{Thread t=new Thread(r,"att-server-worker");t.setDaemon(true);return t;},new ThreadPoolExecutor.AbortPolicy());
         streams=new ThreadPoolExecutor(0,MAX_STREAM_OBSERVERS,30,TimeUnit.SECONDS,new SynchronousQueue<>(),r->{Thread t=new Thread(r,"att-server-sse");t.setDaemon(true);return t;},new ThreadPoolExecutor.AbortPolicy());
         artifactWriters=new ThreadPoolExecutor(1,1,0,TimeUnit.MILLISECONDS,new ArrayBlockingQueue<>(Math.max(1,config.queuedLimit+config.maxConcurrent)),r->{Thread t=new Thread(r,"att-server-artifact-writer");t.setDaemon(true);return t;},new ThreadPoolExecutor.AbortPolicy());
-        java.util.concurrent.BlockingQueue<Runnable> inspectionQueue=config.inspection.queuedLimit==0?new SynchronousQueue<>():new ArrayBlockingQueue<>(config.inspection.queuedLimit);
+        inspectionTaskSlots=new Semaphore(config.inspection.maxConcurrent+config.inspection.queuedLimit,true);
+        java.util.concurrent.BlockingQueue<Runnable> inspectionQueue=new PriorityBlockingQueue<>();
         inspectors=new ThreadPoolExecutor(config.inspection.maxConcurrent,config.inspection.maxConcurrent,0,TimeUnit.MILLISECONDS,inspectionQueue,r->{Thread t=new Thread(r,"att-server-inspector");t.setDaemon(true);return t;},new ThreadPoolExecutor.AbortPolicy());
         for(int i=0;i<config.inspection.maxConcurrent;i++)inspectionWorkerPool.add(new InspectionWorker());
         retention=java.util.concurrent.Executors.newSingleThreadScheduledExecutor(r->{Thread t=new Thread(r,"att-server-retention");t.setDaemon(true);return t;});
@@ -1757,14 +1764,15 @@ final class ServerRuntime implements AutoCloseable {
         return inspected;
     }
     private Map<String,Object> executeInspection(Path root,WorkerRequest request) throws Exception {
-        Future<Map<String,Object>> future;
         long queuedAt=System.nanoTime();
-        try { future=inspectors.submit(()->{inspectionMetrics.record(QUEUE,System.nanoTime()-queuedAt);return runInspectionWorker(root,request);}); }
-        catch(RejectedExecutionException full){throw new InspectionCapacityException();}
+        if(!inspectionTaskSlots.tryAcquire())throw new InspectionCapacityException();
+        InspectionTask task=new InspectionTask(request,inspectionTaskSequence.getAndIncrement(),queuedAt,root);
+        try { inspectors.execute(task); }
+        catch(RejectedExecutionException full){task.releaseSlot();throw new InspectionCapacityException();}
         Map<String,Object> envelope;
-        try { envelope=future.get(config.inspection.timeoutMs,TimeUnit.MILLISECONDS); }
-        catch(java.util.concurrent.TimeoutException timeout){future.cancel(true);throw new InspectionTimeoutException();}
-        catch(InterruptedException interrupted){future.cancel(true);Thread.currentThread().interrupt();throw interrupted;}
+        try { envelope=task.get(config.inspection.timeoutMs,TimeUnit.MILLISECONDS); }
+        catch(java.util.concurrent.TimeoutException timeout){cancelInspectionTask(task);throw new InspectionTimeoutException();}
+        catch(InterruptedException interrupted){cancelInspectionTask(task);Thread.currentThread().interrupt();throw interrupted;}
         catch(ExecutionException failure){Throwable cause=failure.getCause();if(cause instanceof Exception)throw (Exception)cause;throw new IllegalStateException("Package inspection failed",cause);}
         String workerError=(String)envelope.get("errorCode");
         if("ATT-RESOURCE-NOT-FOUND".equals(workerError))throw new NotFoundException();
@@ -1828,6 +1836,36 @@ final class ServerRuntime implements AutoCloseable {
         JsonNode safe=projectInspectionPaths(JSON.valueToTree(att.server.api.internal.DiagnosticSanitizer.sanitizeValue(raw)),root,"");
         @SuppressWarnings("unchecked") Map<String,Object> result=JSON.convertValue(safe,Map.class);
         return result;
+    }
+    private void cancelInspectionTask(InspectionTask task) {
+        task.cancel(true);
+        if(inspectors.remove(task))task.releaseSlot();
+    }
+    private final class InspectionTask extends FutureTask<Map<String,Object>> implements Comparable<Runnable> {
+        private final int priority;
+        private final long sequence;
+        private final boolean explorerList;
+        private final java.util.concurrent.atomic.AtomicBoolean slotReleased=new java.util.concurrent.atomic.AtomicBoolean();
+        InspectionTask(WorkerRequest request,long sequence,long queuedAt,Path root) {
+            super(()->{inspectionMetrics.record(QUEUE,System.nanoTime()-queuedAt);return runInspectionWorker(root,request);});
+            this.sequence=sequence;
+            this.explorerList="list".equals(request.inspectionAction);
+            // Give at most three short, read-only listings priority before normal work has a turn.
+            int credits=explorerList?inspectionExplorerPriorityCredits.getAndUpdate(value->Math.max(0,value-1)):0;
+            this.priority=credits>0?0:1;
+        }
+        @Override public int compareTo(Runnable other) {
+            if(this==other)return 0;
+            InspectionTask candidate=(InspectionTask)other;
+            int byPriority=Integer.compare(priority,candidate.priority);
+            return byPriority!=0?byPriority:Long.compare(sequence,candidate.sequence);
+        }
+        @Override public void run() {
+            if(!explorerList)inspectionExplorerPriorityCredits.set(INSPECTION_EXPLORER_PRIORITY_BURST);
+            try { super.run(); }
+            finally { releaseSlot(); }
+        }
+        void releaseSlot() { if(slotReleased.compareAndSet(false,true))inspectionTaskSlots.release(); }
     }
     static List<Map<String,Object>> safeInspectionDiagnostics(List<?> rawDiagnostics,Path root) {
         List<Map<String,Object>> diagnostics=new ArrayList<>();

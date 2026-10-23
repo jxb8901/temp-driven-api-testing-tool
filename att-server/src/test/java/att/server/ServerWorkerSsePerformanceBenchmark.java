@@ -75,7 +75,7 @@ class ServerWorkerSsePerformanceBenchmark {
         Path packageRoot = Files.createDirectories(packageRoots.resolve(PACKAGE_ID));
         installPackageFixture(packageRoot, caseCount);
         Path runtimeConfig = Files.createDirectories(temp.resolve("runtime-home/config")).resolve("config.yaml");
-        Files.writeString(runtimeConfig,"schemaVersion: att-config/v2.12\noutputDirectory: output\nenvironment: BENCHMARK\n"
+        Files.writeString(runtimeConfig,"schemaVersion: att-config/v2.12\noutputDirectory: output\nenvironment: BENCHMARK\nenvironments: {BENCHMARK: {}}\n"
                 +"testcase: {root: testcase}\ntemplates: {root: templates}\n",StandardCharsets.UTF_8);
         Path runtimeHome=runtimeConfig.getParent().getParent();
         Path localArchive=Path.of(System.getProperty("att.server.benchmark.localArchive",
@@ -99,6 +99,7 @@ class ServerWorkerSsePerformanceBenchmark {
             server = startServer(exploded, temp.resolve("tomcat-first"));
             Map<String, Object> report = new LinkedHashMap<>();
             report.put("schemaVersion", "att-server-worker-sse-benchmark/v1");
+            report.put("sourceRevision", System.getProperty("att.benchmark.commit", "unspecified"));
             report.put("runtime", Map.of("version", ServerBuildInfo.PRODUCT, "warSha256", sha256(war),
                     "workerRuntimeSha256", sha256(runtimeBundle)));
             report.put("environment", environment());
@@ -138,6 +139,10 @@ class ServerWorkerSsePerformanceBenchmark {
             report.put("eventHeavyCommands", serverCommands);
             report.put("packageValidation", measureSingleCommand(server.port, "validate",
                     Map.of("packageId", PACKAGE_ID, "validationScope", "package")));
+
+            if (Boolean.getBoolean("att.server.benchmark.mixedInspection"))
+                report.put("mixedExplorerValidation", measureMixedExplorerValidation(exploded, runtimeConfig,
+                        packageRoots, packageRoot, caseCount));
 
             List<Map<String, Object>> replayScenarios = new ArrayList<>();
             for (int workerCount : concurrency) {
@@ -258,6 +263,165 @@ class ServerWorkerSsePerformanceBenchmark {
         }
         if(resources!=null)resources.close();
         return result;
+    }
+
+    /**
+     * Measures the public Explorer resource-list and RUN-draft routes while the
+     * bounded Inspector queue is occupied by repeated validation requests.
+     */
+    private Map<String, Object> measureMixedExplorerValidation(Path explodedWar, Path runtimeConfig,
+                                                                 Path packageRoots, Path packageRoot,
+                                                                 int caseCount) throws Exception {
+        int warmups = integerProperty("att.server.benchmark.mixedInspection.warmups", 2, 0);
+        int runs = integerProperty("att.server.benchmark.mixedInspection.runs", 12, 4);
+        int validationBurst = integerProperty("att.server.benchmark.mixedInspection.validationBurst", 4, 2);
+        int validationUsers = integerProperty("att.server.benchmark.mixedInspection.validationUsers", 128, 64);
+        Path mixedConfig = temp.resolve("mixed-inspection-server.yaml");
+        Path mixedData = temp.resolve("mixed-inspection-data");
+        Files.writeString(mixedConfig, "server:\n  runtimeConfigPath: " + ServerRuntimeTestSupport.yaml(runtimeConfig)
+                + "\n  dataDir: " + ServerRuntimeTestSupport.yaml(mixedData)
+                + "\n  authenticationRequired: true\n  maxEventsPerJob: 100000\n"
+                + "  inspection: {enabled: true, maxConcurrent: 1, queuedLimit: 64, timeoutMs: 120000}\n"
+                + "workers:\n  maxConcurrent: 1\n  queuedLimit: 8\n  maxConcurrentLoad: 1\n"
+                + "packages:\n  allowedRoots: [" + ServerRuntimeTestSupport.yaml(packageRoots) + "]\n  entries:\n    " + PACKAGE_ID
+                + ": " + ServerRuntimeTestSupport.yaml(packageRoot) + "\n", StandardCharsets.UTF_8);
+
+        String oldConfig = System.getProperty("att.server.config");
+        String oldHome = System.getProperty("att.home");
+        System.setProperty("att.server.config", mixedConfig.toString());
+        System.setProperty("att.home", runtimeConfig.getParent().getParent().toString());
+        ServerHandle mixed = null;
+        ExecutorService validators = Executors.newFixedThreadPool(validationBurst);
+        try {
+            mixed = startServer(explodedWar, temp.resolve("tomcat-mixed-inspection"), validationUsers);
+            final int mixedPort = mixed.port;
+            Object runtime = runtime(mixedPort);
+            java.lang.reflect.Field inspectorField = runtime.getClass().getDeclaredField("inspectors");
+            inspectorField.setAccessible(true);
+            java.util.concurrent.ThreadPoolExecutor inspectors =
+                    (java.util.concurrent.ThreadPoolExecutor) inspectorField.get(runtime);
+            Map<String, Object> definition = Map.of("schemaVersion", "att-execution/v1",
+                    "executionType", "run", "packageId", PACKAGE_ID, "environment", "BENCHMARK",
+                    "selection", Map.of("all", true), "options", Map.of("debug", false));
+            String explorerPath = "/api/v1/packages/" + PACKAGE_ID + "/resources?type=case&limit=50";
+            List<Double> baselineExplorer = new ArrayList<>();
+            List<Double> baselineValidation = new ArrayList<>();
+            List<Double> mixedExplorer = new ArrayList<>();
+            List<Double> mixedValidation = new ArrayList<>();
+            List<Integer> queueDepthAtExplorer = new ArrayList<>();
+            int userIndex = 0;
+
+            // Warm the same package and Inspector, then take serial request baselines.
+            for (int index = 0; index < warmups; index++) {
+                assertTrue(itemCount(getJson(mixedPort, explorerPath, "benchmark-user")) > 0,
+                        "Explorer must return the synthetic Case inventory");
+                Map<String, Object> draft = postJsonExpected(mixedPort, "/api/v1/drafts/run", definition, 201,
+                        validationUser(userIndex++, validationUsers));
+                assertTrue(String.valueOf(draft.get("draftId")).startsWith("R"), "RUN validation must return a draft");
+            }
+            for (int index = 0; index < runs; index++) {
+                long requestStarted = System.nanoTime();
+                assertTrue(itemCount(getJson(mixedPort, explorerPath, "benchmark-user")) > 0);
+                baselineExplorer.add(nanosToMs(System.nanoTime() - requestStarted));
+                requestStarted = System.nanoTime();
+                Map<String, Object> draft = postJsonExpected(mixedPort, "/api/v1/drafts/run", definition, 201,
+                        validationUser(userIndex++, validationUsers));
+                assertTrue(String.valueOf(draft.get("draftId")).startsWith("R"));
+                baselineValidation.add(nanosToMs(System.nanoTime() - requestStarted));
+            }
+            long startsBeforeMixed = inspectionCounter(runtime, "STARTUP");
+            long dispatchesBeforeMixed = inspectionCounter(runtime, "DISPATCH");
+
+            for (int sample = 0; sample < warmups + runs; sample++) {
+                CountDownLatch ready = new CountDownLatch(validationBurst);
+                CountDownLatch start = new CountDownLatch(1);
+                List<Future<Double>> requests = new ArrayList<>();
+                for (int index = 0; index < validationBurst; index++) {
+                    final String user = validationUser(userIndex++, validationUsers);
+                    requests.add(validators.submit(() -> {
+                        ready.countDown();
+                        if (!start.await(10, TimeUnit.SECONDS)) throw new IllegalStateException("Validation start gate timed out");
+                        long requestStarted = System.nanoTime();
+                        Map<String, Object> draft = postJsonExpected(mixedPort, "/api/v1/drafts/run", definition, 201, user);
+                        assertTrue(String.valueOf(draft.get("draftId")).startsWith("R"), "RUN validation must return a draft");
+                        return nanosToMs(System.nanoTime() - requestStarted);
+                    }));
+                }
+                assertTrue(ready.await(10, TimeUnit.SECONDS), "Validation clients must reach the start gate");
+                start.countDown();
+                long backlogDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30);
+                while (inspectors.getActiveCount() == 0 && System.nanoTime() < backlogDeadline) Thread.sleep(2);
+                while (inspectors.getQueue().isEmpty() && System.nanoTime() < backlogDeadline
+                        && requests.stream().anyMatch(request -> !request.isDone())) Thread.sleep(2);
+                int queuedAtExplorer = inspectors.getQueue().size();
+                long explorerStarted = System.nanoTime();
+                Map<String, Object> page = getJson(mixedPort, explorerPath, "benchmark-user");
+                double explorerLatency = nanosToMs(System.nanoTime() - explorerStarted);
+                assertTrue(itemCount(page) > 0, "Explorer must return the synthetic Case inventory under validation load");
+                List<Double> validationLatency = new ArrayList<>();
+                for (Future<Double> request : requests) validationLatency.add(request.get(120, TimeUnit.SECONDS));
+                if (sample >= warmups) {
+                    mixedExplorer.add(explorerLatency);
+                    mixedValidation.addAll(validationLatency);
+                    queueDepthAtExplorer.add(queuedAtExplorer);
+                }
+            }
+            long startupsAfter = inspectionCounter(runtime, "STARTUP");
+            Map<String, Object> report = new LinkedHashMap<>();
+            report.put("caseCount", caseCount);
+            report.put("inspectorConcurrency", 1);
+            report.put("validationBurstSize", validationBurst);
+            report.put("warmups", warmups);
+            report.put("measuredMixedSamples", runs);
+            report.put("measurementScope", "public Explorer resource-list and RUN-draft HTTP routes on one bounded Inspector Worker");
+            report.put("baselineExplorer", latencySummary(baselineExplorer));
+            report.put("baselineRunDraftValidation", latencySummary(baselineValidation));
+            report.put("mixedExplorer", latencySummary(mixedExplorer));
+            report.put("mixedRunDraftValidation", latencySummary(mixedValidation));
+            report.put("queueDepthAtExplorerArrival", queueDepthAtExplorer);
+            report.put("validationSamplesWithQueuedPredecessors", queueDepthAtExplorer.stream().filter(depth -> depth > 0).count());
+            report.put("inspectorWorkerStartsDuringMixedSamples", startupsAfter - startsBeforeMixed);
+            report.put("inspectorWorkerStartsTotal", startupsAfter);
+            report.put("inspectorDispatchesDuringMixedSamples", inspectionCounter(runtime, "DISPATCH") - dispatchesBeforeMixed);
+            report.put("httpRequestsAreReadOnlyOrDraftValidation", true);
+            return report;
+        } finally {
+            validators.shutdownNow();
+            validators.awaitTermination(5, TimeUnit.SECONDS);
+            if (mixed != null) stopServer(mixed);
+            if (oldConfig == null) System.clearProperty("att.server.config");
+            else System.setProperty("att.server.config", oldConfig);
+            if (oldHome == null) System.clearProperty("att.home");
+            else System.setProperty("att.home", oldHome);
+        }
+    }
+
+    private static long inspectionCounter(Object runtime, String counter) throws Exception {
+        var method = runtime.getClass().getDeclaredMethod("inspectionStatistics");
+        method.setAccessible(true);
+        Map<?, ?> statistics = (Map<?, ?>) method.invoke(runtime);
+        Map<?, ?> server = (Map<?, ?>) statistics.get("server");
+        Map<?, ?> metric = (Map<?, ?>) server.get(counter);
+        return ((Number) metric.get("count")).longValue();
+    }
+
+    private static int itemCount(Map<?, ?> page) {
+        Object items = page.get("items");
+        return items instanceof List<?> ? ((List<?>) items).size() : 0;
+    }
+
+    private static String validationUser(int index, int users) {
+        return "validation-" + String.format(java.util.Locale.ROOT, "%03d", index % users);
+    }
+
+    private static Map<String, Object> latencySummary(List<Double> samples) {
+        List<Double> sorted = samples.stream().sorted().toList();
+        Map<String, Object> summary = new LinkedHashMap<>();
+        summary.put("sampleCount", sorted.size());
+        summary.put("p50Ms", sorted.isEmpty() ? null : sorted.get(Math.max(0, (int) Math.ceil(sorted.size() * 0.50) - 1)));
+        summary.put("p95Ms", sorted.isEmpty() ? null : sorted.get(Math.max(0, (int) Math.ceil(sorted.size() * 0.95) - 1)));
+        summary.put("samplesMs", sorted);
+        return summary;
     }
 
     private Map<String, Object> measureOptionalSoak(int port, int workerCount, int caseCount, int durationSeconds)
@@ -476,7 +640,12 @@ class ServerWorkerSsePerformanceBenchmark {
     }
 
     private Map<String, Object> postJson(int port, String path, Map<String, Object> body) throws Exception {
-        HttpURLConnection connection = open(port, path);
+        return postJsonExpected(port, path, body, 202, null);
+    }
+
+    private Map<String, Object> postJsonExpected(int port, String path, Map<String, Object> body,
+                                                int expectedStatus, String username) throws Exception {
+        HttpURLConnection connection = open(port, path, username);
         connection.setRequestMethod("POST");
         connection.setRequestProperty("Content-Type", "application/json");
         connection.setDoOutput(true);
@@ -485,7 +654,7 @@ class ServerWorkerSsePerformanceBenchmark {
             int status = connection.getResponseCode();
             InputStream stream = status >= 400 ? connection.getErrorStream() : connection.getInputStream();
             String text = new String(stream.readAllBytes(), StandardCharsets.UTF_8);
-            assertEquals(202, status, "Server should accept " + path + ": " + text);
+            assertEquals(expectedStatus, status, "Server should accept " + path + ": " + text);
             return ServerRuntime.JSON.readValue(text, Map.class);
         } finally {
             connection.disconnect();
@@ -493,7 +662,11 @@ class ServerWorkerSsePerformanceBenchmark {
     }
 
     private Map<String, Object> getJson(int port, String path) throws Exception {
-        HttpURLConnection connection = open(port, path);
+        return getJson(port, path, null);
+    }
+
+    private Map<String, Object> getJson(int port, String path, String username) throws Exception {
+        HttpURLConnection connection = open(port, path, username);
         try {
             int status = connection.getResponseCode();
             InputStream stream = status >= 400 ? connection.getErrorStream() : connection.getInputStream();
@@ -506,11 +679,15 @@ class ServerWorkerSsePerformanceBenchmark {
     }
 
     private HttpURLConnection open(int port, String path) throws Exception {
+        return open(port, path, null);
+    }
+
+    private HttpURLConnection open(int port, String path, String username) throws Exception {
         HttpURLConnection connection = (HttpURLConnection) new URL("http://127.0.0.1:" + port + CONTEXT + path).openConnection();
         connection.setConnectTimeout(5000);
         connection.setReadTimeout(30000);
-        connection.setRequestProperty("Authorization", basicAuth(path.endsWith("/metrics")
-                ? "benchmark-admin" : "benchmark-user"));
+        connection.setRequestProperty("Authorization", basicAuth(username == null
+                ? path.endsWith("/metrics") ? "benchmark-admin" : "benchmark-user" : username));
         return connection;
     }
 
@@ -607,11 +784,18 @@ class ServerWorkerSsePerformanceBenchmark {
     }
 
     private ServerHandle startServer(Path explodedWar, Path baseDir) throws Exception {
+        return startServer(explodedWar, baseDir, 0);
+    }
+
+    private ServerHandle startServer(Path explodedWar, Path baseDir, int validationUsers) throws Exception {
         Files.createDirectories(baseDir);
-        Path users = Files.writeString(baseDir.resolve("tomcat-users.xml"),
-                "<tomcat-users><role rolename=\"ATT_USER\"/><role rolename=\"ATT_ADMIN\"/>"
-                        + "<user username=\"benchmark-user\" password=\"benchmark-password\" roles=\"ATT_USER\"/>"
-                        + "<user username=\"benchmark-admin\" password=\"benchmark-password\" roles=\"ATT_ADMIN\"/></tomcat-users>",
+        StringBuilder userXml = new StringBuilder("<tomcat-users><role rolename=\"ATT_USER\"/><role rolename=\"ATT_ADMIN\"/>"
+                + "<user username=\"benchmark-user\" password=\"benchmark-password\" roles=\"ATT_USER\"/>"
+                + "<user username=\"benchmark-admin\" password=\"benchmark-password\" roles=\"ATT_ADMIN\"/>");
+        for (int index = 0; index < validationUsers; index++)
+            userXml.append("<user username=\"").append(validationUser(index, validationUsers))
+                    .append("\" password=\"benchmark-password\" roles=\"ATT_USER\"/>");
+        Path users = Files.writeString(baseDir.resolve("tomcat-users.xml"), userXml.append("</tomcat-users>").toString(),
                 StandardCharsets.UTF_8);
         Tomcat tomcat = new Tomcat();
         tomcat.setBaseDir(baseDir.toAbsolutePath().toString());
