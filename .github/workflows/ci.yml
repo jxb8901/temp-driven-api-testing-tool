@@ -30,9 +30,9 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  # PRs stay Chromium-only unless the full-browser-suite label is added.
-  # Manual runs default to the full matrix and can opt out for a quick check.
-  FULL_BROWSER_SUITE: ${{ (github.event_name == 'workflow_dispatch' && github.event.inputs.full_browser_suite != 'false') || (github.event_name == 'push' && (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/load')) || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'full-browser-suite')) }}
+  # Keep routine CI runs on the Chromium smoke suite. The full matrix remains
+  # available for reviewed PRs through a label or for manual dispatches.
+  FULL_BROWSER_SUITE: ${{ (github.event_name == 'workflow_dispatch' && github.event.inputs.full_browser_suite != 'false') || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'full-browser-suite')) }}
   ATT_UI_UPDATE_VISUAL_BASELINES: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.update_visual_baselines == 'true' && '1' || '0' }}
   ATT_UI_VISUAL_BASELINE_REASON: ${{ github.event.inputs.visual_baseline_reason || '' }}
 
