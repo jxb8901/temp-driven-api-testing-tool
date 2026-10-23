@@ -134,17 +134,54 @@ jobs:
       - name: Verify all Server unit tests with isolated parallel JVMs
         # Each test class gets a separate JVM, isolating Tomcat, global properties,
         # authentication state and temporary database files. Tests within a class
-        # remain sequential; no tests or assertions are excluded.
-        # ubuntu-24.04 has 4 vCPUs. Four forks overlap the long Server classes.
+        # remain sequential. Four long process/replay/fault classes run in the
+        # sibling job so the rest of the unit suite does not queue behind them.
+        # Both jobs together include every test class and assertion exactly once.
+        # ubuntu-24.04 has 4 vCPUs. Four forks keep the suite within its memory budget.
         # Each test JVM is capped so four forks plus their Worker processes fit
         # in the runner without raising the job timeout.
-        run: mvn -B -ntp -U -T 1C -pl att-worker,att-server -am -Datt.skipJava8ModuleTests=true -Datt.skipFrontendUnitTests=true -DforkCount=4 -DreuseForks=false -DargLine=-Xmx2g test
+        run: mvn -B -ntp -U -T 1C -pl att-worker,att-server -am -Datt.skipJava8ModuleTests=true -Datt.skipFrontendUnitTests=true -DforkCount=4 -DreuseForks=false -DargLine=-Xmx2g '-Dtest=**/Test*.java,**/*Test.java,**/*Tests.java,**/*TestCase.java,!ServerRuntimeJobReplayTest,!ArtifactPublicationFaultTest,!AuthenticationIntegrationTest,!ExecutionWorkerSemanticParityTest' -Dsurefire.failIfNoSpecifiedTests=false test
 
       - name: Upload Server unit reports on failure
         if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: surefire-reports-server-unit-${{ github.run_id }}
+          path: att-server/target/surefire-reports/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  java-17-server-process-tests:
+    name: Java 17 / Server process, replay, and fault tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: maven
+
+      - name: Set up pinned Node.js for ATT Web module
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.22.2'
+          cache: npm
+          cache-dependency-path: att-web/frontend/package-lock.json
+
+      - name: Verify long-running Server process and publication tests
+        run: mvn -B -ntp -U -T 1C -pl att-worker,att-server -am -Datt.skipJava8ModuleTests=true -Datt.skipFrontendUnitTests=true -DforkCount=4 -DreuseForks=false -DargLine=-Xmx2g '-Dtest=ServerRuntimeJobReplayTest,ArtifactPublicationFaultTest,AuthenticationIntegrationTest,ExecutionWorkerSemanticParityTest' -Dsurefire.failIfNoSpecifiedTests=false test
+
+      - name: Upload Server process test reports on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: surefire-reports-server-process-${{ github.run_id }}
           path: att-server/target/surefire-reports/
           if-no-files-found: ignore
           retention-days: 7
