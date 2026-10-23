@@ -162,7 +162,7 @@ class ExecutionWorkerPoolTest {
             ProcessBuilder coldBuilder=builder(false);coldBuilder.environment().remove("POOL_SECRET");
             coldBuilder.environment().put("TZ","Asia/Hong_Kong");coldBuilder.directory(packageRoot.toFile());
             coldBuilder.command().addAll(List.of("timezone",coldZone.toString()));cold=coldBuilder.start();
-            Process coldProcess=cold;await(()->Files.exists(coldZone));
+            Process coldProcess=cold;await(()->nonEmpty(coldZone));
             assertEquals(Files.readString(coldZone),Files.readString(warmZone));
             assertEquals("Asia/Hong_Kong",Files.readString(warmZone));
             coldProcess.getOutputStream().close();assertTrue(coldProcess.waitFor(5,TimeUnit.SECONDS));
@@ -190,6 +190,33 @@ class ExecutionWorkerPoolTest {
             assertTrue(pool.hasReadyCapacity(firstId),"Demand expansion must retain the first package's idle Worker");
             ExecutionWorkerPool.Lease lease=pool.lease(secondId);assertNotNull(lease);
             lease.process.destroyForcibly();assertTrue(lease.process.waitFor(5,TimeUnit.SECONDS));lease.transferred();
+        }
+        for(Process process:started)assertFalse(process.isAlive());
+    }
+
+    @Test void packageWithoutWarmSlotUsesColdPathAtFullIdleCap() throws Exception {
+        Path base=temp.resolve("package-full-capacity");ServerConfig config=config(base,true,List.of("a","b"),1,1);
+        Path aCwd=temp.resolve("full-cap-a-cwd.txt"),bCwd=temp.resolve("full-cap-b-cwd.txt");
+        List<Process> started=new CopyOnWriteArrayList<>();
+        try(ExecutionWorkerPool pool=new ExecutionWorkerPool(config,id->{
+            ProcessBuilder process=builder(false);process.command().addAll(List.of("cwd",("a".equals(id)?aCwd:bCwd).toString()));return process;
+        },builder->{Process process=builder.start();started.add(process);return process;},()->"v1","a".repeat(64))) {
+            await(()->Files.exists(aCwd)||Files.exists(bCwd));
+            String warmId=Files.exists(aCwd)?"a":"b",coldId="a".equals(warmId)?"b":"a";
+            await(()->pool.hasReadyCapacity(warmId));
+            assertEquals(1,started.size(),"The configured maximum is one idle Worker");
+            Process warm=started.get(0);
+            assertFalse(pool.hasReadyCapacity(coldId),"The second package has no warm reservation at the configured cap");
+            assertNull(pool.lease(coldId),"The uncovered package remains on the existing cold dispatch path");
+            for(int i=0;i<5;i++) {
+                Thread.sleep(250);
+                assertFalse(pool.hasReadyCapacity(coldId));
+            }
+            assertTrue(warm.isAlive(),"Demand for another package must not evict the existing idle Worker");
+            assertTrue(pool.hasReadyCapacity(warmId));
+            assertEquals(1,started.size(),"A hard maxIdle cap must not create or rotate extra Workers");
+            assertEquals(1L,pool.metrics().get("starts"));
+            assertEquals(1,pool.metrics().get("owned"));
         }
         for(Process process:started)assertFalse(process.isAlive());
     }
@@ -252,5 +279,8 @@ class ExecutionWorkerPoolTest {
         long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(15);
         while(!condition.getAsBoolean()&&System.nanoTime()<deadline)Thread.sleep(20);
         assertTrue(condition.getAsBoolean(),"Pool condition did not complete");
+    }
+    private boolean nonEmpty(Path path) {
+        try {return Files.size(path)>0;}catch(Exception unavailable){return false;}
     }
 }

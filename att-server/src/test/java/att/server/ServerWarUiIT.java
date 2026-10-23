@@ -32,7 +32,7 @@ class ServerWarUiIT {
         Path home=createScheduledLocalRuntime(),packages=Files.createDirectories(temp.resolve("redeploy-packages")),pkg=Files.createDirectory(packages.resolve("payments"));
         writeScheduledPackage(pkg,home);copySchemas(pkg);
         Path scenario=pkg.resolve("load/scenario.yaml");Files.writeString(scenario,Files.readString(scenario).replace("duration: 30s","duration: 1s"));
-        Path config=Files.writeString(temp.resolve("redeploy-server.yaml"),"server:\n  runtimeConfigPath: "+yaml(home.resolve("config/config.yaml"))+"\n  dataDir: "+yaml(temp.resolve("redeploy-data"))+"\n  authenticationRequired: true\n  inspection: {enabled: true}\n  scheduling: {enabled: true}\nworkers: {maxConcurrent: 1, queuedLimit: 1}\npackages:\n  allowedRoots: ["+yaml(packages)+"]\n  entries: {payments: "+yaml(pkg)+"}\n");
+        Path config=Files.writeString(temp.resolve("redeploy-server.yaml"),"server:\n  runtimeConfigPath: "+yaml(home.resolve("config/config.yaml"))+"\n  dataDir: "+yaml(temp.resolve("redeploy-data"))+"\n  authenticationRequired: true\n  inspection: {enabled: true}\n  scheduling: {enabled: true}\nworkers:\n  maxConcurrent: 1\n  queuedLimit: 1\n  heapMaxMb: 128\n  executionPool: {enabled: true, minIdle: 1, maxIdle: 1, heapBudgetMb: 128, packageIds: [payments]}\npackages:\n  allowedRoots: ["+yaml(packages)+"]\n  entries: {payments: "+yaml(pkg)+"}\n");
         Path users=Files.writeString(temp.resolve("redeploy-users.xml"),"<tomcat-users><role rolename=\"ATT_USER\"/><user username=\"att\" password=\"secret\" roles=\"ATT_USER\"/></tomcat-users>");
         String oldConfig=System.getProperty("att.server.config"),oldHome=System.getProperty("att.home");
         System.setProperty("att.server.config",config.toString());System.setProperty("att.home",home.toString());
@@ -48,6 +48,9 @@ class ServerWarUiIT {
             for(int cycle=0;cycle<3;cycle++) {
                 org.apache.catalina.Context context=tomcat.addWebapp("/tools/att",war.toString());
                 assertTrue(context.getState().isAvailable(),"Redeployed context must start in the same Tomcat JVM");
+                Object runtime=context.getServletContext().getAttribute("att.server.runtime");
+                List<Long> prewarmPids=awaitPrewarmedPids(runtime);
+                assertEquals(1,prewarmPids.size(),"Each deployed WAR must own one READY prewarm Worker");
                 if(jobId!=null) {
                     assertEquals("PASS",getJson(port,api+"/jobs/"+jobId,auth).path("status").asText());
                     assertEquals(scheduleId,getJson(port,api+"/schedules/"+scheduleId,auth).path("id").asText());
@@ -57,7 +60,7 @@ class ServerWarUiIT {
                 }
                 jobId=apiJsonResponse(port,"POST",api+"/jobs/load",auth,origin,Map.of("packageId","payments","scenario","load/scenario.yaml"),202).path("jobId").asText();
                 awaitArchive(port,api,jobId,auth);
-                Object runtime=context.getServletContext().getAttribute("att.server.runtime");Class<?> runtimeClass=runtime.getClass();
+                Class<?> runtimeClass=runtime.getClass();
                 var eventsMethod=runtimeClass.getDeclaredMethod("events",String.class);eventsMethod.setAccessible(true);Object events=eventsMethod.invoke(runtime,jobId);
                 var append=events.getClass().getDeclaredMethod("append",String.class,Map.class);append.setAccessible(true);
                 var poolField=runtimeClass.getDeclaredField("eventCompactions");poolField.setAccessible(true);var pool=(java.util.concurrent.ThreadPoolExecutor)poolField.get(runtime);
@@ -68,6 +71,11 @@ class ServerWarUiIT {
                 ClassLoader oldLoader=context.getLoader().getClassLoader();
                 tomcat.getHost().removeChild(context);
                 assertTrue(pool.isTerminated(),"Compaction queue must drain before context destruction returns");
+                long processDeadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(10);
+                while(prewarmPids.stream().anyMatch(pid->ProcessHandle.of(pid).map(ProcessHandle::isAlive).orElse(false))
+                        &&System.nanoTime()<processDeadline)Thread.sleep(20);
+                assertTrue(prewarmPids.stream().noneMatch(pid->ProcessHandle.of(pid).map(ProcessHandle::isAlive).orElse(false)),
+                        "Every prewarmed Worker must exit on WAR undeploy: "+prewarmPids);
                 // Executor termination can precede the final thread exit by a scheduling turn.
                 long threadDeadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(10);
                 java.util.List<String> surviving;
@@ -84,6 +92,31 @@ class ServerWarUiIT {
         } finally {
             try{tomcat.stop();tomcat.destroy();}finally{logger.removeHandler(capture);if(oldConfig==null)System.clearProperty("att.server.config");else System.setProperty("att.server.config",oldConfig);if(oldHome==null)System.clearProperty("att.home");else System.setProperty("att.home",oldHome);}
         }
+    }
+
+    private static List<Long> awaitPrewarmedPids(Object runtime) throws Exception {
+        var stats=runtime.getClass().getDeclaredMethod("executionPoolStatistics");stats.setAccessible(true);
+        long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(20);
+        while(System.nanoTime()<deadline) {
+            Map<?,?> values=(Map<?,?>)stats.invoke(runtime);
+            Number ready=(Number)values.get("ready");
+            if(ready!=null&&ready.intValue()>0) {
+                var poolField=runtime.getClass().getDeclaredField("executionWorkers");poolField.setAccessible(true);
+                Object pool=poolField.get(runtime);var ownedField=pool.getClass().getDeclaredField("owned");ownedField.setAccessible(true);
+                List<Long> pids=new java.util.ArrayList<>();
+                synchronized(pool) {
+                    var owned=(List<?>)ownedField.get(pool);
+                    for(Object idle:owned) {
+                        var processField=idle.getClass().getDeclaredField("process");processField.setAccessible(true);
+                        Process process=(Process)processField.get(idle);
+                        if(process!=null&&process.isAlive())pids.add(process.pid());
+                    }
+                }
+                if(!pids.isEmpty())return List.copyOf(pids);
+            }
+            Thread.sleep(25);
+        }
+        fail("The deployed WAR did not become ready with a prewarmed Worker");return List.of();
     }
 
     @Test

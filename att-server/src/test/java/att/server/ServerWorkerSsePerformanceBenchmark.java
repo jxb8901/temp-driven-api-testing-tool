@@ -6,6 +6,9 @@ import att.api.SnapshotResult;
 import org.apache.catalina.Context;
 import org.apache.catalina.realm.MemoryRealm;
 import org.apache.catalina.startup.Tomcat;
+import org.apache.commons.compress.archivers.tar.TarArchiveEntry;
+import org.apache.commons.compress.archivers.tar.TarArchiveInputStream;
+import org.apache.commons.compress.compressors.gzip.GzipCompressorInputStream;
 import org.apache.poi.ss.usermodel.Row;
 import org.apache.poi.ss.usermodel.Sheet;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
@@ -40,6 +43,7 @@ import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
@@ -71,6 +75,10 @@ class ServerWorkerSsePerformanceBenchmark {
         Path runtimeConfig = Files.createDirectories(temp.resolve("runtime-home/config")).resolve("config.yaml");
         Files.writeString(runtimeConfig,"schemaVersion: att-config/v2.12\noutputDirectory: output\nenvironment: BENCHMARK\n"
                 +"testcase: {root: testcase}\ntemplates: {root: templates}\n",StandardCharsets.UTF_8);
+        Path runtimeHome=runtimeConfig.getParent().getParent();
+        Path localArchive=Path.of(System.getProperty("att.server.benchmark.localArchive",
+                "att-dist/target/att-"+ServerBuildInfo.PRODUCT+"-local.tar.gz")).toAbsolutePath().normalize();
+        Path runtimeBundle=installWorkerRuntime(runtimeHome,localArchive);
         SnapshotResult snapshot = new DefaultAttService().snapshot(new SnapshotRequest(packageRoot, runtimeConfig, null,
                 List.of(Path.of("testcase/event-run.xlsx")), null, Collections.emptySet(), false));
         assertEquals("PASS", snapshot.status(), "Benchmark suite snapshot must pass");
@@ -80,19 +88,23 @@ class ServerWorkerSsePerformanceBenchmark {
         writeServerConfig(config, runtimeConfig, dataDir, packageRoots, packageRoot, Math.max(8, max(concurrency)));
         Path exploded = unpackWar(war, temp.resolve("exploded-war"));
         String oldConfig = System.getProperty("att.server.config");
+        String oldHome = System.getProperty("att.home");
         System.setProperty("att.server.config", config.toString());
+        System.setProperty("att.home", runtimeConfig.getParent().getParent().toString());
 
         ServerHandle server = null;
         try {
             server = startServer(exploded, temp.resolve("tomcat-first"));
             Map<String, Object> report = new LinkedHashMap<>();
             report.put("schemaVersion", "att-server-worker-sse-benchmark/v1");
-            report.put("runtime", Map.of("version", ServerBuildInfo.PRODUCT, "warSha256", sha256(war)));
+            report.put("runtime", Map.of("version", ServerBuildInfo.PRODUCT, "warSha256", sha256(war),
+                    "workerRuntimeSha256", sha256(runtimeBundle)));
             report.put("environment", environment());
             report.put("settings", Map.of("caseCount", caseCount, "warmups", warmups, "runs", runs,
                     "workerConcurrency", Arrays.stream(concurrency).boxed().toList(),
                     "observerModes", List.of("none", "fast", "slow"), "syntheticReplayEventsPerJob", replayEvents,
-                    "slowReaderDelayMsPerEvent", slowDelayMs, "soakSeconds", soakSeconds, "maxEventsPerJob", 100000));
+                    "slowReaderDelayMsPerEvent", slowDelayMs, "soakSeconds", soakSeconds, "maxEventsPerJob", 100000,
+                    "processResourceSampling", Boolean.getBoolean("att.benchmark.processResources")));
 
             List<Map<String, Object>> workerScenarios = new ArrayList<>();
             Map<Integer, List<String>> replayJobIds = new LinkedHashMap<>();
@@ -149,11 +161,15 @@ class ServerWorkerSsePerformanceBenchmark {
             if (server != null) stopServer(server);
             if (oldConfig == null) System.clearProperty("att.server.config");
             else System.setProperty("att.server.config", oldConfig);
+            if (oldHome == null) System.clearProperty("att.home");
+            else System.setProperty("att.home", oldHome);
         }
     }
 
     private Map<String, Object> measureRunBatch(int port, int workerCount, String observerMode,
                                                   int caseCount, int sampleIndex, int slowDelayMs) throws Exception {
+        ProcessTreeResourceSampler resources=Boolean.getBoolean("att.benchmark.processResources")
+                ?ProcessTreeResourceSampler.start():null;
         long started = System.nanoTime();
         List<String> jobIds = new ArrayList<>();
         for (int index = 0; index < workerCount; index++) {
@@ -179,7 +195,8 @@ class ServerWorkerSsePerformanceBenchmark {
             List<Map<String, Object>> jobs = new ArrayList<>();
             for (String jobId : jobIds) {
                 Map<String, Object> view = getJson(port, "/api/v1/jobs/" + jobId);
-                assertEquals("PASS", view.get("status"), "Server Worker job must pass: " + jobId + " " + view);
+                Map<String,Object> result=getJson(port,"/api/v1/jobs/"+jobId+"/result");
+                assertEquals("PASS", view.get("status"), "Server Worker job must pass: " + jobId + " " + view + " result=" + result);
                 Map<String, Object> job = new LinkedHashMap<>();
                 job.put("jobId", jobId);
                 job.put("status", view.get("status"));
@@ -203,15 +220,22 @@ class ServerWorkerSsePerformanceBenchmark {
             sample.put("jobs", jobs);
             sample.put("sseReaders", sse);
             sample.put("jobIds", jobIds);
+            if(resources!=null) {
+                resources.close();
+                sample.put("processResources",resources.snapshot());
+            }
             return sample;
         } finally {
             streamStart.countDown();
             readers.shutdownNow();
             readers.awaitTermination(5, TimeUnit.SECONDS);
+            if(resources!=null)resources.close();
         }
     }
 
     private Map<String, Object> measureSingleCommand(int port, String command, Map<String, Object> request) throws Exception {
+        ProcessTreeResourceSampler resources=Boolean.getBoolean("att.benchmark.processResources")
+                ?ProcessTreeResourceSampler.start():null;
         long started = System.nanoTime();
         String id = submit(port, command, request);
         Map<String, Object> peaks = waitForJobs(port, List.of(id), DurationLimit.WORKER_JOB_SECONDS);
@@ -226,6 +250,11 @@ class ServerWorkerSsePerformanceBenchmark {
         result.put("journalEventCount", journalEventCount(id));
         result.put("performance", view.getOrDefault("performance", Map.of()));
         result.put("serverMetricsPeak", peaks);
+        if(resources!=null) {
+            resources.close();
+            result.put("processResources",resources.snapshot());
+        }
+        if(resources!=null)resources.close();
         return result;
     }
 
@@ -624,6 +653,31 @@ class ServerWorkerSsePerformanceBenchmark {
             }
         }
         return root;
+    }
+
+    private Path installWorkerRuntime(Path home,Path localArchive)throws Exception {
+        assertTrue(Files.isRegularFile(localArchive),"Matching Local runtime archive must exist: "+localArchive);
+        Path root=home.toAbsolutePath().normalize();Files.createDirectories(root.resolve("lib"));
+        try(TarArchiveInputStream tar=new TarArchiveInputStream(new GzipCompressorInputStream(Files.newInputStream(localArchive)))) {
+            TarArchiveEntry entry;
+            while((entry=tar.getNextTarEntry())!=null) {
+                String name=entry.getName().replace('\\','/');int slash=name.indexOf('/');
+                if(slash<0)continue;
+                String relative=name.substring(slash+1);
+                if(!relative.startsWith("lib/"))continue;
+                Path destination=root.resolve(relative).normalize();
+                assertTrue(destination.startsWith(root),"Local archive entry must stay inside ATT_HOME");
+                if(entry.isDirectory())Files.createDirectories(destination);
+                else {
+                    assertFalse(entry.isSymbolicLink()||entry.isLink(),"Worker runtime libraries must not use archive links");
+                    Files.createDirectories(destination.getParent());
+                    Files.copy(tar,destination,StandardCopyOption.REPLACE_EXISTING);
+                }
+            }
+        }
+        Path runtime=root.resolve("lib/att-local-"+ServerBuildInfo.PRODUCT+".jar");
+        assertTrue(Files.isRegularFile(runtime),"Local archive must contain its combined Worker runtime: "+runtime);
+        return runtime;
     }
 
     private void copyTree(Path source, Path target) throws Exception {

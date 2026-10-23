@@ -55,6 +55,10 @@ class ArtifactArchiveTest {
             assertTrue(recorder.value.memoryExportPeakBytes<=budget);
             assertEquals(budget==0?3:1,recorder.value.temporaryExportFiles.longValue());
             assertTrue(recorder.value.temporaryExportBytes>2048);
+            assertEquals(recorder.value.temporaryExportBytes,recorder.value.temporaryExportReadBytes,
+                    "Spilled sanitized payload is read once for ZIP publication");
+            assertEquals(recorder.value.zipWriteInputBytes,recorder.value.verificationBytesRead,
+                    "Publication digest verification rereads exactly the bytes written to ZIP entries");
         }
         assertEquals(ArtifactArchive.verify(disk,true),ArtifactArchive.verify(memory,true));
         for(String path:sources.keySet()) {

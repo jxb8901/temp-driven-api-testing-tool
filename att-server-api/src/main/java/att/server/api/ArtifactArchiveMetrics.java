@@ -25,5 +25,11 @@ public final class ArtifactArchiveMetrics {
     public Double compressionRatio;
     public Long temporaryExportFiles;
     public Long temporaryExportBytes;
+    /** Bytes reread from sanitized spill files; null on metrics written before this counter existed. */
+    public Long temporaryExportReadBytes;
+    /** Uncompressed approved payload bytes passed to ZIP entries, including the manifest. */
+    public Long zipWriteInputBytes;
+    /** Uncompressed manifest and entry bytes consumed by digest verification. */
+    public Long verificationBytesRead;
     public Long memoryExportPeakBytes;
 }

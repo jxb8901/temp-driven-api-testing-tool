@@ -67,6 +67,25 @@ class ArtifactPipelinePerformanceBenchmark {
                 double[] values=measurements.stream().map(m->m.get(metric)).filter(Objects::nonNull).mapToDouble(v->((Number)v).doubleValue()).sorted().toArray();
                 if(values.length>0)row.put(metric,Map.of("p50",values[(values.length-1)/2],"p95",values[(int)Math.ceil(values.length*.95)-1]));
             }
+            // Keep the resource pass outside the timed sample series. The sampler observes
+            // OS RSS for the benchmark JVM and descendants while a representative archive is built.
+            ArtifactMetricsRecorder resourceMetrics=new ArtifactMetricsRecorder(System.nanoTime(),1,false);
+            ProcessTreeResourceSampler resources=ProcessTreeResourceSampler.start();
+            ArtifactMetricsRecorder.CURRENT.set(resourceMetrics);
+            try {
+                ArtifactArchive.build(output,temp.resolve("resource-"+files+"/archive.zip"),path->
+                        DiagnosticSanitizer.redactText(Files.readString(path)).getBytes(StandardCharsets.UTF_8),memoryBudget);
+            } finally {
+                resourceMetrics.finish();ArtifactMetricsRecorder.CURRENT.remove();resources.close();
+            }
+            row.put("resourceSample",resources.snapshot());
+            row.put("ioVolume",Map.of("sourceBytes",resourceMetrics.value.sourceBytes,
+                    "sanitizedBytesSpilled",resourceMetrics.value.temporaryExportBytes==null?0:resourceMetrics.value.temporaryExportBytes,
+                    "sanitizedBytesReread",resourceMetrics.value.temporaryExportReadBytes==null?0:resourceMetrics.value.temporaryExportReadBytes,
+                    "zipEntryInputBytes",resourceMetrics.value.zipWriteInputBytes==null?0:resourceMetrics.value.zipWriteInputBytes,
+                    "verificationPayloadBytesRead",resourceMetrics.value.verificationBytesRead==null?0:resourceMetrics.value.verificationBytesRead,
+                    "zipBytesWritten",resourceMetrics.value.zipBytes==null?0:resourceMetrics.value.zipBytes,
+                    "measurement", "application-level bytes; not physical device I/O"));
             rows.add(row);
         }
         Map<String,Object> report=new LinkedHashMap<>();report.put("schemaVersion","att-artifact-pipeline-benchmark/v1");

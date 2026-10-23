@@ -16,7 +16,7 @@ workers:
     packageIds: [default]
 ```
 
-Package ID 必須已登記。啟用時要求正數 Worker heap cap，且 `maxIdle * heapMaxMb <= heapBudgetMb`。此預算限制 idle JVM 的設定 heap 上限，並非 native memory 或 RSS。`minIdle` 是全 pool 的 0–16 個 idle Worker 下限，`maxIdle` 是全 pool 的 1–16 個上限，minimum 不得超過 maximum。啟動時會輪流為已配置的 Package 建立下限容量。若某 Package 沒有 READY Worker，其請求會記錄 demand；即使已達 `minIdle`，maintenance 仍可在全 pool 上限內為該 Package 增加容量。所有 slot 已使用或 Worker 未能及時 READY 時，請求沿用 cold path。Idle expiry 為 1,000–3,600,000 ms，READY timeout 為 1,000–120,000 ms。不接受未知設定或 strategy。設回 `enabled: false` 後，dispatch 返回 cold path；即使關閉，restart recovery 仍會清理已記錄的未使用 JVM。
+Package ID 必須已登記。啟用時要求正數 Worker heap cap，且 `maxIdle * heapMaxMb <= heapBudgetMb`。此預算限制 idle JVM 的設定 heap 上限，並非 native memory 或 RSS。`minIdle` 是全 pool 的 0–16 個 idle Worker 下限，`maxIdle` 是全 pool 的 1–16 個上限，minimum 不得超過 maximum。啟動時會輪流為已配置的 Package 建立下限容量。若某 Package 沒有 READY Worker，其請求會記錄 demand；即使已達 `minIdle`，maintenance 仍可在全 pool 上限內為該 Package 增加容量。全 pool 已達上限時，未覆蓋的 Package 會沿用 cold dispatch；不會淘汰現有 idle Worker 來輪替 Package affinity。若必須讓多個 Package 都有 warm capacity，請在 heap budget 內提高 `maxIdle`。Idle expiry 為 1,000–3,600,000 ms，READY timeout 為 1,000–120,000 ms。不接受未知設定或 strategy。設回 `enabled: false` 後，dispatch 返回 cold path；即使關閉，restart recovery 仍會清理已記錄的未使用 JVM。
 
 ## Eligibility 與 environment
 

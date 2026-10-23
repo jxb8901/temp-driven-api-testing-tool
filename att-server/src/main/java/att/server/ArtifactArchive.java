@@ -39,6 +39,7 @@ final class ArtifactArchive {
             .enable(com.fasterxml.jackson.databind.DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
 
     @FunctionalInterface interface Publisher { byte[] publish(Path source) throws Exception; }
+    @FunctionalInterface interface ZipProgress { void entryWritten(String path) throws Exception; }
     record Entry(String path, String mediaType, long size, String sha256, String classification, String decision, boolean report, boolean preview) {}
 
     private ArtifactArchive() {}
@@ -49,6 +50,11 @@ final class ArtifactArchive {
 
     /** The zero-budget path also provides a controlled disk-staging benchmark. */
     static Path build(Path output, Path archive, Publisher publisher,long memoryBudget) throws Exception {
+        return build(output,archive,publisher,memoryBudget,null);
+    }
+
+    /** Package-private progress seam for deterministic process-crash lifecycle tests. */
+    static Path build(Path output, Path archive, Publisher publisher,long memoryBudget,ZipProgress progress) throws Exception {
         if(memoryBudget<0||memoryBudget>MAX_MEMORY_EXPORT_BYTES)throw new IllegalArgumentException("Artifact memory budget exceeds limits");
         ArtifactMetricsRecorder metrics = ArtifactMetricsRecorder.CURRENT.get();
         if (metrics != null) {
@@ -100,7 +106,10 @@ final class ArtifactArchive {
                     // Both paths contain only Publisher-approved bytes from pass 1.
                     // Never reopen raw output after approval or sanitize twice.
                     byte[] bytes=memoryExports.remove(relative);
-                    if(bytes==null)bytes=Files.readAllBytes(exports.resolve(relative));
+                    if(bytes==null) {
+                        bytes=Files.readAllBytes(exports.resolve(relative));
+                        if(metrics!=null)metrics.value.temporaryExportReadBytes=add(metrics.value.temporaryExportReadBytes,bytes.length);
+                    }
                     boolean report=Set.of("html","htm").contains(extension(relative));
                     if(report) {
                         if(metrics!=null)metrics.phase("scan_classification_redaction");
@@ -112,6 +121,7 @@ final class ArtifactArchive {
                     entries.add(new Entry(relative,mediaType(relative),bytes.length,sha256(bytes),"textual-output","sanitized-once",report,true));
                     writeEntry(zip,relative,bytes);
                     if(metrics!=null){metrics.value.includedEntries++;metrics.value.includedBytes+=bytes.length;}
+                    if(progress!=null)progress.entryWritten(relative);
                 }
                 Map<String,Object> manifest=new LinkedHashMap<>();
                 manifest.put("version",1);manifest.put("policy","att-export-safe-text-v2");manifest.put("entries",entries);manifest.put("complete",omitted==0);
@@ -249,6 +259,7 @@ final class ArtifactArchive {
         Map<String,Object> manifest;
         try (InputStream input = zip.getInputStream(manifestEntry)) {
             byte[] bytes = input.readNBytes(MAX_MANIFEST_BYTES + 1);
+            countVerificationRead(bytes.length);
             if (bytes.length != manifestEntry.getSize() || !validCrc(manifestEntry,bytes)) throw new IllegalArgumentException("Invalid manifest size");
             try { manifest = JSON.readValue(bytes, Map.class); }
             catch (com.fasterxml.jackson.core.JacksonException invalid) { throw new IllegalArgumentException("Invalid archive manifest"); }
@@ -272,6 +283,7 @@ final class ArtifactArchive {
                 throw new IllegalArgumentException("Archive does not match manifest");
             if (digests) try (InputStream input = zip.getInputStream(entry)) {
                 byte[] bytes = input.readNBytes((int)MAX_ENTRY_BYTES + 1);
+                countVerificationRead(bytes.length);
                 if (bytes.length != entry.getSize() || !sha256(bytes).equals(digest) || !validCrc(entry,bytes)) throw new IllegalArgumentException("Archive integrity check failed");
             }
         }
@@ -295,6 +307,18 @@ final class ArtifactArchive {
         var crc = new java.util.zip.CRC32(); crc.update(bytes);
         ZipEntry entry = new ZipEntry(path); entry.setMethod(ZipEntry.STORED); entry.setSize(bytes.length); entry.setCompressedSize(bytes.length); entry.setCrc(crc.getValue());
         zip.putNextEntry(entry); zip.write(bytes); zip.closeEntry();
+        ArtifactMetricsRecorder metrics=ArtifactMetricsRecorder.CURRENT.get();
+        if(metrics!=null)metrics.value.zipWriteInputBytes=add(metrics.value.zipWriteInputBytes,bytes.length);
+    }
+
+    private static void countVerificationRead(long bytes) {
+        ArtifactMetricsRecorder metrics=ArtifactMetricsRecorder.CURRENT.get();
+        if(metrics!=null)metrics.value.verificationBytesRead=add(metrics.value.verificationBytesRead,bytes);
+    }
+
+    private static long add(Long current,long next) {
+        long prior=current==null?0:current;
+        return next>Long.MAX_VALUE-prior?Long.MAX_VALUE:prior+next;
     }
 
     private static boolean validCrc(ZipEntry entry,byte[] bytes) {
