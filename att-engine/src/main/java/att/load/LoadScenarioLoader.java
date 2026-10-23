@@ -26,7 +26,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
-/** Loads and semantically validates current att-load/v1.7 descriptors and compatible historical scenarios. */
+/** Loads and semantically validates current att-load/v1.8 descriptors and compatible historical scenarios. */
 public final class LoadScenarioLoader {
     private static final int MAX_QUICK_LOAD_TEMPLATES = 64;
     private static final int MAX_QUICK_LOAD_TEMPLATE_SCAN = 256;
@@ -48,6 +48,7 @@ public final class LoadScenarioLoader {
             Object loaded = YamlSupport.load(source);
             if (!(loaded instanceof Map)) throw new IllegalArgumentException("Load scenario must be a YAML map");
             Map<String, Object> map = objectMap((Map<?, ?>) loaded);
+            rejectCustomExecutionId(map);
             String version = string(map.get("schemaVersion"), "schemaVersion");
             LoadOverrides effectiveOverrides = overrides == null ? LoadOverrides.none() : overrides;
             Path schema;
@@ -56,10 +57,10 @@ public final class LoadScenarioLoader {
             boolean normalizePreviousV15 = false;
             if (Version.LOAD_SCHEMA_CURRENT.equals(version)) {
                 applyCurrentOverrides(map, effectiveOverrides);
-                schema = att.validation.SchemaFiles.resolve(projectRoot, "att-load-v1.7.schema.json");
-             } else if (Version.LOAD_SCHEMA_V1_6.equals(version)) {
+                schema = att.validation.SchemaFiles.resolve(projectRoot, "att-load-v1.8.schema.json");
+             } else if (Version.LOAD_SCHEMA_V1_7.equals(version) || Version.LOAD_SCHEMA_V1_6.equals(version)) {
                 applyCurrentOverrides(map, effectiveOverrides);
-                schema = att.validation.SchemaFiles.resolveVersion(projectRoot, Version.LOAD_SCHEMA_V1_6);
+                schema = att.validation.SchemaFiles.resolveVersion(projectRoot, version);
                 normalizePreviousV15 = true;
             } else if (Version.LOAD_SCHEMA_V1_5.equals(version)) {
                 applyCurrentOverrides(map, effectiveOverrides);
@@ -77,9 +78,9 @@ public final class LoadScenarioLoader {
                 schema = att.validation.SchemaFiles.resolveVersion(projectRoot, Version.LOAD_SCHEMA_V1_2);
             } else {
                 throw failure("schemaVersion", "Unsupported load scenario schemaVersion '" + version + "'; current schema is "
-                        + Version.LOAD_SCHEMA_CURRENT + " (historical workloads schema " + Version.LOAD_SCHEMA_V1_3 + "). Update to workloads-based syntax and use execution.execIdFormat; see docs/reference/appendices/migrations.md.");
+                        + Version.LOAD_SCHEMA_CURRENT + " (historical workloads schema " + Version.LOAD_SCHEMA_V1_3 + "). Update to workloads-based syntax and use engine-managed EXEC.ID; see docs/reference/appendices/migrations.md.");
             }
-            Path currentSchema = att.validation.SchemaFiles.resolve(projectRoot, "att-load-v1.7.schema.json");
+            Path currentSchema = att.validation.SchemaFiles.resolve(projectRoot, "att-load-v1.8.schema.json");
             if (normalizeHistoricalV13 || normalizePreviousV14 || normalizePreviousV15) {
                 SchemaSupport.requireVersion(map, version, "historical load scenario");
                 JsonSchemaVerifier.verify(schema, map);
@@ -254,7 +255,7 @@ public final class LoadScenarioLoader {
         load.put("users", Integer.valueOf(2)); load.put("duration", "10s"); policy.put("load", load);
         Map<String, Object> execution = new LinkedHashMap<String, Object>(); execution.put("thinkTime", "250ms"); policy.put("execution", execution);
         Map<String, Object> evidence = new LinkedHashMap<String, Object>(); evidence.put("mode", "failures"); policy.put("evidence", evidence);
-        JsonSchemaVerifier.verify(att.validation.SchemaFiles.resolve(projectRoot, "att-load-v1.7.schema.json"), policy);
+        JsonSchemaVerifier.verify(att.validation.SchemaFiles.resolve(projectRoot, "att-load-v1.8.schema.json"), policy);
         semanticCurrent(null, policy, false);
         return policy;
     }
@@ -297,7 +298,7 @@ public final class LoadScenarioLoader {
         }
         load.put("duration", "10s");
         policy.put("load", load);
-        Path schema = att.validation.SchemaFiles.resolve(projectRoot, "att-load-v1.7.schema.json");
+        Path schema = att.validation.SchemaFiles.resolve(projectRoot, "att-load-v1.8.schema.json");
         JsonSchemaVerifier.verify(schema, policy);
         LoadScenario scenario = semanticCurrent(null, policy, false);
         if (!scenario.policyOnly()) throw quickLoadFailure(null, "workloads", "Bundled Quick Load fallback must be policy-only");
@@ -312,22 +313,23 @@ public final class LoadScenarioLoader {
         new att.resource.PackageResourceResolver(projectRoot)
                 .fromInternalPath(source, att.resource.PackageResourceResolver.Kind.FILE);
         if (!Files.isRegularFile(source) || Files.isSymbolicLink(source))
-            throw invalid(source, "Load policy must be a regular non-symlink file", "policy", "Create a regular att-load/v1.7 YAML policy descriptor.", null);
+            throw invalid(source, "Load policy must be a regular non-symlink file", "policy", "Create a regular att-load/v1.8 YAML policy descriptor.", null);
         Object loaded = YamlSupport.load(source);
-        if (!(loaded instanceof Map)) throw invalid(source, "Load policy must be a YAML map", "policy", "Create a valid att-load/v1.7 YAML policy descriptor.", null);
+        if (!(loaded instanceof Map)) throw invalid(source, "Load policy must be a YAML map", "policy", "Create a valid att-load/v1.8 YAML policy descriptor.", null);
         Map<String, Object> map = objectMap((Map<?, ?>) loaded);
+            rejectCustomExecutionId(map);
         String version = string(map.get("schemaVersion"), "schemaVersion");
         if (Version.LOAD_SCHEMA_CURRENT.equals(version)) {
-            JsonSchemaVerifier.verify(att.validation.SchemaFiles.resolve(projectRoot, "att-load-v1.7.schema.json"), map);
+            JsonSchemaVerifier.verify(att.validation.SchemaFiles.resolve(projectRoot, "att-load-v1.8.schema.json"), map);
             LoadScenario scenario = semanticCurrent(source, map, false);
             if (!scenario.policyOnly()) throw quickLoadFailure(source, "workloads", "load/load.yaml is a policy-only descriptor and must not declare workloads");
             return map;
         }
-        if (Version.LOAD_SCHEMA_V1_6.equals(version) || Version.LOAD_SCHEMA_V1_5.equals(version) || Version.LOAD_SCHEMA_V1_4.equals(version)) {
+        if (Version.LOAD_SCHEMA_V1_7.equals(version) || Version.LOAD_SCHEMA_V1_6.equals(version) || Version.LOAD_SCHEMA_V1_5.equals(version) || Version.LOAD_SCHEMA_V1_4.equals(version)) {
             Path previous = att.validation.SchemaFiles.resolveVersion(projectRoot, version);
             JsonSchemaVerifier.verify(previous, map);
             map.put("schemaVersion", Version.LOAD_SCHEMA_CURRENT);
-            JsonSchemaVerifier.verify(att.validation.SchemaFiles.resolve(projectRoot, "att-load-v1.7.schema.json"), map);
+            JsonSchemaVerifier.verify(att.validation.SchemaFiles.resolve(projectRoot, "att-load-v1.8.schema.json"), map);
             LoadScenario scenario = semanticCurrent(source, map, false);
             if (!scenario.policyOnly()) throw quickLoadFailure(source, "workloads", "load/load.yaml is a policy-only descriptor and must not declare workloads");
             return map;
@@ -340,7 +342,7 @@ public final class LoadScenarioLoader {
         migrated.put("schemaVersion", Version.LOAD_SCHEMA_CURRENT);
         for (String field : new String[]{"load", "execution", "thresholds", "evidence", "seed"})
             if (map.containsKey(field)) migrated.put(field, map.get(field));
-        JsonSchemaVerifier.verify(att.validation.SchemaFiles.resolve(projectRoot, "att-load-v1.7.schema.json"), migrated);
+        JsonSchemaVerifier.verify(att.validation.SchemaFiles.resolve(projectRoot, "att-load-v1.8.schema.json"), migrated);
         semanticCurrent(source, migrated, false);
         return migrated;
     }
@@ -350,12 +352,13 @@ public final class LoadScenarioLoader {
         if (values == null) throw quickLoadFailure(null, "scenario", "Inline Load scenario is required");
         Map<String, Object> map = objectMap(values);
         try {
-            if(Version.LOAD_SCHEMA_V1_6.equals(map.get("schemaVersion"))) {
-                JsonSchemaVerifier.verify(att.validation.SchemaFiles.resolveVersion(projectRoot,Version.LOAD_SCHEMA_V1_6),map);
+            rejectCustomExecutionId(map);
+            if(Version.LOAD_SCHEMA_V1_7.equals(map.get("schemaVersion")) || Version.LOAD_SCHEMA_V1_6.equals(map.get("schemaVersion"))) {
+                JsonSchemaVerifier.verify(att.validation.SchemaFiles.resolveVersion(projectRoot,String.valueOf(map.get("schemaVersion"))),map);
                 map.put("schemaVersion",Version.LOAD_SCHEMA_CURRENT);
             }
             SchemaSupport.requireVersion(map, Version.LOAD_SCHEMA_CURRENT, "inline load scenario");
-            JsonSchemaVerifier.verify(att.validation.SchemaFiles.resolve(projectRoot, "att-load-v1.7.schema.json"), map);
+            JsonSchemaVerifier.verify(att.validation.SchemaFiles.resolve(projectRoot, "att-load-v1.8.schema.json"), map);
             return semanticCurrent(null, map, true);
         } catch (DiagnosticException error) {
             throw error;
@@ -408,7 +411,7 @@ public final class LoadScenarioLoader {
         if (!load.isEmpty()) root.put("load", load);
         if (!execution.isEmpty()) root.put("execution", execution);
         root.put("workloads", java.util.Collections.<Object>singletonList(workload));
-        try { JsonSchemaVerifier.verify(att.validation.SchemaFiles.resolve(projectRoot, "att-load-v1.7.schema.json"), root); }
+        try { JsonSchemaVerifier.verify(att.validation.SchemaFiles.resolve(projectRoot, "att-load-v1.8.schema.json"), root); }
         catch (Exception error) { throw quickLoadFailure(source, "load", "Invalid composed Quick Load policy: " + error.getMessage()); }
         return semanticCurrent(source, root, false);
     }
@@ -446,25 +449,42 @@ public final class LoadScenarioLoader {
         return Collections.unmodifiableList(result);
     }
 
+    /** Reject historical customization explicitly, including immutable submitted/scheduled snapshots. */
+    public static void rejectCustomExecutionId(Map<String, Object> root) {
+        rejectCustomExecutionIdAt(root, "");
+    }
+    private static void rejectCustomExecutionIdAt(Object value, String path) {
+        if (value instanceof Map) {
+            for (Map.Entry<?, ?> entry : ((Map<?, ?>) value).entrySet()) {
+                String field = path.isEmpty() ? String.valueOf(entry.getKey()) : path + "." + entry.getKey();
+                if ("execIdFormat".equals(entry.getKey()) && path.endsWith("execution"))
+                    throw failure(field, "Remove execution.execIdFormat and use engine-managed EXEC.ID (<runId>-execution-<sequence>); migrate to att-load/v1.8. "
+                            + "Custom formats are rejected for historical resources and saved snapshots too. Artifact paths and consumer integrations must use the generated ID; use a separate business variable for correlation. "
+                            + "Review and replace affected schedules; existing historical artifacts are unchanged.");
+                rejectCustomExecutionIdAt(entry.getValue(), field);
+            }
+        } else if (value instanceof List) {
+            int i = 0;
+            for (Object item : (List<?>) value) rejectCustomExecutionIdAt(item, path + "[" + i++ + "]");
+        }
+    }
+
     private LoadScenario semanticCurrent(Path source, Map<String, Object> root, boolean sourceIsScenario) {
+        rejectCustomExecutionId(root);
         removeDisabledKeys(root);
         List<Path> testdataDescriptors = descriptorPaths(root.get("testdata"), "testdata");
         List<Object> raw = root.containsKey("workloads") ? list(root.get("workloads"), "workloads") : Collections.<Object>emptyList();
         Map<String, Object> rootLoad = configMapOptional(root.get("load"), "load");
         Map<String, Object> rootExecution = configMapOptional(root.get("execution"), "execution");
         Map<String, Object> workloadExecutionDefaults = new LinkedHashMap<String, Object>(rootExecution);
-        workloadExecutionDefaults.remove("execIdFormat");
         Map<String, Object> rootThresholds = configMapOptional(root.get("thresholds"), "thresholds");
         if (raw.isEmpty()) {
             if (rootLoad.isEmpty()) throw failure("load", "policy-only load descriptor requires a root load policy");
             parsePolicy("policy", rootLoad, workloadExecutionDefaults, rootThresholds);
             Long policySeed = longInteger(root.get("seed"), "seed");
             Map<String, Object> policyEvidence = evidenceMap(root.get("evidence"), "evidence");
-            String policyFormat = rootExecution.containsKey("execIdFormat") ? string(rootExecution.get("execIdFormat"), "execution.execIdFormat") : "";
-            try { LoadExecutionIdPattern.validate(policyFormat, parsePolicy("policy", rootLoad, workloadExecutionDefaults, rootThresholds).model()); }
-            catch (IllegalArgumentException error) { throw failure("execution.execIdFormat", error.getMessage()); }
             LoadScenario policyScenario = new LoadScenario(source, String.valueOf(root.get("schemaVersion")), Collections.<LoadWorkload>emptyList(),
-                    policySeed, rootThresholds, policyEvidence, rootLoad, rootExecution, true, testdataDescriptors).withExecIdFormat(policyFormat);
+                    policySeed, rootThresholds, policyEvidence, rootLoad, rootExecution, true, testdataDescriptors);
             validateEvidencePolicy(policyScenario, "evidence");
             return policyScenario;
         }
@@ -505,12 +525,8 @@ public final class LoadScenarioLoader {
         Map<String, Object> evidence = evidenceMap(root.get("evidence"), "evidence");
         Long seed = longInteger(root.get("seed"), "seed");
         Map<String, Object> execution = rootExecution;
-        String format = execution.containsKey("execIdFormat") ? string(execution.get("execIdFormat"), "execution.execIdFormat") : "";
-        try { LoadExecutionIdPattern.validate(format, model); }
-        catch (IllegalArgumentException error) { throw failure("execution.execIdFormat", error.getMessage()); }
         LoadScenario scenario = new LoadScenario(source, String.valueOf(root.get("schemaVersion")), workloads, seed, thresholds, evidence,
-                rootLoad, rootExecution, false, testdataDescriptors)
-                .withExecIdFormat(format);
+                rootLoad, rootExecution, false, testdataDescriptors);
         validateEvidencePolicy(scenario, "evidence");
         return scenario;
     }
@@ -675,7 +691,6 @@ public final class LoadScenarioLoader {
             throw failure("workloads[0].mix", "--set overrides are ambiguous for a mixed workload; configure inputs, vars, and Tool arguments in the mix entries");
         Map<String, Object> load = mergeMaps(copyMap(root.get("load")), copyMap(workload.get("load")));
         Map<String, Object> execution = mergeMaps(copyMap(root.get("execution")), copyMap(workload.get("execution")));
-        execution.remove("execIdFormat");
         Map<String, Object> inputs = copyMap(workload.get("inputs"));
         Map<String, Object> vars = copyMap(workload.get("vars"));
         Map<String, Object> target = copyMap(workload.get("target"));

@@ -292,3 +292,38 @@
 .att-replay-actions { display: inline-flex; gap: .4rem; flex-wrap: wrap; }
 .att-replay-review { flex-basis: 100%; max-width: min(48rem, 100%); padding: 1rem; border: 1px solid var(--border-color, #aaa); border-radius: .4rem; background: var(--surface-color, #fff); color: var(--text-color, #222); }
 .att-replay-review pre { max-height: 24rem; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
+.att-template-presets { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .75rem; }
+.att-template-presets article { padding: .8rem; border: 1px solid var(--att-color-border, #bbc5d4); border-radius: .4rem; }
+.att-template-presets h2 { margin: 0; font-size: 1rem; }
+.att-template-presets p { margin: .4rem 0; font-size: .8rem; }
+.att-load-tabs, .att-load-actions { display: flex; flex-wrap: wrap; gap: .5rem; padding: .7rem; }
+.att-load-tabs [aria-current="page"] { border-bottom: 3px solid var(--att-color-primary, #2261af); font-weight: 700; }
+.att-load-actions { position: sticky; bottom: 0; background: var(--att-color-surface, #fff); border-top: 1px solid var(--att-color-border, #bbc5d4); }
+.att-load-dialog { width: min(60rem, calc(100vw - 2rem)); max-height: 88vh; overflow: auto; border: 1px solid var(--att-color-border, #bbc5d4); border-radius: .5rem; background: var(--att-color-surface, #fff); color: var(--att-color-text, #182237); padding: 1.25rem; }
+.att-load-dialog::backdrop { background: #0008; }
+.att-load-dialog-content { display: grid; gap: .8rem; }
+.att-load-dialog footer { display: flex; justify-content: flex-end; gap: .6rem; margin-top: 1rem; }
+.att-load-testing small { display: block; }
+@media (max-width: 720px) { .att-template-presets { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 420px) { .att-template-presets { grid-template-columns: 1fr; } }
+
+.att-mix-distribution { display:flex; height:0.6rem; gap:2px; border-radius:4px; overflow:hidden; margin:0.5rem 0; }
+.att-mix-distribution > span { min-width:0; flex-basis:0; }
+
+.att-template-builder > h1 { margin-bottom:0; }
+.att-template-builder > p { margin:.25rem 0; }
+.att-template-builder .att-data-table td:last-child { min-width: 17rem; }
+.att-template-builder .att-data-table .button { margin:.15rem; }
+.att-template-builder input, .att-template-builder select, .att-load-testing select, .att-load-testing input, .att-load-dialog input, .att-load-dialog select { min-height:38px; padding:.45rem .6rem; border:1px solid var(--att-color-border); border-radius:var(--att-radius-control); background:var(--att-color-surface); color:var(--att-color-text); font:inherit; max-width:100%; }
+.att-template-builder label, .att-load-dialog label { display:grid; gap:.4rem; }
+.att-template-builder .att-load-actions { z-index:5; margin:0 -.5rem; box-shadow:0 -3px 12px #0001; }
+.att-template-presets .button { margin:.15rem; }
+.att-load-dialog-content > .att-table-scroll { max-width:100%; }
+.att-load-dialog-content .att-data-table td:last-child { min-width:16rem; }
+
+/* Saved scenario discovery stays a dense resource list. */
+.att-load-catalog-list{gap:6px}
+.att-load-catalog-card{padding:10px 12px;border-radius:6px}
+.att-load-catalog-card-heading{align-items:center}
+.att-load-catalog-card h3{margin:3px 0;font-size:.94rem}
+.att-load-catalog-card .att-load-catalog-actions{margin-top:6px;gap:6px}

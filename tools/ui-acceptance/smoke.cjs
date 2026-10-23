@@ -48,8 +48,9 @@ async function main() {
       await page.goto(`${base}${route}`);
       if (route === '#/jobs' || route === '#/settings') await page.getByRole('heading', { name: title, exact: true }).waitFor();
       else if (route === '#/advanced-load') {
-        await page.getByRole('heading', { name: 'LOAD Catalog', exact: true }).waitFor();
-        await page.getByRole('heading', { name: 'Available Load YAML resources', exact: true }).waitFor();
+        await page.getByRole('heading', { name: 'Load testing', exact: true }).waitFor();
+        await page.locator('.att-template-presets article').nth(5).waitFor();
+        assert.equal(await page.locator('.att-template-presets article').count(), 6);
       } else await page.locator('#home-title').getByText(title, { exact: true }).waitFor();
       assert.equal(await page.locator(`[data-nav="${activeNav}"]`).getAttribute('aria-current'), 'page');
       assert.equal(await page.locator('#breadcrumbs [aria-current="page"]').count(), 1);
@@ -59,14 +60,16 @@ async function main() {
     await page.getByRole('link', { name: 'Browse packages' }).click();
     await page.getByRole('heading', { name: 'Explorer', exact: true }).waitFor();
     await page.locator('[data-nav="load-testing"]').click();
-    await page.getByRole('heading', { name: 'LOAD Catalog', exact: true }).waitFor();
+    await page.getByRole('heading', { name: 'Load testing', exact: true }).waitFor();
+    await page.getByRole('button', { name: '☷ Scenarios', exact: true }).click();
     await page.getByRole('heading', { name: 'Available Load YAML resources', exact: true }).waitFor();
-    await page.getByRole('heading', { name: 'Recent LOAD Jobs', exact: true }).waitFor();
+    assert.equal(await page.getByRole('heading', { name: 'Recent LOAD Jobs', exact: true }).count(), 0);
     await page.getByRole('button', { name: 'New LOAD', exact: true }).waitFor();
     await page.getByRole('button', { name: 'New LOAD', exact: true }).click();
     await page.getByRole('heading', { name: /New LOAD/i }).waitFor();
     await page.locator('[data-nav="load-testing"]').click();
-    await page.getByRole('heading', { name: 'LOAD Catalog', exact: true }).waitFor();
+    await page.getByRole('heading', { name: 'Load testing', exact: true }).waitFor();
+    await page.getByRole('button', { name: '☷ Scenarios', exact: true }).click();
     await page.getByRole('heading', { name: 'Available Load YAML resources', exact: true }).waitFor();
 
     await page.goto(`${base}#/settings`);

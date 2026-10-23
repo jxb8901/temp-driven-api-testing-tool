@@ -12,7 +12,13 @@ Each admitted workload task has a cancellable handle. Cancellation first stops a
 
 ## Execution identity and artifact storage
 
-Every started iteration receives its unique `EXEC.ID` before bootstrap variables are evaluated. The default monotonic ID path needs no collision registry. A configured `execution.execIdFormat` uses a disk-backed reservation marker so concurrent processes cannot claim the same custom ID; markers are scoped to the Load run. The public behavior is that duplicate or path-unsafe IDs fail before the target starts.
+ATT allocates one engine-managed `EXEC.ID` per started iteration: `<runId>-execution-<sequence>`. One run-scoped, thread-safe monotonic allocator serves every workload, target, mix entry and phase. The ID is published before bootstrap variables and target actions. `EXEC.RUN_ID` remains the enclosing Run identity. Collision tracking uses no per-iteration files or growing identity registry.
+
+`execution.execIdFormat` is rejected in current and historical Load Scenarios, policy-only files, inline drafts and saved Schedule/Worker snapshots, including an empty value. Remove the field and migrate to `att-load/v1.8`; review artifact-path consumers and store business correlation in a separate input/variable. Existing artifacts keep their original paths. Historical schema files remain available for inspection; historical resources without customization normalize to the current contract. Replace affected immutable schedules through the normal reviewed-draft workflow.
+
+Generated identities retain the existing safe-segment grammar and 240-character limit. The Run ID must leave room for `-execution-` plus a signed-long sequence. Exhaustion fails permanently without wrapping. Every Run output namespace is claimed atomically once using `.execution-owner`. A second owner or restart must choose a fresh outer Run ID. Claims remain until safe completed-Job artifact retention removes the Run directory. Old reservation directories must only be removed by safe completed-Job retention; never delete markers while an old process can still use them. Metrics-only evidence remains lazy: this single Run metadata file does not materialize per-iteration workspaces.
+
+Outer `execution.runIdFormat`, `execution.debugIdFormat`, exact `--run-id` and `--debug-id` behavior is unchanged. Diagnostic iteration/VU/Workload/mix IDs and scheduler event sequences remain separate from `EXEC.ID`. Independent distributed Workers must use disjoint namespaces or a shared allocator; separate process-local counters cannot safely share a Run namespace.
 
 An iteration's `EXEC.OUTPUT_DIR` is a logical planned path. Metrics-only work does not create a durable per-iteration directory by itself. Resource-output formatting and deferred case-log evidence are materialized when retention selects the iteration. Temporary workspaces are cleaned after their data has been discarded or copied into retained evidence.
 

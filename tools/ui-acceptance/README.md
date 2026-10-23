@@ -109,3 +109,5 @@ Review the four PNGs beside the annotated reference in `docs/system-design/ui-sh
 To remove only this acceptance harness and its generated baseline, revert `tools/ui-acceptance/` and `docs/system-design/ui-shell-baseline/`. To roll back the app shell itself, follow the `Migration and rollback` section in `docs/system-design/ui-shell-architecture.md`; retain the earlier WAR UI regression test with that change.
 
 The general dashboard and workflow smoke scripts use a local Python API fixture. The opt-in `ServerWarUiIT` Playwright step is separate: it runs inside the packaged-WAR test while authenticated Tomcat and the Server API are live under `/tools/att`.
+
+The template-specific check `npm run smoke:load-templates` verifies the six built-ins, no legacy/history requests on Templates, nested modal Save/Cancel boundaries, Escape and mobile dialog bounds under `/att/ui/`. The Tomcat `server-api-smoke.cjs` check verifies the default Templates tab and resource-only Scenarios against real APIs.

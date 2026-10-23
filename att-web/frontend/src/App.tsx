@@ -16,6 +16,8 @@ import type { LoadJobsApi, PackageOption } from './features/load/types';
 const SettingsPage = lazy(() => import('./SettingsPage').then(module => ({ default: module.SettingsPage })));
 import { ConfigurationWorkspace } from './features/explorer/ConfigurationWorkspace';
 import { QuickLoadPage } from './features/load/QuickLoadPage';
+const LoadTestingPage = lazy(() => import('./features/load/LoadTestingPage').then(module => ({ default: module.LoadTestingPage })));
+const LoadTemplateBuilder = lazy(() => import('./features/load/LoadTemplateBuilder').then(module => ({ default: module.LoadTemplateBuilder })));
 import { LoadCatalogPage } from './features/load/LoadCatalogPage';
 import { LoadResourceDetailPage } from './features/load/LoadResourceDetailPage';
 import type { ValidatedScheduleIntent } from './features/schedules/types';
@@ -77,8 +79,9 @@ function ExplorerRouteView({ packageId, resourceRoute, inlineLoadEnabled, schedu
   />;
 }
 
-function LoadRouteView({ packageId, inlineLoadEnabled, schedulingEnabled, packages, onSchedule }: {
+function LoadRouteView({ packageId, templateId, inlineLoadEnabled, schedulingEnabled, packages, onSchedule }: {
   packageId: string;
+  templateId?: string;
   inlineLoadEnabled: boolean;
   schedulingEnabled: boolean;
   packages: PackageOption[];
@@ -119,7 +122,7 @@ function LoadRouteView({ packageId, inlineLoadEnabled, schedulingEnabled, packag
   }, [packageId, environmentReload, workspace.onEnvironmentChange]);
 
   return <Suspense fallback={<div className="page-content" role="status" aria-busy="true">Loading Load…</div>}>
-    <LoadPage
+    {templateId ? <LoadTemplateBuilder templateId={templateId} api={loadJobsApi} packages={packages} selectedPackage={packageId} selectedEnvironment={workspace.selectedEnvironment} environments={environments} environmentState={environmentState} inlineLoadEnabled={inlineLoadEnabled} schedulingEnabled={schedulingEnabled} onPackageChange={onPackageChange} onEnvironmentChange={workspace.onEnvironmentChange} onJobAccepted={onJobAccepted} onSchedule={onSchedule} /> : <LoadPage
       api={loadJobsApi}
       packages={packages}
       selectedPackage={packageId}
@@ -133,7 +136,7 @@ function LoadRouteView({ packageId, inlineLoadEnabled, schedulingEnabled, packag
       onEnvironmentChange={workspace.onEnvironmentChange}
       onJobAccepted={onJobAccepted}
       onSchedule={onSchedule}
-    />
+    />}
   </Suspense>;
 }
 
@@ -350,7 +353,7 @@ export default function App() {
       dispatch({ type: 'version/ready', data: version });
       if (navigation.route.kind !== 'job-console') {
         void loadPackages(controller.signal);
-        void loadJobs(controller.signal);
+        if (navigation.route.kind === 'dashboard') void loadJobs(controller.signal);
       }
     }).catch(error => {
       if (controller.signal.aborted) return;
@@ -380,8 +383,8 @@ export default function App() {
     navigation.navigate({ kind: 'package', packageId });
   }, [navigation.navigate]);
   const onJobChange = useCallback((jobId: string) => {
-    navigation.navigate({ kind: 'jobs', jobId });
-  }, [navigation.navigate]);
+    navigation.navigate({ kind: 'jobs', jobId, ...(navigation.route.kind === 'jobs' && navigation.route.executionType ? { executionType: navigation.route.executionType } : {}) });
+  }, [navigation.navigate, navigation.route]);
   const onJobAccepted = useCallback((job: { jobId: string; packageId?: string }) => {
     navigation.navigate({ kind: 'jobs', jobId: job.jobId });
     void loadJobs();
@@ -407,9 +410,9 @@ export default function App() {
   } else if (navigation.route.kind === 'job-console') {
     content = <Suspense fallback={<div className="page-content" role="status" aria-busy="true">Loading Job console…</div>}><StandaloneJobConsolePage jobId={navigation.route.jobId} view={navigation.route.view} /></Suspense>;
   } else if (navigation.route.kind === 'jobs' && navigation.route.jobId) {
-    content = <Suspense fallback={<div role="status">Loading jobs…</div>}><JobsPage api={loadJobsApi} onSchedule={capabilities.loadSchedulingEnabled ? onSchedule : undefined} onEditSchedule={id => navigation.navigate({ kind: 'schedules', view: 'edit', scheduleId: id })} jobId={navigation.route.jobId} onOpenJob={onJobChange} onShowList={() => navigation.navigate({ kind: 'jobs' })} /></Suspense>;
+    content = <Suspense fallback={<div role="status">Loading jobs…</div>}><JobsPage executionType={navigation.route.executionType} onExecutionTypeChange={executionType => navigation.navigate({ kind: 'jobs', executionType })} api={loadJobsApi} onSchedule={capabilities.loadSchedulingEnabled ? onSchedule : undefined} onEditSchedule={id => navigation.navigate({ kind: 'schedules', view: 'edit', scheduleId: id })} jobId={navigation.route.jobId} onOpenJob={onJobChange} onShowList={() => navigation.navigate({ kind: 'jobs', ...(navigation.route.kind === 'jobs' && navigation.route.executionType ? { executionType: navigation.route.executionType } : {}) })} /></Suspense>;
   } else if (navigation.route.kind === 'jobs') {
-    content = <Suspense fallback={<div role="status">Loading jobs…</div>}><JobsPage api={loadJobsApi} onSchedule={capabilities.loadSchedulingEnabled ? onSchedule : undefined} onEditSchedule={id => navigation.navigate({ kind: 'schedules', view: 'edit', scheduleId: id })} onOpenJob={onJobChange} onShowList={() => navigation.navigate({ kind: 'jobs' })} /></Suspense>;
+    content = <Suspense fallback={<div role="status">Loading jobs…</div>}><JobsPage executionType={navigation.route.executionType} onExecutionTypeChange={executionType => navigation.navigate({ kind: 'jobs', executionType })} api={loadJobsApi} onSchedule={capabilities.loadSchedulingEnabled ? onSchedule : undefined} onEditSchedule={id => navigation.navigate({ kind: 'schedules', view: 'edit', scheduleId: id })} onOpenJob={onJobChange} onShowList={() => navigation.navigate({ kind: 'jobs', ...(navigation.route.kind === 'jobs' && navigation.route.executionType ? { executionType: navigation.route.executionType } : {}) })} /></Suspense>;
   } else if (navigation.route.kind === 'schedules') {
     content = <Suspense fallback={<div className="page-content" role="status" aria-busy="true">Loading Schedules…</div>}>
       <ScheduledLoadPage
@@ -453,9 +456,16 @@ export default function App() {
       ? state.packages.data.map(item => ({ packageId: item.packageId, displayName: item.name }))
       : [];
     content = navigation.route.packageId
-      ? <LoadRouteView packageId={navigation.route.packageId} inlineLoadEnabled={capabilities.inlineLoadEnabled}
+      ? <LoadRouteView key={`${navigation.route.packageId}:${navigation.route.templateId || ''}`} templateId={navigation.route.templateId} packageId={navigation.route.packageId} inlineLoadEnabled={capabilities.inlineLoadEnabled}
           schedulingEnabled={capabilities.loadSchedulingEnabled} packages={packageOptions} onSchedule={onSchedule} />
-      : <LoadCatalogPage api={api}
+      : <Suspense fallback={<div role="status">Loading templates…</div>}><LoadTestingPage api={api} packages={packageOptions} enabled={capabilities.inlineLoadEnabled} tab={navigation.route.tab || (navigation.route.catalog ? 'scenarios' : 'templates')}
+          onTab={tab => navigation.navigate({ kind: 'load', tab })}
+          onBlank={packageId => navigation.navigate({ kind: 'load', packageId })}
+          onJobs={() => navigation.navigate({ kind: 'jobs', executionType: 'load' })}
+          onCreate={(packageId, item) => navigation.navigate(item.mode === 'single-vu' || item.mode === 'single-tps'
+            ? { kind: 'quick-load', packageId, templateId: 'catalog:' + item.id, model: item.mode === 'single-tps' ? 'arrivalRate' : 'virtualUsers' }
+            : { kind: 'load', packageId, templateId: item.id })}>
+        <LoadCatalogPage api={api}
           packages={state.packages.status === 'ready'
             ? { status: 'ready', data: packageOptions }
             : state.packages}
@@ -470,7 +480,7 @@ export default function App() {
           onOpenJob={onJobChange}
           onSchedule={onSchedule}
           onOpenDetail={(item, environment, returnTo) => navigation.navigate({ kind: 'load-resource', packageId: item.packageId,
-            resourceId: item.resourceId, environment, returnTo })} />;
+            resourceId: item.resourceId, environment, returnTo })} /></LoadTestingPage></Suspense>;
   }
 
   return (

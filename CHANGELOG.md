@@ -2,6 +2,9 @@
 
 # ATT 4.2.3 - 2026-10-22
 
+- Add a unified six-mode Load Template catalog, modal editors and shared CLI bindings; consolidate LOAD history under Jobs and results (#276).
+- Move LOAD to `att-load/v1.8` with run-owned sequential execution IDs, durable namespace claims and actionable rejection of custom Load ID formats (#277).
+
 - Resolve Schedule History/List/Edit routes by view and schedule ID, preserving dirty forms during refresh (#271).
 - Add strict, auto-pause, and revalidate-latest schedule package-change policies; preserve stale schedule metadata editing and immutable execution sources (#272).
 - Drain runtime-owned event compactions before closing H2 and unregister only ATT-owned JDBC drivers on WAR undeploy (#273).

@@ -247,7 +247,7 @@ export interface LoadJobsApi {
   getLoadCatalogDetail?(packageId: string, resourceId: string, signal?: AbortSignal): Promise<LoadCatalogDetail>;
   getLoadSource?(packageId: string, resourceId: string, signal?: AbortSignal): Promise<{ available: boolean; logicalPath?: string; text?: string; redacted?: boolean; reason?: string }>;
   submitLoadScenario?(input: { packageId: string; scenario: string; environment?: string }): Promise<JobAccepted>;
-  listLoadJobs?(input?: { offset?: number; limit?: number; signal?: AbortSignal }): Promise<{ items: JobSummary[]; nextOffset?: number | null }>;
+  listLoadJobs?(input?: { offset?: number; limit?: number; principal?: string; pinnedOnly?: boolean; signal?: AbortSignal }): Promise<{ items: JobSummary[]; nextOffset?: number | null }>;
   getLoadPolicy(packageId: string, model: LoadModel, environment?: string, signal?: AbortSignal, templateId?: string): Promise<LoadPolicyResponse>;
   getTargetLoadForm(
     packageId: string,
@@ -291,11 +291,13 @@ export interface LoadFeatureProps {
   onPackageChange: (packageId: string) => void;
   onEnvironmentChange: (environment: string) => void;
   onJobAccepted: (jobId: string) => void;
-  onSchedule?: (input: { packageId: string; environment?: string; draftId: string; previewYaml?: string }) => void;
+  onSchedule?: (input: { packageId: string; environment?: string; draftId: string; previewYaml?: string; expiresAt?: string }) => boolean | void;
   confirmStart?: (message: string) => boolean | Promise<boolean>;
 }
 
 export interface JobsFeatureProps {
+  executionType?: 'load';
+  onExecutionTypeChange?(value: 'load' | undefined): void;
   onSchedule?(intent: ValidatedScheduleIntent): void;
   onEditSchedule?(id: string): void;
 

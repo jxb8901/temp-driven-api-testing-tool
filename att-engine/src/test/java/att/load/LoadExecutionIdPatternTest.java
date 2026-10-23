@@ -2,14 +2,9 @@ package att.load;
 
 import att.config.FrameworkConfig;
 import att.config.FrameworkConfigLoader;
-import att.core.CaseRuntimeContext;
-import att.core.TestCase;
-import att.template.DefaultBuiltInProvider;
-import att.template.UnifiedTemplateEngine;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import java.nio.file.*;
-import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.*;
 import static org.junit.jupiter.api.Assertions.*;
@@ -17,154 +12,119 @@ import static org.junit.jupiter.api.Assertions.*;
 class LoadExecutionIdPatternTest {
     @TempDir Path root;
 
-    @Test void validatesInitializationScopeAndRejectsStatefulExpressions() {
-        LoadExecutionIdPattern.validate("${EXEC.RUN_ID}-${EXEC.LOAD.WORKLOAD_ID}-${EXEC.LOAD.USER_ID}-${EXEC.LOAD.ITERATION}", LoadScenario.Model.CLOSED);
-        LoadExecutionIdPattern.validate("${EXEC.RUN_ID}-${EXEC.LOAD.WORKLOAD_ID}-${EXEC.LOAD.ITERATION}", LoadScenario.Model.ARRIVAL_RATE);
-        for (String invalid : Arrays.asList(
-                "${EXEC.LOAD.user_id}",
-                "${EXEC.ID}",
-                "${EXEC.OUTPUT_DIR}",
-                "${EXEC.ACTIONS.call.output.result}",
-                "${EXEC.LOAD.ITERATION}/child",
-                "#{seq.next()}",
-                "#{formatDate(value='2020-01-01T00:00:00Z', pattern='yyyy')}",
-                "#{date.format(value='2020-01-01T00:00:00Z', pattern='yyyy')}",
-                "#{file.delete('x')}",
-                "#{deleteFile('x')}",
-                "#{file.copy(source='a', target='b')}",
-                "#{copyFile(source='a', target='b')}",
-                "#{file.move(source='a', target='b')}",
-                "#{moveFile(source='a', target='b')}",
-                "#{file.mkdirs('x')}",
-                "#{makeDirectories('x')}",
-                "#{directoryExists('x')}")) {
-            assertThrows(IllegalArgumentException.class, () -> LoadExecutionIdPattern.validate(invalid, LoadScenario.Model.CLOSED), invalid);
-        }
-        assertThrows(IllegalArgumentException.class,
-                () -> LoadExecutionIdPattern.validate("${EXEC.LOAD.USER_ID}", LoadScenario.Model.ARRIVAL_RATE));
-    }
-
-    @Test void evaluatesAgainstPreExecutionRuntimeContextAndPublishesTheGeneratedIdentity() throws Exception {
-        Map<String, Object> inputs = new LinkedHashMap<String, Object>();
-        inputs.put("region", "hk");
-        TestCase testCase = new TestCase(1, "load", "tool", "iteration-7", Collections.emptyList(),
-                inputs, Collections.emptyMap(), "");
-        Path output = root.resolve("output").resolve("pending");
-        CaseRuntimeContext context = new CaseRuntimeContext(testCase, output, "pending", "RUN-42", output,
-                output.resolve("case.log"), "load", "2026-09-30T12:00:00Z", "2026-09-30T11:00:00Z");
-        context.setProject(root);
-        context.setLoadSourceMetadata(root.resolve("payment.yaml"), "payment");
-        context.setTargetMetadata("tool", "sample.echo");
-        context.setLoad("RUN-42", "closed", "iteration-7", 7L, "STEADY",
-                "2026-09-30T12:00:00Z", "VU-3", "2026-09-30T11:00:00Z");
-        context.setLoadWorkload("payments", "tool", "sample.echo");
-        context.setTemplateMetadata("sample.echo", root.resolve("templates/sample.echo"));
-        context.beginExecutionIdInitialization();
-
-        String format = "${EXEC.RUN_ID}-${EXEC.LOAD.WORKLOAD_ID}-${EXEC.LOAD.USER_ID}-${EXEC.LOAD.ITERATION}-#{upper(${EXEC.INPUT.region})}";
-        UnifiedTemplateEngine engine = new UnifiedTemplateEngine(null, null, null, null, new DefaultBuiltInProvider());
-        String id = LoadExecutionIdPattern.evaluate(format, LoadScenario.Model.CLOSED, context, engine, null);
-        assertEquals("RUN-42-payments-VU-3-7-HK", id);
-
-        Path workspace = root.resolve("output").resolve("load").resolve(id);
-        context.finishExecutionIdInitialization(id, workspace, workspace.resolve("case.log"));
-        assertEquals(id, context.resolve("EXEC.ID"));
-        assertEquals("RUN-42", context.resolve("EXEC.RUN_ID"));
-    }
-
-    @Test void reservesUniqueDefaultIdsAcrossConcurrentWorkloadsAndPreservesRunId() throws Exception {
+    @Test void generatesOver100kUniqueIdentitiesWithConstantStorageAcrossConcurrentWorkloads() throws Exception {
         installConfig();
         FrameworkConfig config = new FrameworkConfigLoader().load(root.resolve("config.yaml"), root);
+        Path run = root.resolve("output/load/RUN");
         try (LoadRunResources resources = new LoadRunResources(root, config)) {
-            Path runOutput = root.resolve("output/load/RUN");
-            resources.initializeExecutionNamespace(runOutput);
-            Set<String> ids = Collections.newSetFromMap(new ConcurrentHashMap<String, Boolean>());
-            ExecutorService pool = Executors.newFixedThreadPool(4);
-            try {
-                List<Future<?>> tasks = new ArrayList<Future<?>>();
-                for (int w = 0; w < 4; w++) {
-                    final String workload = "work" + w;
-                    tasks.add(pool.submit(() -> {
-                        for (int n = 1; n <= 50; n++) {
-                            IterationRequest request = IterationRequest.closed("RUN", "iteration-" + n, n,
-                                    "STEADY", Instant.now(), "VU-" + workload, Collections.emptyMap())
-                                    .withWorkloadId(workload);
-                            String id = resources.nextDefaultExecutionId(request.runId());
-                            resources.reserveExecutionId(id, request, false, runOutput);
-                            assertTrue(ids.add(id));
-                            assertEquals("RUN", request.runId());
-                        }
-                    }));
-                }
-                for (Future<?> task : tasks) task.get();
-            } finally {
-                pool.shutdownNow();
-            }
-            assertEquals(200, ids.size());
-            IterationRequest duplicate = IterationRequest.closed("RUN", "duplicate", 1, "STEADY",
-                    Instant.now(), "VU-1", Collections.emptyMap()).withWorkloadId("work0");
-            assertDoesNotThrow(() -> resources.reserveExecutionId(ids.iterator().next(), duplicate, false, runOutput));
-            resources.reserveExecutionId("custom-id", duplicate, true, runOutput);
-            assertThrows(IllegalArgumentException.class,
-                    () -> resources.reserveExecutionId("CUSTOM-ID", duplicate, true, runOutput));
-        }
-        try (LoadRunResources fresh = new LoadRunResources(root, config)) {
-            assertEquals("RUN-execution-1", fresh.nextDefaultExecutionId("RUN"));
-        }
-    }
-
-    @Test void customIdReservationsAreAtomicAndExistingOutputIsRejectedAtStartup() throws Exception {
-        assertFalse(java.lang.reflect.Modifier.isSynchronized(LoadRunResources.class
-                .getMethod("initializeExecutionNamespace", Path.class).getModifiers()),
-                "scheduled iterations must use the lock-free initialized namespace fast path");
-        installConfig();
-        FrameworkConfig config = new FrameworkConfigLoader().load(root.resolve("config.yaml"), root);
-        Path runOutput = root.resolve("output/load/custom-run");
-        try (LoadRunResources resources = new LoadRunResources(root, config)) {
-            resources.initializeExecutionNamespace(runOutput);
+            resources.initializeExecutionNamespace(run);
+            Set<String> ids = ConcurrentHashMap.newKeySet();
             ExecutorService pool = Executors.newFixedThreadPool(8);
             try {
-                List<Future<Boolean>> attempts = new ArrayList<Future<Boolean>>();
-                for (int index = 0; index < 32; index++) {
-                    final int item = index;
-                    attempts.add(pool.submit(() -> {
-                        IterationRequest request = IterationRequest.closed("custom-run", "iteration-" + item, item + 1,
-                                "STEADY", Instant.now(), "VU-1", Collections.emptyMap());
-                        try {
-                            resources.reserveExecutionId("shared-custom-id", request, true, runOutput);
-                            return true;
-                        } catch (IllegalArgumentException duplicate) { return false; }
-                    }));
-                }
-                int winners = 0;
-                for (Future<Boolean> attempt : attempts) if (attempt.get()) winners++;
-                assertEquals(1, winners);
+                List<Future<?>> tasks = new ArrayList<>();
+                for (int w = 0; w < 8; w++) tasks.add(pool.submit(() -> {
+                    for (int i = 0; i < 15000; i++) assertTrue(ids.add(resources.nextExecutionId("RUN")));
+                }));
+                for (Future<?> task : tasks) task.get();
             } finally { pool.shutdownNow(); }
+            assertEquals(120000, ids.size());
+            assertTrue(ids.contains("RUN-execution-1"));
+            assertTrue(ids.contains("RUN-execution-120000"));
+            assertFalse(Files.exists(run.resolve(".exec-id-reservations")));
+            try (java.util.stream.Stream<Path> files = Files.list(run)) { assertEquals(1L, files.count()); }
+            assertThrows(IllegalArgumentException.class, () -> resources.nextExecutionId("OTHER"));
+            try (LoadRunResources second = new LoadRunResources(root, config)) {
+                assertThrows(java.io.IOException.class, () -> second.initializeExecutionNamespace(run));
+            }
         }
-
-        Path occupied = root.resolve("occupied/load/old-run/samples");
-        Files.createDirectories(occupied);
-        Files.write(occupied.resolve("retained"), new byte[] {1});
-        try (LoadRunResources resources = new LoadRunResources(root, config)) {
-            assertThrows(IllegalArgumentException.class,
-                    () -> resources.initializeExecutionNamespace(root.resolve("occupied/load/old-run")));
+        try (LoadRunResources restarted = new LoadRunResources(root, config)) {
+            assertThrows(java.io.IOException.class, () -> restarted.initializeExecutionNamespace(run));
         }
     }
 
-    @Test void loadsCurrentScenarioIdFormatAndRejectsHistoricalSchema() throws Exception {
+    @Test void acceptsExistingRunIdContractWithDeterministicBoundedExecutionSegments() throws Exception {
         installConfig();
-        String yaml = "schemaVersion: att-load/v1.3\nexecution:\n  execIdFormat: '${EXEC.RUN_ID}-${EXEC.LOAD.WORKLOAD_ID}-${EXEC.LOAD.USER_ID}-${EXEC.LOAD.ITERATION}'\n"
-                + "workloads:\n  - id: one\n    target: {type: template, id: T}\n    load: {users: 1, duration: 1s}\n"
-                + "evidence: {resources: {output: none}}\n";
-        Path path = root.resolve("load.yaml");
-        Files.write(path, yaml.getBytes("UTF-8"));
-        LoadScenario scenario = new LoadScenarioLoader(root).load(path);
-        assertEquals("${EXEC.RUN_ID}-${EXEC.LOAD.WORKLOAD_ID}-${EXEC.LOAD.USER_ID}-${EXEC.LOAD.ITERATION}", scenario.execIdFormat());
-        assertFalse(scenario.resourceOutputEnabled());
-        assertEquals(scenario.execIdFormat(), scenario.forWorkload(scenario.workload()).execIdFormat());
-        assertFalse(scenario.forWorkload(scenario.workload()).resourceOutputEnabled());
-        Files.write(path, yaml.replace("v1.3", "v1.2").getBytes("UTF-8"));
-        assertThrows(Exception.class, () -> new LoadScenarioLoader(root).load(path));
+        FrameworkConfig config = new FrameworkConfigLoader().load(root.resolve("config.yaml"), root);
+        assertEquals(68, LoadExecutionIdPattern.executionPrefix(String.join("", Collections.nCopies(128, "測"))).length());
+        Set<String> prefixes = new HashSet<>();
+        for (String id : Arrays.asList("測試2026", "my run", "a..b", "_run", "run!", String.join("", Collections.nCopies(128, "x")))) {
+            assertEquals(id, att.core.IdentifierValidator.runId(id));
+            String prefix = LoadExecutionIdPattern.executionPrefix(id);
+            assertTrue(prefixes.add(prefix));
+            assertEquals(prefix, LoadExecutionIdPattern.executionPrefix(id));
+            try (LoadRunResources resources = new LoadRunResources(root, config)) {
+                resources.initializeExecutionNamespace(root.resolve("output/load").resolve(id));
+                assertEquals(prefix + "-execution-1", resources.nextExecutionId(id));
+                LoadExecutionIdPattern.requireSafe(resources.nextExecutionId(id));
+                assertThrows(IllegalArgumentException.class, () -> resources.nextExecutionId("OTHER"));
+            }
+        }
+    }
+
+    @Test void rejectsUnsafeOrOverlongRunIdsAndNeverWrapsSequence() throws Exception {
+        installConfig();
+        FrameworkConfig config = new FrameworkConfigLoader().load(root.resolve("config.yaml"), root);
+        for (String id : Arrays.asList("", "../run", "a/b", "a\\b", "run.", String.join("", Collections.nCopies(211, "x")))) {
+            try (LoadRunResources resources = new LoadRunResources(root, config)) {
+                assertThrows(IllegalArgumentException.class, () -> resources.nextExecutionId(id));
+            }
+        }
+        try (LoadRunResources resources = new LoadRunResources(root, config)) {
+            java.lang.reflect.Field field = LoadRunResources.class.getDeclaredField("executionSequence");
+            field.setAccessible(true);
+            java.util.concurrent.atomic.AtomicLong sequence = (java.util.concurrent.atomic.AtomicLong) field.get(resources);
+            sequence.set(Long.MAX_VALUE - 1);
+            assertEquals("RUN-execution-" + Long.MAX_VALUE, resources.nextExecutionId("RUN"));
+            assertThrows(IllegalStateException.class, () -> resources.nextExecutionId("RUN"));
+            assertThrows(IllegalStateException.class, () -> resources.nextExecutionId("RUN"));
+            assertEquals(Long.MAX_VALUE, sequence.get());
+        }
+    }
+
+    @Test void rejectsCustomFormatsInHistoricalCurrentPolicyAndInlineSnapshots() throws Exception {
+        installConfig();
+        for (String version : Arrays.asList("att-load/v1.3", "att-load/v1.7", "att-load/v1.8")) {
+            String yaml = "schemaVersion: " + version + "\nexecution: {execIdFormat: ''}\n"
+                    + "workloads: [{id: one, target: {type: tool, id: sample.echo}, load: {users: 1, duration: 1s}}]\n";
+            Path source = root.resolve("scenario.yaml");
+            Files.write(source, yaml.getBytes("UTF-8"));
+            LoadScenarioLoader loader = new LoadScenarioLoader(root);
+            att.validation.DiagnosticException error = assertThrows(att.validation.DiagnosticException.class, () -> loader.load(source));
+            assertEquals("execution.execIdFormat", error.field());
+            assertTrue(error.detail().contains("Remove execution.execIdFormat"));
+            @SuppressWarnings("unchecked") Map<String,Object> snapshot = (Map<String,Object>) att.config.YamlSupport.load(source);
+            error = assertThrows(att.validation.DiagnosticException.class, () -> loader.loadInline(snapshot));
+            assertEquals("execution.execIdFormat", error.field());
+        }
+        Path policy = root.resolve("load/load.yaml");
+        Files.createDirectories(policy.getParent());
+        Files.write(policy, "schemaVersion: att-load/v1.7\nload: {users: 1, duration: 1s}\nexecution: {execIdFormat: custom}\n".getBytes("UTF-8"));
+        assertThrows(IllegalArgumentException.class, () -> new LoadScenarioLoader(root).loadDefaultPolicy());
+    }
+
+    @Test void migratesHistoricalSnapshotsWithoutCustomizationAndRejectsRetainedOutput() throws Exception {
+        installConfig();
+        Path source = root.resolve("scenario.yaml");
+        Files.write(source, ("schemaVersion: att-load/v1.7\nworkloads: [{id: one, target: {type: tool, id: sample.echo}, load: {users: 1, duration: 1s}}]\n").getBytes("UTF-8"));
+        assertEquals("att-load/v1.8", new LoadScenarioLoader(root).load(source).schemaVersion());
+        Path run = root.resolve("occupied/load/RUN");
+        Files.createDirectories(run.resolve("failures"));
+        Files.write(run.resolve("failures/retained"), new byte[]{1});
+        try (LoadRunResources resources = new LoadRunResources(root, new FrameworkConfigLoader().load(root.resolve("config.yaml"), root))) {
+            assertThrows(IllegalArgumentException.class, () -> resources.initializeExecutionNamespace(run));
+        }
+    }
+    @Test void rejectsLegacyMetricsOnlySummaryWithoutOverwritingIt() throws Exception {
+        installConfig();
+        Path run = root.resolve("legacy/load/RUN");
+        Files.createDirectories(run);
+        Path summary = run.resolve("load-summary.json");
+        Files.write(summary, "retained".getBytes("UTF-8"));
+        try (LoadRunResources resources = new LoadRunResources(root, new FrameworkConfigLoader().load(root.resolve("config.yaml"), root))) {
+            assertThrows(IllegalArgumentException.class, () -> resources.initializeExecutionNamespace(run));
+            assertEquals("retained", new String(Files.readAllBytes(summary), "UTF-8"));
+            assertFalse(Files.exists(run.resolve(".execution-owner")));
+        }
     }
 
     private void installConfig() throws Exception {

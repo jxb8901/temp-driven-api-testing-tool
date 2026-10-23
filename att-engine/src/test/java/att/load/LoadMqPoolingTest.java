@@ -119,7 +119,7 @@ class LoadMqPoolingTest {
         LoadEvidenceStore evidence = new LoadEvidenceStore(new LoadEvidencePolicy(
                 LoadEvidencePolicy.Success.NONE, LoadEvidencePolicy.Failure.FULL, 0.0, 1));
         try (LoadRunResources resources = new LoadRunResources(tempDir, config, failureFactory)) {
-            IterationExecutor executor = new IterationExecutor(tempDir, config, target, resources, outputRoot);
+            IterationExecutor executor = new IterationExecutor(tempDir, config, target, resources, tempDir.resolve("failure-output"));
             assertTrue(evidence.reserveEvidence("mq-failure"));
             IterationResult failure = executor.execute(request("mq-failure", "VU-1")
                     .withOutputDirectory(outputRoot.resolve("load/mq-run/iterations"))

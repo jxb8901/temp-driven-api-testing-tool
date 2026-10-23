@@ -89,6 +89,23 @@ public final class FrameworkRunner {
                 return;
             }
             if ("load".equals(options.command())) {
+                if (options.listLoadTemplates()) {
+                    java.util.Map<String,Object> catalog = LoadTemplateCommand.list(root);
+                    if ("json".equals(options.format())) System.out.println(att.validation.JsonSupport.write(catalog));
+                    else System.out.println(new org.yaml.snakeyaml.Yaml().dump(catalog));
+                    return;
+                }
+                att.load.LoadScenario composedTemplate = null;
+                if (options.loadTemplate() != null) {
+                    config = loadConfig(options, root);
+                    composedTemplate = LoadTemplateCommand.compose(root, config, options);
+                    if (options.previewLoadTemplate()) {
+                        java.util.Map<String,Object> projection = new att.debug.DebugEngine(root, options.configPath(), config, new att.exec.IbmMqClientFactory(), true, java.util.Collections.<String>emptyList(), java.util.Collections.<String>emptyList()).projectSafeValue(composedTemplate.toMap());
+                        if ("json".equals(options.format())) System.out.println(att.validation.JsonSupport.write(projection));
+                        else System.out.println(new org.yaml.snakeyaml.Yaml().dump(projection.get("value")));
+                        return;
+                    }
+                }
                 if (options.loadScenario() == null && !options.loadDebug()) {
                     config = loadConfig(options, root);
                     CliDiscovery.printLoad(CliDiscovery.load(root, config), options.format());
@@ -109,7 +126,7 @@ public final class FrameworkRunner {
                             options.loadDebug() ? options.debugTargetId() : null, options.loadUsers(),
                             options.loadArrivalRate(), options.loadWarmup(), options.loadRampUp(), options.loadDuration(),
                             options.loadRampDown(), options.loadThinkTime(), options.loadMaxConcurrent(),
-                            options.loadOverloadPolicy(), options.variableOverrides(), progress, null,
+                            options.loadOverloadPolicy(), options.variableOverrides(), progress, composedTemplate,
                             options.profile()));
                 } catch (InterruptedException interrupted) {
                     Thread.currentThread().interrupt();
@@ -328,6 +345,8 @@ public final class FrameworkRunner {
         System.out.println("Load discovery: ./att.sh load [--format human|json] lists valid scenarios; load/load.yaml supplies the optional Quick Load policy.");
         System.out.println("--set namespaces: input.* -> EXEC.INPUT; arg.* -> Tool arguments; vars.* -> Template/Flow EXEC.VARS. Values use safe YAML types.");
         System.out.println("Path display: absolute paths are shown by default; --substitute-package-root and --substitute-external-basename independently enable $ATT_PACKAGE_ROOT and $EXTERNAL/<basename> aliases.");
+        System.out.println("Load Templates (also att.bat): load --list-templates [--format json]; load --debug <type> <id> --load-template <builtin:single-vu|builtin:single-tps|path> [--preview]; load --debug --load-template <path|builtin:mode> --bindings <file> [--preview] [--format json]");
+        System.out.println("Template preview/list starts no traffic. Multi-target input, set, users, arrival-rate and other unscoped pacing overrides are rejected; put scoped values in the template/bindings descriptor.");
         System.out.println("Load options: --warmup <duration> --ramp-up <duration> --ramp-down <duration> --think-time <duration> --overload-policy drop --output-dir <dir> --profile --quiet|--verbose");
         System.out.println("Load output: <output-dir>/load/<runId>/load-summary.json|yaml and report/index.html; exit codes PASS=0, threshold FAIL=1, validation=2, runtime=3");
         System.out.println("Environment profiles: use --env <name> with run, validate, debug, or load; --config selects the common config.");

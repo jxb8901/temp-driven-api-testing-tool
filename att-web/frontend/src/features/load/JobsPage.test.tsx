@@ -74,6 +74,17 @@ function selectedRows(): string[] {
 }
 
 describe('JobsPage React feature', () => {
+  it('uses Server-filtered LOAD pages instead of the mixed latest window and retains the selected route type', async () => {
+    const loadPage=vi.fn().mockResolvedValueOnce({items:[{...sampleJob,jobId:'LOAD-OLD'}],nextOffset:100}).mockResolvedValueOnce({items:[{...sampleJob,jobId:'LOAD-OLDER'}],nextOffset:null});
+    const api=makeApi({listLoadJobs:loadPage});const onOpenJob=vi.fn();
+    await act(async () => root.render(<JobsPage api={api} executionType="load" onOpenJob={onOpenJob} onShowList={vi.fn()} />));
+    await advance();expect(api.listJobs).not.toHaveBeenCalled();expect(loadPage).toHaveBeenCalledWith(expect.objectContaining({offset:0,limit:100}));
+    await click([...host.querySelectorAll('button')].find(button=>button.textContent==='Load older LOAD Jobs')!);
+    expect(loadPage).toHaveBeenLastCalledWith(expect.objectContaining({offset:100,limit:100}));
+    expect(host.textContent).toContain('LOAD-OLD');expect(host.textContent).toContain('LOAD-OLDER');
+    await click([...host.querySelectorAll('button')].find(button=>button.textContent==='Open details')!);expect(onOpenJob).toHaveBeenCalledWith('LOAD-OLD');
+  });
+
   it('downsamples only the chart display and preserves exact extrema and coordinates', () => {
     const points = Array.from({ length: CHART_DISPLAY_POINT_THRESHOLD + 240 }, (_, index) => ({
       epochMs: 1_800_000_000_000 + index * 1000,

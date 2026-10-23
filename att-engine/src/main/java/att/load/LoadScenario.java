@@ -30,9 +30,6 @@ public final class LoadScenario {
     private final Map<String, Object> executionDefaults;
     private final boolean policyOnly;
     private final List<Path> testdataDescriptors;
-    private String execIdFormat = "";
-    public String execIdFormat() { return execIdFormat; }
-    LoadScenario withExecIdFormat(String value) { execIdFormat = value == null ? "" : value; return this; }
     public boolean resourceOutputEnabled() {
         Object resources = evidence.get("resources");
         return !(resources instanceof Map) || !"none".equals(((Map<?, ?>) resources).get("output"));
@@ -179,7 +176,7 @@ public final class LoadScenario {
         if (workload == null) throw new IllegalArgumentException("Load workload is required");
         return new LoadScenario(source, schemaVersion, Collections.singletonList(workload), seed,
                 workload.thresholds(), evidence, true, loadDefaults, executionDefaults, false,
-                testdataDescriptors).withExecIdFormat(execIdFormat);
+                testdataDescriptors);
     }
 
     LoadScenario forMixEntry(LoadWorkload workload, LoadMixEntry entry) {
@@ -196,7 +193,6 @@ public final class LoadScenario {
         Map<String, Object> result = new LinkedHashMap<String, Object>();
         result.put("schemaVersion", schemaVersion);
         Map<String, Object> execution = new LinkedHashMap<String, Object>(executionDefaults);
-        if (!execIdFormat.isEmpty()) execution.put("execIdFormat", execIdFormat);
         if (!execution.isEmpty()) result.put("execution", execution);
         if (seed != null) result.put("seed", seed);
         if (!loadDefaults.isEmpty()) result.put("load", loadDefaults);

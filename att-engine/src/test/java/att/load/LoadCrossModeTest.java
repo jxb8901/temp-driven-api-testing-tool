@@ -266,7 +266,7 @@ class LoadCrossModeTest {
                 + "    inputs: {accountId: '@{accounts.id}'}\n"
                 + "    vars: {copied: '${EXEC.INPUT.accountId}'}\n"
                 + "    load: {users: 1, duration: 1s}\n"
-                + "execution: {execIdFormat: '${EXEC.RUN_ID}-${EXEC.INPUT.accountId}'}\n");
+                + "execution: {}\n");
         LoadScenario scenario = new LoadScenarioLoader(project).load(source);
         LoadTarget target = new LoadTargetResolver(project, config()).resolve(scenario);
         new LoadTargetValidator(project, config()).validate(scenario, target);
@@ -284,7 +284,7 @@ class LoadCrossModeTest {
             assertEquals(ResultStatus.PASS, result.status());
             assertEquals(42L, ((Number) result.context().require("EXEC.INPUT.accountId")).longValue());
             assertEquals(42L, ((Number) result.context().require("EXEC.VARS.copied")).longValue());
-            assertEquals("testdata-bootstrap-42", result.context().require("EXEC.ID"));
+            assertEquals("testdata-bootstrap-execution-1", result.context().require("EXEC.ID"));
             assertTrue(String.valueOf(result.context().resolve("EXEC.ACTIONS.show.output.result"))
                     .contains("copied=42|input=42"));
         }
@@ -581,6 +581,36 @@ class LoadCrossModeTest {
         String stageKey = String.valueOf(stages.keySet().iterator().next());
         assertEquals("flow=shared-value", CaseRuntimeContext.getPath(caseTree,
                 "STAGES." + stageKey + ".TEMPLATE.ACTIONS.nested.flow.actions.flowLog.output.result"));
+    }
+
+    @Test void concurrentRealIterationsShareIdentityAcrossModelsWorkloadsAndMixEntriesWithoutEvidenceWrites() throws Exception {
+        Path root=fixture();FrameworkConfig config=config();
+        write(root,"templates/SHARED/template.yaml","schemaVersion: att-template/v3.6\nname: SHARED\ndescription: Identity context\nactions:\n  log:\n    type: log\n    message: '${EXEC.ID}'\n");
+        Path source=write(root,"identity.yaml","schemaVersion: att-load/v1.8\nload: {users: 1, duration: 1s}\nworkloads: [{id: pool, target: {type: template, id: SHARED}}]\n");
+        LoadTarget target=new LoadTargetResolver(root,config).resolve(new LoadScenarioLoader(root).load(source));
+        Path output=temp.resolve("identities");
+        try(LoadRunResources resources=new LoadRunResources(root,config)) {
+            IterationExecutor executor=new IterationExecutor(root,config,target,resources,output);
+            java.util.Set<String> ids=java.util.concurrent.ConcurrentHashMap.newKeySet();
+            ExecutorService pool=Executors.newFixedThreadPool(8);
+            try {
+                List<Future<?>> tasks=new java.util.ArrayList<>();
+                for(int worker=0;worker<8;worker++) {final int w=worker;tasks.add(pool.submit(()->{
+                    for(int i=0;i<100;i++) {
+                        IterationRequest request=(w%2==0?IterationRequest.closed("CONCURRENT","iteration-"+w+"-"+i,i,"STEADY",Instant.now(),"VU-"+w,Collections.<String,Object>emptyMap()):IterationRequest.arrivalRate("CONCURRENT","iteration-"+w+"-"+i,i,"STEADY",Instant.now(),Collections.<String,Object>emptyMap()))
+                                .withWorkloadId("workload-"+w).withMixIdentity("slot-"+(i%2),"template","SHARED",Collections.<String,Object>emptyMap()).withEvidenceRetention(false,false);
+                        IterationResult result=executor.execute(request);
+                        assertEquals(ResultStatus.PASS,result.status());assertTrue(ids.add(result.executionId()));
+                        assertEquals(result.executionId(),result.context().require("EXEC.ID"));
+                        assertEquals("CONCURRENT",result.context().require("EXEC.RUN_ID"));
+                        assertTrue(String.valueOf(result.context().require("EXEC.OUTPUT_DIR")).contains(result.executionId()));
+                    }
+                }));}
+                for(Future<?> task:tasks)task.get();
+            } finally {pool.shutdownNow();}
+            assertEquals(800,ids.size());assertTrue(ids.contains("CONCURRENT-execution-800"));
+            try(java.util.stream.Stream<Path> files=Files.walk(output)) {assertEquals(1,files.filter(Files::isRegularFile).count());}
+        }
     }
 
     private CaseRuntimeContext testcaseContext(Path project, StageTemplate template, Map<String, Object> input) {

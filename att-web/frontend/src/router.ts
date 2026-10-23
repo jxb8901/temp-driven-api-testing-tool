@@ -26,9 +26,9 @@ export type AppRoute =
   | { kind: 'configuration'; packageId?: string; environment?: string; filePath?: string; fileOrigin?: string; sourceReference?: ResourceSourceReferenceRoute; configurationReferenceId?: string; tab?: ConfigurationTab }
   | { kind: 'quick-load'; packageId: string; target?: ResourceRoute; environment?: string; templateId?: string; model?: 'virtualUsers' | 'arrivalRate' }
   | { kind: 'run'; packageId?: string; target?: ResourceRoute; environment?: string; batch?: boolean }
-  | { kind: 'jobs'; jobId?: string }
+  | { kind: 'jobs'; jobId?: string; executionType?: 'load' }
   | { kind: 'job-console'; jobId: string; view?: 'live' | 'events' }
-  | { kind: 'load'; packageId?: string; catalog?: LoadCatalogRouteState }
+  | { kind: 'load'; packageId?: string; catalog?: LoadCatalogRouteState; tab?: 'templates' | 'scenarios'; templateId?: string }
   | { kind: 'load-resource'; packageId: string; resourceId: string; environment?: string; returnTo?: string }
   | { kind: 'schedules'; view?: 'new' | 'edit' | 'history'; scheduleId?: string; occurrenceId?: string; intent?: 'validated'; returnTo?: string }
   | { kind: 'settings' };
@@ -100,7 +100,7 @@ export function parseRoute(hash: string): AppRoute {
       const view = query.get('view');
       return { kind: 'job-console', jobId: parts[1], ...(view === 'live' || view === 'events' ? { view } : {}) };
     }
-    return parts[1] ? { kind: 'jobs', jobId: parts[1] } : { kind: 'jobs' };
+    return { kind: 'jobs', ...(parts[1] ? { jobId: parts[1] } : {}), ...(query.get('type') === 'load' ? { executionType: 'load' } : {}) };
   }
   if (parts[0] === 'load' && parts[1] === 'resources' && parts[2] && parts[3]) return {
     kind: 'load-resource', packageId: parts[2], resourceId: parts[3],
@@ -108,7 +108,7 @@ export function parseRoute(hash: string): AppRoute {
     ...(query.get('returnTo') ? { returnTo: query.get('returnTo')! } : {}),
   };
   if (parts[0] === 'advanced-load') {
-    if (parts[1]) return { kind: 'load', packageId: parts[1] };
+    if (parts[1]) return { kind: 'load', packageId: parts[1], ...(query.get('templateId') ? { templateId: query.get('templateId')! } : {}) };
     const catalog: LoadCatalogRouteState = {};
     const queryText = query.get('q'); if (queryText) catalog.query = queryText;
     const packageFilter = query.get('package'); if (packageFilter) catalog.packageFilter = packageFilter;
@@ -117,7 +117,7 @@ export function parseRoute(hash: string): AppRoute {
     const validationFilter = query.get('validation'); if (validationFilter) catalog.validationFilter = validationFilter;
     if (query.has('environment')) catalog.environment = query.get('environment') || '';
     const scrollY = Number(query.get('scrollY')); if (Number.isFinite(scrollY) && scrollY > 0) catalog.scrollY = Math.min(1000000, Math.floor(scrollY));
-    return Object.keys(catalog).length ? { kind: 'load', catalog } : { kind: 'load' };
+    return { kind: 'load', ...(Object.keys(catalog).length ? { catalog } : {}), ...(query.get('tab') === 'scenarios' ? { tab: 'scenarios' } : {}) };
   }
   if (parts[0] === 'schedules' || parts[0] === 'load-schedules' || parts[0] === 'scheduled-load') {
     if (parts[1] === 'new' && parts.length === 2) {
@@ -184,14 +184,15 @@ export function formatRoute(route: AppRoute): string {
         + (route.target ? '/' + encodeURIComponent(route.target.type) + '/' + encodeURIComponent(route.target.resourceId) : '')
         + (suffix ? '?' + suffix : '');
     }
-    case 'jobs': return route.jobId ? '#/jobs/' + encodeURIComponent(route.jobId) : '#/jobs';
+    case 'jobs': return (route.jobId ? '#/jobs/' + encodeURIComponent(route.jobId) : '#/jobs') + (route.executionType ? '?type=load' : '');
     case 'job-console': {
       const view = route.view ? '?view=' + encodeURIComponent(route.view) : '';
       return '#/jobs/' + encodeURIComponent(route.jobId) + '/console' + view;
     }
     case 'load': {
-      if (route.packageId) return '#/advanced-load/' + encodeURIComponent(route.packageId);
+      if (route.packageId) return '#/advanced-load/' + encodeURIComponent(route.packageId) + (route.templateId ? '?templateId=' + encodeURIComponent(route.templateId) : '');
       const query = new URLSearchParams();
+      if (route.tab === 'scenarios') query.set('tab', 'scenarios');
       if (route.catalog?.query) query.set('q', route.catalog.query);
       if (route.catalog?.packageFilter && route.catalog.packageFilter !== 'all') query.set('package', route.catalog.packageFilter);
       if (route.catalog?.kindFilter && route.catalog.kindFilter !== 'all') query.set('kind', route.catalog.kindFilter);

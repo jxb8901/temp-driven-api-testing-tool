@@ -288,7 +288,7 @@ All endpoints use `/api/v1`. Requests and responses use JSON unless the endpoint
 | `GET` | `/packages/{packageId}/load-policy?model=virtualUsers&environment=SIT` | Read safe model-specific Load policy defaults for Advanced Load |
 | `POST` | `/drafts/debug` | Validate a fixed-target Debug input and create an in-memory draft |
 | `POST` | `/drafts/quick-load` | Validate a fixed-target Quick Load and create an in-memory draft |
-| `POST` | `/drafts/load` | Validate an `att-load/v1.7` scenario and create an in-memory draft |
+| `POST` | `/drafts/load` | Validate an `att-load/v1.8` scenario and create an in-memory draft |
 | `GET` | `/drafts/{draftId}` | Read the safe preview for an owned Debug, Quick Load, or Advanced Load draft |
 | `POST` | `/jobs/debug`, `/jobs/load` | Submit an owned Debug, Quick Load, or Advanced Load draft |
 | `POST` | `/jobs/run`, `/jobs/load`, `/jobs/validate` | Submit one path-based job |
@@ -431,7 +431,7 @@ The Server rechecks the package revision at submission and before Worker start. 
 
 ### Target-scoped Quick Load
 
-Quick Load is available from a selected Template, Flow, or Tool when `server.inlineLoad.enabled` is true. It uses one fixed target and creates one Workload. The model is `virtualUsers` or `arrivalRate`; the Server composes the matching current `att-load/v1.7` policy and validates the target through the existing Load pipeline. When disabled, both Quick Load form/policy reads and draft creation return `403 ATT-SERVER-INLINE-LOAD-DISABLED`.
+Quick Load is available from a selected Template, Flow, or Tool when `server.inlineLoad.enabled` is true. It uses one fixed target and creates one Workload. The model is `virtualUsers` or `arrivalRate`; the Server composes the matching current `att-load/v1.8` policy and validates the target through the existing Load pipeline. When disabled, both Quick Load form/policy reads and draft creation return `403 ATT-SERVER-INLINE-LOAD-DISABLED`.
 
 ```http
 GET /api/v1/packages/payments/resources/flow/{resourceId}/quick-load-form?model=virtualUsers&environment=SIT
@@ -439,7 +439,7 @@ GET /api/v1/packages/payments/resources/flow/{resourceId}/quick-load-form?model=
 
 The form response includes safe `inputs` and `vars` defaults for Template/Flow targets, or `inputs` and `arguments` for a Tool, plus a redacted one-workload preview. It reads only the business fields from the optional target `debug.yaml`; Debug-only `case`, `stage`, and local `testdata` are not copied. When a sidecar has Debug-local Testdata, the form reports that those imports were omitted. Supply any needed package-relative descriptors in the separate Load-level `testdata` array; these paths are validated as part of the effective Load scenario.
 
-The Server reads `load/load.visualuser.yaml` for `virtualUsers` and `load/load.arrivalrate.yaml` for `arrivalRate`. These are policy-only `att-load/v1.7` descriptors; the selected policy must match the chosen model. If a model-specific file is absent, a bundled low-intensity fallback is used: one Virtual User for 10 seconds, or 1 arrival per second for 10 seconds with `maxConcurrent: 1` and `overloadPolicy: drop`. Existing CLI `load/load.yaml` behavior is unchanged.
+The Server reads `load/load.visualuser.yaml` for `virtualUsers` and `load/load.arrivalrate.yaml` for `arrivalRate`. These are policy-only `att-load/v1.8` descriptors; the selected policy must match the chosen model. If a model-specific file is absent, a bundled low-intensity fallback is used: one Virtual User for 10 seconds, or 1 arrival per second for 10 seconds with `maxConcurrent: 1` and `overloadPolicy: drop`. Existing CLI `load/load.yaml` behavior is unchanged.
 
 Validate business values and pacing overrides to create an owned draft:
 
@@ -465,7 +465,7 @@ The Server checks the package revision at draft submission, before Worker start,
 
 ### Advanced Load builder
 
-Advanced Load creates a full `att-load/v1.7` scenario with one or more workloads when `server.inlineLoad.enabled` is true. The selected `model` must be `virtualUsers` or `arrivalRate` for every workload. Virtual Users workloads can use one fixed target or a weighted `mix`; Arrival Rate workloads use one fixed target each. The Engine validates the shared timing envelope, workload intensity, thresholds, Testdata policies, and every target before the Server creates a draft. The Server then enforces its configured inline Load caps before returning the preview. Exceeding a cap returns `400 ATT-SERVER-INLINE-LOAD-LIMIT` with a safe summary; the Server does not schedule the scenario.
+Advanced Load creates a full `att-load/v1.8` scenario with one or more workloads when `server.inlineLoad.enabled` is true. The selected `model` must be `virtualUsers` or `arrivalRate` for every workload. Virtual Users workloads can use one fixed target or a weighted `mix`; Arrival Rate workloads use one fixed target each. The Engine validates the shared timing envelope, workload intensity, thresholds, Testdata policies, and every target before the Server creates a draft. The Server then enforces its configured inline Load caps before returning the preview. Exceeding a cap returns `400 ATT-SERVER-INLINE-LOAD-LIMIT` with a safe summary; the Server does not schedule the scenario.
 
 Read safe model policy defaults with:
 
@@ -485,7 +485,7 @@ Content-Type: application/json
   "packageId": "payments",
   "environment": "SIT",
   "scenario": {
-    "schemaVersion": "att-load/v1.7",
+    "schemaVersion": "att-load/v1.8",
     "load": {"users": 1, "duration": "30s"},
     "workloads": [
       {"id": "browse", "target": {"type": "flow", "id": "PAYMENT.browse"}, "load": {"users": 4}},

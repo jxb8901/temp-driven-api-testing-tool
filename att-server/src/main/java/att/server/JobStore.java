@@ -493,9 +493,12 @@ final class JobStore implements AutoCloseable {
         return listLoad(limitPlusOne,offset);
     }
     synchronized List<Map<String,Object>> listLoad(int limitPlusOne,int offset) throws Exception {
+        return listLoad(limitPlusOne,offset,null,false);
+    }
+    synchronized List<Map<String,Object>> listLoad(int limitPlusOne,int offset,String search,boolean pinnedOnly) throws Exception {
         List<Map<String,Object>> out=new ArrayList<>();
-        try(Connection c=connect();PreparedStatement p=c.prepareStatement("SELECT job_id,command,package_id,principal,status,created_at,started_at,finished_at,exit_code,request_summary,pinned,pinned_at,pinned_by,pin_reason FROM jobs WHERE command='load' AND (retention_state IS NULL OR retention_state<>'DELETING') ORDER BY created_at DESC,job_id DESC LIMIT ? OFFSET ?")){
-            p.setInt(1,limitPlusOne);p.setInt(2,offset);try(ResultSet r=p.executeQuery()){while(r.next())out.add(jobSummary(r));}
+        try(Connection c=connect();PreparedStatement p=c.prepareStatement("SELECT job_id,command,package_id,principal,status,created_at,started_at,finished_at,exit_code,request_summary,pinned,pinned_at,pinned_by,pin_reason FROM jobs WHERE command='load' AND (retention_state IS NULL OR retention_state<>'DELETING') AND LOCATE(?,LOWER(COALESCE(principal,''))) > 0"+(pinnedOnly?" AND pinned=TRUE":"")+" ORDER BY created_at DESC,job_id DESC LIMIT ? OFFSET ?")){
+            p.setString(1,search==null?"":search.trim().toLowerCase(java.util.Locale.ROOT));p.setInt(2,limitPlusOne);p.setInt(3,offset);try(ResultSet r=p.executeQuery()){while(r.next())out.add(jobSummary(r));}
         }return out;
     }
     private static Map<String,Object> jobSummary(ResultSet r) throws Exception {

@@ -1,6 +1,5 @@
-import { JobReplayActions } from "./JobReplayActions";
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ApiError, type AsyncState, type JobSummary } from '../../types';
+import { ApiError, type AsyncState } from '../../types';
 import type { LoadCatalogItem, PackageOption, ServerDiagnostic } from './types';
 import type { api } from '../../api';
 import { formatRoute, type LoadCatalogRouteState } from '../../router';
@@ -8,9 +7,8 @@ import { useCountdownNow } from '../../useCountdownNow';
 import './load.css';
 
 type ScheduleIntent = { packageId: string; environment?: string; draftId: string; previewYaml?: string; expiresAt?: string; executionType: 'load' };
-type CatalogApi = Pick<typeof api, 'listLoadCatalog' | 'validateLoadCatalogScenario' | 'submitLoadScenario' | 'listLoadJobs'>
+type CatalogApi = Pick<typeof api, 'listLoadCatalog' | 'validateLoadCatalogScenario' | 'submitLoadScenario'>
   & Partial<Pick<typeof api, 'getDeclaredConfiguration' | 'getJobReplay' | 'createJobReplayDraft' | 'rerunJob'>>;
-type CatalogJob = JobSummary & { scenario?: string; environment?: string; model?: string };
 type CatalogFailure = { message: string; suggestion?: string; cursor?: string; query: string; retrying?: boolean };
 const CATALOG_FETCH_CONCURRENCY = 4;
 
@@ -19,13 +17,6 @@ function catalogFailure(error: unknown, cursor: string | undefined, query: strin
   const suggestion = first && typeof first === 'object' && 'suggestion' in first && typeof first.suggestion === 'string'
     ? first.suggestion : undefined;
   return { message: error instanceof Error ? error.message : 'LOAD catalog could not be loaded.', suggestion, cursor, query };
-}
-
-function jobDuration(job: CatalogJob): string | null {
-  if (!job.startedAt || !job.finishedAt) return null;
-  const milliseconds = Date.parse(job.finishedAt) - Date.parse(job.startedAt);
-  if (!Number.isFinite(milliseconds) || milliseconds < 0) return null;
-  return milliseconds < 1000 ? `${milliseconds} ms` : `${(milliseconds / 1000).toFixed(1)} s`;
 }
 
 function safeDiagnosticField(value: unknown): string | undefined {
@@ -46,7 +37,7 @@ function safeCatalogDiagnostics(value: unknown): ServerDiagnostic[] {
 }
 
 export function LoadCatalogPage({ api, packages, inlineLoadEnabled, schedulingEnabled, environment, catalogState: initialCatalogState, onEnvironmentChange,
-  onNewLoad, onQuickLoad, onJobAccepted, onOpenJob, onSchedule, onOpenDetail }: {
+  onNewLoad, onQuickLoad, onJobAccepted, onSchedule, onOpenDetail }: {
   api: CatalogApi; packages: AsyncState<PackageOption[]>; inlineLoadEnabled: boolean; schedulingEnabled: boolean;
   environment: string; catalogState?: LoadCatalogRouteState; onEnvironmentChange(value: string): void; onNewLoad(packageId?: string): void;
   onQuickLoad(packageId: string, template: LoadCatalogItem): void; onJobAccepted(jobId: string): void;
@@ -79,10 +70,6 @@ export function LoadCatalogPage({ api, packages, inlineLoadEnabled, schedulingEn
   const [actionKey, setActionKey] = useState('');
   const actionSequenceRef = useRef(0);
   const [notice, setNotice] = useState('');
-  const [jobs, setJobs] = useState<CatalogJob[]>([]);
-  const [jobsState, setJobsState] = useState<'loading' | 'ready' | 'error'>('loading');
-  const [jobsError, setJobsError] = useState('');
-  const [jobsMore, setJobsMore] = useState<number | null>(null);
   const environmentDraftRef = useRef(environmentDraft);
   environmentDraftRef.current = environmentDraft;
   const selectedPackage = packageFilter === 'all'
@@ -246,19 +233,6 @@ export function LoadCatalogPage({ api, packages, inlineLoadEnabled, schedulingEn
     };
   }, [packages.status, packages.status === 'ready' ? packages.data : null, loadCatalog, refreshKey]);
 
-  const loadJobs = useCallback(async (offset = 0, append = false, signal?: AbortSignal) => {
-    setJobsState(offset === 0 ? 'loading' : 'ready'); setJobsError('');
-    try {
-      const page = await api.listLoadJobs({ offset, limit: 50, signal });
-      if (signal?.aborted) return;
-      setJobs(current => append ? [...current, ...page.items] : page.items);
-      setJobsMore(page.nextOffset ?? null); setJobsState('ready');
-    } catch (error) {
-      if (!signal?.aborted) { setJobsError(error instanceof Error ? error.message : 'LOAD job history could not be loaded.'); setJobsState('error'); }
-    }
-  }, [api]);
-  useEffect(() => { const controller = new AbortController(); void loadJobs(0, false, controller.signal); return () => controller.abort(); }, [loadJobs]);
-
   const visible = useMemo(() => catalog.filter(item =>
     (packageFilter === 'all' || item.packageId === packageFilter)
     && (kindFilter === 'all' || item.kind === kindFilter)
@@ -281,7 +255,7 @@ export function LoadCatalogPage({ api, packages, inlineLoadEnabled, schedulingEn
   async function showSource(item: LoadCatalogItem) {
     const state: LoadCatalogRouteState = { query: query || undefined, packageFilter, kindFilter, modelFilter, validationFilter,
       environment: environmentDraft, scrollY: window.scrollY };
-    const returnTo = formatRoute({ kind: 'load', catalog: state });
+    const returnTo = formatRoute({ kind: 'load', tab: 'scenarios', catalog: state });
     window.history.replaceState(window.history.state, '', window.location.pathname + window.location.search + returnTo);
     onOpenDetail(item, environmentDraft, returnTo);
   }
@@ -369,8 +343,8 @@ export function LoadCatalogPage({ api, packages, inlineLoadEnabled, schedulingEn
     setPackageFilter('all'); setKindFilter('all'); setModelFilter('all'); setValidationFilter('all');
   };
   return <div className="page-content att-load-catalog">
-    <header className="att-feature-header"><div><p className="att-eyebrow">Load resources and execution history</p><h1>LOAD Catalog</h1>
-      <p>Browse package scenarios and Quick LOAD policies. Validate scenarios for the selected environment before running or scheduling.</p></div>
+    <header className="att-feature-header"><div><p className="att-eyebrow">Package resource definitions</p><h1>Scenarios</h1>
+      <p>Browse executable scenarios and Legacy Quick Load Policies. Validate scenarios for the selected environment before running or scheduling.</p></div>
       <div className="att-load-catalog-toolbar-actions"><button className="button button-primary" type="button" onClick={() => onNewLoad(selectedPackage)}>New LOAD</button></div>
     </header>
     {!inlineLoadEnabled && <p className="callout callout-warning" role="status">Quick LOAD composition is disabled by Server policy. Valid package scenarios may still be run directly when Server execution policy allows.</p>}
@@ -382,7 +356,7 @@ export function LoadCatalogPage({ api, packages, inlineLoadEnabled, schedulingEn
           queryRef.current = value; catalogFailuresRef.current = {}; setCatalogFailures({}); setQuery(value);
         }} placeholder="Package-relative YAML path" /></label>
         <label>Package<select value={packageFilter} onChange={event => setPackageFilter(event.currentTarget.value)}><option value="all">All packages</option>{packages.status === 'ready' && packages.data.map(pkg => <option key={pkg.packageId} value={pkg.packageId}>{pkg.displayName || pkg.packageId}</option>)}</select></label>
-        <label>Kind<select value={kindFilter} onChange={event => setKindFilter(event.currentTarget.value)}><option value="all">All kinds</option><option value="scenario">Scenario</option><option value="template">Template</option><option value="invalid">Invalid</option></select></label>
+        <label>Kind<select value={kindFilter} onChange={event => setKindFilter(event.currentTarget.value)}><option value="all">All kinds</option><option value="scenario">Scenario</option><option value="template">Legacy Quick Load Policy</option><option value="invalid">Invalid</option></select></label>
         <label>Model<select value={modelFilter} onChange={event => setModelFilter(event.currentTarget.value)}><option value="all">All models</option><option value="virtualUsers">Virtual Users</option><option value="arrivalRate">Arrival Rate</option></select></label>
         <label>Validation<select value={validationFilter} onChange={event => setValidationFilter(event.currentTarget.value)}><option value="all">All validation states</option><option value="unverified">Unverified</option><option value="valid">Valid</option><option value="invalid">Invalid</option></select></label>
         <label>Environment for {selectedPackage || 'selected package'}<select aria-label={`Catalog Environment for ${selectedPackage || 'selected package'}`}
@@ -409,7 +383,7 @@ export function LoadCatalogPage({ api, packages, inlineLoadEnabled, schedulingEn
       {catalogState === 'ready' && visible.length === 0 && <p className="att-query-empty-state" role="status">No Load YAML resources match these filters.</p>}
       {catalogState === 'ready' && visible.length > 0 && <div className="att-load-catalog-list" aria-label="Available Load YAML resources">
         {visible.map(item => <article className="att-load-catalog-card" key={`${item.packageId}:${item.resourceId}`}>
-          <div className="att-load-catalog-card-heading"><div><span className={`att-load-kind kind-${item.kind}`}>{item.kind === 'template' ? 'Load Template' : item.kind === 'scenario' ? 'Executable Scenario' : 'Invalid'}</span>
+          <div className="att-load-catalog-card-heading"><div><span className={`att-load-kind kind-${item.kind}`}>{item.kind === 'template' ? 'Legacy Quick Load Policy' : item.kind === 'scenario' ? 'Executable Scenario' : 'Invalid'}</span>
             <h3>{item.path}</h3><p>{item.packageId} · {item.model === 'virtualUsers' ? 'Virtual Users' : item.model === 'arrivalRate' ? 'Arrival Rate' : 'Model unavailable'} · {item.workloadCount} workload{item.workloadCount === 1 ? '' : 's'}</p></div>
             <span className={`att-load-validation validation-${item.validation}`}>{item.validation}</span></div>
           {item.diagnostic && <div className="att-load-catalog-invalid-summary"><p className="att-inline-error" role="status">{item.diagnostic}{item.requestId ? ` Request ID: ${item.requestId}` : ''}</p>
@@ -435,30 +409,6 @@ export function LoadCatalogPage({ api, packages, inlineLoadEnabled, schedulingEn
         {catalogMoreLoading || catalogState === 'loading' ? 'Loading more…' : 'Load more scenarios'}
       </button>}
     </section>
-    </section>
-    <section className="att-query-workspace" aria-labelledby="recent-load-jobs-heading">
-      <section className="att-query-results-panel" aria-label="Recent LOAD job results">
-      <div className="att-query-results-heading"><div><h2 id="recent-load-jobs-heading">Recent LOAD Jobs</h2><p>Execution history returned by the Server's authorized LOAD-only query.</p></div>
-        <button className="button button-quiet" type="button" onClick={() => void loadJobs() } disabled={jobsState === 'loading'}>{jobsState === 'loading' ? 'Refreshing…' : 'Refresh'}</button></div>
-      {jobsState === 'loading' && <p className="att-query-result-status" role="status" aria-busy="true">Loading recent LOAD jobs…</p>}
-      {jobsState === 'error' && <p className="att-inline-error att-query-empty-state" role="alert">{jobsError}</p>}
-      {jobsState === 'ready' && jobs.length === 0 && <p className="att-query-empty-state" role="status">No LOAD jobs are available for this account.</p>}
-      {jobs.length > 0 && <div className="att-load-job-list">{jobs.map(job => <div className="att-load-job-row" key={job.jobId}>
-        <button className="text-link" type="button" onClick={() => onOpenJob(job.jobId)}>{job.jobId}</button>
-        <span>{job.packageId}{job.scenario ? ` · ${job.scenario}` : ''}</span>
-        <span>{job.model || 'Model unavailable'}{job.environment ? ` · ${job.environment}` : ''}</span>
-        <span className={'att-status-badge att-status-' + String(job.status).toLowerCase().replace(/[^a-z0-9]+/g, '-')}>{job.status}</span>
-        <span className="att-load-job-times"><time title="Created">Created {job.createdAt ? new Date(job.createdAt).toLocaleString() : 'unavailable'}</time>
-          {job.startedAt && <time title="Started">Started {new Date(job.startedAt).toLocaleString()}</time>}
-          {job.finishedAt && <time title="Finished">Finished {new Date(job.finishedAt).toLocaleString()}</time>}
-          {jobDuration(job) && <span>Duration {jobDuration(job)}</span>}</span>
-        <button className="button button-quiet" type="button" onClick={() => onOpenJob(job.jobId)}>View Results</button>
-        <JobReplayActions api={api} configuration={{ executionType: "load", packageId: job.packageId }} jobId={job.jobId} onOpenJob={onOpenJob} onSchedule={schedulingEnabled ? intent => {
-          if (intent.executionType === 'load' && intent.draftId) onSchedule({ ...intent, executionType: 'load', draftId: intent.draftId });
-        } : undefined} />
-      </div>)}</div>}
-      {jobsMore !== null && <button className="button button-quiet" type="button" onClick={() => void loadJobs(jobsMore, true)} disabled={jobsState === 'loading'}>Load more LOAD jobs</button>}
-      </section>
     </section>
   </div>;
 }

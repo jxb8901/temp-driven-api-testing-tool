@@ -22,7 +22,7 @@ Case log、CLI output 和輸出的 case evidence 會將 canonical package root �
 
 ## Execution identity format migration
 
-`att-config/v2.12` 新增 execution identity formats；前一版 configuration schema 仍受支援。可用 `execution.runIdFormat` 設定 Run 和 Load 的外層 ID，並用 `execution.debugIdFormat` 設定 standalone Debug directory ID。未設定時仍使用既有 timestamp Run/Load ID 及 `<type>-<targetId>` Debug ID。`execution.execIdFormat` 仍只控制 Load 每次 iteration 的 `EXEC.ID`。Run/Load 的明確 ID 使用 `--run-id`；standalone Debug 的明確 ID 使用 `--debug-id`。
+`att-config/v2.12` 新增 execution identity formats；前一版 configuration schema 仍受支援。可用 `execution.runIdFormat` 設定 Run 和 Load 的外層 ID，並用 `execution.debugIdFormat` 設定 standalone Debug directory ID。未設定時仍使用既有 timestamp Run/Load ID 及 `<type>-<targetId>` Debug ID。Load 每次 iteration 的 `EXEC.ID` 現由 Engine 管理；請移除已停用的 `execution.execIdFormat`。Run/Load 的明確 ID 使用 `--run-id`；standalone Debug 的明確 ID 使用 `--debug-id`。
 
 Load workload `testdata.<id>` 設定控制 `scope`，並可選擇整份覆蓋 descriptor 的 `selection` policy。Scope 預設為 `iteration`；`user` 只適用 closed-VU workload。請明確選擇 `error`、`recycle` 或 `stop` exhaustion。Selection metadata 會記錄，但不包含 record value。
 
@@ -65,7 +65,7 @@ send:
   call: "#{http.payment.post(body=${EXEC.INPUT.request}, requestFormat='json')}"
 ~~~
 
-Load scenario 請將舊 single-target/v1.1 格式經由歷史 v1.2/v1.3 loader 遷移，再把 schemaVersion 升至 att-load/v1.6。Root defaults 可供多個 workload 共用；每個 workload 的 `inputs`、`vars`、load policy 及 execution 設定會覆蓋相應 root 值。Top-level thresholds 只屬於 aggregate；workload thresholds 必須在各 workload 宣告，不會從 root 繼承。`inputs` 仍對應 EXEC.INPUT；`vars` 在每個 execution 的 EXEC.ID 與 EXEC.OUTPUT_DIR 初始化後、target 啟動前評估。完整 reference 保留 native type，dependency 不受宣告順序影響；循環及 external/stateful calls 會在執行前拒絕。頂層 execution.execIdFormat 仍在 initialization 使用一般 expression engine 求值一次；closed workload 可用 EXEC.LOAD.USER_ID，arrival-rate 沒有此欄位。
+Load scenario 請將舊 single-target/v1.1 格式經由歷史 v1.2/v1.3 loader 遷移，再把 schemaVersion 升至 att-load/v1.6。Root defaults 可供多個 workload 共用；每個 workload 的 `inputs`、`vars`、load policy 及 execution 設定會覆蓋相應 root 值。Top-level thresholds 只屬於 aggregate；workload thresholds 必須在各 workload 宣告，不會從 root 繼承。`inputs` 仍對應 EXEC.INPUT；`vars` 在每個 execution 的 EXEC.ID 與 EXEC.OUTPUT_DIR 初始化後、target 啟動前評估。完整 reference 保留 native type，dependency 不受宣告順序影響；循環及 external/stateful calls 會在執行前拒絕。Load iteration identity 現由 Engine 管理；移除舊 `execution.execIdFormat`。Closed workload 可用 EXEC.LOAD.USER_ID，arrival-rate 沒有此欄位。
 
 歷史的 `att-load-profile/v1.0` policy file 僅供 migration 使用：使用前請改寫為現行 policy-only `att-load/v1.6` descriptor；它不是現行 `load/load.yaml` 範例。
 
@@ -105,3 +105,13 @@ Unsupported schemaVersion 會在 execution 前由 validation 拒絕並提供 mig
 ## Environment profile migration
 
 從舊的 complete-config pattern 遷移時，保留 descriptor 與 Action，將 common settings 移至 `config/config.yaml`、各環境 descriptor lists 移至 `environments.<NAME>`，並以 `--config config/config.yaml --env <NAME>` 選擇環境。現行 contract 見 [Configuration](../configuration.md)。
+
+## Load v1.8 execution identities
+
+ATT 為每個 started iteration 配置唯一的 engine-managed `EXEC.ID`：`<runId>-execution-<sequence>`。同一 Run 的所有 Workload、Target、Mix entry 及 phase 共用一個 thread-safe、單調遞增的 allocator。ID 在 bootstrap vars 與 Target action 前發布；`EXEC.RUN_ID` 保持為外層 Run identity。Collision tracking 不會建立 per-iteration 檔案或持續增長的 ID registry。
+
+目前及歷史 Load Scenario、policy-only YAML、inline draft，以及已儲存的 Schedule／Worker snapshot，都拒絕 `execution.execIdFormat`，包括空值。請移除此欄位並遷移至 `att-load/v1.8`，檢查依賴 artifact path 的整合，改用獨立 input／variable 保存 business correlation。歷史 artifact 保留原路徑；歷史 schema 檔案仍供檢視。不含自訂 ID 的歷史資源會正規化至目前 contract。受影響的 immutable schedule 須透過一般 reviewed-draft 流程建立替代版本。
+
+生成 ID 沿用安全 path segment grammar 及 240 字元上限；Run ID 必須預留 `-execution-` 與 signed-long sequence 空間。Sequence 耗盡後持續失敗，不會 wrap。每個 Run output namespace 只透過 `.execution-owner` 原子 claim 一次；第二個 owner 或 restart 必須選用新的外層 Run ID。Claim 由安全的 completed-Job artifact retention 隨 Run 目錄清理。舊 reservation 目錄只可由 completed-Job retention 清理，不能在舊 process 仍可能使用時刪除。Metrics-only evidence 保持 lazy；單一 Run metadata 檔不會建立 iteration workspace。
+
+外層 `execution.runIdFormat`、`execution.debugIdFormat`、literal `--run-id` 與 `--debug-id` 行為不變。Diagnostic iteration／VU／Workload／Mix ID 與 scheduler event sequence 仍獨立於 `EXEC.ID`。分散式 Worker 必須使用互不重疊的 namespace 或共用 allocator；獨立 process-local counter 不能安全共用同一 Run namespace。

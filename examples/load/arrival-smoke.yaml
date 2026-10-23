@@ -1,4 +1,4 @@
-schemaVersion: att-load/v1.7
+schemaVersion: att-load/v1.8
 workloads:
 - target:
     type: tool
@@ -9,5 +9,3 @@ workloads:
     maxConcurrent: 2
     overloadPolicy: drop
   id: arrival-smoke
-execution:
-  execIdFormat: ${EXEC.RUN_ID}-${EXEC.LOAD.WORKLOAD_ID}-arrival-${EXEC.LOAD.ITERATION}

@@ -137,6 +137,7 @@ Status: Normative end-user documentation; generated from modular sources
   - [Debug schema migration](#debug-schema-migration)
   - [Global configuration migration](#global-configuration-migration)
   - [Environment profile migration](#environment-profile-migration)
+  - [Load v1.8 execution identities](#load-v18-execution-identities)
 - [Appendix D — limits, security guarantees and advanced diagnostics](#appendix-d-limits-security-guarantees-and-advanced-diagnostics)
   - [Limits and defaults](#limits-and-defaults)
   - [Collector projection and redaction guarantees](#collector-projection-and-redaction-guarantees)
@@ -168,7 +169,7 @@ RUN executes a functional target or Case selection once. Debug is an optional di
 |---|---|---|
 | Run | workbook Testcases and Stage selectors | Templates, Flows, Tools, DB/MQ/HTTP/SSH |
 | Debug | `att-debug/v1.2` sidecar or `--input` | one Template, Flow or Tool target |
-| Load | `att-load/v1.7` scenario | one or more Template, Flow or Tool workloads repeatedly |
+| Load | `att-load/v1.8` scenario | one or more Template, Flow or Tool workloads repeatedly |
 
 Reusable Templates/Flows depend on `EXEC.INPUT`, `EXEC.VARS`, `EXEC.ACTIONS`, `META`, and Action-local `output`. Execution mode and scheduler identity are framework diagnostics in retained evidence, not expression data.
 
@@ -918,7 +919,7 @@ Example: `#{http.payment.post(path='/v1/payments', query={dryRun: true}, headers
 
 ### Expression scope and errors
 
-This page defines the language. Each field's owner defines available roots and evaluation timing: [Tool command/call](reference/resources/tools.md), [Load execIdFormat and vars](reference/execution-modes/load.md), [Debug vars](reference/execution-modes/debug.md), and [report filenames](reference/configuration.md). `${path?}` permits an absent allowed map/list path to return null; malformed syntax and illegal scope access still fail. Expression syntax and missing required Context paths produce structured diagnostics; see [Validation](reference/validation-diagnostics.md).
+This page defines the language. Each field's owner defines available roots and evaluation timing: [Tool command/call](reference/resources/tools.md), [Load identity and vars](reference/execution-modes/load.md), [Debug vars](reference/execution-modes/debug.md), and [report filenames](reference/configuration.md). `${path?}` permits an absent allowed map/list path to return null; malformed syntax and illegal scope access still fail. Expression syntax and missing required Context paths produce structured diagnostics; see [Validation](reference/validation-diagnostics.md).
 
 Removed APIs: `dbText`/`misc.dbText`, `prettyPrint`/`misc.prettyPrint`/`format.pretty`, all local `file.*` built-ins and their legacy aliases. Keep DB results typed and migrate display calls to Log `value: ${EXEC.ACTIONS.queryOrders.output.result}` with `format: sqlplus`; use `format: json` or `yaml` for Maps/Lists. Read package content with `&{...}` and pass its String to HTTP body, MQ payload, or SSH upload payload. SSHHelper upload accepts content only; native SSH download was removed. ATT local output remains framework-owned. Removed calls fail with migration guidance.
 
@@ -1282,7 +1283,7 @@ For `validate --format json`, stdout contains exactly one JSON document; progres
 
 ### Load mode
 
-ATT accepts att-load/v1.7 scenarios. A scenario has one or more workloads; each workload uses either one fixed Template, Flow or Tool target, or a closed-user weighted mix of targets. Workloads own their inputs, testdata policy, bootstrap vars and pacing policy. Root defaults may be shared by all workloads, while workload-local fields override them. ATT validates and pre-resolves every configured target before a scheduler starts.
+ATT accepts att-load/v1.8 scenarios. A scenario has one or more workloads; each workload uses either one fixed Template, Flow or Tool target, or a closed-user weighted mix of targets. Workloads own their inputs, testdata policy, bootstrap vars and pacing policy. Root defaults may be shared by all workloads, while workload-local fields override them. ATT validates and pre-resolves every configured target before a scheduler starts.
 
 Descriptors using the previous workload schema remain compatible and are normalized to the current schema when loaded.
 
@@ -1290,7 +1291,7 @@ Run `./att.sh load` with no scenario to discover valid full Load descriptors und
 
 #### Independent evidence quotas
 
-`att-load/v1.7` supports two quota models. Legacy scenarios keep their exact previous behavior: an explicit `maxSamples` is one combined run cap, and an explicit `maxFailureSamples` enables shared success/failure caps across the whole run. A scenario that omits both keys also keeps the existing mode defaults, including uncapped-by-default `all`.
+`att-load/v1.8` supports two quota models. Legacy scenarios keep their exact previous behavior: an explicit `maxSamples` is one combined run cap, and an explicit `maxFailureSamples` enables shared success/failure caps across the whole run. A scenario that omits both keys also keeps the existing mode defaults, including uncapped-by-default `all`.
 
 The optional `evidence.quotaScope: perWorkload` selects the independent model. It is explicit so an existing scenario is never silently reinterpreted:
 
@@ -1329,7 +1330,7 @@ Each workload owns its caps. Reaching one workload's success or failure cap neve
 #### Define a Load scenario
 
 ~~~yaml
-schemaVersion: att-load/v1.7
+schemaVersion: att-load/v1.8
 testdata: [examples/testdata/generated-account.yaml]
 workloads:
   - id: payment
@@ -1360,8 +1361,6 @@ evidence:
   mode: failures
   resources:
     output: none
-execution:
-  execIdFormat: "${EXEC.RUN_ID}-${EXEC.LOAD.WORKLOAD_ID}-${EXEC.LOAD.USER_ID}-${EXEC.LOAD.ITERATION}"
 ~~~
 
 #### Distribute closed-user work across targets
@@ -1369,7 +1368,7 @@ execution:
 A workload can declare `mix` instead of `target` to distribute each closed user's next iteration across pre-resolved targets. Every entry has a unique `id`, a positive integer `weight`, and a Template, Flow or Tool `target`. The selector uses the run seed, workload ID, stable VU ID and that VU's iteration number; changing targets does not reset the VU or its think-time stream. Weights express selection probability, not a promise that a short run will match the exact ratio.
 
 ~~~yaml
-schemaVersion: att-load/v1.7
+schemaVersion: att-load/v1.8
 seed: 73
 workloads:
   - id: checkout
@@ -1443,7 +1442,7 @@ duration is required. warmup, rampUp and rampDown default to zero. Warm-up sends
 
 #### Identify iterations and find their artifacts
 
-Each started iteration has a unique `EXEC.ID` across the Load run and shares `EXEC.RUN_ID`. If `execution.execIdFormat` is omitted, ATT uses its default run-scoped ID. Otherwise, ATT evaluates the configured format once during initialization with the ordinary `${...}` / `#{...}` engine. Bootstrap vars are evaluated after that identity is published, so they can use `EXEC.ID` and `EXEC.OUTPUT_DIR`. Closed workloads can use `EXEC.LOAD.USER_ID`; arrival-rate cannot. See [Check execution ID fields before use](#check-execution-id-fields-before-use) for field availability and function restrictions.
+Every started iteration receives an engine-managed `EXEC.ID` before bootstrap vars and target execution; `EXEC.RUN_ID` remains the enclosing Run. See [ID initialization](#check-execution-id-fields-before-use).
 
 Generated IDs must be non-empty, path-safe segments. Duplicate IDs fail before the target starts; ATT does not silently append a suffix.
 
@@ -1505,12 +1504,12 @@ For one workload, options such as --users, --arrival-rate, --warmup, --ramp-up, 
 
 Repeatable `--set` accepts `input.path=value`, Tool-only `arg.name=value`, or Template/Flow-only `vars.path=value`. Values use safe YAML parsing and remain typed; nested maps and numeric list indexes are supported where practical, for example `input.customer.ids[0]=42`. Duplicate assignments apply in order (last wins). ATT expressions are not evaluated during option parsing. Unqualified overrides are rejected for multi-workload scenarios.
 
-`load/load.yaml` is an optional current `att-load/v1.7` policy-only descriptor with no target, inputs or Tool arguments. It contains the default `load` policy and may also declare `execution`, `thresholds`, `evidence`, `seed` and Load-local `testdata` imports. Explicit CLI pacing values override the policy. `load --debug template|flow|tool <id>` promotes the selected sidecar's `inputs`, `vars` or Tool `arguments` into a transient single-workload scenario and then uses the regular Load validation, scheduler and evidence pipeline; Debug execution is not run first. With no policy, provide a complete CLI policy such as `--users 2 --duration 10s` (arrival-rate also requires `--max-concurrent` and `--overload-policy`).
+`load/load.yaml` is an optional current `att-load/v1.8` policy-only descriptor with no target, inputs or Tool arguments. It contains the default `load` policy and may also declare `execution`, `thresholds`, `evidence`, `seed` and Load-local `testdata` imports. Explicit CLI pacing values override the policy. `load --debug template|flow|tool <id>` promotes the selected sidecar's `inputs`, `vars` or Tool `arguments` into a transient single-workload scenario and then uses the regular Load validation, scheduler and evidence pipeline; Debug execution is not run first. With no policy, provide a complete CLI policy such as `--users 2 --duration 10s` (arrival-rate also requires `--max-concurrent` and `--overload-policy`).
 
 Example policy descriptor (copy to `load/load.yaml`):
 
 ~~~yaml
-schemaVersion: att-load/v1.7
+schemaVersion: att-load/v1.8
 load: {users: 2, duration: 10s}
 execution: {thinkTime: 250ms}
 evidence: {mode: failures}
@@ -1532,30 +1531,13 @@ Copyable examples and field descriptions are maintained in [examples/load/README
 
 #### Check execution ID fields before use
 
-The outer Load directory uses the same `execution.runIdFormat` policy as Run when `--run-id` is absent. `--run-id` remains an exact literal override for the outer Load identity. This policy is separate from `execution.execIdFormat`, which continues to generate each started iteration's `EXEC.ID`.
+ATT allocates one engine-managed `EXEC.ID` per started iteration: `<runId>-execution-<sequence>`. One run-scoped, thread-safe monotonic allocator serves every workload, target, mix entry and phase. The ID is published before bootstrap variables and target actions. `EXEC.RUN_ID` remains the enclosing Run identity. Collision tracking uses no per-iteration files or growing identity registry.
 
-Load uses schema att-load/v1.7. If execution.execIdFormat is present, ATT evaluates it once per started iteration with the normal ${...} / #{...} engine during initialization; otherwise the default run-scoped ID remains in effect. Bootstrap vars are evaluated after the generated ID and output path are published.
+`execution.execIdFormat` is rejected in current and historical Load Scenarios, policy-only files, inline drafts and saved Schedule/Worker snapshots, including an empty value. Remove the field and migrate to `att-load/v1.8`; review artifact-path consumers and store business correlation in a separate input/variable. Existing artifacts keep their original paths. Historical schema files remain available for inspection; historical resources without customization normalize to the current contract. Replace affected immutable schedules through the normal reviewed-draft workflow.
 
-Available values include EXEC.RUN_ID, timestamps, EXEC.INPUT, EXEC.LOAD.MODEL/WORKLOAD_ID/ITERATION/PHASE, closed-only EXEC.LOAD.USER_ID and the already curated META.SOURCE/TARGET/TEMPLATE. EXEC.ID and EXEC.OUTPUT_DIR are unavailable because the generated ID determines the workspace. No Action has run, so EXEC.ACTIONS and invocation-scoped Flow/Tool/helper META are absent.
+Generated identities retain the existing safe-segment grammar and 240-character limit. The existing Run ID contract (including Unicode and interior spaces) is unchanged. Run IDs outside the ASCII execution-segment grammar use `run-<SHA-256 of UTF-8 Run ID>` as their execution prefix; ASCII-safe Run IDs keep their literal prefix. The enclosing Run directory and `EXEC.RUN_ID` retain the original value. Encoding is computed once per run; every prefix leaves room for `-execution-` plus a signed-long sequence. Exhaustion fails permanently without wrapping. Every Run output namespace is claimed atomically once using `.execution-owner`. A second owner or restart must choose a fresh outer Run ID. Claims remain until safe completed-Job artifact retention removes the Run directory. Old reservation directories must only be removed by safe completed-Job retention; never delete markers while an old process can still use them. Metrics-only evidence remains lazy: this single Run metadata file does not materialize per-iteration workspaces.
 
-Only deterministic, side-effect-free built-ins are allowed. External Tool/DB/MQ/HTTP/SSH calls and stateful, random, clock or filesystem functions are rejected. seq.next() is neither allowed nor required. Use stable identity components:
-
-~~~yaml
-execution:
-  execIdFormat: "${EXEC.RUN_ID}-${EXEC.LOAD.WORKLOAD_ID}-${EXEC.LOAD.USER_ID}-${EXEC.LOAD.ITERATION}"
-~~~
-
-Arrival-rate has no USER_ID:
-
-~~~yaml
-execution:
-  execIdFormat: "${EXEC.RUN_ID}-${EXEC.LOAD.WORKLOAD_ID}-arrival-${EXEC.LOAD.ITERATION}"
-~~~
-
-IDs must be non-empty, path-safe single segments and unique within the Load run. Duplicate or unsafe values fail before the target starts; ATT does not append a hidden suffix.
-
-
-execIdFormat permits deterministic, side-effect-free built-ins only; external calls, seq.next(), random, clock and filesystem functions are rejected. See [Migration Notes](reference/appendices/migrations.md) for schema migration.
+Outer `execution.runIdFormat`, `execution.debugIdFormat`, exact `--run-id` and `--debug-id` behavior is unchanged. Diagnostic iteration/VU/Workload/mix IDs and scheduler event sequences remain separate from `EXEC.ID`. Independent distributed Workers must use disjoint namespaces or a shared allocator; separate process-local counters cannot safely share a Run namespace.
 
 #### Error rates and failure diagnosis (4.2.3)
 
@@ -1572,6 +1554,59 @@ Measured completions are divided into PASS, SUT failures, and runtime ERROR/INVA
 Optional `runtimeErrorRate` and `totalErrorRate` thresholds use the same percentage comparisons as `errorRate`, for example `{errorRate: '< 1%', totalErrorRate: '< 1%'}`. `errorRate` remains SUT FAIL-only and excludes runtime errors and drops. Thresholds PASS and Execution ERROR can coexist; neither thresholds nor completed TPS imply successful execution. Rates in JSON/YAML remain numeric zero when no measured completions exist, for compatibility; the HTML report shows N/A. The report summary renders `Thresholds: none configured` when no thresholds exist, or `Thresholds: N passed / M failed` when they do.
 
 The Runtime failures / Failure diagnosis section shows total/measured runtime counters and at most 100 sanitized lightweight failure samples per aggregate, workload or mix collector. Each sample identifies iteration, sequence, phase, timestamp, workload/mix, outcome, classification, diagnostic source/code/summary and evidence state. Counts stay complete after sample limits are reached. When no samples are available, the report says `No lightweight failure samples were recorded.` Scheduler exceptions are distinguished from returned executor failures; public samples omit stack traces, classified secrets and host paths. Retained Case Logs are linked in the Evidence section. `NO_CASE_LOG`, `WORKSPACE_MISSING`, `EVIDENCE_IO_ERROR`, `EVIDENCE_MATERIALIZATION_ERROR` and `NOT_RETAINED_BY_POLICY` explain missing evidence independently of the iteration outcome. An evidence failure is not another failed iteration.
+
+#### Target-agnostic Load Templates
+
+Load testing opens **Templates** by default. All six modes use `att-load-template/v1`: `single-vu`, `single-tps`, `single-workload-mix`, `multi-vu`, `multi-tps`, and `multi-workload-mix`. Single VU/TPS reuse Quick Load. Mixed modes use independent weighted iteration selection within each workload; VU pools are never divided by mix weights. Multiple TPS workloads request arrivals independently and report drops and achieved throughput separately. All workloads share the same phase timing envelope.
+
+The **Scenarios** tab retains executable YAML and **Legacy Quick Load Policy** profiles. It excludes `load/templates/` and `load/bindings/`. **View LOAD Jobs** opens Jobs and results with an authorized Server-side LOAD filter and pagination; the filter survives details and browser navigation.
+
+Built-ins use `builtin:<mode>`. Put package templates in `load/templates/` and bindings in `load/bindings/`. Files must be package-relative, schema-valid, at most 256 KiB, and within the bounded catalog scan. Templates contain structural/pacing defaults only, never target IDs or business values. A template cannot execute until every slot is bound. For example:
+
+Catalog inspection pages contain at most 100 items and also honor the configured serialized response budget (256 KiB by default). Follow `nextOffset` until it is null: each page retains complete definitions, so the same query and offset retrieve the corresponding definitions without a separate detail call. A definition that cannot fit even alone is listed as `response-too-large` without its definition; reduce its size for Studio, or compose it directly by file reference in the CLI. CLI `load --list-templates` follows every page automatically and retains the scan-limit `truncated` indicator.
+
+```yaml
+schemaVersion: att-load-template/v1
+name: Independent mixed pools
+mode: multi-workload-mix
+policy:
+  load: {users: 10, duration: 10s}
+  evidence: {mode: metrics}
+workloads:
+  - id: workload-a
+    mix: [{id: browse, weight: 70}, {id: purchase, weight: 30}]
+  - id: workload-b
+    load: {users: 20}
+    mix: [{id: purchase, weight: 40}, {id: report, weight: 60}]
+```
+
+```yaml
+schemaVersion: att-load-bindings/v1
+bindings:
+  workload-a:
+    mix:
+      browse: {type: template, id: BROWSE}
+      purchase: {type: flow, id: PURCHASE}
+  workload-b:
+    mix:
+      purchase: {type: flow, id: PURCHASE}
+      report: {type: tool, id: REPORT}
+```
+
+This creates two workloads, four bindings, three unique targets and 30 VU. Workload and mix slot IDs remain stable when targets repeat or rows move. Fixed modes use `bindings.<workloadId>.target`. Extra workload/mix bindings require an explicit `prototype` naming an existing slot in that scope; they copy its policy, not its target. Missing required slots, unknown prototypes, duplicate IDs and incompatible models fail before traffic. The descriptor limit is 128 workloads/entries; Server aggregate limits may be lower.
+
+The builder summarizes bindings, users/rates and weights. Detailed workload, mix, target and common settings use Save/Cancel dialogs; Cancel or Escape discards tentative changes. Target inputs/vars/Tool arguments retain safe typed sidecar defaults independently for each target. Precedence is template policy, then safe target sidecar business defaults, then target binding values, then workload binding inputs/vars; applicable explicit CLI overrides win. Business maps merge by key, preserving distinct keys and letting the later layer win conflicts. Studio preserves workload-specific timing, ramps and execution settings, including ranged think time, through validation and edits. Debug-local testdata imports are rejected: declare supported Load testdata sources explicitly. Bindings may specify workload inputs, vars and testdata selection as well as target-specific values.
+
+Validate creates a full `att-load/v1.8` immutable draft through the shared Engine composer. Review shows redacted Server-normalized YAML. Any saved edit or environment change invalidates validation; source/revision changes are checked again at submission. Run requires traffic confirmation; Schedule uses the same validated draft and normal permissions, limits, expiry and revision policy. No browser storage or package source writes are used.
+
+```bash
+./att.sh load --list-templates --format json
+./att.sh load --debug template BROWSE --load-template builtin:single-vu --preview
+./att.sh load --debug --load-template load/templates/mixed.yaml --bindings load/bindings/mixed.yaml --env SIT --preview --format json
+# Remove --preview only after reviewing the composed scenario.
+```
+
+Use the same arguments with `att.bat` on Windows. List and preview are read-only and start no traffic. `--preview` requires a template; JSON output remains machine-readable. Multi-target mode requires a complete binding descriptor and rejects unscoped `--input`, `--set`, `--users`, `--arrival-rate`, `--think-time`, `--max-concurrent` and `--overload-policy`. Common duration/warmup/ramp timing overrides apply to the shared envelope. Existing no-template `load --debug <type> <id>` and no-argument scenario discovery retain their behavior. Validation errors exit nonzero with field context.
 
 ## Resources and integrations
 
@@ -2571,7 +2606,7 @@ environments:
 | `execution.processOutput.artifactLimitBytes` | `104857600` | Integer from `memoryLimitBytes` through 1073741824; maximum bytes streamed to each process artifact |
 | `xml.namespaceMode` | `ignore` | `ignore` or `preserve` |
 
-`runIdFormat` generates the outer Run ID and, when Load has no exact `--run-id`, the outer Load ID. It does not affect Load's per-iteration `execution.execIdFormat` (`EXEC.ID`). `debugIdFormat` generates the standalone Debug directory identity. When no format is configured, the existing timestamp Run/Load default and `<type>-<targetId>` Debug default remain in effect.
+`runIdFormat` generates the outer Run ID and, when Load has no exact `--run-id`, the outer Load ID. It does not affect Load's engine-managed per-iteration `EXEC.ID`. `debugIdFormat` generates the standalone Debug directory identity. When no format is configured, the existing timestamp Run/Load default and `<type>-<targetId>` Debug default remain in effect.
 
 Formats are evaluated once before their identity or output directory is published. Run and Load formats can read `META.SOURCE.type/path` and `EXEC.RUN_STARTED_AT`; they cannot read `EXEC.STARTED_AT`, which is captured separately for each Case or Load iteration. ATT uses the same enclosing start timestamp in the generated Run/Load ID and each runtime Context's `EXEC.RUN_STARTED_AT`. Debug formats can read `META.TARGET.type/id`, `EXEC.STARTED_AT`, and `EXEC.RUN_STARTED_AT`; both timestamps represent the standalone Debug start. Pure identity-format built-ins and `date.sysdate` / `date.systimestamp` are available; external calls, random/sequence functions, filesystem calls, and invocation state are not. The identity being created is unavailable: references such as `${EXEC.RUN_ID}`, `${EXEC.ID}`, `${EXEC.OUTPUT_DIR}`, `${EXEC.VARS}`, or `${EXEC.ACTIONS}` are rejected. Generated values must already be valid single path segments; ATT does not sanitize them. Run/Load and configured or explicit Debug IDs fail on collision. The legacy default Debug ID keeps its timestamp collision suffix.
 
@@ -2884,10 +2919,10 @@ Local CLI output shows absolute paths by default. Add `--substitute-package-root
 
 `--set` is repeatable and accepts exactly one namespace: `input`, `arg`, or `vars`. Values use safe YAML parsing (for example `42`, `true`, `null`, `[a, b]`, or `{id: 7}`), and nested paths may use map keys and numeric list indexes such as `input.customer.ids[0]=42`. Duplicate assignments are applied in order, so the last value wins. ATT expressions are not evaluated while parsing an override; quote expression-looking values when a shell could expand them. `arg.*` is Tool-only; `vars.*` is Template/Flow-only. Unqualified overrides are rejected for multi-workload Load scenarios.
 
-`load/load.yaml` is an optional, policy-only `att-load/v1.7` file. It may contain `load`, `execution`, `thresholds`, `evidence`, and `seed`, but no target or business inputs. `load --debug` promotes sidecar `inputs` to `EXEC.INPUT`, Template/Flow `vars` to bootstrap `EXEC.VARS`, or Tool `arguments` to the Tool call, then runs through the regular Load validator, scheduler, and evidence pipeline. It rejects sidecars with Debug-local `testdata` imports; declare those imports on a Load scenario. Explicit CLI pacing fields override the policy. Without a policy, provide a complete policy on the command line; for example:
+`load/load.yaml` is an optional, policy-only `att-load/v1.8` file. It may contain `load`, `execution`, `thresholds`, `evidence`, and `seed`, but no target or business inputs. `load --debug` promotes sidecar `inputs` to `EXEC.INPUT`, Template/Flow `vars` to bootstrap `EXEC.VARS`, or Tool `arguments` to the Tool call, then runs through the regular Load validator, scheduler, and evidence pipeline. It rejects sidecars with Debug-local `testdata` imports; declare those imports on a Load scenario. Explicit CLI pacing fields override the policy. Without a policy, provide a complete policy on the command line; for example:
 
 ```yaml
-schemaVersion: att-load/v1.7
+schemaVersion: att-load/v1.8
 load: {users: 2, duration: 10s}
 execution: {thinkTime: 250ms}
 evidence: {mode: failures}
@@ -2976,6 +3011,8 @@ role. Secret values remain protected in both modes. Field records use `state: hi
 `value: '[REDACTED]'`, `reasonCode: MANDATORY_SECRET` for protected values; unavailable
 fields use `[HIDDEN]` and `UNAVAILABLE_BY_POLICY` or `OPTIONAL_FIELD_POLICY`.
 Source traversal, symlink, deny-glob, sensitive-file and size restrictions remain active.
+
+Load Template CLI: `load --list-templates [--format json]`, `load --debug <type> <id> --load-template <id> [--preview]`, or `load --debug --load-template <id> --bindings <file> [--preview]`. See [Load Templates](reference/execution-modes/load.md) for the versioned contract, precedence, migration and safe preview. Windows `att.bat` accepts the same arguments.
 
 ## Results, reports, and evidence
 
@@ -3355,7 +3392,9 @@ Active schemas (the matching ATT Engine JAR's embedded registry, built from `sch
 | Template | att-template/v3.6 |
 | Flow | att-flow/v3.6 |
 | Debug input | att-debug/v1.2 |
-| Load scenario | att-load/v1.7 |
+| Load scenario | att-load/v1.8 |
+| Load Template | `att-load-template/v1` | `schemas/att-load-template-v1.schema.json` |
+| Load bindings | `att-load-bindings/v1` | `schemas/att-load-bindings-v1.schema.json` |
 | Load summary | att-load-summary/v1.1 |
 | Run manifest | att-run/v2.1 |
 | Validation JSON | att-validation/v2.1 |
@@ -3398,7 +3437,7 @@ Change global configuration from `att-config/v2.10` to `att-config/v2.11` and Lo
 
 ### Execution identity format migration
 
-`att-config/v2.12` adds execution identity formats; the immediately preceding configuration schema remains supported. To configure outer Run and Load IDs, add `execution.runIdFormat`. To configure standalone Debug directory IDs, add `execution.debugIdFormat`. Existing timestamp Run/Load IDs and `<type>-<targetId>` Debug IDs remain the defaults when these fields are absent. `execution.execIdFormat` remains the Load per-iteration `EXEC.ID` policy. Exact Run/Load IDs use `--run-id`; exact standalone Debug IDs use `--debug-id`.
+`att-config/v2.12` adds execution identity formats; the immediately preceding configuration schema remains supported. To configure outer Run and Load IDs, add `execution.runIdFormat`. To configure standalone Debug directory IDs, add `execution.debugIdFormat`. Existing timestamp Run/Load IDs and `<type>-<targetId>` Debug IDs remain the defaults when these fields are absent. Load per-iteration IDs are now engine-managed; remove `execution.execIdFormat`. Exact Run/Load IDs use `--run-id`; exact standalone Debug IDs use `--debug-id`.
 
 ATT 3.7.2 introduces `att-load/v1.6`. Existing v1.5 descriptors remain compatible and are normalized at load time. To use a closed-user target mix, change the schema version to v1.6 and replace that workload's `target` with a `mix` list of uniquely named entries, each with a positive integer `weight` and its own target. Mix entries are prevalidated before scheduling; only closed workloads support mixes. Load summaries now use `att-load-summary/v1.1` and include per-mix selection and metric data when applicable. The previous Load and summary schemas remain available as historical definitions.
 
@@ -3443,7 +3482,7 @@ send:
   call: "#{http.payment.post(body=${EXEC.INPUT.request}, requestFormat='json')}"
 ~~~
 
-For Load, migrate old single-target or v1.1 scenarios through the historical v1.2/v1.3 loaders, then change the schemaVersion to att-load/v1.5. Root defaults may be shared by multiple workloads; each workload's `inputs`, `vars`, load policy and execution settings override the corresponding root values. Top-level thresholds remain aggregate-only; workload thresholds are declared per workload and are not inherited from the root. `inputs` remains EXEC.INPUT; `vars` is evaluated after each execution's EXEC.ID and EXEC.OUTPUT_DIR are initialized and before the target starts. Exact references preserve native values, dependencies are order-independent, and cycles or external/stateful calls fail validation. The optional top-level execution.execIdFormat still uses the ordinary expression engine once during initialization; closed workloads may use EXEC.LOAD.USER_ID, while arrival-rate workloads do not have it.
+For Load, migrate old single-target or v1.1 scenarios through the historical v1.2/v1.3 loaders, then change the schemaVersion to att-load/v1.5. Root defaults may be shared by multiple workloads; each workload's `inputs`, `vars`, load policy and execution settings override the corresponding root values. Top-level thresholds remain aggregate-only; workload thresholds are declared per workload and are not inherited from the root. `inputs` remains EXEC.INPUT; `vars` is evaluated after each execution's EXEC.ID and EXEC.OUTPUT_DIR are initialized and before the target starts. Exact references preserve native values, dependencies are order-independent, and cycles or external/stateful calls fail validation. Remove `execution.execIdFormat` before executing with the current runtime.
 
 The historical `att-load-profile/v1.0` policy file is migration-only: rewrite it as the current policy-only `att-load/v1.6` descriptor before use. It is not a current `load/load.yaml` example.
 
@@ -3483,6 +3522,16 @@ Old `timeoutSeconds`, `reportDirectory`, `logDirectory`, `validation`, and `envi
 ### Environment profile migration
 
 When migrating complete-config packages, preserve descriptors and Actions, move common settings to `config/config.yaml`, move descriptor lists to `environments.<NAME>`, and select with `--config config/config.yaml --env <NAME>`. See [Configuration](reference/configuration.md) for the current contract.
+
+### Load v1.8 execution identities
+
+ATT allocates one engine-managed `EXEC.ID` per started iteration: `<runId>-execution-<sequence>`. One run-scoped, thread-safe monotonic allocator serves every workload, target, mix entry and phase. The ID is published before bootstrap variables and target actions. `EXEC.RUN_ID` remains the enclosing Run identity. Collision tracking uses no per-iteration files or growing identity registry.
+
+`execution.execIdFormat` is rejected in current and historical Load Scenarios, policy-only files, inline drafts and saved Schedule/Worker snapshots, including an empty value. Remove the field and migrate to `att-load/v1.8`; review artifact-path consumers and store business correlation in a separate input/variable. Existing artifacts keep their original paths. Historical schema files remain available for inspection; historical resources without customization normalize to the current contract. Replace affected immutable schedules through the normal reviewed-draft workflow.
+
+Generated identities retain the existing safe-segment grammar and 240-character limit. The Run ID must leave room for `-execution-` plus a signed-long sequence. Exhaustion fails permanently without wrapping. Every Run output namespace is claimed atomically once using `.execution-owner`. A second owner or restart must choose a fresh outer Run ID. Claims remain until safe completed-Job artifact retention removes the Run directory. Old reservation directories must only be removed by safe completed-Job retention; never delete markers while an old process can still use them. Metrics-only evidence remains lazy: this single Run metadata file does not materialize per-iteration workspaces.
+
+Outer `execution.runIdFormat`, `execution.debugIdFormat`, exact `--run-id` and `--debug-id` behavior is unchanged. Diagnostic iteration/VU/Workload/mix IDs and scheduler event sequences remain separate from `EXEC.ID`. Independent distributed Workers must use disjoint namespaces or a shared allocator; separate process-local counters cannot safely share a Run namespace.
 
 ## Appendix D — limits, security guarantees and advanced diagnostics
 

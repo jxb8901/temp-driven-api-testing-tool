@@ -170,6 +170,7 @@ public final class WorkerMain {
             Map<String,Object> diagnostic=fields("code",code,"message",DiagnosticSanitizer.redactText(message==null?"ATT operation failed":message));
             boolean draftInspection="inspect".equals(request.command)&&("debug-input".equals(request.inspectionAction)||"debug-form".equals(request.inspectionAction)
                     ||"quick-load-input".equals(request.inspectionAction)||"quick-load-form".equals(request.inspectionAction)
+                    ||"load-templates".equals(request.inspectionAction)||"load-template-compose".equals(request.inspectionAction)
                     ||"quick-load-policy".equals(request.inspectionAction)
                     ||"load-scenario".equals(request.inspectionAction)
                     ||"load-catalog".equals(request.inspectionAction)
@@ -318,6 +319,14 @@ public final class WorkerMain {
             }
             if("quick-load-policy".equals(r.inspectionAction)) {
                 Map<String,Object> inspected=inspector.inspectQuickLoadPolicy(r.loadModel,r.inspectionPath);
+                return new OperationResult(null,"PASS",0,0,Collections.<att.validation.Diagnostic>emptyList(),
+                        Collections.<String,String>emptyMap(),Collections.<String,Object>singletonMap("inspection",inspected));
+            }
+            if("load-templates".equals(r.inspectionAction) || "load-template-compose".equals(r.inspectionAction)) {
+                Map<String,Object> inspected="load-templates".equals(r.inspectionAction)
+                        ? inspector.inspectLoadTemplates(r.inspectionQuery, r.inspectionOffset==null?0:r.inspectionOffset,
+                                r.inspectionLimit==null?50:r.inspectionLimit)
+                        : inspector.composeLoadTemplate(r.inlineLoadScenario);
                 return new OperationResult(null,"PASS",0,0,Collections.<att.validation.Diagnostic>emptyList(),
                         Collections.<String,String>emptyMap(),Collections.<String,Object>singletonMap("inspection",inspected));
             }

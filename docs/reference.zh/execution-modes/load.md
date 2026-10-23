@@ -1,6 +1,6 @@
 # Load 模式
 
-ATT 接受 att-load/v1.7 scenario。Scenario 有一個或多個 workload；每個 workload 使用單一固定 Template、Flow 或 Tool target，或使用 closed-user weighted target mix。Workload 配置 inputs、testdata policy、bootstrap vars 與 pacing。Root defaults 可供多個 workload 共用，workload-local 欄位會覆蓋它們。Scheduler 啟動前會驗證並預先 resolve 所有 target。
+ATT 接受 att-load/v1.8 scenario。Scenario 有一個或多個 workload；每個 workload 使用單一固定 Template、Flow 或 Tool target，或使用 closed-user weighted target mix。Workload 配置 inputs、testdata policy、bootstrap vars 與 pacing。Root defaults 可供多個 workload 共用，workload-local 欄位會覆蓋它們。Scheduler 啟動前會驗證並預先 resolve 所有 target。
 
 使用上一版 workload schema 的 descriptor 仍相容，載入時會 normalize 至現行 schema。
 
@@ -8,7 +8,7 @@ ATT 接受 att-load/v1.7 scenario。Scenario 有一個或多個 workload；每�
 
 ## 獨立 evidence 配額
 
-`att-load/v1.7` 支援兩種配額模型。Legacy scenario 完全保留既有行為：明確 `maxSamples` 是整個 run 的單一合併上限；明確 `maxFailureSamples` 會啟用整次 run 共用的 success/failure 上限。兩者皆未設定時，亦保留既有 mode defaults，包括預設不設上限的 `all`。
+`att-load/v1.8` 支援兩種配額模型。Legacy scenario 完全保留既有行為：明確 `maxSamples` 是整個 run 的單一合併上限；明確 `maxFailureSamples` 會啟用整次 run 共用的 success/failure 上限。兩者皆未設定時，亦保留既有 mode defaults，包括預設不設上限的 `all`。
 
 可選的 `evidence.quotaScope: perWorkload` 會啟用獨立模型。此為明確 opt-in，既有 scenario 不會被靜默重新解釋：
 
@@ -47,7 +47,7 @@ Per-workload 模式不可與 root `maxSamples`、`maxSuccessSamples` 或 `maxFai
 ## 定義 Load scenario
 
 ~~~yaml
-schemaVersion: att-load/v1.7
+schemaVersion: att-load/v1.8
 testdata: [examples/testdata/generated-account.yaml]
 workloads:
   - id: payment
@@ -78,8 +78,6 @@ evidence:
   mode: failures
   resources:
     output: none
-execution:
-  execIdFormat: "${EXEC.RUN_ID}-${EXEC.LOAD.WORKLOAD_ID}-${EXEC.LOAD.USER_ID}-${EXEC.LOAD.ITERATION}"
 ~~~
 
 ## 將 closed-user work 分配到多個 target
@@ -87,7 +85,7 @@ execution:
 Workload 可用 `mix` 代替 `target`，讓每位 closed user 的下一次 iteration 在預先 resolve 的 targets 之間選擇。每個 entry 包含唯一 `id`、正整數 `weight`，以及 Template、Flow 或 Tool `target`。Selector 由 run seed、workload ID、穩定 VU ID 和該 VU 的 iteration number 決定；切換 target 不會重設 VU 或 think-time random stream。Weight 表示選擇機率，短時間 run 不保證精確符合比例。
 
 ~~~yaml
-schemaVersion: att-load/v1.7
+schemaVersion: att-load/v1.8
 seed: 73
 workloads:
   - id: checkout
@@ -161,7 +159,7 @@ duration 必填。warmup、rampUp、rampDown 預設為零。Warm-up 送出真實
 
 ## 識別 iterations 並查看其 artifacts
 
-每個開始的 iteration 在 Load run 內有唯一 `EXEC.ID`，並共用 `EXEC.RUN_ID`。省略 `execution.execIdFormat` 時 ATT 使用預設 run-scoped ID；有設定時，使用一般 `${...}` / `#{...}` engine 求值一次。Bootstrap vars 在 ID 發布後才評估，因此可讀取 `EXEC.ID` 與 `EXEC.OUTPUT_DIR`。Closed workload 可讀取 `EXEC.LOAD.USER_ID`；arrival-rate 沒有此欄位。欄位初始化時機與 function 限制見 [Check execution ID fields before use](#檢查-execution-id-可用欄位)。
+每個 started iteration 會在 bootstrap vars 與 Target 執行前取得 engine-managed `EXEC.ID`；`EXEC.RUN_ID` 維持外層 Run。詳見 [ID 初始化](#檢查-execid-可用欄位)。
 
 產生的 ID 必須非空且是安全的 path segment。重複 ID 會在 target 啟動前失敗；ATT 不會靜默附加 suffix。
 
@@ -223,12 +221,12 @@ Load workload 啟動前，ATT 會為每個可達的 Render payload glob 解析�
 
 重複的 `--set` 可用 `input.path=value`、僅限 Tool 的 `arg.name=value`，或僅限 Template/Flow 的 `vars.path=value`。值使用 safe YAML 解析並保留型別；實用時支援巢狀 map 與數字 list index，例如 `input.customer.ids[0]=42`。重複賦值依序套用，最後一個值生效；解析 override 時不會評估 ATT expression。多 workload scenario 會拒絕未限定的 override。
 
-可選的 `load/load.yaml` 使用現行 `att-load/v1.7` policy-only descriptor，不含 target、inputs 或 Tool arguments。它提供預設 `load` policy，並可選擇包含 `execution`、`thresholds`、`evidence`、`seed` 及 Load-local `testdata` imports。明確 CLI pacing 會覆蓋 policy。`load --debug template|flow|tool <id>` 會將 sidecar 的 `inputs`、`vars` 或 Tool `arguments` promotion 成暫時的單一 workload scenario，然後使用正常 Load validation、scheduler 和 evidence pipeline；不會先執行 Debug。沒有 policy 時，請在 CLI 提供完整 policy，例如 `--users 2 --duration 10s`（arrival-rate 還需要 `--max-concurrent` 和 `--overload-policy`）。
+可選的 `load/load.yaml` 使用現行 `att-load/v1.8` policy-only descriptor，不含 target、inputs 或 Tool arguments。它提供預設 `load` policy，並可選擇包含 `execution`、`thresholds`、`evidence`、`seed` 及 Load-local `testdata` imports。明確 CLI pacing 會覆蓋 policy。`load --debug template|flow|tool <id>` 會將 sidecar 的 `inputs`、`vars` 或 Tool `arguments` promotion 成暫時的單一 workload scenario，然後使用正常 Load validation、scheduler 和 evidence pipeline；不會先執行 Debug。沒有 policy 時，請在 CLI 提供完整 policy，例如 `--users 2 --duration 10s`（arrival-rate 還需要 `--max-concurrent` 和 `--overload-policy`）。
 
 Policy descriptor 範例（複製到 `load/load.yaml`）：
 
 ~~~yaml
-schemaVersion: att-load/v1.7
+schemaVersion: att-load/v1.8
 load: {users: 2, duration: 10s}
 execution: {thinkTime: 250ms}
 evidence: {mode: failures}
@@ -248,32 +246,15 @@ evidence: {mode: failures}
 
 可複製範例與欄位說明見 [examples/load/README.md](../../../examples/load/README.md)；schema migration 見 [Migration Notes](../appendices/migrations.md)。
 
-## 檢查 execution ID 可用欄位
+## 檢查 EXEC.ID 可用欄位
 
-沒有 `--run-id` 時，Load 外層目錄使用與 Run 相同的 `execution.runIdFormat`。`--run-id` 仍是外層 Load identity 的 literal override。此 policy 與 `execution.execIdFormat` 分開；後者仍只產生每個 started iteration 的 `EXEC.ID`。
+ATT 為每個 started iteration 配置唯一的 engine-managed `EXEC.ID`：`<runId>-execution-<sequence>`。同一 Run 的所有 Workload、Target、Mix entry 及 phase 共用一個 thread-safe、單調遞增的 allocator。ID 在 bootstrap vars 與 Target action 前發布；`EXEC.RUN_ID` 保持為外層 Run identity。Collision tracking 不會建立 per-iteration 檔案或持續增長的 ID registry。
 
-Load 使用 att-load/v1.7。設定 execution.execIdFormat 時，ATT 在每個 iteration initialization 使用一般 ${...} / #{...} engine 求值一次；省略時維持預設 run-scoped ID。Bootstrap vars 會在生成 ID 及 output path 發布後評估。
+目前及歷史 Load Scenario、policy-only YAML、inline draft，以及已儲存的 Schedule／Worker snapshot，都拒絕 `execution.execIdFormat`，包括空值。請移除此欄位並遷移至 `att-load/v1.8`，檢查依賴 artifact path 的整合，改用獨立 input／variable 保存 business correlation。歷史 artifact 保留原路徑；歷史 schema 檔案仍供檢視。不含自訂 ID 的歷史resource會正規化至目前 contract。受影響的 immutable schedule 須透過一般 reviewed-draft 流程建立替代版本。
 
-可用值有 EXEC.RUN_ID、timestamps、EXEC.INPUT、EXEC.LOAD.MODEL/WORKLOAD_ID/ITERATION/PHASE、closed-only EXEC.LOAD.USER_ID，以及已建立的 META.SOURCE/TARGET/TEMPLATE。EXEC.ID 和 EXEC.OUTPUT_DIR 尚未可用，因為生成的 ID 決定 workspace。還沒有 Action 執行，所以 EXEC.ACTIONS 與 Flow/Tool/helper invocation META 缺席。
+生成 ID 沿用安全 path segment grammar 及 240 字元上限；Load execution prefix 保留符合 ASCII grammar 的 Run ID；其他合法 Run ID（包括 Unicode、內含空格）使用 `run-<Run ID UTF-8 的 SHA-256>`，每個 Run 只計算一次。外層 Run 目錄及 `EXEC.RUN_ID` 保留原值。 所有 prefix 均預留 `-execution-` 與 signed-long sequence 空間。Sequence 耗盡後持續失敗，不會 wrap。每個 Run output namespace 只透過 `.execution-owner` 原子 claim 一次；第二個 owner 或 restart 必須選用新的外層 Run ID。Claim 由安全的 completed-Job artifact retention 隨 Run 目錄清理。舊 reservation 目錄只可由 completed-Job retention 清理，不能在舊 process 仍可能使用時刪除。Metrics-only evidence 保持 lazy；單一 Run metadata 檔不會建立 iteration workspace。
 
-只允許 deterministic、side-effect-free built-ins。External Tool/DB/MQ/HTTP/SSH calls 及 stateful、random、clock、filesystem functions 會被拒絕。seq.next() 不允許也不需要。請使用穩定 identity：
-
-~~~yaml
-execution:
-  execIdFormat: "${EXEC.RUN_ID}-${EXEC.LOAD.WORKLOAD_ID}-${EXEC.LOAD.USER_ID}-${EXEC.LOAD.ITERATION}"
-~~~
-
-Arrival-rate 沒有 USER_ID：
-
-~~~yaml
-execution:
-  execIdFormat: "${EXEC.RUN_ID}-${EXEC.LOAD.WORKLOAD_ID}-arrival-${EXEC.LOAD.ITERATION}"
-~~~
-
-ID 必須非空、安全且為單一路徑 segment，並在 Load run 內唯一。重複或不安全值會在 target 開始前失敗；ATT 不會附加隱藏 suffix。
-
-
-execIdFormat 只允許 deterministic、side-effect-free built-ins；external calls、seq.next()、random、clock 與 filesystem functions 都會被拒絕。Schema migration 見 [Migration Notes](../appendices/migrations.md)。
+外層 `execution.runIdFormat`、`execution.debugIdFormat`、literal `--run-id` 與 `--debug-id` 行為不變。Diagnostic iteration／VU／Workload／Mix ID 與 scheduler event sequence 仍獨立於 `EXEC.ID`。分散式 Worker 必須使用互不重疊的 namespace 或共用 allocator；獨立 process-local counter 不能安全共用同一 Run namespace。
 
 ## 錯誤率與失敗診斷（4.2.3）
 
@@ -290,3 +271,27 @@ execIdFormat 只允許 deterministic、side-effect-free built-ins；external cal
 可選的 `runtimeErrorRate`、`totalErrorRate` 門檻採用百分比比較，例如 `{errorRate: '< 1%', totalErrorRate: '< 1%'}`。`errorRate` 保留僅計 SUT FAIL 的含義，不包含執行期錯誤或丟棄。Thresholds PASS 可與 Execution ERROR 同時出現；門檻通過或完成 TPS 均不代表執行成功。沒有測量完成項目時，JSON/YAML 的錯誤率維持數值零以相容舊消費者，HTML 顯示 N/A。報告摘要沒有門檻時顯示 `Thresholds: none configured`；有門檻時顯示 `Thresholds: N passed / M failed`。
 
 Runtime failures / Failure diagnosis 顯示全部／測量執行期錯誤數，並於每個彙總、workload 或 mix 收集器保留最多 100 個已遮罩的輕量失敗樣本。樣本包含 iteration、序號、階段、時間、workload/mix、結果、分類、診斷來源／代碼／摘要及證據狀態；達到樣本上限後仍完整計數。沒有樣本時，報告顯示 `No lightweight failure samples were recorded.`。排程器例外與執行器回傳失敗分開顯示；公開資料不含 stack trace、已分類秘密或主機路徑。保留的 Case Log 可從 Evidence 區段連結開啟。`NO_CASE_LOG`、`WORKSPACE_MISSING`、`EVIDENCE_IO_ERROR`、`EVIDENCE_MATERIALIZATION_ERROR`、`NOT_RETAINED_BY_POLICY` 分別說明證據缺失原因，不改變 iteration 結果，也不額外計為一次失敗。
+
+## 不綁定 Target 的 Load Templates
+
+Load testing 預設開啟 **Templates**。六種模式共同使用 `att-load-template/v1`：`single-vu`、`single-tps`、`single-workload-mix`、`multi-vu`、`multi-tps`、`multi-workload-mix`。Single VU/TPS 沿用 Quick Load；mix weights 是每個 workload 內的 iteration 選擇機率，不會分配固定 VU。各 workload 獨立持有 users 或 requested arrivals；所有 workload 共用 phase timing。實際 throughput 和 generator drops 另行報告。
+
+**Scenarios** 保留 executable YAML 與 **Legacy Quick Load Policy**，排除 `load/templates/`、`load/bindings/`。**View LOAD Jobs** 開啟 Jobs and results，使用 Server 授權後的 LOAD 篩選及分頁，detail/back 繼續保留 URL filter。
+
+內建 ID 為 `builtin:<mode>`。Package template 放於 `load/templates/`，binding 放於 `load/bindings/`；只允許 package-relative、安全且通過 schema 的檔案，每檔最多 256 KiB，catalog 掃描有上限。Template 只保存結構與 policy，不保存 Target ID 或 business values。完整 YAML 範例見英文同名章節；template 欄位為 `schemaVersion`、`name`、`mode`、`policy`、`workloads`。Workload 宣告穩定 `id`、可選 `load` override、mix slot 的 `id/weight`。Binding descriptor 使用 `att-load-bindings/v1`，`bindings.<workloadId>.target` 或 `bindings.<workloadId>.mix.<slotId>` 指向 `{type,id}`。
+
+Catalog inspection 每頁最多 100 項，亦受序列化 response 大小限制（預設 256 KiB）。須持續跟隨 `nextOffset`，直到其為 null；每頁保留完整 definition，相同 query 與 offset 可取得對應 definition，毋須額外 detail request。若單一 definition 已超出大小限制，catalog 仍列出 metadata，但標示 `response-too-large` 並省略 definition；可縮小檔案供 Studio 使用，或在 CLI 直接以檔案 reference compose。CLI `load --list-templates` 自動讀取所有分頁，並保留掃描上限的 `truncated` 標示。
+
+例如 workload-a 使用 10 VU、A/B 70/30，workload-b 使用 20 VU、B/C 40/60，即 2 workloads、4 bindings、3 unique targets、30 VU；重複 Target 不合併 workload。額外 binding 必須有 `prototype`，明確指向同 scope 的原有 slot，複製 policy 而不複製 Target；不可省略必要 slot。Descriptor 最多 128 workloads/entries，Server 可設定更低 aggregate limits。
+
+Builder 以精簡表格顯示 users/rates、bindings、weights。Workload、mix、Target、common settings 使用 Save/Cancel modal；Cancel/Escape 捨棄暫存修改。每個 Target 的 typed sidecar inputs/vars/Tool arguments 獨立載入；優先次序為 template policy、safe sidecar defaults、explicit binding values、適用的 CLI overrides。Debug-local testdata imports 不會自動提升，須明確宣告 Load testdata。Binding 亦可指定 workload inputs/vars/testdata selection。Business inputs/vars 按 key 合併，優先順序為 safe sidecar defaults、Target binding、workload binding；後者覆蓋同名 key，其餘 key 保留。Studio validation 及編輯會保留各 workload 的 timing、ramps、execution settings 與 ranged think time。
+
+Validate 經由共享 Engine composer 建立完整 `att-load/v1.8` immutable draft；Review 顯示 Server-normalized redacted YAML。儲存修改或更改 Environment 會使驗證失效；提交時再次檢查 package/source revision。Run 前確認 traffic；Schedule 沿用相同 draft、權限、limits、expiry 和 revision policy。不使用 browser storage 或寫入 package source。
+
+```bash
+./att.sh load --list-templates --format json
+./att.sh load --debug template BROWSE --load-template builtin:single-vu --preview
+./att.sh load --debug --load-template load/templates/mixed.yaml --bindings load/bindings/mixed.yaml --env SIT --preview --format json
+```
+
+Windows `att.bat` 使用相同參數。List/preview 不啟動 traffic；確認 composed scenario 後才移除 `--preview`。Multi-target 必須提供完整 bindings，拒絕不明確的 `--input`、`--set`、`--users`、`--arrival-rate`、`--think-time`、`--max-concurrent`、`--overload-policy`；duration/warmup/ramp timing 可共同覆蓋。既有不帶 template 的 single-target grammar 和無參數 scenario discovery 不變；validation error 回傳非零 exit code 與欄位位置。

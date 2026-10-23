@@ -12,7 +12,13 @@ Coordinated scheduler 會等待 arrival/VU deadline、phase boundary、completio
 
 ## Execution identity 與 artifact storage
 
-每個 started iteration 都會在 bootstrap vars 評估前取得唯一 `EXEC.ID`。Default monotonic ID 不需要 collision registry。設定 `execution.execIdFormat` 時，程式會使用 disk-backed reservation marker，避免多個 process 佔用相同 custom ID；marker 限定於該 Load run。Public behavior 是 duplicate 或不符合 path safety 的 ID 會在 target 啟動前使 execution 失敗。
+ATT 為每個 started iteration 配置唯一的 engine-managed `EXEC.ID`：`<runId>-execution-<sequence>`。同一 Run 的所有 Workload、Target、Mix entry 及 phase 共用一個 thread-safe、單調遞增的 allocator。ID 在 bootstrap vars 與 Target action 前發布；`EXEC.RUN_ID` 保持為外層 Run identity。Collision tracking 不會建立 per-iteration 檔案或持續增長的 ID registry。
+
+目前及歷史 Load Scenario、policy-only YAML、inline draft，以及已儲存的 Schedule／Worker snapshot，都拒絕 `execution.execIdFormat`，包括空值。請移除此欄位並遷移至 `att-load/v1.8`，檢查依賴 artifact path 的整合，改用獨立 input／variable 保存 business correlation。歷史 artifact 保留原路徑；歷史 schema 檔案仍供檢視。不含自訂 ID 的歷史資源會正規化至目前 contract。受影響的 immutable schedule 須透過一般 reviewed-draft 流程建立替代版本。
+
+生成 ID 沿用安全 path segment grammar 及 240 字元上限；Run ID 必須預留 `-execution-` 與 signed-long sequence 空間。Sequence 耗盡後持續失敗，不會 wrap。每個 Run output namespace 只透過 `.execution-owner` 原子 claim 一次；第二個 owner 或 restart 必須選用新的外層 Run ID。Claim 由安全的 completed-Job artifact retention 隨 Run 目錄清理。舊 reservation 目錄只可由 completed-Job retention 清理，不能在舊 process 仍可能使用時刪除。Metrics-only evidence 保持 lazy；單一 Run metadata 檔不會建立 iteration workspace。
+
+外層 `execution.runIdFormat`、`execution.debugIdFormat`、literal `--run-id` 與 `--debug-id` 行為不變。Diagnostic iteration／VU／Workload／Mix ID 與 scheduler event sequence 仍獨立於 `EXEC.ID`。分散式 Worker 必須使用互不重疊的 namespace 或共用 allocator；獨立 process-local counter 不能安全共用同一 Run namespace。
 
 Iteration 的 `EXEC.OUTPUT_DIR` 是預先規劃的 logical path。Metrics-only work 本身不會建立持久 per-iteration directory。Resource-output formatting 及延遲寫入的 case-log evidence 會在 retention 選中 iteration 後才 materialize。資料被丟棄或複製到 retained evidence 後，temporary workspace 會被清理。
 

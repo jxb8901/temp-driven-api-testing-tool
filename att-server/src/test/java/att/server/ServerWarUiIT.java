@@ -270,9 +270,11 @@ class ServerWarUiIT {
         writeScheduledPackage(packageRoot, localHome);
         // Keep Flow-link inspection in this isolated browser fixture, away from the scheduler capacity fixture.
         writeReferenceFlowSource(packageRoot);
+        // Three package catalogs and environment discovery share this inspection queue.
+        // Keep one worker, but admit the browser's normal parallel discovery burst.
         Path config = Files.writeString(temp.resolve("server.yaml"),
                 "server:\n  runtimeConfigPath: " + yaml(localHome.resolve("config/config.yaml")) + "\n  dataDir: " + yaml(temp.resolve("data")) + "\n  authenticationRequired: true\n  security:\n    checkCrossOrigin: true\n"
-                        + "  inlineLoad:\n    enabled: true\n  inspection:\n    enabled: true\n    maxConcurrent: 1\n    queuedLimit: 2\n    timeoutMs: 30000\n    heapMaxMb: 256"
+                        + "  inlineLoad:\n    enabled: true\n  inspection:\n    enabled: true\n    maxConcurrent: 1\n    queuedLimit: 8\n    timeoutMs: 30000\n    heapMaxMb: 256"
                         + "\n    safeTextSources:\n      payments:\n        - config/tools/att-helper.sh\n"
                         + "  scheduling:\n    enabled: true\n    adminRole: ATT_SCHEDULE_ADMIN\n"
                         + "workers:\n  maxConcurrent: 1\n  queuedLimit: 1\n  maxConcurrentLoad: 1\n"

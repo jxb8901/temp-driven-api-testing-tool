@@ -127,6 +127,22 @@ class ServerRuntimeQuickLoadTest {
             while(((Number)runtime.counts().get("activeWorkers")).intValue()>0&&System.nanoTime()<advancedReleaseDeadline)Thread.sleep(10);
             assertEquals(0,((Number)runtime.counts().get("activeWorkers")).intValue(),"The Advanced Load Worker must exit before the test temp directory is removed");
             assertArrayEquals(originalToolSidecar,Files.readAllBytes(toolSidecar));
+            // Catalog discovery has no Environment; composition must still pin the selected executable revision.
+            Map<String,Object> catalogPage=runtime.inspectLoadTemplates("p",null,0,100,"alice");
+            assertEquals(6,((List<?>)catalogPage.get("items")).size());
+            Map<String,Object> binding=Map.of("target",Map.of("type","tool","id","echo"));
+            Map<String,Object> composition=Map.of("templateId","builtin:multi-vu","revision",catalogPage.get("revisionDigest"),
+                    "bindings",Map.of("schemaVersion","att-load-bindings/v1","bindings",Map.of("workload-1",binding,"workload-2",binding)));
+            com.fasterxml.jackson.databind.node.ObjectNode composedBody=ServerRuntime.JSON.createObjectNode();
+            composedBody.put("packageId","p");composedBody.put("environment","SIT");composedBody.set("templateComposition",ServerRuntime.JSON.valueToTree(composition));
+            Map<String,Object> composedDraft=runtime.createAdvancedLoadDraft(composedBody,"alice");
+            assertTrue(String.valueOf(composedDraft.get("previewYaml")).contains("workload-2"));
+            assertTrue(String.valueOf(composedDraft.get("previewYaml")).contains("CORR-176"));
+            assertThrows(ServerRuntime.NotFoundException.class,()->runtime.getAdvancedLoadDraft(String.valueOf(composedDraft.get("draftId")),"bob"));
+            assertEquals(0,((Number)runtime.counts().get("activeWorkers")).intValue(),"Template validation starts no execution Worker");
+            composedBody.withObject("/templateComposition").put("revision","0".repeat(64));
+            assertThrows(ServerRuntime.StaleCursorException.class,()->runtime.createAdvancedLoadDraft(composedBody,"alice"));
+
             Map<String,Object> stale=runtime.createQuickLoadDraft(body,"alice");
             Files.writeString(templates.resolve("template.yaml"),"schemaVersion: att-template/v3.6\nname: FORM\ndescription: changed\nactions:\n"
                     +"  log:\n    type: log\n    message: '${EXEC.INPUT.value}'\n");

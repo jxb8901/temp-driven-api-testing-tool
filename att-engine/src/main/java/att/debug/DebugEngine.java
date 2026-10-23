@@ -83,6 +83,10 @@ public final class DebugEngine {
     }
 
     /** Reads and validates a Debug sidecar for in-memory Load promotion without executing the target. */
+    public Map<String, Object> loadBootstrapInputForLoad(String type, String id) throws Exception {
+        return loadBootstrapInputForLoad(targetOptions("load", type, id));
+    }
+
     public Map<String, Object> loadBootstrapInputForLoad(ExecutionOptions options) throws Exception {
         DebugInput input = loadInput(options, options.debugTargetType(), options.debugTargetId(),
                 att.core.ExecutionBootstrapVariables.Scope.LOAD);

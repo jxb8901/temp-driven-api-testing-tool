@@ -43,6 +43,10 @@ describe('ATT hash route contract', () => {
       .not.toHaveProperty('sourceReference');
   });
 
+  it('round-trips template, Scenarios and LOAD-filtered Jobs detail links', () => {
+    for(const route of [{kind:'load',tab:'scenarios'},{kind:'load',packageId:'p',templateId:'builtin:multi-workload-mix'},{kind:'jobs',executionType:'load'},{kind:'jobs',jobId:'J123',executionType:'load'}] as const) expect(parseRoute(formatRoute(route))).toEqual(route);
+  });
+
   it('round-trips LOAD resource deep links and preserves LOAD Catalog return filters', () => {
     const catalog = { kind: 'load', catalog: { query: 'nightly payments', packageFilter: 'payments', kindFilter: 'scenario',
       modelFilter: 'arrivalRate', validationFilter: 'unverified', environment: 'UAT', scrollY: 842 } } as const;

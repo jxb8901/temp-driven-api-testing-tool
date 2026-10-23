@@ -1338,7 +1338,8 @@
         "schemaVersion": {
           "enum": [
             "att-load/v1.6",
-            "att-load/v1.7"
+            "att-load/v1.7",
+            "att-load/v1.8"
           ]
         },
         "seed": {

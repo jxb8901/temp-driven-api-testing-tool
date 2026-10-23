@@ -18,6 +18,13 @@ async function main() {
   const pageErrors = [];
   const consoleErrors = [];
   const navigationEvents = [];
+  const inspectionRequests = [];
+  page.on('response', response => {
+    if (/\/(load-catalog|configuration|load-templates)(?:[/?]|$)/.test(response.url())) inspectionRequests.push(`${response.status()} ${new URL(response.url()).pathname}`);
+  });
+  page.on('requestfailed', request => {
+    if (/\/(load-catalog|configuration|load-templates)(?:[/?]|$)/.test(request.url())) inspectionRequests.push(`${request.failure()?.errorText} ${new URL(request.url()).pathname}`);
+  });
   page.on('pageerror', error => pageErrors.push(error.message));
   page.on('console', message => { if (message.type() === 'error') consoleErrors.push(message.text()); });
   page.on('framenavigated', frame => { if (frame === page.mainFrame()) navigationEvents.push(frame.url()); });
@@ -256,12 +263,21 @@ async function main() {
     assert.equal(overflow, false, 'the live Configuration and Quick Load UI must fit a tablet viewport');
 
     await page.goto(`${origin}/tools/att/ui/index.html#/advanced-load`);
-    await page.getByRole('heading', { name: 'LOAD Catalog', level: 1, exact: true }).waitFor();
+    await page.getByRole('heading', { name: 'Load testing', level: 1, exact: true }).waitFor();
+    await page.locator('.att-template-presets article').nth(5).waitFor();
+    assert.equal(await page.locator('.att-template-presets article').count(), 6);
+    const catalogResponse = page.waitForResponse(response =>
+      new URL(response.url()).pathname.endsWith('/packages/payments/load-catalog'));
+    await page.getByRole('button', { name: '☷ Scenarios', exact: true }).click();
+    const catalogResult = await catalogResponse;
+    assert.equal(catalogResult.status(), 200,
+      `Payments catalog discovery failed: ${catalogResult.status()} ${await catalogResult.text()}`);
+    await page.getByRole('heading', { name: 'Scenarios', level: 1, exact: true }).waitFor();
     assert.equal(await page.locator('.att-query-filter-panel[aria-label="LOAD Catalog filters"]').count(), 1,
       'LOAD Catalog filters must use the shared query contract');
     assert.equal(await page.locator('.att-query-results-panel[aria-label="Available LOAD YAML resources"]').count(), 1);
-    assert.equal(await page.locator('.att-query-results-panel[aria-label="Recent LOAD job results"]').count(), 1,
-      'Catalog resources and recent jobs must remain separate result datasets');
+    assert.equal(await page.locator('.att-query-results-panel[aria-label="Recent LOAD job results"]').count(), 0,
+      'Scenarios must not duplicate Jobs and results');
     await page.getByRole('button', { name: 'Clear filters' }).click();
     const scenarioCard = page.locator('.att-load-catalog-card').filter({ hasText: 'load/scenario.yaml' });
     await scenarioCard.waitFor();
@@ -278,7 +294,7 @@ async function main() {
     await page.getByRole('button', { name: 'Show YAML Source' }).click();
     await page.getByRole('region', { name: 'Load YAML Source', exact: true }).waitFor();
     await page.getByRole('button', { name: 'Back to LOAD Catalog' }).click();
-    await page.getByRole('heading', { name: 'LOAD Catalog', level: 1, exact: true }).waitFor();
+    await page.getByRole('heading', { name: 'Scenarios', level: 1, exact: true }).waitFor();
     await page.getByText('Environment: UAT', { exact: false }).waitFor();
     const restoredScenarioCard = page.locator('.att-load-catalog-card').filter({ hasText: 'load/scenario.yaml' });
     const restoredSchedule = restoredScenarioCard.getByRole('button', { name: 'Schedule' });
@@ -294,7 +310,7 @@ async function main() {
     assert.equal(await snapshotSource.inputValue(), 'Validated Load snapshot');
     assert.equal(await page.locator('#schedule-name').inputValue(), 'Validated LOAD snapshot');
     await page.getByRole('button', { name: 'Cancel', exact: true }).click();
-    await page.getByRole('heading', { name: 'LOAD Catalog', level: 1, exact: true }).waitFor();
+    await page.getByRole('heading', { name: 'Scenarios', level: 1, exact: true }).waitFor();
 
     await page.goto(`${origin}/tools/att/ui/index.html#/jobs`);
     await page.getByRole('heading', { name: 'Jobs', level: 1, exact: true }).waitFor();
@@ -360,6 +376,9 @@ async function main() {
     assert.deepEqual(pageErrors, [], 'the live ATT Studio UI must not throw browser errors');
     assert.deepEqual(consoleErrors.filter(message => /content security policy|refused to apply inline style/i.test(message)), [], 'the live Studio must not produce CSP console errors');
     process.stdout.write('Packaged-WAR Playwright API smoke passed under /tools/att; source references, Configuration, Testdata, and Quick Load used the real Server API.\n');
+  } catch (error) {
+    const state = await page.locator('.att-load-catalog').innerText({ timeout: 1000 }).catch(() => 'Catalog not mounted');
+    throw new Error(`${error.message}\nInspection requests: ${JSON.stringify(inspectionRequests)}\nCatalog state: ${state}`);
   } finally {
     await context.close();
     await browser.close();

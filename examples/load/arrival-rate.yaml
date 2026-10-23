@@ -1,4 +1,4 @@
-schemaVersion: att-load/v1.7
+schemaVersion: att-load/v1.8
 workloads:
 - target:
     type: flow
@@ -15,5 +15,3 @@ workloads:
     droppedRate: == 0%
     achievedArrivalRate: '>= 99%'
   id: arrival-rate
-execution:
-  execIdFormat: ${EXEC.RUN_ID}-${EXEC.LOAD.WORKLOAD_ID}-arrival-${EXEC.LOAD.ITERATION}

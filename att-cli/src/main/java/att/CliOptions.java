@@ -12,6 +12,9 @@ import att.core.CliSetOverrides;
 
 /** Parsed command-line arguments and presentation settings for the ATT CLI. */
 public final class CliOptions {
+    private String loadTemplate;
+    private String loadBindings;
+    private boolean listLoadTemplates, previewLoadTemplate, templateDebug;
     private final String command;
     private final Path configPath;
     private final String environment;
@@ -190,11 +193,15 @@ public final class CliOptions {
                 start = 3;
             }
         }
+        String loadTemplate = null, loadBindings = null;
+        boolean listLoadTemplates = false, previewLoadTemplate = false, templateDebug = false;
         Path loadScenario = null;
         if ("load".equals(command)) {
             if (args.length == 2 && "--help".equals(args[1])) return empty("help");
             if (args.length == 1) start = 1;
             else if ("--debug".equals(args[1])) {
+                if (args.length > 2 && args[2].startsWith("--")) { templateDebug = true; start = 2; }
+                else {
                 if (args.length < 4) throw new IllegalArgumentException("load --debug requires template|flow|tool and a target id");
                 debugTargetType = args[2].toLowerCase(java.util.Locale.ROOT);
                 if (!("template".equals(debugTargetType) || "flow".equals(debugTargetType) || "tool".equals(debugTargetType)))
@@ -202,6 +209,7 @@ public final class CliOptions {
                 debugTargetId = args[3];
                 if (debugTargetId.trim().isEmpty()) throw new IllegalArgumentException("load --debug target id must not be blank");
                 start = 4;
+                }
             } else {
                 if (args.length < 2 || args[1].trim().isEmpty())
                     throw new IllegalArgumentException("load requires a scenario path, --debug template|flow|tool <id>, or no target for discovery");
@@ -269,6 +277,10 @@ public final class CliOptions {
             else if ("--profile".equals(arg)) profile = true;
             else if ("--quiet".equals(arg)) quiet = true;
             else if ("--verbose".equals(arg)) { verbose = true; explicitVerbose = true; }
+            else if ("--load-template".equals(arg)) loadTemplate = value(args, ++i, arg);
+            else if ("--bindings".equals(arg)) loadBindings = value(args, ++i, arg);
+            else if ("--list-templates".equals(arg)) listLoadTemplates = true;
+            else if ("--preview".equals(arg)) previewLoadTemplate = true;
             else if ("--users".equals(arg)) loadUsers = value(args, ++i, arg);
             else if ("--arrival-rate".equals(arg)) loadArrivalRate = value(args, ++i, arg);
             else if ("--warmup".equals(arg)) loadWarmup = value(args, ++i, arg);
@@ -291,7 +303,7 @@ public final class CliOptions {
         if ("debug".equals(command) && debugTargetType.isEmpty()
                 && seenOptions.stream().anyMatch(option -> !java.util.Arrays.asList("--config", "--env", "--format", "--quiet", "--verbose", "--substitute-package-root", "--substitute-external-basename").contains(option)))
             throw new IllegalArgumentException("Debug discovery accepts only --config, --env, --format, --quiet, and --verbose");
-        if ("load".equals(command) && loadScenario == null && debugTargetType.isEmpty()
+        if ("load".equals(command) && loadScenario == null && debugTargetType.isEmpty() && !templateDebug && !listLoadTemplates
                 && seenOptions.stream().anyMatch(option -> !java.util.Arrays.asList("--config", "--env", "--format", "--quiet", "--verbose", "--substitute-package-root", "--substitute-external-basename").contains(option)))
             throw new IllegalArgumentException("Load discovery accepts only --config, --env, --format, --quiet, and --verbose");
         if ((packageScope || selectedScope) && !"validate".equals(command)) throw new IllegalArgumentException("--package/--selected are valid only for validate");
@@ -310,6 +322,18 @@ public final class CliOptions {
         if (quiet) verbose = false;
         if ("load".equals(command) && loadUsers != null && loadArrivalRate != null)
             throw new IllegalArgumentException("--users and --arrival-rate are mutually exclusive");
+        if (templateDebug && (loadTemplate == null || loadBindings == null))
+            throw new IllegalArgumentException("load --debug without a target requires --load-template and --bindings");
+        if (loadBindings != null && (!templateDebug || loadTemplate == null))
+            throw new IllegalArgumentException("--bindings requires load --debug --load-template without a positional target");
+        if (loadTemplate != null && !templateDebug && debugTargetType.isEmpty())
+            throw new IllegalArgumentException("--load-template requires load --debug template|flow|tool <id>, or --debug with --bindings");
+        if (previewLoadTemplate && loadTemplate == null) throw new IllegalArgumentException("--preview requires --load-template");
+        if (listLoadTemplates && (loadTemplate != null || loadScenario != null || !debugTargetType.isEmpty() || templateDebug))
+            throw new IllegalArgumentException("--list-templates cannot be combined with an execution target");
+        if (templateDebug && (debugInput != null || !variableOverrides.isEmpty() || loadUsers != null || loadArrivalRate != null
+                || loadMaxConcurrent != null || loadThinkTime != null || loadOverloadPolicy != null))
+            throw new IllegalArgumentException("Multi-target templates require binding-specific business values and template workload pacing; unscoped --input/--set/--users/--arrival-rate/--max-concurrent/--think-time are ambiguous");
         validateAllowed(command, seenOptions);
         CliSetOverrides.validate(variableOverrides);
         CliOptions parsed = new CliOptions(command, config, suites, suiteDir, caseIds, tags, excludeTags, runId, all,
@@ -317,6 +341,8 @@ public final class CliOptions {
                 updateSnapshot, profile, debugTargetType, debugTargetId, debugInput, loadScenario, loadUsers,
                 loadArrivalRate, loadWarmup, loadRampUp, loadDuration, loadRampDown, loadThinkTime,
                 loadMaxConcurrent, loadOverloadPolicy, environment, variableOverrides, unsafeFailureDetails);
+        parsed.loadTemplate = loadTemplate; parsed.loadBindings = loadBindings;
+        parsed.listLoadTemplates = listLoadTemplates; parsed.previewLoadTemplate = previewLoadTemplate; parsed.templateDebug = templateDebug;
         parsed.debugId = debugId;
         parsed.substitutePackageRoot = substitutePackageRoot;
         parsed.substituteExternalBasename = substituteExternalBasename;
@@ -331,7 +357,7 @@ public final class CliOptions {
         else if ("report".equals(command)) allowed.addAll(java.util.Arrays.asList("--run-id", "--output-dir"));
         else if ("build".equals(command)) allowed.add("--output-dir");
         else if ("debug".equals(command)) allowed.addAll(java.util.Arrays.asList("--input", "--set", "--debug-id", "--output-dir", "--profile", "--format", "--quiet", "--verbose", "--env", "--unsafe-failure-details", "--substitute-package-root", "--substitute-external-basename"));
-        else if ("load".equals(command)) allowed.addAll(java.util.Arrays.asList("--input", "--set", "--format", "--quiet", "--verbose", "--profile", "--output-dir", "--run-id", "--users", "--arrival-rate", "--warmup", "--ramp-up", "--duration", "--ramp-down", "--think-time", "--max-concurrent", "--overload-policy", "--env", "--substitute-package-root", "--substitute-external-basename"));
+        else if ("load".equals(command)) allowed.addAll(java.util.Arrays.asList("--load-template", "--bindings", "--list-templates", "--preview","--input", "--set", "--format", "--quiet", "--verbose", "--profile", "--output-dir", "--run-id", "--users", "--arrival-rate", "--warmup", "--ramp-up", "--duration", "--ramp-down", "--think-time", "--max-concurrent", "--overload-policy", "--env", "--substitute-package-root", "--substitute-external-basename"));
         for (String option : seen) if (!allowed.contains(option)) throw new IllegalArgumentException("Option " + option + " is not valid for command " + command);
     }
 
@@ -372,7 +398,11 @@ public final class CliOptions {
     public boolean unsafeFailureDetails() { return unsafeFailureDetails; }
     public List<String> variableOverrides() { return variableOverrides; }
     public List<String> setOverrides() { return variableOverrides; }
-    public boolean loadDebug() { return "load".equals(command) && !debugTargetType.isEmpty(); }
+    public String loadTemplate() { return loadTemplate; }
+    public String loadBindings() { return loadBindings; }
+    public boolean listLoadTemplates() { return listLoadTemplates; }
+    public boolean previewLoadTemplate() { return previewLoadTemplate; }
+    public boolean loadDebug() { return "load".equals(command) && (!debugTargetType.isEmpty() || templateDebug); }
     public Path loadScenario() { return loadScenario; }
     public String loadUsers() { return loadUsers; }
     public String loadArrivalRate() { return loadArrivalRate; }

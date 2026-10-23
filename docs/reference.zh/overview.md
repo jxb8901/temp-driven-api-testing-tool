@@ -25,7 +25,7 @@ RUN 單次執行功能目標或 Case selection；Debug 為診斷選項；LOAD �
 |---|---|---|
 | Run | workbook Testcase 與 Stage selector | Template、Flow、Tool、DB/MQ/HTTP/SSH |
 | Debug | `att-debug/v1.2` sidecar 或 `--input` | 單一 Template、Flow 或 Tool target |
-| Load | `att-load/v1.7` scenario | 重複執行一個或多個 Template、Flow 或 Tool workload |
+| Load | `att-load/v1.8` scenario | 重複執行一個或多個 Template、Flow 或 Tool workload |
 
 可重用 Template/Flow 應依賴 `EXEC.INPUT`、`EXEC.VARS`、`EXEC.ACTIONS`、`META` 和 Action-local `output`。執行模式與 scheduler identity 只保留在 framework evidence，不會成為 expression data。
 
