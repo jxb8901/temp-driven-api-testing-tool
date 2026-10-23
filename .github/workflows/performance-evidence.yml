@@ -83,6 +83,63 @@ jobs:
             -Datt.server.benchmark.prewarmResources.output="$GITHUB_WORKSPACE/target/performance-evidence/prewarm-worker-resource-matrix.json" \
             -Datt.benchmark.commit="$GITHUB_SHA"
 
+      - name: Capture matched control-plane baseline and feature metrics
+        shell: bash
+        run: |
+          set -euo pipefail
+          master="$RUNNER_TEMP/att-master-baseline"
+          test_source="$GITHUB_WORKSPACE/att-server/src/test/java/att/server"
+          mkdir -p "$master/att-server/src/test/java/att/server"
+          cp "$test_source/ControlPlanePerformanceBenchmark.java" "$master/att-server/src/test/java/att/server/ControlPlanePerformanceBenchmark.java"
+          cp "$test_source/ProcessTreeResourceSampler.java" "$master/att-server/src/test/java/att/server/ProcessTreeResourceSampler.java"
+          master_sha="$(git -C "$master" rev-parse HEAD)"
+          (cd "$master" && mvn -B -ntp -pl att-server -am test \
+            -Dtest=ControlPlanePerformanceBenchmark \
+            -Dsurefire.failIfNoSpecifiedTests=false \
+            -Dskip.npm=true -Dskip.installnodenpm=true -Datt.skipFrontendUnitTests=true \
+            -Datt.skipJava8ModuleTests=true \
+            -Datt.backend.samples=256 -Datt.backend.storeWarmups=10 \
+            -Datt.backend.output="$GITHUB_WORKSPACE/target/performance-evidence/control-plane-master.json" \
+            -Datt.benchmark.processResources=true -Datt.benchmark.commit="$master_sha")
+          mvn -B -ntp -pl att-server -am test \
+            -Dtest=ControlPlanePerformanceBenchmark \
+            -Dsurefire.failIfNoSpecifiedTests=false \
+            -Dskip.npm=true -Dskip.installnodenpm=true -Datt.skipFrontendUnitTests=true \
+            -Datt.skipJava8ModuleTests=true \
+            -Datt.backend.samples=256 -Datt.backend.storeWarmups=10 \
+            -Datt.backend.output="$GITHUB_WORKSPACE/target/performance-evidence/control-plane-feature.json" \
+            -Datt.benchmark.processResources=true -Datt.benchmark.commit="$GITHUB_SHA"
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          root = Path("target/performance-evidence")
+          fields = {
+              "jobstore": ("clients", "p50Ms", "p95Ms", "mixedOperationsPerSecond",
+                           "monitorBlockedMs", "threadCpuMs", "threadAllocatedBytes",
+                           "sampledPeakHeapUsedBytes", "h2FilesBytesDelta",
+                           "authUserLookupP95Ms", "authSessionVerifyTouchP95Ms", "jobListP95Ms"),
+              "run-definition-parse-only": ("caseCount", "p50Ms", "p95Ms"),
+              "journal": ("targetEventsPerSecond", "observer", "p50Ms", "p95Ms",
+                          "observedAppendEventsPerSecond", "compactionSnapshots"),
+              "classpath-50-jars": ("p50Ms", "p95Ms"),
+          }
+          for revision in ("master", "feature"):
+              report = json.loads((root / f"control-plane-{revision}.json").read_text())
+              print(json.dumps({
+                  "type": "control-plane-report",
+                  "revision": revision,
+                  "commit": report["commit"],
+                  "samples": report["samples"],
+                  "storeWarmups": report["storeWarmups"],
+                  "processResources": report.get("processResources"),
+              }, sort_keys=True))
+              for row in report["measurements"]:
+                  selected = {key: row[key] for key in fields[row["operation"]] if key in row}
+                  selected["operation"] = row["operation"]
+                  print(json.dumps({"type": "control-plane-measurement", **selected}, sort_keys=True))
+          PY
+
       - name: Compare cold and prewarmed Debug draft latency on this runner
         shell: bash
         run: |

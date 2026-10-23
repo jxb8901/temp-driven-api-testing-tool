@@ -21,6 +21,9 @@ class ControlPlanePerformanceBenchmark {
     private final List<Map<String,Object>> measurements = new ArrayList<>();
 
     @Test void writesReproducibleMetadataJournalAndClasspathMeasurements() throws Exception {
+        ProcessTreeResourceSampler resources = Boolean.getBoolean("att.benchmark.processResources")
+                ? ProcessTreeResourceSampler.start() : null;
+        try {
         var bean = ManagementFactory.getThreadMXBean();
         if (bean.isThreadContentionMonitoringSupported()) bean.setThreadContentionMonitoringEnabled(true);
         var allocationBean = allocationBean();
@@ -308,10 +311,14 @@ class ControlPlanePerformanceBenchmark {
         report.put("maxHeapBytes",Runtime.getRuntime().maxMemory());
         report.put("samples",samples); report.put("storeWarmups",storeWarmups);
         report.put("commit",System.getProperty("att.benchmark.commit","unspecified"));
+        if (resources != null) report.put("processResources", resources.snapshot());
         report.put("measurements",measurements);
         Path output=Path.of(System.getProperty("att.backend.output","target/control-plane-benchmark.json"));
         Files.createDirectories(output.toAbsolutePath().getParent());
         new ObjectMapper().writerWithDefaultPrettyPrinter().writeValue(output.toFile(),report);
+        } finally {
+            if (resources != null) resources.close();
+        }
     }
 
     private static Map<String,Object> summary(String name,long[] times) {
