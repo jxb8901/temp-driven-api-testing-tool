@@ -492,10 +492,10 @@ final class JobStore implements AutoCloseable {
         if(!isActiveUser(login))return List.of();
         return listLoad(limitPlusOne,offset);
     }
-    synchronized List<Map<String,Object>> listLoad(int limitPlusOne,int offset) throws Exception {
+    List<Map<String,Object>> listLoad(int limitPlusOne,int offset) throws Exception {
         return listLoad(limitPlusOne,offset,null,false);
     }
-    synchronized List<Map<String,Object>> listLoad(int limitPlusOne,int offset,String search,boolean pinnedOnly) throws Exception {
+    List<Map<String,Object>> listLoad(int limitPlusOne,int offset,String search,boolean pinnedOnly) throws Exception {
         List<Map<String,Object>> out=new ArrayList<>();
         try(Connection c=connect();PreparedStatement p=c.prepareStatement("SELECT job_id,command,package_id,principal,status,created_at,started_at,finished_at,exit_code,request_summary,pinned,pinned_at,pinned_by,pin_reason FROM jobs WHERE command='load' AND (retention_state IS NULL OR retention_state<>'DELETING') AND LOCATE(?,LOWER(COALESCE(principal,''))) > 0"+(pinnedOnly?" AND pinned=TRUE":"")+" ORDER BY created_at DESC,job_id DESC LIMIT ? OFFSET ?")){
             p.setString(1,search==null?"":search.trim().toLowerCase(java.util.Locale.ROOT));p.setInt(2,limitPlusOne);p.setInt(3,offset);try(ResultSet r=p.executeQuery()){while(r.next())out.add(jobSummary(r));}
@@ -803,13 +803,15 @@ final class JobStore implements AutoCloseable {
     }
     // Status-count polling owns its connection and result data; do not serialize it on the JobStore writer monitor.
     long count(String status) throws Exception { try(Connection c=connect();PreparedStatement p=c.prepareStatement("SELECT COUNT(*) FROM jobs WHERE status=?")){p.setString(1,status);try(ResultSet r=p.executeQuery()){r.next();return r.getLong(1);}} }
-    synchronized List<java.util.Map<String,Object>> list(int limit) throws Exception {
+    // Direct job-history reads own independent JDBC connections and immutable result data.
+    // Keep them off the writer monitor so concurrent readers can overlap inserts and updates.
+    List<java.util.Map<String,Object>> list(int limit) throws Exception {
         return list(limit,null);
     }
-    synchronized List<java.util.Map<String,Object>> list(int limit,String principalSearch) throws Exception {
+    List<java.util.Map<String,Object>> list(int limit,String principalSearch) throws Exception {
         return list(limit,principalSearch,false);
     }
-    synchronized List<java.util.Map<String,Object>> list(int limit,String principalSearch,boolean pinnedOnly) throws Exception {
+    List<java.util.Map<String,Object>> list(int limit,String principalSearch,boolean pinnedOnly) throws Exception {
         List<java.util.Map<String,Object>> out=new ArrayList<>();
         String filter=principalSearch==null||principalSearch.isEmpty()?null:principalSearch;
         String sql="SELECT job_id,command,package_id,principal,status,created_at,started_at,finished_at,exit_code,result_json,diagnostic_json,pinned,pinned_at,pinned_by,pin_reason FROM jobs WHERE (retention_state IS NULL OR retention_state<>'DELETING') "+(pinnedOnly?"AND pinned=TRUE ":"")+(filter==null?"":"AND LOCATE(LOWER(?),LOWER(principal))>0 ")+"ORDER BY created_at DESC LIMIT ?";
