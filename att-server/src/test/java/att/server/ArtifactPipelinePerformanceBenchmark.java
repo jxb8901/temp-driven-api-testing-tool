@@ -79,13 +79,16 @@ class ArtifactPipelinePerformanceBenchmark {
             }
             row.put("resourceSample",resources.snapshot());
             row.put("memoryBudgetPolicy","revision production default");
-            row.put("ioVolume",Map.of("sourceBytes",resourceMetrics.value.sourceBytes,
-                    "sanitizedBytesSpilled",resourceMetrics.value.temporaryExportBytes==null?0:resourceMetrics.value.temporaryExportBytes,
-                    "sanitizedBytesReread",resourceMetrics.value.temporaryExportReadBytes==null?0:resourceMetrics.value.temporaryExportReadBytes,
-                    "zipEntryInputBytes",resourceMetrics.value.zipWriteInputBytes==null?0:resourceMetrics.value.zipWriteInputBytes,
-                    "verificationPayloadBytesRead",resourceMetrics.value.verificationBytesRead==null?0:resourceMetrics.value.verificationBytesRead,
-                    "zipBytesWritten",resourceMetrics.value.zipBytes==null?0:resourceMetrics.value.zipBytes,
-                    "measurement", "application-level bytes; not physical device I/O"));
+            Map<String,Object> ioVolume=new LinkedHashMap<>();
+            ioVolume.put("sourceBytes",resourceMetrics.value.sourceBytes);
+            ioVolume.put("sanitizedBytesSpilled",optionalMetric(resourceMetrics.value,"temporaryExportBytes"));
+            ioVolume.put("sanitizedBytesReread",optionalMetric(resourceMetrics.value,"temporaryExportReadBytes"));
+            ioVolume.put("zipEntryInputBytes",optionalMetric(resourceMetrics.value,"zipWriteInputBytes"));
+            ioVolume.put("verificationPayloadBytesRead",optionalMetric(resourceMetrics.value,"verificationBytesRead"));
+            ioVolume.put("zipBytesWritten",resourceMetrics.value.zipBytes==null?0:resourceMetrics.value.zipBytes);
+            ioVolume.put("measurement", "application-level bytes; not physical device I/O");
+            ioVolume.put("nullCounterMeaning", "counter is not available in this revision's metrics API");
+            row.put("ioVolume",ioVolume);
             rows.add(row);
         }
         Map<String,Object> report=new LinkedHashMap<>();report.put("schemaVersion","att-artifact-pipeline-benchmark/v1");
@@ -97,6 +100,17 @@ class ArtifactPipelinePerformanceBenchmark {
         Files.createDirectories(destination.toAbsolutePath().getParent());
         ServerRuntime.JSON.writerWithDefaultPrettyPrinter().writeValue(destination.toFile(),report);
         System.out.println("Artifact pipeline benchmark written to "+destination.toAbsolutePath());
+    }
+
+    private static Object optionalMetric(Object metrics,String name) {
+        try {
+            Object value=metrics.getClass().getField(name).get(metrics);
+            return value==null?0L:value;
+        } catch (NoSuchFieldException unavailable) {
+            return null;
+        } catch (IllegalAccessException error) {
+            throw new IllegalStateException("Cannot read optional artifact metric "+name,error);
+        }
     }
 
 }
