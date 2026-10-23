@@ -31,9 +31,17 @@ final class ExecutionWorkerPool implements AutoCloseable {
         volatile Process process;
         volatile WorkerProcessFence fence;
         volatile long spawnedNanos,readyNanos;
+        int persistedIdentities;
         boolean retired;
         Idle(String id,String fingerprint,Path root,Path marker) {
             packageId=id;this.fingerprint=fingerprint;this.root=root;this.marker=marker;
+        }
+    }
+    private record RecoveryProcess(ProcessHandle handle,Instant start) {
+        boolean alive() {
+            if(!handle.isAlive())return false;
+            Instant actual=handle.info().startInstant().orElseThrow(()->new IllegalStateException("Prewarm recovery identity unavailable"));
+            return start.equals(actual);
         }
     }
     private final ServerConfig config;
@@ -71,7 +79,8 @@ final class ExecutionWorkerPool implements AutoCloseable {
         for(Iterator<Idle> iterator=owned.iterator();iterator.hasNext();) {
             Idle idle=iterator.next();
             if(idle.retired||idle.readyNanos==0||!idle.packageId.equals(packageId))continue;
-            if(!idle.process.isAlive()||!idle.fingerprint.equals(current)
+            idle.fence.observe();
+            if(!idle.fence.verified()||idle.fence.identities().size()!=1||!idle.process.isAlive()||!idle.fingerprint.equals(current)
                     ||System.nanoTime()-idle.readyNanos>TimeUnit.MILLISECONDS.toNanos(config.executionPool.idleTimeoutMs)) {
                 idle.retired=true;continue;
             }
@@ -90,7 +99,8 @@ final class ExecutionWorkerPool implements AutoCloseable {
                 if(closed)return;
                 for(Iterator<Idle> it=owned.iterator();it.hasNext();) {
                     Idle idle=it.next();
-                    if(idle.process!=null&&(!idle.process.isAlive()||!idle.fingerprint.equals(current)
+                    if(idle.fence!=null)idle.fence.observe();
+                    if(idle.process!=null&&(!idle.fence.verified()||idle.fence.identities().size()!=1||!idle.process.isAlive()||!idle.fingerprint.equals(current)
                             ||(idle.readyNanos!=0&&System.nanoTime()-idle.readyNanos>TimeUnit.MILLISECONDS.toNanos(config.executionPool.idleTimeoutMs)))) idle.retired=true;
                     if(idle.retired&&stop(idle))it.remove();
                 }
@@ -141,6 +151,8 @@ final class ExecutionWorkerPool implements AutoCloseable {
                     ||!idle.root.toString().equals(ready.path("cwd").asText()))
                 throw new IllegalArgumentException("Prewarm READY identity mismatch");
             synchronized(this) {
+                idle.fence.observe();
+                if(!idle.fence.verified()||idle.fence.identities().size()!=1)throw new IllegalStateException("Idle Worker containment was not proven");
                 if(closed||!idle.process.isAlive()||!idle.fingerprint.equals(fingerprint.current())) {idle.retired=true;return;}
                 idle.readyNanos=System.nanoTime();consecutiveFailures=0;retryAfter=0;
             }
@@ -158,8 +170,13 @@ final class ExecutionWorkerPool implements AutoCloseable {
             processes.add(Map.of("pid",idle.process.pid(),"start",start.toString()));
         }
         byte[] bytes=ServerRuntime.JSON.writeValueAsBytes(Map.of("version",1,"processes",processes));
-        Files.write(idle.marker,bytes,StandardOpenOption.CREATE_NEW);
-        try(var channel=java.nio.channels.FileChannel.open(idle.marker,StandardOpenOption.WRITE)){channel.force(true);}
+        Path pending=Files.createTempFile(registry,".prewarm-",".pending");
+        try {
+            Files.write(pending,bytes,StandardOpenOption.TRUNCATE_EXISTING);
+            try(var channel=java.nio.channels.FileChannel.open(pending,StandardOpenOption.WRITE)){channel.force(true);}
+            Files.move(pending,idle.marker,StandardCopyOption.ATOMIC_MOVE,StandardCopyOption.REPLACE_EXISTING);
+            idle.persistedIdentities=processes.size();
+        } finally {Files.deleteIfExists(pending);}
     }
 
     /** Stop previously unassigned Workers even when the feature is now disabled. */
@@ -172,20 +189,35 @@ final class ExecutionWorkerPool implements AutoCloseable {
                 var data=ServerRuntime.JSON.readTree(Files.readAllBytes(marker));
                 if(data.path("version").asInt()!=1||!data.path("processes").isArray()||data.path("processes").size()>1024)
                     throw new IllegalStateException("Invalid prewarm recovery identity");
-                List<ProcessHandle> survivors=new ArrayList<>();
+                Map<Long,RecoveryProcess> survivors=new LinkedHashMap<>();
+                // Capture every known identity before signalling the parent: after
+                // its exit a surviving child may have been reparented already.
                 for(var row:data.path("processes")) {
                     long pid=row.path("pid").asLong();Instant start=Instant.parse(row.path("start").asText());
                     ProcessHandle handle=ProcessHandle.of(pid).orElse(null);
                     if(handle!=null&&handle.isAlive()) {
-                        if(!start.equals(handle.info().startInstant().orElse(null)))continue;
-                        handle.descendants().forEach(ProcessHandle::destroyForcibly);
-                        handle.destroyForcibly();survivors.add(handle);
+                        Instant actual=handle.info().startInstant().orElseThrow(()->new IllegalStateException("Prewarm recovery identity unavailable"));
+                        if(!start.equals(actual))continue; // Recycled PID is never ours to signal.
+                        survivors.put(pid,new RecoveryProcess(handle,start));
+                        try(var descendants=handle.descendants()) {
+                            var iterator=descendants.iterator();
+                            while(iterator.hasNext()) {
+                                ProcessHandle child=iterator.next();
+                                if(!child.isAlive())continue;
+                                Instant childStart=child.info().startInstant().orElseThrow(()->new IllegalStateException("Prewarm recovery descendant identity unavailable"));
+                                survivors.put(child.pid(),new RecoveryProcess(child,childStart));
+                                if(survivors.size()>1024)throw new IllegalStateException("Prewarm recovery process inventory exceeds its limit");
+                            }
+                        }
                     }
                 }
+                List<RecoveryProcess> targets=new ArrayList<>(survivors.values());
+                Collections.reverse(targets);
+                for(var target:targets)if(target.alive())target.handle().destroyForcibly();
                 long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(5);
-                for(var handle:survivors) {
-                    while(handle.isAlive()&&System.nanoTime()<deadline)Thread.sleep(10);
-                    if(handle.isAlive())throw new IllegalStateException("Prewarm recovery cleanup is uncertain");
+                for(var target:targets) {
+                    while(target.alive()&&System.nanoTime()<deadline)Thread.sleep(10);
+                    if(target.alive())throw new IllegalStateException("Prewarm recovery cleanup is uncertain");
                 }
                 Files.delete(marker);
             }
@@ -194,9 +226,13 @@ final class ExecutionWorkerPool implements AutoCloseable {
 
     private boolean stop(Idle idle) {
         if(idle.process==null)return true;
+        idle.fence.observe();
+        boolean recorded=true;
+        if(idle.fence.identities().size()>idle.persistedIdentities)
+            try {persist(idle);}catch(Exception uncertain){recorded=false;}
         idle.fence.force();
         try {idle.process.getOutputStream().close();idle.process.getInputStream().close();}catch(Exception ignored) { }
-        if(!idle.fence.stopped())return false;
+        if(!recorded||!idle.fence.stopped())return false;
         try {Files.deleteIfExists(idle.marker);return true;}catch(Exception failed){return false;}
     }
 
