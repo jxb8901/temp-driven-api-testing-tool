@@ -280,6 +280,8 @@ Load testing 預設開啟 **Templates**。六種模式共同使用 `att-load-tem
 
 內建 ID 為 `builtin:<mode>`。Package template 放於 `load/templates/`，binding 放於 `load/bindings/`；只允許 package-relative、安全且通過 schema 的檔案，每檔最多 256 KiB，catalog 掃描有上限。Template 只保存結構與 policy，不保存 Target ID 或 business values。完整 YAML 範例見英文同名章節；template 欄位為 `schemaVersion`、`name`、`mode`、`policy`、`workloads`。Workload 宣告穩定 `id`、可選 `load` override、mix slot 的 `id/weight`。Binding descriptor 使用 `att-load-bindings/v1`，`bindings.<workloadId>.target` 或 `bindings.<workloadId>.mix.<slotId>` 指向 `{type,id}`。
 
+Catalog inspection 每頁最多 100 項，亦受序列化 response 大小限制（預設 256 KiB）。須持續跟隨 `nextOffset`，直到其為 null；每頁保留完整 definition，相同 query 與 offset 可取得對應 definition，毋須額外 detail request。若單一 definition 已超出大小限制，catalog 仍列出 metadata，但標示 `response-too-large` 並省略 definition；可縮小檔案供 Studio 使用，或在 CLI 直接以檔案 reference compose。CLI `load --list-templates` 自動讀取所有分頁，並保留掃描上限的 `truncated` 標示。
+
 例如 workload-a 使用 10 VU、A/B 70/30，workload-b 使用 20 VU、B/C 40/60，即 2 workloads、4 bindings、3 unique targets、30 VU；重複 Target 不合併 workload。額外 binding 必須有 `prototype`，明確指向同 scope 的原有 slot，複製 policy 而不複製 Target；不可省略必要 slot。Descriptor 最多 128 workloads/entries，Server 可設定更低 aggregate limits。
 
 Builder 以精簡表格顯示 users/rates、bindings、weights。Workload、mix、Target、common settings 使用 Save/Cancel modal；Cancel/Escape 捨棄暫存修改。每個 Target 的 typed sidecar inputs/vars/Tool arguments 獨立載入；優先次序為 template policy、safe sidecar defaults、explicit binding values、適用的 CLI overrides。Debug-local testdata imports 不會自動提升，須明確宣告 Load testdata。Binding 亦可指定 workload inputs/vars/testdata selection。Business inputs/vars 按 key 合併，優先順序為 safe sidecar defaults、Target binding、workload binding；後者覆蓋同名 key，其餘 key 保留。Studio validation 及編輯會保留各 workload 的 timing、ramps、execution settings 與 ranged think time。

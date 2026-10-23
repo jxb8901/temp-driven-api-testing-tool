@@ -947,7 +947,7 @@ public final class PackageResourceInspector implements AutoCloseable {
 
     /** New templates are read without an Environment or a target and never start execution. */
     public Map<String,Object> inspectLoadTemplates(String query, int offset, int limit) throws Exception {
-        Map<String,Object> result = new att.load.LoadTemplateCatalog(packageRoot).list(query, offset, limit);
+        Map<String,Object> result = new att.load.LoadTemplateCatalog(packageRoot).list(query, offset, limit, maxResponseBytes - 1024);
         result.put("revisionDigest", new att.load.LoadTemplateCatalog(packageRoot).sourceRevision());
         return bounded(result);
     }

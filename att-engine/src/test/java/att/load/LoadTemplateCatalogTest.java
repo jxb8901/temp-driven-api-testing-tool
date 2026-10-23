@@ -53,6 +53,51 @@ class LoadTemplateCatalogTest {
         assertNotEquals(added,catalog.sourceRevision());
     }
 
+    @Test @SuppressWarnings("unchecked")
+    void inspectionPagesCompleteDefinitionsWithinDefaultResponseBudget() throws Exception {
+        Path directory = Files.createDirectories(root.resolve("load/templates"));
+        Map<String,Object> definition = LoadTemplateCatalog.builtin("multi-workload-mix");
+        List<Map<String,Object>> workloads = new ArrayList<>();
+        for (int w = 0; w < 20; w++) {
+            List<Map<String,Object>> mix = new ArrayList<>();
+            for (int m = 0; m < 40; m++) mix.add(obj("id", "slot-abcdefghijklmnopqrstuvwxyz0123456789-" + m, "weight", 1));
+            workloads.add(obj("id", "workload-" + w, "mix", mix));
+        }
+        definition.put("workloads", workloads);
+        byte[] yaml = new org.yaml.snakeyaml.Yaml().dump(definition).getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        assertTrue(yaml.length < 262144);
+        assertTrue(yaml.length * 6 > 262144);
+        for (int n = 0; n < 6; n++) Files.write(directory.resolve("large-" + n + ".yaml"), yaml);
+        att.resource.PackageResourceInspector inspector = new att.resource.PackageResourceInspector(root,
+                Paths.get("config/config.yaml"), null, Collections.emptyList(), 65536, 262144);
+        Set<String> seen = new LinkedHashSet<>();
+        int offset = 0, pages = 0;
+        do {
+            Map<String,Object> page = inspector.inspectLoadTemplates("", offset, 100);
+            assertTrue(new org.yaml.snakeyaml.Yaml().dump(page).getBytes(java.nio.charset.StandardCharsets.UTF_8).length <= 262144);
+            assertTrue(att.validation.JsonSupport.write(page).getBytes(java.nio.charset.StandardCharsets.UTF_8).length <= 262144);
+            List<Map<String,Object>> items = (List<Map<String,Object>>)page.get("items");
+            assertFalse(items.isEmpty());
+            for (Map<String,Object> item : items) {
+                assertTrue(seen.add((String)item.get("id")), "No skipped or duplicate definitions");
+                assertEquals("valid", item.get("validation"));
+                assertEquals(new LoadTemplateCatalog(root).load((String)item.get("id")), item.get("definition"));
+            }
+            pages++;
+            if (page.get("nextOffset") == null) break;
+            int next = ((Number)page.get("nextOffset")).intValue();
+            assertTrue(next > offset);
+            offset = next;
+        } while (true);
+        assertTrue(pages > 1);
+        assertEquals(12, seen.size());
+        Map<String,Object> smallPage = new LoadTemplateCatalog(root).list("large-0.yaml", 6, 1, 4096);
+        Map<String,Object> unavailable = ((List<Map<String,Object>>)smallPage.get("items")).get(0);
+        assertEquals("response-too-large", unavailable.get("validation"));
+        assertFalse(unavailable.containsKey("definition"));
+        assertNull(smallPage.get("nextOffset"));
+    }
+
     @Test void independentlyMixedWorkloadsPreserveSharedTargetsAndBusinessIsolation() throws Exception {
         Map<String,Object> definition = LoadTemplateCatalog.builtin("multi-workload-mix");
         @SuppressWarnings("unchecked") List<Map<String,Object>> rows = (List<Map<String,Object>>)definition.get("workloads");

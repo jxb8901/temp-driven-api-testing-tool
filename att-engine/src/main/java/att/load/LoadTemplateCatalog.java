@@ -161,6 +161,11 @@ public final class LoadTemplateCatalog {
 
     /** Bounded package scan; templates remain separate from legacy policy/scenario discovery. */
     public Map<String,Object> list(String query, int offset, int limit) throws Exception {
+        return list(query, offset, limit, Integer.MAX_VALUE);
+    }
+
+    /** Pages retain complete definitions; byte-limited callers follow nextOffset to fetch each definition. */
+    public Map<String,Object> list(String query, int offset, int limit, int maxBytes) throws Exception {
         if (offset < 0 || limit < 1 || limit > 100) throw invalid("cursor", "Invalid template page");
         List<Map<String,Object>> all = new ArrayList<Map<String,Object>>();
         for (String mode : MODES) all.add(item("builtin:" + mode, validate(builtin(mode)), true));
@@ -185,9 +190,32 @@ public final class LoadTemplateCatalog {
         String search = query == null ? "" : query.toLowerCase(Locale.ROOT);
         List<Map<String,Object>> filtered = new ArrayList<Map<String,Object>>();
         for (Map<String,Object> item : all) if (Boolean.TRUE.equals(item.get("builtin")) || (item.get("id") + " " + item.get("name") + " " + item.get("mode")).toLowerCase(Locale.ROOT).contains(search)) filtered.add(item);
-        int end = Math.min(filtered.size(), offset + limit);
-        return obj("items", filtered.subList(Math.min(offset, filtered.size()), end), "total", filtered.size(),
-                "nextOffset", end < filtered.size() ? end : null, "truncated", truncated);
+        int end = Math.min(offset, filtered.size());
+        List<Map<String,Object>> page = new ArrayList<Map<String,Object>>();
+        Map<String,Object> result = obj("items", page, "total", filtered.size(), "nextOffset", null, "truncated", truncated);
+        while (end < filtered.size() && page.size() < limit) {
+            Map<String,Object> candidate = filtered.get(end);
+            page.add(candidate);
+            result.put("nextOffset", end + 1 < filtered.size() ? end + 1 : null);
+            if (maxBytes != Integer.MAX_VALUE && serializedBytes(result) > maxBytes) {
+                page.remove(page.size() - 1);
+                if (!page.isEmpty()) break;
+                // An individually oversized definition must not prevent browsing the rest of the catalog.
+                candidate = new LinkedHashMap<String,Object>(candidate);
+                candidate.remove("definition");
+                candidate.put("validation", "response-too-large");
+                page.add(candidate);
+                if (serializedBytes(result) > maxBytes) throw invalid("catalog", "Response budget is too small for template metadata");
+            }
+            end++;
+        }
+        result.put("nextOffset", end < filtered.size() ? end : null);
+        return result;
+    }
+
+    private static int serializedBytes(Map<String,Object> page) {
+        return Math.max(new org.yaml.snakeyaml.Yaml().dump(page).getBytes(java.nio.charset.StandardCharsets.UTF_8).length,
+                att.validation.JsonSupport.write(page).getBytes(java.nio.charset.StandardCharsets.UTF_8).length);
     }
 
     /** Catalog revision has no Environment dependency; executable drafts retain the full package revision. */

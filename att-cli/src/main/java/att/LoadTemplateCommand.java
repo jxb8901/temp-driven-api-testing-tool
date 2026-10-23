@@ -12,6 +12,22 @@ import static att.load.LoadTemplateCatalog.obj;
 final class LoadTemplateCommand {
     private LoadTemplateCommand() { }
 
+    @SuppressWarnings("unchecked")
+    static Map<String,Object> list(Path root) throws Exception {
+        LoadTemplateCatalog catalog = new LoadTemplateCatalog(root);
+        List<Map<String,Object>> items = new ArrayList<Map<String,Object>>();
+        Map<String,Object> page;
+        int offset = 0;
+        do {
+            page = catalog.list("", offset, 100);
+            items.addAll((List<Map<String,Object>>)page.get("items"));
+            if (page.get("nextOffset") == null) break;
+            offset = ((Number)page.get("nextOffset")).intValue();
+        } while (true);
+        page.put("items", items);
+        return page;
+    }
+
     static LoadScenario compose(Path root, FrameworkConfig config, CliOptions options) throws Exception {
         LoadTemplateCatalog catalog = new LoadTemplateCatalog(root);
         Map<String,Object> definition = catalog.load(options.loadTemplate());
