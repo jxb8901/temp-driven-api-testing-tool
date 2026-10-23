@@ -351,7 +351,7 @@ jobs:
           if [ "$FULL_BROWSER_SUITE" = "true" ]; then
             npx playwright install --with-deps chromium firefox webkit
           else
-            npx playwright install --with-deps chromium
+            npx playwright install chromium
           fi
 
       - name: Run Chromium UI suites
