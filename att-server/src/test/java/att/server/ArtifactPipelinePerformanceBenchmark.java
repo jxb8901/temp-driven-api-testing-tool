@@ -18,7 +18,7 @@ class ArtifactPipelinePerformanceBenchmark {
         assertTrue(samples>=5&&samples<=1000);
         List<Map<String,Object>> rows=new ArrayList<>();
         long memoryBudget=Long.getLong("att.archive.memoryBytes",ArtifactArchive.MAX_MEMORY_EXPORT_BYTES);
-        for(int files:new int[]{24,2048}) {
+        for(int files:new int[]{24,100,500,1000,2048}) {
             Path output=Files.createDirectories(temp.resolve("output-"+files));
             // Fixed incompressible-ish safe text, deterministic across revisions.
             Random random=new Random(280);
