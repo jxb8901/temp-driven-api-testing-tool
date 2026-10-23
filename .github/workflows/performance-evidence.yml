@@ -1,0 +1,299 @@
+name: Performance evidence
+
+on:
+  push:
+    branches:
+      - "feature/issues-278-281-performance"
+    tags:
+      - "performance-evidence-*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  capture:
+    # One-off branch captures require a marker commit; routine branch pushes skip this long benchmark.
+    if: ${{ github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/performance-evidence-') || (github.ref == 'refs/heads/feature/issues-278-281-performance' && contains(github.event.head_commit.message, '[performance-evidence]')) }}
+    name: Same-host baseline and feature measurements
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout tagged source and fetch master
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: maven
+
+      - name: Set up pinned Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22.22.2"
+          cache: npm
+          cache-dependency-path: att-web/frontend/package-lock.json
+
+      - name: Build master baseline packages on this runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin master --depth=1
+          git worktree add --detach "$RUNNER_TEMP/att-master-baseline" origin/master
+          (cd "$RUNNER_TEMP/att-master-baseline" && mvn -B -ntp -T 1C -pl att-dist -am \
+            -DskipTests=true -Datt.skipJava8ModuleTests=true \
+            -Datt.skipFrontendUnitTests=true -Datt.skipServerUnitTests=true clean package)
+          master_version="$(sed -n 's:.*<version>\([^<]*\)</version>.*:\1:p' \
+            "$RUNNER_TEMP/att-master-baseline/pom.xml" | head -n 1)"
+          mkdir -p "$RUNNER_TEMP/att-performance-packages/master"
+          cp "$RUNNER_TEMP/att-master-baseline/att-server/target/att-server-$master_version.war" \
+            "$RUNNER_TEMP/att-performance-packages/master/att-server.war"
+          cp "$RUNNER_TEMP/att-master-baseline/att-dist/target/att-$master_version-local.tar.gz" \
+            "$RUNNER_TEMP/att-performance-packages/master/att-local.tar.gz"
+          feature_version="$(sed -n 's:.*<version>\([^<]*\)</version>.*:\1:p' pom.xml | head -n 1)"
+          printf 'ATT_PERF_VERSION=%s\n' "$feature_version" >> "$GITHUB_ENV"
+
+      - name: Build tagged feature packages on this runner
+        run: |
+          mvn -B -ntp -T 1C -pl att-dist -am \
+            -DskipTests=true -Datt.skipJava8ModuleTests=true \
+            -Datt.skipFrontendUnitTests=true -Datt.skipServerUnitTests=true clean package
+          mkdir -p "$RUNNER_TEMP/att-performance-packages/feature"
+          cp "att-server/target/att-server-$ATT_PERF_VERSION.war" \
+            "$RUNNER_TEMP/att-performance-packages/feature/att-server.war"
+          cp "att-dist/target/att-$ATT_PERF_VERSION-local.tar.gz" \
+            "$RUNNER_TEMP/att-performance-packages/feature/att-local.tar.gz"
+
+      - name: Capture artifact scale, arrival fixtures, and idle prewarm resources
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/target/performance-evidence/arrival-fixtures"
+          mvn -B -ntp -pl att-server -am test \
+            -Dtest=ArtifactInventoryTest,ArtifactArrivalWorkloadFixtureTest,ArtifactPipelinePerformanceBenchmark,PrewarmResourcePerformanceBenchmark \
+            -Dsurefire.failIfNoSpecifiedTests=false \
+            -Dskip.npm=true -Dskip.installnodenpm=true -Datt.skipFrontendUnitTests=true \
+            -Datt.archive.samples=5 \
+            -Datt.archive.output="$GITHUB_WORKSPACE/target/performance-evidence/artifact-pipeline-resource-scale.json" \
+            -Datt.archive.arrivalFixtureDirectory="$GITHUB_WORKSPACE/target/performance-evidence/arrival-fixtures" \
+            -Datt.server.benchmark.prewarmResources=true \
+            -Datt.server.benchmark.prewarmResources.output="$GITHUB_WORKSPACE/target/performance-evidence/prewarm-worker-resource-matrix.json" \
+            -Datt.benchmark.commit="$GITHUB_SHA"
+
+      - name: Capture matched artifact pipeline and DB occupancy baselines
+        shell: bash
+        run: |
+          set -euo pipefail
+          master="$RUNNER_TEMP/att-master-baseline"
+          test_source="$GITHUB_WORKSPACE/att-server/src/test/java/att/server"
+          mkdir -p "$master/att-server/src/test/java/att/server"
+          cp "$test_source/ArtifactPipelinePerformanceBenchmark.java" "$master/att-server/src/test/java/att/server/ArtifactPipelinePerformanceBenchmark.java"
+          cp "$test_source/DbOccupancyPerformanceBenchmark.java" "$master/att-server/src/test/java/att/server/DbOccupancyPerformanceBenchmark.java"
+          cp "$test_source/ProcessTreeResourceSampler.java" "$master/att-server/src/test/java/att/server/ProcessTreeResourceSampler.java"
+          master_sha="$(git -C "$master" rev-parse HEAD)"
+          (cd "$master" && mvn -B -ntp -pl att-server -am test \
+            -Dtest=ArtifactPipelinePerformanceBenchmark,DbOccupancyPerformanceBenchmark \
+            -Dsurefire.failIfNoSpecifiedTests=false \
+            -Dskip.npm=true -Dskip.installnodenpm=true -Datt.skipFrontendUnitTests=true \
+            -Datt.skipJava8ModuleTests=true \
+            -Datt.archive.samples=5 \
+            -Datt.archive.output="$GITHUB_WORKSPACE/target/performance-evidence/artifact-pipeline-master.json" \
+            -Datt.server.benchmark.dbOccupancy=true \
+            -Datt.server.benchmark.dbOccupancy.arrivals=250 \
+            -Datt.server.benchmark.dbOccupancy.arrivalRate=55 \
+            -Datt.server.benchmark.dbOccupancy.nonDbTailMs=20 \
+            -Datt.server.benchmark.dbOccupancy.output="$GITHUB_WORKSPACE/target/performance-evidence/db-occupancy-master.json" \
+            -Datt.benchmark.commit="$master_sha")
+          mvn -B -ntp -pl att-server -am test \
+            -Dtest=DbOccupancyPerformanceBenchmark \
+            -Dsurefire.failIfNoSpecifiedTests=false \
+            -Dskip.npm=true -Dskip.installnodenpm=true -Datt.skipFrontendUnitTests=true \
+            -Datt.skipJava8ModuleTests=true \
+            -Datt.server.benchmark.dbOccupancy=true \
+            -Datt.server.benchmark.dbOccupancy.arrivals=250 \
+            -Datt.server.benchmark.dbOccupancy.arrivalRate=55 \
+            -Datt.server.benchmark.dbOccupancy.nonDbTailMs=20 \
+            -Datt.server.benchmark.dbOccupancy.output="$GITHUB_WORKSPACE/target/performance-evidence/db-occupancy-feature.json" \
+            -Datt.benchmark.commit="$GITHUB_SHA"
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          root = Path("target/performance-evidence")
+          artifact_fields = ("files", "publicationWallMs", "scanClassificationRedactionMs",
+                             "zipWriteMs", "verificationFsyncMs", "cleanupMs", "publisherMs",
+                             "writerCpuMs", "writerAllocatedBytes", "resourceSample", "ioVolume")
+          for revision, filename in (
+              ("master", "artifact-pipeline-master.json"),
+              ("feature", "artifact-pipeline-resource-scale.json"),
+          ):
+              report = json.loads((root / filename).read_text())
+              print(json.dumps({
+                  "type": "artifact-report", "revision": revision, "commit": report["commit"],
+                  "java": report["java"], "os": report["os"],
+                  "memoryBudgetPolicy": report.get("memoryBudgetPolicy"),
+              }, sort_keys=True))
+              for row in report["measurements"]:
+                  selected = {key: row[key] for key in artifact_fields if key in row}
+                  selected["fixtureBodySha256"] = row.get("fixtureBodySha256")
+                  print(json.dumps({"type": "artifact-measurement", "revision": revision, **selected}, sort_keys=True))
+
+          db_fields = ("scope", "onEnd", "poolSize", "arrivals", "completedCases",
+                       "failedCases", "completedCasesPerSecond", "completionWallMs",
+                       "caseLatencyP50Ms", "caseLatencyP95Ms",
+                       "connectionAcquireWaitP50Ms", "connectionAcquireWaitP95Ms",
+                       "connectionHoldP50Ms", "connectionHoldP95Ms",
+                       "borrowTimeouts", "activePeakSampled", "waitingPeakSampled")
+          for revision in ("master", "feature"):
+              report = json.loads((root / f"db-occupancy-{revision}.json").read_text())
+              print(json.dumps({
+                  "type": "db-occupancy-report", "revision": revision,
+                  "environment": report["environment"], "settings": report["settings"],
+              }, sort_keys=True))
+              for row in report["scenarios"]:
+                  selected = {key: row[key] for key in db_fields if key in row}
+                  print(json.dumps({"type": "db-occupancy-scenario", "revision": revision, **selected}, sort_keys=True))
+          PY
+
+      - name: Capture matched control-plane baseline and feature metrics
+        shell: bash
+        run: |
+          set -euo pipefail
+          master="$RUNNER_TEMP/att-master-baseline"
+          test_source="$GITHUB_WORKSPACE/att-server/src/test/java/att/server"
+          mkdir -p "$master/att-server/src/test/java/att/server"
+          cp "$test_source/ControlPlanePerformanceBenchmark.java" "$master/att-server/src/test/java/att/server/ControlPlanePerformanceBenchmark.java"
+          cp "$test_source/ProcessTreeResourceSampler.java" "$master/att-server/src/test/java/att/server/ProcessTreeResourceSampler.java"
+          master_sha="$(git -C "$master" rev-parse HEAD)"
+          (cd "$master" && mvn -B -ntp -pl att-server -am test \
+            -Dtest=ControlPlanePerformanceBenchmark \
+            -Dsurefire.failIfNoSpecifiedTests=false \
+            -Dskip.npm=true -Dskip.installnodenpm=true -Datt.skipFrontendUnitTests=true \
+            -Datt.skipJava8ModuleTests=true \
+            -Datt.backend.samples=256 -Datt.backend.storeWarmups=10 \
+            -Datt.backend.output="$GITHUB_WORKSPACE/target/performance-evidence/control-plane-master.json" \
+            -Datt.benchmark.processResources=true -Datt.benchmark.commit="$master_sha")
+          mvn -B -ntp -pl att-server -am test \
+            -Dtest=ControlPlanePerformanceBenchmark \
+            -Dsurefire.failIfNoSpecifiedTests=false \
+            -Dskip.npm=true -Dskip.installnodenpm=true -Datt.skipFrontendUnitTests=true \
+            -Datt.skipJava8ModuleTests=true \
+            -Datt.backend.samples=256 -Datt.backend.storeWarmups=10 \
+            -Datt.backend.output="$GITHUB_WORKSPACE/target/performance-evidence/control-plane-feature.json" \
+            -Datt.benchmark.processResources=true -Datt.benchmark.commit="$GITHUB_SHA"
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          root = Path("target/performance-evidence")
+          fields = {
+              "jobstore": ("clients", "p50Ms", "p95Ms", "mixedOperationsPerSecond",
+                           "monitorBlockedMs", "threadCpuMs", "threadAllocatedBytes",
+                           "sampledPeakHeapUsedBytes", "h2FilesBytesDelta",
+                           "authUserLookupP95Ms", "authSessionVerifyTouchP95Ms", "jobListP95Ms"),
+              "run-definition-parse-only": ("caseCount", "p50Ms", "p95Ms"),
+              "journal": ("targetEventsPerSecond", "observer", "p50Ms", "p95Ms",
+                          "observedAppendEventsPerSecond", "compactionSnapshots",
+                          "retainedEventCapacity", "expectedCompactionBatches",
+                          "compactionSnapshotsObserved"),
+              "classpath-50-jars": ("p50Ms", "p95Ms"),
+          }
+          for revision in ("master", "feature"):
+              report = json.loads((root / f"control-plane-{revision}.json").read_text())
+              print(json.dumps({
+                  "type": "control-plane-report",
+                  "revision": revision,
+                  "commit": report["commit"],
+                  "samples": report["samples"],
+                  "storeWarmups": report["storeWarmups"],
+                  "processResources": report.get("processResources"),
+              }, sort_keys=True))
+              for row in report["measurements"]:
+                  selected = {key: row[key] for key in fields[row["operation"]] if key in row}
+                  selected["operation"] = row["operation"]
+                  print(json.dumps({"type": "control-plane-measurement", **selected}, sort_keys=True))
+          PY
+
+      - name: Compare cold and prewarmed Debug draft latency on this runner
+        if: ${{ !contains(github.event.head_commit.message, '[targeted-evidence]') }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$GITHUB_WORKSPACE/target/performance-evidence"
+          master="$RUNNER_TEMP/att-master-baseline"
+          mkdir -p "$master/att-server/src/test/java/att/server"
+          cp att-server/src/test/java/att/server/DebugDraftPipelinePerformanceBenchmark.java \
+            "$master/att-server/src/test/java/att/server/DebugDraftPipelinePerformanceBenchmark.java"
+          master_sha="$(git -C "$master" rev-parse HEAD)"
+          (cd "$master" && mvn -B -ntp -pl att-server -am test \
+            -Dtest=DebugDraftPipelinePerformanceBenchmark \
+            -Dsurefire.failIfNoSpecifiedTests=false \
+            -Dskip.npm=true -Dskip.installnodenpm=true -Datt.skipFrontendUnitTests=true \
+            -Datt.skipJava8ModuleTests=true \
+            -Datt.server.benchmark.debugDraft=true \
+            -Datt.server.benchmark.debugDraft.prewarm=false \
+            -Datt.server.benchmark.debugDraft.warmups=5 \
+            -Datt.server.benchmark.debugDraft.runs=20 \
+            -Datt.server.benchmark.debugDraft.revision="$master_sha" \
+            -Datt.server.benchmark.debugDraft.output="$GITHUB_WORKSPACE/target/performance-evidence/debug-draft-master.json")
+          mvn -B -ntp -pl att-server -am test \
+            -Dtest=DebugDraftPipelinePerformanceBenchmark \
+            -Dsurefire.failIfNoSpecifiedTests=false \
+            -Dskip.npm=true -Dskip.installnodenpm=true -Datt.skipFrontendUnitTests=true \
+            -Datt.skipJava8ModuleTests=true \
+            -Datt.server.benchmark.debugDraft=true \
+            -Datt.server.benchmark.debugDraft.prewarm=true \
+            -Datt.server.benchmark.debugDraft.warmups=5 \
+            -Datt.server.benchmark.debugDraft.runs=20 \
+            -Datt.server.benchmark.debugDraft.revision="$GITHUB_SHA" \
+            -Datt.server.benchmark.debugDraft.output="$GITHUB_WORKSPACE/target/performance-evidence/debug-draft-feature.json"
+
+      - name: Capture same-host master and feature RUN, DEBUG, LOAD, and Validate matrix
+        if: ${{ !contains(github.event.head_commit.message, '[targeted-evidence]') }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for case_count in 20 200 1000; do
+            for revision in master feature; do
+              package_dir="$RUNNER_TEMP/att-performance-packages/$revision"
+              observers=none
+              if [ "$case_count" = 20 ]; then observers=none,fast,slow; fi
+              mkdir -p "$GITHUB_WORKSPACE/target/performance-evidence"
+              mvn -B -ntp -pl att-server -am test \
+                -Dtest=ServerWorkerSsePerformanceBenchmark \
+                -Dsurefire.failIfNoSpecifiedTests=false \
+                -Dskip.npm=true -Dskip.installnodenpm=true -Datt.skipFrontendUnitTests=true \
+                -Datt.server.war="$package_dir/att-server.war" \
+                -Datt.server.benchmark.localArchive="$package_dir/att-local.tar.gz" \
+                -Datt.server.benchmark.workerSse=true \
+                -Datt.server.benchmark.workerSse.cases="$case_count" \
+                -Datt.server.benchmark.workerSse.events=1000 \
+                -Datt.server.benchmark.workerSse.runs=6 \
+                -Datt.server.benchmark.workerSse.warmups=1 \
+                -Datt.server.benchmark.workerSse.slowDelayMs=0 \
+                -Datt.server.benchmark.workerSse.workers=1,4 \
+                -Datt.server.benchmark.workerSse.observers="$observers" \
+                -Datt.server.benchmark.mixedInspection=true \
+                -Datt.server.benchmark.mixedInspection.warmups=2 \
+                -Datt.server.benchmark.mixedInspection.runs=12 \
+                -Datt.server.benchmark.mixedInspection.validationBurst=4 \
+                -Datt.server.benchmark.mixedInspection.validationUsers=128 \
+                -Datt.benchmark.processResources=true \
+                -Datt.server.benchmark.workerSse.output="$GITHUB_WORKSPACE/target/performance-evidence/server-worker-$revision-$case_count.json" \
+                -Datt.benchmark.commit="$GITHUB_SHA"
+            done
+          done
+
+      - name: Upload raw performance evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: performance-evidence-${{ github.sha }}
+          path: |
+            target/performance-evidence/
+            att-server/target/surefire-reports/
+          if-no-files-found: warn
+          retention-days: 30

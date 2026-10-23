@@ -34,6 +34,28 @@ class PackageResourceInspectorTest {
         return new PackageResourceInspector(root,config,"SIT",Collections.<String>emptyList(),65536,262144);
     }
 
+    @Test void prewarmCapabilityUsesEnvironmentSnapshotAndRechecksSourcesBeforeExecution() throws Exception {
+        Path root=packageWithTemplate("prewarm-policy","PURE","description: Process-only package");
+        Path config=root.resolve("config/config.yaml");
+        String original=new String(Files.readAllBytes(config),StandardCharsets.UTF_8);
+        try(PackageResourceInspector inspector=new PackageResourceInspector(root,config,"SIT",Collections.<String>emptyList(),65536,262144,true)) {
+            Map<String,Object> first=inspector.prewarmEligibility();
+            assertEquals(true,first.get("eligible"));
+            assertEquals(1,inspector.indexBuildCount());
+            assertEquals(first,inspector.prewarmEligibility());assertEquals(2,inspector.indexBuildCount());
+            String revision=(String)first.get("revisionDigest");inspector.verifyPrewarmRevision(revision);
+            writeUtf8(root.resolve("config/db.yaml"),"schemaVersion: att-dbhelper/v2.6\nid: db\nname: DB\ndescription: Native client\nconnection: {url: 'jdbc:unavailable:no-connection'}\n");
+            String profiles="environments:\n  SIT: {}\n  UAT: {dbhelpers: [config/db.yaml]}\n";
+            writeUtf8(config,original.replace("environments:\n  SIT: {}\n",profiles));
+            assertThrows(PackageResourceInspector.StaleResourceCursorException.class,()->inspector.verifyPrewarmRevision(revision));
+            String fresh=inspector.executionRevisionDigest();inspector.verifyPrewarmRevision(fresh);
+            try(PackageResourceInspector other=new PackageResourceInspector(root,config,"UAT",Collections.<String>emptyList(),65536,262144,true)) {
+                Map<String,Object> nativeClient=other.prewarmEligibility();assertEquals(false,nativeClient.get("eligible"));
+                assertThrows(IllegalArgumentException.class,()->other.verifyPrewarmRevision((String)nativeClient.get("revisionDigest")));
+            }
+        }
+    }
+
     @Test void listsConfiguredPackageResourcesWithLogicalIdsAndReferences() throws Exception {
         Map<String,Object> page=inspector().inspect("list",null,null,null,0,100);
         @SuppressWarnings("unchecked") List<Map<String,Object>> items=(List<Map<String,Object>>)page.get("items");
@@ -807,8 +829,8 @@ class PackageResourceInspectorTest {
             Map<String,Object> debugForm=inspector.inspectDebugForm("template",resourceId,revision);
             @SuppressWarnings("unchecked") Map<String,Object> debugInput=(Map<String,Object>)debugForm.get("input");
             inspector.validateDebugInput("template","PAYMENT",debugInput);
-            assertEquals(1,inspector.indexBuildCount(),
-                    "page, detail, source, Debug form, and draft validation should share one parsed package index");
+            assertEquals(3,inspector.indexBuildCount(),
+                    "Read-only projections share one index; draft creation checks fresh revisions before and after validation");
 
             long version=inspector.packageChangeVersion();
             writeUtf8(root.resolve("templates/PAYMENT/template.yaml"),templateYaml("PAYMENT","description: changed"));

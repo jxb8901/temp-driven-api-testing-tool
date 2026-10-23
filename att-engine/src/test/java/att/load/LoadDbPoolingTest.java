@@ -40,6 +40,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.logging.Logger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class LoadDbPoolingTest {
@@ -139,6 +140,30 @@ class LoadDbPoolingTest {
         assertEquals(0, driver.states.get(commitUrl).rollbacks);
         assertEquals(0, driver.states.get(rollbackUrl).commits);
         assertEquals(1, driver.states.get(rollbackUrl).rollbacks);
+    }
+
+    @Test
+    void closingLoadRunClosesAnActiveDatabasePoolAndRejectsFurtherBorrows() throws Exception {
+        String url = "jdbc:att-load:shutdown";
+        FrameworkConfig config = framework(db("orders", url, 1, 500L, "rollback"));
+        LoadRunResources resources = new LoadRunResources(tempDir, config);
+        HikariDbPool pool = resources.dbPool("orders");
+        resources.db().beginCase();
+        assertTrue(resources.db().execute("orders", "query", "select ONE", "inline",
+                Collections.emptyList(), "shutdown-case").success());
+        assertEquals(1, pool.active());
+
+        resources.close();
+
+        assertTrue(resources.isClosed());
+        assertTrue(driver.states.get(url).closed);
+        assertEquals(0, pool.active());
+        assertThrows(SQLException.class, pool::borrow);
+        assertTrue(driver.states.get(url).closes >= 1);
+        int closesAfterFirstShutdown = driver.states.get(url).closes;
+        resources.close();
+        assertEquals(closesAfterFirstShutdown, driver.states.get(url).closes);
+        assertThrows(IllegalStateException.class, resources::db);
     }
 
     private void runOneCase(String url, String onEnd) throws Exception {

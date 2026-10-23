@@ -1,8 +1,8 @@
 # Server Worker and SSE benchmark
 
-`ServerWorkerSsePerformanceBenchmark` is an opt-in, end-to-end local benchmark for the ATT Server. It starts the packaged WAR in embedded Tomcat, submits real Run, Debug, and Load jobs through the HTTP API, and records Worker throughput with no SSE observer, a fast observer, and a deliberately slow observer. It also appends synthetic progress events to completed jobs and measures SSE replay, `Last-Event-ID` resume, slow-consumer delivery, and replay after a Server restart. An optional repeated-job soak can be enabled.
+`ServerWorkerSsePerformanceBenchmark` is an opt-in, end-to-end local benchmark for the ATT Server. It starts the packaged WAR in embedded Tomcat, submits real Run, Debug, Load, and package-scope Validate jobs through the HTTP API, and records Worker throughput with no SSE observer, a fast observer, and a deliberately slow observer. It also appends synthetic progress events to completed jobs and measures SSE replay, `Last-Event-ID` resume, slow-consumer delivery, and replay after a Server restart. An optional repeated-job soak can be enabled.
 
-The JSON report includes the WAR SHA-256, JVM and host details, each measured job and Server metric sample, event counts, journal bytes on disk, event append time and rate, SSE response bytes, first-event time, replay rate, and command wall time. The fixture and appended events are synthetic; the target is the local ATT Server, not an external service. The benchmark does not set regression thresholds. Compare captures from the same machine and JDK, and retain the raw JSON with any conclusions.
+The JSON report includes the WAR SHA-256, JVM and host details, each measured job and Server metric sample, package validation under `packageValidation`, event counts, journal bytes on disk, event append time and rate, SSE response bytes, first-event time, replay rate, and command wall time. `eventHeavyCommands` continues to contain the Debug and Load measurements; `packageValidation` records the `POST /api/v1/jobs/validate` package-scope job separately. The fixture and appended events are synthetic; the target is the local ATT Server, not an external service. The benchmark does not set regression thresholds. Compare captures from the same machine and JDK, and retain the raw JSON with any conclusions.
 
 ## Capture a baseline
 
@@ -14,14 +14,19 @@ mvn -B -ntp -pl att-server -am -DskipTests package
 mvn -B -ntp -pl att-server -am \
   -Dtest=ServerWorkerSsePerformanceBenchmark \
   -Dsurefire.failIfNoSpecifiedTests=false \
+  -Datt.home=/path/to/att-local-4.0.1 \
   -Datt.server.benchmark.workerSse=true \
   -Datt.server.benchmark.workerSse.output=target/server-worker-sse.json \
   -Datt.server.war=att-server/target/att-server-4.0.1.war test
 ```
 
-By default, each Run job has 300 cases; the matrix uses 1, 4, and 8 concurrent Workers, one warmup and two measured runs, and 10,000 synthetic events per replay leader. A slow SSE reader waits 1 ms per event. Tune these settings with `att.server.benchmark.workerSse.cases`, `.workers`, `.warmups`, `.runs`, `.events`, and `.slowReaderDelayMs`. Set `.soakSeconds` to a positive number to enable the optional soak; it is disabled by default. The report records the selected settings.
+By default, each Run job has 300 cases; the matrix uses 1, 4, and 8 concurrent Workers, one warmup and two measured runs, and 10,000 synthetic events per replay leader. A slow SSE reader waits 1 ms per event. Tune these settings with `att.server.benchmark.workerSse.cases`, `.workers`, `.warmups`, `.runs`, `.events`, and `.slowDelayMs`. Set `.soakSeconds` to a positive number to enable the optional soak; it is disabled by default. The report records the selected settings.
 
-The benchmark binds a loopback HTTP port and starts local Worker processes from the supplied WAR. Use a packaged WAR for the same ATT version and source under comparison. Results depend on JVM, hardware, filesystem, and host load; Server metric peaks are sampled, and very short peaks may be missed. Load uses the generated local template workload and does not measure an external system under test.
+The benchmark binds a loopback HTTP port and starts local Worker processes from the supplied WAR. `att.home` must point to an extracted matching ATT Local distribution containing `lib/att-local-<version>.jar`; the default source tree does not supply that runtime classpath. Use a packaged WAR and Local distribution for the same ATT version and source under comparison. Results depend on JVM, hardware, filesystem, and host load; Server metric peaks are sampled, and very short peaks may be missed. Load uses the generated local template workload and does not measure an external system under test.
+
+## Recorded 4.2.3 HTTP matrix
+
+The [API matrix capture](../performance/baselines/issues-278-281/server-worker-sse-api-matrix.json) used 20 cases per Run job, 1 and 4 concurrent Workers, no/fast/slow SSE observers, one warmup and two measured runs, plus 1,000 synthetic replay events. On an 8-core Apple Silicon Mac running macOS 26.1 and OpenJDK 26.0.1, median Run-batch wall time ranged from 0.98–1.10 s at one Worker and 2.15–2.30 s at four Workers. Package-scope Validate passed in 614 ms; one Debug and one Load job passed in 489 ms and 4.46 s. Only the Run modes have two measured samples; the command results are single samples. This synthetic capture exercises the HTTP and Worker path but is not a controlled before/after comparison or a performance threshold.
 
 ## Recorded 4.0.1 capture
 

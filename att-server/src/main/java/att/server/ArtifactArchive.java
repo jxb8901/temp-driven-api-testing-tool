@@ -28,6 +28,7 @@ final class ArtifactArchive {
     static final long MAX_TOTAL_BYTES = 128L * 1024 * 1024;
     static final int MAX_MANIFEST_BYTES = 8 * 1024 * 1024;
     static final int MAX_CANDIDATES = 50_000;
+    static final long MAX_MEMORY_EXPORT_BYTES = 8L * 1024 * 1024;
     static final long MAX_ARCHIVE_BYTES = MAX_TOTAL_BYTES + MAX_MANIFEST_BYTES + 4L * 1024 * 1024;
     private static final Set<String> SAFE_EXTENSIONS = Set.of("txt", "log", "json", "yaml", "yml", "xml", "html", "htm", "css", "csv", "md");
     private static final String OMISSION_REASON = "unsupported, unsafe, duplicate, binary, oversized, or unapproved output";
@@ -38,16 +39,29 @@ final class ArtifactArchive {
             .enable(com.fasterxml.jackson.databind.DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
 
     @FunctionalInterface interface Publisher { byte[] publish(Path source) throws Exception; }
+    @FunctionalInterface interface ZipProgress { void entryWritten(String path) throws Exception; }
     record Entry(String path, String mediaType, long size, String sha256, String classification, String decision, boolean report, boolean preview) {}
 
     private ArtifactArchive() {}
 
     static Path build(Path output, Path archive, Publisher publisher) throws Exception {
+        return build(output,archive,publisher,MAX_MEMORY_EXPORT_BYTES);
+    }
+
+    /** The zero-budget path also provides a controlled disk-staging benchmark. */
+    static Path build(Path output, Path archive, Publisher publisher,long memoryBudget) throws Exception {
+        return build(output,archive,publisher,memoryBudget,null);
+    }
+
+    /** Package-private progress seam for deterministic process-crash lifecycle tests. */
+    static Path build(Path output, Path archive, Publisher publisher,long memoryBudget,ZipProgress progress) throws Exception {
+        if(memoryBudget<0||memoryBudget>MAX_MEMORY_EXPORT_BYTES)throw new IllegalArgumentException("Artifact memory budget exceeds limits");
         ArtifactMetricsRecorder metrics = ArtifactMetricsRecorder.CURRENT.get();
         if (metrics != null) {
             metrics.phase("scan_classification_redaction");
             metrics.value.sourceFiles=0L;metrics.value.sourceBytes=0L;
             metrics.value.includedEntries=0L;metrics.value.omittedEntries=0L;metrics.value.includedBytes=0L;
+            metrics.value.temporaryExportFiles=0L;metrics.value.temporaryExportBytes=0L;metrics.value.memoryExportPeakBytes=0L;
         }
         if (Files.isSymbolicLink(output)) throw new IllegalArgumentException("Job output root must not be a symbolic link");
         Path requestedRoot=output.toAbsolutePath().normalize(),root=output.toRealPath();
@@ -57,11 +71,9 @@ final class ArtifactArchive {
         Path exports=Files.createTempDirectory(destination.getParent(),".artifact-export-");
         boolean published=false;
         try {
-            List<Path> candidates;
-            try(var paths=Files.walk(root,64)){candidates=paths.limit(MAX_CANDIDATES+1L).toList();}
-            if(candidates.size()>MAX_CANDIDATES)throw new IllegalArgumentException("Artifact inventory exceeds limits");
-            candidates=candidates.stream().sorted(Comparator.comparing(p->root.relativize(p).toString())).toList();
+            List<Path> candidates=inventory(root);
             Set<String> names=new HashSet<>();List<String> approved=new ArrayList<>();long total=0;int omitted=0;
+            Map<String,byte[]> memoryExports=new LinkedHashMap<>();long retained=0;
             for(Path candidate:candidates) {
                 if(root.relativize(candidate).getNameCount()>=64&&Files.isDirectory(candidate,LinkOption.NOFOLLOW_LINKS))throw new IllegalArgumentException("Artifact directory depth exceeds limits");
                 if(candidate.equals(root)||Files.isDirectory(candidate,LinkOption.NOFOLLOW_LINKS))continue;
@@ -78,14 +90,26 @@ final class ArtifactArchive {
                 if(bytes.length>MAX_ENTRY_BYTES){omitted++;if(metrics!=null)metrics.value.omittedEntries=(long)omitted;continue;}
                 if(total+bytes.length>MAX_TOTAL_BYTES)throw new IllegalArgumentException("Artifact total size exceeds limits");
                 names.add(lower);approved.add(relative);total+=bytes.length;
-                Path target=exports.resolve(relative);Files.createDirectories(target.getParent());Files.write(target,bytes);
+                if(bytes.length<=memoryBudget-retained) {
+                    memoryExports.put(relative,bytes);retained+=bytes.length;
+                    if(metrics!=null)metrics.value.memoryExportPeakBytes=retained;
+                } else {
+                    Path target=exports.resolve(relative);Files.createDirectories(target.getParent());Files.write(target,bytes);
+                    if(metrics!=null){metrics.value.temporaryExportFiles++;metrics.value.temporaryExportBytes+=bytes.length;}
+                }
             }
             // Resolve report links only after classification, so omitted evidence never leaves a dangling raw link.
             Set<String> paths=Set.copyOf(approved);List<Entry> entries=new ArrayList<>();total=0;
             if(metrics!=null)metrics.phase("zip_write");
             try(ZipOutputStream zip=new ZipOutputStream(Files.newOutputStream(staging))) {
                 for(String relative:approved) {
-                    byte[] bytes=Files.readAllBytes(exports.resolve(relative));
+                    // Both paths contain only Publisher-approved bytes from pass 1.
+                    // Never reopen raw output after approval or sanitize twice.
+                    byte[] bytes=memoryExports.remove(relative);
+                    if(bytes==null) {
+                        bytes=Files.readAllBytes(exports.resolve(relative));
+                        if(metrics!=null)metrics.value.temporaryExportReadBytes=add(metrics.value.temporaryExportReadBytes,bytes.length);
+                    }
                     boolean report=Set.of("html","htm").contains(extension(relative));
                     if(report) {
                         if(metrics!=null)metrics.phase("scan_classification_redaction");
@@ -97,6 +121,7 @@ final class ArtifactArchive {
                     entries.add(new Entry(relative,mediaType(relative),bytes.length,sha256(bytes),"textual-output","sanitized-once",report,true));
                     writeEntry(zip,relative,bytes);
                     if(metrics!=null){metrics.value.includedEntries++;metrics.value.includedBytes+=bytes.length;}
+                    if(progress!=null)progress.entryWritten(relative);
                 }
                 Map<String,Object> manifest=new LinkedHashMap<>();
                 manifest.put("version",1);manifest.put("policy","att-export-safe-text-v2");manifest.put("entries",entries);manifest.put("complete",omitted==0);
@@ -120,6 +145,37 @@ final class ArtifactArchive {
             if(!published)Files.deleteIfExists(staging);
             try(var paths=Files.walk(exports)){for(Path file:paths.sorted(Comparator.reverseOrder()).toList())Files.deleteIfExists(file);}
         }
+    }
+
+    /** Prune only the established private LOAD bookkeeping namespace. Never follow links. */
+    private static List<Path> inventory(Path root) throws java.io.IOException {
+        List<Path> candidates = new ArrayList<>();
+        Files.walkFileTree(root, Set.of(), 64, new java.nio.file.SimpleFileVisitor<Path>() {
+            private void count(Path path) {
+                if (candidates.size() >= MAX_CANDIDATES)
+                    throw new IllegalArgumentException("Artifact inventory exceeds limits");
+                candidates.add(path);
+            }
+            @Override public java.nio.file.FileVisitResult preVisitDirectory(Path directory,
+                    java.nio.file.attribute.BasicFileAttributes attributes) {
+                Path relative = root.relativize(directory);
+                // Exact spelling and position: aliases, arbitrary hidden folders
+                // and symlinks remain untrusted candidates with the usual bounds.
+                if (relative.getNameCount() == 3 && "load".equals(relative.getName(0).toString())
+                        && ".exec-id-reservations".equals(relative.getName(2).toString()))
+                    return java.nio.file.FileVisitResult.SKIP_SUBTREE;
+                count(directory);
+                return java.nio.file.FileVisitResult.CONTINUE;
+            }
+            @Override public java.nio.file.FileVisitResult visitFile(Path file,
+                    java.nio.file.attribute.BasicFileAttributes attributes) {
+                if (attributes.isDirectory()) throw new IllegalArgumentException("Artifact directory depth exceeds limits");
+                count(file);
+                return java.nio.file.FileVisitResult.CONTINUE;
+            }
+        });
+        candidates.sort(Comparator.comparing(path -> root.relativize(path).toString()));
+        return candidates;
     }
 
     static byte[] read(Path archive, String requested) throws Exception {
@@ -203,6 +259,7 @@ final class ArtifactArchive {
         Map<String,Object> manifest;
         try (InputStream input = zip.getInputStream(manifestEntry)) {
             byte[] bytes = input.readNBytes(MAX_MANIFEST_BYTES + 1);
+            countVerificationRead(bytes.length);
             if (bytes.length != manifestEntry.getSize() || !validCrc(manifestEntry,bytes)) throw new IllegalArgumentException("Invalid manifest size");
             try { manifest = JSON.readValue(bytes, Map.class); }
             catch (com.fasterxml.jackson.core.JacksonException invalid) { throw new IllegalArgumentException("Invalid archive manifest"); }
@@ -226,6 +283,7 @@ final class ArtifactArchive {
                 throw new IllegalArgumentException("Archive does not match manifest");
             if (digests) try (InputStream input = zip.getInputStream(entry)) {
                 byte[] bytes = input.readNBytes((int)MAX_ENTRY_BYTES + 1);
+                countVerificationRead(bytes.length);
                 if (bytes.length != entry.getSize() || !sha256(bytes).equals(digest) || !validCrc(entry,bytes)) throw new IllegalArgumentException("Archive integrity check failed");
             }
         }
@@ -249,6 +307,18 @@ final class ArtifactArchive {
         var crc = new java.util.zip.CRC32(); crc.update(bytes);
         ZipEntry entry = new ZipEntry(path); entry.setMethod(ZipEntry.STORED); entry.setSize(bytes.length); entry.setCompressedSize(bytes.length); entry.setCrc(crc.getValue());
         zip.putNextEntry(entry); zip.write(bytes); zip.closeEntry();
+        ArtifactMetricsRecorder metrics=ArtifactMetricsRecorder.CURRENT.get();
+        if(metrics!=null)metrics.value.zipWriteInputBytes=add(metrics.value.zipWriteInputBytes,bytes.length);
+    }
+
+    private static void countVerificationRead(long bytes) {
+        ArtifactMetricsRecorder metrics=ArtifactMetricsRecorder.CURRENT.get();
+        if(metrics!=null)metrics.value.verificationBytesRead=add(metrics.value.verificationBytesRead,bytes);
+    }
+
+    private static long add(Long current,long next) {
+        long prior=current==null?0:current;
+        return next>Long.MAX_VALUE-prior?Long.MAX_VALUE:prior+next;
     }
 
     private static boolean validCrc(ZipEntry entry,byte[] bytes) {

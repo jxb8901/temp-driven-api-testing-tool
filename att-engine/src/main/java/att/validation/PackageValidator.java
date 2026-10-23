@@ -912,9 +912,9 @@ public final class PackageValidator {
         }
     }
     private Path findOnPath(String executable, boolean requireExecutable) throws java.io.IOException {
-        String path = System.getenv("PATH");
+        String path = att.security.ExecutionEnvironment.get("PATH");
         if (path != null) for (String directory : path.split(java.util.regex.Pattern.quote(java.io.File.pathSeparator))) {
-            for (String name : executableCandidates(executable, windows, System.getenv("PATHEXT"))) {
+            for (String name : executableCandidates(executable, windows, att.security.ExecutionEnvironment.get("PATHEXT"))) {
                 Path candidate = java.nio.file.Paths.get(directory).resolve(name);
                 if (Files.isRegularFile(candidate) && (!requireExecutable || Files.isExecutable(candidate))) return candidate;
             }

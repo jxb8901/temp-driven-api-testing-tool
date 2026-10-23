@@ -5,6 +5,8 @@ import java.util.Map;
 
 /** Versioned wire request. Paths are interpreted relative to packageRoot when not absolute. */
 public class WorkerRequest {
+    /** Internal one-shot prewarm envelope. The Server overwrites caller values. */
+    public Map<String,String> executionEnvironment;
     /** Trusted Server policy, snapshotted for each new Job. */
     public Integer liveOutputMaxEntryChars;
     public Integer liveOutputMaxEntryLines;

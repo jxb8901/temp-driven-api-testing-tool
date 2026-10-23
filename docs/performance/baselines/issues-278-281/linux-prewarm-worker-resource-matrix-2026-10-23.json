@@ -1,0 +1,71 @@
+{
+  "schemaVersion" : "att-execution-prewarm-resource-benchmark/v1",
+  "sourceRevision" : "2844eff24b46c21e1eb168ebf91605ae67016260",
+  "environment" : {
+    "javaVm" : "OpenJDK 64-Bit Server VM",
+    "javaVersion" : "17.0.20.1",
+    "maxHeapBytes" : 4192206848,
+    "os" : "Linux 6.17.0-1022-azure",
+    "processors" : 4,
+    "architecture" : "amd64"
+  },
+  "settings" : {
+    "scope" : "execution Worker JVMs only; no Jobs submitted during sampling",
+    "idleSamplingIntervalMs" : 250,
+    "workerHeapMaxMb" : 128,
+    "poolSizes" : [ 1, 2, 4 ],
+    "idleSampleCount" : 9
+  },
+  "scenarios" : [ {
+    "idlePoolSlots" : 1,
+    "readyWorkers" : 1,
+    "poolReadyMs" : 585.490881,
+    "workerHeapMaxMb" : 128,
+    "resources" : {
+      "scope" : "idle execution Worker processes only",
+      "workerCount" : 1,
+      "sampleCount" : 9,
+      "samplingIntervalMs" : 250,
+      "peakTotalResidentBytes" : 103333888,
+      "peakResidentBytesPerWorker" : [ 103333888 ],
+      "physicalIoAvailable" : true,
+      "kernelReadBytesDuringIdle" : 0,
+      "kernelWriteBytesDuringIdle" : 0,
+      "physicalIoSource" : "/proc/<pid>/io read_bytes/write_bytes"
+    }
+  }, {
+    "idlePoolSlots" : 2,
+    "readyWorkers" : 2,
+    "poolReadyMs" : 1336.205762,
+    "workerHeapMaxMb" : 128,
+    "resources" : {
+      "scope" : "idle execution Worker processes only",
+      "workerCount" : 2,
+      "sampleCount" : 9,
+      "samplingIntervalMs" : 250,
+      "peakTotalResidentBytes" : 204599296,
+      "peakResidentBytesPerWorker" : [ 101191680, 103407616 ],
+      "physicalIoAvailable" : true,
+      "kernelReadBytesDuringIdle" : 0,
+      "kernelWriteBytesDuringIdle" : 8192,
+      "physicalIoSource" : "/proc/<pid>/io read_bytes/write_bytes"
+    }
+  }, {
+    "idlePoolSlots" : 4,
+    "readyWorkers" : 4,
+    "poolReadyMs" : 2926.240908,
+    "workerHeapMaxMb" : 128,
+    "resources" : {
+      "scope" : "idle execution Worker processes only",
+      "workerCount" : 4,
+      "sampleCount" : 9,
+      "samplingIntervalMs" : 250,
+      "peakTotalResidentBytes" : 449536000,
+      "peakResidentBytesPerWorker" : [ 104759296, 100089856, 116416512, 128270336 ],
+      "physicalIoAvailable" : true,
+      "kernelReadBytesDuringIdle" : 0,
+      "kernelWriteBytesDuringIdle" : 8192,
+      "physicalIoSource" : "/proc/<pid>/io read_bytes/write_bytes"
+    }
+  } ]
+}

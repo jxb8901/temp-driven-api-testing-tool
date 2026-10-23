@@ -35,6 +35,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
 import java.util.concurrent.FutureTask;
+import java.util.concurrent.PriorityBlockingQueue;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
@@ -69,6 +70,7 @@ final class ServerRuntime implements AutoCloseable {
     private static final int TESTDATA_RECORD_MAX_PAGE_SIZE=100;
     static final long DRAFT_TTL_MILLIS=TimeUnit.MINUTES.toMillis(10);
     static final int MAX_STREAM_OBSERVERS=32;
+    private static final int INSPECTION_EXPLORER_PRIORITY_BURST=3;
     private static final class ValidatedScheduledScenario {
         final Map<String,Object> scenario;final String revisionDigest,model;final boolean containsSensitiveValues;
         ValidatedScheduledScenario(Map<String,Object> scenario,String revisionDigest,String model,boolean containsSensitiveValues){this.scenario=scenario;this.revisionDigest=revisionDigest;this.model=model;this.containsSensitiveValues=containsSensitiveValues;}
@@ -99,6 +101,7 @@ final class ServerRuntime implements AutoCloseable {
     private final ConcurrentHashMap<String,AdmissionLease> leases=new ConcurrentHashMap<>();
     private final AtomicLong completed=new AtomicLong();
     private final Semaphore loadSlots,admissionSlots;
+    private final Semaphore inspectionTaskSlots;
     final Semaphore streamSlots=new Semaphore(MAX_STREAM_OBSERVERS,true);
     private final ScheduledExecutorService retention;
     private final ScheduledExecutorService artifactMaintenance;
@@ -126,10 +129,14 @@ final class ServerRuntime implements AutoCloseable {
     private final ConcurrentHashMap<Thread,Process> stderrDrainers=new ConcurrentHashMap<>();
     final InspectionMetrics inspectionMetrics=new InspectionMetrics();
     private final AtomicLong inspectionWorkerSelection=new AtomicLong();
+    private final AtomicLong inspectionTaskSequence=new AtomicLong();
+    private final java.util.concurrent.atomic.AtomicInteger inspectionExplorerPriorityCredits=
+            new java.util.concurrent.atomic.AtomicInteger(INSPECTION_EXPLORER_PRIORITY_BURST);
     private final byte[] cursorKey=new byte[32];
     private final SecureRandom cursorRandom=new SecureRandom();
     private final Path workerLibs;
     private final String workerSchemaRegistryDigest;
+    ExecutionWorkerPool executionWorkers;
     ServerRuntime(ServerConfig config,String workerLibs) throws Exception {
         this(config,workerLibs,ProcessBuilder::start);
     }
@@ -147,7 +154,8 @@ final class ServerRuntime implements AutoCloseable {
         workers=new ThreadPoolExecutor(config.maxConcurrent,config.maxConcurrent,0,TimeUnit.MILLISECONDS,queue,r->{Thread t=new Thread(r,"att-server-worker");t.setDaemon(true);return t;},new ThreadPoolExecutor.AbortPolicy());
         streams=new ThreadPoolExecutor(0,MAX_STREAM_OBSERVERS,30,TimeUnit.SECONDS,new SynchronousQueue<>(),r->{Thread t=new Thread(r,"att-server-sse");t.setDaemon(true);return t;},new ThreadPoolExecutor.AbortPolicy());
         artifactWriters=new ThreadPoolExecutor(1,1,0,TimeUnit.MILLISECONDS,new ArrayBlockingQueue<>(Math.max(1,config.queuedLimit+config.maxConcurrent)),r->{Thread t=new Thread(r,"att-server-artifact-writer");t.setDaemon(true);return t;},new ThreadPoolExecutor.AbortPolicy());
-        java.util.concurrent.BlockingQueue<Runnable> inspectionQueue=config.inspection.queuedLimit==0?new SynchronousQueue<>():new ArrayBlockingQueue<>(config.inspection.queuedLimit);
+        inspectionTaskSlots=new Semaphore(config.inspection.maxConcurrent+config.inspection.queuedLimit,true);
+        java.util.concurrent.BlockingQueue<Runnable> inspectionQueue=new PriorityBlockingQueue<>();
         inspectors=new ThreadPoolExecutor(config.inspection.maxConcurrent,config.inspection.maxConcurrent,0,TimeUnit.MILLISECONDS,inspectionQueue,r->{Thread t=new Thread(r,"att-server-inspector");t.setDaemon(true);return t;},new ThreadPoolExecutor.AbortPolicy());
         for(int i=0;i<config.inspection.maxConcurrent;i++)inspectionWorkerPool.add(new InspectionWorker());
         retention=java.util.concurrent.Executors.newSingleThreadScheduledExecutor(r->{Thread t=new Thread(r,"att-server-retention");t.setDaemon(true);return t;});
@@ -167,6 +175,8 @@ final class ServerRuntime implements AutoCloseable {
             loadScheduleScheduler=new LoadScheduleScheduler(config.scheduling,store,this::submitScheduledJob,clock);
             loadScheduleScheduler.start();
         } else loadScheduleScheduler=null;
+        executionWorkers=new ExecutionWorkerPool(config,id->workerBuilder(true,id),this::startWorkerProcess,
+                ()->ExecutionWorkerPool.fingerprint(this.workerLibs,config.workerLibraryDirs),workerSchemaRegistryDigest);
         if(inspectionWarmup!=null)inspectionWarmup.scheduleWithFixedDelay(this::warmInspectionSafely,250,250,TimeUnit.MILLISECONDS);
         if(config.inspection.enabled&&!config.inspection.redactionEnabled)java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).warning("Inspection masking is disabled; ordinary package values are visible to authorized callers, while classified secrets remain protected");
         if(!config.security.checkCrossOrigin)java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).warning("server.security.checkCrossOrigin is disabled; configure trusted proxy origin handling and retain local-auth CSRF protection");
@@ -530,7 +540,10 @@ final class ServerRuntime implements AutoCloseable {
     }
     private void execute(Job job,Path jobPath,AdmissionLease lease) {
         job.workerStartedNanos=System.nanoTime();
+        ExecutionWorkerPool.Lease warm=null;
         try {
+            // Inspector work must not hold the cancellation/process-publication lock.
+            String warmRevision=prewarmRevision(job);
             Process process;
             synchronized(job) {
                 // Publish the process while holding the same lock used by cancel(). A
@@ -541,18 +554,22 @@ final class ServerRuntime implements AutoCloseable {
                 transition(job,"PREPARING");
                 validatePackageRoot(packageRoot(job.packageId));
                 job.request.outputDirectory=jobPath.resolve("output").toRealPath().toString();
-                List<String> classpathEntries=workerClasspath();
-                String cp=String.join(java.io.File.pathSeparator,classpathEntries);
-                List<String> command=new ArrayList<>();command.add(config.javaExecutable.toString());
-                if(config.workerHeapInitialMb>0)command.add("-Xms"+config.workerHeapInitialMb+"m");
-                if(config.workerHeapMaxMb>0)command.add("-Xmx"+config.workerHeapMaxMb+"m");
-                command.add("-cp");command.add(cp);command.add("att.worker.WorkerMain");
-                ProcessBuilder builder=new ProcessBuilder(command);
-                builder.directory(packageRoot(job.packageId).toFile());
-                job.workerSpawnStartedNanos=System.nanoTime();process=startWorkerProcess(builder);job.workerSpawnedNanos=System.nanoTime();job.process=process;job.processFence=new WorkerProcessFence(process);job.workerPid=process.pid();job.workerStartTime=process.info().startInstant().orElse(Instant.now());job.startedAt=Instant.now();transition(job,"RUNNING");rememberWorkerProcesses(job,job.processFence);
+                if(warmRevision!=null) {
+                    long leaseStart=System.nanoTime();warm=executionWorkers.lease(job.packageId);
+                    job.prewarmLeaseMs=(System.nanoTime()-leaseStart)/1_000_000.0;
+                    if(warm!=null)job.request.expectedRevisionDigest=warmRevision;
+                    else job.prewarmFallbackReason="no_ready_worker";
+                }
+                ProcessBuilder coldBuilder=warm==null?workerBuilder(false,job.packageId):null;
+                job.workerSpawnStartedNanos=System.nanoTime();
+                process=warm==null?startWorkerProcess(coldBuilder):warm.process;
+                job.workerSpawnedNanos=System.nanoTime();job.process=process;job.processFence=warm==null?new WorkerProcessFence(process):warm.fence;
+                if(warm!=null){job.workerDispatch="warm";job.prewarmBootstrapMs=(warm.readyNanos-warm.startedNanos)/1_000_000.0;}
+                job.workerPid=process.pid();job.workerStartTime=process.info().startInstant().orElse(Instant.now());job.startedAt=Instant.now();transition(job,"RUNNING");rememberWorkerProcesses(job,job.processFence);
+                if(warm!=null)warm.transferred();
             }
             startStderrDrainer(process,"att-server-worker-stderr");
-            try(var out=process.getOutputStream()){out.write(workerRequestBytes(job.request));out.write('\n');out.flush();}
+            try(var out=process.getOutputStream()){out.write(workerRequestBytes(job.request,warm!=null));out.write('\n');out.flush();}
             try(var reader=new java.io.BufferedInputStream(process.getInputStream())) {
                 att.server.api.internal.WorkerProtocol.Frame frame;
                 while((frame=att.server.api.internal.WorkerProtocol.read(reader,att.server.api.internal.WorkerProtocol.MAX_FRAME_BYTES))!=null) {
@@ -567,6 +584,7 @@ final class ServerRuntime implements AutoCloseable {
           catch(Exception e){stopWorkerTree(job);if(!job.terminal())finishQuietly(job,"ERROR",3,"ATT-SERVER-WORKER-FAILED",safeMessage(e));}
         finally {
             stopWorkerTree(job);
+            if(warm!=null&&job.processFence!=null&&job.processFence.stopped())try{warm.transferred();}catch(Exception ignored) { }
             boolean stopped=job.processFence==null ? job.process==null||!job.process.isAlive() : job.processFence.stopped();
             if(stopped&&job.process!=null){if(job.workerTerminatedNanos==0)job.workerTerminatedNanos=System.nanoTime();job.process=null;if(!closing)try{store.update(job);}catch(Exception ignored){}}
             tasks.remove(job.id);completed.incrementAndGet();
@@ -605,6 +623,47 @@ final class ServerRuntime implements AutoCloseable {
     }
     private List<String> workerClasspath() {
         return WorkerRuntimeClasspath.entries(workerLibs,config.workerLibraryDirs);
+    }
+    private ProcessBuilder workerBuilder(boolean prewarm,String packageId) {
+        List<String> command=new ArrayList<>();command.add(config.javaExecutable.toString());
+        if(config.workerHeapInitialMb>0)command.add("-Xms"+config.workerHeapInitialMb+"m");
+        if(config.workerHeapMaxMb>0)command.add("-Xmx"+config.workerHeapMaxMb+"m");
+        command.add("-cp");command.add(String.join(java.io.File.pathSeparator,workerClasspath()));command.add("att.worker.WorkerMain");
+        if(prewarm)command.add("--prewarmed-one-shot");
+        return new ProcessBuilder(command).directory(packageRoot(packageId).toFile());
+    }
+    private boolean environmentFitsPrewarm() {
+        // JVM bootstrap options cannot be applied after READY. Keep those
+        // deployments on the existing cold path with their original semantics.
+        for(String key:List.of("JAVA_TOOL_OPTIONS","JDK_JAVA_OPTIONS","_JAVA_OPTIONS","JAVA_FONTS","FONTCONFIG_FILE","FONTCONFIG_PATH"))
+            if(System.getenv(key)!=null&&!System.getenv(key).isBlank())return false;
+        long chars=0;
+        if(System.getenv().size()>4096)return false;
+        for(var entry:System.getenv().entrySet())chars+=entry.getKey().length()+(long)entry.getValue().length();
+        return chars<=131072;
+    }
+    String prewarmRevision(Job job) throws InterruptedException {
+        if(!config.executionPool.enabled||!config.executionPool.packageIds.contains(job.packageId)
+                ||!("run".equals(job.command)||"debug".equals(job.command)))return null;
+        if(!environmentFitsPrewarm()) {job.prewarmFallbackReason="startup_environment";return null;}
+        if(!config.workerLibraryDirs.isEmpty()) {job.prewarmFallbackReason="addon_libraries";return null;}
+        if(!config.inspection.enabled) {job.prewarmFallbackReason="inspection_disabled";return null;}
+        if(!executionWorkers.hasReadyCapacity(job.packageId)) {job.prewarmFallbackReason="no_ready_worker";return null;}
+        long before=System.nanoTime();
+        try {
+            WorkerRequest request=inspectionRequest(job.packageId,packageRoot(job.packageId),job.request.environment);
+            request.inspectionAction="prewarm-eligibility";
+            Map<String,Object> eligibility=executeInspection(packageRoot(job.packageId),request);
+            if(!Boolean.TRUE.equals(eligibility.get("eligible"))) {job.prewarmFallbackReason="native_resource_environment";return null;}
+            Object raw=eligibility.get("revisionDigest");
+            if(!(raw instanceof String revision)||!revision.matches("[a-f0-9]{64}")) {job.prewarmFallbackReason="unverified_revision";return null;}
+            if(job.request.expectedRevisionDigest!=null&&!job.request.expectedRevisionDigest.equals(revision)) {
+                job.prewarmFallbackReason="revision_changed";return null;
+            }
+            return revision;
+        } catch(InterruptedException interrupted) {throw interrupted;}
+        catch(Exception unavailable) {job.prewarmFallbackReason="inspection_unavailable";return null;}
+        finally {job.prewarmEligibilityMs=(System.nanoTime()-before)/1_000_000.0;}
     }
     private void stopWorkerTree(Job job) {
         Process process=job.process;
@@ -1288,6 +1347,7 @@ final class ServerRuntime implements AutoCloseable {
         boolean submitted=false;
         try {
             requireLiveDraft(draft);
+            verifyPackageRevision(draft.packageId,draft.environment,draft.revisionDigest);
             com.fasterxml.jackson.databind.node.ObjectNode internal=JSON.createObjectNode();
             internal.put("packageId",draft.packageId);if(draft.environment!=null)internal.put("environment",draft.environment);
             internal.set("target",JSON.valueToTree(Map.of("type",draft.targetType,"id",draft.targetId)));
@@ -1415,11 +1475,18 @@ final class ServerRuntime implements AutoCloseable {
         return applyWorkerPolicy(request);
     }
     WorkerRequest applyWorkerPolicy(WorkerRequest request) {
+        request.executionEnvironment=null;
         request.liveOutputMaxEntryChars=config.liveOutput.maxEntryChars;request.liveOutputMaxEntryLines=config.liveOutput.maxEntryLines;
         return request;
     }
     byte[] workerRequestBytes(WorkerRequest request) throws Exception {
         return JSON.writeValueAsBytes(applyWorkerPolicy(request));
+    }
+    private byte[] workerRequestBytes(WorkerRequest request,boolean warm) throws Exception {
+        if(!warm)return workerRequestBytes(request);
+        var value=JSON.valueToTree(applyWorkerPolicy(request));
+        ((com.fasterxml.jackson.databind.node.ObjectNode)value).set("executionEnvironment",JSON.valueToTree(System.getenv()));
+        return JSON.writeValueAsBytes(value);
     }
     private void applyInspectionPolicy(com.fasterxml.jackson.databind.node.ObjectNode request,String packageId) {
         request.set("safeTextSources",JSON.valueToTree(config.inspection.safeTextSources(packageId)));
@@ -1697,14 +1764,15 @@ final class ServerRuntime implements AutoCloseable {
         return inspected;
     }
     private Map<String,Object> executeInspection(Path root,WorkerRequest request) throws Exception {
-        Future<Map<String,Object>> future;
         long queuedAt=System.nanoTime();
-        try { future=inspectors.submit(()->{inspectionMetrics.record(QUEUE,System.nanoTime()-queuedAt);return runInspectionWorker(root,request);}); }
-        catch(RejectedExecutionException full){throw new InspectionCapacityException();}
+        if(!inspectionTaskSlots.tryAcquire())throw new InspectionCapacityException();
+        InspectionTask task=new InspectionTask(request,inspectionTaskSequence.getAndIncrement(),queuedAt,root);
+        try { inspectors.execute(task); }
+        catch(RejectedExecutionException full){task.releaseSlot();throw new InspectionCapacityException();}
         Map<String,Object> envelope;
-        try { envelope=future.get(config.inspection.timeoutMs,TimeUnit.MILLISECONDS); }
-        catch(java.util.concurrent.TimeoutException timeout){future.cancel(true);throw new InspectionTimeoutException();}
-        catch(InterruptedException interrupted){future.cancel(true);Thread.currentThread().interrupt();throw interrupted;}
+        try { envelope=task.get(config.inspection.timeoutMs,TimeUnit.MILLISECONDS); }
+        catch(java.util.concurrent.TimeoutException timeout){cancelInspectionTask(task);throw new InspectionTimeoutException();}
+        catch(InterruptedException interrupted){cancelInspectionTask(task);Thread.currentThread().interrupt();throw interrupted;}
         catch(ExecutionException failure){Throwable cause=failure.getCause();if(cause instanceof Exception)throw (Exception)cause;throw new IllegalStateException("Package inspection failed",cause);}
         String workerError=(String)envelope.get("errorCode");
         if("ATT-RESOURCE-NOT-FOUND".equals(workerError))throw new NotFoundException();
@@ -1768,6 +1836,36 @@ final class ServerRuntime implements AutoCloseable {
         JsonNode safe=projectInspectionPaths(JSON.valueToTree(att.server.api.internal.DiagnosticSanitizer.sanitizeValue(raw)),root,"");
         @SuppressWarnings("unchecked") Map<String,Object> result=JSON.convertValue(safe,Map.class);
         return result;
+    }
+    private void cancelInspectionTask(InspectionTask task) {
+        task.cancel(true);
+        if(inspectors.remove(task))task.releaseSlot();
+    }
+    private final class InspectionTask extends FutureTask<Map<String,Object>> implements Comparable<Runnable> {
+        private final int priority;
+        private final long sequence;
+        private final boolean explorerList;
+        private final java.util.concurrent.atomic.AtomicBoolean slotReleased=new java.util.concurrent.atomic.AtomicBoolean();
+        InspectionTask(WorkerRequest request,long sequence,long queuedAt,Path root) {
+            super(()->{inspectionMetrics.record(QUEUE,System.nanoTime()-queuedAt);return runInspectionWorker(root,request);});
+            this.sequence=sequence;
+            this.explorerList="list".equals(request.inspectionAction);
+            // Give at most three short, read-only listings priority before normal work has a turn.
+            int credits=explorerList?inspectionExplorerPriorityCredits.getAndUpdate(value->Math.max(0,value-1)):0;
+            this.priority=credits>0?0:1;
+        }
+        @Override public int compareTo(Runnable other) {
+            if(this==other)return 0;
+            InspectionTask candidate=(InspectionTask)other;
+            int byPriority=Integer.compare(priority,candidate.priority);
+            return byPriority!=0?byPriority:Long.compare(sequence,candidate.sequence);
+        }
+        @Override public void run() {
+            if(!explorerList)inspectionExplorerPriorityCredits.set(INSPECTION_EXPLORER_PRIORITY_BURST);
+            try { super.run(); }
+            finally { releaseSlot(); }
+        }
+        void releaseSlot() { if(slotReleased.compareAndSet(false,true))inspectionTaskSlots.release(); }
     }
     static List<Map<String,Object>> safeInspectionDiagnostics(List<?> rawDiagnostics,Path root) {
         List<Map<String,Object>> diagnostics=new ArrayList<>();
@@ -2654,7 +2752,8 @@ final class ServerRuntime implements AutoCloseable {
         result.put("workers",daemons);
         return result;
     }
-    Map<String,Object> counts() throws Exception {Map<String,Object> m=new LinkedHashMap<>();for(String s:List.of("QUEUED","PREPARING","RUNNING","PASS","FAIL","ERROR","INVALID","CANCELLED"))m.put(s.toLowerCase(),store.count(s));m.put("inspection",inspectionStatistics());m.put("queueDepth",workers.getQueue().size());m.put("activeWorkers",workers.getActiveCount());m.put("completedSinceStart",completed.get());m.put("loadSchedulingEnabled",config.scheduling.enabled);if(config.scheduling.enabled){m.put("loadSchedules",store.scheduleCount());m.put("activeScheduledLoads",store.activeScheduledCount(null));m.put("loadScheduleMetrics",store.scheduleMetrics());}m.put("jobStorage",jobStorageSnapshot());return m;}
+    Map<String,Object> executionPoolStatistics() { return executionWorkers==null?Map.of("enabled",false):executionWorkers.metrics(); }
+    Map<String,Object> counts() throws Exception {Map<String,Object> m=new LinkedHashMap<>();for(String s:List.of("QUEUED","PREPARING","RUNNING","PASS","FAIL","ERROR","INVALID","CANCELLED"))m.put(s.toLowerCase(),store.count(s));m.put("inspection",inspectionStatistics());m.put("executionPool",executionPoolStatistics());m.put("queueDepth",workers.getQueue().size());m.put("activeWorkers",workers.getActiveCount());m.put("completedSinceStart",completed.get());m.put("loadSchedulingEnabled",config.scheduling.enabled);if(config.scheduling.enabled){m.put("loadSchedules",store.scheduleCount());m.put("activeScheduledLoads",store.activeScheduledCount(null));m.put("loadScheduleMetrics",store.scheduleMetrics());}m.put("jobStorage",jobStorageSnapshot());return m;}
     Path artifact(Job job,String requested) throws Exception {
         if(requested==null||requested.isBlank())throw new IllegalArgumentException("artifact path is required");
         Path base=config.dataDir.resolve("jobs").resolve(job.id).resolve("output").toRealPath();Path relative=Paths.get(requested);
@@ -3238,6 +3337,7 @@ final class ServerRuntime implements AutoCloseable {
         admissionLifecycle.writeLock().lock();
         try {if(closing)return;closing=true;}finally{admissionLifecycle.writeLock().unlock();}
         if(inspectionWarmup!=null)inspectionWarmup.shutdownNow();
+        if(executionWorkers!=null)executionWorkers.close();
         if(loadScheduleScheduler!=null)loadScheduleScheduler.close();
         retention.shutdownNow();artifactMaintenance.shutdownNow();inspectionWatchdogs.shutdownNow();
         synchronized(draftLock){runDrafts.clear();debugDrafts.clear();quickLoadDrafts.clear();advancedLoadDrafts.clear();catalogLoadDrafts.clear();replayReviews.clear();}

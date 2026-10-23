@@ -209,7 +209,10 @@ def check_schema_references():
     catalog_path = SCHEMAS / "catalog.yaml"
     registered = active_schemas(read(catalog_path)) if catalog_path.is_file() else {}
     registered_tokens = {name + "/v" + version for name, version in registered.items()}
-    documented_protocols = {"att-worker/v1": DOCS / "system-design/worker-protocol.md"}
+    documented_protocols = {
+        "att-worker/v1": DOCS / "system-design/worker-protocol.md",
+        "att-prewarm/v1": DOCS / "system-design/execution-prewarm.md",
+    }
     for token in sorted(tokens):
         protocol_doc = documented_protocols.get(token)
         if (token not in schema_corpus and token not in registered_tokens

@@ -7,6 +7,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.Collections;
+import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
@@ -106,6 +107,49 @@ class ServerRuntimeTest {
             assertTrue(List.of("PASS","FAIL","ERROR","INVALID","CANCELLED").contains(record.get("status")),"Worker must produce a terminal result");while(!runtime.jobs.isEmpty()&&System.nanoTime()<deadline)Thread.sleep(20);assertTrue(runtime.jobs.isEmpty(),"Completed Job objects should be evicted from memory");assertTrue(runtime.events(id).after(0).stream().anyMatch(e->"result".equals(e.get("event"))));
             assertEquals("debug",record.get("command"));
         } finally {runtime.close();}
+    }
+
+    @Test void skipsEligibilityInspectionWhenWarmPoolHasNoReadyCapacity() throws Exception {
+        Path allowed=Files.createDirectory(temp.resolve("prewarm-saturated-packages"));Path pkg=Files.createDirectory(allowed.resolve("package"));
+        Path libs=Files.createDirectory(temp.resolve("prewarm-saturated-libs"));Path yaml=temp.resolve("prewarm-saturated-server.yaml");
+        Files.writeString(yaml,"server:\n  dataDir: "+temp.resolve("prewarm-saturated-data")
+                +"\n  inspection: {enabled: true, warmup: {enabled: false}}\nworkers:\n  heapMaxMb: 128\n"
+                +"  executionPool: {enabled: true, minIdle: 1, maxIdle: 1, heapBudgetMb: 128, packageIds: [p]}\n"
+                +"packages:\n  allowedRoots: ["+allowed+"]\n  entries:\n    p: "+pkg+"\n");
+        java.util.concurrent.atomic.AtomicInteger launches=new java.util.concurrent.atomic.AtomicInteger();
+        String classpath=System.getProperty("surefire.test.class.path",System.getProperty("java.class.path"));
+        ServerRuntime runtime=new ServerRuntime(ServerConfig.load(yaml),libs.toString(),builder->{
+            launches.incrementAndGet();
+            if(!builder.command().contains("--prewarmed-one-shot"))throw new java.io.IOException("Unexpected Inspector launch in saturated-pool test");
+            ProcessBuilder fixture=new ProcessBuilder(Path.of(System.getProperty("java.home"),"bin","java").toString(),
+                    "-cp",classpath,ExecutionPoolProcessFixture.class.getName());
+            fixture.directory(builder.directory());fixture.environment().clear();fixture.environment().putAll(builder.environment());
+            return fixture.start();
+        });
+        ExecutionWorkerPool.Lease leased=null;
+        try {
+            long readyDeadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(10);
+            while(((Number)runtime.executionWorkers.metrics().get("ready")).intValue()!=1&&System.nanoTime()<readyDeadline)Thread.sleep(20);
+            assertEquals(1L,runtime.executionWorkers.metrics().get("ready"));assertEquals(1,launches.get());
+            EnumMap<att.metrics.InspectionMetrics.Stage,Long> before=new EnumMap<>(att.metrics.InspectionMetrics.Stage.class);
+            for(att.metrics.InspectionMetrics.Stage stage:att.metrics.InspectionMetrics.Stage.values())before.put(stage,runtime.inspectionMetrics.count(stage));
+            synchronized(runtime.executionWorkers) {
+                leased=runtime.executionWorkers.lease("p");assertNotNull(leased);
+                Job job=new Job("J1122334455667788","run","p","test",new att.server.api.WorkerRequest(),
+                        new JobEvents(temp.resolve("saturated-events.jsonl"),100));
+                assertNull(runtime.prewarmRevision(job));
+                assertEquals("no_ready_worker",job.prewarmFallbackReason);
+                assertNull(job.prewarmEligibilityMs,"A cold fallback must not pay for package inspection");
+                assertEquals(1,launches.get(),"No Inspector or replacement Worker should launch during eligibility probing");
+                for(att.metrics.InspectionMetrics.Stage stage:att.metrics.InspectionMetrics.Stage.values())
+                    assertEquals(before.get(stage),runtime.inspectionMetrics.count(stage),"Inspection metric changed: "+stage);
+            }
+        } finally {
+            if(leased!=null) {
+                leased.process.destroyForcibly();leased.process.waitFor(5,TimeUnit.SECONDS);leased.transferred();
+            }
+            runtime.close();
+        }
     }
 
     @Test void cancellationCannotSlipBetweenWorkerLaunchAndProcessPublication() throws Exception {

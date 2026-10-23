@@ -35,11 +35,12 @@ public final class ServerConfig {
     public final Authorization authorization;
     public final JobStorage jobStorage;
     public final LiveOutput liveOutput;
+    public final ExecutionPool executionPool;
 
     private ServerConfig(Path dataDir, Path runtimeConfigPath, Path javaExecutable, int maxConcurrent, int queuedLimit,
                          int maxConcurrentLoad, int gracefulStopMs, int jobRetentionDays,
                          int workerHeapInitialMb, int workerHeapMaxMb, int maxRequestBytes,
-                         int maxEventsPerJob, int maxArtifacts, boolean authenticationRequired, String authMode, Security security, Map<String, Path> packages, List<Path> allowedRoots, List<Path> workerLibraryDirs, Inspection inspection, InlineLoad inlineLoad, Scheduling scheduling, Authorization authorization, JobStorage jobStorage, LiveOutput liveOutput) {
+                         int maxEventsPerJob, int maxArtifacts, boolean authenticationRequired, String authMode, Security security, Map<String, Path> packages, List<Path> allowedRoots, List<Path> workerLibraryDirs, Inspection inspection, InlineLoad inlineLoad, Scheduling scheduling, Authorization authorization, JobStorage jobStorage, LiveOutput liveOutput, ExecutionPool executionPool) {
         this.dataDir=dataDir; this.runtimeConfigPath=runtimeConfigPath; this.javaExecutable=javaExecutable; this.maxConcurrent=maxConcurrent;
         this.queuedLimit=queuedLimit; this.maxConcurrentLoad=maxConcurrentLoad; this.gracefulStopMs=gracefulStopMs;this.jobRetentionDays=jobRetentionDays;
         this.workerHeapInitialMb=workerHeapInitialMb;this.workerHeapMaxMb=workerHeapMaxMb;
@@ -52,6 +53,7 @@ public final class ServerConfig {
         this.scheduling=scheduling;
         this.authorization=authorization;
         this.jobStorage=jobStorage;this.liveOutput=liveOutput;
+        this.executionPool=executionPool;
     }
 
     public static ServerConfig load(Path file) throws Exception {
@@ -116,6 +118,7 @@ public final class ServerConfig {
         int heapMax=intValue(workers,"heapMaxMb",0,64,65536), heapInitial=intValue(workers,"heapInitialMb",0,32,65536);
         if(heapInitial>0&&heapMax==0)throw new IllegalArgumentException("workers.heapInitialMb requires workers.heapMaxMb");
         if(heapInitial>heapMax)throw new IllegalArgumentException("workers.heapInitialMb must not exceed workers.heapMaxMb");
+        ExecutionPool executionPool=executionPool(workers.get("executionPool"),resolved,heapMax);
         int retention=intValue(server,"jobRetentionDays",30,1,3650);
         JobStorage jobStorage=jobStorage(server.get("jobStorage"));
         LiveOutput liveOutput=liveOutput(server.get("liveOutput"));
@@ -138,7 +141,40 @@ public final class ServerConfig {
         for(Path packageRoot:resolved.values()) if(packageRoot.startsWith(realData)||realData.startsWith(packageRoot))
             throw new IllegalArgumentException("server.dataDir must be separate from configured package roots");
         privateDirectory(realData);privateDirectory(realData.resolve("db"));privateDirectory(realData.resolve("jobs"));
-        return new ServerConfig(realData,runtimeConfig,java,max,queue,load,stop,retention,heapInitial,heapMax,request,events,artifacts,authenticationRequired,authMode,security,resolved,allowed,workerLibraries,inspection,inlineLoad,scheduling,authorization,jobStorage,liveOutput);
+        return new ServerConfig(realData,runtimeConfig,java,max,queue,load,stop,retention,heapInitial,heapMax,request,events,artifacts,authenticationRequired,authMode,security,resolved,allowed,workerLibraries,inspection,inlineLoad,scheduling,authorization,jobStorage,liveOutput,executionPool);
+    }
+
+    public static final class ExecutionPool {
+        static final ExecutionPool DISABLED=new ExecutionPool(false,0,0,0,300000,30000,List.of());
+        public final boolean enabled;
+        public final int minIdle,maxIdle,heapBudgetMb,idleTimeoutMs,startupTimeoutMs;
+        public final List<String> packageIds;
+        ExecutionPool(boolean enabled,int minIdle,int maxIdle,int budget,int idleMs,int startupMs,List<String> packages) {
+            this.enabled=enabled;this.minIdle=minIdle;this.maxIdle=maxIdle;this.heapBudgetMb=budget;
+            this.idleTimeoutMs=idleMs;this.startupTimeoutMs=startupMs;this.packageIds=List.copyOf(packages);
+        }
+    }
+    private static ExecutionPool executionPool(Object raw,Map<String,Path> packages,int heapMax) {
+        if(raw==null)return ExecutionPool.DISABLED;
+        Map<?,?> values=map(raw,"workers.executionPool");
+        for(Object key:values.keySet())if(!Set.of("enabled","strategy","minIdle","maxIdle","heapBudgetMb","idleTimeoutMs","startupTimeoutMs","packageIds").contains(key))
+            throw new IllegalArgumentException("workers.executionPool contains an unknown setting");
+        boolean enabled=boolValue(values,"enabled",false);
+        if(values.get("strategy")!=null&&!"prewarmed-one-shot".equals(values.get("strategy")))
+            throw new IllegalArgumentException("workers.executionPool.strategy must be prewarmed-one-shot");
+        int min=intValue(values,"minIdle",1,0,16),max=intValue(values,"maxIdle",2,1,16);
+        int budget=intValue(values,"heapBudgetMb",512,64,65536);
+        int idle=intValue(values,"idleTimeoutMs",300000,1000,3600000),startup=intValue(values,"startupTimeoutMs",30000,1000,120000);
+        List<String> ids=new java.util.ArrayList<>();
+        if(values.get("packageIds")!=null)for(Object value:list(values.get("packageIds"),"workers.executionPool.packageIds")) {
+            String id=string(value,"workers.executionPool.packageIds entry");
+            if(!packages.containsKey(id)||ids.contains(id))throw new IllegalArgumentException("workers.executionPool.packageIds must contain unique registered package IDs");
+            ids.add(id);
+        }
+        if(min>max)throw new IllegalArgumentException("workers.executionPool.minIdle exceeds maxIdle");
+        if(enabled&&(heapMax==0||(long)max*heapMax>budget||ids.isEmpty()))
+            throw new IllegalArgumentException("Enabled workers.executionPool requires packageIds, workers.heapMaxMb and enough heapBudgetMb for maxIdle");
+        return new ExecutionPool(enabled,min,max,budget,idle,startup,ids);
     }
 
     public static Path configPath() {

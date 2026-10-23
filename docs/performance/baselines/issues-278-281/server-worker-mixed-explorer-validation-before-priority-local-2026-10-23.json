@@ -1,0 +1,425 @@
+{
+  "schemaVersion": "att-server-worker-sse-benchmark/v1",
+  "runtime": {
+    "version": "4.2.3",
+    "warSha256": "8e653cf6c45cdbc8bae653d5c3976187d4c257dbaade3483c91e3907703b7318",
+    "workerRuntimeSha256": "7ffdf5c34f05fbb31ffe80d7477bd906e3be02dd05365fbbad720be15bb57246"
+  },
+  "environment": {
+    "javaVersion": "26.0.1",
+    "javaVm": "OpenJDK 64-Bit Server VM",
+    "os": "Mac OS X 26.1",
+    "architecture": "aarch64",
+    "processors": 8,
+    "maxHeapBytes": 2147483648,
+    "liveThreads": 19,
+    "capturedAt": "2026-10-23T08:23:35.245187Z"
+  },
+  "settings": {
+    "soakSeconds": 0,
+    "caseCount": 20,
+    "warmups": 0,
+    "workerConcurrency": [
+      1
+    ],
+    "maxEventsPerJob": 100000,
+    "slowReaderDelayMsPerEvent": 1,
+    "processResourceSampling": true,
+    "runs": 1,
+    "observerModes": [
+      "none"
+    ],
+    "syntheticReplayEventsPerJob": 1000
+  },
+  "workerScenarios": [
+    {
+      "workerConcurrency": 1,
+      "observerMode": "none",
+      "measuredRuns": 1,
+      "samples": [
+        {
+          "workerConcurrency": 1,
+          "observerMode": "none",
+          "caseCountPerJob": 20,
+          "jobCount": 1,
+          "status": "PASS",
+          "totalWallMs": 1753.0885,
+          "jobsPerSecond": 0.5704218583374427,
+          "serverMetricsPeak": {
+            "queueDepthPeak": 0,
+            "activeWorkersPeak": 1
+          },
+          "jobs": [
+            {
+              "jobId": "JE3BD6F861F234F95",
+              "status": "PASS",
+              "performance": {
+                "workerDispatch": "cold",
+                "timings": {
+                  "admissionMs": 712.372583,
+                  "queueWaitMs": 0.08225,
+                  "workerPreparationMs": 7.235042,
+                  "workerSpawnMs": 2.28525,
+                  "workerReadyMs": 163.698792,
+                  "executionReadyMs": 481.323833,
+                  "workerLifetimeMs": 922.046208,
+                  "resultToTerminationMs": 5.939625,
+                  "firstMeaningfulEventMs": 1366.99775
+                },
+                "worker": {
+                  "sampling": "event-triggered; at most one sample per 100 ms",
+                  "sampleCount": 4,
+                  "heapUsedBytes": 56912512,
+                  "heapPeakUsedBytes": 56912512,
+                  "heapCommittedBytes": 94371840,
+                  "heapPeakCommittedBytes": 94371840,
+                  "heapMaxBytes": 2147483648,
+                  "rssMetricsAvailable": false,
+                  "rssPeakBytes": null,
+                  "liveThreads": 6,
+                  "liveThreadsPeak": 6,
+                  "gcMetricsAvailable": true,
+                  "gcCollectionCount": 7,
+                  "gcCollectionTimeMs": 14,
+                  "processCpuSupported": true,
+                  "processCpuTimeMs": 2475,
+                  "processCpuPercent": 319.3454399727401
+                }
+              },
+              "journalEventCount": 231,
+              "journalBytesOnDisk": 116042
+            }
+          ],
+          "sseReaders": [],
+          "jobIds": [
+            "JE3BD6F861F234F95"
+          ],
+          "processResources": {
+            "available": true,
+            "scope": "test-process-and-descendants",
+            "physicalIoAvailable": false,
+            "peakResidentBytes": 615137280,
+            "samplingIntervalMs": 25,
+            "physicalIoSource": "unavailable on this host",
+            "sampleCount": 36,
+            "kernelWriteBytes": 0,
+            "kernelReadBytes": 0
+          }
+        }
+      ]
+    }
+  ],
+  "eventHeavyCommands": [
+    {
+      "command": "debug",
+      "jobId": "JEF95E1918CA14997",
+      "status": "PASS",
+      "wallMs": 548.283458,
+      "journalEventCount": 11,
+      "performance": {
+        "workerDispatch": "cold",
+        "timings": {
+          "admissionMs": 3.344459,
+          "queueWaitMs": 0.253833,
+          "workerPreparationMs": 3.220417,
+          "workerSpawnMs": 2.680416,
+          "workerReadyMs": 228.8765,
+          "executionReadyMs": 192.430584,
+          "workerLifetimeMs": 488.118959,
+          "resultToTerminationMs": 4.976709,
+          "firstMeaningfulEventMs": 430.806209
+        },
+        "worker": {
+          "sampling": "event-triggered; at most one sample per 100 ms",
+          "sampleCount": 2,
+          "heapUsedBytes": 18090440,
+          "heapPeakUsedBytes": 11798984,
+          "heapCommittedBytes": 31457280,
+          "heapPeakCommittedBytes": 31457280,
+          "heapMaxBytes": 2147483648,
+          "rssMetricsAvailable": false,
+          "rssPeakBytes": null,
+          "liveThreads": 6,
+          "liveThreadsPeak": 6,
+          "gcMetricsAvailable": true,
+          "gcCollectionCount": 2,
+          "gcCollectionTimeMs": 3,
+          "processCpuSupported": true,
+          "processCpuTimeMs": 854,
+          "processCpuPercent": 302.57032351295254
+        }
+      },
+      "serverMetricsPeak": {
+        "queueDepthPeak": 0,
+        "activeWorkersPeak": 1
+      },
+      "processResources": {
+        "available": true,
+        "scope": "test-process-and-descendants",
+        "physicalIoAvailable": false,
+        "peakResidentBytes": 621117440,
+        "samplingIntervalMs": 25,
+        "physicalIoSource": "unavailable on this host",
+        "sampleCount": 13,
+        "kernelWriteBytes": 0,
+        "kernelReadBytes": 0
+      }
+    },
+    {
+      "command": "load",
+      "jobId": "J8B63515553AE4CDD",
+      "status": "PASS",
+      "wallMs": 4506.157083,
+      "journalEventCount": 806,
+      "performance": {
+        "workerDispatch": "cold",
+        "timings": {
+          "admissionMs": 20.952416,
+          "queueWaitMs": 0.089667,
+          "workerPreparationMs": 1.666708,
+          "workerSpawnMs": 2.359917,
+          "workerReadyMs": 145.95775,
+          "executionReadyMs": 233.791958,
+          "workerLifetimeMs": 4425.742167,
+          "resultToTerminationMs": 7.609834,
+          "firstMeaningfulEventMs": 404.818416
+        },
+        "worker": {
+          "sampling": "event-triggered; at most one sample per 100 ms",
+          "sampleCount": 40,
+          "heapUsedBytes": 45794568,
+          "heapPeakUsedBytes": 60596232,
+          "heapCommittedBytes": 91226112,
+          "heapPeakCommittedBytes": 91226112,
+          "heapMaxBytes": 2147483648,
+          "rssMetricsAvailable": false,
+          "rssPeakBytes": null,
+          "liveThreads": 6,
+          "liveThreadsPeak": 16,
+          "gcMetricsAvailable": true,
+          "gcCollectionCount": 5,
+          "gcCollectionTimeMs": 7,
+          "processCpuSupported": true,
+          "processCpuTimeMs": 1766,
+          "processCpuPercent": 41.16355383536311
+        }
+      },
+      "serverMetricsPeak": {
+        "queueDepthPeak": 0,
+        "activeWorkersPeak": 1
+      },
+      "processResources": {
+        "available": true,
+        "scope": "test-process-and-descendants",
+        "physicalIoAvailable": false,
+        "peakResidentBytes": 735363072,
+        "samplingIntervalMs": 25,
+        "physicalIoSource": "unavailable on this host",
+        "sampleCount": 96,
+        "kernelWriteBytes": 0,
+        "kernelReadBytes": 0
+      }
+    }
+  ],
+  "packageValidation": {
+    "command": "validate",
+    "jobId": "J1279319A43BD4150",
+    "status": "PASS",
+    "wallMs": 631.25,
+    "journalEventCount": 5,
+    "performance": {
+      "workerDispatch": "cold",
+      "timings": {
+        "admissionMs": 1.197625,
+        "queueWaitMs": 0.070166,
+        "workerPreparationMs": 2.612042,
+        "workerSpawnMs": 2.394417,
+        "workerReadyMs": 153.426,
+        "workerLifetimeMs": 621.301833,
+        "resultToTerminationMs": 4.272542
+      },
+      "worker": {
+        "sampling": "event-triggered; at most one sample per 100 ms",
+        "sampleCount": 2,
+        "heapUsedBytes": 36173032,
+        "heapPeakUsedBytes": 36173032,
+        "heapCommittedBytes": 73400320,
+        "heapPeakCommittedBytes": 73400320,
+        "heapMaxBytes": 2147483648,
+        "rssMetricsAvailable": false,
+        "rssPeakBytes": null,
+        "liveThreads": 6,
+        "liveThreadsPeak": 6,
+        "gcMetricsAvailable": true,
+        "gcCollectionCount": 5,
+        "gcCollectionTimeMs": 8,
+        "processCpuSupported": true,
+        "processCpuTimeMs": 1331,
+        "processCpuPercent": 276.87139612176765
+      }
+    },
+    "serverMetricsPeak": {
+      "queueDepthPeak": 0,
+      "activeWorkersPeak": 1
+    },
+    "processResources": {
+      "available": true,
+      "scope": "test-process-and-descendants",
+      "physicalIoAvailable": false,
+      "peakResidentBytes": 748191744,
+      "samplingIntervalMs": 25,
+      "physicalIoSource": "unavailable on this host",
+      "sampleCount": 15,
+      "kernelWriteBytes": 0,
+      "kernelReadBytes": 0
+    }
+  },
+  "mixedExplorerValidation": {
+    "caseCount": 20,
+    "inspectorConcurrency": 1,
+    "validationBurstSize": 4,
+    "warmups": 1,
+    "measuredMixedSamples": 4,
+    "measurementScope": "public Explorer resource-list and RUN-draft HTTP routes on one bounded Inspector Worker",
+    "baselineExplorer": {
+      "sampleCount": 4,
+      "p50Ms": 22.095208,
+      "p95Ms": 24.0685,
+      "samplesMs": [
+        16.842333,
+        22.095208,
+        23.039625,
+        24.0685
+      ]
+    },
+    "baselineRunDraftValidation": {
+      "sampleCount": 4,
+      "p50Ms": 43.086292,
+      "p95Ms": 50.383208,
+      "samplesMs": [
+        39.847125,
+        43.086292,
+        44.941459,
+        50.383208
+      ]
+    },
+    "mixedExplorer": {
+      "sampleCount": 4,
+      "p50Ms": 107.638084,
+      "p95Ms": 153.827708,
+      "samplesMs": [
+        99.119792,
+        107.638084,
+        134.017209,
+        153.827708
+      ]
+    },
+    "mixedRunDraftValidation": {
+      "sampleCount": 16,
+      "p50Ms": 70.206125,
+      "p95Ms": 133.669333,
+      "samplesMs": [
+        30.771959,
+        33.9785,
+        34.200208,
+        42.215333,
+        51.110458,
+        55.127667,
+        63.958375,
+        70.206125,
+        71.75825,
+        76.470459,
+        89.852375,
+        90.364542,
+        99.930541,
+        108.917875,
+        117.138167,
+        133.669333
+      ]
+    },
+    "queueDepthAtExplorerArrival": [
+      3,
+      3,
+      3,
+      3
+    ],
+    "validationSamplesWithQueuedPredecessors": 4,
+    "inspectorWorkerStartsDuringMixedSamples": 0,
+    "inspectorWorkerStartsTotal": 1,
+    "inspectorDispatchesDuringMixedSamples": 25,
+    "httpRequestsAreReadOnlyOrDraftValidation": true
+  },
+  "sseReplay": [
+    {
+      "workerConcurrency": 1,
+      "syntheticEventsAndPayload": "progress events with 192-byte fixed payload; appended after completed real Worker jobs",
+      "jobs": [
+        {
+          "jobId": "JE3BD6F861F234F95",
+          "lastEventId": 231,
+          "appendedEvents": 1000,
+          "appendMs": 49.167875,
+          "appendEventsPerSecond": 20338.483206768648,
+          "journalBytesOnDisk": 384167
+        }
+      ],
+      "parallelReplay": [
+        {
+          "jobId": "JE3BD6F861F234F95",
+          "lastEventId": 231,
+          "eventCount": 1000,
+          "firstEventId": 232,
+          "timeToFirstEventMs": 12.106584,
+          "lastEventIdReceived": 1231,
+          "bytes": 261870,
+          "wallMs": 53.297459,
+          "eventsPerSecond": 18762.62055945294,
+          "consumerDelayMsPerEvent": 0
+        }
+      ],
+      "parallelReplayWallMs": 54.417625,
+      "lastEventIdResume": {
+        "jobId": "JE3BD6F861F234F95",
+        "lastEventId": 231,
+        "eventCount": 1000,
+        "firstEventId": 232,
+        "timeToFirstEventMs": 7.25175,
+        "lastEventIdReceived": 1231,
+        "bytes": 261870,
+        "wallMs": 45.691667,
+        "eventsPerSecond": 21885.828766107395,
+        "consumerDelayMsPerEvent": 0
+      },
+      "slowConsumerReplay": {
+        "jobId": "JE3BD6F861F234F95",
+        "lastEventId": 231,
+        "eventCount": 1000,
+        "firstEventId": 232,
+        "timeToFirstEventMs": 6.589209,
+        "lastEventIdReceived": 1231,
+        "bytes": 261870,
+        "wallMs": 1527.271709,
+        "eventsPerSecond": 654.7623413091062,
+        "consumerDelayMsPerEvent": 1
+      }
+    }
+  ],
+  "restartReplay": {
+    "jobId": "JE3BD6F861F234F95",
+    "lastEventId": 231,
+    "replay": {
+      "jobId": "JE3BD6F861F234F95",
+      "lastEventId": 231,
+      "eventCount": 1000,
+      "firstEventId": 232,
+      "timeToFirstEventMs": 53.397959,
+      "lastEventIdReceived": 1231,
+      "bytes": 261870,
+      "wallMs": 109.957084,
+      "eventsPerSecond": 9094.457252067543,
+      "consumerDelayMsPerEvent": 0
+    },
+    "serverRestarted": true
+  },
+  "sourceRevision": "092baa4-before-priority-queue"
+}

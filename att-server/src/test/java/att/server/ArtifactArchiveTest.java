@@ -31,6 +31,47 @@ class ArtifactArchiveTest {
         assertThrows(IllegalArgumentException.class,()->ArtifactArchive.read(archive,"../secret.txt"));
     }
 
+    @Test void cappedMemoryAndSpillPublishExactlyTheSameApprovedSnapshot() throws Exception {
+        Path output=Files.createDirectory(temporary.resolve("staging-output"));
+        Map<String,String> sources=Map.of("a.log","approved password: synthetic-secret\n"+"x".repeat(300),
+                "b.log","approved password: synthetic-secret\n"+"y".repeat(2048),
+                "index.html","<a href=\"a.log\">A</a><a href=\"b.log\">B</a><a href=\"private.bin\">Omitted</a>");
+        Files.writeString(output.resolve("private.bin"),"not publishable");
+        Path disk=temporary.resolve("disk/artifacts.zip"),memory=temporary.resolve("memory/artifacts.zip");
+        for(long budget:new long[]{0,1024}) {
+            for(var source:sources.entrySet())Files.writeString(output.resolve(source.getKey()),source.getValue());
+            var calls=new java.util.HashMap<Path,Integer>();
+            ArtifactMetricsRecorder recorder=new ArtifactMetricsRecorder(System.nanoTime(),1);
+            ArtifactMetricsRecorder.CURRENT.set(recorder);
+            try {
+                ArtifactArchive.build(output,budget==0?disk:memory,path->{
+                    calls.merge(path,1,Integer::sum);
+                    byte[] approved=att.server.api.internal.DiagnosticSanitizer.redactText(Files.readString(path)).getBytes(StandardCharsets.UTF_8);
+                    // Later raw mutation cannot change the already-approved snapshot.
+                    Files.writeString(path,"password: replaced-raw-secret");return approved;
+                },budget);
+            } finally {recorder.finish();ArtifactMetricsRecorder.CURRENT.remove();}
+            assertEquals(3,calls.size());assertTrue(calls.values().stream().allMatch(count->count==1));
+            assertTrue(recorder.value.memoryExportPeakBytes<=budget);
+            assertEquals(budget==0?3:1,recorder.value.temporaryExportFiles.longValue());
+            assertTrue(recorder.value.temporaryExportBytes>2048);
+            assertEquals(recorder.value.temporaryExportBytes,recorder.value.temporaryExportReadBytes,
+                    "Spilled sanitized payload is read once for ZIP publication");
+            assertEquals(recorder.value.zipWriteInputBytes,recorder.value.verificationBytesRead,
+                    "Publication digest verification rereads exactly the bytes written to ZIP entries");
+        }
+        assertEquals(ArtifactArchive.verify(disk,true),ArtifactArchive.verify(memory,true));
+        for(String path:sources.keySet()) {
+            byte[] expected=ArtifactArchive.read(disk,path),actual=ArtifactArchive.read(memory,path);
+            assertArrayEquals(expected,actual);String text=new String(actual,StandardCharsets.UTF_8);
+            assertFalse(text.contains("synthetic-secret"));assertFalse(text.contains("replaced-raw-secret"));
+        }
+        String html=new String(ArtifactArchive.read(memory,"index.html"),StandardCharsets.UTF_8);
+        assertTrue(html.contains("href=\"a.log\""));assertTrue(html.contains("href=\"b.log\""));
+        assertFalse(html.contains("href=\"private.bin\""));
+        for(Path archive:java.util.List.of(disk,memory))try(var paths=Files.list(archive.getParent())) {assertEquals(java.util.List.of(archive),paths.toList());}
+    }
+
     @Test void repeatedLargeLoadPreviewsUseOnePinnedVerifiedDirectoryAndRejectNewCorruption() throws Exception {
         Path output=Files.createDirectory(temporary.resolve("large-load"));
         for(int i=0;i<2048;i++) {
@@ -136,6 +177,44 @@ class ArtifactArchiveTest {
         assertThrows(java.io.IOException.class,()->ArtifactArchive.build(output,archive,file->{throw new java.io.IOException("disk full");}));
         assertEquals("raw",Files.readString(output.resolve("case.log")));assertFalse(Files.exists(archive));
         try(var paths=Files.list(archive.getParent())){assertEquals(0,paths.count());}
+    }
+
+    @Test void interruptedSpillPublicationCleansStagingAndPreservesPriorArchive() throws Exception {
+        Path output=Files.createDirectory(temporary.resolve("interrupted-output"));
+        Files.writeString(output.resolve("a.log"),"original-a");Files.writeString(output.resolve("b.log"),"original-b");
+        Path archive=temporary.resolve("interrupted-job/artifacts.zip");
+        ArtifactArchive.build(output,archive,Files::readAllBytes);
+        byte[] priorArchive=Files.readAllBytes(archive);
+        Files.writeString(output.resolve("a.log"),"replacement-a");Files.writeString(output.resolve("b.log"),"replacement-b");
+
+        var publisherEntered=new java.util.concurrent.CountDownLatch(1);
+        var releasePublisher=new java.util.concurrent.CountDownLatch(1);
+        var failure=new java.util.concurrent.atomic.AtomicReference<Throwable>();
+        Thread writer=new Thread(()->{
+            try {
+                ArtifactArchive.build(output,archive,file->{
+                    if("b.log".equals(file.getFileName().toString())) {
+                        publisherEntered.countDown();releasePublisher.await();
+                    }
+                    return Files.readAllBytes(file);
+                },0);
+            } catch(Throwable error) { failure.set(error); }
+        },"artifact-interruption-fixture");
+        writer.start();
+        try {
+            assertTrue(publisherEntered.await(5,java.util.concurrent.TimeUnit.SECONDS),"Writer should reach the blocked second export after spilling the first");
+            writer.interrupt();writer.join(5000);
+            assertFalse(writer.isAlive(),"Interrupted archive writer should exit");
+        } finally {
+            releasePublisher.countDown();
+            if(writer.isAlive()) {writer.interrupt();writer.join(5000);}
+        }
+
+        assertTrue(failure.get() instanceof InterruptedException,"Interrupted publication should preserve its failure cause");
+        assertArrayEquals(priorArchive,Files.readAllBytes(archive),"Uncommitted ZIP must not replace the prior archive");
+        assertEquals("replacement-a",Files.readString(output.resolve("a.log")));
+        assertEquals("replacement-b",Files.readString(output.resolve("b.log")));
+        try(var paths=Files.list(archive.getParent())) { assertEquals(java.util.List.of(archive),paths.toList(),"ZIP and sanitized-export staging must both be removed"); }
     }
 
     @Test void rejectsLinkAndSpecialFileAttributesEvenWithValidManifestAndDigests() throws Exception {

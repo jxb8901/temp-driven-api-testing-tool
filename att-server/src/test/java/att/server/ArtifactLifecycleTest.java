@@ -132,15 +132,71 @@ class ArtifactLifecycleTest {
             ArtifactArchive.build(output,runtime.artifactArchivePath(id),file->runtime.publicArtifact(id,file));
             Files.writeString(output.getParent().resolve("archive-status.json"),"{\"state\":\"ARCHIVING\"}");
             Files.writeString(output.getParent().resolve(".artifact-orphan.zip.tmp"),"incomplete");
+            Path abandonedExports=Files.createDirectories(output.getParent().resolve(".artifact-export-orphan/nested"));
+            Files.writeString(abandonedExports.resolve("case.log"),"sanitized-but-uncommitted");
+            Files.writeString(output.getParent().resolve(".archive-status-orphan.tmp"),"incomplete status");
         }
         try(ServerRuntime runtime=new ServerRuntime(config,temp.resolve("libs").toString())) {
             awaitState(runtime,id,"READY");
-            Path staging = runtime.artifactArchivePath(id).resolveSibling(".artifact-orphan.zip.tmp");
+            Path jobDirectory=runtime.artifactArchivePath(id).getParent();
+            Path staging = jobDirectory.resolve(".artifact-orphan.zip.tmp");
+            Path abandonedExports=jobDirectory.resolve(".artifact-export-orphan");
+            Path abandonedStatus=jobDirectory.resolve(".archive-status-orphan.tmp");
             long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(5);
-            while((Files.exists(runtime.outputDirectoryForJob(id))||Files.exists(staging))&&System.nanoTime()<deadline)Thread.sleep(10);
+            while((Files.exists(runtime.outputDirectoryForJob(id))||Files.exists(staging)
+                    ||Files.exists(abandonedExports)||Files.exists(abandonedStatus))&&System.nanoTime()<deadline)Thread.sleep(10);
             assertFalse(Files.exists(runtime.outputDirectoryForJob(id)));
             assertFalse(Files.exists(staging));
+            assertFalse(Files.exists(abandonedExports));
+            assertFalse(Files.exists(abandonedStatus));
             assertEquals("safe",new String(runtime.archiveEntry(id,"case.log"),java.nio.charset.StandardCharsets.UTF_8));
+        }
+    }
+
+    @Test void forcedProcessKillDuringZipWritingIsRecoveredOnServerRestart() throws Exception {
+        String id="J0000000000000001";ServerConfig config;Path output,archive,jobDirectory;
+        try(ServerRuntime runtime=runtime()) {
+            config=runtime.config;job(runtime,id,"PASS");
+            output=runtime.outputDirectoryForJob(id);archive=runtime.artifactArchivePath(id);jobDirectory=archive.getParent();
+            for(int index=0;index<3;index++)Files.writeString(output.resolve("chunk-"+index+".log"),"business="+index+"\n"+"x".repeat(4096));
+            runtime.store.artifactRecoveryNeeded(id,true);
+        }
+
+        Path entered=temp.resolve("zip-entry-written.txt");
+        String classpath=System.getProperty("surefire.test.class.path",System.getProperty("java.class.path"));
+        Path javaBin=Path.of(System.getProperty("java.home"),"bin",System.getProperty("os.name","").toLowerCase().contains("win")?"java.exe":"java");
+        Process writer=new ProcessBuilder(javaBin.toString(),"-cp",classpath,ArtifactArchiveCrashWriter.class.getName(),
+                output.toString(),archive.toString(),entered.toString()).start();
+        try {
+            long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(15);
+            while(!Files.exists(entered)&&System.nanoTime()<deadline&&writer.isAlive())Thread.sleep(10);
+            assertTrue(Files.exists(entered),"Child must finish an entry write and block before ZIP finalization");
+            Path zipTemp;
+            try(var files=Files.list(jobDirectory)) {
+                zipTemp=files.filter(path->path.getFileName().toString().startsWith(".artifact-")
+                        &&path.getFileName().toString().endsWith(".zip.tmp")).findFirst().orElseThrow();
+            }
+            assertTrue(Files.size(zipTemp)>0,"The killed child must leave a partially written ZIP");
+            assertTrue(writer.isAlive(),"Child must still be inside the open ZIP writer after the first entry");
+            Files.writeString(jobDirectory.resolve("archive-status.json"),"{\"state\":\"ARCHIVING\"}");
+            writer.destroyForcibly();assertTrue(writer.waitFor(5,TimeUnit.SECONDS));
+            assertTrue(Files.exists(zipTemp),"Crash leaves staging for restart reconciliation");
+        } finally {
+            if(writer.isAlive()){writer.destroyForcibly();writer.waitFor(5,TimeUnit.SECONDS);}
+        }
+
+        try(ServerRuntime restarted=new ServerRuntime(config,temp.resolve("libs").toString())) {
+            awaitState(restarted,id,"READY");
+            assertTrue(ArtifactArchive.verify(archive,true).containsKey("entries"));
+            assertFalse(Files.exists(output),"Only the recovered committed archive may replace private output");
+            try(var files=Files.list(jobDirectory)) {
+                assertTrue(files.noneMatch(path->{String name=path.getFileName().toString();return name.startsWith(".artifact-export-")
+                        ||name.startsWith(".artifact-")&&name.endsWith(".zip.tmp");}),"Restart must remove abandoned ZIP and spill files");
+            }
+            for(int index=0;index<3;index++) {
+                String entry="chunk-"+index+".log";
+                assertTrue(new String(restarted.archiveEntry(id,entry),java.nio.charset.StandardCharsets.UTF_8).contains("business="+index));
+            }
         }
     }
 

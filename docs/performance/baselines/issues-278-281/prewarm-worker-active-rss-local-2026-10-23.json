@@ -1,0 +1,157 @@
+{
+  "schemaVersion" : "att-execution-prewarm-resource-benchmark/v1",
+  "sourceRevision" : "092baa4-local-priority",
+  "environment" : {
+    "processors" : 8,
+    "os" : "Mac OS X 26.1",
+    "maxHeapBytes" : 2147483648,
+    "javaVersion" : "26.0.1",
+    "javaVm" : "OpenJDK 64-Bit Server VM",
+    "architecture" : "aarch64"
+  },
+  "settings" : {
+    "idleSampleCount" : 9,
+    "poolSizes" : [ 1, 2, 4 ],
+    "workerHeapMaxMb" : 128,
+    "idleSamplingIntervalMs" : 250,
+    "scope" : "idle RSS samples include only execution Worker JVMs; active samples measure one RUN Worker during its Tool action"
+  },
+  "scenarios" : [ {
+    "idlePoolSlots" : 1,
+    "readyWorkers" : 1,
+    "poolReadyMs" : 268.105875,
+    "workerHeapMaxMb" : 128,
+    "resources" : {
+      "scope" : "idle execution Worker processes only",
+      "workerCount" : 1,
+      "sampleCount" : 9,
+      "samplingIntervalMs" : 250,
+      "peakTotalResidentBytes" : 103481344,
+      "peakResidentBytesPerWorker" : [ 103481344 ],
+      "physicalIoAvailable" : false,
+      "kernelReadBytesDuringIdle" : 0,
+      "kernelWriteBytesDuringIdle" : 0,
+      "physicalIoSource" : "unavailable on this host"
+    }
+  }, {
+    "idlePoolSlots" : 2,
+    "readyWorkers" : 2,
+    "poolReadyMs" : 770.712666,
+    "workerHeapMaxMb" : 128,
+    "resources" : {
+      "scope" : "idle execution Worker processes only",
+      "workerCount" : 2,
+      "sampleCount" : 9,
+      "samplingIntervalMs" : 250,
+      "peakTotalResidentBytes" : 205488128,
+      "peakResidentBytesPerWorker" : [ 103251968, 102236160 ],
+      "physicalIoAvailable" : false,
+      "kernelReadBytesDuringIdle" : 0,
+      "kernelWriteBytesDuringIdle" : 0,
+      "physicalIoSource" : "unavailable on this host"
+    }
+  }, {
+    "idlePoolSlots" : 4,
+    "readyWorkers" : 4,
+    "poolReadyMs" : 1845.851667,
+    "workerHeapMaxMb" : 128,
+    "resources" : {
+      "scope" : "idle execution Worker processes only",
+      "workerCount" : 4,
+      "sampleCount" : 9,
+      "samplingIntervalMs" : 250,
+      "peakTotalResidentBytes" : 404979712,
+      "peakResidentBytesPerWorker" : [ 102416384, 97239040, 101367808, 103956480 ],
+      "physicalIoAvailable" : false,
+      "kernelReadBytesDuringIdle" : 0,
+      "kernelWriteBytesDuringIdle" : 0,
+      "physicalIoSource" : "unavailable on this host"
+    }
+  } ],
+  "activeRunScenarios" : [ {
+    "dispatch" : "cold",
+    "toolHoldMs" : 3000,
+    "status" : "PASS",
+    "workerMetricsPeakRssBytes" : null,
+    "workerProcessActivePeakRssBytes" : 112312320,
+    "workerProcessActiveSamples" : 8,
+    "scope" : "one execution Worker process sampled during a 3-second Tool action; excludes Server and Tool-child RSS",
+    "performance" : {
+      "workerDispatch" : "cold",
+      "timings" : {
+        "admissionMs" : 17.287625,
+        "queueWaitMs" : 0.12375,
+        "workerPreparationMs" : 9.184958,
+        "workerSpawnMs" : 2.428083,
+        "workerReadyMs" : 147.396042,
+        "executionReadyMs" : 214.288667,
+        "workerLifetimeMs" : 4011.521792,
+        "resultToTerminationMs" : 6.022708,
+        "firstMeaningfulEventMs" : 390.709125
+      },
+      "worker" : {
+        "sampling" : "event-triggered; at most one sample per 100 ms",
+        "sampleCount" : 3,
+        "heapUsedBytes" : 14673776,
+        "heapPeakUsedBytes" : 11528048,
+        "heapCommittedBytes" : 30408704,
+        "heapPeakCommittedBytes" : 30408704,
+        "heapMaxBytes" : 134217728,
+        "rssMetricsAvailable" : false,
+        "rssPeakBytes" : null,
+        "liveThreads" : 7,
+        "liveThreadsPeak" : 7,
+        "gcMetricsAvailable" : true,
+        "gcCollectionCount" : 3,
+        "gcCollectionTimeMs" : 5,
+        "processCpuSupported" : true,
+        "processCpuTimeMs" : 992,
+        "processCpuPercent" : 25.625429720003222
+      }
+    }
+  }, {
+    "dispatch" : "warm",
+    "toolHoldMs" : 3000,
+    "status" : "PASS",
+    "workerMetricsPeakRssBytes" : null,
+    "workerProcessActivePeakRssBytes" : 121962496,
+    "workerProcessActiveSamples" : 8,
+    "scope" : "one execution Worker process sampled during a 3-second Tool action; excludes Server and Tool-child RSS",
+    "performance" : {
+      "workerDispatch" : "warm",
+      "timings" : {
+        "admissionMs" : 1.870583,
+        "queueWaitMs" : 0.081875,
+        "workerPreparationMs" : 11.935792,
+        "workerSpawnMs" : 4.58E-4,
+        "workerReadyMs" : 6.506917,
+        "executionReadyMs" : 129.653958,
+        "workerLifetimeMs" : 3547.868083,
+        "resultToTerminationMs" : 4.378166,
+        "prewarmEligibilityMs" : 7.302333,
+        "prewarmLeaseMs" : 2.188708,
+        "prewarmBootstrapMs" : 246.021416,
+        "firstMeaningfulEventMs" : 150.049583
+      },
+      "worker" : {
+        "sampling" : "event-triggered; at most one sample per 100 ms",
+        "sampleCount" : 3,
+        "heapUsedBytes" : 15437464,
+        "heapPeakUsedBytes" : 13340312,
+        "heapCommittedBytes" : 31457280,
+        "heapPeakCommittedBytes" : 31457280,
+        "heapMaxBytes" : 134217728,
+        "rssMetricsAvailable" : false,
+        "rssPeakBytes" : null,
+        "liveThreads" : 7,
+        "liveThreadsPeak" : 7,
+        "gcMetricsAvailable" : true,
+        "gcCollectionCount" : 2,
+        "gcCollectionTimeMs" : 4,
+        "processCpuSupported" : true,
+        "processCpuTimeMs" : 1014,
+        "processCpuPercent" : 24.86699095438183
+      }
+    }
+  } ]
+}

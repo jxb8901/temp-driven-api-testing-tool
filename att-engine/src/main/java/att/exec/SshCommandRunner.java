@@ -106,7 +106,7 @@ public final class SshCommandRunner {
     }
 
     public static boolean localSshAvailable() {
-        String path = System.getenv("PATH");
+        String path = att.security.ExecutionEnvironment.get("PATH");
         if (path == null) return false;
         for (String directory : path.split(java.io.File.pathSeparator)) {
             if (directory.isEmpty()) continue;

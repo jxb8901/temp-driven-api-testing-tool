@@ -10,7 +10,7 @@ public final class RuntimeConfigPath {
     public static Path resolve(Path requested, Path packageRoot) {
         Path value = requested == null ? Paths.get("config/config.yaml") : requested;
         if (value.isAbsolute()) return value.toAbsolutePath().normalize();
-        String home = firstNonBlank(System.getProperty("att.home"), System.getenv("ATT_HOME"));
+        String home = firstNonBlank(System.getProperty("att.home"), att.security.ExecutionEnvironment.get("ATT_HOME"));
         Path root = home == null ? packageRoot : Paths.get(home);
         if (root == null) root = Paths.get("").toAbsolutePath();
         return root.toAbsolutePath().normalize().resolve(value).normalize();
@@ -45,7 +45,7 @@ public final class RuntimeConfigPath {
     }
 
     public static Path serverDefault(Path serverConfigFile) {
-        String home = firstNonBlank(System.getProperty("att.home"), System.getenv("ATT_HOME"));
+        String home = firstNonBlank(System.getProperty("att.home"), att.security.ExecutionEnvironment.get("ATT_HOME"));
         if (home != null) return Paths.get(home).toAbsolutePath().normalize().resolve("config/config.yaml");
         if (serverConfigFile != null) {
             Path path = serverConfigFile.toAbsolutePath().normalize();

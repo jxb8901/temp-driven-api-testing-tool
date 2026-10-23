@@ -59,6 +59,51 @@ class ServerRuntimeInspectionTest {
         } finally {runtime.close();}
     }
 
+    @Test void pagesTestdataRecordsThroughTheBoundedInspectorWorker() throws Exception {
+        Path allowed=Files.createDirectories(temp.resolve("testdata-inspection-packages"));
+        Path packageRoot=Files.createDirectories(allowed.resolve("p"));
+        Path descriptor=Files.createDirectories(packageRoot.resolve("testdata")).resolve("accounts.yaml");
+        Files.writeString(descriptor,"schemaVersion: att-testdata/v1.0\nid: accounts\nselection: {strategy: sequential}\nrecords:\n"
+                +"  - {accountId: A-1001, status: ACTIVE}\n  - {accountId: A-1002, status: CLOSED}\n");
+        Path runtimeConfig=Files.createDirectories(temp.resolve("testdata-inspection-runtime/config")).resolve("config.yaml");
+        Files.createDirectories(packageRoot.resolve("templates"));
+        Files.createDirectories(packageRoot.resolve("testcase"));
+        Files.writeString(runtimeConfig,"schemaVersion: att-config/v2.12\nenvironment: SIT\n"
+                +"environments:\n  SIT:\n    testdata: [testdata/accounts.yaml]\n"
+                +"testcase: {root: testcase}\ntemplates: {root: templates}\n");
+        Path javaBin=Path.of(System.getProperty("java.home"),"bin",
+                System.getProperty("os.name","").toLowerCase().contains("win")?"java.exe":"java");
+        Path configFile=temp.resolve("testdata-inspection-server.yaml");
+        Files.writeString(configFile,"server:\n  runtimeConfigPath: "+ServerRuntimeTestSupport.yaml(runtimeConfig)
+                +"\n  dataDir: "+ServerRuntimeTestSupport.yaml(temp.resolve("testdata-inspection-data"))
+                +"\n  javaExecutable: "+ServerRuntimeTestSupport.yaml(javaBin)
+                +"\n  inspection:\n    maxConcurrent: 1\n    queuedLimit: 2\n    timeoutMs: 30000\n    heapMaxMb: 256\nworkers: {}\npackages:\n  allowedRoots:\n    - "+ServerRuntimeTestSupport.yaml(allowed)
+                +"\n  entries:\n    p: "+ServerRuntimeTestSupport.yaml(packageRoot)+"\n");
+        Path libs=Files.createDirectory(temp.resolve("testdata-inspection-WEB-INF-lib"));
+        ServerRuntimeTestSupport.addModuleJar(libs,"att-worker",Path.of("att-worker/target/classes"));
+        ServerRuntimeTestSupport.addModuleJar(libs,"att-engine",Path.of("att-engine/target/classes"));
+        ServerRuntimeTestSupport.addModuleJar(libs,"att-server-api",Path.of("att-server-api/target/classes"));
+        ServerRuntimeTestSupport.addModuleJar(libs,"att-security",Path.of("att-security/target/classes"));
+        ServerRuntimeTestSupport.addWorkerClasspathJars(libs);
+        AtomicInteger inspectorStarts=new AtomicInteger();
+        ServerRuntime runtime=new ServerRuntime(ServerConfig.load(configFile),libs.toString(),builder->{
+            inspectorStarts.incrementAndGet();return builder.start();
+        });
+        try {
+            Map<String,Object> first=runtime.inspectTestdataRecords("p","accounts","SIT",0,1,false,"alice");
+            assertEquals(2,((Number)first.get("total")).intValue());assertEquals(1,first.get("nextOffset"));
+            @SuppressWarnings("unchecked") List<Map<String,Object>> firstRecords=(List<Map<String,Object>>)first.get("records");
+            @SuppressWarnings("unchecked") Map<String,Object> firstValue=(Map<String,Object>)firstRecords.get(0).get("value");
+            assertEquals("A-1001",firstValue.get("accountId"));
+            Map<String,Object> second=runtime.inspectTestdataRecords("p","accounts","SIT",1,1,false,"alice");
+            @SuppressWarnings("unchecked") List<Map<String,Object>> secondRecords=(List<Map<String,Object>>)second.get("records");
+            @SuppressWarnings("unchecked") Map<String,Object> secondValue=(Map<String,Object>)secondRecords.get(0).get("value");
+            assertEquals("A-1002",secondValue.get("accountId"));
+            assertEquals(1,inspectorStarts.get(),"Testdata pages should reuse the bounded inspection Worker process");
+            assertFalse(first.toString().contains(packageRoot.toString()));
+        } finally {runtime.close();}
+    }
+
     @Test void returnsDeclaredEffectiveAndComparisonConfigurationThroughTheBoundedInspectorWorker() throws Exception {
         Path packageRoot=Path.of("").toRealPath().resolve("packages/default");
         Path javaBin=Path.of(System.getProperty("java.home"),"bin",System.getProperty("os.name"," ").toLowerCase().contains("win")?"java.exe":"java");
@@ -158,12 +203,9 @@ class ServerRuntimeInspectionTest {
             assertArrayEquals(originalSidecar,Files.readAllBytes(debugSidecar),"Draft creation must not modify the package sidecar");
 
             Files.writeString(debugSidecar,"schemaVersion: att-debug/v1.2\ninputs:\n  value: changed\n");
-            Map<String,Object> accepted=runtime.submitDebugDraft(ServerRuntime.JSON.readTree("{\"packageId\":\"p\",\"draftId\":\""+draftId+"\"}"),"alice");
-            String jobId=String.valueOf(accepted.get("jobId"));long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(25);
-            Map<String,Object> record=runtime.jobRecord(jobId);
-            while(!List.of("PASS","FAIL","ERROR","INVALID","CANCELLED").contains(record.get("status"))&&System.nanoTime()<deadline){Thread.sleep(20);record=runtime.jobRecord(jobId);}
-            assertEquals("INVALID",record.get("status"),String.valueOf(runtime.resultRecord(jobId)));
-            String events=runtime.events(jobId).after(0).toString();assertTrue(events.contains("ATT-SERVER-DRAFT-STALE"),events);
+            assertThrows(ServerRuntime.StaleDraftException.class,()->runtime.submitDebugDraft(
+                    ServerRuntime.JSON.readTree("{\"packageId\":\"p\",\"draftId\":\""+draftId+"\"}"),"alice"));
+            assertThrows(ServerRuntime.NotFoundException.class,()->runtime.getDebugDraft(draftId,"alice"));
             assertTrue(Files.exists(debugSidecar));
         } finally {runtime.close();}
     }

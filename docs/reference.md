@@ -1940,6 +1940,12 @@ Each path in global `dbhelpers` resolves from the package root and contains one 
 | `evidence` | defaults | `sql: full\|hash` defaults full; `parameters: values\|types\|masked` defaults values; optional `output: {format: json\|yaml\|xml\|text\|sqlplus, maxChars: 10000}` |
 | `pool` | defaults | `maxSize` defaults 20, `minIdle` defaults 0, `connectionTimeout` defaults 2s; `maxSize` 1–10000, `minIdle` cannot exceed `maxSize`, timeout is at least 250ms |
 
+For LOAD's run-scoped connection provider, `scope: statement` returns the borrowed connection after each statement's transaction, result materialization, statement close and cancellation cleanup. A later DB Action borrows again. `statement/commit` uses JDBC auto-commit; `statement/rollback` rolls back before return. Query/update failures also release the statement-scoped connection after cleanup. No automatic SQL retry is added.
+
+`scope: case` retains its shared connection until Case finalization, including read-your-writes and rollback-only behavior. The defaults remain `case/rollback`. Direct RUN/DEBUG connections retain their existing lifecycle. Choose statement scope explicitly only when Actions are independent; changing from Case scope changes transaction semantics.
+
+LOAD `resources.db` metrics include per-helper aggregate `totalConnectionHoldMs`, `releasedConnections`, `totalStatementMs`, `statementCount`, `activePeak` and sampled `observedWaitingPeak`, alongside existing borrow count/wait/timeout metrics. Hold time starts after acquisition and ends after close; statement time excludes pool acquisition and includes result/resource cleanup. The sampled waiting peak can miss brief waits. These counters contain no SQL, parameters, URLs or credentials. `DB_POOL_TIMEOUT` still means acquisition failed before SQL execution; SQL and Tool Action timeouts remain separate budgets.
+
 Query result byte limits are accounted one row at a time; CLOB UTF-8 bytes are counted while reading chunks. This keeps limit enforcement linear in the returned data size.
 
 The root `id` must match `^[A-Za-z_][A-Za-z0-9_-]*$` and be package-unique ignoring case. `connection.isolation` is `driverDefault`, `readUncommitted`, `readCommitted`, `repeatableRead`, or `serializable`. Driver `properties` is a string-to-string map. Complete `${ENV:NAME}` values resolve while loading configuration; missing variables are errors. See [DBHelper](reference/resources/dbhelper.md) for Action, expression, result, security, and lifecycle behaviour.
