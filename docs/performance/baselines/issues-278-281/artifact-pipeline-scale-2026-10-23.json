@@ -4,7 +4,7 @@
   "os" : "Mac OS X 26.1 aarch64",
   "processors" : 8,
   "maxHeapBytes" : 2147483648,
-  "commit" : "c3c12eb8d14e2fb807c12d5001d5a784171456a2",
+  "commit" : "e787456285dca9974ad1e06f0dbe36ef79265a1b",
   "seed" : 280,
   "warmup" : 2,
   "measurements" : [ {
