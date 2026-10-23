@@ -175,6 +175,44 @@ class ArtifactArchiveTest {
         try(var paths=Files.list(archive.getParent())){assertEquals(0,paths.count());}
     }
 
+    @Test void interruptedSpillPublicationCleansStagingAndPreservesPriorArchive() throws Exception {
+        Path output=Files.createDirectory(temporary.resolve("interrupted-output"));
+        Files.writeString(output.resolve("a.log"),"original-a");Files.writeString(output.resolve("b.log"),"original-b");
+        Path archive=temporary.resolve("interrupted-job/artifacts.zip");
+        ArtifactArchive.build(output,archive,Files::readAllBytes);
+        byte[] priorArchive=Files.readAllBytes(archive);
+        Files.writeString(output.resolve("a.log"),"replacement-a");Files.writeString(output.resolve("b.log"),"replacement-b");
+
+        var publisherEntered=new java.util.concurrent.CountDownLatch(1);
+        var releasePublisher=new java.util.concurrent.CountDownLatch(1);
+        var failure=new java.util.concurrent.atomic.AtomicReference<Throwable>();
+        Thread writer=new Thread(()->{
+            try {
+                ArtifactArchive.build(output,archive,file->{
+                    if("b.log".equals(file.getFileName().toString())) {
+                        publisherEntered.countDown();releasePublisher.await();
+                    }
+                    return Files.readAllBytes(file);
+                },0);
+            } catch(Throwable error) { failure.set(error); }
+        },"artifact-interruption-fixture");
+        writer.start();
+        try {
+            assertTrue(publisherEntered.await(5,java.util.concurrent.TimeUnit.SECONDS),"Writer should reach the blocked second export after spilling the first");
+            writer.interrupt();writer.join(5000);
+            assertFalse(writer.isAlive(),"Interrupted archive writer should exit");
+        } finally {
+            releasePublisher.countDown();
+            if(writer.isAlive()) {writer.interrupt();writer.join(5000);}
+        }
+
+        assertTrue(failure.get() instanceof InterruptedException,"Interrupted publication should preserve its failure cause");
+        assertArrayEquals(priorArchive,Files.readAllBytes(archive),"Uncommitted ZIP must not replace the prior archive");
+        assertEquals("replacement-a",Files.readString(output.resolve("a.log")));
+        assertEquals("replacement-b",Files.readString(output.resolve("b.log")));
+        try(var paths=Files.list(archive.getParent())) { assertEquals(java.util.List.of(archive),paths.toList(),"ZIP and sanitized-export staging must both be removed"); }
+    }
+
     @Test void rejectsLinkAndSpecialFileAttributesEvenWithValidManifestAndDigests() throws Exception {
         Path good = simpleArchive();
         byte[] original = Files.readAllBytes(good);
