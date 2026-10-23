@@ -129,15 +129,30 @@ class ServerWarUiIT {
                     +"  hold: {type: tool, call: '#{hold()}'"+timeout+"}\n");
             Files.writeString(targetTemplate.resolve("debug.yaml"),"schemaVersion: att-debug/v1.2\ninputs: {}\n");
         }
+        Path loadDirectory=Files.createDirectories(pkg.resolve("load"));
+        Files.writeString(loadDirectory.resolve("smoke.yaml"),"schemaVersion: att-load/v1.6\nworkloads:\n"
+                +"  - id: one-shot-control\n    target: {type: template, id: PARITY}\n"
+                +"    load: {users: 1, duration: 1s}\n");
         Path holdScript=Files.createDirectories(pkg.resolve("tools")).resolve("hold.sh");
         Files.writeString(holdScript,"#!/bin/sh\nprintf '%s' \"$$\" > \"$ATT_ROOT_DIR/tools/child.pid\"\n"
                 +"touch \"$ATT_ROOT_DIR/tools/started\"\nexec sleep 60\n");
         holdScript.toFile().setExecutable(true);
+        Files.createDirectories(pkg.resolve("testcase"));
+        try(var book=new org.apache.poi.xssf.usermodel.XSSFWorkbook();var out=Files.newOutputStream(pkg.resolve("testcase/parity.xlsx"))) {
+            var sheet=book.createSheet("Cases");var header=sheet.createRow(0);header.createCell(0).setCellValue("ID");
+            header.createCell(1).setCellValue("Tags");header.createCell(2).setCellValue("Template");
+            var row=sheet.createRow(1);row.createCell(0).setCellValue("C1");row.createCell(1).setCellValue("smoke");
+            row.createCell(2).setCellValue("name: PARITY");book.write(out);
+        }
+        Files.writeString(pkg.resolve("testcase/parity.yaml"),"schemaVersion: att-sidecar/v2.2\\nid: parity\\nexcel:\\n"
+                +"  sheet: default=Cases\\n  caseId: ID\\n  tags: Tags\\nstages:\\n  - key: main\\n    template: Template\\n    required: true\\n");
         Files.writeString(home.resolve("config/config.yaml"),"schemaVersion: att-config/v2.12\nenvironment: SIT\n"
                 +"environments: {SIT: {}}\ntestcase: {root: testcase}\ntemplates: {root: templates}\n"
                 +"tools:\n  hold:\n    name: Hold\n    description: Packaged WAR lifecycle parity fixture\n"
                 +"    command: [./tools/hold.sh]\n    stdoutFormat: text\n    arguments: {}\n");
         copySchemas(pkg);
+        new att.api.DefaultAttService().snapshot(new att.api.SnapshotRequest(pkg,home.resolve("config/config.yaml"),
+                "SIT",List.of(Path.of("testcase/parity.xlsx")),null,Set.of(),false));
         Path users=Files.writeString(temp.resolve("parity-tomcat-users.xml"),
                 "<tomcat-users><role rolename=\"ATT_USER\"/><user username=\"att\" password=\"secret\" roles=\"ATT_USER\"/></tomcat-users>");
         String oldConfig=System.getProperty("att.server.config"),oldHome=System.getProperty("att.home");
@@ -200,8 +215,29 @@ class ServerWarUiIT {
                     "run","TIMEOUT",false,prewarm);
             PackagedExecutionCapture timedOutDebug=executePackagedInterruptedDraft(port,api,auth,origin,pkg,runtime,
                     "debug","TIMEOUT",false,prewarm);
+            long loadLease=prewarm?awaitPrewarmedPids(runtime).get(0):0L;
+            String loadDispatch=executePackagedOneShotControlJob(port,api,auth,origin,"load",
+                    Map.of("packageId","parity","scenario","load/smoke.yaml","environment","SIT"),"PASS");
+            assertEquals("cold",loadDispatch,"LOAD must stay on its cold one-shot path when prewarm is enabled");
+            if(prewarm)assertEquals(loadLease,awaitPrewarmedPids(runtime).get(0),"LOAD must leave the READY RUN/DEBUG Worker untouched");
+            long validateLease=prewarm?awaitPrewarmedPids(runtime).get(0):0L;
+            Files.deleteIfExists(pkg.resolve("tools/started"));
+            String validateDispatch=executePackagedOneShotControlJob(port,api,auth,origin,"validate",
+                    Map.of("packageId","parity","validationScope","package"),"PASS");
+            assertEquals("cold",validateDispatch,"Public Validate must retain its durable cold one-shot semantics");
+            assertFalse(Files.exists(pkg.resolve("tools/started")),"Public Validate must not invoke package Tools");
+            if(prewarm)assertEquals(validateLease,awaitPrewarmedPids(runtime).get(0),"Validate must leave the READY RUN/DEBUG Worker untouched");
             return new PackagedWarModeCapture(run,debug,failedRun,failedDebug,cancelledRun,cancelledDebug,timedOutRun,timedOutDebug);
         } finally {try{tomcat.stop();}finally{tomcat.destroy();}}
+    }
+
+    private String executePackagedOneShotControlJob(int port,String api,String auth,String origin,String command,
+                                                    Map<String,Object> request,String expectedStatus) throws Exception {
+        JsonNode accepted=apiJsonResponse(port,"POST",api+"/jobs/"+command,auth,origin,request,202);
+        String id=accepted.path("jobId").asText();
+        JsonNode job=awaitTerminalJobStatus(port,api+"/jobs/"+id,auth);
+        assertEquals(expectedStatus,job.path("status").asText(),command+" terminal result: "+getJson(port,api+"/jobs/"+id+"/result",auth));
+        return job.path("performance").path("workerDispatch").asText();
     }
 
     private PackagedExecutionCapture executePackagedDraft(int port,String api,String auth,String origin,
