@@ -17,7 +17,7 @@ import static org.junit.jupiter.api.Assumptions.assumeFalse;
 class ExecutionWorkerRuntimeLifecycleTest {
     @TempDir Path temp;
 
-    @Test void warmCancellationAndActionTimeoutStopWorkerTreesAndPublishTerminalArtifacts() throws Exception {
+    @Test void warmWorkerLifecycleStopsTreesAndPersistsUnverifiedQuarantine() throws Exception {
         assumeFalse(System.getProperty("os.name","").toLowerCase().contains("win"),"Uses a POSIX child Tool fixture");
         Path allowed=Files.createDirectories(temp.resolve("allowed"));
         Path pkg=Files.createDirectories(allowed.resolve("p"));
@@ -50,7 +50,9 @@ class ExecutionWorkerRuntimeLifecycleTest {
             ServerRuntimeTestSupport.addModuleJar(libs,module,Path.of(module+"/target/classes"));
         ServerRuntimeTestSupport.addWorkerClasspathJars(libs);
 
-        try(ServerRuntime runtime=new ServerRuntime(ServerConfig.load(serverConfig),libs.toString())) {
+        ServerConfig poolConfig=ServerConfig.load(serverConfig);
+        String quarantinedJobId;
+        try(ServerRuntime runtime=new ServerRuntime(poolConfig,libs.toString())) {
             runtime.store.createAuthUser("alice","Alice","unused","USER","csrf");
             awaitReadyWorkers(runtime,1,15);
             Job cancelled=submit(runtime,"HOLD");
@@ -80,6 +82,37 @@ class ExecutionWorkerRuntimeLifecycleTest {
                     &&!ProcessHandle.of(timeoutChild).map(ProcessHandle::isAlive).orElse(false),15);
             awaitArchive(runtime,timedOut.id);
             assertNotEquals(cancelledWorker,timeoutWorker,"A one-shot Worker PID cannot serve two Jobs");
+
+            awaitReadyWorkers(runtime,1,15);
+            Files.deleteIfExists(tools.resolve("started"));
+            Job uncertain=submit(runtime,"HOLD");
+            await(()->Files.exists(tools.resolve("started"))&&uncertain.workerPid!=null,20);
+            assertEquals("warm",uncertain.workerDispatch);
+            long uncertainWorker=uncertain.workerPid.longValue();
+            long uncertainChild=Long.parseLong(Files.readString(tools.resolve("child.pid")));
+            assertNotNull(uncertain.processFence);
+            uncertain.processFence.unverified();
+            assertEquals("CANCELLED",runtime.cancel(uncertain.id,"alice"));
+            await(()->!ProcessHandle.of(uncertainWorker).map(ProcessHandle::isAlive).orElse(false)
+                    &&!ProcessHandle.of(uncertainChild).map(ProcessHandle::isAlive).orElse(false),15);
+            long quarantineDeadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(10);
+            while(!runtime.store.workerQuarantined(uncertain.id)&&System.nanoTime()<quarantineDeadline) {
+                runtime.reconcileWorkerReleases();Thread.sleep(20);
+            }
+            assertTrue(runtime.store.workerQuarantined(uncertain.id),"Unverified warm cleanup must be durably quarantined");
+            while(!"worker_unverified".equals(runtime.artifactIndex(uncertain.id).get("reason"))
+                    &&System.nanoTime()<quarantineDeadline)Thread.sleep(20);
+            assertEquals("worker_unverified",runtime.artifactIndex(uncertain.id).get("reason"));
+            assertFalse(Files.exists(runtime.artifactArchivePath(uncertain.id)),"An unverified Worker cannot publish artifacts");
+            assertTrue(Files.isDirectory(runtime.outputDirectoryForJob(uncertain.id)),"Quarantine retains private evidence");
+            assertThrows(IllegalArgumentException.class,()->runtime.retryArtifactArchive(uncertain.id));
+            quarantinedJobId=uncertain.id;
+        }
+        try(ServerRuntime restarted=new ServerRuntime(poolConfig,libs.toString())) {
+            assertTrue(restarted.store.workerQuarantined(quarantinedJobId),"Warm-worker quarantine must survive Server restart");
+            assertEquals("worker_unverified",restarted.artifactIndex(quarantinedJobId).get("reason"));
+            assertFalse(Files.exists(restarted.artifactArchivePath(quarantinedJobId)));
+            assertTrue(Files.isDirectory(restarted.outputDirectoryForJob(quarantinedJobId)));
         }
     }
 
