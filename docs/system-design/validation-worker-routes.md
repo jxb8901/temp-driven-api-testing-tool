@@ -29,10 +29,10 @@ Implementation anchors: `att-web/frontend/src/api.ts`, `features/explorer/Explor
 The route inventory is backed by ServerRuntime boundary tests rather than a second dispatcher implementation:
 
 - Explorer resource list, detail, source and pagination reuse: `ServerRuntimeInspectionTest.listsPackageResourcesThroughTheBoundedInspectorWorkerAndSignsPaginationCursors`.
-- Declared/effective/compare configuration and testdata-record pagination: `ServerRuntimeInspectionTest.returnsDeclaredEffectiveAndComparisonConfigurationThroughTheBoundedInspectorWorker` and `ServerRuntimeInspectionTest.pagesTestdataRecordsThroughTheBoundedInspectorWorker`.
+- Declared/effective/compare configuration and testdata-record pagination: `ServerRuntimeInspectionTest.returnsDeclaredEffectiveAndComparisonConfigurationThroughTheBoundedInspectorWorker` and `ServerRuntimeInspectionTest.pagesTestdataRecordsThroughTheBoundedInspectorWorker`. The regression verifies bounded pagination and that successful pages reuse one Inspector process.
 - Debug form, normalized draft ownership, classified-default redaction and stale-source rejection: `ServerRuntimeInspectionTest.validatesDebugDraftsWithoutDisclosingDefaultsAndRejectsStalePrincipalBoundSubmissions`.
 - RUN selection and stale package revision: `ServerRuntimeUnifiedRunTest`.
-- Quick Load draft validation and stale revision: `ServerRuntimeQuickLoadTest`.
+- Quick Load draft validation and stale revision: `ServerRuntimeQuickLoadTest.quickLoadDraftOmitsDebugImportsAndRunsOnlyExplicitLoadTestdata`. A broken nested Flow produces validation diagnostics; Quick and Advanced Load draft validation reuse the Inspector and leave the package Tool invocation marker absent.
 - Advanced Load/catalog and schedule validation: `ServerRuntimeScheduleTest`.
 - Replay draft revalidation and durable one-shot Validate Job behavior: `ServerRuntimeJobReplayTest` and `ServerRuntimeTest`.
 - Public authenticated `POST /jobs/validate` integration: `AuthenticationIntegrationTest`.

@@ -118,6 +118,17 @@ class ServerRuntimeQuickLoadTest {
                             "target",Map.of("type","tool","id","echo","arguments",Map.of("value",Map.of("$attDebugKeepDefault","/arguments/value"))),
                             "inputs",Map.of("correlationId",Map.of("$attDebugKeepDefault","/inputs/correlationId")))));
             com.fasterxml.jackson.databind.node.ObjectNode advancedBody=ServerRuntime.JSON.createObjectNode();advancedBody.put("packageId","p");advancedBody.set("scenario",ServerRuntime.JSON.valueToTree(toolScenario));
+            Map<String,Object> brokenAdvancedScenario=Map.of("schemaVersion","att-load/v1.6","load",Map.of("users",1,"duration","1s"),
+                    "workloads",List.of(Map.of("id","broken-flow","load",Map.of("users",1),
+                            "target",Map.of("type","flow","id","broken.outer.v1"))));
+            com.fasterxml.jackson.databind.node.ObjectNode brokenAdvancedBody=advancedBody.deepCopy();
+            brokenAdvancedBody.set("scenario",ServerRuntime.JSON.valueToTree(brokenAdvancedScenario));
+            ServerRuntime.DraftValidationException brokenAdvancedError=assertThrows(ServerRuntime.DraftValidationException.class,
+                    ()->runtime.createAdvancedLoadDraft(brokenAdvancedBody,"alice"));
+            assertFalse(brokenAdvancedError.diagnostics.isEmpty());
+            assertTrue(brokenAdvancedError.diagnostics.toString().contains("missing.inner.v1"),brokenAdvancedError.diagnostics.toString());
+            assertEquals(1,inspectorStarts.get(),"Failed Advanced Load validation should stay on the existing Inspector");
+            assertFalse(Files.exists(toolInvocations),"A rejected Advanced Load draft must not invoke package Tools");
             Map<String,Object> advancedDraft;
             try { advancedDraft=runtime.createAdvancedLoadDraft(advancedBody,"alice"); }
             catch(ServerRuntime.DraftValidationException invalid) { throw new AssertionError(invalid.diagnostics.toString(),invalid); }
