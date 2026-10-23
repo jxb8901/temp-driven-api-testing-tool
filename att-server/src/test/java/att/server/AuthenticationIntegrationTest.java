@@ -823,9 +823,6 @@ class AuthenticationIntegrationTest {
                 connection.setConnectTimeout(3000);connection.setReadTimeout(30000);connection.setRequestProperty("Authorization",authorization);
                 connections.add(connection);
                 assertEquals(200,connection.getResponseCode());
-                // HTTP 200 can arrive before the asynchronous stream task subscribes.
-                // Earlier observers remain open while the next connection is registered.
-                awaitSseListeners(journal,connections.size());
                 eventReaders.add(readerPool.submit(()->{
                     try(var reader=new java.io.BufferedReader(new java.io.InputStreamReader(connection.getInputStream(),java.nio.charset.StandardCharsets.UTF_8))) {
                         String line;while((line=reader.readLine())!=null) {
@@ -834,6 +831,9 @@ class AuthenticationIntegrationTest {
                         return false;
                     }
                 }));
+                // HTTP 200 can arrive before the asynchronous stream task subscribes.
+                // Start draining immediately so each established stream remains active while the next connects.
+                awaitSseListeners(journal,connections.size());
             }
             append.invoke(journal,"progress",Map.of("message","live observer event"));
             assertTrue(liveEvents.await(10,TimeUnit.SECONDS),"Each concurrent observer should receive the live event");

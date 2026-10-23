@@ -4,6 +4,7 @@ import att.api.DefaultAttService;
 import att.api.SnapshotRequest;
 import att.api.SnapshotResult;
 import org.apache.catalina.Context;
+import org.apache.catalina.realm.MemoryRealm;
 import org.apache.catalina.startup.Tomcat;
 import org.apache.poi.ss.usermodel.Row;
 import org.apache.poi.ss.usermodel.Sheet;
@@ -121,6 +122,8 @@ class ServerWorkerSsePerformanceBenchmark {
             serverCommands.add(measureSingleCommand(server.port, "load", Map.of("packageId", PACKAGE_ID,
                     "runId", "server-bench-load", "scenario", "load/server-events.yaml")));
             report.put("eventHeavyCommands", serverCommands);
+            report.put("packageValidation", measureSingleCommand(server.port, "validate",
+                    Map.of("packageId", PACKAGE_ID, "validationScope", "package")));
 
             List<Map<String, Object>> replayScenarios = new ArrayList<>();
             for (int workerCount : concurrency) {
@@ -395,6 +398,7 @@ class ServerWorkerSsePerformanceBenchmark {
         HttpURLConnection connection = (HttpURLConnection) url.openConnection();
         connection.setConnectTimeout(5000);
         connection.setReadTimeout(DurationLimit.SSE_READ_SECONDS * 1000);
+        connection.setRequestProperty("Authorization", basicAuth("benchmark-user"));
         if (lastEventId != null) connection.setRequestProperty("Last-Event-ID", String.valueOf(lastEventId));
         long started = System.nanoTime();
         long bytes = 0L, events = 0L, firstId = -1L, lastId = -1L, firstEventNanos = 0L;
@@ -474,7 +478,14 @@ class ServerWorkerSsePerformanceBenchmark {
         HttpURLConnection connection = (HttpURLConnection) new URL("http://127.0.0.1:" + port + CONTEXT + path).openConnection();
         connection.setConnectTimeout(5000);
         connection.setReadTimeout(30000);
+        connection.setRequestProperty("Authorization", basicAuth(path.endsWith("/metrics")
+                ? "benchmark-admin" : "benchmark-user"));
         return connection;
+    }
+
+    private static String basicAuth(String user) {
+        return "Basic " + Base64.getEncoder().encodeToString((user + ":benchmark-password")
+                .getBytes(StandardCharsets.UTF_8));
     }
 
     private Object runtime(int port) throws Exception {
@@ -558,20 +569,28 @@ class ServerWorkerSsePerformanceBenchmark {
 
     private void writeServerConfig(Path path, Path runtimeConfig, Path dataDir, Path packages, Path packageRoot, int maxConcurrent) throws Exception {
         Files.writeString(path, "server:\n  runtimeConfigPath: " + runtimeConfig.toAbsolutePath() + "\n  dataDir: " + dataDir.toAbsolutePath() + "\n"
-                + "  authenticationRequired: false\n  maxEventsPerJob: 100000\n"
+                + "  authenticationRequired: true\n  maxEventsPerJob: 100000\n"
                 + "workers:\n  maxConcurrent: " + maxConcurrent + "\n  queuedLimit: 32\n  maxConcurrentLoad: 1\n"
                 + "packages:\n  allowedRoots:\n    - " + packages.toAbsolutePath() + "\n  entries:\n    benchmark: "
                 + packageRoot.toAbsolutePath() + "\n", StandardCharsets.UTF_8);
     }
 
     private ServerHandle startServer(Path explodedWar, Path baseDir) throws Exception {
+        Files.createDirectories(baseDir);
+        Path users = Files.writeString(baseDir.resolve("tomcat-users.xml"),
+                "<tomcat-users><role rolename=\"ATT_USER\"/><role rolename=\"ATT_ADMIN\"/>"
+                        + "<user username=\"benchmark-user\" password=\"benchmark-password\" roles=\"ATT_USER\"/>"
+                        + "<user username=\"benchmark-admin\" password=\"benchmark-password\" roles=\"ATT_ADMIN\"/></tomcat-users>",
+                StandardCharsets.UTF_8);
         Tomcat tomcat = new Tomcat();
         tomcat.setBaseDir(baseDir.toAbsolutePath().toString());
         tomcat.setPort(0);
         tomcat.getConnector();
+        MemoryRealm realm = new MemoryRealm();
+        realm.setPathname(users.toString());
+        tomcat.getEngine().setRealm(realm);
         Context context = tomcat.addWebapp(CONTEXT, explodedWar.toString());
         StandardJarScanFilter filter = new StandardJarScanFilter();
-        filter.setDefaultPluggabilityScan(false);
         filter.setDefaultTldScan(false);
         context.getJarScanner().setJarScanFilter(filter);
         tomcat.start();

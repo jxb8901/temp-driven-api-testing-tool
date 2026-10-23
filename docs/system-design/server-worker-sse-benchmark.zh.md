@@ -1,8 +1,8 @@
 # Server Worker 與 SSE 效能基準
 
-`ServerWorkerSsePerformanceBenchmark` 是可選的 ATT Server 端到端本機基準測試。它會在嵌入式 Tomcat 啟動已封裝的 WAR，透過 HTTP API 提交實際 Run、Debug 及 Load 工作，並記錄沒有 SSE 訂閱者、快速訂閱者及刻意放慢的訂閱者對 Worker 吞吐量的影響。測試亦會向已完成的工作追加合成 progress 事件，量度 SSE 重播、`Last-Event-ID` 恢復、慢速用戶端傳送，以及 Server 重啟後的重播。可選的持續工作 soak 測試預設關閉。
+`ServerWorkerSsePerformanceBenchmark` 是可選的 ATT Server 端到端本機基準測試。它會在嵌入式 Tomcat 啟動已封裝的 WAR，透過 HTTP API 提交實際 Run、Debug、Load 及 package scope Validate 工作，並記錄沒有 SSE 訂閱者、快速訂閱者及刻意放慢的訂閱者對 Worker 吞吐量的影響。測試亦會向已完成的工作追加合成 progress 事件，量度 SSE 重播、`Last-Event-ID` 恢復、慢速用戶端傳送，以及 Server 重啟後的重播。可選的持續工作 soak 測試預設關閉。
 
-JSON 報告包括 WAR SHA-256、JVM 和主機資料、每個工作及 Server 指標樣本、事件數量、磁碟日誌大小、事件追加時間和速率、SSE 回應位元組數、首個事件時間、重播速率及命令總時間。測試套件和追加事件均為合成資料；被測目標是本機 ATT Server，不是外部服務。測試不設定回歸門檻。比較時請使用同一部機器及同一 JDK，並保留原始 JSON 報告。
+JSON 報告包括 WAR SHA-256、JVM 和主機資料、每個工作及 Server 指標樣本、`packageValidation` 中的套件範圍驗證、事件數量、磁碟日誌大小、事件追加時間和速率、SSE 回應位元組數、首個事件時間、重播速率及命令總時間。`eventHeavyCommands` 仍只包含 Debug 和 Load 測量；`packageValidation` 會獨立記錄 `POST /api/v1/jobs/validate` 套件範圍工作。測試套件和追加事件均為合成資料；被測目標是本機 ATT Server，不是外部服務。測試不設定回歸門檻。比較時請使用同一部機器及同一 JDK，並保留原始 JSON 報告。
 
 ## 擷取基線
 
@@ -14,14 +14,15 @@ mvn -B -ntp -pl att-server -am -DskipTests package
 mvn -B -ntp -pl att-server -am \
   -Dtest=ServerWorkerSsePerformanceBenchmark \
   -Dsurefire.failIfNoSpecifiedTests=false \
+  -Datt.home=/path/to/att-local-4.0.1 \
   -Datt.server.benchmark.workerSse=true \
   -Datt.server.benchmark.workerSse.output=target/server-worker-sse.json \
   -Datt.server.war=att-server/target/att-server-4.0.1.war test
 ```
 
-預設每個 Run 工作執行 300 個測試案例；測試矩陣使用 1、4、8 個並行 Worker、一次預熱、兩次正式測量，並為主要重播工作追加 10,000 個合成事件。慢速 SSE 用戶端每個事件等待 1 毫秒。可使用 `att.server.benchmark.workerSse.cases`、`.workers`、`.warmups`、`.runs`、`.events` 及 `.slowReaderDelayMs` 調整設定。將 `.soakSeconds` 設為正數即可啟用可選 soak 測試；預設關閉。報告會記錄所有設定。
+預設每個 Run 工作執行 300 個測試案例；測試矩陣使用 1、4、8 個並行 Worker、一次預熱、兩次正式測量，並為主要重播工作追加 10,000 個合成事件。慢速 SSE 用戶端每個事件等待 1 毫秒。可使用 `att.server.benchmark.workerSse.cases`、`.workers`、`.warmups`、`.runs`、`.events` 及 `.slowDelayMs` 調整設定。將 `.soakSeconds` 設為正數即可啟用可選 soak 測試；預設關閉。報告會記錄所有設定。
 
-基準測試會綁定本機 loopback HTTP port，並使用指定 WAR 啟動本機 Worker。比較時請使用相同 ATT 版本及來源的已封裝 WAR。結果會受 JVM、硬件、檔案系統及主機負載影響；Server 指標峰值是抽樣值，可能錯過非常短暫的高峰。Load 使用產生的本機 Template 工作負載，並不量度外部被測系統。
+基準測試會綁定本機 loopback HTTP port，並使用指定 WAR 啟動本機 Worker。`att.home` 必須指向已解壓且版本相符的 ATT Local 發佈目錄，當中須有 `lib/att-local-<version>.jar`；預設來源目錄不會提供這個 Runtime classpath。比較時請使用相同 ATT 版本及來源的已封裝 WAR 和 Local 發佈目錄。結果會受 JVM、硬件、檔案系統及主機負載影響；Server 指標峰值是抽樣值，可能錯過非常短暫的高峰。Load 使用產生的本機 Template 工作負載，並不量度外部被測系統。
 
 ## 已記錄的 4.0.1 效能數據
 
