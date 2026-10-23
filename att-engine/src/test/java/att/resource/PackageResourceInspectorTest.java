@@ -37,7 +37,7 @@ class PackageResourceInspectorTest {
     @Test void prewarmCapabilityUsesEnvironmentSnapshotAndRechecksSourcesBeforeExecution() throws Exception {
         Path root=packageWithTemplate("prewarm-policy","PURE","description: Process-only package");
         Path config=root.resolve("config/config.yaml");
-        String original=Files.readString(config);
+        String original=new String(Files.readAllBytes(config),StandardCharsets.UTF_8);
         try(PackageResourceInspector inspector=new PackageResourceInspector(root,config,"SIT",Collections.<String>emptyList(),65536,262144,true)) {
             Map<String,Object> first=inspector.prewarmEligibility();
             assertEquals(true,first.get("eligible"));
