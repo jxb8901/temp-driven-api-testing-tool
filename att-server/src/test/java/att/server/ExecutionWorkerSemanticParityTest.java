@@ -73,6 +73,14 @@ class ExecutionWorkerSemanticParityTest {
         RunCapture coldDebugFailure=executeDebug(false,allowed,pkg,runtimeConfig,libs,"BAD","cold-debug-failure");
         RunCapture warmDebugFailure=executeDebug(true,allowed,pkg,runtimeConfig,libs,"BAD","warm-debug-failure");
         assertEquivalent("FAIL",coldDebugFailure,warmDebugFailure);
+
+        Path loadDirectory=Files.createDirectories(pkg.resolve("load"));
+        Files.writeString(loadDirectory.resolve("smoke.yaml"),"schemaVersion: att-load/v1.6\nworkloads:\n"
+                +"  - id: one-shot-control\n    target: {type: template, id: SIMPLE}\n"
+                +"    load: {users: 1, duration: 1s}\n");
+        RunCapture load=executeLoadWithPrewarm(allowed,pkg,runtimeConfig,libs,"load-cold-control");
+        assertEquals("PASS",load.status,"The LOAD control should complete successfully with prewarming enabled");
+        assertEquals("cold",load.dispatch,"LOAD must keep the existing isolated cold one-shot path");
     }
 
     @Test void warmAndColdRunAndDebugCancellationAndToolTimeoutHaveEquivalentTerminalEvidence() throws Exception {
@@ -210,6 +218,26 @@ class ExecutionWorkerSemanticParityTest {
             Map<String,Object> draft=runtime.createDebugDraft(definition,"alice");
             Map<String,Object> accepted=runtime.submitDebugDraft(ServerRuntime.JSON.valueToTree(
                     Map.of("packageId","p","draftId",draft.get("draftId"))),"alice");
+            String id=String.valueOf(accepted.get("jobId"));
+            Map<String,Object> result=ServerRuntimeTestSupport.awaitUnifiedJob(runtime,id);
+            awaitArchive(runtime,id,15);
+            return captureRun(runtime,id,result);
+        }
+    }
+
+    private RunCapture executeLoadWithPrewarm(Path allowed,Path pkg,Path runtimeConfig,Path libs,String name) throws Exception {
+        Path data=temp.resolve(name+"-data"),serverConfig=temp.resolve(name+"-server.yaml");
+        Files.writeString(serverConfig,"server:\n  runtimeConfigPath: "+ServerRuntimeTestSupport.yaml(runtimeConfig)+"\n"
+                +"  dataDir: "+ServerRuntimeTestSupport.yaml(data)+"\n  auth: {mode: local}\n"
+                +"  inspection: {enabled: true, maxConcurrent: 1, timeoutMs: 30000}\n"
+                +"workers:\n  maxConcurrent: 1\n  queuedLimit: 1\n  heapMaxMb: 128\n"
+                +"  executionPool: {enabled: true, minIdle: 1, maxIdle: 1, heapBudgetMb: 128, packageIds: [p]}\n"
+                +"packages:\n  allowedRoots: ["+ServerRuntimeTestSupport.yaml(allowed)+"]\n  entries:\n    p: "+ServerRuntimeTestSupport.yaml(pkg)+"\n");
+        try(ServerRuntime runtime=new ServerRuntime(ServerConfig.load(serverConfig),libs.toString())) {
+            runtime.store.createAuthUser("alice","Alice","unused","USER","csrf");
+            awaitReady(runtime,15);
+            Map<String,Object> accepted=runtime.submit("load",ServerRuntime.JSON.valueToTree(
+                    Map.of("packageId","p","scenario","load/smoke.yaml","environment","SIT")),"alice");
             String id=String.valueOf(accepted.get("jobId"));
             Map<String,Object> result=ServerRuntimeTestSupport.awaitUnifiedJob(runtime,id);
             awaitArchive(runtime,id,15);
