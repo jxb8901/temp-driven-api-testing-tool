@@ -17,7 +17,6 @@ class ArtifactPipelinePerformanceBenchmark {
         int samples=Integer.getInteger("att.archive.samples",20);
         assertTrue(samples>=5&&samples<=1000);
         List<Map<String,Object>> rows=new ArrayList<>();
-        long memoryBudget=Long.getLong("att.archive.memoryBytes",ArtifactArchive.MAX_MEMORY_EXPORT_BYTES);
         for(int files:new int[]{24,100,500,1000,2048}) {
             Path output=Files.createDirectories(temp.resolve("output-"+files));
             // Fixed incompressible-ish safe text, deterministic across revisions.
@@ -45,7 +44,7 @@ class ArtifactPipelinePerformanceBenchmark {
                         long start=System.nanoTime();
                         byte[] bytes=DiagnosticSanitizer.redactText(Files.readString(path)).getBytes(StandardCharsets.UTF_8);
                         publishNanos[0]+=System.nanoTime()-start;sanitizedBytes[0]+=bytes.length;return bytes;
-                    },memoryBudget);
+                    });
                 } finally {metrics.finish();ArtifactMetricsRecorder.CURRENT.remove();}
                 assertEquals(files+1,((List<?>)ArtifactArchive.verify(archive,true).get("entries")).size());
                 String text=new String(ArtifactArchive.read(archive,"load/run/samples/workload-0/0.log"),StandardCharsets.UTF_8);
@@ -74,11 +73,12 @@ class ArtifactPipelinePerformanceBenchmark {
             ArtifactMetricsRecorder.CURRENT.set(resourceMetrics);
             try {
                 ArtifactArchive.build(output,temp.resolve("resource-"+files+"/archive.zip"),path->
-                        DiagnosticSanitizer.redactText(Files.readString(path)).getBytes(StandardCharsets.UTF_8),memoryBudget);
+                        DiagnosticSanitizer.redactText(Files.readString(path)).getBytes(StandardCharsets.UTF_8));
             } finally {
                 resourceMetrics.finish();ArtifactMetricsRecorder.CURRENT.remove();resources.close();
             }
             row.put("resourceSample",resources.snapshot());
+            row.put("memoryBudgetPolicy","revision production default");
             row.put("ioVolume",Map.of("sourceBytes",resourceMetrics.value.sourceBytes,
                     "sanitizedBytesSpilled",resourceMetrics.value.temporaryExportBytes==null?0:resourceMetrics.value.temporaryExportBytes,
                     "sanitizedBytesReread",resourceMetrics.value.temporaryExportReadBytes==null?0:resourceMetrics.value.temporaryExportReadBytes,
@@ -92,12 +92,7 @@ class ArtifactPipelinePerformanceBenchmark {
         report.put("java",System.getProperty("java.runtime.version"));report.put("os",System.getProperty("os.name")+" "+System.getProperty("os.version")+" "+System.getProperty("os.arch"));
         report.put("processors",Runtime.getRuntime().availableProcessors());report.put("maxHeapBytes",Runtime.getRuntime().maxMemory());
         report.put("commit",System.getProperty("att.benchmark.commit","unspecified"));report.put("seed",280);report.put("warmup",2);report.put("measurements",rows);
-        report.put("memoryBudgetBytes",memoryBudget);
-        Path arrivalFixtureRoot = Path.of(System.getProperty("att.archive.arrivalFixtureDirectory",
-                "target/artifact-arrival-fixtures")).toAbsolutePath().normalize();
-        report.put("arrivalGenerationFixtures", ArtifactArrivalWorkloadFixtures.generate(
-                arrivalFixtureRoot,
-                Integer.getInteger("att.archive.arrivalFixtureSeconds",1)));
+        report.put("memoryBudgetPolicy","revision production default");
         Path destination=Path.of(System.getProperty("att.archive.output","target/artifact-pipeline-benchmark.json"));
         Files.createDirectories(destination.toAbsolutePath().getParent());
         ServerRuntime.JSON.writerWithDefaultPrettyPrinter().writeValue(destination.toFile(),report);
