@@ -815,7 +815,6 @@ class AuthenticationIntegrationTest {
         var append=journalType.getDeclaredMethod("append",String.class,Map.class);append.setAccessible(true);append.invoke(journal,"status",Map.of("jobId",id,"status","RUNNING"));
         List<HttpURLConnection> connections=new ArrayList<>();
         List<Future<Boolean>> eventReaders=new ArrayList<>();
-        var initialEvents=new java.util.concurrent.CountDownLatch(5);
         var liveEvents=new java.util.concurrent.CountDownLatch(5);
         var readerPool=Executors.newFixedThreadPool(5);
         try {
@@ -824,19 +823,18 @@ class AuthenticationIntegrationTest {
                 connection.setConnectTimeout(3000);connection.setReadTimeout(30000);connection.setRequestProperty("Authorization",authorization);
                 connections.add(connection);
                 assertEquals(200,connection.getResponseCode());
+                // HTTP 200 can arrive before the asynchronous stream task subscribes.
+                // Earlier observers remain open while the next connection is registered.
+                awaitSseListeners(journal,connections.size());
                 eventReaders.add(readerPool.submit(()->{
                     try(var reader=new java.io.BufferedReader(new java.io.InputStreamReader(connection.getInputStream(),java.nio.charset.StandardCharsets.UTF_8))) {
                         String line;while((line=reader.readLine())!=null) {
-                            // The retained status event is flushed only after the stream has
-                            // subscribed, so it gives the test an observable readiness signal.
-                            if("id: 1".equals(line))initialEvents.countDown();
                             if(line.contains("live observer event")){liveEvents.countDown();return true;}
                         }
                         return false;
                     }
                 }));
             }
-            assertTrue(initialEvents.await(10,TimeUnit.SECONDS),"Each SSE stream should deliver the retained event before the live event is appended");
             append.invoke(journal,"progress",Map.of("message","live observer event"));
             assertTrue(liveEvents.await(10,TimeUnit.SECONDS),"Each concurrent observer should receive the live event");
             for(Future<Boolean> eventReader:eventReaders)assertTrue(eventReader.get(),"Each concurrent observer should receive the live event");
@@ -844,6 +842,17 @@ class AuthenticationIntegrationTest {
             readerPool.shutdownNow();
             var finish=runtime.getClass().getDeclaredMethod("finish",jobType,String.class,int.class);finish.setAccessible(true);finish.invoke(runtime,job,"PASS",0);for(HttpURLConnection c:connections)c.disconnect();
         }
+    }
+    private static void awaitSseListeners(Object journal,int expected)throws Exception {
+        var listeners=journal.getClass().getDeclaredField("listeners");listeners.setAccessible(true);
+        long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(10);
+        int count=0;
+        do {
+            count=((java.util.Collection<?>)listeners.get(journal)).size();
+            if(count==expected)return;
+            Thread.sleep(10);
+        } while(System.nanoTime()<deadline);
+        assertEquals(expected,count,"All concurrent SSE streams should subscribe before the live event is appended");
     }
     private static Object field(Object target,String name)throws Exception {var field=target.getClass().getDeclaredField(name);field.setAccessible(true);return field.get(target);}
     private static void copySchemas(Path packageRoot)throws Exception {
