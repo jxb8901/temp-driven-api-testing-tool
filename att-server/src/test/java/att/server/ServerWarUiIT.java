@@ -144,8 +144,8 @@ class ServerWarUiIT {
             var row=sheet.createRow(1);row.createCell(0).setCellValue("C1");row.createCell(1).setCellValue("smoke");
             row.createCell(2).setCellValue("name: PARITY");book.write(out);
         }
-        Files.writeString(pkg.resolve("testcase/parity.yaml"),"schemaVersion: att-sidecar/v2.2\\nid: parity\\nexcel:\\n"
-                +"  sheet: default=Cases\\n  caseId: ID\\n  tags: Tags\\nstages:\\n  - key: main\\n    template: Template\\n    required: true\\n");
+        Files.writeString(pkg.resolve("testcase/parity.yaml"),"schemaVersion: att-sidecar/v2.2\nid: parity\nexcel:\n"
+                +"  sheet: default=Cases\n  caseId: ID\n  tags: Tags\nstages:\n  - key: main\n    template: Template\n    required: true\n");
         Files.writeString(home.resolve("config/config.yaml"),"schemaVersion: att-config/v2.12\nenvironment: SIT\n"
                 +"environments: {SIT: {}}\ntestcase: {root: testcase}\ntemplates: {root: templates}\n"
                 +"tools:\n  hold:\n    name: Hold\n    description: Packaged WAR lifecycle parity fixture\n"
