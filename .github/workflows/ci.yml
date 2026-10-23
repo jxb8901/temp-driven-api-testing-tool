@@ -211,7 +211,7 @@ jobs:
             att-web/frontend/package-lock.json
             tools/ui-acceptance/package-lock.json
 
-      - name: Install Playwright Chromium for ServerWarUiIT
+      - name: Install Playwright test dependencies
         working-directory: tools/ui-acceptance
         run: npm ci
 
@@ -221,9 +221,9 @@ jobs:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ hashFiles('tools/ui-acceptance/package-lock.json') }}-chromium
 
-      - name: Install Playwright Chromium for ServerWarUiIT
+      - name: Install Playwright Chromium
         working-directory: tools/ui-acceptance
-        run: npx playwright install --with-deps chromium
+        run: npx playwright install chromium
 
       - name: Verify documentation release gate
         run: python3 tools/verify_documentation.py
