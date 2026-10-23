@@ -134,8 +134,8 @@ public final class SshResourceExecutor {
         Instant started = Instant.now();
         SshCommandRunner.Execution execution;
         try {
-            execution = commandRunner.runRaw(target, connectDuration(helper, deadlineNanos),
-                    remainingDuration(deadlineNanos), command, projectRoot);
+            Duration timeout = remainingDuration(deadlineNanos);
+            execution = commandRunner.runRaw(target, connectDuration(helper, timeout), timeout, command, projectRoot);
         } catch (SshOperationException error) {
             throw error;
         } catch (IOException error) {
@@ -228,9 +228,11 @@ public final class SshResourceExecutor {
     private Map<String, Object> filesystem(SshHelperConfig helper, SshConfig target, String operation,
             Map<String, Object> input, long timeoutMs, long deadlineNanos, PermitLease lease) throws Exception {
         Instant started = Instant.now();
-        Map<String, Object> summary = transferWithDeadline(cancellation -> transferClient.filesystem(target,
-                operation, input, connectDuration(helper, deadlineNanos), remainingDuration(deadlineNanos),
-                projectRoot, cancellation), deadlineNanos, lease);
+        Map<String, Object> summary = transferWithDeadline(cancellation -> {
+            Duration timeout = remainingDuration(deadlineNanos);
+            return transferClient.filesystem(target, operation, input, connectDuration(helper, timeout), timeout,
+                    projectRoot, cancellation);
+        }, deadlineNanos, lease);
         Map<String, Object> evidence = commonEvidence(helper, target, operation, "sftp", started);
         for (String key : java.util.Arrays.asList("remotePath", "sourcePath", "targetPath", "overwrite", "missingOk"))
             if (input.containsKey(key)) evidence.put(key, redact(String.valueOf(input.get(key)), target));
@@ -255,8 +257,9 @@ public final class SshResourceExecutor {
         final byte[] represented = content;
         long bytes = transferWithDeadline(new TransferOperation<Long>() {
             @Override public Long call(SshTransferCancellation cancellation) throws Exception {
+                Duration timeout = remainingDuration(deadlineNanos);
                 return transferClient.upload(target, represented, remotePath, overwrite,
-                        connectDuration(helper, deadlineNanos), remainingDuration(deadlineNanos), projectRoot, cancellation);
+                        connectDuration(helper, timeout), timeout, projectRoot, cancellation);
             }
         }, deadlineNanos, lease).longValue();
         Map<String, Object> evidence = commonEvidence(helper, target, "upload", "sftp", started);
@@ -366,8 +369,7 @@ public final class SshResourceExecutor {
         return Duration.ofNanos(remaining);
     }
 
-    private Duration connectDuration(SshHelperConfig helper, long deadlineNanos) throws SshOperationException {
-        Duration remaining = remainingDuration(deadlineNanos);
+    private Duration connectDuration(SshHelperConfig helper, Duration remaining) {
         return remaining.compareTo(Duration.ofMillis(helper.connectTimeoutMs())) > 0
                 ? Duration.ofMillis(helper.connectTimeoutMs()) : remaining;
     }

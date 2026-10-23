@@ -193,14 +193,11 @@ jobs:
 
       - name: Verify assembled release
         # Java 8, frontend and Server unit tests have dedicated parallel jobs;
-        # ServerWarUiIT and all release/launcher checks still run here.
+        # the packaged-WAR API smoke and release/launcher checks still run here.
         env:
           ATT_CI_SKIP_COVERED_TESTS: "true"
           ATT_UI_SERVER_PLAYWRIGHT: "1"
         run: ./build.sh
-
-      - name: Verify same-JVM redeploy on Tomcat 11
-        run: mvn -B -ntp -Ptomcat-11 -pl att-server -am -Datt.skipJava8ModuleTests=true -Datt.skipFrontendUnitTests=true -Datt.skipServerUnitTests=true '-Dit.test=ServerWarUiIT#repeatedRedeployReleasesCompactorsAndJdbcWhilePreservingSchedulesAndJournals' verify
 
       - name: Upload Local and Server release packages
         uses: actions/upload-artifact@v4
@@ -222,6 +219,37 @@ jobs:
             att-cli/target/surefire-reports/
             att-worker/target/surefire-reports/
             att-server/target/surefire-reports/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  # Run the Tomcat 11 redeploy lifecycle in parallel with the full distribution
+  # build. It is a required regression, but does not need to extend that job's
+  # release-packaging critical path.
+  java-17-tomcat-11-redeploy:
+    name: Java 17 / Tomcat 11 redeploy lifecycle
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: maven
+
+      - name: Verify same-JVM redeploy lifecycle on Tomcat 11
+        run: mvn -B -ntp -Ptomcat-11 -pl att-server -am -Datt.skipJava8ModuleTests=true -Datt.skipFrontendUnitTests=true -Datt.skipServerUnitTests=true '-Dit.test=ServerWarUiIT#repeatedRedeployReleasesCompactorsAndJdbcWhilePreservingSchedulesAndJournals' verify
+
+      - name: Upload Tomcat 11 test reports on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: failsafe-reports-tomcat-11-${{ github.run_id }}
+          path: att-server/target/failsafe-reports/
           if-no-files-found: ignore
           retention-days: 7
 
