@@ -281,6 +281,7 @@ class ServerWorkerSsePerformanceBenchmark {
         Files.writeString(mixedConfig, "server:\n  runtimeConfigPath: " + ServerRuntimeTestSupport.yaml(runtimeConfig)
                 + "\n  dataDir: " + ServerRuntimeTestSupport.yaml(mixedData)
                 + "\n  authenticationRequired: true\n  maxEventsPerJob: 100000\n"
+                + "  inlineLoad: {enabled: true}\n"
                 + "  inspection: {enabled: true, maxConcurrent: 1, queuedLimit: 64, timeoutMs: 120000}\n"
                 + "workers:\n  maxConcurrent: 1\n  queuedLimit: 8\n  maxConcurrentLoad: 1\n"
                 + "packages:\n  allowedRoots: [" + ServerRuntimeTestSupport.yaml(packageRoots) + "]\n  entries:\n    " + PACKAGE_ID
@@ -384,6 +385,8 @@ class ServerWorkerSsePerformanceBenchmark {
             report.put("inspectorWorkerStartsTotal", startupsAfter);
             report.put("inspectorDispatchesDuringMixedSamples", inspectionCounter(runtime, "DISPATCH") - dispatchesBeforeMixed);
             report.put("httpRequestsAreReadOnlyOrDraftValidation", true);
+            report.put("additionalValidationRoutes", measureAdditionalValidationRoutes(mixedPort, runtime,
+                    warmups, runs, validationUsers));
             return report;
         } finally {
             validators.shutdownNow();
@@ -393,6 +396,88 @@ class ServerWorkerSsePerformanceBenchmark {
             else System.setProperty("att.server.config", oldConfig);
             if (oldHome == null) System.clearProperty("att.home");
             else System.setProperty("att.home", oldHome);
+        }
+    }
+
+    /** Measures the Quick Load and Advanced Load form/catalog/draft paths through the public WAR routes. */
+    private Map<String, Object> measureAdditionalValidationRoutes(int port, Object runtime,
+                                                                   int warmups, int runs, int validationUsers)
+            throws Exception {
+        List<String> routes = List.of("quickLoadForm", "quickLoadPolicy", "quickLoadDraft",
+                "advancedLoadTemplates", "advancedLoadDraft", "loadCatalog", "loadCatalogValidate");
+        Map<String, List<Double>> samples = new LinkedHashMap<>();
+        for (String route : routes) samples.put(route, new ArrayList<>());
+        Map<String, Object> targetPage = getJson(port,
+                "/api/v1/packages/" + PACKAGE_ID + "/resources?type=template&limit=50", "benchmark-user");
+        List<?> targetItems = targetPage.get("items") instanceof List<?> items ? items : List.of();
+        assertFalse(targetItems.isEmpty(), "The benchmark package must expose its template to Quick Load");
+        Object targetResourceId = ((Map<?, ?>) targetItems.get(0)).get("resourceId");
+        assertTrue(targetResourceId instanceof String && !String.valueOf(targetResourceId).isBlank(), targetItems.toString());
+        String templateResourceId = String.valueOf(targetResourceId);
+        int requestIndex = 0;
+        for (int index = 0; index < warmups; index++) {
+            for (String route : routes) invokeValidationRoute(port, route, templateResourceId,
+                    validationUser(requestIndex++, validationUsers));
+        }
+        long startsBefore = inspectionCounter(runtime, "STARTUP");
+        long dispatchesBefore = inspectionCounter(runtime, "DISPATCH");
+        for (int index = 0; index < runs; index++) {
+            for (String route : routes) {
+                long started = System.nanoTime();
+                invokeValidationRoute(port, route, templateResourceId, validationUser(requestIndex++, validationUsers));
+                samples.get(route).add(nanosToMs(System.nanoTime() - started));
+            }
+        }
+        Map<String, Object> summaries = new LinkedHashMap<>();
+        for (String route : routes) summaries.put(route, latencySummary(samples.get(route)));
+        long workerStarts = inspectionCounter(runtime, "STARTUP") - startsBefore;
+        long dispatches = inspectionCounter(runtime, "DISPATCH") - dispatchesBefore;
+        assertEquals(0L, workerStarts, "Validation and draft routes must not start Inspector workers");
+        assertEquals((long) runs * routes.size(), dispatches,
+                "Each measured validation route must be accounted for by one Inspector dispatch");
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("warmupsPerRoute", warmups);
+        result.put("measuredSamplesPerRoute", runs);
+        result.put("measurementScope", "public Quick Load and Advanced Load form, policy, template, catalog and draft routes");
+        result.put("latency", summaries);
+        result.put("inspectorWorkerStartsDuringMeasurements", workerStarts);
+        result.put("inspectorDispatchesDuringMeasurements", dispatches);
+        result.put("businessJobsSubmitted", false);
+        return result;
+    }
+
+    private void invokeValidationRoute(int port, String route, String templateResourceId, String user) throws Exception {
+        String root = "/api/v1/packages/" + PACKAGE_ID;
+        String encodedScenario = java.net.URLEncoder.encode("load/server-events.yaml", StandardCharsets.UTF_8);
+        switch (route) {
+            case "quickLoadForm" -> getJson(port, root + "/resources/template/BENCH_EVENT/quick-load-form"
+                    .replace("BENCH_EVENT", java.net.URLEncoder.encode(templateResourceId, StandardCharsets.UTF_8))
+                    + "?model=virtualUsers&environment=BENCHMARK", user);
+            case "quickLoadPolicy" -> getJson(port, root + "/load-policy?model=virtualUsers&environment=BENCHMARK", user);
+            case "quickLoadDraft" -> {
+                Map<String, Object> body = Map.of("packageId", PACKAGE_ID, "environment", "BENCHMARK",
+                        "target", Map.of("type", "template", "id", "BENCH_EVENT"), "model", "virtualUsers",
+                        "input", Map.of("inputs", Map.of(), "vars", Map.of()),
+                        "load", Map.of("users", 1, "duration", "1s"), "testdata", List.of());
+                Map<String, Object> draft = postJsonExpected(port, "/api/v1/drafts/quick-load", body, 201, user);
+                assertTrue(draft.get("draftId") instanceof String && !String.valueOf(draft.get("draftId")).isBlank(), draft.toString());
+            }
+            case "advancedLoadTemplates" -> getJson(port, root + "/load-templates?offset=0&limit=100", user);
+            case "advancedLoadDraft" -> {
+                Map<String, Object> scenario = Map.of("schemaVersion", "att-load/v1.6", "workloads",
+                        List.of(Map.of("id", "benchmark-inline", "target", Map.of("type", "template", "id", "BENCH_EVENT"),
+                                "load", Map.of("users", 1, "duration", "1s"))));
+                Map<String, Object> draft = postJsonExpected(port, "/api/v1/drafts/load",
+                        Map.of("packageId", PACKAGE_ID, "environment", "BENCHMARK", "scenario", scenario), 201, user);
+                assertTrue(draft.get("draftId") instanceof String && !String.valueOf(draft.get("draftId")).isBlank(), draft.toString());
+            }
+            case "loadCatalog" -> getJson(port, root + "/load-catalog?limit=100", user);
+            case "loadCatalogValidate" -> {
+                Map<String, Object> response = getJson(port, root + "/load-catalog/validate?resourceId="
+                        + encodedScenario + "&environment=BENCHMARK", user);
+                assertEquals("valid", response.get("validation"), response.toString());
+            }
+            default -> throw new IllegalArgumentException("Unknown validation route: " + route);
         }
     }
 
