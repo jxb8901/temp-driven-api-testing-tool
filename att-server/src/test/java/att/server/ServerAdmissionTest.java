@@ -44,6 +44,19 @@ class ServerAdmissionTest {
         } finally {allowLaunch.countDown();awaitJobs(runtime);runtime.close();}
     }
 
+    @Test void serverAdmissionCapsConcurrentLoadWorkersAtTheAggregatePreparationBudget() throws Exception {
+        org.junit.jupiter.api.Assumptions.assumeFalse(isWindows(),"Uses a POSIX test launcher");
+        int loadWorkers=4;
+        CountDownLatch launched=new CountDownLatch(loadWorkers),allowLaunch=new CountDownLatch(1);
+        ServerRuntime runtime=runtime("load-budget",8,8,loadWorkers,30,builder->{launched.countDown();await(allowLaunch);return builder.start();});
+        try {
+            for(int index=0;index<loadWorkers;index++)runtime.submit("load",request(),"ci");
+            assertTrue(launched.await(5,TimeUnit.SECONDS),"all four admitted LOAD Workers should start");
+            assertThrows(ServerRuntime.QueueFullException.class,()->runtime.submit("load",request(),"ci"),
+                    "a fifth LOAD must not exceed the 256-session Server preparation envelope");
+        } finally {allowLaunch.countDown();awaitJobs(runtime);runtime.close();}
+    }
+
     @Test void expiredTerminalJobsRemoveMetadataJournalAndArtifacts() throws Exception {
         ServerRuntime runtime=runtime("retention",1,1,1,1,ProcessBuilder::start);
         try {

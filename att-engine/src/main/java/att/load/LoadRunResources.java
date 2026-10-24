@@ -17,8 +17,9 @@ import java.nio.file.Files;
 
 /** Run-scoped owner for resources shared by load iterations. */
 public final class LoadRunResources implements AutoCloseable {
-    private static final int PREPARATION_PER_RUN_LIMIT = 64;
-    private static final java.util.concurrent.Semaphore PREPARATION_PROCESS_LIMIT = new java.util.concurrent.Semaphore(256, true);
+    private static final int PREPARATION_PER_RUN_LIMIT = LoadPreparationBudget.PER_RUN_CONNECTIONS;
+    private static final java.util.concurrent.Semaphore PREPARATION_PROCESS_LIMIT =
+            new java.util.concurrent.Semaphore(LoadPreparationBudget.WORKER_JVM_CONNECTIONS, true);
     private static final long PREPARATION_DEADLINE_MS = 30_000L;
     private static final java.util.concurrent.ThreadPoolExecutor PREPARATION_EXECUTOR = new java.util.concurrent.ThreadPoolExecutor(
             0, PREPARATION_PER_RUN_LIMIT, 30L, java.util.concurrent.TimeUnit.SECONDS,
@@ -28,13 +29,14 @@ public final class LoadRunResources implements AutoCloseable {
                 return thread;
             }, new java.util.concurrent.ThreadPoolExecutor.AbortPolicy());
     private static final java.util.concurrent.ThreadPoolExecutor PREPARATION_CLEANUP_EXECUTOR = new java.util.concurrent.ThreadPoolExecutor(
-            0, PREPARATION_PROCESS_LIMIT.availablePermits(), 30L, java.util.concurrent.TimeUnit.SECONDS,
+            0, LoadPreparationBudget.WORKER_JVM_CONNECTIONS, 30L, java.util.concurrent.TimeUnit.SECONDS,
             new java.util.concurrent.SynchronousQueue<Runnable>(), runnable -> {
                 Thread thread = new Thread(runnable, "att-load-resource-cleanup");
                 thread.setDaemon(true);
                 return thread;
             }, new java.util.concurrent.ThreadPoolExecutor.AbortPolicy());
     private final FrameworkConfig config;
+    private final java.util.concurrent.Semaphore preparationProcessBudget;
     private final long preparationDeadlineMs;
     private final DbHelperExecutor db;
     private final HikariDbConnectionProvider dbProvider;
@@ -76,8 +78,16 @@ public final class LoadRunResources implements AutoCloseable {
 
     /** Test seam for exercising the same overall readiness deadline with short, deterministic budgets. */
     LoadRunResources(Path projectRoot, FrameworkConfig config, MqTransport.Factory mqTransportFactory, long preparationDeadlineMs) {
+        this(projectRoot, config, mqTransportFactory, preparationDeadlineMs, PREPARATION_PROCESS_LIMIT);
+    }
+
+    /** Test seam for sharing a small preparation budget across overlapping runs. */
+    LoadRunResources(Path projectRoot, FrameworkConfig config, MqTransport.Factory mqTransportFactory,
+                     long preparationDeadlineMs, java.util.concurrent.Semaphore preparationProcessBudget) {
         if (preparationDeadlineMs < 1L) throw new IllegalArgumentException("LOAD preparation deadline must be positive");
+        if (preparationProcessBudget == null) throw new IllegalArgumentException("LOAD preparation budget is required");
         this.config = config;
+        this.preparationProcessBudget = preparationProcessBudget;
         this.preparationDeadlineMs = preparationDeadlineMs;
         this.dbProvider = new HikariDbConnectionProvider();
         this.db = new DbHelperExecutor(projectRoot, config, dbProvider);
@@ -162,7 +172,7 @@ public final class LoadRunResources implements AutoCloseable {
             if (required > PREPARATION_PER_RUN_LIMIT)
                 throw new IllegalStateException("LOAD_RESOURCE_PREPARATION_LIMIT: initial readiness exceeds the bounded per-run connection budget");
             long remainingNanos = operationDeadline - System.nanoTime();
-            if (remainingNanos <= 0L || !PREPARATION_PROCESS_LIMIT.tryAcquire(required, remainingNanos, java.util.concurrent.TimeUnit.NANOSECONDS))
+            if (remainingNanos <= 0L || !preparationProcessBudget.tryAcquire(required, remainingNanos, java.util.concurrent.TimeUnit.NANOSECONDS))
                 throw new java.util.concurrent.TimeoutException("LOAD_RESOURCE_PREPARATION_BUDGET_TIMEOUT");
             preparationPermits = required;
             for (att.config.DbHelperConfig helper : dbs.values()) {
@@ -237,7 +247,9 @@ public final class LoadRunResources implements AutoCloseable {
             }
             preparation.put("status", "RESOURCES_READY"); preparation.put("required", totalHelpers); preparation.put("prepared", totalHelpers);
             preparation.put("failed", 0); preparation.put("skippedDynamic", dynamicKinds.size()); preparation.put("initialConnections", required);
-            preparation.put("perRunConnectionBudget", PREPARATION_PER_RUN_LIMIT); preparation.put("processConnectionBudget", 256);
+            preparation.put("perRunConnectionBudget", PREPARATION_PER_RUN_LIMIT);
+            preparation.put("processConnectionBudget", LoadPreparationBudget.WORKER_JVM_CONNECTIONS);
+            preparation.put("processConnectionBudgetScope", "worker-jvm");
             checkPreparationDeadline(operationDeadline);
             preparation.put("preparationDeadlineMs", preparationDeadlineMs); preparation.put("parallelism", 1);
             preparation.put("discoveryMs", discoveryMs);
@@ -263,7 +275,8 @@ public final class LoadRunResources implements AutoCloseable {
             }
             preparation.put("prepared", prepared); preparation.put("failed", failed); preparation.put("skippedDynamic", skipped);
             preparation.put("initialConnections", required); preparation.put("perRunConnectionBudget", PREPARATION_PER_RUN_LIMIT);
-            preparation.put("processConnectionBudget", 256);
+            preparation.put("processConnectionBudget", LoadPreparationBudget.WORKER_JVM_CONNECTIONS);
+            preparation.put("processConnectionBudgetScope", "worker-jvm");
             preparation.put("preparationDeadlineMs", preparationDeadlineMs); preparation.put("parallelism", 1);
             preparation.put("discoveryMs", discoveryMs);
             preparation.put("preparationMs", java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started));
@@ -484,23 +497,21 @@ public final class LoadRunResources implements AutoCloseable {
     private void closeWithinPreparationDeadline(long deadline) {
         if (!beginClose()) return;
         java.util.concurrent.Future<?> cleanup;
-        try { cleanup = PREPARATION_CLEANUP_EXECUTOR.submit(this::closeOwnedResources); }
+        try { cleanup = PREPARATION_CLEANUP_EXECUTOR.submit(this::closeOwnedResourcesAndReleasePreparationBudget); }
         catch (java.util.concurrent.RejectedExecutionException saturated) {
-            closeOwnedResources();
+            closeOwnedResourcesAndReleasePreparationBudget();
             return;
         }
         boolean interrupted = Thread.interrupted();
         try {
             long remaining = deadline - System.nanoTime();
             if (remaining > 0L) cleanup.get(remaining, java.util.concurrent.TimeUnit.NANOSECONDS);
-            else cleanup.cancel(true);
         } catch (InterruptedException cancelled) {
-            cleanup.cancel(true);
             interrupted = true;
         } catch (java.util.concurrent.TimeoutException timedOut) {
-            cleanup.cancel(true);
+            // Cleanup continues in the background. Its budget remains charged until every owner closes.
         } catch (java.util.concurrent.ExecutionException ignored) {
-            // Cleanup is best-effort after the readiness failure; each resource owner closes independently.
+            // A failed close keeps the budget charged because teardown was not confirmed.
         } finally {
             if (interrupted) Thread.currentThread().interrupt();
         }
@@ -508,19 +519,33 @@ public final class LoadRunResources implements AutoCloseable {
 
     @Override public void close() {
         if (!beginClose()) return;
-        closeOwnedResources();
+        closeOwnedResourcesAndReleasePreparationBudget();
     }
 
     private boolean beginClose() {
-        if (!closed.compareAndSet(false, true)) return false;
-        if (preparationPermits > 0) {
-            PREPARATION_PROCESS_LIMIT.release(preparationPermits);
-            preparationPermits = 0;
+        return closed.compareAndSet(false, true);
+    }
+
+    private void closeOwnedResourcesAndReleasePreparationBudget() {
+        closeOwnedResources();
+        synchronized (this) {
+            if (preparationPermits > 0) {
+                preparationProcessBudget.release(preparationPermits);
+                preparationPermits = 0;
+            }
         }
-        return true;
     }
 
     private void closeOwnedResources() {
-        http.close(); mqFactory.close(); db.closeAll(); dbProvider.close();
+        Throwable failure = null;
+        for (Runnable close : new Runnable[] {http::close, mqFactory::close, db::closeAll, dbProvider::close}) {
+            try { close.run(); }
+            catch (RuntimeException | Error problem) {
+                if (failure == null) failure = problem;
+                else failure.addSuppressed(problem);
+            }
+        }
+        if (failure instanceof Error) throw (Error) failure;
+        if (failure instanceof RuntimeException) throw (RuntimeException) failure;
     }
 }

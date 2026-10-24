@@ -13,28 +13,41 @@ import java.util.Hashtable;
  * the ATT execution model and lets fake transports run without a Queue Manager.
  */
 public final class IbmMqClientFactory implements MqTransport.Factory {
-    private static final Object PREPARATION_TIMEOUT_LOCK = new Object();
+    private static final java.util.concurrent.locks.ReentrantReadWriteLock CONNECTION_TIMEOUT_LOCK =
+            new java.util.concurrent.locks.ReentrantReadWriteLock(true);
     private static final String TCP_CONNECT_TIMEOUT = "com.ibm.mq.cfg.TCP.Connect_Timeout";
     private static final String QMgr_NEGOTIATION_TIMEOUT = "com.ibm.mq.cfg.TCP.QmgrNegotiationFlowTimeout";
 
     @Override public MqTransport.Connection connect(MqHelperConfig config, long timeoutMs) throws Exception {
         if (timeoutMs < 1L) throw new java.util.concurrent.TimeoutException("LOAD_PREPARATION_TIMEOUT");
-        synchronized (PREPARATION_TIMEOUT_LOCK) {
+        java.util.concurrent.locks.Lock lock = CONNECTION_TIMEOUT_LOCK.writeLock();
+        lock.lockInterruptibly();
+        try {
             String previousConnect = System.getProperty(TCP_CONNECT_TIMEOUT);
             String previousNegotiation = System.getProperty(QMgr_NEGOTIATION_TIMEOUT);
             long seconds = Math.max(1L, (timeoutMs + 999L) / 1000L);
             try {
                 System.setProperty(TCP_CONNECT_TIMEOUT, boundedSeconds(previousConnect, seconds));
                 System.setProperty(QMgr_NEGOTIATION_TIMEOUT, boundedSeconds(previousNegotiation, seconds));
-                return connect(config);
+                return createConnection(config);
             } finally {
                 restoreProperty(TCP_CONNECT_TIMEOUT, previousConnect);
                 restoreProperty(QMgr_NEGOTIATION_TIMEOUT, previousNegotiation);
             }
+        } finally {
+            lock.unlock();
         }
     }
 
     @Override public MqTransport.Connection connect(MqHelperConfig config) throws Exception {
+        java.util.concurrent.locks.Lock lock = CONNECTION_TIMEOUT_LOCK.readLock();
+        lock.lockInterruptibly();
+        try { return createConnection(config); }
+        finally { lock.unlock(); }
+    }
+
+    /** Every MQ client creation through this adapter shares the timeout-property isolation lock. */
+    private MqTransport.Connection createConnection(MqHelperConfig config) throws Exception {
         try {
             Class<?> constants = Class.forName("com.ibm.mq.constants.MQConstants");
             Class<?> manager = Class.forName("com.ibm.mq.MQQueueManager");

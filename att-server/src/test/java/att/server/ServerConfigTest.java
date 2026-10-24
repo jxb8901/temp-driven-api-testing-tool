@@ -348,6 +348,21 @@ class ServerConfigTest {
         assertTrue(error.getMessage().contains("must not exceed workers.maxConcurrentLoad"));
     }
 
+    @Test void aggregateServerLoadPreparationCapCannotExceedFourWorkers() throws Exception {
+        Path allowed=Files.createDirectory(temp.resolve("load-budget-packages"));Path pkg=Files.createDirectory(allowed.resolve("p"));
+        Path java=Path.of(System.getProperty("java.home"),"bin",System.getProperty("os.name","").toLowerCase().contains("win")?"java.exe":"java");
+        Path file=temp.resolve("load-budget.yaml");
+        String head="server:\n  dataDir: "+yaml(temp.resolve("load-budget-data"))+"\n  javaExecutable: "+yaml(java)+"\n";
+        String tail="packages:\n  allowedRoots: ["+yaml(allowed)+"]\n  entries: {p: "+yaml(pkg)+"}\n";
+        Files.writeString(file,head+"workers:\n  maxConcurrent: 8\n  maxConcurrentLoad: 5\n"+tail);
+        IllegalArgumentException error=assertThrows(IllegalArgumentException.class,()->ServerConfig.load(file));
+        assertTrue(error.getMessage().contains("must not exceed 4"));
+
+        Files.writeString(file,head+"workers:\n  maxConcurrent: 4\n  maxConcurrentLoad: 8\n"+tail);
+        ServerConfig bounded=ServerConfig.load(file);
+        assertEquals(4,Math.min(bounded.maxConcurrent,bounded.maxConcurrentLoad));
+    }
+
     private static String yaml(Path path){return "'"+path.toAbsolutePath().toString().replace("'","''")+"'";}
 
     @Test void validatesAndLoadsBoundedWorkerHeapSettings() throws Exception {

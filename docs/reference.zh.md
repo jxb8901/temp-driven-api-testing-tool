@@ -1303,7 +1303,7 @@ Target 驗證及 Load plan preparation 完成後，ATT 只會發現所選 Templa
 
 每個被引用 DB helper 會建立足夠的不同實體 connection，至少同時有 `max(1, minIdle)` 個可用 session。原有 `minIdle`、`maxSize` 設定不變，pool 後續正常擴充仍採 lazy 模式。MQ readiness 會為配置的實體 instance 建立 idle connection，但不會開啟 queue、傳送 message 或執行 business request。HTTP readiness 只建立 client 及 TLS 設定，不會連線或發出 request。
 
-Preparation 每個 run 最多建立 64 個 initial session，整個 Engine process 最多 256 個，並受 deadline 及 cancellation 控制。失敗會在任何 iteration admitted 前停止 run，並關閉已準備的 resource。Live output 和 structured event 會顯示各 helper readiness；run summary 會記錄準備結果。此 barrier 只適用 LOAD；RUN 和 Debug 保留原有 lazy resource 行為，也不會取代已配置的 warm-up traffic。
+Preparation 每個 run 的 DB/MQ initial session 上限為 64 個，每個 Worker JVM 上限為 256 個，並受 deadline 及 cancellation 控制。ATT Server 每個 Server process 最多同時執行四個 LOAD Worker，因此由該 Server 提交的 LOAD 工作共用 256 個 initial session 的 aggregate 上限。Resource owner 完成 close 前，cleanup 會繼續計算其 reservation。此 scheduler 上限只涵蓋該 Server process 提交的 LOAD；RUN/Debug、CLI 或直接 Engine process，以及其他 Server instance 不在 admission budget 內，仍可能增加共用 backend 的 session。失敗會在任何 iteration admitted 前停止 run。Live output 和 structured event 會顯示各 helper readiness；run summary 會記錄準備結果。此 barrier 只適用 LOAD，也不會取代已配置的 warm-up traffic。
 
 #### 獨立 evidence 配額
 

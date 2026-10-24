@@ -4,17 +4,24 @@ import att.config.DbHelperConfig;
 import att.exec.DbConnectionProvider;
 import com.zaxxer.hikari.HikariConfig;
 import com.zaxxer.hikari.HikariDataSource;
+import com.zaxxer.hikari.util.DriverDataSource;
 
+import javax.sql.DataSource;
+import java.io.PrintWriter;
 import java.sql.Connection;
 import java.sql.SQLException;
+import java.sql.SQLFeatureNotSupportedException;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Properties;
+import java.util.logging.Logger;
 import java.util.concurrent.atomic.AtomicLong;
 
 /** Run/load-scoped HikariCP owner for one ATT DB helper. */
 public final class HikariDbPool implements AutoCloseable {
     private final String helperId;
     private final HikariDataSource dataSource;
+    private final PreparationDataSource connectionDataSource;
     private final int maxSize;
     private final int minIdle;
     private final long connectionTimeoutMs;
@@ -27,18 +34,28 @@ public final class HikariDbPool implements AutoCloseable {
     private final java.util.concurrent.atomic.AtomicInteger activePeak = new java.util.concurrent.atomic.AtomicInteger();
     private final java.util.concurrent.atomic.AtomicInteger waitingPeak = new java.util.concurrent.atomic.AtomicInteger();
     public HikariDbPool(DbHelperConfig config) {
-        this(config, config.poolConnectionTimeoutMs());
+        this(config, 0L);
     }
     public HikariDbPool(DbHelperConfig config, long preparationConnectTimeoutMs) {
         this.helperId = config.id();
+        Map<String, String> runtimeValues = new LinkedHashMap<String, String>(config.properties());
+        Map<String, String> preparationValues = new LinkedHashMap<String, String>(runtimeValues);
+        applyDriverConnectTimeout(config.url(), preparationValues, preparationConnectTimeoutMs);
+        Properties runtimeProperties = new Properties();
+        runtimeProperties.putAll(runtimeValues);
+        Properties preparationProperties = new Properties();
+        preparationProperties.putAll(preparationValues);
+        String driverClass = config.driverClass().isEmpty() ? null : config.driverClass();
+        DataSource runtimeDataSource = new DriverDataSource(config.url(), driverClass, runtimeProperties,
+                config.username(), config.password());
+        DataSource preparationDataSource = preparationConnectTimeoutMs > 0L
+                ? new DriverDataSource(config.url(), driverClass, preparationProperties, config.username(), config.password())
+                : runtimeDataSource;
+        this.connectionDataSource = new PreparationDataSource(preparationDataSource, runtimeDataSource);
         HikariConfig hikari = new HikariConfig();
         hikari.setPoolName("att-load-db-" + config.id());
-        hikari.setJdbcUrl(config.url()); hikari.setUsername(config.username()); hikari.setPassword(config.password());
+        hikari.setDataSource(connectionDataSource); hikari.setUsername(config.username()); hikari.setPassword(config.password());
         hikari.setMaximumPoolSize(config.poolMaxSize()); hikari.setMinimumIdle(config.poolMinIdle()); hikari.setConnectionTimeout(config.poolConnectionTimeoutMs());
-        if (!config.driverClass().isEmpty()) hikari.setDriverClassName(config.driverClass());
-        Map<String, String> properties = new LinkedHashMap<String, String>(config.properties());
-        applyDriverConnectTimeout(config.url(), properties, preparationConnectTimeoutMs);
-        for (Map.Entry<String, String> entry : properties.entrySet()) hikari.addDataSourceProperty(entry.getKey(), entry.getValue());
         this.dataSource = new HikariDataSource(hikari);
         this.maxSize = config.poolMaxSize(); this.minIdle = config.poolMinIdle(); this.connectionTimeoutMs = config.poolConnectionTimeoutMs();
     }
@@ -71,12 +88,16 @@ public final class HikariDbPool implements AutoCloseable {
                 if (!connection.isValid(seconds)) throw new SQLException("DB_PREPARATION_INVALID_CONNECTION");
             }
         } finally {
-            SQLException failure = null;
-            for (Connection connection : held) {
-                try { connection.close(); } catch (SQLException error) { failure = error; }
+            try {
+                SQLException failure = null;
+                for (Connection connection : held) {
+                    try { connection.close(); } catch (SQLException error) { failure = error; }
+                }
+                dataSource.getHikariConfigMXBean().setConnectionTimeout(originalTimeoutMs);
+                if (failure != null) throw failure;
+            } finally {
+                connectionDataSource.useRuntimeProperties();
             }
-            dataSource.getHikariConfigMXBean().setConnectionTimeout(originalTimeoutMs);
-            if (failure != null) throw failure;
         }
         int ready = idle();
         if (ready < target) throw new SQLException("DB_PREPARATION_IDLE_FLOOR_UNAVAILABLE");
@@ -157,4 +178,35 @@ public final class HikariDbPool implements AutoCloseable {
         return normalized.contains("connection is not available") && normalized.contains("timed out");
     }
     @Override public void close() { dataSource.close(); }
+
+    /** Uses bounded driver settings only until the initial readiness barrier completes. */
+    private static final class PreparationDataSource implements DataSource {
+        private final DataSource preparation;
+        private final DataSource runtime;
+        private volatile DataSource active;
+
+        private PreparationDataSource(DataSource preparation, DataSource runtime) {
+            this.preparation = preparation;
+            this.runtime = runtime;
+            this.active = preparation;
+        }
+
+        private void useRuntimeProperties() { active = runtime; }
+        @Override public Connection getConnection() throws SQLException { return active.getConnection(); }
+        @Override public Connection getConnection(String username, String password) throws SQLException {
+            return active.getConnection(username, password);
+        }
+        @Override public PrintWriter getLogWriter() throws SQLException { return active.getLogWriter(); }
+        @Override public void setLogWriter(PrintWriter out) throws SQLException { preparation.setLogWriter(out); runtime.setLogWriter(out); }
+        @Override public void setLoginTimeout(int seconds) throws SQLException { preparation.setLoginTimeout(seconds); runtime.setLoginTimeout(seconds); }
+        @Override public int getLoginTimeout() throws SQLException { return active.getLoginTimeout(); }
+        @Override public Logger getParentLogger() throws SQLFeatureNotSupportedException { return active.getParentLogger(); }
+        @Override public <T> T unwrap(Class<T> iface) throws SQLException {
+            if (iface.isInstance(this)) return iface.cast(this);
+            return active.unwrap(iface);
+        }
+        @Override public boolean isWrapperFor(Class<?> iface) throws SQLException {
+            return iface.isInstance(this) || active.isWrapperFor(iface);
+        }
+    }
 }

@@ -40,6 +40,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.logging.Logger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -76,6 +77,67 @@ class LoadDbPoolingTest {
                 assertEquals(0, pool.borrowCount());
             }
             assertEquals(driver.states.get(url).connections, driver.states.get(url).closes);
+        }
+    }
+
+    @Test
+    void readinessDriverTimeoutsAreTemporaryAndRuntimePoolGrowthKeepsConfiguredValues() throws Exception {
+        String url="jdbc:postgresql:att-load-timeout-properties";
+        Map<String,String> properties=new LinkedHashMap<String,String>();
+        properties.put("connectTimeout","30");properties.put("loginTimeout","40");
+        DbHelperConfig helper=new DbHelperConfig("timeout","timeout","DB",url,"user","secret","",
+                properties,false,"driverDefault",5,"case","rollback",10,1024,8192,"full","masked",
+                2,0,2000L,tempDir.resolve("timeout-db.yaml"));
+        try(HikariDbPool pool=new HikariDbPool(helper,1000L)) {
+            assertTrue(pool.prepareInitialReady(System.nanoTime()+TimeUnit.SECONDS.toNanos(5))>=1);
+            List<Map<String,String>> seen=driver.connectionProperties.get(url);
+            assertNotNull(seen);
+            assertEquals("1",seen.get(0).get("connectTimeout"));
+            assertEquals("1",seen.get(0).get("loginTimeout"));
+
+            Connection first=pool.borrow();
+            Connection second=pool.borrow();
+            try {
+                assertTrue(seen.size()>=2,"holding the ready lease should force a post-readiness physical pool connection");
+                assertEquals("30",seen.get(seen.size()-1).get("connectTimeout"));
+                assertEquals("40",seen.get(seen.size()-1).get("loginTimeout"));
+            } finally { second.close();first.close(); }
+        }
+    }
+
+    @Test
+    void preparationPermitsStayChargedUntilSlowResourceTeardownCompletes() throws Exception {
+        String url="jdbc:att-load:slow-resource-close";
+        DbHelperConfig helper=db("orders",url,2,500L,"rollback");
+        FrameworkConfig config=framework(helper);
+        LoadTarget target=target(project(),template(singleQuery()));
+        java.util.concurrent.Semaphore budget=new java.util.concurrent.Semaphore(1,true);
+        LoadRunResources first=new LoadRunResources(tempDir,config,new att.exec.IbmMqClientFactory(),5000L,budget);
+        new IterationExecutor(tempDir,config,target,first,tempDir.resolve("output-slow-close-first"));
+        first.prepareResources();
+        assertEquals(0,budget.availablePermits());
+
+        driver.blockCloseUrl=url;
+        driver.closeEntered=new CountDownLatch(1);
+        driver.releaseClose=new CountDownLatch(1);
+        ExecutorService closer=Executors.newSingleThreadExecutor();
+        LoadRunResources overlapping=new LoadRunResources(tempDir,config,new att.exec.IbmMqClientFactory(),150L,budget);
+        try {
+            Future<?> close=closer.submit(first::close);
+            assertTrue(driver.closeEntered.await(5,TimeUnit.SECONDS),"close must reach the physical DB session");
+            assertEquals(0,budget.availablePermits(),"the active teardown must retain its reservation");
+            new IterationExecutor(tempDir,config,target,overlapping,tempDir.resolve("output-slow-close-overlap"));
+            assertThrows(LoadResourcePreparationException.class,overlapping::prepareResources,
+                    "a new run must not acquire capacity while the old physical session is still open");
+            assertEquals(0,budget.availablePermits());
+
+            driver.releaseClose.countDown();
+            close.get(5,TimeUnit.SECONDS);
+            assertEquals(1,budget.availablePermits(),"the reservation is returned after teardown completes");
+        } finally {
+            driver.releaseClose.countDown();
+            closer.shutdownNow();
+            first.close();overlapping.close();
         }
     }
 
@@ -188,7 +250,11 @@ class LoadDbPoolingTest {
         assertTrue(driver.connectEntered.await(1L, TimeUnit.SECONDS), "the test must reach the blocking DB connect");
         assertTrue(driver.connectInterrupted, "closing the failed run must interrupt the in-flight JDBC connect");
         assertTrue(elapsedMs < 2_000L, "the overall preparation deadline should bound cancellation and cleanup: " + elapsedMs + " ms");
-        assertEquals(permitsBefore, LoadRunResources.availablePreparationPermits(), "preparation permits must be released on timeout");
+        long cleanupDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2L);
+        while (LoadRunResources.availablePreparationPermits() != permitsBefore && System.nanoTime() < cleanupDeadline)
+            Thread.sleep(10L);
+        assertEquals(permitsBefore, LoadRunResources.availablePreparationPermits(),
+                "preparation permits return after timeout cleanup finishes");
         assertTrue(events.stream().anyMatch(event -> "LOAD_PREPARATION_FAILED".equals(event.get("event"))), events.toString());
         assertTrue(events.stream().noneMatch(event -> "LOAD_RESOURCES_READY".equals(event.get("event"))), events.toString());
         assertTrue(events.stream().noneMatch(event -> "LOAD_START".equals(event.get("event"))), events.toString());
@@ -404,6 +470,7 @@ class LoadDbPoolingTest {
 
     private static final class FakeDriver implements Driver {
         final Map<String, FakeState> states = new LinkedHashMap<String, FakeState>();
+        final Map<String, List<Map<String, String>>> connectionProperties = new java.util.concurrent.ConcurrentHashMap<String, List<Map<String, String>>>();
         volatile boolean blockQueries;
         volatile String blockConnectUrl;
         volatile boolean connectInterrupted;
@@ -412,10 +479,16 @@ class LoadDbPoolingTest {
         final CountDownLatch queryFinished = new CountDownLatch(1);
         final CountDownLatch connectEntered = new CountDownLatch(1);
         final CountDownLatch releaseConnect = new CountDownLatch(1);
+        volatile String blockCloseUrl;
+        volatile CountDownLatch closeEntered = new CountDownLatch(1);
+        volatile CountDownLatch releaseClose = new CountDownLatch(1);
         volatile String failUrl;
 
         @Override public Connection connect(String url, Properties info) throws SQLException {
             if (!acceptsURL(url)) return null;
+            Map<String, String> snapshot=new LinkedHashMap<String, String>();
+            for(String key:new String[]{"connectTimeout","loginTimeout"})snapshot.put(key,info.getProperty(key));
+            connectionProperties.computeIfAbsent(url,ignored->new java.util.concurrent.CopyOnWriteArrayList<Map<String, String>>()).add(snapshot);
             if (url.equals(failUrl)) throw new SQLException("simulated connection refusal", "08001");
             if (url.equals(blockConnectUrl)) {
                 connectEntered.countDown();
@@ -440,7 +513,14 @@ class LoadDbPoolingTest {
                 if ("setReadOnly".equals(name) || "setTransactionIsolation".equals(name)) return null;
                 if ("commit".equals(name)) { captured.commits++; return null; }
                 if ("rollback".equals(name)) { captured.rollbacks++; return null; }
-                if ("close".equals(name)) { captured.closes++; captured.closed = true; return null; }
+                if ("close".equals(name)) {
+                    if(url.equals(blockCloseUrl)) {
+                        closeEntered.countDown();
+                        try { releaseClose.await(); }
+                        catch(InterruptedException interrupted) { Thread.currentThread().interrupt();throw new SQLException("simulated JDBC close interrupted",interrupted); }
+                    }
+                    captured.closes++; captured.closed = true; return null;
+                }
                 if ("isClosed".equals(name)) return captured.closed;
                 if ("isValid".equals(name)) return true;
                 return defaultValue(method.getReturnType());
@@ -491,7 +571,9 @@ class LoadDbPoolingTest {
             });
         }
 
-        @Override public boolean acceptsURL(String url) { return url != null && url.startsWith("jdbc:att-load:"); }
+        @Override public boolean acceptsURL(String url) {
+            return url != null && (url.startsWith("jdbc:att-load:")||url.startsWith("jdbc:postgresql:att-load-"));
+        }
         @Override public DriverPropertyInfo[] getPropertyInfo(String url, Properties info) { return new DriverPropertyInfo[0]; }
         @Override public int getMajorVersion() { return 1; }
         @Override public int getMinorVersion() { return 0; }

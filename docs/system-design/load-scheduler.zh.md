@@ -14,7 +14,7 @@ Coordinated scheduler 會等待 arrival/VU deadline、phase boundary、completio
 
 Coordinator 會先為每個 target 建立 immutable execution plan，並凍結可到達的 Render source，然後才呼叫 `LoadRunResources.prepareResources()`。Resource inventory 會沿 primary 和巢狀 Tool plan 追蹤靜態 helper call 及 frozen payload expression，不會開啟 global configuration 中所有 helper。Dynamic helper reference 會記錄為 skipped，並在首次使用時維持 lazy。
 
-Preparation 在 scheduler start event 前依序執行。DB pool 會保留不同且已驗證的 idle lease，數量至少為 `max(1, minIdle)`，不會執行 business SQL；MQ factory 建立 idle physical connection，但不開 queue 或傳送 message；HTTP preparation 建立 client/TLS state，不發 request。Run/process session budget 及單一 deadline 限制 startup。失敗會關閉本 run 已建立的 resource，並回傳 preparation error，不會 admission iteration。RUN/Debug 不呼叫此 LOAD barrier。
+Preparation 在 scheduler start event 前依序執行。DB pool 會保留不同且已驗證的 idle lease，數量至少為 `max(1, minIdle)`，不會執行 business SQL；MQ factory 建立 idle physical connection，但不開 queue 或傳送 message；HTTP preparation 建立 client/TLS state，不發 request。每個 run 的 DB/MQ initial session 上限為 64 個，每個 Worker JVM 上限為 256 個。Server 每個 Server process 最多同時執行四個 LOAD Worker，因此由 Server 提交的 LOAD preparation 跨 Worker 最多為 256 個 session。此 admission 上限不包括 RUN/Debug、CLI 或直接 Engine process，以及其他 Server instance。Deadline 限制 startup；resource owner 完成 close 前 cleanup 會保留 reservation。失敗會回傳 preparation error，不會 admission iteration。RUN/Debug 不呼叫此 LOAD barrier。
 
 ## Execution identity 與 artifact storage
 
