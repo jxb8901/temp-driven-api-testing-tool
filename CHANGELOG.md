@@ -1,5 +1,12 @@
 # Changelog
 
+# ATT 4.2.4 - 2026-10-24
+
+- Present target-first Jobs with complete Server-side filtering, grouping, pagination, compact row actions and page-scoped pin/deletion menus (#286).
+- Add reversible, audited pending deletion with background cleanup; expose LOAD schedule targets and planned rates, and full standalone Job Details.
+- Move complete historical Target indexing off startup, isolate malformed legacy metadata with transactional diagnostics, and keep explicit exact Job-ID lookup available during migration.
+- Use accessible Rerun/Schedule review modals; enforce grouped A–Z ordering and document measured indexing/search costs.
+
 # ATT 4.2.3 - 2026-10-22
 
 - Add a unified six-mode Load Template catalog, modal editors and shared CLI bindings; consolidate LOAD history under Jobs and results (#276).

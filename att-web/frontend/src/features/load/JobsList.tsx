@@ -109,7 +109,7 @@ export function JobsList({ api, onOpenJob, onSchedule, onEditSchedule, execution
       <label>Package<select aria-label="Package" value={packageId} onChange={update(setPackage)}><option value="">All packages</option>{[...new Set([...result.packageSuggestions,...(packageId?[packageId]:[])])].map(value => <option key={value}>{value}</option>)}</select></label>
       <label>Type<select aria-label="Type" value={type} onChange={event => {setType(event.currentTarget.value);setPage(0);onExecutionTypeChange?.(event.currentTarget.value==='load'?'load':undefined);}}><option value="">All types</option><option value="run">RUN / Debug</option><option value="load">LOAD</option><option value="validate">Validate</option></select></label>
       <label>Status<select aria-label="Status" value={status} onChange={update(setStatus)}><option value="">All statuses</option>{['QUEUED','PREPARING','RUNNING','CANCEL_REQUESTED',...terminalStatuses].map(value => <option key={value}>{value}</option>)}</select></label>
-      <label>Target or Job ID<input type="search" value={search} onChange={update(setSearch)} /></label>
+      <label>Target or Job ID<input type="search" title="Substring search; use job: followed by the full Job ID for exact lookup, including during target indexing" placeholder="Target, ID, or job:full-ID" value={search} onChange={update(setSearch)} /></label>
     </fieldset>
     <div className="att-jobs-filter-actions">
       <button type="button" disabled={busy} aria-expanded={moreFilters} aria-controls="jobs-more-filters" onClick={() => setMoreFilters(value => !value)}>More filters{extraFilters.length ? ` (${extraFilters.length})` : ''}</button>

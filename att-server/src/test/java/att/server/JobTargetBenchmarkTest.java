@@ -43,7 +43,7 @@ class JobTargetBenchmarkTest {
                 specs[kind]=new JobExecutionSpec(definition,"a".repeat(64),null).json();identities[kind]=ServerRuntime.JSON.writeValueAsString(JobListIdentity.from(definition));
             }
             long snapshotBytes=0;
-            try(var c=connect(config);var p=c.prepareStatement("INSERT INTO jobs(job_id,command,package_id,principal,status,created_at,att_version,request_summary,execution_spec,target_identity,target_sort,target_group,environment) VALUES(?,?,'p','alice','PASS','2026-10-23T00:00:00Z','4.2.3','{}',?,?,?,?,'SIT')")) {
+            try(var c=connect(config);var p=c.prepareStatement("INSERT INTO jobs(job_id,command,package_id,principal,status,created_at,att_version,request_summary,execution_spec,target_identity,target_sort,target_group,environment) VALUES(?,?,'p','alice','PASS','2026-10-23T00:00:00Z','4.2.4','{}',?,?,?,?,'SIT')")) {
                 c.setAutoCommit(false);
                 for(int i=0;i<size;i++) {int kind=i%100==0?1:i%100==1?2:0;
                     p.setString(1,String.format("J%016d",i));p.setString(2,kind==2?"load":"run");p.setString(3,specs[kind]);p.setString(4,identities[kind]);p.setString(5,"group-"+kind);p.setString(6,"group-"+kind);p.addBatch();snapshotBytes+=specs[kind].length();

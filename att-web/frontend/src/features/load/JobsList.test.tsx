@@ -111,3 +111,15 @@ it('clears stale results when target search is pending and allows an explicit re
   expect(host.querySelector('[role="alert"]')?.textContent).toBe(message);expect(host.querySelector('.att-job-target')).toBeNull();expect(host.textContent).not.toContain('No matching Jobs');
   await click(button('Refresh jobs'));await advance();expect(host.querySelector('[role="alert"]')).toBeNull();expect(host.querySelector('.att-job-target')).not.toBeNull();
 });
+
+it('can replace pending substring search with explicit exact Job ID without clearing other filters',async()=>{
+  sessionStorage.setItem('att.jobs.filters',JSON.stringify({search:'common',packageId:'p',status:'PASS'}));
+  const queryJobs=vi.fn(async(input)=>{if(input.search?.startsWith('job:'))return response();throw new Error('Historical target search is being prepared.');});
+  await render({queryJobs});expect(host.querySelector('[role="alert"]')).not.toBeNull();
+  const input=host.querySelector<HTMLInputElement>('input[type="search"]')!;
+  expect(input.title).toContain('job:');
+  await act(async()=>{Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!.call(input,`job:${job.jobId}`);input.dispatchEvent(new Event('input',{bubbles:true}));});
+  await advance();
+  expect(queryJobs).toHaveBeenLastCalledWith(expect.objectContaining({search:`job:${job.jobId}`,packageId:'p',status:'PASS',offset:0}));
+  expect(host.querySelector('[role="alert"]')).toBeNull();expect(host.querySelector('.att-job-target')).not.toBeNull();
+});

@@ -1,6 +1,6 @@
 # Unified RUN and schedules
 
-ATT 4.2.3 represents functional one-shot execution as **RUN**. A RUN executes a Case, Template, Flow, Tool, or a selected batch of Cases. **Debug** is an optional diagnostic mode of RUN. **LOAD** retains its performance engine, pacing controls and specialized reports.
+ATT 4.2.4 represents functional one-shot execution as **RUN**. A RUN executes a Case, Template, Flow, Tool, or a selected batch of Cases. **Debug** is an optional diagnostic mode of RUN. **LOAD** retains its performance engine, pacing controls and specialized reports.
 
 ## Validate and execute a RUN
 
@@ -85,7 +85,7 @@ Every active local `USER` or authenticated container principal in `server.author
 
 ## Migrate existing clients
 
-| Existing interface | Mapping in 4.2.3 |
+| Existing interface | Mapping in 4.2.4 |
 |---|---|
 | CLI `validate`, `run`, `report` | Existing validation, Case RUN and report commands remain valid |
 | CLI `--suite`, `--suite-dir`, `--case`, `--tag`, `--rerun-failed` | Existing selectors retain their behavior; Server batches use `selection` |
@@ -94,7 +94,7 @@ Every active local `USER` or authenticated container principal in `server.author
 | `/load-schedules`, legacy `jobType:load/debug` | Shared scheduler compatibility routes; existing definitions remain readable |
 | `/jobs/...`, saved Studio job/result links | Existing shared history, cancellation, events and results routes |
 
-No legacy endpoint is removed in 4.2.3. `GET /api/v1/version` advertises `unifiedRunVersion:att-execution/v1`. New Studio resource forms can fall back to legacy Debug drafts when an older Server lacks this capability. Unified Case/batch drafts require 4.2.3; use the existing Explorer Case action on older deployments. Deploy matching Server/Worker components together; older Workers do not implement resource RUN dispatch.
+No legacy endpoint is removed in 4.2.4. `GET /api/v1/version` advertises `unifiedRunVersion:att-execution/v1`. New Studio resource forms can fall back to legacy Debug drafts when an older Server lacks this capability. Unified Case/batch drafts require 4.2.4; use the existing Explorer Case action on older deployments. Deploy matching Server/Worker components together; older Workers do not implement resource RUN dispatch.
 
 Schedule persistence adds JSON fields in the existing H2 tables, leaving legacy LOAD rows unchanged. Before downgrade, stop scheduling, export new definitions, remove RUN/one-time definitions and restore the pre-upgrade database backup. An older scheduler must not interpret a new RUN definition as LOAD. Retained job artifacts remain separate from database metadata.
 

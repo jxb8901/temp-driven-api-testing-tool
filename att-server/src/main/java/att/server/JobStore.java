@@ -122,18 +122,33 @@ final class JobStore implements AutoCloseable {
             c.setAutoCommit(false);
             try {
                 List<String[]> batch=new ArrayList<>();
-                try(Statement statement=c.createStatement();ResultSet rows=statement.executeQuery("SELECT job_id,execution_spec,target_identity FROM jobs WHERE target_search_version=0 ORDER BY job_id LIMIT 100")) {
-                    while(rows.next())batch.add(new String[]{rows.getString(1),rows.getString(2),rows.getString(3)});
+                try(Statement statement=c.createStatement();ResultSet rows=statement.executeQuery("SELECT job_id,execution_spec,target_identity,package_id FROM jobs WHERE target_search_version=0 ORDER BY job_id LIMIT 100")) {
+                    while(rows.next())batch.add(new String[]{rows.getString(1),rows.getString(2),rows.getString(3),rows.getString(4)});
                 }
                 for(String[] row:batch) {
                     if(Thread.currentThread().isInterrupted())throw new InterruptedException("Target indexing stopped");
                     Set<Map<String,String>> targets=Set.of();
+                    boolean invalidSnapshot=false,invalidIdentity=false;
                     if(row[1]!=null) {
                         try {targets=JobListIdentity.searchTargets(JobExecutionSpec.parse(row[1]).definition());}
-                        catch(Exception invalid) { /* Legacy invalid snapshot: only known single identity is safe. */ }
+                        catch(com.fasterxml.jackson.core.JsonProcessingException | IllegalArgumentException invalid) {invalidSnapshot=true;}
                     }
-                    if(targets.isEmpty()&&row[2]!=null)targets=singleSearchTarget(ServerRuntime.JSON.readTree(row[2]));
+                    if(row[2]!=null) {
+                        try {
+                            var identity=ServerRuntime.JSON.readTree(row[2]);
+                            if(identity==null||!identity.isObject())invalidIdentity=true;
+                            else if(targets.isEmpty())targets=singleSearchTarget(identity);
+                        }
+                        catch(com.fasterxml.jackson.core.JsonProcessingException | IllegalArgumentException invalid) {invalidIdentity=true;}
+                    }
                     writeSearchTargets(c,row[0],targets);
+                    // Audit in the same transaction as targets/version; never log private CLOB content.
+                    // SQL/storage/interruption failures remain outside the per-Job parse catches.
+                    if(invalidSnapshot||invalidIdentity)try(PreparedStatement audit=c.prepareStatement("INSERT INTO audit(principal,action,job_id,package_id,created_at,outcome,detail) VALUES('system:target-index','JOB_TARGET_INDEX',?,?,?,?,?)")) {
+                        audit.setString(1,row[0]);audit.setString(2,row[3]);audit.setString(3,Instant.now().toString());
+                        audit.setString(4,targets.isEmpty()?"INVALID_METADATA_EMPTY":"INVALID_METADATA_FALLBACK");
+                        audit.setString(5,"invalidSnapshot="+invalidSnapshot+";invalidIdentity="+invalidIdentity);audit.executeUpdate();
+                    }
                 }
                 c.commit();return batch.size();
             } catch(Exception failure){c.rollback();throw failure;}
@@ -144,6 +159,7 @@ final class JobStore implements AutoCloseable {
         try(Statement s=c.createStatement();ResultSet r=s.executeQuery("SELECT 1 FROM jobs WHERE target_search_version=0 LIMIT 1")){return r.next();}
     }
     private static Set<Map<String,String>> singleSearchTarget(com.fasterxml.jackson.databind.JsonNode identity) {
+        if(identity==null||!identity.isObject()||!identity.path("type").isTextual()||!identity.path("id").isTextual())return Set.of();
         String type=identity.path("type").asText(),id=identity.path("id").asText();
         return Set.of("flow","template","tool","case").contains(type)&&!id.isBlank()&&id.length()<=512?Set.of(Map.of("type",type,"id",id)):Set.of();
     }
@@ -582,7 +598,9 @@ final class JobStore implements AutoCloseable {
                     bind(p,parameters);p.setInt(parameters.size()+1,query.limit);p.setInt(parameters.size()+2,query.offset);
                     try(ResultSet r=p.executeQuery()){while(r.next()) {
                         Map<String,Object> item=jobSummary(r);item.put("deletionState",r.getString(15));
-                        String identity=r.getString(16);if(identity!=null)item.put("targetIdentity",ServerRuntime.JSON.readValue(identity,Map.class));
+                        String identity=r.getString(16);
+                        if(identity!=null)try {item.put("targetIdentity",ServerRuntime.JSON.readValue(identity,Map.class));}
+                        catch(com.fasterxml.jackson.core.JsonProcessingException invalid) { /* Legacy malformed display metadata: retain Job-ID fallback. */ }
                         item.put("scheduled",r.getString(19)!=null||scheduledScheduleId(r.getString(4))!=null);
                         item.put("targetGroup",r.getString(17));item.put("environment",r.getString(18));items.add(item);
                     }}

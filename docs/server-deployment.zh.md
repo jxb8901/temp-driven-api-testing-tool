@@ -1,6 +1,6 @@
 # ATT Server 部署與 API
 
-ATT Server 4.2.3 提供單節點控制平面，讓用戶透過版本化 REST API 提交 ATT Run、Debug、Load 及 Validate 工作。請將 WAR 部署至使用 Java 17 或更新版本的外部 Tomcat 10.1+。CLI、Engine 及 Worker 仍相容 Java 8。
+ATT Server 4.2.4 提供單節點控制平面，讓用戶透過版本化 REST API 提交 ATT Run、Debug、Load 及 Validate 工作。請將 WAR 部署至使用 Java 17 或更新版本的外部 Tomcat 10.1+。CLI、Engine 及 Worker 仍相容 Java 8。
 
 ## 準備部署
 
@@ -8,9 +8,9 @@ ATT Server 4.2.3 提供單節點控制平面，讓用戶透過版本化 REST API
 2. 將 package root 設於 allowed root 之下，並確保 Tomcat 服務帳戶可讀取。解壓後的 `$ATT_HOME/packages/default` 可直接註冊為 package root。
 3. 啟動前先建立 `server.dataDir`，並只允許 Tomcat 服務帳戶寫入。範例使用 `$ATT_HOME/data`；只要它與所有已註冊 package root 不相等、互不包含，即可使用。亦可使用 `/var/lib/att-server`。Server data 不可放入 package 內容。
 4. 將 `$ATT_HOME/config/att-server.example.yaml` 複製至 `$ATT_HOME/config/att-server.yaml` 或受保護的外部路徑，更新絕對路徑，並勿將憑證放入 package。升級時不可覆寫既有的 active config。
-5. 將 `att-server-4.2.3.war` 部署至 Tomcat 10.1+。Tomcat 可直接部署 packed WAR；隔離的 Worker 會從 `$ATT_HOME/lib` 載入版本相符的 `att-local-4.2.3.jar`。
+5. 將 `att-server-4.2.4.war` 部署至 Tomcat 10.1+。Tomcat 可直接部署 packed WAR；隔離的 Worker 會從 `$ATT_HOME/lib` 載入版本相符的 `att-local-4.2.4.jar`。
 
-Local archive 解壓後的目錄就是共享安裝及部署根目錄 `ATT_HOME`。此目錄包含 launcher 及 `lib/att-local-4.2.3.jar` 中共用的 Worker/Engine runtime；升級或 rollback 時，必須同時部署版本相符的 Local archive 與 Server WAR。Startup 會驗證 Worker JAR 版本及內嵌 Schema Registry；每個 Worker 處理請求前也會確認 Registry identity 與 Server 驗證過的 runtime 相符。每個 `ATT_HOME/lib` 只保留一個有版本號的 `att-local-<version>.jar`。可執行的 package 內容位於 `packages/<id>/`；Server state 位於另外設定的 `server.dataDir`。Archive 只包含 `config/att-server.example.yaml` 範本，不會包含 active 的 `config/att-server.yaml` 或 `data/` 目錄。
+Local archive 解壓後的目錄就是共享安裝及部署根目錄 `ATT_HOME`。此目錄包含 launcher 及 `lib/att-local-4.2.4.jar` 中共用的 Worker/Engine runtime；升級或 rollback 時，必須同時部署版本相符的 Local archive 與 Server WAR。Startup 會驗證 Worker JAR 版本及內嵌 Schema Registry；每個 Worker 處理請求前也會確認 Registry identity 與 Server 驗證過的 runtime 相符。每個 `ATT_HOME/lib` 只保留一個有版本號的 `att-local-<version>.jar`。可執行的 package 內容位於 `packages/<id>/`；Server state 位於另外設定的 `server.dataDir`。Archive 只包含 `config/att-server.example.yaml` 範本，不會包含 active 的 `config/att-server.yaml` 或 `data/` 目錄。
 
 Server 依次尋找 JVM property `-Datt.server.config`、環境變數 `ATT_SERVER_CONFIG`，再尋找 `$ATT_HOME/config/att-server.yaml`。最後一個路徑的 `ATT_HOME` 先取自 `-Datt.home`，再取自 `ATT_HOME` 環境變數。若選定的 config 不存在、不可讀或無效，Server 會在診斷中指出其路徑並停止啟動，不會改用其他來源。沒有明確來源或可用的預設 config 時，啟動錯誤會提供設定指引。
 
@@ -531,7 +531,7 @@ Artifact 路徑必須相對於工作輸出目錄。絕對路徑、目錄 travers
 
 ## 發行與相容性
 
-Server binary 會以獨立的 `att-4.2.3-server.tar.gz` 發佈，內含 `server/att-server-4.2.3.war`（ATT application code 已合併至 `WEB-INF/lib/att-server-4.2.3.jar`）及部署指南。Local CLI 位於 `att-4.2.3-local.tar.gz`，其 `lib/att-local-4.2.3.jar` 提供共用 Worker/Engine runtime；Server 會載入相同版本的 library。Tomcat 提供 HTTP listener 及 Servlet API。Server 需要 Java 17；CLI、Engine 及 Worker 維持 Java 8 目標。
+Server binary 會以獨立的 `att-4.2.4-server.tar.gz` 發佈，內含 `server/att-server-4.2.4.war`（ATT application code 已合併至 `WEB-INF/lib/att-server-4.2.4.jar`）及部署指南。Local CLI 位於 `att-4.2.4-local.tar.gz`，其 `lib/att-local-4.2.4.jar` 提供共用 Worker/Engine runtime；Server 會載入相同版本的 library。Tomcat 提供 HTTP listener 及 Servlet API。Server 需要 Java 17；CLI、Engine 及 Worker 維持 Java 8 目標。
 
 ### Issue #176 rollout checklist
 
@@ -543,7 +543,7 @@ Server binary 會以獨立的 `att-4.2.3-server.tar.gz` 發佈，內含 `server/
 
 此清單說明部署步驟，不能取代 P6 的安全性、瀏覽器、相容性、WAR 封裝及 hosted CI 驗收證據。
 
-## 已發布 Live Output 限制（4.2.3）
+## 已發布 Live Output 限制（4.2.4）
 
 設定 `server.liveOutput.maxEntryChars`（整數 1–32000，預設 4000）及 `server.liveOutput.maxEntryLines`（整數 1–200，預設 40）：
 
@@ -565,7 +565,7 @@ Studio 保留最近 500 筆瀏覽器事件；瀏覽器歷史淘汰與 journal �
 
 以 `mvn -pl att-server -am -Dtest=JobEventsTest#concurrentExpandedEntriesKeepReplayBoundedAndReportMeasuredCost -Dsurefire.failIfNoSpecifiedTests=false test` 重現並行 journal／重播檢查：四個 Job 寫入共 800 筆擴大項目，重新開啟 journal，核對各自保留的 100 筆視窗與完整文字，並輸出經過毫秒數及保留的 journal bytes。WAR 整合測試另以 16000／100 政策核對 8000 字元診斷經 Worker → journal → SSE 重播，包含企圖覆寫限制的不可信 request。
 
-## Pinned evidence 與待處理 Job 刪除（4.2.3）
+## Pinned evidence 與待處理 Job 刪除（4.2.4）
 
 USER operator 可對 terminal RUN、Debug、LOAD Job 使用 Pin/Unpin 圖示；第一次點擊即持久化，不需要確認或填寫原因。Pin 保護整個 Job，阻止 age/size retention，自動到期機制不適用，且跨 restart 保留。API 的選填 `pinReason` 維持 200 字元上限及 secret redaction；受保護 bytes 仍計入 quota。
 
@@ -585,7 +585,7 @@ Jobs 以 Target 為主要連結，次行顯示 Package/Environment，並提供�
 標記回傳 `MARKED` 並保存 `DELETE_REQUESTED`；HTTP request 不會遞迴刪除檔案。只有 cleanup claim 前可以 `UNMARKED`。相同狀態回傳 `ALREADY_IN_STATE`；已 claim 為 `ALREADY_CLAIMED`，pinned 為 `PINNED_UNPIN_FIRST`，active 為 `NOT_TERMINAL` 或 `JOB_BUSY`，recovery/quarantine fence 為 `NOT_ELIGIBLE`。單筆拒絕回傳 HTTP 409 outcome map；bulk 回傳逐 ID 結果。Pending Job 可列出及存取；claim 後 endpoints 隱藏 Job，取消標記無法恢復 artifacts。不存在紀錄回傳 `ALREADY_UNAVAILABLE`。
 
 有界背景工作每五秒執行，至少保留 30 秒 pending grace period。Claim 以 conditional transition 將 `DELETE_REQUESTED` 改為 `DELETING`，重新檢查 pin、terminal state、Worker identity/descendant、recovery、quarantine 及 archive lifecycle lock。Startup 與定期 reconciliation 完成中斷的 `DELETING`，pending intent 跨 restart 保留。Filesystem cleanup 可重試，audit 保留 requesting actor。`DELETE /api/v1/jobs/{jobId}` 維持取消執行語意；Schedule history 與 package source 保留。刪除不立即壓縮 H2；災難復原仍需獨立備份。
-## 排程 package 變更及 runtime 關閉（4.2.3）
+## 排程 package 變更及 runtime 關閉（4.2.4）
 
 `server.scheduling.packageChangePolicy` 接受 `strict`（預設）、`pause` 或 `ignore`；未知值會阻止啟動。每個排程可透過 `packageChangePolicy` 覆寫；`null` 或未設定時沿用 Server 預設，舊有記錄亦然。Studio 選項為 **Default (Server)**、**Strict**、**Auto-pause** 及 **Revalidate latest**。
 

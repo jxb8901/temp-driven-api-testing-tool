@@ -6,7 +6,7 @@ import java.util.*;
 /** Validated SQL predicate inputs; no caller text is interpolated as SQL. */
 final class JobQuery {
     int offset,limit=100;
-    String principal,principalMode="all",actor,packageId,type,status,from,to,search,sort="newest",deletion="all";
+    String principal,principalMode="all",actor,packageId,type,status,from,to,search,exactJobId,sort="newest",deletion="all";
     boolean pinnedOnly,grouped;
     static JobQuery parse(Map<String,String> values,String actor) {
         JobQuery q=new JobQuery();q.actor=actor;
@@ -16,7 +16,13 @@ final class JobQuery {
         q.status=choice(values.get("status"),null,"QUEUED","PREPARING","RUNNING","CANCEL_REQUESTED","PASS","FAIL","ERROR","INVALID","CANCELLED");
         q.sort=choice(values.get("sort"),"newest","newest","oldest","target-asc","target-desc");
         q.deletion=choice(values.get("deletion"),"all","all","pending","unmarked");
-        q.search=bounded(values.get("search"),120);q.from=instant(values.get("from"));q.to=instant(values.get("to"));
+        q.search=bounded(values.get("search"),120);
+        if(q.search!=null&&q.search.startsWith("job:")) {
+            q.exactJobId=bounded(q.search.substring(4),80);
+            if(q.exactJobId==null)throw new IllegalArgumentException("Exact Job ID is required after job:");
+            q.search=null;
+        }
+        q.from=instant(values.get("from"));q.to=instant(values.get("to"));
         q.pinnedOnly="true".equals(choice(values.get("pinnedOnly"),"false","true","false"));
         q.grouped="target".equals(choice(values.get("groupBy"),null,"target"));return q;
     }
@@ -30,6 +36,7 @@ final class JobQuery {
         if(status!=null){sql.append(" AND status=?");parameters.add(status);}
         if(from!=null){sql.append(" AND CAST(created_at AS TIMESTAMP WITH TIME ZONE)>=CAST(? AS TIMESTAMP WITH TIME ZONE)");parameters.add(from);}
         if(to!=null){sql.append(" AND CAST(created_at AS TIMESTAMP WITH TIME ZONE)<=CAST(? AS TIMESTAMP WITH TIME ZONE)");parameters.add(to);}
+        if(exactJobId!=null){sql.append(" AND job_id=?");parameters.add(exactJobId);}
         if(search!=null){sql.append(" AND (LOCATE(LOWER(?),LOWER(target_sort))>0 OR LOCATE(LOWER(?),LOWER(job_id))>0 OR EXISTS (SELECT 1 FROM job_targets jt WHERE jt.job_id=jobs.job_id AND LOCATE(?,jt.target_id)>0))");parameters.add(search);parameters.add(search);parameters.add(search.toLowerCase(java.util.Locale.ROOT));}
         if(pinnedOnly)sql.append(" AND pinned=TRUE");
         if("pending".equals(deletion))sql.append(" AND retention_state='DELETE_REQUESTED'");
