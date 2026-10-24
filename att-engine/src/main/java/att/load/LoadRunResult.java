@@ -63,11 +63,31 @@ public final class LoadRunResult {
     public boolean multiWorkload() { return !workloads.isEmpty(); }
 
     public ResultStatus status() {
+        if (preparationFailed()) return ResultStatus.ERROR;
         if (runtimeErrorCount() > 0L) return ResultStatus.ERROR;
         for (LoadRunResult workload : workloads.values()) if (workload.status() == ResultStatus.ERROR) return ResultStatus.ERROR;
-        if (!thresholds.passed()) return ResultStatus.FAIL;
+        if ("NOT_MET".equals(thresholds.status())) return ResultStatus.FAIL;
         for (LoadRunResult workload : workloads.values()) if (workload.status() == ResultStatus.FAIL) return ResultStatus.FAIL;
         return ResultStatus.PASS;
+    }
+    /** Existing execution outcome, kept distinct from the configured performance verdict. */
+    public String executionStatus() {
+        if (preparationFailed()) return "ERROR";
+        if (runtimeErrorCount() > 0L) return "ERROR";
+        for (LoadRunResult workload : workloads.values()) if ("ERROR".equals(workload.executionStatus())) return "ERROR";
+        return "PASS";
+    }
+    public String performanceVerdict() {
+        if ("NOT_MET".equals(thresholds.status())) return "NOT_MET";
+        if ("MET".equals(thresholds.status())) return "MET";
+        boolean found = false;
+        for (LoadRunResult workload : workloads.values()) {
+            String verdict = workload.performanceVerdict();
+            if ("NOT_MET".equals(verdict)) return "NOT_MET";
+            if ("MET".equals(verdict)) found = true;
+            else if ("NOT_EVALUATED".equals(verdict)) return "NOT_EVALUATED";
+        }
+        return found ? "MET" : "NOT_EVALUATED";
     }
     public int exitCode() { return ResultAggregator.exitCode(status()); }
     public boolean passed() { return status() == ResultStatus.PASS; }
@@ -86,7 +106,8 @@ public final class LoadRunResult {
     public Map<String, Object> toMap() {
         Map<String, Object> result = new LinkedHashMap<String, Object>();
         result.put("schemaVersion", Version.LOAD_SUMMARY_SCHEMA);
-        result.put("status", status().name()); result.put("exitCode", exitCode());
+        result.put("status", status().name()); result.put("executionStatus", executionStatus());
+        result.put("performanceVerdict", performanceVerdict()); result.put("exitCode", exitCode());
         result.put("runId", runId); result.put("startedAt", startedAt.toString()); result.put("endedAt", endedAt.toString());
         result.put("durationMs", Math.max(0L, Duration.between(startedAt, endedAt).toMillis()));
         Map<String, Object> scenarioSummary = scenario.toSummaryMap();
@@ -106,6 +127,8 @@ public final class LoadRunResult {
             LoadRunResult value = entry.getValue();
             Map<String, Object> item = new LinkedHashMap<String, Object>();
             item.put("status", value.status().name());
+            item.put("executionStatus", value.executionStatus());
+            item.put("performanceVerdict", value.performanceVerdict());
             if (value.scenario().workload().mixed()) item.put("mix", value.resources().get("mix"));
             else {
                 Map<String, Object> target = new LinkedHashMap<String, Object>();
@@ -146,5 +169,9 @@ public final class LoadRunResult {
     private long runtimeErrorCount() {
         Object value = metrics.value("runtimeError");
         return value instanceof Number ? ((Number) value).longValue() : 0L;
+    }
+    private boolean preparationFailed() {
+        Object value = resources.get("preparation");
+        return value instanceof Map && "PREPARATION_FAILED".equals(((Map<?, ?>) value).get("status"));
     }
 }

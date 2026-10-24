@@ -80,7 +80,12 @@ public final class ClosedVuScheduler implements LoadScheduler {
             if (!(executor instanceof IterationExecutor)) throw new IllegalArgumentException("Multi-workload closed scheduling requires IterationExecutor");
             return LoadRunCoordinator.runFrom(scenario, (IterationExecutor) executor, runId, evidenceStore, evidenceOutputRoot);
         }
-        if (executor instanceof IterationExecutor) ((IterationExecutor) executor).initializeOutputNamespace(runId);
+        if (executor instanceof IterationExecutor) {
+            IterationExecutor loadExecutor = (IterationExecutor) executor;
+            loadExecutor.initializeOutputNamespace(runId);
+            loadExecutor.prepareResources(runId);
+            loadExecutor.markSchedulerStart(runId, LoadPhase.at(scenario, 0L).name(), scenario.model().wireName());
+        }
         final long startedAt = startGate == null ? timing.now() : startGate.awaitStart();
         final Instant start = LoadSchedulerSupport.instant(startedAt);
         final long runSeed = LoadRandomization.effectiveSeed(scenario, runId);
@@ -121,7 +126,7 @@ public final class ClosedVuScheduler implements LoadScheduler {
                 }
                 long now = timing.now();
                 long elapsed = now - startedAt;
-                metrics.recordSchedulerWakeup(runWorkers.getQueue().size());
+                metrics.recordSchedulerWakeupAt(now, runWorkers.getQueue().size());
                 int active = activeUsers(elapsed);
                 for (int scanned = 0; scanned < users.size(); scanned++) {
                     if (cancelled.get() || elapsed >= LoadPhase.totalMs(scenario) || inFlight >= workerCount) break;

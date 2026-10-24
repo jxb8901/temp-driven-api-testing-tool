@@ -38,8 +38,9 @@ class LoadFailureReportingTest {
         assertEquals(ResultStatus.ERROR,run.status());String html=new String(Files.readAllBytes(new LoadReportWriter().write(temp,run)),java.nio.charset.StandardCharsets.UTF_8);
         for(String label:Arrays.asList("SUT Fail %","Runtime Error %","Total Error %","Successful TPS","100.00%","SUT FAIL-only"))assertTrue(html.contains(label),label);
         assertTrue(html.contains("Thresholds: 2 passed / 1 failed / Execution: ERROR"));
-        assertTrue(html.contains("<strong>0.00%</strong>"),"overview SUT failure cell");
-        assertTrue(html.contains("<strong>100.00%</strong>"),"overview runtime/total error cells");
+        assertTrue(html.contains("<strong>0 (0.00%)</strong>"),"overview SUT failure card");
+        assertTrue(html.contains("<strong>100 (100.00%)</strong>"),"overview runtime and total error cards");
+        assertTrue(html.contains("<span class=\"muted\">Total ERROR</span>"),"overview total error card");
         assertTrue(html.contains("<b>runtime-only</b>"));
         assertTrue(html.contains("0.00%</span></td><td><span title=\"100 / 100 measured completions\">100.00%</span></td><td><span title=\"100 / 100 measured completions\">100.00%</span>"));
         assertTrue(html.contains("class=\"fail\">ERROR</td>"));

@@ -187,7 +187,7 @@ describe('ScheduledLoadPage', () => {
     const api = makeApi({ createSchedule: vi.fn(async () => { throw new ApiError('Draft unavailable', { status: 404, requestId: 'REQ-DRAFT' }); }) });
     const onCancel = vi.fn();
     const initialDraft = { packageId: 'payments', environment: 'SIT', draftId: `C${'a'.repeat(32)}`,
-      previewYaml: 'schemaVersion: att-load/v1.8\n', executionType: 'load' as const };
+      previewYaml: 'schemaVersion: att-load/v1.9\n', executionType: 'load' as const };
     await act(async () => root.render(<NavigationGuardContext.Provider value={navigation}>
       <ScheduledLoadPage api={api} packages={packages} enabled onOpenJob={vi.fn()} onCancel={onCancel} onSaved={vi.fn()}
         route={{ kind: 'schedules', view: 'new', intent: 'validated', returnTo: '#/advanced-load?package=payments' }} initialDraft={initialDraft} />
@@ -209,7 +209,7 @@ describe('ScheduledLoadPage', () => {
       <ScheduledLoadPage api={api} packages={packages} enabled onOpenJob={vi.fn()} onCancel={onCancel}
         route={{ kind: 'schedules', view: 'new', intent: 'validated', returnTo: '#/advanced-load' }}
         initialDraft={{ packageId: 'payments', environment: 'SIT', draftId: `C${'d'.repeat(32)}`,
-          previewYaml: 'schemaVersion: att-load/v1.8\n', expiresAt: new Date(Date.now() + 1000).toISOString() }} />
+          previewYaml: 'schemaVersion: att-load/v1.9\n', expiresAt: new Date(Date.now() + 1000).toISOString() }} />
     </NavigationGuardContext.Provider>));
     await advance(400);
     expect(host.textContent).toContain('Validated draft expires');

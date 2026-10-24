@@ -57,6 +57,125 @@ class LoadDbPoolingTest {
     }
 
     @Test
+    void preparationHoldsDistinctValidatedConnectionsWithoutBusinessSql() throws Exception {
+        for (int minimum : new int[] {0, 3}) {
+            String url = "jdbc:att-load:ready-" + minimum;
+            DbHelperConfig helper = new DbHelperConfig("orders", "orders", "DB", url, "user", "secret", "",
+                    Collections.<String, String>emptyMap(), false, "driverDefault", 5, "case", "rollback",
+                    10, 1024, 8192, "full", "masked", 5, minimum, 1000L, tempDir.resolve("db.yaml"));
+            try (HikariDbPool pool = new HikariDbPool(helper)) {
+                assertTrue(pool.prepareInitialReady() >= Math.max(1, minimum));
+                assertEquals(0, pool.active());
+                assertTrue(driver.states.get(url).connections >= Math.max(1, minimum));
+                assertEquals(0, driver.states.get(url).queryConnectionIds.size());
+                assertEquals(0, driver.states.get(url).commits);
+                assertEquals(0, driver.states.get(url).rollbacks);
+                assertEquals(minimum, pool.metrics().get("minIdle"));
+                assertEquals(5, pool.metrics().get("maxSize"));
+                // Business borrow telemetry must not include the readiness probe.
+                assertEquals(0, pool.borrowCount());
+            }
+            assertEquals(driver.states.get(url).connections, driver.states.get(url).closes);
+        }
+    }
+
+    @Test
+    void closedSchedulerEmitsNoIterationUntilDbReadinessAndLoadStart() throws Exception {
+        String url = "jdbc:att-load:barrier";
+        DbHelperConfig helper = new DbHelperConfig("orders", "orders", "DB", url, "user", "secret", "",
+                Collections.<String, String>emptyMap(), false, "driverDefault", 5, "case", "rollback",
+                10, 1024, 8192, "full", "masked", 5, 3, 1000L, tempDir.resolve("db.yaml"));
+        String unusedUrl = "jdbc:att-load:unused-helper";
+        FrameworkConfig config = framework(helper, db("unused", unusedUrl, 2, 500L, "rollback"));
+        LoadTarget target = target(project(), template(singleQuery()));
+        List<String> timeline = Collections.synchronizedList(new ArrayList<String>());
+
+        try (LoadRunResources resources = new LoadRunResources(tempDir, config)) {
+            resources.setPreparationObserver(event -> {
+                String name = String.valueOf(event.get("event"));
+                timeline.add(name);
+                if ("LOAD_RESOURCES_READY".equals(name)) {
+                    FakeState state = driver.states.get(url);
+                    assertTrue(state.connections >= 3, "minIdle sessions must be ready before the scheduler gate opens");
+                    assertEquals(0, state.queryConnectionIds.size(), "readiness must not issue business SQL");
+                    assertEquals(0, state.commits);
+                    assertEquals(0, state.rollbacks);
+                }
+            });
+            IterationExecutor executor = new IterationExecutor(tempDir, config, target, resources,
+                    tempDir.resolve("output-barrier"));
+            LoadScenario scenario = new LoadScenario(tempDir.resolve("scenario.yaml"), "template", "DB",
+                    Collections.<String, Object>emptyMap(), Collections.<String, Object>emptyMap(),
+                    LoadScenario.Model.CLOSED, 1, 0.0, null, java.time.Duration.ZERO, java.time.Duration.ZERO,
+                    java.time.Duration.ofMillis(100), java.time.Duration.ZERO, java.time.Duration.ZERO, 0, "",
+                    Collections.<String, Object>emptyMap(), Collections.<String, Object>emptyMap());
+            LoadEventListener listener = new LoadEventListener() {
+                @Override public void onEvent(LoadEvent event) { timeline.add("ITERATION_EVENT"); }
+            };
+
+            new ClosedVuScheduler(scenario, executor, "barrier-run", listener).run();
+
+            int ready = timeline.indexOf("LOAD_RESOURCES_READY");
+            int loadStart = timeline.indexOf("LOAD_START");
+            int firstIteration = timeline.indexOf("ITERATION_EVENT");
+            assertTrue(ready >= 0 && loadStart > ready && firstIteration > loadStart, timeline.toString());
+            assertTrue(driver.states.get(url).queryConnectionIds.size() > 0, "business SQL should run after readiness");
+            assertTrue(!driver.states.containsKey(unusedUrl), "unreferenced helpers must not be warmed");
+            assertEquals(3, resources.dbPool("orders").metrics().get("minIdle"));
+            assertEquals(5, resources.dbPool("orders").metrics().get("maxSize"));
+        }
+    }
+
+    @Test
+    void failedDbReadinessDoesNotReleaseSchedulerAndClosesResources() throws Exception {
+        String url = "jdbc:att-load:readiness-failure";
+        driver.failUrl = url;
+        DbHelperConfig helper = db("orders", url, 2, 500L, "rollback");
+        FrameworkConfig config = framework(helper);
+        LoadTarget target = target(project(), template(singleQuery()));
+        List<String> timeline = Collections.synchronizedList(new ArrayList<String>());
+
+        try (LoadRunResources resources = new LoadRunResources(tempDir, config)) {
+            resources.setPreparationObserver(event -> timeline.add(String.valueOf(event.get("event"))));
+            IterationExecutor executor = new IterationExecutor(tempDir, config, target, resources,
+                    tempDir.resolve("output-readiness-failure"));
+            LoadScenario scenario = new LoadScenario(tempDir.resolve("scenario-failure.yaml"), "template", "DB",
+                    Collections.<String, Object>emptyMap(), Collections.<String, Object>emptyMap(),
+                    LoadScenario.Model.CLOSED, 1, 0.0, null, java.time.Duration.ZERO, java.time.Duration.ZERO,
+                    java.time.Duration.ofMillis(100), java.time.Duration.ZERO, java.time.Duration.ZERO, 0, "",
+                    Collections.<String, Object>emptyMap(), Collections.<String, Object>emptyMap());
+            ClosedVuScheduler scheduler = new ClosedVuScheduler(scenario, executor, "readiness-failure-run",
+                    (LoadEventListener) event -> timeline.add("ITERATION_EVENT"));
+
+            assertThrows(LoadResourcePreparationException.class, scheduler::run);
+            assertTrue(resources.isClosed());
+            assertTrue(timeline.contains("LOAD_PREPARATION_FAILED"), timeline.toString());
+            assertTrue(!timeline.contains("LOAD_START"), timeline.toString());
+            assertTrue(!timeline.contains("ITERATION_EVENT"), timeline.toString());
+        }
+    }
+
+    @Test
+    void dynamicDbActionIsReportedAsSkippedUntilFirstUse() throws Exception {
+        String configuredUrl = "jdbc:att-load:dynamic-helper";
+        FrameworkConfig config = framework(db("orders", configuredUrl, 2, 500L, "rollback"));
+        List<String> timeline = new ArrayList<String>();
+        TemplateAction dynamicAction = new TemplateAction("dynamicQuery", map(
+                "type", "db", "db", "${EXEC.INPUT.helper}", "query", map("sql", "select ONE")), "att-template/v3.4");
+        LoadTarget target = target(project(), template(Collections.singletonList(dynamicAction)));
+
+        try (LoadRunResources resources = new LoadRunResources(tempDir, config)) {
+            resources.setPreparationObserver(event -> timeline.add(String.valueOf(event.get("event"))));
+            new IterationExecutor(tempDir, config, target, resources, tempDir.resolve("output-dynamic"));
+            resources.prepareResources();
+
+            assertTrue(timeline.contains("LOAD_RESOURCE_SKIPPED_DYNAMIC"), timeline.toString());
+            assertTrue(timeline.contains("LOAD_RESOURCES_READY"), timeline.toString());
+            assertTrue(!driver.states.containsKey(configuredUrl), "dynamic references must not warm every configured helper");
+        }
+    }
+
+    @Test
     void iterationReusesOneBorrowedConnectionAndReturnsItAfterCaseFinalization() throws Exception {
         String url = "jdbc:att-load:reuse";
         FrameworkConfig config = framework(db("orders", url, 1, 500L, "rollback"));
@@ -211,9 +330,9 @@ class LoadDbPoolingTest {
         return IterationRequest.closed("load-db", id, 1, "STEADY", java.time.Instant.now(), "VU-1", Collections.emptyMap());
     }
 
-    private FrameworkConfig framework(DbHelperConfig helper) {
+    private FrameworkConfig framework(DbHelperConfig... configuredHelpers) {
         Map<String, DbHelperConfig> helpers = new LinkedHashMap<String, DbHelperConfig>();
-        helpers.put(helper.id(), helper);
+        for (DbHelperConfig helper : configuredHelpers) helpers.put(helper.id(), helper);
         return new FrameworkConfig(tempDir.resolve("output"), tempDir.resolve("report"), tempDir.resolve("logs"),
                 "SIT", 10000, tempDir.resolve("project/templates"), tempDir.resolve("project/testcase"),
                 Collections.emptyMap(), helpers, Collections.emptyMap(), null, null, null, "", "", null, null,
@@ -246,9 +365,11 @@ class LoadDbPoolingTest {
         final CountDownLatch queryEntered = new CountDownLatch(1);
         final CountDownLatch releaseQuery = new CountDownLatch(1);
         final CountDownLatch queryFinished = new CountDownLatch(1);
+        volatile String failUrl;
 
-        @Override public Connection connect(String url, Properties info) {
+        @Override public Connection connect(String url, Properties info) throws SQLException {
             if (!acceptsURL(url)) return null;
+            if (url.equals(failUrl)) throw new SQLException("simulated connection refusal", "08001");
             FakeState state = states.get(url);
             if (state == null) { state = new FakeState(); states.put(url, state); }
             state.connections++;

@@ -192,6 +192,16 @@ class HttpHelperExecutorTest {
         }
     }
 
+    @Test void preparingHttpClientBuildsLocalClientWithoutSendingARequest() throws Exception {
+        String url = start();
+        FrameworkConfig config = configuration(url, null);
+        try (HttpHelperExecutor http = new HttpHelperExecutor(root, config)) {
+            http.prepareClient(config.httpHelper("paymentApi"));
+            assertEquals(0, hits.get());
+            assertTrue(http.metrics().containsKey("paymentapi"));
+        }
+    }
+
     @Test void responseFormatValidationAndParseFailuresAreSafeAndDistinct() throws Exception {
         String url = start();
         FrameworkConfig config = configuration(url, null, null, 5000);

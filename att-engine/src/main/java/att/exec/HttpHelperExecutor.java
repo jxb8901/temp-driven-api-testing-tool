@@ -447,7 +447,13 @@ public final class HttpHelperExecutor implements AutoCloseable {
                 || normalized.contains("api-key") || normalized.contains("apikey")
                 || normalized.contains("password") || normalized.contains("cookie");
     }
-    private Client client(HttpHelperConfig helper) throws Exception {
+    /** Initializes client, connection manager and TLS configuration without network traffic. */
+    public void prepareClient(HttpHelperConfig helper) throws Exception {
+        if (helper == null) throw new IllegalArgumentException("HTTP helper configuration is required");
+        client(helper);
+    }
+
+    private synchronized Client client(HttpHelperConfig helper) throws Exception {
         Client existing = clients.get(helper.id().toLowerCase(Locale.ROOT));
         if (existing != null) return existing;
         Client created = new Client(helper);

@@ -38,6 +38,30 @@ public final class HikariDbPool implements AutoCloseable {
         this.maxSize = config.poolMaxSize(); this.minIdle = config.poolMinIdle(); this.connectionTimeoutMs = config.poolConnectionTimeoutMs();
     }
     public String helperId() { return helperId; }
+    /** Holds distinct leases concurrently, validates through JDBC, then returns
+     * them all. This temporary floor never changes Hikari's configured minIdle. */
+    public int prepareInitialReady() throws SQLException, InterruptedException {
+        int target = Math.max(1, minIdle);
+        java.util.List<Connection> held = new java.util.ArrayList<Connection>(target);
+        try {
+            for (int index = 0; index < target; index++) {
+                if (Thread.currentThread().isInterrupted()) throw new InterruptedException("DB preparation cancelled");
+                Connection connection = dataSource.getConnection();
+                held.add(connection);
+                int seconds = (int) Math.min(Integer.MAX_VALUE, Math.max(1L, (connectionTimeoutMs + 999L) / 1000L));
+                if (!connection.isValid(seconds)) throw new SQLException("DB_PREPARATION_INVALID_CONNECTION");
+            }
+        } finally {
+            SQLException failure = null;
+            for (Connection connection : held) {
+                try { connection.close(); } catch (SQLException error) { failure = error; }
+            }
+            if (failure != null) throw failure;
+        }
+        int ready = idle();
+        if (ready < target) throw new SQLException("DB_PREPARATION_IDLE_FLOOR_UNAVAILABLE");
+        return ready;
+    }
     public Connection borrow() throws SQLException {
         long started = System.nanoTime();
         waitingPeak.accumulateAndGet(waiting(), Math::max);

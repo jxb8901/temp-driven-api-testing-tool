@@ -17,6 +17,9 @@ import java.nio.file.Files;
 
 /** Run-scoped owner for resources shared by load iterations. */
 public final class LoadRunResources implements AutoCloseable {
+    private static final int PREPARATION_PER_RUN_LIMIT = 64;
+    private static final java.util.concurrent.Semaphore PREPARATION_PROCESS_LIMIT = new java.util.concurrent.Semaphore(256, true);
+    private static final long PREPARATION_DEADLINE_MS = 30_000L;
     private final FrameworkConfig config;
     private final DbHelperExecutor db;
     private final HikariDbConnectionProvider dbProvider;
@@ -41,6 +44,11 @@ public final class LoadRunResources implements AutoCloseable {
     private final att.template.RenderPlanCache renderPlans = new att.template.RenderPlanCache();
     private final java.util.concurrent.CopyOnWriteArrayList<att.template.CompiledExecutionPlan> executionPlans =
             new java.util.concurrent.CopyOnWriteArrayList<att.template.CompiledExecutionPlan>();
+    private final Map<String, Object> preparation = new LinkedHashMap<String, Object>();
+    private volatile java.util.function.Consumer<Map<String, Object>> preparationObserver;
+    private volatile String preparationRunId;
+    private int preparationPermits;
+    private boolean schedulerStarted;
 
     public LoadRunResources(Path projectRoot, FrameworkConfig config) {
         this(projectRoot, config, new IbmMqClientFactory());
@@ -65,6 +73,228 @@ public final class LoadRunResources implements AutoCloseable {
         ensureOpen();
         if (plan == null) throw new IllegalArgumentException("Load execution plan is required");
         executionPlans.addIfAbsent(plan);
+    }
+    public void setPreparationObserver(java.util.function.Consumer<Map<String, Object>> observer) {
+        this.preparationObserver = observer;
+    }
+    public synchronized void markSchedulerStart(String runId, String phase, String model) {
+        if (!"RESOURCES_READY".equals(preparation.get("status")) || schedulerStarted) return;
+        schedulerStarted = true;
+        String line = "[LOAD] START runId=" + safeId(runId) + " phase=" + safeId(phase);
+        Map<String, Object> event = new LinkedHashMap<String, Object>(); event.put("event", "LOAD_START");
+        event.put("status", "STARTED"); event.put("runId", safeId(runId)); event.put("phase", safeId(phase));
+        event.put("model", safeId(model));
+        emitPreparation(event, line);
+    }
+
+    /** LOAD-only barrier: construct referenced pools/client state after validation and before scheduler release. */
+    public void prepareResources() throws Exception { prepareResources(null); }
+
+    public synchronized void prepareResources(String runId) throws Exception {
+        ensureOpen();
+        if (runId != null && !runId.trim().isEmpty()) preparationRunId = safeId(runId);
+        if ("RESOURCES_READY".equals(preparation.get("status"))) return;
+        if ("PREPARATION_FAILED".equals(preparation.get("status")))
+            throw new LoadResourcePreparationException("LOAD_RESOURCE_PREPARATION_FAILED: readiness was already attempted", null);
+        long started = System.nanoTime(), deadline = started + java.util.concurrent.TimeUnit.MILLISECONDS.toNanos(PREPARATION_DEADLINE_MS);
+        long discoveryStarted = started;
+        Map<String, att.config.DbHelperConfig> dbs = new java.util.TreeMap<String, att.config.DbHelperConfig>();
+        Map<String, att.config.MqHelperConfig> mqs = new java.util.TreeMap<String, att.config.MqHelperConfig>();
+        Map<String, att.config.HttpHelperConfig> https = new java.util.TreeMap<String, att.config.HttpHelperConfig>();
+        java.util.Set<String> dynamicKinds = new java.util.TreeSet<String>();
+        java.util.List<String> renderSources = renderPlans.dependencySources();
+        for (att.template.CompiledExecutionPlan plan : executionPlans) {
+            att.template.CompiledExecutionPlan.DependencyInventory inventory = plan.resourceDependencyInventory(renderSources);
+            dynamicKinds.addAll(inventory.dynamicKinds());
+            for (att.template.CompiledExecutionPlan.TargetBinding binding : inventory.bindings()) {
+                if (binding.db() != null) dbs.put(binding.db().id(), binding.db());
+                if (binding.mq() != null) mqs.put(binding.mq().poolKey(), binding.mq());
+                if (binding.http() != null) https.put(binding.http().id(), binding.http());
+            }
+        }
+        long discoveryMs = java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - discoveryStarted);
+        int required = 0;
+        for (att.config.DbHelperConfig helper : dbs.values()) required = Math.addExact(required, Math.max(1, helper.poolMinIdle()));
+        for (att.config.MqHelperConfig helper : mqs.values()) required = Math.addExact(required, Math.max(1, helper.poolMinIdle()));
+        int totalHelpers = dbs.size() + mqs.size() + https.size();
+        java.util.List<Map<String, Object>> rows = new java.util.ArrayList<Map<String, Object>>();
+        Map<String, Object> preparing = new LinkedHashMap<String, Object>();
+        preparing.put("event", "LOAD_PREPARING_RESOURCES"); preparing.put("status", "PREPARING_RESOURCES");
+        preparing.put("requiredDbPools", dbs.size()); preparing.put("requiredMqPools", mqs.size());
+        preparing.put("requiredHttpClients", https.size()); preparing.put("required", totalHelpers);
+        preparing.put("initialConnections", required); preparing.put("discoveryMs", discoveryMs);
+        emitPreparation(preparing, "[LOAD] PREPARING_RESOURCES requiredDbPools=" + dbs.size() + " requiredMqPools=" + mqs.size()
+                + " requiredHttpClients=" + https.size() + " initialConnections=" + required + " discoveryMs=" + discoveryMs);
+        for (String kind : dynamicKinds) {
+            Map<String, Object> row = new LinkedHashMap<String, Object>(); row.put("kind", kind); row.put("helper", "dynamic");
+            row.put("status", "SKIPPED_DYNAMIC"); row.put("fallback", "lazy-on-first-use"); rows.add(row);
+            Map<String, Object> event = new LinkedHashMap<String, Object>(); event.put("event", "LOAD_RESOURCE_SKIPPED_DYNAMIC");
+            event.put("kind", kind); event.put("helper", "dynamic"); event.put("status", "SKIPPED_DYNAMIC");
+            event.put("fallback", "lazy-on-first-use");
+            emitPreparation(event, "[LOAD][" + kind + "] helper=dynamic status=SKIPPED_DYNAMIC fallback=lazy-on-first-use");
+        }
+        try {
+            if (required > PREPARATION_PER_RUN_LIMIT)
+                throw new IllegalStateException("LOAD_RESOURCE_PREPARATION_LIMIT: initial readiness exceeds the bounded per-run connection budget");
+            long remainingNanos = deadline - System.nanoTime();
+            if (remainingNanos <= 0L || !PREPARATION_PROCESS_LIMIT.tryAcquire(required, remainingNanos, java.util.concurrent.TimeUnit.NANOSECONDS))
+                throw new java.util.concurrent.TimeoutException("LOAD_RESOURCE_PREPARATION_BUDGET_TIMEOUT");
+            preparationPermits = required;
+            for (att.config.DbHelperConfig helper : dbs.values()) {
+                long before = System.nanoTime(); int target = Math.max(1, helper.poolMinIdle());
+                try {
+                    checkPreparationDeadline(deadline);
+                    int actual = dbPool(helper.id()).prepareInitialReady();
+                    Map<String, Object> row = preparationRow("DB", helper.id(), target, actual, helper.poolMaxSize(), helper.poolMinIdle(), before);
+                    row.put("sizingSource", helper.poolMinIdle() == 0 ? "min-ready" : "configured"); rows.add(row);
+                    Map<String, Object> event = new LinkedHashMap<String, Object>(row); event.put("event", "LOAD_RESOURCE_READY");
+                    emitPreparation(event, "[LOAD][DB] helper=" + safeId(helper.id()) + " status=READY maxSize=" + helper.poolMaxSize()
+                            + " configuredMinIdle=" + helper.poolMinIdle() + " initialReadyTarget=" + target + " actualReady=" + actual
+                            + " sizingSource=" + row.get("sizingSource") + " preparationMs=" + row.get("preparationMs"));
+                } catch (Exception failure) {
+                    Map<String, Object> row = failedPreparationRow("DB", helper.id(), target, helper.poolMaxSize(), helper.poolMinIdle(), before, failure);
+                    rows.add(row); Map<String, Object> event = new LinkedHashMap<String, Object>(row); event.put("event", "LOAD_RESOURCE_FAILED");
+                    emitPreparation(event, "[LOAD][DB] helper=" + safeId(helper.id()) + " status=FAILED maxSize=" + helper.poolMaxSize()
+                            + " configuredMinIdle=" + helper.poolMinIdle() + " initialReadyTarget=" + target + " actualReady=0 errorType="
+                            + row.get("failureCategory") + " preparationMs=" + row.get("preparationMs"));
+                    throw failure;
+                }
+            }
+            for (att.config.MqHelperConfig helper : mqs.values()) {
+                long before = System.nanoTime(); int target = Math.max(1, helper.poolMinIdle());
+                String identity = helper.logicalId() + "::" + helper.instanceId();
+                try {
+                    checkPreparationDeadline(deadline);
+                    int actual = mqFactory.prepareInitialReady(helper);
+                    Map<String, Object> row = preparationRow("MQ", identity, target, actual, helper.poolMaxSize(), helper.poolMinIdle(), before);
+                    row.put("logicalHelper", safeId(helper.logicalId())); row.put("instance", safeId(helper.instanceId()));
+                    row.put("sizingSource", helper.poolMinIdle() == 0 ? "min-ready" : "configured"); rows.add(row);
+                    Map<String, Object> event = new LinkedHashMap<String, Object>(row); event.put("event", "LOAD_RESOURCE_READY");
+                    emitPreparation(event, "[LOAD][MQ] helper=" + safeId(helper.logicalId()) + " instance=" + safeId(helper.instanceId())
+                            + " status=READY maxSize=" + helper.poolMaxSize() + " configuredMinIdle=" + helper.poolMinIdle()
+                            + " initialReadyTarget=" + target + " actualReady=" + actual + " sizingSource=" + row.get("sizingSource")
+                            + " preparationMs=" + row.get("preparationMs"));
+                } catch (Exception failure) {
+                    Map<String, Object> row = failedPreparationRow("MQ", identity, target, helper.poolMaxSize(), helper.poolMinIdle(), before, failure);
+                    row.put("logicalHelper", safeId(helper.logicalId())); row.put("instance", safeId(helper.instanceId())); rows.add(row);
+                    Map<String, Object> event = new LinkedHashMap<String, Object>(row); event.put("event", "LOAD_RESOURCE_FAILED");
+                    emitPreparation(event, "[LOAD][MQ] helper=" + safeId(helper.logicalId()) + " instance=" + safeId(helper.instanceId())
+                            + " status=FAILED maxSize=" + helper.poolMaxSize() + " configuredMinIdle=" + helper.poolMinIdle()
+                            + " initialReadyTarget=" + target + " actualReady=0 errorType=" + row.get("failureCategory")
+                            + " preparationMs=" + row.get("preparationMs"));
+                    throw failure;
+                }
+            }
+            for (att.config.HttpHelperConfig helper : https.values()) {
+                long before = System.nanoTime();
+                try {
+                    checkPreparationDeadline(deadline);
+                    http.prepareClient(helper);
+                    Map<String, Object> row = preparationRow("HTTP", helper.id(), 0, 0, 0, 0, before);
+                    row.put("clientReady", true); row.put("tlsConfigReady", true); row.put("physicalConnections", "not-prewarmed"); rows.add(row);
+                    Map<String, Object> event = new LinkedHashMap<String, Object>(row); event.put("event", "LOAD_RESOURCE_READY");
+                    emitPreparation(event, "[LOAD][HTTP] helper=" + safeId(helper.id()) + " status=READY clientReady=true tlsConfigReady=true physicalConnections=not-prewarmed preparationMs=" + row.get("preparationMs"));
+                } catch (Exception failure) {
+                    Map<String, Object> row = failedPreparationRow("HTTP", helper.id(), 0, 0, 0, before, failure);
+                    row.put("clientReady", false); row.put("tlsConfigReady", false); row.put("physicalConnections", "not-prewarmed"); rows.add(row);
+                    Map<String, Object> event = new LinkedHashMap<String, Object>(row); event.put("event", "LOAD_RESOURCE_FAILED");
+                    emitPreparation(event, "[LOAD][HTTP] helper=" + safeId(helper.id()) + " status=FAILED clientReady=false tlsConfigReady=false physicalConnections=not-prewarmed errorType="
+                            + row.get("failureCategory") + " preparationMs=" + row.get("preparationMs"));
+                    throw failure;
+                }
+            }
+            preparation.put("status", "RESOURCES_READY"); preparation.put("required", totalHelpers); preparation.put("prepared", totalHelpers);
+            preparation.put("failed", 0); preparation.put("skippedDynamic", dynamicKinds.size()); preparation.put("initialConnections", required);
+            preparation.put("perRunConnectionBudget", PREPARATION_PER_RUN_LIMIT); preparation.put("processConnectionBudget", 256);
+            preparation.put("preparationDeadlineMs", PREPARATION_DEADLINE_MS); preparation.put("parallelism", 1);
+            preparation.put("discoveryMs", discoveryMs);
+            preparation.put("preparationMs", java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started)); preparation.put("helpers", rows);
+            Map<String, Object> ready = new LinkedHashMap<String, Object>(); ready.put("event", "LOAD_RESOURCES_READY");
+            ready.put("status", "RESOURCES_READY"); ready.put("required", totalHelpers); ready.put("prepared", totalHelpers);
+            ready.put("failed", 0); ready.put("skipped", dynamicKinds.size()); ready.put("preparationMs", preparation.get("preparationMs"));
+            emitPreparation(ready, "[LOAD] RESOURCES_READY required=" + totalHelpers + " prepared=" + totalHelpers
+                    + " failed=0 dynamicSkipped=" + dynamicKinds.size() + " preparationMs=" + preparation.get("preparationMs"));
+        } catch (Exception failure) {
+            if (failure instanceof InterruptedException) Thread.currentThread().interrupt();
+            preparation.put("status", "PREPARATION_FAILED"); preparation.put("required", totalHelpers);
+            int prepared = 0, failed = 0, skipped = 0;
+            for (Map<String, Object> row : rows) {
+                if ("READY".equals(row.get("status"))) prepared++;
+                else if ("FAILED".equals(row.get("status"))) failed++;
+                else if ("SKIPPED_DYNAMIC".equals(row.get("status"))) skipped++;
+            }
+            if (failed == 0) {
+                failed = 1;
+                Map<String, Object> row = failedPreparationRow("SYSTEM", "resource-budget", 0, 0, 0, started, failure);
+                rows.add(row);
+            }
+            preparation.put("prepared", prepared); preparation.put("failed", failed); preparation.put("skippedDynamic", skipped);
+            preparation.put("initialConnections", required); preparation.put("perRunConnectionBudget", PREPARATION_PER_RUN_LIMIT);
+            preparation.put("processConnectionBudget", 256);
+            preparation.put("preparationDeadlineMs", PREPARATION_DEADLINE_MS); preparation.put("parallelism", 1);
+            preparation.put("discoveryMs", discoveryMs);
+            preparation.put("preparationMs", java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started));
+            String failureCode = preparationCode(failure, "SYSTEM");
+            for (Map<String, Object> row : rows) if ("FAILED".equals(row.get("status"))) {
+                failureCode = String.valueOf(row.get("failureCategory")); break;
+            }
+            preparation.put("helpers", rows); preparation.put("failureCode", failureCode);
+            Map<String, Object> failedEvent = new LinkedHashMap<String, Object>(); failedEvent.put("event", "LOAD_PREPARATION_FAILED");
+            failedEvent.put("status", "PREPARATION_FAILED"); failedEvent.put("required", totalHelpers);
+            failedEvent.put("prepared", prepared); failedEvent.put("failed", failed); failedEvent.put("skipped", skipped);
+            failedEvent.put("preparationMs", preparation.get("preparationMs")); failedEvent.put("errorType", preparation.get("failureCode"));
+            emitPreparation(failedEvent, "[LOAD] PREPARATION_FAILED required=" + totalHelpers + " prepared=" + prepared
+                    + " failed=" + failed + " skipped=" + skipped + " preparationMs=" + preparation.get("preparationMs")
+                    + " errorType=" + preparation.get("failureCode"));
+            close();
+            throw new LoadResourcePreparationException("LOAD_RESOURCE_PREPARATION_FAILED: a referenced helper could not reach its bounded readiness target; verify helper credentials and connectivity (" + failureCode + ")", failure);
+        }
+    }
+
+    private static void checkPreparationDeadline(long deadline) throws java.util.concurrent.TimeoutException {
+        if (Thread.currentThread().isInterrupted()) throw new java.util.concurrent.CancellationException("LOAD preparation cancelled");
+        if (System.nanoTime() >= deadline) throw new java.util.concurrent.TimeoutException("LOAD_PREPARATION_TIMEOUT");
+    }
+    private static String safeId(String id) {
+        String safe = LoadFailureDiagnostic.safe(id);
+        return safe == null ? "unknown" : safe.replaceAll("[^A-Za-z0-9_.:-]", "_");
+    }
+    private static String preparationCode(Throwable failure, String kind) {
+        String safeMarker = failure == null ? "" : String.valueOf(failure.getMessage());
+        if (safeMarker.contains("LOAD_RESOURCE_PREPARATION_LIMIT")) return "PREPARATION_LIMIT_EXCEEDED";
+        if (safeMarker.contains("LOAD_RESOURCE_PREPARATION_BUDGET_TIMEOUT")) return "PREPARATION_BUDGET_TIMEOUT";
+        if (safeMarker.contains("LOAD_PREPARATION_TIMEOUT")) return "PREPARATION_TIMEOUT";
+        if (failure instanceof java.util.concurrent.TimeoutException) return "PREPARATION_TIMEOUT";
+        if (failure instanceof java.util.concurrent.CancellationException || failure instanceof InterruptedException) return "PREPARATION_CANCELLED";
+        if ("DB".equals(kind)) return "DB_CONNECT_ERROR";
+        if ("MQ".equals(kind)) return "MQ_CONNECT_ERROR";
+        if ("HTTP".equals(kind)) return "HTTP_CLIENT_CONFIGURATION_ERROR";
+        return "PREPARATION_ERROR";
+    }
+    private static Map<String, Object> preparationRow(String kind, String id, int target, int actual, int max, int min, long before) {
+        Map<String, Object> row = new LinkedHashMap<String, Object>(); row.put("kind", kind); row.put("helper", safeId(id)); row.put("status", "READY");
+        row.put("initialReadyTarget", target); row.put("actualReady", actual);
+        if (!"HTTP".equals(kind)) { row.put("maxSize", max); row.put("configuredMinIdle", min); }
+        row.put("preparationMs", java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - before)); return row;
+    }
+    private static Map<String, Object> failedPreparationRow(String kind, String id, int target, int max, int min, long before, Throwable failure) {
+        Map<String, Object> row = new LinkedHashMap<String, Object>(); row.put("kind", kind); row.put("helper", safeId(id));
+        row.put("status", "FAILED"); row.put("initialReadyTarget", target); row.put("actualReady", 0);
+        if (!"HTTP".equals(kind)) { row.put("maxSize", max); row.put("configuredMinIdle", min); }
+        row.put("failureCategory", preparationCode(failure, kind));
+        row.put("preparationMs", java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - before)); return row;
+    }
+    private void emitPreparation(Map<String, Object> attributes, String line) {
+        Map<String, Object> event = new LinkedHashMap<String, Object>(attributes);
+        String eventRunId = event.get("runId") == null ? preparationRunId : safeId(String.valueOf(event.get("runId")));
+        if (eventRunId != null) event.put("runId", eventRunId);
+        String contextualLine = line;
+        if (eventRunId != null && !line.contains("runId=")) contextualLine += " runId=" + eventRunId;
+        java.util.function.Consumer<Map<String, Object>> observer = preparationObserver;
+        if (observer == null) { System.out.println(contextualLine); return; }
+        event.put("console", contextualLine);
+        try { observer.accept(java.util.Collections.unmodifiableMap(event)); }
+        catch (RuntimeException ignored) { /* A disconnected live-output observer cannot change readiness. */ }
     }
     /** Resolves Render sources before the workload start gate, shared by all targets in this Load run. */
     public void prepareRenderPlans(LoadTarget target) throws Exception {
@@ -136,9 +366,12 @@ public final class LoadRunResources implements AutoCloseable {
         if (pool == null) throw new IllegalArgumentException("Unknown or unopened mqhelper instance: " + helperId);
         return pool;
     }
-    public Map<String, Object> metrics() {
-        ensureOpen();
+    public synchronized Map<String, Object> metrics() {
         Map<String, Object> result = new LinkedHashMap<String, Object>();
+        if (closed.get()) {
+            if (!preparation.isEmpty()) result.put("preparation", new LinkedHashMap<String, Object>(preparation));
+            return java.util.Collections.unmodifiableMap(result);
+        }
         result.put("db", dbProvider.metrics()); result.put("mq", mqFactory.metrics());
         result.put("http", http.metrics());
         result.put("resourceMetricSamples", resourceMetricSamples.get());
@@ -156,6 +389,7 @@ public final class LoadRunResources implements AutoCloseable {
         execution.put("actionPlansCompiled", actionPlans);
         execution.put("actionEvaluations", evaluations);
         result.put("execution", java.util.Collections.unmodifiableMap(execution));
+        if (!preparation.isEmpty()) result.put("preparation", new LinkedHashMap<String, Object>(preparation));
         return result;
     }
     /** Rate-limited, allocation-light observation of shared HTTP pool peaks. */
@@ -181,6 +415,9 @@ public final class LoadRunResources implements AutoCloseable {
     public void ensureOpen() { if (closed.get()) throw new IllegalStateException("Load run resources are closed"); }
 
     @Override public void close() {
-        if (closed.compareAndSet(false, true)) { http.close(); mqFactory.close(); db.closeAll(); dbProvider.close(); }
+        if (closed.compareAndSet(false, true)) {
+            http.close(); mqFactory.close(); db.closeAll(); dbProvider.close();
+            if (preparationPermits > 0) { PREPARATION_PROCESS_LIMIT.release(preparationPermits); preparationPermits = 0; }
+        }
     }
 }

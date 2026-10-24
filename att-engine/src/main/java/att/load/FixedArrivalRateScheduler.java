@@ -88,7 +88,12 @@ public final class FixedArrivalRateScheduler implements LoadScheduler {
             if (!(executor instanceof IterationExecutor)) throw new IllegalArgumentException("Multi-workload arrival scheduling requires IterationExecutor");
             return LoadRunCoordinator.runFrom(scenario, (IterationExecutor) executor, runId, evidenceStore, evidenceOutputRoot);
         }
-        if (executor instanceof IterationExecutor) ((IterationExecutor) executor).initializeOutputNamespace(runId);
+        if (executor instanceof IterationExecutor) {
+            IterationExecutor loadExecutor = (IterationExecutor) executor;
+            loadExecutor.initializeOutputNamespace(runId);
+            loadExecutor.prepareResources(runId);
+            loadExecutor.markSchedulerStart(runId, LoadPhase.at(scenario, 0L).name(), scenario.model().wireName());
+        }
         long startedAt = startGate == null ? timing.now() : startGate.awaitStart();
         Instant start = LoadSchedulerSupport.instant(startedAt);
         final LoadMetrics metrics = LoadMetrics.forScenario(scenario, startedAt, LoadPhase.totalMs(scenario));
@@ -104,8 +109,9 @@ public final class FixedArrivalRateScheduler implements LoadScheduler {
         long admittedTestdataOrdinal = 0L;
         try {
             while (!cancelled.get()) {
-                metrics.recordSchedulerWakeup(workers.getQueue().size());
-                long elapsed = timing.now() - startedAt;
+                long nowAtWake = timing.now();
+                metrics.recordSchedulerWakeupAt(nowAtWake, workers.getQueue().size());
+                long elapsed = nowAtWake - startedAt;
                 long total = LoadPhase.totalMs(scenario);
                 long desired = elapsed >= total ? arrivalsBeforeDeadline(scenario) : arrivalsDueAt(scenario, elapsed);
                 while (scheduledCount < desired) {
@@ -147,7 +153,7 @@ public final class FixedArrivalRateScheduler implements LoadScheduler {
             FutureTask<Void> task = new FutureTask<Void>(() -> {
                 boolean cancelledBeforeStart = taskHandle.begin();
                 long iterationStarted = timing.now();
-                metrics.recordSubmitLag(iterationStarted - dueAt, workers.getQueue().size());
+            metrics.recordSubmitLagAt(iterationStarted, iterationStarted - dueAt, workers.getQueue().size());
                 att.core.ResultStatus status = att.core.ResultStatus.ERROR;
                 String errorType = "RUNTIME_ERROR";
                 EvidenceRef evidence = null;

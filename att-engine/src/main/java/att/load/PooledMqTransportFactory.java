@@ -36,6 +36,18 @@ public final class PooledMqTransportFactory implements MqTransport.Factory, Auto
 
     public LoadResourcePool<MqTransport.Connection> pool(String id) { return pools.get(id); }
 
+    /** Connect/authenticate only. No business queue is opened and no message is sent. */
+    public int prepareInitialReady(MqHelperConfig config) throws Exception {
+        if (Thread.currentThread().isInterrupted()) throw new InterruptedException("MQ preparation cancelled");
+        LoadResourcePool<MqTransport.Connection> pool = poolFor(config);
+        try { pool.ensureMinIdle(Math.max(1, config.poolMinIdle())); }
+        catch (PoolFactoryException wrapped) { throw wrapped.cause; }
+        int ready = pool.idle();
+        if (ready < Math.max(1, config.poolMinIdle()))
+            throw new IllegalStateException("MQ_PREPARATION_IDLE_FLOOR_UNAVAILABLE");
+        return ready;
+    }
+
     public Map<String, Map<String, Object>> metrics() {
         Map<String, Map<String, Object>> result = new LinkedHashMap<String, Map<String, Object>>();
         for (Map.Entry<String, LoadResourcePool<MqTransport.Connection>> entry : pools.entrySet()) {

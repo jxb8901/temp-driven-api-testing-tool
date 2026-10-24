@@ -11,7 +11,7 @@ REQUIRED = {
     "runtime-context.md": ["EXEC.INPUT", "EXEC.VARS", "EXEC.ACTIONS", "EXEC.LOAD", "META", "EXEC.ACTIONS.<id>.output", "META.HTTPHELPER"],
     "execution-modes/run.md": ["run", "Testcase", "Stage", "latest-run.yaml", "exit"],
     "execution-modes/debug.md": ["att-debug/v1.2", "vars", "EXEC.VARS", "template", "flow", "tool", "debug.yaml", "--input", "--env", "output/debug", "exit"],
-    "execution-modes/load.md": ["att-load/v1.8", "testdata", "scope", "selection", "users", "arrivalRate", "maxConcurrent", "overloadPolicy", "EXEC.LOAD", "execIdFormat", "load-summary", "failures/<EXEC.ID>"],
+    "execution-modes/load.md": ["att-load/v1.9", "testdata", "scope", "selection", "users", "arrivalRate", "maxConcurrent", "overloadPolicy", "EXEC.LOAD", "execIdFormat", "load-summary", "failures/<EXEC.ID>"],
     "resources/tools.md": ["command-backed", "call-backed", "output.result", "stdoutFormat", "evidence"],
     "resources/dbhelper.md": ["att-dbhelper/v2.6", "query", "update", "transaction", "JDBC", "evidence"],
     "resources/mqhelper.md": ["att-mqhelper/v1.3", "send", "receive", "request", "IBM MQ", "String", "evidence"],

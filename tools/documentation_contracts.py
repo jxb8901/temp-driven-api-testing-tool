@@ -55,7 +55,7 @@ def current_blocks(text):
                 raise ValueError("unmatched historical block end")
             historical = False
             continue
-        heading = re.match(r"^##\s+Appendix\s+([A-D])\b", line)
+        heading = re.match(r"^#{1,2}\s+Appendix\s+([A-D])\b", line)
         if heading:
             appendix = heading.group(1)
         elif re.match(r"^##\s+[0-9]+\b", line):

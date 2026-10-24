@@ -85,6 +85,16 @@ public final class LoadConsoleSampler {
         return ExecutionConsoleFormatter.loadStart(runId, model, null);
     }
 
+    /** Adopts the Engine's explicit pre-scheduler START event without emitting a second START line. */
+    public void observePreparedStart(String loadModel, String observedRunId) {
+        adoptRunId(observedRunId);
+        if (loadModel != null) model = ExecutionConsoleFormatter.token(loadModel, model);
+        if (startEmitted.compareAndSet(false, true)) {
+            lastProgressNanos.set(System.nanoTime());
+            armPeriodic();
+        }
+    }
+
     /** Returns a console line, or null when this iteration should stay off the console. */
     public String onEvent(LoadEvent event) {
         if (event == null || finished.get()) return null;

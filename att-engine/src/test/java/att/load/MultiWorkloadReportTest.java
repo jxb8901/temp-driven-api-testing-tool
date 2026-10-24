@@ -45,7 +45,7 @@ class MultiWorkloadReportTest {
         Path summary = temp.resolve("out/load/multi-report/load-summary.json");
         String jsonText = new String(Files.readAllBytes(summary), StandardCharsets.UTF_8);
         assertDoesNotThrow(() -> att.validation.JsonSchemaVerifier.verifyJson(
-                att.validation.SchemaFiles.resolve(root, "att-load-summary-v1.1.schema.json"), jsonText));
+                att.validation.SchemaFiles.resolve(root, "att-load-summary-v1.2.schema.json"), jsonText));
         @SuppressWarnings("unchecked") Map<String, Object> json = att.validation.JsonSupport.mapper().readValue(jsonText, Map.class);
         assertTrue(json.containsKey("workloads"));
         @SuppressWarnings("unchecked") Map<String, Object> workloads = (Map<String, Object>) json.get("workloads");
@@ -55,7 +55,9 @@ class MultiWorkloadReportTest {
         assertTrue(html.contains("<h2>Workloads</h2>"));
         assertTrue(html.contains("primary"));
         assertTrue(html.contains("secondary"));
-        assertTrue(html.contains("aggregate raw-latency collector"));
+        assertTrue(html.contains("Steady rates use actual event timestamps"));
+        assertTrue(html.contains("Execution</th><th>Performance</th>"));
+        assertTrue(html.contains("id=\"rate-chart\""));
     }
 
     @Test void executesClosedMixAndReportsPerEntryMetrics() throws Exception {
@@ -78,7 +80,7 @@ class MultiWorkloadReportTest {
         Path report = new LoadReportWriter().write(temp.resolve("mixed-out"), result);
         Path summary = temp.resolve("mixed-out/load/mixed-report/load-summary.json");
         String jsonText = new String(Files.readAllBytes(summary), StandardCharsets.UTF_8);
-        att.validation.JsonSchemaVerifier.verifyJson(att.validation.SchemaFiles.resolve(root, "att-load-summary-v1.1.schema.json"), jsonText);
+        att.validation.JsonSchemaVerifier.verifyJson(att.validation.SchemaFiles.resolve(root, "att-load-summary-v1.2.schema.json"), jsonText);
         @SuppressWarnings("unchecked") Map<String, Object> json = att.validation.JsonSupport.mapper().readValue(jsonText, Map.class);
         @SuppressWarnings("unchecked") Map<String, Object> workloads = (Map<String, Object>) json.get("workloads");
         @SuppressWarnings("unchecked") Map<String, Object> checkout = (Map<String, Object>) workloads.get("checkout");
@@ -129,13 +131,15 @@ class MultiWorkloadReportTest {
         assertRateCells(http.snapshot().values(),.5,0,.5,1.0);assertRateCells(mq.snapshot().values(),0,.5,.5,1.0);
         assertTrue(html.contains("checkout"));assertTrue(html.contains("payments mix"));assertTrue(html.contains("50.00%"));assertTrue(html.contains("1.000/s"));
         assertTrue(html.contains("Thresholds: none configured / Execution: ERROR"));
-        assertTrue(html.contains("<div class=\"kpi\"><span class=\"muted\">SUT Fail %</span><strong>33.33%</strong><small>2 / 6 measured completions</small></div>"));
-        assertTrue(html.contains("<div class=\"kpi\"><span class=\"muted\">Runtime Error %</span><strong>16.67%</strong><small>1 / 6 measured completions</small></div>"));
-        assertTrue(html.contains("<div class=\"kpi\"><span class=\"muted\">Total Error %</span><strong>50.00%</strong><small>3 / 6 measured completions</small></div>"));
-        assertEquals("<tr><td><b>checkout</b></td><td>template:CHECKOUT</td><td>closed</td><td>1 users</td><td>2.000/s</td><td>1.000/s</td><td>100 ms</td><td><span title=\"1 / 2 measured completions\">50.00%</span></td><td><span title=\"0 / 2 measured completions\">0.00%</span></td><td><span title=\"1 / 2 measured completions\">50.00%</span></td><td>0.00%</td><td>none</td><td class=\"pass\">PASS</td></tr>", row(html,"checkout"));
-        assertEquals("<tr><td><b>payments</b></td><td>2 mixed targets</td><td>closed</td><td>1 users</td><td>4.000/s</td><td>2.000/s</td><td>100 ms</td><td><span title=\"1 / 4 measured completions\">25.00%</span></td><td><span title=\"1 / 4 measured completions\">25.00%</span></td><td><span title=\"2 / 4 measured completions\">50.00%</span></td><td>0.00%</td><td>none</td><td class=\"fail\">ERROR</td></tr>", row(html,"payments"));
-        assertEquals("<tr><td>http</td><td>template:HTTP</td><td>50</td><td>2 (50.0%)</td><td>2.000/s</td><td>1.000/s</td><td>100 ms</td><td><span title=\"1 / 2 measured completions\">50.00%</span></td><td><span title=\"0 / 2 measured completions\">0.00%</span></td><td><span title=\"1 / 2 measured completions\">50.00%</span></td></tr>", row(html,"http"));
-        assertEquals("<tr><td>mq</td><td>template:MQ</td><td>50</td><td>2 (50.0%)</td><td>2.000/s</td><td>1.000/s</td><td>100 ms</td><td><span title=\"0 / 2 measured completions\">0.00%</span></td><td><span title=\"1 / 2 measured completions\">50.00%</span></td><td><span title=\"1 / 2 measured completions\">50.00%</span></td></tr>", row(html,"mq"));
+        assertTrue(html.contains("<h2>Run overview</h2>"));
+        assertTrue(html.contains("id=\"load-window\""));
+        assertTrue(html.contains("SUT FAIL</span>"));
+        assertTrue(html.contains("Runtime ERROR</span>"));
+        assertTrue(html.contains("Steady started/s"));
+        assertTrue(html.contains("Steady p95"));
+        assertTrue(html.contains("<td>http</td>"));
+        assertTrue(html.contains("<td>mq</td>"));
+        assertTrue(html.contains("event-time starts / configured"));
         assertFalse(html.contains("<pre>null</pre>"));
         @SuppressWarnings("unchecked") Map<String,Object> json=att.validation.JsonSupport.mapper().readValue(temp.resolve("load/exact/load-summary.json").toFile(),Map.class);
         @SuppressWarnings("unchecked") Map<String,Object> yaml=(Map<String,Object>)new org.yaml.snakeyaml.Yaml().load(Files.newInputStream(temp.resolve("load/exact/load-summary.yaml")));

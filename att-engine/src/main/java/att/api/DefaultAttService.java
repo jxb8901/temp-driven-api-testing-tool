@@ -174,8 +174,21 @@ public final class DefaultAttService implements AttService {
         LoadRunResult result; Map<String,Object> resourceMetrics;
         long executionPhase=profile.begin();
         try(LoadRunResources resources=new LoadRunResources(request.packageRoot(),cfg)){
+            if (request.listener() != null) resources.setPreparationObserver(request.listener()::onPreparationEvent);
             if(scenario.coordinatorRequired()) result=LoadRunCoordinator.runFrom(request.packageRoot(),cfg,scenario,resources,id,evidence,outputRoot,identitySeed.startedAt());
-            else { IterationExecutor iterations=new IterationExecutor(request.packageRoot(),cfg,target,resources,outputRoot,null,identitySeed.startedAt()); LoadScheduler scheduler=scenario.model()==LoadScenario.Model.CLOSED?new ClosedVuScheduler(scenario,iterations,id,evidence,outputRoot):new FixedArrivalRateScheduler(scenario,iterations,id,evidence,outputRoot); try{result=scheduler.run();}finally{scheduler.close();} }
+            else {
+                IterationExecutor iterations=new IterationExecutor(request.packageRoot(),cfg,target,resources,outputRoot,null,identitySeed.startedAt());
+                LoadScheduler scheduler=scenario.model()==LoadScenario.Model.CLOSED?new ClosedVuScheduler(scenario,iterations,id,evidence,outputRoot):new FixedArrivalRateScheduler(scenario,iterations,id,evidence,outputRoot);
+                try { result=scheduler.run(); }
+                catch (att.load.LoadResourcePreparationException failure) {
+                    long failedAt=System.currentTimeMillis();
+                    LoadMetrics failedMetrics=LoadMetrics.forScenario(scenario,failedAt,LoadPhase.totalMs(scenario));
+                    failedMetrics.finish(failedAt);
+                    result=new LoadRunResult(id,scenario,Instant.ofEpochMilli(failedAt),Instant.ofEpochMilli(failedAt),
+                            failedMetrics.snapshot(),LoadThresholdSummary.empty(),Collections.<String,Object>emptyMap(),resources.metrics());
+                }
+                finally { scheduler.close(); }
+            }
             resourceMetrics=resources.metrics();
         }
         profile.end("loadExecutionMs",executionPhase);

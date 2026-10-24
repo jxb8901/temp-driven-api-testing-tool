@@ -14,7 +14,7 @@ import java.util.regex.Pattern;
 public final class DiagnosticSanitizer {
     private static final Pattern URL=Pattern.compile("(?i)\\b[a-z][a-z0-9+.-]*://[^\\s<>\\\"]+");
     private static final Pattern QUOTED_ABSOLUTE_PATH=Pattern.compile("(['\\\"])((?:/[^\\r\\n'\\\"]+)|(?:[A-Za-z]:[\\\\/][^\\r\\n'\\\"]+)|(?:\\\\\\\\[^\\r\\n'\\\"]+))\\1");
-    private static final Pattern ABSOLUTE_PATH_TOKEN=Pattern.compile("(?<![A-Za-z0-9_/:.$<\\\\])(?:[A-Za-z]:[\\\\/]|\\\\\\\\|/)[^\\s'\\\"<>|,;]*");
+    private static final Pattern ABSOLUTE_PATH_TOKEN=Pattern.compile("(?<![A-Za-z0-9_/:.$<\\\\])(?:[A-Za-z]:[\\\\/]|\\\\\\\\|/)[^\\s'\\\"<>|,;]+");
 
     private DiagnosticSanitizer() { }
 
@@ -46,7 +46,7 @@ public final class DiagnosticSanitizer {
         }
         urlMatcher.appendTail(protectedValue);
         String redacted=replacePaths(protectedValue.toString(),QUOTED_ABSOLUTE_PATH,true,safeRoot);
-        redacted=replacePaths(redacted,ABSOLUTE_PATH_TOKEN,false,safeRoot);
+        redacted=replaceTextPathTokens(redacted,safeRoot);
         for(int i=0;i<urls.size();i++)redacted=redacted.replace("\u0001ATT_URL_"+i+"\u0002",urls.get(i));
         return redacted;
     }
@@ -59,6 +59,28 @@ public final class DiagnosticSanitizer {
             matcher.appendReplacement(result,Matcher.quoteReplacement(replacement));
         }
         matcher.appendTail(result);return result.toString();
+    }
+
+    private static String replaceTextPathTokens(String value,Path packageRoot) {
+        Matcher matcher=ABSOLUTE_PATH_TOKEN.matcher(value);StringBuffer result=new StringBuffer();
+        while(matcher.find()) {
+            String token=matcher.group();
+            if(!looksLikePathToken(token,value,matcher.start())) {
+                matcher.appendReplacement(result,Matcher.quoteReplacement(token));
+                continue;
+            }
+            matcher.appendReplacement(result,Matcher.quoteReplacement(safePathLabel(token,packageRoot)));
+        }
+        matcher.appendTail(result);return result.toString();
+    }
+
+    private static boolean looksLikePathToken(String token,String text,int start) {
+        // A slash by itself and single-segment units such as "rate /s" are ordinary prose.
+        // Real inline paths usually have a second separator or filename suffix. Keep
+        // single-segment paths when their surrounding text names a path operation.
+        if(token.indexOf('/',1)>=0||token.indexOf('\\',1)>=0||token.matches("(?i).+\\.[a-z0-9]{1,12}"))return true;
+        String prefix=text.substring(Math.max(0,start-64),start).toLowerCase(java.util.Locale.ROOT).trim();
+        return prefix.matches("(?s).*(?:\\bpath|\\bfile|\\bdirectory|\\bfolder|\\bsource|\\bdestination|\\broot|\\bworking directory|\\bread|\\bopen|\\bwrite|\\bcreate|\\bresolve|\\bat|\\bfrom|\\bunder)\\s*(?:is\\s*)?[:=]?\\s*");
     }
 
     private static String safePathLabel(String value,Path packageRoot) {

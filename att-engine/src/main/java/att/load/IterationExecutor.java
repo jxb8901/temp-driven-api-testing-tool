@@ -323,6 +323,8 @@ public final class IterationExecutor implements LoadIterationRunner {
     Path projectRoot() { return projectRoot; }
     FrameworkConfig config() { return config; }
     LoadRunResources resources() { return resources; }
+    void prepareResources(String runId) throws Exception { resources.prepareResources(runId); }
+    void markSchedulerStart(String runId, String phase, String model) { resources.markSchedulerStart(runId, phase, model); }
     Path outputRoot() { return outputRoot; }
     void initializeOutputNamespace(String runId) throws IOException {
         initializeOutputNamespace(outputRoot.resolve("load").resolve(safe(runId)).toAbsolutePath().normalize());
