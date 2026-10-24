@@ -50,9 +50,11 @@ async function main() {
       await page.getByRole('tab', { name: 'Artifacts', exact: true }).click();
       const archive = page.getByRole('region', { name: 'Job artifact archive', exact: true });
       await archive.getByText('Artifact Archive: READY', { exact: true }).waitFor();
-      assert.equal(await archive.locator('a').count(), 1, 'Only the finalized ZIP has a download link');
       const downloadPromise = page.waitForEvent('download');
       const archiveLink = archive.getByRole('link', { name: /^Download Artifacts \(\.zip\) — / });
+      assert.equal(await archiveLink.count(), 1, 'Only one finalized ZIP download link is shown');
+      assert.equal(await archive.locator('a[href*="/artifacts/archive.zip"]').count(), 1,
+        'Artifact viewer links are not archive download links');
       const archiveBytes = (await fs.stat(fixture.archivePath)).size;
       assert.equal(await archiveLink.getAttribute('title'), `${archiveBytes} bytes`);
       await archiveLink.click();
