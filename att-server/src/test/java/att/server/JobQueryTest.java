@@ -28,6 +28,9 @@ class JobQueryTest {
             var page=store.queryJobs(JobQuery.parse(Map.of("limit","100","sort","target-asc"),"alice"));
             assertEquals(240L,page.get("total"));var items=(List<Map<String,Object>>)page.get("items");assertEquals(100,items.size());
             assertEquals("a-target",((Map<?,?>)items.get(0).get("targetIdentity")).get("id"));
+            var groupedDescending=store.queryJobs(JobQuery.parse(Map.of("sort","target-desc","groupBy","target"),"alice"));
+            assertEquals("a-target",((Map<?,?>)((List<Map<String,Object>>)groupedDescending.get("items")).get(0).get("targetIdentity")).get("id"));
+            assertTrue(JobQuery.parse(Map.of("sort","target-desc","groupBy","target"),"alice").order().startsWith("target_sort ASC"));
             var second=store.queryJobs(JobQuery.parse(Map.of("offset","100","limit","100","sort","target-asc"),"alice"));
             Set<Object> ids=new HashSet<>();for(var item:items)ids.add(item.get("jobId"));for(var item:(List<Map<String,Object>>)second.get("items"))assertTrue(ids.add(item.get("jobId")));
             var schedules=store.queryJobs(JobQuery.parse(Map.of("principalMode","schedule","limit","25","groupBy","target"),"alice"));assertEquals(80L,schedules.get("total"));
@@ -75,8 +78,34 @@ class JobQueryTest {
             statement.executeUpdate("DELETE FROM job_targets");statement.executeUpdate("UPDATE jobs SET target_search_version=0");
         }
         try(JobStore reopened=new JobStore(config)) {
+            assertEquals(61L,reopened.queryJobs(JobQuery.parse(Map.of(),"alice")).get("total"));
+            assertThrows(JobStore.TargetSearchPendingException.class,()->reopened.queryJobs(JobQuery.parse(Map.of("search","case-44"),"alice")));
+            assertEquals(61,reopened.backfillSearchTargetsBatch());assertEquals(0,reopened.backfillSearchTargetsBatch());
             assertEquals(31L,reopened.queryJobs(JobQuery.parse(Map.of("search","target-39"),"alice")).get("total"));
             assertEquals(30L,reopened.queryJobs(JobQuery.parse(Map.of("search","case-44"),"alice")).get("total"));
+        }
+    }
+    @Test void migrationIsBoundedResumesAfterRestartAndNeverServesPartialSearch() throws Exception {
+        ServerConfig config=config();
+        try(JobStore store=new JobStore(config)) {
+            for(int i=0;i<205;i++) {
+                Job job=new Job("J"+String.format("%016X",i),"run","p","alice",new WorkerRequest(),new JobEvents(config.dataDir.resolve("events/"+i),1));
+                store.insert(job,"{\"targetIdentity\":{\"type\":\"flow\",\"id\":\"legacy-flow\"}}");
+            }
+        }
+        var properties=new Properties();properties.setProperty("user","sa");properties.setProperty("password","");
+        try(var c=new org.h2.Driver().connect("jdbc:h2:file:"+config.dataDir.resolve("db/att-server")+";DB_CLOSE_ON_EXIT=FALSE",properties);var statement=c.createStatement()) {
+            statement.executeUpdate("DELETE FROM job_targets");statement.executeUpdate("UPDATE jobs SET target_search_version=0");
+        }
+        try(JobStore first=new JobStore(config)) {
+            assertEquals(205L,first.queryJobs(JobQuery.parse(Map.of(),"alice")).get("total"));
+            assertEquals(100,first.backfillSearchTargetsBatch());
+            assertThrows(JobStore.TargetSearchPendingException.class,()->first.queryJobs(JobQuery.parse(Map.of("search","legacy-flow","groupBy","target"),"alice")));
+        }
+        try(JobStore resumed=new JobStore(config)) {
+            assertThrows(JobStore.TargetSearchPendingException.class,()->resumed.queryJobs(JobQuery.parse(Map.of("search","legacy-flow"),"alice")));
+            assertEquals(100,resumed.backfillSearchTargetsBatch());assertEquals(5,resumed.backfillSearchTargetsBatch());assertEquals(0,resumed.backfillSearchTargetsBatch());
+            assertEquals(205L,resumed.queryJobs(JobQuery.parse(Map.of("search","legacy-flow","groupBy","target"),"alice")).get("total"));
         }
     }
     @Test void indexesCanonicalFallbackWithoutReplayAndHandlesExpandedUnicodeNormalization() throws Exception {

@@ -73,7 +73,7 @@ it('selects Schedule with keyboard and sends a typed server predicate, then supp
 it('restores filters after navigating back to Jobs',async()=>{
   sessionStorage.setItem('att.jobs.filters',JSON.stringify({principal:'alice',principalMode:'text',status:'PASS',sort:'target-desc',type:'run',grouped:'true'}));
   const queryJobs=vi.fn(async()=>response());await render({queryJobs});
-  expect(queryJobs).toHaveBeenLastCalledWith(expect.objectContaining({principal:'alice',principalMode:'text',status:'PASS',sort:'target-desc',executionType:'run',groupBy:'target'}));
+  expect(queryJobs).toHaveBeenLastCalledWith(expect.objectContaining({principal:'alice',principalMode:'text',status:'PASS',sort:'target-asc',executionType:'run',groupBy:'target'}));
 });
 
 it('keeps advanced filters collapsed with restored active values visible and Clear next to Refresh',async()=>{
@@ -88,4 +88,26 @@ it('keeps advanced filters collapsed with restored active values visible and Cle
   expect(host.querySelector('.att-jobs-active-filters')).toBeNull();expect(queryJobs).toHaveBeenLastCalledWith(expect.objectContaining({deletion:'all',pinnedOnly:false,from:undefined}));
   expect(button('Clear filters').parentElement).toBe(button('Refresh jobs').parentElement);
   expect(host.querySelector('.att-jobs-toolbar')?.textContent).toContain('Showing 1–1 of 1 Jobs');
+});
+
+it('reflects enforced A–Z grouping after descending Recent sort and retains the flat preference',async()=>{
+  const queryJobs=vi.fn(async()=>response());await render({queryJobs});
+  await select('Sort','target-desc');await advance();
+  expect(queryJobs).toHaveBeenLastCalledWith(expect.objectContaining({sort:'target-desc',groupBy:undefined}));
+  await select('View','target');await advance();
+  const sort=host.querySelector<HTMLSelectElement>('[aria-label="Sort"]')!;
+  expect(sort.value).toBe('target-asc');expect(sort.disabled).toBe(true);
+  expect(queryJobs).toHaveBeenLastCalledWith(expect.objectContaining({sort:'target-asc',groupBy:'target',offset:0}));
+  await select('View','recent');await advance();
+  expect(sort.value).toBe('target-desc');expect(sort.disabled).toBe(false);
+  expect(queryJobs).toHaveBeenLastCalledWith(expect.objectContaining({sort:'target-desc',groupBy:undefined}));
+});
+
+it('clears stale results when target search is pending and allows an explicit refresh retry',async()=>{
+  const message='Historical target search is being prepared. No partial results were returned. Retry Refresh jobs shortly.';
+  const queryJobs=vi.fn().mockResolvedValueOnce(response()).mockRejectedValueOnce(new Error(message)).mockResolvedValue(response());
+  await render({queryJobs});expect(host.querySelector('.att-job-target')).not.toBeNull();
+  await click(button('Refresh jobs'));await advance();
+  expect(host.querySelector('[role="alert"]')?.textContent).toBe(message);expect(host.querySelector('.att-job-target')).toBeNull();expect(host.textContent).not.toContain('No matching Jobs');
+  await click(button('Refresh jobs'));await advance();expect(host.querySelector('[role="alert"]')).toBeNull();expect(host.querySelector('.att-job-target')).not.toBeNull();
 });

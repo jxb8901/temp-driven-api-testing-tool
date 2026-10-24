@@ -125,7 +125,8 @@ public final class ApiServlet extends HttpServlet {
             if(path.matches("/jobs/[^/]+/result")){Map<String,Object> result=runtime.resultRecord(segment(path,2));result.put("requestId",requestId);json(res,200,result);return;}
             if(path.matches("/jobs/[^/]+")){Map<String,Object> view=runtime.jobRecord(segment(path,2));view.put("requestId",requestId);json(res,200,view);return;}
             error(res,404,"ATT-SERVER-NOT-FOUND","API resource was not found",requestId);
-        } catch(ServerRuntime.ArchiveUnavailableException e){error(res,409,"ATT-SERVER-ARCHIVE-UNAVAILABLE","Artifact archive is pending, failed, or unavailable; refresh the archive status",requestId);}
+        } catch(JobStore.TargetSearchPendingException e){res.setHeader("Retry-After","2");error(res,503,"ATT-SERVER-TARGET-SEARCH-PENDING","Historical target search is being prepared. No partial results were returned. Retry Refresh jobs shortly.",requestId);}
+          catch(ServerRuntime.ArchiveUnavailableException e){error(res,409,"ATT-SERVER-ARCHIVE-UNAVAILABLE","Artifact archive is pending, failed, or unavailable; refresh the archive status",requestId);}
           catch(ServerRuntime.ArtifactCapacityException e){error(res,503,"ATT-SERVER-ARTIFACT-CAPACITY","Artifact preview capacity is full; retry shortly",requestId);}
           catch(ServerRuntime.InlineLoadDisabledException e){error(res,403,"ATT-SERVER-INLINE-LOAD-DISABLED","Browser-submitted Load is disabled by Server configuration",requestId);}
           catch(ServerRuntime.InlineLoadLimitException e){error(res,400,"ATT-SERVER-INLINE-LOAD-LIMIT",safeDetail(e),requestId);}

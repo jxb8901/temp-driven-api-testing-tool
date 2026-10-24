@@ -37,7 +37,7 @@ final class JobQuery {
         return sql.toString();
     }
     String order() {
-        if(grouped||sort.startsWith("target-"))return "target_sort "+("target-desc".equals(sort)?"DESC":"ASC")+",package_id ASC,environment ASC,target_group ASC,created_at DESC,job_id DESC";
+        if(grouped||sort.startsWith("target-"))return "target_sort "+(!grouped&&"target-desc".equals(sort)?"DESC":"ASC")+",package_id ASC,environment ASC,target_group ASC,created_at DESC,job_id DESC";
         return "created_at "+("oldest".equals(sort)?"ASC":"DESC")+",job_id "+("oldest".equals(sort)?"ASC":"DESC");
     }
     private static int integer(String value,int fallback,int min,int max){try{int n=value==null?fallback:Integer.parseInt(value);if(n<min||n>max)throw new IllegalArgumentException();return n;}catch(Exception invalid){throw new IllegalArgumentException("Invalid Jobs page range");}}

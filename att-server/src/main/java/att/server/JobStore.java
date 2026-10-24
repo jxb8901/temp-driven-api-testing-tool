@@ -87,6 +87,7 @@ final class JobStore implements AutoCloseable {
             s.execute("CREATE UNIQUE INDEX IF NOT EXISTS jobs_schedule_occurrence_uq ON jobs(schedule_occurrence_id)");
             s.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS execution_spec CLOB");
             s.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS target_search_version INT DEFAULT 0 NOT NULL");
+            s.execute("CREATE INDEX IF NOT EXISTS jobs_target_search_version_idx ON jobs(target_search_version,job_id)");
             s.execute("CREATE TABLE IF NOT EXISTS job_targets (job_id VARCHAR(80) NOT NULL, target_type VARCHAR(16) NOT NULL, target_id VARCHAR(1024) NOT NULL, PRIMARY KEY(job_id,target_type,target_id), FOREIGN KEY(job_id) REFERENCES jobs(job_id) ON DELETE CASCADE)");
             s.execute("CREATE INDEX IF NOT EXISTS job_targets_identifier_idx ON job_targets(target_id,job_id)");
             s.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS replay_owner VARCHAR(256)");
@@ -110,20 +111,22 @@ final class JobStore implements AutoCloseable {
             s.execute("CREATE TABLE IF NOT EXISTS auth_sessions (token_hash VARCHAR(64) PRIMARY KEY, login_id VARCHAR(120) NOT NULL, csrf_token VARCHAR(64) NOT NULL, created_at BIGINT NOT NULL, last_seen BIGINT NOT NULL, absolute_expiry BIGINT NOT NULL)");
             s.execute("CREATE TABLE IF NOT EXISTS auth_bootstrap_claim (claim_id INT PRIMARY KEY, claimed_at VARCHAR(40) NOT NULL)");
             s.execute("CREATE INDEX IF NOT EXISTS load_schedule_execution_history_idx ON load_schedule_executions(schedule_id,scheduled_for)");
-            backfillSearchTargets(c);
         } catch(Exception failed){close();throw failed;}
     }
-    /** Migration reads each immutable snapshot once; list queries never parse private definitions. */
-    private void backfillSearchTargets(Connection c) throws Exception {
-        c.setAutoCommit(false);
-        try {
-            while(true) {
+    /** One resumable transaction; startup never reads historical private snapshots.
+     * The single migration executor needs no row locks: a concurrent delete either cascades
+     * indexed targets or causes this entire batch to roll back and retry without the deleted row.
+     */
+    int backfillSearchTargetsBatch() throws Exception {
+        try(Connection c=connect()) {
+            c.setAutoCommit(false);
+            try {
                 List<String[]> batch=new ArrayList<>();
-                try(Statement statement=c.createStatement();ResultSet rows=statement.executeQuery("SELECT job_id,execution_spec,target_identity FROM jobs WHERE target_search_version=0 LIMIT 100")) {
+                try(Statement statement=c.createStatement();ResultSet rows=statement.executeQuery("SELECT job_id,execution_spec,target_identity FROM jobs WHERE target_search_version=0 ORDER BY job_id LIMIT 100")) {
                     while(rows.next())batch.add(new String[]{rows.getString(1),rows.getString(2),rows.getString(3)});
                 }
-                if(batch.isEmpty())break;
                 for(String[] row:batch) {
+                    if(Thread.currentThread().isInterrupted())throw new InterruptedException("Target indexing stopped");
                     Set<Map<String,String>> targets=Set.of();
                     if(row[1]!=null) {
                         try {targets=JobListIdentity.searchTargets(JobExecutionSpec.parse(row[1]).definition());}
@@ -132,9 +135,13 @@ final class JobStore implements AutoCloseable {
                     if(targets.isEmpty()&&row[2]!=null)targets=singleSearchTarget(ServerRuntime.JSON.readTree(row[2]));
                     writeSearchTargets(c,row[0],targets);
                 }
-                c.commit();
-            }
-        } catch(Exception failure){c.rollback();throw failure;}
+                c.commit();return batch.size();
+            } catch(Exception failure){c.rollback();throw failure;}
+        }
+    }
+    static final class TargetSearchPendingException extends Exception { }
+    private static boolean targetSearchPending(Connection c) throws Exception {
+        try(Statement s=c.createStatement();ResultSet r=s.executeQuery("SELECT 1 FROM jobs WHERE target_search_version=0 LIMIT 1")){return r.next();}
     }
     private static Set<Map<String,String>> singleSearchTarget(com.fasterxml.jackson.databind.JsonNode identity) {
         String type=identity.path("type").asText(),id=identity.path("id").asText();
@@ -563,6 +570,8 @@ final class JobStore implements AutoCloseable {
         try(Connection c=connect()) {
             c.setTransactionIsolation(Connection.TRANSACTION_REPEATABLE_READ);c.setAutoCommit(false);
             try {
+                // Check in the same repeatable-read snapshot as totals/page/groups: never return partial search.
+                if(query.search!=null&&targetSearchPending(c))throw new TargetSearchPendingException();
                 long total;
                 try(PreparedStatement p=c.prepareStatement("SELECT COUNT(*) FROM jobs WHERE "+where)) {
                     bind(p,parameters);try(ResultSet r=p.executeQuery()){r.next();total=r.getLong(1);}

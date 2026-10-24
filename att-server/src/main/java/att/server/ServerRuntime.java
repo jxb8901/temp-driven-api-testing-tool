@@ -105,6 +105,7 @@ final class ServerRuntime implements AutoCloseable {
     final Semaphore streamSlots=new Semaphore(MAX_STREAM_OBSERVERS,true);
     private final ScheduledExecutorService retention;
     private final ScheduledExecutorService artifactMaintenance;
+    private final ScheduledExecutorService targetIndexMaintenance;
     private final java.util.concurrent.ConcurrentLinkedQueue<Job> deferredWorkerReleases=new java.util.concurrent.ConcurrentLinkedQueue<>();
     private final Set<String> deferredWorkerReleaseIds=ConcurrentHashMap.newKeySet();
     private String artifactRecoveryCursor="";
@@ -160,6 +161,7 @@ final class ServerRuntime implements AutoCloseable {
         for(int i=0;i<config.inspection.maxConcurrent;i++)inspectionWorkerPool.add(new InspectionWorker());
         retention=java.util.concurrent.Executors.newSingleThreadScheduledExecutor(r->{Thread t=new Thread(r,"att-server-retention");t.setDaemon(true);return t;});
         artifactMaintenance=java.util.concurrent.Executors.newSingleThreadScheduledExecutor(r->{Thread t=new Thread(r,"att-server-artifact-maintenance");t.setDaemon(true);return t;});
+        targetIndexMaintenance=java.util.concurrent.Executors.newSingleThreadScheduledExecutor(r->{Thread t=new Thread(r,"att-server-target-index");t.setDaemon(true);return t;});
         inspectionWatchdogs=java.util.concurrent.Executors.newSingleThreadScheduledExecutor(r->{Thread t=new Thread(r,"att-server-inspector-watchdog");t.setDaemon(true);return t;});
         inspectionWarmup=config.inspection.enabled&&config.inspection.warmup.enabled()
                 ?java.util.concurrent.Executors.newSingleThreadScheduledExecutor(r->{Thread t=new Thread(r,"att-server-inspector-warmup");t.setDaemon(true);return t;}):null;
@@ -170,6 +172,12 @@ final class ServerRuntime implements AutoCloseable {
         artifactMaintenance.scheduleWithFixedDelay(this::reconcileWorkerReleases,1,1,TimeUnit.SECONDS);
         retention.scheduleWithFixedDelay(this::expireDraftsSafely,1,1,TimeUnit.MINUTES);
         retention.scheduleWithFixedDelay(this::cleanupRequestedDeletionsSafely,5,5,TimeUnit.SECONDS);
+        targetIndexMaintenance.scheduleWithFixedDelay(()->{
+            if(closing)return;
+            try {if(store.backfillSearchTargetsBatch()==0)targetIndexMaintenance.shutdown();}
+            catch(InterruptedException stopped){Thread.currentThread().interrupt();}
+            catch(Exception failed){if(!closing)java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).log(java.util.logging.Level.WARNING,"Historical target indexing will retry",failed);}
+        },100,100,TimeUnit.MILLISECONDS);
         if(config.scheduling.enabled) {
             store.recoverScheduleExecutions();
             if(!config.authenticationRequired&&config.authorization.allowAnonymousOperations)java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).warning("ATT operations are enabled without authentication; anonymous clients share operational access");
@@ -3371,7 +3379,7 @@ final class ServerRuntime implements AutoCloseable {
         if(inspectionWarmup!=null)inspectionWarmup.shutdownNow();
         if(executionWorkers!=null)executionWorkers.close();
         if(loadScheduleScheduler!=null)loadScheduleScheduler.close();
-        retention.shutdownNow();artifactMaintenance.shutdownNow();inspectionWatchdogs.shutdownNow();
+        retention.shutdownNow();artifactMaintenance.shutdownNow();targetIndexMaintenance.shutdownNow();inspectionWatchdogs.shutdownNow();
         synchronized(draftLock){runDrafts.clear();debugDrafts.clear();quickLoadDrafts.clear();advancedLoadDrafts.clear();catalogLoadDrafts.clear();replayReviews.clear();}
         inspectors.shutdownNow();workers.shutdownNow();streams.shutdownNow();
         for(InspectionWorker worker:inspectionWorkerPool)worker.close();
@@ -3381,7 +3389,7 @@ final class ServerRuntime implements AutoCloseable {
         }
         for(Process process:inspectionProcesses.keySet())if(process.isAlive())forceTree(process);
         terminateExecutor(workers,"workers");terminateExecutor(inspectors,"inspectors");terminateExecutor(streams,"SSE streams");
-        terminateExecutor(retention,"retention");terminateExecutor(artifactMaintenance,"artifact maintenance");terminateExecutor(inspectionWatchdogs,"inspection watchdogs");
+        terminateExecutor(targetIndexMaintenance,"target indexing");terminateExecutor(retention,"retention");terminateExecutor(artifactMaintenance,"artifact maintenance");terminateExecutor(inspectionWatchdogs,"inspection watchdogs");
         if(inspectionWarmup!=null)terminateExecutor(inspectionWarmup,"inspection warmup");
         for(Job job:jobs.values())if(!job.terminal()) {
             FutureTask<Void> task=tasks.remove(job.id);if(task!=null)task.cancel(false);

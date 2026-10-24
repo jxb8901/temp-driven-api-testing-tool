@@ -29,7 +29,7 @@ async function main(){
     });
     const base=fixture.origin+'/att/ui/';await page.goto(base+'#/jobs');await page.getByText('Apply to this page: 100 Jobs',{exact:true}).waitFor();
     assert.equal(await page.locator('.att-jobs-table tbody tr').count(),100);assert.equal(await page.locator('.att-jobs-page input[type="checkbox"]').count(),0);assert.equal(await page.locator('.att-jobs-table').getByText(/PRIVATE/).count(),0);
-    for(const viewport of [{width:1440,height:1000},{width:768,height:900},{width:390,height:844}]) {
+    for(const viewport of [{width:1920,height:1080},{width:1440,height:1000},{width:768,height:900},{width:390,height:844}]) {
       await page.setViewportSize(viewport);
       const heading=await page.getByRole('heading',{name:'Jobs',exact:true}).boundingBox(),first=await page.locator('.att-jobs-table tbody tr').first().boundingBox();
       const distance=first.y-heading.y;
@@ -37,6 +37,20 @@ async function main(){
       for(const control of await page.locator('.att-jobs-filter-grid:not([hidden]) input,.att-jobs-filter-grid:not([hidden]) select').all()) {
         const box=await control.boundingBox();assert.ok(box.x>=0&&box.x+box.width<=viewport.width+1,'No clipped filter fields');
       }
+      const actions=page.locator('.att-jobs-row-actions').first();
+      await actions.getByRole('button',{name:'Schedule / Reschedule…',exact:true}).waitFor();
+      const boxes=await actions.locator('button').evaluateAll(buttons=>buttons.map(button=>{const r=button.getBoundingClientRect();return {x:r.x,y:r.y,right:r.right,bottom:r.bottom,height:r.height};}));
+      assert.equal(boxes.length,4,'Pin, Delete, Rerun and Schedule all visible');
+      const area=await actions.boundingBox(),cell=await actions.locator('..').boundingBox();
+      assert.ok(area.x>=cell.x-1&&area.x+area.width<=cell.x+cell.width+1,'Action group fits its cell');
+      assert.ok(await actions.locator('button').evaluateAll(buttons=>buttons.every(button=>button.scrollWidth<=button.clientWidth+1)),'No clipped action text');
+      for(const box of boxes)assert.ok(box.x>=area.x-1&&box.right<=area.x+area.width+1&&box.right<=viewport.width+1,'All actions fit the cell/card');
+      for(let a=0;a<boxes.length;a++)for(let b=a+1;b<boxes.length;b++)assert.ok(boxes[a].right<=boxes[b].x+1||boxes[b].right<=boxes[a].x+1||boxes[a].bottom<=boxes[b].y+1||boxes[b].bottom<=boxes[a].y+1,'Actions do not overlap');
+      const lines=new Set(boxes.map(box=>Math.round(box.y))).size;
+      if(viewport.width===1920)assert.equal(lines,1,'Wide layout fits all four actions on one line');
+      if(viewport.width===1440) {assert.ok(lines<=2,`Desktop Actions use ${lines} lines`);assert.equal(Math.round(boxes[0].y),Math.round(boxes[2].y),'Pin, Delete and Rerun share first line');}
+      console.log(`Actions ${viewport.width}px: ${lines} lines, heights ${boxes.map(box=>Math.round(box.height))}`);
+      if(process.env.ATT_UI_SCREENSHOT_DIR)await page.locator('.att-jobs-table tbody tr').first().screenshot({path:`${process.env.ATT_UI_SCREENSHOT_DIR}/jobs-actions-${viewport.width}.png`});
       assert.equal(await page.locator('#jobs-more-filters').isVisible(),false);
       await page.getByRole('button',{name:'More filters',exact:true}).click();
       await page.getByLabel('Deletion state',{exact:true}).selectOption('pending');
@@ -48,7 +62,11 @@ async function main(){
       console.log(`Jobs heading to first result at ${viewport.width}px: ${Math.round(distance)}px`);
     }
     await page.setViewportSize({width:1440,height:1000});
-    await page.getByLabel('View',{exact:true}).selectOption('target');await page.getByRole('button',{name:/240 matching Jobs/}).waitFor();await page.getByRole('button',{name:/240 matching Jobs/}).click();
+    await page.getByLabel('Sort',{exact:true}).selectOption('target-desc');
+    await page.getByLabel('View',{exact:true}).selectOption('target');
+    assert.equal(await page.getByLabel('Sort',{exact:true}).inputValue(),'target-asc');
+    assert.equal(await page.getByLabel('Sort',{exact:true}).isDisabled(),true);
+    await page.getByRole('button',{name:/240 matching Jobs/}).waitFor();await page.getByRole('button',{name:/240 matching Jobs/}).click();
     await page.getByRole('button',{name:'Pin all ▾',exact:true}).click();await page.getByRole('menuitem',{name:'Pin all on this page',exact:true}).click();await page.getByText(/100 updated/).waitFor();assert.equal(mutations[0].body.jobIds.length,100);assert.equal(mutations[0].body.pinned,true);
     await page.getByRole('button',{name:'Next',exact:true}).click();await page.getByText('Showing 101–200 of 240 Jobs',{exact:true}).first().waitFor();
     await page.getByLabel('Rows per page',{exact:true}).selectOption('50');await page.getByText('Showing 1–50 of 240 Jobs',{exact:true}).first().waitFor();
