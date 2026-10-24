@@ -203,12 +203,12 @@ class LoadReportTest {
         Map<String, Object> steadyThreshold = Collections.<String, Object>singletonMap("p95", "<= 20ms");
         LoadScenario scenario = new LoadScenario(Paths.get("warmup-only.yaml"), "template", "LOAD_TEMPLATE",
                 Collections.emptyMap(), Collections.emptyMap(), LoadScenario.Model.ARRIVAL_RATE, 0, 1.0, "1/s",
-                Duration.ofSeconds(1), Duration.ZERO, Duration.ofSeconds(1), Duration.ZERO, Duration.ZERO,
+                Duration.ofMillis(250), Duration.ZERO, Duration.ofMillis(250), Duration.ZERO, Duration.ZERO,
                 1, "drop", Collections.<String, Object>singletonMap("steady", steadyThreshold), Collections.emptyMap());
-        LoadMetrics metrics = LoadMetrics.forScenario(scenario, startMs, 2_000L);
+        LoadMetrics metrics = LoadMetrics.forScenario(scenario, startMs, 500L);
         metrics.onEvent(LoadEvent.completed("warmup-only", "arrivalRate", "WARMUP", "warmup", null, 1,
-                startMs + 500L, startMs + 500L, startMs + 600L, ResultStatus.PASS));
-        metrics.finish(startMs + 2_000L);
+                startMs + 100L, startMs + 100L, startMs + 150L, ResultStatus.PASS));
+        metrics.finish(startMs + 500L);
 
         @SuppressWarnings("unchecked") Map<String, Object> windowMetrics =
                 (Map<String, Object>) metrics.snapshot().value("windowMetrics");
@@ -216,15 +216,19 @@ class LoadReportTest {
                 (Map<String, Object>) windowMetrics.get("timeSeries");
         @SuppressWarnings("unchecked") List<Map<String, Object>> points =
                 (List<Map<String, Object>>) series.get("points");
-        assertEquals(1, points.size(), "the fixture has samples in warm-up only");
+        assertEquals(1, points.size(), "the fixture has one coarse bucket spanning warm-up and steady");
+        assertEquals(startMs, ((Number) points.get(0).get("windowStartEpochMs")).longValue());
+        assertEquals(1_000L, ((Number) points.get(0).get("durationMs")).longValue());
         assertTrue(((List<?>) points.get(0).get("phaseCoverage")).contains("WARMUP"));
+        assertTrue(((List<?>) points.get(0).get("phaseCoverage")).contains("STEADY"));
+        assertEquals(1L, points.get(0).get("completed"), "the only completion belongs to warm-up");
         @SuppressWarnings("unchecked") Map<String, Object> windows = (Map<String, Object>) windowMetrics.get("windows");
         @SuppressWarnings("unchecked") Map<String, Object> steadyWindow = (Map<String, Object>) windows.get("steady");
         @SuppressWarnings("unchecked") Map<String, Object> cohort = (Map<String, Object>) steadyWindow.get("cohort");
         @SuppressWarnings("unchecked") Map<String, Object> latency = (Map<String, Object>) cohort.get("latency");
         assertEquals(0L, latency.get("observationCount"));
 
-        LoadRunResult result = new LoadRunResult("warmup-only", scenario, started, started.plusSeconds(2), metrics.snapshot());
+        LoadRunResult result = new LoadRunResult("warmup-only", scenario, started, started.plusMillis(500), metrics.snapshot());
         Path report = new LoadReportWriter().write(temp, result);
         String html = new String(Files.readAllBytes(report), StandardCharsets.UTF_8);
         int chartStart = html.indexOf("function chart(id,legendId,series,unit,baseMax,opts)");
@@ -235,10 +239,18 @@ class LoadReportTest {
                 "each window selection must clear the previous SVG before the empty-series return");
         assertTrue(html.contains("legendList.textContent='';"), "the empty selection must also clear the previous legend");
         assertTrue(html.contains("No data for selected window"), "empty charts need a visible and accessible state");
+        assertTrue(html.contains("No complete time-series buckets inside selected window; partial boundary buckets are omitted."),
+                "a window containing only mixed-boundary buckets must explain why its trend is empty");
+        assertTrue(html.contains("Trend charts omit buckets that cross this window boundary to avoid mixing out-of-window events"),
+                "the selected window must disclose that partial buckets are filtered");
         assertTrue(html.contains("if(select)select.addEventListener('change',function(){show(select.value)});"),
                 "changing the window selector must rerender the selected window");
-        assertTrue(html.contains("function currentPoints(){var win=w[select?select.value:'steady'];"),
-                "trend series must use the selected window's points");
+        assertTrue(html.contains("function inWindow(p,win){return p.windowStartEpochMs>=win.windowStartEpochMs&&p.windowStartEpochMs+p.durationMs<=win.windowEndEpochMs}"),
+                "a trend bucket must fit entirely inside the selected window");
+        assertTrue(html.contains("function currentPoints(){var key=select?select.value:'steady',win=w[key];if(!win||key==='all')return points;return points.filter(function(p){return inWindow(p,win)})}"),
+                "trend series must omit buckets that overlap but cross the selected window boundary");
+        assertTrue(html.contains("function hasPartialBuckets(){"),
+                "empty windows with omitted partial buckets must be distinguishable from windows with no samples");
         int emptyReturn = html.indexOf("return}svg.setAttribute", emptyWindowCheck);
         int sloDrawing = html.indexOf("var slo=id==='latency-chart'", chartStart);
         assertTrue(emptyReturn > emptyWindowCheck && emptyReturn < sloDrawing,
