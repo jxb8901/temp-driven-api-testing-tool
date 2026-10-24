@@ -158,7 +158,11 @@ function apiPayload(pathname, url, plan) {
   if (pathValue === 'version') return apiFixture.version;
   if (pathValue === 'auth/capabilities') return apiFixture.capabilities;
   if (pathValue === 'packages') return apiFixture.packages;
-  if (pathValue === 'jobs') return { items: makeJobs(fixtureSpec.jobs) };
+  if (pathValue === 'jobs') {
+    const jobs=makeJobs(fixtureSpec.jobs),offset=Number(url.searchParams.get('offset')||0),limit=Number(url.searchParams.get('limit')||100);
+    jobs.sort((a,b)=>url.searchParams.get('sort')==='oldest'?String(a.createdAt).localeCompare(String(b.createdAt)):String(b.createdAt).localeCompare(String(a.createdAt)));
+    return {items:jobs.slice(offset,offset+limit),total:jobs.length,offset,limit,groups:[],principalSuggestions:[],packageSuggestions:[fixtureSpec.packageId]};
+  }
   if (pathValue === 'metrics') return apiFixture.metrics;
   if (pathValue === 'configuration' || pathValue.startsWith('packages/') && /\/configuration(?:$|\?)/.test(pathValue)) return apiFixture.configuration;
   if (pathValue.includes('/configuration/files')) return apiFixture.configurationFiles;
