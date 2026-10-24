@@ -30,6 +30,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class LoadMqPoolingTest {
@@ -94,6 +95,70 @@ class LoadMqPoolingTest {
             delegate.releaseGet.countDown();
             workers.shutdownNow();
         }
+    }
+
+    @Test
+    void blockedMqHandshakeHonorsOverallPreparationDeadlineAndClosesLateConnection() throws Exception {
+        FrameworkConfig config = config(2, 0, 100L);
+        LoadTarget target = target();
+        CountDownLatch connectEntered = new CountDownLatch(1);
+        CountDownLatch releaseConnect = new CountDownLatch(1);
+        CountDownLatch disconnected = new CountDownLatch(1);
+        AtomicInteger interruptedConnect = new AtomicInteger();
+        AtomicInteger disconnectCount = new AtomicInteger();
+        MqTransport.Factory slowFactory = helper -> {
+            connectEntered.countDown();
+            try { releaseConnect.await(); }
+            catch (InterruptedException interrupted) {
+                interruptedConnect.incrementAndGet();
+                boolean released = false;
+                while (!released) {
+                    try { releaseConnect.await(); released = true; }
+                    catch (InterruptedException ignored) { /* emulate a transport that needs its own timeout */ }
+                }
+            }
+            return new MqTransport.Connection() {
+                @Override public MqTransport.Queue open(String queue, boolean input, boolean output) {
+                    throw new AssertionError("Readiness must not open a business queue");
+                }
+                @Override public void disconnect() { disconnectCount.incrementAndGet(); disconnected.countDown(); }
+                @Override public void close() { disconnect(); }
+            };
+        };
+        List<Map<String, Object>> events = Collections.synchronizedList(new ArrayList<Map<String, Object>>());
+        int permitsBefore = LoadRunResources.availablePreparationPermits();
+        long startedNanos = System.nanoTime();
+
+        try (LoadRunResources resources = new LoadRunResources(tempDir, config, slowFactory, 400L)) {
+            resources.setPreparationObserver(event -> events.add(new LinkedHashMap<String, Object>(event)));
+            IterationExecutor executor = new IterationExecutor(tempDir, config, target, resources, tempDir.resolve("mq-deadline-output"));
+            LoadScenario scenario = new LoadScenario(tempDir.resolve("scenario-mq-deadline.yaml"), "template", "MQ",
+                    Collections.<String, Object>emptyMap(), Collections.<String, Object>emptyMap(), LoadScenario.Model.CLOSED,
+                    1, 0.0, null, Duration.ZERO, Duration.ZERO, Duration.ofMillis(100), Duration.ZERO,
+                    Duration.ZERO, 0, "", Collections.<String, Object>emptyMap(), Collections.<String, Object>emptyMap());
+            ClosedVuScheduler scheduler = new ClosedVuScheduler(scenario, executor, "blocked-mq-run",
+                    (LoadEventListener) event -> events.add(Collections.<String, Object>singletonMap("event", "ITERATION_EVENT")));
+
+            assertThrows(LoadResourcePreparationException.class, scheduler::run);
+            assertTrue(resources.isClosed());
+        } finally {
+            releaseConnect.countDown();
+        }
+
+        long elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedNanos);
+        assertTrue(connectEntered.await(1L, TimeUnit.SECONDS), "the test must reach the blocking MQ handshake");
+        assertTrue(interruptedConnect.get() > 0, "bounded cancellation must interrupt the in-flight MQ connect");
+        assertTrue(disconnected.await(2L, TimeUnit.SECONDS), "late MQ connections must be closed after timeout");
+        assertEquals(1, disconnectCount.get());
+        assertTrue(elapsedMs < 2_000L, "the overall preparation deadline should bound scheduler release: " + elapsedMs + " ms");
+        assertEquals(permitsBefore, LoadRunResources.availablePreparationPermits(), "preparation permits must be released on timeout");
+        assertTrue(events.stream().anyMatch(event -> "LOAD_PREPARATION_FAILED".equals(event.get("event"))), events.toString());
+        assertTrue(events.stream().noneMatch(event -> "LOAD_RESOURCES_READY".equals(event.get("event"))), events.toString());
+        assertTrue(events.stream().noneMatch(event -> "LOAD_START".equals(event.get("event"))), events.toString());
+        assertTrue(events.stream().noneMatch(event -> "ITERATION_EVENT".equals(event.get("event"))), events.toString());
+        Map<String, Object> failed = events.stream().filter(event -> "LOAD_PREPARATION_FAILED".equals(event.get("event")))
+                .findFirst().orElseThrow(AssertionError::new);
+        assertEquals("PREPARATION_TIMEOUT", failed.get("errorType"));
     }
 
     @Test

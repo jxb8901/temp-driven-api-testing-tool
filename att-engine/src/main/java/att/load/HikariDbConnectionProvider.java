@@ -25,6 +25,9 @@ public final class HikariDbConnectionProvider implements DbConnectionProvider {
         // initialize and discard a second physical pool.
         return pools.computeIfAbsent(config.id(), ignored -> new HikariDbPool(config));
     }
+    public HikariDbPool pool(DbHelperConfig config, long preparationConnectTimeoutMs) {
+        return pools.computeIfAbsent(config.id(), ignored -> new HikariDbPool(config, preparationConnectTimeoutMs));
+    }
     public Map<String, Map<String, Object>> metrics() {
         Map<String, Map<String, Object>> result = new LinkedHashMap<String, Map<String, Object>>();
         for (Map.Entry<String, HikariDbPool> entry : pools.entrySet()) result.put(entry.getKey(), entry.getValue().metrics());

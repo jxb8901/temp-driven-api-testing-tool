@@ -18,5 +18,15 @@ public final class LoadThresholdSummary {
         for (ThresholdResult item : results) if ("NOT_EVALUATED".equals(item.status())) return "NOT_EVALUATED";
         return "MET";
     }
-    public Map<String, Object> toMap() { Map<String, Object> result = new LinkedHashMap<String, Object>(); result.put("status", passed ? "PASS" : "FAIL"); result.put("performanceVerdict", status()); List<Map<String, Object>> items = new ArrayList<Map<String, Object>>(); for (ThresholdResult item : results) items.add(item.toMap()); result.put("results", items); return result; }
+    public Map<String, Object> toMap() {
+        Map<String, Object> result = new LinkedHashMap<String, Object>();
+        String verdict = status();
+        result.put("status", verdict);
+        result.put("performanceVerdict", verdict);
+        result.put("legacyPassed", passed);
+        List<Map<String, Object>> items = new ArrayList<Map<String, Object>>();
+        for (ThresholdResult item : results) items.add(item.toMap());
+        result.put("results", items);
+        return result;
+    }
 }

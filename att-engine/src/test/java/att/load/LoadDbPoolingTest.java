@@ -156,6 +156,49 @@ class LoadDbPoolingTest {
     }
 
     @Test
+    void blockedDbConnectionHonorsOverallPreparationDeadlineAndNeverReleasesScheduler() throws Exception {
+        String url = "jdbc:att-load:blocked-connect";
+        driver.blockConnectUrl = url;
+        DbHelperConfig helper = db("orders", url, 2, 500L, "rollback");
+        FrameworkConfig config = framework(helper);
+        LoadTarget target = target(project(), template(singleQuery()));
+        List<Map<String, Object>> events = Collections.synchronizedList(new ArrayList<Map<String, Object>>());
+        int permitsBefore = LoadRunResources.availablePreparationPermits();
+        long startedNanos = System.nanoTime();
+
+        try (LoadRunResources resources = new LoadRunResources(tempDir, config, new att.exec.IbmMqClientFactory(), 400L)) {
+            resources.setPreparationObserver(event -> events.add(new LinkedHashMap<String, Object>(event)));
+            IterationExecutor executor = new IterationExecutor(tempDir, config, target, resources,
+                    tempDir.resolve("output-blocked-readiness"));
+            LoadScenario scenario = new LoadScenario(tempDir.resolve("scenario-blocked.yaml"), "template", "DB",
+                    Collections.<String, Object>emptyMap(), Collections.<String, Object>emptyMap(),
+                    LoadScenario.Model.CLOSED, 1, 0.0, null, java.time.Duration.ZERO, java.time.Duration.ZERO,
+                    java.time.Duration.ofMillis(100), java.time.Duration.ZERO, java.time.Duration.ZERO, 0, "",
+                    Collections.<String, Object>emptyMap(), Collections.<String, Object>emptyMap());
+            ClosedVuScheduler scheduler = new ClosedVuScheduler(scenario, executor, "blocked-db-run",
+                    (LoadEventListener) event -> events.add(Collections.<String, Object>singletonMap("event", "ITERATION_EVENT")));
+
+            assertThrows(LoadResourcePreparationException.class, scheduler::run);
+            assertTrue(resources.isClosed());
+        } finally {
+            driver.releaseConnect.countDown();
+        }
+
+        long elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedNanos);
+        assertTrue(driver.connectEntered.await(1L, TimeUnit.SECONDS), "the test must reach the blocking DB connect");
+        assertTrue(driver.connectInterrupted, "closing the failed run must interrupt the in-flight JDBC connect");
+        assertTrue(elapsedMs < 2_000L, "the overall preparation deadline should bound cancellation and cleanup: " + elapsedMs + " ms");
+        assertEquals(permitsBefore, LoadRunResources.availablePreparationPermits(), "preparation permits must be released on timeout");
+        assertTrue(events.stream().anyMatch(event -> "LOAD_PREPARATION_FAILED".equals(event.get("event"))), events.toString());
+        assertTrue(events.stream().noneMatch(event -> "LOAD_RESOURCES_READY".equals(event.get("event"))), events.toString());
+        assertTrue(events.stream().noneMatch(event -> "LOAD_START".equals(event.get("event"))), events.toString());
+        assertTrue(events.stream().noneMatch(event -> "ITERATION_EVENT".equals(event.get("event"))), events.toString());
+        Map<String, Object> failed = events.stream().filter(event -> "LOAD_PREPARATION_FAILED".equals(event.get("event")))
+                .findFirst().orElseThrow(AssertionError::new);
+        assertEquals("PREPARATION_TIMEOUT", failed.get("errorType"));
+    }
+
+    @Test
     void dynamicDbActionIsReportedAsSkippedUntilFirstUse() throws Exception {
         String configuredUrl = "jdbc:att-load:dynamic-helper";
         FrameworkConfig config = framework(db("orders", configuredUrl, 2, 500L, "rollback"));
@@ -362,14 +405,27 @@ class LoadDbPoolingTest {
     private static final class FakeDriver implements Driver {
         final Map<String, FakeState> states = new LinkedHashMap<String, FakeState>();
         volatile boolean blockQueries;
+        volatile String blockConnectUrl;
+        volatile boolean connectInterrupted;
         final CountDownLatch queryEntered = new CountDownLatch(1);
         final CountDownLatch releaseQuery = new CountDownLatch(1);
         final CountDownLatch queryFinished = new CountDownLatch(1);
+        final CountDownLatch connectEntered = new CountDownLatch(1);
+        final CountDownLatch releaseConnect = new CountDownLatch(1);
         volatile String failUrl;
 
         @Override public Connection connect(String url, Properties info) throws SQLException {
             if (!acceptsURL(url)) return null;
             if (url.equals(failUrl)) throw new SQLException("simulated connection refusal", "08001");
+            if (url.equals(blockConnectUrl)) {
+                connectEntered.countDown();
+                try { releaseConnect.await(); }
+                catch (InterruptedException interrupted) {
+                    connectInterrupted = true;
+                    Thread.currentThread().interrupt();
+                    throw new SQLException("simulated JDBC connection interrupted", "08001", interrupted);
+                }
+            }
             FakeState state = states.get(url);
             if (state == null) { state = new FakeState(); states.put(url, state); }
             state.connections++;

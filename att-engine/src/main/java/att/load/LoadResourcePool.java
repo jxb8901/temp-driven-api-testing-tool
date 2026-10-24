@@ -60,8 +60,27 @@ public final class LoadResourcePool<T> implements AutoCloseable {
 
     /** Creates the configured idle floor without borrowing or sharing a resource. */
     public void ensureMinIdle(int minIdle) {
+        try { ensureMinIdleBounded(minIdle, Long.MAX_VALUE); }
+        catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("resource preparation interrupted", interrupted);
+        } catch (java.util.concurrent.TimeoutException impossible) {
+            throw new IllegalStateException("resource preparation timed out", impossible);
+        }
+    }
+
+    /** Creates an idle floor while honoring the run-wide preparation deadline. */
+    public void ensureMinIdle(int minIdle, long deadlineNanos)
+            throws InterruptedException, java.util.concurrent.TimeoutException {
+        ensureMinIdleBounded(minIdle, deadlineNanos);
+    }
+
+    private void ensureMinIdleBounded(int minIdle, long deadlineNanos)
+            throws InterruptedException, java.util.concurrent.TimeoutException {
         if (minIdle < 0 || minIdle > maxSize) throw new IllegalArgumentException("pool minIdle must be from 0 to maxSize");
         while (true) {
+            if (Thread.currentThread().isInterrupted()) throw new InterruptedException("resource preparation cancelled");
+            if (System.nanoTime() >= deadlineNanos) throw new java.util.concurrent.TimeoutException("LOAD_PREPARATION_TIMEOUT");
             synchronized (this) {
                 if (closed) throw new IllegalStateException("resource pool is closed");
                 if (idle.size() + creating >= minIdle || total.get() >= maxSize) return;
@@ -79,9 +98,13 @@ public final class LoadResourcePool<T> implements AutoCloseable {
                 failures.incrementAndGet();
                 throw new IllegalStateException("resource factory returned null");
             }
+            boolean interrupted = Thread.currentThread().isInterrupted();
+            boolean timedOut = System.nanoTime() >= deadlineNanos;
+            boolean closedDuringConnect;
             synchronized (this) {
                 creating--;
-                if (closed) total.decrementAndGet();
+                closedDuringConnect = closed;
+                if (closedDuringConnect || timedOut || interrupted) total.decrementAndGet();
                 else {
                     created.incrementAndGet();
                     if (!idle.offer(value)) total.decrementAndGet();
@@ -89,6 +112,9 @@ public final class LoadResourcePool<T> implements AutoCloseable {
                 }
             }
             if (value != null) closeQuietly(value);
+            if (interrupted) throw new InterruptedException("resource preparation cancelled");
+            if (timedOut) throw new java.util.concurrent.TimeoutException("LOAD_PREPARATION_TIMEOUT");
+            if (closedDuringConnect) throw new IllegalStateException("resource pool is closed");
         }
     }
 

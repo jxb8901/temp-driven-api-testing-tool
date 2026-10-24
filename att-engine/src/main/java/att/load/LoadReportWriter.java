@@ -51,7 +51,15 @@ public final class LoadReportWriter {
         List<ThresholdResult> thresholdResults=result.thresholds().results();
         String thresholdSummary;
         if(thresholdResults.isEmpty())thresholdSummary="none configured";
-        else {int passed=0;for(ThresholdResult item:thresholdResults)if(item.passed())passed++;thresholdSummary=passed+" passed / "+(thresholdResults.size()-passed)+" failed";}
+        else {
+            int passed=0, failed=0, notEvaluated=0;
+            for(ThresholdResult item:thresholdResults) {
+                if("NOT_EVALUATED".equals(item.status()))notEvaluated++;
+                else if(item.passed())passed++;
+                else failed++;
+            }
+            thresholdSummary=passed+" passed / "+failed+" failed / "+notEvaluated+" not evaluated";
+        }
         html.append("<p>Thresholds: ").append(thresholdSummary)
                 .append(" / Execution: ").append(escape(status)).append(" (runtime errors, all phases: ")
                 .append(count(metrics.get("runtimeError"))).append(")</p>");
@@ -85,12 +93,6 @@ public final class LoadReportWriter {
     private String errorRate(Map<String,Object> metrics,String key) {
         return numeric(metrics,"measuredCompleted")==0?"N/A":percent(metrics.get(key));
     }
-    private String rateCells(Map<String,Object> metrics) {
-        return "<span title=\""+errorCounts(metrics,"measuredFailure")+"\">"+errorRate(metrics,"sutErrorRate")+"</span></td><td>"
-                +"<span title=\""+errorCounts(metrics,"measuredRuntimeError")+"\">"+errorRate(metrics,"runtimeErrorRate")+"</span></td><td>"
-                +"<span title=\""+errorCounts(metrics,null)+"\">"+errorRate(metrics,"totalErrorRate")+"</span>";
-    }
-
     private void appendFailureDiagnosis(StringBuilder html,LoadRunResult result,Map<String,Object> metrics) {
         html.append("<section class=\"panel\"><h2>Runtime failures / Failure diagnosis</h2><p>Runtime errors (all phases): ")
                 .append(count(metrics.get("runtimeError"))).append("; measured runtime errors: ")
@@ -182,52 +184,79 @@ public final class LoadReportWriter {
 
     private void appendModelSemantics(StringBuilder html, LoadRunResult result, Map<String, Object> metrics) {
         html.append("<section class=\"panel\"><h2>Workload semantics</h2><div class=\"concepts\">");
+        Map<?, ?> steady = steadyWindow(metrics);
+        Object completedRate = steady.isEmpty() ? metrics.get("completedThroughput") : steady.get("completedRate");
+        Object successfulRate = steady.isEmpty() ? metrics.get("successfulThroughput") : steady.get("successfulRate");
+        String rateBasis = steady.isEmpty() ? "legacy measured throughput" : "event-time completions / configured steady duration";
         if (result.scenario().model() == LoadScenario.Model.ARRIVAL_RATE) {
             concept(html, "Configured arrival rate", rate(metrics.get("configuredArrivalRatePerSecond")), "scenario target; it is not completed TPS", "");
             concept(html, "Achieved scheduling rate", rate(metrics.get("measuredAchievedArrivalRate")), "started / planned arrivals in measured phases", "");
-            concept(html, "Completed TPS", rate(metrics.get("completedThroughput")), "iterations completed by the SUT per second", "");
+            concept(html, "Actual completed TPS", rate(completedRate), rateBasis, "");
+            concept(html, "Actual successful TPS", rate(successfulRate), "event-time PASS completions / configured steady duration", "");
             concept(html, "Dropped arrivals", count(metrics.get("measuredDropped")), "generator saturation; excluded from SUT error", "drop");
             concept(html, "SUT failures", count(metrics.get("measuredFailure")), "completed iterations with FAIL status", "error");
         } else {
             concept(html, "Configured users", count(metrics.get("configuredUsers")), "stable closed-model virtual users", "");
             concept(html, "Active VUs", count(metrics.get("maxActiveVus")), "maximum concurrently active virtual users", "");
-            concept(html, "Completed TPS", rate(metrics.get("completedThroughput")), "measured completed iterations per second", "");
+            concept(html, "Actual completed TPS", rate(completedRate), rateBasis, "");
+            concept(html, "Actual successful TPS", rate(successfulRate), "event-time PASS completions / configured steady duration", "");
             concept(html, "SUT failures", count(metrics.get("measuredFailure")), "completed iterations with FAIL status", "error");
         }
         html.append("</div></section>");
     }
 
     private void appendPhaseTable(StringBuilder html, LoadRunResult result, Map<String, Object> summary) {
-        html.append("<section class=\"panel\"><h2>Phase timing and warm-up separation</h2>");
-        html.append("<p class=\"note\">Warm-up traffic is visible but excluded from measured SLA aggregates. Ramp-up, steady, and ramp-down remain measured.</p>");
-        Map<String, Map<String, Object>> observed = result.metrics().phases();
+        html.append("<section class=\"panel\"><h2>Phase windows and event-time completion rates</h2>");
+        html.append("<p class=\"note\">Counts and rates use event timestamps inside each phase window. Cohort outcomes and latency follow scheduled timestamps, including completions during later phases or drain. DRAIN has no configured duration; its rates use the observed post-generation interval.</p>");
+        Map<?, ?> windows = Collections.emptyMap();
+        Object windowMetricsValue = result.metrics().values().get("windowMetrics");
+        if (windowMetricsValue instanceof Map) windows = nested((Map<?, ?>) windowMetricsValue, "windows");
         Object timingValue = summary.get("timing");
         if (!(timingValue instanceof Map)) { html.append("<p class=\"empty\">No phase timing available.</p></section>"); return; }
         Object phasesValue = ((Map<?, ?>) timingValue).get("phases");
         if (!(phasesValue instanceof List)) { html.append("<p class=\"empty\">No phase timing available.</p></section>"); return; }
-        html.append("<div class=\"scroll\"><table><thead><tr><th>Phase</th><th>Configured window</th><th>Measured</th><th>Scheduled</th><th>Started</th><th>Completed</th><th>Failures</th><th>Runtime errors</th><th>SUT Fail %</th><th>Runtime Error %</th><th>Total Error %</th><th>Drops</th><th>Completed TPS</th><th>Successful TPS</th><th>p95</th><th>Classifications</th></tr></thead><tbody>");
+        html.append("<div class=\"scroll\"><table><thead><tr><th>Phase</th><th>Phase window</th><th>Scheduled</th><th>Started</th><th>Event-time completions</th><th>Event-time PASS</th><th>Event-time SUT FAIL</th><th>Event-time runtime ERROR</th><th>Drops</th><th>Completed/s</th><th>Successful/s</th><th>Scheduled cohort completed</th><th>Cohort SUT FAIL %</th><th>Cohort runtime ERROR %</th><th>Cohort p95</th></tr></thead><tbody>");
         for (Object item : (List<?>) phasesValue) {
             if (!(item instanceof Map)) continue;
-            Map<?, ?> configured = (Map<?, ?>) item; String phase = String.valueOf(configured.get("phase"));
-            Map<String, Object> actual = observed.get(phase);
-            html.append("<tr><td><b>").append(escape(phase)).append("</b></td><td>")
-                    .append(escape(String.valueOf(configured.get("startAt")))).append(" → ")
-                    .append(escape(String.valueOf(configured.get("endAt")))).append("<br>")
-                    .append(display(configured.get("durationMs"))).append(" ms</td><td>")
-                    .append(Boolean.TRUE.equals(configured.get("measured")) ? "yes" : "warm-up").append("</td>");
-            html.append("<td>").append(display(actualValue(actual, "scheduled", 0L))).append("</td><td>")
-                    .append(display(actualValue(actual, "started", 0L))).append("</td><td>")
-                    .append(display(actualValue(actual, "completed", 0L))).append("</td><td>")
-                    .append(display(actualValue(actual, "failure", 0L))).append("</td><td>")
-                    .append(display(actualValue(actual, "runtimeError", 0L))).append("</td><td>")
-                    .append(rateCells(actual==null?Collections.<String,Object>emptyMap():actual)).append("</td><td>")
-                    .append(display(actualValue(actual, "dropped", 0L))).append("</td><td>")
-                    .append(rate(actualValue(actual, "completedThroughput", 0.0))).append("</td><td>")
-                    .append(rate(actualValue(actual, "successfulThroughput", 0.0))).append("</td><td>")
-                    .append(display(actualValue(actual, "p95Ms", 0L))).append(" ms</td><td>")
-                    .append(escape(display(actualValue(actual,"errorClassifications",Collections.emptyMap())))).append("</td></tr>");
+            Map<?, ?> configured = (Map<?, ?>) item;
+            String phase = String.valueOf(configured.get("phase"));
+            appendPhaseRow(html, phase, configured, nested(windows, phase));
         }
+        Map<?, ?> drain = nested(windows, "DRAIN");
+        if (!drain.isEmpty()) appendPhaseRow(html, "DRAIN", Collections.emptyMap(), drain);
         html.append("</tbody></table></div></section>");
+    }
+
+    private void appendPhaseRow(StringBuilder html, String phase, Map<?, ?> configured, Map<?, ?> eventWindow) {
+        Map<?, ?> cohort = nested(eventWindow, "cohort");
+        Map<?, ?> latency = nested(cohort, "latency");
+        Object configuredStart = configured.get("startAt");
+        Object configuredEnd = configured.get("endAt");
+        Object start = configuredStart == null ? phaseBoundary(eventWindow.get("windowStartEpochMs")) : configuredStart;
+        Object end = configuredEnd == null ? phaseBoundary(eventWindow.get("windowEndEpochMs")) : configuredEnd;
+        Object duration = configured.containsKey("durationMs") ? configured.get("durationMs") : eventWindow.get("durationMs");
+        String windowLabel = ("DRAIN".equals(phase) ? "Observed: " : "Configured: ")
+                + display(start) + " → " + display(end) + " (" + display(duration) + " ms)";
+        html.append("<tr><td><b>").append(escape(phase)).append("</b></td><td>")
+                .append(escape(windowLabel)).append("</td><td>")
+                .append(display(eventWindow.get("scheduled"))).append("</td><td>")
+                .append(display(eventWindow.get("started"))).append("</td><td>")
+                .append(display(eventWindow.get("completed"))).append("</td><td>")
+                .append(display(eventWindow.get("successful"))).append("</td><td>")
+                .append(display(eventWindow.get("sutFailure"))).append("</td><td>")
+                .append(display(eventWindow.get("runtimeError"))).append("</td><td>")
+                .append(display(eventWindow.get("dropped"))).append("</td><td>")
+                .append(rate(eventWindow.get("completedRate"))).append("</td><td>")
+                .append(rate(eventWindow.get("successfulRate"))).append("</td><td>")
+                .append(display(cohort.get("completed"))).append("</td><td>")
+                .append(percent(cohort.get("sutErrorRate"))).append("</td><td>")
+                .append(percent(cohort.get("runtimeErrorRate"))).append("</td><td>")
+                .append(display(latency.get("p95Ms"))).append(" ms</td></tr>");
+    }
+
+    private Object phaseBoundary(Object epochMillis) {
+        if (!(epochMillis instanceof Number)) return epochMillis;
+        return java.time.Instant.ofEpochMilli(((Number) epochMillis).longValue()).toString();
     }
 
     private void appendMetricsTable(StringBuilder html, Map<String, Object> metrics) {
@@ -559,10 +588,6 @@ public final class LoadReportWriter {
                 .append(escape(display(value))).append("</strong><small>").append(escape(note)).append("</small></div>");
     }
 
-    private Object actualValue(Map<String, Object> values, String key, Object fallback) {
-        return values == null || !values.containsKey(key) ? fallback : values.get(key);
-    }
-
     private Map<?, ?> steadyWindow(Map<?, ?> metrics) {
         Object contract = metrics == null ? null : metrics.get("windowMetrics");
         if (!(contract instanceof Map)) return Collections.emptyMap();
@@ -580,7 +605,7 @@ public final class LoadReportWriter {
     private String count(Object value) { return display(value); }
     private long numericCount(Object value) { return value instanceof Number ? ((Number) value).longValue() : 0L; }
     private String rate(Object value) { return value instanceof Number ? String.format(java.util.Locale.ROOT, "%.3f/s", ((Number) value).doubleValue()) : display(value); }
-    private String percent(Object value) { return value instanceof Number ? String.format(java.util.Locale.ROOT, "%.2f%%", ((Number) value).doubleValue() * 100.0) : display(value); }
+    private String percent(Object value) { return value instanceof Number ? String.format(java.util.Locale.ROOT, "%.2f%%", ((Number) value).doubleValue() * 100.0) : "N/A"; }
     private String display(Object value) {
         if (value == null) return "-";
         if (value instanceof Map || value instanceof List) return JsonSupport.write(value);

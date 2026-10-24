@@ -139,6 +139,7 @@ class ExecutionWorkerPoolTest {
                 try(ExecutionWorkerPool recovered=new ExecutionWorkerPool(config,id->{
                     throw new AssertionError("minIdle=0 must not start an idle process");
                 },ProcessBuilder::start,()->"v1","a".repeat(64))) {
+                    assertTrue(abandoned.waitFor(5,TimeUnit.SECONDS),"Recovery must terminate and reap the recorded process");
                     assertFalse(abandoned.isAlive(),"Recovery must stop the recorded process");
                     assertFalse(Files.exists(marker),"Recovered identity markers must be removed only after cleanup");
                     assertEquals(0L,recovered.metrics().get("starts"));

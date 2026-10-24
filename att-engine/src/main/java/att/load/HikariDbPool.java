@@ -27,13 +27,18 @@ public final class HikariDbPool implements AutoCloseable {
     private final java.util.concurrent.atomic.AtomicInteger activePeak = new java.util.concurrent.atomic.AtomicInteger();
     private final java.util.concurrent.atomic.AtomicInteger waitingPeak = new java.util.concurrent.atomic.AtomicInteger();
     public HikariDbPool(DbHelperConfig config) {
+        this(config, config.poolConnectionTimeoutMs());
+    }
+    public HikariDbPool(DbHelperConfig config, long preparationConnectTimeoutMs) {
         this.helperId = config.id();
         HikariConfig hikari = new HikariConfig();
         hikari.setPoolName("att-load-db-" + config.id());
         hikari.setJdbcUrl(config.url()); hikari.setUsername(config.username()); hikari.setPassword(config.password());
         hikari.setMaximumPoolSize(config.poolMaxSize()); hikari.setMinimumIdle(config.poolMinIdle()); hikari.setConnectionTimeout(config.poolConnectionTimeoutMs());
         if (!config.driverClass().isEmpty()) hikari.setDriverClassName(config.driverClass());
-        for (Map.Entry<String, String> entry : config.properties().entrySet()) hikari.addDataSourceProperty(entry.getKey(), entry.getValue());
+        Map<String, String> properties = new LinkedHashMap<String, String>(config.properties());
+        applyDriverConnectTimeout(config.url(), properties, preparationConnectTimeoutMs);
+        for (Map.Entry<String, String> entry : properties.entrySet()) hikari.addDataSourceProperty(entry.getKey(), entry.getValue());
         this.dataSource = new HikariDataSource(hikari);
         this.maxSize = config.poolMaxSize(); this.minIdle = config.poolMinIdle(); this.connectionTimeoutMs = config.poolConnectionTimeoutMs();
     }
@@ -41,14 +46,28 @@ public final class HikariDbPool implements AutoCloseable {
     /** Holds distinct leases concurrently, validates through JDBC, then returns
      * them all. This temporary floor never changes Hikari's configured minIdle. */
     public int prepareInitialReady() throws SQLException, InterruptedException {
+        return prepareInitialReady(Long.MAX_VALUE);
+    }
+    public int prepareInitialReady(long deadlineNanos) throws SQLException, InterruptedException {
         int target = Math.max(1, minIdle);
         java.util.List<Connection> held = new java.util.ArrayList<Connection>(target);
+        long originalTimeoutMs = dataSource.getHikariConfigMXBean().getConnectionTimeout();
         try {
             for (int index = 0; index < target; index++) {
                 if (Thread.currentThread().isInterrupted()) throw new InterruptedException("DB preparation cancelled");
+                long remainingNanos = deadlineNanos - System.nanoTime();
+                if (remainingNanos <= 0L) throw new SQLException("LOAD_PREPARATION_TIMEOUT");
+                long remainingMs = Math.max(1L, java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(remainingNanos));
+                long boundedTimeoutMs = Math.min(originalTimeoutMs, remainingMs);
+                if (boundedTimeoutMs < 250L) throw new SQLException("LOAD_PREPARATION_TIMEOUT");
+                dataSource.getHikariConfigMXBean().setConnectionTimeout(boundedTimeoutMs);
                 Connection connection = dataSource.getConnection();
                 held.add(connection);
-                int seconds = (int) Math.min(Integer.MAX_VALUE, Math.max(1L, (connectionTimeoutMs + 999L) / 1000L));
+                remainingNanos = deadlineNanos - System.nanoTime();
+                if (remainingNanos <= 0L) throw new SQLException("LOAD_PREPARATION_TIMEOUT");
+                long validationBudgetMs = Math.min(connectionTimeoutMs,
+                        Math.max(1L, java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(remainingNanos)));
+                int seconds = (int) Math.min(Integer.MAX_VALUE, Math.max(1L, (validationBudgetMs + 999L) / 1000L));
                 if (!connection.isValid(seconds)) throw new SQLException("DB_PREPARATION_INVALID_CONNECTION");
             }
         } finally {
@@ -56,11 +75,35 @@ public final class HikariDbPool implements AutoCloseable {
             for (Connection connection : held) {
                 try { connection.close(); } catch (SQLException error) { failure = error; }
             }
+            dataSource.getHikariConfigMXBean().setConnectionTimeout(originalTimeoutMs);
             if (failure != null) throw failure;
         }
         int ready = idle();
         if (ready < target) throw new SQLException("DB_PREPARATION_IDLE_FLOOR_UNAVAILABLE");
         return ready;
+    }
+    private static void applyDriverConnectTimeout(String url, Map<String, String> properties, long timeoutCapMs) {
+        if (url == null || timeoutCapMs <= 0L) return;
+        String normalized = url.toLowerCase(java.util.Locale.ROOT);
+        if (normalized.startsWith("jdbc:postgresql:")) {
+            long seconds = Math.max(1L, (timeoutCapMs + 999L) / 1000L);
+            properties.put("connectTimeout", boundedNumber(properties.get("connectTimeout"), seconds));
+            properties.put("loginTimeout", boundedNumber(properties.get("loginTimeout"), seconds));
+        } else if (normalized.startsWith("jdbc:mysql:") || normalized.startsWith("jdbc:mariadb:")) {
+            properties.put("connectTimeout", boundedNumber(properties.get("connectTimeout"), timeoutCapMs));
+        } else if (normalized.startsWith("jdbc:oracle:")) {
+            long seconds = Math.max(1L, (timeoutCapMs + 999L) / 1000L);
+            properties.put("oracle.net.CONNECT_TIMEOUT", boundedNumber(properties.get("oracle.net.CONNECT_TIMEOUT"), timeoutCapMs));
+            properties.put("oracle.net.OUTBOUND_CONNECT_TIMEOUT", boundedNumber(properties.get("oracle.net.OUTBOUND_CONNECT_TIMEOUT"), seconds));
+            properties.put("oracle.jdbc.loginTimeout", boundedNumber(properties.get("oracle.jdbc.loginTimeout"), seconds));
+        }
+    }
+    private static String boundedNumber(String configured, long cap) {
+        if (configured != null) {
+            try { cap = Math.min(cap, Long.parseLong(configured.trim())); }
+            catch (NumberFormatException ignored) { /* use the bounded preparation setting */ }
+        }
+        return Long.toString(Math.max(1L, cap));
     }
     public Connection borrow() throws SQLException {
         long started = System.nanoTime();

@@ -20,7 +20,22 @@ public final class LoadRunResources implements AutoCloseable {
     private static final int PREPARATION_PER_RUN_LIMIT = 64;
     private static final java.util.concurrent.Semaphore PREPARATION_PROCESS_LIMIT = new java.util.concurrent.Semaphore(256, true);
     private static final long PREPARATION_DEADLINE_MS = 30_000L;
+    private static final java.util.concurrent.ThreadPoolExecutor PREPARATION_EXECUTOR = new java.util.concurrent.ThreadPoolExecutor(
+            0, PREPARATION_PER_RUN_LIMIT, 30L, java.util.concurrent.TimeUnit.SECONDS,
+            new java.util.concurrent.SynchronousQueue<Runnable>(), runnable -> {
+                Thread thread = new Thread(runnable, "att-load-resource-preparation");
+                thread.setDaemon(true);
+                return thread;
+            }, new java.util.concurrent.ThreadPoolExecutor.AbortPolicy());
+    private static final java.util.concurrent.ThreadPoolExecutor PREPARATION_CLEANUP_EXECUTOR = new java.util.concurrent.ThreadPoolExecutor(
+            0, PREPARATION_PROCESS_LIMIT.availablePermits(), 30L, java.util.concurrent.TimeUnit.SECONDS,
+            new java.util.concurrent.SynchronousQueue<Runnable>(), runnable -> {
+                Thread thread = new Thread(runnable, "att-load-resource-cleanup");
+                thread.setDaemon(true);
+                return thread;
+            }, new java.util.concurrent.ThreadPoolExecutor.AbortPolicy());
     private final FrameworkConfig config;
+    private final long preparationDeadlineMs;
     private final DbHelperExecutor db;
     private final HikariDbConnectionProvider dbProvider;
     private final MqHelperExecutor mq;
@@ -56,7 +71,14 @@ public final class LoadRunResources implements AutoCloseable {
 
     /** Creates load resources with an injectable MQ transport boundary for integration tests. */
     LoadRunResources(Path projectRoot, FrameworkConfig config, MqTransport.Factory mqTransportFactory) {
+        this(projectRoot, config, mqTransportFactory, PREPARATION_DEADLINE_MS);
+    }
+
+    /** Test seam for exercising the same overall readiness deadline with short, deterministic budgets. */
+    LoadRunResources(Path projectRoot, FrameworkConfig config, MqTransport.Factory mqTransportFactory, long preparationDeadlineMs) {
+        if (preparationDeadlineMs < 1L) throw new IllegalArgumentException("LOAD preparation deadline must be positive");
         this.config = config;
+        this.preparationDeadlineMs = preparationDeadlineMs;
         this.dbProvider = new HikariDbConnectionProvider();
         this.db = new DbHelperExecutor(projectRoot, config, dbProvider);
         this.mqFactory = new PooledMqTransportFactory(mqTransportFactory, 20, 2000L);
@@ -96,7 +118,10 @@ public final class LoadRunResources implements AutoCloseable {
         if ("RESOURCES_READY".equals(preparation.get("status"))) return;
         if ("PREPARATION_FAILED".equals(preparation.get("status")))
             throw new LoadResourcePreparationException("LOAD_RESOURCE_PREPARATION_FAILED: readiness was already attempted", null);
-        long started = System.nanoTime(), deadline = started + java.util.concurrent.TimeUnit.MILLISECONDS.toNanos(PREPARATION_DEADLINE_MS);
+        long started = System.nanoTime();
+        long deadline = started + java.util.concurrent.TimeUnit.MILLISECONDS.toNanos(preparationDeadlineMs);
+        long cleanupReserveMs = Math.min(1_000L, Math.max(50L, preparationDeadlineMs / 10L));
+        long operationDeadline = deadline - java.util.concurrent.TimeUnit.MILLISECONDS.toNanos(cleanupReserveMs);
         long discoveryStarted = started;
         Map<String, att.config.DbHelperConfig> dbs = new java.util.TreeMap<String, att.config.DbHelperConfig>();
         Map<String, att.config.MqHelperConfig> mqs = new java.util.TreeMap<String, att.config.MqHelperConfig>();
@@ -136,15 +161,20 @@ public final class LoadRunResources implements AutoCloseable {
         try {
             if (required > PREPARATION_PER_RUN_LIMIT)
                 throw new IllegalStateException("LOAD_RESOURCE_PREPARATION_LIMIT: initial readiness exceeds the bounded per-run connection budget");
-            long remainingNanos = deadline - System.nanoTime();
+            long remainingNanos = operationDeadline - System.nanoTime();
             if (remainingNanos <= 0L || !PREPARATION_PROCESS_LIMIT.tryAcquire(required, remainingNanos, java.util.concurrent.TimeUnit.NANOSECONDS))
                 throw new java.util.concurrent.TimeoutException("LOAD_RESOURCE_PREPARATION_BUDGET_TIMEOUT");
             preparationPermits = required;
             for (att.config.DbHelperConfig helper : dbs.values()) {
                 long before = System.nanoTime(); int target = Math.max(1, helper.poolMinIdle());
                 try {
-                    checkPreparationDeadline(deadline);
-                    int actual = dbPool(helper.id()).prepareInitialReady();
+                    checkPreparationDeadline(operationDeadline);
+                    int actual = runBoundedPreparation(() -> {
+                        long connectionBudgetMs = remainingPreparationMillis(operationDeadline);
+                        if (connectionBudgetMs < 250L) throw new java.util.concurrent.TimeoutException("LOAD_PREPARATION_TIMEOUT");
+                        return dbPool(helper.id(), config, connectionBudgetMs).prepareInitialReady(operationDeadline);
+                    }, operationDeadline);
+                    checkPreparationDeadline(operationDeadline);
                     Map<String, Object> row = preparationRow("DB", helper.id(), target, actual, helper.poolMaxSize(), helper.poolMinIdle(), before);
                     row.put("sizingSource", helper.poolMinIdle() == 0 ? "min-ready" : "configured"); rows.add(row);
                     Map<String, Object> event = new LinkedHashMap<String, Object>(row); event.put("event", "LOAD_RESOURCE_READY");
@@ -164,8 +194,9 @@ public final class LoadRunResources implements AutoCloseable {
                 long before = System.nanoTime(); int target = Math.max(1, helper.poolMinIdle());
                 String identity = helper.logicalId() + "::" + helper.instanceId();
                 try {
-                    checkPreparationDeadline(deadline);
-                    int actual = mqFactory.prepareInitialReady(helper);
+                    checkPreparationDeadline(operationDeadline);
+                    int actual = runBoundedPreparation(() -> mqFactory.prepareInitialReady(helper, operationDeadline), operationDeadline);
+                    checkPreparationDeadline(operationDeadline);
                     Map<String, Object> row = preparationRow("MQ", identity, target, actual, helper.poolMaxSize(), helper.poolMinIdle(), before);
                     row.put("logicalHelper", safeId(helper.logicalId())); row.put("instance", safeId(helper.instanceId()));
                     row.put("sizingSource", helper.poolMinIdle() == 0 ? "min-ready" : "configured"); rows.add(row);
@@ -188,8 +219,9 @@ public final class LoadRunResources implements AutoCloseable {
             for (att.config.HttpHelperConfig helper : https.values()) {
                 long before = System.nanoTime();
                 try {
-                    checkPreparationDeadline(deadline);
-                    http.prepareClient(helper);
+                    checkPreparationDeadline(operationDeadline);
+                    runBoundedPreparation(() -> { http.prepareClient(helper); return Boolean.TRUE; }, operationDeadline);
+                    checkPreparationDeadline(operationDeadline);
                     Map<String, Object> row = preparationRow("HTTP", helper.id(), 0, 0, 0, 0, before);
                     row.put("clientReady", true); row.put("tlsConfigReady", true); row.put("physicalConnections", "not-prewarmed"); rows.add(row);
                     Map<String, Object> event = new LinkedHashMap<String, Object>(row); event.put("event", "LOAD_RESOURCE_READY");
@@ -206,7 +238,8 @@ public final class LoadRunResources implements AutoCloseable {
             preparation.put("status", "RESOURCES_READY"); preparation.put("required", totalHelpers); preparation.put("prepared", totalHelpers);
             preparation.put("failed", 0); preparation.put("skippedDynamic", dynamicKinds.size()); preparation.put("initialConnections", required);
             preparation.put("perRunConnectionBudget", PREPARATION_PER_RUN_LIMIT); preparation.put("processConnectionBudget", 256);
-            preparation.put("preparationDeadlineMs", PREPARATION_DEADLINE_MS); preparation.put("parallelism", 1);
+            checkPreparationDeadline(operationDeadline);
+            preparation.put("preparationDeadlineMs", preparationDeadlineMs); preparation.put("parallelism", 1);
             preparation.put("discoveryMs", discoveryMs);
             preparation.put("preparationMs", java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started)); preparation.put("helpers", rows);
             Map<String, Object> ready = new LinkedHashMap<String, Object>(); ready.put("event", "LOAD_RESOURCES_READY");
@@ -231,7 +264,7 @@ public final class LoadRunResources implements AutoCloseable {
             preparation.put("prepared", prepared); preparation.put("failed", failed); preparation.put("skippedDynamic", skipped);
             preparation.put("initialConnections", required); preparation.put("perRunConnectionBudget", PREPARATION_PER_RUN_LIMIT);
             preparation.put("processConnectionBudget", 256);
-            preparation.put("preparationDeadlineMs", PREPARATION_DEADLINE_MS); preparation.put("parallelism", 1);
+            preparation.put("preparationDeadlineMs", preparationDeadlineMs); preparation.put("parallelism", 1);
             preparation.put("discoveryMs", discoveryMs);
             preparation.put("preparationMs", java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started));
             String failureCode = preparationCode(failure, "SYSTEM");
@@ -246,7 +279,7 @@ public final class LoadRunResources implements AutoCloseable {
             emitPreparation(failedEvent, "[LOAD] PREPARATION_FAILED required=" + totalHelpers + " prepared=" + prepared
                     + " failed=" + failed + " skipped=" + skipped + " preparationMs=" + preparation.get("preparationMs")
                     + " errorType=" + preparation.get("failureCode"));
-            close();
+            closeWithinPreparationDeadline(deadline);
             throw new LoadResourcePreparationException("LOAD_RESOURCE_PREPARATION_FAILED: a referenced helper could not reach its bounded readiness target; verify helper credentials and connectivity (" + failureCode + ")", failure);
         }
     }
@@ -254,6 +287,33 @@ public final class LoadRunResources implements AutoCloseable {
     private static void checkPreparationDeadline(long deadline) throws java.util.concurrent.TimeoutException {
         if (Thread.currentThread().isInterrupted()) throw new java.util.concurrent.CancellationException("LOAD preparation cancelled");
         if (System.nanoTime() >= deadline) throw new java.util.concurrent.TimeoutException("LOAD_PREPARATION_TIMEOUT");
+    }
+    private static long remainingPreparationMillis(long deadline) throws java.util.concurrent.TimeoutException {
+        long remaining = deadline - System.nanoTime();
+        if (remaining <= 0L) throw new java.util.concurrent.TimeoutException("LOAD_PREPARATION_TIMEOUT");
+        return Math.max(1L, java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(remaining));
+    }
+    private static <T> T runBoundedPreparation(java.util.concurrent.Callable<T> preparation, long deadline) throws Exception {
+        checkPreparationDeadline(deadline);
+        final java.util.concurrent.Future<T> future;
+        try { future = PREPARATION_EXECUTOR.submit(preparation); }
+        catch (java.util.concurrent.RejectedExecutionException saturated) {
+            throw new java.util.concurrent.TimeoutException("LOAD_PREPARATION_TIMEOUT: bounded preparation workers are saturated");
+        }
+        try {
+            return future.get(remainingPreparationMillis(deadline), java.util.concurrent.TimeUnit.MILLISECONDS);
+        } catch (java.util.concurrent.TimeoutException timeout) {
+            future.cancel(true);
+            throw new java.util.concurrent.TimeoutException("LOAD_PREPARATION_TIMEOUT");
+        } catch (InterruptedException interrupted) {
+            future.cancel(true);
+            throw interrupted;
+        } catch (java.util.concurrent.ExecutionException failed) {
+            Throwable cause = failed.getCause();
+            if (cause instanceof Exception) throw (Exception) cause;
+            if (cause instanceof Error) throw (Error) cause;
+            throw new IllegalStateException("LOAD preparation task failed", cause);
+        }
     }
     private static String safeId(String id) {
         String safe = LoadFailureDiagnostic.safe(id);
@@ -359,6 +419,12 @@ public final class LoadRunResources implements AutoCloseable {
         if (helper == null) throw new IllegalArgumentException("Unknown dbhelper instance: " + helperId);
         return dbProvider.pool(helper);
     }
+    private HikariDbPool dbPool(String helperId, att.config.FrameworkConfig config, long connectionTimeoutCapMs) {
+        ensureOpen();
+        att.config.DbHelperConfig helper = config.dbHelper(helperId);
+        if (helper == null) throw new IllegalArgumentException("Unknown dbhelper instance: " + helperId);
+        return dbProvider.pool(helper, connectionTimeoutCapMs);
+    }
     public HikariDbPool dbPool(String helperId) { return dbPool(helperId, config); }
     public LoadResourcePool<att.exec.MqTransport.Connection> mqPool(String helperId) {
         ensureOpen();
@@ -412,12 +478,49 @@ public final class LoadRunResources implements AutoCloseable {
     }
     long resourceMetricSamples() { return resourceMetricSamples.get(); }
     public boolean isClosed() { return closed.get(); }
+    static int availablePreparationPermits() { return PREPARATION_PROCESS_LIMIT.availablePermits(); }
     public void ensureOpen() { if (closed.get()) throw new IllegalStateException("Load run resources are closed"); }
 
-    @Override public void close() {
-        if (closed.compareAndSet(false, true)) {
-            http.close(); mqFactory.close(); db.closeAll(); dbProvider.close();
-            if (preparationPermits > 0) { PREPARATION_PROCESS_LIMIT.release(preparationPermits); preparationPermits = 0; }
+    private void closeWithinPreparationDeadline(long deadline) {
+        if (!beginClose()) return;
+        java.util.concurrent.Future<?> cleanup;
+        try { cleanup = PREPARATION_CLEANUP_EXECUTOR.submit(this::closeOwnedResources); }
+        catch (java.util.concurrent.RejectedExecutionException saturated) {
+            closeOwnedResources();
+            return;
         }
+        boolean interrupted = Thread.interrupted();
+        try {
+            long remaining = deadline - System.nanoTime();
+            if (remaining > 0L) cleanup.get(remaining, java.util.concurrent.TimeUnit.NANOSECONDS);
+            else cleanup.cancel(true);
+        } catch (InterruptedException cancelled) {
+            cleanup.cancel(true);
+            interrupted = true;
+        } catch (java.util.concurrent.TimeoutException timedOut) {
+            cleanup.cancel(true);
+        } catch (java.util.concurrent.ExecutionException ignored) {
+            // Cleanup is best-effort after the readiness failure; each resource owner closes independently.
+        } finally {
+            if (interrupted) Thread.currentThread().interrupt();
+        }
+    }
+
+    @Override public void close() {
+        if (!beginClose()) return;
+        closeOwnedResources();
+    }
+
+    private boolean beginClose() {
+        if (!closed.compareAndSet(false, true)) return false;
+        if (preparationPermits > 0) {
+            PREPARATION_PROCESS_LIMIT.release(preparationPermits);
+            preparationPermits = 0;
+        }
+        return true;
+    }
+
+    private void closeOwnedResources() {
+        http.close(); mqFactory.close(); db.closeAll(); dbProvider.close();
     }
 }

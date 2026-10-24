@@ -78,16 +78,18 @@ public final class LoadRunResult {
         return "PASS";
     }
     public String performanceVerdict() {
-        if ("NOT_MET".equals(thresholds.status())) return "NOT_MET";
-        if ("MET".equals(thresholds.status())) return "MET";
-        boolean found = false;
+        boolean notMet = "NOT_MET".equals(thresholds.status());
+        boolean notEvaluated = "NOT_EVALUATED".equals(thresholds.status());
+        boolean evaluated = "MET".equals(thresholds.status());
         for (LoadRunResult workload : workloads.values()) {
             String verdict = workload.performanceVerdict();
-            if ("NOT_MET".equals(verdict)) return "NOT_MET";
-            if ("MET".equals(verdict)) found = true;
-            else if ("NOT_EVALUATED".equals(verdict)) return "NOT_EVALUATED";
+            if ("NOT_MET".equals(verdict)) notMet = true;
+            else if ("NOT_EVALUATED".equals(verdict)) notEvaluated = true;
+            else if ("MET".equals(verdict)) evaluated = true;
         }
-        return found ? "MET" : "NOT_EVALUATED";
+        if (notMet) return "NOT_MET";
+        if (notEvaluated) return "NOT_EVALUATED";
+        return evaluated ? "MET" : "NOT_EVALUATED";
     }
     public int exitCode() { return ResultAggregator.exitCode(status()); }
     public boolean passed() { return status() == ResultStatus.PASS; }

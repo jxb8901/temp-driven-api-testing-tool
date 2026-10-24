@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 import java.nio.file.Paths;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.Instant;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -41,6 +42,15 @@ class LoadThresholdWindowTest {
         LoadThresholdSummary verdict = new LoadThresholdEvaluator().evaluate(scenario, metrics.snapshot());
         assertEquals("NOT_EVALUATED", verdict.status());
         assertEquals("NOT_EVALUATED", verdict.results().get(0).status());
+
+        LoadRunResult run = new LoadRunResult("incomplete-steady", scenario, Instant.ofEpochMilli(20_000L),
+                Instant.ofEpochMilli(21_000L), metrics.snapshot(), verdict, Collections.<String, Object>emptyMap());
+        Map<?, ?> summary = (Map<?, ?>) run.toMap().get("thresholds");
+        assertEquals("NOT_EVALUATED", summary.get("status"));
+        assertEquals("NOT_EVALUATED", summary.get("performanceVerdict"));
+        assertEquals(Boolean.FALSE, summary.get("legacyPassed"));
+        assertEquals("PASS", run.toMap().get("status"), "execution status remains independent from unevaluable performance");
+        assertEquals("NOT_EVALUATED", run.toMap().get("performanceVerdict"));
     }
 
     private static LoadScenario scenario(Map<String, Object> thresholds, long rampUp, long steady, long rampDown) {

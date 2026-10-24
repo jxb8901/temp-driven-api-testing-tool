@@ -714,10 +714,16 @@
       ],
       "properties": {
         "status": {
+          "description": "Authoritative aggregate threshold status. NOT_EVALUATED distinguishes incomplete evidence from a missed threshold.",
           "enum": [
-            "PASS",
-            "FAIL"
+            "MET",
+            "NOT_MET",
+            "NOT_EVALUATED"
           ]
+        },
+        "legacyPassed": {
+          "description": "Compatibility boolean retaining the previous passed() semantics; it is false for configured unevaluable results.",
+          "type": "boolean"
         },
         "results": {
           "type": "array",
@@ -726,6 +732,7 @@
           }
         },
         "performanceVerdict": {
+          "description": "Alias of status for consumers that use the summary-level performance verdict.",
           "enum": [
             "MET",
             "NOT_MET",
