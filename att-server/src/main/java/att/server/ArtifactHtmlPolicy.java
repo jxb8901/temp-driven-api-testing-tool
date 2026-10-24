@@ -17,8 +17,8 @@ final class ArtifactHtmlPolicy {
     // Reviewed static search/sort controls from HtmlReportGenerator; dynamic or altered scripts are rejected.
     static final String REPORT_SCRIPT_DIGEST="0e69333dd886c7209f88a299b6bdf88e269fd6e92a51e00af114b0145d7daf28";
     // The Load chart renderer builds only local SVG nodes from bounded summary data.
-    static final String LOAD_REPORT_SCRIPT_DIGEST="3ff4a55f4e32de358618fb25bae4420715a6fa523c347b6f8eab52f8610c81ad";
-    static final String CONTENT_POLICY="default-src 'none'; script-src 'sha256-DmkzPdiGxyCfiKKZtr34jiaf1ukqUeAK8RSwFF19ryg=' 'sha256-P/SlX04y3jWGGPsluuRCBxWm+lI8NHtvjqtS+GEMga0='; style-src 'unsafe-inline'; img-src data:; form-action 'none'; base-uri 'none'";
+    static final String LOAD_REPORT_SCRIPT_DIGEST="d00de3800fa967f8122eaf92b15a8462d1e589351b4daf65cb6fbbc2da2d6bb4";
+    static final String CONTENT_POLICY="default-src 'none'; script-src 'sha256-DmkzPdiGxyCfiKKZtr34jiaf1ukqUeAK8RSwFF19ryg=' 'sha256-0A3jgA+pZ/gSLq+SsVqEYtHliTUbTa9ly2+7wtota7Q='; style-src 'unsafe-inline'; img-src data:; form-action 'none'; base-uri 'none'";
     private ArtifactHtmlPolicy() {}
 
     static byte[] publish(byte[] input,String path,Set<String> approved) throws Exception {

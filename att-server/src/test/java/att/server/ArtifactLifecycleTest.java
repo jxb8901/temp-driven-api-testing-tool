@@ -143,7 +143,7 @@ class ArtifactLifecycleTest {
             assertTrue(published.contains("target generator rate /s"),published);
             assertTrue(published.contains("id=\"rate-chart\""),published);
             assertTrue(published.contains("renderCharts"),published);
-            assertTrue(published.contains("sha256-P/SlX04y3jWGGPsluuRCBxWm+lI8NHtvjqtS+GEMga0="),published);
+            assertTrue(published.contains("sha256-0A3jgA+pZ/gSLq+SsVqEYtHliTUbTa9ly2+7wtota7Q="),published);
             assertTrue(published.contains("$EXTERNAL/report.html"),published);
             assertFalse(published.contains(privatePath.toString()),published);
         }
