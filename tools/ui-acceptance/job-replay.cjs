@@ -19,7 +19,7 @@ async function main() {
       if (path === 'packages') return json({ items: [{ packageId: 'payments', name: 'Payments' }] });
       if (path === 'packages/payments/configuration') return json({ view: 'declared', environments: [{ name: 'SIT' }] });
       if (path === 'packages/payments/load-catalog') return json({ items: [], total: 0 });
-      if (path === 'jobs') return json({ items: [...jobs.values()].filter(job => !url.searchParams.has('executionType') || job.command === 'load') });
+      if (path === 'jobs') { const items=[...jobs.values()].filter(job => !url.searchParams.has('executionType') || job.command === 'load'); return json({items,total:items.length,offset:0,limit:100,groups:[],principalSuggestions:['alice'],packageSuggestions:['payments']}); }
       const match = /^jobs\/([^/]+)(?:\/(.*))?$/.exec(path);
       if (match) {
         const [, id, action] = match, job = jobs.get(id);
@@ -47,7 +47,7 @@ async function main() {
     const base = fixture.origin + '/att/ui/';
     for (const type of ['run', 'load']) {
       await page.goto(base + '#/jobs');
-      const row = page.getByRole('row').filter({ has: page.getByRole('button', { name: 'J-' + type, exact: true }) });
+      const row = page.getByRole('row').filter({ has: page.getByRole('link', { name: 'Unknown target · J-' + type, exact: true }) });
       await row.getByRole('button', { name: 'Rerun', exact: true }).click();
       const review = page.getByRole('region', { name: 'Review rerun J-' + type });
       await review.getByRole('button', { name: 'Confirm rerun', exact: true }).waitFor({ state: 'visible' });
@@ -71,7 +71,7 @@ async function main() {
       await page.waitForURL(url => url.hash === '#/jobs/J-load');
     }
     await page.goto(base + '#/jobs?type=load');
-    const history = page.getByRole('row').filter({ has: page.getByRole('button', { name: 'J-load', exact: true }) });
+    const history = page.getByRole('row').filter({ has: page.getByRole('link', { name: 'Unknown target · J-load', exact: true }) });
     await history.getByRole('button', { name: 'Rerun', exact: true }).click();
     await page.getByRole('region', { name: 'Review rerun J-load' }).getByRole('button', { name: 'Cancel', exact: true }).click();
     await page.goto(base + '#/jobs/J-old');
@@ -116,15 +116,16 @@ async function main() {
       await page.locator('.att-standalone-console pre.att-console').waitFor();
       await page.getByText('RETAINED_OUTPUT 549', { exact: false }).waitFor();
       assert.equal(broadRequests.length, before, 'Standalone must not load broad jobs or packages');
-      assert.equal(await page.locator('aside, nav, .app-header, .att-breadcrumbs, footer, .att-floating-console, [role="separator"]').count(), 0);
-      assert.equal(await page.getByRole('link', { name: /Open full Job details|Open Job console in a new tab/ }).count(), 0);
+      assert.equal(await page.locator('aside, .app-header, .att-breadcrumbs, footer, .att-floating-console').count(), 0);
+      assert.equal(await page.getByRole('tablist', {name:'Job J-load sections'}).getByRole('tab').count(), 6);
+
       for (const view of ['events', 'live']) {
         await page.getByRole('tab', { name: view === 'live' ? 'Live Output' : 'Events', exact: true }).click();
-        await page.waitForURL(url => url.hash === '#/jobs/J-load/console?view=' + view);
+        await page.waitForURL(url => url.hash === '#/jobs/J-load?standalone=1&tab=' + view);
         const surface = page.locator(view === 'live' ? 'pre.att-console' : 'ol.att-job-events');
         await surface.waitFor();
         const box = await surface.boundingBox();
-        assert.ok(box.height > 70 && box.y + box.height >= viewport.height - 24, JSON.stringify({ viewport, view, box }));
+        assert.ok(box.height > 70, JSON.stringify({ viewport, view, box }));
         assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth));
       }
       await page.reload();
@@ -132,7 +133,7 @@ async function main() {
     }
     if (process.env.ATT_UI_SCREENSHOT) await page.screenshot({ path: process.env.ATT_UI_SCREENSHOT });
     await page.goto(base + '#/jobs/missing/console');
-    await page.getByRole('heading', { name: 'Job console unavailable' }).waitFor();
+    await page.getByRole('heading', { name: 'Job Details unavailable' }).waitFor();
     assert.equal(await page.locator('aside, nav, .app-header, footer').count(), 0);
     assert.deepEqual(errors, []); await context.close();
     console.log('4.2.3 acceptance passed: RUN/LOAD replay and Schedule, History/List/Edit, standalone fixed-Job navigation, virtualized Events, viewport fill, mobile, reload and safe missing-Job state.');

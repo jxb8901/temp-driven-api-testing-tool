@@ -133,12 +133,24 @@ function ScheduleStateBadge({ schedule }: { schedule: ScheduleDefinition }): Rea
 }
 
 function jobSummary(schedule: ScheduleDefinition): string {
+  if (schedule.targetIdentity?.type) return `${schedule.targetIdentity.type} · ${schedule.targetIdentity.id}`;
   if (schedule.executionType === 'run') {
     const target = schedule.debugTarget;
     return target ? `${target.type} · ${target.id}${schedule.legacyDebug ? ' · Debug mode' : ''}`
-      : schedule.selectedCaseIds?.length ? `Cases · ${schedule.selectedCaseIds.join(', ')}` : 'Validated RUN snapshot';
+      : schedule.selectedCaseIds?.length ? `Cases · ${schedule.selectedCaseIds.length} selected` : 'Validated RUN snapshot';
   }
   return schedule.inlineSnapshot ? 'Validated Load snapshot' : schedule.scenario || 'Scenario unavailable';
+}
+
+function LoadScheduleSummary({ schedule }: { schedule: ScheduleDefinition }) {
+  if (schedule.executionType !== 'load') return schedule.selectedCaseIds?.length ? <details><summary>Selected cases</summary><ul>{schedule.selectedCaseIds.slice(0,32).map(id=><li key={id}>{id}</li>)}</ul>{schedule.selectedCaseIds.length>32 && <p>First 32 cases shown; edit to inspect the saved selection.</p>}</details> : null;
+  const identity=schedule.targetIdentity;
+  if (!identity?.workloads?.length) return <small>Load setup: Not available</small>;
+  return <div className="att-schedule-load-summary">{identity.workloadCount!>1 && <small>{identity.workloadCount} workloads · {identity.bindingCount} target bindings</small>}{identity.workloads.map((workload,index)=><div key={index}>
+    <strong>{workload.name || `Workload ${index+1}`}</strong><small>{workload.targets.map(t=>`${t.type} · ${t.id}`).join(' / ') || 'Target: Not available'}</small>
+    <small>{workload.model} · {workload.arrivalRate!=null?`target ${workload.arrivalRate} arrivals (configured rate)`:workload.users!=null?`${workload.users} VUs`:'VU / target rate: Not available'} · Planned total {workload.totalDurationMs!=null?`${workload.totalDurationMs/1000}s`:'Not available'}</small>
+    <small>Steady {workload.duration || 'Not available'}{workload.warmup!=null?` · Warmup ${workload.warmup}`:''}{workload.rampUp!=null?` · Ramp-up ${workload.rampUp}`:''}{workload.rampDown!=null?` · Ramp-down ${workload.rampDown}`:''}</small>
+  </div>)}{identity.truncated && <small>First 32 workload / target summaries shown. Open Edit for the saved definition.</small>}</div>;
 }
 
 function timeZoneChoices(): string[] {
@@ -683,7 +695,7 @@ export function ScheduledLoadPage({ api, packages, enabled, onOpenJob, initialDr
             <thead><tr><th scope="col">Name / type</th><th scope="col">Target / package / environment</th><th scope="col">Recurrence</th><th scope="col">Next run</th><th scope="col">State / owner</th><th scope="col">Actions</th></tr></thead>
             <tbody>{visibleSchedules.map(schedule => <tr key={schedule.id}>
               <th scope="row" data-label="Name"><span>{schedule.name}</span><small>{schedule.executionType.toUpperCase()}</small>{schedule.description && <small>{schedule.description}</small>}</th>
-              <td data-label="Package and scenario"><span>{schedule.packageId} · {schedule.environment || 'Package default'}</span><small>{jobSummary(schedule)}{schedule.loadModel ? ` · ${schedule.loadModel}` : ''}{schedule.config ? ` · ${schedule.config}` : ''}</small></td>
+              <td data-label="Package and scenario"><span>{schedule.packageId} · {schedule.environment || 'Package default'}</span><small>{jobSummary(schedule)}</small><LoadScheduleSummary schedule={schedule} /></td>
               <td data-label="Recurrence"><span>{recurrenceLabel(schedule)}</span><small>{schedule.timezone}</small></td>
               <td data-label="Next run">{formatScheduleTime(schedule.nextRunAt, schedule.timezone)}</td>
               <td data-label="Status"><ScheduleStateBadge schedule={schedule} />{schedule.createdBy && <small>Owner · {schedule.createdBy}</small>}{schedule.recentStatus && <small>{schedule.recentStatus}</small>}</td>
@@ -701,7 +713,7 @@ export function ScheduledLoadPage({ api, packages, enabled, onOpenJob, initialDr
           {visibleSchedules.map(schedule => <article className="att-schedule-card" key={schedule.id}>
             <div className="att-schedule-card-heading"><h3>{schedule.name}</h3><ScheduleStateBadge schedule={schedule} /></div>
             {schedule.description && <p>{schedule.description}</p>}
-            <dl><div><dt>Type</dt><dd>{schedule.executionType.toUpperCase()}</dd></div><div><dt>Package</dt><dd>{schedule.packageId}</dd></div><div><dt>Environment</dt><dd>{schedule.environment || 'Package default'}</dd></div><div><dt>Target</dt><dd>{jobSummary(schedule)}</dd></div>
+            <dl><div><dt>Type</dt><dd>{schedule.executionType.toUpperCase()}</dd></div><div><dt>Package</dt><dd>{schedule.packageId}</dd></div><div><dt>Environment</dt><dd>{schedule.environment || 'Package default'}</dd></div><div><dt>Target</dt><dd>{jobSummary(schedule)}<LoadScheduleSummary schedule={schedule} /></dd></div>
               {schedule.createdBy && <div><dt>Owner</dt><dd>{schedule.createdBy}</dd></div>}
               {schedule.recentStatus && <div><dt>Recent status</dt><dd>{schedule.recentStatus}</dd></div>}
               <div><dt>Recurrence</dt><dd>{recurrenceLabel(schedule)}</dd></div><div><dt>Next run · {schedule.timezone}</dt><dd>{formatScheduleTime(schedule.nextRunAt, schedule.timezone)}</dd></div></dl>

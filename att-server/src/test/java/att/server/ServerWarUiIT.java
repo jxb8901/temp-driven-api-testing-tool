@@ -386,7 +386,7 @@ class ServerWarUiIT {
         System.setProperty("att.server.config",config.toString());System.setProperty("att.home",home.toString());
         Tomcat tomcat=new Tomcat();tomcat.setBaseDir(temp.resolve("tomcat").toString());tomcat.setPort(0);tomcat.getConnector();
         MemoryRealm realm=new MemoryRealm();realm.setPathname(users.toString());tomcat.getEngine().setRealm(realm);
-        ((StandardHost)tomcat.getHost()).setUnpackWARs(false);tomcat.addWebapp("/tools/att",war.toString());
+        ((StandardHost)tomcat.getHost()).setUnpackWARs(false);org.apache.catalina.Context deployedContext=tomcat.addWebapp("/tools/att",war.toString());
         try {
             tomcat.start();int port=tomcat.getConnector().getLocalPort();String origin="http://127.0.0.1:"+port,api="/tools/att/api/v1";
             String auth=basic("att"),peer=basic("colleague"),admin=basic("admin");
@@ -484,7 +484,7 @@ class ServerWarUiIT {
             JsonNode bulkPin=apiJsonResponse(port,"POST",api+"/jobs/pin",peer,origin,Map.of("pinned",true,"pinReason"," password=bulk-pin-secret ","jobIds",List.of(selectedId,secondId)),200).path("items");
             assertEquals(2,bulkPin.size());assertTrue(java.util.stream.StreamSupport.stream(bulkPin.spliterator(),false).allMatch(item->"PINNED".equals(item.path("outcome").asText())));
             assertEquals("password=[REDACTED_SECRET]",getJson(port,api+"/jobs/"+selectedId,peer).path("pinReason").asText());
-            apiJsonResponse(port,"POST",api+"/jobs/delete",peer,origin,Map.of("confirm",false,"jobIds",List.of(selectedId)),400);
+            apiJsonResponse(port,"POST",api+"/jobs/delete",peer,origin,Map.of("requested","invalid","jobIds",List.of(selectedId)),400);
             apiJsonResponse(port,"POST",api+"/jobs/delete",peer,origin,Map.of("confirm",true,"jobIds",java.util.Collections.nCopies(101,selectedId)),400);
             for(Map<String,Object> fixture:fixtures) {
                 String id=String.valueOf(fixture.get("jobId"));
@@ -496,7 +496,16 @@ class ServerWarUiIT {
                 assertEquals("PINNED_UNPIN_FIRST",apiJsonResponse(port,"POST",api+"/jobs/"+id+"/delete",auth,origin,Map.of("confirm",true),409).path("outcome").asText());
                 apiJsonResponse(port,"POST",api+"/jobs/"+id+"/pin",admin,origin,Map.of("pinned",false),403);
                 apiJsonResponse(port,"POST",api+"/jobs/"+id+"/pin",auth,origin,Map.of("pinned",false),200);
-                assertEquals("DELETED",apiJsonResponse(port,"POST",api+"/jobs/"+id+"/delete",peer,origin,Map.of("confirm",true),200).path("outcome").asText());
+                assertEquals("MARKED",apiJsonResponse(port,"POST",api+"/jobs/"+id+"/delete",peer,origin,Map.of("requested",true),200).path("outcome").asText());
+                assertEquals("DELETE_REQUESTED",getJson(port,api+"/jobs/"+id,peer).path("deletionState").asText());
+                assertEquals("UNMARKED",apiJsonResponse(port,"POST",api+"/jobs/"+id+"/delete",peer,origin,Map.of("requested",false),200).path("outcome").asText());
+                assertEquals("MARKED",apiJsonResponse(port,"POST",api+"/jobs/"+id+"/delete",peer,origin,Map.of("requested",true),200).path("outcome").asText());
+                assertTrue(Files.exists(temp.resolve("data/jobs").resolve(id)),"HTTP marking must not remove files");
+                Object deployedRuntime=deployedContext.getServletContext().getAttribute("att.server.runtime");
+                var storeField=deployedRuntime.getClass().getDeclaredField("store");storeField.setAccessible(true);Object deployedStore=storeField.get(deployedRuntime);
+                var claim=deployedStore.getClass().getDeclaredMethod("claimRequestedDeletion",String.class,long.class);claim.setAccessible(true);assertEquals(true,claim.invoke(deployedStore,id,Long.MAX_VALUE));
+                assertEquals("ALREADY_CLAIMED",apiJsonResponse(port,"POST",api+"/jobs/"+id+"/delete",peer,origin,Map.of("requested",false),409).path("outcome").asText());
+                var reconcile=deployedRuntime.getClass().getDeclaredMethod("reconcileDeletingJobs");reconcile.setAccessible(true);assertEquals(true,reconcile.invoke(deployedRuntime));
                 assertEquals("ALREADY_UNAVAILABLE",apiJsonResponse(port,"POST",api+"/jobs/"+id+"/delete",peer,origin,Map.of("confirm",true),200).path("outcome").asText());
                 for(String suffix:List.of("","/result","/events","/artifacts","/artifacts/archive.zip"))assertEquals(404,get(port,api+"/jobs/"+id+suffix,auth));
                 assertFalse(Files.exists(temp.resolve("data/jobs").resolve(id)));

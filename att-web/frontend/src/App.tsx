@@ -351,7 +351,7 @@ export default function App() {
       if (version.apiVersion !== '1') throw new Error('Incompatible ATT Server API version: expected v1.');
       if (controller.signal.aborted) return;
       dispatch({ type: 'version/ready', data: version });
-      if (navigation.route.kind !== 'job-console') {
+      if (navigation.route.kind !== 'job-console' && !(navigation.route.kind === 'jobs' && navigation.route.standalone)) {
         void loadPackages(controller.signal);
         if (navigation.route.kind === 'dashboard') void loadJobs(controller.signal);
       }
@@ -363,7 +363,7 @@ export default function App() {
       dispatch({ type: 'jobs/error', error: reason });
     });
     return () => controller.abort();
-  }, [loadJobs, loadPackages, navigation.route.kind === 'job-console']);
+  }, [loadJobs, loadPackages, navigation.route.kind === 'job-console' || (navigation.route.kind === 'jobs' && !!navigation.route.standalone)]);
 
   const previousRouteKind = useRef(navigation.route.kind);
   useEffect(() => {
@@ -407,8 +407,8 @@ export default function App() {
       onAccepted={onJobAccepted} onSchedule={onSchedule} schedulingEnabled={capabilities.loadSchedulingEnabled} />;
   } else if (navigation.route.kind === 'packages') {
     content = <DashboardPage view="packages" state={state} onPackageChange={onPackageChange} onJobChange={onJobChange} onRetryPackages={() => void loadPackages()} onRetryJobs={() => void loadJobs()} jobsRefreshing={jobsRefreshing} jobsUpdatedAt={jobsUpdatedAt} />;
-  } else if (navigation.route.kind === 'job-console') {
-    content = <Suspense fallback={<div className="page-content" role="status" aria-busy="true">Loading Job console…</div>}><StandaloneJobConsolePage jobId={navigation.route.jobId} view={navigation.route.view} /></Suspense>;
+  } else if (navigation.route.kind === 'job-console' || (navigation.route.kind === 'jobs' && navigation.route.standalone && navigation.route.jobId)) {
+    content = <Suspense fallback={<div className="page-content" role="status" aria-busy="true">Loading Job console…</div>}><StandaloneJobConsolePage jobId={navigation.route.jobId!} view={navigation.route.kind === 'job-console' ? navigation.route.view : navigation.route.tab} /></Suspense>;
   } else if (navigation.route.kind === 'jobs' && navigation.route.jobId) {
     content = <Suspense fallback={<div role="status">Loading jobs…</div>}><JobsPage executionType={navigation.route.executionType} onExecutionTypeChange={executionType => navigation.navigate({ kind: 'jobs', executionType })} api={loadJobsApi} onSchedule={capabilities.loadSchedulingEnabled ? onSchedule : undefined} onEditSchedule={id => navigation.navigate({ kind: 'schedules', view: 'edit', scheduleId: id })} jobId={navigation.route.jobId} onOpenJob={onJobChange} onShowList={() => navigation.navigate({ kind: 'jobs', ...(navigation.route.kind === 'jobs' && navigation.route.executionType ? { executionType: navigation.route.executionType } : {}) })} /></Suspense>;
   } else if (navigation.route.kind === 'jobs') {

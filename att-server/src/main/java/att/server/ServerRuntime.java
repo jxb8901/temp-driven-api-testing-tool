@@ -169,6 +169,7 @@ final class ServerRuntime implements AutoCloseable {
         artifactMaintenance.scheduleWithFixedDelay(this::recoverArtifactArchivesSafely,5,5,TimeUnit.MINUTES);
         artifactMaintenance.scheduleWithFixedDelay(this::reconcileWorkerReleases,1,1,TimeUnit.SECONDS);
         retention.scheduleWithFixedDelay(this::expireDraftsSafely,1,1,TimeUnit.MINUTES);
+        retention.scheduleWithFixedDelay(this::cleanupRequestedDeletionsSafely,5,5,TimeUnit.SECONDS);
         if(config.scheduling.enabled) {
             store.recoverScheduleExecutions();
             if(!config.authenticationRequired&&config.authorization.allowAnonymousOperations)java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).warning("ATT operations are enabled without authentication; anonymous clients share operational access");
@@ -507,6 +508,15 @@ final class ServerRuntime implements AutoCloseable {
             if(request.scenario!=null)summaryFields.put("scenario",request.scenario);
             if(request.environment!=null&&!request.environment.isBlank())summaryFields.put("environment",request.environment);
             if(request.loadModel!=null)summaryFields.put("model",request.loadModel);
+            JsonNode listDefinition=executionSpec==null?null:JobExecutionSpec.parse(executionSpec).definition();
+            if(listDefinition==null) {
+                ObjectNode fallback=JSON.createObjectNode();fallback.put("executionType","load".equals(command)?"load":"run");
+                if(request.inlineLoadScenario!=null)fallback.set("scenario",JSON.valueToTree(request.inlineLoadScenario));
+                if(request.target!=null)fallback.set("target",JSON.valueToTree(request.target));
+                else if(request.caseIds!=null)fallback.putObject("selection").set("caseIds",JSON.valueToTree(request.caseIds));
+                listDefinition=fallback;
+            }
+            summaryFields.put("targetIdentity",JobListIdentity.from(listDefinition));
             String summary=JSON.writeValueAsString(summaryFields);
             store.insert(job,summary);persisted=true;jobs.put(id,job);append(job,"status",Map.of("jobId",id,"status","QUEUED"));
             FutureTask<Void> task=new FutureTask<>(()->{execute(job,activeJobPath,lease);return null;});tasks.put(id,task);leases.put(id,lease);
@@ -731,9 +741,15 @@ final class ServerRuntime implements AutoCloseable {
         for(String id:ids)if(id==null||!JOB_ID.matcher(id).matches())throw new IllegalArgumentException("Invalid Job ID");
         String safeReason=pinReason(pinned?reason:null);List<Map<String,Object>> outcomes=new ArrayList<>();
         for(String id:new java.util.LinkedHashSet<>(ids)) {
-            try {pinJob(id,pinned,safeReason,actor);outcomes.add(Map.of("jobId",id,"outcome",pinned?"PINNED":"UNPINNED"));}
+            try {
+                if("local".equals(config.authMode)&&!store.isActiveUser(actor))throw new NotFoundException();
+                String outcome=store.setPinnedOutcome(id,pinned,actor,safeReason);
+                if("NOT_ELIGIBLE".equals(outcome)&&!store.jobRowExists(id))outcome="UNAVAILABLE";
+                if(List.of("NOT_ELIGIBLE","UNAVAILABLE").contains(outcome))store.audit(actor,"JOB_PIN",id,null,outcome);
+                outcomes.add(Map.of("jobId",id,"outcome",outcome));
+            }
             catch(NotFoundException missing){outcomes.add(Map.of("jobId",id,"outcome","UNAVAILABLE"));}
-            catch(JobConflictException conflict){outcomes.add(Map.of("jobId",id,"outcome","NOT_ELIGIBLE"));}
+            catch(Exception failed){store.audit(actor,"JOB_PIN",id,null,"FAILED");outcomes.add(Map.of("jobId",id,"outcome","FAILED"));}
         }
         return outcomes;
     }
@@ -760,32 +776,45 @@ final class ServerRuntime implements AutoCloseable {
         return Map.of("jobId",id,"outcome",outcome);
     }
     Map<String,Object> deleteJob(String id,String actor) throws Exception {
+        return setDeletionRequested(id,true,actor);
+    }
+    List<Map<String,Object>> setDeletionRequested(List<String> ids,boolean requested,String actor) throws Exception {
+        if(ids==null||ids.isEmpty()||ids.size()>100)throw new IllegalArgumentException("Provide 1 to 100 Job IDs");
+        for(String id:ids)if(id==null||!JOB_ID.matcher(id).matches())throw new IllegalArgumentException("Invalid Job ID");
+        List<Map<String,Object>> outcomes=new ArrayList<>();
+        for(String id:new java.util.LinkedHashSet<>(ids)) {
+            try {outcomes.add(setDeletionRequested(id,requested,actor));}
+            catch(NotFoundException unavailable){outcomes.add(deletionOutcome(id,actor,"UNAVAILABLE"));}
+            catch(Exception failed){outcomes.add(deletionOutcome(id,actor,"FAILED"));}
+        }return outcomes;
+    }
+    Map<String,Object> setDeletionRequested(String id,boolean requested,String actor) throws Exception {
         if(id==null||!JOB_ID.matcher(id).matches())throw new IllegalArgumentException("Invalid Job ID");
         if("local".equals(config.authMode)&&!store.isActiveUser(actor))throw new NotFoundException();
-        if(!store.jobRowExists(id))return deletionOutcome(id,actor,"ALREADY_UNAVAILABLE");
-        if(store.get(id)==null)return deletionOutcome(id,actor,"DELETION_PENDING_RECOVERY");
-        requireJobOwner(id,actor);
         if(!artifactLifecycle.writeLock().tryLock())return deletionOutcome(id,actor,"ARCHIVE_BUSY");
         try {
-            Map<String,Object> row=store.get(id);
-            if(row==null)return deletionOutcome(id,actor,"DELETION_PENDING_RECOVERY");
-            if(Boolean.TRUE.equals(row.get("pinned")))return deletionOutcome(id,actor,"PINNED_UNPIN_FIRST");
-            if(!List.of("PASS","FAIL","ERROR","INVALID","CANCELLED").contains(row.get("status")))return deletionOutcome(id,actor,"NOT_TERMINAL");
-            if(jobs.containsKey(id)||pendingArtifactJobs.contains(id)||store.workerMayBeAlive(id))return deletionOutcome(id,actor,"JOB_BUSY");
-            if(!store.markManualDeleting(id,actor)) {
-                if(!store.jobRowExists(id))return deletionOutcome(id,actor,"ALREADY_UNAVAILABLE");
-                Map<String,Object> current=store.get(id);
-                if(current==null)return deletionOutcome(id,actor,"DELETION_PENDING_RECOVERY");
-                if(Boolean.TRUE.equals(current.get("pinned")))return deletionOutcome(id,actor,"PINNED_UNPIN_FIRST");
-                if(!List.of("PASS","FAIL","ERROR","INVALID","CANCELLED").contains(current.get("status")))return deletionOutcome(id,actor,"NOT_TERMINAL");
-                return deletionOutcome(id,actor,"JOB_BUSY");
-            }
-            try {
-                deleteTree(config.dataDir.resolve("jobs").resolve(id));
-                store.deleteJobWithAudit(id,actor,"JOB_DELETE","DELETED");
-                return Map.of("jobId",id,"outcome","DELETED");
-            } catch(Exception incomplete) {return deletionOutcome(id,actor,"DELETION_PENDING_RECOVERY");}
+            if(requested&&(jobs.containsKey(id)||pendingArtifactJobs.contains(id)||store.workerMayBeAlive(id)))return deletionOutcome(id,actor,"JOB_BUSY");
+            String outcome=store.setDeletionRequested(id,requested,actor,System.currentTimeMillis());
+            Map<String,Object> response=new LinkedHashMap<>();response.put("jobId",id);response.put("outcome",outcome);
+            Map<String,Object> current=store.get(id);response.put("deletionState",current==null?null:current.get("deletionState"));
+            return response;
         } finally {artifactLifecycle.writeLock().unlock();}
+    }
+    /** Five-second bounded cadence, with at least thirty seconds to cancel a pending mark. */
+    void cleanupRequestedDeletions() throws Exception {
+        long before=System.currentTimeMillis()-30_000;
+        for(String id:store.requestedDeletionIds(before)) {
+            if(!artifactLifecycle.writeLock().tryLock())break;
+            try {
+                if(jobs.containsKey(id)||pendingArtifactJobs.contains(id)||store.workerMayBeAlive(id))continue;
+                store.claimRequestedDeletion(id,before);
+            } finally {artifactLifecycle.writeLock().unlock();}
+        }
+        reconcileDeletingJobs();
+    }
+    private void cleanupRequestedDeletionsSafely() {
+        try {cleanupRequestedDeletions();}
+        catch(Exception failed){java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).warning("Unable to clean pending deletions: "+safeMessage(failed));}
     }
 
     void requireJobOwner(String id,String principal) throws Exception {
@@ -2214,12 +2243,13 @@ final class ServerRuntime implements AutoCloseable {
     }
     Map<String,Object> loadScheduleView(LoadSchedule schedule) {
         Map<String,Object> view=JSON.convertValue(schedule,Map.class);
-        view.remove("sourceJobId");view.remove("runInput");view.put("executionType","load".equals(schedule.effectiveJobType())?"load":"run");
+        view.remove("sourceJobId");view.remove("runInput");view.remove("listSummary");view.put("executionType","load".equals(schedule.effectiveJobType())?"load":"run");
         view.put("revisionPolicy",schedule.expectedRevisionDigest!=null?effectivePackageChangePolicy(schedule):"validate-current-package");
         view.put("effectivePackageChangePolicy",effectivePackageChangePolicy(schedule));view.put("serverPackageChangePolicy",config.scheduling.packageChangePolicy);
         view.put("storedRevisionDigest",schedule.expectedRevisionDigest);view.remove("packageRootIdentity");
         view.remove("inlineScenario");view.remove("inlineDebugInput");view.remove("debugResourceId");view.remove("expectedRevisionDigest");view.remove("catalogSnapshot");
         view.put("jobType",schedule.effectiveJobType());
+        view.put("targetIdentity",schedule.listSummary==null?Map.of():schedule.listSummary);
         view.put("inlineSnapshot",Boolean.valueOf(schedule.inlineScenario!=null||schedule.inlineDebugInput!=null||schedule.runInput!=null));
         if(schedule.runInput!=null) {
             Object target=schedule.runInput.get("target");
@@ -2339,7 +2369,7 @@ final class ServerRuntime implements AutoCloseable {
         if(schedule.expectedRevisionDigest!=null&&!schedule.expectedRevisionDigest.equals(revision))
             throw new ScheduleSourceChangedException(schedule.expectedRevisionDigest,revision,effectivePackageChangePolicy(schedule));
     }
-    private void validateScheduleForActivation(LoadSchedule schedule,String principal) throws Exception {prepareScheduledExecution(schedule,principal);}
+    private void validateScheduleForActivation(LoadSchedule schedule,String principal) throws Exception {LoadSchedule checked=prepareScheduledExecution(schedule,principal);schedule.listSummary=checked.listSummary;}
 
     /** Returns an execution-only copy. Stored inputs and their original revision remain immutable. */
     private LoadSchedule prepareScheduledExecution(LoadSchedule original,String principal) throws Exception {
@@ -2459,7 +2489,8 @@ final class ServerRuntime implements AutoCloseable {
         if(schedule.inlineScenario!=null&&validated.containsSensitiveValues)
             throw new IllegalArgumentException("An inline schedule cannot store credentials, private values, or other classified sensitive fields. Remove them from the Load draft or keep them in package-managed configuration.");
         requireScheduleRevision(schedule,validated.revisionDigest);
-        validateScheduledLoadLimits(config.inlineLoad,validated.scenario);schedule.loadModel=validated.model;return validated;
+        validateScheduledLoadLimits(config.inlineLoad,validated.scenario);schedule.loadModel=validated.model;
+        schedule.listSummary=JobListIdentity.load(JSON.valueToTree(validated.scenario));return validated;
     }
 
     private Map<String,Object> readScheduledScenario(Path root,String relative) throws Exception {
@@ -2643,6 +2674,7 @@ final class ServerRuntime implements AutoCloseable {
             // New file-backed schedules need the same immutable baseline as draft-backed schedules.
             // Legacy rows without a digest keep their grandfathered validate-current behavior.
             s.expectedRevisionDigest=validated.revisionDigest;
+            s.listSummary=JobListIdentity.load(JSON.valueToTree(validated.scenario));
             if(s.inlineScenario!=null)s.inlineScenario=deepMap(validated.scenario);
         }
         if(prior==null)s.packageRootIdentity=packageRootIdentity(root);

@@ -585,6 +585,13 @@ class Handler(BaseHTTPRequestHandler):
             return
         if scenario == "empty":
             data = []
+        if parts == ["jobs"]:
+            query = parse_qs(urlsplit(self.path).query)
+            if query.get("status", [""])[0]:
+                data = [job for job in data if job.get("status") == query["status"][0]]
+            offset = int(query.get("offset", ["0"])[0]); limit = int(query.get("limit", ["100"])[0])
+            self._json(200, {"items": data[offset:offset+limit], "total": len(data), "offset": offset, "limit": limit, "groups": [], "principalSuggestions": [], "packageSuggestions": ["payments", "ledger"]})
+            return
         self._json(200, {"items": data})
 
     def _perf_burst_events(self, query: dict[str, list[str]]) -> None:

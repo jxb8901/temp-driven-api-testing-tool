@@ -32,7 +32,7 @@ Reader 在信任 manifest 前，亦會比較 ZIP central directory 與 local hea
 
 Studio 可從 Live Output、Events 或 Job 詳情標題開啟非 modal floating console。使用者切換 Studio 其他頁面時它仍會保留；每個瀏覽器分頁只允許一個 console，切換至另一個 Job 必須明確確認。Minimize 會留下底部 chip，保留一條有界的分頁 SSE 訂閱，但不會渲染隱藏的事件列；Close 會釋放訂閱。兩者都不會取消 Job。主控台可用滑鼠或鍵盤移動及調整大小，小螢幕會改為全螢幕 sheet。
 
-**Open Job console in a new tab** 使用已編碼的同源 hash route，例如 `#/jobs/{jobId}/console?view=events`，並使用 `noopener`。重新整理、直接連結及非根 context path 都支援；每個瀏覽器分頁有自己的 SSE 連線。主控台在同一分頁與 Job Details 共用 stream，最多保留 500 筆事件，保留 EventSource `Last-Event-ID` 重新連線行為，並顯示 journal truncation。未授權或缺少的 Job 會使用現有重新登入路徑或安全的 unavailable 訊息。
+**Open full Job Details in a new tab** 使用已編碼的同源 route `#/jobs/{jobId}?standalone=1&tab=events` 及 `noopener noreferrer`，包含 Overview、Live Output、Events、Results、Artifacts、Metrics，預選來源 tab。舊 `/console?view=live|events` 書籤仍相容；切換 tab 保持同一 Job ID 及共用 SSE 訂閱。支援重新整理、直接連結及非根 context path；未授權或缺少 Job 使用既有登入或安全 unavailable 訊息。Floating console 行為不變。
 
 ### 檢視及下載 Job archive
 

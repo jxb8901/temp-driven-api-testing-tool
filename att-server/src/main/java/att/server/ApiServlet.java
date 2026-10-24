@@ -84,20 +84,12 @@ public final class ApiServlet extends HttpServlet {
             if("/packages".equals(path)){json(res,200,Map.of("items",runtime.packages(principal),"requestId",requestId));return;}
             if(path.startsWith("/packages/")){String id=segment(path,2);Map<String,Object> view=runtime.packageView(id,principal);view.put("requestId",requestId);json(res,200,view);return;}
             if("/jobs".equals(path)){
-                if("load".equals(req.getParameter("executionType"))) {
-                    int limit=parseConfigurationLimit(req.getParameter("limit")),offset=parseOffset(req.getParameter("offset"));
-                    String pinned=req.getParameter("pinnedOnly");
-                    if(pinned!=null&&!List.of("true","false").contains(pinned))throw new IllegalArgumentException("pinnedOnly must be true or false");
-                    List<Map<String,Object>> items=runtime.loadJobsFor(principal,offset,limit,principalSearch(req),"true".equals(pinned));
-                    Integer next=items.size()>limit?Integer.valueOf(offset+limit):null;
-                    if(next!=null)items=items.subList(0,limit);
-                    Map<String,Object> response=new LinkedHashMap<>();response.put("items",items);response.put("nextOffset",next);response.put("requestId",requestId);json(res,200,response);
-                } else {
-                    String pinned=req.getParameter("pinnedOnly");
-                    if(pinned!=null&&!List.of("true","false").contains(pinned))throw new IllegalArgumentException("pinnedOnly must be true or false");
-                    json(res,200,Map.of("items",runtime.jobsFor(principal,principalSearch(req),"true".equals(pinned)),"requestId",requestId));
+                Map<String,String> parameters=new LinkedHashMap<>();
+                for(String key:List.of("offset","limit","principal","principalMode","packageId","executionType","status","from","to","search","sort","deletion","pinnedOnly","groupBy")) {
+                    String value=req.getParameter(key);if(value!=null)parameters.put(key,value);
                 }
-                return;
+                Map<String,Object> response=runtime.store.queryJobs(JobQuery.parse(parameters,principal));response.put("requestId",requestId);
+                res.setHeader("Cache-Control","no-store");json(res,200,response);return;
             }
             if(path.startsWith("/jobs/"))runtime.requireJobOwner(segment(path,2),principal);
             if(path.matches("/jobs/[^/]+/replay")){Map<String,Object> replay=runtime.jobReplay(segment(path,2),principal);replay.put("requestId",requestId);json(res,200,replay);return;}
@@ -174,14 +166,15 @@ public final class ApiServlet extends HttpServlet {
                         json(res,200,Map.of("items",runtime.pinJobs(selected,input.get("pinned").booleanValue(),reason,authorizationPrincipal),"requestId",requestId));
                     } else json(res,200,runtime.pinJob(segment(path,2),input.get("pinned").booleanValue(),reason,authorizationPrincipal));
                 } else {
-                    if(!input.path("confirm").isBoolean()||!input.path("confirm").booleanValue())throw new IllegalArgumentException("Explicit deletion confirmation is required");
+                    if(input.has("requested")?!input.path("requested").isBoolean():!input.path("confirm").isBoolean()||!input.path("confirm").booleanValue())throw new IllegalArgumentException("requested must be a boolean (legacy confirm:true is accepted)");
+                    boolean requested=!input.has("requested")||input.path("requested").booleanValue();
                     if("/jobs/delete".equals(path)) {
                         JsonNode ids=input.get("jobIds");if(ids==null||!ids.isArray()||ids.size()<1||ids.size()>100)throw new IllegalArgumentException("Select 1 to 100 Job IDs");
                         List<String> selected=new java.util.ArrayList<>();
                         for(JsonNode id:ids){if(!id.isTextual())throw new IllegalArgumentException("Job IDs must be strings");selected.add(id.asText());}
-                        json(res,200,Map.of("items",runtime.deleteJobs(selected,authorizationPrincipal),"requestId",requestId));
-                    } else {Map<String,Object> outcome=runtime.deleteJob(segment(path,2),authorizationPrincipal);String value=String.valueOf(outcome.get("outcome"));
-                        int status="DELETED".equals(value)||"ALREADY_UNAVAILABLE".equals(value)?200:"DELETION_PENDING_RECOVERY".equals(value)?202:409;json(res,status,outcome);}
+                        json(res,200,Map.of("items",runtime.setDeletionRequested(selected,requested,authorizationPrincipal),"requestId",requestId));
+                    } else {Map<String,Object> outcome=runtime.setDeletionRequested(segment(path,2),requested,authorizationPrincipal);String value=String.valueOf(outcome.get("outcome"));
+                        int status=List.of("MARKED","UNMARKED","ALREADY_IN_STATE","ALREADY_UNAVAILABLE").contains(value)?200:409;json(res,status,outcome);}
                 }
             } catch(ServerRuntime.NotFoundException missing){error(res,404,"ATT-SERVER-NOT-FOUND","Job was not found or is unavailable",requestId);}
               catch(ServerRuntime.JobConflictException conflict){error(res,409,conflict.code,safeDetail(new IllegalArgumentException(conflict.getMessage())),requestId);}

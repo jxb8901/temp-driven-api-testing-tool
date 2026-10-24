@@ -137,7 +137,22 @@ export interface JobAccepted {
   packageId?: string;
 }
 
+export interface TargetIdentity {
+  type?: string; id?: string; signature?: string; targets?: Array<{ type: string; id: string }>;
+  workloadCount?: number; bindingCount?: number; truncated?: boolean;
+  workloads?: Array<{ name: string; targets: Array<{type: string; id: string}>; model: string; users?: number; arrivalRate?: string; duration?: string; totalDurationMs?: number; warmup?: string; rampUp?: string; rampDown?: string }>;
+}
+export interface JobsQuery {
+  offset?: number; limit?: number; principal?: string; principalMode?: string; packageId?: string; executionType?: string;
+  status?: string; from?: string; to?: string; search?: string; sort?: string; deletion?: string; pinnedOnly?: boolean; groupBy?: string; signal?: AbortSignal;
+}
+export interface JobsQueryResult {
+  items: JobSummary[]; total: number; offset: number; limit: number; nextOffset?: number | null;
+  groups: Array<{ packageId: string; environment: string; targetGroup: string; total: number; lastCreatedAt: string; statuses: Record<string,number> }>;
+  principalSuggestions: string[]; packageSuggestions: string[];
+}
 export interface JobSummary {
+  scheduled?: boolean; targetIdentity?: TargetIdentity; targetGroup?: string; deletionState?: string | null;
   rerunOfJobId?: string;
   pinned?: boolean;
   pinnedAt?: string | null;
@@ -239,6 +254,8 @@ export interface JobEventHandlers {
 
 /** Feature boundary. Shared api.ts implements these operations; components never build REST paths. */
 export interface LoadJobsApi {
+  queryJobs?(input: JobsQuery): Promise<JobsQueryResult>;
+  setDeletionRequested?(jobIds: string[], requested: boolean): Promise<Array<{jobId: string; outcome: string}>>;
   getJobReplay?(jobId: string): Promise<JobReplay>;
   createJobReplayDraft?(jobId: string): Promise<JobReplay>;
   rerunJob?(jobId: string, intentId: string): Promise<{ jobId: string }>;
@@ -296,6 +313,9 @@ export interface LoadFeatureProps {
 }
 
 export interface JobsFeatureProps {
+  initialTab?: 'overview' | 'live' | 'events' | 'results' | 'artifacts' | 'metrics';
+  onTabChange?(tab: 'overview' | 'live' | 'events' | 'results' | 'artifacts' | 'metrics'): void;
+  standalone?: boolean;
   executionType?: 'load';
   onExecutionTypeChange?(value: 'load' | undefined): void;
   onSchedule?(intent: ValidatedScheduleIntent): void;

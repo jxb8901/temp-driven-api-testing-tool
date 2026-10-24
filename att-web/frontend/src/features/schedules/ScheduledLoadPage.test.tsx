@@ -640,3 +640,19 @@ describe('ScheduledLoadPage', () => {
     expect(host.textContent).toContain('O-NOW');
   });
 });
+
+it('shows per-workload planned rates and durations while keeping Schedule IDs out of list text', async () => {
+  const mixed: ScheduleDefinition = {...sampleSchedule, targetIdentity: {type:'load',id:'2 workloads / 2 target bindings',workloadCount:2,bindingCount:2,workloads:[
+    {name:'checkout',targets:[{type:'flow',id:'checkout.v1'}],model:'arrivalRate',arrivalRate:'10/s',duration:'5m',warmup:'10s',rampUp:'20s',totalDurationMs:330000},
+    {name:'browse',targets:[{type:'template',id:'browse.v1'}],model:'virtualUsers',users:20,duration:'10m',totalDurationMs:600000},
+  ]}};
+  const api=makeApi({listSchedules:vi.fn(async()=>({items:[mixed,{...sampleSchedule,id:'S-HISTORICAL',name:'Historical'}]}))});
+  await render(api);
+  expect(host.textContent).toContain('2 workloads · 2 target bindings');
+  expect(host.textContent).toContain('target 10/s arrivals (configured rate) · Planned total 330s');
+  expect(host.textContent).toContain('20 VUs · Planned total 600s');
+  expect(host.textContent).toContain('Steady 5m · Warmup 10s · Ramp-up 20s');
+  expect(host.textContent).toContain('Load setup: Not available');
+  expect(host.textContent).not.toContain('S-HISTORICAL');expect(host.textContent).not.toContain(sampleSchedule.id);
+  expect(api.listSchedules).toHaveBeenCalledTimes(1);expect(api.getScheduleExecutions).not.toHaveBeenCalled();
+});

@@ -8,6 +8,7 @@
     "smoke:explorer": "node explorer-smoke.cjs",
     "smoke:archive-metrics": "node archive-metrics.cjs",
     "smoke:job-replay": "node job-replay.cjs",
+    "smoke:jobs-schedules": "node jobs-schedules.cjs",
     "smoke:load-jobs": "node load-jobs.cjs",
     "smoke:scheduled-load": "node scheduled-load.cjs",
     "smoke:schedules": "node schedules-unified.cjs",

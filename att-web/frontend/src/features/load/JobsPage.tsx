@@ -1,9 +1,11 @@
+import { JobStateIcons } from "./JobStateIcons";
+import { JobsList } from "./JobsList";
 import { formatRoute } from "../../router";
 import { JobReplayActions } from "./JobReplayActions";
 import { StatusBadge } from './StatusBadge';
 import { ArchiveMetrics } from './ArchiveMetrics';
 import type { ArtifactArchiveMetrics } from './types';
-import { memo, Profiler, useEffect, useMemo, useRef, useState, type ChangeEvent, type KeyboardEvent } from 'react';
+import { memo, Profiler, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import './load.css';
 import { JobArtifacts } from './JobArtifacts';
 import type { JobResultResponse, JobStatus, JobSummary, JobView, JobsFeatureProps } from './types';
@@ -13,7 +15,6 @@ import { useJobEventStatus } from './useJobEventStream';
 
 function executionType(job: JobSummary): string { return job.executionType || (job.command === 'debug' ? 'run' : job.command); }
 
-const PAGE_SIZE = 25;
 const MAX_BUCKET_ROWS = 4096;
 const BUCKET_PAGE_SIZE = 100;
 
@@ -27,30 +28,6 @@ const tabs: Array<{ id: JobTab; label: string }> = [
   { id: 'artifacts', label: 'Artifacts' },
   { id: 'metrics', label: 'Metrics' },
 ];
-
-const DELETE_OUTCOME_LABELS: Record<string, string> = {
-  DELETED: 'Deleted',
-  ALREADY_UNAVAILABLE: 'Already removed',
-  DELETION_PENDING_RECOVERY: 'Pending recovery (will finish automatically)',
-  PINNED_UNPIN_FIRST: 'Protected: unpin first',
-  NOT_TERMINAL: 'Not terminal',
-  JOB_BUSY: 'Busy, retry later',
-  ARCHIVE_BUSY: 'Busy, retry later',
-  UNAVAILABLE: 'Not found',
-};
-
-const PIN_OUTCOME_LABELS: Record<string, string> = {
-  PINNED: 'Pinned',
-  UNPINNED: 'Unpinned',
-  NOT_ELIGIBLE: 'Not eligible for pinning',
-  UNAVAILABLE: 'Not found',
-};
-
-function outcomeLabel(outcome: string, labels: Record<string, string>): string {
-  if (labels[outcome]) return labels[outcome];
-  const readable = outcome.replace(/[_-]+/g, ' ').toLocaleLowerCase().replace(/^./, value => value.toLocaleUpperCase());
-  return readable ? `Unknown outcome: ${readable}` : 'Unknown outcome';
-}
 
 function toError(value: unknown, fallback: string): Error {
   return value instanceof Error ? value : new Error(fallback);
@@ -254,10 +231,7 @@ function loadMetricRows(metrics: Record<string, unknown> | null): Array<[string,
   return numericRows(Object.fromEntries(Object.entries(metrics).filter(([key]) => key !== 'buckets')));
 }
 
-function dateKey(value: string): number {
-  const parsed = Date.parse(value);
-  return Number.isFinite(parsed) ? parsed : 0;
-}
+
 
 function unique(values: Array<string | undefined>): string[] {
   return [...new Set(values.filter((value): value is string => Boolean(value)))].sort((a, b) => a.localeCompare(b));
@@ -327,273 +301,18 @@ export function JobsPage(props: JobsFeatureProps) {
   return props.jobId ? <JobDetail key={props.jobId} {...props} jobId={props.jobId} /> : <JobsList {...props} />;
 }
 
-type JobActionOutcome = { jobId: string; outcome: string };
-
-function DeleteJobs({ jobs, onDelete, onDone, onCancel }: { jobs: JobSummary[]; onDelete: (jobIds: string[]) => Promise<JobActionOutcome[]>; onDone: (outcomes: JobActionOutcome[]) => void; onCancel: () => void }) {
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState('');
-  const dialogRef = useRef<HTMLDivElement>(null);
-  const headingRef = useRef<HTMLHeadingElement>(null);
-  const restoreFocusRef = useRef<Element | null>(null);
-  const eligible = jobs.filter(job => isTerminalStatus(job.status) && !job.pinned);
-  useEffect(() => {
-    restoreFocusRef.current = document.activeElement instanceof Element ? document.activeElement : null;
-    headingRef.current?.focus();
-  }, []);
-  useEffect(() => {
-    const onKeyDown = (event: globalThis.KeyboardEvent) => {
-      if (event.key === 'Escape') { event.preventDefault(); onCancel(); return; }
-      if (event.key !== 'Tab' || !dialogRef.current) return;
-      const focusable = dialogRef.current.querySelectorAll<HTMLElement>('button:not([disabled]), input:not([disabled]), textarea:not([disabled]), [href], [tabindex]:not([tabindex="-1"])');
-      if (!focusable.length) return;
-      const first = focusable[0], last = focusable[focusable.length - 1];
-      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
-      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
-    };
-    document.addEventListener('keydown', onKeyDown, true);
-    return () => document.removeEventListener('keydown', onKeyDown, true);
-  }, []);
-  useEffect(() => () => {
-    const opener = restoreFocusRef.current;
-    if (opener instanceof HTMLElement) opener.focus();
-  }, []);
-  async function remove() {
-    setBusy(true); setError('');
-    try { onDone(await onDelete(eligible.map(job => job.jobId))); }
-    catch (reason) { setError(toError(reason, 'Deletion failed; refresh and retry.').message); setBusy(false); }
-  }
-  return <div ref={dialogRef}><section role="dialog" aria-modal="true" aria-label="Confirm irreversible Job deletion" className="att-job-panel">
-    <h2 tabIndex={-1} ref={headingRef}>Delete {eligible.length} of {jobs.length} selected Jobs permanently?</h2>
-    <p>This irreversible action removes each eligible Job record, results, events/logs, archive and stored artifacts. Package sources and schedules are preserved.</p>
-    <ul>{jobs.map(job => <li key={job.jobId}><code>{job.jobId}</code> — {job.command}, {job.packageId}, {job.status}, {job.principal || 'Unknown principal'}{job.pinned ? ' — protected: unpin first' : !isTerminalStatus(job.status) ? ' — skipped: active Job' : ' — delete'}</li>)}</ul>
-    {error && <p role="alert">{error}</p>}
-    <button type="button" disabled={busy} onClick={onCancel}>Keep Jobs</button>
-    <button type="button" disabled={busy || !eligible.length} onClick={() => void remove()}>{busy ? 'Deleting…' : `Permanently delete ${eligible.length} Jobs`}</button>
-  </section></div>;
-}
-
-function PinReasonForm({ title, busy, onSubmit, onCancel }: { title: string; busy: boolean; onSubmit: (reason: string) => void; onCancel: () => void }) {
-  const [reason, setReason] = useState('');
-  return <form className="att-inline-form" onSubmit={event => { event.preventDefault(); onSubmit(reason.trim()); }}>
-    <h3>{title}</h3>
-    <label>Pin reason (optional)
-      <input maxLength={200} value={reason} onChange={event => setReason(event.currentTarget.value)} placeholder="Why should this evidence be retained?" />
-    </label>
-    <button type="submit" disabled={busy}>Pin Job</button>
-    <button type="button" disabled={busy} onClick={onCancel}>Cancel pin</button>
-  </form>;
-}
-
-function JobsList({ api, principal = '', onOpenJob, onSchedule, onEditSchedule, executionType: initialExecutionType, onExecutionTypeChange }: JobsFeatureProps) {
-  const [rows, setRows] = useState<JobSummary[]>([]);
-  const [selected, setSelected] = useState<string[]>([]);
-  const [pinnedOnly, setPinnedOnly] = useState(false);
-  const [confirmDelete, setConfirmDelete] = useState(false);
-  const [pinTarget, setPinTarget] = useState<JobSummary | null>(null);
-  const [bulkPin, setBulkPin] = useState<null | 'pin' | 'unpin'>(null);
-  const [bulkPinReason, setBulkPinReason] = useState('');
-  const [actionStatus, setActionStatus] = useState('');
-  const [actionBusy, setActionBusy] = useState(false);
-  async function pinRow(job: JobSummary, reason = '') {
-    if (!api.pinJob) return;
-    setActionBusy(true);
-    try { const updated = await api.pinJob(job.jobId, !job.pinned, reason); setRows(current => current.map(row => row.jobId === job.jobId ? updated : row)); }
-    catch (reason) { setActionStatus(toError(reason, 'Pin change failed.').message); }
-    finally { setActionBusy(false); }
-  }
-  async function pinSelected(pinned: boolean, reason: string) {
-    if (!api.pinJobs) return;
-    const targets = rows.filter(job => selected.includes(job.jobId));
-    setActionBusy(true); setBulkPin(null);
-    try {
-      const outcomes = await api.pinJobs(targets.map(job => job.jobId), pinned, pinned && reason ? reason : undefined);
-      setActionStatus(outcomes.slice(0, 100).map(item => `${item.jobId}: ${outcomeLabel(item.outcome, PIN_OUTCOME_LABELS)}`).join('; '));
-      setRefreshVersion(value => value + 1);
-    }
-    catch (reason) { setActionStatus(toError(reason, 'Bulk pin change failed.').message); }
-    finally { setActionBusy(false); }
-  }
-  const [state, setState] = useState<LoadState>('loading');
-  const [error, setError] = useState('');
-  const [serverPrincipal, setServerPrincipal] = useState(principal);
-  const [status, setStatus] = useState('');
-  const [packageId, setPackageId] = useState('');
-  const [command, setCommand] = useState(initialExecutionType || '');
-  const [nextLoadOffset, setNextLoadOffset] = useState<number | null>(null);
-  const [loadMoreBusy, setLoadMoreBusy] = useState(false);
-  useEffect(() => { setCommand(previous => initialExecutionType || (previous === 'load' ? '' : previous)); setPage(0); }, [initialExecutionType]);
-  const [fromDate, setFromDate] = useState('');
-  const [toDate, setToDate] = useState('');
-  const [sort, setSort] = useState<'newest' | 'oldest' | 'id'>('newest');
-  const [page, setPage] = useState(0);
-  const [refreshVersion, setRefreshVersion] = useState(0);
-  const sequence = useRef(0);
-
-  useEffect(() => {
-    let debounce: ReturnType<typeof setTimeout> | undefined;
-    const controller = new AbortController();
-    const current = ++sequence.current;
-    setState(previous => previous === 'ready' || previous === 'refreshing' ? 'refreshing' : 'loading');
-    setError('');
-    debounce = setTimeout(() => {
-      (command === 'load' && api.listLoadJobs
-        ? api.listLoadJobs({ offset: 0, limit: 100, principal: serverPrincipal.trim() || undefined, ...(pinnedOnly ? { pinnedOnly: true } : {}), signal: controller.signal }).then(result => { if (current === sequence.current) setNextLoadOffset(result.nextOffset ?? null); return result.items; })
-        : api.listJobs({ principal: serverPrincipal.trim() || undefined, signal: controller.signal, ...(pinnedOnly ? {pinnedOnly: true} : {}) }).then(items => { if (current === sequence.current) setNextLoadOffset(null); return items; }))
-        .then(items => {
-          if (controller.signal.aborted || current !== sequence.current) return;
-          setRows(items.slice(0, 100));
-          setSelected(current => current.filter(id => items.some(job => job.jobId === id)));
-          setState('ready');
-        })
-        .catch(reason => {
-          if (controller.signal.aborted || current !== sequence.current) return;
-          setError(toError(reason, 'Jobs could not be loaded.').message);
-          setState(previous => previous === 'ready' ? 'ready' : 'error');
-        });
-    }, 180);
-    return () => {
-      if (debounce) clearTimeout(debounce);
-      controller.abort();
-    };
-  }, [api, serverPrincipal, refreshVersion, pinnedOnly, command]);
-
-  const filtered = useMemo(() => {
-    const start = fromDate ? new Date(`${fromDate}T00:00:00`).getTime() : Number.NEGATIVE_INFINITY;
-    const end = toDate ? new Date(`${toDate}T23:59:59.999`).getTime() : Number.POSITIVE_INFINITY;
-    return rows.filter(job => {
-      const created = dateKey(job.createdAt || '');
-      return (!pinnedOnly || job.pinned) && (!status || job.status === status)
-        && (!packageId || job.packageId === packageId)
-        && (!command || executionType(job) === command)
-        && created >= start && created <= end;
-    }).sort((a, b) => {
-      if (sort === 'id') return a.jobId.localeCompare(b.jobId);
-      const difference = dateKey(a.createdAt || '') - dateKey(b.createdAt || '');
-      return sort === 'oldest' ? difference : -difference;
-    });
-  }, [rows, status, packageId, command, fromDate, toDate, sort, pinnedOnly]);
-
-  const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
-  const currentPage = Math.min(page, pageCount - 1);
-  const pageRows = filtered.slice(currentPage * PAGE_SIZE, (currentPage + 1) * PAGE_SIZE);
-  const resetPage = (setter: (value: string) => void) => (event: ChangeEvent<HTMLSelectElement | HTMLInputElement>) => {
-    setter(event.currentTarget.value);
-    setPage(0);
-  };
-  const start = filtered.length ? currentPage * PAGE_SIZE + 1 : 0;
-  const end = Math.min((currentPage + 1) * PAGE_SIZE, filtered.length);
-  const clearFilters = () => {
-    setPinnedOnly(false); setServerPrincipal(''); setStatus(''); setPackageId(''); setCommand('');
-    setFromDate(''); setToDate(''); setSort('newest'); setPage(0); onExecutionTypeChange?.(undefined);
-  };
-
-  return <div className="page-content att-jobs-page att-query-workspace" aria-labelledby="jobs-title">
-    <header className="att-feature-header">
-      <div><p className="att-eyebrow">Jobs and results</p><h1 id="jobs-title">Jobs</h1>
-        <p>Search and review jobs returned by the ATT Server.</p></div>
-    </header>
-
-    <section className="att-query-filter-panel att-jobs-filter-panel" aria-label="Job filters">
-      <div className="att-query-filter-grid">
-      <label>Principal search (Server filter)
-        <input value={serverPrincipal} onChange={event => { setServerPrincipal(event.currentTarget.value); setPage(0); }} />
-      </label>
-      <label><input type="checkbox" checked={pinnedOnly} onChange={event => {setPinnedOnly(event.currentTarget.checked);setPage(0);}} /> Pinned only</label>
-      <label>Status
-        <select value={status} onChange={resetPage(setStatus)}><option value="">All loaded statuses</option>{status && !rows.some(job => job.status === status) && <option value={status}>{status} (not in latest loaded rows)</option>}{unique(rows.map(job => job.status)).map(value => <option key={value}>{value}</option>)}</select>
-      </label>
-      <label>Package
-        <select value={packageId} onChange={resetPage(setPackageId)}><option value="">All loaded packages</option>{packageId && !rows.some(job => job.packageId === packageId) && <option value={packageId}>{packageId} (not in latest loaded rows)</option>}{unique(rows.map(job => job.packageId)).map(value => <option key={value}>{value}</option>)}</select>
-      </label>
-      <label>Type
-        <select value={command} onChange={event => { const value = event.currentTarget.value; setCommand(value); setPage(0); onExecutionTypeChange?.(value === 'load' ? 'load' : undefined); }}><option value="">All loaded types</option><option value="load">LOAD (Server filter)</option>{command && command !== 'load' && !rows.some(job => executionType(job) === command) && <option value={command}>{command} (not in latest loaded rows)</option>}{unique(rows.map(executionType)).filter(value => value !== 'load').map(value => <option key={value}>{value}</option>)}</select>
-      </label>
-      <label>Created from
-        <input type="date" value={fromDate} onChange={resetPage(setFromDate)} />
-      </label>
-      <label>Created to
-        <input type="date" value={toDate} onChange={resetPage(setToDate)} />
-      </label>
-      <label>Sort
-        <select value={sort} onChange={event => { setSort(event.currentTarget.value as typeof sort); setPage(0); }}>
-          <option value="newest">Newest first</option><option value="oldest">Oldest first</option><option value="id">Job ID A–Z</option>
-        </select>
-      </label>
-      </div>
-      <div className="att-query-filter-actions">
-        <button className="button button-quiet" type="button" onClick={clearFilters}>Clear filters</button>
-        <button className="button button-quiet" type="button" onClick={() => { setPage(0); setRefreshVersion(value => value + 1); }} disabled={state === 'loading' || state === 'refreshing'}>
-          {state === 'refreshing' ? 'Refreshing…' : 'Refresh jobs'}
-        </button>
-      </div>
-    </section>
-    <section className="att-query-results-panel" aria-label="Job results">
-    <p className="att-list-coverage" role="note">{command === 'load' ? 'LOAD, principal search and Pinned only are filtered by the authorized Server query before pagination, newest first. Other filters apply to loaded LOAD rows.' : 'Filters and sorting apply to at most 100 jobs loaded from the API; principal search and Pinned only are performed by the Server.'}</p>
-    {command === 'load' && nextLoadOffset != null && <button type="button" disabled={loadMoreBusy} onClick={async () => {
-      if (!api.listLoadJobs) return; const version = sequence.current; setLoadMoreBusy(true);
-      try { const result = await api.listLoadJobs({ offset: nextLoadOffset, limit: 100, principal: serverPrincipal.trim() || undefined, ...(pinnedOnly ? { pinnedOnly: true } : {}) }); if (version === sequence.current) { setRows(current => [...current, ...result.items]); setNextLoadOffset(result.nextOffset ?? null); } }
-      catch (error) { if (version === sequence.current) setError(toError(error, 'LOAD jobs could not be loaded.').message); }
-      finally { setLoadMoreBusy(false); }
-    }}>Load older LOAD Jobs</button>}
-
-    <p className="att-list-count att-query-result-status" role="status" aria-live="polite" aria-busy={state === 'loading' || state === 'refreshing'}>
-      {state === 'loading' ? 'Loading jobs…' : state === 'refreshing' ? `Refreshing ${rows.length} loaded jobs…` : `Showing ${start}–${end} of ${filtered.length} matching loaded jobs (page ${currentPage + 1} of ${pageCount}).`}
-    </p>
-    {(api.deleteJobs || api.pinJobs) && <div className="att-query-filter-actions"><span>{selected.length} selected across loaded pages</span>
-      <button type="button" disabled={!selected.length} onClick={() => setSelected([])}>Clear selection</button>
-      {api.pinJobs && <button type="button" disabled={!selected.length || actionBusy} onClick={() => setBulkPin('pin')}>Pin selected</button>}
-      {api.pinJobs && <button type="button" disabled={!selected.length || actionBusy} onClick={() => void pinSelected(false, '')}>Unpin selected</button>}
-      {api.deleteJobs && <button type="button" disabled={!selected.length || actionBusy} onClick={() => setConfirmDelete(true)}>Delete selected</button>}
-    </div>}
-    {actionStatus && <p role="status">{actionStatus}</p>}
-    {pinTarget && <PinReasonForm title={`Pin ${pinTarget.jobId}`} busy={actionBusy} onSubmit={reason => { void pinRow(pinTarget, reason); setPinTarget(null); }} onCancel={() => setPinTarget(null)} />}
-    {bulkPin === 'pin' && <form className="att-inline-form" onSubmit={event => { event.preventDefault(); void pinSelected(true, bulkPinReason.trim()); }}>
-      <h3>Pin {rows.filter(job => selected.includes(job.jobId) && isTerminalStatus(job.status)).length} selected Jobs</h3>
-      <label>Pin reason (optional)<input maxLength={200} value={bulkPinReason} onChange={event => setBulkPinReason(event.currentTarget.value)} /></label>
-      <button type="submit" disabled={actionBusy}>Pin selected Jobs</button>
-      <button type="button" disabled={actionBusy} onClick={() => setBulkPin(null)}>Cancel</button>
-    </form>}
-    {confirmDelete && api.deleteJobs && <DeleteJobs jobs={rows.filter(job => selected.includes(job.jobId))} onDelete={api.deleteJobs} onCancel={() => setConfirmDelete(false)} onDone={outcomes => {
-      setConfirmDelete(false);setActionStatus(outcomes.map(item => `${item.jobId}: ${outcomeLabel(item.outcome, DELETE_OUTCOME_LABELS)}`).join('; '));
-      const removed=outcomes.filter(item => item.outcome === 'DELETED' || item.outcome === 'ALREADY_UNAVAILABLE').map(item => item.jobId);
-      setRows(current => current.filter(job => !removed.includes(job.jobId)));setSelected(current => current.filter(id => !removed.includes(id)));
-      setRefreshVersion(value => value + 1);
-    }} />}
-    {error && <div className="att-inline-error" role="alert">{error}{rows.length > 0 && ' Showing the last successful result.'}</div>}
-    {state === 'error' && rows.length === 0 ? <section className="att-empty-state att-query-empty-state"><h2>Jobs unavailable</h2><p>{error}</p><button type="button" onClick={() => setRefreshVersion(value => value + 1)}>Try again</button></section>
-      : filtered.length === 0 && state === 'ready' ? <section className="att-empty-state att-query-empty-state"><h2>No matching jobs</h2><p>{rows.length ? 'No loaded jobs match these filters.' : 'The Server returned no jobs for this principal search.'}</p></section>
-        : <div className="att-table-scroll"><table className="att-jobs-table att-data-table">
-          <caption>Jobs returned by the Server; most recently created first by default</caption>
-          <thead><tr>{(api.deleteJobs || api.pinJobs) && <th scope="col"><input type="checkbox" aria-label="Select all on this page" checked={pageRows.length > 0 && pageRows.every(job => selected.includes(job.jobId))} onChange={event => {const checked=event.currentTarget.checked;setSelected(current => checked ? [...new Set([...current, ...pageRows.map(job => job.jobId)])] : current.filter(id => !pageRows.some(job => job.jobId === id)));}} /></th>}<th scope="col">Job ID</th><th scope="col">Package</th><th scope="col">Type</th><th scope="col">Principal</th><th scope="col">Status</th><th scope="col">Created</th><th scope="col">Open</th></tr></thead>
-          <tbody>{pageRows.map(job => <tr key={job.jobId}>
-            {(api.deleteJobs || api.pinJobs) && <td><input type="checkbox" aria-label={`Select ${job.jobId}`} checked={selected.includes(job.jobId)} onChange={event => {const checked=event.currentTarget.checked;setSelected(current => checked ? [...current, job.jobId] : current.filter(id => id !== job.jobId));}} /></td>}
-            <th scope="row"><button type="button" className="att-link-button" onClick={() => onOpenJob(job.jobId)}>{job.jobId}</button></th>
-            <td>{job.packageId}</td><td>{executionType(job)}</td><td>{job.principal || 'Not reported'}</td>
-            <td><StatusBadge status={job.status} /></td><td><time dateTime={job.createdAt || undefined}>{dateTime(job.createdAt)}</time></td>
-            <td>{job.pinned && <span title={`Pinned${job.pinReason ? `: ${job.pinReason}` : ''}`}>📌 Pinned</span>}{api.pinJob && isTerminalStatus(job.status) && <button type="button" disabled={actionBusy} onClick={() => job.pinned ? void pinRow(job, '') : setPinTarget(job)}>{job.pinned ? "Unpin" : "Pin"}</button>}<button type="button" onClick={() => onOpenJob(job.jobId)}>Open details</button><JobReplayActions api={api} configuration={{ executionType: executionType(job), packageId: job.packageId }} jobId={job.jobId} onOpenJob={onOpenJob} onSchedule={onSchedule} onEditSchedule={onEditSchedule} /></td>
-          </tr>)}</tbody>
-        </table></div>}
-    {filtered.length > PAGE_SIZE && <nav className="att-pagination att-query-pagination" aria-label="Loaded jobs pages">
-      <button type="button" onClick={() => setPage(value => Math.max(0, value - 1))} disabled={currentPage === 0}>Previous</button>
-      <span>Page {currentPage + 1} of {pageCount}</span>
-      <button type="button" onClick={() => setPage(value => Math.min(pageCount - 1, value + 1))} disabled={currentPage >= pageCount - 1}>Next</button>
-    </nav>}
-    </section>
-  </div>;
-}
-
-function JobDetail({ api, jobId, onShowList, confirmCancel, onOpenJob, onSchedule, onEditSchedule }: JobsFeatureProps & { jobId: string }) {
+function JobDetail({ api, jobId, onShowList, confirmCancel, onOpenJob, onSchedule, onEditSchedule, initialTab, onTabChange, standalone }: JobsFeatureProps & { jobId: string }) {
   const [job, setJob] = useState<JobView | null>(null);
-  const [confirmDelete, setConfirmDelete] = useState(false);
   const [jobActionBusy, setJobActionBusy] = useState(false);
   const [jobActionStatus, setJobActionStatus] = useState('');
-  const [pinReasonOpen, setPinReasonOpen] = useState(false);
   const [jobState, setJobState] = useState<LoadState>('loading');
   const [detailError, setDetailError] = useState('');
   const [result, setResult] = useState<JobResultResponse | null>(null);
   const [resultState, setResultState] = useState<LoadState>('loading');
   const [resultError, setResultError] = useState('');
-  const [activeTab, setActiveTab] = useState<JobTab>('overview');
+  const [activeTab, setActiveTabState] = useState<JobTab>(initialTab || 'overview');
+  useEffect(() => setActiveTabState(initialTab || 'overview'), [initialTab]);
+  const setActiveTab = (tab: JobTab) => { setActiveTabState(tab); onTabChange?.(tab); };
   const [cancelState, setCancelState] = useState<'idle' | 'pending' | 'error'>('idle');
   const [cancelError, setCancelError] = useState('');
   const [detailRefresh, setDetailRefresh] = useState(0);
@@ -645,9 +364,20 @@ function JobDetail({ api, jobId, onShowList, confirmCancel, onOpenJob, onSchedul
   }, [statusSnapshot]);
 
   async function changeJobPin(pinned: boolean, reason = '') {
-    setJobActionBusy(true); setPinReasonOpen(false);
+    setJobActionBusy(true);
     try { setJob(await api.pinJob!(jobId, pinned, reason)); }
     catch (error) { setJobActionStatus(toError(error, 'Pin change failed.').message); }
+    finally { setJobActionBusy(false); }
+  }
+
+  async function changeDeletion() {
+    if (!job || !api.setDeletionRequested || jobActionBusy) return;
+    setJobActionBusy(true);
+    try {
+      const outcomes = await api.setDeletionRequested([jobId], job.deletionState !== 'DELETE_REQUESTED');
+      setJobActionStatus(outcomes.map(item => item.outcome.replaceAll('_', ' ')).join('; '));
+      setDetailRefresh(value => value + 1);
+    } catch (error) { setJobActionStatus(toError(error, 'Deletion mark failed.').message); }
     finally { setJobActionBusy(false); }
   }
 
@@ -693,30 +423,21 @@ function JobDetail({ api, jobId, onShowList, confirmCancel, onOpenJob, onSchedul
     document.getElementById(`job-tab-${tabs[next].id}`)?.focus();
   }
 
-  return <div className="page-content att-job-detail" aria-labelledby="job-title">
+  return <div className={`page-content att-job-detail${standalone ? " att-standalone-job-details" : ""}`} aria-labelledby="job-title">
     <header className="att-feature-header">
       <div><p className="att-eyebrow"><button className="att-link-button" type="button" onClick={onShowList}>Jobs and results</button></p>
         <h1 id="job-title">Job {jobId}</h1><p>Server status, live output, results, artifacts and reported metrics.</p></div>
       <div className="att-job-actions">
         <StatusBadge status={jobStatus} />
         <JobReplayActions api={api} configuration={job ? { executionType: executionType(job), packageId: job.packageId } : undefined} jobId={jobId} onOpenJob={onOpenJob} onSchedule={onSchedule} onEditSchedule={onEditSchedule} />
-        <button type="button" onClick={() => consoleContext.openConsole({ jobId, view: activeTab === 'events' ? 'events' : 'live', job })}>Open floating console</button>
+        {!standalone && <button type="button" onClick={() => consoleContext.openConsole({ jobId, view: activeTab === 'events' ? 'events' : 'live', job })}>Open floating console</button>}
         {job?.pinned && <span title={`Pinned by ${job.pinnedBy || 'operator'} at ${job.pinnedAt || 'unknown time'}${job.pinReason ? ` · ${job.pinReason}` : ''}`}>📌 Pinned</span>}
-        {job && isTerminalStatus(jobStatus) && api.pinJob && <button type="button" disabled={jobActionBusy} onClick={() => job.pinned ? void changeJobPin(false) : setPinReasonOpen(true)}>{job.pinned ? 'Unpin' : 'Pin'}</button>}
-        {job && isTerminalStatus(jobStatus) && (api.deleteJob || api.deleteJobs) && <button type="button" disabled={jobActionBusy || job.pinned} title={job.pinned ? 'Unpin before deletion' : undefined} onClick={() => setConfirmDelete(true)}>Delete Job</button>}
+        {job && <JobStateIcons job={job} busy={jobActionBusy} onPin={api.pinJob ? () => void changeJobPin(!job.pinned) : undefined} onDelete={api.setDeletionRequested ? () => void changeDeletion() : undefined} />}
         {canCancel && <button className="att-button-danger" type="button" onClick={() => void cancel()} disabled={cancelState === 'pending'}>{cancelState === 'pending' ? 'Cancel requested…' : 'Cancel job'}</button>}
         <button type="button" onClick={retry} disabled={jobState === 'loading' || jobState === 'refreshing'}>{jobState === 'refreshing' ? 'Refreshing…' : 'Refresh details'}</button>
       </div>
     </header>
     {jobActionStatus && <p role="status">{jobActionStatus}</p>}
-    {pinReasonOpen && job && <PinReasonForm title={`Pin ${job.jobId}`} busy={jobActionBusy} onSubmit={reason => void changeJobPin(true, reason)} onCancel={() => setPinReasonOpen(false)} />}
-    {confirmDelete && displayedJob && (api.deleteJob || api.deleteJobs) && <DeleteJobs jobs={[displayedJob]} onDelete={jobIds => api.deleteJob
-      ? api.deleteJob(jobIds[0]).then(outcome => [outcome])
-      : api.deleteJobs!(jobIds)} onCancel={() => setConfirmDelete(false)} onDone={outcomes => {
-        setConfirmDelete(false);
-        if (outcomes.some(item => item.outcome === 'DELETED' || item.outcome === 'ALREADY_UNAVAILABLE')) onShowList();
-        else setJobActionStatus(outcomes.map(item => `${item.jobId}: ${outcomeLabel(item.outcome, DELETE_OUTCOME_LABELS)}`).join('; '));
-      }} />}
     {jobState === 'loading' && <p role="status" aria-busy="true">Loading job {jobId}…</p>}
     {detailError && <div role="alert" className="att-inline-error">{detailError}<button type="button" onClick={retry}>Retry</button></div>}
     {cancelError && <p role="alert" className="att-inline-error">{cancelError}</p>}

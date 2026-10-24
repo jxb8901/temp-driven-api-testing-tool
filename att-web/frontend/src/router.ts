@@ -26,7 +26,7 @@ export type AppRoute =
   | { kind: 'configuration'; packageId?: string; environment?: string; filePath?: string; fileOrigin?: string; sourceReference?: ResourceSourceReferenceRoute; configurationReferenceId?: string; tab?: ConfigurationTab }
   | { kind: 'quick-load'; packageId: string; target?: ResourceRoute; environment?: string; templateId?: string; model?: 'virtualUsers' | 'arrivalRate' }
   | { kind: 'run'; packageId?: string; target?: ResourceRoute; environment?: string; batch?: boolean }
-  | { kind: 'jobs'; jobId?: string; executionType?: 'load' }
+  | { kind: 'jobs'; jobId?: string; executionType?: 'load'; standalone?: boolean; tab?: 'overview' | 'live' | 'events' | 'results' | 'artifacts' | 'metrics' }
   | { kind: 'job-console'; jobId: string; view?: 'live' | 'events' }
   | { kind: 'load'; packageId?: string; catalog?: LoadCatalogRouteState; tab?: 'templates' | 'scenarios'; templateId?: string }
   | { kind: 'load-resource'; packageId: string; resourceId: string; environment?: string; returnTo?: string }
@@ -100,7 +100,7 @@ export function parseRoute(hash: string): AppRoute {
       const view = query.get('view');
       return { kind: 'job-console', jobId: parts[1], ...(view === 'live' || view === 'events' ? { view } : {}) };
     }
-    return { kind: 'jobs', ...(parts[1] ? { jobId: parts[1] } : {}), ...(query.get('type') === 'load' ? { executionType: 'load' } : {}) };
+    return { kind: 'jobs', ...(parts[1] ? { jobId: parts[1] } : {}), ...(query.get('standalone') === '1' ? { standalone: true } : {}), ...(['overview','live','events','results','artifacts','metrics'].includes(query.get('tab') || '') ? {tab: query.get('tab') as 'live'} : {}), ...(query.get('type') === 'load' ? { executionType: 'load' } : {}) };
   }
   if (parts[0] === 'load' && parts[1] === 'resources' && parts[2] && parts[3]) return {
     kind: 'load-resource', packageId: parts[2], resourceId: parts[3],
@@ -184,7 +184,10 @@ export function formatRoute(route: AppRoute): string {
         + (route.target ? '/' + encodeURIComponent(route.target.type) + '/' + encodeURIComponent(route.target.resourceId) : '')
         + (suffix ? '?' + suffix : '');
     }
-    case 'jobs': return (route.jobId ? '#/jobs/' + encodeURIComponent(route.jobId) : '#/jobs') + (route.executionType ? '?type=load' : '');
+    case 'jobs': {
+      const query = new URLSearchParams();if (route.executionType) query.set('type',route.executionType);if (route.standalone) query.set('standalone','1');if (route.tab) query.set('tab',route.tab);
+      return (route.jobId ? '#/jobs/' + encodeURIComponent(route.jobId) : '#/jobs') + (query.size ? '?' + query.toString() : '');
+    }
     case 'job-console': {
       const view = route.view ? '?view=' + encodeURIComponent(route.view) : '';
       return '#/jobs/' + encodeURIComponent(route.jobId) + '/console' + view;

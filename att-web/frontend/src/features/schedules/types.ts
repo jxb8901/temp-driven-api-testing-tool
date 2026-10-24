@@ -2,6 +2,7 @@ import type { ApiEnvelope } from '../../types';
 export type PackageChangePolicy = 'strict' | 'pause' | 'ignore';
 
 export interface ScheduleDefinition {
+  targetIdentity?: import('../load/types').TargetIdentity;
   packageChangePolicy?: PackageChangePolicy | null;
   effectivePackageChangePolicy?: PackageChangePolicy;
   serverPackageChangePolicy?: PackageChangePolicy;

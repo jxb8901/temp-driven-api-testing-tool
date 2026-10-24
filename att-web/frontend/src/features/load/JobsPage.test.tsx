@@ -4,8 +4,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ArtifactsPanel, BucketTable, JobOverview, JobsPage, MetricsPanel, TimeSeriesChart, downsampleMetricPoints, CHART_DISPLAY_POINT_THRESHOLD, type MetricBucket, type MetricSeries } from './JobsPage';
 import { JobArtifacts } from './JobArtifacts';
-import { ApiError } from '../../types';
-import type { JobEventHandlers, JobResultResponse, JobStatus, JobSummary, JobView, LoadJobsApi } from './types';
+import type { JobEventHandlers, JobResultResponse, JobStatus, JobView, LoadJobsApi } from './types';
 
 const sampleJob: JobView = {
   jobId: 'JOB-204', command: 'load', packageId: 'payments', principal: 'qa', status: 'RUNNING',
@@ -67,24 +66,7 @@ async function click(element: Element) {
   await act(async () => { element.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
 }
 
-function selectedRows(): string[] {
-  return [...host.querySelectorAll<HTMLInputElement>('[aria-label^="Select J"]')]
-    .filter(input => input.checked)
-    .map(input => input.getAttribute('aria-label')!.replace('Select ', ''));
-}
-
 describe('JobsPage React feature', () => {
-  it('uses Server-filtered LOAD pages instead of the mixed latest window and retains the selected route type', async () => {
-    const loadPage=vi.fn().mockResolvedValueOnce({items:[{...sampleJob,jobId:'LOAD-OLD'}],nextOffset:100}).mockResolvedValueOnce({items:[{...sampleJob,jobId:'LOAD-OLDER'}],nextOffset:null});
-    const api=makeApi({listLoadJobs:loadPage});const onOpenJob=vi.fn();
-    await act(async () => root.render(<JobsPage api={api} executionType="load" onOpenJob={onOpenJob} onShowList={vi.fn()} />));
-    await advance();expect(api.listJobs).not.toHaveBeenCalled();expect(loadPage).toHaveBeenCalledWith(expect.objectContaining({offset:0,limit:100}));
-    await click([...host.querySelectorAll('button')].find(button=>button.textContent==='Load older LOAD Jobs')!);
-    expect(loadPage).toHaveBeenLastCalledWith(expect.objectContaining({offset:100,limit:100}));
-    expect(host.textContent).toContain('LOAD-OLD');expect(host.textContent).toContain('LOAD-OLDER');
-    await click([...host.querySelectorAll('button')].find(button=>button.textContent==='Open details')!);expect(onOpenJob).toHaveBeenCalledWith('LOAD-OLD');
-  });
-
   it('downsamples only the chart display and preserves exact extrema and coordinates', () => {
     const points = Array.from({ length: CHART_DISPLAY_POINT_THRESHOLD + 240 }, (_, index) => ({
       epochMs: 1_800_000_000_000 + index * 1000,
@@ -186,207 +168,6 @@ describe('JobsPage React feature', () => {
     await click([...host.querySelectorAll('button')].find(button => button.textContent === 'Pause auto-scroll')!);
     expect(toJson).toHaveBeenCalledTimes(1);
     expect(event.querySelector('pre')?.textContent).toContain('lazy payload');
-  });
-
-  it('selects only the current page and confirms eligible deletions while preserving pinned selections', async () => {
-    const rows=Array.from({length: 30}, (_, index) => ({...sampleJob, jobId: `J${index}`, status: 'PASS' as const, pinned: index===0}));
-    const deleteJobs=vi.fn(async (ids: string[]) => ids.map(jobId => ({jobId, outcome: 'DELETED'})));
-    const api=makeApi({listJobs: vi.fn(async () => rows), deleteJobs, pinJob: vi.fn()});
-    await act(async () => root.render(<JobsPage api={api} onOpenJob={vi.fn()} onShowList={vi.fn()} />));await advance();
-    await click(host.querySelector('[aria-label="Select all on this page"]')!);
-    expect(host.textContent).toContain('25 selected across loaded pages');
-    const button=(text: string) => [...host.querySelectorAll('button')].find(item => item.textContent===text)!;
-    await click(button('Delete selected'));
-    expect(deleteJobs).not.toHaveBeenCalled();
-    expect(host.querySelector('[role="dialog"]')?.textContent).toContain('protected: unpin first');
-    await click(button('Keep Jobs'));expect(deleteJobs).not.toHaveBeenCalled();
-    await click(button('Delete selected'));await click(button('Permanently delete 24 Jobs'));
-    expect(deleteJobs.mock.calls[0][0]).toHaveLength(24);
-    expect(deleteJobs.mock.calls[0][0]).not.toContain('J0');
-    expect(deleteJobs.mock.calls[0][0]).not.toContain('J25');
-  });
-
-  it('pins a terminal Job in details and deletes it only after unpin and explicit confirmation', async () => {
-    const job={...sampleJob,status: 'PASS' as const,pinned: true};
-    const pinJob=vi.fn(async () => ({...job,pinned:false}));
-    const deleteJobs=vi.fn(async () => [{jobId:job.jobId,outcome:'DELETED'}]);
-    const onShowList=vi.fn();
-    await act(async () => root.render(<JobsPage api={makeApi({getJob:vi.fn(async () => job),pinJob,deleteJobs})} jobId={job.jobId} onOpenJob={vi.fn()} onShowList={onShowList} />));
-    const button=(text: string) => [...host.querySelectorAll('button')].find(item => item.textContent===text)!;
-    expect((button('Delete Job') as HTMLButtonElement).disabled).toBe(true);
-    await click(button('Unpin'));expect(pinJob).toHaveBeenCalledWith(job.jobId,false,'');
-    await click(button('Delete Job'));expect(deleteJobs).not.toHaveBeenCalled();
-    await click(button('Permanently delete 1 Jobs'));expect(onShowList).toHaveBeenCalled();
-  });
-
-  it('makes deletion confirmation accessible and reports readable failed outcomes while retaining selections', async () => {
-    const rows = [
-      {...sampleJob, jobId: 'J0', status: 'PASS' as const},
-      {...sampleJob, jobId: 'J1', status: 'PASS' as const},
-      {...sampleJob, jobId: 'J2', status: 'RUNNING' as const},
-    ];
-    const deleteJobs=vi.fn(async () => [
-      {jobId:'J0',outcome:'DELETED'},
-      {jobId:'J1',outcome:'PINNED_UNPIN_FIRST'},
-      {jobId:'J2',outcome:'NOT_TERMINAL'},
-    ]);
-    await act(async () => root.render(<JobsPage api={makeApi({listJobs: vi.fn(async () => rows),deleteJobs})} onOpenJob={vi.fn()} onShowList={vi.fn()} />));
-    await advance();
-    const opener=host.querySelector('[aria-label="Select J0"]') as HTMLButtonElement;
-    await act(async () => opener.focus());
-    for (const id of ['J0','J1','J2']) await click(host.querySelector(`[aria-label="Select ${id}"]`)!);
-    await click([...host.querySelectorAll('button')].find(button => button.textContent === 'Delete selected')!);
-    const dialog=host.querySelector('[role="dialog"]')!;
-    expect(document.activeElement).toBe(dialog.querySelector('h2'));
-    const keep=dialog.querySelector<HTMLButtonElement>('button')!;
-    const confirm=dialog.querySelectorAll<HTMLButtonElement>('button')[1];
-    confirm.focus();
-    await act(async () => document.body.dispatchEvent(new KeyboardEvent('keydown',{key:'Tab',bubbles:true})));
-    expect(document.activeElement).toBe(keep);
-    keep.focus();
-    await act(async () => document.body.dispatchEvent(new KeyboardEvent('keydown',{key:'Tab',shiftKey:true,bubbles:true})));
-    expect(document.activeElement).toBe(confirm);
-    await act(async () => document.body.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true})));
-    expect(deleteJobs).not.toHaveBeenCalled();
-    expect(host.querySelector('[role="dialog"]')).toBeNull();
-    expect(document.activeElement).toBe(opener);
-    await click([...host.querySelectorAll('button')].find(button => button.textContent === 'Delete selected')!);
-    await click([...host.querySelectorAll('button')].find(button => button.textContent === 'Permanently delete 2 Jobs')!);
-    expect(host.textContent).toContain('J1: Protected: unpin first');
-    expect(host.textContent).toContain('J2: Not terminal');
-    expect((host.querySelector('[aria-label="Select J1"]') as HTMLInputElement).checked).toBe(true);
-    expect(selectedRows()).toContain('J1');
-    expect(selectedRows()).not.toContain('J0');
-  });
-
-  it('uses single deletion, keeps a 202 outcome informational, and surfaces 409 action messages', async () => {
-    const job={...sampleJob,status: 'PASS' as const,pinned: false};
-    const pinJob=vi.fn(async () => { throw new ApiError('Only terminal Jobs can be pinned.', { status: 409, code: 'ATT-SERVER-JOB-NOT-ELIGIBLE' }); });
-    const deleteJob=vi.fn(async () => ({jobId:job.jobId,outcome:'DELETION_PENDING_RECOVERY'}));
-    const deleteJobs=vi.fn();
-    const onShowList=vi.fn();
-    await act(async () => root.render(<JobsPage api={makeApi({getJob:vi.fn(async () => job),pinJob,deleteJob,deleteJobs})} jobId={job.jobId} onOpenJob={vi.fn()} onShowList={onShowList} />));
-    await click([...host.querySelectorAll('button')].find(button => button.textContent === 'Pin')!);
-    await click([...host.querySelectorAll('button')].find(button => button.textContent === 'Pin Job')!);
-    expect(host.textContent).toContain('Only terminal Jobs can be pinned.');
-    await click([...host.querySelectorAll('button')].find(button => button.textContent === 'Delete Job')!);
-    await click([...host.querySelectorAll('button')].find(button => button.textContent === 'Permanently delete 1 Jobs')!);
-    expect(deleteJob).toHaveBeenCalledWith(job.jobId);
-    expect(deleteJobs).not.toHaveBeenCalled();
-    expect(host.textContent).toContain('Pending recovery (will finish automatically)');
-    expect(onShowList).not.toHaveBeenCalled();
-  });
-
-  it('humanizes an unknown deletion outcome and keeps that Job selected', async () => {
-    const rows = [{...sampleJob, jobId: 'J0', status: 'PASS' as const}];
-    const deleteJobs=vi.fn(async () => [{jobId:'J0',outcome:'FUTURE_SERVER_CODE'}]);
-    await act(async () => root.render(<JobsPage api={makeApi({listJobs: vi.fn(async () => rows),deleteJobs})} onOpenJob={vi.fn()} onShowList={vi.fn()} />));
-    await advance();
-    await click(host.querySelector('[aria-label="Select J0"]')!);
-    await click([...host.querySelectorAll('button')].find(button => button.textContent === 'Delete selected')!);
-    await click([...host.querySelectorAll('button')].find(button => button.textContent === 'Permanently delete 1 Jobs')!);
-    expect(host.textContent).toContain('J0: Unknown outcome: Future server code');
-    expect((host.querySelector('[aria-label="Select J0"]') as HTMLInputElement).checked).toBe(true);
-  });
-
-  it.each([
-    ['DELETED', 'Deleted'],
-    ['ALREADY_UNAVAILABLE', 'Already removed'],
-    ['DELETION_PENDING_RECOVERY', 'Pending recovery (will finish automatically)'],
-    ['PINNED_UNPIN_FIRST', 'Protected: unpin first'],
-    ['NOT_TERMINAL', 'Not terminal'],
-    ['JOB_BUSY', 'Busy, retry later'],
-    ['ARCHIVE_BUSY', 'Busy, retry later'],
-    ['UNAVAILABLE', 'Not found'],
-  ])('labels server deletion outcome %s as %s', async (outcome, label) => {
-    const rows = [{...sampleJob, jobId: 'J0', status: 'PASS' as const}];
-    const deleteJobs = vi.fn(async () => [{jobId: 'J0', outcome}]);
-    await act(async () => root.render(<JobsPage api={makeApi({listJobs: vi.fn(async () => rows), deleteJobs})} onOpenJob={vi.fn()} onShowList={vi.fn()} />));
-    await advance();
-    await click(host.querySelector('[aria-label="Select J0"]')!);
-    await click([...host.querySelectorAll('button')].find(button => button.textContent === 'Delete selected')!);
-    await click([...host.querySelectorAll('button')].find(button => button.textContent === 'Permanently delete 1 Jobs')!);
-    expect(host.textContent).toContain(`J0: ${label}`);
-  });
-
-  it('re-fetches rows after bulk pin so the row shows Pinned and Unpin', async () => {
-    const initialRows = [{...sampleJob, jobId: 'J0', status: 'PASS' as const, pinned: false}];
-    const refreshedRows = [{...initialRows[0], pinned: true, pinReason: 'release evidence'}];
-    const listJobs = vi.fn().mockResolvedValueOnce(initialRows).mockResolvedValue(refreshedRows);
-    const pinJobs = vi.fn(async () => [{jobId: 'J0', outcome: 'PINNED'}]);
-    const pinJob = vi.fn();
-    await act(async () => root.render(<JobsPage api={makeApi({listJobs, pinJobs, pinJob})} onOpenJob={vi.fn()} onShowList={vi.fn()} />));
-    await advance();
-    await click(host.querySelector('[aria-label="Select J0"]')!);
-    await click([...host.querySelectorAll('button')].find(button => button.textContent === 'Pin selected')!);
-    await click([...host.querySelectorAll('button')].find(button => button.textContent === 'Pin selected Jobs')!);
-    await advance();
-    expect(listJobs).toHaveBeenCalledTimes(2);
-    const row = host.querySelector('tbody tr')!;
-    expect(row.textContent).toContain('📌 Pinned');
-    expect([...row.querySelectorAll('button')].some(button => button.textContent === 'Unpin')).toBe(true);
-  });
-
-  it.each([
-    ['PINNED', 'Pinned', false],
-    ['UNPINNED', 'Unpinned', true],
-    ['NOT_ELIGIBLE', 'Not eligible for pinning', false],
-    ['UNAVAILABLE', 'Not found', false],
-  ])('labels server pin outcome %s as %s', async (outcome, label, initiallyPinned) => {
-    const rows = [{...sampleJob, jobId: 'J0', status: 'PASS' as const, pinned: initiallyPinned}];
-    const pinJobs = vi.fn(async () => [{jobId: 'J0', outcome}]);
-    await act(async () => root.render(<JobsPage api={makeApi({listJobs: vi.fn(async () => rows), pinJobs})} onOpenJob={vi.fn()} onShowList={vi.fn()} />));
-    await advance();
-    await click(host.querySelector('[aria-label="Select J0"]')!);
-    const action = initiallyPinned ? 'Unpin selected' : 'Pin selected';
-    await click([...host.querySelectorAll('button')].find(button => button.textContent === action)!);
-    if (!initiallyPinned) await click([...host.querySelectorAll('button')].find(button => button.textContent === 'Pin selected Jobs')!);
-    expect(host.textContent).toContain(`J0: ${label}`);
-  });
-
-  it('re-fetches the list after bulk delete', async () => {
-    const rows = [{...sampleJob, jobId: 'J0', status: 'PASS' as const, pinned: false}];
-    const listJobs = vi.fn().mockResolvedValue(rows);
-    const deleteJobs = vi.fn(async () => [{jobId: 'J0', outcome: 'DELETION_PENDING_RECOVERY'}]);
-    await act(async () => root.render(<JobsPage api={makeApi({listJobs, deleteJobs})} onOpenJob={vi.fn()} onShowList={vi.fn()} />));
-    await advance();
-    await click(host.querySelector('[aria-label="Select J0"]')!);
-    await click([...host.querySelectorAll('button')].find(button => button.textContent === 'Delete selected')!);
-    await click([...host.querySelectorAll('button')].find(button => button.textContent === 'Permanently delete 1 Jobs')!);
-    await advance();
-    expect(listJobs).toHaveBeenCalledTimes(2);
-  });
-
-  it('collects a pin reason and supports bulk pin outcomes', async () => {
-    const rows=[{...sampleJob,jobId:'J0',status:'PASS' as const},{...sampleJob,jobId:'J1',status:'PASS' as const},{...sampleJob,jobId:'J2',status:'RUNNING' as const}];
-    const pinJob=vi.fn(async (_id:string,_pinned:boolean,reason?:string)=>({...sampleJob,jobId:'J0',status:'PASS' as const,pinned:true,pinReason:reason||null}));
-    const pinJobs=vi.fn(async (ids:string[],pinned:boolean)=>[
-      {jobId:ids[0]||'J0',outcome:pinned?'PINNED':'UNPINNED'},
-      {jobId:'J2',outcome:'NOT_ELIGIBLE'},
-    ]);
-    const api=makeApi({listJobs:vi.fn(async()=>rows),pinJob,pinJobs});
-    await act(async () => root.render(<JobsPage api={api} onOpenJob={vi.fn()} onShowList={vi.fn()} />));
-    await advance();
-    await click([...host.querySelectorAll('button')].find(button => button.textContent === 'Pin')!);
-    const input=host.querySelector<HTMLInputElement>('input[maxlength="200"]')!;
-    await act(async () => {
-      input.focus();
-      const setter=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!;
-      setter.call(input,'release evidence');
-      input.dispatchEvent(new Event('input',{bubbles:true}));
-      await Promise.resolve();
-    });
-    await click([...host.querySelectorAll('button')].find(button => button.textContent === 'Pin Job')!);
-    expect(pinJob).toHaveBeenCalledWith('J0',true,'release evidence');
-    await advance();
-    for (const id of ['J0','J1','J2']) await click(host.querySelector(`[aria-label="Select ${id}"]`)!);
-    await click([...host.querySelectorAll('button')].find(button => button.textContent === 'Pin selected')!);
-    await click([...host.querySelectorAll('button')].find(button => button.textContent === 'Pin selected Jobs')!);
-    expect(pinJobs).toHaveBeenCalledWith(['J0','J1','J2'],true,undefined);
-    expect(host.textContent).toContain('J0: Pinned');
-    expect(host.textContent).toContain('J2: Not eligible');
-    await click([...host.querySelectorAll('button')].find(button => button.textContent === 'Unpin selected')!);
-    expect(pinJobs).toHaveBeenLastCalledWith(['J0','J1','J2'],false,undefined);
   });
 
   it.each([
@@ -683,49 +464,6 @@ describe('JobsPage React feature', () => {
     ]);
     expect(summary.textContent).not.toContain('borrowed');
     expect(summary.textContent).not.toContain('reclaimed borrow');
-  });
-
-  it('keeps active list filters through an asynchronous refresh and bounds results to the returned rows', async () => {
-    const next = deferred<JobSummary[]>();
-    const listJobs = vi.fn<LoadJobsApi['listJobs']>()
-      .mockResolvedValueOnce([
-        { jobId: 'JOB-RUN', command: 'load', packageId: 'payments', principal: 'qa', status: 'RUNNING', createdAt: '2026-10-13T10:00:00Z' },
-        { jobId: 'JOB-PASS', command: 'run', packageId: 'ledger', principal: 'qa', status: 'PASS', createdAt: '2026-10-13T09:00:00Z' },
-      ])
-      .mockReturnValueOnce(next.promise);
-    const api = makeApi({ listJobs });
-    const onOpenJob = vi.fn();
-    await act(async () => root.render(<JobsPage api={api} onOpenJob={onOpenJob} onShowList={vi.fn()} />));
-    await advance();
-    expect(host.textContent).toContain('JOB-RUN');
-    expect(host.querySelector('.att-query-filter-panel[aria-label="Job filters"]')).not.toBeNull();
-    expect(host.querySelector('.att-query-results-panel[aria-label="Job results"]')).not.toBeNull();
-
-    const status = host.querySelector('.att-jobs-filter-panel select') as HTMLSelectElement;
-    await act(async () => {
-      status.value = 'RUNNING';
-      status.dispatchEvent(new Event('change', { bubbles: true }));
-    });
-    expect(status.value).toBe('RUNNING');
-    expect(host.textContent).toContain('JOB-RUN');
-    expect(host.textContent).not.toContain('JOB-PASS');
-
-    await click([...host.querySelectorAll('button')].find(button => button.textContent === 'Refresh jobs')!);
-    await advance();
-    expect(host.textContent).toContain('Refreshing 2 loaded jobs');
-    expect((host.querySelector('.att-jobs-filter-panel select') as HTMLSelectElement).value).toBe('RUNNING');
-
-    await act(async () => next.resolve([
-      { jobId: 'JOB-NEW', command: 'load', packageId: 'payments', principal: 'qa', status: 'PASS', createdAt: '2026-10-13T11:00:00Z' },
-    ]));
-    expect((host.querySelector('.att-jobs-filter-panel select') as HTMLSelectElement).value).toBe('RUNNING');
-    expect(host.textContent).toContain('No loaded jobs match these filters.');
-    expect(host.textContent).not.toContain('JOB-NEW');
-    expect(host.textContent).toContain('at most 100 jobs');
-    expect(listJobs).toHaveBeenCalledTimes(2);
-    await click([...host.querySelectorAll('button')].find(button => button.textContent === 'Clear filters')!);
-    expect((host.querySelector('.att-jobs-filter-panel select') as HTMLSelectElement).value).toBe('');
-    expect(host.textContent).toContain('JOB-NEW');
   });
 
   it('does not overwrite a terminal SSE event with a delayed cancel response', async () => {

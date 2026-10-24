@@ -66,6 +66,9 @@ class ServerRuntimeScheduleTest {
             catalogScheduleRequest.put("draftId",String.valueOf(environmentValidation.get("draftId")));
             catalogScheduleRequest.put("environment","SIT");catalogScheduleRequest.put("timezone","UTC");catalogScheduleRequest.put("cron","0 2 * * *");
             LoadSchedule catalogSnapshotSchedule=setupRuntime.createLoadSchedule(catalogScheduleRequest,"alice");
+            assertNotNull(catalogSnapshotSchedule.listSummary);
+            assertFalse(((List<?>)catalogSnapshotSchedule.listSummary.get("workloads")).isEmpty());
+            assertEquals(ServerRuntime.JSON.writeValueAsString(catalogSnapshotSchedule.listSummary),ServerRuntime.JSON.writeValueAsString(setupRuntime.store.schedule(catalogSnapshotSchedule.id).listSummary));
             assertTrue(catalogSnapshotSchedule.catalogSnapshot);assertNull(catalogSnapshotSchedule.scenario);
             assertNotNull(catalogSnapshotSchedule.inlineScenario);assertNotNull(catalogSnapshotSchedule.expectedRevisionDigest);
             assertTrue(Boolean.TRUE.equals(setupRuntime.loadScheduleView(catalogSnapshotSchedule).get("inlineSnapshot")));
