@@ -84,7 +84,7 @@ class LoadReportTest {
         @SuppressWarnings("unchecked") Map<String, Object> json = att.validation.JsonSupport.mapper()
                 .readValue(runDirectory.resolve("load-summary.json").toFile(), Map.class);
         assertDoesNotThrow(() -> att.validation.JsonSchemaVerifier.verifyJson(
-                Paths.get("schemas/att-load-summary-v1.1.schema.json"),
+                Paths.get("schemas/att-load-summary-v1.2.schema.json"),
                 new String(Files.readAllBytes(runDirectory.resolve("load-summary.json")), StandardCharsets.UTF_8)));
         Map<String, Object> legacySummary = new LinkedHashMap<String, Object>(json);
         Map<String, Object> legacyMetrics = new LinkedHashMap<String, Object>((Map<String, Object>) json.get("metrics"));
@@ -93,9 +93,9 @@ class LoadReportTest {
             legacyMetrics.remove(added);
         legacySummary.put("metrics", legacyMetrics);
         assertDoesNotThrow(() -> att.validation.JsonSchemaVerifier.verifyJson(
-                Paths.get("schemas/att-load-summary-v1.1.schema.json"), att.validation.JsonSupport.write(legacySummary)),
+                Paths.get("schemas/att-load-summary-v1.2.schema.json"), att.validation.JsonSupport.write(legacySummary)),
                 "summaries with optional telemetry fields remain valid when new telemetry fields are absent");
-        assertEquals("att-load-summary/v1.1", json.get("schemaVersion"));
+        assertEquals("att-load-summary/v1.2", json.get("schemaVersion"));
         assertEquals("PASS", json.get("status"));
         assertTrue(json.containsKey("timing"));
         assertTrue(json.containsKey("resources"));
@@ -111,16 +111,16 @@ class LoadReportTest {
         Map<String, Object> missingReport = new LinkedHashMap<String, Object>(json);
         missingReport.remove("report");
         assertThrows(IllegalArgumentException.class, () -> att.validation.JsonSchemaVerifier.verifyJson(
-                Paths.get("schemas/att-load-summary-v1.1.schema.json"),
+                Paths.get("schemas/att-load-summary-v1.2.schema.json"),
                 att.validation.JsonSupport.write(missingReport)));
 
         String html = new String(Files.readAllBytes(report), StandardCharsets.UTF_8);
         assertTrue(html.contains("Configured arrival rate"));
         assertTrue(html.contains("Achieved scheduling rate"));
-        assertTrue(html.contains("Completed TPS"));
+        assertTrue(html.contains("Actual completed TPS"));
         assertTrue(html.contains("Dropped arrivals"));
         assertTrue(html.contains("SUT failures"));
-        assertTrue(html.contains("Phase timing and warm-up separation"));
+        assertTrue(html.contains("Phase windows and event-time completion rates"));
         assertTrue(html.contains("Resource and generator diagnostics"));
         assertTrue(html.contains("orders"));
         assertTrue(html.contains("broker"));
@@ -129,7 +129,49 @@ class LoadReportTest {
         assertTrue(html.contains("../samples/00001-deadbeef.json"));
         assertTrue(html.contains("../executions/exec-1/case%20log%3C%26.log"));
         assertTrue(html.contains("payments&lt;&amp;"));
-        assertTrue(html.contains("window.ATT_LOAD_SUMMARY"));
+        assertTrue(html.contains("<script type=\"application/json\" id=\"att-load-summary-data\">"));
+        assertFalse(html.contains("window.ATT_LOAD_SUMMARY="));
+    }
+
+    @Test void phaseTableSeparatesCrossPhaseCompletionsFromScheduledCohortsAndLateDrain() throws Exception {
+        Instant started = Instant.parse("2026-10-24T00:00:00Z");
+        long startMs = started.toEpochMilli();
+        LoadScenario scenario = new LoadScenario(Paths.get("phase-times.yaml"), "template", "LOAD_TEMPLATE",
+                Collections.emptyMap(), Collections.emptyMap(), LoadScenario.Model.ARRIVAL_RATE, 0, 10.0, "10/s",
+                Duration.ZERO, Duration.ofSeconds(1), Duration.ofSeconds(1), Duration.ZERO, Duration.ZERO,
+                2, "drop", Collections.emptyMap(), Collections.emptyMap());
+        LoadMetrics metrics = LoadMetrics.forScenario(scenario, startMs, 2_500L);
+        metrics.onEvent(LoadEvent.completed("phase-run", "arrivalRate", "RAMP_UP", "ramp-cohort", null, 1,
+                startMs + 500L, startMs + 500L, startMs + 1_500L, ResultStatus.PASS));
+        metrics.onEvent(LoadEvent.completed("phase-run", "arrivalRate", "STEADY", "steady-cohort", null, 2,
+                startMs + 1_500L, startMs + 1_500L, startMs + 2_500L, ResultStatus.PASS));
+        metrics.finish(startMs + 2_500L);
+        LoadRunResult result = new LoadRunResult("phase-run", scenario, started, started.plusMillis(2_500L), metrics.snapshot());
+        Path report = new LoadReportWriter().write(temp, result);
+        String html = new String(Files.readAllBytes(report), StandardCharsets.UTF_8);
+
+        String rampUp = phaseRow(html, "RAMP_UP");
+        assertTrue(rampUp.contains("</td><td>1</td><td>1</td><td>0</td><td>0</td>"), rampUp);
+        assertTrue(rampUp.contains("</td><td>1</td><td>0.00%"), "the scheduled ramp-up cohort must retain its eventual outcome: " + rampUp);
+        String steady = phaseRow(html, "STEADY");
+        assertTrue(steady.contains("</td><td>1</td><td>1</td><td>1</td><td>1</td>"), steady);
+        assertTrue(steady.contains("<td>1.000/s</td><td>1.000/s</td>"), steady);
+        String drain = phaseRow(html, "DRAIN");
+        assertTrue(drain.contains("</td><td>0</td><td>0</td><td>1</td><td>1</td>"), drain);
+        assertTrue(drain.contains("<td>2.000/s</td><td>2.000/s</td>"), drain);
+        assertTrue(html.contains("Scheduled cohort completed"));
+        assertTrue(html.contains("Event-time completions"));
+        assertFalse(html.contains("<th>Completed TPS</th>"));
+        assertFalse(html.contains("<th>Successful TPS</th>"));
+    }
+
+    private static String phaseRow(String html, String phase) {
+        String start = "<tr><td><b>" + phase + "</b>";
+        int from = html.indexOf(start);
+        assertTrue(from >= 0, "missing phase row " + phase);
+        int end = html.indexOf("</tr>", from);
+        assertTrue(end > from, "unterminated phase row " + phase);
+        return html.substring(from, end + 5);
     }
 
     @Test void reportDoesNotCreateCaseLogLinksForMissingOrEscapingArtifacts() throws Exception {
@@ -213,7 +255,9 @@ class LoadReportTest {
         assertEquals("FAIL", json.get("status"));
         assertEquals(1, ((Number) json.get("exitCode")).intValue());
         @SuppressWarnings("unchecked") Map<String, Object> jsonThresholds = (Map<String, Object>) json.get("thresholds");
-        assertEquals("FAIL", jsonThresholds.get("status"));
+        assertEquals("NOT_MET", jsonThresholds.get("status"));
+        assertEquals(Boolean.FALSE, jsonThresholds.get("legacyPassed"));
+        assertEquals("NOT_MET", jsonThresholds.get("performanceVerdict"));
         assertTrue(jsonText.contains("250.000ms exceeds <= 100ms"));
         assertTrue(yamlText.contains("250.000ms exceeds <= 100ms"));
         assertTrue(html.contains("FAIL"));

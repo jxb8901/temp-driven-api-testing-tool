@@ -58,7 +58,7 @@ describe('LoadCatalogPage', () => {
         { packageId: 'payments', resourceId: 'load/policy.yaml', path: 'load/policy.yaml', kind: 'template', validation: 'valid', model: 'arrivalRate', workloadCount: 0, sourceAvailable: true, runNow: false, schedule: false, createQuickLoad: true },
       ], total: 2 })),
       validateLoadCatalogScenario: vi.fn(async () => ({ validation: 'valid', scheduleAvailable: true, draftId: 'C'.concat('a'.repeat(32)),
-        previewYaml: 'schemaVersion: att-load/v1.8\n', expiresAt: new Date(Date.now() + 60_000).toISOString() })),
+        previewYaml: 'schemaVersion: att-load/v1.9\n', expiresAt: new Date(Date.now() + 60_000).toISOString() })),
       getLoadSource: vi.fn(async () => ({ available: true, text: 'schemaVersion: att-load/v1.6\n', redacted: true })),
       submitLoadScenario: vi.fn(async () => ({ jobId: 'JOB-LOAD' })),
       listLoadJobs: vi.fn(async () => ({ items: [] })),
@@ -85,7 +85,7 @@ describe('LoadCatalogPage', () => {
     const schedule = [...host.querySelectorAll('button')].find(button => button.textContent === 'Schedule')!;
     await act(async () => schedule.click());
     expect(onSchedule).toHaveBeenCalledWith({ packageId: 'payments', environment: 'SIT', draftId: `C${'a'.repeat(32)}`,
-      previewYaml: 'schemaVersion: att-load/v1.8\n', expiresAt: expect.any(String), executionType: 'load' });
+      previewYaml: 'schemaVersion: att-load/v1.9\n', expiresAt: expect.any(String), executionType: 'load' });
     await act(async () => [...host.querySelectorAll('button')].find(button => button.textContent === 'Clear filters')!.click());
     expect((host.querySelector('[aria-label="Catalog Environment for payments"]') as HTMLSelectElement).value).toBe('SIT');
   });

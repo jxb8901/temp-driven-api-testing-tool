@@ -291,7 +291,7 @@ describe('JobsPage React feature', () => {
     expect(metrics?.textContent).toContain('500');
   });
 
-  it('discovers reports independently of pagination and offers only an archive download', async () => {
+  it('discovers reports independently of pagination and offers authenticated standalone artifact links', async () => {
     const report = { path: 'load/run/report/index.html', report: true, size: 900 };
     const api = makeApi({
       getJobArtifactArchive: vi.fn(async (_id: string, offset?: number) => ({ archiveStatus: 'READY' as const, primaryReports: [report],
@@ -304,13 +304,23 @@ describe('JobsPage React feature', () => {
     await advance();
     const panel = host.querySelector('#job-panel-artifacts')!;
     expect(panel.textContent).toContain('View Report: load/run/report/index.html');
-    expect([...panel.querySelectorAll('a')].map(link => link.textContent)).toEqual(['Download Artifacts (.zip)']);
+    expect([...panel.querySelectorAll('a')].map(link => link.textContent)).toEqual([
+      'Download Artifacts (.zip)', 'Open in new tab', 'Open in new tab',
+    ]);
+    const reportLink = [...panel.querySelectorAll<HTMLAnchorElement>('a')].find(link => link.href.includes('/artifact?path='));
+    expect(reportLink?.getAttribute('href')).toContain('path=load%2Frun%2Freport%2Findex.html');
+    expect(reportLink?.target).toBe('_blank');
+    expect(reportLink?.rel).toBe('noopener noreferrer');
     expect(panel.textContent).toContain('Some output was excluded');
     await click([...panel.querySelectorAll('button')].find(button => button.textContent === 'Load more artifacts')!);
     expect(panel.textContent).toContain('nested/evidence.json');
     expect(panel.textContent).toContain('case.log');
     await click([...panel.querySelectorAll('button')].find(button => button.textContent?.startsWith('View Report:'))!);
     await advance();
+    const previewLink = panel.querySelector<HTMLAnchorElement>('[aria-label="Artifact preview"] a');
+    expect(previewLink?.textContent).toBe('Open in new tab');
+    expect(previewLink?.target).toBe('_blank');
+    expect(previewLink?.rel).toBe('noopener noreferrer');
     const frame = panel.querySelector('iframe')!;
     expect(frame.getAttribute('sandbox')).toBe('allow-scripts');
     expect(frame.hasAttribute('allow-same-origin')).toBe(false);

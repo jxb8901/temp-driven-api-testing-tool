@@ -1,5 +1,12 @@
 package att.server;
 
+import att.core.ResultStatus;
+import att.load.LoadEvent;
+import att.load.LoadMetrics;
+import att.load.LoadReportWriter;
+import att.load.LoadRunResult;
+import att.load.LoadScenario;
+import att.load.LoadScenarioLoader;
 import att.server.api.WorkerRequest;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -7,6 +14,8 @@ import org.junit.jupiter.api.io.TempDir;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
+import java.nio.charset.StandardCharsets;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
@@ -104,6 +113,39 @@ class ArtifactLifecycleTest {
                 assertTrue(new String(preview,java.nio.charset.StandardCharsets.UTF_8).contains("business=unchanged"));
                 assertEquals(job.principal,runtime.jobRecord(id).get("principal"));
             }
+        }
+    }
+
+    @Test void archivedLoadReportKeepsRateUnitsAndCountsInZipPreview() throws Exception {
+        try(ServerRuntime runtime=runtime()) {
+            String id="J0000000000000001";job(runtime,id,"PASS");
+            Path output=runtime.outputDirectoryForJob(id);
+            Path privatePath=temp.resolve("private").resolve("report.html");
+            Path scenarioPath=temp.resolve("load-preview.yaml");
+            Files.write(scenarioPath,Collections.singletonList("schemaVersion: att-load/v1.9\nworkloads:\n- target:\n    type: tool\n    id: sample.getAcDate\n  load: {users: 1, duration: 2s}\n  id: archive-preview"),StandardCharsets.UTF_8);
+            LoadScenario scenario=new LoadScenarioLoader(temp).load(scenarioPath);
+            Instant started=Instant.parse("2026-10-24T00:00:00Z");long startMs=started.toEpochMilli();
+            LoadMetrics metrics=LoadMetrics.forScenario(scenario,startMs,3_000L);
+            metrics.onEvent(LoadEvent.completed("archive-preview", "closed", "STEADY", "iteration-1", "VU-1", 1,
+                    startMs+1_000L,startMs+1_000L,startMs+1_050L,ResultStatus.PASS));
+            metrics.finish(startMs+3_000L);
+            String html=Files.readString(new LoadReportWriter().write(temp.resolve("load-source"),
+                    new LoadRunResult("archive-preview",scenario,started,started.plusSeconds(3),metrics.snapshot())),StandardCharsets.UTF_8)
+                    .replace("<body>","<body><p>0 / 120 measured completions</p><p>target generator rate /s</p><p>Could not read "+privatePath+"</p>");
+            Files.writeString(output.resolve("load-report.html"),html);
+            runtime.scheduleArtifactArchive(id);awaitState(runtime,id,"READY");
+
+            byte[] archived=ArtifactArchive.read(runtime.artifactArchivePath(id),"load-report.html");
+            byte[] studioPreview=runtime.archiveEntry(id,"load-report.html");
+            assertArrayEquals(archived,studioPreview);
+            String published=new String(archived,java.nio.charset.StandardCharsets.UTF_8);
+            assertTrue(published.contains("0 / 120 measured completions"),published);
+            assertTrue(published.contains("target generator rate /s"),published);
+            assertTrue(published.contains("id=\"rate-chart\""),published);
+            assertTrue(published.contains("renderCharts"),published);
+            assertTrue(published.contains("sha256-7Emox9BSHo++OK/zNqiPHBVgRGZ8mb3Ox1aAfU9nSdI="),published);
+            assertTrue(published.contains("$EXTERNAL/report.html"),published);
+            assertFalse(published.contains(privatePath.toString()),published);
         }
     }
 

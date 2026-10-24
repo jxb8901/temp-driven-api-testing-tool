@@ -10,11 +10,17 @@ Coordinated scheduler 會等待 arrival/VU deadline、phase boundary、completio
 
 每個已 admission 的 workload task 都有可取消 handle。Cancellation 先停止 admission，再 interrupt 該 workload 已 admission 的 tasks。Workload result snapshot 在 scheduler 收完 completion/finally event 後才凍結，因此 cancellation 期間完成的 iteration outcome 和 metrics 也會被計入。
 
+## LOAD resource readiness barrier
+
+Coordinator 會先為每個 target 建立 immutable execution plan，並凍結可到達的 Render source，然後才呼叫 `LoadRunResources.prepareResources()`。Resource inventory 會沿 primary 和巢狀 Tool plan 追蹤靜態 helper call 及 frozen payload expression，不會開啟 global configuration 中所有 helper。Dynamic helper reference 會記錄為 skipped，並在首次使用時維持 lazy。
+
+Preparation 在 scheduler start event 前依序執行。DB pool 會保留不同且已驗證的 idle lease，數量至少為 `max(1, minIdle)`，不會執行 business SQL；MQ factory 建立 idle physical connection，但不開 queue 或傳送 message；HTTP preparation 建立 client/TLS state，不發 request。每個 run 的 DB/MQ initial session 上限為 64 個，每個 Worker JVM 上限為 256 個。Server 每個 Server process 最多同時執行四個 LOAD Worker，因此由 Server 提交的 LOAD preparation 跨 Worker 最多為 256 個 session。此 admission 上限不包括 RUN/Debug、CLI 或直接 Engine process，以及其他 Server instance。Deadline 限制 startup；resource owner 完成 close 前 cleanup 會保留 reservation。失敗會回傳 preparation error，不會 admission iteration。RUN/Debug 不呼叫此 LOAD barrier。
+
 ## Execution identity 與 artifact storage
 
 ATT 為每個 started iteration 配置唯一的 engine-managed `EXEC.ID`：`<runId>-execution-<sequence>`。同一 Run 的所有 Workload、Target、Mix entry 及 phase 共用一個 thread-safe、單調遞增的 allocator。ID 在 bootstrap vars 與 Target action 前發布；`EXEC.RUN_ID` 保持為外層 Run identity。Collision tracking 不會建立 per-iteration 檔案或持續增長的 ID registry。
 
-目前及歷史 Load Scenario、policy-only YAML、inline draft，以及已儲存的 Schedule／Worker snapshot，都拒絕 `execution.execIdFormat`，包括空值。請移除此欄位並遷移至 `att-load/v1.8`，檢查依賴 artifact path 的整合，改用獨立 input／variable 保存 business correlation。歷史 artifact 保留原路徑；歷史 schema 檔案仍供檢視。不含自訂 ID 的歷史資源會正規化至目前 contract。受影響的 immutable schedule 須透過一般 reviewed-draft 流程建立替代版本。
+目前及歷史 Load Scenario、policy-only YAML、inline draft，以及已儲存的 Schedule／Worker snapshot，都拒絕 `execution.execIdFormat`，包括空值。請移除此欄位並遷移至 `att-load/v1.9`，檢查依賴 artifact path 的整合，改用獨立 input／variable 保存 business correlation。歷史 artifact 保留原路徑；歷史 schema 檔案仍供檢視。不含自訂 ID 的歷史資源會正規化至目前 contract。受影響的 immutable schedule 須透過一般 reviewed-draft 流程建立替代版本。
 
 生成 ID 沿用安全 path segment grammar 及 240 字元上限；Run ID 必須預留 `-execution-` 與 signed-long sequence 空間。Sequence 耗盡後持續失敗，不會 wrap。每個 Run output namespace 只透過 `.execution-owner` 原子 claim 一次；第二個 owner 或 restart 必須選用新的外層 Run ID。Claim 由安全的 completed-Job artifact retention 隨 Run 目錄清理。舊 reservation 目錄只可由 completed-Job retention 清理，不能在舊 process 仍可能使用時刪除。Metrics-only evidence 保持 lazy；單一 Run metadata 檔不會建立 iteration workspace。
 

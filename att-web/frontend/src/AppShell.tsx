@@ -67,6 +67,7 @@ function routeTitle(route: AppRoute): string {
   if (route.kind === 'quick-load') return 'Quick Load';
   if (route.kind === 'jobs') return route.jobId ? 'Job ' + route.jobId : 'Jobs and results';
   if (route.kind === 'job-console') return 'Job ' + route.jobId + ' console';
+  if (route.kind === 'job-artifact') return route.path.split('/').filter(Boolean).pop() || 'Job artifact';
   if (route.kind === 'load') return route.packageId ? 'Advanced Load' : 'Load testing';
   if (route.kind === 'load-resource') return route.resourceId.split('/').pop() || 'Load resource';
   if (route.kind === 'schedules') return 'Schedules';
@@ -78,7 +79,7 @@ function activeNavigation(route: AppRoute): string {
   if (route.kind === 'run' || route.kind === 'packages' || route.kind === 'package') return 'explorer';
   if (route.kind === 'configuration') return 'configuration';
   if (route.kind === 'quick-load') return 'load-testing';
-  if (route.kind === 'jobs' || route.kind === 'job-console') return 'jobs';
+  if (route.kind === 'jobs' || route.kind === 'job-console' || route.kind === 'job-artifact') return 'jobs';
   if (route.kind === 'load' || route.kind === 'load-resource') return 'load-testing';
   if (route.kind === 'schedules') return 'scheduled-load';
   if (route.kind === 'settings') return 'settings';
@@ -346,7 +347,7 @@ export function AppShell({
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if (route.kind === 'job-console' || (route.kind === 'jobs' && route.standalone)) return;
+      if (route.kind === 'job-console' || route.kind === 'job-artifact' || (route.kind === 'jobs' && route.standalone)) return;
       const target = event.target as HTMLElement | null;
       const editable = Boolean(target && (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName)));
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
@@ -403,7 +404,7 @@ export function AppShell({
   return (
     <NavigationGuardContext.Provider value={navigation}>
       <AppShellContext.Provider value={{ selectedPackage, selectedEnvironment, themePreference, uiLocale, uiLocalePreference, authMode: versionData?.authMode, currentUser, accessCapabilities, canRevealConfigurationFields, onPackageChange, onEnvironmentChange, onThemePreferenceChange: changeThemePreference, onUiLocaleChange: changeUiLocale, onJobAccepted }}>
-      {(route.kind === 'job-console' || (route.kind === 'jobs' && route.standalone)) ? <main key={inspectionSessionEpoch} id="main-content" className="att-standalone-console-shell" tabIndex={-1}>
+      {(route.kind === 'job-console' || route.kind === 'job-artifact' || (route.kind === 'jobs' && route.standalone)) ? <main key={inspectionSessionEpoch} id="main-content" className="att-standalone-console-shell" tabIndex={-1}>
         {capabilitiesResolved ? children : <div role="status" aria-busy="true">Checking ATT access…</div>}
       </main> : <JobConsoleProvider jobsApi={api}>
       <div className={'app-layout' + (collapsed ? ' is-collapsed' : '') + (mobileNavigationOpen ? ' mobile-nav-open' : '')} data-page={currentPage}>

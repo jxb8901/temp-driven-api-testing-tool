@@ -13,7 +13,41 @@ import java.util.Hashtable;
  * the ATT execution model and lets fake transports run without a Queue Manager.
  */
 public final class IbmMqClientFactory implements MqTransport.Factory {
+    private static final java.util.concurrent.locks.ReentrantReadWriteLock CONNECTION_TIMEOUT_LOCK =
+            new java.util.concurrent.locks.ReentrantReadWriteLock(true);
+    private static final String TCP_CONNECT_TIMEOUT = "com.ibm.mq.cfg.TCP.Connect_Timeout";
+    private static final String QMgr_NEGOTIATION_TIMEOUT = "com.ibm.mq.cfg.TCP.QmgrNegotiationFlowTimeout";
+
+    @Override public MqTransport.Connection connect(MqHelperConfig config, long timeoutMs) throws Exception {
+        if (timeoutMs < 1L) throw new java.util.concurrent.TimeoutException("LOAD_PREPARATION_TIMEOUT");
+        java.util.concurrent.locks.Lock lock = CONNECTION_TIMEOUT_LOCK.writeLock();
+        lock.lockInterruptibly();
+        try {
+            String previousConnect = System.getProperty(TCP_CONNECT_TIMEOUT);
+            String previousNegotiation = System.getProperty(QMgr_NEGOTIATION_TIMEOUT);
+            long seconds = Math.max(1L, (timeoutMs + 999L) / 1000L);
+            try {
+                System.setProperty(TCP_CONNECT_TIMEOUT, boundedSeconds(previousConnect, seconds));
+                System.setProperty(QMgr_NEGOTIATION_TIMEOUT, boundedSeconds(previousNegotiation, seconds));
+                return createConnection(config);
+            } finally {
+                restoreProperty(TCP_CONNECT_TIMEOUT, previousConnect);
+                restoreProperty(QMgr_NEGOTIATION_TIMEOUT, previousNegotiation);
+            }
+        } finally {
+            lock.unlock();
+        }
+    }
+
     @Override public MqTransport.Connection connect(MqHelperConfig config) throws Exception {
+        java.util.concurrent.locks.Lock lock = CONNECTION_TIMEOUT_LOCK.readLock();
+        lock.lockInterruptibly();
+        try { return createConnection(config); }
+        finally { lock.unlock(); }
+    }
+
+    /** Every MQ client creation through this adapter shares the timeout-property isolation lock. */
+    private MqTransport.Connection createConnection(MqHelperConfig config) throws Exception {
         try {
             Class<?> constants = Class.forName("com.ibm.mq.constants.MQConstants");
             Class<?> manager = Class.forName("com.ibm.mq.MQQueueManager");
@@ -36,6 +70,18 @@ public final class IbmMqClientFactory implements MqTransport.Factory {
         } catch (Exception error) {
             throw translate(error);
         }
+    }
+
+    private static String boundedSeconds(String configured, long cap) {
+        if (configured != null) {
+            try { cap = Math.min(cap, Long.parseLong(configured.trim())); }
+            catch (NumberFormatException ignored) { /* replace a non-numeric value for this bounded connection */ }
+        }
+        return Long.toString(Math.max(1L, cap));
+    }
+    private static void restoreProperty(String name, String value) {
+        if (value == null) System.clearProperty(name);
+        else System.setProperty(name, value);
     }
 
     private static final class ReflectiveConnection implements MqTransport.Connection {

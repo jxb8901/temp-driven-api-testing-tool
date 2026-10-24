@@ -113,10 +113,20 @@ public final class FrameworkRunner {
                 }
                 String loadId = options.runId();
                 final CliOptions loadOptions = options;
-                att.load.LoadEventListener progress = loadEvent -> {
-                    if (loadOptions.quiet() || !loadOptions.verbose()) return;
-                    java.io.PrintStream output = "json".equals(loadOptions.format()) ? System.err : System.out;
-                    synchronized (output) { output.println("[LOAD] " + att.validation.JsonSupport.write(loadEvent.toMap(root))); output.flush(); }
+                att.load.LoadEventListener progress = new att.load.LoadEventListener() {
+                    @Override public void onEvent(att.load.LoadEvent loadEvent) {
+                        if (loadOptions.quiet() || !loadOptions.verbose()) return;
+                        java.io.PrintStream output = "json".equals(loadOptions.format()) ? System.err : System.out;
+                        synchronized (output) { output.println("[LOAD] " + att.validation.JsonSupport.write(loadEvent.toMap(root))); output.flush(); }
+                    }
+                    @Override public void onPreparationEvent(java.util.Map<String, Object> event) {
+                        boolean json = "json".equals(loadOptions.format());
+                        if (loadOptions.quiet() || (json && !loadOptions.verbose())) return;
+                        java.io.PrintStream output = json ? System.err : System.out;
+                        String rendered = loadOptions.verbose() || json
+                                ? "[LOAD] " + att.validation.JsonSupport.write(event) : String.valueOf(event.get("console"));
+                        synchronized (output) { output.println(rendered); output.flush(); }
+                    }
                 };
                 att.api.LoadResult loadResult = null;
                 try {

@@ -3,6 +3,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { prepareReportHtml, ReportPreview, resolveReportHref } from './ReportPreview';
+import { ApiError } from '../../types';
 
 const report = '<!doctype html><html><head>'
   + '<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; script-src \'sha256-reviewed\'; style-src \'unsafe-inline\'">'
@@ -75,10 +76,27 @@ describe('authenticated isolated report preview', () => {
   });
 
   it('shows a 401 as a controlled preview error instead of navigating the browser', async () => {
-    const readText = vi.fn(async () => { throw new Error('Artifact preview is unavailable (401).'); });
+    const readText = vi.fn(async () => { throw new ApiError('Artifact preview is unavailable (401).', { status: 401 }); });
     await act(async () => root.render(<ReportPreview jobId="JOB-1" path="report/index.html" readText={readText} />));
     await act(async () => { await Promise.resolve(); });
-    expect(host.querySelector('[role="alert"]')?.textContent).toContain('(401)');
+    expect(host.querySelector('[role="alert"]')?.textContent).toContain('session has expired');
+    expect(host.querySelector('[role="alert"] a')?.textContent).toBe('Sign in again');
     expect(host.querySelector('iframe')).toBeNull();
+  });
+
+  it('hands vetted report-relative navigation to the standalone route when requested', async () => {
+    const readText = vi.fn(async () => report);
+    const onNavigate = vi.fn();
+    await act(async () => root.render(<ReportPreview jobId="JOB-1" path="run/report/index.html" readText={readText} onNavigate={onNavigate} />));
+    await act(async () => { await Promise.resolve(); });
+    const frame = host.querySelector('iframe')!;
+    await act(async () => {
+      window.dispatchEvent(new MessageEvent('message', {
+        source: frame.contentWindow, data: { type: 'att-report-navigation', href: '../case.log' },
+      }));
+      await Promise.resolve();
+    });
+    expect(onNavigate).toHaveBeenCalledWith('run/case.log');
+    expect(readText).toHaveBeenCalledTimes(1);
   });
 });

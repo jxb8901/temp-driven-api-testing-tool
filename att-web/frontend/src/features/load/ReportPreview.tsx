@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { CodeEditor, detectCodeLanguage } from '../code/CodeEditor';
+import { ApiError } from '../../types';
+import { contextRelativeReturnTo } from '../../contextPaths';
 
 type ReadText = (jobId: string, path: string, signal?: AbortSignal) => Promise<string>;
 
@@ -61,7 +63,7 @@ export function prepareReportHtml(source: string, currentPath: string, studioNon
   return '<!doctype html>\n' + document.documentElement.outerHTML;
 }
 
-export function ReportPreview({ jobId, path, readText }: { jobId: string; path: string; readText: ReadText }) {
+export function ReportPreview({ jobId, path, readText, onNavigate }: { jobId: string; path: string; readText: ReadText; onNavigate?: (path: string) => void }) {
   const [history, setHistory] = useState([path]);
   const [position, setPosition] = useState(0);
   const currentPath = history[position] || path;
@@ -69,10 +71,11 @@ export function ReportPreview({ jobId, path, readText }: { jobId: string; path: 
   const [html, setHtml] = useState<string | null>(null);
   const [plain, setPlain] = useState<string | null>(null);
   const [error, setError] = useState('');
+  const [errorStatus, setErrorStatus] = useState<number | null>(null);
 
   useEffect(() => {
     const controller = new AbortController();
-    setHtml(null); setPlain(null); setError('');
+    setHtml(null); setPlain(null); setError(''); setErrorStatus(null);
     readText(jobId, currentPath, controller.signal).then(content => {
       if (controller.signal.aborted) return;
       if (/\.html?$/i.test(currentPath)) {
@@ -80,7 +83,14 @@ export function ReportPreview({ jobId, path, readText }: { jobId: string; path: 
         setHtml(prepareReportHtml(content, currentPath, nonce));
       } else setPlain(content);
     }).catch(reason => {
-      if (!controller.signal.aborted) setError(reason instanceof Error ? reason.message : 'Report preview could not be loaded.');
+      if (!controller.signal.aborted) {
+        setErrorStatus(reason instanceof ApiError ? reason.status : null);
+        setError(reason instanceof ApiError && reason.status === 401 ? 'Your session has expired. Sign in again to open this artifact.'
+          : reason instanceof ApiError && reason.status === 403 ? 'Your account is not authorized to open this Job artifact.'
+            : reason instanceof ApiError && reason.status === 404 ? 'This artifact is unavailable or was not approved for preview.'
+              : reason instanceof ApiError && reason.status === 409 ? 'The artifact archive is unavailable. Refresh to check its status.'
+                : reason instanceof Error ? reason.message : 'Report preview could not be loaded.');
+      }
     });
     return () => controller.abort();
   }, [jobId, currentPath, readText]);
@@ -95,21 +105,23 @@ export function ReportPreview({ jobId, path, readText }: { jobId: string; path: 
       const target = resolveReportHref(currentPath, data.href);
       if (!target) return;
       if (target === currentPath) return;
+      if (onNavigate) { onNavigate(target); return; }
       setHistory(previous => [...previous.slice(0, position + 1), target]);
       setPosition(position + 1);
     };
     window.addEventListener('message', navigate);
     return () => window.removeEventListener('message', navigate);
-  }, [currentPath, position]);
+  }, [currentPath, onNavigate, position]);
+
+  const signInHref = new URL('login.html?returnTo=' + encodeURIComponent(contextRelativeReturnTo(location.pathname, location.search, location.hash)), document.baseURI).toString();
 
   return <section aria-label="Isolated authenticated report preview">
     <p>Report content is retrieved with your existing ATT session and displayed in an isolated viewer.</p>
-    <div>
+    <div>{!onNavigate && <>
       <button type="button" disabled={position === 0} onClick={() => setPosition(position - 1)}>Report back</button>
       <button type="button" disabled={position >= history.length - 1} onClick={() => setPosition(position + 1)}>Report forward</button>
-      <span> {currentPath}</span>
-    </div>
-    {error && <p role="alert">{error}</p>}
+    </>}<span> {currentPath}</span></div>
+    {error && <p role="alert">{error}{errorStatus === 401 && <> <a href={signInHref}>Sign in again</a></>}</p>}
     {!error && html === null && plain === null && <p role="status">Loading authenticated report...</p>}
     {html !== null && <iframe key={currentPath} ref={frame} title={'Report: ' + currentPath}
       sandbox="allow-scripts" referrerPolicy="no-referrer" srcDoc={html}

@@ -249,14 +249,25 @@ public final class WorkerMain {
             return service.debug(new DebugRequest(root,config,r.environment,output,r.runId,text(t,"type"),text(t,"id"),path(r.debugInput),bool(r.unsafeFailureDetails),event -> emitExecution(event),r.debugId,r.overrides,false,null,r.inlineDebugInput)); }
         if("load".equals(r.command)) { Map<String,Object> t=r.target==null?Collections.<String,Object>emptyMap():r.target; Map<String,String> l=r.load==null?Collections.<String,String>emptyMap():r.load;
             loadSampler=new att.load.LoadConsoleSampler(r.runId, line -> { try { emit(WorkerEvent.Type.PROGRESS, fields("console", line, "phase", "PROGRESS")); } catch(Exception error) { throw new IllegalStateException(error); } });
-            att.load.LoadEventListener observer = event -> { try {
-                String start=loadSampler.startLine(event.model(), event.runId());
-                if(start!=null) emit(WorkerEvent.Type.PROGRESS, fields("console", start, "runId", event.runId(), "phase", "START"));
-                Map<String,Object> payload=event.toMap(root);
-                String line=loadSampler.onEvent(event);
-                if(line!=null) payload.put("console", line);
-                emit(WorkerEvent.Type.PROGRESS, payload);
-            } catch(Exception error) { throw new IllegalStateException(error); } };
+            att.load.LoadEventListener observer = new att.load.LoadEventListener() {
+                @Override public void onEvent(att.load.LoadEvent event) { try {
+                    String start=loadSampler.startLine(event.model(), event.runId());
+                    if(start!=null) emit(WorkerEvent.Type.PROGRESS, fields("console", start, "runId", event.runId(), "phase", "START"));
+                    Map<String,Object> payload=event.toMap(root);
+                    String line=loadSampler.onEvent(event);
+                    if(line!=null) payload.put("console", line);
+                    emit(WorkerEvent.Type.PROGRESS, payload);
+                } catch(Exception error) { throw new IllegalStateException(error); } }
+                @Override public void onPreparationEvent(Map<String,Object> event) { try {
+                    String loadEvent=String.valueOf(event.get("event"));
+                    if ("LOAD_START".equals(loadEvent))
+                        loadSampler.observePreparedStart(String.valueOf(event.get("model")), String.valueOf(event.get("runId")));
+                    Map<String,Object> payload=new java.util.LinkedHashMap<String,Object>(event);
+                    payload.put("loadEvent", loadEvent);
+                    payload.put("phase", "PREPARATION");
+                    emit(WorkerEvent.Type.PROGRESS, payload);
+                } catch(Exception error) { throw new IllegalStateException(error); } }
+            };
             att.api.OperationResult loadResult;
             if(r.inlineLoadScenario!=null) {
                 if(r.expectedRevisionDigest!=null) verifyRevision(root,config,r);

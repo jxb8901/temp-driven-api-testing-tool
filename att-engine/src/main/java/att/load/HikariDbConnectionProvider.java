@@ -20,7 +20,14 @@ public final class HikariDbConnectionProvider implements DbConnectionProvider {
         HikariDbPool pool = pools.get(helperId);
         if (pool != null) pool.recordStatement(elapsedNanos);
     }
-    public HikariDbPool pool(DbHelperConfig config) { HikariDbPool existing = pools.get(config.id()); if (existing != null) return existing; HikariDbPool created = new HikariDbPool(config); HikariDbPool previous = pools.putIfAbsent(config.id(), created); if (previous != null) { created.close(); return previous; } return created; }
+    public HikariDbPool pool(DbHelperConfig config) {
+        // Construct under per-key ownership: losing a putIfAbsent race used to
+        // initialize and discard a second physical pool.
+        return pools.computeIfAbsent(config.id(), ignored -> new HikariDbPool(config));
+    }
+    public HikariDbPool pool(DbHelperConfig config, long preparationConnectTimeoutMs) {
+        return pools.computeIfAbsent(config.id(), ignored -> new HikariDbPool(config, preparationConnectTimeoutMs));
+    }
     public Map<String, Map<String, Object>> metrics() {
         Map<String, Map<String, Object>> result = new LinkedHashMap<String, Map<String, Object>>();
         for (Map.Entry<String, HikariDbPool> entry : pools.entrySet()) result.put(entry.getKey(), entry.getValue().metrics());

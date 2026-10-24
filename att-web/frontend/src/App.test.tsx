@@ -4,6 +4,8 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import App from './App';
 import { api } from './api';
+import { artifactApi } from './features/load/artifactApi';
+import { parseRoute } from './router';
 import type { JobSummary } from './types';
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -101,6 +103,41 @@ describe('App Dashboard job refresh', () => {
     expect(getJobs).toHaveBeenCalledTimes(2);
     expect(host.querySelector('[aria-label="Dashboard summary"]')?.textContent).toContain('PASS');
     expect(host.querySelector('[aria-label="Dashboard summary"]')?.textContent).toContain('1');
+  });
+
+  it('opens a bookmarkable standalone artifact route and follows report links with browser history', async () => {
+    await import('./features/load/StandaloneJobArtifactPage');
+    const initialHash = '#/jobs/JOB-ARTIFACT/artifact?path=run%2Freport%2Findex.html';
+    window.history.replaceState(null, '', window.location.pathname + window.location.search + initialHash);
+    vi.spyOn(api, 'getJob').mockResolvedValue({ jobId: 'JOB-ARTIFACT', command: 'run', packageId: 'demo', status: 'PASS' });
+    vi.spyOn(artifactApi, 'getJobArtifactArchive').mockResolvedValue({ archiveStatus: 'READY', items: [], primaryReports: [] });
+    vi.spyOn(artifactApi, 'getJobArtifactText').mockImplementation(async (_jobId, path) =>
+      path.endsWith('.html')
+        ? '<html><head><meta http-equiv="Content-Security-Policy" content="default-src \'none\'; script-src \'sha256-reviewed\'"></head><body><h1>Approved report</h1><a href="../case.log">Case log</a></body></html>'
+        : 'approved linked log');
+
+    await act(async () => root.render(<App />));
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); });
+    await act(async () => { await vi.waitFor(() => expect(host.querySelector('iframe')).not.toBeNull()); });
+    expect(parseRoute(window.location.hash)).toEqual({ kind: 'job-artifact', jobId: 'JOB-ARTIFACT', path: 'run/report/index.html' });
+    expect(host.querySelector('.app-sidebar')).toBeNull();
+    expect(host.querySelector('#main-content')?.classList.contains('att-standalone-console-shell')).toBe(true);
+    const firstFrame = host.querySelector('iframe')!;
+    expect(firstFrame.getAttribute('sandbox')).toBe('allow-scripts');
+
+    await act(async () => {
+      window.dispatchEvent(new MessageEvent('message', {
+        source: firstFrame.contentWindow, data: { type: 'att-report-navigation', href: '../case.log' },
+      }));
+    });
+    const linkedHash = '#/jobs/JOB-ARTIFACT/artifact?path=run%2Fcase.log';
+    await act(async () => { await vi.waitFor(() => expect(window.location.hash).toBe(linkedHash)); });
+    await act(async () => { await vi.waitFor(() => expect(host.textContent).toContain('approved linked log')); });
+
+    await act(async () => { window.history.back(); await vi.waitFor(() => expect(window.location.hash).toBe(initialHash)); });
+    await act(async () => { await vi.waitFor(() => expect(host.querySelector('iframe')).not.toBeNull()); });
+    await act(async () => { window.history.forward(); await vi.waitFor(() => expect(window.location.hash).toBe(linkedHash)); });
+    expect(parseRoute(window.location.hash)).toEqual({ kind: 'job-artifact', jobId: 'JOB-ARTIFACT', path: 'run/case.log' });
   });
 
   it('keeps a dirty Quick Load environment switch transactional across Cancel and Confirm', async () => {

@@ -58,10 +58,15 @@ public final class Version {
     public static final String LOAD_SCHEMA_V1_5 = "att-load/v1.5";
     public static final String LOAD_SCHEMA_V1_6 = "att-load/v1.6";
     public static final String LOAD_SCHEMA_V1_7 = "att-load/v1.7";
-    public static final String PREVIOUS_LOAD_SCHEMA = LOAD_SCHEMA_V1_7;
-    public static final String LOAD_SCHEMA = "att-load/v1.8";
+    public static final String LOAD_SCHEMA_V1_8 = "att-load/v1.8";
+    public static final String LOAD_SCHEMA_V1_9 = "att-load/v1.9";
+    public static final String PREVIOUS_LOAD_SCHEMA = LOAD_SCHEMA_V1_8;
+    public static final String LOAD_SCHEMA = LOAD_SCHEMA_V1_9;
     public static final String LOAD_SCHEMA_CURRENT = LOAD_SCHEMA;
-    public static final String LOAD_SUMMARY_SCHEMA = "att-load-summary/v1.1";
+    public static final String LOAD_SUMMARY_SCHEMA_V1_1 = "att-load-summary/v1.1";
+    public static final String LOAD_SUMMARY_SCHEMA_V1_2 = "att-load-summary/v1.2";
+    public static final String PREVIOUS_LOAD_SUMMARY_SCHEMA = LOAD_SUMMARY_SCHEMA_V1_1;
+    public static final String LOAD_SUMMARY_SCHEMA = LOAD_SUMMARY_SCHEMA_V1_2;
 
     private Version() {}
 

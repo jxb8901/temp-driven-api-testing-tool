@@ -54,6 +54,7 @@ public final class LoadMetrics implements LoadEventListener {
     private final int configuredUsers;
     private final int configuredMaxConcurrent;
     private final double configuredArrivalRatePerSecond;
+    private final LoadWindowMetrics windowMetrics;
     private volatile long endedAtEpochMs;
 
     public LoadMetrics(String model, long startedAtEpochMs) { this(model, startedAtEpochMs, 0L, 0, 0.0, 0); }
@@ -61,12 +62,22 @@ public final class LoadMetrics implements LoadEventListener {
 
     public LoadMetrics(String model, long startedAtEpochMs, long rateWindowMs,
                        int configuredUsers, double configuredArrivalRatePerSecond, int configuredMaxConcurrent) {
+        this(model, startedAtEpochMs, rateWindowMs, configuredUsers, configuredArrivalRatePerSecond,
+                configuredMaxConcurrent, null);
+    }
+
+    private LoadMetrics(String model, long startedAtEpochMs, long rateWindowMs,
+                        int configuredUsers, double configuredArrivalRatePerSecond, int configuredMaxConcurrent,
+                        LoadScenario scenario) {
         this.model = model;
         this.startedAtEpochMs = startedAtEpochMs;
         this.rateWindowMs = Math.max(0L, rateWindowMs);
         this.configuredUsers = Math.max(0, configuredUsers);
         this.configuredArrivalRatePerSecond = Math.max(0.0, configuredArrivalRatePerSecond);
         this.configuredMaxConcurrent = Math.max(0, configuredMaxConcurrent);
+        this.windowMetrics = scenario == null ? null : new LoadWindowMetrics(startedAtEpochMs,
+                scenario.warmup().toMillis(), scenario.rampUp().toMillis(), scenario.duration().toMillis(),
+                scenario.rampDown().toMillis());
     }
 
     /** Creates a metrics view with scenario metadata required to compare configured and achieved load. */
@@ -75,13 +86,14 @@ public final class LoadMetrics implements LoadEventListener {
         boolean closed = scenario.model() == LoadScenario.Model.CLOSED;
         boolean arrival = scenario.model() == LoadScenario.Model.ARRIVAL_RATE;
         return new LoadMetrics(scenario.model().wireName(), startedAtEpochMs, rateWindowMs,
-                closed ? scenario.users() : 0,
-                arrival ? scenario.arrivalRatePerSecond() : 0.0,
-                arrival ? scenario.maxConcurrent() : 0);
+                closed ? scenario.configuredUsers() : 0,
+                arrival ? scenario.configuredArrivalRatePerSecond() : 0.0,
+                arrival ? scenario.configuredMaxConcurrent() : 0, scenario);
     }
 
     @Override public void onEvent(LoadEvent event) {
         if (event == null) return;
+        if (windowMetrics != null) windowMetrics.onEvent(event);
         generatorTelemetry.sample(isWarmup(event));
         if (event.scheduled()) {
             scheduled.incrementAndGet();
@@ -145,7 +157,10 @@ public final class LoadMetrics implements LoadEventListener {
         if (bucket != null) bucket.accept(event, inFlight.get(), activeVus.get());
     }
 
-    public void finish(long endedAtEpochMs) { this.endedAtEpochMs = endedAtEpochMs; }
+    public void finish(long endedAtEpochMs) {
+        this.endedAtEpochMs = endedAtEpochMs;
+        if (windowMetrics != null) windowMetrics.finish(endedAtEpochMs);
+    }
     public long scheduled() { return scheduled.get(); }
     public long started() { return started.get(); }
     public long completed() { return completed.get(); }
@@ -160,10 +175,18 @@ public final class LoadMetrics implements LoadEventListener {
         schedulerWakeups.incrementAndGet();
         recordWorkerQueueDepth(queueDepth);
     }
+    public void recordSchedulerWakeupAt(long timestampEpochMs, int queueDepth) {
+        recordSchedulerWakeup(queueDepth);
+        if (windowMetrics != null) windowMetrics.recordSchedulerSample(timestampEpochMs, queueDepth);
+    }
     public void recordSubmitLag(long millis, int queueDepth) {
         long value = Math.max(0L, millis);
         submitLagCount.incrementAndGet(); submitLagSumMs.addAndGet(value); updateMax(submitLagMaxMs, value);
         recordWorkerQueueDepth(queueDepth);
+    }
+    public void recordSubmitLagAt(long timestampEpochMs, long millis, int queueDepth) {
+        recordSubmitLag(millis, queueDepth);
+        if (windowMetrics != null) windowMetrics.recordSubmitSample(timestampEpochMs, millis, queueDepth);
     }
     public void recordWorkerQueueDepth(int depth) {
         int value = Math.max(0, depth); workerQueueDepth.set(value); updateMax(workerQueueDepthPeak, value);
@@ -193,6 +216,7 @@ public final class LoadMetrics implements LoadEventListener {
         double measuredElapsedSeconds = Math.max(0.001, measuredElapsedMs / 1000.0);
         Map<String, Object> result = new LinkedHashMap<String, Object>();
         result.put("model", model);
+        result.put("startAtEpochMs", startedAtEpochMs);
         result.put("configuredUsers", configuredUsers);
         result.put("configuredArrivalRatePerSecond", configuredArrivalRatePerSecond);
         result.put("configuredMaxConcurrent", configuredMaxConcurrent);
@@ -254,6 +278,8 @@ public final class LoadMetrics implements LoadEventListener {
         result.put("p99Ms", percentile(sorted, 0.99));
         result.put("latencyMaxMs", measuredLatencyCount.get() == 0L ? 0L : latencyMaxMs.get());
         result.put("timeSeriesBucketCapacity", MAX_BUCKETS);
+        result.put("metricContractVersion", "att-load-window-metrics/v1");
+        if (windowMetrics != null) result.put("windowMetrics", windowMetrics.snapshot(ended));
         Map<String, Map<String, Object>> bucketMap = new TreeMap<String, Map<String, Object>>();
         int bucketCount = 0;
         for (BucketSlot slot : buckets) {
@@ -645,6 +671,8 @@ public final class LoadMetrics implements LoadEventListener {
             result.put("allDroppedRate", scheduledCount == 0L ? 0.0 : ((double) dropped.sum()) / scheduledCount);
             result.put("completedThroughput", measuredCount);
             result.put("completedTps", measuredCount);
+            result.put("completedFromScheduledCohort", measuredCount);
+            result.put("completedTpsBasis", "scheduled cohort; retained for legacy compatibility; not wall-clock throughput");
             result.put("currentInFlight", currentInFlight.get());
             result.put("maxInFlight", maxInFlight.get());
             result.put("activeVus", activeVus.get());

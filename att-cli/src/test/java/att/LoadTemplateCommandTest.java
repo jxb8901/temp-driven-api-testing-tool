@@ -33,7 +33,7 @@ class LoadTemplateCommandTest {
     Collections.addAll(argv,"--bindings","load/bindings/test.yaml");
    }
    LoadScenario scenario=LoadTemplateCommand.compose(root,config,CliOptions.parse(argv.toArray(new String[0])));
-   assertEquals("att-load/v1.8",scenario.schemaVersion());assertEquals(mode.startsWith("multi-")?2:1,scenario.workloads().size());
+   assertEquals("att-load/v1.9",scenario.schemaVersion());assertEquals(mode.startsWith("multi-")?2:1,scenario.workloads().size());
    for(LoadWorkload workload:scenario.workloads()) {
     if(workload.mixed()) {assertEquals(7,workload.mix().get(0).inputs().get("count"));assertEquals(9,workload.mix().get(1).inputs().get("count"));}
     else assertEquals(7,workload.inputs().get("count"));

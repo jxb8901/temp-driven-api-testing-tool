@@ -1,6 +1,10 @@
+import { ApiError } from '../../types';
+
 export async function readArtifactText(url: string, signal?: AbortSignal): Promise<string> {
     const response = await fetch(url, { signal, credentials: 'same-origin', cache: 'no-store' });
-    if (!response.ok) throw new Error('Artifact preview is unavailable (' + response.status + ').');
+    if (!response.ok) throw new ApiError('Artifact preview is unavailable (' + response.status + ').', {
+      status: response.status, requestId: response.headers.get('X-Request-Id') || undefined,
+    });
     const reader = response.body?.getReader();
     if (!reader) return '';
     const decoder = new TextDecoder(); let text = ''; let bytes = 0;

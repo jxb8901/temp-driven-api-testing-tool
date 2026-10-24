@@ -17,6 +17,35 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class PooledMqTransportFactoryTest {
     @Test
+    void preparationEstablishesDistinctIdleFloorAndStillExpandsLazily() throws Exception {
+        for (int minimum : new int[] {0, 3}) {
+            AtomicInteger connected = new AtomicInteger(), disconnected = new AtomicInteger();
+            MqTransport.Factory delegate = helper -> {
+                connected.incrementAndGet();
+                return new MqTransport.Connection() {
+                    @Override public MqTransport.Queue open(String name, boolean input, boolean output) {
+                        throw new AssertionError("Preparation must never open a business queue");
+                    }
+                    @Override public void disconnect() { disconnected.incrementAndGet(); }
+                    @Override public void close() { disconnect(); }
+                };
+            };
+            try (PooledMqTransportFactory factory = new PooledMqTransportFactory(delegate, 20, 2000L)) {
+                MqHelperConfig helper = config(5, minimum, 100L);
+                assertEquals(Math.max(1, minimum), factory.prepareInitialReady(helper));
+                assertEquals(Math.max(1, minimum), connected.get());
+                assertEquals(0, factory.pool("broker").active());
+                java.util.List<MqTransport.Connection> held = new java.util.ArrayList<>();
+                for (int i = 0; i < 5; i++) held.add(factory.connect(helper));
+                assertEquals(5, connected.get());
+                for (MqTransport.Connection connection : held) connection.disconnect();
+                assertEquals(minimum, helper.poolMinIdle());
+            }
+            assertEquals(connected.get(), disconnected.get());
+        }
+    }
+
+    @Test
     void minIdleCreatesOnePhysicalConnectionAndHealthyLeaseIsReused() throws Exception {
         FakeFactory delegate = new FakeFactory();
         PooledMqTransportFactory factory = new PooledMqTransportFactory(delegate, 20, 2000L);

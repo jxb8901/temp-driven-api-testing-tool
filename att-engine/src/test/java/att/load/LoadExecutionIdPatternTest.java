@@ -83,7 +83,7 @@ class LoadExecutionIdPatternTest {
 
     @Test void rejectsCustomFormatsInHistoricalCurrentPolicyAndInlineSnapshots() throws Exception {
         installConfig();
-        for (String version : Arrays.asList("att-load/v1.3", "att-load/v1.7", "att-load/v1.8")) {
+        for (String version : Arrays.asList("att-load/v1.3", "att-load/v1.7", "att-load/v1.8", "att-load/v1.9")) {
             String yaml = "schemaVersion: " + version + "\nexecution: {execIdFormat: ''}\n"
                     + "workloads: [{id: one, target: {type: tool, id: sample.echo}, load: {users: 1, duration: 1s}}]\n";
             Path source = root.resolve("scenario.yaml");
@@ -106,7 +106,7 @@ class LoadExecutionIdPatternTest {
         installConfig();
         Path source = root.resolve("scenario.yaml");
         Files.write(source, ("schemaVersion: att-load/v1.7\nworkloads: [{id: one, target: {type: tool, id: sample.echo}, load: {users: 1, duration: 1s}}]\n").getBytes("UTF-8"));
-        assertEquals("att-load/v1.8", new LoadScenarioLoader(root).load(source).schemaVersion());
+        assertEquals("att-load/v1.9", new LoadScenarioLoader(root).load(source).schemaVersion());
         Path run = root.resolve("occupied/load/RUN");
         Files.createDirectories(run.resolve("failures"));
         Files.write(run.resolve("failures/retained"), new byte[]{1});
