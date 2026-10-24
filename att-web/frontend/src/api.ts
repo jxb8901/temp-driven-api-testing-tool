@@ -314,6 +314,14 @@ export const api = {
   submitLoadDraft(input: SubmitLoadDraftInput): Promise<LoadJobAccepted> {
     return postJson<LoadJobAccepted>('jobs/load', input);
   },
+  queryJobs(input: import('./features/load/types').JobsQuery) {
+    const { signal, ...query } = input;
+    return request<import('./features/load/types').JobsQueryResult>('jobs' + queryString(query), { signal });
+  },
+  async setDeletionRequested(jobIds: string[], requested: boolean) {
+    const response = await request<{ items: Array<{ jobId: string; outcome: string }> }>('jobs/delete', { method: 'POST', body: JSON.stringify({ jobIds, requested }) });
+    return response.items;
+  },
   async listJobs(input: { principal?: string; pinnedOnly?: boolean; signal?: AbortSignal } = {}): Promise<LoadJobSummary[]> {
     const envelope = await request<ApiEnvelope<LoadJobSummary>>('jobs' + queryString({ principal: input.principal, pinnedOnly: input.pinnedOnly }), { signal: input.signal });
     return Array.isArray(envelope.items) ? envelope.items.slice(0, 100) : [];

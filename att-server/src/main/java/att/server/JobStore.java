@@ -11,6 +11,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /** H2-backed bounded control-plane metadata store. Evidence remains on disk under each job directory. */
 final class JobStore implements AutoCloseable {
@@ -72,11 +73,23 @@ final class JobStore implements AutoCloseable {
             s.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS pinned_by VARCHAR(256)");
             s.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS pin_reason VARCHAR(200)");
             s.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS retention_actor VARCHAR(256)");
+            s.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS delete_requested_at BIGINT");
+            s.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS target_identity CLOB");
+            s.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS target_sort VARCHAR(600) DEFAULT 'Unknown target' NOT NULL");
+            s.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS target_group VARCHAR(64) DEFAULT 'legacy' NOT NULL");
+            s.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS environment VARCHAR(128) DEFAULT '' NOT NULL");
+            s.execute("CREATE INDEX IF NOT EXISTS jobs_target_page_idx ON jobs(target_sort,target_group,created_at,job_id)");
+            s.execute("CREATE INDEX IF NOT EXISTS jobs_created_page_idx ON jobs(created_at,job_id)");
+            s.execute("CREATE INDEX IF NOT EXISTS jobs_delete_requested_idx ON jobs(retention_state,delete_requested_at,job_id)");
             s.execute("CREATE INDEX IF NOT EXISTS jobs_artifact_recovery_idx ON jobs(artifact_recovery,job_id)");
             s.execute("CREATE TABLE IF NOT EXISTS job_worker_processes (job_id VARCHAR(80) NOT NULL, process_pid BIGINT NOT NULL, process_start_time VARCHAR(40), PRIMARY KEY(job_id,process_pid), FOREIGN KEY(job_id) REFERENCES jobs(job_id) ON DELETE CASCADE)");
             s.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS schedule_occurrence_id VARCHAR(160)");
             s.execute("CREATE UNIQUE INDEX IF NOT EXISTS jobs_schedule_occurrence_uq ON jobs(schedule_occurrence_id)");
             s.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS execution_spec CLOB");
+            s.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS target_search_version INT DEFAULT 0 NOT NULL");
+            s.execute("CREATE INDEX IF NOT EXISTS jobs_target_search_version_idx ON jobs(target_search_version,job_id)");
+            s.execute("CREATE TABLE IF NOT EXISTS job_targets (job_id VARCHAR(80) NOT NULL, target_type VARCHAR(16) NOT NULL, target_id VARCHAR(1024) NOT NULL, PRIMARY KEY(job_id,target_type,target_id), FOREIGN KEY(job_id) REFERENCES jobs(job_id) ON DELETE CASCADE)");
+            s.execute("CREATE INDEX IF NOT EXISTS job_targets_identifier_idx ON job_targets(target_id,job_id)");
             s.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS replay_owner VARCHAR(256)");
             s.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS originating_schedule_id VARCHAR(40)");
             s.execute("CREATE TABLE IF NOT EXISTS job_replay_intents (principal VARCHAR(256) NOT NULL, intent_id VARCHAR(80) NOT NULL, source_job_id VARCHAR(80) NOT NULL, job_id VARCHAR(80) NOT NULL, expires_at BIGINT, PRIMARY KEY(principal,intent_id))");
@@ -100,13 +113,79 @@ final class JobStore implements AutoCloseable {
             s.execute("CREATE INDEX IF NOT EXISTS load_schedule_execution_history_idx ON load_schedule_executions(schedule_id,scheduled_for)");
         } catch(Exception failed){close();throw failed;}
     }
-    synchronized void insert(Job job,String summary) throws Exception {
+    /** One resumable transaction; startup never reads historical private snapshots.
+     * The single migration executor needs no row locks: a concurrent delete either cascades
+     * indexed targets or causes this entire batch to roll back and retry without the deleted row.
+     */
+    int backfillSearchTargetsBatch() throws Exception {
         try(Connection c=connect()) {
             c.setAutoCommit(false);
             try {
-                try(PreparedStatement p=c.prepareStatement("INSERT INTO jobs(job_id,command,package_id,principal,status,created_at,att_version,request_summary,schedule_occurrence_id,execution_spec,replay_unavailable,rerun_of_job_id,replay_intent,replay_owner,originating_schedule_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)")) {
-                    p.setString(1,job.id);p.setString(2,job.command);p.setString(3,job.packageId);p.setString(4,job.principal);p.setString(5,job.status);p.setString(6,job.createdAt.toString());p.setString(7,ServerBuildInfo.PRODUCT);p.setString(8,summary);p.setString(9,job.scheduleOccurrenceId);p.setString(10,job.executionSpec);p.setString(11,job.replayUnavailable);p.setString(12,job.rerunOfJobId);p.setString(13,job.replayIntent);p.setString(14,job.replayOwner);p.setString(15,job.originatingScheduleId);p.executeUpdate();
+                List<String[]> batch=new ArrayList<>();
+                try(Statement statement=c.createStatement();ResultSet rows=statement.executeQuery("SELECT job_id,execution_spec,target_identity,package_id FROM jobs WHERE target_search_version=0 ORDER BY job_id LIMIT 100")) {
+                    while(rows.next())batch.add(new String[]{rows.getString(1),rows.getString(2),rows.getString(3),rows.getString(4)});
                 }
+                for(String[] row:batch) {
+                    if(Thread.currentThread().isInterrupted())throw new InterruptedException("Target indexing stopped");
+                    Set<Map<String,String>> targets=Set.of();
+                    boolean invalidSnapshot=false,invalidIdentity=false;
+                    if(row[1]!=null) {
+                        try {targets=JobListIdentity.searchTargets(JobExecutionSpec.parse(row[1]).definition());}
+                        catch(com.fasterxml.jackson.core.JsonProcessingException | IllegalArgumentException invalid) {invalidSnapshot=true;}
+                    }
+                    if(row[2]!=null) {
+                        try {
+                            var identity=ServerRuntime.JSON.readTree(row[2]);
+                            if(identity==null||!identity.isObject())invalidIdentity=true;
+                            else if(targets.isEmpty())targets=singleSearchTarget(identity);
+                        }
+                        catch(com.fasterxml.jackson.core.JsonProcessingException | IllegalArgumentException invalid) {invalidIdentity=true;}
+                    }
+                    writeSearchTargets(c,row[0],targets);
+                    // Audit in the same transaction as targets/version; never log private CLOB content.
+                    // SQL/storage/interruption failures remain outside the per-Job parse catches.
+                    if(invalidSnapshot||invalidIdentity)try(PreparedStatement audit=c.prepareStatement("INSERT INTO audit(principal,action,job_id,package_id,created_at,outcome,detail) VALUES('system:target-index','JOB_TARGET_INDEX',?,?,?,?,?)")) {
+                        audit.setString(1,row[0]);audit.setString(2,row[3]);audit.setString(3,Instant.now().toString());
+                        audit.setString(4,targets.isEmpty()?"INVALID_METADATA_EMPTY":"INVALID_METADATA_FALLBACK");
+                        audit.setString(5,"invalidSnapshot="+invalidSnapshot+";invalidIdentity="+invalidIdentity);audit.executeUpdate();
+                    }
+                }
+                c.commit();return batch.size();
+            } catch(Exception failure){c.rollback();throw failure;}
+        }
+    }
+    static final class TargetSearchPendingException extends Exception { }
+    private static boolean targetSearchPending(Connection c) throws Exception {
+        try(Statement s=c.createStatement();ResultSet r=s.executeQuery("SELECT 1 FROM jobs WHERE target_search_version=0 LIMIT 1")){return r.next();}
+    }
+    private static Set<Map<String,String>> singleSearchTarget(com.fasterxml.jackson.databind.JsonNode identity) {
+        if(identity==null||!identity.isObject()||!identity.path("type").isTextual()||!identity.path("id").isTextual())return Set.of();
+        String type=identity.path("type").asText(),id=identity.path("id").asText();
+        return Set.of("flow","template","tool","case").contains(type)&&!id.isBlank()&&id.length()<=512?Set.of(Map.of("type",type,"id",id)):Set.of();
+    }
+    private static void writeSearchTargets(Connection c,String jobId,Set<Map<String,String>> targets) throws Exception {
+        try(PreparedStatement p=c.prepareStatement("MERGE INTO job_targets(job_id,target_type,target_id) KEY(job_id,target_type,target_id) VALUES(?,?,?)")) {
+            for(var target:targets) {p.setString(1,jobId);p.setString(2,target.get("type"));p.setString(3,target.get("id").toLowerCase(java.util.Locale.ROOT));p.addBatch();}
+            p.executeBatch();
+        }
+        try(PreparedStatement p=c.prepareStatement("UPDATE jobs SET target_search_version=1 WHERE job_id=?")){p.setString(1,jobId);p.executeUpdate();}
+    }
+    synchronized void insert(Job job,String summary) throws Exception {
+        Set<Map<String,String>> targets=job.executionSpec==null?singleSearchTarget(ServerRuntime.JSON.readTree(summary).path("targetIdentity")):JobListIdentity.searchTargets(JobExecutionSpec.parse(job.executionSpec).definition());
+        insert(job,summary,targets);
+    }
+    synchronized void insert(Job job,String summary,Set<Map<String,String>> targets) throws Exception {
+        try(Connection c=connect()) {
+            c.setAutoCommit(false);
+            try {
+                try(PreparedStatement p=c.prepareStatement("INSERT INTO jobs(job_id,command,package_id,principal,status,created_at,att_version,request_summary,schedule_occurrence_id,execution_spec,replay_unavailable,rerun_of_job_id,replay_intent,replay_owner,originating_schedule_id,target_identity,target_sort,target_group,environment) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)")) {
+                    p.setString(1,job.id);p.setString(2,job.command);p.setString(3,job.packageId);p.setString(4,job.principal);p.setString(5,job.status);p.setString(6,job.createdAt.toString());p.setString(7,ServerBuildInfo.PRODUCT);p.setString(8,summary);p.setString(9,job.scheduleOccurrenceId);p.setString(10,job.executionSpec);p.setString(11,job.replayUnavailable);p.setString(12,job.rerunOfJobId);p.setString(13,job.replayIntent);p.setString(14,job.replayOwner);p.setString(15,job.originatingScheduleId);
+                    var metadata=ServerRuntime.JSON.readTree(summary);var identity=metadata.path("targetIdentity");
+                    p.setString(16,identity.isObject()?identity.toString():null);
+                    p.setString(17,identity.hasNonNull("type")?identity.path("type").asText()+" · "+identity.path("id").asText():"Unknown target");
+                    p.setString(18,identity.path("signature").asText("legacy"));p.setString(19,metadata.path("environment").asText(""));p.executeUpdate();
+                }
+                writeSearchTargets(c,job.id,targets);
                 if(job.replayIntent!=null)try(PreparedStatement p=c.prepareStatement("INSERT INTO job_replay_intents(principal,intent_id,source_job_id,job_id,expires_at) VALUES(?,?,?,?,?)")) {
                     p.setString(1,job.principal);p.setString(2,job.replayIntent);p.setString(3,job.rerunOfJobId);p.setString(4,job.id);
                     p.setLong(5,job.createdAt.plus(REPLAY_INTENT_RETENTION).toEpochMilli());p.executeUpdate();
@@ -501,6 +580,57 @@ final class JobStore implements AutoCloseable {
             p.setString(1,search==null?"":search.trim().toLowerCase(java.util.Locale.ROOT));p.setInt(2,limitPlusOne);p.setInt(3,offset);try(ResultSet r=p.executeQuery()){while(r.next())out.add(jobSummary(r));}
         }return out;
     }
+    /** One snapshot for page membership, authorized totals and group aggregates. Never reads evidence or private specs. */
+    Map<String,Object> queryJobs(JobQuery query) throws Exception {
+        List<Object> parameters=new ArrayList<>();String where=query.where(parameters);
+        try(Connection c=connect()) {
+            c.setTransactionIsolation(Connection.TRANSACTION_REPEATABLE_READ);c.setAutoCommit(false);
+            try {
+                // Check in the same repeatable-read snapshot as totals/page/groups: never return partial search.
+                if(query.search!=null&&targetSearchPending(c))throw new TargetSearchPendingException();
+                long total;
+                try(PreparedStatement p=c.prepareStatement("SELECT COUNT(*) FROM jobs WHERE "+where)) {
+                    bind(p,parameters);try(ResultSet r=p.executeQuery()){r.next();total=r.getLong(1);}
+                }
+                List<Map<String,Object>> items=new ArrayList<>();
+                String projection="job_id,command,package_id,principal,status,created_at,started_at,finished_at,exit_code,request_summary,pinned,pinned_at,pinned_by,pin_reason,retention_state,target_identity,target_group,environment,originating_schedule_id";
+                try(PreparedStatement p=c.prepareStatement("SELECT "+projection+" FROM jobs WHERE "+where+" ORDER BY "+query.order()+" LIMIT ? OFFSET ?")) {
+                    bind(p,parameters);p.setInt(parameters.size()+1,query.limit);p.setInt(parameters.size()+2,query.offset);
+                    try(ResultSet r=p.executeQuery()){while(r.next()) {
+                        Map<String,Object> item=jobSummary(r);item.put("deletionState",r.getString(15));
+                        String identity=r.getString(16);
+                        if(identity!=null)try {item.put("targetIdentity",ServerRuntime.JSON.readValue(identity,Map.class));}
+                        catch(com.fasterxml.jackson.core.JsonProcessingException invalid) { /* Legacy malformed display metadata: retain Job-ID fallback. */ }
+                        item.put("scheduled",r.getString(19)!=null||scheduledScheduleId(r.getString(4))!=null);
+                        item.put("targetGroup",r.getString(17));item.put("environment",r.getString(18));items.add(item);
+                    }}
+                }
+                List<Map<String,Object>> groups=new ArrayList<>();
+                if(query.grouped&&!items.isEmpty()) {
+                    List<Object> groupParameters=new ArrayList<>(parameters);List<String> predicates=new ArrayList<>();Set<List<String>> seen=new java.util.HashSet<>();
+                    for(var item:items) {
+                        List<String> key=List.of(String.valueOf(item.get("packageId")),String.valueOf(item.get("environment")),String.valueOf(item.get("targetGroup")));
+                        if(seen.add(key)){predicates.add("(package_id=? AND environment=? AND target_group=?)");groupParameters.addAll(key);}
+                    }
+                    try(PreparedStatement p=c.prepareStatement("SELECT package_id,environment,target_group,COUNT(*),MAX(created_at),SUM(CASE WHEN status='PASS' THEN 1 ELSE 0 END),SUM(CASE WHEN status='FAIL' THEN 1 ELSE 0 END),SUM(CASE WHEN status='ERROR' THEN 1 ELSE 0 END),SUM(CASE WHEN status='CANCELLED' THEN 1 ELSE 0 END),SUM(CASE WHEN status IN ('QUEUED','PREPARING','RUNNING','CANCEL_REQUESTED') THEN 1 ELSE 0 END),SUM(CASE WHEN status='INVALID' THEN 1 ELSE 0 END) FROM jobs WHERE "+where+" AND ("+String.join(" OR ",predicates)+") GROUP BY package_id,environment,target_group")) {
+                        bind(p,groupParameters);try(ResultSet r=p.executeQuery()){while(r.next()) {
+                            Map<String,Object> group=new LinkedHashMap<>();group.put("packageId",r.getString(1));group.put("environment",r.getString(2));group.put("targetGroup",r.getString(3));group.put("total",r.getLong(4));group.put("lastCreatedAt",r.getString(5));
+                            group.put("statuses",Map.of("PASS",r.getLong(6),"FAIL",r.getLong(7),"ERROR",r.getLong(8),"CANCELLED",r.getLong(9),"inProgress",r.getLong(10),"INVALID",r.getLong(11)));groups.add(group);
+                        }}
+                    }
+                }
+                List<String> principals=new ArrayList<>(),packages=new ArrayList<>();
+                try(PreparedStatement p=c.prepareStatement("SELECT DISTINCT principal FROM jobs WHERE (retention_state IS NULL OR retention_state<>'DELETING') AND principal NOT LIKE 'load-schedule:%' AND principal NOT LIKE 'debug-schedule:%' AND originating_schedule_id IS NULL AND LOCATE(LOWER(?),LOWER(principal))>0 ORDER BY principal LIMIT 30")) {
+                    p.setString(1,"text".equals(query.principalMode)&&query.principal!=null?query.principal:"");
+                    try(ResultSet r=p.executeQuery()){while(r.next())principals.add(r.getString(1));}
+                }
+                try(PreparedStatement p=c.prepareStatement("SELECT DISTINCT package_id FROM jobs WHERE (retention_state IS NULL OR retention_state<>'DELETING') ORDER BY package_id LIMIT 100");ResultSet r=p.executeQuery()){while(r.next())packages.add(r.getString(1));}
+                c.commit();Map<String,Object> response=new LinkedHashMap<>();response.put("items",items);response.put("total",total);response.put("offset",query.offset);response.put("limit",query.limit);response.put("nextOffset",query.offset+(long)items.size()<total?query.offset+items.size():null);response.put("groups",groups);response.put("principalSuggestions",principals);response.put("packageSuggestions",packages);return response;
+            } catch(Exception failure){c.rollback();throw failure;}
+        }
+    }
+    private static void bind(PreparedStatement p,List<Object> parameters) throws Exception {for(int i=0;i<parameters.size();i++)p.setObject(i+1,parameters.get(i));}
+
     private static Map<String,Object> jobSummary(ResultSet r) throws Exception {
         Map<String,Object> m=new LinkedHashMap<>();m.put("jobId",r.getString(1));m.put("command",r.getString(2));m.put("executionType",Job.executionType(r.getString(2)));
         m.put("packageId",r.getString(3));m.put("principal",r.getString(4));m.put("status",r.getString(5));m.put("createdAt",r.getString(6));
@@ -663,20 +793,23 @@ final class JobStore implements AutoCloseable {
     }
     synchronized boolean setPinned(String id,boolean pinned,String actor) throws Exception {return setPinned(id,pinned,actor,null);}
     synchronized boolean setPinned(String id,boolean pinned,String actor,String reason) throws Exception {
+        return !"NOT_ELIGIBLE".equals(setPinnedOutcome(id,pinned,actor,reason));
+    }
+    synchronized String setPinnedOutcome(String id,boolean pinned,String actor,String reason) throws Exception {
         try(Connection c=connect()) {
             c.setAutoCommit(false);
             try {
                 boolean previous;
                 try(PreparedStatement p=c.prepareStatement("SELECT pinned FROM jobs WHERE job_id=? AND command IN ('run','debug','load') AND status IN ('PASS','FAIL','ERROR','INVALID','CANCELLED') AND (retention_state IS NULL OR retention_state='') FOR UPDATE")) {
-                    p.setString(1,id);try(ResultSet r=p.executeQuery()){if(!r.next())return false;previous=r.getBoolean(1);}
+                    p.setString(1,id);try(ResultSet r=p.executeQuery()){if(!r.next())return "NOT_ELIGIBLE";previous=r.getBoolean(1);}
                 }
                 try(PreparedStatement p=c.prepareStatement("UPDATE jobs SET pinned=?,pinned_at=?,pinned_by=?,pin_reason=? WHERE job_id=? AND command IN ('run','debug','load') AND status IN ('PASS','FAIL','ERROR','INVALID','CANCELLED') AND (retention_state IS NULL OR retention_state='')")) {
-                    p.setBoolean(1,pinned);p.setString(2,pinned?Instant.now().toString():null);p.setString(3,pinned?bounded(actor,256):null);p.setString(4,pinned?reason:null);p.setString(5,id);if(p.executeUpdate()!=1){c.rollback();return false;}
+                    p.setBoolean(1,pinned);p.setString(2,pinned?Instant.now().toString():null);p.setString(3,pinned?bounded(actor,256):null);p.setString(4,pinned?reason:null);p.setString(5,id);if(p.executeUpdate()!=1){c.rollback();return "NOT_ELIGIBLE";}
                 }
                 try(PreparedStatement p=c.prepareStatement("INSERT INTO audit(principal,action,job_id,created_at,outcome,detail) VALUES(?,?,?,?,?,?)")) {
                     p.setString(1,bounded(actor,256));p.setString(2,"JOB_PIN");p.setString(3,id);p.setString(4,Instant.now().toString());p.setString(5,previous+"->"+pinned);p.setString(6,pinned?reason:null);p.executeUpdate();
                 }
-                c.commit();return true;
+                c.commit();return previous==pinned?"ALREADY_IN_STATE":pinned?"PINNED":"UNPINNED";
             } catch(Exception error){c.rollback();throw error;}
         }
     }
@@ -685,6 +818,60 @@ final class JobStore implements AutoCloseable {
             p.setString(1,bounded(actor,256));p.setString(2,id);return p.executeUpdate()==1;
         }
     }
+    /** Durable reversible intent; the claim and pin transitions share the same row lock. */
+    synchronized String setDeletionRequested(String id,boolean requested,String actor,long now) throws Exception {
+        try(Connection c=connect()) {
+            c.setAutoCommit(false);
+            try {
+                String outcome;
+                try(PreparedStatement p=c.prepareStatement("SELECT retention_state,pinned,worker_quarantined,artifact_recovery,status,finished_at FROM jobs WHERE job_id=? FOR UPDATE")) {
+                    p.setString(1,id);
+                    try(ResultSet r=p.executeQuery()) {
+                        if(!r.next())outcome="ALREADY_UNAVAILABLE";
+                        else if("DELETING".equals(r.getString(1)))outcome="ALREADY_CLAIMED";
+                        else if(requested=="DELETE_REQUESTED".equals(r.getString(1)))outcome="ALREADY_IN_STATE";
+                        else if(requested&&r.getBoolean(2))outcome="PINNED_UNPIN_FIRST";
+                        else if(requested&&(!List.of("PASS","FAIL","ERROR","INVALID","CANCELLED").contains(r.getString(5))||r.getString(6)==null))outcome="NOT_TERMINAL";
+                        else if(requested&&(r.getBoolean(3)||r.getBoolean(4)))outcome="NOT_ELIGIBLE";
+                        else {
+                            try(PreparedStatement update=c.prepareStatement("UPDATE jobs SET retention_state=?,retention_actor=?,delete_requested_at=? WHERE job_id=?")) {
+                                update.setString(1,requested?"DELETE_REQUESTED":null);update.setString(2,requested?bounded(actor,256):null);
+                                if(requested)update.setLong(3,now);else update.setNull(3,java.sql.Types.BIGINT);
+                                update.setString(4,id);update.executeUpdate();
+                            }
+                            outcome=requested?"MARKED":"UNMARKED";
+                        }
+                    }
+                }
+                try(PreparedStatement audit=c.prepareStatement("INSERT INTO audit(principal,action,job_id,created_at,outcome) VALUES(?,?,?,?,?)")) {
+                    audit.setString(1,bounded(actor,256));audit.setString(2,requested?"JOB_DELETE_MARK":"JOB_DELETE_UNMARK");
+                    audit.setString(3,id);audit.setString(4,Instant.ofEpochMilli(now).toString());audit.setString(5,outcome);audit.executeUpdate();
+                }
+                c.commit();return outcome;
+            } catch(Exception failed){c.rollback();throw failed;}
+        }
+    }
+    synchronized List<String> requestedDeletionIds(long before) throws Exception {
+        List<String> ids=new ArrayList<>();
+        try(Connection c=connect();PreparedStatement p=c.prepareStatement("SELECT job_id FROM jobs WHERE retention_state='DELETE_REQUESTED' AND delete_requested_at<=? ORDER BY delete_requested_at,job_id LIMIT 100")) {
+            p.setLong(1,before);try(ResultSet r=p.executeQuery()){while(r.next())ids.add(r.getString(1));}
+        }return ids;
+    }
+    synchronized boolean claimRequestedDeletion(String id,long before) throws Exception {
+        try(Connection c=connect()) {
+            c.setAutoCommit(false);
+            try {
+                try(PreparedStatement p=c.prepareStatement("UPDATE jobs SET retention_state='DELETING' WHERE job_id=? AND retention_state='DELETE_REQUESTED' AND delete_requested_at<=? AND pinned=FALSE AND worker_quarantined=FALSE AND artifact_recovery=FALSE AND status IN ('PASS','FAIL','ERROR','INVALID','CANCELLED') AND finished_at IS NOT NULL")) {
+                    p.setString(1,id);p.setLong(2,before);if(p.executeUpdate()!=1){c.rollback();return false;}
+                }
+                try(PreparedStatement p=c.prepareStatement("INSERT INTO audit(principal,action,job_id,created_at,outcome) SELECT COALESCE(retention_actor,'system:job-retention'),'JOB_DELETE_CLAIM',job_id,?,'CLAIMED' FROM jobs WHERE job_id=?")) {
+                    p.setString(1,Instant.now().toString());p.setString(2,id);p.executeUpdate();
+                }
+                c.commit();return true;
+            } catch(Exception failed){c.rollback();throw failed;}
+        }
+    }
+
     synchronized String deletionActor(String id) throws Exception {
         try(Connection c=connect();PreparedStatement p=c.prepareStatement("SELECT retention_actor FROM jobs WHERE job_id=?")) {
             p.setString(1,id);try(ResultSet r=p.executeQuery()){return r.next()?r.getString(1):null;}
@@ -820,7 +1007,7 @@ final class JobStore implements AutoCloseable {
     // Job reads own their connection and result data; allow API polling alongside writes.
     java.util.Map<String,Object> get(String id) throws Exception {
         try(Connection c=connect();PreparedStatement p=c.prepareStatement("SELECT job_id,command,package_id,principal,status,created_at,started_at,finished_at,worker_pid,exit_code,result_json,diagnostic_json,att_version,performance_json,retention_state,pinned,pinned_at,pinned_by,pin_reason FROM jobs WHERE job_id=?")) {
-            p.setString(1,id);try(ResultSet r=p.executeQuery()){if(!r.next()||"DELETING".equals(r.getString(15)))return null;var m=new java.util.LinkedHashMap<String,Object>();m.put("jobId",r.getString(1));m.put("command",r.getString(2));m.put("executionType",Job.executionType(r.getString(2)));m.put("packageId",r.getString(3));m.put("principal",r.getString(4));m.put("status",r.getString(5));m.put("createdAt",r.getString(6));m.put("startedAt",r.getString(7));m.put("finishedAt",r.getString(8));m.put("workerPid",r.getObject(9));m.put("exitCode",r.getObject(10));m.put("resultJson",r.getString(11));m.put("diagnosticJson",r.getString(12));m.put("attVersion",r.getString(13));m.put("performanceJson",r.getString(14));m.put("pinned",r.getBoolean(16));m.put("pinnedAt",r.getString(17));m.put("pinnedBy",r.getString(18));m.put("pinReason",r.getString(19));return m;}}
+            p.setString(1,id);try(ResultSet r=p.executeQuery()){if(!r.next()||"DELETING".equals(r.getString(15)))return null;var m=new java.util.LinkedHashMap<String,Object>();m.put("jobId",r.getString(1));m.put("command",r.getString(2));m.put("executionType",Job.executionType(r.getString(2)));m.put("packageId",r.getString(3));m.put("principal",r.getString(4));m.put("status",r.getString(5));m.put("createdAt",r.getString(6));m.put("startedAt",r.getString(7));m.put("finishedAt",r.getString(8));m.put("workerPid",r.getObject(9));m.put("exitCode",r.getObject(10));m.put("resultJson",r.getString(11));m.put("diagnosticJson",r.getString(12));m.put("attVersion",r.getString(13));m.put("performanceJson",r.getString(14));m.put("pinned",r.getBoolean(16));m.put("pinnedAt",r.getString(17));m.put("pinnedBy",r.getString(18));m.put("pinReason",r.getString(19));m.put("deletionState",r.getString(15));return m;}}
     }
     private Connection connect() throws Exception{if(closed)throw new IllegalStateException("Job store is closed");return DriverManager.getConnection(url,"sa","");}
     private static String text(Instant value){return value==null?null:value.toString();}

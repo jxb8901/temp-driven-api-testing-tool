@@ -365,6 +365,7 @@ jobs:
           npm run smoke:archive-metrics
           npm run smoke:load-templates
           npm run smoke:load-jobs
+          npm run smoke:jobs-schedules
           npm run smoke:job-replay
           npm run smoke:run
           npm run smoke:auth

@@ -256,7 +256,7 @@ Generated identities retain the existing safe-segment grammar and 240-character 
 
 Outer `execution.runIdFormat`, `execution.debugIdFormat`, exact `--run-id` and `--debug-id` behavior is unchanged. Diagnostic iteration/VU/Workload/mix IDs and scheduler event sequences remain separate from `EXEC.ID`. Independent distributed Workers must use disjoint namespaces or a shared allocator; separate process-local counters cannot safely share a Run namespace.
 
-## Error rates and failure diagnosis (4.2.3)
+## Error rates and failure diagnosis (4.2.4)
 
 Measured completions are divided into PASS, SUT failures, and runtime ERROR/INVALID. Warm-up is excluded from measured rates; it can still make execution ERROR. Generator drops remain separate.
 

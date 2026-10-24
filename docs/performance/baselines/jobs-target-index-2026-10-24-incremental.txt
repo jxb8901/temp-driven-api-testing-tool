@@ -1,0 +1,479 @@
+Final incremental migration, no row locking; cursor index initially absent.
+BENCH environment: Mac OS X aarch64 Java 26.0.1 CPUs=8
+BENCH seeded jobs=10000 snapshotsBytes=7718500
+BENCH open jobs=10000 wallMs=68.47 cpuMs=261.71 threadAllocatedBytes=36909384
+BENCH progress jobs=10000 batches=100 wallMs=11517.38
+BENCH backfill jobs=10000 targets=229800 batches=100 maxBatchMs=991.23 snapshotsBytes=7718500 wallMs=11519.93 cpuMs=25153.57 threadAllocatedBytes=6010626344 dbBeforeBytes=18792448 dbAfterBytes=663683072 io={info.FILE_WRITE=362, info.FILE_WRITE_BYTES=644898816, info.FILE_READ=42041, info.FILE_READ_BYTES=59718595, info.FILE_SIZE=663683072}
+BENCH plan jobs=10000 search=case-1999 SELECT
+    COUNT(*)
+FROM "PUBLIC"."JOBS"
+    /* PUBLIC.JOBS.tableScan */
+    /* scanCount: 10001 */
+WHERE (("RETENTION_STATE" IS NULL)
+    OR ("RETENTION_STATE" <> 'DELETING'))
+    AND ((LOCATE(LOWER(?1), LOWER("TARGET_SORT")) > 0)
+    OR (LOCATE(LOWER(?2), LOWER("JOB_ID")) > 0)
+    OR EXISTS(    SELECT
+        1
+    FROM "PUBLIC"."JOB_TARGETS" "JT"
+        /* PUBLIC.PRIMARY_KEY_2: JOB_ID = JOBS.JOB_ID */
+        /* scanCount: 2 */
+    WHERE ("JT"."JOB_ID" = "JOBS"."JOB_ID")
+        AND (LOCATE(?3, "JT"."TARGET_ID") > 0)))
+/*
+reads: 17560
+*/
+BENCH plan jobs=10000 search=case-1999 SELECT
+    "JOB_ID"
+FROM "PUBLIC"."JOBS"
+    /* PUBLIC.JOBS.tableScan */
+    /* scanCount: 10001 */
+WHERE (("RETENTION_STATE" IS NULL)
+    OR ("RETENTION_STATE" <> 'DELETING'))
+    AND ((LOCATE(LOWER(?1), LOWER("TARGET_SORT")) > 0)
+    OR (LOCATE(LOWER(?2), LOWER("JOB_ID")) > 0)
+    OR EXISTS(    SELECT
+        1
+    FROM "PUBLIC"."JOB_TARGETS" "JT"
+        /* PUBLIC.PRIMARY_KEY_2: JOB_ID = JOBS.JOB_ID */
+        /* scanCount: 2 */
+    WHERE ("JT"."JOB_ID" = "JOBS"."JOB_ID")
+        AND (LOCATE(?3, "JT"."TARGET_ID") > 0)))
+ORDER BY "TARGET_SORT", "PACKAGE_ID", "ENVIRONMENT", "TARGET_GROUP", "CREATED_AT" DESC, 1 DESC
+FETCH FIRST 100 ROWS ONLY
+BENCH plan jobs=10000 search=case-1999 SELECT
+    "TARGET_GROUP",
+    COUNT(*)
+FROM "PUBLIC"."JOBS"
+    /* PUBLIC.JOBS.tableScan */
+    /* scanCount: 10001 */
+WHERE (("RETENTION_STATE" IS NULL)
+    OR ("RETENTION_STATE" <> 'DELETING'))
+    AND ((LOCATE(LOWER(?1), LOWER("TARGET_SORT")) > 0)
+    OR (LOCATE(LOWER(?2), LOWER("JOB_ID")) > 0)
+    OR EXISTS(    SELECT
+        1
+    FROM "PUBLIC"."JOB_TARGETS" "JT"
+        /* PUBLIC.PRIMARY_KEY_2: JOB_ID = JOBS.JOB_ID */
+        /* scanCount: 2 */
+    WHERE ("JT"."JOB_ID" = "JOBS"."JOB_ID")
+        AND (LOCATE(?3, "JT"."TARGET_ID") > 0)))
+GROUP BY "TARGET_GROUP"
+BENCH query jobs=10000 search=case-1999 fullPageAndGroupedTotalsMs=[214.16, 204.29, 399.27, 144.38] cpuMs=1500.47 threadAllocatedBytes=200391912 io={info.FILE_WRITE=362, info.FILE_WRITE_BYTES=644898816, info.FILE_READ=68638, info.FILE_READ_BYTES=93085251, info.FILE_SIZE=663683072}
+BENCH plan jobs=10000 search=load-target-9-19 SELECT
+    COUNT(*)
+FROM "PUBLIC"."JOBS"
+    /* PUBLIC.JOBS.tableScan */
+    /* scanCount: 10001 */
+WHERE (("RETENTION_STATE" IS NULL)
+    OR ("RETENTION_STATE" <> 'DELETING'))
+    AND ((LOCATE(LOWER(?1), LOWER("TARGET_SORT")) > 0)
+    OR (LOCATE(LOWER(?2), LOWER("JOB_ID")) > 0)
+    OR EXISTS(    SELECT
+        1
+    FROM "PUBLIC"."JOB_TARGETS" "JT"
+        /* PUBLIC.PRIMARY_KEY_2: JOB_ID = JOBS.JOB_ID */
+        /* scanCount: 2 */
+    WHERE ("JT"."JOB_ID" = "JOBS"."JOB_ID")
+        AND (LOCATE(?3, "JT"."TARGET_ID") > 0)))
+BENCH plan jobs=10000 search=load-target-9-19 SELECT
+    "JOB_ID"
+FROM "PUBLIC"."JOBS"
+    /* PUBLIC.JOBS.tableScan */
+    /* scanCount: 10001 */
+WHERE (("RETENTION_STATE" IS NULL)
+    OR ("RETENTION_STATE" <> 'DELETING'))
+    AND ((LOCATE(LOWER(?1), LOWER("TARGET_SORT")) > 0)
+    OR (LOCATE(LOWER(?2), LOWER("JOB_ID")) > 0)
+    OR EXISTS(    SELECT
+        1
+    FROM "PUBLIC"."JOB_TARGETS" "JT"
+        /* PUBLIC.PRIMARY_KEY_2: JOB_ID = JOBS.JOB_ID */
+        /* scanCount: 2 */
+    WHERE ("JT"."JOB_ID" = "JOBS"."JOB_ID")
+        AND (LOCATE(?3, "JT"."TARGET_ID") > 0)))
+ORDER BY "TARGET_SORT", "PACKAGE_ID", "ENVIRONMENT", "TARGET_GROUP", "CREATED_AT" DESC, 1 DESC
+FETCH FIRST 100 ROWS ONLY
+BENCH plan jobs=10000 search=load-target-9-19 SELECT
+    "TARGET_GROUP",
+    COUNT(*)
+FROM "PUBLIC"."JOBS"
+    /* PUBLIC.JOBS.tableScan */
+    /* scanCount: 10001 */
+WHERE (("RETENTION_STATE" IS NULL)
+    OR ("RETENTION_STATE" <> 'DELETING'))
+    AND ((LOCATE(LOWER(?1), LOWER("TARGET_SORT")) > 0)
+    OR (LOCATE(LOWER(?2), LOWER("JOB_ID")) > 0)
+    OR EXISTS(    SELECT
+        1
+    FROM "PUBLIC"."JOB_TARGETS" "JT"
+        /* PUBLIC.PRIMARY_KEY_2: JOB_ID = JOBS.JOB_ID */
+        /* scanCount: 2 */
+    WHERE ("JT"."JOB_ID" = "JOBS"."JOB_ID")
+        AND (LOCATE(?3, "JT"."TARGET_ID") > 0)))
+GROUP BY "TARGET_GROUP"
+BENCH query jobs=10000 search=load-target-9-19 fullPageAndGroupedTotalsMs=[136.47, 121.35, 106.03, 101.27] cpuMs=745.98 threadAllocatedBytes=117146160 io={info.FILE_WRITE=362, info.FILE_WRITE_BYTES=644898816, info.FILE_READ=68661, info.FILE_READ_BYTES=93844099, info.FILE_SIZE=663683072}
+BENCH plan jobs=10000 search=ordinary SELECT
+    COUNT(*)
+FROM "PUBLIC"."JOBS"
+    /* PUBLIC.JOBS.tableScan */
+    /* scanCount: 10001 */
+WHERE (("RETENTION_STATE" IS NULL)
+    OR ("RETENTION_STATE" <> 'DELETING'))
+    AND ((LOCATE(LOWER(?1), LOWER("TARGET_SORT")) > 0)
+    OR (LOCATE(LOWER(?2), LOWER("JOB_ID")) > 0)
+    OR EXISTS(    SELECT
+        1
+    FROM "PUBLIC"."JOB_TARGETS" "JT"
+        /* PUBLIC.PRIMARY_KEY_2: JOB_ID = JOBS.JOB_ID */
+        /* scanCount: 1 */
+    WHERE ("JT"."JOB_ID" = "JOBS"."JOB_ID")
+        AND (LOCATE(?3, "JT"."TARGET_ID") > 0)))
+BENCH plan jobs=10000 search=ordinary SELECT
+    "JOB_ID"
+FROM "PUBLIC"."JOBS"
+    /* PUBLIC.JOBS.tableScan */
+    /* scanCount: 10001 */
+WHERE (("RETENTION_STATE" IS NULL)
+    OR ("RETENTION_STATE" <> 'DELETING'))
+    AND ((LOCATE(LOWER(?1), LOWER("TARGET_SORT")) > 0)
+    OR (LOCATE(LOWER(?2), LOWER("JOB_ID")) > 0)
+    OR EXISTS(    SELECT
+        1
+    FROM "PUBLIC"."JOB_TARGETS" "JT"
+        /* PUBLIC.PRIMARY_KEY_2: JOB_ID = JOBS.JOB_ID */
+        /* scanCount: 1 */
+    WHERE ("JT"."JOB_ID" = "JOBS"."JOB_ID")
+        AND (LOCATE(?3, "JT"."TARGET_ID") > 0)))
+ORDER BY "TARGET_SORT", "PACKAGE_ID", "ENVIRONMENT", "TARGET_GROUP", "CREATED_AT" DESC, 1 DESC
+FETCH FIRST 100 ROWS ONLY
+BENCH plan jobs=10000 search=ordinary SELECT
+    "TARGET_GROUP",
+    COUNT(*)
+FROM "PUBLIC"."JOBS"
+    /* PUBLIC.JOBS.tableScan */
+    /* scanCount: 10001 */
+WHERE (("RETENTION_STATE" IS NULL)
+    OR ("RETENTION_STATE" <> 'DELETING'))
+    AND ((LOCATE(LOWER(?1), LOWER("TARGET_SORT")) > 0)
+    OR (LOCATE(LOWER(?2), LOWER("JOB_ID")) > 0)
+    OR EXISTS(    SELECT
+        1
+    FROM "PUBLIC"."JOB_TARGETS" "JT"
+        /* PUBLIC.PRIMARY_KEY_2: JOB_ID = JOBS.JOB_ID */
+        /* scanCount: 1 */
+    WHERE ("JT"."JOB_ID" = "JOBS"."JOB_ID")
+        AND (LOCATE(?3, "JT"."TARGET_ID") > 0)))
+GROUP BY "TARGET_GROUP"
+BENCH query jobs=10000 search=ordinary fullPageAndGroupedTotalsMs=[121.33, 116.84, 114.01, 114.74] cpuMs=664.5 threadAllocatedBytes=133522240 io={info.FILE_WRITE=362, info.FILE_WRITE_BYTES=644898816, info.FILE_READ=68661, info.FILE_READ_BYTES=93844099, info.FILE_SIZE=663683072}
+BENCH plan jobs=10000 search=absent-identifier SELECT
+    COUNT(*)
+FROM "PUBLIC"."JOBS"
+    /* PUBLIC.JOBS.tableScan */
+    /* scanCount: 10001 */
+WHERE (("RETENTION_STATE" IS NULL)
+    OR ("RETENTION_STATE" <> 'DELETING'))
+    AND ((LOCATE(LOWER(?1), LOWER("TARGET_SORT")) > 0)
+    OR (LOCATE(LOWER(?2), LOWER("JOB_ID")) > 0)
+    OR EXISTS(    SELECT
+        1
+    FROM "PUBLIC"."JOB_TARGETS" "JT"
+        /* PUBLIC.PRIMARY_KEY_2: JOB_ID = JOBS.JOB_ID */
+        /* scanCount: 2 */
+    WHERE ("JT"."JOB_ID" = "JOBS"."JOB_ID")
+        AND (LOCATE(?3, "JT"."TARGET_ID") > 0)))
+BENCH plan jobs=10000 search=absent-identifier SELECT
+    "JOB_ID"
+FROM "PUBLIC"."JOBS"
+    /* PUBLIC.JOBS.tableScan */
+    /* scanCount: 10001 */
+WHERE (("RETENTION_STATE" IS NULL)
+    OR ("RETENTION_STATE" <> 'DELETING'))
+    AND ((LOCATE(LOWER(?1), LOWER("TARGET_SORT")) > 0)
+    OR (LOCATE(LOWER(?2), LOWER("JOB_ID")) > 0)
+    OR EXISTS(    SELECT
+        1
+    FROM "PUBLIC"."JOB_TARGETS" "JT"
+        /* PUBLIC.PRIMARY_KEY_2: JOB_ID = JOBS.JOB_ID */
+        /* scanCount: 2 */
+    WHERE ("JT"."JOB_ID" = "JOBS"."JOB_ID")
+        AND (LOCATE(?3, "JT"."TARGET_ID") > 0)))
+ORDER BY "TARGET_SORT", "PACKAGE_ID", "ENVIRONMENT", "TARGET_GROUP", "CREATED_AT" DESC, 1 DESC
+FETCH FIRST 100 ROWS ONLY
+BENCH plan jobs=10000 search=absent-identifier SELECT
+    "TARGET_GROUP",
+    COUNT(*)
+FROM "PUBLIC"."JOBS"
+    /* PUBLIC.JOBS.tableScan */
+    /* scanCount: 10001 */
+WHERE (("RETENTION_STATE" IS NULL)
+    OR ("RETENTION_STATE" <> 'DELETING'))
+    AND ((LOCATE(LOWER(?1), LOWER("TARGET_SORT")) > 0)
+    OR (LOCATE(LOWER(?2), LOWER("JOB_ID")) > 0)
+    OR EXISTS(    SELECT
+        1
+    FROM "PUBLIC"."JOB_TARGETS" "JT"
+        /* PUBLIC.PRIMARY_KEY_2: JOB_ID = JOBS.JOB_ID */
+        /* scanCount: 2 */
+    WHERE ("JT"."JOB_ID" = "JOBS"."JOB_ID")
+        AND (LOCATE(?3, "JT"."TARGET_ID") > 0)))
+GROUP BY "TARGET_GROUP"
+BENCH query jobs=10000 search=absent-identifier fullPageAndGroupedTotalsMs=[73.49, 69.18, 68.59, 69.65] cpuMs=292.26 threadAllocatedBytes=84011096 io={info.FILE_WRITE=362, info.FILE_WRITE_BYTES=644898816, info.FILE_READ=68661, info.FILE_READ_BYTES=93844099, info.FILE_SIZE=663683072}
+BENCH reopen jobs=10000 wallMs=33.91
+BENCH seeded jobs=50000 snapshotsBytes=38592500
+BENCH open jobs=50000 wallMs=160.32 cpuMs=311.12 threadAllocatedBytes=252682624
+BENCH progress jobs=50000 batches=100 wallMs=25478.66
+BENCH progress jobs=50000 batches=200 wallMs=45982.66
+BENCH progress jobs=50000 batches=300 wallMs=65348.42
+BENCH progress jobs=50000 batches=400 wallMs=83348.86
+BENCH progress jobs=50000 batches=500 wallMs=94790.36
+BENCH backfill jobs=50000 targets=1149000 batches=500 maxBatchMs=1771.53 snapshotsBytes=38592500 wallMs=94791.1 cpuMs=110848.14 threadAllocatedBytes=96412396312 dbBeforeBytes=135290880 dbAfterBytes=5661315072 io={info.FILE_WRITE=2721, info.FILE_WRITE_BYTES=5767491584, info.FILE_READ=5290292, info.FILE_READ_BYTES=6261195029, info.FILE_SIZE=5661315072}
+BENCH plan jobs=50000 search=case-1999 SELECT
+    COUNT(*)
+FROM "PUBLIC"."JOBS"
+    /* PUBLIC.JOBS.tableScan */
+    /* scanCount: 50001 */
+WHERE (("RETENTION_STATE" IS NULL)
+    OR ("RETENTION_STATE" <> 'DELETING'))
+    AND ((LOCATE(LOWER(?1), LOWER("TARGET_SORT")) > 0)
+    OR (LOCATE(LOWER(?2), LOWER("JOB_ID")) > 0)
+    OR EXISTS(    SELECT
+        1
+    FROM "PUBLIC"."JOB_TARGETS" "JT"
+        /* PUBLIC.PRIMARY_KEY_2: JOB_ID = JOBS.JOB_ID */
+        /* scanCount: 2 */
+    WHERE ("JT"."JOB_ID" = "JOBS"."JOB_ID")
+        AND (LOCATE(?3, "JT"."TARGET_ID") > 0)))
+/*
+reads: 88724
+*/
+BENCH plan jobs=50000 search=case-1999 SELECT
+    "JOB_ID"
+FROM "PUBLIC"."JOBS"
+    /* PUBLIC.JOBS.tableScan */
+    /* scanCount: 50001 */
+WHERE (("RETENTION_STATE" IS NULL)
+    OR ("RETENTION_STATE" <> 'DELETING'))
+    AND ((LOCATE(LOWER(?1), LOWER("TARGET_SORT")) > 0)
+    OR (LOCATE(LOWER(?2), LOWER("JOB_ID")) > 0)
+    OR EXISTS(    SELECT
+        1
+    FROM "PUBLIC"."JOB_TARGETS" "JT"
+        /* PUBLIC.PRIMARY_KEY_2: JOB_ID = JOBS.JOB_ID */
+        /* scanCount: 2 */
+    WHERE ("JT"."JOB_ID" = "JOBS"."JOB_ID")
+        AND (LOCATE(?3, "JT"."TARGET_ID") > 0)))
+ORDER BY "TARGET_SORT", "PACKAGE_ID", "ENVIRONMENT", "TARGET_GROUP", "CREATED_AT" DESC, 1 DESC
+FETCH FIRST 100 ROWS ONLY
+/*
+reads: 88724
+*/
+BENCH plan jobs=50000 search=case-1999 SELECT
+    "TARGET_GROUP",
+    COUNT(*)
+FROM "PUBLIC"."JOBS"
+    /* PUBLIC.JOBS.tableScan */
+    /* scanCount: 50001 */
+WHERE (("RETENTION_STATE" IS NULL)
+    OR ("RETENTION_STATE" <> 'DELETING'))
+    AND ((LOCATE(LOWER(?1), LOWER("TARGET_SORT")) > 0)
+    OR (LOCATE(LOWER(?2), LOWER("JOB_ID")) > 0)
+    OR EXISTS(    SELECT
+        1
+    FROM "PUBLIC"."JOB_TARGETS" "JT"
+        /* PUBLIC.PRIMARY_KEY_2: JOB_ID = JOBS.JOB_ID */
+        /* scanCount: 2 */
+    WHERE ("JT"."JOB_ID" = "JOBS"."JOB_ID")
+        AND (LOCATE(?3, "JT"."TARGET_ID") > 0)))
+GROUP BY "TARGET_GROUP"
+/*
+reads: 88724
+*/
+BENCH query jobs=50000 search=case-1999 fullPageAndGroupedTotalsMs=[1508.54, 1867.45, 2496.5, 2504.56] cpuMs=7154.26 threadAllocatedBytes=9587257384 io={info.FILE_WRITE=2721, info.FILE_WRITE_BYTES=5767491584, info.FILE_READ=6651036, info.FILE_READ_BYTES=7522416853, info.FILE_SIZE=5661315072}
+BENCH plan jobs=50000 search=load-target-9-19 SELECT
+    COUNT(*)
+FROM "PUBLIC"."JOBS"
+    /* PUBLIC.JOBS.tableScan */
+    /* scanCount: 50001 */
+WHERE (("RETENTION_STATE" IS NULL)
+    OR ("RETENTION_STATE" <> 'DELETING'))
+    AND ((LOCATE(LOWER(?1), LOWER("TARGET_SORT")) > 0)
+    OR (LOCATE(LOWER(?2), LOWER("JOB_ID")) > 0)
+    OR EXISTS(    SELECT
+        1
+    FROM "PUBLIC"."JOB_TARGETS" "JT"
+        /* PUBLIC.PRIMARY_KEY_2: JOB_ID = JOBS.JOB_ID */
+        /* scanCount: 2 */
+    WHERE ("JT"."JOB_ID" = "JOBS"."JOB_ID")
+        AND (LOCATE(?3, "JT"."TARGET_ID") > 0)))
+/*
+reads: 86461
+*/
+BENCH plan jobs=50000 search=load-target-9-19 SELECT
+    "JOB_ID"
+FROM "PUBLIC"."JOBS"
+    /* PUBLIC.JOBS.tableScan */
+    /* scanCount: 50001 */
+WHERE (("RETENTION_STATE" IS NULL)
+    OR ("RETENTION_STATE" <> 'DELETING'))
+    AND ((LOCATE(LOWER(?1), LOWER("TARGET_SORT")) > 0)
+    OR (LOCATE(LOWER(?2), LOWER("JOB_ID")) > 0)
+    OR EXISTS(    SELECT
+        1
+    FROM "PUBLIC"."JOB_TARGETS" "JT"
+        /* PUBLIC.PRIMARY_KEY_2: JOB_ID = JOBS.JOB_ID */
+        /* scanCount: 2 */
+    WHERE ("JT"."JOB_ID" = "JOBS"."JOB_ID")
+        AND (LOCATE(?3, "JT"."TARGET_ID") > 0)))
+ORDER BY "TARGET_SORT", "PACKAGE_ID", "ENVIRONMENT", "TARGET_GROUP", "CREATED_AT" DESC, 1 DESC
+FETCH FIRST 100 ROWS ONLY
+/*
+reads: 88724
+*/
+BENCH plan jobs=50000 search=load-target-9-19 SELECT
+    "TARGET_GROUP",
+    COUNT(*)
+FROM "PUBLIC"."JOBS"
+    /* PUBLIC.JOBS.tableScan */
+    /* scanCount: 50001 */
+WHERE (("RETENTION_STATE" IS NULL)
+    OR ("RETENTION_STATE" <> 'DELETING'))
+    AND ((LOCATE(LOWER(?1), LOWER("TARGET_SORT")) > 0)
+    OR (LOCATE(LOWER(?2), LOWER("JOB_ID")) > 0)
+    OR EXISTS(    SELECT
+        1
+    FROM "PUBLIC"."JOB_TARGETS" "JT"
+        /* PUBLIC.PRIMARY_KEY_2: JOB_ID = JOBS.JOB_ID */
+        /* scanCount: 2 */
+    WHERE ("JT"."JOB_ID" = "JOBS"."JOB_ID")
+        AND (LOCATE(?3, "JT"."TARGET_ID") > 0)))
+GROUP BY "TARGET_GROUP"
+/*
+reads: 88724
+*/
+BENCH query jobs=50000 search=load-target-9-19 fullPageAndGroupedTotalsMs=[1325.87, 1721.8, 1233.86, 1076.59] cpuMs=4850.33 threadAllocatedBytes=7086074184 io={info.FILE_WRITE=2721, info.FILE_WRITE_BYTES=5767491584, info.FILE_READ=7706571, info.FILE_READ_BYTES=8501803925, info.FILE_SIZE=5661315072}
+BENCH plan jobs=50000 search=ordinary SELECT
+    COUNT(*)
+FROM "PUBLIC"."JOBS"
+    /* PUBLIC.JOBS.tableScan */
+    /* scanCount: 50001 */
+WHERE (("RETENTION_STATE" IS NULL)
+    OR ("RETENTION_STATE" <> 'DELETING'))
+    AND ((LOCATE(LOWER(?1), LOWER("TARGET_SORT")) > 0)
+    OR (LOCATE(LOWER(?2), LOWER("JOB_ID")) > 0)
+    OR EXISTS(    SELECT
+        1
+    FROM "PUBLIC"."JOB_TARGETS" "JT"
+        /* PUBLIC.PRIMARY_KEY_2: JOB_ID = JOBS.JOB_ID */
+        /* scanCount: 1 */
+    WHERE ("JT"."JOB_ID" = "JOBS"."JOB_ID")
+        AND (LOCATE(?3, "JT"."TARGET_ID") > 0)))
+/*
+reads: 86677
+*/
+BENCH plan jobs=50000 search=ordinary SELECT
+    "JOB_ID"
+FROM "PUBLIC"."JOBS"
+    /* PUBLIC.JOBS.tableScan */
+    /* scanCount: 50001 */
+WHERE (("RETENTION_STATE" IS NULL)
+    OR ("RETENTION_STATE" <> 'DELETING'))
+    AND ((LOCATE(LOWER(?1), LOWER("TARGET_SORT")) > 0)
+    OR (LOCATE(LOWER(?2), LOWER("JOB_ID")) > 0)
+    OR EXISTS(    SELECT
+        1
+    FROM "PUBLIC"."JOB_TARGETS" "JT"
+        /* PUBLIC.PRIMARY_KEY_2: JOB_ID = JOBS.JOB_ID */
+        /* scanCount: 1 */
+    WHERE ("JT"."JOB_ID" = "JOBS"."JOB_ID")
+        AND (LOCATE(?3, "JT"."TARGET_ID") > 0)))
+ORDER BY "TARGET_SORT", "PACKAGE_ID", "ENVIRONMENT", "TARGET_GROUP", "CREATED_AT" DESC, 1 DESC
+FETCH FIRST 100 ROWS ONLY
+/*
+reads: 88724
+*/
+BENCH plan jobs=50000 search=ordinary SELECT
+    "TARGET_GROUP",
+    COUNT(*)
+FROM "PUBLIC"."JOBS"
+    /* PUBLIC.JOBS.tableScan */
+    /* scanCount: 50001 */
+WHERE (("RETENTION_STATE" IS NULL)
+    OR ("RETENTION_STATE" <> 'DELETING'))
+    AND ((LOCATE(LOWER(?1), LOWER("TARGET_SORT")) > 0)
+    OR (LOCATE(LOWER(?2), LOWER("JOB_ID")) > 0)
+    OR EXISTS(    SELECT
+        1
+    FROM "PUBLIC"."JOB_TARGETS" "JT"
+        /* PUBLIC.PRIMARY_KEY_2: JOB_ID = JOBS.JOB_ID */
+        /* scanCount: 1 */
+    WHERE ("JT"."JOB_ID" = "JOBS"."JOB_ID")
+        AND (LOCATE(?3, "JT"."TARGET_ID") > 0)))
+GROUP BY "TARGET_GROUP"
+/*
+reads: 88724
+*/
+BENCH query jobs=50000 search=ordinary fullPageAndGroupedTotalsMs=[1099.36, 1233.52, 1072.0, 1083.41] cpuMs=4724.91 threadAllocatedBytes=7150348888 io={info.FILE_WRITE=2721, info.FILE_WRITE_BYTES=5767491584, info.FILE_READ=8749638, info.FILE_READ_BYTES=9449012373, info.FILE_SIZE=5661315072}
+BENCH plan jobs=50000 search=absent-identifier SELECT
+    COUNT(*)
+FROM "PUBLIC"."JOBS"
+    /* PUBLIC.JOBS.tableScan */
+    /* scanCount: 50001 */
+WHERE (("RETENTION_STATE" IS NULL)
+    OR ("RETENTION_STATE" <> 'DELETING'))
+    AND ((LOCATE(LOWER(?1), LOWER("TARGET_SORT")) > 0)
+    OR (LOCATE(LOWER(?2), LOWER("JOB_ID")) > 0)
+    OR EXISTS(    SELECT
+        1
+    FROM "PUBLIC"."JOB_TARGETS" "JT"
+        /* PUBLIC.PRIMARY_KEY_2: JOB_ID = JOBS.JOB_ID */
+        /* scanCount: 2 */
+    WHERE ("JT"."JOB_ID" = "JOBS"."JOB_ID")
+        AND (LOCATE(?3, "JT"."TARGET_ID") > 0)))
+/*
+reads: 86197
+*/
+BENCH plan jobs=50000 search=absent-identifier SELECT
+    "JOB_ID"
+FROM "PUBLIC"."JOBS"
+    /* PUBLIC.JOBS.tableScan */
+    /* scanCount: 50001 */
+WHERE (("RETENTION_STATE" IS NULL)
+    OR ("RETENTION_STATE" <> 'DELETING'))
+    AND ((LOCATE(LOWER(?1), LOWER("TARGET_SORT")) > 0)
+    OR (LOCATE(LOWER(?2), LOWER("JOB_ID")) > 0)
+    OR EXISTS(    SELECT
+        1
+    FROM "PUBLIC"."JOB_TARGETS" "JT"
+        /* PUBLIC.PRIMARY_KEY_2: JOB_ID = JOBS.JOB_ID */
+        /* scanCount: 2 */
+    WHERE ("JT"."JOB_ID" = "JOBS"."JOB_ID")
+        AND (LOCATE(?3, "JT"."TARGET_ID") > 0)))
+ORDER BY "TARGET_SORT", "PACKAGE_ID", "ENVIRONMENT", "TARGET_GROUP", "CREATED_AT" DESC, 1 DESC
+FETCH FIRST 100 ROWS ONLY
+/*
+reads: 88724
+*/
+BENCH plan jobs=50000 search=absent-identifier SELECT
+    "TARGET_GROUP",
+    COUNT(*)
+FROM "PUBLIC"."JOBS"
+    /* PUBLIC.JOBS.tableScan */
+    /* scanCount: 50001 */
+WHERE (("RETENTION_STATE" IS NULL)
+    OR ("RETENTION_STATE" <> 'DELETING'))
+    AND ((LOCATE(LOWER(?1), LOWER("TARGET_SORT")) > 0)
+    OR (LOCATE(LOWER(?2), LOWER("JOB_ID")) > 0)
+    OR EXISTS(    SELECT
+        1
+    FROM "PUBLIC"."JOB_TARGETS" "JT"
+        /* PUBLIC.PRIMARY_KEY_2: JOB_ID = JOBS.JOB_ID */
+        /* scanCount: 2 */
+    WHERE ("JT"."JOB_ID" = "JOBS"."JOB_ID")
+        AND (LOCATE(?3, "JT"."TARGET_ID") > 0)))
+GROUP BY "TARGET_GROUP"
+/*
+reads: 88724
+*/
+BENCH query jobs=50000 search=absent-identifier fullPageAndGroupedTotalsMs=[1133.84, 910.79, 905.43, 862.48] cpuMs=3941.66 threadAllocatedBytes=6723968128 io={info.FILE_WRITE=2721, info.FILE_WRITE_BYTES=5767491584, info.FILE_READ=9770720, info.FILE_READ_BYTES=10371488533, info.FILE_SIZE=5661315072}
+BENCH reopen jobs=50000 wallMs=27.38

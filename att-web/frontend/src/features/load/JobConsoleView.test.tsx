@@ -66,10 +66,10 @@ describe('JobConsoleView', () => {
     expect(vi.mocked(api.subscribeJob).mock.calls[0][0]).toBe(job.jobId);
   });
 
-  it('builds an encoded same-origin noopener console URL', () => {
+  it('builds an encoded same-origin full Details URL', () => {
     const value = new URL(consoleRouteUrl(job.jobId, 'events'));
     expect(value.origin).toBe(window.location.origin);
-    expect(value.hash).toBe('#/jobs/J%2F1/console?view=events');
+    expect(value.hash).toBe('#/jobs/J%2F1?standalone=1&tab=events');
     expect(value.pathname).toBe(window.location.pathname);
   });
 

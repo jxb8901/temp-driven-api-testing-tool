@@ -66,7 +66,7 @@ class LoadScheduleSchedulerTest {
         }
     }
 
-    @Test void manualDeletionKeepsScheduleOccurrenceButMakesLinkedJobUnavailableImmediately() throws Exception {
+    @Test void manualDeletionKeepsScheduleOccurrenceAvailableUntilCleanupClaim() throws Exception {
         org.junit.jupiter.api.Assumptions.assumeFalse(System.getProperty("os.name","").toLowerCase(java.util.Locale.ROOT).contains("win"));
         ServerConfig config=config("manual-delete-history",1,"continue",1);String scheduleId="SMANUALDELETE",occurrence="SMANUALDELETE-1",jobId="J00000000000002A0";
         try(ServerRuntime runtime=new ServerRuntime(config,Files.createDirectories(temp.resolve("manual-delete-libs")).toString(),ProcessBuilder::start)) {
@@ -77,7 +77,10 @@ class LoadScheduleSchedulerTest {
             Path outside=Files.createDirectories(temp.resolve("manual-delete-history-target"));Files.writeString(outside.resolve("keep.txt"),"keep");
             Files.delete(config.dataDir.resolve("jobs").resolve(jobId));Files.createSymbolicLink(config.dataDir.resolve("jobs").resolve(jobId),outside);
             assertEquals("PASS",runtime.store.scheduleExecution(occurrence).get("jobStatus"));
-            assertEquals("DELETION_PENDING_RECOVERY",runtime.deleteJob(jobId,"operator").get("outcome"));
+            assertEquals("MARKED",runtime.deleteJob(jobId,"operator").get("outcome"));
+            assertEquals("PASS",runtime.store.scheduleExecution(occurrence).get("jobStatus"));
+            assertTrue(runtime.store.claimRequestedDeletion(jobId,Long.MAX_VALUE));
+            assertFalse(runtime.reconcileDeletingJobs());
             Map<String,Object> retained=runtime.store.scheduleExecution(occurrence);assertNotNull(retained);assertEquals(jobId,retained.get("jobId"));assertNull(retained.get("jobStatus"));
             Map<String,Object> listed=runtime.store.scheduleExecutions(scheduleId,10).get(0);assertEquals(occurrence,listed.get("occurrenceId"));assertNull(listed.get("jobStatus"));
             assertTrue(runtime.store.jobRowExists(jobId));assertTrue(Files.exists(outside.resolve("keep.txt")));

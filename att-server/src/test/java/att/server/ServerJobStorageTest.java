@@ -18,6 +18,16 @@ import static org.junit.jupiter.api.Assertions.*;
 class ServerJobStorageTest {
     @TempDir Path temp;
 
+    @Test void backgroundCleanupHonorsPendingGraceThenDeletesClaimedEvidence() throws Exception {
+        try(ServerRuntime runtime=runtime("pending-grace",null,Clock.systemUTC())) {
+            String id="J0000000000000789";Path directory=seedRow(runtime,id,"PASS",Instant.parse("2020-01-01T00:00:00Z"),false);
+            assertEquals("MARKED",runtime.deleteJob(id,"operator").get("outcome"));
+            runtime.cleanupRequestedDeletions();assertNotNull(runtime.store.get(id));assertTrue(Files.isDirectory(directory));
+            assertEquals("UNMARKED",runtime.store.setDeletionRequested(id,false,"operator",System.currentTimeMillis()));
+            assertEquals("MARKED",runtime.store.setDeletionRequested(id,true,"operator",System.currentTimeMillis()-31_000));
+            runtime.cleanupRequestedDeletions();assertFalse(runtime.store.jobRowExists(id));assertFalse(Files.exists(directory));
+        }
+    }
     @Test void loadQueryFiltersBeforePaginationAndHonorsPrincipalAndPins() throws Exception {
         try (ServerRuntime runtime=runtime("load-query",null,Clock.systemUTC())) {
             Instant finished=Instant.parse("2026-01-01T00:00:00Z");
@@ -60,7 +70,9 @@ class ServerJobStorageTest {
             assertEquals(true,restarted.store.get(load).get("pinned"));
             assertTrue(Files.exists(jobDir(restarted,load).resolve("artifacts.zip")));
             restarted.pinJob(run,false,"second-operator");
-            assertEquals("DELETED",restarted.deleteJob(run,"second-operator").get("outcome"));
+            assertEquals("MARKED",restarted.deleteJob(run,"second-operator").get("outcome"));
+            assertTrue(Files.exists(jobDir(restarted,run)));assertNotNull(restarted.store.get(run));
+            assertTrue(restarted.store.claimRequestedDeletion(run,Long.MAX_VALUE));assertTrue(restarted.reconcileDeletingJobs());
             assertFalse(Files.exists(jobDir(restarted,run)));assertNull(restarted.store.get(run));
             assertEquals("ALREADY_UNAVAILABLE",restarted.deleteJob(run,"second-operator").get("outcome"));
             assertEquals(true,restarted.store.get(load).get("pinned"));
@@ -142,7 +154,7 @@ class ServerJobStorageTest {
             assertTrue(runtime.store.markManualDeleting(pending,"operator"));
             assertFalse(runtime.store.setPinned(pending,true,"operator"));
             var results=runtime.deleteJobs(List.of(pinned,eligible,active,pending,eligible),"operator");
-            assertEquals(List.of("PINNED_UNPIN_FIRST","DELETED","NOT_TERMINAL","DELETION_PENDING_RECOVERY"),results.stream().map(row->row.get("outcome")).toList());
+            assertEquals(List.of("PINNED_UNPIN_FIRST","MARKED","NOT_TERMINAL","ALREADY_CLAIMED"),results.stream().map(row->row.get("outcome")).toList());
             assertTrue(runtime.reconcileDeletingJobs());assertFalse(Files.exists(jobDir(runtime,pending)));assertFalse(runtime.store.jobRowExists(pending));
             assertNotNull(runtime.store.get(pinned));assertNotNull(runtime.store.get(active));
             assertTrue(runtime.store.auditOutcomes("JOB_DELETE").contains("DELETED_AFTER_RECOVERY"));

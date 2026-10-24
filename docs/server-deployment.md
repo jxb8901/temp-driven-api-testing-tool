@@ -1,6 +1,6 @@
 # ATT Server deployment and API
 
-ATT Server 4.2.3 provides a single-node control plane for submitting ATT Run, Debug, Load, and Validate jobs over a versioned REST API. Deploy its WAR to an external Tomcat 10.1+ instance running Java 17 or later. The CLI, Engine, and Worker remain Java 8-compatible.
+ATT Server 4.2.4 provides a single-node control plane for submitting ATT Run, Debug, Load, and Validate jobs over a versioned REST API. Deploy its WAR to an external Tomcat 10.1+ instance running Java 17 or later. The CLI, Engine, and Worker remain Java 8-compatible.
 
 ## Prepare the deployment
 
@@ -8,9 +8,9 @@ ATT Server 4.2.3 provides a single-node control plane for submitting ATT Run, De
 2. Register package roots beneath an allowed root and ensure the Tomcat service account can read them. The extracted default package can be registered directly as `$ATT_HOME/packages/default`.
 3. Create `server.dataDir` before startup and make it writable only by the Tomcat service account. The sample uses `$ATT_HOME/data`; it is supported when it does not equal, contain, or sit inside any registered package root. `/var/lib/att-server` is another option. Keep it out of package content.
 4. Copy `$ATT_HOME/config/att-server.example.yaml` to `$ATT_HOME/config/att-server.yaml` or a protected external path, update its absolute paths, and keep credentials out of package content. Do not replace an existing active config during an upgrade.
-5. Deploy `att-server-4.2.3.war` to Tomcat 10.1+. Tomcat may run the WAR packed; isolated Workers load the matching `att-local-4.2.3.jar` from `$ATT_HOME/lib`.
+5. Deploy `att-server-4.2.4.war` to Tomcat 10.1+. Tomcat may run the WAR packed; isolated Workers load the matching `att-local-4.2.4.jar` from `$ATT_HOME/lib`.
 
-The Local archive's extracted directory is `ATT_HOME`, the shared installation and deployment root. It contains launchers and the shared Worker/Engine runtime at `lib/att-local-4.2.3.jar`; install and upgrade or roll back the matching Local archive and Server WAR together. Startup verifies the Worker JAR version and embedded Schema Registry, and each Worker confirms that its registry matches the Server-validated runtime before processing requests. Keep one versioned `att-local-<version>.jar` in each `ATT_HOME/lib`. Executable package content lives beneath `packages/<id>/`; Server state lives in the separately configured `server.dataDir`. The archive includes `config/att-server.example.yaml` as a template, but never includes an active `config/att-server.yaml` or a `data/` directory.
+The Local archive's extracted directory is `ATT_HOME`, the shared installation and deployment root. It contains launchers and the shared Worker/Engine runtime at `lib/att-local-4.2.4.jar`; install and upgrade or roll back the matching Local archive and Server WAR together. Startup verifies the Worker JAR version and embedded Schema Registry, and each Worker confirms that its registry matches the Server-validated runtime before processing requests. Keep one versioned `att-local-<version>.jar` in each `ATT_HOME/lib`. Executable package content lives beneath `packages/<id>/`; Server state lives in the separately configured `server.dataDir`. The archive includes `config/att-server.example.yaml` as a template, but never includes an active `config/att-server.yaml` or a `data/` directory.
 
 Server config discovery checks, in order, JVM property `-Datt.server.config`, environment variable `ATT_SERVER_CONFIG`, then `$ATT_HOME/config/att-server.yaml`. For the last candidate, the Server resolves `ATT_HOME` from `-Datt.home` first and then the `ATT_HOME` environment variable. A selected config that is missing, unreadable, or invalid stops startup with its path in the diagnostic; the Server does not fall back to another source. With no explicit source or usable default candidate, startup fails with setup guidance.
 
@@ -556,7 +556,7 @@ Public Artifact paths are logical paths inside the verified Job ZIP. Loose Worke
 
 ## Distribution and compatibility
 
-The Server binary is distributed separately as `att-4.2.3-server.tar.gz`, containing `server/att-server-4.2.3.war` (with ATT application code combined in `WEB-INF/lib/att-server-4.2.3.jar`) and the deployment guides. The local CLI is in `att-4.2.3-local.tar.gz` with the shared Worker/Engine runtime at `lib/att-local-4.2.3.jar`; the Server uses that same version-matched library. Tomcat provides the HTTP listener and Servlet API. The Server requires Java 17; the CLI, Engine, and Worker continue to target Java 8.
+The Server binary is distributed separately as `att-4.2.4-server.tar.gz`, containing `server/att-server-4.2.4.war` (with ATT application code combined in `WEB-INF/lib/att-server-4.2.4.jar`) and the deployment guides. The local CLI is in `att-4.2.4-local.tar.gz` with the shared Worker/Engine runtime at `lib/att-local-4.2.4.jar`; the Server uses that same version-matched library. Tomcat provides the HTTP listener and Servlet API. The Server requires Java 17; the CLI, Engine, and Worker continue to target Java 8.
 
 ### Issue #176 rollout checklist
 
@@ -568,7 +568,7 @@ The Server binary is distributed separately as `att-4.2.3-server.tar.gz`, contai
 
 This checklist describes deployment steps; it does not substitute for the P6 security, browser, compatibility, packaged-WAR, and hosted-CI acceptance evidence.
 
-## Published Live Output limits (4.2.3)
+## Published Live Output limits (4.2.4)
 
 Set `server.liveOutput.maxEntryChars` (integer 1–32000, default 4000) and `server.liveOutput.maxEntryLines` (integer 1–200, default 40). For example:
 
@@ -590,25 +590,28 @@ Larger entries increase redaction/JSON CPU, SSE/replay bandwidth and journal dis
 
 Reproduce the bounded concurrent journal/replay check with `mvn -pl att-server -am -Dtest=JobEventsTest#concurrentExpandedEntriesKeepReplayBoundedAndReportMeasuredCost -Dsurefire.failIfNoSpecifiedTests=false test`. It writes 800 expanded entries across four concurrent Jobs, reopens each journal, verifies the retained 100-entry windows and exact text, and prints elapsed milliseconds plus retained journal bytes. The WAR integration test also checks an 8000-character diagnostic through Worker → journal → SSE replay under the 16000/100 policy, including an untrusted request that tries to override it.
 
-## Pinned evidence and manual Job deletion (4.2.3)
+## Pinned evidence and pending Job deletion (4.2.4)
 
-USER operators can Pin/Unpin terminal RUN, Debug and LOAD Jobs from Jobs rows or details. Pins are shared durable H2 properties (`pinned`, `pinnedAt`, `pinnedBy`, `pinReason`), visible to all authorized operators and preserved across restart. `pinReason` is trimmed, limited to 200 characters, rejects control characters, is secret-redacted, and is returned as `job.pinReason`. Pinned only queries Server history (`GET /api/v1/jobs?pinnedOnly=true`), including pins older than the default 100 newest Jobs, and returns at most 100 matching Jobs. A pin has no expiry and protects the entire Job, including its archive, from existing age/size cleanup. Pinned bytes still count toward quota usage; when protected Jobs prevent the target, storage reports `quota_unmet` and leaves them intact. Existing retention intervals and thresholds do not change.
+USER operators can pin terminal RUN, Debug and LOAD Jobs. Pin/Unpin icons persist on the first click without a confirmation or reason prompt. Pins protect the whole Job from age and size retention, survive restart, and never expire automatically. The optional API `pinReason` remains bounded to 200 characters and secret-redacted. Protected bytes still count toward storage quota.
 
-Select individual rows or Select all on this page, then Delete selected; selections persist explicitly across loaded pages. The confirmation lists the exact Job IDs and identifies protected/active Jobs. Detail deletion uses the same confirmation. Delete permanently removes the Job record, result, events/logs, archive and Job directory; unselected Jobs, package sources and schedules remain. Pinned Jobs require Unpin first. A busy, possibly-live, quarantined or recovering Job is rejected/deferred with a per-Job outcome. Refresh and retry after it becomes quiescent. Schedule occurrence history remains and shows unavailable Job references.
+Jobs uses server-side filters, ordering and offset pagination. `GET /api/v1/jobs` accepts `offset`, `limit` (1–100, default 100), `principal`, `principalMode` (`all`, `text`, `mine`, `schedule`), `packageId`, `executionType`, `status`, `from`, `to`, `search`, `sort` (`newest`, `oldest`, `target-asc`, `target-desc`), `pinnedOnly`, `deletion` (`all`, `pending`, `unmarked`) and `groupBy=target`. Dates use ISO-8601 instants. RUN includes Debug. Mine uses the authenticated identity; Schedule matches canonical schedule principals or persisted schedule provenance. Free text is a literal substring. The response includes `items`, authorized `total`, `offset`, `limit`, `nextOffset`, bounded principal/package suggestions and page-relevant `groups` with complete filtered counts/statuses. The current operator policy permits USER operators to see shared Job history; ADMIN accounts cannot use operator endpoints. Suggestions follow that same policy and exclude schedule IDs.
 
-Authenticated operator endpoints use the existing origin/CSRF and shared USER authorization rules:
+Jobs displays target identity first, with Package/Environment and a shortened, copyable full Job ID. Target identities are immutable allowlisted projections captured at submission. Historical rows without provenance show Unknown target and remain openable. Group keys include Package, Environment and the complete target-binding signature; multi-target Jobs appear once. Pages contain individual Jobs; group counts cover all matching history while page actions include collapsed members on the page. Default ordering is newest first. The footer remembers 25/50/100 rows, default 100.
 
-- `POST /api/v1/jobs/{jobId}/pin` with `{"pinned":true,"pinReason":"release evidence"}` or `false`; an ineligible pin returns `409 ATT-SERVER-JOB-NOT-ELIGIBLE`.
-- `POST /api/v1/jobs/pin` with `{"pinned":true,"pinReason":"release evidence","jobIds":[...]}`; the response contains one `PINNED`, `UNPINNED`, `NOT_ELIGIBLE`, or `UNAVAILABLE` outcome per ID.
-- `POST /api/v1/jobs/{jobId}/delete` with `{"confirm":true}`; returns `200` for `DELETED` or `ALREADY_UNAVAILABLE`, `202` for `DELETION_PENDING_RECOVERY`, `409` for refusal outcomes such as `PINNED_UNPIN_FIRST`, busy, or not quiescent; a Job that no longer exists returns `200` with `ALREADY_UNAVAILABLE`, and `404` is returned only when the caller may not see the Job. A `409` response still contains the outcome map, not an error envelope.
-- `POST /api/v1/jobs/delete` with `{"confirm":true,"jobIds":["J0123456789ABCDEF"]}`; maximum 100 IDs, deduplicated, action body maximum 16384 bytes or the smaller configured request limit.
+The only list bulk controls are two footer menus: Pin all / Unpin all and Delete all / Undelete all. They apply to the explicit current-page ID snapshot, never unseen pages. Per-ID responses distinguish updated, already in state, rejected/skipped and failed outcomes. No checkboxes or selection dialogs are required.
 
-`DELETE /api/v1/jobs/{jobId}` retains its cancellation meaning. Manual deletion through `POST /api/v1/jobs/{jobId}/delete` never cancels an active Job. Pin changes do not wait on archive locks; deletion and archive reads/writes remain lifecycle-fenced. A durable DELETING record hides endpoints during incomplete deletion; startup and hourly reconciliation finish removing files/metadata, including when job-storage quota is disabled. A partial deletion reports `DELETION_PENDING_RECOVERY`, never success. Minimal audit records retain actor, time, target and outcome; pin audit includes old/new flags. Deletion does not compact H2 immediately.
+Use these bounded state-setting endpoints (at most 100 IDs, deduplicated; action bodies at most 16384 bytes or the configured request limit):
 
-Pins are operational retention protection. Use independent backups for Server filesystem loss, administrator out-of-band deletion and disaster recovery; pins are not legal/WORM holds.
+- `POST /api/v1/jobs/{jobId}/pin` with `{"pinned":true}` or `false`.
+- `POST /api/v1/jobs/pin` with `{"pinned":true,"jobIds":["J0123456789ABCDEF"]}`. Repeating the same bulk state returns `ALREADY_IN_STATE`.
+- `POST /api/v1/jobs/{jobId}/delete` with `{"requested":true}` to mark or `{"requested":false}` to unmark. Legacy `{"confirm":true}` requests remain accepted as marks.
+- `POST /api/v1/jobs/delete` with `{"requested":true,"jobIds":["J0123456789ABCDEF"]}`; use `false` for unmark.
 
+Marking returns `MARKED` and persists `DELETE_REQUESTED`; it never recursively deletes files in the HTTP request. Unmark returns `UNMARKED` only before cleanup claim. Identical state returns `ALREADY_IN_STATE`; claimed records return `ALREADY_CLAIMED`, pinned records `PINNED_UNPIN_FIRST`, active records `NOT_TERMINAL` or `JOB_BUSY`, and recovery/quarantine fences `NOT_ELIGIBLE`. Single rejected requests return HTTP 409 with an outcome map; bulk requests return per-ID outcomes. Pending Jobs remain listable and accessible. After claim, endpoints hide the Job; unmark cannot restore artifacts. Missing records return `ALREADY_UNAVAILABLE` without implying restoration.
 
-## Schedule package changes and runtime shutdown (4.2.3)
+A bounded background task runs every five seconds, with a minimum 30-second pending grace period. Claim conditionally transitions `DELETE_REQUESTED` to `DELETING`, rechecking pins, terminal state, Worker identities/descendants, recovery, quarantine and archive lifecycle locks. Startup and periodic reconciliation finish interrupted `DELETING` cleanup; pending intent survives restart. Filesystem deletion remains idempotent and audited with the requesting actor. `DELETE /api/v1/jobs/{jobId}` retains cancellation semantics. Schedule history and package sources remain. Deletion does not immediately compact H2; independent backups remain necessary for disaster recovery.
+
+## Schedule package changes and runtime shutdown (4.2.4)
 
 Set `server.scheduling.packageChangePolicy` to `strict` (default), `pause`, or `ignore`. Unknown values prevent startup. Each schedule can override `packageChangePolicy`; `null` or an omitted value inherits the Server default, including older persisted schedules. Studio labels these choices **Default (Server)**, **Strict**, **Auto-pause**, and **Revalidate latest**.
 

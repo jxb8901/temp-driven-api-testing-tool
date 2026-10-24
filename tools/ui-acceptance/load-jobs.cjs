@@ -61,7 +61,7 @@ async function main() {
       });
       if (method === 'GET' && resource === 'jobs') {
         if (delayJobs) await new Promise(resolve => setTimeout(resolve, 700));
-        return json({ items: [job] });
+        return json({ items: [job], total: 1, offset: Number(url.searchParams.get('offset') || 0), limit: 100, groups: [], principalSuggestions: ['qa-smoke'], packageSuggestions: ['payments'] });
       }
       if (method === 'GET' && resource === 'packages/payments/load-policy') return json({
         model: url.searchParams.get('model') || 'virtualUsers',
@@ -191,10 +191,10 @@ async function main() {
     const liveTab = floatingAfterRestore.getByRole('tab', { name: 'Live Output', exact: true });
     assert.equal(await liveTab.getAttribute('aria-selected'), 'true', 'restoring the console should keep its selected Live Output view');
     await floatingAfterRestore.getByText('[LOAD] status=RUNNING jobId=JOB-LOAD-204', { exact: true }).waitFor();
-    const newTab = floatingAfterRestore.getByRole('link', { name: 'Open Job console in a new tab' });
+    const newTab = floatingAfterRestore.getByRole('link', { name: 'Open full Job Details in a new tab' });
     assert.equal(await newTab.getAttribute('target'), '_blank');
     assert.match(await newTab.getAttribute('rel') || '', /noopener/);
-    assert.match(await newTab.getAttribute('href') || '', new RegExp(`#\\/jobs\\/${jobId}\\/console\\?view=live`));
+    assert.match(await newTab.getAttribute('href') || '', new RegExp(`#\\/jobs\\/${jobId}\\?standalone=1&tab=live`));
     await floatingAfterRestore.getByRole('button', { name: 'Close Job console' }).click();
     assert.equal(await page.locator(`[aria-label="Floating console for Job ${jobId}"]`).count(), 0, 'Close should remove the floating console');
     assert.equal(cancelRequested, false, 'closing the floating console must not cancel the Job');
@@ -246,7 +246,8 @@ async function main() {
     await standaloneEventsTab.page().locator('.att-job-events').first().waitFor();
     assert.equal(await createdEventSourceCount(page), 1, 'the standalone console tab should create exactly one EventSource for the terminal Job replay');
     await assertAxe(page, 'Standalone Job console should pass the configured WCAG accessibility rules');
-    assert.equal(await page.getByRole('link', { name: 'Open full Job details' }).count(), 0, 'standalone console must keep the fixed Job without a details navigation action');
+    for (const href of await page.getByRole('link', { name: 'Open full Job details', exact: true }).evaluateAll(links => links.map(link => link.getAttribute('href')))) assert.equal(href, '#/jobs/' + jobId, 'Details links must keep the fixed Job');
+    assert.equal(await page.getByRole('tablist', { name: 'Job ' + jobId + ' sections' }).getByRole('tab').count(), 6);
     await page.goto(`${base}#/jobs/${jobId}`);
     await page.waitForURL(new RegExp(`#\\/jobs\\/${jobId}$`));
     await page.getByRole('heading', { name: `Job ${jobId}`, level: 1, exact: true }).waitFor();
@@ -254,14 +255,14 @@ async function main() {
     await page.goto(`${base}#/jobs`);
     await page.getByRole('heading', { name: 'Jobs' }).waitFor();
     await assertAxe(page, 'Jobs list should pass the configured WCAG accessibility rules');
-    const statusFilter = page.locator('.att-jobs-filter-panel select').first();
+    const statusFilter = page.getByLabel('Status', { exact: true });
     await statusFilter.selectOption('RUNNING');
     delayJobs = true;
     await page.getByRole('button', { name: 'Refresh jobs' }).click();
-    await page.getByText(/Refreshing .* loaded jobs/i).waitFor();
+    await page.getByText(/Loading Jobs…/i).waitFor();
     assert.equal(await statusFilter.inputValue(), 'RUNNING', 'refresh should preserve the selected filter while the response is pending');
-    await page.getByText(/at most 100 jobs/i).waitFor();
-    await page.getByText(jobId, { exact: true }).waitFor({ timeout: 10_000 });
+    await page.getByRole('status').filter({ hasText: /Showing .* of 1 Jobs/ }).waitFor();
+    await page.getByRole('link', { name: 'Unknown target · ' + jobId }).waitFor({ timeout: 10_000 });
     assert.equal(await statusFilter.inputValue(), 'RUNNING');
 
     assert.deepEqual(pageErrors, [], 'Load/Jobs UI should not report uncaught browser errors');

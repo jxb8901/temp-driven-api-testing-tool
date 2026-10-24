@@ -84,7 +84,7 @@ async function main() {
       if (method === 'GET' && path === 'packages') {
         return jsonResponse(route, 200, { items: [{ packageId: 'payments', name: 'payments', state: 'ready' }], total: 1 });
       }
-      if (method === 'GET' && path === 'jobs') return jsonResponse(route, 200, { items: [], total: 0 });
+      if (method === 'GET' && path === 'jobs') return jsonResponse(route, 200, { items: [], total: 0, offset: 0, limit: 100, groups: [], principalSuggestions: [], packageSuggestions: [] });
       if (method === 'GET' && path === 'jobs/job-debug-99') {
         return jsonResponse(route, 200, { jobId: 'job-debug-99', packageId: 'payments', status: 'QUEUED', command: 'DEBUG' });
       }

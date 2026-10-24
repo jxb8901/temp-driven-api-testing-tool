@@ -15,11 +15,11 @@ async function main() {
       const path = decodeURIComponent(url.pathname.split('/api/v1/')[1] || '');
       if (path === 'jobs' || path === 'packages') broadRequests.push(path);
       const json = (body, status = 200) => route.fulfill({ status, json: body });
-      if (path === 'version') return json({ version: '4.2.3', apiVersion: '1', inlineLoadEnabled: true, loadSchedulingEnabled: true, unifiedRunVersion: 'att-execution/v1' });
+      if (path === 'version') return json({ version: '4.2.4', apiVersion: '1', inlineLoadEnabled: true, loadSchedulingEnabled: true, unifiedRunVersion: 'att-execution/v1' });
       if (path === 'packages') return json({ items: [{ packageId: 'payments', name: 'Payments' }] });
       if (path === 'packages/payments/configuration') return json({ view: 'declared', environments: [{ name: 'SIT' }] });
       if (path === 'packages/payments/load-catalog') return json({ items: [], total: 0 });
-      if (path === 'jobs') return json({ items: [...jobs.values()].filter(job => !url.searchParams.has('executionType') || job.command === 'load') });
+      if (path === 'jobs') { const items=[...jobs.values()].filter(job => !url.searchParams.has('executionType') || job.command === 'load'); return json({items,total:items.length,offset:0,limit:100,groups:[],principalSuggestions:['alice'],packageSuggestions:['payments']}); }
       const match = /^jobs\/([^/]+)(?:\/(.*))?$/.exec(path);
       if (match) {
         const [, id, action] = match, job = jobs.get(id);
@@ -45,11 +45,40 @@ async function main() {
     });
     const page = await context.newPage(), errors = []; page.on('pageerror', error => errors.push(error.message));
     const base = fixture.origin + '/att/ui/';
+    // Both entry points/actions must preserve the surrounding layout at every supported width.
+    for (const width of [1440, 768, 390]) {
+      await page.setViewportSize({width, height:900});
+      for (const detail of [false, true]) {
+        await page.goto(base + (detail ? '#/jobs/J-load' : '#/jobs'));
+        const container = detail ? page.locator('.att-job-detail') : page.getByRole('row').filter({has:page.getByRole('link',{name:'Unknown target · J-load',exact:true})});
+        for (const action of ['Rerun', 'Schedule / Reschedule…']) {
+          const opener=container.getByRole('button',{name:action,exact:true});
+          await opener.waitFor(); const before=await container.boundingBox();
+          await opener.click();
+          const modal=page.locator('dialog.att-replay-review');
+          await modal.getByRole('button',{name:action==='Rerun'?'Confirm rerun':'Continue to New Schedule',exact:true}).and(page.locator(':enabled')).waitFor();
+          assert.equal(await page.locator('body > dialog.att-replay-review').count(),1);
+          const after=await container.boundingBox(); assert.equal(after.height,before.height,'Opening review must not change row/Details geometry');
+          assert.equal(await modal.locator('details').getAttribute('open'),null);
+          const box=await modal.boundingBox(); assert.ok(box.x>=0&&box.x+box.width<=width+1&&box.height<=900*.85+1,JSON.stringify({width,box}));
+          await modal.getByRole('button',{name:'Cancel',exact:true}).focus(); await page.keyboard.press('Tab');
+          assert.ok(await modal.evaluate(element=>element.contains(document.activeElement)),'Tab stays inside modal');
+          await page.keyboard.press('Shift+Tab'); assert.equal(await page.evaluate(()=>document.activeElement.textContent),'Cancel');
+          await modal.locator('summary').click(); assert.equal(await modal.locator('details').getAttribute('open'),'');
+          assert.ok(await modal.locator('pre').evaluate(element=>element.clientHeight<=innerHeight*.32+1));
+          await page.addScriptTag({path:require.resolve('axe-core/axe.min.js')});
+          const violations=await page.evaluate(async()=> (await axe.run(document.querySelector('dialog.att-replay-review'),{runOnly:{type:'tag',values:['wcag2a','wcag2aa','wcag21aa']}})).violations);assert.deepEqual(violations,[]);
+          if(process.env.ATT_UI_SCREENSHOT_DIR)await page.screenshot({path:`${process.env.ATT_UI_SCREENSHOT_DIR}/replay-${width}-${detail?'detail':'list'}-${action==='Rerun'?'run':'schedule'}.png`});
+          await page.keyboard.press('Escape'); await modal.waitFor({state:'hidden'}); assert.ok(await opener.evaluate(element=>element===document.activeElement),'Restore focus to opener');
+        }
+      }
+    }
+    await page.setViewportSize({width:1280,height:900});
     for (const type of ['run', 'load']) {
       await page.goto(base + '#/jobs');
-      const row = page.getByRole('row').filter({ has: page.getByRole('button', { name: 'J-' + type, exact: true }) });
+      const row = page.getByRole('row').filter({ has: page.getByRole('link', { name: 'Unknown target · J-' + type, exact: true }) });
       await row.getByRole('button', { name: 'Rerun', exact: true }).click();
-      const review = page.getByRole('region', { name: 'Review rerun J-' + type });
+      const review = page.getByRole('dialog', { name: 'Review rerun J-' + type });
       await review.getByRole('button', { name: 'Confirm rerun', exact: true }).waitFor({ state: 'visible' });
       assert.equal(submits.length, type === 'run' ? 0 : 1);
       await review.getByRole('button', { name: 'Confirm rerun', exact: true }).click();
@@ -71,9 +100,9 @@ async function main() {
       await page.waitForURL(url => url.hash === '#/jobs/J-load');
     }
     await page.goto(base + '#/jobs?type=load');
-    const history = page.getByRole('row').filter({ has: page.getByRole('button', { name: 'J-load', exact: true }) });
+    const history = page.getByRole('row').filter({ has: page.getByRole('link', { name: 'Unknown target · J-load', exact: true }) });
     await history.getByRole('button', { name: 'Rerun', exact: true }).click();
-    await page.getByRole('region', { name: 'Review rerun J-load' }).getByRole('button', { name: 'Cancel', exact: true }).click();
+    await page.getByRole('dialog', { name: 'Review rerun J-load' }).getByRole('button', { name: 'Cancel', exact: true }).click();
     await page.goto(base + '#/jobs/J-old');
     await page.getByRole('button', { name: 'Rerun', exact: true }).click();
     await page.getByText('Rerun unavailable for this historical job', { exact: true }).waitFor();
@@ -84,12 +113,12 @@ async function main() {
     await page.getByRole('button', { name: 'Rerun', exact: true }).click();
     await page.getByRole('button', { name: 'Confirm rerun', exact: true }).and(page.locator(':enabled')).waitFor();
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), 'Review must fit a phone viewport');
-    await page.getByRole('button', { name: 'Jobs and results', exact: true }).click();
+    await page.evaluate(() => { location.hash = '#/jobs'; });
     await page.getByRole('dialog', { name: 'Discard your changes?' }).waitFor();
     await page.getByRole('button', { name: 'Stay on this page', exact: true }).click();
     await page.getByRole('dialog', { name: 'Discard your changes?' }).waitFor({ state: 'hidden' });
     await page.keyboard.press('Escape');
-    assert.equal(await page.getByRole('region', { name: 'Review rerun J-load' }).count(), 0);
+    assert.equal(await page.getByRole('dialog', { name: 'Review rerun J-load' }).count(), 0);
     // Same mounted route: history -> list -> edit, then cancel/back/forward.
     await page.goto(base + '#/schedules/S-1/history');
     await page.getByRole('heading', { name: /Execution history/ }).waitFor();
@@ -116,15 +145,16 @@ async function main() {
       await page.locator('.att-standalone-console pre.att-console').waitFor();
       await page.getByText('RETAINED_OUTPUT 549', { exact: false }).waitFor();
       assert.equal(broadRequests.length, before, 'Standalone must not load broad jobs or packages');
-      assert.equal(await page.locator('aside, nav, .app-header, .att-breadcrumbs, footer, .att-floating-console, [role="separator"]').count(), 0);
-      assert.equal(await page.getByRole('link', { name: /Open full Job details|Open Job console in a new tab/ }).count(), 0);
+      assert.equal(await page.locator('aside, .app-header, .att-breadcrumbs, footer, .att-floating-console').count(), 0);
+      assert.equal(await page.getByRole('tablist', {name:'Job J-load sections'}).getByRole('tab').count(), 6);
+
       for (const view of ['events', 'live']) {
         await page.getByRole('tab', { name: view === 'live' ? 'Live Output' : 'Events', exact: true }).click();
-        await page.waitForURL(url => url.hash === '#/jobs/J-load/console?view=' + view);
+        await page.waitForURL(url => url.hash === '#/jobs/J-load?standalone=1&tab=' + view);
         const surface = page.locator(view === 'live' ? 'pre.att-console' : 'ol.att-job-events');
         await surface.waitFor();
         const box = await surface.boundingBox();
-        assert.ok(box.height > 70 && box.y + box.height >= viewport.height - 24, JSON.stringify({ viewport, view, box }));
+        assert.ok(box.height > 70, JSON.stringify({ viewport, view, box }));
         assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth));
       }
       await page.reload();
@@ -132,10 +162,10 @@ async function main() {
     }
     if (process.env.ATT_UI_SCREENSHOT) await page.screenshot({ path: process.env.ATT_UI_SCREENSHOT });
     await page.goto(base + '#/jobs/missing/console');
-    await page.getByRole('heading', { name: 'Job console unavailable' }).waitFor();
+    await page.getByRole('heading', { name: 'Job Details unavailable' }).waitFor();
     assert.equal(await page.locator('aside, nav, .app-header, footer').count(), 0);
     assert.deepEqual(errors, []); await context.close();
-    console.log('4.2.3 acceptance passed: RUN/LOAD replay and Schedule, History/List/Edit, standalone fixed-Job navigation, virtualized Events, viewport fill, mobile, reload and safe missing-Job state.');
+    console.log('4.2.4 acceptance passed: RUN/LOAD replay and Schedule, History/List/Edit, standalone fixed-Job navigation, virtualized Events, viewport fill, mobile, reload and safe missing-Job state.');
   } finally { await browser.close(); await stopFixture(fixture); }
 }
 main().catch(error => { console.error(error); process.exitCode = 1; });

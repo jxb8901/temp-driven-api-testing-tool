@@ -346,7 +346,7 @@ export function AppShell({
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if (route.kind === 'job-console') return;
+      if (route.kind === 'job-console' || (route.kind === 'jobs' && route.standalone)) return;
       const target = event.target as HTMLElement | null;
       const editable = Boolean(target && (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName)));
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
@@ -403,7 +403,7 @@ export function AppShell({
   return (
     <NavigationGuardContext.Provider value={navigation}>
       <AppShellContext.Provider value={{ selectedPackage, selectedEnvironment, themePreference, uiLocale, uiLocalePreference, authMode: versionData?.authMode, currentUser, accessCapabilities, canRevealConfigurationFields, onPackageChange, onEnvironmentChange, onThemePreferenceChange: changeThemePreference, onUiLocaleChange: changeUiLocale, onJobAccepted }}>
-      {route.kind === 'job-console' ? <main key={inspectionSessionEpoch} id="main-content" className="att-standalone-console-shell" tabIndex={-1}>
+      {(route.kind === 'job-console' || (route.kind === 'jobs' && route.standalone)) ? <main key={inspectionSessionEpoch} id="main-content" className="att-standalone-console-shell" tabIndex={-1}>
         {capabilitiesResolved ? children : <div role="status" aria-busy="true">Checking ATT access…</div>}
       </main> : <JobConsoleProvider jobsApi={api}>
       <div className={'app-layout' + (collapsed ? ' is-collapsed' : '') + (mobileNavigationOpen ? ' mobile-nav-open' : '')} data-page={currentPage}>
@@ -445,7 +445,7 @@ export function AppShell({
               <span className="nav-icon" aria-hidden="true">⚙</span><span className="nav-label">Settings</span>
             </a>}
           </nav>
-          <div className="sidebar-footer"><span>ATT Server</span><span className="sidebar-version">{versionData?.version || '4.2.3'}</span></div>
+          <div className="sidebar-footer"><span>ATT Server</span><span className="sidebar-version">{versionData?.version || '4.2.4'}</span></div>
         </aside>
 
         <div className="app-frame">

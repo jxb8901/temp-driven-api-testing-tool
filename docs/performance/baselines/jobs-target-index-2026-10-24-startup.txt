@@ -1,0 +1,6 @@
+Incremental migration readiness: missing version/cursor index, no historical snapshots parsed.
+BENCH environment: Mac OS X aarch64 Java 26.0.1 CPUs=8
+BENCH seeded jobs=10000 snapshotsBytes=7718500
+BENCH open jobs=10000 wallMs=50.44 cpuMs=91.97 threadAllocatedBytes=36769848
+BENCH seeded jobs=50000 snapshotsBytes=38592500
+BENCH open jobs=50000 wallMs=1412.16 cpuMs=420.35 threadAllocatedBytes=184010848

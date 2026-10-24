@@ -19,6 +19,7 @@ final class LoadSchedule {
     /** Missing legacy values deserialize as Load to preserve existing stored schedules. */
     public String jobType="load";
     public String scenario;
+    public Map<String,Object> listSummary;
     /** Server-validated immutable scenario snapshot for schedules created from a UI draft. */
     public Map<String,Object> inlineScenario;
     /** Marks a Server-validated package-file snapshot; this does not depend on browser Inline Load policy. */
@@ -64,6 +65,7 @@ final class LoadSchedule {
     LoadSchedule copy() {
         LoadSchedule copy=new LoadSchedule();
         copy.schemaVersion=schemaVersion;copy.runInput=runInput==null?null:ServerRuntime.JSON.convertValue(runInput,Map.class);
+        copy.listSummary=listSummary==null?null:new LinkedHashMap<>(listSummary);
         copy.sourceJobId=sourceJobId;copy.id=id;copy.name=name;copy.description=description;copy.packageId=packageId;copy.jobType=jobType==null?"load":jobType;copy.scenario=scenario;
         copy.inlineScenario=inlineScenario==null?null:new LinkedHashMap<>(inlineScenario);copy.catalogSnapshot=catalogSnapshot;copy.loadModel=loadModel;
         copy.inlineDebugInput=inlineDebugInput==null?null:new LinkedHashMap<>(inlineDebugInput);

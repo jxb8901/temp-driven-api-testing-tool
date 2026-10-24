@@ -167,7 +167,7 @@ const EventRow = memo(function EventRow({ event, index, total, expanded, onToggl
 
 export function consoleRouteUrl(jobId: string, view: JobConsoleViewMode = 'live'): string {
   const url = new URL('./', document.baseURI);
-  url.hash = formatRoute({ kind: 'job-console', jobId, view });
+  url.hash = formatRoute({ kind: 'jobs', jobId, tab: view, standalone: true });
   return url.toString();
 }
 
@@ -412,7 +412,7 @@ export function JobConsoleView({
         <a href={formatRoute({ kind: 'jobs', jobId })} aria-label="Open full Job details" title="Open full Job details">Details</a>
         {onMinimize && <button type="button" aria-label="Minimize Job console" title="Minimize" onClick={onMinimize}>−</button>}
         <button type="button" aria-label={(onMaximize ? maximized : localMaximized) ? 'Restore Job console' : 'Maximize Job console'} title={(onMaximize ? maximized : localMaximized) ? 'Restore' : 'Maximize'} onClick={onMaximize || (() => setLocalMaximized(value => !value))}>{(onMaximize ? maximized : localMaximized) ? 'Restore' : 'Maximize'}</button>
-        <a href={consoleRouteUrl(jobId, view)} target="_blank" rel="noopener noreferrer" aria-label="Open Job console in a new tab" onClick={onOpenNewTab}>↗ New tab</a>
+        <a href={consoleRouteUrl(jobId, view)} target="_blank" rel="noopener noreferrer" aria-label="Open full Job Details in a new tab" onClick={onOpenNewTab}>↗ New tab</a>
         {onClose && <button type="button" aria-label="Close Job console" title="Close" onClick={onClose}>×</button>}
       </div>}
     </header>
