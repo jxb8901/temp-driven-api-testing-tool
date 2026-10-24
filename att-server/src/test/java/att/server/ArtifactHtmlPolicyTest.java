@@ -83,7 +83,33 @@ class ArtifactHtmlPolicyTest {
         assertEquals(1,document.select("script[type=application/json]#att-load-summary-data").size());
         assertTrue(document.select("svg#rate-chart[viewbox]").size()==1);
         assertTrue(document.select("svg#latency-chart,svg#concurrency-chart,svg#lag-chart,svg#failure-chart").size()==4);
+        assertChartCards(document);
         assertEquals(0,document.select("[onload],[onmouseover],svg[href],script[src]").size());
         assertFalse(document.outerHtml().contains("alert('injected')"));
+
+        Path archive=ArtifactArchive.build(tempDir.resolve("output"),tempDir.resolve("offline-report.zip"),Files::readAllBytes);
+        byte[] archived=ArtifactArchive.read(archive,"load/offline/report/index.html");
+        assertChartCards(Jsoup.parse(new String(archived,StandardCharsets.UTF_8)));
+    }
+
+    private void assertChartCards(org.jsoup.nodes.Document document) {
+        var cards=document.select(".chart-grid > section.chart-card");
+        assertEquals(5,cards.size(),"all five sanitized chart cards must retain their wrappers");
+        for(org.jsoup.nodes.Element card:cards) {
+            var children=card.children();
+            assertTrue(children.size()==3||children.size()==4,card.outerHtml());
+            assertEquals("h3",children.get(0).tagName(),"chart title must come first");
+            assertEquals("svg",children.get(1).tagName(),"responsive plot must follow its title");
+            assertEquals("ul",children.get(2).tagName(),"each chart legend must follow its plot");
+            assertEquals("chart-legend",children.get(2).className());
+            if(children.size()==4) assertEquals("p",children.get(3).tagName(),"optional chart note follows the legend");
+            assertTrue(children.get(1).hasAttr("viewbox"));
+        }
+        String css=document.select("style").stream().map(org.jsoup.nodes.Element::data)
+                .filter(value->value.contains(".chart-grid")).findFirst().orElseThrow(AssertionError::new);
+        assertTrue(css.contains("grid-template-columns:minmax(0,1fr)"),"one full-width chart per row");
+        assertTrue(css.contains(".chart-card{box-sizing:border-box;min-width:0;width:100%"));
+        assertTrue(css.contains(".chart-card svg{display:block;width:100%;height:auto"));
+        assertTrue(css.contains(".chart-legend{display:flex;flex-wrap:wrap;justify-content:flex-start"));
     }
 }

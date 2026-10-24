@@ -24,6 +24,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -159,6 +160,67 @@ class LoadMqPoolingTest {
         Map<String, Object> failed = events.stream().filter(event -> "LOAD_PREPARATION_FAILED".equals(event.get("event")))
                 .findFirst().orElseThrow(AssertionError::new);
         assertEquals("PREPARATION_TIMEOUT", failed.get("errorType"));
+    }
+
+    @Test
+    void failedMqDisconnectKeepsPreparationBudgetChargedWhileAnotherRunWaits() throws Exception {
+        FrameworkConfig config = config(1, 0, 100L);
+        Semaphore budget = new Semaphore(1, true);
+        CountDownLatch disconnectEntered = new CountDownLatch(1);
+        CountDownLatch allowDisconnectFailure = new CountDownLatch(1);
+        AtomicInteger disconnectAttempts = new AtomicInteger();
+        MqTransport.Factory failingFactory = helper -> new MqTransport.Connection() {
+            @Override public MqTransport.Queue open(String queue, boolean input, boolean output) {
+                throw new AssertionError("Readiness must not open a business queue");
+            }
+            @Override public void disconnect() throws Exception {
+                disconnectAttempts.incrementAndGet();
+                disconnectEntered.countDown();
+                allowDisconnectFailure.await();
+                throw new Exception("synthetic MQ disconnect failure");
+            }
+            @Override public void close() throws Exception { disconnect(); }
+        };
+        LoadRunResources first = new LoadRunResources(tempDir, config, failingFactory, 3_000L, budget);
+        ExecutorService cleanup = Executors.newSingleThreadExecutor();
+        LoadRunResources second = null;
+        try {
+            IterationExecutor firstExecutor = new IterationExecutor(tempDir, config, target(), first,
+                    tempDir.resolve("mq-close-failure-first"));
+            firstExecutor.prepareResources("mq-close-failure-first");
+            assertEquals(0, budget.availablePermits(), "the prepared connection must hold the shared charge");
+
+            Future<RuntimeException> closing = cleanup.submit(() -> {
+                try { first.close(); return null; }
+                catch (RuntimeException failure) { return failure; }
+            });
+            assertTrue(disconnectEntered.await(2L, TimeUnit.SECONDS), "owner close must attempt physical MQ disconnect");
+
+            MqTransport.Factory unusedFactory = helper -> {
+                throw new AssertionError("a second run must not connect before acquiring the shared budget");
+            };
+            second = new LoadRunResources(tempDir, config, unusedFactory, 400L, budget);
+            IterationExecutor secondExecutor = new IterationExecutor(tempDir, config, target(), second,
+                    tempDir.resolve("mq-close-failure-second"));
+            LoadRunResources blockedRun = second;
+            assertThrows(LoadResourcePreparationException.class,
+                    () -> secondExecutor.prepareResources("mq-close-failure-second"));
+            assertEquals(0, budget.availablePermits(), "an overlapping run must not reuse an unconfirmed MQ session slot");
+
+            allowDisconnectFailure.countDown();
+            RuntimeException teardownFailure = closing.get(2L, TimeUnit.SECONDS);
+            assertNotNull(teardownFailure, "failed disconnect must propagate to the resource owner");
+            assertTrue(teardownFailure.getMessage().contains("MQ_RESOURCE_TEARDOWN_FAILED"), teardownFailure.toString());
+            assertEquals(1, disconnectAttempts.get());
+            assertEquals(0, budget.availablePermits(), "failed teardown must quarantine its preparation charge");
+            blockedRun.close();
+        } finally {
+            allowDisconnectFailure.countDown();
+            if (second != null) second.close();
+            first.close();
+            cleanup.shutdownNow();
+            cleanup.awaitTermination(2L, TimeUnit.SECONDS);
+        }
     }
 
     @Test

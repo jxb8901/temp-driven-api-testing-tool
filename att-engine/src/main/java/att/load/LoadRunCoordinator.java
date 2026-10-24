@@ -206,6 +206,12 @@ public final class LoadRunCoordinator implements AutoCloseable {
             final Instant startInstant = LoadSchedulerSupport.instant(startedAt);
             final LoadMetrics aggregate = LoadMetrics.forScenario(scenario, startedAt, rateWindow);
             aggregateHolder[0] = aggregate;
+            for (LoadScheduler scheduler : schedulers.values()) {
+                if (scheduler instanceof ClosedVuScheduler)
+                    ((ClosedVuScheduler) scheduler).forwardSchedulerMetricsTo(aggregate);
+                else if (scheduler instanceof FixedArrivalRateScheduler)
+                    ((FixedArrivalRateScheduler) scheduler).forwardSchedulerMetricsTo(aggregate);
+            }
             for (LoadWorkload workload : scenario.workloads()) for (LoadMixEntry entry : workload.mix()) {
                 String key = targetKey(workload.id(), entry.id());
                 LoadScenario mixScenario = scenario.forMixEntry(workload, entry);
@@ -218,7 +224,6 @@ public final class LoadRunCoordinator implements AutoCloseable {
             LoadThresholdEvaluator evaluator = new LoadThresholdEvaluator();
             for (LoadWorkload workload : scenario.workloads()) {
                 LoadRunResult childResult = futures.get(workload.id()).get();
-                aggregate.mergeSchedulerTelemetry(childResult.metrics().values());
                 LoadScenario child = scenario.forWorkload(workload);
                 childResult = childResult.withThresholds(evaluator.evaluate(child, childResult.metrics()));
                 if (workload.mixed()) {

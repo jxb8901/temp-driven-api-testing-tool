@@ -34,6 +34,7 @@ public final class LoadResourcePool<T> implements AutoCloseable {
     private final AtomicInteger discarded = new AtomicInteger();
     private final AtomicInteger failures = new AtomicInteger();
     private final AtomicLong waitNanos = new AtomicLong();
+    private final List<RuntimeException> closeFailures = Collections.synchronizedList(new ArrayList<RuntimeException>());
     private volatile boolean closed;
 
     public LoadResourcePool(int maxSize, long borrowTimeoutMs, Supplier<T> factory, Consumer<T> closer) {
@@ -217,7 +218,8 @@ public final class LoadResourcePool<T> implements AutoCloseable {
     }
 
     private void closeQuietly(T value) {
-        try { closer.accept(value); } catch (RuntimeException ignored) { }
+        try { closer.accept(value); }
+        catch (RuntimeException failure) { closeFailures.add(failure); }
     }
 
     @Override public void close() {
@@ -234,6 +236,14 @@ public final class LoadResourcePool<T> implements AutoCloseable {
             permits.release(maxSize);
         }
         for (T value : values) closeQuietly(value);
+        if (!closeFailures.isEmpty()) {
+            IllegalStateException failure = new IllegalStateException(
+                    "LOAD_RESOURCE_TEARDOWN_FAILED: one or more pooled resources did not confirm close");
+            synchronized (closeFailures) {
+                for (RuntimeException closeFailure : closeFailures) failure.addSuppressed(closeFailure);
+            }
+            throw failure;
+        }
     }
 
     public final class Lease implements AutoCloseable {

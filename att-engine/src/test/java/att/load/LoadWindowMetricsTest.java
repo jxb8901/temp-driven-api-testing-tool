@@ -6,6 +6,32 @@ import java.util.Map;
 import static org.junit.jupiter.api.Assertions.*;
 
 class LoadWindowMetricsTest {
+    @Test void admissionRateFollowsItsScheduledCohortAcrossPhaseBoundaries() {
+        LoadWindowMetrics metrics = new LoadWindowMetrics(10_000L, 1_000L, 1_000L, 3_000L, 1_000L);
+        // These ramp-up arrivals start during STEADY and must not be credited to
+        // the steady cohort's admission percentage.
+        for (int index = 0; index < 5; index++)
+            metrics.onEvent(LoadEvent.started("r", "arrivalRate", "RAMP_UP", "ramp-" + index, null,
+                    index, 11_000L + index * 100L, 12_100L + index * 100L));
+        // Eight of ten STEADY arrivals start before finish; two remain unstarted.
+        for (int index = 0; index < 8; index++)
+            metrics.onEvent(LoadEvent.started("r", "arrivalRate", "STEADY", "steady-" + index, null,
+                    index + 5, 12_000L + index * 100L, 12_200L + index * 100L));
+        for (int index = 0; index < 2; index++)
+            metrics.onEvent(LoadEvent.dropped("r", "arrivalRate", "STEADY", "dropped-" + index,
+                    index + 20, 13_000L + index * 100L, 13_100L + index * 100L));
+        metrics.finish(16_000L);
+
+        @SuppressWarnings("unchecked") Map<String, Object> windows =
+                (Map<String, Object>) metrics.snapshot(16_000L).get("windows");
+        @SuppressWarnings("unchecked") Map<String, Object> steady = (Map<String, Object>) windows.get("steady");
+        assertEquals(13L, steady.get("started"), "event-time starts still include prior-phase work");
+        assertEquals(10L, steady.get("scheduled"));
+        assertEquals(8.0 / 10.0, ((Number) steady.get("admissionRate")).doubleValue(), 0.000001);
+        assertEquals(13.0 / 3.0, ((Number) steady.get("startedRate")).doubleValue(), 0.000001);
+        assertTrue(((String) steady.get("basis")).contains("arrivals still unstarted at finish are not admitted"));
+    }
+
     @Test void completionEventTimeAndScheduledCohortRemainIndependentAcrossDrain() {
         LoadWindowMetrics metrics = new LoadWindowMetrics(10_000L, 1_000L, 1_000L, 3_000L, 1_000L);
         // Scheduled during STEADY; its eventual completion is after generation ends.

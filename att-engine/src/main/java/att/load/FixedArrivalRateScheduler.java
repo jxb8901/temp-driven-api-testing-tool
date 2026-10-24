@@ -37,6 +37,7 @@ public final class FixedArrivalRateScheduler implements LoadScheduler {
     private final AtomicInteger inFlight = new AtomicInteger();
     private final Object completionMonitor = new Object();
     private volatile BlockingQueue<Boolean> schedulerWakeups;
+    private volatile LoadMetrics aggregateSchedulerMetrics;
 
     public FixedArrivalRateScheduler(LoadScenario scenario, IterationExecutor executor, String runId, Consumer<LoadEvent> listener) {
         this(scenario, executor, runId, listener, LoadSchedulerTiming.system());
@@ -110,7 +111,10 @@ public final class FixedArrivalRateScheduler implements LoadScheduler {
         try {
             while (!cancelled.get()) {
                 long nowAtWake = timing.now();
-                metrics.recordSchedulerWakeupAt(nowAtWake, workers.getQueue().size());
+                int queueDepth = workers.getQueue().size();
+                metrics.recordSchedulerWakeupAt(nowAtWake, queueDepth);
+                LoadMetrics aggregate = aggregateSchedulerMetrics;
+                if (aggregate != null) aggregate.recordSchedulerWakeupAt(nowAtWake, queueDepth);
                 long elapsed = nowAtWake - startedAt;
                 long total = LoadPhase.totalMs(scenario);
                 long desired = elapsed >= total ? arrivalsBeforeDeadline(scenario) : arrivalsDueAt(scenario, elapsed);
@@ -153,7 +157,10 @@ public final class FixedArrivalRateScheduler implements LoadScheduler {
             FutureTask<Void> task = new FutureTask<Void>(() -> {
                 boolean cancelledBeforeStart = taskHandle.begin();
                 long iterationStarted = timing.now();
-            metrics.recordSubmitLagAt(iterationStarted, iterationStarted - dueAt, workers.getQueue().size());
+                int queueDepth = workers.getQueue().size();
+                metrics.recordSubmitLagAt(iterationStarted, iterationStarted - dueAt, queueDepth);
+                LoadMetrics aggregate = aggregateSchedulerMetrics;
+                if (aggregate != null) aggregate.recordSubmitLagAt(iterationStarted, iterationStarted - dueAt, queueDepth);
                 att.core.ResultStatus status = att.core.ResultStatus.ERROR;
                 String errorType = "RUNTIME_ERROR";
                 EvidenceRef evidence = null;
@@ -330,6 +337,11 @@ public final class FixedArrivalRateScheduler implements LoadScheduler {
             }
         }
     }
+    void forwardSchedulerMetricsTo(LoadMetrics aggregate) {
+        if (aggregate == null) throw new IllegalArgumentException("Aggregate LOAD metrics are required");
+        aggregateSchedulerMetrics = aggregate;
+    }
+
     @Override public void cancel() {
         cancelled.set(true);
         Thread control = controlThread;

@@ -58,6 +58,29 @@ class MultiWorkloadReportTest {
         assertTrue(html.contains("Steady rates use actual event timestamps"));
         assertTrue(html.contains("Execution</th><th>Performance</th>"));
         assertTrue(html.contains("id=\"rate-chart\""));
+        @SuppressWarnings("unchecked") Map<String, Object> windowMetrics =
+                (Map<String, Object>) result.metrics().values().get("windowMetrics");
+        @SuppressWarnings("unchecked") Map<String, Object> timeSeries =
+                (Map<String, Object>) windowMetrics.get("timeSeries");
+        @SuppressWarnings("unchecked") java.util.List<Map<String, Object>> points =
+                (java.util.List<Map<String, Object>>) timeSeries.get("points");
+        assertTrue(points.stream().anyMatch(point -> point.get("queueDepthPeak") instanceof Number),
+                "coordinator should retain child worker queue samples");
+        assertTrue(points.stream().anyMatch(point -> point.get("submitLagMeanMs") instanceof Number),
+                "coordinator should retain child submit-lag samples");
+        String marker = "<script type=\"application/json\" id=\"att-load-summary-data\">";
+        int dataStart = html.indexOf(marker);
+        assertTrue(dataStart >= 0, "the report must embed the chart summary data");
+        int dataEnd = html.indexOf("</script>", dataStart + marker.length());
+        @SuppressWarnings("unchecked") Map<String, Object> embedded = att.validation.JsonSupport.mapper()
+                .readValue(html.substring(dataStart + marker.length(), dataEnd), Map.class);
+        @SuppressWarnings("unchecked") Map<String, Object> embeddedMetrics = (Map<String, Object>) embedded.get("metrics");
+        @SuppressWarnings("unchecked") Map<String, Object> embeddedWindows = (Map<String, Object>) embeddedMetrics.get("windowMetrics");
+        @SuppressWarnings("unchecked") Map<String, Object> embeddedSeries = (Map<String, Object>) embeddedWindows.get("timeSeries");
+        @SuppressWarnings("unchecked") java.util.List<Map<String, Object>> embeddedPoints =
+                (java.util.List<Map<String, Object>>) embeddedSeries.get("points");
+        assertTrue(embeddedPoints.stream().anyMatch(point -> point.get("queueDepthPeak") instanceof Number));
+        assertTrue(embeddedPoints.stream().anyMatch(point -> point.get("submitLagMeanMs") instanceof Number));
     }
 
     @Test void executesClosedMixAndReportsPerEntryMetrics() throws Exception {

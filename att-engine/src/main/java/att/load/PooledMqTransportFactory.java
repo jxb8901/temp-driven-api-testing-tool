@@ -108,7 +108,12 @@ public final class PooledMqTransportFactory implements MqTransport.Factory, Auto
                         return delegate.connect(config);
                     }
                     catch (Exception error) { throw new PoolFactoryException(error); }
-                }, connection -> { try { connection.disconnect(); } catch (Exception ignored) { } });
+                }, connection -> {
+                    try { connection.disconnect(); }
+                    catch (Exception failure) {
+                        throw new IllegalStateException("MQ_CONNECTION_DISCONNECT_FAILED", failure);
+                    }
+                });
         PoolEntry candidate = new PoolEntry(created, preparationConnect, deadlineNanos);
         PoolEntry raced = pools.putIfAbsent(poolKey, candidate);
         if (raced != null) {
@@ -125,8 +130,17 @@ public final class PooledMqTransportFactory implements MqTransport.Factory, Auto
 
     @Override public void close() {
         if (!closed.compareAndSet(false, true)) return;
-        for (PoolEntry entry : pools.values()) entry.pool.close();
+        RuntimeException failure = null;
+        for (PoolEntry entry : pools.values()) {
+            try { entry.pool.close(); }
+            catch (RuntimeException problem) {
+                if (failure == null) failure = problem;
+                else failure.addSuppressed(problem);
+            }
+        }
         pools.clear();
+        if (failure != null) throw new IllegalStateException(
+                "MQ_RESOURCE_TEARDOWN_FAILED: one or more physical MQ connections did not confirm disconnect", failure);
     }
 
     private static final class PoolFactoryException extends RuntimeException {

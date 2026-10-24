@@ -200,7 +200,7 @@ final class LoadWindowMetrics {
         final long start, end;
         final LongAdder scheduled = new LongAdder(), started = new LongAdder(), completed = new LongAdder();
         final LongAdder successful = new LongAdder(), sutFailure = new LongAdder(), runtimeError = new LongAdder(), dropped = new LongAdder();
-        final LongAdder cohortCompleted = new LongAdder(), cohortSuccess = new LongAdder();
+        final LongAdder cohortStarted = new LongAdder(), cohortCompleted = new LongAdder(), cohortSuccess = new LongAdder();
         final LongAdder cohortSutFailure = new LongAdder(), cohortRuntimeError = new LongAdder();
         final LongAdder occupiedMs = new LongAdder(), lagMs = new LongAdder(), lagCount = new LongAdder();
         final LongAdder submitLagMs = new LongAdder(), submitLagCount = new LongAdder();
@@ -213,6 +213,9 @@ final class LoadWindowMetrics {
         boolean contains(long timestamp) { return timestamp >= start && timestamp < end; }
         synchronized void accept(LoadEvent event) {
             if (event.scheduled() && contains(event.scheduledAtEpochMs())) scheduled.increment();
+            // Admission is a scheduled-cohort percentage, independent of the event-time
+            // started count above. A start in this window may belong to an earlier phase.
+            if (event.started() && contains(event.scheduledAtEpochMs())) cohortStarted.increment();
             if (event.dropped() && contains(event.scheduledAtEpochMs())) dropped.increment();
             if (event.dropped() && contains(event.scheduledAtEpochMs())) { lagMs.add(event.schedulerLagMs()); lagCount.increment(); }
             String key = eventKey(event);
@@ -269,7 +272,7 @@ final class LoadWindowMetrics {
             Map<String, Object> result = new LinkedHashMap<String, Object>();
             result.put("windowStartEpochMs", start); result.put("windowEndEpochMs", effectiveEnd);
             result.put("durationMs", duration); result.put("phase", name);
-            result.put("basis", "configured window; event-time rates; scheduled-cohort latency and outcomes");
+            result.put("basis", "configured window; event-time rates; admission uses arrivals scheduled in this window that started by run finish; arrivals still unstarted at finish are not admitted; latency and outcomes use scheduled cohorts");
             result.put("evaluated", valid);
             result.put("notEvaluatedReason", valid ? null : !finished ? "RUN_INCOMPLETE" : duration == 0L ? "ZERO_DURATION" : actualEnd < effectiveEnd ? "WINDOW_INCOMPLETE" : "NO_EVENTS");
             result.put("scheduled", scheduled.sum()); result.put("started", started.sum()); result.put("completed", completed.sum());
@@ -279,7 +282,7 @@ final class LoadWindowMetrics {
             result.put("startedRate", rate(started.sum(), duration, valid));
             result.put("completedRate", rate(completed.sum(), duration, valid));
             result.put("successfulRate", rate(successful.sum(), duration, valid));
-            result.put("admissionRate", ratio(started.sum(), scheduled.sum(), valid));
+            result.put("admissionRate", ratio(cohortStarted.sum(), scheduled.sum(), valid));
             result.put("droppedRate", ratio(dropped.sum(), scheduled.sum(), valid));
             result.put("schedulerLagMeanMs", ratio(lagMs.sum(), lagCount.sum(), valid));
             result.put("submitLagMeanMs", ratio(submitLagMs.sum(), submitLagCount.sum(), valid));
