@@ -12,8 +12,8 @@ import java.util.concurrent.atomic.AtomicLongArray;
 import java.util.concurrent.atomic.LongAdder;
 
 /** Explicit configured windows. Legacy LoadMetrics fields retain their original meaning.
- * Event rates use event timestamps; latency/outcome SLOs follow scheduled cohorts,
- * including their eventual outcomes in later phases or drain. */
+ * Event rates use event timestamps; latency trends and outcome SLOs follow scheduled
+ * cohorts, including their eventual outcomes in later phases or drain. */
 final class LoadWindowMetrics {
     static final int SERIES_CAPACITY = 2048;
     static final int SAMPLE_CAPACITY = 4096;
@@ -43,7 +43,10 @@ final class LoadWindowMetrics {
         for (Window window : windows) window.accept(event);
         if (event.scheduled()) record(event.scheduledAtEpochMs(), 0, event);
         if (event.started()) record(event.startedAtEpochMs(), 1, event);
-        if (event.completed()) record(event.completedAtEpochMs(), 2, event);
+        if (event.completed()) {
+            record(event.completedAtEpochMs(), 2, event);
+            recordLatency(event.scheduledAtEpochMs(), event);
+        }
         if (event.dropped()) record(event.scheduledAtEpochMs(), 3, event);
     }
 
@@ -83,10 +86,14 @@ final class LoadWindowMetrics {
             if (event.status() == ResultStatus.PASS) point.counts[4]++;
             else if (event.status() == ResultStatus.ERROR || event.status() == ResultStatus.INVALID) point.counts[6]++;
             else point.counts[5]++;
-            point.latencies.add(event.latencyMs());
         }
         if (kind == 1) point.concurrencyDelta++;
         if (kind == 2) point.concurrencyDelta--;
+    }
+
+    private synchronized void recordLatency(long scheduledAt, LoadEvent event) {
+        Point point = pointAt(scheduledAt);
+        if (point != null) point.latencies.add(event.latencyMs());
     }
 
     synchronized void recordSchedulerSample(long timestamp, int queueDepth) {
@@ -128,7 +135,7 @@ final class LoadWindowMetrics {
 
     private synchronized Map<String, Object> seriesSnapshot() {
         Map<String, Object> result = new LinkedHashMap<String, Object>();
-        result.put("basis", "event-time; bins aligned to scheduler start; full-bin rate denominator");
+        result.put("basis", "event-time counts and rates; latency samples grouped by scheduled cohort; bins aligned to scheduler start; full-bin rate denominator");
         result.put("bucketDurationMs", bucketWidthMs);
         result.put("capacity", SERIES_CAPACITY);
         result.put("coverage", "Whole execution; uniform power-of-two roll-up, no historical eviction");
@@ -146,6 +153,7 @@ final class LoadWindowMetrics {
             point.put("observedInFlight", inFlight); // compatibility alias
             Map<String, Object> latency = entry.getValue().latencies.snapshot(true);
             point.put("latencySampleCount", latency.get("sampleCount"));
+            point.put("latencyObservationCount", latency.get("observationCount"));
             point.put("latencyP50Ms", latency.get("p50Ms"));
             point.put("latencyP95Ms", latency.get("p95Ms"));
             point.put("latencyP99Ms", latency.get("p99Ms"));
@@ -307,7 +315,7 @@ final class LoadWindowMetrics {
         private Object ratio(long count, long denominator, boolean valid) { return valid && denominator > 0L ? count / (double) denominator : null; }
     }
 
-    /** Deterministic Algorithm R; fixed storage, distinct atomic observation IDs. */
+    /** Uniform bounded reservoir; fixed storage and exact observation counts. */
     private static final class Samples {
         final AtomicLong count = new AtomicLong();
         final int capacity;
@@ -316,13 +324,8 @@ final class LoadWindowMetrics {
         Samples(int capacity) { this.capacity = capacity; this.values = new AtomicLongArray(capacity); }
         void add(long value) {
             long seen = count.incrementAndGet();
-            long slot = seen - 1;
-            if (seen > capacity) {
-                long mixed = seen + 0x9E3779B97F4A7C15L;
-                mixed = (mixed ^ (mixed >>> 30)) * 0xBF58476D1CE4E5B9L;
-                mixed = (mixed ^ (mixed >>> 27)) * 0x94D049BB133111EBL;
-                slot = Math.floorMod(mixed ^ (mixed >>> 31), seen);
-            }
+            long slot = seen <= capacity ? seen - 1
+                    : java.util.concurrent.ThreadLocalRandom.current().nextLong(seen);
             if (slot < capacity) values.set((int) slot, Math.max(0L, value));
         }
         Map<String, Object> snapshot(boolean valid) {
@@ -347,14 +350,37 @@ final class LoadWindowMetrics {
             long[] result = new long[size]; for (int i = 0; i < size; i++) result[i] = values.get(i); return result;
         }
         void merge(Samples other) {
-            long total = count.get() + other.count.get();
+            long leftCount = count.get(), rightCount = other.count.get();
+            long total = Math.addExact(leftCount, rightCount);
+            if (rightCount == 0L) return;
             long[] left = snapshotValues(), right = other.snapshotValues();
-            long[] combined = new long[left.length + right.length];
-            System.arraycopy(left, 0, combined, 0, left.length);
-            System.arraycopy(right, 0, combined, left.length, right.length);
-            int retained = Math.min(capacity, combined.length);
-            for (int i = 0; i < retained; i++) values.set(i, combined[(int) (((long) i * combined.length) / retained)]);
+            int retained = (int) Math.min((long) capacity, total);
+            java.util.concurrent.ThreadLocalRandom random = java.util.concurrent.ThreadLocalRandom.current();
+            long leftRemaining = leftCount, rightRemaining = rightCount, remaining = total;
+            int retainedLeft = 0;
+            for (int draw = 0; draw < retained; draw++) {
+                if (leftRemaining > 0L && (rightRemaining == 0L || random.nextLong(remaining) < leftRemaining)) {
+                    retainedLeft++;
+                    leftRemaining--;
+                } else rightRemaining--;
+                remaining--;
+            }
+            long[] selectedLeft = choose(left, retainedLeft, random);
+            long[] selectedRight = choose(right, retained - retainedLeft, random);
+            int offset = 0;
+            for (long value : selectedLeft) values.set(offset++, value);
+            for (long value : selectedRight) values.set(offset++, value);
             count.set(total);
+        }
+
+        private static long[] choose(long[] sample, int retained, java.util.concurrent.ThreadLocalRandom random) {
+            if (retained == 0) return new long[0];
+            long[] shuffled = sample.clone();
+            for (int index = 0; index < retained; index++) {
+                int selected = index + random.nextInt(shuffled.length - index);
+                long value = shuffled[index]; shuffled[index] = shuffled[selected]; shuffled[selected] = value;
+            }
+            return Arrays.copyOf(shuffled, retained);
         }
     }
 }

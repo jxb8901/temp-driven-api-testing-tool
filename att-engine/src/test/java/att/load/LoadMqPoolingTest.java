@@ -152,6 +152,9 @@ class LoadMqPoolingTest {
         assertTrue(disconnected.await(2L, TimeUnit.SECONDS), "late MQ connections must be closed after timeout");
         assertEquals(1, disconnectCount.get());
         assertTrue(elapsedMs < 2_000L, "the overall preparation deadline should bound scheduler release: " + elapsedMs + " ms");
+        long permitDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2L);
+        while (LoadRunResources.availablePreparationPermits() != permitsBefore && System.nanoTime() < permitDeadline)
+            Thread.sleep(10L);
         assertEquals(permitsBefore, LoadRunResources.availablePreparationPermits(), "preparation permits must be released on timeout");
         assertTrue(events.stream().anyMatch(event -> "LOAD_PREPARATION_FAILED".equals(event.get("event"))), events.toString());
         assertTrue(events.stream().noneMatch(event -> "LOAD_RESOURCES_READY".equals(event.get("event"))), events.toString());
@@ -160,6 +163,75 @@ class LoadMqPoolingTest {
         Map<String, Object> failed = events.stream().filter(event -> "LOAD_PREPARATION_FAILED".equals(event.get("event")))
                 .findFirst().orElseThrow(AssertionError::new);
         assertEquals("PREPARATION_TIMEOUT", failed.get("errorType"));
+    }
+
+    @Test
+    void timedOutMqConnectKeepsPreparationBudgetUntilLateConnectionTeardownCompletes() throws Exception {
+        FrameworkConfig config = config(1, 0, 100L);
+        Semaphore budget = new Semaphore(1, true);
+        CountDownLatch connectEntered = new CountDownLatch(1);
+        CountDownLatch interruptedConnect = new CountDownLatch(1);
+        CountDownLatch releaseConnect = new CountDownLatch(1);
+        CountDownLatch disconnectEntered = new CountDownLatch(1);
+        CountDownLatch releaseDisconnect = new CountDownLatch(1);
+        AtomicInteger secondConnections = new AtomicInteger();
+        MqTransport.Factory slowFactory = helper -> {
+            connectEntered.countDown();
+            try { releaseConnect.await(); }
+            catch (InterruptedException cancelled) {
+                interruptedConnect.countDown();
+                boolean released = false;
+                while (!released) {
+                    try { releaseConnect.await(); released = true; }
+                    catch (InterruptedException ignored) { /* emulate a transport that ignores cancellation */ }
+                }
+            }
+            return new MqTransport.Connection() {
+                @Override public MqTransport.Queue open(String queue, boolean input, boolean output) {
+                    throw new AssertionError("Readiness must not open a business queue");
+                }
+                @Override public void disconnect() throws Exception {
+                    disconnectEntered.countDown();
+                    releaseDisconnect.await();
+                }
+                @Override public void close() throws Exception { disconnect(); }
+            };
+        };
+        LoadRunResources first = new LoadRunResources(tempDir, config, slowFactory, 400L, budget);
+        LoadRunResources second = null;
+        try {
+            IterationExecutor firstExecutor = new IterationExecutor(tempDir, config, target(), first,
+                    tempDir.resolve("mq-connect-timeout-first"));
+            assertThrows(LoadResourcePreparationException.class,
+                    () -> firstExecutor.prepareResources("mq-connect-timeout-first"));
+            assertTrue(connectEntered.await(1L, TimeUnit.SECONDS), "the first run must enter its MQ handshake");
+            assertTrue(interruptedConnect.await(1L, TimeUnit.SECONDS), "the preparation deadline must cancel the handshake");
+            assertEquals(0, budget.availablePermits(), "the first run keeps its reservation while connect is outstanding");
+
+            MqTransport.Factory unusedFactory = helper -> {
+                secondConnections.incrementAndGet();
+                throw new AssertionError("a second run must wait for the first run's physical session teardown");
+            };
+            second = new LoadRunResources(tempDir, config, unusedFactory, 150L, budget);
+            IterationExecutor secondExecutor = new IterationExecutor(tempDir, config, target(), second,
+                    tempDir.resolve("mq-connect-timeout-second"));
+            assertThrows(LoadResourcePreparationException.class,
+                    () -> secondExecutor.prepareResources("mq-connect-timeout-second"));
+            assertEquals(0, secondConnections.get(), "the second run must not connect while the first factory is in flight");
+            assertEquals(0, budget.availablePermits());
+
+            releaseConnect.countDown();
+            assertTrue(disconnectEntered.await(2L, TimeUnit.SECONDS), "the late MQ session must enter physical teardown");
+            assertEquals(0, budget.availablePermits(), "a returned but not yet disconnected session remains charged");
+            releaseDisconnect.countDown();
+            assertTrue(awaitPermits(budget, 1, 2L), "the reservation returns only after the late session closes");
+        } finally {
+            releaseConnect.countDown();
+            releaseDisconnect.countDown();
+            if (second != null) second.close();
+            first.close();
+        }
+        assertEquals(0, secondConnections.get());
     }
 
     @Test
@@ -378,6 +450,12 @@ class LoadMqPoolingTest {
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(seconds);
         while (pool.active() != 0 && System.nanoTime() < deadline) Thread.sleep(10L);
         return pool.active() == 0;
+    }
+
+    private boolean awaitPermits(Semaphore budget, int expected, long seconds) throws InterruptedException {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(seconds);
+        while (budget.availablePermits() != expected && System.nanoTime() < deadline) Thread.sleep(10L);
+        return budget.availablePermits() == expected;
     }
 
     private static Map<String, Object> map(Object... values) {

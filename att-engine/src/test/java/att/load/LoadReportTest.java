@@ -146,9 +146,41 @@ class LoadReportTest {
         metrics.onEvent(LoadEvent.completed("phase-run", "arrivalRate", "STEADY", "steady-cohort", null, 2,
                 startMs + 1_500L, startMs + 1_500L, startMs + 2_500L, ResultStatus.PASS));
         metrics.finish(startMs + 2_500L);
-        LoadRunResult result = new LoadRunResult("phase-run", scenario, started, started.plusMillis(2_500L), metrics.snapshot());
+        LoadMetricsSnapshot snapshot = metrics.snapshot();
+        @SuppressWarnings("unchecked") Map<String, Object> windowMetrics =
+                (Map<String, Object>) snapshot.value("windowMetrics");
+        @SuppressWarnings("unchecked") Map<String, Object> timeSeries =
+                (Map<String, Object>) windowMetrics.get("timeSeries");
+        @SuppressWarnings("unchecked") List<Map<String, Object>> trendPoints =
+                (List<Map<String, Object>>) timeSeries.get("points");
+        Map<String, Object> steadyTrend = trendPoints.stream()
+                .filter(point -> ((Number) point.get("windowStartEpochMs")).longValue() == startMs + 1_000L)
+                .findFirst().orElseThrow(() -> new AssertionError(trendPoints.toString()));
+        Map<String, Object> drainTrend = trendPoints.stream()
+                .filter(point -> ((Number) point.get("windowStartEpochMs")).longValue() == startMs + 2_000L)
+                .findFirst().orElseThrow(() -> new AssertionError(trendPoints.toString()));
+        assertTrue(((List<?>) steadyTrend.get("phaseCoverage")).contains("STEADY"));
+        assertEquals(1, steadyTrend.get("latencySampleCount"));
+        assertEquals(1L, steadyTrend.get("latencyObservationCount"));
+        assertEquals(1_000L, steadyTrend.get("latencyP95Ms"));
+        assertEquals(1L, steadyTrend.get("completed"));
+        assertTrue(((List<?>) drainTrend.get("phaseCoverage")).contains("DRAIN"));
+        assertEquals(1L, drainTrend.get("completed"));
+        assertEquals(0, drainTrend.get("latencySampleCount"));
+        @SuppressWarnings("unchecked") Map<String, Object> windows =
+                (Map<String, Object>) windowMetrics.get("windows");
+        @SuppressWarnings("unchecked") Map<String, Object> steadyWindow =
+                (Map<String, Object>) windows.get("steady");
+        @SuppressWarnings("unchecked") Map<String, Object> cohort =
+                (Map<String, Object>) steadyWindow.get("cohort");
+        @SuppressWarnings("unchecked") Map<String, Object> cohortLatency =
+                (Map<String, Object>) cohort.get("latency");
+        assertEquals(1_000L, cohortLatency.get("p95Ms"));
+        LoadRunResult result = new LoadRunResult("phase-run", scenario, started, started.plusMillis(2_500L), snapshot);
         Path report = new LoadReportWriter().write(temp, result);
         String html = new String(Files.readAllBytes(report), StandardCharsets.UTF_8);
+        assertTrue(html.contains("Latency follows scheduled cohorts, including completions in later phases or drain"));
+        assertTrue(html.contains("sample n=1 / 1 observations"));
 
         String rampUp = phaseRow(html, "RAMP_UP");
         assertTrue(rampUp.contains("</td><td>1</td><td>1</td><td>0</td><td>0</td>"), rampUp);

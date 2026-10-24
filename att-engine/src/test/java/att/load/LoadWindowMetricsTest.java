@@ -55,8 +55,62 @@ class LoadWindowMetricsTest {
         assertEquals(1L, steadyCohort.get("successful"));
         @SuppressWarnings("unchecked") Map<String, Object> drain = (Map<String, Object>) windows.get("DRAIN");
         assertEquals(1L, drain.get("completed"));
-        assertEquals("event-time; bins aligned to scheduler start; full-bin rate denominator",
+        assertEquals("event-time counts and rates; latency samples grouped by scheduled cohort; bins aligned to scheduler start; full-bin rate denominator",
                 ((Map<?, ?>) root.get("timeSeries")).get("basis"));
+    }
+
+    @Test void trendLatencyStaysWithScheduledCohortWhenCompletionOccursDuringDrain() {
+        LoadWindowMetrics metrics = new LoadWindowMetrics(10_000L, 1_000L, 1_000L, 3_000L, 1_000L);
+        metrics.onEvent(LoadEvent.started("r", "arrivalRate", "STEADY", "late", null, 1, 12_000L, 12_000L));
+        metrics.onEvent(LoadEvent.completion("r", "arrivalRate", "STEADY", "late", null, 1,
+                12_000L, 12_000L, 17_000L, ResultStatus.PASS));
+        metrics.finish(17_000L);
+
+        Map<String, Object> root = metrics.snapshot(17_000L);
+        @SuppressWarnings("unchecked") Map<String, Object> series = (Map<String, Object>) root.get("timeSeries");
+        @SuppressWarnings("unchecked") java.util.List<Map<String, Object>> points =
+                (java.util.List<Map<String, Object>>) series.get("points");
+        Map<String, Object> steadyPoint = points.stream()
+                .filter(point -> ((Number) point.get("windowStartEpochMs")).longValue() == 12_000L)
+                .findFirst().orElseThrow(AssertionError::new);
+        Map<String, Object> drainPoint = points.stream()
+                .filter(point -> ((Number) point.get("windowStartEpochMs")).longValue() == 17_000L)
+                .findFirst().orElseThrow(AssertionError::new);
+        assertTrue(((java.util.List<?>) steadyPoint.get("phaseCoverage")).contains("STEADY"));
+        assertEquals(1, steadyPoint.get("latencySampleCount"));
+        assertEquals(1L, steadyPoint.get("latencyObservationCount"));
+        assertEquals(5_000L, steadyPoint.get("latencyP50Ms"));
+        assertEquals(0L, steadyPoint.get("completed"));
+        assertTrue(((java.util.List<?>) drainPoint.get("phaseCoverage")).contains("DRAIN"));
+        assertEquals(1L, drainPoint.get("completed"));
+        assertEquals(0, drainPoint.get("latencySampleCount"));
+    }
+
+    @Test void rolledUpLatencyReservoirWeightsSamplesByTheirObservationCounts() {
+        LoadWindowMetrics metrics = new LoadWindowMetrics(0L, 0L, 0L, 3_000L, 0L);
+        for (int index = 0; index < 10_000; index++)
+            metrics.onEvent(LoadEvent.completion("r", "arrivalRate", "STEADY", "common-" + index, null, index,
+                    0L, 0L, 100L, ResultStatus.PASS));
+        for (int index = 0; index < 10; index++)
+            metrics.onEvent(LoadEvent.completion("r", "arrivalRate", "STEADY", "rare-" + index, null, index,
+                    1_000L, 1_000L, 11_000L, ResultStatus.PASS));
+        for (int second = 2; second <= 2_048; second++)
+            metrics.onEvent(LoadEvent.dropped("r", "arrivalRate", "STEADY", "d" + second, second,
+                    second * 1_000L, second * 1_000L));
+        metrics.finish(2_049_000L);
+
+        @SuppressWarnings("unchecked") Map<String, Object> series =
+                (Map<String, Object>) metrics.snapshot(2_049_000L).get("timeSeries");
+        @SuppressWarnings("unchecked") java.util.List<Map<String, Object>> points =
+                (java.util.List<Map<String, Object>>) series.get("points");
+        Map<String, Object> firstRolledPoint = points.stream()
+                .filter(point -> ((Number) point.get("windowStartEpochMs")).longValue() == 0L)
+                .findFirst().orElseThrow(AssertionError::new);
+        assertEquals(2_000L, series.get("bucketDurationMs"));
+        assertEquals(10_010L, firstRolledPoint.get("latencyObservationCount"));
+        assertEquals(128, firstRolledPoint.get("latencySampleCount"));
+        assertEquals(100L, firstRolledPoint.get("latencyP95Ms"),
+                "the ten rare slow observations must not outweigh ten thousand common observations");
     }
 
     @Test void incompleteSteadyWindowIsNotEvaluatedAndSeriesRetainsWholeRun() {
