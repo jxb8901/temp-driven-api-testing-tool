@@ -38,6 +38,7 @@ function FooterMenu({ label, disabled, actions }: { label: string; disabled: boo
 
 export function JobsList({ api, onOpenJob, onSchedule, onEditSchedule, executionType, onExecutionTypeChange }: JobsFeatureProps) {
   const [saved] = useState(savedFilters);
+  const [moreFilters, setMoreFilters] = useState(false);
   const [result, setResult] = useState<JobsQueryResult>({items: [], total: 0, offset: 0, limit: 100, groups: [], principalSuggestions: [], packageSuggestions: []});
   const [principal, setPrincipal] = useState(saved.principal || ''); const [principalMode,setPrincipalMode]=useState(saved.principalMode || 'all'); const [packageId, setPackage] = useState(saved.packageId || ''); const [type, setType] = useState(executionType || saved.type || '');
   const [status, setStatus] = useState(saved.status || ''); const [from, setFrom] = useState(saved.from || ''); const [to, setTo] = useState(saved.to || '');
@@ -85,6 +86,7 @@ export function JobsList({ api, onOpenJob, onSchedule, onEditSchedule, execution
     finally { mutationLock.current = false; setBusy(false); setVersion(value => value + 1); }
   }
   const update = (setter: (value: string) => void) => (event: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => { setter(event.currentTarget.value); setPage(0); };
+  const extraFilters = [from && `From ${from}`, to && `To ${to}`, deletion !== 'all' && `Deletion: ${deletion}`, pinned && 'Pinned only'].filter(Boolean);
   const rows = result.items, pages = Math.max(1, Math.ceil(result.total / pageSize));
   const groups = new Map<string, JobSummary[]>(); for (const job of rows) { const key = groupKey(job); groups.set(key, [...(groups.get(key) || []), job]); }
   const blocked = busy || loading;
@@ -103,25 +105,30 @@ export function JobsList({ api, onOpenJob, onSchedule, onEditSchedule, execution
   return <div className="page-content att-jobs-page att-query-workspace" aria-labelledby="jobs-title">
     <header className="att-feature-header"><div><p className="att-eyebrow">Jobs and results</p><h1 id="jobs-title">Jobs</h1></div></header>
     <section className="att-query-filter-panel att-jobs-filter-panel" aria-label="Job filters"><fieldset disabled={busy} className="att-jobs-filter-grid">
-      <label>Principal<PrincipalCombobox value={principal} suggestions={result.principalSuggestions} disabled={busy} onChange={(value,mode)=>{setPrincipal(value);setPrincipalMode(mode);setPage(0);}} /><small>Server-filtered · up to 30 matching known principals; type to search</small></label>
+      <label title="Server-filtered · up to 30 matching known principals; type to search">Principal<PrincipalCombobox value={principal} suggestions={result.principalSuggestions} disabled={busy} onChange={(value,mode)=>{setPrincipal(value);setPrincipalMode(mode);setPage(0);}} /></label>
       <label>Package<select aria-label="Package" value={packageId} onChange={update(setPackage)}><option value="">All packages</option>{[...new Set([...result.packageSuggestions,...(packageId?[packageId]:[])])].map(value => <option key={value}>{value}</option>)}</select></label>
       <label>Type<select aria-label="Type" value={type} onChange={event => {setType(event.currentTarget.value);setPage(0);onExecutionTypeChange?.(event.currentTarget.value==='load'?'load':undefined);}}><option value="">All types</option><option value="run">RUN / Debug</option><option value="load">LOAD</option><option value="validate">Validate</option></select></label>
       <label>Status<select aria-label="Status" value={status} onChange={update(setStatus)}><option value="">All statuses</option>{['QUEUED','PREPARING','RUNNING','CANCEL_REQUESTED',...terminalStatuses].map(value => <option key={value}>{value}</option>)}</select></label>
-      <label>Created from<input type="date" value={from} onChange={update(setFrom)} /></label><label>Created to<input type="date" value={to} onChange={update(setTo)} /></label>
       <label>Target or Job ID<input type="search" value={search} onChange={update(setSearch)} /></label>
+    </fieldset>
+    <div className="att-jobs-filter-actions">
+      <button type="button" disabled={busy} aria-expanded={moreFilters} aria-controls="jobs-more-filters" onClick={() => setMoreFilters(value => !value)}>More filters{extraFilters.length ? ` (${extraFilters.length})` : ''}</button>
+      {extraFilters.length > 0 && <span className="att-jobs-active-filters">{extraFilters.join(' · ')}</span>}
+      <div className="att-query-filter-actions"><button type="button" disabled={busy} onClick={() => {setPrincipal('');setPrincipalMode('all');setPackage('');setType('');setStatus('');setFrom('');setTo('');setPinned(false);setDeletion('all');setSearch('');setSort('newest');setPage(0);onExecutionTypeChange?.(undefined);}}>Clear filters</button><button type="button" disabled={busy || loading} onClick={() => setVersion(value=>value+1)}>Refresh jobs</button></div>
+    </div>
+    <fieldset id="jobs-more-filters" disabled={busy} hidden={!moreFilters} className="att-jobs-filter-grid att-jobs-more-filters">
+      <label>Created from<input type="date" value={from} onChange={update(setFrom)} /></label><label>Created to<input type="date" value={to} onChange={update(setTo)} /></label>
       <label>Deletion state<select aria-label="Deletion state" value={deletion} onChange={update(setDeletion)}><option value="all">All Jobs</option><option value="pending">Pending deletion</option><option value="unmarked">Unmarked</option></select></label>
       <label>Pin state<select aria-label="Pin state" value={pinned?'pinned':'all'} onChange={event => {setPinned(event.currentTarget.value==='pinned');setPage(0);}}><option value="all">All pin states</option><option value="pinned">Pinned only</option></select></label>
-      <div className="att-query-filter-actions"><button type="button" onClick={() => {setPrincipal('');setPrincipalMode('all');setPackage('');setType('');setStatus('');setFrom('');setTo('');setPinned(false);setDeletion('all');setSearch('');setSort('newest');setPage(0);onExecutionTypeChange?.(undefined);}}>Clear filters</button><button type="button" disabled={loading} onClick={() => setVersion(value=>value+1)}>Refresh jobs</button></div>
     </fieldset></section>
     <section className="att-query-results-panel" aria-label="Job results"><div className="att-jobs-toolbar">
       <label>View<select aria-label="View" value={grouped?'target':'recent'} disabled={busy} onChange={event=>{setGrouped(event.currentTarget.value==='target');setPage(0);}}><option value="recent">Recent Jobs</option><option value="target">Group by Target</option></select></label>
       <label>Sort<select aria-label="Sort" value={sort} disabled={busy || grouped} onChange={update(setSort)}><option value="newest">Created newest first</option><option value="oldest">Created oldest first</option><option value="target-asc">Target A–Z</option><option value="target-desc">Target Z–A</option></select></label>
-      {grouped && <span>Groups A–Z · Jobs newest first · counts across matching history</span>}
-    </div>
-    <p role="status" aria-live="polite">{loading?'Loading Jobs…':`Showing ${rows.length?result.offset+1:0}–${result.offset+rows.length} of ${result.total} Jobs`}</p>
+      <span title="Groups A–Z · Jobs newest first · counts across matching history. Group identity includes package, environment and all target bindings." aria-label="About target grouping">ⓘ</span>
+    <p role="status" aria-live="polite">{loading?'Loading Jobs…':`Showing ${rows.length?result.offset+1:0}–${result.offset+rows.length} of ${result.total} Jobs`}</p></div>
     {error && <p role="alert">{error}</p>}{copyState && <p role="status">{copyState}</p>}
     {!!outcomes.length && <details className="att-job-outcomes"><summary>{counts.updated} updated · {counts.already} already in desired state / unavailable · {counts.skipped} skipped · {counts.failed} failed</summary><ul>{outcomes.map(item=><li key={item.jobId}>{item.jobId}: {item.outcome.replaceAll('_',' ')}</li>)}</ul><p>Deletion marks wait at least 30 seconds before background cleanup can claim them. Unmark only cancels a pending mark.</p></details>}
-    {!loading && !rows.length ? <section className="att-empty-state"><h2>No matching Jobs</h2><p>Adjust the filters to search the full authorized history.</p></section> : <div className="att-table-scroll"><table className="att-jobs-table att-data-table"><caption>Jobs matching Server filters</caption><thead><tr><th>Target / Package / Environment</th><th>Type / Status</th><th>Timing</th><th>Actions</th></tr></thead><tbody>
+    {!loading && !rows.length ? <section className="att-empty-state"><h2>No matching Jobs</h2><p>Adjust the filters to search the full authorized history.</p></section> : <div className="att-table-scroll"><table className="att-jobs-table att-data-table"><caption className="att-visually-hidden">Jobs matching Server filters</caption><thead><tr><th>Target / Package / Environment</th><th>Type / Status</th><th>Timing</th><th>Actions</th></tr></thead><tbody>
       {!grouped ? rows.map(row) : [...groups].map(([key,members]) => {
         const aggregate=result.groups.find(group=>groupKey(group)===key);const closed=collapsed.has(key);
         return <Fragment key={key}><tr className="att-job-group"><th colSpan={4}><button type="button" aria-expanded={!closed} onClick={()=>setCollapsed(current=>{const next=new Set(current);if(next.has(key))next.delete(key);else next.add(key);return next;})}>{closed?'▸':'▾'} {members[0].targetGroup==='legacy'?'Unclassified / legacy':targetLabel(members[0])} · {members[0].packageId} · {members[0].environment || 'Package default'} · {aggregate?.total ?? members.length} matching Jobs ({members.length} on this page)</button>{aggregate && <span className="att-job-secondary">{Object.entries(aggregate.statuses).map(([status,count])=>`${status}: ${count}`).join(' · ')} · Latest {timestamp(aggregate.lastCreatedAt)}</span>}{members[0].targetIdentity?.targets && members[0].targetIdentity.targets.length>1 && <details><summary>Target bindings</summary><ul>{members[0].targetIdentity.targets.map(t=><li key={JSON.stringify(t)}>{t.type} · {t.id}</li>)}</ul>{members[0].targetIdentity.truncated && <p>First 32 bindings shown. Group identity includes the full binding signature.</p>}</details>}</th></tr>{!closed && members.map(row)}</Fragment>;

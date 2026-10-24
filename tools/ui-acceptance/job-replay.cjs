@@ -45,11 +45,40 @@ async function main() {
     });
     const page = await context.newPage(), errors = []; page.on('pageerror', error => errors.push(error.message));
     const base = fixture.origin + '/att/ui/';
+    // Both entry points/actions must preserve the surrounding layout at every supported width.
+    for (const width of [1440, 768, 390]) {
+      await page.setViewportSize({width, height:900});
+      for (const detail of [false, true]) {
+        await page.goto(base + (detail ? '#/jobs/J-load' : '#/jobs'));
+        const container = detail ? page.locator('.att-job-detail') : page.getByRole('row').filter({has:page.getByRole('link',{name:'Unknown target · J-load',exact:true})});
+        for (const action of ['Rerun', 'Schedule / Reschedule…']) {
+          const opener=container.getByRole('button',{name:action,exact:true});
+          await opener.waitFor(); const before=await container.boundingBox();
+          await opener.click();
+          const modal=page.locator('dialog.att-replay-review');
+          await modal.getByRole('button',{name:action==='Rerun'?'Confirm rerun':'Continue to New Schedule',exact:true}).and(page.locator(':enabled')).waitFor();
+          assert.equal(await page.locator('body > dialog.att-replay-review').count(),1);
+          const after=await container.boundingBox(); assert.equal(after.height,before.height,'Opening review must not change row/Details geometry');
+          assert.equal(await modal.locator('details').getAttribute('open'),null);
+          const box=await modal.boundingBox(); assert.ok(box.x>=0&&box.x+box.width<=width+1&&box.height<=900*.85+1,JSON.stringify({width,box}));
+          await modal.getByRole('button',{name:'Cancel',exact:true}).focus(); await page.keyboard.press('Tab');
+          assert.ok(await modal.evaluate(element=>element.contains(document.activeElement)),'Tab stays inside modal');
+          await page.keyboard.press('Shift+Tab'); assert.equal(await page.evaluate(()=>document.activeElement.textContent),'Cancel');
+          await modal.locator('summary').click(); assert.equal(await modal.locator('details').getAttribute('open'),'');
+          assert.ok(await modal.locator('pre').evaluate(element=>element.clientHeight<=innerHeight*.32+1));
+          await page.addScriptTag({path:require.resolve('axe-core/axe.min.js')});
+          const violations=await page.evaluate(async()=> (await axe.run(document.querySelector('dialog.att-replay-review'),{runOnly:{type:'tag',values:['wcag2a','wcag2aa','wcag21aa']}})).violations);assert.deepEqual(violations,[]);
+          if(process.env.ATT_UI_SCREENSHOT_DIR)await page.screenshot({path:`${process.env.ATT_UI_SCREENSHOT_DIR}/replay-${width}-${detail?'detail':'list'}-${action==='Rerun'?'run':'schedule'}.png`});
+          await page.keyboard.press('Escape'); await modal.waitFor({state:'hidden'}); assert.ok(await opener.evaluate(element=>element===document.activeElement),'Restore focus to opener');
+        }
+      }
+    }
+    await page.setViewportSize({width:1280,height:900});
     for (const type of ['run', 'load']) {
       await page.goto(base + '#/jobs');
       const row = page.getByRole('row').filter({ has: page.getByRole('link', { name: 'Unknown target · J-' + type, exact: true }) });
       await row.getByRole('button', { name: 'Rerun', exact: true }).click();
-      const review = page.getByRole('region', { name: 'Review rerun J-' + type });
+      const review = page.getByRole('dialog', { name: 'Review rerun J-' + type });
       await review.getByRole('button', { name: 'Confirm rerun', exact: true }).waitFor({ state: 'visible' });
       assert.equal(submits.length, type === 'run' ? 0 : 1);
       await review.getByRole('button', { name: 'Confirm rerun', exact: true }).click();
@@ -73,7 +102,7 @@ async function main() {
     await page.goto(base + '#/jobs?type=load');
     const history = page.getByRole('row').filter({ has: page.getByRole('link', { name: 'Unknown target · J-load', exact: true }) });
     await history.getByRole('button', { name: 'Rerun', exact: true }).click();
-    await page.getByRole('region', { name: 'Review rerun J-load' }).getByRole('button', { name: 'Cancel', exact: true }).click();
+    await page.getByRole('dialog', { name: 'Review rerun J-load' }).getByRole('button', { name: 'Cancel', exact: true }).click();
     await page.goto(base + '#/jobs/J-old');
     await page.getByRole('button', { name: 'Rerun', exact: true }).click();
     await page.getByText('Rerun unavailable for this historical job', { exact: true }).waitFor();
@@ -84,12 +113,12 @@ async function main() {
     await page.getByRole('button', { name: 'Rerun', exact: true }).click();
     await page.getByRole('button', { name: 'Confirm rerun', exact: true }).and(page.locator(':enabled')).waitFor();
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), 'Review must fit a phone viewport');
-    await page.getByRole('button', { name: 'Jobs and results', exact: true }).click();
+    await page.evaluate(() => { location.hash = '#/jobs'; });
     await page.getByRole('dialog', { name: 'Discard your changes?' }).waitFor();
     await page.getByRole('button', { name: 'Stay on this page', exact: true }).click();
     await page.getByRole('dialog', { name: 'Discard your changes?' }).waitFor({ state: 'hidden' });
     await page.keyboard.press('Escape');
-    assert.equal(await page.getByRole('region', { name: 'Review rerun J-load' }).count(), 0);
+    assert.equal(await page.getByRole('dialog', { name: 'Review rerun J-load' }).count(), 0);
     // Same mounted route: history -> list -> edit, then cancel/back/forward.
     await page.goto(base + '#/schedules/S-1/history');
     await page.getByRole('heading', { name: /Execution history/ }).waitFor();

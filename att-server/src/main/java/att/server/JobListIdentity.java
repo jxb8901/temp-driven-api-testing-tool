@@ -51,6 +51,26 @@ final class JobListIdentity {
         else out=identity("load",workloads.size()+" workloads / "+bindings+" target bindings",targets,signature);
         out.put("workloadCount",workloads.size());out.put("bindingCount",bindings);out.put("workloads",summaries);out.put("truncated",workloads.size()>32||bindings>32);return out;
     }
+    /** Complete private search relation, independent of the 32-target display preview.
+     * Retained RUN selections are bounded at 10000; LOAD snapshots are size bounded. */
+    static Set<Map<String,String>> searchTargets(JsonNode definition) {
+        Set<Map<String,String>> out=new LinkedHashSet<>();
+        if("load".equals(definition.path("executionType").asText())) {
+            for(JsonNode workload:definition.path("scenario").path("workloads")) {
+                addTarget(out,workload.path("target"));
+                for(JsonNode entry:workload.path("mix"))addTarget(out,entry.path("target"));
+            }
+        } else {
+            addTarget(out,definition.path("target"));
+            for(JsonNode id:definition.path("selection").path("caseIds")) {
+                String value=text(id);if(!value.isBlank())out.add(Map.of("type","case","id",value));
+            }
+        }
+        return out;
+    }
+    private static void addTarget(Set<Map<String,String>> out,JsonNode value) {
+        Map<String,String> member=target(value);if(!member.isEmpty())out.add(member);
+    }
     private static Map<String,Object> identity(String type,String id,List<Map<String,String>> targets,Object signature) {
         Map<String,Object> out=new LinkedHashMap<>();out.put("type",type);out.put("id",id);out.put("targets",targets);
         try {out.put("signature",HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(json(List.of(type,signature)).getBytes(StandardCharsets.UTF_8))));}

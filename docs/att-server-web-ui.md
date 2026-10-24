@@ -91,3 +91,9 @@ Schedules lists never display Schedule IDs. LOAD summaries show saved configured
 History → Back to list → Edit resolves both the route view and schedule ID. Refreshing the authorized list preserves unsaved edits in the same form; missing or forbidden definitions show an unavailable state. Legacy RUN definitions without an editable validated snapshot explain how to review a replacement RUN.
 
 **Open full Job Details in a new tab** opens `#/jobs/{encodedJobId}?standalone=1&tab=live` (or `events`) with Overview, Live Output, Events, Results, Artifacts and Metrics. Tab switching updates the URL while keeping the Job fixed. Old `#/jobs/{jobId}/console?view=live|events` bookmarks adapt to the full Details workspace. Same-origin `target="_blank" rel="noopener noreferrer"` links support `/att/ui/`, refresh and browser navigation. One Job stream is shared within each tab; floating/docked/minimized consoles keep their existing behavior. Inaccessible Jobs show safe unavailable or sign-in messages.
+
+### Jobs filters and replay review
+
+Jobs keeps Principal, Package, Type, Status and Target search in a compact toolbar. **More filters** reveals Created from/to, Deletion state and Pin state; active values remain visible when collapsed. Target search includes every retained canonical target or selected Case ID, including targets beyond the first 32 preview entries, before Server pagination. Legacy Jobs without retained target metadata remain searchable by Job ID.
+
+From either Jobs List or Job Details, **Rerun** and **Schedule / Reschedule…** open a modal review showing type, package, target, environment, source and revision. **Advanced / View raw definition** expands the sanitized JSON in a bounded scroll area. Tab stays in the dialog, Escape or Cancel closes it and restores focus; confirming retains the immutable Server intent and package-revision revalidation.

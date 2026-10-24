@@ -91,3 +91,9 @@ Schedules 清單不顯示 Schedule ID。LOAD 依每個 workload 顯示已保存�
 History → Back to list → Edit 會同時按 route view 及 schedule ID 載入。重新整理已授權清單時保留同一表單的未儲存修改；不存在或禁止存取的定義顯示不可用狀態。沒有可編輯 validated snapshot 的舊 RUN 定義會說明如何審閱替代 RUN。
 
 **Open full Job Details in a new tab** 開啟 `#/jobs/{encodedJobId}?standalone=1&tab=live`（或 `events`），包括 Overview、Live Output、Events、Results、Artifacts、Metrics。切換 tab 更新 URL 並固定同一 Job。舊 `#/jobs/{jobId}/console?view=live|events` 書籤使用完整 Details adapter。同源 `target="_blank" rel="noopener noreferrer"` 連結支援 `/att/ui/`、重新整理、Back/Forward。每個分頁內共用單一 Job stream；floating/docked/minimized console 維持原有行為。未授權或缺少的 Job 顯示安全 unavailable／登入訊息。
+
+### Jobs 篩選與重播審閱
+
+Jobs 的精簡工具列保留 Principal、Package、Type、Status 及 Target 搜尋。**More filters** 可展開 Created from/to、Deletion state 和 Pin state；收合後仍顯示已啟用的條件。Target 搜尋會在 Server 分頁前比對完整保留的 canonical target／Case ID，包括前 32 筆預覽之外的項目。沒有保留 Target metadata 的歷史 Job 仍可用 Job ID 搜尋。
+
+在 Jobs List 或 Job Details 按 **Rerun** 或 **Schedule / Reschedule…**，會開啟 modal review，顯示類型、Package、Target、Environment、Source 及 Revision。**Advanced / View raw definition** 可在有界捲動區展開 sanitized JSON。Tab 焦點保留於對話框內，Escape 或 Cancel 關閉並返回原按鈕；確認仍使用 immutable Server intent 並重新驗證 Package revision。

@@ -518,7 +518,7 @@ final class ServerRuntime implements AutoCloseable {
             }
             summaryFields.put("targetIdentity",JobListIdentity.from(listDefinition));
             String summary=JSON.writeValueAsString(summaryFields);
-            store.insert(job,summary);persisted=true;jobs.put(id,job);append(job,"status",Map.of("jobId",id,"status","QUEUED"));
+            store.insert(job,summary,JobListIdentity.searchTargets(listDefinition));persisted=true;jobs.put(id,job);append(job,"status",Map.of("jobId",id,"status","QUEUED"));
             FutureTask<Void> task=new FutureTask<>(()->{execute(job,activeJobPath,lease);return null;});tasks.put(id,task);leases.put(id,lease);
             job.admittedNanos=System.nanoTime();
             try { workers.execute(task); }

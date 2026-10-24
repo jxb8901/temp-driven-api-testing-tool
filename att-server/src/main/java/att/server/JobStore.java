@@ -86,6 +86,9 @@ final class JobStore implements AutoCloseable {
             s.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS schedule_occurrence_id VARCHAR(160)");
             s.execute("CREATE UNIQUE INDEX IF NOT EXISTS jobs_schedule_occurrence_uq ON jobs(schedule_occurrence_id)");
             s.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS execution_spec CLOB");
+            s.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS target_search_version INT DEFAULT 0 NOT NULL");
+            s.execute("CREATE TABLE IF NOT EXISTS job_targets (job_id VARCHAR(80) NOT NULL, target_type VARCHAR(16) NOT NULL, target_id VARCHAR(1024) NOT NULL, PRIMARY KEY(job_id,target_type,target_id), FOREIGN KEY(job_id) REFERENCES jobs(job_id) ON DELETE CASCADE)");
+            s.execute("CREATE INDEX IF NOT EXISTS job_targets_identifier_idx ON job_targets(target_id,job_id)");
             s.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS replay_owner VARCHAR(256)");
             s.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS originating_schedule_id VARCHAR(40)");
             s.execute("CREATE TABLE IF NOT EXISTS job_replay_intents (principal VARCHAR(256) NOT NULL, intent_id VARCHAR(80) NOT NULL, source_job_id VARCHAR(80) NOT NULL, job_id VARCHAR(80) NOT NULL, expires_at BIGINT, PRIMARY KEY(principal,intent_id))");
@@ -107,9 +110,48 @@ final class JobStore implements AutoCloseable {
             s.execute("CREATE TABLE IF NOT EXISTS auth_sessions (token_hash VARCHAR(64) PRIMARY KEY, login_id VARCHAR(120) NOT NULL, csrf_token VARCHAR(64) NOT NULL, created_at BIGINT NOT NULL, last_seen BIGINT NOT NULL, absolute_expiry BIGINT NOT NULL)");
             s.execute("CREATE TABLE IF NOT EXISTS auth_bootstrap_claim (claim_id INT PRIMARY KEY, claimed_at VARCHAR(40) NOT NULL)");
             s.execute("CREATE INDEX IF NOT EXISTS load_schedule_execution_history_idx ON load_schedule_executions(schedule_id,scheduled_for)");
+            backfillSearchTargets(c);
         } catch(Exception failed){close();throw failed;}
     }
+    /** Migration reads each immutable snapshot once; list queries never parse private definitions. */
+    private void backfillSearchTargets(Connection c) throws Exception {
+        c.setAutoCommit(false);
+        try {
+            while(true) {
+                List<String[]> batch=new ArrayList<>();
+                try(Statement statement=c.createStatement();ResultSet rows=statement.executeQuery("SELECT job_id,execution_spec,target_identity FROM jobs WHERE target_search_version=0 LIMIT 100")) {
+                    while(rows.next())batch.add(new String[]{rows.getString(1),rows.getString(2),rows.getString(3)});
+                }
+                if(batch.isEmpty())break;
+                for(String[] row:batch) {
+                    Set<Map<String,String>> targets=Set.of();
+                    if(row[1]!=null) {
+                        try {targets=JobListIdentity.searchTargets(JobExecutionSpec.parse(row[1]).definition());}
+                        catch(Exception invalid) { /* Legacy invalid snapshot: only known single identity is safe. */ }
+                    }
+                    if(targets.isEmpty()&&row[2]!=null)targets=singleSearchTarget(ServerRuntime.JSON.readTree(row[2]));
+                    writeSearchTargets(c,row[0],targets);
+                }
+                c.commit();
+            }
+        } catch(Exception failure){c.rollback();throw failure;}
+    }
+    private static Set<Map<String,String>> singleSearchTarget(com.fasterxml.jackson.databind.JsonNode identity) {
+        String type=identity.path("type").asText(),id=identity.path("id").asText();
+        return Set.of("flow","template","tool","case").contains(type)&&!id.isBlank()&&id.length()<=512?Set.of(Map.of("type",type,"id",id)):Set.of();
+    }
+    private static void writeSearchTargets(Connection c,String jobId,Set<Map<String,String>> targets) throws Exception {
+        try(PreparedStatement p=c.prepareStatement("MERGE INTO job_targets(job_id,target_type,target_id) KEY(job_id,target_type,target_id) VALUES(?,?,?)")) {
+            for(var target:targets) {p.setString(1,jobId);p.setString(2,target.get("type"));p.setString(3,target.get("id").toLowerCase(java.util.Locale.ROOT));p.addBatch();}
+            p.executeBatch();
+        }
+        try(PreparedStatement p=c.prepareStatement("UPDATE jobs SET target_search_version=1 WHERE job_id=?")){p.setString(1,jobId);p.executeUpdate();}
+    }
     synchronized void insert(Job job,String summary) throws Exception {
+        Set<Map<String,String>> targets=job.executionSpec==null?singleSearchTarget(ServerRuntime.JSON.readTree(summary).path("targetIdentity")):JobListIdentity.searchTargets(JobExecutionSpec.parse(job.executionSpec).definition());
+        insert(job,summary,targets);
+    }
+    synchronized void insert(Job job,String summary,Set<Map<String,String>> targets) throws Exception {
         try(Connection c=connect()) {
             c.setAutoCommit(false);
             try {
@@ -120,6 +162,7 @@ final class JobStore implements AutoCloseable {
                     p.setString(17,identity.hasNonNull("type")?identity.path("type").asText()+" · "+identity.path("id").asText():"Unknown target");
                     p.setString(18,identity.path("signature").asText("legacy"));p.setString(19,metadata.path("environment").asText(""));p.executeUpdate();
                 }
+                writeSearchTargets(c,job.id,targets);
                 if(job.replayIntent!=null)try(PreparedStatement p=c.prepareStatement("INSERT INTO job_replay_intents(principal,intent_id,source_job_id,job_id,expires_at) VALUES(?,?,?,?,?)")) {
                     p.setString(1,job.principal);p.setString(2,job.replayIntent);p.setString(3,job.rerunOfJobId);p.setString(4,job.id);
                     p.setLong(5,job.createdAt.plus(REPLAY_INTENT_RETENTION).toEpochMilli());p.executeUpdate();

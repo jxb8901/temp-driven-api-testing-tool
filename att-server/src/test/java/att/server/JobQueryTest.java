@@ -41,6 +41,54 @@ class JobQueryTest {
             assertEquals(239L,store.queryJobs(JobQuery.parse(Map.of("deletion","unmarked"),"alice")).get("total"));
         }
     }
+    @SuppressWarnings("unchecked")
+    @Test void findsCompleteMultiTargetAndCaseSelectionsAcrossPagesAndMigratesRetainedSnapshots() throws Exception {
+        ServerConfig config=config();
+        var load=ServerRuntime.JSON.createObjectNode();load.put("executionType","load");load.put("packageId","p");
+        var workloads=load.putObject("scenario").putArray("workloads");
+        var mix=workloads.addObject().put("id","mixed").putArray("mix");
+        for(int i=0;i<40;i++)mix.addObject().putObject("target").put("type",i%2==0?"flow":"template").put("id","target-"+i);
+        workloads.addObject().put("id","second").putObject("target").put("type","tool").put("id","last-tool");
+        var run=ServerRuntime.JSON.createObjectNode();run.put("schemaVersion",RunDefinition.VERSION);run.put("executionType","run");run.put("packageId","p");
+        var cases=run.putObject("selection").putArray("caseIds");for(int i=0;i<45;i++)cases.add("CASE-"+i);
+        try(JobStore store=new JobStore(config)) {
+            for(int i=0;i<61;i++) {
+                var definition=i<31?load:run;
+                Job job=new Job("J"+String.format("%016X",i),i<31?"load":"run",i==60?"other":"p","alice",new WorkerRequest(),new JobEvents(config.dataDir.resolve("events/"+i),1));
+                job.executionSpec=new JobExecutionSpec(definition,"a".repeat(64),null).json();
+                store.insert(job,ServerRuntime.JSON.writeValueAsString(Map.of("targetIdentity",JobListIdentity.from(definition))));
+            }
+            for(String target:List.of("TARGET-39","target-38","last-tool","case-44")) {
+                long total=target.startsWith("case")?29:31;
+                var query=Map.of("search",target,"packageId","p","limit","25","groupBy","target");
+                var first=store.queryJobs(JobQuery.parse(query,"alice"));assertEquals(total,first.get("total"));assertEquals(25,((List<?>)first.get("items")).size());
+                var next=new HashMap<>(query);next.put("offset","25");
+                var second=store.queryJobs(JobQuery.parse(next,"alice"));assertEquals(total-25,((List<?>)second.get("items")).size());
+                Set<Object> ids=new HashSet<>();for(var page:List.of(first,second))for(var item:(List<Map<String,Object>>)page.get("items")){assertEquals("p",item.get("packageId"));assertTrue(ids.add(item.get("jobId")));}
+                assertEquals(total,ids.size());assertEquals(total,((List<Map<String,Object>>)first.get("groups")).get(0).get("total"));
+                assertFalse(ServerRuntime.JSON.writeValueAsString(first).contains("execution_spec"));
+            }
+        }
+        // Simulate upgrade from the previous schema: no indexed targets, durable safe snapshot retained.
+        var connectionProperties=new java.util.Properties();connectionProperties.setProperty("user","sa");connectionProperties.setProperty("password","");
+        try(var c=new org.h2.Driver().connect("jdbc:h2:file:"+config.dataDir.resolve("db/att-server")+";DB_CLOSE_ON_EXIT=FALSE",connectionProperties);var statement=c.createStatement()) {
+            statement.executeUpdate("DELETE FROM job_targets");statement.executeUpdate("UPDATE jobs SET target_search_version=0");
+        }
+        try(JobStore reopened=new JobStore(config)) {
+            assertEquals(31L,reopened.queryJobs(JobQuery.parse(Map.of("search","target-39"),"alice")).get("total"));
+            assertEquals(30L,reopened.queryJobs(JobQuery.parse(Map.of("search","case-44"),"alice")).get("total"));
+        }
+    }
+    @Test void indexesCanonicalFallbackWithoutReplayAndHandlesExpandedUnicodeNormalization() throws Exception {
+        ServerConfig config=config();
+        var definition=ServerRuntime.JSON.createObjectNode();definition.put("executionType","run");
+        definition.putObject("target").put("type","tool").put("id","İ".repeat(512));
+        try(JobStore store=new JobStore(config)) {
+            Job job=new Job("JUNICODE","run","p","alice",new WorkerRequest(),new JobEvents(config.dataDir.resolve("events"),1));
+            store.insert(job,ServerRuntime.JSON.writeValueAsString(Map.of("targetIdentity",JobListIdentity.from(definition))),JobListIdentity.searchTargets(definition));
+            assertEquals(1L,store.queryJobs(JobQuery.parse(Map.of("search","i\u0307"),"alice")).get("total"));
+        }
+    }
     @Test void dateBoundsIncludeFractionalSecondsAfterAnExactSecond() throws Exception {
         ServerConfig config=config();
         try(JobStore store=new JobStore(config)) {

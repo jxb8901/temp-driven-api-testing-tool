@@ -1,7 +1,20 @@
 import { useContext, useEffect, useId, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { NavigationGuardContext } from '../../router';
 import type { ValidatedScheduleIntent } from '../schedules/types';
 import type { JobReplay, LoadJobsApi } from './types';
+
+function snapshotTargets(definition: NonNullable<JobReplay['definition']>): string {
+  const targets = new Set<string>();
+  function add(value: unknown) { if (value && typeof value === 'object' && 'type' in value && 'id' in value) targets.add(`${String(value.type)} · ${String(value.id)}`); }
+  add(definition.target);
+  const selection = definition.selection as {caseIds?: unknown[]} | undefined;
+  if (selection?.caseIds?.length) return `Cases · ${selection.caseIds.length} selected`;
+  const scenario = definition.scenario as {workloads?: Array<{target?: unknown; mix?: Array<{target?: unknown}>}>} | undefined;
+  for (const workload of scenario?.workloads || []) { add(workload.target); for (const entry of workload.mix || []) add(entry.target); }
+  const shown = [...targets].slice(0, 4).join(', ');
+  return shown ? shown + (targets.size > 4 ? ` (+${targets.size - 4} more)` : '') : 'Not available';
+}
 
 type ReplayApi = Pick<LoadJobsApi, 'getJobReplay' | 'createJobReplayDraft' | 'rerunJob'>;
 
@@ -18,6 +31,7 @@ export function JobReplayActions({ api, jobId, onOpenJob, onSchedule, onEditSche
   const [error, setError] = useState('');
   const lock = useRef(false);
   const generation = useRef(0);
+  const dialog = useRef<HTMLDialogElement>(null);
   const heading = useRef<HTMLHeadingElement>(null);
   const opener = useRef<HTMLElement | null>(null);
   const unregister = useRef<(() => void) | undefined>(undefined);
@@ -26,22 +40,17 @@ export function JobReplayActions({ api, jobId, onOpenJob, onSchedule, onEditSche
   const id = useId();
   useEffect(() => {
     if (!mode) return;
+    const element = dialog.current;
+    if (element && !element.open) { if (element.showModal) element.showModal(); else element.setAttribute('open', ''); }
     heading.current?.focus();
     unregister.current = registerUnsavedChanges?.(true, 'A job replay review is open. Leave without creating a job or schedule?');
-    return () => { unregister.current?.(); unregister.current = undefined; };
+    return () => { element?.close?.(); unregister.current?.(); unregister.current = undefined; };
   }, [mode, registerUnsavedChanges]);
   useEffect(() => () => { generation.current++; }, []);
-  useEffect(() => {
-    if (!mode) return;
-    const escape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape' && !busy && !document.querySelector('dialog[open]')) { event.preventDefault(); close(); }
-    };
-    document.addEventListener('keydown', escape);
-    return () => document.removeEventListener('keydown', escape);
-  }, [mode, busy]);
   if (!api.getJobReplay || !api.createJobReplayDraft || !api.rerunJob) return null;
 
   function close() {
+    dialog.current?.close?.();
     generation.current++; setMode(null); setReview(null); setError(''); setBusy(false); lock.current = false;
     unregister.current?.(); opener.current?.focus();
   }
@@ -79,20 +88,34 @@ export function JobReplayActions({ api, jobId, onOpenJob, onSchedule, onEditSche
   return <span className="att-replay-actions">
     <button type="button" disabled={busy} onClick={() => void open('run')}>Rerun</button>
     {onSchedule && <button type="button" disabled={busy} onClick={() => void open('schedule')}>Schedule / Reschedule…</button>}
-    {mode && <section role="region" aria-labelledby={id} className="att-replay-review">
+    {mode && createPortal(<dialog ref={dialog} aria-labelledby={id} aria-describedby={`${id}-description`} className="att-replay-review" onCancel={event => { event.preventDefault(); if (!busy) close(); }} onKeyDown={event => {
+      if (event.key !== 'Tab') return;
+      const items = [...event.currentTarget.querySelectorAll<HTMLElement>('button:not(:disabled), summary, [href], input:not(:disabled), select:not(:disabled), [tabindex="0"]')].filter(item => !item.closest('details:not([open])') || item.tagName === 'SUMMARY');
+      const first = items[0], last = items[items.length - 1];
+      if (!first) { event.preventDefault(); heading.current?.focus(); }
+      else if (event.shiftKey && (document.activeElement === first || document.activeElement === heading.current)) { event.preventDefault(); last.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+    }}>
       <h2 id={id} ref={heading} tabIndex={-1}>{mode === 'run' ? 'Review rerun' : 'Create new schedule from job'} {jobId}</h2>
-      <p>Replay the previous safe snapshot. Package changes are rejected; configure a new run to use changed source files.</p>
+      <p id={`${id}-description`}>Replay the previous safe snapshot. Package changes are rejected; configure a new run to use changed source files.</p>
       {busy && <p role="status">Revalidating job inputs…</p>}
       {error && <p role="alert">{error}</p>}
       {review && !review.available && <p role="status">{review.reason}</p>}
-      {review?.sourcePath && <p>Package source: <code>{review.sourcePath}</code></p>}
+      {review?.definition && <dl className="att-replay-summary">
+        <div><dt>Type</dt><dd>{review.definition.executionType.toUpperCase()}</dd></div>
+        <div><dt>Package</dt><dd>{review.definition.packageId}</dd></div>
+        <div><dt>Target</dt><dd>{snapshotTargets(review.definition)}</dd></div>
+        <div><dt>Environment</dt><dd>{review.definition.environment || 'Package default'}</dd></div>
+        <div><dt>Source</dt><dd>{review.sourcePath || 'Retained snapshot'}</dd></div>
+        <div><dt>Revision</dt><dd><code>{review.revision || 'Not available'}</code></dd></div>
+      </dl>}
       {configuration && navigation && <button type="button" disabled={busy} onClick={() => {
         unregister.current?.(); close(); navigation.navigate({ kind: configuration.executionType === 'load' ? 'load' : 'run', packageId: configuration.packageId });
       }}>Configure new run from current package</button>}
-      {review?.definition && <pre className="att-code-block">{JSON.stringify(review.definition, null, 2)}</pre>}
+      {review?.definition && <details className="att-replay-advanced"><summary>Advanced / View raw definition</summary><pre className="att-code-block" tabIndex={0} aria-label="Sanitized execution definition">{JSON.stringify(review.definition, null, 2)}</pre></details>}
       {review?.originatingScheduleId && onEditSchedule && <button type="button" onClick={() => { unregister.current?.(); onEditSchedule(review.originatingScheduleId!); close(); }}>View / Edit originating schedule</button>}
-      <button type="button" disabled={busy || !review?.available || !review.intentId} onClick={() => void confirm()}>{mode === 'run' ? 'Confirm rerun' : 'Continue to New Schedule'}</button>
-      <button type="button" disabled={busy} onClick={close}>Cancel</button>
-    </section>}
+      <footer><button type="button" disabled={busy || !review?.available || !review.intentId} onClick={() => void confirm()}>{mode === 'run' ? 'Confirm rerun' : 'Continue to New Schedule'}</button>
+      <button type="button" disabled={busy} onClick={close}>Cancel</button></footer>
+    </dialog>, document.body)}
   </span>;
 }

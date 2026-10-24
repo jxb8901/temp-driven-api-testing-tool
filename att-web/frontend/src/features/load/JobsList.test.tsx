@@ -75,3 +75,17 @@ it('restores filters after navigating back to Jobs',async()=>{
   const queryJobs=vi.fn(async()=>response());await render({queryJobs});
   expect(queryJobs).toHaveBeenLastCalledWith(expect.objectContaining({principal:'alice',principalMode:'text',status:'PASS',sort:'target-desc',executionType:'run',groupBy:'target'}));
 });
+
+it('keeps advanced filters collapsed with restored active values visible and Clear next to Refresh',async()=>{
+  sessionStorage.setItem('att.jobs.filters',JSON.stringify({from:'2026-10-01',deletion:'pending',pinned:'true'}));
+  const queryJobs=vi.fn(async()=>response());await render({queryJobs});
+  expect(host.querySelector<HTMLFieldSetElement>('#jobs-more-filters')?.hidden).toBe(true);
+  expect(host.querySelector('.att-jobs-active-filters')?.textContent).toContain('From 2026-10-01 · Deletion: pending · Pinned only');
+  expect(queryJobs).toHaveBeenLastCalledWith(expect.objectContaining({deletion:'pending',pinnedOnly:true,from:expect.any(String)}));
+  await click(button('More filters (3)'));expect(host.querySelector<HTMLFieldSetElement>('#jobs-more-filters')?.hidden).toBe(false);
+  await select('Deletion state','unmarked');await advance();expect(queryJobs).toHaveBeenLastCalledWith(expect.objectContaining({deletion:'unmarked',offset:0}));
+  await click(button('More filters (3)'));await click(button('Clear filters'));await advance();
+  expect(host.querySelector('.att-jobs-active-filters')).toBeNull();expect(queryJobs).toHaveBeenLastCalledWith(expect.objectContaining({deletion:'all',pinnedOnly:false,from:undefined}));
+  expect(button('Clear filters').parentElement).toBe(button('Refresh jobs').parentElement);
+  expect(host.querySelector('.att-jobs-toolbar')?.textContent).toContain('Showing 1–1 of 1 Jobs');
+});

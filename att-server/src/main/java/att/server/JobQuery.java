@@ -30,7 +30,7 @@ final class JobQuery {
         if(status!=null){sql.append(" AND status=?");parameters.add(status);}
         if(from!=null){sql.append(" AND CAST(created_at AS TIMESTAMP WITH TIME ZONE)>=CAST(? AS TIMESTAMP WITH TIME ZONE)");parameters.add(from);}
         if(to!=null){sql.append(" AND CAST(created_at AS TIMESTAMP WITH TIME ZONE)<=CAST(? AS TIMESTAMP WITH TIME ZONE)");parameters.add(to);}
-        if(search!=null){sql.append(" AND (LOCATE(LOWER(?),LOWER(target_sort))>0 OR LOCATE(LOWER(?),LOWER(job_id))>0)");parameters.add(search);parameters.add(search);}
+        if(search!=null){sql.append(" AND (LOCATE(LOWER(?),LOWER(target_sort))>0 OR LOCATE(LOWER(?),LOWER(job_id))>0 OR EXISTS (SELECT 1 FROM job_targets jt WHERE jt.job_id=jobs.job_id AND LOCATE(?,jt.target_id)>0))");parameters.add(search);parameters.add(search);parameters.add(search.toLowerCase(java.util.Locale.ROOT));}
         if(pinnedOnly)sql.append(" AND pinned=TRUE");
         if("pending".equals(deletion))sql.append(" AND retention_state='DELETE_REQUESTED'");
         if("unmarked".equals(deletion))sql.append(" AND (retention_state IS NULL OR retention_state='')");
