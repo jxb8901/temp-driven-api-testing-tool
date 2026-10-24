@@ -12,6 +12,7 @@ const ExplorerPage = lazy(() => import('./features/explorer/ExplorerPage').then(
 import type { ExplorerPageProps, ResourceSourceReference } from './features/explorer/types';
 const LoadPage = lazy(() => import('./features/load/LoadPage').then(module => ({ default: module.LoadPage })));
 const JobsPage = lazy(() => import('./features/load/JobsPage').then(module => ({ default: module.JobsPage })));
+const StandaloneJobArtifactPage = lazy(() => import('./features/load/StandaloneJobArtifactPage').then(module => ({ default: module.StandaloneJobArtifactPage })));
 import type { LoadJobsApi, PackageOption } from './features/load/types';
 const SettingsPage = lazy(() => import('./SettingsPage').then(module => ({ default: module.SettingsPage })));
 import { ConfigurationWorkspace } from './features/explorer/ConfigurationWorkspace';
@@ -351,7 +352,7 @@ export default function App() {
       if (version.apiVersion !== '1') throw new Error('Incompatible ATT Server API version: expected v1.');
       if (controller.signal.aborted) return;
       dispatch({ type: 'version/ready', data: version });
-      if (navigation.route.kind !== 'job-console' && !(navigation.route.kind === 'jobs' && navigation.route.standalone)) {
+      if (navigation.route.kind !== 'job-console' && navigation.route.kind !== 'job-artifact' && !(navigation.route.kind === 'jobs' && navigation.route.standalone)) {
         void loadPackages(controller.signal);
         if (navigation.route.kind === 'dashboard') void loadJobs(controller.signal);
       }
@@ -363,7 +364,7 @@ export default function App() {
       dispatch({ type: 'jobs/error', error: reason });
     });
     return () => controller.abort();
-  }, [loadJobs, loadPackages, navigation.route.kind === 'job-console' || (navigation.route.kind === 'jobs' && !!navigation.route.standalone)]);
+  }, [loadJobs, loadPackages, navigation.route.kind === 'job-console' || navigation.route.kind === 'job-artifact' || (navigation.route.kind === 'jobs' && !!navigation.route.standalone)]);
 
   const previousRouteKind = useRef(navigation.route.kind);
   useEffect(() => {
@@ -409,6 +410,8 @@ export default function App() {
     content = <DashboardPage view="packages" state={state} onPackageChange={onPackageChange} onJobChange={onJobChange} onRetryPackages={() => void loadPackages()} onRetryJobs={() => void loadJobs()} jobsRefreshing={jobsRefreshing} jobsUpdatedAt={jobsUpdatedAt} />;
   } else if (navigation.route.kind === 'job-console' || (navigation.route.kind === 'jobs' && navigation.route.standalone && navigation.route.jobId)) {
     content = <Suspense fallback={<div className="page-content" role="status" aria-busy="true">Loading Job console…</div>}><StandaloneJobConsolePage jobId={navigation.route.jobId!} view={navigation.route.kind === 'job-console' ? navigation.route.view : navigation.route.tab} /></Suspense>;
+  } else if (navigation.route.kind === 'job-artifact') {
+    content = <Suspense fallback={<div className="page-content" role="status" aria-busy="true">Loading artifact…</div>}><StandaloneJobArtifactPage api={loadJobsApi} jobId={navigation.route.jobId} path={navigation.route.path} /></Suspense>;
   } else if (navigation.route.kind === 'jobs' && navigation.route.jobId) {
     content = <Suspense fallback={<div role="status">Loading jobs…</div>}><JobsPage executionType={navigation.route.executionType} onExecutionTypeChange={executionType => navigation.navigate({ kind: 'jobs', executionType })} api={loadJobsApi} onSchedule={capabilities.loadSchedulingEnabled ? onSchedule : undefined} onEditSchedule={id => navigation.navigate({ kind: 'schedules', view: 'edit', scheduleId: id })} jobId={navigation.route.jobId} onOpenJob={onJobChange} onShowList={() => navigation.navigate({ kind: 'jobs', ...(navigation.route.kind === 'jobs' && navigation.route.executionType ? { executionType: navigation.route.executionType } : {}) })} /></Suspense>;
   } else if (navigation.route.kind === 'jobs') {

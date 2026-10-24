@@ -25,6 +25,9 @@ describe('ATT hash route contract', () => {
     expect(parseRoute('#/jobs/J10045/console?view=events')).toEqual({ kind: 'job-console', jobId: 'J10045', view: 'events' });
     expect(parseRoute('#/jobs/J%2F10045/console?view=live')).toEqual({ kind: 'job-console', jobId: 'J/10045', view: 'live' });
     expect(formatRoute({ kind: 'job-console', jobId: 'J/10045', view: 'events' })).toBe('#/jobs/J%2F10045/console?view=events');
+    const artifact = { kind: 'job-artifact', jobId: 'J/10045', path: 'load/run/report/index.html' } as const;
+    expect(parseRoute(formatRoute(artifact))).toEqual(artifact);
+    expect(formatRoute(artifact)).toBe('#/jobs/J%2F10045/artifact?path=load%2Frun%2Freport%2Findex.html');
     expect(parseRoute(formatRoute({ kind: 'schedules' }))).toEqual({ kind: 'schedules' });
     expect(parseRoute(formatRoute({ kind: 'settings' }))).toEqual({ kind: 'settings' });
     expect(parseRoute(formatRoute({ kind: 'run', packageId: 'payments', environment: 'UAT', batch: true }))).toEqual({

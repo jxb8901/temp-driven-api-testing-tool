@@ -1,0 +1,13 @@
+.att-standalone-artifact { display: flex; flex-direction: column; min-height: calc(100vh - 1rem); min-height: calc(100dvh - 1rem); min-width: 0; gap: 1rem; color: var(--att-color-text, #182237); }
+.att-standalone-artifact-heading { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .75rem 1rem; padding: .5rem .75rem; border: 1px solid var(--att-color-border, #dce2ec); border-radius: var(--att-radius-card, .9rem); background: var(--att-color-surface, #fff); }
+.att-standalone-artifact-heading h1 { margin: 0; font-size: 1.2rem; }
+.att-standalone-artifact-heading p { margin: .2rem 0 0; }
+.att-standalone-artifact-heading > a { display: inline-flex; align-items: center; min-height: 2.5rem; padding: .4rem .75rem; border: 1px solid var(--att-color-border, #dce2ec); border-radius: var(--att-radius-control, .55rem); color: var(--att-color-primary, #3157c8); text-decoration: none; }
+.att-standalone-artifact-path { overflow-wrap: anywhere; color: var(--att-color-muted, #637087); }
+.att-standalone-artifact > main { flex: 1 1 auto; min-width: 0; padding: .25rem; }
+.att-standalone-artifact-state { display: flex; flex-wrap: wrap; align-items: center; gap: .75rem; padding: 1rem; border: 1px solid var(--att-color-border, #dce2ec); border-radius: var(--att-radius-card, .9rem); background: var(--att-color-surface, #fff); }
+.att-standalone-artifact-state p { flex: 1 1 18rem; margin: 0; }
+.att-standalone-artifact-state button { min-height: 2.5rem; padding: .4rem .75rem; border: 1px solid var(--att-color-border, #dce2ec); border-radius: var(--att-radius-control, .55rem); background: var(--att-color-surface, #fff); color: var(--att-color-text, #182237); font: inherit; cursor: pointer; }
+.att-standalone-artifact iframe { display: block; width: 100%; min-height: 78vh !important; min-height: 78dvh !important; border: 1px solid var(--att-color-border, #dce2ec) !important; border-radius: var(--att-radius-control, .55rem); background: #fff; }
+.att-standalone-artifact .cm-editor { max-height: none; min-height: 70vh; }
+@media (max-width: 40rem) { .att-standalone-artifact-heading { align-items: flex-start; } .att-standalone-artifact > main { padding: 0; } }
