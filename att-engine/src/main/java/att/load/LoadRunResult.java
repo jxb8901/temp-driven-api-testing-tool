@@ -78,18 +78,27 @@ public final class LoadRunResult {
         return "PASS";
     }
     public String performanceVerdict() {
-        boolean notMet = "NOT_MET".equals(thresholds.status());
-        boolean notEvaluated = "NOT_EVALUATED".equals(thresholds.status());
-        boolean evaluated = "MET".equals(thresholds.status());
+        boolean configured = thresholdsConfigured();
+        boolean notMet = !thresholds.results().isEmpty() && "NOT_MET".equals(thresholds.status());
+        boolean notEvaluated = !thresholds.results().isEmpty() && "NOT_EVALUATED".equals(thresholds.status());
+        boolean evaluated = !thresholds.results().isEmpty() && "MET".equals(thresholds.status());
         for (LoadRunResult workload : workloads.values()) {
+            if (!workload.thresholdsConfigured()) continue;
             String verdict = workload.performanceVerdict();
+            configured = true;
             if ("NOT_MET".equals(verdict)) notMet = true;
             else if ("NOT_EVALUATED".equals(verdict)) notEvaluated = true;
             else if ("MET".equals(verdict)) evaluated = true;
         }
+        if (!configured) return "NOT_EVALUATED";
         if (notMet) return "NOT_MET";
         if (notEvaluated) return "NOT_EVALUATED";
         return evaluated ? "MET" : "NOT_EVALUATED";
+    }
+    private boolean thresholdsConfigured() {
+        if (!thresholds.results().isEmpty()) return true;
+        for (LoadRunResult workload : workloads.values()) if (workload.thresholdsConfigured()) return true;
+        return false;
     }
     public int exitCode() { return ResultAggregator.exitCode(status()); }
     public boolean passed() { return status() == ResultStatus.PASS; }

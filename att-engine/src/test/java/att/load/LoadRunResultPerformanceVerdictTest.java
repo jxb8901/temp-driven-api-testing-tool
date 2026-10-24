@@ -63,12 +63,50 @@ class LoadRunResultPerformanceVerdictTest {
         assertTrue(workloadRow(passingHtml, "two").contains("<td class=\"pass\">MET</td>"));
     }
 
+    @Test
+    void absentRootThresholdsAreNeutralWhenWorkloadsHaveConfiguredVerdicts() {
+        LoadScenario scenario = scenario();
+        LoadMetrics metrics = LoadMetrics.forScenario(scenario, 1_000L, 100L);
+        metrics.finish(1_100L);
+        LoadMetricsSnapshot snapshot = metrics.snapshot();
+        ThresholdResult childPass = new ThresholdResult("steady.completedRate", ">= 0/s", "1.000/s", true, null);
+        ThresholdResult childFail = new ThresholdResult("steady.p95", "< 10ms", "20.000ms", false, "threshold missed");
+        ThresholdResult childUnevaluated = new ThresholdResult("steady.p95", "< 10ms", "N/A", false,
+                "window evidence is incomplete", "NOT_EVALUATED");
+
+        LoadRunResult allPassing = root(scenario, snapshot, LoadThresholdSummary.empty(),
+                child("one", scenario, snapshot, childPass), child("two", scenario, snapshot, childPass));
+        assertEquals("MET", allPassing.performanceVerdict());
+
+        LoadRunResult failingChild = root(scenario, snapshot, LoadThresholdSummary.empty(),
+                child("failed", scenario, snapshot, childFail), child("passing", scenario, snapshot, childPass));
+        assertEquals("NOT_MET", failingChild.performanceVerdict());
+
+        LoadRunResult configuredButUnevaluableRoot = root(scenario, snapshot,
+                new LoadThresholdSummary(Collections.singletonList(childUnevaluated)),
+                child("passing", scenario, snapshot, childPass));
+        assertEquals("NOT_EVALUATED", configuredButUnevaluableRoot.performanceVerdict());
+
+        LoadRunResult noThresholdsAnywhere = root(scenario, snapshot, LoadThresholdSummary.empty(),
+                childWithoutThresholds("unconfigured", scenario, snapshot));
+        assertEquals("NOT_EVALUATED", noThresholdsAnywhere.performanceVerdict());
+
+        LoadRunResult unconfiguredWorkloadIsNeutral = root(scenario, snapshot, LoadThresholdSummary.empty(),
+                childWithoutThresholds("unconfigured", scenario, snapshot), child("passing", scenario, snapshot, childPass));
+        assertEquals("MET", unconfiguredWorkloadIsNeutral.performanceVerdict());
+    }
+
     private LoadRunResult root(LoadScenario scenario, LoadMetricsSnapshot metrics, ThresholdResult rootThreshold,
+                               LoadRunResult... children) {
+        return root(scenario, metrics, new LoadThresholdSummary(Collections.singletonList(rootThreshold)), children);
+    }
+
+    private LoadRunResult root(LoadScenario scenario, LoadMetricsSnapshot metrics, LoadThresholdSummary thresholds,
                                LoadRunResult... children) {
         Map<String, LoadRunResult> workloads = new LinkedHashMap<String, LoadRunResult>();
         for (LoadRunResult child : children) workloads.put(child.runId(), child);
         return new LoadRunResult("root-" + children[0].runId(), scenario, Instant.ofEpochMilli(1_000L),
-                Instant.ofEpochMilli(1_100L), metrics, new LoadThresholdSummary(Collections.singletonList(rootThreshold)),
+                Instant.ofEpochMilli(1_100L), metrics, thresholds,
                 Collections.<String, Object>emptyMap(), Collections.<String, Object>emptyMap(), workloads);
     }
 
@@ -96,5 +134,10 @@ class LoadRunResultPerformanceVerdictTest {
                 Collections.<String, Object>emptyMap(), LoadScenario.Model.CLOSED, 1, 0.0, null, Duration.ZERO,
                 Duration.ZERO, Duration.ofMillis(100), Duration.ZERO, Duration.ZERO, 0, "",
                 Collections.<String, Object>emptyMap(), Collections.<String, Object>emptyMap());
+    }
+
+    private LoadRunResult childWithoutThresholds(String id, LoadScenario scenario, LoadMetricsSnapshot metrics) {
+        return new LoadRunResult(id, scenario, Instant.ofEpochMilli(1_000L), Instant.ofEpochMilli(1_100L), metrics,
+                LoadThresholdSummary.empty(), Collections.<String, Object>emptyMap(), Collections.<String, Object>emptyMap());
     }
 }

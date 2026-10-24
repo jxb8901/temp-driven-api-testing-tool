@@ -197,6 +197,54 @@ class LoadReportTest {
         assertFalse(html.contains("<th>Successful TPS</th>"));
     }
 
+    @Test void emptySelectedWindowClearsWarmupOnlyTrendCharts() throws Exception {
+        Instant started = Instant.parse("2026-10-24T00:00:00Z");
+        long startMs = started.toEpochMilli();
+        Map<String, Object> steadyThreshold = Collections.<String, Object>singletonMap("p95", "<= 20ms");
+        LoadScenario scenario = new LoadScenario(Paths.get("warmup-only.yaml"), "template", "LOAD_TEMPLATE",
+                Collections.emptyMap(), Collections.emptyMap(), LoadScenario.Model.ARRIVAL_RATE, 0, 1.0, "1/s",
+                Duration.ofSeconds(1), Duration.ZERO, Duration.ofSeconds(1), Duration.ZERO, Duration.ZERO,
+                1, "drop", Collections.<String, Object>singletonMap("steady", steadyThreshold), Collections.emptyMap());
+        LoadMetrics metrics = LoadMetrics.forScenario(scenario, startMs, 2_000L);
+        metrics.onEvent(LoadEvent.completed("warmup-only", "arrivalRate", "WARMUP", "warmup", null, 1,
+                startMs + 500L, startMs + 500L, startMs + 600L, ResultStatus.PASS));
+        metrics.finish(startMs + 2_000L);
+
+        @SuppressWarnings("unchecked") Map<String, Object> windowMetrics =
+                (Map<String, Object>) metrics.snapshot().value("windowMetrics");
+        @SuppressWarnings("unchecked") Map<String, Object> series =
+                (Map<String, Object>) windowMetrics.get("timeSeries");
+        @SuppressWarnings("unchecked") List<Map<String, Object>> points =
+                (List<Map<String, Object>>) series.get("points");
+        assertEquals(1, points.size(), "the fixture has samples in warm-up only");
+        assertTrue(((List<?>) points.get(0).get("phaseCoverage")).contains("WARMUP"));
+        @SuppressWarnings("unchecked") Map<String, Object> windows = (Map<String, Object>) windowMetrics.get("windows");
+        @SuppressWarnings("unchecked") Map<String, Object> steadyWindow = (Map<String, Object>) windows.get("steady");
+        @SuppressWarnings("unchecked") Map<String, Object> cohort = (Map<String, Object>) steadyWindow.get("cohort");
+        @SuppressWarnings("unchecked") Map<String, Object> latency = (Map<String, Object>) cohort.get("latency");
+        assertEquals(0L, latency.get("observationCount"));
+
+        LoadRunResult result = new LoadRunResult("warmup-only", scenario, started, started.plusSeconds(2), metrics.snapshot());
+        Path report = new LoadReportWriter().write(temp, result);
+        String html = new String(Files.readAllBytes(report), StandardCharsets.UTF_8);
+        int chartStart = html.indexOf("function chart(id,legendId,series,unit,baseMax,opts)");
+        int clear = html.indexOf("svg.textContent='';", chartStart);
+        int emptyWindowCheck = html.indexOf("if(!pts.length)", chartStart);
+        assertTrue(chartStart >= 0);
+        assertTrue(clear > chartStart && clear < emptyWindowCheck,
+                "each window selection must clear the previous SVG before the empty-series return");
+        assertTrue(html.contains("legendList.textContent='';"), "the empty selection must also clear the previous legend");
+        assertTrue(html.contains("No data for selected window"), "empty charts need a visible and accessible state");
+        assertTrue(html.contains("if(select)select.addEventListener('change',function(){show(select.value)});"),
+                "changing the window selector must rerender the selected window");
+        assertTrue(html.contains("function currentPoints(){var win=w[select?select.value:'steady'];"),
+                "trend series must use the selected window's points");
+        int emptyReturn = html.indexOf("return}svg.setAttribute", emptyWindowCheck);
+        int sloDrawing = html.indexOf("var slo=id==='latency-chart'", chartStart);
+        assertTrue(emptyReturn > emptyWindowCheck && emptyReturn < sloDrawing,
+                "an empty selected window must return before drawing latency data or its p95 SLO");
+    }
+
     private static String phaseRow(String html, String phase) {
         String start = "<tr><td><b>" + phase + "</b>";
         int from = html.indexOf(start);
