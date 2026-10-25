@@ -11,5 +11,6 @@ Public Server API 以 /api/v1 為版本根目錄。以下按任務導覽，並�
 | 驗證 RUN、Debug、LOAD input 並提交工作 | [Execution API](execution.zh.md) |
 | 讀取 event、SSE、result 及 cancellation 行為 | [Jobs and Events](jobs-and-events.zh.md) |
 | 建立、審閱或操作 Schedule | [Schedules API](schedules.zh.md) |
+| 查看擬議的同步 validation contract | [規劃中的 Validation API（#287）](validation.zh.md) |
 
 Tomcat deployment、Server configuration 及 authentication operation 請參閱 [Operations](../../operations/server-deployment.zh.md)。

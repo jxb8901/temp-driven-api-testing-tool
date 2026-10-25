@@ -2,6 +2,14 @@
 
 # Studio Load testing
 
+![ATT Studio Quick Load form for a single resource](../../system-design/ui-shell-baseline/quick-load-1440-light.png)
+
+*Illustrative Quick Load form with sample settings.*
+
+![ATT Studio Advanced Load builder](../../system-design/ui-shell-baseline/load-builder-1440-light.png)
+
+*Static UI-shell baseline capture with sample workloads; the version badge belongs to the screenshot baseline.*
+
 Browser-created Quick and Advanced Load are disabled by default. A Server administrator must set `server.inlineLoad.enabled: true` and configure server-owned workload, target, user, rate, concurrency, and duration caps before those forms can create drafts. The UI reads `inlineLoadEnabled` from `/api/v1/version` and disables the Advanced Load entry and hides Quick Load when the feature is off; direct navigation displays the disabled state. A disabled endpoint returns `403 ATT-SERVER-INLINE-LOAD-DISABLED`; an over-limit draft returns `400 ATT-SERVER-INLINE-LOAD-LIMIT` with a summary naming the exceeded setting. This switch does not disable existing path-based Load clients.
 
 Quick Load is a first-level route for one selected Template, Flow, or Tool. Its bounded template picker includes compatible policy-only YAML files from the package `load/` directory, including `load/load.visualuser.yaml` and `load/load.arrivalrate.yaml` when compatible, plus the bundled **Quick smoke** preset for Virtual Users. Selecting a template loads its supported settings; when no compatible package template is selected, the Server supplies the model-specific defaults or a bundled 10-second low-intensity fallback. Preset and model changes update the unsent scenario; the target remains fixed, and Debug-local Testdata imports are never promoted implicitly. Advanced Settings retain thresholds, evidence, execution options, Testdata paths, and a complete scenario preview. Validate the single-target scenario and confirm before submitting traffic. The Server binds the draft to the authenticated Principal and current package revision and submits the same immutable scenario it validated. Schedule carries that validated draft into an immutable inline Load snapshot, so the target, environment, inputs, pacing, thresholds, and evidence do not need to be re-entered.

@@ -2,6 +2,14 @@
 
 # Jobs 與 results
 
+![ATT Studio Job 結果工作區](../../system-design/ui-shell-baseline/job-results-1440-light.png)
+
+*Job 結果示意畫面，使用示例執行資料。*
+
+![ATT Studio 浮動 Job 主控台](../../system-design/ui-shell-baseline/job-console-floating-1440-light.png)
+
+*浮動主控台靜態 UI shell 基線截圖，使用示例 Job 資料；圖中版本標籤屬於截圖基線。*
+
 ## Job workspace
 
 ### 分離及還原 Job 主控台

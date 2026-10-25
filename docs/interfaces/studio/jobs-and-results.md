@@ -2,6 +2,14 @@
 
 # Jobs and results
 
+![ATT Studio Job results workspace](../../system-design/ui-shell-baseline/job-results-1440-light.png)
+
+*Illustrative Job results with sample run data.*
+
+![ATT Studio floating Job console](../../system-design/ui-shell-baseline/job-console-floating-1440-light.png)
+
+*Static UI-shell baseline capture with sample Job activity; the version badge belongs to the screenshot baseline.*
+
 ## Job workspace
 
 ### Detach and restore a Job console

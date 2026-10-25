@@ -52,16 +52,24 @@ public final class RuntimeConfigurationValidator {
         List<String> profiles;
         boolean profileLimitReached=false;
         Map<?, ?> raw;
+        FrameworkConfigLoader loader = new FrameworkConfigLoader();
+        String validationEnvironment = requestedEnvironment;
         try {
             if (Files.isSymbolicLink(file) || !Files.isRegularFile(file, LinkOption.NOFOLLOW_LINKS) || !Files.isReadable(file))
                 throw new IllegalArgumentException("Shared Runtime Config is missing, unreadable, or a symbolic link");
             Object loaded = YamlSupport.load(file);
             if (!(loaded instanceof Map)) throw new IllegalArgumentException("Shared Runtime Config must be a YAML mapping");
             raw = (Map<?, ?>) loaded;
-            ProfileSelection selection=selectProfiles(raw,requestedEnvironment,allProfiles);
+            if (packageRoot != null && !allProfiles && validationEnvironment == null) {
+                validationEnvironment = loader.loadDiscovery(file, root, packageRoot, null).environment();
+            }
+            if (!allProfiles && validationEnvironment == null && raw.get("environment") instanceof String) {
+                validationEnvironment = (String) raw.get("environment");
+            }
+            ProfileSelection selection=selectProfiles(raw,validationEnvironment,allProfiles);
             profiles=selection.profiles();profileLimitReached=selection.truncated();
             if(allProfiles)report.context("environments",profiles.isEmpty()?Collections.singletonList("default"):profiles);
-            else if(requestedEnvironment==null&&profiles.isEmpty())report.context("environment","default");
+            else report.context("environment",validationEnvironment==null?"default":validationEnvironment);
         } catch (Exception invalid) {
             shared.diagnostic(diagnostic("ATT-CONFIG-INVALID", "ERROR", logical(file, root), "config",
                     safe(invalid.getMessage(), root), "Correct the Runtime Config YAML, schema, or referenced path."));
@@ -77,7 +85,6 @@ public final class RuntimeConfigurationValidator {
                     "Only the first "+MAX_ENVIRONMENT_PROFILES+" Environment Profiles were checked; the report is incomplete",null));
         }
 
-        FrameworkConfigLoader loader = new FrameworkConfigLoader();
         List<String> checkedProfiles = profiles.isEmpty() ? Collections.singletonList(null) : profiles;
         boolean sharedFailed = false;
         for (String profile : checkedProfiles) {
@@ -97,11 +104,15 @@ public final class RuntimeConfigurationValidator {
                     }
                 }
             } catch (Exception invalid) {
+                environment.status("FAIL");
                 environment.diagnostic(diagnostic("ATT-CONFIG-INVALID", "ERROR", logical(file, root), "environments." + name,
                         safe(invalid.getMessage(), root, packageRoot), "Correct the selected Environment Profile and its static references."));
                 sharedFailed = true;
             }
-            if (sectionHasError(environment)) sharedFailed = true;
+            if (sectionHasError(environment)) {
+                environment.status("FAIL");
+                sharedFailed = true;
+            }
         }
 
         if (packageRoot != null) {
@@ -128,7 +139,7 @@ public final class RuntimeConfigurationValidator {
                             new TestdataRegistry(packageRoot, layer, Collections.<Path>emptyList()).validateAll();
                     }
                 } else {
-                    FrameworkConfig effective=loader.loadDiscovery(file,root,packageRoot,requestedEnvironment);
+                    FrameworkConfig effective=loader.loadDiscovery(file,root,packageRoot,validationEnvironment);
                     List<Path> selected=manifest.present()
                             ?manifest.descriptors(effective.environment())
                             :effective.testdataDescriptors();

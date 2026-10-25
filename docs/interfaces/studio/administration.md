@@ -2,6 +2,10 @@
 
 # Studio administration
 
+![ATT Studio Configuration screen](../../system-design/ui-shell-baseline/configuration-1440-light.png)
+
+*Static UI-shell baseline capture with sample configuration data; the version badge belongs to the screenshot baseline.*
+
 ## Account management
 
 In local mode, the current-user menu offers **Change password** to every signed-in local user. The form requires the current password, new password, and confirmation. A successful change revokes the current session and redirects to the login page with a success message. Password inputs stay in the active form only; the UI does not write them to local storage, session storage, URLs, or application logs.

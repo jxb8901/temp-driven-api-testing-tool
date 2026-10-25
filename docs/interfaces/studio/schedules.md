@@ -2,6 +2,10 @@
 
 # Schedules in Studio
 
+![ATT Studio scheduled Load view](../../system-design/ui-shell-baseline/scheduled-load-1440-light.png)
+
+*Static UI-shell baseline capture with sample schedule data; the version badge belongs to the screenshot baseline.*
+
 ## Schedule routes and standalone console (4.2.4)
 
 Schedules lists never display Schedule IDs. LOAD summaries show saved configured VUs or arrival rate, planned total duration and available warmup/ramp/steady phases per workload, with bounded target bindings. Missing historical settings show Not available. The list reads persisted sanitized summaries without per-row YAML requests.

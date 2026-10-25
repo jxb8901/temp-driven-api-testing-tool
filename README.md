@@ -4,6 +4,10 @@ ATT is a Package-oriented platform for functional API and integration testing an
 
 ATT supports Local execution, an optional ATT Server control plane, a browser Studio, and a versioned REST API. The Engine runs one functional RUN model across Case, Template, Flow and Tool targets; Debug adds diagnostic detail to a RUN. LOAD uses separate workload pacing and evidence controls. VALIDATE checks configuration, Package resources and dependencies without business execution.
 
+![ATT Studio dashboard showing configured Packages, recent Jobs, and Server status](docs/system-design/ui-shell-baseline/dashboard-1440-light.png)
+
+*Illustrative Studio UI-shell baseline with sample Package and Job data; the version badge belongs to that screenshot baseline.*
+
 ## Quick Start: current 4.2.4 CLI
 
 This source-checkout walkthrough uses the shipped legacy CLI. Snapshot generation is an explicit authoring step; validation does not create or update snapshots.

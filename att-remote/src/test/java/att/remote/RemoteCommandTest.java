@@ -6,6 +6,8 @@ import att.server.api.ServerApi;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.PrintStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
@@ -111,6 +113,48 @@ class RemoteCommandTest {
         assertEquals(2,exit);assertEquals(1,client.posts);assertEquals("/validation",client.lastPath);
         assertEquals("config",client.lastBody.path("targetKind").asText());assertFalse(client.lastBody.has("config"));
         assertTrue(client.getPaths.contains("/auth/capabilities"));assertFalse(client.getPaths.contains("/packages"));
+    }
+
+    @Test void vNextValidationFailuresStayOnStdoutAsAttValidationReports() throws Exception {
+        assertVNextValidationFailure(new RemoteException("ATT Server rejected authorization (HTTP 403), password=topsecret, path /srv/private/config.yaml"),4,"PARTIAL","ATT-REMOTE-VALIDATION-FORBIDDEN");
+        assertVNextValidationFailure(new RemoteException("ATT Server rejected validation request (HTTP 400)",2),2,"INVALID","ATT-REMOTE-VALIDATION-REJECTED");
+        assertVNextValidationFailure(RemoteException.retryableTransport("Unable to connect to ATT Server",new java.io.IOException("connection reset")),4,"PARTIAL","ATT-REMOTE-VALIDATION-TRANSPORT");
+    }
+
+    private static void assertVNextValidationFailure(RemoteException failure,int expectedExit,String expectedStatus,String expectedDiagnostic) throws Exception {
+        MockClient client=new MockClient() {
+            @Override public JsonNode get(String path)throws RemoteException {
+                if("/version".equals(path))return RemoteHttpClient.JSON.createObjectNode().put("apiVersion",ServerApi.VERSION).put("version","test");
+                return super.get(path);
+            }
+            @Override public JsonNode post(String path,JsonNode body)throws RemoteException {
+                posts++;lastPath=path;lastBody=body.deepCopy();throw failure;
+            }
+        };
+        ByteArrayOutputStream stdout=new ByteArrayOutputStream(),stderr=new ByteArrayOutputStream();
+        PrintStream previousOut=System.out,previousErr=System.err;
+        int exit;
+        try {
+            System.setOut(new PrintStream(stdout,true,"UTF-8"));
+            System.setErr(new PrintStream(stderr,true,"UTF-8"));
+            exit=RemoteCommand.run(new String[]{"--server","https://example.invalid","--format","json","vnext",
+                            "{\"command\":\"validate\",\"all\":true}"},
+                    java.util.Collections.<String,String>emptyMap(),null,null,(profile,password,username,provider)->client);
+        } finally {
+            System.setOut(previousOut);System.setErr(previousErr);
+        }
+        assertEquals(expectedExit,exit);
+        assertEquals("/validation",client.lastPath);
+        JsonNode report=RemoteHttpClient.JSON.readTree(new String(stdout.toByteArray(),StandardCharsets.UTF_8).trim());
+        assertEquals("att-validation/v1",report.path("schemaVersion").asText());
+        assertEquals("ALL",report.path("scope").asText());
+        assertEquals(expectedStatus,report.path("overallStatus").asText());
+        assertEquals(expectedExit,report.path("exitCode").asInt());
+        assertEquals(expectedDiagnostic,report.path("diagnostics").get(0).path("code").asText());
+        String diagnosticMessage=report.path("diagnostics").get(0).path("message").asText();
+        assertFalse(diagnosticMessage.contains("topsecret"));
+        assertFalse(diagnosticMessage.contains("/srv/private/config.yaml"));
+        assertEquals("",new String(stderr.toByteArray(),StandardCharsets.UTF_8));
     }
 
     private static class MockClient extends RemoteHttpClient {

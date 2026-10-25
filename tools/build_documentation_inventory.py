@@ -87,6 +87,10 @@ def row_for(path, version, inbound):
         audience, owner, applicable, status = "Maintainer / archive reader", "Historical record", "Historical version", "Historical"
         quality, disposition, destination = "Historical; retained for compatibility and chronology", "KEEP ARCHIVED", rel
         tests = "History index and local-link checks"
+    elif "planned" in marker and rel.startswith("docs/interfaces/server-api/"):
+        audience, owner, applicable, status = "Server administrator / integrator", "Proposed Server API validation endpoint", "Unreleased; #287", "Planned, not released"
+        quality, disposition, destination = "Planned Server endpoint; excluded from Current route table", "KEEP PLANNED", rel
+        tests = "API route, auth, schema and status checks; language-pair and link checks"
     elif "planned" in marker:
         audience, owner, applicable, status = "CLI user / contributor", "Proposed CLI vNext contract", "Unreleased; #287", "Planned, not released"
         quality, disposition, destination = "Planned syntax; excluded from Current examples", "KEEP PLANNED", rel

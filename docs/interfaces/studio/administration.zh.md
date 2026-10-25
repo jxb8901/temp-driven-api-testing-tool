@@ -2,6 +2,10 @@
 
 # Studio 管理
 
+![ATT Studio Configuration 設定畫面](../../system-design/ui-shell-baseline/configuration-1440-light.png)
+
+*設定靜態 UI shell 基線截圖，使用示例資料；圖中版本標籤屬於截圖基線。*
+
 ## 帳戶管理
 
 Local mode 中，每位已登入的本地用戶均可在目前用戶選單使用 **Change password**。表單需要目前密碼、新密碼及確認。變更成功後會撤銷目前 session，並將用戶轉回登入頁面及顯示成功訊息。密碼只會留在目前表單，不會寫入 local storage、session storage、URL 或應用程式日誌。

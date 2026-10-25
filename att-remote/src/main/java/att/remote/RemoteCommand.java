@@ -8,6 +8,7 @@ import att.remote.render.RemoteRenderer;
 import att.remote.sse.SseEvent;
 import att.remote.sse.SseReader;
 import att.server.api.ApiStatus;
+import att.server.api.AttValidationReport;
 import att.server.api.ServerApi;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ArrayNode;
@@ -19,6 +20,7 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.net.HttpURLConnection;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -37,10 +39,14 @@ public final class RemoteCommand {
             args.add("--format");args.add(format==null?"human":format);
             args.add("vnext");args.add(RemoteHttpClient.JSON.writeValueAsString(plan));
             return run(args.toArray(new String[0]));
-        } catch(Exception failure) { return fail("Unable to prepare Remote ATT command: "+safe(failure),4,format==null?"human":format); }
+        } catch(Exception failure) {
+            return fail("Unable to prepare Remote ATT command: "+safe(failure),4,format==null?"human":format,
+                    validationRequestContext(plan));
+        }
     }
     static int run(String[] args,Map<String,String> environment,Path profilePath,CredentialPrompt prompt,RemoteClientFactory clientFactory) {
         String format="human";
+        ValidationRequestContext validationContext=validationRequestContext(args);
         try {
             RemoteOptions options=RemoteOptions.parse(args);format=options.format;
             if(options.command.isEmpty()||"help".equals(options.command.get(0))){help();return 0;}
@@ -75,9 +81,9 @@ public final class RemoteCommand {
             if("artifact".equals(op))return artifact(client,command);
             if("run".equals(op)||"debug".equals(op)||"load".equals(op)||"validate".equals(op))return submit(client,command,format,op);
             throw new IllegalArgumentException("Unknown att remote command: "+op);
-        } catch(IllegalArgumentException e) { return fail(e.getMessage(),2,format); }
-        catch(RemoteException e) { return fail(e.getMessage(),e.exitCode(),format); }
-        catch(Exception e) { return fail("ATT Remote failed: "+safe(e),4,format); }
+        } catch(IllegalArgumentException e) { return fail(e.getMessage(),2,format,validationContext); }
+        catch(RemoteException e) { return fail(e.getMessage(),e.exitCode(),format,validationContext); }
+        catch(Exception e) { return fail("ATT Remote failed: "+safe(e),4,format,validationContext); }
     }
     private static int packages(RemoteHttpClient c,List<String>a,String f)throws Exception {
         if(a.size()!=1)throw new IllegalArgumentException("Usage: att remote packages");JsonNode result=c.get("/packages").path("items");
@@ -336,6 +342,64 @@ public final class RemoteCommand {
     private static String jobId(List<String>a,int index){if(a.size()!=index+1||!a.get(index).matches("J[A-F0-9]{16}"))throw new IllegalArgumentException("A valid job ID is required");return a.get(index);}
     private static String segment(String value){try{return java.net.URLEncoder.encode(value,"UTF-8").replace("+","%20");}catch(java.io.UnsupportedEncodingException impossible){throw new IllegalStateException(impossible);}}
     private static int fail(String message,int code,String format){String safe=message==null?"Remote command failed":message.replaceAll("(?i)(password|authorization)\\s*[:=]\\s*[^ ,]+","$1=[REDACTED_SECRET]");if("json".equals(format)){ObjectNode out=RemoteHttpClient.JSON.createObjectNode();out.put("error",safe);out.put("exitCode",code);System.err.println(out.toString());}else System.err.println("ATT Remote: "+safe);return code;}
+    private static int fail(String message,int code,String format,ValidationRequestContext context) {
+        if(context==null||!"json".equals(format))return fail(message,code,format);
+        AttValidationReport report=new AttValidationReport(context.scope,"SERVER");
+        report.context("command","validate");
+        report.context("targetKind",context.targetKind);
+        report.context("packageId",context.packageId);
+        report.context("environment",context.environment);
+        AttValidationReport.Section section=report.addSection("Remote validation request","/validation",code==2?"FAIL":"WARN");
+        Map<String,Object> diagnostic=new LinkedHashMap<String,Object>();
+        String detail=message==null?"Remote validation request failed":message;
+        String normalizedDetail=detail.toLowerCase(java.util.Locale.ROOT);
+        boolean authorizationDenied=normalizedDetail.contains("http 401")||normalizedDetail.contains("http 403");
+        diagnostic.put("code",code==2?"ATT-REMOTE-VALIDATION-REJECTED":
+                authorizationDenied?"ATT-REMOTE-VALIDATION-FORBIDDEN":"ATT-REMOTE-VALIDATION-TRANSPORT");
+        diagnostic.put("severity","ERROR");
+        diagnostic.put("source","/validation");
+        diagnostic.put("field","request");
+        diagnostic.put("message",att.server.api.internal.DiagnosticSanitizer.redactAbsolutePaths(
+                att.server.api.internal.DiagnosticSanitizer.redactText(detail)));
+        section.diagnostic(diagnostic);
+        if(code==2)report.exitCode(2);
+        else {report.incomplete();report.exitCode(code>=0&&code<=4?code:4);}
+        try {System.out.println(RemoteHttpClient.JSON.writeValueAsString(report.toMap()));}
+        catch(Exception serializationFailure) { return fail(message,code,format); }
+        return code;
+    }
+    private static ValidationRequestContext validationRequestContext(String[] args) {
+        if(args==null)return null;
+        for(int i=0;i+1<args.length;i++)if("vnext".equals(args[i])) {
+            try {return validationRequestContext(RemoteHttpClient.JSON.readTree(args[i+1]));}
+            catch(Exception ignored) {return null;}
+        }
+        return null;
+    }
+    private static ValidationRequestContext validationRequestContext(Map<String,Object> plan) {
+        if(plan==null||!"validate".equals(String.valueOf(plan.get("command"))))return null;
+        String kind=plan.get("targetKind")==null?null:String.valueOf(plan.get("targetKind"));
+        boolean all=Boolean.TRUE.equals(plan.get("all"));
+        String scope=all?"ALL":kind==null||"config".equals(kind)?"CONFIG":"package".equals(kind)?"PACKAGE":"SELECTED";
+        return new ValidationRequestContext(scope,kind,
+                plan.get("packageId")==null?null:String.valueOf(plan.get("packageId")),
+                plan.get("environment")==null?null:String.valueOf(plan.get("environment")));
+    }
+    private static ValidationRequestContext validationRequestContext(JsonNode plan) {
+        if(plan==null||!plan.isObject()||!"validate".equals(plan.path("command").asText()))return null;
+        String kind=plan.path("targetKind").isTextual()?plan.path("targetKind").asText():null;
+        boolean all=plan.path("all").asBoolean(false);
+        String scope=all?"ALL":kind==null||"config".equals(kind)?"CONFIG":"package".equals(kind)?"PACKAGE":"SELECTED";
+        return new ValidationRequestContext(scope,kind,
+                plan.path("packageId").isTextual()?plan.path("packageId").asText():null,
+                plan.path("environment").isTextual()?plan.path("environment").asText():null);
+    }
+    private static final class ValidationRequestContext {
+        final String scope,targetKind,packageId,environment;
+        ValidationRequestContext(String scope,String targetKind,String packageId,String environment) {
+            this.scope=scope;this.targetKind=targetKind;this.packageId=packageId;this.environment=environment;
+        }
+    }
     private static String safe(Exception e){String m=e.getMessage();return m==null?e.getClass().getSimpleName():m;}
     private static void help(){System.out.println("Usage: att remote [--server <profile|url>] [--format human|json] [--no-auth] <command>\nCommands: ping, version, packages, package <id>, run|debug|load|validate <packageId> [--principal <name>], jobs [--principal <search>], job|watch|result|cancel <jobId>, artifacts <jobId> [--download <directory>], artifact <jobId> artifacts.zip --download <directory>\n--server accepts a named profile or an HTTP(S) base URL. ATT_SERVER accepts either value and overrides the YAML default. Basic authentication, including credentials entered for a direct URL, requires HTTPS.");}
 }

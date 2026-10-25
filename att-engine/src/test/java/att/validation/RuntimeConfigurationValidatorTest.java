@@ -65,4 +65,37 @@ class RuntimeConfigurationValidatorTest {
         assertEquals(2,fullPackage.exitCode());
         assertTrue(att.validation.JsonSupport.write(fullPackage.toMap()).contains("ATT-PACKAGE-INVALID"));
     }
+
+    @Test void focusedPackageConfigUsesPackageDefaultEnvironmentAndReportsNestedFailures() throws Exception {
+        att.TestSchemas.install(temp);
+        Path config=temp.resolve("config/config.yaml");Files.createDirectories(config.getParent());
+        Path packageRoot=Files.createDirectories(temp.resolve("package"));
+        Files.write(packageRoot.resolve("package.yaml"),
+                "schemaVersion: att-package/v1\ndefaultEnvironment: UAT\n".getBytes(StandardCharsets.UTF_8));
+        String globalSitBroken="schemaVersion: att-config/v2.13\nenvironment: SIT\n"
+                +"environments:\n  SIT:\n    dbhelpers: [config/dbhelpers/sit/missing.yaml]\n  UAT: {}\n";
+        Files.write(config,globalSitBroken.getBytes(StandardCharsets.UTF_8));
+
+        AttValidationReport packageUat=RuntimeConfigurationValidator.validate(config,temp,packageRoot,null,"LOCAL",false);
+        assertEquals(0,packageUat.exitCode(),att.validation.JsonSupport.write(packageUat.toMap()));
+        Map<?,?> packageContext=(Map<?,?>)packageUat.toMap().get("context");
+        assertEquals("UAT",packageContext.get("environment"));
+        assertTrue(att.validation.ValidationReportRenderer.human(packageUat).contains("UAT — Tool Groups and DB/MQ/HTTP/SSH Helpers"));
+        assertFalse(att.validation.JsonSupport.write(packageUat.toMap()).contains("ATT-RESOURCE-HELPER-UNAVAILABLE"));
+
+        String uatHelperMissing="schemaVersion: att-config/v2.13\nenvironment: SIT\n"
+                +"environments:\n  SIT: {}\n  UAT:\n    dbhelpers: [config/dbhelpers/uat/missing.yaml]\n";
+        Files.write(config,uatHelperMissing.getBytes(StandardCharsets.UTF_8));
+        AttValidationReport invalidUat=RuntimeConfigurationValidator.validate(config,temp,packageRoot,null,"LOCAL",false);
+        assertEquals(2,invalidUat.exitCode());
+        Map<?,?> root=(Map<?,?>)((List<?>)invalidUat.toMap().get("sections")).get(0);
+        Map<?,?> uat=(Map<?,?>)((List<?>)root.get("sections")).get(0);
+        assertTrue(String.valueOf(uat.get("name")).startsWith("UAT —"));
+        assertEquals("FAIL",uat.get("status"));
+        Map<?,?> counts=(Map<?,?>)invalidUat.toMap().get("counts");
+        assertTrue(((Number)counts.get("fail")).intValue()>=2);
+        String human=att.validation.ValidationReportRenderer.human(invalidUat);
+        assertTrue(human.contains("[FAIL] UAT — Tool Groups and DB/MQ/HTTP/SSH Helpers"));
+        assertTrue(att.validation.JsonSupport.write(invalidUat.toMap()).contains("ATT-RESOURCE-HELPER-UNAVAILABLE"));
+    }
 }

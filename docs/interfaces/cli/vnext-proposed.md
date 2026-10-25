@@ -11,7 +11,7 @@ att [--local | --server <profile|url>] [-p <packageId>] [-e <profile>] \
     [--config <path>] [--format human|json] <run|load|validate> <target-kind> [target]
 ```
 
-`--local` and `--server` are mutually exclusive. With neither flag, vNext uses Local Engine. Local Package selection uses `ATT_PACKAGE_ROOT` or the current directory when `-p` is omitted; `-p <id>` resolves only to the immediate `ATT_HOME/packages/<id>` directory. Remote RUN/LOAD and Package or selected-target validation require `-p <id>` registered with the Server; Remote `validate config` may omit it to check only central configuration. Remote paths are Package-relative, and the Server owns its Runtime Config.
+`--local` and `--server` are mutually exclusive. With neither flag, vNext uses Local Engine. Local Package selection uses `ATT_PACKAGE_ROOT` or the current directory when `-p` is omitted; `-p <id>` resolves only to the immediate `ATT_HOME/packages/<id>` directory. Remote RUN/LOAD and Package or selected-target validation require `-p <id>` registered with the Server; Remote `validate config` may omit it to check only central configuration. Remote paths are Package-relative, and the Server owns its Runtime Config. The only top-level vNext execution commands are `run`, `load`, and `validate`.
 
 | Command | Example | Behavior |
 |---|---|---|
@@ -24,9 +24,9 @@ att [--local | --server <profile|url>] [-p <packageId>] [-e <profile>] \
 
 `validate --all` cannot be combined with a target, `-p`, or `-e`. Local validation never creates or changes Server data directories. A missing optional active Server Config is reported as `SKIP`; an explicitly selected missing or invalid file is `FAIL`. Server validation checks only registered Packages and uses the Server-owned Runtime Config.
 
-Validation is read-only: it does not execute Tools, send Load traffic, probe DB/MQ systems, or modify Config, Package files, or outputs. Human output has hierarchical `PASS`/`FAIL`/`WARN`/`SKIP` sections. `--format json` emits one `att-validation/v1` report on stdout. Exit codes are `0` for PASS, `1` for functional RUN/LOAD failure, `2` for invalid input or validation failure, `3` for execution error/cancellation, and `4` for Remote transport or untrusted-result failure. No Local Job store or `--detach` is part of this grammar.
+Validation is read-only: it does not execute Tools, send Load traffic, probe DB/MQ systems, or modify Config, Package files, or outputs. Human output has hierarchical `PASS`/`FAIL`/`WARN`/`SKIP` sections. `--format json` emits one `att-validation/v1` report on stdout. Exit codes are `0` for PASS, `1` for functional RUN/LOAD failure, `2` for invalid input or validation failure, `3` for execution error/cancellation, and `4` for Remote transport or untrusted-result failure. Persistent Local Job management and background submission are outside this proposed grammar.
 
-Common vNext options are `-p, --package`, `-e, --env`, `--format`, `--quiet`, `--verbose`, `--help`, and `--version`. `--config <path>` is Local-only. RUN selection options include `--suite`, `--suite-dir`, `--case`, `--tag`, `--exclude-tag`, `--all`, `--rerun-failed`, `--dry-run`, `--fail-fast`, `--run-id`, and Local-only `--output-dir`. Resource RUN/LOAD accepts `--input` and repeatable `--set`; LOAD accepts `--users` or `--arrival-rate` plus duration, warmup, ramp, think-time, concurrency, and overload options. `--users` and `--arrival-rate` cannot be combined. Unsupported options and invalid combinations fail before submission or traffic.
+Common vNext options are `-p, --package`, `-e, --env`, `--format`, `--quiet`, `--verbose`, `--help`, and `--version`. `--config <path>` is Local-only. RUN selection options include `--suite`, `--suite-dir`, `--case` (also `--case-id`), `--tag`, `--exclude-tag`, `--all`, `--rerun-failed`, `--dry-run` (Case/Suite RUN only), `--fail-fast`, `--run-id`, and Local-only `--output-dir`. Template, Flow, and Tool RUN reject `--dry-run` and accept `--input <path>`; resource RUN and LOAD accept repeatable `--set`. Direct LOAD rejects `--input`. LOAD accepts `--users` or `--arrival-rate` plus `--duration`, `--warmup`, `--ramp-up`, `--ramp-down`, `--think-time`, `--max-concurrent`, and `--overload-policy`. `--users` and `--arrival-rate` cannot be combined. Unsupported options and invalid combinations fail before submission or traffic.
 
 ### Migrate existing commands
 
@@ -58,8 +58,3 @@ The vNext syntax puts backend and Package selection before one of the three comm
 
 `validate config` reads the Server-owned Runtime Config and returns source-aware diagnostics without executing business Tools or contacting DB/MQ systems. `validate --all` checks the shared Runtime Config, active Server Config, and registered Packages. The Server requires an administrator for this installation-wide validation; it never scans unregistered directories. A Remote client cannot submit a Runtime Config path. The result uses the versioned `att-validation/v1` report and validation failures exit with code `2`.
 
-Use `--detach` to return the job ID without keeping a background process:
-
-```sh
-./att.sh remote --server ci run payments --all --detach
-```

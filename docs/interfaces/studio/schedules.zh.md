@@ -2,6 +2,10 @@
 
 # Studio Schedule
 
+![ATT Studio 排程 Load 畫面](../../system-design/ui-shell-baseline/scheduled-load-1440-light.png)
+
+*排程 Load 靜態 UI shell 基線截圖，使用示例 Schedule 資料；圖中版本標籤屬於截圖基線。*
+
 ## 排程 route 與獨立 console（4.2.4）
 
 Schedules 清單不顯示 Schedule ID。LOAD 依每個 workload 顯示已保存的 configured VU 或 arrival rate、planned total duration、可用 warmup/ramp/steady phase 及有界 Target bindings。缺少的歷史設定顯示 Not available；清單只讀已保存的 sanitized summary，不逐列請求 YAML。

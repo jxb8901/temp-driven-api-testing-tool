@@ -437,6 +437,227 @@ def check_cli_documentation():
                          (path.relative_to(ROOT), option))
 
 
+
+def check_vnext_cli_contract():
+    source_path = ROOT / "att-cli/src/main/java/att/VNextOptions.java"
+    if not source_path.is_file():
+        fail("missing vNext CLI parser: %s" % source_path.relative_to(ROOT))
+        return
+    source = read(source_path)
+    command_match = re.search(r"COMMANDS\s*=\s*set\(([^)]*)\)", source)
+    if not command_match:
+        fail("could not derive vNext commands from VNextOptions.COMMANDS")
+        return
+    commands = set(re.findall(r'"([^"]+)"', command_match.group(1)))
+    supported_options = set(re.findall(r'"(--[a-z][a-z0-9-]*|-[a-z])"', source))
+    takes_value = re.search(
+        r"takesValue\(String arg\)\s*\{\s*return set\((.*?)\)\.contains\(arg\);",
+        source, re.S)
+    if not takes_value:
+        fail("could not derive value-taking vNext options from VNextOptions.takesValue")
+        value_options = set()
+    else:
+        value_options = set(re.findall(r'"([^"]+)"', takes_value.group(1)))
+
+    if ("if (b.dryRun&&isResource(b.targetKind))" not in source
+            or "run --dry-run is not available for Template, Flow, or Tool targets" not in source):
+        fail("vNext parser no longer rejects dry-run for Template, Flow, and Tool RUN")
+    if ("if (b.input!=null && !(run&&isResource(b.targetKind)))" not in source
+            or "--input is supported only for Template, Flow, or Tool RUN" not in source):
+        fail("vNext parser no longer limits input to Template, Flow, and Tool RUN")
+
+    for rel in ("interfaces/cli/vnext-proposed.md",
+                "interfaces/cli/vnext-proposed.zh.md"):
+        path = DOCS / rel
+        if not path.is_file():
+            fail("missing proposed vNext CLI reference: docs/%s" % rel)
+            continue
+        text = read(path)
+        marker = re.search(r"<!-- att-doc-status: ([^>]+) -->", text[:1500])
+        if not marker or "planned" not in marker.group(1) or "issue=287" not in marker.group(1):
+            fail("%s must remain marked Planned for issue #287" % path.relative_to(ROOT))
+        grammar = re.search(r"<([^<>]+)>\s*<target-kind>", text)
+        if not grammar:
+            fail("%s does not expose a parser-shaped top-level command grammar" %
+                 path.relative_to(ROOT))
+        else:
+            documented_commands = set(grammar.group(1).split("|"))
+            if documented_commands != commands:
+                fail("%s command grammar differs from VNextOptions: documented=%s parser=%s" %
+                     (path.relative_to(ROOT), sorted(documented_commands), sorted(commands)))
+
+        documented_options = set(re.findall(
+            r"(?<!\w)--[a-z][a-z0-9-]*|(?<!\w)-[a-z](?!\w)", text))
+        if documented_options != supported_options:
+            fail("%s vNext options differ from VNextOptions: undocumented=%s unsupported=%s" %
+                 (path.relative_to(ROOT), sorted(supported_options - documented_options),
+                  sorted(documented_options - supported_options)))
+
+        backtick = chr(96)
+        if rel.endswith(".zh.md"):
+            target_rules = (
+                "Template、Flow 及 Tool RUN 會拒絕 " + backtick + "--dry-run" + backtick,
+                "直接 LOAD 會拒絕 " + backtick + "--input" + backtick,
+            )
+        else:
+            target_rules = (
+                "Template, Flow, and Tool RUN reject " + backtick + "--dry-run" + backtick,
+                "Direct LOAD rejects " + backtick + "--input" + backtick,
+            )
+        for rule in target_rules:
+            if rule not in text:
+                fail("%s is missing the parser-aligned target option rule: %s" %
+                     (path.relative_to(ROOT), rule))
+
+        # A legacy verb cannot become vNext merely by appearing in a migration table.
+        for lineno, line in enumerate(text.splitlines(), 1):
+            match = re.search(r"(?:\./att\.sh|att\.bat)\s+(.+)$", line)
+            if not match:
+                continue
+            tokens = re.findall(r"--[a-z][a-z0-9-]*|-[a-z]|[A-Za-z0-9_./:@+-]+",
+                                match.group(1))
+            index = 0
+            command = None
+            while index < len(tokens):
+                token = tokens[index]
+                if token in value_options:
+                    if index + 1 >= len(tokens):
+                        fail("%s:%s option %s is missing its value" %
+                             (path.relative_to(ROOT), lineno, token))
+                        break
+                    index += 2
+                elif token.startswith("-"):
+                    index += 1
+                else:
+                    command = token
+                    break
+            if command not in commands:
+                fail("%s:%s uses a top-level command outside the vNext parser: %s" %
+                     (path.relative_to(ROOT), lineno, command or "<missing>"))
+
+
+def check_server_validation_api_contract():
+    servlet_path = ROOT / "att-server/src/main/java/att/server/ApiServlet.java"
+    runtime_path = ROOT / "att-server/src/main/java/att/server/ServerRuntime.java"
+    dto_path = ROOT / "att-server-api/src/main/java/att/server/api/AttValidationReport.java"
+    schema_path = SCHEMAS / "att-validation-v1.schema.json"
+    test_path = ROOT / "att-server/src/test/java/att/server/AuthenticationIntegrationTest.java"
+    servlet = read(servlet_path)
+    runtime = read(runtime_path)
+    dto = read(dto_path)
+    tests = read(test_path)
+    try:
+        schema = json.loads(read(schema_path))
+    except Exception as error:
+        fail("att-validation/v1 schema is invalid JSON: %s" % error)
+        return
+
+    if '"/validation".equals(path)' not in servlet or "validationPost(req,res,requestId,authorizationPrincipal)" not in servlet:
+        fail("Server POST route table no longer dispatches /validation to validationPost")
+    validation_method = re.search(
+        r"(?ms)^    private void validationPost\b.*?^    }\s*$", servlet)
+    if not validation_method or "runtime.validateVNext(input,actor)" not in validation_method.group(0):
+        fail("POST /validation no longer delegates to ServerRuntime.validateVNext")
+    elif ("requireOperator(req,res,requestId)" not in validation_method.group(0)
+          or "requireSystemAdmin(req,res,requestId)" not in validation_method.group(0)):
+        fail("POST /validation authorization no longer distinguishes operators from system administrators")
+
+    allowed_match = re.search(r"allowedFields\s*=\s*Set\.of\(([^)]*)\)", runtime)
+    if not allowed_match:
+        fail("could not derive Server validation request fields")
+        allowed_fields = set()
+    else:
+        allowed_fields = set(re.findall(r'"([^"]+)"', allowed_match.group(1)))
+    expected_request_fields = {
+        "command", "targetKind", "target", "packageId", "environment", "all",
+    }
+    if allowed_fields != expected_request_fields:
+        fail("Server validation request field set changed: %s" % sorted(allowed_fields))
+
+    tick = chr(96)
+    for rel, label in (
+            ("interfaces/server-api/validation.md", "Allowed fields:"),
+            ("interfaces/server-api/validation.zh.md", "允許欄位：")):
+        path = DOCS / rel
+        if not path.is_file():
+            fail("missing planned Server validation API page: docs/%s" % rel)
+            continue
+        text = read(path)
+        marker = re.search(r"<!-- att-doc-status: ([^>]+) -->", text[:1500])
+        if (not marker or "planned" not in marker.group(1)
+                or "release=unreleased" not in marker.group(1)
+                or "issue=287" not in marker.group(1)):
+            fail("%s must remain Planned until issue #287 is released" %
+                 path.relative_to(ROOT))
+        allowed_line = re.search(r"(?m)^%s\s*(.*)$" % re.escape(label), text)
+        if not allowed_line:
+            fail("%s does not list the exact Server validation request fields" %
+                 path.relative_to(ROOT))
+        else:
+            documented_fields = set(re.findall(
+                tick + r"([A-Za-z][A-Za-z0-9]*)" + tick, allowed_line.group(1)))
+            if documented_fields != allowed_fields:
+                fail("%s request fields differ from ServerRuntime.validateVNext: documented=%s server=%s" %
+                     (path.relative_to(ROOT), sorted(documented_fields), sorted(allowed_fields)))
+        for field in ("schemaVersion", "scope", "backend", "sections", "diagnostics",
+                      "counts", "overallStatus", "complete", "exitCode", "requestId"):
+            if tick + field + tick not in text:
+                fail("%s does not document response field %s" %
+                     (path.relative_to(ROOT), field))
+        if "att-validation-v1.schema.json" not in text:
+            fail("%s does not link the att-validation/v1 JSON Schema" %
+                 path.relative_to(ROOT))
+        for status in ("200", "400", "401", "403", "404", "413", "415", "500", "503", "504"):
+            if tick + status + tick not in text:
+                fail("%s does not document HTTP status %s" %
+                     (path.relative_to(ROOT), status))
+
+    required_response_fields = set(schema.get("required", []))
+    dto_fields = set(re.findall(r'out\.put\("([A-Za-z][A-Za-z0-9]*)"', dto))
+    if not required_response_fields.issubset(dto_fields):
+        fail("att-validation/v1 DTO no longer emits schema-required fields: %s" %
+             sorted(required_response_fields - dto_fields))
+    if schema.get("properties", {}).get("schemaVersion", {}).get("const") != "att-validation/v1":
+        fail("att-validation/v1 schema version changed without updating the API contract gate")
+    if "att-validation/v1" not in dto or 'report.put("requestId",requestId)' not in servlet:
+        fail("Server validation response no longer uses att-validation/v1 with requestId")
+
+    for rel in ("interfaces/server-api/v1.md", "interfaces/server-api/v1.zh.md"):
+        current = DOCS / rel
+        if not current.is_file():
+            fail("missing Current Server API index: docs/%s" % rel)
+            continue
+        text = read(current)
+        header = "| Method | Path | Purpose |" if rel.endswith("/v1.md") else "| 方法 | 路徑 | 用途 |"
+        if header not in text:
+            fail("%s is missing its Current route table" % current.relative_to(ROOT))
+            continue
+        route_table = text.split(header, 1)[1].split("\n\n", 1)[0]
+        if "/validation" in route_table or "/jobs/validate" not in route_table:
+            fail("%s must keep /validation out of Current routes and document /jobs/validate" %
+                 current.relative_to(ROOT))
+
+    for rel, link in (
+            ("interfaces/server-api/README.md", "[Validation API (planned, #287)](validation.md)"),
+            ("interfaces/server-api/README.zh.md", "[規劃中的 Validation API（#287）](validation.zh.md)")):
+        nav = DOCS / rel
+        if not nav.is_file() or link not in read(nav):
+            fail("Server API navigation is missing the Planned validation link: docs/%s" % rel)
+
+    route_position = tests.find('"/att/api/v1/validation"')
+    test_start = tests.rfind("\n", 0, route_position) + 1 if route_position >= 0 else -1
+    test_end = tests.find("JsonNode form=getJson", test_start)
+    test_block = tests[test_start:test_end] if test_start >= 0 and test_end > test_start else ""
+    if (not test_block or '"att-validation/v1"' not in test_block
+            or 'validation.path("backend")' not in test_block):
+        fail("AuthenticationIntegrationTest must assert the Server validation report contract")
+    if ",200);" not in test_block:
+        fail("AuthenticationIntegrationTest must verify a successful POST /validation response")
+    for status in ("400", "401", "403"):
+        if "assertEquals(" + status + "," not in test_block:
+            fail("AuthenticationIntegrationTest must cover POST /validation HTTP %s" % status)
+
+
 def check_secret_placeholders():
     files = []
     for root in (ROOT / "config", ROOT / "examples", PACKAGE_ROOT / "templates", PACKAGE_ROOT / "testdata"):
@@ -588,6 +809,8 @@ def main():
     check_language_parity(items)
     check_schema_references()
     check_cli_documentation()
+    check_vnext_cli_contract()
+    check_server_validation_api_contract()
     check_secret_placeholders()
     check_critical_examples()
     check_documentation_status()
