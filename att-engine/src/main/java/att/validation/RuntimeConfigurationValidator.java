@@ -61,7 +61,11 @@ public final class RuntimeConfigurationValidator {
             if (!(loaded instanceof Map)) throw new IllegalArgumentException("Shared Runtime Config must be a YAML mapping");
             raw = (Map<?, ?>) loaded;
             if (packageRoot != null && !allProfiles && validationEnvironment == null) {
-                validationEnvironment = loader.loadDiscovery(file, root, packageRoot, null).environment();
+                try {
+                    validationEnvironment = loader.loadDiscovery(file, root, packageRoot, null).environment();
+                } catch (Exception deferredDiscoveryFailure) {
+                    // Report Config and Manifest diagnostics in their own sections below.
+                }
             }
             if (!allProfiles && validationEnvironment == null && raw.get("environment") instanceof String) {
                 validationEnvironment = (String) raw.get("environment");
