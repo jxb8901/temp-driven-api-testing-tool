@@ -30,6 +30,16 @@ class PackageConfigurationTest {
         assertTrue(new String(Files.readAllBytes(config), "UTF-8").contains("environment: SIT"));
     }
 
+    @Test void omittedGlobalFieldsRetainRuntimeDefaultOriginAndSafeAuthoredPath() throws Exception {
+        Path config=global("timeoutMs: 11000\n");Path pkg=root.resolve("packages/a");
+        write(pkg.resolve("package.yaml"),"schemaVersion: att-package/v1\n");
+        FrameworkConfig effective=load(config,pkg,null);
+        assertEquals("global",effective.effectiveConfiguration().origins().get("timeoutMs"));
+        assertEquals("runtime-default",effective.effectiveConfiguration().origins().get("report.columns"));
+        java.util.Map<?,?> paths=(java.util.Map<?,?>)effective.effectiveConfiguration().metadata("SIT").get("authoredPaths");
+        assertEquals("",paths.get("report.columns"));assertEquals("config/config.yaml",paths.get("timeoutMs"));
+    }
+
     @Test void trustedContextSelectsEnvironmentWithoutInferringPackageId() throws Exception {
         Path config=global(""); Path pkg=root.resolve("packages/folder-name");
         write(pkg.resolve("package.yaml"),"schemaVersion: att-package/v1\ndefaultEnvironment: SIT\n");

@@ -1547,7 +1547,7 @@ final class ServerRuntime implements AutoCloseable {
     }
     WorkerRequest inspectionRequest(String packageId,Path root,String environment) {
         WorkerRequest request=new WorkerRequest();request.protocolVersion="att-worker/v1";request.jobId="I"+UUID.randomUUID().toString().replace("-","");request.command="inspect";
-        request.packageRoot=root.toString();request.config=config.runtimeConfigPath.toString();request.environment=environment;
+        request.packageRoot=root.toString();request.config=config.runtimeConfigPath.toString();request.environment=environment;request.registeredPackageId=packageId;
         request.maxResponseBytes=config.inspection.maxResponseBytes;request.maxSourceBytes=config.inspection.maxSourceBytes;
         request.safeTextSources=config.inspection.safeTextSources(packageId);
         request.externalTextSources=config.inspection.externalTextSources(packageId);
@@ -1939,7 +1939,7 @@ final class ServerRuntime implements AutoCloseable {
             if(rawDiagnostics instanceof List)for(Object raw:(List<?>)rawDiagnostics)if(raw instanceof Map) {
                 @SuppressWarnings("unchecked") Map<String,Object> value=(Map<String,Object>)raw;
                 Map<String,Object> safe=new LinkedHashMap<String,Object>();
-                for(String key:List.of("code","summary","detail","field","file","suggestion","resourceId","sourceFile")) {
+                for(String key:List.of("code","summary","detail","field","file","suggestion","resourceId","sourceFile","packageId")) {
                     Object item=value.get(key);
                     if(item instanceof String) {
                         String text=att.server.api.internal.DiagnosticSanitizer.redactText((String)item);
@@ -1960,7 +1960,7 @@ final class ServerRuntime implements AutoCloseable {
                 if(resourceId!=null)fallback.put("resourceId",resourceId);
                 diagnostics.add(fallback);
             }
-            String packageId=configuredPackageId(root);
+            String packageId=request.registeredPackageId==null?configuredPackageId(root):request.registeredPackageId;
             List<Map<String,String>> targets=diagnosticTargets(request);
             for(Map<String,Object> diagnostic:diagnostics) {
                 if(packageId!=null)diagnostic.putIfAbsent("packageId",packageId);
@@ -2013,7 +2013,7 @@ final class ServerRuntime implements AutoCloseable {
         for(Object raw:rawDiagnostics)if(raw instanceof Map) {
             @SuppressWarnings("unchecked") Map<String,Object> value=(Map<String,Object>)raw;
             Map<String,Object> safe=new LinkedHashMap<>();
-            for(String key:List.of("code","summary","detail","field","file","suggestion")) {
+            for(String key:List.of("code","summary","detail","field","file","suggestion","packageId")) {
                 Object item=value.get(key);
                 if(item instanceof String) {
                     String text=att.server.api.internal.DiagnosticSanitizer.redactText((String)item);
@@ -2204,7 +2204,7 @@ final class ServerRuntime implements AutoCloseable {
                     response.put("errorCode",errorCode);
                     if(workerDiagnostic!=null) {
                         Map<String,Object> diagnostic=new LinkedHashMap<>();
-                        for(String key:List.of("code","summary","detail","field","file","suggestion","resourceId","sourceFile")) {
+                        for(String key:List.of("code","summary","detail","field","file","suggestion","resourceId","sourceFile","packageId")) {
                             Object value=workerDiagnostic.get(key);
                             if(value instanceof String)diagnostic.put(key,value);
                         }

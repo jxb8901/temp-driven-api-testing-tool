@@ -45,6 +45,18 @@ class ServerRuntimePackageManifestTest {
             assertEquals(true,runtime.inspectPackageConfiguration("owner","declared",null,"owner").get("canEdit"));
         }
     }
+    @Test void candidateDescriptorFailureIncludesRegisteredPackageAndSafeDeclaration() throws Exception {
+        try(var runtime=runtime("")) {
+            String source="schemaVersion: att-package/v1\ntestdata: {descriptors: [testdata/missing.yaml]}\n";
+            String id=(String)runtime.manifestPublisher.stage("owner","owner",source,PackageManifestPublisher.digest(new byte[0])).get("draftId");
+            ServerRuntime.DraftValidationException failure=assertThrows(ServerRuntime.DraftValidationException.class,()->runtime.manifestPublisher.validate("owner","owner",id));
+            assertEquals("owner",failure.diagnostics.get(0).get("packageId"));
+            String diagnostics=failure.diagnostics.toString();assertTrue(diagnostics.contains("testdata/missing.yaml"),diagnostics);
+            assertTrue(diagnostics.contains("missing"),diagnostics);assertTrue(diagnostics.contains("Manifest/env"),diagnostics);
+            assertFalse(diagnostics.contains(temp.toString()),diagnostics);assertFalse(Files.exists(pkg.resolve("package.yaml")));
+        }
+    }
+
     @Test void retainsApprovedOriginThroughJobsSchedulesArtifactsReplayAndRestart() throws Exception {
         String jobId,scheduleId;Map<String,Object> approved;
         try(var runtime=runtime("")) {

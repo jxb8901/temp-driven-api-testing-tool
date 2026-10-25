@@ -97,7 +97,8 @@ public final class PackageManifestInspector {
             String origin = "environment".equals(entry.getKey()) && value.effectiveConfiguration() != null
                     ? value.effectiveConfiguration().environmentOrigin() : origins.get(entry.getKey());
             field.put("origin", origin == null ? "global" : origin);
-            field.put("authoredPath", "package".equals(origin) ? "package.yaml" : "runtime-default".equals(origin) ? "" : "config/config.yaml");
+            field.put("authoredPath", "package".equals(origin) ? "package.yaml" : "runtime-default".equals(origin) ? ""
+                    : "request".equals(origin) ? "request.environment" : "context".equals(origin) ? "Context.environment" : "config/config.yaml");
             fields.put(entry.getKey(), field);
         }
         return fields;

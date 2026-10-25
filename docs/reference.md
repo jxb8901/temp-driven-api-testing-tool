@@ -2881,7 +2881,7 @@ Source reading uses the existing source browsing policy and structured masking. 
 4. Review the safe declaration, effective values, Environment, and origins; select **Review validated Manifest**.
 5. Select **Publish reviewed Manifest**. The Server rechecks ownership, live digest, global/Package dependencies, and schema revision, then atomically replaces `package.yaml`.
 
-A conflict requires a fresh draft. Publication records an audit intent before replacement and a completion record afterward. History stays in private Server data; the API returns revision identifiers rather than raw historical source. **Stage rollback** creates another candidate that must pass the same validation and review gates. Restoring pre-Manifest defaults produces a canonical empty `att-package/v1` file, as shown in review.
+Edited source and pending drafts participate in Studio navigation protection. Refresh and view switching stay disabled until the source is staged or explicitly discarded. A conflict requires a fresh draft. Publication records an audit intent before replacement and a completion record afterward. History stays in private Server data; the API returns revision identifiers rather than raw historical source. **Stage rollback** creates another candidate that must pass the same validation and review gates. Restoring pre-Manifest defaults produces a canonical empty `att-package/v1` file, as shown in review.
 
 The trusted deployment policy is optional and defaults to editing disabled:
 

@@ -148,6 +148,7 @@ function ConfigurationRouteView({ route, packages }: {
 }) {
   const workspace = useAppShellContext();
   const [showManifest, setShowManifest] = useState(false);
+  const [manifestDirty, setManifestDirty] = useState(false);
   useEffect(() => { setShowManifest(false); }, [route.filePath, route.packageId]);
   const navigation = useNavigationGuard();
   const selectedEnvironment = route.environment ?? workspace.selectedEnvironment;
@@ -170,9 +171,9 @@ function ConfigurationRouteView({ route, packages }: {
   return <>
     <nav className="configuration-scope" aria-label="Configuration ownership">
       <button type="button" aria-pressed={showManifest} disabled={!route.packageId} onClick={() => setShowManifest(true)}>Package Configuration</button>
-      <button type="button" aria-pressed={!showManifest} onClick={() => setShowManifest(false)}>Shared Configuration</button>
+      <button type="button" aria-pressed={!showManifest} disabled={manifestDirty} onClick={() => setShowManifest(false)}>Shared Configuration</button>
     </nav>
-    {showManifest && route.packageId ? <PackageManifestWorkspace key={route.packageId} api={api} packageId={route.packageId} /> : <ConfigurationWorkspace
+    {showManifest && route.packageId ? <PackageManifestWorkspace key={route.packageId} api={api} packageId={route.packageId} registerUnsavedChanges={navigation.registerUnsavedChanges} onDirtyChange={setManifestDirty} /> : <ConfigurationWorkspace
     api={api}
     packages={packages}
     packageId={route.packageId || ''}

@@ -14,23 +14,31 @@ function readable(error: unknown): string {
 }
 const shown = (value: unknown) => typeof value === 'string' ? value : JSON.stringify(value, null, 2);
 
-export function PackageManifestWorkspace({ api, packageId }: { api: PackageManifestApi; packageId: string }) {
+export function PackageManifestWorkspace({ api, packageId, registerUnsavedChanges, onDirtyChange }: {
+  api: PackageManifestApi; packageId: string;
+  registerUnsavedChanges?: (dirty: boolean, description?: string) => () => void;
+  onDirtyChange?: (dirty: boolean) => void;
+}) {
   const [view, setView] = useState<ManifestView>('effective');
   const [environment, setEnvironment] = useState('');
   const [selection, setSelection] = useState('');
   const [projection, setProjection] = useState<ManifestProjection | null>(null);
   const [source, setSource] = useState('');
+  const [baseline, setBaseline] = useState('');
   const [draft, setDraft] = useState<ManifestDraft | null>(null);
   const [history, setHistory] = useState<ManifestHistory[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
   const [revision, refresh] = useState(0);
+  const dirty = source !== baseline || !!draft;
+  useEffect(() => registerUnsavedChanges?.(dirty, 'unpublished Package Manifest changes'), [dirty, registerUnsavedChanges]);
+  useEffect(() => { onDirtyChange?.(dirty);return () => onDirtyChange?.(false); }, [dirty, onDirtyChange]);
   const request = useRef<AbortController | null>(null);
   const epoch = useRef(0);
   useEffect(() => {
     epoch.current += 1;
-    setDraft(null);setHistory([]);setMessage('');setSource('');setEnvironment('');setSelection('');
+    setDraft(null);setHistory([]);setMessage('');setSource('');setBaseline('');setEnvironment('');setSelection('');
     return () => { epoch.current += 1; request.current?.abort(); };
   }, [packageId]);
   useEffect(() => {
@@ -41,7 +49,7 @@ export function PackageManifestWorkspace({ api, packageId }: { api: PackageManif
       const result = view === 'source' && !declared.present ? { ...declared, available: true, text: 'schemaVersion: att-package/v1\n', redacted: false }
         : view === 'declared' ? declared : await api.getPackageManifest(packageId, view, environment || undefined, controller.signal);
       if (controller.signal.aborted) return;
-      setProjection(result);if (view === 'source') setSource(result.text || '');
+      setProjection(result);if (view === 'source') {setSource(result.text || '');setBaseline(result.text || '');}
     };
     void load().catch(failure => { if (!controller.signal.aborted) setError(readable(failure)); })
       .finally(() => { if (!controller.signal.aborted) setBusy(false); });
@@ -61,10 +69,10 @@ export function PackageManifestWorkspace({ api, packageId }: { api: PackageManif
   return <section className="att-manifest-workspace" aria-label="Package Configuration">
     <header><h2>Package Configuration · {packageId}</h2>
       <p>Package defaults and Testdata belong to <code>package.yaml</code>. Shared profiles, Helpers and Tools remain in Global Configuration.</p>
-      <button type="button" disabled={busy || !!draft} onClick={() => refresh(value => value + 1)}>Refresh Package Configuration</button>
+      <button type="button" disabled={busy || dirty} onClick={() => refresh(value => value + 1)}>Refresh Package Configuration</button>
     </header>
     <nav aria-label="Package Configuration views">{(['source', 'declared', 'effective', 'compare'] as const).map(item =>
-      <button key={item} type="button" aria-pressed={view === item} disabled={busy || !!draft} onClick={() => setView(item)}>
+      <button key={item} type="button" aria-pressed={view === item} disabled={busy || dirty} onClick={() => setView(item)}>
         {item === 'compare' ? 'Compare with Global' : item[0].toUpperCase() + item.slice(1)}
       </button>)}</nav>
     {(view === 'effective' || view === 'compare') && <form onSubmit={event => { event.preventDefault();setEnvironment(selection.trim()); }}>
@@ -81,6 +89,7 @@ export function PackageManifestWorkspace({ api, packageId }: { api: PackageManif
         {!projection.available && <p>Source unavailable under the current source browsing policy.</p>}
         {projection.redacted && <p>Some source values are masked. This projection is read only to preserve protected values.</p>}
         <CodeEditor value={source} language="yaml" label="Package Manifest source" readOnly={!editable} maxCharacters={262144} onChange={setSource} />
+        {source !== baseline && !draft && <p>Unpublished Manifest changes. Create a draft or <button type="button" disabled={busy} onClick={() => {setSource(baseline);setError('');}}>Discard source changes</button> before refreshing or switching views.</p>}
         {!canWrite && <p>Source editing requires the active USER whose login matches this registered Package ID and enabled Server source policy.</p>}
         <button type="button" disabled={!editable} onClick={() => void act(async signal => {
           const staged = await api.stagePackageManifest(packageId, source, projection.manifestDigest, signal);
@@ -113,10 +122,10 @@ export function PackageManifestWorkspace({ api, packageId }: { api: PackageManif
         })}>Discard Manifest draft</button>
       </section>}
       {canWrite && <section aria-label="Manifest revision history">
-        <button type="button" disabled={busy || !!draft} onClick={() => void act(async signal => {
+        <button type="button" disabled={busy || dirty} onClick={() => void act(async signal => {
           const result = await api.getPackageManifestHistory(packageId, signal);if (!signal.aborted) setHistory(result.items);
         })}>Load Manifest history</button>
-        {history.map(item => <p key={item.manifestDigest}><code>{item.manifestDigest.slice(0, 12)}</code> · {item.modifiedAt} <button type="button" disabled={busy || !!draft || item.manifestDigest === projection.manifestDigest} onClick={() => void act(async signal => {
+        {history.map(item => <p key={item.manifestDigest}><code>{item.manifestDigest.slice(0, 12)}</code> · {item.modifiedAt} <button type="button" disabled={busy || dirty || item.manifestDigest === projection.manifestDigest} onClick={() => void act(async signal => {
           const staged = await api.rollbackPackageManifest(packageId, item.manifestDigest, projection.manifestDigest, signal);
           if (!signal.aborted) setDraft(staged);
         })}>Stage rollback {item.manifestDigest.slice(0, 12)}</button></p>)}

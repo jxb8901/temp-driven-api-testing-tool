@@ -157,7 +157,7 @@ public final class FrameworkConfigLoader {
                 if (!SchemaSupport.isDisabledKey(key)) declaredEnvironments.add(String.valueOf(key));
             packageConfig.validateEnvironments(declaredEnvironments);
             String selector = selectedEnvironment == null ? packageConfig.defaultEnvironment() : selectedEnvironment;
-            String environmentOrigin = selectedEnvironment != null ? "request" : packageConfig.defaultEnvironment() != null ? "package" : "global";
+            String environmentOrigin = selectedEnvironment != null ? "request" : packageConfig.defaultEnvironment() != null ? "package" : rawMap.get("environment") != null ? "global" : "runtime-default";
             Map<String, Object> map = resolveEnvironment(rawMap, v29 || v28 || v27 || v26, v29 || v28 || v27,
                     v29 || v28, selector);
             att.validation.SchemaMigrationGuidance.verify(schema,
@@ -199,7 +199,7 @@ public final class FrameworkConfigLoader {
             Map<?, ?> policy = rawMap.get("packagePolicy") instanceof Map ? (Map<?, ?>) rawMap.get("packagePolicy") : Collections.emptyMap();
             int timeoutCeiling = positiveInteger(policy.get("maxTimeoutMs"), 300000, "packagePolicy.maxTimeoutMs");
             return EffectiveConfigurationResolver.resolve(global, packageConfig, packageRoot, environmentOrigin,
-                    PackageConfig.sha256(att.validation.JsonSupport.mapper().writeValueAsBytes(rawMap)), timeoutCeiling, legacyTestdata(rawMap), packageDiagnostics(rawMap, packageConfig));
+                    PackageConfig.sha256(att.validation.JsonSupport.mapper().writeValueAsBytes(rawMap)), timeoutCeiling, legacyTestdata(rawMap), packageDiagnostics(rawMap, packageConfig), map);
         } catch (att.validation.DiagnosticException e) {
             throw YamlSupport.locate(e, path, e.field()).forPackage(packageRoot);
         } catch (Exception e) {

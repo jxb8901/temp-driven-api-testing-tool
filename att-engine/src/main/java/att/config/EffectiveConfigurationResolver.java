@@ -10,7 +10,7 @@ public final class EffectiveConfigurationResolver {
 
     public static FrameworkConfig resolve(FrameworkConfig global, PackageConfig pkg, Path root,
                                           String environmentOrigin, String globalDigest, int maxTimeoutMs,
-                                          boolean legacyTestdata, java.util.List<String> diagnostics) throws Exception {
+                                          boolean legacyTestdata, java.util.List<String> diagnostics, Map<?,?> globalDeclared) throws Exception {
         if (pkg.timeoutMs() != null && pkg.timeoutMs() > maxTimeoutMs)
             throw new IllegalArgumentException("package.yaml [Manifest] defaults.timeoutMs exceeds administrator packagePolicy.maxTimeoutMs");
         PackageConfig.safeRelative(root, pkg.templatesRoot().toString().replace('\\', '/'));
@@ -30,8 +30,20 @@ public final class EffectiveConfigurationResolver {
         origins.put("report.junit.caseLogEmbedThresholdBytes", pkg.junitLimit() == null ? "global" : "package");
         origins.put("caseLog.yamlAnchors", pkg.yamlAnchors() == null ? "global" : "package");
         origins.put("xml.namespaceMode", pkg.namespaceMode() == null ? "global" : "package");
+        for(Map.Entry<String,String> field : origins.entrySet()) {
+            if("global".equals(field.getValue()) && !"environment".equals(field.getKey()) && !"testdata".equals(field.getKey())
+                    && !declared(globalDeclared,field.getKey()))field.setValue("runtime-default");
+        }
         String identity = PackageConfig.sha256((globalDigest + "\n" + pkg.digest() + "\n" + global.environment()
-                + "\n" + att.Version.PRODUCT + "\n" + att.validation.SchemaFiles.registryDigest() + "\n" + root.toAbsolutePath().normalize()).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                + "\n" + att.Version.PRODUCT + "\n" + att.Version.GIT_COMMIT + "\n" + att.validation.SchemaFiles.registryDigest() + "\n" + root.toAbsolutePath().normalize()).getBytes(java.nio.charset.StandardCharsets.UTF_8));
         return new FrameworkConfig(global, pkg, new EffectiveExecutionConfig(identity, environmentOrigin, pkg.digest(), globalDigest, origins, diagnostics), legacyTestdata);
+    }
+    private static boolean declared(Map<?,?> source, String path) {
+        Object current=source;
+        for(String part:path.split("\\.")) {
+            if(!(current instanceof Map)||!((Map<?,?>)current).containsKey(part))return false;
+            current=((Map<?,?>)current).get(part);
+        }
+        return current!=null;
     }
 }

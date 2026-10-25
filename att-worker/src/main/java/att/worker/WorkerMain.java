@@ -221,6 +221,8 @@ public final class WorkerMain {
             else if(error instanceof PackageConfigurationInspector.ConfigurationLimitException) { code="ATT-RESOURCE-LIMIT"; message="Package configuration inspection exceeded a configured limit"; }
             else if(error instanceof IllegalArgumentException) { code="WORKER_REQUEST_INVALID"; exit=2; status="INVALID"; }
             Map<String,Object> diagnostic=fields("code",code,"message",DiagnosticSanitizer.redactText(message==null?"ATT operation failed":message));
+            if(request.registeredPackageId!=null&&request.registeredPackageId.matches("[A-Za-z0-9][A-Za-z0-9._-]{0,127}"))
+                diagnostic.put("packageId",request.registeredPackageId);
             boolean draftInspection="inspect".equals(request.command)&&(("package-configuration".equals(request.inspectionType)&&"validate".equals(request.inspectionAction))||"debug-input".equals(request.inspectionAction)||"debug-form".equals(request.inspectionAction)
                     ||"quick-load-input".equals(request.inspectionAction)||"quick-load-form".equals(request.inspectionAction)
                     ||"load-templates".equals(request.inspectionAction)||"load-template-compose".equals(request.inspectionAction)

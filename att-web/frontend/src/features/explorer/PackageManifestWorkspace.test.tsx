@@ -52,6 +52,21 @@ describe('Package Manifest publication', () => {
     expect(api.publishPackageManifest).toHaveBeenCalledTimes(1);expect(host.textContent).toContain('Manifest published');
     expect(host.querySelector('[aria-label="Manifest publication review"]')).toBeNull();
   });
+  it('retains edited source until explicit discard and registers draft navigation protection', async () => {
+    const api=fixture();const release=vi.fn(),register=vi.fn(() => release);
+    await act(async () => {root.render(<PackageManifestWorkspace api={api} packageId="owner" registerUnsavedChanges={register} />);});
+    await click('Source');const editor=host.querySelector('textarea')!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value')!.set!.call(editor,'schemaVersion: att-package/v1\ndefaultEnvironment: UAT\n');
+      editor.dispatchEvent(new Event('input',{bubbles:true}));
+    });
+    expect(button('Effective').disabled).toBe(true);expect(button('Refresh Package Configuration').disabled).toBe(true);
+    expect(register).toHaveBeenLastCalledWith(true,'unpublished Package Manifest changes');
+    expect(editor.value).toContain('UAT');await click('Discard source changes');
+    expect(editor.value).not.toContain('UAT');expect(button('Effective').disabled).toBe(false);
+    await click('Create Manifest draft');expect(register).toHaveBeenLastCalledWith(true,'unpublished Package Manifest changes');
+    await click('Discard Manifest draft');expect(register).toHaveBeenLastCalledWith(false,'unpublished Package Manifest changes');
+  });
   it('keeps masked source read only and never stages the projected text', async () => {
     const api = fixture(true);await render(api);await click('Source');
     expect((host.querySelector('textarea') as HTMLTextAreaElement).readOnly).toBe(true);
