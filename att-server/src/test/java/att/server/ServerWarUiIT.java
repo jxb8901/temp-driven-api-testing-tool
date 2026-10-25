@@ -1035,7 +1035,7 @@ class ServerWarUiIT {
         Path nestedTool = Files.createDirectories(packageRoot.resolve("tools/mq")).resolve("check-queue.sh");
         Path configRoot = Files.createDirectories(localHome.resolve("config"));
         Files.writeString(configRoot.resolve("config.yaml"),
-                "schemaVersion: att-config/v2.12\nenvironment: SIT\nenvironments:\n  SIT:\n    testdata: [testdata/generated.yaml]\n  UAT: {}\n"
+                "schemaVersion: att-config/v2.12\nenvironment: SIT\nenvironments:\n  SIT: {}\n  UAT: {}\n"
                         + "testcase:\n  root: testcase\ntemplates:\n  root: templates\ntools:\n  checkQueue:\n"
                         + "    name: Check queue\n    description: Nested Tool script default source\n"
                         + "    command: [bash, tools/mq/check-queue.sh]\n    stdoutFormat: text\n    arguments: {}\n");
@@ -1043,6 +1043,7 @@ class ServerWarUiIT {
         Path tools = Files.createDirectories(configRoot.resolve("tools"));
         Files.writeString(tools.resolve("att-helper.sh"), "#!/bin/sh\n# Safe configuration helper source\necho password=helper-secret\n");
         Files.writeString(nestedTool, "#!/bin/sh\n# package-local script source\necho safe\n");
+        Files.writeString(packageRoot.resolve("package.yaml"),"schemaVersion: att-package/v1\ntestdata: {descriptors: [testdata/generated.yaml]}\n");
         Path testdata = Files.createDirectories(packageRoot.resolve("testdata"));
         Files.writeString(testdata.resolve("generated.yaml"),
                 "schemaVersion: att-testdata/v1.0\nid: generatedAccounts\nrecords:\n  generate:\n    seq:\n      from: 1000\n      to: 1120\n      format: '%06d'\n  record:\n    id: 'A-%{seq}'\n"
