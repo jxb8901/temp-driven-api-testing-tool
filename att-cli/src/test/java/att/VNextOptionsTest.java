@@ -32,4 +32,28 @@ class VNextOptionsTest {
         assertThrows(IllegalArgumentException.class,()->VNextOptions.parse(new String[]{"load","scenario","load/smoke.yaml","--dry-run"}));
         assertThrows(IllegalArgumentException.class,()->VNextOptions.parse(new String[]{"--local","--server","sit","validate","config"}));
     }
+
+    @Test void resourceRunDryRunIsRejectedForLocalAndRemoteBeforeDispatch() {
+        assertThrows(IllegalArgumentException.class,()->VNextOptions.parse(new String[]{
+                "--local","run","flow","PAYMENT.submit","--dry-run"}));
+        assertThrows(IllegalArgumentException.class,()->VNextOptions.parse(new String[]{
+                "--server","sit","-p","payments","run","tool","mq.send","--dry-run"}));
+        assertTrue(VNextOptions.parse(new String[]{"--local","run","flow","PAYMENT.submit"}).input()==null);
+    }
+
+    @Test void directLoadRejectsInputUntilBothAdaptersSupportIt() {
+        assertThrows(IllegalArgumentException.class,()->VNextOptions.parse(new String[]{
+                "--local","load","flow","PAYMENT.submit","--input","templates/flows/PAYMENT.submit/load.yaml"}));
+        assertThrows(IllegalArgumentException.class,()->VNextOptions.parse(new String[]{
+                "--server","sit","-p","payments","load","template","PAYMENT_INVOKE","--input","input.yaml"}));
+        assertEquals("input.yaml",VNextOptions.parse(new String[]{
+                "--local","run","flow","PAYMENT.submit","--input","input.yaml"}).input().toString());
+        assertEquals("input.yaml",VNextOptions.parse(new String[]{
+                "--server","sit","-p","payments","run","flow","PAYMENT.submit","--input","input.yaml"}).input().toString());
+    }
+
+    @Test void requestedFormatSurvivesOtherArgumentErrors() {
+        assertEquals("json",VNextOptions.requestedFormat(new String[]{"--bad-option","--format","json"}));
+        assertEquals("human",VNextOptions.requestedFormat(new String[]{"--format","xml"}));
+    }
 }

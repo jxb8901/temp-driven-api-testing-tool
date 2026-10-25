@@ -54,6 +54,56 @@ public final class VNextOptions {
         return false;
     }
 
+    /** Returns a valid machine-output request even when another argument later fails parsing. */
+    public static String requestedFormat(String[] args) {
+        String format = "human";
+        if (args == null) return format;
+        for (int i=0;i<args.length;i++) {
+            if (!"--format".equals(args[i]) || i+1>=args.length) continue;
+            String candidate=args[++i];
+            if ("human".equals(candidate)||"json".equals(candidate)) format=candidate;
+        }
+        return format;
+    }
+
+    public static String requestedBackend(String[] args) {
+        if (args != null) for (String arg : args) {
+            if ("--server".equals(arg)) return "SERVER";
+            if ("--local".equals(arg)) return "LOCAL";
+        }
+        return "LOCAL";
+    }
+
+    public static String requestedCommand(String[] args) {
+        if (args == null) return null;
+        for (int i=0;i<args.length;i++) {
+            if (takesValue(args[i]) && i+1<args.length) { i++; continue; }
+            if (COMMANDS.contains(args[i])) return args[i];
+        }
+        return null;
+    }
+
+    public static String requestedValidationScope(String[] args) {
+        if (args == null) return "VALIDATION";
+        int command=-1;
+        for (int i=0;i<args.length;i++) {
+            if (takesValue(args[i]) && i+1<args.length) { i++; continue; }
+            if ("validate".equals(args[i])) { command=i; break; }
+        }
+        if (command<0) return "VALIDATION";
+        for (int i=command+1;i<args.length;i++) {
+            String arg=args[i];
+            if ("--all".equals(arg)) return "ALL";
+            if (takesValue(arg) && i+1<args.length) { i++; continue; }
+            if (!arg.startsWith("-")) {
+                if ("config".equals(arg)) return "CONFIG";
+                if ("package".equals(arg)) return "PACKAGE";
+                return "SELECTED";
+            }
+        }
+        return "VALIDATION";
+    }
+
     public static VNextOptions parse(String[] args) {
         if (args == null) args=new String[0];
         Builder b=new Builder();
@@ -124,8 +174,10 @@ public final class VNextOptions {
         if (b.rerunFailed||b.dryRun||b.failFast||!"reject".equals(b.concurrencyMode)||b.outputDirectory!=null||b.runId!=null||!b.suites.isEmpty()||b.suiteDirectory!=null||!b.caseIds.isEmpty()||!b.tags.isEmpty()||!b.excludeTags.isEmpty()) {
             if (!run) throw invalid("RUN selection and execution options are valid only for run");
         }
-        if (b.input!=null||!b.overrides.isEmpty()) if (!(run&&isResource(b.targetKind)||load&&isResource(b.targetKind)))
-            throw invalid("--input and --set require a Template, Flow, or Tool target");
+        if (b.input!=null && !(run&&isResource(b.targetKind)))
+            throw invalid("--input is supported only for Template, Flow, or Tool RUN");
+        if (!b.overrides.isEmpty() && !(run&&isResource(b.targetKind)||load&&isResource(b.targetKind)))
+            throw invalid("--set requires a Template, Flow, or Tool target");
         if (load&&b.dryRun) throw invalid("load --dry-run is not available in the minimal CLI");
         if (b.users!=null||b.arrivalRate!=null||b.warmup!=null||b.rampUp!=null||b.duration!=null||b.rampDown!=null||b.thinkTime!=null||b.maxConcurrent!=null||b.overloadPolicy!=null) {
             if (!load) throw invalid("Load pacing options are valid only for load");
@@ -133,6 +185,8 @@ public final class VNextOptions {
         }
         if (run) {
             if (!set("case","cases","suite","template","flow","tool").contains(b.targetKind)) throw invalid("run target must be case, cases, suite, template, flow, or tool");
+            if (b.dryRun&&isResource(b.targetKind))
+                throw invalid("run --dry-run is not available for Template, Flow, or Tool targets");
             if ("cases".equals(b.targetKind)) {
                 if (b.target!=null) throw invalid("run cases does not take a target ID");
                 if (b.all&&(!b.suites.isEmpty()||b.suiteDirectory!=null||!b.caseIds.isEmpty()||!b.tags.isEmpty()||!b.excludeTags.isEmpty()))

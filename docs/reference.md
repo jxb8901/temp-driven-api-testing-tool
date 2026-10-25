@@ -101,7 +101,7 @@ Status: Normative end-user documentation; generated from modular sources
   - [API paths](#api-paths)
 - [CLI reference](#cli-reference)
   - [Choose a command](#choose-a-command)
-  - [Minimal vNext CLI](#minimal-vnext-cli)
+  - [Availability in ATT 4.2.4](#availability-in-att-424)
   - [Build a source checkout](#build-a-source-checkout)
   - [Find syntax, options, and examples by task](#find-syntax-options-and-examples-by-task)
   - [Use ATT Server from the CLI](#use-att-server-from-the-cli)
@@ -956,12 +956,17 @@ All adapters resolve the environment, construct canonical Context, validate the 
 
 ### Unified RUN and schedules
 
+<!-- att-doc-status: current release=4.2.4 -->
+
 ATT 4.2.4 represents functional one-shot execution as **RUN**. A RUN executes a Case, Template, Flow, Tool, or a selected batch of Cases. **Debug** is an optional diagnostic mode of RUN. **LOAD** retains its performance engine, pacing controls and specialized reports.
+
+The released Local CLI keeps its interface-specific compatibility boundary: its run verb selects workbook Cases, and standalone debug runs one Template, Flow or Tool. ATT Remote retains its legacy Server commands. This shared RUN model does not mean the proposed vNext CLI grammar is released; see the [Planned vNext page](interfaces/cli/vnext-proposed.md).
 
 #### Validate and execute a RUN
 
 Use the same authenticated Server origin and context path as ATT Studio. Send this request to `POST /api/v1/drafts/run`:
 
+<!-- att-doc-example: current id=unified-run-draft schema=att-execution/v1 format=json -->
 ```json
 {
   "schemaVersion": "att-execution/v1",
@@ -1014,6 +1019,7 @@ Canonical creation requests use `schemas/att-schedule-v2.schema.json`; legacy ro
 
 Create a RUN schedule by sending this body to `POST /api/v1/schedules`:
 
+<!-- att-doc-example: current id=run-schedule schema=att-schedule/v2 format=json -->
 ```json
 {
   "schemaVersion": "att-schedule/v2",
@@ -1076,7 +1082,9 @@ Use the returned `draftId`, package, environment and canonical `executionType: r
 
 ### Run mode
 
-Run executes selected authored Testcases from a workbook. Each selected Testcase produces one Case execution with a status and evidence record. Use *Testcase* for the normalized workbook row and *Case execution* for that runtime result; the Case ID is the shared identifier.
+<!-- att-doc-status: current release=4.2.4 -->
+
+The ATT 4.2.4 Local CLI run command is a legacy Case adapter: it executes selected authored Testcases from a workbook. The broader functional model and direct resource targets are defined in [Unified RUN](reference/execution-modes/unified-run.md).
 
 ```sh
 ./att.sh run --all
@@ -1592,6 +1600,7 @@ Built-ins use `builtin:<mode>`. Put package templates in `load/templates/` and b
 
 Catalog inspection pages contain at most 100 items and also honor the configured serialized response budget (256 KiB by default). Follow `nextOffset` until it is null: each page retains complete definitions, so the same query and offset retrieve the corresponding definitions without a separate detail call. A definition that cannot fit even alone is listed as `response-too-large` without its definition; reduce its size for Studio, or compose it directly by file reference in the CLI. CLI `load --list-templates` follows every page automatically and retains the scan-limit `truncated` indicator.
 
+<!-- att-doc-example: current id=multi-workload-load-template schema=att-load-template/v1 format=yaml -->
 ```yaml
 schemaVersion: att-load-template/v1
 name: Independent mixed pools
@@ -1607,6 +1616,7 @@ workloads:
     mix: [{id: purchase, weight: 40}, {id: report, weight: 60}]
 ```
 
+<!-- att-doc-example: current id=multi-workload-load-bindings schema=att-load-bindings/v1 format=yaml -->
 ```yaml
 schemaVersion: att-load-bindings/v1
 bindings:
@@ -2932,6 +2942,9 @@ Source revision conflicts return `409`; denied source access or Environment poli
 
 ## CLI reference
 
+<!-- att-doc-status: current release=4.2.4 -->
+
+
 ### Choose a command
 
 | Command | Purpose | External tools? |
@@ -2949,43 +2962,11 @@ Source revision conflicts return `409`; denied source access or Environment poli
 | `clean` | Remove documented ATT-generated output | No |
 | `remote` | Submit and manage jobs through ATT Server's REST/SSE API | ATT Server |
 
-Existing compatibility commands remain available during migration. The **minimal vNext execution grammar** has exactly three top-level commands: `run`, `load`, and `validate`.
+The commands in this table are the ATT 4.2.4 CLI. The separate vNext proposal is not part of this release.
 
-### Minimal vNext CLI
+### Availability in ATT 4.2.4
 
-```text
-att [--local | --server <profile|url>] [-p <packageId>] [-e <profile>] \
-    [--config <path>] [--format human|json] <run|load|validate> <target-kind> [target]
-```
-
-`--local` and `--server` are mutually exclusive. With neither flag, vNext uses Local Engine. Local Package selection uses `ATT_PACKAGE_ROOT` or the current directory when `-p` is omitted; `-p <id>` resolves only to the immediate `ATT_HOME/packages/<id>` directory. Remote RUN/LOAD and Package or selected-target validation require `-p <id>` registered with the Server; Remote `validate config` may omit it to check only central configuration. Remote paths are Package-relative, and the Server owns its Runtime Config.
-
-| Command | Example | Behavior |
-|---|---|---|
-| `run` | `att --local -p payments run case quickStart.default.QS001` | Run a Case, Suite workbook, all Cases, Template, Flow, or Tool; Local runs synchronously. |
-| `load` | `att --server sit -p payments load flow PAYMENT.submit --arrival-rate 5/s --duration 2m` | Run a Flow, Template, Tool, or authored Load Scenario through the existing Load Engine. |
-| `validate config` | `att --local -p payments -e SIT validate config` | Check shared Runtime Config and the selected Package's effective Config and Testdata references without business I/O. |
-| `validate package` | `att --server sit -p payments validate package` | Check the full registered Package inventory and static dependencies. |
-| selected `validate` | `att --local -p payments validate flow PAYMENT.submit` | Check the target and its dependency closure. |
-| `validate --all` | `att --server sit validate --all --format json` | Aggregate shared Config, active Server Config, and all in-scope Packages. Server mode requires installation-wide administrator permission. |
-
-`validate --all` cannot be combined with a target, `-p`, or `-e`. Local validation never creates or changes Server data directories. A missing optional active Server Config is reported as `SKIP`; an explicitly selected missing or invalid file is `FAIL`. Server validation checks only registered Packages and uses the Server-owned Runtime Config.
-
-Validation is read-only: it does not execute Tools, send Load traffic, probe DB/MQ systems, or modify Config, Package files, or outputs. Human output has hierarchical `PASS`/`FAIL`/`WARN`/`SKIP` sections. `--format json` emits one `att-validation/v1` report on stdout. Exit codes are `0` for PASS, `1` for functional RUN/LOAD failure, `2` for invalid input or validation failure, `3` for execution error/cancellation, and `4` for Remote transport or untrusted-result failure. No Local Job store or `--detach` is part of this grammar.
-
-Common vNext options are `-p, --package`, `-e, --env`, `--format`, `--quiet`, `--verbose`, `--help`, and `--version`. `--config <path>` is Local-only. RUN selection options include `--suite`, `--suite-dir`, `--case`, `--tag`, `--exclude-tag`, `--all`, `--rerun-failed`, `--dry-run`, `--fail-fast`, `--run-id`, and Local-only `--output-dir`. Resource RUN/LOAD accepts `--input` and repeatable `--set`; LOAD accepts `--users` or `--arrival-rate` plus duration, warmup, ramp, think-time, concurrency, and overload options. `--users` and `--arrival-rate` cannot be combined. Unsupported options and invalid combinations fail before submission or traffic.
-
-#### Migrate existing commands
-
-| Existing syntax | vNext syntax |
-|---|---|
-| `att run --suite testcase/payment.xlsx` | `att --local run suite testcase/payment.xlsx` |
-| `att debug flow PAYMENT.submit --input debug.yaml` | `att --local run flow PAYMENT.submit --input debug.yaml` |
-| `att load load/payment.yaml --users 5 --duration 60s` | `att --local load scenario load/payment.yaml --users 5 --duration 60s` |
-| `att remote run payments --suite testcase/payment.xlsx` | `att --server sit -p payments run suite testcase/payment.xlsx` |
-| `att remote validate payments --package` | `att --server sit -p payments validate package` |
-
-Legacy verbs remain on the compatibility path during migration. They are not additional vNext commands. Management commands and advanced Remote detach remain outside this minimal contract.
+This Reference describes the CLI shipped with ATT 4.2.4. The vNext grammar is a separate [Planned proposal](interfaces/cli/vnext-proposed.md); it is not a current command interface. Legacy commands remain supported in this release.
 
 ### Build a source checkout
 

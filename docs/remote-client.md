@@ -1,5 +1,8 @@
 # ATT Remote client
 
+<!-- att-doc-status: legacy-current release=4.2.4 -->
+
+
 ATT Remote lets you use an ATT Server from the existing `att.sh` or `att.bat` launcher. It sends requests to the Server's public REST API, watches job events over SSE, and returns the canonical result as an ATT exit code. Local commands remain local.
 
 ## Configure a Server profile
@@ -66,27 +69,6 @@ Pass the logical Server package ID first. Familiar ATT selection and environment
 Paths such as `--suite`, `--suite-dir`, `--config`, `--input`, and a Load scenario are logical paths inside the Server package. The client rejects absolute paths and parent-directory traversal. The request contains `packageId`, never `PACKAGE_ROOT`, `SERVER_DATA_DIR`, Worker paths, or a client output directory.
 
 Commands wait for a terminal result by default. The client submits once, consumes ordered status/progress/log/diagnostic events, retrieves the result, and exits. It does not invoke `att-engine` locally. `jobs --principal <text>` searches the existing principal field by case-insensitive substring, including server-formatted anonymous labels: searching for `alice` also matches `alice(anonym)`. Historical `anonymous` records are searchable too.
-
-## Use the minimal vNext grammar
-
-The vNext syntax puts backend and Package selection before one of the three commands `run`, `load`, or `validate`. It uses the existing Server profile and authentication transport. Remote target paths stay Package-relative; `--config` and `--output-dir` are Local-only.
-
-```sh
-./att.sh --server sit -p payments run suite testcase/payment.xlsx
-./att.sh --server sit -p payments -e SIT load flow PAYMENT.submit --arrival-rate 5/s --duration 2m
-./att.sh --server sit validate config
-./att.sh --server sit -p payments -e UAT validate config
-./att.sh --server sit -p payments validate package
-./att.sh --server sit validate --all --format json
-```
-
-`validate config` reads the Server-owned Runtime Config and returns source-aware diagnostics without executing business Tools or contacting DB/MQ systems. `validate --all` checks the shared Runtime Config, active Server Config, and registered Packages. The Server requires an administrator for this installation-wide validation; it never scans unregistered directories. A Remote client cannot submit a Runtime Config path. The result uses the versioned `att-validation/v1` report and validation failures exit with code `2`.
-
-Use `--detach` to return the job ID without keeping a background process:
-
-```sh
-./att.sh remote --server ci run payments --all --detach
-```
 
 ## Manage jobs
 

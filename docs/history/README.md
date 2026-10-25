@@ -18,3 +18,7 @@ This directory contains superseded, version-specific, compatibility, migration, 
 | [`01_Product_Vision_and_Scope.md`](01_Product_Vision_and_Scope.md) | historical product vision/scope baseline | Use the root [README](../../README.md) and current Reference for supported behavior |
 
 Historical files may contain links and terminology that reflect their original repository location and release. They are retained as snapshots and must not be linked as primary current Quick Start, Reference, or System Design destinations.
+
+## Server deployment records
+
+- [Issue #176 Server rollout checklist](issue-176-server-rollout.md) · [繁體中文](issue-176-server-rollout.zh.md)

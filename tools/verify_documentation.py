@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from pathlib import Path
 from urllib.parse import unquote
+import json
 import re
 import subprocess
 import sys
@@ -143,7 +144,7 @@ def check_markdown_links(path):
 
 def check_version_consistency(version):
     exact_prefixes = {
-        ROOT / "README.md": "# ATT %s - Automated Testing Tool" % version,
+        ROOT / "README.md": "# ATT %s — API and integration testing" % version,
         DOCS / "quick-start.md": "# ATT v%s quick start" % version,
         DOCS / "quick-start.zh.md": "# ATT v%s 快速入門" % version,
         DOCS / "reference.md": "# ATT v%s reference manual" % version,
@@ -191,6 +192,151 @@ def check_language_parity(items):
         if not (DOCS / name).is_file():
             fail("missing generated EN/ZH artifact: docs/%s" % name)
 
+    for dirname in ("concepts", "guides", "interfaces", "operations"):
+        base = DOCS / dirname
+        if not base.is_dir():
+            fail("missing bilingual documentation area: docs/%s" % dirname)
+            continue
+        for path in base.rglob("*.md"):
+            if path.name.endswith(".zh.md"):
+                english = path.with_name(path.name[:-len(".zh.md")] + ".md")
+                if not english.is_file():
+                    fail("missing English counterpart for %s" % path.relative_to(ROOT))
+            else:
+                chinese = path.with_name(path.stem + ".zh.md")
+                if not chinese.is_file():
+                    fail("missing Traditional Chinese counterpart for %s" % path.relative_to(ROOT))
+
+
+def check_documentation_status():
+    allowed = {"current", "legacy-current", "compatibility", "planned", "deprecated", "historical"}
+    marker = re.compile(r"<!-- att-doc-status: ([a-z-]+)(?:\s+[^>]*)? -->")
+    for path in DOCS.rglob("*.md"):
+        if path in (DOCS / "reference.md", DOCS / "reference.zh.md"):
+            continue
+        text = read(path)
+        found = marker.search(text[:1600])
+        if found and found.group(1) not in allowed:
+            fail("%s has unknown documentation status: %s" %
+                 (path.relative_to(ROOT), found.group(1)))
+        if "vnext-proposed" in path.name:
+            if not found or found.group(1) != "planned":
+                fail("%s must be marked Planned" % path.relative_to(ROOT))
+            planned_label = "尚未發行" if path.name.endswith(".zh.md") else "Planned, not released"
+            if planned_label not in text[:1200]:
+                fail("%s must label the vNext contract as not released" % path.relative_to(ROOT))
+
+
+def check_documented_examples():
+    contract_path = DOCS / "example-contracts.json"
+    if not contract_path.is_file():
+        fail("missing docs/example-contracts.json")
+        return
+    try:
+        manifest = json.loads(read(contract_path))
+    except Exception as error:
+        fail("docs/example-contracts.json is invalid JSON: %s" % error)
+        return
+    if manifest.get("schemaVersion") != "att-doc-examples/v1":
+        fail("docs/example-contracts.json must declare att-doc-examples/v1")
+    entries = manifest.get("examples")
+    if not isinstance(entries, list):
+        fail("docs/example-contracts.json must contain an examples array")
+        return
+
+    active = active_schemas(read(SCHEMAS / "catalog.yaml"))
+    contracts = {}
+    for entry in entries:
+        if not isinstance(entry, dict):
+            fail("docs/example-contracts.json contains a non-object entry")
+            continue
+        example_id = entry.get("id")
+        source = entry.get("source")
+        schema = entry.get("schema")
+        fmt = entry.get("format")
+        if not all(isinstance(value, str) and value for value in (example_id, source, schema, fmt)):
+            fail("docs/example-contracts.json contains an incomplete entry: %r" % entry)
+            continue
+        if example_id in contracts:
+            fail("duplicate documentation example id: %s" % example_id)
+        contracts[example_id] = entry
+        if entry.get("status") != "current":
+            fail("only Current examples may be listed in docs/example-contracts.json: %s" % example_id)
+        if fmt not in ("json", "yaml"):
+            fail("unsupported documentation example format for %s: %s" % (example_id, fmt))
+        if "/v" not in schema:
+            fail("documentation example %s has no versioned schema: %s" % (example_id, schema))
+        else:
+            name, version = schema.rsplit("/v", 1)
+            if version not in active.get(name, ()):
+                fail("documentation example %s uses an unregistered or historical schema: %s" %
+                     (example_id, schema))
+        candidate = (ROOT / source).resolve()
+        try:
+            candidate.relative_to(ROOT.resolve())
+        except ValueError:
+            fail("documentation example source escapes repository root: %s" % source)
+            continue
+        if not candidate.is_file() or candidate.suffix.lower() != ".md":
+            fail("documentation example source is missing or not Markdown: %s" % source)
+
+    tagged = {}
+    marker = re.compile(r"^\s*<!-- att-doc-example: current id=([a-z0-9-]+) schema=([^ ]+) format=(json|yaml) -->\s*$")
+    fence = re.compile(r"^\s*(`{3,}|~{3,})(json|yaml|yml)\s*$")
+    for path in DOCS.rglob("*.md"):
+        if path in (DOCS / "reference.md", DOCS / "reference.zh.md") or "history" in path.relative_to(DOCS).parts:
+            continue
+        lines = read(path).splitlines()
+        for index, line in enumerate(lines):
+            match = marker.match(line)
+            if not match:
+                continue
+            example_id, schema, fmt = match.groups()
+            if example_id in tagged:
+                fail("duplicate Current documentation example tag: %s" % example_id)
+            tagged[example_id] = {"id": example_id,
+                                  "source": path.relative_to(ROOT).as_posix(),
+                                  "schema": schema, "format": fmt, "status": "current"}
+            next_line = index + 1
+            while next_line < len(lines) and not lines[next_line].strip():
+                next_line += 1
+            if next_line >= len(lines):
+                fail("documentation example tag has no code block: %s" % example_id)
+                continue
+            code = fence.match(lines[next_line])
+            if not code:
+                fail("documentation example tag is not followed by a YAML/JSON fence: %s" % example_id)
+                continue
+            language = "yaml" if code.group(2) == "yml" else code.group(2)
+            if language != fmt:
+                fail("documentation example format/fence mismatch for %s" % example_id)
+            closing = code.group(1)[0] * len(code.group(1))
+            end = next_line + 1
+            while end < len(lines) and lines[end].strip() != closing:
+                end += 1
+            if end >= len(lines):
+                fail("unterminated documentation example code fence: %s" % example_id)
+                continue
+            body = "\n".join(lines[next_line + 1:end])
+            if fmt == "json":
+                try:
+                    value = json.loads(body)
+                    if value.get("schemaVersion") != schema:
+                        fail("JSON example schemaVersion does not match tag for %s" % example_id)
+                except Exception as error:
+                    fail("JSON documentation example %s is invalid: %s" % (example_id, error))
+            else:
+                declared = re.search(r"^schemaVersion:\s*([^\s#]+)", body, re.M)
+                if not declared or declared.group(1) != schema:
+                    fail("YAML example schemaVersion does not match tag for %s" % example_id)
+
+    if set(tagged) != set(contracts):
+        fail("Current documentation tags and example contract manifest differ: unlisted=%s missing=%s" %
+             (sorted(set(tagged) - set(contracts)), sorted(set(contracts) - set(tagged))))
+    for example_id in sorted(set(tagged) & set(contracts)):
+        if tagged[example_id] != contracts[example_id]:
+            fail("example contract metadata differs from its Markdown tag for %s" % example_id)
+
 
 def check_schema_references():
     current = [ROOT / "README.md", DOCS / "quick-start.md"]
@@ -232,7 +378,7 @@ def check_schema_references():
 def check_cli_documentation():
     source = read(ROOT / "att-cli/src/main/java/att/CliOptions.java")
     supported_options = set(re.findall(r'"(--[a-z][a-z0-9-]*)"', source))
-    supported_options.update(("--local", "--server", "--version", "--no-auth", "--principal", "--detach", "--download", "--scenario"))
+    supported_options.update(("--server", "--no-auth", "--principal", "--detach", "--download", "--scenario"))
     public_commands = set(("run", "validate", "snapshot", "docs", "report",
                            "build", "clean", "version", "debug", "load", "help", "remote"))
 
@@ -337,6 +483,8 @@ def check_critical_examples():
     for rel in assets:
         if not (ROOT / rel).is_file():
             fail("missing checked-in documentation example asset: %s" % rel)
+    if not (DOCS / "example-contracts.json").is_file():
+        fail("missing tagged example contract manifest: docs/example-contracts.json")
 
     command_group = ROOT / "config/tools/sample.yaml"
     call_group = ROOT / "config/tools/orders-db.yaml"
@@ -356,6 +504,10 @@ def check_critical_examples():
                     "config/mqhelpers/sit/payment.yaml", "config/tools/orders-db.yaml"):
             if rel not in test_text:
                 fail("DocumentationExamplesTest does not regression-protect documented asset: %s" % rel)
+        for contract in ("docs/example-contracts.json", "SchemaFiles.resolveVersion",
+                         "JsonSchemaVerifier.verify", "YamlSupport.parser"):
+            if contract not in test_text:
+                fail("DocumentationExamplesTest does not validate tagged examples through %s" % contract)
 
 
 def check_ownership_links():
@@ -426,6 +578,8 @@ def main():
     run_gate("documentation contract regression tests",
              [sys.executable, "-m", "unittest", "discover", "-s", "tools",
               "-p", "test_documentation_contracts.py"])
+    run_gate("documentation inventory freshness",
+             [sys.executable, "tools/build_documentation_inventory.py", "--check"])
     run_gate("Reference semantic coverage",
              [sys.executable, "tools/validate_reference_content.py"])
 
@@ -436,22 +590,13 @@ def main():
     check_cli_documentation()
     check_secret_placeholders()
     check_critical_examples()
+    check_documentation_status()
+    check_documented_examples()
     check_ownership_links()
 
-    markdown_files = [
-        ROOT / "README.md",
-        LANDING,
-        HISTORY_INDEX,
-        DOCS / "quick-start.md",
-        DOCS / "quick-start.zh.md",
-        DOCS / "reference" / "README.md",
-        DOCS / "reference.zh" / "README.md",
-        DOCS / "reference.md",
-        DOCS / "reference.zh.md",
-    ]
-    markdown_files += list((DOCS / "system-design").rglob("*.md"))
-    markdown_files += list((DOCS / "reference").rglob("*.md"))
-    markdown_files += list((DOCS / "reference.zh").rglob("*.md"))
+    markdown_files = [ROOT / "README.md", HISTORY_INDEX]
+    markdown_files += [path for path in DOCS.rglob("*.md")
+                       if "history" not in path.relative_to(DOCS).parts]
     markdown_files += list((ROOT / "examples").rglob("*.md"))
     for path in markdown_files:
         if path.is_file():

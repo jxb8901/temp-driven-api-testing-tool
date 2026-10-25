@@ -463,7 +463,8 @@ public final class WorkerMain {
         java.util.Set<String> permittedEnvironments=request.validationAllowedEnvironments==null?null:
                 new java.util.LinkedHashSet<String>(request.validationAllowedEnvironments);
         att.server.api.AttValidationReport report=att.validation.RuntimeConfigurationValidator.validate(configPath,runtimeRoot,
-                packageCheck&&!packageBudgetExceeded?packageRoot:null,request.environment,"SERVER",Boolean.TRUE.equals(request.all),permittedEnvironments);
+                packageCheck&&!packageBudgetExceeded?packageRoot:null,request.environment,"SERVER",Boolean.TRUE.equals(request.all),
+                "package".equals(scope)||Boolean.TRUE.equals(request.all),permittedEnvironments);
         if(request.registeredPackageId!=null)report.context("packageId",request.registeredPackageId);
         report.context("environment",request.environment);
         if("config".equals(scope)) return validationResult(report,request);

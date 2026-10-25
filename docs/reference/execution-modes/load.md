@@ -298,6 +298,7 @@ Built-ins use `builtin:<mode>`. Put package templates in `load/templates/` and b
 
 Catalog inspection pages contain at most 100 items and also honor the configured serialized response budget (256 KiB by default). Follow `nextOffset` until it is null: each page retains complete definitions, so the same query and offset retrieve the corresponding definitions without a separate detail call. A definition that cannot fit even alone is listed as `response-too-large` without its definition; reduce its size for Studio, or compose it directly by file reference in the CLI. CLI `load --list-templates` follows every page automatically and retains the scan-limit `truncated` indicator.
 
+<!-- att-doc-example: current id=multi-workload-load-template schema=att-load-template/v1 format=yaml -->
 ```yaml
 schemaVersion: att-load-template/v1
 name: Independent mixed pools
@@ -313,6 +314,7 @@ workloads:
     mix: [{id: purchase, weight: 40}, {id: report, weight: 60}]
 ```
 
+<!-- att-doc-example: current id=multi-workload-load-bindings schema=att-load-bindings/v1 format=yaml -->
 ```yaml
 schemaVersion: att-load-bindings/v1
 bindings:

@@ -47,4 +47,22 @@ class RuntimeConfigurationValidatorTest {
         assertTrue(((List<?>)report.toMap().get("diagnostics")).stream().anyMatch(value->
                 "ATT-VALIDATION-LIMIT".equals(((Map<?,?>)value).get("code"))));
     }
+
+    @Test void selectedEnvironmentConfigValidationIgnoresOtherPackageTestdataLayers() throws Exception {
+        att.TestSchemas.install(temp);
+        Path config=temp.resolve("config/config.yaml");Files.createDirectories(config.getParent());
+        Files.write(config,("schemaVersion: att-config/v2.13\nenvironment: SIT\nenvironments:\n"
+                +"  SIT: {}\n  UAT: {}\n").getBytes(StandardCharsets.UTF_8));
+        Path packageRoot=temp.resolve("package");Files.createDirectories(packageRoot.resolve("testdata"));
+        Files.write(packageRoot.resolve("package.yaml"),("schemaVersion: att-package/v1\ntestdata:\n"
+                +"  descriptors: []\n  environments:\n    UAT: [testdata/uat.yaml]\n").getBytes(StandardCharsets.UTF_8));
+        Files.write(packageRoot.resolve("testdata/uat.yaml"),"records: [unterminated\n".getBytes(StandardCharsets.UTF_8));
+
+        AttValidationReport selected=RuntimeConfigurationValidator.validate(config,temp,packageRoot,"SIT","LOCAL",false);
+        assertEquals(0,selected.exitCode());
+
+        AttValidationReport fullPackage=RuntimeConfigurationValidator.validate(config,temp,packageRoot,"SIT","LOCAL",false,true,null);
+        assertEquals(2,fullPackage.exitCode());
+        assertTrue(att.validation.JsonSupport.write(fullPackage.toMap()).contains("ATT-PACKAGE-INVALID"));
+    }
 }

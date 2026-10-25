@@ -44,9 +44,9 @@ public final class VNextCommand {
             else exit=loadTarget(options,packageRoot,config);
             return exit;
         } catch (IllegalArgumentException invalid) {
-            return fail(options,"ATT-CLI-INVALID",invalid.getMessage(),2);
+            return fail(options,"ATT-CLI-INVALID",invalid.getMessage(),2,args);
         } catch (Exception failure) {
-            return fail(options,"ATT-CLI-FAILED",safe(failure),3);
+            return fail(options,"ATT-CLI-FAILED",safe(failure),3,args);
         }
     }
 
@@ -136,7 +136,7 @@ public final class VNextCommand {
         return result.exitCode();
     }
 
-    private static int validate(VNextOptions o,Path packageRoot,Path config) throws Exception {
+    static int validate(VNextOptions o,Path packageRoot,Path config) throws Exception {
         Path runtimeRoot=RuntimeConfigPath.root(config);
         if(o.all()) return validateAll(o,packageRoot,config,runtimeRoot);
         String scope=o.targetKind();
@@ -148,7 +148,7 @@ public final class VNextCommand {
             return report.exitCode();
         }
         AttValidationReport report=RuntimeConfigurationValidator.validate(config,runtimeRoot,packageRoot,
-                o.environment(),"LOCAL",false);
+                o.environment(),"LOCAL",false,"package".equals(scope),null);
         AttValidationReport combined=new AttValidationReport("package".equals(scope)?"PACKAGE":"SELECTED","LOCAL");
         combined.context("packageId",o.packageId()==null?packageRoot.getFileName().toString():o.packageId());
         combined.context("environment",o.environment());
@@ -173,31 +173,33 @@ public final class VNextCommand {
             if(validation.exitCode()!=0)checks.status("FAIL");
         } else if("load".equals(scope)) {
             checks=combined.addSection("Load Scenario / dependency closure",targetSource(scope,o),"PASS");
-            Map<String,Object> details;
             try(PackageResourceInspector inspector=inspector(packageRoot,config,o.environment())) {
-                details=inspector.validateLoadScenarioFile(o.target());
+                Map<String,Object> details=inspector.validateLoadScenarioFile(o.target());
+                Object diagnostics=details.get("diagnostics");
+                if(diagnostics instanceof List) for(Object d:(List<?>)diagnostics) if(d instanceof Map)addSafeDiagnostic(checks,castMap(d),packageRoot);
+                if(hasErrors(checks))checks.status("FAIL");
+            } catch(Exception invalid) {
+                addTargetValidationFailure(checks,o,packageRoot,"ATT-LOAD-SCENARIO-INVALID",invalid);
             }
-            Object diagnostics=details.get("diagnostics");
-            if(diagnostics instanceof List) for(Object d:(List<?>)diagnostics) if(d instanceof Map)checks.diagnostic(castMap(d));
-            if(hasErrors(checks))checks.status("FAIL");
         } else {
             checks=combined.addSection("Selected Resource / dependency closure",targetSource(scope,o),"PASS");
-            Map<String,Object> details;
             try(PackageResourceInspector inspector=inspector(packageRoot,config,o.environment())) {
-                details=inspector.inspect("detail",scope,o.target(),null,0,1);
+                Map<String,Object> details=inspector.inspect("detail",scope,o.target(),null,0,1);
+                Object resource=details.get("resource");
+                String state=resource instanceof Map?String.valueOf(((Map<?,?>)resource).get("state")):"missing";
+                if(!"ready".equalsIgnoreCase(state)) {
+                    checks.status("FAIL");
+                    addSafeDiagnostic(checks,validationDiagnostic("ATT-RESOURCE-INVALID","ERROR",targetSource(scope,o),"target",
+                            "Selected resource is missing or has invalid dependencies",null),packageRoot);
+                }
+                Object diagnostics=details.get("diagnostics");
+                if(diagnostics instanceof List)for(Object d:(List<?>)diagnostics)if(d instanceof Map)addSafeDiagnostic(checks,castMap(d),packageRoot);
+                if(hasErrors(checks))checks.status("FAIL");
+            } catch(Exception invalid) {
+                addTargetValidationFailure(checks,o,packageRoot,"ATT-RESOURCE-INVALID",invalid);
             }
-            Object resource=details.get("resource");
-            String state=resource instanceof Map?String.valueOf(((Map<?,?>)resource).get("state")):"missing";
-            if(!"ready".equalsIgnoreCase(state)) {
-                checks.status("FAIL");
-                checks.diagnostic(validationDiagnostic("ATT-RESOURCE-INVALID","ERROR",targetSource(scope,o),"target",
-                        "Selected resource is missing or has invalid dependencies",null));
-            }
-            Object diagnostics=details.get("diagnostics");
-            if(diagnostics instanceof List)for(Object d:(List<?>)diagnostics)if(d instanceof Map)checks.diagnostic(castMap(d));
-            if(hasErrors(checks))checks.status("FAIL");
         }
-        if(report.exitCode()!=0)combined.exitCode(2);
+        if(report.exitCode()!=0||hasErrors(checks))combined.exitCode(2);
         printValidation(o,combined);
         return combined.exitCode();
     }
@@ -470,6 +472,21 @@ public final class VNextCommand {
             section.diagnostic(safe);
         }
     }
+    private static void addSafeDiagnostic(AttValidationReport.Section section,Map<String,Object> diagnostic,Path root) {
+        section.diagnostic(castMap(safeDiagnosticValue(diagnostic,root)));
+    }
+    private static void addTargetValidationFailure(AttValidationReport.Section section,VNextOptions options,Path root,
+                                                  String code,Exception failure) {
+        section.status("FAIL");
+        String source=options.target();
+        try {
+            Path target=Paths.get(source);
+            if(!target.isAbsolute())source=target.normalize().toString().replace('\\','/');
+            else source=logical(target.toString(),root);
+        } catch(Exception ignored) { }
+        addSafeDiagnostic(section,validationDiagnostic(code,"ERROR",source,"target",safe(failure),
+                "Correct the selected target and its package-relative source, then retry validation."),root);
+    }
     static Object safeDiagnosticValue(Object raw,Path root) {
         if(raw instanceof Map) {
             Map<String,Object> result=new LinkedHashMap<String,Object>();
@@ -519,15 +536,37 @@ public final class VNextCommand {
         report.limitOutputBytes(1024*1024);
         if("json".equals(options.format()))System.out.println(att.validation.JsonSupport.write(report.toMap()));else System.out.println(ValidationReportRenderer.human(report));
     }
-    private static int fail(VNextOptions options,String code,String message,int exit) {
+    private static int fail(VNextOptions options,String code,String message,int exit,String[] args) {
         String safe=message==null?"ATT command failed":message;
         safe=att.server.api.internal.DiagnosticSanitizer.redactAbsolutePaths(att.server.api.internal.DiagnosticSanitizer.redactText(safe));
-        if(options!=null&&"json".equals(options.format())) {
-            Map<String,Object> output=new LinkedHashMap<String,Object>();output.put("schemaVersion","att-operation/v1");output.put("backend",options.server()==null?"LOCAL":"SERVER");output.put("command",options.command());
+        String format=options==null?VNextOptions.requestedFormat(args):options.format();
+        String command=options==null?VNextOptions.requestedCommand(args):options.command();
+        String backend=options==null?VNextOptions.requestedBackend(args):options.server()==null?"LOCAL":"SERVER";
+        if(exit==2&&"validate".equals(command)) {
+            String scope=options==null?VNextOptions.requestedValidationScope(args):validationScope(options);
+            String source=options==null?null:options.target()==null?options.targetKind():options.target();
+            if(source!=null)source=att.server.api.internal.DiagnosticSanitizer.redactAbsolutePaths(source);
+            AttValidationReport report=new AttValidationReport(scope,backend);
+            AttValidationReport.Section request=report.addSection("Validation request",source,"FAIL");
+            request.diagnostic(validationDiagnostic(code,"ERROR",source,"command",safe,null));
+            if("json".equals(format))System.out.println(att.validation.JsonSupport.write(report.toMap()));
+            else System.out.println(ValidationReportRenderer.human(report));
+            return exit;
+        }
+        if("json".equals(format)) {
+            Map<String,Object> output=new LinkedHashMap<String,Object>();output.put("schemaVersion","att-operation/v1");
+            output.put("backend",backend);
+            output.put("command",command==null?"parse":command);
             output.put("status",exit==2?"INVALID":"ERROR");output.put("exitCode",exit);output.put("diagnostics",Collections.singletonList(validationDiagnostic(code,"ERROR",null,null,safe,null)));
-            System.err.println(att.validation.JsonSupport.write(output));
+            System.out.println(att.validation.JsonSupport.write(output));
         } else System.err.println(code+": "+safe);
         return exit;
+    }
+    private static String validationScope(VNextOptions options) {
+        if(options.all())return "ALL";
+        if("config".equals(options.targetKind()))return "CONFIG";
+        if("package".equals(options.targetKind()))return "PACKAGE";
+        return "SELECTED";
     }
     private static String safe(Exception error) {String message=error.getMessage();return message==null?error.getClass().getSimpleName():message.replaceAll("(?i)(password|authorization)\\s*[:=]\\s*[^ ,]+","$1=[REDACTED_SECRET]");}
     private static String safe(Throwable error) {String message=error.getMessage();return message==null?error.getClass().getSimpleName():message.replaceAll("(?i)(password|authorization)\\s*[:=]\\s*[^ ,]+","$1=[REDACTED_SECRET]");}

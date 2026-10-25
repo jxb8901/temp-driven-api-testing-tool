@@ -34,6 +34,14 @@ public final class RuntimeConfigurationValidator {
     public static AttValidationReport validate(Path configFile, Path runtimeRoot, Path packageRoot,
                                                String requestedEnvironment, String backend,
                                                boolean allProfiles, Set<String> permittedPackageEnvironments) {
+        return validate(configFile,runtimeRoot,packageRoot,requestedEnvironment,backend,
+                allProfiles,allProfiles,permittedPackageEnvironments);
+    }
+
+    public static AttValidationReport validate(Path configFile, Path runtimeRoot, Path packageRoot,
+                                               String requestedEnvironment, String backend,
+                                               boolean allProfiles, boolean allTestdataLayers,
+                                               Set<String> permittedPackageEnvironments) {
         Path file = configFile.toAbsolutePath().normalize();
         Path root = runtimeRoot.toAbsolutePath().normalize();
         AttValidationReport report = new AttValidationReport(packageRoot == null ? "CONFIG" : "CONFIG_PACKAGE", backend);
@@ -109,14 +117,22 @@ public final class RuntimeConfigurationValidator {
                 if (raw.get("environment") instanceof String) declared.add((String) raw.get("environment"));
                 manifest.validateEnvironments(declared);
                 List<List<Path>> layers = manifest.descriptorLayers();
-                if (!manifest.present() && layers.size() == 1 && layers.get(0).isEmpty()) {
-                    for (String profile : checkedProfiles) {
-                        FrameworkConfig effective = loader.loadDiscovery(file, root, packageRoot, profile);
-                        new TestdataRegistry(packageRoot, effective.testdataDescriptors(), Collections.<Path>emptyList()).validateAll();
+                if (allTestdataLayers) {
+                    if (!manifest.present() && layers.size() == 1 && layers.get(0).isEmpty()) {
+                        for (String profile : checkedProfiles) {
+                            FrameworkConfig effective = loader.loadDiscovery(file, root, packageRoot, profile);
+                            new TestdataRegistry(packageRoot, effective.testdataDescriptors(), Collections.<Path>emptyList()).validateAll();
+                        }
+                    } else {
+                        for (List<Path> layer : layers)
+                            new TestdataRegistry(packageRoot, layer, Collections.<Path>emptyList()).validateAll();
                     }
                 } else {
-                    for (List<Path> layer : layers)
-                        new TestdataRegistry(packageRoot, layer, Collections.<Path>emptyList()).validateAll();
+                    FrameworkConfig effective=loader.loadDiscovery(file,root,packageRoot,requestedEnvironment);
+                    List<Path> selected=manifest.present()
+                            ?manifest.descriptors(effective.environment())
+                            :effective.testdataDescriptors();
+                    new TestdataRegistry(packageRoot,selected,Collections.<Path>emptyList()).validateAll();
                 }
             } catch (Exception invalid) {
                 manifestSection.diagnostic(diagnostic("ATT-PACKAGE-INVALID", "ERROR", "package.yaml", "manifest/testdata",

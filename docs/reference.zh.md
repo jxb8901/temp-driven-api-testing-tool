@@ -101,7 +101,7 @@ Status: 規範性使用者文件；由模組化來源自動生成
   - [API paths](#api-paths)
 - [CLI 參考](#cli-參考)
   - [選擇命令](#選擇命令)
-  - [精簡 vNext CLI](#精簡-vnext-cli)
+  - [ATT 4.2.4 的可用性](#att-424-的可用性)
   - [編譯 source checkout](#編譯-source-checkout)
   - [按任務查閱語法、option 和範例](#按任務查閱語法option-和範例)
   - [透過 CLI 使用 ATT Server](#透過-cli-使用-att-server)
@@ -938,7 +938,11 @@ RUN 是 Case、選定 Cases 或單一 Template/Flow/Tool 的功能執行模型�
 
 ### 統一 RUN 與排程
 
+<!-- att-doc-status: current release=4.2.4 -->
+
 ATT 4.2.4 將功能性單次執行統一為 **RUN**，支援 Case、Template、Flow、Tool，以及所選 Case 批次。**Debug** 是 RUN 的診斷選項。**LOAD** 保留效能引擎、負載控制和專用報告。
+
+已發行的 Local CLI 保留其 interface-specific 相容邊界：run verb 選取 workbook Case，standalone debug 執行一個 Template、Flow 或 Tool。ATT Remote 保留舊版 Server command。此共用 RUN model 不代表 proposed vNext CLI grammar 已發行；請參閱[規劃中的 vNext page](interfaces/cli/vnext-proposed.zh.md)。
 
 #### 驗證及執行 RUN
 
@@ -1058,7 +1062,9 @@ Job lifecycle API 在 `/api/v1` 下提供以下 endpoint：
 
 ### Run 模式
 
-Run 會執行 Workbook 中經選擇的 authored Testcase。每個選中的 Testcase 會產生一次 Case execution，並有自己的狀態和 evidence record。討論正規化 Workbook row 時使用 *Testcase*；討論 runtime 結果時使用 *Case execution*；兩者共用同一個 Case ID。
+<!-- att-doc-status: current release=4.2.4 -->
+
+ATT 4.2.4 Local CLI 的 run command 是 legacy Case adapter，會執行 Workbook 中選取的 authored Testcase。較完整的 functional model 與 direct resource target 定義於 [Unified RUN](reference.zh/execution-modes/unified-run.md)。
 
 ```sh
 ./att.sh run --all
@@ -2841,6 +2847,9 @@ python tools/migrate_package_config.py --config config/config.yaml --server-conf
 
 ## CLI 參考
 
+<!-- att-doc-status: current release=4.2.4 -->
+
+
 ### 選擇命令
 
 | 命令 | 目的 | 是否調用外部 Tool |
@@ -2858,43 +2867,11 @@ python tools/migrate_package_config.py --config config/config.yaml --server-conf
 | `clean` | 刪除文檔化的 ATT 生成輸出 | 否 |
 | `remote` | 透過 ATT Server REST/SSE API 提交及管理工作 | ATT Server |
 
-上表包括現有的相容命令。**精簡 vNext 執行語法只有三個頂層命令：`run`、`load` 和 `validate`。**
+上表列出 ATT 4.2.4 CLI command。獨立的 vNext proposal 尚未包含在此 release。
 
-### 精簡 vNext CLI
+### ATT 4.2.4 的可用性
 
-```text
-att [--local | --server <profile|url>] [-p <packageId>] [-e <profile>] \
-    [--config <path>] [--format human|json] <run|load|validate> <target-kind> [target]
-```
-
-`--local` 與 `--server` 不能同時使用。兩者皆未指定時，vNext 使用 Local Engine。若沒有 `-p`，Local Package 選擇使用 `ATT_PACKAGE_ROOT` 或目前目錄；`-p <id>` 只會解析 `ATT_HOME/packages/<id>` 下的直接子目錄。Remote RUN/LOAD 及 Package 或選中目標 validation 必須指定已在 Server 註冊的 `-p <id>`；Remote `validate config` 則可省略 `-p`，只檢查中央設定。Remote 路徑相對於 Package，Runtime Config 由 Server 管理。
-
-| 命令 | 範例 | 行為 |
-|---|---|---|
-| `run` | `att --local -p payments run case quickStart.default.QS001` | 執行 Case、Suite workbook、所有 Case、Template、Flow 或 Tool；Local 會同步執行。 |
-| `load` | `att --server sit -p payments load flow PAYMENT.submit --arrival-rate 5/s --duration 2m` | 透過現有 Load Engine 執行 Flow、Template、Tool 或已編寫的 Load Scenario。 |
-| `validate config` | `att --local -p payments -e SIT validate config` | 檢查共享 Runtime Config，以及所選 Package 的有效 Config 和 Testdata reference，不執行業務 I/O。 |
-| `validate package` | `att --server sit -p payments validate package` | 檢查完整的已註冊 Package inventory 和靜態依賴。 |
-| 選中項目 `validate` | `att --local -p payments validate flow PAYMENT.submit` | 檢查目標及其依賴閉包。 |
-| `validate --all` | `att --server sit validate --all --format json` | 彙總共享 Config、有效 Server Config 和範圍內的所有 Package。Server 模式需要安裝級管理員權限。 |
-
-`validate --all` 不能與目標、`-p` 或 `-e` 同時使用。Local validation 不會建立或更改 Server data directory。若沒有可選的 active Server Config，結果會標記為 `SKIP`；明確指定的檔案若不存在或無效則標記為 `FAIL`。Server validation 只檢查已註冊的 Package，並使用 Server 管理的 Runtime Config。
-
-Validation 只讀：不執行 Tool、不發送 Load traffic、不連線探測 DB/MQ，也不修改 Config、Package 檔案或輸出。Human 輸出使用階層式 `PASS`/`FAIL`/`WARN`/`SKIP` 區段；`--format json` 會向 stdout 輸出單一 `att-validation/v1` report。Exit code：PASS 為 `0`、RUN/LOAD 功能失敗為 `1`、輸入或 validation 無效為 `2`、執行錯誤/取消為 `3`、Remote transport 或不可信結果為 `4`。此語法不包含 Local Job store 或 `--detach`。
-
-常用 vNext option：`-p, --package`、`-e, --env`、`--format`、`--quiet`、`--verbose`、`--help` 和 `--version`。`--config <path>` 只適用 Local。RUN 選擇 option 包括 `--suite`、`--suite-dir`、`--case`、`--tag`、`--exclude-tag`、`--all`、`--rerun-failed`、`--dry-run`、`--fail-fast`、`--run-id`，以及僅限 Local 的 `--output-dir`。Resource RUN/LOAD 可使用 `--input` 和可重複的 `--set`；LOAD 可使用 `--users` 或 `--arrival-rate`，並可設定 duration、warmup、ramp、think-time、concurrency 和 overload。`--users` 與 `--arrival-rate` 不能同時使用。未支援的 option 和無效組合會在提交工作或發送 traffic 前報錯。
-
-#### 遷移既有命令
-
-| 既有語法 | vNext 語法 |
-|---|---|
-| `att run --suite testcase/payment.xlsx` | `att --local run suite testcase/payment.xlsx` |
-| `att debug flow PAYMENT.submit --input debug.yaml` | `att --local run flow PAYMENT.submit --input debug.yaml` |
-| `att load load/payment.yaml --users 5 --duration 60s` | `att --local load scenario load/payment.yaml --users 5 --duration 60s` |
-| `att remote run payments --suite testcase/payment.xlsx` | `att --server sit -p payments run suite testcase/payment.xlsx` |
-| `att remote validate payments --package` | `att --server sit -p payments validate package` |
-
-遷移期間會保留舊命令的相容路徑，但它們不是 vNext 命令。管理命令和進階 Remote detach 不屬於這份精簡語法。
+本 Reference 說明 ATT 4.2.4 已發行的 CLI。vNext grammar 是獨立的[規劃中 proposal](interfaces/cli/vnext-proposed.zh.md)，並非目前 command interface。本版本繼續支援 legacy command。
 
 ### 編譯 source checkout
 

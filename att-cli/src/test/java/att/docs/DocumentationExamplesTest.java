@@ -1,6 +1,11 @@
 /* Author: Jeffrey + ChatGPT */
 package att.docs;
 
+import att.config.YamlSupport;
+import att.validation.JsonSchemaVerifier;
+import att.validation.SchemaFiles;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -10,8 +15,12 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -20,6 +29,38 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class DocumentationExamplesTest {
     @TempDir Path temp;
     private int processCounter;
+
+    @Test
+    void taggedCurrentDocumentationExamplesMatchManifestAndEmbeddedSchemas() throws Exception {
+        Path root = Paths.get("").toAbsolutePath().normalize();
+        Path manifestPath = root.resolve("docs/example-contracts.json");
+        JsonNode manifest = new ObjectMapper().readTree(manifestPath.toFile());
+        assertEquals("att-doc-examples/v1", manifest.path("schemaVersion").asText());
+        assertTrue(manifest.path("examples").isArray(), "example contract manifest must contain an examples array");
+
+        Set<String> ids = new HashSet<String>();
+        for (JsonNode entry : manifest.path("examples")) {
+            String id = entry.path("id").asText();
+            String sourceName = entry.path("source").asText();
+            String schemaVersion = entry.path("schema").asText();
+            String format = entry.path("format").asText();
+            assertTrue(ids.add(id), "duplicate documentation example id: " + id);
+            assertEquals("current", entry.path("status").asText(), "only Current examples enter this test");
+
+            Path source = root.resolve(sourceName).normalize();
+            assertTrue(source.startsWith(root), "documentation example source escapes the checkout: " + sourceName);
+            TaggedExample example = taggedExample(source, id);
+            assertEquals(schemaVersion, example.schema, "schema marker drift for " + id);
+            assertEquals(format, example.format, "format marker drift for " + id);
+
+            Object value = "json".equals(format)
+                    ? new ObjectMapper().readTree(example.content)
+                    : YamlSupport.parser().load(example.content);
+            Path schema = SchemaFiles.resolveVersion(root, schemaVersion);
+            JsonSchemaVerifier.verify(schema, value);
+        }
+        assertEquals(4, ids.size(), "update the manifest and schema test when Current tagged examples change");
+    }
 
     @Test
     void checkedInEnvironmentAndResourceExamplesValidateThroughTheRealCli() throws Exception {
@@ -91,6 +132,35 @@ class DocumentationExamplesTest {
         assertTrue(Files.isRegularFile(root.resolve(relative)), "Missing documented asset: " + relative);
     }
 
+    private TaggedExample taggedExample(Path source, String id) throws Exception {
+        String[] lines = read(source).split("\\r?\\n");
+        Pattern marker = Pattern.compile("^<!-- att-doc-example: current id=([a-z0-9-]+) schema=([^ ]+) format=(json|yaml) -->$");
+        int found = 0;
+        TaggedExample result = null;
+        for (int index = 0; index < lines.length; index++) {
+            Matcher tagged = marker.matcher(lines[index].trim());
+            if (!tagged.matches() || !id.equals(tagged.group(1))) continue;
+            found++;
+            int fenceIndex = index + 1;
+            while (fenceIndex < lines.length && lines[fenceIndex].trim().isEmpty()) fenceIndex++;
+            assertTrue(fenceIndex < lines.length, "missing code block after documentation example tag " + id);
+            Matcher fence = Pattern.compile("^```(json|yaml|yml)\\s*$").matcher(lines[fenceIndex].trim());
+            assertTrue(fence.matches(), "expected a JSON/YAML code block after documentation example tag " + id);
+            String blockFormat = "yml".equals(fence.group(1)) ? "yaml" : fence.group(1);
+            StringBuilder content = new StringBuilder();
+            int end = fenceIndex + 1;
+            while (end < lines.length && !"```".equals(lines[end].trim())) {
+                if (content.length() > 0) content.append('\n');
+                content.append(lines[end]);
+                end++;
+            }
+            assertTrue(end < lines.length, "unterminated documentation example code block " + id);
+            result = new TaggedExample(tagged.group(2), blockFormat, content.toString());
+        }
+        assertEquals(1, found, "expected exactly one Current example tag for " + id + " in " + source);
+        return result;
+    }
+
     private CliResult runCli(Path root, String... args) throws Exception {
         List<String> command = new ArrayList<String>(Arrays.asList(
                 Paths.get(System.getProperty("java.home"), "bin", "java").toString(),
@@ -127,6 +197,18 @@ class DocumentationExamplesTest {
             this.exitCode = exitCode;
             this.stdout = stdout;
             this.stderr = stderr;
+        }
+    }
+
+    private static final class TaggedExample {
+        private final String schema;
+        private final String format;
+        private final String content;
+
+        private TaggedExample(String schema, String format, String content) {
+            this.schema = schema;
+            this.format = format;
+            this.content = content;
         }
     }
 }
