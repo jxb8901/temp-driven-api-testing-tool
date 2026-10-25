@@ -343,11 +343,16 @@ public final class VNextCommand {
         catch(Exception ignored) {report.incomplete();}
 
         long validationWorkUnits=0L;
+        Map<String,String> packageRuntimeConfigs=new LinkedHashMap<String,String>();
         for(Map.Entry<Path,Set<String>> candidate:packagesByRoot.entrySet()) {
             Path canonical=candidate.getKey();List<String> ids=new ArrayList<String>(candidate.getValue());Collections.sort(ids,String.CASE_INSENSITIVE_ORDER);
             String id=ids.isEmpty()?canonical.getFileName().toString():ids.get(0);
             String name="Package "+id+(ids.size()>1?" (also registered as "+String.join(", ",ids.subList(1,ids.size()))+")":"");
             boolean unregistered=unregisteredRoots.contains(canonical);
+            boolean registered=registeredRoots.contains(canonical);
+            Path packageConfig=registered&&serverResult!=null?serverResult.runtimeConfig():config;
+            Path packageRuntimeRoot=RuntimeConfigPath.root(packageConfig);
+            packageRuntimeConfigs.put(id,registered?"server.runtimeConfigPath":"cli.config");
             att.validation.PackageValidationBudget.Result budget=att.validation.PackageValidationBudget.inspect(canonical);
             validationWorkUnits+=budget.entries();
             if(!budget.complete()) {
@@ -365,7 +370,7 @@ public final class VNextCommand {
                 continue;
             }
             List<String> workProfiles;
-            try {workProfiles=RuntimeConfigurationValidator.validationProfiles(config).profiles();}
+            try {workProfiles=RuntimeConfigurationValidator.validationProfiles(packageConfig).profiles();}
             catch(Exception invalid) {workProfiles=Collections.emptyList();}
             long packageWorkUnits=budget.entries()*(Math.max(1,workProfiles.size())+1L);
             if(packageWorkUnits>att.validation.PackageValidationBudget.MAX_INSTALLATION_WORK_UNITS-validationWorkUnits) {
@@ -375,16 +380,18 @@ public final class VNextCommand {
                 break;
             }
             validationWorkUnits+=packageWorkUnits;
-            AttValidationReport packageReport=RuntimeConfigurationValidator.validate(config,runtimeRoot,canonical,null,"LOCAL",true,
-                    serverResult==null?null:serverResult.allowedEnvironments());
-            AttValidationReport.Section pkg=report.addSection(name,"packages/"+id,packageReport.exitCode()==0?(unregistered?"WARN":"PASS"):"FAIL");
+            AttValidationReport packageReport=RuntimeConfigurationValidator.validate(packageConfig,packageRuntimeRoot,canonical,null,"LOCAL",true,
+                    registered&&serverResult!=null?serverResult.allowedEnvironments():null);
+            int packageExit=packageReport.exitCode();
+            String packageStatus=packageExit==2?"FAIL":packageExit==0?(unregistered?"WARN":"PASS"):"WARN";
+            AttValidationReport.Section pkg=report.addSection(name,"packages/"+id,packageStatus);
             if(unregistered)pkg.diagnostic(validationDiagnostic("ATT-PACKAGE-NOT-REGISTERED","WARNING","packages/"+id,"packageId",
                     "Package directory is not registered with the active Server Config",null));
             copySections(pkg,packageReport);
-            if(packageReport.exitCode()==2)report.exitCode(2);else if(packageReport.exitCode()!=0)report.incomplete();
+            if(packageExit==2)report.exitCode(2);else if(packageExit!=0)report.incomplete();
 
             List<String> profiles;
-            try {profiles=RuntimeConfigurationValidator.validationProfiles(config).profiles();}
+            try {profiles=RuntimeConfigurationValidator.validationProfiles(packageConfig).profiles();}
             catch(Exception invalid) {
                 report.incomplete();
                 AttValidationReport.Section incomplete=pkg.child("Testcases / Templates / Flows / dependencies",null,"WARN");
@@ -395,7 +402,7 @@ public final class VNextCommand {
             if(profiles.isEmpty())profiles=Collections.singletonList(null);
             for(String profile:profiles) {
                 String profileLabel=profile==null?"default":profile;
-                if(serverResult!=null&&serverResult.allowedEnvironments()!=null&&!serverResult.allowedEnvironments().contains(profileLabel.toLowerCase(java.util.Locale.ROOT))) {
+                if(registered&&serverResult!=null&&serverResult.allowedEnvironments()!=null&&!serverResult.allowedEnvironments().contains(profileLabel.toLowerCase(java.util.Locale.ROOT))) {
                     AttValidationReport.Section skipped=pkg.child(profileLabel+" — Testcases / Templates / Flows / dependencies",null,"SKIP");
                     skipped.diagnostic(validationDiagnostic("ATT-ENVIRONMENT-FORBIDDEN","INFO","att-server.yaml","environment",
                             "Environment is excluded by the active Server Package policy",null));
@@ -403,11 +410,12 @@ public final class VNextCommand {
                 }
                 final String selectedProfile=profile;
                 validateInventory(report,pkg,id,profileLabel,canonical,()->new att.api.DefaultAttService().validate(
-                        new ValidateRequest(canonical,config,selectedProfile,Collections.<Path>emptyList(),null,
+                        new ValidateRequest(canonical,packageConfig,selectedProfile,Collections.<Path>emptyList(),null,
                                 Collections.<String>emptySet(),Collections.<String>emptySet(),Collections.<String>emptySet(),false,"package")));
             }
         }
         report.context("validationWorkUnits",validationWorkUnits);
+        report.context("packageRuntimeConfigs",packageRuntimeConfigs);
         if(runtime.exitCode()==2)report.exitCode(2);else if(runtime.exitCode()!=0)report.incomplete();
         printValidation(o,report);return report.exitCode();
     }

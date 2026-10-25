@@ -8,7 +8,9 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -98,4 +100,74 @@ class RuntimeConfigurationValidatorTest {
         assertTrue(human.contains("[FAIL] UAT — Tool Groups and DB/MQ/HTTP/SSH Helpers"));
         assertTrue(att.validation.JsonSupport.write(invalidUat.toMap()).contains("ATT-RESOURCE-HELPER-UNAVAILABLE"));
     }
+    @Test void fullTestdataScanSkipsForbiddenEnvironmentLayersForBothBackendsAndRejectsForbiddenDefaults() throws Exception {
+        att.TestSchemas.install(temp);
+        Path config=temp.resolve("config/config.yaml");Files.createDirectories(config.getParent());
+        Files.write(config,("schemaVersion: att-config/v2.13\nenvironment: SIT\nenvironments:\n"
+                +"  SIT: {}\n  UAT: {}\n").getBytes(StandardCharsets.UTF_8));
+        Path packageRoot=Files.createDirectories(temp.resolve("package"));
+        Files.write(packageRoot.resolve("package.yaml"),("schemaVersion: att-package/v1\ntestdata:\n"
+                +"  descriptors: []\n  environments:\n    UAT: [testdata/uat.yaml]\n").getBytes(StandardCharsets.UTF_8));
+        Files.createDirectories(packageRoot.resolve("testdata"));
+        Files.write(packageRoot.resolve("testdata/uat.yaml"),"records: [unterminated\n".getBytes(StandardCharsets.UTF_8));
+        Set<String> allowed=new LinkedHashSet<String>(Arrays.asList("SIT"));
+
+        for(String backend:Arrays.asList("LOCAL","SERVER")) {
+            Files.write(packageRoot.resolve("package.yaml"),("schemaVersion: att-package/v1\ntestdata:\n"
+                    +"  descriptors: []\n  environments:\n    UAT: [testdata/uat.yaml]\n").getBytes(StandardCharsets.UTF_8));
+            AttValidationReport allowedSit=RuntimeConfigurationValidator.validate(config,temp,packageRoot,null,backend,true,allowed);
+            assertEquals(0,allowedSit.exitCode(),backend+" "+att.validation.JsonSupport.write(allowedSit.toMap()));
+            Map<?,?> manifest=findSection((List<?>)allowedSit.toMap().get("sections"),
+                    "Package Manifest / Effective Config / Testdata");
+            assertNotNull(manifest);
+            Map<?,?> skipped=findSection(Arrays.asList(manifest),"UAT — Package Testdata");
+            assertNotNull(skipped,backend+" should explain why UAT Testdata was skipped");
+            assertEquals("SKIP",skipped.get("status"));
+
+            Files.write(packageRoot.resolve("package.yaml"),("schemaVersion: att-package/v1\ndefaultEnvironment: UAT\ntestdata:\n"
+                    +"  descriptors: []\n  environments:\n    UAT: [testdata/uat.yaml]\n").getBytes(StandardCharsets.UTF_8));
+            AttValidationReport forbiddenDefault=RuntimeConfigurationValidator.validate(config,temp,packageRoot,null,backend,true,allowed);
+            assertEquals(2,forbiddenDefault.exitCode(),backend+" must reject a Package default excluded by policy");
+            String rendered=att.validation.JsonSupport.write(forbiddenDefault.toMap());
+            assertTrue(rendered.contains("ATT-ENVIRONMENT-FORBIDDEN"),rendered);
+            Map<?,?> failedManifest=findSection((List<?>)forbiddenDefault.toMap().get("sections"),
+                    "Package Manifest / Effective Config / Testdata");
+            assertEquals("FAIL",failedManifest.get("status"));
+
+            Files.write(packageRoot.resolve("package.yaml"),("schemaVersion: att-package/v1\ntestdata:\n"
+                    +"  descriptors: []\n  environments:\n    UAT: [testdata/uat.yaml]\n").getBytes(StandardCharsets.UTF_8));
+            Files.write(config,("schemaVersion: att-config/v2.13\nenvironment: UAT\nenvironments:\n"
+                    +"  SIT: {}\n  UAT: {}\n").getBytes(StandardCharsets.UTF_8));
+            AttValidationReport forbiddenGlobalDefault=RuntimeConfigurationValidator.validate(config,temp,packageRoot,null,backend,true,allowed);
+            assertEquals(2,forbiddenGlobalDefault.exitCode(),backend+" must reject a Global default excluded by policy");
+            assertTrue(att.validation.JsonSupport.write(forbiddenGlobalDefault.toMap()).contains("ATT-ENVIRONMENT-FORBIDDEN"));
+
+            Files.write(config,("schemaVersion: att-config/v2.13\nenvironment: SIT\nenvironments:\n"
+                    +"  SIT: {}\n  UAT: {}\n").getBytes(StandardCharsets.UTF_8));
+
+
+            Files.write(packageRoot.resolve("package.yaml"),("schemaVersion: att-package/v1\ntestdata:\n"
+                    +"  descriptors: [testdata/base.yaml]\n  environments:\n    UAT: [testdata/uat.yaml]\n").getBytes(StandardCharsets.UTF_8));
+            Files.write(packageRoot.resolve("testdata/base.yaml"),"records: [unterminated\n".getBytes(StandardCharsets.UTF_8));
+            AttValidationReport invalidBase=RuntimeConfigurationValidator.validate(config,temp,packageRoot,null,backend,true,allowed);
+            assertEquals(2,invalidBase.exitCode(),backend+" must continue validating base Testdata");
+            assertTrue(att.validation.JsonSupport.write(invalidBase.toMap()).contains("ATT-PACKAGE-INVALID"));
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Map<?,?> findSection(List<?> sections,String name) {
+        for(Object value:sections) {
+            if(!(value instanceof Map))continue;
+            Map<?,?> section=(Map<?,?>)value;
+            if(name.equals(section.get("name")))return section;
+            Object children=section.get("sections");
+            if(children instanceof List) {
+                Map<?,?> found=findSection((List<?>)children,name);
+                if(found!=null)return found;
+            }
+        }
+        return null;
+    }
+
 }

@@ -132,15 +132,43 @@ public final class RuntimeConfigurationValidator {
                 if (raw.get("environment") instanceof String) declared.add((String) raw.get("environment"));
                 manifest.validateEnvironments(declared);
                 List<List<Path>> layers = manifest.descriptorLayers();
+                String effectiveDefaultEnvironment=manifest.defaultEnvironment();
+                String effectiveDefaultSource="package.yaml",effectiveDefaultField="defaultEnvironment";
+                if(effectiveDefaultEnvironment==null&&raw.get("environment") instanceof String) {
+                    effectiveDefaultEnvironment=(String)raw.get("environment");
+                    effectiveDefaultSource=logical(file,root);effectiveDefaultField="environment";
+                }
+                if (permittedPackageEnvironments != null && effectiveDefaultEnvironment != null
+                        && !packageEnvironmentAllowed(permittedPackageEnvironments, effectiveDefaultEnvironment)) {
+                    AttValidationReport.Section conflict=manifestSection.child(
+                            effectiveDefaultEnvironment+" — Package Environment Policy",effectiveDefaultSource,"FAIL");
+                    conflict.diagnostic(diagnostic("ATT-ENVIRONMENT-FORBIDDEN","ERROR",effectiveDefaultSource,effectiveDefaultField,
+                            "Effective default Environment is excluded by the active Server Package policy",null));
+                    packageFailed=true;
+                }
                 if (allTestdataLayers) {
                     if (!manifest.present() && layers.size() == 1 && layers.get(0).isEmpty()) {
                         for (String profile : checkedProfiles) {
+                            if (profile != null && !packageEnvironmentAllowed(permittedPackageEnvironments, profile)) {
+                                skipPackageTestdataEnvironment(manifestSection,profile);
+                                continue;
+                            }
                             FrameworkConfig effective = loader.loadDiscovery(file, root, packageRoot, profile);
                             new TestdataRegistry(packageRoot, effective.testdataDescriptors(), Collections.<Path>emptyList()).validateAll();
                         }
                     } else {
-                        for (List<Path> layer : layers)
-                            new TestdataRegistry(packageRoot, layer, Collections.<Path>emptyList()).validateAll();
+                        List<Path> baseDescriptors=layers.get(0);
+                        new TestdataRegistry(packageRoot,baseDescriptors,Collections.<Path>emptyList()).validateAll();
+                        for (String profile : checkedProfiles) {
+                            if (profile == null) continue;
+                            if (!packageEnvironmentAllowed(permittedPackageEnvironments, profile)) {
+                                skipPackageTestdataEnvironment(manifestSection,profile);
+                                continue;
+                            }
+                            List<Path> selected=manifest.descriptors(profile);
+                            if (!selected.equals(baseDescriptors))
+                                new TestdataRegistry(packageRoot,selected,Collections.<Path>emptyList()).validateAll();
+                        }
                     }
                 } else {
                     FrameworkConfig effective=loader.loadDiscovery(file,root,packageRoot,validationEnvironment);
@@ -248,6 +276,18 @@ public final class RuntimeConfigurationValidator {
 
     private static String safe(String value, Path root) {
         return safe(value, root, null);
+    }
+
+    private static boolean packageEnvironmentAllowed(Set<String> permitted,String environment) {
+        if(permitted==null)return true;
+        for(String value:permitted)if(value!=null&&value.equalsIgnoreCase(environment))return true;
+        return false;
+    }
+
+    private static void skipPackageTestdataEnvironment(AttValidationReport.Section parent,String environment) {
+        AttValidationReport.Section skipped=parent.child(environment+" — Package Testdata","package.yaml","SKIP");
+        skipped.diagnostic(diagnostic("ATT-ENVIRONMENT-FORBIDDEN","INFO","package.yaml","environment",
+                "Environment Testdata is excluded by the active Server Package policy",null));
     }
 
     private static String safe(String value, Path runtimeRoot, Path packageRoot) {

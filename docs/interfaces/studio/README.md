@@ -4,6 +4,10 @@
 
 ATT Studio is the browser interface to the registered Packages and Server lifecycle.
 
+![ATT Studio dashboard showing Package summaries, recent Jobs, and Server status](../../system-design/ui-shell-baseline/dashboard-1440-light.png)
+
+*Illustrative UI-shell baseline with sample Package and Job data; the version badge belongs to that screenshot baseline.*
+
 - [Navigation and package selection](navigation.md)
 - [Explorer, resource inspection and functional execution](explorer-run.md)
 - [Load Testing](load-testing.md)

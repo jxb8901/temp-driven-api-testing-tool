@@ -1,6 +1,7 @@
 package att;
 
 import org.junit.jupiter.api.Test;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.io.TempDir;
 
 import att.api.ValidateResult;
@@ -9,6 +10,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
 import java.util.Collections;
 import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.nio.file.Files;
 import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
@@ -68,7 +70,7 @@ class VNextCommandTest {
         Files.createDirectories(pkg.resolve("testcase"));Files.createDirectories(pkg.resolve("tools"));
         Files.createDirectories(home.resolve("config/tools"));
         TestSchemas.install(home);
-        Files.write(script,("#!/bin/sh\nprintf invoked >> '"+marker.toString()+"'\nprintf 'ok\\n'\n").getBytes(StandardCharsets.UTF_8));
+        Files.write(script,("#!/bin/sh\nprintf invoked >> '"+marker.toString()+"'\nprintf 'ok\n'\n").getBytes(StandardCharsets.UTF_8));
         Files.setPosixFilePermissions(script,java.util.EnumSet.of(
                 java.nio.file.attribute.PosixFilePermission.OWNER_READ,
                 java.nio.file.attribute.PosixFilePermission.OWNER_WRITE,
@@ -160,6 +162,116 @@ class VNextCommandTest {
         assertEquals(2,selected.exitCode);
         assertTrue(selected.stdout.contains("ATT-PACKAGE-INVALID"),selected.stdout);
         assertTrue(selected.stdout.contains("Package Manifest"),selected.stdout);
+    }
+
+    @Test void registeredPackagesUseTheServerBoundRuntimeConfig() throws Exception {
+        Path home=packageRoot.resolve("att-home");
+        Path cliConfig=home.resolve("config/config.yaml");
+        Path boundRoot=packageRoot.resolve("runtime-b");
+        Path boundConfig=boundRoot.resolve("config/config.yaml");
+        Path packages=Files.createDirectories(home.resolve("packages"));
+        Path payments=Files.createDirectories(packages.resolve("payments"));
+        Path standalone=Files.createDirectories(packages.resolve("standalone"));
+        Files.write(standalone.resolve("package.yaml"),
+                "schemaVersion: att-package/v1\ndefaultEnvironment: UAT\n".getBytes(StandardCharsets.UTF_8));
+        Files.createDirectories(cliConfig.getParent());Files.createDirectories(boundConfig.getParent());
+        TestSchemas.install(home);TestSchemas.install(boundRoot);
+        Files.write(cliConfig,runtimeConfig(null).getBytes(StandardCharsets.UTF_8));
+        Files.write(boundConfig,runtimeConfig("config/dbhelpers/uat/missing.yaml").getBytes(StandardCharsets.UTF_8));
+        Files.write(payments.resolve("package.yaml"),
+                "schemaVersion: att-package/v1\ndefaultEnvironment: UAT\n".getBytes(StandardCharsets.UTF_8));
+        Path serverConfig=home.resolve("config/att-server.yaml");
+        Path dataDirectory=home.resolve("server-data");
+        Path java=javaExecutable();
+        String serverYaml="server:\n  dataDir: "+yaml(dataDirectory)+"\n  runtimeConfigPath: "+yaml(boundConfig)+"\n"
+                +"  javaExecutable: "+yaml(java)+"\nworkers: {}\npackages:\n"
+                +"  allowedRoots: ["+yaml(packages)+"]\n  entries:\n    payments: "+yaml(payments)+"\n";
+        Files.write(serverConfig,serverYaml.getBytes(StandardCharsets.UTF_8));
+
+        String previousHome=System.getProperty("att.home"),previousServer=System.getProperty("att.server.config");
+        try {
+            System.setProperty("att.home",home.toString());
+            System.setProperty("att.server.config",serverConfig.toString());
+            Captured captured=capture(()->VNextCommand.run(new String[]{
+                    "--local","--format","json","validate","--all"}));
+            assertEquals(2,captured.exitCode,captured.stdout);
+            Map<?,?> result=new ObjectMapper().readValue(captured.stdout,Map.class);
+            Map<?,?> context=(Map<?,?>)result.get("context");
+            Map<?,?> sources=(Map<?,?>)context.get("packageRuntimeConfigs");
+            assertEquals("server.runtimeConfigPath",sources.get("payments"));
+            assertEquals("cli.config",sources.get("standalone"));
+            Map<?,?> localPackage=findSection((List<?>)result.get("sections"),"Package standalone");
+            assertNotNull(localPackage,captured.stdout);
+            assertEquals("WARN",localPackage.get("status"),"Unregistered Local Packages retain the CLI Runtime Config");
+            Map<?,?> pkg=findSection((List<?>)result.get("sections"),"Package payments");
+            assertNotNull(pkg,captured.stdout);
+            assertEquals("FAIL",pkg.get("status"),"The registered Package must be checked against the bound Runtime Config");
+            String packageJson=att.validation.JsonSupport.write(pkg);
+            assertTrue(packageJson.contains("ATT-CONFIG-INVALID")
+                    ||packageJson.contains("ATT-RESOURCE-HELPER-UNAVAILABLE"),captured.stdout);
+        } finally {
+            if(previousHome==null)System.clearProperty("att.home");else System.setProperty("att.home",previousHome);
+            if(previousServer==null)System.clearProperty("att.server.config");else System.setProperty("att.server.config",previousServer);
+        }
+    }
+
+    @Test void validateAllReportsBoundedPackageScansAsPartialNotInvalid() throws Exception {
+        Path home=packageRoot.resolve("partial-home");
+        Path config=home.resolve("config/config.yaml");
+        Files.createDirectories(home.resolve("packages/payments"));
+        Files.write(home.resolve("packages/payments/package.yaml"),
+                "schemaVersion: att-package/v1\n".getBytes(StandardCharsets.UTF_8));
+        Files.createDirectories(config.getParent());TestSchemas.install(home);
+        StringBuilder yaml=new StringBuilder("schemaVersion: att-config/v2.13\nenvironments:\n");
+        for(int i=0;i<=att.validation.RuntimeConfigurationValidator.MAX_ENVIRONMENT_PROFILES;i++)
+            yaml.append("  Env").append(String.format("%03d",i)).append(": {}\n");
+        Files.write(config,yaml.toString().getBytes(StandardCharsets.UTF_8));
+
+        String previousHome=System.getProperty("att.home"),previousServer=System.getProperty("att.server.config");
+        try {
+            System.setProperty("att.home",home.toString());System.clearProperty("att.server.config");
+            Captured captured=capture(()->VNextCommand.run(new String[]{
+                    "--local","--format","json","validate","--all"}));
+            assertEquals(3,captured.exitCode,captured.stdout);
+            Map<?,?> result=new ObjectMapper().readValue(captured.stdout,Map.class);
+            assertEquals("PARTIAL",result.get("overallStatus"));
+            assertEquals(3,((Number)result.get("exitCode")).intValue());
+            Map<?,?> pkg=findSection((List<?>)result.get("sections"),"Package payments");
+            assertNotNull(pkg,captured.stdout);
+            assertEquals("WARN",pkg.get("status"));
+        } finally {
+            if(previousHome==null)System.clearProperty("att.home");else System.setProperty("att.home",previousHome);
+            if(previousServer==null)System.clearProperty("att.server.config");else System.setProperty("att.server.config",previousServer);
+        }
+    }
+
+    private static String runtimeConfig(String uatHelper) {
+        return "schemaVersion: att-config/v2.13\noutputDirectory: output\nenvironment: SIT\nenvironments:\n"
+                +"  SIT: {}\n  UAT:"+ (uatHelper==null?" {}\n":"\n    dbhelpers: ["+uatHelper+"]\n");
+    }
+
+    private static Path javaExecutable() {
+        return Paths.get(System.getProperty("java.home"),"bin",
+                System.getProperty("os.name","").toLowerCase().contains("win")?"java.exe":"java");
+    }
+
+    private static String yaml(Path path) {
+        return "'"+path.toAbsolutePath().normalize().toString().replace("'","''")+"'";
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Map<?,?> findSection(List<?> sections,String name) {
+        for(Object value:sections) {
+            if(!(value instanceof Map))continue;
+            Map<?,?> section=(Map<?,?>)value;
+            if(name.equals(section.get("name")))return section;
+            Object children=section.get("sections");
+            if(children instanceof List) {
+                Map<?,?> found=findSection((List<?>)children,name);
+                if(found!=null)return found;
+            }
+        }
+        return null;
     }
 
     private static Captured capture(OutputAction action) throws Exception {
