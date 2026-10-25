@@ -456,18 +456,30 @@ public final class WorkerMain {
         String scope=request.validationScope==null?"config":request.validationScope;
         Path runtimeRoot=RuntimeConfigPath.root(configPath);
         boolean packageCheck=request.registeredPackageId!=null;
+        att.validation.PackageValidationBudget.Result packageBudget=null;
+        if(packageCheck&&Boolean.TRUE.equals(request.all)&&"package".equals(scope))
+            packageBudget=att.validation.PackageValidationBudget.inspect(packageRoot);
+        boolean packageBudgetExceeded=packageBudget!=null&&!packageBudget.complete();
         java.util.Set<String> permittedEnvironments=request.validationAllowedEnvironments==null?null:
                 new java.util.LinkedHashSet<String>(request.validationAllowedEnvironments);
         att.server.api.AttValidationReport report=att.validation.RuntimeConfigurationValidator.validate(configPath,runtimeRoot,
-                packageCheck?packageRoot:null,request.environment,"SERVER",Boolean.TRUE.equals(request.all),permittedEnvironments);
+                packageCheck&&!packageBudgetExceeded?packageRoot:null,request.environment,"SERVER",Boolean.TRUE.equals(request.all),permittedEnvironments);
         if(request.registeredPackageId!=null)report.context("packageId",request.registeredPackageId);
         report.context("environment",request.environment);
         if("config".equals(scope)) return validationResult(report,request);
         if("package".equals(scope)) {
+            if(packageBudgetExceeded) {
+                report.context("validationWorkUnits",packageBudget.entries());
+                report.incomplete();att.server.api.AttValidationReport.Section skipped=report.addSection("Package Inventory","packages/"+request.registeredPackageId,"WARN");
+                Map<String,Object> diagnostic=new LinkedHashMap<String,Object>();diagnostic.put("code","ATT-VALIDATION-LIMIT");
+                diagnostic.put("severity","WARNING");diagnostic.put("source","packages/"+request.registeredPackageId);
+                diagnostic.put("field","resources");diagnostic.put("message","Package inventory exceeded the bounded read-only scan budget; its full validation was skipped");
+                skipped.diagnostic(diagnostic);return validationResult(report,request);
+            }
             List<String> profiles;
             try {
                 profiles=Boolean.TRUE.equals(request.all)
-                        ?att.validation.RuntimeConfigurationValidator.declaredProfiles(configPath)
+                        ?att.validation.RuntimeConfigurationValidator.validationProfiles(configPath).profiles()
                         :Collections.singletonList(request.environment);
             } catch(Exception invalid) {
                 report.incomplete();
@@ -478,6 +490,7 @@ public final class WorkerMain {
                 incomplete.diagnostic(diagnostic);return validationResult(report,request);
             }
             if(profiles.isEmpty())profiles=Collections.singletonList(null);
+            if(packageBudget!=null)report.context("validationWorkUnits",packageBudget.entries()*(profiles.size()+2L));
             for(String profile:profiles) {
                 String label=profile==null?"default":profile;
                 if(Boolean.TRUE.equals(request.all)&&permittedEnvironments!=null&&!permittedEnvironments.contains(label.toLowerCase(java.util.Locale.ROOT))) {
@@ -486,11 +499,20 @@ public final class WorkerMain {
                     diagnostic.put("severity","INFO");diagnostic.put("source","att-server.yaml");diagnostic.put("field","environment");
                     diagnostic.put("message","Environment is excluded by the active Server Package policy");skipped.diagnostic(diagnostic);continue;
                 }
-                att.api.OperationResult result=new att.api.DefaultAttService().validate(new att.api.ValidateRequest(packageRoot,configPath,
-                        profile,Collections.<Path>emptyList(),null,Collections.<String>emptySet(),Collections.<String>emptySet(),
-                        Collections.<String>emptySet(),false,"package"));
-                att.server.api.AttValidationReport.Section inventory=report.addSection(label+" — Testcases / Templates / Flows / dependencies",null,result.exitCode()==0?"PASS":"FAIL");
-                addValidationDiagnostics(inventory,result.diagnostics());if(result.exitCode()!=0)report.exitCode(2);
+                try {
+                    att.api.OperationResult result=new att.api.DefaultAttService().validate(new att.api.ValidateRequest(packageRoot,configPath,
+                            profile,Collections.<Path>emptyList(),null,Collections.<String>emptySet(),Collections.<String>emptySet(),
+                            Collections.<String>emptySet(),false,"package"));
+                    att.server.api.AttValidationReport.Section inventory=report.addSection(label+" — Testcases / Templates / Flows / dependencies",null,result.exitCode()==0?"PASS":"FAIL");
+                    addValidationDiagnostics(inventory,result.diagnostics());if(result.exitCode()!=0)report.exitCode(2);
+                } catch(Exception invalid) {
+                    att.server.api.AttValidationReport.Section inventory=report.addSection(label+" — Testcases / Templates / Flows / dependencies",null,"FAIL");
+                    Map<String,Object> diagnostic=new LinkedHashMap<String,Object>();diagnostic.put("code","ATT-PACKAGE-INVENTORY-FAILED");
+                    diagnostic.put("severity","ERROR");diagnostic.put("source","packages/"+request.registeredPackageId);
+                    diagnostic.put("field","environment");diagnostic.put("message",DiagnosticSanitizer.redactAbsolutePaths(
+                            DiagnosticSanitizer.redactText(invalid.getMessage()==null?"Package inventory validation failed":invalid.getMessage()),packageRoot));
+                    inventory.diagnostic(diagnostic);report.exitCode(2);
+                }
             }
             return validationResult(report,request);
         }

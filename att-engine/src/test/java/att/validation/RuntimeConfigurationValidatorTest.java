@@ -29,4 +29,22 @@ class RuntimeConfigurationValidatorTest {
         JsonSchemaVerifier.verify(SchemaFiles.resolveVersion(temp,"att-validation/v1"),report.toMap());
         assertDoesNotThrow(()->SchemaFiles.historicalSchemaVersions(temp));
     }
+
+    @Test void allProfileValidationReportsPartialWhenTheEnvironmentBoundIsReached() throws Exception {
+        att.TestSchemas.install(temp);
+        Path config=temp.resolve("config/config.yaml");Files.createDirectories(config.getParent());
+        StringBuilder yaml=new StringBuilder("schemaVersion: att-config/v2.13\nenvironments:\n");
+        for(int i=0;i<=RuntimeConfigurationValidator.MAX_ENVIRONMENT_PROFILES;i++)
+            yaml.append("  Env").append(String.format("%03d",i)).append(": {}\n");
+        Files.write(config,yaml.toString().getBytes(StandardCharsets.UTF_8));
+
+        AttValidationReport report=RuntimeConfigurationValidator.validate(config,temp,null,null,"LOCAL",true);
+
+        assertEquals(3,report.exitCode());
+        assertEquals("PARTIAL",report.overallStatus());
+        assertTrue(((List<?>)((Map<?,?>)report.toMap().get("context")).get("environments")).size()
+                <=RuntimeConfigurationValidator.MAX_ENVIRONMENT_PROFILES);
+        assertTrue(((List<?>)report.toMap().get("diagnostics")).stream().anyMatch(value->
+                "ATT-VALIDATION-LIMIT".equals(((Map<?,?>)value).get("code"))));
+    }
 }

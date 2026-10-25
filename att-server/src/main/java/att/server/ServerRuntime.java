@@ -68,6 +68,8 @@ final class ServerRuntime implements AutoCloseable {
     // Public inspection limits; keep aligned with PackageResourceInspector in the Local runtime.
     private static final int RESOURCE_DEFAULT_PAGE_SIZE=50, RESOURCE_MAX_PAGE_SIZE=100;
     private static final int TESTDATA_RECORD_MAX_PAGE_SIZE=100;
+    private static final int MAX_VALIDATION_PACKAGE_ENTRIES=20000, MAX_VALIDATION_ENVIRONMENTS=100;
+    private static final long MAX_TOTAL_VNEXT_VALIDATION_WORK_UNITS=10000000L;
     static final long DRAFT_TTL_MILLIS=TimeUnit.MINUTES.toMillis(10);
     static final int MAX_STREAM_OBSERVERS=32;
     private static final int INSPECTION_EXPLORER_PRIORITY_BURST=3;
@@ -1626,7 +1628,9 @@ final class ServerRuntime implements AutoCloseable {
         List<Map.Entry<String,Path>> packages=new ArrayList<>(config.packages.entrySet());packages.sort(Map.Entry.comparingByKey());
         report.context("packages",packages.size());
         if(packages.size()>200) {packages=packages.subList(0,200);report.incomplete();}
-        for(Map.Entry<String,Path> entry:packages) {
+        long validationWorkUnits=0L;
+        for(int packageIndex=0;packageIndex<packages.size();packageIndex++) {
+            Map.Entry<String,Path> entry=packages.get(packageIndex);
             String packageId=entry.getKey();Path root=entry.getValue();
             try {
                 validatePackageRoot(root);
@@ -1635,15 +1639,33 @@ final class ServerRuntime implements AutoCloseable {
                 if(!config.packageConfiguration.allowedEnvironments.isEmpty())
                     request.validationAllowedEnvironments=new ArrayList<>(config.packageConfiguration.allowedEnvironments);
                 Map<String,Object> checked=validationWorkerReport(executeInspection(root,request));
+                validationWorkUnits=saturatedAdd(validationWorkUnits,validationWorkUnits(checked));
                 String status=reportExit(checked)==0?"PASS":reportExit(checked)==2?"FAIL":"WARN";
                 att.server.api.AttValidationReport.Section packageSection=report.addSection("Package "+packageId,"packages/"+packageId,status);
                 appendValidationSections(packageSection,checked);
                 if(reportExit(checked)==2)report.exitCode(2);
                 else if(reportExit(checked)!=0)report.incomplete();
+                if(validationWorkUnits>=MAX_TOTAL_VNEXT_VALIDATION_WORK_UNITS&&packageIndex+1<packages.size()) {
+                    report.incomplete();att.server.api.AttValidationReport.Section limit=report.addSection("Package Validation Work Limit",null,"WARN");
+                    Map<String,Object> diagnostic=new LinkedHashMap<String,Object>();diagnostic.put("code","ATT-VALIDATION-LIMIT");
+                    diagnostic.put("severity","WARNING");diagnostic.put("field","packages");
+                    diagnostic.put("message","The installation-wide Package/Environment work budget was reached; remaining Packages were skipped");
+                    limit.diagnostic(diagnostic);break;
+                }
             } catch(Exception unavailable) {
+                validationWorkUnits=saturatedAdd(validationWorkUnits,
+                        (long)MAX_VALIDATION_PACKAGE_ENTRIES*(MAX_VALIDATION_ENVIRONMENTS+2L));
                 report.incomplete();AttValidationReportSection(report,"Package "+packageId,"packages/"+packageId,"ATT-VALIDATION-INCOMPLETE",safeMessage(unavailable));
+                if(validationWorkUnits>=MAX_TOTAL_VNEXT_VALIDATION_WORK_UNITS&&packageIndex+1<packages.size()) {
+                    report.incomplete();att.server.api.AttValidationReport.Section limit=report.addSection("Package Validation Work Limit",null,"WARN");
+                    Map<String,Object> diagnostic=new LinkedHashMap<String,Object>();diagnostic.put("code","ATT-VALIDATION-LIMIT");
+                    diagnostic.put("severity","WARNING");diagnostic.put("field","packages");
+                    diagnostic.put("message","The installation-wide Package/Environment work budget was reached; remaining Packages were skipped");
+                    limit.diagnostic(diagnostic);break;
+                }
             }
         }
+        report.context("validationWorkUnits",validationWorkUnits);
         report.limitOutputBytes(config.inspection.maxResponseBytes);
         Map<String,Object> result=report.toMap();result.put("requestId","validation");return result;
     }
@@ -1859,6 +1881,12 @@ final class ServerRuntime implements AutoCloseable {
         requireObject(value,message);
         @SuppressWarnings("unchecked") Map<String,Object> result=(Map<String,Object>)JSON.convertValue(value,Map.class);
         return result;
+    }
+
+    @SuppressWarnings("unchecked") private static long validationWorkUnits(Map<String,Object> report) {
+        Object context=report.get("context");Object value=context instanceof Map?((Map<String,Object>)context).get("validationWorkUnits"):null;
+        if(value instanceof Number)return Math.max(0L,((Number)value).longValue());
+        return (long)MAX_VALIDATION_PACKAGE_ENTRIES*(MAX_VALIDATION_ENVIRONMENTS+2L);
     }
     private static List<String> quickLoadTestdata(JsonNode value) {
         if(value==null||value.isNull())return Collections.emptyList();

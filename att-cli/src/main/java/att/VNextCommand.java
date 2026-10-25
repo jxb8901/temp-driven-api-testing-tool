@@ -208,7 +208,7 @@ public final class VNextCommand {
         report.context("runtimeConfig",logical(config.toString(),runtimeRoot));
         AttValidationReport runtime=RuntimeConfigurationValidator.validate(config,runtimeRoot,null,null,"LOCAL",true);
         copySections(report,runtime);
-        if(runtime.exitCode()!=0)report.exitCode(2);
+        if(runtime.exitCode()==2)report.exitCode(2);else if(runtime.exitCode()!=0)report.incomplete();
 
         Map<Path,Set<String>> packagesByRoot=new LinkedHashMap<Path,Set<String>>();
         Set<Path> homeRoots=new LinkedHashSet<Path>(),registeredRoots=new LinkedHashSet<Path>();
@@ -290,8 +290,9 @@ public final class VNextCommand {
                 if(sameRuntime) {
                     try { serverProfiles=RuntimeConfigurationValidator.declaredProfiles(config); }
                     catch(Exception invalidRuntime) { serverProfiles=Collections.emptyList(); }
-                    serverSection.child("Bound Shared Runtime Config",logical(boundRuntime.toString(),runtimeRoot),runtime.exitCode()==0?"PASS":"FAIL");
-                    if(runtime.exitCode()!=0){serverSection.status("FAIL");report.exitCode(2);}
+                    serverSection.child("Bound Shared Runtime Config",logical(boundRuntime.toString(),runtimeRoot),runtime.exitCode()==0?"PASS":runtime.exitCode()==2?"FAIL":"WARN");
+                    if(runtime.exitCode()==2){serverSection.status("FAIL");report.exitCode(2);}
+                    else if(runtime.exitCode()!=0){serverSection.status("WARN");report.incomplete();}
                 } else {
                     Path boundRoot=RuntimeConfigPath.root(boundRuntime);
                     AttValidationReport boundReport=RuntimeConfigurationValidator.validate(boundRuntime,boundRoot,null,null,"LOCAL",true);
@@ -300,7 +301,8 @@ public final class VNextCommand {
                     copySections(binding,boundReport);
                     try { serverProfiles=RuntimeConfigurationValidator.declaredProfiles(boundRuntime); }
                     catch(Exception invalidRuntime) { serverProfiles=Collections.emptyList(); }
-                    if(boundReport.exitCode()!=0){serverSection.status("FAIL");report.exitCode(2);}
+                    if(boundReport.exitCode()==2){serverSection.status("FAIL");report.exitCode(2);}
+                    else if(boundReport.exitCode()!=0){serverSection.status("WARN");report.incomplete();}
                 }
                 for(Map.Entry<String,Path> entry:serverResult.packages().entrySet()) {
                     Path canonical=entry.getValue().toRealPath();
@@ -326,7 +328,7 @@ public final class VNextCommand {
                         "Correct the active ATT Server Config and retry read-only validation."));
             }
         }
-        for(Path path:homeRoots)if(!registeredRoots.contains(path))unregisteredRoots.add(path);
+        if(serverResult!=null)for(Path path:homeRoots)if(!registeredRoots.contains(path))unregisteredRoots.add(path);
 
         if(packagesByRoot.size()>200) {
             Map<Path,Set<String>> bounded=new LinkedHashMap<Path,Set<String>>();
@@ -335,14 +337,42 @@ public final class VNextCommand {
             AttValidationReport.Section limit=report.addSection("Package Scan Limit",null,"WARN");
             limit.diagnostic(validationDiagnostic("ATT-VALIDATION-LIMIT","WARNING",null,"packages","Package scan limit of 200 roots was reached; report is incomplete",null));
         }
-        try {report.context("packages",packagesByRoot.size());report.context("environments",RuntimeConfigurationValidator.declaredProfiles(config));}
+        try {report.context("packages",packagesByRoot.size());report.context("environments",RuntimeConfigurationValidator.validationProfiles(config).profiles());}
         catch(Exception ignored) {report.incomplete();}
 
+        long validationWorkUnits=0L;
         for(Map.Entry<Path,Set<String>> candidate:packagesByRoot.entrySet()) {
             Path canonical=candidate.getKey();List<String> ids=new ArrayList<String>(candidate.getValue());Collections.sort(ids,String.CASE_INSENSITIVE_ORDER);
             String id=ids.isEmpty()?canonical.getFileName().toString():ids.get(0);
             String name="Package "+id+(ids.size()>1?" (also registered as "+String.join(", ",ids.subList(1,ids.size()))+")":"");
             boolean unregistered=unregisteredRoots.contains(canonical);
+            att.validation.PackageValidationBudget.Result budget=att.validation.PackageValidationBudget.inspect(canonical);
+            validationWorkUnits+=budget.entries();
+            if(!budget.complete()) {
+                report.incomplete();AttValidationReport.Section skipped=report.addSection(name,"packages/"+id,"WARN");
+                skipped.diagnostic(validationDiagnostic("ATT-VALIDATION-LIMIT","WARNING","packages/"+id,"resources",
+                        "Package inventory exceeded the bounded read-only scan budget; its full validation was skipped",null));
+                if(unregistered)skipped.diagnostic(validationDiagnostic("ATT-PACKAGE-NOT-REGISTERED","WARNING","packages/"+id,"packageId",
+                        "Package directory is not registered with the active Server Config",null));
+                if(validationWorkUnits>=att.validation.PackageValidationBudget.MAX_INSTALLATION_WORK_UNITS) {
+                    AttValidationReport.Section limit=report.addSection("Package Validation Work Limit",null,"WARN");
+                    limit.diagnostic(validationDiagnostic("ATT-VALIDATION-LIMIT","WARNING",null,"packages",
+                            "The installation-wide Package/Environment work budget was reached; remaining checks were skipped",null));
+                    break;
+                }
+                continue;
+            }
+            List<String> workProfiles;
+            try {workProfiles=RuntimeConfigurationValidator.validationProfiles(config).profiles();}
+            catch(Exception invalid) {workProfiles=Collections.emptyList();}
+            long packageWorkUnits=budget.entries()*(Math.max(1,workProfiles.size())+1L);
+            if(packageWorkUnits>att.validation.PackageValidationBudget.MAX_INSTALLATION_WORK_UNITS-validationWorkUnits) {
+                report.incomplete();AttValidationReport.Section limit=report.addSection("Package Validation Work Limit",null,"WARN");
+                limit.diagnostic(validationDiagnostic("ATT-VALIDATION-LIMIT","WARNING",null,"packages",
+                        "The installation-wide Package/Environment work budget was reached; remaining checks were skipped",null));
+                break;
+            }
+            validationWorkUnits+=packageWorkUnits;
             AttValidationReport packageReport=RuntimeConfigurationValidator.validate(config,runtimeRoot,canonical,null,"LOCAL",true,
                     serverResult==null?null:serverResult.allowedEnvironments());
             AttValidationReport.Section pkg=report.addSection(name,"packages/"+id,packageReport.exitCode()==0?(unregistered?"WARN":"PASS"):"FAIL");
@@ -352,7 +382,7 @@ public final class VNextCommand {
             if(packageReport.exitCode()==2)report.exitCode(2);else if(packageReport.exitCode()!=0)report.incomplete();
 
             List<String> profiles;
-            try {profiles=RuntimeConfigurationValidator.declaredProfiles(config);}
+            try {profiles=RuntimeConfigurationValidator.validationProfiles(config).profiles();}
             catch(Exception invalid) {
                 report.incomplete();
                 AttValidationReport.Section incomplete=pkg.child("Testcases / Templates / Flows / dependencies",null,"WARN");
@@ -369,21 +399,39 @@ public final class VNextCommand {
                             "Environment is excluded by the active Server Package policy",null));
                     continue;
                 }
-                OperationResult full=new att.api.DefaultAttService().validate(new ValidateRequest(canonical,config,profile,
-                        Collections.<Path>emptyList(),null,Collections.<String>emptySet(),Collections.<String>emptySet(),
-                        Collections.<String>emptySet(),false,"package"));
-                AttValidationReport.Section inventory=pkg.child(profileLabel+" — Testcases / Templates / Flows / dependencies",null,full.exitCode()==0?"PASS":"FAIL");
-                addDiagnostics(inventory,full.diagnostics(),canonical);
-                if(full.exitCode()!=0)report.exitCode(2);
+                final String selectedProfile=profile;
+                validateInventory(report,pkg,id,profileLabel,canonical,()->new att.api.DefaultAttService().validate(
+                        new ValidateRequest(canonical,config,selectedProfile,Collections.<Path>emptyList(),null,
+                                Collections.<String>emptySet(),Collections.<String>emptySet(),Collections.<String>emptySet(),false,"package")));
             }
         }
-        if(runtime.exitCode()!=0)report.exitCode(2);
+        report.context("validationWorkUnits",validationWorkUnits);
+        if(runtime.exitCode()==2)report.exitCode(2);else if(runtime.exitCode()!=0)report.incomplete();
         printValidation(o,report);return report.exitCode();
     }
 
     private static void addPackageRoot(Map<Path,Set<String>> packages,Path root,String id) {
         Set<String> ids=packages.get(root);if(ids==null){ids=new LinkedHashSet<String>();packages.put(root,ids);}ids.add(id);
     }
+    static void validateInventory(AttValidationReport report,AttValidationReport.Section pkg,String packageId,
+                                  String profileLabel,Path packageRoot,PackageInventoryValidator validator) {
+        String sectionName=profileLabel+" — Testcases / Templates / Flows / dependencies";
+        try {
+            OperationResult full=validator.validate();
+            AttValidationReport.Section inventory=pkg.child(sectionName,null,full.exitCode()==0?"PASS":"FAIL");
+            addDiagnostics(inventory,full.diagnostics(),packageRoot);
+            if(full.exitCode()!=0){pkg.status("FAIL");report.exitCode(2);}
+        } catch(Exception invalid) {
+            pkg.status("FAIL");
+            AttValidationReport.Section inventory=pkg.child(sectionName,null,"FAIL");
+            String message=att.server.api.internal.DiagnosticSanitizer.redactAbsolutePaths(
+                    att.server.api.internal.DiagnosticSanitizer.redactText(safe(invalid)),packageRoot);
+            inventory.diagnostic(validationDiagnostic("ATT-PACKAGE-INVENTORY-FAILED","ERROR","packages/"+packageId,
+                    "environment",message,"Correct the Package or Environment inputs and retry read-only validation."));
+            report.exitCode(2);
+        }
+    }
+    interface PackageInventoryValidator { OperationResult validate() throws Exception; }
     private static boolean containsIgnoreCase(List<String> values,String value) {
         for(String item:values)if(item.equalsIgnoreCase(value))return true;return false;
     }

@@ -22,6 +22,7 @@ import java.util.Locale;
 
 /** Read-only Runtime Config, Environment Profile, Helper and Package Testdata validation. */
 public final class RuntimeConfigurationValidator {
+    public static final int MAX_ENVIRONMENT_PROFILES = 100;
     private RuntimeConfigurationValidator() { }
 
     public static AttValidationReport validate(Path configFile, Path runtimeRoot, Path packageRoot,
@@ -41,6 +42,7 @@ public final class RuntimeConfigurationValidator {
         if(requestedEnvironment!=null)report.context("environment",requestedEnvironment);
         AttValidationReport.Section shared = report.addSection("Shared Runtime Config", logical(file, root), "PASS");
         List<String> profiles;
+        boolean profileLimitReached=false;
         Map<?, ?> raw;
         try {
             if (Files.isSymbolicLink(file) || !Files.isRegularFile(file, LinkOption.NOFOLLOW_LINKS) || !Files.isReadable(file))
@@ -48,7 +50,8 @@ public final class RuntimeConfigurationValidator {
             Object loaded = YamlSupport.load(file);
             if (!(loaded instanceof Map)) throw new IllegalArgumentException("Shared Runtime Config must be a YAML mapping");
             raw = (Map<?, ?>) loaded;
-            profiles = environmentProfiles(raw, requestedEnvironment, allProfiles);
+            ProfileSelection selection=selectProfiles(raw,requestedEnvironment,allProfiles);
+            profiles=selection.profiles();profileLimitReached=selection.truncated();
             if(allProfiles)report.context("environments",profiles.isEmpty()?Collections.singletonList("default"):profiles);
             else if(requestedEnvironment==null&&profiles.isEmpty())report.context("environment","default");
         } catch (Exception invalid) {
@@ -57,6 +60,13 @@ public final class RuntimeConfigurationValidator {
             shared.status("FAIL");
             report.exitCode(2);
             return report;
+        }
+
+        if(profileLimitReached) {
+            report.incomplete();
+            AttValidationReport.Section limit=report.addSection("Environment Profile Limit",logical(file,root),"WARN");
+            limit.diagnostic(diagnostic("ATT-VALIDATION-LIMIT","WARNING",logical(file,root),"environments",
+                    "Only the first "+MAX_ENVIRONMENT_PROFILES+" Environment Profiles were checked; the report is incomplete",null));
         }
 
         FrameworkConfigLoader loader = new FrameworkConfigLoader();
@@ -144,6 +154,12 @@ public final class RuntimeConfigurationValidator {
         return Collections.singletonList(selected);
     }
 
+    private static ProfileSelection selectProfiles(Map<?,?> raw,String requested,boolean all) {
+        List<String> profiles=environmentProfiles(raw,requested,all);
+        if(!all||profiles.size()<=MAX_ENVIRONMENT_PROFILES)return new ProfileSelection(profiles,false);
+        return new ProfileSelection(new ArrayList<String>(profiles.subList(0,MAX_ENVIRONMENT_PROFILES)),true);
+    }
+
     private static boolean containsIgnoreCase(List<String> values,String target) {
         for(String value:values)if(value.equalsIgnoreCase(target))return true;return false;
     }
@@ -152,6 +168,21 @@ public final class RuntimeConfigurationValidator {
         Object loaded=YamlSupport.load(configFile.toAbsolutePath().normalize());
         if(!(loaded instanceof Map))throw new IllegalArgumentException("Shared Runtime Config must be a YAML mapping");
         return Collections.unmodifiableList(new ArrayList<String>(environmentProfiles((Map<?,?>)loaded,null,true)));
+    }
+
+    public static ProfileSelection validationProfiles(Path configFile) throws Exception {
+        Object loaded=YamlSupport.load(configFile.toAbsolutePath().normalize());
+        if(!(loaded instanceof Map))throw new IllegalArgumentException("Shared Runtime Config must be a YAML mapping");
+        return selectProfiles((Map<?,?>)loaded,null,true);
+    }
+
+    public static final class ProfileSelection {
+        private final List<String> profiles;private final boolean truncated;
+        private ProfileSelection(List<String> profiles,boolean truncated) {
+            this.profiles=Collections.unmodifiableList(new ArrayList<String>(profiles));this.truncated=truncated;
+        }
+        public List<String> profiles(){return profiles;}
+        public boolean truncated(){return truncated;}
     }
 
     private static void addHelperFailures(AttValidationReport.Section section, FrameworkConfig config,
