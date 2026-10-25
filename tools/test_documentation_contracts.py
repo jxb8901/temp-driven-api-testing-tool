@@ -37,6 +37,54 @@ class DocumentationContractsTest(unittest.TestCase):
         self.assertEqual([], stale_claims("ATT 4.1.0; att-load/v1.6; config v2.12; att-testdata/v1.0",
                                           self.active, VERSION))
 
+    def test_load_time_series_retention_contract_matches_current_metrics(self):
+        root = Path(__file__).resolve().parents[1]
+        english = (
+            root / "docs/reference/execution-modes/load.md",
+            root / "docs/system-design/load-scheduler.md",
+            root / "docs/system-design/load-telemetry.md",
+            root / "docs/reference.md",
+        )
+        chinese = (
+            root / "docs/reference.zh/execution-modes/load.md",
+            root / "docs/system-design/load-scheduler.zh.md",
+            root / "docs/system-design/load-telemetry.zh.md",
+            root / "docs/reference.zh.md",
+        )
+        stale_english = (
+            "Time-series output retains the newest 4,096 one-second buckets.",
+            "time-series store is a circular ring that keeps the newest 4,096 one-second buckets",
+            "Time series retain the newest 4,096 one-second buckets in a circular ring",
+        )
+        stale_chinese = (
+            "Time-series output 保留最新 4,096 個一秒 bucket。",
+            "time-series store 是 circular ring，保留最新 4,096 個一秒 bucket",
+            "Time series 以 circular ring 保留最新 4,096 個一秒 bucket",
+        )
+        for path in english:
+            with self.subTest(path=path):
+                text = path.read_text(encoding="utf-8")
+                folded = text.casefold()
+                for claim in stale_english:
+                    self.assertNotIn(claim.casefold(), folded)
+                for token in ("metrics.windowMetrics.timeSeries", "windowSeries.measured.points",
+                              "windowSeries.steady.points", "2,048", "1,000 ms",
+                              "adjacent bin", "double", "lower time resolution", "window duration",
+                              "clip", "window boundary", "128",
+                              "4,096", "256", "metrics.buckets"):
+                    self.assertIn(token.casefold(), folded, "%s is missing %r" % (path, token))
+        for path in chinese:
+            with self.subTest(path=path):
+                text = path.read_text(encoding="utf-8")
+                for claim in stale_chinese:
+                    self.assertNotIn(claim, text)
+                for token in ("metrics.windowMetrics.timeSeries", "windowSeries.measured.points",
+                              "windowSeries.steady.points", "2,048", "1,000 ms",
+                              "相鄰 bin", "加倍", "較低", "時間解析度", "window duration",
+                              "configured window 起點", "截短", "128",
+                              "4,096", "256", "metrics.buckets"):
+                    self.assertIn(token, text, "%s is missing %r" % (path, token))
+
     def test_testdata_mapping_example_is_bootstrap_safe_and_uses_selected_record_paths(self):
         root = Path(__file__).resolve().parents[1]
         paths = (

@@ -4,7 +4,9 @@ ATT 會將 generator observation 與 SUT outcome metrics 分開。Bounded `metri
 
 `schedulerWakeups`、submit-lag 次數/平均/最大值，以及 worker-queue current/peak depth 描述 scheduler pressure。Arrival drops 是容量結果，會與 SUT error 分開。`resources.http` 按 helper 提供 active/idle/waiting 及觀察到的 pool connection peak；DB、MQ、Render diagnostics 也會並列。使用相關功能時，Render-plan compilation/cache counters 及 testdata mapping/selection counters 會一同輸出。Custom `EXEC.ID` collision reservation 使用 disk marker，並顯示保留 marker 數量；default monotonic ID 不會建立每個 ID 的 registry entry。
 
-Load latency percentile 使用有界 primitive `long` reservoir。Run-level report 提供 `latencySampleCapacity`、`latencySampleCount`、`latencyObservationCount` 及 `latencySampleRate`；精確 count、mean、minimum、maximum 不受抽樣影響。Phase 及每秒 time bucket latency sample 各有明確容量。Time series 以 circular ring 保留最新 4,096 個一秒 bucket；新秒數到達時會淘汰較舊 bucket。
+Load latency percentile 使用有界 primitive `long` reservoir。Run-level report 提供 `latencySampleCapacity`、`latencySampleCount`、`latencyObservationCount` 及 `latencySampleRate`；精確 count、mean、minimum、maximum 不受抽樣影響。Run-level 和每個 configured-window cohort reservoir 各最多保留 4,096 個 sample；legacy phase 與 `metrics.buckets` reservoir 每個 phase 或一秒 bucket 最多保留 256 個 latency sample。
+
+`metrics.windowMetrics.timeSeries.points` 全執行 chart series 最多保留 2,048 個有資料的 bin，初始寬度為 1,000 ms。資料 bin 超過容量時，ATT 會合併相鄰 bin，並使用 power-of-two coarsening 將寬度加倍。它不會淘汰歷史 bin；長時間 run 會以較低的時間解析度保留資料。Measured 和 steady series `metrics.windowMetrics.timeSeries.windowSeries.measured.points`、`metrics.windowMetrics.timeSeries.windowSeries.steady.points` 各自最多 2,048 個 bin，按 configured window 起點對齊，並在 window boundary 截短最後一個 partial bucket；初始寬度為 1,000 ms 與 window duration 兩者中較小者，且沿用相同的 coarsening 和不淘汰歷史資料政策。每個 chart bin 最多保留 128 個 latency sample，與 run-level、configured-window 和 phase reservoir 分開計算。Compatibility `metrics.buckets` ring 保留最新 4,096 個一秒 bucket，並淘汰較舊項目。
 
 `PayloadCache` 為 process scope，並會在 file 的 canonical path、size 或 modification time 改變時使 entry 失效。它採 least-recently-used eviction，最多保留 512 個 entries、共 16,777,216 個 UTF-16 code units；超過 2,097,152 code units 的單一 file 不會被 cache。這將 cached character data 限制在約 32 MiB；此上限不限制呼叫端載入的 String 或 compiled plan 自己的 snapshot。
 

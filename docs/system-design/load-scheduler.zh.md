@@ -32,7 +32,7 @@ Failure capture 依有效 evidence policy 和剩餘 retention capacity 決定。
 
 ## Telemetry storage
 
-Load latency percentile 使用有界 primitive `long` reservoir。精確 count、mean、minimum 和 maximum 會另行追蹤。Run-level、phase 和每秒 time-series observation 使用各自的容量；time-series store 是 circular ring，保留最新 4,096 個一秒 bucket。
+Load latency percentile 使用有界 primitive `long` reservoir，並另行追蹤精確 count、mean、minimum 和 maximum。`metrics.windowMetrics.timeSeries.points` 全執行序列最多保留 2,048 個有資料的 bin，初始寬度為 1,000 ms。超過容量時，相鄰 bin 會合併，bucket 寬度加倍；series 不會淘汰歷史 bin，長時間 run 會以較低時間解析度保留歷史。Measured 和 steady series `metrics.windowMetrics.timeSeries.windowSeries.measured.points`、`metrics.windowMetrics.timeSeries.windowSeries.steady.points` 各自有 2,048-bin 上限，按 configured window 起點對齊，並在 window boundary 截短最後一個 partial bucket；其初始寬度為 1,000 ms 與 window duration 兩者中較小者。每個 chart bin 最多保留 128 個 latency sample。Run-level 和 configured-window cohort reservoir 各最多 4,096 個 sample；phase summary 最多 256 個。Compatibility `metrics.buckets` 則是獨立 circular buffer，保留最新 4,096 個一秒 bucket。
 
 Generator 和 resource telemetry sampling 由 event 觸發，每 100 ms 至多記錄一次。Heap soak test 會在 warm-up 與最後 checkpoint 強制 GC，再檢查 retained heap growth，並確認 iteration-scope testdata state 不會隨 iteration 數量增加。報告字段和 maintainer verification procedure 見 [Load Generator Telemetry](load-telemetry.zh.md)。
 
