@@ -16,6 +16,7 @@ cleanup() {
 trap cleanup EXIT
 
 log_file="$tmp_dir/application.log"
+default_tmp_dir="$(cd -P /tmp && pwd -P)"
 mkdir -p "$tmp_dir/custom-output"
 cat > "$log_file" <<'EOF'
 [INFO] [2026/10/25 12:00:00.000] [Sample.first] [TID123456] alpha token
@@ -57,9 +58,9 @@ assert_one_output() {
 }
 
 positional_result="$(LOGHELPER_HOST="P$$" "$helper" "$log_file" 'alpha,beta')"
-assert_one_output "positional defaults" "/tmp/application.log" "$positional_result"
+assert_one_output "positional defaults" "$default_tmp_dir/application.log" "$positional_result"
 case "$(printf '%s\n' "$positional_result" | sed -n "s/^    path: '\(.*\)'$/\1/p" | sed -n '1p')" in
-    /tmp/*|/private/tmp/*) ;;
+    "$default_tmp_dir"/*) ;;
     *)
         printf '%s\n' 'FAIL: positional output did not default to /tmp.' "$positional_result" >&2
         exit 1
