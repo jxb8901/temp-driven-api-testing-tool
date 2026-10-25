@@ -28,6 +28,7 @@ export type AppRoute =
   | { kind: 'run'; packageId?: string; target?: ResourceRoute; environment?: string; batch?: boolean }
   | { kind: 'jobs'; jobId?: string; executionType?: 'load'; standalone?: boolean; tab?: 'overview' | 'live' | 'events' | 'results' | 'artifacts' | 'metrics' }
   | { kind: 'job-console'; jobId: string; view?: 'live' | 'events' }
+  | { kind: 'job-artifact'; jobId: string; path: string }
   | { kind: 'load'; packageId?: string; catalog?: LoadCatalogRouteState; tab?: 'templates' | 'scenarios'; templateId?: string }
   | { kind: 'load-resource'; packageId: string; resourceId: string; environment?: string; returnTo?: string }
   | { kind: 'schedules'; view?: 'new' | 'edit' | 'history'; scheduleId?: string; occurrenceId?: string; intent?: 'validated'; returnTo?: string }
@@ -99,6 +100,9 @@ export function parseRoute(hash: string): AppRoute {
     if (parts[1] && parts[2] === 'console' && parts.length === 3) {
       const view = query.get('view');
       return { kind: 'job-console', jobId: parts[1], ...(view === 'live' || view === 'events' ? { view } : {}) };
+    }
+    if (parts[1] && parts[2] === 'artifact' && parts.length === 3) {
+      return { kind: 'job-artifact', jobId: parts[1], path: query.get('path') || '' };
     }
     return { kind: 'jobs', ...(parts[1] ? { jobId: parts[1] } : {}), ...(query.get('standalone') === '1' ? { standalone: true } : {}), ...(['overview','live','events','results','artifacts','metrics'].includes(query.get('tab') || '') ? {tab: query.get('tab') as 'live'} : {}), ...(query.get('type') === 'load' ? { executionType: 'load' } : {}) };
   }
@@ -191,6 +195,11 @@ export function formatRoute(route: AppRoute): string {
     case 'job-console': {
       const view = route.view ? '?view=' + encodeURIComponent(route.view) : '';
       return '#/jobs/' + encodeURIComponent(route.jobId) + '/console' + view;
+    }
+    case 'job-artifact': {
+      const query = new URLSearchParams();
+      query.set('path', route.path);
+      return '#/jobs/' + encodeURIComponent(route.jobId) + '/artifact?' + query.toString();
     }
     case 'load': {
       if (route.packageId) return '#/advanced-load/' + encodeURIComponent(route.packageId) + (route.templateId ? '?templateId=' + encodeURIComponent(route.templateId) : '');

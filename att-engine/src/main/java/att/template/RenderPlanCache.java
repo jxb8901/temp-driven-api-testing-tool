@@ -103,6 +103,14 @@ public final class RenderPlanCache {
 
     public void recordEvaluation() { evaluations.increment(); }
 
+    /** Immutable payload text already resolved and compiled for this LOAD run. */
+    public List<String> dependencySources() {
+        List<String> result = new ArrayList<String>();
+        for (Plan plan : plans.values())
+            for (Source source : plan.sources()) result.add(source.content());
+        return Collections.unmodifiableList(result);
+    }
+
     public Stats stats() {
         return new Stats(compilations.sum(), cacheHits.sum(), payloadResolutions.sum(), payloadCacheHits.sum(),
                 evaluations.sum(), sourceBytes.sum(), 0L);

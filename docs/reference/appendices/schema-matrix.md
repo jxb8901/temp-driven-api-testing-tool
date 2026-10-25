@@ -18,10 +18,10 @@ Active schemas (the matching ATT Engine JAR's embedded registry, built from `sch
 | Template | att-template/v3.6 |
 | Flow | att-flow/v3.6 |
 | Debug input | att-debug/v1.2 |
-| Load scenario | att-load/v1.8 |
+| Load scenario | att-load/v1.9 |
 | Load Template | `att-load-template/v1` | `schemas/att-load-template-v1.schema.json` |
 | Load bindings | `att-load-bindings/v1` | `schemas/att-load-bindings-v1.schema.json` |
-| Load summary | att-load-summary/v1.1 |
+| Load summary | att-load-summary/v1.2 |
 | Run manifest | att-run/v2.1 |
 | Validation JSON | att-validation/v2.1 |
 | CI summary | att-ci-summary/v2.1 |

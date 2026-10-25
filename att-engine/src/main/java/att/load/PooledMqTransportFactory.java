@@ -12,7 +12,18 @@ public final class PooledMqTransportFactory implements MqTransport.Factory, Auto
     private final MqTransport.Factory delegate;
     private final int defaultMaxSize;
     private final long defaultBorrowTimeoutMs;
-    private final Map<String, LoadResourcePool<MqTransport.Connection>> pools = new ConcurrentHashMap<String, LoadResourcePool<MqTransport.Connection>>();
+    private final ConcurrentHashMap<String, PoolEntry> pools = new ConcurrentHashMap<String, PoolEntry>();
+    private final java.util.concurrent.atomic.AtomicBoolean closed = new java.util.concurrent.atomic.AtomicBoolean();
+
+    private static final class PoolEntry {
+        final LoadResourcePool<MqTransport.Connection> pool;
+        final java.util.concurrent.atomic.AtomicBoolean preparationConnect;
+        final long preparationDeadlineNanos;
+        PoolEntry(LoadResourcePool<MqTransport.Connection> pool,
+                  java.util.concurrent.atomic.AtomicBoolean preparationConnect, long preparationDeadlineNanos) {
+            this.pool = pool; this.preparationConnect = preparationConnect; this.preparationDeadlineNanos = preparationDeadlineNanos;
+        }
+    }
 
     public PooledMqTransportFactory(MqTransport.Factory delegate, int maxSize, long borrowTimeoutMs) {
         if (delegate == null) throw new IllegalArgumentException("MQ transport factory is required");
@@ -24,7 +35,10 @@ public final class PooledMqTransportFactory implements MqTransport.Factory, Auto
 
     @Override public MqTransport.Connection connect(final MqHelperConfig config) throws Exception {
         if (config == null) throw new IllegalArgumentException("MQ helper configuration is required");
-        final LoadResourcePool<MqTransport.Connection> pool = poolFor(config);
+        final PoolEntry entry = poolFor(config, Long.MAX_VALUE, false);
+        final LoadResourcePool<MqTransport.Connection> pool = entry.pool;
+        try { pool.ensureMinIdle(config.poolMinIdle()); }
+        catch (PoolFactoryException wrapped) { throw wrapped.cause; }
         final LoadResourcePool<MqTransport.Connection>.Lease lease;
         try {
             lease = pool.borrow();
@@ -34,12 +48,39 @@ public final class PooledMqTransportFactory implements MqTransport.Factory, Auto
         return new PooledConnection(lease);
     }
 
-    public LoadResourcePool<MqTransport.Connection> pool(String id) { return pools.get(id); }
+    public LoadResourcePool<MqTransport.Connection> pool(String id) {
+        PoolEntry entry = pools.get(id);
+        return entry == null ? null : entry.pool;
+    }
+
+    /** Connect/authenticate only. No business queue is opened and no message is sent. */
+    public int prepareInitialReady(MqHelperConfig config) throws Exception {
+        return prepareInitialReady(config, Long.MAX_VALUE);
+    }
+
+    public int prepareInitialReady(MqHelperConfig config, long deadlineNanos) throws Exception {
+        if (Thread.currentThread().isInterrupted()) throw new InterruptedException("MQ preparation cancelled");
+        boolean bounded = deadlineNanos != Long.MAX_VALUE;
+        PoolEntry entry = poolFor(config, deadlineNanos, bounded);
+        LoadResourcePool<MqTransport.Connection> pool = entry.pool;
+        try {
+            if (bounded) pool.ensureMinIdle(Math.max(1, config.poolMinIdle()), deadlineNanos);
+            else pool.ensureMinIdle(Math.max(1, config.poolMinIdle()));
+        }
+        catch (PoolFactoryException wrapped) { throw wrapped.cause; }
+        if (bounded && System.nanoTime() >= deadlineNanos)
+            throw new java.util.concurrent.TimeoutException("LOAD_PREPARATION_TIMEOUT");
+        entry.preparationConnect.set(false);
+        int ready = pool.idle();
+        if (ready < Math.max(1, config.poolMinIdle()))
+            throw new IllegalStateException("MQ_PREPARATION_IDLE_FLOOR_UNAVAILABLE");
+        return ready;
+    }
 
     public Map<String, Map<String, Object>> metrics() {
         Map<String, Map<String, Object>> result = new LinkedHashMap<String, Map<String, Object>>();
-        for (Map.Entry<String, LoadResourcePool<MqTransport.Connection>> entry : pools.entrySet()) {
-            LoadResourcePool<MqTransport.Connection> pool = entry.getValue();
+        for (Map.Entry<String, PoolEntry> entry : pools.entrySet()) {
+            LoadResourcePool<MqTransport.Connection> pool = entry.getValue().pool;
             Map<String, Object> values = new LinkedHashMap<String, Object>(pool.metrics());
             values.put("helperId", entry.getKey());
             result.put(entry.getKey(), values);
@@ -47,33 +88,59 @@ public final class PooledMqTransportFactory implements MqTransport.Factory, Auto
         return result;
     }
 
-    private synchronized LoadResourcePool<MqTransport.Connection> poolFor(final MqHelperConfig config) throws Exception {
+    private PoolEntry poolFor(final MqHelperConfig config, final long deadlineNanos, boolean bounded) throws Exception {
+        if (closed.get()) throw new IllegalStateException("MQ resource factory is closed");
         final String poolKey = config.poolKey();
-        LoadResourcePool<MqTransport.Connection> existing = pools.get(poolKey);
+        PoolEntry existing = pools.get(poolKey);
         if (existing != null) return existing;
         int maxSize = config.poolMaxSize() < 1 ? defaultMaxSize : config.poolMaxSize();
         long borrowTimeoutMs = config.poolBorrowTimeoutMs() < 0L ? defaultBorrowTimeoutMs : config.poolBorrowTimeoutMs();
+        final java.util.concurrent.atomic.AtomicBoolean preparationConnect = new java.util.concurrent.atomic.AtomicBoolean(bounded);
         LoadResourcePool<MqTransport.Connection> created = new LoadResourcePool<MqTransport.Connection>(maxSize, borrowTimeoutMs,
                 () -> {
-                    try { return delegate.connect(config); }
+                    try {
+                        if (preparationConnect.get()) {
+                            long remaining = deadlineNanos - System.nanoTime();
+                            if (remaining <= 0L) throw new java.util.concurrent.TimeoutException("LOAD_PREPARATION_TIMEOUT");
+                            long timeoutMs = Math.max(1L, java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(remaining));
+                            return delegate.connect(config, timeoutMs);
+                        }
+                        return delegate.connect(config);
+                    }
                     catch (Exception error) { throw new PoolFactoryException(error); }
-                }, connection -> { try { connection.disconnect(); } catch (Exception ignored) { } });
-        try {
-            created.ensureMinIdle(config.poolMinIdle());
-        } catch (PoolFactoryException wrapped) {
+                }, connection -> {
+                    try { connection.disconnect(); }
+                    catch (Exception failure) {
+                        throw new IllegalStateException("MQ_CONNECTION_DISCONNECT_FAILED", failure);
+                    }
+                });
+        PoolEntry candidate = new PoolEntry(created, preparationConnect, deadlineNanos);
+        PoolEntry raced = pools.putIfAbsent(poolKey, candidate);
+        if (raced != null) {
             created.close();
-            throw wrapped.cause;
-        } catch (RuntimeException error) {
-            created.close();
-            throw error;
+            return raced;
         }
-        pools.put(poolKey, created);
-        return created;
+        if (closed.get()) {
+            pools.remove(poolKey, candidate);
+            created.close();
+            throw new IllegalStateException("MQ resource factory is closed");
+        }
+        return candidate;
     }
 
-    @Override public synchronized void close() {
-        for (LoadResourcePool<MqTransport.Connection> pool : pools.values()) pool.close();
+    @Override public void close() {
+        if (!closed.compareAndSet(false, true)) return;
+        RuntimeException failure = null;
+        for (PoolEntry entry : pools.values()) {
+            try { entry.pool.close(); }
+            catch (RuntimeException problem) {
+                if (failure == null) failure = problem;
+                else failure.addSuppressed(problem);
+            }
+        }
         pools.clear();
+        if (failure != null) throw new IllegalStateException(
+                "MQ_RESOURCE_TEARDOWN_FAILED: one or more physical MQ connections did not confirm disconnect", failure);
     }
 
     private static final class PoolFactoryException extends RuntimeException {

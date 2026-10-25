@@ -42,6 +42,8 @@ att/                              # ATT_HOME
 
 ## 設定
 
+Server 會驗證 `min(workers.maxConcurrent, workers.maxConcurrentLoad) <= 4`。每個 Worker 最多預留 64 個 DB/MQ initial session，因此單一 Server process 最多同時執行四個 LOAD Worker，並將該 Server 提交的 LOAD preparation 限制在 256 個 session。此上限只涵蓋該 Server process admission 的 LOAD 工作。RUN/Debug、CLI 或直接 Engine process，以及其他 Server instance 不由同一 admission semaphore 協調；若它們共用 backend，請另行計算其 session。
+
 `server.dataDir` 儲存 H2 控制平面資料及工作輸出。`workers` 限制 Worker 並行數、佇列大小、Load admission、優雅停止逾時及可選的每個 Worker Heap 上限。`workers.heapMaxMb` 為每個 Worker 設定 `-Xmx`（64–65536 MiB）；選填 `heapInitialMb` 設定 `-Xms`（32–65536 MiB），必須同時設定 `heapMaxMb`，並且不可超過上限。請按 `maxConcurrent`、Server 及 container 的記憶體預算設定總 Heap 上限。被拒絕的提交會在建立持久工作記錄前清理。已完成工作的 metadata、journal 及 artifacts 會保留 `server.jobRetentionDays` 天（預設 30，範圍 1–3650）；啟動時及每小時清理過期工作，並保留執行中的工作。天數保留與選用的容量配額彼此獨立。`server.jobStorage` 只有在 `enabled: true` 時才會啟用。啟用時必須設定 `maxTotalSizeMb`，以及嚴格較小的 `cleanupTargetSizeMb`（各為 1–10485760 MiB）。Server 只測量 `dataDir/jobs`，不會跟隨符號連結，也不會計入 H2 資料庫。測量無法完成時不會刪除任何內容。用量高於高水位時，會由最舊的已結束 Job 開始刪除，直到用量低於或等於清理目標：先比 `finishedAt`，再比 `jobId`。執行中、佇列中、仍在記憶體中、隔離、artifact recovery、封存讀取中，以及新於 `minRetentionHours`（預設 24）的 Job 都會保留。`minRetentionHours` 只限制容量回收。`jobRetentionDays` 的天數到期仍單獨生效，可能刪除容量回收會保留的 Job。每次回收會刪除整個 Job 目錄及其 H2 列；標記為刪除中的 Job 會從一般清單、LOAD 清單與讀取 API 隱藏，直到刪除完成。重啟後完成刪除時會寫入一筆 `JOB_STORAGE_EVICT` audit。`maxSingleJobSizeMb` 會被拒絕，因為不會只因單一 Job 過大而刪除它。配額不會壓縮 H2。若一次清掃達到候選 Job 上限而仍有可刪除的 Job，結果為 `partial`，不會記為 `quota_unmet`。下次清掃會從上次檢查的最後一個候選之後繼續。當錨點 Job 的完成時間改變、候選清單已走完，或用量回到高水位以下時，會捨棄這個續掃位置。若續掃已包含最舊的候選並走到清單結尾，而用量仍高於清理目標，結果是 `quota_unmet`。隔離中以及仍需 artifact recovery 的 Job 不會進入候選頁，因此受保護的前綴不能佔滿本次預算。`quota_unmet` 表示候選已看完，且因為只剩受保護的 Job 而用量仍高於清理目標。已驗證的管理員可從 `GET /api/v1/metrics` 的 `jobStorage` 讀取最近一次清理結果。`workers.maxConcurrentLoad` 限制已接納的 Load 工作總數，包括佇列中及執行中的工作，避免等待中的 Load 佔用一般 Worker thread。Load 或整體容量超出上限時會回傳 HTTP 429。`workers.libraryDirs` 可選擇列出絕對、已存在且可讀的目錄，Worker subprocess 會將其中 JAR 加入 classpath，以載入額外 JDBC、MQ 或其他 dependency；只可設定由 Server 管理員信任的目錄。唯讀 `packages` registry 將穩定 package ID 對應到 `allowedRoots` 下的 canonical root。每個 Package 都必須明確登錄；package ID 只是標籤，與 login ID 相同不代表 owner 或額外權限。Business resources 僅從各自 Package root 解析；所有 Package 共用 ATT_HOME runtime config 及 trusted schema。`server.inspection` 以有界的常駐 Worker pool 獨立限制唯讀資源探索。Worker pool 的程序數不會超過 `maxConcurrent`，每個程序會依次處理請求，並快取最多兩個 package index；package 檔案變更事件會令快取失效。資源探索另設佇列、逾時、heap、source 及 response 上限。`sourceBrowsing.policy: safe-package-files` 預設允許合資格且非敏感的 package-local 文字，無須逐檔 allowlist，包括有界的 Template/Flow YAML 投影、Tool scripts、一般設定與 Testdata descriptor，以及由已授權 source 連結的合資格 `&{...}` targets。`config/` 是唯一可列出目錄的檔案樹。每個連結檔案都使用 Server 簽發、綁定 package 及 origin 的不透明 reference ID；caller 單靠路徑和 origin 不會獲得導覽權限。`allowlist-only` 使用 `server.inspection.safeTextSources` 設定精確路徑；共用設定來源以 ATT_HOME-relative 路徑表示，Package 檔案仍以各自 root-relative 路徑表示。External scripts 只會在 `sourceBrowsing.externalTextSources.<packageId>` 列出其 canonical 精確檔案，且檔案位於已設定的 canonical `externalSourceRoots` 目錄時提供；不接受 wildcard、不列出 external 檔案，回應亦不會洩露 filesystem path。敏感路徑、deny 檔案、binary、package root 以外的檔案及超大檔案仍不可用；憑證及個人資料在所有模式下都會受到保護。
 
 舊版的 `server.inspection.safeTextSources` 若包含 YAML entry，可能令 Tomcat 因 `Inspection source allowlist accepts text script files only` 而無法啟動。如需先恢復舊版服務，請在重啟前移除該 entry。本版本已接受 YAML entry；預設 `safe-package-files` policy 會提供合資格的共用設定 YAML（例如 `config/tools/fpp.yaml`），無須逐檔設定。只有使用 `allowlist-only` 時才需保留精確路徑。
@@ -267,7 +269,7 @@ Local mode 的所有 active USER 均可存取同一操作範圍內的 package、
 | `GET` | `/packages/{packageId}/load-policy?model=virtualUsers&environment=SIT` | 讀取 Advanced Load 使用的安全 model policy 預設值 |
 | `POST` | `/drafts/debug` | 驗證固定目標的 Debug 輸入並建立記憶體 draft |
 | `POST` | `/drafts/quick-load` | 驗證固定目標的 Quick Load 並建立記憶體 draft |
-| `POST` | `/drafts/load` | 驗證 `att-load/v1.8` scenario 並建立記憶體 draft |
+| `POST` | `/drafts/load` | 驗證 `att-load/v1.9` scenario 並建立記憶體 draft |
 | `GET` | `/drafts/{draftId}` | 讀取所屬 Debug、Quick Load 或 Advanced Load draft 的安全預覽 |
 | `POST` | `/jobs/debug`、`/jobs/load` | 提交所屬 Debug、Quick Load 或 Advanced Load draft |
 | `POST` | `/jobs/run`、`/jobs/load`、`/jobs/validate` | 提交 path-based 工作 |
@@ -410,7 +412,7 @@ Server 會在提交時及 Worker 啟動前重新檢查 package revision。若在
 
 ### 目標範圍內的 Quick Load
 
-設定 `server.inlineLoad.enabled: true` 後，Quick Load 才可從已選取的 Template、Flow 或 Tool 開啟；它固定使用該目標並組成一個 Workload。Model 可選 `virtualUsers` 或 `arrivalRate`；Server 會組成相符的現行 `att-load/v1.8` policy，並使用現有 Load pipeline 驗證目標。功能停用時，Quick Load form、policy 及 draft endpoint 都會回傳 `403 ATT-SERVER-INLINE-LOAD-DISABLED`。
+設定 `server.inlineLoad.enabled: true` 後，Quick Load 才可從已選取的 Template、Flow 或 Tool 開啟；它固定使用該目標並組成一個 Workload。Model 可選 `virtualUsers` 或 `arrivalRate`；Server 會組成相符的現行 `att-load/v1.9` policy，並使用現有 Load pipeline 驗證目標。功能停用時，Quick Load form、policy 及 draft endpoint 都會回傳 `403 ATT-SERVER-INLINE-LOAD-DISABLED`。
 
 ```http
 GET /api/v1/packages/payments/resources/flow/{resourceId}/quick-load-form?model=virtualUsers&environment=SIT
@@ -418,7 +420,7 @@ GET /api/v1/packages/payments/resources/flow/{resourceId}/quick-load-form?model=
 
 表單回應會為 Template/Flow 提供安全的 `inputs`、`vars` 預設值，或為 Tool 提供 `inputs`、`arguments`，並附上已遮蔽的單 workload 預覽。它只讀取目標選填 `debug.yaml` 內的 business 欄位；不會複製 Debug 專用的 `case`、`stage` 及 local `testdata`。若 sidecar 包含 Debug-local Testdata，表單會明確提示這些 imports 已略過。需要的 package-relative descriptor 可另外放入 Load-level `testdata` array，並會按 effective Load scenario 驗證。
 
-Server 會為 `virtualUsers` 讀取 `load/load.visualuser.yaml`，為 `arrivalRate` 讀取 `load/load.arrivalrate.yaml`。這些是 policy-only 的 `att-load/v1.8` descriptor，必須與所選 model 相符。若 model 專用檔案不存在，會使用內建低強度 fallback：一個 Virtual User 執行 10 秒，或每秒 1 次 arrival、執行 10 秒，並設定 `maxConcurrent: 1` 及 `overloadPolicy: drop`。既有 CLI `load/load.yaml` 行為不變。
+Server 會為 `virtualUsers` 讀取 `load/load.visualuser.yaml`，為 `arrivalRate` 讀取 `load/load.arrivalrate.yaml`。這些是 policy-only 的 `att-load/v1.9` descriptor，必須與所選 model 相符。若 model 專用檔案不存在，會使用內建低強度 fallback：一個 Virtual User 執行 10 秒，或每秒 1 次 arrival、執行 10 秒，並設定 `maxConcurrent: 1` 及 `overloadPolicy: drop`。既有 CLI `load/load.yaml` 行為不變。
 
 提交 business values 及 pacing overrides 以建立所屬 draft：
 
@@ -444,7 +446,7 @@ Server 會在 draft 提交時、Worker 啟動前及 Worker 內重新檢查 packa
 
 ### Advanced Load builder
 
-設定 `server.inlineLoad.enabled: true` 後，Advanced Load 才會建立包含一個或多個 workload 的完整 `att-load/v1.8` scenario。所有 workload 必須使用同一 `virtualUsers` 或 `arrivalRate` model。Virtual Users workload 可使用單一固定 target 或 weighted `mix`；每個 Arrival Rate workload 使用一個固定 target。Engine 會在 Server 建立 draft 前驗證共用時間窗口、workload intensity、thresholds、Testdata policy 及所有 target，Server 隨後會檢查管理員設定的 inline Load 上限。若超出任何上限，回傳 `400 ATT-SERVER-INLINE-LOAD-LIMIT` 及安全摘要，且不會排程 scenario。
+設定 `server.inlineLoad.enabled: true` 後，Advanced Load 才會建立包含一個或多個 workload 的完整 `att-load/v1.9` scenario。所有 workload 必須使用同一 `virtualUsers` 或 `arrivalRate` model。Virtual Users workload 可使用單一固定 target 或 weighted `mix`；每個 Arrival Rate workload 使用一個固定 target。Engine 會在 Server 建立 draft 前驗證共用時間窗口、workload intensity、thresholds、Testdata policy 及所有 target，Server 隨後會檢查管理員設定的 inline Load 上限。若超出任何上限，回傳 `400 ATT-SERVER-INLINE-LOAD-LIMIT` 及安全摘要，且不會排程 scenario。
 
 讀取安全的 model policy 預設值：
 
@@ -464,7 +466,7 @@ Content-Type: application/json
   "packageId": "payments",
   "environment": "SIT",
   "scenario": {
-    "schemaVersion": "att-load/v1.8",
+    "schemaVersion": "att-load/v1.9",
     "load": {"users": 1, "duration": "30s"},
     "workloads": [
       {"id": "browse", "target": {"type": "flow", "id": "PAYMENT.browse"}, "load": {"users": 4}},

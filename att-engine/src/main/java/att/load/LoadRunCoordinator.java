@@ -180,6 +180,20 @@ public final class LoadRunCoordinator implements AutoCloseable {
                 else ((FixedArrivalRateScheduler) scheduler).useSharedWorkers(sharedIterationWorkers);
                 schedulers.put(workload.id(), scheduler);
             }
+            // IterationExecutor construction compiles each validated target and
+            // freezes its Render payloads; only now is the complete dependency
+            // inventory available for this shared run.
+            try {
+                resources.prepareResources(runId);
+            } catch (LoadResourcePreparationException failure) {
+                cancelAll();
+                long failedAt = timing.now();
+                LoadMetrics failedMetrics = LoadMetrics.forScenario(scenario, failedAt, rateWindow);
+                failedMetrics.finish(failedAt);
+                return new LoadRunResult(runId, scenario, LoadSchedulerSupport.instant(failedAt),
+                        LoadSchedulerSupport.instant(failedAt), failedMetrics.snapshot(), LoadThresholdSummary.empty(),
+                        Collections.<String, Object>emptyMap(), resources.metrics());
+            }
             for (Map.Entry<String, LoadScheduler> entry : schedulers.entrySet()) {
                 final String workloadId = entry.getKey();
                 final LoadScheduler scheduler = entry.getValue();
@@ -187,16 +201,21 @@ public final class LoadRunCoordinator implements AutoCloseable {
             }
 
             startGate.awaitReady();
+            resources.markSchedulerStart(runId, LoadPhase.at(scenario, 0L).name(), scenario.model().wireName());
             final long startedAt = timing.now();
             final Instant startInstant = LoadSchedulerSupport.instant(startedAt);
-            final LoadMetrics aggregate = new LoadMetrics(scenario.model().wireName(), startedAt, rateWindow,
-                    scenario.model() == LoadScenario.Model.CLOSED ? scenario.configuredUsers() : 0,
-                    scenario.model() == LoadScenario.Model.ARRIVAL_RATE ? scenario.configuredArrivalRatePerSecond() : 0.0,
-                    scenario.model() == LoadScenario.Model.ARRIVAL_RATE ? scenario.configuredMaxConcurrent() : 0);
+            final LoadMetrics aggregate = LoadMetrics.forScenario(scenario, startedAt, rateWindow);
             aggregateHolder[0] = aggregate;
+            for (LoadScheduler scheduler : schedulers.values()) {
+                if (scheduler instanceof ClosedVuScheduler)
+                    ((ClosedVuScheduler) scheduler).forwardSchedulerMetricsTo(aggregate);
+                else if (scheduler instanceof FixedArrivalRateScheduler)
+                    ((FixedArrivalRateScheduler) scheduler).forwardSchedulerMetricsTo(aggregate);
+            }
             for (LoadWorkload workload : scenario.workloads()) for (LoadMixEntry entry : workload.mix()) {
                 String key = targetKey(workload.id(), entry.id());
-                mixCollectors.put(key, new LoadMetrics("closed", startedAt, rateWindow, workload.users(), 0.0, 0));
+                LoadScenario mixScenario = scenario.forMixEntry(workload, entry);
+                mixCollectors.put(key, LoadMetrics.forScenario(mixScenario, startedAt, rateWindow));
                 mixSelections.put(key, new java.util.concurrent.atomic.AtomicLong());
             }
             startGate.release(startedAt);
@@ -205,7 +224,6 @@ public final class LoadRunCoordinator implements AutoCloseable {
             LoadThresholdEvaluator evaluator = new LoadThresholdEvaluator();
             for (LoadWorkload workload : scenario.workloads()) {
                 LoadRunResult childResult = futures.get(workload.id()).get();
-                aggregate.mergeSchedulerTelemetry(childResult.metrics().values());
                 LoadScenario child = scenario.forWorkload(workload);
                 childResult = childResult.withThresholds(evaluator.evaluate(child, childResult.metrics()));
                 if (workload.mixed()) {

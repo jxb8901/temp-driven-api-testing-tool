@@ -17,6 +17,10 @@ import java.util.Set;
 
 /** Validated, immutable deployment configuration for the single-node control plane. */
 public final class ServerConfig {
+    // Must stay aligned with att.load.LoadPreparationBudget in the Worker runtime.
+    private static final int LOAD_PREPARATION_PER_WORKER_CONNECTIONS = 64;
+    private static final int LOAD_PREPARATION_SERVER_CONNECTIONS = 256;
+    private static final int MAX_SERVER_LOAD_WORKERS = LOAD_PREPARATION_SERVER_CONNECTIONS / LOAD_PREPARATION_PER_WORKER_CONNECTIONS;
     public final Path dataDir;
     public final Path runtimeConfigPath;
     public final Path javaExecutable;
@@ -115,6 +119,11 @@ public final class ServerConfig {
         for(Object entry:libraryDirs){Path library=canonicalRequired(string(entry,"workers.libraryDirs entry"),"workers.libraryDirs entry",true);if(!Files.isReadable(library))throw new IllegalArgumentException("workers.libraryDirs entry must be readable: "+library);workerLibraries.add(library);}
         int max=intValue(workers,"maxConcurrent",8,1,256), queue=intValue(workers,"queuedLimit",100,0,100000),
             load=intValue(workers,"maxConcurrentLoad",2,1,256), stop=intValue(workers,"gracefulStopMs",10000,0,300000);
+        if(Math.min(max,load)>MAX_SERVER_LOAD_WORKERS)
+            throw new IllegalArgumentException("min(workers.maxConcurrent, workers.maxConcurrentLoad) must not exceed "
+                    +MAX_SERVER_LOAD_WORKERS+" for the bounded LOAD preparation budget ("
+                    +LOAD_PREPARATION_PER_WORKER_CONNECTIONS+" initial connections per Worker, "
+                    +LOAD_PREPARATION_SERVER_CONNECTIONS+" per Server process)");
         int heapMax=intValue(workers,"heapMaxMb",0,64,65536), heapInitial=intValue(workers,"heapInitialMb",0,32,65536);
         if(heapInitial>0&&heapMax==0)throw new IllegalArgumentException("workers.heapInitialMb requires workers.heapMaxMb");
         if(heapInitial>heapMax)throw new IllegalArgumentException("workers.heapInitialMb must not exceed workers.heapMaxMb");

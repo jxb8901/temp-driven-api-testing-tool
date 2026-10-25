@@ -3115,10 +3115,33 @@ final class ServerRuntime implements AutoCloseable {
                 return new org.yaml.snakeyaml.Yaml(options).dump(ARTIFACT_JSON.convertValue(projected,Object.class)).getBytes(StandardCharsets.UTF_8);
             } catch(Exception invalid){throw new IllegalArgumentException("Structured artifact cannot be safely published");}
         }
-        text=att.server.api.internal.DiagnosticSanitizer.redactText(text);
-        text=replacePathPrefix(text,outputDirectoryForJob(id).toString(),"artifact");
-        text=att.server.api.internal.DiagnosticSanitizer.redactAbsolutePaths(text,packageRootForJob(id));
+        if(filename.endsWith(".html")||filename.endsWith(".htm")) {
+            text=redactArtifactHtml(text,outputDirectoryForJob(id).toString(),packageRootForJob(id));
+        } else {
+            text=att.server.api.internal.DiagnosticSanitizer.redactText(text);
+            text=replacePathPrefix(text,outputDirectoryForJob(id).toString(),"artifact");
+            text=att.server.api.internal.DiagnosticSanitizer.redactAbsolutePaths(text,packageRootForJob(id));
+        }
         return text.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+    }
+    private static String redactArtifactHtml(String html,String outputRoot,Path packageRoot) {
+        java.util.regex.Pattern pattern=java.util.regex.Pattern.compile("(?is)<script\\b([^>]*)>(.*?)</script\\s*>");
+        java.util.regex.Matcher matcher=pattern.matcher(html);StringBuffer masked=new StringBuffer();
+        java.util.Map<String,String> executableScripts=new java.util.LinkedHashMap<>();int index=0;
+        while(matcher.find()) {
+            String attributes=matcher.group(1);
+            boolean jsonData=java.util.regex.Pattern.compile("(?i)\\btype\\s*=\\s*['\\\"]?application/json\\b").matcher(attributes).find();
+            if(jsonData)continue;
+            String token="__ATT_SCRIPT_BLOCK_"+index+"_"+java.util.UUID.randomUUID().toString().replace("-","")+"__";
+            executableScripts.put(token,matcher.group());
+            matcher.appendReplacement(masked,java.util.regex.Matcher.quoteReplacement(token));index++;
+        }
+        matcher.appendTail(masked);
+        String safe=att.server.api.internal.DiagnosticSanitizer.redactText(masked.toString());
+        safe=replacePathPrefix(safe,outputRoot,"artifact");
+        safe=att.server.api.internal.DiagnosticSanitizer.redactAbsolutePaths(safe,packageRoot);
+        for(java.util.Map.Entry<String,String> entry:executableScripts.entrySet())safe=safe.replace(entry.getKey(),entry.getValue());
+        return safe;
     }
     Path artifact(String id,String requested) throws Exception {Map<String,Object> row=store.get(id);if(row==null)throw new NotFoundException();Job j=jobs.get(id);if(j!=null)return artifact(j,requested);Path base=config.dataDir.resolve("jobs").resolve(id).resolve("output").toRealPath();Path relative=Paths.get(requested);if(relative.isAbsolute())throw new IllegalArgumentException("Artifact path must be relative to job output");Path candidate=base.resolve(relative).normalize();if(!candidate.startsWith(base)||!Files.exists(candidate,java.nio.file.LinkOption.NOFOLLOW_LINKS))throw new NotFoundException();Path walk=base;for(Path part:base.relativize(candidate)){walk=walk.resolve(part);if(Files.isSymbolicLink(walk))throw new NotFoundException();}Path real=candidate.toRealPath();if(!real.startsWith(base)||!Files.isRegularFile(real))throw new NotFoundException();return real;}
     void cleanupExpiredJobs() throws Exception {

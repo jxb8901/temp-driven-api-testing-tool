@@ -84,7 +84,7 @@ class LoadReportTest {
         @SuppressWarnings("unchecked") Map<String, Object> json = att.validation.JsonSupport.mapper()
                 .readValue(runDirectory.resolve("load-summary.json").toFile(), Map.class);
         assertDoesNotThrow(() -> att.validation.JsonSchemaVerifier.verifyJson(
-                Paths.get("schemas/att-load-summary-v1.1.schema.json"),
+                Paths.get("schemas/att-load-summary-v1.2.schema.json"),
                 new String(Files.readAllBytes(runDirectory.resolve("load-summary.json")), StandardCharsets.UTF_8)));
         Map<String, Object> legacySummary = new LinkedHashMap<String, Object>(json);
         Map<String, Object> legacyMetrics = new LinkedHashMap<String, Object>((Map<String, Object>) json.get("metrics"));
@@ -93,9 +93,9 @@ class LoadReportTest {
             legacyMetrics.remove(added);
         legacySummary.put("metrics", legacyMetrics);
         assertDoesNotThrow(() -> att.validation.JsonSchemaVerifier.verifyJson(
-                Paths.get("schemas/att-load-summary-v1.1.schema.json"), att.validation.JsonSupport.write(legacySummary)),
+                Paths.get("schemas/att-load-summary-v1.2.schema.json"), att.validation.JsonSupport.write(legacySummary)),
                 "summaries with optional telemetry fields remain valid when new telemetry fields are absent");
-        assertEquals("att-load-summary/v1.1", json.get("schemaVersion"));
+        assertEquals("att-load-summary/v1.2", json.get("schemaVersion"));
         assertEquals("PASS", json.get("status"));
         assertTrue(json.containsKey("timing"));
         assertTrue(json.containsKey("resources"));
@@ -111,16 +111,16 @@ class LoadReportTest {
         Map<String, Object> missingReport = new LinkedHashMap<String, Object>(json);
         missingReport.remove("report");
         assertThrows(IllegalArgumentException.class, () -> att.validation.JsonSchemaVerifier.verifyJson(
-                Paths.get("schemas/att-load-summary-v1.1.schema.json"),
+                Paths.get("schemas/att-load-summary-v1.2.schema.json"),
                 att.validation.JsonSupport.write(missingReport)));
 
         String html = new String(Files.readAllBytes(report), StandardCharsets.UTF_8);
         assertTrue(html.contains("Configured arrival rate"));
         assertTrue(html.contains("Achieved scheduling rate"));
-        assertTrue(html.contains("Completed TPS"));
+        assertTrue(html.contains("Actual completed TPS"));
         assertTrue(html.contains("Dropped arrivals"));
         assertTrue(html.contains("SUT failures"));
-        assertTrue(html.contains("Phase timing and warm-up separation"));
+        assertTrue(html.contains("Phase windows and event-time completion rates"));
         assertTrue(html.contains("Resource and generator diagnostics"));
         assertTrue(html.contains("orders"));
         assertTrue(html.contains("broker"));
@@ -129,7 +129,186 @@ class LoadReportTest {
         assertTrue(html.contains("../samples/00001-deadbeef.json"));
         assertTrue(html.contains("../executions/exec-1/case%20log%3C%26.log"));
         assertTrue(html.contains("payments&lt;&amp;"));
-        assertTrue(html.contains("window.ATT_LOAD_SUMMARY"));
+        assertTrue(html.contains("<script type=\"application/json\" id=\"att-load-summary-data\">"));
+        assertFalse(html.contains("window.ATT_LOAD_SUMMARY="));
+    }
+
+    @Test void phaseTableSeparatesCrossPhaseCompletionsFromScheduledCohortsAndLateDrain() throws Exception {
+        Instant started = Instant.parse("2026-10-24T00:00:00Z");
+        long startMs = started.toEpochMilli();
+        LoadScenario scenario = new LoadScenario(Paths.get("phase-times.yaml"), "template", "LOAD_TEMPLATE",
+                Collections.emptyMap(), Collections.emptyMap(), LoadScenario.Model.ARRIVAL_RATE, 0, 10.0, "10/s",
+                Duration.ZERO, Duration.ofSeconds(1), Duration.ofSeconds(1), Duration.ZERO, Duration.ZERO,
+                2, "drop", Collections.emptyMap(), Collections.emptyMap());
+        LoadMetrics metrics = LoadMetrics.forScenario(scenario, startMs, 2_500L);
+        metrics.onEvent(LoadEvent.completed("phase-run", "arrivalRate", "RAMP_UP", "ramp-cohort", null, 1,
+                startMs + 500L, startMs + 500L, startMs + 1_500L, ResultStatus.PASS));
+        metrics.onEvent(LoadEvent.completed("phase-run", "arrivalRate", "STEADY", "steady-cohort", null, 2,
+                startMs + 1_500L, startMs + 1_500L, startMs + 2_500L, ResultStatus.PASS));
+        metrics.finish(startMs + 2_500L);
+        LoadMetricsSnapshot snapshot = metrics.snapshot();
+        @SuppressWarnings("unchecked") Map<String, Object> windowMetrics =
+                (Map<String, Object>) snapshot.value("windowMetrics");
+        @SuppressWarnings("unchecked") Map<String, Object> timeSeries =
+                (Map<String, Object>) windowMetrics.get("timeSeries");
+        @SuppressWarnings("unchecked") List<Map<String, Object>> trendPoints =
+                (List<Map<String, Object>>) timeSeries.get("points");
+        Map<String, Object> steadyTrend = trendPoints.stream()
+                .filter(point -> ((Number) point.get("windowStartEpochMs")).longValue() == startMs + 1_000L)
+                .findFirst().orElseThrow(() -> new AssertionError(trendPoints.toString()));
+        Map<String, Object> drainTrend = trendPoints.stream()
+                .filter(point -> ((Number) point.get("windowStartEpochMs")).longValue() == startMs + 2_000L)
+                .findFirst().orElseThrow(() -> new AssertionError(trendPoints.toString()));
+        assertTrue(((List<?>) steadyTrend.get("phaseCoverage")).contains("STEADY"));
+        assertEquals(1, steadyTrend.get("latencySampleCount"));
+        assertEquals(1L, steadyTrend.get("latencyObservationCount"));
+        assertEquals(1_000L, steadyTrend.get("latencyP95Ms"));
+        assertEquals(1L, steadyTrend.get("completed"));
+        assertTrue(((List<?>) drainTrend.get("phaseCoverage")).contains("DRAIN"));
+        assertEquals(1L, drainTrend.get("completed"));
+        assertEquals(0, drainTrend.get("latencySampleCount"));
+        @SuppressWarnings("unchecked") Map<String, Object> windows =
+                (Map<String, Object>) windowMetrics.get("windows");
+        @SuppressWarnings("unchecked") Map<String, Object> steadyWindow =
+                (Map<String, Object>) windows.get("steady");
+        @SuppressWarnings("unchecked") Map<String, Object> cohort =
+                (Map<String, Object>) steadyWindow.get("cohort");
+        @SuppressWarnings("unchecked") Map<String, Object> cohortLatency =
+                (Map<String, Object>) cohort.get("latency");
+        assertEquals(1_000L, cohortLatency.get("p95Ms"));
+        LoadRunResult result = new LoadRunResult("phase-run", scenario, started, started.plusMillis(2_500L), snapshot);
+        Path report = new LoadReportWriter().write(temp, result);
+        String html = new String(Files.readAllBytes(report), StandardCharsets.UTF_8);
+        assertTrue(html.contains("Latency follows scheduled cohorts, including completions in later phases or drain"));
+        assertTrue(html.contains("sample n=1 / 1 observations"));
+
+        String rampUp = phaseRow(html, "RAMP_UP");
+        assertTrue(rampUp.contains("</td><td>1</td><td>1</td><td>0</td><td>0</td>"), rampUp);
+        assertTrue(rampUp.contains("</td><td>1</td><td>0.00%"), "the scheduled ramp-up cohort must retain its eventual outcome: " + rampUp);
+        String steady = phaseRow(html, "STEADY");
+        assertTrue(steady.contains("</td><td>1</td><td>1</td><td>1</td><td>1</td>"), steady);
+        assertTrue(steady.contains("<td>1.000/s</td><td>1.000/s</td>"), steady);
+        String drain = phaseRow(html, "DRAIN");
+        assertTrue(drain.contains("</td><td>0</td><td>0</td><td>1</td><td>1</td>"), drain);
+        assertTrue(drain.contains("<td>2.000/s</td><td>2.000/s</td>"), drain);
+        assertTrue(html.contains("Scheduled cohort completed"));
+        assertTrue(html.contains("Event-time completions"));
+        assertFalse(html.contains("<th>Completed TPS</th>"));
+        assertFalse(html.contains("<th>Successful TPS</th>"));
+    }
+
+    @Test void emptySelectedWindowClearsWarmupOnlyTrendCharts() throws Exception {
+        Instant started = Instant.parse("2026-10-24T00:00:00Z");
+        long startMs = started.toEpochMilli();
+        Map<String, Object> steadyThreshold = Collections.<String, Object>singletonMap("p95", "<= 20ms");
+        LoadScenario scenario = new LoadScenario(Paths.get("warmup-only.yaml"), "template", "LOAD_TEMPLATE",
+                Collections.emptyMap(), Collections.emptyMap(), LoadScenario.Model.ARRIVAL_RATE, 0, 1.0, "1/s",
+                Duration.ofMillis(250), Duration.ZERO, Duration.ofMillis(250), Duration.ZERO, Duration.ZERO,
+                1, "drop", Collections.<String, Object>singletonMap("steady", steadyThreshold), Collections.emptyMap());
+        LoadMetrics metrics = LoadMetrics.forScenario(scenario, startMs, 500L);
+        metrics.onEvent(LoadEvent.completed("warmup-only", "arrivalRate", "WARMUP", "warmup", null, 1,
+                startMs + 100L, startMs + 100L, startMs + 150L, ResultStatus.PASS));
+        metrics.finish(startMs + 500L);
+
+        @SuppressWarnings("unchecked") Map<String, Object> windowMetrics =
+                (Map<String, Object>) metrics.snapshot().value("windowMetrics");
+        @SuppressWarnings("unchecked") Map<String, Object> series =
+                (Map<String, Object>) windowMetrics.get("timeSeries");
+        @SuppressWarnings("unchecked") List<Map<String, Object>> points =
+                (List<Map<String, Object>>) series.get("points");
+        assertEquals(1, points.size(), "the fixture has one coarse bucket spanning warm-up and steady");
+        assertEquals(startMs, ((Number) points.get(0).get("windowStartEpochMs")).longValue());
+        assertEquals(1_000L, ((Number) points.get(0).get("durationMs")).longValue());
+        assertTrue(((List<?>) points.get(0).get("phaseCoverage")).contains("WARMUP"));
+        assertTrue(((List<?>) points.get(0).get("phaseCoverage")).contains("STEADY"));
+        assertEquals(1L, points.get(0).get("completed"), "the only completion belongs to warm-up");
+        @SuppressWarnings("unchecked") Map<String, Object> windows = (Map<String, Object>) windowMetrics.get("windows");
+        @SuppressWarnings("unchecked") Map<String, Object> steadyWindow = (Map<String, Object>) windows.get("steady");
+        @SuppressWarnings("unchecked") Map<String, Object> cohort = (Map<String, Object>) steadyWindow.get("cohort");
+        @SuppressWarnings("unchecked") Map<String, Object> latency = (Map<String, Object>) cohort.get("latency");
+        assertEquals(0L, latency.get("observationCount"));
+
+        LoadRunResult result = new LoadRunResult("warmup-only", scenario, started, started.plusMillis(500), metrics.snapshot());
+        Path report = new LoadReportWriter().write(temp, result);
+        String html = new String(Files.readAllBytes(report), StandardCharsets.UTF_8);
+        int chartStart = html.indexOf("function chart(id,legendId,series,unit,baseMax,opts)");
+        int clear = html.indexOf("svg.textContent='';", chartStart);
+        int emptyWindowCheck = html.indexOf("if(!pts.length)", chartStart);
+        assertTrue(chartStart >= 0);
+        assertTrue(clear > chartStart && clear < emptyWindowCheck,
+                "each window selection must clear the previous SVG before the empty-series return");
+        assertTrue(html.contains("legendList.textContent='';"), "the empty selection must also clear the previous legend");
+        assertTrue(html.contains("No data for selected window"), "empty charts need a visible and accessible state");
+        assertTrue(html.contains("No complete time-series buckets inside selected window; partial boundary buckets are omitted."),
+                "a window containing only mixed-boundary buckets must explain why its trend is empty");
+        assertTrue(html.contains("Trend charts omit buckets that cross this window boundary to avoid mixing out-of-window events"),
+                "the selected window must disclose that partial buckets are filtered");
+        assertTrue(html.contains("if(select)select.addEventListener('change',function(){show(select.value)});"),
+                "changing the window selector must rerender the selected window");
+        assertTrue(html.contains("function inWindow(p,win){return p.windowStartEpochMs>=win.windowStartEpochMs&&p.windowStartEpochMs+p.durationMs<=win.windowEndEpochMs}"),
+                "a trend bucket must fit entirely inside the selected window");
+        assertTrue(html.contains("function currentPoints(){var key=select?select.value:'steady',win=w[key],scoped=windowSeries[key];if(key==='all')return points;if(scoped&&scoped.points)return scoped.points;if(!win)return points;return points.filter(function(p){return inWindow(p,win)})}"),
+                "trend series must use window-aligned points and retain a safe fallback for older summaries");
+        assertTrue(html.contains("function hasPartialBuckets(){"),
+                "empty windows with omitted partial buckets must be distinguishable from windows with no samples");
+        int emptyReturn = html.indexOf("return}svg.setAttribute", emptyWindowCheck);
+        int sloDrawing = html.indexOf("var slo=id==='latency-chart'", chartStart);
+        assertTrue(emptyReturn > emptyWindowCheck && emptyReturn < sloDrawing,
+                "an empty selected window must return before drawing latency data or its p95 SLO");
+    }
+
+    @Test void subSecondSteadyTrendShowsSteadyEventsWithoutWarmupContamination() throws Exception {
+        Instant started = Instant.parse("2026-10-24T00:00:00Z");
+        long startMs = started.toEpochMilli();
+        LoadScenario scenario = new LoadScenario(Paths.get("subsecond-steady.yaml"), "template", "LOAD_TEMPLATE",
+                Collections.emptyMap(), Collections.emptyMap(), LoadScenario.Model.ARRIVAL_RATE, 0, 1.0, "1/s",
+                Duration.ofMillis(250), Duration.ZERO, Duration.ofMillis(250), Duration.ZERO, Duration.ZERO,
+                1, "drop", Collections.emptyMap(), Collections.emptyMap());
+        LoadMetrics metrics = LoadMetrics.forScenario(scenario, startMs, 500L);
+        metrics.onEvent(LoadEvent.completed("subsecond-steady", "arrivalRate", "WARMUP", "warmup", null, 1,
+                startMs + 100L, startMs + 100L, startMs + 150L, ResultStatus.PASS));
+        metrics.onEvent(LoadEvent.completed("subsecond-steady", "arrivalRate", "STEADY", "steady", null, 2,
+                startMs + 350L, startMs + 350L, startMs + 375L, ResultStatus.PASS));
+        metrics.finish(startMs + 500L);
+
+        LoadRunResult result = new LoadRunResult("subsecond-steady", scenario, started, started.plusMillis(500), metrics.snapshot());
+        Path report = new LoadReportWriter().write(temp, result);
+        String html = new String(Files.readAllBytes(report), StandardCharsets.UTF_8);
+        assertTrue(html.contains("Trend charts use buckets aligned to this configured window"));
+        assertTrue(html.contains("if(scoped&&scoped.points)return scoped.points"),
+                "the selected window must use its dedicated trend series");
+
+        String marker = "<script type=\"application/json\" id=\"att-load-summary-data\">";
+        int dataStart = html.indexOf(marker);
+        assertTrue(dataStart >= 0, "the report must embed the chart data");
+        int dataEnd = html.indexOf("</script>", dataStart + marker.length());
+        @SuppressWarnings("unchecked") Map<String, Object> embedded = att.validation.JsonSupport.mapper()
+                .readValue(html.substring(dataStart + marker.length(), dataEnd), Map.class);
+        @SuppressWarnings("unchecked") Map<String, Object> embeddedMetrics = (Map<String, Object>) embedded.get("metrics");
+        @SuppressWarnings("unchecked") Map<String, Object> windowMetrics = (Map<String, Object>) embeddedMetrics.get("windowMetrics");
+        @SuppressWarnings("unchecked") Map<String, Object> timeSeries = (Map<String, Object>) windowMetrics.get("timeSeries");
+        @SuppressWarnings("unchecked") List<Map<String, Object>> allPoints = (List<Map<String, Object>>) timeSeries.get("points");
+        assertEquals(2L, ((Number) allPoints.get(0).get("completed")).longValue(), "the full-execution bucket contains both phases");
+        @SuppressWarnings("unchecked") Map<String, Object> windowSeries = (Map<String, Object>) timeSeries.get("windowSeries");
+        @SuppressWarnings("unchecked") Map<String, Object> steadySeries = (Map<String, Object>) windowSeries.get("steady");
+        @SuppressWarnings("unchecked") List<Map<String, Object>> steadyPoints = (List<Map<String, Object>>) steadySeries.get("points");
+        assertEquals(1, steadyPoints.size(), "a valid sub-second steady window must keep its event");
+        Map<String, Object> steadyPoint = steadyPoints.get(0);
+        assertEquals(startMs + 250L, ((Number) steadyPoint.get("windowStartEpochMs")).longValue());
+        assertEquals(250L, ((Number) steadyPoint.get("durationMs")).longValue());
+        assertEquals(1L, ((Number) steadyPoint.get("scheduled")).longValue(), "warm-up arrivals must not enter the steady trend");
+        assertEquals(1L, ((Number) steadyPoint.get("completed")).longValue());
+        assertEquals(1L, ((Number) steadyPoint.get("latencyObservationCount")).longValue());
+        assertEquals(25L, ((Number) steadyPoint.get("latencyP95Ms")).longValue());
+    }
+
+    private static String phaseRow(String html, String phase) {
+        String start = "<tr><td><b>" + phase + "</b>";
+        int from = html.indexOf(start);
+        assertTrue(from >= 0, "missing phase row " + phase);
+        int end = html.indexOf("</tr>", from);
+        assertTrue(end > from, "unterminated phase row " + phase);
+        return html.substring(from, end + 5);
     }
 
     @Test void reportDoesNotCreateCaseLogLinksForMissingOrEscapingArtifacts() throws Exception {
@@ -213,7 +392,9 @@ class LoadReportTest {
         assertEquals("FAIL", json.get("status"));
         assertEquals(1, ((Number) json.get("exitCode")).intValue());
         @SuppressWarnings("unchecked") Map<String, Object> jsonThresholds = (Map<String, Object>) json.get("thresholds");
-        assertEquals("FAIL", jsonThresholds.get("status"));
+        assertEquals("NOT_MET", jsonThresholds.get("status"));
+        assertEquals(Boolean.FALSE, jsonThresholds.get("legacyPassed"));
+        assertEquals("NOT_MET", jsonThresholds.get("performanceVerdict"));
         assertTrue(jsonText.contains("250.000ms exceeds <= 100ms"));
         assertTrue(yamlText.contains("250.000ms exceeds <= 100ms"));
         assertTrue(html.contains("FAIL"));

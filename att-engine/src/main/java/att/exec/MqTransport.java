@@ -12,6 +12,10 @@ public final class MqTransport {
 
     public interface Factory {
         Connection connect(att.config.MqHelperConfig config) throws java.lang.Exception;
+        /** Optional bounded path used only while LOAD is preparing its first ready resources. */
+        default Connection connect(att.config.MqHelperConfig config, long timeoutMs) throws java.lang.Exception {
+            return connect(config);
+        }
     }
 
     public interface Connection extends AutoCloseable {

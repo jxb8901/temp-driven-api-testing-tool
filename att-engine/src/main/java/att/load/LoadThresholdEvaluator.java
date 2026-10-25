@@ -15,18 +15,73 @@ import java.util.regex.Pattern;
 public final class LoadThresholdEvaluator {
     private static final Pattern EXPRESSION = Pattern.compile("^(<|<=|>|>=|==)\\s*([0-9]+(?:\\.[0-9]+)?)(%|ms|/s|/m)$");
     private static final Set<String> SUPPORTED = Collections.unmodifiableSet(new LinkedHashSet<String>(Arrays.asList(
-            "errorRate", "runtimeErrorRate", "totalErrorRate", "p95", "p99", "minThroughput", "droppedRate", "achievedArrivalRate")));
+            "errorRate", "runtimeErrorRate", "totalErrorRate", "p95", "p99", "minThroughput", "droppedRate", "achievedArrivalRate",
+            "startedRate", "completedRate", "successfulRate")));
 
     static boolean isSupportedName(String name) { return SUPPORTED.contains(name); }
 
     public LoadThresholdSummary evaluate(LoadScenario scenario, LoadMetricsSnapshot metrics) {
         List<ThresholdResult> results = new ArrayList<ThresholdResult>();
         for (Map.Entry<String, Object> entry : scenario.thresholds().entrySet()) {
+            if ("steady".equals(entry.getKey()) || "overall".equals(entry.getKey())) {
+                if (!(entry.getValue() instanceof Map)) {
+                    results.add(new ThresholdResult(entry.getKey(), "", "N/A", false, "Threshold scope must be a map"));
+                    continue;
+                }
+                @SuppressWarnings("unchecked") Map<String, Object> scoped = (Map<String, Object>) entry.getValue();
+                for (Map.Entry<String, Object> threshold : scoped.entrySet()) {
+                    String name = entry.getKey() + "." + threshold.getKey();
+                    String expression = String.valueOf(threshold.getValue()).trim();
+                    try { results.add(evaluateWindow(scenario, metrics, entry.getKey(), threshold.getKey(), expression)); }
+                    catch (RuntimeException error) { results.add(new ThresholdResult(name, expression, "invalid", false, error.getMessage())); }
+                }
+                continue;
+            }
             String name = entry.getKey(); String expression = String.valueOf(entry.getValue()).trim();
             try { results.add(evaluateOne(scenario, metrics, name, expression)); }
             catch (RuntimeException error) { results.add(new ThresholdResult(name, expression, "invalid", false, error.getMessage())); }
         }
         return new LoadThresholdSummary(results);
+    }
+
+    private ThresholdResult evaluateWindow(LoadScenario scenario, LoadMetricsSnapshot metrics,
+                                           String scope, String key, String expression) {
+        Matcher matcher = EXPRESSION.matcher(expression);
+        if (!matcher.matches()) throw new IllegalArgumentException("Threshold must use operator, value, and unit");
+        String unit = matcher.group(3);
+        if (!isSupportedName(key)) throw new IllegalArgumentException("Unsupported threshold: " + key);
+        if (scenario.model() == LoadScenario.Model.CLOSED && ("droppedRate".equals(key)
+                || "achievedArrivalRate".equals(key) || "startedRate".equals(key)))
+            throw new IllegalArgumentException(key + " is valid only for arrivalRate workloads");
+        @SuppressWarnings("unchecked") Map<String, Object> windowMetrics = (Map<String, Object>) metrics.value("windowMetrics");
+        @SuppressWarnings("unchecked") Map<String, Object> windows = windowMetrics == null ? null
+                : (Map<String, Object>) windowMetrics.get("windows");
+        @SuppressWarnings("unchecked") Map<String, Object> window = windows == null ? null
+                : (Map<String, Object>) windows.get("steady".equals(scope) ? "steady" : "all");
+        if (window == null || !Boolean.TRUE.equals(window.get("evaluated")))
+            return new ThresholdResult(scope + "." + key, expression, "N/A", false, "Window evidence is incomplete or unavailable", "NOT_EVALUATED");
+        Map<String, Object> cohort = (Map<String, Object>) window.get("cohort");
+        Object raw;
+        if ("startedRate".equals(key)) raw = window.get("startedRate");
+        else if ("completedRate".equals(key) || "minThroughput".equals(key)) raw = window.get("completedRate");
+        else if ("successfulRate".equals(key)) raw = window.get("successfulRate");
+        else if ("p95".equals(key)) raw = ((Map<?, ?>) cohort.get("latency")).get("p95Ms");
+        else if ("p99".equals(key)) raw = ((Map<?, ?>) cohort.get("latency")).get("p99Ms");
+        else if ("errorRate".equals(key)) raw = cohort.get("sutErrorRate");
+        else if ("runtimeErrorRate".equals(key)) raw = cohort.get("runtimeErrorRate");
+        else if ("totalErrorRate".equals(key)) raw = cohort.get("errorRate");
+        else if ("droppedRate".equals(key)) raw = window.get("droppedRate");
+        else if ("achievedArrivalRate".equals(key)) raw = "%".equals(unit)
+                ? window.get("admissionRate") : window.get("startedRate");
+        else throw new IllegalArgumentException("Unsupported threshold: " + key);
+        if (!(raw instanceof Number))
+            return new ThresholdResult(scope + "." + key, expression, "N/A", false, "Threshold metric has no observations", "NOT_EVALUATED");
+        double actual = ((Number) raw).doubleValue();
+        if ("%".equals(unit)) actual *= 100.0;
+        else if ("/m".equals(unit)) actual *= 60.0;
+        double expected = Double.parseDouble(matcher.group(2));
+        boolean passed = compare(actual, matcher.group(1), expected);
+        return new ThresholdResult(scope + "." + key, expression, String.format(Locale.ROOT, "%.3f%s", actual, unit), passed, null);
     }
 
     private ThresholdResult evaluateOne(LoadScenario scenario, LoadMetricsSnapshot metrics, String name, String expression) {

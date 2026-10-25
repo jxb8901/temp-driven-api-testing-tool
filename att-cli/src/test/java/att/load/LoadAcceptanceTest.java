@@ -113,7 +113,7 @@ class LoadAcceptanceTest {
         String html = read(output.resolve("load/issue25-arrival-saturation/report/index.html"));
         assertTrue(html.contains("Configured arrival rate"));
         assertTrue(html.contains("Achieved scheduling rate"));
-        assertTrue(html.contains("Completed TPS"));
+        assertTrue(html.contains("Actual completed TPS"));
         assertTrue(html.contains("Dropped arrivals"));
     }
 

@@ -37,6 +37,7 @@ public final class FixedArrivalRateScheduler implements LoadScheduler {
     private final AtomicInteger inFlight = new AtomicInteger();
     private final Object completionMonitor = new Object();
     private volatile BlockingQueue<Boolean> schedulerWakeups;
+    private volatile LoadMetrics aggregateSchedulerMetrics;
 
     public FixedArrivalRateScheduler(LoadScenario scenario, IterationExecutor executor, String runId, Consumer<LoadEvent> listener) {
         this(scenario, executor, runId, listener, LoadSchedulerTiming.system());
@@ -88,7 +89,12 @@ public final class FixedArrivalRateScheduler implements LoadScheduler {
             if (!(executor instanceof IterationExecutor)) throw new IllegalArgumentException("Multi-workload arrival scheduling requires IterationExecutor");
             return LoadRunCoordinator.runFrom(scenario, (IterationExecutor) executor, runId, evidenceStore, evidenceOutputRoot);
         }
-        if (executor instanceof IterationExecutor) ((IterationExecutor) executor).initializeOutputNamespace(runId);
+        if (executor instanceof IterationExecutor) {
+            IterationExecutor loadExecutor = (IterationExecutor) executor;
+            loadExecutor.initializeOutputNamespace(runId);
+            loadExecutor.prepareResources(runId);
+            loadExecutor.markSchedulerStart(runId, LoadPhase.at(scenario, 0L).name(), scenario.model().wireName());
+        }
         long startedAt = startGate == null ? timing.now() : startGate.awaitStart();
         Instant start = LoadSchedulerSupport.instant(startedAt);
         final LoadMetrics metrics = LoadMetrics.forScenario(scenario, startedAt, LoadPhase.totalMs(scenario));
@@ -104,8 +110,12 @@ public final class FixedArrivalRateScheduler implements LoadScheduler {
         long admittedTestdataOrdinal = 0L;
         try {
             while (!cancelled.get()) {
-                metrics.recordSchedulerWakeup(workers.getQueue().size());
-                long elapsed = timing.now() - startedAt;
+                long nowAtWake = timing.now();
+                int queueDepth = workers.getQueue().size();
+                metrics.recordSchedulerWakeupAt(nowAtWake, queueDepth);
+                LoadMetrics aggregate = aggregateSchedulerMetrics;
+                if (aggregate != null) aggregate.recordSchedulerWakeupAt(nowAtWake, queueDepth);
+                long elapsed = nowAtWake - startedAt;
                 long total = LoadPhase.totalMs(scenario);
                 long desired = elapsed >= total ? arrivalsBeforeDeadline(scenario) : arrivalsDueAt(scenario, elapsed);
                 while (scheduledCount < desired) {
@@ -147,7 +157,10 @@ public final class FixedArrivalRateScheduler implements LoadScheduler {
             FutureTask<Void> task = new FutureTask<Void>(() -> {
                 boolean cancelledBeforeStart = taskHandle.begin();
                 long iterationStarted = timing.now();
-                metrics.recordSubmitLag(iterationStarted - dueAt, workers.getQueue().size());
+                int queueDepth = workers.getQueue().size();
+                metrics.recordSubmitLagAt(iterationStarted, iterationStarted - dueAt, queueDepth);
+                LoadMetrics aggregate = aggregateSchedulerMetrics;
+                if (aggregate != null) aggregate.recordSubmitLagAt(iterationStarted, iterationStarted - dueAt, queueDepth);
                 att.core.ResultStatus status = att.core.ResultStatus.ERROR;
                 String errorType = "RUNTIME_ERROR";
                 EvidenceRef evidence = null;
@@ -324,6 +337,11 @@ public final class FixedArrivalRateScheduler implements LoadScheduler {
             }
         }
     }
+    void forwardSchedulerMetricsTo(LoadMetrics aggregate) {
+        if (aggregate == null) throw new IllegalArgumentException("Aggregate LOAD metrics are required");
+        aggregateSchedulerMetrics = aggregate;
+    }
+
     @Override public void cancel() {
         cancelled.set(true);
         Thread control = controlThread;

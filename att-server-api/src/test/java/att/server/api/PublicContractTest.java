@@ -92,4 +92,13 @@ class PublicContractTest {
         assertEquals(safe,att.server.api.internal.DiagnosticSanitizer.redactAbsolutePaths(safe,temp));
     }
 
+    @Test void pathRedactionPreservesReportUnitsAndCompletionCounts() {
+        String report="target generator rate /s; 0 / 120 measured completions; could not read /tmp/private/report.html";
+        String safe=att.server.api.internal.DiagnosticSanitizer.redactAbsolutePaths(report,temp);
+        assertTrue(safe.contains("target generator rate /s"),safe);
+        assertTrue(safe.contains("0 / 120 measured completions"),safe);
+        assertTrue(safe.contains("could not read $EXTERNAL/report.html"),safe);
+        assertFalse(safe.contains("/tmp/private/report.html"),safe);
+    }
+
 }

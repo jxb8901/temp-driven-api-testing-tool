@@ -63,11 +63,42 @@ public final class LoadRunResult {
     public boolean multiWorkload() { return !workloads.isEmpty(); }
 
     public ResultStatus status() {
+        if (preparationFailed()) return ResultStatus.ERROR;
         if (runtimeErrorCount() > 0L) return ResultStatus.ERROR;
         for (LoadRunResult workload : workloads.values()) if (workload.status() == ResultStatus.ERROR) return ResultStatus.ERROR;
-        if (!thresholds.passed()) return ResultStatus.FAIL;
+        if ("NOT_MET".equals(thresholds.status())) return ResultStatus.FAIL;
         for (LoadRunResult workload : workloads.values()) if (workload.status() == ResultStatus.FAIL) return ResultStatus.FAIL;
         return ResultStatus.PASS;
+    }
+    /** Existing execution outcome, kept distinct from the configured performance verdict. */
+    public String executionStatus() {
+        if (preparationFailed()) return "ERROR";
+        if (runtimeErrorCount() > 0L) return "ERROR";
+        for (LoadRunResult workload : workloads.values()) if ("ERROR".equals(workload.executionStatus())) return "ERROR";
+        return "PASS";
+    }
+    public String performanceVerdict() {
+        boolean configured = thresholdsConfigured();
+        boolean notMet = !thresholds.results().isEmpty() && "NOT_MET".equals(thresholds.status());
+        boolean notEvaluated = !thresholds.results().isEmpty() && "NOT_EVALUATED".equals(thresholds.status());
+        boolean evaluated = !thresholds.results().isEmpty() && "MET".equals(thresholds.status());
+        for (LoadRunResult workload : workloads.values()) {
+            if (!workload.thresholdsConfigured()) continue;
+            String verdict = workload.performanceVerdict();
+            configured = true;
+            if ("NOT_MET".equals(verdict)) notMet = true;
+            else if ("NOT_EVALUATED".equals(verdict)) notEvaluated = true;
+            else if ("MET".equals(verdict)) evaluated = true;
+        }
+        if (!configured) return "NOT_EVALUATED";
+        if (notMet) return "NOT_MET";
+        if (notEvaluated) return "NOT_EVALUATED";
+        return evaluated ? "MET" : "NOT_EVALUATED";
+    }
+    private boolean thresholdsConfigured() {
+        if (!thresholds.results().isEmpty()) return true;
+        for (LoadRunResult workload : workloads.values()) if (workload.thresholdsConfigured()) return true;
+        return false;
     }
     public int exitCode() { return ResultAggregator.exitCode(status()); }
     public boolean passed() { return status() == ResultStatus.PASS; }
@@ -86,7 +117,8 @@ public final class LoadRunResult {
     public Map<String, Object> toMap() {
         Map<String, Object> result = new LinkedHashMap<String, Object>();
         result.put("schemaVersion", Version.LOAD_SUMMARY_SCHEMA);
-        result.put("status", status().name()); result.put("exitCode", exitCode());
+        result.put("status", status().name()); result.put("executionStatus", executionStatus());
+        result.put("performanceVerdict", performanceVerdict()); result.put("exitCode", exitCode());
         result.put("runId", runId); result.put("startedAt", startedAt.toString()); result.put("endedAt", endedAt.toString());
         result.put("durationMs", Math.max(0L, Duration.between(startedAt, endedAt).toMillis()));
         Map<String, Object> scenarioSummary = scenario.toSummaryMap();
@@ -106,6 +138,8 @@ public final class LoadRunResult {
             LoadRunResult value = entry.getValue();
             Map<String, Object> item = new LinkedHashMap<String, Object>();
             item.put("status", value.status().name());
+            item.put("executionStatus", value.executionStatus());
+            item.put("performanceVerdict", value.performanceVerdict());
             if (value.scenario().workload().mixed()) item.put("mix", value.resources().get("mix"));
             else {
                 Map<String, Object> target = new LinkedHashMap<String, Object>();
@@ -146,5 +180,9 @@ public final class LoadRunResult {
     private long runtimeErrorCount() {
         Object value = metrics.value("runtimeError");
         return value instanceof Number ? ((Number) value).longValue() : 0L;
+    }
+    private boolean preparationFailed() {
+        Object value = resources.get("preparation");
+        return value instanceof Map && "PREPARATION_FAILED".equals(((Map<?, ?>) value).get("status"));
     }
 }

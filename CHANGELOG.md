@@ -2,6 +2,8 @@
 
 # ATT 4.2.4 - 2026-10-24
 
+- Prepare referenced DB/MQ/HTTP resources before LOAD scheduler start, with bounded readiness, live diagnostics, and no business requests during preflight (#285).
+- Add event-time all/measured/steady Load metrics and window-scoped thresholds, render offline charts in archived and Studio ZIP previews, and preserve report units and counts during path redaction (#290).
 - Present target-first Jobs with complete Server-side filtering, grouping, pagination, compact row actions and page-scoped pin/deletion menus (#286).
 - Add reversible, audited pending deletion with background cleanup; expose LOAD schedule targets and planned rates, and full standalone Job Details.
 - Move complete historical Target indexing off startup, isolate malformed legacy metadata with transactional diagnostics, and keep explicit exact Job-ID lookup available during migration.

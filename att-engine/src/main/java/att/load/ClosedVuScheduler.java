@@ -32,6 +32,7 @@ public final class ClosedVuScheduler implements LoadScheduler {
     private volatile ThreadPoolExecutor workers;
     private volatile Thread controlThread;
     private volatile boolean ownsWorkers = true;
+    private volatile LoadMetrics aggregateSchedulerMetrics;
 
     public ClosedVuScheduler(LoadScenario scenario, IterationExecutor executor, String runId, Consumer<LoadEvent> listener) {
         this(scenario, executor, runId, listener, LoadSchedulerTiming.system());
@@ -80,7 +81,12 @@ public final class ClosedVuScheduler implements LoadScheduler {
             if (!(executor instanceof IterationExecutor)) throw new IllegalArgumentException("Multi-workload closed scheduling requires IterationExecutor");
             return LoadRunCoordinator.runFrom(scenario, (IterationExecutor) executor, runId, evidenceStore, evidenceOutputRoot);
         }
-        if (executor instanceof IterationExecutor) ((IterationExecutor) executor).initializeOutputNamespace(runId);
+        if (executor instanceof IterationExecutor) {
+            IterationExecutor loadExecutor = (IterationExecutor) executor;
+            loadExecutor.initializeOutputNamespace(runId);
+            loadExecutor.prepareResources(runId);
+            loadExecutor.markSchedulerStart(runId, LoadPhase.at(scenario, 0L).name(), scenario.model().wireName());
+        }
         final long startedAt = startGate == null ? timing.now() : startGate.awaitStart();
         final Instant start = LoadSchedulerSupport.instant(startedAt);
         final long runSeed = LoadRandomization.effectiveSeed(scenario, runId);
@@ -121,7 +127,10 @@ public final class ClosedVuScheduler implements LoadScheduler {
                 }
                 long now = timing.now();
                 long elapsed = now - startedAt;
-                metrics.recordSchedulerWakeup(runWorkers.getQueue().size());
+                int queueDepth = runWorkers.getQueue().size();
+                metrics.recordSchedulerWakeupAt(now, queueDepth);
+                LoadMetrics aggregate = aggregateSchedulerMetrics;
+                if (aggregate != null) aggregate.recordSchedulerWakeupAt(now, queueDepth);
                 int active = activeUsers(elapsed);
                 for (int scanned = 0; scanned < users.size(); scanned++) {
                     if (cancelled.get() || elapsed >= LoadPhase.totalMs(scenario) || inFlight >= workerCount) break;
@@ -293,6 +302,11 @@ public final class ClosedVuScheduler implements LoadScheduler {
         if (LoadPhase.at(scenario, elapsedMs) == LoadPhase.RAMP_DOWN) return Math.max(1, (int) Math.ceil(scenario.users() * LoadPhase.fraction(scenario, elapsedMs)));
         return scenario.users();
     }
+    void forwardSchedulerMetricsTo(LoadMetrics aggregate) {
+        if (aggregate == null) throw new IllegalArgumentException("Aggregate LOAD metrics are required");
+        aggregateSchedulerMetrics = aggregate;
+    }
+
     @Override public void cancel() {
         cancelled.set(true);
         Thread control = controlThread;

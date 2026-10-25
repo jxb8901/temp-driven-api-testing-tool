@@ -31,7 +31,7 @@ class LoadTemplateCatalogTest {
         for (String mode : LoadTemplateCatalog.MODES) {
             Map<String,Object> definition = catalog.load("builtin:" + mode);
             LoadScenario scenario = catalog.compose(definition, bindings(definition), null);
-            assertEquals("att-load/v1.8", scenario.schemaVersion());
+            assertEquals("att-load/v1.9", scenario.schemaVersion());
             assertEquals(mode.startsWith("multi-") ? 2 : 1, scenario.workloads().size());
             for (LoadWorkload workload : scenario.workloads()) {
                 assertEquals(mode.endsWith("mix"), workload.mixed());

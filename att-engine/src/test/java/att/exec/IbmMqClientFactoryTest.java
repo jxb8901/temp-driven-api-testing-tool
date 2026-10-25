@@ -1,6 +1,13 @@
 package att.exec;
 
+import att.config.MqHelperConfig;
 import org.junit.jupiter.api.Test;
+import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import static org.junit.jupiter.api.Assertions.*;
 
 class IbmMqClientFactoryTest {
@@ -68,5 +75,44 @@ class IbmMqClientFactoryTest {
         assertEquals("MQ_RESPONSE_TOO_LARGE", translated.reason());
         assertTrue(translated.getMessage().contains("maxResponseBytes=2048"));
         assertTrue(translated.getMessage().contains("messageBytes=4097"));
+    }
+
+    @Test void timedPreparationConnectIsIsolatedFromOrdinaryMqConnect() throws Exception {
+        String connectKey="com.ibm.mq.cfg.TCP.Connect_Timeout";
+        String negotiationKey="com.ibm.mq.cfg.TCP.QmgrNegotiationFlowTimeout";
+        String previousConnect=System.getProperty(connectKey),previousNegotiation=System.getProperty(negotiationKey);
+        ExecutorService callers=Executors.newFixedThreadPool(2);
+        com.ibm.mq.MQQueueManager.reset(true);
+        try {
+            System.setProperty(connectKey,"17");System.setProperty(negotiationKey,"23");
+            IbmMqClientFactory factory=new IbmMqClientFactory();
+            MqHelperConfig config=new MqHelperConfig("mq","MQ","","QM1","localhost",1414,"ATT.SVRCONN","","",
+                    1208,"MQSTR","asQueue",1000,null,java.nio.file.Paths.get("mq.yaml"));
+            Future<MqTransport.Connection> timed=callers.submit(()->factory.connect(config,1000L));
+            assertTrue(com.ibm.mq.MQQueueManager.firstConnect.await(5,TimeUnit.SECONDS));
+            Future<MqTransport.Connection> ordinary=callers.submit(()->factory.connect(config));
+            assertFalse(com.ibm.mq.MQQueueManager.secondConnect.await(150,TimeUnit.MILLISECONDS),
+                    "ordinary connects must wait while temporary process-wide timeouts are installed");
+
+            com.ibm.mq.MQQueueManager.releaseFirstConnect.countDown();
+            MqTransport.Connection timedConnection=timed.get(5,TimeUnit.SECONDS);
+            MqTransport.Connection ordinaryConnection=ordinary.get(5,TimeUnit.SECONDS);
+            timedConnection.disconnect();ordinaryConnection.disconnect();
+
+            List<String[]> observed=com.ibm.mq.MQQueueManager.observedTimeouts;
+            assertEquals(2,observed.size());
+            assertArrayEquals(new String[]{"1","1"},observed.get(0),"the readiness connect should use the bounded timeout");
+            assertArrayEquals(new String[]{"17","23"},observed.get(1),"the ordinary connect should see configured defaults");
+            assertEquals("17",System.getProperty(connectKey));
+            assertEquals("23",System.getProperty(negotiationKey));
+        } finally {
+            com.ibm.mq.MQQueueManager.releaseFirstConnect.countDown();
+            callers.shutdownNow();
+            restoreProperty(connectKey,previousConnect);restoreProperty(negotiationKey,previousNegotiation);
+        }
+    }
+
+    private static void restoreProperty(String name,String value) {
+        if(value==null)System.clearProperty(name);else System.setProperty(name,value);
     }
 }

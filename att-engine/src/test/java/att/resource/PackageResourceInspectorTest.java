@@ -163,7 +163,7 @@ class PackageResourceInspectorTest {
         assertEquals("scenario",detail.get("kind"));
         assertEquals("unverified",detail.get("validation"),"View must not depend on resolving execution targets");
         assertEquals(Boolean.FALSE,detail.get("sourceAvailable"),"Structured metadata remains available when source is hidden");
-        assertEquals("att-load/v1.8",detail.get("schemaVersion"));
+        assertEquals("att-load/v1.9",detail.get("schemaVersion"));
         @SuppressWarnings("unchecked") Map<String,Object> definition=(Map<String,Object>)detail.get("definition");
         @SuppressWarnings("unchecked") List<Map<String,Object>> workloads=(List<Map<String,Object>>)definition.get("workloads");
         assertEquals("MISSING",((Map<?,?>)workloads.get(0).get("target")).get("id"));
@@ -905,7 +905,7 @@ class PackageResourceInspectorTest {
         assertEquals(discovery.inspectLoadTemplates(null,0,100).get("revisionDigest"),selected.inspectLoadTemplates(null,0,100).get("revisionDigest"));
         assertEquals(0,((List<?>)selected.inspectLoadCatalog(null,0,100,null).get("items")).size());
         Map<String,Object> policy=selected.inspectQuickLoadPolicy("virtualUsers","catalog:builtin:single-vu");
-        assertEquals("att-load/v1.8",((Map<?,?>)policy.get("policy")).get("schemaVersion"));
+        assertEquals("att-load/v1.9",((Map<?,?>)policy.get("policy")).get("schemaVersion"));
         assertThrows(IllegalArgumentException.class,()->selected.inspectQuickLoadPolicy("arrivalRate","catalog:builtin:single-vu"));
     }
 

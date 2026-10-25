@@ -4,6 +4,7 @@ import { ReportPreview } from './ReportPreview';
 import { api as serverApi } from '../../api';
 import { artifactApi } from './artifactApi';
 import type { ArtifactArchiveMetrics, JobArtifact, JobArtifactArchive, LoadJobsApi } from './types';
+import { formatRoute } from '../../router';
 
 export function formatArchiveSize(bytes: number | null | undefined): string | null {
   if (bytes == null || !Number.isFinite(bytes) || bytes < 0) return null;
@@ -94,7 +95,11 @@ export function JobArtifacts({ api, jobId, refresh, onMetrics }: { api: LoadJobs
     finally { setBusy(false); }
   }
 
-  const entry = (item: JobArtifact) => <li key={item.path}><button type="button" className="att-link-button" onClick={() => setSelected(item)}>{item.report ? 'View Report: ' : 'Preview: '}{item.path}</button>{item.size != null && <span> ({item.size.toLocaleString()} bytes)</span>}</li>;
+  const entry = (item: JobArtifact) => <li key={item.path}>
+    <button type="button" className="att-link-button" onClick={() => setSelected(item)}>{item.report ? 'View Report: ' : 'Preview: '}{item.path}</button>
+    {item.size != null && <span> ({item.size.toLocaleString()} bytes)</span>}{' '}
+    <a href={formatRoute({ kind: 'job-artifact', jobId, path: item.path })} target="_blank" rel="noopener noreferrer">Open in new tab</a>
+  </li>;
   return <section aria-label="Job artifact archive">
     {!archive && !error && <p role="status">Loading artifacts...</p>}
     {error && <p role="alert">{error} <button type="button" onClick={() => setVersion(value => value + 1)}>Refresh artifacts</button></p>}
@@ -111,7 +116,11 @@ export function JobArtifacts({ api, jobId, refresh, onMetrics }: { api: LoadJobs
       </>}
     </>}
     {selected && <section aria-label="Artifact preview">
-      <h3>{selected.path}</h3><button type="button" onClick={() => setSelected(null)}>Close preview</button>
+      <h3>{selected.path}</h3>
+      <div className="att-review-actions">
+        <a href={formatRoute({ kind: 'job-artifact', jobId, path: selected.path })} target="_blank" rel="noopener noreferrer">Open in new tab</a>
+        <button type="button" onClick={() => setSelected(null)}>Close preview</button>
+      </div>
       {/\.html?$/i.test(selected.path) ? (
         features.getJobArtifactText
           ? <ReportPreview key={jobId + ':' + selected.path} jobId={jobId} path={selected.path} readText={features.getJobArtifactText} />
