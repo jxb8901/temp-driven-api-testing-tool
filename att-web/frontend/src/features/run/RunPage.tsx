@@ -1,3 +1,4 @@
+import { EnvironmentResolutionNotice } from '../explorer/EnvironmentResolutionNotice';
 import './run.css';
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../../api';
@@ -158,6 +159,7 @@ export function RunPage({ packageId: initialPackage = '', initialTarget, initial
       <label>Environment<select value={environment} onChange={e => { setEnvironmentNotice(''); changed(() => setEnvironment(e.target.value)); }} disabled={environmentState !== 'ready'}>
         <option value="">Package default</option>{environments.map(name => <option key={name} value={name}>{name}</option>)}
       </select></label>
+      <EnvironmentResolutionNotice packageId={packageId} environment={environment} />
       {!initialTarget && <label>Target type<select value={targetType} onChange={e => changed(() => setType(e.target.value))}>
         <option value="case">Case</option><option value="template">Template</option><option value="flow">Flow</option><option value="tool">Tool</option><option value="batch">Batch selection</option>
       </select></label>}
