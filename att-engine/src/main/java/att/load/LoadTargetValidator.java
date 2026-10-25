@@ -20,7 +20,7 @@ public final class LoadTargetValidator {
             LoadWorkload workload = scenario.workload();
             att.testdata.TestdataRegistry testdata = new att.testdata.TestdataRegistry(projectRoot,
                     config.testdataDescriptors(), scenario.testdataDescriptors());
-            testdata.validateAll();
+            testdata.validateInvocation();
             att.testdata.TestdataMappingValidator.validate(workload.inputs(), testdata);
             target.withCompiledTestdataMapping(att.testdata.CompiledTestdataMapping.compile(workload.inputs()));
             Set<String> testdataIds = new java.util.LinkedHashSet<String>(

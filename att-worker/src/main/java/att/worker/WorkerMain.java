@@ -280,6 +280,11 @@ public final class WorkerMain {
         if("validate".equals(r.command)) return service.validate(new ValidateRequest(root,config,r.environment,paths(r.suites),path(r.suiteDirectory),set(r.caseIds),set(r.tags),set(r.excludeTags),bool(r.all),r.validationScope));
         if("snapshot".equals(r.command)) return service.snapshot(new SnapshotRequest(root,config,r.environment,paths(r.suites),path(r.suiteDirectory),set(r.caseIds),bool(r.all)));
         if("inspect".equals(r.command)) {
+            if ("package-configuration".equals(r.inspectionType)) {
+                Map<String,Object> inspected = new att.resource.PackageManifestInspector(root, config, !Boolean.FALSE.equals(r.redactionEnabled), r.sensitivePaths, r.sensitiveFieldPatterns).inspect(r.inspectionAction, r.environment);
+                return new OperationResult(null,"PASS",0,0,Collections.<att.validation.Diagnostic>emptyList(),
+                        Collections.<String,String>emptyMap(),Collections.<String,Object>singletonMap("inspection",inspected));
+            }
             if("configuration".equals(r.inspectionType)) {
                 int maxResponseBytes = r.maxResponseBytes == null ? 262144 : r.maxResponseBytes;
                 Map<String,Object> inspected;

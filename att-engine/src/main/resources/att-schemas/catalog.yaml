@@ -1,5 +1,6 @@
 schemaVersion: att-schema-catalog/v3.0
 schemas:
+  att-package/v1: att-package-v1.schema.json
   att-load-bindings/v1: att-load-bindings-v1.schema.json
   att-load-template/v1: att-load-template-v1.schema.json
   att-schedule/v2: att-schedule-v2.schema.json
@@ -22,7 +23,8 @@ schemas:
   att-load-summary/v1.0: history/att-load-summary-v1.0.schema.json
   att-config/v2.11: history/att-config-v2.11.schema.json
   att-config/v2.10: history/att-config-v2.10.schema.json
-  globalConfig: att-config-v2.12.schema.json
+  globalConfig: att-config-v2.13.schema.json
+  att-config/v2.12: history/att-config-v2.12.schema.json
   previousGlobalConfig: history/att-config-v2.8.schema.json
   previousGlobalConfigV27: history/att-config-v2.7.schema.json
   legacyGlobalConfigV26: history/att-config-v2.6.schema.json

@@ -60,12 +60,25 @@ public final class FrameworkConfigLoader {
     public FrameworkConfig loadDiscoveryParsed(Path path, Path projectRoot, String selectedEnvironment,
                                                Object loaded) throws IOException {
         EnvironmentReferences references = EnvironmentReferences.discovery();
-        return loadInternal(path, projectRoot, projectRoot, selectedEnvironment, loaded, true, references)
+        return loadInternal(path, projectRoot, projectRoot, selectedEnvironment, loaded, true, references, false)
+                .forDiscovery(references.requirements(), references.helperFailures());
+    }
+
+    /** Shared infrastructure inspection does not select or interpret any Package Manifest. */
+    public FrameworkConfig loadGlobalDiscovery(Path path, Path runtimeConfigRoot, String selectedEnvironment) throws IOException {
+        EnvironmentReferences references = EnvironmentReferences.discovery();
+        return loadInternal(path, runtimeConfigRoot, runtimeConfigRoot, selectedEnvironment, null, false, references, false)
                 .forDiscovery(references.requirements(), references.helperFailures());
     }
 
     private FrameworkConfig loadInternal(Path path, Path runtimeConfigRoot, Path packageRoot,
                                          String selectedEnvironment, Object parsed, boolean supplied, EnvironmentReferences references) throws IOException {
+        return loadInternal(path, runtimeConfigRoot, packageRoot, selectedEnvironment, parsed, supplied, references, true);
+    }
+
+    private FrameworkConfig loadInternal(Path path, Path runtimeConfigRoot, Path packageRoot,
+                                         String selectedEnvironment, Object parsed, boolean supplied, EnvironmentReferences references,
+                                         boolean packageAware) throws IOException {
         long inspectionStarted=System.nanoTime();
         try {
             Object loaded=supplied?parsed:YamlSupport.load(path);
@@ -73,11 +86,11 @@ public final class FrameworkConfigLoader {
             Map<?, ?> rawMap = (Map<?, ?>) loaded;
             String schemaVersion = String.valueOf(rawMap.get("schemaVersion"));
             boolean v210 = Version.CONFIG_SCHEMA.equals(schemaVersion)
-                    || Version.PREVIOUS_CONFIG_SCHEMA.equals(schemaVersion);
+                    || Version.PREVIOUS_CONFIG_SCHEMA.equals(schemaVersion) || "att-config/v2.11".equals(schemaVersion);
             if (!v210) {
                 runtimeConfigRoot = runtimeConfigRoot.toAbsolutePath().normalize();
                 Path declaredSchema = att.validation.SchemaFiles.resolveVersion(runtimeConfigRoot, schemaVersion);
-                Path currentSchema = schema(runtimeConfigRoot, "att-config-v2.12.schema.json");
+                Path currentSchema = schema(runtimeConfigRoot, "att-config-v2.13.schema.json");
                 att.validation.SchemaMigrationGuidance.verify(declaredSchema, currentSchema, rawMap,
                         schemaVersion, Version.CONFIG_SCHEMA);
                 throw new IllegalArgumentException("Unsupported config schemaVersion '" + schemaVersion
@@ -94,28 +107,35 @@ public final class FrameworkConfigLoader {
             packageRoot = packageRoot.toAbsolutePath().normalize();
             String schemaName = v210 ? null : v29 ? "att-config-v2.9.schema.json" : v28 ? "att-config-v2.8.schema.json" : v27 ? "att-config-v2.7.schema.json" : v26 ? "att-config-v2.6.schema.json" : v25 ? "att-config-v2.5.schema.json" : v22 ? "att-config-v2.2.schema.json" : "att-config-v2.1.schema.json";
             Path schema = v210 ? (Version.CONFIG_SCHEMA.equals(schemaVersion)
-                    ? schema(runtimeConfigRoot, "att-config-v2.12.schema.json")
+                    ? schema(runtimeConfigRoot, "att-config-v2.13.schema.json")
                     : att.validation.SchemaFiles.resolveVersion(runtimeConfigRoot, schemaVersion))
                     : schema(runtimeConfigRoot, schemaName);
             att.validation.SchemaMigrationGuidance.verify(schema,
-                    schema(runtimeConfigRoot, "att-config-v2.12.schema.json"), rawMap, schemaVersion, Version.CONFIG_SCHEMA);
+                    schema(runtimeConfigRoot, "att-config-v2.13.schema.json"), rawMap, schemaVersion, Version.CONFIG_SCHEMA);
             SchemaSupport.rejectUnknown(rawMap, "config", v28
-                    ? new String[]{"schemaVersion", "outputDirectory", "environment", "timeoutMs", "templates", "testcase", "run", "execution", "report", "caseLog", "xml", "toolGroups", "dbhelpers", "mqhelpers", "sshhelpers", "httphelpers", "testdata", "ssh", "tools", "environments"}
+                    ? new String[]{"schemaVersion", "outputDirectory", "environment", "timeoutMs", "templates", "testcase", "run", "execution", "report", "caseLog", "xml", "toolGroups", "dbhelpers", "mqhelpers", "sshhelpers", "httphelpers", "testdata", "ssh", "tools", "environments", "packagePolicy"}
                     : v29
-                    ? new String[]{"schemaVersion", "outputDirectory", "environment", "timeoutMs", "templates", "testcase", "run", "execution", "report", "caseLog", "xml", "toolGroups", "dbhelpers", "mqhelpers", "sshhelpers", "httphelpers", "testdata", "ssh", "tools", "environments"}
+                    ? new String[]{"schemaVersion", "outputDirectory", "environment", "timeoutMs", "templates", "testcase", "run", "execution", "report", "caseLog", "xml", "toolGroups", "dbhelpers", "mqhelpers", "sshhelpers", "httphelpers", "testdata", "ssh", "tools", "environments", "packagePolicy"}
                     : v27
-                    ? new String[]{"schemaVersion", "outputDirectory", "environment", "timeoutMs", "templates", "testcase", "run", "execution", "report", "caseLog", "xml", "toolGroups", "dbhelpers", "mqhelpers", "sshhelpers", "ssh", "tools", "environments"}
+                    ? new String[]{"schemaVersion", "outputDirectory", "environment", "timeoutMs", "templates", "testcase", "run", "execution", "report", "caseLog", "xml", "toolGroups", "dbhelpers", "mqhelpers", "sshhelpers", "ssh", "tools", "environments", "packagePolicy"}
                     : v26
-                    ? new String[]{"schemaVersion", "outputDirectory", "environment", "timeoutMs", "templates", "testcase", "run", "execution", "report", "caseLog", "xml", "toolGroups", "dbhelpers", "mqhelpers", "ssh", "tools", "environments"}
+                    ? new String[]{"schemaVersion", "outputDirectory", "environment", "timeoutMs", "templates", "testcase", "run", "execution", "report", "caseLog", "xml", "toolGroups", "dbhelpers", "mqhelpers", "ssh", "tools", "environments", "packagePolicy"}
                     : v25
                     ? new String[]{"schemaVersion", "outputDirectory", "environment", "timeoutMs", "templates", "testcase", "run", "execution", "report", "caseLog", "xml", "toolGroups", "dbhelpers", "ssh", "tools"}
                     : v22
                     ? new String[]{"schemaVersion", "outputDirectory", "environment", "timeoutMs", "templates", "testcase", "run", "execution", "report", "caseLog", "xml", "toolGroups", "ssh", "tools"}
                     : new String[]{"schemaVersion", "outputDirectory", "environment", "timeoutMs", "templates", "testcase", "run", "report", "caseLog", "xml", "tools"});
+            PackageConfig packageConfig = packageAware ? PackageConfig.load(packageRoot) : PackageConfig.parse(packageRoot, "schemaVersion: att-package/v1\n");
+            Set<String> declaredEnvironments = new LinkedHashSet<String>();
+            if (rawMap.get("environments") instanceof Map) for (Object key : ((Map<?, ?>) rawMap.get("environments")).keySet())
+                if (!SchemaSupport.isDisabledKey(key)) declaredEnvironments.add(String.valueOf(key));
+            packageConfig.validateEnvironments(declaredEnvironments);
+            String selector = selectedEnvironment == null ? packageConfig.defaultEnvironment() : selectedEnvironment;
+            String environmentOrigin = selectedEnvironment != null ? "request" : packageConfig.defaultEnvironment() != null ? "package" : "global";
             Map<String, Object> map = resolveEnvironment(rawMap, v29 || v28 || v27 || v26, v29 || v28 || v27,
-                    v29 || v28, selectedEnvironment);
+                    v29 || v28, selector);
             att.validation.SchemaMigrationGuidance.verify(schema,
-                    schema(runtimeConfigRoot, "att-config-v2.12.schema.json"), map, schemaVersion, Version.CONFIG_SCHEMA);
+                    schema(runtimeConfigRoot, "att-config-v2.13.schema.json"), map, schemaVersion, Version.CONFIG_SCHEMA);
             validateGlobalMappings(map);
             Map<String, ToolConfig> tools = new LinkedHashMap<String, ToolConfig>();
             Map<String, SshHelperConfig> sshHelpers = (v29 || v28 || v27)
@@ -144,11 +164,16 @@ public final class FrameworkConfigLoader {
                     ? HelperDiscoveryLoader.load("mq", map.get("mqhelpers"), runtimeConfigRoot, references,
                             new MqHelperConfigLoader(references)::load)
                     : Collections.<String, MqHelperConfig>emptyMap();
-            return new FrameworkConfig(relativePath(map.get("outputDirectory"), "output", "outputDirectory"),
+            FrameworkConfig global = new FrameworkConfig(relativePath(map.get("outputDirectory"), "output", "outputDirectory"),
                     Paths.get("report"), Paths.get("logs"),
                     map.get("environment") == null ? "SIT" : SchemaSupport.string(map.get("environment"), "environment", true), positiveInteger(map.get("timeoutMs"), 10000, "timeoutMs"),
                     templatesRoot(map), testcasesRoot(map), tools, dbHelpers, mqHelpers, sshHelpers, httpHelpers, report(map), run(map), null, "", "", null, null, 1, xmlNamespaceMode(map), "", caseLogYamlAnchors(map), processOutput(map),
-                    descriptorPaths(map.get("testdata"), packageRoot, "config.environments." + String.valueOf(map.get("environment")) + ".testdata"));
+                    descriptorPaths((!packageAware || legacyTestdata(rawMap)) && (!packageAware || !packageConfig.present()) ? map.get("testdata") : null, packageRoot, "config.environments." + String.valueOf(map.get("environment")) + ".testdata"));
+            if (!packageAware) return global;
+            Map<?, ?> policy = rawMap.get("packagePolicy") instanceof Map ? (Map<?, ?>) rawMap.get("packagePolicy") : Collections.emptyMap();
+            int timeoutCeiling = positiveInteger(policy.get("maxTimeoutMs"), 300000, "packagePolicy.maxTimeoutMs");
+            return EffectiveConfigurationResolver.resolve(global, packageConfig, packageRoot, environmentOrigin,
+                    PackageConfig.sha256(att.validation.JsonSupport.mapper().writeValueAsBytes(rawMap)), timeoutCeiling, legacyTestdata(rawMap), packageDiagnostics(rawMap, packageConfig));
         } catch (att.validation.DiagnosticException e) {
             throw YamlSupport.locate(e, path, e.field()).forPackage(packageRoot);
         } catch (Exception e) {
@@ -168,7 +193,28 @@ public final class FrameworkConfigLoader {
         }
     }
 
-    private static Map<String, Object> resolveEnvironment(Map<?, ?> raw, boolean profileSupported, boolean sshSupported,
+    private static List<String> packageDiagnostics(Map<?, ?> raw, PackageConfig pkg) {
+        List<String> diagnostics = new ArrayList<String>();
+        boolean sharedInventory = raw.containsKey("testdata");
+        if (raw.get("environments") instanceof Map) for (Object profile : ((Map<?, ?>) raw.get("environments")).values())
+            if (profile instanceof Map && ((Map<?, ?>) profile).containsKey("testdata")) sharedInventory = true;
+        if (sharedInventory) diagnostics.add(legacyTestdata(raw) && !pkg.present()
+                ? "Deprecated shared Testdata compatibility is active; migrate this Package's owned imports to package.yaml."
+                : "Deprecated shared Testdata inventory is ignored; only this Package's package.yaml declares its base Testdata registry.");
+        for (String family : new String[]{"templates", "testcase"}) {
+            Object section = raw.get(family);
+            if (section instanceof Map && ((Map<?, ?>) section).containsKey("root") && !family.equals(((Map<?, ?>) section).get("root")))
+                diagnostics.add("Shared " + family + ".root is ignored; declare a safe Package resource root in package.yaml.");
+        }
+        return diagnostics;
+    }
+
+    private static boolean legacyTestdata(Map<?, ?> map) {
+        Object policy = map.get("packagePolicy");
+        return policy instanceof Map && Boolean.TRUE.equals(((Map<?, ?>) policy).get("legacyTestdata"));
+    }
+
+    static Map<String, Object> resolveEnvironment(Map<?, ?> raw, boolean profileSupported, boolean sshSupported,
                                                            boolean httpSupported, String requested) {
         Object configured = raw.get("environments");
         if (configured == null) {
@@ -769,7 +815,7 @@ public final class FrameworkConfigLoader {
         return result;
     }
 
-    private static ReportConfig report(Map<?, ?> map) {
+    static ReportConfig report(Map<?, ?> map) {
         Object value = map.get("report");
         if (!(value instanceof Map)) return null;
         Map<?, ?> report = (Map<?, ?>) value;

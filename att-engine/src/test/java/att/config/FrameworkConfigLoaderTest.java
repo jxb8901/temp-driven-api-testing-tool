@@ -317,7 +317,7 @@ class FrameworkConfigLoaderTest {
         assertEquals(10000, new FrameworkConfigLoader().load(ok).timeoutMs());
         Path rooted=tempDir.resolve("rooted.yaml"); Files.write(rooted,"schemaVersion: att-config/v2.11\ntestcase: {root: cases/nested}\ncaseLog: {yamlAnchors: true}\ntimeoutMs: 3600000\n".getBytes("UTF-8"));
         FrameworkConfig rootedConfig = new FrameworkConfigLoader().load(rooted);
-        assertEquals(Paths.get("cases/nested"), rootedConfig.testcasesRoot());
+        assertEquals(Paths.get("testcase"), rootedConfig.testcasesRoot());
         assertEquals(3600000, rootedConfig.timeoutMs());
         assertTrue(rootedConfig.caseLogYamlAnchors());
         assertFalse(new FrameworkConfigLoader().load(ok).caseLogYamlAnchors());

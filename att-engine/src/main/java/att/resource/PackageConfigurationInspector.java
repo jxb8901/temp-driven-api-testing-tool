@@ -143,7 +143,7 @@ public final class PackageConfigurationInspector {
         Map<?,?> raw = cached == null ? readConfig() : cached.raw;
         validateReferencedFiles(raw, safeEnvironment);
         Path file = configFile();
-        FrameworkConfig config = cached == null ? new FrameworkConfigLoader().loadDiscovery(file, RuntimeConfigPath.root(file), packageRoot, safeEnvironment) : cached.config;
+        FrameworkConfig config = cached == null ? new FrameworkConfigLoader().loadGlobalDiscovery(file, RuntimeConfigPath.root(file), safeEnvironment) : cached.config;
         TestdataDescriptor selected = null;
         String selectedSource = null;
         for (Path path : config.testdataDescriptors()) {
@@ -197,6 +197,12 @@ public final class PackageConfigurationInspector {
         result.put("redactionEnabled", Boolean.valueOf(redactionEnabled));
         result.put("diagnostics", Collections.emptyList());
         return result;
+    }
+
+    /** The Package Manifest view uses exactly the established secret and source projection policy. */
+    Object projectPackageValue(Object value, String field, boolean[] redacted) {
+        int dot = field.lastIndexOf('.');
+        return projectTestdataValue(value, field, dot < 0 ? field : field.substring(dot + 1), redacted);
     }
 
     private Object projectTestdataValue(Object value, String path, String key, boolean[] redacted) {
@@ -278,7 +284,7 @@ public final class PackageConfigurationInspector {
             Map<?, ?> raw = cached == null ? readConfig() : cached.raw;
             validateReferencedFiles(raw, safeEnvironment);
             Path file = configFile();
-            FrameworkConfig config = cached == null ? new FrameworkConfigLoader().loadDiscovery(file, RuntimeConfigPath.root(file), packageRoot, safeEnvironment) : cached.config;
+            FrameworkConfig config = cached == null ? new FrameworkConfigLoader().loadGlobalDiscovery(file, RuntimeConfigPath.root(file), safeEnvironment) : cached.config;
             return snapshot(raw, config, "effective", section, offset, limit, query);
         } catch (ConfigurationLimitException exceeded) {
             throw exceeded;

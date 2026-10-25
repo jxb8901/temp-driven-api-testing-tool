@@ -25,8 +25,8 @@ class MultiEnvironmentConfigurationTest {
         Map<?, ?> sit = yaml(home.resolve("config/environments/sit.yaml"));
         Map<?, ?> uat = yaml(home.resolve("config/environments/uat.yaml"));
 
-        JsonSchemaVerifier.verify(att.validation.SchemaFiles.resolve(root, "att-config-v2.12.schema.json"), sit);
-        JsonSchemaVerifier.verify(att.validation.SchemaFiles.resolve(root, "att-config-v2.12.schema.json"), uat);
+        JsonSchemaVerifier.verify(att.validation.SchemaFiles.resolve(root, "att-config-v2.13.schema.json"), sit);
+        JsonSchemaVerifier.verify(att.validation.SchemaFiles.resolve(root, "att-config-v2.13.schema.json"), uat);
 
         assertEquals("SIT", sit.get("environment"));
         assertEquals("UAT", uat.get("environment"));

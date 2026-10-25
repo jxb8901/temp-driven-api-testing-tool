@@ -1698,6 +1698,16 @@ final class ServerRuntime implements AutoCloseable {
         }
         return paths;
     }
+    Map<String,Object> inspectPackageConfiguration(String packageId,String action,String environment,String principal) throws Exception {
+        if(!config.inspection.enabled)throw new NotFoundException();
+        Path root=packageRoot(packageId);if(root==null)throw new NotFoundException();validatePackageRoot(root);
+        if(!List.of("declared","effective","compare").contains(action))throw new IllegalArgumentException("Unsupported Package Configuration view");
+        String selected=environment==null||environment.isBlank()?null:inspectionEnvironment(environment,"environment");
+        WorkerRequest request=inspectionRequest(packageId,root,selected);
+        request.inspectionType="package-configuration";request.inspectionAction=action;
+        Map<String,Object> result=executeInspection(root,request);result.put("packageId",packageId);return result;
+    }
+
     Map<String,Object> inspectConfiguration(String packageId,String action,String environment,String otherEnvironment,String principal) throws Exception {
         return inspectConfiguration(packageId,action,environment,otherEnvironment,null,0,0,principal);
     }

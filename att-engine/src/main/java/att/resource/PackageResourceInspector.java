@@ -2527,7 +2527,13 @@ public final class PackageResourceInspector implements AutoCloseable {
         digest.update((byte) 0);
         digest.update(utf8("ATT_SCHEMA_REGISTRY=" + att.validation.SchemaFiles.registryDigest()));
         digest.update((byte) 0);
-        digest.update(utf8("ATT_ENVIRONMENT=" + (environment == null ? "" : environment)));
+        att.config.PackageConfig manifest = att.config.PackageConfig.load(packageRoot);
+        digest.update(utf8("ATT_PACKAGE_MANIFEST=" + manifest.present() + ":" + manifest.digest()));
+        digest.update((byte) 0);
+        FrameworkConfig effectiveConfig = new FrameworkConfigLoader().loadDiscovery(resolveConfigFile(), runtimeConfigRoot, packageRoot, environment);
+        digest.update(utf8("ATT_EFFECTIVE_CONFIG=" + effectiveConfig.effectiveConfiguration().identity()));
+        digest.update((byte) 0);
+        digest.update(utf8("ATT_ENVIRONMENT=" + effectiveConfig.environment()));
         digest.update((byte) 0);
         List<Path> ordered = new ArrayList<Path>(files);
         Collections.sort(ordered);

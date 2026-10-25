@@ -39,7 +39,7 @@ public class ReportConfig {
 
     public String mode() { return mode; }
     public String fileNamePattern() { return fileNamePattern; }
-    public Map<String, String> columns() { return columns; }
+    public Map<String, String> columns() { return Collections.unmodifiableMap(columns); }
     public int junitCaseLogEmbedThresholdBytes() { return junitCaseLogEmbedThresholdBytes; }
     public int htmlCaseLogInlineLimitBytes() { return htmlCaseLogInlineLimitBytes; }
 }

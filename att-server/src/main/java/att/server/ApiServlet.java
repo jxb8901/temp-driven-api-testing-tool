@@ -70,6 +70,13 @@ public final class ApiServlet extends HttpServlet {
             }
             if(resourceRequest){resourceGet(req,res,path,requestId,principal);return;}
             if(loadCatalogRequest){loadCatalogGet(req,res,path,requestId,principal);return;}
+            if(path.matches("/packages/[^/]+/package-configuration(?:/(?:declared|effective|compare))?")) {
+                String[] segments=path.split("/");
+                String action=segments.length==4?"effective":segments[4];
+                try {Map<String,Object> result=runtime.inspectPackageConfiguration(segment(path,2),action,req.getParameter("environment"),principal);
+                    result.put("requestId",requestId);res.setHeader("Cache-Control","no-store");json(res,200,result);return;
+                } catch(Exception failure) {if(failure instanceof RuntimeException)throw (RuntimeException)failure;throw new IOException(failure);}
+            }
             if(configurationRequest){configurationGet(req,res,path,requestId,principal);return;}
             if(loadPolicyRequest){loadPolicyGet(req,res,path,requestId,principal);return;}
             if(draftRequest){
@@ -631,7 +638,7 @@ public final class ApiServlet extends HttpServlet {
     private static boolean parseOptionalBoolean(String raw,String name){if(raw==null||raw.isEmpty())return false;if("true".equalsIgnoreCase(raw))return true;if("false".equalsIgnoreCase(raw))return false;throw new IllegalArgumentException(name+" must be true or false");}
     private static String principalSearch(HttpServletRequest req){String value=req.getParameter("principal");if(value==null)return null;value=value.strip();if(value.codePointCount(0,value.length())>120)throw new IllegalArgumentException("principal search must be at most 120 characters");for(int i=0;i<value.length();i++)if(Character.isISOControl(value.charAt(i)))throw new IllegalArgumentException("principal search contains an invalid character");return value.isEmpty()?null:value;}
     private static boolean resourcePath(String path){return path.matches("/packages/[^/]+/resources(?:/.*)?");}
-    private static boolean configurationPath(String path){return path.matches("/packages/[^/]+/configuration(?:/.*)?")||path.matches("/configuration(?:/.*)?");}
+    private static boolean configurationPath(String path){return path.matches("/packages/[^/]+/package-configuration(?:/.*)?")||path.matches("/packages/[^/]+/configuration(?:/.*)?")||path.matches("/configuration(?:/.*)?");}
     private static boolean loadPolicyPath(String path){return path.matches("/packages/[^/]+/load-policy");}
     private static boolean isJson(String value){if(value==null)return false;String[] parts=value.split(";",2);return "application/json".equalsIgnoreCase(parts[0].trim());}
     private boolean checkOrigin(HttpServletRequest req,HttpServletResponse res,String requestId,boolean force)throws IOException {
