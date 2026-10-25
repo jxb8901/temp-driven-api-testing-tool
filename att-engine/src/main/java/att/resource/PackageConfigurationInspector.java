@@ -57,6 +57,10 @@ public final class PackageConfigurationInspector {
     private PackageConfigurationSnapshots snapshots;
     private Object snapshotContext;
     private boolean sharedRuntime;
+    private boolean packageTestdata;
+
+    /** Package Testdata uses the execution resolver, independently of Shared Configuration. */
+    public PackageConfigurationInspector forPackageTestdata() { packageTestdata=true; return this; }
 
     /** Shared views never resolve Package-local Testdata records or dependencies. */
     public PackageConfigurationInspector forSharedRuntime() { sharedRuntime=true; return this; }
@@ -139,14 +143,21 @@ public final class PackageConfigurationInspector {
             throw new PackageResourceInspector.ResourceNotFoundException();
         if (limit < 1 || limit > 100) throw new IllegalArgumentException("limit must be between 1 and 100");
         String safeEnvironment = normalizedEnvironment(environment);
-        PackageConfigurationSnapshots.Snapshot cached = configurationSnapshot(safeEnvironment);
+        PackageConfigurationSnapshots.Snapshot cached = packageTestdata ? null : configurationSnapshot(safeEnvironment);
         Map<?,?> raw = cached == null ? readConfig() : cached.raw;
-        validateReferencedFiles(raw, safeEnvironment);
+        if (!packageTestdata) validateReferencedFiles(raw, safeEnvironment);
         Path file = configFile();
-        FrameworkConfig config = cached == null ? new FrameworkConfigLoader().loadGlobalDiscovery(file, RuntimeConfigPath.root(file), safeEnvironment) : cached.config;
+        FrameworkConfig config = packageTestdata
+                ? new FrameworkConfigLoader().loadDiscovery(file, RuntimeConfigPath.root(file), packageRoot, safeEnvironment)
+                : cached == null ? new FrameworkConfigLoader().loadGlobalDiscovery(file, RuntimeConfigPath.root(file), safeEnvironment) : cached.config;
         TestdataDescriptor selected = null;
         String selectedSource = null;
-        for (Path path : config.testdataDescriptors()) {
+        if (packageTestdata) {
+            selected = new att.testdata.TestdataRegistry(packageRoot, config.testdataDescriptors(), Collections.<Path>emptyList()).resolve(descriptorId);
+            PackageResourceResolver.PackageResource resolved = resources.fromInternalPath(selected.source(), PackageResourceResolver.Kind.FILE);
+            if (Files.size(resolved.canonicalPath()) > MAX_DESCRIPTOR_BYTES) throw new ConfigurationLimitException();
+            selectedSource = resolved.logicalName();
+        } else for (Path path : config.testdataDescriptors()) {
             PackageResourceResolver.PackageResource resolved = resources.fromInternalPath(path, PackageResourceResolver.Kind.FILE);
             if (Files.size(resolved.canonicalPath()) > MAX_DESCRIPTOR_BYTES) throw new ConfigurationLimitException();
             TestdataDescriptor candidate = new TestdataDescriptorLoader(packageRoot).load(resolved.canonicalPath());
@@ -179,6 +190,11 @@ public final class PackageConfigurationInspector {
         result.put("descriptorId", selected.id());
         result.put("source", selectedSource);
         result.put("environment", config.environment());
+        if (packageTestdata) {
+            result.put("environmentOrigin", config.effectiveConfiguration().environmentOrigin());
+            result.put("configurationIdentity", config.effectiveConfiguration().identity());
+            result.put("manifestDigest", config.effectiveConfiguration().manifestDigest());
+        }
         result.put("generated", Boolean.valueOf(generated));
         result.put("previewRequired", Boolean.valueOf(previewRequired));
         result.put("recordCount", Long.valueOf(selected.count()));
@@ -280,11 +296,14 @@ public final class PackageConfigurationInspector {
     private Map<String, Object> effective(String environment, String section, int offset, int limit, String query) {
         String safeEnvironment = normalizedEnvironment(environment);
         try {
-            PackageConfigurationSnapshots.Snapshot cached = configurationSnapshot(safeEnvironment);
+            PackageConfigurationSnapshots.Snapshot cached = packageTestdata ? null : configurationSnapshot(safeEnvironment);
             Map<?, ?> raw = cached == null ? readConfig() : cached.raw;
-            validateReferencedFiles(raw, safeEnvironment);
+            if (!packageTestdata) validateReferencedFiles(raw, safeEnvironment);
             Path file = configFile();
-            FrameworkConfig config = cached == null ? new FrameworkConfigLoader().loadGlobalDiscovery(file, RuntimeConfigPath.root(file), safeEnvironment) : cached.config;
+            FrameworkConfig config = packageTestdata
+                ? new FrameworkConfigLoader().loadDiscovery(file, RuntimeConfigPath.root(file), packageRoot, safeEnvironment)
+                : cached == null ? new FrameworkConfigLoader().loadGlobalDiscovery(file, RuntimeConfigPath.root(file), safeEnvironment) : cached.config;
+            if (packageTestdata) return packageTestdataSnapshot(config, offset, limit, query);
             return snapshot(raw, config, "effective", section, offset, limit, query);
         } catch (ConfigurationLimitException exceeded) {
             throw exceeded;
@@ -502,6 +521,29 @@ public final class PackageConfigurationInspector {
             result.put("total", Integer.valueOf(total));
             result.put("nextOffset", selectedSection != null && offset + limit < total ? Integer.valueOf(offset + limit) : null);
         }
+        return result;
+    }
+
+    private Map<String,Object> packageTestdataSnapshot(FrameworkConfig config, int offset, int limit, String query) throws Exception {
+        String source = config.effectiveConfiguration().origins().get("testdata");
+        Map<String,Object> selected = testdataSection(config, source == null ? "package" : source);
+        @SuppressWarnings("unchecked") List<Map<String,Object>> entries = (List<Map<String,Object>>)selected.get("entries");
+        if (query != null && !query.trim().isEmpty()) entries.removeIf(entry -> !entryMatches(entry, query.trim().toLowerCase(Locale.ROOT)));
+        entries.sort((a,b) -> String.valueOf(a.get("id")).compareToIgnoreCase(String.valueOf(b.get("id"))));
+        int total = entries.size();
+        if (offset > total) throw new IllegalArgumentException("offset exceeds the current configuration section");
+        int end = limit > 0 ? Math.min(total, offset + limit) : total;
+        selected.put("entryCount", total);
+        selected.put("entries", new ArrayList<Map<String,Object>>(entries.subList(offset, end)));
+        Map<String,Object> result = base("effective", "ready", att.Version.PACKAGE_SCHEMA);
+        result.put("scope", "package"); result.put("environment", config.environment());
+        result.put("environmentOrigin", config.effectiveConfiguration().environmentOrigin());
+        result.put("configurationIdentity", config.effectiveConfiguration().identity());
+        result.put("manifestDigest", config.effectiveConfiguration().manifestDigest());
+        result.put("sections", Collections.singletonList(selected)); result.put("section", "testdata");
+        result.put("redactionEnabled", redactionEnabled); result.put("diagnostics", Collections.emptyList());
+        result.put("offset", offset); result.put("limit", limit); result.put("total", total);
+        result.put("nextOffset", end < total ? Integer.valueOf(end) : null);
         return result;
     }
 

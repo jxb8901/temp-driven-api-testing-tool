@@ -1763,6 +1763,7 @@ final class ServerRuntime implements AutoCloseable {
         Path root=packageRoot(packageId);if(root==null)throw new NotFoundException();validatePackageRoot(root);
         String selected=environment==null||environment.isBlank()?null:inspectionEnvironment(environment,"environment");
         WorkerRequest request=inspectionRequest(packageId,root,selected);request.inspectionType="configuration";
+        request.inspectionEnvironment=selected;
         request.inspectionAction="testdata-records";request.inspectionResourceId=descriptorId;request.inspectionSection=descriptorId;
         request.inspectionOffset=offset;request.inspectionLimit=limit;
         request.inspectionQuery=previewGenerated?"preview-generated":null;

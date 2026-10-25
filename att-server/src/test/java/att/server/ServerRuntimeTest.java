@@ -160,12 +160,12 @@ class ServerRuntimeTest {
         ServerConfig config=ServerConfig.load(configFile);Path libs=Files.createDirectory(temp.resolve("cancel-WEB-INF-lib"));
         CountDownLatch launchEntered=new CountDownLatch(1),allowLaunch=new CountDownLatch(1);
         AtomicReference<Process> launched=new AtomicReference<>();
-        ServerRuntime runtime=new ServerRuntime(config,libs.toString(),builder->{
+        ServerRuntime runtime=new ServerRuntime(config,libs.toString(),ServerRuntimeTestSupport.resolvingConfiguration(builder->{
             launchEntered.countDown();
             try {if(!allowLaunch.await(5,TimeUnit.SECONDS))throw new java.io.IOException("test launch gate timed out");}
             catch(InterruptedException e){Thread.currentThread().interrupt();throw new java.io.IOException("test launch gate interrupted",e);}
             Process process=builder.start();launched.set(process);return process;
-        });
+        }));
         try {
             Map<String,Object> submitted=runtime.submit("validate",ServerRuntime.JSON.readTree("{\"packageId\":\"p\"}"),"ci-test");
             String id=(String)submitted.get("jobId");assertTrue(launchEntered.await(5,TimeUnit.SECONDS),"Worker launcher should reach the process-publication boundary");
@@ -288,10 +288,10 @@ class ServerRuntimeTest {
         Path java=Path.of(System.getProperty("java.home"),"bin",System.getProperty("os.name","").toLowerCase().contains("win")?"java.exe":"java");
         Path yaml=temp.resolve("heap-command-server.yaml");Files.writeString(yaml,"server:\n  dataDir: "+temp.resolve("heap-command-data")+"\n  javaExecutable: "+java+"\nworkers:\n  maxConcurrent: 1\n  queuedLimit: 1\n  maxConcurrentLoad: 1\n  heapInitialMb: 128\n  heapMaxMb: 1024\npackages:\n  allowedRoots:\n    - "+allowed+"\n  entries:\n    p: "+pkg+"\n");
         AtomicReference<List<String>> command=new AtomicReference<>();
-        ServerRuntime runtime=new ServerRuntime(ServerConfig.load(yaml),Files.createDirectory(temp.resolve("heap-command-libs")).toString(),builder->{
+        ServerRuntime runtime=new ServerRuntime(ServerConfig.load(yaml),Files.createDirectory(temp.resolve("heap-command-libs")).toString(),ServerRuntimeTestSupport.resolvingConfiguration(builder->{
             command.set(new java.util.ArrayList<>(builder.command()));
             throw new java.io.IOException("captured Worker launch command");
-        });
+        }));
         try {
             Map<String,Object> submitted=runtime.submit("validate",ServerRuntime.JSON.readTree("{\"packageId\":\"p\"}"),"test");
             String id=(String)submitted.get("jobId");long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(5);
@@ -353,10 +353,10 @@ class ServerRuntimeTest {
         ServerRuntimeTestSupport.addModuleJar(externalLibraries,"oracle-driver",driverClasses);ServerRuntimeTestSupport.addModuleJar(webLibs,"worker-probe",probeClasses);
         Path java=Path.of(System.getProperty("java.home"),"bin",System.getProperty("os.name","").toLowerCase().contains("win")?"java.exe":"java");Path yaml=temp.resolve("external-driver-server.yaml");
         Files.writeString(yaml,"server:\n  dataDir: "+ServerRuntimeTestSupport.yaml(temp.resolve("external-driver-data"))+"\n  javaExecutable: "+ServerRuntimeTestSupport.yaml(java)+"\nworkers:\n  maxConcurrent: 1\n  queuedLimit: 1\n  maxConcurrentLoad: 1\n  libraryDirs:\n    - "+ServerRuntimeTestSupport.yaml(externalLibraries)+"\npackages:\n  allowedRoots:\n    - "+ServerRuntimeTestSupport.yaml(allowed)+"\n  entries:\n    p: "+ServerRuntimeTestSupport.yaml(pkg)+"\n");
-        ServerRuntime runtime=new ServerRuntime(ServerConfig.load(yaml),webLibs.toString(),builder->{
+        ServerRuntime runtime=new ServerRuntime(ServerConfig.load(yaml),webLibs.toString(),ServerRuntimeTestSupport.resolvingConfiguration(builder->{
             assertTrue(builder.command().get(2).contains(externalLibraries.resolve("*").toString()),"Configured external library wildcard must be on the Worker classpath");
             builder.command().set(3,"probe.WorkerProbe");return builder.start();
-        });
+        }));
         try {
             Map<String,Object> submitted=runtime.submit("validate",ServerRuntime.JSON.readTree("{\"packageId\":\"p\"}"),"test");String id=(String)submitted.get("jobId");
             long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(10);Map<String,Object> result=runtime.jobRecord(id);

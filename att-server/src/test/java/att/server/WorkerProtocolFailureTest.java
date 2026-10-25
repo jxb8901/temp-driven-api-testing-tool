@@ -105,6 +105,6 @@ class WorkerProtocolFailureTest {
     private ServerRuntime runtime(ServerRuntime.WorkerProcessLauncher launcher)throws Exception {
         Path pkg=Files.createDirectories(temp.resolve("packages/p"));Files.createDirectory(temp.resolve("libs"));
         Path yaml=temp.resolve("server.yaml");Files.writeString(yaml,"server:\n  dataDir: '"+temp.resolve("data")+"'\nworkers: {maxConcurrent: 1, queuedLimit: 1, maxConcurrentLoad: 1}\npackages:\n  allowedRoots: ['"+pkg.getParent()+"']\n  entries: {p: '"+pkg+"'}\n");
-        return new ServerRuntime(ServerConfig.load(yaml),temp.resolve("libs").toString(),launcher);
+        return new ServerRuntime(ServerConfig.load(yaml),temp.resolve("libs").toString(),ServerRuntimeTestSupport.resolvingConfiguration(launcher));
     }
 }

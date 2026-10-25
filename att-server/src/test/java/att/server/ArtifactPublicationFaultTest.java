@@ -472,7 +472,7 @@ class ArtifactPublicationFaultTest {
                 "server:\n  dataDir: '" + temp.resolve("data") + "'\n  javaExecutable: '" + launcher + "'\n"
                         + "workers:\n  maxConcurrent: 1\n  maxConcurrentLoad: 1\n  queuedLimit: " + queuedLimit + "\n  gracefulStopMs: 100\npackages:\n  allowedRoots:\n    - '" + packages + "'\n  entries:\n    p: '" + pkg + "'\n");
         return new ServerRuntime(ServerConfig.load(yaml), Files.createDirectories(temp.resolve("libs")).toString(),
-                ProcessBuilder::start, Clock.systemUTC(), publisher);
+                ServerRuntimeTestSupport.resolvingConfiguration(ProcessBuilder::start), Clock.systemUTC(), publisher);
     }
 
     private Job terminalJob(ServerRuntime runtime, String id) throws Exception {

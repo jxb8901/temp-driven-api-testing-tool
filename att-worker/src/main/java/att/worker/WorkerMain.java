@@ -311,6 +311,7 @@ public final class WorkerMain {
                             maxResponseBytes, Boolean.TRUE.equals(r.redactionEnabled), r.sensitivePaths, r.sensitiveFieldPatterns,
                             Boolean.TRUE.equals(r.inspectionIncludeAllFields));
                     if(Boolean.TRUE.equals(r.inspectionSharedConfiguration))inspector.forSharedRuntime();
+                    else if("testdata".equals(r.inspectionSection)||"testdata-records".equals(r.inspectionAction))inspector.forPackageTestdata();
                     if(inspectionDaemon)inspector.withSnapshots(configurationSnapshots,att.server.api.internal.InspectionCacheIdentity.context(root,r));
                     inspected = inspector.inspect(r.inspectionAction,
                             r.inspectionEnvironment, r.inspectionOtherEnvironment, r.inspectionSection,

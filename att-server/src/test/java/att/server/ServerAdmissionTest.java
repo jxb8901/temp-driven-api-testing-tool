@@ -73,7 +73,7 @@ class ServerAdmissionTest {
         Path allowed=Files.createDirectory(temp.resolve(name+"-packages"));Path pkg=Files.createDirectory(allowed.resolve("p"));
         Path script=temp.resolve(name+"-slow-java");Files.writeString(script,"#!/bin/sh\nsleep 1\n");script.toFile().setExecutable(true);
         Path yaml=temp.resolve(name+"-server.yaml");Files.writeString(yaml,"server:\n  dataDir: "+temp.resolve(name+"-data")+"\n  javaExecutable: "+script+"\n  jobRetentionDays: "+retention+"\nworkers:\n  maxConcurrent: "+concurrent+"\n  queuedLimit: "+queue+"\n  maxConcurrentLoad: "+load+"\npackages:\n  allowedRoots:\n    - "+allowed+"\n  entries:\n    p: "+pkg+"\n");
-        return new ServerRuntime(ServerConfig.load(yaml),Files.createDirectory(temp.resolve(name+"-libs")).toString(),launcher);
+        return new ServerRuntime(ServerConfig.load(yaml),Files.createDirectory(temp.resolve(name+"-libs")).toString(),ServerRuntimeTestSupport.resolvingConfiguration(launcher));
     }
     private static JsonNode request(){return ServerRuntime.JSON.createObjectNode().put("packageId","p");}
     private static void await(CountDownLatch gate)throws java.io.IOException {try{if(!gate.await(5,TimeUnit.SECONDS))throw new java.io.IOException("test launch gate timed out");}catch(InterruptedException e){Thread.currentThread().interrupt();throw new java.io.IOException("test launch gate interrupted",e);}}

@@ -233,7 +233,9 @@ public final class FrameworkConfigLoader {
                                                            boolean httpSupported, String requested) {
         Object configured = raw.get("environments");
         if (configured == null) {
-            if (requested != null) throw new IllegalArgumentException("--env requires a profile config with an environments map");
+            String canonical = raw.get("environment") instanceof String ? (String)raw.get("environment") : "SIT";
+            if (requested != null && !canonical.equalsIgnoreCase(requested))
+                throw new IllegalArgumentException("Selected environment is not declared in the Global configuration");
             Map<String, Object> copy = new LinkedHashMap<String, Object>();
             for (Map.Entry<?, ?> entry : raw.entrySet()) copy.put(String.valueOf(entry.getKey()), entry.getValue());
             return copy;
