@@ -44,6 +44,74 @@ class AuthenticationIntegrationTest {
         restore(previousServerConfig);
     }
 
+    @Test void packageManifestHttpPublicationEnforcesCsrfOwnerRevocationAndConflict() throws Exception {
+        previousAttHome=System.getProperty("att.home");Path home=createLocalRuntime();System.setProperty("att.home",home.toString());
+        Path packages=Files.createDirectories(temp.resolve("manifest-packages"));Path pkg=Files.createDirectories(packages.resolve("business-folder"));
+        Files.createDirectories(pkg.resolve("templates"));Files.createDirectories(pkg.resolve("testcase"));
+        String original="schemaVersion: att-package/v1\ndefaultEnvironment: SIT\n";
+        Files.writeString(pkg.resolve("package.yaml"),original);
+        Path data=temp.resolve("manifest-data");Path config=Files.writeString(temp.resolve("manifest-server.yaml"),
+                "server:\n  dataDir: "+yaml(data)+"\n  auth: {mode: local}\n  security: {checkCrossOrigin: true}\n"
+                +"  packageConfiguration: {sourceEditingEnabled: true}\nworkers: {}\npackages:\n  allowedRoots: ["+yaml(packages)+"]\n  entries: {owner: "+yaml(pkg)+"}\n");
+        System.setProperty("att.server.config",config.toString());
+        Path users=Files.writeString(temp.resolve("manifest-users.xml"),"<tomcat-users></tomcat-users>");
+        Tomcat tomcat=start(users,appDirectory("manifest-http"));
+        try {
+            int port=tomcat.getConnector().getLocalPort();String origin="http://localhost:"+port;HttpClient client=HttpClient.newHttpClient();
+            String password="manifest publication secure password";
+            String bootstrap=ServerRuntime.JSON.writeValueAsString(Map.of("token",Files.readString(data.resolve("bootstrap-admin.token")).strip(),"loginId","admin","displayName","Admin","password",password));
+            assertEquals(201,send(client,port,"POST","/att/api/v1/auth/bootstrap",origin,null,bootstrap).statusCode());
+            ManifestSession admin=manifestLogin(client,port,"admin",password);
+            for(String login:List.of("owner","other")) {
+                String body=ServerRuntime.JSON.writeValueAsString(Map.of("loginId",login,"displayName",login,"password",password,"role","USER"));
+                assertEquals(201,sendWithCookie(client,port,"POST","/att/api/v1/auth/users",admin.cookie,origin,admin.csrf,body).statusCode());
+            }
+            ManifestSession owner=manifestLogin(client,port,"owner",password),other=manifestLogin(client,port,"other",password);
+            String base="/att/api/v1/packages/owner/package-configuration";
+            assertEquals(401,send(client,port,"GET",base+"/source",null,null,null).statusCode());
+            HttpResponse<String> source=sendWithCookie(client,port,"GET",base+"/source",owner.cookie,null,null,null);
+            assertEquals(200,source.statusCode(),source.body());
+            String digest=ServerRuntime.JSON.readTree(source.body()).path("manifestDigest").asText();assertTrue(digest.matches("[a-f0-9]{64}"));
+            String candidate="schemaVersion: att-package/v1\ndefaultEnvironment: SIT\ndefaults: {timeoutMs: 12000}\n";
+            String body=ServerRuntime.JSON.writeValueAsString(Map.of("source",candidate,"expectedManifestDigest",digest));
+            assertEquals(403,sendWithCookie(client,port,"POST",base+"/drafts",owner.cookie,origin,null,body).statusCode());
+            assertEquals(403,sendWithCookie(client,port,"POST",base+"/drafts",owner.cookie,"https://attacker.example",owner.csrf,body).statusCode());
+            assertEquals(403,sendWithCookie(client,port,"POST",base+"/drafts",other.cookie,origin,other.csrf,body).statusCode());
+            assertEquals(403,sendWithCookie(client,port,"POST",base+"/drafts",admin.cookie,origin,admin.csrf,body).statusCode());
+            HttpResponse<String> staged=sendWithCookie(client,port,"POST",base+"/drafts",owner.cookie,origin,owner.csrf,body);
+            assertEquals(200,staged.statusCode(),staged.body());String id=ServerRuntime.JSON.readTree(staged.body()).path("draftId").asText();
+            assertEquals(original,Files.readString(pkg.resolve("package.yaml")));
+            for(String action:List.of("validate","review")) {
+                HttpResponse<String> response=sendWithCookie(client,port,"POST",base+"/drafts/"+id+"/"+action,owner.cookie,origin,owner.csrf,"{}");
+                assertEquals(200,response.statusCode(),response.body());assertEquals(original,Files.readString(pkg.resolve("package.yaml")));
+            }
+            HttpResponse<String> published=sendWithCookie(client,port,"POST",base+"/drafts/"+id+"/publish",owner.cookie,origin,owner.csrf,"{}");
+            assertEquals(200,published.statusCode(),published.body());assertEquals(candidate,Files.readString(pkg.resolve("package.yaml")));
+            assertEquals(200,sendWithCookie(client,port,"GET",base+"/history",owner.cookie,null,null,null).statusCode());
+            for(boolean revoke:List.of(false,true)) {
+                source=sendWithCookie(client,port,"GET",base+"/source",owner.cookie,null,null,null);
+                digest=ServerRuntime.JSON.readTree(source.body()).path("manifestDigest").asText();
+                body=ServerRuntime.JSON.writeValueAsString(Map.of("source",candidate+"# reviewed candidate\n","expectedManifestDigest",digest));
+                staged=sendWithCookie(client,port,"POST",base+"/drafts",owner.cookie,origin,owner.csrf,body);assertEquals(200,staged.statusCode(),staged.body());
+                id=ServerRuntime.JSON.readTree(staged.body()).path("draftId").asText();
+                for(String action:List.of("validate","review"))assertEquals(200,sendWithCookie(client,port,"POST",base+"/drafts/"+id+"/"+action,owner.cookie,origin,owner.csrf,"{}").statusCode());
+                if(revoke)assertEquals(200,sendWithCookie(client,port,"DELETE","/att/api/v1/auth/users/owner",admin.cookie,origin,admin.csrf,"{}").statusCode());
+                else Files.writeString(pkg.resolve("package.yaml"),candidate+"# external publication\n");
+                String before=Files.readString(pkg.resolve("package.yaml"));
+                published=sendWithCookie(client,port,"POST",base+"/drafts/"+id+"/publish",owner.cookie,origin,owner.csrf,"{}");
+                assertEquals(revoke?401:409,published.statusCode(),published.body());assertEquals(before,Files.readString(pkg.resolve("package.yaml")));
+            }
+        } finally {try{tomcat.stop();}finally{tomcat.destroy();}}
+    }
+    private record ManifestSession(String cookie,String csrf) { }
+    private static ManifestSession manifestLogin(HttpClient client,int port,String login,String password) throws Exception {
+        HttpResponse<String> response=send(client,port,"POST","/att/api/v1/auth/login","http://localhost:"+port,null,
+                ServerRuntime.JSON.writeValueAsString(Map.of("loginId",login,"password",password)));
+        assertEquals(200,response.statusCode(),response.body());String cookie=response.headers().firstValue("Set-Cookie").orElseThrow().split(";",2)[0];
+        String csrf=sendWithCookie(client,port,"GET","/att/api/v1/auth/me",cookie,null,null,null).headers().firstValue("X-ATT-CSRF").orElseThrow();
+        return new ManifestSession(cookie,csrf);
+    }
+
     @Test void trustedGatewayOriginsPreserveLocalAuthenticationAndCsrfForBothOriginModes() throws Exception {
         previousAttHome=System.getProperty("att.home");
         System.setProperty("att.home",createLocalRuntime().toString());
