@@ -16,6 +16,7 @@ const StandaloneJobArtifactPage = lazy(() => import('./features/load/StandaloneJ
 import type { LoadJobsApi, PackageOption } from './features/load/types';
 const SettingsPage = lazy(() => import('./SettingsPage').then(module => ({ default: module.SettingsPage })));
 import { ConfigurationWorkspace } from './features/explorer/ConfigurationWorkspace';
+import { PackageManifestWorkspace } from './features/explorer/PackageManifestWorkspace';
 import { QuickLoadPage } from './features/load/QuickLoadPage';
 const LoadTestingPage = lazy(() => import('./features/load/LoadTestingPage').then(module => ({ default: module.LoadTestingPage })));
 const LoadTemplateBuilder = lazy(() => import('./features/load/LoadTemplateBuilder').then(module => ({ default: module.LoadTemplateBuilder })));
@@ -146,6 +147,8 @@ function ConfigurationRouteView({ route, packages }: {
   packages: PackageOption[];
 }) {
   const workspace = useAppShellContext();
+  const [showManifest, setShowManifest] = useState(false);
+  useEffect(() => { setShowManifest(false); }, [route.filePath, route.packageId]);
   const navigation = useNavigationGuard();
   const selectedEnvironment = route.environment ?? workspace.selectedEnvironment;
   const onPackageChange = useCallback((packageId: string) => {
@@ -164,7 +167,12 @@ function ConfigurationRouteView({ route, packages }: {
   const onOpenResource = useCallback((resource: { type: string; resourceId: string }) => {
     navigation.navigate({ kind: 'package', packageId: route.packageId || '', resource });
   }, [navigation.navigate, route.packageId]);
-  return <ConfigurationWorkspace
+  return <>
+    <nav className="configuration-scope" aria-label="Configuration ownership">
+      <button type="button" aria-pressed={showManifest} disabled={!route.packageId} onClick={() => setShowManifest(true)}>Package Configuration</button>
+      <button type="button" aria-pressed={!showManifest} onClick={() => setShowManifest(false)}>Shared Configuration</button>
+    </nav>
+    {showManifest && route.packageId ? <PackageManifestWorkspace key={route.packageId} api={api} packageId={route.packageId} /> : <ConfigurationWorkspace
     api={api}
     packages={packages}
     packageId={route.packageId || ''}
@@ -180,7 +188,7 @@ function ConfigurationRouteView({ route, packages }: {
     onFileChange={onFileChange}
     onTabChange={onTabChange}
     onOpenResource={onOpenResource}
-  />;
+  />}</>;
 }
 
 function QuickLoadRouteView({ route, inlineLoadEnabled, schedulingEnabled, onSchedule }: {

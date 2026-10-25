@@ -206,7 +206,7 @@ public final class PackageResourceInspector implements AutoCloseable {
                 result.put("reason", "forbidden");
                 return bounded(result);
             }
-            if (!linked&&!logicalPath.startsWith("config/")) {
+            if (!linked&&!logicalPath.startsWith("config/")&&!"package.yaml".equals(logicalPath)) {
                 result.put("reason","forbidden");
                 return bounded(result);
             }
@@ -228,7 +228,7 @@ public final class PackageResourceInspector implements AutoCloseable {
                 result.put("reason", "binary-file");
                 return bounded(result);
             }
-            boolean yamlConfiguration = logicalPath.startsWith("config/")
+            boolean yamlConfiguration = (logicalPath.startsWith("config/") || "package.yaml".equals(logicalPath))
                     && (logicalPath.toLowerCase(Locale.ROOT).endsWith(".yaml") || logicalPath.toLowerCase(Locale.ROOT).endsWith(".yml"));
             String safe;
             boolean redacted;

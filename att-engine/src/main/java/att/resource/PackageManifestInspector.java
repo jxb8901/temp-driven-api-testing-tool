@@ -24,7 +24,7 @@ public final class PackageManifestInspector {
     }
 
     public Map<String, Object> inspect(String view, String environment) throws Exception {
-        if (!java.util.Arrays.asList("declared", "effective", "compare").contains(view))
+        if (!java.util.Arrays.asList("declared", "effective", "compare", "resolve").contains(view))
             throw new IllegalArgumentException("Package Configuration view must be declared, effective or compare");
         PackageConfig manifest = PackageConfig.load(root);
         Map<String, Object> result = new LinkedHashMap<String, Object>();
@@ -39,6 +39,7 @@ public final class PackageManifestInspector {
         result.put("environmentOrigin", effective.effectiveConfiguration().environmentOrigin());
         result.put("configurationIdentity", effective.effectiveConfiguration().identity());
         result.put("schemaRegistryDigest", att.validation.SchemaFiles.registryDigest());
+        if ("resolve".equals(view)) { result.remove("declared"); return result; }
         result.put("fields", fields(effective, effective.effectiveConfiguration().origins()));
         if ("compare".equals(view)) {
             FrameworkConfig global = loader.loadGlobalDiscovery(config, RuntimeConfigPath.root(config), effective.environment());
@@ -49,18 +50,30 @@ public final class PackageManifestInspector {
 
     /** The source publisher validates this private candidate; nothing writes into the live Package. */
     public Map<String, Object> validateCandidate(String source, String environment) throws Exception {
+        String before = PackageSourceRevision.capture(root, config);
         PackageConfig candidate = PackageConfig.parse(root, source);
         FrameworkConfig effective = new FrameworkConfigLoader().loadPackageCandidateDiscovery(config, RuntimeConfigPath.root(config), root, environment, source);
         for (List<Path> layer : candidate.descriptorLayers())
             new att.testdata.TestdataRegistry(root, layer, Collections.<Path>emptyList()).validateAll();
+        String after = PackageSourceRevision.capture(root, config);
+        if (!before.equals(after)) throw new IllegalArgumentException("Package or global sources changed during Manifest validation; validate again");
         Map<String, Object> result = new LinkedHashMap<String, Object>();
+        result.put("validationRevision", digestRevision(after, candidate.digest()));
         result.put("valid", true); result.put("manifestDigest", candidate.digest());
+        result.put("declared", projection.projectPackageValue(candidate.declared(root), "package", new boolean[1]));
         result.put("environment", effective.environment()); result.put("environmentOrigin", effective.effectiveConfiguration().environmentOrigin());
         result.put("configurationIdentity", effective.effectiveConfiguration().identity());
         result.put("schemaRegistryDigest", att.validation.SchemaFiles.registryDigest());
         result.put("diagnostics", effective.effectiveConfiguration().diagnostics());
         result.put("fields", fields(effective, effective.effectiveConfiguration().origins()));
         return result;
+    }
+
+    private static String digestRevision(String sources, String manifest) throws Exception {
+        java.security.MessageDigest digest=java.security.MessageDigest.getInstance("SHA-256");
+        StringBuilder result=new StringBuilder();
+        for(byte b:digest.digest((sources+"\n"+manifest).getBytes(java.nio.charset.StandardCharsets.UTF_8)))result.append(String.format("%02x",b&255));
+        return result.toString();
     }
 
     private Map<String, Object> fields(FrameworkConfig value, Map<String, String> origins) {

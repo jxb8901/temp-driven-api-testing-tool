@@ -44,6 +44,8 @@ public class WorkerRequest {
     public Boolean unsafeFailureDetails;
     public Map<String,String> load;
     public List<String> overrides;
+    /** Internal, bounded private Manifest candidate for source validation; never an execution overlay. */
+    public String packageManifestSource;
     public String inspectionAction;
     public String inspectionType;
     public String inspectionEnvironment;

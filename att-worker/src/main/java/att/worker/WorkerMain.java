@@ -198,7 +198,7 @@ public final class WorkerMain {
             else if(error instanceof PackageConfigurationInspector.ConfigurationLimitException) { code="ATT-RESOURCE-LIMIT"; message="Package configuration inspection exceeded a configured limit"; }
             else if(error instanceof IllegalArgumentException) { code="WORKER_REQUEST_INVALID"; exit=2; status="INVALID"; }
             Map<String,Object> diagnostic=fields("code",code,"message",DiagnosticSanitizer.redactText(message==null?"ATT operation failed":message));
-            boolean draftInspection="inspect".equals(request.command)&&("debug-input".equals(request.inspectionAction)||"debug-form".equals(request.inspectionAction)
+            boolean draftInspection="inspect".equals(request.command)&&(("package-configuration".equals(request.inspectionType)&&"validate".equals(request.inspectionAction))||"debug-input".equals(request.inspectionAction)||"debug-form".equals(request.inspectionAction)
                     ||"quick-load-input".equals(request.inspectionAction)||"quick-load-form".equals(request.inspectionAction)
                     ||"load-templates".equals(request.inspectionAction)||"load-template-compose".equals(request.inspectionAction)
                     ||"quick-load-policy".equals(request.inspectionAction)
@@ -281,7 +281,15 @@ public final class WorkerMain {
         if("snapshot".equals(r.command)) return service.snapshot(new SnapshotRequest(root,config,r.environment,paths(r.suites),path(r.suiteDirectory),set(r.caseIds),bool(r.all)));
         if("inspect".equals(r.command)) {
             if ("package-configuration".equals(r.inspectionType)) {
-                Map<String,Object> inspected = new att.resource.PackageManifestInspector(root, config, !Boolean.FALSE.equals(r.redactionEnabled), r.sensitivePaths, r.sensitiveFieldPatterns).inspect(r.inspectionAction, r.environment);
+                att.resource.PackageManifestInspector manifest = new att.resource.PackageManifestInspector(root, config, !Boolean.FALSE.equals(r.redactionEnabled), r.sensitivePaths, r.sensitiveFieldPatterns);
+                Map<String,Object> inspected = "validate".equals(r.inspectionAction)
+                        ? manifest.validateCandidate(r.packageManifestSource, r.environment)
+                        : "source".equals(r.inspectionAction) ? resourceInspector(root, config, r).inspectPackageFileSource("package.yaml", null)
+                        : manifest.inspect(r.inspectionAction, r.environment);
+                if("source".equals(r.inspectionAction)) {
+                    Map<String,Object> metadata=manifest.inspect("declared",r.environment);
+                    inspected.put("manifestDigest",metadata.get("manifestDigest"));inspected.put("present",metadata.get("present"));
+                }
                 return new OperationResult(null,"PASS",0,0,Collections.<att.validation.Diagnostic>emptyList(),
                         Collections.<String,String>emptyMap(),Collections.<String,Object>singletonMap("inspection",inspected));
             }
