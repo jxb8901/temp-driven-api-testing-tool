@@ -102,6 +102,25 @@ class VNextCommandTest {
         }
     }
 
+    @Test void additionalSingleTargetSelectorsFailBeforeLocalOrRemoteDispatch() throws Exception {
+        String[][] prefixes={{"--local"},{"--server","https://example.invalid","-p","payments"}};
+        String[][] commands={
+                {"run","case","PAYMENT.A","--case","PAYMENT.B"},
+                {"run","case","PAYMENT.A","--tag","smoke"},
+                {"run","suite","testcase/A.xlsx","--suite","testcase/B.xlsx"},
+                {"run","suite","testcase/A.xlsx","--suite-dir","testcase"}
+        };
+        for(String[] prefix:prefixes) {
+            for(String[] command:commands) {
+                String[] args=concat(prefix,command);
+                Captured captured=capture(()->VNextCommand.run(args));
+                assertEquals(2,captured.exitCode,captured.stderr);
+                assertTrue(captured.stderr.contains("cannot be combined"),captured.stderr);
+                assertFalse(captured.stdout.contains("jobId"),captured.stdout);
+            }
+        }
+    }
+
     @Test void jsonParseAndPackageFailuresAreWrittenAsOneStdoutDocument() throws Exception {
         Captured parse=capture(()->VNextCommand.run(new String[]{
                 "--format","json","--unknown-option","validate","config"}));
@@ -277,6 +296,13 @@ class VNextCommandTest {
             }
         }
         return null;
+    }
+
+    private static String[] concat(String[] prefix,String[] command) {
+        String[] result=new String[prefix.length+command.length];
+        System.arraycopy(prefix,0,result,0,prefix.length);
+        System.arraycopy(command,0,result,prefix.length,command.length);
+        return result;
     }
 
     private static Captured capture(OutputAction action) throws Exception {
