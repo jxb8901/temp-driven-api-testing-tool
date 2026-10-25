@@ -166,7 +166,7 @@ CLI 的 target、`--input`、`--set` 與 `--env` 語法見本頁 option matrix�
 
 ## 完整 CLI option matrix
 
-`--config <file>` 選擇 base configuration；`--env <name>` 從 `att-config/v2.12` 選擇 environment profile，適用於 `run`、`validate`、`debug` 和 `load`。`--help` 顯示說明。`--case-id` 是 `--case` 的相容別名。`--parallel` 是已棄用的 `--allow-parallel-runs` 相容拼法，應優先使用後者。`--queue` 與 `--allow-parallel-runs` 控制共用 output root 的 process-level concurrency，不會在單一 run 內增加 Case worker。`--profile` 為 `run` 和 `load` 寫入 performance diagnostics，並為選定的 `debug` target 寫入啟動及執行 phase timing。
+`--config <file>` 選擇 base configuration；`--env <name>` 從 `att-config/v2.13` 選擇 environment profile，適用於 `run`、`validate`、`debug` 和 `load`。`--help` 顯示說明。`--case-id` 是 `--case` 的相容別名。`--parallel` 是已棄用的 `--allow-parallel-runs` 相容拼法，應優先使用後者。`--queue` 與 `--allow-parallel-runs` 控制共用 output root 的 process-level concurrency，不會在單一 run 內增加 Case worker。`--profile` 為 `run` 和 `load` 寫入 performance diagnostics，並為選定的 `debug` target 寫入啟動及執行 phase timing。
 
 Load 以 scenario 為基礎；明確提供的 workload option 會先覆蓋對應欄位，再重新驗證 effective scenario：
 

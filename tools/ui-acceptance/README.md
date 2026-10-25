@@ -111,3 +111,5 @@ To remove only this acceptance harness and its generated baseline, revert `tools
 The general dashboard and workflow smoke scripts use a local Python API fixture. The opt-in `ServerWarUiIT` Playwright step is separate: it runs inside the packaged-WAR test while authenticated Tomcat and the Server API are live under `/tools/att`.
 
 The template-specific check `npm run smoke:load-templates` verifies the six built-ins, no legacy/history requests on Templates, nested modal Save/Cancel boundaries, Escape and mobile dialog bounds under `/att/ui/`. The Tomcat `server-api-smoke.cjs` check verifies the default Templates tab and resource-only Scenarios against real APIs.
+
+`npm run smoke:package-manifest` checks the Package Configuration views, Draft → Validate → Review → Publish gates, refresh after publication, stale-source conflicts, masked source, and desktop/mobile layout. It uses API fixtures with the built Studio assets and saves `att-package-manifest-desktop.png` and `att-package-manifest-mobile.png` in `ATT_UI_SCREENSHOT_DIR` (default `/tmp`). Server authorization and publication atomicity are covered separately by the Java integration tests.

@@ -1,3 +1,4 @@
+import { EnvironmentResolutionNotice } from '../explorer/EnvironmentResolutionNotice';
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../../api';
 import { useNavigationGuard } from '../../router';
@@ -139,6 +140,7 @@ export function LoadTemplateBuilder(props: LoadFeatureProps & { templateId: stri
     <h1>{definition?.name || 'Load Template'}</h1><p>{packageId} · {definition?.mode} · {message}</p>
     {!definition && <button className="button button-quiet" type="button" onClick={() => setReload(value => value + 1)}>Retry</button>}
     <label>Environment <select value={environment} onChange={event => onEnvironmentChange(event.target.value)}><option value="">Default environment</option>{environments.map(value => <option key={value}>{value}</option>)}</select></label>
+      <EnvironmentResolutionNotice packageId={packageId} environment={environment} />
     <p>{workloads.length} Workloads · {targets.length} Target bindings · {unique} Unique targets · {model === 'virtualUsers' ? `${workloads.reduce((sum,row) => sum + Number(row.users),0)} total VU` : `${workloads.reduce((sum,row) => { const [rate,unit] = row.arrivalRate.split('/'); return sum + Number(rate) / (unit === 'm' ? 60 : 1); },0)} configured arrivals/sec`}</p>
     {limits.maxTotalUsers > 0 && <p className="att-help">Server limits: {limits.maxWorkloads} workloads · {limits.maxTargets} bindings · {limits.maxTotalUsers} users · {limits.maxAggregateArrivalRatePerSecond} arrivals/sec · {limits.maxTotalConcurrent} total concurrent · {limits.maxDurationSeconds}s duration</p>}
     {definition && <>

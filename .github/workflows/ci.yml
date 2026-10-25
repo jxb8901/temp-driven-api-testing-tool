@@ -225,6 +225,12 @@ jobs:
         working-directory: tools/ui-acceptance
         run: npx playwright install chromium
 
+      - name: Verify Package Manifest migration safety
+        run: |
+          python3 -m venv "$RUNNER_TEMP/att-migration-venv"
+          "$RUNNER_TEMP/att-migration-venv/bin/pip" install -r tools/requirements-migration.txt
+          "$RUNNER_TEMP/att-migration-venv/bin/python" tools/test_package_config_migration.py
+
       - name: Verify documentation release gate
         run: python3 tools/verify_documentation.py
 
@@ -362,6 +368,7 @@ jobs:
         run: |
           npm run smoke
           npm run smoke:explorer
+          npm run smoke:package-manifest
           npm run smoke:archive-metrics
           npm run smoke:load-templates
           npm run smoke:load-jobs

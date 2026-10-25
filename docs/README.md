@@ -32,6 +32,7 @@ Minimal offline workflow:
 | Route SSH Tools across SIT/UAT or clustered hosts | [SSHHelper](reference/resources/sshhelper.md) · [中文](reference.zh/resources/sshhelper.md) |
 | Debug one Template, Flow, or Tool | [Debug](reference/execution-modes/debug.md) |
 | Run a load test | [Load](reference/execution-modes/load.md) |
+| Own Package defaults and Testdata | [Package Manifest](reference/package-manifest.md) · [繁體中文](reference.zh/package-manifest.md) |
 | Switch SIT/UAT resources | [Configuration and Environments](reference/configuration.md) |
 | Understand `${...}` and `#{...}` | [Expressions](reference/expressions.md) |
 | Diagnose FAIL, ERROR, or INVALID | [Validation and Troubleshooting](reference/validation-diagnostics.md) |

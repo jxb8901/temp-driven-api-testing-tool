@@ -29,6 +29,7 @@ Each contract has one semantic owner:
 | Resource descriptors and resource-local expressions | Resource pages |
 | Status, runWhen, onFailure, timeout, retry, aggregation and replay caution | Reliability |
 | Global configuration, profiles, precedence and registry binding | Configuration and Environments |
+| Package defaults, business roots, Testdata inventory and Manifest publication | Package Manifest |
 | Artifact navigation and interpreting failed evidence | Results |
 | Exact limits, collector projection guarantees and platform diagnostics | [Limits, security guarantees, and advanced diagnostics](reference/appendices/limits-defaults.md) |
 

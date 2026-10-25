@@ -18,6 +18,9 @@ public class WorkerRequest {
     public String packageRoot;
     public String config;
     public String environment;
+    /** Internal Server-approved value-free configuration snapshot. */
+    public Map<String,Object> configurationProvenance;
+    public String registeredPackageId;
     public String outputDirectory;
     public String runId;
     public String debugId;
@@ -44,6 +47,8 @@ public class WorkerRequest {
     public Boolean unsafeFailureDetails;
     public Map<String,String> load;
     public List<String> overrides;
+    /** Internal, bounded private Manifest candidate for source validation; never an execution overlay. */
+    public String packageManifestSource;
     public String inspectionAction;
     public String inspectionType;
     public String inspectionEnvironment;

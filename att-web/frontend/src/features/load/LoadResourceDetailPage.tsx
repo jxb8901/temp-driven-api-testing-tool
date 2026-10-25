@@ -1,3 +1,4 @@
+import { EnvironmentResolutionNotice } from '../explorer/EnvironmentResolutionNotice';
 import { useEffect, useRef, useState } from 'react';
 import { ApiError } from '../../types';
 import type { LoadCatalogDetail, ServerDiagnostic } from './types';
@@ -204,6 +205,7 @@ export function LoadResourceDetailPage({ api, packageId, resourceId, environment
           </select></label>
         </div>
         {environmentState === 'loading' && <p role="status" aria-busy="true">Loading declared Environment profiles…</p>}
+      <EnvironmentResolutionNotice packageId={packageId} environment={environment} />
         {environmentState === 'error' && <p className="att-inline-error" role="alert">Environment profiles could not be loaded. Package default remains available. {onRetryEnvironments && <button className="button button-quiet" type="button" onClick={onRetryEnvironments}>Retry profiles</button>}</p>}
         {environmentNotice && <p role="status">{environmentNotice}</p>}
         <p role={validationState === 'invalid' ? 'alert' : 'status'}>{validationMessage}</p>

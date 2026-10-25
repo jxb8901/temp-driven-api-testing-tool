@@ -2,6 +2,7 @@
 <assembly xmlns="http://maven.apache.org/ASSEMBLY/2.2.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/ASSEMBLY/2.2.0 https://maven.apache.org/xsd/assembly-2.2.0.xsd">
     <id>local</id><formats><format>tar.gz</format></formats><includeBaseDirectory>true</includeBaseDirectory><baseDirectory>att-${project.version}-local</baseDirectory>
     <files>
+        <file><source>${project.basedir}/../packages/default/package.yaml</source><outputDirectory>packages/default</outputDirectory><destName>package.yaml</destName><fileMode>0644</fileMode></file>
         <file><source>${project.basedir}/../att.sh</source><outputDirectory>/</outputDirectory><destName>att.sh</destName><fileMode>0755</fileMode></file>
         <file><source>${project.basedir}/../att.bat</source><outputDirectory>/</outputDirectory><destName>att.bat</destName><fileMode>0644</fileMode></file>
         <file><source>${project.basedir}/../README.md</source><outputDirectory>/</outputDirectory><destName>README.md</destName><fileMode>0644</fileMode></file>

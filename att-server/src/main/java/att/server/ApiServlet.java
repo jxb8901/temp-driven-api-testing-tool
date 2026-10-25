@@ -70,6 +70,9 @@ public final class ApiServlet extends HttpServlet {
             }
             if(resourceRequest){resourceGet(req,res,path,requestId,principal);return;}
             if(loadCatalogRequest){loadCatalogGet(req,res,path,requestId,principal);return;}
+            if(path.matches("/packages/[^/]+/package-configuration(?:/(?:declared|effective|compare|source|history))?")) {
+                manifestGet(req,res,path,requestId,principal);return;
+            }
             if(configurationRequest){configurationGet(req,res,path,requestId,principal);return;}
             if(loadPolicyRequest){loadPolicyGet(req,res,path,requestId,principal);return;}
             if(draftRequest){
@@ -139,6 +142,7 @@ public final class ApiServlet extends HttpServlet {
           catch(ServerRuntime.DraftCapacityException e){error(res,429,"ATT-SERVER-DRAFT-CAPACITY","Draft capacity is full; retry after an existing draft expires",requestId);}
           catch(ServerRuntime.InspectionTimeoutException e){error(res,504,"ATT-SERVER-INSPECTION-TIMEOUT","Package inspection exceeded its time limit",requestId);}
           catch(ServerRuntime.InspectionResponseTooLargeException e){error(res,413,"ATT-SERVER-INSPECTION-RESPONSE-TOO-LARGE","Package inspection response exceeded the configured limit",requestId);}
+          catch(PackageConfigurationPolicy.EnvironmentDeniedException e){error(res,403,"ATT-PACKAGE-ENVIRONMENT-DENIED",safeDetail(e),requestId);}
           catch(IllegalArgumentException e){error(res,400,"ATT-SERVER-INVALID-REQUEST",safeDetail(e),requestId);}
           catch(Exception e){error(res,500,"ATT-SERVER-REQUEST-FAILED","The request could not be completed",requestId);getServletContext().log("ATT Server request failed id="+requestId,e);}
     }
@@ -148,6 +152,9 @@ public final class ApiServlet extends HttpServlet {
         if(authorizationPrincipal==null){error(res,401,"ATT-SERVER-AUTHENTICATION-REQUIRED","An authenticated Servlet Principal is required",requestId);return;}
         if(loadSchedulePath(path)){schedulePost(req,res,path,requestId,authorizationPrincipal);return;}
         if(!requireOperator(req,res,requestId))return;
+        if(path.matches("/packages/[^/]+/package-configuration/(?:drafts(?:/[^/]+/(?:validate|review|publish|discard))?|rollback)")) {
+            manifestPost(req,res,path,requestId,authorizationPrincipal);return;
+        }
         if(path.matches("/jobs/[^/]+/artifacts/retry")){if(!checkOrigin(req,res,requestId,false))return;try{String id=segment(path,2);runtime.requireJobOwner(id,authorizationPrincipal);runtime.retryArtifactArchive(id);json(res,202,Map.of("archiveStatus","PENDING","requestId",requestId));return;}catch(ServerRuntime.NotFoundException missing){error(res,404,"ATT-SERVER-NOT-FOUND","API resource was not found",requestId);return;}catch(IllegalArgumentException invalid){error(res,409,"ATT-SERVER-ARCHIVE-NOT-READY",safeDetail(invalid),requestId);return;}catch(Exception failure){error(res,500,"ATT-SERVER-REQUEST-FAILED","The archive retry could not be scheduled",requestId);return;}}
         if("/jobs/delete".equals(path)||"/jobs/pin".equals(path)||path.matches("/jobs/[^/]+/(pin|delete)")) {
             if(!checkOrigin(req,res,requestId,false))return;
@@ -223,6 +230,8 @@ public final class ApiServlet extends HttpServlet {
           catch(ServerRuntime.InspectionCapacityException e){error(res,503,"ATT-SERVER-INSPECTION-CAPACITY","Package inspection capacity is full; retry shortly",requestId);}
           catch(ServerRuntime.InspectionTimeoutException e){error(res,504,"ATT-SERVER-INSPECTION-TIMEOUT","Package inspection exceeded its time limit",requestId);}
           catch(ServerRuntime.InspectionResponseTooLargeException e){error(res,413,"ATT-SERVER-INSPECTION-RESPONSE-TOO-LARGE","Package inspection response exceeded the configured limit",requestId);}
+          catch(ServerRuntime.InspectionConfigurationException e){error(res,422,"ATT-CFG-001",e.summary(),requestId,e.diagnostics);}
+          catch(PackageConfigurationPolicy.EnvironmentDeniedException e){error(res,403,"ATT-PACKAGE-ENVIRONMENT-DENIED",safeDetail(e),requestId);}
           catch(IllegalArgumentException e){error(res,400,"ATT-SERVER-INVALID-REQUEST",safeDetail(e),requestId);}
           catch(Exception e){error(res,500,"ATT-SERVER-REQUEST-FAILED","The request could not be completed",requestId);getServletContext().log("ATT Server submission failed id="+requestId,e);}
     }
@@ -357,6 +366,8 @@ public final class ApiServlet extends HttpServlet {
           catch(ServerRuntime.InspectionCapacityException e){error(res,503,"ATT-SERVER-INSPECTION-CAPACITY","Package inspection capacity is full; retry shortly",requestId);}
           catch(ServerRuntime.InspectionTimeoutException e){error(res,504,"ATT-SERVER-INSPECTION-TIMEOUT","Package inspection exceeded its time limit",requestId);}
           catch(ServerRuntime.InspectionResponseTooLargeException e){error(res,413,"ATT-SERVER-INSPECTION-RESPONSE-TOO-LARGE","Package inspection response exceeded the configured limit",requestId);}
+          catch(ServerRuntime.InspectionConfigurationException e){error(res,422,"ATT-CFG-001",e.summary(),requestId,e.diagnostics);}
+          catch(PackageConfigurationPolicy.EnvironmentDeniedException e){error(res,403,"ATT-PACKAGE-ENVIRONMENT-DENIED",safeDetail(e),requestId);}
           catch(IllegalArgumentException e){error(res,400,"ATT-SERVER-INVALID-REQUEST",safeDetail(e),requestId);}
           catch(Exception e){error(res,500,"ATT-SERVER-REQUEST-FAILED","The schedule request could not be completed",requestId);getServletContext().log("ATT Server schedule read failed id="+requestId,e);}
     }
@@ -380,6 +391,8 @@ public final class ApiServlet extends HttpServlet {
           catch(ServerRuntime.InspectionCapacityException e){error(res,503,"ATT-SERVER-INSPECTION-CAPACITY","Package inspection capacity is full; retry shortly",requestId);}
           catch(ServerRuntime.InspectionTimeoutException e){error(res,504,"ATT-SERVER-INSPECTION-TIMEOUT","Package inspection exceeded its time limit",requestId);}
           catch(ServerRuntime.InspectionResponseTooLargeException e){error(res,413,"ATT-SERVER-INSPECTION-RESPONSE-TOO-LARGE","Package inspection response exceeded the configured limit",requestId);}
+          catch(ServerRuntime.InspectionConfigurationException e){error(res,422,"ATT-CFG-001",e.summary(),requestId,e.diagnostics);}
+          catch(PackageConfigurationPolicy.EnvironmentDeniedException e){error(res,403,"ATT-PACKAGE-ENVIRONMENT-DENIED",safeDetail(e),requestId);}
           catch(IllegalArgumentException e){error(res,400,"ATT-SERVER-INVALID-REQUEST",safeDetail(e),requestId);}
           catch(Exception e){error(res,500,"ATT-SERVER-REQUEST-FAILED","The schedule request could not be completed",requestId);getServletContext().log("ATT Server schedule action failed id="+requestId,e);}
     }
@@ -400,7 +413,8 @@ public final class ApiServlet extends HttpServlet {
         catch(ServerRuntime.InspectionCapacityException e){error(res,503,"ATT-SERVER-INSPECTION-CAPACITY","Package inspection capacity is full; retry shortly",requestId);}
         catch(ServerRuntime.InspectionTimeoutException e){error(res,504,"ATT-SERVER-INSPECTION-TIMEOUT","Package inspection exceeded its time limit",requestId);}
         catch(ServerRuntime.InspectionResponseTooLargeException e){error(res,413,"ATT-SERVER-INSPECTION-RESPONSE-TOO-LARGE","Package inspection response exceeded the configured limit",requestId);}
-        catch(IllegalArgumentException e){error(res,400,"ATT-SERVER-INVALID-REQUEST",safeDetail(e),requestId);}
+        catch(PackageConfigurationPolicy.EnvironmentDeniedException e){error(res,403,"ATT-PACKAGE-ENVIRONMENT-DENIED",safeDetail(e),requestId);}
+          catch(IllegalArgumentException e){error(res,400,"ATT-SERVER-INVALID-REQUEST",safeDetail(e),requestId);}
         catch(Exception e){error(res,500,"ATT-SERVER-REQUEST-FAILED","The schedule could not be updated",requestId);getServletContext().log("ATT Server schedule update failed id="+requestId,e);}
     }
 
@@ -631,7 +645,63 @@ public final class ApiServlet extends HttpServlet {
     private static boolean parseOptionalBoolean(String raw,String name){if(raw==null||raw.isEmpty())return false;if("true".equalsIgnoreCase(raw))return true;if("false".equalsIgnoreCase(raw))return false;throw new IllegalArgumentException(name+" must be true or false");}
     private static String principalSearch(HttpServletRequest req){String value=req.getParameter("principal");if(value==null)return null;value=value.strip();if(value.codePointCount(0,value.length())>120)throw new IllegalArgumentException("principal search must be at most 120 characters");for(int i=0;i<value.length();i++)if(Character.isISOControl(value.charAt(i)))throw new IllegalArgumentException("principal search contains an invalid character");return value.isEmpty()?null:value;}
     private static boolean resourcePath(String path){return path.matches("/packages/[^/]+/resources(?:/.*)?");}
-    private static boolean configurationPath(String path){return path.matches("/packages/[^/]+/configuration(?:/.*)?")||path.matches("/configuration(?:/.*)?");}
+    private void manifestGet(HttpServletRequest req,HttpServletResponse res,String path,String requestId,String actor) throws IOException {
+        String[] parts=path.split("/");String action=parts.length==4?"effective":parts[4];
+        try {
+            Map<String,Object> result="history".equals(action)?new java.util.LinkedHashMap<>(Map.of("items",runtime.manifestPublisher.history(segment(path,2),actor))):
+                    runtime.inspectPackageConfiguration(segment(path,2),action,req.getParameter("environment"),actor);
+            result.put("requestId",requestId);res.setHeader("Cache-Control","no-store");json(res,200,result);
+        } catch(PackageManifestPublisher.Denied e){error(res,403,"ATT-PACKAGE-SOURCE-DENIED","Package source editing is not authorized",requestId);}
+          catch(PackageManifestPublisher.Missing|ServerRuntime.NotFoundException e){error(res,404,"ATT-SERVER-NOT-FOUND","Package source was not found",requestId);}
+          catch(ServerRuntime.InspectionCapacityException e){error(res,503,"ATT-SERVER-INSPECTION-CAPACITY","Package inspection capacity is full",requestId);}
+          catch(ServerRuntime.InspectionTimeoutException e){error(res,504,"ATT-SERVER-INSPECTION-TIMEOUT","Package inspection exceeded its time limit",requestId);}
+          catch(ServerRuntime.InspectionConfigurationException e){error(res,422,"ATT-CFG-001",e.summary(),requestId,e.diagnostics);}
+          catch(PackageConfigurationPolicy.EnvironmentDeniedException e){error(res,403,"ATT-PACKAGE-ENVIRONMENT-DENIED",safeDetail(e),requestId);}
+          catch(IllegalArgumentException e){error(res,400,"ATT-SERVER-INVALID-REQUEST",safeDetail(e),requestId);}
+          catch(Exception e){error(res,500,"ATT-PACKAGE-SOURCE-FAILED","Package configuration could not be read",requestId);getServletContext().log("ATT Package Configuration failed id="+requestId,e);}
+    }
+    private void manifestPost(HttpServletRequest req,HttpServletResponse res,String path,String requestId,String actor) throws IOException {
+        if(!isJson(req.getContentType())){error(res,415,"ATT-SERVER-UNSUPPORTED-MEDIA-TYPE","Content-Type must be application/json",requestId);return;}
+        if(!checkOrigin(req,res,requestId,false))return;
+        try {
+            int limit=Math.min(runtime.config.maxRequestBytes,PackageManifestPublisher.MAX_SOURCE_BYTES*6+4096);
+            byte[] bytes=req.getInputStream().readNBytes(limit+1);
+            if(bytes.length>limit){error(res,413,"ATT-SERVER-REQUEST-TOO-LARGE","Manifest request exceeds its size limit",requestId);return;}
+            JsonNode input=ServerRuntime.JSON.readTree(bytes);
+            if(input==null||!input.isObject())throw new IllegalArgumentException("A JSON object is required");
+            String packageId=segment(path,2);String[] parts=path.split("/");Map<String,Object> result;
+            if(parts.length==5) {
+                String sourceField="rollback".equals(parts[4])?"revision":"source";
+                java.util.Iterator<String> fields=input.fieldNames();
+                while(fields.hasNext())if(!java.util.Set.of(sourceField,"expectedManifestDigest").contains(fields.next()))throw new IllegalArgumentException("Unsupported Manifest request field");
+                if(!input.path(sourceField).isTextual()||!input.path("expectedManifestDigest").isTextual())throw new IllegalArgumentException("Manifest source or revision and expectedManifestDigest are required");
+                result="rollback".equals(parts[4])?runtime.manifestPublisher.rollbackDraft(packageId,actor,input.get("revision").asText(),input.get("expectedManifestDigest").asText()):
+                        runtime.manifestPublisher.stage(packageId,actor,input.get("source").asText(),input.get("expectedManifestDigest").asText());
+            } else {
+                if(input.size()!=0)throw new IllegalArgumentException("Manifest draft actions accept an empty object");
+                String id=parts[5];
+                result=switch(parts[6]) {
+                    case "validate" -> runtime.manifestPublisher.validate(packageId,actor,id);
+                    case "review" -> runtime.manifestPublisher.review(packageId,actor,id);
+                    case "publish" -> runtime.manifestPublisher.publish(packageId,actor,id);
+                    case "discard" -> {runtime.manifestPublisher.discard(packageId,actor,id);yield new java.util.LinkedHashMap<>(Map.of("discarded",true));}
+                    default -> throw new IllegalArgumentException("Unsupported Manifest action");
+                };
+            }
+            result.put("requestId",requestId);res.setHeader("Cache-Control","no-store");json(res,200,result);
+        } catch(PackageManifestPublisher.Denied e){error(res,403,"ATT-PACKAGE-SOURCE-DENIED","Package source editing is not authorized",requestId);}
+          catch(PackageManifestPublisher.Missing e){error(res,404,"ATT-SERVER-NOT-FOUND","Manifest draft or revision was not found",requestId);}
+          catch(PackageManifestPublisher.Conflict e){error(res,409,"ATT-PACKAGE-SOURCE-CONFLICT","Package or configuration sources changed; validate a new draft",requestId);}
+          catch(PackageManifestPublisher.Capacity e){error(res,429,"ATT-PACKAGE-SOURCE-CAPACITY","Manifest draft capacity is full",requestId);}
+          catch(ServerRuntime.DraftValidationException e){error(res,400,"ATT-PACKAGE-SOURCE-INVALID",e.getMessage(),requestId,e.diagnostics);}
+          catch(ServerRuntime.InspectionConfigurationException e){error(res,422,"ATT-CFG-001",e.summary(),requestId,e.diagnostics);}
+          catch(ServerRuntime.InspectionCapacityException e){error(res,503,"ATT-SERVER-INSPECTION-CAPACITY","Package inspection capacity is full",requestId);}
+          catch(ServerRuntime.InspectionTimeoutException e){error(res,504,"ATT-SERVER-INSPECTION-TIMEOUT","Package inspection exceeded its time limit",requestId);}
+          catch(PackageConfigurationPolicy.EnvironmentDeniedException e){error(res,403,"ATT-PACKAGE-ENVIRONMENT-DENIED",safeDetail(e),requestId);}
+          catch(IllegalArgumentException e){error(res,400,"ATT-SERVER-INVALID-REQUEST",safeDetail(e),requestId);}
+          catch(Exception e){error(res,500,"ATT-PACKAGE-SOURCE-FAILED","Manifest action could not be completed",requestId);getServletContext().log("ATT Manifest action failed id="+requestId,e);}
+    }
+    private static boolean configurationPath(String path){return path.matches("/packages/[^/]+/package-configuration(?:/.*)?")||path.matches("/packages/[^/]+/configuration(?:/.*)?")||path.matches("/configuration(?:/.*)?");}
     private static boolean loadPolicyPath(String path){return path.matches("/packages/[^/]+/load-policy");}
     private static boolean isJson(String value){if(value==null)return false;String[] parts=value.split(";",2);return "application/json".equalsIgnoreCase(parts[0].trim());}
     private boolean checkOrigin(HttpServletRequest req,HttpServletResponse res,String requestId,boolean force)throws IOException {

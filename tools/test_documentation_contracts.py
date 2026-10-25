@@ -198,7 +198,7 @@ class DocumentationContractsTest(unittest.TestCase):
         self.assertEqual([], manifest_errors(["a.md", "x/b.md"]))
 
     def test_duplicate_number_missing_appendix_and_order_drift_fail(self):
-        good = "\n".join(["## Chapter %s" % n for n in range(1, 14)] +
+        good = "\n".join(["## Chapter %s" % n for n in range(1, 15)] +
                          ["## Appendix " + c + " — Lookup " + c for c in "ABCD"])
         self.assertEqual([], structure_errors(good))
         self.assertTrue(structure_errors(good.replace("Chapter 3", "Chapter 2")))

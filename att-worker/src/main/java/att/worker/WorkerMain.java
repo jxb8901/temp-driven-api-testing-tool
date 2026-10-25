@@ -171,14 +171,37 @@ public final class WorkerMain {
         long processingStarted=System.nanoTime();
         long buildsBefore=InspectionMetrics.JVM.count(INDEX_BUILD),loadsBefore=InspectionMetrics.JVM.count(CONFIG_LOAD),bytesBefore=InspectionMetrics.JVM.count(READ_BYTES);
         try {
+            Map<String,Object> configuration=null;
+            if(!"inspect".equals(request.command)&&request.configurationProvenance!=null) {
+                configuration=att.server.api.ConfigurationSnapshot.copy(request.configurationProvenance);
+                if(!java.util.Objects.equals(request.registeredPackageId,configuration.get("packageId"))||!java.util.Objects.equals(request.environment,configuration.get("environment")))
+                    throw new IllegalArgumentException("Approved Package configuration identity is invalid");
+                Path root=Paths.get(request.packageRoot).toAbsolutePath().normalize();
+                Path config=att.config.RuntimeConfigPath.resolve(path(request.config),root);
+                att.config.FrameworkConfig current=new att.config.FrameworkConfigLoader().load(config,att.config.RuntimeConfigPath.root(config),root,request.environment);
+                if(!current.effectiveConfiguration().identity().equals(configuration.get("configurationIdentity")))
+                    throw new PackageResourceInspector.StaleResourceCursorException();
+            }
             OperationResult result=dispatch(request);
+            Map<String,Object> serialized=result.toMap();
+            if(configuration!=null) {
+                Map<String,Object> summary=new LinkedHashMap<String,Object>(result.summary());
+                summary.put("configuration",configuration);serialized.put("summary",summary);
+                String artifact=result.paths().get("configuration");
+                if(artifact!=null&&executionOutput!=null) {
+                    Path file=Paths.get(artifact).toAbsolutePath().normalize();
+                    if(!file.startsWith(executionOutput.toAbsolutePath().normalize())||!"configuration.json".equals(file.getFileName().toString()))
+                        throw new IllegalStateException("Configuration artifact is outside managed output");
+                    java.nio.file.Files.write(file,att.validation.JsonSupport.write(configuration).getBytes(StandardCharsets.UTF_8));
+                }
+            }
             if(inspectionDaemon) {
                 InspectionMetrics.JVM.record(PROCESSING,System.nanoTime()-processingStarted);
                 if("source".equals(request.inspectionAction)||"source-file".equals(request.inspectionAction))
                     InspectionMetrics.JVM.record(SOURCE,System.nanoTime()-processingStarted);
             }
             recordInspectionAggregate(request,processingStarted,buildsBefore,loadsBefore,bytesBefore);
-            Map<String,Object> payload=new LinkedHashMap<String,Object>(); payload.put("status",result.status()); payload.put("exitCode",result.exitCode()); payload.put("durationMs",result.durationMs()); payload.put("result",result.toMap());
+            Map<String,Object> payload=new LinkedHashMap<String,Object>(); payload.put("status",result.status()); payload.put("exitCode",result.exitCode()); payload.put("durationMs",result.durationMs()); payload.put("result",serialized);
             emitResult(payload);
             return result.exitCode();
         } catch(Exception error) {
@@ -198,7 +221,9 @@ public final class WorkerMain {
             else if(error instanceof PackageConfigurationInspector.ConfigurationLimitException) { code="ATT-RESOURCE-LIMIT"; message="Package configuration inspection exceeded a configured limit"; }
             else if(error instanceof IllegalArgumentException) { code="WORKER_REQUEST_INVALID"; exit=2; status="INVALID"; }
             Map<String,Object> diagnostic=fields("code",code,"message",DiagnosticSanitizer.redactText(message==null?"ATT operation failed":message));
-            boolean draftInspection="inspect".equals(request.command)&&("debug-input".equals(request.inspectionAction)||"debug-form".equals(request.inspectionAction)
+            if(request.registeredPackageId!=null&&request.registeredPackageId.matches("[A-Za-z0-9][A-Za-z0-9._-]{0,127}"))
+                diagnostic.put("packageId",request.registeredPackageId);
+            boolean draftInspection="inspect".equals(request.command)&&(("package-configuration".equals(request.inspectionType)&&"validate".equals(request.inspectionAction))||"debug-input".equals(request.inspectionAction)||"debug-form".equals(request.inspectionAction)
                     ||"quick-load-input".equals(request.inspectionAction)||"quick-load-form".equals(request.inspectionAction)
                     ||"load-templates".equals(request.inspectionAction)||"load-template-compose".equals(request.inspectionAction)
                     ||"quick-load-policy".equals(request.inspectionAction)
@@ -280,6 +305,19 @@ public final class WorkerMain {
         if("validate".equals(r.command)) return service.validate(new ValidateRequest(root,config,r.environment,paths(r.suites),path(r.suiteDirectory),set(r.caseIds),set(r.tags),set(r.excludeTags),bool(r.all),r.validationScope));
         if("snapshot".equals(r.command)) return service.snapshot(new SnapshotRequest(root,config,r.environment,paths(r.suites),path(r.suiteDirectory),set(r.caseIds),bool(r.all)));
         if("inspect".equals(r.command)) {
+            if ("package-configuration".equals(r.inspectionType)) {
+                att.resource.PackageManifestInspector manifest = new att.resource.PackageManifestInspector(root, config, !Boolean.FALSE.equals(r.redactionEnabled), r.sensitivePaths, r.sensitiveFieldPatterns);
+                Map<String,Object> inspected = "validate".equals(r.inspectionAction)
+                        ? manifest.validateCandidate(r.packageManifestSource, r.environment)
+                        : "source".equals(r.inspectionAction) ? resourceInspector(root, config, r).inspectPackageFileSource("package.yaml", null)
+                        : manifest.inspect(r.inspectionAction, r.environment);
+                if("source".equals(r.inspectionAction)) {
+                    Map<String,Object> metadata=manifest.inspect("declared",r.environment);
+                    inspected.put("manifestDigest",metadata.get("manifestDigest"));inspected.put("present",metadata.get("present"));
+                }
+                return new OperationResult(null,"PASS",0,0,Collections.<att.validation.Diagnostic>emptyList(),
+                        Collections.<String,String>emptyMap(),Collections.<String,Object>singletonMap("inspection",inspected));
+            }
             if("configuration".equals(r.inspectionType)) {
                 int maxResponseBytes = r.maxResponseBytes == null ? 262144 : r.maxResponseBytes;
                 Map<String,Object> inspected;
@@ -298,6 +336,8 @@ public final class WorkerMain {
                             maxResponseBytes, Boolean.TRUE.equals(r.redactionEnabled), r.sensitivePaths, r.sensitiveFieldPatterns,
                             Boolean.TRUE.equals(r.inspectionIncludeAllFields));
                     if(Boolean.TRUE.equals(r.inspectionSharedConfiguration))inspector.forSharedRuntime();
+                    else if("testdata".equals(r.inspectionSection)||"testdata-records".equals(r.inspectionAction))inspector.forPackageTestdata();
+                    else inspector.forSharedRuntime();
                     if(inspectionDaemon)inspector.withSnapshots(configurationSnapshots,att.server.api.internal.InspectionCacheIdentity.context(root,r));
                     inspected = inspector.inspect(r.inspectionAction,
                             r.inspectionEnvironment, r.inspectionOtherEnvironment, r.inspectionSection,

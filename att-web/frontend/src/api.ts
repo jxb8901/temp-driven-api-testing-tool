@@ -1,3 +1,4 @@
+import type { ManifestView, ManifestProjection, ManifestDraft, ManifestHistory } from './features/explorer/packageManifest';
 import type { JobReplay } from "./features/load/types";
 import { ApiError, type ApiEnvelope, type ApiErrorBody, type JobSummary, type LocalAuthUser, type PackageSummary, type ServerVersion } from './types';
 import type {
@@ -384,6 +385,26 @@ export const api = {
   },
   getResourceSourceFile(identity: ResourceIdentity, referenceId: string, signal?: AbortSignal, origin?: string): Promise<SourceProjection> {
     return request<SourceProjection>(resourcePath(identity) + '/source-file' + queryString({ referenceId, origin }), { signal });
+  },
+  getPackageManifest(packageId: string, view: ManifestView, environment?: string, signal?: AbortSignal): Promise<ManifestProjection> {
+    return request('packages/' + encodeURIComponent(packageId) + '/package-configuration/' + view + queryString({ environment }), { signal });
+  },
+  stagePackageManifest(packageId: string, source: string, expectedManifestDigest: string, signal?: AbortSignal): Promise<ManifestDraft> {
+    return postJson('packages/' + encodeURIComponent(packageId) + '/package-configuration/drafts', { source, expectedManifestDigest }, signal);
+  },
+  manifestDraftAction(packageId: string, draftId: string, action: 'validate' | 'review' | 'discard', signal?: AbortSignal): Promise<ManifestDraft> {
+    return postJson('packages/' + encodeURIComponent(packageId) + '/package-configuration/drafts/' + encodeURIComponent(draftId) + '/' + action, {}, signal);
+  },
+  async publishPackageManifest(packageId: string, draftId: string, signal?: AbortSignal): Promise<{ published: boolean; manifestDigest: string; auditConfirmed?: boolean }> {
+    const result = await postJson<{ published: boolean; manifestDigest: string; auditConfirmed?: boolean }>('packages/' + encodeURIComponent(packageId) + '/package-configuration/drafts/' + encodeURIComponent(draftId) + '/publish', {}, signal);
+    if (result.published) inspectionCache.invalidatePackage(packageId);
+    return result;
+  },
+  getPackageManifestHistory(packageId: string, signal?: AbortSignal): Promise<{ items: ManifestHistory[] }> {
+    return request('packages/' + encodeURIComponent(packageId) + '/package-configuration/history', { signal });
+  },
+  rollbackPackageManifest(packageId: string, revision: string, expectedManifestDigest: string, signal?: AbortSignal): Promise<ManifestDraft> {
+    return postJson('packages/' + encodeURIComponent(packageId) + '/package-configuration/rollback', { revision, expectedManifestDigest }, signal);
   },
   getDeclaredConfiguration(packageId: string, signal?: AbortSignal): Promise<ConfigurationResponse> {
     return request<ConfigurationResponse>((packageId ? 'packages/' + encodeURIComponent(packageId) + '/configuration' : 'configuration') + queryString({ view: 'declared' }), { signal });

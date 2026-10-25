@@ -1,3 +1,4 @@
+import { EnvironmentResolutionNotice } from '../explorer/EnvironmentResolutionNotice';
 import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import './load.css';
 import { TypedSidecarForm, type SidecarGroup } from '../explorer/TypedSidecarForm';
@@ -465,6 +466,7 @@ export function LoadPage(props: LoadFeatureProps): React.JSX.Element {
               {environments.map(environment => <option key={environment} value={environment}>{environment}</option>)}
             </select>
           </label>
+      <EnvironmentResolutionNotice packageId={selectedPackage} environment={selectedEnvironment} />
           <label>Load model
             <select value={model} onChange={event => setModel(event.target.value as LoadModel)} disabled={!inlineLoadEnabled}>
               <option value="virtualUsers">Virtual Users</option>

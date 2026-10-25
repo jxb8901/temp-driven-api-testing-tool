@@ -1,3 +1,4 @@
+import { EnvironmentResolutionNotice } from '../explorer/EnvironmentResolutionNotice';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { TypedSidecarForm } from '../explorer/TypedSidecarForm';
 import type { JsonObject as SidecarObject, JsonValue } from '../explorer/types';
@@ -394,6 +395,7 @@ export function QuickLoadPage({ api, packageId, target, initialTemplateId = '', 
         {model === 'arrivalRate' && <label>Maximum concurrent<input type="number" min="1" step="1" value={maxConcurrent} onChange={event => change(setMaxConcurrent, event.currentTarget.value)} /></label>}
         <label>Duration<input value={duration} onChange={event => change(setDuration, event.currentTarget.value)} placeholder="e.g. 30s or 5m" /></label>
       </div>
+      <EnvironmentResolutionNotice packageId={packageId} environment={environment} />
       {environmentState === 'loading' && <p role="status">Loading package environments…</p>}{environmentState === 'error' && <p className="att-help" role="alert">Environment profiles are unavailable; the package default remains selectable.{onRetryEnvironments && <> <button className="button button-quiet" type="button" onClick={onRetryEnvironments}>Retry profiles</button></>}</p>}
       {environmentNotice && <p role="status">{environmentNotice}</p>}
       <p className="att-help">{policyMessage}</p>

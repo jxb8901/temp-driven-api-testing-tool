@@ -283,7 +283,7 @@ async function main() {
     await scenarioCard.waitFor();
     const catalogEnvironment = page.getByLabel(/Catalog Environment for payments/);
     await catalogEnvironment.selectOption('UAT');
-    await page.getByText('Environment: UAT', { exact: false }).waitFor();
+    await page.locator('.att-load-environment-context').filter({ hasText: 'Environment: UAT' }).waitFor();
     await scenarioCard.getByRole('button', { name: 'Validate load/scenario.yaml for UAT' }).click();
     await page.getByText(/load\/scenario\.yaml validation refreshed for UAT: valid/).waitFor();
     assert.equal(await scenarioCard.getByRole('button', { name: 'Schedule' }).isDisabled(), false,
@@ -295,7 +295,7 @@ async function main() {
     await page.getByRole('region', { name: 'Load YAML Source', exact: true }).waitFor();
     await page.getByRole('button', { name: 'Back to LOAD Catalog' }).click();
     await page.getByRole('heading', { name: 'Scenarios', level: 1, exact: true }).waitFor();
-    await page.getByText('Environment: UAT', { exact: false }).waitFor();
+    await page.locator('.att-load-environment-context').filter({ hasText: 'Environment: UAT' }).waitFor();
     const restoredScenarioCard = page.locator('.att-load-catalog-card').filter({ hasText: 'load/scenario.yaml' });
     const restoredSchedule = restoredScenarioCard.getByRole('button', { name: 'Schedule' });
     assert.equal(await restoredSchedule.isDisabled(), true, 'returning from details requires fresh validation before scheduling');

@@ -1,0 +1,6 @@
+schemaVersion: att-package/v1
+metadata:
+  name: Default Package
+  description: ATT example test resources
+testdata:
+  descriptors: [testdata/accounts.yaml]

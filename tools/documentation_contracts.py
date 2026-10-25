@@ -112,7 +112,7 @@ def chapter_shape(text):
 
 
 def structure_errors(text):
-    expected_count = 17
+    expected_count = 18
     errors = []
     shape = chapter_shape(text)
     if len(shape) != expected_count:

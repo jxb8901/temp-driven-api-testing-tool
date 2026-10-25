@@ -75,14 +75,12 @@ class WindowsLauncherTest {
         Path templates = temp.resolve("templates");
         Path simple = templates.resolve("SIMPLE");
         Files.createDirectories(simple);
-        Path templateRoot = packageRoot.relativize(templates);
-        Path outputRoot = packageRoot.relativize(temp.resolve("output"));
         Path config = temp.resolve("config.yaml");
-        Files.write(config, ("schemaVersion: att-config/v2.11\nenvironment: SIT\noutputDirectory: " + yamlQuote(outputRoot) + "\n"
-                + "templates: {root: " + yamlQuote(templateRoot) + "}\ntestcase: {root: testcase}\ntools:\n"
+        Files.write(config, ("schemaVersion: att-config/v2.13\nenvironment: SIT\noutputDirectory: output\ntools:\n"
                 + "  smoke:\n    name: Launcher smoke\n    description: Verify source-tree Tool execution\n"
                 + "    command: [cmd.exe, /c, echo, launcher-smoke]\n    stdoutFormat: text\n    arguments: {}\n")
                 .getBytes(StandardCharsets.UTF_8));
+        writePackageManifest(temp);
         Files.write(simple.resolve("template.yaml"), ("schemaVersion: att-template/v3.4\nname: SIMPLE\n"
                 + "description: Windows source launcher smoke\nactions:\n  invoke:\n    type: tool\n    call: \"#{smoke()}\"\n")
                 .getBytes(StandardCharsets.UTF_8));
@@ -97,7 +95,7 @@ class WindowsLauncherTest {
                 .directory(Paths.get("").toAbsolutePath().toFile())
                 .redirectOutput(output.toFile()).redirectError(error.toFile());
         builder.environment().put("M2_REPO", mavenRepository.toString());
-        builder.environment().put("ATT_PACKAGE_ROOT", packageRoot.toString());
+        builder.environment().put("ATT_PACKAGE_ROOT", temp.toString());
         Process process = builder.start();
         try {
             assertTrue(process.waitFor(90, TimeUnit.SECONDS), "att.bat did not finish the command-backed Tool smoke test");
@@ -143,9 +141,9 @@ class WindowsLauncherTest {
                 Path executionRoot = root.resolve("packages/default");
                 Path fixturePath = root.equals(sourceRoot) ? temp.resolve("source-debug-fixture")
                         : executionRoot.resolve("target/launcher-debug-smoke");
-                Path debugFixture = createDebugFixture(executionRoot, fixturePath);
+                Path debugFixture = createDebugFixture(fixturePath);
                 for (Path path : paths) {
-                    ProcessResult result = invokeWindows(root, path, buildToolLog,
+                    ProcessResult result = invokeWindowsPackage(root, path, buildToolLog, debugFixture,
                             "debug", "template", "SIMPLE", "--config", debugFixture.resolve("config.yaml").toString(),
                             "--input", debugFixture.resolve("templates/SIMPLE/debug.yaml").toString(),
                             "--format", "json", "--quiet");
@@ -184,15 +182,13 @@ class WindowsLauncherTest {
         return path;
     }
 
-    private static Path createDebugFixture(Path root, Path fixture) throws Exception {
+    private static Path createDebugFixture(Path fixture) throws Exception {
         Path template = fixture.resolve("templates/SIMPLE");
         Files.createDirectories(template);
         copyTree(Paths.get("schemas"), fixture.resolve("schemas"));
-        String fixtureRelative = root.relativize(fixture).toString().replace(File.separatorChar, '/');
-        Files.write(fixture.resolve("config.yaml"), ("schemaVersion: att-config/v2.11\n"
-                + "environment: SIT\noutputDirectory: " + fixtureRelative + "/output\n"
-                + "templates: {root: " + fixtureRelative + "/templates}\n"
-                + "testcase: {root: testcase}\n").getBytes(StandardCharsets.UTF_8));
+        Files.write(fixture.resolve("config.yaml"), ("schemaVersion: att-config/v2.13\n"
+                + "environment: SIT\noutputDirectory: output\n").getBytes(StandardCharsets.UTF_8));
+        writePackageManifest(fixture);
         Files.write(template.resolve("template.yaml"), ("schemaVersion: att-template/v3.4\nname: SIMPLE\n"
                 + "description: Launcher Debug execution smoke\nactions:\n"
                 + "  record:\n    type: log\n    message: launcher-debug-smoke\n")
@@ -200,6 +196,12 @@ class WindowsLauncherTest {
         Files.write(template.resolve("debug.yaml"), "schemaVersion: att-debug/v1.2\ninputs: {}\n"
                 .getBytes(StandardCharsets.UTF_8));
         return fixture;
+    }
+
+    private static void writePackageManifest(Path fixture) throws Exception {
+        Files.write(fixture.resolve("package.yaml"), ("schemaVersion: att-package/v1\n"
+                + "resources: {templatesRoot: templates, testcaseRoot: testcase}\n")
+                .getBytes(StandardCharsets.UTF_8));
     }
 
     private static String buildToolShim(String tool) {
@@ -309,6 +311,11 @@ class WindowsLauncherTest {
     }
 
     private static ProcessResult invokeWindows(Path root, Path path, Path buildToolLog, String... args) throws Exception {
+        return invokeWindowsPackage(root, path, buildToolLog, null, args);
+    }
+
+    private static ProcessResult invokeWindowsPackage(Path root, Path path, Path buildToolLog,
+                                                       Path packageRoot, String... args) throws Exception {
         String systemRoot = System.getenv("SystemRoot");
         if (systemRoot == null) systemRoot = System.getenv("WINDIR");
         assertTrue(systemRoot != null, "SystemRoot is not defined");
@@ -327,6 +334,7 @@ class WindowsLauncherTest {
         builder.environment().put("PATH", path.toString() + ";" + system32);
         builder.environment().put("M2_REPO", Paths.get(System.getProperty("user.home"), ".m2", "repository").toString());
         builder.environment().put("ATT_BUILD_TOOL_LOG", buildToolLog.toString());
+        if (packageRoot != null) builder.environment().put("ATT_PACKAGE_ROOT", packageRoot.toString());
         builder.environment().put("ORDERS_DB_USERNAME", "att-validation-placeholder");
         builder.environment().put("ORDERS_DB_PASSWORD", "att-validation-placeholder");
         builder.environment().put("PAYMENT_MQ_USERNAME", "att-validation-placeholder");
@@ -354,5 +362,4 @@ class WindowsLauncherTest {
         }
     }
 
-    private static String yamlQuote(Path path) { return "'" + path.toString().replace("'", "''") + "'"; }
 }

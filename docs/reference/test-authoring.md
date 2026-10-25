@@ -173,7 +173,7 @@ records:
 selection: {strategy: roundRobin, exhaustion: stop}
 ~~~
 
-An environment profile's `testdata` list declares the shared registry. A Load scenario may declare its own top-level `testdata` imports; matching IDs replace the whole environment descriptor for that Load only. Duplicate IDs within one layer fail. Ordinary Run/Debug activate referenced IDs lazily, while `validate --package` checks every configured descriptor. Templates, Flows, and Tool definitions receive resolved values through `EXEC.INPUT`; they cannot contain direct `@{...}` or `%{...}` references. See [Environment and Test Data](configuration.md), [Load](execution-modes/load.md), and the maintainer [testdata design](../system-design/testdata.md).
+The [Package Manifest](package-manifest.md) declares the Package Testdata registry and optional Environment-specific replacement lists. A Load scenario may declare its own top-level `testdata` imports; matching IDs replace the whole environment descriptor for that Load only. Duplicate IDs within one layer fail. Ordinary Run/Debug activate referenced IDs lazily, while `validate --package` checks every declared Manifest descriptor layer. Templates, Flows, and Tool definitions receive resolved values through `EXEC.INPUT`; they cannot contain direct `@{...}` or `%{...}` references. See [Environment and Test Data](configuration.md), [Load](execution-modes/load.md), and the maintainer [testdata design](../system-design/testdata.md).
 
 ## Advanced workbook and Snapshot details
 

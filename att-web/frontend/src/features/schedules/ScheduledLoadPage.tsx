@@ -1,3 +1,4 @@
+import { EnvironmentResolutionNotice } from '../explorer/EnvironmentResolutionNotice';
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { ApiError, type AsyncState, type PackageSummary } from '../../types';
 import { formatRoute, useNavigationGuard, type AppRoute } from '../../router';
@@ -834,6 +835,7 @@ export function ScheduledLoadPage({ api, packages, enabled, onOpenJob, initialDr
           <label htmlFor="schedule-environment">Environment <span className="att-schedule-hint">Optional</span>
             <input id="schedule-environment" value={draft.environment} onChange={event => updateDraft('environment', event.currentTarget.value)} maxLength={128} placeholder="SIT" disabled={draft.inlineSnapshot} />
           </label>
+      <EnvironmentResolutionNotice packageId={draft.packageId} environment={draft.environment} />
           <label htmlFor="schedule-timezone">Timezone · IANA <span aria-hidden="true">*</span>
             <input id="schedule-timezone" list="schedule-timezone-options" value={draft.timezone} onChange={event => updateDraft('timezone', event.currentTarget.value)} maxLength={80} aria-invalid={Boolean(draft.timezone && !isIanaTimeZone(draft.timezone))} required />
             <datalist id="schedule-timezone-options">{timezoneOptions.map(zone => <option key={zone} value={zone} />)}</datalist>

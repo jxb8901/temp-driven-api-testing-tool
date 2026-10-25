@@ -22,7 +22,7 @@ Case log、CLI output 和輸出的 case evidence 會將 canonical package root �
 
 ## Execution identity format migration
 
-`att-config/v2.12` 新增 execution identity formats；前一版 configuration schema 仍受支援。可用 `execution.runIdFormat` 設定 Run 和 Load 的外層 ID，並用 `execution.debugIdFormat` 設定 standalone Debug directory ID。未設定時仍使用既有 timestamp Run/Load ID 及 `<type>-<targetId>` Debug ID。Load 每次 iteration 的 `EXEC.ID` 現由 Engine 管理；請移除已停用的 `execution.execIdFormat`。Run/Load 的明確 ID 使用 `--run-id`；standalone Debug 的明確 ID 使用 `--debug-id`。
+`att-config/v2.13` 新增 execution identity formats；前一版 configuration schema 仍受支援。可用 `execution.runIdFormat` 設定 Run 和 Load 的外層 ID，並用 `execution.debugIdFormat` 設定 standalone Debug directory ID。未設定時仍使用既有 timestamp Run/Load ID 及 `<type>-<targetId>` Debug ID。Load 每次 iteration 的 `EXEC.ID` 現由 Engine 管理；請移除已停用的 `execution.execIdFormat`。Run/Load 的明確 ID 使用 `--run-id`；standalone Debug 的明確 ID 使用 `--debug-id`。
 
 Load workload `testdata.<id>` 設定控制 `scope`，並可選擇整份覆蓋 descriptor 的 `selection` policy。Scope 預設為 `iteration`；`user` 只適用 closed-VU workload。請明確選擇 `error`、`recycle` 或 `stop` exhaustion。Selection metadata 會記錄，但不包含 record value。
 

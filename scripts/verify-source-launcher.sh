@@ -77,11 +77,13 @@ write_debug_fixture() {
   mkdir -p "$fixture/templates/SIMPLE"
   mkdir -p "$(dirname "$runtime_config")"
   cat > "$runtime_config" <<EOF
-schemaVersion: att-config/v2.12
+schemaVersion: att-config/v2.13
 environment: SIT
-outputDirectory: $fixture_relative/output
-templates: {root: $fixture_relative/templates}
-testcase: {root: testcase}
+outputDirectory: output
+EOF
+  cat > "$fixture/package.yaml" <<'EOF'
+schemaVersion: att-package/v1
+resources: {templatesRoot: templates, testcaseRoot: testcase}
 EOF
   cat > "$fixture/templates/SIMPLE/template.yaml" <<'EOF'
 schemaVersion: att-template/v3.6
@@ -105,10 +107,10 @@ run_debug() {
   log_file="$3"
   fixture_relative="$4"
   runtime_config="$root/config/${fixture_relative##*/}/config.yaml"
-  output="$(PATH="$path_dir" ATT_BUILD_TOOL_LOG="$log_file" \
+  output="$(PATH="$path_dir" ATT_BUILD_TOOL_LOG="$log_file" ATT_PACKAGE_ROOT="$root/packages/default/$fixture_relative" \
     /bin/sh "$root/att.sh" debug template SIMPLE \
     --config "$runtime_config" \
-    --input "$fixture_relative/templates/SIMPLE/debug.yaml" --format json --quiet)" || {
+    --input "templates/SIMPLE/debug.yaml" --format json --quiet)" || {
     status=$?
     echo "Debug launcher failed (exit $status): $root/att.sh debug template SIMPLE" >&2
     echo "$output" >&2

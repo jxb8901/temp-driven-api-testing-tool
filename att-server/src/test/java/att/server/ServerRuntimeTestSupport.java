@@ -19,6 +19,38 @@ import static org.junit.jupiter.api.Assertions.fail;
 final class ServerRuntimeTestSupport {
     private ServerRuntimeTestSupport() {}
 
+    /** Execution-only fake launchers still need a valid configuration-resolution protocol. */
+    static ServerRuntime.WorkerProcessLauncher resolvingConfiguration(ServerRuntime.WorkerProcessLauncher execution) {
+        return builder -> {
+            if (!builder.command().contains("--inspection-daemon")) return execution.start(builder);
+            return new ProcessBuilder(Path.of(System.getProperty("java.home"), "bin", "java").toString(),
+                    "-cp", System.getProperty("surefire.test.class.path", System.getProperty("java.class.path")),
+                    ConfigurationProcess.class.getName()).start();
+        };
+    }
+
+    public static class ConfigurationProcess {
+        public static void main(String[] args) throws Exception {
+            var reader = new java.io.BufferedReader(new java.io.InputStreamReader(System.in, java.nio.charset.StandardCharsets.UTF_8));
+            String line;
+            while ((line = reader.readLine()) != null) {
+                var request = ServerRuntime.JSON.readTree(line);
+                if (!"package-configuration".equals(request.path("inspectionType").asText()) || !"resolve".equals(request.path("inspectionAction").asText()))
+                    throw new IllegalArgumentException("Execution fixture only supports configuration resolution");
+                String environment = request.path("environment").asText("SIT");
+                Map<String,Object> evidence=new java.util.LinkedHashMap<>();evidence.put("environment",environment);
+                evidence.put("environmentOrigin",request.hasNonNull("environment")?"request":"global");
+                for(String key:List.of("configurationIdentity","manifestDigest","globalDigest","schemaRegistryDigest"))evidence.put(key,"a".repeat(64));
+                evidence.put("engineVersion","fixture");evidence.put("engineRevision","fixture");
+                evidence.put("origins",Map.of("environment",evidence.get("environmentOrigin")));
+                evidence.put("authoredPaths",Map.of("environment",request.hasNonNull("environment")?"request.environment":"config/config.yaml"));
+                System.out.println(ServerRuntime.JSON.writeValueAsString(Map.of("type", "RESULT", "status", "PASS", "exitCode", 0,
+                        "result", Map.of("summary", Map.of("inspection", evidence)))));
+                System.out.flush();
+            }
+        }
+    }
+
     static Map<String,Object> awaitUnifiedJob(ServerRuntime runtime,String id) throws Exception {
         long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(30);
         while(System.nanoTime()<deadline) {

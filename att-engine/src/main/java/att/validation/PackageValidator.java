@@ -130,6 +130,9 @@ public final class PackageValidator {
                 throw new IllegalArgumentException("Shared runtime configuration is missing, unreadable, or a symbolic link: " + options.configPath());
         } catch (Exception e) { return invalid(options.validationScope(), Collections.singletonList(diagnostic(DiagnosticCodes.PATH_INVALID, e, null))); }
         List<Diagnostic> diagnostics = new ArrayList<Diagnostic>();
+        if (global.effectiveConfiguration() != null) for (String message : global.effectiveConfiguration().diagnostics())
+            diagnostics.add(new Diagnostic("ATT-PKG-MIGRATION", Diagnostic.Severity.WARNING, message, "config/config.yaml",
+                    "package.yaml", null, null, null, null, null, "Run the Package configuration migration inventory and review each Package's proposed Manifest."));
         try { att.core.ExecutionIdentityFormat.validateRunIdFormat(global.run().runIdFormat()); }
         catch (Exception e) { diagnostics.add(diagnostic(DiagnosticCodes.CONFIG_INVALID, e, projectRoot.resolve(options.configPath()))); }
         try { att.core.ExecutionIdentityFormat.validateDebugIdFormat(global.run().debugIdFormat()); }
@@ -141,7 +144,10 @@ public final class PackageValidator {
         Set<String> templates = new LinkedHashSet<String>();
         if ("package".equals(options.validationScope())) {
             try {
-                new att.testdata.TestdataRegistry(projectRoot, global.testdataDescriptors(), Collections.<Path>emptyList()).validateAll();
+                att.config.PackageConfig manifest = att.config.PackageConfig.load(projectRoot);
+                for (List<Path> layer : manifest.descriptorLayers())
+                    new att.testdata.TestdataRegistry(projectRoot, layer, Collections.<Path>emptyList()).validateAll();
+                if (!manifest.present()) new att.testdata.TestdataRegistry(projectRoot, global.testdataDescriptors(), Collections.<Path>emptyList()).validateAll();
             } catch (Exception e) {
                 diagnostics.add(diagnostic(DiagnosticCodes.PACKAGE_INVALID, e,
                         global.testdataDescriptors().isEmpty() ? null : global.testdataDescriptors().get(0)));
@@ -268,6 +274,7 @@ public final class PackageValidator {
                                          Set<String> availableLoadFields, String localLayerName) throws Exception {
         att.testdata.TestdataRegistry registry = new att.testdata.TestdataRegistry(projectRoot,
                 config.testdataDescriptors(), loadTestdataDescriptors, localLayerName);
+        registry.validateInvocation();
         att.testdata.TestdataMappingValidator.validate(mapping, registry);
         String diagnosticCode = mode == att.core.ExecutionBootstrapVariables.InputMappingMode.LOAD
                 ? DiagnosticCodes.LOAD_INVALID

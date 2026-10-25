@@ -352,6 +352,24 @@ class PackageResourceInspectorTest {
         assertFalse(source.containsKey("text"));
     }
 
+    @Test void manifestSourceUsesExistingVisibilityAndStructuredRedactionWithoutExposingOtherUnlinkedFiles() throws Exception {
+        Path root=packageWithTemplate("manifest-source","SOURCE","description: harmless");
+        writeUtf8(root.resolve("package.yaml"),"schemaVersion: att-package/v1\nmetadata: {name: Visible, description: private-description}\n");
+        writeUtf8(root.resolve("notes.yaml"),"message: private-note\n");
+        PackageResourceInspector inspector=new PackageResourceInspector(root,Paths.get("config/config.yaml"),"SIT",
+                java.util.Arrays.asList("package.yaml","notes.yaml"),65536,262144,false,true,"allowlist-only",
+                Collections.<String>emptyList(),true,Collections.singletonList("metadata.description"),Collections.<String>emptyList());
+        Map<String,Object> source=inspector.inspectPackageFileSource("package.yaml",null);
+        assertEquals(Boolean.TRUE,source.get("available"),source.toString());
+        assertEquals(Boolean.TRUE,source.get("redacted"),source.toString());
+        assertFalse(source.toString().contains("private-description"));assertTrue(source.toString().contains("Visible"));
+        assertEquals("forbidden",inspector.inspectPackageFileSource("notes.yaml",null).get("reason"));
+        PackageResourceInspector disabled=new PackageResourceInspector(root,Paths.get("config/config.yaml"),"SIT",
+                Collections.singletonList("package.yaml"),65536,262144,false,false,"allowlist-only",Collections.<String>emptyList(),true,
+                Collections.<String>emptyList(),Collections.<String>emptyList());
+        assertFalse(Boolean.TRUE.equals(disabled.inspectPackageFileSource("package.yaml",null).get("available")));
+    }
+
     @Test void resolvesDescriptorRelativeConfigurationSourcesAndEnforcesVisibilityLimits() throws Exception {
         Path root=packageWithTemplate("configuration-file-source", "SOURCE", "description: harmless");
         Path source=Files.createDirectories(root.resolve("config/queries")).resolve("lookup.sql");

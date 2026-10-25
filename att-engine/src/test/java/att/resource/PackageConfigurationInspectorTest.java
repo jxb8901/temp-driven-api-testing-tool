@@ -20,6 +20,31 @@ class PackageConfigurationInspectorTest {
     @org.junit.jupiter.api.BeforeEach void enableServerPathPresentation() { att.core.PathPresentation.configure(true, true); }
     @org.junit.jupiter.api.AfterEach void restoreDefaultPathPresentation() { att.core.PathPresentation.configure(false, false); }
 
+    @Test void packageTestdataUsesPackageDefaultsAndRefreshesManifestWithoutSharingCachedGlobalState() throws Exception {
+        Path a=packageRoot("manifest-preview-a"), b=packageRoot("manifest-preview-b");
+        Files.createDirectories(a.resolve("testdata"));Files.createDirectories(b.resolve("testdata"));
+        String descriptor="schemaVersion: att-testdata/v1.0\nid: accounts\nrecords: [{accountId: A, note: Bearer private-canary}]\n";
+        write(a.resolve("testdata/sit.yaml"),descriptor);
+        write(a.resolve("testdata/uat.yaml"),descriptor.replace("accountId: A", "accountId: UAT"));
+        write(b.resolve("testdata/sit.yaml"),descriptor.replace("accountId: A", "accountId: B"));
+        write(a.resolve("package.yaml"),"schemaVersion: att-package/v1\ndefaultEnvironment: UAT\ntestdata:\n  descriptors: [testdata/sit.yaml]\n  environments: {UAT: [testdata/uat.yaml]}\n");
+        write(b.resolve("package.yaml"),"schemaVersion: att-package/v1\ntestdata: {descriptors: [testdata/sit.yaml]}\n");
+        PackageConfigurationSnapshots cache=new PackageConfigurationSnapshots();
+        PackageConfigurationInspector first=inspector(a).forPackageTestdata().withSnapshots(cache,"same-context");
+        PackageConfigurationInspector second=inspector(b).forPackageTestdata().withSnapshots(cache,"same-context");
+        Map<String,Object> metadata=first.inspect("effective",null,null,"testdata",0,50);
+        assertEquals("UAT",metadata.get("environment"));assertEquals("package",metadata.get("environmentOrigin"));
+        assertEquals(1,metadata.get("total"));assertFalse(metadata.toString().contains("accountId"));
+        Map<String,Object> records=first.inspect("testdata-records",null,null,"accounts",0,1);
+        assertTrue(records.toString().contains("accountId=UAT"));assertFalse(records.toString().contains("private-canary"));
+        assertTrue(second.inspect("testdata-records",null,null,"accounts",0,1).toString().contains("accountId=B"));
+        assertTrue(first.inspect("testdata-records","SIT",null,"accounts",0,1).toString().contains("accountId=A"));
+        write(a.resolve("package.yaml"),"schemaVersion: att-package/v1\ntestdata: {descriptors: []}\n");
+        assertEquals(0,first.inspect("effective",null,null,"testdata",0,50).get("total"));
+        assertEquals("SIT",first.inspect("effective",null,null,"testdata",0,50).get("environment"));
+        assertFalse(second.inspect("testdata-records",null,null,"accounts",0,1).toString().contains("UAT"));
+    }
+
     @Test void sharedRuntimeIgnoresPackageRecordsAndReconcilesConfigRevision() throws Exception {
         Path root=packageRoot("shared-runtime");
         Path file=root.resolve("config/config.yaml");

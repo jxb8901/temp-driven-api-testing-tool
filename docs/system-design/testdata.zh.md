@@ -1,12 +1,12 @@
 # Testdata registry 與 input mapping
 
-本頁說明 issue #63 的 runtime boundary。Public descriptor 契約為 `att-testdata/v1.0`；Environment selection 屬於 `att-config/v2.12`，Load policy 屬於 `att-load/v1.9`。
+本頁說明 issue #63 的 runtime boundary。Public descriptor 契約為 `att-testdata/v1.0`；Environment selection 屬於 `att-config/v2.13`，Load policy 屬於 `att-load/v1.9`。
 
 ## Registry layers 與啟用時機
 
-所選 environment profile 提供 package-relative testdata descriptor paths。每個 descriptor 有 logical ID，並宣告非空 literal `records` list 或 generated record。Load scenario 可在頂層 `testdata` 加入 package-relative paths，形成 scenario-local overlay。同名 Load-local ID 會在該 scenario 完整取代 environment descriptor；不合併 records 或 selection 欄位。同一 layer 內重複 ID 或重複 canonical path 都無效。
+所選 Package Manifest 提供 Package-relative Testdata descriptor paths；Environment-specific list 會整份取代 base inventory。每個 descriptor 有 logical ID，並宣告非空 literal `records` list 或 generated record。Load scenario 可在頂層 `testdata` 加入 package-relative paths，形成 scenario-local overlay。同名 Load-local ID 會在該 scenario 完整取代 environment descriptor；不合併 records 或 selection 欄位。同一 layer 內重複 ID 或重複 canonical path 都無效。
 
-Registry 會按需建立 descriptor ID 索引。Run 與 Debug 只載入 input mapping 引用的 descriptors。Load 在 scheduler 啟動前驗證 workload inputs 和明確 policy 引用的 IDs。明確執行 package validation 時，會載入並 schema-validate 所選 environment 的全部 descriptors，包括未使用項。Import 必須解析為 canonical package root 內的 regular YAML file，且不能是 symlink。
+Registry 會按需建立 descriptor ID 索引。Run 與 Debug 只載入 input mapping 引用的 descriptors。Load 在 scheduler 啟動前驗證 workload inputs 和明確 policy 引用的 IDs。完整 Package validation 會載入並 schema-validate 每個 Manifest descriptor layer，包括未使用項與所有 Environment lists。Import 必須解析為 canonical package root 內的 regular YAML file，且不能是 symlink。
 
 ## Literal 與 generated records
 

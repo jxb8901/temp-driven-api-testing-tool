@@ -17,6 +17,7 @@ resources/httphelper.md
 resources/sshhelper.md
 reliability-execution-control.md
 configuration.md
+package-manifest.md
 cli.md
 results-reports-evidence.md
 validation-diagnostics.md

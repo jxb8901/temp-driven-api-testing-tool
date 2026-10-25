@@ -113,6 +113,7 @@ final class ServerRuntime implements AutoCloseable {
     private LoadScheduleScheduler loadScheduleScheduler;
     private final WorkerProcessLauncher processLauncher;
     private final Clock clock;
+    final PackageManifestPublisher manifestPublisher;
     private volatile Map<String,Object> jobStorageReport;
     private final ConcurrentHashMap<Process,Boolean> inspectionProcesses=new ConcurrentHashMap<>();
     private final Object draftLock=new Object();
@@ -150,6 +151,9 @@ final class ServerRuntime implements AutoCloseable {
     ServerRuntime(ServerConfig config,String workerLibs,WorkerProcessLauncher processLauncher,Clock clock,ArtifactPublisher artifactPublisher) throws Exception {
         if(Runtime.version().feature()<17)throw new IllegalStateException("ATT Server requires Java 17 or later; detected Java "+Runtime.version().feature());
         this.config=config;this.artifactPublisher=java.util.Objects.requireNonNull(artifactPublisher);this.workerLibs=workerLibs==null?null:Paths.get(workerLibs).toAbsolutePath().normalize();this.workerSchemaRegistryDigest=WorkerRuntimeClasspath.schemaRegistryDigestIfPresent(this.workerLibs);this.processLauncher=processLauncher;this.clock=java.util.Objects.requireNonNull(clock);this.store=new JobStore(config);try{this.auth=new AuthService(config,store);}catch(Exception failed){store.close();throw failed;}this.loadSlots=new Semaphore(config.maxConcurrentLoad,true);this.admissionSlots=new Semaphore(config.maxConcurrent+config.queuedLimit,true);
+        manifestPublisher=new PackageManifestPublisher(config.dataDir,config.packageConfiguration,clock,
+                this::manifestEditableRoot,this::validateManifestCandidate,
+                (actor,action,packageId,detail)->store.audit(actor,action,null,packageId,detail));
         cursorRandom.nextBytes(cursorKey);
         java.util.concurrent.BlockingQueue<Runnable> queue=config.queuedLimit==0?new SynchronousQueue<>():new ArrayBlockingQueue<>(config.queuedLimit);
         workers=new ThreadPoolExecutor(config.maxConcurrent,config.maxConcurrent,0,TimeUnit.MILLISECONDS,queue,r->{Thread t=new Thread(r,"att-server-worker");t.setDaemon(true);return t;},new ThreadPoolExecutor.AbortPolicy());
@@ -272,7 +276,7 @@ final class ServerRuntime implements AutoCloseable {
                 }
             }
         }
-        return new JobExecutionSpec(definition,revision,sourcePath);
+        return new JobExecutionSpec(definition,revision,sourcePath).withConfiguration(input.path("configurationProvenance").isObject()?configurationRevision(JSON.convertValue(input.get("configurationProvenance"),Map.class),revision):null);
     }
 
     /** Builds the retained snapshot from a server-validated draft without re-running its inspection Worker. */
@@ -315,7 +319,7 @@ final class ServerRuntime implements AutoCloseable {
                 }
             }
         }
-        return new JobExecutionSpec(definition,revision,sourcePath);
+        return new JobExecutionSpec(definition,revision,sourcePath).withConfiguration(input.path("configurationProvenance").isObject()?configurationRevision(JSON.convertValue(input.get("configurationProvenance"),Map.class),revision):null);
     }
 
     private void verifyReplayRevision(String packageId,String environment,String revision) throws Exception {
@@ -345,6 +349,7 @@ final class ServerRuntime implements AutoCloseable {
         if(record.get("spec")==null)view.put("reason",record.get("reason")==null?"Rerun unavailable for this historical job. Configure a new run from the current package.":record.get("reason"));
         else {
             JobExecutionSpec spec=JobExecutionSpec.parse(record.get("spec"));
+            if(spec.configuration()!=null)view.put("configuration",spec.configuration());
             view.put("definition",spec.definition());view.put("revisionPolicy","reject-package-changes");view.put("revision",spec.revision());
             if(spec.value.has("sourcePath"))view.put("sourcePath",spec.value.get("sourcePath").asText());
         }
@@ -368,18 +373,18 @@ final class ServerRuntime implements AutoCloseable {
             verifyReplayRevision(packageId,environment,spec.revision());
             boolean run="run".equals(definition.path("executionType").asText());
             Map<String,Object> draft;
-            if(run)draft=createRunDraft(definition,principal,true);
+            if(run)draft=createRunDraft(definition,principal,true,spec.configuration());
             else if(spec.value.has("sourcePath")) {
                 String path=safeRelative(spec.value.path("sourcePath").asText(),"scenario");validatePackagePath(packageRoot(packageId),path,"scenario");
                 LoadSchedule source=new LoadSchedule();source.packageId=packageId;source.environment=environment;
                 source.inlineScenario=JSON.convertValue(definition.get("scenario"),Map.class);
                 ValidatedScheduledScenario validated=validateScheduleScenario(packageRoot(packageId),source);
                 if(validated.containsSensitiveValues||!spec.revision().equals(validated.revisionDigest))throw new StaleDraftException();
-                CatalogLoadDraftState retained=new CatalogLoadDraftState("C"+UUID.randomUUID().toString().replace("-","").toUpperCase(),principal,packageId,environment,path,spec.revision(),validated.model,validated.scenario,null,clock.instant().plusMillis(DRAFT_TTL_MILLIS));
+                CatalogLoadDraftState retained=new CatalogLoadDraftState("C"+UUID.randomUUID().toString().replace("-","").toUpperCase(),principal,packageId,environment,path,spec.revision(),validated.model,validated.scenario,null,spec.configuration()!=null?spec.configuration():resolveExecutionConfiguration(packageId,packageRoot(packageId),environment),clock.instant().plusMillis(DRAFT_TTL_MILLIS));
                 synchronized(draftLock){expireDrafts();checkDraftCapacity(principal);catalogLoadDrafts.put(retained.id,retained);}
                 draft=catalogLoadDraftView(retained);
             } else {
-                ObjectNode input=definition.deepCopy();input.remove("executionType");draft=createAdvancedLoadDraft(input,principal);
+                ObjectNode input=definition.deepCopy();input.remove("executionType");draft=createAdvancedLoadDraft(input,principal,spec.configuration());
             }
             String draftId=String.valueOf(draft.get("draftId"));
             // The fresh validator must agree with the retained package revision too.
@@ -415,6 +420,7 @@ final class ServerRuntime implements AutoCloseable {
                 if(environment!=null)input.put("environment",environment);
                 input.set("inlineLoadScenario",JSON.valueToTree(draft==null?catalog.scenario:draft.scenario));input.put("expectedRevisionDigest",spec.revision());
             }
+            if(spec.configuration()!=null)input.set("configurationProvenance",JSON.valueToTree(spec.configuration()));
             applyInspectionPolicy(input,review.packageId);
             Map<String,Object> result=submit(review.executionType,input,principal,true,null,"load".equals(review.executionType)&&spec.value.has("sourcePath"),id,intent);
             store.audit(principal,"JOB_RERUN",String.valueOf(result.get("jobId")),review.packageId,"ACCEPTED");
@@ -451,7 +457,8 @@ final class ServerRuntime implements AutoCloseable {
         if(loadAdmission&&loadSlots.availablePermits()==0){store.audit(principal,"SUBMIT",null,packageId,"REJECTED_LOAD_CAPACITY");throw new QueueFullException("Load capacity is full; retry after a Load job completes");}
         if(admissionSlots.availablePermits()==0){store.audit(principal,"SUBMIT",null,packageId,"REJECTED_QUEUE_FULL");throw new QueueFullException("Worker capacity is full; retry after a job completes");}
         if(!serverIssuedDraft&&(input.has("draftId")||input.has("inlineDebugInput")||input.has("inlineLoadScenario")
-                ||input.has("expectedRevisionDigest")||input.has("expectedSchemaRegistryDigest")||input.has("draftResourceId")))
+                ||input.has("expectedRevisionDigest")||input.has("expectedSchemaRegistryDigest")||input.has("draftResourceId")
+                ||input.has("configurationProvenance")||input.has("registeredPackageId")))
             throw new IllegalArgumentException("Inline execution fields require a server-issued draft");
         if(serverIssuedDraft&&"load".equals(command)) {
             if(!scheduleIssued)requireInlineLoadEnabled();
@@ -463,7 +470,20 @@ final class ServerRuntime implements AutoCloseable {
         Path root=packageRoot(packageId);
         if(root==null)throw new IllegalArgumentException("Unknown packageId");
         validatePackageRoot(root);
+        ObjectNode pinned=((ObjectNode)input).deepCopy();
+        String requestedEnvironment=optionalText(input,"environment");
+        Map<String,Object> configuration;
+        if(serverIssuedDraft&&input.path("configurationProvenance").isObject()) {
+            configuration=att.server.api.ConfigurationSnapshot.copy(JSON.convertValue(input.get("configurationProvenance"),Map.class));
+            if(!packageId.equals(configuration.get("packageId"))||!java.util.Objects.equals(requestedEnvironment,configuration.get("environment")))
+                throw new IllegalArgumentException("Configuration evidence differs from the approved execution");
+            authorizeConfiguration(configuration);
+        } else configuration=resolveExecutionConfiguration(packageId,root,requestedEnvironment);
+        pinned.put("environment",(String)configuration.get("environment"));
+        pinned.set("configurationProvenance",JSON.valueToTree(configuration));
+        input=pinned;
         WorkerRequest request=applyWorkerPolicy(JSON.treeToValue(input,WorkerRequest.class));
+        request.configurationProvenance=configuration;request.registeredPackageId=packageId;
         request.protocolVersion="att-worker/v1";request.command=command;request.packageRoot=root.toString();
         request.outputDirectory=null;request.config=config.runtimeConfigPath.toString();request.environment=safeText(request.environment,128,"environment");
         request.expectedSchemaRegistryDigest=workerSchemaRegistryDigest;
@@ -501,6 +521,7 @@ final class ServerRuntime implements AutoCloseable {
             JsonNode exact=captured.definition().path("selection").get("caseIds");
             if(exact!=null) {request.caseIds=JSON.convertValue(exact,List.class);request.tags=null;request.excludeTags=null;request.all=false;request.rerunFailed=false;}
         }
+        configuration=configurationRevision(configuration,request.expectedRevisionDigest);request.configurationProvenance=configuration;
         if(executionSpec==null&&replayUnavailable==null)replayUnavailable="This job type or Server capability does not support safe replay. Configure a new run.";
         if(loadAdmission&&!loadSlots.tryAcquire()){store.audit(principal,"SUBMIT",null,packageId,"REJECTED_LOAD_CAPACITY");throw new QueueFullException("Load capacity is full; retry after a Load job completes");}
         if(!admissionSlots.tryAcquire()){if(loadAdmission)loadSlots.release();store.audit(principal,"SUBMIT",null,packageId,"REJECTED_QUEUE_FULL");throw new QueueFullException("Worker capacity is full; retry after a job completes");}
@@ -513,6 +534,8 @@ final class ServerRuntime implements AutoCloseable {
             Job job=new Job(id,command,packageId,principal,request,events);job.scheduleOccurrenceId=scheduleOccurrenceId;job.requestReceivedNanos=requestReceivedNanos;
             job.executionSpec=executionSpec;job.replayUnavailable=replayUnavailable;job.rerunOfJobId=rerunOfJobId;job.replayIntent=replayIntent;job.replayOwner=replayOwner;job.originatingScheduleId=originatingScheduleId;
             Map<String,Object> summaryFields=new LinkedHashMap<>();summaryFields.put("command",command);summaryFields.put("packageId",packageId);
+            summaryFields.put("configuration",configuration);
+            Files.write(jobPath.resolve("output/configuration.json"),JSON.writeValueAsBytes(configuration));
             if(request.scenario!=null)summaryFields.put("scenario",request.scenario);
             if(request.environment!=null&&!request.environment.isBlank())summaryFields.put("environment",request.environment);
             if(request.loadModel!=null)summaryFields.put("model",request.loadModel);
@@ -706,7 +729,7 @@ final class ServerRuntime implements AutoCloseable {
         if(("PROGRESS".equals(type)||"LOG".equals(type))&&job.executionReadyNanos==0)job.executionReadyNanos=eventNanos;
         switch(type){case "STATUS"->{String status=event.path("status").asText("");if("RUNNING".equals(status)&&"PREPARING".equals(job.status))transition(job,"RUNNING");}
             case "PROGRESS"->append(job,"progress",safe);case "LOG"->append(job,"log",safe);case "DIAGNOSTIC"->{job.diagnosticJson=JSON.writeValueAsString(safe);store.update(job);append(job,"diagnostic",safe);}
-            case "RESULT"->{if(job.processFence!=null){job.processFence.observe();rememberWorkerProcesses(job,job.processFence);}job.resultReceivedNanos=eventNanos;Object workerMetrics=safe.get("workerMetrics");if(workerMetrics instanceof Map<?,?>)job.workerMetrics=(Map<String,Object>)workerMetrics;String status=event.path("status").asText("ERROR");int code=event.path("exitCode").asInt(3);Object result=safe.get("result");job.resultJson=result==null?"{}":JSON.writeValueAsString(result);job.resultReceived=true;Object console=safe.get("console");finish(job,normalizeTerminal(status),code,console instanceof String consoleLine?consoleLine:null);}
+            case "RESULT"->{if(job.processFence!=null){job.processFence.observe();rememberWorkerProcesses(job,job.processFence);}job.resultReceivedNanos=eventNanos;Object workerMetrics=safe.get("workerMetrics");if(workerMetrics instanceof Map<?,?>)job.workerMetrics=(Map<String,Object>)workerMetrics;String status=event.path("status").asText("ERROR");int code=event.path("exitCode").asInt(3);Object result=safe.get("result");if(result instanceof Map<?,?> original&&job.request.configurationProvenance!=null){Map<String,Object> enriched=new LinkedHashMap<>((Map<String,Object>)original);Map<String,Object> summary=enriched.get("summary") instanceof Map<?,?> existing?new LinkedHashMap<>((Map<String,Object>)existing):new LinkedHashMap<>();summary.put("configuration",job.request.configurationProvenance);enriched.put("summary",summary);result=enriched;}job.resultJson=result==null?"{}":JSON.writeValueAsString(result);job.resultReceived=true;Object console=safe.get("console");finish(job,normalizeTerminal(status),code,console instanceof String consoleLine?consoleLine:null);}
             default->append(job,"log",Map.of("message","Worker emitted an unrecognized event"));}
     }
     void recordProtocolLimit(Job job,att.server.api.internal.WorkerProtocol.Frame frame) throws Exception {
@@ -1016,7 +1039,8 @@ final class ServerRuntime implements AutoCloseable {
         if(principal==null||principal.isBlank())throw new IllegalArgumentException("A server-resolved request identity is required");
         if(resourceId==null||resourceId.isBlank()||resourceId.length()>1024)throw new IllegalArgumentException("resourceId is invalid");
         Path root=packageRoot(packageId);if(root==null)throw new NotFoundException();validatePackageRoot(root);
-        String selected=environment==null||environment.isBlank()?null:inspectionEnvironment(environment,"environment");
+        Map<String,Object> configuration=resolveExecutionConfiguration(packageId,root,environment);
+        String selected=(String)configuration.get("environment");
         WorkerRequest request=inspectionRequest(packageId,root,selected);request.inspectionAction="load-scenario";request.inspectionPath=resourceId;
         Map<String,Object> result=executeInspection(root,request);
         Object rawScenario=result.remove("normalizedScenario"),rawRevision=result.remove("revisionDigest");
@@ -1025,6 +1049,7 @@ final class ServerRuntime implements AutoCloseable {
                 ||!(rawSensitive instanceof Boolean)||!(rawModel instanceof String)
                 ||!List.of("virtualUsers","arrivalRate").contains(rawModel))
             throw new IllegalStateException("Load validation Worker returned an invalid response");
+        configuration=configurationRevision(configuration,(String)rawRevision);result.put("configuration",configuration);
         result.put("validation","valid");
         result.put("scheduleAvailable",Boolean.FALSE);
         if(!config.scheduling.enabled) result.put("scheduleReason","Scheduling is disabled by Server policy.");
@@ -1034,7 +1059,7 @@ final class ServerRuntime implements AutoCloseable {
             @SuppressWarnings("unchecked") Map<String,Object> scenario=(Map<String,Object>)JSON.convertValue(rawScenario,Map.class);
             CatalogLoadDraftState draft=new CatalogLoadDraftState("C"+UUID.randomUUID().toString().replace("-","").toUpperCase(),
                     principal,packageId,selected,resourceId,(String)rawRevision,(String)rawModel,scenario,
-                    (String)result.get("previewYaml"),clock.instant().plusMillis(DRAFT_TTL_MILLIS));
+                    (String)result.get("previewYaml"),configuration,clock.instant().plusMillis(DRAFT_TTL_MILLIS));
             try {
                 synchronized(draftLock) {
                     expireDrafts();checkDraftCapacity(principal);catalogLoadDrafts.put(draft.id,draft);
@@ -1114,7 +1139,8 @@ final class ServerRuntime implements AutoCloseable {
         requireObject(input,"A JSON object is required");
         requireOnlyFields(input,"packageId","environment","target","input");
         String packageId=required(input,"packageId");Path root=packageRoot(packageId);if(root==null)throw new NotFoundException();validatePackageRoot(root);
-        String environment=optionalText(input,"environment");if(environment!=null)environment=inspectionEnvironment(environment,"environment");
+        Map<String,Object> configuration=resolveExecutionConfiguration(packageId,root,optionalText(input,"environment"));
+        String environment=(String)configuration.get("environment");
         JsonNode targetNode=input.get("target");requireObject(targetNode,"target must be a JSON object");requireOnlyFields(targetNode,"type","id");
         String type=required(targetNode,"type"),logicalId=required(targetNode,"id");
         if(!List.of("template","flow","tool").contains(type)||logicalId.length()>512||containsControl(logicalId))
@@ -1128,6 +1154,7 @@ final class ServerRuntime implements AutoCloseable {
         Map<String,Object> inspected=executeInspection(root,request);
         Object rawNormalized=inspected.remove("normalizedInput");
         Object rawDigest=inspected.remove("revisionDigest");
+        inspected.put("configuration",configurationRevision(configuration,(String)rawDigest));
         Object rawSensitive=inspected.remove("containsSensitiveValues");
         if(!(rawNormalized instanceof Map)||!(rawDigest instanceof String)||!((String)rawDigest).matches("[a-f0-9]{64}")
                 ||!(rawSensitive instanceof Boolean))
@@ -1151,7 +1178,8 @@ final class ServerRuntime implements AutoCloseable {
         requireObject(input,"A JSON object is required");
         requireOnlyFields(input,"packageId","environment","target","model","input","load","execution","testdata");
         String packageId=required(input,"packageId");Path root=packageRoot(packageId);if(root==null)throw new NotFoundException();validatePackageRoot(root);
-        String environment=optionalText(input,"environment");if(environment!=null)environment=inspectionEnvironment(environment,"environment");
+        Map<String,Object> configuration=resolveExecutionConfiguration(packageId,root,optionalText(input,"environment"));
+        String environment=(String)configuration.get("environment");
         JsonNode targetNode=input.get("target");requireObject(targetNode,"target must be a JSON object");requireOnlyFields(targetNode,"type","id");
         String type=required(targetNode,"type"),logicalId=required(targetNode,"id");
         if(!List.of("template","flow","tool").contains(type)||logicalId.length()>512||containsControl(logicalId))
@@ -1170,6 +1198,7 @@ final class ServerRuntime implements AutoCloseable {
         Map<String,Object> inspected=executeInspection(root,request);
         Object rawScenario=inspected.remove("normalizedScenario");
         Object rawDigest=inspected.remove("revisionDigest");
+        inspected.put("configuration",configurationRevision(configuration,(String)rawDigest));
         Object rawSensitive=inspected.remove("containsSensitiveValues");
         if(!(rawScenario instanceof Map)||!(rawDigest instanceof String)||!((String)rawDigest).matches("[a-f0-9]{64}")||!(rawSensitive instanceof Boolean))
             throw new IllegalStateException("Quick Load validation Worker returned an invalid response");
@@ -1192,18 +1221,24 @@ final class ServerRuntime implements AutoCloseable {
         return quickLoadDraftView(draft);
     }
     Map<String,Object> createAdvancedLoadDraft(JsonNode input,String principal) throws Exception {
+        return createAdvancedLoadDraft(input,principal,null);
+    }
+    private Map<String,Object> createAdvancedLoadDraft(JsonNode input,String principal,Map<String,Object> approvedConfiguration) throws Exception {
         if(principal==null||principal.isBlank())throw new IllegalArgumentException("A server-resolved request identity is required");
         if(!config.inspection.enabled)throw new NotFoundException();
         requireInlineLoadEnabled();
         requireObject(input,"A JSON object is required");requireOnlyFields(input,"packageId","environment","scenario","templateComposition");
         String packageId=required(input,"packageId");Path root=packageRoot(packageId);if(root==null)throw new NotFoundException();validatePackageRoot(root);
-        String environment=optionalText(input,"environment");if(environment!=null)environment=inspectionEnvironment(environment,"environment");
+        Map<String,Object> configuration=resolveExecutionConfiguration(packageId,root,optionalText(input,"environment"));
+        if(approvedConfiguration!=null)configuration=approvedConfiguration;
+        String environment=(String)configuration.get("environment");
         if(input.has("scenario")&&input.has("templateComposition"))throw new IllegalArgumentException("Choose scenario or templateComposition");
         JsonNode scenarioNode=input.has("templateComposition")?input.get("templateComposition"):input.get("scenario");requireObject(scenarioNode,"scenario must be a JSON object");
         @SuppressWarnings("unchecked") Map<String,Object> scenarioInput=(Map<String,Object>)JSON.convertValue(scenarioNode,Map.class);
         WorkerRequest request=inspectionRequest(packageId,root,environment);request.inspectionAction=input.has("templateComposition")?"load-template-compose":"load-scenario";request.inlineLoadScenario=scenarioInput;
         Map<String,Object> inspected=executeInspection(root,request);
         Object rawScenario=inspected.remove("normalizedScenario"),rawDigest=inspected.remove("revisionDigest");
+        inspected.put("configuration",configurationRevision(configuration,(String)rawDigest));
         Object rawSensitive=inspected.remove("containsSensitiveValues");
         Object rawModel=inspected.get("model");
         if(!(rawScenario instanceof Map)||!(rawDigest instanceof String)||!((String)rawDigest).matches("[a-f0-9]{64}")
@@ -1256,12 +1291,18 @@ final class ServerRuntime implements AutoCloseable {
     }
     Map<String,Object> createRunDraft(JsonNode body,String principal) throws Exception {return createRunDraft(body,principal,false);}
     private Map<String,Object> createRunDraft(JsonNode body,String principal,boolean retainedSelection) throws Exception {
+        return createRunDraft(body,principal,retainedSelection,null);
+    }
+    private Map<String,Object> createRunDraft(JsonNode body,String principal,boolean retainedSelection,Map<String,Object> approvedConfiguration) throws Exception {
         RunDefinition run=retainedSelection?RunDefinition.parseRetained(body):RunDefinition.parse(body);
         if(principal==null||principal.isBlank())throw new IllegalArgumentException("A server-resolved request identity is required");
         if(!config.inspection.enabled)throw new NotFoundException();
         String packageId=run.workerInput.path("packageId").asText();
         Path root=packageRoot(packageId);if(root==null)throw new NotFoundException();validatePackageRoot(root);
         ObjectNode input=run.workerInput.deepCopy();
+        Map<String,Object> configuration=resolveExecutionConfiguration(packageId,root,optionalText(input,"environment"));
+        if(approvedConfiguration!=null)configuration=approvedConfiguration;
+        input.put("environment",(String)configuration.get("environment"));
         // The request omits config when using the Server's shared runtime configuration.
         // Persist its absolute canonical path so draft revision checks and scheduled RUNs
         // keep resolving the same file outside the package root.
@@ -1270,7 +1311,7 @@ final class ServerRuntime implements AutoCloseable {
         Map<String,Object> preview;DebugDraft resourceDebugDraft=null;String revision;
         if(run.resourceTarget) {
             ObjectNode debug=JSON.createObjectNode();debug.put("packageId",packageId);
-            if(body.has("environment"))debug.set("environment",body.get("environment"));
+            debug.set("environment",input.get("environment"));
             debug.set("target",body.get("target"));debug.set("input",body.get("input"));
             resourceDebugDraft=buildDebugDraft(debug,principal);
             preview=debugDraftView(resourceDebugDraft);preview.remove("draftId");
@@ -1293,6 +1334,8 @@ final class ServerRuntime implements AutoCloseable {
             input.set("caseIds",JSON.valueToTree(selected));input.remove("tags");input.remove("excludeTags");input.remove("rerunFailed");
         }
         if(revision==null||!revision.matches("[a-f0-9]{64}"))throw new IllegalStateException("RUN validation did not return a package revision");
+        configuration=configurationRevision(configuration,revision);
+        preview.put("configuration",configuration);input.set("configurationProvenance",JSON.valueToTree(configuration));
         input.put("expectedRevisionDigest",revision);applyInspectionPolicy(input,packageId);
         RunDraft draft=new RunDraft("R"+UUID.randomUUID().toString().replace("-","").toUpperCase(),principal,packageId,revision,input,
                 new LinkedHashMap<>(preview),clock.instant().plusMillis(DRAFT_TTL_MILLIS),resourceDebugDraft);
@@ -1386,6 +1429,7 @@ final class ServerRuntime implements AutoCloseable {
             requireLiveDraft(draft);
             verifyPackageRevision(draft.packageId,draft.environment,draft.revisionDigest);
             com.fasterxml.jackson.databind.node.ObjectNode internal=JSON.createObjectNode();
+            internal.set("configurationProvenance",JSON.valueToTree(retainedConfiguration(draft.preview)));
             internal.put("packageId",draft.packageId);if(draft.environment!=null)internal.put("environment",draft.environment);
             internal.set("target",JSON.valueToTree(Map.of("type",draft.targetType,"id",draft.targetId)));
             internal.set("inlineDebugInput",JSON.valueToTree(draft.input));
@@ -1422,6 +1466,7 @@ final class ServerRuntime implements AutoCloseable {
             verifyQuickLoadDraftRevision(draft);
             requireLiveDraft(draft.expiresAt);
             com.fasterxml.jackson.databind.node.ObjectNode internal=JSON.createObjectNode();
+            internal.set("configurationProvenance",JSON.valueToTree(retainedConfiguration(draft.preview)));
             internal.put("packageId",draft.packageId);if(draft.environment!=null)internal.put("environment",draft.environment);
             internal.set("target",JSON.valueToTree(Map.of("type",draft.targetType,"id",draft.targetId)));
             internal.put("loadModel",draft.model);internal.set("inlineLoadScenario",JSON.valueToTree(draft.scenario));
@@ -1458,6 +1503,7 @@ final class ServerRuntime implements AutoCloseable {
             verifyPackageRevision(draft.packageId,draft.environment,draft.revisionDigest);
             requireLiveDraft(draft.expiresAt);
             com.fasterxml.jackson.databind.node.ObjectNode internal=JSON.createObjectNode();
+            internal.set("configurationProvenance",JSON.valueToTree(retainedConfiguration(draft.preview)));
             internal.put("packageId",draft.packageId);if(draft.environment!=null)internal.put("environment",draft.environment);
             internal.put("loadModel",draft.model);internal.set("inlineLoadScenario",JSON.valueToTree(draft.scenario));
             internal.put("expectedRevisionDigest",draft.revisionDigest);
@@ -1501,7 +1547,7 @@ final class ServerRuntime implements AutoCloseable {
     }
     WorkerRequest inspectionRequest(String packageId,Path root,String environment) {
         WorkerRequest request=new WorkerRequest();request.protocolVersion="att-worker/v1";request.jobId="I"+UUID.randomUUID().toString().replace("-","");request.command="inspect";
-        request.packageRoot=root.toString();request.config=config.runtimeConfigPath.toString();request.environment=environment;
+        request.packageRoot=root.toString();request.config=config.runtimeConfigPath.toString();request.environment=environment;request.registeredPackageId=packageId;
         request.maxResponseBytes=config.inspection.maxResponseBytes;request.maxSourceBytes=config.inspection.maxSourceBytes;
         request.safeTextSources=config.inspection.safeTextSources(packageId);
         request.externalTextSources=config.inspection.externalTextSources(packageId);
@@ -1513,6 +1559,7 @@ final class ServerRuntime implements AutoCloseable {
     }
     WorkerRequest applyWorkerPolicy(WorkerRequest request) {
         request.executionEnvironment=null;
+        if(!"inspect".equals(request.command))request.packageManifestSource=null;
         request.liveOutputMaxEntryChars=config.liveOutput.maxEntryChars;request.liveOutputMaxEntryLines=config.liveOutput.maxEntryLines;
         return request;
     }
@@ -1536,28 +1583,28 @@ final class ServerRuntime implements AutoCloseable {
     }
     private Map<String,Object> debugDraftView(DebugDraft draft) {
         Map<String,Object> view=new LinkedHashMap<String,Object>();view.put("draftId",draft.id);view.put("packageId",draft.packageId);
-        view.put("environment",draft.environment);view.put("target",Map.of("type",draft.targetType,"id",draft.targetId));
+        view.put("configuration",draft.preview.get("configuration"));view.put("environment",draft.environment);view.put("target",Map.of("type",draft.targetType,"id",draft.targetId));
         view.put("preview",draft.preview.get("input"));view.put("redacted",Boolean.TRUE.equals(draft.preview.get("redacted")));
         try {DumperOptions options=new DumperOptions();options.setDefaultFlowStyle(DumperOptions.FlowStyle.BLOCK);options.setPrettyFlow(true);options.setWidth(120);view.put("previewYaml",new Yaml(options).dump(draft.preview.get("input")));}catch(Exception ignored){view.put("previewYaml","{}");}
         view.put("diagnostics",Collections.emptyList());view.put("expiresAt",draft.expiresAt.toString());return view;
     }
     private Map<String,Object> quickLoadDraftView(QuickLoadDraft draft) {
         Map<String,Object> view=new LinkedHashMap<String,Object>();view.put("draftId",draft.id);view.put("packageId",draft.packageId);
-        view.put("environment",draft.environment);view.put("target",Map.of("type",draft.targetType,"id",draft.targetId));
+        view.put("configuration",draft.preview.get("configuration"));view.put("environment",draft.environment);view.put("target",Map.of("type",draft.targetType,"id",draft.targetId));
         view.put("model",draft.model);view.put("preview",draft.preview.get("preview"));view.put("previewYaml",draft.preview.get("previewYaml"));
         view.put("redacted",Boolean.TRUE.equals(draft.preview.get("redacted")));view.put("diagnostics",Collections.emptyList());
         view.put("expiresAt",draft.expiresAt.toString());return view;
     }
     private Map<String,Object> advancedLoadDraftView(AdvancedLoadDraftState draft) {
         Map<String,Object> view=new LinkedHashMap<String,Object>();view.put("draftId",draft.id);view.put("packageId",draft.packageId);
-        view.put("environment",draft.environment);view.put("model",draft.model);
+        view.put("configuration",draft.preview.get("configuration"));view.put("environment",draft.environment);view.put("model",draft.model);
         view.put("preview",draft.preview.get("preview"));view.put("previewYaml",draft.preview.get("previewYaml"));
         view.put("redacted",Boolean.TRUE.equals(draft.preview.get("redacted")));view.put("diagnostics",Collections.emptyList());
         view.put("expiresAt",draft.expiresAt.toString());return view;
     }
     private Map<String,Object> catalogLoadDraftView(CatalogLoadDraftState draft) {
         Map<String,Object> view=new LinkedHashMap<String,Object>();view.put("draftId",draft.id);view.put("packageId",draft.packageId);
-        view.put("environment",draft.environment);view.put("model",draft.model);view.put("previewYaml",draft.previewYaml);
+        view.put("configuration",draft.configuration);view.put("environment",draft.environment);view.put("model",draft.model);view.put("previewYaml",draft.previewYaml);
         view.put("redacted",Boolean.TRUE);view.put("diagnostics",Collections.emptyList());view.put("expiresAt",draft.expiresAt.toString());return view;
     }
     private void checkDraftCapacity(String principal) {
@@ -1698,6 +1745,58 @@ final class ServerRuntime implements AutoCloseable {
         }
         return paths;
     }
+    /** Resolve through the Engine before policy checks and persist the canonical selected profile. */
+    private Map<String,Object> resolveExecutionConfiguration(String packageId,Path root,String requested) throws Exception {
+        String selection=requested==null||requested.isBlank()?null:inspectionEnvironment(requested,"environment");
+        WorkerRequest request=inspectionRequest(packageId,root,selection);
+        request.inspectionType="package-configuration";request.inspectionAction="resolve";request.registeredPackageId=packageId;
+        Map<String,Object> effective=executeInspection(root,request);
+        Map<String,Object> evidence=new LinkedHashMap<>(att.server.api.ConfigurationSnapshot.copy(effective));
+        String canonical=inspectionEnvironment((String)evidence.get("environment"),"environment");
+        config.packageConfiguration.authorizeEnvironment(canonical,selection!=null);
+        evidence.put("packageId",packageId);
+        return deepMap(evidence);
+    }
+    private void authorizeConfiguration(Map<String,Object> configuration) {
+        String origin=(String)configuration.get("environmentOrigin");
+        config.packageConfiguration.authorizeEnvironment((String)configuration.get("environment"),"request".equals(origin)||"context".equals(origin));
+    }
+    private static Map<String,Object> configurationRevision(Map<String,Object> evidence,String revision) {
+        Map<String,Object> result=new LinkedHashMap<>(evidence);
+        if(revision!=null)result.put("packageRevision",revision);
+        return att.server.api.ConfigurationSnapshot.copy(result);
+    }
+    private static Map<String,Object> retainedConfiguration(Map<String,Object> preview) {
+        return att.server.api.ConfigurationSnapshot.copy((Map<?,?>)preview.get("configuration"));
+    }
+    private Path manifestEditableRoot(String packageId,String principal) throws Exception {
+        if(!config.authenticationRequired||!config.packageConfiguration.sourceEditingEnabled||principal==null||
+                !principal.equals(packageId)||!isOperationalPrincipal(principal)) {
+            store.audit(principal==null?"anonymous":principal,"PACKAGE_MANIFEST_DENIED",null,packageId,"source editing is not authorized");
+            throw new PackageManifestPublisher.Denied();
+        }
+        Path root=packageRoot(packageId);if(root==null)throw new PackageManifestPublisher.Missing();
+        validatePackageRoot(root);return root.toRealPath();
+    }
+    private Map<String,Object> validateManifestCandidate(String packageId,String source) throws Exception {
+        if(!config.inspection.enabled)throw new NotFoundException();
+        Path root=packageRoot(packageId);if(root==null)throw new NotFoundException();validatePackageRoot(root);
+        WorkerRequest request=inspectionRequest(packageId,root,null);
+        request.inspectionType="package-configuration";request.inspectionAction="validate";request.packageManifestSource=source;
+        return executeInspection(root,request);
+    }
+    Map<String,Object> inspectPackageConfiguration(String packageId,String action,String environment,String principal) throws Exception {
+        if(!config.inspection.enabled)throw new NotFoundException();
+        Path root=packageRoot(packageId);if(root==null)throw new NotFoundException();validatePackageRoot(root);
+        if(!List.of("declared","effective","compare","source").contains(action))throw new IllegalArgumentException("Unsupported Package Configuration view");
+        String selected=environment==null||environment.isBlank()?null:inspectionEnvironment(environment,"environment");
+        WorkerRequest request=inspectionRequest(packageId,root,selected);
+        request.inspectionType="package-configuration";request.inspectionAction=action;
+        Map<String,Object> result=executeInspection(root,request);result.put("packageId",packageId);
+        result.put("canEdit",config.authenticationRequired&&config.packageConfiguration.sourceEditingEnabled&&packageId.equals(principal)&&isOperationalPrincipal(principal));
+        return result;
+    }
+
     Map<String,Object> inspectConfiguration(String packageId,String action,String environment,String otherEnvironment,String principal) throws Exception {
         return inspectConfiguration(packageId,action,environment,otherEnvironment,null,0,0,principal);
     }
@@ -1710,6 +1809,7 @@ final class ServerRuntime implements AutoCloseable {
         Path root=packageRoot(packageId);if(root==null)throw new NotFoundException();validatePackageRoot(root);
         String selected=environment==null||environment.isBlank()?null:inspectionEnvironment(environment,"environment");
         WorkerRequest request=inspectionRequest(packageId,root,selected);request.inspectionType="configuration";
+        request.inspectionEnvironment=selected;
         request.inspectionAction="testdata-records";request.inspectionResourceId=descriptorId;request.inspectionSection=descriptorId;
         request.inspectionOffset=offset;request.inspectionLimit=limit;
         request.inspectionQuery=previewGenerated?"preview-generated":null;
@@ -1812,6 +1912,10 @@ final class ServerRuntime implements AutoCloseable {
         catch(InterruptedException interrupted){cancelInspectionTask(task);Thread.currentThread().interrupt();throw interrupted;}
         catch(ExecutionException failure){Throwable cause=failure.getCause();if(cause instanceof Exception)throw (Exception)cause;throw new IllegalStateException("Package inspection failed",cause);}
         String workerError=(String)envelope.get("errorCode");
+        if("package-configuration".equals(request.inspectionType)&&"ATT-CFG-001".equals(workerError)) {
+            Object raw=envelope.get("diagnostics");
+            throw new InspectionConfigurationException(safeInspectionDiagnostics(raw instanceof List?(List<?>)raw:List.of(),root));
+        }
         if("ATT-RESOURCE-NOT-FOUND".equals(workerError))throw new NotFoundException();
         if("ATT-RESOURCE-CURSOR-STALE".equals(workerError))throw new StaleCursorException();
         if(List.of("load-catalog","load-detail","load-source").contains(request.inspectionAction)) {
@@ -1822,7 +1926,7 @@ final class ServerRuntime implements AutoCloseable {
                 throw new InspectionConfigurationException(diagnostics.isEmpty()
                         ?safeInspectionDiagnostics(List.of(),root):diagnostics);
         }
-        boolean draftInspection="run-input".equals(request.inspectionAction)||"debug-input".equals(request.inspectionAction)||"debug-form".equals(request.inspectionAction)
+        boolean draftInspection=("package-configuration".equals(request.inspectionType)&&"validate".equals(request.inspectionAction))||"run-input".equals(request.inspectionAction)||"debug-input".equals(request.inspectionAction)||"debug-form".equals(request.inspectionAction)
                 ||"quick-load-input".equals(request.inspectionAction)||"quick-load-form".equals(request.inspectionAction)
                 ||"load-templates".equals(request.inspectionAction)||"load-template-compose".equals(request.inspectionAction)
                 ||"quick-load-policy".equals(request.inspectionAction)||"load-scenario".equals(request.inspectionAction)
@@ -1835,7 +1939,7 @@ final class ServerRuntime implements AutoCloseable {
             if(rawDiagnostics instanceof List)for(Object raw:(List<?>)rawDiagnostics)if(raw instanceof Map) {
                 @SuppressWarnings("unchecked") Map<String,Object> value=(Map<String,Object>)raw;
                 Map<String,Object> safe=new LinkedHashMap<String,Object>();
-                for(String key:List.of("code","summary","detail","field","file","suggestion","resourceId","sourceFile")) {
+                for(String key:List.of("code","summary","detail","field","file","suggestion","resourceId","sourceFile","packageId")) {
                     Object item=value.get(key);
                     if(item instanceof String) {
                         String text=att.server.api.internal.DiagnosticSanitizer.redactText((String)item);
@@ -1856,7 +1960,7 @@ final class ServerRuntime implements AutoCloseable {
                 if(resourceId!=null)fallback.put("resourceId",resourceId);
                 diagnostics.add(fallback);
             }
-            String packageId=configuredPackageId(root);
+            String packageId=request.registeredPackageId==null?configuredPackageId(root):request.registeredPackageId;
             List<Map<String,String>> targets=diagnosticTargets(request);
             for(Map<String,Object> diagnostic:diagnostics) {
                 if(packageId!=null)diagnostic.putIfAbsent("packageId",packageId);
@@ -1909,7 +2013,7 @@ final class ServerRuntime implements AutoCloseable {
         for(Object raw:rawDiagnostics)if(raw instanceof Map) {
             @SuppressWarnings("unchecked") Map<String,Object> value=(Map<String,Object>)raw;
             Map<String,Object> safe=new LinkedHashMap<>();
-            for(String key:List.of("code","summary","detail","field","file","suggestion")) {
+            for(String key:List.of("code","summary","detail","field","file","suggestion","packageId")) {
                 Object item=value.get(key);
                 if(item instanceof String) {
                     String text=att.server.api.internal.DiagnosticSanitizer.redactText((String)item);
@@ -2100,7 +2204,7 @@ final class ServerRuntime implements AutoCloseable {
                     response.put("errorCode",errorCode);
                     if(workerDiagnostic!=null) {
                         Map<String,Object> diagnostic=new LinkedHashMap<>();
-                        for(String key:List.of("code","summary","detail","field","file","suggestion","resourceId","sourceFile")) {
+                        for(String key:List.of("code","summary","detail","field","file","suggestion","resourceId","sourceFile","packageId")) {
                             Object value=workerDiagnostic.get(key);
                             if(value instanceof String)diagnostic.put(key,value);
                         }
@@ -2350,7 +2454,7 @@ final class ServerRuntime implements AutoCloseable {
     }
 
     private Map<String,Object> submitScheduledRun(LoadSchedule schedule,String occurrenceId,String executionPrincipal) throws Exception {
-        ObjectNode input=JSON.valueToTree(schedule.runInput);applyInspectionPolicy(input,schedule.packageId);
+        ObjectNode input=JSON.valueToTree(schedule.runInput);input.set("configurationProvenance",JSON.valueToTree(schedule.configuration));applyInspectionPolicy(input,schedule.packageId);
         JobExecutionSpec retained=capturePrevalidatedExecutionSpec("run",input,null);
         return submit("run",input,executionPrincipal,true,occurrenceId,true,null,null,retained);
     }
@@ -2410,6 +2514,7 @@ final class ServerRuntime implements AutoCloseable {
                 if(validated!=null){execution.inlineScenario=deepMap(validated.scenario);execution.expectedRevisionDigest=validated.revisionDigest;execution.validatedSensitiveSource=validated.containsSensitiveValues;}
                 store.recordScheduleSourceChange(original,current,false,clock.instant().toString());
                 store.audit(principal,"SCHEDULE_SOURCE_REVALIDATED",null,original.packageId,"schedule="+original.id+";stored="+original.expectedRevisionDigest+";current="+current+";policy="+policy+";source="+(original.packageChangePolicy==null?"server":"schedule"));
+                refreshScheduleConfiguration(execution,original,root);
                 return execution;
             }
         }
@@ -2417,7 +2522,13 @@ final class ServerRuntime implements AutoCloseable {
         if(validated!=null){execution.inlineScenario=deepMap(validated.scenario);execution.expectedRevisionDigest=validated.revisionDigest;execution.validatedSensitiveSource=validated.containsSensitiveValues;}
         if("package-revision-changed".equals(original.sourceStatus))
             store.recordScheduleSourceRestored(original,original.expectedRevisionDigest,clock.instant().toString());
+        if(execution.configuration==null)refreshScheduleConfiguration(execution,original,root);
         return execution;
+    }
+    private void refreshScheduleConfiguration(LoadSchedule execution,LoadSchedule approved,Path root) throws Exception {
+        Map<String,Object> current=new LinkedHashMap<>(resolveExecutionConfiguration(execution.packageId,root,execution.environment));
+        if(approved.configuration!=null){current.put("approvedConfigurationIdentity",approved.configuration.get("configurationIdentity"));current.put("environmentOrigin",approved.configuration.get("environmentOrigin"));Map<String,Object> origins=new LinkedHashMap<>((Map<String,Object>)current.get("origins"));origins.put("environment",approved.configuration.get("environmentOrigin"));current.put("origins",origins);Map<String,Object> paths=new LinkedHashMap<>((Map<String,Object>)current.get("authoredPaths"));paths.put("environment",((Map<?,?>)approved.configuration.get("authoredPaths")).get("environment"));current.put("authoredPaths",paths);}
+        execution.configuration=configurationRevision(current,execution.expectedRevisionDigest);
     }
     private ValidatedScheduledScenario validateScheduleInputs(Path root,LoadSchedule schedule) throws Exception {
         if("run".equals(schedule.effectiveJobType()))validateScheduledRun(schedule);
@@ -2434,6 +2545,7 @@ final class ServerRuntime implements AutoCloseable {
         Map<String,Object> scenario=schedule.inlineScenario;
         if(scenario==null||schedule.expectedRevisionDigest==null)throw new IllegalArgumentException("Validated scheduled Load snapshot is incomplete");
         com.fasterxml.jackson.databind.node.ObjectNode input=JSON.createObjectNode();input.put("packageId",schedule.packageId);
+        input.set("configurationProvenance",JSON.valueToTree(schedule.configuration));
         if(schedule.config!=null)input.put("config",schedule.config);if(schedule.environment!=null)input.put("environment",schedule.environment);
         input.set("inlineLoadScenario",JSON.valueToTree(scenario));input.put("expectedRevisionDigest",schedule.expectedRevisionDigest);
         applyInspectionPolicy(input,schedule.packageId);
@@ -2449,6 +2561,7 @@ final class ServerRuntime implements AutoCloseable {
         String revisionDigest=schedule.expectedRevisionDigest;
         if(revisionDigest==null)throw new IllegalArgumentException("Validated scheduled Debug snapshot is incomplete");
         com.fasterxml.jackson.databind.node.ObjectNode input=JSON.createObjectNode();input.put("packageId",schedule.packageId);
+        input.set("configurationProvenance",JSON.valueToTree(schedule.configuration));
         if(schedule.config!=null)input.put("config",schedule.config);if(schedule.environment!=null)input.put("environment",schedule.environment);
         input.set("target",JSON.valueToTree(Map.of("type",schedule.debugTargetType,"id",schedule.debugTargetId)));
         input.set("inlineDebugInput",JSON.valueToTree(schedule.inlineDebugInput));input.put("expectedRevisionDigest",revisionDigest);
@@ -2575,7 +2688,13 @@ final class ServerRuntime implements AutoCloseable {
             if(prior!=null)throw new IllegalArgumentException("A validated draft can only create a new schedule");
             if(input.has("scenario")&&!input.get("scenario").isNull())throw new IllegalArgumentException("Provide either a validated draft or a package scenario path");
             String draftEnvironment=input.has("environment")?fieldText(input,"environment",null,false):null;
-            draftEnvironment=draftEnvironment==null||draftEnvironment.isBlank()?null:inspectionEnvironment(draftEnvironment,"environment");
+            draftEnvironment=draftEnvironment==null||draftEnvironment.isBlank()?retainedDraftEnvironment(draftId,principal,s.packageId):inspectionEnvironment(draftEnvironment,"environment");
+            s.environment=draftEnvironment;
+            if(runDrafts.containsKey(draftId))s.configuration=retainedConfiguration(runDrafts.get(draftId).preview);
+            else if(debugDrafts.containsKey(draftId))s.configuration=retainedConfiguration(debugDrafts.get(draftId).preview);
+            else if(quickLoadDrafts.containsKey(draftId))s.configuration=retainedConfiguration(quickLoadDrafts.get(draftId).preview);
+            else if(advancedLoadDrafts.containsKey(draftId))s.configuration=retainedConfiguration(advancedLoadDrafts.get(draftId).preview);
+            else if(catalogLoadDrafts.containsKey(draftId))s.configuration=catalogLoadDrafts.get(draftId).configuration;
             if("run".equals(jobType)) {
                 RunDraft draft=runDraft(draftId,principal,s.packageId);
                 if(!java.util.Objects.equals(draftEnvironment,draft.workerInput.path("environment").isTextual()?draft.workerInput.path("environment").asText():null))throw new IllegalArgumentException("Schedule environment differs from the validated RUN draft");
@@ -2671,6 +2790,12 @@ final class ServerRuntime implements AutoCloseable {
             if(scenarioInputChanged(prior,s,input))throw new IllegalArgumentException("An inline scenario snapshot is immutable; create a new schedule for changed values");
             if(s.load!=null&&!s.load.isEmpty())throw new IllegalArgumentException("Inline scenario snapshots cannot use separate Load overrides");
         }
+        if(validateExecution) {
+            if(s.configuration==null||!java.util.Objects.equals(s.environment,s.configuration.get("environment"))||!java.util.Objects.equals(s.packageId,s.configuration.get("packageId")))
+                s.configuration=resolveExecutionConfiguration(s.packageId,root,s.environment);
+            s.environment=(String)s.configuration.get("environment");
+            authorizeConfiguration(s.configuration);
+        }
         java.time.ZoneId zone=scheduleZone(s.timezone);
         if(s.runAt==null) {
             CronExpression cron=CronExpression.parse(s.cron,config.scheduling.minimumIntervalMinutes);
@@ -2685,6 +2810,7 @@ final class ServerRuntime implements AutoCloseable {
             s.listSummary=JobListIdentity.load(JSON.valueToTree(validated.scenario));
             if(s.inlineScenario!=null)s.inlineScenario=deepMap(validated.scenario);
         }
+        if(s.configuration!=null)s.configuration=configurationRevision(s.configuration,s.expectedRevisionDigest);
         if(prior==null)s.packageRootIdentity=packageRootIdentity(root);
         else if(validateExecution) {
             if("load".equals(s.effectiveJobType())&&s.inlineScenario==null&&!java.util.Objects.equals(prior.packageId,s.packageId))s.packageRootIdentity=packageRootIdentity(root);
@@ -2698,6 +2824,18 @@ final class ServerRuntime implements AutoCloseable {
         try { fire=Instant.parse(runAt); } catch(java.time.format.DateTimeParseException invalid) {throw new IllegalArgumentException("runAt must be an ISO-8601 instant with UTC offset");}
         if(!fire.isAfter(clock.instant()))throw new IllegalArgumentException("runAt must be in the future");
         return fire.toString();
+    }
+    private String retainedDraftEnvironment(String id,String principal,String packageId) {
+        if(id.startsWith("R"))return runDraft(id,principal,packageId).workerInput.path("environment").asText(null);
+        DebugDraft debug=debugDrafts.get(id);
+        if(debug!=null&&debug.principal.equals(principal)&&debug.packageId.equals(packageId))return debug.environment;
+        QuickLoadDraft quick=quickLoadDrafts.get(id);
+        if(quick!=null&&quick.principal.equals(principal)&&quick.packageId.equals(packageId))return quick.environment;
+        AdvancedLoadDraftState advanced=advancedLoadDrafts.get(id);
+        if(advanced!=null&&advanced.principal.equals(principal)&&advanced.packageId.equals(packageId))return advanced.environment;
+        CatalogLoadDraftState catalog=catalogLoadDrafts.get(id);
+        if(catalog!=null&&catalog.principal.equals(principal)&&catalog.packageId.equals(packageId))return catalog.environment;
+        throw new NotFoundException();
     }
     private Map<String,Object> scheduleDraftScenario(String draftId,String principal,String packageId,String environment) {
         synchronized(draftLock) {
@@ -3400,6 +3538,7 @@ final class ServerRuntime implements AutoCloseable {
         admissionLifecycle.writeLock().lock();
         try {if(closing)return;closing=true;}finally{admissionLifecycle.writeLock().unlock();}
         if(inspectionWarmup!=null)inspectionWarmup.shutdownNow();
+        manifestPublisher.close();
         if(executionWorkers!=null)executionWorkers.close();
         if(loadScheduleScheduler!=null)loadScheduleScheduler.close();
         retention.shutdownNow();artifactMaintenance.shutdownNow();targetIndexMaintenance.shutdownNow();inspectionWatchdogs.shutdownNow();
@@ -3537,13 +3676,13 @@ final class ServerRuntime implements AutoCloseable {
     }
     private static final class CatalogLoadDraftState {
         final String id,principal,packageId,environment,resourceId,revisionDigest,model,previewYaml;
-        final Map<String,Object> scenario;
+        final Map<String,Object> scenario,configuration;
         final Instant expiresAt;
         CatalogLoadDraftState(String id,String principal,String packageId,String environment,String resourceId,
-                              String revisionDigest,String model,Map<String,Object> scenario,String previewYaml,Instant expiresAt) {
+                              String revisionDigest,String model,Map<String,Object> scenario,String previewYaml,Map<String,Object> configuration,Instant expiresAt) {
             this.id=id;this.principal=principal;this.packageId=packageId;this.environment=environment;
             this.resourceId=resourceId;this.revisionDigest=revisionDigest;this.model=model;
-            this.scenario=deepMap(scenario);this.previewYaml=previewYaml;this.expiresAt=expiresAt;
+            this.scenario=deepMap(scenario);this.previewYaml=previewYaml;this.configuration=deepMap(configuration);this.expiresAt=expiresAt;
         }
     }
     private static Map<String,Object> deepMap(Map<String,Object> source) {

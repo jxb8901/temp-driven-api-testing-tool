@@ -17,6 +17,7 @@ contents:
   - att-worker/pom.xml
   - att-server/pom.xml
   - att-dist/pom.xml
+  - packages/default/package.yaml (att-package/v1)
   - packages/default/templates/
   - tools/
   - packages/default/testcase/

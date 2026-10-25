@@ -173,7 +173,7 @@ records:
 selection: {strategy: roundRobin, exhaustion: stop}
 ~~~
 
-Environment profile 的 `testdata` list 宣告共享 registry。Load scenario 可在頂層宣告本地 `testdata` imports；同 ID 會在該次 Load 完整取代 environment descriptor。單一 layer 內的重複 ID 會報錯。一般 Run/Debug 只延遲啟用實際引用的 ID；`validate --package` 會檢查全部配置 descriptors。Template、Flow 與 Tool 定義只能透過 `EXEC.INPUT` 取得已解析資料，不可直接寫 `@{...}` 或 `%{...}`。詳見[Environment 與 Test Data](configuration.md)、[Load](execution-modes/load.md) 及維護者的 [testdata design](../system-design/testdata.zh.md)。
+[Package Manifest](package-manifest.md) 宣告 Package Testdata registry，以及可選的 Environment replacement lists。Load scenario 可在頂層宣告本地 `testdata` imports；同 ID 會在該次 Load 完整取代 environment descriptor。單一 layer 內的重複 ID 會報錯。一般 Run/Debug 只延遲啟用實際引用的 ID；`validate --package` 會檢查全部 Manifest descriptor layers。Template、Flow 與 Tool 定義只能透過 `EXEC.INPUT` 取得已解析資料，不可直接寫 `@{...}` 或 `%{...}`。詳見[Environment 與 Test Data](configuration.md)、[Load](execution-modes/load.md) 及維護者的 [testdata design](../system-design/testdata.zh.md)。
 
 ## 進階 Workbook 與 Snapshot 細節
 

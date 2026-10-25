@@ -1,3 +1,4 @@
+import { EnvironmentResolutionNotice } from '../explorer/EnvironmentResolutionNotice';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ApiError, type AsyncState } from '../../types';
 import type { LoadCatalogItem, PackageOption, ServerDiagnostic } from './types';
@@ -368,6 +369,7 @@ export function LoadCatalogPage({ api, packages, inlineLoadEnabled, schedulingEn
         <button className="button button-quiet" type="button" onClick={clearCatalogFilters}>Clear filters</button>
         <button className="button button-quiet" type="button" onClick={() => setRefreshKey(value => value + 1)} disabled={catalogState === 'loading'}>{catalogState === 'loading' ? 'Refreshing…' : 'Refresh resources'}</button>
       </div>
+      <EnvironmentResolutionNotice packageId={selectedPackage || ''} environment={environmentDraft} />
       <p className="att-load-environment-context" role="status">Environment: {environmentDraft || 'Package default'}{selectedPackage ? ` · Profiles from ${selectedPackage}` : ''}</p>
       {environmentProfilesState === 'loading' && <p role="status" aria-busy="true">Loading declared Environment profiles…</p>}
       {environmentProfilesState === 'error' && <p className="att-inline-error" role="alert">Environment profiles could not be loaded. Package default remains available. <button className="button button-quiet" type="button" onClick={() => setEnvironmentReload(value => value + 1)}>Retry profiles</button></p>}

@@ -27,8 +27,9 @@ class ServerRuntimeScheduleTest {
         Files.createDirectories(packageRoot.resolve("testcase"));
         Files.createDirectories(packageRoot.resolve("testdata"));
         Path runtimeConfig=temp.resolve("scheduled-runtime/config/config.yaml");Files.createDirectories(runtimeConfig.getParent());
-        Files.writeString(runtimeConfig,"schemaVersion: att-config/v2.12\nenvironment: SIT\nenvironments:\n  SIT:\n    testdata: [testdata/edda.yaml]\n"
+        Files.writeString(runtimeConfig,"schemaVersion: att-config/v2.12\nenvironment: SIT\nenvironments: {SIT: {}}\n"
                 +"testcase:\n  root: testcase\ntemplates:\n  root: templates\n");
+        Files.writeString(packageRoot.resolve("package.yaml"),"schemaVersion: att-package/v1\ntestdata: {environments: {SIT: [testdata/edda.yaml]}}\n");
         Files.writeString(packageRoot.resolve("testdata/edda.yaml"),"schemaVersion: att-testdata/v1.0\nid: edda\nrecords: [{currency: HKD}]\n");
         Files.writeString(templates.resolve("template.yaml"),"schemaVersion: att-template/v3.6\nname: SCHEDULED\ndescription: scheduled Load smoke target\nactions:\n"
                 +"  message:\n    type: log\n    message: scheduled Load passed\n");

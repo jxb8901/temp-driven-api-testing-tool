@@ -77,6 +77,7 @@ Status: 規範性使用者文件；由模組化來源自動生成
   - [Tool Timeout precedence](#tool-timeout-precedence)
   - [Direct DB timeout 與 retry eligibility](#direct-db-timeout-與-retry-eligibility)
 - [Configuration 與 environments](#configuration-與-environments)
+  - [Package ownership](#package-ownership)
   - [Studio 共用 Configuration](#studio-共用-configuration)
   - [按任務查找配置](#按任務查找配置)
   - [配置層與優先級](#配置層與優先級)
@@ -90,6 +91,14 @@ Status: 規範性使用者文件；由模組化來源自動生成
   - [分開的 Configuration files](#分開的-configuration-files)
   - [`config.report.fileNamePattern`](#configreportfilenamepattern)
   - [Configuration owners](#configuration-owners)
+- [Package Manifest](#package-manifest)
+  - [宣告 Package 預設值](#宣告-package-預設值)
+  - [解析 Environment](#解析-environment)
+  - [套用 typed defaults](#套用-typed-defaults)
+  - [解析 invocation Testdata](#解析-invocation-testdata)
+  - [在 Studio 檢視及發布](#在-studio-檢視及發布)
+  - [遷移舊 Package inventory](#遷移舊-package-inventory)
+  - [API paths](#api-paths)
 - [CLI 參考](#cli-參考)
   - [選擇命令](#選擇命令)
   - [編譯 source checkout](#編譯-source-checkout)
@@ -380,7 +389,7 @@ records:
 selection: {strategy: roundRobin, exhaustion: stop}
 ~~~
 
-Environment profile 的 `testdata` list 宣告共享 registry。Load scenario 可在頂層宣告本地 `testdata` imports；同 ID 會在該次 Load 完整取代 environment descriptor。單一 layer 內的重複 ID 會報錯。一般 Run/Debug 只延遲啟用實際引用的 ID；`validate --package` 會檢查全部配置 descriptors。Template、Flow 與 Tool 定義只能透過 `EXEC.INPUT` 取得已解析資料，不可直接寫 `@{...}` 或 `%{...}`。詳見[Environment 與 Test Data](reference.zh/configuration.md)、[Load](reference.zh/execution-modes/load.md) 及維護者的 [testdata design](system-design/testdata.zh.md)。
+[Package Manifest](reference.zh/package-manifest.md) 宣告 Package Testdata registry，以及可選的 Environment replacement lists。Load scenario 可在頂層宣告本地 `testdata` imports；同 ID 會在該次 Load 完整取代 environment descriptor。單一 layer 內的重複 ID 會報錯。一般 Run/Debug 只延遲啟用實際引用的 ID；`validate --package` 會檢查全部 Manifest descriptor layers。Template、Flow 與 Tool 定義只能透過 `EXEC.INPUT` 取得已解析資料，不可直接寫 `@{...}` 或 `%{...}`。詳見[Environment 與 Test Data](reference.zh/configuration.md)、[Load](reference.zh/execution-modes/load.md) 及維護者的 [testdata design](system-design/testdata.zh.md)。
 
 ### 進階 Workbook 與 Snapshot 細節
 
@@ -2189,11 +2198,11 @@ instances:
   - {id: app2, host: sit-app2.example, port: 2222}
 ```
 
-在 `att-config/v2.12` 的全域或 `environments.<NAME>.sshhelpers` 列出 descriptor 路徑。目前 package 使用 config v2.12 與 Tool Group v2.9。選定環境的清單會整組取代全域清單；省略則繼承。Tool group 所綁定的相同邏輯 ID 必須在每個選定 profile 內存在。SIT 可綁定一臺，UAT 綁定兩臺，Tool／Action 不必修改：
+在 `att-config/v2.13` 的全域或 `environments.<NAME>.sshhelpers` 列出 descriptor 路徑。目前 package 使用 config v2.13 與 Tool Group v2.9。選定環境的清單會整組取代全域清單；省略則繼承。Tool group 所綁定的相同邏輯 ID 必須在每個選定 profile 內存在。SIT 可綁定一臺，UAT 綁定兩臺，Tool／Action 不必修改：
 
 ```yaml
 # config/config.yaml
-schemaVersion: att-config/v2.12
+schemaVersion: att-config/v2.13
 environment: SIT
 toolGroups: [config/tools/application.yaml]
 environments:
@@ -2317,6 +2326,10 @@ Direct `update` Action 支援 `timeoutMs`，但明確拒絕 `retry`。發生 tim
 本頁是作者編寫配置時的權威閱讀參考。[`schemas/`](../schemas) 目錄中的文件仍是機器可讀契約。模式校驗會先於跨字段和文件系統校驗執行。
 
 
+### Package ownership
+
+Package 預設值、根目錄與 Testdata 改由 [Package Manifest](reference.zh/package-manifest.md) 管理。Global inventories 已棄用，除非啟用暫時 legacy policy，否則不使用。Manifest 採嚴格驗證，不支援 `x-` extensions。
+
 ### Studio 共用 Configuration
 
 在 **All packages** 下直接開啟 **Configuration**。Source、Declared、Effective 及 Compare 使用單一 `server.runtimeConfigPath`，不要求選取 Package，也不會回退至 default Package。Environment 只切換 effective values，不切換設定來源樹；設定無效或不可用時顯示明確狀態。
@@ -2355,7 +2368,7 @@ Timeout/Retry precedence 與 eligibility 見 [Reliability](reference.zh/reliabil
 在可選的 ATT 配置字段，或 ATT 擁有的 keyed collection 條目名稱前加上完全小寫的 `x-`，該項便會視為不存在。適用於現行配置物件和 keyed collection，例如 `tools`、environment profiles、Tool `arguments` declarations、`actions`、Action `evidence` collectors、report columns 及 Debug Tool overrides。YAML 本身仍須能解析；但 ATT 不會對停用項進行模式校驗、解析引用、探索依賴、求值、建立物件、執行或發布。對 keyed collection，請加在 key 上。此規則不會停用或改名 Tool 呼叫時傳入的 argument values：
 
 ```yaml
-schemaVersion: att-config/v2.12
+schemaVersion: att-config/v2.13
 x-debug-note: "#{missing.tool()}"      # 忽略的配置字段
 tools:
   x-temporary: not-a-tool               # 忽略的 Tool 條目
@@ -2387,9 +2400,9 @@ actions:
 
 ### 選擇 environment profile
 
-`att-config/v2.12` 是現行 profile 契約。Profile 可整組替換已配置的 DBHelper、MQHelper、SSHHelper、HTTPHelper 與 testdata descriptor lists。各 Helper 與 testdata descriptor 的設定方式及 [Testdata Registry 與 Input Mapping](reference.zh/test-authoring.md) 見對應頁面。
+`att-config/v2.13` 是現行 profile 契約。Profile 可整組替換已配置的 DBHelper、MQHelper、SSHHelper 與 HTTPHelper lists；Package Testdata lists 由 `package.yaml` 管理。各 Helper 與 testdata descriptor 的設定方式及 [Testdata Registry 與 Input Mapping](reference.zh/test-authoring.md) 見對應頁面。
 
-ATT 使用一份 common `att-config/v2.12` 加上 `environments` map 選擇環境；不通過修改 Action 或增加環境專用 Tool ID 來選擇環境。SIT、UAT、PREPROD 及 production-like 環境之間，Action 只保留穩定的 logical ID：
+ATT 使用一份 common `att-config/v2.13` 加上 `environments` map 選擇環境；不通過修改 Action 或增加環境專用 Tool ID 來選擇環境。SIT、UAT、PREPROD 及 production-like 環境之間，Action 只保留穩定的 logical ID：
 
 ```text
 Action -> logical helper ID -> selected config -> physical descriptor -> endpoint
@@ -2405,16 +2418,17 @@ ATT_HOME/
 │   ├── dbhelpers/{sit,uat}/orders.yaml
 │   └── mqhelpers/{sit,uat}/payment.yaml
 └── packages/<id>/
+    ├── package.yaml
     ├── testcase/
     ├── templates/
     └── testdata/accounts.yaml
 ```
 
-common config 保留 package-relative templates、testcase root、run/execution/report 設置、`toolGroups` 和 global `tools` registry。Tool/Helper descriptors 從 `ATT_HOME/config/` 解析；Testdata descriptors 則從選取的 Package 解析。Profile 層可配置 typed DB/MQ/SSH/HTTP descriptor lists；以下以 DB/MQ 示範：
+common config 保留 run/execution/report 設置、`toolGroups` 和 global `tools` registry。Tool/Helper descriptors 從 `ATT_HOME/config/` 解析；Testdata descriptors 則從選取的 Package 解析。Profile 層可配置 typed DB/MQ/SSH/HTTP descriptor lists；以下以 DB/MQ 示範：
 
 ```yaml
 # config/config.yaml
-schemaVersion: att-config/v2.12
+schemaVersion: att-config/v2.13
 environment: SIT                 # default；--env 会覆盖
 templates: {root: templates}
 testcase: {root: testcase}
@@ -2426,11 +2440,9 @@ environments:
   SIT:
     dbhelpers: [config/dbhelpers/sit/orders.yaml]
     mqhelpers: [config/mqhelpers/sit/payment.yaml]
-    testdata: [testdata/accounts.yaml]
   UAT:
     dbhelpers: [config/dbhelpers/uat/orders.yaml]
     mqhelpers: [config/mqhelpers/uat/payment.yaml]
-    testdata: [testdata/accounts.yaml]
 ```
 
 可把 `config/environments/sit.yaml` 和 `config/environments/uat.yaml` 作為 common registry 的遷移來源，包括 `invokePaymentApi` 以及 `examples/load/closed-smoke.yaml` 使用的 `sample.getAcDate`。實際 package 不要把共用 registry 縮減成 `tools: {}` 或 `toolGroups: []`。
@@ -2506,7 +2518,7 @@ Repository `schemas/catalog.yaml` 是建立版本相符 ATT Engine JAR 內嵌 re
 以下 configuration example 與 field table 和英文版共用相同 contract；欄位名與 literal values 保留英文。
 
 ```yaml
-schemaVersion: att-config/v2.12
+schemaVersion: att-config/v2.13
 outputDirectory: output
 environment: SIT
 timeoutMs: 10000
@@ -2542,13 +2554,13 @@ environments:
 
 | Path | Required/default | Constraints |
 |---|---|---|
-| `schemaVersion` | required | 現行版本：`att-config/v2.12`；上一版 schema 仍受支援。本例採用現行 schema。 |
+| `schemaVersion` | required | 現行版本：`att-config/v2.13`；上一版 schema 仍受支援。本例採用現行 schema。 |
 | `outputDirectory` | `output` | Non-empty package-relative output root |
 | `environment` | `SIT` | Non-empty default profile name when `environments` is present; otherwise exposed metadata only |
 | `timeoutMs` | `10000` | Integer 1–3600000 milliseconds |
 | `caseLog.yamlAnchors` | `false` | Boolean; false fully expands repeated YAML structures, true permits anchors/aliases |
-| `templates.root` | `templates` | Non-empty package-relative template root |
-| `testcase.root` | `testcase` | Non-empty package-relative recursive workbook/sidecar discovery root |
+| `templates.root` | 已棄用 | 使用 Manifest `resources.templatesRoot`；省略時為 `templates` |
+| `testcase.root` | 已棄用 | 使用 Manifest `resources.testcaseRoot`；省略時為 `testcase` |
 | `run.id.default` | `timestamp` | Only `timestamp` is supported |
 | `run.id.timestampFormat` | `yyyyMMdd-HHmmss` | Non-empty Java date/time format |
 | `execution.runIdFormat` | unset | Optional outer Run/Load ID expression; exact `--run-id` wins |
@@ -2588,8 +2600,8 @@ Run 和 Load 的 `--run-id <id>`，以及 standalone Debug 的 `--debug-id <id>`
 | `mqhelpers` | `[]` | Unique package-contained `att-mqhelper/v1.3` YAML paths; normalized duplicates are rejected |
 | `sshhelpers` | `[]` | Unique package-contained `att-sshhelper/v1.0` YAML paths |
 | `httphelpers` | `[]` | Unique package-contained `att-httphelper/v1.1` YAML paths |
-| `environments` | absent | Non-empty map of profile names; profiles may contain configured resource and testdata descriptor lists |
-| `environments.<profile>.testdata` | `[]` | Unique package-relative YAML paths available to that selected environment |
+| `environments` | absent | Non-empty map of profile names; profiles may contain configured shared Resource lists; Package Testdata belongs to the Manifest |
+| `environments.<profile>.testdata` | deprecated | Temporary `packagePolicy.legacyTestdata` only; migrate to Manifest `testdata.environments` |
 | `ssh` | absent | Optional SSH target for inline global tools |
 | `tools` | `{}` | Map of reusable tool contracts |
 
@@ -2680,6 +2692,151 @@ fileNamePattern: "#{concat('ATT-', #{lower(${suiteName})})}.xlsx"
 | HTTP descriptor | [HTTPHelper](reference.zh/resources/httphelper.md) |
 | SSH descriptor | [SSHHelper](reference.zh/resources/sshhelper.md) |
 | Timeout / Retry | [Reliability](reference.zh/reliability-execution-control.md) |
+
+## Package Manifest
+
+使用 `<PACKAGE_ROOT>/package.yaml` 為單一 Package 宣告預設值、業務Resource根目錄及 Testdata inventory。此檔案可省略，schema 為獨立的 `att-package/v1`；權威定義來自相符 Engine JAR 內嵌的 registry。
+
+Package ID 與實體根目錄來自可信註冊或既有 Local Package 選取。Manifest 不會註冊 Package、授權使用者或提供具特權的 runtime configuration。共用 Environment profiles、Tools 與 DB/MQ/HTTP/SSH Helpers 仍由 Global Configuration 管理。
+
+### 宣告 Package 預設值
+
+此範例選取中央既有 profile，並宣告 Package 自己的 Testdata。執行完整驗證前，先建立引用的 descriptor。
+
+```yaml
+schemaVersion: att-package/v1
+metadata:
+  name: Payments
+  description: Payment regression resources
+defaultEnvironment: SIT
+resources:
+  templatesRoot: templates
+  testcaseRoot: testcase
+testdata:
+  descriptors: [testdata/accounts.yaml]
+  environments:
+    UAT: [testdata/uat-accounts.yaml]
+    PROD: []
+defaults:
+  timeoutMs: 15000
+  report:
+    columns: {result: Result, durationMs: Duration}
+  xml: {namespaceMode: preserve}
+```
+
+中央 `environments` 必須定義 `SIT`、`UAT` 及 `PROD`。某個 Environment 未出現在 `testdata.environments` 時，繼承 `descriptors`；存在的 list 會整份取代 inventory，`[]` 代表清空。
+
+所有路徑使用 `/`，相對於已選取 Package。絕對路徑、`..`、不安全 symlink 及越界路徑均會被拒絕。檔案上限為 262144 UTF-8 bytes。未知欄位、重複 YAML keys、aliases、anchors 及 `x-` extensions 均不允許。
+
+沒有 Manifest 時，使用慣例根目錄 `templates`、`testcase`，Package Testdata inventory 為空。Global `templates.root`、`testcase.root` 不再決定 Package 業務根目錄。
+
+### 解析 Environment
+
+明確 request 或既有 CLI `--env` 優先；未指定時使用 Package 的 `defaultEnvironment`，再回退至中央預設值。名稱會解析成中央 profile 的正式拼寫。Effective 檢視顯示實際 Environment 及來源。
+
+Server 在解析後套用 policy。Package 預設值不能繞過允許清單或明確選取要求。新建 execution drafts、直接提交及 schedules 會保存已解析 Environment。從已驗證 draft 建立 schedule 而未提供 Environment 時，繼承 draft 的選取。日後修改預設值不能重新導向該 snapshot；來源 revision 檢查可能要求重新審閱。
+
+Registry adapter 可透過 `FrameworkConfigLoader.loadContext` 與明確的 `PackageContext` 提供選取內容；Environment 優先序為 request → Context → Package → Global。來源證據只採用 adapter 提供的已註冊 Package ID，不會由資料夾名稱或登入身分推導。CLI Context 的持久化指令仍屬另一項變更。
+
+執行結果在 `summary.configuration` 保留不含設定值的來源snapshot：標準 Environment、原始選取層、Global 與 Manifest 摘要、有效設定識別、Engine 版本與 revision、Schema Registry 摘要，以及欄位來源與邏輯撰寫路徑。RUN、Debug、Load 亦在受管理產物目錄寫入 `configuration.json`。Server Draft、排隊 Job、Schedule 定義保留核准snapshot，包含已註冊 Package ID 與驗證時的 Package revision；Job 歷史與結果在 Server 重啟後仍保留此資料。呼叫端不能提供這些內部核准欄位。
+
+Worker 在執行前核對已核准的有效設定識別。採用 `ignore` Package 變更政策的 Schedule 會以目前來源重新驗證執行副本；已儲存的核准內容保持不變，執行證據另保留原核准設定識別以供比較。此證據不包含設定值、descriptor 紀錄、憑證或主機路徑。
+
+### 套用 typed defaults
+
+只允許以下執行與呈現預設值；未提供的欄位繼承 Global Configuration。
+
+| Manifest path | 行為 |
+|---|---|
+| `defaults.timeoutMs` | 正整數，不得超過中央 `packagePolicy.maxTimeoutMs`；預設上限 300000 ms |
+| `defaults.run.id.default` | 只接受 `timestamp` |
+| `defaults.run.id.timestampFormat` | 使用既有 timestamp format 驗證 |
+| `defaults.execution.runIdFormat` | 使用既有 Run/Load ID expression 契約 |
+| `defaults.execution.debugIdFormat` | 使用既有 Debug ID expression 契約 |
+| `defaults.report.fileNamePattern` | 使用既有報表檔名契約 |
+| `defaults.report.columns` | 整份取代 column mapping；包括明確 `{}` |
+| `defaults.report.html.caseLogInlineLimitBytes` | 整數 0–1048576 |
+| `defaults.report.junit.caseLogEmbedThresholdBytes` | 整數 0–1048576 |
+| `defaults.caseLog.yamlAnchors` | Boolean |
+| `defaults.xml.namespaceMode` | `ignore` 或 `preserve` |
+
+Manifest 不可覆寫 output directories、process output limits、scheduling limits、authentication、credentials、helper definitions、worker settings 或 schema locations。完整欄位白名單由 Engine 內嵌 Manifest schema 定義。
+
+### 解析 invocation Testdata
+
+Base inventory 屬於已選取 Package 及 Environment。不同 Package 可使用相同 descriptor ID，但不共用 records，也不匯入鄰近 Package 的檔案。
+
+執行只驗證引用所需的 base Testdata dependency closure。未引用的缺失或無效 base descriptor 不會阻止 Quick Load。明確 invocation-local Debug/Load imports 仍採嚴格驗證：明確匯入的缺失或無效檔案會失敗。Invocation descriptor 以相同 ID 整份取代 base descriptor，不合併 fields 或 records；同一 layer 的重複 ID 仍屬錯誤。
+
+完整 Package validation 檢查 Manifest 宣告的所有 descriptor layers，包括各 Environment lists。內建 default Package 可執行：
+
+```bash
+./att.sh validate --package --format json
+```
+
+按 diagnostics 中的 Package ownership、logical path、layer 與 descriptor ID 修正問題，再發布或分發 Package。
+
+### 在 Studio 檢視及發布
+
+選取已註冊 Package 後，開啟 **Configuration**，再選 **Package Configuration**。**Source**、**Declared**、**Effective**、**Compare with Global** 分別檢視 Manifest；**Shared Configuration** 保留中央共用設定。All Packages 共用 inspector 仍只使用中央來源。
+
+Source reading 沿用既有 source browsing policy 及結構化遮蔽。已遮蔽 projection 只供閱讀。編輯需要 Server 明確啟用，以及已驗證、有效且 login 與明確註冊 Package ID 完全相同的 USER。其他 USER 保留一般操作；只有 ADMIN 的帳戶沒有隱含編輯權限。Login 相同不會自動註冊目錄。
+
+1. 在 **Source** 編輯可見 Manifest，或建立新的可選 Manifest。
+2. 選 **Create Manifest draft**，按目前 digest 暫存私有且會到期的 candidate。
+3. 選 **Validate Manifest draft**，由 Worker 驗證 candidate，期間不修改 live file。
+4. 審閱安全的 declaration、effective values、Environment 與 origins，再選 **Review validated Manifest**。
+5. 選 **Publish reviewed Manifest**。Server 重新檢查 ownership、live digest、Global/Package dependencies 與 schema revision，再以 atomic replacement 寫入 `package.yaml`。
+
+Manifest 發布的 fingerprint 涵蓋中央 Runtime Config、其所有已宣告 profiles 明列的 Tool/Helper descriptors、candidate 的每個 Testdata descriptor layer、business root bindings，以及內嵌 Schema Registry。系統在驗證前後及發布時檢查 fingerprint；不掃描無關的 business files、archives 或未被引用的中央檔案。驗證依賴集合最多包含 10000 個不同 descriptor paths，檔案內容總計最多 256 MiB；這是依賴集合限制，不是整個 Package 的大小上限。Execution 與 Job revisions 仍各自檢查 business dependencies。
+
+Studio 會保護已修改的 Manifest source 與尚未發佈的 Draft；建立 Draft 或明確捨棄 source 變更前，不能重新整理或切換檢視。離開頁面亦使用現有的未儲存變更確認流程。
+
+發生衝突時需建立新 draft。發布前保存 audit intent，發布後記錄完成狀態。History 位於私有 Server data，API 只回傳 revisions，不回傳歷史原始 source；按保存檔案的修改時間由新至舊排序，同時刻以 digest 升序排列。**Stage rollback** 只建立 candidate，仍需驗證與審閱。回復至沒有 Manifest 前的預設行為時，使用 canonical empty `att-package/v1` 檔案，審閱畫面會明確標示。
+
+以下可信部署 policy 可省略；預設不允許編輯：
+
+```yaml
+server:
+  packageConfiguration:
+    sourceEditingEnabled: false
+    maxDrafts: 128
+    maxDraftsPerUser: 8
+    draftTtlSeconds: 900
+    maxHistory: 50
+    allowedEnvironments: [SIT, UAT]
+    requireExplicitEnvironments: [UAT]
+```
+
+`allowedEnvironments: []` 允許中央定義的任何 profile。`requireExplicitEnvironments` 在 execution validation 前拒絕隱含選取其列出的 profile。Draft 數量、到期時間、history 與 source size 均設上限。Source editing 亦要求 inspection 及既有已驗證 USER 授權流程。
+
+### 遷移舊 Package inventory
+
+Global `testdata` 及 profile `testdata` lists 已棄用，預設不使用。中央可暫時設定 `packagePolicy.legacyTestdata: true`，只為沒有 Manifest 的 Package 恢復舊 inventory。存在 Manifest 時完全採用 Package ownership，包括明確空 inventory。Migration warnings 會指出舊 ownership；相容 switch 應只在有期限的遷移期間使用。
+
+Migration helper 依可信 Server 明確 registry 產生有版本的唯讀計畫。從 repository 執行，Python environment 需先安裝 `tools/requirements-migration.txt`：
+
+```bash
+python tools/migrate_package_config.py --config config/config.yaml --server-config /ABSOLUTE/PATH/att-server.yaml
+```
+
+將 `/ABSOLUTE/PATH/att-server.yaml` 換成部署 registry。Helper 掃描各已註冊 Package 的業務文字與受限 XLSX text，只建議屬於本 Package 且被引用的 descriptors；保留 Environment 明確空 lists，略過既有 Manifest，並報告缺失、未使用或不安全 imports。它只列出繼承預設值的欄位名稱，不輸出其值或 descriptor records。重複 mapping keys 或 YAML aliases 會令 inventory 失敗。工具不發布檔案，也不推斷註冊。
+
+審閱各 proposed Manifest，補齊所需 descriptors，再執行完整 Package validation。透過 source workflow 或受控部署流程發布後，移除舊 Global inventories 並停用 `legacyTestdata`。
+
+### API paths
+
+以下路徑相對於 `/api/v1`，沿用已驗證 USER、origin、CSRF、source policy 與 request size 限制。
+
+| Method 與 path | 結果 |
+|---|---|
+| `GET /packages/{id}/package-configuration/{source\|declared\|effective\|compare}` | 安全 projection；effective selection 可提供 `environment` query |
+| `POST /packages/{id}/package-configuration/drafts` | 暫存 `{source, expectedManifestDigest}` |
+| `POST /packages/{id}/package-configuration/drafts/{draftId}/{validate\|review\|publish\|discard}` | 以 `{}` 推進私有 draft |
+| `GET /packages/{id}/package-configuration/history` | 只供 owner 存取的有上限 revision list |
+| `POST /packages/{id}/package-configuration/rollback` | 暫存 `{revision, expectedManifestDigest}`，等待審閱 |
+
+來源 revision 衝突回傳 `409`；source 存取或 Environment policy 拒絕回傳 `403`；draft 到期或不可用回傳 `404`；draft 容量不足回傳 `429`。發布不會執行測試或修改中央 profile definitions。
 
 ## CLI 參考
 
@@ -2849,7 +3006,7 @@ CLI 的 target、`--input`、`--set` 與 `--env` 語法見本頁 option matrix�
 
 ### 完整 CLI option matrix
 
-`--config <file>` 選擇 base configuration；`--env <name>` 從 `att-config/v2.12` 選擇 environment profile，適用於 `run`、`validate`、`debug` 和 `load`。`--help` 顯示說明。`--case-id` 是 `--case` 的相容別名。`--parallel` 是已棄用的 `--allow-parallel-runs` 相容拼法，應優先使用後者。`--queue` 與 `--allow-parallel-runs` 控制共用 output root 的 process-level concurrency，不會在單一 run 內增加 Case worker。`--profile` 為 `run` 和 `load` 寫入 performance diagnostics，並為選定的 `debug` target 寫入啟動及執行 phase timing。
+`--config <file>` 選擇 base configuration；`--env <name>` 從 `att-config/v2.13` 選擇 environment profile，適用於 `run`、`validate`、`debug` 和 `load`。`--help` 顯示說明。`--case-id` 是 `--case` 的相容別名。`--parallel` 是已棄用的 `--allow-parallel-runs` 相容拼法，應優先使用後者。`--queue` 與 `--allow-parallel-runs` 控制共用 output root 的 process-level concurrency，不會在單一 run 內增加 Case worker。`--profile` 為 `run` 和 `load` 寫入 performance diagnostics，並為選定的 `debug` target 寫入啟動及執行 phase timing。
 
 Load 以 scenario 為基礎；明確提供的 workload option 會先覆蓋對應欄位，再重新驗證 effective scenario：
 
@@ -3284,7 +3441,8 @@ Maintainer implementation sequencing、scheduler internals、resource-owner deta
 |---|---|
 | 排程建立 | att-schedule/v2 |
 | RUN 定義 | att-execution/v1 |
-| Global configuration | att-config/v2.12 |
+| Global configuration | att-config/v2.13 |
+| Package Manifest | att-package/v1 |
 | Testdata descriptor | att-testdata/v1.0 |
 | DBHelper | att-dbhelper/v2.6 |
 | MQHelper | att-mqhelper/v1.3 |
@@ -3341,7 +3499,7 @@ Case log、CLI output 和輸出的 case evidence 會將 canonical package root �
 
 ### Execution identity format migration
 
-`att-config/v2.12` 新增 execution identity formats；前一版 configuration schema 仍受支援。可用 `execution.runIdFormat` 設定 Run 和 Load 的外層 ID，並用 `execution.debugIdFormat` 設定 standalone Debug directory ID。未設定時仍使用既有 timestamp Run/Load ID 及 `<type>-<targetId>` Debug ID。Load 每次 iteration 的 `EXEC.ID` 現由 Engine 管理；請移除已停用的 `execution.execIdFormat`。Run/Load 的明確 ID 使用 `--run-id`；standalone Debug 的明確 ID 使用 `--debug-id`。
+`att-config/v2.13` 新增 execution identity formats；前一版 configuration schema 仍受支援。可用 `execution.runIdFormat` 設定 Run 和 Load 的外層 ID，並用 `execution.debugIdFormat` 設定 standalone Debug directory ID。未設定時仍使用既有 timestamp Run/Load ID 及 `<type>-<targetId>` Debug ID。Load 每次 iteration 的 `EXEC.ID` 現由 Engine 管理；請移除已停用的 `execution.execIdFormat`。Run/Load 的明確 ID 使用 `--run-id`；standalone Debug 的明確 ID 使用 `--debug-id`。
 
 Load workload `testdata.<id>` 設定控制 `scope`，並可選擇整份覆蓋 descriptor 的 `selection` policy。Scope 預設為 `iteration`；`user` 只適用 closed-VU workload。請明確選擇 `error`、`recycle` 或 `stop` exhaustion。Selection metadata 會記錄，但不包含 record value。
 

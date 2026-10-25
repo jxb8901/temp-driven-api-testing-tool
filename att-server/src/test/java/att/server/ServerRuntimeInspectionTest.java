@@ -68,8 +68,9 @@ class ServerRuntimeInspectionTest {
         Path runtimeConfig=Files.createDirectories(temp.resolve("testdata-inspection-runtime/config")).resolve("config.yaml");
         Files.createDirectories(packageRoot.resolve("templates"));
         Files.createDirectories(packageRoot.resolve("testcase"));
+        Files.writeString(packageRoot.resolve("package.yaml"),"schemaVersion: att-package/v1\ntestdata: {descriptors: [testdata/accounts.yaml]}\n");
         Files.writeString(runtimeConfig,"schemaVersion: att-config/v2.12\nenvironment: SIT\n"
-                +"environments:\n  SIT:\n    testdata: [testdata/accounts.yaml]\n"
+                +"environments:\n  SIT: {}\n"
                 +"testcase: {root: testcase}\ntemplates: {root: templates}\n");
         Path javaBin=Path.of(System.getProperty("java.home"),"bin",
                 System.getProperty("os.name","").toLowerCase().contains("win")?"java.exe":"java");

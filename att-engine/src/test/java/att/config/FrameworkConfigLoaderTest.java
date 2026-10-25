@@ -15,6 +15,13 @@ class FrameworkConfigLoaderTest {
     }
     @org.junit.jupiter.api.AfterEach void restoreDefaultPathPresentation() { att.core.PathPresentation.configure(false, false); }
 
+    @Test void flatGlobalEnvironmentCanBePinnedWithoutAddingUndeclaredProfiles() throws Exception {
+        Path config=write("flat-environment.yaml", "schemaVersion: att-config/v2.13\nenvironment: SIT\n");
+        FrameworkConfigLoader loader=new FrameworkConfigLoader();
+        assertEquals("SIT",loader.load(config,tempDir,"sit").environment());
+        assertThrows(IllegalArgumentException.class,()->loader.load(config,tempDir,"UAT"));
+    }
+
     @Test void loadsRunAndDebugIdentityFormatsFromCurrentConfigSchema() throws Exception {
         Path config = write("identity-formats.yaml", "schemaVersion: att-config/v2.12\n"
                 + "execution: {runIdFormat: 'run-${META.SOURCE.type}', debugIdFormat: 'debug-${META.TARGET.id}'}\n");
@@ -317,7 +324,7 @@ class FrameworkConfigLoaderTest {
         assertEquals(10000, new FrameworkConfigLoader().load(ok).timeoutMs());
         Path rooted=tempDir.resolve("rooted.yaml"); Files.write(rooted,"schemaVersion: att-config/v2.11\ntestcase: {root: cases/nested}\ncaseLog: {yamlAnchors: true}\ntimeoutMs: 3600000\n".getBytes("UTF-8"));
         FrameworkConfig rootedConfig = new FrameworkConfigLoader().load(rooted);
-        assertEquals(Paths.get("cases/nested"), rootedConfig.testcasesRoot());
+        assertEquals(Paths.get("testcase"), rootedConfig.testcasesRoot());
         assertEquals(3600000, rootedConfig.timeoutMs());
         assertTrue(rootedConfig.caseLogYamlAnchors());
         assertFalse(new FrameworkConfigLoader().load(ok).caseLogYamlAnchors());

@@ -40,11 +40,12 @@ public final class ServerConfig {
     public final JobStorage jobStorage;
     public final LiveOutput liveOutput;
     public final ExecutionPool executionPool;
+    final PackageConfigurationPolicy packageConfiguration;
 
     private ServerConfig(Path dataDir, Path runtimeConfigPath, Path javaExecutable, int maxConcurrent, int queuedLimit,
                          int maxConcurrentLoad, int gracefulStopMs, int jobRetentionDays,
                          int workerHeapInitialMb, int workerHeapMaxMb, int maxRequestBytes,
-                         int maxEventsPerJob, int maxArtifacts, boolean authenticationRequired, String authMode, Security security, Map<String, Path> packages, List<Path> allowedRoots, List<Path> workerLibraryDirs, Inspection inspection, InlineLoad inlineLoad, Scheduling scheduling, Authorization authorization, JobStorage jobStorage, LiveOutput liveOutput, ExecutionPool executionPool) {
+                         int maxEventsPerJob, int maxArtifacts, boolean authenticationRequired, String authMode, Security security, Map<String, Path> packages, List<Path> allowedRoots, List<Path> workerLibraryDirs, Inspection inspection, InlineLoad inlineLoad, Scheduling scheduling, Authorization authorization, JobStorage jobStorage, LiveOutput liveOutput, ExecutionPool executionPool, PackageConfigurationPolicy packageConfiguration) {
         this.dataDir=dataDir; this.runtimeConfigPath=runtimeConfigPath; this.javaExecutable=javaExecutable; this.maxConcurrent=maxConcurrent;
         this.queuedLimit=queuedLimit; this.maxConcurrentLoad=maxConcurrentLoad; this.gracefulStopMs=gracefulStopMs;this.jobRetentionDays=jobRetentionDays;
         this.workerHeapInitialMb=workerHeapInitialMb;this.workerHeapMaxMb=workerHeapMaxMb;
@@ -57,7 +58,7 @@ public final class ServerConfig {
         this.scheduling=scheduling;
         this.authorization=authorization;
         this.jobStorage=jobStorage;this.liveOutput=liveOutput;
-        this.executionPool=executionPool;
+        this.executionPool=executionPool;this.packageConfiguration=packageConfiguration;
     }
 
     public static ServerConfig load(Path file) throws Exception {
@@ -150,7 +151,7 @@ public final class ServerConfig {
         for(Path packageRoot:resolved.values()) if(packageRoot.startsWith(realData)||realData.startsWith(packageRoot))
             throw new IllegalArgumentException("server.dataDir must be separate from configured package roots");
         privateDirectory(realData);privateDirectory(realData.resolve("db"));privateDirectory(realData.resolve("jobs"));
-        return new ServerConfig(realData,runtimeConfig,java,max,queue,load,stop,retention,heapInitial,heapMax,request,events,artifacts,authenticationRequired,authMode,security,resolved,allowed,workerLibraries,inspection,inlineLoad,scheduling,authorization,jobStorage,liveOutput,executionPool);
+        return new ServerConfig(realData,runtimeConfig,java,max,queue,load,stop,retention,heapInitial,heapMax,request,events,artifacts,authenticationRequired,authMode,security,resolved,allowed,workerLibraries,inspection,inlineLoad,scheduling,authorization,jobStorage,liveOutput,executionPool,PackageConfigurationPolicy.load(server.get("packageConfiguration")));
     }
 
     public static final class ExecutionPool {

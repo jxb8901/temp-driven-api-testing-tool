@@ -39,6 +39,7 @@ public final class FrameworkConfig {
     private final boolean caseLogYamlAnchors;
     private final ProcessOutputConfig processOutput;
     private final List<Path> testdataDescriptors;
+    private final EffectiveExecutionConfig effectiveConfiguration;
 
     public FrameworkConfig(Path outputDirectory, Path reportDirectory, Path logDirectory, String environment,
                            int timeoutMs, Path templatesRoot, Map<String, ToolConfig> tools,
@@ -178,6 +179,7 @@ public final class FrameworkConfig {
                            List<StageConfig> stages, int headerRows, String xmlNamespaceMode, String workbookId,
                            boolean caseLogYamlAnchors, ProcessOutputConfig processOutput,
                            List<Path> testdataDescriptors) {
+        this.effectiveConfiguration = null;
         this.discoveryOnly = false;
         this.environmentRequirements = Collections.emptyList();
         this.helperDiscoveryFailures = Collections.emptyList();
@@ -212,6 +214,7 @@ public final class FrameworkConfig {
     }
 
     private FrameworkConfig(FrameworkConfig source, List<EnvironmentRequirement> requirements, List<HelperDiscoveryFailure> failures) {
+        this.effectiveConfiguration = source.effectiveConfiguration;
         this.discoveryOnly = true;
         this.helperDiscoveryFailures = Collections.unmodifiableList(new ArrayList<HelperDiscoveryFailure>(failures));
         this.environmentRequirements = Collections.unmodifiableList(new ArrayList<EnvironmentRequirement>(requirements));
@@ -241,6 +244,78 @@ public final class FrameworkConfig {
         this.processOutput = source.processOutput;
         this.testdataDescriptors = source.testdataDescriptors;
     }
+    private FrameworkConfig(FrameworkConfig source, EffectiveExecutionConfig identity) {
+        this.effectiveConfiguration = identity;
+        this.discoveryOnly = source.discoveryOnly;
+        this.helperDiscoveryFailures = source.helperDiscoveryFailures;
+        this.environmentRequirements = source.environmentRequirements;
+        this.outputDirectory = source.outputDirectory;
+        this.reportDirectory = source.reportDirectory;
+        this.logDirectory = source.logDirectory;
+        this.environment = source.environment;
+        this.timeoutMs = source.timeoutMs;
+        this.templatesRoot = source.templatesRoot;
+        this.testcasesRoot = source.testcasesRoot;
+        this.tools = source.tools;
+        this.dbHelpers = source.dbHelpers;
+        this.mqHelpers = source.mqHelpers;
+        this.sshHelpers = source.sshHelpers;
+        this.httpHelpers = source.httpHelpers;
+        this.report = source.report;
+        this.run = source.run;
+        this.sheetGroups = source.sheetGroups;
+        this.caseIdColumn = source.caseIdColumn;
+        this.tagsColumn = source.tagsColumn;
+        this.dataColumns = source.dataColumns;
+        this.stages = source.stages;
+        this.headerRows = source.headerRows;
+        this.xmlNamespaceMode = source.xmlNamespaceMode;
+        this.workbookId = source.workbookId;
+        this.caseLogYamlAnchors = source.caseLogYamlAnchors;
+        this.processOutput = source.processOutput;
+        this.testdataDescriptors = source.testdataDescriptors;
+    }
+
+    FrameworkConfig withEffectiveConfiguration(EffectiveExecutionConfig identity) { return new FrameworkConfig(this, identity); }
+
+    FrameworkConfig(FrameworkConfig source, PackageConfig pkg, EffectiveExecutionConfig identity, boolean legacyTestdata) {
+        this.effectiveConfiguration = identity;
+        this.discoveryOnly = source.discoveryOnly;
+        this.helperDiscoveryFailures = source.helperDiscoveryFailures;
+        this.environmentRequirements = source.environmentRequirements;
+        this.outputDirectory = source.outputDirectory;
+        this.reportDirectory = source.reportDirectory;
+        this.logDirectory = source.logDirectory;
+        this.environment = source.environment;
+        this.timeoutMs = pkg.timeoutMs() == null ? source.timeoutMs : pkg.timeoutMs();
+        this.templatesRoot = pkg.templatesRoot();
+        this.testcasesRoot = pkg.testcaseRoot();
+        this.tools = source.tools;
+        this.dbHelpers = source.dbHelpers;
+        this.mqHelpers = source.mqHelpers;
+        this.sshHelpers = source.sshHelpers;
+        this.httpHelpers = source.httpHelpers;
+        this.report = new ReportConfig(source.report.mode(),
+                pkg.reportFileName() == null ? source.report.fileNamePattern() : pkg.reportFileName(),
+                pkg.reportColumns() == null ? source.report.columns() : pkg.reportColumns(),
+                pkg.junitLimit() == null ? source.report.junitCaseLogEmbedThresholdBytes() : pkg.junitLimit(),
+                pkg.htmlLimit() == null ? source.report.htmlCaseLogInlineLimitBytes() : pkg.htmlLimit());
+        this.run = new RunConfig(source.run.defaultMode(),
+                pkg.timestampFormat() == null ? source.run.timestampFormat() : pkg.timestampFormat(),
+                pkg.runIdFormat() == null ? source.run.runIdFormat() : pkg.runIdFormat(),
+                pkg.debugIdFormat() == null ? source.run.debugIdFormat() : pkg.debugIdFormat());
+        this.sheetGroups = source.sheetGroups;
+        this.caseIdColumn = source.caseIdColumn;
+        this.tagsColumn = source.tagsColumn;
+        this.dataColumns = source.dataColumns;
+        this.stages = source.stages;
+        this.headerRows = source.headerRows;
+        this.xmlNamespaceMode = pkg.namespaceMode() == null ? source.xmlNamespaceMode : pkg.namespaceMode();
+        this.workbookId = source.workbookId;
+        this.caseLogYamlAnchors = pkg.yamlAnchors() == null ? source.caseLogYamlAnchors : pkg.yamlAnchors();
+        this.processOutput = source.processOutput;
+        this.testdataDescriptors = legacyTestdata && !pkg.present() ? source.testdataDescriptors : pkg.descriptors(source.environment);
+    }
 
     FrameworkConfig forDiscovery(List<EnvironmentRequirement> requirements, List<HelperDiscoveryFailure> failures) {
         return new FrameworkConfig(this, requirements, failures);
@@ -251,6 +326,8 @@ public final class FrameworkConfig {
     public void requireExecutionConfig() {
         if (discoveryOnly) throw new IllegalStateException("Metadata configuration cannot execute; validate and reload execution dependencies first");
     }
+
+    public EffectiveExecutionConfig effectiveConfiguration() { return effectiveConfiguration; }
 
     public Path outputDirectory() { return outputDirectory; }
     public Path reportDirectory() { return reportDirectory; }

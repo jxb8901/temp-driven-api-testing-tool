@@ -121,7 +121,9 @@ class ExecutionWorkerRuntimeLifecycleTest {
         definition.put("schemaVersion",RunDefinition.VERSION);definition.put("executionType","run");definition.put("packageId","p");
         definition.set("target",ServerRuntime.JSON.valueToTree(Map.of("type","template","id",template)));
         definition.set("input",ServerRuntime.JSON.createObjectNode());definition.set("options",ServerRuntime.JSON.valueToTree(Map.of("debug",false)));
-        Map<String,Object> draft=runtime.createRunDraft(definition,"alice");
+        Map<String,Object> draft;
+        try { draft=runtime.createRunDraft(definition,"alice"); }
+        catch (ServerRuntime.InspectionConfigurationException invalid) { throw new AssertionError(invalid.diagnostics.toString(), invalid); }
         Map<String,Object> accepted=runtime.submitRunDraft(ServerRuntime.JSON.valueToTree(Map.of("packageId","p","draftId",draft.get("draftId"))),"alice","alice");
         return runtime.jobs.get(String.valueOf(accepted.get("jobId")));
     }
