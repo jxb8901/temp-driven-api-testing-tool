@@ -132,6 +132,17 @@ public final class RuntimeConfigurationValidator {
                 if (raw.get("environment") instanceof String) declared.add((String) raw.get("environment"));
                 manifest.validateEnvironments(declared);
                 List<List<Path>> layers = manifest.descriptorLayers();
+                List<String> testdataProfiles=checkedProfiles;
+                if(allTestdataLayers&&!allProfiles) {
+                    ProfileSelection selection=selectProfiles(raw,null,true);
+                    testdataProfiles=selection.profiles().isEmpty()?Collections.singletonList(null):selection.profiles();
+                    if(selection.truncated()) {
+                        report.incomplete();
+                        AttValidationReport.Section limit=manifestSection.child("Testdata Environment Limit",logical(file,root),"WARN");
+                        limit.diagnostic(diagnostic("ATT-VALIDATION-LIMIT","WARNING",logical(file,root),"environments",
+                                "Only the first "+MAX_ENVIRONMENT_PROFILES+" Environment Profiles were checked for Package Testdata; the report is incomplete",null));
+                    }
+                }
                 String effectiveDefaultEnvironment=manifest.defaultEnvironment();
                 String effectiveDefaultSource="package.yaml",effectiveDefaultField="defaultEnvironment";
                 if(effectiveDefaultEnvironment==null&&raw.get("environment") instanceof String) {
@@ -148,7 +159,7 @@ public final class RuntimeConfigurationValidator {
                 }
                 if (allTestdataLayers) {
                     if (!manifest.present() && layers.size() == 1 && layers.get(0).isEmpty()) {
-                        for (String profile : checkedProfiles) {
+                        for (String profile : testdataProfiles) {
                             if (profile != null && !packageEnvironmentAllowed(permittedPackageEnvironments, profile)) {
                                 skipPackageTestdataEnvironment(manifestSection,profile);
                                 continue;
@@ -159,7 +170,7 @@ public final class RuntimeConfigurationValidator {
                     } else {
                         List<Path> baseDescriptors=layers.get(0);
                         new TestdataRegistry(packageRoot,baseDescriptors,Collections.<Path>emptyList()).validateAll();
-                        for (String profile : checkedProfiles) {
+                        for (String profile : testdataProfiles) {
                             if (profile == null) continue;
                             if (!packageEnvironmentAllowed(permittedPackageEnvironments, profile)) {
                                 skipPackageTestdataEnvironment(manifestSection,profile);
