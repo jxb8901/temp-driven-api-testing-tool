@@ -57,20 +57,26 @@ class VNextCommandTest {
     }
 
     @Test void resourceDryRunFailsBeforeRecordingToolCanRun() throws Exception {
+        org.junit.jupiter.api.Assumptions.assumeFalse(System.getProperty("os.name","").toLowerCase().contains("win"),
+                "The recording Tool fixture requires a POSIX executable script");
         Path home=packageRoot.resolve("att-home");
         Path pkg=home.resolve("packages/payments");
         Path config=home.resolve("config/config.yaml");
         Path marker=packageRoot.resolve("tool-invoked.txt");
-        Path script=packageRoot.resolve("record-tool.sh");
+        Path script=pkg.resolve("record-tool.sh");
         Files.createDirectories(config.getParent());Files.createDirectories(pkg.resolve("templates"));
         Files.createDirectories(pkg.resolve("testcase"));Files.createDirectories(pkg.resolve("tools"));
         Files.createDirectories(home.resolve("config/tools"));
         TestSchemas.install(home);
         Files.write(script,("#!/bin/sh\nprintf invoked >> '"+marker.toString()+"'\nprintf 'ok\\n'\n").getBytes(StandardCharsets.UTF_8));
+        Files.setPosixFilePermissions(script,java.util.EnumSet.of(
+                java.nio.file.attribute.PosixFilePermission.OWNER_READ,
+                java.nio.file.attribute.PosixFilePermission.OWNER_WRITE,
+                java.nio.file.attribute.PosixFilePermission.OWNER_EXECUTE));
         Files.write(config,("schemaVersion: att-config/v2.13\noutputDirectory: output\nenvironment: SIT\n"
                 +"templates: {root: templates}\ntestcase: {root: testcase}\ntools:\n  recording:\n"
                 +"    name: Recording tool\n    description: Records a Tool invocation\n"
-                +"    command: [\"/bin/sh\", \""+script.toString()+"\"]\n"
+                +"    command: [\"./record-tool.sh\"]\n"
                 +"    stdoutFormat: text\n    arguments: {}\n").getBytes(StandardCharsets.UTF_8));
         Files.write(home.resolve("config/tools/recording.debug.yaml"),
                 "schemaVersion: att-debug/v1.2\narguments: {}\n".getBytes(StandardCharsets.UTF_8));
