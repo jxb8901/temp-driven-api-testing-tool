@@ -93,9 +93,11 @@ Source reading 沿用既有 source browsing policy 及結構化遮蔽。已遮�
 4. 審閱安全的 declaration、effective values、Environment 與 origins，再選 **Review validated Manifest**。
 5. 選 **Publish reviewed Manifest**。Server 重新檢查 ownership、live digest、Global/Package dependencies 與 schema revision，再以 atomic replacement 寫入 `package.yaml`。
 
+Manifest 發布的 fingerprint 涵蓋中央 Runtime Config、其所有已宣告 profiles 明列的 Tool/Helper descriptors、candidate 的每個 Testdata descriptor layer、business root bindings，以及內嵌 Schema Registry。系統在驗證前後及發布時檢查 fingerprint；不掃描無關的 business files、archives 或未被引用的中央檔案。驗證依賴集合最多包含 10000 個不同 descriptor paths，檔案內容總計最多 256 MiB；這是依賴集合限制，不是整個 Package 的大小上限。Execution 與 Job revisions 仍各自檢查 business dependencies。
+
 Studio 會保護已修改的 Manifest source 與尚未發佈的 Draft；建立 Draft 或明確捨棄 source 變更前，不能重新整理或切換檢視。離開頁面亦使用現有的未儲存變更確認流程。
 
-發生衝突時需建立新 draft。發布前保存 audit intent，發布後記錄完成狀態。History 位於私有 Server data，API 只回傳 revisions，不回傳歷史原始 source。**Stage rollback** 只建立 candidate，仍需驗證與審閱。回復至沒有 Manifest 前的預設行為時，使用 canonical empty `att-package/v1` 檔案，審閱畫面會明確標示。
+發生衝突時需建立新 draft。發布前保存 audit intent，發布後記錄完成狀態。History 位於私有 Server data，API 只回傳 revisions，不回傳歷史原始 source；按保存檔案的修改時間由新至舊排序，同時刻以 digest 升序排列。**Stage rollback** 只建立 candidate，仍需驗證與審閱。回復至沒有 Manifest 前的預設行為時，使用 canonical empty `att-package/v1` 檔案，審閱畫面會明確標示。
 
 以下可信部署 policy 可省略；預設不允許編輯：
 

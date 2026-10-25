@@ -107,11 +107,13 @@ final class PackageManifestPublisher implements AutoCloseable {
         authorizedRoot(packageId,actor);Path directory=historyDirectory(packageId);
         List<Map<String,Object>> result=new ArrayList<>();
         try(var files=Files.list(directory)) {
-            for(Path file:files.filter(p->p.getFileName().toString().matches("[a-f0-9]{64}\\.yaml")).sorted().toList()) {
+            for(Path file:files.filter(p->p.getFileName().toString().matches("[a-f0-9]{64}\\.yaml")).toList()) {
                 if(Files.isSymbolicLink(file)||!Files.isRegularFile(file,LinkOption.NOFOLLOW_LINKS))throw new IOException("Source history is unavailable");
                 result.add(Map.of("manifestDigest",file.getFileName().toString().substring(0,64),"modifiedAt",Files.getLastModifiedTime(file).toInstant().toString()));
             }
         }
+        result.sort(Comparator.<Map<String,Object>,Instant>comparing(item->Instant.parse((String)item.get("modifiedAt")))
+                .reversed().thenComparing(item->(String)item.get("manifestDigest")));
         return result;
     }
 

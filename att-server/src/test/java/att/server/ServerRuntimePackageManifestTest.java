@@ -45,6 +45,31 @@ class ServerRuntimePackageManifestTest {
             assertEquals(true,runtime.inspectPackageConfiguration("owner","declared",null,"owner").get("canEdit"));
         }
     }
+    @Test void publishesSmallManifestInLargePackageAndStillFencesDeclaredDependencyChanges() throws Exception {
+        try(var runtime=runtime("")) {
+            Path archive=Files.createDirectories(pkg.resolve("archive"));
+            // Sparse file crosses the previous 256 MiB whole-tree cap without allocating that much disk.
+            try(var file=new java.io.RandomAccessFile(archive.resolve("business-input.bin").toFile(),"rw")) {
+                file.setLength(268435457L);
+            }
+            for(int i=0;i<10001;i++)Files.createFile(archive.resolve("fixture-"+i));
+            Path descriptor=Files.createDirectories(pkg.resolve("testdata")).resolve("base.yaml");
+            Files.writeString(descriptor,"schemaVersion: att-testdata/v1.0\nid: accounts\nrecords: [{id: first}]\n");
+            String source="schemaVersion: att-package/v1\ndefaultEnvironment: UAT\ntestdata: {descriptors: [testdata/base.yaml]}\n";
+            String before=PackageManifestPublisher.digest(new byte[0]);
+            String id=(String)runtime.manifestPublisher.stage("owner","owner",source,before).get("draftId");
+            runtime.manifestPublisher.validate("owner","owner",id);runtime.manifestPublisher.review("owner","owner",id);
+            Files.writeString(archive.resolve("unrelated.yaml"),"changed after review");
+            assertEquals(true,runtime.manifestPublisher.publish("owner","owner",id).get("published"));
+            assertEquals(source,Files.readString(pkg.resolve("package.yaml")));
+            String updated=source+"metadata: {name: Revised}\n";
+            String next=(String)runtime.manifestPublisher.stage("owner","owner",updated,PackageManifestPublisher.digest(source.getBytes(java.nio.charset.StandardCharsets.UTF_8))).get("draftId");
+            runtime.manifestPublisher.validate("owner","owner",next);runtime.manifestPublisher.review("owner","owner",next);
+            Files.writeString(descriptor,"schemaVersion: att-testdata/v1.0\nid: accounts\nrecords: [{id: second}]\n");
+            assertThrows(PackageManifestPublisher.Conflict.class,()->runtime.manifestPublisher.publish("owner","owner",next));
+            assertEquals(source,Files.readString(pkg.resolve("package.yaml")));
+        }
+    }
     @Test void candidateDescriptorFailureIncludesRegisteredPackageAndSafeDeclaration() throws Exception {
         try(var runtime=runtime("")) {
             String source="schemaVersion: att-package/v1\ntestdata: {descriptors: [testdata/missing.yaml]}\n";

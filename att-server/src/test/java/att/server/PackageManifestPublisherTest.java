@@ -63,6 +63,31 @@ class PackageManifestPublisherTest {
             try(var children=Files.list(root)){assertEquals(1,children.count());}
         }
     }
+    @Test void historyUsesNewestModificationTimeThenDigestRatherThanFilenameOrder() throws Exception {
+        try(var publisher=publisher(Map.of("sourceEditingEnabled",true))) {
+            var sources=new ArrayList<>(java.util.List.of(OLD,SOURCE,"schemaVersion: att-package/v1\nmetadata: {name: Third}\n"));
+            sources.sort(java.util.Comparator.comparing(text->{try{return sha(text);}catch(Exception e){throw new RuntimeException(e);}}));
+            Path history=temporary.resolve("private/package-source-history").resolve(sha("owner"));
+            String previous="";int index=0;
+            for(String source:sources) {
+                String id=staged(publisher,source,previous);
+                publisher.validate("owner","owner",id);publisher.review("owner","owner",id);publisher.publish("owner","owner",id);
+                Files.setLastModifiedTime(history.resolve(sha(source)+".yaml"),
+                        java.nio.file.attribute.FileTime.from(clock.instant().plusSeconds(++index)));
+                previous=source;
+            }
+            Files.setLastModifiedTime(history.resolve(sha("")+".yaml"),java.nio.file.attribute.FileTime.from(clock.instant()));
+            var expected=new ArrayList<String>();
+            for(int i=sources.size()-1;i>=0;i--)expected.add(sha(sources.get(i)));
+            expected.add(sha(""));
+            assertEquals(expected,publisher.history("owner","owner").stream().map(item->(String)item.get("manifestDigest")).toList());
+            try(var files=Files.list(history)) {
+                for(Path file:files.toList())Files.setLastModifiedTime(file,java.nio.file.attribute.FileTime.from(clock.instant()));
+            }
+            expected.sort(String::compareTo);
+            assertEquals(expected,publisher.history("owner","owner").stream().map(item->(String)item.get("manifestDigest")).toList());
+        }
+    }
     @Test void rejectsStaleLiveOrDependencyRevisionAndRechecksRevokedAccess() throws Exception {
         try(var publisher=publisher(Map.of("sourceEditingEnabled",true))) {
             String id=staged(publisher,SOURCE,"");publisher.validate("owner","owner",id);publisher.review("owner","owner",id);

@@ -47,12 +47,12 @@ public final class PackageManifestInspector {
 
     /** The source publisher validates this private candidate; nothing writes into the live Package. */
     public Map<String, Object> validateCandidate(String source, String environment) throws Exception {
-        String before = PackageSourceRevision.capture(root, config);
         PackageConfig candidate = PackageConfig.parse(root, source);
+        String before = PackageSourceRevision.capture(root, config, candidate);
         FrameworkConfig effective = new FrameworkConfigLoader().loadPackageCandidateDiscovery(config, RuntimeConfigPath.root(config), root, environment, source);
         for (List<Path> layer : candidate.descriptorLayers())
             new att.testdata.TestdataRegistry(root, layer, Collections.<Path>emptyList()).validateAll();
-        String after = PackageSourceRevision.capture(root, config);
+        String after = PackageSourceRevision.capture(root, config, candidate);
         if (!before.equals(after)) throw new IllegalArgumentException("Package or global sources changed during Manifest validation; validate again");
         Map<String, Object> result = new LinkedHashMap<String, Object>();
         result.put("validationRevision", digestRevision(after, candidate.digest()));
