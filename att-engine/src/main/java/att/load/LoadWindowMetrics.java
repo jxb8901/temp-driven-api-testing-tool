@@ -20,6 +20,7 @@ final class LoadWindowMetrics {
     private final long start, generationEnd;
     private final List<Window> windows = new ArrayList<Window>();
     private final TreeMap<Long, Point> series = new TreeMap<Long, Point>();
+    private final WindowSeries measuredSeries, steadySeries;
     private long bucketWidthMs = 1000L;
     private volatile long ended;
 
@@ -29,6 +30,8 @@ final class LoadWindowMetrics {
         long steadyStart = Math.addExact(measured, rampUp);
         long steadyEnd = Math.addExact(steadyStart, steady);
         generationEnd = Math.addExact(steadyEnd, rampDown);
+        measuredSeries = new WindowSeries(measured, generationEnd);
+        steadySeries = new WindowSeries(steadyStart, steadyEnd);
         windows.add(new Window("all", start, Long.MAX_VALUE));
         windows.add(new Window("measured", measured, generationEnd));
         windows.add(new Window("steady", steadyStart, steadyEnd));
@@ -73,13 +76,19 @@ final class LoadWindowMetrics {
             phase.put("measured", !"WARMUP".equals(window.name)); phaseBoundaries.add(phase);
         }
         result.put("phaseBoundaries", phaseBoundaries);
-        result.put("timeSeries", seriesSnapshot());
+        result.put("timeSeries", seriesSnapshot(actualEnd));
         return result;
     }
 
     private synchronized void record(long timestamp, int kind, LoadEvent event) {
         Point point = pointAt(timestamp);
         if (point == null) return;
+        record(point, kind, event);
+        measuredSeries.record(timestamp, kind, event);
+        steadySeries.record(timestamp, kind, event);
+    }
+
+    private void record(Point point, int kind, LoadEvent event) {
         point.counts[kind]++;
         if (kind == 1 || kind == 3) { point.schedulerLagTotalMs += event.schedulerLagMs(); point.schedulerLagCount++; }
         if (kind == 2) {
@@ -93,7 +102,11 @@ final class LoadWindowMetrics {
 
     private synchronized void recordLatency(long scheduledAt, LoadEvent event) {
         Point point = pointAt(scheduledAt);
-        if (point != null) point.latencies.add(event.latencyMs());
+        if (point != null) {
+            point.latencies.add(event.latencyMs());
+            measuredSeries.recordLatency(scheduledAt, event.latencyMs());
+            steadySeries.recordLatency(scheduledAt, event.latencyMs());
+        }
     }
 
     synchronized void recordSchedulerSample(long timestamp, int queueDepth) {
@@ -101,6 +114,8 @@ final class LoadWindowMetrics {
         if (point == null) return;
         point.queueDepthTotal += Math.max(0, queueDepth); point.queueSamples++;
         point.queueDepthPeak = Math.max(point.queueDepthPeak, Math.max(0, queueDepth));
+        measuredSeries.recordQueueSample(timestamp, queueDepth);
+        steadySeries.recordQueueSample(timestamp, queueDepth);
         for (Window window : windows) window.recordQueueSample(timestamp, queueDepth);
     }
 
@@ -110,6 +125,8 @@ final class LoadWindowMetrics {
         point.submitLagTotalMs += Math.max(0L, lagMs); point.submitLagCount++;
         point.queueDepthTotal += Math.max(0, queueDepth); point.queueSamples++;
         point.queueDepthPeak = Math.max(point.queueDepthPeak, Math.max(0, queueDepth));
+        measuredSeries.recordSubmitSample(timestamp, lagMs, queueDepth);
+        steadySeries.recordSubmitSample(timestamp, lagMs, queueDepth);
         for (Window window : windows) window.recordSubmitSample(timestamp, lagMs, queueDepth);
     }
 
@@ -133,7 +150,7 @@ final class LoadWindowMetrics {
         return series.get(currentBin);
     }
 
-    private synchronized Map<String, Object> seriesSnapshot() {
+    private synchronized Map<String, Object> seriesSnapshot(long actualEnd) {
         Map<String, Object> result = new LinkedHashMap<String, Object>();
         result.put("basis", "event-time counts and rates; latency samples grouped by scheduled cohort; bins aligned to scheduler start; full-bin rate denominator");
         result.put("bucketDurationMs", bucketWidthMs);
@@ -174,7 +191,42 @@ final class LoadWindowMetrics {
             points.add(point);
         }
         result.put("points", points);
+        Map<String, Object> windowSeries = new LinkedHashMap<String, Object>();
+        windowSeries.put("measured", measuredSeries.snapshot(actualEnd));
+        windowSeries.put("steady", steadySeries.snapshot(actualEnd));
+        result.put("windowSeries", windowSeries);
         return result;
+    }
+
+    private Map<String, Object> pointSnapshot(long bucketStart, long durationMs, Point point, long inFlightAtBinEnd) {
+        Map<String, Object> value = new LinkedHashMap<String, Object>();
+        value.put("windowStartEpochMs", bucketStart);
+        value.put("durationMs", durationMs);
+        value.put("phaseCoverage", phaseCoverage(bucketStart, bucketStart + durationMs));
+        value.put("inFlightAtBinEnd", inFlightAtBinEnd);
+        value.put("observedInFlight", inFlightAtBinEnd);
+        Map<String, Object> latency = point.latencies.snapshot(true);
+        value.put("latencySampleCount", latency.get("sampleCount"));
+        value.put("latencyObservationCount", latency.get("observationCount"));
+        value.put("latencyP50Ms", latency.get("p50Ms"));
+        value.put("latencyP95Ms", latency.get("p95Ms"));
+        value.put("latencyP99Ms", latency.get("p99Ms"));
+        value.put("schedulerLagMeanMs", point.schedulerLagCount == 0L ? null
+                : point.schedulerLagTotalMs / (double) point.schedulerLagCount);
+        value.put("submitLagMeanMs", point.submitLagCount == 0L ? null
+                : point.submitLagTotalMs / (double) point.submitLagCount);
+        value.put("queueDepthMean", point.queueSamples == 0L ? null
+                : point.queueDepthTotal / (double) point.queueSamples);
+        value.put("queueDepthPeak", point.queueSamples == 0L ? null : point.queueDepthPeak);
+        String[] names = {"scheduled", "started", "completed", "dropped", "successful", "sutFailure", "runtimeError"};
+        for (int i = 0; i < names.length; i++) {
+            value.put(names[i], point.counts[i]);
+            value.put(names[i] + "Rate", point.counts[i] * 1000.0 / durationMs);
+        }
+        value.put("sutFailureRate", point.counts[2] == 0L ? 0.0 : point.counts[5] / (double) point.counts[2]);
+        value.put("runtimeErrorRate", point.counts[2] == 0L ? 0.0 : point.counts[6] / (double) point.counts[2]);
+        value.put("droppedRate", point.counts[0] == 0L ? 0.0 : point.counts[3] / (double) point.counts[0]);
+        return value;
     }
 
     private List<String> phaseCoverage(long from, long to) {
@@ -184,6 +236,103 @@ final class LoadWindowMetrics {
             if (from < window.end && to > window.start) result.add(window.name);
         }
         return result;
+    }
+
+    private String eventKey(LoadEvent event) {
+        return String.valueOf(event.runId()) + '\u0000' + String.valueOf(event.workloadId()) + '\u0000'
+                + String.valueOf(event.mixId()) + '\u0000' + String.valueOf(event.iterationId());
+    }
+
+    /** A bounded series whose buckets are aligned to, and cannot cross, one configured window. */
+    private final class WindowSeries {
+        private final long start, end;
+        private final TreeMap<Long, Point> points = new TreeMap<Long, Point>();
+        private final java.util.Set<String> activeAtStart = new java.util.HashSet<String>();
+        private long bucketWidthMs;
+
+        WindowSeries(long start, long end) {
+            this.start = start;
+            this.end = end;
+            this.bucketWidthMs = Math.min(1000L, Math.max(1L, end - start));
+        }
+
+        void record(long timestamp, int kind, LoadEvent event) {
+            trackActivityAtStart(event);
+            Point point = pointAt(timestamp);
+            if (point != null) LoadWindowMetrics.this.record(point, kind, event);
+        }
+
+        void recordLatency(long timestamp, long latencyMs) {
+            Point point = pointAt(timestamp);
+            if (point != null) point.latencies.add(latencyMs);
+        }
+
+        void recordQueueSample(long timestamp, int queueDepth) {
+            Point point = pointAt(timestamp);
+            if (point == null) return;
+            point.queueDepthTotal += Math.max(0, queueDepth);
+            point.queueSamples++;
+            point.queueDepthPeak = Math.max(point.queueDepthPeak, Math.max(0, queueDepth));
+        }
+
+        void recordSubmitSample(long timestamp, long lagMs, int queueDepth) {
+            Point point = pointAt(timestamp);
+            if (point == null) return;
+            point.submitLagTotalMs += Math.max(0L, lagMs);
+            point.submitLagCount++;
+            recordQueueSample(timestamp, queueDepth);
+        }
+
+        private Point pointAt(long timestamp) {
+            if (timestamp < start || timestamp >= end || end <= start) return null;
+            long bin = Math.floorDiv(timestamp - start, bucketWidthMs);
+            Point point = points.get(bin);
+            if (point == null) { point = new Point(); points.put(bin, point); }
+            while (points.size() > SERIES_CAPACITY) {
+                TreeMap<Long, Point> rolled = new TreeMap<Long, Point>();
+                for (Map.Entry<Long, Point> entry : points.entrySet()) {
+                    long key = Math.floorDiv(entry.getKey(), 2L);
+                    Point merged = rolled.get(key);
+                    if (merged == null) { merged = new Point(); rolled.put(key, merged); }
+                    merged.add(entry.getValue());
+                }
+                points.clear(); points.putAll(rolled);
+                bucketWidthMs = Math.multiplyExact(bucketWidthMs, 2L);
+            }
+            return points.get(Math.floorDiv(timestamp - start, bucketWidthMs));
+        }
+
+        private void trackActivityAtStart(LoadEvent event) {
+            String key = eventKey(event);
+            if (event.completed() && event.completedAtEpochMs() < start) {
+                activeAtStart.remove(key);
+                return;
+            }
+            if ((event.started() || event.completed()) && event.startedAtEpochMs() < start)
+                activeAtStart.add(key);
+        }
+
+        Map<String, Object> snapshot(long actualEnd) {
+            long effectiveEnd = Math.min(end, Math.max(start, actualEnd));
+            Map<String, Object> result = new LinkedHashMap<String, Object>();
+            result.put("basis", "event-time counts and rates; latency samples grouped by scheduled cohort; buckets start at the configured window boundary and the final bucket is clipped to its end");
+            result.put("windowStartEpochMs", start);
+            result.put("windowEndEpochMs", effectiveEnd);
+            result.put("durationMs", effectiveEnd - start);
+            result.put("bucketDurationMs", bucketWidthMs);
+            result.put("capacity", SERIES_CAPACITY);
+            List<Map<String, Object>> values = new ArrayList<Map<String, Object>>();
+            long inFlight = activeAtStart.size();
+            for (Map.Entry<Long, Point> entry : points.entrySet()) {
+                long bucketStart = start + entry.getKey() * bucketWidthMs;
+                if (bucketStart >= effectiveEnd) continue;
+                long duration = Math.min(bucketWidthMs, effectiveEnd - bucketStart);
+                inFlight = Math.max(0L, inFlight + entry.getValue().concurrencyDelta);
+                values.add(pointSnapshot(bucketStart, duration, entry.getValue(), inFlight));
+            }
+            result.put("points", values);
+            return result;
+        }
     }
 
     private static final class Point {

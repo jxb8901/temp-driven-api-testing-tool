@@ -2,10 +2,49 @@ package att.load;
 
 import att.core.ResultStatus;
 import org.junit.jupiter.api.Test;
+import java.util.List;
 import java.util.Map;
 import static org.junit.jupiter.api.Assertions.*;
 
 class LoadWindowMetricsTest {
+    @Test void windowSeriesKeepSubsecondSteadyTrafficAndExcludeWarmup() {
+        long start = 10_000L;
+        LoadWindowMetrics metrics = new LoadWindowMetrics(start, 250L, 0L, 250L, 0L);
+        metrics.onEvent(LoadEvent.completed("r", "arrivalRate", "WARMUP", "warmup", null, 1,
+                start + 100L, start + 100L, start + 150L, ResultStatus.PASS));
+        metrics.onEvent(LoadEvent.completed("r", "arrivalRate", "STEADY", "steady", null, 2,
+                start + 350L, start + 350L, start + 375L, ResultStatus.PASS));
+        metrics.finish(start + 500L);
+
+        @SuppressWarnings("unchecked") Map<String, Object> root = metrics.snapshot(start + 500L);
+        @SuppressWarnings("unchecked") Map<String, Object> timeSeries = (Map<String, Object>) root.get("timeSeries");
+        @SuppressWarnings("unchecked") List<Map<String, Object>> allPoints =
+                (List<Map<String, Object>>) timeSeries.get("points");
+        assertEquals(2L, allPoints.get(0).get("completed"), "the all-execution series keeps both phase events");
+
+        @SuppressWarnings("unchecked") Map<String, Object> windowSeries =
+                (Map<String, Object>) timeSeries.get("windowSeries");
+        @SuppressWarnings("unchecked") Map<String, Object> steadySeries =
+                (Map<String, Object>) windowSeries.get("steady");
+        assertEquals(start + 250L, steadySeries.get("windowStartEpochMs"));
+        assertEquals(start + 500L, steadySeries.get("windowEndEpochMs"));
+        assertEquals(250L, steadySeries.get("bucketDurationMs"));
+        @SuppressWarnings("unchecked") List<Map<String, Object>> steadyPoints =
+                (List<Map<String, Object>>) steadySeries.get("points");
+        assertEquals(1, steadyPoints.size());
+        Map<String, Object> point = steadyPoints.get(0);
+        assertEquals(start + 250L, point.get("windowStartEpochMs"));
+        assertEquals(250L, point.get("durationMs"));
+        assertEquals(1L, point.get("scheduled"));
+        assertEquals(1L, point.get("started"));
+        assertEquals(1L, point.get("completed"));
+        assertEquals(1L, point.get("successful"));
+        assertEquals(1L, point.get("latencyObservationCount"));
+        assertEquals(25L, point.get("latencyP95Ms"));
+        assertEquals(4.0, ((Number) point.get("completedRate")).doubleValue(), 0.000001);
+        assertEquals(java.util.Collections.singletonList("STEADY"), point.get("phaseCoverage"));
+    }
+
     @Test void admissionRateFollowsItsScheduledCohortAcrossPhaseBoundaries() {
         LoadWindowMetrics metrics = new LoadWindowMetrics(10_000L, 1_000L, 1_000L, 3_000L, 1_000L);
         // These ramp-up arrivals start during STEADY and must not be credited to

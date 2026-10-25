@@ -247,14 +247,59 @@ class LoadReportTest {
                 "changing the window selector must rerender the selected window");
         assertTrue(html.contains("function inWindow(p,win){return p.windowStartEpochMs>=win.windowStartEpochMs&&p.windowStartEpochMs+p.durationMs<=win.windowEndEpochMs}"),
                 "a trend bucket must fit entirely inside the selected window");
-        assertTrue(html.contains("function currentPoints(){var key=select?select.value:'steady',win=w[key];if(!win||key==='all')return points;return points.filter(function(p){return inWindow(p,win)})}"),
-                "trend series must omit buckets that overlap but cross the selected window boundary");
+        assertTrue(html.contains("function currentPoints(){var key=select?select.value:'steady',win=w[key],scoped=windowSeries[key];if(key==='all')return points;if(scoped&&scoped.points)return scoped.points;if(!win)return points;return points.filter(function(p){return inWindow(p,win)})}"),
+                "trend series must use window-aligned points and retain a safe fallback for older summaries");
         assertTrue(html.contains("function hasPartialBuckets(){"),
                 "empty windows with omitted partial buckets must be distinguishable from windows with no samples");
         int emptyReturn = html.indexOf("return}svg.setAttribute", emptyWindowCheck);
         int sloDrawing = html.indexOf("var slo=id==='latency-chart'", chartStart);
         assertTrue(emptyReturn > emptyWindowCheck && emptyReturn < sloDrawing,
                 "an empty selected window must return before drawing latency data or its p95 SLO");
+    }
+
+    @Test void subSecondSteadyTrendShowsSteadyEventsWithoutWarmupContamination() throws Exception {
+        Instant started = Instant.parse("2026-10-24T00:00:00Z");
+        long startMs = started.toEpochMilli();
+        LoadScenario scenario = new LoadScenario(Paths.get("subsecond-steady.yaml"), "template", "LOAD_TEMPLATE",
+                Collections.emptyMap(), Collections.emptyMap(), LoadScenario.Model.ARRIVAL_RATE, 0, 1.0, "1/s",
+                Duration.ofMillis(250), Duration.ZERO, Duration.ofMillis(250), Duration.ZERO, Duration.ZERO,
+                1, "drop", Collections.emptyMap(), Collections.emptyMap());
+        LoadMetrics metrics = LoadMetrics.forScenario(scenario, startMs, 500L);
+        metrics.onEvent(LoadEvent.completed("subsecond-steady", "arrivalRate", "WARMUP", "warmup", null, 1,
+                startMs + 100L, startMs + 100L, startMs + 150L, ResultStatus.PASS));
+        metrics.onEvent(LoadEvent.completed("subsecond-steady", "arrivalRate", "STEADY", "steady", null, 2,
+                startMs + 350L, startMs + 350L, startMs + 375L, ResultStatus.PASS));
+        metrics.finish(startMs + 500L);
+
+        LoadRunResult result = new LoadRunResult("subsecond-steady", scenario, started, started.plusMillis(500), metrics.snapshot());
+        Path report = new LoadReportWriter().write(temp, result);
+        String html = new String(Files.readAllBytes(report), StandardCharsets.UTF_8);
+        assertTrue(html.contains("Trend charts use buckets aligned to this configured window"));
+        assertTrue(html.contains("if(scoped&&scoped.points)return scoped.points"),
+                "the selected window must use its dedicated trend series");
+
+        String marker = "<script type=\"application/json\" id=\"att-load-summary-data\">";
+        int dataStart = html.indexOf(marker);
+        assertTrue(dataStart >= 0, "the report must embed the chart data");
+        int dataEnd = html.indexOf("</script>", dataStart + marker.length());
+        @SuppressWarnings("unchecked") Map<String, Object> embedded = att.validation.JsonSupport.mapper()
+                .readValue(html.substring(dataStart + marker.length(), dataEnd), Map.class);
+        @SuppressWarnings("unchecked") Map<String, Object> embeddedMetrics = (Map<String, Object>) embedded.get("metrics");
+        @SuppressWarnings("unchecked") Map<String, Object> windowMetrics = (Map<String, Object>) embeddedMetrics.get("windowMetrics");
+        @SuppressWarnings("unchecked") Map<String, Object> timeSeries = (Map<String, Object>) windowMetrics.get("timeSeries");
+        @SuppressWarnings("unchecked") List<Map<String, Object>> allPoints = (List<Map<String, Object>>) timeSeries.get("points");
+        assertEquals(2L, ((Number) allPoints.get(0).get("completed")).longValue(), "the full-execution bucket contains both phases");
+        @SuppressWarnings("unchecked") Map<String, Object> windowSeries = (Map<String, Object>) timeSeries.get("windowSeries");
+        @SuppressWarnings("unchecked") Map<String, Object> steadySeries = (Map<String, Object>) windowSeries.get("steady");
+        @SuppressWarnings("unchecked") List<Map<String, Object>> steadyPoints = (List<Map<String, Object>>) steadySeries.get("points");
+        assertEquals(1, steadyPoints.size(), "a valid sub-second steady window must keep its event");
+        Map<String, Object> steadyPoint = steadyPoints.get(0);
+        assertEquals(startMs + 250L, ((Number) steadyPoint.get("windowStartEpochMs")).longValue());
+        assertEquals(250L, ((Number) steadyPoint.get("durationMs")).longValue());
+        assertEquals(1L, ((Number) steadyPoint.get("scheduled")).longValue(), "warm-up arrivals must not enter the steady trend");
+        assertEquals(1L, ((Number) steadyPoint.get("completed")).longValue());
+        assertEquals(1L, ((Number) steadyPoint.get("latencyObservationCount")).longValue());
+        assertEquals(25L, ((Number) steadyPoint.get("latencyP95Ms")).longValue());
     }
 
     private static String phaseRow(String html, String phase) {
