@@ -41,6 +41,26 @@ class VNextOptionsTest {
         assertTrue(VNextOptions.parse(new String[]{"--local","run","flow","PAYMENT.submit"}).input()==null);
     }
 
+    @Test void singleCaseAndSuiteTargetsRejectAdditionalSelectorsForLocalAndRemote() {
+        String[][] prefixes={{"--local"},{"--server","sit","-p","payments"}};
+        String[][] extraSelectors={
+                {"run","case","PAYMENT.A","--case","PAYMENT.B"},
+                {"run","case","PAYMENT.A","--case-id","PAYMENT.B"},
+                {"run","case","PAYMENT.A","--tag","smoke"},
+                {"run","case","PAYMENT.A","--exclude-tag","skip"},
+                {"run","suite","testcase/A.xlsx","--suite","testcase/B.xlsx"},
+                {"run","suite","testcase/A.xlsx","--suite-dir","testcase"}
+        };
+        for(String[] prefix:prefixes) {
+            for(String[] command:extraSelectors) {
+                String[] args=concat(prefix,command);
+                assertThrows(IllegalArgumentException.class,()->VNextOptions.parse(args));
+            }
+        }
+        assertEquals("case",VNextOptions.parse(new String[]{"run","case","PAYMENT.A"}).targetKind());
+        assertEquals("suite",VNextOptions.parse(new String[]{"run","suite","testcase/A.xlsx"}).targetKind());
+    }
+
     @Test void directLoadRejectsInputUntilBothAdaptersSupportIt() {
         assertThrows(IllegalArgumentException.class,()->VNextOptions.parse(new String[]{
                 "--local","load","flow","PAYMENT.submit","--input","templates/flows/PAYMENT.submit/load.yaml"}));
@@ -50,6 +70,13 @@ class VNextOptionsTest {
                 "--local","run","flow","PAYMENT.submit","--input","input.yaml"}).input().toString());
         assertEquals("input.yaml",VNextOptions.parse(new String[]{
                 "--server","sit","-p","payments","run","flow","PAYMENT.submit","--input","input.yaml"}).input().toString());
+    }
+
+    private static String[] concat(String[] prefix,String[] command) {
+        String[] result=new String[prefix.length+command.length];
+        System.arraycopy(prefix,0,result,0,prefix.length);
+        System.arraycopy(command,0,result,prefix.length,command.length);
+        return result;
     }
 
     @Test void requestedFormatSurvivesOtherArgumentErrors() {
