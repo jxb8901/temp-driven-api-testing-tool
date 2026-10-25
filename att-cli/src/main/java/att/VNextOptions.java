@@ -195,8 +195,8 @@ public final class VNextOptions {
             } else if (b.target==null||b.target.trim().isEmpty()) throw invalid("run "+b.targetKind+" requires a target ID or path");
             if (isResource(b.targetKind)&&(!b.suites.isEmpty()||b.suiteDirectory!=null||!b.caseIds.isEmpty()||!b.tags.isEmpty()||!b.excludeTags.isEmpty()))
                 throw invalid("Resource targets cannot be combined with Case, Suite, or tag selectors");
-            if ("case".equals(b.targetKind)&&(!b.suites.isEmpty()||b.suiteDirectory!=null)) throw invalid("run case cannot be combined with suite selectors");
-            if ("suite".equals(b.targetKind)&&(!b.caseIds.isEmpty()||!b.tags.isEmpty()||!b.excludeTags.isEmpty())) throw invalid("run suite cannot be combined with Case/tag selectors");
+            if ("case".equals(b.targetKind)&&(!b.suites.isEmpty()||b.suiteDirectory!=null||!b.caseIds.isEmpty()||!b.tags.isEmpty()||!b.excludeTags.isEmpty())) throw invalid("run case cannot be combined with additional Case, Suite, or tag selectors");
+            if ("suite".equals(b.targetKind)&&(!b.suites.isEmpty()||b.suiteDirectory!=null||!b.caseIds.isEmpty()||!b.tags.isEmpty()||!b.excludeTags.isEmpty())) throw invalid("run suite cannot be combined with additional Case, Suite, or tag selectors");
         } else if (load) {
             if (!set("scenario","template","flow","tool").contains(b.targetKind)) throw invalid("load target must be scenario, template, flow, or tool");
             if (b.target==null||b.target.trim().isEmpty()) throw invalid("load "+b.targetKind+" requires a target ID or path");
