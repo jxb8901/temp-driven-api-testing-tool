@@ -1,6 +1,7 @@
 schemaVersion: att-schema-catalog/v3.0
 schemas:
   att-package/v1: att-package-v1.schema.json
+  att-validation/v1: att-validation-v1.schema.json
   att-load-bindings/v1: att-load-bindings-v1.schema.json
   att-load-template/v1: att-load-template-v1.schema.json
   att-schedule/v2: att-schedule-v2.schema.json

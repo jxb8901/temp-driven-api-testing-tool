@@ -24,7 +24,8 @@
 | Load bindings | `att-load-bindings/v1` | `schemas/att-load-bindings-v1.schema.json` |
 | Load summary | att-load-summary/v1.2 |
 | Run manifest | att-run/v2.1 |
-| Validation JSON | att-validation/v2.1 |
+| 舊版 Package validation JSON | `att-validation/v2.1` |
+| 精簡 CLI 階層式 validation report | `att-validation/v1` |
 | CI summary | att-ci-summary/v2.1 |
 | JUnit XML | att-junit/v2.1 |
 

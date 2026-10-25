@@ -29,6 +29,16 @@ public final class RemoteCommand {
         return run(args,System.getenv(),ServerProfileLoader.profilePath(),systemConsolePrompt(),
                 (profile,password,username,provider)->new RemoteHttpClient(profile,password,username,provider));
     }
+    /** Run the typed vNext plan through the existing authenticated Server transport. */
+    public static int runVNext(String server,String format,Map<String,Object> plan) {
+        try {
+            List<String> args=new ArrayList<>();
+            if(server!=null){args.add("--server");args.add(server);}
+            args.add("--format");args.add(format==null?"human":format);
+            args.add("vnext");args.add(RemoteHttpClient.JSON.writeValueAsString(plan));
+            return run(args.toArray(new String[0]));
+        } catch(Exception failure) { return fail("Unable to prepare Remote ATT command: "+safe(failure),4,format==null?"human":format); }
+    }
     static int run(String[] args,Map<String,String> environment,Path profilePath,CredentialPrompt prompt,RemoteClientFactory clientFactory) {
         String format="human";
         try {
@@ -52,6 +62,7 @@ public final class RemoteCommand {
             JsonNode version=client.get("/version");
             if(!version.path("apiVersion").isTextual()||!ServerApi.VERSION.equals(version.path("apiVersion").asText()))throw new RemoteException("ATT Server API is missing or unsupported; client supports API v"+ServerApi.VERSION);
             if("ping".equals(op)){JsonNode health=client.get("/health");if("json".equals(format))System.out.println(health.toString());else System.out.println("ATT Server "+profile.url+": "+health.path("status").asText("UNKNOWN"));return 0;}
+            if("vnext".equals(op)){if(command.size()!=2)throw new IllegalArgumentException("Invalid typed vNext command plan");JsonNode plan;try{plan=RemoteHttpClient.JSON.readTree(command.get(1));}catch(Exception invalid){throw new IllegalArgumentException("Invalid typed vNext command plan");}if(plan==null||!plan.isObject())throw new IllegalArgumentException("Invalid typed vNext command plan");return runVNext(client,plan,format);}
             if("version".equals(op)){if("json".equals(format))System.out.println(version.toString());else System.out.println("ATT Server "+version.path("version").asText("unknown")+" (API v"+version.path("apiVersion").asText()+")");return 0;}
             if("packages".equals(op))return packages(client,command,format);
             if("package".equals(op))return packageView(client,command,format);
@@ -156,6 +167,12 @@ public final class RemoteCommand {
         catch(Exception failure){String detail=safe(failure);throw new RemoteException("Job "+id+" was accepted, but following it failed: "+detail+". Recover with `att remote watch "+id+"` or `att remote result "+id+"`.",failure);}
     }
     static int follow(RemoteHttpClient c,String id,String format)throws Exception {
+        JsonNode value=awaitResult(c,id,format);return renderResult(value,format);
+    }
+    private static JsonNode awaitResult(RemoteHttpClient c,String id,String format)throws Exception {
+        return awaitResult(c,id,format,false,false);
+    }
+    private static JsonNode awaitResult(RemoteHttpClient c,String id,String format,boolean quiet,boolean verbose)throws Exception {
         JsonNode current=c.get("/jobs/"+id);ApiStatus status=parseStatus(current.path("status").asText(null));
             String cursor=null;int retries=0;
             while(true) {
@@ -168,7 +185,7 @@ public final class RemoteCommand {
                         JsonNode data;try{data=RemoteHttpClient.JSON.readTree(event.data);}catch(Exception e){throw new RemoteException("ATT Server returned malformed SSE event data");}
                         if(data==null||!data.isObject())throw new RemoteException("ATT Server returned malformed SSE event data");
                         retries=0;
-                        RemoteRenderer.event(format,id,event.event,data);
+                        if((!quiet&&verbose)||"diagnostic".equals(event.event))RemoteRenderer.event(format,id,event.event,data);
                         if(("status".equals(event.event)||"result".equals(event.event))&&data.has("status")){ApiStatus candidate=parseStatus(data.path("status").asText(null));if(candidate.isTerminal())status=candidate;}
                     }
                     if(!status.isTerminal()){JsonNode confirmed=c.get("/jobs/"+id);ApiStatus canonical=parseStatus(confirmed.path("status").asText(null));if(canonical.isTerminal())status=canonical;else throw new java.io.IOException("SSE closed before terminal status");}
@@ -176,7 +193,83 @@ public final class RemoteCommand {
                 } catch(RemoteException e){if(!e.isRetryableTransport()||++retries>5)throw e;pause(retries);}catch(Exception e){if(status.isTerminal())break;if(++retries>5)throw new RemoteException("ATT Server event stream disconnected repeatedly before a terminal result",e);pause(retries);}
                 finally {if(connection!=null)connection.disconnect();}
             }
-        JsonNode value=c.get("/jobs/"+id+"/result");return renderResult(value,format);
+        return c.get("/jobs/"+id+"/result");
+    }
+
+    private static int runVNext(RemoteHttpClient c,JsonNode plan,String format)throws Exception {
+        String command=plan.path("command").asText("");
+        if("validate".equals(command)) {
+            JsonNode report=c.post("/validation",plan);
+            if(!"att-validation/v1".equals(report.path("schemaVersion").asText()))throw new RemoteException("ATT Server returned an unsupported validation report");
+            int exit=report.path("exitCode").asInt(-1);if(exit<0||exit>4)throw new RemoteException("ATT Server returned an invalid validation exit code");
+            if("json".equals(format))System.out.println(report.toString());else renderValidation(report,0);
+            return exit;
+        }
+        if(!"run".equals(command)&&!"load".equals(command))throw new IllegalArgumentException("The Remote vNext command must be run, load, or validate");
+        String packageId=plan.path("packageId").asText("");
+        if(packageId.trim().isEmpty()||packageId.contains("/"))throw new IllegalArgumentException("Remote RUN/LOAD requires a logical -p/--package ID");
+        ObjectNode body=RemoteHttpClient.JSON.createObjectNode();body.put("packageId",packageId);
+        copyText(plan,body,"environment");copyText(plan,body,"runId");
+        copyArray(plan,body,"suites");copyArray(plan,body,"caseIds");copyArray(plan,body,"tags");copyArray(plan,body,"excludeTags");copyArray(plan,body,"overrides");
+        copyText(plan,body,"suiteDirectory");
+        if(plan.path("all").asBoolean(false))body.put("all",true);
+        if(plan.path("rerunFailed").asBoolean(false))body.put("rerunFailed",true);
+        if(plan.path("dryRun").asBoolean(false))body.put("dryRun",true);
+        if(plan.path("failFast").asBoolean(false))body.put("failFast",true);
+        String targetKind=plan.path("targetKind").asText("");String target=plan.path("target").asText(null);
+        if("run".equals(command)) {
+            if(java.util.Arrays.asList("template","flow","tool").contains(targetKind)) {
+                ObjectNode value=body.putObject("target");value.put("type",targetKind);value.put("id",target);
+                copyLogicalPath(plan,body,"input","debugInput");
+            } else if("case".equals(targetKind))body.withArray("caseIds").add(target);
+            else if("suite".equals(targetKind))body.withArray("suites").add(logicalPath(target,"suite"));
+        } else {
+            if("scenario".equals(targetKind)||"load".equals(targetKind))body.put("scenario",logicalPath(target,"scenario"));
+            else {ObjectNode value=body.putObject("target");value.put("type",targetKind);value.put("id",target);}
+            JsonNode load=plan.path("load");if(load.isObject())body.set("load",load.deepCopy());
+        }
+        JsonNode accepted=c.post("/jobs/"+command,body);String id=accepted.path("jobId").asText("");
+        if(!id.matches("J[A-F0-9]{16}"))throw new RemoteException("ATT Server accepted a job without a valid job ID");
+        JsonNode result;
+        try {result=awaitResult(c,id,format,plan.path("quiet").asBoolean(false),plan.path("verbose").asBoolean(false));} catch(Exception failure){throw new RemoteException("Job "+id+" was accepted, but following it failed: "+safe(failure)+". Recover with `att remote watch "+id+"` or `att remote result "+id+"`.",failure);}
+        int exit=terminalExitCode(result);
+        JsonNode job=result.path("job"),canonical=result.path("result");
+        if("json".equals(format)) {
+            ObjectNode output=RemoteHttpClient.JSON.createObjectNode();output.put("schemaVersion","att-operation/v1");output.put("backend","SERVER");
+            output.put("command",command);output.put("targetKind",targetKind);if(target!=null)output.put("target",target);
+            output.put("packageId",packageId);copyText(plan,output,"environment");output.put("jobId",id);
+            if(canonical.has("executionId"))output.set("executionId",canonical.get("executionId"));
+            output.put("status",job.path("status").asText("UNKNOWN"));output.put("exitCode",exit);
+            if(canonical.has("summary"))output.set("summary",canonical.get("summary"));
+            if(canonical.has("paths"))output.set("paths",canonical.get("paths"));
+            if(result.has("diagnostic"))output.set("diagnostic",result.get("diagnostic"));
+            System.out.println(output.toString());
+        } else {
+            System.out.println(command.toUpperCase(java.util.Locale.ROOT)+" "+job.path("status").asText("UNKNOWN")+" ("+exit+")");
+            System.out.println("Server Job: "+id);
+            if(canonical.has("executionId")&&!canonical.path("executionId").isNull())System.out.println("Run ID: "+canonical.path("executionId").asText());
+            if(result.path("diagnostic").isObject())System.err.println(result.path("diagnostic").path("summary").asText("ATT Server diagnostic"));
+        }
+        return exit;
+    }
+    private static int terminalExitCode(JsonNode value)throws RemoteException {
+        JsonNode job=value.path("job");if(!job.isObject())throw new RemoteException("ATT Server result response is missing its job");
+        ApiStatus status=parseStatus(job.path("status").asText(null));if(!status.isTerminal())throw new RemoteException("ATT Server has not produced a terminal result");
+        int code;switch(status){case PASS:code=0;break;case FAIL:code=1;break;case INVALID:code=2;break;case ERROR:case CANCELLED:code=3;default:throw new RemoteException("ATT Server returned an unsupported terminal result");}
+        JsonNode canonical=value.path("result");if(canonical.isObject()&&canonical.has("exitCode")){int serverCode=canonical.path("exitCode").asInt(-1);if(serverCode<0||serverCode>3)throw new RemoteException("ATT Server returned an unsupported ATT exit code");code=serverCode;}return code;
+    }
+    private static void copyText(JsonNode source,ObjectNode target,String name){JsonNode v=source.get(name);if(v!=null&&v.isTextual()&&!v.asText().isEmpty())target.set(name,v.deepCopy());}
+    private static void copyArray(JsonNode source,ObjectNode target,String name){JsonNode v=source.get(name);if(v!=null&&v.isArray()&&v.size()>0)target.set(name,v.deepCopy());}
+    private static void copyLogicalPath(JsonNode source,ObjectNode target,String from,String to){JsonNode v=source.get(from);if(v!=null&&v.isTextual())target.put(to,logicalPath(v.asText(),to));}
+    private static void renderValidation(JsonNode report,int depth) {
+        if(depth==0){System.out.println("ATT Validation Report");System.out.println("Backend       : SERVER");System.out.println("Scope         : "+report.path("scope").asText());JsonNode context=report.path("context");if(context.isObject())context.fields().forEachRemaining(entry->System.out.println(entry.getKey()+" : "+entry.getValue().asText(entry.getValue().toString())));}
+        JsonNode sections=report.path("sections");if(sections.isArray())for(JsonNode section:sections)renderValidationSection(section,depth);
+        if(depth==0){JsonNode counts=report.path("counts");System.out.println("Summary       : "+counts.path("pass").asInt()+" pass, "+counts.path("fail").asInt()+" fail, "+counts.path("warnings").asInt()+" warning(s), "+counts.path("skip").asInt()+" skipped");System.out.println("Overall Status: "+report.path("overallStatus").asText());System.out.println("Exit Code     : "+report.path("exitCode").asInt());}
+    }
+    private static void renderValidationSection(JsonNode section,int depth) {
+        StringBuilder line=new StringBuilder();for(int i=0;i<depth;i++)line.append("  ");line.append('[').append(section.path("status").asText()).append("] ").append(section.path("name").asText());if(section.path("source").isTextual())line.append("  ").append(section.path("source").asText());System.out.println(line.toString());
+        JsonNode children=section.path("sections");if(children.isArray())for(JsonNode child:children)renderValidationSection(child,depth+1);
+        JsonNode diagnostics=section.path("diagnostics");if(diagnostics.isArray())for(JsonNode d:diagnostics){StringBuilder detail=new StringBuilder();for(int i=0;i<=depth;i++)detail.append("  ");detail.append(d.path("severity").asText()).append(' ').append(d.path("code").asText());if(d.path("source").isTextual())detail.append(" | ").append(d.path("source").asText());if(d.path("field").isTextual())detail.append(" | field: ").append(d.path("field").asText());if(d.path("message").isTextual())detail.append(" | ").append(d.path("message").asText());System.out.println(detail.toString());}
     }
     private static int renderResult(JsonNode value,String format)throws Exception {
         JsonNode job=value.path("job");if(!job.isObject())throw new RemoteException("ATT Server result response is missing its job");
@@ -230,7 +323,7 @@ public final class RemoteCommand {
         };
     }
     private static boolean requiresCredentialPreflight(String operation) {
-        return "run".equals(operation)||"debug".equals(operation)||"load".equals(operation)||"validate".equals(operation)||"cancel".equals(operation);
+        return "run".equals(operation)||"debug".equals(operation)||"load".equals(operation)||"validate".equals(operation)||"cancel".equals(operation)||"vnext".equals(operation);
     }
     private static final class Credentials { final String username,password; Credentials(String username,String password){this.username=username;this.password=password;} }
     interface CredentialPrompt { String readLine(String prompt); char[] readPassword(String prompt); }

@@ -37,6 +37,8 @@ public class WorkerRequest {
     public Boolean dryRun;
     public Boolean failFast;
     public String validationScope;
+    /** Server policy filter for installation-wide, profile-aware static validation. */
+    public List<String> validationAllowedEnvironments;
     public String debugInput;
     public Map<String,Object> inlineDebugInput;
     public Map<String,Object> inlineLoadInput;

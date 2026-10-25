@@ -1557,6 +1557,132 @@ final class ServerRuntime implements AutoCloseable {
         request.sensitivePaths=config.inspection.sensitivePaths;request.sensitiveFieldPatterns=config.inspection.sensitiveFieldPatterns;
         return applyWorkerPolicy(request);
     }
+
+    Map<String,Object> validateVNext(JsonNode input,String principal) throws Exception {
+        if(input==null||!input.isObject())throw new IllegalArgumentException("A JSON validation plan is required");
+        Set<String> allowedFields=Set.of("command","targetKind","target","packageId","environment","all");
+        java.util.Iterator<String> fields=input.fieldNames();while(fields.hasNext())if(!allowedFields.contains(fields.next()))
+            throw new IllegalArgumentException("Remote validation accepts only typed targets and always uses Server-owned configuration");
+        String command=optionalText(input,"command");
+        if(!"validate".equals(command))throw new IllegalArgumentException("Only validate plans are accepted by this endpoint");
+        boolean all=input.path("all").asBoolean(false);
+        String targetKind=optionalText(input,"targetKind"),target=optionalText(input,"target"),packageId=optionalText(input,"packageId"),environment=optionalText(input,"environment");
+        if(all) {
+            if(targetKind!=null||target!=null||packageId!=null||environment!=null)
+                throw new IllegalArgumentException("validate --all cannot be combined with a target, Package, or Environment");
+            return validateAllVNext();
+        }
+        String scope=targetKind==null?"config":targetKind;
+        if(!List.of("config","package","case","suite","template","flow","tool","load").contains(scope))
+            throw new IllegalArgumentException("Unsupported validation scope");
+        if("config".equals(scope)&&target!=null)throw new IllegalArgumentException("validate config does not take a target");
+        if(!"config".equals(scope)&&packageId==null)throw new IllegalArgumentException("Remote validation requires a registered -p/--package ID");
+        if(List.of("case","suite","template","flow","tool","load").contains(scope)&&(target==null||target.isBlank()))
+            throw new IllegalArgumentException("Selected validation requires a target");
+        if("config".equals(scope)&&target!=null)throw new IllegalArgumentException("validate config does not take a target");
+        Path root=null;
+        if(packageId!=null) {root=packageRoot(packageId);if(root==null)throw new NotFoundException();validatePackageRoot(root);}
+        if(environment!=null) {
+            if(root!=null)config.packageConfiguration.authorizeEnvironment(environment,true);
+        } else if(root!=null) {
+            try {Map<String,Object> effective=resolveExecutionConfiguration(packageId,root,null);environment=(String)effective.get("environment");}
+            catch(InspectionConfigurationException invalid) { /* The validation Worker returns the detailed read-only report. */ }
+        }
+        Path workerRoot=root==null?ServerConfig.runtimeConfigRoot(config.runtimeConfigPath):root;
+        WorkerRequest request=inspectionRequest(packageId,workerRoot,environment);
+        request.inspectionAction="cli-validation";request.validationScope=scope;request.inspectionSharedConfiguration=Boolean.valueOf(root==null);
+        request.validationAllowedEnvironments=null;
+        if("suite".equals(scope)||"load".equals(scope))request.inspectionPath=safeRelative(target,scope);
+        else if("case".equals(scope))request.inspectionResourceId=safeText(target,512,"target");
+        else if(List.of("template","flow","tool").contains(scope)){request.inspectionType=scope;request.inspectionResourceId=safeText(target,512,"target");}
+        Map<String,Object> result=validationWorkerReport(executeInspection(workerRoot,request));
+        result.put("requestId",request.jobId);
+        return result;
+    }
+
+    private Map<String,Object> validateAllVNext() throws Exception {
+        Path runtimeRoot=ServerConfig.runtimeConfigRoot(config.runtimeConfigPath);
+        att.server.api.AttValidationReport report=new att.server.api.AttValidationReport("ALL","SERVER");
+        report.context("runtimeConfig","config/config.yaml");report.context("serverConfig","att-server.yaml");
+        try {
+            WorkerRequest central=inspectionRequest(null,runtimeRoot,null);central.inspectionSharedConfiguration=Boolean.TRUE;
+            central.inspectionAction="cli-validation";central.validationScope="config";central.all=Boolean.TRUE;
+            Map<String,Object> checked=validationWorkerReport(executeInspection(runtimeRoot,central));appendValidationSections(report,checked);
+        } catch(Exception unavailable) {
+            report.incomplete();AttValidationReportSection(report,"Shared Runtime Config","config/config.yaml","ATT-VALIDATION-INCOMPLETE",safeMessage(unavailable));
+        }
+        Path serverFile=config.sourceFile;
+        if(serverFile==null) {
+            report.addSection("ATT Server Config","att-server.yaml","SKIP").diagnostic(validationDiagnostic("ATT-SERVER-CONFIG-SKIPPED","INFO","att-server.yaml","serverConfig","No active ATT Server Config path is configured",null));
+        } else {
+            att.server.api.AttValidationReport.Section server=report.addSection("ATT Server Config","att-server.yaml","PASS");
+            try {ServerConfig.validateReadOnly(serverFile);}
+            catch(Exception invalid) {
+                server.status("FAIL");server.diagnostic(validationDiagnostic("ATT-SERVER-CONFIG-INVALID","ERROR","att-server.yaml","server",
+                        att.server.api.internal.DiagnosticSanitizer.redactAbsolutePaths(att.server.api.internal.DiagnosticSanitizer.redactText(invalid.getMessage()),serverFile.getParent()),
+                        "Correct the active ATT Server Config and retry read-only validation."));report.exitCode(2);
+            }
+        }
+        List<Map.Entry<String,Path>> packages=new ArrayList<>(config.packages.entrySet());packages.sort(Map.Entry.comparingByKey());
+        report.context("packages",packages.size());
+        if(packages.size()>200) {packages=packages.subList(0,200);report.incomplete();}
+        for(Map.Entry<String,Path> entry:packages) {
+            String packageId=entry.getKey();Path root=entry.getValue();
+            try {
+                validatePackageRoot(root);
+                WorkerRequest request=inspectionRequest(packageId,root,null);request.inspectionAction="cli-validation";
+                request.validationScope="package";request.all=Boolean.TRUE;
+                if(!config.packageConfiguration.allowedEnvironments.isEmpty())
+                    request.validationAllowedEnvironments=new ArrayList<>(config.packageConfiguration.allowedEnvironments);
+                Map<String,Object> checked=validationWorkerReport(executeInspection(root,request));
+                String status=reportExit(checked)==0?"PASS":reportExit(checked)==2?"FAIL":"WARN";
+                att.server.api.AttValidationReport.Section packageSection=report.addSection("Package "+packageId,"packages/"+packageId,status);
+                appendValidationSections(packageSection,checked);
+                if(reportExit(checked)==2)report.exitCode(2);
+                else if(reportExit(checked)!=0)report.incomplete();
+            } catch(Exception unavailable) {
+                report.incomplete();AttValidationReportSection(report,"Package "+packageId,"packages/"+packageId,"ATT-VALIDATION-INCOMPLETE",safeMessage(unavailable));
+            }
+        }
+        report.limitOutputBytes(config.inspection.maxResponseBytes);
+        Map<String,Object> result=report.toMap();result.put("requestId","validation");return result;
+    }
+
+    @SuppressWarnings("unchecked") private static Map<String,Object> validationWorkerReport(Map<String,Object> envelope) {
+        Object value=envelope.get("inspection");
+        if(!(value instanceof Map))throw new IllegalStateException("Validation Worker returned no att-validation/v1 report");
+        return new LinkedHashMap<String,Object>((Map<String,Object>)value);
+    }
+
+    @SuppressWarnings("unchecked") private static void appendValidationSections(att.server.api.AttValidationReport report,Map<String,Object> source) {
+        Object raw=source.get("sections");if(!(raw instanceof List))return;
+        for(Object value:(List<?>)raw)if(value instanceof Map)copyValidationSection(report,(Map<String,Object>)value);
+        int exit=reportExit(source);if(exit==2)report.exitCode(2);else if(exit==3)report.incomplete();
+    }
+    @SuppressWarnings("unchecked") private static void appendValidationSections(att.server.api.AttValidationReport.Section report,Map<String,Object> source) {
+        Object raw=source.get("sections");if(!(raw instanceof List))return;
+        for(Object value:(List<?>)raw)if(value instanceof Map)copyValidationSection(report,(Map<String,Object>)value);
+    }
+    @SuppressWarnings("unchecked") private static void copyValidationSection(att.server.api.AttValidationReport report,Map<String,Object> source) {
+        att.server.api.AttValidationReport.Section section=report.addSection(String.valueOf(source.get("name")),(String)source.get("source"),String.valueOf(source.get("status")));
+        copyValidationDetails(section,source);
+    }
+    @SuppressWarnings("unchecked") private static void copyValidationSection(att.server.api.AttValidationReport.Section report,Map<String,Object> source) {
+        att.server.api.AttValidationReport.Section section=report.child(String.valueOf(source.get("name")),(String)source.get("source"),String.valueOf(source.get("status")));
+        copyValidationDetails(section,source);
+    }
+    @SuppressWarnings("unchecked") private static void copyValidationDetails(att.server.api.AttValidationReport.Section section,Map<String,Object> source) {
+        Object diagnostics=source.get("diagnostics");if(diagnostics instanceof List)for(Object item:(List<?>)diagnostics)if(item instanceof Map)section.diagnostic((Map<String,Object>)item);
+        Object nested=source.get("sections");if(nested instanceof List)for(Object item:(List<?>)nested)if(item instanceof Map)copyValidationSection(section,(Map<String,Object>)item);
+    }
+    private static int reportExit(Map<String,Object> report) {Object value=report.get("exitCode");return value instanceof Number?((Number)value).intValue():3;}
+    private static void AttValidationReportSection(att.server.api.AttValidationReport report,String name,String source,String code,String message) {
+        att.server.api.AttValidationReport.Section section=report.addSection(name,source,"WARN");
+        section.diagnostic(validationDiagnostic(code,"ERROR",source,"validation",message,null));
+    }
+    private static Map<String,Object> validationDiagnostic(String code,String severity,String source,String field,String message,String suggestion) {
+        Map<String,Object> out=new LinkedHashMap<>();out.put("code",code);out.put("severity",severity);out.put("source",source);out.put("field",field);out.put("message",message==null?"Validation failed":message);if(suggestion!=null)out.put("suggestion",suggestion);return out;
+    }
     WorkerRequest applyWorkerPolicy(WorkerRequest request) {
         request.executionEnvironment=null;
         if(!"inspect".equals(request.command))request.packageManifestSource=null;

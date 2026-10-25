@@ -16,12 +16,10 @@ def active_schemas(catalog):
         match = re.search(r":\s*(att-[a-z0-9-]+)-v([0-9]+(?:\.[0-9]+)*)\.(?:schema\.json|xsd)\s*$", line)
         if match:
             name, version = match.groups()
-            if name in active and active[name] != version:
-                raise ValueError("multiple active versions for " + name)
-            active[name] = version
+            active.setdefault(name, set()).add(version)
     if not active:
         raise ValueError("catalog contains no active schema files")
-    return active
+    return {name: frozenset(versions) for name, versions in active.items()}
 
 
 def without_code(text):
@@ -71,9 +69,10 @@ def stale_claims(text, active, version):
     for lineno, line in enumerate(current_blocks(text), 1):
         for match in SCHEMA_TOKEN.finditer(line):
             name, found = match.groups()
-            if name.lower() in active and found != active[name.lower()]:
-                errors.append("stale schema %s/v%s; active is v%s (line %s)" %
-                              (name, found, active[name.lower()], lineno))
+            versions = active.get(name.lower(), ())
+            if versions and found not in versions:
+                errors.append("stale schema %s/v%s; active versions are %s (line %s)" %
+                              (name, found, ", ".join("v" + value for value in sorted(versions)), lineno))
         aliases = {
             "Load": "att-load", "Debug": "att-debug", "DBHelper": "att-dbhelper",
             "MQHelper": "att-mqhelper", "HTTPHelper": "att-httphelper",
@@ -83,8 +82,10 @@ def stale_claims(text, active, version):
         for label, name in aliases.items():
             for found in re.findall(r"\b" + re.escape(label) +
                                     r"\s+v([0-9]+(?:\.[0-9]+)*)\b", line, re.I):
-                if name in active and found != active[name]:
-                    errors.append("stale %s v%s; active is v%s" % (label, found, active[name]))
+                versions = active.get(name, ())
+                if versions and found not in versions:
+                    errors.append("stale %s v%s; active versions are %s" %
+                                  (label, found, ", ".join("v" + value for value in sorted(versions))))
         for found in re.findall(r"\bATT\s+[Vv]?([0-9]+(?:\.[0-9]+){2})\b|"
                                 r'["\x27]?attVersion["\x27]?\s*:\s*["\x27]([0-9.]+)', line):
             claimed = found[0] or found[1]
@@ -354,7 +355,7 @@ def validate(root=ROOT):
         errors += [lang + ": " + e for e in structure_errors(assembled[lang])]
         matrix = (module_root / "appendices/schema-matrix.md").read_text(encoding="utf-8")
         found = {(m.group(1).lower(), m.group(2)) for m in SCHEMA_TOKEN.finditer(matrix)}
-        expected = set(active.items())
+        expected = {(name, version) for name, versions in active.items() for version in versions}
         if found != expected:
             errors.append("%s active schema matrix differs from catalog: missing=%s extra=%s" %
                           (lang, sorted(expected - found), sorted(found - expected)))

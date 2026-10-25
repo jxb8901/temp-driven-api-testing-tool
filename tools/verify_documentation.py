@@ -208,7 +208,7 @@ def check_schema_references():
                                 (".json", ".xsd", ".yaml", ".yml"))
     catalog_path = SCHEMAS / "catalog.yaml"
     registered = active_schemas(read(catalog_path)) if catalog_path.is_file() else {}
-    registered_tokens = {name + "/v" + version for name, version in registered.items()}
+    registered_tokens = {name + "/v" + version for name, versions in registered.items() for version in versions}
     documented_protocols = {
         "att-worker/v1": DOCS / "system-design/worker-protocol.md",
         "att-prewarm/v1": DOCS / "system-design/execution-prewarm.md",
@@ -232,7 +232,7 @@ def check_schema_references():
 def check_cli_documentation():
     source = read(ROOT / "att-cli/src/main/java/att/CliOptions.java")
     supported_options = set(re.findall(r'"(--[a-z][a-z0-9-]*)"', source))
-    supported_options.update(("--server", "--no-auth", "--principal", "--detach", "--download", "--scenario"))
+    supported_options.update(("--local", "--server", "--version", "--no-auth", "--principal", "--detach", "--download", "--scenario"))
     public_commands = set(("run", "validate", "snapshot", "docs", "report",
                            "build", "clean", "version", "debug", "load", "help", "remote"))
 

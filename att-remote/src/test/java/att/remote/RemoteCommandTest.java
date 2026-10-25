@@ -2,6 +2,7 @@ package att.remote;
 
 import att.remote.config.ServerProfile;
 import att.remote.http.RemoteHttpClient;
+import att.server.api.ServerApi;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.io.ByteArrayInputStream;
@@ -93,10 +94,28 @@ class RemoteCommandTest {
         assertEquals(0,client.posts);
     }
 
+    @Test void vNextValidationUsesReadOnlyEndpointAndReturnsValidationExitCode() throws Exception {
+        MockClient client=new MockClient(){
+            @Override public JsonNode get(String path)throws RemoteException {
+                if("/version".equals(path))return RemoteHttpClient.JSON.createObjectNode().put("apiVersion",ServerApi.VERSION).put("version","test");
+                return super.get(path);
+            }
+            @Override public JsonNode post(String path,JsonNode body) {
+                posts++;lastPath=path;lastBody=body.deepCopy();
+                return RemoteHttpClient.JSON.createObjectNode().put("schemaVersion","att-validation/v1").put("overallStatus","INVALID").put("exitCode",2);
+            }
+        };
+        int exit=RemoteCommand.run(new String[]{"--server","https://example.invalid","--no-auth","--format","json","vnext",
+                        "{\"command\":\"validate\",\"targetKind\":\"config\",\"all\":false}"},
+                java.util.Collections.<String,String>emptyMap(),null,null,(profile,password,username,provider)->client);
+        assertEquals(2,exit);assertEquals(1,client.posts);assertEquals("/validation",client.lastPath);
+        assertEquals("config",client.lastBody.path("targetKind").asText());assertFalse(client.lastBody.has("config"));
+    }
+
     private static class MockClient extends RemoteHttpClient {
         JsonNode lastBody;final java.util.ArrayList<JsonNode> requests=new java.util.ArrayList<JsonNode>();final java.util.ArrayList<String> cursors=new java.util.ArrayList<String>();
-        int posts,eventOpens,jobReads;MockClient()throws RemoteException{super(new ServerProfile("mock","https://example.invalid",null,null,false),null);}
-        @Override public JsonNode post(String path,JsonNode body)throws RemoteException {posts++;lastBody=body;requests.add(body.deepCopy());return RemoteHttpClient.JSON.createObjectNode().put("jobId",JOB).put("status","QUEUED");}
+        int posts,eventOpens,jobReads;String lastPath;MockClient()throws RemoteException{super(new ServerProfile("mock","https://example.invalid",null,null,false),null);}
+        @Override public JsonNode post(String path,JsonNode body)throws RemoteException {posts++;lastPath=path;lastBody=body;requests.add(body.deepCopy());return RemoteHttpClient.JSON.createObjectNode().put("jobId",JOB).put("status","QUEUED");}
         @Override public JsonNode get(String path)throws RemoteException {
             if(path.endsWith("/result")){ObjectNode result=RemoteHttpClient.JSON.createObjectNode();result.set("job",RemoteHttpClient.JSON.createObjectNode().put("jobId",JOB).put("status","PASS").put("exitCode",0));result.set("result",RemoteHttpClient.JSON.createObjectNode().put("status","PASS").put("exitCode",0));return result;}
             if(path.equals("/jobs/"+JOB)&&++jobReads>2)return RemoteHttpClient.JSON.createObjectNode().put("jobId",JOB).put("status","PASS");

@@ -25,7 +25,15 @@ class DocumentationContractsTest(unittest.TestCase):
         self.active = active_schemas(CATALOG)
 
     def test_catalog_history_does_not_override_active_version(self):
-        self.assertEqual({"att-load": "1.6", "att-config": "2.12", "att-testdata": "1.0"}, self.active)
+        self.assertEqual({"att-load": {"1.6"}, "att-config": {"2.12"}, "att-testdata": {"1.0"}},
+                         {key: set(versions) for key, versions in self.active.items()})
+
+    def test_catalog_supports_distinct_active_contracts_for_legacy_and_vnext_validation(self):
+        catalog = CATALOG + "  legacyValidation: att-validation-v2.1.schema.json\n  att-validation/v1: att-validation-v1.schema.json\n"
+        active = active_schemas(catalog)
+        self.assertEqual({"1", "2.1"}, set(active["att-validation"]))
+        self.assertEqual([], stale_claims("att-validation/v1; att-validation/v2.1", active, VERSION))
+        self.assertTrue(stale_claims("att-validation/v3", active, VERSION))
 
     def test_stale_schemas_in_normal_text_examples_and_filenames_fail(self):
         for text in ("schemaVersion: att-load/v1.2", "Load v1.2",

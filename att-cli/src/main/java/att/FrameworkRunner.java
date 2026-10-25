@@ -31,6 +31,11 @@ public final class FrameworkRunner {
             if (remoteExit != 0) System.exit(remoteExit);
             return;
         }
+        if (VNextOptions.isVNextRequest(args)) {
+            int vNextExit = VNextCommand.run(args);
+            if (vNextExit != 0) System.exit(vNextExit);
+            return;
+        }
         att.core.PathPresentation.configure(false, false);
         CliOptions options = null;
         long argumentParseNanos = 0L;

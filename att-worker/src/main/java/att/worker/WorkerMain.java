@@ -305,6 +305,7 @@ public final class WorkerMain {
         if("validate".equals(r.command)) return service.validate(new ValidateRequest(root,config,r.environment,paths(r.suites),path(r.suiteDirectory),set(r.caseIds),set(r.tags),set(r.excludeTags),bool(r.all),r.validationScope));
         if("snapshot".equals(r.command)) return service.snapshot(new SnapshotRequest(root,config,r.environment,paths(r.suites),path(r.suiteDirectory),set(r.caseIds),bool(r.all)));
         if("inspect".equals(r.command)) {
+            if("cli-validation".equals(r.inspectionAction)) return validateVNext(r,root,config);
             if ("package-configuration".equals(r.inspectionType)) {
                 att.resource.PackageManifestInspector manifest = new att.resource.PackageManifestInspector(root, config, !Boolean.FALSE.equals(r.redactionEnabled), r.sensitivePaths, r.sensitiveFieldPatterns);
                 Map<String,Object> inspected = "validate".equals(r.inspectionAction)
@@ -449,6 +450,93 @@ public final class WorkerMain {
                     Collections.<String,String>emptyMap(),Collections.<String,Object>singletonMap("inspection",inspected));
         }
         throw new IllegalArgumentException("Unsupported Worker command: "+r.command);
+    }
+
+    private OperationResult validateVNext(WorkerRequest request,Path packageRoot,Path configPath) throws Exception {
+        String scope=request.validationScope==null?"config":request.validationScope;
+        Path runtimeRoot=RuntimeConfigPath.root(configPath);
+        boolean packageCheck=request.registeredPackageId!=null;
+        java.util.Set<String> permittedEnvironments=request.validationAllowedEnvironments==null?null:
+                new java.util.LinkedHashSet<String>(request.validationAllowedEnvironments);
+        att.server.api.AttValidationReport report=att.validation.RuntimeConfigurationValidator.validate(configPath,runtimeRoot,
+                packageCheck?packageRoot:null,request.environment,"SERVER",Boolean.TRUE.equals(request.all),permittedEnvironments);
+        if(request.registeredPackageId!=null)report.context("packageId",request.registeredPackageId);
+        report.context("environment",request.environment);
+        if("config".equals(scope)) return validationResult(report,request);
+        if("package".equals(scope)) {
+            List<String> profiles;
+            try {
+                profiles=Boolean.TRUE.equals(request.all)
+                        ?att.validation.RuntimeConfigurationValidator.declaredProfiles(configPath)
+                        :Collections.singletonList(request.environment);
+            } catch(Exception invalid) {
+                report.incomplete();
+                att.server.api.AttValidationReport.Section incomplete=report.addSection("Testcases / Templates / Flows / dependencies",null,"WARN");
+                Map<String,Object> diagnostic=new LinkedHashMap<String,Object>();diagnostic.put("code","ATT-VALIDATION-INCOMPLETE");
+                diagnostic.put("severity","ERROR");diagnostic.put("source","config/config.yaml");diagnostic.put("field","environments");
+                diagnostic.put("message","Environment profiles could not be enumerated, so full Package inventory checks could not finish");
+                incomplete.diagnostic(diagnostic);return validationResult(report,request);
+            }
+            if(profiles.isEmpty())profiles=Collections.singletonList(null);
+            for(String profile:profiles) {
+                String label=profile==null?"default":profile;
+                if(Boolean.TRUE.equals(request.all)&&permittedEnvironments!=null&&!permittedEnvironments.contains(label.toLowerCase(java.util.Locale.ROOT))) {
+                    att.server.api.AttValidationReport.Section skipped=report.addSection(label+" — Testcases / Templates / Flows / dependencies",null,"SKIP");
+                    Map<String,Object> diagnostic=new LinkedHashMap<String,Object>();diagnostic.put("code","ATT-ENVIRONMENT-FORBIDDEN");
+                    diagnostic.put("severity","INFO");diagnostic.put("source","att-server.yaml");diagnostic.put("field","environment");
+                    diagnostic.put("message","Environment is excluded by the active Server Package policy");skipped.diagnostic(diagnostic);continue;
+                }
+                att.api.OperationResult result=new att.api.DefaultAttService().validate(new att.api.ValidateRequest(packageRoot,configPath,
+                        profile,Collections.<Path>emptyList(),null,Collections.<String>emptySet(),Collections.<String>emptySet(),
+                        Collections.<String>emptySet(),false,"package"));
+                att.server.api.AttValidationReport.Section inventory=report.addSection(label+" — Testcases / Templates / Flows / dependencies",null,result.exitCode()==0?"PASS":"FAIL");
+                addValidationDiagnostics(inventory,result.diagnostics());if(result.exitCode()!=0)report.exitCode(2);
+            }
+            return validationResult(report,request);
+        }
+        if("case".equals(scope)||"suite".equals(scope)||"cases".equals(scope)) {
+            att.server.api.AttValidationReport.Section selected=report.addSection("Selected Cases / dependency closure",request.inspectionPath,"PASS");
+            List<Path> suites=paths(request.suites);java.util.Set<String> cases=set(request.caseIds);
+            if("suite".equals(scope)&&request.inspectionPath!=null)suites.add(Paths.get(request.inspectionPath));
+            if("case".equals(scope)&&request.inspectionResourceId!=null)cases.add(request.inspectionResourceId);
+            att.api.OperationResult result=new att.api.DefaultAttService().validate(new att.api.ValidateRequest(packageRoot,configPath,
+                    request.environment,suites,path(request.suiteDirectory),cases,set(request.tags),set(request.excludeTags),false,"selected"));
+            addValidationDiagnostics(selected,result.diagnostics());if(result.exitCode()!=0)selected.status("FAIL");
+            if(report.exitCode()==0&&result.exitCode()!=0)report.exitCode(2);
+            return validationResult(report,request);
+        }
+        att.server.api.AttValidationReport.Section selected=report.addSection("Selected Resource / dependency closure",request.inspectionPath,"PASS");
+        try {
+            att.resource.PackageResourceInspector inspector=resourceInspector(packageRoot,configPath,request);
+            try {
+                Map<String,Object> details;
+                if("load".equals(scope)) details=inspector.validateLoadScenarioFile(request.inspectionPath);
+                else details=inspector.inspect("detail",request.inspectionType,request.inspectionResourceId,null,0,1);
+                Object resource=details.get("resource");
+                if(!"load".equals(scope)&&(!(resource instanceof Map)||!"ready".equalsIgnoreCase(String.valueOf(((Map<?,?>)resource).get("state")))))
+                    selected.status("FAIL");
+                Object diagnostics=details.get("diagnostics");
+                if(diagnostics instanceof List)for(Object item:(List<?>)diagnostics)if(item instanceof Map)selected.diagnostic((Map<String,Object>)item);
+            } finally {inspector.close();}
+        } catch(Exception invalid) {
+            selected.status("FAIL");
+            Map<String,Object> diagnostic=new LinkedHashMap<String,Object>();diagnostic.put("code","ATT-VALIDATION-TARGET-INVALID");
+            diagnostic.put("severity","ERROR");diagnostic.put("source",request.inspectionPath==null?"target":request.inspectionPath);
+            diagnostic.put("field","target");diagnostic.put("message",DiagnosticSanitizer.redactText(invalid.getMessage()==null?"Selected target is invalid":invalid.getMessage()));
+            selected.diagnostic(diagnostic);
+        }
+        if(report.exitCode()==0&&"FAIL".equals(selected.status()))report.exitCode(2);
+        return validationResult(report,request);
+    }
+
+    private OperationResult validationResult(att.server.api.AttValidationReport report,WorkerRequest request) {
+        report.limitOutputBytes(request.maxResponseBytes==null?262144:Math.max(768,request.maxResponseBytes-256));
+        Map<String,Object> summary=new LinkedHashMap<String,Object>();summary.put("inspection",report.toMap());
+        return new OperationResult(null,"PASS",0,0,Collections.<att.validation.Diagnostic>emptyList(),Collections.<String,String>emptyMap(),summary);
+    }
+
+    private static void addValidationDiagnostics(att.server.api.AttValidationReport.Section section,List<att.validation.Diagnostic> diagnostics) {
+        for(att.validation.Diagnostic diagnostic:diagnostics)section.diagnostic(diagnostic.toMap());
     }
 
     private void verifyRevision(Path root,Path config,WorkerRequest request) throws Exception {
