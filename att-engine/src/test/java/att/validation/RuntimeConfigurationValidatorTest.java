@@ -6,6 +6,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
@@ -18,7 +19,7 @@ class RuntimeConfigurationValidatorTest {
     @Test void allProfileValidationChecksEnabledProfilesAndIgnoresDisabledExtensions() throws Exception {
         att.TestSchemas.install(temp);
         Path config=temp.resolve("config/config.yaml");Files.createDirectories(config.getParent());
-        Files.writeString(config,"schemaVersion: att-config/v2.13\nenvironment: SIT\nenvironments:\n  SIT: {}\n  UAT: {}\n  x-disabled-profile: not-a-profile\n");
+        Files.write(config,"schemaVersion: att-config/v2.13\nenvironment: SIT\nenvironments:\n  SIT: {}\n  UAT: {}\n  x-disabled-profile: not-a-profile\n".getBytes(StandardCharsets.UTF_8));
 
         AttValidationReport report=RuntimeConfigurationValidator.validate(config,temp,null,null,"LOCAL",true);
 

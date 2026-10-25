@@ -6,6 +6,7 @@ import org.junit.jupiter.api.io.TempDir;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.nio.charset.StandardCharsets;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -14,11 +15,12 @@ class ServerConfigurationValidatorTest {
 
     @Test void validatesActiveServerConfigWithoutCreatingDataDirectories() throws Exception {
         Path runtime=temp.resolve("config/config.yaml");Files.createDirectories(runtime.getParent());
-        Files.writeString(runtime,"schemaVersion: att-config/v2.13\nenvironment: SIT\n");
+        Files.write(runtime,"schemaVersion: att-config/v2.13\nenvironment: SIT\n".getBytes(StandardCharsets.UTF_8));
         Path packages=Files.createDirectory(temp.resolve("packages"));Path payment=Files.createDirectory(packages.resolve("payments"));
         Path data=temp.resolve("server-data");Path source=temp.resolve("att-server.yaml");
         Path java=Paths.get(System.getProperty("java.home"),"bin",System.getProperty("os.name","").toLowerCase().contains("win")?"java.exe":"java");
-        Files.writeString(source,"server:\n  dataDir: '"+data+"'\n  runtimeConfigPath: '"+runtime+"'\n  javaExecutable: '"+java+"'\nworkers: {}\npackages:\n  allowedRoots: ['"+packages+"']\n  entries:\n    payments: '"+payment+"'\n");
+        String sourceText="server:\n  dataDir: '"+data+"'\n  runtimeConfigPath: '"+runtime+"'\n  javaExecutable: '"+java+"'\nworkers: {}\npackages:\n  allowedRoots: ['"+packages+"']\n  entries:\n    payments: '"+payment+"'\n";
+        Files.write(source,sourceText.getBytes(StandardCharsets.UTF_8));
         long modified=Files.getLastModifiedTime(source).toMillis();
 
         ServerConfigurationValidator.Result result=ServerConfigurationValidator.validate(source);
