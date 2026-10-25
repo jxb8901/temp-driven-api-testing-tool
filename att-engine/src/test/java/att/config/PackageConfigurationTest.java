@@ -132,6 +132,20 @@ class PackageConfigurationTest {
         assertFalse(missing.contains(root.toString()));
     }
 
+    @Test void candidateValidationNeverChangesTheLiveManifestOrCentralConfig() throws Exception {
+        Path config = global("packagePolicy: {maxTimeoutMs: 16000}\n"); Path pkg = root.resolve("packages/a");
+        Path live = write(pkg.resolve("package.yaml"), "schemaVersion: att-package/v1\ndefaultEnvironment: SIT\n");
+        byte[] before = Files.readAllBytes(live), beforeGlobal = Files.readAllBytes(config);
+        att.resource.PackageManifestInspector inspector = new att.resource.PackageManifestInspector(pkg, config);
+        java.util.Map<String,Object> candidate = inspector.validateCandidate("schemaVersion: att-package/v1\ndefaultEnvironment: UAT\ndefaults: {timeoutMs: 15000}\n", null);
+        assertEquals("UAT", candidate.get("environment")); assertEquals(true, candidate.get("valid"));
+        assertArrayEquals(before, Files.readAllBytes(live)); assertArrayEquals(beforeGlobal, Files.readAllBytes(config));
+        assertEquals("SIT", load(config, pkg, null).environment());
+        assertThrows(IllegalArgumentException.class, () -> inspector.validateCandidate("schemaVersion: att-package/v1\ndefaults: {timeoutMs: 16001}\n", null));
+        assertThrows(IllegalArgumentException.class, () -> inspector.validateCandidate("schemaVersion: att-package/v1\ntestdata: {descriptors: [testdata/missing.yaml]}\n", null));
+        assertArrayEquals(before, Files.readAllBytes(live));
+    }
+
     private Path descriptor(Path path, String id, String value) throws Exception {
         return write(path, "schemaVersion: att-testdata/v1.0\nid: " + id + "\nrecords:\n  - {value: " + value + "}\n");
     }

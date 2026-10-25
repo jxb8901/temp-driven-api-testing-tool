@@ -76,9 +76,24 @@ public final class FrameworkConfigLoader {
         return loadInternal(path, runtimeConfigRoot, packageRoot, selectedEnvironment, parsed, supplied, references, true);
     }
 
+    /** Validates a typed Manifest candidate against trusted central profiles without publishing any file. */
+    public FrameworkConfig loadPackageCandidateDiscovery(Path path, Path runtimeConfigRoot, Path packageRoot,
+                                                         String selectedEnvironment, String source) throws IOException {
+        PackageConfig candidate = PackageConfig.parse(packageRoot, source);
+        EnvironmentReferences references = EnvironmentReferences.discovery();
+        return loadInternal(path, runtimeConfigRoot, packageRoot, selectedEnvironment, null, false, references, true, candidate)
+                .forDiscovery(references.requirements(), references.helperFailures());
+    }
+
     private FrameworkConfig loadInternal(Path path, Path runtimeConfigRoot, Path packageRoot,
                                          String selectedEnvironment, Object parsed, boolean supplied, EnvironmentReferences references,
                                          boolean packageAware) throws IOException {
+        return loadInternal(path, runtimeConfigRoot, packageRoot, selectedEnvironment, parsed, supplied, references, packageAware, null);
+    }
+
+    private FrameworkConfig loadInternal(Path path, Path runtimeConfigRoot, Path packageRoot,
+                                         String selectedEnvironment, Object parsed, boolean supplied, EnvironmentReferences references,
+                                         boolean packageAware, PackageConfig candidate) throws IOException {
         long inspectionStarted=System.nanoTime();
         try {
             Object loaded=supplied?parsed:YamlSupport.load(path);
@@ -125,7 +140,7 @@ public final class FrameworkConfigLoader {
                     : v22
                     ? new String[]{"schemaVersion", "outputDirectory", "environment", "timeoutMs", "templates", "testcase", "run", "execution", "report", "caseLog", "xml", "toolGroups", "ssh", "tools"}
                     : new String[]{"schemaVersion", "outputDirectory", "environment", "timeoutMs", "templates", "testcase", "run", "report", "caseLog", "xml", "tools"});
-            PackageConfig packageConfig = packageAware ? PackageConfig.load(packageRoot) : PackageConfig.parse(packageRoot, "schemaVersion: att-package/v1\n");
+            PackageConfig packageConfig = candidate != null ? candidate : packageAware ? PackageConfig.load(packageRoot) : PackageConfig.parse(packageRoot, "schemaVersion: att-package/v1\n");
             Set<String> declaredEnvironments = new LinkedHashSet<String>();
             if (rawMap.get("environments") instanceof Map) for (Object key : ((Map<?, ?>) rawMap.get("environments")).keySet())
                 if (!SchemaSupport.isDisabledKey(key)) declaredEnvironments.add(String.valueOf(key));

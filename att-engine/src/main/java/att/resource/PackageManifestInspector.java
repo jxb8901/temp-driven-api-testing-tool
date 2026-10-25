@@ -47,6 +47,22 @@ public final class PackageManifestInspector {
         return result;
     }
 
+    /** The source publisher validates this private candidate; nothing writes into the live Package. */
+    public Map<String, Object> validateCandidate(String source, String environment) throws Exception {
+        PackageConfig candidate = PackageConfig.parse(root, source);
+        FrameworkConfig effective = new FrameworkConfigLoader().loadPackageCandidateDiscovery(config, RuntimeConfigPath.root(config), root, environment, source);
+        for (List<Path> layer : candidate.descriptorLayers())
+            new att.testdata.TestdataRegistry(root, layer, Collections.<Path>emptyList()).validateAll();
+        Map<String, Object> result = new LinkedHashMap<String, Object>();
+        result.put("valid", true); result.put("manifestDigest", candidate.digest());
+        result.put("environment", effective.environment()); result.put("environmentOrigin", effective.effectiveConfiguration().environmentOrigin());
+        result.put("configurationIdentity", effective.effectiveConfiguration().identity());
+        result.put("schemaRegistryDigest", att.validation.SchemaFiles.registryDigest());
+        result.put("diagnostics", effective.effectiveConfiguration().diagnostics());
+        result.put("fields", fields(effective, effective.effectiveConfiguration().origins()));
+        return result;
+    }
+
     private Map<String, Object> fields(FrameworkConfig value, Map<String, String> origins) {
         Map<String, Object> values = new LinkedHashMap<String, Object>();
         values.put("environment", value.environment()); values.put("timeoutMs", value.timeoutMs());
