@@ -192,6 +192,7 @@ public class FrameworkEngine {
         // COMPLETE is the final run artifact. If any earlier evidence write
         // fails, the directly visible directory remains intentionally
         // incomplete and cannot be consumed as a finished run.
+        att.config.ConfigurationEvidence.write(runDirectory, config);
         writeManifest(runDirectory, runId, results, runStarted, runEnded, html, options, inputs, validationDiagnostics);
         writeLatest(outputRoot, runDirectory, runId, summary, runEnded);
         return new RunSummary(results, runDirectory.resolve("report/index.html"), runId);

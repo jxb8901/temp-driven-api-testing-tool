@@ -35,10 +35,7 @@ public final class PackageManifestInspector {
         FrameworkConfigLoader loader = new FrameworkConfigLoader();
         FrameworkConfig effective = loader.loadDiscovery(config, RuntimeConfigPath.root(config), root, environment);
         result.put("diagnostics", effective.effectiveConfiguration().diagnostics());
-        result.put("environment", effective.environment());
-        result.put("environmentOrigin", effective.effectiveConfiguration().environmentOrigin());
-        result.put("configurationIdentity", effective.effectiveConfiguration().identity());
-        result.put("schemaRegistryDigest", att.validation.SchemaFiles.registryDigest());
+        result.putAll(effective.effectiveConfiguration().metadata(effective.environment()));
         if ("resolve".equals(view)) { result.remove("declared"); return result; }
         result.put("fields", fields(effective, effective.effectiveConfiguration().origins()));
         if ("compare".equals(view)) {

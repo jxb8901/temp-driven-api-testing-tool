@@ -38,8 +38,14 @@ final class ServerRuntimeTestSupport {
                 if (!"package-configuration".equals(request.path("inspectionType").asText()) || !"resolve".equals(request.path("inspectionAction").asText()))
                     throw new IllegalArgumentException("Execution fixture only supports configuration resolution");
                 String environment = request.path("environment").asText("SIT");
+                Map<String,Object> evidence=new java.util.LinkedHashMap<>();evidence.put("environment",environment);
+                evidence.put("environmentOrigin",request.hasNonNull("environment")?"request":"global");
+                for(String key:List.of("configurationIdentity","manifestDigest","globalDigest","schemaRegistryDigest"))evidence.put(key,"a".repeat(64));
+                evidence.put("engineVersion","fixture");evidence.put("engineRevision","fixture");
+                evidence.put("origins",Map.of("environment",evidence.get("environmentOrigin")));
+                evidence.put("authoredPaths",Map.of("environment",request.hasNonNull("environment")?"request.environment":"config/config.yaml"));
                 System.out.println(ServerRuntime.JSON.writeValueAsString(Map.of("type", "RESULT", "status", "PASS", "exitCode", 0,
-                        "result", Map.of("summary", Map.of("inspection", Map.of("environment", environment))))));
+                        "result", Map.of("summary", Map.of("inspection", evidence)))));
                 System.out.flush();
             }
         }

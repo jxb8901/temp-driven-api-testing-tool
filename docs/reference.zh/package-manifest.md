@@ -41,7 +41,11 @@ defaults:
 
 Server 在解析後套用 policy。Package 預設值不能繞過允許清單或明確選取要求。新建 execution drafts、直接提交及 schedules 會保存已解析 Environment。從已驗證 draft 建立 schedule 而未提供 Environment 時，繼承 draft 的選取。日後修改預設值不能重新導向該 snapshot；來源 revision 檢查可能要求重新審閱。
 
-未來的 CLI Context 改版屬獨立工作；Manifest 不新增 Context persistence commands。
+Registry adapter 可透過 `FrameworkConfigLoader.loadContext` 與明確的 `PackageContext` 提供選取內容；Environment 優先序為 request → Context → Package → Global。來源證據只採用 adapter 提供的已註冊 Package ID，不會由資料夾名稱或登入身分推導。CLI Context 的持久化指令仍屬另一項變更。
+
+執行結果在 `summary.configuration` 保留不含設定值的來源快照：標準 Environment、原始選取層、Global 與 Manifest 摘要、有效設定識別、Engine 版本與 revision、Schema Registry 摘要，以及欄位來源與邏輯撰寫路徑。RUN、Debug、Load 亦在受管理產物目錄寫入 `configuration.json`。Server Draft、排隊 Job、Schedule 定義保留核准快照，包含已註冊 Package ID 與驗證時的 Package revision；Job 歷史與結果在 Server 重啟後仍保留此資料。呼叫端不能提供這些內部核准欄位。
+
+Worker 在執行前核對已核准的有效設定識別。採用 `ignore` Package 變更政策的 Schedule 會以目前來源重新驗證執行副本；已儲存的核准內容保持不變，執行證據另保留原核准設定識別以供比較。此證據不包含設定值、descriptor 紀錄、憑證或主機路徑。
 
 ## 套用 typed defaults
 

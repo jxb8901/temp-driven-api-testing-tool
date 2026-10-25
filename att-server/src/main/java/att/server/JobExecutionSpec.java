@@ -31,12 +31,18 @@ final class JobExecutionSpec {
         return result;
     }
     ObjectNode definition(){return ((ObjectNode)value.get("definition")).deepCopy();}
+    java.util.Map<String,Object> configuration(){return value.path("configuration").isObject()?att.server.api.ConfigurationSnapshot.copy(ServerRuntime.JSON.convertValue(value.get("configuration"),java.util.Map.class)):null;}
+    JobExecutionSpec withConfiguration(java.util.Map<String,Object> configuration) {
+        if(configuration!=null)value.set("configuration",ServerRuntime.JSON.valueToTree(att.server.api.ConfigurationSnapshot.copy(configuration)));
+        return this;
+    }
     String revision(){return value.path("revision").asText();}
     private void validate() {
         if(!VERSION.equals(value.path("schemaVersion").asText())||!"reject-package-changes".equals(value.path("revisionPolicy").asText())
                 ||!value.path("revision").asText().matches("[a-f0-9]{64}")||!value.path("definition").isObject())
             throw new IllegalArgumentException("Unsupported execution snapshot");
-        value.fieldNames().forEachRemaining(field->{if(!Set.of("schemaVersion","revisionPolicy","revision","definition","sourcePath").contains(field))throw new IllegalArgumentException("Unknown execution snapshot field");});
+        value.fieldNames().forEachRemaining(field->{if(!Set.of("schemaVersion","revisionPolicy","revision","definition","sourcePath","configuration").contains(field))throw new IllegalArgumentException("Unknown execution snapshot field");});
+        if(value.has("configuration"))configuration();
         JsonNode definition=value.get("definition");
         if(!Set.of("run","load").contains(definition.path("executionType").asText())||definition.path("packageId").asText().isBlank())
             throw new IllegalArgumentException("Invalid execution identity");

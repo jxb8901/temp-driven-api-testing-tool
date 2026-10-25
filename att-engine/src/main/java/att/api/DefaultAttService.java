@@ -62,7 +62,7 @@ public final class DefaultAttService implements AttService {
         phase=profile.begin(); PackageValidator.ValidationSummary validation=new PackageValidator(request.packageRoot(),cfg,
                 RuntimeConfigPath.resolve(request.configPath(), request.packageRoot())).validate(opts);
         profile.end("validationMs",phase);
-        if(!validation.valid()) return new RunResult(opts.runId(),"INVALID",2,elapsed(started),validation.diagnostics,Collections.<String,String>emptyMap(),validationMap(validation));
+        if(!validation.valid()) return new RunResult(opts.runId(),"INVALID",2,elapsed(started),validation.diagnostics,Collections.<String,String>emptyMap(),withConfiguration(validationMap(validation), cfg));
         if(request.observer()!=null) {
             Map<String,Object> progress = new LinkedHashMap<String,Object>();
             progress.put("productVersion", att.Version.PRODUCT);
@@ -91,7 +91,8 @@ public final class DefaultAttService implements AttService {
             Map<String,Object> failure=new LinkedHashMap<String,Object>(); failure.put("status",item.status().name()); failure.put("caseId",item.caseId());
             failure.put("caseLog",item.caseLogPath()==null?null:OperationResult.display(item.caseLogPath(),request.packageRoot())); failures.add(failure);
         }
-        return new RunResult(result.runId(),result.status().name(),result.exitCode(),elapsed(started),validation.diagnostics,paths("report",OperationResult.display(result.reportPath(),request.packageRoot())),summary,failures);
+        summary = withConfiguration(summary, cfg);
+        return new RunResult(result.runId(),result.status().name(),result.exitCode(),elapsed(started),validation.diagnostics,paths("report",OperationResult.display(result.reportPath(),request.packageRoot()),"configuration",OperationResult.display(result.reportPath().getParent().getParent().resolve("configuration.json"),request.packageRoot())),summary,failures);
     }
     @Override public DebugResult debug(DebugRequest request) throws Exception {
         long serviceStarted=System.nanoTime();
@@ -121,22 +122,25 @@ public final class DefaultAttService implements AttService {
         List<Diagnostic> ds=result.diagnostic()==null?Collections.<Diagnostic>emptyList():Collections.singletonList(result.diagnostic().toDiagnostic());
         Map<String,String> paths=paths("outputDirectory",OperationResult.display(result.outputDirectory(),request.packageRoot()),"log",OperationResult.display(result.logPath(),request.packageRoot()),"result",OperationResult.display(result.resultPath(),request.packageRoot()));
         if(profile!=null)paths.put("performance",OperationResult.display(result.outputDirectory().resolve("performance.json"),request.packageRoot()));
-        return new DebugResult(result.executionId(),result.status().name(),result.exitCode(),result.durationMs(),ds,paths,Collections.<String,Object>emptyMap());
+        paths.put("configuration",OperationResult.display(att.config.ConfigurationEvidence.write(result.outputDirectory(),cfg),request.packageRoot()));
+        return new DebugResult(result.executionId(),result.status().name(),result.exitCode(),result.durationMs(),ds,paths,withConfiguration(Collections.<String,Object>emptyMap(),cfg));
     }
     @Override public ValidateResult validate(ValidateRequest request) throws Exception {
         long started=System.nanoTime();
         ExecutionOptions opts=options(request,"validate",request.suites(),request.suiteDirectory(),request.caseIds(),request.tags(),request.excludeTags(),request.all(),false,true,false,request.scope(),null,null,null,false,null,null,null,null,null,null,null,null,null,null,Collections.<String>emptyList());
-        PackageValidator.ValidationSummary result=new PackageValidator(request.packageRoot(),config(request),
+        FrameworkConfig cfg=config(request);
+        PackageValidator.ValidationSummary result=new PackageValidator(request.packageRoot(),cfg,
                 RuntimeConfigPath.resolve(request.configPath(), request.packageRoot())).validate(opts);
-        return new ValidateResult(null,result.valid()?"PASS":"INVALID",result.valid()?0:2,elapsed(started),result.diagnostics,Collections.<String,String>emptyMap(),validationMap(result));
+        return new ValidateResult(null,result.valid()?"PASS":"INVALID",result.valid()?0:2,elapsed(started),result.diagnostics,Collections.<String,String>emptyMap(),withConfiguration(validationMap(result),cfg));
     }
     @Override public SnapshotResult snapshot(SnapshotRequest request) throws Exception {
         long started=System.nanoTime();
         ExecutionOptions opts=options(request,"snapshot",request.suites(),request.suiteDirectory(),request.caseIds(),Collections.<String>emptySet(),Collections.<String>emptySet(),request.all(),false,false,false,"selected",null,null,null,false,null,null,null,null,null,null,null,null,null,null,Collections.<String>emptyList());
-        List<Path> generated=new SnapshotCommand().generate(request.packageRoot(),config(request),opts);
+        FrameworkConfig cfg=config(request);
+        List<Path> generated=new SnapshotCommand().generate(request.packageRoot(),cfg,opts);
         List<String> items=new ArrayList<String>(); for(Path p:generated) items.add(OperationResult.display(p,request.packageRoot()));
         Map<String,Object> summary=new LinkedHashMap<String,Object>(); summary.put("snapshots",items.size()); summary.put("paths",items);
-        return new SnapshotResult(null,"PASS",0,elapsed(started),Collections.<Diagnostic>emptyList(),Collections.<String,String>emptyMap(),summary);
+        return new SnapshotResult(null,"PASS",0,elapsed(started),Collections.<Diagnostic>emptyList(),Collections.<String,String>emptyMap(),withConfiguration(summary,cfg));
     }
     @Override public LoadResult load(LoadRequest request) throws Exception {
         long started=System.nanoTime();
@@ -170,6 +174,7 @@ public final class DefaultAttService implements AttService {
         } catch (java.nio.file.FileAlreadyExistsException collision) {
             throw new IllegalArgumentException("Load run ID already exists: "+id+" ("+runDir+"). Choose a different --run-id.", collision);
         }
+        att.config.ConfigurationEvidence.write(runDir,cfg);
         LoadEvidenceStore evidence=new LoadEvidenceStore(LoadEvidencePolicy.from(scenario),request.listener());
         LoadRunResult result; Map<String,Object> resourceMetrics;
         long executionPhase=profile.begin();
@@ -205,7 +210,12 @@ public final class DefaultAttService implements AttService {
         if(renderStats!=null) for(Map.Entry<String,Object> entry:renderStats.entrySet())
             if(entry.getValue() instanceof Number) profile.counter(entry.getKey(),((Number)entry.getValue()).longValue());
         profile.write(runDir);
-        return new LoadResult(id,result.status().name(),result.exitCode(),elapsed(started),Collections.<Diagnostic>emptyList(),paths("report",OperationResult.display(report,request.packageRoot()),"outputDirectory",OperationResult.display(runDir,request.packageRoot())),result.toMap());
+        return new LoadResult(id,result.status().name(),result.exitCode(),elapsed(started),Collections.<Diagnostic>emptyList(),paths("report",OperationResult.display(report,request.packageRoot()),"outputDirectory",OperationResult.display(runDir,request.packageRoot()),"configuration",OperationResult.display(runDir.resolve("configuration.json"),request.packageRoot())),withConfiguration(result.toMap(),cfg));
+    }
+    private static Map<String,Object> withConfiguration(Map<String,Object> summary, FrameworkConfig config) {
+        Map<String,Object> value = new LinkedHashMap<String,Object>(summary);
+        value.put("configuration",att.config.ConfigurationEvidence.metadata(config));
+        return value;
     }
     private static long elapsed(long started) { return Math.max(0L,(System.nanoTime()-started)/1000000L); }
     private static void emitExecutionEvent(ExecutionEventListener observer, String runId, String event, String message, Map<String,Object> data) {

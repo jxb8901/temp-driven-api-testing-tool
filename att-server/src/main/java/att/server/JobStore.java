@@ -640,7 +640,7 @@ final class JobStore implements AutoCloseable {
         String summary=r.getString(10);
         if(summary!=null&&!summary.isBlank())try {
             @SuppressWarnings("unchecked") Map<String,Object> details=ServerRuntime.JSON.readValue(summary,Map.class);
-            for(String key:List.of("scenario","environment","model"))if(details.get(key)!=null)m.put(key,details.get(key));
+            for(String key:List.of("scenario","environment","model","configuration"))if(details.get(key)!=null)m.put(key,details.get(key));
         } catch(Exception ignored) { /* Older or malformed summaries do not make job history unavailable. */ }
         return m;
     }
@@ -1006,8 +1006,9 @@ final class JobStore implements AutoCloseable {
     }
     // Job reads own their connection and result data; allow API polling alongside writes.
     java.util.Map<String,Object> get(String id) throws Exception {
-        try(Connection c=connect();PreparedStatement p=c.prepareStatement("SELECT job_id,command,package_id,principal,status,created_at,started_at,finished_at,worker_pid,exit_code,result_json,diagnostic_json,att_version,performance_json,retention_state,pinned,pinned_at,pinned_by,pin_reason FROM jobs WHERE job_id=?")) {
-            p.setString(1,id);try(ResultSet r=p.executeQuery()){if(!r.next()||"DELETING".equals(r.getString(15)))return null;var m=new java.util.LinkedHashMap<String,Object>();m.put("jobId",r.getString(1));m.put("command",r.getString(2));m.put("executionType",Job.executionType(r.getString(2)));m.put("packageId",r.getString(3));m.put("principal",r.getString(4));m.put("status",r.getString(5));m.put("createdAt",r.getString(6));m.put("startedAt",r.getString(7));m.put("finishedAt",r.getString(8));m.put("workerPid",r.getObject(9));m.put("exitCode",r.getObject(10));m.put("resultJson",r.getString(11));m.put("diagnosticJson",r.getString(12));m.put("attVersion",r.getString(13));m.put("performanceJson",r.getString(14));m.put("pinned",r.getBoolean(16));m.put("pinnedAt",r.getString(17));m.put("pinnedBy",r.getString(18));m.put("pinReason",r.getString(19));m.put("deletionState",r.getString(15));return m;}}
+        try(Connection c=connect();PreparedStatement p=c.prepareStatement("SELECT job_id,command,package_id,principal,status,created_at,started_at,finished_at,worker_pid,exit_code,result_json,diagnostic_json,att_version,performance_json,retention_state,pinned,pinned_at,pinned_by,pin_reason,request_summary FROM jobs WHERE job_id=?")) {
+            p.setString(1,id);try(ResultSet r=p.executeQuery()){if(!r.next()||"DELETING".equals(r.getString(15)))return null;var m=new java.util.LinkedHashMap<String,Object>();m.put("jobId",r.getString(1));m.put("command",r.getString(2));m.put("executionType",Job.executionType(r.getString(2)));m.put("packageId",r.getString(3));m.put("principal",r.getString(4));m.put("status",r.getString(5));m.put("createdAt",r.getString(6));m.put("startedAt",r.getString(7));m.put("finishedAt",r.getString(8));m.put("workerPid",r.getObject(9));m.put("exitCode",r.getObject(10));m.put("resultJson",r.getString(11));m.put("diagnosticJson",r.getString(12));m.put("attVersion",r.getString(13));m.put("performanceJson",r.getString(14));m.put("pinned",r.getBoolean(16));m.put("pinnedAt",r.getString(17));m.put("pinnedBy",r.getString(18));m.put("pinReason",r.getString(19));m.put("deletionState",r.getString(15));
+                String summary=r.getString(20);if(summary!=null)try{Map<?,?> details=ServerRuntime.JSON.readValue(summary,Map.class);for(String key:List.of("environment","configuration"))if(details.get(key)!=null)m.put(key,details.get(key));}catch(Exception ignored){}return m;}}
     }
     private Connection connect() throws Exception{if(closed)throw new IllegalStateException("Job store is closed");return DriverManager.getConnection(url,"sa","");}
     private static String text(Instant value){return value==null?null:value.toString();}

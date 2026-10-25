@@ -41,6 +41,7 @@ final class LoadSchedule {
     public String loadModel;
     public String config;
     public String environment;
+    public Map<String,Object> configuration;
     public String timezone;
     public String cron;
     /** ISO-8601 instant for a single firing; mutually exclusive with cron. */
@@ -73,6 +74,7 @@ final class LoadSchedule {
         copy.expectedRevisionDigest=expectedRevisionDigest;copy.packageChangePolicy=packageChangePolicy;copy.packageRootIdentity=packageRootIdentity;
         copy.sourceStatus=sourceStatus;copy.currentRevisionDigest=currentRevisionDigest;copy.autoPauseReason=autoPauseReason;copy.autoPausedAt=autoPausedAt;
         copy.tags=tags==null?List.of():List.copyOf(tags);
+        copy.configuration=configuration==null?null:att.server.api.ConfigurationSnapshot.copy(configuration);
         copy.config=config;copy.environment=environment;copy.timezone=timezone;copy.cron=cron;copy.runAt=runAt;
         copy.load=load==null?new LinkedHashMap<>():new LinkedHashMap<>(load);copy.maxConcurrentRuns=maxConcurrentRuns;copy.enabled=enabled;
         copy.createdBy=createdBy;copy.executionPrincipal=executionPrincipal;

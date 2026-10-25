@@ -171,14 +171,37 @@ public final class WorkerMain {
         long processingStarted=System.nanoTime();
         long buildsBefore=InspectionMetrics.JVM.count(INDEX_BUILD),loadsBefore=InspectionMetrics.JVM.count(CONFIG_LOAD),bytesBefore=InspectionMetrics.JVM.count(READ_BYTES);
         try {
+            Map<String,Object> configuration=null;
+            if(!"inspect".equals(request.command)&&request.configurationProvenance!=null) {
+                configuration=att.server.api.ConfigurationSnapshot.copy(request.configurationProvenance);
+                if(!java.util.Objects.equals(request.registeredPackageId,configuration.get("packageId"))||!java.util.Objects.equals(request.environment,configuration.get("environment")))
+                    throw new IllegalArgumentException("Approved Package configuration identity is invalid");
+                Path root=Paths.get(request.packageRoot).toAbsolutePath().normalize();
+                Path config=att.config.RuntimeConfigPath.resolve(path(request.config),root);
+                att.config.FrameworkConfig current=new att.config.FrameworkConfigLoader().load(config,att.config.RuntimeConfigPath.root(config),root,request.environment);
+                if(!current.effectiveConfiguration().identity().equals(configuration.get("configurationIdentity")))
+                    throw new PackageResourceInspector.StaleResourceCursorException();
+            }
             OperationResult result=dispatch(request);
+            Map<String,Object> serialized=result.toMap();
+            if(configuration!=null) {
+                Map<String,Object> summary=new LinkedHashMap<String,Object>(result.summary());
+                summary.put("configuration",configuration);serialized.put("summary",summary);
+                String artifact=result.paths().get("configuration");
+                if(artifact!=null&&executionOutput!=null) {
+                    Path file=Paths.get(artifact).toAbsolutePath().normalize();
+                    if(!file.startsWith(executionOutput.toAbsolutePath().normalize())||!"configuration.json".equals(file.getFileName().toString()))
+                        throw new IllegalStateException("Configuration artifact is outside managed output");
+                    java.nio.file.Files.write(file,att.validation.JsonSupport.write(configuration).getBytes(StandardCharsets.UTF_8));
+                }
+            }
             if(inspectionDaemon) {
                 InspectionMetrics.JVM.record(PROCESSING,System.nanoTime()-processingStarted);
                 if("source".equals(request.inspectionAction)||"source-file".equals(request.inspectionAction))
                     InspectionMetrics.JVM.record(SOURCE,System.nanoTime()-processingStarted);
             }
             recordInspectionAggregate(request,processingStarted,buildsBefore,loadsBefore,bytesBefore);
-            Map<String,Object> payload=new LinkedHashMap<String,Object>(); payload.put("status",result.status()); payload.put("exitCode",result.exitCode()); payload.put("durationMs",result.durationMs()); payload.put("result",result.toMap());
+            Map<String,Object> payload=new LinkedHashMap<String,Object>(); payload.put("status",result.status()); payload.put("exitCode",result.exitCode()); payload.put("durationMs",result.durationMs()); payload.put("result",serialized);
             emitResult(payload);
             return result.exitCode();
         } catch(Exception error) {

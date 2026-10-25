@@ -32,6 +32,6 @@ public final class EffectiveConfigurationResolver {
         origins.put("xml.namespaceMode", pkg.namespaceMode() == null ? "global" : "package");
         String identity = PackageConfig.sha256((globalDigest + "\n" + pkg.digest() + "\n" + global.environment()
                 + "\n" + att.Version.PRODUCT + "\n" + att.validation.SchemaFiles.registryDigest() + "\n" + root.toAbsolutePath().normalize()).getBytes(java.nio.charset.StandardCharsets.UTF_8));
-        return new FrameworkConfig(global, pkg, new EffectiveExecutionConfig(identity, environmentOrigin, pkg.digest(), origins, diagnostics), legacyTestdata);
+        return new FrameworkConfig(global, pkg, new EffectiveExecutionConfig(identity, environmentOrigin, pkg.digest(), globalDigest, origins, diagnostics), legacyTestdata);
     }
 }

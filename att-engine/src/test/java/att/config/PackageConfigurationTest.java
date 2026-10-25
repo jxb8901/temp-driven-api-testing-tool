@@ -30,6 +30,26 @@ class PackageConfigurationTest {
         assertTrue(new String(Files.readAllBytes(config), "UTF-8").contains("environment: SIT"));
     }
 
+    @Test void trustedContextSelectsEnvironmentWithoutInferringPackageId() throws Exception {
+        Path config=global(""); Path pkg=root.resolve("packages/folder-name");
+        write(pkg.resolve("package.yaml"),"schemaVersion: att-package/v1\ndefaultEnvironment: SIT\n");
+        FrameworkConfigLoader loader=new FrameworkConfigLoader();
+        PackageContext context=new PackageContext(pkg,"registered-id","uat");
+        FrameworkConfig selected=loader.loadContext(config,root,context,null);
+        assertEquals("UAT",selected.environment());
+        java.util.Map<String,Object> evidence=selected.effectiveConfiguration().metadata(selected.environment());
+        assertEquals("context",evidence.get("environmentOrigin"));
+        assertEquals("registered-id",evidence.get("packageId"));
+        assertEquals("Context.environment",((java.util.Map<?,?>)evidence.get("authoredPaths")).get("environment"));
+        assertThrows(UnsupportedOperationException.class,()->evidence.put("environment","SIT"));
+        FrameworkConfig explicit=loader.loadContext(config,root,context,"sit");
+        assertEquals("SIT",explicit.environment());
+        assertEquals("request",explicit.effectiveConfiguration().environmentOrigin());
+        FrameworkConfig anonymous=loader.loadContext(config,root,new PackageContext(pkg,null,null),null);
+        assertEquals("package",anonymous.effectiveConfiguration().environmentOrigin());
+        assertFalse(anonymous.effectiveConfiguration().metadata("SIT").containsKey("packageId"));
+    }
+
     @Test void environmentListsReplaceBaseAndExplicitEmptyClearsRegistry() throws Exception {
         Path config = global(""); Path pkg = root.resolve("packages/a");
         write(pkg.resolve("package.yaml"), "schemaVersion: att-package/v1\ntestdata:\n  descriptors: [testdata/base.yaml]\n  environments:\n    UAT: []\n");

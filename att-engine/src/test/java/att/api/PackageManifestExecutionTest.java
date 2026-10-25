@@ -57,6 +57,19 @@ class PackageManifestExecutionTest {
                     null,null,null,null,null,null,null,Collections.emptyList()));
             assertEquals("PASS",path.status(),path.toMap().toString());
             assertTrue(((Number)((java.util.Map<?,?>)path.summary().get("metrics")).get("completed")).longValue()>0);
+            for(OperationResult operation:new OperationResult[]{snapshot,run,debug,quick,path}) {
+                java.util.Map<?,?> evidence=(java.util.Map<?,?>)operation.summary().get("configuration");
+                assertEquals("stresstest".equals(name)?"UAT":"SIT",evidence.get("environment"));
+                assertEquals("stresstest".equals(name)?"package":"global",evidence.get("environmentOrigin"));
+                assertTrue(String.valueOf(evidence.get("configurationIdentity")).matches("[a-f0-9]{64}"));
+                assertFalse(evidence.toString().contains(temp.toString()),"Configuration evidence must not disclose host paths");
+                assertEquals(att.Version.PRODUCT,evidence.get("engineVersion"));
+                if(operation.paths().containsKey("configuration")) {
+                    java.util.Map<?,?> persisted=att.validation.JsonSupport.mapper().readValue(Files.readAllBytes(
+                            java.nio.file.Paths.get(operation.paths().get("configuration"))),java.util.Map.class);
+                    assertEquals(evidence,persisted);
+                }
+            }
             if("stresstest".equals(name)) {
                 ValidateResult full=service.validate(new ValidateRequest(root,config,null,Collections.emptyList(),null,Collections.emptySet(),Collections.emptySet(),Collections.emptySet(),true,"package"));
                 assertEquals("INVALID",full.status(),"Full Package validation must still reject its declared missing descriptor");

@@ -37,6 +37,17 @@ public final class FrameworkConfigLoader {
         return load(path, projectRoot, projectRoot, selectedEnvironment);
     }
 
+    /** Future CLI/registry hook: request > selected Context > Package > Global. */
+    public FrameworkConfig loadContext(Path path, Path runtimeConfigRoot, PackageContext context,
+                                       String requestedEnvironment) throws IOException {
+        if (context == null) throw new IllegalArgumentException("Package context is required");
+        String selected = requestedEnvironment == null ? context.environment() : requestedEnvironment;
+        FrameworkConfig resolved = load(path, runtimeConfigRoot, context.root(), selected);
+        String origin = requestedEnvironment != null ? "request" : context.environment() != null
+                ? "context" : resolved.effectiveConfiguration().environmentOrigin();
+        return resolved.withEffectiveConfiguration(resolved.effectiveConfiguration().withContext(origin, context.registeredPackageId()));
+    }
+
     /** Loads central runtime configuration while keeping package Testdata paths package-local. */
     public FrameworkConfig load(Path path, Path runtimeConfigRoot, Path packageRoot,
                                 String selectedEnvironment) throws IOException {

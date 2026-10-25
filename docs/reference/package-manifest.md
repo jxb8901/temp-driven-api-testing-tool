@@ -41,7 +41,11 @@ An explicit request or supported CLI `--env` selects the profile first. Otherwis
 
 Server policy applies after selection. A Package default cannot bypass the allowed list or explicit-selection requirement. New Server execution drafts, direct submissions, and schedules retain the resolved Environment. An omitted Environment on schedule creation inherits the validated draft's selection. A later default edit cannot redirect that snapshot; source revision checks may require a new review.
 
-The future CLI Context redesign is separate. No new Context persistence commands are introduced by the Manifest.
+Registry adapters can use `FrameworkConfigLoader.loadContext` with an explicit `PackageContext`. Its Environment precedence is request → Context → Package → Global. Only the adapter-supplied registered Package ID enters provenance; a folder name or login does not supply an ID. The future CLI Context persistence commands remain a separate change.
+
+Execution results retain a value-free `summary.configuration` snapshot: canonical Environment, original selection layer, Global and Manifest digests, effective configuration identity, Engine version/revision, Schema Registry digest, and field origins with logical authored paths. RUN, Debug, and Load write `configuration.json` alongside their managed artifacts. Server drafts, queued Jobs, and Schedule definitions retain the approved snapshot, including the registered Package ID and validated Package revision. Job history and results preserve it across Server restarts. Callers cannot supply these internal approval fields.
+
+A Worker checks the approved effective configuration identity before execution. A Schedule using the `ignore` Package-change policy revalidates an execution copy against current sources; the stored approval remains unchanged, and the execution evidence retains its approved configuration identity for comparison. No configuration values, descriptor records, credentials, or host paths are included in this evidence.
 
 ## Apply typed defaults
 
