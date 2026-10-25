@@ -171,7 +171,9 @@ class VNextCommandTest {
         Path boundConfig=boundRoot.resolve("config/config.yaml");
         Path packages=Files.createDirectories(home.resolve("packages"));
         Path payments=Files.createDirectories(packages.resolve("payments"));
+        Files.createDirectories(payments.resolve("testcase"));
         Path standalone=Files.createDirectories(packages.resolve("standalone"));
+        Files.createDirectories(standalone.resolve("testcase"));
         Files.write(standalone.resolve("package.yaml"),
                 "schemaVersion: att-package/v1\ndefaultEnvironment: UAT\n".getBytes(StandardCharsets.UTF_8));
         Files.createDirectories(cliConfig.getParent());Files.createDirectories(boundConfig.getParent());
@@ -218,7 +220,7 @@ class VNextCommandTest {
     @Test void validateAllReportsBoundedPackageScansAsPartialNotInvalid() throws Exception {
         Path home=packageRoot.resolve("partial-home");
         Path config=home.resolve("config/config.yaml");
-        Files.createDirectories(home.resolve("packages/payments"));
+        Files.createDirectories(home.resolve("packages/payments/testcase"));
         Files.write(home.resolve("packages/payments/package.yaml"),
                 "schemaVersion: att-package/v1\n".getBytes(StandardCharsets.UTF_8));
         Files.createDirectories(config.getParent());TestSchemas.install(home);
