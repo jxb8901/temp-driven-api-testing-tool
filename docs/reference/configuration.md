@@ -3,6 +3,10 @@
 This page is the authoritative reading reference for author-authored configuration. Files in [`schemas/`](../../schemas/) remain the machine-readable contract. Schema validation runs before cross-field and filesystem validation.
 
 
+## Package ownership
+
+Use [Package Manifest](package-manifest.md) for Package defaults, roots and Testdata. Global inventories are deprecated and ignored unless the temporary legacy policy is enabled. Manifest validation is strict and does not support `x-` extensions.
+
 ## Shared Configuration in Studio
 
 Open **Configuration** with **All packages** selected. Source, Declared, Effective and Compare inspect the single `server.runtimeConfigPath` configuration without choosing or falling back to a Package. Choose an Environment to change effective values, not the source tree. Invalid or unavailable configuration produces an explicit configuration state.
@@ -24,10 +28,10 @@ The authenticated `/api/v1/configuration/{declared|effective|compare|files|sourc
 
 | Layer | Source | Owns |
 |---|---|---|
-| Shared runtime | `ATT_HOME/config/config.yaml` | output/environment/runtime defaults, package template roots, reports, XML mode, global tools, group paths, DB/MQ/HTTP/SSHHelper paths, optional legacy inline SSH |
+| Shared runtime | `ATT_HOME/config/config.yaml` | output/environment/runtime defaults, reports, XML mode, global tools, group paths, DB/MQ/HTTP/SSHHelper paths, optional legacy inline SSH |
 | Tool group | `ATT_HOME/config/` YAML path | group identity, optional script/SSH, grouped tools |
 | DB/MQ/SSH/HTTP helper | configured YAML under `ATT_HOME/config/` | logical resource identity, endpoint, connection, pool, timeout, and evidence policy |
-| Package Testdata | package-relative `testdata/` path | package-local Testdata descriptors registered by the selected environment |
+| Package Testdata | package-relative `testdata/` path | Package Manifest inventory selected by the effective Environment |
 | Workbook | `<workbook>.yaml` | Excel mapping, stages, workbook labels |
 | Template | `template.yaml` | template identity and ordered actions |
 | CLI | command options | selection, Run ID, output override, presentation, CI formats |
@@ -39,7 +43,7 @@ The authenticated `/api/v1/configuration/{declared|effective|compare|files|sourc
 Prefix an optional ATT-owned field or an entry in an ATT-owned keyed collection with the exact lowercase `x-` to make it behave as absent. This applies to current config objects and keyed collections such as `tools`, environment profiles, Tool `arguments` declarations, `actions`, Action `evidence` collectors, report columns, and Debug Tool overrides. The YAML must still parse, but ATT does not schema-check, resolve, discover, evaluate, instantiate, execute, or publish a disabled entry. For a keyed collection, use this on the key. This does not disable or rename argument values supplied when invoking a Tool:
 
 ```yaml
-schemaVersion: att-config/v2.12
+schemaVersion: att-config/v2.13
 x-debug-note: "#{missing.tool()}"      # ignored config field
 tools:
   x-temporary: not-a-tool               # ignored Tool entry
@@ -71,9 +75,9 @@ Do not use this prefix to remove keys from user data. Keys in HTTP headers, `EXE
 
 ## Select an environment profile
 
-`att-config/v2.12` is the active profile contract. Profiles can replace configured DBHelper, MQHelper, SSHHelper, HTTPHelper and testdata descriptor lists as a whole. See the resource pages and [Testdata registry and input mapping](test-authoring.md) for each binding.
+`att-config/v2.13` is the active profile contract. Profiles can replace configured DBHelper, MQHelper, SSHHelper and HTTPHelper lists as a whole. Package Testdata lists belong to `package.yaml`. See the resource pages and [Testdata registry and input mapping](test-authoring.md) for each binding.
 
-ATT selects an environment through one common `att-config/v2.12` file. It does not select an environment by changing an Action or by adding an environment-specific Tool ID. Actions keep stable logical IDs across SIT, UAT, PREPROD, and production-like environments:
+ATT selects an environment through one common `att-config/v2.13` file. It does not select an environment by changing an Action or by adding an environment-specific Tool ID. Actions keep stable logical IDs across SIT, UAT, PREPROD, and production-like environments:
 
 ```text
 Actions -> logical helper ID -> selected config -> physical descriptor -> endpoint
@@ -89,16 +93,17 @@ ATT_HOME/
 │   ├── dbhelpers/{sit,uat}/orders.yaml
 │   └── mqhelpers/{sit,uat}/payment.yaml
 └── packages/<id>/
+    ├── package.yaml
     ├── testcase/
     ├── templates/
     └── testdata/accounts.yaml
 ```
 
-The common config keeps package-relative Template and Testcase roots, run/execution/report settings, `toolGroups`, and the global `tools` registry. Tool/helper descriptors are resolved under `ATT_HOME/config/`; Testdata descriptors are resolved under the selected Package. The profile layer contains typed DB/MQ/SSH/HTTP descriptor lists. This profile example shows DB/MQ bindings:
+The common config keeps run/execution/report settings, `toolGroups`, and the global `tools` registry. Tool/helper descriptors are resolved under `ATT_HOME/config/`; Testdata descriptors are resolved under the selected Package. The profile layer contains typed DB/MQ/SSH/HTTP descriptor lists. This profile example shows DB/MQ bindings:
 
 ```yaml
 # config/config.yaml
-schemaVersion: att-config/v2.12
+schemaVersion: att-config/v2.13
 environment: SIT                 # default profile; --env overrides it
 templates: {root: templates}
 testcase: {root: testcase}
@@ -110,7 +115,6 @@ environments:
   SIT:
     dbhelpers: [config/dbhelpers/sit/orders.yaml]
     mqhelpers: [config/mqhelpers/sit/payment.yaml]
-    testdata: [testdata/accounts.yaml]
   UAT:
     dbhelpers: [config/dbhelpers/uat/orders.yaml]
     mqhelpers: [config/mqhelpers/uat/payment.yaml]
@@ -187,7 +191,7 @@ The repository `schemas/catalog.yaml` is build input for the active schema regis
 ## Set package-wide options
 
 ```yaml
-schemaVersion: att-config/v2.12
+schemaVersion: att-config/v2.13
 outputDirectory: output
 environment: SIT
 timeoutMs: 10000
@@ -214,24 +218,22 @@ environments:
   SIT:
     dbhelpers: [config/dbhelpers/sit/orders.yaml]
     mqhelpers: [config/mqhelpers/sit/payment.yaml]
-    testdata: [testdata/accounts.yaml]
   UAT:
     dbhelpers: [config/dbhelpers/uat/orders.yaml]
     mqhelpers: [config/mqhelpers/uat/payment.yaml]
-    testdata: [testdata/accounts.yaml]
 ```
 
 ### Set runtime and package paths
 
 | Path | Required/default | Constraints |
 |---|---|---|
-| `schemaVersion` | required | Current: `att-config/v2.12`; the previous schema remains compatible. The example uses the active schema. |
+| `schemaVersion` | required | Current: `att-config/v2.13`; the previous schema remains compatible. The example uses the active schema. |
 | `outputDirectory` | `output` | Non-empty package-relative output root |
 | `environment` | `SIT` | Non-empty default profile name when `environments` is present; otherwise exposed metadata only |
 | `timeoutMs` | `10000` | Integer 1–3600000 milliseconds |
 | `caseLog.yamlAnchors` | `false` | Boolean; false fully expands repeated YAML structures, true permits anchors/aliases |
-| `templates.root` | `templates` | Non-empty package-relative template root |
-| `testcase.root` | `testcase` | Non-empty package-relative recursive workbook/sidecar discovery root |
+| `templates.root` | deprecated | Use Manifest `resources.templatesRoot`; omission uses `templates` |
+| `testcase.root` | deprecated | Use Manifest `resources.testcaseRoot`; omission uses `testcase` |
 | `run.id.default` | `timestamp` | Only `timestamp` is supported |
 | `run.id.timestampFormat` | `yyyyMMdd-HHmmss` | Non-empty Java date/time format |
 | `execution.runIdFormat` | unset | Optional expression for the outer Run and Load ID; exact `--run-id` takes precedence |
@@ -273,8 +275,8 @@ Run and Load accept `--run-id <id>` as a literal override. Standalone Debug acce
 | `mqhelpers` | `[]` | Unique package-contained `att-mqhelper/v1.3` YAML paths; normalized duplicates are rejected |
 | `sshhelpers` | `[]` | Unique package-contained `att-sshhelper/v1.0` YAML paths |
 | `httphelpers` | `[]` | Unique package-contained `att-httphelper/v1.1` YAML paths |
-| `environments` | absent | Non-empty map of profile names; profiles may contain configured resource and testdata descriptor lists |
-| `environments.<profile>.testdata` | `[]` | Unique package-relative YAML paths available to that selected environment |
+| `environments` | absent | Non-empty map of profile names; profiles may contain configured shared resource lists; Package Testdata belongs to the Manifest |
+| `environments.<profile>.testdata` | deprecated | Temporary `packagePolicy.legacyTestdata` only; migrate to Manifest `testdata.environments` |
 | `ssh` | absent | Optional SSH target for inline global tools |
 | `tools` | `{}` | Map of reusable tool contracts |
 

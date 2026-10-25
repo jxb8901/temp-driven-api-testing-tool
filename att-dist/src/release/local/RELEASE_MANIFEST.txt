@@ -9,6 +9,7 @@ contents:
   - lib/att-local-${project.version}.jar
   - lib/
   - config/
+  - packages/default/package.yaml (att-package/v1)
   - packages/default/templates/
   - packages/default/tools/
   - packages/default/testcase/
@@ -28,5 +29,5 @@ notes:
   - Optional Server config: ATT_HOME/config/att-server.yaml, discovered after -Datt.server.config and ATT_SERVER_CONFIG
   - Optional Server data directory: ATT_HOME/data/ when disjoint from every package root; data/ is not shipped
   - server.dataDir may be under ATT_HOME but must not equal, contain, or be inside a registered package root
-  - Tomcat owns and writes server.dataDir; package roots remain read-only to the Server
+  - Tomcat owns and writes server.dataDir; package roots are read-only by default; owner-authorized Manifest publication requires explicitly enabled source editing and filesystem write access
   - Keep one versioned ATT Local runtime in ATT_HOME/lib; remove the previous att-local-*.jar when upgrading

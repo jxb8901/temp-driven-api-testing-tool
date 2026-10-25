@@ -694,6 +694,9 @@ public final class ApiServlet extends HttpServlet {
           catch(PackageManifestPublisher.Conflict e){error(res,409,"ATT-PACKAGE-SOURCE-CONFLICT","Package or configuration sources changed; validate a new draft",requestId);}
           catch(PackageManifestPublisher.Capacity e){error(res,429,"ATT-PACKAGE-SOURCE-CAPACITY","Manifest draft capacity is full",requestId);}
           catch(ServerRuntime.DraftValidationException e){error(res,400,"ATT-PACKAGE-SOURCE-INVALID",e.getMessage(),requestId,e.diagnostics);}
+          catch(ServerRuntime.InspectionConfigurationException e){error(res,422,"ATT-CFG-001",e.summary(),requestId,e.diagnostics);}
+          catch(ServerRuntime.InspectionCapacityException e){error(res,503,"ATT-SERVER-INSPECTION-CAPACITY","Package inspection capacity is full",requestId);}
+          catch(ServerRuntime.InspectionTimeoutException e){error(res,504,"ATT-SERVER-INSPECTION-TIMEOUT","Package inspection exceeded its time limit",requestId);}
           catch(PackageConfigurationPolicy.EnvironmentDeniedException e){error(res,403,"ATT-PACKAGE-ENVIRONMENT-DENIED",safeDetail(e),requestId);}
           catch(IllegalArgumentException e){error(res,400,"ATT-SERVER-INVALID-REQUEST",safeDetail(e),requestId);}
           catch(Exception e){error(res,500,"ATT-PACKAGE-SOURCE-FAILED","Manifest action could not be completed",requestId);getServletContext().log("ATT Manifest action failed id="+requestId,e);}

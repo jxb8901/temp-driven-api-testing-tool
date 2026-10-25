@@ -77,6 +77,7 @@ Status: Normative end-user documentation; generated from modular sources
   - [Tool timeout precedence](#tool-timeout-precedence)
   - [Direct DB timeout and retry eligibility](#direct-db-timeout-and-retry-eligibility)
 - [Configuration and environments](#configuration-and-environments)
+  - [Package ownership](#package-ownership)
   - [Shared Configuration in Studio](#shared-configuration-in-studio)
   - [Find a configuration task](#find-a-configuration-task)
   - [Configuration layers and precedence](#configuration-layers-and-precedence)
@@ -90,6 +91,14 @@ Status: Normative end-user documentation; generated from modular sources
   - [Separate configuration files](#separate-configuration-files)
   - [`config.report.fileNamePattern`](#configreportfilenamepattern)
   - [Configuration owners](#configuration-owners)
+- [Package Manifest](#package-manifest)
+  - [Declare Package defaults](#declare-package-defaults)
+  - [Resolve an Environment](#resolve-an-environment)
+  - [Apply typed defaults](#apply-typed-defaults)
+  - [Resolve Testdata for one invocation](#resolve-testdata-for-one-invocation)
+  - [Inspect and publish in Studio](#inspect-and-publish-in-studio)
+  - [Migrate legacy Package inventories](#migrate-legacy-package-inventories)
+  - [API paths](#api-paths)
 - [CLI reference](#cli-reference)
   - [Choose a command](#choose-a-command)
   - [Build a source checkout](#build-a-source-checkout)
@@ -380,7 +389,7 @@ records:
 selection: {strategy: roundRobin, exhaustion: stop}
 ~~~
 
-An environment profile's `testdata` list declares the shared registry. A Load scenario may declare its own top-level `testdata` imports; matching IDs replace the whole environment descriptor for that Load only. Duplicate IDs within one layer fail. Ordinary Run/Debug activate referenced IDs lazily, while `validate --package` checks every configured descriptor. Templates, Flows, and Tool definitions receive resolved values through `EXEC.INPUT`; they cannot contain direct `@{...}` or `%{...}` references. See [Environment and Test Data](reference/configuration.md), [Load](reference/execution-modes/load.md), and the maintainer [testdata design](system-design/testdata.md).
+The [Package Manifest](reference/package-manifest.md) declares the Package Testdata registry and optional Environment-specific replacement lists. A Load scenario may declare its own top-level `testdata` imports; matching IDs replace the whole environment descriptor for that Load only. Duplicate IDs within one layer fail. Ordinary Run/Debug activate referenced IDs lazily, while `validate --package` checks every declared Manifest descriptor layer. Templates, Flows, and Tool definitions receive resolved values through `EXEC.INPUT`; they cannot contain direct `@{...}` or `%{...}` references. See [Environment and Test Data](reference/configuration.md), [Load](reference/execution-modes/load.md), and the maintainer [testdata design](system-design/testdata.md).
 
 ### Advanced workbook and Snapshot details
 
@@ -2263,11 +2272,11 @@ instances:
   - {id: app2, host: sit-app2.example, port: 2222}
 ```
 
-Bind descriptor paths globally or in `environments.<NAME>.sshhelpers` of `att-config/v2.12`. Current packages use config v2.12 and Tool Group v2.9. The selected environment's list replaces the global list; omission inherits it. A group binding must resolve to the same logical ID in each selected profile. SIT can bind one host and UAT two without changing the Tool, Action, or Resource Helper call:
+Bind descriptor paths globally or in `environments.<NAME>.sshhelpers` of `att-config/v2.13`. Current packages use config v2.13 and Tool Group v2.9. The selected environment's list replaces the global list; omission inherits it. A group binding must resolve to the same logical ID in each selected profile. SIT can bind one host and UAT two without changing the Tool, Action, or Resource Helper call:
 
 ```yaml
 # config/config.yaml
-schemaVersion: att-config/v2.12
+schemaVersion: att-config/v2.13
 environment: SIT
 toolGroups: [config/tools/application.yaml]
 environments:
@@ -2392,6 +2401,10 @@ Direct `update` Actions support `timeoutMs` but deliberately reject `retry`. A t
 This page is the authoritative reading reference for author-authored configuration. Files in [`schemas/`](../schemas) remain the machine-readable contract. Schema validation runs before cross-field and filesystem validation.
 
 
+### Package ownership
+
+Use [Package Manifest](reference/package-manifest.md) for Package defaults, roots and Testdata. Global inventories are deprecated and ignored unless the temporary legacy policy is enabled. Manifest validation is strict and does not support `x-` extensions.
+
 ### Shared Configuration in Studio
 
 Open **Configuration** with **All packages** selected. Source, Declared, Effective and Compare inspect the single `server.runtimeConfigPath` configuration without choosing or falling back to a Package. Choose an Environment to change effective values, not the source tree. Invalid or unavailable configuration produces an explicit configuration state.
@@ -2413,10 +2426,10 @@ The authenticated `/api/v1/configuration/{declared|effective|compare|files|sourc
 
 | Layer | Source | Owns |
 |---|---|---|
-| Shared runtime | `ATT_HOME/config/config.yaml` | output/environment/runtime defaults, package template roots, reports, XML mode, global tools, group paths, DB/MQ/HTTP/SSHHelper paths, optional legacy inline SSH |
+| Shared runtime | `ATT_HOME/config/config.yaml` | output/environment/runtime defaults, reports, XML mode, global tools, group paths, DB/MQ/HTTP/SSHHelper paths, optional legacy inline SSH |
 | Tool group | `ATT_HOME/config/` YAML path | group identity, optional script/SSH, grouped tools |
 | DB/MQ/SSH/HTTP helper | configured YAML under `ATT_HOME/config/` | logical resource identity, endpoint, connection, pool, timeout, and evidence policy |
-| Package Testdata | package-relative `testdata/` path | package-local Testdata descriptors registered by the selected environment |
+| Package Testdata | package-relative `testdata/` path | Package Manifest inventory selected by the effective Environment |
 | Workbook | `<workbook>.yaml` | Excel mapping, stages, workbook labels |
 | Template | `template.yaml` | template identity and ordered actions |
 | CLI | command options | selection, Run ID, output override, presentation, CI formats |
@@ -2428,7 +2441,7 @@ The authenticated `/api/v1/configuration/{declared|effective|compare|files|sourc
 Prefix an optional ATT-owned field or an entry in an ATT-owned keyed collection with the exact lowercase `x-` to make it behave as absent. This applies to current config objects and keyed collections such as `tools`, environment profiles, Tool `arguments` declarations, `actions`, Action `evidence` collectors, report columns, and Debug Tool overrides. The YAML must still parse, but ATT does not schema-check, resolve, discover, evaluate, instantiate, execute, or publish a disabled entry. For a keyed collection, use this on the key. This does not disable or rename argument values supplied when invoking a Tool:
 
 ```yaml
-schemaVersion: att-config/v2.12
+schemaVersion: att-config/v2.13
 x-debug-note: "#{missing.tool()}"      # ignored config field
 tools:
   x-temporary: not-a-tool               # ignored Tool entry
@@ -2460,9 +2473,9 @@ Do not use this prefix to remove keys from user data. Keys in HTTP headers, `EXE
 
 ### Select an environment profile
 
-`att-config/v2.12` is the active profile contract. Profiles can replace configured DBHelper, MQHelper, SSHHelper, HTTPHelper and testdata descriptor lists as a whole. See the resource pages and [Testdata registry and input mapping](reference/test-authoring.md) for each binding.
+`att-config/v2.13` is the active profile contract. Profiles can replace configured DBHelper, MQHelper, SSHHelper and HTTPHelper lists as a whole. Package Testdata lists belong to `package.yaml`. See the resource pages and [Testdata registry and input mapping](reference/test-authoring.md) for each binding.
 
-ATT selects an environment through one common `att-config/v2.12` file. It does not select an environment by changing an Action or by adding an environment-specific Tool ID. Actions keep stable logical IDs across SIT, UAT, PREPROD, and production-like environments:
+ATT selects an environment through one common `att-config/v2.13` file. It does not select an environment by changing an Action or by adding an environment-specific Tool ID. Actions keep stable logical IDs across SIT, UAT, PREPROD, and production-like environments:
 
 ```text
 Actions -> logical helper ID -> selected config -> physical descriptor -> endpoint
@@ -2478,16 +2491,17 @@ ATT_HOME/
 │   ├── dbhelpers/{sit,uat}/orders.yaml
 │   └── mqhelpers/{sit,uat}/payment.yaml
 └── packages/<id>/
+    ├── package.yaml
     ├── testcase/
     ├── templates/
     └── testdata/accounts.yaml
 ```
 
-The common config keeps package-relative Template and Testcase roots, run/execution/report settings, `toolGroups`, and the global `tools` registry. Tool/helper descriptors are resolved under `ATT_HOME/config/`; Testdata descriptors are resolved under the selected Package. The profile layer contains typed DB/MQ/SSH/HTTP descriptor lists. This profile example shows DB/MQ bindings:
+The common config keeps run/execution/report settings, `toolGroups`, and the global `tools` registry. Tool/helper descriptors are resolved under `ATT_HOME/config/`; Testdata descriptors are resolved under the selected Package. The profile layer contains typed DB/MQ/SSH/HTTP descriptor lists. This profile example shows DB/MQ bindings:
 
 ```yaml
 # config/config.yaml
-schemaVersion: att-config/v2.12
+schemaVersion: att-config/v2.13
 environment: SIT                 # default profile; --env overrides it
 templates: {root: templates}
 testcase: {root: testcase}
@@ -2499,7 +2513,6 @@ environments:
   SIT:
     dbhelpers: [config/dbhelpers/sit/orders.yaml]
     mqhelpers: [config/mqhelpers/sit/payment.yaml]
-    testdata: [testdata/accounts.yaml]
   UAT:
     dbhelpers: [config/dbhelpers/uat/orders.yaml]
     mqhelpers: [config/mqhelpers/uat/payment.yaml]
@@ -2576,7 +2589,7 @@ The repository `schemas/catalog.yaml` is build input for the active schema regis
 ### Set package-wide options
 
 ```yaml
-schemaVersion: att-config/v2.12
+schemaVersion: att-config/v2.13
 outputDirectory: output
 environment: SIT
 timeoutMs: 10000
@@ -2603,24 +2616,22 @@ environments:
   SIT:
     dbhelpers: [config/dbhelpers/sit/orders.yaml]
     mqhelpers: [config/mqhelpers/sit/payment.yaml]
-    testdata: [testdata/accounts.yaml]
   UAT:
     dbhelpers: [config/dbhelpers/uat/orders.yaml]
     mqhelpers: [config/mqhelpers/uat/payment.yaml]
-    testdata: [testdata/accounts.yaml]
 ```
 
 #### Set runtime and package paths
 
 | Path | Required/default | Constraints |
 |---|---|---|
-| `schemaVersion` | required | Current: `att-config/v2.12`; the previous schema remains compatible. The example uses the active schema. |
+| `schemaVersion` | required | Current: `att-config/v2.13`; the previous schema remains compatible. The example uses the active schema. |
 | `outputDirectory` | `output` | Non-empty package-relative output root |
 | `environment` | `SIT` | Non-empty default profile name when `environments` is present; otherwise exposed metadata only |
 | `timeoutMs` | `10000` | Integer 1–3600000 milliseconds |
 | `caseLog.yamlAnchors` | `false` | Boolean; false fully expands repeated YAML structures, true permits anchors/aliases |
-| `templates.root` | `templates` | Non-empty package-relative template root |
-| `testcase.root` | `testcase` | Non-empty package-relative recursive workbook/sidecar discovery root |
+| `templates.root` | deprecated | Use Manifest `resources.templatesRoot`; omission uses `templates` |
+| `testcase.root` | deprecated | Use Manifest `resources.testcaseRoot`; omission uses `testcase` |
 | `run.id.default` | `timestamp` | Only `timestamp` is supported |
 | `run.id.timestampFormat` | `yyyyMMdd-HHmmss` | Non-empty Java date/time format |
 | `execution.runIdFormat` | unset | Optional expression for the outer Run and Load ID; exact `--run-id` takes precedence |
@@ -2662,8 +2673,8 @@ Run and Load accept `--run-id <id>` as a literal override. Standalone Debug acce
 | `mqhelpers` | `[]` | Unique package-contained `att-mqhelper/v1.3` YAML paths; normalized duplicates are rejected |
 | `sshhelpers` | `[]` | Unique package-contained `att-sshhelper/v1.0` YAML paths |
 | `httphelpers` | `[]` | Unique package-contained `att-httphelper/v1.1` YAML paths |
-| `environments` | absent | Non-empty map of profile names; profiles may contain configured resource and testdata descriptor lists |
-| `environments.<profile>.testdata` | `[]` | Unique package-relative YAML paths available to that selected environment |
+| `environments` | absent | Non-empty map of profile names; profiles may contain configured shared resource lists; Package Testdata belongs to the Manifest |
+| `environments.<profile>.testdata` | deprecated | Temporary `packagePolicy.legacyTestdata` only; migrate to Manifest `testdata.environments` |
 | `ssh` | absent | Optional SSH target for inline global tools |
 | `tools` | `{}` | Map of reusable tool contracts |
 
@@ -2774,6 +2785,143 @@ A pattern such as `${suiteName}-${RUN_ID}.xlsx` is rejected; unknown references 
 | HTTP descriptor | [HTTPHelper](reference/resources/httphelper.md) |
 | SSH descriptor | [SSHHelper](reference/resources/sshhelper.md) |
 | Timeout / Retry | [Reliability](reference/reliability-execution-control.md) |
+
+## Package Manifest
+
+Use `<PACKAGE_ROOT>/package.yaml` to give one Package its own defaults, business roots, and Testdata inventory. The optional file uses `att-package/v1`, independently of Global Configuration. The matching Engine JAR supplies the authoritative schema.
+
+A Package ID and its filesystem root come from trusted registration or the supported Local package selection. A Manifest never registers a Package, grants access, or supplies a privileged runtime configuration. Shared profiles, Tools, and DB/MQ/HTTP/SSH Helpers remain owned by Global Configuration.
+
+### Declare Package defaults
+
+This example selects an existing central profile and declares two Package-owned Testdata files. Create those descriptors before validating the Package.
+
+```yaml
+schemaVersion: att-package/v1
+metadata:
+  name: Payments
+  description: Payment regression resources
+defaultEnvironment: SIT
+resources:
+  templatesRoot: templates
+  testcaseRoot: testcase
+testdata:
+  descriptors: [testdata/accounts.yaml]
+  environments:
+    UAT: [testdata/uat-accounts.yaml]
+    PROD: []
+defaults:
+  timeoutMs: 15000
+  report:
+    columns: {result: Result, durationMs: Duration}
+  xml: {namespaceMode: preserve}
+```
+
+`SIT`, `UAT`, and `PROD` must exist in the central `environments` mapping. Omitting a profile's Testdata entry inherits `descriptors`. A present list replaces that inventory completely; `[]` clears it.
+
+Paths use forward slashes and stay relative to the selected Package. Absolute paths, `..`, unsafe symlinks, and escapes are rejected. The canonical file is limited to 262144 UTF-8 bytes. Unknown fields, duplicate YAML keys, aliases, anchors, and `x-` extensions are rejected.
+
+Without a Manifest, the Package uses conventional `templates` and `testcase` roots and an empty Package Testdata inventory. Global `templates.root` and `testcase.root` no longer choose business roots.
+
+### Resolve an Environment
+
+An explicit request or supported CLI `--env` selects the profile first. Otherwise, `defaultEnvironment` selects an existing central profile; the central default applies when the Manifest omits it. Profile names resolve to their canonical central spelling. The Effective view shows the selected profile and its origin.
+
+Server policy applies after selection. A Package default cannot bypass the allowed list or explicit-selection requirement. New Server execution drafts, direct submissions, and schedules retain the resolved Environment. An omitted Environment on schedule creation inherits the validated draft's selection. A later default edit cannot redirect that snapshot; source revision checks may require a new review.
+
+The future CLI Context redesign is separate. No new Context persistence commands are introduced by the Manifest.
+
+### Apply typed defaults
+
+The Manifest permits only these execution and presentation defaults. Unspecified fields inherit their global values.
+
+| Manifest path | Behavior |
+|---|---|
+| `defaults.timeoutMs` | Positive integer, bounded by central `packagePolicy.maxTimeoutMs`; default cap 300000 ms |
+| `defaults.run.id.default` | `timestamp` only |
+| `defaults.run.id.timestampFormat` | Existing execution timestamp format validation |
+| `defaults.execution.runIdFormat` | Existing Run/Load identity expression contract |
+| `defaults.execution.debugIdFormat` | Existing Debug identity expression contract |
+| `defaults.report.fileNamePattern` | Existing report filename contract |
+| `defaults.report.columns` | Replaces the complete column mapping, including explicit `{}` |
+| `defaults.report.html.caseLogInlineLimitBytes` | Integer 0–1048576 |
+| `defaults.report.junit.caseLogEmbedThresholdBytes` | Integer 0–1048576 |
+| `defaults.caseLog.yamlAnchors` | Boolean |
+| `defaults.xml.namespaceMode` | `ignore` or `preserve` |
+
+Output directories, process output limits, scheduling limits, authentication, credentials, helper definitions, worker settings, and schema locations cannot be overridden here. The Manifest schema in the embedded Engine registry defines the complete field whitelist.
+
+### Resolve Testdata for one invocation
+
+Base inventories belong to the selected Package and Environment. Another Package can use the same descriptor ID without sharing records or importing its neighbor's files.
+
+Execution validates the base descriptors needed by the referenced Testdata closure. An unrelated missing or malformed base descriptor does not block a Quick Load that never references it. Invocation-local Debug/Load imports remain strict: explicitly imported missing or malformed files fail validation. An invocation descriptor replaces the entire base descriptor with the same ID; fields and records are not merged. Duplicate IDs within one layer remain errors.
+
+Full Package validation checks every declared Manifest descriptor layer, including Environment-specific lists. For the bundled default Package, run:
+
+```bash
+./att.sh validate --package --format json
+```
+
+Inspect diagnostics for Package ownership, logical path, layer, and descriptor ID. Resolve full-validation failures before publishing or distributing a Package.
+
+### Inspect and publish in Studio
+
+With a registered Package selected, open **Configuration**, then **Package Configuration**. **Source**, **Declared**, **Effective**, and **Compare with Global** inspect this Manifest separately from **Shared Configuration**. The All Packages shared inspector remains central-only.
+
+Source reading uses the existing source browsing policy and structured masking. Masked projections are read only. Editing requires enabled Server policy and an authenticated active USER whose exact login equals the explicitly registered Package ID. Other USERs retain ordinary operations. An ADMIN-only account has no implicit source-edit permission. Matching a login never registers a directory.
+
+1. Open **Source** and edit the visible Manifest, or create a new optional Manifest.
+2. Select **Create Manifest draft** to stage a private, expiring candidate against the displayed digest.
+3. Select **Validate Manifest draft** to validate the candidate through the Worker without changing the live file.
+4. Review the safe declaration, effective values, Environment, and origins; select **Review validated Manifest**.
+5. Select **Publish reviewed Manifest**. The Server rechecks ownership, live digest, global/Package dependencies, and schema revision, then atomically replaces `package.yaml`.
+
+A conflict requires a fresh draft. Publication records an audit intent before replacement and a completion record afterward. History stays in private Server data; the API returns revision identifiers rather than raw historical source. **Stage rollback** creates another candidate that must pass the same validation and review gates. Restoring pre-Manifest defaults produces a canonical empty `att-package/v1` file, as shown in review.
+
+The trusted deployment policy is optional and defaults to editing disabled:
+
+```yaml
+server:
+  packageConfiguration:
+    sourceEditingEnabled: false
+    maxDrafts: 128
+    maxDraftsPerUser: 8
+    draftTtlSeconds: 900
+    maxHistory: 50
+    allowedEnvironments: [SIT, UAT]
+    requireExplicitEnvironments: [UAT]
+```
+
+`allowedEnvironments: []` permits any centrally defined profile. `requireExplicitEnvironments` rejects implicit selection of its listed profiles before execution validation. Draft counts, expiry, history, and source size remain bounded. Source editing also requires inspection and the existing authenticated USER authorization path.
+
+### Migrate legacy Package inventories
+
+Global `testdata` and profile-level `testdata` lists are deprecated and ignored by default. The temporary central `packagePolicy.legacyTestdata: true` switch restores those inventories only for Packages without a Manifest. A Manifest takes ownership completely, including explicit empty inventories. Migration warnings identify the deprecated ownership; this compatibility switch is intended for a bounded migration window.
+
+The migration helper produces a versioned read-only plan from an explicit trusted Server registry. Run it from the repository with a Python environment containing `tools/requirements-migration.txt`:
+
+```bash
+python tools/migrate_package_config.py --config config/config.yaml --server-config /ABSOLUTE/PATH/att-server.yaml
+```
+
+Replace `/ABSOLUTE/PATH/att-server.yaml` with your deployment registry. The helper inventories each registered Package's business text and bounded XLSX text. It proposes only locally owned, referenced descriptors; preserves explicit Environment empties; skips existing Manifests; and reports missing, unused, or unsafe imports. It lists inherited default field names without printing their values or descriptor records. Duplicate mapping keys and YAML aliases fail inventory. It does not publish files or infer registration.
+
+Review each proposed Manifest, supply any required descriptors, and run full Package validation. Publish through the source workflow or your controlled deployment process. Then remove legacy global inventories and disable `legacyTestdata`.
+
+### API paths
+
+All paths are relative to `/api/v1`. Apply the existing authenticated USER, origin, CSRF, source policy, and request-size rules.
+
+| Method and path | Result |
+|---|---|
+| `GET /packages/{id}/package-configuration/{source\|declared\|effective\|compare}` | Safe projection; optional `environment` query for effective selection |
+| `POST /packages/{id}/package-configuration/drafts` | Stage `{source, expectedManifestDigest}` |
+| `POST /packages/{id}/package-configuration/drafts/{draftId}/{validate\|review\|publish\|discard}` | Advance the private draft using `{}` |
+| `GET /packages/{id}/package-configuration/history` | Owner-authorized bounded revision list |
+| `POST /packages/{id}/package-configuration/rollback` | Stage `{revision, expectedManifestDigest}` for review |
+
+Source revision conflicts return `409`; denied source access or Environment policy returns `403`; expired or unavailable drafts return `404`; draft capacity returns `429`. Publication never runs a test or changes central profile definitions.
 
 ## CLI reference
 
@@ -2976,7 +3124,7 @@ This page defines target, `--input`, `--set` and `--env` syntax in the option ma
 
 ### Complete option matrix
 
-`--config <file>` selects the base configuration. `--env <name>` selects one environment profile from an `att-config/v2.12` configuration and is valid for `run`, `validate`, `debug`, and `load`. `--help` prints help. `--case-id` is a compatibility synonym for `--case`. `--parallel` is the deprecated compatibility spelling for `--allow-parallel-runs`; prefer the latter. `--queue` and `--allow-parallel-runs` control process-level output-root concurrency, not Case workers. `--profile` writes performance diagnostics for `run` and `load`, and writes startup plus execution phase timings for a selected `debug` target.
+`--config <file>` selects the base configuration. `--env <name>` selects one environment profile from an `att-config/v2.13` configuration and is valid for `run`, `validate`, `debug`, and `load`. `--help` prints help. `--case-id` is a compatibility synonym for `--case`. `--parallel` is the deprecated compatibility spelling for `--allow-parallel-runs`; prefer the latter. `--queue` and `--allow-parallel-runs` control process-level output-root concurrency, not Case workers. `--profile` writes performance diagnostics for `run` and `load`, and writes startup plus execution phase timings for a selected `debug` target.
 
 Load uses the scenario as the base and explicit workload options override the corresponding fields before the effective scenario is validated again:
 
@@ -3403,7 +3551,8 @@ Active schemas (the matching ATT Engine JAR's embedded registry, built from `sch
 |---|---|
 | Schedule creation | att-schedule/v2 |
 | RUN definition | att-execution/v1 |
-| Global configuration | att-config/v2.12 |
+| Global configuration | att-config/v2.13 |
+| Package Manifest | att-package/v1 |
 | Testdata descriptor | att-testdata/v1.0 |
 | DBHelper | att-dbhelper/v2.6 |
 | MQHelper | att-mqhelper/v1.3 |
@@ -3460,7 +3609,7 @@ Change global configuration from `att-config/v2.10` to `att-config/v2.11` and Lo
 
 ### Execution identity format migration
 
-`att-config/v2.12` adds execution identity formats; the immediately preceding configuration schema remains supported. To configure outer Run and Load IDs, add `execution.runIdFormat`. To configure standalone Debug directory IDs, add `execution.debugIdFormat`. Existing timestamp Run/Load IDs and `<type>-<targetId>` Debug IDs remain the defaults when these fields are absent. Load per-iteration IDs are now engine-managed; remove `execution.execIdFormat`. Exact Run/Load IDs use `--run-id`; exact standalone Debug IDs use `--debug-id`.
+`att-config/v2.13` adds execution identity formats; the immediately preceding configuration schema remains supported. To configure outer Run and Load IDs, add `execution.runIdFormat`. To configure standalone Debug directory IDs, add `execution.debugIdFormat`. Existing timestamp Run/Load IDs and `<type>-<targetId>` Debug IDs remain the defaults when these fields are absent. Load per-iteration IDs are now engine-managed; remove `execution.execIdFormat`. Exact Run/Load IDs use `--run-id`; exact standalone Debug IDs use `--debug-id`.
 
 ATT 3.7.2 introduces `att-load/v1.6`. Existing v1.5 descriptors remain compatible and are normalized at load time. To use a closed-user target mix, change the schema version to v1.6 and replace that workload's `target` with a `mix` list of uniquely named entries, each with a positive integer `weight` and its own target. Mix entries are prevalidated before scheduling; only closed workloads support mixes. Load summaries now use `att-load-summary/v1.1` and include per-mix selection and metric data when applicable. The previous Load and summary schemas remain available as historical definitions.
 

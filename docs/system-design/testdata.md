@@ -1,12 +1,12 @@
 # Testdata registry and input mapping
 
-This page describes the runtime boundary for issue #63. The public descriptor contract is `att-testdata/v1.0`; environment selection belongs to `att-config/v2.12`, and Load policy belongs to `att-load/v1.9`.
+This page describes the runtime boundary for issue #63. The public descriptor contract is `att-testdata/v1.0`; environment selection belongs to `att-config/v2.13`, and Load policy belongs to `att-load/v1.9`.
 
 ## Registry layers and activation
 
-The selected environment profile supplies package-relative testdata descriptor paths. Each descriptor has a logical ID and either a non-empty literal `records` list or a generated record declaration. A Load scenario can add package-relative paths at its top-level `testdata` property. Those descriptors form a scenario-local overlay: a matching Load-local ID replaces the complete environment descriptor for that scenario. No record or selection fields are merged. Repeated IDs within a layer and repeated canonical paths in that layer are invalid.
+The selected Package Manifest supplies package-relative Testdata descriptor paths, with an Environment-specific whole-list replacement when declared. Each descriptor has a logical ID and either a non-empty literal `records` list or a generated record declaration. A Load scenario can add package-relative paths at its top-level `testdata` property. Those descriptors form a scenario-local overlay: a matching Load-local ID replaces the complete environment descriptor for that scenario. No record or selection fields are merged. Repeated IDs within a layer and repeated canonical paths in that layer are invalid.
 
-The registry indexes descriptor IDs on demand. Run and Debug load only descriptors referenced by input mappings. Load validates the IDs used by workload inputs and explicit workload policies before scheduler startup. Explicit package validation loads and schema-validates every descriptor in the selected environment, including unused ones. Imports must resolve to regular YAML files inside the canonical package root and may not be symlinks.
+The registry indexes descriptor IDs on demand. Run and Debug load only descriptors referenced by input mappings. Load validates the IDs used by workload inputs and explicit workload policies before scheduler startup. Full Package validation loads and schema-validates every declared Manifest descriptor layer, including unused descriptors and all Environment lists. Imports must resolve to regular YAML files inside the canonical package root and may not be symlinks.
 
 ## Literal and generated records
 

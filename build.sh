@@ -97,7 +97,7 @@ for archive in "$LOCAL_ARCHIVE" "$SERVER_ARCHIVE" "$SOURCE_ARCHIVE"; do
   if [ ! -f "$archive" ]; then echo "Maven distribution assembly did not produce: $archive" >&2; exit 2; fi
 done
 SOURCE_ENTRIES="$(tar -tzf "$SOURCE_ARCHIVE")"
-for required in config/config.yaml schemas/catalog.yaml packages/default/testcase packages/default/templates packages/default/tools; do
+for required in config/config.yaml schemas/catalog.yaml packages/default/package.yaml packages/default/testcase packages/default/templates packages/default/tools; do
   case "$SOURCE_ENTRIES" in
     *"$SOURCE_PACKAGE_NAME/$required"*) ;;
     *) echo "Source archive is missing required path: $required" >&2; exit 2 ;;
@@ -121,7 +121,7 @@ rm -rf "$ROOT_DIR/target/release"; mkdir -p "$LOCAL_WORK" "$SERVER_WORK" "$DIST_
 tar -xzf "$LOCAL_ARCHIVE" -C "$LOCAL_WORK"
 LOCAL_PACKAGE_DIR="$LOCAL_WORK/$LOCAL_PACKAGE_NAME"
 LOCAL_PACKAGE_ROOT="$LOCAL_PACKAGE_DIR/packages/default"
-for required in att.sh att.bat lib config/att-server.example.yaml config/config.yaml config/dbhelpers config/mqhelpers config/tools packages/default/testcase packages/default/templates packages/default/testdata packages/default/tools; do
+for required in att.sh att.bat lib config/att-server.example.yaml config/config.yaml config/dbhelpers config/mqhelpers config/tools packages/default/package.yaml packages/default/testcase packages/default/templates packages/default/testdata packages/default/tools; do
   if [ ! -e "$LOCAL_PACKAGE_DIR/$required" ]; then echo "Local archive is missing required layout path: $required" >&2; exit 2; fi
 done
 if [ -e "$LOCAL_PACKAGE_DIR/schemas" ]; then

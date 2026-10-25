@@ -97,7 +97,9 @@ public final class PackageManifestInspector {
             boolean[] masked = new boolean[1];
             field.put("value", projection.projectPackageValue(entry.getValue(), "package." + entry.getKey(), masked));
             field.put("state", masked[0] ? "redacted" : "visible"); field.put("masked", masked[0]);
-            String origin = origins.get(entry.getKey()); field.put("origin", origin == null ? "global" : origin);
+            String origin = "environment".equals(entry.getKey()) && value.effectiveConfiguration() != null
+                    ? value.effectiveConfiguration().environmentOrigin() : origins.get(entry.getKey());
+            field.put("origin", origin == null ? "global" : origin);
             field.put("authoredPath", "package".equals(origin) ? "package.yaml" : "runtime-default".equals(origin) ? "" : "config/config.yaml");
             fields.put(entry.getKey(), field);
         }

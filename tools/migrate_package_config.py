@@ -13,9 +13,28 @@ class MigrationError(ValueError):
     pass
 
 
+class InventoryLoader(yaml.SafeLoader):
+    def compose_node(self, parent, index):
+        if self.check_event(yaml.AliasEvent):
+            raise MigrationError("YAML aliases are not supported by migration inventory")
+        return super().compose_node(parent, index)
+
+    def construct_mapping(self, node, deep=False):
+        keys = set()
+        for key_node, _ in node.value:
+            key = self.construct_object(key_node, deep=deep)
+            if not isinstance(key, str) or key in keys:
+                raise MigrationError("YAML contains a duplicate or non-string mapping key")
+            keys.add(key)
+        return super().construct_mapping(node, deep=deep)
+
+
 def read_yaml(path):
-    with path.open(encoding="utf-8") as stream:
-        value = yaml.safe_load(stream)
+    with path.open("rb") as stream:
+        source = stream.read(1_048_577)
+    if len(source) > 1_048_576:
+        raise MigrationError("YAML exceeds the migration inventory size limit")
+    value = yaml.load(source.decode("utf-8"), Loader=InventoryLoader)
     if not isinstance(value, dict):
         raise MigrationError("Expected a YAML mapping")
     return value
@@ -35,6 +54,8 @@ def package_path(root, name):
 
 def owned_imports(root, imports, references, diagnostics, layer):
     result = []
+    identifiers = {}
+    duplicates = set()
     if not isinstance(imports, list):
         raise MigrationError("Legacy Testdata inventory must be a list")
     for name in imports:
@@ -44,9 +65,21 @@ def owned_imports(root, imports, references, diagnostics, layer):
                 diagnostics.append({"path": name, "layer": layer, "reason": "missing-or-unreadable"})
                 continue
             descriptor = read_yaml(path)
+            if path.suffix.lower() not in (".yaml", ".yml") or descriptor.get("schemaVersion") != "att-testdata/v1.0":
+                raise MigrationError("invalid-schema")
             logical_id = descriptor.get("id")
             if not isinstance(logical_id, str) or not re.fullmatch(r"[A-Za-z][A-Za-z0-9_-]*", logical_id):
                 raise MigrationError("invalid-schema")
+            if logical_id in identifiers:
+                previous = identifiers[logical_id]
+                if previous in result:
+                    result.remove(previous)
+                if logical_id not in duplicates:
+                    diagnostics.append({"path": previous, "layer": layer, "id": logical_id, "reason": "duplicate-id"})
+                diagnostics.append({"path": name, "layer": layer, "id": logical_id, "reason": "duplicate-id"})
+                duplicates.add(logical_id)
+                continue
+            identifiers[logical_id] = name
             if logical_id in references:
                 result.append(name)
             else:
@@ -74,7 +107,8 @@ def inventory(runtime, registry):
         value = config.get(section, {})
         if isinstance(value, dict): inherited[section] = {key: value[key] for key in keys if key in value}
     plan = {"schemaVersion": "att-package-migration/v1", "dryRun": True,
-            "inheritedDefaults": inherited, "outputPolicy": "managed-runtime-output",
+            "inheritedDefaults": sorted(key + "." + child if isinstance(value, dict) else key
+                                         for key, value in inherited.items() for child in (value if isinstance(value, dict) else [""])), "outputPolicy": "managed-runtime-output",
             "globalConfigDigest": hashlib.sha256(runtime.read_bytes()).hexdigest(),
             "globalDefaultEnvironment": config.get("environment"), "packages": []}
     for package_id, configured_root in entries.items():
