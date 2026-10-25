@@ -55,7 +55,7 @@ public final class RemoteCommand {
                     Credentials credentials=password(profile,environment,prompt);
                     return new RemoteHttpClient.Credentials(credentials.username,credentials.password);
                 });
-                if(requiresCredentialPreflight(op)) client.get("/packages");
+                if(requiresCredentialPreflight(op)) client.get("vnext".equals(op)?"/auth/capabilities":"/packages");
             } else {
                 client=clientFactory.create(profile,null,null,null);
             }
