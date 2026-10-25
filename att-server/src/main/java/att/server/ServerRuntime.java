@@ -1670,10 +1670,10 @@ final class ServerRuntime implements AutoCloseable {
         Map<String,Object> result=report.toMap();result.put("requestId","validation");return result;
     }
 
-    @SuppressWarnings("unchecked") private static Map<String,Object> validationWorkerReport(Map<String,Object> envelope) {
-        Object value=envelope.get("inspection");
-        if(!(value instanceof Map))throw new IllegalStateException("Validation Worker returned no att-validation/v1 report");
-        return new LinkedHashMap<String,Object>((Map<String,Object>)value);
+    private static Map<String,Object> validationWorkerReport(Map<String,Object> report) {
+        if(report==null||!"att-validation/v1".equals(report.get("schemaVersion")))
+            throw new IllegalStateException("Validation Worker returned no att-validation/v1 report");
+        return new LinkedHashMap<String,Object>(report);
     }
 
     @SuppressWarnings("unchecked") private static void appendValidationSections(att.server.api.AttValidationReport report,Map<String,Object> source) {
