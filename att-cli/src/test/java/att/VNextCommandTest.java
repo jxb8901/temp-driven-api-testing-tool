@@ -172,8 +172,10 @@ class VNextCommandTest {
         Path packages=Files.createDirectories(home.resolve("packages"));
         Path payments=Files.createDirectories(packages.resolve("payments"));
         Files.createDirectories(payments.resolve("testcase"));
+        Files.createDirectories(payments.resolve("templates"));
         Path standalone=Files.createDirectories(packages.resolve("standalone"));
         Files.createDirectories(standalone.resolve("testcase"));
+        Files.createDirectories(standalone.resolve("templates"));
         Files.write(standalone.resolve("package.yaml"),
                 "schemaVersion: att-package/v1\ndefaultEnvironment: UAT\n".getBytes(StandardCharsets.UTF_8));
         Files.createDirectories(cliConfig.getParent());Files.createDirectories(boundConfig.getParent());
@@ -221,6 +223,7 @@ class VNextCommandTest {
         Path home=packageRoot.resolve("partial-home");
         Path config=home.resolve("config/config.yaml");
         Files.createDirectories(home.resolve("packages/payments/testcase"));
+        Files.createDirectories(home.resolve("packages/payments/templates"));
         Files.write(home.resolve("packages/payments/package.yaml"),
                 "schemaVersion: att-package/v1\n".getBytes(StandardCharsets.UTF_8));
         Files.createDirectories(config.getParent());TestSchemas.install(home);
