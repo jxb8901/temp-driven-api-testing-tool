@@ -22,7 +22,8 @@ Active schemas (the matching ATT Engine JAR's embedded registry, built from `sch
 | Load scenario | att-load/v1.9 |
 | Load Template | `att-load-template/v1` | `schemas/att-load-template-v1.schema.json` |
 | Load bindings | `att-load-bindings/v1` | `schemas/att-load-bindings-v1.schema.json` |
-| Load summary | att-load-summary/v1.2 |
+| Load summary | direct Engine/CLI: legacy summary contract (schema under `schemas/history/`); archived report: att-load-summary/v1.3 |
+| LOAD report detail files | att-load-detail-manifest/v1, att-load-detail-reference/v1, att-load-detail-series/v1, att-load-workload-detail/v1 |
 | Run manifest | att-run/v2.1 |
 | Legacy package validation JSON | `att-validation/v2.1` |
 | Minimal CLI hierarchical validation report | `att-validation/v1` |

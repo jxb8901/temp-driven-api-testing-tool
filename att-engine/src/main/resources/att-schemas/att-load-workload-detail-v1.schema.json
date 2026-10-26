@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:att:schema:load-workload-detail:v1",
+  "type": "object",
+  "required": ["schemaVersion", "workloadId", "workload"],
+  "properties": {
+    "schemaVersion": { "const": "att-load-workload-detail/v1" },
+    "workloadId": { "type": "string", "minLength": 1, "maxLength": 96 },
+    "workload": {
+      "type": "object",
+      "required": ["status", "executionStatus", "performanceVerdict", "model", "metrics", "thresholds", "detailArtifact"],
+      "properties": {
+        "status": { "enum": ["PASS", "FAIL", "ERROR"] },
+        "executionStatus": { "enum": ["PASS", "ERROR"] },
+        "performanceVerdict": { "enum": ["MET", "NOT_MET", "NOT_EVALUATED"] },
+        "model": { "enum": ["closed", "arrivalRate"] },
+        "target": { "type": "object" },
+        "mix": { "type": "object" },
+        "metrics": { "type": "object", "additionalProperties": true },
+        "thresholds": { "type": "object", "additionalProperties": true },
+        "detailArtifact": {
+          "type": "string",
+          "pattern": "^details/v1/workloads/workload-[0-9]{4}/summary\\.json$"
+        }
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": false
+}

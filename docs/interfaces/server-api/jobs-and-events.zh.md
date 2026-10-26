@@ -21,9 +21,9 @@ data: {"jobId":"J...","status":"RUNNING"}
 
 精簡 summary 把執行結果和 performance verdict 分開，並提供有界 aggregate metrics、threshold／workload 預覽、主要診斷、細節完整度、metrics 涵蓋範圍及邏輯 archive 路徑。其 UTF-8 JSON 上限為 32 KiB。端到端測試會量度序列化後的終端 journal 與 SSE envelope，包括 Unicode 及 JSON escaping，確保各自低於 48 KiB；Journal event-data 上限仍為 64 KiB。Worker frame 上限維持 1 MiB。
 
-ERROR 會在 `summary.diagnostics.primaryError` 保留 runtime 或 preparation 原因、有限長度診斷及失敗數量。`HTTP_RESPONSE_TOO_LARGE`、`MQ_RESPONSE_TOO_LARGE`、`MQ_POOL_TIMEOUT`、`LOAD_RESOURCE_PREPARATION_LIMIT` 及 `LOAD_PREPARATION_TIMEOUT` 仍可用於排查。Worker event truncation、Journal truncation 及 artifact 發布狀態只屬次要 metadata，不會取代主要原因、終端狀態或 exit code。較舊 Worker 送來的詳細 LOAD 結果會在新資料持久化及發布終端 event 前轉為 v1；已儲存的舊結果則會在讀取時投影為 v1。
+ERROR 和 INVALID 結果會在 `summary.diagnostics.primaryError` 保留有界 runtime、preparation 或 validation 原因。只有來源回報真實失敗數量時才輸出 failed count。`HTTP_RESPONSE_TOO_LARGE`、`MQ_RESPONSE_TOO_LARGE`、`MQ_POOL_TIMEOUT`、`LOAD_RESOURCE_PREPARATION_LIMIT` 及 `LOAD_PREPARATION_TIMEOUT` 仍可用於排查。Worker event truncation、Journal truncation 及 artifact 發布狀態只屬次要 metadata，不會取代主要原因、終端狀態或 exit code。過大的舊版 LOAD 結果會在 Worker 發出前投影，並在 Server 持久化／發布前再次投影；舊 stored result 則會在讀取時投影。
 
-`summary.archive.status` 和 `reportAvailability` 只表示初始狀態提示。最新 archive 狀態及核准 entries 以現有授權 artifact index route 為準。詳細 `load-summary.json`、`load-summary.yaml` 及 `report/index.html` 保留 `att-load-summary/v1.2`，只可透過已驗證的 Job artifact routes 取得。Metrics coverage 會回報 4,096 個一秒 bucket 的 rolling compatibility window，以及獨立的 `LoadWindowMetrics` bin 寬度與涵蓋範圍；不會暗示長時間執行仍保留每一秒的資料。
+`summary.archive.status` 和 `reportAvailability` 只表示初始狀態提示。最新 archive 狀態及核准 entries 以現有授權 artifact index route 為準。`LoadReportWriter` 輸出的 archived `load-summary.json` 和 YAML 使用 `att-load-summary/v1.3`；大型 metric collection 使用相對路徑及版本化 `details/v1/manifest.json` sidecar，只可透過已驗證的 Job artifact routes 取得。直接 Engine／CLI `OperationResult` output 維持 legacy summary contract (schema under `schemas/history/`)。Metrics coverage 會回報 4,096 個一秒 bucket 的 rolling compatibility window，以及獨立的 `LoadWindowMetrics` bin 寬度與涵蓋範圍；不會暗示長時間執行仍保留每一秒的資料。
 
 ## 取消與復原
 

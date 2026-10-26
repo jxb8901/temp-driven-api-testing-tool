@@ -4,6 +4,7 @@ import att.core.ResultStatus;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -20,6 +21,31 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class LoadReportTest {
     @TempDir Path temp;
+
+    @Test void reportBudgetFailureRemovesPartialReportAndSidecarFiles() throws Exception {
+        Instant started = Instant.parse("2026-10-26T00:00:00Z");
+        long startMs = started.toEpochMilli();
+        LoadScenario scenario = new LoadScenario(Paths.get("report-budget.yaml"), "template", "SIMPLE",
+                Collections.emptyMap(), Collections.emptyMap(), LoadScenario.Model.CLOSED, 1, 0.0, "closed",
+                Duration.ZERO, Duration.ZERO, Duration.ofSeconds(1), Duration.ZERO, Duration.ZERO,
+                1, "drop", Collections.emptyMap(), Collections.emptyMap());
+        LoadMetrics metrics = LoadMetrics.forScenario(scenario, startMs, 1_000L);
+        metrics.finish(startMs + 1_000L);
+        LoadRunResult result = new LoadRunResult("report-budget", scenario, started, started.plusSeconds(1),
+                metrics.snapshot(), LoadThresholdSummary.empty(), Collections.<String,Object>emptyMap(),
+                Collections.<String,Object>emptyMap()).withResources(Collections.<String,Object>singletonMap(
+                        "largeDiagnostic", repeat("x", 16 * 1024 * 1024)));
+
+        IOException failure = assertThrows(IOException.class, () -> new LoadReportWriter().write(temp, result));
+        assertTrue(failure.getMessage().contains("16 MiB"), failure.getMessage());
+        Path runDirectory = temp.resolve("load/report-budget");
+        assertFalse(Files.exists(runDirectory.resolve("load-summary.json")));
+        assertFalse(Files.exists(runDirectory.resolve("load-summary.yaml")));
+        assertFalse(Files.exists(runDirectory.resolve("report/index.html")));
+        assertFalse(Files.exists(runDirectory.resolve("details/v1/manifest.json")));
+        assertEquals("PASS", result.status().name(), "report failure does not mutate the executed LOAD outcome");
+        assertEquals(0, result.exitCode());
+    }
 
     @Test void writesBoundedArrivalSummaryHtmlAndEvidenceLinks() throws Exception {
         Instant started = Instant.parse("2026-09-22T00:00:00Z");
@@ -84,7 +110,7 @@ class LoadReportTest {
         @SuppressWarnings("unchecked") Map<String, Object> json = att.validation.JsonSupport.mapper()
                 .readValue(runDirectory.resolve("load-summary.json").toFile(), Map.class);
         assertDoesNotThrow(() -> att.validation.JsonSchemaVerifier.verifyJson(
-                Paths.get("schemas/att-load-summary-v1.2.schema.json"),
+                Paths.get("schemas/att-load-summary-v1.3.schema.json"),
                 new String(Files.readAllBytes(runDirectory.resolve("load-summary.json")), StandardCharsets.UTF_8)));
         Map<String, Object> legacySummary = new LinkedHashMap<String, Object>(json);
         Map<String, Object> legacyMetrics = new LinkedHashMap<String, Object>((Map<String, Object>) json.get("metrics"));
@@ -93,9 +119,9 @@ class LoadReportTest {
             legacyMetrics.remove(added);
         legacySummary.put("metrics", legacyMetrics);
         assertDoesNotThrow(() -> att.validation.JsonSchemaVerifier.verifyJson(
-                Paths.get("schemas/att-load-summary-v1.2.schema.json"), att.validation.JsonSupport.write(legacySummary)),
+                Paths.get("schemas/att-load-summary-v1.3.schema.json"), att.validation.JsonSupport.write(legacySummary)),
                 "summaries with optional telemetry fields remain valid when new telemetry fields are absent");
-        assertEquals("att-load-summary/v1.2", json.get("schemaVersion"));
+        assertEquals("att-load-summary/v1.3", json.get("schemaVersion"));
         assertEquals("PASS", json.get("status"));
         assertTrue(json.containsKey("timing"));
         assertTrue(json.containsKey("resources"));
@@ -111,7 +137,7 @@ class LoadReportTest {
         Map<String, Object> missingReport = new LinkedHashMap<String, Object>(json);
         missingReport.remove("report");
         assertThrows(IllegalArgumentException.class, () -> att.validation.JsonSchemaVerifier.verifyJson(
-                Paths.get("schemas/att-load-summary-v1.2.schema.json"),
+                Paths.get("schemas/att-load-summary-v1.3.schema.json"),
                 att.validation.JsonSupport.write(missingReport)));
 
         String html = new String(Files.readAllBytes(report), StandardCharsets.UTF_8);
@@ -441,5 +467,11 @@ class LoadReportTest {
         assertFalse(html.contains("secret-payload-value"));
         assertFalse(html.contains("secret-token-value"));
         assertFalse(html.contains("secret-body-value"));
+    }
+
+    private static String repeat(String value, int count) {
+        StringBuilder out = new StringBuilder(Math.min(count, 1) * value.length());
+        for (int i = 0; i < count; i++) out.append(value);
+        return out.toString();
     }
 }

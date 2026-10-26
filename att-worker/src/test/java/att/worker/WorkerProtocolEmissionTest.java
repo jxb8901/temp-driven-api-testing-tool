@@ -94,6 +94,72 @@ class WorkerProtocolEmissionTest {
         assertEquals(65_536,event.path("loadResultTransport").path("journalDataLimitBytes").asInt());
     }
 
+    @Test void oversizedLegacyLoadFrameKeepsTheRealCauseBeforeTransportTruncation() throws Exception {
+        StringBuilder large = new StringBuilder();
+        for (int index = 0; index < 1_100_000; index++) large.append(index % 2 == 0 ? 'x' : '\u96ea');
+        Map<String,Object> metrics = fields("scheduled", 12L, "started", 12L, "completed", 12L,
+                "success", 10L, "failure", 1L, "runtimeError", 1L,
+                "failureDiagnostics", Collections.singletonList(fields("status", "ERROR",
+                        "code", "HTTP_RESPONSE_TOO_LARGE", "summary", "HTTP response exceeded its size limit")),
+                "buckets", Collections.emptyMap(), "large", large.toString());
+        Map<String,Object> legacy = fields("schemaVersion", "att-load-summary/v1.2", "runId", "load-legacy-large",
+                "status", "ERROR", "executionStatus", "ERROR", "performanceVerdict", "NOT_MET",
+                "durationMs", 3_600_000L, "metrics", metrics, "thresholds", fields("status", "NOT_EVALUATED"),
+                "workloads", Collections.emptyMap(), "resources", Collections.emptyMap(), "report", "report/index.html");
+        Map<String,Object> raw = fields("executionId", "load-legacy-large", "status", "ERROR", "exitCode", 3,
+                "durationMs", 3_600_000L, "diagnostics", Collections.emptyList(), "summary", legacy);
+        Path output = Files.createDirectory(temp.resolve("oversized-legacy-load"));
+        ByteArrayOutputStream bytes = new ByteArrayOutputStream(); WorkerMain worker = worker(bytes, output);
+        Field command = WorkerMain.class.getDeclaredField("currentCommand"); command.setAccessible(true); command.set(worker, "load");
+        invoke(worker, "emitResult", new Class<?>[]{Map.class}, fields("status", "ERROR", "exitCode", 3,
+                "durationMs", 3_600_000L, "result", raw));
+
+        JsonNode event = mapper.readTree(WorkerProtocol.read(new ByteArrayInputStream(bytes.toByteArray()), WorkerProtocol.MAX_FRAME_BYTES).text());
+        JsonNode result = event.path("result");
+        JsonNode summary = result.path("summary");
+        assertEquals("ERROR", result.path("status").asText());
+        assertEquals(3, result.path("exitCode").asInt());
+        assertEquals("att-load-terminal-result/v1", summary.path("schemaVersion").asText());
+        assertEquals("HTTP_RESPONSE_TOO_LARGE", summary.path("diagnostics").path("primaryError").path("code").asText());
+        assertEquals("ATT-WORKER-EVENT-TRUNCATED", summary.path("diagnostics").path("transportWarnings").get(0).path("code").asText());
+        assertEquals("ATT-WORKER-EVENT-TRUNCATED", result.path("diagnostics").get(result.path("diagnostics").size() - 1).path("code").asText());
+    }
+
+    @Test void workerFailureResultKeepsLegacyShapeForNonLoadAndVersionedShapeForLoad() throws Exception {
+        for (String commandName : new String[] {"run", "debug", "validate", "load"}) {
+            ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+            WorkerMain worker = worker(bytes, Files.createDirectory(temp.resolve("failure-output-" + commandName)));
+            JsonNode request = mapper.readTree(mapper.writeValueAsBytes(fields("protocolVersion", "att-worker/v1",
+                    "jobId", "J-" + commandName, "command", commandName, "packageRoot", "",
+                    "config", "missing.yaml", "outputDirectory", "output")));
+            invoke(worker, "executeRequest", new Class<?>[]{JsonNode.class}, request);
+            String[] lines = new String(bytes.toByteArray(), java.nio.charset.StandardCharsets.UTF_8).trim().split("\\R");
+            JsonNode resultEvent = mapper.readTree(lines[lines.length - 1]);
+            JsonNode result = resultEvent.path("result");
+            assertEquals(resultEvent.path("status").asText(), result.path("status").asText());
+            assertEquals(resultEvent.path("exitCode").asInt(), result.path("exitCode").asInt());
+            if ("load".equals(commandName)) {
+                assertEquals("att-load-terminal-result/v1", result.path("summary").path("schemaVersion").asText());
+                assertTrue(result.path("diagnostics").isArray());
+                assertEquals("INVALID", result.path("status").asText());
+                assertEquals(2, result.path("exitCode").asInt());
+                assertEquals("WORKER_REQUEST_INVALID", result.path("summary").path("diagnostics").path("primaryError").path("code").asText());
+            } else {
+                assertFalse(result.has("summary"));
+                assertFalse(result.has("diagnostics"));
+            }
+        }
+    }
+
+    @Test void workerUsesTypedPreparationDiagnosticFromTheRealBudgetFailurePath() throws Exception {
+        att.load.LoadResourcePreparationException failure = assertThrows(att.load.LoadResourcePreparationException.class,
+                () -> att.load.LoadPreparationBudget.requireWithinPerRunLimit(att.load.LoadPreparationBudget.PER_RUN_CONNECTIONS + 1));
+        assertEquals(att.load.LoadResourcePreparationException.RESOURCE_LIMIT, failure.diagnosticCode());
+        Method classifier = WorkerMain.class.getDeclaredMethod("loadPreparationCode", Throwable.class);
+        classifier.setAccessible(true);
+        assertEquals("LOAD_RESOURCE_PREPARATION_LIMIT", classifier.invoke(null, failure));
+    }
+
     @Test void artifactWriteFailureStillDeliversTheTerminalResult() throws Exception {
         Path output=Files.createDirectory(temp.resolve("occupied"));
         Files.write(output.resolve("worker-protocol-result.json"),new byte[]{1});

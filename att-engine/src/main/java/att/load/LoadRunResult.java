@@ -135,6 +135,11 @@ public final class LoadRunResult {
 
     /** Builds the Worker/Server control-plane projection without copying full metrics or evidence maps. */
     public Map<String, Object> toTerminalSummary(Map<String, Object> configuration) {
+        return toTerminalSummary(configuration, "PENDING");
+    }
+
+    /** Builds the compact projection with artifact publication kept independent from execution outcome. */
+    public Map<String, Object> toTerminalSummary(Map<String, Object> configuration, String reportAvailability) {
         Map<String, Object> source = new LinkedHashMap<String, Object>();
         long durationMs = Math.max(0L, Duration.between(startedAt, endedAt).toMillis());
         source.put("executionId", runId); source.put("runId", runId); source.put("status", status().name());
@@ -172,7 +177,9 @@ public final class LoadRunResult {
         paths.put("loadSummaryJson", "load/" + runId + "/load-summary.json");
         paths.put("loadSummaryYaml", "load/" + runId + "/load-summary.yaml");
         paths.put("report", "load/" + runId + "/report/index.html");
-        archive.put("paths", paths); archive.put("status", "PENDING"); archive.put("reportAvailability", "PENDING");
+        String archiveState = "FAILED".equals(reportAvailability) ? "FAILED" : "PENDING";
+        archive.put("paths", paths); archive.put("status", archiveState); archive.put("reportAvailability", archiveState);
+        if ("FAILED".equals(archiveState)) archive.put("omissionReason", "LOAD_REPORT_WRITE_FAILED");
         source.put("archive", archive); source.put("reportProduced", Boolean.TRUE);
         if (configuration != null) source.put("configuration", configuration);
         return LoadTerminalResult.compact(source);

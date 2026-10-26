@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
 import java.math.BigInteger;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -15,7 +16,7 @@ class LoadTerminalResultTest {
     private static final ObjectMapper JSON = new ObjectMapper();
 
     @Test void legacyDetailedSummaryProjectsToBoundedPostEnvelopeResultAndKeepsRealErrorFirst() throws Exception {
-        Map<String,Object> summary = detailedSummary("HTTP_RESPONSE_TOO_LARGE", "root cause \"雪\"\\line\n" + "界".repeat(3000));
+        Map<String,Object> summary = detailedSummary("HTTP_RESPONSE_TOO_LARGE", "root cause \"雪\"\\line\n" + repeat("界",3000));
         List<Map<String,Object>> diagnostics = new ArrayList<>();
         diagnostics.add(fields("code", "ATT-WORKER-EVENT-TRUNCATED", "summary", "transport truncated"));
         diagnostics.add(fields("code", "ATT-JOURNAL-EVENT-TRUNCATED", "summary", "journal truncated"));
@@ -59,7 +60,7 @@ class LoadTerminalResultTest {
         for (String code : new String[] {"HTTP_RESPONSE_TOO_LARGE", "MQ_RESPONSE_TOO_LARGE", "MQ_POOL_TIMEOUT"}) {
             Map<String,Object> summary = detailedSummary(code, "operation failed with " + code);
             Map<String,Object> result = LoadTerminalResult.projectOperationResult(
-                    fields("status", "ERROR", "exitCode", 3, "diagnostics", List.of(fields("code", "ATT-WORKER-EVENT-TRUNCATED")), "summary", summary), "ERROR", 3);
+                    fields("status", "ERROR", "exitCode", 3, "diagnostics", Collections.singletonList(fields("code", "ATT-WORKER-EVENT-TRUNCATED")), "summary", summary), "ERROR", 3);
             Map<?,?> cause = (Map<?,?>) ((Map<?,?>) ((Map<?,?>) result.get("summary")).get("diagnostics")).get("primaryError");
             assertEquals(code, cause.get("code"));
             assertEquals(3, ((Number) result.get("exitCode")).intValue());
@@ -79,21 +80,88 @@ class LoadTerminalResultTest {
         }
     }
 
+    @Test void preparationRootCauseDoesNotInventFailedCountWhenNoHelperFailed() {
+        Map<String,Object> summary = detailedSummary(null, null);
+        summary.put("resources", fields("preparation", fields("status", "PREPARATION_FAILED", "required", 65,
+                "prepared", 0, "failed", 0, "failureCode", "LOAD_RESOURCE_PREPARATION_LIMIT")));
+        Map<String,Object> result = LoadTerminalResult.projectOperationResult(
+                fields("status", "ERROR", "exitCode", 3, "summary", summary), "ERROR", 3);
+        Map<?,?> cause = (Map<?,?>) ((Map<?,?>) ((Map<?,?>) result.get("summary")).get("diagnostics")).get("primaryError");
+        assertEquals("LOAD_RESOURCE_PREPARATION_LIMIT", cause.get("code"));
+        assertFalse(cause.containsKey("failedCount"));
+    }
+
     @Test void truncationAloneDoesNotChangeLoadOutcomeOrCreateARootCause() {
         Map<String,Object> result = LoadTerminalResult.projectOperationResult(
                 fields("status", "PASS", "exitCode", 0,
-                        "diagnostics", List.of(fields("code", "ATT-WORKER-EVENT-TRUNCATED", "summary", "transport symptom")),
+                        "diagnostics", Collections.singletonList(fields("code", "ATT-WORKER-EVENT-TRUNCATED", "summary", "transport symptom")),
                         "truncated", Boolean.TRUE, "summary", detailedSummary(null, null)), "PASS", 0);
         Map<String,Object> compactSummary = new LinkedHashMap<>((Map<String,Object>) result.get("summary"));
         compactSummary.put("archive", fields("status", "FAILED", "reportAvailability", "FAILED"));
         result = LoadTerminalResult.projectOperationResult(fields("status", "PASS", "exitCode", 0,
-                "diagnostics", List.of(fields("code", "ATT-JOURNAL-EVENT-TRUNCATED", "summary", "secondary warning")),
+                "diagnostics", Collections.singletonList(fields("code", "ATT-JOURNAL-EVENT-TRUNCATED", "summary", "secondary warning")),
                 "summary", compactSummary), "PASS", 0);
         Map<?,?> compact = (Map<?,?>) result.get("summary");
         assertEquals("PASS", result.get("status")); assertEquals(0, ((Number) result.get("exitCode")).intValue());
         assertFalse(((Map<?,?>) compact.get("diagnostics")).containsKey("primaryError"));
         assertEquals("PASS", ((Map<?,?>) compact.get("execution")).get("status"));
         assertEquals("FAILED", ((Map<?,?>) compact.get("archive")).get("status"));
+    }
+
+    @Test void earlyInvalidLoadKeepsItsDiagnosticAndRemainsInvalidWithoutArchive() {
+        Map<String,Object> result = LoadTerminalResult.projectOperationResult(fields(
+                "status", "INVALID", "exitCode", 2,
+                "diagnostics", Collections.singletonList(fields("code", "LOAD_INVALID", "message", "Scenario is missing workloads")),
+                "summary", Collections.emptyMap()), "INVALID", 2);
+        Map<?,?> summary = (Map<?,?>) result.get("summary");
+        Map<?,?> primary = (Map<?,?>) ((Map<?,?>) summary.get("diagnostics")).get("primaryError");
+        Map<?,?> archive = (Map<?,?>) summary.get("archive");
+        assertEquals("INVALID", result.get("status"));
+        assertEquals(2, ((Number) result.get("exitCode")).intValue());
+        assertEquals("LOAD_INVALID", primary.get("code"));
+        assertEquals("Scenario is missing workloads", primary.get("summary"));
+        assertEquals("OMITTED", archive.get("status"));
+        assertEquals("OMITTED", archive.get("reportAvailability"));
+        assertTrue(((Map<?,?>) archive.get("paths")).isEmpty());
+    }
+
+    @Test void serverReprojectionKeepsWorkerFallbackCauseAndTransportWarningSeparate() {
+        Map<String,Object> workerFallback = LoadTerminalResult.projectOperationResult(fields(
+                "status", "ERROR", "exitCode", 3,
+                "summary", detailedSummary("MQ_RESPONSE_TOO_LARGE", "MQ response exceeded the configured size")), "ERROR", 3);
+        Map<String,Object> summary = new LinkedHashMap<>((Map<String,Object>) workerFallback.get("summary"));
+        Map<String,Object> diagnostics = new LinkedHashMap<>((Map<String,Object>) summary.get("diagnostics"));
+        diagnostics.put("transportWarnings", Collections.singletonList(fields("code", "ATT-WORKER-EVENT-TRUNCATED", "summary", "Worker details truncated")));
+        summary.put("diagnostics", diagnostics);
+        workerFallback.put("summary", summary);
+
+        Map<String,Object> stored = LoadTerminalResult.projectOperationResult(workerFallback, "ERROR", 3);
+        Map<?,?> storedSummary = (Map<?,?>) stored.get("summary");
+        Map<?,?> storedDiagnostics = (Map<?,?>) storedSummary.get("diagnostics");
+        Map<?,?> cause = (Map<?,?>) storedDiagnostics.get("primaryError");
+        assertEquals("ERROR", stored.get("status"));
+        assertEquals(3, ((Number) stored.get("exitCode")).intValue());
+        assertEquals("MQ_RESPONSE_TOO_LARGE", cause.get("code"));
+        assertEquals("ATT-WORKER-EVENT-TRUNCATED", ((Map<?,?>) ((List<?>) storedDiagnostics.get("transportWarnings")).get(0)).get("code"));
+    }
+
+    @Test void reportPublicationFailureDoesNotReplaceTheLoadRootCauseOrOutcome() {
+        Map<String,Object> summary = LoadTerminalResult.compact(fields("runId", "load-run", "status", "ERROR",
+                "exitCode", 3, "durationMs", 1000L, "metrics", fields("runtimeError", 1L, "failure", 1L),
+                "diagnostics", fields("primaryError", fields("code", "HTTP_RESPONSE_TOO_LARGE",
+                        "summary", "SUT response exceeded its configured limit")),
+                "archive", fields("status", "FAILED", "reportAvailability", "FAILED",
+                        "omissionReason", "LOAD_REPORT_WRITE_FAILED", "paths", fields("report", "load/run/report/index.html"))));
+        Map<String,Object> result = LoadTerminalResult.projectOperationResult(
+                fields("status", "ERROR", "exitCode", 3, "summary", summary), "ERROR", 3);
+        Map<?,?> compact = (Map<?,?>) result.get("summary");
+        Map<?,?> archive = (Map<?,?>) compact.get("archive");
+        Map<?,?> diagnostics = (Map<?,?>) compact.get("diagnostics");
+        assertEquals("ERROR", result.get("status"));
+        assertEquals(3, ((Number) result.get("exitCode")).intValue());
+        assertEquals("FAILED", archive.get("status"));
+        assertEquals("FAILED", archive.get("reportAvailability"));
+        assertEquals("HTTP_RESPONSE_TOO_LARGE", ((Map<?,?>) diagnostics.get("primaryError")).get("code"));
     }
 
     @Test void terminalExecutionOutcomesAndExitCodesRemainIndependentOfPerformanceVerdict() {
@@ -114,7 +182,7 @@ class LoadTerminalResultTest {
         Map<String,Object> summary = detailedSummary(null, null);
         Map<?,?> sourceMetrics = (Map<?,?>) summary.get("metrics");
         Map<String,Object> metrics = new LinkedHashMap<>((Map<String,Object>) sourceMetrics);
-        metrics.put("completed", new BigInteger("9".repeat(100_000)));
+        metrics.put("completed", new BigInteger(repeat("9",100_000)));
         metrics.put("completedThroughput", Double.POSITIVE_INFINITY);
         summary.put("metrics", metrics);
 
@@ -143,7 +211,7 @@ class LoadTerminalResultTest {
         Map<String,Object> metrics = fields("scheduled", 500_000L, "started", 499_000L, "completed", 498_000L,
                 "success", 497_000L, "failure", 800L, "runtimeError", primaryCode == null ? 0L : 1200L,
                 "dropped", 1000L, "timeSeriesBucketCapacity", 4096, "timeSeriesBucketCount", 4096,
-                "errorClassifications", classes, "runtimeErrorClassifications", primaryCode == null ? Map.of() : Map.of(primaryCode, 1200L),
+                "errorClassifications", classes, "runtimeErrorClassifications", primaryCode == null ? Collections.<String,Object>emptyMap() : fields(primaryCode, 1200L),
                 "primaryRuntimeError", primaryCode == null ? null : fields("code", primaryCode, "summary", primarySummary),
                 "failureDiagnostics", failures, "buckets", buckets,
                 "windowMetrics", fields("schemaVersion", "att-load-window-metrics/v1", "timeSeries", fields("capacity", 2048, "bucketDurationMs", 60000L, "coverage", "Whole execution; roll-up")));
@@ -160,10 +228,10 @@ class LoadTerminalResultTest {
             String key = "field" + String.format("%02d", index);
             origins.put(key, "package"); authored.put(key, "config/config.yaml");
         }
-        return fields("configurationIdentity", "a".repeat(64), "manifestDigest", "b".repeat(64),
-                "globalDigest", "c".repeat(64), "schemaRegistryDigest", "d".repeat(64),
-                "packageRevision", "e".repeat(64), "approvedConfigurationIdentity", "f".repeat(64),
-                "environment", "SIT", "engineVersion", "v".repeat(128), "engineRevision", "r".repeat(128),
+        return fields("configurationIdentity", repeat("a",64), "manifestDigest", repeat("b",64),
+                "globalDigest", repeat("c",64), "schemaRegistryDigest", repeat("d",64),
+                "packageRevision", repeat("e",64), "approvedConfigurationIdentity", repeat("f",64),
+                "environment", "SIT", "engineVersion", repeat("v",128), "engineRevision", repeat("r",128),
                 "packageId", "package-1", "environmentOrigin", "request", "origins", origins, "authoredPaths", authored);
     }
 
@@ -171,5 +239,11 @@ class LoadTerminalResultTest {
         Map<String,Object> result = new LinkedHashMap<>();
         for (int i = 0; i + 1 < values.length; i += 2) result.put(String.valueOf(values[i]), values[i + 1]);
         return result;
+    }
+
+    private static String repeat(String value, int count) {
+        StringBuilder out = new StringBuilder(value.length() * count);
+        for (int i = 0; i < count; i++) out.append(value);
+        return out.toString();
     }
 }

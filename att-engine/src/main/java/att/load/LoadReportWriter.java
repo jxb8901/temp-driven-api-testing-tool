@@ -10,19 +10,59 @@ import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Stream;
 
 /** Writes isolated machine-readable summaries and a self-contained Load performance report. */
 public final class LoadReportWriter {
+    private static final int MAX_REPORT_FILE_BYTES = 16 * 1024 * 1024;
+    private static final long MAX_REPORT_TOTAL_BYTES = 120L * 1024 * 1024;
+
     public Path write(Path outputRoot, LoadRunResult result) throws IOException {
         Path runDirectory = outputRoot.resolve("load").resolve(result.runId()).toAbsolutePath().normalize();
-        Files.createDirectories(runDirectory.resolve("report"));
-        Map<String, Object> map = result.toMap();
-        Files.write(runDirectory.resolve("load-summary.json"), JsonSupport.mapper().writerWithDefaultPrettyPrinter().writeValueAsBytes(map));
-        Files.write(runDirectory.resolve("load-summary.yaml"), new Yaml().dump(map).getBytes(StandardCharsets.UTF_8));
-        Files.write(runDirectory.resolve("report/index.html"), html(runDirectory, result, map).getBytes(StandardCharsets.UTF_8));
-        return runDirectory.resolve("report/index.html");
+        try {
+            Files.createDirectories(runDirectory.resolve("report"));
+            Map<String, Object> map = result.toMap();
+            long detailBytes = LoadReportDetailWriter.write(runDirectory, map);
+            byte[] json = JsonSupport.mapper().writerWithDefaultPrettyPrinter().writeValueAsBytes(map);
+            byte[] yaml = new Yaml().dump(map).getBytes(StandardCharsets.UTF_8);
+            byte[] reportHtml = html(runDirectory, result, map).getBytes(StandardCharsets.UTF_8);
+            long reportBytes = detailBytes + json.length + yaml.length + reportHtml.length;
+            if (reportBytes > MAX_REPORT_TOTAL_BYTES)
+                throw new IOException("LOAD detailed report output exceeds its 120 MiB bounded report budget.");
+            writeBounded(runDirectory.resolve("load-summary.json"), json);
+            writeBounded(runDirectory.resolve("load-summary.yaml"), yaml);
+            writeBounded(runDirectory.resolve("report/index.html"), reportHtml);
+            return runDirectory.resolve("report/index.html");
+        } catch (IOException | RuntimeException failure) {
+            removePartialArtifacts(runDirectory, failure);
+            throw failure;
+        }
+    }
+
+    private static void removePartialArtifacts(Path runDirectory, Throwable failure) {
+        for (Path path : new Path[] {runDirectory.resolve("load-summary.json"), runDirectory.resolve("load-summary.yaml"),
+                runDirectory.resolve("report/index.html")}) {
+            try { Files.deleteIfExists(path); }
+            catch (IOException cleanupFailure) { failure.addSuppressed(cleanupFailure); }
+        }
+        Path details = runDirectory.resolve("details/v1");
+        if (Files.exists(details)) try (Stream<Path> entries = Files.walk(details)) {
+            for (Path path : (Iterable<Path>) entries.sorted(Comparator.reverseOrder())::iterator) Files.deleteIfExists(path);
+        } catch (IOException cleanupFailure) { failure.addSuppressed(cleanupFailure); }
+        for (Path path : new Path[] {runDirectory.resolve("report"), runDirectory.resolve("details")}) {
+            try { Files.deleteIfExists(path); }
+            catch (IOException cleanupFailure) { failure.addSuppressed(cleanupFailure); }
+        }
+    }
+
+    private static void writeBounded(Path path, byte[] bytes) throws IOException {
+        if (bytes.length > MAX_REPORT_FILE_BYTES)
+            throw new IOException("LOAD report file exceeds the 16 MiB artifact entry limit (" + bytes.length
+                    + " bytes): " + path.getFileName());
+        Files.write(path, bytes);
     }
 
     private String html(Path runDirectory, LoadRunResult result, Map<String, Object> summary) {
@@ -74,8 +114,8 @@ public final class LoadReportWriter {
         appendEvidenceTable(html, runDirectory, result.evidence());
         appendTimeSeries(html, result);
 
-        html.append("<section class=\"panel\"><h2>Machine-readable summary</h2><p class=\"note\">The complete bounded summary is available beside this report as ");
-        html.append("<a href=\"../load-summary.json\">load-summary.json</a> and <a href=\"../load-summary.yaml\">load-summary.yaml</a>.</p></section>");
+        html.append("<section class=\"panel\"><h2>Machine-readable summary</h2><p class=\"note\">Aggregate counters and thresholds are exact. Detailed per-workload series are stored in versioned, relative sidecars. Read ");
+        html.append("<a href=\"../load-summary.json\">load-summary.json</a>, <a href=\"../load-summary.yaml\">load-summary.yaml</a> and <a href=\"../details/v1/manifest.json\">details/v1/manifest.json</a>.</p></section>");
         String embedded = JsonSupport.write(summary).replace("<", "\\u003c");
         html.append("<script type=\"application/json\" id=\"att-load-summary-data\">").append(embedded).append("</script>");
         appendTrendScript(html);

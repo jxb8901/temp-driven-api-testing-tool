@@ -35,6 +35,7 @@ public final class WorkerMain {
     private final att.resource.PackageConfigurationSnapshots configurationSnapshots=new att.resource.PackageConfigurationSnapshots();
     private final LinkedHashMap<String,Map<String,Object>> inspectionAggregates=new LinkedHashMap<String,Map<String,Object>>(16,.75f,true);
     private String jobId;
+    private String currentCommand;
     private boolean inspectionDaemon;
     private boolean prewarmed;
     private boolean inspectionRequest;
@@ -133,6 +134,7 @@ public final class WorkerMain {
         emit(WorkerEvent.Type.STATUS,fields("status","RUNNING"));
         try { request=mapper.treeToValue(input,WorkerRequest.class); if(request.maxResponseBytes!=null)inspectionResponseLimit=request.maxResponseBytes; }
         catch(Exception error) { return fail("WORKER_REQUEST_INVALID","Unable to decode Worker request"); }
+        currentCommand=request.command;
         try { consoleOptions=att.console.ExecutionConsoleFormatter.Options.published(
                 request.liveOutputMaxEntryChars==null?4000:request.liveOutputMaxEntryChars,
                 request.liveOutputMaxEntryLines==null?40:request.liveOutputMaxEntryLines); }
@@ -223,12 +225,11 @@ public final class WorkerMain {
             else if(error instanceof PackageResourceInspector.StaleResourceCursorException) { code="ATT-RESOURCE-CURSOR-STALE"; message="The package resources changed; refresh the Explorer"; }
             else if(error instanceof PackageConfigurationInspector.ResponseTooLargeException) { code="ATT-RESOURCE-RESPONSE-TOO-LARGE"; message="Package configuration response exceeded the configured limit"; }
             else if(error instanceof PackageConfigurationInspector.ConfigurationLimitException) { code="ATT-RESOURCE-LIMIT"; message="Package configuration inspection exceeded a configured limit"; }
-            else if("load".equals(request.command)&&String.valueOf(error.getMessage()).contains("LOAD_RESOURCE_PREPARATION_LIMIT")) { code="LOAD_RESOURCE_PREPARATION_LIMIT"; message="LOAD resource preparation exceeded its bounded connection budget"; }
-            else if("load".equals(request.command)&&String.valueOf(error.getMessage()).contains("LOAD_PREPARATION_TIMEOUT")) { code="LOAD_PREPARATION_TIMEOUT"; message="LOAD resource preparation exceeded its deadline"; }
+            else if("load".equals(request.command)&&error instanceof att.load.LoadResourcePreparationException) {
+                code=loadPreparationCode(error); message=error.getMessage();
+            }
             else if(error instanceof IllegalArgumentException) { code="WORKER_REQUEST_INVALID"; exit=2; status="INVALID"; }
             Map<String,Object> diagnostic=fields("code",code,"message",DiagnosticSanitizer.redactAbsolutePaths(DiagnosticSanitizer.redactText(message==null?"ATT operation failed":message)));
-            if("load".equals(request.command)&&("LOAD_RESOURCE_PREPARATION_LIMIT".equals(code)||"LOAD_PREPARATION_TIMEOUT".equals(code)))
-                diagnostic.put("failedCount",1);
             if(request.registeredPackageId!=null&&request.registeredPackageId.matches("[A-Za-z0-9][A-Za-z0-9._-]{0,127}"))
                 diagnostic.put("packageId",request.registeredPackageId);
             boolean draftInspection="inspect".equals(request.command)&&(("package-configuration".equals(request.inspectionType)&&"validate".equals(request.inspectionAction))||"debug-input".equals(request.inspectionAction)||"debug-form".equals(request.inspectionAction)
@@ -261,10 +262,12 @@ public final class WorkerMain {
             }
             if(loadSampler!=null&&loadSummaryLine==null) loadSummaryLine=loadSampler.finish(status);
             emit(WorkerEvent.Type.DIAGNOSTIC,diagnostic);
-            Map<String,Object> failedResult=fields("executionId",null,"status",status,"exitCode",exit,
-                    "diagnostics",Collections.singletonList(diagnostic),"summary",Collections.emptyMap());
-            if("load".equals(request.command))
+            Map<String,Object> failedResult=fields("executionId",null,"status",status,"exitCode",exit);
+            if("load".equals(request.command)) {
+                failedResult.put("diagnostics",Collections.singletonList(diagnostic));
+                failedResult.put("summary",Collections.emptyMap());
                 failedResult=att.server.api.LoadTerminalResult.projectOperationResult(failedResult,status,exit);
+            }
             emitResult(fields("status",status,"exitCode",exit,"result",failedResult));
             return exit;
         }
@@ -734,6 +737,10 @@ public final class WorkerMain {
         Object summary=((Map<?,?>)value).get("summary");
         return att.server.api.LoadTerminalResult.isSummary(summary);
     }
+    private static String loadPreparationCode(Throwable error) {
+        return error instanceof att.load.LoadResourcePreparationException
+                ? ((att.load.LoadResourcePreparationException) error).diagnosticCode() : null;
+    }
     private att.console.ExecutionConsoleFormatter.Options consoleOptions=att.console.ExecutionConsoleFormatter.Options.published();
     private void attachConsole(WorkerEvent.Type type,Map<String,Object> safe) {
         Object existing=safe.get("console");
@@ -764,6 +771,36 @@ public final class WorkerMain {
         if(type==WorkerEvent.Type.RESULT) {
             Object value=safe.get("result");
             Map<?,?> original=value instanceof Map?(Map<?,?>)value:Collections.emptyMap();
+            if("load".equals(currentCommand)) {
+                String eventStatus=safe.get("status") instanceof String?(String)safe.get("status"):"ERROR";
+                Map<String,Object> projected=att.server.api.LoadTerminalResult.projectOperationResult(original,
+                        eventStatus,safe.get("exitCode") instanceof Number?((Number)safe.get("exitCode")).intValue():3);
+                List<Map<String,Object>> diagnostics=new ArrayList<Map<String,Object>>();
+                Object old=projected.get("diagnostics");
+                if(old instanceof Iterable)for(Object item:(Iterable<?>)old)if(item instanceof Map&&diagnostics.size()<3)
+                    diagnostics.add(new LinkedHashMap<String,Object>((Map<String,Object>)item));
+                diagnostics.add(fields("code","ATT-WORKER-EVENT-TRUNCATED","summary","Large result details were omitted from the Worker protocol; inspect the published artifacts"));
+                projected.put("diagnostics",diagnostics);
+                projected.put("truncated",Boolean.TRUE);
+                Map<String,Object> summary=(Map<String,Object>)projected.get("summary");
+                Map<String,Object> diagnosticSummary=(Map<String,Object>)summary.get("diagnostics");
+                List<Map<String,Object>> warnings=new ArrayList<Map<String,Object>>();
+                Object existing=diagnosticSummary.get("transportWarnings");
+                if(existing instanceof Iterable)for(Object item:(Iterable<?>)existing)if(item instanceof Map&&warnings.size()<1)
+                    warnings.add(new LinkedHashMap<String,Object>((Map<String,Object>)item));
+                warnings.add(fields("code","ATT-WORKER-EVENT-TRUNCATED","summary","Large result details were omitted from the Worker protocol"));
+                diagnosticSummary.put("transportWarnings",warnings);
+                bounded.put("status",projected.get("status")); bounded.put("exitCode",projected.get("exitCode"));
+                bounded.put("result",projected);
+                bounded.put("workerMetrics",safe.get("workerMetrics"));
+                if(executionOutput!=null)try {
+                    java.nio.file.Files.createDirectories(executionOutput);
+                    try(java.io.OutputStream out=java.nio.file.Files.newOutputStream(executionOutput.resolve("worker-protocol-result.json"),
+                            java.nio.file.StandardOpenOption.CREATE_NEW,java.nio.file.StandardOpenOption.WRITE)) { mapper.writeValue(out,safe); }
+                    projected.put("detailsArtifact","worker-protocol-result.json");
+                } catch(Exception unavailable) { projected.put("detailsUnavailable",true); }
+                return bounded;
+            }
             Map<String,Object> result=fields("status",bounded.get("status"),"exitCode",bounded.get("exitCode"),"truncated",true);
             if(original.get("executionId") instanceof String)result.put("executionId",boundedText(original.get("executionId"),256));
             if(original.get("durationMs") instanceof Number)result.put("durationMs",original.get("durationMs"));

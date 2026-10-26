@@ -11,20 +11,29 @@ import java.util.Map;
 public final class LoadResult extends OperationResult {
     private final LoadRunResult detailedResult;
     private final Map<String,Object> configuration;
+    private final String reportAvailability;
 
     public LoadResult(String executionId, String status, int exitCode, long durationMs,
                          List<Diagnostic> diagnostics, Map<String,String> paths, Map<String,Object> summary) {
         super(executionId, status, exitCode, durationMs, diagnostics, paths, summary);
         this.detailedResult=null;
         this.configuration=null;
+        this.reportAvailability="OMITTED";
     }
 
     public LoadResult(String executionId, String status, int exitCode, long durationMs,
                       List<Diagnostic> diagnostics, Map<String,String> paths,
                       LoadRunResult detailedResult, Map<String,Object> configuration) {
+        this(executionId, status, exitCode, durationMs, diagnostics, paths, detailedResult, configuration, "PENDING");
+    }
+
+    LoadResult(String executionId, String status, int exitCode, long durationMs,
+               List<Diagnostic> diagnostics, Map<String,String> paths,
+               LoadRunResult detailedResult, Map<String,Object> configuration, String reportAvailability) {
         super(executionId, status, exitCode, durationMs, diagnostics, paths, null);
         this.detailedResult=detailedResult;
         this.configuration=configuration==null?null:new LinkedHashMap<String,Object>(configuration);
+        this.reportAvailability=reportAvailability;
     }
 
     /** Full report shape used by direct Engine/CLI callers for compatibility. */
@@ -50,7 +59,7 @@ public final class LoadResult extends OperationResult {
         List<Map<String,Object>> serialized=new java.util.ArrayList<Map<String,Object>>();
         for(Diagnostic diagnostic:diagnostics())serialized.add(diagnostic.toMap());
         value.put("diagnostics",serialized);
-        value.put("summary",detailedResult.toTerminalSummary(configuration));
+        value.put("summary",detailedResult.toTerminalSummary(configuration,reportAvailability));
         return LoadTerminalResult.projectOperationResult(value,status(),exitCode());
     }
 }

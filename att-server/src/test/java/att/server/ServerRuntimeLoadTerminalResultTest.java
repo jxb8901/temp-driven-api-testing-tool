@@ -107,6 +107,36 @@ class ServerRuntimeLoadTerminalResultTest {
         }
     }
 
+    @Test void storesWorkerOversizeFallbackCauseWithoutPromotingTransportTruncation() throws Exception {
+        try (ServerRuntime runtime = runtime("worker-fallback-cause")) {
+            String id = "J0000000000000300";
+            Job job = createJob(runtime, id);
+            Map<String,Object> raw = legacyResult("ERROR", 3, "HTTP_RESPONSE_TOO_LARGE", true, 12);
+            Map<String,Object> fallback = att.server.api.LoadTerminalResult.projectOperationResult(raw, "ERROR", 3);
+            Map<String,Object> summary = new LinkedHashMap<>((Map<String,Object>) fallback.get("summary"));
+            Map<String,Object> diagnostics = new LinkedHashMap<>((Map<String,Object>) summary.get("diagnostics"));
+            diagnostics.put("transportWarnings", List.of(fields("code", "ATT-WORKER-EVENT-TRUNCATED", "summary", "Worker details truncated")));
+            summary.put("diagnostics", diagnostics);
+            fallback.put("summary", summary);
+            fallback.put("diagnostics", List.of(fields("code", "HTTP_RESPONSE_TOO_LARGE", "summary", "Failed with HTTP_RESPONSE_TOO_LARGE"),
+                    fields("code", "ATT-WORKER-EVENT-TRUNCATED", "summary", "Large Worker result details were omitted")));
+            fallback.put("truncated", Boolean.TRUE);
+            sendTerminal(runtime, job, fallback, "ERROR", 3);
+
+            Map<?,?> stored = JSON.readValue((String) runtime.store.get(id).get("resultJson"), Map.class);
+            Map<?,?> storedSummary = (Map<?,?>) stored.get("summary");
+            Map<?,?> storedDiagnostics = (Map<?,?>) storedSummary.get("diagnostics");
+            assertEquals("ERROR", stored.get("status"));
+            assertEquals(3, ((Number) stored.get("exitCode")).intValue());
+            assertEquals("HTTP_RESPONSE_TOO_LARGE", ((Map<?,?>) storedDiagnostics.get("primaryError")).get("code"));
+            assertEquals("ATT-WORKER-EVENT-TRUNCATED", ((Map<?,?>) ((List<?>) storedDiagnostics.get("transportWarnings")).get(0)).get("code"));
+            Map<?,?> terminal = (Map<?,?>) job.events.after(0).stream().filter(event -> "result".equals(event.get("event"))).findFirst().orElseThrow();
+            JsonNode published = JSON.valueToTree(terminal.get("data"));
+            assertEquals("HTTP_RESPONSE_TOO_LARGE", published.path("result").path("summary").path("diagnostics").path("primaryError").path("code").asText());
+            assertEquals(3, published.path("result").path("exitCode").asInt());
+        }
+    }
+
     @Test void benchmarkShortAndSyntheticLongMultiWorkloadTransferSizes() throws Exception {
         try (ServerRuntime runtime = runtime("benchmark")) {
             Map<String, Object> shortShape = measure(runtime, "J0000000000000301", legacyResult("PASS", 0, null, false, 1), 1_000L);
@@ -125,13 +155,137 @@ class ServerRuntimeLoadTerminalResultTest {
             assertEquals("PENDING", longShape.get("archiveState"));
             assertTrue(((Number) longShape.get("omittedWorkloads")).intValue() > 0);
             assertEquals(4096, longShape.get("syntheticBucketCount"));
+            assertTrue(shortShape.containsKey("projectionHeapDeltaBytesBestEffort"));
+            assertTrue(longShape.containsKey("projectionHeapUsedBeforeBytes"));
         }
+    }
+
+    @Test void realLongMultiWorkloadReportSplitsSeriesAndPublishesWithinArchiveLimits() throws Exception {
+        Path output = Files.createDirectories(temp.resolve("long-report-output"));
+        att.load.LoadRunResult result = syntheticLongReportResult();
+        Path report = new att.load.LoadReportWriter().write(output, result);
+        Path runDirectory = output.resolve("load/synthetic-long");
+        for (String name : List.of("load-summary.json", "load-summary.yaml", "report/index.html"))
+            assertTrue(Files.size(runDirectory.resolve(name)) <= ArtifactArchive.MAX_ENTRY_BYTES, name + " exceeded the archive file cap");
+        Map<?,?> summary = JSON.readValue(runDirectory.resolve("load-summary.json").toFile(), Map.class);
+        assertEquals("att-load-summary/v1.3", summary.get("schemaVersion"));
+        assertEquals(3_600L, ((Number) ((Map<?,?>) summary.get("metrics")).get("scheduled")).longValue());
+        assertEquals(3_600L, ((Number) ((Map<?,?>) summary.get("metrics")).get("completed")).longValue());
+        assertEquals(12, ((Map<?,?>) summary.get("workloads")).size());
+        assertEquals("details/v1/manifest.json", summary.get("detailManifestPath"));
+        Map<?,?> aggregateMetrics = (Map<?,?>) summary.get("metrics");
+        assertTrue(((Map<?,?>) aggregateMetrics.get("buckets")).size() <= 32, "aggregate series has a bounded inline preview");
+        assertTrue(aggregateMetrics.containsKey("detailSeries"), "aggregate series has versioned sidecar references");
+        att.validation.JsonSchemaVerifier.verifyJson(att.validation.SchemaFiles.resolve(temp,
+                "att-load-detail-reference-v1.schema.json"), JSON.writeValueAsString(aggregateMetrics.get("detailSeries")));
+        Map<?,?> summaryMetrics = (Map<?,?>) ((Map<?,?>) summary.get("workloads")).get("workload-00");
+        assertTrue(((Map<?,?>) summaryMetrics.get("metrics")).get("buckets") instanceof Map);
+        assertTrue(((Map<?,?>) summaryMetrics.get("metrics")).containsKey("detailSeries"));
+        assertTrue(Files.size(report) > 0L);
+
+        Path archive = ArtifactArchive.build(output, temp.resolve("synthetic-long-load.zip"), Files::readAllBytes, 0L);
+        long includedBytes = 0L; int includedEntries = 0; long detailBytes = 0L; int detailFiles = 0; long maxEntryBytes = 0L;
+        try (java.util.zip.ZipFile zip = new java.util.zip.ZipFile(archive.toFile())) {
+            java.util.Enumeration<? extends java.util.zip.ZipEntry> entries = zip.entries();
+            while (entries.hasMoreElements()) {
+                java.util.zip.ZipEntry entry = entries.nextElement();
+                if (ArtifactArchive.MANIFEST.equals(entry.getName())) continue;
+                includedEntries++; includedBytes += entry.getSize();
+                maxEntryBytes = Math.max(maxEntryBytes, entry.getSize());
+                if (entry.getName().startsWith("load/synthetic-long/details/v1/")) {
+                    detailFiles++; detailBytes += entry.getSize();
+                }
+                assertTrue(entry.getSize() <= ArtifactArchive.MAX_ENTRY_BYTES, entry.getName() + " exceeded per-file limit");
+            }
+            assertTrue(includedEntries <= ArtifactArchive.MAX_ENTRIES);
+            assertTrue(includedBytes <= ArtifactArchive.MAX_TOTAL_BYTES);
+            long reportOutputBytes = detailManifestBytes(runDirectory.resolve("details/v1/manifest.json"))
+                    + Files.size(runDirectory.resolve("load-summary.json")) + Files.size(runDirectory.resolve("load-summary.yaml")) + Files.size(report);
+            assertTrue(reportOutputBytes <= 120L * 1024 * 1024);
+            JsonNode archiveManifest = JSON.readTree(zip.getInputStream(zip.getEntry(ArtifactArchive.MANIFEST)));
+            assertTrue(archiveManifest.path("complete").asBoolean(), archiveManifest.toString());
+            String reportManifestPath = "load/synthetic-long/details/v1/manifest.json";
+            JsonNode detailManifest = JSON.readTree(zip.getInputStream(zip.getEntry(reportManifestPath)));
+            assertEquals("att-load-detail-manifest/v1", detailManifest.path("schemaVersion").asText());
+            att.validation.JsonSchemaVerifier.verifyJson(att.validation.SchemaFiles.resolve(temp,
+                    "att-load-detail-manifest-v1.schema.json"), detailManifest.toString());
+            assertTrue(detailManifest.path("complete").asBoolean());
+            assertEquals(12, detailManifest.path("workloads").size());
+            assertTrue(detailManifest.path("detailFileCount").asInt() < 9_000);
+            assertTrue(detailManifest.path("detailBytes").asLong() < 100L * 1024 * 1024);
+            assertEquals(detailManifest.path("detailFileCount").asInt(), detailFiles,
+                    "every file described by the detail manifest is present in the archive");
+            assertEquals(detailManifest.path("detailBytes").asLong(), detailBytes,
+                    "manifest byte accounting matches every archived detail file");
+            for (JsonNode series : detailManifest.path("series")) {
+                int itemCount = 0;
+                int part = 0;
+                JsonNode files = series.path("files");
+                assertTrue(files.isArray() && files.size() > 0, series.toString());
+                for (JsonNode chunkPath : files) {
+                    JsonNode chunk = JSON.readTree(zip.getInputStream(zip.getEntry("load/synthetic-long/" + chunkPath.asText())));
+                    assertEquals("att-load-detail-series/v1", chunk.path("schemaVersion").asText());
+                    att.validation.JsonSchemaVerifier.verifyJson(att.validation.SchemaFiles.resolve(temp,
+                            "att-load-detail-series-v1.schema.json"), chunk.toString());
+                    assertEquals(++part, chunk.path("part").asInt());
+                    assertEquals(files.size(), chunk.path("parts").asInt());
+                    itemCount += chunk.path("items").size();
+                }
+                assertEquals(series.path("count").asInt(), itemCount, "no metric-series items were silently omitted: " + series.path("target"));
+            }
+            JsonNode aggregateBucketSeries = null;
+            for (JsonNode series : detailManifest.path("aggregate").path("series"))
+                if ("metrics/buckets".equals(series.path("target").asText())) aggregateBucketSeries = series;
+            assertNotNull(aggregateBucketSeries, "aggregate rolling buckets must be fully represented in sidecars");
+            int aggregateBucketCount = 0;
+            for (JsonNode chunkPath : aggregateBucketSeries.path("files")) {
+                JsonNode chunk = JSON.readTree(zip.getInputStream(zip.getEntry("load/synthetic-long/" + chunkPath.asText())));
+                aggregateBucketCount += chunk.path("items").size();
+            }
+            assertEquals(3_600, aggregateBucketCount);
+            for (JsonNode workload : detailManifest.path("workloads")) {
+                String workloadPath = workload.path("summaryPath").asText();
+                java.util.zip.ZipEntry workloadEntry = zip.getEntry("load/synthetic-long/" + workloadPath);
+                assertNotNull(workloadEntry, workloadPath);
+                JsonNode workloadDetail = JSON.readTree(zip.getInputStream(workloadEntry));
+                assertEquals("att-load-workload-detail/v1", workloadDetail.path("schemaVersion").asText());
+                att.validation.JsonSchemaVerifier.verifyJson(att.validation.SchemaFiles.resolve(temp,
+                        "att-load-workload-detail-v1.schema.json"), workloadDetail.toString());
+                JsonNode bucketSeries = null;
+                for (JsonNode series : workload.path("series")) if ("metrics/buckets".equals(series.path("target").asText())) bucketSeries = series;
+                assertNotNull(bucketSeries, workload.toString());
+                int bucketCount = 0;
+                for (JsonNode chunkPath : bucketSeries.path("files")) {
+                    JsonNode chunk = JSON.readTree(zip.getInputStream(zip.getEntry("load/synthetic-long/" + chunkPath.asText())));
+                    assertEquals("att-load-detail-series/v1", chunk.path("schemaVersion").asText());
+                    bucketCount += chunk.path("items").size();
+                }
+                assertEquals(3_600, bucketCount, workload.toString());
+            }
+            System.out.println("LOAD_REPORT_ARCHIVE_BENCHMARK " + JSON.writeValueAsString(fields(
+                    "scenario", "synthetic 60-minute, 12-workload", "summaryJsonBytes", Files.size(runDirectory.resolve("load-summary.json")),
+                    "summaryYamlBytes", Files.size(runDirectory.resolve("load-summary.yaml")), "reportHtmlBytes", Files.size(report),
+                    "detailBytes", detailManifest.path("detailBytes").asLong(), "detailFiles", detailManifest.path("detailFileCount").asInt(),
+                    "archiveEntries", includedEntries, "archiveUncompressedBytes", includedBytes,
+                    "archiveLargestEntryBytes", maxEntryBytes, "reportOutputBytes", reportOutputBytes,
+                    "archiveEntryLimitBytes", ArtifactArchive.MAX_ENTRY_BYTES, "archiveTotalLimitBytes", ArtifactArchive.MAX_TOTAL_BYTES,
+                    "archiveEntryLimit", ArtifactArchive.MAX_ENTRIES)));
+        }
+    }
+
+    private long detailManifestBytes(Path manifestPath) throws Exception {
+        JsonNode manifest = JSON.readTree(manifestPath.toFile());
+        return manifest.path("detailBytes").asLong();
     }
 
     private Map<String, Object> measure(ServerRuntime runtime, String id, Map<String, Object> raw, long durationMs) throws Exception {
         Job job = createJob(runtime, id);
+        Runtime jvm = Runtime.getRuntime();
+        long heapUsedBefore = jvm.totalMemory() - jvm.freeMemory();
         Map<String, Object> compact = att.server.api.LoadTerminalResult.projectOperationResult(raw,
                 String.valueOf(raw.get("status")), ((Number) raw.get("exitCode")).intValue());
+        long heapUsedAfter = jvm.totalMemory() - jvm.freeMemory();
+        long heapDelta = heapUsedAfter - heapUsedBefore;
         long workerBytes = sendTerminal(runtime, job, compact, String.valueOf(raw.get("status")),
                 ((Number) raw.get("exitCode")).intValue());
         Map<String, Object> stored = runtime.store.get(id);
@@ -161,9 +315,57 @@ class ServerRuntimeLoadTerminalResultTest {
                 "journalDataLimitBytes", sizes.get("journalDataLimitBytes"), "sseEventLimitBytes", sizes.get("sseEventLimitBytes"),
                 "postEnvelopeTargetBytes", 48 * 1024, "jobRecordTransferBytes", jobRecordBytes,
                 "jobResultsTransferBytes", responseBytes, "jobDetailsTransferBytes", jobRecordBytes + responseBytes,
+                "projectionHeapUsedBeforeBytes", heapUsedBefore, "projectionHeapUsedAfterBytes", heapUsedAfter,
+                "projectionHeapDeltaBytesBestEffort", heapDelta,
                 "archiveState", ((Map<?, ?>) summary.get("archive")).get("status"),
                 "omittedWorkloads", omitted.get("workloads"), "omittedBuckets", omitted.get("timeSeriesBuckets"));
         return result;
+    }
+
+    private att.load.LoadRunResult syntheticLongReportResult() throws Exception {
+        StringBuilder descriptor = new StringBuilder("schemaVersion: att-load/v1.9\nworkloads:\n");
+        for (int index = 0; index < 12; index++) descriptor.append("  - id: workload-")
+                .append(String.format(java.util.Locale.ROOT, "%02d", index))
+                .append("\n    target: {type: tool, id: synthetic}\n    load: {users: 1, duration: 1h}\n");
+        Path scenarioFile = temp.resolve("synthetic-long.yaml");
+        Files.writeString(scenarioFile, descriptor.toString(), StandardCharsets.UTF_8);
+        att.load.LoadScenario scenario = new att.load.LoadScenarioLoader(temp).load(scenarioFile);
+        java.time.Instant started = java.time.Instant.parse("2026-10-26T00:00:00Z");
+        long startMs = started.toEpochMilli(); long endMs = startMs + 3_600_000L;
+        att.load.LoadMetrics aggregate = att.load.LoadMetrics.forScenario(scenario, startMs, 3_600_000L);
+        for (int index = 0; index < 3_600; index++) {
+            att.load.LoadWorkload workload = scenario.workloads().get(index % scenario.workloads().size());
+            aggregate.onEvent(syntheticEvent("synthetic-long", scenario.model().wireName(), index, startMs, workload));
+        }
+        aggregate.finish(endMs);
+
+        Map<String, att.load.LoadRunResult> workloads = new LinkedHashMap<>();
+        for (int workloadIndex = 0; workloadIndex < scenario.workloads().size(); workloadIndex++) {
+            att.load.LoadWorkload workload = scenario.workloads().get(workloadIndex);
+            att.load.LoadScenario childScenario = scenario.forWorkload(workload);
+            att.load.LoadMetrics childMetrics = att.load.LoadMetrics.forScenario(childScenario, startMs, 3_600_000L);
+            for (int index = 0; index < 3_600; index++)
+                childMetrics.onEvent(syntheticEvent("synthetic-child-" + workload.id(), childScenario.model().wireName(), index, startMs, workload));
+            childMetrics.finish(endMs);
+            att.load.LoadRunResult child = new att.load.LoadRunResult("synthetic-child-" + workload.id(), childScenario,
+                    started, java.time.Instant.ofEpochMilli(endMs), childMetrics.snapshot());
+            workloads.put(workload.id(), child);
+        }
+
+        java.lang.reflect.Constructor<att.load.LoadRunResult> constructor = att.load.LoadRunResult.class.getDeclaredConstructor(
+                String.class, att.load.LoadScenario.class, java.time.Instant.class, java.time.Instant.class,
+                att.load.LoadMetricsSnapshot.class, att.load.LoadThresholdSummary.class, Map.class, Map.class, Map.class);
+        constructor.setAccessible(true);
+        return constructor.newInstance("synthetic-long", scenario, started, java.time.Instant.ofEpochMilli(endMs),
+                aggregate.snapshot(), att.load.LoadThresholdSummary.empty(), Map.of(), Map.of(), workloads);
+    }
+
+    private att.load.LoadEvent syntheticEvent(String runId, String model, int index, long startMs,
+                                               att.load.LoadWorkload workload) {
+        long scheduled = startMs + index * 1000L;
+        return att.load.LoadEvent.completed(runId, model, "STEADY", "iteration-" + index, null, index + 1L,
+                scheduled, scheduled + 5L, scheduled + 25L, att.core.ResultStatus.PASS)
+                .withWorkloadIdentity(workload.id(), workload.targetType(), workload.targetId());
     }
 
     private long sendTerminal(ServerRuntime runtime, Job job, Map<String, Object> result, String status, int exitCode) throws Exception {

@@ -45,7 +45,7 @@ class MultiWorkloadReportTest {
         Path summary = temp.resolve("out/load/multi-report/load-summary.json");
         String jsonText = new String(Files.readAllBytes(summary), StandardCharsets.UTF_8);
         assertDoesNotThrow(() -> att.validation.JsonSchemaVerifier.verifyJson(
-                att.validation.SchemaFiles.resolve(root, "att-load-summary-v1.2.schema.json"), jsonText));
+                att.validation.SchemaFiles.resolve(root, "att-load-summary-v1.3.schema.json"), jsonText));
         @SuppressWarnings("unchecked") Map<String, Object> json = att.validation.JsonSupport.mapper().readValue(jsonText, Map.class);
         assertTrue(json.containsKey("workloads"));
         @SuppressWarnings("unchecked") Map<String, Object> workloads = (Map<String, Object>) json.get("workloads");
@@ -103,7 +103,7 @@ class MultiWorkloadReportTest {
         Path report = new LoadReportWriter().write(temp.resolve("mixed-out"), result);
         Path summary = temp.resolve("mixed-out/load/mixed-report/load-summary.json");
         String jsonText = new String(Files.readAllBytes(summary), StandardCharsets.UTF_8);
-        att.validation.JsonSchemaVerifier.verifyJson(att.validation.SchemaFiles.resolve(root, "att-load-summary-v1.2.schema.json"), jsonText);
+        att.validation.JsonSchemaVerifier.verifyJson(att.validation.SchemaFiles.resolve(root, "att-load-summary-v1.3.schema.json"), jsonText);
         @SuppressWarnings("unchecked") Map<String, Object> json = att.validation.JsonSupport.mapper().readValue(jsonText, Map.class);
         @SuppressWarnings("unchecked") Map<String, Object> workloads = (Map<String, Object>) json.get("workloads");
         @SuppressWarnings("unchecked") Map<String, Object> checkout = (Map<String, Object>) workloads.get("checkout");

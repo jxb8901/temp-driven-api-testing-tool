@@ -174,7 +174,7 @@ public final class LoadTerminalResult {
             archive.put("reportAvailability", "PENDING");
             archive.put("status", "PENDING");
         } else {
-            archive.put("status", "PENDING");
+            archive.put("status", "OMITTED");
             archive.put("reportAvailability", "OMITTED");
         }
         source.put("archive", archive);
@@ -277,10 +277,10 @@ public final class LoadTerminalResult {
         Map<?, ?> prep = map(map(resources.get("preparation")));
         Map<?, ?> primary = map(source.get("primaryError"));
         if (primary.isEmpty()) primary = map(metrics.get("primaryRuntimeError"));
-        if (primary.isEmpty() && "ERROR".equals(status)) primary = firstRuntimeFailure(source.get("failureDiagnostics"), metrics.get("failureDiagnostics"));
-        if (primary.isEmpty() && "ERROR".equals(status) && !prep.isEmpty()
+        if (primary.isEmpty() && isFailureOutcome(status)) primary = firstRuntimeFailure(source.get("failureDiagnostics"), metrics.get("failureDiagnostics"));
+        if (primary.isEmpty() && isFailureOutcome(status) && !prep.isEmpty()
                 && "PREPARATION_FAILED".equals(prep.get("status"))) primary = preparationError(prep);
-        if (primary.isEmpty() && "ERROR".equals(status)) primary = firstRealDiagnostic(source.get("outer"));
+        if (primary.isEmpty() && isFailureOutcome(status)) primary = firstRealDiagnostic(source.get("outer"));
         if (primary.isEmpty() && "ERROR".equals(status)) {
             Map<String, Object> fallback = new LinkedHashMap<String, Object>();
             fallback.put("code", "LOAD_ERROR_DIAGNOSTIC_UNAVAILABLE");
@@ -312,6 +312,10 @@ public final class LoadTerminalResult {
         return out;
     }
 
+    private static boolean isFailureOutcome(String status) {
+        return "ERROR".equals(status) || "INVALID".equals(status);
+    }
+
     private static Map<String, Object> firstRuntimeFailure(Object first, Object second) {
         for (Object value : new Object[] {first, second}) if (value instanceof Iterable) {
             for (Object item : (Iterable<?>) value) if (item instanceof Map) {
@@ -330,13 +334,14 @@ public final class LoadTerminalResult {
     private static Map<String, Object> preparationError(Map<?, ?> preparation) {
         String code = text(preparation.get("failureCode"), 128);
         if (code.isEmpty()) code = "LOAD_RESOURCE_PREPARATION_FAILED";
-        if ("PREPARATION_LIMIT_EXCEEDED".equals(code) || code.contains("LOAD_RESOURCE_PREPARATION_LIMIT")) code = "LOAD_RESOURCE_PREPARATION_LIMIT";
-        else if ("PREPARATION_TIMEOUT".equals(code) || code.contains("LOAD_PREPARATION_TIMEOUT")) code = "LOAD_PREPARATION_TIMEOUT";
+        if ("PREPARATION_LIMIT_EXCEEDED".equals(code) || "LOAD_RESOURCE_PREPARATION_LIMIT".equals(code)) code = "LOAD_RESOURCE_PREPARATION_LIMIT";
+        else if ("PREPARATION_TIMEOUT".equals(code) || "LOAD_PREPARATION_TIMEOUT".equals(code)) code = "LOAD_PREPARATION_TIMEOUT";
         else if (!code.startsWith("LOAD_") && !code.endsWith("_ERROR")) code = "LOAD_RESOURCE_PREPARATION_FAILED";
         Map<String, Object> result = new LinkedHashMap<String, Object>();
         result.put("code", code);
         result.put("summary", "LOAD resource preparation failed (" + code + ").");
-        result.put("failedCount", number(preparation.get("failed"), 1));
+        if (preparation.get("failed") instanceof Number && number(preparation.get("failed"), 0).longValue() > 0L)
+            result.put("failedCount", number(preparation.get("failed"), 0));
         return result;
     }
 
@@ -402,7 +407,7 @@ public final class LoadTerminalResult {
         if (primary.isEmpty() && "ERROR".equals(status)) primary = map(source.get("primaryRuntimeError"));
         Map<String, Object> safePrimary = diagnostic(primary);
         if (!safePrimary.isEmpty()) result.add(safePrimary);
-        else if ("ERROR".equals(status)) {
+        else if (isFailureOutcome(status)) {
             Map<String, Object> safe = firstRealDiagnostic(source.get("outer"));
             if (!safe.isEmpty()) result.add(safe);
         }
