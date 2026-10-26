@@ -231,6 +231,9 @@ jobs:
           "$RUNNER_TEMP/att-migration-venv/bin/pip" install -r tools/requirements-migration.txt
           "$RUNNER_TEMP/att-migration-venv/bin/python" tools/test_package_config_migration.py
 
+      - name: Verify loghelper argument forms
+        run: bash tools/test_loghelper_arguments.sh
+
       - name: Verify documentation release gate
         run: python3 tools/verify_documentation.py
 

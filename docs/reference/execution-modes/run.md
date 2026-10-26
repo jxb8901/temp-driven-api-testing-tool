@@ -1,6 +1,8 @@
 # Run mode
 
-Run executes selected authored Testcases from a workbook. Each selected Testcase produces one Case execution with a status and evidence record. Use *Testcase* for the normalized workbook row and *Case execution* for that runtime result; the Case ID is the shared identifier.
+<!-- att-doc-status: current release=4.2.4 -->
+
+The ATT 4.2.4 Local CLI run command is a legacy Case adapter: it executes selected authored Testcases from a workbook. The broader functional model and direct resource targets are defined in [Unified RUN](unified-run.md).
 
 ```sh
 ./att.sh run --all

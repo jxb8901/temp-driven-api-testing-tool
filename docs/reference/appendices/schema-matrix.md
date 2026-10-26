@@ -24,7 +24,8 @@ Active schemas (the matching ATT Engine JAR's embedded registry, built from `sch
 | Load bindings | `att-load-bindings/v1` | `schemas/att-load-bindings-v1.schema.json` |
 | Load summary | att-load-summary/v1.2 |
 | Run manifest | att-run/v2.1 |
-| Validation JSON | att-validation/v2.1 |
+| Legacy package validation JSON | `att-validation/v2.1` |
+| Minimal CLI hierarchical validation report | `att-validation/v1` |
 | CI summary | att-ci-summary/v2.1 |
 | JUnit XML | att-junit/v2.1 |
 

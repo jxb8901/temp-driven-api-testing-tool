@@ -151,6 +151,7 @@ public final class ApiServlet extends HttpServlet {
         if(path.startsWith("/auth/")){authPost(req,res,path,requestId);return;}
         if(authorizationPrincipal==null){error(res,401,"ATT-SERVER-AUTHENTICATION-REQUIRED","An authenticated Servlet Principal is required",requestId);return;}
         if(loadSchedulePath(path)){schedulePost(req,res,path,requestId,authorizationPrincipal);return;}
+        if("/validation".equals(path)){validationPost(req,res,requestId,authorizationPrincipal);return;}
         if(!requireOperator(req,res,requestId))return;
         if(path.matches("/packages/[^/]+/package-configuration/(?:drafts(?:/[^/]+/(?:validate|review|publish|discard))?|rollback)")) {
             manifestPost(req,res,path,requestId,authorizationPrincipal);return;
@@ -234,6 +235,27 @@ public final class ApiServlet extends HttpServlet {
           catch(PackageConfigurationPolicy.EnvironmentDeniedException e){error(res,403,"ATT-PACKAGE-ENVIRONMENT-DENIED",safeDetail(e),requestId);}
           catch(IllegalArgumentException e){error(res,400,"ATT-SERVER-INVALID-REQUEST",safeDetail(e),requestId);}
           catch(Exception e){error(res,500,"ATT-SERVER-REQUEST-FAILED","The request could not be completed",requestId);getServletContext().log("ATT Server submission failed id="+requestId,e);}
+    }
+
+    private void validationPost(HttpServletRequest req,HttpServletResponse res,String requestId,String actor)throws IOException {
+        JsonNode input=null;
+        try {
+            if(!isJson(req.getContentType())){error(res,415,"ATT-SERVER-UNSUPPORTED-MEDIA-TYPE","Content-Type must be application/json",requestId);return;}
+            if(!checkOrigin(req,res,requestId,false))return;
+            byte[] bytes=req.getInputStream().readNBytes(runtime.config.maxRequestBytes+1);
+            if(bytes.length>runtime.config.maxRequestBytes){error(res,413,"ATT-SERVER-REQUEST-TOO-LARGE","Validation request exceeds the configured size limit",requestId);return;}
+            try{input=ServerRuntime.JSON.readTree(bytes);}catch(JsonProcessingException malformed){error(res,400,"ATT-SERVER-INVALID-REQUEST","Request body is not valid JSON",requestId);return;}
+            if(input==null||!input.isObject())throw new IllegalArgumentException("A JSON validation plan is required");
+            if(input.path("all").asBoolean(false)) {if(!requireSystemAdmin(req,res,requestId))return;}
+            else if(!requireOperator(req,res,requestId))return;
+            Map<String,Object> report=runtime.validateVNext(input,actor);report.put("requestId",requestId);json(res,200,report);
+        } catch(ServerRuntime.NotFoundException missing){error(res,404,"ATT-SERVER-NOT-FOUND","Registered Package or validation target was not found",requestId);}
+          catch(PackageConfigurationPolicy.EnvironmentDeniedException denied){error(res,403,"ATT-PACKAGE-ENVIRONMENT-DENIED",safeDetail(denied),requestId);}
+          catch(ServerRuntime.InspectionCapacityException full){error(res,503,"ATT-SERVER-INSPECTION-CAPACITY","Validation Worker capacity is full; retry shortly",requestId);}
+          catch(ServerRuntime.InspectionTimeoutException timeout){error(res,504,"ATT-SERVER-INSPECTION-TIMEOUT","Read-only validation exceeded its time limit",requestId);}
+          catch(ServerRuntime.InspectionResponseTooLargeException oversized){error(res,413,"ATT-SERVER-INSPECTION-RESPONSE-TOO-LARGE","Validation report exceeded the configured response limit",requestId);}
+          catch(IllegalArgumentException invalid){error(res,400,"ATT-SERVER-INVALID-REQUEST",safeDetail(invalid),requestId);}
+          catch(Exception failure){error(res,500,"ATT-SERVER-VALIDATION-FAILED","Read-only validation could not be completed",requestId);getServletContext().log("ATT Server validation failed id="+requestId,failure);}
     }
     @Override protected void doDelete(HttpServletRequest req,HttpServletResponse res) throws IOException {
         String requestId=requestId(req,res),path=path(req),principal=principal(req);

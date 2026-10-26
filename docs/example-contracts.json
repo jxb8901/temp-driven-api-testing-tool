@@ -1,0 +1,33 @@
+{
+  "schemaVersion": "att-doc-examples/v1",
+  "examples": [
+    {
+      "id": "unified-run-draft",
+      "source": "docs/reference/execution-modes/unified-run.md",
+      "schema": "att-execution/v1",
+      "format": "json",
+      "status": "current"
+    },
+    {
+      "id": "run-schedule",
+      "source": "docs/reference/execution-modes/unified-run.md",
+      "schema": "att-schedule/v2",
+      "format": "json",
+      "status": "current"
+    },
+    {
+      "id": "multi-workload-load-template",
+      "source": "docs/reference/execution-modes/load.md",
+      "schema": "att-load-template/v1",
+      "format": "yaml",
+      "status": "current"
+    },
+    {
+      "id": "multi-workload-load-bindings",
+      "source": "docs/reference/execution-modes/load.md",
+      "schema": "att-load-bindings/v1",
+      "format": "yaml",
+      "status": "current"
+    }
+  ]
+}

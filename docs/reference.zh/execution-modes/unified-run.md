@@ -1,6 +1,10 @@
 # 統一 RUN 與排程
 
+<!-- att-doc-status: current release=4.2.4 -->
+
 ATT 4.2.4 將功能性單次執行統一為 **RUN**，支援 Case、Template、Flow、Tool，以及所選 Case 批次。**Debug** 是 RUN 的診斷選項。**LOAD** 保留效能引擎、負載控制和專用報告。
+
+已發行的 Local CLI 保留其 interface-specific 相容邊界：run verb 選取 workbook Case，standalone debug 執行一個 Template、Flow 或 Tool。ATT Remote 保留舊版 Server command。此共用 RUN model 不代表 proposed vNext CLI grammar 已發行；請參閱[規劃中的 vNext page](../../interfaces/cli/vnext-proposed.zh.md)。
 
 ## 驗證及執行 RUN
 

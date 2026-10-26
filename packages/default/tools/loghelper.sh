@@ -3,7 +3,8 @@
 # 提取特定交易應用日誌的工具：在給定的多個日誌文件中搜索包括全部 keywords 的交易日誌，
 # 每筆交易日誌保存為獨立文件，最多保存給定個數。具體要求如下：
 #    1. 配置：交易日誌目錄、交易開始 pattern、交易結束 pattern、其它模式匹配所用的正則表達式
-#    2. Usage: $0 --output-prefix <path> --log-file <path-or-glob> [<path-or-glob> ...] --keyword <text> [<text> ...] [--max-tid-files <n>] [--min-tid-files <n>] [--recent-log-count <n>] [--ssh]，log_file 是無序的；不帶參數、--help 或 --usage 顯示用法
+#    2. Usage: $0 --output-prefix <path> --log-file <path-or-glob>... --keyword <text>... [options]；短參數包括 -o、-l、-k
+#       位置參數用法：$0 <log-file> <keyword1,keyword2,...>，輸出目錄默認為 /tmp
 #    3. 應用日誌由 log4j 生成，日誌格式為：[DEBUG] [2026/07/15 13:25:32.589] [JavaClass.method] [TID123456] ...
 #       Messages…\n multiple line \n …，每條日誌的第 4 個欄位 TID 為一筆交易的唯一 ID
 #    4. 一筆交易的第一／最後一條日誌可能匹配，也可能不匹配可配置的交易開始／結束 pattern；
@@ -12,7 +13,7 @@
 #    6. 日誌會自動 rotate，輸入可同時包含當前日誌及帶時間後綴的已 rotate 日誌
 #    7. 輸入的全部 keywords 必須出現在同一 TID 的日誌中；可出現在不同日誌條目或非 Messages 欄位
 #    8. 為控制內存使用兩遍掃描：第一遍倒序找到最新的符合 TID，第二遍正序提取，並使用開始／結束 pattern 限定範圍
-#    9. 結果寫入 <output_prefix>-<TID>-<HOST>.log，每個 TID 一個獨立文件；output_prefix 未指定目錄時使用 /tmp
+#    9. 結果寫入 <output_prefix>-<TID>-<HOST>.log；未指定 prefix 時以日誌文件名為 prefix，輸出目錄默認 /tmp
 #   10. 最多返回 --max-tid-files 個結果文件，默認 10；--min-tid-files 默認 1；相同 TID 在不同 HOST 的文件分別計數
 #   11. 默認只搜索按文件最近修改時間排序後最近 2 個日誌；--recent-log-count 0 表示搜索全部日誌
 #   12. 指定 --ssh 且已收集的結果文件少於 --min-tid-files 時，按配置順序繼續搜索遠程服務器，並將新結果複製到本地相同路徑
@@ -102,28 +103,42 @@ function extract_tid(line,    header_part, tags, tag_count, tid) {
 usage() {
     cat >&2 <<EOF
 Usage:
-  $0 --output-prefix <path> --log-file <path-or-glob> [<path-or-glob> ...] \\
-     --keyword <text> [<text> ...] [options]
+  $0 [-o <prefix>] -l <path-or-glob> [<path-or-glob> ...] -k <keyword1,keyword2,...> [options]
+  $0 <log-file> <keyword1,keyword2,...> [--output-dir <dir>]
   $0 --help
-  $0 --usage
 
-Required arguments:
-  --output-prefix <path>       Prefix for each extracted transaction log.
-  --log-file <path-or-glob>   One or more log paths or pathname patterns.
-  --keyword <text>            One or more literal keywords; all must match.
+Arguments:
+  -l, --log-file <path-or-glob>    One or more log paths or pathname patterns.
+  -k, --keywords <list>            Comma-separated literal keywords; all must match.
+      --keyword <text> [<text>...] One or more literal keywords; all must match.
+
+Output options:
+  -o, --output-prefix <path>     Prefix for each extracted transaction log.
+  -d, --output-dir <path>        Output directory when no prefix is supplied (default: /tmp).
 
 Options:
-  --max-tid-files <n>         Maximum result files (default: 10).
-  --min-tid-files <n>         Minimum result files (default: 1).
-  --recent-log-count <n>      Search the newest n logs by mtime (default: 2;
-                              0 searches all logs).
-  --ssh                       Continue on configured remote servers when the
-                              local result count is below --min-tid-files.
-  --help, --usage             Show this help and exit successfully.
+  -M, --max-tid-files <n>        Maximum result files (default: 10).
+  -m, --min-tid-files <n>        Minimum result files (default: 1).
+  -r, --recent-log-count <n>     Search newest n logs by mtime (default: 2; 0 searches all).
+  -s, --ssh                      Continue on configured remote servers below --min-tid-files.
+  -h, --help, --usage            Show this help and exit successfully.
 
 With no arguments, this help is displayed. Help is written to stderr so stdout
 remains reserved for the ATT YAML result contract.
 EOF
+}
+
+append_csv_keywords() {
+    local keyword
+    local -a keyword_parts
+
+    IFS=, read -r -a keyword_parts <<< "$1"
+    for keyword in "${keyword_parts[@]}"; do
+        keyword=${keyword#"${keyword%%[![:space:]]*}"}
+        keyword=${keyword%"${keyword##*[![:space:]]}"}
+        [ -n "$keyword" ] || fail "keywords must not be empty."
+        KEYWORDS+=("$keyword")
+    done
 }
 
 yaml_escape() {
@@ -633,12 +648,14 @@ search_remote_servers() {
 MAX_FILES=10
 MIN_FILES=1
 OUTPUT_PREFIX=''
+OUTPUT_DIR="$DEFAULT_OUTPUT_DIR"
 RECENT_LOG_COUNT=2
 LOG_FILES=()
 KEYWORDS=()
 SEEN_MAX_FILES=false
 SEEN_MIN_FILES=false
 SEEN_OUTPUT_PREFIX=false
+SEEN_OUTPUT_DIR=false
 SEEN_RECENT_LOG_COUNT=false
 SEEN_LOG_FILES=false
 SEEN_KEYWORDS=false
@@ -653,7 +670,7 @@ if [ "$#" -eq 0 ]; then
 fi
 for option in "$@"; do
     case "$option" in
-        --help|--usage)
+        --help|--usage|-h)
             usage
             exit 0
             ;;
@@ -661,10 +678,22 @@ for option in "$@"; do
 done
 unset option
 
+if [ "$#" -gt 0 ] && [[ "$1" != -* ]]; then
+    [ "$#" -ge 2 ] || {
+        usage
+        fail "positional form requires a log file followed by a comma-separated keyword list."
+    }
+    LOG_FILES+=("$1")
+    SEEN_LOG_FILES=true
+    SEEN_KEYWORDS=true
+    append_csv_keywords "$2"
+    shift 2
+fi
+
 while [ "$#" -gt 0 ]; do
     option=$1
     case "$option" in
-        --max-tid-files)
+        -M|--max-tid-files)
             [ "$#" -ge 2 ] || {
                 usage
                 fail "missing value for --max-tid-files."
@@ -674,7 +703,7 @@ while [ "$#" -gt 0 ]; do
             SEEN_MAX_FILES=true
             shift 2
             ;;
-        --min-tid-files)
+        -m|--min-tid-files)
             [ "$#" -ge 2 ] || {
                 usage
                 fail "missing value for --min-tid-files."
@@ -684,7 +713,7 @@ while [ "$#" -gt 0 ]; do
             SEEN_MIN_FILES=true
             shift 2
             ;;
-        --output-prefix)
+        -o|--output-prefix)
             [ "$#" -ge 2 ] || {
                 usage
                 fail "missing value for --output-prefix."
@@ -694,7 +723,17 @@ while [ "$#" -gt 0 ]; do
             SEEN_OUTPUT_PREFIX=true
             shift 2
             ;;
-        --recent-log-count)
+        -d|--output-dir)
+            [ "$#" -ge 2 ] || {
+                usage
+                fail "missing value for --output-dir."
+            }
+            [ "$SEEN_OUTPUT_DIR" = false ] || fail "--output-dir must be specified only once."
+            OUTPUT_DIR=$2
+            SEEN_OUTPUT_DIR=true
+            shift 2
+            ;;
+        -r|--recent-log-count)
             [ "$#" -ge 2 ] || {
                 usage
                 fail "missing value for --recent-log-count."
@@ -704,19 +743,19 @@ while [ "$#" -gt 0 ]; do
             SEEN_RECENT_LOG_COUNT=true
             shift 2
             ;;
-        --ssh)
+        -s|--ssh)
             [ "$SEEN_SSH" = false ] || fail "--ssh must be specified only once."
             SSH_ENABLED=true
             SEEN_SSH=true
             shift
             ;;
-        --log-file)
+        -l|--log-file)
             [ "$SEEN_LOG_FILES" = false ] || fail "--log-file must be specified only once."
             SEEN_LOG_FILES=true
             shift
             while [ "$#" -gt 0 ]; do
                 case "$1" in
-                    --max-tid-files|--min-tid-files|--output-prefix|--recent-log-count|--log-file|--keyword|--ssh) break ;;
+                    -M|--max-tid-files|-m|--min-tid-files|-o|--output-prefix|-d|--output-dir|-r|--recent-log-count|-l|--log-file|--keyword|--keywords|-k|-s|--ssh) break ;;
                 esac
                 [ -n "$1" ] || fail "log file paths must not be empty."
                 LOG_FILES+=("$1")
@@ -728,12 +767,12 @@ while [ "$#" -gt 0 ]; do
             }
             ;;
         --keyword)
-            [ "$SEEN_KEYWORDS" = false ] || fail "--keyword must be specified only once."
+            [ "$SEEN_KEYWORDS" = false ] || fail "--keyword/--keywords must be specified only once."
             SEEN_KEYWORDS=true
             shift
             while [ "$#" -gt 0 ]; do
                 case "$1" in
-                    --max-tid-files|--min-tid-files|--output-prefix|--recent-log-count|--log-file|--keyword|--ssh) break ;;
+                    -M|--max-tid-files|-m|--min-tid-files|-o|--output-prefix|-d|--output-dir|-r|--recent-log-count|-l|--log-file|--keyword|--keywords|-k|-s|--ssh) break ;;
                 esac
                 [ -n "$1" ] || fail "keywords must not be empty."
                 KEYWORDS+=("$1")
@@ -744,16 +783,46 @@ while [ "$#" -gt 0 ]; do
                 fail "missing value for --keyword."
             }
             ;;
+        -k|--keywords)
+            [ "$SEEN_KEYWORDS" = false ] || fail "--keyword/--keywords must be specified only once."
+            SEEN_KEYWORDS=true
+            shift
+            while [ "$#" -gt 0 ]; do
+                case "$1" in
+                    -M|--max-tid-files|-m|--min-tid-files|-o|--output-prefix|-d|--output-dir|-r|--recent-log-count|-l|--log-file|--keyword|--keywords|-k|-s|--ssh) break ;;
+                esac
+                [ -n "$1" ] || fail "keywords must not be empty."
+                append_csv_keywords "$1"
+                shift
+            done
+            [ "${#KEYWORDS[@]}" -gt 0 ] || {
+                usage
+                fail "missing value for --keywords."
+            }
+            ;;
         *)
             usage
             fail "unknown argument: $option"
             ;;
     esac
 done
-
-[ "$SEEN_OUTPUT_PREFIX" = true ] || fail "missing required argument --output-prefix."
-[ "${#LOG_FILES[@]}" -gt 0 ] || fail "at least one --log-file is required."
-[ "${#KEYWORDS[@]}" -gt 0 ] || fail "at least one --keyword is required."
+[ "${#LOG_FILES[@]}" -gt 0 ] || fail "at least one --log-file or positional log file is required."
+[ "${#KEYWORDS[@]}" -gt 0 ] || fail "at least one keyword is required."
+if [ "$SEEN_OUTPUT_PREFIX" = true ] && [ "$SEEN_OUTPUT_DIR" = true ]; then
+    fail "specify either --output-prefix or --output-dir, not both."
+fi
+if [ "$SEEN_OUTPUT_PREFIX" = false ]; then
+    [ -n "$OUTPUT_DIR" ] || fail "--output-dir must not be empty."
+    [ -d "$OUTPUT_DIR" ] || fail "output directory '$OUTPUT_DIR' does not exist."
+    [ -w "$OUTPUT_DIR" ] || fail "output directory '$OUTPUT_DIR' is not writable."
+    OUTPUT_DIR=$(cd -P "$OUTPUT_DIR" 2>/dev/null && pwd -P) || fail "could not resolve output directory '$OUTPUT_DIR'."
+    output_base=${LOG_FILES[0]##*/}
+    output_base=${output_base//[^[:alnum:]_.-]/_}
+    case "$output_base" in
+        ''|.|..) output_base=loghelper ;;
+    esac
+    OUTPUT_PREFIX="$OUTPUT_DIR/$output_base"
+fi
 
 # Canonical named arguments forwarded to remote loghelper.sh. --ssh is omitted
 # deliberately so a remote helper never starts another SSH fallback.

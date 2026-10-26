@@ -1,99 +1,23 @@
+<!-- att-doc-status: compatibility release=4.2.4 -->
+
 # ATT Server Web UI
 
-ATT Server 在 `<Tomcat context path>/ui/` 提供靜態瀏覽器主控台，例如 `https://host.example.com/tools/att/ui/`。支援維護中的 Chrome、Edge 或 Firefox 版本。`server.auth.mode: container` 由 Tomcat 保護 `/ui/*` 及 `/api/v1/*`；HTTP Basic 憑證由瀏覽器處理，ATT 不會儲存。`server.auth.mode: local` 則由 ATT 提供登入頁面及本地帳戶功能。啟用驗證的部署應使用 HTTPS。
+本相容頁保留舊標題 anchor；目前 Studio 指南已拆分為以下專題頁面。
 
 ## 本地使用者管理
-
-Local mode 中，每位已登入的本地用戶均可在目前用戶選單使用 **Change password**。表單需要目前密碼、新密碼及確認。變更成功後會撤銷目前 session，並將用戶轉回登入頁面及顯示成功訊息。密碼只會留在目前表單，不會寫入 local storage、session storage、URL 或應用程式日誌。
-
-Local `ADMIN` 可前往 **Settings → User Management**，以登入 ID、顯示名稱、角色及狀態搜尋或排序安全帳戶列表。管理員可建立 `ADMIN` 或 `USER`、啟用或停用帳戶，以及重設密碼。建立帳戶及密碼表單都要求確認欄位相符，並遵守 Server 的 12 至 1024 字元密碼政策。系統不會顯示現有密碼。停用用戶或重設密碼前需要確認，並會撤銷該用戶的 session。即使多個停用請求同時執行，Server 仍會阻止停用最後一個啟用中的 `ADMIN`。若所有管理員都無法登入，請使用 [Server 部署指南](server-deployment.zh.md) 所述的離線復原程序；復原只會更新現有 `ADMIN`，不會重新開啟 bootstrap。
-
-只有已驗證的 local `ADMIN` 可檢視帳戶列表及控制項。其他本地用戶看不到帳戶資料或管理功能。Container mode 的 Settings 會說明帳戶由 Tomcat 或設定的 SSO provider 管理；ATT 不會把外部帳戶顯示成由 ATT 管理。Settings 可使用英文或繁體中文、跟隨瀏覽器語言，或在此瀏覽器保存語言選擇；存取控制及密碼政策仍由 Server 執行。
-
-主控台會列出已設定的邏輯套件 ID 與近期持久化工作。選擇套件後可提交 Run、Debug、Load 或 Validate，接著開啟工作以追蹤進度、檢視終端結果與安全診斷、取消執行中的工作，或下載邏輯 artifact。套件資源欄位使用相對於所選套件的邏輯路徑。UI 不接受或顯示 `PACKAGE_ROOT` 或 Server 儲存路徑。Artifacts 分頁顯示封存狀態，並從經驗證的 ZIP 預覽報告及文字。**Download Artifacts (.zip)** 是唯一下載操作；HTML 報告使用隔離的檢視器。詳見 [Artifact 發布與復原](reference/results-reports-evidence.md#att-server-job-artifact-publication)。 工作深層連結（例如 `/ui/jobs/J10045`）會轉址至標準 hash route，並透過公開 API 與 SSE 重新載入工作狀態。
-
-Package Resource Explorer 會按 package-scoped 邏輯資源 ID 列出已設定的 Case、Template、Flow 及 Tool，並支援類型與文字篩選、跨所有符合項目排序後再分頁、加密 cursor、資源詳細資料及安全關聯。在預設 `safe-package-files` policy 下，已授權 source 所連結的合資格 package-local Tool scripts 及安全 `&{...}` targets 無須逐檔設定即可開啟；Template/Flow YAML 仍以淨化投影回傳。`allowlist-only` 使用完全相同的 package-relative `server.inspection.safeTextSources` 路徑。External scripts 必須位於已設定的 external root 並列入每 package canonical 精確 allowlist，回應會隱藏 filesystem path。Case 詳細資料會顯示身份及 Stage/Template 中繼資料，並隱藏 workbook 業務值。反向關聯最多內嵌 100 筆，並同時回傳準確數量及 `referencedByHasMore`。Explorer 不會瀏覽任意檔案、不會執行 Tool，也不會修改 package 內容。若分頁期間 package 或排序/篩選條件有變更，Server 會拒絕過期 cursor，UI 可重新整理清單。
-
-Debug 只能從已選取的 Template、Flow 或 Tool 詳細資料開啟。表單會載入該目標選填 `debug.yaml` 的安全預設值；若檔案不存在，Server 會提供有效的空白 `att-debug/v1.2` 預設值。Package 撰寫的值預設會隱藏。保留 `$attDebugKeepDefault` 標記即可沿用隱藏值；若要覆寫，請改成明確值。可以用 JSON object 編輯巢狀值、還原已載入的預設值、驗證，並在開始 Debug 前檢視已遮蔽的 YAML 預覽。所有目標都使用 `inputs`；Template 與 Flow 亦使用 `vars`，Tool 則使用 `arguments` 並不接受 `vars`。Server 會將記憶體中的 draft 綁定至已驗證 Principal 及目前 package revision。Draft 於 10 分鐘後過期，Server 重啟後失效。編輯或提交都不會寫入 package 檔案。現有以路徑提交的 Debug API 仍供相容用戶端使用。
-
-瀏覽器建立的 Quick Load 與 Advanced Load 預設停用。Server 管理員必須設定 `server.inlineLoad.enabled: true`，並配置 workload、target、user、rate、並行數及 duration 上限，這些表單才可建立 draft。UI 會從 `/api/v1/version` 讀取 `inlineLoadEnabled`；功能關閉時會停用 Advanced Load 入口、隱藏 Quick Load，直接開啟頁面則會顯示停用狀態。停用時 endpoint 回傳 `403 ATT-SERVER-INLINE-LOAD-DISABLED`；超出上限的 draft 會回傳 `400 ATT-SERVER-INLINE-LOAD-LIMIT`，並以摘要指出超出的設定。此設定不會停用既有 path-based Load 用戶端。
-
-Quick Load 是第一層路由，可對單一選定的 Template、Flow 或 Tool 執行。有限制的 template picker 會列出 package `load/` 目錄內相容的 policy-only YAML 檔案，包括相容的 `load/load.visualuser.yaml` 和 `load/load.arrivalrate.yaml`，以及只適用於 Virtual Users 的內建 **Quick smoke** preset。選取 template 會載入其支援設定；未選取相容 package template 時，Server 會提供該 model 的預設值或內建 10 秒低強度 fallback。切換 preset 或 model 會更新未提交的 scenario；Target 維持固定，Debug-local Testdata imports 不會自動提升。Advanced Settings 保留 thresholds、evidence、execution options、Testdata paths 及完整 scenario preview。先驗證單一 target scenario，確認後才提交。Server 會將 draft 綁定至已驗證 Principal 及目前 package revision，並提交與驗證相同的不可變 scenario。Schedule 會將已驗證 draft 帶入 immutable inline Load snapshot，因此無須重新輸入 target、environment、inputs、pacing、thresholds 或 evidence。
-
-首頁每個 package 都可開啟 Advanced Load。先選擇 `virtualUsers` 或 `arrivalRate`，再新增 workloads；所有 workload 都使用同一 model。設定共用時間窗口、選填 seed、package-relative Testdata imports、execution defaults、aggregate thresholds 及 evidence policy。你可以新增、複製、排序或移除 workload。每個 workload 有自己的 intensity、target、Testdata policy 及 thresholds。Workload 可使用單一 Template、Flow 或 Tool target；Virtual Users 亦可使用 weighted target mix。每個 Arrival Rate workload 使用一個 target。Target sidecar 預設值只包含安全的 business 欄位；不會複製 Debug `case`、`stage` 或 local Testdata。驗證完整 scenario 並檢視安全 YAML 後，確認即可由 Server 以不可變 draft 交給一般 Load scheduler。只有預覽未遮蔽時才可複製或匯出。
-
-當 `/api/v1/version` 回傳 `loadSchedulingEnabled: true` 且 caller 具備設定的排程管理 role（預設 `ATT_ADMIN`）時，可在 React 主控台的 `#/schedules` 使用 Schedules。可從已驗證的 Quick/Advanced Load draft 建立排程，亦可沿用 package-relative Load scenario。Draft-based 排程會保留 Server 正規化後的 immutable scenario snapshot；API view 只顯示 `inlineSnapshot`，不會回傳 scenario 內容。Server 會在每次 occurrence 前重新驗證 snapshot 及 package revision。頁面支援 descriptions、tags、IANA timezone 的 next-run preview，以及 daily、weekly 或五欄位 cron。Preview 只計算執行時間；儲存時會透過 inspection Worker 驗證完整 scenario 及 target closure。切換 recurrence 會取代已儲存的 trigger；只修改 metadata 時則保留該 trigger 及其經 Server 確認的 next run，因此已執行過的一次性排程仍可重新命名或修改說明。儲存驗證失敗時會顯示診斷碼，以及可用的摘要、欄位、source 位置、package、environment、target 和建議，並附 request ID。使用 **Review field** 可前往相關控制項或開啟已保存的 snapshot。本機絕對路徑會遮蔽。新排程預設暫停，只有選取 **Enable after saving** 才會啟用。Run Now 和刪除都需要確認。Occurrence history 會說明略過及提交失敗，並將已提交工作連結至一般 job 頁面、結果、事件與 artifacts。排程和歷史在 Server 重啟後仍保留；編輯或刪除排程不會取消已接納工作。
-
-在 Quick 或 Advanced Load 按 **Schedule…** 會於目前編輯器上開啟排程表單，並顯示安全的驗證預覽。取消後會返回同一個 draft。若 inline snapshot 含有 credentials 或其他已分類敏感值，Server 會在儲存排程前拒絕；請將這些值保留在 package-managed configuration。
-
-共用 React shell 會跟隨作業系統的淺色或深色偏好，直到你自行選擇主題；選擇會保存在瀏覽器儲存空間。按 `/` 或 `Ctrl K`/`⌘ K` 搜尋頁面，按 `?` 開啟快捷鍵清單，按 `Esc` 關閉對話框或手機導覽。在 Advanced Load 頁面，按 `Ctrl Enter`/`⌘ Enter` 只會啟動仍有效且已驗證的 draft，並保留既有確認步驟。主控台和 Schedules 編輯器會適應平板及手機寬度，保留清晰的鍵盤焦點，尊重減少動態效果設定，並以文字標籤配合狀態顏色。
-
-第一層 Configuration 工作區位於 `#/configuration`，在 **All packages** 下也可直接使用。Source、Declared、Effective 和 Compare 透過全域已驗證 API 檢視共用 Runtime config；Environment 只切換 effective values，不切換來源樹，也不會回退至任何 Package。只有 Testdata 顯示獨立的 Package selector，並在該 Package 內解析 records。舊有 `#/configuration/{packageId}` deep link 保留，但共用檢視忽略其 Package context。檔案遍歷、source-reference 授權、source policy、遮蔽及 admin-field 限制保持不變；無效或不可用設定顯示明確狀態。
-
-Declared 和 Engine effective 檢視使用共用 Runtime 的 `FrameworkConfigLoader` 選擇規則，不會連接 DB、MQ、HTTP 或 SSH。可直接檢視 Runtime 預設值，無需選擇 profile。Compare 預設顯示 environment-specific 值，並在分頁前套用所選 section；**Include inherited/global fields** 可選擇顯示 shared values 及 provenance。Configuration admin 可選擇 **Show additional DB configuration fields** 檢視其他非秘密 DB properties 及 evidence fields。Container-auth deployment 使用 `server.inspection.configurationAdminRole`（預設 `ATT_ADMIN`）；local-auth deployment 需要本地 `ADMIN`。Credentials 及設定的敏感值仍會隱藏。Hidden 和 missing 狀態會保持區分；UI 不會比較 hidden 值。Tool 詳細資料會連結至其設定 section。公開 endpoint 及分頁參數見 [ATT Server 部署與 API](server-deployment.zh.md#package-configuration-inspection)。
-
-Source 和 preview 共用 lazy-loaded CodeMirror 編輯器，支援 YAML、JSON、XML、SQL、Shell 及純文字。它會標示 ATT 的 `${...}`、`#{...}`、`@{...}` 和 `&{...}` expression。只有帶有 Server 簽發不透明 token 的檔案參照才會連結回 Configuration。Server 將 token 綁定 package、origin 及 target，並在回傳文字前重新驗證參照；UI 不會根據客戶端解析的路徑建立連結。編輯器工具列支援複製、搜尋、跳至行號、全螢幕及安全格式化，不會執行程式碼。Debug sidecar 的 scalar 欄位仍以表單為主，巢狀值可用 Advanced JSON 編輯。Threshold 和 Evidence 提供表單及 Advanced JSON；無效 JSON 會保留在草稿中，不會取代最後有效設定。
-
-開啟 **Schedules** 時，首先顯示已儲存的 RUN／LOAD 定義清單，不會顯示新增或編輯表單。可搜尋名稱、target、package、environment、owner 或 cron，並按執行類型、狀態、package 及 API 提供的 owner 篩選。清單顯示類型、target、package／environment、時區、recurrence、next run 及狀態；只有 API 授權回傳的 owner／近期狀態才會顯示。
-
-選取 **New Schedule**（`#/schedules/new`）或 **Edit**（`#/schedules/<id>/edit`）開啟獨立表單。RUN 必須先在 **Run** 驗證 Case、Template、Flow、Tool 或 typed batch selection，再從 Review 選擇 **Schedule…**。已驗證的 Quick／Advanced／YAML LOAD 使用相同排程 drawer，保留背景來源編輯器及 Server draft ID，因此不會重建或改寫 typed inputs、Case 選取、Debug mode 或 LOAD policies。儲存只建立定義，不會立即執行；新排程預設暫停，啟用前請檢查 next-occurrences preview。LOAD 亦可使用現有 package-relative scenario path。
-
-**Cancel** 及 **Back to Schedules** 會保護未儲存變更；重新整理或關閉分頁時會提示，切換分頁則保留記憶體內表單。Draft 與憑證不會寫入 browser storage。重新整理無法還原尚未儲存的已驗證 draft，必須返回來源重新驗證。Edit／History deep link 會重新讀取 Server 定義，舊 `#/load-schedules` 及 `#/scheduled-load` 連結仍可使用。
-
-**History** 使用 `#/schedules/<id>/history`，occurrence 連結使用 `#/schedules/<id>/history/<occurrenceId>`，範圍為最近 100 筆保留紀錄。超出範圍或已移除的紀錄會顯示不可用狀態。只有 Server 提供可用 job status 時才顯示 Job 連結，Job／Report 授權仍由 API 檢查。**Run Now**、**Pause/Resume** 及 **Delete** 均須確認；手動觸發 LOAD 仍建立 LOAD Job。舊 Scheduled Debug 顯示為 RUN 加 Debug mode，透過 adapter 保留後端識別。Misfire、retention、capacity、revision 及 DST 政策仍由既有統一 Scheduler 管理。
+請參閱[目前的 Studio 指南](interfaces/studio/administration.zh.md)。
 
 ## 使用 React Explorer 與 Debug 表單
-
-React Explorer 以三欄工作區呈現套件資源、所選定義及資源操作。選擇 Case、Template、Flow 或 Tool 即可開啟詳細資料。`#/packages/{packageId}/resources/{type}/{resourceId}` hash route 會在重新載入時還原所選資源，並支援瀏覽器導覽。Definition、Source 及 Dependencies 分頁可使用方向鍵、Home 及 End 鍵盤操作。
-
-Source 分頁只載入 Server 提供的安全 source projection。畫面最多顯示前 200,000 個字元及 12,000 行，並只渲染視窗內的行；source 內容會以純文字呈現。Package 更新後可重新整理。**Copy displayed source** 只會複製上述上限內已顯示的文字。空白或不可用的 projection 會明確顯示；驗證及權限錯誤不會包含原始回應細節。
-
-可從資源 Inspector 執行 Debug 或 Case。Sidecar 提供的 scalar 欄位會使用文字、數字、布林值及 null 等型別控制項。巢狀值及完整 business input 可在 **Advanced JSON** 編輯。提交驗證前，請修正無效 JSON 或 scalar 值。**Reset defaults** 會還原從 sidecar 載入的值。若 Server 將 sidecar 值標示為 redacted，表單會顯示 keep-default 標記，不會揭露隱藏值。保留標記即可沿用 package 值；如需覆寫，請選擇型別並輸入明確值。開始 Debug 前請先驗證並檢視安全預覽。Server 仍是驗證及存取檢查的權威來源。
-
-當 Debug 編輯尚未儲存時，切換 package、resource 或 environment 會先詢問是否捨棄變更。同一保護也涵蓋 hash route 及瀏覽器上一頁／下一頁。選填 job label 會隨執行請求作為 Principal label 傳送；它不能取代 Tomcat 驗證。若 session 過期，請重新登入後重試。在 Server 允許請求時，匿名部署亦可使用此 label。
+請參閱[目前的 Studio 指南](interfaces/studio/explorer-run.zh.md)。
 
 ## React Load Builder 與 Jobs/Results
+請參閱[目前的 Studio 指南](interfaces/studio/load-testing.zh.md)。
 
 ### 分離及還原 Job 主控台
-
-在 **Live Output**、**Events** 或 Job 詳情標題選擇 **Open floating console**。這個非 modal 主控台會留在 Studio shell 上方；切換 Explorer、Configuration、Load testing、Jobs 或 Settings 時不會卸載。它顯示 Job ID、RUN／DEBUG／LOAD 類型、狀態、SSE 狀態、可搜尋的 Live Output、結構化 Events、暫停／繼續、複製、最大化／還原及關閉控制項。桌面版可拖曳 **Move console**，或用方向鍵移動；可拖曳角落控制項，或用方向鍵調整大小。面板會限制在 viewport 內；較小螢幕會改為全螢幕 sheet。
-
-每個 Studio 分頁只有一個 floating console。開啟另一個 Job 前會要求確認 **Switch Job**。**Minimize** 會保留底部 console chip 及一條有界的該瀏覽器分頁 SSE 訂閱，使狀態和新事件保持更新，但不會渲染隱藏的事件列；所選 view、搜尋、篩選及捲動偏好會保留在 session 記憶體。**Close** 會釋放該訂閱。以上控制項都不會取消或停止 Job。
-
-**Open full Job Details in a new tab** 開啟 `#/jobs/{encodedJobId}?standalone=1&tab=live`（或 `events`），包括 Overview、Live Output、Events、Results、Artifacts、Metrics。切換 tab 更新 URL 並固定同一 Job。舊 `#/jobs/{jobId}/console?view=live|events` 書籤使用完整 Details adapter。同源 `target="_blank" rel="noopener noreferrer"` 連結支援 `/att/ui/`、重新整理、Back/Forward。每個分頁內共用單一 Job stream；floating/docked/minimized console 維持原有行為。未授權或缺少的 Job 顯示安全 unavailable／登入訊息。
-
-瀏覽器會立即把事件寫入最多 500 筆的有界 buffer，並以固定 100 ms 週期發布一般顯示 snapshot。Document 隱藏時會暫停發布顯示 snapshot，重新顯示時再發布當時的有界 snapshot。終端 `result` 事件、終端 `status` 事件、取消請求狀態及連線錯誤狀態轉換會立即發布。最後一個 consumer 關閉後，timer 及原生 `EventSource` 都會釋放。
-
-Events 清單只渲染捲動位置附近的列（並以 spacer 保持捲軸及清單位置正確），事件 payload 在展開前保持收合，搜尋則涵蓋完整的 500 筆視窗，而非只搜尋已渲染列。Metrics 分頁會繪製所有回傳的 bucket（最多 4,096 個），其無障礙 bucket 表格每頁顯示 100 列，提供 Previous 與 Next 控制項及 `Showing rows` 狀態。
-
-Server Journal Event ID 是 append order 的排序鍵；每個 Job 的 ID 在 Server 重啟、journal trimming 及 compaction 前後都保持單調遞增。UI 會按 Server append order 顯示事件，不會按 timestamp 重新排序。數字 ID 如不大於最後顯示的 ID，會視為 duplicate 或 stale out-of-order replay 而忽略，計入相應數量，且不會重新排序插入清單。向前出現 gap 是合法情況，只會計入診斷。非數字 ID 使用有界的 recent-ID index 去重。原生 `EventSource` 使用 `Last-Event-ID` 重新連線；重疊 replay 即使已離開可見 window，或在 **Clear view** 後到達，也不會再次出現。任何計數不為零時，非即時更新的 **Stream diagnostics** 訊息會顯示已忽略的 duplicate、out-of-order replay 及 ID gap 數量。
-
-這些限制屬於不同層次。瀏覽器只顯示最近 500 筆已接受事件，不代表保留完整 Job 歷史。Server journal 決定可 replay 的範圍，較早 journal 歷史已截斷時會明確報告。#265 追蹤的 per-entry 限制會在發布前或期間縮短單一文字或 payload 欄位；瀏覽器不會重建或重新格式化這些 protocol 資料。
-
-Advanced Load route 使用有型別的控制項設定 duration 單位、Virtual Users、Arrival Rate、最大並行數及 think time。Target sidecar 預設值會為 `inputs`、`vars` 及 Tool `arguments` 提供有型別 scalar 控制項；巢狀值保留在 Advanced JSON。表單會按 model 顯示適用限制，但驗證、policy 上限、draft 過期、package revision 及執行仍以 Server 為準。確認後，UI 會提交同一份由 Server 簽發的 draft；回應已遮蔽時不會提供預覽複製或匯出。
-
-Jobs 在 Server 對完整 matching history 執行 filter、Target 排序／分組及真正分頁。Target 連結開啟指定 Job Details；每列保留 Package/Environment、可複製的縮短 Job ID、Schedule principal、Created/Started/Finished/elapsed。Recent Jobs 預設最新優先。Rows per page 支援 25/50/100（初次預設 100，保存在瀏覽器）。Pin/Delete 圖示立即生效。兩個 footer 選單對當頁所有 Job（包括收合群組）設定 pin/unpin 或 mark/unmark；逐 ID 結果解釋部分失敗。Deletion mark 在至少 30 秒後的背景 claim 前可取消；pinned、active、busy、quarantined Job 仍受保護。Job Details 保留 Overview、Live Output、Events、Results、Artifacts、Metrics；取消執行仍需確認。
-
-Explorer 是 React 與 TypeScript 單頁 UI，於 `att-web` Maven resource 階段使用 Vite 建置。Maven 會把產生的靜態資源複製至 `META-INF/resources/ui/`；Server WAR 再將它們封裝供 Tomcat 提供。Node.js 只用於建置階段。部署後的 UI 呼叫同源公開 REST API，無需額外 Node 程序或前端服務。
-
-瀏覽器只使用公開的同源 `/api/v1` REST 與 SSE 契約。REST 請求與原生 `EventSource` 使用瀏覽器管理的容器驗證。SSE 重新連線使用瀏覽器標準 `Last-Event-ID` 行為；重新整理工作頁面時會從 Server 重新載入工作狀態與保留事件。關閉瀏覽器分頁不會取消工作。取消前需要確認，UI 會等候 Server 回報終端狀態。
-
-UI 會在載入工作資料前檢查 Server API 版本。工作到達最終狀態並收到 SSE result 後會關閉事件串流，以免重複連線；即時進度另外顯示，事件歷史則限制筆數。靜態 UI 與 API 共用 Tomcat 驗證邊界。
-
-主控台以 `att-web` JAR 中 `META-INF/resources/ui/` 的靜態資源提供，並封裝於 Server WAR。相對 URL 支援非根 Tomcat context path，無需額外前端服務或執行期 Node.js。Server 套用同源 Content Security Policy，並拒絕帶有非預期 `Origin` 的狀態變更瀏覽器請求；無需設定含憑證的 CORS。API 文字以純文字方式插入 DOM，事件清單最多保留 500 筆。
-
-對尚無公開 discovery schema 的欄位，UI 會使用安全 sidecar 資料提供 typed scalar 控制項，並以 Advanced JSON 編輯巢狀值。Server 驗證仍是權威來源；瀏覽器端驗證與篩選不構成授權邊界。
-
+請參閱[目前的 Studio 指南](interfaces/studio/jobs-and-results.zh.md)。
 
 ### 排程 route 與獨立 console（4.2.4）
-
-Schedules 清單不顯示 Schedule ID。LOAD 依每個 workload 顯示已保存的 configured VU 或 arrival rate、planned total duration、可用 warmup/ramp/steady phase 及有界 Target bindings。缺少的歷史設定顯示 Not available；清單只讀已保存的 sanitized summary，不逐列請求 YAML。
-History → Back to list → Edit 會同時按 route view 及 schedule ID 載入。重新整理已授權清單時保留同一表單的未儲存修改；不存在或禁止存取的定義顯示不可用狀態。沒有可編輯 validated snapshot 的舊 RUN 定義會說明如何審閱替代 RUN。
-
-**Open full Job Details in a new tab** 開啟 `#/jobs/{encodedJobId}?standalone=1&tab=live`（或 `events`），包括 Overview、Live Output、Events、Results、Artifacts、Metrics。切換 tab 更新 URL 並固定同一 Job。舊 `#/jobs/{jobId}/console?view=live|events` 書籤使用完整 Details adapter。同源 `target="_blank" rel="noopener noreferrer"` 連結支援 `/att/ui/`、重新整理、Back/Forward。每個分頁內共用單一 Job stream；floating/docked/minimized console 維持原有行為。未授權或缺少的 Job 顯示安全 unavailable／登入訊息。
+請參閱[目前的 Studio 指南](interfaces/studio/schedules.zh.md)。
 
 ### Jobs 篩選與重播審閱
-
-Jobs 的精簡工具列保留 Principal、Package、Type、Status 及 Target 搜尋。**More filters** 可展開 Created from/to、Deletion state 和 Pin state；收合後仍顯示已啟用的條件。Target 搜尋會在 Server 分頁前比對完整保留的 canonical target／Case ID，包括前 32 筆預覽之外的項目。沒有保留 Target metadata 的歷史 Job 仍可用 Job ID 搜尋。升級後，歷史 Target 索引會以背景批次繼續建立。未輸入搜尋條件時仍可瀏覽 Jobs；索引完成前，Target or Job ID 子字串搜尋會傳回可重試的 503（`ATT-SERVER-TARGET-SEARCH-PENDING`），不會顯示不完整結果。請以 **Refresh jobs** 重試。若要精確查詢，輸入 `job:` 加完整 Job ID（例如 `job:J0123456789ABCDEF`，區分大小寫）；此主鍵查詢在索引期間仍可使用，並保留其他篩選、筆數與分頁規則。無法解析的歷史 snapshot／identity 會逐筆隔離，以安全的 fallback 或空 Target 集合標記為已處理，並記錄不含私人 metadata 的 audit，不會永久阻擋索引。Group by Target 固定顯示 Target A–Z，群組內的 Jobs 按最新優先排列；返回 Recent Jobs 時恢復其選定的排序。
-
-在 Jobs List 或 Job Details 按 **Rerun** 或 **Schedule / Reschedule…**，會開啟 modal review，顯示類型、Package、Target、Environment、Source 及 Revision。**Advanced / View raw definition** 可在有界捲動區展開 sanitized JSON。Tab 焦點保留於對話框內，Escape 或 Cancel 關閉並返回原按鈕；確認仍使用 immutable Server intent 並重新驗證 Package revision。
+請參閱[目前的 Studio 指南](interfaces/studio/load-testing.zh.md)。

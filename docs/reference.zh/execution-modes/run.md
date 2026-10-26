@@ -1,6 +1,8 @@
 # Run 模式
 
-Run 會執行 Workbook 中經選擇的 authored Testcase。每個選中的 Testcase 會產生一次 Case execution，並有自己的狀態和 evidence record。討論正規化 Workbook row 時使用 *Testcase*；討論 runtime 結果時使用 *Case execution*；兩者共用同一個 Case ID。
+<!-- att-doc-status: current release=4.2.4 -->
+
+ATT 4.2.4 Local CLI 的 run command 是 legacy Case adapter，會執行 Workbook 中選取的 authored Testcase。較完整的 functional model 與 direct resource target 定義於 [Unified RUN](unified-run.md)。
 
 ```sh
 ./att.sh run --all

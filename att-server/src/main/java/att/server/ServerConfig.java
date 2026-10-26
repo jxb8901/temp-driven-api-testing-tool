@@ -6,6 +6,7 @@ import org.yaml.snakeyaml.constructor.SafeConstructor;
 
 import java.io.InputStream;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.Collections;
@@ -21,6 +22,7 @@ public final class ServerConfig {
     private static final int LOAD_PREPARATION_PER_WORKER_CONNECTIONS = 64;
     private static final int LOAD_PREPARATION_SERVER_CONNECTIONS = 256;
     private static final int MAX_SERVER_LOAD_WORKERS = LOAD_PREPARATION_SERVER_CONNECTIONS / LOAD_PREPARATION_PER_WORKER_CONNECTIONS;
+    public final Path sourceFile;
     public final Path dataDir;
     public final Path runtimeConfigPath;
     public final Path javaExecutable;
@@ -42,11 +44,11 @@ public final class ServerConfig {
     public final ExecutionPool executionPool;
     final PackageConfigurationPolicy packageConfiguration;
 
-    private ServerConfig(Path dataDir, Path runtimeConfigPath, Path javaExecutable, int maxConcurrent, int queuedLimit,
+    private ServerConfig(Path sourceFile, Path dataDir, Path runtimeConfigPath, Path javaExecutable, int maxConcurrent, int queuedLimit,
                          int maxConcurrentLoad, int gracefulStopMs, int jobRetentionDays,
                          int workerHeapInitialMb, int workerHeapMaxMb, int maxRequestBytes,
                          int maxEventsPerJob, int maxArtifacts, boolean authenticationRequired, String authMode, Security security, Map<String, Path> packages, List<Path> allowedRoots, List<Path> workerLibraryDirs, Inspection inspection, InlineLoad inlineLoad, Scheduling scheduling, Authorization authorization, JobStorage jobStorage, LiveOutput liveOutput, ExecutionPool executionPool, PackageConfigurationPolicy packageConfiguration) {
-        this.dataDir=dataDir; this.runtimeConfigPath=runtimeConfigPath; this.javaExecutable=javaExecutable; this.maxConcurrent=maxConcurrent;
+        this.sourceFile=sourceFile;this.dataDir=dataDir; this.runtimeConfigPath=runtimeConfigPath; this.javaExecutable=javaExecutable; this.maxConcurrent=maxConcurrent;
         this.queuedLimit=queuedLimit; this.maxConcurrentLoad=maxConcurrentLoad; this.gracefulStopMs=gracefulStopMs;this.jobRetentionDays=jobRetentionDays;
         this.workerHeapInitialMb=workerHeapInitialMb;this.workerHeapMaxMb=workerHeapMaxMb;
         this.maxRequestBytes=maxRequestBytes; this.maxEventsPerJob=maxEventsPerJob; this.maxArtifacts=maxArtifacts;this.authenticationRequired=authenticationRequired;this.authMode=authMode;this.security=security;
@@ -62,6 +64,15 @@ public final class ServerConfig {
     }
 
     public static ServerConfig load(Path file) throws Exception {
+        return load(file, true);
+    }
+
+    /** Parse the active Server Config and validate its settings without creating or chmod-ing data directories. */
+    public static ServerConfig validateReadOnly(Path file) throws Exception {
+        return load(file, false);
+    }
+
+    private static ServerConfig load(Path file, boolean initializeDataDirectory) throws Exception {
         if (file == null)
             throw new IllegalStateException("ATT Server configuration was not found; set -Datt.server.config or ATT_SERVER_CONFIG, or provide ATT_HOME/config/att-server.yaml");
         Path configFile=file.toAbsolutePath().normalize();
@@ -146,12 +157,23 @@ public final class ServerConfig {
         Path candidateData=canonicalFuturePath(data);
         for(Path packageRoot:resolved.values()) if(packageRoot.startsWith(candidateData)||candidateData.startsWith(packageRoot))
             throw new IllegalArgumentException("server.dataDir must be separate from configured package roots");
-        Files.createDirectories(data);
-        Path realData=data.toRealPath();
+        Path realData;
+        if (initializeDataDirectory) {
+            Files.createDirectories(data);
+            realData=data.toRealPath();
+        } else if (Files.exists(data, LinkOption.NOFOLLOW_LINKS)) {
+            if (Files.isSymbolicLink(data) || !Files.isDirectory(data, LinkOption.NOFOLLOW_LINKS))
+                throw new IllegalArgumentException("server.dataDir must be a non-symlink directory when it exists");
+            realData=data.toRealPath();
+        } else {
+            realData=candidateData;
+        }
         for(Path packageRoot:resolved.values()) if(packageRoot.startsWith(realData)||realData.startsWith(packageRoot))
             throw new IllegalArgumentException("server.dataDir must be separate from configured package roots");
-        privateDirectory(realData);privateDirectory(realData.resolve("db"));privateDirectory(realData.resolve("jobs"));
-        return new ServerConfig(realData,runtimeConfig,java,max,queue,load,stop,retention,heapInitial,heapMax,request,events,artifacts,authenticationRequired,authMode,security,resolved,allowed,workerLibraries,inspection,inlineLoad,scheduling,authorization,jobStorage,liveOutput,executionPool,PackageConfigurationPolicy.load(server.get("packageConfiguration")));
+        if (initializeDataDirectory) {
+            privateDirectory(realData);privateDirectory(realData.resolve("db"));privateDirectory(realData.resolve("jobs"));
+        }
+        return new ServerConfig(configFile,realData,runtimeConfig,java,max,queue,load,stop,retention,heapInitial,heapMax,request,events,artifacts,authenticationRequired,authMode,security,resolved,allowed,workerLibraries,inspection,inlineLoad,scheduling,authorization,jobStorage,liveOutput,executionPool,PackageConfigurationPolicy.load(server.get("packageConfiguration")));
     }
 
     public static final class ExecutionPool {

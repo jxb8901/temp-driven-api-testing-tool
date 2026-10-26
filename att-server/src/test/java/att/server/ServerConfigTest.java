@@ -202,6 +202,23 @@ class ServerConfigTest {
         assertThrows(UnsupportedOperationException.class,()->config.packages.put("other",pkg));
     }
 
+    @Test void validatesServerConfigReadOnlyWithoutCreatingOrChangingDataDirectories() throws Exception {
+        Path allowed=Files.createDirectory(temp.resolve("readonly-packages"));Path pkg=Files.createDirectory(allowed.resolve("payments"));
+        Path runtime=temp.resolve("readonly-config/config.yaml");Files.createDirectories(runtime.getParent());
+        Files.writeString(runtime,"schemaVersion: att-config/v2.13\nenvironment: SIT\n");
+        Path data=temp.resolve("readonly-server-data");Path file=temp.resolve("readonly-server.yaml");
+        Path java=Path.of(System.getProperty("java.home"),"bin",System.getProperty("os.name","").toLowerCase().contains("win")?"java.exe":"java");
+        Files.writeString(file,"server:\n  dataDir: '"+data+"'\n  runtimeConfigPath: '"+runtime+"'\n  javaExecutable: '"+java+"'\nworkers: {}\npackages:\n  allowedRoots: ['"+allowed+"']\n  entries: {payments: '"+pkg+"'}\n");
+        long modified=Files.getLastModifiedTime(file).toMillis();
+
+        ServerConfig config=ServerConfig.validateReadOnly(file);
+
+        assertEquals(file.toAbsolutePath().normalize(),config.sourceFile);
+        assertEquals(pkg.toRealPath(),config.packages.get("payments"));
+        assertFalse(Files.exists(data));assertFalse(Files.exists(data.resolve("db")));assertFalse(Files.exists(data.resolve("jobs")));
+        assertEquals(modified,Files.getLastModifiedTime(file).toMillis());
+    }
+
     @Test void acceptsStrictOriginCheckingAndBoundsInspectionPolicySettings() throws Exception {
         Path allowed=Files.createDirectory(temp.resolve("policy-packages"));Path pkg=Files.createDirectory(allowed.resolve("p"));
         Path java=Path.of(System.getProperty("java.home"),"bin",System.getProperty("os.name","").toLowerCase().contains("win")?"java.exe":"java");

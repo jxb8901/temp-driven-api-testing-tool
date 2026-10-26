@@ -323,8 +323,9 @@ class AuthenticationIntegrationTest {
         Path debugPackage=Files.createDirectory(packages.resolve("debug"));Path template=Files.createDirectories(debugPackage.resolve("templates/FORM"));
         Files.createDirectories(debugPackage.resolve("testcase"));
         Path runtimeConfig=Files.createDirectories(localHome.resolve("config")).resolve("config.yaml");
+        Files.writeString(debugPackage.resolve("package.yaml"),"schemaVersion: att-package/v1\ndefaultEnvironment: UAT\n");
         Files.writeString(runtimeConfig,"schemaVersion: att-config/v2.12\nenvironment: SIT\n"
-                +"environments:\n  SIT: {}\ntestcase:\n  root: testcase\ntemplates:\n  root: templates\n");
+                +"environments:\n  SIT: {}\n  UAT: {}\ntestcase:\n  root: testcase\ntemplates:\n  root: templates\n");
         Files.writeString(template.resolve("template.yaml"),"schemaVersion: att-template/v3.6\nname: FORM\ndescription: authenticated debug form\nactions:\n"
                 +"  log:\n    type: log\n    message: '${EXEC.INPUT.value}'\n");
         Path loadDirectory=Files.createDirectories(debugPackage.resolve("load"));
@@ -348,6 +349,21 @@ class AuthenticationIntegrationTest {
             String formPath="/att/api/v1/packages/debug/resources/template/"+resourceId+"/debug-form";
             assertEquals(401,get(port,formPath,null),"Debug defaults must remain behind container authentication");
             assertEquals(401,postStatus(port,null,"/att/api/v1/drafts/debug",Map.of("packageId","debug")),"Draft creation must remain behind container authentication");
+            assertEquals(401,postStatus(port,null,"/att/api/v1/validation",Map.of("command","validate","targetKind","config")),"Validation API must remain behind container authentication");
+            JsonNode validation=postJson(port,"/att/api/v1/validation",basic,
+                    ServerRuntime.JSON.valueToTree(Map.of("command","validate","targetKind","config")),200);
+            assertEquals("att-validation/v1",validation.path("schemaVersion").asText());
+            assertEquals("SERVER",validation.path("backend").asText());
+            assertTrue(validation.path("requestId").isTextual()&&!validation.path("requestId").asText().isBlank());
+            JsonNode packageDefaultValidation=postJson(port,"/att/api/v1/validation",basic,
+                    ServerRuntime.JSON.valueToTree(Map.of("command","validate","targetKind","config","packageId","debug")),200);
+            assertEquals("UAT",packageDefaultValidation.path("context").path("environment").asText());
+            assertEquals("PASS",packageDefaultValidation.path("overallStatus").asText());
+            assertTrue(packageDefaultValidation.toString().contains("UAT — Tool Groups and DB/MQ/HTTP/SSH Helpers"));
+            assertEquals(400,postStatus(port,basic,"/att/api/v1/validation",Map.of("command","validate","unexpected","field")));
+            assertEquals(403,postStatus(port,basic,"/att/api/v1/validation",Map.of("command","validate","all",true)),
+                    "Installation-wide validation requires system-administrator access");
+
             JsonNode form=getJson(port,formPath,basic);
             assertFalse(form.toString().contains("123456789"));assertFalse(form.toString().contains("violet-123"));
             JsonNode draftBody=ServerRuntime.JSON.valueToTree(Map.of("packageId","debug","target",Map.of("type","template","id","FORM"),"input",form.path("input")));

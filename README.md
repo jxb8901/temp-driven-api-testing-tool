@@ -1,142 +1,53 @@
-# ATT 4.2.4 - Automated Testing Tool
+# ATT 4.2.4 — API and integration testing
 
-ATT is an offline, template-driven API and integration test runner for SIT/UAT. Excel rows define Testcases; Stages select Templates; Templates execute ordered Actions; reusable Flows and configured Resources keep implementation logic out of test data.
+ATT is a Package-oriented platform for functional API and integration testing and controlled Load testing. A Package groups Testcases, Templates, Flows, Tools, Testdata and other business resources behind one registered root. Shared Runtime Configuration and Environment profiles bind those resources to SIT, UAT or another environment.
 
-```text
-Testcase -> Stage -> Template -> Action -> Resource
-                                  |         |-- Tool
-                                  |         |-- DBHelper
-                                  |         |-- MQHelper
-                                  |         `-- SSHHelper (Tool routing + Resource Helper)
-                                  `-- Flow
-```
+ATT supports Local execution, an optional ATT Server control plane, a browser Studio, and a versioned REST API. The Engine runs one functional RUN model across Case, Template, Flow and Tool targets; Debug adds diagnostic detail to a RUN. LOAD uses separate workload pacing and evidence controls. VALIDATE checks configuration, Package resources and dependencies without business execution.
 
-ATT has three peer execution modes over the same runtime model:
+![ATT Studio dashboard showing configured Packages, recent Jobs, and Server status](docs/system-design/ui-shell-baseline/dashboard-1440-light.png)
 
-- **Run** — workbook-driven Testcase execution;
-- **Debug** — standalone Template, Flow or Tool execution;
-- **Load** — closed-VU or fixed-arrival-rate execution against a Template, Flow or Tool.
+*Illustrative Studio UI-shell baseline with sample Package and Job data; the version badge belongs to that screenshot baseline.*
 
-All modes use canonical `EXEC` / `META` Context roots and Action-local `output`. Actions publish native typed values through `output.result`; resource-specific evidence and transport parsing remain at their boundaries. Environment profiles select DB/MQ/SSHHelper bindings through stable logical IDs without changing Actions.
+## Quick Start: current 4.2.4 CLI
 
-## Start here
+This source-checkout walkthrough uses the shipped legacy CLI. Snapshot generation is an explicit authoring step; validation does not create or update snapshots.
 
-New to ATT? Follow the [English Quick Start](docs/quick-start.md) or [中文快速入門](docs/quick-start.zh.md). Both guides use the same checked-in offline example and walk through snapshot, validation, execution, logs, assertions, and one local Tool call.
-
-```sh
+~~~sh
 ./att.sh snapshot --suite testcase/quick_start.xlsx
 ./att.sh validate --package
 ./att.sh run --suite testcase/quick_start.xlsx --case quickStart.default.QS001
-```
+~~~
 
-Useful peer-mode commands after the basic Run workflow is familiar:
+Open [Quick Start](docs/quick-start.md) for the full offline fixture, validation, execution, logs and assertions. The same guide is available in [繁體中文](docs/quick-start.zh.md).
 
-```sh
-./att.sh debug template PAYMENT_INVOKE
-./att.sh load ../examples/load/closed-smoke.yaml
-./att.sh load ../examples/load/arrival-smoke.yaml --format json
-```
+## What ATT provides
 
-To submit work to ATT Server, use the thin `att remote` adapter. Configure a Server profile first; local commands remain offline and do not require Server connectivity. See the [ATT Remote client guide](docs/remote-client.md) and [中文指南](docs/remote-client.zh.md).
-
-```sh
-./att.sh remote --server sit packages
-./att.sh remote --server sit run payments --suite testcase/payment.xlsx --tag smoke
-```
-
-Windows uses the same commands through `att.bat`.
+- Package isolation and reusable authoring with Testcases, Stages, Templates, Flows, Actions, Tools and Resources.
+- Functional RUN and separate LOAD execution, with read-only VALIDATE.
+- Shared Runtime Configuration, Environment profiles, optional Package Manifest defaults and Package-owned Testdata.
+- Local CLI, ATT Studio, REST/SSE integration and Server Jobs and Schedules.
+- Bounded diagnostics, reports and evidence with secret protection.
 
 ## Documentation
 
-- Canonical documentation index: [`docs/README.md`](docs/README.md)
-- English guided tutorial: [`docs/quick-start.md`](docs/quick-start.md)
-- 中文快速入門: [`docs/quick-start.zh.md`](docs/quick-start.zh.md)
-- Complete generated Reference Manual: [`docs/reference.md`](docs/reference.md)
-- 中文 Reference Manual: [`docs/reference.zh.md`](docs/reference.zh.md)
-- English Reference sources: [`docs/reference/`](docs/reference/)
-- Chinese Reference sources: [`docs/reference.zh/`](docs/reference.zh/)
-- Maintainer design: [`docs/system-design/`](docs/system-design/)
-- Historical and superseded documentation: [`docs/history/`](docs/history/)
-- Release chronology: [`CHANGELOG.md`](CHANGELOG.md)
+- [Documentation map](docs/README.md): start pages for test authors, CLI users, load testers, Studio operators, Server administrators, integrators and contributors.
+- [Concepts](docs/concepts/): Package, authoring, execution, configuration and Server lifecycle.
+- [Guides](docs/guides/): task-oriented RUN, LOAD and validation procedures.
+- [Current CLI Reference](docs/reference/cli.md) and [ATT Remote compatibility guide](docs/remote-client.md).
+- [Proposed CLI vNext](docs/interfaces/cli/vnext-proposed.md) is a plan for a later release. It is not available in ATT 4.2.4.
+- [Generated Reference Manual](docs/reference.md) and [繁體中文 Reference](docs/reference.zh.md).
+- [Server deployment](docs/operations/server-deployment.md), [Studio interfaces](docs/interfaces/studio/), and [Server API v1](docs/interfaces/server-api/).
+- [Documentation architecture and inventory](docs/system-design/documentation-architecture.md); [history archive](docs/history/README.md).
 
-The current Reference Manual is organized by product concepts rather than release history: authoring, Context, Run/Debug/Load, Tool/DBHelper/MQHelper/SSHHelper, environments, expressions, reliability, configuration, CLI, results, validation and operations.
+## Build and documentation checks
 
-DB operations run under ordinary `type: tool` Actions through `db.<helper>.<query|scalar|update>(...)` calls. Action-level `timeoutMs` overrides the DBHelper statement timeout. Read-only query/scalar calls may use bounded retry for `ASSERTION` and `TIMEOUT`; mutating update calls deliberately reject automatic retry because the mutation outcome can be uncertain after timeout or database/transport failure. See the [DBHelper Reference](docs/reference/resources/dbhelper.md).
+Use a JDK and Maven to build the project. The source launcher runs prebuilt classes and does not compile code.
 
-## Repository modules
-
-The repository is a Maven source checkout whose default package lives under `packages/default/`. The Local release keeps that package layout beneath its extracted installation root, `ATT_HOME`, alongside the launchers and runtime libraries:
-
-```text
-pom.xml       parent / aggregator
-att-engine/   local Run, Debug, Load, validation, and execution contracts
-att-server-api/ Java 8 public REST/SSE contract shared by Server and client
-att-remote/   Java 8 Server REST/SSE client used by `att remote`
-att-cli/      existing ATT command line and local command adapter
-att-worker/   one-job process adapter for ATT Server
-att-server/   Java 17+ Jakarta Servlet WAR for the ATT Server control plane
-att-dist/     binary/source release assembly
-```
-
-ATT Server is a single-node REST/SSE control plane deployed as a WAR to external Tomcat 10.1+ on Java 17+. Tomcat owns authentication; Server consumes the Servlet Principal and launches isolated Worker processes. `att remote` uses the public API, SSE replay, and canonical job results. See [ATT Server deployment and API](docs/server-deployment.md). CLI, Engine, Worker, Remote, and Server API modules remain Java 8-compatible. See [Multi-module build layout](docs/system-design/multi-module-build.md).
-
-## Default ATT_HOME and Package layout
-
-```text
-config/
-  config.yaml   shared runtime configuration
-  tools/        shared Tool groups
-  dbhelpers/    shared DBHelper descriptors
-  mqhelpers/    shared MQHelper descriptors
-  environments/ complete profile examples
-  att-server.example.yaml  ATT Server deployment template
-schemas/        repository build source for the Engine JAR schema registry (not an ATT_HOME runtime directory)
-packages/default/
-  testcase/     xlsx + yaml sidecar + generated xml snapshot
-  templates/    Template directories and reusable Flows
-  tools/        process-backed integration scripts/programs
-  testdata/     package-local Testdata descriptors
-  sql/          package SQL resources
-  output/       run/debug/load evidence and reports
-tools/          repository build, documentation, benchmark, and QA automation
-```
-
-The source checkout and Local archive use the same `packages/default/` business-resource root and share runtime configuration from `$ATT_HOME/config/config.yaml`. `./att.sh` runs commands against that Package; `att.sh`, `att.bat`, Maven modules, and `lib/` stay at the repository or `ATT_HOME` root. Packages are registered explicitly by ATT Server and do not need their own `config/` or `schemas/` directories. In the archive, ATT Server can register `$ATT_HOME/packages/default` directly. Its `server.dataDir` can be `$ATT_HOME/data` when that path is disjoint from every registered package root; the archive does not include Server data or an active `config/att-server.yaml`. See the [Server deployment guide](docs/server-deployment.md) for config discovery and migration from earlier flat source checkouts.
-
-ATT 4.2.4 uses `att-config/v2.13`, `att-package/v1`, `att-testdata/v1.0`, `att-tool-group/v2.9`, `att-dbhelper/v2.6`, `att-mqhelper/v1.3`, `att-httphelper/v1.1`, `att-template/v3.6`, `att-flow/v3.6`, and `att-load/v1.9`. The repository `schemas/` catalog is build input only; the matching ATT Engine JAR embeds the authoritative, versioned runtime registry under `att-schemas/`. Runtime validation reads that registry from the classpath and may materialize a verified, content-addressed compatibility cache in a private per-user temporary directory; it retains the active and previous registry version and safely prunes older unused entries. `ATT_HOME/schemas/` is ignored and is not installed, and package-local catalogs or schema files cannot replace the runtime definitions.
-
-## Build and validation
-
-Source launchers run only prebuilt classes; `att.sh` and `att.bat` never compile code. To prepare the Java 8-compatible CLI, Engine, Remote, and Server API modules, use a JDK and Maven:
-
-```sh
-mvn -DskipTests -pl att-cli -am compile
-```
-
-Then run `./att.sh` on macOS/Linux or `att.bat` on Windows. A missing prebuilt class produces an error with the explicit build command. Packaged releases contain prebuilt JARs and need a Java 8 or later runtime, not Maven. Optional JDBC and IBM MQ driver JARs can be placed in `lib/`. The Server WAR requires Java 17 or later.
-
-```sh
+~~~sh
 mvn clean verify
-python3 tools/build_reference_manual.py --check
-python3 tools/validate_reference_content.py
+python3 -B tools/build_reference_manual.py --check
+python3 -B tools/verify_documentation.py
 ./build.sh
-```
+~~~
 
-`mvn clean verify` runs the full reactor: it tests the Engine, Server API, Remote, CLI, Worker, and Server modules, packages the Server WAR, and assembles separate local, Server, and source releases through `att-dist`. `build.sh` remains the release entry point, smoke-tests the extracted local package, and verifies that both binary archives are smaller than 25 MB. The local package contains the CLI and its runtime libraries; the Server package contains the WAR and deployment guides without a second copy of those libraries. The Server WAR requires Java 17 and external Tomcat 10.1+; CLI, Engine, Worker, Remote, and Server API remain Java 8-compatible. JDBC drivers are supplied in `lib/`; IBM MQ remains an optional runtime integration.
-
-`build.sh` uses Maven's `1C` thread setting by default. On a memory-constrained
-machine, bound Maven to one build thread and skip only the suites already covered
-by hosted CI:
-
-```sh
-MAVEN_OPTS="-Xmx1024m" ATT_MAVEN_THREADS=1 ATT_CI_SKIP_COVERED_TESTS=true ./build.sh
-```
-
-`ATT_MAVEN_THREADS` accepts a positive integer or a core multiple such as `1C`.
-The default remains `1C`. `ATT_CI_SKIP_COVERED_TESTS` skips the Java 8 module,
-frontend unit, and Server unit suites only; compilation, TypeScript checking,
-the production Vite build, bundle budget, WAR/archive assembly, schema and
-package validation, launcher checks, and packaged CLI smoke tests still run. A
-full local release still uses `./build.sh` without that variable. If Maven stops
-inside `att-web`, rerun its Vitest suite directly from `att-web/frontend`; the
-final `npm test failed` line is a reactor summary, not the failing stack trace.
+The Server WAR requires Java 17 or later and external Tomcat 10.1+. The Local CLI, Engine, Worker, Remote client and Server API retain the published Java 8 baseline. See the [multi-module build guide](docs/system-design/multi-module-build.md) for maintainer details.

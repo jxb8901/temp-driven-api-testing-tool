@@ -101,6 +101,7 @@ Status: 規範性使用者文件；由模組化來源自動生成
   - [API paths](#api-paths)
 - [CLI 參考](#cli-參考)
   - [選擇命令](#選擇命令)
+  - [ATT 4.2.4 的可用性](#att-424-的可用性)
   - [編譯 source checkout](#編譯-source-checkout)
   - [按任務查閱語法、option 和範例](#按任務查閱語法option-和範例)
   - [透過 CLI 使用 ATT Server](#透過-cli-使用-att-server)
@@ -937,7 +938,11 @@ RUN 是 Case、選定 Cases 或單一 Template/Flow/Tool 的功能執行模型�
 
 ### 統一 RUN 與排程
 
+<!-- att-doc-status: current release=4.2.4 -->
+
 ATT 4.2.4 將功能性單次執行統一為 **RUN**，支援 Case、Template、Flow、Tool，以及所選 Case 批次。**Debug** 是 RUN 的診斷選項。**LOAD** 保留效能引擎、負載控制和專用報告。
+
+已發行的 Local CLI 保留其 interface-specific 相容邊界：run verb 選取 workbook Case，standalone debug 執行一個 Template、Flow 或 Tool。ATT Remote 保留舊版 Server command。此共用 RUN model 不代表 proposed vNext CLI grammar 已發行；請參閱[規劃中的 vNext page](interfaces/cli/vnext-proposed.zh.md)。
 
 #### 驗證及執行 RUN
 
@@ -1057,7 +1062,9 @@ Job lifecycle API 在 `/api/v1` 下提供以下 endpoint：
 
 ### Run 模式
 
-Run 會執行 Workbook 中經選擇的 authored Testcase。每個選中的 Testcase 會產生一次 Case execution，並有自己的狀態和 evidence record。討論正規化 Workbook row 時使用 *Testcase*；討論 runtime 結果時使用 *Case execution*；兩者共用同一個 Case ID。
+<!-- att-doc-status: current release=4.2.4 -->
+
+ATT 4.2.4 Local CLI 的 run command 是 legacy Case adapter，會執行 Workbook 中選取的 authored Testcase。較完整的 functional model 與 direct resource target 定義於 [Unified RUN](reference.zh/execution-modes/unified-run.md)。
 
 ```sh
 ./att.sh run --all
@@ -2840,6 +2847,9 @@ python tools/migrate_package_config.py --config config/config.yaml --server-conf
 
 ## CLI 參考
 
+<!-- att-doc-status: current release=4.2.4 -->
+
+
 ### 選擇命令
 
 | 命令 | 目的 | 是否調用外部 Tool |
@@ -2856,6 +2866,12 @@ python tools/migrate_package_config.py --config config/config.yaml --server-conf
 | `build` | 歸檔最新已完成 run | 否 |
 | `clean` | 刪除文檔化的 ATT 生成輸出 | 否 |
 | `remote` | 透過 ATT Server REST/SSE API 提交及管理工作 | ATT Server |
+
+上表列出 ATT 4.2.4 CLI command。獨立的 vNext proposal 尚未包含在此 release。
+
+### ATT 4.2.4 的可用性
+
+本 Reference 說明 ATT 4.2.4 已發行的 CLI。vNext grammar 是獨立的[規劃中 proposal](interfaces/cli/vnext-proposed.zh.md)，並非目前 command interface。本版本繼續支援 legacy command。
 
 ### 編譯 source checkout
 
@@ -3459,7 +3475,8 @@ Maintainer implementation sequencing、scheduler internals、resource-owner deta
 | Load bindings | `att-load-bindings/v1` | `schemas/att-load-bindings-v1.schema.json` |
 | Load summary | att-load-summary/v1.2 |
 | Run manifest | att-run/v2.1 |
-| Validation JSON | att-validation/v2.1 |
+| 舊版 Package validation JSON | `att-validation/v2.1` |
+| 精簡 CLI 階層式 validation report | `att-validation/v1` |
 | CI summary | att-ci-summary/v2.1 |
 | JUnit XML | att-junit/v2.1 |
 

@@ -101,6 +101,7 @@ Status: Normative end-user documentation; generated from modular sources
   - [API paths](#api-paths)
 - [CLI reference](#cli-reference)
   - [Choose a command](#choose-a-command)
+  - [Availability in ATT 4.2.4](#availability-in-att-424)
   - [Build a source checkout](#build-a-source-checkout)
   - [Find syntax, options, and examples by task](#find-syntax-options-and-examples-by-task)
   - [Use ATT Server from the CLI](#use-att-server-from-the-cli)
@@ -955,12 +956,17 @@ All adapters resolve the environment, construct canonical Context, validate the 
 
 ### Unified RUN and schedules
 
+<!-- att-doc-status: current release=4.2.4 -->
+
 ATT 4.2.4 represents functional one-shot execution as **RUN**. A RUN executes a Case, Template, Flow, Tool, or a selected batch of Cases. **Debug** is an optional diagnostic mode of RUN. **LOAD** retains its performance engine, pacing controls and specialized reports.
+
+The released Local CLI keeps its interface-specific compatibility boundary: its run verb selects workbook Cases, and standalone debug runs one Template, Flow or Tool. ATT Remote retains its legacy Server commands. This shared RUN model does not mean the proposed vNext CLI grammar is released; see the [Planned vNext page](interfaces/cli/vnext-proposed.md).
 
 #### Validate and execute a RUN
 
 Use the same authenticated Server origin and context path as ATT Studio. Send this request to `POST /api/v1/drafts/run`:
 
+<!-- att-doc-example: current id=unified-run-draft schema=att-execution/v1 format=json -->
 ```json
 {
   "schemaVersion": "att-execution/v1",
@@ -1013,6 +1019,7 @@ Canonical creation requests use `schemas/att-schedule-v2.schema.json`; legacy ro
 
 Create a RUN schedule by sending this body to `POST /api/v1/schedules`:
 
+<!-- att-doc-example: current id=run-schedule schema=att-schedule/v2 format=json -->
 ```json
 {
   "schemaVersion": "att-schedule/v2",
@@ -1075,7 +1082,9 @@ Use the returned `draftId`, package, environment and canonical `executionType: r
 
 ### Run mode
 
-Run executes selected authored Testcases from a workbook. Each selected Testcase produces one Case execution with a status and evidence record. Use *Testcase* for the normalized workbook row and *Case execution* for that runtime result; the Case ID is the shared identifier.
+<!-- att-doc-status: current release=4.2.4 -->
+
+The ATT 4.2.4 Local CLI run command is a legacy Case adapter: it executes selected authored Testcases from a workbook. The broader functional model and direct resource targets are defined in [Unified RUN](reference/execution-modes/unified-run.md).
 
 ```sh
 ./att.sh run --all
@@ -1591,6 +1600,7 @@ Built-ins use `builtin:<mode>`. Put package templates in `load/templates/` and b
 
 Catalog inspection pages contain at most 100 items and also honor the configured serialized response budget (256 KiB by default). Follow `nextOffset` until it is null: each page retains complete definitions, so the same query and offset retrieve the corresponding definitions without a separate detail call. A definition that cannot fit even alone is listed as `response-too-large` without its definition; reduce its size for Studio, or compose it directly by file reference in the CLI. CLI `load --list-templates` follows every page automatically and retains the scan-limit `truncated` indicator.
 
+<!-- att-doc-example: current id=multi-workload-load-template schema=att-load-template/v1 format=yaml -->
 ```yaml
 schemaVersion: att-load-template/v1
 name: Independent mixed pools
@@ -1606,6 +1616,7 @@ workloads:
     mix: [{id: purchase, weight: 40}, {id: report, weight: 60}]
 ```
 
+<!-- att-doc-example: current id=multi-workload-load-bindings schema=att-load-bindings/v1 format=yaml -->
 ```yaml
 schemaVersion: att-load-bindings/v1
 bindings:
@@ -2931,6 +2942,9 @@ Source revision conflicts return `409`; denied source access or Environment poli
 
 ## CLI reference
 
+<!-- att-doc-status: current release=4.2.4 -->
+
+
 ### Choose a command
 
 | Command | Purpose | External tools? |
@@ -2947,6 +2961,12 @@ Source revision conflicts return `409`; denied source access or Environment poli
 | `build` | Archive the latest completed run | No |
 | `clean` | Remove documented ATT-generated output | No |
 | `remote` | Submit and manage jobs through ATT Server's REST/SSE API | ATT Server |
+
+The commands in this table are the ATT 4.2.4 CLI. The separate vNext proposal is not part of this release.
+
+### Availability in ATT 4.2.4
+
+This Reference describes the CLI shipped with ATT 4.2.4. The vNext grammar is a separate [Planned proposal](interfaces/cli/vnext-proposed.md); it is not a current command interface. Legacy commands remain supported in this release.
 
 ### Build a source checkout
 
@@ -3575,7 +3595,8 @@ Active schemas (the matching ATT Engine JAR's embedded registry, built from `sch
 | Load bindings | `att-load-bindings/v1` | `schemas/att-load-bindings-v1.schema.json` |
 | Load summary | att-load-summary/v1.2 |
 | Run manifest | att-run/v2.1 |
-| Validation JSON | att-validation/v2.1 |
+| Legacy package validation JSON | `att-validation/v2.1` |
+| Minimal CLI hierarchical validation report | `att-validation/v1` |
 | CI summary | att-ci-summary/v2.1 |
 | JUnit XML | att-junit/v2.1 |
 

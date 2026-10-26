@@ -1,11 +1,16 @@
 # Unified RUN and schedules
 
+<!-- att-doc-status: current release=4.2.4 -->
+
 ATT 4.2.4 represents functional one-shot execution as **RUN**. A RUN executes a Case, Template, Flow, Tool, or a selected batch of Cases. **Debug** is an optional diagnostic mode of RUN. **LOAD** retains its performance engine, pacing controls and specialized reports.
+
+The released Local CLI keeps its interface-specific compatibility boundary: its run verb selects workbook Cases, and standalone debug runs one Template, Flow or Tool. ATT Remote retains its legacy Server commands. This shared RUN model does not mean the proposed vNext CLI grammar is released; see the [Planned vNext page](../../interfaces/cli/vnext-proposed.md).
 
 ## Validate and execute a RUN
 
 Use the same authenticated Server origin and context path as ATT Studio. Send this request to `POST /api/v1/drafts/run`:
 
+<!-- att-doc-example: current id=unified-run-draft schema=att-execution/v1 format=json -->
 ```json
 {
   "schemaVersion": "att-execution/v1",
@@ -58,6 +63,7 @@ Canonical creation requests use `schemas/att-schedule-v2.schema.json`; legacy ro
 
 Create a RUN schedule by sending this body to `POST /api/v1/schedules`:
 
+<!-- att-doc-example: current id=run-schedule schema=att-schedule/v2 format=json -->
 ```json
 {
   "schemaVersion": "att-schedule/v2",
