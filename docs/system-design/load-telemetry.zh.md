@@ -8,6 +8,24 @@ Load latency percentile 使用有界 primitive `long` reservoir。Run-level repo
 
 `metrics.windowMetrics.timeSeries.points` 全執行 chart series 最多保留 2,048 個有資料的 bin，初始寬度為 1,000 ms。資料 bin 超過容量時，ATT 會合併相鄰 bin，並使用 power-of-two coarsening 將寬度加倍。它不會淘汰歷史 bin；長時間 run 會以較低的時間解析度保留資料。Measured 和 steady series `metrics.windowMetrics.timeSeries.windowSeries.measured.points`、`metrics.windowMetrics.timeSeries.windowSeries.steady.points` 各自最多 2,048 個 bin，按 configured window 起點對齊，並在 window boundary 截短最後一個 partial bucket；初始寬度為 1,000 ms 與 window duration 兩者中較小者，且沿用相同的 coarsening 和不淘汰歷史資料政策。每個 chart bin 最多保留 128 個 latency sample，與 run-level、configured-window 和 phase reservoir 分開計算。Compatibility `metrics.buckets` ring 保留最新 4,096 個一秒 bucket，並淘汰較舊項目。
 
+Service 有 private output directory 時，每個 LOAD metrics collector 每五分鐘及 scheduler 正常 drain 後寫入 versioned checkpoint。Checkpoint 包含一致的 metrics snapshot、run/workload identity、單調遞增 sequence、capture time 及 integrity checksum。資料先寫入 temporary file 再 atomic rename；每個 aggregate 或 workload collector 僅保留最新兩代，每個檔案上限 16 MiB。寫入錯誤會獨立顯示在 `metrics.checkpoints`，不會改寫執行狀態。Checkpoint 是 recovery evidence，不會聲稱中斷或 partial LOAD 已成功完成。完成的 report bundle 以最後寫入的 `load-report-manifest.json` 作 commit marker；Server 發布 canonical LOAD report 前會驗證所有列出的 path、長度及 checksum。
+
+九百萬事件 accelerated metrics stress 預設不執行：
+
+~~~sh
+mvn -pl att-engine -Datt.load.soak.accelerated=true -Dtest=LoadMetricsHighIterationSoakTest test
+~~~
+
+此 synthetic collector stress 會檢查精確事件總數及有界 bucket/time-series retention；它不能代替 25 小時 Engine/Worker acceptance run，也不能單獨證明 completed throughput。
+
+請在專用主機上手動執行 measured gate，預留至少 28 小時不間斷執行時間及足夠儲存空間。請從本次測量的相同 checkout commit 建置並解壓 ATT Local，再執行：
+
+~~~sh
+python3 tools/run_load_soak.py --runtime-root /path/to/att-local --output target/load-soak-evidence --commit-sha "$(git rev-parse HEAD)"
+~~~
+
+Gate 使用 150 arrivals/s、512 個最大 in-flight iterations 和 ATT-local no-op Template，驗證每個五分鐘 checkpoint interval、arrival/completion conservation，以及已 commit 的 JSON/YAML/HTML report bundle。它會輸出 `acceptance.json`、`five-minute-trend.json` 和完整 run directory。只有這個 real 25 小時 gate 通過並記錄硬體資料後，結果才算 VERIFIED。
+
 `PayloadCache` 為 process scope，並會在 file 的 canonical path、size 或 modification time 改變時使 entry 失效。它採 least-recently-used eviction，最多保留 512 個 entries、共 16,777,216 個 UTF-16 code units；超過 2,097,152 code units 的單一 file 不會被 cache。這將 cached character data 限制在約 32 MiB；此上限不限制呼叫端載入的 String 或 compiled plan 自己的 snapshot。
 
 如需比較 physical、interactive-mirror、deferred 及 bounded mode 的本機 evidence-log append 數據，請看 [CaseExecutionLog 基準測試](case-execution-log-benchmark.zh.md)。

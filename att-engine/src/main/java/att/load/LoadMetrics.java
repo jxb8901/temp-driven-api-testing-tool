@@ -38,6 +38,7 @@ public final class LoadMetrics implements LoadEventListener {
     private final Set<String> activeUsers = Collections.newSetFromMap(new ConcurrentHashMap<String, Boolean>());
     private final AtomicLong scheduled = new AtomicLong(), measuredScheduled = new AtomicLong(), started = new AtomicLong(), completed = new AtomicLong();
     private final AtomicLong success = new AtomicLong(), failure = new AtomicLong(), runtimeError = new AtomicLong(), dropped = new AtomicLong();
+    private final AtomicLong capacityDropped = new AtomicLong(), submissionRejected = new AtomicLong(), cancelledBeforeAdmission = new AtomicLong();
     private final AtomicLong measuredCompleted = new AtomicLong(), measuredFailure = new AtomicLong(), measuredSuccess = new AtomicLong(), measuredRuntimeError = new AtomicLong(), measuredDropped = new AtomicLong();
     private final AtomicInteger inFlight = new AtomicInteger(), maxInFlight = new AtomicInteger();
     private final AtomicInteger activeVus = new AtomicInteger(), maxActiveVus = new AtomicInteger();
@@ -50,6 +51,8 @@ public final class LoadMetrics implements LoadEventListener {
     private final AtomicInteger workerQueueDepth = new AtomicInteger(), workerQueueDepthPeak = new AtomicInteger();
     private final GeneratorTelemetry generatorTelemetry = new GeneratorTelemetry();
     private final AtomicLong measuredWindowStartMs = new AtomicLong(NO_TIMESTAMP);
+    private final AtomicInteger activeMutators = new AtomicInteger();
+    private final java.util.concurrent.atomic.AtomicBoolean snapshotInProgress = new java.util.concurrent.atomic.AtomicBoolean();
     private final java.util.List<Map<String,Object>> failureSamples = new java.util.ArrayList<Map<String,Object>>();
     private final Object errorClassificationLock = new Object();
     private final String model;
@@ -60,6 +63,7 @@ public final class LoadMetrics implements LoadEventListener {
     private final double configuredArrivalRatePerSecond;
     private final LoadWindowMetrics windowMetrics;
     private volatile long endedAtEpochMs;
+    private volatile LoadMetricsCheckpointStore checkpointStore;
 
     public LoadMetrics(String model, long startedAtEpochMs) { this(model, startedAtEpochMs, 0L, 0, 0.0, 0); }
     public LoadMetrics(String model, long startedAtEpochMs, long rateWindowMs) { this(model, startedAtEpochMs, rateWindowMs, 0, 0.0, 0); }
@@ -97,6 +101,12 @@ public final class LoadMetrics implements LoadEventListener {
 
     @Override public void onEvent(LoadEvent event) {
         if (event == null) return;
+        beginMutation();
+        try { recordEvent(event); }
+        finally { endMutation(); }
+    }
+
+    private void recordEvent(LoadEvent event) {
         if (windowMetrics != null) windowMetrics.onEvent(event);
         generatorTelemetry.sample(isWarmup(event));
         if (event.scheduled()) {
@@ -105,6 +115,9 @@ public final class LoadMetrics implements LoadEventListener {
         }
         if (event.dropped()) {
             dropped.incrementAndGet();
+            if ("SUBMISSION_REJECTED".equals(event.errorType())) submissionRejected.incrementAndGet();
+            else if ("CANCELLED_BEFORE_ADMISSION".equals(event.errorType())) cancelledBeforeAdmission.incrementAndGet();
+            else capacityDropped.incrementAndGet();
             if (!isWarmup(event)) measuredDropped.incrementAndGet();
         }
         if (event.started()) {
@@ -166,8 +179,20 @@ public final class LoadMetrics implements LoadEventListener {
     }
 
     public void finish(long endedAtEpochMs) {
-        this.endedAtEpochMs = endedAtEpochMs;
-        if (windowMetrics != null) windowMetrics.finish(endedAtEpochMs);
+        beginMutation();
+        try {
+            this.endedAtEpochMs = endedAtEpochMs;
+            if (windowMetrics != null) windowMetrics.finish(endedAtEpochMs);
+        } finally { endMutation(); }
+        LoadMetricsCheckpointStore store = checkpointStore;
+        if (store != null) store.finish(this::snapshot);
+    }
+    void enableCheckpoints(java.nio.file.Path directory, String runId, String scope) {
+        if (directory == null) return;
+        if (checkpointStore != null) throw new IllegalStateException("LOAD metrics checkpoints are already enabled");
+        LoadMetricsCheckpointStore store = new LoadMetricsCheckpointStore(directory, runId, scope);
+        checkpointStore = store;
+        store.start(this::snapshot);
     }
     public long scheduled() { return scheduled.get(); }
     public long started() { return started.get(); }
@@ -180,40 +205,64 @@ public final class LoadMetrics implements LoadEventListener {
     public int maxInFlight() { return maxInFlight.get(); }
 
     public void recordSchedulerWakeup(int queueDepth) {
-        schedulerWakeups.incrementAndGet();
-        recordWorkerQueueDepth(queueDepth);
+        beginMutation();
+        try {
+            recordSchedulerWakeupUnsafe(queueDepth);
+        } finally { endMutation(); }
     }
     public void recordSchedulerWakeupAt(long timestampEpochMs, int queueDepth) {
-        recordSchedulerWakeup(queueDepth);
-        if (windowMetrics != null) windowMetrics.recordSchedulerSample(timestampEpochMs, queueDepth);
+        beginMutation();
+        try {
+            recordSchedulerWakeupUnsafe(queueDepth);
+            if (windowMetrics != null) windowMetrics.recordSchedulerSample(timestampEpochMs, queueDepth);
+        } finally { endMutation(); }
     }
     public void recordSubmitLag(long millis, int queueDepth) {
-        long value = Math.max(0L, millis);
-        submitLagCount.incrementAndGet(); submitLagSumMs.addAndGet(value); updateMax(submitLagMaxMs, value);
-        recordWorkerQueueDepth(queueDepth);
+        beginMutation();
+        try {
+            recordSubmitLagUnsafe(millis, queueDepth);
+        } finally { endMutation(); }
     }
     public void recordSubmitLagAt(long timestampEpochMs, long millis, int queueDepth) {
-        recordSubmitLag(millis, queueDepth);
-        if (windowMetrics != null) windowMetrics.recordSubmitSample(timestampEpochMs, millis, queueDepth);
+        beginMutation();
+        try {
+            recordSubmitLagUnsafe(millis, queueDepth);
+            if (windowMetrics != null) windowMetrics.recordSubmitSample(timestampEpochMs, millis, queueDepth);
+        } finally { endMutation(); }
     }
     public void recordWorkerQueueDepth(int depth) {
-        int value = Math.max(0, depth); workerQueueDepth.set(value); updateMax(workerQueueDepthPeak, value);
+        beginMutation();
+        try { recordWorkerQueueDepthUnsafe(depth); }
+        finally { endMutation(); }
     }
     public void mergeSchedulerTelemetry(Map<String, Object> values) {
         if (values == null) return;
-        Object wakeups = values.get("schedulerWakeups");
-        if (wakeups instanceof Number) schedulerWakeups.addAndGet(((Number) wakeups).longValue());
-        Object count = values.get("submitLagCount"), mean = values.get("submitLagMeanMs"), maximum = values.get("submitLagMaxMs");
-        if (count instanceof Number) {
-            long n = ((Number) count).longValue(); submitLagCount.addAndGet(n);
-            if (mean instanceof Number) submitLagSumMs.addAndGet(Math.round(((Number) mean).doubleValue() * n));
-        }
-        if (maximum instanceof Number) updateMax(submitLagMaxMs, ((Number) maximum).longValue());
-        Object peak = values.get("workerQueueDepthPeak");
-        if (peak instanceof Number) updateMax(workerQueueDepthPeak, ((Number) peak).intValue());
+        beginMutation();
+        try {
+            Object wakeups = values.get("schedulerWakeups");
+            if (wakeups instanceof Number) schedulerWakeups.addAndGet(((Number) wakeups).longValue());
+            Object count = values.get("submitLagCount"), mean = values.get("submitLagMeanMs"), maximum = values.get("submitLagMaxMs");
+            if (count instanceof Number) {
+                long n = ((Number) count).longValue(); submitLagCount.addAndGet(n);
+                if (mean instanceof Number) submitLagSumMs.addAndGet(Math.round(((Number) mean).doubleValue() * n));
+            }
+            if (maximum instanceof Number) updateMax(submitLagMaxMs, ((Number) maximum).longValue());
+            Object peak = values.get("workerQueueDepthPeak");
+            if (peak instanceof Number) updateMax(workerQueueDepthPeak, ((Number) peak).intValue());
+        } finally { endMutation(); }
     }
 
     public LoadMetricsSnapshot snapshot() {
+        while (!snapshotInProgress.compareAndSet(false, true)) Thread.yield();
+        try {
+            while (activeMutators.get() != 0) Thread.yield();
+            return snapshotUnsafe();
+        } finally {
+            snapshotInProgress.set(false);
+        }
+    }
+
+    private LoadMetricsSnapshot snapshotUnsafe() {
         long[] sorted = latencies.snapshot();
         Arrays.sort(sorted);
         long ended = endedAtEpochMs == 0L ? System.currentTimeMillis() : endedAtEpochMs;
@@ -238,6 +287,11 @@ public final class LoadMetrics implements LoadEventListener {
         result.put("failure", failure.get());
         result.put("runtimeError", runtimeError.get());
         result.put("dropped", dropped.get());
+        Map<String, Object> dropClassifications = new LinkedHashMap<String, Object>();
+        dropClassifications.put("CAPACITY_LIMIT", capacityDropped.get());
+        dropClassifications.put("SUBMISSION_REJECTED", submissionRejected.get());
+        dropClassifications.put("CANCELLED_BEFORE_ADMISSION", cancelledBeforeAdmission.get());
+        result.put("dropClassifications", dropClassifications);
         result.put("measuredDropped", measuredDropped.get());
         result.put("currentInFlight", inFlight.get());
         result.put("maxInFlight", maxInFlight.get());
@@ -305,7 +359,32 @@ public final class LoadMetrics implements LoadEventListener {
             PhaseStats value = phases.get(phase);
             if (value != null) phaseMap.put(phase, value.toMap());
         }
+        LoadMetricsCheckpointStore store = checkpointStore;
+        if (store != null) result.put("checkpoints", store.status());
         return new LoadMetricsSnapshot(result, bucketMap, phaseMap);
+    }
+
+    private void beginMutation() {
+        while (true) {
+            while (snapshotInProgress.get()) Thread.yield();
+            activeMutators.incrementAndGet();
+            if (!snapshotInProgress.get()) return;
+            activeMutators.decrementAndGet();
+        }
+    }
+    private void endMutation() { activeMutators.decrementAndGet(); }
+
+    private void recordSchedulerWakeupUnsafe(int queueDepth) {
+        schedulerWakeups.incrementAndGet();
+        recordWorkerQueueDepthUnsafe(queueDepth);
+    }
+    private void recordSubmitLagUnsafe(long millis, int queueDepth) {
+        long value = Math.max(0L, millis);
+        submitLagCount.incrementAndGet(); submitLagSumMs.addAndGet(value); updateMax(submitLagMaxMs, value);
+        recordWorkerQueueDepthUnsafe(queueDepth);
+    }
+    private void recordWorkerQueueDepthUnsafe(int depth) {
+        int value = Math.max(0, depth); workerQueueDepth.set(value); updateMax(workerQueueDepthPeak, value);
     }
 
     private PhaseStats phase(String name) {

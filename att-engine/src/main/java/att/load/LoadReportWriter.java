@@ -12,8 +12,13 @@ import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.nio.file.StandardCopyOption;
+import java.nio.file.AtomicMoveNotSupportedException;
+import java.security.MessageDigest;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Stream;
@@ -22,48 +27,181 @@ import java.util.stream.Stream;
 public final class LoadReportWriter {
     private static final int MAX_REPORT_FILE_BYTES = 16 * 1024 * 1024;
     private static final long MAX_REPORT_TOTAL_BYTES = 120L * 1024 * 1024;
+    static final String REPORT_MANIFEST = "load-report-manifest.json";
+    static final String REPORT_MANIFEST_SCHEMA = "att-load-report-manifest/v1";
 
     public Path write(Path outputRoot, LoadRunResult result) throws IOException {
         Path runDirectory = outputRoot.resolve("load").resolve(result.runId()).toAbsolutePath().normalize();
+        Path staging = null;
+        List<Path> promoted = new ArrayList<Path>();
+        boolean promotionStarted = false;
         try {
-            Files.createDirectories(runDirectory.resolve("report"));
+            Files.createDirectories(runDirectory);
+            if (Files.isSymbolicLink(runDirectory) || !Files.isDirectory(runDirectory, LinkOption.NOFOLLOW_LINKS))
+                throw new IOException("LOAD report run directory must be a private regular directory.");
+            runDirectory = runDirectory.toRealPath();
+            final Path stageRoot = Files.createTempDirectory(runDirectory, ".load-report-stage-");
+            staging = stageRoot;
             Map<String, Object> map = result.toMap();
-            long detailBytes = LoadReportDetailWriter.write(runDirectory, map);
+            map.put("reportManifest", REPORT_MANIFEST);
+            long detailBytes = LoadReportDetailWriter.write(stageRoot, map);
             // Stream each representation through the shared byte budget. Never hold three large
             // JSON/YAML/HTML byte arrays in the Worker heap before checking the archive limit.
             ReportByteBudget budget = new ReportByteBudget(detailBytes);
-            try (OutputStream output = budget.open(runDirectory.resolve("load-summary.json"))) {
+            Files.createDirectories(stageRoot.resolve("report"));
+            try (OutputStream output = budget.open(stageRoot.resolve("load-summary.json"))) {
                 JsonSupport.mapper().writerWithDefaultPrettyPrinter().writeValue(output, map);
             }
-            try (OutputStream output = budget.open(runDirectory.resolve("load-summary.yaml"));
+            try (OutputStream output = budget.open(stageRoot.resolve("load-summary.yaml"));
                  OutputStreamWriter writer = new OutputStreamWriter(output, StandardCharsets.UTF_8)) {
                 new Yaml().dump(map, writer);
             }
-            try (OutputStream output = budget.open(runDirectory.resolve("report/index.html"));
+            try (OutputStream output = budget.open(stageRoot.resolve("report/index.html"));
                  OutputStreamWriter writer = new OutputStreamWriter(output, StandardCharsets.UTF_8)) {
                 writer.write(html(runDirectory, result, map));
             }
+            Map<String, Object> manifest = createManifest(stageRoot, result);
+            byte[] manifestBytes = JsonSupport.mapper().writerWithDefaultPrettyPrinter().writeValueAsBytes(manifest);
+            writeBounded(stageRoot.resolve(REPORT_MANIFEST), manifestBytes);
+            long reportBytes = treeBytes(stageRoot);
+            if (reportBytes > MAX_REPORT_TOTAL_BYTES)
+                throw new IOException("LOAD detailed report output exceeds its 120 MiB bounded report budget.");
+
+            // The commit marker is absent during promotion and installed last. Readers can
+            // distinguish a complete bundle from an interrupted multi-file replacement.
+            Files.deleteIfExists(runDirectory.resolve(REPORT_MANIFEST));
+            promotionStarted = true;
+            List<Path> files;
+            try (Stream<Path> paths = Files.walk(stageRoot)) {
+                files = paths.filter(path -> Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS))
+                        .filter(path -> !path.equals(stageRoot.resolve(REPORT_MANIFEST)))
+                        .sorted(Comparator.comparing(path -> stageRoot.relativize(path).toString()))
+                        .collect(java.util.stream.Collectors.toList());
+            }
+            for (Path source : files) {
+                Path relative = stageRoot.relativize(source);
+                Path target = runDirectory.resolve(relative).normalize();
+                if (!target.startsWith(runDirectory)) throw new IOException("LOAD report path escaped its run directory.");
+                createPrivateParents(runDirectory, target.getParent());
+                moveAtomically(source, target);
+                promoted.add(target);
+            }
+            Path stagedManifest = stageRoot.resolve(REPORT_MANIFEST);
+            Path publishedManifest = runDirectory.resolve(REPORT_MANIFEST);
+            moveAtomically(stagedManifest, publishedManifest);
             return runDirectory.resolve("report/index.html");
         } catch (IOException | RuntimeException failure) {
-            removePartialArtifacts(runDirectory, failure);
+            if (promotionStarted) {
+                for (Path path : promoted) {
+                    try { Files.deleteIfExists(path); }
+                    catch (IOException cleanupFailure) { failure.addSuppressed(cleanupFailure); }
+                }
+                try { Files.deleteIfExists(runDirectory.resolve(REPORT_MANIFEST)); }
+                catch (IOException cleanupFailure) { failure.addSuppressed(cleanupFailure); }
+            }
             throw failure;
+        } finally {
+            if (staging != null) removeTree(staging);
         }
     }
 
-    private static void removePartialArtifacts(Path runDirectory, Throwable failure) {
-        for (Path path : new Path[] {runDirectory.resolve("load-summary.json"), runDirectory.resolve("load-summary.yaml"),
-                runDirectory.resolve("report/index.html")}) {
-            try { Files.deleteIfExists(path); }
-            catch (IOException cleanupFailure) { failure.addSuppressed(cleanupFailure); }
+    private static Map<String, Object> createManifest(Path staging, LoadRunResult result) throws IOException {
+        List<Map<String, Object>> files = new ArrayList<Map<String, Object>>();
+        try (Stream<Path> paths = Files.walk(staging)) {
+            for (Path path : (Iterable<Path>) paths.filter(item -> Files.isRegularFile(item, LinkOption.NOFOLLOW_LINKS))
+                    .filter(item -> !item.equals(staging.resolve(REPORT_MANIFEST)))
+                    .sorted(Comparator.comparing(item -> staging.relativize(item).toString()))::iterator) {
+                Path relative = staging.relativize(path);
+                String name = relative.toString().replace('\\', '/');
+                if (relative.isAbsolute() || name.startsWith("/") || name.contains("../") || name.equals("..") || Files.isSymbolicLink(path))
+                    throw new IOException("Unsafe path in LOAD report bundle.");
+                long size = Files.size(path);
+                if (size > MAX_REPORT_FILE_BYTES) throw new IOException("LOAD report file exceeds the 16 MiB artifact entry limit: " + name);
+                files.add(fields("path", name, "lengthBytes", size, "sha256", sha256(path)));
+            }
         }
-        Path details = runDirectory.resolve("details/v1");
-        if (Files.exists(details)) try (Stream<Path> entries = Files.walk(details)) {
-            for (Path path : (Iterable<Path>) entries.sorted(Comparator.reverseOrder())::iterator) Files.deleteIfExists(path);
-        } catch (IOException cleanupFailure) { failure.addSuppressed(cleanupFailure); }
-        for (Path path : new Path[] {runDirectory.resolve("report"), runDirectory.resolve("details")}) {
-            try { Files.deleteIfExists(path); }
-            catch (IOException cleanupFailure) { failure.addSuppressed(cleanupFailure); }
+        if (files.size() > 9000) throw new IOException("LOAD report bundle exceeds the bounded file count.");
+        Object checkpointMetadata = result.metrics().value("checkpoints");
+        Object checkpointSequence = checkpointMetadata instanceof Map
+                ? ((Map<?, ?>) checkpointMetadata).get("sequence") : null;
+        Map<String, Object> checkpointSequences = new LinkedHashMap<String, Object>();
+        if (checkpointSequence != null) checkpointSequences.put("aggregate", checkpointSequence);
+        for (Map.Entry<String, LoadRunResult> workload : result.workloads().entrySet()) {
+            Object workloadCheckpoint = workload.getValue().metrics().value("checkpoints");
+            if (workloadCheckpoint instanceof Map && ((Map<?, ?>) workloadCheckpoint).get("sequence") != null)
+                checkpointSequences.put(workload.getKey(), ((Map<?, ?>) workloadCheckpoint).get("sequence"));
         }
+        return fields("schemaVersion", REPORT_MANIFEST_SCHEMA, "state", "COMPLETE", "complete", Boolean.TRUE,
+                "runId", result.runId(), "executionStatus", result.executionStatus(),
+                "performanceVerdict", result.performanceVerdict(), "startedAt", result.startedAt().toString(),
+                "endedAt", result.endedAt().toString(), "durationMs",
+                Math.max(0L, java.time.Duration.between(result.startedAt(), result.endedAt()).toMillis()),
+                "checkpointSequence", checkpointSequence, "checkpointSequences", checkpointSequences, "files", files);
+    }
+
+    private static Map<String, Object> fields(Object... values) {
+        Map<String, Object> result = new LinkedHashMap<String, Object>();
+        for (int index = 0; index < values.length; index += 2) result.put((String) values[index], values[index + 1]);
+        return result;
+    }
+
+    private static String sha256(Path path) throws IOException {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            try (java.io.InputStream input = Files.newInputStream(path)) {
+                byte[] buffer = new byte[8192];
+                int read;
+                while ((read = input.read(buffer)) >= 0) if (read > 0) digest.update(buffer, 0, read);
+            }
+            StringBuilder value = new StringBuilder(64);
+            for (byte item : digest.digest()) value.append(String.format(java.util.Locale.ROOT, "%02x", item & 0xff));
+            return value.toString();
+        } catch (java.security.NoSuchAlgorithmException impossible) {
+            throw new IllegalStateException("SHA-256 is unavailable", impossible);
+        }
+    }
+
+    private static long treeBytes(Path root) throws IOException {
+        long total = 0L;
+        try (Stream<Path> paths = Files.walk(root)) {
+            for (Path path : (Iterable<Path>) paths.filter(item -> Files.isRegularFile(item, LinkOption.NOFOLLOW_LINKS))::iterator) {
+                long size = Files.size(path);
+                if (size > MAX_REPORT_TOTAL_BYTES - total) return MAX_REPORT_TOTAL_BYTES + 1L;
+                total += size;
+            }
+        }
+        return total;
+    }
+
+    private static void moveAtomically(Path source, Path target) throws IOException {
+        try { Files.move(source, target, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING); }
+        catch (AtomicMoveNotSupportedException unsupported) {
+            Files.move(source, target, StandardCopyOption.REPLACE_EXISTING);
+        }
+    }
+
+    private static void createPrivateParents(Path root, Path parent) throws IOException {
+        if (!parent.startsWith(root)) throw new IOException("LOAD report parent escaped its run directory.");
+        Path current = root;
+        for (Path component : root.relativize(parent)) {
+            current = current.resolve(component);
+            if (Files.exists(current, LinkOption.NOFOLLOW_LINKS)) {
+                if (Files.isSymbolicLink(current) || !Files.isDirectory(current, LinkOption.NOFOLLOW_LINKS))
+                    throw new IOException("LOAD report path contains a non-private directory component.");
+            } else {
+                Files.createDirectory(current);
+            }
+        }
+        if (!current.toRealPath().startsWith(root)) throw new IOException("LOAD report parent escaped its run directory.");
+    }
+
+    private static void removeTree(Path root) {
+        if (root == null || !Files.exists(root, LinkOption.NOFOLLOW_LINKS)) return;
+        try (Stream<Path> paths = Files.walk(root)) {
+            for (Path path : (Iterable<Path>) paths.sorted(Comparator.reverseOrder())::iterator) {
+                try { Files.deleteIfExists(path); } catch (IOException ignored) { }
+            }
+        } catch (IOException ignored) { }
     }
 
     /** Enforce per-file and cross-file UTF-8 byte caps while writing, not after allocation. */
@@ -144,7 +282,7 @@ public final class LoadReportWriter {
         appendTimeSeries(html, result);
 
         html.append("<section class=\"panel\"><h2>Machine-readable summary</h2><p class=\"note\">Aggregate counters and thresholds are exact. Detailed per-workload series are stored in versioned, relative sidecars. Read ");
-        html.append("<a href=\"../load-summary.json\">load-summary.json</a>, <a href=\"../load-summary.yaml\">load-summary.yaml</a> and <a href=\"../details/v1/manifest.json\">details/v1/manifest.json</a>.</p></section>");
+        html.append("<a href=\"../load-summary.json\">load-summary.json</a>, <a href=\"../load-summary.yaml\">load-summary.yaml</a>, <a href=\"../details/v1/manifest.json\">details/v1/manifest.json</a> and <a href=\"../load-report-manifest.json\">load-report-manifest.json</a>.</p></section>");
         String embedded = JsonSupport.write(summary).replace("<", "\\u003c");
         html.append("<script type=\"application/json\" id=\"att-load-summary-data\">").append(embedded).append("</script>");
         appendTrendScript(html);

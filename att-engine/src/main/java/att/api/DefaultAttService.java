@@ -236,7 +236,10 @@ public final class DefaultAttService implements AttService {
         profile.write(runDir);
         Map<String,String> resultPaths=paths("outputDirectory",OperationResult.display(runDir,request.packageRoot()),
                 "configuration",OperationResult.display(runDir.resolve("configuration.json"),request.packageRoot()));
-        if(report!=null) resultPaths.put("report",OperationResult.display(report,request.packageRoot()));
+        if(report!=null) {
+            resultPaths.put("report",OperationResult.display(report,request.packageRoot()));
+            resultPaths.put("reportManifest",OperationResult.display(runDir.resolve("load-report-manifest.json"),request.packageRoot()));
+        }
         return new LoadResult(id,result.status().name(),result.exitCode(),elapsed(started),Collections.<Diagnostic>emptyList(),
                 resultPaths,result,att.config.ConfigurationEvidence.metadata(cfg),reportAvailability);
     }

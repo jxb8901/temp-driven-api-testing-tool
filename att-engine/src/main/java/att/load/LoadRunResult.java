@@ -188,6 +188,7 @@ public final class LoadRunResult {
             paths.put("loadSummaryJson", "load/" + runId + "/load-summary.json");
             paths.put("loadSummaryYaml", "load/" + runId + "/load-summary.yaml");
             paths.put("report", "load/" + runId + "/report/index.html");
+            paths.put("reportManifest", "load/" + runId + "/load-report-manifest.json");
         }
         String archiveState = reportProduced ? "PENDING" : "FAILED";
         archive.put("paths", paths); archive.put("status", archiveState); archive.put("reportAvailability", archiveState);

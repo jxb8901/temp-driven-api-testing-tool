@@ -6,6 +6,8 @@ import org.junit.jupiter.api.io.TempDir;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.zip.ZipFile;
@@ -261,12 +263,47 @@ class ArtifactArchiveTest {
             Path samples=Files.createDirectories(output.resolve("load/run/samples/"+workload));
             for(int i=0;i<600;i++)Files.writeString(samples.resolve(i+".log"),"sample "+i);
         }
-        Path report=output.resolve("load/run/report/index.html");Files.createDirectories(report.getParent());
-        String html="<a href=\"../load-summary.json\">Summary</a>";Files.writeString(report,html);
-        Files.writeString(output.resolve("load/run/load-summary.json"),"{\"businessValue\":\"keep-me\"}");
+        writeCanonicalLoadReport(output.resolve("load/run"), "run");
         Path archive=temporary.resolve("archive.zip");ArtifactArchive.build(output,archive,Files::readAllBytes);
-        assertEquals(1202,((java.util.List<?>)ArtifactArchive.verify(archive,true).get("entries")).size());
+        assertEquals(1205,((java.util.List<?>)ArtifactArchive.verify(archive,true).get("entries")).size());
         assertTrue(new String(ArtifactArchive.read(archive,"load/run/report/index.html"),StandardCharsets.UTF_8).contains("href=\"../load-summary.json\""));
+    }
+
+    @Test void loadArchiveRejectsMissingOrCorruptReportCommit() throws Exception {
+        Path missing=Files.createDirectory(temporary.resolve("missing-report-commit"));
+        Files.createDirectories(missing.resolve("load/run/report"));
+        Files.writeString(missing.resolve("load/run/report/index.html"),"<html>report</html>");
+        Files.writeString(missing.resolve("load/run/load-summary.json"),"{\"report\":\"report/index.html\"}");
+        assertThrows(java.io.IOException.class,()->ArtifactArchive.build(missing,temporary.resolve("missing.zip"),Files::readAllBytes));
+
+        Path corrupt=Files.createDirectory(temporary.resolve("corrupt-report-commit"));
+        writeCanonicalLoadReport(corrupt.resolve("load/run"),"run");
+        Files.writeString(corrupt.resolve("load/run/report/index.html"),"<html>tampered</html>");
+        assertThrows(java.io.IOException.class,()->ArtifactArchive.build(corrupt,temporary.resolve("corrupt.zip"),Files::readAllBytes));
+        assertFalse(Files.exists(temporary.resolve("missing.zip")));
+        assertFalse(Files.exists(temporary.resolve("corrupt.zip")));
+    }
+
+    private static void writeCanonicalLoadReport(Path run,String runId) throws Exception {
+        Files.createDirectories(run.resolve("report"));
+        Files.createDirectories(run.resolve("details/v1"));
+        Files.writeString(run.resolve("report/index.html"),"<a href=\"../load-summary.json\">Summary</a>");
+        Files.writeString(run.resolve("load-summary.json"),"{\"runId\":\"run\",\"durationMs\":1000,\"executionStatus\":\"PASS\",\"performanceVerdict\":\"NOT_EVALUATED\",\"report\":\"report/index.html\",\"reportManifest\":\"load-report-manifest.json\",\"businessValue\":\"keep-me\"}");
+        Files.writeString(run.resolve("load-summary.yaml"),"report: report/index.html\n");
+        Files.writeString(run.resolve("details/v1/manifest.json"),"{\"complete\":true}");
+        List<Map<String,Object>> files=new ArrayList<>();
+        for(String relative:List.of("load-summary.json","load-summary.yaml","report/index.html","details/v1/manifest.json")) {
+            byte[] bytes=Files.readAllBytes(run.resolve(relative));
+            files.add(Map.of("path",relative,"lengthBytes",bytes.length,"sha256",ArtifactArchive.sha256(bytes)));
+        }
+        Map<String,Object> manifest=new LinkedHashMap<>();
+        manifest.put("schemaVersion",ArtifactArchive.LOAD_REPORT_MANIFEST_SCHEMA);
+        manifest.put("state","COMPLETE");manifest.put("complete",true);manifest.put("runId",runId);
+        manifest.put("executionStatus","PASS");manifest.put("performanceVerdict","NOT_EVALUATED");
+        manifest.put("startedAt","2026-10-26T00:00:00Z");manifest.put("endedAt","2026-10-26T00:00:01Z");
+        manifest.put("durationMs",1000L);manifest.put("files",files);
+        Files.write(run.resolve(ArtifactArchive.LOAD_REPORT_MANIFEST),
+                new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsBytes(manifest));
     }
 
     @Test void publisherFailureLeavesRawOutputAndNoPublishedOrStagingArchive() throws Exception {

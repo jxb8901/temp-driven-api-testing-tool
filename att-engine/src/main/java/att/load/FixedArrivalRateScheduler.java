@@ -98,6 +98,7 @@ public final class FixedArrivalRateScheduler implements LoadScheduler {
         long startedAt = startGate == null ? timing.now() : startGate.awaitStart();
         Instant start = LoadSchedulerSupport.instant(startedAt);
         final LoadMetrics metrics = LoadMetrics.forScenario(scenario, startedAt, LoadPhase.totalMs(scenario));
+        enableCheckpoints(metrics);
         if (workers == null) {
             workers = new ThreadPoolExecutor(scenario.maxConcurrent(), scenario.maxConcurrent(), 0L, TimeUnit.MILLISECONDS,
                     new ArrayBlockingQueue<Runnable>(scenario.maxConcurrent()),
@@ -247,6 +248,13 @@ public final class FixedArrivalRateScheduler implements LoadScheduler {
         BlockingQueue<Boolean> wakeups = schedulerWakeups;
         if (wakeups != null) wakeups.offer(Boolean.TRUE);
         synchronized (completionMonitor) { completionMonitor.notifyAll(); }
+    }
+
+    private void enableCheckpoints(LoadMetrics metrics) {
+        if (evidenceOutputRoot == null) return;
+        String workload = scenario.workloadId() == null ? "aggregate" : "workload-" + safe(scenario.workloadId());
+        metrics.enableCheckpoints(evidenceOutputRoot.resolve("load").resolve(runId).resolve("checkpoints").resolve(workload),
+                runId, workload);
     }
 
     private LoadEvent tag(LoadEvent event) {

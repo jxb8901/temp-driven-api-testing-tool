@@ -52,6 +52,10 @@ class FixedArrivalRateSchedulerTest {
         assertEquals(result.metrics().longValue("dropped"), events.stream().filter(LoadEvent::dropped).count());
         assertTrue(events.stream().filter(LoadEvent::dropped)
                 .allMatch(event -> "SUBMISSION_REJECTED".equals(event.errorType())));
+        @SuppressWarnings("unchecked") Map<String, Object> dropClassifications =
+                (Map<String, Object>) result.metrics().value("dropClassifications");
+        assertEquals(result.metrics().longValue("dropped"),
+                ((Number) dropClassifications.get("SUBMISSION_REJECTED")).longValue());
         assertEquals(0L, result.metrics().longValue("currentInFlight"));
     }
 

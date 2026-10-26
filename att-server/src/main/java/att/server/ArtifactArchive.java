@@ -25,6 +25,8 @@ import java.util.zip.ZipOutputStream;
 /** Builds the sole public representation of a Job's output. Raw Worker output is never served. */
 final class ArtifactArchive {
     static final String MANIFEST = "export-manifest-v1.json";
+    static final String LOAD_REPORT_MANIFEST = "load-report-manifest.json";
+    static final String LOAD_REPORT_MANIFEST_SCHEMA = "att-load-report-manifest/v1";
     static final int MAX_ENTRIES = 10_000;
     static final long MAX_ENTRY_BYTES = 16L * 1024 * 1024;
     static final long MAX_TOTAL_BYTES = 128L * 1024 * 1024;
@@ -85,6 +87,7 @@ final class ArtifactArchive {
         try {
             List<Path> candidates=inventory(root,maxCandidates);
             if(metrics!=null){metrics.value.candidateCount=(long)candidates.size();usage(metrics.value.limitUsage,"artifact.inventory.candidates",candidates.size(),maxCandidates);}
+            Set<String> requiredLoadReportEntries=validateLoadReportBundles(root,candidates);
             Set<String> names=new HashSet<>();List<String> approved=new ArrayList<>();long total=0;int omitted=0;long oversizedOmission=0L;long largestEntryBytes=0L;int entryCapOmissions=0;
             Map<String,byte[]> memoryExports=new LinkedHashMap<>();long retained=0;
             for(Path candidate:candidates) {
@@ -112,6 +115,11 @@ final class ArtifactArchive {
                     Path target=exports.resolve(relative);Files.createDirectories(target.getParent());Files.write(target,bytes);
                     if(metrics!=null){metrics.value.temporaryExportFiles++;metrics.value.temporaryExportBytes+=bytes.length;}
                 }
+            }
+            if(!approved.containsAll(requiredLoadReportEntries)) {
+                Set<String> missing=new HashSet<>(requiredLoadReportEntries);
+                missing.removeAll(approved);
+                throw new java.io.IOException("A verified LOAD report bundle contains files that cannot be published: " + missing.size());
             }
             // ZIP bytes are exactly the validated producer bytes; publication must not rewrite HTML links or scripts.
             List<Entry> entries=new ArrayList<>();total=0;
@@ -213,10 +221,83 @@ final class ArtifactArchive {
 
     private static int archivePriority(String path) {
         if (path.endsWith("/load-summary.json") || path.endsWith("/load-summary.yaml")
-                || path.endsWith("/report/index.html") || path.endsWith("/report-commit-manifest.json")) return 0;
+                || path.endsWith("/report/index.html") || path.endsWith("/report-commit-manifest.json")
+                || path.endsWith("/" + LOAD_REPORT_MANIFEST)) return 0;
         if (path.contains("/details/v1/")) return 1;
         if (path.endsWith("/configuration.json")) return 2;
         return 3;
+    }
+
+    /** Verify the Engine's committed LOAD bundle before any of its entries enter the ZIP. */
+    private static Set<String> validateLoadReportBundles(Path root,List<Path> candidates) throws Exception {
+        Set<String> candidateNames=new HashSet<>();
+        Set<String> runIds=new HashSet<>();
+        for(Path candidate:candidates) {
+            String relative=root.relativize(candidate).toString().replace('\\','/');
+            candidateNames.add(relative);
+            String[] parts=relative.split("/");
+            if(parts.length==3&&"load".equals(parts[0])
+                    &&("load-summary.json".equals(parts[2])||LOAD_REPORT_MANIFEST.equals(parts[2])))runIds.add(parts[1]);
+        }
+        Set<String> required=new HashSet<>();
+        for(String runId:runIds) {
+            if(!safePath(runId))throw new java.io.IOException("Unsafe LOAD run identifier in report inventory.");
+            String prefix="load/"+runId+"/";
+            String manifestName=prefix+LOAD_REPORT_MANIFEST;
+            if(!candidateNames.contains(manifestName))
+                throw new java.io.IOException("LOAD report bundle is missing its completion manifest.");
+            Path runDirectory=root.resolve("load").resolve(runId).normalize();
+            Path manifestPath=runDirectory.resolve(LOAD_REPORT_MANIFEST);
+            if(!manifestPath.startsWith(root)||Files.isSymbolicLink(manifestPath)
+                    ||!Files.isRegularFile(manifestPath,LinkOption.NOFOLLOW_LINKS)||Files.size(manifestPath)>MAX_ENTRY_BYTES)
+                throw new java.io.IOException("LOAD report completion manifest is not a bounded regular file.");
+            com.fasterxml.jackson.databind.JsonNode manifest=JSON.readTree(manifestPath.toFile());
+            if(!LOAD_REPORT_MANIFEST_SCHEMA.equals(manifest.path("schemaVersion").asText())
+                    ||!"COMPLETE".equals(manifest.path("state").asText())
+                    ||!manifest.path("complete").asBoolean(false)
+                    ||!runId.equals(manifest.path("runId").asText()))
+                throw new java.io.IOException("LOAD report completion manifest is invalid or incomplete.");
+            com.fasterxml.jackson.databind.JsonNode fileRows=manifest.path("files");
+            if(!fileRows.isArray()||fileRows.isEmpty()||fileRows.size()>9000)
+                throw new java.io.IOException("LOAD report completion manifest has an invalid file inventory.");
+            Set<String> listed=new HashSet<>();
+            long total=0L;
+            for(com.fasterxml.jackson.databind.JsonNode row:fileRows) {
+                String name=row.path("path").asText("");
+                long length=row.path("lengthBytes").asLong(-1L);
+                String digest=row.path("sha256").asText("");
+                if(!safePath(name)||!name.startsWith("details/")&&!name.startsWith("report/")
+                        &&!Set.of("load-summary.json","load-summary.yaml").contains(name)
+                        ||!listed.add(name)||!digest.matches("[0-9a-f]{64}")||length<0||length>MAX_ENTRY_BYTES)
+                    throw new java.io.IOException("LOAD report completion manifest contains an unsafe or duplicate file entry.");
+                if(total>MAX_TOTAL_BYTES-length)throw new java.io.IOException("LOAD report bundle exceeds the archive byte limit.");
+                total+=length;
+                Path file=runDirectory.resolve(name).normalize();
+                String archiveName=prefix+name;
+                if(!file.startsWith(runDirectory)||Files.isSymbolicLink(file)
+                        ||!Files.isRegularFile(file,LinkOption.NOFOLLOW_LINKS)||Files.size(file)!=length
+                        ||!digest.equals(sha256(Files.readAllBytes(file)))||!candidateNames.contains(archiveName))
+                    throw new java.io.IOException("A LOAD report file does not match its completion manifest.");
+                required.add(archiveName);
+            }
+            Set<String> essential=Set.of("load-summary.json","load-summary.yaml","report/index.html","details/v1/manifest.json");
+            if(!listed.containsAll(essential))throw new java.io.IOException("LOAD report bundle is missing an essential report file.");
+            com.fasterxml.jackson.databind.JsonNode summary=JSON.readTree(runDirectory.resolve("load-summary.json").toFile());
+            if(!runId.equals(summary.path("runId").asText())
+                    ||!summary.path("executionStatus").isTextual()
+                    ||!summary.path("performanceVerdict").isTextual()
+                    ||summary.path("durationMs").asLong(-1L)!=manifest.path("durationMs").asLong(-2L)
+                    ||!summary.path("executionStatus").asText().equals(manifest.path("executionStatus").asText())
+                    ||!summary.path("performanceVerdict").asText().equals(manifest.path("performanceVerdict").asText())
+                    ||!LOAD_REPORT_MANIFEST.equals(summary.path("reportManifest").asText())
+                    ||!"report/index.html".equals(summary.path("report").asText()))
+                throw new java.io.IOException("LOAD summary does not reference its committed report bundle.");
+            com.fasterxml.jackson.databind.JsonNode details=JSON.readTree(runDirectory.resolve("details/v1/manifest.json").toFile());
+            if(!details.path("complete").asBoolean(false))
+                throw new java.io.IOException("LOAD detailed metrics manifest is incomplete.");
+            required.add(manifestName);
+        }
+        return required;
     }
 
     private static void usage(Map<String,Map<String,Object>> target,String name,long value,long limit){

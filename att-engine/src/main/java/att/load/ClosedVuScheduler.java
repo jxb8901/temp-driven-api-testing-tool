@@ -91,6 +91,7 @@ public final class ClosedVuScheduler implements LoadScheduler {
         final Instant start = LoadSchedulerSupport.instant(startedAt);
         final long runSeed = LoadRandomization.effectiveSeed(scenario, runId);
         final LoadMetrics metrics = LoadMetrics.forScenario(scenario, startedAt, 0L);
+        enableCheckpoints(metrics);
         // Iteration execution is synchronous and may block on SUT I/O, so worker
         // capacity can grow to preserve every configured closed VU's slot.
         int workerCount = scenario.users();
@@ -245,6 +246,13 @@ public final class ClosedVuScheduler implements LoadScheduler {
             }
         }
         return true;
+    }
+
+    private void enableCheckpoints(LoadMetrics metrics) {
+        if (evidenceOutputRoot == null) return;
+        String workload = scenario.workloadId() == null ? "aggregate" : "workload-" + safe(scenario.workloadId());
+        metrics.enableCheckpoints(evidenceOutputRoot.resolve("load").resolve(runId).resolve("checkpoints").resolve(workload),
+                runId, workload);
     }
 
     private long nextWakeAt(java.util.List<VuState> users, long now, long elapsed, int active,

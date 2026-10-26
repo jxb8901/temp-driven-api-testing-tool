@@ -62,7 +62,15 @@ protocol 診斷發布精簡終端結果。Performance verdict 會是 `NOT_EVALUA
 
 ## 詳細 artifact 與 metrics 涵蓋範圍
 
-`LoadReportWriter` 會以新增欄位的 `att-load-summary/v1.3` schema 輸出 archived
+`LoadReportWriter` 會先 stage `load-summary.json`、YAML、standalone HTML 和
+versioned details，再將檔案 promote 至 run directory。它最後寫入
+`load-report-manifest.json`，記錄 bundle state、run identity、測量 duration、
+checkpoint sequence references，以及每個 report path 的 byte length 和 SHA-256。
+此 manifest 是 commit marker：render 或 promotion 失敗時會保持不存在。Server
+只有在 marker、四個必要 report 檔案、所有列出檔案的 checksum 及 versioned
+detail manifest 均通過驗證後，才會發布 canonical LOAD summary。
+
+Report 使用新增欄位的 `att-load-summary/v1.3` schema 輸出 archived
 `load-summary.json` 及 YAML。Aggregate counters 和 thresholds 仍然精確；大型
 aggregate／per-workload metric collection 會移至 `details/v1/` sidecar，並由
 `details/v1/manifest.json` 及 `att-load-detail-manifest/v1`、
