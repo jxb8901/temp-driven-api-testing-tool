@@ -45,6 +45,7 @@ public final class AttValidationReport {
     public void appendSections(AttValidationReport other) {
         if(other==null)return;
         for(Section section:other.sections)addCopied(sections,section.toMap());
+        if(!other.complete)incomplete();
         if(other.exitCode()==2)exitCode(2);else if(other.exitCode()==3)incomplete();
     }
     public void incomplete() { complete=false; forcedExitCode=Integer.valueOf(3); }
