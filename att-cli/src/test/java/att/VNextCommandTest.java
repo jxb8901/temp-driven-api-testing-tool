@@ -269,6 +269,49 @@ class VNextCommandTest {
         }
     }
 
+    @Test void validatePackagePreservesPartialStatusAndActualFailures() throws Exception {
+        Path home=packageRoot.resolve("bounded-package-home");
+        Path packageDir=home.resolve("packages/payments");
+        Path config=home.resolve("config/config.yaml");
+        Files.createDirectories(packageDir.resolve("testcase"));
+        Files.createDirectories(packageDir.resolve("templates"));
+        Files.write(packageDir.resolve("package.yaml"),
+                "schemaVersion: att-package/v1\\n".getBytes(StandardCharsets.UTF_8));
+        Files.createDirectories(config.getParent());TestSchemas.install(home);
+        StringBuilder yaml=new StringBuilder("schemaVersion: att-config/v2.13\\nenvironments:\\n");
+        for(int i=0;i<=att.validation.RuntimeConfigurationValidator.MAX_ENVIRONMENT_PROFILES;i++)
+            yaml.append("  Env").append(String.format("%03d",i)).append(": {}\\n");
+        Files.write(config,yaml.toString().getBytes(StandardCharsets.UTF_8));
+
+        String previousHome=System.getProperty("att.home"),previousServer=System.getProperty("att.server.config");
+        try {
+            System.setProperty("att.home",home.toString());System.clearProperty("att.server.config");
+            String[] args={"--local","--format","json","-p","payments","validate","package"};
+            Captured partial=capture(()->VNextCommand.run(args));
+            assertEquals(3,partial.exitCode,partial.stdout);
+            Map<?,?> partialReport=new ObjectMapper().readValue(partial.stdout,Map.class);
+            assertEquals("PARTIAL",partialReport.get("overallStatus"),partial.stdout);
+            assertEquals(Boolean.FALSE,partialReport.get("complete"),partial.stdout);
+            assertEquals(3,((Number)partialReport.get("exitCode")).intValue(),partial.stdout);
+
+            Files.createDirectories(packageDir.resolve("testdata"));
+            Files.write(packageDir.resolve("package.yaml"),
+                    ("schemaVersion: att-package/v1\\ntestdata:\\n"
+                            +"  descriptors: [testdata/base.yaml]\\n  environments: {}\\n").getBytes(StandardCharsets.UTF_8));
+            Files.write(packageDir.resolve("testdata/base.yaml"),
+                    "records: [unterminated\\n".getBytes(StandardCharsets.UTF_8));
+            Captured invalid=capture(()->VNextCommand.run(args));
+            assertEquals(2,invalid.exitCode,invalid.stdout);
+            Map<?,?> invalidReport=new ObjectMapper().readValue(invalid.stdout,Map.class);
+            assertEquals("INVALID",invalidReport.get("overallStatus"),invalid.stdout);
+            assertEquals(Boolean.FALSE,invalidReport.get("complete"),invalid.stdout);
+            assertEquals(2,((Number)invalidReport.get("exitCode")).intValue(),invalid.stdout);
+        } finally {
+            if(previousHome==null)System.clearProperty("att.home");else System.setProperty("att.home",previousHome);
+            if(previousServer==null)System.clearProperty("att.server.config");else System.setProperty("att.server.config",previousServer);
+        }
+    }
+
     private static String runtimeConfig(String uatHelper) {
         return "schemaVersion: att-config/v2.13\noutputDirectory: output\nenvironment: SIT\nenvironments:\n"
                 +"  SIT: {}\n  UAT:"+ (uatHelper==null?" {}\n":"\n    dbhelpers: ["+uatHelper+"]\n");
