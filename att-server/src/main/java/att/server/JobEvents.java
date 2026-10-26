@@ -177,7 +177,10 @@ final class JobEvents {
             payload.clear();
             payload.putAll(retained);
             payload.put("truncated", true);
-            payload.put("journalLimit",Map.of("code","ATT-JOURNAL-EVENT-TRUNCATED","sizeBytes",originalBytes,"limitBytes",MAX_EVENT_DATA_BYTES));
+            payload.put("journalLimit",att.server.api.LimitDiagnostic.create("ATT-JOURNAL-EVENT-TRUNCATED",
+                    "Event details were omitted from the retained journal payload", "server.eventJournal.maxEventDataBytes",
+                    MAX_EVENT_DATA_BYTES, originalBytes, "server.eventJournal", att.server.api.LimitOutcome.DATA_TRUNCATED,
+                    "presentation", "Use bounded event details or open the retained report artifact", null));
             payload.put("summary", "Event payload exceeded the retained event size limit");
             if(!dropped.isEmpty())payload.put("droppedFields",dropped);
             if (console instanceof String text && !text.isEmpty()) {

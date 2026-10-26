@@ -166,7 +166,8 @@ public final class HttpHelperExecutor implements AutoCloseable {
                     int maxResponseBytes = helper.maxResponseBytes();
                     long declaredLength = entity == null ? 0L : entity.getContentLength();
                     if (declaredLength > maxResponseBytes)
-                        throw new HttpFailure("HTTP_RESPONSE_TOO_LARGE", "HTTP response exceeds maxResponseBytes=" + maxResponseBytes);
+                        throw new HttpFailure("HTTP_RESPONSE_TOO_LARGE", "HTTP response exceeds maxResponseBytes=" + maxResponseBytes,
+                                "http.response.maxBytes", maxResponseBytes, declaredLength);
                     byte[] bytes = entity == null ? new byte[0] : readBounded(entity.getContent(), maxResponseBytes);
                     ensureDeadline(deadline, "read");
                     String contentType = response.getFirstHeader("Content-Type") == null ? "" : response.getFirstHeader("Content-Type").getValue();
@@ -190,7 +191,8 @@ public final class HttpHelperExecutor implements AutoCloseable {
                     if (context != null) context.recordResourceOutput(helper.evidenceOutput(), result, evidence, diagnosticSecrets(helper, arguments));
                     return result(name, invocationId, result, true, metadata, evidence, null);
                 } catch (org.apache.http.conn.ConnectionPoolTimeoutException exhausted) {
-                    throw new HttpFailure("HTTP_POOL_TIMEOUT", "HTTP connection pool borrow timed out");
+                    throw new HttpFailure("HTTP_POOL_TIMEOUT", "HTTP connection pool borrow timed out",
+                            "http.pool.connectionRequestTimeoutMs", helper.connectionRequestTimeoutMs(), null);
                 } catch (java.net.SocketTimeoutException timeout) {
                     throw new HttpFailure("HTTP_TIMEOUT", "HTTP connect/read timed out");
                 } catch (org.apache.http.conn.ConnectTimeoutException timeout) {
@@ -208,6 +210,14 @@ public final class HttpHelperExecutor implements AutoCloseable {
                     ? safeMessage(error, type) : "HTTP request failed (" + error.getClass().getSimpleName() + ")";
             Map<String, Object> diagnostic = new LinkedHashMap<String, Object>();
             diagnostic.put("type", type); diagnostic.put("message", message);
+            if (error instanceof HttpFailure && ((HttpFailure) error).limitName != null) {
+                HttpFailure limited = (HttpFailure) error;
+                diagnostic.putAll(att.server.api.LimitDiagnostic.create(type,
+                        "HTTP operation exceeded a configured resource bound", limited.limitName,
+                        limited.configuredLimit, limited.observed, "engine.http",
+                        att.server.api.LimitOutcome.EXECUTION_ERROR, "execution",
+                        "Reduce response size or request concurrency, or adjust the helper limit after reviewing capacity.", null));
+            }
             List<String> secrets = diagnosticSecrets(helperForDiagnostics, arguments);
             if (InternalExceptionLogger.isInternal(error)) {
                 InternalExceptionLogger.logIfInternal(log, phase, error, secrets);
@@ -227,10 +237,12 @@ public final class HttpHelperExecutor implements AutoCloseable {
         int count;
         while ((count = input.read(buffer, 0, Math.min(buffer.length, limit + 1 - output.size()))) >= 0) {
             if (output.size() + count > limit)
-                throw new HttpFailure("HTTP_RESPONSE_TOO_LARGE", "HTTP response exceeds maxResponseBytes=" + limit);
+                throw new HttpFailure("HTTP_RESPONSE_TOO_LARGE", "HTTP response exceeds maxResponseBytes=" + limit,
+                        "http.response.maxBytes", limit, (long) output.size() + count);
             output.write(buffer, 0, count);
             if (output.size() == limit) {
-                if (input.read() >= 0) throw new HttpFailure("HTTP_RESPONSE_TOO_LARGE", "HTTP response exceeds maxResponseBytes=" + limit);
+                if (input.read() >= 0) throw new HttpFailure("HTTP_RESPONSE_TOO_LARGE", "HTTP response exceeds maxResponseBytes=" + limit,
+                        "http.response.maxBytes", limit, (long) limit + 1L);
                 break;
             }
         }
@@ -471,6 +483,9 @@ public final class HttpHelperExecutor implements AutoCloseable {
             Map<String, Object> item = new LinkedHashMap<String, Object>();
             item.put("active", stats.getLeased()); item.put("idle", stats.getAvailable());
             item.put("waiting", stats.getPending()); item.put("max", stats.getMax());
+            Map<String, Object> saturation = new LinkedHashMap<String, Object>();
+            saturation.put("usage", stats.getLeased()); saturation.put("limit", stats.getMax()); saturation.put("threshold", 0.8d);
+            item.put("limitUsage", java.util.Collections.<String, Object>singletonMap("http.pool.activeConnections", saturation));
             item.put("peakActive", entry.getValue().peakActive.get());
             item.put("peakIdle", entry.getValue().peakIdle.get());
             item.put("peakWaiting", entry.getValue().peakWaiting.get());
@@ -583,7 +598,12 @@ public final class HttpHelperExecutor implements AutoCloseable {
     }
     private static final class HttpFailure extends IllegalArgumentException {
         private final String type;
-        private HttpFailure(String type, String message) { super(message); this.type = type; }
-        private HttpFailure(String type, String message, Throwable cause) { super(message, cause); this.type = type; }
+        private final String limitName;
+        private final Number configuredLimit, observed;
+        private HttpFailure(String type, String message) { this(type, message, null, null, null); }
+        private HttpFailure(String type, String message, String limitName, Number configuredLimit, Number observed) {
+            super(message); this.type = type; this.limitName = limitName; this.configuredLimit = configuredLimit; this.observed = observed;
+        }
+        private HttpFailure(String type, String message, Throwable cause) { super(message, cause); this.type = type; this.limitName = null; this.configuredLimit = null; this.observed = null; }
     }
 }

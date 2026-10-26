@@ -98,6 +98,16 @@ function primaryLoadError(payload: JobResultResponse | null): Record<string, unk
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null;
 }
 
+function secondaryLoadWarnings(payload: JobResultResponse | null): Array<Record<string, unknown>> {
+  const diagnostics = loadTerminalSummary(payload)?.diagnostics;
+  if (!diagnostics || typeof diagnostics !== 'object' || Array.isArray(diagnostics)) return [];
+  const value = diagnostics as Record<string, unknown>;
+  const notices = Array.isArray(value.secondaryNotices) ? value.secondaryNotices : [];
+  const transport = Array.isArray(value.transportWarnings) ? value.transportWarnings : [];
+  return [...notices, ...transport].filter((item): item is Record<string, unknown> =>
+    Boolean(item) && typeof item === 'object' && !Array.isArray(item)).slice(0, 3);
+}
+
 type ReportAvailability = 'idle' | 'loading' | 'PENDING' | 'ARCHIVING' | 'READY' | 'FAILED' | 'EXPIRED' | 'OMITTED' | 'ERROR' | 'UNAVAILABLE';
 
 function useLoadArchiveSummary(api: LoadJobsApi, jobId: string, enabled: boolean, includeSummary: boolean, includeMetricSeries: boolean) {
@@ -477,6 +487,7 @@ function CompactLoadSummary({ payload, archiveState, archiveMessage }: { payload
   const metrics = summary.metrics && typeof summary.metrics === 'object' ? summary.metrics as Record<string, unknown> : {};
   const thresholds = summary.thresholds && typeof summary.thresholds === 'object' ? summary.thresholds as Record<string, unknown> : {};
   const root = primaryLoadError(payload);
+  const secondaryWarnings = secondaryLoadWarnings(payload);
   const archive = summary.archive && typeof summary.archive === 'object' ? summary.archive as Record<string, unknown> : {};
   const reportedState = typeof archiveState === 'string' && archiveState !== 'idle' ? archiveState : String(archive.reportAvailability || archive.status || 'PENDING');
   const availabilityText: Record<string, string> = {
@@ -499,6 +510,15 @@ function CompactLoadSummary({ payload, archiveState, archiveMessage }: { payload
     </dl>
     {root && <section aria-label="LOAD root-cause diagnosis" role="alert">
       <h4>{String(root.code || 'LOAD runtime error')}</h4><p>{String(root.summary || 'The LOAD ended with ERROR.')}</p>
+    </section>}
+    {secondaryWarnings.length > 0 && <section aria-label="Secondary limit and transport notices" role="status">
+      <h4>Secondary notices</h4>
+      <ul>{secondaryWarnings.map((warning, index) => <li key={`${String(warning.code || 'notice')}-${index}`}>
+        <strong>{String(warning.code || 'Limit or transport notice')}</strong>: {String(warning.summary || 'Some diagnostic details were bounded.')}
+        {typeof warning.limitName === 'string' && <span> ({warning.limitName}{typeof warning.observed === 'number'
+          ? typeof warning.configuredLimit === 'number' ? `: ${warning.observed} / ${warning.configuredLimit}` : `: ${warning.observed} observed`
+          : ''})</span>}
+      </li>)}</ul>
     </section>}
     {archiveMessage && <p role={reportedState === 'OMITTED' || reportedState === 'FAILED' || reportedState === 'EXPIRED' || reportedState === 'ERROR' ? 'alert' : 'status'}>{archiveMessage}</p>}
   </section>;

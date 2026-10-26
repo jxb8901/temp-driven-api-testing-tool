@@ -238,6 +238,10 @@ class HttpHelperExecutorTest {
                     context(), 5000L, "large-response", "text");
             Map<?, ?> error = (Map<?, ?>) result.operationResult().outputMetadata().get("error");
             assertEquals("HTTP_RESPONSE_TOO_LARGE", error.get("type"));
+            assertEquals("http.response.maxBytes", error.get("limitName"));
+            assertEquals(HttpHelperExecutor.DEFAULT_MAX_RESPONSE_BYTES, ((Number) error.get("configuredLimit")).intValue());
+            assertEquals(HttpHelperExecutor.DEFAULT_MAX_RESPONSE_BYTES + 1L, ((Number) error.get("observed")).longValue());
+            assertEquals("EXECUTION_ERROR", error.get("outcome"));
             Map<?, ?> invocation = (Map<?, ?>) ((java.util.List<?>) ((Map<?, ?>) result.evidence().get("http")).get("invocations")).get(0);
             assertEquals(200, invocation.get("statusCode"));
         }
@@ -461,7 +465,11 @@ class HttpHelperExecutorTest {
             Future<ToolInvocationResult> first = tasks.submit(() -> http.execute("paymentApi", "get", args("path", "/hold"), context, 1000L, "first", "text"));
             assertTrue(holding.await(1, TimeUnit.SECONDS));
             ToolInvocationResult second = http.execute("paymentApi", "get", args("path", "/json"), context, 1000L, "second", "text");
-            assertEquals("HTTP_POOL_TIMEOUT", ((Map<?, ?>) second.operationResult().outputMetadata().get("error")).get("type"));
+            Map<?, ?> poolError = (Map<?, ?>) second.operationResult().outputMetadata().get("error");
+            assertEquals("HTTP_POOL_TIMEOUT", poolError.get("type"));
+            assertEquals("http.pool.connectionRequestTimeoutMs", poolError.get("limitName"));
+            assertEquals(40, ((Number) poolError.get("configuredLimit")).intValue());
+            assertEquals("EXECUTION_ERROR", poolError.get("outcome"));
             assertTrue(first.get(2, TimeUnit.SECONDS).executionSuccess());
             ToolInvocationResult timeout = http.execute("paymentApi", "get", args("path", "/slow"), context, 25L, "timeout", "text");
             assertEquals("HTTP_TIMEOUT", ((Map<?, ?>) timeout.operationResult().outputMetadata().get("error")).get("type"));

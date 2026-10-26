@@ -766,15 +766,21 @@ final class ServerRuntime implements AutoCloseable {
             default->append(job,"log",Map.of("message","Worker emitted an unrecognized event"));}
     }
     void recordProtocolLimit(Job job,att.server.api.internal.WorkerProtocol.Frame frame) throws Exception {
-        Map<String,Object> diagnostic=Map.of("code","ATT-SERVER-WORKER-EVENT-TOO-LARGE",
-                "summary","Worker event exceeded the UTF-8 protocol byte limit","eventType",frame.eventType(),
-                "sizeBytes",frame.sizeBytes,"limitBytes",frame.limitBytes);
+        Map<String,Object> diagnostic=new LinkedHashMap<>(att.server.api.LimitDiagnostic.create(
+                "ATT-SERVER-WORKER-EVENT-TOO-LARGE","Worker event exceeded the UTF-8 protocol byte limit",
+                "worker.protocol.maxFrameBytes",frame.limitBytes,frame.sizeBytes,"worker.transport",
+                att.server.api.LimitOutcome.DATA_TRUNCATED,"transport",
+                "Reduce progress payloads or keep terminal results within the shared frame budget.",null));
+        diagnostic.put("eventType",frame.eventType());diagnostic.put("sizeBytes",frame.sizeBytes);diagnostic.put("limitBytes",frame.limitBytes);
         job.protocolDiagnostic=diagnostic;job.diagnosticJson=JSON.writeValueAsString(diagnostic);
         store.update(job);append(job,"diagnostic",diagnostic);
     }
     void recordWorkerExit(Job job,int exit) throws Exception {
-        Map<String,Object> fallback=Map.of("code","ATT-SERVER-WORKER-EXITED",
-                "summary","Worker exited before delivering a terminal result","exitCode",exit);
+        Map<String,Object> fallback=new LinkedHashMap<>(att.server.api.LimitDiagnostic.create(
+                "ATT-SERVER-WORKER-EXITED","Worker exited before delivering a terminal result",
+                "worker.processTermination",null,exit,"worker.process",att.server.api.LimitOutcome.EXECUTION_ERROR,
+                "execution","Review bounded worker diagnostics and heap pressure before changing process limits.",null));
+        fallback.put("exitCode",exit);
         Map<String,Object> diagnostic=new LinkedHashMap<>(job.protocolDiagnostic==null?fallback:job.protocolDiagnostic);
         if(job.protocolDiagnostic!=null)diagnostic.put("workerExit",fallback);
         job.diagnosticJson=JSON.writeValueAsString(diagnostic);append(job,"diagnostic",diagnostic);
@@ -3259,6 +3265,7 @@ final class ServerRuntime implements AutoCloseable {
             JsonNode publication=readArchiveStatus(statusFile);
             String state=publication.path("state").asText("FAILED");
             out.put("reason",publication.path("reason").asText(""));
+            if(publication.path("diagnostic").isObject())out.put("diagnostic",JSON.convertValue(publication.path("diagnostic"),Map.class));
             boolean quarantined=store.workerQuarantined(id);
             if(quarantined){state="FAILED";out.put("reason","worker_unverified");}
             if(Files.isRegularFile(archive)&&"READY".equals(state)) {
@@ -3270,6 +3277,7 @@ final class ServerRuntime implements AutoCloseable {
                     out.put("items",all.subList(start,end));out.put("nextOffset",end<all.size()?end:null);
                     out.put("primaryReports",all.stream().filter(item->item instanceof Map<?,?> row&&Boolean.TRUE.equals(row.get("report"))).toList());
                     out.put("archiveStatus","READY");out.put("omissions",data.get("omissions"));out.put("complete",data.get("complete"));
+                    if(data.get("diagnostics") instanceof List<?> notices&&!notices.isEmpty())out.put("omissionDiagnostics",notices);
                     out.put("archiveSizeBytes",archiveSize);
                 } catch(Exception corrupt) { state="FAILED"; }
             }
@@ -3309,12 +3317,15 @@ final class ServerRuntime implements AutoCloseable {
             return new ArtifactRead(archive,verified,download);
         } catch(Exception failure){artifactLifecycle.readLock().unlock();artifactReadSlots.release();throw failure;}
     }
-    private void archiveStatus(String id,String state,String reason) throws Exception {
+    private void archiveStatus(String id,String state,String reason) throws Exception { archiveStatus(id,state,reason,null); }
+    private void archiveStatus(String id,String state,String reason,Map<String,Object> diagnostic) throws Exception {
         Path target=artifactArchivePath(id).resolveSibling("archive-status.json");
         Files.createDirectories(target.getParent());
         Path temporary=Files.createTempFile(target.getParent(),".archive-status-",".tmp");
         try {
-            Files.write(temporary,JSON.writeValueAsBytes(Map.of("state",state,"reason",reason,"manifestVersion",1)));
+            Map<String,Object> value=new LinkedHashMap<>();value.put("state",state);value.put("reason",reason);value.put("manifestVersion",1);
+            if(diagnostic!=null)value.put("diagnostic",diagnostic);
+            Files.write(temporary,JSON.writeValueAsBytes(value));
             try(var channel=java.nio.channels.FileChannel.open(temporary,java.nio.file.StandardOpenOption.WRITE)){channel.force(true);}
             Files.move(temporary,target,java.nio.file.StandardCopyOption.ATOMIC_MOVE,java.nio.file.StandardCopyOption.REPLACE_EXISTING);
         } finally { Files.deleteIfExists(temporary); }
@@ -3390,7 +3401,7 @@ final class ServerRuntime implements AutoCloseable {
             } catch(Exception failure) {
                 boolean policy=failure instanceof IllegalArgumentException;
                 if(metrics!=null&&metrics.value.failurePhase==null)metrics.fail(policy?"policy_limit":"publication_failed");
-                finishArtifactFailure(id,policy?"policy_limit":"publication_failed",policy?"REJECTED_POLICY":"FAILED_IO");
+                finishArtifactFailure(id,policy?"policy_limit":"publication_failed",policy?"REJECTED_POLICY":"FAILED_IO",failure);
                 java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).warning("Artifact publication failed for Job "+id);
             } finally {
                 ArtifactMetricsRecorder.CURRENT.remove();
@@ -3411,7 +3422,21 @@ final class ServerRuntime implements AutoCloseable {
         }
     }
     private void finishArtifactFailure(String id,String reason,String auditOutcome) {
-        try {archiveStatus(id,"FAILED",reason);}catch(Exception ignored){}
+        finishArtifactFailure(id,reason,auditOutcome,null);
+    }
+    private void finishArtifactFailure(String id,String reason,String auditOutcome,Exception failure) {
+        Map<String,Object> diagnostic=null;
+        if(failure instanceof ArtifactArchive.LimitFailure){
+            ArtifactArchive.LimitFailure limited=(ArtifactArchive.LimitFailure)failure;
+            diagnostic=att.server.api.LimitDiagnostic.create("ATT-ARCHIVE-LIMIT-EXCEEDED","Artifact archive exceeded a configured publication limit",
+                    limited.limitName,limited.limit,limited.observed,"server.artifactPublication",att.server.api.LimitOutcome.ARCHIVE_FAILED,
+                    "publication","Reduce eligible artifact entry count or size and retry archive publication.","archive.zip");
+        }else if("policy_limit".equals(reason)){
+            diagnostic=att.server.api.LimitDiagnostic.create("ATT-ARCHIVE-POLICY-LIMIT","Artifact archive could not be published within its safe policy",
+                    "artifact.archivePolicy",null,null,"server.artifactPublication",att.server.api.LimitOutcome.ARCHIVE_FAILED,
+                    "publication","Reduce eligible artifact entry count or size and retry archive publication.","archive.zip");
+        }
+        try {archiveStatus(id,"FAILED",reason,diagnostic);}catch(Exception ignored){}
         try {store.artifactRecoveryNeeded(id,false);}catch(Exception ignored){}
         try {store.audit("SYSTEM","ARTIFACT_PUBLICATION",id,null,auditOutcome);}catch(Exception ignored){}
     }

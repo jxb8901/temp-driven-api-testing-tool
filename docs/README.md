@@ -11,7 +11,7 @@ This is the canonical documentation map for ATT 4.2.4. It separates task guidanc
 | CLI user | [Current CLI Reference](reference/cli.md) · [Legacy ATT Remote guide](remote-client.md) |
 | Load tester | [Load testing guide](guides/load-testing.md) · [Six-mode Load model](concepts/load-model.md) |
 | Studio operator | [Studio navigation](interfaces/studio/navigation.md) |
-| Server administrator | [Deployment](operations/server-deployment.md) · [Configuration](operations/server-configuration.md) · [Security](operations/security.md) |
+| Server administrator | [Deployment](operations/server-deployment.md) · [Configuration](operations/server-configuration.md) · [Security](operations/security.md) · [Limits Reference](operations/limits-reference.md) · [繁體中文容量參考](operations/limits-reference.zh.md) |
 | Integrator | [Server API v1](interfaces/server-api/README.md) |
 | Contributor | [Documentation architecture](system-design/documentation-architecture.md) · [Reference source guide](reference/README.md) |
 
@@ -47,6 +47,8 @@ The Quick Start is a current 4.2.4 workflow. Snapshot generation is explicit aut
 | Review schemas and versioned contracts | [Generated Reference Manual](reference.md) · [繁體中文 Reference](reference.zh.md) |
 | Build and package ATT | [CI and packaging operations](reference/ci-packaging-operations.md) |
 | Understand Engine execution flow | [Runtime execution design](system-design/runtime-execution.md) |
+| Diagnose capacity limits and truncation | [Limits Reference](operations/limits-reference.md) · [繁體中文容量參考](operations/limits-reference.zh.md) · [Internal limits design](system-design/internal-limits-diagnostics.md) |
+| Design high-resolution LOAD history retention | [LOAD time-series retention follow-up for #299](system-design/load-time-series-retention.md) · [繁體中文設計](system-design/load-time-series-retention.zh.md) |
 
 ## Product and interface status
 
@@ -78,7 +80,7 @@ docs/
   quick-start.md / quick-start.zh.md current runnable tutorial
   concepts/ and guides/             task guidance linked to Reference
   interfaces/                       CLI, Studio and versioned Server API
-  operations/                        deployment, config, security, lifecycle
+  operations/                        deployment, config, security, lifecycle, capacity
   reference/ and reference.zh/       paired normative source modules
   reference.md / reference.zh.md     generated manuals
   system-design/                     maintainer docs and inventory

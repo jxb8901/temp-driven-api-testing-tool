@@ -33,6 +33,21 @@ class WorkerProtocolFailureTest {
         }
     }
 
+    @Test void abnormalWorkerExitIsAnExecutionErrorWithSafeExitEvidence() throws Exception {
+        try(ServerRuntime runtime=runtime()) {
+            Job job=job(runtime);
+            runtime.recordWorkerExit(job,137);
+            runtime.finish(job,"ERROR",137);
+            var diagnostic=ServerRuntime.JSON.readTree(job.diagnosticJson);
+            assertEquals("ATT-SERVER-WORKER-EXITED",diagnostic.path("code").asText());
+            assertEquals("EXECUTION_ERROR",diagnostic.path("outcome").asText());
+            assertEquals("worker.processTermination",diagnostic.path("limitName").asText());
+            assertEquals(137,diagnostic.path("exitCode").asInt());
+            assertEquals("ERROR",job.status);assertEquals(137,job.exitCode);
+            assertFalse(diagnostic.toString().contains(runtime.config.dataDir.toString()));
+        }
+    }
+
     @Test void oversizedProgressDoesNotPreventAValidLaterErrorResultAndMetrics() throws Exception {
         try(ServerRuntime runtime=runtime()) {
             Job job=job(runtime);runtime.recordProtocolLimit(job,oversized());
@@ -85,9 +100,12 @@ class WorkerProtocolFailureTest {
         assertNotNull(raw,record.toString());
         var diagnostic=ServerRuntime.JSON.readTree(String.valueOf(raw));
         assertEquals("ATT-SERVER-WORKER-EVENT-TOO-LARGE",diagnostic.path("code").asText());
+        assertEquals("DATA_TRUNCATED",diagnostic.path("outcome").asText());
+        assertEquals("worker.protocol.maxFrameBytes",diagnostic.path("limitName").asText());
         assertEquals("PROGRESS",diagnostic.path("eventType").asText());
         assertTrue(diagnostic.path("sizeBytes").asLong()>diagnostic.path("limitBytes").asLong());
         assertEquals("ATT-SERVER-WORKER-EXITED",diagnostic.path("workerExit").path("code").asText());
+        assertEquals("EXECUTION_ERROR",diagnostic.path("workerExit").path("outcome").asText());
         assertFalse(String.valueOf(raw).contains("private-canary"));
     }
     private WorkerProtocol.Frame oversized()throws Exception {

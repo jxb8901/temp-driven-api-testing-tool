@@ -63,6 +63,11 @@ class JobEventsTest {
         journal.append("status",event);Map<?,?> payload=(Map<?,?>)journal.after(0).get(0).get("data");
         assertEquals("FAIL",payload.get("status"));assertEquals("CASE_FINISHED",payload.get("executionEventType"));
         assertEquals("case-17",payload.get("caseId"));assertEquals("run-9",payload.get("executionId"));
+        Map<?,?> limit=(Map<?,?>)payload.get("journalLimit");
+        assertEquals("ATT-JOURNAL-EVENT-TRUNCATED",limit.get("code"));
+        assertEquals("DATA_TRUNCATED",limit.get("outcome"));
+        assertEquals("server.eventJournal.maxEventDataBytes",limit.get("limitName"));
+        assertTrue(((Number)limit.get("observed")).longValue()>((Number)limit.get("configuredLimit")).longValue());
         assertTrue(((List<?>)payload.get("droppedFields")).contains("largeDetails"));
         assertTrue(new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsBytes(payload).length<=65536);
         JobEvents replay=new JobEvents(temp.resolve("structured.jsonl"),10,Runnable::run);Map<?,?> replayed=(Map<?,?>)replay.after(0).get(0).get("data");

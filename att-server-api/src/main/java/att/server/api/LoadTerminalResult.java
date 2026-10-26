@@ -309,7 +309,19 @@ public final class LoadTerminalResult {
         addTransportWarning(warnings, source.get("outer"));
         addTransportWarning(warnings, source.get("transportWarnings"));
         if (!warnings.isEmpty()) out.put("transportWarnings", warnings);
+        List<Map<String, Object>> secondary = safeSecondaryNotices(source.get("secondaryNotices"));
+        if (!secondary.isEmpty()) out.put("secondaryNotices", secondary);
         return out;
+    }
+
+    private static List<Map<String, Object>> safeSecondaryNotices(Object value) {
+        List<Map<String, Object>> notices = new ArrayList<Map<String, Object>>();
+        if (!(value instanceof Iterable)) return notices;
+        for (Object item : (Iterable<?>) value) if (item instanceof Map && notices.size() < 2) {
+            Map<String, Object> notice = diagnostic((Map<?, ?>) item);
+            if (!notice.isEmpty()) notices.add(notice);
+        }
+        return notices;
     }
 
     private static boolean isFailureOutcome(String status) {
@@ -325,6 +337,9 @@ public final class LoadTerminalResult {
                 result.put("code", row.get("code") == null ? row.get("type") : row.get("code"));
                 result.put("summary", row.get("summary"));
                 result.put("workloadId", row.get("workloadId"));
+                for (String key : new String[] {"limitName", "configuredLimit", "actual", "observed", "usage", "limit",
+                        "threshold", "scope", "outcome", "stage", "remediationHint", "artifactRef"})
+                    if (row.containsKey(key)) result.put(key, row.get(key));
                 return result;
             }
         }
@@ -342,6 +357,18 @@ public final class LoadTerminalResult {
         result.put("summary", "LOAD resource preparation failed (" + code + ").");
         if (preparation.get("failed") instanceof Number && number(preparation.get("failed"), 0).longValue() > 0L)
             result.put("failedCount", number(preparation.get("failed"), 0));
+        boolean resourceLimit = "LOAD_RESOURCE_PREPARATION_LIMIT".equals(code);
+        boolean deadline = "LOAD_PREPARATION_TIMEOUT".equals(code);
+        if (resourceLimit || deadline) {
+            String limitName = resourceLimit ? "load.initialConnectionsPerWorker" : "load.preparationDeadlineMs";
+            Number configured = number(preparation.get(resourceLimit ? "perRunConnectionBudget" : "preparationDeadlineMs"),
+                    resourceLimit ? 64 : 30000);
+            Number observed = number(preparation.get(resourceLimit ? "initialConnections" : "preparationMs"), 0);
+            result.putAll(LimitDiagnostic.create(code, String.valueOf(result.get("summary")), limitName, configured,
+                    observed, "load.preparation", LimitOutcome.EXECUTION_ERROR, "preparation",
+                    resourceLimit ? "Reduce the number of distinct initial DB and MQ connections per LOAD."
+                            : "Check dependency readiness and reduce preparation work before extending the deadline.", null));
+        }
         return result;
     }
 
@@ -364,7 +391,27 @@ public final class LoadTerminalResult {
         putText(result, "workloadId", source.get("workloadId"), 96);
         putText(result, "phase", source.get("phase"), 24);
         putNumber(result, "failedCount", source.get("failedCount"));
+        putText(result, "limitName", source.get("limitName"), 96);
+        putNumber(result, "configuredLimit", source.get("configuredLimit"));
+        putNumber(result, "actual", source.get("actual"));
+        putNumber(result, "observed", source.get("observed"));
+        putNumber(result, "usage", source.get("usage"));
+        putNumber(result, "limit", source.get("limit"));
+        putNumber(result, "threshold", source.get("threshold"));
+        putText(result, "scope", source.get("scope"), 96);
+        String outcome = text(source.get("outcome"), 32);
+        if (isLimitOutcome(outcome)) result.put("outcome", outcome);
+        putText(result, "stage", source.get("stage"), 96);
+        putText(result, "remediationHint", DiagnosticSanitizer.redactAbsolutePaths(
+                DiagnosticSanitizer.redactText(text(source.get("remediationHint"), 256))), 256);
+        String artifactRef = safeRelative(source.get("artifactRef"), null);
+        if (artifactRef != null) result.put("artifactRef", artifactRef);
         return result;
+    }
+
+    private static boolean isLimitOutcome(String value) {
+        for (LimitOutcome outcome : LimitOutcome.values()) if (outcome.name().equals(value)) return true;
+        return false;
     }
 
     private static List<Map<String, Object>> classifications(Map<?, ?> source, String primaryCode) {
@@ -424,6 +471,9 @@ public final class LoadTerminalResult {
         int count = number(metrics.get("timeSeriesBucketCount"), map(metrics.get("buckets")).size()).intValue();
         out.put("loadMetricsBucketCapacity", capacity); out.put("loadMetricsBucketCount", Math.max(0, count));
         out.put("loadMetricsBucketWidthMs", 1000);
+        long evicted = number(metrics.get("timeSeriesBucketsEvicted"), 0).longValue();
+        out.put("evictedBucketCount", Math.max(0L, evicted));
+        if (evicted > 0L) out.put("outcome", LimitOutcome.METRICS_SAMPLED.name());
         List<Long> bucketTimes = new ArrayList<Long>();
         for (Object key : map(metrics.get("buckets")).keySet()) {
             try { bucketTimes.add(Long.parseLong(String.valueOf(key))); } catch (NumberFormatException ignored) { }
@@ -450,9 +500,11 @@ public final class LoadTerminalResult {
         Map<String, Object> result = new LinkedHashMap<String, Object>();
         String[] numbers = {"loadMetricsBucketCapacity", "loadMetricsBucketCount", "loadMetricsBucketWidthMs",
                 "observedBucketStartEpochMs", "observedBucketEndEpochMs", "observedBucketCoverageMs", "runDurationMs",
-                "windowSeriesCapacity", "windowSeriesBinWidthMs"};
+                "windowSeriesCapacity", "windowSeriesBinWidthMs", "evictedBucketCount"};
         for (String key : numbers) putNumber(result, key, source.get(key));
         if (source.get("fullDurationInRollingWindow") instanceof Boolean) result.put("fullDurationInRollingWindow", source.get("fullDurationInRollingWindow"));
+        String outcome = text(source.get("outcome"), 32);
+        if (isLimitOutcome(outcome)) result.put("outcome", outcome);
         putText(result, "windowSeriesCoverage", source.get("windowSeriesCoverage"), 96);
         putText(result, "windowMetricsSchemaVersion", source.get("windowMetricsSchemaVersion"), 64);
         return result;
@@ -544,6 +596,9 @@ public final class LoadTerminalResult {
         int originalCount = number(diagnosticData.get("classificationCount"), 0).intValue();
         shrunkDiagnostics.put("omittedClassificationCount", Math.max(0, originalCount - classes.size()));
         shrunkDiagnostics.remove("transportWarnings");
+        Object notices = shrunkDiagnostics.remove("secondaryNotices");
+        int omittedNotices = iterableSize(notices);
+        if (omittedNotices > 0) shrunkDiagnostics.put("omittedSecondaryNoticeCount", omittedNotices);
         summary.put("diagnostics", shrunkDiagnostics);
         if (jsonBytes(summary) <= MAX_SUMMARY_BYTES) return;
         summary.remove("configuration");
@@ -586,7 +641,8 @@ public final class LoadTerminalResult {
     }
 
     private static boolean isTransportCode(String code) {
-        return "ATT-WORKER-EVENT-TRUNCATED".equals(code) || "ATT-JOURNAL-EVENT-TRUNCATED".equals(code);
+        return "ATT-WORKER-EVENT-TRUNCATED".equals(code) || "ATT-JOURNAL-EVENT-TRUNCATED".equals(code)
+                || "ATT-SERVER-WORKER-EVENT-TOO-LARGE".equals(code);
     }
 
     private static String safeRelative(Object value, String fallback) {

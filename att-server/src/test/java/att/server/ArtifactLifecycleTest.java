@@ -31,6 +31,7 @@ class ArtifactLifecycleTest {
         try(ServerRuntime runtime=runtime()) {
             config=runtime.config;
             job(runtime,id,"ERROR");
+            assertEquals("PENDING",runtime.artifactIndex(id).get("archiveStatus"));
             Files.delete(runtime.outputDirectoryForJob(id));
             runtime.scheduleArtifactArchive(id);
             var failed=awaitMetrics(runtime,id,"FAILED");
@@ -101,9 +102,19 @@ class ArtifactLifecycleTest {
             for(String state:List.of("PASS","FAIL","ERROR","INVALID","CANCELLED")) {
                 String id=String.format("J%016X",++counter);Job job=job(runtime,id,state);
                 Files.writeString(runtime.outputDirectoryForJob(id).resolve("case.log"),"password=archive-canary\nbusiness=unchanged\n");
+                if("PASS".equals(state))Files.write(runtime.outputDirectoryForJob(id).resolve("oversized.log"),
+                        new byte[(int)ArtifactArchive.MAX_ENTRY_BYTES+1]);
                 runtime.scheduleArtifactArchive(id);runtime.scheduleArtifactArchive(id);
                 awaitState(runtime,id,"READY");
                 assertEquals(state,runtime.jobRecord(id).get("status"));
+                if("PASS".equals(state)) {
+                    Map<String,Object> index=runtime.artifactIndex(id);
+                    assertEquals("READY",index.get("archiveStatus"));
+                    assertEquals(Boolean.FALSE,index.get("complete"));
+                    Map<?,?> omission=(Map<?,?>)((List<?>)index.get("omissionDiagnostics")).get(0);
+                    assertEquals("ARTIFACT_OMITTED",omission.get("outcome"));
+                    assertEquals("PASS",runtime.jobRecord(id).get("status"),"An omitted artifact does not change execution status");
+                }
                 long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(5);
                 while(Files.exists(runtime.outputDirectoryForJob(id))&&System.nanoTime()<deadline)Thread.sleep(10);
                 assertFalse(Files.exists(runtime.outputDirectoryForJob(id)));

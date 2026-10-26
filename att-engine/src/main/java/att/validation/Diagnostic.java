@@ -12,6 +12,7 @@ public final class Diagnostic implements Comparable<Diagnostic> {
     private final java.util.List<java.util.Map<String, Object>> schemaViolations;
     private final int occurrences;
     private final java.util.List<java.util.Map<String, Object>> affectedCases;
+    private final java.util.Map<String, Object> metadata;
 
     public Diagnostic(String code, Severity severity, String message, String file, String sheet,
                       Integer row, Integer column, String template, String action) {
@@ -42,6 +43,16 @@ public final class Diagnostic implements Comparable<Diagnostic> {
                        String summary, String detail, SourceLocation source, DiagnosticContext context,
                        java.util.List<java.util.Map<String, Object>> schemaViolations,
                        int occurrences, java.util.List<java.util.Map<String, Object>> affectedCases) {
+        this(code, severity, message, file, field, sheet, row, column, template, action, suggestion,
+                summary, detail, source, context, schemaViolations, occurrences, affectedCases,
+                java.util.Collections.<String, Object>emptyMap());
+    }
+    private Diagnostic(String code, Severity severity, String message, String file, String field, String sheet,
+                       Integer row, Integer column, String template, String action, String suggestion,
+                       String summary, String detail, SourceLocation source, DiagnosticContext context,
+                       java.util.List<java.util.Map<String, Object>> schemaViolations,
+                       int occurrences, java.util.List<java.util.Map<String, Object>> affectedCases,
+                       java.util.Map<String, Object> metadata) {
         this.code = code; this.severity = severity; this.message = message == null ? null : att.security.SecretProtection.text(message); this.file = file;
         this.field = field; this.sheet = sheet; this.row = row; this.column = column; this.template = template; this.action = action; this.suggestion = suggestion;
         this.summary = summary == null ? null : att.security.SecretProtection.text(summary); this.detail = detail == null ? null : att.security.SecretProtection.text(detail); this.source = source;
@@ -55,6 +66,7 @@ public final class Diagnostic implements Comparable<Diagnostic> {
         if (affectedCases != null) for (java.util.Map<String, Object> affectedCase : affectedCases)
             cases.add(java.util.Collections.unmodifiableMap(new java.util.LinkedHashMap<String, Object>(affectedCase)));
         this.affectedCases = java.util.Collections.unmodifiableList(cases);
+        this.metadata = java.util.Collections.unmodifiableMap(new java.util.LinkedHashMap<String, Object>(metadata));
     }
     public String code() { return code; }
     public Severity severity() { return severity; }
@@ -85,6 +97,19 @@ public final class Diagnostic implements Comparable<Diagnostic> {
                 summary, detail, source, context, schemaViolations, count, cases);
     }
 
+    /** Adds stable machine fields without changing the primary human-readable cause. */
+    public Diagnostic withMetadata(java.util.Map<String, Object> values) {
+        if (values == null || values.isEmpty()) return this;
+        java.util.Map<String, Object> merged = new java.util.LinkedHashMap<String, Object>(metadata);
+        java.util.Set<String> allowed = new java.util.HashSet<String>(java.util.Arrays.asList(
+                "limitName", "configuredLimit", "actual", "observed", "usage", "limit", "threshold",
+                "scope", "outcome", "stage", "remediationHint", "artifactRef"));
+        for (java.util.Map.Entry<String, Object> entry : values.entrySet())
+            if (allowed.contains(entry.getKey())) merged.put(entry.getKey(), entry.getValue());
+        return new Diagnostic(code, severity, message, file, field, sheet, row, column, template, action, suggestion,
+                summary, detail, source, context, schemaViolations, occurrences, affectedCases, merged);
+    }
+
     public java.util.Map<String, Object> toMap() {
         java.util.Map<String, Object> map = new java.util.LinkedHashMap<String, Object>();
         map.put("code", code); map.put("severity", severity.name()); map.put("message", message); map.put("file", file); map.put("field", field); map.put("sheet", sheet); map.put("row", row); map.put("column", column); map.put("template", template); map.put("action", action); map.put("suggestion", suggestion);
@@ -97,6 +122,7 @@ public final class Diagnostic implements Comparable<Diagnostic> {
             map.put("occurrences", occurrences);
             if (!affectedCases.isEmpty()) map.put("affectedCases", affectedCases);
         }
+        map.putAll(metadata);
         return map;
     }
     public String toJson() {

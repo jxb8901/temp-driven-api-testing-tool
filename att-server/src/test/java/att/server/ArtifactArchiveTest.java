@@ -6,6 +6,7 @@ import org.junit.jupiter.api.io.TempDir;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Map;
 import java.util.zip.ZipFile;
 
@@ -155,6 +156,49 @@ class ArtifactArchiveTest {
         assertEquals(false,manifest.get("complete"));
         assertFalse(manifest.toString().contains("secret-binary"));assertFalse(manifest.toString().contains("outside.log"));
         assertThrows(java.io.FileNotFoundException.class,()->ArtifactArchive.read(archive,"outside.log"));
+    }
+
+    @Test void oversizedReportEntryIsOmittedWithSafeDiagnosticAndItsLinkIsUnavailable() throws Exception {
+        Path output=Files.createDirectory(temporary.resolve("oversized-report-output"));
+        Path report=Files.createDirectories(output.resolve("load/run/report"));
+        Files.writeString(report.resolve("index.html"),"<a href=\"oversized.html\">Open details</a>",StandardCharsets.UTF_8);
+        Files.write(report.resolve("oversized.html"),new byte[(int)ArtifactArchive.MAX_ENTRY_BYTES+1]);
+        Path archive=temporary.resolve("oversized-report.zip");
+        ArtifactArchive.build(output,archive,Files::readAllBytes);
+
+        Map<String,Object> manifest=ArtifactArchive.verify(archive,true);
+        assertEquals(false,manifest.get("complete"));
+        List<?> notices=(List<?>)manifest.get("diagnostics");
+        Map<?,?> notice=(Map<?,?>)notices.get(0);
+        assertEquals("ATT-ARTIFACT-OMITTED",notice.get("code"));
+        assertEquals("artifact.archive.entryBytes",notice.get("limitName"));
+        assertEquals("ARTIFACT_OMITTED",notice.get("outcome"));
+        assertEquals(ArtifactArchive.MAX_ENTRY_BYTES+1,((Number)notice.get("observed")).longValue());
+        assertFalse(manifest.toString().contains("oversized.html"),"The safe diagnostic must not reveal a filesystem or logical rejected name");
+        assertThrows(java.io.FileNotFoundException.class,()->ArtifactArchive.read(archive,"load/run/report/oversized.html"));
+        String published=new String(ArtifactArchive.read(archive,"load/run/report/index.html"),StandardCharsets.UTF_8);
+        assertFalse(published.contains("href=\"oversized.html\""));
+        assertTrue(published.contains("unavailable in exported archive"));
+    }
+
+    @Test void totalAndEntryCountCapsFailPublicationWithTypedLimitEvidence() throws Exception {
+        Path totalOutput=Files.createDirectory(temporary.resolve("total-cap-output"));
+        for(int i=0;i<9;i++)Files.createFile(totalOutput.resolve("part-"+i+".log"));
+        ArtifactArchive.LimitFailure total=assertThrows(ArtifactArchive.LimitFailure.class,()->ArtifactArchive.build(
+                totalOutput,temporary.resolve("total-cap.zip"),file->new byte[15*1024*1024]));
+        assertEquals("artifact.archive.totalBytes",total.limitName);
+        assertEquals(ArtifactArchive.MAX_TOTAL_BYTES,total.limit);
+        assertTrue(total.observed>ArtifactArchive.MAX_TOTAL_BYTES);
+        assertFalse(Files.exists(temporary.resolve("total-cap.zip")));
+
+        Path entriesOutput=Files.createDirectory(temporary.resolve("entry-cap-output"));
+        for(int i=0;i<ArtifactArchive.MAX_ENTRIES+1;i++)Files.createFile(entriesOutput.resolve(i+".log"));
+        ArtifactArchive.LimitFailure entries=assertThrows(ArtifactArchive.LimitFailure.class,()->ArtifactArchive.build(
+                entriesOutput,temporary.resolve("entry-cap.zip"),Files::readAllBytes));
+        assertEquals("artifact.archive.entries",entries.limitName);
+        assertEquals(ArtifactArchive.MAX_ENTRIES,entries.limit);
+        assertEquals(ArtifactArchive.MAX_ENTRIES+1L,entries.observed);
+        assertFalse(Files.exists(temporary.resolve("entry-cap.zip")));
     }
 
     @Test void reportDiscoveryInventoryDoesNotDependOnListingLimitsAndKeepsRelativeBytes() throws Exception {

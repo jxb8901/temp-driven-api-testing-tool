@@ -485,7 +485,7 @@ public final class ApiServlet extends HttpServlet {
                 wakeup.poll(15,TimeUnit.SECONDS);
                 if(sessionHash!=null&&!runtime.auth.sessionStillValid(sessionHash))break;
                 List<Map<String,Object>> events=journal.after(cursor,100);
-                for(Map<String,Object> event:events){long id=((Number)event.get("id")).longValue();Object projected=runtime.publicEventData(event.get("data"),outputDirectory,packageRoot);if(projected instanceof com.fasterxml.jackson.databind.node.ObjectNode node && journal.truncatedHistory() && id==journal.oldestId()) node.put("historyTruncated",true);out.print("id: "+id+"\nevent: "+event.get("event")+"\ndata: "+ServerRuntime.JSON.writeValueAsString(projected)+"\n\n");cursor=id;}
+                for(Map<String,Object> event:events){long id=((Number)event.get("id")).longValue();Object projected=runtime.publicEventData(event.get("data"),outputDirectory,packageRoot);if(projected instanceof com.fasterxml.jackson.databind.node.ObjectNode node && journal.truncatedHistory() && id==journal.oldestId()){node.put("historyTruncated",true);node.set("historyLimit",ServerRuntime.JSON.valueToTree(att.server.api.LimitDiagnostic.create("ATT-JOURNAL-HISTORY-EVICTED","Earlier Job events are outside the retained journal window","server.maxEventsPerJob",runtime.config.maxEventsPerJob,journal.oldestId()-1,"server.eventJournal",att.server.api.LimitOutcome.HISTORY_EVICTED,"presentation","Use pagination or retained report artifacts for longer history",null)));}out.print("id: "+id+"\nevent: "+event.get("event")+"\ndata: "+ServerRuntime.JSON.writeValueAsString(projected)+"\n\n");cursor=id;}
                 if(!events.isEmpty()){out.flush();if(out.checkError())return;lastWrite=System.nanoTime();}
                 if(journal.hasMore(cursor)){wakeup.offer(Boolean.TRUE);continue;}
                 if(runtime.terminal(jobId)&&journal.resultDeliveredThrough(cursor)&&!journal.hasMore(cursor))break;
@@ -738,7 +738,33 @@ public final class ApiServlet extends HttpServlet {
     static String principal(HttpServletRequest req){Object value=req.getServletContext().getAttribute(ServerBootstrap.RUNTIME);if(value instanceof ServerRuntime runtime&&"local".equals(runtime.config.authMode)){Object identity=req.getAttribute(AuthService.IDENTITY);return identity instanceof String?(String)identity:null;}if(value instanceof ServerRuntime runtime&&!runtime.config.authenticationRequired)return RequestIdentity.ANONYMOUS;Principal p=req.getUserPrincipal();if(p==null)return null;String name=p.getName();if(name==null||name.isBlank()||name.length()>256)return null;for(int i=0;i<name.length();i++)if(Character.isISOControl(name.charAt(i)))return null;return name.trim();}
     private static String requestId(HttpServletRequest req,HttpServletResponse res){String value=req.getHeader("X-Request-ID");if(value==null||!value.matches("[A-Za-z0-9._-]{1,80}"))value=UUID.randomUUID().toString();res.setHeader("X-Request-ID",value);return value;}
     private static void json(HttpServletResponse res,int status,Object body)throws IOException{res.setStatus(status);res.setCharacterEncoding("UTF-8");res.setContentType("application/json");ServerRuntime.JSON.writeValue(res.getOutputStream(),body);}
-    private static void error(HttpServletResponse res,int status,String code,String summary,String requestId)throws IOException{Map<String,Object> e=new LinkedHashMap<>();e.put("code",code);e.put("summary",summary);e.put("detail",summary);e.put("requestId",requestId);json(res,status,Map.of("error",e));}
+    static void error(HttpServletResponse res,int status,String code,String summary,String requestId)throws IOException{
+        Map<String,Object> e=new LinkedHashMap<>();e.put("code",code);e.put("summary",summary);e.put("detail",summary);e.put("requestId",requestId);
+        Map<String,Object> response=new LinkedHashMap<>();response.put("error",e);response.put("requestId",requestId);
+        Map<String,Object> diagnostic=limitHttpDiagnostic(status,code,summary);
+        if(diagnostic!=null){e.put("diagnostic",diagnostic);response.put("diagnostics",List.of(diagnostic));}
+        json(res,status,response);
+    }
+    private static Map<String,Object> limitHttpDiagnostic(int status,String code,String summary){
+        if(status==409&&"ATT-SERVER-ARCHIVE-UNAVAILABLE".equals(code))
+            return att.server.api.LimitDiagnostic.create(code,summary,"artifact.archiveAvailability",null,null,"server.artifactPublication",
+                    att.server.api.LimitOutcome.ARCHIVE_FAILED,"publication","Refresh archive status; retry publication when the private source output remains available.","archive.zip");
+        if(status!=413&&status!=429&&status!=503&&status!=504)return null;
+        String limitName,remediation;
+        if(code.contains("INSPECTION-RESPONSE")||code.contains("RESPONSE-TOO-LARGE")){
+            limitName="server.inspection.maxResponseBytes";remediation="Request a smaller paginated or bounded inspection response.";
+        }else if(code.contains("TIMEOUT")){
+            limitName="server.inspection.timeoutMs";remediation="Narrow the inspection request and reduce package scan work before reviewing its deadline.";
+        }else if(status==413){
+            limitName="server.maxRequestBytes";remediation="Submit a smaller request or split the operation into bounded pages.";
+        }else if(status==429){
+            limitName=code.contains("DRAFT")?"server.drafts.capacity":"server.admission.queue";remediation="Retry after active work completes or reduce concurrent submissions.";
+        }else{
+            limitName=code.contains("STREAM")?"server.sse.observers":"server.inspection.capacity";remediation="Retry after current observers or inspections release capacity.";
+        }
+        return att.server.api.LimitDiagnostic.create(code,summary,limitName,null,null,"server.admission",
+                att.server.api.LimitOutcome.SUBMISSION_REJECTED,"admission",remediation,null);
+    }
     private static void error(HttpServletResponse res,int status,String code,String summary,String requestId,List<Map<String,Object>> diagnostics)throws IOException{
         Map<String,Object> e=new LinkedHashMap<>();e.put("code",code);e.put("summary",summary);e.put("detail",summary);e.put("requestId",requestId);
         List<Map<String,Object>> correlated=new ArrayList<>();

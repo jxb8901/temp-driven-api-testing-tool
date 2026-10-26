@@ -1,5 +1,8 @@
 package att.server.api;
 
+import java.util.LinkedHashMap;
+import java.util.Map;
+
 /** Bounded Server archive telemetry, independent of Worker execution metrics. */
 public final class ArtifactArchiveMetrics {
     public int version = 1;
@@ -17,6 +20,8 @@ public final class ArtifactArchiveMetrics {
     public Double writerCpuMs;
     public Long writerAllocatedBytes;
     public Long sourceFiles;
+    /** Filesystem candidates counted by the bounded archive inventory; null when the scan did not complete. */
+    public Long candidateCount;
     public Long sourceBytes;
     public Long includedEntries;
     public Long omittedEntries;
@@ -32,4 +37,6 @@ public final class ArtifactArchiveMetrics {
     /** Uncompressed manifest and entry bytes consumed by digest verification. */
     public Long verificationBytesRead;
     public Long memoryExportPeakBytes;
+    /** Bounded usage/limit/threshold snapshots; absent means the measurement was unavailable. */
+    public Map<String, Map<String, Object>> limitUsage = new LinkedHashMap<String, Map<String, Object>>();
 }

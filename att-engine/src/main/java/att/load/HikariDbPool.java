@@ -163,6 +163,9 @@ public final class HikariDbPool implements AutoCloseable {
         result.put("total", total()); result.put("waiting", waiting()); result.put("borrowCount", borrowCount());
         result.put("borrowTimeouts", borrowTimeouts()); result.put("borrowFailures", borrowFailures());
         result.put("totalBorrowWaitMs", totalBorrowWaitMs());
+        Map<String, Object> saturation = new LinkedHashMap<String, Object>();
+        saturation.put("usage", active()); saturation.put("limit", maxSize); saturation.put("threshold", 0.8d);
+        result.put("limitUsage", java.util.Collections.<String, Object>singletonMap("db.pool.activeConnections", saturation));
         result.put("totalConnectionHoldMs", holdNanos.get() / 1_000_000.0);
         result.put("releasedConnections", holdCount.get());
         result.put("totalStatementMs", statementNanos.get() / 1_000_000.0);

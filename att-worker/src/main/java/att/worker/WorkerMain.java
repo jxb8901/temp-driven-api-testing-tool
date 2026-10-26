@@ -762,8 +762,12 @@ public final class WorkerMain {
         return att.console.ExecutionConsoleFormatter.present(DiagnosticSanitizer.redactAbsolutePaths(DiagnosticSanitizer.redactText(line)),consoleOptions);
     }
     private Map<String,Object> boundedEvent(WorkerEvent.Type type,Map<String,Object> safe,long size) {
-        Map<String,Object> bounded=fields("truncated",true,"protocolLimit",fields("code","ATT-WORKER-EVENT-TRUNCATED",
-                "eventType",type.name(),"sizeBytes",size,"limitBytes",WorkerProtocol.MAX_FRAME_BYTES));
+        Map<String,Object> protocolLimit=att.server.api.LimitDiagnostic.create("ATT-WORKER-EVENT-TRUNCATED",
+                "Large Worker event details were omitted from the protocol frame", "worker.protocol.maxFrameBytes",
+                WorkerProtocol.MAX_FRAME_BYTES, size, "worker.protocol", att.server.api.LimitOutcome.DATA_TRUNCATED,
+                "transport", "Inspect the retained report artifact for bounded details", null);
+        protocolLimit.put("eventType",type.name());
+        Map<String,Object> bounded=fields("truncated",true,"protocolLimit",protocolLimit);
         for(String key:new String[]{"status","code","message","executionId","caseId","stage","action","executionEventType"})
             if(safe.get(key) instanceof String)bounded.put(key,boundedText(safe.get(key),512));
         if(safe.get("console") instanceof String)bounded.put("console",boundedText(safe.get("console"),512));
@@ -779,7 +783,11 @@ public final class WorkerMain {
                 Object old=projected.get("diagnostics");
                 if(old instanceof Iterable)for(Object item:(Iterable<?>)old)if(item instanceof Map&&diagnostics.size()<3)
                     diagnostics.add(new LinkedHashMap<String,Object>((Map<String,Object>)item));
-                diagnostics.add(fields("code","ATT-WORKER-EVENT-TRUNCATED","summary","Large result details were omitted from the Worker protocol; inspect the published artifacts"));
+                diagnostics.add(att.server.api.LimitDiagnostic.create("ATT-WORKER-EVENT-TRUNCATED",
+                        "Large result details were omitted from the Worker protocol; inspect the published artifacts",
+                        "worker.protocol.maxFrameBytes",WorkerProtocol.MAX_FRAME_BYTES,size,"worker.protocol",
+                        att.server.api.LimitOutcome.DATA_TRUNCATED,"transport",
+                        "Inspect the retained report artifact for bounded details",null));
                 projected.put("diagnostics",diagnostics);
                 projected.put("truncated",Boolean.TRUE);
                 Map<String,Object> summary=(Map<String,Object>)projected.get("summary");
@@ -788,7 +796,10 @@ public final class WorkerMain {
                 Object existing=diagnosticSummary.get("transportWarnings");
                 if(existing instanceof Iterable)for(Object item:(Iterable<?>)existing)if(item instanceof Map&&warnings.size()<1)
                     warnings.add(new LinkedHashMap<String,Object>((Map<String,Object>)item));
-                warnings.add(fields("code","ATT-WORKER-EVENT-TRUNCATED","summary","Large result details were omitted from the Worker protocol"));
+                warnings.add(att.server.api.LimitDiagnostic.create("ATT-WORKER-EVENT-TRUNCATED",
+                        "Large result details were omitted from the Worker protocol", "worker.protocol.maxFrameBytes",
+                        WorkerProtocol.MAX_FRAME_BYTES,size,"worker.protocol",att.server.api.LimitOutcome.DATA_TRUNCATED,
+                        "transport","Inspect the retained report artifact for bounded details",null));
                 diagnosticSummary.put("transportWarnings",warnings);
                 bounded.put("status",projected.get("status")); bounded.put("exitCode",projected.get("exitCode"));
                 bounded.put("result",projected);
@@ -814,7 +825,11 @@ public final class WorkerMain {
                     if(((Map<?,?>)item).get(key) instanceof String)diagnostic.put(key,boundedText(((Map<?,?>)item).get(key),512));
                 if(!diagnostic.isEmpty())diagnostics.add(diagnostic);
             }
-            diagnostics.add(fields("code","ATT-WORKER-EVENT-TRUNCATED","summary","Large result details were omitted from the Worker protocol; inspect the published artifacts"));
+            diagnostics.add(att.server.api.LimitDiagnostic.create("ATT-WORKER-EVENT-TRUNCATED",
+                    "Large result details were omitted from the Worker protocol; inspect the published artifacts",
+                    "worker.protocol.maxFrameBytes",WorkerProtocol.MAX_FRAME_BYTES,size,"worker.protocol",
+                    att.server.api.LimitOutcome.DATA_TRUNCATED,"transport",
+                    "Inspect the retained report artifact for bounded details",null));
             result.put("diagnostics",diagnostics);
             if(executionOutput!=null)try {
                 java.nio.file.Files.createDirectories(executionOutput);

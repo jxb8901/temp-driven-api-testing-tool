@@ -39,7 +39,7 @@ public final class LoadResult extends OperationResult {
     /** Full report shape used by direct Engine/CLI callers for compatibility. */
     @Override public Map<String,Object> summary() {
         if(detailedResult==null)return super.summary();
-        Map<String,Object> value=new LinkedHashMap<String,Object>(detailedResult.toMap());
+        Map<String,Object> value=new LinkedHashMap<String,Object>(detailedResult.toDetailedMap(reportAvailability));
         if(configuration!=null)value.put("configuration",configuration);
         return value;
     }

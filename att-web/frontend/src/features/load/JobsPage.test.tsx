@@ -457,7 +457,13 @@ describe('JobsPage React feature', () => {
         performance: { executionStatus: 'ERROR', verdict: 'NOT_EVALUATED' },
         metrics: { scheduled: 100, started: 98, completed: 90, success: 80, runtimeError: 7, failure: 3, completedThroughput: 7.5 },
         thresholds: { verdict: 'PASS', total: 2 },
-        diagnostics: { primaryError: { code: 'MQ_POOL_TIMEOUT', summary: 'Connection pool wait timed out.' } },
+        diagnostics: {
+          primaryError: { code: 'MQ_POOL_TIMEOUT', summary: 'Connection pool wait timed out.', outcome: 'EXECUTION_ERROR' },
+          secondaryNotices: [{ code: 'ATT-LOAD-EVIDENCE-QUOTA', summary: 'Some iteration evidence was not retained.',
+            limitName: 'load.evidence.maxFailureSamples', observed: 4, outcome: 'DATA_TRUNCATED' }],
+          transportWarnings: [{ code: 'ATT-WORKER-EVENT-TRUNCATED', summary: 'Worker event details were truncated.',
+            limitName: 'worker.protocol.maxFrameBytes', observed: 4000000, configuredLimit: 2097152, outcome: 'DATA_TRUNCATED' }],
+        },
         metricCoverage: { loadMetricsBucketCapacity: 4096, observedBucketCoverageMs: 5000, windowSeriesBinWidthMs: 2000, windowSeriesCapacity: 1024, windowSeriesCoverage: 'ROLLING_WINDOW' },
         archive: { reportAvailability: 'PENDING', status: 'PENDING' },
       } },
@@ -470,6 +476,15 @@ describe('JobsPage React feature', () => {
     const overview = host.querySelector('#job-panel-overview')!;
     expect(overview.querySelector('[aria-label="Compact LOAD result"]')?.textContent).toContain('MQ_POOL_TIMEOUT');
     expect(overview.textContent).toContain('Connection pool wait timed out.');
+    const cause = overview.querySelector('[aria-label="LOAD root-cause diagnosis"]');
+    const notices = overview.querySelector('[aria-label="Secondary limit and transport notices"]');
+    expect(cause?.textContent).toContain('MQ_POOL_TIMEOUT');
+    expect(notices?.textContent).toContain('ATT-LOAD-EVIDENCE-QUOTA');
+    expect(notices?.textContent).toContain('4 observed');
+    expect(notices?.textContent).toContain('ATT-WORKER-EVENT-TRUNCATED');
+    expect(notices?.textContent).toContain('4000000 / 2097152');
+    expect(cause !== null && notices !== null
+      && Boolean(cause.compareDocumentPosition(notices) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
     expect(overview.textContent).toContain('90 / 80');
     expect(getArchive).not.toHaveBeenCalled();
     const raw = host.querySelector('#job-panel-results details[open]');
