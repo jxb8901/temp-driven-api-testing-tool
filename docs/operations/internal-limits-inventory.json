@@ -1490,15 +1490,15 @@
     {
       "id": "resource-page",
       "settingName": "resourceInspector.maxPageSize",
-      "sourcePath": "att-engine/src/main/java/att/resource/PackageResourceInspector.java",
-      "sourceClass": "PackageResourceInspector",
+      "sourcePath": "att-server/src/main/java/att/server/ApiServlet.java",
+      "sourceClass": "ApiServlet",
       "default": 100,
       "allowedMin": 1,
       "allowedMax": 100,
       "scope": "One resource listing",
       "configurable": true,
       "hardCoded": false,
-      "enforcingBoundary": "Resource listing validator",
+      "enforcingBoundary": "Resource listing query validator",
       "resultingStatus": {
         "executionStatus": "request rejected",
         "httpStatus": 400,
@@ -1506,10 +1506,10 @@
         "archiveStatus": null
       },
       "diagnosticCode": "ATT-RESOURCE-LIMIT",
-      "whereShown": "Studio Explorer pagination",
+      "whereShown": "HTTP resource listing error diagnostics and Studio Explorer request result",
       "suggestedRemediation": "Fetch the next bounded page.",
       "suggestedRemediationZh": "讀取下一個有界分頁。",
-      "sourceCheck": "MAX_PAGE_SIZE\\s*=\\s*100",
+      "sourceCheck": "\"resourceInspector.maxPageSize\",100,observed",
       "outcome": "SUBMISSION_REJECTED"
     },
     {
@@ -2286,6 +2286,106 @@
       "suggestedRemediation": "Reduce snapshot size or retain only required versions.",
       "suggestedRemediationZh": "縮小 snapshot，或只保留必要版本。",
       "outcome": "HISTORY_EVICTED"
+    },
+    {
+      "id": "package-config-bytes",
+      "settingName": "packageConfiguration.maxConfigBytes",
+      "sourcePath": "att-engine/src/main/java/att/resource/PackageConfigurationInspector.java",
+      "sourceClass": "PackageConfigurationInspector",
+      "default": 1048576,
+      "allowedMin": null,
+      "allowedMax": null,
+      "scope": "Maximum main configuration YAML file",
+      "configurable": false,
+      "hardCoded": true,
+      "enforcingBoundary": "Configuration file byte counter",
+      "resultingStatus": {
+        "executionStatus": "inspection rejected",
+        "httpStatus": 413,
+        "exitCode": null,
+        "archiveStatus": null
+      },
+      "diagnosticCode": "ATT-RESOURCE-LIMIT",
+      "whereShown": "HTTP package configuration inspection diagnostic and Studio configuration view",
+      "suggestedRemediation": "Reduce the configuration inspection scope or split referenced configuration into bounded files; this deterministic limit does not need a retry.",
+      "suggestedRemediationZh": "縮小設定檢查範圍，或將參照設定拆分為有界檔案；此確定性限制無需原樣重試。",
+      "sourceCheck": "\\bMAX_CONFIG_BYTES\\s*=\\s*[^;]+;",
+      "outcome": "SUBMISSION_REJECTED"
+    },
+    {
+      "id": "package-config-descriptor-bytes",
+      "settingName": "packageConfiguration.maxDescriptorBytes",
+      "sourcePath": "att-engine/src/main/java/att/resource/PackageConfigurationInspector.java",
+      "sourceClass": "PackageConfigurationInspector",
+      "default": 1048576,
+      "allowedMin": null,
+      "allowedMax": null,
+      "scope": "Each referenced descriptor file",
+      "configurable": false,
+      "hardCoded": true,
+      "enforcingBoundary": "Descriptor file byte counter",
+      "resultingStatus": {
+        "executionStatus": "inspection rejected",
+        "httpStatus": 413,
+        "exitCode": null,
+        "archiveStatus": null
+      },
+      "diagnosticCode": "ATT-RESOURCE-LIMIT",
+      "whereShown": "HTTP package configuration inspection diagnostic and Studio configuration view",
+      "suggestedRemediation": "Reduce the configuration inspection scope or split referenced configuration into bounded files; this deterministic limit does not need a retry.",
+      "suggestedRemediationZh": "縮小設定檢查範圍，或將參照設定拆分為有界檔案；此確定性限制無需原樣重試。",
+      "sourceCheck": "\\bMAX_DESCRIPTOR_BYTES\\s*=\\s*[^;]+;",
+      "outcome": "SUBMISSION_REJECTED"
+    },
+    {
+      "id": "package-config-reference-count",
+      "settingName": "packageConfiguration.maxReferencedFiles",
+      "sourcePath": "att-engine/src/main/java/att/resource/PackageConfigurationInspector.java",
+      "sourceClass": "PackageConfigurationInspector",
+      "default": 512,
+      "allowedMin": null,
+      "allowedMax": null,
+      "scope": "One effective configuration inspection",
+      "configurable": false,
+      "hardCoded": true,
+      "enforcingBoundary": "Referenced file counter",
+      "resultingStatus": {
+        "executionStatus": "inspection rejected",
+        "httpStatus": 413,
+        "exitCode": null,
+        "archiveStatus": null
+      },
+      "diagnosticCode": "ATT-RESOURCE-LIMIT",
+      "whereShown": "HTTP package configuration inspection diagnostic and Studio configuration view",
+      "suggestedRemediation": "Reduce the configuration inspection scope or split referenced configuration into bounded files; this deterministic limit does not need a retry.",
+      "suggestedRemediationZh": "縮小設定檢查範圍，或將參照設定拆分為有界檔案；此確定性限制無需原樣重試。",
+      "sourceCheck": "\\bMAX_REFERENCED_FILES\\s*=\\s*[^;]+;",
+      "outcome": "SUBMISSION_REJECTED"
+    },
+    {
+      "id": "package-config-total-descriptor-bytes",
+      "settingName": "packageConfiguration.maxTotalDescriptorBytes",
+      "sourcePath": "att-engine/src/main/java/att/resource/PackageConfigurationInspector.java",
+      "sourceClass": "PackageConfigurationInspector",
+      "default": 16777216,
+      "allowedMin": null,
+      "allowedMax": null,
+      "scope": "All referenced descriptor files in one inspection",
+      "configurable": false,
+      "hardCoded": true,
+      "enforcingBoundary": "Accumulated descriptor byte counter",
+      "resultingStatus": {
+        "executionStatus": "inspection rejected",
+        "httpStatus": 413,
+        "exitCode": null,
+        "archiveStatus": null
+      },
+      "diagnosticCode": "ATT-RESOURCE-LIMIT",
+      "whereShown": "HTTP package configuration inspection diagnostic and Studio configuration view",
+      "suggestedRemediation": "Reduce the configuration inspection scope or split referenced configuration into bounded files; this deterministic limit does not need a retry.",
+      "suggestedRemediationZh": "縮小設定檢查範圍，或將參照設定拆分為有界檔案；此確定性限制無需原樣重試。",
+      "sourceCheck": "\\bMAX_TOTAL_DESCRIPTOR_BYTES\\s*=\\s*[^;]+;",
+      "outcome": "SUBMISSION_REJECTED"
     }
   ],
   "sourceContracts": [
@@ -3046,21 +3146,22 @@
     },
     {
       "entryId": "resource-page",
-      "path": "att-engine/src/main/java/att/resource/PackageResourceInspector.java",
-      "pattern": "MAX_PAGE_SIZE\\s*=\\s*(?P<value>\\d+)",
+      "path": "att-server/src/main/java/att/server/ApiServlet.java",
+      "pattern": "\"resourceInspector.maxPageSize\",(?P<default>\\d+),observed",
       "fields": {
-        "default": "value",
-        "allowedMax": "value"
+        "default": "default",
+        "allowedMax": "default"
       },
       "literalFields": {},
       "settingName": "resourceInspector.maxPageSize"
     },
     {
       "entryId": "resource-page",
-      "path": "att-engine/src/main/java/att/resource/PackageResourceInspector.java",
-      "pattern": "limit\\s*<\\s*(?P<allowedMin>\\d+)\\s*\\|\\|\\s*limit\\s*>\\s*MAX_PAGE_SIZE",
+      "path": "att-server/src/main/java/att/server/ApiServlet.java",
+      "pattern": "if\\(value<(?P<allowedMin>\\d+)\\|\\|value>(?P<allowedMax>\\d+)\\)throw new ResourcePageLimitException",
       "fields": {
-        "allowedMin": "allowedMin"
+        "allowedMin": "allowedMin",
+        "allowedMax": "allowedMax"
       },
       "literalFields": {},
       "settingName": "resourceInspector.maxPageSize"
@@ -3423,6 +3524,46 @@
       },
       "literalFields": {},
       "settingName": "packageConfiguration.maxSnapshotBytes"
+    },
+    {
+      "entryId": "package-config-bytes",
+      "path": "att-engine/src/main/java/att/resource/PackageConfigurationInspector.java",
+      "pattern": "\\bMAX_CONFIG_BYTES\\s*=\\s*(?P<default>[^;]+);",
+      "fields": {
+        "default": "default"
+      },
+      "literalFields": {},
+      "settingName": "packageConfiguration.maxConfigBytes"
+    },
+    {
+      "entryId": "package-config-descriptor-bytes",
+      "path": "att-engine/src/main/java/att/resource/PackageConfigurationInspector.java",
+      "pattern": "\\bMAX_DESCRIPTOR_BYTES\\s*=\\s*(?P<default>[^;]+);",
+      "fields": {
+        "default": "default"
+      },
+      "literalFields": {},
+      "settingName": "packageConfiguration.maxDescriptorBytes"
+    },
+    {
+      "entryId": "package-config-reference-count",
+      "path": "att-engine/src/main/java/att/resource/PackageConfigurationInspector.java",
+      "pattern": "\\bMAX_REFERENCED_FILES\\s*=\\s*(?P<default>[^;]+);",
+      "fields": {
+        "default": "default"
+      },
+      "literalFields": {},
+      "settingName": "packageConfiguration.maxReferencedFiles"
+    },
+    {
+      "entryId": "package-config-total-descriptor-bytes",
+      "path": "att-engine/src/main/java/att/resource/PackageConfigurationInspector.java",
+      "pattern": "\\bMAX_TOTAL_DESCRIPTOR_BYTES\\s*=\\s*(?P<default>[^;]+);",
+      "fields": {
+        "default": "default"
+      },
+      "literalFields": {},
+      "settingName": "packageConfiguration.maxTotalDescriptorBytes"
     }
   ]
 }

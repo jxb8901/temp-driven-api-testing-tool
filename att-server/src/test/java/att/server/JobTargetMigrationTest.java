@@ -55,6 +55,7 @@ class JobTargetMigrationTest {
             Map<String,Object> pending=get(servlet,context,runtime,"legacy-flow");
             assertEquals(503,pending.get("status"));assertEquals("2",pending.get("Retry-After"));
             assertTrue(pending.get("body").toString().contains("ATT-SERVER-TARGET-SEARCH-PENDING"));assertFalse(pending.get("body").toString().contains("items"));
+            assertFalse(pending.get("body").toString().contains("\"diagnostics\""),"Pending historical search is retryable but is not an inspection capacity failure");
             assertEquals(200,get(servlet,context,runtime,null).get("status"));
             var exact=get(servlet,context,runtime,"job:JLEGACY");assertEquals(200,exact.get("status"));assertTrue(exact.get("body").toString().contains("JLEGACY"));
             assertEquals(503,get(servlet,context,runtime,"JLEG").get("status"));

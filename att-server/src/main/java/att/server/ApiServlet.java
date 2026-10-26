@@ -144,6 +144,7 @@ public final class ApiServlet extends HttpServlet {
           catch(ServerRuntime.InspectionTimeoutException e){error(res,504,"ATT-SERVER-INSPECTION-TIMEOUT","Package inspection exceeded its time limit",requestId);}
           catch(ServerRuntime.InspectionResponseTooLargeException e){error(res,413,"ATT-SERVER-INSPECTION-RESPONSE-TOO-LARGE","Package inspection response exceeded the configured limit",requestId);}
           catch(PackageConfigurationPolicy.EnvironmentDeniedException e){error(res,403,"ATT-PACKAGE-ENVIRONMENT-DENIED",safeDetail(e),requestId);}
+          catch(ResourcePageLimitException e){error(res,400,"ATT-RESOURCE-LIMIT","Resource page size exceeds the bounded listing limit",requestId,List.of(e.diagnostic));}
           catch(IllegalArgumentException e){error(res,400,"ATT-SERVER-INVALID-REQUEST",safeDetail(e),requestId);}
           catch(Exception e){error(res,500,"ATT-SERVER-REQUEST-FAILED","The request could not be completed",requestId);getServletContext().log("ATT Server request failed id="+requestId,e);}
     }
@@ -625,6 +626,7 @@ public final class ApiServlet extends HttpServlet {
                 result.put("requestId",requestId);json(res,200,result);
             }
         } catch(ServerRuntime.NotFoundException e){throw e;}
+          catch(ServerRuntime.InspectionLimitException e){throw e;}
           catch(ServerRuntime.InspectionCapacityException e){throw e;}
           catch(ServerRuntime.InspectionTimeoutException e){throw e;}
           catch(ServerRuntime.InspectionResponseTooLargeException e){throw e;}
@@ -663,9 +665,17 @@ public final class ApiServlet extends HttpServlet {
           catch(IllegalArgumentException e){throw e;}
           catch(Exception e){throw new IOException(e);}
     }
-    private static int parseLimit(String raw){if(raw==null||raw.isEmpty())return 0;if(!raw.matches("[0-9]{1,3}"))throw new IllegalArgumentException("limit must be an integer between 1 and 100");int value=Integer.parseInt(raw);if(value<1||value>100)throw new IllegalArgumentException("limit must be between 1 and 100");return value;}
+    private static int parseLimit(String raw){if(raw==null||raw.isEmpty())return 0;if(!raw.matches("[0-9]{1,3}"))throw new IllegalArgumentException("limit must be an integer between 1 and 100");int value=Integer.parseInt(raw);if(value<1||value>100)throw new ResourcePageLimitException(value);return value;}
     private static int parseOffset(String raw){if(raw==null||raw.isEmpty())return 0;if(!raw.matches("[0-9]{1,6}"))throw new IllegalArgumentException("offset must be a non-negative integer");return Integer.parseInt(raw);}
     private static int parseConfigurationLimit(String raw){if(raw==null||raw.isEmpty())return 50;if(!raw.matches("[0-9]{1,3}"))throw new IllegalArgumentException("limit must be between 1 and 100");int value=Integer.parseInt(raw);if(value<1||value>100)throw new IllegalArgumentException("limit must be between 1 and 100");return value;}
+    private static final class ResourcePageLimitException extends IllegalArgumentException {
+        final Map<String,Object> diagnostic;
+        ResourcePageLimitException(int observed){
+            diagnostic=att.server.api.LimitDiagnostic.create("ATT-RESOURCE-LIMIT","Resource page size exceeds the bounded listing limit",
+                    "resourceInspector.maxPageSize",100,observed,"one resource listing",att.server.api.LimitOutcome.SUBMISSION_REJECTED,
+                    "request validation","Fetch the next bounded page.",null);
+        }
+    }
     private static boolean parseOptionalBoolean(String raw,String name){if(raw==null||raw.isEmpty())return false;if("true".equalsIgnoreCase(raw))return true;if("false".equalsIgnoreCase(raw))return false;throw new IllegalArgumentException(name+" must be true or false");}
     private static String principalSearch(HttpServletRequest req){String value=req.getParameter("principal");if(value==null)return null;value=value.strip();if(value.codePointCount(0,value.length())>120)throw new IllegalArgumentException("principal search must be at most 120 characters");for(int i=0;i<value.length();i++)if(Character.isISOControl(value.charAt(i)))throw new IllegalArgumentException("principal search contains an invalid character");return value.isEmpty()?null:value;}
     private static boolean resourcePath(String path){return path.matches("/packages/[^/]+/resources(?:/.*)?");}
@@ -762,6 +772,21 @@ public final class ApiServlet extends HttpServlet {
     private static Map<String,Object> limitHttpDiagnostic(int status,String code,String summary){
         if(status!=413&&status!=429&&status!=503&&status!=504)return null;
         String limitName,remediation;
+        if(status==503){
+            if("ATT-SERVER-ARTIFACT-CAPACITY".equals(code)){
+                limitName="server.artifacts.readSlots";remediation="Retry after an artifact preview or download releases its read slot.";
+            }else if("ATT-SERVER-INSPECTION-CAPACITY".equals(code)){
+                limitName="server.inspection.capacity";remediation="Retry after active package inspections release capacity.";
+            }else if("ATT-SERVER-STREAM-CAPACITY".equals(code)){
+                limitName="server.sse.observers";remediation="Retry after an event-stream observer disconnects.";
+            }else return null;
+            return att.server.api.LimitDiagnostic.create(code,summary,limitName,null,null,"server.admission",
+                    att.server.api.LimitOutcome.SUBMISSION_REJECTED,"admission",remediation,null);
+        }
+        if(status==429&&!"ATT-SERVER-CAPACITY-EXCEEDED".equals(code)&&!"ATT-SERVER-DRAFT-CAPACITY".equals(code))return null;
+        if(status==504&&!"ATT-SERVER-INSPECTION-TIMEOUT".equals(code))return null;
+        if(status==413&&!"ATT-SERVER-REQUEST-TOO-LARGE".equals(code)
+                &&!"ATT-SERVER-INSPECTION-RESPONSE-TOO-LARGE".equals(code))return null;
         if(code.contains("INSPECTION-RESPONSE")||code.contains("RESPONSE-TOO-LARGE")){
             limitName="server.inspection.maxResponseBytes";remediation="Request a smaller paginated or bounded inspection response.";
         }else if(code.contains("TIMEOUT")){
@@ -770,9 +795,7 @@ public final class ApiServlet extends HttpServlet {
             limitName="server.maxRequestBytes";remediation="Submit a smaller request or split the operation into bounded pages.";
         }else if(status==429){
             limitName=code.contains("DRAFT")?"server.drafts.capacity":"server.admission.queue";remediation="Retry after active work completes or reduce concurrent submissions.";
-        }else{
-            limitName=code.contains("STREAM")?"server.sse.observers":"server.inspection.capacity";remediation="Retry after current observers or inspections release capacity.";
-        }
+        }else return null;
         return att.server.api.LimitDiagnostic.create(code,summary,limitName,null,null,"server.admission",
                 att.server.api.LimitOutcome.SUBMISSION_REJECTED,"admission",remediation,null);
     }

@@ -142,6 +142,64 @@ class ApiServletIntegratedLimitsTest {
         }
     }
 
+    @Test void packageConfigurationByteLimitHasStructuredFieldsOnTheRealInspectionRoute() throws Exception {
+        Path packages=Files.createDirectories(temp.resolve("configuration-limit-packages"));createPackage(packages.resolve("p"));
+        Path config=sharedRuntimeConfig();
+        try(java.io.OutputStream out=Files.newOutputStream(config,java.nio.file.StandardOpenOption.APPEND)) {
+            out.write(("#"+"x".repeat(1024*1024)+"\n").getBytes(StandardCharsets.UTF_8));
+        }
+        try(ServerRuntime runtime=runtime(packages,config,"configuration-limit-data",1000,null,workerLibraries("configuration-limit-libs"))) {
+            Captured response=invoke(servlet(runtime),"GET","/packages/p/configuration/effective",Collections.singletonMap("environment","SIT"),new byte[0]);
+            JsonNode diagnostic=ServerRuntime.JSON.readTree(response.body()).path("diagnostics").path(0);
+            assertEquals(413,response.status,new String(response.body(),StandardCharsets.UTF_8));
+            assertEquals("ATT-RESOURCE-LIMIT",diagnostic.path("code").asText());
+            assertEquals("packageConfiguration.maxConfigBytes",diagnostic.path("limitName").asText(),diagnostic.toString());
+            assertEquals(1024*1024,diagnostic.path("configuredLimit").asInt());
+            assertEquals(1024*1024,diagnostic.path("limit").asInt());
+            assertTrue(diagnostic.path("observed").asLong()>diagnostic.path("configuredLimit").asLong());
+            assertEquals(diagnostic.path("observed").asLong(),diagnostic.path("actual").asLong());
+            assertEquals("SUBMISSION_REJECTED",diagnostic.path("outcome").asText());
+            stopInspectionProcesses(runtime);
+        }
+    }
+
+    @Test void resourcePageSizeOverOneHundredHasStructured400DiagnosticOnRealRoute() throws Exception {
+        Path packages=Files.createDirectories(temp.resolve("page-size-packages"));createPackage(packages.resolve("p"));
+        try(ServerRuntime runtime=runtime(packages,sharedRuntimeConfig(),"page-size-data",1000,null,workerLibraries("page-size-libs"))) {
+            Map<String,String> parameters=new HashMap<>();parameters.put("type","template");parameters.put("limit","101");
+            Captured response=invoke(servlet(runtime),"GET","/packages/p/resources",parameters,new byte[0]);
+            JsonNode diagnostic=ServerRuntime.JSON.readTree(response.body()).path("diagnostics").path(0);
+            assertEquals(400,response.status);
+            assertEquals("ATT-RESOURCE-LIMIT",diagnostic.path("code").asText());
+            assertEquals("resourceInspector.maxPageSize",diagnostic.path("limitName").asText());
+            assertEquals(100,diagnostic.path("configuredLimit").asInt());
+            assertEquals(101,diagnostic.path("observed").asInt());
+            assertEquals("SUBMISSION_REJECTED",diagnostic.path("outcome").asText());
+        }
+    }
+
+    @Test void artifactReadSlotExhaustionNamesItsOwnCapacityOnTheRealArtifactRoute() throws Exception {
+        Path packages=Files.createDirectories(temp.resolve("artifact-capacity-packages"));createPackage(packages.resolve("p"));
+        try(ServerRuntime runtime=runtime(packages,sharedRuntimeConfig(),"artifact-capacity-data",1000,null,workerLibraries("artifact-capacity-libs"))) {
+            String id="J0000000000000295";Path output=Files.createDirectories(runtime.outputDirectoryForJob(id));
+            Files.writeString(output.resolve("case.log"),"approved");
+            Job job=new Job(id,"run","p","alice",new WorkerRequest(),new JobEvents(output.getParent().resolve("events.jsonl"),100));
+            job.status="PASS";job.exitCode=0;job.finishedAt=Instant.now();runtime.store.insert(job,"{}");
+            ArtifactArchive.build(output,runtime.artifactArchivePath(id),Files::readAllBytes);
+            Files.writeString(runtime.artifactArchivePath(id).resolveSibling("archive-status.json"),"{\"state\":\"READY\"}");
+            int acquired=0;while(runtime.acquireArtifactReadSlot())acquired++;
+            assertEquals(8,acquired);
+            try {
+                Captured response=invoke(servlet(runtime),"GET","/jobs/"+id+"/artifacts/view/case.log",Collections.emptyMap(),new byte[0]);
+                JsonNode diagnostic=ServerRuntime.JSON.readTree(response.body()).path("diagnostics").path(0);
+                assertEquals(503,response.status);
+                assertEquals("ATT-SERVER-ARTIFACT-CAPACITY",diagnostic.path("code").asText());
+                assertEquals("server.artifacts.readSlots",diagnostic.path("limitName").asText());
+                assertEquals("SUBMISSION_REJECTED",diagnostic.path("outcome").asText());
+            } finally {for(int index=0;index<acquired;index++)runtime.releaseArtifactReadSlot();}
+        }
+    }
+
     @Test void artifactRouteReportsPendingArchivingFailedAndReadyStatesSeparately() throws Exception {
         Path packages=Files.createDirectories(temp.resolve("archive-packages"));
         createPackage(packages.resolve("p"));

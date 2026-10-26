@@ -238,6 +238,12 @@ public final class WorkerMain {
                         limited.limitName,limited.configuredLimit,limited.observed,"package",att.server.api.LimitOutcome.SUBMISSION_REJECTED,
                         "inspection","Reduce the package scan scope or split the package into bounded units before retrying.",null));
             }
+            if(error instanceof PackageConfigurationInspector.ConfigurationLimitException) {
+                PackageConfigurationInspector.ConfigurationLimitException limited=(PackageConfigurationInspector.ConfigurationLimitException)error;
+                diagnostic.putAll(att.server.api.LimitDiagnostic.create("ATT-RESOURCE-LIMIT",message,
+                        limited.limitName,limited.configuredLimit,limited.observed,"package",att.server.api.LimitOutcome.SUBMISSION_REJECTED,
+                        "inspection","Reduce configuration inspection scope or split referenced configuration into bounded files before retrying.",null));
+            }
             if(request.registeredPackageId!=null&&request.registeredPackageId.matches("[A-Za-z0-9][A-Za-z0-9._-]{0,127}"))
                 diagnostic.put("packageId",request.registeredPackageId);
             boolean draftInspection="inspect".equals(request.command)&&(("package-configuration".equals(request.inspectionType)&&"validate".equals(request.inspectionAction))||"debug-input".equals(request.inspectionAction)||"debug-form".equals(request.inspectionAction)

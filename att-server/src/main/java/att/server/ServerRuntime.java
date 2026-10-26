@@ -731,7 +731,16 @@ final class ServerRuntime implements AutoCloseable {
         if("STATUS".equals(type)&&job.workerReadyNanos==0)job.workerReadyNanos=eventNanos;
         if(("PROGRESS".equals(type)||"LOG".equals(type))&&job.executionReadyNanos==0)job.executionReadyNanos=eventNanos;
         switch(type){case "STATUS"->{String status=event.path("status").asText("");if("RUNNING".equals(status)&&"PREPARING".equals(job.status))transition(job,"RUNNING");}
-            case "PROGRESS"->append(job,"progress",safe);case "LOG"->append(job,"log",safe);case "DIAGNOSTIC"->{job.diagnosticJson=JSON.writeValueAsString(safe);store.update(job);append(job,"diagnostic",safe);}
+            case "PROGRESS"->append(job,"progress",safe);case "LOG"->append(job,"log",safe);case "DIAGNOSTIC"->{
+                String eventDiagnostic=JSON.writeValueAsString(safe);
+                if(hasClassifiedCause(eventDiagnostic)) {
+                    if(job.primaryDiagnosticJson==null)job.primaryDiagnosticJson=eventDiagnostic;
+                    if(job.primaryDiagnosticJson.equals(eventDiagnostic))job.diagnosticJson=eventDiagnostic;
+                    else addSecondaryDiagnostic(job,safe);
+                } else if(job.primaryDiagnosticJson!=null||job.protocolDiagnostic!=null) addSecondaryDiagnostic(job,safe);
+                else job.diagnosticJson=eventDiagnostic;
+                store.update(job);append(job,"diagnostic",safe);
+            }
             case "RESULT"->{
                 if(job.processFence!=null){job.processFence.observe();rememberWorkerProcesses(job,job.processFence);}
                 job.resultReceivedNanos=eventNanos;
@@ -755,6 +764,7 @@ final class ServerRuntime implements AutoCloseable {
                         summary.put("configuration",job.request.configurationProvenance);enriched.put("summary",summary);
                     }
                     result=att.server.api.LoadTerminalResult.projectOperationResult(enriched,status,code);
+                    attachJobDiagnostics((Map<String,Object>)result,job);
                 } else if(result instanceof Map<?,?> original&&job.request.configurationProvenance!=null) {
                     Map<String,Object> enriched=new LinkedHashMap<>((Map<String,Object>)original);
                     Map<String,Object> summary=enriched.get("summary") instanceof Map<?,?> existing?new LinkedHashMap<>((Map<String,Object>)existing):new LinkedHashMap<>();
@@ -790,7 +800,34 @@ final class ServerRuntime implements AutoCloseable {
         else {job.diagnosticJson=JSON.writeValueAsString(diagnostic);append(job,"diagnostic",diagnostic);}
     }
     private boolean hasPrimaryForJob(Job job) {
-        return job.protocolDiagnostic==null?hasPrimaryDiagnostic(job.diagnosticJson):hasClassifiedCause(job.diagnosticJson);
+        return job.primaryDiagnosticJson!=null||(job.protocolDiagnostic==null&&hasPrimaryDiagnostic(job.diagnosticJson));
+    }
+    private void addSecondaryDiagnostic(Job job,Map<String,Object> diagnostic) {
+        if(job.secondaryDiagnostics.size()>=4)return;
+        Object code=diagnostic.get("code");
+        if(code instanceof String)for(Map<String,Object> existing:job.secondaryDiagnostics)if(code.equals(existing.get("code")))return;
+        job.secondaryDiagnostics.add(new LinkedHashMap<>(diagnostic));
+    }
+    private void attachJobDiagnostics(Map<String,Object> terminal,Job job) throws Exception {
+        Object rawSummary=terminal.get("summary");
+        if(!(rawSummary instanceof Map<?,?>))return;
+        @SuppressWarnings("unchecked") Map<String,Object> summary=(Map<String,Object>)rawSummary;
+        Object rawDiagnostics=summary.get("diagnostics");
+        Map<String,Object> diagnostics=rawDiagnostics instanceof Map<?,?>
+                ?new LinkedHashMap<>((Map<String,Object>)rawDiagnostics):new LinkedHashMap<String,Object>();
+        if(job.primaryDiagnosticJson!=null)diagnostics.put("primaryError",JSON.readValue(job.primaryDiagnosticJson,Map.class));
+        List<Map<String,Object>> notices=new ArrayList<>();
+        Object previous=diagnostics.get("secondaryNotices");
+        if(previous instanceof Iterable<?>)for(Object item:(Iterable<?>)previous)
+            if(item instanceof Map<?,?>&&notices.size()<2)notices.add(new LinkedHashMap<>((Map<String,Object>)item));
+        for(Map<String,Object> secondary:job.secondaryDiagnostics) {
+            if(notices.size()>=2)break;
+            Object code=secondary.get("code");boolean duplicate=false;
+            if(code instanceof String)for(Map<String,Object> notice:notices)if(code.equals(notice.get("code")))duplicate=true;
+            if(!duplicate)notices.add(new LinkedHashMap<>(secondary));
+        }
+        if(!notices.isEmpty())diagnostics.put("secondaryNotices",notices);
+        summary.put("diagnostics",diagnostics);
     }
     private boolean hasPrimaryDiagnostic(String diagnosticJson) {
         if(diagnosticJson==null)return false;
@@ -810,18 +847,20 @@ final class ServerRuntime implements AutoCloseable {
         } catch(Exception invalid){return false;}
     }
     private Map<String,Object> loadResultWithProtocolWarning(Map<String,Object> original,Job job) throws Exception {
-        if(job.protocolDiagnostic==null&&job.journalDiagnostic==null)return original;
+        if(job.protocolDiagnostic==null&&job.journalDiagnostic==null&&job.primaryDiagnosticJson==null&&job.secondaryDiagnostics.isEmpty())return original;
         Map<String,Object> result=new LinkedHashMap<String,Object>(original);
         List<Map<String,Object>> diagnostics=new ArrayList<Map<String,Object>>();
         Object existing=result.get("diagnostics");
         if(existing instanceof Iterable<?>)for(Object item:(Iterable<?>)existing)if(item instanceof Map<?,?>&&diagnostics.size()<4)
             diagnostics.add(new LinkedHashMap<String,Object>((Map<String,Object>)item));
         if(hasPrimaryForJob(job)) {
-            Map<?,?> current=JSON.readValue(job.diagnosticJson,Map.class);
+            String primary=job.primaryDiagnosticJson==null?job.diagnosticJson:job.primaryDiagnosticJson;
+            Map<?,?> current=JSON.readValue(primary,Map.class);
             String code=String.valueOf(current.get("code"));
             boolean present=false;for(Map<String,Object> item:diagnostics)if(code.equals(item.get("code")))present=true;
             if(!present&&diagnostics.size()<4)diagnostics.add(new LinkedHashMap<String,Object>((Map<String,Object>)current));
         }
+        for(Map<String,Object> secondary:job.secondaryDiagnostics)if(diagnostics.size()<4)diagnostics.add(new LinkedHashMap<>(secondary));
         boolean workerNotice=false;
         for(Map<String,Object> item:diagnostics)if("ATT-WORKER-EVENT-TRUNCATED".equals(item.get("code")))workerNotice=true;
         if(job.protocolDiagnostic!=null&&!workerNotice&&diagnostics.size()<4) {
@@ -3252,12 +3291,15 @@ final class ServerRuntime implements AutoCloseable {
                     Object parsed=JSON.readValue(j.diagnosticJson,Object.class);
                     if(parsed instanceof Map<?,?> diagnostic)diagnostics.add((Map<String,Object>)diagnostic);
                 }
+                for(Map<String,Object> secondary:j.secondaryDiagnostics)if(diagnostics.size()<4)diagnostics.add(new LinkedHashMap<>(secondary));
                 if(j.protocolDiagnostic!=null)diagnostics.add(new LinkedHashMap<String,Object>(j.protocolDiagnostic));
                 if(j.journalDiagnostic!=null)diagnostics.add(new LinkedHashMap<String,Object>(j.journalDiagnostic));
                 Map<String,Object> fallback=new LinkedHashMap<>();
                 fallback.put("executionId",j.id);fallback.put("status",status);fallback.put("exitCode",code);
                 fallback.put("diagnostics",diagnostics);fallback.put("summary",Map.of());
-                j.resultJson=JSON.writeValueAsString(att.server.api.LoadTerminalResult.projectOperationResult(fallback,status,code));
+                Map<String,Object> projected=att.server.api.LoadTerminalResult.projectOperationResult(fallback,status,code);
+                attachJobDiagnostics(projected,j);
+                j.resultJson=JSON.writeValueAsString(projected);
             }
             j.status=status;j.exitCode=code;j.finishedAt=Instant.now();store.update(j);
             append(j,"status",Map.of("jobId",j.id,"status",status));
