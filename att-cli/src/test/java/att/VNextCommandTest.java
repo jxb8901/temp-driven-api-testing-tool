@@ -248,20 +248,20 @@ class VNextCommandTest {
         Files.createDirectories(payments.resolve("testcase"));
         Files.createDirectories(payments.resolve("templates"));
         Files.write(payments.resolve("package.yaml"),
-                "schemaVersion: att-package/v1\\n".getBytes(StandardCharsets.UTF_8));
+                "schemaVersion: att-package/v1\n".getBytes(StandardCharsets.UTF_8));
         Files.createDirectories(cliConfig.getParent());Files.createDirectories(boundConfig.getParent());
         TestSchemas.install(home);TestSchemas.install(boundRoot);
         Files.write(cliConfig,runtimeConfig(null).getBytes(StandardCharsets.UTF_8));
-        StringBuilder boundedRuntime=new StringBuilder("schemaVersion: att-config/v2.13\\nenvironments:\\n");
+        StringBuilder boundedRuntime=new StringBuilder("schemaVersion: att-config/v2.13\nenvironments:\n");
         for(int i=0;i<=att.validation.RuntimeConfigurationValidator.MAX_ENVIRONMENT_PROFILES;i++)
-            boundedRuntime.append("  Env").append(String.format("%03d",i)).append(": {}\\n");
+            boundedRuntime.append("  Env").append(String.format("%03d",i)).append(": {}\n");
         Files.write(boundConfig,boundedRuntime.toString().getBytes(StandardCharsets.UTF_8));
 
         Path serverConfig=home.resolve("config/att-server.yaml");
         Path dataDirectory=home.resolve("server-data");
-        String serverYaml="server:\\n  dataDir: "+yaml(dataDirectory)+"\\n  runtimeConfigPath: "+yaml(boundConfig)+"\\n"
-                +"  javaExecutable: "+yaml(javaExecutable())+"\\nworkers: {}\\npackages:\\n"
-                +"  allowedRoots: ["+yaml(packages)+"]\\n  entries:\\n    payments: "+yaml(payments)+"\\n";
+        String serverYaml="server:\n  dataDir: "+yaml(dataDirectory)+"\n  runtimeConfigPath: "+yaml(boundConfig)+"\n"
+                +"  javaExecutable: "+yaml(javaExecutable())+"\nworkers: {}\npackages:\n"
+                +"  allowedRoots: ["+yaml(packages)+"]\n  entries:\n    payments: "+yaml(payments)+"\n";
         Files.write(serverConfig,serverYaml.getBytes(StandardCharsets.UTF_8));
 
         String previousHome=System.getProperty("att.home"),previousServer=System.getProperty("att.server.config");
