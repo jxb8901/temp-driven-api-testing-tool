@@ -30,3 +30,20 @@ ERROR 和 INVALID 結果會在 `summary.diagnostics.primaryError` 保留有界 r
 `DELETE /jobs/{jobId}` 會要求 Worker 優雅終止，等待最多 `gracefulStopMs`，必要時只強制終止該 Worker。工作記錄會保留。Server 重啟後不會自動重跑尚未完成的工作。
 
 Artifact 路徑必須相對於工作輸出目錄。絕對路徑、目錄 traversal 及 symlink escape 均會遭拒。Server 不提供一般檔案系統瀏覽或 package 修改 API。
+
+## Job replay 與可編輯 draft
+
+只有來源 Job 對目前呼叫者授權，且安全保留 `att-job-execution/v1` 或 `/v2` 定義時才可 Replay。系統不會從 log／artifact 重建秘密、Worker transport data、host path 或不安全 source path。
+
+v2 retained-spec 合約見 [att-job-execution/v2](../../../schemas/api/att-job-execution-v2.schema.json)；短期 editor draft response envelope 見 [att-job-replay-draft/v1](../../../schemas/api/att-job-replay-draft-v1.schema.json)。
+
+| Method 與 path | 合約 |
+| --- | --- |
+| `GET /jobs/{jobId}/replay` | 對已授權呼叫者回傳安全可用性 metadata 與定義。 |
+| `POST /jobs/{jobId}/replay-draft` | 接受 `{"sourcePolicy":"current"|"strict","overrides":{...}}`；回傳 `att-job-replay-draft/v1`、`draftRef`、`intentId`、原始／目前 revision 及已驗證 preview。省略 `sourcePolicy` 時沿用舊版 strict 行為。 |
+| `GET /jobs/{jobId}/replay-draft/{draftRef}` | 回傳綁定 principal 的 editor sanitized prefill 定義及重新解析的 configuration；response 使用 `private, no-store`。 |
+| `POST /jobs/{jobId}/rerun` | 接受 `{"intentId":"...","confirm":true,"sourcePolicy":"current"|"strict"}`，建立含 `rerunOfJobId` 的獨立 Job。相同 intent 重試時回傳已接受的 Job。 |
+
+Overrides 上限為 32 KiB，並使用 typed allowlist。LOAD workload edits 綁定保留的 workload ID，且保留原有 `virtualUsers` 或 `arrivalRate` model；Server 拒絕隱式 model 轉換。RUN edits 可指定保留的 target 或 exact Case selection，並修改支援的 options／inputs。一般 Engine validator 仍是最終依據。Package-file-backed LOAD replay 使用已驗證的安全 package-relative source path，不受僅 inline draft 適用的 `server.inlineLoad` 上限影響。
+
+`ATT-SERVER-REPLAY-REVISION-CONFLICT` 表示 strict mode 無法使用記錄的原始 revision；它不會還原缺失的歷史 source files。`ATT-SERVER-REPLAY-DRAFT-STALE` 表示 draft 驗證後 Package 已改變。`ATT-SERVER-REPLAY-DRAFT-EXPIRED` 表示短期 draft／intent 過期或 Server restart 後遺失。缺少安全輸入回傳 `ATT-SERVER-REPLAY-INPUT-MISSING`；已移除／無法解析的 Resource 回傳 `ATT-SERVER-REPLAY-RESOURCE-MISSING`；schema／field 錯誤回傳附安全 diagnostics 的 `ATT-SERVER-REPLAY-VALIDATION-FAILED`；容量回傳 HTTP 429。Draft reference 及 confirmation intent 綁定 principal，存在 Server 記憶體十分鐘。到期或重啟後，請重新開啟來源 Job 建立 draft。

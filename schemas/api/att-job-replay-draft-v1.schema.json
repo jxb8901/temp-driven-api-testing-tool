@@ -1,0 +1,28 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "urn:att:api-schema:job-replay-draft:v1",
+  "title": "ATT authorized Job-based editor draft response",
+  "type": "object",
+  "required": ["schemaVersion", "draftRef", "sourceJobId", "packageId", "executionType", "sourcePolicy", "originalRevision", "currentRevision", "definition", "expiresAt"],
+  "properties": {
+    "schemaVersion": { "const": "att-job-replay-draft/v1" },
+    "draftRef": { "type": "string", "pattern": "^[RC][A-F0-9]{32}$" },
+    "draftId": { "type": "string", "pattern": "^[RC][A-F0-9]{32}$" },
+    "intentId": { "type": "string", "format": "uuid" },
+    "sourceJobId": { "type": "string", "pattern": "^J[A-F0-9]{16}$" },
+    "packageId": { "type": "string", "minLength": 1 },
+    "executionType": { "enum": ["run", "load"] },
+    "sourcePolicy": { "enum": ["current", "strict"] },
+    "originalRevision": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "currentRevision": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "revision": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "definition": { "type": "object" },
+    "originalConfiguration": { "type": "object" },
+    "configuration": { "type": "object" },
+    "expiresAt": { "type": "string", "format": "date-time" },
+    "sourcePath": { "type": ["string", "null"], "maxLength": 1024 },
+    "missingFields": { "type": "array", "items": { "type": "string", "maxLength": 256 } },
+    "preview": { "type": "object" },
+    "requestId": { "type": "string" }
+  }
+}

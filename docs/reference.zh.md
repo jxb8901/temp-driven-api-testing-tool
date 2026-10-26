@@ -1040,13 +1040,17 @@ LOAD 排程繼續支援套件 scenario 路徑及已驗證 Load draft，沿用 sc
 
 持久化使用既有 H2 table 的附加 JSON 欄位，不改寫舊 LOAD row。降版前先停止排程、匯出新定義、移除 RUN/單次定義，再還原升級前資料庫備份，避免舊 scheduler 把 RUN 當成 LOAD。保留的 artifact 與資料庫 metadata 分開儲存。
 
-#### 重新執行 Job 或建立排程
+#### Replay 與從 Job 建立新執行
 
-在 **Jobs**、**Job Details** 或 **LOAD Catalog → Recent LOAD Jobs** 選擇 **Rerun** 或 **Schedule / Reschedule…**。Server 會重新驗證保留的執行定義，再顯示確認內容。檢查 package、environment、RUN target 或精確 Case 選擇、Debug 選項，或 LOAD scenario 與負載參數。**Confirm rerun** 建立獨立的新 Job，並開啟其 Details；原本的結果與證據保持完整。
+在 **Jobs**、**Job Details** 或 **LOAD History** 選擇 **Rerun with same settings** 或 **Configure & Rerun**。兩者都會建立一個獲授權的 Server draft，並在執行前依目前 Package/Environment 驗證。標準 RUN 或 LOAD editor 只會收到不透明的 `draftRef`，進入後再向 Server 取得 sanitized 定義；定義不會放入 URL 或 browser storage。
 
-**Continue to New Schedule** 開啟統一的新增排程表單。設定名稱、頻率、時區、重疊執行上限及啟用狀態，檢查執行時間預覽後儲存。單純開啟表單不會建立或修改排程。**View / Edit originating schedule** 開啟仍存在且獲授權的來源排程；這與建立新排程或立即重跑是不同操作。
+**Rerun with same settings** 預設使用 **Use current Package**：沿用 Job 中安全保留的執行參數，依目前 Package 重新解析 Target 與設定，再顯示原始／目前 revision 及驗證結果供確認。它不會在無提示下以最新 YAML defaults 取代保留的 Scenario。**Require original revision (strict)** 是重現選項。Revision 不符時回傳 `ATT-SERVER-REPLAY-REVISION-CONFLICT`，並提供 **Review with current Package**；儲存的 metadata 無法還原已缺失的歷史 source bytes。`server.scheduling.packageChangePolicy` 及 Schedule 層級的 `ignore` 只套用於排程執行，不會控制手動 Rerun。
 
-Replay 使用先前的安全 snapshot，並採用 `revisionPolicy: reject-package-changes`，不會自動改用最新 package 檔案。Package、runtime configuration 或相依 Resource變更後，請重新設定並驗證新執行。新保留的安全定義可在 draft 到期及 Server 重啟後使用；確認 draft 的有效期為十分鐘，到期後須重新建立。Server 會再次檢查目前帳戶、package、environment、schema、功能開關及執行限制。
+**Configure & Rerun** 會在一般 editor 預填支援且安全保留的設定。可修改 RUN Target／Case selection、options 與安全 inputs，或 LOAD timing、workloads、模型專屬 pacing、concurrency、thresholds、evidence 及安全 testdata selection。**Validate** 會以有界 typed overrides 建立新 review intent；**Review changes** 顯示前後值、LOAD phases 總和、目前 revision，以及 configured arrival rate 與 measured TPS 的差異。按 **Run** 會以 `rerunOfJobId` 建立獨立 Job；Cancel／Back 不會修改來源 Job、報告、Schedule 或 package files。Package-file-backed LOAD 使用安全保留的 package-relative source route，不套用僅 inline draft 使用的 duration 上限。
+
+Schedule 維持獨立流程：**Edit existing schedule**、**Create new schedule** 或 **Run now**。既有排程 `strict`／`pause`／`ignore` 語意不變。
+
+新保留的 execution spec 使用 `att-job-execution/v2`，parser 仍接受 v1。Replay draft 使用 `att-job-replay-draft/v1`。Draft reference 和 confirmation intent 綁定目前 principal，十分鐘後到期；兩者存在 Server 記憶體，Server restart 後會失效，需重新從來源 Job 建立。沒有安全保留定義的來源 Job、缺少敏感輸入、draft 過期、Resource 移除、schema 無效及容量拒絕會使用不同錯誤回應。系統不會從 log 或 artifact 重建秘密、Worker transport data、host root 或不安全路徑。
 
 未保留執行定義的歷史 Job 會顯示 **Rerun unavailable for this historical job**。僅驗證的 Job、安全保留失敗或包含已分類敏感輸入的 Job，不能進行精確 replay。含有原始 overrides 或未解析 `rerunFailed` 歷史選擇的舊式直接提交，須先建立新的驗證 draft 才能安全保留。請設定新執行，並透過正常的受保護輸入流程補充憑證。不可從 log、artifact 或已遮罩預覽重建執行。安全定義上限為 256 KiB，不包含 Worker transport 欄位及主機根目錄。
 
@@ -1054,11 +1058,12 @@ Job lifecycle API 在 `/api/v1` 下提供以下 endpoint：
 
 | Method 與 path | 結果 |
 | --- | --- |
-| `GET /jobs/{jobId}/replay` | 已授權的安全定義、不可用原因、revision policy，以及仍可用的來源排程連結。 |
-| `POST /jobs/{jobId}/replay-draft`，body 為 `{}` | 重新驗證的 RUN/LOAD draft 與不透明的 `intentId`；不會建立執行或排程。 |
-| `POST /jobs/{jobId}/rerun`，body 為 `{"intentId":"...","confirm":true}` | 回傳獨立新 Job、HTTP 202 及 `Location`；相同 intent 的重試回傳已接受的 Job。 |
+| `GET /jobs/{jobId}/replay` | 已授權的安全定義及不可用原因。 |
+| `POST /jobs/{jobId}/replay-draft`，body 為 `{"sourcePolicy":"current"}` 或 `{"sourcePolicy":"strict","overrides":{...}}` | 驗證 `att-job-replay-draft/v1`、不透明 `draftRef` 及確認 `intentId`；不建立 Job 或 Schedule。省略 `sourcePolicy` 時沿用舊版 strict 行為。 |
+| `GET /jobs/{jobId}/replay-draft/{draftRef}` | 綁定 principal 的 sanitized editor 定義及目前 configuration provenance；route 不包含定義。 |
+| `POST /jobs/{jobId}/rerun`，body 為 `{"intentId":"...","confirm":true,"sourcePolicy":"current"}` | 建立獨立 Job，回傳 HTTP 202 及 `Location`；相同 intent 重試時回傳已接受的 Job。 |
 
-在正常的 `POST /schedules` 建立合約中，使用回傳的 `draftId`、package、environment 及標準 `executionType: run | load`。Debug 維持 RUN 的 `options.debug`。重跑 Job 提供 `rerunOfJobId`；由 Job 建立的排程保留獲授權的 `sourceJobId` 來源資訊。Replay 僅限提交者身分或已保留的排程執行擁有者。已刪除或無權存取的 Job 回傳 404；來源過期回傳 409；容量及驗證錯誤沿用正常提交合約。若已接受 intent 的輸出 Job 被刪除，再次使用該 intent 會安全失敗，不會新增執行。
+Schedule 使用一般已驗證 draft 合約。RUN Debug 仍使用 `options.debug`。Replay 限制於提交者或保留的排程執行 owner。若 Package 在驗證後改變，回傳 `ATT-SERVER-REPLAY-DRAFT-STALE`；draft 過期或 Server restart 後遺失則回傳 `ATT-SERVER-REPLAY-DRAFT-EXPIRED`；容量限制回傳 HTTP 429。重用已接受 intent 會回傳同一 Job。
 
 ### Run 模式
 
@@ -1081,6 +1086,8 @@ Run evidence 直接寫到 `output/<RunID>/`。完成後才發布 `run.yaml`、Ca
 Status aggregation 的嚴重度為 ERROR > INVALID > FAIL > PASS > SKIPPED。Process exit code：`0` 表示沒有失敗狀態、`1` 表示測試/assertion failure、`2` 表示 command/configuration/validation 無效、`3` 表示 runtime/infrastructure error。
 
 selector 和 option 請看 [CLI Reference](reference.zh/cli.md)，Stage 和 Action control 請看 [Reliability and Execution Control](reference.zh/reliability-execution-control.md)，artifact contract 請看 [Results, Reports, and Evidence](reference.zh/results-reports-evidence.md)。
+
+在 Studio 從 Job 選擇 **Configure & Rerun**，會把安全保留的 RUN target 或 exact Case selection、environment、Debug／fail-fast options 及符合安全條件的 typed inputs 載入此標準 RUN editor。修改後需依目前 Package 驗證，再檢查並提交。Source policy 與 API 行為見 [Job replay 與建立新執行](reference.zh/execution-modes/unified-run.md)。
 
 ### Standalone Debug
 
@@ -1614,6 +1621,8 @@ Catalog inspection 每頁最多 100 項，亦受序列化 response 大小限制�
 Builder 以精簡表格顯示 users/rates、bindings、weights。Workload、mix、Target、common settings 使用 Save/Cancel modal；Cancel/Escape 捨棄暫存修改。每個 Target 的 typed sidecar inputs/vars/Tool arguments 獨立載入；優先次序為 template policy、safe sidecar defaults、explicit binding values、適用的 CLI overrides。Debug-local testdata imports 不會自動提升，須明確宣告 Load testdata。Binding 亦可指定 workload inputs/vars/testdata selection。Business inputs/vars 按 key 合併，優先順序為 safe sidecar defaults、Target binding、workload binding；後者覆蓋同名 key，其餘 key 保留。Studio validation 及編輯會保留各 workload 的 timing、ramps、execution settings 與 ranged think time。
 
 Validate 經由共享 Engine composer 建立完整 `att-load/v1.9` immutable draft；Review 顯示 Server-normalized redacted YAML。儲存修改或更改 Environment 會使驗證失效；提交時再次檢查 package/source revision。Run 前確認 traffic；Schedule 沿用相同 draft、權限、limits、expiry 和 revision policy。不使用 browser storage 或寫入 package source。
+
+LOAD Job 的 **Configure & Rerun** 使用此標準 editor 及 Server 發出的 `draftRef`。它會預填安全保留的 scenario、environment、workload IDs/mix、model、pacing、timing phases、thresholds、evidence 及可安全保留的 inputs。修改共用 timing envelope 與模型專屬欄位後，需依目前 Package 驗證並檢查差異。Current-package rerun 不會無提示重載最新 YAML defaults，也不會把 Arrival Rate 轉成 Virtual Users。File-backed LOAD replay 會沿用 package-relative source route，不套用只供 inline draft 使用的 duration 上限；詳見 [Job replay](reference.zh/execution-modes/unified-run.md)。
 
 ```bash
 ./att.sh load --list-templates --format json

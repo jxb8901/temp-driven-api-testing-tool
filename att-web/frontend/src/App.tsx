@@ -81,8 +81,11 @@ function ExplorerRouteView({ packageId, resourceRoute, inlineLoadEnabled, schedu
   />;
 }
 
-function LoadRouteView({ packageId, templateId, inlineLoadEnabled, schedulingEnabled, packages, onSchedule }: {
+function LoadRouteView({ packageId, templateId, environment: initialEnvironment, replayDraftId, replaySourceJobId, inlineLoadEnabled, schedulingEnabled, packages, onSchedule }: {
   packageId: string;
+  environment?: string;
+  replayDraftId?: string;
+  replaySourceJobId?: string;
   templateId?: string;
   inlineLoadEnabled: boolean;
   schedulingEnabled: boolean;
@@ -91,14 +94,17 @@ function LoadRouteView({ packageId, templateId, inlineLoadEnabled, schedulingEna
 }) {
   const workspace = useAppShellContext();
   const navigation = useNavigationGuard();
-  const selectedEnvironment = useRef(workspace.selectedEnvironment);
-  selectedEnvironment.current = workspace.selectedEnvironment;
+  const [routeEnvironment,setRouteEnvironment] = useState(initialEnvironment ?? workspace.selectedEnvironment);
   const [environments, setEnvironments] = useState<string[]>([]);
   const [environmentState, setEnvironmentState] = useState<'loading' | 'ready' | 'error'>('loading');
   const [environmentReload, setEnvironmentReload] = useState(0);
   const onPackageChange = useCallback((nextPackageId: string) => {
     navigation.navigate({ kind: 'load', packageId: nextPackageId });
   }, [navigation.navigate]);
+  const onEnvironmentChange = useCallback((environment:string) => {
+    setRouteEnvironment(environment);workspace.onEnvironmentChange(environment);
+  },[workspace.onEnvironmentChange]);
+  useEffect(()=>{if(initialEnvironment!==undefined)setRouteEnvironment(initialEnvironment);},[initialEnvironment]);
   const onJobAccepted = useCallback((jobId: string) => {
     workspace.onJobAccepted({ jobId, packageId });
   }, [packageId, workspace.onJobAccepted]);
@@ -111,7 +117,7 @@ function LoadRouteView({ packageId, templateId, inlineLoadEnabled, schedulingEna
       const names = (configuration.environments || []).filter(profile => profile.name && profile.state === 'active').map(profile => profile.name);
       setEnvironments(names);
       setEnvironmentState('ready');
-      if (selectedEnvironment.current && !names.includes(selectedEnvironment.current)) {
+      if (routeEnvironment && !names.includes(routeEnvironment)) {
         workspace.onEnvironmentChange('');
       }
     }).catch(() => {
@@ -121,21 +127,23 @@ function LoadRouteView({ packageId, templateId, inlineLoadEnabled, schedulingEna
       }
     });
     return () => controller.abort();
-  }, [packageId, environmentReload, workspace.onEnvironmentChange]);
+  }, [packageId, environmentReload, routeEnvironment, workspace.onEnvironmentChange]);
 
   return <Suspense fallback={<div className="page-content" role="status" aria-busy="true">Loading Load…</div>}>
-    {templateId ? <LoadTemplateBuilder templateId={templateId} api={loadJobsApi} packages={packages} selectedPackage={packageId} selectedEnvironment={workspace.selectedEnvironment} environments={environments} environmentState={environmentState} inlineLoadEnabled={inlineLoadEnabled} schedulingEnabled={schedulingEnabled} onPackageChange={onPackageChange} onEnvironmentChange={workspace.onEnvironmentChange} onJobAccepted={onJobAccepted} onSchedule={onSchedule} /> : <LoadPage
+    {templateId ? <LoadTemplateBuilder templateId={templateId} api={loadJobsApi} packages={packages} selectedPackage={packageId} selectedEnvironment={routeEnvironment} environments={environments} environmentState={environmentState} inlineLoadEnabled={inlineLoadEnabled} schedulingEnabled={schedulingEnabled} onPackageChange={onPackageChange} onEnvironmentChange={onEnvironmentChange} onJobAccepted={onJobAccepted} onSchedule={onSchedule} /> : <LoadPage
       api={loadJobsApi}
       packages={packages}
       selectedPackage={packageId}
-      selectedEnvironment={workspace.selectedEnvironment}
+      selectedEnvironment={routeEnvironment}
       environments={environments}
       environmentState={environmentState}
       inlineLoadEnabled={inlineLoadEnabled}
       schedulingEnabled={schedulingEnabled}
+      replayDraftId={replayDraftId}
+      replaySourceJobId={replaySourceJobId}
       onRetryEnvironments={() => setEnvironmentReload(value => value + 1)}
       onPackageChange={onPackageChange}
-      onEnvironmentChange={workspace.onEnvironmentChange}
+      onEnvironmentChange={onEnvironmentChange}
       onJobAccepted={onJobAccepted}
       onSchedule={onSchedule}
     />}
@@ -321,7 +329,7 @@ export default function App() {
     navigation.navigate({ kind: 'schedules' });
   }, [navigation.navigate]);
   useEffect(() => {
-    const routeEnvironment = navigation.route.kind === 'configuration' || navigation.route.kind === 'quick-load' || navigation.route.kind === 'run' ? navigation.route.environment : undefined;
+    const routeEnvironment = navigation.route.kind === 'configuration' || navigation.route.kind === 'quick-load' || navigation.route.kind === 'run' || navigation.route.kind === 'load' ? navigation.route.environment : undefined;
     if (routeEnvironment !== undefined) setSelectedEnvironment(routeEnvironment);
   }, [navigation.route]);
 
@@ -412,8 +420,9 @@ export default function App() {
   if (navigation.route.kind === 'dashboard') {
     content = <DashboardPage view="dashboard" state={state} onPackageChange={onPackageChange} onJobChange={onJobChange} onRetryPackages={() => void loadPackages()} onRetryJobs={() => void loadJobs()} jobsRefreshing={jobsRefreshing} jobsUpdatedAt={jobsUpdatedAt} />;
   } else if (navigation.route.kind === 'run') {
-    content = <RunPage key={`${navigation.route.packageId || ''}:${navigation.route.target?.type || ''}:${navigation.route.target?.resourceId || ''}:${navigation.route.environment || ''}:${navigation.route.batch ? 'batch' : ''}`}
+    content = <RunPage key={`${navigation.route.packageId || ''}:${navigation.route.target?.type || ''}:${navigation.route.target?.resourceId || ''}:${navigation.route.environment || ''}:${navigation.route.batch ? 'batch' : ''}:${navigation.route.replaySourceJobId || ''}:${navigation.route.replayDraftId || ''}`}
       packageId={navigation.route.packageId} initialTarget={navigation.route.target} initialBatchMode={navigation.route.batch} initialEnvironment={navigation.route.environment ?? selectedEnvironment}
+      replayDraftId={navigation.route.replayDraftId} replaySourceJobId={navigation.route.replaySourceJobId}
       onAccepted={onJobAccepted} onSchedule={onSchedule} schedulingEnabled={capabilities.loadSchedulingEnabled} />;
   } else if (navigation.route.kind === 'packages') {
     content = <DashboardPage view="packages" state={state} onPackageChange={onPackageChange} onJobChange={onJobChange} onRetryPackages={() => void loadPackages()} onRetryJobs={() => void loadJobs()} jobsRefreshing={jobsRefreshing} jobsUpdatedAt={jobsUpdatedAt} />;
@@ -468,7 +477,7 @@ export default function App() {
       ? state.packages.data.map(item => ({ packageId: item.packageId, displayName: item.name }))
       : [];
     content = navigation.route.packageId
-      ? <LoadRouteView key={`${navigation.route.packageId}:${navigation.route.templateId || ''}`} templateId={navigation.route.templateId} packageId={navigation.route.packageId} inlineLoadEnabled={capabilities.inlineLoadEnabled}
+      ? <LoadRouteView key={`${navigation.route.packageId}:${navigation.route.templateId || ''}:${navigation.route.replaySourceJobId || ''}:${navigation.route.replayDraftId || ''}`} templateId={navigation.route.templateId} packageId={navigation.route.packageId} environment={navigation.route.environment} replayDraftId={navigation.route.replayDraftId} replaySourceJobId={navigation.route.replaySourceJobId} inlineLoadEnabled={capabilities.inlineLoadEnabled}
           schedulingEnabled={capabilities.loadSchedulingEnabled} packages={packageOptions} onSchedule={onSchedule} />
       : <Suspense fallback={<div role="status">Loading templates…</div>}><LoadTestingPage api={api} packages={packageOptions} enabled={capabilities.inlineLoadEnabled} tab={navigation.route.tab || (navigation.route.catalog ? 'scenarios' : 'templates')}
           onTab={tab => navigation.navigate({ kind: 'load', tab })}

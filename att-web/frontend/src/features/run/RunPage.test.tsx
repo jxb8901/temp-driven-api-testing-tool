@@ -6,7 +6,7 @@ import { RunPage } from './RunPage';
 import { api } from '../../api';
 import { NavigationGuardContext, type NavigationGuardApi } from '../../router';
 import type { DebugFormResponse, JsonObject, ResourceIdentity } from '../explorer/types';
-vi.mock('../../api', () => ({ api: { previewRun: vi.fn(), submitRun: vi.fn(), getDeclaredConfiguration: vi.fn(), getDebugForm: vi.fn() } }));
+vi.mock('../../api', () => ({ api: { previewRun: vi.fn(), submitRun: vi.fn(), getDeclaredConfiguration: vi.fn(), getDebugForm: vi.fn(), getJobReplayEditorDraft: vi.fn(), createJobReplayDraft: vi.fn(), rerunJob: vi.fn() } }));
 vi.mock('../code/CodeEditor', () => ({ CodeEditor: ({ label, value, readOnly, onChange }: { label: string; value: string; readOnly?: boolean; onChange?: (value: string) => void }) => <textarea aria-label={label} value={value} readOnly={readOnly} onChange={e => onChange?.(e.target.value)} /> }));
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 let host: HTMLDivElement; let root: Root;
@@ -16,6 +16,9 @@ beforeEach(async () => {
   vi.clearAllMocks(); vi.mocked(api.previewRun).mockResolvedValue({ draftId: 'R123', preview: { selectedCaseIds: ['cases.default.C1'] },
     expiresAt: new Date(Date.now() + 60_000).toISOString() });
   vi.mocked(api.submitRun).mockResolvedValue({ jobId: 'J123' });
+  vi.mocked(api.getJobReplayEditorDraft).mockReset();
+  vi.mocked(api.createJobReplayDraft).mockReset();
+  vi.mocked(api.rerunJob).mockReset();
   vi.mocked(api.getDeclaredConfiguration).mockResolvedValue({ environments: [{ name: 'SIT', state: 'active' }, { name: 'UAT', state: 'active' }] });
   vi.mocked(api.getDebugForm).mockImplementation(async identity => ({
     target: { type: identity.type as 'template' | 'flow' | 'tool', id: identity.resourceId }, input: {},
@@ -130,6 +133,28 @@ it('refreshes defaults on environment changes and ignores an older response', as
   expect(api.previewRun).toHaveBeenLastCalledWith(expect.objectContaining({ environment: 'UAT', input: { inputs: { amount: 9 }, vars: { region: 'UAT' } } }));
   await click('Schedule…');
   expect(onSchedule).toHaveBeenCalledWith(expect.objectContaining({ environment: 'UAT', target: { type: 'flow', id: 'payment.flow' } }));
+});
+
+it('prefills a safe RUN replay from an opaque draft reference and validates typed overrides', async () => {
+  vi.mocked(api.getJobReplayEditorDraft).mockResolvedValue({
+    schemaVersion:'att-job-replay-draft/v1',draftRef:'R0123456789ABCDEF0123456789ABCDEF',sourceJobId:'J0123456789ABCDEF',packageId:'payments',executionType:'run',sourcePolicy:'current',
+    originalRevision:'a'.repeat(64),currentRevision:'b'.repeat(64),configuration:{environment:'SIT'},expiresAt:new Date(Date.now()+60000).toISOString(),missingFields:[],
+    definition:{schemaVersion:'att-execution/v1',executionType:'run',packageId:'payments',environment:'SIT',target:{type:'tool',id:'lookup-customer'},input:{inputs:{requestId:'R1'},arguments:{limit:3}},options:{debug:true,failFast:true}},
+  });
+  vi.mocked(api.getDebugForm).mockResolvedValue({target:{type:'tool',id:'lookup-customer'},input:{inputs:{requestId:'default'},arguments:{limit:1}}});
+  vi.mocked(api.createJobReplayDraft).mockResolvedValue({jobId:'J0123456789ABCDEF',available:true,sourcePolicy:'current',intentId:'intent',draftId:'R123',
+    originalRevision:'a'.repeat(64),currentRevision:'b'.repeat(64),preview:{draftId:'R123',preview:{target:{type:'tool',id:'lookup-customer'}},expiresAt:new Date(Date.now()+60000).toISOString()}});
+  await act(async () => root.render(<NavigationGuardContext.Provider value={guard}><RunPage packageId="payments" replayDraftId="R0123456789ABCDEF0123456789ABCDEF" replaySourceJobId="J0123456789ABCDEF" onAccepted={onAccepted} onSchedule={onSchedule} schedulingEnabled /></NavigationGuardContext.Provider>));
+  await settleDebugForm();
+  expect(api.getJobReplayEditorDraft).toHaveBeenCalledWith('J0123456789ABCDEF','R0123456789ABCDEF0123456789ABCDEF');
+  expect((control('Target ID') as HTMLInputElement).value).toBe('lookup-customer');
+  expect((control('Environment') as HTMLSelectElement).value).toBe('SIT');
+  expect((control('Debug diagnostics') as HTMLInputElement).checked).toBe(true);
+  expect((control('Stop after the first failed Case') as HTMLInputElement).checked).toBe(true);
+  expect((host.querySelector('input[aria-label="limit value"]') as HTMLInputElement).value).toBe('3');
+  await click('Validate');
+  expect(api.createJobReplayDraft).toHaveBeenCalledWith('J0123456789ABCDEF',{sourcePolicy:'current',overrides:expect.objectContaining({environment:'SIT',options:{debug:true,failFast:true},target:{type:'tool',id:'lookup-customer'},input:{inputs:{requestId:'R1'},arguments:{limit:3}}})});
+  expect(host.textContent).toContain('Review changes from the source Job');
 });
 
 it('releases the dirty-form guard for an accepted validated Schedule handoff', async () => {

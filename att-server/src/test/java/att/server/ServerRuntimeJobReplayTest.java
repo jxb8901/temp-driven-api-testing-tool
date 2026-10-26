@@ -51,6 +51,14 @@ class ServerRuntimeJobReplayTest {
         runtime.store.createAuthUser("bob","Bob","unused","USER","csrf");
     }
     private static JsonNode submit(String draftId) {return ServerRuntime.JSON.valueToTree(Map.of("packageId","p","draftId",draftId));}
+
+    @Test void legacyRetainedExecutionSpecV1StillParses() throws Exception {
+        var legacy=ServerRuntime.JSON.createObjectNode();legacy.put("schemaVersion","att-job-execution/v1");
+        legacy.put("revisionPolicy","reject-package-changes");legacy.put("revision","a".repeat(64));
+        var definition=legacy.putObject("definition");definition.put("executionType","load");definition.put("packageId","p");definition.putObject("scenario").put("schemaVersion","att-load/v1.9");
+        JobExecutionSpec parsed=JobExecutionSpec.parse(ServerRuntime.JSON.writeValueAsString(legacy));
+        assertEquals("att-job-execution/v1",parsed.value.path("schemaVersion").asText());assertEquals("p",parsed.definition().path("packageId").asText());
+    }
     private static void await(ServerRuntime runtime,String id) throws Exception {
         Instant deadline=Instant.now().plusSeconds(30);
         while(Instant.now().isBefore(deadline)) {
@@ -191,6 +199,8 @@ class ServerRuntimeJobReplayTest {
                 if("batch".equals(type))assertEquals(List.of("cases.default.C1"),ServerRuntime.JSON.convertValue(retained.path("selection").path("caseIds"),List.class));
                 Map<String,Object> before=runtime.jobRecord(original);String originalResult=(String)runtime.store.get(original).get("resultJson");
                 Map<String,Object> review=runtime.createJobReplayDraft(original,"alice");
+                assertThrows(ServerRuntime.JobConflictException.class,()->runtime.submitRunDraft(submit(String.valueOf(review.get("draftId"))),"alice","alice"),
+                        "Replay editor drafts must use the source Job confirmation intent to preserve lineage and idempotency");
                 var confirmation=ServerRuntime.JSON.valueToTree(Map.of("confirm",true,"intentId",review.get("intentId")));
                 assertThrows(IllegalArgumentException.class,()->runtime.rerunJob(original,ServerRuntime.JSON.valueToTree(Map.of("confirm",false,"intentId",review.get("intentId"))),"alice"));
                 assertThrows(ServerRuntime.NotFoundException.class,()->runtime.rerunJob(original,confirmation,"bob"));
@@ -248,8 +258,99 @@ class ServerRuntimeJobReplayTest {
             assertThrows(ServerRuntime.NotFoundException.class,()->runtime.rerunJob(original,ServerRuntime.JSON.valueToTree(Map.of("confirm",true,"intentId",review.get("intentId"))),"alice"));
             runtime.store.setAuthActive("alice",true);
             Files.writeString(fixture.root.resolve("templates/SIMPLE/template.yaml"),"# changed\n",java.nio.file.StandardOpenOption.APPEND);
-            assertThrows(ServerRuntime.StaleDraftException.class,()->runtime.createJobReplayDraft(original,"alice"));
-            assertThrows(ServerRuntime.StaleDraftException.class,()->runtime.rerunJob(original,ServerRuntime.JSON.valueToTree(Map.of("confirm",true,"intentId",review.get("intentId"))),"alice"));
+            ServerRuntime.JobConflictException mismatch=assertThrows(ServerRuntime.JobConflictException.class,()->runtime.createJobReplayDraft(original,"alice"));
+            assertEquals("ATT-SERVER-REPLAY-REVISION-CONFLICT",mismatch.code);
+            ServerRuntime.JobConflictException stale=assertThrows(ServerRuntime.JobConflictException.class,()->runtime.rerunJob(original,ServerRuntime.JSON.valueToTree(Map.of("confirm",true,"intentId",review.get("intentId"))),"alice"));
+            assertEquals("ATT-SERVER-REPLAY-REVISION-CONFLICT",stale.code);
+        }
+    }
+
+    @Test void currentPackageReplayCreatesEditableBoundDraftAndKeepsPathBackedLoadIndependent() throws Exception {
+        Fixture fixture=fixture();String original;String originalResult;String originalRevision;
+        Files.writeString(fixture.root.resolve("load/smoke.yaml"),"schemaVersion: att-load/v1.9\n"
+                +"load: {warmup: 1s, rampUp: 2s, duration: 1s, rampDown: 1s}\n"
+                +"workloads:\n"
+                +"  - id: smoke-a\n    target: {type: template, id: SIMPLE}\n    load: {users: 1}\n"
+                +"  - id: smoke-b\n    mix: [{id: simple, weight: 100, target: {type: template, id: SIMPLE}}]\n    load: {users: 1}\n"
+                +"thresholds: {minThroughput: '>= 0/s'}\nevidence: {mode: metrics, maxSamples: 10}\n");
+        try(ServerRuntime runtime=fixture.open()) {
+            users(runtime);
+            original=String.valueOf(runtime.submit("load",ServerRuntime.JSON.valueToTree(Map.of("packageId","p","scenario","load/smoke.yaml","environment","SIT")),"alice").get("jobId"));await(runtime,original);
+            originalResult=(String)runtime.store.get(original).get("resultJson");originalRevision=JobExecutionSpec.parse(runtime.store.executionSpec(original).get("spec")).revision();
+            Files.writeString(fixture.root.resolve("templates/SIMPLE/template.yaml"),"# compatible current package change\n",java.nio.file.StandardOpenOption.APPEND);
+            ServerRuntime.JobConflictException strict=assertThrows(ServerRuntime.JobConflictException.class,()->runtime.createJobReplayDraft(original,"alice",ServerRuntime.JSON.valueToTree(Map.of("sourcePolicy","strict"))));
+            assertEquals("ATT-SERVER-REPLAY-REVISION-CONFLICT",strict.code);
+            Map<String,Object> edits=Map.of("load",Map.of("warmup","3s","rampUp","5s","duration","24h","rampDown","2s"),
+                    "workloads",List.of(Map.of("id","smoke-a","load",Map.of("users",2)),Map.of("id","smoke-b","load",Map.of("users",3))));
+            Map<String,Object> review=runtime.createJobReplayDraft(original,"alice",ServerRuntime.JSON.valueToTree(Map.of("sourcePolicy","current","overrides",edits)));
+            assertEquals("att-job-replay-draft/v1",review.get("schemaVersion"));assertNotEquals(originalRevision,review.get("currentRevision"));
+            String draftRef=String.valueOf(review.get("draftRef"));assertTrue(draftRef.matches("[RAC][0-9A-F]{32}"));
+            Map<String,Object> editor=runtime.getJobReplayEditorDraft(original,draftRef,"alice");
+            assertEquals("load/smoke.yaml",editor.get("sourcePath"));
+            JsonNode scenario=ServerRuntime.JSON.valueToTree(editor.get("definition")).path("scenario");
+            assertEquals("24h",scenario.path("load").path("duration").asText());
+            assertEquals(2,scenario.path("workloads").get(0).path("load").path("users").asInt());
+            assertEquals(3,scenario.path("workloads").get(1).path("load").path("users").asInt());
+            assertEquals("simple",scenario.path("workloads").get(1).path("mix").get(0).path("id").asText());
+            assertThrows(ServerRuntime.NotFoundException.class,()->runtime.getJobReplayEditorDraft(original,draftRef,"bob"));
+            assertThrows(IllegalArgumentException.class,()->runtime.createJobReplayDraft(original,"alice",ServerRuntime.JSON.valueToTree(Map.of("sourcePolicy","current","overrides",Map.of("workloads",List.of(Map.of("id","smoke-a","load",Map.of("arrivalRate","2/s"))))))));
+            Map<String,Object> rerun=runtime.rerunJob(original,ServerRuntime.JSON.valueToTree(Map.of("confirm",true,"intentId",review.get("intentId"),"sourcePolicy","current")),"alice");
+            String rerunId=String.valueOf(rerun.get("jobId"));assertEquals(original,runtime.jobRecord(rerunId).get("rerunOfJobId"));
+            assertEquals(rerunId,runtime.rerunJob(original,ServerRuntime.JSON.valueToTree(Map.of("confirm",true,"intentId",review.get("intentId"),"sourcePolicy","current")),"alice").get("jobId"));
+            JobExecutionSpec rerunSpec=JobExecutionSpec.parse(runtime.store.executionSpec(rerunId).get("spec"));
+            assertEquals("current",rerunSpec.value.path("replay").path("sourcePolicy").asText());
+            assertEquals(originalRevision,rerunSpec.value.path("replay").path("originalRevision").asText());
+            assertEquals(review.get("currentRevision"),rerunSpec.value.path("replay").path("effectiveRevision").asText());
+            assertEquals("24h",rerunSpec.definition().path("scenario").path("load").path("duration").asText());
+            assertEquals(originalResult,runtime.store.get(original).get("resultJson"));
+            assertEquals(originalRevision,JobExecutionSpec.parse(runtime.store.executionSpec(original).get("spec")).revision());
+
+            Map<String,Object> staleReview=runtime.createJobReplayDraft(original,"alice",ServerRuntime.JSON.valueToTree(Map.of("sourcePolicy","current")));
+            Files.writeString(fixture.root.resolve("templates/SIMPLE/template.yaml"),"# changed after validation\n",java.nio.file.StandardOpenOption.APPEND);
+            ServerRuntime.JobConflictException stale=assertThrows(ServerRuntime.JobConflictException.class,()->runtime.rerunJob(original,ServerRuntime.JSON.valueToTree(Map.of("confirm",true,"intentId",staleReview.get("intentId"),"sourcePolicy","current")),"alice"));
+            assertEquals("ATT-SERVER-REPLAY-DRAFT-STALE",stale.code);
+            assertEquals(originalResult,runtime.store.get(original).get("resultJson"));
+        }
+    }
+
+    @Test void replayOverridesPreserveArrivalRateWorkloadIdentityAndCommonPhases() {
+        var source=ServerRuntime.JSON.createObjectNode();source.put("executionType","load");source.put("packageId","p");
+        var scenario=source.putObject("scenario");scenario.put("schemaVersion","att-load/v1.9");
+        var common=scenario.putObject("load");common.put("warmup","2s");common.put("rampUp","3s");common.put("duration","30m");common.put("rampDown","4s");
+        var workloads=scenario.putArray("workloads");
+        for(String id:List.of("primary","mixed")) {
+            var workload=workloads.addObject();workload.put("id",id);workload.putObject("load").put("arrivalRate","2/s").put("maxConcurrent",4).put("overloadPolicy","drop");
+            if("mixed".equals(id))workload.putArray("mix").addObject().put("id","checkout-slot").put("weight",100).putObject("target").put("type","template").put("id","SIMPLE");
+        }
+        scenario.putObject("thresholds").put("p95Ms",800);scenario.putObject("evidence").put("mode","failures");
+        Map<String,Object> edits=Map.of("load",Map.of("duration","24h"),"workloads",List.of(
+                Map.of("id","primary","load",Map.of("arrivalRate","5/s","maxConcurrent",8,"overloadPolicy","wait")),
+                Map.of("id","mixed","load",Map.of("arrivalRate","3/s","maxConcurrent",6))),
+                "thresholds",Map.of("p95Ms",500),"evidence",Map.of("mode","all","maxSamples",20));
+        var updated=JobReplayOverrides.apply(source,ServerRuntime.JSON.valueToTree(edits));
+        var result=updated.path("scenario");assertEquals("24h",result.path("load").path("duration").asText());
+        assertEquals("2s",result.path("load").path("warmup").asText());assertEquals("3s",result.path("load").path("rampUp").asText());assertEquals("4s",result.path("load").path("rampDown").asText());
+        assertEquals(2,result.path("workloads").size());assertEquals("mixed",result.path("workloads").get(1).path("id").asText());
+        assertEquals("checkout-slot",result.path("workloads").get(1).path("mix").get(0).path("id").asText());
+        assertEquals("5/s",result.path("workloads").get(0).path("load").path("arrivalRate").asText());
+        assertEquals(8,result.path("workloads").get(0).path("load").path("maxConcurrent").asInt());
+        assertFalse(result.path("workloads").get(0).path("load").has("users"));
+        assertEquals(500,result.path("thresholds").path("p95Ms").asInt());assertEquals("all",result.path("evidence").path("mode").asText());
+        assertThrows(IllegalArgumentException.class,()->JobReplayOverrides.apply(source,ServerRuntime.JSON.valueToTree(Map.of(
+                "workloads",List.of(Map.of("id","primary","load",Map.of("users",10)))))));
+    }
+
+    @Test void replayDraftReferenceExpiresAndIsLostOnServerRestart() throws Exception {
+        Fixture fixture=fixture();String original;String draftRef;var clock=new ServerRuntimeTestSupport.MutableClock();
+        try(ServerRuntime runtime=fixture.open(clock)) {
+            users(runtime);original=String.valueOf(runtime.submit("load",ServerRuntime.JSON.valueToTree(Map.of("packageId","p","scenario","load/smoke.yaml")),"alice").get("jobId"));await(runtime,original);
+            Map<String,Object> draft=runtime.createJobReplayDraft(original,"alice",ServerRuntime.JSON.valueToTree(Map.of("sourcePolicy","current")));draftRef=String.valueOf(draft.get("draftRef"));
+        }
+        try(ServerRuntime runtime=fixture.open(clock)) {
+            assertThrows(ServerRuntime.ReplayDraftExpiredException.class,()->runtime.getJobReplayEditorDraft(original,draftRef,"alice"));
+            Map<String,Object> replacement=runtime.createJobReplayDraft(original,"alice",ServerRuntime.JSON.valueToTree(Map.of("sourcePolicy","current")));
+            String replacementRef=String.valueOf(replacement.get("draftRef"));clock.advance(Duration.ofMinutes(11));
+            assertThrows(ServerRuntime.ReplayDraftExpiredException.class,()->runtime.getJobReplayEditorDraft(original,replacementRef,"alice"));
         }
     }
     @Test void classifiedInputsAndHistoricalJobsHaveNoPersistedReplayPayload() throws Exception {

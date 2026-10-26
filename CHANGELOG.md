@@ -4,6 +4,7 @@
 
 - Publish compact, versioned LOAD terminal results with artifact-backed details, durable failure causes, and Studio evidence access (#297).
 - Inventory internal capacity limits, classify limit outcomes, and expose structured capacity diagnostics across execution, artifacts, and API responses (#298).
+- Add current-Package and strict Job rerun choices plus a principal-bound editable RUN/LOAD draft flow with safe prefill, typed overrides, stale-revision checks and `rerunOfJobId` provenance (#300).
 
 # ATT 4.2.4 - 2026-10-24
 

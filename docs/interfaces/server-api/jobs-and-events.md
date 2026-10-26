@@ -30,3 +30,20 @@ ERROR and INVALID results keep their bounded runtime, preparation, or validation
 `DELETE /jobs/{jobId}` requests graceful Worker termination, waits up to `gracefulStopMs`, and then force-terminates only that Worker if needed. The job record remains available. A Server restart does not automatically rerun jobs that were not terminal.
 
 Public Artifact paths are logical paths inside the verified Job ZIP. Loose Worker output is private and has no direct download route. Absolute paths, traversal, and symlink escapes are rejected. The Server does not expose general filesystem browsing or package mutation APIs.
+
+## Job replay and editable drafts
+
+Replay is available only when the caller is authorized for the source Job and it has a safely retained `att-job-execution/v1` or `/v2` definition. Replay never reconstructs secrets, Worker transport data, host paths or unsafe source paths from logs/artifacts.
+
+The v2 retained-spec contract is [att-job-execution/v2](../../../schemas/api/att-job-execution-v2.schema.json). The response envelope for the short-lived editor draft is [att-job-replay-draft/v1](../../../schemas/api/att-job-replay-draft-v1.schema.json).
+
+| Method and path | Contract |
+| --- | --- |
+| `GET /jobs/{jobId}/replay` | Safe availability metadata and definition for an authorized caller. |
+| `POST /jobs/{jobId}/replay-draft` | Accepts `{"sourcePolicy":"current"|"strict","overrides":{...}}`; returns `att-job-replay-draft/v1`, `draftRef`, `intentId`, original/current revisions and validated preview. Omitting `sourcePolicy` keeps legacy strict behavior. |
+| `GET /jobs/{jobId}/replay-draft/{draftRef}` | Returns the sanitized prefill definition and freshly resolved configuration for the principal-bound editor draft. Response is `private, no-store`. |
+| `POST /jobs/{jobId}/rerun` | Accepts `{"intentId":"...","confirm":true,"sourcePolicy":"current"|"strict"}` and returns the independent Job with `rerunOfJobId`. Same-intent retries return the accepted Job. |
+
+Overrides are bounded to 32 KiB and typed allowlists. LOAD workload edits bind to retained workload IDs and preserve the original `virtualUsers` or `arrivalRate` model; the Server rejects implicit model conversion. RUN edits can select the retained target or exact Case selection and change supported options/inputs. The ordinary Engine validators remain authoritative. A package-file-backed LOAD replay uses its validated safe package-relative source path and is not subject to `server.inlineLoad` inline-only ceilings.
+
+`ATT-SERVER-REPLAY-REVISION-CONFLICT` means strict mode cannot use the recorded original revision. It does not restore missing historical source files. `ATT-SERVER-REPLAY-DRAFT-STALE` means the Package changed after draft validation. `ATT-SERVER-REPLAY-DRAFT-EXPIRED` means the short-lived draft or intent expired or was lost on Server restart. Missing safe inputs return `ATT-SERVER-REPLAY-INPUT-MISSING`; removed/unresolved resources return `ATT-SERVER-REPLAY-RESOURCE-MISSING`; schema or field errors return `ATT-SERVER-REPLAY-VALIDATION-FAILED` with safe diagnostics; capacity returns HTTP 429. Draft references and confirmation intents are principal-bound and held in Server memory for ten minutes. Reopen the source Job to create a new draft after expiration/restart.

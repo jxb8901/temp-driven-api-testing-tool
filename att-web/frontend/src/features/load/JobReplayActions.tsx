@@ -16,10 +16,10 @@ function snapshotTargets(definition: NonNullable<JobReplay['definition']>): stri
   return shown ? shown + (targets.size > 4 ? ` (+${targets.size - 4} more)` : '') : 'Not available';
 }
 
-type ReplayApi = Pick<LoadJobsApi, 'getJobReplay' | 'createJobReplayDraft' | 'rerunJob'>;
+type ReplayApi = Pick<LoadJobsApi, 'getJobReplay' | 'createJobReplayDraft' | 'getJobReplayEditorDraft' | 'rerunJob'>;
 
 /** Shared by Details, Jobs and LOAD history. Opening a review never submits a job. */
-export function JobReplayActions({ api, jobId, onOpenJob, onSchedule, onEditSchedule, configuration }: {
+export function JobReplayActions({ api, jobId, onOpenJob, onSchedule, onEditSchedule }: {
   api: ReplayApi; jobId: string; onOpenJob(id: string): void;
   onSchedule?(intent: ValidatedScheduleIntent): void;
   onEditSchedule?(id: string): void;
@@ -27,6 +27,7 @@ export function JobReplayActions({ api, jobId, onOpenJob, onSchedule, onEditSche
 }) {
   const [review, setReview] = useState<JobReplay | null>(null);
   const [mode, setMode] = useState<'run' | 'schedule' | null>(null);
+  const [sourcePolicy, setSourcePolicy] = useState<'current' | 'strict'>('current');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const lock = useRef(false);
@@ -58,16 +59,41 @@ export function JobReplayActions({ api, jobId, onOpenJob, onSchedule, onEditSche
     if (lock.current) return;
     lock.current = true; opener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const request = ++generation.current;
-    setMode(next); setBusy(true); setReview(null); setError('');
+    setMode(next); setBusy(true); setReview(null); setError(''); setSourcePolicy(next === 'schedule' ? 'strict' : 'current');
     try {
       const metadata = await api.getJobReplay!(jobId);
       if (request !== generation.current) return;
       if (!metadata.available) { setReview(metadata); return; }
-      const draft = await api.createJobReplayDraft!(jobId);
-      if (request === generation.current) setReview(draft);
+      const policy = next === 'schedule' ? 'strict' : 'current';
+      const draft = await api.createJobReplayDraft!(jobId, { sourcePolicy: policy });
+      if (request !== generation.current) return;
+      setReview(draft);
     } catch (reason) {
       if (request === generation.current) setError(reason instanceof Error ? reason.message : 'The job cannot be reconstructed. Configure a new run from the current package.');
     } finally { if (request === generation.current) { setBusy(false); lock.current = false; } }
+  }
+  async function reviewWithPolicy(policy: 'current' | 'strict') {
+    if (lock.current) return;
+    lock.current = true;setBusy(true);setError('');setSourcePolicy(policy);
+    const request=++generation.current;
+    try {const draft=await api.createJobReplayDraft!(jobId,{sourcePolicy:policy});if(request===generation.current)setReview(draft);}
+    catch(reason){if(request===generation.current){setReview(null);setError(reason instanceof Error?reason.message:'The Package could not be validated for this replay.');}}
+    finally{if(request===generation.current){setBusy(false);lock.current=false;}}
+  }
+  async function configure() {
+    if(lock.current||!api.getJobReplayEditorDraft||!navigation)return;
+    lock.current=true;setMode('run');setSourcePolicy('current');setReview(null);setBusy(true);setError('');
+    try {
+      const metadata=await api.getJobReplay!(jobId);
+      if(!metadata.available)throw new Error(metadata.reason||'This Job has no safely retained execution definition.');
+      const draft=await api.createJobReplayDraft!(jobId,{sourcePolicy:'current'});
+      if(!draft.draftRef||!draft.definition)throw new Error('The Server did not return an editable replay draft reference.');
+      const route=draft.definition.executionType==='load'
+        ?{kind:'load' as const,packageId:draft.definition.packageId,environment:draft.definition.environment||undefined,replayDraftId:draft.draftRef,replaySourceJobId:jobId}
+        :{kind:'run' as const,packageId:draft.definition.packageId,environment:draft.definition.environment||undefined,replayDraftId:draft.draftRef,replaySourceJobId:jobId};
+      unregister.current?.();navigation.navigate(route);
+    } catch(reason){setError(reason instanceof Error?reason.message:'The replay draft could not be opened.');}
+    finally{setBusy(false);lock.current=false;}
   }
   async function confirm() {
     if (lock.current || !review?.available || !review.intentId || !review.definition || !review.draftId) return;
@@ -80,13 +106,14 @@ export function JobReplayActions({ api, jobId, onOpenJob, onSchedule, onEditSche
     }
     lock.current = true; setBusy(true); setError('');
     try {
-      const accepted = await api.rerunJob!(jobId, review.intentId);
+      const accepted = await api.rerunJob!(jobId, review.intentId, sourcePolicy);
       unregister.current?.(); close(); onOpenJob(accepted.jobId);
     } catch (reason) { setError(reason instanceof Error ? reason.message : 'Submission failed. Retry this confirmation to check the same intent.'); }
     finally { setBusy(false); lock.current = false; }
   }
   return <span className="att-replay-actions">
-    <button type="button" disabled={busy} onClick={() => void open('run')}>Rerun</button>
+    <button type="button" disabled={busy} onClick={() => void open('run')}>Rerun with same settings</button>
+    <button type="button" disabled={busy} onClick={() => void configure()}>Configure &amp; Rerun</button>
     {onSchedule && <button type="button" disabled={busy} onClick={() => void open('schedule')}>Schedule / Reschedule…</button>}
     {mode && createPortal(<dialog ref={dialog} aria-labelledby={id} aria-describedby={`${id}-description`} className="att-replay-review" onCancel={event => { event.preventDefault(); if (!busy) close(); }} onKeyDown={event => {
       if (event.key !== 'Tab') return;
@@ -97,24 +124,31 @@ export function JobReplayActions({ api, jobId, onOpenJob, onSchedule, onEditSche
       else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
     }}>
       <h2 id={id} ref={heading} tabIndex={-1}>{mode === 'run' ? 'Review rerun' : 'Create new schedule from job'} {jobId}</h2>
-      <p id={`${id}-description`}>Replay the previous safe snapshot. Package changes are rejected; configure a new run to use changed source files.</p>
+      <p id={`${id}-description`}>Review the retained settings against the selected Package revision. Schedule package-change policy does not control manual Rerun.</p>
       {busy && <p role="status">Revalidating job inputs…</p>}
       {error && <p role="alert">{error}</p>}
+      {mode === 'run' && <fieldset disabled={busy}><legend>Package revision</legend>
+        <label><input type="radio" name={`${id}-source-policy`} checked={sourcePolicy === 'current'} onChange={() => setSourcePolicy('current')} />Use current Package</label>
+        <label><input type="radio" name={`${id}-source-policy`} checked={sourcePolicy === 'strict'} onChange={() => setSourcePolicy('strict')} />Require original revision (strict)<small>Runs only when the current Package matches the recorded revision; metadata cannot restore missing source files.</small></label>
+        <button type="button" disabled={busy || (review?.sourcePolicy === sourcePolicy)} onClick={() => void reviewWithPolicy(sourcePolicy)}>Review selected revision</button>
+      </fieldset>}
+      {mode === 'run' && sourcePolicy === 'strict' && error && <button type="button" disabled={busy} onClick={() => void reviewWithPolicy('current')}>Review with current Package</button>}
       {review && !review.available && <p role="status">{review.reason}</p>}
+      {review?.missingFields?.length ? <p role="alert">Some retained fields are missing: {review.missingFields.join(', ')}. Cancel this review and choose Configure &amp; Rerun to enter them.</p> : null}
       {review?.definition && <dl className="att-replay-summary">
         <div><dt>Type</dt><dd>{review.definition.executionType.toUpperCase()}</dd></div>
         <div><dt>Package</dt><dd>{review.definition.packageId}</dd></div>
         <div><dt>Target</dt><dd>{snapshotTargets(review.definition)}</dd></div>
         <div><dt>Environment</dt><dd>{review.definition.environment || 'Package default'}</dd></div>
         <div><dt>Source</dt><dd>{review.sourcePath || 'Retained snapshot'}</dd></div>
-        <div><dt>Revision</dt><dd><code>{review.revision || 'Not available'}</code></dd></div>
+        <div><dt>Original revision</dt><dd><code>{review.originalRevision || review.revision || 'Not available'}</code></dd></div>
+        <div><dt>Current revision</dt><dd><code>{review.currentRevision || review.revision || 'Not available'}</code></dd></div>
+        <div><dt>Original configuration</dt><dd>{String(review.originalConfiguration?.environment || review.definition.environment || 'Package default recorded for the Job')}</dd></div>
+        <div><dt>Current configuration</dt><dd>{String(review.configuration?.environment || review.definition.environment || 'Package default resolved now')}</dd></div>
       </dl>}
-      {configuration && navigation && <button type="button" disabled={busy} onClick={() => {
-        unregister.current?.(); close(); navigation.navigate({ kind: configuration.executionType === 'load' ? 'load' : 'run', packageId: configuration.packageId });
-      }}>Configure new run from current package</button>}
       {review?.definition && <details className="att-replay-advanced"><summary>Advanced / View raw definition</summary><pre className="att-code-block" tabIndex={0} aria-label="Sanitized execution definition">{JSON.stringify(review.definition, null, 2)}</pre></details>}
       {review?.originatingScheduleId && onEditSchedule && <button type="button" onClick={() => { unregister.current?.(); onEditSchedule(review.originatingScheduleId!); close(); }}>View / Edit originating schedule</button>}
-      <footer><button type="button" disabled={busy || !review?.available || !review.intentId} onClick={() => void confirm()}>{mode === 'run' ? 'Confirm rerun' : 'Continue to New Schedule'}</button>
+      <footer><button type="button" disabled={busy || !review?.available || !review.intentId || Boolean(review?.missingFields?.length) || (mode === 'run' && review.sourcePolicy !== sourcePolicy)} onClick={() => void confirm()}>{mode === 'run' ? 'Confirm rerun' : 'Continue to New Schedule'}</button>
       <button type="button" disabled={busy} onClick={close}>Cancel</button></footer>
     </dialog>, document.body)}
   </span>;

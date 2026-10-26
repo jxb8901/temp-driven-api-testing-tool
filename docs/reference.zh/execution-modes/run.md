@@ -19,3 +19,5 @@ Run evidence 直接寫到 `output/<RunID>/`。完成後才發布 `run.yaml`、Ca
 Status aggregation 的嚴重度為 ERROR > INVALID > FAIL > PASS > SKIPPED。Process exit code：`0` 表示沒有失敗狀態、`1` 表示測試/assertion failure、`2` 表示 command/configuration/validation 無效、`3` 表示 runtime/infrastructure error。
 
 selector 和 option 請看 [CLI Reference](../cli.md)，Stage 和 Action control 請看 [Reliability and Execution Control](../reliability-execution-control.md)，artifact contract 請看 [Results, Reports, and Evidence](../results-reports-evidence.md)。
+
+在 Studio 從 Job 選擇 **Configure & Rerun**，會把安全保留的 RUN target 或 exact Case selection、environment、Debug／fail-fast options 及符合安全條件的 typed inputs 載入此標準 RUN editor。修改後需依目前 Package 驗證，再檢查並提交。Source policy 與 API 行為見 [Job replay 與建立新執行](unified-run.md)。

@@ -25,11 +25,11 @@ export type AppRoute =
   | { kind: 'package'; packageId: string; resource?: ResourceRoute }
   | { kind: 'configuration'; packageId?: string; environment?: string; filePath?: string; fileOrigin?: string; sourceReference?: ResourceSourceReferenceRoute; configurationReferenceId?: string; tab?: ConfigurationTab }
   | { kind: 'quick-load'; packageId: string; target?: ResourceRoute; environment?: string; templateId?: string; model?: 'virtualUsers' | 'arrivalRate' }
-  | { kind: 'run'; packageId?: string; target?: ResourceRoute; environment?: string; batch?: boolean }
+  | { kind: 'run'; packageId?: string; target?: ResourceRoute; environment?: string; batch?: boolean; replayDraftId?: string; replaySourceJobId?: string }
   | { kind: 'jobs'; jobId?: string; executionType?: 'load'; standalone?: boolean; tab?: 'overview' | 'live' | 'events' | 'results' | 'artifacts' | 'metrics' }
   | { kind: 'job-console'; jobId: string; view?: 'live' | 'events' }
   | { kind: 'job-artifact'; jobId: string; path: string }
-  | { kind: 'load'; packageId?: string; catalog?: LoadCatalogRouteState; tab?: 'templates' | 'scenarios'; templateId?: string }
+  | { kind: 'load'; packageId?: string; catalog?: LoadCatalogRouteState; tab?: 'templates' | 'scenarios'; templateId?: string; environment?: string; replayDraftId?: string; replaySourceJobId?: string }
   | { kind: 'load-resource'; packageId: string; resourceId: string; environment?: string; returnTo?: string }
   | { kind: 'schedules'; view?: 'new' | 'edit' | 'history'; scheduleId?: string; occurrenceId?: string; intent?: 'validated'; returnTo?: string }
   | { kind: 'settings' };
@@ -95,7 +95,8 @@ export function parseRoute(hash: string): AppRoute {
   if (parts[0] === 'run') return { kind: 'run', packageId: parts[1] || undefined,
     ...(parts[2]&&parts[3]?{target:{type:parts[2],resourceId:parts[3],...(query.get('id')?{logicalId:query.get('id')!}:{})}}:{}),
     environment:query.has('environment')?query.get('environment')||'':undefined,
-    ...(query.get('mode') === 'batch' ? { batch: true } : {}) };
+    ...(query.get('mode') === 'batch' ? { batch: true } : {}),
+    ...(validReplayDraftQuery(query) ? { replayDraftId: query.get('replayDraft')!, replaySourceJobId: query.get('replaySourceJob')! } : {}) };
   if (parts[0] === 'jobs') {
     if (parts[1] && parts[2] === 'console' && parts.length === 3) {
       const view = query.get('view');
@@ -112,7 +113,8 @@ export function parseRoute(hash: string): AppRoute {
     ...(query.get('returnTo') ? { returnTo: query.get('returnTo')! } : {}),
   };
   if (parts[0] === 'advanced-load') {
-    if (parts[1]) return { kind: 'load', packageId: parts[1], ...(query.get('templateId') ? { templateId: query.get('templateId')! } : {}) };
+    if (parts[1]) return { kind: 'load', packageId: parts[1], ...(query.has('environment')?{environment:query.get('environment')||''}:{}), ...(query.get('templateId') ? { templateId: query.get('templateId')! } : {}),
+      ...(validReplayDraftQuery(query) ? { replayDraftId: query.get('replayDraft')!, replaySourceJobId: query.get('replaySourceJob')! } : {}) };
     const catalog: LoadCatalogRouteState = {};
     const queryText = query.get('q'); if (queryText) catalog.query = queryText;
     const packageFilter = query.get('package'); if (packageFilter) catalog.packageFilter = packageFilter;
@@ -121,7 +123,8 @@ export function parseRoute(hash: string): AppRoute {
     const validationFilter = query.get('validation'); if (validationFilter) catalog.validationFilter = validationFilter;
     if (query.has('environment')) catalog.environment = query.get('environment') || '';
     const scrollY = Number(query.get('scrollY')); if (Number.isFinite(scrollY) && scrollY > 0) catalog.scrollY = Math.min(1000000, Math.floor(scrollY));
-    return { kind: 'load', ...(Object.keys(catalog).length ? { catalog } : {}), ...(query.get('tab') === 'scenarios' ? { tab: 'scenarios' } : {}) };
+    return { kind: 'load', ...(Object.keys(catalog).length ? { catalog } : {}), ...(query.get('tab') === 'scenarios' ? { tab: 'scenarios' } : {}),
+      ...(validReplayDraftQuery(query) ? { replayDraftId: query.get('replayDraft')!, replaySourceJobId: query.get('replaySourceJob')! } : {}) };
   }
   if (parts[0] === 'schedules' || parts[0] === 'load-schedules' || parts[0] === 'scheduled-load') {
     if (parts[1] === 'new' && parts.length === 2) {
@@ -149,6 +152,7 @@ export function formatRoute(route: AppRoute): string {
       const root=route.packageId?'#/run/'+encodeURIComponent(route.packageId):'#/run';
       const target=route.target?'/'+encodeURIComponent(route.target.type)+'/'+encodeURIComponent(route.target.resourceId):'';
       const query=new URLSearchParams();if(route.environment!==undefined)query.set('environment',route.environment);if(route.target?.logicalId)query.set('id',route.target.logicalId);if(route.batch)query.set('mode','batch');
+      if(route.replayDraftId&&route.replaySourceJobId){query.set('replayDraft',route.replayDraftId);query.set('replaySourceJob',route.replaySourceJobId);}
       return root+target+(query.size?'?'+query.toString():'');
     }
     case 'packages': return '#/packages';
@@ -202,7 +206,11 @@ export function formatRoute(route: AppRoute): string {
       return '#/jobs/' + encodeURIComponent(route.jobId) + '/artifact?' + query.toString();
     }
     case 'load': {
-      if (route.packageId) return '#/advanced-load/' + encodeURIComponent(route.packageId) + (route.templateId ? '?templateId=' + encodeURIComponent(route.templateId) : '');
+      if (route.packageId) {
+        const query=new URLSearchParams();if(route.templateId)query.set('templateId',route.templateId);
+        if(route.replayDraftId&&route.replaySourceJobId){query.set('replayDraft',route.replayDraftId);query.set('replaySourceJob',route.replaySourceJobId);}
+        return '#/advanced-load/' + encodeURIComponent(route.packageId) + (query.size?'?'+query.toString():'');
+      }
       const query = new URLSearchParams();
       if (route.tab === 'scenarios') query.set('tab', 'scenarios');
       if (route.catalog?.query) query.set('q', route.catalog.query);
@@ -212,6 +220,7 @@ export function formatRoute(route: AppRoute): string {
       if (route.catalog?.validationFilter && route.catalog.validationFilter !== 'all') query.set('validation', route.catalog.validationFilter);
       if (route.catalog?.environment !== undefined) query.set('environment', route.catalog.environment);
       if (route.catalog?.scrollY) query.set('scrollY', String(Math.floor(route.catalog.scrollY)));
+      if(route.replayDraftId&&route.replaySourceJobId){query.set('replayDraft',route.replayDraftId);query.set('replaySourceJob',route.replaySourceJobId);}
       return '#/advanced-load' + (query.size ? '?' + query.toString() : '');
     }
     case 'load-resource': {
@@ -233,6 +242,11 @@ export function formatRoute(route: AppRoute): string {
     }
     case 'settings': return '#/settings';
   }
+}
+
+function validReplayDraftQuery(query: URLSearchParams): boolean {
+  return /^[RAC][0-9A-F]{32}$/.test(query.get('replayDraft') || '')
+    && /^J[0-9A-F]{16}$/.test(query.get('replaySourceJob') || '');
 }
 
 export function normalizeRouteHash(to: string | AppRoute): string {

@@ -19,3 +19,5 @@ Run evidence is written directly below `output/<RunID>/`. The completed run publ
 Status aggregation preserves severity: ERROR > INVALID > FAIL > PASS > SKIPPED. Process exit code is `0` when the run completes without failing status, `1` for test/assertion failure, `2` for invalid command/configuration/validation, and `3` for runtime/infrastructure error.
 
 See the [CLI Reference](../cli.md) for selectors and options, [Reliability and Execution Control](../reliability-execution-control.md) for Stage and Action control, and [Results, Reports, and Evidence](../results-reports-evidence.md) for artifact contracts.
+
+In Studio, **Configure & Rerun** from a Job preloads the safe retained RUN target or exact Case selection, environment, Debug/fail-fast options and eligible typed inputs into this standard RUN editor. Validate the edited definition against the current Package before review and submit. See [Job replay and new execution](unified-run.md#replay-and-new-execution-from-a-job) for source policy and API behavior.
