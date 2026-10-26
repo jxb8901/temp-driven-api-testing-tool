@@ -276,11 +276,11 @@ class VNextCommandTest {
         Files.createDirectories(packageDir.resolve("testcase"));
         Files.createDirectories(packageDir.resolve("templates"));
         Files.write(packageDir.resolve("package.yaml"),
-                "schemaVersion: att-package/v1\\n".getBytes(StandardCharsets.UTF_8));
+                "schemaVersion: att-package/v1\n".getBytes(StandardCharsets.UTF_8));
         Files.createDirectories(config.getParent());TestSchemas.install(home);
-        StringBuilder yaml=new StringBuilder("schemaVersion: att-config/v2.13\\nenvironments:\\n");
+        StringBuilder yaml=new StringBuilder("schemaVersion: att-config/v2.13\nenvironments:\n");
         for(int i=0;i<=att.validation.RuntimeConfigurationValidator.MAX_ENVIRONMENT_PROFILES;i++)
-            yaml.append("  Env").append(String.format("%03d",i)).append(": {}\\n");
+            yaml.append("  Env").append(String.format("%03d",i)).append(": {}\n");
         Files.write(config,yaml.toString().getBytes(StandardCharsets.UTF_8));
 
         String previousHome=System.getProperty("att.home"),previousServer=System.getProperty("att.server.config");
@@ -296,10 +296,10 @@ class VNextCommandTest {
 
             Files.createDirectories(packageDir.resolve("testdata"));
             Files.write(packageDir.resolve("package.yaml"),
-                    ("schemaVersion: att-package/v1\\ntestdata:\\n"
-                            +"  descriptors: [testdata/base.yaml]\\n  environments: {}\\n").getBytes(StandardCharsets.UTF_8));
+                    ("schemaVersion: att-package/v1\ntestdata:\n"
+                            +"  descriptors: [testdata/base.yaml]\n  environments: {}\n").getBytes(StandardCharsets.UTF_8));
             Files.write(packageDir.resolve("testdata/base.yaml"),
-                    "records: [unterminated\\n".getBytes(StandardCharsets.UTF_8));
+                    "records: [unterminated\n".getBytes(StandardCharsets.UTF_8));
             Captured invalid=capture(()->VNextCommand.run(args));
             assertEquals(2,invalid.exitCode,invalid.stdout);
             Map<?,?> invalidReport=new ObjectMapper().readValue(invalid.stdout,Map.class);
