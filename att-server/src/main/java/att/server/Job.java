@@ -22,6 +22,7 @@ final class Job {
     volatile String resultJson,diagnosticJson;
     volatile Map<String,Object> workerMetrics;
     volatile Map<String,Object> protocolDiagnostic;
+    volatile Map<String,Object> journalDiagnostic;
     volatile boolean resultReceived;
     volatile String workerDispatch="cold";
     volatile String prewarmFallbackReason;

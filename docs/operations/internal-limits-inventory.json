@@ -140,11 +140,11 @@
       "sourceClass": "ServerConfig",
       "default": 2,
       "allowedMin": 1,
-      "allowedMax": 4,
-      "scope": "Concurrent Server LOAD Workers",
+      "allowedMax": 256,
+      "scope": "Configured LOAD worker concurrency; a shared preparation budget limits effective simultaneous LOAD workers to 4.",
       "configurable": true,
       "hardCoded": false,
-      "enforcingBoundary": "ServerConfig cross-field preparation budget",
+      "enforcingBoundary": "ServerConfig parser range 1-256 plus cross-field budget of 256 initial connections per Server and 64 per Worker.",
       "resultingStatus": {
         "executionStatus": "configuration rejected at startup",
         "exitCode": null,
@@ -913,7 +913,7 @@
       "whereShown": "Artifact download and Studio artifacts",
       "suggestedRemediation": "Use selective report preview or reduce archive payload.",
       "suggestedRemediationZh": "改用指定報告預覽，或縮小下載封存檔。",
-      "sourceCheck": "MAX_TOTAL_BYTES\\s*=\\s*128L\\s*\\*\\s*1024\\s*\\*\\s*1024",
+      "sourceCheck": "MAX_ARCHIVE_BYTES\\s*=",
       "outcome": "ARCHIVE_FAILED"
     },
     {
@@ -1112,7 +1112,7 @@
       "suggestedRemediation": "Use failure-only or deterministic sampling before increasing quotas.",
       "suggestedRemediationZh": "先使用僅保留失敗項目或確定性抽樣，再考慮提高配額。",
       "sourceCheck": "DEFAULT_PER_WORKLOAD_CAP\\s*=\\s*1000",
-      "outcome": "METRICS_SAMPLED"
+      "outcome": "DATA_TRUNCATED"
     },
     {
       "id": "load-evidence-aggregate",
@@ -1525,15 +1525,15 @@
       "hardCoded": true,
       "enforcingBoundary": "Resource index item counter",
       "resultingStatus": {
-        "executionStatus": "partial inspection",
-        "httpStatus": 413,
+        "executionStatus": "HTTP 413 inspection rejected",
         "exitCode": null,
+        "httpStatus": 413,
         "archiveStatus": null
       },
       "diagnosticCode": "ATT-RESOURCE-LIMIT",
-      "whereShown": "Studio Explorer diagnostic",
-      "suggestedRemediation": "Filter by resource type or inspect a narrower Package.",
-      "suggestedRemediationZh": "依資源類型篩選，或縮小 Package 檢查範圍。",
+      "whereShown": "HTTP diagnostic and Studio Explorer request result",
+      "suggestedRemediation": "Filter by resource type or inspect a narrower Package; this deterministic scan limit does not need a retry.",
+      "suggestedRemediationZh": "依資源類型篩選或縮小 Package 檢查範圍；這是確定性的掃描限制，無須重試。",
       "sourceCheck": "MAX_RESOURCES\\s*=\\s*20000",
       "outcome": "SUBMISSION_REJECTED"
     },
@@ -1548,19 +1548,19 @@
       "scope": "Nested source reference scan",
       "configurable": false,
       "hardCoded": true,
-      "enforcingBoundary": "Visited-file counter; depth separately capped at 8",
+      "enforcingBoundary": "Reachability check stops after the visited-file budget; depth is independently capped at 8.",
       "resultingStatus": {
-        "executionStatus": "partial inspection",
-        "httpStatus": 413,
+        "executionStatus": "Source-file navigation returns not found when the bounded reference walk cannot prove reachability",
         "exitCode": null,
+        "httpStatus": 404,
         "archiveStatus": null
       },
-      "diagnosticCode": "ATT-RESOURCE-LIMIT",
-      "whereShown": "Studio source diagnostic",
-      "suggestedRemediation": "Inspect selected references rather than the full graph.",
-      "suggestedRemediationZh": "只檢查選定的參照，避免遍歷整個來源圖。",
+      "diagnosticCode": null,
+      "whereShown": "Source-file navigation authorization; no partial path list or limit diagnostic is emitted.",
+      "suggestedRemediation": "Open a directly referenced source file or follow fewer nested references.",
+      "suggestedRemediationZh": "開啟直接參照的來源檔案，或減少巢狀參照層數。",
       "sourceCheck": "MAX_NESTED_SOURCE_FILES\\s*=\\s*256",
-      "outcome": "SUBMISSION_REJECTED"
+      "outcome": null
     },
     {
       "id": "resource-workbooks",
@@ -1570,20 +1570,20 @@
       "default": 500,
       "allowedMin": null,
       "allowedMax": null,
-      "scope": "One workbook resource index",
+      "scope": "Workbook candidates in one Package inspection",
       "configurable": false,
       "hardCoded": true,
       "enforcingBoundary": "Workbook candidate counter",
       "resultingStatus": {
-        "executionStatus": "partial inspection",
-        "httpStatus": 413,
+        "executionStatus": "HTTP 413 inspection rejected",
         "exitCode": null,
+        "httpStatus": 413,
         "archiveStatus": null
       },
       "diagnosticCode": "ATT-RESOURCE-LIMIT",
-      "whereShown": "Studio resource diagnostic",
-      "suggestedRemediation": "Filter workbooks or split package data.",
-      "suggestedRemediationZh": "篩選工作簿，或拆分 Package 資料。",
+      "whereShown": "HTTP diagnostic and Studio inspection request result",
+      "suggestedRemediation": "Reduce workbook candidates or split them across bounded Packages; this deterministic scan limit does not need a retry.",
+      "suggestedRemediationZh": "減少工作簿候選數或拆分到多個有界 Package；這是確定性的掃描限制，無須重試。",
       "sourceCheck": "MAX_WORKBOOKS\\s*=\\s*500",
       "outcome": "SUBMISSION_REJECTED"
     },
@@ -1600,17 +1600,17 @@
       "hardCoded": true,
       "enforcingBoundary": "Cumulative workbook byte counter",
       "resultingStatus": {
-        "executionStatus": "partial inspection",
-        "httpStatus": 413,
+        "executionStatus": "HTTP 200; oversized suite is returned as invalid",
         "exitCode": null,
+        "httpStatus": 200,
         "archiveStatus": null
       },
-      "diagnosticCode": "ATT-RESOURCE-LIMIT",
-      "whereShown": "Studio resource diagnostic",
-      "suggestedRemediation": "Inspect required workbooks or narrow filters.",
-      "suggestedRemediationZh": "只檢查必要工作簿，並縮小篩選範圍。",
+      "diagnosticCode": "ATT-RESOURCE-CASE-INVALID",
+      "whereShown": "Studio Explorer lists the invalid suite and its bounded diagnostic; other suites remain inspectable.",
+      "suggestedRemediation": "Reduce individual workbook size or split the suite. The endpoint returns a partial index with that suite marked invalid.",
+      "suggestedRemediationZh": "縮小單一工作簿或拆分測試套件。端點會回傳部分索引，並將該套件標記為無效。",
       "sourceCheck": "MAX_TOTAL_WORKBOOK_BYTES\\s*=\\s*128L\\s*\\*\\s*1024L\\s*\\*\\s*1024L",
-      "outcome": "SUBMISSION_REJECTED"
+      "outcome": "DATA_TRUNCATED"
     },
     {
       "id": "config-snapshot-cache",
@@ -1689,8 +1689,8 @@
     {
       "id": "process-memory",
       "settingName": "process.output.maxMemoryBytes",
-      "sourcePath": "att-engine/src/main/java/att/config/ProcessOutputConfig.java",
-      "sourceClass": "ProcessOutputConfig",
+      "sourcePath": "att-engine/src/main/java/att/config/FrameworkConfigLoader.java",
+      "sourceClass": "FrameworkConfigLoader",
       "default": 65536,
       "allowedMin": 1024,
       "allowedMax": 1048576,
@@ -1713,10 +1713,10 @@
     {
       "id": "process-artifact",
       "settingName": "process.output.maxArtifactBytes",
-      "sourcePath": "att-engine/src/main/java/att/config/ProcessOutputConfig.java",
-      "sourceClass": "ProcessOutputConfig",
+      "sourcePath": "att-engine/src/main/java/att/config/FrameworkConfigLoader.java",
+      "sourceClass": "FrameworkConfigLoader",
       "default": 104857600,
-      "allowedMin": 65536,
+      "allowedMin": "memoryLimitBytes",
       "allowedMax": 1073741824,
       "scope": "One process output artifact",
       "configurable": true,
@@ -1794,18 +1794,18 @@
       "scope": "Nested source reference walk",
       "configurable": false,
       "hardCoded": true,
-      "enforcingBoundary": "Nested source depth guard",
+      "enforcingBoundary": "Reachability check stops at the depth budget; visited files are independently capped at 256.",
       "resultingStatus": {
-        "executionStatus": "partial inspection",
-        "httpStatus": 413,
+        "executionStatus": "Source-file navigation returns not found when the bounded reference walk cannot prove reachability",
         "exitCode": null,
+        "httpStatus": 404,
         "archiveStatus": null
       },
-      "diagnosticCode": "ATT-RESOURCE-LIMIT",
-      "whereShown": "Studio source inspection",
-      "suggestedRemediation": "Inspect selected references rather than the full source graph.",
-      "suggestedRemediationZh": "只檢查選定的參照，避免遍歷整個來源圖。",
-      "outcome": "SUBMISSION_REJECTED"
+      "diagnosticCode": null,
+      "whereShown": "Source-file navigation authorization; no partial path list or limit diagnostic is emitted.",
+      "suggestedRemediation": "Open a directly referenced source file or follow fewer nested references.",
+      "suggestedRemediationZh": "開啟直接參照的來源檔案，或減少巢狀參照層數。",
+      "outcome": null
     },
     {
       "id": "resource-inline-backrefs",
@@ -1820,16 +1820,16 @@
       "hardCoded": true,
       "enforcingBoundary": "Inline back-reference projection",
       "resultingStatus": {
-        "executionStatus": "partial inspection",
-        "httpStatus": 413,
+        "executionStatus": "HTTP 200 with bounded inline detail projection",
         "exitCode": null,
+        "httpStatus": 200,
         "archiveStatus": null
       },
-      "diagnosticCode": "ATT-RESOURCE-LIMIT",
-      "whereShown": "Studio resource detail",
-      "suggestedRemediation": "Use paginated related-resource queries.",
-      "suggestedRemediationZh": "使用相關資源的分頁查詢。",
-      "outcome": "SUBMISSION_REJECTED"
+      "diagnosticCode": null,
+      "whereShown": "Studio resource detail includes total backReferenceCount and at most 100 inline backReferences.",
+      "suggestedRemediation": "Use paginated related-resource queries to review the remaining references.",
+      "suggestedRemediationZh": "使用分頁的相關資源查詢檢視其餘參照。",
+      "outcome": "DATA_TRUNCATED"
     },
     {
       "id": "resource-config-bytes",
@@ -1844,16 +1844,160 @@
       "hardCoded": true,
       "enforcingBoundary": "Configuration file byte check",
       "resultingStatus": {
-        "executionStatus": "partial inspection",
-        "httpStatus": 413,
+        "executionStatus": "HTTP 413 inspection rejected",
         "exitCode": null,
+        "httpStatus": 413,
         "archiveStatus": null
       },
       "diagnosticCode": "ATT-RESOURCE-LIMIT",
-      "whereShown": "Studio resource inspection",
-      "suggestedRemediation": "Split or narrow large configuration sources.",
-      "suggestedRemediationZh": "拆分大型設定來源，或縮小檢查範圍。",
+      "whereShown": "HTTP diagnostic and Studio inspection request result",
+      "suggestedRemediation": "Split or narrow large configuration sources; the deterministic scan limit does not need a retry.",
+      "suggestedRemediationZh": "拆分大型設定來源或縮小檢查範圍；這是確定性的掃描限制，無須重試。",
       "outcome": "SUBMISSION_REJECTED"
+    },
+    {
+      "id": "resource-source-references",
+      "settingName": "resourceInspector.maxSourceReferences",
+      "sourcePath": "att-engine/src/main/java/att/resource/PackageResourceInspector.java",
+      "sourceClass": "PackageResourceInspector",
+      "default": 100,
+      "allowedMin": null,
+      "allowedMax": null,
+      "scope": "Resolved source references in one source projection",
+      "configurable": false,
+      "hardCoded": true,
+      "enforcingBoundary": "Reference collector retains at most 100 and sets fileReferencesTruncated when more are resolved",
+      "resultingStatus": {
+        "executionStatus": "HTTP 200 with truncated reference list",
+        "exitCode": null,
+        "httpStatus": 200,
+        "archiveStatus": null
+      },
+      "outcome": "DATA_TRUNCATED",
+      "diagnosticCode": null,
+      "whereShown": "Studio source view fileReferences and fileReferencesTruncated metadata",
+      "suggestedRemediation": "Open references in bounded pages or inspect selected source files.",
+      "suggestedRemediationZh": "以有界分頁開啟參照，或檢查選定的來源檔案。"
+    },
+    {
+      "id": "resource-workbook-bytes-individual",
+      "settingName": "resourceInspector.maxWorkbookBytes",
+      "sourcePath": "att-engine/src/main/java/att/resource/PackageResourceInspector.java",
+      "sourceClass": "PackageResourceInspector",
+      "default": 33554432,
+      "allowedMin": null,
+      "allowedMax": null,
+      "scope": "One workbook in a Package inspection",
+      "configurable": false,
+      "hardCoded": true,
+      "enforcingBoundary": "Workbook byte check before parsing; an oversized workbook is retained as an invalid suite",
+      "resultingStatus": {
+        "executionStatus": "HTTP 200; oversized suite is returned as invalid",
+        "exitCode": null,
+        "httpStatus": 200,
+        "archiveStatus": null
+      },
+      "outcome": "DATA_TRUNCATED",
+      "diagnosticCode": "ATT-RESOURCE-CASE-INVALID",
+      "whereShown": "Studio Explorer lists the invalid suite diagnostic; other suites remain inspectable.",
+      "suggestedRemediation": "Reduce individual workbook size or split the suite. The endpoint returns a partial index with that suite marked invalid.",
+      "suggestedRemediationZh": "縮小單一工作簿或拆分測試套件。端點會回傳部分索引，並將該套件標記為無效。"
+    },
+    {
+      "id": "resource-revision-bytes",
+      "settingName": "resourceInspector.maxRevisionBytes",
+      "sourcePath": "att-engine/src/main/java/att/resource/PackageResourceInspector.java",
+      "sourceClass": "PackageResourceInspector",
+      "default": 268435456,
+      "allowedMin": null,
+      "allowedMax": null,
+      "scope": "Package revision digest scan",
+      "configurable": false,
+      "hardCoded": true,
+      "enforcingBoundary": "Bounded revision digest byte counter",
+      "resultingStatus": {
+        "executionStatus": "HTTP 413 inspection rejected",
+        "exitCode": null,
+        "httpStatus": 413,
+        "archiveStatus": null
+      },
+      "outcome": "SUBMISSION_REJECTED",
+      "diagnosticCode": "ATT-RESOURCE-LIMIT",
+      "whereShown": "HTTP diagnostic and Studio inspection request result",
+      "suggestedRemediation": "Reduce scanned source bytes or split the Package; this deterministic scan limit does not need a retry.",
+      "suggestedRemediationZh": "減少掃描的來源位元組或拆分 Package；這是確定性的掃描限制，無須重試。"
+    },
+    {
+      "id": "resource-yaml-candidates",
+      "settingName": "resourceInspector.maxYamlCandidates",
+      "sourcePath": "att-engine/src/main/java/att/resource/PackageResourceInspector.java",
+      "sourceClass": "PackageResourceInspector",
+      "default": 20000,
+      "allowedMin": null,
+      "allowedMax": null,
+      "scope": "YAML descriptors under one Package load/ tree",
+      "configurable": false,
+      "hardCoded": true,
+      "enforcingBoundary": "Bounded YAML candidate enumeration before catalog response",
+      "resultingStatus": {
+        "executionStatus": "HTTP 413 inspection rejected",
+        "exitCode": null,
+        "httpStatus": 413,
+        "archiveStatus": null
+      },
+      "outcome": "SUBMISSION_REJECTED",
+      "diagnosticCode": "ATT-RESOURCE-LIMIT",
+      "whereShown": "HTTP diagnostic and Studio load catalog request result",
+      "suggestedRemediation": "Narrow the load/ tree or split YAML catalogs into bounded Packages; this deterministic scan limit does not need a retry.",
+      "suggestedRemediationZh": "縮小 load/ 範圍或把 YAML 目錄拆分到有界 Package；這是確定性的掃描限制，無須重試。"
+    },
+    {
+      "id": "resource-config-tree-entries",
+      "settingName": "resourceInspector.maxConfigTreeEntries",
+      "sourcePath": "att-engine/src/main/java/att/resource/PackageResourceInspector.java",
+      "sourceClass": "PackageResourceInspector",
+      "default": 5000,
+      "allowedMin": null,
+      "allowedMax": null,
+      "scope": "Non-protected filesystem entries in the runtime config tree",
+      "configurable": false,
+      "hardCoded": true,
+      "enforcingBoundary": "Config-tree path counter, including directories, before source projection",
+      "resultingStatus": {
+        "executionStatus": "HTTP 413 inspection rejected",
+        "exitCode": null,
+        "httpStatus": 413,
+        "archiveStatus": null
+      },
+      "outcome": "SUBMISSION_REJECTED",
+      "diagnosticCode": "ATT-RESOURCE-LIMIT",
+      "whereShown": "HTTP diagnostic and Studio inspection request result",
+      "suggestedRemediation": "Reduce the scanned config tree or split configuration into bounded directories; this deterministic scan limit does not need a retry.",
+      "suggestedRemediationZh": "減少設定樹掃描範圍或拆分為有界目錄；這是確定性的掃描限制，無須重試。"
+    },
+    {
+      "id": "resource-config-tree-bytes",
+      "settingName": "resourceInspector.maxConfigTreeBytes",
+      "sourcePath": "att-engine/src/main/java/att/resource/PackageResourceInspector.java",
+      "sourceClass": "PackageResourceInspector",
+      "default": 268435456,
+      "allowedMin": null,
+      "allowedMax": null,
+      "scope": "Cumulative regular-file bytes in the runtime config tree",
+      "configurable": false,
+      "hardCoded": true,
+      "enforcingBoundary": "Cumulative config-tree byte counter before source projection",
+      "resultingStatus": {
+        "executionStatus": "HTTP 413 inspection rejected",
+        "exitCode": null,
+        "httpStatus": 413,
+        "archiveStatus": null
+      },
+      "outcome": "SUBMISSION_REJECTED",
+      "diagnosticCode": "ATT-RESOURCE-LIMIT",
+      "whereShown": "HTTP diagnostic and Studio inspection request result",
+      "suggestedRemediation": "Reduce the scanned config bytes or split configuration into bounded directories; this deterministic scan limit does not need a retry.",
+      "suggestedRemediationZh": "減少設定樹掃描位元組或拆分為有界目錄；這是確定性的掃描限制，無須重試。"
     },
     {
       "id": "load-window-buckets",
@@ -2146,329 +2290,1139 @@
   ],
   "sourceContracts": [
     {
+      "entryId": "worker-frame",
       "path": "att-server-api/src/main/java/att/server/api/internal/WorkerProtocol.java",
-      "pattern": "MAX_FRAME_BYTES\\s*=\\s*1024\\s*\\*\\s*1024",
+      "pattern": "\\bMAX_FRAME_BYTES\\s*=\\s*(?P<default>[^;]+);",
+      "fields": {
+        "default": "default"
+      },
+      "literalFields": {},
       "settingName": "worker.protocol.maxFrameBytes"
     },
     {
+      "entryId": "journal-event-data",
       "path": "att-server/src/main/java/att/server/JobEvents.java",
-      "pattern": "MAX_EVENT_DATA_BYTES\\s*=\\s*65536",
+      "pattern": "\\bMAX_EVENT_DATA_BYTES\\s*=\\s*(?P<default>[^;]+);",
+      "fields": {
+        "default": "default"
+      },
+      "literalFields": {},
       "settingName": "server.eventJournal.maxEventDataBytes"
     },
     {
+      "entryId": "journal-history",
+      "path": "att-server/src/main/java/att/server/ServerConfig.java",
+      "pattern": "\"maxEventsPerJob\"\\)?\\s*,\\s*(?P<default>[^,\\n]+),\\s*(?P<allowedMin>[^,\\n]+),\\s*(?P<allowedMax>[^,\\n)]+)",
+      "fields": {
+        "default": "default",
+        "allowedMin": "allowedMin",
+        "allowedMax": "allowedMax"
+      },
+      "literalFields": {},
+      "settingName": "server.maxEventsPerJob"
+    },
+    {
+      "entryId": "worker-concurrent",
+      "path": "att-server/src/main/java/att/server/ServerConfig.java",
+      "pattern": "\"maxConcurrent\"\\)?\\s*,\\s*(?P<default>[^,\\n]+),\\s*(?P<allowedMin>[^,\\n]+),\\s*(?P<allowedMax>[^,\\n)]+)",
+      "fields": {
+        "default": "default",
+        "allowedMin": "allowedMin",
+        "allowedMax": "allowedMax"
+      },
+      "literalFields": {},
+      "settingName": "workers.maxConcurrent"
+    },
+    {
+      "entryId": "worker-queue",
+      "path": "att-server/src/main/java/att/server/ServerConfig.java",
+      "pattern": "\"queuedLimit\"\\)?\\s*,\\s*(?P<default>[^,\\n]+),\\s*(?P<allowedMin>[^,\\n]+),\\s*(?P<allowedMax>[^,\\n)]+)",
+      "fields": {
+        "default": "default",
+        "allowedMin": "allowedMin",
+        "allowedMax": "allowedMax"
+      },
+      "literalFields": {},
+      "settingName": "workers.queuedLimit"
+    },
+    {
+      "entryId": "load-worker-cap",
+      "path": "att-server/src/main/java/att/server/ServerConfig.java",
+      "pattern": "\"maxConcurrentLoad\"\\)?\\s*,\\s*(?P<default>[^,\\n]+),\\s*(?P<allowedMin>[^,\\n]+),\\s*(?P<allowedMax>[^,\\n)]+)",
+      "fields": {
+        "default": "default",
+        "allowedMin": "allowedMin",
+        "allowedMax": "allowedMax"
+      },
+      "literalFields": {},
+      "settingName": "workers.maxConcurrentLoad"
+    },
+    {
+      "entryId": "load-prep-per-run",
       "path": "att-engine/src/main/java/att/load/LoadPreparationBudget.java",
-      "pattern": "PER_RUN_CONNECTIONS\\s*=\\s*64",
+      "pattern": "\\bPER_RUN_CONNECTIONS\\s*=\\s*(?P<default>[^;]+);",
+      "fields": {
+        "default": "default"
+      },
+      "literalFields": {},
       "settingName": "load.initialConnectionsPerWorker"
     },
     {
+      "entryId": "load-prep-jvm",
       "path": "att-engine/src/main/java/att/load/LoadPreparationBudget.java",
-      "pattern": "WORKER_JVM_CONNECTIONS\\s*=\\s*256",
+      "pattern": "\\bWORKER_JVM_CONNECTIONS\\s*=\\s*(?P<default>[^;]+);",
+      "fields": {
+        "default": "default"
+      },
+      "literalFields": {},
       "settingName": "load.initialConnectionsPerWorkerJvm"
     },
     {
+      "entryId": "load-prep-deadline",
       "path": "att-engine/src/main/java/att/load/LoadRunResources.java",
-      "pattern": "PREPARATION_DEADLINE_MS\\s*=\\s*30_000L",
+      "pattern": "\\bPREPARATION_DEADLINE_MS\\s*=\\s*(?P<default>[^;]+);",
+      "fields": {
+        "default": "default"
+      },
+      "literalFields": {},
       "settingName": "load.preparationDeadlineMs"
     },
     {
+      "entryId": "db-rows",
       "path": "att-engine/src/main/java/att/config/DbHelperConfigLoader.java",
-      "pattern": "get\\(\"maxRows\"\\),\\s*1000,\\s*1,\\s*1000000",
+      "pattern": "\"maxRows\"\\)?\\s*,\\s*(?P<default>[^,\\n]+),\\s*(?P<allowedMin>[^,\\n]+),\\s*(?P<allowedMax>[^,\\n)]+)",
+      "fields": {
+        "default": "default",
+        "allowedMin": "allowedMin",
+        "allowedMax": "allowedMax"
+      },
+      "literalFields": {},
       "settingName": "dbhelper.result.maxRows"
     },
     {
+      "entryId": "db-cell",
       "path": "att-engine/src/main/java/att/config/DbHelperConfigLoader.java",
-      "pattern": "get\\(\"maxCellBytes\"\\),\\s*1048576,\\s*1,\\s*1073741824",
+      "pattern": "\"maxCellBytes\"\\)?\\s*,\\s*(?P<default>[^,\\n]+),\\s*(?P<allowedMin>[^,\\n]+),\\s*(?P<allowedMax>[^,\\n)]+)",
+      "fields": {
+        "default": "default",
+        "allowedMin": "allowedMin",
+        "allowedMax": "allowedMax"
+      },
+      "literalFields": {},
       "settingName": "dbhelper.result.maxCellBytes"
     },
     {
+      "entryId": "db-result",
       "path": "att-engine/src/main/java/att/config/DbHelperConfigLoader.java",
-      "pattern": "get\\(\"maxBytes\"\\),\\s*10485760,\\s*1,\\s*1073741824",
+      "pattern": "\"maxBytes\"\\)?\\s*,\\s*(?P<default>[^,\\n]+),\\s*(?P<allowedMin>[^,\\n]+),\\s*(?P<allowedMax>[^,\\n)]+)",
+      "fields": {
+        "default": "default",
+        "allowedMin": "allowedMin",
+        "allowedMax": "allowedMax"
+      },
+      "literalFields": {},
       "settingName": "dbhelper.result.maxBytes"
     },
     {
+      "entryId": "db-pool-size",
       "path": "att-engine/src/main/java/att/config/DbHelperConfigLoader.java",
-      "pattern": "get\\(\"maxSize\"\\),\\s*20,\\s*1,\\s*10000",
+      "pattern": "\"maxSize\"\\)?\\s*,\\s*(?P<default>[^,\\n]+),\\s*(?P<allowedMin>[^,\\n]+),\\s*(?P<allowedMax>[^,\\n)]+)",
+      "fields": {
+        "default": "default",
+        "allowedMin": "allowedMin",
+        "allowedMax": "allowedMax"
+      },
+      "literalFields": {},
       "settingName": "dbhelper.pool.maxSize"
     },
     {
+      "entryId": "db-pool-wait",
+      "path": "att-engine/src/main/java/att/config/DbHelperConfigLoader.java",
+      "pattern": "\"connectionTimeout\"\\)?\\s*,\\s*(?P<default>[^,\\n)]+)",
+      "fields": {
+        "default": "default"
+      },
+      "literalFields": {},
+      "settingName": "dbhelper.pool.connectionTimeout"
+    },
+    {
+      "entryId": "db-pool-wait",
+      "path": "att-engine/src/main/java/att/config/DbHelperConfigLoader.java",
+      "pattern": "Math\\.max\\(\\s*(?P<allowedMin>250)L",
+      "fields": {
+        "allowedMin": "allowedMin"
+      },
+      "literalFields": {},
+      "settingName": "dbhelper.pool.connectionTimeout"
+    },
+    {
+      "entryId": "mq-response",
       "path": "att-engine/src/main/java/att/config/MqHelperConfigLoader.java",
-      "pattern": "get\\(\"waitMs\"\\),\\s*10000,\\s*0,\\s*3600000",
+      "pattern": "\"maxResponseBytes\"\\)?\\s*,\\s*(?P<default>[^,\\n]+),\\s*(?P<allowedMin>[^,\\n]+),\\s*(?P<allowedMax>[^,\\n)]+)",
+      "fields": {
+        "default": "default",
+        "allowedMin": "allowedMin",
+        "allowedMax": "allowedMax"
+      },
+      "literalFields": {},
+      "settingName": "mqhelper.requestReply.maxResponseBytes"
+    },
+    {
+      "entryId": "mq-pool-size",
+      "path": "att-engine/src/main/java/att/config/MqHelperConfigLoader.java",
+      "pattern": "\"maxSize\"\\)?\\s*,\\s*(?P<default>[^,\\n]+),\\s*(?P<allowedMin>[^,\\n]+),\\s*(?P<allowedMax>[^,\\n)]+)",
+      "fields": {
+        "default": "default",
+        "allowedMin": "allowedMin",
+        "allowedMax": "allowedMax"
+      },
+      "literalFields": {},
+      "settingName": "mqhelper.pool.maxSize"
+    },
+    {
+      "entryId": "mq-pool-wait",
+      "path": "att-engine/src/main/java/att/config/MqHelperConfigLoader.java",
+      "pattern": "\"borrowTimeout\"\\)?\\s*,\\s*(?P<default>[^,\\n)]+)",
+      "fields": {
+        "default": "default"
+      },
+      "literalFields": {},
+      "settingName": "mqhelper.pool.borrowTimeout"
+    },
+    {
+      "entryId": "mq-pool-wait",
+      "path": "att-engine/src/main/java/att/config/MqHelperConfigLoader.java",
+      "pattern": "Math\\.max\\(\\s*(?P<allowedMin>0)L",
+      "fields": {
+        "allowedMin": "allowedMin"
+      },
+      "literalFields": {},
+      "settingName": "mqhelper.pool.borrowTimeout"
+    },
+    {
+      "entryId": "mq-wait",
+      "path": "att-engine/src/main/java/att/config/MqHelperConfigLoader.java",
+      "pattern": "\"waitMs\"\\)?\\s*,\\s*(?P<default>[^,\\n]+),\\s*(?P<allowedMin>[^,\\n]+),\\s*(?P<allowedMax>[^,\\n)]+)",
+      "fields": {
+        "default": "default",
+        "allowedMin": "allowedMin",
+        "allowedMax": "allowedMax"
+      },
+      "literalFields": {},
       "settingName": "mqhelper.requestReply.waitMs"
     },
     {
+      "entryId": "http-response",
+      "path": "att-engine/src/main/java/att/config/HttpHelperConfigLoader.java",
+      "pattern": "\"maxResponseBytes\"\\)?\\s*,\\s*(?P<default>[^,\\n)]+)",
+      "fields": {
+        "default": "default"
+      },
+      "literalFields": {},
+      "settingName": "httphelper.defaults.maxResponseBytes"
+    },
+    {
+      "entryId": "http-response",
+      "path": "att-engine/src/main/java/att/config/HttpHelperConfigLoader.java",
+      "pattern": "private static int bytes\\(Object value, int fallback, String field\\).*?\\.intValue\\(\\) < (?P<allowedMin>\\d+).*?\\.intValue\\(\\) > (?P<allowedMax>\\d+)",
+      "fields": {
+        "allowedMin": "allowedMin",
+        "allowedMax": "allowedMax"
+      },
+      "literalFields": {},
+      "settingName": "httphelper.defaults.maxResponseBytes"
+    },
+    {
+      "entryId": "http-pool-size",
+      "path": "att-engine/src/main/java/att/config/HttpHelperConfigLoader.java",
+      "pattern": "\"maxConnections\"\\)?\\s*,\\s*(?P<default>[^,\\n)]+)",
+      "fields": {
+        "default": "default"
+      },
+      "literalFields": {},
+      "settingName": "httphelper.pool.maxConnections"
+    },
+    {
+      "entryId": "http-pool-size",
+      "path": "att-engine/src/main/java/att/config/HttpHelperConfigLoader.java",
+      "pattern": "private static int number\\(Object value, int fallback, String field\\).*?\\.intValue\\(\\) < (?P<allowedMin>\\d+).*?\\.intValue\\(\\) > (?P<allowedMax>\\d+)",
+      "fields": {
+        "allowedMin": "allowedMin",
+        "allowedMax": "allowedMax"
+      },
+      "literalFields": {},
+      "settingName": "httphelper.pool.maxConnections"
+    },
+    {
+      "entryId": "http-pool-route",
+      "path": "att-engine/src/main/java/att/config/HttpHelperConfigLoader.java",
+      "pattern": "\"maxConnectionsPerRoute\"\\)?\\s*,\\s*(?P<default>[^,\\n)]+)",
+      "fields": {
+        "default": "default"
+      },
+      "literalFields": {},
+      "settingName": "httphelper.pool.maxConnectionsPerRoute"
+    },
+    {
+      "entryId": "http-pool-route",
+      "path": "att-engine/src/main/java/att/config/HttpHelperConfigLoader.java",
+      "pattern": "private static int number\\(Object value, int fallback, String field\\).*?\\.intValue\\(\\) < (?P<allowedMin>\\d+).*?\\.intValue\\(\\) > (?P<allowedMax>\\d+)",
+      "fields": {
+        "allowedMin": "allowedMin",
+        "allowedMax": "allowedMax"
+      },
+      "literalFields": {},
+      "settingName": "httphelper.pool.maxConnectionsPerRoute"
+    },
+    {
+      "entryId": "http-pool-wait",
+      "path": "att-engine/src/main/java/att/config/HttpHelperConfigLoader.java",
+      "pattern": "\"connectionRequestTimeoutMs\"\\)?\\s*,\\s*(?P<default>[^,\\n)]+)",
+      "fields": {
+        "default": "default"
+      },
+      "literalFields": {},
+      "settingName": "httphelper.pool.connectionRequestTimeoutMs"
+    },
+    {
+      "entryId": "http-pool-wait",
+      "path": "att-engine/src/main/java/att/config/HttpHelperConfigLoader.java",
+      "pattern": "private static int number\\(Object value, int fallback, String field\\).*?\\.intValue\\(\\) < (?P<allowedMin>\\d+).*?\\.intValue\\(\\) > (?P<allowedMax>\\d+)",
+      "fields": {
+        "allowedMin": "allowedMin",
+        "allowedMax": "allowedMax"
+      },
+      "literalFields": {},
+      "settingName": "httphelper.pool.connectionRequestTimeoutMs"
+    },
+    {
+      "entryId": "http-connect",
+      "path": "att-engine/src/main/java/att/config/HttpHelperConfigLoader.java",
+      "pattern": "\"connectTimeoutMs\"\\)?\\s*,\\s*(?P<default>[^,\\n)]+)",
+      "fields": {
+        "default": "default"
+      },
+      "literalFields": {},
+      "settingName": "httphelper.defaults.connectTimeoutMs"
+    },
+    {
+      "entryId": "http-connect",
+      "path": "att-engine/src/main/java/att/config/HttpHelperConfigLoader.java",
+      "pattern": "private static int number\\(Object value, int fallback, String field\\).*?\\.intValue\\(\\) < (?P<allowedMin>\\d+).*?\\.intValue\\(\\) > (?P<allowedMax>\\d+)",
+      "fields": {
+        "allowedMin": "allowedMin",
+        "allowedMax": "allowedMax"
+      },
+      "literalFields": {},
+      "settingName": "httphelper.defaults.connectTimeoutMs"
+    },
+    {
+      "entryId": "http-read",
+      "path": "att-engine/src/main/java/att/config/HttpHelperConfigLoader.java",
+      "pattern": "\"readTimeoutMs\"\\)?\\s*,\\s*(?P<default>[^,\\n)]+)",
+      "fields": {
+        "default": "default"
+      },
+      "literalFields": {},
+      "settingName": "httphelper.defaults.readTimeoutMs"
+    },
+    {
+      "entryId": "http-read",
+      "path": "att-engine/src/main/java/att/config/HttpHelperConfigLoader.java",
+      "pattern": "private static int number\\(Object value, int fallback, String field\\).*?\\.intValue\\(\\) < (?P<allowedMin>\\d+).*?\\.intValue\\(\\) > (?P<allowedMax>\\d+)",
+      "fields": {
+        "allowedMin": "allowedMin",
+        "allowedMax": "allowedMax"
+      },
+      "literalFields": {},
+      "settingName": "httphelper.defaults.readTimeoutMs"
+    },
+    {
+      "entryId": "server-request",
       "path": "att-server/src/main/java/att/server/ServerConfig.java",
-      "pattern": "int retention=intValue\\(server,\"jobRetentionDays\",30,1,3650\\)",
+      "pattern": "\"maxRequestBytes\"\\)?\\s*,\\s*(?P<default>[^,\\n]+),\\s*(?P<allowedMin>[^,\\n]+),\\s*(?P<allowedMax>[^,\\n)]+)",
+      "fields": {
+        "default": "default",
+        "allowedMin": "allowedMin",
+        "allowedMax": "allowedMax"
+      },
+      "literalFields": {},
+      "settingName": "server.maxRequestBytes"
+    },
+    {
+      "entryId": "inspection-concurrent",
+      "path": "att-server/src/main/java/att/server/ServerConfig.java",
+      "pattern": "int concurrent=intValue\\(values,\"maxConcurrent\",(?P<default>[^,]+),(?P<allowedMin>[^,]+),(?P<allowedMax>[^)]+)\\)",
+      "fields": {
+        "default": "default",
+        "allowedMin": "allowedMin",
+        "allowedMax": "allowedMax"
+      },
+      "literalFields": {},
+      "settingName": "server.inspection.maxConcurrent"
+    },
+    {
+      "entryId": "inspection-queue",
+      "path": "att-server/src/main/java/att/server/ServerConfig.java",
+      "pattern": "int queued=intValue\\(values,\"queuedLimit\",(?P<default>[^,]+),(?P<allowedMin>[^,]+),(?P<allowedMax>[^)]+)\\)",
+      "fields": {
+        "default": "default",
+        "allowedMin": "allowedMin",
+        "allowedMax": "allowedMax"
+      },
+      "literalFields": {},
+      "settingName": "server.inspection.queuedLimit"
+    },
+    {
+      "entryId": "inspection-timeout",
+      "path": "att-server/src/main/java/att/server/ServerConfig.java",
+      "pattern": "int timeout=intValue\\(values,\"timeoutMs\",(?P<default>[^,]+),(?P<allowedMin>[^,]+),(?P<allowedMax>[^)]+)\\)",
+      "fields": {
+        "default": "default",
+        "allowedMin": "allowedMin",
+        "allowedMax": "allowedMax"
+      },
+      "literalFields": {},
+      "settingName": "server.inspection.timeoutMs"
+    },
+    {
+      "entryId": "inspection-response",
+      "path": "att-server/src/main/java/att/server/ServerConfig.java",
+      "pattern": "int response=intValue\\(values,\"maxResponseBytes\",(?P<default>[^,]+),(?P<allowedMin>[^,]+),(?P<allowedMax>[^)]+)\\)",
+      "fields": {
+        "default": "default",
+        "allowedMin": "allowedMin",
+        "allowedMax": "allowedMax"
+      },
+      "literalFields": {},
+      "settingName": "server.inspection.maxResponseBytes"
+    },
+    {
+      "entryId": "inspection-source",
+      "path": "att-server/src/main/java/att/server/ServerConfig.java",
+      "pattern": "int source=intValue\\(values,\"maxSourceBytes\",(?P<default>[^,]+),(?P<allowedMin>[^,]+),(?P<allowedMax>[^)]+)\\)",
+      "fields": {
+        "default": "default",
+        "allowedMin": "allowedMin",
+        "allowedMax": "allowedMax"
+      },
+      "literalFields": {},
+      "settingName": "server.inspection.maxSourceBytes"
+    },
+    {
+      "entryId": "job-retention",
+      "path": "att-server/src/main/java/att/server/ServerConfig.java",
+      "pattern": "\"jobRetentionDays\"\\)?\\s*,\\s*(?P<default>[^,\\n]+),\\s*(?P<allowedMin>[^,\\n]+),\\s*(?P<allowedMax>[^,\\n)]+)",
+      "fields": {
+        "default": "default",
+        "allowedMin": "allowedMin",
+        "allowedMax": "allowedMax"
+      },
+      "literalFields": {},
       "settingName": "server.jobRetentionDays"
     },
     {
+      "entryId": "archive-entry-bytes",
       "path": "att-server/src/main/java/att/server/ArtifactArchive.java",
-      "pattern": "MAX_ENTRY_BYTES\\s*=\\s*16L\\s*\\*\\s*1024\\s*\\*\\s*1024",
+      "pattern": "\\bMAX_ENTRY_BYTES\\s*=\\s*(?P<default>[^;]+);",
+      "fields": {
+        "default": "default"
+      },
+      "literalFields": {},
       "settingName": "artifact.archive.maxEntryBytes"
     },
     {
+      "entryId": "archive-total-bytes",
       "path": "att-server/src/main/java/att/server/ArtifactArchive.java",
-      "pattern": "MAX_TOTAL_BYTES\\s*=\\s*128L\\s*\\*\\s*1024\\s*\\*\\s*1024",
+      "pattern": "\\bMAX_TOTAL_BYTES\\s*=\\s*(?P<default>[^;]+);",
+      "fields": {
+        "default": "default"
+      },
+      "literalFields": {},
       "settingName": "artifact.archive.maxTotalBytes"
     },
     {
+      "entryId": "archive-entry-count",
       "path": "att-server/src/main/java/att/server/ArtifactArchive.java",
-      "pattern": "MAX_ENTRIES\\s*=\\s*10_000",
+      "pattern": "\\bMAX_ENTRIES\\s*=\\s*(?P<default>[^;]+);",
+      "fields": {
+        "default": "default"
+      },
+      "literalFields": {},
       "settingName": "artifact.archive.maxEntries"
     },
     {
+      "entryId": "archive-candidates",
       "path": "att-server/src/main/java/att/server/ArtifactArchive.java",
-      "pattern": "MAX_CANDIDATES\\s*=\\s*50_000",
+      "pattern": "\\bMAX_CANDIDATES\\s*=\\s*(?P<default>[^;]+);",
+      "fields": {
+        "default": "default"
+      },
+      "literalFields": {},
       "settingName": "artifact.archive.maxCandidates"
     },
     {
+      "entryId": "archive-manifest",
       "path": "att-server/src/main/java/att/server/ArtifactArchive.java",
-      "pattern": "MAX_MANIFEST_BYTES\\s*=\\s*8\\s*\\*\\s*1024\\s*\\*\\s*1024",
+      "pattern": "\\bMAX_MANIFEST_BYTES\\s*=\\s*(?P<default>[^;]+);",
+      "fields": {
+        "default": "default"
+      },
+      "literalFields": {},
       "settingName": "artifact.archive.maxManifestBytes"
     },
     {
+      "entryId": "archive-download",
       "path": "att-server/src/main/java/att/server/ArtifactArchive.java",
-      "pattern": "MAX_TOTAL_BYTES\\s*=\\s*128L\\s*\\*\\s*1024\\s*\\*\\s*1024",
+      "pattern": "\\bMAX_ARCHIVE_BYTES\\s*=\\s*(?P<default>[^;]+);",
+      "fields": {
+        "default": "default"
+      },
+      "literalFields": {},
       "settingName": "artifact.archive.maxDownloadBytes"
     },
     {
+      "entryId": "archive-page",
+      "path": "att-server/src/main/java/att/server/ServerRuntime.java",
+      "pattern": "RESOURCE_MAX_PAGE_SIZE\\s*=\\s*(?P<value>\\d+)",
+      "fields": {
+        "default": "value",
+        "allowedMax": "value"
+      },
+      "literalFields": {},
+      "settingName": "server.artifacts.maxPageSize"
+    },
+    {
+      "entryId": "archive-page",
+      "path": "att-server/src/main/java/att/server/ServerRuntime.java",
+      "pattern": "limit\\s*<\\s*(?P<allowedMin>\\d+)\\s*\\|\\|\\s*limit\\s*>\\s*RESOURCE_MAX_PAGE_SIZE",
+      "fields": {
+        "allowedMin": "allowedMin"
+      },
+      "literalFields": {},
+      "settingName": "server.artifacts.maxPageSize"
+    },
+    {
+      "entryId": "archive-read-slots",
+      "path": "att-server/src/main/java/att/server/ServerRuntime.java",
+      "pattern": "\\bMAX_ARTIFACT_READ_SLOTS\\s*=\\s*(?P<default>[^;]+);",
+      "fields": {
+        "default": "default"
+      },
+      "literalFields": {},
+      "settingName": "server.artifacts.readSlots"
+    },
+    {
+      "entryId": "archive-download-chunk",
       "path": "att-server/src/main/java/att/server/ArtifactDownload.java",
-      "pattern": "CHUNK_BYTES\\s*=\\s*64\\s*\\*\\s*1024",
+      "pattern": "\\bCHUNK_BYTES\\s*=\\s*(?P<default>[^;]+);",
+      "fields": {
+        "default": "default"
+      },
+      "literalFields": {},
       "settingName": "artifact.download.chunkBytes"
     },
     {
+      "entryId": "load-buckets",
       "path": "att-engine/src/main/java/att/load/LoadMetrics.java",
-      "pattern": "MAX_BUCKETS\\s*=\\s*4096",
+      "pattern": "\\bMAX_BUCKETS\\s*=\\s*(?P<default>[^;]+);",
+      "fields": {
+        "default": "default"
+      },
+      "literalFields": {},
       "settingName": "load.metrics.maxBuckets"
     },
     {
+      "entryId": "load-latency-samples",
       "path": "att-engine/src/main/java/att/load/LoadMetrics.java",
-      "pattern": "MAX_LATENCIES\\s*=\\s*4096",
+      "pattern": "\\bMAX_LATENCIES\\s*=\\s*(?P<default>[^;]+);",
+      "fields": {
+        "default": "default"
+      },
+      "literalFields": {},
       "settingName": "load.metrics.maxLatencySamples"
     },
     {
+      "entryId": "load-bucket-samples",
       "path": "att-engine/src/main/java/att/load/LoadMetrics.java",
-      "pattern": "MAX_BUCKET_LATENCIES\\s*=\\s*256",
+      "pattern": "\\bMAX_BUCKET_LATENCIES\\s*=\\s*(?P<default>[^;]+);",
+      "fields": {
+        "default": "default"
+      },
+      "literalFields": {},
       "settingName": "load.metrics.maxBucketLatencySamples"
     },
     {
+      "entryId": "load-failure-samples",
       "path": "att-engine/src/main/java/att/load/LoadMetrics.java",
-      "pattern": "result.put\\(\"failureDiagnosticsLimit\",100\\)",
+      "pattern": "result\\.put\\(\"failureDiagnosticsLimit\",\\s*(?P<default>\\d+)\\)",
+      "fields": {
+        "default": "default"
+      },
+      "literalFields": {},
       "settingName": "load.metrics.maxFailureDiagnostics"
     },
     {
+      "entryId": "load-evidence-workload",
       "path": "att-engine/src/main/java/att/load/LoadEvidencePolicy.java",
-      "pattern": "DEFAULT_PER_WORKLOAD_CAP\\s*=\\s*1000",
+      "pattern": "DEFAULT_PER_WORKLOAD_CAP\\s*=\\s*(?P<default>[^;]+);",
+      "fields": {
+        "default": "default"
+      },
+      "literalFields": {},
       "settingName": "load.evidence.perWorkloadMaxSamples"
     },
     {
+      "entryId": "load-evidence-workload",
       "path": "att-engine/src/main/java/att/load/LoadEvidencePolicy.java",
-      "pattern": "MAX_AGGREGATE_CAP\\s*=\\s*1000000",
+      "pattern": "must be an integer from\\s+(?P<allowedMin>\\d+)\\s+to\\s+(?P<allowedMax>\\d+)",
+      "fields": {
+        "allowedMin": "allowedMin",
+        "allowedMax": "allowedMax"
+      },
+      "literalFields": {},
+      "settingName": "load.evidence.perWorkloadMaxSamples"
+    },
+    {
+      "entryId": "load-evidence-aggregate",
+      "path": "att-engine/src/main/java/att/load/LoadEvidencePolicy.java",
+      "pattern": "MAX_AGGREGATE_CAP\\s*=\\s*(?P<default>[^;]+);",
+      "fields": {
+        "default": "default"
+      },
+      "literalFields": {},
       "settingName": "load.evidence.maxAggregatePerOutcome"
     },
     {
+      "entryId": "load-evidence-aggregate",
+      "path": "att-engine/src/main/java/att/load/LoadEvidencePolicy.java",
+      "pattern": "must be an integer from\\s+(?P<allowedMin>\\d+)\\s+to\\s+(?P<allowedMax>\\d+)",
+      "fields": {
+        "allowedMin": "allowedMin",
+        "allowedMax": "allowedMax"
+      },
+      "literalFields": {},
+      "settingName": "load.evidence.maxAggregatePerOutcome"
+    },
+    {
+      "entryId": "load-detail-bytes",
       "path": "att-engine/src/main/java/att/load/LoadReportDetailWriter.java",
-      "pattern": "MAX_DETAIL_BYTES\\s*=\\s*100L\\s*\\*\\s*1024\\s*\\*\\s*1024",
+      "pattern": "\\bMAX_DETAIL_BYTES\\s*=\\s*(?P<default>[^;]+);",
+      "fields": {
+        "default": "default"
+      },
+      "literalFields": {},
       "settingName": "load.report.maxDetailBytes"
     },
     {
+      "entryId": "load-detail-files",
       "path": "att-engine/src/main/java/att/load/LoadReportDetailWriter.java",
-      "pattern": "MAX_DETAIL_FILES\\s*=\\s*9_000",
+      "pattern": "\\bMAX_DETAIL_FILES\\s*=\\s*(?P<default>[^;]+);",
+      "fields": {
+        "default": "default"
+      },
+      "literalFields": {},
       "settingName": "load.report.maxDetailFiles"
     },
     {
+      "entryId": "load-report-total",
+      "path": "att-engine/src/main/java/att/load/LoadReportWriter.java",
+      "pattern": "\\bMAX_REPORT_TOTAL_BYTES\\s*=\\s*(?P<default>[^;]+);",
+      "fields": {
+        "default": "default"
+      },
+      "literalFields": {},
+      "settingName": "load.report.maxTotalBytes"
+    },
+    {
+      "entryId": "case-log-buffer",
       "path": "att-engine/src/main/java/att/core/CaseExecutionLog.java",
-      "pattern": "BATCHED_LOG_BUFFER_CHARS\\s*=\\s*64\\s*\\*\\s*1024",
+      "pattern": "\\bBATCHED_LOG_BUFFER_CHARS\\s*=\\s*(?P<default>[^;]+);",
+      "fields": {
+        "default": "default"
+      },
+      "literalFields": {},
       "settingName": "engine.caseLog.maxDeferredChars"
     },
     {
+      "entryId": "exception-detail",
       "path": "att-engine/src/main/java/att/core/InternalExceptionLogger.java",
-      "pattern": "MAX_CHARS\\s*=\\s*16000",
+      "pattern": "\\bMAX_CHARS\\s*=\\s*(?P<default>[^;]+);",
+      "fields": {
+        "default": "default"
+      },
+      "literalFields": {},
       "settingName": "engine.internalExceptionLog.maxChars"
     },
     {
+      "entryId": "server-stream-observers",
+      "path": "att-server/src/main/java/att/server/ServerRuntime.java",
+      "pattern": "MAX_STREAM_OBSERVERS\\s*=\\s*(?P<default>[^;]+);",
+      "fields": {
+        "default": "default"
+      },
+      "literalFields": {},
+      "settingName": "server.maxStreamObservers"
+    },
+    {
+      "entryId": "studio-event-history",
       "path": "att-web/frontend/src/features/load/useJobEventStream.ts",
-      "pattern": "MAX_EVENTS\\s*=\\s*500",
+      "pattern": "\\bMAX_EVENTS\\s*=\\s*(?P<default>[^;]+);",
+      "fields": {
+        "default": "default"
+      },
+      "literalFields": {},
       "settingName": "studio.jobEventHistory.maxEvents"
     },
     {
+      "entryId": "studio-event-ids",
       "path": "att-web/frontend/src/features/load/useJobEventStream.ts",
-      "pattern": "MAX_TRACKED_EVENT_IDS\\s*=\\s*2000",
+      "pattern": "\\bMAX_TRACKED_EVENT_IDS\\s*=\\s*(?P<default>[^;]+);",
+      "fields": {
+        "default": "default"
+      },
+      "literalFields": {},
       "settingName": "studio.jobEventHistory.maxTrackedEventIds"
     },
     {
+      "entryId": "studio-console-line",
       "path": "att-web/frontend/src/features/load/JobConsoleView.tsx",
-      "pattern": "MAX_LINE_LENGTH\\s*=\\s*4000",
+      "pattern": "\\bMAX_LINE_LENGTH\\s*=\\s*(?P<default>[^;]+);",
+      "fields": {
+        "default": "default"
+      },
+      "literalFields": {},
       "settingName": "studio.jobConsole.maxLineChars"
     },
     {
+      "entryId": "studio-console-payload",
       "path": "att-web/frontend/src/features/load/JobConsoleView.tsx",
-      "pattern": "payload.slice\\(0,\\s*65536\\)",
+      "pattern": "payload\\.slice\\(0,\\s*(?P<default>\\d+)\\)",
+      "fields": {
+        "default": "default"
+      },
+      "literalFields": {},
       "settingName": "studio.jobConsole.maxRetainedPayloadChars"
     },
     {
+      "entryId": "validation-entries",
       "path": "att-engine/src/main/java/att/validation/PackageValidationBudget.java",
-      "pattern": "MAX_ENTRIES_PER_PACKAGE\\s*=\\s*20000",
+      "pattern": "\\bMAX_ENTRIES_PER_PACKAGE\\s*=\\s*(?P<default>[^;]+);",
+      "fields": {
+        "default": "default"
+      },
+      "literalFields": {},
       "settingName": "validation.package.maxEntries"
     },
     {
+      "entryId": "validation-bytes",
       "path": "att-engine/src/main/java/att/validation/PackageValidationBudget.java",
-      "pattern": "MAX_BYTES_PER_PACKAGE\\s*=\\s*256L\\s*\\*\\s*1024L\\s*\\*\\s*1024L",
+      "pattern": "\\bMAX_BYTES_PER_PACKAGE\\s*=\\s*(?P<default>[^;]+);",
+      "fields": {
+        "default": "default"
+      },
+      "literalFields": {},
       "settingName": "validation.package.maxBytes"
     },
     {
+      "entryId": "validation-install-work",
       "path": "att-engine/src/main/java/att/validation/PackageValidationBudget.java",
-      "pattern": "MAX_INSTALLATION_WORK_UNITS\\s*=\\s*10000000L",
+      "pattern": "\\bMAX_INSTALLATION_WORK_UNITS\\s*=\\s*(?P<default>[^;]+);",
+      "fields": {
+        "default": "default"
+      },
+      "literalFields": {},
       "settingName": "validation.installation.maxWorkUnits"
     },
     {
+      "entryId": "validation-env",
       "path": "att-engine/src/main/java/att/validation/RuntimeConfigurationValidator.java",
-      "pattern": "MAX_ENVIRONMENT_PROFILES\\s*=\\s*100",
+      "pattern": "\\bMAX_ENVIRONMENT_PROFILES\\s*=\\s*(?P<default>[^;]+);",
+      "fields": {
+        "default": "default"
+      },
+      "literalFields": {},
       "settingName": "validation.maxEnvironmentProfiles"
     },
     {
+      "entryId": "resource-page",
       "path": "att-engine/src/main/java/att/resource/PackageResourceInspector.java",
-      "pattern": "MAX_PAGE_SIZE\\s*=\\s*100",
+      "pattern": "MAX_PAGE_SIZE\\s*=\\s*(?P<value>\\d+)",
+      "fields": {
+        "default": "value",
+        "allowedMax": "value"
+      },
+      "literalFields": {},
       "settingName": "resourceInspector.maxPageSize"
     },
     {
+      "entryId": "resource-page",
       "path": "att-engine/src/main/java/att/resource/PackageResourceInspector.java",
-      "pattern": "MAX_RESOURCES\\s*=\\s*20000",
+      "pattern": "limit\\s*<\\s*(?P<allowedMin>\\d+)\\s*\\|\\|\\s*limit\\s*>\\s*MAX_PAGE_SIZE",
+      "fields": {
+        "allowedMin": "allowedMin"
+      },
+      "literalFields": {},
+      "settingName": "resourceInspector.maxPageSize"
+    },
+    {
+      "entryId": "resource-count",
+      "path": "att-engine/src/main/java/att/resource/PackageResourceInspector.java",
+      "pattern": "\\bMAX_RESOURCES\\s*=\\s*(?P<default>[^;]+);",
+      "fields": {
+        "default": "default"
+      },
+      "literalFields": {},
       "settingName": "resourceInspector.maxResources"
     },
     {
+      "entryId": "resource-depth-files",
       "path": "att-engine/src/main/java/att/resource/PackageResourceInspector.java",
-      "pattern": "MAX_NESTED_SOURCE_FILES\\s*=\\s*256",
+      "pattern": "\\bMAX_NESTED_SOURCE_FILES\\s*=\\s*(?P<default>[^;]+);",
+      "fields": {
+        "default": "default"
+      },
+      "literalFields": {},
       "settingName": "resourceInspector.maxNestedSourceFiles"
     },
     {
+      "entryId": "resource-workbooks",
       "path": "att-engine/src/main/java/att/resource/PackageResourceInspector.java",
-      "pattern": "MAX_WORKBOOKS\\s*=\\s*500",
+      "pattern": "\\bMAX_WORKBOOKS\\s*=\\s*(?P<default>[^;]+);",
+      "fields": {
+        "default": "default"
+      },
+      "literalFields": {},
       "settingName": "resourceInspector.maxWorkbooks"
     },
     {
+      "entryId": "resource-workbook-bytes",
       "path": "att-engine/src/main/java/att/resource/PackageResourceInspector.java",
-      "pattern": "MAX_TOTAL_WORKBOOK_BYTES\\s*=\\s*128L\\s*\\*\\s*1024L\\s*\\*\\s*1024L",
+      "pattern": "\\bMAX_TOTAL_WORKBOOK_BYTES\\s*=\\s*(?P<default>[^;]+);",
+      "fields": {
+        "default": "default"
+      },
+      "literalFields": {},
       "settingName": "resourceInspector.maxTotalWorkbookBytes"
     },
     {
+      "entryId": "config-snapshot-cache",
+      "path": "att-engine/src/main/java/att/resource/PackageConfigurationSnapshots.java",
+      "pattern": "\\bMAX_RETAINED_WEIGHT\\s*=\\s*(?P<default>[^;]+);",
+      "fields": {
+        "default": "default"
+      },
+      "literalFields": {},
+      "settingName": "packageConfiguration.maxRetainedWeightBytes"
+    },
+    {
+      "entryId": "execution-snapshot",
       "path": "att-server/src/main/java/att/server/JobExecutionSpec.java",
-      "pattern": "MAX_BYTES\\s*=\\s*262144",
+      "pattern": "\\bMAX_BYTES\\s*=\\s*(?P<default>[^;]+);",
+      "fields": {
+        "default": "default"
+      },
+      "literalFields": {},
       "settingName": "server.executionSnapshot.maxBytes"
     },
     {
+      "entryId": "jobs-page",
       "path": "att-server/src/main/java/att/server/JobQuery.java",
-      "pattern": "limit=integer\\(values.get\\(\"limit\"\\),100,1,100\\)",
+      "pattern": "limit=integer\\(values\\.get\\(\"limit\"\\),(?P<default>\\d+),(?P<allowedMin>\\d+),(?P<allowedMax>\\d+)\\)",
+      "fields": {
+        "default": "default",
+        "allowedMin": "allowedMin",
+        "allowedMax": "allowedMax"
+      },
+      "literalFields": {},
       "settingName": "server.jobs.maxPageSize"
     },
     {
+      "entryId": "process-memory",
+      "path": "att-engine/src/main/java/att/config/FrameworkConfigLoader.java",
+      "pattern": "\"memoryLimitBytes\"\\)?\\s*,\\s*(?P<default>[^,\\n]+),\\s*(?P<allowedMin>[^,\\n]+),\\s*(?P<allowedMax>[^,\\n)]+)",
+      "fields": {
+        "default": "default",
+        "allowedMin": "allowedMin",
+        "allowedMax": "allowedMax"
+      },
+      "literalFields": {},
+      "settingName": "process.output.maxMemoryBytes"
+    },
+    {
+      "entryId": "process-artifact",
+      "path": "att-engine/src/main/java/att/config/FrameworkConfigLoader.java",
+      "pattern": "output\\.get\\(\"artifactLimitBytes\"\\),\\s*(?P<default>[^,]+),\\s*memory,\\s*(?P<allowedMax>\\d+)",
+      "fields": {
+        "default": "default",
+        "allowedMax": "allowedMax"
+      },
+      "literalFields": {},
+      "settingName": "process.output.maxArtifactBytes"
+    },
+    {
+      "entryId": "process-artifact",
+      "path": "att-engine/src/main/java/att/config/ProcessOutputConfig.java",
+      "pattern": "artifactLimitBytes\\s*<\\s*memoryLimitBytes",
+      "fields": {},
+      "literalFields": {
+        "allowedMin": "memoryLimitBytes"
+      },
+      "settingName": "process.output.maxArtifactBytes"
+    },
+    {
+      "entryId": "archive-memory-export",
       "path": "att-server/src/main/java/att/server/ArtifactArchive.java",
-      "pattern": "MAX_MEMORY_EXPORT_BYTES\\s*=\\s*8L\\s*\\*\\s*1024\\s*\\*\\s*1024",
+      "pattern": "\\bMAX_MEMORY_EXPORT_BYTES\\s*=\\s*(?P<default>[^;]+);",
+      "fields": {
+        "default": "default"
+      },
+      "literalFields": {},
       "settingName": "artifact.archive.maxMemoryExportBytes"
     },
     {
-      "path": "att-server/src/main/java/att/server/ArtifactArchive.java",
-      "pattern": "MAX_ENTRIES\\s*=\\s*10_000",
-      "settingName": "archive entry count"
-    },
-    {
-      "path": "att-server/src/main/java/att/server/ArtifactArchive.java",
-      "pattern": "MAX_CANDIDATES\\s*=\\s*50_000",
-      "settingName": "archive candidate count"
-    },
-    {
-      "path": "att-engine/src/main/java/att/config/DbHelperConfigLoader.java",
-      "pattern": "get\\(\"maxCellBytes\"\\),\\s*1048576,\\s*1,\\s*1073741824",
-      "settingName": "DB cell default and range"
-    },
-    {
-      "path": "att-engine/src/main/java/att/config/DbHelperConfigLoader.java",
-      "pattern": "get\\(\"maxBytes\"\\),\\s*10485760,\\s*1,\\s*1073741824",
-      "settingName": "DB result default and range"
-    },
-    {
-      "path": "att-engine/src/main/java/att/config/MqHelperConfigLoader.java",
-      "pattern": "get\\(\"waitMs\"\\),\\s*10000,\\s*0,\\s*3600000",
-      "settingName": "MQ wait default and range"
-    },
-    {
-      "path": "att-server/src/main/java/att/server/ServerConfig.java",
-      "pattern": "int retention=intValue\\(server,\"jobRetentionDays\",30,1,3650\\)",
-      "settingName": "job retention default and range"
-    },
-    {
+      "entryId": "validation-depth",
       "path": "att-engine/src/main/java/att/validation/PackageValidationBudget.java",
-      "pattern": "MAX_ENTRIES_PER_PACKAGE\\s*=\\s*20000",
-      "settingName": "validation entry budget"
+      "pattern": "\\bMAX_DEPTH\\s*=\\s*(?P<default>[^;]+);",
+      "fields": {
+        "default": "default"
+      },
+      "literalFields": {},
+      "settingName": "validation.package.maxDepth"
     },
     {
-      "path": "att-engine/src/main/java/att/validation/PackageValidationBudget.java",
-      "pattern": "MAX_BYTES_PER_PACKAGE\\s*=\\s*256L\\s*\\*\\s*1024L\\s*\\*\\s*1024L",
-      "settingName": "validation byte budget"
+      "entryId": "resource-nested-depth",
+      "path": "att-engine/src/main/java/att/resource/PackageResourceInspector.java",
+      "pattern": "\\bMAX_NESTED_SOURCE_DEPTH\\s*=\\s*(?P<default>[^;]+);",
+      "fields": {
+        "default": "default"
+      },
+      "literalFields": {},
+      "settingName": "resourceInspector.maxNestedSourceDepth"
     },
     {
+      "entryId": "resource-inline-backrefs",
+      "path": "att-engine/src/main/java/att/resource/PackageResourceInspector.java",
+      "pattern": "\\bMAX_INLINE_BACK_REFERENCES\\s*=\\s*(?P<default>[^;]+);",
+      "fields": {
+        "default": "default"
+      },
+      "literalFields": {},
+      "settingName": "resourceInspector.maxInlineBackReferences"
+    },
+    {
+      "entryId": "resource-config-bytes",
+      "path": "att-engine/src/main/java/att/resource/PackageResourceInspector.java",
+      "pattern": "\\bMAX_CONFIG_BYTES\\s*=\\s*(?P<default>[^;]+);",
+      "fields": {
+        "default": "default"
+      },
+      "literalFields": {},
+      "settingName": "resourceInspector.maxConfigBytes"
+    },
+    {
+      "entryId": "resource-source-references",
+      "path": "att-engine/src/main/java/att/resource/PackageResourceInspector.java",
+      "pattern": "\\bMAX_SOURCE_REFERENCES\\s*=\\s*(?P<default>[^;]+);",
+      "fields": {
+        "default": "default"
+      },
+      "literalFields": {},
+      "settingName": "resourceInspector.maxSourceReferences"
+    },
+    {
+      "entryId": "resource-workbook-bytes-individual",
+      "path": "att-engine/src/main/java/att/resource/PackageResourceInspector.java",
+      "pattern": "\\bMAX_WORKBOOK_BYTES\\s*=\\s*(?P<default>[^;]+);",
+      "fields": {
+        "default": "default"
+      },
+      "literalFields": {},
+      "settingName": "resourceInspector.maxWorkbookBytes"
+    },
+    {
+      "entryId": "resource-revision-bytes",
+      "path": "att-engine/src/main/java/att/resource/PackageResourceInspector.java",
+      "pattern": "\\bMAX_REVISION_BYTES\\s*=\\s*(?P<default>[^;]+);",
+      "fields": {
+        "default": "default"
+      },
+      "literalFields": {},
+      "settingName": "resourceInspector.maxRevisionBytes"
+    },
+    {
+      "entryId": "resource-yaml-candidates",
+      "path": "att-engine/src/main/java/att/resource/PackageResourceInspector.java",
+      "pattern": "\\bMAX_YAML_CANDIDATES\\s*=\\s*(?P<default>[^;]+);",
+      "fields": {
+        "default": "default"
+      },
+      "literalFields": {},
+      "settingName": "resourceInspector.maxYamlCandidates"
+    },
+    {
+      "entryId": "resource-config-tree-entries",
+      "path": "att-engine/src/main/java/att/resource/PackageResourceInspector.java",
+      "pattern": "\\bMAX_CONFIG_TREE_ENTRIES\\s*=\\s*(?P<default>[^;]+);",
+      "fields": {
+        "default": "default"
+      },
+      "literalFields": {},
+      "settingName": "resourceInspector.maxConfigTreeEntries"
+    },
+    {
+      "entryId": "resource-config-tree-bytes",
+      "path": "att-engine/src/main/java/att/resource/PackageResourceInspector.java",
+      "pattern": "\\bMAX_CONFIG_TREE_BYTES\\s*=\\s*(?P<default>[^;]+);",
+      "fields": {
+        "default": "default"
+      },
+      "literalFields": {},
+      "settingName": "resourceInspector.maxConfigTreeBytes"
+    },
+    {
+      "entryId": "load-window-buckets",
+      "path": "att-engine/src/main/java/att/load/LoadWindowMetrics.java",
+      "pattern": "\\bSERIES_CAPACITY\\s*=\\s*(?P<default>[^;]+);",
+      "fields": {
+        "default": "default"
+      },
+      "literalFields": {},
+      "settingName": "load.windowMetrics.capacity"
+    },
+    {
+      "entryId": "load-window-samples",
+      "path": "att-engine/src/main/java/att/load/LoadWindowMetrics.java",
+      "pattern": "\\bSAMPLE_CAPACITY\\s*=\\s*(?P<default>[^;]+);",
+      "fields": {
+        "default": "default"
+      },
+      "literalFields": {},
+      "settingName": "load.windowMetrics.maxSamplesPerSeries"
+    },
+    {
+      "entryId": "server-storage-total",
       "path": "att-server/src/main/java/att/server/ServerConfig.java",
-      "pattern": "max=intValue\\(workers,\"maxConcurrent\",8,1,256\\)",
-      "settingName": "Worker concurrent default and range"
+      "pattern": "!values\\.containsKey\\(\"maxTotalSizeMb\"\\).*?required when size limits are enabled",
+      "fields": {},
+      "literalFields": {
+        "default": "required when enabled"
+      },
+      "settingName": "server.jobStorage.maxTotalSizeMb"
     },
     {
+      "entryId": "server-storage-total",
       "path": "att-server/src/main/java/att/server/ServerConfig.java",
-      "pattern": "queue=intValue\\(workers,\"queuedLimit\",100,0,100000\\)",
-      "settingName": "Worker queue default and range"
+      "pattern": "exact\\s*<\\s*(?P<allowedMin>\\d+)\\s*\\|\\|\\s*exact\\s*>\\s*(?P<allowedMax>[\\d_]+)",
+      "fields": {
+        "allowedMin": "allowedMin",
+        "allowedMax": "allowedMax"
+      },
+      "literalFields": {},
+      "settingName": "server.jobStorage.maxTotalSizeMb"
     },
     {
+      "entryId": "server-storage-target",
       "path": "att-server/src/main/java/att/server/ServerConfig.java",
-      "pattern": "request=intValue\\(server,\"maxRequestBytes\",1048576,1024,16777216\\)",
-      "settingName": "HTTP request byte default and range"
+      "pattern": "!values\\.containsKey\\(\"cleanupTargetSizeMb\"\\).*?required when size limits are enabled",
+      "fields": {},
+      "literalFields": {
+        "default": "required when enabled"
+      },
+      "settingName": "server.jobStorage.cleanupTargetSizeMb"
     },
     {
+      "entryId": "server-storage-target",
       "path": "att-server/src/main/java/att/server/ServerConfig.java",
-      "pattern": "concurrent=intValue\\(values,\"maxConcurrent\",2,1,16\\)",
-      "settingName": "Inspection concurrency default and range"
+      "pattern": "exact\\s*<\\s*(?P<allowedMin>\\d+)\\s*\\|\\|\\s*exact\\s*>\\s*(?P<allowedMax>[\\d_]+)",
+      "fields": {
+        "allowedMin": "allowedMin",
+        "allowedMax": "allowedMax"
+      },
+      "literalFields": {},
+      "settingName": "server.jobStorage.cleanupTargetSizeMb"
     },
     {
+      "entryId": "worker-heap",
       "path": "att-server/src/main/java/att/server/ServerConfig.java",
-      "pattern": "queued=intValue\\(values,\"queuedLimit\",16,0,1024\\)",
-      "settingName": "Inspection queue default and range"
+      "pattern": "\"heapMaxMb\"\\)?\\s*,\\s*(?P<default>[^,\\n]+),\\s*(?P<allowedMin>[^,\\n]+),\\s*(?P<allowedMax>[^,\\n)]+)",
+      "fields": {
+        "default": "default",
+        "allowedMin": "allowedMin",
+        "allowedMax": "allowedMax"
+      },
+      "literalFields": {},
+      "settingName": "workers.heapMaxMb"
     },
     {
-      "path": "att-server/src/main/java/att/server/ServerConfig.java",
-      "pattern": "timeout=intValue\\(values,\"timeoutMs\",30000,100,300000\\)",
-      "settingName": "Inspection timeout default and range"
-    },
-    {
-      "path": "att-server/src/main/java/att/server/ServerConfig.java",
-      "pattern": "response=intValue\\(values,\"maxResponseBytes\",262144,1024,1048576\\)",
-      "settingName": "Inspection response default and range"
-    },
-    {
-      "path": "att-engine/src/main/java/att/config/HttpHelperConfigLoader.java",
-      "pattern": "bytes\\(defaults.get\\(\"maxResponseBytes\"\\),\\s*10\\s*\\*\\s*1024\\s*\\*\\s*1024",
-      "settingName": "HTTP response default"
-    },
-    {
+      "entryId": "worker-process-isolation",
       "path": "att-server/src/main/java/att/server/ServerRuntime.java",
-      "pattern": "new Semaphore\\(8,true\\)",
-      "settingName": "Artifact read slots"
+      "pattern": "(?:ProcessBuilder::start|new ProcessBuilder\\(command\\))",
+      "fields": {},
+      "literalFields": {
+        "default": 1
+      },
+      "settingName": "server.workerProcessIsolation"
     },
     {
-      "path": "att-server/src/main/java/att/server/ServerRuntime.java",
-      "pattern": "MAX_STREAM_OBSERVERS=32",
-      "settingName": "SSE observer capacity"
+      "entryId": "case-log-batch",
+      "path": "att-engine/src/main/java/att/core/CaseExecutionLog.java",
+      "pattern": "\\bBATCHED_LOG_BUFFER_CHARS\\s*=\\s*(?P<default>[^;]+);",
+      "fields": {
+        "default": "default"
+      },
+      "literalFields": {},
+      "settingName": "engine.caseLog.maxBatchChars"
     },
     {
-      "path": "att-engine/src/main/java/att/config/DbHelperConfigLoader.java",
-      "pattern": "durationMs\\(pool.get\\(\"connectionTimeout\"\\),\\s*2000L",
-      "settingName": "DB pool wait default"
+      "entryId": "load-console-rate",
+      "path": "att-engine/src/main/java/att/load/LoadConsoleProgress.java",
+      "pattern": "\\bDEFAULT_INTERVAL_MS\\s*=\\s*(?P<default>[^;]+);",
+      "fields": {
+        "default": "default"
+      },
+      "literalFields": {},
+      "settingName": "load.console.progressIntervalMs"
     },
     {
-      "path": "att-engine/src/main/java/att/config/MqHelperConfigLoader.java",
-      "pattern": "durationMs\\(pool.get\\(\"borrowTimeout\"\\),\\s*2000L",
-      "settingName": "MQ pool wait default"
+      "entryId": "load-console-error-rate",
+      "path": "att-engine/src/main/java/att/load/LoadConsoleProgress.java",
+      "pattern": "\\bDEFAULT_ERROR_INTERVAL_MS\\s*=\\s*(?P<default>[^;]+);",
+      "fields": {
+        "default": "default"
+      },
+      "literalFields": {},
+      "settingName": "load.console.errorProgressIntervalMs"
     },
     {
-      "path": "att-server/src/main/java/att/server/ServerConfig.java",
-      "pattern": "int heapMax=intValue\\(workers,\"heapMaxMb\",0,64,65536\\)",
-      "settingName": "Worker heap default and range"
+      "entryId": "config-snapshot-count",
+      "path": "att-engine/src/main/java/att/resource/PackageConfigurationSnapshots.java",
+      "pattern": "\\bCAPACITY\\s*=\\s*(?P<default>[^;]+);",
+      "fields": {
+        "default": "default"
+      },
+      "literalFields": {},
+      "settingName": "packageConfiguration.maxSnapshots"
+    },
+    {
+      "entryId": "config-snapshot-files",
+      "path": "att-engine/src/main/java/att/resource/PackageConfigurationSnapshots.java",
+      "pattern": "\\bMAX_FILES\\s*=\\s*(?P<default>[^;]+);",
+      "fields": {
+        "default": "default"
+      },
+      "literalFields": {},
+      "settingName": "packageConfiguration.maxSnapshotFiles"
+    },
+    {
+      "entryId": "config-snapshot-bytes",
+      "path": "att-engine/src/main/java/att/resource/PackageConfigurationSnapshots.java",
+      "pattern": "\\bMAX_BYTES\\s*=\\s*(?P<default>[^;]+);",
+      "fields": {
+        "default": "default"
+      },
+      "literalFields": {},
+      "settingName": "packageConfiguration.maxSnapshotBytes"
     }
   ]
 }

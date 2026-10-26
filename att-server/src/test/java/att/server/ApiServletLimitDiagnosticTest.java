@@ -25,10 +25,9 @@ class ApiServletLimitDiagnosticTest {
         ApiServlet.error(capture.response(),409,"ATT-SERVER-ARCHIVE-UNAVAILABLE",
                 "Artifact archive is pending, failed, or unavailable","request-safe");
         JsonNode response=ServerRuntime.JSON.readTree(capture.body());
-        JsonNode diagnostic=response.path("diagnostics").path(0);
         assertEquals(409,capture.status);
-        assertEquals("ARCHIVE_FAILED",diagnostic.path("outcome").asText());
-        assertEquals("artifact.archiveAvailability",diagnostic.path("limitName").asText());
+        assertTrue(response.path("diagnostics").isMissingNode(),
+                "a state-less generic error must not guess that an archive failed");
         assertFalse(response.toString().contains("/private/"));
     }
 

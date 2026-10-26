@@ -218,7 +218,7 @@ public final class WorkerMain {
             if(error instanceof att.validation.DiagnosticException) { code=((att.validation.DiagnosticException)error).code(); message=((att.validation.DiagnosticException)error).getMessage(); }
             else if(error instanceof PackageResourceInspector.ResourceNotFoundException) { code="ATT-RESOURCE-NOT-FOUND"; message="Package resource was not found"; }
             else if(error instanceof PackageResourceInspector.ResponseTooLargeException) { code="ATT-RESOURCE-RESPONSE-TOO-LARGE"; message="Package resource response exceeded the configured limit"; }
-            else if(error instanceof PackageResourceInspector.ResourceLimitException) { code="ATT-RESOURCE-LIMIT"; message="Package resource inspection exceeded a configured limit"; }
+            else if(error instanceof PackageResourceInspector.ResourceLimitException) { code="ATT-RESOURCE-LIMIT"; message="Package resource inspection exceeded a configured scan limit"; }
             else if(error instanceof PackageResourceInspector.StaleResourceCursorException
                     &&("run".equals(request.command)||"debug".equals(request.command)||"load".equals(request.command))
                     &&request.expectedRevisionDigest!=null) { code="ATT-SERVER-DRAFT-STALE"; message="Package content changed after preview; rebuild the draft"; exit=2; status="INVALID"; }
@@ -229,7 +229,15 @@ public final class WorkerMain {
                 code=loadPreparationCode(error); message=error.getMessage();
             }
             else if(error instanceof IllegalArgumentException) { code="WORKER_REQUEST_INVALID"; exit=2; status="INVALID"; }
-            Map<String,Object> diagnostic=fields("code",code,"message",DiagnosticSanitizer.redactAbsolutePaths(DiagnosticSanitizer.redactText(message==null?"ATT operation failed":message)));
+            Map<String,Object> diagnostic=fields("code",code,"message",DiagnosticSanitizer.redactAbsolutePaths(DiagnosticSanitizer.redactText(message==null?"ATT operation failed":message)),
+                    "outcome","ERROR".equals(status)?att.server.api.LimitOutcome.EXECUTION_ERROR.name():att.server.api.LimitOutcome.SUBMISSION_REJECTED.name(),
+                    "stage","ERROR".equals(status)?"execution":"validation");
+            if(error instanceof PackageResourceInspector.ResourceLimitException) {
+                PackageResourceInspector.ResourceLimitException limited=(PackageResourceInspector.ResourceLimitException)error;
+                if(limited.limitName!=null)diagnostic.putAll(att.server.api.LimitDiagnostic.create("ATT-RESOURCE-LIMIT",message,
+                        limited.limitName,limited.configuredLimit,limited.observed,"package",att.server.api.LimitOutcome.SUBMISSION_REJECTED,
+                        "inspection","Reduce the package scan scope or split the package into bounded units before retrying.",null));
+            }
             if(request.registeredPackageId!=null&&request.registeredPackageId.matches("[A-Za-z0-9][A-Za-z0-9._-]{0,127}"))
                 diagnostic.put("packageId",request.registeredPackageId);
             boolean draftInspection="inspect".equals(request.command)&&(("package-configuration".equals(request.inspectionType)&&"validate".equals(request.inspectionAction))||"debug-input".equals(request.inspectionAction)||"debug-form".equals(request.inspectionAction)
@@ -371,7 +379,11 @@ public final class WorkerMain {
                 String revision=inspector.executionRevisionDigest();
                 OperationResult validated=service.validate(new ValidateRequest(root,config,r.environment,paths(r.suites),path(r.suiteDirectory),set(r.caseIds),set(r.tags),set(r.excludeTags),bool(r.all),"selected"));
                 if(validated.exitCode()!=0) {
-                    for(att.validation.Diagnostic diagnostic:validated.diagnostics())emit(WorkerEvent.Type.DIAGNOSTIC,diagnostic.toMap());
+                    for(att.validation.Diagnostic diagnostic:validated.diagnostics()) {
+                        Map<String,Object> value=diagnostic.toMap();
+                        value.put("outcome",att.server.api.LimitOutcome.SUBMISSION_REJECTED.name());value.put("stage","validation");
+                        emit(WorkerEvent.Type.DIAGNOSTIC,value);
+                    }
                     return validated;
                 }
                 if(r.caseIds!=null&&!r.caseIds.isEmpty()) {
@@ -905,7 +917,8 @@ public final class WorkerMain {
             }
         payload.put("workerMetrics",resourceTelemetry.snapshot());emit(WorkerEvent.Type.RESULT,payload);
     }
-    private int fail(String code,String message) throws Exception { emit(WorkerEvent.Type.DIAGNOSTIC,fields("code",code,"message",message)); emitResult(fields("status","INVALID","exitCode",2,"result",fields("executionId",null,"status","INVALID","exitCode",2))); return 2; }
+    private int fail(String code,String message) throws Exception { emit(WorkerEvent.Type.DIAGNOSTIC,fields("code",code,"message",message,
+            "outcome",att.server.api.LimitOutcome.SUBMISSION_REJECTED.name(),"stage","submission")); emitResult(fields("status","INVALID","exitCode",2,"result",fields("executionId",null,"status","INVALID","exitCode",2))); return 2; }
     private static Map<String,Object> fields(Object... values) { Map<String,Object> map=new LinkedHashMap<String,Object>(); for(int i=0;i+1<values.length;i+=2)map.put(String.valueOf(values[i]),values[i+1]); return map; }
     private static boolean bool(Boolean value) { return Boolean.TRUE.equals(value); }
     private static String text(Map<String,Object> value,String key) { String found=optionalText(value,key); if(found==null||found.trim().isEmpty())throw new IllegalArgumentException("target."+key+" is required"); return found; }

@@ -57,6 +57,16 @@ final class ArtifactArchive {
 
     /** Package-private progress seam for deterministic process-crash lifecycle tests. */
     static Path build(Path output, Path archive, Publisher publisher,long memoryBudget,ZipProgress progress) throws Exception {
+        return build(output,archive,publisher,memoryBudget,progress,MAX_CANDIDATES);
+    }
+
+    /** Test-only cap seam; production entry points always retain MAX_CANDIDATES. */
+    static Path buildForTest(Path output,Path archive,Publisher publisher,int maxCandidates) throws Exception {
+        if(maxCandidates<1||maxCandidates>MAX_CANDIDATES)throw new IllegalArgumentException("Invalid test candidate cap");
+        return build(output,archive,publisher,MAX_MEMORY_EXPORT_BYTES,null,maxCandidates);
+    }
+
+    private static Path build(Path output,Path archive,Publisher publisher,long memoryBudget,ZipProgress progress,int maxCandidates) throws Exception {
         if(memoryBudget<0||memoryBudget>MAX_MEMORY_EXPORT_BYTES)throw new IllegalArgumentException("Artifact memory budget exceeds limits");
         ArtifactMetricsRecorder metrics = ArtifactMetricsRecorder.CURRENT.get();
         if (metrics != null) {
@@ -73,8 +83,8 @@ final class ArtifactArchive {
         Path exports=Files.createTempDirectory(destination.getParent(),".artifact-export-");
         boolean published=false;
         try {
-            List<Path> candidates=inventory(root);
-            if(metrics!=null){metrics.value.candidateCount=(long)candidates.size();usage(metrics.value.limitUsage,"artifact.inventory.candidates",candidates.size(),MAX_CANDIDATES);}
+            List<Path> candidates=inventory(root,maxCandidates);
+            if(metrics!=null){metrics.value.candidateCount=(long)candidates.size();usage(metrics.value.limitUsage,"artifact.inventory.candidates",candidates.size(),maxCandidates);}
             Set<String> names=new HashSet<>();List<String> approved=new ArrayList<>();long total=0;int omitted=0;long oversizedOmission=0L;long largestEntryBytes=0L;
             Map<String,byte[]> memoryExports=new LinkedHashMap<>();long retained=0;
             for(Path candidate:candidates) {
@@ -168,12 +178,12 @@ final class ArtifactArchive {
     }
 
     /** Prune only the established private LOAD bookkeeping namespace. Never follow links. */
-    private static List<Path> inventory(Path root) throws java.io.IOException {
+    private static List<Path> inventory(Path root,int maxCandidates) throws java.io.IOException {
         List<Path> candidates = new ArrayList<>();
         Files.walkFileTree(root, Set.of(), 64, new java.nio.file.SimpleFileVisitor<Path>() {
             private void count(Path path) {
-                if (candidates.size() >= MAX_CANDIDATES)
-                    throw new LimitFailure("Artifact inventory exceeds limits","artifact.inventory.candidates",MAX_CANDIDATES,MAX_CANDIDATES+1L);
+                if (candidates.size() >= maxCandidates)
+                    throw new LimitFailure("Artifact inventory exceeds limits","artifact.inventory.candidates",maxCandidates,maxCandidates+1L);
                 candidates.add(path);
             }
             @Override public java.nio.file.FileVisitResult preVisitDirectory(Path directory,

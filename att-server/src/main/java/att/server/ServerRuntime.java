@@ -68,6 +68,7 @@ final class ServerRuntime implements AutoCloseable {
     // Public inspection limits; keep aligned with PackageResourceInspector in the Local runtime.
     private static final int RESOURCE_DEFAULT_PAGE_SIZE=50, RESOURCE_MAX_PAGE_SIZE=100;
     private static final int TESTDATA_RECORD_MAX_PAGE_SIZE=100;
+    static final int MAX_ARTIFACT_READ_SLOTS=8;
     private static final int MAX_VALIDATION_PACKAGE_ENTRIES=20000, MAX_VALIDATION_ENVIRONMENTS=100, MAX_VNEXT_VALIDATION_PACKAGES=200;
     private static final long MAX_TOTAL_VNEXT_VALIDATION_WORK_UNITS=10000000L;
     static final long DRAFT_TTL_MILLIS=TimeUnit.MINUTES.toMillis(10);
@@ -84,7 +85,7 @@ final class ServerRuntime implements AutoCloseable {
     private final ThreadPoolExecutor eventCompactions=new ThreadPoolExecutor(2,2,0,TimeUnit.MILLISECONDS,new ArrayBlockingQueue<>(1024),r->{Thread t=new Thread(r,"att-server-event-compactor");t.setDaemon(true);return t;},new ThreadPoolExecutor.AbortPolicy());
     private final ThreadPoolExecutor artifactWriters;
     private final ArtifactPublisher artifactPublisher;
-    private final Semaphore artifactReadSlots=new Semaphore(8,true);
+    private final Semaphore artifactReadSlots=new Semaphore(MAX_ARTIFACT_READ_SLOTS,true);
     private final Set<String> pendingArtifactJobs=ConcurrentHashMap.newKeySet();
     private final Set<String> requestedArtifactRetries=ConcurrentHashMap.newKeySet();
     private final java.util.concurrent.locks.ReentrantReadWriteLock artifactLifecycle=new java.util.concurrent.locks.ReentrantReadWriteLock(true);
@@ -746,6 +747,7 @@ final class ServerRuntime implements AutoCloseable {
                 Object result=safe.get("result");
                 if("load".equals(job.command)) {
                     Map<String,Object> original=result instanceof Map<?,?>?(Map<String,Object>)result:new LinkedHashMap<>();
+                    original=loadResultWithProtocolWarning(original,job);
                     Map<String,Object> enriched=new LinkedHashMap<>(original);
                     if(job.request.configurationProvenance!=null) {
                         Map<String,Object> summary=enriched.get("summary") instanceof Map<?,?> existing
@@ -772,7 +774,8 @@ final class ServerRuntime implements AutoCloseable {
                 att.server.api.LimitOutcome.DATA_TRUNCATED,"transport",
                 "Reduce progress payloads or keep terminal results within the shared frame budget.",null));
         diagnostic.put("eventType",frame.eventType());diagnostic.put("sizeBytes",frame.sizeBytes);diagnostic.put("limitBytes",frame.limitBytes);
-        job.protocolDiagnostic=diagnostic;job.diagnosticJson=JSON.writeValueAsString(diagnostic);
+        job.protocolDiagnostic=diagnostic;
+        if(!hasPrimaryForJob(job))job.diagnosticJson=JSON.writeValueAsString(diagnostic);
         store.update(job);append(job,"diagnostic",diagnostic);
     }
     void recordWorkerExit(Job job,int exit) throws Exception {
@@ -783,7 +786,60 @@ final class ServerRuntime implements AutoCloseable {
         fallback.put("exitCode",exit);
         Map<String,Object> diagnostic=new LinkedHashMap<>(job.protocolDiagnostic==null?fallback:job.protocolDiagnostic);
         if(job.protocolDiagnostic!=null)diagnostic.put("workerExit",fallback);
-        job.diagnosticJson=JSON.writeValueAsString(diagnostic);append(job,"diagnostic",diagnostic);
+        if(hasPrimaryForJob(job))append(job,"diagnostic",diagnostic);
+        else {job.diagnosticJson=JSON.writeValueAsString(diagnostic);append(job,"diagnostic",diagnostic);}
+    }
+    private boolean hasPrimaryForJob(Job job) {
+        return job.protocolDiagnostic==null?hasPrimaryDiagnostic(job.diagnosticJson):hasClassifiedCause(job.diagnosticJson);
+    }
+    private boolean hasPrimaryDiagnostic(String diagnosticJson) {
+        if(diagnosticJson==null)return false;
+        try {
+            JsonNode value=JSON.readTree(diagnosticJson);String code=value.path("code").asText("");
+            return !code.isBlank()&&!code.startsWith("ATT-SERVER-WORKER-EVENT-TOO-LARGE")
+                    &&!code.startsWith("ATT-WORKER-EVENT-TRUNCATED")&&!code.startsWith("ATT-JOURNAL-EVENT-TRUNCATED");
+        } catch(Exception invalid){return false;}
+    }
+    private boolean hasClassifiedCause(String diagnosticJson) {
+        if(!hasPrimaryDiagnostic(diagnosticJson))return false;
+        try {
+            JsonNode value=JSON.readTree(diagnosticJson);
+            String outcome=value.path("outcome").asText("");
+            return att.server.api.LimitOutcome.EXECUTION_ERROR.name().equals(outcome)
+                    ||att.server.api.LimitOutcome.SUBMISSION_REJECTED.name().equals(outcome);
+        } catch(Exception invalid){return false;}
+    }
+    private Map<String,Object> loadResultWithProtocolWarning(Map<String,Object> original,Job job) throws Exception {
+        if(job.protocolDiagnostic==null&&job.journalDiagnostic==null)return original;
+        Map<String,Object> result=new LinkedHashMap<String,Object>(original);
+        List<Map<String,Object>> diagnostics=new ArrayList<Map<String,Object>>();
+        Object existing=result.get("diagnostics");
+        if(existing instanceof Iterable<?>)for(Object item:(Iterable<?>)existing)if(item instanceof Map<?,?>&&diagnostics.size()<4)
+            diagnostics.add(new LinkedHashMap<String,Object>((Map<String,Object>)item));
+        if(hasPrimaryForJob(job)) {
+            Map<?,?> current=JSON.readValue(job.diagnosticJson,Map.class);
+            String code=String.valueOf(current.get("code"));
+            boolean present=false;for(Map<String,Object> item:diagnostics)if(code.equals(item.get("code")))present=true;
+            if(!present&&diagnostics.size()<4)diagnostics.add(new LinkedHashMap<String,Object>((Map<String,Object>)current));
+        }
+        boolean workerNotice=false;
+        for(Map<String,Object> item:diagnostics)if("ATT-WORKER-EVENT-TRUNCATED".equals(item.get("code")))workerNotice=true;
+        if(job.protocolDiagnostic!=null&&!workerNotice&&diagnostics.size()<4) {
+            Number limit=job.protocolDiagnostic.get("limitBytes") instanceof Number?(Number)job.protocolDiagnostic.get("limitBytes"):null;
+            Number observed=job.protocolDiagnostic.get("sizeBytes") instanceof Number?(Number)job.protocolDiagnostic.get("sizeBytes"):null;
+            String eventType=job.protocolDiagnostic.get("eventType") instanceof String?(String)job.protocolDiagnostic.get("eventType"):"RESULT";
+            Map<String,Object> notice=att.server.api.LimitDiagnostic.create("ATT-WORKER-EVENT-TRUNCATED",
+                    "Large Worker event details were omitted from the protocol frame","worker.protocol.maxFrameBytes",limit,observed,
+                    "worker.protocol",att.server.api.LimitOutcome.DATA_TRUNCATED,"transport",
+                    "Inspect the retained report artifact for bounded details",null);
+            notice.put("eventType",eventType);diagnostics.add(notice);
+        }
+        boolean journalNotice=false;
+        for(Map<String,Object> item:diagnostics)if("ATT-JOURNAL-EVENT-TRUNCATED".equals(item.get("code")))journalNotice=true;
+        if(job.journalDiagnostic!=null&&!journalNotice&&diagnostics.size()<4)
+            diagnostics.add(new LinkedHashMap<String,Object>(job.journalDiagnostic));
+        if(!diagnostics.isEmpty())result.put("diagnostics",diagnostics);
+        return result;
     }
     private String normalizeTerminal(String s){return List.of("PASS","FAIL","ERROR","INVALID","CANCELLED").contains(s)?s:"ERROR";}
     String cancel(String id,String principal) throws Exception {
@@ -2187,11 +2243,37 @@ final class ServerRuntime implements AutoCloseable {
             throw new DraftValidationException(diagnostics);
         }
         if("ATT-RESOURCE-RESPONSE-TOO-LARGE".equals(workerError))throw new InspectionResponseTooLargeException();
-        if("ATT-RESOURCE-LIMIT".equals(workerError))throw new InspectionCapacityException();
+        if("ATT-RESOURCE-LIMIT".equals(workerError))
+            throw new InspectionLimitException(safeResourceLimitDiagnostics(envelope.get("diagnostics")));
         if(workerError!=null)throw new IllegalStateException("Package inspection Worker failed: "+workerError);
         Object raw=envelope.get("inspection");if(!(raw instanceof Map))throw new IllegalStateException("Package inspection Worker returned an invalid response");
         JsonNode safe=projectInspectionPaths(JSON.valueToTree(att.server.api.internal.DiagnosticSanitizer.sanitizeValue(raw)),root,"");
         @SuppressWarnings("unchecked") Map<String,Object> result=JSON.convertValue(safe,Map.class);
+        return result;
+    }
+    private List<Map<String,Object>> safeResourceLimitDiagnostics(Object raw) {
+        List<Map<String,Object>> result=new ArrayList<Map<String,Object>>();
+        if(raw instanceof List<?>)for(Object value:(List<?>)raw)if(value instanceof Map<?,?>) {
+            Map<?,?> source=(Map<?,?>)value;
+            if(!"ATT-RESOURCE-LIMIT".equals(source.get("code")))continue;
+            Object summary=source.get("summary");
+            if(!(summary instanceof String))summary=source.get("message");
+            String safeSummary=summary instanceof String
+                    ?att.server.api.internal.DiagnosticSanitizer.redactText((String)summary)
+                    :"Package inspection exceeded a deterministic scan limit.";
+            String name=source.get("limitName") instanceof String?(String)source.get("limitName"):null;
+            Number configured=source.get("configuredLimit") instanceof Number?(Number)source.get("configuredLimit"):null;
+            Number observed=source.get("observed") instanceof Number?(Number)source.get("observed"):null;
+            Map<String,Object> diagnostic=att.server.api.LimitDiagnostic.create("ATT-RESOURCE-LIMIT",safeSummary,
+                    name,configured,observed,"package",att.server.api.LimitOutcome.SUBMISSION_REJECTED,"inspection",
+                    "Reduce the package scan scope or split the package into bounded units; this is a deterministic limit and does not need a retry.",null);
+            if(!diagnostic.isEmpty())result.add(diagnostic);
+            if(result.size()>=2)break;
+        }
+        if(result.isEmpty())result.add(att.server.api.LimitDiagnostic.create("ATT-RESOURCE-LIMIT",
+                "Package inspection exceeded a deterministic scan limit.","resourceInspector.scan",null,null,
+                "package",att.server.api.LimitOutcome.SUBMISSION_REJECTED,"inspection",
+                "Reduce the package scan scope or split the package into bounded units; this is a deterministic limit and does not need a retry.",null));
         return result;
     }
     private void cancelInspectionTask(InspectionTask task) {
@@ -2420,11 +2502,13 @@ final class ServerRuntime implements AutoCloseable {
                     response.put("errorCode",errorCode);
                     if(workerDiagnostic!=null) {
                         Map<String,Object> diagnostic=new LinkedHashMap<>();
-                        for(String key:List.of("code","summary","detail","field","file","suggestion","resourceId","sourceFile","packageId")) {
+                        for(String key:List.of("code","summary","detail","field","file","suggestion","resourceId","sourceFile","packageId",
+                                "limitName","scope","outcome","stage","remediationHint","artifactRef")) {
                             Object value=workerDiagnostic.get(key);
                             if(value instanceof String)diagnostic.put(key,value);
                         }
-                        for(String key:List.of("line","column","sourceColumn"))if(workerDiagnostic.get(key) instanceof Number)diagnostic.put(key,workerDiagnostic.get(key));
+                        for(String key:List.of("line","column","sourceColumn","configuredLimit","limit","observed","actual","usage"))
+                            if(workerDiagnostic.get(key) instanceof Number)diagnostic.put(key,workerDiagnostic.get(key));
                         Object summary=diagnostic.get("summary");
                         if(!(summary instanceof String)||((String)summary).isBlank()) {
                             Object message=workerDiagnostic.get("message");
@@ -3168,6 +3252,8 @@ final class ServerRuntime implements AutoCloseable {
                     Object parsed=JSON.readValue(j.diagnosticJson,Object.class);
                     if(parsed instanceof Map<?,?> diagnostic)diagnostics.add((Map<String,Object>)diagnostic);
                 }
+                if(j.protocolDiagnostic!=null)diagnostics.add(new LinkedHashMap<String,Object>(j.protocolDiagnostic));
+                if(j.journalDiagnostic!=null)diagnostics.add(new LinkedHashMap<String,Object>(j.journalDiagnostic));
                 Map<String,Object> fallback=new LinkedHashMap<>();
                 fallback.put("executionId",j.id);fallback.put("status",status);fallback.put("exitCode",code);
                 fallback.put("diagnostics",diagnostics);fallback.put("summary",Map.of());
@@ -3211,7 +3297,12 @@ final class ServerRuntime implements AutoCloseable {
         Object existing=payload.get("console");
         if(existing instanceof String line&&!line.isBlank()) payload.put("console",publishConsole(line));
         else {String line=lifecycleConsole(j,type,payload);if(line!=null&&!line.isBlank())payload.put("console",publishConsole(line));}
-        return j.events.append(type,payload);
+        Map<String,Object> appended=j.events.append(type,payload);
+        Object bounded=appended.get("data");
+        if(bounded instanceof Map<?,?> eventData&&eventData.get("journalLimit") instanceof Map<?,?> notice
+                &&"ATT-JOURNAL-EVENT-TRUNCATED".equals(notice.get("code")))
+            j.journalDiagnostic=new LinkedHashMap<String,Object>((Map<String,Object>)notice);
+        return appended;
     }
     private static String lifecycleConsole(Job j,String type,Map<String,Object> payload) {
         String mode=executionMode(j==null?null:j.command);
@@ -3308,12 +3399,13 @@ final class ServerRuntime implements AutoCloseable {
         artifactLifecycle.readLock().lock();
         try {
             if(store.get(id)==null)throw new NotFoundException();
-            if(store.workerQuarantined(id))throw new ArchiveUnavailableException();
+            if(store.workerQuarantined(id))throw new ArchiveUnavailableException("FAILED");
             Path archive=artifactArchivePath(id),status=archive.resolveSibling("archive-status.json");
-            if(!"READY".equals(readArchiveStatus(status).path("state").asText()))throw new ArchiveUnavailableException();
+            String archiveState=readArchiveStatus(status).path("state").asText("FAILED");
+            if(!"READY".equals(archiveState))throw new ArchiveUnavailableException(archiveState);
             ArtifactArchive.VerifiedRead verified=null;ArtifactDownload download=null;
             try { if(digests)download=ArtifactDownload.open(archive);else verified=ArtifactArchive.openVerified(archive,false); }
-            catch(Exception invalid){throw new ArchiveUnavailableException();}
+            catch(Exception invalid){throw new ArchiveUnavailableException("FAILED");}
             return new ArtifactRead(archive,verified,download);
         } catch(Exception failure){artifactLifecycle.readLock().unlock();artifactReadSlots.release();throw failure;}
     }
@@ -3889,6 +3981,12 @@ final class ServerRuntime implements AutoCloseable {
     }
     static final class ScheduleConflictException extends RuntimeException {}
     static final class InspectionCapacityException extends RuntimeException {}
+    static final class InspectionLimitException extends RuntimeException {
+        final List<Map<String,Object>> diagnostics;
+        InspectionLimitException(List<Map<String,Object>> diagnostics) {
+            this.diagnostics=Collections.unmodifiableList(new ArrayList<Map<String,Object>>(diagnostics));
+        }
+    }
     static final class InspectionConfigurationException extends RuntimeException {
         final List<Map<String,Object>> diagnostics;
         InspectionConfigurationException(List<Map<String,Object>> diagnostics){this.diagnostics=Collections.unmodifiableList(new ArrayList<>(diagnostics));}
@@ -3901,7 +3999,12 @@ final class ServerRuntime implements AutoCloseable {
     static final class DraftCapacityException extends RuntimeException {}
     static final class InlineLoadDisabledException extends RuntimeException {}
     static final class ArtifactCapacityException extends RuntimeException {}
-    static final class ArchiveUnavailableException extends RuntimeException {}
+    static final class ArchiveUnavailableException extends RuntimeException {
+        final String archiveState;
+        ArchiveUnavailableException(String archiveState) {
+            this.archiveState=Set.of("PENDING","ARCHIVING","READY","FAILED").contains(archiveState)?archiveState:"FAILED";
+        }
+    }
     static final class InlineLoadLimitException extends IllegalArgumentException {
         InlineLoadLimitException(String message){super(message);}
     }

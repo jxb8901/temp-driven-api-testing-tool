@@ -129,7 +129,8 @@ public final class ApiServlet extends HttpServlet {
             if(path.matches("/jobs/[^/]+")){Map<String,Object> view=runtime.jobRecord(segment(path,2));view.put("requestId",requestId);json(res,200,view);return;}
             error(res,404,"ATT-SERVER-NOT-FOUND","API resource was not found",requestId);
         } catch(JobStore.TargetSearchPendingException e){res.setHeader("Retry-After","2");error(res,503,"ATT-SERVER-TARGET-SEARCH-PENDING","Historical target search is being prepared. No partial results were returned. Use job: followed by the full Job ID for exact lookup, or retry Refresh jobs shortly.",requestId);}
-          catch(ServerRuntime.ArchiveUnavailableException e){error(res,409,"ATT-SERVER-ARCHIVE-UNAVAILABLE","Artifact archive is pending, failed, or unavailable; refresh the archive status",requestId);}
+          catch(ServerRuntime.ArchiveUnavailableException e){archiveUnavailable(res,e,requestId);}
+          catch(ServerRuntime.InspectionLimitException e){error(res,413,"ATT-RESOURCE-LIMIT","Package inspection exceeded a deterministic scan limit",requestId,e.diagnostics);}
           catch(ServerRuntime.ArtifactCapacityException e){error(res,503,"ATT-SERVER-ARTIFACT-CAPACITY","Artifact preview capacity is full; retry shortly",requestId);}
           catch(ServerRuntime.InlineLoadDisabledException e){error(res,403,"ATT-SERVER-INLINE-LOAD-DISABLED","Browser-submitted Load is disabled by Server configuration",requestId);}
           catch(ServerRuntime.InlineLoadLimitException e){error(res,400,"ATT-SERVER-INLINE-LOAD-LIMIT",safeDetail(e),requestId);}
@@ -537,6 +538,7 @@ public final class ApiServlet extends HttpServlet {
             }
         } catch(ServerRuntime.NotFoundException e){throw e;}
           catch(ServerRuntime.StaleCursorException e){throw e;}
+          catch(ServerRuntime.InspectionLimitException e){throw e;}
           catch(ServerRuntime.InspectionCapacityException e){throw e;}
           catch(ServerRuntime.InspectionTimeoutException e){throw e;}
           catch(ServerRuntime.InspectionResponseTooLargeException e){throw e;}
@@ -745,10 +747,19 @@ public final class ApiServlet extends HttpServlet {
         if(diagnostic!=null){e.put("diagnostic",diagnostic);response.put("diagnostics",List.of(diagnostic));}
         json(res,status,response);
     }
+    private static void archiveUnavailable(HttpServletResponse res,ServerRuntime.ArchiveUnavailableException failure,String requestId)throws IOException {
+        boolean failed="FAILED".equals(failure.archiveState);
+        String code=failed?"ATT-SERVER-ARCHIVE-UNAVAILABLE":"ATT-ARCHIVE-NOT-READY";
+        String summary=failed?"Artifact archive publication failed; inspect archive status before retrying."
+                :"Artifact archive is not ready; refresh archive status before opening it.";
+        Map<String,Object> diagnostic=att.server.api.LimitDiagnostic.create(code,summary,"artifact.archiveAvailability",null,null,
+                "server.artifactPublication",failed?att.server.api.LimitOutcome.ARCHIVE_FAILED:null,"publication",
+                failed?"Inspect the archive failure diagnostic and retry after eligible private output is available."
+                        :"Refresh archive status and open the artifact after publication reaches READY.","archive.zip");
+        diagnostic.put("archiveState",failure.archiveState);
+        error(res,409,code,summary,requestId,List.of(diagnostic));
+    }
     private static Map<String,Object> limitHttpDiagnostic(int status,String code,String summary){
-        if(status==409&&"ATT-SERVER-ARCHIVE-UNAVAILABLE".equals(code))
-            return att.server.api.LimitDiagnostic.create(code,summary,"artifact.archiveAvailability",null,null,"server.artifactPublication",
-                    att.server.api.LimitOutcome.ARCHIVE_FAILED,"publication","Refresh archive status; retry publication when the private source output remains available.","archive.zip");
         if(status!=413&&status!=429&&status!=503&&status!=504)return null;
         String limitName,remediation;
         if(code.contains("INSPECTION-RESPONSE")||code.contains("RESPONSE-TOO-LARGE")){

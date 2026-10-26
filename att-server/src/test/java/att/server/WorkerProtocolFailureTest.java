@@ -48,6 +48,20 @@ class WorkerProtocolFailureTest {
         }
     }
 
+    @Test void structuredRuntimeCauseRemainsPrimaryAfterProtocolTruncationAndWorkerExit() throws Exception {
+        try(ServerRuntime runtime=runtime()) {
+            Job job=job(runtime);runtime.recordProtocolLimit(job,oversized());
+            runtime.handleWorkerEvent(job,"{\"type\":\"DIAGNOSTIC\",\"code\":\"HTTP_RESPONSE_TOO_LARGE\",\"message\":\"HTTP response exceeded its configured byte limit\",\"outcome\":\"EXECUTION_ERROR\",\"stage\":\"execution\"}");
+            runtime.recordWorkerExit(job,3);runtime.finish(job,"ERROR",3);
+            var diagnostic=ServerRuntime.JSON.readTree(job.diagnosticJson);
+            assertEquals("HTTP_RESPONSE_TOO_LARGE",diagnostic.path("code").asText());
+            assertEquals("EXECUTION_ERROR",diagnostic.path("outcome").asText());
+            String events=Files.readString(runtime.config.dataDir.resolve("jobs").resolve(job.id).resolve("events.jsonl"));
+            assertTrue(events.contains("ATT-SERVER-WORKER-EVENT-TOO-LARGE"));
+            assertFalse(events.contains("private-canary"));
+        }
+    }
+
     @Test void oversizedProgressDoesNotPreventAValidLaterErrorResultAndMetrics() throws Exception {
         try(ServerRuntime runtime=runtime()) {
             Job job=job(runtime);runtime.recordProtocolLimit(job,oversized());

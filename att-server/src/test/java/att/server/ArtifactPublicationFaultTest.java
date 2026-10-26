@@ -110,6 +110,29 @@ class ArtifactPublicationFaultTest {
         }
     }
 
+    @Test void candidateLimitPublicationPersistsStructuredArchiveFailureDiagnostic() throws Exception {
+        ServerRuntime.ArtifactPublisher capped=(output,archive,publisher)->ArtifactArchive.buildForTest(output,archive,publisher,2);
+        try(ServerRuntime runtime=runtime(capped)) {
+            String id="J0000000000000298";
+            Job job=terminalJob(runtime,id);job.exitCode=0;runtime.store.update(job);
+            Files.writeString(runtime.outputDirectoryForJob(id).resolve("second.log"),"bounded evidence");
+            runtime.scheduleArtifactArchive(id);
+            awaitState(runtime,id,"FAILED");
+
+            Map<?,?> index=(Map<?,?>)runtime.artifactIndex(id);
+            assertEquals("FAILED",index.get("archiveStatus"));
+            Map<?,?> diagnostic=(Map<?,?>)index.get("diagnostic");
+            assertEquals("ATT-ARCHIVE-LIMIT-EXCEEDED",diagnostic.get("code"));
+            assertEquals("ARCHIVE_FAILED",diagnostic.get("outcome"));
+            assertEquals("artifact.inventory.candidates",diagnostic.get("limitName"));
+            assertEquals(2L,((Number)diagnostic.get("configuredLimit")).longValue());
+            assertEquals(3L,((Number)diagnostic.get("observed")).longValue());
+            assertEquals("PASS",runtime.jobRecord(id).get("status"));
+            assertEquals(0,runtime.jobRecord(id).get("exitCode"));
+            assertFalse(diagnostic.toString().contains(runtime.config.dataDir.toString()));
+        }
+    }
+
     @Test void archiveLimitFailureHasItsOwnStructuredStateAndPreservesExecutionOutcome() throws Exception {
         try (ServerRuntime runtime = runtime((output, archive, publisher) -> {
             throw new ArtifactArchive.LimitFailure("total cap", "artifact.archive.totalBytes",
