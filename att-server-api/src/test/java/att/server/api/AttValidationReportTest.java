@@ -24,7 +24,7 @@ class AttValidationReportTest {
         assertEquals(1,((Map<?,?>)value.get("counts")).get("errors"));
     }
 
-    @Test void marksOversizedReportsIncompleteAndKeepsAnExplicitLimitDiagnostic() throws Exception {
+    @Test void oversizedInvalidReportRetainsInvalidVerdictAndLimitDiagnostic() throws Exception {
         AttValidationReport report=new AttValidationReport("ALL","LOCAL");
         for(int i=0;i<100;i++) {
             AttValidationReport.Section section=report.addSection("Package p"+i,"packages/p"+i,"FAIL");
@@ -36,13 +36,31 @@ class AttValidationReportTest {
         report.limitOutputBytes(1024);
 
         Map<String,Object> value=report.toMap();
-        assertEquals(Boolean.FALSE,value.get("complete"));assertEquals(3,value.get("exitCode"));
+        assertEquals(Boolean.FALSE,value.get("complete"));
+        assertEquals(2,value.get("exitCode"));
+        assertEquals("INVALID",value.get("overallStatus"));
+        assertTrue(((Number)((Map<?,?>)value.get("counts")).get("fail")).intValue()>0);
         assertTrue(new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsBytes(value).length<=1024);
-        assertEquals("PARTIAL",value.get("overallStatus"));
         assertEquals(Boolean.TRUE,((Map<?,?>)value.get("context")).get("reportTruncated"));
         boolean marker=false;
         for(Object item:(List<?>)value.get("diagnostics"))if(item instanceof Map&&"ATT-VALIDATION-OUTPUT-LIMIT".equals(((Map<?,?>)item).get("code")))marker=true;
         assertTrue(marker);
-        assertTrue(new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsBytes(value).length<=4096);
     }
+
+    @Test void oversizedPassReportBecomesPartialAndKeepsAnExplicitLimitDiagnostic() throws Exception {
+        AttValidationReport report=new AttValidationReport("ALL","LOCAL");
+        for(int i=0;i<100;i++)report.addSection("Package p"+i,"packages/p"+i,"PASS");
+        report.limitOutputBytes(1024);
+
+        Map<String,Object> value=report.toMap();
+        assertEquals(Boolean.FALSE,value.get("complete"));
+        assertEquals(3,value.get("exitCode"));
+        assertEquals("PARTIAL",value.get("overallStatus"));
+        assertTrue(new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsBytes(value).length<=1024);
+        assertEquals(Boolean.TRUE,((Map<?,?>)value.get("context")).get("reportTruncated"));
+        boolean marker=false;
+        for(Object item:(List<?>)value.get("diagnostics"))if(item instanceof Map&&"ATT-VALIDATION-OUTPUT-LIMIT".equals(((Map<?,?>)item).get("code")))marker=true;
+        assertTrue(marker);
+    }
+
 }

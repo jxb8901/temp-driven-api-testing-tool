@@ -1643,8 +1643,7 @@ final class ServerRuntime implements AutoCloseable {
                 String status=reportExit(checked)==0?"PASS":reportExit(checked)==2?"FAIL":"WARN";
                 att.server.api.AttValidationReport.Section packageSection=report.addSection("Package "+packageId,"packages/"+packageId,status);
                 appendValidationSections(packageSection,checked);
-                if(reportExit(checked)==2)report.exitCode(2);
-                else if(reportExit(checked)!=0)report.incomplete();
+                appendValidationOutcome(report,checked);
                 if(validationWorkUnits>=MAX_TOTAL_VNEXT_VALIDATION_WORK_UNITS&&packageIndex+1<packages.size()) {
                     report.incomplete();att.server.api.AttValidationReport.Section limit=report.addSection("Package Validation Work Limit",null,"WARN");
                     Map<String,Object> diagnostic=new LinkedHashMap<String,Object>();diagnostic.put("code","ATT-VALIDATION-LIMIT");
@@ -1676,12 +1675,12 @@ final class ServerRuntime implements AutoCloseable {
         return new LinkedHashMap<String,Object>(report);
     }
 
-    @SuppressWarnings("unchecked") private static void appendValidationSections(att.server.api.AttValidationReport report,Map<String,Object> source) {
-        Object raw=source.get("sections");if(!(raw instanceof List))return;
-        for(Object value:(List<?>)raw)if(value instanceof Map)copyValidationSection(report,(Map<String,Object>)value);
-        int exit=reportExit(source);if(exit==2)report.exitCode(2);else if(exit==3)report.incomplete();
+    @SuppressWarnings("unchecked") static void appendValidationSections(att.server.api.AttValidationReport report,Map<String,Object> source) {
+        Object raw=source.get("sections");
+        if(raw instanceof List)for(Object value:(List<?>)raw)if(value instanceof Map)copyValidationSection(report,(Map<String,Object>)value);
+        appendValidationOutcome(report,source);
     }
-    @SuppressWarnings("unchecked") private static void appendValidationSections(att.server.api.AttValidationReport.Section report,Map<String,Object> source) {
+    @SuppressWarnings("unchecked") static void appendValidationSections(att.server.api.AttValidationReport.Section report,Map<String,Object> source) {
         Object raw=source.get("sections");if(!(raw instanceof List))return;
         for(Object value:(List<?>)raw)if(value instanceof Map)copyValidationSection(report,(Map<String,Object>)value);
     }
@@ -1696,6 +1695,10 @@ final class ServerRuntime implements AutoCloseable {
     @SuppressWarnings("unchecked") private static void copyValidationDetails(att.server.api.AttValidationReport.Section section,Map<String,Object> source) {
         Object diagnostics=source.get("diagnostics");if(diagnostics instanceof List)for(Object item:(List<?>)diagnostics)if(item instanceof Map)section.diagnostic((Map<String,Object>)item);
         Object nested=source.get("sections");if(nested instanceof List)for(Object item:(List<?>)nested)if(item instanceof Map)copyValidationSection(section,(Map<String,Object>)item);
+    }
+    static void appendValidationOutcome(att.server.api.AttValidationReport report,Map<String,Object> source) {
+        if(Boolean.FALSE.equals(source.get("complete")))report.incomplete();
+        int exit=reportExit(source);if(exit==2)report.exitCode(2);else if(exit==3)report.incomplete();
     }
     private static int reportExit(Map<String,Object> report) {Object value=report.get("exitCode");return value instanceof Number?((Number)value).intValue():3;}
     private static void AttValidationReportSection(att.server.api.AttValidationReport report,String name,String source,String code,String message) {

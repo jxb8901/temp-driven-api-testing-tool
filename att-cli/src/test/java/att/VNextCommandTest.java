@@ -263,6 +263,19 @@ class VNextCommandTest {
             Map<?,?> pkg=findSection((List<?>)result.get("sections"),"Package payments");
             assertNotNull(pkg,captured.stdout);
             assertEquals("WARN",pkg.get("status"));
+            StringBuilder invalidYaml=new StringBuilder(
+                    "schemaVersion: att-config/v2.13\nenvironment: Env000\nenvironments:\n"
+                            +"  Env000:\n    dbhelpers: [config/dbhelpers/missing.yaml]\n");
+            for(int i=1;i<=att.validation.RuntimeConfigurationValidator.MAX_ENVIRONMENT_PROFILES;i++)
+                invalidYaml.append("  Env").append(String.format("%03d",i)).append(": {}\n");
+            Files.write(config,invalidYaml.toString().getBytes(StandardCharsets.UTF_8));
+            Captured invalidPartial=capture(()->VNextCommand.run(new String[]{
+                    "--local","--format","json","validate","--all"}));
+            assertEquals(2,invalidPartial.exitCode,invalidPartial.stdout);
+            Map<?,?> invalidResult=new ObjectMapper().readValue(invalidPartial.stdout,Map.class);
+            assertEquals("INVALID",invalidResult.get("overallStatus"),invalidPartial.stdout);
+            assertEquals(Boolean.FALSE,invalidResult.get("complete"),invalidPartial.stdout);
+            assertEquals(2,((Number)invalidResult.get("exitCode")).intValue(),invalidPartial.stdout);
         } finally {
             if(previousHome==null)System.clearProperty("att.home");else System.setProperty("att.home",previousHome);
             if(previousServer==null)System.clearProperty("att.server.config");else System.setProperty("att.server.config",previousServer);

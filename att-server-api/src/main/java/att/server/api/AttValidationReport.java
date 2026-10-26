@@ -28,18 +28,22 @@ public final class AttValidationReport {
     /** Keeps aggregate CLI reports bounded and makes any omitted section explicit. */
     public void limitOutputBytes(int maximum) {
         int limit=Math.max(768,maximum);
+        boolean invalidBeforeTruncation=exitCode()==2;
         if(jsonBytes()<=limit)return;
-        complete=false;forcedExitCode=Integer.valueOf(3);context.put("reportTruncated",Boolean.TRUE);
+        complete=false;forcedExitCode=Integer.valueOf(invalidBeforeTruncation?2:3);context.put("reportTruncated",Boolean.TRUE);
         while(!sections.isEmpty()&&jsonBytes()>limit-512)sections.remove(sections.size()-1);
-        Section marker=addSection("Report Output Limit",null,"WARN");
+        String markerStatus=invalidBeforeTruncation?"FAIL":"WARN";
         Map<String,Object> diagnostic=new LinkedHashMap<String,Object>();diagnostic.put("code","ATT-VALIDATION-OUTPUT-LIMIT");
-        diagnostic.put("severity","WARNING");diagnostic.put("field","report");
-        diagnostic.put("message","Report details were truncated; validation is incomplete");
+        diagnostic.put("severity",invalidBeforeTruncation?"ERROR":"WARNING");diagnostic.put("field","report");
+        diagnostic.put("message",invalidBeforeTruncation
+                ?"Report details were truncated; at least one validation failure was omitted"
+                :"Report details were truncated; validation is incomplete");
+        Section marker=addSection("Report Output Limit",null,markerStatus);
         marker.diagnostic(diagnostic);
         while(jsonBytes()>limit&&sections.size()>1)sections.remove(sections.size()-2);
         if(jsonBytes()>limit) {
             sections.clear();context.clear();context.put("reportTruncated",Boolean.TRUE);
-            marker=addSection("Report Output Limit",null,"WARN");marker.diagnostic(diagnostic);
+            marker=addSection("Report Output Limit",null,markerStatus);marker.diagnostic(diagnostic);
         }
     }
     public void appendSections(AttValidationReport other) {
@@ -48,6 +52,7 @@ public final class AttValidationReport {
         if(!other.complete)incomplete();
         if(other.exitCode()==2)exitCode(2);else if(other.exitCode()==3)incomplete();
     }
+    public boolean isComplete() { return complete; }
     public void incomplete() { complete=false; forcedExitCode=Integer.valueOf(3); }
     public void exitCode(int code) { if(code<0||code>4)throw new IllegalArgumentException("Unsupported validation exit code");forcedExitCode=code; }
     public List<Section> sections() { return Collections.unmodifiableList(sections); }

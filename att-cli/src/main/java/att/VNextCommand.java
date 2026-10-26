@@ -211,8 +211,7 @@ public final class VNextCommand {
         AttValidationReport report=new AttValidationReport("ALL","LOCAL");
         report.context("runtimeConfig",logical(config.toString(),runtimeRoot));
         AttValidationReport runtime=RuntimeConfigurationValidator.validate(config,runtimeRoot,null,null,"LOCAL",true);
-        copySections(report,runtime);
-        if(runtime.exitCode()==2)report.exitCode(2);else if(runtime.exitCode()!=0)report.incomplete();
+        report.appendSections(runtime);
 
         Map<Path,Set<String>> packagesByRoot=new LinkedHashMap<Path,Set<String>>();
         Set<Path> homeRoots=new LinkedHashSet<Path>(),registeredRoots=new LinkedHashSet<Path>();
@@ -303,6 +302,7 @@ public final class VNextCommand {
                     AttValidationReport.Section binding=serverSection.child("Bound Shared Runtime Config",logical(boundRuntime.toString(),boundRoot),
                             boundReport.exitCode()==0?"PASS":"FAIL");
                     copySections(binding,boundReport);
+                    if(!boundReport.isComplete())report.incomplete();
                     try { serverProfiles=RuntimeConfigurationValidator.declaredProfiles(boundRuntime); }
                     catch(Exception invalidRuntime) { serverProfiles=Collections.emptyList(); }
                     if(boundReport.exitCode()==2){serverSection.status("FAIL");report.exitCode(2);}
@@ -390,6 +390,7 @@ public final class VNextCommand {
             if(unregistered)pkg.diagnostic(validationDiagnostic("ATT-PACKAGE-NOT-REGISTERED","WARNING","packages/"+id,"packageId",
                     "Package directory is not registered with the active Server Config",null));
             copySections(pkg,packageReport);
+            if(!packageReport.isComplete())report.incomplete();
             if(packageExit==2)report.exitCode(2);else if(packageExit!=0)report.incomplete();
 
             List<String> profiles;
