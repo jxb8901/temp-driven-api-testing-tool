@@ -7,6 +7,7 @@ import org.junit.jupiter.api.io.TempDir;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Collections;
@@ -62,9 +63,10 @@ class LoadMetricsCheckpointStoreTest {
         assertNull(LoadMetricsCheckpointStore.readLatest(directory, "other-run", "aggregate"));
         Path checkpoint;
         try (java.util.stream.Stream<Path> files = Files.list(directory)) {
-            checkpoint = files.filter(path -> path.getFileName().toString().endsWith(".json")).findFirst().orElseThrow();
+            checkpoint = files.filter(path -> path.getFileName().toString().endsWith(".json")).findFirst()
+                    .orElseThrow(IllegalStateException::new);
         }
-        Files.writeString(checkpoint, "{\"schemaVersion\":\"att-load-metrics-checkpoint/v1\"}");
+        Files.write(checkpoint, "{\"schemaVersion\":\"att-load-metrics-checkpoint/v1\"}".getBytes(StandardCharsets.UTF_8));
         assertNull(LoadMetricsCheckpointStore.readLatest(directory, "expected-run", "aggregate"));
     }
 
