@@ -56,7 +56,7 @@ class LoadMetricsCheckpointStoreTest {
     @Test void ignoresTamperedCheckpointAndRejectsWrongRunIdentity() throws Exception {
         Instant started = Instant.parse("2026-10-26T00:00:00Z");
         LoadMetrics metrics = new LoadMetrics("closed", started.toEpochMilli(), 1_000L);
-        Path directory = temp.resolve("checkpoints");
+        Path directory = temp.resolve("load/run/checkpoints/aggregate");
         metrics.enableCheckpoints(directory, "expected-run", "aggregate");
         metrics.finish(started.plusSeconds(1).toEpochMilli());
 

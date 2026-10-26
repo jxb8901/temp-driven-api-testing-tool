@@ -177,7 +177,8 @@ final class LoadMetricsCheckpointStore {
             if (Files.isSymbolicLink(path) || !Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS)
                     || Files.size(path) > MAX_CHECKPOINT_BYTES) continue;
             try {
-                JsonNode checkpoint = JSON.readTree(path.toFile());
+                byte[] checkpointBytes = Files.readAllBytes(path);
+                JsonNode checkpoint = JSON.readTree(checkpointBytes);
                 long checkpointSequence = checkpoint.path("sequence").asLong(-1L);
                 String state = checkpoint.path("state").asText();
                 if (!SCHEMA.equals(checkpoint.path("schemaVersion").asText())
@@ -189,7 +190,7 @@ final class LoadMetricsCheckpointStore {
                         || checkpoint.path("finalized").asBoolean() != "FINAL_CHECKPOINT".equals(state)
                         || !checkpoint.path("payload").path("metrics").isObject()) continue;
                 String expected = checkpoint.path("integritySha256").asText("");
-                String actual = sha256(JSON.writeValueAsBytes(checkpoint.path("payload")));
+                String actual = sha256(payloadBytes(checkpointBytes));
                 if (!expected.equals(actual)) continue;
                 @SuppressWarnings("unchecked") Map<String, Object> parsed = JSON.convertValue(checkpoint, Map.class);
                 return parsed;
@@ -198,6 +199,52 @@ final class LoadMetricsCheckpointStore {
             }
         }
         return null;
+    }
+
+    /** Extract the exact UTF-8 JSON value hashed by the writer, without numeric reformatting. */
+    private static byte[] payloadBytes(byte[] document) throws IOException {
+        int valueStart = -1;
+        boolean inString = false;
+        boolean escaped = false;
+        for (int index = 0; index < document.length; index++) {
+            int current = document[index] & 0xff;
+            if (inString) {
+                if (escaped) escaped = false;
+                else if (current == '\\') escaped = true;
+                else if (current == '"') inString = false;
+                continue;
+            }
+            if (current != '"') continue;
+            byte[] key = new byte[] {'"','p','a','y','l','o','a','d','"'};
+            boolean matches = index + key.length <= document.length;
+            for (int offset = 0; matches && offset < key.length; offset++)
+                matches = document[index + offset] == key[offset];
+            if (!matches) { inString = true; continue; }
+            int delimiter = index + key.length;
+            while (delimiter < document.length && Character.isWhitespace((char) (document[delimiter] & 0xff))) delimiter++;
+            if (delimiter >= document.length || document[delimiter] != ':') { inString = true; continue; }
+            valueStart = delimiter + 1;
+            while (valueStart < document.length && Character.isWhitespace((char) (document[valueStart] & 0xff))) valueStart++;
+            break;
+        }
+        if (valueStart < 0 || valueStart >= document.length || document[valueStart] != '{')
+            throw new IOException("LOAD checkpoint payload is missing or not an object.");
+        int depth = 0;
+        inString = false;
+        escaped = false;
+        for (int index = valueStart; index < document.length; index++) {
+            int current = document[index] & 0xff;
+            if (inString) {
+                if (escaped) escaped = false;
+                else if (current == '\\') escaped = true;
+                else if (current == '"') inString = false;
+                continue;
+            }
+            if (current == '"') inString = true;
+            else if (current == '{') depth++;
+            else if (current == '}' && --depth == 0) return java.util.Arrays.copyOfRange(document, valueStart, index + 1);
+        }
+        throw new IOException("LOAD checkpoint payload is truncated.");
     }
 
     private static String fileName(long sequence) { return String.format(java.util.Locale.ROOT, "checkpoint-%020d.json", sequence); }
