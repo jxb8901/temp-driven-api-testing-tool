@@ -152,7 +152,7 @@ public final class VNextCommand {
         AttValidationReport combined=new AttValidationReport("package".equals(scope)?"PACKAGE":"SELECTED","LOCAL");
         combined.context("packageId",o.packageId()==null?packageRoot.getFileName().toString():o.packageId());
         combined.context("environment",o.environment());
-        copySections(combined,report);
+        combined.appendSections(report);
         AttValidationReport.Section checks;
         if("package".equals(scope)) {
             checks=combined.addSection("Testcases / Templates / Flows / dependencies",null,"PASS");
@@ -199,7 +199,9 @@ public final class VNextCommand {
                 addTargetValidationFailure(checks,o,packageRoot,"ATT-RESOURCE-INVALID",invalid);
             }
         }
-        if(report.exitCode()!=0||hasErrors(checks))combined.exitCode(2);
+        if(report.exitCode()==3)combined.incomplete();
+        else if(report.exitCode()!=0)combined.exitCode(2);
+        if(hasErrors(checks))combined.exitCode(2);
         printValidation(o,combined);
         return combined.exitCode();
     }
