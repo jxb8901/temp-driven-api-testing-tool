@@ -183,9 +183,13 @@ public final class WorkerMain {
                     throw new PackageResourceInspector.StaleResourceCursorException();
             }
             OperationResult result=dispatch(request);
-            Map<String,Object> serialized=result.toMap();
+            Map<String,Object> serialized=result instanceof att.api.LoadResult && "load".equals(request.command)
+                    ? ((att.api.LoadResult)result).toWorkerMap() : result.toMap();
             if(configuration!=null) {
-                Map<String,Object> summary=new LinkedHashMap<String,Object>(result.summary());
+                Object existingSummary=serialized.get("summary");
+                Map<String,Object> summary=existingSummary instanceof Map
+                        ?new LinkedHashMap<String,Object>((Map<String,Object>)existingSummary)
+                        :new LinkedHashMap<String,Object>();
                 summary.put("configuration",configuration);serialized.put("summary",summary);
                 String artifact=result.paths().get("configuration");
                 if(artifact!=null&&executionOutput!=null) {
@@ -219,8 +223,12 @@ public final class WorkerMain {
             else if(error instanceof PackageResourceInspector.StaleResourceCursorException) { code="ATT-RESOURCE-CURSOR-STALE"; message="The package resources changed; refresh the Explorer"; }
             else if(error instanceof PackageConfigurationInspector.ResponseTooLargeException) { code="ATT-RESOURCE-RESPONSE-TOO-LARGE"; message="Package configuration response exceeded the configured limit"; }
             else if(error instanceof PackageConfigurationInspector.ConfigurationLimitException) { code="ATT-RESOURCE-LIMIT"; message="Package configuration inspection exceeded a configured limit"; }
+            else if("load".equals(request.command)&&String.valueOf(error.getMessage()).contains("LOAD_RESOURCE_PREPARATION_LIMIT")) { code="LOAD_RESOURCE_PREPARATION_LIMIT"; message="LOAD resource preparation exceeded its bounded connection budget"; }
+            else if("load".equals(request.command)&&String.valueOf(error.getMessage()).contains("LOAD_PREPARATION_TIMEOUT")) { code="LOAD_PREPARATION_TIMEOUT"; message="LOAD resource preparation exceeded its deadline"; }
             else if(error instanceof IllegalArgumentException) { code="WORKER_REQUEST_INVALID"; exit=2; status="INVALID"; }
-            Map<String,Object> diagnostic=fields("code",code,"message",DiagnosticSanitizer.redactText(message==null?"ATT operation failed":message));
+            Map<String,Object> diagnostic=fields("code",code,"message",DiagnosticSanitizer.redactAbsolutePaths(DiagnosticSanitizer.redactText(message==null?"ATT operation failed":message)));
+            if("load".equals(request.command)&&("LOAD_RESOURCE_PREPARATION_LIMIT".equals(code)||"LOAD_PREPARATION_TIMEOUT".equals(code)))
+                diagnostic.put("failedCount",1);
             if(request.registeredPackageId!=null&&request.registeredPackageId.matches("[A-Za-z0-9][A-Za-z0-9._-]{0,127}"))
                 diagnostic.put("packageId",request.registeredPackageId);
             boolean draftInspection="inspect".equals(request.command)&&(("package-configuration".equals(request.inspectionType)&&"validate".equals(request.inspectionAction))||"debug-input".equals(request.inspectionAction)||"debug-form".equals(request.inspectionAction)
@@ -253,7 +261,11 @@ public final class WorkerMain {
             }
             if(loadSampler!=null&&loadSummaryLine==null) loadSummaryLine=loadSampler.finish(status);
             emit(WorkerEvent.Type.DIAGNOSTIC,diagnostic);
-            emitResult(fields("status",status,"exitCode",exit,"result",fields("executionId",null,"status",status,"exitCode",exit)));
+            Map<String,Object> failedResult=fields("executionId",null,"status",status,"exitCode",exit,
+                    "diagnostics",Collections.singletonList(diagnostic),"summary",Collections.emptyMap());
+            if("load".equals(request.command))
+                failedResult=att.server.api.LoadTerminalResult.projectOperationResult(failedResult,status,exit);
+            emitResult(fields("status",status,"exitCode",exit,"result",failedResult));
             return exit;
         }
     }
@@ -682,7 +694,20 @@ public final class WorkerMain {
         } else safe=DiagnosticSanitizer.sanitize(data);
         if(!inspectionDaemon&&!inspectionRequest) {
             attachConsole(type,safe);
-            WorkerProtocol.Frame frame=WorkerProtocol.encode(mapper,new WorkerEvent(type,jobId,safe).toMap(),WorkerProtocol.MAX_FRAME_BYTES);
+            WorkerProtocol.Frame frame;
+            if(type==WorkerEvent.Type.RESULT&&isCompactLoadResult(safe)) {
+                Map<String,Object> transport=fields("workerFrameBytes",0L,
+                        "workerFrameLimitBytes",WorkerProtocol.MAX_FRAME_BYTES,
+                        "journalDataLimitBytes",att.server.api.LoadTerminalResult.MAX_JOURNAL_EVENT_BYTES);
+                safe.put("loadResultTransport",transport);
+                long previous=-1L;
+                for(int attempt=0;attempt<6;attempt++) {
+                    frame=WorkerProtocol.encode(mapper,new WorkerEvent(type,jobId,safe).toMap(),WorkerProtocol.MAX_FRAME_BYTES);
+                    if(frame.sizeBytes==previous)break;
+                    previous=frame.sizeBytes;transport.put("workerFrameBytes",previous);
+                }
+                frame=WorkerProtocol.encode(mapper,new WorkerEvent(type,jobId,safe).toMap(),WorkerProtocol.MAX_FRAME_BYTES);
+            } else frame=WorkerProtocol.encode(mapper,new WorkerEvent(type,jobId,safe).toMap(),WorkerProtocol.MAX_FRAME_BYTES);
             if(frame.oversized()) {
                 Map<String,Object> bounded=boundedEvent(type,safe,frame.sizeBytes);
                 frame=WorkerProtocol.encode(mapper,new WorkerEvent(type,boundedText(jobId,128),bounded).toMap(),WorkerProtocol.MAX_FRAME_BYTES);
@@ -702,6 +727,12 @@ public final class WorkerMain {
         }
         protocol.println(line);protocol.flush();
         if(inspectionDaemon)inspectionResponseBytes+=bytes;
+    }
+    private static boolean isCompactLoadResult(Map<String,Object> event) {
+        Object value=event.get("result");
+        if(!(value instanceof Map))return false;
+        Object summary=((Map<?,?>)value).get("summary");
+        return att.server.api.LoadTerminalResult.isSummary(summary);
     }
     private att.console.ExecutionConsoleFormatter.Options consoleOptions=att.console.ExecutionConsoleFormatter.Options.published();
     private void attachConsole(WorkerEvent.Type type,Map<String,Object> safe) {

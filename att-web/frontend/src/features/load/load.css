@@ -25,6 +25,21 @@
 .att-feature-header h1 { margin: 0; font-size: clamp(1.6rem, 3vw, 2.15rem); }
 .att-feature-header p:not(.att-eyebrow) { max-width: 70ch; color: var(--att-color-muted, #637087); }
 
+.att-load-terminal-summary {
+  display: grid;
+  gap: var(--att-space-2, .5rem);
+  padding: var(--att-space-4, 1rem);
+  border: 1px solid var(--att-color-border, #dce2ec);
+  border-radius: var(--att-radius-card, .9rem);
+  background: var(--att-color-surface, #fff);
+}
+.att-load-terminal-summary h3 { margin: 0; }
+.att-load-terminal-summary dl { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 16rem), 1fr)); gap: var(--att-space-2, .5rem) var(--att-space-4, 1rem); margin: 0; }
+.att-load-terminal-summary dl > div { min-width: 0; }
+.att-load-terminal-summary dt { color: var(--att-color-muted, #637087); font-size: .82rem; }
+.att-load-terminal-summary dd { margin: 0; overflow-wrap: anywhere; font-weight: 650; }
+.att-load-terminal-summary [role="alert"] { border-inline-start: .25rem solid var(--att-color-danger, #b42318); padding-inline-start: var(--att-space-3, .75rem); }
+
 .att-replay-review button:not(.button),
 .att-load-page button:not(.button),
 .att-jobs-page button:not(.button),

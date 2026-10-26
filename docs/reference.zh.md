@@ -1506,6 +1506,10 @@ evidence.resources.output 支援 inherit（預設）或 none。none 停用可選
 
 ATT 在 run root 寫入有界 load-summary.json/yaml 與 self-contained report/index.html。Report 對 retained execution 顯示 EXEC.ID、workload/target identity、status、timing；有保留 case.log 時提供 link。Aggregate latency percentile 由 aggregate latency collector 計算，不會平均 workload percentile。
 
+直接 Engine／CLI LOAD 輸出仍使用完整的 `att-load-summary/v1.2` 詳細格式。Server 代理的 Job Results 則在 `result.summary` 使用 `att-load-terminal-result/v1`：執行結果、performance verdict、aggregate counters、有界 workload／threshold 預覽、主要診斷及 detail/archive 狀態。精簡 summary 上限為 32 KiB；量度終端 journal 和 SSE envelope 後均低於 48 KiB，並低於不變的 64 KiB journal event-data 上限。Worker frame 的 1 MiB 上限也維持不變。LOAD scheduling、virtual-user 和 arrival-rate 語義不變。
+
+完整 buckets、failure samples、workload／threshold 細節及 evidence 仍保存在 `load-summary.json`、`load-summary.yaml` 和 `report/index.html`，Server 只透過現有授權 artifact archive routes 提供。Studio 先顯示精簡結果，只有開啟 Metrics 才載入 report summary。Archive availability 與執行結果獨立；`PENDING`、`ARCHIVING`、`READY`、`FAILED` 或詳細資料 omitted 均不會改變終端狀態或 exit code。ERROR 會優先保留 runtime/preparation 原因，而非 Worker／Journal truncation 或 archive 診斷。
+
 Load v1.9 新增 `all`、`measured`、`steady` 三個 event-time window。`measured` 從 warm-up 後開始，包含 ramp-up、steady、ramp-down；`steady` 只涵蓋配置的穩態 duration。HTML report 預設顯示 `steady`，並可切換其他 window。Scheduled、started、completed rate 依各 event timestamp 及配置 window duration 計算，因此 `startedRate` 仍按 event time 計算。`admissionRate` 則使用相同的 scheduled cohort：分子是該 window 內排程且在 run 結束前已開始的 arrival，分母是該 window 內全部排程 arrival；run 結束仍未開始的 arrival 視為未准入。Latency percentile 和 outcome count 依 scheduled cohort 計算，因此 drain 完成的 iteration 仍屬於其 scheduled phase。既有 top-level metric 名稱及 legacy 語義仍保留。
 
 巢狀 `thresholds.steady` 和 `thresholds.overall` 分別對 steady 與 all-execution window 評估。原有 top-level threshold 保持先前 measured-run 語義。Window 不完整或無法評估時回報 `NOT_EVALUATED`，不視為 performance pass。Report 會把 execution status 與 performance verdict 分開，並顯示 percentile sample／observation count，讓稀疏估算可被辨識。Summary schema 為 `att-load-summary/v1.2`；新 window 與 preparation 欄位對 reader 而言為 optional，legacy summary 欄位維持不變。
@@ -1518,9 +1522,9 @@ Summary 會將 generator observation 與 SUT outcome 分開。`metrics.generator
 
 `metrics.windowMetrics.timeSeries.points` 全執行序列最多保留 2,048 個有資料的 time bin，初始寬度為 1,000 ms。資料 bin 超過容量時，ATT 會合併相鄰 bin，並以 power-of-two coarsening 將 bucket 寬度加倍。系統不會淘汰歷史 bin，因此較長的 run 會以較低的時間解析度保留歷史資料。`metrics.windowMetrics.timeSeries.windowSeries.measured.points` 和 `metrics.windowMetrics.timeSeries.windowSeries.steady.points` 是各自獨立的序列，各自最多 2,048 個 bin。它們按 configured window 起點對齊，初始寬度為 1,000 ms 與 window duration 兩者中較小者，並會在 window boundary 截短最後一個 partial bucket；它們使用相同的 coarsening 和不淘汰歷史資料政策。Compatibility `metrics.buckets` 是獨立的 legacy series：使用 circular buffer 保留最新 4,096 個一秒 bucket，並淘汰較舊項目。ATT 不會平均 workload percentile 來計算整體 percentile。
 
-新增的 Load summary telemetry 欄位在 `att-load-summary/v1.2` 下屬 optional；目前 writer 會輸出這些欄位，加入 telemetry 前產生的 summary 仍然有效。
+新增的 Load summary telemetry 欄位在 `att-load-summary/v1.2` 下屬 optional；目前 writer 會輸出這些欄位，加入 telemetry 前產生的 summary 仍然有效。Server Job Results 使用另一個版本化契約 `att-load-terminal-result/v1`；需要完整 metrics 的 consumer 應在 archive 顯示 READY 後讀取其中的 `load-summary.json`。
 
-Sampling limits、metrics 解讀方式和 maintainer verification 請看 [Load Generator Telemetry](system-design/load-telemetry.zh.md)。
+Sampling limits、metrics 解讀方式和 maintainer verification 請看 [Load Generator Telemetry](system-design/load-telemetry.zh.md) 及[精簡 LOAD 終端結果](system-design/load-terminal-result.zh.md)。執行確定性的短時間對照與模擬長時間 transfer benchmark：`mvn -q -o -pl att-server -am -Dtest=ServerRuntimeLoadTerminalResultTest#benchmarkShortAndSyntheticLongMultiWorkloadTransferSizes -Datt.skipFrontendUnitTests=true -Dsurefire.failIfNoSpecifiedTests=false test`。該測試會建構等同 30–60 分鐘的多 workload 結果，不會真的執行長時間 LOAD。
 
 Root thresholds 只套用於 aggregate run；workload thresholds 只套用於個別 workload，不會從 root 繼承。Threshold 失敗回傳 FAIL/exit 1。設定或 target 無效回傳 exit 2；runtime/infrastructure error 回傳 ERROR/exit 3。Generator drop 不屬於 SUT error。
 

@@ -22,7 +22,9 @@
 
 瀏覽器會立即把事件寫入最多 500 筆的有界 buffer，並以固定 100 ms 週期發布一般顯示 snapshot。Document 隱藏時會暫停發布顯示 snapshot，重新顯示時再發布當時的有界 snapshot。終端 `result` 事件、終端 `status` 事件、取消請求狀態及連線錯誤狀態轉換會立即發布。最後一個 consumer 關閉後，timer 及原生 `EventSource` 都會釋放。
 
-Events 清單只渲染捲動位置附近的列（並以 spacer 保持捲軸及清單位置正確），事件 payload 在展開前保持收合，搜尋則涵蓋完整的 500 筆視窗，而非只搜尋已渲染列。Metrics 分頁會繪製所有回傳的 bucket（最多 4,096 個），其無障礙 bucket 表格每頁顯示 100 列，提供 Previous 與 Next 控制項及 `Showing rows` 狀態。
+Events 清單只渲染捲動位置附近的列（並以 spacer 保持捲軸及清單位置正確），事件 payload 在展開前保持收合，搜尋則涵蓋完整的 500 筆視窗，而非只搜尋已渲染列。
+
+LOAD Overview、Results 及基本 Metrics 使用有界的 `att-load-terminal-result/v1` projection，會即時顯示執行結果、performance verdict、aggregate 計數及主要 runtime／preparation 原因。初次載入 Job Details 時不會讀取 artifact index 或下載詳細報告。精簡結果中的 PENDING archive 狀態只是初始提示；開啟 Results 或 Metrics 後，系統才透過現有授權 artifact index route 核實目前狀態。畫面會顯示 READY、PENDING、ARCHIVING、FAILED、expired 或 omitted，同時保留 inline 結果。開啟 Metrics 後才會透過授權 artifact text route 載入 `load-summary.json`；archive 準備完成後才渲染 time-series 及詳細表格。只有開啟 Artifacts 分頁才會載入其 index。詳細報告已載入時，charts 會使用回傳的 bucket（最多 4,096 個）；無障礙 bucket 表格每頁顯示 100 列，提供 Previous、Next 及 `Showing rows` 狀態。Bucket coverage 會指出 4,096 筆的一秒 rolling window，以及獨立的 `LoadWindowMetrics` bin 寬度與涵蓋範圍。
 
 Server Journal Event ID 是 append order 的排序鍵；每個 Job 的 ID 在 Server 重啟、journal trimming 及 compaction 前後都保持單調遞增。UI 會按 Server append order 顯示事件，不會按 timestamp 重新排序。數字 ID 如不大於最後顯示的 ID，會視為 duplicate 或 stale out-of-order replay 而忽略，計入相應數量，且不會重新排序插入清單。向前出現 gap 是合法情況，只會計入診斷。非數字 ID 使用有界的 recent-ID index 去重。原生 `EventSource` 使用 `Last-Event-ID` 重新連線；重疊 replay 即使已離開可見 window，或在 **Clear view** 後到達，也不會再次出現。任何計數不為零時，非即時更新的 **Stream diagnostics** 訊息會顯示已忽略的 duplicate、out-of-order replay 及 ID gap 數量。
 

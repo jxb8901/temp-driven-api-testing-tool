@@ -269,6 +269,7 @@ describe('JobsPage React feature', () => {
   ] as const)('shows truthful ZIP size for %s and %s bytes', async (archiveStatus, archiveSizeBytes, expected) => {
     const api=makeApi({getJobArtifactArchive: vi.fn(async () => ({ archiveStatus, archiveSizeBytes, items: [], primaryReports: [] })), artifactArchiveHref: () => '/archive.zip'});
     await act(async () => root.render(<JobsPage api={api} jobId="JOB-204" onOpenJob={vi.fn()} onShowList={vi.fn()} />));
+    await click(host.querySelector('#job-tab-artifacts')!);
     await advance();
     const link=host.querySelector('#job-panel-artifacts a');
     if(archiveStatus !== 'READY') expect(link).toBeNull();
@@ -282,7 +283,9 @@ describe('JobsPage React feature', () => {
       getJobArtifactArchive:vi.fn(async () => ({archiveStatus:'READY' as const, items:[], primaryReports:[], archiveMetrics})),
     });
     await act(async () => root.render(<JobsPage api={api} jobId="JOB-204" onOpenJob={vi.fn()} onShowList={vi.fn()} />));
+    await click(host.querySelector('#job-tab-artifacts')!);
     await advance();
+    await click(host.querySelector('#job-tab-metrics')!);
     const metrics=host.querySelector('[aria-label="Artifact archive metrics"]');
     expect(metrics?.textContent).toContain('Outcome: READY');
     expect(metrics?.textContent).toContain('Unavailable');
@@ -301,6 +304,7 @@ describe('JobsPage React feature', () => {
       getJobArtifactText: vi.fn(async () => '<html><head><meta http-equiv="Content-Security-Policy" content="default-src \'none\'; script-src \'sha256-reviewed\'; style-src \'unsafe-inline\'"></head><body><h1>Authenticated report</h1></body></html>'),
     });
     await act(async () => root.render(<JobsPage api={api} jobId="JOB-204" onOpenJob={vi.fn()} onShowList={vi.fn()} />));
+    await click(host.querySelector('#job-tab-artifacts')!);
     await advance();
     const panel = host.querySelector('#job-panel-artifacts')!;
     expect(panel.textContent).toContain('View Report: load/run/report/index.html');
@@ -381,6 +385,7 @@ describe('JobsPage React feature', () => {
     const retryArchive = vi.fn(async () => ({}));
     const api = makeApi({ getJob: vi.fn(async () => ({ ...sampleJob, status: 'PASS' })), getJobArtifactArchive: getArchive, retryJobArtifactArchive: retryArchive });
     await act(async () => root.render(<JobsPage api={api} jobId="JOB-204" onOpenJob={vi.fn()} onShowList={vi.fn()} />));
+    await click(host.querySelector('#job-tab-artifacts')!);
     await advance();
     expect(host.querySelector('#job-panel-artifacts')?.textContent).toContain('PENDING');
     await advance(2100);
@@ -392,7 +397,10 @@ describe('JobsPage React feature', () => {
   });
 
   it('renders stable job tabs and API-backed content for a loaded job', async () => {
-    const api = makeApi();
+    const api = makeApi({
+      getJobArtifactArchive: vi.fn(async () => ({ archiveStatus: 'READY' as const, items: [], primaryReports: [{ path: 'load-summary.json', size: 80 }] })),
+      getJobArtifactText: vi.fn(async () => JSON.stringify({ metrics: sampleResult.result?.metrics })),
+    });
     await act(async () => root.render(<JobsPage api={api} jobId="JOB-204" onOpenJob={vi.fn()} onShowList={vi.fn()} confirmCancel={() => true} />));
     await act(async () => { await Promise.resolve(); });
 
@@ -409,7 +417,13 @@ describe('JobsPage React feature', () => {
     expect(host.querySelector('#job-panel-results')?.textContent).toContain('Raw result payload');
     expect(host.querySelector('[aria-label="Retained evidence quotas"]')?.textContent).toContain('Failure samples retained5');
     expect(host.querySelector('[aria-label="Retained evidence quotas"] [role="alert"]')?.textContent).toContain('Failure evidence quota reached');
+    expect(api.getJobArtifactArchive).not.toHaveBeenCalled();
+    expect(api.getJobArtifactText).not.toHaveBeenCalled();
+    await click(host.querySelector('#job-tab-artifacts')!);
+    await advance();
     expect(host.querySelector('#job-panel-artifacts')?.textContent).toContain('load-summary.json');
+    await click(host.querySelector('#job-tab-metrics')!);
+    await advance();
     const metricsPanel = host.querySelector('#job-panel-metrics')!;
     expect(metricsPanel.textContent).toContain('p95Ms');
     expect(metricsPanel.querySelectorAll('svg[role="img"]')).toHaveLength(3);
@@ -432,6 +446,85 @@ describe('JobsPage React feature', () => {
     expect(host.querySelector('#job-panel-live pre.att-console')?.textContent).toContain('[RUN] worker ready');
     expect(host.querySelector('#job-panel-live pre.att-console')?.innerHTML).not.toContain('<');
     expect(host.querySelector('#job-panel-live')?.textContent).toContain('connected');
+  });
+
+  it('renders the compact terminal result and primary ERROR cause without requesting an archive on initial detail load', async () => {
+    const compact: JobResultResponse = {
+      job: { jobId: 'JOB-204', command: 'load', status: 'ERROR', exitCode: 17 },
+      result: { status: 'ERROR', exitCode: 17, summary: {
+        schemaVersion: 'att-load-terminal-result/v1',
+        execution: { executionId: 'run-compact', status: 'ERROR', exitCode: 17, durationMs: 12000 },
+        performance: { executionStatus: 'ERROR', verdict: 'NOT_EVALUATED' },
+        metrics: { scheduled: 100, started: 98, completed: 90, success: 80, runtimeError: 7, failure: 3, completedThroughput: 7.5 },
+        thresholds: { verdict: 'PASS', total: 2 },
+        diagnostics: { primaryError: { code: 'MQ_POOL_TIMEOUT', summary: 'Connection pool wait timed out.' } },
+        metricCoverage: { loadMetricsBucketCapacity: 4096, observedBucketCoverageMs: 5000, windowSeriesBinWidthMs: 2000, windowSeriesCapacity: 1024, windowSeriesCoverage: 'ROLLING_WINDOW' },
+        archive: { reportAvailability: 'PENDING', status: 'PENDING' },
+      } },
+    };
+    const getArchive = vi.fn(async () => ({ archiveStatus: 'READY' as const, items: [], primaryReports: [] }));
+    const api = makeApi({ getJobResult: vi.fn(async () => compact), getJobArtifactArchive: getArchive });
+    await act(async () => root.render(<JobsPage api={api} jobId="JOB-204" onOpenJob={vi.fn()} onShowList={vi.fn()} />));
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+
+    const overview = host.querySelector('#job-panel-overview')!;
+    expect(overview.querySelector('[aria-label="Compact LOAD result"]')?.textContent).toContain('MQ_POOL_TIMEOUT');
+    expect(overview.textContent).toContain('Connection pool wait timed out.');
+    expect(overview.textContent).toContain('90 / 80');
+    expect(getArchive).not.toHaveBeenCalled();
+    const raw = host.querySelector('#job-panel-results details[open]');
+    expect(raw).toBeNull();
+
+    await click(host.querySelector('#job-tab-results')!);
+    expect(host.querySelector('#job-panel-results [aria-label="LOAD root-cause diagnosis"]')?.textContent).toContain('MQ_POOL_TIMEOUT');
+    expect(getArchive).toHaveBeenCalledOnce();
+  });
+
+  it('loads detailed LOAD metrics only after Metrics is opened through the authorized archive API', async () => {
+    const compact: JobResultResponse = { job: { jobId: 'JOB-204', command: 'load', status: 'PASS' }, result: { status: 'PASS', summary: {
+      schemaVersion: 'att-load-terminal-result/v1', execution: { status: 'PASS' }, performance: { verdict: 'PASS' },
+      metrics: { scheduled: 60, started: 60, completed: 60, success: 60, runtimeError: 0 },
+      metricCoverage: { loadMetricsBucketCapacity: 4096, observedBucketCoverageMs: 3000, windowSeriesBinWidthMs: 1000, windowSeriesCapacity: 1024, windowSeriesCoverage: 'ROLLING_WINDOW' },
+      archive: { reportAvailability: 'PENDING', status: 'PENDING' },
+    } } };
+    const archiveRead = vi.fn(async () => ({ archiveStatus: 'READY' as const, items: [], primaryReports: [{ path: 'load/run/load-summary.json', size: 500 }] }));
+    const textRead = vi.fn(async () => JSON.stringify({ metrics: { completedThroughput: 10, buckets: {
+      '1800000000000': { bucketStartEpochMs: 1800000000000, completedTps: 9, p95Ms: 80, p99Ms: 120 },
+      '1800000001000': { bucketStartEpochMs: 1800000001000, completedTps: 10, p95Ms: 70, p99Ms: 110 },
+    } } }));
+    const api = makeApi({ getJobResult: vi.fn(async () => compact), getJobArtifactArchive: archiveRead, getJobArtifactText: textRead });
+    await act(async () => root.render(<JobsPage api={api} jobId="JOB-204" onOpenJob={vi.fn()} onShowList={vi.fn()} />));
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(archiveRead).not.toHaveBeenCalled();
+    expect(textRead).not.toHaveBeenCalled();
+    expect(host.querySelector('#job-panel-overview')?.textContent).toContain('60 / 60');
+
+    await click(host.querySelector('#job-tab-metrics')!);
+    await advance();
+    expect(archiveRead).toHaveBeenCalledWith('JOB-204', 0, expect.any(AbortSignal));
+    expect(textRead).toHaveBeenCalledWith('JOB-204', 'load/run/load-summary.json', expect.any(AbortSignal));
+    expect(host.querySelector('#job-panel-metrics')?.querySelectorAll('svg[role="img"]')).toHaveLength(3);
+    expect(host.querySelector('#job-panel-metrics')?.textContent).toContain('Detailed report');
+  });
+
+  it.each([
+    ['PENDING', 'PENDING — initial hint; open Results or Metrics to check the current archive state.'],
+    ['ARCHIVING', 'ARCHIVING — the report archive is being published.'],
+    ['FAILED', 'FAILED — the inline result remains available.'],
+    ['READY', 'OMITTED — the report was not included in the archive.'],
+  ] as const)('keeps inline LOAD metrics available while report availability is %s', async (archiveStatus, expected) => {
+    const compact: JobResultResponse = { job: { jobId: 'JOB-204', command: 'load', status: 'PASS' }, result: { status: 'PASS', summary: {
+      schemaVersion: 'att-load-terminal-result/v1', execution: { status: 'PASS' }, performance: { verdict: 'PASS' },
+      metrics: { scheduled: 12, started: 12, completed: 12, success: 12, runtimeError: 0 },
+      archive: { reportAvailability: 'PENDING', status: 'PENDING' },
+    } } };
+    const api = makeApi({ getJobResult: vi.fn(async () => compact), getJobArtifactArchive: vi.fn(async () => ({ archiveStatus, items: [], primaryReports: [] })) });
+    await act(async () => root.render(<JobsPage api={api} jobId="JOB-204" onOpenJob={vi.fn()} onShowList={vi.fn()} />));
+    await click(host.querySelector('#job-tab-metrics')!);
+    await advance();
+    expect(host.querySelector('#job-panel-metrics')?.textContent).toContain(expected);
+    expect(host.querySelector('#job-panel-metrics')?.textContent).toContain('12 / 12');
+    expect(api.getJobArtifactText).toBeUndefined();
   });
 
   it('shows effective per-workload evidence caps without borrowing fields', async () => {

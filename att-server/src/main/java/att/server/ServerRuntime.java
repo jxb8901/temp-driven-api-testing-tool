@@ -731,7 +731,38 @@ final class ServerRuntime implements AutoCloseable {
         if(("PROGRESS".equals(type)||"LOG".equals(type))&&job.executionReadyNanos==0)job.executionReadyNanos=eventNanos;
         switch(type){case "STATUS"->{String status=event.path("status").asText("");if("RUNNING".equals(status)&&"PREPARING".equals(job.status))transition(job,"RUNNING");}
             case "PROGRESS"->append(job,"progress",safe);case "LOG"->append(job,"log",safe);case "DIAGNOSTIC"->{job.diagnosticJson=JSON.writeValueAsString(safe);store.update(job);append(job,"diagnostic",safe);}
-            case "RESULT"->{if(job.processFence!=null){job.processFence.observe();rememberWorkerProcesses(job,job.processFence);}job.resultReceivedNanos=eventNanos;Object workerMetrics=safe.get("workerMetrics");if(workerMetrics instanceof Map<?,?>)job.workerMetrics=(Map<String,Object>)workerMetrics;String status=event.path("status").asText("ERROR");int code=event.path("exitCode").asInt(3);Object result=safe.get("result");if(result instanceof Map<?,?> original&&job.request.configurationProvenance!=null){Map<String,Object> enriched=new LinkedHashMap<>((Map<String,Object>)original);Map<String,Object> summary=enriched.get("summary") instanceof Map<?,?> existing?new LinkedHashMap<>((Map<String,Object>)existing):new LinkedHashMap<>();summary.put("configuration",job.request.configurationProvenance);enriched.put("summary",summary);result=enriched;}job.resultJson=result==null?"{}":JSON.writeValueAsString(result);job.resultReceived=true;Object console=safe.get("console");finish(job,normalizeTerminal(status),code,console instanceof String consoleLine?consoleLine:null);}
+            case "RESULT"->{
+                if(job.processFence!=null){job.processFence.observe();rememberWorkerProcesses(job,job.processFence);}
+                job.resultReceivedNanos=eventNanos;
+                Object workerMetrics=safe.get("workerMetrics");
+                if(workerMetrics instanceof Map<?,?>)job.workerMetrics=new LinkedHashMap<>((Map<String,Object>)workerMetrics);
+                if(safe.get("loadResultTransport") instanceof Map<?,?> transport) {
+                    Map<String,Object> current=job.workerMetrics==null?new LinkedHashMap<>():new LinkedHashMap<>(job.workerMetrics);
+                    current.put("loadResultTransport",new LinkedHashMap<>((Map<String,Object>)transport));
+                    job.workerMetrics=current;
+                }
+                String status=event.path("status").asText("ERROR");
+                int code=event.path("exitCode").asInt(3);
+                Object result=safe.get("result");
+                if("load".equals(job.command)) {
+                    Map<String,Object> original=result instanceof Map<?,?>?(Map<String,Object>)result:new LinkedHashMap<>();
+                    Map<String,Object> enriched=new LinkedHashMap<>(original);
+                    if(job.request.configurationProvenance!=null) {
+                        Map<String,Object> summary=enriched.get("summary") instanceof Map<?,?> existing
+                                ?new LinkedHashMap<>((Map<String,Object>)existing):new LinkedHashMap<>();
+                        summary.put("configuration",job.request.configurationProvenance);enriched.put("summary",summary);
+                    }
+                    result=att.server.api.LoadTerminalResult.projectOperationResult(enriched,status,code);
+                } else if(result instanceof Map<?,?> original&&job.request.configurationProvenance!=null) {
+                    Map<String,Object> enriched=new LinkedHashMap<>((Map<String,Object>)original);
+                    Map<String,Object> summary=enriched.get("summary") instanceof Map<?,?> existing?new LinkedHashMap<>((Map<String,Object>)existing):new LinkedHashMap<>();
+                    summary.put("configuration",job.request.configurationProvenance);enriched.put("summary",summary);result=enriched;
+                }
+                job.resultJson=result==null?"{}":JSON.writeValueAsString(result);
+                job.resultReceived=true;
+                Object console=safe.get("console");
+                finish(job,normalizeTerminal(status),code,console instanceof String consoleLine?consoleLine:null);
+            }
             default->append(job,"log",Map.of("message","Worker emitted an unrecognized event"));}
     }
     void recordProtocolLimit(Job job,att.server.api.internal.WorkerProtocol.Frame frame) throws Exception {
@@ -913,7 +944,8 @@ final class ServerRuntime implements AutoCloseable {
                 String diagnosticJson=active.diagnosticJson!=null?active.diagnosticJson:(String)record.get("diagnosticJson");
                 Map<String,Object> out=new LinkedHashMap<>();
                 out.put("job",active.view());
-                out.put("result",resultJson==null?null:publicJson(id,resultJson));
+                out.put("result",resultJson==null?null:publicJobResult(id,active.command,active.status,
+                        active.exitCode==null?3:active.exitCode,resultJson));
                 out.put("diagnostic",diagnosticJson==null?null:publicJson(id,diagnosticJson));
                 return out;
             }
@@ -921,7 +953,8 @@ final class ServerRuntime implements AutoCloseable {
         Map<String,Object> record=store.get(id);if(record==null)throw new NotFoundException();
         Map<String,Object> out=new LinkedHashMap<>();out.put("job",jobRecord(id));
         String resultJson=(String)record.get("resultJson"),diagnosticJson=(String)record.get("diagnosticJson");
-        out.put("result",resultJson==null?null:publicJson(id,resultJson));
+        out.put("result",resultJson==null?null:publicJobResult(id,String.valueOf(record.get("command")),String.valueOf(record.get("status")),
+                record.get("exitCode") instanceof Number?((Number)record.get("exitCode")).intValue():3,resultJson));
         out.put("diagnostic",diagnosticJson==null?null:publicJson(id,diagnosticJson));
         return out;
     }
@@ -3120,14 +3153,59 @@ final class ServerRuntime implements AutoCloseable {
     private void transition(Job j,String next) throws Exception {synchronized(j){if(j.terminal())return;j.status=next;if("RUNNING".equals(next))j.startedAt=Instant.now();store.update(j);append(j,"status",Map.of("jobId",j.id,"status",next));}}
     // terminal() shares this monitor; SSE also waits for JobEvents' result marker before closing.
     void finish(Job j,String status,int code) throws Exception {finish(j,status,code,null);}
-    void finish(Job j,String status,int code,String console) throws Exception {synchronized(j){if(j.terminal())return;j.status=status;j.exitCode=code;j.finishedAt=Instant.now();store.update(j);append(j,"status",Map.of("jobId",j.id,"status",status));Map<String,Object> result=new LinkedHashMap<>();result.put("jobId",j.id);result.put("status",status);result.put("exitCode",code);result.put("result",j.resultJson==null?null:publicJson(j.id,j.resultJson));if(console!=null&&!console.isBlank())result.put("console",console);append(j,"result",result);}}
+    void finish(Job j,String status,int code,String console) throws Exception {
+        synchronized(j) {
+            if(j.terminal())return;
+            if("load".equals(j.command)&&j.resultJson==null) {
+                List<Map<String,Object>> diagnostics=new ArrayList<>();
+                if(j.diagnosticJson!=null) {
+                    Object parsed=JSON.readValue(j.diagnosticJson,Object.class);
+                    if(parsed instanceof Map<?,?> diagnostic)diagnostics.add((Map<String,Object>)diagnostic);
+                }
+                Map<String,Object> fallback=new LinkedHashMap<>();
+                fallback.put("executionId",j.id);fallback.put("status",status);fallback.put("exitCode",code);
+                fallback.put("diagnostics",diagnostics);fallback.put("summary",Map.of());
+                j.resultJson=JSON.writeValueAsString(att.server.api.LoadTerminalResult.projectOperationResult(fallback,status,code));
+            }
+            j.status=status;j.exitCode=code;j.finishedAt=Instant.now();store.update(j);
+            append(j,"status",Map.of("jobId",j.id,"status",status));
+            Map<String,Object> result=new LinkedHashMap<>();
+            result.put("jobId",j.id);result.put("status",status);result.put("exitCode",code);
+            result.put("result",j.resultJson==null?null:publicJson(j.id,j.resultJson));
+            if(console!=null&&!console.isBlank())result.put("console",console);
+            Map<String,Object> terminalEvent=append(j,"result",result);
+            if("load".equals(j.command)) {
+                Map<String,Object> worker=j.workerMetrics==null?new LinkedHashMap<>():new LinkedHashMap<>(j.workerMetrics);
+                Map<String,Object> sizes=new LinkedHashMap<>();
+                // Worker frame telemetry is carried outside the public result payload.
+                if(worker.get("loadResultTransport") instanceof Map<?,?> transport) {
+                    for(String key:new String[]{"workerFrameBytes","workerFrameLimitBytes","journalDataLimitBytes"})
+                        if(transport.get(key) instanceof Number)sizes.put(key,transport.get(key));
+                }
+                Object eventData=terminalEvent.get("data");
+                sizes.put("storedResultBytes",j.resultJson==null?0:j.resultJson.getBytes(StandardCharsets.UTF_8).length);
+                sizes.put("journalDataBytes",JSON.writeValueAsBytes(eventData).length);
+                sizes.put("journalEventBytes",JSON.writeValueAsBytes(terminalEvent).length);
+                Object sseData=publicEventData(eventData,config.dataDir.resolve("jobs").resolve(j.id).resolve("output"),packageRootForJob(j.id));
+                String ssePayload=JSON.writeValueAsString(sseData);
+                String sseEvent="id: "+terminalEvent.get("id")+"\nevent: result\ndata: "+ssePayload+"\n\n";
+                sizes.put("sseEventBytes",sseEvent.getBytes(StandardCharsets.UTF_8).length);
+                sizes.put("sseEventLimitBytes",JobEvents.MAX_EVENT_DATA_BYTES);
+                sizes.put("journalDataLimitBytes",JobEvents.MAX_EVENT_DATA_BYTES);
+                sizes.put("workerFrameLimitBytes",att.server.api.internal.WorkerProtocol.MAX_FRAME_BYTES);
+                worker.put("loadTerminalResult",sizes);
+                j.workerMetrics=worker;
+                store.update(j);
+            }
+        }
+    }
     private void finishQuietly(Job j,String status,int code,String diagnostic,String message){try{j.diagnosticJson=JSON.writeValueAsString(Map.of("code",diagnostic,"summary",message));append(j,"diagnostic",JSON.readValue(j.diagnosticJson,Map.class));finish(j,status,code);}catch(Exception ignored){j.status=status;j.exitCode=code;j.finishedAt=Instant.now();}}
-    private void append(Job j,String type,Map<String,?> data) throws Exception {
+    private Map<String,Object> append(Job j,String type,Map<String,?> data) throws Exception {
         Map<String,Object> payload=new LinkedHashMap<>();if(data!=null)data.forEach(payload::put);
         Object existing=payload.get("console");
         if(existing instanceof String line&&!line.isBlank()) payload.put("console",publishConsole(line));
         else {String line=lifecycleConsole(j,type,payload);if(line!=null&&!line.isBlank())payload.put("console",publishConsole(line));}
-        j.events.append(type,payload);
+        return j.events.append(type,payload);
     }
     private static String lifecycleConsole(Job j,String type,Map<String,Object> payload) {
         String mode=executionMode(j==null?null:j.command);
@@ -3364,6 +3442,14 @@ final class ServerRuntime implements AutoCloseable {
     }
     private JsonNode publicJson(String id,String json) throws Exception {
         JsonNode node=JSON.readTree(json);Object safe=att.server.api.internal.DiagnosticSanitizer.sanitizeValue(JSON.convertValue(node,Object.class));node=JSON.valueToTree(safe);Path output=config.dataDir.resolve("jobs").resolve(id).resolve("output").toAbsolutePath().normalize();
+        return sanitize(node,output,packageRootForJob(id));
+    }
+    private JsonNode publicJobResult(String id,String command,String status,int exitCode,String json) throws Exception {
+        if(!"load".equals(command))return publicJson(id,json);
+        Map<?,?> stored=JSON.readValue(json,Map.class);
+        Map<String,Object> compact=att.server.api.LoadTerminalResult.projectOperationResult(stored,status,exitCode);
+        JsonNode node=JSON.valueToTree(att.server.api.internal.DiagnosticSanitizer.sanitizeValue(compact));
+        Path output=config.dataDir.resolve("jobs").resolve(id).resolve("output").toAbsolutePath().normalize();
         return sanitize(node,output,packageRootForJob(id));
     }
     private static boolean semanticLocation(String field) {

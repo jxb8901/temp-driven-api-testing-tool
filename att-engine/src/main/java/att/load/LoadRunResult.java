@@ -3,6 +3,7 @@ package att.load;
 import att.Version;
 import att.core.ResultAggregator;
 import att.core.ResultStatus;
+import att.server.api.LoadTerminalResult;
 
 import java.time.Duration;
 import java.time.Instant;
@@ -129,6 +130,90 @@ public final class LoadRunResult {
         result.put("resources", resources);
         if (!evidence.isEmpty()) result.put("evidence", evidence);
         result.put("report", "report/index.html");
+        return result;
+    }
+
+    /** Builds the Worker/Server control-plane projection without copying full metrics or evidence maps. */
+    public Map<String, Object> toTerminalSummary(Map<String, Object> configuration) {
+        Map<String, Object> source = new LinkedHashMap<String, Object>();
+        long durationMs = Math.max(0L, Duration.between(startedAt, endedAt).toMillis());
+        source.put("executionId", runId); source.put("runId", runId); source.put("status", status().name());
+        source.put("exitCode", exitCode()); source.put("durationMs", durationMs);
+        source.put("startedAt", startedAt.toString()); source.put("endedAt", endedAt.toString());
+        source.put("executionStatus", executionStatus()); source.put("performanceVerdict", performanceVerdict());
+        source.put("metrics", metrics.values());
+        source.put("thresholds", thresholds.toMap());
+        Map<String, Object> workloadSummaries = new LinkedHashMap<String, Object>();
+        for (Map.Entry<String, LoadRunResult> entry : workloads.entrySet()) {
+            LoadRunResult workload = entry.getValue();
+            Map<String, Object> summary = new LinkedHashMap<String, Object>();
+            summary.put("status", workload.status().name()); summary.put("executionStatus", workload.executionStatus());
+            summary.put("performanceVerdict", workload.performanceVerdict()); summary.put("metrics", workload.metrics().values());
+            workloadSummaries.put(entry.getKey(), summary);
+        }
+        source.put("workloads", workloadSummaries);
+        source.put("resources", resources);
+        source.put("evidence", evidence);
+        source.put("diagnostics", terminalDiagnostics());
+        source.put("metricCoverage", terminalMetricCoverage(durationMs));
+        Map<String, Object> completeness = new LinkedHashMap<String, Object>();
+        completeness.put("state", "OMITTED"); completeness.put("truncated", Boolean.TRUE);
+        Map<String, Object> omitted = new LinkedHashMap<String, Object>();
+        omitted.put("timeSeriesBuckets", metrics.buckets().size());
+        Object failureSamples = metrics.value("failureDiagnostics");
+        omitted.put("failureSamples", failureSamples instanceof List ? ((List<?>) failureSamples).size() : 0);
+        omitted.put("workloads", workloads.size()); omitted.put("thresholds", thresholds.results().size());
+        Object evidenceCount = evidence.get("count");
+        omitted.put("evidenceItems", evidenceCount instanceof Number ? ((Number) evidenceCount).intValue() : 0);
+        completeness.put("omittedCounts", omitted); completeness.put("detailSource", "load-summary.json");
+        source.put("detailCompleteness", completeness);
+        Map<String, Object> archive = new LinkedHashMap<String, Object>();
+        Map<String, Object> paths = new LinkedHashMap<String, Object>();
+        paths.put("loadSummaryJson", "load/" + runId + "/load-summary.json");
+        paths.put("loadSummaryYaml", "load/" + runId + "/load-summary.yaml");
+        paths.put("report", "load/" + runId + "/report/index.html");
+        archive.put("paths", paths); archive.put("status", "PENDING"); archive.put("reportAvailability", "PENDING");
+        source.put("archive", archive); source.put("reportProduced", Boolean.TRUE);
+        if (configuration != null) source.put("configuration", configuration);
+        return LoadTerminalResult.compact(source);
+    }
+
+    private Map<String, Object> terminalDiagnostics() {
+        Map<String, Object> result = new LinkedHashMap<String, Object>();
+        Object primary = metrics.value("primaryRuntimeError");
+        if (primary instanceof Map) result.put("primaryError", primary);
+        Object classifications = metrics.value("runtimeErrorClassifications");
+        if (classifications instanceof Map) result.put("classifications", classifications);
+        return result;
+    }
+
+    private Map<String, Object> terminalMetricCoverage(long durationMs) {
+        Map<String, Object> result = new LinkedHashMap<String, Object>();
+        result.put("loadMetricsBucketCapacity", metrics.value("timeSeriesBucketCapacity"));
+        result.put("loadMetricsBucketCount", metrics.buckets().size());
+        result.put("loadMetricsBucketWidthMs", 1000L);
+        long first = Long.MAX_VALUE, last = Long.MIN_VALUE;
+        for (String key : metrics.buckets().keySet()) {
+            try { long at = Long.parseLong(key); first = Math.min(first, at); last = Math.max(last, at); }
+            catch (NumberFormatException ignored) { }
+        }
+        if (first != Long.MAX_VALUE && last != Long.MIN_VALUE) {
+            result.put("observedBucketStartEpochMs", first); result.put("observedBucketEndEpochMs", last + 1000L);
+            result.put("observedBucketCoverageMs", Math.max(0L, last - first + 1000L));
+        }
+        int capacity = ((Number) metrics.value("timeSeriesBucketCapacity")).intValue();
+        result.put("runDurationMs", durationMs); result.put("fullDurationInRollingWindow", durationMs <= capacity * 1000L);
+        Object windowValue = metrics.value("windowMetrics");
+        if (windowValue instanceof Map) {
+            Object seriesValue = ((Map<?, ?>) windowValue).get("timeSeries");
+            if (seriesValue instanceof Map) {
+                Map<?, ?> series = (Map<?, ?>) seriesValue;
+                result.put("windowSeriesCapacity", series.get("capacity"));
+                result.put("windowSeriesBinWidthMs", series.get("bucketDurationMs"));
+                result.put("windowSeriesCoverage", series.get("coverage"));
+            }
+            result.put("windowMetricsSchemaVersion", ((Map<?, ?>) windowValue).get("schemaVersion"));
+        }
         return result;
     }
 

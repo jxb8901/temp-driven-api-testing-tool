@@ -210,7 +210,7 @@ public final class DefaultAttService implements AttService {
         if(renderStats!=null) for(Map.Entry<String,Object> entry:renderStats.entrySet())
             if(entry.getValue() instanceof Number) profile.counter(entry.getKey(),((Number)entry.getValue()).longValue());
         profile.write(runDir);
-        return new LoadResult(id,result.status().name(),result.exitCode(),elapsed(started),Collections.<Diagnostic>emptyList(),paths("report",OperationResult.display(report,request.packageRoot()),"outputDirectory",OperationResult.display(runDir,request.packageRoot()),"configuration",OperationResult.display(runDir.resolve("configuration.json"),request.packageRoot())),withConfiguration(result.toMap(),cfg));
+        return new LoadResult(id,result.status().name(),result.exitCode(),elapsed(started),Collections.<Diagnostic>emptyList(),paths("report",OperationResult.display(report,request.packageRoot()),"outputDirectory",OperationResult.display(runDir,request.packageRoot()),"configuration",OperationResult.display(runDir.resolve("configuration.json"),request.packageRoot())),result,att.config.ConfigurationEvidence.metadata(cfg));
     }
     private static Map<String,Object> withConfiguration(Map<String,Object> summary, FrameworkConfig config) {
         Map<String,Object> value = new LinkedHashMap<String,Object>(summary);

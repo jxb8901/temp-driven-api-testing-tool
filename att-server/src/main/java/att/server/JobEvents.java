@@ -25,7 +25,7 @@ import java.util.function.Consumer;
 /** Retained, job-local event journal. Client delivery runs independently from the Worker consumer. */
 final class JobEvents {
     private static final ObjectMapper JSON = new ObjectMapper();
-    private static final int MAX_EVENT_DATA_BYTES = 65536;
+    static final int MAX_EVENT_DATA_BYTES = 65536;
     private static final int COMPACT_EVERY_EVENTS = 128;
     private static final int MAX_COMPACTION_TAIL_EVENTS = 32;
     private static final Object[] COMPACTION_LOCKS = new Object[64];
