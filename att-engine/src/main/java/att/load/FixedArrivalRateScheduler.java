@@ -220,6 +220,8 @@ public final class FixedArrivalRateScheduler implements LoadScheduler {
             synchronized (admissionLock) {
                 if (cancelled.get()) {
                     inFlight.decrementAndGet();
+                    LoadSchedulerSupport.emit(metrics, listener, tag(LoadEvent.rejected(runId, "arrivalRate", phase, id,
+                            sequenceValue, dueAt, timing.now(), "CANCELLED_BEFORE_ADMISSION")));
                     signalWorkerChange();
                     return;
                 }
@@ -228,11 +230,15 @@ public final class FixedArrivalRateScheduler implements LoadScheduler {
                 catch (RejectedExecutionException rejected) {
                     admittedTasks.remove(id, taskHandle);
                     inFlight.decrementAndGet();
+                    LoadSchedulerSupport.emit(metrics, listener, tag(LoadEvent.rejected(runId, "arrivalRate", phase, id,
+                            sequenceValue, dueAt, timing.now(), "SUBMISSION_REJECTED")));
                     signalWorkerChange();
                 }
             }
         } catch (RejectedExecutionException rejected) {
             inFlight.decrementAndGet();
+            LoadSchedulerSupport.emit(metrics, listener, tag(LoadEvent.rejected(runId, "arrivalRate", phase, id,
+                    sequenceValue, dueAt, timing.now(), "SUBMISSION_REJECTED")));
             signalWorkerChange();
         }
     }
