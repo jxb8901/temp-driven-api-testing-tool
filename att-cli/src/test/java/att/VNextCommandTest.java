@@ -238,6 +238,55 @@ class VNextCommandTest {
         }
     }
 
+    @Test void validateAllMapsPartialBoundRuntimeConfigToWarn() throws Exception {
+        Path home=packageRoot.resolve("bound-partial-home");
+        Path cliConfig=home.resolve("config/config.yaml");
+        Path boundRoot=home.resolve("bound-runtime");
+        Path boundConfig=boundRoot.resolve("config/config.yaml");
+        Path packages=Files.createDirectories(home.resolve("packages"));
+        Path payments=Files.createDirectories(packages.resolve("payments"));
+        Files.createDirectories(payments.resolve("testcase"));
+        Files.createDirectories(payments.resolve("templates"));
+        Files.write(payments.resolve("package.yaml"),
+                "schemaVersion: att-package/v1\\n".getBytes(StandardCharsets.UTF_8));
+        Files.createDirectories(cliConfig.getParent());Files.createDirectories(boundConfig.getParent());
+        TestSchemas.install(home);TestSchemas.install(boundRoot);
+        Files.write(cliConfig,runtimeConfig(null).getBytes(StandardCharsets.UTF_8));
+        StringBuilder boundedRuntime=new StringBuilder("schemaVersion: att-config/v2.13\\nenvironments:\\n");
+        for(int i=0;i<=att.validation.RuntimeConfigurationValidator.MAX_ENVIRONMENT_PROFILES;i++)
+            boundedRuntime.append("  Env").append(String.format("%03d",i)).append(": {}\\n");
+        Files.write(boundConfig,boundedRuntime.toString().getBytes(StandardCharsets.UTF_8));
+
+        Path serverConfig=home.resolve("config/att-server.yaml");
+        Path dataDirectory=home.resolve("server-data");
+        String serverYaml="server:\\n  dataDir: "+yaml(dataDirectory)+"\\n  runtimeConfigPath: "+yaml(boundConfig)+"\\n"
+                +"  javaExecutable: "+yaml(javaExecutable())+"\\nworkers: {}\\npackages:\\n"
+                +"  allowedRoots: ["+yaml(packages)+"]\\n  entries:\\n    payments: "+yaml(payments)+"\\n";
+        Files.write(serverConfig,serverYaml.getBytes(StandardCharsets.UTF_8));
+
+        String previousHome=System.getProperty("att.home"),previousServer=System.getProperty("att.server.config");
+        try {
+            System.setProperty("att.home",home.toString());
+            System.setProperty("att.server.config",serverConfig.toString());
+            Captured captured=capture(()->VNextCommand.run(new String[]{
+                    "--local","--format","json","validate","--all"}));
+            assertEquals(3,captured.exitCode,captured.stdout);
+            Map<?,?> result=new ObjectMapper().readValue(captured.stdout,Map.class);
+            assertEquals("PARTIAL",result.get("overallStatus"),captured.stdout);
+            assertEquals(Boolean.FALSE,result.get("complete"),captured.stdout);
+            assertEquals(3,((Number)result.get("exitCode")).intValue(),captured.stdout);
+            Map<?,?> server=findSection((List<?>)result.get("sections"),"ATT Server Config");
+            Map<?,?> binding=findSection((List<?>)result.get("sections"),"Bound Shared Runtime Config");
+            assertNotNull(server,captured.stdout);
+            assertNotNull(binding,captured.stdout);
+            assertEquals("WARN",server.get("status"),captured.stdout);
+            assertEquals("WARN",binding.get("status"),captured.stdout);
+        } finally {
+            if(previousHome==null)System.clearProperty("att.home");else System.setProperty("att.home",previousHome);
+            if(previousServer==null)System.clearProperty("att.server.config");else System.setProperty("att.server.config",previousServer);
+        }
+    }
+
     @Test void validateAllReportsBoundedPackageScansAsPartialNotInvalid() throws Exception {
         Path home=packageRoot.resolve("partial-home");
         Path config=home.resolve("config/config.yaml");

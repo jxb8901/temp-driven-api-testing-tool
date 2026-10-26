@@ -300,7 +300,7 @@ public final class VNextCommand {
                     Path boundRoot=RuntimeConfigPath.root(boundRuntime);
                     AttValidationReport boundReport=RuntimeConfigurationValidator.validate(boundRuntime,boundRoot,null,null,"LOCAL",true);
                     AttValidationReport.Section binding=serverSection.child("Bound Shared Runtime Config",logical(boundRuntime.toString(),boundRoot),
-                            boundReport.exitCode()==0?"PASS":"FAIL");
+                            boundReport.exitCode()==0?"PASS":boundReport.exitCode()==2?"FAIL":"WARN");
                     copySections(binding,boundReport);
                     if(!boundReport.isComplete())report.incomplete();
                     try { serverProfiles=RuntimeConfigurationValidator.declaredProfiles(boundRuntime); }
