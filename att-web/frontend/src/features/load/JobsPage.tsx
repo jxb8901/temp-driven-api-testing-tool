@@ -617,11 +617,11 @@ function configuredRatePerSecond(value: number | string | undefined): number | n
   return Number.isFinite(result) && result > 0 ? result : null;
 }
 
-function LiveLoadSummary({ job, active, progress, history, trend, streamHistory, checkpointHistory, connection, now, showTrends = false }: {
+function LiveLoadSummary({ job, active, progress, history, trend, streamHistory, checkpointHistory, connection, now, showTrends = false, terminalResultAvailable = false }: {
   job: JobView | null; active: boolean; progress: LoadLiveProgressSnapshot | null;
-  history: LoadLiveProgressPoint[]; trend: LoadLiveProgressPoint[]; streamHistory?: readonly LoadLiveProgressPoint[]; checkpointHistory?: readonly import('./types').LoadCheckpointInterval[]; connection: JobStreamConnection; now: number; showTrends?: boolean;
+  history: LoadLiveProgressPoint[]; trend: LoadLiveProgressPoint[]; streamHistory?: readonly LoadLiveProgressPoint[]; checkpointHistory?: readonly import('./types').LoadCheckpointInterval[]; connection: JobStreamConnection; now: number; showTrends?: boolean; terminalResultAvailable?: boolean;
 }) {
-  const partial = Boolean(!active && job && ['CANCELLED', 'ERROR', 'INVALID', 'FAIL'].includes(job.status) && progress);
+  const partial = Boolean(!active && job && isTerminalStatus(job.status) && progress && (!terminalResultAvailable || ['CANCELLED', 'ERROR', 'INVALID', 'FAIL'].includes(job.status)));
   if ((!active && !partial) || job?.command !== 'load') return null;
   const plans = job.targetIdentity?.workloads || [];
   const latestAge = progress ? Math.max(0, now - Date.parse(progress.serverReceivedAt || progress.capturedAt)) : null;
@@ -796,7 +796,7 @@ export const ArtifactsPanel = memo(function ArtifactsPanel({ api, jobId, refresh
 });
 
 export const MetricsPanel = memo(function MetricsPanel({ job, payload = null, metrics, resultState, archiveMetrics, reportAvailability = 'idle', reportError = '', onRetryReport = () => {}, reportDetailsLoaded = false, buckets, charts, hidden, onProfilerCommit,
-  activeLoad = false, liveProgress = null, liveHistory = [], liveTrend = [], streamHistory = [], checkpointHistory = [], streamConnection = 'connecting', now = Date.now() }: {
+  activeLoad = false, liveProgress = null, liveHistory = [], liveTrend = [], streamHistory = [], checkpointHistory = [], streamConnection = 'connecting', now = Date.now(), terminalResultAvailable = false }: {
   job: JobView | null;
   payload?: JobResultResponse | null;
   metrics: Record<string, unknown> | null;
@@ -818,6 +818,7 @@ export const MetricsPanel = memo(function MetricsPanel({ job, payload = null, me
   checkpointHistory?: readonly import('./types').LoadCheckpointInterval[];
   streamConnection?: JobStreamConnection;
   now?: number;
+  terminalResultAvailable?: boolean;
 }) {
   const terminal = loadTerminalSummary(payload);
   const coverage = terminal?.metricCoverage && typeof terminal.metricCoverage === 'object'
@@ -825,7 +826,7 @@ export const MetricsPanel = memo(function MetricsPanel({ job, payload = null, me
   return <section className="att-job-panel" role="tabpanel" id="job-panel-metrics" aria-labelledby="job-tab-metrics" hidden={hidden} tabIndex={0}>
     <Profiler id="job-metrics-content" onRender={() => onProfilerCommit?.()}><h2>Metrics</h2>
     <p className="att-help">Only values returned by the job API are shown. Server timings and Worker JVM metrics are separate from Load result metrics.</p>
-    <LiveLoadSummary job={job} active={activeLoad} progress={liveProgress} history={liveHistory} trend={liveTrend} streamHistory={streamHistory} checkpointHistory={checkpointHistory} connection={streamConnection} now={now} showTrends />
+    <LiveLoadSummary job={job} active={activeLoad} progress={liveProgress} history={liveHistory} trend={liveTrend} streamHistory={streamHistory} checkpointHistory={checkpointHistory} connection={streamConnection} now={now} terminalResultAvailable={terminalResultAvailable} showTrends />
     {!activeLoad && terminal && <CompactLoadSummary payload={payload} archiveState={reportAvailability} archiveMessage={reportError} />}
     {coverage && <p className="att-help">LoadMetrics retains at most {displayValue(coverage.loadMetricsBucketCapacity)} one-second buckets; retained coverage is {displayValue(coverage.observedBucketCoverageMs ?? 0)} ms. The window series uses {displayValue(coverage.windowSeriesBinWidthMs)} ms bins across {displayValue(coverage.windowSeriesCapacity)} slots ({displayValue(coverage.windowSeriesCoverage || 'coverage not reported')}).</p>}
     {job && <MetricTable title="Server timings" rows={numericRows(job.performance?.timings)} unit="ms" />}
@@ -872,6 +873,7 @@ function JobDetail({ api, jobId, onShowList, confirmCancel, onOpenJob, onSchedul
   const cancellationLock = useRef(false);
   const terminalStatus = useRef<JobStatus | null>(null);
   const terminalReconciled = useRef(false);
+  const resultReconciled = useRef(false);
   const requestSequence = useRef(0);
   const consoleContext = useJobConsole();
   const statusSnapshot = useJobEventStatus(api, jobId, job?.status);
@@ -923,10 +925,10 @@ function JobDetail({ api, jobId, onShowList, confirmCancel, onOpenJob, onSchedul
     if (statusSnapshot.eventRevision === 0) return;
     const terminal = Boolean(statusSnapshot.status && isTerminalStatus(statusSnapshot.status as JobStatus));
     if (terminal) terminalStatus.current = statusSnapshot.status as JobStatus;
-    if (!terminalReconciled.current && (terminal || statusSnapshot.resultEvent)) {
-      terminalReconciled.current = true;
-      setTerminalRefresh(value => value + 1);
-    }
+    let refresh = false;
+    if (terminal && !terminalReconciled.current) { terminalReconciled.current = true; refresh = true; }
+    if (statusSnapshot.resultEvent && !resultReconciled.current) { resultReconciled.current = true; if (!result?.result) refresh = true; }
+    if (refresh) setTerminalRefresh(value => value + 1);
   }, [statusSnapshot]);
 
   async function changeJobPin(pinned: boolean, reason = '') {
@@ -1022,7 +1024,7 @@ function JobDetail({ api, jobId, onShowList, confirmCancel, onOpenJob, onSchedul
     <StructuredEventsPanel api={api} jobId={jobId} job={displayedJob} hidden={activeTab !== 'events'} />
     <section className="att-job-panel" role="tabpanel" id="job-panel-results" aria-labelledby="job-tab-results" hidden={activeTab !== 'results'} tabIndex={0}>
       <h2>Results</h2>
-      <LiveLoadSummary job={displayedJob} active={activeLoad} progress={liveProgress} history={job?.loadProgressHistory || []} trend={job?.loadProgressTrend || []} streamHistory={eventStream.liveProgressHistory} checkpointHistory={eventStream.checkpointHistory} connection={eventStream.connection} now={clockNow} />
+      <LiveLoadSummary job={displayedJob} active={activeLoad} progress={liveProgress} history={job?.loadProgressHistory || []} trend={job?.loadProgressTrend || []} streamHistory={eventStream.liveProgressHistory} checkpointHistory={eventStream.checkpointHistory} connection={eventStream.connection} now={clockNow} terminalResultAvailable={payloadTerminal && Boolean(result?.result)} />
       {Boolean(resultMetrics(result)) && <section aria-label="Failure diagnosis"><h3>Failure diagnosis</h3>
         <p>Runtime errors (all phases): {displayValue(resultMetrics(result)?.runtimeError ?? 0)}; measured runtime errors: {displayValue(resultMetrics(result)?.measuredRuntimeError ?? 0)}.</p>
         <p>Thresholds and execution outcome are independent. Completed TPS includes unsuccessful completions; successfulThroughput counts PASS only.</p>
@@ -1053,7 +1055,7 @@ function JobDetail({ api, jobId, onShowList, confirmCancel, onOpenJob, onSchedul
     <MetricsPanel job={displayedJob} payload={result} metrics={metrics} resultState={resultState} archiveMetrics={report.archiveMetrics || archiveMetrics}
       reportAvailability={report.availability} reportError={report.error} onRetryReport={report.retry} reportDetailsLoaded={Boolean(report.detailMetrics)}
       buckets={buckets} charts={charts} hidden={activeTab !== 'metrics'} activeLoad={activeLoad} liveProgress={liveProgress}
-      liveHistory={job?.loadProgressHistory || []} liveTrend={job?.loadProgressTrend || []} streamHistory={eventStream.liveProgressHistory} checkpointHistory={eventStream.checkpointHistory} streamConnection={eventStream.connection} now={clockNow} />
+      liveHistory={job?.loadProgressHistory || []} liveTrend={job?.loadProgressTrend || []} streamHistory={eventStream.liveProgressHistory} checkpointHistory={eventStream.checkpointHistory} streamConnection={eventStream.connection} now={clockNow} terminalResultAvailable={payloadTerminal && Boolean(result?.result)} />
   </div>;
 }
 

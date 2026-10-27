@@ -218,6 +218,31 @@ describe('JobsPage React feature', () => {
     expect(getJobResult).toHaveBeenCalledTimes(2);
   });
 
+  it('retains the last live sample until a later result event refreshes the canonical result', async () => {
+    const now = new Date().toISOString();
+    const progress = { schemaVersion: 'att-load-live-progress/v1' as const, capturedAt: now, serverReceivedAt: now, elapsedMs: 5000, phase: 'STEADY', counts: { completed: 7, passed: 6 } };
+    const running: JobView = { ...sampleJob, loadProgress: progress };
+    const done: JobView = { ...running, status: 'PASS' };
+    const getJob = vi.fn().mockResolvedValueOnce(running).mockResolvedValue(done);
+    const getJobResult = vi.fn().mockResolvedValueOnce({ job: running, result: null }).mockResolvedValueOnce({ job: done, result: null })
+      .mockResolvedValue({ job: done, result: { status: 'PASS', summary: { schemaVersion: 'att-load-terminal-result/v1', execution: { status: 'PASS' }, metrics: { completed: 9, success: 8 } } } });
+    const api = makeApi({ getJob, getJobResult });
+    await act(async () => root.render(<JobsPage api={api} jobId="JOB-204" onOpenJob={vi.fn()} onShowList={vi.fn()} />));
+    await click(host.querySelector('#job-tab-results')!);
+    const handlers = vi.mocked(api.subscribeJob).mock.calls[0]![1];
+    await act(async () => handlers.onEvent({ id: 'done-status', type: 'status', data: { status: 'PASS' } }));
+    const results = host.querySelector('#job-panel-results')!;
+    expect(results.textContent).toContain('Last live LOAD snapshot');
+    expect(results.textContent).toContain('Completed / PASS7 / 6');
+    expect(getJobResult).toHaveBeenCalledTimes(2);
+    await act(async () => handlers.onEvent({ id: 'later-result', type: 'result', data: { status: 'PASS' } }));
+    expect(getJobResult).toHaveBeenCalledTimes(3);
+    expect(results.textContent).not.toContain('Last live LOAD snapshot');
+    expect(results.textContent).toContain('Completed / successful9 / 8');
+    await act(async () => handlers.onEvent({ id: 'replay-result', type: 'result', data: { status: 'PASS' } }));
+    expect(getJobResult).toHaveBeenCalledTimes(3);
+  });
+
   it('aborts initial snapshots and ignores their late responses after terminal SSE', async () => {
     const initialJob = deferred<JobView>();
     const initialResult = deferred<JobResultResponse>();
