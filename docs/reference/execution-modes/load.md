@@ -338,6 +338,8 @@ The builder summarizes bindings, users/rates and weights. Detailed workload, mix
 
 Validate creates a full `att-load/v1.9` immutable draft through the shared Engine composer. Review shows redacted Server-normalized YAML. Any saved edit or environment change invalidates validation; source/revision changes are checked again at submission. Run requires traffic confirmation; Schedule uses the same validated draft and normal permissions, limits, expiry and revision policy. No browser storage or package source writes are used.
 
+**Configure & Rerun** from a LOAD Job uses this standard editor with a server-issued `draftRef`. It prefills the safe retained scenario, environment, workload IDs/mix, model, pacing, timing phases, thresholds, evidence and eligible inputs. Edit the common timing envelope and model-specific fields, then validate against the current Package before reviewing the delta. Current-package rerun does not silently reload latest YAML defaults or convert Arrival Rate to Virtual Users. File-backed LOAD replay remains on its package-relative source route and does not inherit inline-draft-only duration caps; see [Job replay](unified-run.md#replay-and-new-execution-from-a-job).
+
 ```bash
 ./att.sh load --list-templates --format json
 ./att.sh load --debug template BROWSE --load-template builtin:single-vu --preview

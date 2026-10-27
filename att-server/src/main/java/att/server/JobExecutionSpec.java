@@ -7,7 +7,8 @@ import java.util.Set;
 
 /** Safe runnable definition, separate from Worker transport, logs and redacted previews. */
 final class JobExecutionSpec {
-    static final String VERSION="att-job-execution/v1";
+    static final String VERSION="att-job-execution/v2";
+    private static final String LEGACY_VERSION="att-job-execution/v1";
     static final int MAX_BYTES=262144;
     final ObjectNode value;
 
@@ -38,11 +39,14 @@ final class JobExecutionSpec {
     }
     String revision(){return value.path("revision").asText();}
     private void validate() {
-        if(!VERSION.equals(value.path("schemaVersion").asText())||!"reject-package-changes".equals(value.path("revisionPolicy").asText())
+        String version=value.path("schemaVersion").asText();
+        boolean currentVersion=VERSION.equals(version),legacyVersion=LEGACY_VERSION.equals(version);
+        if((!currentVersion&&!legacyVersion)||!"reject-package-changes".equals(value.path("revisionPolicy").asText())
                 ||!value.path("revision").asText().matches("[a-f0-9]{64}")||!value.path("definition").isObject())
             throw new IllegalArgumentException("Unsupported execution snapshot");
-        value.fieldNames().forEachRemaining(field->{if(!Set.of("schemaVersion","revisionPolicy","revision","definition","sourcePath","configuration").contains(field))throw new IllegalArgumentException("Unknown execution snapshot field");});
+        value.fieldNames().forEachRemaining(field->{if(!Set.of("schemaVersion","revisionPolicy","revision","definition","sourcePath","configuration","replay").contains(field))throw new IllegalArgumentException("Unknown execution snapshot field");});
         if(value.has("configuration"))configuration();
+        if(value.has("replay"))validateReplay(value.path("replay"),currentVersion);
         JsonNode definition=value.get("definition");
         if(!Set.of("run","load").contains(definition.path("executionType").asText())||definition.path("packageId").asText().isBlank())
             throw new IllegalArgumentException("Invalid execution identity");
@@ -54,5 +58,19 @@ final class JobExecutionSpec {
         String path=value.path("sourcePath").asText("");
         if(path.length()>1024||path.chars().anyMatch(Character::isISOControl)||path.contains(":")||path.startsWith("/")||path.contains("\\")||java.util.Arrays.asList(path.split("/")).contains(".."))
             throw new IllegalArgumentException("Execution source must be package-relative");
+    }
+    JobExecutionSpec withReplaySource(String sourceJobId,String sourcePolicy,String originalRevision,String effectiveRevision) {
+        if(!"current".equals(sourcePolicy)&&!"strict".equals(sourcePolicy))throw new IllegalArgumentException("Unsupported replay source policy");
+        ObjectNode replay=value.putObject("replay");replay.put("sourceJobId",sourceJobId);replay.put("sourcePolicy",sourcePolicy);
+        replay.put("originalRevision",originalRevision);replay.put("effectiveRevision",effectiveRevision);
+        return this;
+    }
+    private static void validateReplay(JsonNode replay,boolean required) {
+        if(!replay.isObject()||!replay.path("sourceJobId").asText("").matches("J[A-F0-9]{16}")
+                ||!Set.of("current","strict").contains(replay.path("sourcePolicy").asText())
+                ||!replay.path("originalRevision").asText("").matches("[a-f0-9]{64}")
+                ||!replay.path("effectiveRevision").asText("").matches("[a-f0-9]{64}"))
+            throw new IllegalArgumentException("Invalid replay provenance");
+        replay.fieldNames().forEachRemaining(field->{if(!Set.of("sourceJobId","sourcePolicy","originalRevision","effectiveRevision").contains(field))throw new IllegalArgumentException("Unknown replay provenance field");});
     }
 }

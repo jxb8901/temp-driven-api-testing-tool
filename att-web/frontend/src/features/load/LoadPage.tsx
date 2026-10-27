@@ -12,6 +12,8 @@ import type {
   ServerDiagnostic,
   TargetResource,
 } from './types';
+import type { JobReplay, JobReplayEditorDraft } from './types';
+import { useNavigationGuard } from '../../router';
 
 type JsonObject = Record<string, unknown>;
 type ThinkTime = string | { min: string; max: string };
@@ -24,6 +26,7 @@ export type WorkloadDraft = {
   users: string;
   arrivalRate: string;
   maxConcurrent: string;
+  overloadPolicy: string;
   thinkTime: ThinkTime;
   structure: 'single' | 'mix';
   testdataJson: string;
@@ -53,6 +56,7 @@ export function newWorkload(id: number, policy: JsonObject = {}): WorkloadDraft 
     users: String(load.users ?? 1),
     arrivalRate: String(load.arrivalRate ?? '1/s'),
     maxConcurrent: String(load.maxConcurrent ?? 1),
+    overloadPolicy: String(load.overloadPolicy ?? 'drop'),
     thinkTime: typeof execution.thinkTime === 'string' ? execution.thinkTime : execution.thinkTime && typeof execution.thinkTime === 'object' ? { min: String(asObject(execution.thinkTime).min ?? ''), max: String(asObject(execution.thinkTime).max ?? '') } : '',
     structure: 'single',
     testdataJson: '{}',
@@ -124,6 +128,8 @@ export function makeScenario(
   if (!timing.duration.trim()) throw new Error('Measured duration is required.');
   scenario.load = rootLoad;
   scenario.workloads = workloads.map(workload => {
+    if (!['case', 'template', 'flow', 'tool'].includes(workload.target.type))
+      throw new Error(`Workload ${workload.id} has unsupported target type “${workload.target.type}”. Choose a supported target type before validating.`);
     const row: JsonObject = { id: workload.id.trim(), load: {} };
     if (!row.id) throw new Error('Every workload needs an ID.');
     const load: JsonObject = { ...workload.loadPolicy };
@@ -138,7 +144,8 @@ export function makeScenario(
       if (!workload.arrivalRate.trim()) throw new Error(`Workload ${row.id} needs an arrival rate.`);
       const maxConcurrent = Number(workload.maxConcurrent);
       if (!Number.isSafeInteger(maxConcurrent) || maxConcurrent < 1) throw new Error(`Workload ${row.id} needs positive maximum concurrency.`);
-      Object.assign(load, { arrivalRate: workload.arrivalRate.trim(), maxConcurrent, overloadPolicy: 'drop' });
+      if (!workload.overloadPolicy.trim()) throw new Error(`Workload ${row.id} needs an explicit overload policy.`);
+      Object.assign(load, { arrivalRate: workload.arrivalRate.trim(), maxConcurrent, overloadPolicy: workload.overloadPolicy.trim() });
     }
     row.load = load;
     if (Object.keys(execution).length) row.execution = execution;
@@ -155,6 +162,8 @@ export function makeScenario(
       row.inputs = asObject(defaults.inputs);
       row.vars = asObject(defaults.vars);
       row.mix = workload.mix.map(entry => {
+        if (!['case', 'template', 'flow', 'tool'].includes(entry.type))
+          throw new Error(`Workload ${workload.id} mix target type “${entry.type}” is unsupported. Choose a supported target type before validating.`);
         if (!entry.businessValid) throw new Error(`Mix target ${entry.id} has invalid business values.`);
         const weight = Number(entry.weight);
         if (!Number.isSafeInteger(weight) || weight < 1) throw new Error(`Mix target ${entry.id} needs a positive whole-number weight.`);
@@ -203,7 +212,9 @@ export function makeScenario(
 }
 
 export function initialTiming(policy: JsonObject): TimingDraft {
-  const load = asObject(policy.load);
+  const rootLoad = asObject(policy.load);
+  const rows = Array.isArray(policy.workloads) ? policy.workloads : [];
+  const load = { ...asObject(asObject(rows[0]).load), ...rootLoad };
   return {
     warmup: String(load.warmup ?? ''),
     rampUp: String(load.rampUp ?? ''),
@@ -212,10 +223,60 @@ export function initialTiming(policy: JsonObject): TimingDraft {
   };
 }
 
+export function retainedScenarioToEditor(value: unknown): { model: LoadModel; timing: TimingDraft; workloads: WorkloadDraft[]; advanced: { execution: string; testdata: string; thresholds: string; evidence: string; seed: string }; diagnostics: ServerDiagnostic[] } {
+  const scenario=asObject(value),rootLoad=asObject(scenario.load),rows=Array.isArray(scenario.workloads)?scenario.workloads:[];
+  if(!rows.length)throw new Error('The retained LOAD draft has no workloads.');
+  const targetDiagnostics:ServerDiagnostic[]=[];
+  const firstLoad={...rootLoad,...asObject(asObject(rows[0]).load)};
+  const isArrival=firstLoad.arrivalRate!=null;
+  const model:LoadModel=isArrival?'arrivalRate':'virtualUsers';
+  const phaseFields=['warmup','rampUp','duration','rampDown'] as const;
+  const timing=Object.fromEntries(phaseFields.map(field=>[field,String(firstLoad[field]??'')])) as TimingDraft;
+  for(const raw of rows){const load=asObject(asObject(raw).load);for(const field of phaseFields){
+    const explicit=load[field];if(rootLoad[field]!=null&&explicit!=null&&String(rootLoad[field])!==String(explicit))throw new Error(`The retained LOAD has conflicting ${field} values. Review the source Job before editing.`);
+    if(rootLoad[field]==null&&explicit!=null&&String(explicit)!==timing[field])throw new Error(`The retained LOAD workloads do not share one ${field} value. Review the source Job before editing.`);
+  }}
+  const targetDraft=(raw:unknown,inputs:unknown,vars:unknown,field:string):TargetDraft=>{
+    const target=asObject(raw),rawType=String(target.type||'template');
+    const supported=['case','template','flow','tool'].includes(rawType);
+    if(!supported)targetDiagnostics.push({code:'ATT-LOAD-UNSUPPORTED-TARGET-TYPE',field,summary:`Retained target type “${rawType}” is unsupported. Choose a supported target type explicitly.`});
+    const type=(supported?rawType:`unsupported:${rawType}`) as LoadTargetType;
+    const business={inputs:asObject(inputs),...(rawType==='tool'?{arguments:asObject(target.arguments)}:{vars:asObject(vars)})};
+    return {type,id:String(target.id||''),businessJson:JSON.stringify(business,null,2),businessValid:true};
+  };
+  const workloads=rows.map((raw,index)=>{
+    const row=asObject(raw),load={...rootLoad,...asObject(row.load)},execution=asObject(row.execution),mixRows=Array.isArray(row.mix)?row.mix:[];
+    const mix:MixDraft[]=mixRows.map((rawMix,mixIndex)=>{
+      const item=asObject(rawMix),target=asObject(item.target),targetDraftValue=targetDraft(target,item.inputs,item.vars,`scenario.workloads[${index}].mix[${mixIndex}].target.type`);
+      return {...targetDraftValue,entryId:String(item.id??''),weight:String(item.weight??'')};
+    });
+    const target=targetDraft(row.target,row.inputs,row.vars,`scenario.workloads[${index}].target.type`);
+    if(row.target&&target.type==='tool')target.businessJson=JSON.stringify({inputs:asObject(row.inputs),arguments:asObject(asObject(row.target).arguments)},null,2);
+    const testdata=asObject(row.testdata),thresholds=asObject(row.thresholds),evidence=asObject(row.evidence);
+    const pacing={...load};for(const field of phaseFields)delete pacing[field];
+    return {
+      ...newWorkload(index+1,{load:pacing,execution}),id:String(row.id??''),loadPolicy:pacing,executionPolicy:{...execution},
+      users:String(load.users??''),arrivalRate:String(load.arrivalRate??''),maxConcurrent:String(load.maxConcurrent??''),overloadPolicy:String(load.overloadPolicy??''),
+      structure:(mix.length?'mix':'single') as WorkloadDraft['structure'],testdataJson:JSON.stringify(testdata,null,2),thresholdsJson:JSON.stringify(thresholds,null,2),evidenceJson:JSON.stringify(evidence,null,2),
+      mixDefaultsJson:JSON.stringify({inputs:asObject(row.inputs),vars:asObject(row.vars)},null,2),mixDefaultsValid:true,target,mix,
+    };
+  });
+  const advanced={execution:JSON.stringify(asObject(scenario.execution),null,2),testdata:JSON.stringify(Array.isArray(scenario.testdata)?scenario.testdata:[],null,2),
+    thresholds:JSON.stringify(asObject(scenario.thresholds),null,2),evidence:JSON.stringify(asObject(scenario.evidence),null,2),seed:scenario.seed==null?'':String(scenario.seed)};
+  return {model,timing,workloads,advanced,diagnostics:targetDiagnostics};
+}
+
+function effectiveDuration(timing:TimingDraft):string {
+  const phases=[timing.warmup,timing.rampUp,timing.duration,timing.rampDown].filter(Boolean);
+  let total=0;
+  for(const phase of phases){const match=/^(\d+)(ms|s|m|h)$/.exec(phase.trim());if(!match)return 'Requires validation';const factor=match[2]==='ms'?1:match[2]==='s'?1000:match[2]==='m'?60000:3600000;total+=Number(match[1])*factor;}
+  return `${total} ms (sum of warm-up, ramp-up, measured duration and ramp-down)`;
+}
+
 export function LoadPage(props: LoadFeatureProps): React.JSX.Element {
   const {
     api, packages, selectedPackage, selectedEnvironment, environments = [], environmentState, inlineLoadEnabled,
-    schedulingEnabled = false, principal, onPackageChange, onEnvironmentChange, onJobAccepted, onSchedule, confirmStart, onRetryEnvironments,
+    schedulingEnabled = false, principal, replayDraftId, replaySourceJobId, onPackageChange, onEnvironmentChange, onJobAccepted, onSchedule, confirmStart, onRetryEnvironments,
   } = props;
   const [model, setModel] = useState<LoadModel>('virtualUsers');
   const [policy, setPolicy] = useState<JsonObject | null>(null);
@@ -230,12 +291,52 @@ export function LoadPage(props: LoadFeatureProps): React.JSX.Element {
   const [draftMessage, setDraftMessage] = useState('Validate to review the Server-normalized scenario.');
   const [diagnostics, setDiagnostics] = useState<ServerDiagnostic[]>([]);
   const [requestError, setRequestError] = useState('');
+  const [requestErrorCode, setRequestErrorCode] = useState('');
   const [rawScenarioJson, setRawScenarioJson] = useState('');
   const [advancedJsonError, setAdvancedJsonError] = useState('');
   const [thresholdEditorErrors, setThresholdEditorErrors] = useState<Record<string, string>>({});
+  const [replayEditorDefinition, setReplayEditorDefinition] = useState<JobReplayEditorDraft['definition'] | null>(null);
+  const [replayOriginalDefinition, setReplayOriginalDefinition] = useState<JobReplayEditorDraft['definition'] | null>(null);
+  const [replayReview, setReplayReview] = useState<JobReplay | null>(null);
+  const [replayDraftLoading, setReplayDraftLoading] = useState(Boolean(replayDraftId&&replaySourceJobId));
+  const [replayDraftError, setReplayDraftError] = useState('');
+  const [replayDirty, setReplayDirty] = useState(false);
+  const [missingReplayFields, setMissingReplayFields] = useState<string[]>([]);
+  const navigation=useNavigationGuard();
   const requestSequence = useRef(0);
+  const replayValidationGeneration = useRef(0);
   const packageRef = useRef(selectedPackage);
   const submitLock = useRef(false);
+  const releaseReplayNavigationGuard = useRef<() => void>(() => {});
+  const replaySeeded = useRef(false);
+  const replayEnvironmentOrigin = useRef('');
+  const replayPackageDefaultEnvironment = useRef('');
+  useEffect(()=>{
+    const release=navigation.registerUnsavedChanges(Boolean(replaySourceJobId&&replayDirty),'Edited Job replay settings');
+    releaseReplayNavigationGuard.current=release;
+    return()=>{release();if(releaseReplayNavigationGuard.current===release)releaseReplayNavigationGuard.current=()=>{};};
+  },[navigation.registerUnsavedChanges,replayDirty,replaySourceJobId]);
+  function markReplayDirty(){if(replaySourceJobId){replayValidationGeneration.current++;setReplayDirty(true);setReplayReview(null);setDraft(null);setDraftState('idle');}}
+
+  useEffect(() => {
+    if(!replayDraftId||!replaySourceJobId)return;
+    if(!api.getJobReplayEditorDraft){setReplayDraftError('This Server client cannot load editable Job drafts.');setReplayDraftLoading(false);return;}
+    const controller=new AbortController();replaySeeded.current=false;setReplayDraftLoading(true);setReplayDraftError('');
+    api.getJobReplayEditorDraft(replaySourceJobId,replayDraftId).then(draft=>{
+      if(controller.signal.aborted)return;
+      if(draft.executionType!=='load')throw new Error('This Job contains a RUN definition, not a LOAD scenario.');
+      setReplayEditorDefinition(draft.definition);setReplayOriginalDefinition(draft.originalDefinition||draft.definition);const scenario=asObject(draft.definition.scenario);
+      replayEnvironmentOrigin.current=String(draft.configuration?.environmentOrigin||'');
+      replayPackageDefaultEnvironment.current=replayEnvironmentOrigin.current==='package'?String(draft.configuration?.environment||''):'';
+      const rows=Array.isArray(scenario.workloads)?scenario.workloads:[];
+      setMissingReplayFields(draft.missingFields||[]);
+      setModel(asObject(asObject(rows[0]).load).arrivalRate!=null||asObject(scenario.load).arrivalRate!=null?'arrivalRate':'virtualUsers');
+      setReplayReview({jobId:draft.sourceJobId,available:true,...draft,definition:draft.definition,originalDefinition:draft.originalDefinition||draft.definition});
+      setDraft(null);setDraftState(draft.validationState==='invalid'?'error':'idle');setDraftMessage(draft.validationState==='invalid'?'The retained settings are ready to edit. Resolve the current Package errors, then validate again.':'Job settings loaded. Edit the fields, then validate against the current Package.');
+      setDiagnostics(draft.diagnostics||[]);setRequestError('');setRequestErrorCode('');setReplayDirty(false);
+    }).catch(error=>{if(!controller.signal.aborted){setReplayDraftError(error instanceof Error?error.message:'The replay draft expired. Open the source Job again.');setReplayDraftLoading(false);}});
+    return()=>controller.abort();
+  },[api,replayDraftId,replaySourceJobId]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -246,6 +347,7 @@ export function LoadPage(props: LoadFeatureProps): React.JSX.Element {
     setDraftState('idle');
     setDiagnostics([]);
     setRequestError('');
+    setRequestErrorCode('');
     if (packageChanged) {
       setPolicy(null);
       setWorkloads([]);
@@ -257,7 +359,7 @@ export function LoadPage(props: LoadFeatureProps): React.JSX.Element {
       setPolicyMessage('Choose a package to load the Server policy.');
       return () => controller.abort();
     }
-    if (!inlineLoadEnabled) {
+    if (!inlineLoadEnabled && !replaySourceJobId) {
       setPolicyState('disabled');
       setPolicyMessage('Browser-created Load drafts are disabled by Server configuration.');
       return () => controller.abort();
@@ -289,9 +391,21 @@ export function LoadPage(props: LoadFeatureProps): React.JSX.Element {
         if (controller.signal.aborted || sequence !== requestSequence.current) return;
         setPolicyState('error');
         setPolicyMessage(error instanceof Error ? error.message : 'Load policy is unavailable.');
+        if(replaySourceJobId){setReplayDraftError('Current Package policy could not be loaded. Reopen the source Job or retry after the Package is available.');setReplayDraftLoading(false);}
       });
     return () => controller.abort();
-  }, [api, selectedPackage, selectedEnvironment, model, inlineLoadEnabled]);
+  }, [api, selectedPackage, selectedEnvironment, model, inlineLoadEnabled, replaySourceJobId]);
+
+  useEffect(()=>{
+    if(!replayEditorDefinition||!policy||replaySeeded.current)return;
+    try {
+      const seeded=retainedScenarioToEditor(replayEditorDefinition.scenario);
+      replaySeeded.current=true;setModel(seeded.model);setTiming(seeded.timing);setWorkloads(seeded.workloads);setAdvanced(seeded.advanced);
+      if(seeded.diagnostics.length)setDiagnostics(current=>[...current,...seeded.diagnostics]);
+      setDraft(null);setDraftState('idle');setDraftMessage('Job settings loaded. Edit the fields, then validate against the current Package.');
+      setReplayDraftLoading(false);
+    } catch(error) {setReplayDraftError(error instanceof Error?error.message:'The retained LOAD definition cannot be edited safely.');setReplayDraftLoading(false);}
+  },[policy,replayEditorDefinition]);
 
   useEffect(() => {
     if (!policy) { setRawScenarioJson(''); return; }
@@ -304,8 +418,9 @@ export function LoadPage(props: LoadFeatureProps): React.JSX.Element {
   }, [policy, model, timing, workloads, advanced]);
 
   const packageName = useMemo(() => packages.find(item => item.packageId === selectedPackage)?.displayName || selectedPackage, [packages, selectedPackage]);
-  const updateWorkload = (id: string, updater: (current: WorkloadDraft) => WorkloadDraft) =>
-    setWorkloads(current => current.map(item => item.id === id ? updater(item) : item));
+  const updateWorkload = (id: string, updater: (current: WorkloadDraft) => WorkloadDraft) => {
+    markReplayDirty();setWorkloads(current => current.map(item => item.id === id ? updater(item) : item));
+  };
 
   function readScenario(): JsonObject {
     if (!policy) throw new Error('Load policy is not ready.');
@@ -317,22 +432,58 @@ export function LoadPage(props: LoadFeatureProps): React.JSX.Element {
 
   async function validateScenario() {
     setRequestError('');
+    setRequestErrorCode('');
     setDiagnostics([]);
     let scenario: JsonObject;
     try { scenario = readScenario(); }
-    catch (error) { setDraftState('error'); setDraftMessage(error instanceof Error ? error.message : 'Correct the scenario fields.'); return; }
+    catch (error) {
+      const message=error instanceof Error?error.message:'Correct the scenario fields.';
+      if(message.includes('unsupported target type'))setDiagnostics([{code:'ATT-LOAD-UNSUPPORTED-TARGET-TYPE',field:'scenario.workloads.target.type',summary:message}]);
+      setDraftState('error'); setDraftMessage(message); return;
+    }
     const packageId = selectedPackage;
     const sequence = ++requestSequence.current;
+    const validationGeneration = ++replayValidationGeneration.current;
     setDraft(null);
     setDraftState('validating');
     setDraftMessage('Validating the complete scenario on the Server…');
     try {
-      const response = await api.createLoadDraft({
-        packageId,
-        ...(selectedEnvironment ? { environment: selectedEnvironment } : {}),
-        scenario,
-      });
-      if (sequence !== requestSequence.current || packageId !== selectedPackage) return;
+      let response: import('./types').LoadDraftResponse;
+      if(replaySourceJobId) {
+        if(!api.createJobReplayDraft)throw new Error('This Server client cannot validate an editable Job draft.');
+        const scenarioLoad=asObject(scenario.load),scenarioWorkloads=Array.isArray(scenario.workloads)?scenario.workloads:[];
+        const environmentOverride=replayEnvironmentOrigin.current==='package'&&selectedEnvironment===replayPackageDefaultEnvironment.current?'':selectedEnvironment||'';
+        const overrides:Record<string,unknown>={environment:environmentOverride,
+          load:Object.fromEntries(['warmup','rampUp','duration','rampDown'].filter(field=>scenarioLoad[field]!=null).map(field=>[field,scenarioLoad[field]])),
+          workloads:scenarioWorkloads.map(raw=>{
+            const row=asObject(raw),load=asObject(row.load);
+            const pacing=model==='arrivalRate'
+              ?{arrivalRate:load.arrivalRate,maxConcurrent:load.maxConcurrent,overloadPolicy:load.overloadPolicy}
+              :{users:load.users};
+            const patch:Record<string,unknown>={id:row.id,load:pacing};
+            for(const field of ['execution','target','mix','inputs','vars','testdata','thresholds','evidence'])if(row[field]!=null)patch[field]=row[field];
+            return patch;
+          }),
+        };
+        for(const field of ['execution','testdata','thresholds','evidence','seed'])if(scenario[field]!=null)overrides[field]=scenario[field];
+        const replay=await api.createJobReplayDraft(replaySourceJobId,{sourcePolicy:'current',overrides});
+        if(validationGeneration!==replayValidationGeneration.current||sequence!==requestSequence.current||packageId!==selectedPackage)return;
+        setMissingReplayFields(replay.missingFields||[]);
+        setReplayReview(replay);
+        if(!replay.intentId) {
+          setDiagnostics(replay.diagnostics||[]);setDraftState('error');setDraftMessage('Current Package validation needs attention. See the error and field diagnostics below.');
+          setRequestError(replay.reason||'Current Package validation failed.');setRequestErrorCode(replay.errorCode||'');setDraft(null);return;
+        }
+        if(replay.configuration?.environmentOrigin==='package')replayPackageDefaultEnvironment.current=String(replay.configuration.environment||'');
+        setDiagnostics(replay.diagnostics||[]);response=(replay.preview||{}) as unknown as import('./types').LoadDraftResponse;
+      } else {
+        response = await api.createLoadDraft({
+          packageId,
+          ...(selectedEnvironment ? { environment: selectedEnvironment } : {}),
+          scenario,
+        });
+      }
+      if (validationGeneration!==replayValidationGeneration.current||sequence !== requestSequence.current || packageId !== selectedPackage) return;
       setDraft(response);
       setDiagnostics(response.diagnostics || []);
       setDraftState('valid');
@@ -340,18 +491,20 @@ export function LoadPage(props: LoadFeatureProps): React.JSX.Element {
         ? 'Server validation passed. The preview hides sensitive fields; copy and export are disabled.'
         : 'Server validation passed. Review the complete normalized scenario before starting.');
     } catch (error) {
-      if (sequence !== requestSequence.current) return;
+      if (validationGeneration!==replayValidationGeneration.current||sequence !== requestSequence.current) return;
       const details = error as Error & { diagnostics?: unknown };
       const serverDiagnostics = Array.isArray(details.diagnostics) ? details.diagnostics as ServerDiagnostic[] : [];
       setDiagnostics(serverDiagnostics);
       setDraftState('error');
-      setDraftMessage(details.message || 'Server validation failed.');
+      setDraftMessage('Validation needs attention. See the error and field diagnostics below.');
       setRequestError(details.message || 'Server validation failed.');
+      setRequestErrorCode((details as Error & { code?: string }).code || '');
     }
   }
 
   async function startLoad() {
     if (!draft || draftState === 'submitting' || submitLock.current) return;
+    if(replaySourceJobId&&(!replayReview?.intentId||replayReview.missingFields?.length))return;
     if (Date.parse(draft.expiresAt) <= Date.now()) {
       setDraft(null); setDraftState('error'); setDraftMessage('This validated draft expired. Validate the scenario again.'); return;
     }
@@ -364,8 +517,9 @@ export function LoadPage(props: LoadFeatureProps): React.JSX.Element {
       );
     } catch (error) {
       submitLock.current = false;
-      setDraftMessage(error instanceof Error ? error.message : 'Load start confirmation failed.');
+      setDraftMessage('Load start could not be confirmed. See the error below.');
       setRequestError(error instanceof Error ? error.message : 'Load start confirmation failed.');
+      setRequestErrorCode((error as Error & { code?: string }).code || '');
       setDraftState('error');
       setConfirmationPending(false);
       return;
@@ -375,15 +529,23 @@ export function LoadPage(props: LoadFeatureProps): React.JSX.Element {
     setDraftState('submitting');
     setDraftMessage('Submitting the Server-validated Load draft…');
     try {
-      const job = await api.submitLoadDraft({ packageId: selectedPackage, draftId: draft.draftId, ...(principal ? { principal } : {}) });
+      const job = replaySourceJobId&&replayReview?.intentId
+        ? await api.rerunJob?.(replaySourceJobId,replayReview.intentId,replayReview.sourcePolicy||'current')
+        : await api.submitLoadDraft({ packageId: selectedPackage, draftId: draft.draftId, ...(principal ? { principal } : {}) });
+      if(!job)throw new Error('The Server client cannot submit this replay.');
       setDraft(null);
+      releaseReplayNavigationGuard.current();
+      setReplayDirty(false);
       onJobAccepted(job.jobId);
     } catch (error) {
-      const failure = error as Error & { status?: number; diagnostics?: unknown };
+      const failure = error as Error & { status?: number; code?: string; diagnostics?: unknown };
       setDiagnostics(Array.isArray(failure.diagnostics) ? failure.diagnostics as ServerDiagnostic[] : []);
       setDraftState('error');
-      setDraftMessage(failure.message || 'The Server did not accept this Load draft.');
+      setDraftMessage(failure.code === 'ATT-SERVER-REPLAY-DRAFT-STALE'
+        ? 'Your edits are retained. Validate again before running this LOAD.'
+        : 'The LOAD was not started. See the error below.');
       setRequestError(failure.message || 'The Server did not accept this Load draft.');
+      setRequestErrorCode(failure.code || '');
       if (failure.status === 404 || failure.status === 409) setDraft(null);
     } finally {
       submitLock.current = false;
@@ -408,7 +570,7 @@ export function LoadPage(props: LoadFeatureProps): React.JSX.Element {
   }
 
   function updateAdvanced<K extends keyof typeof advanced>(key: K, value: (typeof advanced)[K]) {
-    setAdvanced(current => ({ ...current, [key]: value }));
+    markReplayDirty();setAdvanced(current => ({ ...current, [key]: value }));
   }
   function updateThresholdEditorValidity(key: string, message: string) {
     setThresholdEditorErrors(current => { const next = { ...current }; if (message) next[key] = message; else delete next[key]; return next; });
@@ -419,14 +581,14 @@ export function LoadPage(props: LoadFeatureProps): React.JSX.Element {
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key === 'Enter'
-        && hasLiveDraft && draftState !== 'submitting' && !confirmationPending && inlineLoadEnabled) {
+        && hasLiveDraft && draftState !== 'submitting' && !confirmationPending && (inlineLoadEnabled||Boolean(replaySourceJobId))) {
         event.preventDefault();
         void startLoadRef.current();
       }
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [confirmationPending, draftState, hasLiveDraft, inlineLoadEnabled]);
+  }, [confirmationPending, draftState, hasLiveDraft, inlineLoadEnabled,replaySourceJobId]);
   const navigateSection = (id: string) => {
     const section = document.getElementById(id);
     section?.scrollIntoView?.({ behavior: 'smooth', block: 'start' });
@@ -434,16 +596,25 @@ export function LoadPage(props: LoadFeatureProps): React.JSX.Element {
   };
 
   return (
-    <div className="page-content att-load-page">
+    <div className="page-content att-load-page" onChangeCapture={markReplayDirty} onClickCapture={event=>{
+      const label=(event.target as HTMLElement).closest('button')?.textContent?.trim()||'';
+      if(/^(Add|Remove)\b/.test(label))markReplayDirty();
+    }}>
       <header className="att-feature-header">
         <div>
           <p className="att-eyebrow">Load testing</p>
-          <h1>New Load scenario</h1>
+          <h1>{replaySourceJobId?'Configure & Rerun LOAD':'New Load scenario'}</h1>
           <p>Build a shared timing plan, configure workloads, then validate the complete scenario on the Server.</p>
         </div>
         <span className={`att-feature-state att-state-${policyState}`} role="status" aria-live="polite">{policyMessage}</span>
       </header>
+      {replayDraftLoading&&<p role="status">Loading the authorized Job draft…</p>}
+      {replayDraftError&&<p role="alert">{replayDraftError}</p>}
+      {replaySourceJobId&&<div role="note"><p>New LOAD from Job {replaySourceJobId}. Schedule package-change policy does not control this manual rerun.</p>
+        <button type="button" onClick={()=>navigation.navigate({kind:'jobs',jobId:replaySourceJobId})}>Back to source Job</button></div>}
+      {missingReplayFields.length>0&&<p role="note">These fields were not safely retained and need an explicit value before this LOAD can run: {missingReplayFields.join(', ')}.</p>}
 
+      <div hidden={replayDraftLoading}>
       <nav className="att-section-nav" aria-label="Load scenario sections">
         <button type="button" aria-controls="load-model" onClick={() => navigateSection('load-model')}>Model</button>
         <button type="button" aria-controls="load-workloads" onClick={() => navigateSection('load-workloads')}>Workloads</button>
@@ -455,7 +626,7 @@ export function LoadPage(props: LoadFeatureProps): React.JSX.Element {
         <h2 id="load-model-title">Scenario</h2>
         <div className="att-load-grid">
           <label>Package
-            <select value={selectedPackage} onChange={event => onPackageChange(event.target.value)} disabled={!inlineLoadEnabled}>
+            <select value={selectedPackage} onChange={event => onPackageChange(event.target.value)} disabled={!inlineLoadEnabled||Boolean(replaySourceJobId)}>
               <option value="">Choose a package</option>
               {packages.map(item => <option key={item.packageId} value={item.packageId}>{item.displayName || item.packageId}</option>)}
             </select>
@@ -468,7 +639,7 @@ export function LoadPage(props: LoadFeatureProps): React.JSX.Element {
           </label>
       <EnvironmentResolutionNotice packageId={selectedPackage} environment={selectedEnvironment} />
           <label>Load model
-            <select value={model} onChange={event => setModel(event.target.value as LoadModel)} disabled={!inlineLoadEnabled}>
+          <select value={model} onChange={event => {markReplayDirty();setModel(event.target.value as LoadModel);}} disabled={!inlineLoadEnabled||Boolean(replaySourceJobId)}>
               <option value="virtualUsers">Virtual Users</option>
               <option value="arrivalRate">Arrival Rate</option>
             </select>
@@ -500,7 +671,7 @@ export function LoadPage(props: LoadFeatureProps): React.JSX.Element {
             packageId={selectedPackage}
             environment={selectedEnvironment}
             api={api}
-            inlineLoadEnabled={inlineLoadEnabled}
+            inlineLoadEnabled={inlineLoadEnabled||Boolean(replaySourceJobId)}
             onChange={next => updateWorkload(workload.id, () => next)}
             onRemove={() => setWorkloads(current => current.filter(item => item.id !== workload.id))}
           />
@@ -533,27 +704,39 @@ export function LoadPage(props: LoadFeatureProps): React.JSX.Element {
           {rawScenarioJson && <details><summary>Current complete scenario JSON</summary><CodeEditor value={rawScenarioJson} language="json" label="Complete scenario JSON" readOnly /></details>}
         </details>
       </section>
+      </div>
 
       <section id="load-review" className="att-load-section" aria-labelledby="load-review-title" tabIndex={-1}>
         <h2 id="load-review-title">Review and start</h2>
+        {replayReview&&replayEditorDefinition&&<div className="att-replay-delta" role="region" aria-label="Review LOAD replay changes">
+          <h3>Review changes from the source Job</h3>
+          <p>Package revision: <code>{replayReview.originalRevision||replayReview.revision}</code> → <code>{replayReview.currentRevision||replayReview.revision}</code></p>
+          <p>Configuration provenance: original environment {String(replayReview.originalConfiguration?.environment||replayEditorDefinition.environment||'Package default recorded for the Job')}; current environment {String(replayReview.configuration?.environment||selectedEnvironment||'Package default resolved now')}.</p>
+          <p>Effective duration: {effectiveDuration(initialTiming(asObject((replayOriginalDefinition||replayEditorDefinition).scenario)))} → {effectiveDuration(timing)}</p>
+          <p>Configured target arrival rate is the pacing request. Measured TPS is observed completed throughput and can differ.</p>
+          {typeof (replayOriginalDefinition||replayEditorDefinition).sourcePath==='string'&&<p>Scenario source: <code>{String((replayOriginalDefinition||replayEditorDefinition).sourcePath)}</code></p>}
+          <details><summary>Before → after scenario</summary><pre>{JSON.stringify({before:(replayOriginalDefinition||replayEditorDefinition).scenario,after:replayReview.definition?.scenario||(()=>{try{return readScenario();}catch{return 'Correct the fields, then validate.';}})()},null,2)}</pre></details>
+        </div>}
         <div className={`att-validation-state att-state-${draftState}`} role="status" aria-live="polite" aria-busy={draftState === 'validating' || draftState === 'submitting'}>
           <p>{draftMessage}</p>
-          {requestError && <p>{requestError}</p>}
-          {diagnostics.length > 0 && <ul>{diagnostics.map((item, index) => <li key={`${item.code || item.path || 'diagnostic'}-${index}`}>
-            {[item.severity, item.path, item.code].filter(Boolean).join(' · ')}{item.message || item.summary ? `: ${item.message || item.summary}` : ''}
+          {diagnostics.length > 0 && <ul aria-label="LOAD validation details">{diagnostics.map((item, index) => <li key={`${item.code || item.field || item.path || 'diagnostic'}-${index}`}>
+            {[item.severity, item.field || item.path, item.code].filter(Boolean).join(' · ')}{item.message || item.summary ? `: ${item.message || item.summary}` : ''}
           </li>)}</ul>}
         </div>
+        {requestError && <p className="att-inline-error" role="alert">{requestError}</p>}
+        {requestErrorCode === 'ATT-SERVER-REPLAY-DRAFT-STALE' && <button type="button" onClick={() => void validateScenario()}>Validate again</button>}
         {draft && <p className="att-draft-expiry">Draft expires {new Date(draft.expiresAt).toLocaleString()}.</p>}
         {preview && <CodeEditor value={preview} language="yaml" label="Server-validated scenario preview" readOnly />}
         <div className="att-review-actions">
-          <button type="button" onClick={() => void validateScenario()} disabled={!policy || !inlineLoadEnabled || draftState === 'validating' || draftState === 'submitting'}>Validate scenario</button>
-          <button type="button" onClick={() => draft?.draftId && onSchedule?.({ packageId: selectedPackage, environment: selectedEnvironment || undefined, draftId: draft.draftId, previewYaml: draft.previewYaml })}
+          <button type="button" onClick={() => void validateScenario()} disabled={replayDraftLoading || !policy || (!inlineLoadEnabled&&!replaySourceJobId) || draftState === 'validating' || draftState === 'submitting'}>Validate scenario</button>
+          {!replaySourceJobId&&<button type="button" onClick={() => draft?.draftId && onSchedule?.({ packageId: selectedPackage, environment: selectedEnvironment || undefined, draftId: draft.draftId, previewYaml: draft.previewYaml })}
             disabled={!schedulingEnabled || !draft?.draftId || draftState !== 'valid' || !onSchedule}
             title={!schedulingEnabled ? 'Scheduled Load is disabled by Server configuration.' : !draft?.draftId ? 'Validate the scenario before scheduling.' : undefined}>Schedule…</button>
+          }
           <button type="button" onClick={() => void copyYaml()} disabled={!draft?.previewYaml || Boolean(draft.redacted)}>Copy YAML</button>
           <button type="button" onClick={exportYaml} disabled={!draft?.previewYaml || Boolean(draft.redacted)}>Export YAML</button>
-          <button type="button" className="att-primary-action" onClick={() => void startLoad()} disabled={!hasLiveDraft || draftState === 'submitting' || confirmationPending || !inlineLoadEnabled}>
-            {confirmationPending ? 'Waiting for confirmation…' : draftState === 'submitting' ? 'Starting…' : 'Review and start Load'}
+          <button type="button" className="att-primary-action" onClick={() => void startLoad()} disabled={!hasLiveDraft || draftState === 'submitting' || confirmationPending || Boolean(replayReview?.missingFields?.length) || (!inlineLoadEnabled&&!replaySourceJobId)}>
+            {confirmationPending ? 'Waiting for confirmation…' : draftState === 'submitting' ? 'Starting…' : replaySourceJobId?'Run new LOAD Job':'Review and start Load'}
           </button>
         </div>
         {draftState === 'valid' && draft?.draftId && <p className="att-help">Scheduling creates a recurring job from this validated immutable scenario snapshot.</p>}
@@ -642,7 +825,8 @@ function WorkloadEditor({
       {model === 'virtualUsers'
         ? <label>Virtual users<input type="number" min="1" step="1" value={workload.users} onChange={event => onChange({ ...workload, users: event.target.value })} /></label>
         : <><RateField value={workload.arrivalRate} onChange={arrivalRate => onChange({ ...workload, arrivalRate })} />
-          <label>Maximum concurrent<input type="number" min="1" step="1" value={workload.maxConcurrent} onChange={event => onChange({ ...workload, maxConcurrent: event.target.value })} /></label></>}
+          <label>Maximum concurrent<input type="number" min="1" step="1" value={workload.maxConcurrent} onChange={event => onChange({ ...workload, maxConcurrent: event.target.value })} /></label>
+          <label>Overload policy<select value={workload.overloadPolicy} onChange={event => onChange({ ...workload, overloadPolicy: event.target.value })}><option value="">Choose an overload policy</option><option value="drop">Drop excess arrivals</option></select></label></>}
       <ThinkTimeField value={workload.thinkTime} disabled={model !== 'virtualUsers'} onChange={thinkTime => onChange({ ...workload, thinkTime })} />
     </div>
     {model === 'virtualUsers' && <label>Target structure
@@ -802,6 +986,7 @@ export function TargetEditor({ target, packageId, environment, model, api, inlin
     <div className="att-load-grid">
       <label>Target type
         <select value={target.type} onChange={event => onChange({ ...target, type: event.target.value as LoadTargetType })}>
+          {target.type.startsWith('unsupported:')&&<option value={target.type}>Unsupported retained type: {target.type.slice('unsupported:'.length)}</option>}
           <option value="template">Template</option><option value="flow">Flow</option><option value="tool">Tool</option>
         </select>
       </label>

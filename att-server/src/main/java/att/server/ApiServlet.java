@@ -95,7 +95,11 @@ public final class ApiServlet extends HttpServlet {
                 res.setHeader("Cache-Control","no-store");json(res,200,response);return;
             }
             if(path.startsWith("/jobs/"))runtime.requireJobOwner(segment(path,2),principal);
-            if(path.matches("/jobs/[^/]+/replay")){Map<String,Object> replay=runtime.jobReplay(segment(path,2),principal);replay.put("requestId",requestId);json(res,200,replay);return;}
+            if(path.matches("/jobs/[^/]+/replay-draft/[^/]+")){
+                Map<String,Object> draft=runtime.getJobReplayEditorDraft(segment(path,2),segment(path,4),principal);draft.put("requestId",requestId);
+                res.setHeader("Cache-Control","private, no-store");json(res,200,draft);return;
+            }
+            if(path.matches("/jobs/[^/]+/replay")){Map<String,Object> replay=runtime.jobReplay(segment(path,2),principal);replay.put("requestId",requestId);res.setHeader("Cache-Control","private, no-store");json(res,200,replay);return;}
             if(path.matches("/jobs/[^/]+/events")){sse(req,res,segment(path,2));return;}
             if(path.matches("/jobs/[^/]+/artifacts/archive\\.zip")){
                 String id=segment(path,2);
@@ -136,6 +140,8 @@ public final class ApiServlet extends HttpServlet {
           catch(ServerRuntime.InlineLoadLimitException e){error(res,400,"ATT-SERVER-INLINE-LOAD-LIMIT",safeDetail(e),requestId);}
           catch(ServerRuntime.DraftValidationException e){error(res,400,"ATT-SERVER-INVALID-REQUEST",e.getMessage(),requestId,e.diagnostics);}
           catch(ServerRuntime.InspectionConfigurationException e){error(res,422,"ATT-CFG-001",e.summary(),requestId,e.diagnostics);}
+          catch(ServerRuntime.JobConflictException e){error(res,409,e.code,safeDetail(new IllegalArgumentException(e.getMessage())),requestId);}
+          catch(ServerRuntime.ReplayDraftExpiredException e){error(res,410,"ATT-SERVER-REPLAY-DRAFT-EXPIRED","The replay draft expired or was lost after Server restart. Reopen the source Job and create a new draft.",requestId);}
           catch(ServerRuntime.NotFoundException e){error(res,404,"ATT-SERVER-NOT-FOUND","API resource was not found",requestId);}
           catch(ServerRuntime.StaleCursorException e){error(res,409,"ATT-RESOURCE-CURSOR-STALE","The package resources changed; refresh the Explorer",requestId);}
           catch(ServerRuntime.StaleDraftException e){error(res,409,"ATT-SERVER-DRAFT-STALE","Package content changed after preview; rebuild the draft",requestId);}
@@ -206,7 +212,7 @@ public final class ApiServlet extends HttpServlet {
             try{input=ServerRuntime.JSON.readTree(body);}catch(JsonProcessingException malformed){error(res,400,"ATT-SERVER-INVALID-REQUEST","Request body is not valid JSON",requestId);return;}
             if(input==null||!input.isObject())throw new IllegalArgumentException("A JSON object is required");
             RequestIdentity identity=RequestIdentity.resolve(runtime.config.authenticationRequired,authorizationPrincipal,input);
-            if(createReplayDraft){if(input.size()!=0)throw new IllegalArgumentException("Replay review accepts an empty object");Map<String,Object> draft=runtime.createJobReplayDraft(segment(path,2),identity.authorizationPrincipal());draft.put("requestId",requestId);json(res,201,draft);return;}
+            if(createReplayDraft){Map<String,Object> draft=runtime.createJobReplayDraft(segment(path,2),identity.authorizationPrincipal(),input);draft.put("requestId",requestId);res.setHeader("Cache-Control","private, no-store");json(res,201,draft);return;}
             if(rerunJob){Map<String,Object> job=runtime.rerunJob(segment(path,2),input,identity.authorizationPrincipal());job.put("requestId",requestId);res.setHeader("Location",req.getContextPath()+"/api/v1/jobs/"+job.get("jobId"));json(res,202,job);return;}
             if(createRunDraft){Map<String,Object> draft=runtime.createRunDraft(input,identity.authorizationPrincipal());draft.put("requestId",requestId);json(res,201,draft);return;}
             if(createDebugDraft){DebugDraft draft=ServerRuntime.JSON.convertValue(runtime.createDebugDraft(input,identity.authorizationPrincipal()),DebugDraft.class);draft.requestId=requestId;json(res,201,draft);return;}
@@ -223,7 +229,12 @@ public final class ApiServlet extends HttpServlet {
                 Map<String,Object> job=runtime.submitLoadDraft(input,identity.authorizationPrincipal(),identity.persistedPrincipal());job.put("requestId",requestId);res.setHeader("Location",req.getContextPath()+"/api/v1/jobs/"+job.get("jobId"));json(res,202,job);return;
             }
             Map<String,Object> job=runtime.submit(command,workerInput,identity.persistedPrincipal());job.put("requestId",requestId);res.setHeader("Location",req.getContextPath()+"/api/v1/jobs/"+job.get("jobId"));json(res,202,job);
-        } catch(ServerRuntime.InlineLoadDisabledException e){error(res,403,"ATT-SERVER-INLINE-LOAD-DISABLED","Browser-submitted Load is disabled by Server configuration",requestId);}
+        } catch(ServerRuntime.JobConflictException e){error(res,409,e.code,safeDetail(new IllegalArgumentException(e.getMessage())),requestId);}
+          catch(ServerRuntime.ReplayDraftExpiredException e){error(res,410,"ATT-SERVER-REPLAY-DRAFT-EXPIRED","The replay draft or confirmation expired or was lost after Server restart. Reopen the Job and create a new draft.",requestId);}
+          catch(ServerRuntime.ReplayInputMissingException e){error(res,422,"ATT-SERVER-REPLAY-INPUT-MISSING",safeDetail(e),requestId);}
+          catch(ServerRuntime.ReplayResourceMissingException e){error(res,422,"ATT-SERVER-REPLAY-RESOURCE-MISSING",safeDetail(new IllegalArgumentException(e.getMessage())),requestId);}
+          catch(ServerRuntime.ReplayValidationException e){error(res,422,"ATT-SERVER-REPLAY-VALIDATION-FAILED",safeDetail(new IllegalArgumentException(e.getMessage())),requestId,e.diagnostics);}
+          catch(ServerRuntime.InlineLoadDisabledException e){error(res,403,"ATT-SERVER-INLINE-LOAD-DISABLED","Browser-submitted Load is disabled by Server configuration",requestId);}
           catch(ServerRuntime.InlineLoadLimitException e){error(res,400,"ATT-SERVER-INLINE-LOAD-LIMIT",safeDetail(e),requestId);}
           catch(ServerRuntime.QueueFullException e){error(res,429,"ATT-SERVER-CAPACITY-EXCEEDED",e.getMessage(),requestId);}
           catch(ServerRuntime.DraftValidationException e){error(res,400,"ATT-SERVER-INVALID-REQUEST",e.getMessage(),requestId,e.diagnostics);}

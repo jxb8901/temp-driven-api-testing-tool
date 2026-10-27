@@ -308,6 +308,8 @@ Builder 以精簡表格顯示 users/rates、bindings、weights。Workload、mix�
 
 Validate 經由共享 Engine composer 建立完整 `att-load/v1.9` immutable draft；Review 顯示 Server-normalized redacted YAML。儲存修改或更改 Environment 會使驗證失效；提交時再次檢查 package/source revision。Run 前確認 traffic；Schedule 沿用相同 draft、權限、limits、expiry 和 revision policy。不使用 browser storage 或寫入 package source。
 
+LOAD Job 的 **Configure & Rerun** 使用此標準 editor 及 Server 發出的 `draftRef`。它會預填安全保留的 scenario、environment、workload IDs/mix、model、pacing、timing phases、thresholds、evidence 及可安全保留的 inputs。修改共用 timing envelope 與模型專屬欄位後，需依目前 Package 驗證並檢查差異。Current-package rerun 不會無提示重載最新 YAML defaults，也不會把 Arrival Rate 轉成 Virtual Users。File-backed LOAD replay 會沿用 package-relative source route，不套用只供 inline draft 使用的 duration 上限；詳見 [Job replay](unified-run.md)。
+
 ```bash
 ./att.sh load --list-templates --format json
 ./att.sh load --debug template BROWSE --load-template builtin:single-vu --preview

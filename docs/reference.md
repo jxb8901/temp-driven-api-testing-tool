@@ -1060,13 +1060,17 @@ No legacy endpoint is removed in 4.2.5. `GET /api/v1/version` advertises `unifie
 
 Schedule persistence adds JSON fields in the existing H2 tables, leaving legacy LOAD rows unchanged. Before downgrade, stop scheduling, export new definitions, remove RUN/one-time definitions and restore the pre-upgrade database backup. An older scheduler must not interpret a new RUN definition as LOAD. Retained job artifacts remain separate from database metadata.
 
-#### Rerun or schedule a Job
+#### Replay and new execution from a Job
 
-In **Jobs**, **Job Details**, or **LOAD Catalog → Recent LOAD Jobs**, select **Rerun** or **Schedule / Reschedule…**. The Server revalidates the retained definition before displaying a confirmation. Review the package, environment, exact RUN target or selected cases, Debug option, or LOAD scenario and pacing. **Confirm rerun** creates an independent Job and opens its Details. The original results and evidence remain intact.
+In **Jobs**, **Job Details**, or **LOAD History**, choose **Rerun with same settings** or **Configure & Rerun**. Both actions create one authorized Server draft and validate the current Package/Environment before execution. The standard RUN or LOAD editor receives only an opaque `draftRef`; it fetches the sanitized definition from the Server on entry. It does not place the definition in a URL or browser storage.
 
-**Continue to New Schedule** opens the unified creation form. Choose the name, recurrence, timezone, overlap limit and enabled state, review the occurrence preview, then save. Opening this form does not create or edit a schedule. **View / Edit originating schedule** opens the existing authorized schedule; it is a separate action from creating a new schedule or running again now.
+**Rerun with same settings** defaults to **Use current Package**: preserve the Job's safely retained execution parameters, resolve targets and configuration against the current Package, then show the original/current revisions and validation outcome before confirmation. It never silently replaces a retained scenario with the latest YAML defaults. **Require original revision (strict)** is the reproducibility choice. A mismatch returns `ATT-SERVER-REPLAY-REVISION-CONFLICT` and offers **Review with current Package**; stored metadata cannot restore missing historical source bytes. `server.scheduling.packageChangePolicy` and a Schedule-level `ignore` apply only to scheduled executions and do not change manual Rerun.
 
-Replay uses the previous safe snapshot with `revisionPolicy: reject-package-changes`. It never silently switches to the latest package file. If the package, runtime configuration or dependencies change, configure and validate a new run. Newly retained safe definitions survive draft expiry and Server restart; confirmation drafts expire after ten minutes and must then be rebuilt. The Server validates the current account, package, environment, schema, capability and execution limits again.
+**Configure & Rerun** opens the ordinary editor with supported safe settings prefilled. Edit the RUN target/Case selection, options and safe inputs, or LOAD timing, workloads, model-specific pacing, concurrency, thresholds, evidence and safe testdata selection. **Validate** creates a new review intent with bounded typed overrides; **Review changes** shows before/after values, summed LOAD phase duration, current revision and the distinction between configured arrival rate and measured TPS. **Run** creates an independent Job with `rerunOfJobId`; Cancel/Back leaves the source Job, report, Schedule and package files unchanged. Package-file-backed LOAD uses its retained safe package-relative source route and does not inherit the inline-draft-only duration ceiling.
+
+Schedules remain a separate workflow: **Edit existing schedule**, **Create new schedule**, or **Run now**. Existing schedule `strict`/`pause`/`ignore` behavior is unchanged.
+
+New retained execution specs use `att-job-execution/v2`; the parser still accepts v1. Replay drafts use `att-job-replay-draft/v1`. Draft references and confirmation intents are principal-bound and expire after ten minutes; they are held in Server memory, so Server restart loses them and the user must reopen the source Job to create a new draft. A source Job without a safe retained definition, a missing sensitive input, an expired draft, a removed resource, an invalid schema and capacity rejection have separate error responses. Secrets, Worker transport data, host roots and unsafe paths are never reconstructed from logs or artifacts.
 
 Historical Jobs without a retained definition show **Rerun unavailable for this historical job**. Validation-only Jobs, failed safe retention, and classified submitted inputs cannot be replayed exactly. Legacy direct submissions with raw overrides or unresolved `rerunFailed` history selection require a new validated draft before safe retention. Configure a new run and provide missing credentials through the normal protected input flow. Never reconstruct an execution from logs, artifacts or redacted previews. Safe definitions are limited to 256 KiB and exclude Worker transport fields and host roots.
 
@@ -1074,11 +1078,12 @@ The Job lifecycle API uses the following endpoints under `/api/v1`:
 
 | Method and path | Result |
 | --- | --- |
-| `GET /jobs/{jobId}/replay` | Authorized safe definition, availability reason, revision policy and originating schedule link when available. |
-| `POST /jobs/{jobId}/replay-draft` with `{}` | Revalidated RUN/LOAD draft plus an opaque `intentId`; creates no execution or schedule. |
-| `POST /jobs/{jobId}/rerun` with `{"intentId":"...","confirm":true}` | New independent Job, HTTP 202 and `Location`; retries with the same intent return the accepted Job. |
+| `GET /jobs/{jobId}/replay` | Authorized safe definition and availability reason. |
+| `POST /jobs/{jobId}/replay-draft` with `{"sourcePolicy":"current"}` or `{"sourcePolicy":"strict","overrides":{...}}` | `att-job-replay-draft/v1` validation, opaque `draftRef` and confirmation `intentId`; no Job or Schedule is created. Omitted `sourcePolicy` preserves legacy strict behavior. |
+| `GET /jobs/{jobId}/replay-draft/{draftRef}` | Principal-authorized sanitized editor definition and current configuration provenance; no definition is carried in the route. |
+| `POST /jobs/{jobId}/rerun` with `{"intentId":"...","confirm":true,"sourcePolicy":"current"}` | New independent Job, HTTP 202 and `Location`; retries with the same intent return the accepted Job. |
 
-Use the returned `draftId`, package, environment and canonical `executionType: run | load` in the normal `POST /schedules` creation contract. Debug remains `options.debug` on RUN. A rerun exposes `rerunOfJobId`; schedules created from a Job retain authorized `sourceJobId` provenance. Replay access is restricted to the submitting identity or retained schedule execution owner. Deleted or inaccessible Jobs fail with 404. A stale source fails with 409; capacity and validation failures follow the normal submission contracts. Repeating an accepted intent after its output Job is deleted fails safely instead of launching another execution.
+Schedule creation uses its normal validated draft contract. Debug remains `options.debug` on RUN. Replay access is restricted to the submitting identity or retained schedule execution owner. `ATT-SERVER-REPLAY-DRAFT-STALE` is returned when the Package changes after validation; `ATT-SERVER-REPLAY-DRAFT-EXPIRED` is returned for an expired or restart-lost draft; capacity returns HTTP 429. Repeating an accepted intent returns the same Job.
 
 ### Run mode
 
@@ -1101,6 +1106,8 @@ Run evidence is written directly below `output/<RunID>/`. The completed run publ
 Status aggregation preserves severity: ERROR > INVALID > FAIL > PASS > SKIPPED. Process exit code is `0` when the run completes without failing status, `1` for test/assertion failure, `2` for invalid command/configuration/validation, and `3` for runtime/infrastructure error.
 
 See the [CLI Reference](reference/cli.md) for selectors and options, [Reliability and Execution Control](reference/reliability-execution-control.md) for Stage and Action control, and [Results, Reports, and Evidence](reference/results-reports-evidence.md) for artifact contracts.
+
+In Studio, **Configure & Rerun** from a Job preloads the safe retained RUN target or exact Case selection, environment, Debug/fail-fast options and eligible typed inputs into this standard RUN editor. Validate the edited definition against the current Package before review and submit. See [Job replay and new execution](reference/execution-modes/unified-run.md#replay-and-new-execution-from-a-job) for source policy and API behavior.
 
 ### Standalone Debug
 
@@ -1639,6 +1646,8 @@ This creates two workloads, four bindings, three unique targets and 30 VU. Workl
 The builder summarizes bindings, users/rates and weights. Detailed workload, mix, target and common settings use Save/Cancel dialogs; Cancel or Escape discards tentative changes. Target inputs/vars/Tool arguments retain safe typed sidecar defaults independently for each target. Precedence is template policy, then safe target sidecar business defaults, then target binding values, then workload binding inputs/vars; applicable explicit CLI overrides win. Business maps merge by key, preserving distinct keys and letting the later layer win conflicts. Studio preserves workload-specific timing, ramps and execution settings, including ranged think time, through validation and edits. Debug-local testdata imports are rejected: declare supported Load testdata sources explicitly. Bindings may specify workload inputs, vars and testdata selection as well as target-specific values.
 
 Validate creates a full `att-load/v1.9` immutable draft through the shared Engine composer. Review shows redacted Server-normalized YAML. Any saved edit or environment change invalidates validation; source/revision changes are checked again at submission. Run requires traffic confirmation; Schedule uses the same validated draft and normal permissions, limits, expiry and revision policy. No browser storage or package source writes are used.
+
+**Configure & Rerun** from a LOAD Job uses this standard editor with a server-issued `draftRef`. It prefills the safe retained scenario, environment, workload IDs/mix, model, pacing, timing phases, thresholds, evidence and eligible inputs. Edit the common timing envelope and model-specific fields, then validate against the current Package before reviewing the delta. Current-package rerun does not silently reload latest YAML defaults or convert Arrival Rate to Virtual Users. File-backed LOAD replay remains on its package-relative source route and does not inherit inline-draft-only duration caps; see [Job replay](reference/execution-modes/unified-run.md#replay-and-new-execution-from-a-job).
 
 ```bash
 ./att.sh load --list-templates --format json

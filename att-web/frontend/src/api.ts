@@ -1,5 +1,5 @@
 import type { ManifestView, ManifestProjection, ManifestDraft, ManifestHistory } from './features/explorer/packageManifest';
-import type { JobReplay } from "./features/load/types";
+import type { JobReplay, JobReplayEditorDraft } from "./features/load/types";
 import { ApiError, type ApiEnvelope, type ApiErrorBody, type JobSummary, type LocalAuthUser, type PackageSummary, type ServerVersion } from './types';
 import type {
   AcceptedJob, ConfigurationComparisonQuery, ConfigurationFilePage, ConfigurationResponse, DebugDraftRequest, DraftResponse,
@@ -330,11 +330,14 @@ export const api = {
   getJobReplay(jobId: string): Promise<JobReplay> {
     return request<JobReplay>('jobs/' + encodeURIComponent(jobId) + '/replay');
   },
-  createJobReplayDraft(jobId: string): Promise<JobReplay> {
-    return postJson<JobReplay>('jobs/' + encodeURIComponent(jobId) + '/replay-draft', {});
+  createJobReplayDraft(jobId: string, options: { sourcePolicy?: 'current' | 'strict'; overrides?: Record<string, unknown> } = {}): Promise<JobReplay> {
+    return postJson<JobReplay>('jobs/' + encodeURIComponent(jobId) + '/replay-draft', options);
   },
-  rerunJob(jobId: string, intentId: string): Promise<{ jobId: string }> {
-    return postJson<{ jobId: string }>('jobs/' + encodeURIComponent(jobId) + '/rerun', { intentId, confirm: true });
+  getJobReplayEditorDraft(jobId: string, draftRef: string): Promise<JobReplayEditorDraft> {
+    return request<JobReplayEditorDraft>('jobs/' + encodeURIComponent(jobId) + '/replay-draft/' + encodeURIComponent(draftRef));
+  },
+  rerunJob(jobId: string, intentId: string, sourcePolicy?: 'current' | 'strict'): Promise<{ jobId: string }> {
+    return postJson<{ jobId: string }>('jobs/' + encodeURIComponent(jobId) + '/rerun', { intentId, confirm: true, ...(sourcePolicy ? { sourcePolicy } : {}) });
   },
   getJob(jobId: string, signal?: AbortSignal): Promise<JobView> {
     return request<JobView>('jobs/' + encodeURIComponent(jobId), { signal });
