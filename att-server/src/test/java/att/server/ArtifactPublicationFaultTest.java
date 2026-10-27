@@ -188,7 +188,8 @@ class ArtifactPublicationFaultTest {
                 writer.destroyForcibly();
                 assertTrue(writer.waitFor(5, TimeUnit.SECONDS));
                 awaitReady(restarted, id);
-                assertFalse(new String(restarted.archiveEntry(id, "case.log"), java.nio.charset.StandardCharsets.UTF_8).contains("private-canary"));
+                assertThrows(ServerRuntime.NotFoundException.class, () -> restarted.archiveEntry(id, "case.log"),
+                        "unapproved producer secrets must be omitted instead of being redacted during ZIP creation");
             }
         } finally {
             writer.destroyForcibly();
@@ -267,7 +268,8 @@ class ArtifactPublicationFaultTest {
                 child.destroyForcibly();
                 child.onExit().get(5, TimeUnit.SECONDS);
                 awaitReady(restarted, id);
-                assertFalse(new String(restarted.archiveEntry(id, "case.log"), java.nio.charset.StandardCharsets.UTF_8).contains("private-canary"));
+                assertThrows(ServerRuntime.NotFoundException.class, () -> restarted.archiveEntry(id, "case.log"),
+                        "unapproved producer secrets must be omitted instead of being redacted during ZIP creation");
                 long cleanupDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
                 while (Files.exists(restarted.outputDirectoryForJob(id)) && System.nanoTime() < cleanupDeadline) Thread.sleep(10);
                 assertFalse(Files.exists(restarted.outputDirectoryForJob(id)));
@@ -300,8 +302,8 @@ class ArtifactPublicationFaultTest {
             assertThrows(ServerRuntime.ArchiveUnavailableException.class, () -> runtime.archiveEntry(job.id, "case.log"));
             awaitReady(runtime, job.id);
             assertEquals(2, attempts.get());
-            assertEquals("password=[REDACTED_SECRET]\nbusiness=unchanged\n",
-                    new String(runtime.archiveEntry(job.id, "case.log"), java.nio.charset.StandardCharsets.UTF_8));
+            assertThrows(ServerRuntime.NotFoundException.class, () -> runtime.archiveEntry(job.id, "case.log"),
+                    "raw producer output containing credentials must not become a public archive entry");
         }
     }
 
@@ -357,7 +359,7 @@ class ArtifactPublicationFaultTest {
                 assertEquals("READY", runtime.artifactIndex(job.id).get("archiveStatus"));
                 byte[] archive = Files.readAllBytes(runtime.artifactArchivePath(job.id));
                 assertTrue(Files.readString(output.resolve("case.log")).contains("private-canary"));
-                assertFalse(new String(runtime.archiveEntry(job.id, "case.log"), java.nio.charset.StandardCharsets.UTF_8).contains("private-canary"));
+                assertThrows(ServerRuntime.NotFoundException.class, () -> runtime.archiveEntry(job.id, "case.log"));
                 Files.setPosixFilePermissions(output, original);
                 runtime.retryArtifactArchive(job.id);
                 long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
@@ -464,10 +466,8 @@ class ArtifactPublicationFaultTest {
                 assertEquals("CANCELLED", runtime.cancel(id, "user-a"));
                 awaitReady(runtime, id);
                 assertEquals("CANCELLED", runtime.jobRecord(id).get("status"));
-                String approved = new String(runtime.archiveEntry(id, "case.log"), java.nio.charset.StandardCharsets.UTF_8);
-                assertTrue(approved.contains("business=partial"));
-                assertTrue(approved.contains("password=[REDACTED_SECRET]"));
-                assertFalse(approved.contains("private-cancel-canary"));
+                assertThrows(ServerRuntime.NotFoundException.class, () -> runtime.archiveEntry(id, "case.log"),
+                        "cancellation must not publish incomplete unapproved Worker secrets");
                 long cleanupDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
                 while (Files.exists(output) && System.nanoTime() < cleanupDeadline) Thread.sleep(10);
                 assertFalse(Files.exists(output));
