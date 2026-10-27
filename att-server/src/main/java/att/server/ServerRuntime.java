@@ -3897,6 +3897,27 @@ final class ServerRuntime implements AutoCloseable {
                 .decode(java.nio.ByteBuffer.wrap(bytes)).toString();}
         catch(java.nio.charset.CharacterCodingException invalid){throw new IllegalArgumentException("Binary artifacts cannot be exported");}
         if(text.indexOf(0)>=0)throw new IllegalArgumentException("Binary artifacts cannot be exported");
+        // Approval is fail-closed, not an export redaction pass: never replace or rewrite bytes.
+        // Producer output requiring masking is not safe to publish until the producer fixes it.
+        if(!att.server.api.internal.DiagnosticSanitizer.redactText(text).equals(text))
+            throw new IllegalArgumentException("Artifact contains unapproved sensitive text");
+        String name=file.getFileName().toString().toLowerCase(java.util.Locale.ROOT);
+        if(name.endsWith(".json") || name.endsWith(".yaml") || name.endsWith(".yml")) {
+            try {
+                Object source;
+                if(name.endsWith(".json")) source=ARTIFACT_JSON.readValue(text,Object.class);
+                else {
+                    org.yaml.snakeyaml.LoaderOptions options=new org.yaml.snakeyaml.LoaderOptions();
+                    options.setAllowDuplicateKeys(false);options.setMaxAliasesForCollections(0);
+                    options.setNestingDepthLimit(64);options.setCodePointLimit(limit);
+                    source=new org.yaml.snakeyaml.Yaml(new ArtifactYamlConstructor(options)).load(text);
+                }
+                Object safe=att.security.SecretProtection.exportValue(source);
+                if(!java.util.Objects.equals(source,safe))
+                    throw new IllegalArgumentException("Artifact contains unapproved sensitive fields");
+            } catch(IllegalArgumentException rejected) {throw rejected;}
+              catch(Exception invalid) {throw new IllegalArgumentException("Invalid structured artifact cannot be exported");}
+        }
         return bytes;
     }
     /** Legacy sanitized export projection; retained only for compatibility tests and callers. */
