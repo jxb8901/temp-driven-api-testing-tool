@@ -15,6 +15,25 @@ SPEC.loader.exec_module(soak)
 
 
 class LoadSoakEvidenceTest(unittest.TestCase):
+    def test_macos_resource_sampling_uses_supported_process_thread_rows(self):
+        def process_output(command, **kwargs):
+            if command[:3] == ["ps", "-o", "rss="]:
+                return "120000\n"
+            if command[:2] == ["ps", "-M"]:
+                return "USER PID COMMAND\nuser 123 java\n  123 thread-a\n  123 thread-b\n"
+            if command[0] == "lsof":
+                return "COMMAND PID USER FD TYPE NAME\njava 123 user cwd DIR /tmp\njava 123 user txt REG /tmp/att.jar\n"
+            raise AssertionError("unexpected command: {}".format(command))
+
+        with mock.patch.object(soak.platform, "system", return_value="Darwin"), \
+                mock.patch.object(soak.subprocess, "check_output", side_effect=process_output):
+            sample = soak.process_resource_sample(123)
+
+        self.assertTrue(sample["supported"])
+        self.assertEqual(120000 * 1024, sample["residentBytes"])
+        self.assertEqual(3, sample["threads"])
+        self.assertEqual(2, sample["openFileDescriptors"])
+
     def test_checkpoint_reader_checks_identity_and_integrity(self):
         with tempfile.TemporaryDirectory() as temporary:
             directory = Path(temporary)

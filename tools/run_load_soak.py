@@ -119,19 +119,19 @@ def process_resource_sample(pid):
             return {"pid": int(pid), "supported": False, "reason": "process counters became unavailable"}
     if platform.system() == "Darwin":
         try:
-            output = subprocess.check_output(["ps", "-o", "rss=", "-o", "thcount=", "-p", str(pid)],
-                                             text=True, stderr=subprocess.DEVNULL).strip().split()
-            values = {"pid": int(pid), "supported": bool(output)}
-            if len(output) >= 1:
-                values["residentBytes"] = int(output[0]) * 1024
-            if len(output) >= 2:
-                values["threads"] = int(output[1])
-            try:
-                descriptors = subprocess.check_output(["lsof", "-n", "-p", str(pid)],
-                                                       text=True, stderr=subprocess.DEVNULL)
-                values["openFileDescriptors"] = max(0, len(descriptors.splitlines()) - 1)
-            except (OSError, subprocess.CalledProcessError):
-                values["openFileDescriptorsAvailable"] = False
+            rss = subprocess.check_output(["ps", "-o", "rss=", "-p", str(pid)],
+                                          text=True, stderr=subprocess.DEVNULL).strip().split()
+            threads = subprocess.check_output(["ps", "-M", "-p", str(pid)],
+                                              text=True, stderr=subprocess.DEVNULL).splitlines()
+            values = {"pid": int(pid), "supported": bool(rss and len(threads) > 1)}
+            if rss:
+                values["residentBytes"] = int(rss[0]) * 1024
+            if len(threads) > 1:
+                # macOS ps -M emits a header followed by one row for each thread.
+                values["threads"] = len(threads) - 1
+            descriptors = subprocess.check_output(["lsof", "-n", "-p", str(pid)],
+                                                   text=True, stderr=subprocess.DEVNULL)
+            values["openFileDescriptors"] = max(0, len(descriptors.splitlines()) - 1)
             return values
         except (OSError, subprocess.CalledProcessError, ValueError):
             pass
