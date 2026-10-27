@@ -113,8 +113,8 @@ final class ArtifactArchive {
                     if(metrics!=null){metrics.value.temporaryExportFiles++;metrics.value.temporaryExportBytes+=bytes.length;}
                 }
             }
-            // Resolve report links only after classification, so omitted evidence never leaves a dangling raw link.
-            Set<String> paths=Set.copyOf(approved);List<Entry> entries=new ArrayList<>();total=0;
+            // ZIP bytes are exactly the validated producer bytes; publication must not rewrite HTML links or scripts.
+            List<Entry> entries=new ArrayList<>();total=0;
             if(metrics!=null)metrics.phase("zip_write");
             try(ZipOutputStream zip=new ZipOutputStream(Files.newOutputStream(staging))) {
                 for(String relative:approved) {
@@ -126,22 +126,17 @@ final class ArtifactArchive {
                         if(metrics!=null)metrics.value.temporaryExportReadBytes=add(metrics.value.temporaryExportReadBytes,bytes.length);
                     }
                     boolean report=Set.of("html","htm").contains(extension(relative));
-                    if(report) {
-                        if(metrics!=null)metrics.phase("scan_classification_redaction");
-                        bytes=ArtifactHtmlPolicy.publish(bytes,relative,paths);
-                        if(metrics!=null)metrics.phase("zip_write");
-                    }
                     if(bytes.length>MAX_ENTRY_BYTES)throw new LimitFailure("Final artifact size exceeds limits","artifact.archive.entryBytes",MAX_ENTRY_BYTES,bytes.length);
                     if(total+bytes.length>MAX_TOTAL_BYTES)throw new LimitFailure("Final artifact size exceeds limits","artifact.archive.totalBytes",MAX_TOTAL_BYTES,total+bytes.length);
                     total+=bytes.length;
                     largestEntryBytes=Math.max(largestEntryBytes,bytes.length);
-                    entries.add(new Entry(relative,mediaType(relative),bytes.length,sha256(bytes),"textual-output","sanitized-once",report,true));
+                    entries.add(new Entry(relative,mediaType(relative),bytes.length,sha256(bytes),"textual-output","preserved",report,true));
                     writeEntry(zip,relative,bytes);
                     if(metrics!=null){metrics.value.includedEntries++;metrics.value.includedBytes+=bytes.length;}
                     if(progress!=null)progress.entryWritten(relative);
                 }
                 Map<String,Object> manifest=new LinkedHashMap<>();
-                manifest.put("version",1);manifest.put("policy","att-export-safe-text-v2");manifest.put("entries",entries);manifest.put("complete",omitted==0);
+                manifest.put("version",1);manifest.put("policy","att-export-approved-bytes-v1");manifest.put("entries",entries);manifest.put("complete",omitted==0);
                 manifest.put("omissions",omitted==0?List.of():List.of(Map.of("count",omitted,"reason",OMISSION_REASON)));
                 if(omitted>0){
                     Map<String,Object> notice=oversizedOmission>0
@@ -311,7 +306,7 @@ final class ArtifactArchive {
         if (manifest == null || !(manifest.keySet().equals(baseKeys) || manifest.keySet().equals(diagnosticKeys))
                 || !Integer.valueOf(1).equals(manifest.get("version")) || !validOmissions(manifest)
                 || !validDiagnostics(manifest.get("diagnostics"))
-                || !"att-export-safe-text-v2".equals(manifest.get("policy")) || !(manifest.get("entries") instanceof List<?> entries)
+                || !Set.of("att-export-safe-text-v2","att-export-approved-bytes-v1").contains(manifest.get("policy")) || !(manifest.get("entries") instanceof List<?> entries)
                 || entries.size() != count - 1) throw new IllegalArgumentException("Invalid archive manifest");
         Set<String> approved = new HashSet<>();
         for (Object value : entries) {
@@ -323,7 +318,9 @@ final class ArtifactArchive {
             if (entry == null || !integral(row.get("size")) || ((Number) row.get("size")).longValue() != entry.getSize()
                     || !(row.get("sha256") instanceof String digest) || !digest.matches("[a-f0-9]{64}")
                     || !mediaType(path).equals(row.get("mediaType")) || !"textual-output".equals(row.get("classification"))
-                    || !"sanitized-once".equals(row.get("decision")) || !Boolean.TRUE.equals(row.get("preview"))
+                    || !(("att-export-approved-bytes-v1".equals(manifest.get("policy")) && "preserved".equals(row.get("decision")))
+                        || ("att-export-safe-text-v2".equals(manifest.get("policy")) && "sanitized-once".equals(row.get("decision"))))
+                    || !Boolean.TRUE.equals(row.get("preview"))
                     || !Boolean.valueOf(Set.of("html","htm").contains(extension(path))).equals(row.get("report")))
                 throw new IllegalArgumentException("Archive does not match manifest");
             if (digests) try (InputStream input = zip.getInputStream(entry)) {
