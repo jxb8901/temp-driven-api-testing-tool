@@ -8,9 +8,11 @@ import org.junit.jupiter.api.io.TempDir;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.FutureTask;
 import java.util.concurrent.TimeUnit;
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -48,13 +50,21 @@ class ServerAdmissionTest {
         org.junit.jupiter.api.Assumptions.assumeFalse(isWindows(),"Uses a POSIX test launcher");
         int loadWorkers=4;
         CountDownLatch launched=new CountDownLatch(loadWorkers),allowLaunch=new CountDownLatch(1);
-        ServerRuntime runtime=runtime("load-budget",8,8,loadWorkers,30,builder->{launched.countDown();await(allowLaunch);return builder.start();});
+        ServerRuntime runtime=runtime("load-budget",8,8,loadWorkers,30,builder->{launched.countDown();await(allowLaunch,90,TimeUnit.SECONDS);return builder.start();});
+        List<FutureTask<Map<String,Object>>> submissions=new ArrayList<>();
         try {
-            for(int index=0;index<loadWorkers;index++)runtime.submit("load",request(),"ci");
-            assertTrue(launched.await(4,TimeUnit.MINUTES),"all four admitted LOAD Workers should start");
+            for(int index=0;index<loadWorkers;index++) {
+                FutureTask<Map<String,Object>> submission=new FutureTask<>(()->runtime.submit("load",request(),"ci"));
+                submissions.add(submission);new Thread(submission,"test-load-admission-"+index).start();
+            }
+            assertTrue(launched.await(75,TimeUnit.SECONDS),"all four admitted LOAD Workers should reach the launch gate");
             assertThrows(ServerRuntime.QueueFullException.class,()->runtime.submit("load",request(),"ci"),
                     "a fifth LOAD must not exceed the 256-session Server preparation envelope");
-        } finally {allowLaunch.countDown();awaitJobs(runtime);runtime.close();}
+        } finally {
+            allowLaunch.countDown();
+            for(FutureTask<Map<String,Object>> submission:submissions)try{submission.get(10,TimeUnit.SECONDS);}catch(Exception ignored){}
+            awaitJobs(runtime);runtime.close();
+        }
     }
 
     @Test void expiredTerminalJobsRemoveMetadataJournalAndArtifacts() throws Exception {
@@ -76,7 +86,8 @@ class ServerAdmissionTest {
         return new ServerRuntime(ServerConfig.load(yaml),Files.createDirectory(temp.resolve(name+"-libs")).toString(),ServerRuntimeTestSupport.resolvingConfiguration(launcher));
     }
     private static JsonNode request(){return ServerRuntime.JSON.createObjectNode().put("packageId","p");}
-    private static void await(CountDownLatch gate)throws java.io.IOException {try{if(!gate.await(5,TimeUnit.MINUTES))throw new java.io.IOException("test launch gate timed out");}catch(InterruptedException e){Thread.currentThread().interrupt();throw new java.io.IOException("test launch gate interrupted",e);}}
+    private static void await(CountDownLatch gate)throws java.io.IOException {await(gate,5,TimeUnit.SECONDS);}
+    private static void await(CountDownLatch gate,long timeout,TimeUnit unit)throws java.io.IOException {try{if(!gate.await(timeout,unit))throw new java.io.IOException("test launch gate timed out");}catch(InterruptedException e){Thread.currentThread().interrupt();throw new java.io.IOException("test launch gate interrupted",e);}}
     private static void awaitJobs(ServerRuntime runtime){long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(5);while(!runtime.jobs.isEmpty()&&System.nanoTime()<deadline)try{Thread.sleep(10);}catch(InterruptedException e){Thread.currentThread().interrupt();return;}}
     private static boolean isWindows(){return System.getProperty("os.name","").toLowerCase().contains("win");}
 }
