@@ -44,14 +44,14 @@ class ServerConfigurationValidatorTest {
 
     @Test void validatesTenDayInlineLoadLimitAndFieldSpecificOverflow() throws Exception {
         Path runtime=temp.resolve("duration-config/config.yaml");Files.createDirectories(runtime.getParent());
-        Files.writeString(runtime,"schemaVersion: att-config/v2.13\nenvironment: SIT\n");
+        Files.write(runtime,"schemaVersion: att-config/v2.13\nenvironment: SIT\n".getBytes(StandardCharsets.UTF_8));
         Path packages=Files.createDirectory(temp.resolve("duration-packages"));Path payment=Files.createDirectory(packages.resolve("payments"));
         Path java=Paths.get(System.getProperty("java.home"),"bin",System.getProperty("os.name","").toLowerCase().contains("win")?"java.exe":"java");
         Path valid=temp.resolve("duration-valid.yaml");
-        Files.writeString(valid,"server:\n  dataDir: '"+temp.resolve("duration-data")+"'\n  runtimeConfigPath: '"+runtime+"'\n  javaExecutable: '"+java+"'\n  inlineLoad:\n    maxDurationSeconds: 864000\nworkers: {}\npackages:\n  allowedRoots: ['"+packages+"']\n  entries:\n    payments: '"+payment+"'\n");
+        Files.write(valid,"server:\n  dataDir: '"+temp.resolve("duration-data")+"'\n  runtimeConfigPath: '"+runtime+"'\n  javaExecutable: '"+java+"'\n  inlineLoad:\n    maxDurationSeconds: 864000\nworkers: {}\npackages:\n  allowedRoots: ['"+packages+"']\n  entries:\n    payments: '"+payment+"'\n".getBytes(StandardCharsets.UTF_8));
         assertEquals(payment.toRealPath(),ServerConfigurationValidator.validate(valid).packages().get("payments"));
         Path invalid=temp.resolve("duration-invalid.yaml");
-        Files.writeString(invalid,"server:\n  dataDir: '"+temp.resolve("duration-data-invalid")+"'\n  runtimeConfigPath: '"+runtime+"'\n  javaExecutable: '"+java+"'\n  inlineLoad:\n    maxDurationSeconds: 864001\nworkers: {}\npackages:\n  allowedRoots: ['"+packages+"']\n  entries:\n    payments: '"+payment+"'\n");
+        Files.write(invalid,"server:\n  dataDir: '"+temp.resolve("duration-data-invalid")+"'\n  runtimeConfigPath: '"+runtime+"'\n  javaExecutable: '"+java+"'\n  inlineLoad:\n    maxDurationSeconds: 864001\nworkers: {}\npackages:\n  allowedRoots: ['"+packages+"']\n  entries:\n    payments: '"+payment+"'\n".getBytes(StandardCharsets.UTF_8));
         IllegalArgumentException error=assertThrows(IllegalArgumentException.class,()->ServerConfigurationValidator.validate(invalid));
         assertTrue(error.getMessage().contains("server.inlineLoad.maxDurationSeconds"),error.getMessage());
     }
