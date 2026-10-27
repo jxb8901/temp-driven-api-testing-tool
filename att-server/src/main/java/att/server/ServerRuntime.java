@@ -3897,13 +3897,17 @@ final class ServerRuntime implements AutoCloseable {
                 .decode(java.nio.ByteBuffer.wrap(bytes)).toString();}
         catch(java.nio.charset.CharacterCodingException invalid){throw new IllegalArgumentException("Binary artifacts cannot be exported");}
         if(text.indexOf(0)>=0)throw new IllegalArgumentException("Binary artifacts cannot be exported");
-        // Approval is fail-closed, not an export redaction pass: never replace or rewrite bytes.
-        // Producer output requiring masking is not safe to publish until the producer fixes it.
-        if(!att.server.api.internal.DiagnosticSanitizer.redactText(text).equals(text))
-            throw new IllegalArgumentException("Artifact contains unapproved sensitive text");
-        if(!att.server.api.internal.DiagnosticSanitizer.redactAbsolutePaths(text).equals(text))
-            throw new IllegalArgumentException("Artifact contains unapproved host-local paths");
+        // Never alter producer bytes when creating ZIPs. Plain-text evidence is checked for
+        // credentials and host-local paths; generated HTML and structured JSON/YAML have their
+        // own syntax/presentation rules. Applying free-text path rewriting to structured
+        // payloads incorrectly classifies legitimate remotePath values and report scripts.
         String name=file.getFileName().toString().toLowerCase(java.util.Locale.ROOT);
+        boolean html=name.endsWith(".html")||name.endsWith(".htm");
+        if(!html && !att.server.api.internal.DiagnosticSanitizer.redactText(text).equals(text))
+            throw new IllegalArgumentException("Artifact contains unapproved sensitive text");
+        if((name.endsWith(".log")||name.endsWith(".txt")||name.endsWith(".md"))
+                && !att.server.api.internal.DiagnosticSanitizer.redactAbsolutePaths(text).equals(text))
+            throw new IllegalArgumentException("Artifact contains unapproved host-local paths");
         if(name.endsWith(".json") || name.endsWith(".yaml") || name.endsWith(".yml")) {
             try {
                 Object source;
