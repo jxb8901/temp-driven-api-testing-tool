@@ -180,8 +180,9 @@ class AttServiceTest {
         assertEquals("PASS",result.status());
         assertEquals(0,result.exitCode());
         assertFalse(result.paths().containsKey("report"));
-        assertEquals("att-load-summary/v1.2",result.summary().get("schemaVersion"),
-                "direct Engine/CLI summary compatibility is retained");
+        assertEquals("att-load-summary/v1.3",result.summary().get("schemaVersion"),
+                "direct Engine/CLI summary advertises its actual version");
+        att.validation.JsonSchemaVerifier.verify(Paths.get("schemas/att-load-summary-v1.3.schema.json"),result.summary());
         Map<?,?> worker=(Map<?,?>)result.toWorkerMap();
         Map<?,?> compact=(Map<?,?>)worker.get("summary");
         Map<?,?> archive=(Map<?,?>)compact.get("archive");
