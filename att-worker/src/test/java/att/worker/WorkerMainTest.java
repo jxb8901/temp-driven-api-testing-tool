@@ -463,7 +463,7 @@ class WorkerMainTest {
     }
 
 
-    @Test void workerAndDirectApiReturnEquivalentSmallLoadOutcomes() throws Exception {
+    @Test void workerAndDirectApiReturnEquivalentLoadOutcomesWithVersionedWorkerSummary() throws Exception {
         Path root=temp.resolve("load-package"); Files.createDirectories(root.resolve("config")); Files.createDirectories(root.resolve("templates/SIMPLE"));
         Files.createDirectories(root.resolve("testcase")); Files.createDirectories(root.resolve("load"));
         copyTree(Paths.get("schemas"),root.resolve("schemas"));
@@ -484,7 +484,15 @@ class WorkerMainTest {
         assertEquals(direct.exitCode(),terminal.get("result").get("exitCode").asInt());
         assertEquals("worker-load",terminal.get("result").get("executionId").asText());
         assertFalse(terminal.get("result").has("jobId"));
-        assertEquals(toMap(direct.summary().get("metrics")).keySet(),toMap(terminal.get("result").get("summary").get("metrics")).keySet());
+        JsonNode workerSummary=terminal.get("result").get("summary");
+        assertEquals("att-load-terminal-result/v1",workerSummary.get("schemaVersion").asText());
+        JsonNode workerMetrics=workerSummary.get("metrics"),directMetrics=mapper.valueToTree(direct.summary().get("metrics"));
+        for(String key:new String[]{"scheduled","started","completed","success","failure","runtimeError","dropped"}) {
+            assertTrue(directMetrics.has(key),"direct metric "+key);
+            assertTrue(workerMetrics.has(key),"Worker compact metric "+key);
+        }
+        assertFalse(workerMetrics.has("buckets"));
+        assertTrue(directMetrics.has("buckets"),"direct Engine API keeps the detailed CLI summary");
         assertTrue(Files.isRegularFile(root.resolve("output/load/api-load/load-summary.json")));
         assertTrue(Files.isRegularFile(root.resolve("output/load/worker-load/load-summary.json")));
         Process cli=new ProcessBuilder(Paths.get(System.getProperty("java.home"),"bin","java").toString(),"-cp",System.getProperty("java.class.path"),"att.FrameworkRunner","load","load/scenario.yaml","--run-id","cli-load","--output-dir",root.resolve("output-cli").toString(),"--format","json","--quiet").directory(root.toFile()).start();

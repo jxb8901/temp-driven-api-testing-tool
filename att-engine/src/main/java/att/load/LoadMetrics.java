@@ -28,9 +28,13 @@ public final class LoadMetrics implements LoadEventListener {
 
     private final ConcurrentLatencyReservoir latencies = new ConcurrentLatencyReservoir(MAX_LATENCIES);
     private final BucketSlot[] buckets = bucketSlots();
+    private final AtomicLong timeSeriesBucketsEvicted = new AtomicLong();
     /* The phase set is fixed by the load contract, so this remains bounded independently of run duration. */
     private final ConcurrentHashMap<String, PhaseStats> phases = new ConcurrentHashMap<String, PhaseStats>();
     private final Map<String, AtomicLong> errorClassifications = new ConcurrentHashMap<String, AtomicLong>();
+    private final Map<String, AtomicLong> runtimeErrorClassifications = new ConcurrentHashMap<String, AtomicLong>();
+    private final java.util.concurrent.atomic.AtomicReference<Map<String, Object>> primaryRuntimeError =
+            new java.util.concurrent.atomic.AtomicReference<Map<String, Object>>();
     private final Set<String> activeUsers = Collections.newSetFromMap(new ConcurrentHashMap<String, Boolean>());
     private final AtomicLong scheduled = new AtomicLong(), measuredScheduled = new AtomicLong(), started = new AtomicLong(), completed = new AtomicLong();
     private final AtomicLong success = new AtomicLong(), failure = new AtomicLong(), runtimeError = new AtomicLong(), dropped = new AtomicLong();
@@ -148,7 +152,11 @@ public final class LoadMetrics implements LoadEventListener {
                 updateMax(latencyMaxMs, latencyMs);
                 recordLatency(latencyMs, observation);
             }
-            if (event.status() != null && event.status() != ResultStatus.PASS) {recordError(event);recordFailureSample(event);}
+            if (event.status() != null && event.status() != ResultStatus.PASS) {
+                recordError(event);
+                if (event.status() == ResultStatus.ERROR || event.status() == ResultStatus.INVALID) recordRuntimeError(event);
+                recordFailureSample(event);
+            }
         }
 
         if (event.phase() != null) phase(event.phase()).accept(event, inFlight.get(), activeVus.get());
@@ -263,6 +271,9 @@ public final class LoadMetrics implements LoadEventListener {
         result.put("workerQueueDepthPeak", workerQueueDepthPeak.get());
         result.put("generator", generatorTelemetry.snapshot());
         result.put("errorClassifications", classificationSnapshot());
+        result.put("runtimeErrorClassifications", runtimeClassificationSnapshot());
+        Map<String, Object> rootCause = primaryRuntimeError.get();
+        if (rootCause != null) result.put("primaryRuntimeError", new LinkedHashMap<String, Object>(rootCause));
         synchronized(failureSamples){result.put("failureDiagnostics",new java.util.ArrayList<Map<String,Object>>(failureSamples));}
         result.put("failureDiagnosticsLimit",100);
         result.put("latencySampleCount", sorted.length);
@@ -278,6 +289,7 @@ public final class LoadMetrics implements LoadEventListener {
         result.put("p99Ms", percentile(sorted, 0.99));
         result.put("latencyMaxMs", measuredLatencyCount.get() == 0L ? 0L : latencyMaxMs.get());
         result.put("timeSeriesBucketCapacity", MAX_BUCKETS);
+        result.put("timeSeriesBucketsEvicted", timeSeriesBucketsEvicted.get());
         result.put("metricContractVersion", "att-load-window-metrics/v1");
         if (windowMetrics != null) result.put("windowMetrics", windowMetrics.snapshot(ended));
         Map<String, Map<String, Object>> bucketMap = new TreeMap<String, Map<String, Object>>();
@@ -308,7 +320,7 @@ public final class LoadMetrics implements LoadEventListener {
         long bucketIndex = Math.floorDiv(bucketStart, 1000L);
         int index = (int) Math.floorMod(bucketIndex, (long) MAX_BUCKETS);
         return buckets[index].get(bucketStart, model, configuredUsers,
-                configuredArrivalRatePerSecond, configuredMaxConcurrent);
+                configuredArrivalRatePerSecond, configuredMaxConcurrent, timeSeriesBucketsEvicted);
     }
 
     private void recordLatency(long latencyMs, long observation) {
@@ -367,11 +379,60 @@ public final class LoadMetrics implements LoadEventListener {
         count.incrementAndGet();
     }
 
+    private void recordRuntimeError(LoadEvent event) {
+        String type = event.errorType();
+        if (type == null || type.trim().isEmpty()) type = event.status().name();
+        type = boundedRuntimeCode(type);
+        AtomicLong count = runtimeErrorClassifications.get(type);
+        if (count == null) {
+            synchronized (errorClassificationLock) {
+                count = runtimeErrorClassifications.get(type);
+                if (count == null) {
+                    if (runtimeErrorClassifications.size() >= MAX_ERROR_CLASSIFICATIONS) type = "OTHER";
+                    count = runtimeErrorClassifications.get(type);
+                    if (count == null) {
+                        AtomicLong candidate = new AtomicLong();
+                        AtomicLong existing = runtimeErrorClassifications.putIfAbsent(type, candidate);
+                        count = existing == null ? candidate : existing;
+                    }
+                }
+            }
+        }
+        count.incrementAndGet();
+        if (primaryRuntimeError.get() != null) return;
+        Map<String, Object> failure = event.failureDiagnostic();
+        String code = failure.get("code") instanceof String ? (String) failure.get("code") : type;
+        String summary = failure.get("summary") instanceof String ? (String) failure.get("summary")
+                : "Iteration returned " + event.status().name();
+        Map<String, Object> root = new LinkedHashMap<String, Object>();
+        root.put("code", LoadFailureDiagnostic.safeCode(code));
+        root.put("summary", LoadFailureDiagnostic.safe(summary));
+        if (event.workloadId() != null) root.put("workloadId", LoadFailureDiagnostic.safe(event.workloadId()));
+        if (event.phase() != null) root.put("phase", LoadFailureDiagnostic.safe(event.phase()));
+        for (String key : new String[] {"limitName", "configuredLimit", "actual", "observed", "usage", "limit",
+                "threshold", "scope", "outcome", "stage", "remediationHint", "artifactRef"})
+            if (failure.containsKey(key)) root.put(key, failure.get(key));
+        primaryRuntimeError.compareAndSet(null, Collections.unmodifiableMap(root));
+    }
+
+    private static String boundedRuntimeCode(String value) {
+        String safe = LoadFailureDiagnostic.safeCode(value);
+        return safe.length() > 128 ? safe.substring(0, 128) : safe;
+    }
+
     private Map<String, Long> classificationSnapshot() {
         List<String> keys = new ArrayList<String>(errorClassifications.keySet());
         Collections.sort(keys);
         Map<String, Long> result = new LinkedHashMap<String, Long>();
         for (String key : keys) result.put(key, errorClassifications.get(key).get());
+        return result;
+    }
+
+    private Map<String, Long> runtimeClassificationSnapshot() {
+        List<String> keys = new ArrayList<String>(runtimeErrorClassifications.keySet());
+        Collections.sort(keys);
+        Map<String, Long> result = new LinkedHashMap<String, Long>();
+        for (String key : keys) result.put(key, runtimeErrorClassifications.get(key).get());
         return result;
     }
 
@@ -698,13 +759,14 @@ public final class LoadMetrics implements LoadEventListener {
 
     private static final class BucketSlot {
         private volatile Bucket value;
-        Bucket get(long start, String model, int users, double rate, int maxConcurrent) {
+        Bucket get(long start, String model, int users, double rate, int maxConcurrent, AtomicLong evicted) {
             Bucket current = value;
             if (current != null && current.bucketStart == start) return current;
             synchronized (this) {
                 current = value;
                 if (current != null && current.bucketStart == start) return current;
                 if (current != null && current.bucketStart > start) return null;
+                if (current != null) evicted.incrementAndGet();
                 Bucket replacement = new Bucket(start, model, users, rate, maxConcurrent);
                 value = replacement;
                 return replacement;

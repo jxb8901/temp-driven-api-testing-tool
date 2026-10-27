@@ -236,6 +236,9 @@ public final class LoadResourcePool<T> implements AutoCloseable {
         result.put("total", total()); result.put("waiting", waiting()); result.put("waitDurationMs", waitDurationMs());
         result.put("timeoutCount", timeoutCount()); result.put("created", created()); result.put("discarded", discarded());
         result.put("replacementCount", discarded()); result.put("failures", failures());
+        Map<String, Object> saturation = new LinkedHashMap<String, Object>();
+        saturation.put("usage", active()); saturation.put("limit", maxSize); saturation.put("threshold", 0.8d);
+        result.put("limitUsage", java.util.Collections.<String, Object>singletonMap("mq.pool.activeConnections", saturation));
         return result;
     }
 

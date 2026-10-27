@@ -21,4 +21,4 @@ All workloads in a scenario use the shared phase timing envelope required by the
 
 ## Where the contracts live
 
-The [Load Reference](../reference/execution-modes/load.md) owns schema, composition, scheduler, telemetry, thresholds and evidence. The [Load guide](../guides/load-testing.md) shows the current 4.2.4 workflow. This page is a model overview, not a second schema specification.
+The [Load Reference](../reference/execution-modes/load.md) owns schema, composition, scheduler, telemetry, thresholds and evidence. The [Load guide](../guides/load-testing.md) shows the current 4.2.5 workflow. This page is a model overview, not a second schema specification.

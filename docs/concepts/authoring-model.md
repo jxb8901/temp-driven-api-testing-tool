@@ -20,7 +20,7 @@ The workbook is one supported way to author Cases. It is not the complete ATT re
 
 For workbook-based Cases, Snapshot generation creates the canonical XML representation of the selected workbook. It is an explicit authoring operation. VALIDATE reads the available authored inputs and checks them; it never creates or refreshes a Snapshot as a side effect.
 
-The current 4.2.4 Quick Start keeps the explicit sequence: generate the Snapshot, validate the Package, then execute a Case. See [Quick Start](../quick-start.md) and the [Test Authoring Reference](../reference/test-authoring.md).
+The current 4.2.5 Quick Start keeps the explicit sequence: generate the Snapshot, validate the Package, then execute a Case. See [Quick Start](../quick-start.md) and the [Test Authoring Reference](../reference/test-authoring.md).
 
 ## Data boundaries
 

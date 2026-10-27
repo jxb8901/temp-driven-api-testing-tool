@@ -159,7 +159,7 @@ class PackageResourceInspectionPerformanceBenchmark {
 
         Map<String, Object> report = new LinkedHashMap<>();
         report.put("schemaVersion", "att-package-resource-discovery-benchmark/v3");
-        report.put("version", "4.2.4");
+        report.put("version", "4.2.5");
         report.put("workerStartups", startups.get());
         report.put("telemetry",telemetry);
         report.put("sourceRevision", System.getProperty("att.server.inspection.benchmark.revision", "unknown"));

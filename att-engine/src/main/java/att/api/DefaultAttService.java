@@ -25,6 +25,22 @@ import java.util.Map;
 
 /** Default implementation backed by ATT's established execution/runtime components. */
 public final class DefaultAttService implements AttService {
+    private final LoadReportPublisher loadReportPublisher;
+
+    public DefaultAttService() {
+        this((outputRoot, result) -> new LoadReportWriter().write(outputRoot, result));
+    }
+
+    DefaultAttService(LoadReportPublisher loadReportPublisher) {
+        this.loadReportPublisher = loadReportPublisher == null
+                ? (outputRoot, result) -> new LoadReportWriter().write(outputRoot, result)
+                : loadReportPublisher;
+    }
+
+    interface LoadReportPublisher {
+        Path write(Path outputRoot, LoadRunResult result) throws Exception;
+    }
+
     private static ExecutionOptions options(AttRequest request, String command, List<Path> suites, Path suiteDirectory,
             java.util.Set<String> cases, java.util.Set<String> tags, java.util.Set<String> excluded, boolean all,
             boolean rerun, boolean dry, boolean failFast, String scope, String targetType, String targetId,
@@ -200,7 +216,15 @@ public final class DefaultAttService implements AttService {
         Map<String,Object> retained=evidence.write(runDir);
         result=result.withResources(resourceMetrics).withThresholds(new LoadThresholdEvaluator().evaluate(scenario,result.metrics())).withEvidence(retained);
         long reportPhase=profile.begin();
-        Path report=new LoadReportWriter().write(outputRoot,result);
+        Path report=null;
+        String reportAvailability="PENDING";
+        try {
+            report=loadReportPublisher.write(outputRoot,result);
+            if(report==null) reportAvailability="FAILED";
+        } catch(Exception reportFailure) {
+            reportAvailability="FAILED";
+            profile.counter("loadReportWriteFailures",1L);
+        }
         profile.end("loadReportMs",reportPhase);
         profile.counter("loadScheduled",result.metrics().longValue("scheduled"));
         profile.counter("loadStarted",result.metrics().longValue("started"));
@@ -210,7 +234,11 @@ public final class DefaultAttService implements AttService {
         if(renderStats!=null) for(Map.Entry<String,Object> entry:renderStats.entrySet())
             if(entry.getValue() instanceof Number) profile.counter(entry.getKey(),((Number)entry.getValue()).longValue());
         profile.write(runDir);
-        return new LoadResult(id,result.status().name(),result.exitCode(),elapsed(started),Collections.<Diagnostic>emptyList(),paths("report",OperationResult.display(report,request.packageRoot()),"outputDirectory",OperationResult.display(runDir,request.packageRoot()),"configuration",OperationResult.display(runDir.resolve("configuration.json"),request.packageRoot())),withConfiguration(result.toMap(),cfg));
+        Map<String,String> resultPaths=paths("outputDirectory",OperationResult.display(runDir,request.packageRoot()),
+                "configuration",OperationResult.display(runDir.resolve("configuration.json"),request.packageRoot()));
+        if(report!=null) resultPaths.put("report",OperationResult.display(report,request.packageRoot()));
+        return new LoadResult(id,result.status().name(),result.exitCode(),elapsed(started),Collections.<Diagnostic>emptyList(),
+                resultPaths,result,att.config.ConfigurationEvidence.metadata(cfg),reportAvailability);
     }
     private static Map<String,Object> withConfiguration(Map<String,Object> summary, FrameworkConfig config) {
         Map<String,Object> value = new LinkedHashMap<String,Object>(summary);

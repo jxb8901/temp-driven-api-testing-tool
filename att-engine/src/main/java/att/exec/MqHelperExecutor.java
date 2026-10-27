@@ -398,7 +398,7 @@ public final class MqHelperExecutor {
 
     private void ensureReplyWithinLimit(MqTransport.Message message, int maxBytes) throws MqTransport.Exception {
         if (message != null && message.payloadLength() > maxBytes)
-            throw MqTransport.Exception.responseTooLarge(maxBytes);
+            throw MqTransport.Exception.responseTooLarge(maxBytes, message.payloadLength());
     }
 
     private static final class MqResultParseException extends Exception {
@@ -532,6 +532,17 @@ public final class MqHelperExecutor {
             if (mq.completionCode() != null) detail.put("completionCode", mq.completionCode());
             if (mq.reasonCode() != null) detail.put("reasonCode", mq.reasonCode());
             if (mq.reason() != null) detail.put("reason", mq.reason());
+            if ("MQ_POOL_TIMEOUT".equals(type)) {
+                detail.putAll(att.server.api.LimitDiagnostic.create(type, "MQ connection pool wait timed out",
+                        "mq.pool.borrowTimeoutMs", helper.poolBorrowTimeoutMs(), null, "engine.mq",
+                        att.server.api.LimitOutcome.EXECUTION_ERROR, "execution",
+                        "Reduce concurrent MQ work or review the helper pool capacity and wait limit.", null));
+            } else if ("MQ_RESPONSE_TOO_LARGE".equals(type)) {
+                detail.putAll(att.server.api.LimitDiagnostic.create(type, "MQ reply exceeded its configured byte limit",
+                        "mq.response.maxBytes", mq.configuredLimitBytes(), mq.observedBytes(), "engine.mq",
+                        att.server.api.LimitOutcome.EXECUTION_ERROR, "execution",
+                        "Reduce the reply payload or review the helper response limit and evidence policy.", null));
+            }
         } else { detail.put("type", error.getClass().getName()); detail.put("message", safe(error, helper)); }
         result.put("error", detail); evidence.put("error", detail);
     }

@@ -31,7 +31,7 @@ def discovered_files():
     files = {ROOT / "README.md", DOCS / "reference-manifest.txt"}
     for base in (DOCS, ROOT / "examples"):
         if base.is_dir():
-            files.update(path for path in base.rglob("*") if path.is_file())
+            files.update(path for path in base.rglob("*") if path.is_file() and path.name != ".DS_Store")
     # Include every fixture explicitly protected by the executable docs test.
     if ASSET_TEST.is_file():
         source = ASSET_TEST.read_text(encoding="utf-8")
@@ -130,7 +130,7 @@ def row_for(path, version, inbound):
         quality, disposition, destination = "Legacy syntax retained; vNext proposal is separate", "KEEP LEGACY", rel
         tests = "Current CLI contract and Markdown link checks"
     elif rel.startswith("docs/quick-start"):
-        audience, owner, applicable, status = "New user", "Current 4.2.4 CLI workflow", version, "Current tutorial"
+        audience, owner, applicable, status = "New user", "Current 4.2.5 CLI workflow", version, "Current tutorial"
         quality, disposition, destination = "Runnable Current workflow; Snapshot authoring remains explicit", "KEEP", rel
         tests = "DocumentationExamplesTest; current CLI and Markdown link checks"
     elif rel.startswith("docs/performance/"):

@@ -118,6 +118,8 @@ public class StageTemplateRunner {
                 }
                 else throw new IllegalArgumentException("Unsupported action type: " + action.type());
 
+                if (actionDiagnostic == null) actionDiagnostic = limitDiagnostic(output.get("diagnostic"));
+
                 context.addAction(action.id(), node);
                 recorded = true;
                 context.setActionOutput(output);
@@ -1090,6 +1092,38 @@ public class StageTemplateRunner {
         output.put("result", result.result());
         replaceActionEvidence(output, result.evidence());
         if (result.diagnostic() != null) output.put("diagnostic", result.diagnostic());
+        if (result.diagnostic() == null) {
+            Map<String, Object> diagnostic = limitDiagnosticMap(result.outputMetadata() == null ? null : result.outputMetadata().get("error"));
+            if (diagnostic == null && result.result() instanceof Map)
+                diagnostic = limitDiagnosticMap(((Map<?, ?>) result.result()).get("error"));
+            if (diagnostic != null) output.put("diagnostic", diagnostic);
+        }
+    }
+
+    private static Map<String, Object> limitDiagnosticMap(Object raw) {
+        if (!(raw instanceof Map)) return null;
+        Map<?, ?> source = (Map<?, ?>) raw;
+        if (!(source.get("outcome") instanceof String)) return null;
+        String outcome = String.valueOf(source.get("outcome"));
+        boolean known = false;
+        for (att.server.api.LimitOutcome item : att.server.api.LimitOutcome.values()) if (item.name().equals(outcome)) known = true;
+        if (!known || source.get("code") == null || source.get("summary") == null) return null;
+        Map<String, Object> safe = new LinkedHashMap<String, Object>();
+        for (String key : new String[] {"code", "summary", "limitName", "configuredLimit", "actual", "observed", "usage",
+                "limit", "threshold", "scope", "outcome", "stage", "remediationHint", "artifactRef"})
+            if (source.containsKey(key)) safe.put(key, source.get(key));
+        return safe;
+    }
+
+    private static att.validation.Diagnostic limitDiagnostic(Object raw) {
+        Map<String, Object> safe = limitDiagnosticMap(raw);
+        if (safe == null) return null;
+        String code = String.valueOf(safe.get("code"));
+        String summary = String.valueOf(safe.get("summary"));
+        Object hint = safe.get("remediationHint");
+        att.validation.Diagnostic result = new att.validation.Diagnostic(code, att.validation.Diagnostic.Severity.ERROR,
+                summary, null, null, null, null, null, null, null, hint instanceof String ? (String) hint : null);
+        return result.withMetadata(safe);
     }
 
     @SuppressWarnings("unchecked")

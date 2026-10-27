@@ -58,6 +58,14 @@ class LoadDbPoolingTest {
     }
 
     @Test
+    void perWorkerInitialConnectionBudgetHasATypedLimitFailure() throws Exception {
+        LoadPreparationBudget.requireWithinPerRunLimit(LoadPreparationBudget.PER_RUN_CONNECTIONS);
+        LoadResourcePreparationException failure = assertThrows(LoadResourcePreparationException.class,
+                () -> LoadPreparationBudget.requireWithinPerRunLimit(LoadPreparationBudget.PER_RUN_CONNECTIONS + 1));
+        assertEquals(LoadResourcePreparationException.RESOURCE_LIMIT, failure.diagnosticCode());
+    }
+
+    @Test
     void preparationHoldsDistinctValidatedConnectionsWithoutBusinessSql() throws Exception {
         for (int minimum : new int[] {0, 3}) {
             String url = "jdbc:att-load:ready-" + minimum;

@@ -169,8 +169,7 @@ public final class LoadRunResources implements AutoCloseable {
             emitPreparation(event, "[LOAD][" + kind + "] helper=dynamic status=SKIPPED_DYNAMIC fallback=lazy-on-first-use");
         }
         try {
-            if (required > PREPARATION_PER_RUN_LIMIT)
-                throw new IllegalStateException("LOAD_RESOURCE_PREPARATION_LIMIT: initial readiness exceeds the bounded per-run connection budget");
+            LoadPreparationBudget.requireWithinPerRunLimit(required);
             long remainingNanos = operationDeadline - System.nanoTime();
             if (remainingNanos <= 0L || !preparationProcessBudget.tryAcquire(required, remainingNanos, java.util.concurrent.TimeUnit.NANOSECONDS))
                 throw new java.util.concurrent.TimeoutException("LOAD_RESOURCE_PREPARATION_BUDGET_TIMEOUT");
@@ -254,6 +253,7 @@ public final class LoadRunResources implements AutoCloseable {
             preparation.put("preparationDeadlineMs", preparationDeadlineMs); preparation.put("parallelism", 1);
             preparation.put("discoveryMs", discoveryMs);
             preparation.put("preparationMs", java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started)); preparation.put("helpers", rows);
+            putPreparationUsage(preparation, required, ((Number) preparation.get("preparationMs")).longValue(), preparationDeadlineMs);
             Map<String, Object> ready = new LinkedHashMap<String, Object>(); ready.put("event", "LOAD_RESOURCES_READY");
             ready.put("status", "RESOURCES_READY"); ready.put("required", totalHelpers); ready.put("prepared", totalHelpers);
             ready.put("failed", 0); ready.put("skipped", dynamicKinds.size()); ready.put("preparationMs", preparation.get("preparationMs"));
@@ -268,11 +268,6 @@ public final class LoadRunResources implements AutoCloseable {
                 else if ("FAILED".equals(row.get("status"))) failed++;
                 else if ("SKIPPED_DYNAMIC".equals(row.get("status"))) skipped++;
             }
-            if (failed == 0) {
-                failed = 1;
-                Map<String, Object> row = failedPreparationRow("SYSTEM", "resource-budget", 0, 0, 0, started, failure);
-                rows.add(row);
-            }
             preparation.put("prepared", prepared); preparation.put("failed", failed); preparation.put("skippedDynamic", skipped);
             preparation.put("initialConnections", required); preparation.put("perRunConnectionBudget", PREPARATION_PER_RUN_LIMIT);
             preparation.put("processConnectionBudget", LoadPreparationBudget.WORKER_JVM_CONNECTIONS);
@@ -280,6 +275,7 @@ public final class LoadRunResources implements AutoCloseable {
             preparation.put("preparationDeadlineMs", preparationDeadlineMs); preparation.put("parallelism", 1);
             preparation.put("discoveryMs", discoveryMs);
             preparation.put("preparationMs", java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started));
+            putPreparationUsage(preparation, required, ((Number) preparation.get("preparationMs")).longValue(), preparationDeadlineMs);
             String failureCode = preparationCode(failure, "SYSTEM");
             for (Map<String, Object> row : rows) if ("FAILED".equals(row.get("status"))) {
                 failureCode = String.valueOf(row.get("failureCategory")); break;
@@ -293,7 +289,8 @@ public final class LoadRunResources implements AutoCloseable {
                     + " failed=" + failed + " skipped=" + skipped + " preparationMs=" + preparation.get("preparationMs")
                     + " errorType=" + preparation.get("failureCode"));
             closeWithinPreparationDeadline(deadline);
-            throw new LoadResourcePreparationException("LOAD_RESOURCE_PREPARATION_FAILED: a referenced helper could not reach its bounded readiness target; verify helper credentials and connectivity (" + failureCode + ")", failure);
+            throw new LoadResourcePreparationException("LOAD_RESOURCE_PREPARATION_FAILED: a referenced helper could not reach its bounded readiness target; verify helper credentials and connectivity (" + failureCode + ")",
+                    terminalPreparationCode(failureCode), failure);
         }
     }
 
@@ -333,16 +330,33 @@ public final class LoadRunResources implements AutoCloseable {
         return safe == null ? "unknown" : safe.replaceAll("[^A-Za-z0-9_.:-]", "_");
     }
     private static String preparationCode(Throwable failure, String kind) {
-        String safeMarker = failure == null ? "" : String.valueOf(failure.getMessage());
-        if (safeMarker.contains("LOAD_RESOURCE_PREPARATION_LIMIT")) return "PREPARATION_LIMIT_EXCEEDED";
-        if (safeMarker.contains("LOAD_RESOURCE_PREPARATION_BUDGET_TIMEOUT")) return "PREPARATION_BUDGET_TIMEOUT";
-        if (safeMarker.contains("LOAD_PREPARATION_TIMEOUT")) return "PREPARATION_TIMEOUT";
+        if (failure instanceof LoadResourcePreparationException) {
+            String code = ((LoadResourcePreparationException) failure).diagnosticCode();
+            if (LoadResourcePreparationException.RESOURCE_LIMIT.equals(code)) return "PREPARATION_LIMIT_EXCEEDED";
+            if (LoadResourcePreparationException.DEADLINE.equals(code)) return "PREPARATION_TIMEOUT";
+        }
         if (failure instanceof java.util.concurrent.TimeoutException) return "PREPARATION_TIMEOUT";
         if (failure instanceof java.util.concurrent.CancellationException || failure instanceof InterruptedException) return "PREPARATION_CANCELLED";
         if ("DB".equals(kind)) return "DB_CONNECT_ERROR";
         if ("MQ".equals(kind)) return "MQ_CONNECT_ERROR";
         if ("HTTP".equals(kind)) return "HTTP_CLIENT_CONFIGURATION_ERROR";
         return "PREPARATION_ERROR";
+    }
+
+    private static String terminalPreparationCode(String failureCode) {
+        if ("PREPARATION_LIMIT_EXCEEDED".equals(failureCode)) return LoadResourcePreparationException.RESOURCE_LIMIT;
+        if ("PREPARATION_TIMEOUT".equals(failureCode) || "PREPARATION_BUDGET_TIMEOUT".equals(failureCode))
+            return LoadResourcePreparationException.DEADLINE;
+        return LoadResourcePreparationException.FAILED;
+    }
+    private static void putPreparationUsage(Map<String, Object> preparation, int required, long elapsedMs, long deadlineMs) {
+        Map<String, Object> initial = new LinkedHashMap<String, Object>();
+        initial.put("usage", required); initial.put("limit", PREPARATION_PER_RUN_LIMIT); initial.put("threshold", 0.8d);
+        Map<String, Object> deadline = new LinkedHashMap<String, Object>();
+        deadline.put("usage", elapsedMs); deadline.put("limit", deadlineMs); deadline.put("threshold", 0.8d);
+        Map<String, Object> usage = new LinkedHashMap<String, Object>();
+        usage.put("load.initialConnectionsPerWorker", initial); usage.put("load.preparationDeadlineMs", deadline);
+        preparation.put("limitUsage", usage);
     }
     private static Map<String, Object> preparationRow(String kind, String id, int target, int actual, int max, int min, long before) {
         Map<String, Object> row = new LinkedHashMap<String, Object>(); row.put("kind", kind); row.put("helper", safeId(id)); row.put("status", "READY");

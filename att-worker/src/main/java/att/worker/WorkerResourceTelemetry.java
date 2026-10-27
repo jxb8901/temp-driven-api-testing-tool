@@ -62,6 +62,9 @@ final class WorkerResourceTelemetry {
         result.put("heapCommittedBytes", Math.max(0L, heap.getCommitted()));
         result.put("heapPeakCommittedBytes", peakHeapCommittedBytes);
         result.put("heapMaxBytes", maxHeapBytes);
+        Map<String, Object> heapUsage = new LinkedHashMap<String, Object>();
+        heapUsage.put("usage", peakHeapUsedBytes); heapUsage.put("limit", maxHeapBytes); heapUsage.put("threshold", 0.8d);
+        result.put("limitUsage", java.util.Collections.<String, Object>singletonMap("worker.heapBytes", heapUsage));
         result.put("rssMetricsAvailable", peakRssBytes >= 0L);
         result.put("rssPeakBytes", peakRssBytes < 0L ? null : peakRssBytes);
         result.put("liveThreads", threads.getThreadCount());

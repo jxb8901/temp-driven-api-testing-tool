@@ -110,6 +110,51 @@ class ArtifactPublicationFaultTest {
         }
     }
 
+    @Test void candidateLimitPublicationPersistsStructuredArchiveFailureDiagnostic() throws Exception {
+        ServerRuntime.ArtifactPublisher capped=(output,archive,publisher)->ArtifactArchive.buildForTest(output,archive,publisher,2);
+        try(ServerRuntime runtime=runtime(capped)) {
+            String id="J0000000000000298";
+            Job job=terminalJob(runtime,id);job.exitCode=0;runtime.store.update(job);
+            Files.writeString(runtime.outputDirectoryForJob(id).resolve("second.log"),"bounded evidence");
+            runtime.scheduleArtifactArchive(id);
+            awaitState(runtime,id,"FAILED");
+
+            Map<?,?> index=(Map<?,?>)runtime.artifactIndex(id);
+            assertEquals("FAILED",index.get("archiveStatus"));
+            Map<?,?> diagnostic=(Map<?,?>)index.get("diagnostic");
+            assertEquals("ATT-ARCHIVE-LIMIT-EXCEEDED",diagnostic.get("code"));
+            assertEquals("ARCHIVE_FAILED",diagnostic.get("outcome"));
+            assertEquals("artifact.inventory.candidates",diagnostic.get("limitName"));
+            assertEquals(2L,((Number)diagnostic.get("configuredLimit")).longValue());
+            assertEquals(3L,((Number)diagnostic.get("observed")).longValue());
+            assertEquals("PASS",runtime.jobRecord(id).get("status"));
+            assertEquals(0,runtime.jobRecord(id).get("exitCode"));
+            assertFalse(diagnostic.toString().contains(runtime.config.dataDir.toString()));
+        }
+    }
+
+    @Test void archiveLimitFailureHasItsOwnStructuredStateAndPreservesExecutionOutcome() throws Exception {
+        try (ServerRuntime runtime = runtime((output, archive, publisher) -> {
+            throw new ArtifactArchive.LimitFailure("total cap", "artifact.archive.totalBytes",
+                    ArtifactArchive.MAX_TOTAL_BYTES, ArtifactArchive.MAX_TOTAL_BYTES + 1L);
+        })) {
+            Job job=terminalJob(runtime,"J0000000000000001");
+            job.exitCode=0;runtime.store.update(job);
+            runtime.scheduleArtifactArchive(job.id);
+            awaitState(runtime,job.id,"FAILED");
+            Map<String,Object> execution=runtime.store.get(job.id);
+            Map<String,Object> artifacts=runtime.artifactIndex(job.id);
+            Map<?,?> diagnostic=(Map<?,?>)artifacts.get("diagnostic");
+            assertEquals("PASS",execution.get("status"));
+            assertEquals(0,((Number)execution.get("exitCode")).intValue());
+            assertEquals("ARCHIVE_FAILED",diagnostic.get("outcome"));
+            assertEquals("artifact.archive.totalBytes",diagnostic.get("limitName"));
+            assertEquals(ArtifactArchive.MAX_TOTAL_BYTES,((Number)diagnostic.get("configuredLimit")).longValue());
+            assertEquals(ArtifactArchive.MAX_TOTAL_BYTES+1L,((Number)diagnostic.get("observed")).longValue());
+            assertFalse(diagnostic.toString().contains(runtime.config.dataDir.toString()));
+        }
+    }
+
     @Test void restartDoesNotPublishTerminalOutputWhileThePersistedWorkerIsAlive() throws Exception {
         org.junit.jupiter.api.Assumptions.assumeFalse(isWindows(), "Uses a POSIX process fixture");
         Process writer = new ProcessBuilder("sh", "-c", "exec sleep 30").start();
@@ -143,7 +188,8 @@ class ArtifactPublicationFaultTest {
                 writer.destroyForcibly();
                 assertTrue(writer.waitFor(5, TimeUnit.SECONDS));
                 awaitReady(restarted, id);
-                assertFalse(new String(restarted.archiveEntry(id, "case.log"), java.nio.charset.StandardCharsets.UTF_8).contains("private-canary"));
+                assertThrows(ServerRuntime.NotFoundException.class, () -> restarted.archiveEntry(id, "case.log"),
+                        "unapproved producer secrets must be omitted instead of being redacted during ZIP creation");
             }
         } finally {
             writer.destroyForcibly();
@@ -222,7 +268,8 @@ class ArtifactPublicationFaultTest {
                 child.destroyForcibly();
                 child.onExit().get(5, TimeUnit.SECONDS);
                 awaitReady(restarted, id);
-                assertFalse(new String(restarted.archiveEntry(id, "case.log"), java.nio.charset.StandardCharsets.UTF_8).contains("private-canary"));
+                assertThrows(ServerRuntime.NotFoundException.class, () -> restarted.archiveEntry(id, "case.log"),
+                        "unapproved producer secrets must be omitted instead of being redacted during ZIP creation");
                 long cleanupDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
                 while (Files.exists(restarted.outputDirectoryForJob(id)) && System.nanoTime() < cleanupDeadline) Thread.sleep(10);
                 assertFalse(Files.exists(restarted.outputDirectoryForJob(id)));
@@ -255,8 +302,8 @@ class ArtifactPublicationFaultTest {
             assertThrows(ServerRuntime.ArchiveUnavailableException.class, () -> runtime.archiveEntry(job.id, "case.log"));
             awaitReady(runtime, job.id);
             assertEquals(2, attempts.get());
-            assertEquals("password=[REDACTED_SECRET]\nbusiness=unchanged\n",
-                    new String(runtime.archiveEntry(job.id, "case.log"), java.nio.charset.StandardCharsets.UTF_8));
+            assertThrows(ServerRuntime.NotFoundException.class, () -> runtime.archiveEntry(job.id, "case.log"),
+                    "raw producer output containing credentials must not become a public archive entry");
         }
     }
 
@@ -312,7 +359,7 @@ class ArtifactPublicationFaultTest {
                 assertEquals("READY", runtime.artifactIndex(job.id).get("archiveStatus"));
                 byte[] archive = Files.readAllBytes(runtime.artifactArchivePath(job.id));
                 assertTrue(Files.readString(output.resolve("case.log")).contains("private-canary"));
-                assertFalse(new String(runtime.archiveEntry(job.id, "case.log"), java.nio.charset.StandardCharsets.UTF_8).contains("private-canary"));
+                assertThrows(ServerRuntime.NotFoundException.class, () -> runtime.archiveEntry(job.id, "case.log"));
                 Files.setPosixFilePermissions(output, original);
                 runtime.retryArtifactArchive(job.id);
                 long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
@@ -377,7 +424,8 @@ class ArtifactPublicationFaultTest {
                     });
                     expiry.get(5,TimeUnit.SECONDS);
                     assertNotNull(runtime.store.get(job.id), "An active archive reader must fence expiry");
-                    assertTrue(new String(runtime.archiveEntry(job.id, "case.log"), java.nio.charset.StandardCharsets.UTF_8).contains("business=unchanged"));
+                    assertThrows(ServerRuntime.NotFoundException.class, () -> runtime.archiveEntry(job.id, "case.log"),
+                            "unapproved producer output must not become an archive entry");
                     assertArrayEquals(archive, Files.readAllBytes(runtime.artifactArchivePath(job.id)));
                 }
                 long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
@@ -419,10 +467,8 @@ class ArtifactPublicationFaultTest {
                 assertEquals("CANCELLED", runtime.cancel(id, "user-a"));
                 awaitReady(runtime, id);
                 assertEquals("CANCELLED", runtime.jobRecord(id).get("status"));
-                String approved = new String(runtime.archiveEntry(id, "case.log"), java.nio.charset.StandardCharsets.UTF_8);
-                assertTrue(approved.contains("business=partial"));
-                assertTrue(approved.contains("password=[REDACTED_SECRET]"));
-                assertFalse(approved.contains("private-cancel-canary"));
+                assertThrows(ServerRuntime.NotFoundException.class, () -> runtime.archiveEntry(id, "case.log"),
+                        "cancellation must not publish incomplete unapproved Worker secrets");
                 long cleanupDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
                 while (Files.exists(output) && System.nanoTime() < cleanupDeadline) Thread.sleep(10);
                 assertFalse(Files.exists(output));

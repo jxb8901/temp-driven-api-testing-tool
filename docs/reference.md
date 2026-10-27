@@ -1,7 +1,7 @@
-# ATT v4.2.4 reference manual
+# ATT v4.2.5 reference manual
 
 Author: Jeffrey + ChatGPT
-Version: 4.2.4
+Version: 4.2.5
 Status: Normative end-user documentation; generated from modular sources
 
 <!-- GENERATED FILE. Edit docs/reference*/ modules, not this combined output. -->
@@ -101,7 +101,7 @@ Status: Normative end-user documentation; generated from modular sources
   - [API paths](#api-paths)
 - [CLI reference](#cli-reference)
   - [Choose a command](#choose-a-command)
-  - [Availability in ATT 4.2.4](#availability-in-att-424)
+  - [Availability in ATT 4.2.5](#availability-in-att-425)
   - [Build a source checkout](#build-a-source-checkout)
   - [Find syntax, options, and examples by task](#find-syntax-options-and-examples-by-task)
   - [Use ATT Server from the CLI](#use-att-server-from-the-cli)
@@ -956,9 +956,9 @@ All adapters resolve the environment, construct canonical Context, validate the 
 
 ### Unified RUN and schedules
 
-<!-- att-doc-status: current release=4.2.4 -->
+<!-- att-doc-status: current release=4.2.5 -->
 
-ATT 4.2.4 represents functional one-shot execution as **RUN**. A RUN executes a Case, Template, Flow, Tool, or a selected batch of Cases. **Debug** is an optional diagnostic mode of RUN. **LOAD** retains its performance engine, pacing controls and specialized reports.
+ATT 4.2.5 represents functional one-shot execution as **RUN**. A RUN executes a Case, Template, Flow, Tool, or a selected batch of Cases. **Debug** is an optional diagnostic mode of RUN. **LOAD** retains its performance engine, pacing controls and specialized reports.
 
 The released Local CLI keeps its interface-specific compatibility boundary: its run verb selects workbook Cases, and standalone debug runs one Template, Flow or Tool. ATT Remote retains its legacy Server commands. This shared RUN model does not mean the proposed vNext CLI grammar is released; see the [Planned vNext page](interfaces/cli/vnext-proposed.md).
 
@@ -1047,7 +1047,7 @@ Every active local `USER` or authenticated container principal in `server.author
 
 #### Migrate existing clients
 
-| Existing interface | Mapping in 4.2.4 |
+| Existing interface | Mapping in 4.2.5 |
 |---|---|
 | CLI `validate`, `run`, `report` | Existing validation, Case RUN and report commands remain valid |
 | CLI `--suite`, `--suite-dir`, `--case`, `--tag`, `--rerun-failed` | Existing selectors retain their behavior; Server batches use `selection` |
@@ -1056,17 +1056,21 @@ Every active local `USER` or authenticated container principal in `server.author
 | `/load-schedules`, legacy `jobType:load/debug` | Shared scheduler compatibility routes; existing definitions remain readable |
 | `/jobs/...`, saved Studio job/result links | Existing shared history, cancellation, events and results routes |
 
-No legacy endpoint is removed in 4.2.4. `GET /api/v1/version` advertises `unifiedRunVersion:att-execution/v1`. New Studio resource forms can fall back to legacy Debug drafts when an older Server lacks this capability. Unified Case/batch drafts require 4.2.4; use the existing Explorer Case action on older deployments. Deploy matching Server/Worker components together; older Workers do not implement resource RUN dispatch.
+No legacy endpoint is removed in 4.2.5. `GET /api/v1/version` advertises `unifiedRunVersion:att-execution/v1`. New Studio resource forms can fall back to legacy Debug drafts when an older Server lacks this capability. Unified Case/batch drafts require 4.2.5; use the existing Explorer Case action on older deployments. Deploy matching Server/Worker components together; older Workers do not implement resource RUN dispatch.
 
 Schedule persistence adds JSON fields in the existing H2 tables, leaving legacy LOAD rows unchanged. Before downgrade, stop scheduling, export new definitions, remove RUN/one-time definitions and restore the pre-upgrade database backup. An older scheduler must not interpret a new RUN definition as LOAD. Retained job artifacts remain separate from database metadata.
 
-#### Rerun or schedule a Job
+#### Replay and new execution from a Job
 
-In **Jobs**, **Job Details**, or **LOAD Catalog → Recent LOAD Jobs**, select **Rerun** or **Schedule / Reschedule…**. The Server revalidates the retained definition before displaying a confirmation. Review the package, environment, exact RUN target or selected cases, Debug option, or LOAD scenario and pacing. **Confirm rerun** creates an independent Job and opens its Details. The original results and evidence remain intact.
+In **Jobs**, **Job Details**, or **LOAD History**, choose **Rerun with same settings** or **Configure & Rerun**. Both actions create one authorized Server draft and validate the current Package/Environment before execution. The standard RUN or LOAD editor receives only an opaque `draftRef`; it fetches the sanitized definition from the Server on entry. It does not place the definition in a URL or browser storage.
 
-**Continue to New Schedule** opens the unified creation form. Choose the name, recurrence, timezone, overlap limit and enabled state, review the occurrence preview, then save. Opening this form does not create or edit a schedule. **View / Edit originating schedule** opens the existing authorized schedule; it is a separate action from creating a new schedule or running again now.
+**Rerun with same settings** defaults to **Use current Package**: preserve the Job's safely retained execution parameters, resolve targets and configuration against the current Package, then show the original/current revisions and validation outcome before confirmation. It never silently replaces a retained scenario with the latest YAML defaults. **Require original revision (strict)** is the reproducibility choice. A mismatch returns `ATT-SERVER-REPLAY-REVISION-CONFLICT` and offers **Review with current Package**; stored metadata cannot restore missing historical source bytes. `server.scheduling.packageChangePolicy` and a Schedule-level `ignore` apply only to scheduled executions and do not change manual Rerun.
 
-Replay uses the previous safe snapshot with `revisionPolicy: reject-package-changes`. It never silently switches to the latest package file. If the package, runtime configuration or dependencies change, configure and validate a new run. Newly retained safe definitions survive draft expiry and Server restart; confirmation drafts expire after ten minutes and must then be rebuilt. The Server validates the current account, package, environment, schema, capability and execution limits again.
+**Configure & Rerun** opens the ordinary editor with supported safe settings prefilled. Edit the RUN target/Case selection, options and safe inputs, or LOAD timing, workloads, model-specific pacing, concurrency, thresholds, evidence and safe testdata selection. **Validate** creates a new review intent with bounded typed overrides; **Review changes** shows before/after values, summed LOAD phase duration, current revision and the distinction between configured arrival rate and measured TPS. **Run** creates an independent Job with `rerunOfJobId`; Cancel/Back leaves the source Job, report, Schedule and package files unchanged. Package-file-backed LOAD uses its retained safe package-relative source route and does not inherit the inline-draft-only duration ceiling.
+
+Schedules remain a separate workflow: **Edit existing schedule**, **Create new schedule**, or **Run now**. Existing schedule `strict`/`pause`/`ignore` behavior is unchanged.
+
+New retained execution specs use `att-job-execution/v2`; the parser still accepts v1. Replay drafts use `att-job-replay-draft/v1`. Draft references and confirmation intents are principal-bound and expire after ten minutes; they are held in Server memory, so Server restart loses them and the user must reopen the source Job to create a new draft. A source Job without a safe retained definition, a missing sensitive input, an expired draft, a removed resource, an invalid schema and capacity rejection have separate error responses. Secrets, Worker transport data, host roots and unsafe paths are never reconstructed from logs or artifacts.
 
 Historical Jobs without a retained definition show **Rerun unavailable for this historical job**. Validation-only Jobs, failed safe retention, and classified submitted inputs cannot be replayed exactly. Legacy direct submissions with raw overrides or unresolved `rerunFailed` history selection require a new validated draft before safe retention. Configure a new run and provide missing credentials through the normal protected input flow. Never reconstruct an execution from logs, artifacts or redacted previews. Safe definitions are limited to 256 KiB and exclude Worker transport fields and host roots.
 
@@ -1074,17 +1078,18 @@ The Job lifecycle API uses the following endpoints under `/api/v1`:
 
 | Method and path | Result |
 | --- | --- |
-| `GET /jobs/{jobId}/replay` | Authorized safe definition, availability reason, revision policy and originating schedule link when available. |
-| `POST /jobs/{jobId}/replay-draft` with `{}` | Revalidated RUN/LOAD draft plus an opaque `intentId`; creates no execution or schedule. |
-| `POST /jobs/{jobId}/rerun` with `{"intentId":"...","confirm":true}` | New independent Job, HTTP 202 and `Location`; retries with the same intent return the accepted Job. |
+| `GET /jobs/{jobId}/replay` | Authorized safe definition and availability reason. |
+| `POST /jobs/{jobId}/replay-draft` with `{"sourcePolicy":"current"}` or `{"sourcePolicy":"strict","overrides":{...}}` | `att-job-replay-draft/v1` validation, opaque `draftRef` and confirmation `intentId`; no Job or Schedule is created. Omitted `sourcePolicy` preserves legacy strict behavior. |
+| `GET /jobs/{jobId}/replay-draft/{draftRef}` | Principal-authorized sanitized editor definition and current configuration provenance; no definition is carried in the route. |
+| `POST /jobs/{jobId}/rerun` with `{"intentId":"...","confirm":true,"sourcePolicy":"current"}` | New independent Job, HTTP 202 and `Location`; retries with the same intent return the accepted Job. |
 
-Use the returned `draftId`, package, environment and canonical `executionType: run | load` in the normal `POST /schedules` creation contract. Debug remains `options.debug` on RUN. A rerun exposes `rerunOfJobId`; schedules created from a Job retain authorized `sourceJobId` provenance. Replay access is restricted to the submitting identity or retained schedule execution owner. Deleted or inaccessible Jobs fail with 404. A stale source fails with 409; capacity and validation failures follow the normal submission contracts. Repeating an accepted intent after its output Job is deleted fails safely instead of launching another execution.
+Schedule creation uses its normal validated draft contract. Debug remains `options.debug` on RUN. Replay access is restricted to the submitting identity or retained schedule execution owner. `ATT-SERVER-REPLAY-DRAFT-STALE` is returned when the Package changes after validation; `ATT-SERVER-REPLAY-DRAFT-EXPIRED` is returned for an expired or restart-lost draft; capacity returns HTTP 429. Repeating an accepted intent returns the same Job.
 
 ### Run mode
 
-<!-- att-doc-status: current release=4.2.4 -->
+<!-- att-doc-status: current release=4.2.5 -->
 
-The ATT 4.2.4 Local CLI run command is a legacy Case adapter: it executes selected authored Testcases from a workbook. The broader functional model and direct resource targets are defined in [Unified RUN](reference/execution-modes/unified-run.md).
+The ATT 4.2.5 Local CLI run command is a legacy Case adapter: it executes selected authored Testcases from a workbook. The broader functional model and direct resource targets are defined in [Unified RUN](reference/execution-modes/unified-run.md).
 
 ```sh
 ./att.sh run --all
@@ -1101,6 +1106,8 @@ Run evidence is written directly below `output/<RunID>/`. The completed run publ
 Status aggregation preserves severity: ERROR > INVALID > FAIL > PASS > SKIPPED. Process exit code is `0` when the run completes without failing status, `1` for test/assertion failure, `2` for invalid command/configuration/validation, and `3` for runtime/infrastructure error.
 
 See the [CLI Reference](reference/cli.md) for selectors and options, [Reliability and Execution Control](reference/reliability-execution-control.md) for Stage and Action control, and [Results, Reports, and Evidence](reference/results-reports-evidence.md) for artifact contracts.
+
+In Studio, **Configure & Rerun** from a Job preloads the safe retained RUN target or exact Case selection, environment, Debug/fail-fast options and eligible typed inputs into this standard RUN editor. Validate the edited definition against the current Package before review and submit. See [Job replay and new execution](reference/execution-modes/unified-run.md#replay-and-new-execution-from-a-job) for source policy and API behavior.
 
 ### Standalone Debug
 
@@ -1501,9 +1508,13 @@ evidence.resources.output accepts inherit (default) or none. none disables optio
 
 ATT writes bounded load-summary.json/yaml and a self-contained report/index.html below the run root. The report shows EXEC.ID for retained executions, workload/target identity, status, timing and case.log links when available. Aggregate latency percentiles use the aggregate latency collector; ATT does not average workload percentiles.
 
+Direct Engine/CLI `OperationResult` output keeps its legacy full-summary detail shape; its schema definition remains under `schemas/history/`. The archived report emitted by `LoadReportWriter` uses additive `att-load-summary/v1.3` and moves large aggregate/per-workload metric collections into relative `details/v1/` sidecars referenced by `details/v1/manifest.json`. Inline collections have at most 32 preview items, each sidecar chunk is at most 4 MiB, the sidecar set is capped at 100 MiB/9,000 files, and complete report output is capped at 120 MiB; each main report file remains at or below 16 MiB. Aggregate counters and thresholds remain exact. Server-mediated Job Results use `att-load-terminal-result/v1` in `result.summary`: execution outcome, performance verdict, aggregate counters, bounded workload/threshold previews, primary diagnostic and detail/archive state. The compact summary is capped at 32 KiB; measured terminal journal and SSE envelopes stay below 48 KiB, below the unchanged 64 KiB journal event-data limit. The 1 MiB Worker frame limit is also unchanged. Existing LOAD scheduling, virtual-user and arrival-rate semantics do not change.
+
+Full buckets, failure samples, workload details, threshold details and evidence remain in `load-summary.json`, `load-summary.yaml`, `report/index.html` and the versioned sidecars. The Server exposes those through the existing authorized artifact archive routes. Studio shows the compact result first, loads evidence/workload previews when Results is opened, and loads metric-series sidecars when Metrics is opened. No artifact request is made on the initial Job Details load. Archive availability is independent from execution outcome; `PENDING`, `ARCHIVING`, `READY`, `FAILED` or omitted details do not change terminal status or exit code. ERROR and INVALID keep their real runtime/preparation/validation cause ahead of Worker/Journal truncation and archive diagnostics.
+
 Load v1.9 adds event-time windows named `all`, `measured` and `steady`. `measured` starts after warm-up and includes ramp-up, steady and ramp-down; `steady` covers only the configured steady duration. The HTML report opens on `steady` and lets readers select another window. Scheduled, started and completed rates use the timestamp of each event and the configured window duration. `startedRate` therefore remains event-time. `admissionRate` instead uses the same scheduled cohort: arrivals scheduled in the window that start by run finish divided by all arrivals scheduled in that window; arrivals still unstarted at finish count as not admitted. Latency percentiles and outcome counts use the scheduled cohort, so a drained iteration remains attributed to the phase where it was scheduled. Existing top-level metric names and their legacy meanings remain available.
 
-Nested `thresholds.steady` and `thresholds.overall` evaluate against the steady and all-execution windows. Existing top-level thresholds retain their previous measured-run semantics. An incomplete or unevaluable window returns `NOT_EVALUATED`; it is not a performance pass. Reports show execution status separately from the performance verdict and disclose the percentile sample and observation counts so sparse estimates are visible. The summary schema is `att-load-summary/v1.2`; its new window and preparation fields are optional for readers, and legacy summary fields remain unchanged.
+Nested `thresholds.steady` and `thresholds.overall` evaluate against the steady and all-execution windows. Existing top-level thresholds retain their previous measured-run semantics. An incomplete or unevaluable window returns `NOT_EVALUATED`; it is not a performance pass. Reports show execution status separately from the performance verdict and disclose the percentile sample and observation counts so sparse estimates are visible. Direct Engine/CLI summaries use legacy summary contract (schema under `schemas/history/`); archived reports use the additive `att-load-summary/v1.3` schema with optional detail-manifest and workload-sidecar references.
 
 In the summary's `thresholds` object, `status` and `performanceVerdict` are authoritative and use `MET`, `NOT_MET` or `NOT_EVALUATED`. `legacyPassed` is an optional compatibility boolean that retains the previous `passed()` semantics: it is false when configured thresholds are unevaluable and true when no thresholds are configured. Consumers should use the tri-state fields to distinguish incomplete evidence from a missed threshold.
 
@@ -1513,9 +1524,9 @@ The summary separates generator observations from SUT outcomes. `metrics.generat
 
 The full-execution series at `metrics.windowMetrics.timeSeries.points` stores up to 2,048 populated time bins, initially 1,000 ms wide. When the populated-bin count exceeds that capacity, ATT merges adjacent bins and doubles the bucket width using power-of-two coarsening. It does not evict historical bins, so longer runs retain their history at lower time resolution. The measured and steady series at `metrics.windowMetrics.timeSeries.windowSeries.measured.points` and `metrics.windowMetrics.timeSeries.windowSeries.steady.points` have separate 2,048-bin bounds. They align bins to their configured window start, start with the smaller of 1,000 ms or the window duration, and clip a final partial bucket at the window boundary; they use the same coarsening and no-eviction policy. The compatibility `metrics.buckets` series is separate: it keeps the newest 4,096 one-second buckets in a circular buffer and evicts older entries. ATT does not average per-workload percentiles to calculate the overall percentile.
 
-The new Load summary telemetry fields are optional under `att-load-summary/v1.2`; current writers emit them, and summaries produced before this telemetry was added remain valid.
+The Load telemetry fields remain optional in the direct legacy summary contract (schema under `schemas/history/`); archived reports use `att-load-summary/v1.3` and sidecar references. Server Job Results use the separate, versioned `att-load-terminal-result/v1` contract. Consumers that need full metrics should follow `detailManifestPath` and its relative chunk references after the archive reports READY.
 
-For sampling limits and maintainer verification, see [Load Generator Telemetry](system-design/load-telemetry.md).
+For sampling limits and maintainer verification, see [Load Generator Telemetry](system-design/load-telemetry.md) and [Compact LOAD terminal result](system-design/load-terminal-result.md). The deterministic short-versus-synthetic-long transfer benchmark runs with `mvn -q -o -pl att-server -am -Dtest=ServerRuntimeLoadTerminalResultTest#benchmarkShortAndSyntheticLongMultiWorkloadTransferSizes -Datt.skipFrontendUnitTests=true -Dsurefire.failIfNoSpecifiedTests=false test`; it constructs a 30–60-minute-equivalent multi-workload result and does not run a long LOAD.
 
 Top-level thresholds apply only to the aggregate run; workload thresholds apply only to their individual workload. Root thresholds are not inherited into workload thresholds. Threshold failure returns FAIL/exit 1. Invalid config/target returns exit 2; runtime/infrastructure errors return ERROR/exit 3. Generator drops are not SUT errors.
 
@@ -1635,6 +1646,8 @@ This creates two workloads, four bindings, three unique targets and 30 VU. Workl
 The builder summarizes bindings, users/rates and weights. Detailed workload, mix, target and common settings use Save/Cancel dialogs; Cancel or Escape discards tentative changes. Target inputs/vars/Tool arguments retain safe typed sidecar defaults independently for each target. Precedence is template policy, then safe target sidecar business defaults, then target binding values, then workload binding inputs/vars; applicable explicit CLI overrides win. Business maps merge by key, preserving distinct keys and letting the later layer win conflicts. Studio preserves workload-specific timing, ramps and execution settings, including ranged think time, through validation and edits. Debug-local testdata imports are rejected: declare supported Load testdata sources explicitly. Bindings may specify workload inputs, vars and testdata selection as well as target-specific values.
 
 Validate creates a full `att-load/v1.9` immutable draft through the shared Engine composer. Review shows redacted Server-normalized YAML. Any saved edit or environment change invalidates validation; source/revision changes are checked again at submission. Run requires traffic confirmation; Schedule uses the same validated draft and normal permissions, limits, expiry and revision policy. No browser storage or package source writes are used.
+
+**Configure & Rerun** from a LOAD Job uses this standard editor with a server-issued `draftRef`. It prefills the safe retained scenario, environment, workload IDs/mix, model, pacing, timing phases, thresholds, evidence and eligible inputs. Edit the common timing envelope and model-specific fields, then validate against the current Package before reviewing the delta. Current-package rerun does not silently reload latest YAML defaults or convert Arrival Rate to Virtual Users. File-backed LOAD replay remains on its package-relative source route and does not inherit inline-draft-only duration caps; see [Job replay](reference/execution-modes/unified-run.md#replay-and-new-execution-from-a-job).
 
 ```bash
 ./att.sh load --list-templates --format json
@@ -2942,7 +2955,7 @@ Source revision conflicts return `409`; denied source access or Environment poli
 
 ## CLI reference
 
-<!-- att-doc-status: current release=4.2.4 -->
+<!-- att-doc-status: current release=4.2.5 -->
 
 
 ### Choose a command
@@ -2962,11 +2975,11 @@ Source revision conflicts return `409`; denied source access or Environment poli
 | `clean` | Remove documented ATT-generated output | No |
 | `remote` | Submit and manage jobs through ATT Server's REST/SSE API | ATT Server |
 
-The commands in this table are the ATT 4.2.4 CLI. The separate vNext proposal is not part of this release.
+The commands in this table are the ATT 4.2.5 CLI. The separate vNext proposal is not part of this release.
 
-### Availability in ATT 4.2.4
+### Availability in ATT 4.2.5
 
-This Reference describes the CLI shipped with ATT 4.2.4. The vNext grammar is a separate [Planned proposal](interfaces/cli/vnext-proposed.md); it is not a current command interface. Legacy commands remain supported in this release.
+This Reference describes the CLI shipped with ATT 4.2.5. The vNext grammar is a separate [Planned proposal](interfaces/cli/vnext-proposed.md); it is not a current command interface. Legacy commands remain supported in this release.
 
 ### Build a source checkout
 
@@ -3240,7 +3253,7 @@ HTML passes through a parser before publication. Only the reviewed, digest-allow
 
 #### Manifest and resource limits
 
-`export-manifest-v1.json` uses manifest version `1` and policy `att-export-safe-text-v2`. Each entry records its logical path, media type, byte size, SHA-256, report/preview eligibility, classification and publication decision. `complete` and aggregate `omissions` describe excluded output without rejected filenames or values. ZIP, preview and extracted files use the same finalized bytes; GET requests never independently redact them.
+`export-manifest-v1.json` uses manifest version `1` and policy `att-export-approved-bytes-v1` (legacy `att-export-safe-text-v2` ZIPs remain readable). Approved producer bytes are preserved exactly; producers must mask sensitive values before emitting artifacts. Each entry records its logical path, media type, byte size, SHA-256, report/preview eligibility, classification and publication decision. `complete` and aggregate `omissions` describe excluded output without rejected filenames or values. ZIP, preview and extracted files use the same finalized bytes; GET requests never independently redact them.
 
 Inventory is independent of `server.maxArtifacts`: up to 50,000 filesystem candidates, depth 64, 10,000 published entries, 16 MiB per entry and 128 MiB total published bytes. The manifest is limited to 8 MiB. Crossing aggregate limits fails publication and preserves private source output. ZIP entries use STORED encoding to avoid compression-ratio ambiguity for repetitive logs. Readers reject unsafe paths, control characters, encoded traversal, duplicate/case-colliding names, oversized or high-ratio entries, unmanifested entries and integrity mismatches. Publication uses one writer with a bounded queue; at most eight artifact reads run concurrently.
 
@@ -3494,7 +3507,7 @@ Do not place passwords, tokens, private keys, or sensitive customer data in work
 ```json
 {
   "schemaVersion": "att-validation/v2.1",
-  "attVersion": "4.2.4",
+  "attVersion": "4.2.5",
   "valid": false,
   "mode": "package",
   "summary": {"errors": 1, "warnings": 0, "suites": 1, "cases": 22, "templates": 7, "tools": 7},
@@ -3533,7 +3546,7 @@ python3 tools/validate_reference_content.py
 ./att.sh validate --package
 ```
 
-`build.sh` runs the release gate, regenerates the modular Markdown Reference Manual, builds the application jar and release archives, and smoke-tests the extracted local package. It requires Java/Maven and Python 3. It outputs `att-4.2.4-local.tar.gz` for the CLI, `att-4.2.4-server.tar.gz` for the WAR and deployment guides, and `att-4.2.4-src.tar.gz` for source. Each binary archive must be smaller than 25 MB. The local package no longer includes the WAR or its duplicate runtime libraries.
+`build.sh` runs the release gate, regenerates the modular Markdown Reference Manual, builds the application jar and release archives, and smoke-tests the extracted local package. It requires Java/Maven and Python 3. It outputs `att-4.2.5-local.tar.gz` for the CLI, `att-4.2.5-server.tar.gz` for the WAR and deployment guides, and `att-4.2.5-src.tar.gz` for source. Each binary archive must be smaller than 25 MB. The local package no longer includes the WAR or its duplicate runtime libraries.
 
 ### Runtime dependencies
 
@@ -3593,7 +3606,8 @@ Active schemas (the matching ATT Engine JAR's embedded registry, built from `sch
 | Load scenario | att-load/v1.9 |
 | Load Template | `att-load-template/v1` | `schemas/att-load-template-v1.schema.json` |
 | Load bindings | `att-load-bindings/v1` | `schemas/att-load-bindings-v1.schema.json` |
-| Load summary | att-load-summary/v1.2 |
+| Load summary | direct Engine/CLI: legacy summary contract (schema under `schemas/history/`); archived report: att-load-summary/v1.3 |
+| LOAD report detail files | att-load-detail-manifest/v1, att-load-detail-reference/v1, att-load-detail-series/v1, att-load-workload-detail/v1 |
 | Run manifest | att-run/v2.1 |
 | Legacy package validation JSON | `att-validation/v2.1` |
 | Minimal CLI hierarchical validation report | `att-validation/v1` |
@@ -3763,7 +3777,7 @@ Unexpected internal failures such as `NullPointerException`, `ClassCastException
 
 #### Why does `att.bat` ask for Maven, or why does a `.sh` Tool fail on windows?
 
-In a binary release, `att.bat` finds the versioned runtime JAR, such as `lib\att-local-4.2.4.jar`, and only requires Java 8+. Keep one `att-local-<version>.jar` in each `ATT_HOME/lib` so the launcher selects an unambiguous runtime. In a source tree it compiles with Maven when Maven is on `PATH`; without Maven, previously compiled `target\classes` must exist. Use `att.bat version` to confirm the launcher before validating the package.
+In a binary release, `att.bat` finds the versioned runtime JAR, such as `lib\att-local-4.2.5.jar`, and only requires Java 8+. Keep one `att-local-<version>.jar` in each `ATT_HOME/lib` so the launcher selects an unambiguous runtime. In a source tree it compiles with Maven when Maven is on `PATH`; without Maven, previously compiled `target\classes` must exist. Use `att.bat version` to confirm the launcher before validating the package.
 
 The launcher makes ATT itself cross-platform; it cannot translate external tool executables. Configure a Windows-compatible `.bat`, `.cmd`, PowerShell script (with an explicit `powershell`/`pwsh` argv), or native executable instead of a POSIX-only `.sh` command. PATH validation follows Windows `PATHEXT`, so names such as `pwsh` can resolve `pwsh.exe`. Keep argument contracts and stdout output formats identical when maintaining platform variants.
 

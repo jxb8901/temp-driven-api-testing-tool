@@ -8,6 +8,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.Collections;
+import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -151,6 +152,47 @@ class AttServiceTest {
             workers.shutdownNow();
             workers.awaitTermination(2,TimeUnit.SECONDS);
         }
+    }
+
+    @Test void failedLoadReportPublicationDoesNotChangeExecutionOutcomeOrLegacyCliSummary() throws Exception {
+        Path root=temp.resolve("load-report-publication-failure");
+        Files.createDirectories(root.resolve("config")); Files.createDirectories(root.resolve("templates/SIMPLE"));
+        Files.createDirectories(root.resolve("testcase")); Files.createDirectories(root.resolve("tools")); Files.createDirectories(root.resolve("load"));
+        att.TestSchemas.install(root);
+        Files.write(root.resolve("config/config.yaml"), ("schemaVersion: att-config/v2.11\n"
+                + "outputDirectory: output\nenvironment: SIT\ntemplates: {root: templates}\n"
+                + "testcase: {root: testcase}\ntools: {}\n").getBytes("UTF-8"));
+        Files.write(root.resolve("templates/SIMPLE/template.yaml"), ("schemaVersion: att-template/v3.4\n"
+                + "name: SIMPLE\ndescription: report failure outcome test\nactions:\n"
+                + "  show: {type: log, message: load-pass}\n").getBytes("UTF-8"));
+        Path scenario=root.resolve("load/scenario.yaml");
+        Files.write(scenario, ("schemaVersion: att-load/v1.9\nworkloads:\n"
+                + "  - id: report-failure\n    target: {type: template, id: SIMPLE}\n"
+                + "    load: {users: 1, duration: 100ms}\n    execution: {thinkTime: 0ms}\n"
+                + "evidence: {mode: metrics}\n").getBytes("UTF-8"));
+
+        DefaultAttService service=new DefaultAttService((outputRoot, loadResult) -> {
+            throw new java.io.IOException("simulated artifact report write failure");
+        });
+        LoadResult result=service.load(new LoadRequest(root,Paths.get("config/config.yaml"),null,null,"report-failed",
+                scenario,null,null,null,null,null,null,null,null,null,null,null,Collections.<String>emptyList()));
+
+        assertEquals("PASS",result.status());
+        assertEquals(0,result.exitCode());
+        assertFalse(result.paths().containsKey("report"));
+        assertEquals("att-load-summary/v1.3",result.summary().get("schemaVersion"),
+                "direct Engine/CLI summary advertises its actual version");
+        att.validation.JsonSchemaVerifier.verify(Paths.get("schemas/att-load-summary-v1.3.schema.json"),result.summary());
+        Map<?,?> worker=(Map<?,?>)result.toWorkerMap();
+        Map<?,?> compact=(Map<?,?>)worker.get("summary");
+        Map<?,?> archive=(Map<?,?>)compact.get("archive");
+        assertEquals("PASS",worker.get("status"));
+        assertEquals(0,worker.get("exitCode"));
+        assertEquals("FAILED",archive.get("status"));
+        assertEquals("FAILED",archive.get("reportAvailability"));
+        assertEquals("LOAD_REPORT_WRITE_FAILED",archive.get("omissionReason"));
+        assertTrue(((Map<?,?>)archive.get("paths")).isEmpty(), "failed report writes must not advertise missing paths");
+        assertFalse(((Map<?,?>)compact.get("diagnostics")).containsKey("primaryError"));
     }
 
     @Test void configuredLoadIdentityUsesTheSameEnclosingTimestampAsIterationContext() throws Exception {

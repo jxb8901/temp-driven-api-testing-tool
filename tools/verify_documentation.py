@@ -801,6 +801,11 @@ def main():
               "-p", "test_documentation_contracts.py"])
     run_gate("documentation inventory freshness",
              [sys.executable, "tools/build_documentation_inventory.py", "--check"])
+    run_gate("limits reference freshness",
+             [sys.executable, "tools/build_limits_reference.py", "--check"])
+    run_gate("limits inventory defaults, ranges and source contracts",
+             [sys.executable, "-m", "unittest", "discover", "-s", "tools",
+              "-p", "test_limits_inventory.py"])
     run_gate("Reference semantic coverage",
              [sys.executable, "tools/validate_reference_content.py"])
 

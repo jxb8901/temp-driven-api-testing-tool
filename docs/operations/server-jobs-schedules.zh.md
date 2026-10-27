@@ -1,4 +1,4 @@
-<!-- att-doc-status: current release=4.2.4 -->
+<!-- att-doc-status: current release=4.2.5 -->
 
 # ATT Server Job 與 Schedule 操作
 
@@ -54,5 +54,7 @@ Jobs 以 Target 為主要連結，次行顯示 Package/Environment，並提供�
 - **Revalidate latest**：只略過與保留 package digest 的相等檢查。仍驗證目前註冊的 package root、執行身分、typed target、精確 Case IDs、schema、environment、受保護輸入分類及限制。Worker 接收新的 digest，並於執行前再次檢查；儲存的定義保持不可變。`SCHEDULE_SOURCE_REVALIDATED` audit 記錄兩個 revision 及 policy 來自 Server 或排程。早於私有 package 註冊身分 pin 的舊記錄，在接受變更來源前需要重新審閱並建立替代排程。
 
 週期與手動提交，以及啟用／恢復時均會檢查 policy。新排程必須通過目前輸入驗證。來源過期時仍可儲存名稱、描述、tags、週期、timezone 及 policy，而不更換來源或清除 stale／paused 狀態。RUN 輸入、target、package 及 environment 不可原地更換；需要重新驗證 RUN 並建立替代排程。Package-wide digest 包括共用設定及 Engine／schema 身分，因此無關 package 檔案的修改也可能觸發 policy；target dependency digest 留待後續最佳化。沒有保留 digest 的舊檔案式 LOAD 定義，繼續在每次觸發時驗證目前 package scenario。
+
+上述 policy 屬於 Schedule execution，不會控制 Job 的手動 **Rerun with same settings**。每次手動 Rerun 都會選擇 **Use current Package** 或 **Require original revision (strict)**，建立新的獲授權 draft，並於提交前重新驗證。不可使用 `ignore` 繞過手動 Job replay 驗證。
 
 Server 擁有有界的 event-compaction executor，供新建、恢復及之後讀取的 journal 使用。關閉時拒絕新 Job，停止排程及 retention producer，結束 Worker／inspection／SSE 活動，再排空 artifact writer 及 compaction queue，最後釋放資料庫。每個 executor 等待都有時間上限；中斷 compaction 後仍可從 append journal 恢復。重複關閉安全。共用 ATT classloader 的 runtime 以引用計數管理 H2 註冊，最後關閉時只移除該 classloader 擁有的 H2 driver；container 擁有的 JDBC driver 保留。測試在同一 Tomcat JVM 部署三次，執行 compaction 並於重新部署後讀回排程及 journal；CI 亦在 Tomcat 11 執行此案例。

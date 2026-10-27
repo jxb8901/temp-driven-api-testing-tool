@@ -257,8 +257,9 @@ export interface LoadJobsApi {
   queryJobs?(input: JobsQuery): Promise<JobsQueryResult>;
   setDeletionRequested?(jobIds: string[], requested: boolean): Promise<Array<{jobId: string; outcome: string}>>;
   getJobReplay?(jobId: string): Promise<JobReplay>;
-  createJobReplayDraft?(jobId: string): Promise<JobReplay>;
-  rerunJob?(jobId: string, intentId: string): Promise<{ jobId: string }>;
+  createJobReplayDraft?(jobId: string, options?: { sourcePolicy?: 'current' | 'strict'; overrides?: Record<string, unknown> }): Promise<JobReplay>;
+  getJobReplayEditorDraft?(jobId: string, draftRef: string): Promise<JobReplayEditorDraft>;
+  rerunJob?(jobId: string, intentId: string, sourcePolicy?: 'current' | 'strict'): Promise<{ jobId: string }>;
 
   listLoadCatalog?(packageId: string, input?: { query?: string; cursor?: string; limit?: number }, signal?: AbortSignal): Promise<LoadCatalogPage>;
   getLoadCatalogDetail?(packageId: string, resourceId: string, signal?: AbortSignal): Promise<LoadCatalogDetail>;
@@ -303,6 +304,8 @@ export interface LoadFeatureProps {
   environmentState?: 'loading' | 'ready' | 'error';
   inlineLoadEnabled: boolean;
   schedulingEnabled?: boolean;
+  replayDraftId?: string;
+  replaySourceJobId?: string;
   principal?: string;
   onRetryEnvironments?: () => void;
   onPackageChange: (packageId: string) => void;
@@ -333,5 +336,18 @@ export interface JobReplay {
   jobId: string; available: boolean; reason?: string; rerunOfJobId?: string; originatingScheduleId?: string;
   revisionPolicy?: string; revision?: string; sourcePath?: string;
   definition?: { executionType: 'run' | 'load'; packageId: string; environment?: string | null; [key: string]: unknown };
-  intentId?: string; draftId?: string; expiresAt?: string;
+  originalDefinition?: { executionType: 'run' | 'load'; packageId: string; environment?: string | null; [key: string]: unknown };
+  originalConfiguration?: Record<string, unknown>; configuration?: Record<string, unknown>;
+  intentId?: string; draftId?: string; expiresAt?: string; preview?: Record<string, unknown>;
+  sourcePolicy?: 'current' | 'strict'; originalRevision?: string; currentRevision?: string; draftRef?: string; missingFields?: string[];
+  validationState?: 'valid' | 'invalid'; errorCode?: string;
+  diagnostics?: ServerDiagnostic[];
+}
+
+export interface JobReplayEditorDraft {
+  schemaVersion: 'att-job-replay-draft/v1'; draftRef: string; sourceJobId: string; packageId: string;
+  executionType: 'run' | 'load'; sourcePolicy: 'current' | 'strict'; originalRevision: string; currentRevision?: string;
+  definition: NonNullable<JobReplay['definition']>; originalDefinition?: NonNullable<JobReplay['definition']>;
+  originalConfiguration?: Record<string, unknown>; configuration: Record<string, unknown>; expiresAt: string; missingFields: string[];
+  validationState?: 'valid' | 'invalid'; errorCode?: string; diagnostics?: ServerDiagnostic[];
 }

@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:att:schema:load-detail-series:v1",
+  "type": "object",
+  "required": ["schemaVersion", "scope", "target", "kind", "part", "parts", "total", "items"],
+  "properties": {
+    "schemaVersion": { "const": "att-load-detail-series/v1" },
+    "scope": { "enum": ["aggregate", "workload"] },
+    "workloadId": { "type": "string", "minLength": 1 },
+    "target": { "type": "string", "pattern": "^metrics(?:/|$)" },
+    "kind": { "enum": ["map", "list"] },
+    "part": { "type": "integer", "minimum": 1 },
+    "parts": { "type": "integer", "minimum": 1 },
+    "total": { "type": "integer", "minimum": 1 },
+    "items": {}
+  },
+  "allOf": [
+    { "if": { "properties": { "kind": { "const": "map" } } }, "then": { "properties": { "items": { "type": "object" } } } },
+    { "if": { "properties": { "kind": { "const": "list" } } }, "then": { "properties": { "items": { "type": "array" } } } }
+  ],
+  "additionalProperties": false
+}

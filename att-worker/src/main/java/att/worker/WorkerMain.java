@@ -35,6 +35,7 @@ public final class WorkerMain {
     private final att.resource.PackageConfigurationSnapshots configurationSnapshots=new att.resource.PackageConfigurationSnapshots();
     private final LinkedHashMap<String,Map<String,Object>> inspectionAggregates=new LinkedHashMap<String,Map<String,Object>>(16,.75f,true);
     private String jobId;
+    private String currentCommand;
     private boolean inspectionDaemon;
     private boolean prewarmed;
     private boolean inspectionRequest;
@@ -49,6 +50,9 @@ public final class WorkerMain {
         // Trusted evidence retains original diagnostics. Protocol secrets are protected
         // in emit(); Server projects host paths with the package context.
         att.core.PathPresentation.configure(false, false);
+        // Worker-produced logs are later zipped byte-for-byte: sanitize host paths as written.
+        // Local CLI remains free to retain detailed on-disk diagnostics.
+        System.setProperty("att.worker.safeOutput", "true");
         PrintStream protocol=System.out;
         System.setOut(System.err);
         WorkerMain worker=new WorkerMain(protocol);
@@ -133,6 +137,7 @@ public final class WorkerMain {
         emit(WorkerEvent.Type.STATUS,fields("status","RUNNING"));
         try { request=mapper.treeToValue(input,WorkerRequest.class); if(request.maxResponseBytes!=null)inspectionResponseLimit=request.maxResponseBytes; }
         catch(Exception error) { return fail("WORKER_REQUEST_INVALID","Unable to decode Worker request"); }
+        currentCommand=request.command;
         try { consoleOptions=att.console.ExecutionConsoleFormatter.Options.published(
                 request.liveOutputMaxEntryChars==null?4000:request.liveOutputMaxEntryChars,
                 request.liveOutputMaxEntryLines==null?40:request.liveOutputMaxEntryLines); }
@@ -183,9 +188,13 @@ public final class WorkerMain {
                     throw new PackageResourceInspector.StaleResourceCursorException();
             }
             OperationResult result=dispatch(request);
-            Map<String,Object> serialized=result.toMap();
+            Map<String,Object> serialized=result instanceof att.api.LoadResult && "load".equals(request.command)
+                    ? ((att.api.LoadResult)result).toWorkerMap() : result.toMap();
             if(configuration!=null) {
-                Map<String,Object> summary=new LinkedHashMap<String,Object>(result.summary());
+                Object existingSummary=serialized.get("summary");
+                Map<String,Object> summary=existingSummary instanceof Map
+                        ?new LinkedHashMap<String,Object>((Map<String,Object>)existingSummary)
+                        :new LinkedHashMap<String,Object>();
                 summary.put("configuration",configuration);serialized.put("summary",summary);
                 String artifact=result.paths().get("configuration");
                 if(artifact!=null&&executionOutput!=null) {
@@ -212,15 +221,32 @@ public final class WorkerMain {
             if(error instanceof att.validation.DiagnosticException) { code=((att.validation.DiagnosticException)error).code(); message=((att.validation.DiagnosticException)error).getMessage(); }
             else if(error instanceof PackageResourceInspector.ResourceNotFoundException) { code="ATT-RESOURCE-NOT-FOUND"; message="Package resource was not found"; }
             else if(error instanceof PackageResourceInspector.ResponseTooLargeException) { code="ATT-RESOURCE-RESPONSE-TOO-LARGE"; message="Package resource response exceeded the configured limit"; }
-            else if(error instanceof PackageResourceInspector.ResourceLimitException) { code="ATT-RESOURCE-LIMIT"; message="Package resource inspection exceeded a configured limit"; }
+            else if(error instanceof PackageResourceInspector.ResourceLimitException) { code="ATT-RESOURCE-LIMIT"; message="Package resource inspection exceeded a configured scan limit"; }
             else if(error instanceof PackageResourceInspector.StaleResourceCursorException
                     &&("run".equals(request.command)||"debug".equals(request.command)||"load".equals(request.command))
                     &&request.expectedRevisionDigest!=null) { code="ATT-SERVER-DRAFT-STALE"; message="Package content changed after preview; rebuild the draft"; exit=2; status="INVALID"; }
             else if(error instanceof PackageResourceInspector.StaleResourceCursorException) { code="ATT-RESOURCE-CURSOR-STALE"; message="The package resources changed; refresh the Explorer"; }
             else if(error instanceof PackageConfigurationInspector.ResponseTooLargeException) { code="ATT-RESOURCE-RESPONSE-TOO-LARGE"; message="Package configuration response exceeded the configured limit"; }
             else if(error instanceof PackageConfigurationInspector.ConfigurationLimitException) { code="ATT-RESOURCE-LIMIT"; message="Package configuration inspection exceeded a configured limit"; }
+            else if("load".equals(request.command)&&error instanceof att.load.LoadResourcePreparationException) {
+                code=loadPreparationCode(error); message=error.getMessage();
+            }
             else if(error instanceof IllegalArgumentException) { code="WORKER_REQUEST_INVALID"; exit=2; status="INVALID"; }
-            Map<String,Object> diagnostic=fields("code",code,"message",DiagnosticSanitizer.redactText(message==null?"ATT operation failed":message));
+            Map<String,Object> diagnostic=fields("code",code,"message",DiagnosticSanitizer.redactAbsolutePaths(DiagnosticSanitizer.redactText(message==null?"ATT operation failed":message)),
+                    "outcome","ERROR".equals(status)?att.server.api.LimitOutcome.EXECUTION_ERROR.name():att.server.api.LimitOutcome.SUBMISSION_REJECTED.name(),
+                    "stage","ERROR".equals(status)?"execution":"validation");
+            if(error instanceof PackageResourceInspector.ResourceLimitException) {
+                PackageResourceInspector.ResourceLimitException limited=(PackageResourceInspector.ResourceLimitException)error;
+                if(limited.limitName!=null)diagnostic.putAll(att.server.api.LimitDiagnostic.create("ATT-RESOURCE-LIMIT",message,
+                        limited.limitName,limited.configuredLimit,limited.observed,"package",att.server.api.LimitOutcome.SUBMISSION_REJECTED,
+                        "inspection","Reduce the package scan scope or split the package into bounded units before retrying.",null));
+            }
+            if(error instanceof PackageConfigurationInspector.ConfigurationLimitException) {
+                PackageConfigurationInspector.ConfigurationLimitException limited=(PackageConfigurationInspector.ConfigurationLimitException)error;
+                diagnostic.putAll(att.server.api.LimitDiagnostic.create("ATT-RESOURCE-LIMIT",message,
+                        limited.limitName,limited.configuredLimit,limited.observed,"package",att.server.api.LimitOutcome.SUBMISSION_REJECTED,
+                        "inspection","Reduce configuration inspection scope or split referenced configuration into bounded files before retrying.",null));
+            }
             if(request.registeredPackageId!=null&&request.registeredPackageId.matches("[A-Za-z0-9][A-Za-z0-9._-]{0,127}"))
                 diagnostic.put("packageId",request.registeredPackageId);
             boolean draftInspection="inspect".equals(request.command)&&(("package-configuration".equals(request.inspectionType)&&"validate".equals(request.inspectionAction))||"debug-input".equals(request.inspectionAction)||"debug-form".equals(request.inspectionAction)
@@ -253,7 +279,13 @@ public final class WorkerMain {
             }
             if(loadSampler!=null&&loadSummaryLine==null) loadSummaryLine=loadSampler.finish(status);
             emit(WorkerEvent.Type.DIAGNOSTIC,diagnostic);
-            emitResult(fields("status",status,"exitCode",exit,"result",fields("executionId",null,"status",status,"exitCode",exit)));
+            Map<String,Object> failedResult=fields("executionId",null,"status",status,"exitCode",exit);
+            if("load".equals(request.command)) {
+                failedResult.put("diagnostics",Collections.singletonList(diagnostic));
+                failedResult.put("summary",Collections.emptyMap());
+                failedResult=att.server.api.LoadTerminalResult.projectOperationResult(failedResult,status,exit);
+            }
+            emitResult(fields("status",status,"exitCode",exit,"result",failedResult));
             return exit;
         }
     }
@@ -356,7 +388,11 @@ public final class WorkerMain {
                 String revision=inspector.executionRevisionDigest();
                 OperationResult validated=service.validate(new ValidateRequest(root,config,r.environment,paths(r.suites),path(r.suiteDirectory),set(r.caseIds),set(r.tags),set(r.excludeTags),bool(r.all),"selected"));
                 if(validated.exitCode()!=0) {
-                    for(att.validation.Diagnostic diagnostic:validated.diagnostics())emit(WorkerEvent.Type.DIAGNOSTIC,diagnostic.toMap());
+                    for(att.validation.Diagnostic diagnostic:validated.diagnostics()) {
+                        Map<String,Object> value=diagnostic.toMap();
+                        value.put("outcome",att.server.api.LimitOutcome.SUBMISSION_REJECTED.name());value.put("stage","validation");
+                        emit(WorkerEvent.Type.DIAGNOSTIC,value);
+                    }
                     return validated;
                 }
                 if(r.caseIds!=null&&!r.caseIds.isEmpty()) {
@@ -682,7 +718,20 @@ public final class WorkerMain {
         } else safe=DiagnosticSanitizer.sanitize(data);
         if(!inspectionDaemon&&!inspectionRequest) {
             attachConsole(type,safe);
-            WorkerProtocol.Frame frame=WorkerProtocol.encode(mapper,new WorkerEvent(type,jobId,safe).toMap(),WorkerProtocol.MAX_FRAME_BYTES);
+            WorkerProtocol.Frame frame;
+            if(type==WorkerEvent.Type.RESULT&&isCompactLoadResult(safe)) {
+                Map<String,Object> transport=fields("workerFrameBytes",0L,
+                        "workerFrameLimitBytes",WorkerProtocol.MAX_FRAME_BYTES,
+                        "journalDataLimitBytes",att.server.api.LoadTerminalResult.MAX_JOURNAL_EVENT_BYTES);
+                safe.put("loadResultTransport",transport);
+                long previous=-1L;
+                for(int attempt=0;attempt<6;attempt++) {
+                    frame=WorkerProtocol.encode(mapper,new WorkerEvent(type,jobId,safe).toMap(),WorkerProtocol.MAX_FRAME_BYTES);
+                    if(frame.sizeBytes==previous)break;
+                    previous=frame.sizeBytes;transport.put("workerFrameBytes",previous);
+                }
+                frame=WorkerProtocol.encode(mapper,new WorkerEvent(type,jobId,safe).toMap(),WorkerProtocol.MAX_FRAME_BYTES);
+            } else frame=WorkerProtocol.encode(mapper,new WorkerEvent(type,jobId,safe).toMap(),WorkerProtocol.MAX_FRAME_BYTES);
             if(frame.oversized()) {
                 Map<String,Object> bounded=boundedEvent(type,safe,frame.sizeBytes);
                 frame=WorkerProtocol.encode(mapper,new WorkerEvent(type,boundedText(jobId,128),bounded).toMap(),WorkerProtocol.MAX_FRAME_BYTES);
@@ -702,6 +751,16 @@ public final class WorkerMain {
         }
         protocol.println(line);protocol.flush();
         if(inspectionDaemon)inspectionResponseBytes+=bytes;
+    }
+    private static boolean isCompactLoadResult(Map<String,Object> event) {
+        Object value=event.get("result");
+        if(!(value instanceof Map))return false;
+        Object summary=((Map<?,?>)value).get("summary");
+        return att.server.api.LoadTerminalResult.isSummary(summary);
+    }
+    private static String loadPreparationCode(Throwable error) {
+        return error instanceof att.load.LoadResourcePreparationException
+                ? ((att.load.LoadResourcePreparationException) error).diagnosticCode() : null;
     }
     private att.console.ExecutionConsoleFormatter.Options consoleOptions=att.console.ExecutionConsoleFormatter.Options.published();
     private void attachConsole(WorkerEvent.Type type,Map<String,Object> safe) {
@@ -724,8 +783,12 @@ public final class WorkerMain {
         return att.console.ExecutionConsoleFormatter.present(DiagnosticSanitizer.redactAbsolutePaths(DiagnosticSanitizer.redactText(line)),consoleOptions);
     }
     private Map<String,Object> boundedEvent(WorkerEvent.Type type,Map<String,Object> safe,long size) {
-        Map<String,Object> bounded=fields("truncated",true,"protocolLimit",fields("code","ATT-WORKER-EVENT-TRUNCATED",
-                "eventType",type.name(),"sizeBytes",size,"limitBytes",WorkerProtocol.MAX_FRAME_BYTES));
+        Map<String,Object> protocolLimit=att.server.api.LimitDiagnostic.create("ATT-WORKER-EVENT-TRUNCATED",
+                "Large Worker event details were omitted from the protocol frame", "worker.protocol.maxFrameBytes",
+                WorkerProtocol.MAX_FRAME_BYTES, size, "worker.protocol", att.server.api.LimitOutcome.DATA_TRUNCATED,
+                "transport", "Inspect the retained report artifact for bounded details", null);
+        protocolLimit.put("eventType",type.name());
+        Map<String,Object> bounded=fields("truncated",true,"protocolLimit",protocolLimit);
         for(String key:new String[]{"status","code","message","executionId","caseId","stage","action","executionEventType"})
             if(safe.get(key) instanceof String)bounded.put(key,boundedText(safe.get(key),512));
         if(safe.get("console") instanceof String)bounded.put("console",boundedText(safe.get("console"),512));
@@ -733,6 +796,43 @@ public final class WorkerMain {
         if(type==WorkerEvent.Type.RESULT) {
             Object value=safe.get("result");
             Map<?,?> original=value instanceof Map?(Map<?,?>)value:Collections.emptyMap();
+            if("load".equals(currentCommand)) {
+                String eventStatus=safe.get("status") instanceof String?(String)safe.get("status"):"ERROR";
+                Map<String,Object> projected=att.server.api.LoadTerminalResult.projectOperationResult(original,
+                        eventStatus,safe.get("exitCode") instanceof Number?((Number)safe.get("exitCode")).intValue():3);
+                List<Map<String,Object>> diagnostics=new ArrayList<Map<String,Object>>();
+                Object old=projected.get("diagnostics");
+                if(old instanceof Iterable)for(Object item:(Iterable<?>)old)if(item instanceof Map&&diagnostics.size()<3)
+                    diagnostics.add(new LinkedHashMap<String,Object>((Map<String,Object>)item));
+                diagnostics.add(att.server.api.LimitDiagnostic.create("ATT-WORKER-EVENT-TRUNCATED",
+                        "Large result details were omitted from the Worker protocol; inspect the published artifacts",
+                        "worker.protocol.maxFrameBytes",WorkerProtocol.MAX_FRAME_BYTES,size,"worker.protocol",
+                        att.server.api.LimitOutcome.DATA_TRUNCATED,"transport",
+                        "Inspect the retained report artifact for bounded details",null));
+                projected.put("diagnostics",diagnostics);
+                projected.put("truncated",Boolean.TRUE);
+                Map<String,Object> summary=(Map<String,Object>)projected.get("summary");
+                Map<String,Object> diagnosticSummary=(Map<String,Object>)summary.get("diagnostics");
+                List<Map<String,Object>> warnings=new ArrayList<Map<String,Object>>();
+                Object existing=diagnosticSummary.get("transportWarnings");
+                if(existing instanceof Iterable)for(Object item:(Iterable<?>)existing)if(item instanceof Map&&warnings.size()<1)
+                    warnings.add(new LinkedHashMap<String,Object>((Map<String,Object>)item));
+                warnings.add(att.server.api.LimitDiagnostic.create("ATT-WORKER-EVENT-TRUNCATED",
+                        "Large result details were omitted from the Worker protocol", "worker.protocol.maxFrameBytes",
+                        WorkerProtocol.MAX_FRAME_BYTES,size,"worker.protocol",att.server.api.LimitOutcome.DATA_TRUNCATED,
+                        "transport","Inspect the retained report artifact for bounded details",null));
+                diagnosticSummary.put("transportWarnings",warnings);
+                bounded.put("status",projected.get("status")); bounded.put("exitCode",projected.get("exitCode"));
+                bounded.put("result",projected);
+                bounded.put("workerMetrics",safe.get("workerMetrics"));
+                if(executionOutput!=null)try {
+                    java.nio.file.Files.createDirectories(executionOutput);
+                    try(java.io.OutputStream out=java.nio.file.Files.newOutputStream(executionOutput.resolve("worker-protocol-result.json"),
+                            java.nio.file.StandardOpenOption.CREATE_NEW,java.nio.file.StandardOpenOption.WRITE)) { mapper.writeValue(out,safe); }
+                    projected.put("detailsArtifact","worker-protocol-result.json");
+                } catch(Exception unavailable) { projected.put("detailsUnavailable",true); }
+                return bounded;
+            }
             Map<String,Object> result=fields("status",bounded.get("status"),"exitCode",bounded.get("exitCode"),"truncated",true);
             if(original.get("executionId") instanceof String)result.put("executionId",boundedText(original.get("executionId"),256));
             if(original.get("durationMs") instanceof Number)result.put("durationMs",original.get("durationMs"));
@@ -746,7 +846,11 @@ public final class WorkerMain {
                     if(((Map<?,?>)item).get(key) instanceof String)diagnostic.put(key,boundedText(((Map<?,?>)item).get(key),512));
                 if(!diagnostic.isEmpty())diagnostics.add(diagnostic);
             }
-            diagnostics.add(fields("code","ATT-WORKER-EVENT-TRUNCATED","summary","Large result details were omitted from the Worker protocol; inspect the published artifacts"));
+            diagnostics.add(att.server.api.LimitDiagnostic.create("ATT-WORKER-EVENT-TRUNCATED",
+                    "Large result details were omitted from the Worker protocol; inspect the published artifacts",
+                    "worker.protocol.maxFrameBytes",WorkerProtocol.MAX_FRAME_BYTES,size,"worker.protocol",
+                    att.server.api.LimitOutcome.DATA_TRUNCATED,"transport",
+                    "Inspect the retained report artifact for bounded details",null));
             result.put("diagnostics",diagnostics);
             if(executionOutput!=null)try {
                 java.nio.file.Files.createDirectories(executionOutput);
@@ -822,7 +926,8 @@ public final class WorkerMain {
             }
         payload.put("workerMetrics",resourceTelemetry.snapshot());emit(WorkerEvent.Type.RESULT,payload);
     }
-    private int fail(String code,String message) throws Exception { emit(WorkerEvent.Type.DIAGNOSTIC,fields("code",code,"message",message)); emitResult(fields("status","INVALID","exitCode",2,"result",fields("executionId",null,"status","INVALID","exitCode",2))); return 2; }
+    private int fail(String code,String message) throws Exception { emit(WorkerEvent.Type.DIAGNOSTIC,fields("code",code,"message",message,
+            "outcome",att.server.api.LimitOutcome.SUBMISSION_REJECTED.name(),"stage","submission")); emitResult(fields("status","INVALID","exitCode",2,"result",fields("executionId",null,"status","INVALID","exitCode",2))); return 2; }
     private static Map<String,Object> fields(Object... values) { Map<String,Object> map=new LinkedHashMap<String,Object>(); for(int i=0;i+1<values.length;i+=2)map.put(String.valueOf(values[i]),values[i+1]); return map; }
     private static boolean bool(Boolean value) { return Boolean.TRUE.equals(value); }
     private static String text(Map<String,Object> value,String key) { String found=optionalText(value,key); if(found==null||found.trim().isEmpty())throw new IllegalArgumentException("target."+key+" is required"); return found; }

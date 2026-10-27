@@ -24,22 +24,56 @@ export function resolveReportHref(currentPath: string, href: string): string | n
 }
 
 /**
- * The Server has already sanitized the archive HTML. Its CSP permits only
- * reviewed report scripts. Add a tightly scoped click bridge; preserve both
- * that CSP and the opaque-origin iframe boundary.
+ * ZIP publication preserves the original producer HTML. Apply an independent, restrictive
+ * viewer CSP only inside srcdoc; never assume the archived source is already sanitized.
+ * Unreviewed scripts, external resources and event handlers must not gain the Studio nonce.
  */
-export function prepareReportHtml(source: string, currentPath: string, studioNonce: string): string {
+export async function prepareReportHtml(source: string, currentPath: string, studioNonce: string): Promise<string> {
   const document = new DOMParser().parseFromString(source, 'text/html');
-  const policy = document.querySelector<HTMLMetaElement>('meta[http-equiv="Content-Security-Policy"]');
-  const configured = policy?.getAttribute('content') || '';
-  if (!policy || !configured.includes("default-src 'none'") || !/\bscript-src\s+[^;]+/.test(configured))
-    throw new Error('The report does not carry the required sanitized archive Content Security Policy.');
-  policy.setAttribute('content', configured.replace(/\bscript-src\s+([^;]+)/,
-    (_match, allowed: string) => 'script-src ' + allowed.trim() + ' ' + BRIDGE_HASH));
-
-  // The Studio document CSP is inherited by srcdoc; authorize only the same
-  // per-response nonce already used by the parent page, not unsafe-inline.
-  if (studioNonce) document.querySelectorAll('style, script').forEach(element => element.setAttribute('nonce', studioNonce));
+  document.querySelectorAll('iframe, object, embed, form, base, link, meta[http-equiv], foreignObject').forEach(node => node.remove());
+  for (const element of document.querySelectorAll('*')) {
+    for (const attribute of Array.from(element.attributes)) {
+      if (/^on/i.test(attribute.name) || ['srcdoc', 'formaction', 'ping', 'download', 'target'].includes(attribute.name.toLowerCase())) {
+        element.removeAttribute(attribute.name);
+      }
+    }
+    if (element.hasAttribute('src') && !/^data:image\/(png|jpeg|gif);base64,[A-Za-z0-9+/=\s]+$/i.test(element.getAttribute('src') || '')) {
+      element.removeAttribute('src');
+    }
+  }
+  // Hash the actual producer script bytes, not names or attributes. Only scripts already
+  // reviewed by ATT may inherit the parent page's script nonce. Others are removed.
+  const approved = new Set(['DmkzPdiGxyCfiKKZtr34jiaf1ukqUeAK8RSwFF19ryg=', '2n13XsaCAniqXDGJgtRR2kgh8VlBPDQQ3kb5BQLyzq4=']);
+  for (const script of Array.from(document.querySelectorAll('script'))) {
+    if (script.hasAttribute('src')) { script.remove(); continue; }
+    if (script.getAttribute('type') === 'application/json' && script.id === 'att-load-summary-data') {
+      try {
+        const value: unknown = JSON.parse(script.textContent || '');
+        if (value && typeof value === 'object' && !Array.isArray(value)) continue;
+      } catch { /* unsafe embedded data is discarded */ }
+      script.remove();
+      continue;
+    }
+    let trusted = false;
+    if (!script.getAttribute('type') && globalThis.crypto?.subtle) {
+      const bytes = new TextEncoder().encode(script.textContent || '');
+      if (bytes.length <= 256 * 1024) {
+        const digest = await globalThis.crypto.subtle.digest('SHA-256', bytes);
+        const base64 = btoa(String.fromCharCode(...new Uint8Array(digest)));
+        trusted = approved.has(base64);
+      }
+    }
+    if (!trusted) script.remove();
+    else if (studioNonce) script.setAttribute('nonce', studioNonce);
+  }
+  if (studioNonce) document.querySelectorAll('style').forEach(element => element.setAttribute('nonce', studioNonce));
+  const policy = document.createElement('meta');
+  policy.setAttribute('http-equiv', 'Content-Security-Policy');
+  policy.setAttribute('content', "default-src 'none'; script-src 'sha256-DmkzPdiGxyCfiKKZtr34jiaf1ukqUeAK8RSwFF19ryg=' 'sha256-2n13XsaCAniqXDGJgtRR2kgh8VlBPDQQ3kb5BQLyzq4=' " + BRIDGE_HASH
+    + (studioNonce ? " 'nonce-" + studioNonce + "'" : '')
+    + "; style-src 'unsafe-inline'" + (studioNonce ? " 'nonce-" + studioNonce + "'" : '')
+    + "; img-src data:; form-action 'none'; base-uri 'none'; connect-src 'none'");
+  document.head.prepend(policy);
 
   for (const link of document.querySelectorAll<HTMLAnchorElement>('a[href]')) {
     const href = link.getAttribute('href') || '';
@@ -76,11 +110,12 @@ export function ReportPreview({ jobId, path, readText, onNavigate }: { jobId: st
   useEffect(() => {
     const controller = new AbortController();
     setHtml(null); setPlain(null); setError(''); setErrorStatus(null);
-    readText(jobId, currentPath, controller.signal).then(content => {
+    readText(jobId, currentPath, controller.signal).then(async content => {
       if (controller.signal.aborted) return;
       if (/\.html?$/i.test(currentPath)) {
         const nonce = document.querySelector<HTMLScriptElement>('script[nonce]')?.nonce || '';
-        setHtml(prepareReportHtml(content, currentPath, nonce));
+        const safeHtml = await prepareReportHtml(content, currentPath, nonce);
+        if (!controller.signal.aborted) setHtml(safeHtml);
       } else setPlain(content);
     }).catch(reason => {
       if (!controller.signal.aborted) {

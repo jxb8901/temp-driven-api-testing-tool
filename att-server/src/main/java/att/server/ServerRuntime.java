@@ -68,6 +68,7 @@ final class ServerRuntime implements AutoCloseable {
     // Public inspection limits; keep aligned with PackageResourceInspector in the Local runtime.
     private static final int RESOURCE_DEFAULT_PAGE_SIZE=50, RESOURCE_MAX_PAGE_SIZE=100;
     private static final int TESTDATA_RECORD_MAX_PAGE_SIZE=100;
+    static final int MAX_ARTIFACT_READ_SLOTS=8;
     private static final int MAX_VALIDATION_PACKAGE_ENTRIES=20000, MAX_VALIDATION_ENVIRONMENTS=100, MAX_VNEXT_VALIDATION_PACKAGES=200;
     private static final long MAX_TOTAL_VNEXT_VALIDATION_WORK_UNITS=10000000L;
     static final long DRAFT_TTL_MILLIS=TimeUnit.MINUTES.toMillis(10);
@@ -84,7 +85,7 @@ final class ServerRuntime implements AutoCloseable {
     private final ThreadPoolExecutor eventCompactions=new ThreadPoolExecutor(2,2,0,TimeUnit.MILLISECONDS,new ArrayBlockingQueue<>(1024),r->{Thread t=new Thread(r,"att-server-event-compactor");t.setDaemon(true);return t;},new ThreadPoolExecutor.AbortPolicy());
     private final ThreadPoolExecutor artifactWriters;
     private final ArtifactPublisher artifactPublisher;
-    private final Semaphore artifactReadSlots=new Semaphore(8,true);
+    private final Semaphore artifactReadSlots=new Semaphore(MAX_ARTIFACT_READ_SLOTS,true);
     private final Set<String> pendingArtifactJobs=ConcurrentHashMap.newKeySet();
     private final Set<String> requestedArtifactRetries=ConcurrentHashMap.newKeySet();
     private final java.util.concurrent.locks.ReentrantReadWriteLock artifactLifecycle=new java.util.concurrent.locks.ReentrantReadWriteLock(true);
@@ -324,14 +325,18 @@ final class ServerRuntime implements AutoCloseable {
         return new JobExecutionSpec(definition,revision,sourcePath).withConfiguration(input.path("configurationProvenance").isObject()?configurationRevision(JSON.convertValue(input.get("configurationProvenance"),Map.class),revision):null);
     }
 
-    private void verifyReplayRevision(String packageId,String environment,String revision) throws Exception {
+    private void verifyStrictReplayRevision(String packageId,String environment,String revision) throws Exception {
         try {verifyPackageRevision(packageId,environment,revision);}
-        catch(StaleCursorException stale){throw new StaleDraftException();}
+        catch(StaleCursorException stale){throw new JobConflictException("ATT-SERVER-REPLAY-REVISION-CONFLICT","The original Package revision is unavailable. Strict replay is blocked; review with the current Package or restore the original source separately.");}
     }
 
     private final Object replayLock=new Object();
     private final Map<String,ReplayReview> replayReviews=new java.util.concurrent.ConcurrentHashMap<>();
-    private record ReplayReview(String source,String principal,String draftId,String packageId,String executionType,Instant expiresAt) {}
+    private record ReplayReview(String source,String principal,String draftId,String packageId,String executionType,String sourcePolicy,
+                                String originalRevision,String selectedRevision,String configurationDigest,
+                                String sourcePath,ObjectNode originalDefinition,ObjectNode definition,Map<String,Object> originalConfiguration,
+                                Map<String,Object> configuration,String validationCode,List<Map<String,Object>> diagnostics,
+                                Instant expiresAt) {}
 
     private Map<String,String> ownedExecutionSpec(String id,String principal) throws Exception {
         requireLocalOperator(principal);requireJobOwner(id,principal);
@@ -366,70 +371,238 @@ final class ServerRuntime implements AutoCloseable {
         return view;
     }
     Map<String,Object> createJobReplayDraft(String id,String principal) throws Exception {
+        return createJobReplayDraft(id,principal,JSON.createObjectNode());
+    }
+    Map<String,Object> createJobReplayDraft(String id,String principal,JsonNode request) throws Exception {
         if(!config.inspection.enabled)throw new IllegalArgumentException("Replay requires package inspection to be enabled by the Server");
         synchronized(replayLock) {
+            requireObject(request,"Replay draft options must be a JSON object");requireOnlyFields(request,"sourcePolicy","overrides");
+            String sourcePolicy=request.has("sourcePolicy")?required(request,"sourcePolicy"):"strict";
+            if(!Set.of("current","strict").contains(sourcePolicy))throw new IllegalArgumentException("sourcePolicy must be current or strict");
             Map<String,String> record=ownedExecutionSpec(id,principal);
-            if(record.get("spec")==null)throw new IllegalArgumentException("Rerun unavailable for this historical or unsafe job. Configure a new run and supply missing inputs.");
-            JobExecutionSpec spec=JobExecutionSpec.parse(record.get("spec"));ObjectNode definition=spec.definition();
+            if(record.get("spec")==null)throw new ReplayInputMissingException("Rerun is unavailable because this Job has no safely retained execution definition. Re-enter the missing inputs in a new run.");
+            JobExecutionSpec spec=JobExecutionSpec.parse(record.get("spec"));ObjectNode originalDefinition=spec.definition();
+            requireReplayReviewCapacity(principal);
+            ObjectNode definition=JobReplayOverrides.apply(originalDefinition,request.get("overrides"));
+            boolean packageDefaultEnvironment=spec.configuration()!=null&&"package".equals(spec.configuration().get("environmentOrigin"));
+            JsonNode environmentOverride=request.path("overrides").path("environment");
+            if(packageDefaultEnvironment&&(!environmentOverride.isTextual()||environmentOverride.asText().isBlank()))definition.remove("environment");
             String packageId=required(definition,"packageId"),environment=optionalText(definition,"environment");
-            verifyReplayRevision(packageId,environment,spec.revision());
+            if("strict".equals(sourcePolicy))verifyStrictReplayRevision(packageId,environment,spec.revision());
             boolean run="run".equals(definition.path("executionType").asText());
-            Map<String,Object> draft;
-            if(run)draft=createRunDraft(definition,principal,true,spec.configuration());
-            else if(spec.value.has("sourcePath")) {
-                String path=safeRelative(spec.value.path("sourcePath").asText(),"scenario");validatePackagePath(packageRoot(packageId),path,"scenario");
-                LoadSchedule source=new LoadSchedule();source.packageId=packageId;source.environment=environment;
-                source.inlineScenario=JSON.convertValue(definition.get("scenario"),Map.class);
-                ValidatedScheduledScenario validated=validateScheduleScenario(packageRoot(packageId),source);
-                if(validated.containsSensitiveValues||!spec.revision().equals(validated.revisionDigest))throw new StaleDraftException();
-                CatalogLoadDraftState retained=new CatalogLoadDraftState("C"+UUID.randomUUID().toString().replace("-","").toUpperCase(),principal,packageId,environment,path,spec.revision(),validated.model,validated.scenario,null,spec.configuration()!=null?spec.configuration():resolveExecutionConfiguration(packageId,packageRoot(packageId),environment),clock.instant().plusMillis(DRAFT_TTL_MILLIS));
-                synchronized(draftLock){expireDrafts();checkDraftCapacity(principal);catalogLoadDrafts.put(retained.id,retained);}
-                draft=catalogLoadDraftView(retained);
-            } else {
-                ObjectNode input=definition.deepCopy();input.remove("executionType");draft=createAdvancedLoadDraft(input,principal,spec.configuration());
-            }
+            Map<String,Object> draft=null;String validationCode=null;List<Map<String,Object>> diagnostics=Collections.emptyList();
+            try {
+                if(run)draft=createRunDraft(definition,principal,true,null);
+                else if(spec.value.has("sourcePath")) {
+                    String path=safeRelative(spec.value.path("sourcePath").asText(),"scenario");validatePackagePath(packageRoot(packageId),path,"scenario");
+                    LoadSchedule source=new LoadSchedule();source.packageId=packageId;source.environment=environment;
+                    source.inlineScenario=JSON.convertValue(definition.get("scenario"),Map.class);
+                    ValidatedScheduledScenario validated=validateScheduledScenario(packageRoot(packageId),source,source.inlineScenario,false);
+                    validatePackageBackedReplayLoadLimits(config.inlineLoad,validated.scenario);
+                    if(validated.containsSensitiveValues)throw new ReplayInputMissingException("Sensitive LOAD inputs were not retained. Enter them again through the authorized input controls.");
+                    definition.set("scenario",JSON.valueToTree(validated.scenario));
+                    Map<String,Object> configuration=configurationRevision(resolveExecutionConfiguration(packageId,packageRoot(packageId),environment),validated.revisionDigest);
+                    CatalogLoadDraftState retained=new CatalogLoadDraftState("C"+UUID.randomUUID().toString().replace("-","").toUpperCase(),principal,packageId,environment,path,validated.revisionDigest,validated.model,validated.scenario,null,configuration,clock.instant().plusMillis(DRAFT_TTL_MILLIS));
+                    synchronized(draftLock){expireDrafts();checkDraftCapacity(principal);catalogLoadDrafts.put(retained.id,retained);}
+                    draft=catalogLoadDraftView(retained);
+                } else {
+                    ObjectNode input=definition.deepCopy();input.remove("executionType");draft=createAdvancedLoadDraft(input,principal,null);
+                    JsonNode normalized=JSON.valueToTree(draft.get("scenario"));if(normalized.isObject())definition.set("scenario",normalized);
+                }
+            } catch(ReplayInputMissingException missing){validationCode="ATT-SERVER-REPLAY-INPUT-MISSING";diagnostics=List.of(replayDiagnostic(validationCode,"inputs",missing.getMessage()));}
+              catch(InlineLoadLimitException limit){validationCode="ATT-SERVER-INLINE-LOAD-LIMIT";diagnostics=List.of(replayDiagnostic(validationCode,"scenario.load",limit.getMessage()));}
+              catch(InspectionConfigurationException invalid){validationCode="ATT-SERVER-REPLAY-VALIDATION-FAILED";diagnostics=safeReplayDiagnostics(invalid.diagnostics,validationCode);}
+              catch(DraftValidationException invalid){
+                if(replayDiagnosticsShowMissingResource(invalid.diagnostics)){validationCode="ATT-SERVER-REPLAY-RESOURCE-MISSING";diagnostics=safeReplayDiagnostics(invalid.diagnostics,validationCode);}
+                else {validationCode="ATT-SERVER-REPLAY-VALIDATION-FAILED";diagnostics=safeReplayDiagnostics(invalid.diagnostics,validationCode);}
+              } catch(NotFoundException missing){validationCode="ATT-SERVER-REPLAY-RESOURCE-MISSING";diagnostics=List.of(replayDiagnostic(validationCode,"target or scenario","The retained resource is missing or no longer available in this Package. Choose an available resource, then validate again."));}
+              catch(StaleCursorException stale){validationCode="ATT-SERVER-REPLAY-DRAFT-STALE";diagnostics=List.of(replayDiagnostic(validationCode,"package","The Package changed during validation. Validate these edits again."));}
+              catch(IllegalArgumentException invalid){validationCode="ATT-SERVER-REPLAY-VALIDATION-FAILED";diagnostics=List.of(replayDiagnostic(validationCode,run?"target or selection":"scenario",invalid.getMessage()));}
+            if(validationCode!=null)return createInvalidReplayDraft(id,principal,spec,sourcePolicy,originalDefinition,definition,packageId,run,validationCode,diagnostics);
             String draftId=String.valueOf(draft.get("draftId"));
-            // The fresh validator must agree with the retained package revision too.
-            if(run&&!runDraft(draftId,principal,packageId).revision.equals(spec.revision()))throw new StaleDraftException();
-            if(!run&&advancedLoadDrafts.containsKey(draftId)&&!advancedLoadDrafts.get(draftId).revisionDigest.equals(spec.revision()))throw new StaleDraftException();
-            replayReviews.entrySet().removeIf(entry->!entry.getValue().expiresAt.isAfter(clock.instant()));
-            if(replayReviews.size()>=MAX_ACTIVE_DRAFTS)throw new DraftCapacityException();
+            String selectedRevision=String.valueOf(draft.get("revisionDigest"));
+            if(!selectedRevision.matches("[a-f0-9]{64}"))throw new IllegalStateException("Replay validation did not produce a current package revision");
+            Map<String,Object> configuration=JSON.convertValue(draft.get("configuration"),Map.class);
+            if(configuration==null||configuration.isEmpty())throw new IllegalStateException("Replay validation did not resolve current configuration");
+            String effectiveEnvironment=configuration.get("environment") instanceof String?(String)configuration.get("environment"):environment;
+            if(effectiveEnvironment!=null)definition.put("environment",effectiveEnvironment);
+            if("strict".equals(sourcePolicy)&&!selectedRevision.equals(spec.revision()))verifyStrictReplayRevision(packageId,effectiveEnvironment,spec.revision());
+            requireReplayReviewCapacity(principal);
             String intent=UUID.randomUUID().toString();Instant expires=clock.instant().plusMillis(DRAFT_TTL_MILLIS);
-            replayReviews.put(intent,new ReplayReview(id,principal,draftId,packageId,run?"run":"load",expires));
-            Map<String,Object> result=new LinkedHashMap<>(jobReplay(id,principal));result.put("intentId",intent);result.put("draftId",draftId);result.put("expiresAt",expires.toString());result.put("preview",draft);return result;
+            replayReviews.put(intent,new ReplayReview(id,principal,draftId,packageId,run?"run":"load",sourcePolicy,spec.revision(),selectedRevision,
+                    replayConfigurationDigest(configuration),spec.value.path("sourcePath").asText(null),originalDefinition.deepCopy(),definition.deepCopy(),spec.configuration(),
+                    att.server.api.ConfigurationSnapshot.copy(configuration),null,Collections.emptyList(),expires));
+            Map<String,Object> result=new LinkedHashMap<>(jobReplay(id,principal));
+            Object oldConfiguration=result.remove("configuration");if(oldConfiguration!=null)result.put("originalConfiguration",oldConfiguration);
+            result.put("schemaVersion","att-job-replay-draft/v1");result.put("sourceJobId",id);result.put("definition",definition);result.put("originalDefinition",originalDefinition);result.put("sourcePolicy",sourcePolicy);
+            result.put("originalRevision",spec.revision());result.put("currentRevision",selectedRevision);result.put("configuration",configuration);
+            result.put("missingFields",replayMissingFields(definition));
+            result.put("intentId",intent);result.put("draftId",draftId);result.put("draftRef",draftId);result.put("expiresAt",expires.toString());result.put("preview",draft);return result;
+        }
+    }
+    private Map<String,Object> createInvalidReplayDraft(String id,String principal,JobExecutionSpec spec,String sourcePolicy,
+            ObjectNode originalDefinition,ObjectNode definition,String packageId,boolean run,String validationCode,
+            List<Map<String,Object>> diagnostics) throws Exception {
+        String environment=optionalText(definition,"environment"),selectedRevision="";Map<String,Object> configuration=Collections.emptyMap();
+        try {
+            Path root=packageRoot(packageId);if(root==null)throw new NotFoundException();
+            WorkerRequest revisionRequest=inspectionRequest(packageId,root,environment);revisionRequest.inspectionAction="revision";
+            Map<String,Object> inspected=executeInspection(root,revisionRequest);Object digest=inspected.get("revisionDigest");
+            if(digest instanceof String&&((String)digest).matches("[a-f0-9]{64}"))selectedRevision=(String)digest;
+        } catch(Exception ignored) { /* Keep the editor draft available when current Package inspection itself is unavailable. */ }
+        try {
+            Path root=packageRoot(packageId);if(root!=null)configuration=configurationRevision(resolveExecutionConfiguration(packageId,root,environment),selectedRevision.isEmpty()?null:selectedRevision);
+        } catch(Exception ignored) { /* Diagnostics below explain why the retained definition still needs editing. */ }
+        String effectiveEnvironment=configuration.get("environment") instanceof String?(String)configuration.get("environment"):environment;
+        if(effectiveEnvironment!=null)definition.put("environment",effectiveEnvironment);
+        String draftRef=(run?"R":"C")+UUID.randomUUID().toString().replace("-","").toUpperCase(java.util.Locale.ROOT);
+        Instant expires=clock.instant().plusMillis(DRAFT_TTL_MILLIS);requireReplayReviewCapacity(principal);
+        replayReviews.put(UUID.randomUUID().toString(),new ReplayReview(id,principal,draftRef,packageId,run?"run":"load",sourcePolicy,spec.revision(),selectedRevision,
+                null,spec.value.path("sourcePath").asText(null),originalDefinition.deepCopy(),definition.deepCopy(),spec.configuration(),
+                configuration,validationCode,safeReplayDiagnostics(diagnostics,validationCode),expires));
+        Map<String,Object> result=new LinkedHashMap<>(jobReplay(id,principal));Object oldConfiguration=result.remove("configuration");
+        if(oldConfiguration!=null)result.put("originalConfiguration",oldConfiguration);
+        result.put("schemaVersion","att-job-replay-draft/v1");result.put("draftRef",draftRef);result.put("draftId",draftRef);result.put("sourceJobId",id);
+        result.put("packageId",packageId);result.put("executionType",run?"run":"load");result.put("sourcePolicy",sourcePolicy);
+        result.put("originalRevision",spec.revision());result.put("currentRevision",selectedRevision);result.put("originalDefinition",originalDefinition);result.put("definition",definition);
+        result.put("sourcePath",spec.value.path("sourcePath").asText(null));result.put("configuration",configuration);result.put("expiresAt",expires.toString());
+        result.put("validationState","invalid");result.put("errorCode",validationCode);result.put("diagnostics",safeReplayDiagnostics(diagnostics,validationCode));
+        List<String> missing=new ArrayList<>(replayMissingFields(definition));if("ATT-SERVER-REPLAY-INPUT-MISSING".equals(validationCode)&&!missing.contains("sensitive inputs"))missing.add("sensitive inputs");
+        result.put("missingFields",missing);return result;
+    }
+    private void requireReplayReviewCapacity(String principal) {
+        Instant now=clock.instant();replayReviews.entrySet().removeIf(entry->!entry.getValue().expiresAt.isAfter(now));
+        long owned=replayReviews.values().stream().filter(review->java.util.Objects.equals(principal,review.principal)).count();
+        if(replayReviews.size()>=MAX_ACTIVE_DRAFTS||owned>=MAX_DRAFTS_PER_PRINCIPAL)throw new DraftCapacityException();
+    }
+    private static Map<String,Object> replayDiagnostic(String code,String field,String summary) {
+        Map<String,Object> result=new LinkedHashMap<>();result.put("code",code);result.put("field",field);result.put("summary",summary==null?"Replay validation failed against the current Package.":summary);return result;
+    }
+    private static List<Map<String,Object>> safeReplayDiagnostics(List<Map<String,Object>> diagnostics,String fallbackCode) {
+        List<Map<String,Object>> safe=new ArrayList<>();
+        if(diagnostics!=null)for(Map<String,Object> diagnostic:diagnostics) {
+            Map<String,Object> item=new LinkedHashMap<>();
+            for(String field:List.of("code","field","path","resourceId","severity","summary","message","suggestion")) {
+                Object value=diagnostic.get(field);if(value instanceof String) {
+                    String text=(String)value;if(text.length()>512||containsControl(text)||text.startsWith("/")||text.contains("..\\"))continue;
+                    item.put(field,text);
+                }
+            }
+            if(item.get("code")==null)item.put("code",fallbackCode);if(item.get("summary")==null)item.put("summary","Replay validation failed against the current Package.");safe.add(item);
+        }
+        if(safe.isEmpty())safe.add(replayDiagnostic(fallbackCode,"scenario","Replay validation failed against the current Package. Review the affected fields and validate again."));
+        return Collections.unmodifiableList(safe);
+    }
+    private static List<String> replayMissingFields(ObjectNode definition) {
+        List<String> missing=new ArrayList<>();
+        if("run".equals(definition.path("executionType").asText())) {
+            if(!definition.path("target").isObject()&&!definition.path("selection").isObject())missing.add("target or selection");
+            return missing;
+        }
+        JsonNode scenario=definition.path("scenario"),rootLoad=scenario.path("load"),rows=scenario.path("workloads");
+        if(!hasValue(rootLoad.path("duration"))&&!hasWorkloadPhase(rows,"duration"))missing.add("scenario.load.duration");
+        if(rows.isArray())for(int i=0;i<rows.size();i++) {
+            JsonNode workload=rows.get(i),load=workload.path("load");String prefix="scenario.workloads["+i+"]";
+            if(!hasValue(workload.path("id")))missing.add(prefix+".id");
+            boolean arrival=hasValue(load.path("arrivalRate"))||hasValue(rootLoad.path("arrivalRate"));
+            if(arrival) {
+                if(!hasValue(load.path("arrivalRate"))&&!hasValue(rootLoad.path("arrivalRate")))missing.add(prefix+".load.arrivalRate");
+                if(!hasValue(load.path("maxConcurrent"))&&!hasValue(rootLoad.path("maxConcurrent")))missing.add(prefix+".load.maxConcurrent");
+                if(!hasValue(load.path("overloadPolicy"))&&!hasValue(rootLoad.path("overloadPolicy")))missing.add(prefix+".load.overloadPolicy");
+            } else if(!hasValue(load.path("users"))&&!hasValue(rootLoad.path("users")))missing.add(prefix+".load.users");
+        }
+        return missing;
+    }
+    private static boolean hasWorkloadPhase(JsonNode rows,String phase) {
+        if(!rows.isArray())return false;
+        for(JsonNode row:rows)if(hasValue(row.path("load").path(phase)))return true;
+        return false;
+    }
+    private static boolean hasValue(JsonNode value) {return value!=null&&!value.isMissingNode()&&!value.isNull()&&(!value.isTextual()||!value.asText().isBlank());}
+    private String replayConfigurationDigest(Map<String,Object> configuration) throws Exception {
+        byte[] bytes=JSON.writeValueAsBytes(att.server.api.ConfigurationSnapshot.copy(configuration));
+        byte[] digest=java.security.MessageDigest.getInstance("SHA-256").digest(bytes);StringBuilder result=new StringBuilder(64);
+        for(byte value:digest)result.append(String.format(java.util.Locale.ROOT,"%02x",value&255));return result.toString();
+    }
+    Map<String,Object> getJobReplayEditorDraft(String jobId,String draftId,String principal) throws Exception {
+        synchronized(replayLock) {
+            ownedExecutionSpec(jobId,principal);
+            ReplayReview review=null;
+            for(ReplayReview candidate:replayReviews.values())if(candidate.source.equals(jobId)&&candidate.principal.equals(principal)&&candidate.draftId.equals(draftId)){review=candidate;break;}
+            if(review==null)throw new ReplayDraftExpiredException();
+            if(!review.expiresAt.isAfter(clock.instant())){replayReviews.values().remove(review);throw new ReplayDraftExpiredException();}
+            Map<String,Object> view=new LinkedHashMap<>();view.put("schemaVersion","att-job-replay-draft/v1");view.put("draftRef",draftId);view.put("sourceJobId",jobId);
+            view.put("packageId",review.packageId);view.put("executionType",review.executionType);view.put("sourcePolicy",review.sourcePolicy);
+            view.put("originalRevision",review.originalRevision);view.put("currentRevision",review.selectedRevision);
+            ObjectNode definition=review.definition.deepCopy(),originalDefinition=review.originalDefinition.deepCopy();
+            if(review.sourcePath!=null){definition.put("sourcePath",review.sourcePath);originalDefinition.put("sourcePath",review.sourcePath);}
+            view.put("definition",definition);view.put("originalDefinition",originalDefinition);view.put("sourcePath",review.sourcePath);
+            if(review.originalConfiguration!=null)view.put("originalConfiguration",att.server.api.ConfigurationSnapshot.copy(review.originalConfiguration));
+            view.put("configuration",review.configuration.isEmpty()?Collections.emptyMap():att.server.api.ConfigurationSnapshot.copy(review.configuration));view.put("expiresAt",review.expiresAt.toString());
+            view.put("missingFields",replayMissingFields(review.definition));view.put("validationState",review.validationCode==null?"valid":"invalid");
+            if(review.validationCode!=null){view.put("errorCode",review.validationCode);view.put("diagnostics",review.diagnostics);}
+            return view;
         }
     }
     Map<String,Object> rerunJob(String id,JsonNode body,String principal) throws Exception {
-        requireOnlyFields(body,"intentId","confirm");
+        requireOnlyFields(body,"intentId","confirm","sourcePolicy");
         if(!body.path("confirm").isBoolean()||!body.path("confirm").booleanValue())throw new IllegalArgumentException("Positive replay confirmation is required");
+        String requestedPolicy=body.has("sourcePolicy")?required(body,"sourcePolicy"):null;
+        if(requestedPolicy!=null&&!Set.of("current","strict").contains(requestedPolicy))throw new IllegalArgumentException("sourcePolicy must be current or strict");
         String intent=required(body,"intentId");if(!intent.matches("[a-f0-9-]{36}"))throw new IllegalArgumentException("Invalid replay intent");
         synchronized(replayLock) {
             ownedExecutionSpec(id,principal);
-            String accepted=store.replayJob(principal,intent,id);if(accepted!=null){requireJobOwner(accepted,principal);return jobRecord(accepted);}
+            String accepted=store.replayJob(principal,intent,id);if(accepted!=null){requireJobOwner(accepted,principal);if(requestedPolicy!=null){Map<String,String> acceptedSpec=store.executionSpec(accepted);if(acceptedSpec==null||acceptedSpec.get("spec")==null||!requestedPolicy.equals(JobExecutionSpec.parse(acceptedSpec.get("spec")).value.path("replay").path("sourcePolicy").asText()))throw new JobConflictException("ATT-SERVER-REPLAY-INTENT-MISMATCH","The confirmation intent belongs to a different source policy.");}return jobRecord(accepted);}
             ReplayReview review=replayReviews.get(intent);
-            if(review==null||!review.source.equals(id)||!review.principal.equals(principal)||!review.expiresAt.isAfter(clock.instant()))throw new NotFoundException();
+            if(review==null||!review.source.equals(id)||!review.principal.equals(principal)) {if(requestedPolicy!=null)throw new ReplayDraftExpiredException();throw new NotFoundException();}
+            if(!review.expiresAt.isAfter(clock.instant()))throw new ReplayDraftExpiredException();
+            if(requestedPolicy!=null&&!requestedPolicy.equals(review.sourcePolicy))throw new JobConflictException("ATT-SERVER-REPLAY-INTENT-MISMATCH","The confirmation intent belongs to a different source policy.");
             Map<String,String> record=ownedExecutionSpec(id,principal);JobExecutionSpec spec=JobExecutionSpec.parse(record.get("spec"));
-            verifyReplayRevision(review.packageId,optionalText(spec.definition(),"environment"),spec.revision());
+            if("strict".equals(review.sourcePolicy))verifyStrictReplayRevision(review.packageId,optionalText(review.definition,"environment"),review.originalRevision);
+            else try {verifyPackageRevision(review.packageId,optionalText(review.definition,"environment"),review.selectedRevision);}
+                catch(StaleCursorException stale){throw new JobConflictException("ATT-SERVER-REPLAY-DRAFT-STALE","The Package changed after replay validation. Your edits are still available; validate them again.");}
+            if(!review.configurationDigest.equals(replayConfigurationDigest(review.configuration)))throw new JobConflictException("ATT-SERVER-REPLAY-DRAFT-STALE","The validated configuration changed. Review the draft again.");
             ObjectNode input;
             if("run".equals(review.executionType))input=runDraft(review.draftId,principal,review.packageId).workerInput.deepCopy();
             else {
                 AdvancedLoadDraftState draft=advancedLoadDrafts.get(review.draftId);CatalogLoadDraftState catalog=catalogLoadDrafts.get(review.draftId);
                 if(draft==null&&catalog==null)throw new NotFoundException();
                 Instant expires=draft==null?catalog.expiresAt:draft.expiresAt;
-                if(!expires.isAfter(clock.instant()))throw new NotFoundException();
+                if(!expires.isAfter(clock.instant()))throw new ReplayDraftExpiredException();
                 input=JSON.createObjectNode();input.put("packageId",review.packageId);
                 String environment=draft==null?catalog.environment:draft.environment;
                 if(environment!=null)input.put("environment",environment);
-                input.set("inlineLoadScenario",JSON.valueToTree(draft==null?catalog.scenario:draft.scenario));input.put("expectedRevisionDigest",spec.revision());
+                input.set("inlineLoadScenario",JSON.valueToTree(draft==null?catalog.scenario:draft.scenario));input.put("expectedRevisionDigest",review.selectedRevision);
+                if(draft==null&&catalog.resourceId!=null)input.put("scenario",catalog.resourceId);
+                input.set("configurationProvenance",JSON.valueToTree(review.configuration));
             }
-            if(spec.configuration()!=null)input.set("configurationProvenance",JSON.valueToTree(spec.configuration()));
+            input.put("expectedRevisionDigest",review.selectedRevision);
+            input.set("configurationProvenance",JSON.valueToTree(review.configuration));
             applyInspectionPolicy(input,review.packageId);
-            Map<String,Object> result=submit(review.executionType,input,principal,true,null,"load".equals(review.executionType)&&spec.value.has("sourcePath"),id,intent);
+            JobExecutionSpec retained=capturePrevalidatedExecutionSpec(review.executionType,input,null)
+                    .withReplaySource(id,review.sourcePolicy,review.originalRevision,review.selectedRevision);
+            Map<String,Object> result=submit(review.executionType,input,principal,true,null,"load".equals(review.executionType)&&review.definition.has("scenario")&&spec.value.has("sourcePath"),id,intent,retained,
+                    "load".equals(review.executionType)&&spec.value.has("sourcePath"));
             store.audit(principal,"JOB_RERUN",String.valueOf(result.get("jobId")),review.packageId,"ACCEPTED");
             runDrafts.remove(review.draftId);advancedLoadDrafts.remove(review.draftId);catalogLoadDrafts.remove(review.draftId);replayReviews.remove(intent);
             return result;
         }
     }
+    private static boolean replayDiagnosticsShowMissingResource(List<Map<String,Object>> diagnostics) {
+        for(Map<String,Object> diagnostic:diagnostics) {
+            String code=String.valueOf(diagnostic.getOrDefault("code","" )).toUpperCase(java.util.Locale.ROOT);
+            String summary=String.valueOf(diagnostic.getOrDefault("summary","" )).toLowerCase(java.util.Locale.ROOT);
+            String detail=String.valueOf(diagnostic.getOrDefault("detail","" )).toLowerCase(java.util.Locale.ROOT);
+            if(code.contains("NOT-FOUND")||code.contains("RESOURCE-MISSING")||summary.contains("not found")||summary.contains("no longer exists")||detail.contains("not found"))return true;
+        }
+        return false;
+    }
+    static final class ReplayValidationException extends RuntimeException {
+        final List<Map<String,Object>> diagnostics;
+        ReplayValidationException(String summary){this(List.of(Map.of("code","ATT-SERVER-REPLAY-VALIDATION-FAILED","summary",summary==null?"Replay validation failed against the current Package.":summary)));}
+        ReplayValidationException(List<Map<String,Object>> diagnostics){super(diagnostics.isEmpty()?"Replay validation failed against the current Package.":String.valueOf(diagnostics.get(0).getOrDefault("summary","Replay validation failed against the current Package.")));this.diagnostics=Collections.unmodifiableList(new ArrayList<>(diagnostics));}
+    }
+    static final class ReplayResourceMissingException extends RuntimeException {ReplayResourceMissingException(){super("A retained Scenario or Target no longer resolves in the current Package. Edit the affected field or choose an available resource, then validate again.");}}
 
     Map<String,Object> submit(String command,JsonNode input,String principal) throws Exception {
         return submit(command,input,principal,false);
@@ -447,6 +620,9 @@ final class ServerRuntime implements AutoCloseable {
         return submit(command,input,principal,serverIssuedDraft,scheduleOccurrenceId,scheduleIssued,rerunOfJobId,replayIntent,null);
     }
     private Map<String,Object> submit(String command,JsonNode input,String principal,boolean serverIssuedDraft,String scheduleOccurrenceId,boolean scheduleIssued,String rerunOfJobId,String replayIntent,JobExecutionSpec prevalidatedSpec) throws Exception {
+        return submit(command,input,principal,serverIssuedDraft,scheduleOccurrenceId,scheduleIssued,rerunOfJobId,replayIntent,prevalidatedSpec,false);
+    }
+    private Map<String,Object> submit(String command,JsonNode input,String principal,boolean serverIssuedDraft,String scheduleOccurrenceId,boolean scheduleIssued,String rerunOfJobId,String replayIntent,JobExecutionSpec prevalidatedSpec,boolean fileBackedReplay) throws Exception {
         admissionLifecycle.readLock().lock();
         try {
         if(closing)throw new QueueFullException("Server is shutting down");
@@ -463,11 +639,16 @@ final class ServerRuntime implements AutoCloseable {
                 ||input.has("configurationProvenance")||input.has("registeredPackageId")))
             throw new IllegalArgumentException("Inline execution fields require a server-issued draft");
         if(serverIssuedDraft&&"load".equals(command)) {
-            if(!scheduleIssued)requireInlineLoadEnabled();
+            if(!scheduleIssued&&!fileBackedReplay)requireInlineLoadEnabled();
             JsonNode scenarioNode=input.get("inlineLoadScenario");
             if(scenarioNode==null||!scenarioNode.isObject())throw new IllegalArgumentException("A validated inline Load scenario is required");
             @SuppressWarnings("unchecked") Map<String,Object> scenario=(Map<String,Object>)JSON.convertValue(scenarioNode,Map.class);
-            if(scheduleIssued)validateScheduledLoadLimits(config.inlineLoad,scenario);else enforceInlineLoadLimits(scenario);
+            if(fileBackedReplay) {
+                String sourcePath=optionalText(input,"scenario");
+                if(sourcePath==null)throw new IllegalArgumentException("A package-file-backed replay requires its retained source path");
+                validatePackagePath(packageRoot(required(input,"packageId")),safeRelative(sourcePath,"scenario"),"scenario");
+                validatePackageBackedReplayLoadLimits(config.inlineLoad,scenario);
+            } else if(scheduleIssued)validateScheduledLoadLimits(config.inlineLoad,scenario);else enforceInlineLoadLimits(scenario);
         }
         Path root=packageRoot(packageId);
         if(root==null)throw new IllegalArgumentException("Unknown packageId");
@@ -507,7 +688,8 @@ final class ServerRuntime implements AutoCloseable {
         }
         String executionSpec=null,replayUnavailable=null;
         try {
-            if(rerunOfJobId!=null)executionSpec=ownedExecutionSpec(rerunOfJobId,principal).get("spec");
+            if(prevalidatedSpec!=null)executionSpec=prevalidatedSpec.json();
+            else if(rerunOfJobId!=null)executionSpec=ownedExecutionSpec(rerunOfJobId,principal).get("spec");
             else if(serverIssuedDraft) {
                 if(prevalidatedSpec!=null)executionSpec=prevalidatedSpec.json();
                 else replayUnavailable="Exact rerun is unavailable: sensitive execution inputs require secure re-entry.";
@@ -525,6 +707,16 @@ final class ServerRuntime implements AutoCloseable {
         }
         configuration=configurationRevision(configuration,request.expectedRevisionDigest);request.configurationProvenance=configuration;
         if(executionSpec==null&&replayUnavailable==null)replayUnavailable="This job type or Server capability does not support safe replay. Configure a new run.";
+        if(rerunOfJobId!=null&&prevalidatedSpec!=null) {
+            JsonNode replay=prevalidatedSpec.value.path("replay");
+            String policy=replay.path("sourcePolicy").asText("strict");
+            String expected="strict".equals(policy)?replay.path("originalRevision").asText():replay.path("effectiveRevision").asText();
+            try {verifyPackageRevision(packageId,request.environment,expected);}
+            catch(StaleCursorException stale) {
+                if("strict".equals(policy))throw new JobConflictException("ATT-SERVER-REPLAY-REVISION-CONFLICT","The original Package revision is unavailable. Strict replay is blocked; review with the current Package or restore the original source separately.");
+                throw new JobConflictException("ATT-SERVER-REPLAY-DRAFT-STALE","The Package changed after replay validation. Your edits are still available; validate them again.");
+            }
+        }
         if(loadAdmission&&!loadSlots.tryAcquire()){store.audit(principal,"SUBMIT",null,packageId,"REJECTED_LOAD_CAPACITY");throw new QueueFullException("Load capacity is full; retry after a Load job completes");}
         if(!admissionSlots.tryAcquire()){if(loadAdmission)loadSlots.release();store.audit(principal,"SUBMIT",null,packageId,"REJECTED_QUEUE_FULL");throw new QueueFullException("Worker capacity is full; retry after a job completes");}
         AdmissionLease lease=new AdmissionLease(admissionSlots,loadAdmission?loadSlots:null);
@@ -730,23 +922,154 @@ final class ServerRuntime implements AutoCloseable {
         if("STATUS".equals(type)&&job.workerReadyNanos==0)job.workerReadyNanos=eventNanos;
         if(("PROGRESS".equals(type)||"LOG".equals(type))&&job.executionReadyNanos==0)job.executionReadyNanos=eventNanos;
         switch(type){case "STATUS"->{String status=event.path("status").asText("");if("RUNNING".equals(status)&&"PREPARING".equals(job.status))transition(job,"RUNNING");}
-            case "PROGRESS"->append(job,"progress",safe);case "LOG"->append(job,"log",safe);case "DIAGNOSTIC"->{job.diagnosticJson=JSON.writeValueAsString(safe);store.update(job);append(job,"diagnostic",safe);}
-            case "RESULT"->{if(job.processFence!=null){job.processFence.observe();rememberWorkerProcesses(job,job.processFence);}job.resultReceivedNanos=eventNanos;Object workerMetrics=safe.get("workerMetrics");if(workerMetrics instanceof Map<?,?>)job.workerMetrics=(Map<String,Object>)workerMetrics;String status=event.path("status").asText("ERROR");int code=event.path("exitCode").asInt(3);Object result=safe.get("result");if(result instanceof Map<?,?> original&&job.request.configurationProvenance!=null){Map<String,Object> enriched=new LinkedHashMap<>((Map<String,Object>)original);Map<String,Object> summary=enriched.get("summary") instanceof Map<?,?> existing?new LinkedHashMap<>((Map<String,Object>)existing):new LinkedHashMap<>();summary.put("configuration",job.request.configurationProvenance);enriched.put("summary",summary);result=enriched;}job.resultJson=result==null?"{}":JSON.writeValueAsString(result);job.resultReceived=true;Object console=safe.get("console");finish(job,normalizeTerminal(status),code,console instanceof String consoleLine?consoleLine:null);}
+            case "PROGRESS"->append(job,"progress",safe);case "LOG"->append(job,"log",safe);case "DIAGNOSTIC"->{
+                String eventDiagnostic=JSON.writeValueAsString(safe);
+                if(hasClassifiedCause(eventDiagnostic)) {
+                    if(job.primaryDiagnosticJson==null)job.primaryDiagnosticJson=eventDiagnostic;
+                    if(job.primaryDiagnosticJson.equals(eventDiagnostic))job.diagnosticJson=eventDiagnostic;
+                    else addSecondaryDiagnostic(job,safe);
+                } else if(job.primaryDiagnosticJson!=null||job.protocolDiagnostic!=null) addSecondaryDiagnostic(job,safe);
+                else job.diagnosticJson=eventDiagnostic;
+                store.update(job);append(job,"diagnostic",safe);
+            }
+            case "RESULT"->{
+                if(job.processFence!=null){job.processFence.observe();rememberWorkerProcesses(job,job.processFence);}
+                job.resultReceivedNanos=eventNanos;
+                Object workerMetrics=safe.get("workerMetrics");
+                if(workerMetrics instanceof Map<?,?>)job.workerMetrics=new LinkedHashMap<>((Map<String,Object>)workerMetrics);
+                if(safe.get("loadResultTransport") instanceof Map<?,?> transport) {
+                    Map<String,Object> current=job.workerMetrics==null?new LinkedHashMap<>():new LinkedHashMap<>(job.workerMetrics);
+                    current.put("loadResultTransport",new LinkedHashMap<>((Map<String,Object>)transport));
+                    job.workerMetrics=current;
+                }
+                String status=event.path("status").asText("ERROR");
+                int code=event.path("exitCode").asInt(3);
+                Object result=safe.get("result");
+                if("load".equals(job.command)) {
+                    Map<String,Object> original=result instanceof Map<?,?>?(Map<String,Object>)result:new LinkedHashMap<>();
+                    original=loadResultWithProtocolWarning(original,job);
+                    Map<String,Object> enriched=new LinkedHashMap<>(original);
+                    if(job.request.configurationProvenance!=null) {
+                        Map<String,Object> summary=enriched.get("summary") instanceof Map<?,?> existing
+                                ?new LinkedHashMap<>((Map<String,Object>)existing):new LinkedHashMap<>();
+                        summary.put("configuration",job.request.configurationProvenance);enriched.put("summary",summary);
+                    }
+                    result=att.server.api.LoadTerminalResult.projectOperationResult(enriched,status,code);
+                    attachJobDiagnostics((Map<String,Object>)result,job);
+                } else if(result instanceof Map<?,?> original&&job.request.configurationProvenance!=null) {
+                    Map<String,Object> enriched=new LinkedHashMap<>((Map<String,Object>)original);
+                    Map<String,Object> summary=enriched.get("summary") instanceof Map<?,?> existing?new LinkedHashMap<>((Map<String,Object>)existing):new LinkedHashMap<>();
+                    summary.put("configuration",job.request.configurationProvenance);enriched.put("summary",summary);result=enriched;
+                }
+                job.resultJson=result==null?"{}":JSON.writeValueAsString(result);
+                job.resultReceived=true;
+                Object console=safe.get("console");
+                finish(job,normalizeTerminal(status),code,console instanceof String consoleLine?consoleLine:null);
+            }
             default->append(job,"log",Map.of("message","Worker emitted an unrecognized event"));}
     }
     void recordProtocolLimit(Job job,att.server.api.internal.WorkerProtocol.Frame frame) throws Exception {
-        Map<String,Object> diagnostic=Map.of("code","ATT-SERVER-WORKER-EVENT-TOO-LARGE",
-                "summary","Worker event exceeded the UTF-8 protocol byte limit","eventType",frame.eventType(),
-                "sizeBytes",frame.sizeBytes,"limitBytes",frame.limitBytes);
-        job.protocolDiagnostic=diagnostic;job.diagnosticJson=JSON.writeValueAsString(diagnostic);
+        Map<String,Object> diagnostic=new LinkedHashMap<>(att.server.api.LimitDiagnostic.create(
+                "ATT-SERVER-WORKER-EVENT-TOO-LARGE","Worker event exceeded the UTF-8 protocol byte limit",
+                "worker.protocol.maxFrameBytes",frame.limitBytes,frame.sizeBytes,"worker.transport",
+                att.server.api.LimitOutcome.DATA_TRUNCATED,"transport",
+                "Reduce progress payloads or keep terminal results within the shared frame budget.",null));
+        diagnostic.put("eventType",frame.eventType());diagnostic.put("sizeBytes",frame.sizeBytes);diagnostic.put("limitBytes",frame.limitBytes);
+        job.protocolDiagnostic=diagnostic;
+        if(!hasPrimaryForJob(job))job.diagnosticJson=JSON.writeValueAsString(diagnostic);
         store.update(job);append(job,"diagnostic",diagnostic);
     }
     void recordWorkerExit(Job job,int exit) throws Exception {
-        Map<String,Object> fallback=Map.of("code","ATT-SERVER-WORKER-EXITED",
-                "summary","Worker exited before delivering a terminal result","exitCode",exit);
+        Map<String,Object> fallback=new LinkedHashMap<>(att.server.api.LimitDiagnostic.create(
+                "ATT-SERVER-WORKER-EXITED","Worker exited before delivering a terminal result",
+                "worker.processTermination",null,exit,"worker.process",att.server.api.LimitOutcome.EXECUTION_ERROR,
+                "execution","Review bounded worker diagnostics and heap pressure before changing process limits.",null));
+        fallback.put("exitCode",exit);
         Map<String,Object> diagnostic=new LinkedHashMap<>(job.protocolDiagnostic==null?fallback:job.protocolDiagnostic);
         if(job.protocolDiagnostic!=null)diagnostic.put("workerExit",fallback);
-        job.diagnosticJson=JSON.writeValueAsString(diagnostic);append(job,"diagnostic",diagnostic);
+        if(hasPrimaryForJob(job))append(job,"diagnostic",diagnostic);
+        else {job.diagnosticJson=JSON.writeValueAsString(diagnostic);append(job,"diagnostic",diagnostic);}
+    }
+    private boolean hasPrimaryForJob(Job job) {
+        return job.primaryDiagnosticJson!=null||(job.protocolDiagnostic==null&&hasPrimaryDiagnostic(job.diagnosticJson));
+    }
+    private void addSecondaryDiagnostic(Job job,Map<String,Object> diagnostic) {
+        if(job.secondaryDiagnostics.size()>=4)return;
+        Object code=diagnostic.get("code");
+        if(code instanceof String)for(Map<String,Object> existing:job.secondaryDiagnostics)if(code.equals(existing.get("code")))return;
+        job.secondaryDiagnostics.add(new LinkedHashMap<>(diagnostic));
+    }
+    private void attachJobDiagnostics(Map<String,Object> terminal,Job job) throws Exception {
+        Object rawSummary=terminal.get("summary");
+        if(!(rawSummary instanceof Map<?,?>))return;
+        @SuppressWarnings("unchecked") Map<String,Object> summary=(Map<String,Object>)rawSummary;
+        Object rawDiagnostics=summary.get("diagnostics");
+        Map<String,Object> diagnostics=rawDiagnostics instanceof Map<?,?>
+                ?new LinkedHashMap<>((Map<String,Object>)rawDiagnostics):new LinkedHashMap<String,Object>();
+        if(job.primaryDiagnosticJson!=null)diagnostics.put("primaryError",JSON.readValue(job.primaryDiagnosticJson,Map.class));
+        List<Map<String,Object>> notices=new ArrayList<>();
+        Object previous=diagnostics.get("secondaryNotices");
+        if(previous instanceof Iterable<?>)for(Object item:(Iterable<?>)previous)
+            if(item instanceof Map<?,?>&&notices.size()<2)notices.add(new LinkedHashMap<>((Map<String,Object>)item));
+        for(Map<String,Object> secondary:job.secondaryDiagnostics) {
+            if(notices.size()>=2)break;
+            Object code=secondary.get("code");boolean duplicate=false;
+            if(code instanceof String)for(Map<String,Object> notice:notices)if(code.equals(notice.get("code")))duplicate=true;
+            if(!duplicate)notices.add(new LinkedHashMap<>(secondary));
+        }
+        if(!notices.isEmpty())diagnostics.put("secondaryNotices",notices);
+        summary.put("diagnostics",diagnostics);
+    }
+    private boolean hasPrimaryDiagnostic(String diagnosticJson) {
+        if(diagnosticJson==null)return false;
+        try {
+            JsonNode value=JSON.readTree(diagnosticJson);String code=value.path("code").asText("");
+            return !code.isBlank()&&!code.startsWith("ATT-SERVER-WORKER-EVENT-TOO-LARGE")
+                    &&!code.startsWith("ATT-WORKER-EVENT-TRUNCATED")&&!code.startsWith("ATT-JOURNAL-EVENT-TRUNCATED");
+        } catch(Exception invalid){return false;}
+    }
+    private boolean hasClassifiedCause(String diagnosticJson) {
+        if(!hasPrimaryDiagnostic(diagnosticJson))return false;
+        try {
+            JsonNode value=JSON.readTree(diagnosticJson);
+            String outcome=value.path("outcome").asText("");
+            return att.server.api.LimitOutcome.EXECUTION_ERROR.name().equals(outcome)
+                    ||att.server.api.LimitOutcome.SUBMISSION_REJECTED.name().equals(outcome);
+        } catch(Exception invalid){return false;}
+    }
+    private Map<String,Object> loadResultWithProtocolWarning(Map<String,Object> original,Job job) throws Exception {
+        if(job.protocolDiagnostic==null&&job.journalDiagnostic==null&&job.primaryDiagnosticJson==null&&job.secondaryDiagnostics.isEmpty())return original;
+        Map<String,Object> result=new LinkedHashMap<String,Object>(original);
+        List<Map<String,Object>> diagnostics=new ArrayList<Map<String,Object>>();
+        Object existing=result.get("diagnostics");
+        if(existing instanceof Iterable<?>)for(Object item:(Iterable<?>)existing)if(item instanceof Map<?,?>&&diagnostics.size()<4)
+            diagnostics.add(new LinkedHashMap<String,Object>((Map<String,Object>)item));
+        if(hasPrimaryForJob(job)) {
+            String primary=job.primaryDiagnosticJson==null?job.diagnosticJson:job.primaryDiagnosticJson;
+            Map<?,?> current=JSON.readValue(primary,Map.class);
+            String code=String.valueOf(current.get("code"));
+            boolean present=false;for(Map<String,Object> item:diagnostics)if(code.equals(item.get("code")))present=true;
+            if(!present&&diagnostics.size()<4)diagnostics.add(new LinkedHashMap<String,Object>((Map<String,Object>)current));
+        }
+        for(Map<String,Object> secondary:job.secondaryDiagnostics)if(diagnostics.size()<4)diagnostics.add(new LinkedHashMap<>(secondary));
+        boolean workerNotice=false;
+        for(Map<String,Object> item:diagnostics)if("ATT-WORKER-EVENT-TRUNCATED".equals(item.get("code")))workerNotice=true;
+        if(job.protocolDiagnostic!=null&&!workerNotice&&diagnostics.size()<4) {
+            Number limit=job.protocolDiagnostic.get("limitBytes") instanceof Number?(Number)job.protocolDiagnostic.get("limitBytes"):null;
+            Number observed=job.protocolDiagnostic.get("sizeBytes") instanceof Number?(Number)job.protocolDiagnostic.get("sizeBytes"):null;
+            String eventType=job.protocolDiagnostic.get("eventType") instanceof String?(String)job.protocolDiagnostic.get("eventType"):"RESULT";
+            Map<String,Object> notice=att.server.api.LimitDiagnostic.create("ATT-WORKER-EVENT-TRUNCATED",
+                    "Large Worker event details were omitted from the protocol frame","worker.protocol.maxFrameBytes",limit,observed,
+                    "worker.protocol",att.server.api.LimitOutcome.DATA_TRUNCATED,"transport",
+                    "Inspect the retained report artifact for bounded details",null);
+            notice.put("eventType",eventType);diagnostics.add(notice);
+        }
+        boolean journalNotice=false;
+        for(Map<String,Object> item:diagnostics)if("ATT-JOURNAL-EVENT-TRUNCATED".equals(item.get("code")))journalNotice=true;
+        if(job.journalDiagnostic!=null&&!journalNotice&&diagnostics.size()<4)
+            diagnostics.add(new LinkedHashMap<String,Object>(job.journalDiagnostic));
+        if(!diagnostics.isEmpty())result.put("diagnostics",diagnostics);
+        return result;
     }
     private String normalizeTerminal(String s){return List.of("PASS","FAIL","ERROR","INVALID","CANCELLED").contains(s)?s:"ERROR";}
     String cancel(String id,String principal) throws Exception {
@@ -913,7 +1236,8 @@ final class ServerRuntime implements AutoCloseable {
                 String diagnosticJson=active.diagnosticJson!=null?active.diagnosticJson:(String)record.get("diagnosticJson");
                 Map<String,Object> out=new LinkedHashMap<>();
                 out.put("job",active.view());
-                out.put("result",resultJson==null?null:publicJson(id,resultJson));
+                out.put("result",resultJson==null?null:publicJobResult(id,active.command,active.status,
+                        active.exitCode==null?3:active.exitCode,resultJson));
                 out.put("diagnostic",diagnosticJson==null?null:publicJson(id,diagnosticJson));
                 return out;
             }
@@ -921,7 +1245,8 @@ final class ServerRuntime implements AutoCloseable {
         Map<String,Object> record=store.get(id);if(record==null)throw new NotFoundException();
         Map<String,Object> out=new LinkedHashMap<>();out.put("job",jobRecord(id));
         String resultJson=(String)record.get("resultJson"),diagnosticJson=(String)record.get("diagnosticJson");
-        out.put("result",resultJson==null?null:publicJson(id,resultJson));
+        out.put("result",resultJson==null?null:publicJobResult(id,String.valueOf(record.get("command")),String.valueOf(record.get("status")),
+                record.get("exitCode") instanceof Number?((Number)record.get("exitCode")).intValue():3,resultJson));
         out.put("diagnostic",diagnosticJson==null?null:publicJson(id,diagnosticJson));
         return out;
     }
@@ -1390,7 +1715,8 @@ final class ServerRuntime implements AutoCloseable {
     }
     Map<String,Object> submitRunDraft(JsonNode body,String principal,String persistedPrincipal) throws Exception {
         requireOnlyFields(body,"packageId","draftId","principal");
-        RunDraft draft=runDraft(required(body,"draftId"),principal,required(body,"packageId"));
+        String draftId=required(body,"draftId");requireReplayConfirmation(draftId,principal);
+        RunDraft draft=runDraft(draftId,principal,required(body,"packageId"));
         synchronized(draft) {
             if(runDrafts.get(draft.id)!=draft)throw new NotFoundException();
             WorkerRequest revisionRequest=inspectionRequest(draft.packageId,packageRoot(draft.packageId),draft.workerInput.path("environment").isTextual()?draft.workerInput.path("environment").asText():null);
@@ -1528,9 +1854,16 @@ final class ServerRuntime implements AutoCloseable {
     Map<String,Object> submitLoadDraft(JsonNode body,String principal,String persistedPrincipal) throws Exception {
         requireObject(body,"A JSON object is required");
         String draftId=required(body,"draftId");
+        requireReplayConfirmation(draftId,principal);
         if(QUICK_LOAD_DRAFT_ID.matcher(draftId).matches())return submitQuickLoadDraft(body,principal,persistedPrincipal);
         if(ADVANCED_LOAD_DRAFT_ID.matcher(draftId).matches())return submitAdvancedLoadDraft(body,principal,persistedPrincipal);
         throw new NotFoundException();
+    }
+    private void requireReplayConfirmation(String draftId,String principal) {
+        synchronized(replayLock) {
+            for(ReplayReview review:replayReviews.values())if(review.draftId.equals(draftId)&&review.principal.equals(principal))
+                throw new JobConflictException("ATT-SERVER-REPLAY-CONFIRMATION-REQUIRED","Job-based editor drafts must be submitted through their source Job confirmation intent.");
+        }
     }
     private void verifyQuickLoadDraftRevision(QuickLoadDraft draft) throws Exception {
         try { verifyPackageRevision(draft.packageId,draft.environment,draft.revisionDigest); }
@@ -1768,14 +2101,14 @@ final class ServerRuntime implements AutoCloseable {
     }
     private Map<String,Object> advancedLoadDraftView(AdvancedLoadDraftState draft) {
         Map<String,Object> view=new LinkedHashMap<String,Object>();view.put("draftId",draft.id);view.put("packageId",draft.packageId);
-        view.put("configuration",draft.preview.get("configuration"));view.put("environment",draft.environment);view.put("model",draft.model);
+        view.put("configuration",draft.preview.get("configuration"));view.put("environment",draft.environment);view.put("model",draft.model);view.put("revisionDigest",draft.revisionDigest);
         view.put("preview",draft.preview.get("preview"));view.put("previewYaml",draft.preview.get("previewYaml"));
         view.put("redacted",Boolean.TRUE.equals(draft.preview.get("redacted")));view.put("diagnostics",Collections.emptyList());
         view.put("expiresAt",draft.expiresAt.toString());return view;
     }
     private Map<String,Object> catalogLoadDraftView(CatalogLoadDraftState draft) {
         Map<String,Object> view=new LinkedHashMap<String,Object>();view.put("draftId",draft.id);view.put("packageId",draft.packageId);
-        view.put("configuration",draft.configuration);view.put("environment",draft.environment);view.put("model",draft.model);view.put("previewYaml",draft.previewYaml);
+        view.put("configuration",draft.configuration);view.put("environment",draft.environment);view.put("model",draft.model);view.put("revisionDigest",draft.revisionDigest);view.put("previewYaml",draft.previewYaml);
         view.put("redacted",Boolean.TRUE);view.put("diagnostics",Collections.emptyList());view.put("expiresAt",draft.expiresAt.toString());return view;
     }
     private void checkDraftCapacity(String principal) {
@@ -1856,6 +2189,12 @@ final class ServerRuntime implements AutoCloseable {
         if(maximumEnvelopeMs>TimeUnit.SECONDS.toMillis(limits.maxDurationSeconds))
             throw new InlineLoadLimitException("Scenario exceeds server.inlineLoad.maxDurationSeconds");
     }
+    static void validatePackageBackedReplayLoadLimits(ServerConfig.InlineLoad limits,Map<String,Object> scenario) {
+        validateScheduledLoadLimits(limits,scenario);
+        Object rootLoad=scenario.get("load");
+        if(rootLoad instanceof Map&&replayRootDurationEnvelopeMillis((Map<?,?>)rootLoad)>TimeUnit.SECONDS.toMillis(limits.maxDurationSeconds))
+            throw new InlineLoadLimitException("Scenario exceeds server.inlineLoad.maxDurationSeconds");
+    }
     private static long addWithinLimit(long total,long value,long maximum,String message) {
         if(value<0||total>maximum-value)throw new InlineLoadLimitException(message);
         return total+value;
@@ -1893,6 +2232,37 @@ final class ServerRuntime implements AutoCloseable {
             return Math.addExact(Math.addExact(durationMillis(load.get("warmup"),"warmup"),durationMillis(load.get("rampUp"),"rampUp")),
                     Math.addExact(durationMillis(load.get("duration"),"duration"),durationMillis(load.get("rampDown"),"rampDown")));
         } catch(ArithmeticException overflow) { return Long.MAX_VALUE; }
+    }
+    private static long replayRootDurationEnvelopeMillis(Map<?,?> load) {
+        try {
+            return Math.addExact(Math.addExact(replayRootDurationMillis(load.get("warmup"),"warmup"),replayRootDurationMillis(load.get("rampUp"),"rampUp")),
+                    Math.addExact(replayRootDurationMillis(load.get("duration"),"duration"),replayRootDurationMillis(load.get("rampDown"),"rampDown")));
+        } catch(ArithmeticException overflow) { return Long.MAX_VALUE; }
+    }
+    private static long replayRootDurationMillis(Object value,String field) {
+        // Retained root timing can be represented as normalized millisecond numbers; omitted phases are zero.
+        if(value==null)return 0L;
+        if(value instanceof Number) {
+            try {
+                long milliseconds=new java.math.BigDecimal(String.valueOf(value)).longValueExact();
+                if(milliseconds<0)throw new IllegalArgumentException("Validated replay Load "+field+" is invalid");
+                return milliseconds;
+            } catch(NumberFormatException|ArithmeticException invalid) {
+                throw new IllegalArgumentException("Validated replay Load "+field+" is invalid",invalid);
+            }
+        }
+        if(!(value instanceof String))throw new IllegalArgumentException("Validated replay Load "+field+" is invalid");
+        String text=((String)value).trim();
+        if(text.matches("[0-9]+"))return Long.parseLong(text);
+        java.util.regex.Matcher matcher=INLINE_LOAD_DURATION.matcher(text);
+        if(!matcher.matches())throw new IllegalArgumentException("Validated replay Load "+field+" is invalid");
+        try {
+            long amount=Long.parseLong(matcher.group(1));
+            long multiplier="ms".equals(matcher.group(2))?1L:"s".equals(matcher.group(2))?1000L:"m".equals(matcher.group(2))?60000L:3600000L;
+            return Math.multiplyExact(amount,multiplier);
+        } catch(NumberFormatException|ArithmeticException invalid) {
+            throw new IllegalArgumentException("Validated replay Load "+field+" is invalid",invalid);
+        }
     }
     private static String optionalText(JsonNode object,String name) {
         JsonNode value=object.get(name);if(value==null||value.isNull())return null;
@@ -2148,11 +2518,37 @@ final class ServerRuntime implements AutoCloseable {
             throw new DraftValidationException(diagnostics);
         }
         if("ATT-RESOURCE-RESPONSE-TOO-LARGE".equals(workerError))throw new InspectionResponseTooLargeException();
-        if("ATT-RESOURCE-LIMIT".equals(workerError))throw new InspectionCapacityException();
+        if("ATT-RESOURCE-LIMIT".equals(workerError))
+            throw new InspectionLimitException(safeResourceLimitDiagnostics(envelope.get("diagnostics")));
         if(workerError!=null)throw new IllegalStateException("Package inspection Worker failed: "+workerError);
         Object raw=envelope.get("inspection");if(!(raw instanceof Map))throw new IllegalStateException("Package inspection Worker returned an invalid response");
         JsonNode safe=projectInspectionPaths(JSON.valueToTree(att.server.api.internal.DiagnosticSanitizer.sanitizeValue(raw)),root,"");
         @SuppressWarnings("unchecked") Map<String,Object> result=JSON.convertValue(safe,Map.class);
+        return result;
+    }
+    private List<Map<String,Object>> safeResourceLimitDiagnostics(Object raw) {
+        List<Map<String,Object>> result=new ArrayList<Map<String,Object>>();
+        if(raw instanceof List<?>)for(Object value:(List<?>)raw)if(value instanceof Map<?,?>) {
+            Map<?,?> source=(Map<?,?>)value;
+            if(!"ATT-RESOURCE-LIMIT".equals(source.get("code")))continue;
+            Object summary=source.get("summary");
+            if(!(summary instanceof String))summary=source.get("message");
+            String safeSummary=summary instanceof String
+                    ?att.server.api.internal.DiagnosticSanitizer.redactText((String)summary)
+                    :"Package inspection exceeded a deterministic scan limit.";
+            String name=source.get("limitName") instanceof String?(String)source.get("limitName"):null;
+            Number configured=source.get("configuredLimit") instanceof Number?(Number)source.get("configuredLimit"):null;
+            Number observed=source.get("observed") instanceof Number?(Number)source.get("observed"):null;
+            Map<String,Object> diagnostic=att.server.api.LimitDiagnostic.create("ATT-RESOURCE-LIMIT",safeSummary,
+                    name,configured,observed,"package",att.server.api.LimitOutcome.SUBMISSION_REJECTED,"inspection",
+                    "Reduce the package scan scope or split the package into bounded units; this is a deterministic limit and does not need a retry.",null);
+            if(!diagnostic.isEmpty())result.add(diagnostic);
+            if(result.size()>=2)break;
+        }
+        if(result.isEmpty())result.add(att.server.api.LimitDiagnostic.create("ATT-RESOURCE-LIMIT",
+                "Package inspection exceeded a deterministic scan limit.","resourceInspector.scan",null,null,
+                "package",att.server.api.LimitOutcome.SUBMISSION_REJECTED,"inspection",
+                "Reduce the package scan scope or split the package into bounded units; this is a deterministic limit and does not need a retry.",null));
         return result;
     }
     private void cancelInspectionTask(InspectionTask task) {
@@ -2381,11 +2777,13 @@ final class ServerRuntime implements AutoCloseable {
                     response.put("errorCode",errorCode);
                     if(workerDiagnostic!=null) {
                         Map<String,Object> diagnostic=new LinkedHashMap<>();
-                        for(String key:List.of("code","summary","detail","field","file","suggestion","resourceId","sourceFile","packageId")) {
+                        for(String key:List.of("code","summary","detail","field","file","suggestion","resourceId","sourceFile","packageId",
+                                "limitName","scope","outcome","stage","remediationHint","artifactRef")) {
                             Object value=workerDiagnostic.get(key);
                             if(value instanceof String)diagnostic.put(key,value);
                         }
-                        for(String key:List.of("line","column","sourceColumn"))if(workerDiagnostic.get(key) instanceof Number)diagnostic.put(key,workerDiagnostic.get(key));
+                        for(String key:List.of("line","column","sourceColumn","configuredLimit","limit","observed","actual","usage"))
+                            if(workerDiagnostic.get(key) instanceof Number)diagnostic.put(key,workerDiagnostic.get(key));
                         Object summary=diagnostic.get("summary");
                         if(!(summary instanceof String)||((String)summary).isBlank()) {
                             Object message=workerDiagnostic.get("message");
@@ -3120,14 +3518,69 @@ final class ServerRuntime implements AutoCloseable {
     private void transition(Job j,String next) throws Exception {synchronized(j){if(j.terminal())return;j.status=next;if("RUNNING".equals(next))j.startedAt=Instant.now();store.update(j);append(j,"status",Map.of("jobId",j.id,"status",next));}}
     // terminal() shares this monitor; SSE also waits for JobEvents' result marker before closing.
     void finish(Job j,String status,int code) throws Exception {finish(j,status,code,null);}
-    void finish(Job j,String status,int code,String console) throws Exception {synchronized(j){if(j.terminal())return;j.status=status;j.exitCode=code;j.finishedAt=Instant.now();store.update(j);append(j,"status",Map.of("jobId",j.id,"status",status));Map<String,Object> result=new LinkedHashMap<>();result.put("jobId",j.id);result.put("status",status);result.put("exitCode",code);result.put("result",j.resultJson==null?null:publicJson(j.id,j.resultJson));if(console!=null&&!console.isBlank())result.put("console",console);append(j,"result",result);}}
+    void finish(Job j,String status,int code,String console) throws Exception {
+        synchronized(j) {
+            if(j.terminal())return;
+            if("load".equals(j.command)&&j.resultJson==null) {
+                List<Map<String,Object>> diagnostics=new ArrayList<>();
+                if(j.diagnosticJson!=null) {
+                    Object parsed=JSON.readValue(j.diagnosticJson,Object.class);
+                    if(parsed instanceof Map<?,?> diagnostic)diagnostics.add((Map<String,Object>)diagnostic);
+                }
+                for(Map<String,Object> secondary:j.secondaryDiagnostics)if(diagnostics.size()<4)diagnostics.add(new LinkedHashMap<>(secondary));
+                if(j.protocolDiagnostic!=null)diagnostics.add(new LinkedHashMap<String,Object>(j.protocolDiagnostic));
+                if(j.journalDiagnostic!=null)diagnostics.add(new LinkedHashMap<String,Object>(j.journalDiagnostic));
+                Map<String,Object> fallback=new LinkedHashMap<>();
+                fallback.put("executionId",j.id);fallback.put("status",status);fallback.put("exitCode",code);
+                fallback.put("diagnostics",diagnostics);fallback.put("summary",Map.of());
+                Map<String,Object> projected=att.server.api.LoadTerminalResult.projectOperationResult(fallback,status,code);
+                attachJobDiagnostics(projected,j);
+                j.resultJson=JSON.writeValueAsString(projected);
+            }
+            j.status=status;j.exitCode=code;j.finishedAt=Instant.now();store.update(j);
+            append(j,"status",Map.of("jobId",j.id,"status",status));
+            Map<String,Object> result=new LinkedHashMap<>();
+            result.put("jobId",j.id);result.put("status",status);result.put("exitCode",code);
+            result.put("result",j.resultJson==null?null:publicJson(j.id,j.resultJson));
+            if(console!=null&&!console.isBlank())result.put("console",console);
+            Map<String,Object> terminalEvent=append(j,"result",result);
+            if("load".equals(j.command)) {
+                Map<String,Object> worker=j.workerMetrics==null?new LinkedHashMap<>():new LinkedHashMap<>(j.workerMetrics);
+                Map<String,Object> sizes=new LinkedHashMap<>();
+                // Worker frame telemetry is carried outside the public result payload.
+                if(worker.get("loadResultTransport") instanceof Map<?,?> transport) {
+                    for(String key:new String[]{"workerFrameBytes","workerFrameLimitBytes","journalDataLimitBytes"})
+                        if(transport.get(key) instanceof Number)sizes.put(key,transport.get(key));
+                }
+                Object eventData=terminalEvent.get("data");
+                sizes.put("storedResultBytes",j.resultJson==null?0:j.resultJson.getBytes(StandardCharsets.UTF_8).length);
+                sizes.put("journalDataBytes",JSON.writeValueAsBytes(eventData).length);
+                sizes.put("journalEventBytes",JSON.writeValueAsBytes(terminalEvent).length);
+                Object sseData=publicEventData(eventData,config.dataDir.resolve("jobs").resolve(j.id).resolve("output"),packageRootForJob(j.id));
+                String ssePayload=JSON.writeValueAsString(sseData);
+                String sseEvent="id: "+terminalEvent.get("id")+"\nevent: result\ndata: "+ssePayload+"\n\n";
+                sizes.put("sseEventBytes",sseEvent.getBytes(StandardCharsets.UTF_8).length);
+                sizes.put("sseEventLimitBytes",JobEvents.MAX_EVENT_DATA_BYTES);
+                sizes.put("journalDataLimitBytes",JobEvents.MAX_EVENT_DATA_BYTES);
+                sizes.put("workerFrameLimitBytes",att.server.api.internal.WorkerProtocol.MAX_FRAME_BYTES);
+                worker.put("loadTerminalResult",sizes);
+                j.workerMetrics=worker;
+                store.update(j);
+            }
+        }
+    }
     private void finishQuietly(Job j,String status,int code,String diagnostic,String message){try{j.diagnosticJson=JSON.writeValueAsString(Map.of("code",diagnostic,"summary",message));append(j,"diagnostic",JSON.readValue(j.diagnosticJson,Map.class));finish(j,status,code);}catch(Exception ignored){j.status=status;j.exitCode=code;j.finishedAt=Instant.now();}}
-    private void append(Job j,String type,Map<String,?> data) throws Exception {
+    private Map<String,Object> append(Job j,String type,Map<String,?> data) throws Exception {
         Map<String,Object> payload=new LinkedHashMap<>();if(data!=null)data.forEach(payload::put);
         Object existing=payload.get("console");
         if(existing instanceof String line&&!line.isBlank()) payload.put("console",publishConsole(line));
         else {String line=lifecycleConsole(j,type,payload);if(line!=null&&!line.isBlank())payload.put("console",publishConsole(line));}
-        j.events.append(type,payload);
+        Map<String,Object> appended=j.events.append(type,payload);
+        Object bounded=appended.get("data");
+        if(bounded instanceof Map<?,?> eventData&&eventData.get("journalLimit") instanceof Map<?,?> notice
+                &&"ATT-JOURNAL-EVENT-TRUNCATED".equals(notice.get("code")))
+            j.journalDiagnostic=new LinkedHashMap<String,Object>((Map<String,Object>)notice);
+        return appended;
     }
     private static String lifecycleConsole(Job j,String type,Map<String,Object> payload) {
         String mode=executionMode(j==null?null:j.command);
@@ -3181,6 +3634,7 @@ final class ServerRuntime implements AutoCloseable {
             JsonNode publication=readArchiveStatus(statusFile);
             String state=publication.path("state").asText("FAILED");
             out.put("reason",publication.path("reason").asText(""));
+            if(publication.path("diagnostic").isObject())out.put("diagnostic",JSON.convertValue(publication.path("diagnostic"),Map.class));
             boolean quarantined=store.workerQuarantined(id);
             if(quarantined){state="FAILED";out.put("reason","worker_unverified");}
             if(Files.isRegularFile(archive)&&"READY".equals(state)) {
@@ -3192,6 +3646,7 @@ final class ServerRuntime implements AutoCloseable {
                     out.put("items",all.subList(start,end));out.put("nextOffset",end<all.size()?end:null);
                     out.put("primaryReports",all.stream().filter(item->item instanceof Map<?,?> row&&Boolean.TRUE.equals(row.get("report"))).toList());
                     out.put("archiveStatus","READY");out.put("omissions",data.get("omissions"));out.put("complete",data.get("complete"));
+                    if(data.get("diagnostics") instanceof List<?> notices&&!notices.isEmpty())out.put("omissionDiagnostics",notices);
                     out.put("archiveSizeBytes",archiveSize);
                 } catch(Exception corrupt) { state="FAILED"; }
             }
@@ -3222,21 +3677,25 @@ final class ServerRuntime implements AutoCloseable {
         artifactLifecycle.readLock().lock();
         try {
             if(store.get(id)==null)throw new NotFoundException();
-            if(store.workerQuarantined(id))throw new ArchiveUnavailableException();
+            if(store.workerQuarantined(id))throw new ArchiveUnavailableException("FAILED");
             Path archive=artifactArchivePath(id),status=archive.resolveSibling("archive-status.json");
-            if(!"READY".equals(readArchiveStatus(status).path("state").asText()))throw new ArchiveUnavailableException();
+            String archiveState=readArchiveStatus(status).path("state").asText("FAILED");
+            if(!"READY".equals(archiveState))throw new ArchiveUnavailableException(archiveState);
             ArtifactArchive.VerifiedRead verified=null;ArtifactDownload download=null;
             try { if(digests)download=ArtifactDownload.open(archive);else verified=ArtifactArchive.openVerified(archive,false); }
-            catch(Exception invalid){throw new ArchiveUnavailableException();}
+            catch(Exception invalid){throw new ArchiveUnavailableException("FAILED");}
             return new ArtifactRead(archive,verified,download);
         } catch(Exception failure){artifactLifecycle.readLock().unlock();artifactReadSlots.release();throw failure;}
     }
-    private void archiveStatus(String id,String state,String reason) throws Exception {
+    private void archiveStatus(String id,String state,String reason) throws Exception { archiveStatus(id,state,reason,null); }
+    private void archiveStatus(String id,String state,String reason,Map<String,Object> diagnostic) throws Exception {
         Path target=artifactArchivePath(id).resolveSibling("archive-status.json");
         Files.createDirectories(target.getParent());
         Path temporary=Files.createTempFile(target.getParent(),".archive-status-",".tmp");
         try {
-            Files.write(temporary,JSON.writeValueAsBytes(Map.of("state",state,"reason",reason,"manifestVersion",1)));
+            Map<String,Object> value=new LinkedHashMap<>();value.put("state",state);value.put("reason",reason);value.put("manifestVersion",1);
+            if(diagnostic!=null)value.put("diagnostic",diagnostic);
+            Files.write(temporary,JSON.writeValueAsBytes(value));
             try(var channel=java.nio.channels.FileChannel.open(temporary,java.nio.file.StandardOpenOption.WRITE)){channel.force(true);}
             Files.move(temporary,target,java.nio.file.StandardCopyOption.ATOMIC_MOVE,java.nio.file.StandardCopyOption.REPLACE_EXISTING);
         } finally { Files.deleteIfExists(temporary); }
@@ -3298,7 +3757,8 @@ final class ServerRuntime implements AutoCloseable {
                     archiveStatus(id,"ARCHIVING","");
                     if(!Files.isDirectory(output))throw new java.io.IOException("Worker output is unavailable");
                     cleanupArtifactStaging(archive.getParent());
-                    artifactPublisher.publish(output,archive,file->publicArtifact(id,file));
+                    // Preserve producer-approved bytes in the ZIP. Archive publication never redacts or rewrites.
+                    artifactPublisher.publish(output,archive,ServerRuntime::approvedArtifactBytes);
                 }
                 metrics.phase("publication");
                 archiveStatus(id,"READY","");
@@ -3312,7 +3772,7 @@ final class ServerRuntime implements AutoCloseable {
             } catch(Exception failure) {
                 boolean policy=failure instanceof IllegalArgumentException;
                 if(metrics!=null&&metrics.value.failurePhase==null)metrics.fail(policy?"policy_limit":"publication_failed");
-                finishArtifactFailure(id,policy?"policy_limit":"publication_failed",policy?"REJECTED_POLICY":"FAILED_IO");
+                finishArtifactFailure(id,policy?"policy_limit":"publication_failed",policy?"REJECTED_POLICY":"FAILED_IO",failure);
                 java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).warning("Artifact publication failed for Job "+id);
             } finally {
                 ArtifactMetricsRecorder.CURRENT.remove();
@@ -3333,7 +3793,21 @@ final class ServerRuntime implements AutoCloseable {
         }
     }
     private void finishArtifactFailure(String id,String reason,String auditOutcome) {
-        try {archiveStatus(id,"FAILED",reason);}catch(Exception ignored){}
+        finishArtifactFailure(id,reason,auditOutcome,null);
+    }
+    private void finishArtifactFailure(String id,String reason,String auditOutcome,Exception failure) {
+        Map<String,Object> diagnostic=null;
+        if(failure instanceof ArtifactArchive.LimitFailure){
+            ArtifactArchive.LimitFailure limited=(ArtifactArchive.LimitFailure)failure;
+            diagnostic=att.server.api.LimitDiagnostic.create("ATT-ARCHIVE-LIMIT-EXCEEDED","Artifact archive exceeded a configured publication limit",
+                    limited.limitName,limited.limit,limited.observed,"server.artifactPublication",att.server.api.LimitOutcome.ARCHIVE_FAILED,
+                    "publication","Reduce eligible artifact entry count or size and retry archive publication.","archive.zip");
+        }else if("policy_limit".equals(reason)){
+            diagnostic=att.server.api.LimitDiagnostic.create("ATT-ARCHIVE-POLICY-LIMIT","Artifact archive could not be published within its safe policy",
+                    "artifact.archivePolicy",null,null,"server.artifactPublication",att.server.api.LimitOutcome.ARCHIVE_FAILED,
+                    "publication","Reduce eligible artifact entry count or size and retry archive publication.","archive.zip");
+        }
+        try {archiveStatus(id,"FAILED",reason,diagnostic);}catch(Exception ignored){}
         try {store.artifactRecoveryNeeded(id,false);}catch(Exception ignored){}
         try {store.audit("SYSTEM","ARTIFACT_PUBLICATION",id,null,auditOutcome);}catch(Exception ignored){}
     }
@@ -3364,6 +3838,14 @@ final class ServerRuntime implements AutoCloseable {
     }
     private JsonNode publicJson(String id,String json) throws Exception {
         JsonNode node=JSON.readTree(json);Object safe=att.server.api.internal.DiagnosticSanitizer.sanitizeValue(JSON.convertValue(node,Object.class));node=JSON.valueToTree(safe);Path output=config.dataDir.resolve("jobs").resolve(id).resolve("output").toAbsolutePath().normalize();
+        return sanitize(node,output,packageRootForJob(id));
+    }
+    private JsonNode publicJobResult(String id,String command,String status,int exitCode,String json) throws Exception {
+        if(!"load".equals(command))return publicJson(id,json);
+        Map<?,?> stored=JSON.readValue(json,Map.class);
+        Map<String,Object> compact=att.server.api.LoadTerminalResult.projectOperationResult(stored,status,exitCode);
+        JsonNode node=JSON.valueToTree(att.server.api.internal.DiagnosticSanitizer.sanitizeValue(compact));
+        Path output=config.dataDir.resolve("jobs").resolve(id).resolve("output").toAbsolutePath().normalize();
         return sanitize(node,output,packageRootForJob(id));
     }
     private static boolean semanticLocation(String field) {
@@ -3402,7 +3884,52 @@ final class ServerRuntime implements AutoCloseable {
     static String safeMessage(Exception e){String m=att.server.api.internal.DiagnosticSanitizer.redactAbsolutePaths(att.server.api.internal.DiagnosticSanitizer.redactText(e.getMessage()));return m.isEmpty()?"ATT Worker execution failed":m.length()>500?m.substring(0,500):m;}
     JobEvents events(String id) throws Exception {if(!JOB_ID.matcher(id).matches()||store.get(id)==null)throw new NotFoundException();Job active=jobs.get(id);return active==null?new JobEvents(config.dataDir.resolve("jobs").resolve(id).resolve("events.jsonl"),config.maxEventsPerJob,eventCompactions):active.events;}
     boolean terminal(String id) throws Exception {Job active=jobs.get(id);if(active!=null)return active.terminal();Map<String,Object> row=store.get(id);if(row==null)throw new NotFoundException();return List.of("PASS","FAIL","ERROR","INVALID","CANCELLED").contains(row.get("status"));}
-    /** One-time export projection; no public GET reads trusted Worker files. */
+    /** Validate bounded text artifacts without modifying any Engine/Worker-generated byte. */
+    static byte[] approvedArtifactBytes(Path file) throws Exception {
+        final int limit=16*1024*1024;
+        byte[] bytes;
+        try(var input=Files.newInputStream(file)){bytes=input.readNBytes(limit+1);}
+        if(bytes.length>limit)throw new IllegalArgumentException("Artifact exceeds the safe text download limit (16 MiB)");
+        String text;
+        try {text=java.nio.charset.StandardCharsets.UTF_8.newDecoder()
+                .onMalformedInput(java.nio.charset.CodingErrorAction.REPORT)
+                .onUnmappableCharacter(java.nio.charset.CodingErrorAction.REPORT)
+                .decode(java.nio.ByteBuffer.wrap(bytes)).toString();}
+        catch(java.nio.charset.CharacterCodingException invalid){throw new IllegalArgumentException("Binary artifacts cannot be exported");}
+        if(text.indexOf(0)>=0)throw new IllegalArgumentException("Binary artifacts cannot be exported");
+        // Never alter producer bytes when creating ZIPs. Plain-text evidence is checked for
+        // credentials and host-local paths; generated HTML and structured JSON/YAML have their
+        // own syntax/presentation rules. Applying free-text path rewriting to structured
+        // payloads incorrectly classifies legitimate remotePath values and report scripts.
+        String name=file.getFileName().toString().toLowerCase(java.util.Locale.ROOT);
+        boolean html=name.endsWith(".html")||name.endsWith(".htm");
+        boolean structured=name.endsWith(".json")||name.endsWith(".yaml")||name.endsWith(".yml");
+        // Structured snapshots are already protected by the typed exportValue check below.
+        // Text heuristics are not idempotent on quoted YAML and may discard valid case.yaml.
+        if(!html && !structured && !att.server.api.internal.DiagnosticSanitizer.redactText(text).equals(text))
+            throw new IllegalArgumentException("Artifact contains unapproved sensitive text");
+        if((name.endsWith(".log")||name.endsWith(".txt")||name.endsWith(".md"))
+                && !att.server.api.internal.DiagnosticSanitizer.redactAbsolutePaths(text).equals(text))
+            throw new IllegalArgumentException("Artifact contains unapproved host-local paths");
+        if(name.endsWith(".json") || name.endsWith(".yaml") || name.endsWith(".yml")) {
+            try {
+                Object source;
+                if(name.endsWith(".json")) source=ARTIFACT_JSON.readValue(text,Object.class);
+                else {
+                    org.yaml.snakeyaml.LoaderOptions options=new org.yaml.snakeyaml.LoaderOptions();
+                    options.setAllowDuplicateKeys(false);options.setMaxAliasesForCollections(0);
+                    options.setNestingDepthLimit(64);options.setCodePointLimit(limit);
+                    source=new org.yaml.snakeyaml.Yaml(new ArtifactYamlConstructor(options)).load(text);
+                }
+                Object safe=att.security.SecretProtection.exportValue(source);
+                if(!java.util.Objects.equals(source,safe))
+                    throw new IllegalArgumentException("Artifact contains unapproved sensitive fields");
+            } catch(IllegalArgumentException rejected) {throw rejected;}
+              catch(Exception invalid) {throw new IllegalArgumentException("Invalid structured artifact cannot be exported");}
+        }
+        return bytes;
+    }
+    /** Legacy sanitized export projection; retained only for compatibility tests and callers. */
     byte[] publicArtifact(String id, Path file) throws Exception {
         final int limit=16*1024*1024;
         byte[] bytes;
@@ -3772,12 +4299,20 @@ final class ServerRuntime implements AutoCloseable {
     static final class QueueFullException extends RuntimeException {QueueFullException(String m){super(m);}}
     static final class JobConflictException extends RuntimeException {final String code;JobConflictException(String code,String message){super(message);this.code=code;}}
     static final class NotFoundException extends RuntimeException {}
+    static final class ReplayDraftExpiredException extends RuntimeException {}
+    static final class ReplayInputMissingException extends IllegalArgumentException {ReplayInputMissingException(String message){super(message);}}
     static final class ScheduleSourceChangedException extends IllegalArgumentException {
         final String storedRevision,currentRevision,policy;
         ScheduleSourceChangedException(String stored,String current,String policy){super("package-revision-changed");this.storedRevision=stored;this.currentRevision=current;this.policy=policy;}
     }
     static final class ScheduleConflictException extends RuntimeException {}
     static final class InspectionCapacityException extends RuntimeException {}
+    static final class InspectionLimitException extends RuntimeException {
+        final List<Map<String,Object>> diagnostics;
+        InspectionLimitException(List<Map<String,Object>> diagnostics) {
+            this.diagnostics=Collections.unmodifiableList(new ArrayList<Map<String,Object>>(diagnostics));
+        }
+    }
     static final class InspectionConfigurationException extends RuntimeException {
         final List<Map<String,Object>> diagnostics;
         InspectionConfigurationException(List<Map<String,Object>> diagnostics){this.diagnostics=Collections.unmodifiableList(new ArrayList<>(diagnostics));}
@@ -3790,7 +4325,12 @@ final class ServerRuntime implements AutoCloseable {
     static final class DraftCapacityException extends RuntimeException {}
     static final class InlineLoadDisabledException extends RuntimeException {}
     static final class ArtifactCapacityException extends RuntimeException {}
-    static final class ArchiveUnavailableException extends RuntimeException {}
+    static final class ArchiveUnavailableException extends RuntimeException {
+        final String archiveState;
+        ArchiveUnavailableException(String archiveState) {
+            this.archiveState=Set.of("PENDING","ARCHIVING","READY","FAILED").contains(archiveState)?archiveState:"FAILED";
+        }
+    }
     static final class InlineLoadLimitException extends IllegalArgumentException {
         InlineLoadLimitException(String message){super(message);}
     }

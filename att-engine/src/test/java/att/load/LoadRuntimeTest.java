@@ -128,6 +128,11 @@ class LoadRuntimeTest {
         assertTrue(snapshot.longValue("latencySampleCount") <= LoadMetrics.MAX_LATENCIES);
         assertEquals(LoadMetrics.MAX_BUCKETS, snapshot.longValue("timeSeriesBucketCapacity"));
         assertTrue(snapshot.buckets().size() <= LoadMetrics.MAX_BUCKETS);
+        assertEquals(LoadMetrics.MAX_LATENCIES + 102L, snapshot.longValue("completed"),
+                "bucket eviction and latency sampling must leave aggregate counters exact");
+        assertEquals(LoadMetrics.MAX_LATENCIES + 102L, snapshot.longValue("success"));
+        assertTrue(snapshot.longValue("timeSeriesBucketsEvicted") > 0L,
+                "rolling one-second buckets must report rollover without changing exact aggregates");
     }
 
     @Test void latencyReservoirKeepsSamplingAfterCapacityAndExactAggregatesStayExact() {

@@ -1,4 +1,4 @@
-<!-- att-doc-status: current release=4.2.4 -->
+<!-- att-doc-status: current release=4.2.5 -->
 
 # ATT Server 部署
 
@@ -8,9 +8,9 @@
 2. 將 package root 設於 allowed root 之下，並確保 Tomcat 服務帳戶可讀取。解壓後的 `$ATT_HOME/packages/default` 可直接註冊為 package root。
 3. 啟動前先建立 `server.dataDir`，並只允許 Tomcat 服務帳戶寫入。範例使用 `$ATT_HOME/data`；只要它與所有已註冊 package root 不相等、互不包含，即可使用。亦可使用 `/var/lib/att-server`。Server data 不可放入 package 內容。
 4. 將 `$ATT_HOME/config/att-server.example.yaml` 複製至 `$ATT_HOME/config/att-server.yaml` 或受保護的外部路徑，更新絕對路徑，並勿將憑證放入 package。升級時不可覆寫既有的 active config。
-5. 將 `att-server-4.2.4.war` 部署至 Tomcat 10.1+。Tomcat 可直接部署 packed WAR；隔離的 Worker 會從 `$ATT_HOME/lib` 載入版本相符的 `att-local-4.2.4.jar`。
+5. 將 `att-server-4.2.5.war` 部署至 Tomcat 10.1+。Tomcat 可直接部署 packed WAR；隔離的 Worker 會從 `$ATT_HOME/lib` 載入版本相符的 `att-local-4.2.5.jar`。
 
-Local archive 解壓後的目錄就是共享安裝及部署根目錄 `ATT_HOME`。此目錄包含 launcher 及 `lib/att-local-4.2.4.jar` 中共用的 Worker/Engine runtime；升級或 rollback 時，必須同時部署版本相符的 Local archive 與 Server WAR。Startup 會驗證 Worker JAR 版本及內嵌 Schema Registry；每個 Worker 處理請求前也會確認 Registry identity 與 Server 驗證過的 runtime 相符。每個 `ATT_HOME/lib` 只保留一個有版本號的 `att-local-<version>.jar`。可執行的 package 內容位於 `packages/<id>/`；Server state 位於另外設定的 `server.dataDir`。Archive 只包含 `config/att-server.example.yaml` 範本，不會包含 active 的 `config/att-server.yaml` 或 `data/` 目錄。
+Local archive 解壓後的目錄就是共享安裝及部署根目錄 `ATT_HOME`。此目錄包含 launcher 及 `lib/att-local-4.2.5.jar` 中共用的 Worker/Engine runtime；升級或 rollback 時，必須同時部署版本相符的 Local archive 與 Server WAR。Startup 會驗證 Worker JAR 版本及內嵌 Schema Registry；每個 Worker 處理請求前也會確認 Registry identity 與 Server 驗證過的 runtime 相符。每個 `ATT_HOME/lib` 只保留一個有版本號的 `att-local-<version>.jar`。可執行的 package 內容位於 `packages/<id>/`；Server state 位於另外設定的 `server.dataDir`。Archive 只包含 `config/att-server.example.yaml` 範本，不會包含 active 的 `config/att-server.yaml` 或 `data/` 目錄。
 
 Server 依次尋找 JVM property `-Datt.server.config`、環境變數 `ATT_SERVER_CONFIG`，再尋找 `$ATT_HOME/config/att-server.yaml`。最後一個路徑的 `ATT_HOME` 先取自 `-Datt.home`，再取自 `ATT_HOME` 環境變數。若選定的 config 不存在、不可讀或無效，Server 會在診斷中指出其路徑並停止啟動，不會改用其他來源。沒有明確來源或可用的預設 config 時，啟動錯誤會提供設定指引。
 
@@ -42,4 +42,4 @@ att/                              # ATT_HOME
 
 ## 發行與相容性
 
-Server binary 會以獨立的 `att-4.2.4-server.tar.gz` 發佈，內含 `server/att-server-4.2.4.war`（ATT application code 已合併至 `WEB-INF/lib/att-server-4.2.4.jar`）及部署指南。Local CLI 位於 `att-4.2.4-local.tar.gz`，其 `lib/att-local-4.2.4.jar` 提供共用 Worker/Engine runtime；Server 會載入相同版本的 library。Tomcat 提供 HTTP listener 及 Servlet API。Server 需要 Java 17；CLI、Engine 及 Worker 維持 Java 8 目標。
+Server binary 會以獨立的 `att-4.2.5-server.tar.gz` 發佈，內含 `server/att-server-4.2.5.war`（ATT application code 已合併至 `WEB-INF/lib/att-server-4.2.5.jar`）及部署指南。Local CLI 位於 `att-4.2.5-local.tar.gz`，其 `lib/att-local-4.2.5.jar` 提供共用 Worker/Engine runtime；Server 會載入相同版本的 library。Tomcat 提供 HTTP listener 及 Servlet API。Server 需要 Java 17；CLI、Engine 及 Worker 維持 Java 8 目標。

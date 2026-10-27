@@ -1,7 +1,7 @@
-# ATT v4.2.4 使用手冊與參考
+# ATT v4.2.5 使用手冊與參考
 
 Author: Jeffrey + ChatGPT
-Version: 4.2.4
+Version: 4.2.5
 Status: 規範性使用者文件；由模組化來源自動生成
 
 <!-- GENERATED FILE. Edit docs/reference*/ modules, not this combined output. -->
@@ -101,7 +101,7 @@ Status: 規範性使用者文件；由模組化來源自動生成
   - [API paths](#api-paths)
 - [CLI 參考](#cli-參考)
   - [選擇命令](#選擇命令)
-  - [ATT 4.2.4 的可用性](#att-424-的可用性)
+  - [ATT 4.2.5 的可用性](#att-425-的可用性)
   - [編譯 source checkout](#編譯-source-checkout)
   - [按任務查閱語法、option 和範例](#按任務查閱語法option-和範例)
   - [透過 CLI 使用 ATT Server](#透過-cli-使用-att-server)
@@ -938,9 +938,9 @@ RUN 是 Case、選定 Cases 或單一 Template/Flow/Tool 的功能執行模型�
 
 ### 統一 RUN 與排程
 
-<!-- att-doc-status: current release=4.2.4 -->
+<!-- att-doc-status: current release=4.2.5 -->
 
-ATT 4.2.4 將功能性單次執行統一為 **RUN**，支援 Case、Template、Flow、Tool，以及所選 Case 批次。**Debug** 是 RUN 的診斷選項。**LOAD** 保留效能引擎、負載控制和專用報告。
+ATT 4.2.5 將功能性單次執行統一為 **RUN**，支援 Case、Template、Flow、Tool，以及所選 Case 批次。**Debug** 是 RUN 的診斷選項。**LOAD** 保留效能引擎、負載控制和專用報告。
 
 已發行的 Local CLI 保留其 interface-specific 相容邊界：run verb 選取 workbook Case，standalone debug 執行一個 Template、Flow 或 Tool。ATT Remote 保留舊版 Server command。此共用 RUN model 不代表 proposed vNext CLI grammar 已發行；請參閱[規劃中的 vNext page](interfaces/cli/vnext-proposed.zh.md)。
 
@@ -1027,7 +1027,7 @@ LOAD 排程繼續支援套件 scenario 路徑及已驗證 Load draft，沿用 sc
 
 #### 遷移既有用戶端
 
-| 既有介面 | 4.2.4 對應 |
+| 既有介面 | 4.2.5 對應 |
 |---|---|
 | CLI `validate`、`run`、`report` | 保留驗證、Case RUN、報告命令 |
 | CLI `--suite`、`--suite-dir`、`--case`、`--tag`、`--rerun-failed` | 保留選取行為；Server 批次使用 `selection` |
@@ -1036,17 +1036,21 @@ LOAD 排程繼續支援套件 scenario 路徑及已驗證 Load draft，沿用 sc
 | `/load-schedules`、`jobType:load/debug` | 共用 scheduler 相容路徑，保留既有定義 |
 | `/jobs/...`、既有 Studio 工作/結果連結 | 保留共用 history、取消、事件與結果路徑 |
 
-4.2.4 沒有移除舊 endpoint。`GET /api/v1/version` 公開 `unifiedRunVersion:att-execution/v1`。新 Studio Resource表單在舊 Server 缺少此能力時，可使用舊 Debug draft。統一 Case/batch draft 需要 4.2.4；舊部署可繼續使用 Explorer Case 操作。Server/Worker 應配套部署，舊 Worker 不支援Resource RUN dispatch。
+4.2.5 沒有移除舊 endpoint。`GET /api/v1/version` 公開 `unifiedRunVersion:att-execution/v1`。新 Studio Resource表單在舊 Server 缺少此能力時，可使用舊 Debug draft。統一 Case/batch draft 需要 4.2.5；舊部署可繼續使用 Explorer Case 操作。Server/Worker 應配套部署，舊 Worker 不支援Resource RUN dispatch。
 
 持久化使用既有 H2 table 的附加 JSON 欄位，不改寫舊 LOAD row。降版前先停止排程、匯出新定義、移除 RUN/單次定義，再還原升級前資料庫備份，避免舊 scheduler 把 RUN 當成 LOAD。保留的 artifact 與資料庫 metadata 分開儲存。
 
-#### 重新執行 Job 或建立排程
+#### Replay 與從 Job 建立新執行
 
-在 **Jobs**、**Job Details** 或 **LOAD Catalog → Recent LOAD Jobs** 選擇 **Rerun** 或 **Schedule / Reschedule…**。Server 會重新驗證保留的執行定義，再顯示確認內容。檢查 package、environment、RUN target 或精確 Case 選擇、Debug 選項，或 LOAD scenario 與負載參數。**Confirm rerun** 建立獨立的新 Job，並開啟其 Details；原本的結果與證據保持完整。
+在 **Jobs**、**Job Details** 或 **LOAD History** 選擇 **Rerun with same settings** 或 **Configure & Rerun**。兩者都會建立一個獲授權的 Server draft，並在執行前依目前 Package/Environment 驗證。標準 RUN 或 LOAD editor 只會收到不透明的 `draftRef`，進入後再向 Server 取得 sanitized 定義；定義不會放入 URL 或 browser storage。
 
-**Continue to New Schedule** 開啟統一的新增排程表單。設定名稱、頻率、時區、重疊執行上限及啟用狀態，檢查執行時間預覽後儲存。單純開啟表單不會建立或修改排程。**View / Edit originating schedule** 開啟仍存在且獲授權的來源排程；這與建立新排程或立即重跑是不同操作。
+**Rerun with same settings** 預設使用 **Use current Package**：沿用 Job 中安全保留的執行參數，依目前 Package 重新解析 Target 與設定，再顯示原始／目前 revision 及驗證結果供確認。它不會在無提示下以最新 YAML defaults 取代保留的 Scenario。**Require original revision (strict)** 是重現選項。Revision 不符時回傳 `ATT-SERVER-REPLAY-REVISION-CONFLICT`，並提供 **Review with current Package**；儲存的 metadata 無法還原已缺失的歷史 source bytes。`server.scheduling.packageChangePolicy` 及 Schedule 層級的 `ignore` 只套用於排程執行，不會控制手動 Rerun。
 
-Replay 使用先前的安全 snapshot，並採用 `revisionPolicy: reject-package-changes`，不會自動改用最新 package 檔案。Package、runtime configuration 或相依 Resource變更後，請重新設定並驗證新執行。新保留的安全定義可在 draft 到期及 Server 重啟後使用；確認 draft 的有效期為十分鐘，到期後須重新建立。Server 會再次檢查目前帳戶、package、environment、schema、功能開關及執行限制。
+**Configure & Rerun** 會在一般 editor 預填支援且安全保留的設定。可修改 RUN Target／Case selection、options 與安全 inputs，或 LOAD timing、workloads、模型專屬 pacing、concurrency、thresholds、evidence 及安全 testdata selection。**Validate** 會以有界 typed overrides 建立新 review intent；**Review changes** 顯示前後值、LOAD phases 總和、目前 revision，以及 configured arrival rate 與 measured TPS 的差異。按 **Run** 會以 `rerunOfJobId` 建立獨立 Job；Cancel／Back 不會修改來源 Job、報告、Schedule 或 package files。Package-file-backed LOAD 使用安全保留的 package-relative source route，不套用僅 inline draft 使用的 duration 上限。
+
+Schedule 維持獨立流程：**Edit existing schedule**、**Create new schedule** 或 **Run now**。既有排程 `strict`／`pause`／`ignore` 語意不變。
+
+新保留的 execution spec 使用 `att-job-execution/v2`，parser 仍接受 v1。Replay draft 使用 `att-job-replay-draft/v1`。Draft reference 和 confirmation intent 綁定目前 principal，十分鐘後到期；兩者存在 Server 記憶體，Server restart 後會失效，需重新從來源 Job 建立。沒有安全保留定義的來源 Job、缺少敏感輸入、draft 過期、Resource 移除、schema 無效及容量拒絕會使用不同錯誤回應。系統不會從 log 或 artifact 重建秘密、Worker transport data、host root 或不安全路徑。
 
 未保留執行定義的歷史 Job 會顯示 **Rerun unavailable for this historical job**。僅驗證的 Job、安全保留失敗或包含已分類敏感輸入的 Job，不能進行精確 replay。含有原始 overrides 或未解析 `rerunFailed` 歷史選擇的舊式直接提交，須先建立新的驗證 draft 才能安全保留。請設定新執行，並透過正常的受保護輸入流程補充憑證。不可從 log、artifact 或已遮罩預覽重建執行。安全定義上限為 256 KiB，不包含 Worker transport 欄位及主機根目錄。
 
@@ -1054,17 +1058,18 @@ Job lifecycle API 在 `/api/v1` 下提供以下 endpoint：
 
 | Method 與 path | 結果 |
 | --- | --- |
-| `GET /jobs/{jobId}/replay` | 已授權的安全定義、不可用原因、revision policy，以及仍可用的來源排程連結。 |
-| `POST /jobs/{jobId}/replay-draft`，body 為 `{}` | 重新驗證的 RUN/LOAD draft 與不透明的 `intentId`；不會建立執行或排程。 |
-| `POST /jobs/{jobId}/rerun`，body 為 `{"intentId":"...","confirm":true}` | 回傳獨立新 Job、HTTP 202 及 `Location`；相同 intent 的重試回傳已接受的 Job。 |
+| `GET /jobs/{jobId}/replay` | 已授權的安全定義及不可用原因。 |
+| `POST /jobs/{jobId}/replay-draft`，body 為 `{"sourcePolicy":"current"}` 或 `{"sourcePolicy":"strict","overrides":{...}}` | 驗證 `att-job-replay-draft/v1`、不透明 `draftRef` 及確認 `intentId`；不建立 Job 或 Schedule。省略 `sourcePolicy` 時沿用舊版 strict 行為。 |
+| `GET /jobs/{jobId}/replay-draft/{draftRef}` | 綁定 principal 的 sanitized editor 定義及目前 configuration provenance；route 不包含定義。 |
+| `POST /jobs/{jobId}/rerun`，body 為 `{"intentId":"...","confirm":true,"sourcePolicy":"current"}` | 建立獨立 Job，回傳 HTTP 202 及 `Location`；相同 intent 重試時回傳已接受的 Job。 |
 
-在正常的 `POST /schedules` 建立合約中，使用回傳的 `draftId`、package、environment 及標準 `executionType: run | load`。Debug 維持 RUN 的 `options.debug`。重跑 Job 提供 `rerunOfJobId`；由 Job 建立的排程保留獲授權的 `sourceJobId` 來源資訊。Replay 僅限提交者身分或已保留的排程執行擁有者。已刪除或無權存取的 Job 回傳 404；來源過期回傳 409；容量及驗證錯誤沿用正常提交合約。若已接受 intent 的輸出 Job 被刪除，再次使用該 intent 會安全失敗，不會新增執行。
+Schedule 使用一般已驗證 draft 合約。RUN Debug 仍使用 `options.debug`。Replay 限制於提交者或保留的排程執行 owner。若 Package 在驗證後改變，回傳 `ATT-SERVER-REPLAY-DRAFT-STALE`；draft 過期或 Server restart 後遺失則回傳 `ATT-SERVER-REPLAY-DRAFT-EXPIRED`；容量限制回傳 HTTP 429。重用已接受 intent 會回傳同一 Job。
 
 ### Run 模式
 
-<!-- att-doc-status: current release=4.2.4 -->
+<!-- att-doc-status: current release=4.2.5 -->
 
-ATT 4.2.4 Local CLI 的 run command 是 legacy Case adapter，會執行 Workbook 中選取的 authored Testcase。較完整的 functional model 與 direct resource target 定義於 [Unified RUN](reference.zh/execution-modes/unified-run.md)。
+ATT 4.2.5 Local CLI 的 run command 是 legacy Case adapter，會執行 Workbook 中選取的 authored Testcase。較完整的 functional model 與 direct resource target 定義於 [Unified RUN](reference.zh/execution-modes/unified-run.md)。
 
 ```sh
 ./att.sh run --all
@@ -1081,6 +1086,8 @@ Run evidence 直接寫到 `output/<RunID>/`。完成後才發布 `run.yaml`、Ca
 Status aggregation 的嚴重度為 ERROR > INVALID > FAIL > PASS > SKIPPED。Process exit code：`0` 表示沒有失敗狀態、`1` 表示測試/assertion failure、`2` 表示 command/configuration/validation 無效、`3` 表示 runtime/infrastructure error。
 
 selector 和 option 請看 [CLI Reference](reference.zh/cli.md)，Stage 和 Action control 請看 [Reliability and Execution Control](reference.zh/reliability-execution-control.md)，artifact contract 請看 [Results, Reports, and Evidence](reference.zh/results-reports-evidence.md)。
+
+在 Studio 從 Job 選擇 **Configure & Rerun**，會把安全保留的 RUN target 或 exact Case selection、environment、Debug／fail-fast options 及符合安全條件的 typed inputs 載入此標準 RUN editor。修改後需依目前 Package 驗證，再檢查並提交。Source policy 與 API 行為見 [Job replay 與建立新執行](reference.zh/execution-modes/unified-run.md)。
 
 ### Standalone Debug
 
@@ -1506,9 +1513,13 @@ evidence.resources.output 支援 inherit（預設）或 none。none 停用可選
 
 ATT 在 run root 寫入有界 load-summary.json/yaml 與 self-contained report/index.html。Report 對 retained execution 顯示 EXEC.ID、workload/target identity、status、timing；有保留 case.log 時提供 link。Aggregate latency percentile 由 aggregate latency collector 計算，不會平均 workload percentile。
 
+直接 Engine／CLI `OperationResult` 輸出仍保留舊版完整 summary 詳細格式；其 schema 定義仍存於 `schemas/history/`。`LoadReportWriter` 輸出的 archived report 使用新增欄位的 `att-load-summary/v1.3`，並將大型 aggregate／per-workload metric collection 移至相對路徑 `details/v1/` sidecar，由 `details/v1/manifest.json` 引用。Inline collection 最多顯示 32 項 preview；每個 sidecar chunk 最多 4 MiB，sidecar 集合上限為 100 MiB／9,000 個檔案，完整 report output 上限為 120 MiB，每個主要 report 檔案最多 16 MiB。Aggregate counters 和 thresholds 維持精確。Server 代理 Job Results 則在 `result.summary` 使用 `att-load-terminal-result/v1`：執行結果、performance verdict、有界 aggregate counters、workload／threshold 預覽、主要診斷及 detail/archive 狀態。精簡 summary 上限為 32 KiB；量度終端 journal 和 SSE envelope 後均低於 48 KiB，並低於不變的 64 KiB journal event-data 上限。Worker frame 的 1 MiB 上限也維持不變。LOAD scheduling、virtual-user 和 arrival-rate 語義不變。
+
+完整 buckets、failure samples、workload／threshold 細節及 evidence 仍保存在 `load-summary.json`、`load-summary.yaml`、`report/index.html` 及版本化 sidecar，Server 只透過現有授權 artifact archive routes 提供。Studio 先顯示精簡結果；開啟 Results 才載入 evidence/workload preview，開啟 Metrics 才載入 metric-series sidecar。初始 Job Details 不會請求 artifact。Archive availability 與執行結果獨立；`PENDING`、`ARCHIVING`、`READY`、`FAILED` 或詳細資料 omitted 均不會改變終端狀態或 exit code。ERROR 和 INVALID 會優先保留真實 runtime/preparation/validation 原因，而非 Worker／Journal truncation 或 archive 診斷。
+
 Load v1.9 新增 `all`、`measured`、`steady` 三個 event-time window。`measured` 從 warm-up 後開始，包含 ramp-up、steady、ramp-down；`steady` 只涵蓋配置的穩態 duration。HTML report 預設顯示 `steady`，並可切換其他 window。Scheduled、started、completed rate 依各 event timestamp 及配置 window duration 計算，因此 `startedRate` 仍按 event time 計算。`admissionRate` 則使用相同的 scheduled cohort：分子是該 window 內排程且在 run 結束前已開始的 arrival，分母是該 window 內全部排程 arrival；run 結束仍未開始的 arrival 視為未准入。Latency percentile 和 outcome count 依 scheduled cohort 計算，因此 drain 完成的 iteration 仍屬於其 scheduled phase。既有 top-level metric 名稱及 legacy 語義仍保留。
 
-巢狀 `thresholds.steady` 和 `thresholds.overall` 分別對 steady 與 all-execution window 評估。原有 top-level threshold 保持先前 measured-run 語義。Window 不完整或無法評估時回報 `NOT_EVALUATED`，不視為 performance pass。Report 會把 execution status 與 performance verdict 分開，並顯示 percentile sample／observation count，讓稀疏估算可被辨識。Summary schema 為 `att-load-summary/v1.2`；新 window 與 preparation 欄位對 reader 而言為 optional，legacy summary 欄位維持不變。
+巢狀 `thresholds.steady` 和 `thresholds.overall` 分別對 steady 與 all-execution window 評估。原有 top-level threshold 保持先前 measured-run 語義。Window 不完整或無法評估時回報 `NOT_EVALUATED`，不視為 performance pass。Report 會把 execution status 與 performance verdict 分開，並顯示 percentile sample／observation count，讓稀疏估算可被辨識。直接 Engine／CLI summary 使用 legacy summary contract (schema under `schemas/history/`)；archived report 使用新增 `detailManifestPath` 和 workload sidecar references 的 `att-load-summary/v1.3`。
 
 Summary 的 `thresholds` object 中，`status` 和 `performanceVerdict` 是 authoritative tri-state 欄位，值為 `MET`、`NOT_MET` 或 `NOT_EVALUATED`。Optional `legacyPassed` boolean 維持舊有 `passed()` 語義：已配置但無法評估的 threshold 為 false，未配置 threshold 時為 true。Consumer 應使用 tri-state 欄位，區分 evidence 不完整與 threshold 未達標。
 
@@ -1518,9 +1529,9 @@ Summary 會將 generator observation 與 SUT outcome 分開。`metrics.generator
 
 `metrics.windowMetrics.timeSeries.points` 全執行序列最多保留 2,048 個有資料的 time bin，初始寬度為 1,000 ms。資料 bin 超過容量時，ATT 會合併相鄰 bin，並以 power-of-two coarsening 將 bucket 寬度加倍。系統不會淘汰歷史 bin，因此較長的 run 會以較低的時間解析度保留歷史資料。`metrics.windowMetrics.timeSeries.windowSeries.measured.points` 和 `metrics.windowMetrics.timeSeries.windowSeries.steady.points` 是各自獨立的序列，各自最多 2,048 個 bin。它們按 configured window 起點對齊，初始寬度為 1,000 ms 與 window duration 兩者中較小者，並會在 window boundary 截短最後一個 partial bucket；它們使用相同的 coarsening 和不淘汰歷史資料政策。Compatibility `metrics.buckets` 是獨立的 legacy series：使用 circular buffer 保留最新 4,096 個一秒 bucket，並淘汰較舊項目。ATT 不會平均 workload percentile 來計算整體 percentile。
 
-新增的 Load summary telemetry 欄位在 `att-load-summary/v1.2` 下屬 optional；目前 writer 會輸出這些欄位，加入 telemetry 前產生的 summary 仍然有效。
+Load telemetry 欄位在舊版直接 summary contract（schema under `schemas/history/`）下仍屬 optional；archived report 使用 `att-load-summary/v1.3` 及 sidecar references。Server Job Results 使用另一個版本化契約 `att-load-terminal-result/v1`；需要完整 metrics 的 consumer 應在 archive 顯示 READY 後跟隨 `detailManifestPath` 及相對 chunk references。
 
-Sampling limits、metrics 解讀方式和 maintainer verification 請看 [Load Generator Telemetry](system-design/load-telemetry.zh.md)。
+Sampling limits、metrics 解讀方式和 maintainer verification 請看 [Load Generator Telemetry](system-design/load-telemetry.zh.md) 及[精簡 LOAD 終端結果](system-design/load-terminal-result.zh.md)。執行確定性的短時間對照與模擬長時間 transfer benchmark：`mvn -q -o -pl att-server -am -Dtest=ServerRuntimeLoadTerminalResultTest#benchmarkShortAndSyntheticLongMultiWorkloadTransferSizes -Datt.skipFrontendUnitTests=true -Dsurefire.failIfNoSpecifiedTests=false test`。該測試會建構等同 30–60 分鐘的多 workload 結果，不會真的執行長時間 LOAD。
 
 Root thresholds 只套用於 aggregate run；workload thresholds 只套用於個別 workload，不會從 root 繼承。Threshold 失敗回傳 FAIL/exit 1。設定或 target 無效回傳 exit 2；runtime/infrastructure error 回傳 ERROR/exit 3。Generator drop 不屬於 SUT error。
 
@@ -1610,6 +1621,8 @@ Catalog inspection 每頁最多 100 項，亦受序列化 response 大小限制�
 Builder 以精簡表格顯示 users/rates、bindings、weights。Workload、mix、Target、common settings 使用 Save/Cancel modal；Cancel/Escape 捨棄暫存修改。每個 Target 的 typed sidecar inputs/vars/Tool arguments 獨立載入；優先次序為 template policy、safe sidecar defaults、explicit binding values、適用的 CLI overrides。Debug-local testdata imports 不會自動提升，須明確宣告 Load testdata。Binding 亦可指定 workload inputs/vars/testdata selection。Business inputs/vars 按 key 合併，優先順序為 safe sidecar defaults、Target binding、workload binding；後者覆蓋同名 key，其餘 key 保留。Studio validation 及編輯會保留各 workload 的 timing、ramps、execution settings 與 ranged think time。
 
 Validate 經由共享 Engine composer 建立完整 `att-load/v1.9` immutable draft；Review 顯示 Server-normalized redacted YAML。儲存修改或更改 Environment 會使驗證失效；提交時再次檢查 package/source revision。Run 前確認 traffic；Schedule 沿用相同 draft、權限、limits、expiry 和 revision policy。不使用 browser storage 或寫入 package source。
+
+LOAD Job 的 **Configure & Rerun** 使用此標準 editor 及 Server 發出的 `draftRef`。它會預填安全保留的 scenario、environment、workload IDs/mix、model、pacing、timing phases、thresholds、evidence 及可安全保留的 inputs。修改共用 timing envelope 與模型專屬欄位後，需依目前 Package 驗證並檢查差異。Current-package rerun 不會無提示重載最新 YAML defaults，也不會把 Arrival Rate 轉成 Virtual Users。File-backed LOAD replay 會沿用 package-relative source route，不套用只供 inline draft 使用的 duration 上限；詳見 [Job replay](reference.zh/execution-modes/unified-run.md)。
 
 ```bash
 ./att.sh load --list-templates --format json
@@ -2847,7 +2860,7 @@ python tools/migrate_package_config.py --config config/config.yaml --server-conf
 
 ## CLI 參考
 
-<!-- att-doc-status: current release=4.2.4 -->
+<!-- att-doc-status: current release=4.2.5 -->
 
 
 ### 選擇命令
@@ -2867,11 +2880,11 @@ python tools/migrate_package_config.py --config config/config.yaml --server-conf
 | `clean` | 刪除文檔化的 ATT 生成輸出 | 否 |
 | `remote` | 透過 ATT Server REST/SSE API 提交及管理工作 | ATT Server |
 
-上表列出 ATT 4.2.4 CLI command。獨立的 vNext proposal 尚未包含在此 release。
+上表列出 ATT 4.2.5 CLI command。獨立的 vNext proposal 尚未包含在此 release。
 
-### ATT 4.2.4 的可用性
+### ATT 4.2.5 的可用性
 
-本 Reference 說明 ATT 4.2.4 已發行的 CLI。vNext grammar 是獨立的[規劃中 proposal](interfaces/cli/vnext-proposed.zh.md)，並非目前 command interface。本版本繼續支援 legacy command。
+本 Reference 說明 ATT 4.2.5 已發行的 CLI。vNext grammar 是獨立的[規劃中 proposal](interfaces/cli/vnext-proposed.zh.md)，並非目前 command interface。本版本繼續支援 legacy command。
 
 ### 編譯 source checkout
 
@@ -3130,7 +3143,7 @@ HTML 發佈前經 parser 清理：保留已核准的 relative links、inline sty
 
 #### Manifest 及 Resource limits
 
-`export-manifest-v1.json` 使用 manifest version `1`、policy `att-export-safe-text-v2`。每個 entry 記錄 logical path、media type、byte size、SHA-256、report/preview eligibility、classification 及 publication decision。`complete` 和彙總 `omissions` 不包含被拒絕的檔名或值。ZIP、preview 及解壓檔案使用完全相同的最終 bytes；GET 不會再次獨立遮罩。
+`export-manifest-v1.json` 使用 manifest version `1`、policy `att-export-approved-bytes-v1`（仍可讀取舊版 `att-export-safe-text-v2` ZIP）。ZIP 完整保留 producer 輸出的核准 bytes；敏感值必須在 artifact 生成前完成遮罩。每個 entry 記錄 logical path、media type、byte size、SHA-256、report/preview eligibility、classification 及 publication decision。`complete` 和彙總 `omissions` 不包含被拒絕的檔名或值。ZIP、preview 及解壓檔案使用完全相同的最終 bytes；GET 不會再次獨立遮罩。
 
 Inventory 不受 `server.maxArtifacts` 限制：最多 50,000 filesystem candidates、深度 64、10,000 已發佈 entries、每項 16 MiB、總 bytes 128 MiB、manifest 8 MiB。超出總量上限會使發佈失敗並保留私有來源。ZIP 使用 STORED encoding，避免重複 log 的 compression-ratio 歧義。Reader 拒絕不安全路徑、control characters、encoded traversal、重複或大小寫衝突名稱、過大或高壓縮比 entries、未列入 manifest 的 entries 及 integrity mismatch。Writer 為單一有界佇列，同時最多八個 artifact reads。
 
@@ -3374,7 +3387,7 @@ Assertion 為 false 會令 Case execution 變成 FAIL。無效表達式語法/�
 ```json
 {
   "schemaVersion": "att-validation/v2.1",
-  "attVersion": "4.2.4",
+  "attVersion": "4.2.5",
   "valid": false,
   "mode": "package",
   "summary": {"errors": 1, "warnings": 0, "suites": 1, "cases": 22, "templates": 7, "tools": 7},
@@ -3413,7 +3426,7 @@ python3 tools/validate_reference_content.py
 ./att.sh validate --package
 ```
 
-`build.sh` 會執行 release gate、重新生成 modular Reference Manual、建立 application jar 和 release archive，並 smoke-test 解壓後的 local package。Reference generation 另外需要 Python 3 與 Pandoc。它會輸出供 CLI 使用的 `att-4.2.4-local.tar.gz`、包含 WAR 和部署指南的 `att-4.2.4-server.tar.gz`，以及 source archive `att-4.2.4-src.tar.gz`。每個 binary archive 均須小於 25 MB。Local package 不再包含 WAR 或其中重複的 runtime library。
+`build.sh` 會執行 release gate、重新生成 modular Reference Manual、建立 application jar 和 release archive，並 smoke-test 解壓後的 local package。Reference generation 另外需要 Python 3 與 Pandoc。它會輸出供 CLI 使用的 `att-4.2.5-local.tar.gz`、包含 WAR 和部署指南的 `att-4.2.5-server.tar.gz`，以及 source archive `att-4.2.5-src.tar.gz`。每個 binary archive 均須小於 25 MB。Local package 不再包含 WAR 或其中重複的 runtime library。
 
 ### Runtime dependencies
 
@@ -3473,7 +3486,8 @@ Maintainer implementation sequencing、scheduler internals、resource-owner deta
 | Load scenario | att-load/v1.9 |
 | Load Template | `att-load-template/v1` | `schemas/att-load-template-v1.schema.json` |
 | Load bindings | `att-load-bindings/v1` | `schemas/att-load-bindings-v1.schema.json` |
-| Load summary | att-load-summary/v1.2 |
+| Load summary | 直接 Engine／CLI：legacy summary contract (schema under `schemas/history/`)；封存報告：att-load-summary/v1.3 |
+| LOAD report detail files | att-load-detail-manifest/v1、att-load-detail-reference/v1、att-load-detail-series/v1、att-load-workload-detail/v1 |
 | Run manifest | att-run/v2.1 |
 | 舊版 Package validation JSON | `att-validation/v2.1` |
 | 精簡 CLI 階層式 validation report | `att-validation/v1` |
@@ -3641,7 +3655,7 @@ Timeout range、evidence sample bound、result limit、pool size 等 operational
 
 #### 為什麼 `Att.bat` 會要求 Maven，或者為什麼 `.sh` Tool 在 windows 上失敗？
 
-在二進制發布中，`att.bat` 會找到有版本號的 runtime JAR，例如 `lib\att-local-4.2.4.jar`，只需要 Java 8+。每個 `ATT_HOME/lib` 只保留一個 `att-local-<version>.jar`，讓啟動器能明確選取 runtime。源碼樹中，`att.bat` 會在 Maven 位於 `PATH` 時使用 Maven；沒有 Maven 時，需要已有的 `target\classes`。先用 `att.bat version` 確認啟動器後再校驗套件。
+在二進制發布中，`att.bat` 會找到有版本號的 runtime JAR，例如 `lib\att-local-4.2.5.jar`，只需要 Java 8+。每個 `ATT_HOME/lib` 只保留一個 `att-local-<version>.jar`，讓啟動器能明確選取 runtime。源碼樹中，`att.bat` 會在 Maven 位於 `PATH` 時使用 Maven；沒有 Maven 時，需要已有的 `target\classes`。先用 `att.bat version` 確認啟動器後再校驗套件。
 
 啟動器讓 ATT 自身跨平臺；它無法翻譯外部 Tool 可執行文件。請為 Windows 配置 `.bat`、`.cmd`、PowerShell 腳本（需要顯式 `powershell`/`pwsh` argv）或原生可執行文件，而不是 POSIX-only `.sh`。PATH 校驗遵循 Windows `PATHEXT`，因此如 `pwsh` 這類名稱可解析為 `pwsh.exe`。維護多平臺版本時，請保持參數契約和 stdout 輸出格式一致。
 

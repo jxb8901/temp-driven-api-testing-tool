@@ -2,7 +2,7 @@
 
 # Proposed Server Validation API
 
-> **Planned, not released.** This proposed route is not part of ATT 4.2.4. Use the current [REST API v1](v1.md) route `POST /api/v1/jobs/validate` for path-based validation; it submits an asynchronous Job.
+> **Planned, not released.** This proposed route is not part of ATT 4.2.5. Use the current [REST API v1](v1.md) route `POST /api/v1/jobs/validate` for path-based validation; it submits an asynchronous Job.
 
 ## Endpoint
 

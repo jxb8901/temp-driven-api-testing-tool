@@ -1,0 +1,184 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://att.invalid/schemas/att-load-terminal-result-v1.schema.json",
+  "title": "ATT compact LOAD terminal result v1",
+  "description": "Output contract for the Server-mediated result.summary projection. This is not an author-authored execution schema and is not registered in schemas/catalog.yaml.",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "execution",
+    "performance",
+    "metrics",
+    "thresholds",
+    "workloads",
+    "diagnostics",
+    "metricCoverage",
+    "detailCompleteness",
+    "archive"
+  ],
+  "properties": {
+    "schemaVersion": { "const": "att-load-terminal-result/v1" },
+    "execution": {
+      "type": "object",
+      "properties": {
+        "executionId": { "type": "string", "maxLength": 128 },
+        "runId": { "type": "string", "maxLength": 128 },
+        "status": { "type": "string", "maxLength": 24 },
+        "exitCode": { "type": "integer" },
+        "durationMs": { "type": "integer", "minimum": 0 },
+        "startedAt": { "type": "string", "maxLength": 40 },
+        "endedAt": { "type": "string", "maxLength": 40 }
+      },
+      "additionalProperties": false
+    },
+    "performance": {
+      "type": "object",
+      "required": ["verdict"],
+      "properties": {
+        "executionStatus": { "type": "string", "maxLength": 24 },
+        "verdict": { "type": "string", "maxLength": 24 }
+      },
+      "additionalProperties": false
+    },
+    "metrics": {
+      "type": "object",
+      "description": "Bounded aggregate counters and rates. Full time-series data belongs to the archived report.",
+      "additionalProperties": { "type": "number" }
+    },
+    "thresholds": {
+      "type": "object",
+      "required": ["verdict", "total", "items", "omittedCount"],
+      "properties": {
+        "verdict": { "type": "string", "maxLength": 24 },
+        "total": { "type": "integer", "minimum": 0 },
+        "passed": { "type": "integer", "minimum": 0 },
+        "failed": { "type": "integer", "minimum": 0 },
+        "notEvaluated": { "type": "integer", "minimum": 0 },
+        "omittedCount": { "type": "integer", "minimum": 0 },
+        "items": {
+          "type": "array",
+          "maxItems": 8,
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": { "type": "string", "maxLength": 64 },
+              "status": { "type": "string", "maxLength": 24 },
+              "actual": { "type": "string", "maxLength": 48 }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "workloads": {
+      "type": "object",
+      "required": ["total", "items", "omittedCount"],
+      "properties": {
+        "total": { "type": "integer", "minimum": 0 },
+        "omittedCount": { "type": "integer", "minimum": 0 },
+        "items": {
+          "type": "array",
+          "maxItems": 8,
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string", "maxLength": 96 },
+              "status": { "type": "string", "maxLength": 24 },
+              "executionStatus": { "type": "string", "maxLength": 24 },
+              "performanceVerdict": { "type": "string", "maxLength": 24 },
+              "metrics": { "type": "object", "additionalProperties": { "type": "number" } }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "diagnostics": {
+      "type": "object",
+      "properties": {
+        "primaryError": {
+          "type": "object",
+          "required": ["code", "summary"],
+          "properties": {
+            "code": { "type": "string", "maxLength": 128 },
+            "summary": { "type": "string", "maxLength": 512 },
+            "workloadId": { "type": "string", "maxLength": 96 },
+            "phase": { "type": "string", "maxLength": 24 },
+            "failedCount": { "type": "integer", "minimum": 0 }
+          },
+          "additionalProperties": false
+        },
+        "classifications": { "type": "array", "maxItems": 8, "items": { "type": "object" } },
+        "classificationCount": { "type": "integer", "minimum": 0 },
+        "omittedClassificationCount": { "type": "integer", "minimum": 0 },
+        "transportWarnings": { "type": "array", "maxItems": 2, "items": { "type": "object" } }
+      },
+      "additionalProperties": false
+    },
+    "metricCoverage": {
+      "type": "object",
+      "properties": {
+        "loadMetricsBucketCapacity": { "type": "integer", "const": 4096 },
+        "loadMetricsBucketCount": { "type": "integer", "minimum": 0, "maximum": 4096 },
+        "loadMetricsBucketWidthMs": { "type": "integer", "const": 1000 },
+        "observedBucketStartEpochMs": { "type": "integer" },
+        "observedBucketEndEpochMs": { "type": "integer" },
+        "observedBucketCoverageMs": { "type": "integer", "minimum": 0 },
+        "runDurationMs": { "type": "integer", "minimum": 0 },
+        "fullDurationInRollingWindow": { "type": "boolean" },
+        "windowSeriesCapacity": { "type": "integer", "minimum": 0 },
+        "windowSeriesBinWidthMs": { "type": "integer", "minimum": 0 },
+        "windowSeriesCoverage": { "type": "string", "maxLength": 96 },
+        "windowMetricsSchemaVersion": { "type": "string", "maxLength": 64 }
+      },
+      "additionalProperties": false
+    },
+    "detailCompleteness": {
+      "type": "object",
+      "required": ["state", "truncated", "omittedCounts"],
+      "properties": {
+        "state": { "type": "string", "maxLength": 24 },
+        "truncated": { "type": "boolean" },
+        "omittedCounts": {
+          "type": "object",
+          "properties": {
+            "timeSeriesBuckets": { "type": "integer", "minimum": 0 },
+            "failureSamples": { "type": "integer", "minimum": 0 },
+            "workloads": { "type": "integer", "minimum": 0 },
+            "thresholds": { "type": "integer", "minimum": 0 },
+            "evidenceItems": { "type": "integer", "minimum": 0 }
+          },
+          "additionalProperties": false
+        },
+        "detailSource": { "type": "string", "maxLength": 64 }
+      },
+      "additionalProperties": false
+    },
+    "archive": {
+      "type": "object",
+      "required": ["status", "paths", "reportAvailability"],
+      "properties": {
+        "status": { "enum": ["PENDING", "ARCHIVING", "READY", "FAILED", "OMITTED", "EXPIRED"] },
+        "reportAvailability": { "enum": ["PENDING", "ARCHIVING", "READY", "FAILED", "OMITTED", "EXPIRED"] },
+        "paths": {
+          "type": "object",
+          "properties": {
+            "loadSummaryJson": { "type": "string", "maxLength": 256 },
+            "loadSummaryYaml": { "type": "string", "maxLength": 256 },
+            "report": { "type": "string", "maxLength": 256 }
+          },
+          "additionalProperties": false
+        },
+        "omittedArtifactCount": { "type": "integer", "minimum": 0 },
+        "omissionReason": { "type": "string", "maxLength": 96 }
+      },
+      "additionalProperties": false
+    },
+    "configuration": { "type": "object" },
+    "configurationOmitted": { "type": "boolean" }
+  },
+  "additionalProperties": false,
+  "$comment": "The compact summary JSON is capped at 32 KiB. The Worker protocol frame is unchanged at 1 MiB; end-to-end terminal SSE/journal measurements stay below 48 KiB."
+}

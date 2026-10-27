@@ -45,7 +45,8 @@ public final class PackageConfigurationSnapshots {
         InspectionMetrics.JVM.add(CONFIG_MISS,1);
         for(int attempt=0;attempt<3;attempt++) {
             byte[] before = digestFile(resolver,file,new long[]{0});
-            if(Files.size(file)>1024*1024)throw new PackageConfigurationInspector.ConfigurationLimitException();
+            long configBytes=Files.size(file);
+            if(configBytes>1024*1024)throw new PackageConfigurationInspector.ConfigurationLimitException("packageConfiguration.maxConfigBytes",1024*1024,configBytes);
             long parsedAt=System.nanoTime();
             Object loaded=YamlSupport.load(file);
             InspectionMetrics.JVM.record(CONFIG_PARSE,System.nanoTime()-parsedAt);
@@ -103,7 +104,7 @@ public final class PackageConfigurationSnapshots {
             // Retain the authored path too: canonical re-resolution detects symlink and rename changes.
             paths.add(resolver.packageRoot().resolve((String)path).normalize());
             paths.add(canonical);
-            if(paths.size()>MAX_FILES)throw new PackageConfigurationInspector.ConfigurationLimitException();
+            if(paths.size()>MAX_FILES)throw new PackageConfigurationInspector.ConfigurationLimitException("packageConfiguration.maxSnapshotFiles",MAX_FILES,paths.size());
         }
     }
     private Fingerprint fingerprint(PackageResourceResolver resolver,Set<Path> dependencies,boolean includeSchemas) throws Exception {
@@ -116,13 +117,13 @@ public final class PackageConfigurationSnapshots {
                 int count=0;
                 while(iterator.hasNext()) {
                     Path path=iterator.next();
-                    if(++count>MAX_FILES)throw new PackageConfigurationInspector.ConfigurationLimitException();
+                    if(++count>MAX_FILES)throw new PackageConfigurationInspector.ConfigurationLimitException("packageConfiguration.maxSnapshotFiles",MAX_FILES,count);
                     if(Files.isSymbolicLink(path))throw new IllegalArgumentException("Unsafe schema dependency");
                     if(Files.isRegularFile(path,LinkOption.NOFOLLOW_LINKS))paths.add(path);
                 }
             }
         }
-        if(paths.size()>MAX_FILES)throw new PackageConfigurationInspector.ConfigurationLimitException();
+        if(paths.size()>MAX_FILES)throw new PackageConfigurationInspector.ConfigurationLimitException("packageConfiguration.maxSnapshotFiles",MAX_FILES,paths.size());
         MessageDigest digest=MessageDigest.getInstance("SHA-256");long[] bytes={0};
         for(Path path:paths) {
             digest.update(resolver.packageRoot().relativize(path).toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));
@@ -139,11 +140,12 @@ public final class PackageConfigurationSnapshots {
     private byte[] digestFile(PackageResourceResolver resolver,Path path,long[] bytes) throws Exception {
         if(Files.isSymbolicLink(path))throw new IllegalArgumentException("Unsafe configuration dependency");
         Path file=resolver.fromInternalPath(path,PackageResourceResolver.Kind.FILE).canonicalPath();
-        if(Files.size(file)>1024*1024)throw new PackageConfigurationInspector.ConfigurationLimitException();
+        long size=Files.size(file);
+        if(size>1024*1024)throw new PackageConfigurationInspector.ConfigurationLimitException("packageConfiguration.maxDescriptorBytes",1024*1024,size);
         MessageDigest digest=MessageDigest.getInstance("SHA-256");
         try(InputStream input=Files.newInputStream(file,LinkOption.NOFOLLOW_LINKS)) {
             byte[] buffer=new byte[8192];int count;
-            while((count=input.read(buffer))!=-1){bytes[0]+=count;if(bytes[0]>MAX_BYTES)throw new PackageConfigurationInspector.ConfigurationLimitException();digest.update(buffer,0,count);InspectionMetrics.JVM.add(READ_BYTES,count);}
+            while((count=input.read(buffer))!=-1){bytes[0]+=count;if(bytes[0]>MAX_BYTES)throw new PackageConfigurationInspector.ConfigurationLimitException("packageConfiguration.maxSnapshotBytes",MAX_BYTES,bytes[0]);digest.update(buffer,0,count);InspectionMetrics.JVM.add(READ_BYTES,count);}
         }
         return digest.digest();
     }

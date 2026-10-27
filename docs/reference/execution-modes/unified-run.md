@@ -1,8 +1,8 @@
 # Unified RUN and schedules
 
-<!-- att-doc-status: current release=4.2.4 -->
+<!-- att-doc-status: current release=4.2.5 -->
 
-ATT 4.2.4 represents functional one-shot execution as **RUN**. A RUN executes a Case, Template, Flow, Tool, or a selected batch of Cases. **Debug** is an optional diagnostic mode of RUN. **LOAD** retains its performance engine, pacing controls and specialized reports.
+ATT 4.2.5 represents functional one-shot execution as **RUN**. A RUN executes a Case, Template, Flow, Tool, or a selected batch of Cases. **Debug** is an optional diagnostic mode of RUN. **LOAD** retains its performance engine, pacing controls and specialized reports.
 
 The released Local CLI keeps its interface-specific compatibility boundary: its run verb selects workbook Cases, and standalone debug runs one Template, Flow or Tool. ATT Remote retains its legacy Server commands. This shared RUN model does not mean the proposed vNext CLI grammar is released; see the [Planned vNext page](../../interfaces/cli/vnext-proposed.md).
 
@@ -91,7 +91,7 @@ Every active local `USER` or authenticated container principal in `server.author
 
 ## Migrate existing clients
 
-| Existing interface | Mapping in 4.2.4 |
+| Existing interface | Mapping in 4.2.5 |
 |---|---|
 | CLI `validate`, `run`, `report` | Existing validation, Case RUN and report commands remain valid |
 | CLI `--suite`, `--suite-dir`, `--case`, `--tag`, `--rerun-failed` | Existing selectors retain their behavior; Server batches use `selection` |
@@ -100,17 +100,21 @@ Every active local `USER` or authenticated container principal in `server.author
 | `/load-schedules`, legacy `jobType:load/debug` | Shared scheduler compatibility routes; existing definitions remain readable |
 | `/jobs/...`, saved Studio job/result links | Existing shared history, cancellation, events and results routes |
 
-No legacy endpoint is removed in 4.2.4. `GET /api/v1/version` advertises `unifiedRunVersion:att-execution/v1`. New Studio resource forms can fall back to legacy Debug drafts when an older Server lacks this capability. Unified Case/batch drafts require 4.2.4; use the existing Explorer Case action on older deployments. Deploy matching Server/Worker components together; older Workers do not implement resource RUN dispatch.
+No legacy endpoint is removed in 4.2.5. `GET /api/v1/version` advertises `unifiedRunVersion:att-execution/v1`. New Studio resource forms can fall back to legacy Debug drafts when an older Server lacks this capability. Unified Case/batch drafts require 4.2.5; use the existing Explorer Case action on older deployments. Deploy matching Server/Worker components together; older Workers do not implement resource RUN dispatch.
 
 Schedule persistence adds JSON fields in the existing H2 tables, leaving legacy LOAD rows unchanged. Before downgrade, stop scheduling, export new definitions, remove RUN/one-time definitions and restore the pre-upgrade database backup. An older scheduler must not interpret a new RUN definition as LOAD. Retained job artifacts remain separate from database metadata.
 
-## Rerun or schedule a Job
+## Replay and new execution from a Job
 
-In **Jobs**, **Job Details**, or **LOAD Catalog → Recent LOAD Jobs**, select **Rerun** or **Schedule / Reschedule…**. The Server revalidates the retained definition before displaying a confirmation. Review the package, environment, exact RUN target or selected cases, Debug option, or LOAD scenario and pacing. **Confirm rerun** creates an independent Job and opens its Details. The original results and evidence remain intact.
+In **Jobs**, **Job Details**, or **LOAD History**, choose **Rerun with same settings** or **Configure & Rerun**. Both actions create one authorized Server draft and validate the current Package/Environment before execution. The standard RUN or LOAD editor receives only an opaque `draftRef`; it fetches the sanitized definition from the Server on entry. It does not place the definition in a URL or browser storage.
 
-**Continue to New Schedule** opens the unified creation form. Choose the name, recurrence, timezone, overlap limit and enabled state, review the occurrence preview, then save. Opening this form does not create or edit a schedule. **View / Edit originating schedule** opens the existing authorized schedule; it is a separate action from creating a new schedule or running again now.
+**Rerun with same settings** defaults to **Use current Package**: preserve the Job's safely retained execution parameters, resolve targets and configuration against the current Package, then show the original/current revisions and validation outcome before confirmation. It never silently replaces a retained scenario with the latest YAML defaults. **Require original revision (strict)** is the reproducibility choice. A mismatch returns `ATT-SERVER-REPLAY-REVISION-CONFLICT` and offers **Review with current Package**; stored metadata cannot restore missing historical source bytes. `server.scheduling.packageChangePolicy` and a Schedule-level `ignore` apply only to scheduled executions and do not change manual Rerun.
 
-Replay uses the previous safe snapshot with `revisionPolicy: reject-package-changes`. It never silently switches to the latest package file. If the package, runtime configuration or dependencies change, configure and validate a new run. Newly retained safe definitions survive draft expiry and Server restart; confirmation drafts expire after ten minutes and must then be rebuilt. The Server validates the current account, package, environment, schema, capability and execution limits again.
+**Configure & Rerun** opens the ordinary editor with supported safe settings prefilled. Edit the RUN target/Case selection, options and safe inputs, or LOAD timing, workloads, model-specific pacing, concurrency, thresholds, evidence and safe testdata selection. **Validate** creates a new review intent with bounded typed overrides; **Review changes** shows before/after values, summed LOAD phase duration, current revision and the distinction between configured arrival rate and measured TPS. **Run** creates an independent Job with `rerunOfJobId`; Cancel/Back leaves the source Job, report, Schedule and package files unchanged. Package-file-backed LOAD uses its retained safe package-relative source route and does not inherit the inline-draft-only duration ceiling.
+
+Schedules remain a separate workflow: **Edit existing schedule**, **Create new schedule**, or **Run now**. Existing schedule `strict`/`pause`/`ignore` behavior is unchanged.
+
+New retained execution specs use `att-job-execution/v2`; the parser still accepts v1. Replay drafts use `att-job-replay-draft/v1`. Draft references and confirmation intents are principal-bound and expire after ten minutes; they are held in Server memory, so Server restart loses them and the user must reopen the source Job to create a new draft. A source Job without a safe retained definition, a missing sensitive input, an expired draft, a removed resource, an invalid schema and capacity rejection have separate error responses. Secrets, Worker transport data, host roots and unsafe paths are never reconstructed from logs or artifacts.
 
 Historical Jobs without a retained definition show **Rerun unavailable for this historical job**. Validation-only Jobs, failed safe retention, and classified submitted inputs cannot be replayed exactly. Legacy direct submissions with raw overrides or unresolved `rerunFailed` history selection require a new validated draft before safe retention. Configure a new run and provide missing credentials through the normal protected input flow. Never reconstruct an execution from logs, artifacts or redacted previews. Safe definitions are limited to 256 KiB and exclude Worker transport fields and host roots.
 
@@ -118,8 +122,9 @@ The Job lifecycle API uses the following endpoints under `/api/v1`:
 
 | Method and path | Result |
 | --- | --- |
-| `GET /jobs/{jobId}/replay` | Authorized safe definition, availability reason, revision policy and originating schedule link when available. |
-| `POST /jobs/{jobId}/replay-draft` with `{}` | Revalidated RUN/LOAD draft plus an opaque `intentId`; creates no execution or schedule. |
-| `POST /jobs/{jobId}/rerun` with `{"intentId":"...","confirm":true}` | New independent Job, HTTP 202 and `Location`; retries with the same intent return the accepted Job. |
+| `GET /jobs/{jobId}/replay` | Authorized safe definition and availability reason. |
+| `POST /jobs/{jobId}/replay-draft` with `{"sourcePolicy":"current"}` or `{"sourcePolicy":"strict","overrides":{...}}` | `att-job-replay-draft/v1` validation, opaque `draftRef` and confirmation `intentId`; no Job or Schedule is created. Omitted `sourcePolicy` preserves legacy strict behavior. |
+| `GET /jobs/{jobId}/replay-draft/{draftRef}` | Principal-authorized sanitized editor definition and current configuration provenance; no definition is carried in the route. |
+| `POST /jobs/{jobId}/rerun` with `{"intentId":"...","confirm":true,"sourcePolicy":"current"}` | New independent Job, HTTP 202 and `Location`; retries with the same intent return the accepted Job. |
 
-Use the returned `draftId`, package, environment and canonical `executionType: run | load` in the normal `POST /schedules` creation contract. Debug remains `options.debug` on RUN. A rerun exposes `rerunOfJobId`; schedules created from a Job retain authorized `sourceJobId` provenance. Replay access is restricted to the submitting identity or retained schedule execution owner. Deleted or inaccessible Jobs fail with 404. A stale source fails with 409; capacity and validation failures follow the normal submission contracts. Repeating an accepted intent after its output Job is deleted fails safely instead of launching another execution.
+Schedule creation uses its normal validated draft contract. Debug remains `options.debug` on RUN. Replay access is restricted to the submitting identity or retained schedule execution owner. `ATT-SERVER-REPLAY-DRAFT-STALE` is returned when the Package changes after validation; `ATT-SERVER-REPLAY-DRAFT-EXPIRED` is returned for an expired or restart-lost draft; capacity returns HTTP 429. Repeating an accepted intent returns the same Job.

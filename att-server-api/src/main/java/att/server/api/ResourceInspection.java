@@ -91,5 +91,16 @@ public final class ResourceInspection {
         public String summary;
         public String field;
         public String resourceId;
+        public String limitName;
+        public Long configuredLimit;
+        public Long limit;
+        public Long observed;
+        public Long actual;
+        public Long usage;
+        public String scope;
+        public String outcome;
+        public String stage;
+        public String remediationHint;
+        public String artifactRef;
     }
 }

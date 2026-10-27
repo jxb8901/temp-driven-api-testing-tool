@@ -1,4 +1,4 @@
-<!-- att-doc-status: current release=4.2.4 -->
+<!-- att-doc-status: current release=4.2.5 -->
 
 # Jobs 與 results
 
@@ -22,7 +22,9 @@
 
 瀏覽器會立即把事件寫入最多 500 筆的有界 buffer，並以固定 100 ms 週期發布一般顯示 snapshot。Document 隱藏時會暫停發布顯示 snapshot，重新顯示時再發布當時的有界 snapshot。終端 `result` 事件、終端 `status` 事件、取消請求狀態及連線錯誤狀態轉換會立即發布。最後一個 consumer 關閉後，timer 及原生 `EventSource` 都會釋放。
 
-Events 清單只渲染捲動位置附近的列（並以 spacer 保持捲軸及清單位置正確），事件 payload 在展開前保持收合，搜尋則涵蓋完整的 500 筆視窗，而非只搜尋已渲染列。Metrics 分頁會繪製所有回傳的 bucket（最多 4,096 個），其無障礙 bucket 表格每頁顯示 100 列，提供 Previous 與 Next 控制項及 `Showing rows` 狀態。
+Events 清單只渲染捲動位置附近的列（並以 spacer 保持捲軸及清單位置正確），事件 payload 在展開前保持收合，搜尋則涵蓋完整的 500 筆視窗，而非只搜尋已渲染列。
+
+LOAD Overview、Results 及基本 Metrics 使用有界的 `att-load-terminal-result/v1` projection，會即時顯示執行結果、performance verdict、aggregate 計數及主要 runtime／preparation／validation 原因。初次載入 Job Details 時不會讀取 artifact index 或下載詳細報告。精簡結果中的 PENDING archive 狀態只是初始提示；開啟 Results 或 Metrics 後，系統才透過現有授權 artifact index route 核實目前狀態。畫面會顯示 READY、PENDING、ARCHIVING、FAILED、expired 或 omitted，同時保留 inline 結果。開啟 Results 後才會載入授權 `load-summary.json` preview，顯示有界 evidence records、workload summaries，以及 workload sidecar 連結。開啟 Metrics 後才會透過授權 artifact text route 載入 `load-summary.json` 及其引用的 metric-series sidecar；archive 準備完成後才渲染詳細表格及 charts。Archived detailed report 使用 `att-load-summary/v1.3`，大型 series 存放於 `details/v1/` 的版本化相對路徑檔案。只有開啟 Artifacts 分頁才會載入完整 artifact 清單。詳細報告已載入時，charts 會使用回傳的 bucket（最多 4,096 個）；無障礙 bucket 表格每頁顯示 100 列，提供 Previous、Next 及 `Showing rows` 狀態。Bucket coverage 會指出 4,096 筆的一秒 rolling window，以及獨立的 `LoadWindowMetrics` bin 寬度與涵蓋範圍。
 
 Server Journal Event ID 是 append order 的排序鍵；每個 Job 的 ID 在 Server 重啟、journal trimming 及 compaction 前後都保持單調遞增。UI 會按 Server append order 顯示事件，不會按 timestamp 重新排序。數字 ID 如不大於最後顯示的 ID，會視為 duplicate 或 stale out-of-order replay 而忽略，計入相應數量，且不會重新排序插入清單。向前出現 gap 是合法情況，只會計入診斷。非數字 ID 使用有界的 recent-ID index 去重。原生 `EventSource` 使用 `Last-Event-ID` 重新連線；重疊 replay 即使已離開可見 window，或在 **Clear view** 後到達，也不會再次出現。任何計數不為零時，非即時更新的 **Stream diagnostics** 訊息會顯示已忽略的 duplicate、out-of-order replay 及 ID gap 數量。
 
@@ -32,4 +34,6 @@ Server Journal Event ID 是 append order 的排序鍵；每個 Job 的 ID 在 Se
 
 Jobs 的精簡工具列保留 Principal、Package、Type、Status 及 Target 搜尋。**More filters** 可展開 Created from/to、Deletion state 和 Pin state；收合後仍顯示已啟用的條件。Target 搜尋會在 Server 分頁前比對完整保留的 canonical target／Case ID，包括前 32 筆預覽之外的項目。沒有保留 Target metadata 的歷史 Job 仍可用 Job ID 搜尋。升級後，歷史 Target 索引會以背景批次繼續建立。未輸入搜尋條件時仍可瀏覽 Jobs；索引完成前，Target or Job ID 子字串搜尋會傳回可重試的 503（`ATT-SERVER-TARGET-SEARCH-PENDING`），不會顯示不完整結果。請以 **Refresh jobs** 重試。若要精確查詢，輸入 `job:` 加完整 Job ID（例如 `job:J0123456789ABCDEF`，區分大小寫）；此主鍵查詢在索引期間仍可使用，並保留其他篩選、筆數與分頁規則。無法解析的歷史 snapshot／identity 會逐筆隔離，以安全的 fallback 或空 Target 集合標記為已處理，並記錄不含私人 metadata 的 audit，不會永久阻擋索引。Group by Target 固定顯示 Target A–Z，群組內的 Jobs 按最新優先排列；返回 Recent Jobs 時恢復其選定的排序。
 
-在 Jobs List 或 Job Details 按 **Rerun** 或 **Schedule / Reschedule…**，會開啟 modal review，顯示類型、Package、Target、Environment、Source 及 Revision。**Advanced / View raw definition** 可在有界捲動區展開 sanitized JSON。Tab 焦點保留於對話框內，Escape 或 Cancel 關閉並返回原按鈕；確認仍使用 immutable Server intent 並重新驗證 Package revision。
+在 Jobs List、Job Details 或 LOAD History 選擇 **Rerun with same settings**，會開啟 review，提供預設的 **Use current Package** 及 **Require original revision (strict)**。Current mode 沿用舊 Job 的安全參數，但依目前 Package 及 configuration 驗證。Strict mode 在 revision 改變時阻止執行，並提供 **Review with current Package**。Schedule package-change policy 不控制手動 Rerun。
+
+**Configure & Rerun** 會建立短期獲授權的 Server draft，並開啟預填支援安全欄位的標準 RUN／LOAD editor。URL 只含不透明 `draftRef`；定義透過授權且使用 `private, no-store` 的 request 載入。修改後按 **Validate → Review changes → Run**，檢查前後定義、目前 revision 及 LOAD timing／rate 細節。Back／Cancel 不修改 Job、報告、Schedule 或 package source。**Schedule / Reschedule…** 維持獨立，提供新增 Schedule 或開啟獲授權的來源 Schedule；不會啟動 Job。

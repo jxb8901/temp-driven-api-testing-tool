@@ -64,6 +64,8 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
+import att.server.api.LimitDiagnostic;
+import att.server.api.LimitOutcome;
 
 /**
  * Read-only logical package index used by the authenticated Server inspector Worker.
@@ -82,6 +84,9 @@ public final class PackageResourceInspector implements AutoCloseable {
     private static final int MAX_CONFIG_BYTES = 1024 * 1024;
     private static final long MAX_WORKBOOK_BYTES = 32L * 1024L * 1024L;
     private static final long MAX_REVISION_BYTES = 256L * 1024L * 1024L;
+    private static final int MAX_YAML_CANDIDATES = 20000;
+    private static final int MAX_CONFIG_TREE_ENTRIES = 5000;
+    private static final long MAX_CONFIG_TREE_BYTES = 256L * 1024L * 1024L;
     private static final Pattern TOOL_CALL = Pattern.compile("#\\{\\s*([A-Za-z_][A-Za-z0-9_.-]*)\\s*\\(");
     private static final Pattern KEY_VALUE_SECRET = Pattern.compile(
             "(?i)([\"']?(?:password|passwd|passphrase|token|secret|authorization|credential|api[_-]?key|access[_-]?key|private[_-]?key|client[_-]?secret|refresh[_-]?token)[\"']?\\s*(?::|=|\\bis\\b)\\s*[\"']?)([^\\s,'\";}<>]+)");
@@ -750,7 +755,8 @@ public final class PackageResourceInspector implements AutoCloseable {
     private Index buildIndexContents() throws Exception {
         Index index = new Index();
         Path configFile = resolveConfigFile();
-        if (Files.size(configFile) > MAX_CONFIG_BYTES) throw new ResourceLimitException();
+        long configBytes = Files.size(configFile);
+        if (configBytes > MAX_CONFIG_BYTES) throw new ResourceLimitException("resourceInspector.maxConfigBytes", MAX_CONFIG_BYTES, configBytes);
         index.files.add(configFile);
         FrameworkConfig config = new FrameworkConfigLoader().loadDiscovery(configFile, runtimeConfigRoot, packageRoot, environment);
         // In-JVM resource libraries may read native getenv(), which cannot be
@@ -1027,11 +1033,12 @@ public final class PackageResourceInspector implements AutoCloseable {
                         .filter(path -> {
                             String name = path.getFileName().toString().toLowerCase(Locale.ROOT);
                             return name.endsWith(".yaml") || name.endsWith(".yml");
-                        }).limit(20001).forEach(candidates::add);
+                        }).limit(MAX_YAML_CANDIDATES + 1L).forEach(candidates::add);
             }
         }
         candidates.sort(Comparator.comparing(path -> path.toString().toLowerCase(Locale.ROOT)));
-        if (candidates.size() > 20000) throw new ResourceLimitException();
+        if (candidates.size() > MAX_YAML_CANDIDATES)
+            throw new ResourceLimitException("resourceInspector.maxYamlCandidates", MAX_YAML_CANDIDATES, candidates.size());
         List<Path> matches = new ArrayList<Path>();
         for (Path candidate : candidates) {
             String logical = packageRoot.relativize(candidate).toString().replace('\\', '/');
@@ -1557,7 +1564,7 @@ public final class PackageResourceInspector implements AutoCloseable {
         try {
             StageTemplateLoader loader = new StageTemplateLoader(packageRoot, templatesRoot, false);
             for (String relative : loader.paths()) {
-                if (index.ordered.size() >= MAX_RESOURCES) throw new ResourceLimitException();
+                if (index.ordered.size() >= MAX_RESOURCES) throw new ResourceLimitException("resourceInspector.maxResources", MAX_RESOURCES, index.ordered.size() + 1L);
                 Path descriptor = templatesRoot.resolve(relative).resolve("template.yaml");
                 StageTemplate template;
                 Resource resource = new Resource("template", resourceId("template", relative), relative);
@@ -1596,7 +1603,7 @@ public final class PackageResourceInspector implements AutoCloseable {
         try {
             FlowRegistry registry = new FlowRegistry(packageRoot, templatesRoot, false);
             for (String id : registry.ids()) {
-                if (index.ordered.size() >= MAX_RESOURCES) throw new ResourceLimitException();
+                if (index.ordered.size() >= MAX_RESOURCES) throw new ResourceLimitException("resourceInspector.maxResources", MAX_RESOURCES, index.ordered.size() + 1L);
                 Resource resource = new Resource("flow", resourceId("flow", id), id);
                 try {
                     FlowDefinition flow = registry.get(id);
@@ -1629,7 +1636,7 @@ public final class PackageResourceInspector implements AutoCloseable {
         List<String> keys = new ArrayList<String>(config.tools().keySet());
         Collections.sort(keys);
         for (String key : keys) {
-            if (index.ordered.size() >= MAX_RESOURCES) throw new ResourceLimitException();
+            if (index.ordered.size() >= MAX_RESOURCES) throw new ResourceLimitException("resourceInspector.maxResources", MAX_RESOURCES, index.ordered.size() + 1L);
             ToolConfig tool = config.tools().get(key);
             Resource resource = new Resource("tool", resourceId("tool", key), key);
             resource.name = tool.name();
@@ -1668,7 +1675,11 @@ public final class PackageResourceInspector implements AutoCloseable {
         try (Stream<Path> paths = Files.walk(testcasesRoot)) {
             paths.filter(path -> Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS))
                     .filter(path -> path.getFileName().toString().toLowerCase(Locale.ROOT).endsWith(".xlsx"))
-                    .forEach(path -> { if (workbooks.size() >= MAX_WORKBOOKS) throw new ResourceLimitException(); workbooks.add(path); });
+                    .forEach(path -> {
+                        if (workbooks.size() >= MAX_WORKBOOKS)
+                            throw new ResourceLimitException("resourceInspector.maxWorkbooks", MAX_WORKBOOKS, workbooks.size() + 1L);
+                        workbooks.add(path);
+                    });
         } catch (ResourceLimitException limit) {
             throw limit;
         } catch (Exception error) {
@@ -1678,13 +1689,17 @@ public final class PackageResourceInspector implements AutoCloseable {
         Collections.sort(workbooks);
         long totalWorkbookBytes = 0;
         for (Path workbook : workbooks) {
-            if (index.ordered.size() >= MAX_RESOURCES) throw new ResourceLimitException();
+            if (index.ordered.size() >= MAX_RESOURCES) throw new ResourceLimitException("resourceInspector.maxResources", MAX_RESOURCES, index.ordered.size() + 1L);
             try {
                 Path canonical = resources.fromInternalPath(workbook, PackageResourceResolver.Kind.FILE).canonicalPath();
                 String suite = resources.fromInternalPath(canonical, PackageResourceResolver.Kind.FILE).logicalName();
                 long workbookBytes=Files.size(canonical);totalWorkbookBytes+=workbookBytes;
-                if (workbookBytes > MAX_WORKBOOK_BYTES || totalWorkbookBytes > MAX_TOTAL_WORKBOOK_BYTES) {
-                    index.add(invalidSuite(suite, "Workbook exceeds the inspection size limit"));
+                if (workbookBytes > MAX_WORKBOOK_BYTES) {
+                    index.add(invalidSuite(suite, "Workbook exceeds the inspection size limit", "resourceInspector.maxWorkbookBytes", MAX_WORKBOOK_BYTES, workbookBytes));
+                    continue;
+                }
+                if (totalWorkbookBytes > MAX_TOTAL_WORKBOOK_BYTES) {
+                    index.add(invalidSuite(suite, "Workbook inventory exceeds the inspection size limit", "resourceInspector.maxTotalWorkbookBytes", MAX_TOTAL_WORKBOOK_BYTES, totalWorkbookBytes));
                     continue;
                 }
                 indexFile(index, canonical);
@@ -1695,7 +1710,7 @@ public final class PackageResourceInspector implements AutoCloseable {
                 List<TestCase> cases = new ExcelTestSuiteLoader(suiteConfig).load(canonical);
                 InspectionMetrics.JVM.record(WORKBOOK_PARSE, System.nanoTime() - workbookStarted);
                 for (TestCase testCase : cases) {
-                    if (index.ordered.size() >= MAX_RESOURCES) throw new ResourceLimitException();
+                    if (index.ordered.size() >= MAX_RESOURCES) throw new ResourceLimitException("resourceInspector.maxResources", MAX_RESOURCES, index.ordered.size() + 1L);
                     Resource resource = new Resource("case",
                             resourceId("case", suite + "\n" + testCase.caseId()), testCase.caseId());
                     resource.name = testCase.caseName();
@@ -1742,6 +1757,17 @@ public final class PackageResourceInspector implements AutoCloseable {
         resource.state = "invalid";
         resource.provenance.put("suite", logicalSuite);
         resource.diagnostics.add(diagnostic("ATT-RESOURCE-CASE-INVALID", message));
+        return resource;
+    }
+
+    private Resource invalidSuite(String logicalSuite, String message, String limitName, long limit, long observed) {
+        Resource resource = new Resource("case", resourceId("case-suite", logicalSuite), logicalSuite);
+        resource.name = Paths.get(logicalSuite).getFileName().toString();
+        resource.state = "invalid";
+        resource.provenance.put("suite", logicalSuite);
+        resource.diagnostics.add(LimitDiagnostic.create("ATT-RESOURCE-CASE-INVALID", message, limitName, limit, observed,
+                "package", LimitOutcome.DATA_TRUNCATED, "inspection",
+                "Reduce workbook size or split the workbook inventory; this suite remains listed as invalid.", null));
         return resource;
     }
 
@@ -2549,7 +2575,7 @@ public final class PackageResourceInspector implements AutoCloseable {
                 while ((read = input.read(buffer)) >= 0) {
                     InspectionMetrics.JVM.add(READ_BYTES,read);
                     total += read;
-                    if (total > MAX_REVISION_BYTES) throw new ResourceLimitException();
+                    if (total > MAX_REVISION_BYTES) throw new ResourceLimitException("resourceInspector.maxRevisionBytes", MAX_REVISION_BYTES, total);
                     digest.update(buffer, 0, read);
                 }
             }
@@ -2629,10 +2655,10 @@ public final class PackageResourceInspector implements AutoCloseable {
             for (Path candidate : (Iterable<Path>) paths::iterator) {
                 if (candidate.equals(configDirectory) || Files.isSymbolicLink(candidate) || protectedRuntimeConfigPath(
                         runtimeConfigRoot.relativize(candidate).toString().replace('\\', '/'))) continue;
-                if (++count > 5000) throw new ResourceLimitException();
+                if (++count > MAX_CONFIG_TREE_ENTRIES) throw new ResourceLimitException("resourceInspector.maxConfigTreeEntries", MAX_CONFIG_TREE_ENTRIES, count);
                 if (!Files.isRegularFile(candidate, LinkOption.NOFOLLOW_LINKS)) continue;
                 bytes += Files.size(candidate);
-                if (bytes > 268435456L) throw new ResourceLimitException();
+                if (bytes > MAX_CONFIG_TREE_BYTES) throw new ResourceLimitException("resourceInspector.maxConfigTreeBytes", MAX_CONFIG_TREE_BYTES, bytes);
                 index.files.add(configResources.fromInternalPath(candidate, PackageResourceResolver.Kind.FILE).canonicalPath());
             }
         }
@@ -2934,7 +2960,18 @@ public final class PackageResourceInspector implements AutoCloseable {
     }
 
     public static final class ResourceNotFoundException extends RuntimeException { }
-    public static final class ResourceLimitException extends RuntimeException { }
+    public static final class ResourceLimitException extends RuntimeException {
+        public final String limitName;
+        public final Long configuredLimit;
+        public final Long observed;
+        public ResourceLimitException() { this(null, null, null); }
+        public ResourceLimitException(String limitName, long configuredLimit, long observed) {
+            this(limitName, Long.valueOf(configuredLimit), Long.valueOf(observed));
+        }
+        private ResourceLimitException(String limitName, Long configuredLimit, Long observed) {
+            this.limitName = limitName; this.configuredLimit = configuredLimit; this.observed = observed;
+        }
+    }
     public static final class ResponseTooLargeException extends RuntimeException { }
     public static final class StaleResourceCursorException extends RuntimeException { }
 }

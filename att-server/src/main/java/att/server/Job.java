@@ -3,6 +3,8 @@ package att.server;
 import att.server.api.WorkerRequest;
 import java.time.Instant;
 import java.util.LinkedHashMap;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 
 final class Job {
@@ -22,6 +24,9 @@ final class Job {
     volatile String resultJson,diagnosticJson;
     volatile Map<String,Object> workerMetrics;
     volatile Map<String,Object> protocolDiagnostic;
+    volatile Map<String,Object> journalDiagnostic;
+    volatile String primaryDiagnosticJson;
+    final List<Map<String,Object>> secondaryDiagnostics=new ArrayList<>();
     volatile boolean resultReceived;
     volatile String workerDispatch="cold";
     volatile String prewarmFallbackReason;

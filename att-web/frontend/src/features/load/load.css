@@ -25,6 +25,21 @@
 .att-feature-header h1 { margin: 0; font-size: clamp(1.6rem, 3vw, 2.15rem); }
 .att-feature-header p:not(.att-eyebrow) { max-width: 70ch; color: var(--att-color-muted, #637087); }
 
+.att-load-terminal-summary {
+  display: grid;
+  gap: var(--att-space-2, .5rem);
+  padding: var(--att-space-4, 1rem);
+  border: 1px solid var(--att-color-border, #dce2ec);
+  border-radius: var(--att-radius-card, .9rem);
+  background: var(--att-color-surface, #fff);
+}
+.att-load-terminal-summary h3 { margin: 0; }
+.att-load-terminal-summary dl { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 16rem), 1fr)); gap: var(--att-space-2, .5rem) var(--att-space-4, 1rem); margin: 0; }
+.att-load-terminal-summary dl > div { min-width: 0; }
+.att-load-terminal-summary dt { color: var(--att-color-muted, #637087); font-size: .82rem; }
+.att-load-terminal-summary dd { margin: 0; overflow-wrap: anywhere; font-weight: 650; }
+.att-load-terminal-summary [role="alert"] { border-inline-start: .25rem solid var(--att-color-danger, #b42318); padding-inline-start: var(--att-space-3, .75rem); }
+
 .att-replay-review button:not(.button),
 .att-load-page button:not(.button),
 .att-jobs-page button:not(.button),
@@ -386,6 +401,12 @@
 .att-replay-summary { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: .6rem 1rem; }
 .att-replay-summary dt { font-size: .8rem; color: var(--att-color-muted); }
 .att-replay-summary dd { margin: .15rem 0 0; overflow-wrap: anywhere; }
+.att-replay-diff { border-top: 1px solid var(--att-color-border); padding-top: .5rem; }
+.att-replay-diff h3 { margin: .4rem 0; font-size: 1rem; }
+.att-replay-diff dl { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: .45rem .8rem; margin: 0; }
+.att-replay-diff dt { color: var(--att-color-muted); font-size: .8rem; }
+.att-replay-diff dd { margin: .1rem 0 0; overflow-wrap: anywhere; }
+.att-replay-diagnostics { padding-left: 1.25rem; overflow-wrap: anywhere; }
 .att-replay-advanced { margin: .8rem 0; }
 .att-jobs-page.att-query-workspace { gap: .6rem; }
 .att-jobs-page .att-feature-header { margin: 0; }
@@ -410,6 +431,7 @@
   .att-jobs-toolbar label { flex: 1 1 100%; justify-content: space-between; }
   .att-jobs-toolbar p { margin-left: 0; }
   .att-replay-summary { grid-template-columns: minmax(0,1fr); }
+  .att-replay-diff dl { grid-template-columns: minmax(0,1fr); }
 }
 
 /* All row controls share one wrapping flow; Details/Load actions retain their layout. */

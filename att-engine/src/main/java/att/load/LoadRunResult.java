@@ -3,6 +3,7 @@ package att.load;
 import att.Version;
 import att.core.ResultAggregator;
 import att.core.ResultStatus;
+import att.server.api.LoadTerminalResult;
 
 import java.time.Duration;
 import java.time.Instant;
@@ -129,6 +130,175 @@ public final class LoadRunResult {
         result.put("resources", resources);
         if (!evidence.isEmpty()) result.put("evidence", evidence);
         result.put("report", "report/index.html");
+        return result;
+    }
+
+    /** Full direct Engine/CLI result with bounded terminal diagnostics and coverage metadata. */
+    public Map<String, Object> toDetailedMap(String reportAvailability) {
+        Map<String, Object> result = toMap();
+        long durationMs = Math.max(0L, Duration.between(startedAt, endedAt).toMillis());
+        result.put("diagnostics", terminalDiagnostics(reportAvailability));
+        result.put("metricCoverage", terminalMetricCoverage(durationMs));
+        return result;
+    }
+
+    /** Builds the Worker/Server control-plane projection without copying full metrics or evidence maps. */
+    public Map<String, Object> toTerminalSummary(Map<String, Object> configuration) {
+        return toTerminalSummary(configuration, "PENDING");
+    }
+
+    /** Builds the compact projection with artifact publication kept independent from execution outcome. */
+    public Map<String, Object> toTerminalSummary(Map<String, Object> configuration, String reportAvailability) {
+        Map<String, Object> source = new LinkedHashMap<String, Object>();
+        long durationMs = Math.max(0L, Duration.between(startedAt, endedAt).toMillis());
+        source.put("executionId", runId); source.put("runId", runId); source.put("status", status().name());
+        source.put("exitCode", exitCode()); source.put("durationMs", durationMs);
+        source.put("startedAt", startedAt.toString()); source.put("endedAt", endedAt.toString());
+        source.put("executionStatus", executionStatus()); source.put("performanceVerdict", performanceVerdict());
+        source.put("metrics", metrics.values());
+        source.put("thresholds", thresholds.toMap());
+        Map<String, Object> workloadSummaries = new LinkedHashMap<String, Object>();
+        for (Map.Entry<String, LoadRunResult> entry : workloads.entrySet()) {
+            LoadRunResult workload = entry.getValue();
+            Map<String, Object> summary = new LinkedHashMap<String, Object>();
+            summary.put("status", workload.status().name()); summary.put("executionStatus", workload.executionStatus());
+            summary.put("performanceVerdict", workload.performanceVerdict()); summary.put("metrics", workload.metrics().values());
+            workloadSummaries.put(entry.getKey(), summary);
+        }
+        source.put("workloads", workloadSummaries);
+        source.put("resources", resources);
+        source.put("evidence", evidence);
+        source.put("diagnostics", terminalDiagnostics(reportAvailability));
+        source.put("metricCoverage", terminalMetricCoverage(durationMs));
+        Map<String, Object> completeness = new LinkedHashMap<String, Object>();
+        completeness.put("state", "OMITTED"); completeness.put("truncated", Boolean.TRUE);
+        Map<String, Object> omitted = new LinkedHashMap<String, Object>();
+        omitted.put("timeSeriesBuckets", metrics.buckets().size());
+        Object failureSamples = metrics.value("failureDiagnostics");
+        omitted.put("failureSamples", failureSamples instanceof List ? ((List<?>) failureSamples).size() : 0);
+        omitted.put("workloads", workloads.size()); omitted.put("thresholds", thresholds.results().size());
+        Object evidenceCount = evidence.get("count");
+        omitted.put("evidenceItems", evidenceCount instanceof Number ? ((Number) evidenceCount).intValue() : 0);
+        completeness.put("omittedCounts", omitted); completeness.put("detailSource", "load-summary.json");
+        source.put("detailCompleteness", completeness);
+        Map<String, Object> archive = new LinkedHashMap<String, Object>();
+        boolean reportProduced = !"FAILED".equals(reportAvailability) && !"OMITTED".equals(reportAvailability);
+        Map<String, Object> paths = new LinkedHashMap<String, Object>();
+        if (reportProduced) {
+            paths.put("loadSummaryJson", "load/" + runId + "/load-summary.json");
+            paths.put("loadSummaryYaml", "load/" + runId + "/load-summary.yaml");
+            paths.put("report", "load/" + runId + "/report/index.html");
+        }
+        String archiveState = reportProduced ? "PENDING" : "FAILED";
+        archive.put("paths", paths); archive.put("status", archiveState); archive.put("reportAvailability", archiveState);
+        if (!reportProduced) archive.put("omissionReason", "LOAD_REPORT_WRITE_FAILED");
+        source.put("archive", archive); source.put("reportProduced", reportProduced);
+        if (configuration != null) source.put("configuration", configuration);
+        return LoadTerminalResult.compact(source);
+    }
+
+    private Map<String, Object> terminalDiagnostics(String reportAvailability) {
+        Map<String, Object> result = new LinkedHashMap<String, Object>();
+        Object primary = metrics.value("primaryRuntimeError");
+        if (primary instanceof Map) result.put("primaryError", primary);
+        else {
+            Map<String, Object> preparation = preparationFailureDiagnostic();
+            if (preparation != null) result.put("primaryError", preparation);
+        }
+        Object classifications = metrics.value("runtimeErrorClassifications");
+        if (classifications instanceof Map) result.put("classifications", classifications);
+        List<Map<String, Object>> secondary = new ArrayList<Map<String, Object>>();
+        Map<String, Object> evidenceNotice = evidenceQuotaNotice();
+        if (evidenceNotice != null) secondary.add(evidenceNotice);
+        if ("FAILED".equals(reportAvailability)) {
+            secondary.add(att.server.api.LimitDiagnostic.create("LOAD_REPORT_WRITE_FAILED",
+                    "LOAD execution completed, but report artifacts could not be published.", null, null, null,
+                    "engine.loadReport", att.server.api.LimitOutcome.ARCHIVE_FAILED, "publication",
+                    "Retry report publication when storage is available; reduce detailed outputs if a report budget was exceeded.", null));
+        }
+        if (!secondary.isEmpty()) result.put("secondaryNotices", secondary);
+        return result;
+    }
+
+    private Map<String, Object> preparationFailureDiagnostic() {
+        Object raw = resources.get("preparation");
+        if (!(raw instanceof Map) || !"PREPARATION_FAILED".equals(((Map<?, ?>) raw).get("status"))) return null;
+        Map<?, ?> preparation = (Map<?, ?>) raw;
+        String failureCode = preparation.get("failureCode") instanceof String
+                ? (String) preparation.get("failureCode") : "";
+        if ("PREPARATION_LIMIT_EXCEEDED".equals(failureCode)) {
+            Object configured = preparation.get("perRunConnectionBudget");
+            Object observed = preparation.get("initialConnections");
+            return att.server.api.LimitDiagnostic.create("LOAD_RESOURCE_PREPARATION_LIMIT",
+                    "LOAD resource preparation exceeded its per-worker initial connection budget.",
+                    "load.initialConnectionsPerWorker", configured instanceof Number ? (Number) configured : null,
+                    observed instanceof Number ? (Number) observed : null, "engine.loadPreparation",
+                    att.server.api.LimitOutcome.EXECUTION_ERROR, "preparation",
+                    "Reduce helper minimum-ready connections or distribute work across additional Workers.", null);
+        }
+        if ("PREPARATION_TIMEOUT".equals(failureCode) || "PREPARATION_BUDGET_TIMEOUT".equals(failureCode)) {
+            Object configured = preparation.get("preparationDeadlineMs");
+            Object observed = preparation.get("preparationMs");
+            return att.server.api.LimitDiagnostic.create("LOAD_PREPARATION_TIMEOUT",
+                    "LOAD resource preparation did not complete before its deadline.",
+                    "load.preparationDeadlineMs", configured instanceof Number ? (Number) configured : null,
+                    observed instanceof Number ? (Number) observed : null, "engine.loadPreparation",
+                    att.server.api.LimitOutcome.EXECUTION_ERROR, "preparation",
+                    "Reduce helper readiness work or resolve slow connection setup before changing the deadline.", null);
+        }
+        return att.server.api.LimitDiagnostic.create("LOAD_RESOURCE_PREPARATION_FAILED",
+                "LOAD resources could not reach readiness before execution started.", null, null, null,
+                "engine.loadPreparation", att.server.api.LimitOutcome.EXECUTION_ERROR, "preparation",
+                "Check the bounded helper readiness diagnostics and resolve connectivity or resource setup failures.", null);
+    }
+
+    private Map<String, Object> evidenceQuotaNotice() {
+        long skippedSuccess = number(evidence.get("skippedSuccessQuotaCount"));
+        long skippedFailure = number(evidence.get("skippedFailureQuotaCount"));
+        long skipped = skippedSuccess > Long.MAX_VALUE - skippedFailure ? Long.MAX_VALUE : skippedSuccess + skippedFailure;
+        if (skipped <= 0L) return null;
+        String limitName = skippedSuccess > 0L && skippedFailure > 0L ? "load.evidence.sampleQuota"
+                : skippedFailure > 0L ? "load.evidence.maxFailureSamples" : "load.evidence.maxSuccessSamples";
+        return att.server.api.LimitDiagnostic.create("ATT-LOAD-EVIDENCE-QUOTA",
+                "Some iteration evidence was not retained after its configured quota was reached; aggregate metrics remain complete.",
+                limitName, null, skipped, "engine.loadEvidence", att.server.api.LimitOutcome.DATA_TRUNCATED,
+                "evidence", "Reduce retained evidence or use bounded sampling; aggregate counters remain complete.", null);
+    }
+
+    private static long number(Object value) {
+        return value instanceof Number ? Math.max(0L, ((Number) value).longValue()) : 0L;
+    }
+
+    private Map<String, Object> terminalMetricCoverage(long durationMs) {
+        Map<String, Object> result = new LinkedHashMap<String, Object>();
+        result.put("loadMetricsBucketCapacity", metrics.value("timeSeriesBucketCapacity"));
+        result.put("loadMetricsBucketCount", metrics.buckets().size());
+        result.put("loadMetricsBucketWidthMs", 1000L);
+        Object evicted = metrics.value("timeSeriesBucketsEvicted");
+        result.put("evictedBucketCount", evicted instanceof Number ? evicted : 0L);
+        if (evicted instanceof Number && ((Number) evicted).longValue() > 0L) result.put("outcome", "METRICS_SAMPLED");
+        long first = Long.MAX_VALUE, last = Long.MIN_VALUE;
+        for (String key : metrics.buckets().keySet()) {
+            try { long at = Long.parseLong(key); first = Math.min(first, at); last = Math.max(last, at); }
+            catch (NumberFormatException ignored) { }
+        }
+        if (first != Long.MAX_VALUE && last != Long.MIN_VALUE) {
+            result.put("observedBucketStartEpochMs", first); result.put("observedBucketEndEpochMs", last + 1000L);
+            result.put("observedBucketCoverageMs", Math.max(0L, last - first + 1000L));
+        }
+        int capacity = ((Number) metrics.value("timeSeriesBucketCapacity")).intValue();
+        result.put("runDurationMs", durationMs); result.put("fullDurationInRollingWindow", durationMs <= capacity * 1000L);
+        Object windowValue = metrics.value("windowMetrics");
+        if (windowValue instanceof Map) {
+            Object seriesValue = ((Map<?, ?>) windowValue).get("timeSeries");
+            if (seriesValue instanceof Map) {
+                Map<?, ?> series = (Map<?, ?>) seriesValue;
+                result.put("windowSeriesCapacity", series.get("capacity"));
+                result.put("windowSeriesBinWidthMs", series.get("bucketDurationMs"));
+                result.put("windowSeriesCoverage", series.get("coverage"));
+            }
+            result.put("windowMetricsSchemaVersion", ((Map<?, ?>) windowValue).get("schemaVersion"));
+        }
         return result;
     }
 

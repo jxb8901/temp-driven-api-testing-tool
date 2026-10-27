@@ -155,11 +155,13 @@ public final class PackageConfigurationInspector {
         if (packageTestdata) {
             selected = new att.testdata.TestdataRegistry(packageRoot, config.testdataDescriptors(), Collections.<Path>emptyList()).resolve(descriptorId);
             PackageResourceResolver.PackageResource resolved = resources.fromInternalPath(selected.source(), PackageResourceResolver.Kind.FILE);
-            if (Files.size(resolved.canonicalPath()) > MAX_DESCRIPTOR_BYTES) throw new ConfigurationLimitException();
+            long size=Files.size(resolved.canonicalPath());
+            if (size > MAX_DESCRIPTOR_BYTES) throw new ConfigurationLimitException("packageConfiguration.maxDescriptorBytes",MAX_DESCRIPTOR_BYTES,size);
             selectedSource = resolved.logicalName();
         } else for (Path path : config.testdataDescriptors()) {
             PackageResourceResolver.PackageResource resolved = resources.fromInternalPath(path, PackageResourceResolver.Kind.FILE);
-            if (Files.size(resolved.canonicalPath()) > MAX_DESCRIPTOR_BYTES) throw new ConfigurationLimitException();
+            long size=Files.size(resolved.canonicalPath());
+            if (size > MAX_DESCRIPTOR_BYTES) throw new ConfigurationLimitException("packageConfiguration.maxDescriptorBytes",MAX_DESCRIPTOR_BYTES,size);
             TestdataDescriptor candidate = new TestdataDescriptorLoader(packageRoot).load(resolved.canonicalPath());
             if (descriptorId.equals(candidate.id())) {
                 if (selected != null) throw new IllegalArgumentException("Testdata descriptor id is ambiguous in the effective registry");
@@ -889,7 +891,8 @@ public final class PackageConfigurationInspector {
         TestdataDescriptorLoader loader = new TestdataDescriptorLoader(packageRoot);
         for (Path path : config.testdataDescriptors()) {
             PackageResourceResolver.PackageResource resource = resources.fromInternalPath(path, PackageResourceResolver.Kind.FILE);
-            if (Files.size(resource.canonicalPath()) > MAX_DESCRIPTOR_BYTES) throw new ConfigurationLimitException();
+            long size=Files.size(resource.canonicalPath());
+            if (size > MAX_DESCRIPTOR_BYTES) throw new ConfigurationLimitException("packageConfiguration.maxDescriptorBytes",MAX_DESCRIPTOR_BYTES,size);
             TestdataDescriptor descriptor = loader.load(resource.canonicalPath());
             Map<String, Object> entry = entry(descriptor.id(), source);
             entry.put("source", resource.logicalName());
@@ -922,7 +925,8 @@ public final class PackageConfigurationInspector {
         if(snapshots != null&&configFile().startsWith(packageRoot))try { return snapshots.get(packageRoot,configPath,null,snapshotContext,false).raw; }
         catch(Exception unavailable) { /* Read and validate using the uncached path below. */ }
         PackageResourceResolver.PackageResource resource = configResources.fromInternalPath(configFile(), PackageResourceResolver.Kind.FILE);
-        if (Files.size(resource.canonicalPath()) > MAX_CONFIG_BYTES) throw new ConfigurationLimitException();
+        long size=Files.size(resource.canonicalPath());
+        if (size > MAX_CONFIG_BYTES) throw new ConfigurationLimitException("packageConfiguration.maxConfigBytes",MAX_CONFIG_BYTES,size);
         long started=System.nanoTime();
         Object loaded = YamlSupport.load(resource.canonicalPath());
         att.metrics.InspectionMetrics.JVM.record(att.metrics.InspectionMetrics.Stage.CONFIG_PARSE,System.nanoTime()-started);
@@ -953,7 +957,7 @@ public final class PackageConfigurationInspector {
                 if (!(value instanceof String)) continue;
                 if (!"testdata".equals(key) && !Files.exists(configResources.internalCandidate(
                         RuntimeConfigPath.root(configFile()).resolve(String.valueOf(value))), java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
-                    if (++count > MAX_REFERENCED_FILES) throw new ConfigurationLimitException();
+                    if (++count > MAX_REFERENCED_FILES) throw new ConfigurationLimitException("packageConfiguration.maxReferencedFiles",MAX_REFERENCED_FILES,count);
                     continue; // The discovery loader still validates the path and reports unavailable Helpers.
                 }
                 totalBytes = checkDescriptorLimit(++count, totalBytes, String.valueOf(value), !"testdata".equals(key));
@@ -962,9 +966,9 @@ public final class PackageConfigurationInspector {
     }
 
     private long checkDescriptorLimit(int count, long totalBytes, String authored, boolean central) throws Exception {
-        if (count > MAX_REFERENCED_FILES) throw new ConfigurationLimitException();
+        if (count > MAX_REFERENCED_FILES) throw new ConfigurationLimitException("packageConfiguration.maxReferencedFiles",MAX_REFERENCED_FILES,count);
         long nextBytes = totalBytes + checkDescriptor(authored, central);
-        if (nextBytes > MAX_TOTAL_DESCRIPTOR_BYTES) throw new ConfigurationLimitException();
+        if (nextBytes > MAX_TOTAL_DESCRIPTOR_BYTES) throw new ConfigurationLimitException("packageConfiguration.maxTotalDescriptorBytes",MAX_TOTAL_DESCRIPTOR_BYTES,nextBytes);
         return nextBytes;
     }
 
@@ -977,7 +981,7 @@ public final class PackageConfigurationInspector {
             throw new IllegalArgumentException("Shared descriptor escaped config/");
         if (Files.isSymbolicLink(logical)) throw new IllegalArgumentException("Package configuration descriptor is invalid");
         long size = Files.size(resource.canonicalPath());
-        if (size > MAX_DESCRIPTOR_BYTES) throw new ConfigurationLimitException();
+        if (size > MAX_DESCRIPTOR_BYTES) throw new ConfigurationLimitException("packageConfiguration.maxDescriptorBytes",MAX_DESCRIPTOR_BYTES,size);
         return size;
     }
 
@@ -1223,7 +1227,14 @@ public final class PackageConfigurationInspector {
     private static Map<?, ?> object(Object value) { return value instanceof Map ? (Map<?, ?>) value : Collections.emptyMap(); }
 
     public static final class ResponseTooLargeException extends RuntimeException { }
-    public static final class ConfigurationLimitException extends RuntimeException { }
+    public static final class ConfigurationLimitException extends RuntimeException {
+        public final String limitName;
+        public final long configuredLimit;
+        public final long observed;
+        public ConfigurationLimitException(String limitName,long configuredLimit,long observed) {
+            this.limitName=limitName;this.configuredLimit=configuredLimit;this.observed=observed;
+        }
+    }
 
     private static final class ObjectsEqual {
         private static boolean value(Object left, Object right) { return left == null ? right == null : left.equals(right); }

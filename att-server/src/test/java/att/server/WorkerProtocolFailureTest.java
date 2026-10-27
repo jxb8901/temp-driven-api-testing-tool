@@ -33,6 +33,63 @@ class WorkerProtocolFailureTest {
         }
     }
 
+    @Test void abnormalWorkerExitIsAnExecutionErrorWithSafeExitEvidence() throws Exception {
+        try(ServerRuntime runtime=runtime()) {
+            Job job=job(runtime);
+            runtime.recordWorkerExit(job,137);
+            runtime.finish(job,"ERROR",137);
+            var diagnostic=ServerRuntime.JSON.readTree(job.diagnosticJson);
+            assertEquals("ATT-SERVER-WORKER-EXITED",diagnostic.path("code").asText());
+            assertEquals("EXECUTION_ERROR",diagnostic.path("outcome").asText());
+            assertEquals("worker.processTermination",diagnostic.path("limitName").asText());
+            assertEquals(137,diagnostic.path("exitCode").asInt());
+            assertEquals("ERROR",job.status);assertEquals(137,job.exitCode);
+            assertFalse(diagnostic.toString().contains(runtime.config.dataDir.toString()));
+        }
+    }
+
+    @Test void structuredRuntimeCauseRemainsPrimaryAfterProtocolTruncationAndWorkerExit() throws Exception {
+        try(ServerRuntime runtime=runtime()) {
+            Job job=job(runtime);runtime.recordProtocolLimit(job,oversized());
+            runtime.handleWorkerEvent(job,"{\"type\":\"DIAGNOSTIC\",\"code\":\"HTTP_RESPONSE_TOO_LARGE\",\"message\":\"HTTP response exceeded its configured byte limit\",\"outcome\":\"EXECUTION_ERROR\",\"stage\":\"execution\"}");
+            runtime.recordWorkerExit(job,3);runtime.finish(job,"ERROR",3);
+            var diagnostic=ServerRuntime.JSON.readTree(job.diagnosticJson);
+            assertEquals("HTTP_RESPONSE_TOO_LARGE",diagnostic.path("code").asText());
+            assertEquals("EXECUTION_ERROR",diagnostic.path("outcome").asText());
+            String events=Files.readString(runtime.config.dataDir.resolve("jobs").resolve(job.id).resolve("events.jsonl"));
+            assertTrue(events.contains("ATT-SERVER-WORKER-EVENT-TOO-LARGE"));
+            assertFalse(events.contains("private-canary"));
+        }
+    }
+
+    @Test void classifiedCauseStaysPrimaryWhenSecondaryArrivesBeforeTerminalResult() throws Exception {
+        try(ServerRuntime runtime=runtime()) {
+            Job job=job(runtime,"load");
+            runtime.handleWorkerEvent(job,"{\"type\":\"DIAGNOSTIC\",\"code\":\"HTTP_RESPONSE_TOO_LARGE\",\"message\":\"bounded helper response exceeded\",\"outcome\":\"EXECUTION_ERROR\",\"stage\":\"execution\"}");
+            runtime.handleWorkerEvent(job,"{\"type\":\"DIAGNOSTIC\",\"code\":\"SECONDARY\",\"message\":\"optional detail was omitted\"}");
+            runtime.handleWorkerEvent(job,"{\"type\":\"RESULT\",\"status\":\"ERROR\",\"exitCode\":3,\"result\":{\"status\":\"ERROR\",\"diagnostics\":[]}}");
+            assertEquals("ERROR",job.status);assertEquals(3,job.exitCode);
+            assertEquals("HTTP_RESPONSE_TOO_LARGE",ServerRuntime.JSON.readTree(job.diagnosticJson).path("code").asText());
+            var diagnostics=ServerRuntime.JSON.readTree(job.resultJson).path("summary").path("diagnostics");
+            assertEquals("HTTP_RESPONSE_TOO_LARGE",diagnostics.path("primaryError").path("code").asText());
+            assertTrue(diagnostics.toString().contains("SECONDARY"),diagnostics.toString());
+        }
+    }
+
+    @Test void classifiedCauseStaysPrimaryWhenSecondaryArrivesBeforeMissingResultExit() throws Exception {
+        try(ServerRuntime runtime=runtime()) {
+            Job job=job(runtime,"load");
+            runtime.handleWorkerEvent(job,"{\"type\":\"DIAGNOSTIC\",\"code\":\"HTTP_RESPONSE_TOO_LARGE\",\"message\":\"bounded helper response exceeded\",\"outcome\":\"EXECUTION_ERROR\",\"stage\":\"execution\"}");
+            runtime.handleWorkerEvent(job,"{\"type\":\"DIAGNOSTIC\",\"code\":\"SECONDARY\",\"message\":\"optional detail was omitted\"}");
+            runtime.recordWorkerExit(job,3);runtime.finish(job,"ERROR",3);
+            assertEquals("ERROR",job.status);assertEquals(3,job.exitCode);
+            assertEquals("HTTP_RESPONSE_TOO_LARGE",ServerRuntime.JSON.readTree(job.diagnosticJson).path("code").asText());
+            var diagnostics=ServerRuntime.JSON.readTree(job.resultJson).path("summary").path("diagnostics");
+            assertEquals("HTTP_RESPONSE_TOO_LARGE",diagnostics.path("primaryError").path("code").asText());
+            assertTrue(diagnostics.toString().contains("SECONDARY"),diagnostics.toString());
+        }
+    }
+
     @Test void oversizedProgressDoesNotPreventAValidLaterErrorResultAndMetrics() throws Exception {
         try(ServerRuntime runtime=runtime()) {
             Job job=job(runtime);runtime.recordProtocolLimit(job,oversized());
@@ -85,9 +142,12 @@ class WorkerProtocolFailureTest {
         assertNotNull(raw,record.toString());
         var diagnostic=ServerRuntime.JSON.readTree(String.valueOf(raw));
         assertEquals("ATT-SERVER-WORKER-EVENT-TOO-LARGE",diagnostic.path("code").asText());
+        assertEquals("DATA_TRUNCATED",diagnostic.path("outcome").asText());
+        assertEquals("worker.protocol.maxFrameBytes",diagnostic.path("limitName").asText());
         assertEquals("PROGRESS",diagnostic.path("eventType").asText());
         assertTrue(diagnostic.path("sizeBytes").asLong()>diagnostic.path("limitBytes").asLong());
         assertEquals("ATT-SERVER-WORKER-EXITED",diagnostic.path("workerExit").path("code").asText());
+        assertEquals("EXECUTION_ERROR",diagnostic.path("workerExit").path("outcome").asText());
         assertFalse(String.valueOf(raw).contains("private-canary"));
     }
     private WorkerProtocol.Frame oversized()throws Exception {
@@ -95,8 +155,11 @@ class WorkerProtocolFailureTest {
         return WorkerProtocol.read(new ByteArrayInputStream(line.getBytes(StandardCharsets.UTF_8)),WorkerProtocol.MAX_FRAME_BYTES);
     }
     private Job job(ServerRuntime runtime)throws Exception {
+        return job(runtime,"debug");
+    }
+    private Job job(ServerRuntime runtime,String command)throws Exception {
         Path directory=Files.createDirectories(runtime.config.dataDir.resolve("jobs/J1234567890ABCDEF"));
-        Job job=new Job("J1234567890ABCDEF","debug","p","ci",new WorkerRequest(),new JobEvents(directory.resolve("events.jsonl"),100));
+        Job job=new Job("J1234567890ABCDEF",command,"p","ci",new WorkerRequest(),new JobEvents(directory.resolve("events.jsonl"),100));
         job.status="RUNNING";runtime.store.insert(job,"{}");return job;
     }
     private ServerRuntime runtime()throws Exception {
