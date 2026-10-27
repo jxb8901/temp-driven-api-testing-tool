@@ -50,11 +50,31 @@ class LoadSoakEvidenceTest(unittest.TestCase):
             }
             (directory / "checkpoint-00000000000000000001.json").write_text(
                 json.dumps(checkpoint, separators=(",", ":")), encoding="utf-8")
-            self.assertEqual(1, soak.latest_checkpoint(directory, "run-1")["sequence"])
-            self.assertIsNone(soak.latest_checkpoint(directory, "other-run"))
+            self.assertEqual(1, soak.latest_checkpoint(directory, "run-1", soak.CHECKPOINT_SCOPE)["sequence"])
+            self.assertIsNone(soak.latest_checkpoint(directory, "other-run", soak.CHECKPOINT_SCOPE))
             checkpoint["payload"]["metrics"]["completed"] = 1
             (directory / "checkpoint-00000000000000000001.json").write_text(json.dumps(checkpoint), encoding="utf-8")
-            self.assertIsNone(soak.latest_checkpoint(directory, "run-1"))
+            self.assertIsNone(soak.latest_checkpoint(directory, "run-1", soak.CHECKPOINT_SCOPE))
+
+    def test_aggregate_checkpoint_scope_is_used_for_soak_progress(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            payload = {"metrics": {"scheduled": 12, "started": 12, "completed": 12, "success": 12}}
+            checkpoint = {
+                "schemaVersion": "att-load-metrics-checkpoint/v1",
+                "state": "CHECKPOINT",
+                "runId": "run-aggregate",
+                "scope": "aggregate",
+                "sequence": 1,
+                "capturedAt": datetime.now(timezone.utc).isoformat(),
+                "finalized": False,
+                "payload": payload,
+                "integritySha256": hashlib.sha256(soak.canonical_json_bytes(payload)).hexdigest(),
+            }
+            (directory / "checkpoint-00000000000000000001.json").write_text(
+                json.dumps(checkpoint, separators=(",", ":")), encoding="utf-8")
+            self.assertEqual("aggregate", soak.AGGREGATE_CHECKPOINT_SCOPE)
+            self.assertEqual(1, soak.latest_checkpoint(directory, "run-aggregate")["sequence"])
 
     def test_five_minute_rates_keep_scheduled_started_completed_and_success_distinct(self):
         start = datetime(2026, 10, 26, tzinfo=timezone.utc)
@@ -116,7 +136,7 @@ class LoadSoakEvidenceTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             run = root / "scratch" / "output" / "load" / "run-2"
-            checkpoint_dir = run / "checkpoints" / soak.CHECKPOINT_SCOPE
+            checkpoint_dir = run / "checkpoints" / soak.AGGREGATE_CHECKPOINT_SCOPE
             checkpoint_dir.mkdir(parents=True)
             (run / "partial.txt").write_text("preserve", encoding="utf-8")
             payload = {"metrics": {"scheduled": 5000, "started": 5000, "completed": 4999,
@@ -124,7 +144,7 @@ class LoadSoakEvidenceTest(unittest.TestCase):
                                    "dropped": 0, "currentInFlight": 1}}
             checkpoint = {
                 "schemaVersion": "att-load-metrics-checkpoint/v1", "state": "CHECKPOINT",
-                "runId": "run-2", "scope": soak.CHECKPOINT_SCOPE, "sequence": 7,
+                "runId": "run-2", "scope": soak.AGGREGATE_CHECKPOINT_SCOPE, "sequence": 7,
                 "capturedAt": datetime.now(timezone.utc).isoformat(), "finalized": False,
                 "payload": payload,
             }
@@ -168,14 +188,14 @@ class LoadSoakEvidenceTest(unittest.TestCase):
                     return self.returncode
 
             def start_fake_process(command, cwd, env, **kwargs):
-                checkpoint_dir = Path(env["ATT_PACKAGE_ROOT"]) / "output/load/fake-process-run/checkpoints" / soak.CHECKPOINT_SCOPE
+                checkpoint_dir = Path(env["ATT_PACKAGE_ROOT"]) / "output/load/fake-process-run/checkpoints" / soak.AGGREGATE_CHECKPOINT_SCOPE
                 checkpoint_dir.mkdir(parents=True)
                 payload = {"metrics": {"scheduled": 12, "started": 12, "completed": 11,
                                         "success": 11, "failure": 0, "runtimeError": 0,
                                         "dropped": 0, "currentInFlight": 1}}
                 checkpoint = {
                     "schemaVersion": "att-load-metrics-checkpoint/v1", "state": "CHECKPOINT",
-                    "runId": "fake-process-run", "scope": soak.CHECKPOINT_SCOPE,
+                    "runId": "fake-process-run", "scope": soak.AGGREGATE_CHECKPOINT_SCOPE,
                     "sequence": 2, "capturedAt": datetime.now(timezone.utc).isoformat(),
                     "finalized": False, "payload": payload,
                     "integritySha256": hashlib.sha256(soak.canonical_json_bytes(payload)).hexdigest(),
@@ -189,7 +209,7 @@ class LoadSoakEvidenceTest(unittest.TestCase):
                     self.assertRaisesRegex(RuntimeError, "first verified checkpoint is missing"):
                 soak.run_soak(args)
 
-            copied = evidence / "load/fake-process-run/checkpoints" / soak.CHECKPOINT_SCOPE
+            copied = evidence / "load/fake-process-run/checkpoints" / soak.AGGREGATE_CHECKPOINT_SCOPE
             saved_checkpoint = soak.latest_checkpoint(copied, "fake-process-run")
             self.assertIsNotNone(saved_checkpoint)
             self.assertEqual(2, saved_checkpoint["sequence"])

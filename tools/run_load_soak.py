@@ -16,6 +16,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 
+AGGREGATE_CHECKPOINT_SCOPE = "aggregate"
 CHECKPOINT_SCOPE = "workload-local-soak"
 REQUIRED_DURATION_HOURS = 25
 MIN_COMPLETED_TPS = 100.0
@@ -54,7 +55,7 @@ def checkpoint_payload_bytes(source):
     return text[value_start:value_end].encode("utf-8")
 
 
-def verified_checkpoints(directory, run_id, scope=CHECKPOINT_SCOPE):
+def verified_checkpoints(directory, run_id, scope=AGGREGATE_CHECKPOINT_SCOPE):
     verified = []
     for path in sorted(directory.glob("checkpoint-*.json"), reverse=True):
         try:
@@ -81,7 +82,7 @@ def verified_checkpoints(directory, run_id, scope=CHECKPOINT_SCOPE):
     return sorted(verified, key=lambda checkpoint: int(checkpoint["sequence"]))
 
 
-def latest_checkpoint(directory, run_id, scope=CHECKPOINT_SCOPE):
+def latest_checkpoint(directory, run_id, scope=AGGREGATE_CHECKPOINT_SCOPE):
     checkpoints = verified_checkpoints(directory, run_id, scope)
     return checkpoints[-1] if checkpoints else None
 
@@ -279,7 +280,7 @@ def capture_incomplete_evidence(evidence_root, run_directory, checkpoint_dir, ru
         "complete": False,
         "elapsedSeconds": max(0.0, elapsed_seconds),
         "reason": str(reason)[:2000],
-        "checkpointDirectory": "load/{}/checkpoints/{}".format(run_id, CHECKPOINT_SCOPE),
+        "checkpointDirectory": "load/{}/checkpoints/{}".format(run_id, AGGREGATE_CHECKPOINT_SCOPE),
     }
     if exit_code is not None:
         acceptance["exitCode"] = exit_code
@@ -482,7 +483,7 @@ def run_soak(args):
         package_root.mkdir(parents=True)
         scenario, launcher = install_soak_package(repository, runtime_root, package_root,
                                                    args.arrival_rate, args.duration_hours, args.max_concurrent)
-        checkpoint_dir = package_root / "output" / "load" / run_id / "checkpoints" / CHECKPOINT_SCOPE
+        checkpoint_dir = package_root / "output" / "load" / run_id / "checkpoints" / AGGREGATE_CHECKPOINT_SCOPE
         logs = evidence_root / "logs"
         logs.mkdir(parents=True, exist_ok=True)
         stdout_log = logs / "att.stdout.log"
@@ -510,7 +511,7 @@ def run_soak(args):
 
             def consume_checkpoints():
                 nonlocal previous, last_sequence, last_progress
-                for checkpoint in verified_checkpoints(checkpoint_dir, run_id):
+                for checkpoint in verified_checkpoints(checkpoint_dir, run_id, AGGREGATE_CHECKPOINT_SCOPE):
                     sequence = int(checkpoint.get("sequence", 0))
                     if sequence <= last_sequence:
                         continue
@@ -578,7 +579,7 @@ def run_soak(args):
                 "commitSha": args.commit_sha,
                 "result": "REPORT_UNAVAILABLE",
                 "exitCode": process.returncode,
-                "checkpointDirectory": "load/{}/checkpoints/{}".format(run_id, CHECKPOINT_SCOPE),
+                "checkpointDirectory": "load/{}/checkpoints/{}".format(run_id, AGGREGATE_CHECKPOINT_SCOPE),
                 "reason": "ATT exited without a canonical LOAD summary or report commit manifest; any retained checkpoints remain incomplete evidence.",
             })
             raise RuntimeError("ATT exited without a canonical LOAD summary; see the captured logs")
@@ -612,7 +613,7 @@ def run_soak(args):
         if (not aggregate_checkpoints.get("enabled") or aggregate_checkpoints.get("writeFailures") != 0
                 or not workload_checkpoints.get("enabled") or workload_checkpoints.get("writeFailures") != 0):
             raise RuntimeError("LOAD checkpointing was disabled or reported a write failure")
-        verify_final_checkpoint(run_directory / "checkpoints" / "aggregate", run_id, "aggregate",
+        verify_final_checkpoint(run_directory / "checkpoints" / AGGREGATE_CHECKPOINT_SCOPE, run_id, AGGREGATE_CHECKPOINT_SCOPE,
                                 manifest.get("checkpointSequences", {}).get("aggregate"))
         verify_final_checkpoint(run_directory / "checkpoints" / CHECKPOINT_SCOPE, run_id, CHECKPOINT_SCOPE,
                                 manifest.get("checkpointSequences", {}).get("local-soak"))
