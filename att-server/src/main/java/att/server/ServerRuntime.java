@@ -434,7 +434,7 @@ final class ServerRuntime implements AutoCloseable {
                     att.server.api.ConfigurationSnapshot.copy(configuration),null,Collections.emptyList(),expires));
             Map<String,Object> result=new LinkedHashMap<>(jobReplay(id,principal));
             Object oldConfiguration=result.remove("configuration");if(oldConfiguration!=null)result.put("originalConfiguration",oldConfiguration);
-            result.put("schemaVersion","att-job-replay-draft/v1");result.put("definition",definition);result.put("originalDefinition",originalDefinition);result.put("sourcePolicy",sourcePolicy);
+            result.put("schemaVersion","att-job-replay-draft/v1");result.put("sourceJobId",id);result.put("definition",definition);result.put("originalDefinition",originalDefinition);result.put("sourcePolicy",sourcePolicy);
             result.put("originalRevision",spec.revision());result.put("currentRevision",selectedRevision);result.put("configuration",configuration);
             result.put("missingFields",replayMissingFields(definition));
             result.put("intentId",intent);result.put("draftId",draftId);result.put("draftRef",draftId);result.put("expiresAt",expires.toString());result.put("preview",draft);return result;

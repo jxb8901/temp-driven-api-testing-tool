@@ -299,6 +299,7 @@ class ServerRuntimeJobReplayTest {
                     "workloads",List.of(Map.of("id","smoke-a","load",Map.of("users",2)),Map.of("id","smoke-b","load",Map.of("users",3))));
             Map<String,Object> review=runtime.createJobReplayDraft(original,"alice",ServerRuntime.JSON.valueToTree(Map.of("sourcePolicy","current","overrides",edits)));
             assertEquals("att-job-replay-draft/v1",review.get("schemaVersion"));assertNotEquals(originalRevision,review.get("currentRevision"));
+            assertEquals(original,review.get("sourceJobId"));
             assertEquals(originalRevision,review.get("originalRevision"));
             assertEquals("1s",ServerRuntime.JSON.valueToTree(review.get("originalDefinition")).path("scenario").path("load").path("duration").asText());
             assertEquals("24h",ServerRuntime.JSON.valueToTree(review.get("definition")).path("scenario").path("load").path("duration").asText());
