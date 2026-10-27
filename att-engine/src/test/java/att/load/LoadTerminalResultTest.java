@@ -43,7 +43,8 @@ class LoadTerminalResultTest {
         Map<?,?> cliMetrics = (Map<?,?>) cliSummary.get("metrics");
         Map<?,?> cliDiagnostics = (Map<?,?>) cliSummary.get("diagnostics");
         Map<?,?> cliPrimary = (Map<?,?>) cliDiagnostics.get("primaryError");
-        assertEquals("att-load-summary/v1.2", cliSummary.get("schemaVersion"));
+        assertEquals("att-load-summary/v1.3", cliSummary.get("schemaVersion"));
+        att.validation.JsonSchemaVerifier.verify(java.nio.file.Paths.get("schemas/att-load-summary-v1.3.schema.json"), cliSummary);
         assertTrue(cliMetrics.containsKey("buckets"), "direct Engine/CLI result keeps full summary");
         assertEquals("MQ_POOL_TIMEOUT", cliPrimary.get("code"), "direct CLI results expose the primary cause");
         assertEquals("mq.pool.connectionRequestTimeoutMs", cliPrimary.get("limitName"));
