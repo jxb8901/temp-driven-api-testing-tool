@@ -120,6 +120,9 @@ function useLoadArchiveSummary(api: LoadJobsApi, jobId: string, enabled: boolean
   const [error, setError] = useState('');
   const [attempt, setAttempt] = useState(0);
   const sequence = useRef(0);
+  // Retain a small, per-job sidecar cache across tab switches without keeping 100 MiB reports in memory.
+  const seriesCache = useRef(new Map<string, string>());
+  useEffect(() => { seriesCache.current.clear(); }, [jobId]);
   const features = api === serverApi ? artifactApi : api;
 
   useEffect(() => {
@@ -183,7 +186,8 @@ function useLoadArchiveSummary(api: LoadJobsApi, jobId: string, enabled: boolean
         setDetailRoot(root);
         if (includeSummary && includeMetricSeries) {
           setDetailMetrics(await restoreMetricSeries(
-            metrics as Record<string, unknown>, features, jobId, root, controller.signal));
+            metrics as Record<string, unknown>, features, jobId, root, controller.signal, seriesCache.current));
+          if (controller.signal.aborted || current !== sequence.current) return;
         }
       } catch (reason) {
         if (!controller.signal.aborted && current === sequence.current) {
@@ -201,7 +205,7 @@ function useLoadArchiveSummary(api: LoadJobsApi, jobId: string, enabled: boolean
 const MAX_DETAIL_SERIES_FILES = 9000;
 
 async function restoreMetricSeries(metrics: Record<string, unknown>, api: Pick<LoadJobsApi, 'getJobArtifactText'>, jobId: string, root: string,
-                                   signal: AbortSignal): Promise<Record<string, unknown>> {
+                                   signal: AbortSignal, cache: Map<string, string>): Promise<Record<string, unknown>> {
   const ref = metrics.detailSeries;
   if (!ref || typeof ref !== 'object' || Array.isArray(ref)) return metrics;
   const reference = ref as Record<string, unknown>;
@@ -224,22 +228,41 @@ async function restoreMetricSeries(metrics: Record<string, unknown>, api: Pick<L
         || !['map', 'list'].includes(String(record.kind)) || !Number.isSafeInteger(record.count)
         || !Array.isArray(record.files) || record.files.length === 0)
       throw new Error('The archived LOAD metric-series entry is incomplete.');
-    const chunks: Array<{ part: number; parts: number; items: unknown }> = [];
-    for (const path of record.files) {
-      const artifactPath = safeArtifactPath(root, path);
-      if (!artifactPath) throw new Error('The archived LOAD metric-series path is invalid.');
-      const parsed: unknown = JSON.parse(await api.getJobArtifactText(jobId, artifactPath, signal));
-      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('An archived LOAD metric-series chunk is invalid.');
-      const chunk = parsed as Record<string, unknown>;
-      const validItems = record.kind === 'list' ? Array.isArray(chunk.items)
-        : Boolean(chunk.items && typeof chunk.items === 'object' && !Array.isArray(chunk.items));
-      if (chunk.schemaVersion !== 'att-load-detail-series/v1' || chunk.scope !== 'aggregate'
-          || chunk.target !== record.target || chunk.kind !== record.kind || !Number.isSafeInteger(chunk.part)
-          || !Number.isSafeInteger(chunk.parts) || chunk.total !== record.count
-          || !validItems)
-        throw new Error('An archived LOAD metric-series chunk does not match its reference.');
-      chunks.push({ part: chunk.part as number, parts: chunk.parts as number, items: chunk.items });
-    }
+    // Metrics charts consume buckets. Other series are loaded only via their authorized artifact links,
+    // rather than eagerly fetching every diagnostic and workload collection.
+    if (record.target !== 'metrics/buckets') continue;
+    const paths = record.files.map(path => safeArtifactPath(root, path));
+    if (paths.some(path => !path)) throw new Error('The archived LOAD metric-series path is invalid.');
+    const chunks: Array<{ part: number; parts: number; items: unknown }> = new Array(paths.length);
+    let next = 0;
+    await Promise.all(Array.from({ length: Math.min(8, paths.length) }, async () => {
+      while (next < paths.length) {
+        if (signal.aborted) throw new Error('Metric-series retrieval was cancelled.');
+        const index = next++;
+        const artifactPath = paths[index]!;
+        const key = jobId + ':' + artifactPath;
+        let text = cache.get(key);
+        if (text === undefined) {
+          text = await api.getJobArtifactText!(jobId, artifactPath, signal);
+          if (signal.aborted) throw new Error('Metric-series retrieval was cancelled.');
+          if (text.length <= 1024 * 1024) {
+            if (cache.size >= 32) cache.delete(cache.keys().next().value!);
+            cache.set(key, text);
+          }
+        }
+        const parsed: unknown = JSON.parse(text);
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('An archived LOAD metric-series chunk is invalid.');
+        const chunk = parsed as Record<string, unknown>;
+        const validItems = record.kind === 'list' ? Array.isArray(chunk.items)
+          : Boolean(chunk.items && typeof chunk.items === 'object' && !Array.isArray(chunk.items));
+        if (chunk.schemaVersion !== 'att-load-detail-series/v1' || chunk.scope !== 'aggregate'
+            || chunk.target !== record.target || chunk.kind !== record.kind || !Number.isSafeInteger(chunk.part)
+            || !Number.isSafeInteger(chunk.parts) || chunk.total !== record.count
+            || !validItems)
+          throw new Error('An archived LOAD metric-series chunk does not match its reference.');
+        chunks[index] = { part: chunk.part as number, parts: chunk.parts as number, items: chunk.items };
+      }
+    }));
     chunks.sort((left, right) => left.part - right.part);
     const expectedParts = chunks.length;
     if (chunks.some((chunk, index) => chunk.part !== index + 1 || chunk.parts !== expectedParts))
