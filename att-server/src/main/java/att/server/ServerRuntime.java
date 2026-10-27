@@ -3901,6 +3901,8 @@ final class ServerRuntime implements AutoCloseable {
         // Producer output requiring masking is not safe to publish until the producer fixes it.
         if(!att.server.api.internal.DiagnosticSanitizer.redactText(text).equals(text))
             throw new IllegalArgumentException("Artifact contains unapproved sensitive text");
+        if(!att.server.api.internal.DiagnosticSanitizer.redactAbsolutePaths(text).equals(text))
+            throw new IllegalArgumentException("Artifact contains unapproved host-local paths");
         String name=file.getFileName().toString().toLowerCase(java.util.Locale.ROOT);
         if(name.endsWith(".json") || name.endsWith(".yaml") || name.endsWith(".yml")) {
             try {
