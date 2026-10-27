@@ -461,7 +461,7 @@ describe('JobsPage React feature', () => {
       phases: { WARMUP: { completed: 2, passed: 2 }, STEADY: { completed: 8, passed: 6, sutFailures: 1, runtimeErrors: 1 } },
       rates: { completedTps: 2, successfulTps: 1.6 }, latency: { sampleCount: 10, meanMs: 40, p95Ms: 64, p99Ms: 127 },
       checkpointInterval: { schemaVersion: 'att-load-checkpoint-interval/v1' as const, state: 'VERIFIED' as const, startSequence: 1, endSequence: 2,
-        startAt: now, endAt: now, durationMs: 300_000, latencySampleCount: 10, latencyMeanMs: 23.5, counts: { completed: 600, success: 590, failure: 5, runtimeError: 3, dropped: 2 } },
+        startAt: now, endAt: new Date(Date.parse(now) - 360_000).toISOString(), durationMs: 300_000, latencySampleCount: 10, latencyMeanMs: 23.5, counts: { completed: 600, success: 590, failure: 5, runtimeError: 3, dropped: 2 } },
       workloads: { steady: { scheduled: 20, started: 19, completed: 10, passed: 8 } },
     };
     const liveJob: JobView = { ...sampleJob, targetIdentity: { workloads: [{ name: 'steady', targets: [{ type: 'flow', id: 'checkout' }], model: 'arrivalRate', arrivalRate: 2, maxConcurrent: 20, totalDurationMs: 60_000 }] },
@@ -493,6 +493,8 @@ describe('JobsPage React feature', () => {
     expect(metrics.textContent).toContain('Latency percentiles are estimates from a bounded histogram');
     expect(metrics.querySelector('[aria-label="Verified checkpoint intervals"]')?.textContent).toContain('590 / 5 / 3 / 2');
     expect(metrics.querySelector('[aria-label="Verified checkpoint intervals"]')?.textContent).toContain('23.5 ms (10 observations)');
+    expect(metrics.textContent).toContain('Approximate age 360');
+    expect(metrics.textContent).toContain('The latest verified checkpoint is stale');
     expect(getArchive).not.toHaveBeenCalled();
     const subscription = vi.mocked(api.subscribeJob).mock.calls[0]?.[1];
     await act(async () => { subscription?.onEvent({ id: 'terminal', type: 'status', data: { status: 'CANCELLED' } }); });

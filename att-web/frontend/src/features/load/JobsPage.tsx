@@ -656,6 +656,10 @@ function LiveLoadSummary({ job, active, progress, history, trend, streamHistory,
   for (const interval of checkpointHistory || []) if (!checkpoints.some(item => item.endSequence === interval.endSequence)) checkpoints.push(interval);
   if (latestCheckpoint?.state === 'VERIFIED' && !checkpoints.some(item => item.endSequence === latestCheckpoint.endSequence)) checkpoints.push(latestCheckpoint);
   checkpoints.sort((left, right) => (left.endSequence ?? 0) - (right.endSequence ?? 0));
+  const lastCheckpoint = checkpoints[checkpoints.length - 1];
+  const checkpointLag = progress && lastCheckpoint?.endAt ? Date.parse(progress.capturedAt) - Date.parse(lastCheckpoint.endAt) : NaN;
+  const checkpointAge = Number.isFinite(checkpointLag) && checkpointLag >= 0 && latestAge != null && Number.isFinite(latestAge)
+    ? checkpointLag + latestAge : null;
   return <section className="att-live-load-summary" aria-label="Live LOAD progress">
     <div className="att-live-load-heading"><div><h3>{partial ? 'Last live LOAD snapshot' : 'Live LOAD progress'}</h3><p>Worker samples are coalesced about every five seconds; live counters are not per-iteration events.</p></div>
       <span className={latestAge != null && latestAge <= 15_000 ? 'att-live-fresh' : 'att-live-stale'}>{freshness}</span>
@@ -722,7 +726,8 @@ function LiveLoadSummary({ job, active, progress, history, trend, streamHistory,
       <section aria-label="Verified checkpoint intervals">
         <h4>Recent checkpoint intervals</h4>
         <p>Provisional aggregate measurements from integrity-verified checkpoints; the latest 64 intervals are retained.</p>
-        {checkpoints.length > 0 && <p>Latest checkpoint ended {checkpoints[checkpoints.length - 1]?.endAt}. Interval latency uses measured-window observations; interval percentiles are unavailable.</p>}
+        {lastCheckpoint && <p>Latest checkpoint ended {lastCheckpoint.endAt}. {checkpointAge == null ? 'Checkpoint age is unavailable because timestamps could not be compared.' : `Approximate age ${METRIC_NUMBER_FORMATTER.format(checkpointAge / 1000)}s.`} Interval latency uses measured-window observations; interval percentiles are unavailable.</p>}
+        {active && checkpointAge != null && checkpointAge > 330_000 && <p role="alert">The latest verified checkpoint is stale; interval history may be incomplete.</p>}
         {latestCheckpoint?.state === 'DEGRADED' && <p role="alert">Checkpoint coverage is degraded: a checkpoint is missing, invalid, or out of sequence.</p>}
         {checkpoints.some(item => item.coverageGap) && <p role="alert">Checkpoint history has a gap; the displayed intervals do not cover the entire run.</p>}
         {checkpoints.length === 0 ? <p>No verified checkpoint interval is available yet.</p> :
