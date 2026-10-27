@@ -32,6 +32,7 @@ import java.util.concurrent.locks.ReentrantLock;
 import static org.junit.jupiter.api.Assertions.*;
 
 class ApiServletIntegratedLimitsTest {
+    private static final int DEFAULT_INSPECTION_TIMEOUT_MS=30_000;
     @TempDir Path temp;
 
     @Test void inspectionEndpointSeparatesDeterministicScanLimitsPartialSuitesAndQueueSaturation() throws Exception {
@@ -46,7 +47,7 @@ class ApiServletIntegratedLimitsTest {
         }
         Path runtimeConfig=sharedRuntimeConfig();
         Path libs=workerLibraries("inspection-libs");
-        try(ServerRuntime runtime=runtime(packages,runtimeConfig,"inspection-data",1000,null,libs)) {
+        try(ServerRuntime runtime=runtime(packages,runtimeConfig,"inspection-data",DEFAULT_INSPECTION_TIMEOUT_MS,null,libs)) {
             ApiServlet servlet=servlet(runtime);
             Captured scan=invoke(servlet,"GET","/packages/counted/resources",Collections.singletonMap("type","case"),new byte[0]);
             JsonNode rejected=ServerRuntime.JSON.readTree(scan.body());
@@ -88,7 +89,7 @@ class ApiServletIntegratedLimitsTest {
         createPackage(packages.resolve("p"));
         Path runtimeConfig=sharedRuntimeConfig();
         Path libs=workerLibraries("admission-libs");
-        try(ServerRuntime runtime=runtime(packages,runtimeConfig,"admission-data",1000,null,libs)) {
+        try(ServerRuntime runtime=runtime(packages,runtimeConfig,"admission-data",DEFAULT_INSPECTION_TIMEOUT_MS,null,libs)) {
             ApiServlet servlet=servlet(runtime);
             byte[] oversizedBody=new byte[1025];
             Captured tooLarge=invoke(servlet,"POST","/jobs/run",Collections.emptyMap(),oversizedBody);
@@ -148,7 +149,7 @@ class ApiServletIntegratedLimitsTest {
         try(java.io.OutputStream out=Files.newOutputStream(config,java.nio.file.StandardOpenOption.APPEND)) {
             out.write(("#"+"x".repeat(1024*1024)+"\n").getBytes(StandardCharsets.UTF_8));
         }
-        try(ServerRuntime runtime=runtime(packages,config,"configuration-limit-data",1000,null,workerLibraries("configuration-limit-libs"))) {
+        try(ServerRuntime runtime=runtime(packages,config,"configuration-limit-data",DEFAULT_INSPECTION_TIMEOUT_MS,null,workerLibraries("configuration-limit-libs"))) {
             Captured response=invoke(servlet(runtime),"GET","/packages/p/configuration/effective",Collections.singletonMap("environment","SIT"),new byte[0]);
             JsonNode diagnostic=ServerRuntime.JSON.readTree(response.body()).path("diagnostics").path(0);
             assertEquals(413,response.status,new String(response.body(),StandardCharsets.UTF_8));
@@ -165,7 +166,7 @@ class ApiServletIntegratedLimitsTest {
 
     @Test void resourcePageSizeOverOneHundredHasStructured400DiagnosticOnRealRoute() throws Exception {
         Path packages=Files.createDirectories(temp.resolve("page-size-packages"));createPackage(packages.resolve("p"));
-        try(ServerRuntime runtime=runtime(packages,sharedRuntimeConfig(),"page-size-data",1000,null,workerLibraries("page-size-libs"))) {
+        try(ServerRuntime runtime=runtime(packages,sharedRuntimeConfig(),"page-size-data",DEFAULT_INSPECTION_TIMEOUT_MS,null,workerLibraries("page-size-libs"))) {
             Map<String,String> parameters=new HashMap<>();parameters.put("type","template");parameters.put("limit","101");
             Captured response=invoke(servlet(runtime),"GET","/packages/p/resources",parameters,new byte[0]);
             JsonNode diagnostic=ServerRuntime.JSON.readTree(response.body()).path("diagnostics").path(0);
@@ -180,7 +181,7 @@ class ApiServletIntegratedLimitsTest {
 
     @Test void artifactReadSlotExhaustionNamesItsOwnCapacityOnTheRealArtifactRoute() throws Exception {
         Path packages=Files.createDirectories(temp.resolve("artifact-capacity-packages"));createPackage(packages.resolve("p"));
-        try(ServerRuntime runtime=runtime(packages,sharedRuntimeConfig(),"artifact-capacity-data",1000,null,workerLibraries("artifact-capacity-libs"))) {
+        try(ServerRuntime runtime=runtime(packages,sharedRuntimeConfig(),"artifact-capacity-data",DEFAULT_INSPECTION_TIMEOUT_MS,null,workerLibraries("artifact-capacity-libs"))) {
             String id="J0000000000000295";Path output=Files.createDirectories(runtime.outputDirectoryForJob(id));
             Files.writeString(output.resolve("case.log"),"approved");
             Job job=new Job(id,"run","p","alice",new WorkerRequest(),new JobEvents(output.getParent().resolve("events.jsonl"),100));
@@ -203,7 +204,7 @@ class ApiServletIntegratedLimitsTest {
     @Test void artifactRouteReportsPendingArchivingFailedAndReadyStatesSeparately() throws Exception {
         Path packages=Files.createDirectories(temp.resolve("archive-packages"));
         createPackage(packages.resolve("p"));
-        try(ServerRuntime runtime=runtime(packages,sharedRuntimeConfig(),"archive-data",1000,null,workerLibraries("archive-libs"))) {
+        try(ServerRuntime runtime=runtime(packages,sharedRuntimeConfig(),"archive-data",DEFAULT_INSPECTION_TIMEOUT_MS,null,workerLibraries("archive-libs"))) {
             ApiServlet servlet=servlet(runtime);
             assertArchiveState(servlet,runtime,"J0000000000000291","PENDING",false,"ATT-ARCHIVE-NOT-READY",null);
             assertArchiveState(servlet,runtime,"J0000000000000292","ARCHIVING",false,"ATT-ARCHIVE-NOT-READY",null);
