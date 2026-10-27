@@ -3143,7 +3143,7 @@ HTML 發佈前經 parser 清理：保留已核准的 relative links、inline sty
 
 #### Manifest 及 Resource limits
 
-`export-manifest-v1.json` 使用 manifest version `1`、policy `att-export-safe-text-v2`。每個 entry 記錄 logical path、media type、byte size、SHA-256、report/preview eligibility、classification 及 publication decision。`complete` 和彙總 `omissions` 不包含被拒絕的檔名或值。ZIP、preview 及解壓檔案使用完全相同的最終 bytes；GET 不會再次獨立遮罩。
+`export-manifest-v1.json` 使用 manifest version `1`、policy `att-export-approved-bytes-v1`（仍可讀取舊版 `att-export-safe-text-v2` ZIP）。ZIP 完整保留 producer 輸出的核准 bytes；敏感值必須在 artifact 生成前完成遮罩。每個 entry 記錄 logical path、media type、byte size、SHA-256、report/preview eligibility、classification 及 publication decision。`complete` 和彙總 `omissions` 不包含被拒絕的檔名或值。ZIP、preview 及解壓檔案使用完全相同的最終 bytes；GET 不會再次獨立遮罩。
 
 Inventory 不受 `server.maxArtifacts` 限制：最多 50,000 filesystem candidates、深度 64、10,000 已發佈 entries、每項 16 MiB、總 bytes 128 MiB、manifest 8 MiB。超出總量上限會使發佈失敗並保留私有來源。ZIP 使用 STORED encoding，避免重複 log 的 compression-ratio 歧義。Reader 拒絕不安全路徑、control characters、encoded traversal、重複或大小寫衝突名稱、過大或高壓縮比 entries、未列入 manifest 的 entries 及 integrity mismatch。Writer 為單一有界佇列，同時最多八個 artifact reads。
 
