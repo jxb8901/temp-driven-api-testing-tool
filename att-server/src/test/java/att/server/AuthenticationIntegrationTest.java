@@ -236,6 +236,7 @@ class AuthenticationIntegrationTest {
             String colleagueBasic="Basic "+Base64.getEncoder().encodeToString("basic-user:basic user secure password".getBytes(java.nio.charset.StandardCharsets.UTF_8));
             assertEquals(200,sendBasicViaTrustedProxy(client,port,"GET","/att/api/v1/jobs/"+ownedJobId,"https://att.example.test",null,colleagueBasic,null).statusCode(),"Active USERs share Jobs across accounts");
             assertEquals(403,sendWithCookie(client,port,"GET","/att/api/v1/jobs/"+ownedJobId,ownerCookie,null,null,null).statusCode(),"ADMIN accounts do not receive Job operations");
+            assertAuthorizedLiveLoadProjection(tomcat,client,port,viewerCookie,ownerCookie,colleagueBasic);
             String archiveJobId=ownedJobId;
             String artifactBase="/att/api/v1/jobs/"+archiveJobId+"/artifacts";
             long archiveDeadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(30);
@@ -886,6 +887,34 @@ class AuthenticationIntegrationTest {
         assertTrue(output.toString(java.nio.charset.StandardCharsets.UTF_8).contains("Remote Run(anonym)"),"Remote job output displays the Server-formatted principal");
     }
     private static void restore(String old){if(old==null)System.clearProperty("att.server.config");else System.setProperty("att.server.config",old);}
+    private static void assertAuthorizedLiveLoadProjection(Tomcat tomcat,HttpClient client,int port,String userCookie,String adminCookie,String colleagueBasic)throws Exception {
+        Context context=(Context)tomcat.getHost().findChild("/att");Object runtime=context.getServletContext().getAttribute(ServerBootstrap.RUNTIME);ClassLoader loader=runtime.getClass().getClassLoader();
+        Object config=field(runtime,"config");Path dataDir=(Path)field(config,"dataDir");int maxEvents=(Integer)field(config,"maxEventsPerJob");
+        String id="J"+java.util.UUID.randomUUID().toString().replace("-","").substring(0,16).toUpperCase();Path directory=Files.createDirectories(dataDir.resolve("jobs").resolve(id));
+        Class<?> journalType=Class.forName("att.server.JobEvents",true,loader);var journalConstructor=journalType.getDeclaredConstructor(Path.class,int.class);journalConstructor.setAccessible(true);Object journal=journalConstructor.newInstance(directory.resolve("events.jsonl"),maxEvents);
+        Class<?> requestType=Class.forName("att.server.api.WorkerRequest",true,loader);Object request=requestType.getConstructor().newInstance();
+        Class<?> jobType=Class.forName("att.server.Job",true,loader);var constructor=jobType.getDeclaredConstructor(String.class,String.class,String.class,String.class,requestType,journalType);constructor.setAccessible(true);Object job=constructor.newInstance(id,"load","p","viewer",request,journal);
+        Object store=field(runtime,"store");var insert=store.getClass().getDeclaredMethod("insert",jobType,String.class);insert.setAccessible(true);insert.invoke(store,job,"{}");
+        @SuppressWarnings("unchecked") Map<String,Object> jobs=(Map<String,Object>)field(runtime,"jobs");jobs.put(id,job);
+        Map<String,Object> intervalCounts=new java.util.LinkedHashMap<>();for(String key:List.of("scheduled","started","completed","success","failure","runtimeError","otherOutcome","dropped","measuredScheduled","measuredStarted","measuredCompleted","measuredSuccess","measuredFailure","measuredRuntimeError","measuredOtherOutcome","measuredDropped"))intervalCounts.put(key,1L);
+        Map<String,Object> interval=Map.of("schemaVersion","att-load-checkpoint-interval/v1","state","VERIFIED","startSequence",1L,"endSequence",2L,"startAt","2026-10-27T00:00:00Z","endAt","2026-10-27T00:05:00Z","durationMs",300000L,"counts",intervalCounts,"path","/private/worker/secret");
+        Map<String,Object> sample=new java.util.LinkedHashMap<>(Map.of("schemaVersion","att-load-live-progress/v1","capturedAt","2026-10-27T00:05:00Z","elapsedMs",300000L,"phase","STEADY","counts",Map.of("completed",7L,"passed",6L),"checkpointInterval",interval,"password","secret-value"));
+        sample.put("measuredCounts",Map.of("completed",7L,"passed",6L));sample.put("rates",Map.of("completedTps",0.02));sample.put("latency",Map.of("sampleCount",0L));
+        var event=runtime.getClass().getDeclaredMethod("handleWorkerEvent",jobType,String.class);event.setAccessible(true);event.invoke(runtime,job,ServerRuntime.JSON.writeValueAsString(Map.of("type","PROGRESS","loadProgress",sample)));
+        String route="/att/api/v1/jobs/"+id;HttpResponse<String> authorized=sendWithCookie(client,port,"GET",route,userCookie,null,null,null);
+        assertEquals(200,authorized.statusCode(),authorized.body());JsonNode payload=ServerRuntime.JSON.readTree(authorized.body());
+        assertEquals(7,payload.path("loadProgress").path("counts").path("completed").asInt());assertEquals(2,payload.path("loadCheckpointHistory").get(0).path("endSequence").asInt());
+        assertFalse(authorized.body().contains("secret-value"));assertFalse(authorized.body().contains("/private/worker"));
+        assertEquals(200,sendBasicViaTrustedProxy(client,port,"GET",route,"https://att.example.test",null,colleagueBasic,null).statusCode(),"Active users can read shared Job telemetry");
+        for(String path:List.of(route,route+"/events")) {
+            assertEquals(403,sendWithCookie(client,port,"GET",path,adminCookie,null,null,null).statusCode(),"ADMIN-only access is denied: "+path);
+            assertEquals(401,send(client,port,"GET",path,null,null,null).statusCode(),"Anonymous access is denied: "+path);
+        }
+        HttpURLConnection stream=(HttpURLConnection)new URL("http://127.0.0.1:"+port+route+"/events").openConnection();stream.setConnectTimeout(3000);stream.setReadTimeout(5000);stream.setRequestProperty("Cookie",userCookie);
+        try {assertEquals(200,stream.getResponseCode());try(var reader=new java.io.BufferedReader(new java.io.InputStreamReader(stream.getInputStream(),java.nio.charset.StandardCharsets.UTF_8))) {
+            String line;boolean found=false;while((line=reader.readLine())!=null){if(line.startsWith("data: ")&&line.contains("loadProgress")){assertTrue(line.contains("checkpointInterval"));assertFalse(line.contains("secret-value"));assertFalse(line.contains("/private/worker"));found=true;break;}}assertTrue(found,"Authorized SSE replays the sanitized live snapshot");
+        }} finally {stream.disconnect();jobs.remove(id);}
+    }
     private static int postBody(int port,String authorization,String contentType,String origin,String body)throws Exception {
         try(java.net.Socket socket=new java.net.Socket("127.0.0.1",port)) {socket.setSoTimeout(3000);java.io.OutputStream out=socket.getOutputStream();StringBuilder request=new StringBuilder("POST /att/api/v1/jobs/run HTTP/1.1\r\nHost: 127.0.0.1:").append(port).append("\r\nConnection: close\r\nAuthorization: ").append(authorization).append("\r\nContent-Type: ").append(contentType).append("\r\nContent-Length: ").append(body.getBytes(java.nio.charset.StandardCharsets.UTF_8).length).append("\r\n");if(origin!=null)request.append("Origin: ").append(origin).append("\r\n");request.append("\r\n").append(body);out.write(request.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));out.flush();String status=new java.io.BufferedReader(new java.io.InputStreamReader(socket.getInputStream(),java.nio.charset.StandardCharsets.UTF_8)).readLine();return Integer.parseInt(status.split(" ")[1]);}
     }
