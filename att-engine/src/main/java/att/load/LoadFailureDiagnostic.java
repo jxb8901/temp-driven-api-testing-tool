@@ -53,6 +53,12 @@ final class LoadFailureDiagnostic {
         map.put("source","executor-result");
         map.put("code",safe(LoadSchedulerSupport.errorType(result)));
         map.put("summary",safe(result.diagnostic()==null?"Iteration returned "+result.status():result.diagnostic().summary()));
+        if (result.diagnostic() != null) {
+            Map<String,Object> details = result.diagnostic().toMap();
+            for (String key : new String[] {"limitName", "configuredLimit", "actual", "observed", "usage", "limit",
+                    "threshold", "scope", "outcome", "stage", "remediationHint", "artifactRef"})
+                if (details.containsKey(key)) map.put(key, details.get(key));
+        }
         map.put("evidenceState",result.evidenceFailureReason());
         return map;
     }

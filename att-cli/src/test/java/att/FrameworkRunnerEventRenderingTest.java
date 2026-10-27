@@ -12,6 +12,7 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 
 class FrameworkRunnerEventRenderingTest {
     @TempDir Path root;
@@ -58,6 +59,25 @@ class FrameworkRunnerEventRenderingTest {
         render.setAccessible(true);
         assertEquals("[1/4] V4.1.0 validation PASS: 2 suites, 5 cases, 3 templates, 4 tools",
                 render.invoke(null, event, root));
+    }
+
+    @Test void loadDiagnosticsRenderPrimaryCauseBeforeSeparateBoundedNoticesWithoutPayloadText() {
+        Map<String,Object> diagnostics = fields("primaryError", fields("code", "HTTP_RESPONSE_TOO_LARGE",
+                        "summary", "customer-token=private-business-payload", "limitName", "http.response.maxBytes",
+                        "observed", 10485761, "configuredLimit", 10485760, "outcome", "EXECUTION_ERROR"),
+                "secondaryNotices", Arrays.asList(fields("code", "ATT-LOAD-EVIDENCE-QUOTA",
+                                "outcome", "DATA_TRUNCATED")),
+                "transportWarnings", Arrays.asList(fields("code", "ATT-WORKER-EVENT-TRUNCATED",
+                                "outcome", "DATA_TRUNCATED")));
+
+        java.util.List<String> lines = FrameworkRunner.loadDiagnosticLines(diagnostics);
+        assertEquals(3, lines.size());
+        assertTrue(lines.get(0).startsWith("LOAD ERROR [HTTP_RESPONSE_TOO_LARGE]"), lines.toString());
+        assertTrue(lines.get(0).contains("limit=http.response.maxBytes"), lines.toString());
+        assertTrue(lines.get(0).contains("outcome=EXECUTION_ERROR"), lines.toString());
+        assertTrue(lines.get(1).startsWith("LOAD NOTICE [ATT-LOAD-EVIDENCE-QUOTA]"), lines.toString());
+        assertTrue(lines.get(2).startsWith("LOAD TRANSPORT [ATT-WORKER-EVENT-TRUNCATED]"), lines.toString());
+        assertFalse(lines.toString().contains("private-business-payload"), lines.toString());
     }
 
     private static Map<String,Object> fields(Object... pairs) {

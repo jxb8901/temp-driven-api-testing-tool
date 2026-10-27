@@ -155,6 +155,8 @@ public final class FrameworkRunner {
                     System.out.println(att.validation.JsonSupport.write(output));
                 }
                 else {
+                    for (String diagnostic : loadDiagnosticLines(loadResult.summary().get("diagnostics")))
+                        System.err.println(diagnostic);
                     System.out.println(att.console.ExecutionConsoleFormatter.reportLine(att.core.PathPresentation.displayPath(Paths.get(loadResult.paths().get("report")), root)));
                     if (!options.quiet()) System.out.println(att.console.ExecutionConsoleFormatter.metricsLine(loadResult.summary().get("metrics")));
                 }
@@ -283,6 +285,47 @@ public final class FrameworkRunner {
 
     private static String cliDisplayPath(String value, Path root) {
         return value == null ? null : att.core.PathPresentation.displayPath(Paths.get(value), root);
+    }
+
+    static java.util.List<String> loadDiagnosticLines(Object value) {
+        java.util.List<String> lines = new java.util.ArrayList<String>();
+        if (!(value instanceof java.util.Map)) return lines;
+        java.util.Map<?,?> diagnostics = (java.util.Map<?,?>) value;
+        Object primary = diagnostics.get("primaryError");
+        if (primary instanceof java.util.Map) {
+            String line = loadDiagnosticLine("LOAD ERROR", (java.util.Map<?,?>) primary);
+            if (line != null) lines.add(line);
+        }
+        appendLoadDiagnosticLines(lines, "LOAD NOTICE", diagnostics.get("secondaryNotices"));
+        appendLoadDiagnosticLines(lines, "LOAD TRANSPORT", diagnostics.get("transportWarnings"));
+        return lines;
+    }
+
+    private static void appendLoadDiagnosticLines(java.util.List<String> lines, String label, Object value) {
+        if (!(value instanceof Iterable)) return;
+        for (Object item : (Iterable<?>) value) {
+            if (lines.size() >= 5) return;
+            if (item instanceof java.util.Map) {
+                String line = loadDiagnosticLine(label, (java.util.Map<?,?>) item);
+                if (line != null) lines.add(line);
+            }
+        }
+    }
+
+    private static String loadDiagnosticLine(String label, java.util.Map<?,?> diagnostic) {
+        Object codeValue = diagnostic.get("code");
+        if (!(codeValue instanceof String) || !((String) codeValue).matches("[A-Za-z0-9][A-Za-z0-9._:-]{0,127}")) return null;
+        StringBuilder line = new StringBuilder(label).append(" [").append(codeValue).append(']');
+        Object limitName = diagnostic.get("limitName");
+        if (limitName instanceof String && ((String) limitName).matches("[A-Za-z0-9][A-Za-z0-9._:-]{0,95}"))
+            line.append(" limit=").append(limitName);
+        Object observed = diagnostic.containsKey("observed") ? diagnostic.get("observed") : diagnostic.get("actual");
+        if (observed instanceof Number) line.append(" usage=").append(((Number) observed).longValue());
+        Object configured = diagnostic.containsKey("configuredLimit") ? diagnostic.get("configuredLimit") : diagnostic.get("limit");
+        if (configured instanceof Number) line.append(" configuredLimit=").append(((Number) configured).longValue());
+        Object outcome = diagnostic.get("outcome");
+        if (outcome instanceof String && ((String) outcome).matches("[A-Z_]{1,64}")) line.append(" outcome=").append(outcome);
+        return line.toString();
     }
 
     private static int number(java.util.Map<String,Object> values, String key) {

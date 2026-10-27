@@ -114,8 +114,15 @@ public final class MqTransport {
         private final Integer completionCode;
         private final Integer reasonCode;
         private final String reason;
+        private final Integer configuredLimitBytes;
+        private final Long observedBytes;
         public Exception(String message, Integer completionCode, Integer reasonCode, String reason, Throwable cause) {
+            this(message, completionCode, reasonCode, reason, cause, null, null);
+        }
+        private Exception(String message, Integer completionCode, Integer reasonCode, String reason, Throwable cause,
+                          Integer configuredLimitBytes, Long observedBytes) {
             super(message, cause); this.completionCode = completionCode; this.reasonCode = reasonCode; this.reason = reason;
+            this.configuredLimitBytes = configuredLimitBytes; this.observedBytes = observedBytes;
         }
         public static Exception poolTimeout(Throwable cause) {
             return new Exception("MQ connection pool borrow timed out", null, null, "MQ_POOL_TIMEOUT", cause);
@@ -126,11 +133,13 @@ public final class MqTransport {
         public static Exception responseTooLarge(int maxBytes, long actualBytes) {
             String actual = actualBytes >= 0L ? " (messageBytes=" + actualBytes + ")" : "";
             return new Exception("MQ reply exceeds maxResponseBytes=" + maxBytes + actual,
-                    null, null, "MQ_RESPONSE_TOO_LARGE", null);
+                    null, null, "MQ_RESPONSE_TOO_LARGE", null, maxBytes, actualBytes >= 0L ? Long.valueOf(actualBytes) : null);
         }
         public Integer completionCode() { return completionCode; }
         public Integer reasonCode() { return reasonCode; }
         public String reason() { return reason; }
+        public Integer configuredLimitBytes() { return configuredLimitBytes; }
+        public Long observedBytes() { return observedBytes; }
 
         /** True only when IBM MQ metadata identifies a physical connection failure. */
         public boolean connectionFailure() {

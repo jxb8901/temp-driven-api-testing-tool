@@ -65,7 +65,11 @@ class PooledMqHelperExecutorTest {
             Map<String, Object> result = executor.execute("broker", "send",
                     map("queue", "REQUEST.Q", "payload", text(payload)), context(caseDir), null, "timeout-1").result();
             assertFalse(Boolean.TRUE.equals(result.get("sent")));
-            assertEquals("MQ_POOL_TIMEOUT", ((Map<?, ?>) result.get("error")).get("type"));
+            Map<?, ?> poolError = (Map<?, ?>) result.get("error");
+            assertEquals("MQ_POOL_TIMEOUT", poolError.get("type"));
+            assertEquals("mq.pool.borrowTimeoutMs", poolError.get("limitName"));
+            assertEquals(25, ((Number) poolError.get("configuredLimit")).intValue());
+            assertEquals("EXECUTION_ERROR", poolError.get("outcome"));
             assertEquals(1, ((Number) factory.pool("broker").metrics().get("timeoutCount")).intValue());
         } finally {
             held.disconnect();
@@ -102,7 +106,12 @@ class PooledMqHelperExecutorTest {
         Path caseDir = Files.createDirectories(tempDir.resolve("bounded-reply"));
         Map<String, Object> tooLarge = executor.execute("broker", "receive",
                 map("queue", "REPLY.Q", "waitMs", 0), context(caseDir), null, "oversize").result();
-        assertEquals("MQ_RESPONSE_TOO_LARGE", ((Map<?, ?>) tooLarge.get("error")).get("type"));
+        Map<?, ?> responseError = (Map<?, ?>) tooLarge.get("error");
+        assertEquals("MQ_RESPONSE_TOO_LARGE", responseError.get("type"));
+        assertEquals("mq.response.maxBytes", responseError.get("limitName"));
+        assertEquals(3, ((Number) responseError.get("configuredLimit")).intValue());
+        assertEquals(4, ((Number) responseError.get("observed")).intValue());
+        assertEquals("EXECUTION_ERROR", responseError.get("outcome"));
         assertEquals(3, delegate.requestedMaxBytes);
         delegate.replyPayload = new byte[]{1, 2, 3};
         Map<String, Object> boundary = executor.execute("broker", "receive",

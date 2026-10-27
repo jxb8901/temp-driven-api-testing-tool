@@ -253,6 +253,7 @@ public final class LoadRunResources implements AutoCloseable {
             preparation.put("preparationDeadlineMs", preparationDeadlineMs); preparation.put("parallelism", 1);
             preparation.put("discoveryMs", discoveryMs);
             preparation.put("preparationMs", java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started)); preparation.put("helpers", rows);
+            putPreparationUsage(preparation, required, ((Number) preparation.get("preparationMs")).longValue(), preparationDeadlineMs);
             Map<String, Object> ready = new LinkedHashMap<String, Object>(); ready.put("event", "LOAD_RESOURCES_READY");
             ready.put("status", "RESOURCES_READY"); ready.put("required", totalHelpers); ready.put("prepared", totalHelpers);
             ready.put("failed", 0); ready.put("skipped", dynamicKinds.size()); ready.put("preparationMs", preparation.get("preparationMs"));
@@ -274,6 +275,7 @@ public final class LoadRunResources implements AutoCloseable {
             preparation.put("preparationDeadlineMs", preparationDeadlineMs); preparation.put("parallelism", 1);
             preparation.put("discoveryMs", discoveryMs);
             preparation.put("preparationMs", java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started));
+            putPreparationUsage(preparation, required, ((Number) preparation.get("preparationMs")).longValue(), preparationDeadlineMs);
             String failureCode = preparationCode(failure, "SYSTEM");
             for (Map<String, Object> row : rows) if ("FAILED".equals(row.get("status"))) {
                 failureCode = String.valueOf(row.get("failureCategory")); break;
@@ -346,6 +348,15 @@ public final class LoadRunResources implements AutoCloseable {
         if ("PREPARATION_TIMEOUT".equals(failureCode) || "PREPARATION_BUDGET_TIMEOUT".equals(failureCode))
             return LoadResourcePreparationException.DEADLINE;
         return LoadResourcePreparationException.FAILED;
+    }
+    private static void putPreparationUsage(Map<String, Object> preparation, int required, long elapsedMs, long deadlineMs) {
+        Map<String, Object> initial = new LinkedHashMap<String, Object>();
+        initial.put("usage", required); initial.put("limit", PREPARATION_PER_RUN_LIMIT); initial.put("threshold", 0.8d);
+        Map<String, Object> deadline = new LinkedHashMap<String, Object>();
+        deadline.put("usage", elapsedMs); deadline.put("limit", deadlineMs); deadline.put("threshold", 0.8d);
+        Map<String, Object> usage = new LinkedHashMap<String, Object>();
+        usage.put("load.initialConnectionsPerWorker", initial); usage.put("load.preparationDeadlineMs", deadline);
+        preparation.put("limitUsage", usage);
     }
     private static Map<String, Object> preparationRow(String kind, String id, int target, int actual, int max, int min, long before) {
         Map<String, Object> row = new LinkedHashMap<String, Object>(); row.put("kind", kind); row.put("helper", safeId(id)); row.put("status", "READY");

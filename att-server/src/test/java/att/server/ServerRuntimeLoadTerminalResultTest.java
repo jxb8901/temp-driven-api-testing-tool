@@ -14,6 +14,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -134,6 +135,49 @@ class ServerRuntimeLoadTerminalResultTest {
             JsonNode published = JSON.valueToTree(terminal.get("data"));
             assertEquals("HTTP_RESPONSE_TOO_LARGE", published.path("result").path("summary").path("diagnostics").path("primaryError").path("code").asText());
             assertEquals(3, published.path("result").path("exitCode").asInt());
+        }
+    }
+
+    @Test void realLoadProcessKeepsRuntimeCausePrimaryWhenTerminalAndJournalEventsAreOversized() throws Exception {
+        ServerRuntime.WorkerProcessLauncher launcher=builder->new ProcessBuilder(
+                Path.of(System.getProperty("java.home"),"bin",System.getProperty("os.name","").toLowerCase().contains("win")?"java.exe":"java").toString(),
+                "-cp",System.getProperty("surefire.test.class.path",System.getProperty("java.class.path")),OversizedLoadWorker.class.getName()).start();
+        Path libs=workerLibraries("integrated-truncation-libs");
+        try(ServerRuntime runtime=runtime("integrated-truncation",launcher,libs)) {
+            Map<String,Object> submitted=runtime.submit("load",JSON.createObjectNode().put("packageId","p"),"integration");
+            String id=String.valueOf(submitted.get("jobId"));
+            Map<String,Object> stored=null;
+            long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(30);
+            while(System.nanoTime()<deadline) {
+                stored=runtime.store.get(id);
+                if(stored!=null&&"ERROR".equals(stored.get("status"))&&!runtime.jobs.containsKey(id))break;
+                Thread.sleep(20L);
+            }
+            assertNotNull(stored,"the submitted LOAD process did not finish");
+            assertEquals("ERROR",stored.get("status"));
+            assertEquals(3,((Number)stored.get("exitCode")).intValue());
+            JsonNode primary=JSON.readTree(String.valueOf(stored.get("diagnosticJson")));
+            assertEquals("HTTP_RESPONSE_TOO_LARGE",primary.path("code").asText());
+            assertEquals("EXECUTION_ERROR",primary.path("outcome").asText());
+
+            JsonNode result=JSON.readTree(String.valueOf(stored.get("resultJson")));
+            assertEquals("ERROR",result.path("status").asText());
+            assertEquals(3,result.path("exitCode").asInt());
+            JsonNode summary=result.path("summary");
+            assertEquals("HTTP_RESPONSE_TOO_LARGE",summary.path("diagnostics").path("primaryError").path("code").asText());
+            List<String> secondary=new ArrayList<>();
+            for(JsonNode warning:summary.path("diagnostics").path("transportWarnings"))secondary.add(warning.path("code").asText());
+            assertTrue(secondary.contains("ATT-WORKER-EVENT-TRUNCATED"),secondary.toString());
+            assertTrue(secondary.contains("ATT-JOURNAL-EVENT-TRUNCATED"),secondary.toString());
+            assertFalse(result.toString().contains("private-canary"));
+            assertFalse(result.toString().contains(runtime.config.dataDir.toString()));
+
+            List<Map<String,Object>> events=new JobEvents(runtime.config.dataDir.resolve("jobs").resolve(id).resolve("events.jsonl"),100).after(0);
+            Map<String,Object> largeLog=events.stream().filter(event->"log".equals(event.get("event"))).findFirst().orElseThrow();
+            JsonNode journalNotice=JSON.valueToTree(largeLog.get("data")).path("journalLimit");
+            assertEquals("ATT-JOURNAL-EVENT-TRUNCATED",journalNotice.path("code").asText());
+            assertEquals("DATA_TRUNCATED",journalNotice.path("outcome").asText());
+            stopInspectionProcesses(runtime);
         }
     }
 
@@ -401,6 +445,14 @@ class ServerRuntimeLoadTerminalResultTest {
     }
 
     private ServerRuntime runtime(String name) throws Exception {
+        return runtime(name,builder->{throw new UnsupportedOperationException("worker launch is not used");});
+    }
+
+    private ServerRuntime runtime(String name,ServerRuntime.WorkerProcessLauncher launcher) throws Exception {
+        return runtime(name,launcher,null);
+    }
+
+    private ServerRuntime runtime(String name,ServerRuntime.WorkerProcessLauncher launcher,Path libs) throws Exception {
         Path allowed = Files.createDirectories(temp.resolve(name + "-packages"));
         Path pkg = Files.createDirectories(allowed.resolve("p"));
         Path data = temp.resolve(name + "-data");
@@ -408,7 +460,45 @@ class ServerRuntimeLoadTerminalResultTest {
         Files.writeString(configFile, "server:\n  dataDir: " + ServerRuntimeTestSupport.yaml(data)
                 + "\nworkers: {}\npackages:\n  allowedRoots:\n    - " + ServerRuntimeTestSupport.yaml(allowed)
                 + "\n  entries:\n    p: " + ServerRuntimeTestSupport.yaml(pkg) + "\n");
-        return new ServerRuntime(ServerConfig.load(configFile), null, builder -> { throw new UnsupportedOperationException("worker launch is not used"); });
+        return new ServerRuntime(ServerConfig.load(configFile), libs==null?null:libs.toString(), ServerRuntimeTestSupport.resolvingConfiguration(launcher));
+    }
+
+    private Path workerLibraries(String name) throws Exception {
+        Path libs=Files.createDirectory(temp.resolve(name));
+        ServerRuntimeTestSupport.addModuleJar(libs,"att-worker",Path.of("att-worker/target/classes"));
+        ServerRuntimeTestSupport.addModuleJar(libs,"att-engine",Path.of("att-engine/target/classes"));
+        ServerRuntimeTestSupport.addModuleJar(libs,"att-server-api",Path.of("att-server-api/target/classes"));
+        ServerRuntimeTestSupport.addModuleJar(libs,"att-security",Path.of("att-security/target/classes"));
+        ServerRuntimeTestSupport.addWorkerClasspathJars(libs);
+        return libs;
+    }
+
+    private static void stopInspectionProcesses(ServerRuntime runtime) throws Exception {
+        java.lang.reflect.Field workersField=ServerRuntime.class.getDeclaredField("inspectionWorkerPool");
+        workersField.setAccessible(true);
+        for(Object worker:(List<?>)workersField.get(runtime)) {
+            java.lang.reflect.Field processField=worker.getClass().getDeclaredField("process");
+            processField.setAccessible(true);
+            Process process=(Process)processField.get(worker);
+            if(process!=null&&process.isAlive()) {
+                process.destroyForcibly();
+                process.waitFor();
+            }
+        }
+    }
+
+    public static class OversizedLoadWorker {
+        public static void main(String[] args) throws Exception {
+            new java.io.BufferedReader(new java.io.InputStreamReader(System.in,StandardCharsets.UTF_8)).readLine();
+            System.out.println("{\"type\":\"DIAGNOSTIC\",\"code\":\"HTTP_RESPONSE_TOO_LARGE\",\"summary\":\"HTTP response exceeded its configured byte limit\",\"limitName\":\"httphelper.defaults.maxResponseBytes\",\"configuredLimit\":10,\"observed\":11,\"outcome\":\"EXECUTION_ERROR\",\"stage\":\"execution\"}");
+            System.out.print("{\"type\":\"LOG\",\"message\":\"");
+            System.out.print("journal-private-canary"+"x".repeat(JobEvents.MAX_EVENT_DATA_BYTES));
+            System.out.println("\"}");
+            System.out.println("{\"type\":\"RESULT\",\"status\":\"ERROR\",\"exitCode\":3,\"padding\":\"private-canary"+"x".repeat(WorkerProtocol.MAX_FRAME_BYTES)+"\"}");
+            System.out.println("{\"type\":\"RESULT\",\"status\":\"ERROR\",\"exitCode\":3,\"result\":{\"executionId\":\"load-e2e\",\"status\":\"ERROR\",\"exitCode\":3,\"summary\":{\"schemaVersion\":\"att-load-summary/v1.2\",\"runId\":\"load-e2e\",\"status\":\"ERROR\",\"executionStatus\":\"ERROR\",\"metrics\":{\"scheduled\":1,\"started\":1,\"completed\":0,\"runtimeError\":1}}}}");
+            System.out.flush();
+            System.exit(3);
+        }
     }
 
     private Path packageRoot(ServerRuntime runtime, String id) throws Exception { return runtime.packageRootForJob(id); }

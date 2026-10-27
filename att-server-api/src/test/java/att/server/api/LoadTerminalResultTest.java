@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.math.BigInteger;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -18,8 +19,12 @@ class LoadTerminalResultTest {
     @Test void legacyDetailedSummaryProjectsToBoundedPostEnvelopeResultAndKeepsRealErrorFirst() throws Exception {
         Map<String,Object> summary = detailedSummary("HTTP_RESPONSE_TOO_LARGE", "root cause \"雪\"\\line\n" + repeat("界",3000));
         List<Map<String,Object>> diagnostics = new ArrayList<>();
-        diagnostics.add(fields("code", "ATT-WORKER-EVENT-TRUNCATED", "summary", "transport truncated"));
-        diagnostics.add(fields("code", "ATT-JOURNAL-EVENT-TRUNCATED", "summary", "journal truncated"));
+        diagnostics.add(fields("code", "ATT-WORKER-EVENT-TRUNCATED", "summary", "transport truncated",
+                "limitName", "worker.protocol.maxFrameBytes", "configuredLimit", 2_097_152L,
+                "observed", 2_200_000L, "outcome", "DATA_TRUNCATED"));
+        diagnostics.add(fields("code", "ATT-JOURNAL-EVENT-TRUNCATED", "summary", "journal truncated",
+                "limitName", "server.journal.maxEventBytes", "configuredLimit", 65_536L,
+                "observed", 70_000L, "outcome", "DATA_TRUNCATED"));
         Map<String,Object> original = fields("executionId", "run-雪", "status", "ERROR", "exitCode", 3,
                 "durationMs", 3_600_000L, "paths", fields("report", "/private/tmp/report.html"),
                 "diagnostics", diagnostics, "summary", summary);
@@ -30,8 +35,14 @@ class LoadTerminalResultTest {
         Map<?,?> cause = (Map<?,?>) ((Map<?,?>) compact.get("diagnostics")).get("primaryError");
         assertEquals(LoadTerminalResult.SCHEMA_VERSION, compact.get("schemaVersion"));
         assertEquals("HTTP_RESPONSE_TOO_LARGE", cause.get("code"));
+        assertEquals("EXECUTION_ERROR", cause.get("outcome"));
+        assertEquals("http.response.maxBytes", cause.get("limitName"));
+        assertEquals(10_485_760L, ((Number) cause.get("configuredLimit")).longValue());
         assertTrue(String.valueOf(cause.get("summary")).contains("雪"));
         assertTrue(((List<?>) ((Map<?,?>) compact.get("diagnostics")).get("transportWarnings")).size() <= 2);
+        Map<?,?> workerWarning=(Map<?,?>)((List<?>)((Map<?,?>)compact.get("diagnostics")).get("transportWarnings")).get(0);
+        assertEquals("ATT-WORKER-EVENT-TRUNCATED",workerWarning.get("code"));
+        assertEquals("DATA_TRUNCATED",workerWarning.get("outcome"));
         assertEquals("ERROR", ((Map<?,?>) compact.get("execution")).get("status"));
         assertEquals("NOT_MET", ((Map<?,?>) compact.get("performance")).get("verdict"));
         assertEquals(1200L, ((Map<?,?>) compact.get("metrics")).get("runtimeError"));
@@ -57,13 +68,17 @@ class LoadTerminalResultTest {
     }
 
     @Test void runtimeAndPreparationCausesTakePrecedenceOverTransportWarnings() {
-        for (String code : new String[] {"HTTP_RESPONSE_TOO_LARGE", "MQ_RESPONSE_TOO_LARGE", "MQ_POOL_TIMEOUT"}) {
+        for (String code : new String[] {"HTTP_RESPONSE_TOO_LARGE", "MQ_RESPONSE_TOO_LARGE", "MQ_POOL_TIMEOUT",
+                "DB_POOL_TIMEOUT", "HTTP_POOL_TIMEOUT", "LIMIT_EXCEEDED"}) {
             Map<String,Object> summary = detailedSummary(code, "operation failed with " + code);
             Map<String,Object> result = LoadTerminalResult.projectOperationResult(
                     fields("status", "ERROR", "exitCode", 3, "diagnostics", Collections.singletonList(fields("code", "ATT-WORKER-EVENT-TRUNCATED")), "summary", summary), "ERROR", 3);
             Map<?,?> cause = (Map<?,?>) ((Map<?,?>) ((Map<?,?>) result.get("summary")).get("diagnostics")).get("primaryError");
             assertEquals(code, cause.get("code"));
+            assertEquals("ERROR", result.get("status"));
             assertEquals(3, ((Number) result.get("exitCode")).intValue());
+            assertEquals("EXECUTION_ERROR", cause.get("outcome"));
+            assertTrue(cause.get("limitName") instanceof String);
         }
 
         for (String[] pair : new String[][] {
@@ -77,6 +92,11 @@ class LoadTerminalResultTest {
             Map<?,?> cause = (Map<?,?>) ((Map<?,?>) ((Map<?,?>) result.get("summary")).get("diagnostics")).get("primaryError");
             assertEquals(pair[1], cause.get("code"));
             assertEquals(2, ((Number) cause.get("failedCount")).intValue());
+            assertEquals("EXECUTION_ERROR", cause.get("outcome"));
+            assertEquals("load.preparation", cause.get("scope"));
+            assertTrue(cause.containsKey("limitName"));
+            assertTrue(cause.get("configuredLimit") instanceof Number);
+            assertTrue(cause.get("observed") instanceof Number);
         }
     }
 
@@ -108,6 +128,37 @@ class LoadTerminalResultTest {
         assertEquals("FAILED", ((Map<?,?>) compact.get("archive")).get("status"));
     }
 
+    @Test void secondaryNoticesAreSafeBoundedAndRemainSeparateFromThePrimaryCause() throws Exception {
+        Map<String,Object> diagnostics = fields("primaryError", fields("code", "HTTP_RESPONSE_TOO_LARGE",
+                "summary", "SUT response exceeded its configured limit", "outcome", "EXECUTION_ERROR"),
+                "secondaryNotices", Arrays.asList(
+                fields("code", "ATT-LOAD-EVIDENCE-QUOTA", "summary", "Evidence was sampled",
+                        "limitName", "load.evidence.maxFailureSamples", "observed", 12L,
+                        "outcome", "DATA_TRUNCATED", "scope", "engine.loadEvidence"),
+                fields("code", "LOAD_REPORT_WRITE_FAILED", "summary", "Report artifacts could not be published",
+                        "outcome", "ARCHIVE_FAILED", "scope", "engine.loadReport",
+                        "remediationHint", "Retry report publication after storage is available."),
+                fields("code", "ATT-UNBOUNDED", "summary", "This third notice must be omitted")));
+        Map<String,Object> compact = LoadTerminalResult.compact(fields("runId", "safe-run", "status", "ERROR",
+                "exitCode", 3, "durationMs", 1000L, "executionStatus", "ERROR", "performanceVerdict", "NOT_EVALUATED",
+                "metrics", fields("runtimeError", 1L), "thresholds", Collections.emptyMap(),
+                "workloads", Collections.emptyMap(), "diagnostics", diagnostics,
+                "metricCoverage", fields("loadMetricsBucketCapacity", 4096),
+                "detailCompleteness", fields("state", "OMITTED", "truncated", Boolean.TRUE),
+                "archive", fields("status", "PENDING", "reportAvailability", "PENDING")));
+        Map<String,Object> projected = LoadTerminalResult.projectOperationResult(
+                fields("status", "ERROR", "exitCode", 3, "summary", compact), "ERROR", 3);
+        Map<?,?> compactDiagnostics = (Map<?,?>) ((Map<?,?>) ((Map<?,?>) projected.get("summary")).get("diagnostics"));
+        Map<?,?> primary = (Map<?,?>) compactDiagnostics.get("primaryError");
+        List<?> notices = (List<?>) compactDiagnostics.get("secondaryNotices");
+        assertEquals("HTTP_RESPONSE_TOO_LARGE", primary.get("code"));
+        assertEquals(2, notices.size());
+        assertEquals("ATT-LOAD-EVIDENCE-QUOTA", ((Map<?,?>) notices.get(0)).get("code"));
+        assertEquals("ARCHIVE_FAILED", ((Map<?,?>) notices.get(1)).get("outcome"));
+        assertFalse(JSON.writeValueAsString(projected).contains("business-payload"));
+        assertTrue(JSON.writeValueAsBytes(projected).length <= LoadTerminalResult.MAX_SUMMARY_BYTES + 1024);
+    }
+
     @Test void earlyInvalidLoadKeepsItsDiagnosticAndRemainsInvalidWithoutArchive() {
         Map<String,Object> result = LoadTerminalResult.projectOperationResult(fields(
                 "status", "INVALID", "exitCode", 2,
@@ -132,6 +183,8 @@ class LoadTerminalResultTest {
         Map<String,Object> summary = new LinkedHashMap<>((Map<String,Object>) workerFallback.get("summary"));
         Map<String,Object> diagnostics = new LinkedHashMap<>((Map<String,Object>) summary.get("diagnostics"));
         diagnostics.put("transportWarnings", Collections.singletonList(fields("code", "ATT-WORKER-EVENT-TRUNCATED", "summary", "Worker details truncated")));
+        diagnostics.put("secondaryNotices", Collections.singletonList(fields("code", "ATT-LOAD-EVIDENCE-QUOTA",
+                "summary", "Some iteration evidence was not retained", "outcome", "DATA_TRUNCATED")));
         summary.put("diagnostics", diagnostics);
         workerFallback.put("summary", summary);
 
@@ -143,6 +196,7 @@ class LoadTerminalResultTest {
         assertEquals(3, ((Number) stored.get("exitCode")).intValue());
         assertEquals("MQ_RESPONSE_TOO_LARGE", cause.get("code"));
         assertEquals("ATT-WORKER-EVENT-TRUNCATED", ((Map<?,?>) ((List<?>) storedDiagnostics.get("transportWarnings")).get(0)).get("code"));
+        assertEquals("ATT-LOAD-EVIDENCE-QUOTA", ((Map<?,?>) ((List<?>) storedDiagnostics.get("secondaryNotices")).get(0)).get("code"));
     }
 
     @Test void reportPublicationFailureDoesNotReplaceTheLoadRootCauseOrOutcome() {
@@ -195,12 +249,29 @@ class LoadTerminalResultTest {
     }
 
     private Map<String,Object> detailedSummary(String primaryCode, String primarySummary) {
+        String limitName = "MQ_POOL_TIMEOUT".equals(primaryCode) ? "mq.pool.borrowTimeoutMs"
+                : "MQ_RESPONSE_TOO_LARGE".equals(primaryCode) ? "mq.response.maxBytes"
+                : "DB_POOL_TIMEOUT".equals(primaryCode) ? "db.poolConnectionTimeoutMs"
+                : "HTTP_POOL_TIMEOUT".equals(primaryCode) ? "http.pool.connectionRequestTimeoutMs"
+                : "LIMIT_EXCEEDED".equals(primaryCode) ? "db.result.maxRows" : "http.response.maxBytes";
+        Number configuredLimit = "MQ_POOL_TIMEOUT".equals(primaryCode) ? 30_000L
+                : "MQ_RESPONSE_TOO_LARGE".equals(primaryCode) ? 4_194_304L
+                : "DB_POOL_TIMEOUT".equals(primaryCode) ? 250L
+                : "HTTP_POOL_TIMEOUT".equals(primaryCode) ? 40L
+                : "LIMIT_EXCEEDED".equals(primaryCode) ? 1L : 10_485_760L;
+        Number observed = "MQ_POOL_TIMEOUT".equals(primaryCode) || "DB_POOL_TIMEOUT".equals(primaryCode)
+                || "HTTP_POOL_TIMEOUT".equals(primaryCode) ? null : configuredLimit.longValue() + 1L;
+        String scope = "MQ_POOL_TIMEOUT".equals(primaryCode) || "MQ_RESPONSE_TOO_LARGE".equals(primaryCode) ? "engine.mq"
+                : "DB_POOL_TIMEOUT".equals(primaryCode) || "LIMIT_EXCEEDED".equals(primaryCode) ? "engine.db"
+                : "HTTP_POOL_TIMEOUT".equals(primaryCode) ? "engine.http.pool" : "engine.http";
         Map<String,Object> classes = new LinkedHashMap<>();
         for (int i = 0; i < 256; i++) classes.put("CLASS_" + i, 10_000L + i);
         if (primaryCode != null) classes.put(primaryCode, 17L);
         List<Map<String,Object>> failures = new ArrayList<>();
         if (primaryCode != null) failures.add(fields("status", "ERROR", "code", primaryCode,
-                "summary", primarySummary, "workloadId", "load-界"));
+                "summary", primarySummary, "workloadId", "load-界", "limitName", limitName,
+                "configuredLimit", configuredLimit, "observed", observed,
+                "scope", scope, "outcome", "EXECUTION_ERROR", "stage", "execution"));
         Map<String,Object> buckets = new LinkedHashMap<>();
         for (int i = 0; i < 4096; i++) buckets.put(String.valueOf(1_700_000_000_000L + i * 1000L), fields("completed", i));
         Map<String,Object> workloads = new LinkedHashMap<>();
@@ -212,7 +283,10 @@ class LoadTerminalResultTest {
                 "success", 497_000L, "failure", 800L, "runtimeError", primaryCode == null ? 0L : 1200L,
                 "dropped", 1000L, "timeSeriesBucketCapacity", 4096, "timeSeriesBucketCount", 4096,
                 "errorClassifications", classes, "runtimeErrorClassifications", primaryCode == null ? Collections.<String,Object>emptyMap() : fields(primaryCode, 1200L),
-                "primaryRuntimeError", primaryCode == null ? null : fields("code", primaryCode, "summary", primarySummary),
+                "primaryRuntimeError", primaryCode == null ? null : fields("code", primaryCode, "summary", primarySummary,
+                        "limitName", limitName, "configuredLimit", configuredLimit,
+                        "observed", observed, "scope", scope,
+                        "outcome", "EXECUTION_ERROR", "stage", "execution"),
                 "failureDiagnostics", failures, "buckets", buckets,
                 "windowMetrics", fields("schemaVersion", "att-load-window-metrics/v1", "timeSeries", fields("capacity", 2048, "bucketDurationMs", 60000L, "coverage", "Whole execution; roll-up")));
         return fields("runId", "run-雪", "status", primaryCode == null ? "PASS" : "ERROR", "exitCode", primaryCode == null ? 0 : 3,

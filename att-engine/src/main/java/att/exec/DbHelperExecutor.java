@@ -210,6 +210,14 @@ public final class DbHelperExecutor implements AutoCloseable {
                 managed.failed();
                 result = failure(operation, failure.type, failure.detail == null ? safeMessage(failure.cause, config) : failure.detail,
                         failure.cause instanceof SQLException ? (SQLException) failure.cause : null, managed);
+                if (failure.limitName != null) {
+                    @SuppressWarnings("unchecked") Map<String, Object> error = (Map<String, Object>) result.get("error");
+                    error.putAll(att.server.api.LimitDiagnostic.create(failure.type,
+                            "DB operation exceeded a configured resource bound", failure.limitName,
+                            failure.configuredLimit, failure.observed, "engine.db",
+                            att.server.api.LimitOutcome.EXECUTION_ERROR, "execution",
+                            "Reduce result size or concurrency, or adjust the helper limit after reviewing capacity.", null));
+                }
                 recordInternalFailure(result, failure.cause, "db." + operation, config, log);
             } catch (Exception error) {
                 managed.failed();
@@ -305,7 +313,8 @@ public final class DbHelperExecutor implements AutoCloseable {
                                                  String sql, List<?> params, List<String> parameterNames, Long timeoutMs) throws DbFailure {
         Connection connection;
         try { connection = managed.connection(); }
-        catch (DbConnectionProvider.PoolTimeoutException error) { throw new DbFailure("DB_POOL_TIMEOUT", error); }
+        catch (DbConnectionProvider.PoolTimeoutException error) { throw new DbFailure("DB_POOL_TIMEOUT", error, null,
+                "db.poolConnectionTimeoutMs", managed.config.poolConnectionTimeoutMs(), null); }
         catch (Exception error) {
             String message = error.getMessage() == null ? "" : error.getMessage();
             String type = connectionProvider != null && message.toLowerCase(Locale.ROOT).contains("connection is not available")
@@ -362,7 +371,8 @@ public final class DbHelperExecutor implements AutoCloseable {
                         new SQLTimeoutException("Tool Action timeout exceeded " + timeoutMs + "ms"),
                         timeoutDetail(timeoutMs, cancellationConfirmed.get(), cancellationError.get()));
             } catch (SQLTimeoutException error) { throw new DbFailure("TIMEOUT", error, timeoutDetail(timeoutMs, cancellationConfirmed.get(), cancellationError.get())); }
-            catch (LimitException error) { throw new DbFailure("LIMIT_EXCEEDED", error); }
+            catch (LimitException error) { throw new DbFailure("LIMIT_EXCEEDED", error, error.getMessage(),
+                    error.limitName, error.limit, error.observed); }
             catch (SQLException error) {
                 throw new DbFailure(timeoutTriggered.get() ? "TIMEOUT" : "SQL_ERROR", error,
                         timeoutTriggered.get() ? timeoutDetail(timeoutMs, cancellationConfirmed.get(), cancellationError.get()) : null);
@@ -406,7 +416,8 @@ public final class DbHelperExecutor implements AutoCloseable {
         // each serialized row exactly once instead of reserializing the prefix.
         long resultBytes = 2L;
         while (resultSet.next()) {
-            if (rows.size() >= config.maxRows()) throw new LimitException("Query exceeded maxRows=" + config.maxRows());
+            if (rows.size() >= config.maxRows()) throw new LimitException("Query exceeded maxRows=" + config.maxRows(),
+                    "db.result.maxRows", config.maxRows(), rows.size() + 1L);
             Map<String, Object> row = new LinkedHashMap<String, Object>();
             for (int column = 1; column <= labels.size(); column++) {
                 try { row.put(labels.get(column - 1), normalize(resultSet.getObject(column), config)); }
@@ -415,7 +426,8 @@ public final class DbHelperExecutor implements AutoCloseable {
             }
             int rowBytes = jsonBytes(row);
             resultBytes += rowBytes + (rows.isEmpty() ? 0 : 1);
-            if (resultBytes > config.maxBytes()) throw new LimitException("Query exceeded maxBytes=" + config.maxBytes());
+            if (resultBytes > config.maxBytes()) throw new LimitException("Query exceeded maxBytes=" + config.maxBytes(),
+                    "db.result.maxBytes", config.maxBytes(), resultBytes);
             rows.add(row);
         }
         return success("query", rows.size(), rows, null, managed);
@@ -426,12 +438,14 @@ public final class DbHelperExecutor implements AutoCloseable {
         if (value instanceof byte[]) return checked(Base64.getEncoder().encodeToString((byte[]) value), config);
         if (value instanceof Blob) {
             Blob blob = (Blob) value;
-            if (blob.length() > config.maxCellBytes()) throw new LimitException("BLOB exceeded maxCellBytes=" + config.maxCellBytes());
+            if (blob.length() > config.maxCellBytes()) throw new LimitException("BLOB exceeded maxCellBytes=" + config.maxCellBytes(),
+                    "db.result.maxCellBytes", config.maxCellBytes(), blob.length());
             try (InputStream input = blob.getBinaryStream()) { return Base64.getEncoder().encodeToString(read(input, config.maxCellBytes())); }
         }
         if (value instanceof Clob) {
             Clob clob = (Clob) value;
-            if (clob.length() > config.maxCellBytes()) throw new LimitException("CLOB exceeded maxCellBytes=" + config.maxCellBytes());
+            if (clob.length() > config.maxCellBytes()) throw new LimitException("CLOB exceeded maxCellBytes=" + config.maxCellBytes(),
+                    "db.result.maxCellBytes", config.maxCellBytes(), clob.length());
             try (Reader reader = clob.getCharacterStream()) { return read(reader, config.maxCellBytes()); }
         }
         if (value instanceof java.sql.Date || value instanceof java.sql.Time || value instanceof java.sql.Timestamp
@@ -442,7 +456,8 @@ public final class DbHelperExecutor implements AutoCloseable {
 
     private Object checked(Object value, DbHelperConfig config) {
         if (value instanceof String && ((String) value).getBytes(StandardCharsets.UTF_8).length > config.maxCellBytes()) {
-            throw new LimitException("Cell exceeded maxCellBytes=" + config.maxCellBytes());
+            throw new LimitException("Cell exceeded maxCellBytes=" + config.maxCellBytes(),
+                    "db.result.maxCellBytes", config.maxCellBytes(), ((String) value).getBytes(StandardCharsets.UTF_8).length);
         }
         return value;
     }
@@ -452,7 +467,8 @@ public final class DbHelperExecutor implements AutoCloseable {
         byte[] buffer = new byte[8192];
         int read;
         while ((read = input.read(buffer)) >= 0) {
-            if (output.size() + read > limit) throw new LimitException("Binary cell exceeded maxCellBytes=" + limit);
+            if (output.size() + read > limit) throw new LimitException("Binary cell exceeded maxCellBytes=" + limit,
+                    "db.result.maxCellBytes", limit, (long) output.size() + read);
             output.write(buffer, 0, read);
         }
         return output.toByteArray();
@@ -483,11 +499,13 @@ public final class DbHelperExecutor implements AutoCloseable {
                     else utf8Bytes += 1;
                 } else if (Character.isLowSurrogate(c)) utf8Bytes += 1;
                 else utf8Bytes += c <= 0x7f ? 1 : c <= 0x7ff ? 2 : 3;
-                if (utf8Bytes > limit) throw new LimitException("Text cell exceeded maxCellBytes=" + limit);
+                if (utf8Bytes > limit) throw new LimitException("Text cell exceeded maxCellBytes=" + limit,
+                        "db.result.maxCellBytes", limit, utf8Bytes);
             }
         }
         if (pendingHighSurrogate != 0) utf8Bytes += 1;
-        if (utf8Bytes > limit) throw new LimitException("Text cell exceeded maxCellBytes=" + limit);
+        if (utf8Bytes > limit) throw new LimitException("Text cell exceeded maxCellBytes=" + limit,
+                "db.result.maxCellBytes", limit, utf8Bytes);
         return output.toString();
     }
 
@@ -763,11 +781,21 @@ public final class DbHelperExecutor implements AutoCloseable {
         final String type;
         final Throwable cause;
         final String detail;
+        final String limitName;
+        final Number configuredLimit, observed;
         DbFailure(String type, Throwable cause) { this(type, cause, null); }
-        DbFailure(String type, Throwable cause, String detail) { super(cause); this.type = type; this.cause = cause; this.detail = detail; }
+        DbFailure(String type, Throwable cause, String detail) { this(type, cause, detail, null, null, null); }
+        DbFailure(String type, Throwable cause, String detail, String limitName, Number configuredLimit, Number observed) {
+            super(cause); this.type = type; this.cause = cause; this.detail = detail;
+            this.limitName = limitName; this.configuredLimit = configuredLimit; this.observed = observed;
+        }
     }
 
     private static final class LimitException extends RuntimeException {
-        LimitException(String message) { super(message); }
+        final String limitName; final Number limit, observed;
+        LimitException(String message) { this(message, "db.result.maxCellBytes", null, null); }
+        LimitException(String message, String limitName, Number limit, Number observed) {
+            super(message); this.limitName = limitName; this.limit = limit; this.observed = observed;
+        }
     }
 }

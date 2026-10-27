@@ -28,6 +28,7 @@ public final class LoadMetrics implements LoadEventListener {
 
     private final ConcurrentLatencyReservoir latencies = new ConcurrentLatencyReservoir(MAX_LATENCIES);
     private final BucketSlot[] buckets = bucketSlots();
+    private final AtomicLong timeSeriesBucketsEvicted = new AtomicLong();
     /* The phase set is fixed by the load contract, so this remains bounded independently of run duration. */
     private final ConcurrentHashMap<String, PhaseStats> phases = new ConcurrentHashMap<String, PhaseStats>();
     private final Map<String, AtomicLong> errorClassifications = new ConcurrentHashMap<String, AtomicLong>();
@@ -288,6 +289,7 @@ public final class LoadMetrics implements LoadEventListener {
         result.put("p99Ms", percentile(sorted, 0.99));
         result.put("latencyMaxMs", measuredLatencyCount.get() == 0L ? 0L : latencyMaxMs.get());
         result.put("timeSeriesBucketCapacity", MAX_BUCKETS);
+        result.put("timeSeriesBucketsEvicted", timeSeriesBucketsEvicted.get());
         result.put("metricContractVersion", "att-load-window-metrics/v1");
         if (windowMetrics != null) result.put("windowMetrics", windowMetrics.snapshot(ended));
         Map<String, Map<String, Object>> bucketMap = new TreeMap<String, Map<String, Object>>();
@@ -318,7 +320,7 @@ public final class LoadMetrics implements LoadEventListener {
         long bucketIndex = Math.floorDiv(bucketStart, 1000L);
         int index = (int) Math.floorMod(bucketIndex, (long) MAX_BUCKETS);
         return buckets[index].get(bucketStart, model, configuredUsers,
-                configuredArrivalRatePerSecond, configuredMaxConcurrent);
+                configuredArrivalRatePerSecond, configuredMaxConcurrent, timeSeriesBucketsEvicted);
     }
 
     private void recordLatency(long latencyMs, long observation) {
@@ -407,6 +409,9 @@ public final class LoadMetrics implements LoadEventListener {
         root.put("summary", LoadFailureDiagnostic.safe(summary));
         if (event.workloadId() != null) root.put("workloadId", LoadFailureDiagnostic.safe(event.workloadId()));
         if (event.phase() != null) root.put("phase", LoadFailureDiagnostic.safe(event.phase()));
+        for (String key : new String[] {"limitName", "configuredLimit", "actual", "observed", "usage", "limit",
+                "threshold", "scope", "outcome", "stage", "remediationHint", "artifactRef"})
+            if (failure.containsKey(key)) root.put(key, failure.get(key));
         primaryRuntimeError.compareAndSet(null, Collections.unmodifiableMap(root));
     }
 
@@ -754,13 +759,14 @@ public final class LoadMetrics implements LoadEventListener {
 
     private static final class BucketSlot {
         private volatile Bucket value;
-        Bucket get(long start, String model, int users, double rate, int maxConcurrent) {
+        Bucket get(long start, String model, int users, double rate, int maxConcurrent, AtomicLong evicted) {
             Bucket current = value;
             if (current != null && current.bucketStart == start) return current;
             synchronized (this) {
                 current = value;
                 if (current != null && current.bucketStart == start) return current;
                 if (current != null && current.bucketStart > start) return null;
+                if (current != null) evicted.incrementAndGet();
                 Bucket replacement = new Bucket(start, model, users, rate, maxConcurrent);
                 value = replacement;
                 return replacement;

@@ -129,7 +129,8 @@ public final class ApiServlet extends HttpServlet {
             if(path.matches("/jobs/[^/]+")){Map<String,Object> view=runtime.jobRecord(segment(path,2));view.put("requestId",requestId);json(res,200,view);return;}
             error(res,404,"ATT-SERVER-NOT-FOUND","API resource was not found",requestId);
         } catch(JobStore.TargetSearchPendingException e){res.setHeader("Retry-After","2");error(res,503,"ATT-SERVER-TARGET-SEARCH-PENDING","Historical target search is being prepared. No partial results were returned. Use job: followed by the full Job ID for exact lookup, or retry Refresh jobs shortly.",requestId);}
-          catch(ServerRuntime.ArchiveUnavailableException e){error(res,409,"ATT-SERVER-ARCHIVE-UNAVAILABLE","Artifact archive is pending, failed, or unavailable; refresh the archive status",requestId);}
+          catch(ServerRuntime.ArchiveUnavailableException e){archiveUnavailable(res,e,requestId);}
+          catch(ServerRuntime.InspectionLimitException e){error(res,413,"ATT-RESOURCE-LIMIT","Package inspection exceeded a deterministic scan limit",requestId,e.diagnostics);}
           catch(ServerRuntime.ArtifactCapacityException e){error(res,503,"ATT-SERVER-ARTIFACT-CAPACITY","Artifact preview capacity is full; retry shortly",requestId);}
           catch(ServerRuntime.InlineLoadDisabledException e){error(res,403,"ATT-SERVER-INLINE-LOAD-DISABLED","Browser-submitted Load is disabled by Server configuration",requestId);}
           catch(ServerRuntime.InlineLoadLimitException e){error(res,400,"ATT-SERVER-INLINE-LOAD-LIMIT",safeDetail(e),requestId);}
@@ -143,6 +144,7 @@ public final class ApiServlet extends HttpServlet {
           catch(ServerRuntime.InspectionTimeoutException e){error(res,504,"ATT-SERVER-INSPECTION-TIMEOUT","Package inspection exceeded its time limit",requestId);}
           catch(ServerRuntime.InspectionResponseTooLargeException e){error(res,413,"ATT-SERVER-INSPECTION-RESPONSE-TOO-LARGE","Package inspection response exceeded the configured limit",requestId);}
           catch(PackageConfigurationPolicy.EnvironmentDeniedException e){error(res,403,"ATT-PACKAGE-ENVIRONMENT-DENIED",safeDetail(e),requestId);}
+          catch(ResourcePageLimitException e){error(res,400,"ATT-RESOURCE-LIMIT","Resource page size exceeds the bounded listing limit",requestId,List.of(e.diagnostic));}
           catch(IllegalArgumentException e){error(res,400,"ATT-SERVER-INVALID-REQUEST",safeDetail(e),requestId);}
           catch(Exception e){error(res,500,"ATT-SERVER-REQUEST-FAILED","The request could not be completed",requestId);getServletContext().log("ATT Server request failed id="+requestId,e);}
     }
@@ -485,7 +487,7 @@ public final class ApiServlet extends HttpServlet {
                 wakeup.poll(15,TimeUnit.SECONDS);
                 if(sessionHash!=null&&!runtime.auth.sessionStillValid(sessionHash))break;
                 List<Map<String,Object>> events=journal.after(cursor,100);
-                for(Map<String,Object> event:events){long id=((Number)event.get("id")).longValue();Object projected=runtime.publicEventData(event.get("data"),outputDirectory,packageRoot);if(projected instanceof com.fasterxml.jackson.databind.node.ObjectNode node && journal.truncatedHistory() && id==journal.oldestId()) node.put("historyTruncated",true);out.print("id: "+id+"\nevent: "+event.get("event")+"\ndata: "+ServerRuntime.JSON.writeValueAsString(projected)+"\n\n");cursor=id;}
+                for(Map<String,Object> event:events){long id=((Number)event.get("id")).longValue();Object projected=runtime.publicEventData(event.get("data"),outputDirectory,packageRoot);if(projected instanceof com.fasterxml.jackson.databind.node.ObjectNode node && journal.truncatedHistory() && id==journal.oldestId()){node.put("historyTruncated",true);node.set("historyLimit",ServerRuntime.JSON.valueToTree(att.server.api.LimitDiagnostic.create("ATT-JOURNAL-HISTORY-EVICTED","Earlier Job events are outside the retained journal window","server.maxEventsPerJob",runtime.config.maxEventsPerJob,journal.oldestId()-1,"server.eventJournal",att.server.api.LimitOutcome.HISTORY_EVICTED,"presentation","Use pagination or retained report artifacts for longer history",null)));}out.print("id: "+id+"\nevent: "+event.get("event")+"\ndata: "+ServerRuntime.JSON.writeValueAsString(projected)+"\n\n");cursor=id;}
                 if(!events.isEmpty()){out.flush();if(out.checkError())return;lastWrite=System.nanoTime();}
                 if(journal.hasMore(cursor)){wakeup.offer(Boolean.TRUE);continue;}
                 if(runtime.terminal(jobId)&&journal.resultDeliveredThrough(cursor)&&!journal.hasMore(cursor))break;
@@ -537,6 +539,7 @@ public final class ApiServlet extends HttpServlet {
             }
         } catch(ServerRuntime.NotFoundException e){throw e;}
           catch(ServerRuntime.StaleCursorException e){throw e;}
+          catch(ServerRuntime.InspectionLimitException e){throw e;}
           catch(ServerRuntime.InspectionCapacityException e){throw e;}
           catch(ServerRuntime.InspectionTimeoutException e){throw e;}
           catch(ServerRuntime.InspectionResponseTooLargeException e){throw e;}
@@ -623,6 +626,7 @@ public final class ApiServlet extends HttpServlet {
                 result.put("requestId",requestId);json(res,200,result);
             }
         } catch(ServerRuntime.NotFoundException e){throw e;}
+          catch(ServerRuntime.InspectionLimitException e){throw e;}
           catch(ServerRuntime.InspectionCapacityException e){throw e;}
           catch(ServerRuntime.InspectionTimeoutException e){throw e;}
           catch(ServerRuntime.InspectionResponseTooLargeException e){throw e;}
@@ -661,9 +665,17 @@ public final class ApiServlet extends HttpServlet {
           catch(IllegalArgumentException e){throw e;}
           catch(Exception e){throw new IOException(e);}
     }
-    private static int parseLimit(String raw){if(raw==null||raw.isEmpty())return 0;if(!raw.matches("[0-9]{1,3}"))throw new IllegalArgumentException("limit must be an integer between 1 and 100");int value=Integer.parseInt(raw);if(value<1||value>100)throw new IllegalArgumentException("limit must be between 1 and 100");return value;}
+    private static int parseLimit(String raw){if(raw==null||raw.isEmpty())return 0;if(!raw.matches("[0-9]{1,3}"))throw new IllegalArgumentException("limit must be an integer between 1 and 100");int value=Integer.parseInt(raw);if(value<1||value>100)throw new ResourcePageLimitException(value);return value;}
     private static int parseOffset(String raw){if(raw==null||raw.isEmpty())return 0;if(!raw.matches("[0-9]{1,6}"))throw new IllegalArgumentException("offset must be a non-negative integer");return Integer.parseInt(raw);}
     private static int parseConfigurationLimit(String raw){if(raw==null||raw.isEmpty())return 50;if(!raw.matches("[0-9]{1,3}"))throw new IllegalArgumentException("limit must be between 1 and 100");int value=Integer.parseInt(raw);if(value<1||value>100)throw new IllegalArgumentException("limit must be between 1 and 100");return value;}
+    private static final class ResourcePageLimitException extends IllegalArgumentException {
+        final Map<String,Object> diagnostic;
+        ResourcePageLimitException(int observed){
+            diagnostic=att.server.api.LimitDiagnostic.create("ATT-RESOURCE-LIMIT","Resource page size exceeds the bounded listing limit",
+                    "resourceInspector.maxPageSize",100,observed,"one resource listing",att.server.api.LimitOutcome.SUBMISSION_REJECTED,
+                    "request validation","Fetch the next bounded page.",null);
+        }
+    }
     private static boolean parseOptionalBoolean(String raw,String name){if(raw==null||raw.isEmpty())return false;if("true".equalsIgnoreCase(raw))return true;if("false".equalsIgnoreCase(raw))return false;throw new IllegalArgumentException(name+" must be true or false");}
     private static String principalSearch(HttpServletRequest req){String value=req.getParameter("principal");if(value==null)return null;value=value.strip();if(value.codePointCount(0,value.length())>120)throw new IllegalArgumentException("principal search must be at most 120 characters");for(int i=0;i<value.length();i++)if(Character.isISOControl(value.charAt(i)))throw new IllegalArgumentException("principal search contains an invalid character");return value.isEmpty()?null:value;}
     private static boolean resourcePath(String path){return path.matches("/packages/[^/]+/resources(?:/.*)?");}
@@ -738,7 +750,55 @@ public final class ApiServlet extends HttpServlet {
     static String principal(HttpServletRequest req){Object value=req.getServletContext().getAttribute(ServerBootstrap.RUNTIME);if(value instanceof ServerRuntime runtime&&"local".equals(runtime.config.authMode)){Object identity=req.getAttribute(AuthService.IDENTITY);return identity instanceof String?(String)identity:null;}if(value instanceof ServerRuntime runtime&&!runtime.config.authenticationRequired)return RequestIdentity.ANONYMOUS;Principal p=req.getUserPrincipal();if(p==null)return null;String name=p.getName();if(name==null||name.isBlank()||name.length()>256)return null;for(int i=0;i<name.length();i++)if(Character.isISOControl(name.charAt(i)))return null;return name.trim();}
     private static String requestId(HttpServletRequest req,HttpServletResponse res){String value=req.getHeader("X-Request-ID");if(value==null||!value.matches("[A-Za-z0-9._-]{1,80}"))value=UUID.randomUUID().toString();res.setHeader("X-Request-ID",value);return value;}
     private static void json(HttpServletResponse res,int status,Object body)throws IOException{res.setStatus(status);res.setCharacterEncoding("UTF-8");res.setContentType("application/json");ServerRuntime.JSON.writeValue(res.getOutputStream(),body);}
-    private static void error(HttpServletResponse res,int status,String code,String summary,String requestId)throws IOException{Map<String,Object> e=new LinkedHashMap<>();e.put("code",code);e.put("summary",summary);e.put("detail",summary);e.put("requestId",requestId);json(res,status,Map.of("error",e));}
+    static void error(HttpServletResponse res,int status,String code,String summary,String requestId)throws IOException{
+        Map<String,Object> e=new LinkedHashMap<>();e.put("code",code);e.put("summary",summary);e.put("detail",summary);e.put("requestId",requestId);
+        Map<String,Object> response=new LinkedHashMap<>();response.put("error",e);response.put("requestId",requestId);
+        Map<String,Object> diagnostic=limitHttpDiagnostic(status,code,summary);
+        if(diagnostic!=null){e.put("diagnostic",diagnostic);response.put("diagnostics",List.of(diagnostic));}
+        json(res,status,response);
+    }
+    private static void archiveUnavailable(HttpServletResponse res,ServerRuntime.ArchiveUnavailableException failure,String requestId)throws IOException {
+        boolean failed="FAILED".equals(failure.archiveState);
+        String code=failed?"ATT-SERVER-ARCHIVE-UNAVAILABLE":"ATT-ARCHIVE-NOT-READY";
+        String summary=failed?"Artifact archive publication failed; inspect archive status before retrying."
+                :"Artifact archive is not ready; refresh archive status before opening it.";
+        Map<String,Object> diagnostic=att.server.api.LimitDiagnostic.create(code,summary,"artifact.archiveAvailability",null,null,
+                "server.artifactPublication",failed?att.server.api.LimitOutcome.ARCHIVE_FAILED:null,"publication",
+                failed?"Inspect the archive failure diagnostic and retry after eligible private output is available."
+                        :"Refresh archive status and open the artifact after publication reaches READY.","archive.zip");
+        diagnostic.put("archiveState",failure.archiveState);
+        error(res,409,code,summary,requestId,List.of(diagnostic));
+    }
+    private static Map<String,Object> limitHttpDiagnostic(int status,String code,String summary){
+        if(status!=413&&status!=429&&status!=503&&status!=504)return null;
+        String limitName,remediation;
+        if(status==503){
+            if("ATT-SERVER-ARTIFACT-CAPACITY".equals(code)){
+                limitName="server.artifacts.readSlots";remediation="Retry after an artifact preview or download releases its read slot.";
+            }else if("ATT-SERVER-INSPECTION-CAPACITY".equals(code)){
+                limitName="server.inspection.capacity";remediation="Retry after active package inspections release capacity.";
+            }else if("ATT-SERVER-STREAM-CAPACITY".equals(code)){
+                limitName="server.sse.observers";remediation="Retry after an event-stream observer disconnects.";
+            }else return null;
+            return att.server.api.LimitDiagnostic.create(code,summary,limitName,null,null,"server.admission",
+                    att.server.api.LimitOutcome.SUBMISSION_REJECTED,"admission",remediation,null);
+        }
+        if(status==429&&!"ATT-SERVER-CAPACITY-EXCEEDED".equals(code)&&!"ATT-SERVER-DRAFT-CAPACITY".equals(code))return null;
+        if(status==504&&!"ATT-SERVER-INSPECTION-TIMEOUT".equals(code))return null;
+        if(status==413&&!"ATT-SERVER-REQUEST-TOO-LARGE".equals(code)
+                &&!"ATT-SERVER-INSPECTION-RESPONSE-TOO-LARGE".equals(code))return null;
+        if(code.contains("INSPECTION-RESPONSE")||code.contains("RESPONSE-TOO-LARGE")){
+            limitName="server.inspection.maxResponseBytes";remediation="Request a smaller paginated or bounded inspection response.";
+        }else if(code.contains("TIMEOUT")){
+            limitName="server.inspection.timeoutMs";remediation="Narrow the inspection request and reduce package scan work before reviewing its deadline.";
+        }else if(status==413){
+            limitName="server.maxRequestBytes";remediation="Submit a smaller request or split the operation into bounded pages.";
+        }else if(status==429){
+            limitName=code.contains("DRAFT")?"server.drafts.capacity":"server.admission.queue";remediation="Retry after active work completes or reduce concurrent submissions.";
+        }else return null;
+        return att.server.api.LimitDiagnostic.create(code,summary,limitName,null,null,"server.admission",
+                att.server.api.LimitOutcome.SUBMISSION_REJECTED,"admission",remediation,null);
+    }
     private static void error(HttpServletResponse res,int status,String code,String summary,String requestId,List<Map<String,Object>> diagnostics)throws IOException{
         Map<String,Object> e=new LinkedHashMap<>();e.put("code",code);e.put("summary",summary);e.put("detail",summary);e.put("requestId",requestId);
         List<Map<String,Object>> correlated=new ArrayList<>();

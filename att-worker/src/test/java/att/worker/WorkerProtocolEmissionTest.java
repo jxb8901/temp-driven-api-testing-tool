@@ -49,6 +49,10 @@ class WorkerProtocolEmissionTest {
             try(ByteArrayInputStream stream=new ByteArrayInputStream(bytes.toByteArray())) {
                 WorkerProtocol.Frame progress=WorkerProtocol.read(stream,WorkerProtocol.MAX_FRAME_BYTES);
                 assertFalse(progress.oversized());assertTrue(mapper.readTree(progress.text()).path("truncated").asBoolean());
+                JsonNode progressLimit=mapper.readTree(progress.text()).path("protocolLimit");
+                assertEquals("DATA_TRUNCATED",progressLimit.path("outcome").asText());
+                assertEquals("worker.protocol.maxFrameBytes",progressLimit.path("limitName").asText());
+                assertTrue(progressLimit.path("observed").asLong()>progressLimit.path("configuredLimit").asLong());
                 WorkerProtocol.Frame terminal=WorkerProtocol.read(stream,WorkerProtocol.MAX_FRAME_BYTES);
                 assertFalse(terminal.oversized());JsonNode event=mapper.readTree(terminal.text());
                 assertEquals("RESULT",event.path("type").asText());assertEquals(outcome.status(),event.path("status").asText());
@@ -56,7 +60,12 @@ class WorkerProtocolEmissionTest {
                 assertEquals(outcome.executionId(),event.path("result").path("executionId").asText());
                 assertEquals("CONNECTION_ERROR",event.path("result").path("diagnostics").get(0).path("code").asText());
                 assertTrue(event.path("workerMetrics").path("sampleCount").asLong()>0);
-                assertTrue(event.path("protocolLimit").path("sizeBytes").asLong()>WorkerProtocol.MAX_FRAME_BYTES);
+                JsonNode heapUsage=event.path("workerMetrics").path("limitUsage").path("worker.heapBytes");
+                assertTrue(heapUsage.path("usage").isNumber());
+                assertTrue(heapUsage.path("limit").isNumber());
+                assertEquals(0.8d,heapUsage.path("threshold").asDouble(),0.0001d);
+                assertTrue(event.path("protocolLimit").path("observed").asLong()
+                        >event.path("protocolLimit").path("configuredLimit").asLong());
                 assertEquals("worker-protocol-result.json",event.path("result").path("detailsArtifact").asText());
                 assertNull(WorkerProtocol.read(stream,WorkerProtocol.MAX_FRAME_BYTES));
             }
@@ -100,7 +109,10 @@ class WorkerProtocolEmissionTest {
         Map<String,Object> metrics = fields("scheduled", 12L, "started", 12L, "completed", 12L,
                 "success", 10L, "failure", 1L, "runtimeError", 1L,
                 "failureDiagnostics", Collections.singletonList(fields("status", "ERROR",
-                        "code", "HTTP_RESPONSE_TOO_LARGE", "summary", "HTTP response exceeded its size limit")),
+                        "code", "HTTP_RESPONSE_TOO_LARGE", "summary", "HTTP response exceeded its size limit",
+                        "limitName", "http.response.maxBytes", "configuredLimit", 10 * 1024 * 1024,
+                        "observed", 10 * 1024 * 1024 + 1L, "scope", "engine.http",
+                        "outcome", "EXECUTION_ERROR", "stage", "execution")),
                 "buckets", Collections.emptyMap(), "large", large.toString());
         Map<String,Object> legacy = fields("schemaVersion", "att-load-summary/v1.2", "runId", "load-legacy-large",
                 "status", "ERROR", "executionStatus", "ERROR", "performanceVerdict", "NOT_MET",
@@ -121,7 +133,9 @@ class WorkerProtocolEmissionTest {
         assertEquals(3, result.path("exitCode").asInt());
         assertEquals("att-load-terminal-result/v1", summary.path("schemaVersion").asText());
         assertEquals("HTTP_RESPONSE_TOO_LARGE", summary.path("diagnostics").path("primaryError").path("code").asText());
+        assertEquals("EXECUTION_ERROR",summary.path("diagnostics").path("primaryError").path("outcome").asText());
         assertEquals("ATT-WORKER-EVENT-TRUNCATED", summary.path("diagnostics").path("transportWarnings").get(0).path("code").asText());
+        assertEquals("DATA_TRUNCATED",summary.path("diagnostics").path("transportWarnings").get(0).path("outcome").asText());
         assertEquals("ATT-WORKER-EVENT-TRUNCATED", result.path("diagnostics").get(result.path("diagnostics").size() - 1).path("code").asText());
     }
 

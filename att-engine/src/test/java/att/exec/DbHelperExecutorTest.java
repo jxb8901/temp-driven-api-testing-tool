@@ -365,6 +365,9 @@ class DbHelperExecutorTest {
                 assertFalse(timedOut.success());
                 Map<?, ?> error = (Map<?, ?>) ((Map<?, ?>) timedOut.result()).get("error");
                 assertEquals("DB_POOL_TIMEOUT", error.get("type"));
+                assertEquals("db.poolConnectionTimeoutMs", error.get("limitName"));
+                assertEquals(250, ((Number) error.get("configuredLimit")).intValue());
+                assertEquals("EXECUTION_ERROR", error.get("outcome"));
                 String diagnostics = String.valueOf(error.get("message")) + timedOut.evidence();
                 assertFalse(diagnostics.contains("password-secret"));
                 assertFalse(diagnostics.contains(url));
@@ -400,7 +403,12 @@ class DbHelperExecutorTest {
         Map<?, ?> tooMany = (Map<?, ?>) executor.execute("limited", "query", "select MANY", "inline",
                 Collections.emptyList(), "many").result();
         assertFalse(Boolean.TRUE.equals(tooMany.get("success")));
-        assertEquals("LIMIT_EXCEEDED", ((Map<?, ?>) tooMany.get("error")).get("type"));
+        Map<?, ?> limitError = (Map<?, ?>) tooMany.get("error");
+        assertEquals("LIMIT_EXCEEDED", limitError.get("type"));
+        assertEquals("db.result.maxRows", limitError.get("limitName"));
+        assertEquals(1, ((Number) limitError.get("configuredLimit")).intValue());
+        assertEquals(2, ((Number) limitError.get("observed")).intValue());
+        assertEquals("EXECUTION_ERROR", limitError.get("outcome"));
 
         Map<?, ?> duplicate = (Map<?, ?>) executor.execute("limited", "query", "select DUP", "inline",
                 Collections.emptyList(), "duplicate").result();

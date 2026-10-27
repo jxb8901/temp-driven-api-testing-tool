@@ -1,5 +1,10 @@
 # Changelog
 
+# ATT 4.2.5 - 2026-10-27
+
+- Publish compact, versioned LOAD terminal results with artifact-backed details, durable failure causes, and Studio evidence access (#297).
+- Inventory internal capacity limits, classify limit outcomes, and expose structured capacity diagnostics across execution, artifacts, and API responses (#298).
+
 # ATT 4.2.4 - 2026-10-24
 
 - Prepare referenced DB/MQ/HTTP resources before LOAD scheduler start, with bounded readiness, live diagnostics, and no business requests during preflight (#285).

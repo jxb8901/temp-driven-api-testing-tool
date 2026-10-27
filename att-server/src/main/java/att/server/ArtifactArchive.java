@@ -1,6 +1,8 @@
 package att.server;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import att.server.api.LimitDiagnostic;
+import att.server.api.LimitOutcome;
 
 import java.io.InputStream;
 import java.nio.file.Files;
@@ -55,6 +57,16 @@ final class ArtifactArchive {
 
     /** Package-private progress seam for deterministic process-crash lifecycle tests. */
     static Path build(Path output, Path archive, Publisher publisher,long memoryBudget,ZipProgress progress) throws Exception {
+        return build(output,archive,publisher,memoryBudget,progress,MAX_CANDIDATES);
+    }
+
+    /** Test-only cap seam; production entry points always retain MAX_CANDIDATES. */
+    static Path buildForTest(Path output,Path archive,Publisher publisher,int maxCandidates) throws Exception {
+        if(maxCandidates<1||maxCandidates>MAX_CANDIDATES)throw new IllegalArgumentException("Invalid test candidate cap");
+        return build(output,archive,publisher,MAX_MEMORY_EXPORT_BYTES,null,maxCandidates);
+    }
+
+    private static Path build(Path output,Path archive,Publisher publisher,long memoryBudget,ZipProgress progress,int maxCandidates) throws Exception {
         if(memoryBudget<0||memoryBudget>MAX_MEMORY_EXPORT_BYTES)throw new IllegalArgumentException("Artifact memory budget exceeds limits");
         ArtifactMetricsRecorder metrics = ArtifactMetricsRecorder.CURRENT.get();
         if (metrics != null) {
@@ -71,8 +83,9 @@ final class ArtifactArchive {
         Path exports=Files.createTempDirectory(destination.getParent(),".artifact-export-");
         boolean published=false;
         try {
-            List<Path> candidates=inventory(root);
-            Set<String> names=new HashSet<>();List<String> approved=new ArrayList<>();long total=0;int omitted=0;
+            List<Path> candidates=inventory(root,maxCandidates);
+            if(metrics!=null){metrics.value.candidateCount=(long)candidates.size();usage(metrics.value.limitUsage,"artifact.inventory.candidates",candidates.size(),maxCandidates);}
+            Set<String> names=new HashSet<>();List<String> approved=new ArrayList<>();long total=0;int omitted=0;long oversizedOmission=0L;long largestEntryBytes=0L;
             Map<String,byte[]> memoryExports=new LinkedHashMap<>();long retained=0;
             for(Path candidate:candidates) {
                 if(root.relativize(candidate).getNameCount()>=64&&Files.isDirectory(candidate,LinkOption.NOFOLLOW_LINKS))throw new IllegalArgumentException("Artifact directory depth exceeds limits");
@@ -82,13 +95,15 @@ final class ArtifactArchive {
                 if(metrics!=null)metrics.source(Files.size(candidate));
                 String relative=root.relativize(candidate).toString().replace('\\','/'),lower=relative.toLowerCase(Locale.ROOT);
                 if(!safePath(relative)||lower.equals(MANIFEST)||!SAFE_EXTENSIONS.contains(extension(relative))||names.contains(lower)){omitted++;if(metrics!=null)metrics.value.omittedEntries=(long)omitted;continue;}
-                if(approved.size()>=MAX_ENTRIES)throw new IllegalArgumentException("Artifact entry count exceeds limits");
+                if(approved.size()>=MAX_ENTRIES)throw new LimitFailure("Artifact entry count exceeds limits","artifact.archive.entries",MAX_ENTRIES,approved.size()+1L);
                 long sourceSize=Files.size(candidate);
-                if(sourceSize>MAX_ENTRY_BYTES){omitted++;if(metrics!=null)metrics.value.omittedEntries=(long)omitted;continue;}
+                largestEntryBytes=Math.max(largestEntryBytes,sourceSize);
+                if(sourceSize>MAX_ENTRY_BYTES){omitted++;oversizedOmission=Math.max(oversizedOmission,sourceSize);if(metrics!=null)metrics.value.omittedEntries=(long)omitted;continue;}
                 byte[] bytes;
                 try{bytes=publisher.publish(candidate);}catch(IllegalArgumentException rejected){omitted++;if(metrics!=null)metrics.value.omittedEntries=(long)omitted;continue;}
-                if(bytes.length>MAX_ENTRY_BYTES){omitted++;if(metrics!=null)metrics.value.omittedEntries=(long)omitted;continue;}
-                if(total+bytes.length>MAX_TOTAL_BYTES)throw new IllegalArgumentException("Artifact total size exceeds limits");
+                if(bytes.length>MAX_ENTRY_BYTES){omitted++;oversizedOmission=Math.max(oversizedOmission,bytes.length);if(metrics!=null)metrics.value.omittedEntries=(long)omitted;continue;}
+                largestEntryBytes=Math.max(largestEntryBytes,bytes.length);
+                if(total+bytes.length>MAX_TOTAL_BYTES)throw new LimitFailure("Artifact total size exceeds limits","artifact.archive.totalBytes",MAX_TOTAL_BYTES,total+bytes.length);
                 names.add(lower);approved.add(relative);total+=bytes.length;
                 if(bytes.length<=memoryBudget-retained) {
                     memoryExports.put(relative,bytes);retained+=bytes.length;
@@ -116,8 +131,10 @@ final class ArtifactArchive {
                         bytes=ArtifactHtmlPolicy.publish(bytes,relative,paths);
                         if(metrics!=null)metrics.phase("zip_write");
                     }
-                    if(bytes.length>MAX_ENTRY_BYTES||total+bytes.length>MAX_TOTAL_BYTES)throw new IllegalArgumentException("Final artifact size exceeds limits");
+                    if(bytes.length>MAX_ENTRY_BYTES)throw new LimitFailure("Final artifact size exceeds limits","artifact.archive.entryBytes",MAX_ENTRY_BYTES,bytes.length);
+                    if(total+bytes.length>MAX_TOTAL_BYTES)throw new LimitFailure("Final artifact size exceeds limits","artifact.archive.totalBytes",MAX_TOTAL_BYTES,total+bytes.length);
                     total+=bytes.length;
+                    largestEntryBytes=Math.max(largestEntryBytes,bytes.length);
                     entries.add(new Entry(relative,mediaType(relative),bytes.length,sha256(bytes),"textual-output","sanitized-once",report,true));
                     writeEntry(zip,relative,bytes);
                     if(metrics!=null){metrics.value.includedEntries++;metrics.value.includedBytes+=bytes.length;}
@@ -126,8 +143,18 @@ final class ArtifactArchive {
                 Map<String,Object> manifest=new LinkedHashMap<>();
                 manifest.put("version",1);manifest.put("policy","att-export-safe-text-v2");manifest.put("entries",entries);manifest.put("complete",omitted==0);
                 manifest.put("omissions",omitted==0?List.of():List.of(Map.of("count",omitted,"reason",OMISSION_REASON)));
+                if(omitted>0){
+                    Map<String,Object> notice=oversizedOmission>0
+                            ? LimitDiagnostic.create("ATT-ARTIFACT-OMITTED","Some output files exceeded the per-entry publication limit",
+                                    "artifact.archive.entryBytes",MAX_ENTRY_BYTES,oversizedOmission,"server.artifactPublication",
+                                    LimitOutcome.ARTIFACT_OMITTED,"publication","Use smaller evidence files or split detailed output across bounded artifacts.","archive.zip")
+                            : LimitDiagnostic.create("ATT-ARTIFACT-OMITTED","Some output files were omitted by the safe publication policy",
+                                    "artifact.archivePolicy",null,(long)omitted,"server.artifactPublication",LimitOutcome.ARTIFACT_OMITTED,
+                                    "publication","Review artifact policy and retain only approved, bounded text evidence.","archive.zip");
+                    manifest.put("diagnostics",List.of(notice));
+                }else manifest.put("diagnostics",List.of());
                 byte[] bytes=JSON.writeValueAsBytes(manifest);
-                if(bytes.length>MAX_MANIFEST_BYTES)throw new IllegalArgumentException("Artifact manifest exceeds limits");
+                if(bytes.length>MAX_MANIFEST_BYTES)throw new LimitFailure("Artifact manifest exceeds limits","artifact.archive.manifestBytes",MAX_MANIFEST_BYTES,bytes.length);
                 writeEntry(zip,MANIFEST,bytes);
             }
             if(metrics!=null)metrics.phase("verification_fsync");
@@ -135,9 +162,12 @@ final class ArtifactArchive {
             try(var channel=java.nio.channels.FileChannel.open(staging,java.nio.file.StandardOpenOption.WRITE)){channel.force(true);}
             Files.move(staging,destination,StandardCopyOption.ATOMIC_MOVE,StandardCopyOption.REPLACE_EXISTING);
             published=true;
-            if(metrics!=null)metrics.value.zipBytes=Files.size(destination);
+            if(metrics!=null){metrics.value.zipBytes=Files.size(destination);usage(metrics.value.limitUsage,"artifact.archive.entries",entries.size(),MAX_ENTRIES);usage(metrics.value.limitUsage,"artifact.archive.totalBytes",total,MAX_TOTAL_BYTES);usage(metrics.value.limitUsage,"artifact.archive.entryBytes",largestEntryBytes,MAX_ENTRY_BYTES);}
             return destination;
         } catch(Exception failure) {
+            if(metrics!=null&&failure instanceof LimitFailure){LimitFailure limited=(LimitFailure)failure;
+                if("artifact.inventory.candidates".equals(limited.limitName))metrics.value.candidateCount=limited.observed;
+                usage(metrics.value.limitUsage,limited.limitName,limited.observed,limited.limit);}
             if(metrics!=null)metrics.fail(failure instanceof IllegalArgumentException?"policy_limit":"publication_failed");
             throw failure;
         } finally {
@@ -148,12 +178,12 @@ final class ArtifactArchive {
     }
 
     /** Prune only the established private LOAD bookkeeping namespace. Never follow links. */
-    private static List<Path> inventory(Path root) throws java.io.IOException {
+    private static List<Path> inventory(Path root,int maxCandidates) throws java.io.IOException {
         List<Path> candidates = new ArrayList<>();
         Files.walkFileTree(root, Set.of(), 64, new java.nio.file.SimpleFileVisitor<Path>() {
             private void count(Path path) {
-                if (candidates.size() >= MAX_CANDIDATES)
-                    throw new IllegalArgumentException("Artifact inventory exceeds limits");
+                if (candidates.size() >= maxCandidates)
+                    throw new LimitFailure("Artifact inventory exceeds limits","artifact.inventory.candidates",maxCandidates,maxCandidates+1L);
                 candidates.add(path);
             }
             @Override public java.nio.file.FileVisitResult preVisitDirectory(Path directory,
@@ -178,6 +208,15 @@ final class ArtifactArchive {
         return candidates;
     }
 
+    private static void usage(Map<String,Map<String,Object>> target,String name,long value,long limit){
+        Map<String,Object> row=new LinkedHashMap<>();row.put("usage",value);row.put("limit",limit);row.put("threshold",0.8d);target.put(name,row);
+    }
+
+    static final class LimitFailure extends IllegalArgumentException {
+        final String limitName;final long limit,observed;
+        LimitFailure(String message,String limitName,long limit,long observed){super(message);this.limitName=limitName;this.limit=limit;this.observed=observed;}
+    }
+
     static byte[] read(Path archive, String requested) throws Exception {
         try (VerifiedRead read = openVerified(archive, false)) { return read.read(requested); }
     }
@@ -200,6 +239,9 @@ final class ArtifactArchive {
             Map<String,Object> snapshot = new LinkedHashMap<>(manifest);
             snapshot.put("entries", List.copyOf(rows));
             snapshot.put("omissions", ((List<?>) manifest.get("omissions")).stream().map(value -> Map.copyOf((Map<?,?>) value)).toList());
+            Object diagnostics = manifest.get("diagnostics");
+            if (diagnostics instanceof List<?> notices)
+                snapshot.put("diagnostics", notices.stream().map(value -> Map.copyOf((Map<?,?>) value)).toList());
             this.manifest = Map.copyOf(snapshot);
         }
         byte[] read(String requested) throws Exception {
@@ -264,8 +306,11 @@ final class ArtifactArchive {
             try { manifest = JSON.readValue(bytes, Map.class); }
             catch (com.fasterxml.jackson.core.JacksonException invalid) { throw new IllegalArgumentException("Invalid archive manifest"); }
         }
-        if (manifest == null || !manifest.keySet().equals(Set.of("version", "policy", "entries", "complete", "omissions"))
+        Set<String> baseKeys = Set.of("version", "policy", "entries", "complete", "omissions");
+        Set<String> diagnosticKeys = Set.of("version", "policy", "entries", "complete", "omissions", "diagnostics");
+        if (manifest == null || !(manifest.keySet().equals(baseKeys) || manifest.keySet().equals(diagnosticKeys))
                 || !Integer.valueOf(1).equals(manifest.get("version")) || !validOmissions(manifest)
+                || !validDiagnostics(manifest.get("diagnostics"))
                 || !"att-export-safe-text-v2".equals(manifest.get("policy")) || !(manifest.get("entries") instanceof List<?> entries)
                 || entries.size() != count - 1) throw new IllegalArgumentException("Invalid archive manifest");
         Set<String> approved = new HashSet<>();
@@ -300,6 +345,31 @@ final class ArtifactArchive {
                 || !integral(omission.get("count"))) return false;
         long count = ((Number) omission.get("count")).longValue();
         return count > 0 && count <= MAX_CANDIDATES;
+    }
+
+    private static boolean validDiagnostics(Object value) {
+        if (value == null) return true; // Read older v1 manifests written before notices were added.
+        if (!(value instanceof List<?> notices) || notices.size() > 1) return false;
+        if (notices.isEmpty()) return true;
+        Object item = notices.get(0);
+        if (!(item instanceof Map<?, ?> notice)) return false;
+        Set<String> fields = Set.of("code", "summary", "limitName", "configuredLimit", "limit", "observed",
+                "actual", "usage", "scope", "outcome", "stage", "remediationHint", "artifactRef");
+        if (!fields.containsAll(notice.keySet()) || !(notice.get("code") instanceof String code)
+                || !code.matches("[A-Za-z0-9][A-Za-z0-9._:-]{0,127}")
+                || !(notice.get("summary") instanceof String summary) || summary.length() > 512
+                || !"ARTIFACT_OMITTED".equals(notice.get("outcome"))) return false;
+        for (String key : new String[] {"limitName", "scope", "stage"})
+            if (notice.containsKey(key) && (!(notice.get(key) instanceof String text)
+                    || !text.matches("[A-Za-z0-9][A-Za-z0-9._:-]{0,95}"))) return false;
+        for (String key : new String[] {"configuredLimit", "limit", "observed", "actual", "usage"})
+            if (notice.containsKey(key) && !(notice.get(key) instanceof Number)) return false;
+        if (notice.containsKey("remediationHint")
+                && (!(notice.get("remediationHint") instanceof String hint) || hint.length() > 256
+                || hint.contains("/") || hint.contains("\\"))) return false;
+        if (notice.containsKey("artifactRef") && (!(notice.get("artifactRef") instanceof String ref)
+                || !ref.matches("[A-Za-z0-9._/-]{1,256}") || ref.contains(".."))) return false;
+        return true;
     }
 
     private static void writeEntry(ZipOutputStream zip, String path, byte[] bytes) throws Exception {
