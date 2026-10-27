@@ -191,6 +191,7 @@ class AttServiceTest {
         assertEquals("FAILED",archive.get("status"));
         assertEquals("FAILED",archive.get("reportAvailability"));
         assertEquals("LOAD_REPORT_WRITE_FAILED",archive.get("omissionReason"));
+        assertTrue(((Map<?,?>)archive.get("paths")).isEmpty(), "failed report writes must not advertise missing paths");
         assertFalse(((Map<?,?>)compact.get("diagnostics")).containsKey("primaryError"));
     }
 
