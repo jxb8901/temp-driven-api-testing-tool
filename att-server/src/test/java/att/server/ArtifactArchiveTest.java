@@ -25,7 +25,7 @@ class ArtifactArchiveTest {
         ArtifactArchive.build(output,archive,ServerRuntime::approvedArtifactBytes);
         Map<String,Object> manifest=ArtifactArchive.verify(archive,true);
         assertEquals(false,manifest.get("complete"));
-        assertEquals("safe business payload\\n",new String(ArtifactArchive.read(archive,"safe.log"),StandardCharsets.UTF_8));
+        assertEquals("safe business payload\n",new String(ArtifactArchive.read(archive,"safe.log"),StandardCharsets.UTF_8));
         assertThrows(java.io.FileNotFoundException.class,()->ArtifactArchive.read(archive,"raw-secret.log"));
     }
 
