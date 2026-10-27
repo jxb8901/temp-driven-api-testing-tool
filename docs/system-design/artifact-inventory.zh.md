@@ -4,7 +4,7 @@ Completed Job 的 archive publication 不跟隨 symlink 遍歷私有 output tree
 
 剪除的 namespace 永遠不屬於可發佈內容，包括使用支援副檔名的檔案；它不產生 manifest entry 或 omission。此操作不刪除歷史檔案，檔案由 Worker cleanup 後的 completed-Job retention 負責移除。其他路徑，包括目錄與不支援檔案，仍消耗 candidate 預算。深度 64 的目錄會 fail closed；無法讀取的路徑或 traversal error 會中止 publication。
 
-Inventory 保留既有的 candidate、path、type 及 size 上限。Artifact producer 在寫入 private output tree 前保護敏感內容。Archive 驗證有界 UTF-8 文字，並封裝擷取的 producer bytes，不會重新遮罩文字或改寫 HTML。`ArtifactInventoryTest` 涵蓋 100k 歷史檔案、精確分類、candidate 邊界與深度上限。
+Inventory 保留既有的 candidate、path、type 及 size 上限。Artifact producer 在寫入 private output tree 前保護敏感內容。Archive 驗證有界 UTF-8 文字，並封裝擷取的 producer bytes，不會重新遮罩文字或改寫 HTML。新 archive 使用 `att-export-approved-bytes-v1` policy 和 `preserved` entry decision。為相容既有 archive，verifier 仍接受舊的 `att-export-safe-text-v2` manifest，但只驗證並回傳 ZIP 中已儲存的 bytes，不會再執行 sanitizer。`ArtifactInventoryTest` 涵蓋 100k 歷史檔案、精確分類、candidate 邊界與深度上限。
 
 ## 有上限的 producer-byte staging
 

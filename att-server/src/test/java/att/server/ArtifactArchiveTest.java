@@ -54,6 +54,24 @@ class ArtifactArchiveTest {
         }
     }
 
+    @Test void legacySanitizedManifestVerificationReturnsStoredZipBytesWithoutRewriting() throws Exception {
+        Path archive=temporary.resolve("legacy-sanitized.zip");
+        byte[] original="previously approved producer bytes".getBytes(StandardCharsets.UTF_8);
+        Map<String,Object> row=Map.of("path","case.log","mediaType","text/plain","size",original.length,
+                "sha256",ArtifactArchive.sha256(original),"classification","textual-output",
+                "decision","sanitized-once","report",false,"preview",true);
+        Map<String,Object> manifest=Map.of("version",1,"policy","att-export-safe-text-v2",
+                "entries",List.of(row),"complete",true,"omissions",List.of());
+        try(var zip=new java.util.zip.ZipOutputStream(Files.newOutputStream(archive))) {
+            zip.putNextEntry(new java.util.zip.ZipEntry("case.log"));zip.write(original);zip.closeEntry();
+            zip.putNextEntry(new java.util.zip.ZipEntry(ArtifactArchive.MANIFEST));
+            zip.write(ServerRuntime.JSON.writeValueAsBytes(manifest));zip.closeEntry();
+        }
+
+        assertEquals("att-export-safe-text-v2",ArtifactArchive.verify(archive,true).get("policy"));
+        assertArrayEquals(original,ArtifactArchive.read(archive,"case.log"));
+    }
+
     @Test void detailSidecarsTakePriorityOverSurplusEvidenceAtEntryCap() throws Exception {
         Path output=Files.createDirectory(temporary.resolve("evidence-heavy-output"));
         Path report=output.resolve("reports/load-summary.json");Files.createDirectories(report.getParent());
@@ -453,11 +471,11 @@ class ArtifactArchiveTest {
                 for (String name : names) {
                     rows.add(Map.of("path", name, "mediaType", "text/plain", "size", content.length,
                             "sha256", ArtifactArchive.sha256(content), "classification", "textual-output",
-                            "decision", "sanitized-once", "report", false, "preview", true));
+                            "decision", "preserved", "report", false, "preview", true));
                     zip.putNextEntry(new java.util.zip.ZipEntry(name)); zip.write(content); zip.closeEntry();
                 }
                 zip.putNextEntry(new java.util.zip.ZipEntry(ArtifactArchive.MANIFEST));
-                zip.write(ServerRuntime.JSON.writeValueAsBytes(Map.of("version", 1, "policy", "att-export-safe-text-v2", "entries", rows,
+                zip.write(ServerRuntime.JSON.writeValueAsBytes(Map.of("version", 1, "policy", "att-export-approved-bytes-v1", "entries", rows,
                         "complete", true, "omissions", java.util.List.of())));
                 zip.closeEntry();
             }

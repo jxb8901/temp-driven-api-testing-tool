@@ -4,7 +4,7 @@ Completed Job archive publication walks the private output tree without followin
 
 The pruned namespace is never eligible for publication, including files with otherwise supported extensions. It creates neither manifest entries nor omissions. Pruning does not delete historical files; completed-Job retention owns their removal after Worker cleanup. Other paths, including directories and unsupported files, consume the candidate budget. A directory at depth 64 fails closed. Unreadable paths and traversal errors abort publication.
 
-The inventory keeps the existing candidate, path, type and size limits. Artifact producers protect sensitive content before writing into the private output tree. The archive validates bounded UTF-8 text and packages the captured producer bytes without redacting text or rewriting HTML. See `ArtifactInventoryTest` for the 100k-file historical fixture, exact classification, candidate boundary and depth limits.
+The inventory keeps the existing candidate, path, type and size limits. Artifact producers protect sensitive content before writing into the private output tree. The archive validates bounded UTF-8 text and packages the captured producer bytes without redacting text or rewriting HTML. New archives use the `att-export-approved-bytes-v1` policy with `preserved` entry decisions. The verifier still accepts historical `att-export-safe-text-v2` manifests for compatibility, but validates and returns their stored ZIP bytes without applying another sanitizer pass. See `ArtifactInventoryTest` for the 100k-file historical fixture, exact classification, candidate boundary and depth limits.
 
 ## Bounded producer-byte staging
 
