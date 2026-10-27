@@ -15,6 +15,46 @@ import static org.junit.jupiter.api.Assertions.*;
 class ArtifactArchiveTest {
     @TempDir Path temporary;
 
+    @Test void preservesProducerBytesAndDigestsForReportsAndCommitManifest() throws Exception {
+        Path output=Files.createDirectory(temporary.resolve("byte-preserving-output"));
+        Map<String,String> sources=Map.of(
+                "load/run/load-summary.json", "{\"payload\":\"keep exact bytes\\n\"}",
+                "load/run/load-summary.yaml", "payload: '  keep  spaces  '\\n",
+                "load/run/report/index.html", "<!doctype html><html><script>window.T=1</script><a href=\"../missing.log\">link</a></html>",
+                "load/run/report-commit-manifest.json", "{\"sha256\":\"source-defined\"}");
+        for(Map.Entry<String,String> entry:sources.entrySet()) {
+            Path file=output.resolve(entry.getKey());Files.createDirectories(file.getParent());
+            Files.writeString(file,entry.getValue(),StandardCharsets.UTF_8);
+        }
+        Path zip=temporary.resolve("byte-preserved.zip");
+        ArtifactArchive.build(output,zip,ServerRuntime::approvedArtifactBytes);
+        Map<String,Object> manifest=ArtifactArchive.verify(zip,true);
+        assertEquals("att-export-approved-bytes-v1",manifest.get("policy"));
+        for(String path:sources.keySet()) {
+            byte[] original=Files.readAllBytes(output.resolve(path));
+            byte[] extracted=ArtifactArchive.read(zip,path);
+            assertArrayEquals(original,extracted,path);
+            assertEquals(ArtifactArchive.sha256(original),manifestEntry(zip,path).get("sha256"),path);
+        }
+    }
+
+    @Test void detailSidecarsTakePriorityOverSurplusEvidenceAtEntryCap() throws Exception {
+        Path output=Files.createDirectory(temporary.resolve("evidence-heavy-output"));
+        Path report=output.resolve("load/run/load-summary.json");Files.createDirectories(report.getParent());
+        Files.writeString(report,"{\"schemaVersion\":\"att-load-summary/v1.3\"}");
+        Path detail=output.resolve("load/run/details/v1/manifest.json");Files.createDirectories(detail.getParent());
+        Files.writeString(detail,"{\"schemaVersion\":\"att-load-detail-manifest/v1\"}");
+        Path evidence=Files.createDirectories(output.resolve("load/run/samples"));
+        for(int i=0;i<ArtifactArchive.MAX_ENTRIES+100;i++)Files.writeString(evidence.resolve(String.format("%05d.log",i)),"evidence");
+        Path zip=temporary.resolve("evidence-heavy.zip");
+        ArtifactArchive.build(output,zip,Files::readAllBytes);
+        Map<String,Object> manifest=ArtifactArchive.verify(zip,true);
+        assertEquals(false,manifest.get("complete"));
+        assertEquals(ArtifactArchive.MAX_ENTRIES,((List<?>)manifest.get("entries")).size());
+        assertArrayEquals(Files.readAllBytes(report),ArtifactArchive.read(zip,"load/run/load-summary.json"));
+        assertArrayEquals(Files.readAllBytes(detail),ArtifactArchive.read(zip,"load/run/details/v1/manifest.json"));
+    }
+
     @Test void writesManifestForThePublishedBytesAndReadsOnlyApprovedEntries() throws Exception {
         Path output=Files.createDirectory(temporary.resolve("output"));
         Path report=output.resolve("report/index.html");Files.createDirectories(report.getParent());
@@ -177,8 +217,8 @@ class ArtifactArchiveTest {
         assertFalse(manifest.toString().contains("oversized.html"),"The safe diagnostic must not reveal a filesystem or logical rejected name");
         assertThrows(java.io.FileNotFoundException.class,()->ArtifactArchive.read(archive,"load/run/report/oversized.html"));
         String published=new String(ArtifactArchive.read(archive,"load/run/report/index.html"),StandardCharsets.UTF_8);
-        assertFalse(published.contains("href=\"oversized.html\""));
-        assertTrue(published.contains("unavailable in exported archive"));
+        assertEquals("<a href=\"oversized.html\">Open details</a>", published,
+                "Archive publication preserves producer bytes even when a linked artifact is omitted");
     }
 
     @Test void totalAndEntryCountCapsFailPublicationWithTypedLimitEvidence() throws Exception {
@@ -193,12 +233,12 @@ class ArtifactArchiveTest {
 
         Path entriesOutput=Files.createDirectory(temporary.resolve("entry-cap-output"));
         for(int i=0;i<ArtifactArchive.MAX_ENTRIES+1;i++)Files.createFile(entriesOutput.resolve(i+".log"));
-        ArtifactArchive.LimitFailure entries=assertThrows(ArtifactArchive.LimitFailure.class,()->ArtifactArchive.build(
-                entriesOutput,temporary.resolve("entry-cap.zip"),Files::readAllBytes));
-        assertEquals("artifact.archive.entries",entries.limitName);
-        assertEquals(ArtifactArchive.MAX_ENTRIES,entries.limit);
-        assertEquals(ArtifactArchive.MAX_ENTRIES+1L,entries.observed);
-        assertFalse(Files.exists(temporary.resolve("entry-cap.zip")));
+        Path cappedZip=temporary.resolve("entry-cap.zip");
+        ArtifactArchive.build(entriesOutput,cappedZip,Files::readAllBytes);
+        Map<String,Object> cappedManifest=ArtifactArchive.verify(cappedZip,true);
+        assertEquals(false,cappedManifest.get("complete"));
+        assertEquals(ArtifactArchive.MAX_ENTRIES,((List<?>)cappedManifest.get("entries")).size());
+        assertEquals("artifact.archive.entries",((Map<?,?>)((List<?>)cappedManifest.get("diagnostics")).get(0)).get("limitName"));
     }
 
     @Test void reportDiscoveryInventoryDoesNotDependOnListingLimitsAndKeepsRelativeBytes() throws Exception {
