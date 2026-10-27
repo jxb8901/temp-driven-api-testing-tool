@@ -320,6 +320,8 @@ public class CaseExecutionLog implements AutoCloseable {
     private synchronized void write(String text) throws IOException {
         if (discarding) return;
         String safeText = redactSecrets(text);
+        if (Boolean.getBoolean("att.worker.safeOutput"))
+            safeText = att.server.api.internal.DiagnosticSanitizer.redactAbsolutePaths(safeText);
         if (writer != null) {
             writer.write(safeText);
             bufferedCharacters += safeText.length();
