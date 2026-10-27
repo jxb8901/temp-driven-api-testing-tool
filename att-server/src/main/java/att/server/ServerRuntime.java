@@ -831,7 +831,10 @@ final class ServerRuntime implements AutoCloseable {
             }
             else if(!job.terminal()) {String state=exit==0?"PASS":"FAIL";finish(job,state,exit);}
         } catch(InterruptedException e){Thread.currentThread().interrupt();stopWorkerTree(job);if(!job.terminal())finishQuietly(job,"CANCELLED",143,"ATT-SERVER-CANCELLED","Worker was cancelled");}
-          catch(Exception e){stopWorkerTree(job);if(!job.terminal())finishQuietly(job,"ERROR",3,"ATT-SERVER-WORKER-FAILED",safeMessage(e));}
+          catch(Exception e){stopWorkerTree(job);if(!job.terminal()){
+              if(job.cancelRequested)finishQuietly(job,"CANCELLED",143,"ATT-SERVER-CANCELLED","Worker was cancelled");
+              else finishQuietly(job,"ERROR",3,"ATT-SERVER-WORKER-FAILED",safeMessage(e));
+          }}
         finally {
             stopWorkerTree(job);
             OutputStream workerInput=job.workerControlStream;job.workerControlStream=null;
