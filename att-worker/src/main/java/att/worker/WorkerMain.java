@@ -50,6 +50,9 @@ public final class WorkerMain {
         // Trusted evidence retains original diagnostics. Protocol secrets are protected
         // in emit(); Server projects host paths with the package context.
         att.core.PathPresentation.configure(false, false);
+        // Worker-produced logs are later zipped byte-for-byte: sanitize host paths as written.
+        // Local CLI remains free to retain detailed on-disk diagnostics.
+        System.setProperty("att.worker.safeOutput", "true");
         PrintStream protocol=System.out;
         System.setOut(System.err);
         WorkerMain worker=new WorkerMain(protocol);
