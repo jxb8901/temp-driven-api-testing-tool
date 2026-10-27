@@ -83,6 +83,9 @@ final class LoadMetricsCheckpointStore {
     }
 
     void start(Supplier<LoadMetricsSnapshot> snapshotSupplier) {
+        // Persist an immediate baseline so the first scheduled checkpoint covers
+        // the first complete interval instead of leaving the opening window unmeasured.
+        checkpoint(snapshotSupplier, false);
         scheduled = WRITERS.scheduleAtFixedRate(() -> checkpoint(snapshotSupplier, false),
                 intervalMs, intervalMs, TimeUnit.MILLISECONDS);
     }

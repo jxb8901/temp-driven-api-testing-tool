@@ -18,7 +18,6 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
-import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -36,6 +35,13 @@ class LoadMetricsCheckpointStoreTest {
         Path workloadDirectory = temp.resolve("load/run/checkpoints")
                 .resolve(LoadMetricsCheckpointStore.workloadCheckpointDirectoryName("payments"));
         metrics.enableCheckpoints(workloadDirectory, "run", workloadScope);
+        Map<String, Object> baseline = LoadMetricsCheckpointStore.readLatest(workloadDirectory, "run", workloadScope);
+        assertNotNull(baseline);
+        assertEquals("CHECKPOINT", baseline.get("state"));
+        assertEquals(1L, ((Number) baseline.get("sequence")).longValue());
+        @SuppressWarnings("unchecked") Map<String, Object> baselinePayload = (Map<String, Object>) baseline.get("payload");
+        @SuppressWarnings("unchecked") Map<String, Object> baselineMetrics = (Map<String, Object>) baselinePayload.get("metrics");
+        assertEquals(0L, ((Number) baselineMetrics.get("scheduled")).longValue());
         metrics.onEvent(LoadEvent.completed("run", "arrivalRate", "STEADY", "iteration-1", null, 1,
                 started.toEpochMilli(), started.toEpochMilli(), started.toEpochMilli() + 10L, ResultStatus.PASS));
         metrics.finish(started.plusSeconds(1).toEpochMilli());
@@ -46,7 +52,7 @@ class LoadMetricsCheckpointStoreTest {
         assertEquals(LoadMetricsCheckpointStore.SCHEMA, checkpoint.get("schemaVersion"));
         assertEquals("FINAL_CHECKPOINT", checkpoint.get("state"));
         assertEquals(Boolean.TRUE, checkpoint.get("finalized"));
-        assertEquals(1L, ((Number) checkpoint.get("sequence")).longValue());
+        assertEquals(2L, ((Number) checkpoint.get("sequence")).longValue());
         @SuppressWarnings("unchecked") Map<String, Object> payload = (Map<String, Object>) checkpoint.get("payload");
         @SuppressWarnings("unchecked") Map<String, Object> snapshot = (Map<String, Object>) payload.get("metrics");
         assertEquals(1L, ((Number) snapshot.get("scheduled")).longValue());
@@ -55,7 +61,7 @@ class LoadMetricsCheckpointStoreTest {
         assertEquals(0L, ((Number) snapshot.get("dropped")).longValue());
         assertEquals("VERIFIED", ((Map<?, ?>) snapshot.get("accounting")).get("state"));
         try (java.util.stream.Stream<Path> files = Files.list(workloadDirectory)) {
-            assertEquals(1L, files.filter(path -> path.getFileName().toString().endsWith(".json")).count());
+            assertEquals(2L, files.filter(path -> path.getFileName().toString().endsWith(".json")).count());
         }
     }
 
@@ -63,8 +69,8 @@ class LoadMetricsCheckpointStoreTest {
         Instant started = Instant.parse("2026-10-26T00:00:00Z");
         LoadMetrics metrics = new LoadMetrics("closed", started.toEpochMilli(), 1_000L);
         Path directory = temp.resolve("load/run/checkpoints/aggregate");
-        metrics.enableCheckpoints(directory, "expected-run", "aggregate");
-        metrics.finish(started.plusSeconds(1).toEpochMilli());
+        LoadMetricsCheckpointStore store = new LoadMetricsCheckpointStore(directory, "expected-run", "aggregate");
+        store.finish(metrics::snapshot);
 
         assertNull(LoadMetricsCheckpointStore.readLatest(directory, "other-run", "aggregate"));
         Path checkpoint;
@@ -137,9 +143,9 @@ class LoadMetricsCheckpointStoreTest {
         CountDownLatch periodicEntered = new CountDownLatch(1);
         CountDownLatch releasePeriodic = new CountDownLatch(1);
         CountDownLatch finishCompleted = new CountDownLatch(1);
-        AtomicBoolean firstCapture = new AtomicBoolean(true);
+        java.util.concurrent.atomic.AtomicInteger captureCount = new java.util.concurrent.atomic.AtomicInteger();
         store.start(() -> {
-            if (firstCapture.compareAndSet(true, false)) {
+            if (captureCount.incrementAndGet() == 2) {
                 periodicEntered.countDown();
                 try {
                     if (!releasePeriodic.await(5, java.util.concurrent.TimeUnit.SECONDS))
@@ -171,7 +177,7 @@ class LoadMetricsCheckpointStoreTest {
         Map<String, Object> checkpoint = LoadMetricsCheckpointStore.readLatest(directory, "run", "aggregate");
         assertNotNull(checkpoint);
         assertEquals("FINAL_CHECKPOINT", checkpoint.get("state"));
-        assertEquals(2L, ((Number) checkpoint.get("sequence")).longValue());
+        assertEquals(3L, ((Number) checkpoint.get("sequence")).longValue());
         @SuppressWarnings("unchecked") Map<String, Object> payload = (Map<String, Object>) checkpoint.get("payload");
         @SuppressWarnings("unchecked") Map<String, Object> snapshot = (Map<String, Object>) payload.get("metrics");
         assertEquals(1L, ((Number) snapshot.get("scheduled")).longValue());
