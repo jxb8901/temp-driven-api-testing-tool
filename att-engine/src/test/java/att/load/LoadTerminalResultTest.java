@@ -20,7 +20,7 @@ class LoadTerminalResultTest {
     @Test void workerProjectionKeepsCauseAndCoverageWhileDirectLoadResultRemainsDetailed() throws Exception {
         LoadScenario scenario = new LoadScenario(Paths.get("load.yaml"), "template", "T", Collections.emptyMap(),
                 Collections.emptyMap(), LoadScenario.Model.ARRIVAL_RATE, 0, 100.0, "100", Duration.ZERO,
-                Duration.ZERO, Duration.ofHours(1), Duration.ZERO, Duration.ZERO, 0, "",
+                Duration.ZERO, Duration.ofHours(1), Duration.ZERO, Duration.ZERO, 1, "drop",
                 Collections.emptyMap(), Collections.emptyMap());
         LoadMetrics metrics = LoadMetrics.forScenario(scenario, 1_000L, Duration.ofHours(1).toMillis());
         LoadEvent failure = LoadEvent.completed("run-雪", "arrivalRate", "STEADY", "iteration-1", null,
