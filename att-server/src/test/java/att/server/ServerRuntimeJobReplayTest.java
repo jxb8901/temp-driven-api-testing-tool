@@ -367,15 +367,24 @@ class ServerRuntimeJobReplayTest {
             for(int index=0;index<excessive.size();index++) {
                 Map<String,Object> review=runtime.createJobReplayDraft(original,"alice",ServerRuntime.JSON.valueToTree(excessive.get(index)));
                 assertEquals("invalid",review.get("validationState"),"The replay must stop before issuing an intent for an exceeded scheduled limit");
+                assertEquals("ATT-SERVER-INLINE-LOAD-LIMIT",review.get("errorCode"));
                 assertNull(review.get("intentId"));
                 JsonNode diagnostics=ServerRuntime.JSON.valueToTree(review).path("diagnostics");
                 assertTrue(diagnostics.isArray()&&diagnostics.size()>0);
                 assertTrue(diagnostics.get(0).path("summary").asText().contains(limits.get(index)),diagnostics.toString());
             }
-            Map<String,Object> excessArrival=Map.of("load",Map.of("duration","10s"),"workloads",List.of(Map.of("id","paced","target",Map.of("type","template","id","SIMPLE"),"load",Map.of("arrivalRate","11/s","maxConcurrent",4))));
+            Map<String,Object> excessArrival=Map.of("load",Map.of("duration","10s"),"workloads",List.of(Map.of("id","paced","target",Map.of("type","template","id","SIMPLE"),"load",Map.of("warmup","0ms","rampUp","0ms","duration","10s","rampDown","0ms","arrivalRate","11/s","maxConcurrent",4))));
             assertTrue(assertThrows(ServerRuntime.InlineLoadLimitException.class,()->ServerRuntime.validateScheduledLoadLimits(runtime.config.inlineLoad,excessArrival)).getMessage().contains("maxAggregateArrivalRatePerSecond"));
-            Map<String,Object> excessConcurrency=Map.of("load",Map.of("duration","10s"),"workloads",List.of(Map.of("id","paced","target",Map.of("type","template","id","SIMPLE"),"load",Map.of("arrivalRate","2/s","maxConcurrent",11))));
+            Map<String,Object> excessConcurrency=Map.of("load",Map.of("duration","10s"),"workloads",List.of(Map.of("id","paced","target",Map.of("type","template","id","SIMPLE"),"load",Map.of("warmup","0ms","rampUp","0ms","duration","10s","rampDown","0ms","arrivalRate","2/s","maxConcurrent",11))));
             assertTrue(assertThrows(ServerRuntime.InlineLoadLimitException.class,()->ServerRuntime.validateScheduledLoadLimits(runtime.config.inlineLoad,excessConcurrency)).getMessage().contains("maxConcurrentPerWorkload"));
+            Map<String,Object> perWorkloadTiming=Map.of("workloads",List.of(Map.of("id","paced","target",Map.of("type","template","id","SIMPLE"),"load",Map.of("warmup","0ms","rampUp","0ms","duration","100ms","rampDown","0ms","users",1))));
+            assertDoesNotThrow(()->ServerRuntime.validateScheduledLoadLimits(runtime.config.inlineLoad,perWorkloadTiming));
+            Map<String,Object> withinMixedDuration=Map.of("load",Map.of("duration",3599999),
+                    "workloads",List.of(Map.of("id","paced","target",Map.of("type","template","id","SIMPLE"),"load",Map.of("warmup","0ms","rampUp","0ms","duration","1s","rampDown","0ms","users",1))));
+            assertDoesNotThrow(()->ServerRuntime.validatePackageBackedReplayLoadLimits(runtime.config.inlineLoad,withinMixedDuration));
+            Map<String,Object> overRootEnvelope=Map.of("load",Map.of("warmup",0,"rampUp","1ms","duration",3600000,"rampDown",0),
+                    "workloads",List.of(Map.of("id","paced","target",Map.of("type","template","id","SIMPLE"),"load",Map.of("warmup","0ms","rampUp","0ms","duration","1s","rampDown","0ms","users",1))));
+            assertTrue(assertThrows(ServerRuntime.InlineLoadLimitException.class,()->ServerRuntime.validatePackageBackedReplayLoadLimits(runtime.config.inlineLoad,overRootEnvelope)).getMessage().contains("maxDurationSeconds"));
         }
     }
 

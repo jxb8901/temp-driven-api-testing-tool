@@ -398,7 +398,7 @@ final class ServerRuntime implements AutoCloseable {
                     LoadSchedule source=new LoadSchedule();source.packageId=packageId;source.environment=environment;
                     source.inlineScenario=JSON.convertValue(definition.get("scenario"),Map.class);
                     ValidatedScheduledScenario validated=validateScheduledScenario(packageRoot(packageId),source,source.inlineScenario,false);
-                    validateScheduledLoadLimits(config.inlineLoad,validated.scenario);
+                    validatePackageBackedReplayLoadLimits(config.inlineLoad,validated.scenario);
                     if(validated.containsSensitiveValues)throw new ReplayInputMissingException("Sensitive LOAD inputs were not retained. Enter them again through the authorized input controls.");
                     definition.set("scenario",JSON.valueToTree(validated.scenario));
                     Map<String,Object> configuration=configurationRevision(resolveExecutionConfiguration(packageId,packageRoot(packageId),environment),validated.revisionDigest);
@@ -647,7 +647,7 @@ final class ServerRuntime implements AutoCloseable {
                 String sourcePath=optionalText(input,"scenario");
                 if(sourcePath==null)throw new IllegalArgumentException("A package-file-backed replay requires its retained source path");
                 validatePackagePath(packageRoot(required(input,"packageId")),safeRelative(sourcePath,"scenario"),"scenario");
-                validateScheduledLoadLimits(config.inlineLoad,scenario);
+                validatePackageBackedReplayLoadLimits(config.inlineLoad,scenario);
             } else if(scheduleIssued)validateScheduledLoadLimits(config.inlineLoad,scenario);else enforceInlineLoadLimits(scenario);
         }
         Path root=packageRoot(packageId);
@@ -2157,8 +2157,6 @@ final class ServerRuntime implements AutoCloseable {
         long totalUsers=0L,totalTargets=0L,totalArrivalConcurrency=0L;
         double totalArrivalRate=0.0;
         long maximumEnvelopeMs=0L;
-        Object rootLoad=scenario.get("load");
-        if(rootLoad instanceof Map)maximumEnvelopeMs=durationEnvelopeMillis((Map<?,?>)rootLoad);
         for(int i=0;i<workloads.size();i++) {
             Object raw=workloads.get(i);
             if(!(raw instanceof Map))throw new IllegalArgumentException("Validated Load workload is invalid");
@@ -2189,6 +2187,12 @@ final class ServerRuntime implements AutoCloseable {
             maximumEnvelopeMs=Math.max(maximumEnvelopeMs,envelope);
         }
         if(maximumEnvelopeMs>TimeUnit.SECONDS.toMillis(limits.maxDurationSeconds))
+            throw new InlineLoadLimitException("Scenario exceeds server.inlineLoad.maxDurationSeconds");
+    }
+    static void validatePackageBackedReplayLoadLimits(ServerConfig.InlineLoad limits,Map<String,Object> scenario) {
+        validateScheduledLoadLimits(limits,scenario);
+        Object rootLoad=scenario.get("load");
+        if(rootLoad instanceof Map&&replayRootDurationEnvelopeMillis((Map<?,?>)rootLoad)>TimeUnit.SECONDS.toMillis(limits.maxDurationSeconds))
             throw new InlineLoadLimitException("Scenario exceeds server.inlineLoad.maxDurationSeconds");
     }
     private static long addWithinLimit(long total,long value,long maximum,String message) {
@@ -2228,6 +2232,37 @@ final class ServerRuntime implements AutoCloseable {
             return Math.addExact(Math.addExact(durationMillis(load.get("warmup"),"warmup"),durationMillis(load.get("rampUp"),"rampUp")),
                     Math.addExact(durationMillis(load.get("duration"),"duration"),durationMillis(load.get("rampDown"),"rampDown")));
         } catch(ArithmeticException overflow) { return Long.MAX_VALUE; }
+    }
+    private static long replayRootDurationEnvelopeMillis(Map<?,?> load) {
+        try {
+            return Math.addExact(Math.addExact(replayRootDurationMillis(load.get("warmup"),"warmup"),replayRootDurationMillis(load.get("rampUp"),"rampUp")),
+                    Math.addExact(replayRootDurationMillis(load.get("duration"),"duration"),replayRootDurationMillis(load.get("rampDown"),"rampDown")));
+        } catch(ArithmeticException overflow) { return Long.MAX_VALUE; }
+    }
+    private static long replayRootDurationMillis(Object value,String field) {
+        // Retained root timing can be represented as normalized millisecond numbers; omitted phases are zero.
+        if(value==null)return 0L;
+        if(value instanceof Number) {
+            try {
+                long milliseconds=new java.math.BigDecimal(String.valueOf(value)).longValueExact();
+                if(milliseconds<0)throw new IllegalArgumentException("Validated replay Load "+field+" is invalid");
+                return milliseconds;
+            } catch(NumberFormatException|ArithmeticException invalid) {
+                throw new IllegalArgumentException("Validated replay Load "+field+" is invalid",invalid);
+            }
+        }
+        if(!(value instanceof String))throw new IllegalArgumentException("Validated replay Load "+field+" is invalid");
+        String text=((String)value).trim();
+        if(text.matches("[0-9]+"))return Long.parseLong(text);
+        java.util.regex.Matcher matcher=INLINE_LOAD_DURATION.matcher(text);
+        if(!matcher.matches())throw new IllegalArgumentException("Validated replay Load "+field+" is invalid");
+        try {
+            long amount=Long.parseLong(matcher.group(1));
+            long multiplier="ms".equals(matcher.group(2))?1L:"s".equals(matcher.group(2))?1000L:"m".equals(matcher.group(2))?60000L:3600000L;
+            return Math.multiplyExact(amount,multiplier);
+        } catch(NumberFormatException|ArithmeticException invalid) {
+            throw new IllegalArgumentException("Validated replay Load "+field+" is invalid",invalid);
+        }
     }
     private static String optionalText(JsonNode object,String name) {
         JsonNode value=object.get(name);if(value==null||value.isNull())return null;
