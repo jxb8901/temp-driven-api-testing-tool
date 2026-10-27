@@ -15,6 +15,20 @@ import static org.junit.jupiter.api.Assertions.*;
 class ArtifactArchiveTest {
     @TempDir Path temporary;
 
+    @Test void unsafeProducerOutputIsOmittedWithoutAnArchiveRedactionPass() throws Exception {
+        Path output=Files.createDirectory(temporary.resolve("mixed-approval-output"));
+        Files.writeString(output.resolve("safe.log"),"safe business payload\\n");
+        Files.writeString(output.resolve("raw-secret.log"),"password=producer-secret\\n");
+        assertThrows(IllegalArgumentException.class,
+                () -> ServerRuntime.approvedArtifactBytes(output.resolve("raw-secret.log")));
+        Path archive=temporary.resolve("mixed-approval.zip");
+        ArtifactArchive.build(output,archive,ServerRuntime::approvedArtifactBytes);
+        Map<String,Object> manifest=ArtifactArchive.verify(archive,true);
+        assertEquals(false,manifest.get("complete"));
+        assertEquals("safe business payload\\n",new String(ArtifactArchive.read(archive,"safe.log"),StandardCharsets.UTF_8));
+        assertThrows(java.io.FileNotFoundException.class,()->ArtifactArchive.read(archive,"raw-secret.log"));
+    }
+
     @Test void preservesProducerBytesAndDigestsForReportsAndCommitManifest() throws Exception {
         Path output=Files.createDirectory(temporary.resolve("byte-preserving-output"));
         Map<String,String> sources=Map.of(
