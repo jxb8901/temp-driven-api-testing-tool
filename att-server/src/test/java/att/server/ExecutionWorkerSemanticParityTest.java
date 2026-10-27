@@ -241,8 +241,22 @@ class ExecutionWorkerSemanticParityTest {
             String id=String.valueOf(accepted.get("jobId"));
             Map<String,Object> result=ServerRuntimeTestSupport.awaitUnifiedJob(runtime,id);
             awaitArchive(runtime,id,15);
-            return captureRun(runtime,id,result);
+            RunCapture capture=captureRun(runtime,id,result);
+            assertPublishedLoadReport(runtime,id,capture);
+            return capture;
         }
+    }
+
+    private void assertPublishedLoadReport(ServerRuntime runtime,String id,RunCapture capture) throws Exception {
+        for(String required:List.of("load-summary.json","load-summary.yaml","load-report-manifest.json",
+                "report/index.html","details/v1/manifest.json"))
+            assertTrue(capture.reportEntries.stream().anyMatch(path->path.endsWith("/"+required)),
+                    "The Server Job archive must contain the committed LOAD report file: "+required);
+        String reportPath=capture.primaryReportPaths.stream()
+                .filter(path->path.endsWith("/report/index.html")).findFirst()
+                .orElseThrow(()->new AssertionError("The Server Job must identify report/index.html as a primary report"));
+        assertTrue(runtime.archiveEntry(id,reportPath).length>0,
+                "The primary LOAD report must be retrievable from the verified Server Job archive");
     }
 
     private RunCapture captureRun(ServerRuntime runtime,String id,Map<String,Object> result) throws Exception {
