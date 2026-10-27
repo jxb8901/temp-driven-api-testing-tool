@@ -471,6 +471,15 @@ class WorkerMainTest {
         Files.write(root.resolve("templates/SIMPLE/template.yaml"),("schemaVersion: att-template/v3.4\nname: SIMPLE\ndescription: worker load parity\nactions: {show: {type: log, message: worker-load-parity}}\n").getBytes(StandardCharsets.UTF_8));
         Files.write(root.resolve("load/scenario.yaml"),("schemaVersion: att-load/v1.6\nworkloads:\n- id: worker-parity\n  target: {type: template, id: SIMPLE}\n  load: {users: 1, duration: 20ms}\n").getBytes(StandardCharsets.UTF_8));
         LoadResult direct=new DefaultAttService().load(new LoadRequest(root,null,null,null,"api-load",root.resolve("load/scenario.yaml"),null,null,null,null,null,null,null,null,null,null,null,Collections.<String>emptyList()));
+        try (WorkerMain.CheckpointProjection projection=new WorkerMain.CheckpointProjection(root.resolve("output"),"api-load")) {
+            Map<String,Object> progress=new java.util.LinkedHashMap<String,Object>();
+            long deadline=System.nanoTime()+java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
+            while(!progress.containsKey("checkpointInterval") && System.nanoTime()<deadline) { projection.addTo(progress); if(!progress.containsKey("checkpointInterval"))Thread.sleep(10L); }
+            Map<?,?> interval=(Map<?,?>)progress.get("checkpointInterval");
+            assertNotNull(interval,"Worker must asynchronously project real checkpoints");
+            assertEquals("VERIFIED",interval.get("state"));
+            assertFalse(mapper.writeValueAsString(interval).contains(root.toString()));
+        }
         String request=mapper.writeValueAsString(fields("protocolVersion","att-worker/v1","jobId","worker-load-job","command","load","packageRoot",root.toString(),"scenario","load/scenario.yaml","runId","worker-load"));
         Process process=new ProcessBuilder(Paths.get(System.getProperty("java.home"),"bin","java").toString(),"-cp",System.getProperty("java.class.path"),WorkerMain.class.getName()).start();
         process.getOutputStream().write(request.getBytes(StandardCharsets.UTF_8)); process.getOutputStream().close();

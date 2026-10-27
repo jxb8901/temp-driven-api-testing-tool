@@ -453,11 +453,14 @@ describe('JobsPage React feature', () => {
   it('shows sampled live LOAD progress in Results and Metrics without terminal archive wording', async () => {
     const now = new Date().toISOString();
     const first = { capturedAt: now, serverReceivedAt: now, elapsedMs: 10_000, phase: 'STEADY', counts: { scheduled: 10, started: 10, completed: 4, passed: 3 } };
-    const second = { ...first, elapsedMs: 15_000, counts: { scheduled: 15, started: 15, completed: 8, passed: 7 } };
+    const second = { ...first, elapsedMs: 15_000, counts: { scheduled: 15, started: 15, completed: 8, passed: 5 } };
     const progress = {
       ...second, elapsedMs: 20_000, schemaVersion: 'att-load-live-progress/v1' as const,
-      counts: { scheduled: 20, started: 19, completed: 10, passed: 8, sutFailures: 1, runtimeErrors: 1, dropped: 0, active: 9, queued: 1 },
+      counts: { scheduled: 20, started: 19, completed: 10, passed: 6, sutFailures: 1, runtimeErrors: 1, dropped: 0, active: 9, queued: 1 },
+      measuredCounts: { completed: 8, passed: 6, sutFailures: 1, runtimeErrors: 1 },
       rates: { completedTps: 2, successfulTps: 1.6 }, latency: { sampleCount: 10, meanMs: 40, p95Ms: 64, p99Ms: 127 },
+      checkpointInterval: { schemaVersion: 'att-load-checkpoint-interval/v1' as const, state: 'VERIFIED' as const, startSequence: 1, endSequence: 2,
+        startAt: now, endAt: now, durationMs: 300_000, latencySampleCount: 10, latencyMeanMs: 23.5, counts: { completed: 600, success: 590, failure: 5, runtimeError: 3, dropped: 2 } },
       workloads: { steady: { scheduled: 20, started: 19, completed: 10, passed: 8 } },
     };
     const liveJob: JobView = { ...sampleJob, targetIdentity: { workloads: [{ name: 'steady', targets: [{ type: 'flow', id: 'checkout' }], model: 'arrivalRate', arrivalRate: 2, maxConcurrent: 20, totalDurationMs: 60_000 }] },
@@ -468,7 +471,10 @@ describe('JobsPage React feature', () => {
     await click(host.querySelector('#job-tab-results')!);
     const results = host.querySelector('#job-panel-results')!;
     expect(results.textContent).toContain('Live LOAD progress');
-    expect(results.textContent).toContain('Completed / PASS10 / 8');
+    expect(results.textContent).toContain('Completed / PASS10 / 6');
+    expect(results.textContent).toContain('Execution outcome: IN_PROGRESS');
+    expect(results.textContent).toContain('Performance/threshold verdict: NOT_FINAL');
+    expect(results.textContent).toContain('75% (6 / 8 measured completions)');
     expect(results.textContent).toContain('Configured target rate 2');
     expect(results.textContent).not.toContain('The Server has not returned a result payload');
     expect(results.textContent).not.toContain('Detailed metrics are waiting for the artifact archive');
@@ -476,6 +482,10 @@ describe('JobsPage React feature', () => {
     const metrics = host.querySelector('#job-panel-metrics')!;
     expect(metrics.textContent).toContain('Actual completed / successful TPS2 / 1.6');
     expect(metrics.querySelector('svg[aria-label="Live completed and successful throughput trend"]')).not.toBeNull();
+    expect(metrics.querySelector('.att-live-load-completed')?.getAttribute('d')).not.toBe(metrics.querySelector('.att-live-load-passed')?.getAttribute('d'));
+    expect(metrics.textContent).toContain('Latency percentiles are estimates from a bounded histogram');
+    expect(metrics.querySelector('[aria-label="Verified checkpoint intervals"]')?.textContent).toContain('590 / 5 / 3 / 2');
+    expect(metrics.querySelector('[aria-label="Verified checkpoint intervals"]')?.textContent).toContain('23.5 ms (10 observations)');
     expect(getArchive).not.toHaveBeenCalled();
   });
 

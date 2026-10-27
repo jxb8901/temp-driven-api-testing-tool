@@ -166,9 +166,17 @@ export interface LoadLiveProgressPoint {
 }
 export interface LoadLiveProgressSnapshot extends LoadLiveProgressPoint {
   schemaVersion: 'att-load-live-progress/v1';
+  checkpointInterval?: LoadCheckpointInterval;
+  latestFailure?: { status: string; capturedAt: string; code?: string };
   phases?: Record<string, LoadLiveProgressCounts>;
   workloads?: Record<string, LoadLiveProgressCounts>;
   workloadsTruncated?: boolean;
+}
+export interface LoadCheckpointInterval {
+  schemaVersion: 'att-load-checkpoint-interval/v1'; state: 'WAITING' | 'DEGRADED' | 'VERIFIED';
+  startSequence?: number; endSequence?: number; startAt?: string; endAt?: string; durationMs?: number;
+  counts?: Record<string, number>; coverageGap?: boolean;
+  latencySampleCount?: number; latencyMeanMs?: number;
 }
 export interface JobsQuery {
   offset?: number; limit?: number; principal?: string; principalMode?: string; packageId?: string; executionType?: string;
@@ -206,6 +214,7 @@ export interface JobView extends JobSummary {
   loadProgress?: LoadLiveProgressSnapshot;
   loadProgressHistory?: LoadLiveProgressPoint[];
   loadProgressTrend?: LoadLiveProgressPoint[];
+  loadCheckpointHistory?: LoadCheckpointInterval[];
   performance?: {
     timings?: Record<string, unknown>;
     worker?: Record<string, unknown>;

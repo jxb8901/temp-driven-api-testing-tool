@@ -1244,6 +1244,17 @@ final class ServerRuntime implements AutoCloseable {
         Map<String,Object> measured=progressCounts(raw.get("measuredCounts"));if(measured==null)return null;snapshot.put("measuredCounts",measured);
         Map<String,Object> rates=progressNumbers(raw.get("rates"),Set.of("completedTps","successfulTps"));if(rates==null)return null;snapshot.put("rates",rates);
         Map<String,Object> latency=progressLatency(raw.get("latency"));if(latency==null)return null;snapshot.put("latency",latency);
+        if(raw.get("latestFailure") instanceof Map<?,?>) {
+            Map<?,?> failure=(Map<?,?>)raw.get("latestFailure");Object status=failure.get("status"),time=failure.get("capturedAt"),code=failure.get("code");
+            if(status instanceof String && Set.of("DROPPED","FAIL","ERROR","INVALID","SKIPPED").contains(status) && time instanceof String && ((String)time).length()<=40 && validTimestamp((String)time)) {
+                Map<String,Object> projected=new LinkedHashMap<>();projected.put("status",status);projected.put("capturedAt",time);
+                if(code instanceof String && ((String)code).matches("[A-Za-z][A-Za-z0-9_.-]{0,63}"))projected.put("code",code);
+                snapshot.put("latestFailure",projected);
+            }
+        }
+        Map<String,Object> checkpoint=progressCheckpoint(raw.get("checkpointInterval"));
+        if(raw.containsKey("checkpointInterval") && checkpoint==null)checkpoint=Map.of("schemaVersion","att-load-checkpoint-interval/v1","state","DEGRADED");
+        if(checkpoint!=null)snapshot.put("checkpointInterval",checkpoint);
         Map<String,Object> phases=new TreeMap<>();Object rawPhases=raw.get("phases");
         if(rawPhases instanceof Map<?,?>)for(Map.Entry<?,?> entry:((Map<?,?>)rawPhases).entrySet()) {
             if(phases.size()>=8)break;String name=safeProgressName(entry.getKey());if(!Set.of("WARMUP","RAMP_UP","STEADY","RAMP_DOWN","COMPLETE","PREPARING","UNKNOWN").contains(name))continue;
@@ -1269,6 +1280,31 @@ final class ServerRuntime implements AutoCloseable {
             Object value=source.get(key);if(value==null){result.put(key,null);continue;}double number=boundedDouble(value);if(!Double.isFinite(number)||number<0)return null;result.put(key,number);
         }
         return result;
+    }
+
+    private static Map<String,Object> progressCheckpoint(Object raw) {
+        if(!(raw instanceof Map<?,?>))return null;Map<?,?> source=(Map<?,?>)raw;
+        if(!"att-load-checkpoint-interval/v1".equals(source.get("schemaVersion")))return null;
+        Object state=source.get("state");if(!(state instanceof String)||!Set.of("WAITING","DEGRADED","VERIFIED").contains(state))return null;
+        Map<String,Object> value=new LinkedHashMap<>();value.put("schemaVersion","att-load-checkpoint-interval/v1");value.put("state",state);
+        if(!"VERIFIED".equals(state))return value;
+        long start=boundedLong(source.get("startSequence"),1L,Long.MAX_VALUE-1L),end=boundedLong(source.get("endSequence"),2L,Long.MAX_VALUE);
+        long duration=boundedLong(source.get("durationMs"),1L,TimeUnit.DAYS.toMillis(11));
+        if(start<1L||end!=start+1L||duration<1L||!(source.get("startAt") instanceof String)||!(source.get("endAt") instanceof String))return null;
+        String startAt=(String)source.get("startAt"),endAt=(String)source.get("endAt");
+        if(startAt.length()>40||endAt.length()>40||!validTimestamp(startAt)||!validTimestamp(endAt))return null;
+        try {if(java.time.Duration.between(Instant.parse(startAt),Instant.parse(endAt)).toMillis()!=duration)return null;}catch(Exception invalid){return null;}
+        if(!(source.get("counts") instanceof Map<?,?>))return null;Map<?,?> rawCounts=(Map<?,?>)source.get("counts");Map<String,Object> counts=new LinkedHashMap<>();
+        for(String key:List.of("scheduled","started","completed","success","failure","runtimeError","otherOutcome","dropped","measuredScheduled","measuredStarted","measuredCompleted","measuredSuccess","measuredFailure","measuredRuntimeError","measuredOtherOutcome","measuredDropped")) {
+            long count=boundedLong(rawCounts.get(key),0L,Long.MAX_VALUE);if(count<0L)return null;counts.put(key,count);
+        }
+        value.put("startSequence",start);value.put("endSequence",end);value.put("startAt",startAt);value.put("endAt",endAt);value.put("durationMs",duration);value.put("counts",counts);
+        if(source.containsKey("latencySampleCount")) {
+            long samples=boundedLong(source.get("latencySampleCount"),0L,Long.MAX_VALUE);if(samples<0L)return null;
+            value.put("latencySampleCount",samples);
+            if(samples>0L) {double mean=boundedDouble(source.get("latencyMeanMs"));if(!Double.isFinite(mean)||mean<0.0)return null;value.put("latencyMeanMs",mean);}
+        }
+        return value;
     }
 
     private static Map<String,Object> progressNumbers(Object raw,Set<String> allow) {
@@ -1303,12 +1339,31 @@ final class ServerRuntime implements AutoCloseable {
                 long previous=((Number)job.loadProgress.get("elapsedMs")).longValue();
                 long next=((Number)progress.get("elapsedMs")).longValue();if(next<previous)return false;
             }
-            Map<String,Object> saved=new LinkedHashMap<>(progress);job.loadProgress=saved;
+            Map<String,Object> saved=new LinkedHashMap<>(progress);
+            Object incomingCheckpoint=saved.get("checkpointInterval");
+            if(incomingCheckpoint instanceof Map<?,?> && "VERIFIED".equals(((Map<?,?>)incomingCheckpoint).get("state")) && !job.loadCheckpointHistory.isEmpty()) {
+                long sequence=((Number)((Map<?,?>)incomingCheckpoint).get("endSequence")).longValue();
+                long previous=((Number)job.loadCheckpointHistory.get(job.loadCheckpointHistory.size()-1).get("endSequence")).longValue();
+                if(sequence<previous)saved.put("checkpointInterval",Map.of("schemaVersion","att-load-checkpoint-interval/v1","state","DEGRADED"));
+            }
+            job.loadProgress=saved;
+            Object checkpoint=saved.get("checkpointInterval");
+            if(checkpoint instanceof Map<?,?> && "VERIFIED".equals(((Map<?,?>)checkpoint).get("state"))) {
+                @SuppressWarnings("unchecked") Map<String,Object> interval=(Map<String,Object>)checkpoint;
+                long sequence=((Number)interval.get("endSequence")).longValue();
+                long previous=job.loadCheckpointHistory.isEmpty()?0L:((Number)job.loadCheckpointHistory.get(job.loadCheckpointHistory.size()-1).get("endSequence")).longValue();
+                if(sequence>previous) {
+                    Map<String,Object> entry=new LinkedHashMap<>(interval);
+                    if((previous==0L && sequence>2L)||(previous>0L && sequence>previous+1L))entry.put("coverageGap",true);
+                    saved.put("checkpointInterval",entry);
+                    job.loadCheckpointHistory.add(entry);if(job.loadCheckpointHistory.size()>64)job.loadCheckpointHistory.remove(0);
+                }
+            }
             Map<String,Object> point=progressHistoryPoint(saved);
             job.loadProgressHistory.add(point);if(job.loadProgressHistory.size()>60)job.loadProgressHistory.remove(0);
             long elapsed=((Number)saved.get("elapsedMs")).longValue();long planned=plannedLoadDurationMs(job);
             int bucket=(int)Math.max(0L,Math.min(255L,(long)(elapsed*256.0/Math.max(1L,planned))));job.loadProgressTrend.put(bucket,point);
-            Map<String,Object> state=new LinkedHashMap<>();state.put("latest",saved);state.put("recent",new ArrayList<>(job.loadProgressHistory));state.put("trend",new ArrayList<>(job.loadProgressTrend.values()));
+            Map<String,Object> state=new LinkedHashMap<>();state.put("latest",saved);state.put("recent",new ArrayList<>(job.loadProgressHistory));state.put("trend",new ArrayList<>(job.loadProgressTrend.values()));state.put("checkpoints",new ArrayList<>(job.loadCheckpointHistory));
             job.loadProgressJson=JSON.writeValueAsString(state);store.updateLoadProgress(job.id,job.loadProgressJson);return true;
         }
     }

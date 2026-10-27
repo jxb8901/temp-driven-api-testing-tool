@@ -17,6 +17,15 @@ import java.util.concurrent.atomic.AtomicInteger;
 import static org.junit.jupiter.api.Assertions.*;
 
 class LoadConsoleSamplerTest {
+    @Test void preparationDoesNotAdvanceSchedulerElapsedTime() throws Exception {
+        LoadConsoleSampler sampler=new LoadConsoleSampler("preparing",5000L,1000L);
+        Thread.sleep(20L);
+        assertEquals(0L,sampler.snapshot().get("elapsedMs"));
+        sampler.observePreparedStart("closed","preparing");
+        Thread.sleep(5L);
+        assertTrue(((Number)sampler.snapshot().get("elapsedMs")).longValue()>0L);
+        sampler.finish("PASS");
+    }
     @Test void exposesBoundedProgressCountsAndLatencyWithoutIterationIdentity() {
         LoadConsoleSampler sampler=new LoadConsoleSampler("live-progress",5000L,1000L);
         sampler.startLine("arrivalRate");
@@ -31,6 +40,7 @@ class LoadConsoleSamplerTest {
         @SuppressWarnings("unchecked") Map<String,Object> latency=(Map<String,Object>)snapshot.get("latency");
         assertEquals(1L,latency.get("sampleCount"));assertEquals(50.0,latency.get("meanMs"));
         assertFalse(snapshot.toString().contains("private-iteration"));
+        assertEquals("DROPPED",((Map<?,?>)snapshot.get("latestFailure")).get("status"));
         assertTrue(snapshot.containsKey("measuredCounts"));assertTrue(snapshot.containsKey("phases"));
         sampler.finish("PASS");
     }

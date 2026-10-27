@@ -30,6 +30,7 @@ public final class LoadConsoleSampler {
     private final long intervalNanos;
     private final long errorIntervalNanos;
     private final AtomicLong startedNanos = new AtomicLong();
+    private final AtomicLong schedulerStartedNanos = new AtomicLong();
     private final AtomicLong scheduled = new AtomicLong();
     private final AtomicLong started = new AtomicLong();
     private final AtomicLong completed = new AtomicLong();
@@ -51,6 +52,7 @@ public final class LoadConsoleSampler {
     private final ConcurrentHashMap<String,Counters> livePhases = new ConcurrentHashMap<>();
     private final AtomicBoolean liveWorkloadsTruncated = new AtomicBoolean();
     private volatile String livePhase = "PREPARING";
+    private volatile Map<String,Object> latestFailure;
     private volatile ScheduledExecutorService periodic;
     private volatile String model = "unknown";
     private final AtomicLong lastProgressNanos = new AtomicLong();
@@ -105,9 +107,15 @@ public final class LoadConsoleSampler {
         return ExecutionConsoleFormatter.loadStart(runId, model, null);
     }
 
-    /** Adopts the Engine's explicit pre-scheduler START event without emitting a second START line. */
+    /** Adopts the Engine's scheduler START event without emitting a second START line. */
     public void observePreparedStart(String loadModel, String observedRunId) {
+        observePreparedStart(loadModel, observedRunId, null);
+    }
+
+    public void observePreparedStart(String loadModel, String observedRunId, String phase) {
         adoptRunId(observedRunId);
+        schedulerStartedNanos.compareAndSet(0L,System.nanoTime());
+        if(phase!=null)livePhase=ExecutionConsoleFormatter.token(phase,"UNKNOWN");
         if (loadModel != null) model = ExecutionConsoleFormatter.token(loadModel, model);
         if (startEmitted.compareAndSet(false, true)) {
             startedNanos.compareAndSet(0L,System.nanoTime());
@@ -119,6 +127,7 @@ public final class LoadConsoleSampler {
     /** Returns a console line, or null when this iteration should stay off the console. */
     public String onEvent(LoadEvent event) {
         if (event == null || finished.get()) return null;
+        schedulerStartedNanos.compareAndSet(0L,System.nanoTime());
         liveCounters.observe(event);
         String phaseKey=ExecutionConsoleFormatter.token(event.phase(),"UNKNOWN");
         livePhase=phaseKey;
@@ -145,6 +154,11 @@ public final class LoadConsoleSampler {
             else errors.incrementAndGet();
         }
         if (event.dropped() || (event.completed() && !event.success())) {
+            Map<String,Object> failure=new LinkedHashMap<>();
+            failure.put("status",event.dropped()?"DROPPED":event.status()==null?"ERROR":event.status().name());
+            failure.put("capturedAt",Instant.now().toString());
+            String type=event.errorType();if(type!=null && type.matches("[A-Za-z][A-Za-z0-9_.-]{0,63}"))failure.put("code",type);
+            latestFailure=failure;
             String error = errorLine(event);
             if (error != null) return error;
         }
@@ -160,7 +174,7 @@ public final class LoadConsoleSampler {
 
     /** Bounded, sanitized live counters for the Server's coalesced Job progress snapshot. */
     public Map<String,Object> snapshot() {
-        long began=startedNanos.get();long elapsedMs=began==0L?0L:Math.max(0L,TimeUnit.NANOSECONDS.toMillis(System.nanoTime()-began));
+        long began=schedulerStartedNanos.get();long elapsedMs=began==0L?0L:Math.max(0L,TimeUnit.NANOSECONDS.toMillis(System.nanoTime()-began));
         Map<String,Object> snapshot=new LinkedHashMap<>();
         snapshot.put("schemaVersion","att-load-live-progress/v1");
         snapshot.put("capturedAt",Instant.now().toString());
@@ -172,6 +186,7 @@ public final class LoadConsoleSampler {
         rates.put("successfulTps",rate(liveCounters.passed.get(),elapsedMs));
         snapshot.put("rates",rates);
         snapshot.put("latency",liveCounters.latencyMap());
+        if(latestFailure!=null)snapshot.put("latestFailure",latestFailure);
         Map<String,Object> measured=new LinkedHashMap<>();
         for(String phase:new String[]{"RAMP_UP","STEADY","RAMP_DOWN"}) {
             Counters counters=livePhases.get(phase);if(counters!=null)mergeCounters(measured,counters);

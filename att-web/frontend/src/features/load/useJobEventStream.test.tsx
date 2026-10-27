@@ -122,6 +122,26 @@ describe('useJobEventStream', () => {
     expect(snapshot?.consoleTruncated).toBe(false);
   });
 
+  it('keeps the latest live snapshot after a high-rate event burst and ignores regressing snapshots', async () => {
+    const { api, latestHandler } = makeApi();
+    await act(async () => root.render(<Consumer api={api} jobId="J1" />));
+    const sample = { schemaVersion: 'att-load-live-progress/v1', capturedAt: '2026-10-27T00:00:05Z', elapsedMs: 5000, phase: 'STEADY', counts: { completed: 7 }, checkpointInterval: { schemaVersion: 'att-load-checkpoint-interval/v1', state: 'VERIFIED', endSequence: 2 } };
+    act(() => {
+      latestHandler('J1')?.onEvent({ id: '1', type: 'progress', data: { loadProgress: sample } });
+      for (let id = 2; id <= 10_001; id += 1) latestHandler('J1')?.onEvent({ id: String(id), type: 'progress', data: { phase: 'RUNNING' } });
+      latestHandler('J1')?.onEvent({ id: '10002', type: 'progress', data: { loadProgress: { ...sample, elapsedMs: 4000 } } });
+      latestHandler('J1')?.onEvent({ id: '10003', type: 'progress', data: { loadProgress: { ...sample, elapsedMs: 6000, checkpointInterval: { ...sample.checkpointInterval, endSequence: 3 } } } });
+    });
+    await flush();
+    const snapshot = jobEventStreamStateForTesting(api, 'J1')?.snapshot;
+    expect(snapshot?.events).toHaveLength(MAX_EVENTS);
+    expect(snapshot?.events.some(event => event.id === '1')).toBe(false);
+    expect(snapshot?.latestLoadProgress?.elapsedMs).toBe(6000);
+    expect(snapshot?.latestLoadProgress?.counts.completed).toBe(7);
+    expect(snapshot?.checkpointHistory?.map(interval => interval.endSequence)).toEqual([2, 3]);
+    expect(api.subscribeJob).toHaveBeenCalledTimes(1);
+  });
+
   it('bounds console retention independently and reports evicted console text', async () => {
     const { api, latestHandler } = makeApi();
     await act(async () => root.render(<Consumer api={api} jobId="J1" />));

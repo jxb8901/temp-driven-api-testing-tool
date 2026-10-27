@@ -1,5 +1,5 @@
 import { useMemo, useSyncExternalStore } from 'react';
-import type { JobEvent, JobEventHandlers, LoadJobsApi } from './types';
+import type { JobEvent, JobEventHandlers, LoadJobsApi, LoadLiveProgressSnapshot, LoadCheckpointInterval } from './types';
 
 export const MAX_EVENTS = 500;
 export const MAX_CONSOLE_LINES = 2000;
@@ -13,6 +13,8 @@ export type JobStreamEvent = Readonly<JobEvent & { seq: number; consoleText: str
 export type JobConsoleLine = Readonly<{ seq: number; id?: string; receivedAt: string; text: string }>;
 
 export interface JobEventStreamSnapshot {
+  readonly latestLoadProgress?: LoadLiveProgressSnapshot;
+  readonly checkpointHistory?: readonly LoadCheckpointInterval[];
   readonly events: readonly JobStreamEvent[];
   readonly consoleLines: readonly JobConsoleLine[];
   readonly consoleTruncated: boolean;
@@ -101,6 +103,8 @@ class BoundedIdIndex {
 }
 
 interface Entry {
+  latestLoadProgress?: LoadLiveProgressSnapshot;
+  checkpointHistory: LoadCheckpointInterval[];
   buffer: EventRing;
   consoleBuffer: ConsoleRing;
   idIndex: BoundedIdIndex;
@@ -201,6 +205,8 @@ function publish(entry: Entry): void {
   clearFlushTimer(entry);
   clearCounterFlushTimer(entry);
   entry.snapshot = Object.freeze({
+    latestLoadProgress: entry.latestLoadProgress,
+    checkpointHistory: Object.freeze([...entry.checkpointHistory]),
     events: entry.buffer.snapshot(),
     consoleLines: entry.consoleBuffer.snapshot(),
     consoleTruncated: entry.consoleBuffer.wasTruncated(),
@@ -253,7 +259,7 @@ function entryFor(api: LoadJobsApi, jobId: string): Entry {
   if (!entry) {
     entry = {
       buffer: new EventRing(), consoleBuffer: new ConsoleRing(), idIndex: new BoundedIdIndex(),
-      connection: 'connecting', journalTruncated: false,
+      connection: 'connecting', journalTruncated: false, checkpointHistory: [],
       duplicatesIgnored: 0, staleIgnored: 0, gaps: 0,
       statusSnapshot: EMPTY_STATUS_SNAPSHOT,
       listeners: new Set(), nextSequence: 0, consumerCount: 0, dirty: false, pendingCounters: false,
@@ -326,6 +332,19 @@ function ingest(entry: Entry, event: JobEvent): boolean {
       eventRevision: entry.statusSnapshot.eventRevision + 1,
       resultEvent: event.type === 'result',
     });
+  }
+  if (event.type === 'progress' && event.data && typeof event.data === 'object' && !Array.isArray(event.data)) {
+    const candidate = (event.data as Record<string, unknown>).loadProgress as LoadLiveProgressSnapshot | undefined;
+    if (candidate && candidate.schemaVersion === 'att-load-live-progress/v1' && Number.isFinite(candidate.elapsedMs)
+        && (!entry.latestLoadProgress || candidate.elapsedMs >= entry.latestLoadProgress.elapsedMs)) {
+      entry.latestLoadProgress = candidate;
+      const interval = candidate.checkpointInterval;
+      if (interval?.state === 'VERIFIED' && typeof interval.endSequence === 'number' &&
+          !entry.checkpointHistory.some(item => item.endSequence === interval.endSequence)) {
+        entry.checkpointHistory.push(interval);
+        if (entry.checkpointHistory.length > 64) entry.checkpointHistory.shift();
+      }
+    }
   }
   entry.buffer.append(stored);
   entry.dirty = true;
