@@ -279,6 +279,9 @@ def capture_incomplete_evidence(evidence_root, run_directory, checkpoint_dir, ru
     if "generator" in values:
         partial_metrics["generator"] = values["generator"]
     result = "PARTIAL" if checkpoint else "REPORT_UNAVAILABLE"
+    reason_text = str(reason).strip()
+    if not reason_text:
+        reason_text = "runner interrupted" if isinstance(reason, KeyboardInterrupt) else type(reason).__name__
     acceptance = {
         "schemaVersion": "att-load-25h-soak/v1",
         "runId": run_id,
@@ -286,7 +289,7 @@ def capture_incomplete_evidence(evidence_root, run_directory, checkpoint_dir, ru
         "result": result,
         "complete": False,
         "elapsedSeconds": max(0.0, elapsed_seconds),
-        "reason": str(reason)[:2000],
+        "reason": reason_text[:2000],
         "checkpointDirectory": "load/{}/checkpoints/{}".format(run_id, AGGREGATE_CHECKPOINT_SCOPE),
     }
     if exit_code is not None:

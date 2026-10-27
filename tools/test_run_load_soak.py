@@ -208,9 +208,10 @@ class LoadSoakEvidenceTest(unittest.TestCase):
             write_checkpoint(checkpoint_dir / "checkpoint-00000000000000000007.json", checkpoint)
             evidence_root = root / "evidence"
             result = soak.capture_incomplete_evidence(evidence_root, run, checkpoint_dir, "run-2",
-                                                      "abc123", 301.5, "interrupted", -15)
+                                                      "abc123", 301.5, KeyboardInterrupt(), -15)
             self.assertEqual("PARTIAL", result["result"])
             self.assertFalse(result["complete"])
+            self.assertEqual("runner interrupted", result["reason"])
             self.assertEqual(7, result["latestCheckpoint"]["sequence"])
             self.assertTrue((evidence_root / "load" / "run-2" / "partial.txt").is_file())
             saved = json.loads((evidence_root / "acceptance.json").read_text(encoding="utf-8"))
