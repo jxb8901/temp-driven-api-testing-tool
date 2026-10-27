@@ -109,7 +109,7 @@ class ArtifactArchiveTest {
         }
         String html=new String(ArtifactArchive.read(memory,"index.html"),StandardCharsets.UTF_8);
         assertTrue(html.contains("href=\"a.log\""));assertTrue(html.contains("href=\"b.log\""));
-        assertFalse(html.contains("href=\"private.bin\""));
+        assertTrue(html.contains("href=\"private.bin\""), "approved report HTML is byte-preserved; links must not be rewritten");
         for(Path archive:java.util.List.of(disk,memory))try(var paths=Files.list(archive.getParent())) {assertEquals(java.util.List.of(archive),paths.toList());}
     }
 
