@@ -101,7 +101,10 @@ class ArtifactLifecycleTest {
             int counter=0;
             for(String state:List.of("PASS","FAIL","ERROR","INVALID","CANCELLED")) {
                 String id=String.format("J%016X",++counter);Job job=job(runtime,id,state);
-                Files.writeString(runtime.outputDirectoryForJob(id).resolve("case.log"),"password=archive-canary\nbusiness=unchanged\n");
+                Path producerLog=runtime.outputDirectoryForJob(id).resolve("case.log");
+                Files.writeString(producerLog,"password=archive-canary\nbusiness=unchanged\n");
+                assertThrows(IllegalArgumentException.class,()->ServerRuntime.approvedArtifactBytes(producerLog));
+                Files.write(producerLog,runtime.publicArtifact(id,producerLog));
                 if("PASS".equals(state))Files.write(runtime.outputDirectoryForJob(id).resolve("oversized.log"),
                         new byte[(int)ArtifactArchive.MAX_ENTRY_BYTES+1]);
                 runtime.scheduleArtifactArchive(id);runtime.scheduleArtifactArchive(id);
@@ -143,6 +146,8 @@ class ArtifactLifecycleTest {
             String html=Files.readString(new LoadReportWriter().write(temp.resolve("load-source"),
                     new LoadRunResult("archive-preview",scenario,started,started.plusSeconds(3),metrics.snapshot())),StandardCharsets.UTF_8)
                     .replace("<body>","<body><p>0 / 120 measured completions</p><p>target generator rate /s</p><p>Could not read "+privatePath+"</p>");
+            // Producer resolves host-only references before the byte-preserving export.
+            html=html.replace(privatePath.toString(),"$EXTERNAL/report.html");
             Files.writeString(output.resolve("load-report.html"),html);
             runtime.scheduleArtifactArchive(id);awaitState(runtime,id,"READY");
 
@@ -259,6 +264,8 @@ class ArtifactLifecycleTest {
             Files.writeString(output.resolve("result.json"),"{\"clientToken\":{\"arbitraryField\":\"nested-canary\"},\"customerName\":\"Business Name\",\"amount\":12.5}");
             Files.writeString(output.resolve("result.yaml"),"clientSecret:\n  arbitraryField: nested-canary\ncustomerName: Business Name\namount: 12.5\n");
             Files.writeString(output.resolve("invalid.json"),"{invalid: secret}");
+            for(String name:List.of("result.json","result.yaml"))
+                Files.write(output.resolve(name),runtime.publicArtifact(id,output.resolve(name)));
             runtime.scheduleArtifactArchive(id);awaitState(runtime,id,"READY");
             byte[] json=runtime.archiveEntry(id,"result.json"),yaml=runtime.archiveEntry(id,"result.yaml");
             assertEquals("[REDACTED_SECRET]",ServerRuntime.JSON.readTree(json).path("clientToken").asText());
@@ -305,6 +312,7 @@ class ArtifactLifecycleTest {
             assertEquals("FAILED",runtime.artifactIndex(id).get("archiveStatus"));
             assertThrows(ServerRuntime.ArchiveUnavailableException.class,()->runtime.archiveEntry(id,"case.log"));
             assertTrue(Files.readString(output.resolve("case.log")).contains("private-canary"),"Failure must retain private source, not publish it");
+            Files.write(output.resolve("case.log"),runtime.publicArtifact(id,output.resolve("case.log")));
             runtime.retryArtifactArchive(id);awaitState(runtime,id,"READY");
             awaitMetrics(runtime,id,"READY");
             String published=new String(runtime.archiveEntry(id,"case.log"),java.nio.charset.StandardCharsets.UTF_8);
@@ -346,6 +354,8 @@ class ArtifactLifecycleTest {
                 assertTrue(text.contains("Business Customer"));
             }
             assertEquals(json, Files.readString(output.resolve("result.json")), "Projection must not rewrite private source");
+            for(String name:List.of("result.json","result.yaml"))
+                Files.write(output.resolve(name),runtime.publicArtifact(id,output.resolve(name)));
             runtime.scheduleArtifactArchive(id); awaitState(runtime, id, "READY");
             for (String name : List.of("result.json", "result.yaml")) {
                 byte[] preview = runtime.archiveEntry(id, name);
@@ -374,6 +384,9 @@ class ArtifactLifecycleTest {
             Path collision = output.resolve("collision.json");
             Files.writeString(collision, ServerRuntime.JSON.writeValueAsString(Map.of("/host/one/name.txt", "a", "/host/two/name.txt", "b")));
             assertThrows(IllegalArgumentException.class, () -> runtime.publicArtifact(id, collision));
+            // The producer rejects colliding protocol keys instead of shipping an unsafe file.
+            Files.delete(collision);
+            Files.write(output.resolve("result.json"),published);
             runtime.scheduleArtifactArchive(id); awaitState(runtime, id, "READY");
             assertArrayEquals(published, runtime.archiveEntry(id, "result.json"));
             assertEquals(false, runtime.artifactIndex(id).get("complete"));
@@ -398,6 +411,7 @@ class ArtifactLifecycleTest {
                 Files.writeString(output.resolve("invalid.yaml"), invalid);
                 assertThrows(IllegalArgumentException.class, () -> runtime.publicArtifact(id, output.resolve("invalid.yaml")));
             }
+            Files.write(file,projected);
             runtime.scheduleArtifactArchive(id); awaitState(runtime, id, "READY");
             assertArrayEquals(projected, runtime.archiveEntry(id, "result.yaml"));
             assertEquals(false, runtime.artifactIndex(id).get("complete"));
