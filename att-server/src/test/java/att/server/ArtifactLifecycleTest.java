@@ -43,6 +43,9 @@ class ArtifactLifecycleTest {
             Path output=Files.createDirectory(runtime.outputDirectoryForJob(id));
             Files.writeString(output.resolve("private-canary.log"),"password=private-canary-secret\nbusiness=retained\n");
             Files.write(output.resolve("binary.bin"),new byte[]{0,1,2});
+            Path approvedLog=output.resolve("private-canary.log");
+            assertThrows(IllegalArgumentException.class,()->ServerRuntime.approvedArtifactBytes(approvedLog));
+            Files.write(approvedLog,runtime.publicArtifact(id,approvedLog));
             runtime.retryArtifactArchive(id);
             var ready=awaitMetrics(runtime,id,"READY");
             assertEquals(2,ready.attempts);assertEquals(1,ready.retries);
@@ -159,7 +162,7 @@ class ArtifactLifecycleTest {
             assertTrue(published.contains("target generator rate /s"),published);
             assertTrue(published.contains("id=\"rate-chart\""),published);
             assertTrue(published.contains("renderCharts"),published);
-            assertTrue(published.contains("sha256-2n13XsaCAniqXDGJgtRR2kgh8VlBPDQQ3kb5BQLyzq4="),published);
+            assertEquals(html,published,"ZIP and preview keep the exact producer-generated report HTML");
             assertTrue(published.contains("$EXTERNAL/report.html"),published);
             assertFalse(published.contains(privatePath.toString()),published);
         }
@@ -452,6 +455,13 @@ class ArtifactLifecycleTest {
                 Files.write(output.resolve(name), producerBytes);
                 projected.put(name, producerBytes);
             }
+            // This fixture also exercises a safe producer snapshot for downstream business data;
+            // previously projected sensitive containers are validated above, not ZIP-rewritten.
+            byte[] safeBusiness=ServerRuntime.JSON.writeValueAsBytes(Map.of(
+                    "customerName","Business Customer","amount",12.5,
+                    "queue","ORDERS.REQUEST","remotePath","/remote/inbox/ordinary.txt"));
+            Files.write(output.resolve("evidence.json"),safeBusiness);
+            projected.put("evidence.json",safeBusiness);
             runtime.scheduleArtifactArchive(id); awaitState(runtime, id, "READY");
             Map<String,Object> manifest = ArtifactArchive.verify(runtime.artifactArchivePath(id), true);
             assertEquals(false, manifest.get("complete"));
