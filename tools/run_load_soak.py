@@ -18,6 +18,7 @@ from pathlib import Path
 
 AGGREGATE_CHECKPOINT_SCOPE = "aggregate"
 CHECKPOINT_SCOPE = "workload-local-soak"
+CHECKPOINT_SCHEMA = "att-load-metrics-checkpoint/v2"
 REQUIRED_DURATION_HOURS = 25
 MIN_COMPLETED_TPS = 100.0
 MIN_COMPLETIONS = 9_000_000
@@ -29,6 +30,16 @@ REPORT_FILES = {
 }
 
 
+def workload_checkpoint_directory(workload_id):
+    value = "default" if workload_id is None else str(workload_id)
+    safe = "".join(character if character.isascii() and
+                    (character.isalnum() or character in "._-") else "_" for character in value)
+    return "workload-{}-{}".format(safe, hashlib.sha256(value.encode("utf-8")).hexdigest())
+
+
+CHECKPOINT_DIRECTORY = workload_checkpoint_directory("local-soak")
+
+
 def atomic_json(path, value):
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_name(path.name + ".tmp")
@@ -36,23 +47,19 @@ def atomic_json(path, value):
     os.replace(temporary, path)
 
 
-def canonical_json_bytes(value):
-    # Kept for small fixtures; real checkpoints are checked against their exact JSON payload bytes.
-    return json.dumps(value, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
-
-
-def checkpoint_payload_bytes(source):
-    text = source.decode("utf-8") if isinstance(source, bytes) else source
-    key = text.find('"payload"')
-    if key < 0:
-        raise ValueError("checkpoint payload is absent")
-    value_start = text.find(":", key + len('"payload"')) + 1
-    while value_start < len(text) and text[value_start].isspace():
-        value_start += 1
-    value, value_end = json.JSONDecoder().raw_decode(text, value_start)
-    if not isinstance(value, dict):
-        raise ValueError("checkpoint payload must be an object")
-    return text[value_start:value_end].encode("utf-8")
+def checkpoint_integrity_envelope_bytes(source):
+    data = source.encode("utf-8") if isinstance(source, str) else source
+    marker = b',"integritySha256":"'
+    marker_start = data.rfind(marker)
+    if marker_start < 0:
+        raise ValueError("checkpoint integrity field is absent")
+    digest_start = marker_start + len(marker)
+    if len(data) != digest_start + 66 or data[digest_start + 64:] != b'"}':
+        raise ValueError("checkpoint integrity field is malformed or not the final envelope field")
+    digest = data[digest_start:digest_start + 64]
+    if any(character not in b"0123456789abcdef" for character in digest):
+        raise ValueError("checkpoint integrity digest is malformed")
+    return data[:marker_start] + b"}"
 
 
 def verified_checkpoints(directory, run_id, scope=AGGREGATE_CHECKPOINT_SCOPE):
@@ -62,7 +69,7 @@ def verified_checkpoints(directory, run_id, scope=AGGREGATE_CHECKPOINT_SCOPE):
             source = path.read_text(encoding="utf-8")
             checkpoint = json.loads(source)
             payload = checkpoint["payload"]
-            if checkpoint.get("schemaVersion") != "att-load-metrics-checkpoint/v1":
+            if checkpoint.get("schemaVersion") != CHECKPOINT_SCHEMA:
                 continue
             if checkpoint.get("runId") != run_id or checkpoint.get("scope") != scope:
                 continue
@@ -73,7 +80,7 @@ def verified_checkpoints(directory, run_id, scope=AGGREGATE_CHECKPOINT_SCOPE):
                     or state not in ("CHECKPOINT", "FINAL_CHECKPOINT")
                     or checkpoint.get("finalized", False) is not finalized):
                 continue
-            digest = hashlib.sha256(checkpoint_payload_bytes(source)).hexdigest()
+            digest = hashlib.sha256(checkpoint_integrity_envelope_bytes(source)).hexdigest()
             if digest != checkpoint.get("integritySha256"):
                 continue
             verified.append(checkpoint)
@@ -615,7 +622,7 @@ def run_soak(args):
             raise RuntimeError("LOAD checkpointing was disabled or reported a write failure")
         verify_final_checkpoint(run_directory / "checkpoints" / AGGREGATE_CHECKPOINT_SCOPE, run_id, AGGREGATE_CHECKPOINT_SCOPE,
                                 manifest.get("checkpointSequences", {}).get("aggregate"))
-        verify_final_checkpoint(run_directory / "checkpoints" / CHECKPOINT_SCOPE, run_id, CHECKPOINT_SCOPE,
+        verify_final_checkpoint(run_directory / "checkpoints" / CHECKPOINT_DIRECTORY, run_id, CHECKPOINT_SCOPE,
                                 manifest.get("checkpointSequences", {}).get("local-soak"))
         duration_ms = int(summary.get("durationMs", 0))
         completed = int(metrics.get("measuredCompleted", 0))

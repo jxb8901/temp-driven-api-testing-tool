@@ -253,7 +253,9 @@ public final class FixedArrivalRateScheduler implements LoadScheduler {
     private void enableCheckpoints(LoadMetrics metrics) {
         if (evidenceOutputRoot == null) return;
         String workload = scenario.workloadId() == null ? "aggregate" : "workload-" + safe(scenario.workloadId());
-        metrics.enableCheckpoints(evidenceOutputRoot.resolve("load").resolve(runId).resolve("checkpoints").resolve(workload),
+        String directory = scenario.workloadId() == null ? "aggregate"
+                : LoadMetricsCheckpointStore.workloadCheckpointDirectoryName(scenario.workloadId());
+        metrics.enableCheckpoints(evidenceOutputRoot.resolve("load").resolve(runId).resolve("checkpoints").resolve(directory),
                 runId, workload);
     }
 
@@ -264,7 +266,8 @@ public final class FixedArrivalRateScheduler implements LoadScheduler {
     private Path evidenceOutputRoot(String iterationId) {
         if (evidenceStore == null || evidenceOutputRoot == null || !evidenceStore.reserveSuccessEvidence(iterationId, scenario.workloadId())) return null;
         Path root = evidenceOutputRoot.resolve("load").resolve(runId).resolve("iterations");
-        return scenario.legacyV10() ? root : root.resolve(safe(scenario.workloadId()));
+        return scenario.legacyV10() ? root : root.resolve(
+                LoadMetricsCheckpointStore.workloadCheckpointDirectoryName(scenario.workloadId()));
     }
     private long remainingRunMillis(long startedAt) {
         return LoadPhase.totalMs(scenario) - (timing.now() - startedAt);

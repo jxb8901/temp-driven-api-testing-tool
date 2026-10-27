@@ -29,7 +29,7 @@ import java.util.stream.Stream;
 
 /** Bounded, versioned LOAD metrics checkpoints. Checkpoints are recovery evidence, never a completed report. */
 final class LoadMetricsCheckpointStore {
-    static final String SCHEMA = "att-load-metrics-checkpoint/v1";
+    static final String SCHEMA = "att-load-metrics-checkpoint/v2";
     static final long INTERVAL_MS = TimeUnit.MINUTES.toMillis(5L);
     static final int MAX_CHECKPOINT_BYTES = 16 * 1024 * 1024;
     private static final int RETAINED_GENERATIONS = 2;
@@ -71,6 +71,17 @@ final class LoadMetricsCheckpointStore {
         this.intervalMs = intervalMs;
     }
 
+    /** Case-insensitive filesystems must not alias checkpoints for case-distinct workload IDs. */
+    static String workloadCheckpointDirectoryName(String workloadId) {
+        String value = workloadId == null ? "default" : workloadId;
+        String safe = value.replaceAll("[^A-Za-z0-9_.-]", "_");
+        try {
+            return "workload-" + safe + "-" + sha256(value.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        } catch (Exception unavailable) {
+            throw new IllegalStateException("SHA-256 is unavailable for LOAD workload checkpoint namespaces.", unavailable);
+        }
+    }
+
     void start(Supplier<LoadMetricsSnapshot> snapshotSupplier) {
         scheduled = WRITERS.scheduleAtFixedRate(() -> checkpoint(snapshotSupplier, false),
                 intervalMs, intervalMs, TimeUnit.MILLISECONDS);
@@ -103,7 +114,6 @@ final class LoadMetricsCheckpointStore {
             Path directory = ensurePrivateDirectory();
             Map<String, Object> payload = new LinkedHashMap<String, Object>();
             payload.put("metrics", snapshot.toMap());
-            byte[] payloadBytes = JSON.writeValueAsBytes(payload);
             Map<String, Object> checkpoint = new LinkedHashMap<String, Object>();
             checkpoint.put("schemaVersion", SCHEMA);
             checkpoint.put("state", finalized ? "FINAL_CHECKPOINT" : "CHECKPOINT");
@@ -113,7 +123,9 @@ final class LoadMetricsCheckpointStore {
             checkpoint.put("capturedAt", Instant.now().toString());
             checkpoint.put("finalized", finalized);
             checkpoint.put("payload", payload);
-            checkpoint.put("integritySha256", sha256(payloadBytes));
+            // Hash the complete envelope before adding the digest field so identity, sequence,
+            // timestamp and terminal state are covered along with the metrics payload.
+            checkpoint.put("integritySha256", sha256(JSON.writeValueAsBytes(checkpoint)));
             byte[] bytes = JSON.writeValueAsBytes(checkpoint);
             if (bytes.length > MAX_CHECKPOINT_BYTES) throw new IOException("LOAD metrics checkpoint exceeded its 16 MiB size limit.");
             String fileName = fileName(next);
@@ -202,7 +214,7 @@ final class LoadMetricsCheckpointStore {
                         || checkpoint.path("finalized").asBoolean() != "FINAL_CHECKPOINT".equals(state)
                         || !checkpoint.path("payload").path("metrics").isObject()) continue;
                 String expected = checkpoint.path("integritySha256").asText("");
-                String actual = sha256(payloadBytes(checkpointBytes));
+                String actual = sha256(integrityEnvelopeBytes(checkpointBytes));
                 if (!expected.equals(actual)) continue;
                 @SuppressWarnings("unchecked") Map<String, Object> parsed = JSON.convertValue(checkpoint, Map.class);
                 return parsed;
@@ -213,50 +225,32 @@ final class LoadMetricsCheckpointStore {
         return null;
     }
 
-    /** Extract the exact UTF-8 JSON value hashed by the writer, without numeric reformatting. */
-    private static byte[] payloadBytes(byte[] document) throws IOException {
-        int valueStart = -1;
-        boolean inString = false;
-        boolean escaped = false;
-        for (int index = 0; index < document.length; index++) {
-            int current = document[index] & 0xff;
-            if (inString) {
-                if (escaped) escaped = false;
-                else if (current == '\\') escaped = true;
-                else if (current == '"') inString = false;
-                continue;
-            }
-            if (current != '"') continue;
-            byte[] key = new byte[] {'"','p','a','y','l','o','a','d','"'};
-            boolean matches = index + key.length <= document.length;
-            for (int offset = 0; matches && offset < key.length; offset++)
-                matches = document[index + offset] == key[offset];
-            if (!matches) { inString = true; continue; }
-            int delimiter = index + key.length;
-            while (delimiter < document.length && Character.isWhitespace((char) (document[delimiter] & 0xff))) delimiter++;
-            if (delimiter >= document.length || document[delimiter] != ':') { inString = true; continue; }
-            valueStart = delimiter + 1;
-            while (valueStart < document.length && Character.isWhitespace((char) (document[valueStart] & 0xff))) valueStart++;
-            break;
+    /** Remove the final digest member to recover the exact envelope bytes hashed by the writer. */
+    private static byte[] integrityEnvelopeBytes(byte[] document) throws IOException {
+        byte[] marker = ",\"integritySha256\":\"".getBytes(java.nio.charset.StandardCharsets.US_ASCII);
+        int markerStart = lastIndexOf(document, marker);
+        if (markerStart < 0) throw new IOException("LOAD checkpoint integrity field is missing.");
+        int digestStart = markerStart + marker.length;
+        if (document.length != digestStart + 66 || document[digestStart + 64] != '"'
+                || document[digestStart + 65] != '}')
+            throw new IOException("LOAD checkpoint integrity field is malformed or not the final envelope field.");
+        for (int index = digestStart; index < digestStart + 64; index++) {
+            int value = document[index] & 0xff;
+            if (!(value >= '0' && value <= '9') && !(value >= 'a' && value <= 'f'))
+                throw new IOException("LOAD checkpoint integrity digest is malformed.");
         }
-        if (valueStart < 0 || valueStart >= document.length || document[valueStart] != '{')
-            throw new IOException("LOAD checkpoint payload is missing or not an object.");
-        int depth = 0;
-        inString = false;
-        escaped = false;
-        for (int index = valueStart; index < document.length; index++) {
-            int current = document[index] & 0xff;
-            if (inString) {
-                if (escaped) escaped = false;
-                else if (current == '\\') escaped = true;
-                else if (current == '"') inString = false;
-                continue;
-            }
-            if (current == '"') inString = true;
-            else if (current == '{') depth++;
-            else if (current == '}' && --depth == 0) return java.util.Arrays.copyOfRange(document, valueStart, index + 1);
+        byte[] envelope = java.util.Arrays.copyOf(document, markerStart + 1);
+        envelope[markerStart] = '}';
+        return envelope;
+    }
+
+    private static int lastIndexOf(byte[] source, byte[] target) {
+        for (int start = source.length - target.length; start >= 0; start--) {
+            int offset = 0;
+            while (offset < target.length && source[start + offset] == target[offset]) offset++;
+            if (offset == target.length) return start;
         }
-        throw new IOException("LOAD checkpoint payload is truncated.");
+        return -1;
     }
 
     private static String fileName(long sequence) { return String.format(java.util.Locale.ROOT, "checkpoint-%020d.json", sequence); }

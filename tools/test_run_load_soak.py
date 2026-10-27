@@ -14,7 +14,25 @@ soak = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(soak)
 
 
+def seal_checkpoint(checkpoint):
+    checkpoint["schemaVersion"] = soak.CHECKPOINT_SCHEMA
+    checkpoint.pop("integritySha256", None)
+    envelope = json.dumps(checkpoint, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    checkpoint["integritySha256"] = hashlib.sha256(envelope).hexdigest()
+    return checkpoint
+
+
+def write_checkpoint(path, checkpoint):
+    path.write_text(json.dumps(checkpoint, separators=(",", ":"), ensure_ascii=False), encoding="utf-8")
+
+
 class LoadSoakEvidenceTest(unittest.TestCase):
+    def test_case_distinct_workload_checkpoint_directories_do_not_alias_on_casefolding_filesystems(self):
+        upper = soak.workload_checkpoint_directory("Payments")
+        lower = soak.workload_checkpoint_directory("payments")
+        self.assertNotEqual(upper.casefold(), lower.casefold())
+        self.assertEqual(soak.CHECKPOINT_DIRECTORY, soak.workload_checkpoint_directory("local-soak"))
+
     def test_macos_resource_sampling_uses_supported_process_thread_rows(self):
         def process_output(command, **kwargs):
             if command[:3] == ["ps", "-o", "rss="]:
@@ -39,29 +57,58 @@ class LoadSoakEvidenceTest(unittest.TestCase):
             directory = Path(temporary)
             payload = {"metrics": {"completed": 30000, "success": 30000}}
             checkpoint = {
-                "schemaVersion": "att-load-metrics-checkpoint/v1",
+                "schemaVersion": soak.CHECKPOINT_SCHEMA,
                 "state": "CHECKPOINT",
                 "runId": "run-1",
                 "scope": soak.CHECKPOINT_SCOPE,
                 "sequence": 1,
                 "capturedAt": datetime.now(timezone.utc).isoformat(),
+                "finalized": False,
                 "payload": payload,
-                "integritySha256": hashlib.sha256(soak.canonical_json_bytes(payload)).hexdigest(),
             }
-            (directory / "checkpoint-00000000000000000001.json").write_text(
-                json.dumps(checkpoint, separators=(",", ":")), encoding="utf-8")
+            seal_checkpoint(checkpoint)
+            write_checkpoint(directory / "checkpoint-00000000000000000001.json", checkpoint)
             self.assertEqual(1, soak.latest_checkpoint(directory, "run-1", soak.CHECKPOINT_SCOPE)["sequence"])
             self.assertIsNone(soak.latest_checkpoint(directory, "other-run", soak.CHECKPOINT_SCOPE))
             checkpoint["payload"]["metrics"]["completed"] = 1
-            (directory / "checkpoint-00000000000000000001.json").write_text(json.dumps(checkpoint), encoding="utf-8")
+            write_checkpoint(directory / "checkpoint-00000000000000000001.json", checkpoint)
             self.assertIsNone(soak.latest_checkpoint(directory, "run-1", soak.CHECKPOINT_SCOPE))
+
+    def test_checkpoint_digest_covers_timestamp_state_identity_and_sequence(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            payload = {"metrics": {"scheduled": 1, "started": 1, "completed": 1, "success": 1}}
+            original = seal_checkpoint({
+                "state": "FINAL_CHECKPOINT", "runId": "run-envelope", "scope": "aggregate",
+                "sequence": 1, "capturedAt": "2026-10-27T00:00:00Z", "finalized": True,
+                "payload": payload,
+            })
+            original_digest = original["integritySha256"]
+            variants = []
+            timestamp = json.loads(json.dumps(original)); timestamp["capturedAt"] = "2026-10-27T00:05:00Z"
+            variants.append((timestamp, "run-envelope", "aggregate", 1))
+            state = json.loads(json.dumps(original)); state["state"] = "CHECKPOINT"; state["finalized"] = False
+            variants.append((state, "run-envelope", "aggregate", 1))
+            run_id = json.loads(json.dumps(original)); run_id["runId"] = "other-run"
+            variants.append((run_id, "other-run", "aggregate", 1))
+            scope = json.loads(json.dumps(original)); scope["scope"] = "other-scope"
+            variants.append((scope, "run-envelope", "other-scope", 1))
+            sequence = json.loads(json.dumps(original)); sequence["sequence"] = 2
+            variants.append((sequence, "run-envelope", "aggregate", 2))
+
+            for variant, run_id, scope_id, sequence_id in variants:
+                variant["integritySha256"] = original_digest
+                path = directory / "checkpoint-{:020d}.json".format(sequence_id)
+                write_checkpoint(path, variant)
+                self.assertIsNone(soak.latest_checkpoint(directory, run_id, scope_id), variant["state"])
+                path.unlink()
 
     def test_aggregate_checkpoint_scope_is_used_for_soak_progress(self):
         with tempfile.TemporaryDirectory() as temporary:
             directory = Path(temporary)
             payload = {"metrics": {"scheduled": 12, "started": 12, "completed": 12, "success": 12}}
             checkpoint = {
-                "schemaVersion": "att-load-metrics-checkpoint/v1",
+                "schemaVersion": soak.CHECKPOINT_SCHEMA,
                 "state": "CHECKPOINT",
                 "runId": "run-aggregate",
                 "scope": "aggregate",
@@ -69,8 +116,8 @@ class LoadSoakEvidenceTest(unittest.TestCase):
                 "capturedAt": datetime.now(timezone.utc).isoformat(),
                 "finalized": False,
                 "payload": payload,
-                "integritySha256": hashlib.sha256(soak.canonical_json_bytes(payload)).hexdigest(),
             }
+            seal_checkpoint(checkpoint)
             (directory / "checkpoint-00000000000000000001.json").write_text(
                 json.dumps(checkpoint, separators=(",", ":")), encoding="utf-8")
             self.assertEqual("aggregate", soak.AGGREGATE_CHECKPOINT_SCOPE)
@@ -143,15 +190,13 @@ class LoadSoakEvidenceTest(unittest.TestCase):
                                    "success": 4999, "failure": 0, "runtimeError": 0,
                                    "dropped": 0, "currentInFlight": 1}}
             checkpoint = {
-                "schemaVersion": "att-load-metrics-checkpoint/v1", "state": "CHECKPOINT",
+                "schemaVersion": soak.CHECKPOINT_SCHEMA, "state": "CHECKPOINT",
                 "runId": "run-2", "scope": soak.AGGREGATE_CHECKPOINT_SCOPE, "sequence": 7,
                 "capturedAt": datetime.now(timezone.utc).isoformat(), "finalized": False,
                 "payload": payload,
             }
-            checkpoint["integritySha256"] = hashlib.sha256(
-                soak.canonical_json_bytes(payload)).hexdigest()
-            (checkpoint_dir / "checkpoint-00000000000000000007.json").write_text(
-                json.dumps(checkpoint, separators=(",", ":")), encoding="utf-8")
+            seal_checkpoint(checkpoint)
+            write_checkpoint(checkpoint_dir / "checkpoint-00000000000000000007.json", checkpoint)
             evidence_root = root / "evidence"
             result = soak.capture_incomplete_evidence(evidence_root, run, checkpoint_dir, "run-2",
                                                       "abc123", 301.5, "interrupted", -15)
@@ -194,14 +239,13 @@ class LoadSoakEvidenceTest(unittest.TestCase):
                                         "success": 11, "failure": 0, "runtimeError": 0,
                                         "dropped": 0, "currentInFlight": 1}}
                 checkpoint = {
-                    "schemaVersion": "att-load-metrics-checkpoint/v1", "state": "CHECKPOINT",
+                    "schemaVersion": soak.CHECKPOINT_SCHEMA, "state": "CHECKPOINT",
                     "runId": "fake-process-run", "scope": soak.AGGREGATE_CHECKPOINT_SCOPE,
                     "sequence": 2, "capturedAt": datetime.now(timezone.utc).isoformat(),
                     "finalized": False, "payload": payload,
-                    "integritySha256": hashlib.sha256(soak.canonical_json_bytes(payload)).hexdigest(),
                 }
-                (checkpoint_dir / "checkpoint-00000000000000000002.json").write_text(
-                    json.dumps(checkpoint, separators=(",", ":")), encoding="utf-8")
+                seal_checkpoint(checkpoint)
+                write_checkpoint(checkpoint_dir / "checkpoint-00000000000000000002.json", checkpoint)
                 return FakeProcess()
 
             with mock.patch.object(soak.subprocess, "Popen", side_effect=start_fake_process), \

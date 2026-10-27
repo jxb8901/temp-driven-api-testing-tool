@@ -19,10 +19,12 @@ final class LoadMetricsAccounting {
                                         boolean finalized) {
         List<Map<String, Object>> violations = new ArrayList<Map<String, Object>>();
         boolean partial = false;
-        String state = checkScope("run", values, finalized, violations);
+        Map<String, Object> pendingAdmissions = new LinkedHashMap<String, Object>();
+        String state = checkScope("run", values, finalized, violations, pendingAdmissions);
         partial |= "PARTIAL".equals(state);
         for (Map.Entry<String, Map<String, Object>> phase : phases.entrySet()) {
-            String phaseState = checkScope("phase:" + phase.getKey(), phase.getValue(), finalized, violations);
+            String phaseState = checkScope("phase:" + phase.getKey(), phase.getValue(), finalized,
+                    violations, pendingAdmissions);
             partial |= "PARTIAL".equals(phaseState);
         }
         Map<String, Object> result = new LinkedHashMap<String, Object>();
@@ -30,6 +32,7 @@ final class LoadMetricsAccounting {
         result.put("state", finalState);
         result.put("finalized", Boolean.valueOf(finalized));
         result.put("scopesChecked", Integer.valueOf(1 + phases.size()));
+        result.put("pendingAdmissionByScope", pendingAdmissions);
         result.put("violations", violations);
         return result;
     }
@@ -62,7 +65,8 @@ final class LoadMetricsAccounting {
     }
 
     private static String checkScope(String scope, Map<String, Object> counters, boolean finalized,
-                                     List<Map<String, Object>> violations) {
+                                     List<Map<String, Object>> violations,
+                                     Map<String, Object> pendingAdmissions) {
         long scheduled = number(counters.get("scheduled"));
         long started = number(counters.get("started"));
         long completed = number(counters.get("completed"));
@@ -75,8 +79,15 @@ final class LoadMetricsAccounting {
         long drainedOrInFlight = add(completed, inFlight, scope + ".started", violations);
         for (String key : COUNTERS) if (number(counters.get(key)) < 0L)
             addViolation(violations, "NEGATIVE_COUNTER", scope + "." + key, number(counters.get(key)), "non-negative");
-        if (scheduled != admittedOrDropped)
+        long pendingAdmission = 0L;
+        if (admittedOrDropped == Long.MIN_VALUE || scheduled < admittedOrDropped) {
             addViolation(violations, "ARRIVAL_CONSERVATION_FAILED", scope + ".scheduled", scheduled, admittedOrDropped);
+        } else {
+            pendingAdmission = scheduled - admittedOrDropped;
+            if (finalized && pendingAdmission != 0L)
+                addViolation(violations, "ARRIVAL_CONSERVATION_FAILED", scope + ".scheduled", scheduled, admittedOrDropped);
+        }
+        pendingAdmissions.put(scope, Long.valueOf(pendingAdmission));
         if (started != drainedOrInFlight)
             addViolation(violations, "START_CONSERVATION_FAILED", scope + ".started", started, drainedOrInFlight);
         if (completed != outcomes)

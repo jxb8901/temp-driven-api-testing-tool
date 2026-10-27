@@ -56,6 +56,34 @@ class LoadMetricsAccountingTest {
     }
 
     @Test
+    void inProgressQueuedArrivalIsReportedAsPendingInsteadOfAnAccountingFailure() {
+        Map<String, Object> counters = counters(5L, 4L, 3L, 3L, 0L, 0L, 0L, 1L);
+        Map<String, Map<String, Object>> phases = new LinkedHashMap<String, Map<String, Object>>();
+        phases.put("STEADY", counters);
+
+        Map<String, Object> accounting = LoadMetricsAccounting.evaluate(counters, phases, false);
+
+        assertEquals("IN_PROGRESS", accounting.get("state"));
+        assertTrue(((java.util.List<?>) accounting.get("violations")).isEmpty());
+        @SuppressWarnings("unchecked") Map<String, Object> pending =
+                (Map<String, Object>) accounting.get("pendingAdmissionByScope");
+        assertEquals(1L, pending.get("run"));
+        assertEquals(1L, pending.get("phase:STEADY"));
+    }
+
+    @Test
+    void unadmittedArrivalStillFailsTheFinalizedAccountingCheck() {
+        Map<String, Object> counters = counters(5L, 4L, 3L, 3L, 0L, 0L, 0L, 1L);
+
+        Map<String, Object> accounting = LoadMetricsAccounting.evaluate(counters,
+                Collections.<String, Map<String, Object>>emptyMap(), true);
+
+        assertEquals("FAILED", accounting.get("state"));
+        assertTrue(((java.util.List<?>) accounting.get("violations")).stream()
+                .anyMatch(item -> ((Map<?, ?>) item).get("code").equals("ARRIVAL_CONSERVATION_FAILED")));
+    }
+
+    @Test
     void skippedCompletionsAreExplicitOtherOutcomesRatherThanSutFailures() {
         long start = 1_000L;
         LoadMetrics metrics = LoadMetrics.forScenario(scenario(), start, 10_000L);
