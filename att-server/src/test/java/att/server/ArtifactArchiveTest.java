@@ -17,8 +17,8 @@ class ArtifactArchiveTest {
 
     @Test void unsafeProducerOutputIsOmittedWithoutAnArchiveRedactionPass() throws Exception {
         Path output=Files.createDirectory(temporary.resolve("mixed-approval-output"));
-        Files.writeString(output.resolve("safe.log"),"safe business payload\\n");
-        Files.writeString(output.resolve("raw-secret.log"),"password=producer-secret\\n");
+        Files.writeString(output.resolve("safe.log"),"safe business payload\n");
+        Files.writeString(output.resolve("raw-secret.log"),"password=producer-secret\n");
         assertThrows(IllegalArgumentException.class,
                 () -> ServerRuntime.approvedArtifactBytes(output.resolve("raw-secret.log")));
         Path archive=temporary.resolve("mixed-approval.zip");
@@ -33,7 +33,7 @@ class ArtifactArchiveTest {
         Path output=Files.createDirectory(temporary.resolve("byte-preserving-output"));
         Map<String,String> sources=Map.of(
                 "load/run/load-summary.json", "{\"customerName\":\"Business Customer\"}",
-                "load/run/load-summary.yaml", "customerName: '  Business Customer  '\\n",
+                "load/run/load-summary.yaml", "customerName: '  Business Customer  '\n",
                 "load/run/report/index.html", "<!doctype html><html><script>window.T=1</script><a href=\"../missing.log\">link</a></html>",
                 "load/run/report-commit-manifest.json", "{\"sha256\":\"source-defined\"}");
         for(Map.Entry<String,String> entry:sources.entrySet()) {
