@@ -94,7 +94,10 @@
         "NOT_MET",
         "NOT_EVALUATED"
       ]
-    }
+    },
+    "configuration": {"type": "object", "additionalProperties": true},
+    "diagnostics": {"type": "object", "additionalProperties": true},
+    "metricCoverage": {"type": "object", "additionalProperties": true}
   },
   "additionalProperties": false,
   "$defs": {
