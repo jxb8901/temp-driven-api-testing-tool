@@ -45,30 +45,38 @@ export function RunPage({ packageId: initialPackage = '', initialTarget, initial
   const [draft, setDraft] = useState<DraftResponse | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const [validationDiagnostics, setValidationDiagnostics] = useState<Array<{code?: string; field?: string; summary?: string; detail?: string}>>([]);
+  const [validationDiagnostics, setValidationDiagnostics] = useState<Array<{code?: string; field?: string; path?: string; summary?: string; detail?: string}>>([]);
   const [dirty, setDirty] = useState(false);
   const generation = useRef(0);
   const [definition, setDefinition] = useState<RunDefinition | null>(null);
   const [replayReview, setReplayReview] = useState<JobReplay | null>(null);
   const [replaySourceDefinition, setReplaySourceDefinition] = useState<RunDefinition | null>(null);
-  const [replayDraftLoading, setReplayDraftLoading] = useState(false);
+  const [replayDraftLoading, setReplayDraftLoading] = useState(Boolean(replayDraftId&&replaySourceJobId));
   const [replayDraftError, setReplayDraftError] = useState('');
   const [missingReplayFields,setMissingReplayFields]=useState<string[]>([]);
   const replayInputRef = useRef<JsonObject | undefined>(undefined);
   const releaseNavigationGuard = useRef<() => void>(() => {});
   const environmentRef = useRef(environment);
   environmentRef.current = environment;
+  const replayEnvironmentOrigin = useRef('');
+  const replayPackageDefaultEnvironment = useRef('');
   useEffect(() => {
     if (!replayDraftId || !replaySourceJobId) return;
     const controller=new AbortController();setReplayDraftLoading(true);setReplayDraftError('');
     api.getJobReplayEditorDraft(replaySourceJobId,replayDraftId).then((draft:JobReplayEditorDraft)=>{
       if(controller.signal.aborted)return;
-      const retained=draft.definition as unknown as RunDefinition;setPackage(retained.packageId);setEnvironment(retained.environment||'');
+      const retained=draft.definition as unknown as RunDefinition;
+      replayEnvironmentOrigin.current=String(draft.configuration?.environmentOrigin||'');
+      replayPackageDefaultEnvironment.current=replayEnvironmentOrigin.current==='package'?String(draft.configuration?.environment||''):'';
+      setPackage(retained.packageId);setEnvironment(replayEnvironmentOrigin.current==='package'?'':retained.environment||String(draft.configuration?.environment||''));
       setMissingReplayFields(draft.missingFields||[]);
-      if(retained.target){setType(retained.target.type);setId(retained.target.id);}else{setType('batch');setId('');}
+      if(retained.target){setType(retained.target.type);setId(retained.target.id);}else if(retained.selection){setType('batch');setId('');}else{setType('case');setId('');}
       setSelection(JSON.stringify(retained.selection||{all:true},null,2));replayInputRef.current=retained.input;
       setInput(JSON.stringify(retained.input||{},null,2));setDebug(Boolean(retained.options?.debug));setFailFast(Boolean(retained.options?.failFast));
-      setReplaySourceDefinition(retained);setReplayReview(null);setDirty(false);setDraft(null);setDefinition(null);setError('');
+      setReplaySourceDefinition((draft.originalDefinition||retained) as unknown as RunDefinition);
+      setReplayReview({jobId:draft.sourceJobId,available:true,...draft,definition:draft.definition,originalDefinition:draft.originalDefinition||draft.definition});
+      setValidationDiagnostics(draft.diagnostics||[]);setMissingReplayFields(draft.missingFields||[]);
+      setDirty(false);setDraft(null);setDefinition(null);setError('');
     }).catch(failure=>{if(!controller.signal.aborted)setReplayDraftError(failure instanceof Error?failure.message:'The replay draft expired. Open the source Job again.');})
       .finally(()=>{if(!controller.signal.aborted)setReplayDraftLoading(false);});
     return()=>controller.abort();
@@ -154,10 +162,14 @@ export function RunPage({ packageId: initialPackage = '', initialTarget, initial
         if (targetType !== 'case') body.input = object(businessInput);
       }
       if(replaySourceJobId) {
-        const overrides:Record<string,unknown>={environment:body.environment||'',options:body.options,
+        const selectedEnvironment=body.environment||'';
+        const environmentOverride=replayEnvironmentOrigin.current==='package'&&selectedEnvironment===replayPackageDefaultEnvironment.current?'':selectedEnvironment;
+        const overrides:Record<string,unknown>={environment:environmentOverride,options:body.options,
           ...(body.target?{target:body.target}:{}),...(body.selection?{selection:body.selection}:{}),...(body.input?{input:body.input}:{})};
         const replay=await api.createJobReplayDraft(replaySourceJobId,{sourcePolicy:'current',overrides});
-        if(current===generation.current){setReplayReview(replay);setDraft((replay.preview as unknown as DraftResponse)||null);setDefinition(body);}
+        if(current===generation.current){setReplayReview(replay);setValidationDiagnostics(replay.diagnostics||[]);setMissingReplayFields(replay.missingFields||[]);
+          if(replay.intentId){setDraft((replay.preview as unknown as DraftResponse)||null);setDefinition(body);}
+          else {setDraft(null);setDefinition(null);setError(replay.reason||'Resolve the current Package validation errors, then validate again.');}}
       } else {
         const validated = await api.previewRun(body);
         if (current === generation.current) { setDraft(validated); setDefinition(body); }
@@ -194,7 +206,7 @@ export function RunPage({ packageId: initialPackage = '', initialTarget, initial
     <p>Validate a functional execution, review its selection, then run now or schedule the same definition.</p>
     {replayDraftLoading&&<p role="status">Loading the authorized Job draft…</p>}
     {replayDraftError&&<p role="alert">{replayDraftError}</p>}
-    {replaySourceDefinition&&<p role="note">New RUN from Job {replaySourceJobId}. The current Package and environment are revalidated.</p>}
+    {replaySourceDefinition&&<><p role="note">New RUN from Job {replaySourceJobId}. The current Package and environment are revalidated.</p><p role="status">Job settings loaded. Review the retained fields, then validate against the current Package.</p></>}
     {missingReplayFields.length>0&&<p role="note">These fields were not safely retained and need an explicit value before this RUN can start: {missingReplayFields.join(', ')}.</p>}
     <fieldset className="att-run-definition" disabled={busy||replayDraftLoading}><legend>Execution definition</legend>
       {initialTarget ? <p><strong>Package:</strong> {packageId}<br /><strong>Target:</strong> {initialTarget.type} · {initialTarget.resourceId}</p>
@@ -230,7 +242,7 @@ export function RunPage({ packageId: initialPackage = '', initialTarget, initial
       <button className="button button-primary" type="button" onClick={() => void validate()}>Validate</button>
     </fieldset>
     {error && <p role="alert">{error}</p>}
-    {validationDiagnostics.length>0&&<ul className="att-run-validation-diagnostics" aria-label="RUN validation details">{validationDiagnostics.map((item,index)=><li key={`${item.code||item.field||'diagnostic'}-${index}`}>{[item.field,item.code].filter(Boolean).join(' · ')}{item.summary||item.detail?`: ${item.summary||item.detail}`:''}</li>)}</ul>}
+    {validationDiagnostics.length>0&&<ul className="att-run-validation-diagnostics" aria-label="RUN validation details">{validationDiagnostics.map((item,index)=><li key={`${item.code||item.field||item.path||'diagnostic'}-${index}`}>{[item.field||item.path,item.code].filter(Boolean).join(' · ')}{item.summary||item.detail?`: ${item.summary||item.detail}`:''}</li>)}</ul>}
     {busy && <p role="status">Processing…</p>}
     {draft && definition && <section className="att-run-review" aria-label="Review RUN"><h2>Review</h2>
       <p>Validation passed. Package changes require validation again.</p>

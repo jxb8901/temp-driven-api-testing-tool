@@ -1,8 +1,20 @@
 package att.server;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import jakarta.servlet.ReadListener;
+import jakarta.servlet.ServletConfig;
+import jakarta.servlet.ServletContext;
+import jakarta.servlet.ServletInputStream;
+import jakarta.servlet.ServletOutputStream;
+import jakarta.servlet.WriteListener;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.lang.reflect.InvocationHandler;
+import java.lang.reflect.Proxy;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -51,6 +63,9 @@ class ServerRuntimeJobReplayTest {
         runtime.store.createAuthUser("bob","Bob","unused","USER","csrf");
     }
     private static JsonNode submit(String draftId) {return ServerRuntime.JSON.valueToTree(Map.of("packageId","p","draftId",draftId));}
+    private static long jobCount(ServerRuntime runtime,String principal) throws Exception {
+        return ((Number)runtime.store.queryJobs(JobQuery.parse(Map.of(),principal)).get("total")).longValue();
+    }
 
     @Test void legacyRetainedExecutionSpecV1StillParses() throws Exception {
         var legacy=ServerRuntime.JSON.createObjectNode();legacy.put("schemaVersion","att-job-execution/v1");
@@ -284,15 +299,24 @@ class ServerRuntimeJobReplayTest {
                     "workloads",List.of(Map.of("id","smoke-a","load",Map.of("users",2)),Map.of("id","smoke-b","load",Map.of("users",3))));
             Map<String,Object> review=runtime.createJobReplayDraft(original,"alice",ServerRuntime.JSON.valueToTree(Map.of("sourcePolicy","current","overrides",edits)));
             assertEquals("att-job-replay-draft/v1",review.get("schemaVersion"));assertNotEquals(originalRevision,review.get("currentRevision"));
+            assertEquals(originalRevision,review.get("originalRevision"));
+            assertEquals("1s",ServerRuntime.JSON.valueToTree(review.get("originalDefinition")).path("scenario").path("load").path("duration").asText());
+            assertEquals("24h",ServerRuntime.JSON.valueToTree(review.get("definition")).path("scenario").path("load").path("duration").asText());
             String draftRef=String.valueOf(review.get("draftRef"));assertTrue(draftRef.matches("[RAC][0-9A-F]{32}"));
             Map<String,Object> editor=runtime.getJobReplayEditorDraft(original,draftRef,"alice");
             assertEquals("load/smoke.yaml",editor.get("sourcePath"));
+            assertEquals("1s",ServerRuntime.JSON.valueToTree(editor.get("originalDefinition")).path("scenario").path("load").path("duration").asText());
             JsonNode scenario=ServerRuntime.JSON.valueToTree(editor.get("definition")).path("scenario");
             assertEquals("24h",scenario.path("load").path("duration").asText());
             assertEquals(2,scenario.path("workloads").get(0).path("load").path("users").asInt());
             assertEquals(3,scenario.path("workloads").get(1).path("load").path("users").asInt());
             assertEquals("simple",scenario.path("workloads").get(1).path("mix").get(0).path("id").asText());
             assertThrows(ServerRuntime.NotFoundException.class,()->runtime.getJobReplayEditorDraft(original,draftRef,"bob"));
+            assertApiError(apiRequest(runtime,"GET","/jobs/"+original+"/replay-draft/"+draftRef,"bob",Map.of()),404,"ATT-SERVER-NOT-FOUND");
+            long jobsBeforeCrossOwnerSubmit=jobCount(runtime,"alice");
+            assertThrows(ServerRuntime.NotFoundException.class,()->runtime.rerunJob(original,ServerRuntime.JSON.valueToTree(Map.of("confirm",true,"intentId",review.get("intentId"),"sourcePolicy","current")),"bob"));
+            assertApiError(apiRequest(runtime,"POST","/jobs/"+original+"/rerun","bob",Map.of("confirm",true,"intentId",review.get("intentId"),"sourcePolicy","current")),404,"ATT-SERVER-NOT-FOUND");
+            assertEquals(jobsBeforeCrossOwnerSubmit,jobCount(runtime,"alice"));
             assertThrows(IllegalArgumentException.class,()->runtime.createJobReplayDraft(original,"alice",ServerRuntime.JSON.valueToTree(Map.of("sourcePolicy","current","overrides",Map.of("workloads",List.of(Map.of("id","smoke-a","load",Map.of("arrivalRate","2/s"))))))));
             Map<String,Object> rerun=runtime.rerunJob(original,ServerRuntime.JSON.valueToTree(Map.of("confirm",true,"intentId",review.get("intentId"),"sourcePolicy","current")),"alice");
             String rerunId=String.valueOf(rerun.get("jobId"));assertEquals(original,runtime.jobRecord(rerunId).get("rerunOfJobId"));
@@ -306,10 +330,83 @@ class ServerRuntimeJobReplayTest {
             assertEquals(originalRevision,JobExecutionSpec.parse(runtime.store.executionSpec(original).get("spec")).revision());
 
             Map<String,Object> staleReview=runtime.createJobReplayDraft(original,"alice",ServerRuntime.JSON.valueToTree(Map.of("sourcePolicy","current")));
+            long jobsBeforeStaleSubmit=jobCount(runtime,"alice");
             Files.writeString(fixture.root.resolve("templates/SIMPLE/template.yaml"),"# changed after validation\n",java.nio.file.StandardOpenOption.APPEND);
             ServerRuntime.JobConflictException stale=assertThrows(ServerRuntime.JobConflictException.class,()->runtime.rerunJob(original,ServerRuntime.JSON.valueToTree(Map.of("confirm",true,"intentId",staleReview.get("intentId"),"sourcePolicy","current")),"alice"));
             assertEquals("ATT-SERVER-REPLAY-DRAFT-STALE",stale.code);
+            assertEquals(jobsBeforeStaleSubmit,jobCount(runtime,"alice"),"A stale validated replay must not create a Job");
             assertEquals(originalResult,runtime.store.get(original).get("resultJson"));
+        }
+    }
+
+    @Test void removedRunTargetIssuesAuthorizedEditableDraftWithResourceDiagnosticAndNoGuessedTarget() throws Exception {
+        Fixture fixture=fixture();
+        try(ServerRuntime runtime=fixture.open()) {
+            users(runtime);
+            var definition=ServerRuntime.JSON.createObjectNode();definition.put("schemaVersion",RunDefinition.VERSION);definition.put("executionType","run");definition.put("packageId","p");definition.put("environment","SIT");
+            definition.putObject("target").put("type","template").put("id","SIMPLE");definition.putObject("input");definition.putObject("options").put("debug",false);
+            Map<String,Object> validated=runtime.createRunDraft(definition,"alice");
+            String original=String.valueOf(runtime.submitRunDraft(submit(String.valueOf(validated.get("draftId"))),"alice","alice").get("jobId"));await(runtime,original);
+            Files.delete(fixture.root.resolve("templates/SIMPLE/template.yaml"));long count=jobCount(runtime,"alice");
+            Map<String,Object> invalid=runtime.createJobReplayDraft(original,"alice",ServerRuntime.JSON.valueToTree(Map.of("sourcePolicy","current")));
+            assertEquals("invalid",invalid.get("validationState"));assertEquals("ATT-SERVER-REPLAY-RESOURCE-MISSING",invalid.get("errorCode"));
+            assertNull(invalid.get("intentId"),"An unresolved target cannot receive a runnable confirmation intent");
+            assertEquals("SIMPLE",ServerRuntime.JSON.valueToTree(invalid.get("definition")).path("target").path("id").asText());
+            assertFalse(((List<?>)invalid.get("diagnostics")).isEmpty());
+            Map<String,Object> editor=runtime.getJobReplayEditorDraft(original,String.valueOf(invalid.get("draftRef")),"alice");
+            assertEquals("ATT-SERVER-REPLAY-RESOURCE-MISSING",editor.get("errorCode"));
+            assertEquals("SIMPLE",ServerRuntime.JSON.valueToTree(editor.get("definition")).path("target").path("id").asText());
+            assertEquals(count,jobCount(runtime,"alice"));
+        }
+    }
+
+    @Test void invalidLoadSchemaReturnsFieldDiagnosticsAndNoConfirmationIntent() throws Exception {
+        Fixture fixture=fixture();
+        try(ServerRuntime runtime=fixture.open()) {
+            users(runtime);String original=String.valueOf(runtime.submit("load",ServerRuntime.JSON.valueToTree(Map.of("packageId","p","scenario","load/smoke.yaml","environment","SIT")),"alice").get("jobId"));await(runtime,original);
+            Map<String,Object> invalid=runtime.createJobReplayDraft(original,"alice",ServerRuntime.JSON.valueToTree(Map.of("sourcePolicy","current","overrides",Map.of("load",Map.of("duration","not-a-duration")))));
+            assertEquals("invalid",invalid.get("validationState"));assertEquals("ATT-SERVER-REPLAY-VALIDATION-FAILED",invalid.get("errorCode"));
+            assertNull(invalid.get("intentId"));assertFalse(((List<?>)invalid.get("diagnostics")).isEmpty());
+            assertTrue(invalid.get("diagnostics").toString().contains("duration"),invalid.get("diagnostics").toString());
+        }
+    }
+
+    @Test void replayDraftCapacityIsA429BoundaryBeforePackageValidation() throws Exception {
+        Fixture fixture=fixture();
+        try(ServerRuntime runtime=fixture.open()) {
+            users(runtime);String original=String.valueOf(runtime.submit("load",ServerRuntime.JSON.valueToTree(Map.of("packageId","p","scenario","load/smoke.yaml")),"alice").get("jobId"));await(runtime,original);
+            var field=ServerRuntime.class.getDeclaredField("replayReviews");field.setAccessible(true);
+            @SuppressWarnings("unchecked") Map<String,Object> reviews=(Map<String,Object>)field.get(runtime);
+            Class<?> reviewType=java.util.Arrays.stream(ServerRuntime.class.getDeclaredClasses()).filter(type->type.getSimpleName().equals("ReplayReview")).findFirst().orElseThrow();
+            var constructor=reviewType.getDeclaredConstructors()[0];constructor.setAccessible(true);
+            var definition=ServerRuntime.JSON.createObjectNode();definition.put("executionType","load");definition.put("packageId","p");definition.putObject("scenario").put("schemaVersion","att-load/v1.9");
+            for(int i=0;i<ServerRuntime.MAX_DRAFTS_PER_PRINCIPAL;i++) {
+                String ref="C"+String.format(java.util.Locale.ROOT,"%032X",i+1);
+                Object review=constructor.newInstance(original,"alice",ref,"p","load","current","a".repeat(64),"a".repeat(64),"digest",null,
+                        definition.deepCopy(),definition.deepCopy(),null,Map.of(),null,List.of(),Instant.MAX);
+                reviews.put("test-"+i,review);
+            }
+            assertThrows(ServerRuntime.DraftCapacityException.class,()->runtime.createJobReplayDraft(original,"alice",ServerRuntime.JSON.valueToTree(Map.of("sourcePolicy","current"))));
+            assertApiError(apiRequest(runtime,"POST","/jobs/"+original+"/replay-draft","alice",Map.of("sourcePolicy","current")),429,"ATT-SERVER-DRAFT-CAPACITY");
+        }
+    }
+
+    @Test void packageDefaultEnvironmentIsResolvedAgainAndMissingProfileBlocksReplay() throws Exception {
+        Fixture fixture=fixture();String original;
+        Path packageYaml=fixture.root.resolve("package.yaml");Files.writeString(packageYaml,"schemaVersion: att-package/v1\ndefaultEnvironment: UAT\n");
+        Path runtimeConfig=fixture.server.getParent().resolve("unified-runtime/config/config.yaml");
+        try(ServerRuntime runtime=fixture.open()) {
+            users(runtime);var definition=ServerRuntime.JSON.createObjectNode();definition.put("schemaVersion",RunDefinition.VERSION);definition.put("executionType","run");definition.put("packageId","p");
+            definition.putObject("target").put("type","template").put("id","SIMPLE");definition.putObject("input");definition.putObject("options").put("debug",false);
+            Map<String,Object> validated=runtime.createRunDraft(definition,"alice");
+            original=String.valueOf(runtime.submitRunDraft(submit(String.valueOf(validated.get("draftId"))),"alice","alice").get("jobId"));await(runtime,original);
+            Map<String,String> stored=runtime.store.executionSpec(original);JobExecutionSpec spec=JobExecutionSpec.parse(stored.get("spec"));
+            assertEquals("package",spec.configuration().get("environmentOrigin"));assertEquals("UAT",spec.configuration().get("environment"));
+            String config=Files.readString(runtimeConfig);Files.writeString(runtimeConfig,config.replace("environments: {SIT: {}, UAT: {}}","environments: {SIT: {}}"));
+            Map<String,Object> invalid=runtime.createJobReplayDraft(original,"alice",ServerRuntime.JSON.valueToTree(Map.of("sourcePolicy","current")));
+            assertEquals("invalid",invalid.get("validationState"));assertEquals("ATT-SERVER-REPLAY-VALIDATION-FAILED",invalid.get("errorCode"));
+            assertNull(invalid.get("intentId"));assertFalse(((List<?>)invalid.get("diagnostics")).isEmpty());
+            assertTrue(invalid.get("diagnostics").toString().toLowerCase(java.util.Locale.ROOT).contains("environment"),invalid.get("diagnostics").toString());
         }
     }
 
@@ -341,13 +438,20 @@ class ServerRuntimeJobReplayTest {
     }
 
     @Test void replayDraftReferenceExpiresAndIsLostOnServerRestart() throws Exception {
-        Fixture fixture=fixture();String original;String draftRef;var clock=new ServerRuntimeTestSupport.MutableClock();
+        Fixture fixture=fixture();String original;String draftRef;String originalResult;String originalSpec;var clock=new ServerRuntimeTestSupport.MutableClock();
         try(ServerRuntime runtime=fixture.open(clock)) {
             users(runtime);original=String.valueOf(runtime.submit("load",ServerRuntime.JSON.valueToTree(Map.of("packageId","p","scenario","load/smoke.yaml")),"alice").get("jobId"));await(runtime,original);
             Map<String,Object> draft=runtime.createJobReplayDraft(original,"alice",ServerRuntime.JSON.valueToTree(Map.of("sourcePolicy","current")));draftRef=String.valueOf(draft.get("draftRef"));
+            originalResult=(String)runtime.store.get(original).get("resultJson");originalSpec=runtime.store.executionSpec(original).get("spec");
+            assertThrows(ServerRuntime.ReplayDraftExpiredException.class,()->runtime.getJobReplayEditorDraft(original,"CFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF","alice"));
+            assertApiError(apiRequest(runtime,"GET","/jobs/"+original+"/replay-draft/CFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF","alice",Map.of()),410,"ATT-SERVER-REPLAY-DRAFT-EXPIRED");
         }
         try(ServerRuntime runtime=fixture.open(clock)) {
             assertThrows(ServerRuntime.ReplayDraftExpiredException.class,()->runtime.getJobReplayEditorDraft(original,draftRef,"alice"));
+            assertApiError(apiRequest(runtime,"GET","/jobs/"+original+"/replay-draft/"+draftRef,"alice",Map.of()),410,"ATT-SERVER-REPLAY-DRAFT-EXPIRED");
+            assertEquals(originalResult,runtime.store.get(original).get("resultJson"));
+            assertEquals(originalSpec,runtime.store.executionSpec(original).get("spec"));
+            assertEquals(true,runtime.jobReplay(original,"alice").get("available"));
             Map<String,Object> replacement=runtime.createJobReplayDraft(original,"alice",ServerRuntime.JSON.valueToTree(Map.of("sourcePolicy","current")));
             String replacementRef=String.valueOf(replacement.get("draftRef"));clock.advance(Duration.ofMinutes(11));
             assertThrows(ServerRuntime.ReplayDraftExpiredException.class,()->runtime.getJobReplayEditorDraft(original,replacementRef,"alice"));
@@ -364,11 +468,14 @@ class ServerRuntimeJobReplayTest {
             String id=String.valueOf(runtime.submitRunDraft(submit(String.valueOf(draft.get("draftId"))),"alice","alice").get("jobId"));await(runtime,id);
             Map<String,String> stored=runtime.store.executionSpec(id);assertNull(stored.get("spec"));assertFalse(stored.toString().contains("NEVER-RETAIN-THIS"));
             assertEquals(false,runtime.jobReplay(id,"alice").get("available"));
-            assertThrows(IllegalArgumentException.class,()->runtime.createJobReplayDraft(id,"alice"));
+            ServerRuntime.ReplayInputMissingException sensitive=assertThrows(ServerRuntime.ReplayInputMissingException.class,()->runtime.createJobReplayDraft(id,"alice"));
+            assertTrue(sensitive.getMessage().toLowerCase(java.util.Locale.ROOT).contains("safely retained"));
+            assertFalse(sensitive.getMessage().contains("NEVER-RETAIN-THIS"));
+            assertApiError(apiRequest(runtime,"POST","/jobs/"+id+"/replay-draft","alice",Map.of()),422,"ATT-SERVER-REPLAY-INPUT-MISSING");
             Job historical=new Job("J1234567890ABCDEF","load","p","alice",new att.server.api.WorkerRequest(),new JobEvents(temp.resolve("historical.jsonl"),100));
             runtime.store.insert(historical,"{\"scenario\":\"load/smoke.yaml\"}");
             assertEquals(false,runtime.jobReplay(historical.id,"alice").get("available"));
-            assertThrows(IllegalArgumentException.class,()->runtime.createJobReplayDraft(historical.id,"alice"));
+            assertThrows(ServerRuntime.ReplayInputMissingException.class,()->runtime.createJobReplayDraft(historical.id,"alice"));
             String raw=String.valueOf(runtime.submit("load",ServerRuntime.JSON.valueToTree(Map.of("packageId","p","scenario","load/smoke.yaml","overrides",List.of("inputs.password=NEVER-RETAIN-RAW-OVERRIDE"))),"alice").get("jobId"));
             assertNull(runtime.store.executionSpec(raw).get("spec"),"Raw overrides must never be silently omitted from a retained definition");
             assertFalse(runtime.store.executionSpec(raw).toString().contains("NEVER-RETAIN-RAW-OVERRIDE"));
@@ -407,5 +514,55 @@ class ServerRuntimeJobReplayTest {
             String id=String.valueOf(runtime.rerunJob(original,ServerRuntime.JSON.valueToTree(Map.of("intentId",review.get("intentId"),"confirm",true)),"alice").get("jobId"));await(runtime,id);
             assertEquals("run",runtime.jobRecord(id).get("command"));assertFalse(runtime.jobReplay(id,"alice").containsKey("originatingScheduleId"));
         }
+    }
+
+    private static void assertApiError(Map<String,Object> response,int status,String code) {
+        assertEquals(status,response.get("status"));
+        assertEquals(code,ServerRuntime.JSON.valueToTree(response.get("body")).path("error").path("code").asText());
+    }
+
+    private static Map<String,Object> apiRequest(ServerRuntime runtime,String method,String path,String principal,Map<String,Object> body) throws Exception {
+        ServletContext context=servletProxy(ServletContext.class,(self,called,args)->"getAttribute".equals(called.getName())&&ServerBootstrap.RUNTIME.equals(args[0])?runtime:null);
+        ApiServlet servlet=new ApiServlet();
+        servlet.init(servletProxy(ServletConfig.class,(self,called,args)->"getServletContext".equals(called.getName())?context:null));
+        byte[] requestBytes=ServerRuntime.JSON.writeValueAsBytes(body);ByteArrayInputStream requestBytesIn=new ByteArrayInputStream(requestBytes);
+        ServletInputStream requestStream=new ServletInputStream() {
+            @Override public boolean isFinished(){return requestBytesIn.available()==0;}
+            @Override public boolean isReady(){return true;}
+            @Override public void setReadListener(ReadListener listener){}
+            @Override public int read(){return requestBytesIn.read();}
+        };
+        HttpServletRequest request=servletProxy(HttpServletRequest.class,(self,called,args)->{
+            switch(called.getName()) {
+                case "getPathInfo":return path;
+                case "getServletContext":return context;
+                case "getAttribute":return AuthService.IDENTITY.equals(args[0])?principal:null;
+                case "getContentType":return "application/json";
+                case "getInputStream":return requestStream;
+                case "getHeader":return null;
+                case "getContextPath":return "";
+                case "getRemoteAddr":return "127.0.0.1";
+                case "getMethod":return method;
+                default:return null;
+            }
+        });
+        ByteArrayOutputStream responseBytes=new ByteArrayOutputStream();
+        ServletOutputStream responseStream=new ServletOutputStream() {
+            @Override public boolean isReady(){return true;}
+            @Override public void setWriteListener(WriteListener listener){}
+            @Override public void write(int value){responseBytes.write(value);}
+        };
+        Map<String,Object> response=new java.util.LinkedHashMap<>();response.put("status",200);
+        HttpServletResponse responseProxy=servletProxy(HttpServletResponse.class,(self,called,args)->{
+            if("setStatus".equals(called.getName()))response.put("status",args[0]);
+            if("getOutputStream".equals(called.getName()))return responseStream;
+            return null;
+        });
+        if("POST".equals(method))servlet.doPost(request,responseProxy);else servlet.doGet(request,responseProxy);
+        response.put("body",ServerRuntime.JSON.readTree(responseBytes.toByteArray()));return response;
+    }
+
+    private static <T>T servletProxy(Class<T> type,InvocationHandler handler) {
+        return type.cast(Proxy.newProxyInstance(type.getClassLoader(),new Class<?>[]{type},handler));
     }
 }

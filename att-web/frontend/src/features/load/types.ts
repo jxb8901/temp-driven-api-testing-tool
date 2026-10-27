@@ -336,13 +336,18 @@ export interface JobReplay {
   jobId: string; available: boolean; reason?: string; rerunOfJobId?: string; originatingScheduleId?: string;
   revisionPolicy?: string; revision?: string; sourcePath?: string;
   definition?: { executionType: 'run' | 'load'; packageId: string; environment?: string | null; [key: string]: unknown };
+  originalDefinition?: { executionType: 'run' | 'load'; packageId: string; environment?: string | null; [key: string]: unknown };
   originalConfiguration?: Record<string, unknown>; configuration?: Record<string, unknown>;
   intentId?: string; draftId?: string; expiresAt?: string; preview?: Record<string, unknown>;
   sourcePolicy?: 'current' | 'strict'; originalRevision?: string; currentRevision?: string; draftRef?: string; missingFields?: string[];
+  validationState?: 'valid' | 'invalid'; errorCode?: string;
+  diagnostics?: ServerDiagnostic[];
 }
 
 export interface JobReplayEditorDraft {
   schemaVersion: 'att-job-replay-draft/v1'; draftRef: string; sourceJobId: string; packageId: string;
-  executionType: 'run' | 'load'; sourcePolicy: 'current' | 'strict'; originalRevision: string; currentRevision: string;
-  definition: NonNullable<JobReplay['definition']>; originalConfiguration?: Record<string, unknown>; configuration: Record<string, unknown>; expiresAt: string; missingFields: string[];
+  executionType: 'run' | 'load'; sourcePolicy: 'current' | 'strict'; originalRevision: string; currentRevision?: string;
+  definition: NonNullable<JobReplay['definition']>; originalDefinition?: NonNullable<JobReplay['definition']>;
+  originalConfiguration?: Record<string, unknown>; configuration: Record<string, unknown>; expiresAt: string; missingFields: string[];
+  validationState?: 'valid' | 'invalid'; errorCode?: string; diagnostics?: ServerDiagnostic[];
 }

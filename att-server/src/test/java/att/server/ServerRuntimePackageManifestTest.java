@@ -100,17 +100,23 @@ class ServerRuntimePackageManifestTest {
             var submitted=runtime.submitQuickLoadDraft(ServerRuntime.JSON.valueToTree(Map.of("packageId","owner","draftId",draft.get("draftId"))),"owner");
             jobId=(String)submitted.get("jobId");assertEquals(approved,submitted.get("configuration"));
             ServerRuntimeTestSupport.awaitUnifiedJob(runtime,jobId);
+            Map<String,byte[]> originalEvidence=captureConfigurationEvidence(runtime,jobId,approved);
             assertEquals("PASS",runtime.jobRecord(jobId).get("status"),runtime.resultRecord(jobId).toString());
             assertEquals(ServerRuntime.JSON.valueToTree(approved),ServerRuntime.JSON.valueToTree(runtime.resultRecord(jobId).get("result")).path("summary").get("configuration"));
             assertEquals(approved,runtime.jobReplay(jobId,"owner").get("configuration"));
             Map<String,Object> review=runtime.createJobReplayDraft(jobId,"owner");
             assertEquals(approved,((Map<?,?>)review.get("preview")).get("configuration"));
-            Path output=runtime.config.dataDir.resolve("jobs").resolve(jobId).resolve("output");
-            try(var files=Files.walk(output)) {
-                List<Path> evidence=files.filter(file->file.getFileName().toString().equals("configuration.json")).toList();
-                assertTrue(evidence.size()>=2,"Job and operation artifacts must retain evidence");
-                for(Path file:evidence)assertEquals(approved,ServerRuntime.JSON.readValue(Files.readAllBytes(file),Map.class));
-            }
+            Map<String,Object> replayed=runtime.rerunJob(jobId,ServerRuntime.JSON.valueToTree(Map.of("confirm",true,"intentId",review.get("intentId"))),"owner");
+            String replayedId=String.valueOf(replayed.get("jobId"));
+            ServerRuntimeTestSupport.awaitUnifiedJob(runtime,replayedId);
+            assertEquals("package",((Map<?,?>)runtime.jobRecord(replayedId).get("configuration")).get("environmentOrigin"));
+            JobExecutionSpec replayedSpec=JobExecutionSpec.parse(runtime.store.executionSpec(replayedId).get("spec"));
+            assertEquals("package",replayedSpec.configuration().get("environmentOrigin"));
+            assertEquals("package.yaml",((Map<?,?>)replayedSpec.configuration().get("authoredPaths")).get("environment"));
+            assertEquals(approved,runtime.jobRecord(jobId).get("configuration"),"Rerunning must leave the original Job configuration unchanged");
+            Path originalOutput=runtime.config.dataDir.resolve("jobs").resolve(jobId).resolve("output");
+            if(Files.isDirectory(originalOutput))for(Map.Entry<String,byte[]> entry:originalEvidence.entrySet())
+                assertArrayEquals(entry.getValue(),Files.readAllBytes(originalOutput.resolve(entry.getKey())),"Rerunning must not change the original Job's evidence");
             var forged=ServerRuntime.JSON.createObjectNode();forged.put("packageId","owner");forged.set("configurationProvenance",ServerRuntime.JSON.valueToTree(approved));
             assertThrows(IllegalArgumentException.class,()->runtime.submit("debug",forged,"owner"));
         }
@@ -124,6 +130,21 @@ class ServerRuntimePackageManifestTest {
             assertEquals("PASS",reopened.jobRecord(scheduled).get("status"),reopened.resultRecord(scheduled).toString());
             assertEquals(approved,reopened.jobRecord(scheduled).get("configuration"));
         }
+    }
+
+    private static Map<String,byte[]> captureConfigurationEvidence(ServerRuntime runtime,String jobId,Map<String,Object> approved) throws Exception {
+        Path output=runtime.config.dataDir.resolve("jobs").resolve(jobId).resolve("output");
+        Map<String,byte[]> found=new java.util.LinkedHashMap<>();
+        try(var files=Files.walk(output)) {
+            List<Path> evidence=files.filter(file->file.getFileName().toString().equals("configuration.json")).toList();
+            assertTrue(evidence.size()>=2,"Job and operation artifacts must retain evidence before archival");
+            for(Path file:evidence) {
+                byte[] bytes=Files.readAllBytes(file);
+                assertEquals(approved,ServerRuntime.JSON.readValue(bytes,Map.class));
+                found.put(output.relativize(file).toString(),bytes);
+            }
+        }
+        return found;
     }
 
     @Test void pinsResolvedEnvironmentAndRejectsImplicitRestrictedDefaultsBeforeTargetValidation() throws Exception {

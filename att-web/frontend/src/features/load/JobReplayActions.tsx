@@ -16,6 +16,38 @@ function snapshotTargets(definition: NonNullable<JobReplay['definition']>): stri
   return shown ? shown + (targets.size > 4 ? ` (+${targets.size - 4} more)` : '') : 'Not available';
 }
 
+function durationMillis(value: unknown): number | null {
+  if (typeof value !== 'string') return null;
+  const match = /^(\d+)(ms|s|m|h)$/.exec(value.trim());
+  if (!match) return null;
+  const unit = match[2] === 'ms' ? 1 : match[2] === 's' ? 1000 : match[2] === 'm' ? 60000 : 3600000;
+  return Number(match[1]) * unit;
+}
+
+function effectiveDuration(definition: NonNullable<JobReplay['definition']> | undefined): string {
+  if (!definition || definition.executionType !== 'load') return 'Not applicable';
+  const scenario = definition.scenario as { load?: Record<string, unknown>; workloads?: Array<{ load?: Record<string, unknown> }> } | undefined;
+  let total = 0;
+  for (const phase of ['warmup', 'rampUp', 'duration', 'rampDown']) {
+    const root = durationMillis(scenario?.load?.[phase]);
+    const values = (scenario?.workloads || []).map(row => durationMillis(row.load?.[phase])).filter((value): value is number => value !== null);
+    total += root ?? (values.length ? Math.max(...values) : 0);
+  }
+  if (!total) return 'Unavailable';
+  const hours=Math.floor(total/3600000),minutes=Math.floor((total%3600000)/60000),seconds=Math.floor((total%60000)/1000),milliseconds=total%1000;
+  return [hours?`${hours}h`:null,minutes?`${minutes}m`:null,seconds?`${seconds}s`:null,milliseconds?`${milliseconds}ms`:null].filter(Boolean).join(' ');
+}
+
+function arrivalRates(definition: NonNullable<JobReplay['definition']> | undefined): string {
+  if (!definition || definition.executionType !== 'load') return 'Not applicable';
+  const scenario = definition.scenario as { load?: { arrivalRate?: unknown }; workloads?: Array<{ id?: string; load?: { arrivalRate?: unknown } }> } | undefined;
+  const values = (scenario?.workloads || []).map((row, index) => {
+    const rate = row.load?.arrivalRate ?? scenario?.load?.arrivalRate;
+    return rate == null ? null : `${row.id || `workload ${index + 1}`}: ${String(rate)}`;
+  }).filter((value): value is string => value !== null);
+  return values.length ? values.join(', ') : 'Virtual Users model; no target arrival rate configured';
+}
+
 type ReplayApi = Pick<LoadJobsApi, 'getJobReplay' | 'createJobReplayDraft' | 'getJobReplayEditorDraft' | 'rerunJob'>;
 
 /** Shared by Details, Jobs and LOAD history. Opening a review never submits a job. */
@@ -88,9 +120,10 @@ export function JobReplayActions({ api, jobId, onOpenJob, onSchedule, onEditSche
       if(!metadata.available)throw new Error(metadata.reason||'This Job has no safely retained execution definition.');
       const draft=await api.createJobReplayDraft!(jobId,{sourcePolicy:'current'});
       if(!draft.draftRef||!draft.definition)throw new Error('The Server did not return an editable replay draft reference.');
+      const environment=draft.configuration?.environmentOrigin==='package'?undefined:draft.definition.environment||undefined;
       const route=draft.definition.executionType==='load'
-        ?{kind:'load' as const,packageId:draft.definition.packageId,environment:draft.definition.environment||undefined,replayDraftId:draft.draftRef,replaySourceJobId:jobId}
-        :{kind:'run' as const,packageId:draft.definition.packageId,environment:draft.definition.environment||undefined,replayDraftId:draft.draftRef,replaySourceJobId:jobId};
+        ?{kind:'load' as const,packageId:draft.definition.packageId,environment,replayDraftId:draft.draftRef,replaySourceJobId:jobId}
+        :{kind:'run' as const,packageId:draft.definition.packageId,environment,replayDraftId:draft.draftRef,replaySourceJobId:jobId};
       unregister.current?.();navigation.navigate(route);
     } catch(reason){setError(reason instanceof Error?reason.message:'The replay draft could not be opened.');}
     finally{setBusy(false);lock.current=false;}
@@ -112,8 +145,7 @@ export function JobReplayActions({ api, jobId, onOpenJob, onSchedule, onEditSche
     finally { setBusy(false); lock.current = false; }
   }
   return <span className="att-replay-actions">
-    <button type="button" disabled={busy} onClick={() => void open('run')}>Rerun with same settings</button>
-    <button type="button" disabled={busy} onClick={() => void configure()}>Configure &amp; Rerun</button>
+    <button type="button" disabled={busy} onClick={() => void open('run')}>Rerun</button>
     {onSchedule && <button type="button" disabled={busy} onClick={() => void open('schedule')}>Schedule / Reschedule…</button>}
     {mode && createPortal(<dialog ref={dialog} aria-labelledby={id} aria-describedby={`${id}-description`} className="att-replay-review" onCancel={event => { event.preventDefault(); if (!busy) close(); }} onKeyDown={event => {
       if (event.key !== 'Tab') return;
@@ -134,7 +166,7 @@ export function JobReplayActions({ api, jobId, onOpenJob, onSchedule, onEditSche
       </fieldset>}
       {mode === 'run' && sourcePolicy === 'strict' && error && <button type="button" disabled={busy} onClick={() => void reviewWithPolicy('current')}>Review with current Package</button>}
       {review && !review.available && <p role="status">{review.reason}</p>}
-      {review?.missingFields?.length ? <p role="alert">Some retained fields are missing: {review.missingFields.join(', ')}. Cancel this review and choose Configure &amp; Rerun to enter them.</p> : null}
+      {review?.missingFields?.length ? <p role="alert">Some retained fields are missing: {review.missingFields.join(', ')}. Choose Configure &amp; Rerun to enter them before execution.</p> : null}
       {review?.definition && <dl className="att-replay-summary">
         <div><dt>Type</dt><dd>{review.definition.executionType.toUpperCase()}</dd></div>
         <div><dt>Package</dt><dd>{review.definition.packageId}</dd></div>
@@ -146,9 +178,22 @@ export function JobReplayActions({ api, jobId, onOpenJob, onSchedule, onEditSche
         <div><dt>Original configuration</dt><dd>{String(review.originalConfiguration?.environment || review.definition.environment || 'Package default recorded for the Job')}</dd></div>
         <div><dt>Current configuration</dt><dd>{String(review.configuration?.environment || review.definition.environment || 'Package default resolved now')}</dd></div>
       </dl>}
+      {mode === 'run' && review?.originalDefinition && review.definition && <section className="att-replay-diff" aria-label="Before and after replay changes">
+        <h3>Before → after</h3>
+        <dl>
+          <div><dt>Target / selection</dt><dd>{snapshotTargets(review.originalDefinition)} → {snapshotTargets(review.definition)}</dd></div>
+          <div><dt>Effective total duration</dt><dd>{effectiveDuration(review.originalDefinition)} → {effectiveDuration(review.definition)}</dd></div>
+          <div><dt>Configured target arrival rate</dt><dd>{arrivalRates(review.originalDefinition)} → {arrivalRates(review.definition)}</dd></div>
+          <div><dt>Measured TPS</dt><dd>Observed completed throughput from the original Job report; it is not used as the configured arrival rate.</dd></div>
+        </dl>
+        <details className="att-replay-advanced"><summary>View sanitized before and after definitions</summary><pre className="att-code-block" tabIndex={0} aria-label="Sanitized before and after execution definitions">{JSON.stringify({ before: review.originalDefinition, after: review.definition }, null, 2)}</pre></details>
+      </section>}
+      {review?.diagnostics?.length ? <ul className="att-replay-diagnostics" aria-label="Current Package validation diagnostics">{review.diagnostics.map((item,index)=><li key={`${item.code||item.field||'diagnostic'}-${index}`}>{[item.field||item.path,item.code].filter(Boolean).join(' · ')}{item.summary||item.message?`: ${item.summary||item.message}`:''}</li>)}</ul> : null}
+      {review?.validationState === 'invalid' && <p role="alert">The retained definition is loaded for editing. Resolve these current Package errors and validate again before running.</p>}
       {review?.definition && <details className="att-replay-advanced"><summary>Advanced / View raw definition</summary><pre className="att-code-block" tabIndex={0} aria-label="Sanitized execution definition">{JSON.stringify(review.definition, null, 2)}</pre></details>}
       {review?.originatingScheduleId && onEditSchedule && <button type="button" onClick={() => { unregister.current?.(); onEditSchedule(review.originatingScheduleId!); close(); }}>View / Edit originating schedule</button>}
-      <footer><button type="button" disabled={busy || !review?.available || !review.intentId || Boolean(review?.missingFields?.length) || (mode === 'run' && review.sourcePolicy !== sourcePolicy)} onClick={() => void confirm()}>{mode === 'run' ? 'Confirm rerun' : 'Continue to New Schedule'}</button>
+      {mode === 'run' && review?.available && review.definition && <button type="button" disabled={busy} onClick={() => void configure()}>Configure &amp; Rerun</button>}
+      <footer><button type="button" disabled={busy || !review?.available || !review.intentId || Boolean(review?.missingFields?.length) || (mode === 'run' && review.sourcePolicy !== sourcePolicy)} onClick={() => void confirm()}>{mode === 'run' ? 'Rerun with same settings' : 'Continue to New Schedule'}</button>
       <button type="button" disabled={busy} onClick={close}>Cancel</button></footer>
     </dialog>, document.body)}
   </span>;

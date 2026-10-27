@@ -185,6 +185,7 @@ class Handler(BaseHTTPRequestHandler):
                     self._json(409, {"error": {"code": "ATT-SERVER-REPLAY-REVISION-CONFLICT", "summary": "Original package revision conflict. Review with current Package."}})
                     return
                 definition = json.loads(json.dumps(self.server.replay_job_definitions.get(job_id, replay_definition(job_id))))
+                original_definition = json.loads(json.dumps(definition))
                 overrides = body.get("overrides", {})
                 if definition.get("executionType") == "load":
                     if overrides.get("environment"):
@@ -214,10 +215,14 @@ class Handler(BaseHTTPRequestHandler):
                 expires = "2099-01-01T00:00:00Z"
                 preview = {"draftId": draft_ref, "packageId": "payments", "model": "virtualUsers", "previewYaml": json.dumps(definition.get("scenario", definition)), "expiresAt": expires, "redacted": False, "diagnostics": []}
                 draft = {"schemaVersion": "att-job-replay-draft/v1", "draftRef": draft_ref, "draftId": draft_ref, "intentId": intent_id,
+                         "jobId": job_id, "available": True,
                          "sourceJobId": job_id, "packageId": "payments", "executionType": definition["executionType"], "sourcePolicy": source_policy,
-                         "originalRevision": "a" * 64, "currentRevision": "b" * 64, "revision": "b" * 64, "definition": definition,
-                         "originalConfiguration": {"packageId": "payments", "environment": "SIT", "packageRevision": "a" * 64},
-                         "configuration": {"packageId": "payments", "environment": definition.get("environment", "dev")},
+                         "originalRevision": "a" * 64, "currentRevision": "b" * 64, "revision": "b" * 64,
+                         "originalDefinition": original_definition, "definition": definition,
+                         "originalConfiguration": {"packageId": "payments", "environment": "SIT", "environmentOrigin": "package",
+                                                   "origins": {"environment": "package"}, "authoredPaths": {"environment": "package.yaml"}, "packageRevision": "a" * 64},
+                         "configuration": {"packageId": "payments", "environment": definition.get("environment", "dev"), "environmentOrigin": "package",
+                                           "origins": {"environment": "package"}, "authoredPaths": {"environment": "package.yaml"}, "packageRevision": "b" * 64},
                          "sourcePath": definition.get("sourcePath"), "expiresAt": expires, "preview": preview}
                 self.server.replay_drafts[draft_ref] = draft
                 if job_id == REPLAY_JOBS[1]["jobId"] and overrides.get("load", {}).get("duration") == "24h" and not self.server.replay_stale_used:
@@ -526,15 +531,19 @@ class Handler(BaseHTTPRequestHandler):
                         self._json(200, {"jobId": job_id, "available": False, "reason": "No safe retained execution definition is available."})
                     else:
                         definition = self.server.replay_job_definitions.get(job_id, replay_definition(job_id))
-                        self._json(200, {"jobId": job_id, "available": True, "definition": definition, "revisionPolicy": "reject-package-changes", "revision": "a" * 64, "sourcePath": definition.get("sourcePath")})
+                        self._json(200, {"jobId": job_id, "available": True, "definition": definition, "revisionPolicy": "reject-package-changes", "revision": "a" * 64,
+                                         "configuration": {"packageId": "payments", "environment": definition.get("environment", "SIT"), "environmentOrigin": "package",
+                                                            "origins": {"environment": "package"}, "authoredPaths": {"environment": "package.yaml"}, "packageRevision": "a" * 64},
+                                         "sourcePath": definition.get("sourcePath")})
                     return
                 if action == "replay-draft" and len(parts) == 4:
                     draft = self.server.replay_drafts.get(parts[3])
                     if draft is None or draft["sourceJobId"] != job_id:
                         self._json(410, {"error": {"code": "ATT-SERVER-REPLAY-DRAFT-EXPIRED", "summary": "Replay draft expired or is unknown. Reopen the source Job."}})
                     else:
-                        view = {key: draft[key] for key in ("schemaVersion", "draftRef", "sourceJobId", "packageId", "executionType", "sourcePolicy", "originalRevision", "currentRevision", "definition", "originalConfiguration", "configuration", "sourcePath", "expiresAt")}
+                        view = {key: draft[key] for key in ("schemaVersion", "draftRef", "sourceJobId", "packageId", "executionType", "sourcePolicy", "originalRevision", "currentRevision", "originalDefinition", "definition", "originalConfiguration", "configuration", "sourcePath", "expiresAt")}
                         view["missingFields"] = []
+                        view["validationState"] = "valid"
                         self._json(200, view)
                     return
                 if action == "result":
@@ -593,12 +602,22 @@ class Handler(BaseHTTPRequestHandler):
                 return
             self._json(404, {"error": {"code": "JOB_NOT_FOUND", "summary": "Job not found."}})
             return
-        elif len(parts) == 3 and parts[:2] == ["packages", "payments"] and parts[2] == "configuration":
+        elif len(parts) == 4 and parts[:3] == ["packages", "payments", "package-configuration"] and parts[3] == "effective":
+            requested_environment = query.get("environment", [""])[0]
             self._json(200, {
-                "state": "ready", "view": "declared", "environments": [
-                    {"name": "dev", "state": "active", "default": True},
-                    {"name": "staging", "state": "active"}, {"name": "prod", "state": "active"},
-                ],
+                "packageId": "payments", "present": True, "canEdit": False, "manifestDigest": "b" * 64,
+                "environment": requested_environment or "SIT",
+                "environmentOrigin": "request" if requested_environment else "package",
+            })
+            return
+        elif len(parts) == 3 and parts[:2] == ["packages", "payments"] and parts[2] == "configuration":
+            environments = ([{"name": "SIT", "state": "active", "default": True},
+                             {"name": "dev", "state": "active"}, {"name": "staging", "state": "active"},
+                             {"name": "prod", "state": "active"}] if scenario == "job-replay" else
+                            [{"name": "dev", "state": "active", "default": True},
+                             {"name": "staging", "state": "active"}, {"name": "prod", "state": "active"}])
+            self._json(200, {
+                "state": "ready", "view": "declared", "environments": environments,
                 "globals": {"baseDir": {"state": "visible", "value": "config"}},
                 "sections": [
                     {"id": "testdata", "title": "Testdata", "entryCount": 1},

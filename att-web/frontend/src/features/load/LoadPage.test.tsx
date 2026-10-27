@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { LoadPage, retainedScenarioToEditor } from './LoadPage';
 import type { LoadJobsApi } from './types';
 import { NavigationGuardContext } from '../../router';
+import { ApiError } from '../../types';
 
 function makeApi(): LoadJobsApi {
   return {
@@ -61,10 +62,31 @@ describe('LoadPage React feature', () => {
     expect(arrival.model).toBe('arrivalRate');expect(arrival.workloads[0].arrivalRate).toBe('3/s');expect(arrival.workloads[0].maxConcurrent).toBe('6');
   });
 
+  it('hides default LOAD controls and disables validation until the replay draft is applied', async () => {
+    const api=makeApi();let resolveDraft!:(draft:import('./types').JobReplayEditorDraft)=>void;
+    api.getJobReplayEditorDraft=vi.fn(()=>new Promise<import('./types').JobReplayEditorDraft>(resolve=>{resolveDraft=resolve;}));
+    await act(async()=>root.render(<NavigationGuardContext.Provider value={{navigate:vi.fn(),registerUnsavedChanges:vi.fn(()=>vi.fn())} as never}><LoadPage
+      api={api} packages={[{packageId:'payments',displayName:'Payments'}]} selectedPackage="payments" selectedEnvironment="" environments={['SIT']} inlineLoadEnabled={false}
+      replayDraftId="C0123456789ABCDEF0123456789ABCDEF" replaySourceJobId="J0123456789ABCDEF" onPackageChange={vi.fn()} onEnvironmentChange={vi.fn()} onJobAccepted={vi.fn()}
+    /></NavigationGuardContext.Provider>));
+    await flush();
+    expect([...host.querySelectorAll('[role="status"]')].some(node=>node.textContent?.includes('Loading the authorized Job draft'))).toBe(true);
+    expect(host.querySelector('.att-section-nav')?.closest('[hidden]')).not.toBeNull();
+    expect([...host.querySelectorAll('button')].find(button=>button.textContent==='Validate scenario')?.disabled).toBe(true);
+    await act(async()=>resolveDraft({schemaVersion:'att-job-replay-draft/v1',draftRef:'C0123456789ABCDEF0123456789ABCDEF',sourceJobId:'J0123456789ABCDEF',packageId:'payments',executionType:'load',sourcePolicy:'current',
+      originalRevision:'a'.repeat(64),currentRevision:'b'.repeat(64),configuration:{packageId:'payments',environment:'SIT',environmentOrigin:'package'},expiresAt:new Date(Date.now()+60000).toISOString(),missingFields:[],
+      definition:{executionType:'load',packageId:'payments',sourcePath:'load/arrival.yaml',scenario:{schemaVersion:'att-load/v1.9',load:{duration:'30m'},workloads:[{id:'arrival',target:{type:'template',id:'checkout'},load:{arrivalRate:'5/s',maxConcurrent:8}}]}}}));
+    await flush();
+    expect(host.textContent).toContain('Job settings loaded. Edit the fields');
+    expect(host.querySelector('.att-section-nav')?.closest('[hidden]')).toBeNull();
+    expect(([...host.querySelectorAll('label')].find(label=>label.textContent?.includes('Load model'))?.querySelector('select') as HTMLSelectElement).value).toBe('arrivalRate');
+    expect([...host.querySelectorAll('button')].find(button=>button.textContent==='Validate scenario')?.disabled).toBe(false);
+  });
+
   it('prefills a package-backed LOAD draft, preserves workload identity and validates edited timing', async () => {
     const api=makeApi(),confirmStart=vi.fn(()=>true),onJobAccepted=vi.fn();
     api.getJobReplayEditorDraft=vi.fn().mockResolvedValue({schemaVersion:'att-job-replay-draft/v1',draftRef:'C0123456789ABCDEF0123456789ABCDEF',sourceJobId:'J0123456789ABCDEF',packageId:'payments',executionType:'load',sourcePolicy:'current',
-      originalRevision:'a'.repeat(64),currentRevision:'b'.repeat(64),configuration:{packageId:'payments',environment:'SIT'},expiresAt:new Date(Date.now()+60000).toISOString(),missingFields:[],
+      originalRevision:'a'.repeat(64),currentRevision:'b'.repeat(64),configuration:{packageId:'payments',environment:'SIT',environmentOrigin:'package'},expiresAt:new Date(Date.now()+60000).toISOString(),missingFields:[],
       definition:{executionType:'load',packageId:'payments',environment:'SIT',sourcePath:'load/nightly.yaml',scenario:{schemaVersion:'att-load/v1.9',load:{warmup:'2s',rampUp:'3s',duration:'30m',rampDown:'4s'},workloads:[
         {id:'checkout-main',target:{type:'template',id:'Payments.create'},inputs:{region:'HK'},load:{users:4},thresholds:{p95:'< 800ms'}},
         {id:'checkout-mix',mix:[{id:'purchase',weight:100,target:{type:'flow',id:'Payments.purchase'}}],load:{users:2}},
@@ -91,12 +113,74 @@ describe('LoadPage React feature', () => {
     expect(host.textContent).not.toContain('Effective duration:');
     await click([...host.querySelectorAll('button')].find(button=>button.textContent==='Validate scenario')!);await flush();
     expect(api.createJobReplayDraft).toHaveBeenCalledWith('J0123456789ABCDEF',expect.objectContaining({sourcePolicy:'current',overrides:expect.objectContaining({
-      environment:'SIT',load:expect.objectContaining({duration:'24h',warmup:'2s',rampUp:'3s',rampDown:'4s'}),
+      environment:'',load:expect.objectContaining({duration:'24h',warmup:'2s',rampUp:'3s',rampDown:'4s'}),
       workloads:expect.arrayContaining([expect.objectContaining({id:'checkout-main',load:expect.objectContaining({users:4})}),expect.objectContaining({id:'checkout-mix',load:expect.objectContaining({users:2}),mix:expect.anything()})]),
       testdata:['examples/accounts.yaml'],evidence:{mode:'failures',maxFailureSamples:5},thresholds:{minThroughput:'>= 10/s'},
     })}));
     expect(host.textContent).toContain('Effective duration:');expect(host.textContent).toContain('Review changes from the source Job');
     expect(host.textContent).toContain('Configured target arrival rate is the pacing request');
+  });
+
+  it('announces a stale replay submission once and offers Validate again without losing edits', async () => {
+    const api=makeApi(),confirmStart=vi.fn(()=>true);let dirty=false,blockedNavigation=false;
+    const navigate=vi.fn((route:unknown)=>{if(dirty){blockedNavigation=true;return false;}return route;});
+    const registerUnsavedChanges=vi.fn((value:boolean)=>{dirty=value;return()=>{dirty=false;};});
+    api.getJobReplayEditorDraft=vi.fn().mockResolvedValue({schemaVersion:'att-job-replay-draft/v1',draftRef:'C0123456789ABCDEF0123456789ABCDEF',sourceJobId:'J0123456789ABCDEF',packageId:'payments',executionType:'load',sourcePolicy:'current',
+      originalRevision:'a'.repeat(64),currentRevision:'b'.repeat(64),configuration:{packageId:'payments',environment:'SIT',environmentOrigin:'package'},expiresAt:new Date(Date.now()+60000).toISOString(),missingFields:[],
+      definition:{executionType:'load',packageId:'payments',environment:'SIT',sourcePath:'load/nightly.yaml',scenario:{schemaVersion:'att-load/v1.9',load:{warmup:'2s',rampUp:'3s',duration:'30m',rampDown:'4s'},workloads:[{id:'checkout-main',target:{type:'template',id:'Payments.create'},load:{users:4}}]}}});
+    api.createJobReplayDraft=vi.fn().mockResolvedValue({jobId:'J0123456789ABCDEF',available:true,sourcePolicy:'current',intentId:'intent',draftId:'C123',originalRevision:'a'.repeat(64),currentRevision:'c'.repeat(64),
+      preview:{draftId:'C123',previewYaml:'schemaVersion: att-load/v1.9',expiresAt:new Date(Date.now()+60000).toISOString(),redacted:false,diagnostics:[]}});
+    api.rerunJob=vi.fn().mockRejectedValueOnce(new ApiError('The Package changed after replay validation. Revalidate your edits.',{status:409,code:'ATT-SERVER-REPLAY-DRAFT-STALE'})).mockResolvedValueOnce({jobId:'J-new'});
+    await act(async()=>root.render(<NavigationGuardContext.Provider value={{navigate,registerUnsavedChanges} as never}><LoadPage
+      api={api} packages={[{packageId:'payments',displayName:'Payments'}]} selectedPackage="payments" selectedEnvironment="" environments={['SIT']} inlineLoadEnabled={false}
+      replayDraftId="C0123456789ABCDEF0123456789ABCDEF" replaySourceJobId="J0123456789ABCDEF" onPackageChange={vi.fn()} onEnvironmentChange={vi.fn()} onJobAccepted={jobId=>navigate({kind:'jobs',jobId})} confirmStart={confirmStart}
+    /></NavigationGuardContext.Provider>));
+    await flush();
+    const duration=host.querySelector('[aria-label="Measured duration value"]') as HTMLInputElement;
+    await act(async()=>{Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!.call(duration,'24');duration.dispatchEvent(new Event('input',{bubbles:true}));});
+    const durationUnit=host.querySelector('[aria-label="Measured duration unit"]') as HTMLSelectElement;
+    await act(async()=>{durationUnit.value='h';durationUnit.dispatchEvent(new Event('change',{bubbles:true}));});
+    await click([...host.querySelectorAll('button')].find(button=>button.textContent==='Validate scenario')!);await flush();
+    await click([...host.querySelectorAll('button')].find(button=>button.textContent==='Run new LOAD Job')!);await flush();
+    const alerts=host.querySelectorAll('[role="alert"]');
+    expect(alerts).toHaveLength(1);
+    expect(alerts[0].textContent).toContain('The Package changed after replay validation. Revalidate your edits.');
+    expect(host.textContent?.match(/Package changed after replay validation/g)).toHaveLength(1);
+    expect((host.querySelector('[aria-label="Measured duration value"]') as HTMLInputElement).value).toBe('24');
+    expect((host.querySelector('[aria-label="Measured duration unit"]') as HTMLSelectElement).value).toBe('h');
+    const validateAgain=[...host.querySelectorAll('button')].find(button=>button.textContent==='Validate again')!;
+    expect(validateAgain).toBeTruthy();
+    await click(validateAgain);await flush();
+    expect(api.createJobReplayDraft).toHaveBeenCalledTimes(2);
+    expect(host.querySelector('[role="alert"]')).toBeNull();
+    await click([...host.querySelectorAll('button')].find(button=>button.textContent==='Run new LOAD Job')!);await flush();
+    expect(api.rerunJob).toHaveBeenCalledTimes(2);
+    expect(navigate).toHaveBeenCalledWith({kind:'jobs',jobId:'J-new'});
+    expect(blockedNavigation).toBe(false);
+    expect(dirty).toBe(false);
+  });
+
+  it('opens an invalid retained LOAD in edit mode with resource diagnostics and no run action', async () => {
+    const api=makeApi();
+    api.getJobReplayEditorDraft=vi.fn().mockResolvedValue({schemaVersion:'att-job-replay-draft/v1',draftRef:'C0123456789ABCDEF0123456789ABCDEF',sourceJobId:'J0123456789ABCDEF',packageId:'payments',executionType:'load',sourcePolicy:'current',
+      originalRevision:'a'.repeat(64),currentRevision:'b'.repeat(64),configuration:{packageId:'payments',environment:'SIT'},expiresAt:new Date(Date.now()+60000).toISOString(),missingFields:[],validationState:'invalid',errorCode:'ATT-SERVER-REPLAY-RESOURCE-MISSING',
+      diagnostics:[{code:'ATT-SERVER-REPLAY-RESOURCE-MISSING',field:'scenario.workloads[0].target',summary:'The retained workload target is no longer available.'}],
+      originalDefinition:{executionType:'load',packageId:'payments',scenario:{schemaVersion:'att-load/v1.9',load:{duration:'30m'},workloads:[{id:'main',target:{type:'template',id:'removed-target'},load:{users:2}}]}},
+      definition:{executionType:'load',packageId:'payments',environment:'SIT',scenario:{schemaVersion:'att-load/v1.9',load:{duration:'30m'},workloads:[{id:'main',target:{type:'template',id:'removed-target'},load:{users:2}}]}}});
+    api.createJobReplayDraft=vi.fn().mockResolvedValue({jobId:'J0123456789ABCDEF',available:true,sourcePolicy:'current',draftRef:'C0123456789ABCDEF0123456789ABCDEF',validationState:'invalid',errorCode:'ATT-SERVER-REPLAY-RESOURCE-MISSING',
+      diagnostics:[{code:'ATT-SERVER-REPLAY-RESOURCE-MISSING',field:'scenario.workloads[0].target',summary:'The retained workload target is no longer available.'}]});
+    api.rerunJob=vi.fn();
+    await act(async()=>root.render(<NavigationGuardContext.Provider value={{navigate:vi.fn(),registerUnsavedChanges:vi.fn(()=>vi.fn())} as never}><LoadPage
+      api={api} packages={[{packageId:'payments',displayName:'Payments'}]} selectedPackage="payments" selectedEnvironment="SIT" environments={['SIT']} inlineLoadEnabled={false}
+      replayDraftId="C0123456789ABCDEF0123456789ABCDEF" replaySourceJobId="J0123456789ABCDEF" onPackageChange={vi.fn()} onEnvironmentChange={vi.fn()} onJobAccepted={vi.fn()}
+    /></NavigationGuardContext.Provider>));
+    await flush();
+    expect((host.querySelector('[aria-label="Measured duration value"]') as HTMLInputElement).value).toBe('30');
+    expect(host.textContent).toContain('The retained workload target is no longer available.');
+    const run=[...host.querySelectorAll('button')].find(button=>button.textContent==='Run new LOAD Job') as HTMLButtonElement;
+    expect(run.disabled).toBe(true);
+    await click([...host.querySelectorAll('button')].find(button=>button.textContent==='Validate scenario')!);await flush();
+    expect(host.textContent).toContain('scenario.workloads[0].target');expect(run.disabled).toBe(true);expect(api.rerunJob).not.toHaveBeenCalled();expect(api.submitLoadDraft).not.toHaveBeenCalled();
   });
 
   it('uses the keyboard submit shortcut only for a live draft and preserves confirmation', async () => {

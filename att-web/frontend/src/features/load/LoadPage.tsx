@@ -284,12 +284,14 @@ export function LoadPage(props: LoadFeatureProps): React.JSX.Element {
   const [draftMessage, setDraftMessage] = useState('Validate to review the Server-normalized scenario.');
   const [diagnostics, setDiagnostics] = useState<ServerDiagnostic[]>([]);
   const [requestError, setRequestError] = useState('');
+  const [requestErrorCode, setRequestErrorCode] = useState('');
   const [rawScenarioJson, setRawScenarioJson] = useState('');
   const [advancedJsonError, setAdvancedJsonError] = useState('');
   const [thresholdEditorErrors, setThresholdEditorErrors] = useState<Record<string, string>>({});
   const [replayEditorDefinition, setReplayEditorDefinition] = useState<JobReplayEditorDraft['definition'] | null>(null);
+  const [replayOriginalDefinition, setReplayOriginalDefinition] = useState<JobReplayEditorDraft['definition'] | null>(null);
   const [replayReview, setReplayReview] = useState<JobReplay | null>(null);
-  const [replayDraftLoading, setReplayDraftLoading] = useState(false);
+  const [replayDraftLoading, setReplayDraftLoading] = useState(Boolean(replayDraftId&&replaySourceJobId));
   const [replayDraftError, setReplayDraftError] = useState('');
   const [replayDirty, setReplayDirty] = useState(false);
   const [missingReplayFields, setMissingReplayFields] = useState<string[]>([]);
@@ -297,24 +299,34 @@ export function LoadPage(props: LoadFeatureProps): React.JSX.Element {
   const requestSequence = useRef(0);
   const packageRef = useRef(selectedPackage);
   const submitLock = useRef(false);
+  const releaseReplayNavigationGuard = useRef<() => void>(() => {});
   const replaySeeded = useRef(false);
-  useEffect(()=>navigation.registerUnsavedChanges(Boolean(replaySourceJobId&&replayDirty),'Edited Job replay settings'),[navigation.registerUnsavedChanges,replayDirty,replaySourceJobId]);
+  const replayEnvironmentOrigin = useRef('');
+  const replayPackageDefaultEnvironment = useRef('');
+  useEffect(()=>{
+    const release=navigation.registerUnsavedChanges(Boolean(replaySourceJobId&&replayDirty),'Edited Job replay settings');
+    releaseReplayNavigationGuard.current=release;
+    return()=>{release();if(releaseReplayNavigationGuard.current===release)releaseReplayNavigationGuard.current=()=>{};};
+  },[navigation.registerUnsavedChanges,replayDirty,replaySourceJobId]);
   function markReplayDirty(){if(replaySourceJobId){setReplayDirty(true);setReplayReview(null);setDraft(null);setDraftState('idle');}}
 
   useEffect(() => {
     if(!replayDraftId||!replaySourceJobId)return;
-    if(!api.getJobReplayEditorDraft){setReplayDraftError('This Server client cannot load editable Job drafts.');return;}
+    if(!api.getJobReplayEditorDraft){setReplayDraftError('This Server client cannot load editable Job drafts.');setReplayDraftLoading(false);return;}
     const controller=new AbortController();replaySeeded.current=false;setReplayDraftLoading(true);setReplayDraftError('');
     api.getJobReplayEditorDraft(replaySourceJobId,replayDraftId).then(draft=>{
       if(controller.signal.aborted)return;
       if(draft.executionType!=='load')throw new Error('This Job contains a RUN definition, not a LOAD scenario.');
-      setReplayEditorDefinition(draft.definition);const scenario=asObject(draft.definition.scenario);
+      setReplayEditorDefinition(draft.definition);setReplayOriginalDefinition(draft.originalDefinition||draft.definition);const scenario=asObject(draft.definition.scenario);
+      replayEnvironmentOrigin.current=String(draft.configuration?.environmentOrigin||'');
+      replayPackageDefaultEnvironment.current=replayEnvironmentOrigin.current==='package'?String(draft.configuration?.environment||''):'';
       const rows=Array.isArray(scenario.workloads)?scenario.workloads:[];
       setMissingReplayFields(draft.missingFields||[]);
       setModel(asObject(asObject(rows[0]).load).arrivalRate!=null||asObject(scenario.load).arrivalRate!=null?'arrivalRate':'virtualUsers');
-      setReplayReview(null);setDraft(null);setDraftState('idle');setDiagnostics([]);setRequestError('');setReplayDirty(false);
-    }).catch(error=>{if(!controller.signal.aborted)setReplayDraftError(error instanceof Error?error.message:'The replay draft expired. Open the source Job again.');})
-      .finally(()=>{if(!controller.signal.aborted)setReplayDraftLoading(false);});
+      setReplayReview({jobId:draft.sourceJobId,available:true,...draft,definition:draft.definition,originalDefinition:draft.originalDefinition||draft.definition});
+      setDraft(null);setDraftState(draft.validationState==='invalid'?'error':'idle');setDraftMessage(draft.validationState==='invalid'?'The retained settings are ready to edit. Resolve the current Package errors, then validate again.':'Job settings loaded. Edit the fields, then validate against the current Package.');
+      setDiagnostics(draft.diagnostics||[]);setRequestError('');setRequestErrorCode('');setReplayDirty(false);
+    }).catch(error=>{if(!controller.signal.aborted){setReplayDraftError(error instanceof Error?error.message:'The replay draft expired. Open the source Job again.');setReplayDraftLoading(false);}});
     return()=>controller.abort();
   },[api,replayDraftId,replaySourceJobId]);
 
@@ -327,6 +339,7 @@ export function LoadPage(props: LoadFeatureProps): React.JSX.Element {
     setDraftState('idle');
     setDiagnostics([]);
     setRequestError('');
+    setRequestErrorCode('');
     if (packageChanged) {
       setPolicy(null);
       setWorkloads([]);
@@ -370,6 +383,7 @@ export function LoadPage(props: LoadFeatureProps): React.JSX.Element {
         if (controller.signal.aborted || sequence !== requestSequence.current) return;
         setPolicyState('error');
         setPolicyMessage(error instanceof Error ? error.message : 'Load policy is unavailable.');
+        if(replaySourceJobId){setReplayDraftError('Current Package policy could not be loaded. Reopen the source Job or retry after the Package is available.');setReplayDraftLoading(false);}
       });
     return () => controller.abort();
   }, [api, selectedPackage, selectedEnvironment, model, inlineLoadEnabled, replaySourceJobId]);
@@ -380,7 +394,8 @@ export function LoadPage(props: LoadFeatureProps): React.JSX.Element {
       const seeded=retainedScenarioToEditor(replayEditorDefinition.scenario);
       replaySeeded.current=true;setModel(seeded.model);setTiming(seeded.timing);setWorkloads(seeded.workloads);setAdvanced(seeded.advanced);
       setDraft(null);setDraftState('idle');setDraftMessage('Job settings loaded. Edit the fields, then validate against the current Package.');
-    } catch(error) {setReplayDraftError(error instanceof Error?error.message:'The retained LOAD definition cannot be edited safely.');}
+      setReplayDraftLoading(false);
+    } catch(error) {setReplayDraftError(error instanceof Error?error.message:'The retained LOAD definition cannot be edited safely.');setReplayDraftLoading(false);}
   },[policy,replayEditorDefinition]);
 
   useEffect(() => {
@@ -408,6 +423,7 @@ export function LoadPage(props: LoadFeatureProps): React.JSX.Element {
 
   async function validateScenario() {
     setRequestError('');
+    setRequestErrorCode('');
     setDiagnostics([]);
     let scenario: JsonObject;
     try { scenario = readScenario(); }
@@ -422,7 +438,8 @@ export function LoadPage(props: LoadFeatureProps): React.JSX.Element {
       if(replaySourceJobId) {
         if(!api.createJobReplayDraft)throw new Error('This Server client cannot validate an editable Job draft.');
         const scenarioLoad=asObject(scenario.load),scenarioWorkloads=Array.isArray(scenario.workloads)?scenario.workloads:[];
-        const overrides:Record<string,unknown>={environment:selectedEnvironment||'',
+        const environmentOverride=replayEnvironmentOrigin.current==='package'&&selectedEnvironment===replayPackageDefaultEnvironment.current?'':selectedEnvironment||'';
+        const overrides:Record<string,unknown>={environment:environmentOverride,
           load:Object.fromEntries(['warmup','rampUp','duration','rampDown'].filter(field=>scenarioLoad[field]!=null).map(field=>[field,scenarioLoad[field]])),
           workloads:scenarioWorkloads.map(raw=>{
             const row=asObject(raw),load=asObject(row.load);
@@ -436,9 +453,14 @@ export function LoadPage(props: LoadFeatureProps): React.JSX.Element {
         };
         for(const field of ['execution','testdata','thresholds','evidence','seed'])if(scenario[field]!=null)overrides[field]=scenario[field];
         const replay=await api.createJobReplayDraft(replaySourceJobId,{sourcePolicy:'current',overrides});
-        if(!replay.intentId)throw new Error(replay.reason||'The Server did not validate this replay draft.');
         setMissingReplayFields(replay.missingFields||[]);
-        setReplayReview(replay);response=(replay.preview||{}) as unknown as import('./types').LoadDraftResponse;
+        setReplayReview(replay);
+        if(!replay.intentId) {
+          setDiagnostics(replay.diagnostics||[]);setDraftState('error');setDraftMessage('Current Package validation needs attention. See the error and field diagnostics below.');
+          setRequestError(replay.reason||'Current Package validation failed.');setRequestErrorCode(replay.errorCode||'');setDraft(null);return;
+        }
+        if(replay.configuration?.environmentOrigin==='package')replayPackageDefaultEnvironment.current=String(replay.configuration.environment||'');
+        setDiagnostics(replay.diagnostics||[]);response=(replay.preview||{}) as unknown as import('./types').LoadDraftResponse;
       } else {
         response = await api.createLoadDraft({
           packageId,
@@ -459,8 +481,9 @@ export function LoadPage(props: LoadFeatureProps): React.JSX.Element {
       const serverDiagnostics = Array.isArray(details.diagnostics) ? details.diagnostics as ServerDiagnostic[] : [];
       setDiagnostics(serverDiagnostics);
       setDraftState('error');
-      setDraftMessage(details.message || 'Server validation failed.');
+      setDraftMessage('Validation needs attention. See the error and field diagnostics below.');
       setRequestError(details.message || 'Server validation failed.');
+      setRequestErrorCode((details as Error & { code?: string }).code || '');
     }
   }
 
@@ -479,8 +502,9 @@ export function LoadPage(props: LoadFeatureProps): React.JSX.Element {
       );
     } catch (error) {
       submitLock.current = false;
-      setDraftMessage(error instanceof Error ? error.message : 'Load start confirmation failed.');
+      setDraftMessage('Load start could not be confirmed. See the error below.');
       setRequestError(error instanceof Error ? error.message : 'Load start confirmation failed.');
+      setRequestErrorCode((error as Error & { code?: string }).code || '');
       setDraftState('error');
       setConfirmationPending(false);
       return;
@@ -495,14 +519,18 @@ export function LoadPage(props: LoadFeatureProps): React.JSX.Element {
         : await api.submitLoadDraft({ packageId: selectedPackage, draftId: draft.draftId, ...(principal ? { principal } : {}) });
       if(!job)throw new Error('The Server client cannot submit this replay.');
       setDraft(null);
+      releaseReplayNavigationGuard.current();
       setReplayDirty(false);
       onJobAccepted(job.jobId);
     } catch (error) {
-      const failure = error as Error & { status?: number; diagnostics?: unknown };
+      const failure = error as Error & { status?: number; code?: string; diagnostics?: unknown };
       setDiagnostics(Array.isArray(failure.diagnostics) ? failure.diagnostics as ServerDiagnostic[] : []);
       setDraftState('error');
-      setDraftMessage(failure.message || 'The Server did not accept this Load draft.');
+      setDraftMessage(failure.code === 'ATT-SERVER-REPLAY-DRAFT-STALE'
+        ? 'Your edits are retained. Validate again before running this LOAD.'
+        : 'The LOAD was not started. See the error below.');
       setRequestError(failure.message || 'The Server did not accept this Load draft.');
+      setRequestErrorCode(failure.code || '');
       if (failure.status === 404 || failure.status === 409) setDraft(null);
     } finally {
       submitLock.current = false;
@@ -571,6 +599,7 @@ export function LoadPage(props: LoadFeatureProps): React.JSX.Element {
         <button type="button" onClick={()=>navigation.navigate({kind:'jobs',jobId:replaySourceJobId})}>Back to source Job</button></div>}
       {missingReplayFields.length>0&&<p role="note">These fields were not safely retained and need an explicit value before this LOAD can run: {missingReplayFields.join(', ')}.</p>}
 
+      <div hidden={replayDraftLoading}>
       <nav className="att-section-nav" aria-label="Load scenario sections">
         <button type="button" aria-controls="load-model" onClick={() => navigateSection('load-model')}>Model</button>
         <button type="button" aria-controls="load-workloads" onClick={() => navigateSection('load-workloads')}>Workloads</button>
@@ -660,6 +689,7 @@ export function LoadPage(props: LoadFeatureProps): React.JSX.Element {
           {rawScenarioJson && <details><summary>Current complete scenario JSON</summary><CodeEditor value={rawScenarioJson} language="json" label="Complete scenario JSON" readOnly /></details>}
         </details>
       </section>
+      </div>
 
       <section id="load-review" className="att-load-section" aria-labelledby="load-review-title" tabIndex={-1}>
         <h2 id="load-review-title">Review and start</h2>
@@ -667,22 +697,23 @@ export function LoadPage(props: LoadFeatureProps): React.JSX.Element {
           <h3>Review changes from the source Job</h3>
           <p>Package revision: <code>{replayReview.originalRevision||replayReview.revision}</code> → <code>{replayReview.currentRevision||replayReview.revision}</code></p>
           <p>Configuration provenance: original environment {String(replayReview.originalConfiguration?.environment||replayEditorDefinition.environment||'Package default recorded for the Job')}; current environment {String(replayReview.configuration?.environment||selectedEnvironment||'Package default resolved now')}.</p>
-          <p>Effective duration: {effectiveDuration(initialTiming(asObject(replayEditorDefinition.scenario)))} → {effectiveDuration(timing)}</p>
+          <p>Effective duration: {effectiveDuration(initialTiming(asObject((replayOriginalDefinition||replayEditorDefinition).scenario)))} → {effectiveDuration(timing)}</p>
           <p>Configured target arrival rate is the pacing request. Measured TPS is observed completed throughput and can differ.</p>
-          {typeof replayEditorDefinition.sourcePath==='string'&&<p>Scenario source: <code>{replayEditorDefinition.sourcePath}</code></p>}
-          <details><summary>Before → after scenario</summary><pre>{JSON.stringify({before:replayEditorDefinition.scenario,after:replayReview.definition?.scenario||(()=>{try{return readScenario();}catch{return 'Correct the fields, then validate.';}})()},null,2)}</pre></details>
+          {typeof (replayOriginalDefinition||replayEditorDefinition).sourcePath==='string'&&<p>Scenario source: <code>{String((replayOriginalDefinition||replayEditorDefinition).sourcePath)}</code></p>}
+          <details><summary>Before → after scenario</summary><pre>{JSON.stringify({before:(replayOriginalDefinition||replayEditorDefinition).scenario,after:replayReview.definition?.scenario||(()=>{try{return readScenario();}catch{return 'Correct the fields, then validate.';}})()},null,2)}</pre></details>
         </div>}
         <div className={`att-validation-state att-state-${draftState}`} role="status" aria-live="polite" aria-busy={draftState === 'validating' || draftState === 'submitting'}>
           <p>{draftMessage}</p>
-          {requestError && <p>{requestError}</p>}
-          {diagnostics.length > 0 && <ul>{diagnostics.map((item, index) => <li key={`${item.code || item.path || 'diagnostic'}-${index}`}>
-            {[item.severity, item.path, item.code].filter(Boolean).join(' · ')}{item.message || item.summary ? `: ${item.message || item.summary}` : ''}
+          {diagnostics.length > 0 && <ul aria-label="LOAD validation details">{diagnostics.map((item, index) => <li key={`${item.code || item.field || item.path || 'diagnostic'}-${index}`}>
+            {[item.severity, item.field || item.path, item.code].filter(Boolean).join(' · ')}{item.message || item.summary ? `: ${item.message || item.summary}` : ''}
           </li>)}</ul>}
         </div>
+        {requestError && <p className="att-inline-error" role="alert">{requestError}</p>}
+        {requestErrorCode === 'ATT-SERVER-REPLAY-DRAFT-STALE' && <button type="button" onClick={() => void validateScenario()}>Validate again</button>}
         {draft && <p className="att-draft-expiry">Draft expires {new Date(draft.expiresAt).toLocaleString()}.</p>}
         {preview && <CodeEditor value={preview} language="yaml" label="Server-validated scenario preview" readOnly />}
         <div className="att-review-actions">
-          <button type="button" onClick={() => void validateScenario()} disabled={!policy || (!inlineLoadEnabled&&!replaySourceJobId) || draftState === 'validating' || draftState === 'submitting'}>Validate scenario</button>
+          <button type="button" onClick={() => void validateScenario()} disabled={replayDraftLoading || !policy || (!inlineLoadEnabled&&!replaySourceJobId) || draftState === 'validating' || draftState === 'submitting'}>Validate scenario</button>
           {!replaySourceJobId&&<button type="button" onClick={() => draft?.draftId && onSchedule?.({ packageId: selectedPackage, environment: selectedEnvironment || undefined, draftId: draft.draftId, previewYaml: draft.previewYaml })}
             disabled={!schedulingEnabled || !draft?.draftId || draftState !== 'valid' || !onSchedule}
             title={!schedulingEnabled ? 'Scheduled Load is disabled by Server configuration.' : !draft?.draftId ? 'Validate the scenario before scheduling.' : undefined}>Schedule…</button>

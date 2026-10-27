@@ -5,8 +5,9 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { RunPage } from './RunPage';
 import { api } from '../../api';
 import { NavigationGuardContext, type NavigationGuardApi } from '../../router';
+import { ApiError } from '../../types';
 import type { DebugFormResponse, JsonObject, ResourceIdentity } from '../explorer/types';
-vi.mock('../../api', () => ({ api: { previewRun: vi.fn(), submitRun: vi.fn(), getDeclaredConfiguration: vi.fn(), getDebugForm: vi.fn(), getJobReplayEditorDraft: vi.fn(), createJobReplayDraft: vi.fn(), rerunJob: vi.fn() } }));
+vi.mock('../../api', () => ({ api: { previewRun: vi.fn(), submitRun: vi.fn(), getDeclaredConfiguration: vi.fn(), getPackageManifest: vi.fn(), getDebugForm: vi.fn(), getJobReplayEditorDraft: vi.fn(), createJobReplayDraft: vi.fn(), rerunJob: vi.fn() } }));
 vi.mock('../code/CodeEditor', () => ({ CodeEditor: ({ label, value, readOnly, onChange }: { label: string; value: string; readOnly?: boolean; onChange?: (value: string) => void }) => <textarea aria-label={label} value={value} readOnly={readOnly} onChange={e => onChange?.(e.target.value)} /> }));
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 let host: HTMLDivElement; let root: Root;
@@ -20,6 +21,7 @@ beforeEach(async () => {
   vi.mocked(api.createJobReplayDraft).mockReset();
   vi.mocked(api.rerunJob).mockReset();
   vi.mocked(api.getDeclaredConfiguration).mockResolvedValue({ environments: [{ name: 'SIT', state: 'active' }, { name: 'UAT', state: 'active' }] });
+  vi.mocked(api.getPackageManifest).mockResolvedValue({packageId:'payments',present:true,canEdit:false,manifestDigest:'a'.repeat(64),environment:'SIT',environmentOrigin:'package'});
   vi.mocked(api.getDebugForm).mockImplementation(async identity => ({
     target: { type: identity.type as 'template' | 'flow' | 'tool', id: identity.resourceId }, input: {},
   }));
@@ -138,7 +140,7 @@ it('refreshes defaults on environment changes and ignores an older response', as
 it('prefills a safe RUN replay from an opaque draft reference and validates typed overrides', async () => {
   vi.mocked(api.getJobReplayEditorDraft).mockResolvedValue({
     schemaVersion:'att-job-replay-draft/v1',draftRef:'R0123456789ABCDEF0123456789ABCDEF',sourceJobId:'J0123456789ABCDEF',packageId:'payments',executionType:'run',sourcePolicy:'current',
-    originalRevision:'a'.repeat(64),currentRevision:'b'.repeat(64),configuration:{environment:'SIT'},expiresAt:new Date(Date.now()+60000).toISOString(),missingFields:[],
+    originalRevision:'a'.repeat(64),currentRevision:'b'.repeat(64),configuration:{environment:'SIT',environmentOrigin:'package'},expiresAt:new Date(Date.now()+60000).toISOString(),missingFields:[],
     definition:{schemaVersion:'att-execution/v1',executionType:'run',packageId:'payments',environment:'SIT',target:{type:'tool',id:'lookup-customer'},input:{inputs:{requestId:'R1'},arguments:{limit:3}},options:{debug:true,failFast:true}},
   });
   vi.mocked(api.getDebugForm).mockResolvedValue({target:{type:'tool',id:'lookup-customer'},input:{inputs:{requestId:'default'},arguments:{limit:1}}});
@@ -148,13 +150,70 @@ it('prefills a safe RUN replay from an opaque draft reference and validates type
   await settleDebugForm();
   expect(api.getJobReplayEditorDraft).toHaveBeenCalledWith('J0123456789ABCDEF','R0123456789ABCDEF0123456789ABCDEF');
   expect((control('Target ID') as HTMLInputElement).value).toBe('lookup-customer');
-  expect((control('Environment') as HTMLSelectElement).value).toBe('SIT');
+  expect((control('Environment') as HTMLSelectElement).value).toBe('');
+  expect(host.textContent).toContain('Resolved Environment: SIT · Origin: Package Manifest');
+  expect(api.getPackageManifest).toHaveBeenLastCalledWith('payments','effective',undefined,expect.any(AbortSignal));
   expect((control('Debug diagnostics') as HTMLInputElement).checked).toBe(true);
   expect((control('Stop after the first failed Case') as HTMLInputElement).checked).toBe(true);
   expect((host.querySelector('input[aria-label="limit value"]') as HTMLInputElement).value).toBe('3');
   await click('Validate');
-  expect(api.createJobReplayDraft).toHaveBeenCalledWith('J0123456789ABCDEF',{sourcePolicy:'current',overrides:expect.objectContaining({environment:'SIT',options:{debug:true,failFast:true},target:{type:'tool',id:'lookup-customer'},input:{inputs:{requestId:'R1'},arguments:{limit:3}}})});
+  expect(api.createJobReplayDraft).toHaveBeenCalledWith('J0123456789ABCDEF',{sourcePolicy:'current',overrides:expect.objectContaining({environment:'',options:{debug:true,failFast:true},target:{type:'tool',id:'lookup-customer'},input:{inputs:{requestId:'R1'},arguments:{limit:3}}})});
   expect(host.textContent).toContain('Review changes from the source Job');
+});
+
+it('keeps default RUN controls disabled until the authorized replay draft is applied', async () => {
+  let resolveDraft!:(draft:import('../load/types').JobReplayEditorDraft)=>void;
+  vi.mocked(api.getJobReplayEditorDraft).mockReturnValue(new Promise(resolve=>{resolveDraft=resolve;}));
+  await act(async()=>root.render(<NavigationGuardContext.Provider value={guard}><RunPage packageId="payments" replayDraftId="R0123456789ABCDEF0123456789ABCDEF" replaySourceJobId="J0123456789ABCDEF" onAccepted={onAccepted} onSchedule={onSchedule} schedulingEnabled /></NavigationGuardContext.Provider>));
+  expect(host.textContent).toContain('Loading the authorized Job draft');
+  expect(host.querySelector('.att-run-definition')?.getAttribute('disabled')).not.toBeNull();
+  expect([...host.querySelectorAll('button')].find(button=>button.textContent==='Validate')?.matches(':disabled')).toBe(true);
+  await act(async()=>resolveDraft({schemaVersion:'att-job-replay-draft/v1',draftRef:'R0123456789ABCDEF0123456789ABCDEF',sourceJobId:'J0123456789ABCDEF',packageId:'payments',executionType:'run',sourcePolicy:'current',
+    originalRevision:'a'.repeat(64),currentRevision:'b'.repeat(64),configuration:{environment:'SIT',environmentOrigin:'package'},expiresAt:new Date(Date.now()+60000).toISOString(),missingFields:[],
+    definition:{schemaVersion:'att-execution/v1',executionType:'run',packageId:'payments',environment:'SIT',target:{type:'tool',id:'lookup-customer'},input:{inputs:{requestId:'R1'}},options:{debug:false}}}));
+  await settleDebugForm();
+  expect(host.textContent).toContain('Job settings loaded. Review the retained fields');
+  expect((control('Target ID') as HTMLInputElement).value).toBe('lookup-customer');
+  expect(host.querySelector('.att-run-definition')?.hasAttribute('disabled')).toBe(false);
+  expect([...host.querySelectorAll('button')].find(button=>button.textContent==='Validate')?.disabled).toBe(false);
+});
+
+it('keeps an invalid retained RUN target editable and blocks execution until current validation succeeds', async () => {
+  vi.mocked(api.getJobReplayEditorDraft).mockResolvedValue({schemaVersion:'att-job-replay-draft/v1',draftRef:'R0123456789ABCDEF0123456789ABCDEF',sourceJobId:'J0123456789ABCDEF',packageId:'payments',executionType:'run',sourcePolicy:'current',
+    originalRevision:'a'.repeat(64),currentRevision:'b'.repeat(64),configuration:{environment:'SIT'},expiresAt:new Date(Date.now()+60000).toISOString(),missingFields:[],validationState:'invalid',errorCode:'ATT-SERVER-REPLAY-RESOURCE-MISSING',
+    diagnostics:[{code:'ATT-SERVER-REPLAY-RESOURCE-MISSING',field:'target.id',summary:'Target no longer exists in this Package.'}],
+    definition:{schemaVersion:'att-execution/v1',executionType:'run',packageId:'payments',environment:'SIT',target:{type:'tool',id:'removed-tool'},input:{inputs:{requestId:'R1'}},options:{debug:false}}});
+  vi.mocked(api.getDebugForm).mockResolvedValue({target:{type:'tool',id:'removed-tool'},input:{inputs:{}}});
+  vi.mocked(api.createJobReplayDraft).mockResolvedValue({jobId:'J0123456789ABCDEF',available:true,sourcePolicy:'current',draftRef:'R0123456789ABCDEF0123456789ABCDEF',
+    validationState:'invalid',errorCode:'ATT-SERVER-REPLAY-RESOURCE-MISSING',diagnostics:[{code:'ATT-SERVER-REPLAY-RESOURCE-MISSING',field:'target.id',summary:'Target no longer exists in this Package.'}]});
+  await act(async () => root.render(<NavigationGuardContext.Provider value={guard}><RunPage packageId="payments" replayDraftId="R0123456789ABCDEF0123456789ABCDEF" replaySourceJobId="J0123456789ABCDEF" onAccepted={onAccepted} onSchedule={onSchedule} schedulingEnabled /></NavigationGuardContext.Provider>));
+  await settleDebugForm();
+  expect((control('Target ID') as HTMLInputElement).value).toBe('removed-tool');
+  expect(host.textContent).toContain('Target no longer exists in this Package.');
+  expect(host.querySelector('.att-run-review .button-primary')).toBeNull();
+  await click('Validate');
+  expect(host.textContent).toContain('target.id');expect(host.querySelector('.att-run-review .button-primary')).toBeNull();expect(api.submitRun).not.toHaveBeenCalled();
+});
+
+it('renders one alert when a validated RUN replay becomes stale at submit', async () => {
+  vi.mocked(api.getJobReplayEditorDraft).mockResolvedValue({schemaVersion:'att-job-replay-draft/v1',draftRef:'R0123456789ABCDEF0123456789ABCDEF',sourceJobId:'J0123456789ABCDEF',packageId:'payments',executionType:'run',sourcePolicy:'current',
+    originalRevision:'a'.repeat(64),currentRevision:'b'.repeat(64),configuration:{environment:'SIT',environmentOrigin:'package'},expiresAt:new Date(Date.now()+60000).toISOString(),missingFields:[],
+    definition:{schemaVersion:'att-execution/v1',executionType:'run',packageId:'payments',environment:'SIT',target:{type:'tool',id:'lookup-customer'},input:{inputs:{requestId:'R1'}},options:{debug:false}}});
+  vi.mocked(api.getDebugForm).mockResolvedValue({target:{type:'tool',id:'lookup-customer'},input:{inputs:{requestId:'default'}}});
+  vi.mocked(api.createJobReplayDraft).mockResolvedValue({jobId:'J0123456789ABCDEF',available:true,sourcePolicy:'current',intentId:'intent',draftId:'R123',
+    preview:{draftId:'R123',preview:{target:{type:'tool',id:'lookup-customer'}},expiresAt:new Date(Date.now()+60000).toISOString()}});
+  vi.mocked(api.rerunJob).mockRejectedValueOnce(new ApiError('The Package changed after replay validation. Revalidate your edits.',{status:409,code:'ATT-SERVER-REPLAY-DRAFT-STALE'})).mockResolvedValueOnce({jobId:'J-new'});
+  await act(async()=>root.render(<NavigationGuardContext.Provider value={guard}><RunPage packageId="payments" replayDraftId="R0123456789ABCDEF0123456789ABCDEF" replaySourceJobId="J0123456789ABCDEF" onAccepted={onAccepted} onSchedule={onSchedule} schedulingEnabled /></NavigationGuardContext.Provider>));
+  await settleDebugForm();await change('Target ID','edited-target');await settleDebugForm();await click('Validate');await click('Run new Job');
+  const alerts=host.querySelectorAll('[role="alert"]');
+  expect(alerts).toHaveLength(1);
+  expect(alerts[0].textContent).toContain('The Package changed after replay validation. Revalidate your edits.');
+  expect(host.textContent?.match(/Package changed after replay validation/g)).toHaveLength(1);
+  expect(api.submitRun).not.toHaveBeenCalled();
+  await click('Validate');await click('Run new Job');
+  expect(api.rerunJob).toHaveBeenCalledTimes(2);
+  expect(onAccepted).toHaveBeenCalledWith({jobId:'J-new',packageId:'payments'});
+  expect(release).toHaveBeenCalled();
 });
 
 it('releases the dirty-form guard for an accepted validated Schedule handoff', async () => {

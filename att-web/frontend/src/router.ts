@@ -207,7 +207,7 @@ export function formatRoute(route: AppRoute): string {
     }
     case 'load': {
       if (route.packageId) {
-        const query=new URLSearchParams();if(route.templateId)query.set('templateId',route.templateId);
+        const query=new URLSearchParams();if(route.environment!==undefined)query.set('environment',route.environment);if(route.templateId)query.set('templateId',route.templateId);
         if(route.replayDraftId&&route.replaySourceJobId){query.set('replayDraft',route.replayDraftId);query.set('replaySourceJob',route.replaySourceJobId);}
         return '#/advanced-load/' + encodeURIComponent(route.packageId) + (query.size?'?'+query.toString():'');
       }

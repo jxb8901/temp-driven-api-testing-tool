@@ -94,7 +94,7 @@ function LoadRouteView({ packageId, templateId, environment: initialEnvironment,
 }) {
   const workspace = useAppShellContext();
   const navigation = useNavigationGuard();
-  const [routeEnvironment,setRouteEnvironment] = useState(initialEnvironment ?? workspace.selectedEnvironment);
+  const [routeEnvironment,setRouteEnvironment] = useState(initialEnvironment ?? (replaySourceJobId ? '' : workspace.selectedEnvironment));
   const [environments, setEnvironments] = useState<string[]>([]);
   const [environmentState, setEnvironmentState] = useState<'loading' | 'ready' | 'error'>('loading');
   const [environmentReload, setEnvironmentReload] = useState(0);

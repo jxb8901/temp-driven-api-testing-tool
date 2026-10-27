@@ -48,6 +48,9 @@ describe('ATT hash route contract', () => {
 
   it('round-trips template, Scenarios and LOAD-filtered Jobs detail links', () => {
     for(const route of [{kind:'load',tab:'scenarios'},{kind:'load',packageId:'p',templateId:'builtin:multi-workload-mix'},{kind:'jobs',executionType:'load'},{kind:'jobs',jobId:'J123',executionType:'load'}] as const) expect(parseRoute(formatRoute(route))).toEqual(route);
+    const replay = { kind:'load', packageId:'payments', environment:'UAT', replayDraftId:'C0123456789ABCDEF0123456789ABCDEF', replaySourceJobId:'J0123456789ABCDEF' } as const;
+    expect(parseRoute(formatRoute(replay))).toEqual(replay);
+    expect(formatRoute(replay)).toContain('environment=UAT');
   });
 
   it('round-trips LOAD resource deep links and preserves LOAD Catalog return filters', () => {

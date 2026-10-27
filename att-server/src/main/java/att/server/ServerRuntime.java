@@ -334,8 +334,9 @@ final class ServerRuntime implements AutoCloseable {
     private final Map<String,ReplayReview> replayReviews=new java.util.concurrent.ConcurrentHashMap<>();
     private record ReplayReview(String source,String principal,String draftId,String packageId,String executionType,String sourcePolicy,
                                 String originalRevision,String selectedRevision,String configurationDigest,
-                                String sourcePath,ObjectNode definition,Map<String,Object> originalConfiguration,
-                                Map<String,Object> configuration,Instant expiresAt) {}
+                                String sourcePath,ObjectNode originalDefinition,ObjectNode definition,Map<String,Object> originalConfiguration,
+                                Map<String,Object> configuration,String validationCode,List<Map<String,Object>> diagnostics,
+                                Instant expiresAt) {}
 
     private Map<String,String> ownedExecutionSpec(String id,String principal) throws Exception {
         requireLocalOperator(principal);requireJobOwner(id,principal);
@@ -380,11 +381,16 @@ final class ServerRuntime implements AutoCloseable {
             if(!Set.of("current","strict").contains(sourcePolicy))throw new IllegalArgumentException("sourcePolicy must be current or strict");
             Map<String,String> record=ownedExecutionSpec(id,principal);
             if(record.get("spec")==null)throw new ReplayInputMissingException("Rerun is unavailable because this Job has no safely retained execution definition. Re-enter the missing inputs in a new run.");
-            JobExecutionSpec spec=JobExecutionSpec.parse(record.get("spec"));ObjectNode definition=JobReplayOverrides.apply(spec.definition(),request.get("overrides"));
+            JobExecutionSpec spec=JobExecutionSpec.parse(record.get("spec"));ObjectNode originalDefinition=spec.definition();
+            requireReplayReviewCapacity(principal);
+            ObjectNode definition=JobReplayOverrides.apply(originalDefinition,request.get("overrides"));
+            boolean packageDefaultEnvironment=spec.configuration()!=null&&"package".equals(spec.configuration().get("environmentOrigin"));
+            JsonNode environmentOverride=request.path("overrides").path("environment");
+            if(packageDefaultEnvironment&&(!environmentOverride.isTextual()||environmentOverride.asText().isBlank()))definition.remove("environment");
             String packageId=required(definition,"packageId"),environment=optionalText(definition,"environment");
             if("strict".equals(sourcePolicy))verifyStrictReplayRevision(packageId,environment,spec.revision());
             boolean run="run".equals(definition.path("executionType").asText());
-            Map<String,Object> draft;
+            Map<String,Object> draft=null;String validationCode=null;List<Map<String,Object>> diagnostics=Collections.emptyList();
             try {
                 if(run)draft=createRunDraft(definition,principal,true,null);
                 else if(spec.value.has("sourcePath")) {
@@ -402,13 +408,16 @@ final class ServerRuntime implements AutoCloseable {
                     ObjectNode input=definition.deepCopy();input.remove("executionType");draft=createAdvancedLoadDraft(input,principal,null);
                     JsonNode normalized=JSON.valueToTree(draft.get("scenario"));if(normalized.isObject())definition.set("scenario",normalized);
                 }
-            } catch(ReplayInputMissingException missing){throw missing;}
-              catch(InlineLoadLimitException limit){throw limit;}
+            } catch(ReplayInputMissingException missing){validationCode="ATT-SERVER-REPLAY-INPUT-MISSING";diagnostics=List.of(replayDiagnostic(validationCode,"inputs",missing.getMessage()));}
+              catch(InlineLoadLimitException limit){validationCode="ATT-SERVER-INLINE-LOAD-LIMIT";diagnostics=List.of(replayDiagnostic(validationCode,"scenario.load",limit.getMessage()));}
+              catch(InspectionConfigurationException invalid){validationCode="ATT-SERVER-REPLAY-VALIDATION-FAILED";diagnostics=safeReplayDiagnostics(invalid.diagnostics,validationCode);}
               catch(DraftValidationException invalid){
-                if(replayDiagnosticsShowMissingResource(invalid.diagnostics))throw new ReplayResourceMissingException();
-                throw new ReplayValidationException(invalid.diagnostics);
-              } catch(NotFoundException missing){throw new ReplayResourceMissingException();}
-              catch(IllegalArgumentException invalid){throw new ReplayValidationException(invalid.getMessage());}
+                if(replayDiagnosticsShowMissingResource(invalid.diagnostics)){validationCode="ATT-SERVER-REPLAY-RESOURCE-MISSING";diagnostics=safeReplayDiagnostics(invalid.diagnostics,validationCode);}
+                else {validationCode="ATT-SERVER-REPLAY-VALIDATION-FAILED";diagnostics=safeReplayDiagnostics(invalid.diagnostics,validationCode);}
+              } catch(NotFoundException missing){validationCode="ATT-SERVER-REPLAY-RESOURCE-MISSING";diagnostics=List.of(replayDiagnostic(validationCode,"target or scenario","The retained resource is missing or no longer available in this Package. Choose an available resource, then validate again."));}
+              catch(StaleCursorException stale){validationCode="ATT-SERVER-REPLAY-DRAFT-STALE";diagnostics=List.of(replayDiagnostic(validationCode,"package","The Package changed during validation. Validate these edits again."));}
+              catch(IllegalArgumentException invalid){validationCode="ATT-SERVER-REPLAY-VALIDATION-FAILED";diagnostics=List.of(replayDiagnostic(validationCode,run?"target or selection":"scenario",invalid.getMessage()));}
+            if(validationCode!=null)return createInvalidReplayDraft(id,principal,spec,sourcePolicy,originalDefinition,definition,packageId,run,validationCode,diagnostics);
             String draftId=String.valueOf(draft.get("draftId"));
             String selectedRevision=String.valueOf(draft.get("revisionDigest"));
             if(!selectedRevision.matches("[a-f0-9]{64}"))throw new IllegalStateException("Replay validation did not produce a current package revision");
@@ -417,19 +426,71 @@ final class ServerRuntime implements AutoCloseable {
             String effectiveEnvironment=configuration.get("environment") instanceof String?(String)configuration.get("environment"):environment;
             if(effectiveEnvironment!=null)definition.put("environment",effectiveEnvironment);
             if("strict".equals(sourcePolicy)&&!selectedRevision.equals(spec.revision()))verifyStrictReplayRevision(packageId,effectiveEnvironment,spec.revision());
-            replayReviews.entrySet().removeIf(entry->!entry.getValue().expiresAt.isAfter(clock.instant()));
-            if(replayReviews.size()>=MAX_ACTIVE_DRAFTS)throw new DraftCapacityException();
+            requireReplayReviewCapacity(principal);
             String intent=UUID.randomUUID().toString();Instant expires=clock.instant().plusMillis(DRAFT_TTL_MILLIS);
             replayReviews.put(intent,new ReplayReview(id,principal,draftId,packageId,run?"run":"load",sourcePolicy,spec.revision(),selectedRevision,
-                    replayConfigurationDigest(configuration),spec.value.path("sourcePath").asText(null),definition.deepCopy(),spec.configuration(),
-                    att.server.api.ConfigurationSnapshot.copy(configuration),expires));
+                    replayConfigurationDigest(configuration),spec.value.path("sourcePath").asText(null),originalDefinition.deepCopy(),definition.deepCopy(),spec.configuration(),
+                    att.server.api.ConfigurationSnapshot.copy(configuration),null,Collections.emptyList(),expires));
             Map<String,Object> result=new LinkedHashMap<>(jobReplay(id,principal));
             Object oldConfiguration=result.remove("configuration");if(oldConfiguration!=null)result.put("originalConfiguration",oldConfiguration);
-            result.put("schemaVersion","att-job-replay-draft/v1");result.put("definition",definition);result.put("sourcePolicy",sourcePolicy);
+            result.put("schemaVersion","att-job-replay-draft/v1");result.put("definition",definition);result.put("originalDefinition",originalDefinition);result.put("sourcePolicy",sourcePolicy);
             result.put("originalRevision",spec.revision());result.put("currentRevision",selectedRevision);result.put("configuration",configuration);
             result.put("missingFields",replayMissingFields(definition));
             result.put("intentId",intent);result.put("draftId",draftId);result.put("draftRef",draftId);result.put("expiresAt",expires.toString());result.put("preview",draft);return result;
         }
+    }
+    private Map<String,Object> createInvalidReplayDraft(String id,String principal,JobExecutionSpec spec,String sourcePolicy,
+            ObjectNode originalDefinition,ObjectNode definition,String packageId,boolean run,String validationCode,
+            List<Map<String,Object>> diagnostics) throws Exception {
+        String environment=optionalText(definition,"environment"),selectedRevision="";Map<String,Object> configuration=Collections.emptyMap();
+        try {
+            Path root=packageRoot(packageId);if(root==null)throw new NotFoundException();
+            WorkerRequest revisionRequest=inspectionRequest(packageId,root,environment);revisionRequest.inspectionAction="revision";
+            Map<String,Object> inspected=executeInspection(root,revisionRequest);Object digest=inspected.get("revisionDigest");
+            if(digest instanceof String&&((String)digest).matches("[a-f0-9]{64}"))selectedRevision=(String)digest;
+        } catch(Exception ignored) { /* Keep the editor draft available when current Package inspection itself is unavailable. */ }
+        try {
+            Path root=packageRoot(packageId);if(root!=null)configuration=configurationRevision(resolveExecutionConfiguration(packageId,root,environment),selectedRevision.isEmpty()?null:selectedRevision);
+        } catch(Exception ignored) { /* Diagnostics below explain why the retained definition still needs editing. */ }
+        String effectiveEnvironment=configuration.get("environment") instanceof String?(String)configuration.get("environment"):environment;
+        if(effectiveEnvironment!=null)definition.put("environment",effectiveEnvironment);
+        String draftRef=(run?"R":"C")+UUID.randomUUID().toString().replace("-","").toUpperCase(java.util.Locale.ROOT);
+        Instant expires=clock.instant().plusMillis(DRAFT_TTL_MILLIS);requireReplayReviewCapacity(principal);
+        replayReviews.put(UUID.randomUUID().toString(),new ReplayReview(id,principal,draftRef,packageId,run?"run":"load",sourcePolicy,spec.revision(),selectedRevision,
+                null,spec.value.path("sourcePath").asText(null),originalDefinition.deepCopy(),definition.deepCopy(),spec.configuration(),
+                configuration,validationCode,safeReplayDiagnostics(diagnostics,validationCode),expires));
+        Map<String,Object> result=new LinkedHashMap<>(jobReplay(id,principal));Object oldConfiguration=result.remove("configuration");
+        if(oldConfiguration!=null)result.put("originalConfiguration",oldConfiguration);
+        result.put("schemaVersion","att-job-replay-draft/v1");result.put("draftRef",draftRef);result.put("draftId",draftRef);result.put("sourceJobId",id);
+        result.put("packageId",packageId);result.put("executionType",run?"run":"load");result.put("sourcePolicy",sourcePolicy);
+        result.put("originalRevision",spec.revision());result.put("currentRevision",selectedRevision);result.put("originalDefinition",originalDefinition);result.put("definition",definition);
+        result.put("sourcePath",spec.value.path("sourcePath").asText(null));result.put("configuration",configuration);result.put("expiresAt",expires.toString());
+        result.put("validationState","invalid");result.put("errorCode",validationCode);result.put("diagnostics",safeReplayDiagnostics(diagnostics,validationCode));
+        List<String> missing=new ArrayList<>(replayMissingFields(definition));if("ATT-SERVER-REPLAY-INPUT-MISSING".equals(validationCode)&&!missing.contains("sensitive inputs"))missing.add("sensitive inputs");
+        result.put("missingFields",missing);return result;
+    }
+    private void requireReplayReviewCapacity(String principal) {
+        Instant now=clock.instant();replayReviews.entrySet().removeIf(entry->!entry.getValue().expiresAt.isAfter(now));
+        long owned=replayReviews.values().stream().filter(review->java.util.Objects.equals(principal,review.principal)).count();
+        if(replayReviews.size()>=MAX_ACTIVE_DRAFTS||owned>=MAX_DRAFTS_PER_PRINCIPAL)throw new DraftCapacityException();
+    }
+    private static Map<String,Object> replayDiagnostic(String code,String field,String summary) {
+        Map<String,Object> result=new LinkedHashMap<>();result.put("code",code);result.put("field",field);result.put("summary",summary==null?"Replay validation failed against the current Package.":summary);return result;
+    }
+    private static List<Map<String,Object>> safeReplayDiagnostics(List<Map<String,Object>> diagnostics,String fallbackCode) {
+        List<Map<String,Object>> safe=new ArrayList<>();
+        if(diagnostics!=null)for(Map<String,Object> diagnostic:diagnostics) {
+            Map<String,Object> item=new LinkedHashMap<>();
+            for(String field:List.of("code","field","path","resourceId","severity","summary","message","suggestion")) {
+                Object value=diagnostic.get(field);if(value instanceof String) {
+                    String text=(String)value;if(text.length()>512||containsControl(text)||text.startsWith("/")||text.contains("..\\"))continue;
+                    item.put(field,text);
+                }
+            }
+            if(item.get("code")==null)item.put("code",fallbackCode);if(item.get("summary")==null)item.put("summary","Replay validation failed against the current Package.");safe.add(item);
+        }
+        if(safe.isEmpty())safe.add(replayDiagnostic(fallbackCode,"scenario","Replay validation failed against the current Package. Review the affected fields and validate again."));
+        return Collections.unmodifiableList(safe);
     }
     private static List<String> replayMissingFields(ObjectNode definition) {
         List<String> missing=new ArrayList<>();
@@ -472,11 +533,14 @@ final class ServerRuntime implements AutoCloseable {
             Map<String,Object> view=new LinkedHashMap<>();view.put("schemaVersion","att-job-replay-draft/v1");view.put("draftRef",draftId);view.put("sourceJobId",jobId);
             view.put("packageId",review.packageId);view.put("executionType",review.executionType);view.put("sourcePolicy",review.sourcePolicy);
             view.put("originalRevision",review.originalRevision);view.put("currentRevision",review.selectedRevision);
-            ObjectNode definition=review.definition.deepCopy();if(review.sourcePath!=null)definition.put("sourcePath",review.sourcePath);
-            view.put("definition",definition);view.put("sourcePath",review.sourcePath);
+            ObjectNode definition=review.definition.deepCopy(),originalDefinition=review.originalDefinition.deepCopy();
+            if(review.sourcePath!=null){definition.put("sourcePath",review.sourcePath);originalDefinition.put("sourcePath",review.sourcePath);}
+            view.put("definition",definition);view.put("originalDefinition",originalDefinition);view.put("sourcePath",review.sourcePath);
             if(review.originalConfiguration!=null)view.put("originalConfiguration",att.server.api.ConfigurationSnapshot.copy(review.originalConfiguration));
-            view.put("configuration",att.server.api.ConfigurationSnapshot.copy(review.configuration));view.put("expiresAt",review.expiresAt.toString());
-            view.put("missingFields",replayMissingFields(review.definition));return view;
+            view.put("configuration",review.configuration.isEmpty()?Collections.emptyMap():att.server.api.ConfigurationSnapshot.copy(review.configuration));view.put("expiresAt",review.expiresAt.toString());
+            view.put("missingFields",replayMissingFields(review.definition));view.put("validationState",review.validationCode==null?"valid":"invalid");
+            if(review.validationCode!=null){view.put("errorCode",review.validationCode);view.put("diagnostics",review.diagnostics);}
+            return view;
         }
     }
     Map<String,Object> rerunJob(String id,JsonNode body,String principal) throws Exception {
