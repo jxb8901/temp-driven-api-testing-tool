@@ -1,6 +1,3 @@
-Warning: truncated output (original token count: 9781)
-Total output lines: 393
-
 package att.server;
 
 import com.fasterxml.jackson.databind.JsonNode;
@@ -156,7 +153,104 @@ class ServerRuntimeTest {
     }
 
     @Test void cancellationCannotSlipBetweenWorkerLaunchAndProcessPublication() throws Exception {
-        org.junit.jupiter.api.Assum…2781 tokens truncated…fact(id,oversized));
+        org.junit.jupiter.api.Assumptions.assumeFalse(System.getProperty("os.name","").toLowerCase().contains("win"),"Uses a POSIX test launcher");
+        Path allowed=Files.createDirectory(temp.resolve("cancel-packages"));Path pkg=Files.createDirectory(allowed.resolve("package"));
+        Path launcher=temp.resolve("slow-java");Files.writeString(launcher,"#!/bin/sh\nexec sleep 60\n");launcher.toFile().setExecutable(true);
+        Path configFile=temp.resolve("cancel-server.yaml");Files.writeString(configFile,"server:\n  dataDir: "+temp.resolve("cancel-data")+"\n  javaExecutable: "+launcher+"\nworkers:\n  maxConcurrent: 1\n  queuedLimit: 1\n  maxConcurrentLoad: 1\npackages:\n  allowedRoots:\n    - "+allowed+"\n  entries:\n    p: "+pkg+"\n");
+        ServerConfig config=ServerConfig.load(configFile);Path libs=Files.createDirectory(temp.resolve("cancel-WEB-INF-lib"));
+        CountDownLatch launchEntered=new CountDownLatch(1),allowLaunch=new CountDownLatch(1);
+        AtomicReference<Process> launched=new AtomicReference<>();
+        ServerRuntime runtime=new ServerRuntime(config,libs.toString(),ServerRuntimeTestSupport.resolvingConfiguration(builder->{
+            launchEntered.countDown();
+            try {if(!allowLaunch.await(30,TimeUnit.SECONDS))throw new java.io.IOException("test launch gate timed out");}
+            catch(InterruptedException e){Thread.currentThread().interrupt();throw new java.io.IOException("test launch gate interrupted",e);}
+            Process process=builder.start();launched.set(process);return process;
+        }));
+        try {
+            Map<String,Object> submitted=runtime.submit("validate",ServerRuntime.JSON.readTree("{\"packageId\":\"p\"}"),"ci-test");
+            String id=(String)submitted.get("jobId");assertTrue(launchEntered.await(30,TimeUnit.SECONDS),"Worker launcher should reach the process-publication boundary");
+            FutureTask<Void> cancel=new FutureTask<>(()->{runtime.cancel(id,"ci-test");return null;});new Thread(cancel,"test-job-cancel").start();
+            Thread.sleep(100);assertFalse(cancel.isDone(),"Cancellation must wait while launch and process publication are atomic");
+            allowLaunch.countDown();cancel.get(5,TimeUnit.SECONDS);
+            assertEquals("CANCELLED",runtime.jobRecord(id).get("status"));
+            assertNotNull(launched.get());assertFalse(launched.get().isAlive(),"Cancellation must terminate the published Worker process");
+            long cleanupDeadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(5);
+            while(runtime.jobs.containsKey(id)&&System.nanoTime()<cleanupDeadline)Thread.sleep(10);
+            assertFalse(runtime.jobs.containsKey(id),"Worker cleanup must finish before the temporary fixture is removed");
+        } finally {allowLaunch.countDown();runtime.close();}
+    }
+
+    @Test void cancellationAndWorkerCompletionSerializeWithoutMonitorInversion() throws Exception {
+        Path allowed=Files.createDirectory(temp.resolve("race-packages"));Path pkg=Files.createDirectory(allowed.resolve("package"));Path yaml=temp.resolve("race-server.yaml");
+        Files.writeString(yaml,"server:\n  dataDir: "+temp.resolve("race-data")+"\nworkers:\n  maxConcurrent: 1\n  queuedLimit: 1\n  maxConcurrentLoad: 1\npackages:\n  allowedRoots:\n    - "+allowed+"\n  entries:\n    p: "+pkg+"\n");
+        ServerRuntime runtime=new ServerRuntime(ServerConfig.load(yaml),Files.createDirectory(temp.resolve("race-libs")).toString());
+        try {
+            for(int i=0;i<20;i++) {
+                String id=String.format("J%016X",i+1);Job job=new Job(id,"run","p","test",new att.server.api.WorkerRequest(),new JobEvents(runtime.config.dataDir.resolve("jobs").resolve(id).resolve("events.jsonl"),100));
+                runtime.store.insert(job,"{}");runtime.jobs.put(id,job);CountDownLatch start=new CountDownLatch(1);
+                FutureTask<Void> cancel=new FutureTask<>(()->{start.await();runtime.cancel(id,"test");return null;});FutureTask<Void> finish=new FutureTask<>(()->{start.await();runtime.finish(job,"PASS",0);return null;});
+                Thread a=new Thread(cancel),b=new Thread(finish);a.start();b.start();start.countDown();cancel.get(3,TimeUnit.SECONDS);finish.get(3,TimeUnit.SECONDS);
+                assertTrue(job.terminal());
+            }
+        } finally {runtime.close();}
+    }
+
+    @Test void sseCompletionWaitsForResultMarkerAndClientCursor() throws Exception {
+        Path allowed=Files.createDirectory(temp.resolve("sse-completion-packages"));Path pkg=Files.createDirectory(allowed.resolve("package"));Path yaml=temp.resolve("sse-completion-server.yaml");
+        Files.writeString(yaml,"server:\n  dataDir: "+temp.resolve("sse-completion-data")+"\nworkers:\n  maxConcurrent: 1\n  queuedLimit: 1\n  maxConcurrentLoad: 1\npackages:\n  allowedRoots:\n    - "+allowed+"\n  entries:\n    p: "+pkg+"\n");
+        ServerRuntime runtime=new ServerRuntime(ServerConfig.load(yaml),Files.createDirectory(temp.resolve("sse-completion-libs")).toString());
+        try {
+            String id="J1122334455667788";Job job=new Job(id,"run","p","test",new att.server.api.WorkerRequest(),new JobEvents(runtime.config.dataDir.resolve("jobs").resolve(id).resolve("events.jsonl"),100));
+            runtime.store.insert(job,"{}");runtime.jobs.put(id,job);long clientCursor=job.events.latest();
+            AtomicReference<Boolean> terminalValue=new AtomicReference<>();CountDownLatch terminalCheckStarted=new CountDownLatch(1);
+            Thread terminalCheck=new Thread(()->{terminalCheckStarted.countDown();try{terminalValue.set(runtime.terminal(id));}catch(Exception failure){throw new RuntimeException(failure);}},"test-sse-terminal-check");
+            synchronized(job) {
+                job.status="PASS";job.exitCode=0;job.finishedAt=java.time.Instant.now();runtime.store.update(job);
+                assertFalse(job.events.resultDeliveredThrough(clientCursor),"An old Last-Event-ID cursor must not pass an unpublished result marker");
+                terminalCheck.start();assertTrue(terminalCheckStarted.await(5,TimeUnit.SECONDS));long blockedDeadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(2);
+                while(terminalCheck.getState()!=Thread.State.BLOCKED&&System.nanoTime()<blockedDeadline)Thread.yield();
+                assertEquals(Thread.State.BLOCKED,terminalCheck.getState(),"Terminal observation must wait while final journal events are unpublished");
+                job.events.append("status",Map.of("jobId",id,"status","PASS"));
+                job.events.append("result",Map.of("jobId",id,"status","PASS","exitCode",0));
+            }
+            terminalCheck.join(5000);
+            assertFalse(terminalCheck.isAlive());assertEquals(Boolean.TRUE,terminalValue.get());
+            List<Map<String,Object>> replay=job.events.after(clientCursor);assertEquals(List.of("status","result"),replay.stream().map(event->event.get("event")).toList());
+            long resumedCursor=((Number)replay.get(0).get("id")).longValue();assertFalse(job.events.resultDeliveredThrough(resumedCursor),"Receiving only the status event must not close SSE");
+            resumedCursor=((Number)replay.get(1).get("id")).longValue();assertTrue(job.events.resultDeliveredThrough(resumedCursor),"SSE can close once Last-Event-ID has passed the result event");assertFalse(job.events.hasMore(resumedCursor));
+        } finally {runtime.close();}
+    }
+
+    @Test void publicResultsReplacePackageAndOutputRootsWithLogicalReferences() throws Exception {
+        Path allowed=Files.createDirectory(temp.resolve("redact-packages"));Path pkg=Files.createDirectory(allowed.resolve("package"));Path yaml=temp.resolve("redact-server.yaml");
+        Files.writeString(yaml,"server:\n  dataDir: "+temp.resolve("redact-data")+"\nworkers:\n  maxConcurrent: 1\n  queuedLimit: 1\n  maxConcurrentLoad: 1\npackages:\n  allowedRoots:\n    - "+allowed+"\n  entries:\n    p: "+pkg+"\n");
+        ServerRuntime runtime=new ServerRuntime(ServerConfig.load(yaml),Files.createDirectory(temp.resolve("redact-libs")).toString());
+        try {
+            String id="JABCDEF0123456789";Path output=runtime.config.dataDir.resolve("jobs").resolve(id).resolve("output");Files.createDirectories(output);
+            Job job=new Job(id,"run","p","test",new att.server.api.WorkerRequest(),new JobEvents(output.getParent().resolve("events.jsonl"),100));
+            runtime.store.insert(job,"{}");runtime.jobs.put(id,job);
+            job.resultJson=ServerRuntime.JSON.writeValueAsString(Map.of("summary",pkg.toRealPath().resolve("case.json").toString(),"artifact",output.resolve("report.xlsx").toString()));
+            job.diagnosticJson=ServerRuntime.JSON.writeValueAsString(Map.of("code","ATT-TEST","message","active worker diagnostic"));job.status="INVALID";
+            var activeResponse=ServerRuntime.JSON.valueToTree(runtime.resultRecord(id));
+            assertTrue(activeResponse.path("result").path("summary").asText().endsWith("case.json"),activeResponse.toString());
+            assertEquals("active worker diagnostic",activeResponse.path("diagnostic").path("message").asText());
+            runtime.finish(job,"PASS",0);var response=ServerRuntime.JSON.valueToTree(runtime.resultRecord(id));String encoded=response.toString();
+            assertFalse(encoded.contains(pkg.toString()));assertFalse(encoded.contains(output.toString()));assertTrue(encoded.contains("package:case.json"));assertTrue(encoded.contains("artifact:report.xlsx"));
+            String original="payload='&{./Pacs008.xml}' <a></a>\nfile="+pkg.resolve("flows/bad.yaml")+" line=7 column=3\nexternal=/private/host/hidden.txt\npassword=artifact-canary\n";
+            Path artifact=Files.writeString(output.resolve("case.log"),original);
+            String projected=new String(runtime.publicArtifact(id,artifact),java.nio.charset.StandardCharsets.UTF_8);
+            assertTrue(projected.contains("payload='&{./Pacs008.xml}' <a></a>"),projected);
+            assertTrue(projected.contains("flows/bad.yaml line=7 column=3"),projected);
+            assertFalse(projected.contains(pkg.toString()));assertFalse(projected.contains("/private/host"));
+            assertFalse(projected.contains("artifact-canary"));assertEquals(original,Files.readString(artifact));
+            Object event=runtime.publicEventData(Map.of("message",original,"headers",Map.of("Authorization","Bearer event-canary","Content-Type","application/xml")),output,pkg);
+            String publicEvent=ServerRuntime.JSON.writeValueAsString(event);
+            assertFalse(publicEvent.contains("event-canary"));assertFalse(publicEvent.contains("artifact-canary"));
+            assertFalse(publicEvent.contains("/private/host"));assertTrue(publicEvent.contains("application/xml"));
+            Path binary=Files.write(output.resolve("binary.bin"),new byte[]{0,1,2});
+            assertThrows(IllegalArgumentException.class,()->runtime.publicArtifact(id,binary));
+            Path oversized=output.resolve("large.log");try(var stream=Files.newOutputStream(oversized)){stream.write(new byte[16*1024*1024+1]);}
+            assertThrows(IllegalArgumentException.class,()->runtime.publicArtifact(id,oversized));
 
         } finally {runtime.close();}
     }
