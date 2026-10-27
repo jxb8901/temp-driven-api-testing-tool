@@ -537,7 +537,9 @@ describe('JobsPage React feature', () => {
     const textRead = vi.fn(async (_jobId: string, path: string) => path.endsWith('load-summary.json')
       ? JSON.stringify({ metrics: { scheduled: 40, completed: 40, buckets: preview, detailSeries: {
         schemaVersion: 'att-load-detail-reference/v1', complete: true, series: [{ scope: 'aggregate', target: 'metrics/buckets',
-          kind: 'map', count: 40, inlinePreviewCount: 32, complete: true, files: ['details/v1/aggregate/series-0001-0001.json'] }],
+          kind: 'map', count: 40, inlinePreviewCount: 32, complete: true, files: ['details/v1/aggregate/series-0001-0001.json'] },
+          { scope: 'aggregate', target: 'metrics/failureDiagnostics', kind: 'list', count: 200,
+            complete: true, files: ['details/v1/aggregate/diagnostics-0002-0001.json'] }],
       } } })
       : JSON.stringify({ schemaVersion: 'att-load-detail-series/v1', scope: 'aggregate', target: 'metrics/buckets',
         kind: 'map', part: 1, parts: 1, total: 40, items: buckets }));
@@ -555,6 +557,14 @@ describe('JobsPage React feature', () => {
     expect(panel.textContent).toContain('Load time-series buckets');
     expect(panel.querySelectorAll('[aria-label="Returned Load time-series buckets"] tbody tr')).toHaveLength(40);
     expect(panel.textContent).toContain('40');
+    expect(textRead.mock.calls.some(call => call[1].includes('diagnostics-0002'))).toBe(false,
+      'Metrics must not eagerly download non-chart series');
+    await click(host.querySelector('#job-tab-results')!);
+    await advance();
+    await click(host.querySelector('#job-tab-metrics')!);
+    await advance();
+    expect(textRead.mock.calls.filter(call => call[1].includes('series-0001')).length).toBe(1,
+      'tab switches should reuse the already verified sidecar');
   });
 
   it('loads archived evidence and workload details only when Results is opened', async () => {
