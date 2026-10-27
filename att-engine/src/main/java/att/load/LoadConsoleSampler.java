@@ -3,6 +3,11 @@ package att.load;
 import att.console.ExecutionConsoleFormatter;
 import att.core.ResultStatus;
 
+import java.time.Instant;
+import java.util.LinkedHashMap;
+import java.util.Map;
+import java.util.TreeMap;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ThreadFactory;
@@ -10,12 +15,6 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicLongArray;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.Map;
-import java.util.List;
-import java.util.LinkedHashMap;
-import java.util.TreeMap;
-import java.time.Instant;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 
@@ -124,7 +123,7 @@ public final class LoadConsoleSampler {
         String phaseKey=ExecutionConsoleFormatter.token(event.phase(),"UNKNOWN");
         livePhase=phaseKey;
         if(livePhases.size()<8||livePhases.containsKey(phaseKey))livePhases.computeIfAbsent(phaseKey,ignored->new Counters()).observe(event);
-        if(event.workloadId()!=null&&!event.workloadId().isBlank()) {
+        if(event.workloadId()!=null&&!event.workloadId().trim().isEmpty()) {
             String workloadKey=ExecutionConsoleFormatter.token(event.workloadId(),"unknown");
             if(liveWorkloads.size()<32||liveWorkloads.containsKey(workloadKey))liveWorkloads.computeIfAbsent(workloadKey,ignored->new Counters()).observe(event);
             else liveWorkloadsTruncated.set(true);
@@ -168,10 +167,13 @@ public final class LoadConsoleSampler {
         snapshot.put("elapsedMs",elapsedMs);
         snapshot.put("phase",livePhase);
         snapshot.put("counts",liveCounters.toMap());
-        snapshot.put("rates",Map.of("completedTps",rate(liveCounters.completed.get(),elapsedMs),"successfulTps",rate(liveCounters.passed.get(),elapsedMs)));
+        Map<String,Object> rates=new LinkedHashMap<>();
+        rates.put("completedTps",rate(liveCounters.completed.get(),elapsedMs));
+        rates.put("successfulTps",rate(liveCounters.passed.get(),elapsedMs));
+        snapshot.put("rates",rates);
         snapshot.put("latency",liveCounters.latencyMap());
         Map<String,Object> measured=new LinkedHashMap<>();
-        for(String phase:List.of("RAMP_UP","STEADY","RAMP_DOWN")) {
+        for(String phase:new String[]{"RAMP_UP","STEADY","RAMP_DOWN"}) {
             Counters counters=livePhases.get(phase);if(counters!=null)mergeCounters(measured,counters);
         }
         snapshot.put("measuredCounts",measured);
