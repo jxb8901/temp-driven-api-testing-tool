@@ -34,7 +34,7 @@ class CaseExecutionLogTest {
             if(prior==null)System.clearProperty("att.worker.safeOutput");
             else System.setProperty("att.worker.safeOutput",prior);
         }
-        String text=Files.readString(logFile);
+        String text=new String(Files.readAllBytes(logFile),java.nio.charset.StandardCharsets.UTF_8);
         assertTrue(text.contains("&{./Pacs008.xml}"),text);
         assertTrue(text.contains("debug.yaml"),text);
         assertFalse(text.contains(root.toString()),text);
