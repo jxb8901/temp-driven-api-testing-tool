@@ -210,7 +210,7 @@ class AttServiceTest {
         Path scenario=root.resolve("load/scenario.yaml");
         Files.write(scenario, ("schemaVersion: att-load/v1.3\nworkloads:\n"
                 + "  - id: time\n    target: {type: template, id: SIMPLE}\n"
-                + "    load: {users: 1, duration: 20ms}\n    execution: {thinkTime: 0ms}\n"
+                + "    load: {users: 1, duration: 1s}\n    execution: {thinkTime: 0ms}\n"
                 + "evidence: {mode: all}\n").getBytes("UTF-8"));
 
         LoadResult result=new DefaultAttService().load(new LoadRequest(root,Paths.get("config/config.yaml"),null,
