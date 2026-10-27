@@ -183,6 +183,17 @@ public final class DefaultAttService implements AttService {
                         "load", scenario.source(), identitySeed.startedAt())
                 : att.core.IdentifierValidator.runId(request.runId());
         Path outputRoot=(request.outputDirectory()==null?request.packageRoot().resolve(cfg.outputDirectory()):request.packageRoot().resolve(request.outputDirectory())).toAbsolutePath().normalize();
+        Map<String,Object> longRunPreflight=att.load.LoadLongRunPreflight.inspect(scenario,outputRoot);
+        if(request.listener()!=null && longRunPreflight.get("warnings") instanceof List) {
+            for(Object value:(List<?>)longRunPreflight.get("warnings")) if(value instanceof Map) {
+                Map<String,Object> warning=new LinkedHashMap<String,Object>();
+                for(Map.Entry<?,?> entry:((Map<?,?>)value).entrySet())
+                    if(entry.getKey() instanceof String) warning.put((String)entry.getKey(),entry.getValue());
+                warning.put("event","LOAD_LONG_RUN_PREFLIGHT");
+                warning.put("console","[LOAD] Preflight warning: "+warning.get("message"));
+                request.listener().onPreparationEvent(warning);
+            }
+        }
         Path loadRoot=outputRoot.resolve("load"); Path runDir=att.core.IdentifierValidator.strictChild(loadRoot,id,"Load run directory");
         Files.createDirectories(loadRoot);
         try {
@@ -214,7 +225,9 @@ public final class DefaultAttService implements AttService {
         }
         profile.end("loadExecutionMs",executionPhase);
         Map<String,Object> retained=evidence.write(runDir);
-        result=result.withResources(resourceMetrics).withThresholds(new LoadThresholdEvaluator().evaluate(scenario,result.metrics())).withEvidence(retained);
+        Map<String,Object> preflightResources=new LinkedHashMap<String,Object>(resourceMetrics);
+        preflightResources.put("preflight",longRunPreflight);
+        result=result.withResources(preflightResources).withThresholds(new LoadThresholdEvaluator().evaluate(scenario,result.metrics())).withEvidence(retained);
         long reportPhase=profile.begin();
         Path report=null;
         String reportAvailability="PENDING";

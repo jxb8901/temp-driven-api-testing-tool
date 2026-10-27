@@ -61,8 +61,9 @@ public final class LoadReportWriter {
                 writer.write(html(runDirectory, result, map));
             }
             Map<String, Object> manifest = createManifest(stageRoot, result);
-            byte[] manifestBytes = JsonSupport.mapper().writerWithDefaultPrettyPrinter().writeValueAsBytes(manifest);
-            writeBounded(stageRoot.resolve(REPORT_MANIFEST), manifestBytes);
+            try (OutputStream output = budget.open(stageRoot.resolve(REPORT_MANIFEST))) {
+                JsonSupport.mapper().writerWithDefaultPrettyPrinter().writeValue(output, manifest);
+            }
             long reportBytes = treeBytes(stageRoot);
             if (reportBytes > MAX_REPORT_TOTAL_BYTES)
                 throw new IOException("LOAD detailed report output exceeds its 120 MiB bounded report budget.");
@@ -133,7 +134,8 @@ public final class LoadReportWriter {
         }
         return fields("schemaVersion", REPORT_MANIFEST_SCHEMA, "state", "COMPLETE", "complete", Boolean.TRUE,
                 "runId", result.runId(), "executionStatus", result.executionStatus(),
-                "performanceVerdict", result.performanceVerdict(), "startedAt", result.startedAt().toString(),
+                "performanceVerdict", result.performanceVerdict(), "accountingStatus", result.accountingStatus(),
+                "startedAt", result.startedAt().toString(),
                 "endedAt", result.endedAt().toString(), "durationMs",
                 Math.max(0L, java.time.Duration.between(result.startedAt(), result.endedAt()).toMillis()),
                 "checkpointSequence", checkpointSequence, "checkpointSequences", checkpointSequences, "files", files);
@@ -233,7 +235,7 @@ public final class LoadReportWriter {
     }
 
     private String html(Path runDirectory, LoadRunResult result, Map<String, Object> summary) {
-        Map<String, Object> metrics = result.metrics().values();
+        @SuppressWarnings("unchecked") Map<String, Object> metrics = (Map<String, Object>) summary.get("metrics");
         StringBuilder html = new StringBuilder(64 * 1024);
         String status = result.status().name();
         String statusClass = result.passed() ? "pass" : "fail";

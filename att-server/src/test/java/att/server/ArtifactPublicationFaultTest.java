@@ -440,7 +440,7 @@ class ArtifactPublicationFaultTest {
     @Test void cancellationArchivesPartialOutputOnlyAfterTheSurvivingWriterIsStopped() throws Exception {
         org.junit.jupiter.api.Assumptions.assumeFalse(isWindows(), "Uses a POSIX Worker and detached-writer fixture");
         Path writer = Files.writeString(temp.resolve("writer.sh"), "#!/bin/sh\ntrap '' TERM\n"
-                + "printf 'password=[REDACTED_SECRET]\\nbusiness=partial\\n' >> \"$1/case.log\"\n"
+                + "printf 'password=att-test-private-canary\\nbusiness=partial\\n' >> \"$1/case.log\"\n"
                 + "touch \"$1/child.ready\"\n"
                 + "while :; do printf 'business=partial\\n' >> \"$1/case.log\"; sleep 0.02; done\n");
         String launcher = "#!/bin/sh\nIFS= read -r request\n"

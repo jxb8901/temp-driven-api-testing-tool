@@ -65,6 +65,7 @@ public final class LoadRunResult {
 
     public ResultStatus status() {
         if (preparationFailed()) return ResultStatus.ERROR;
+        if (accountingFailed()) return ResultStatus.ERROR;
         if (runtimeErrorCount() > 0L) return ResultStatus.ERROR;
         for (LoadRunResult workload : workloads.values()) if (workload.status() == ResultStatus.ERROR) return ResultStatus.ERROR;
         if ("NOT_MET".equals(thresholds.status())) return ResultStatus.FAIL;
@@ -74,6 +75,7 @@ public final class LoadRunResult {
     /** Existing execution outcome, kept distinct from the configured performance verdict. */
     public String executionStatus() {
         if (preparationFailed()) return "ERROR";
+        if (accountingFailed()) return "ERROR";
         if (runtimeErrorCount() > 0L) return "ERROR";
         for (LoadRunResult workload : workloads.values()) if ("ERROR".equals(workload.executionStatus())) return "ERROR";
         return "PASS";
@@ -125,7 +127,9 @@ public final class LoadRunResult {
         Map<String, Object> scenarioSummary = scenario.toSummaryMap();
         if (scenario.randomizedThinkTime()) scenarioSummary.put("effectiveSeed", Long.valueOf(LoadRandomization.effectiveSeed(scenario, runId)));
         result.put("scenario", scenarioSummary); result.put("timing", timing());
-        result.put("metrics", metrics.toMap()); result.put("thresholds", thresholds.toMap());
+        Map<String, Object> metricMap = metrics.toMap();
+        metricMap.put("accounting", accountingSummary());
+        result.put("metrics", metricMap); result.put("thresholds", thresholds.toMap());
         if (!workloads.isEmpty()) result.put("workloads", workloadMaps());
         result.put("resources", resources);
         if (!evidence.isEmpty()) result.put("evidence", evidence);
@@ -155,7 +159,9 @@ public final class LoadRunResult {
         source.put("exitCode", exitCode()); source.put("durationMs", durationMs);
         source.put("startedAt", startedAt.toString()); source.put("endedAt", endedAt.toString());
         source.put("executionStatus", executionStatus()); source.put("performanceVerdict", performanceVerdict());
-        source.put("metrics", metrics.values());
+        Map<String, Object> terminalMetrics = new LinkedHashMap<String, Object>(metrics.values());
+        terminalMetrics.put("accounting", accountingSummary());
+        source.put("metrics", terminalMetrics);
         source.put("thresholds", thresholds.toMap());
         Map<String, Object> workloadSummaries = new LinkedHashMap<String, Object>();
         for (Map.Entry<String, LoadRunResult> entry : workloads.entrySet()) {
@@ -209,8 +215,19 @@ public final class LoadRunResult {
         Object classifications = metrics.value("runtimeErrorClassifications");
         if (classifications instanceof Map) result.put("classifications", classifications);
         List<Map<String, Object>> secondary = new ArrayList<Map<String, Object>>();
+        String accountingState = accountingState();
+        if ("FAILED".equals(accountingState) || "PARTIAL".equals(accountingState)) {
+            String code = "FAILED".equals(accountingState)
+                    ? "LOAD_ACCOUNTING_INVARIANT_FAILED" : "LOAD_ACCOUNTING_INCOMPLETE";
+            secondary.add(att.server.api.LimitDiagnostic.create(code,
+                    "LOAD metrics did not reach a fully reconciled clean drain (accounting state: " + accountingState + ").",
+                    "load.metrics.accounting", null, null, "engine.loadMetrics",
+                    att.server.api.LimitOutcome.EXECUTION_ERROR, "metrics",
+                    "Inspect the bounded accounting violations and the latest verified checkpoint before interpreting throughput.", null));
+        }
         Map<String, Object> evidenceNotice = evidenceQuotaNotice();
         if (evidenceNotice != null) secondary.add(evidenceNotice);
+        for (Map<String, Object> notice : preflightNotices()) if (secondary.size() < 16) secondary.add(notice);
         if ("FAILED".equals(reportAvailability)) {
             secondary.add(att.server.api.LimitDiagnostic.create("LOAD_REPORT_WRITE_FAILED",
                     "LOAD execution completed, but report artifacts could not be published.", null, null, null,
@@ -218,6 +235,59 @@ public final class LoadRunResult {
                     "Retry report publication when storage is available; reduce detailed outputs if a report budget was exceeded.", null));
         }
         if (!secondary.isEmpty()) result.put("secondaryNotices", secondary);
+        return result;
+    }
+
+    private boolean accountingFailed() {
+        String state = accountingState();
+        return "FAILED".equals(state) || "PARTIAL".equals(state);
+    }
+
+    private String accountingState() {
+        Object state = accountingSummary().get("state");
+        return state instanceof String ? (String) state : "IN_PROGRESS";
+    }
+    public String accountingStatus() { return accountingState(); }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> accountingSummary() {
+        Object raw = metrics.value("accounting");
+        Map<String, Object> result = raw instanceof Map
+                ? new LinkedHashMap<String, Object>((Map<String, Object>) raw)
+                : new LinkedHashMap<String, Object>();
+        if (!workloads.isEmpty()) {
+            Map<String, Map<String, Object>> childMetrics = new LinkedHashMap<String, Map<String, Object>>();
+            boolean childInvalid = false;
+            for (Map.Entry<String, LoadRunResult> entry : workloads.entrySet()) {
+                childMetrics.put(entry.getKey(), entry.getValue().metrics().values());
+                String childState = entry.getValue().accountingState();
+                if ("FAILED".equals(childState) || "PARTIAL".equals(childState)) childInvalid = true;
+            }
+            Map<String, Object> aggregate = LoadMetricsAccounting.compareWorkloads(metrics.values(), childMetrics);
+            result.put("workloadAggregate", aggregate);
+            if (childInvalid || "FAILED".equals(aggregate.get("state"))) result.put("state", "FAILED");
+        }
+        if (!result.containsKey("state")) result.put("state", "IN_PROGRESS");
+        return result;
+    }
+
+    @SuppressWarnings("unchecked")
+    private List<Map<String, Object>> preflightNotices() {
+        Object raw = resources.get("preflight");
+        if (!(raw instanceof Map)) return Collections.emptyList();
+        Object values = ((Map<String, Object>) raw).get("warnings");
+        if (!(values instanceof List)) return Collections.emptyList();
+        List<Map<String, Object>> result = new ArrayList<Map<String, Object>>();
+        for (Object value : (List<?>) values) {
+            if (!(value instanceof Map)) continue;
+            Map<?, ?> warning = (Map<?, ?>) value;
+            String code = warning.get("code") instanceof String ? (String) warning.get("code") : "LOAD_LONG_RUN_PREFLIGHT";
+            String message = warning.get("message") instanceof String ? (String) warning.get("message") : "Long-duration LOAD preflight reported a storage or evidence risk.";
+            result.add(att.server.api.LimitDiagnostic.create(code, message, null, null, null,
+                    "engine.loadPreflight", null, "preflight",
+                    "Review the preflight summary in load-summary.json before starting a long run.", null));
+            if (result.size() >= 8) break;
+        }
         return result;
     }
 

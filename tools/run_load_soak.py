@@ -8,6 +8,7 @@ import os
 import platform
 import shutil
 import signal
+import statistics
 import subprocess
 import sys
 import tempfile
@@ -101,6 +102,198 @@ def total_memory_bytes():
     return None
 
 
+def process_resource_sample(pid):
+    """Read bounded OS counters for the ATT JVM process without opening /proc files for output."""
+    proc = Path("/proc") / str(pid)
+    if proc.is_dir():
+        values = {"pid": int(pid), "supported": True}
+        try:
+            for line in (proc / "status").read_text(encoding="ascii", errors="replace").splitlines():
+                if line.startswith("VmRSS:"):
+                    values["residentBytes"] = int(line.split()[1]) * 1024
+                elif line.startswith("Threads:"):
+                    values["threads"] = int(line.split()[1])
+            values["openFileDescriptors"] = sum(1 for _ in (proc / "fd").iterdir())
+            return values
+        except (OSError, ValueError, IndexError):
+            return {"pid": int(pid), "supported": False, "reason": "process counters became unavailable"}
+    if platform.system() == "Darwin":
+        try:
+            output = subprocess.check_output(["ps", "-o", "rss=", "-o", "thcount=", "-p", str(pid)],
+                                             text=True, stderr=subprocess.DEVNULL).strip().split()
+            values = {"pid": int(pid), "supported": bool(output)}
+            if len(output) >= 1:
+                values["residentBytes"] = int(output[0]) * 1024
+            if len(output) >= 2:
+                values["threads"] = int(output[1])
+            try:
+                descriptors = subprocess.check_output(["lsof", "-n", "-p", str(pid)],
+                                                       text=True, stderr=subprocess.DEVNULL)
+                values["openFileDescriptors"] = max(0, len(descriptors.splitlines()) - 1)
+            except (OSError, subprocess.CalledProcessError):
+                values["openFileDescriptorsAvailable"] = False
+            return values
+        except (OSError, subprocess.CalledProcessError, ValueError):
+            pass
+    return {"pid": int(pid), "supported": False, "reason": "OS process counters are unavailable on this host"}
+
+
+def summarize_resource_series(rows, section, keys):
+    samples = []
+    for row in rows:
+        values = row.get(section, {}) if section else row
+        if isinstance(values, dict):
+            samples.append((row, values))
+    result = {"sampleCount": len(samples)}
+    for key in keys:
+        available = [(row, values[key]) for row, values in samples if isinstance(values.get(key), (int, float))]
+        if not available:
+            result[key] = {"available": False}
+            continue
+        first_row, first = available[0]
+        last_row, last = available[-1]
+        first_elapsed = float(first_row.get("elapsedSeconds", 0.0))
+        last_elapsed = float(last_row.get("elapsedSeconds", first_elapsed))
+        span_hours = max(0.0, (last_elapsed - first_elapsed) / 3600.0)
+        result[key] = {
+            "available": True,
+            "first": first,
+            "last": last,
+            "maximum": max(value for _, value in available),
+            "slopePerHour": ((last - first) / span_hours) if span_hours > 0.0 else None,
+        }
+    return result
+
+
+def assess_resource_evidence(process_rows, jvm_rows, minimum_span_seconds):
+    """Require sufficiently dense OS and JVM measurements across the qualified soak window."""
+    requirements = (
+        ("process", process_rows, "", ("residentBytes", "threads", "openFileDescriptors"), 60.0),
+        ("jvm", jvm_rows, "generator", ("heapUsedBytes", "heapCommittedBytes", "liveThreads",
+                                        "gcCollectionCount", "gcCollectionTimeMs"), 300.0),
+    )
+    assessment = {"status": "CAPTURED", "minimumSpanSeconds": minimum_span_seconds}
+    for name, rows, section, keys, interval_seconds in requirements:
+        if len(rows) < 2:
+            raise RuntimeError("{} resource evidence has fewer than two samples".format(name))
+        elapsed = [float(row.get("elapsedSeconds", 0.0)) for row in rows]
+        span = max(elapsed) - min(elapsed)
+        if span < minimum_span_seconds * 0.9:
+            raise RuntimeError("{} resource evidence covers only {:.2f} hours of a {:.2f}-hour qualified window".format(
+                name, span / 3600.0, minimum_span_seconds / 3600.0))
+        expected_samples = max(2, int(span / interval_seconds * 0.8))
+        if len(rows) < expected_samples:
+            raise RuntimeError("{} resource evidence has {} samples; at least {} are required".format(
+                name, len(rows), expected_samples))
+        series = summarize_resource_series(rows, section, keys)
+        series_results = {}
+        for key in keys:
+            available_count = 0
+            for row in rows:
+                values = row.get(section, {}) if section else row
+                if isinstance(values, dict) and isinstance(values.get(key), (int, float)):
+                    available_count += 1
+            coverage = available_count / float(len(rows))
+            series_results[key] = {"coverage": coverage, "summary": series[key]}
+            if coverage < 0.95:
+                raise RuntimeError("{} resource series {} covers only {:.1%} of samples".format(name, key, coverage))
+        assessment[name] = {
+            "sampleCount": len(rows),
+            "spanSeconds": span,
+            "sampleIntervalSeconds": interval_seconds,
+            "series": series_results,
+        }
+    pids = {row.get("pid") for row in process_rows if isinstance(row.get("pid"), int)}
+    if len(pids) != 1:
+        raise RuntimeError("process resource evidence does not identify one stable ATT JVM process")
+    assessment["process"]["processIdCount"] = len(pids)
+    endpoint_window_seconds = min(1800.0, minimum_span_seconds * 0.1)
+    growth = {}
+    for name, rows, section, key, tolerance in (
+        ("openFileDescriptors", process_rows, "", "openFileDescriptors", 2.0),
+        ("threads", process_rows, "", "threads", None),
+        ("heapUsedBytes", jvm_rows, "generator", "heapUsedBytes", None),
+    ):
+        ordered = sorted(rows, key=lambda row: float(row.get("elapsedSeconds", 0.0)))
+        first_time = float(ordered[0].get("elapsedSeconds", 0.0))
+        last_time = float(ordered[-1].get("elapsedSeconds", first_time))
+        start_values = []
+        end_values = []
+        for row in ordered:
+            values = row.get(section, {}) if section else row
+            value = values.get(key) if isinstance(values, dict) else None
+            if not isinstance(value, (int, float)) or value < 0:
+                continue
+            elapsed = float(row.get("elapsedSeconds", 0.0))
+            if elapsed <= first_time + endpoint_window_seconds:
+                start_values.append(float(value))
+            if elapsed >= last_time - endpoint_window_seconds:
+                end_values.append(float(value))
+        if not start_values or not end_values:
+            raise RuntimeError("{} resource growth could not be assessed from endpoint samples".format(name))
+        baseline = statistics.median(start_values)
+        ending = statistics.median(end_values)
+        if tolerance is None and name == "threads":
+            tolerance = max(2.0, baseline * 0.05)
+        elif tolerance is None:
+            heap_limits = [row.get("generator", {}).get("heapMaxBytes") for row in jvm_rows
+                           if isinstance(row.get("generator"), dict)]
+            heap_limit = max([float(value) for value in heap_limits if isinstance(value, (int, float)) and value > 0]
+                             or [0.0])
+            tolerance = min(64.0 * 1024.0 * 1024.0, max(16.0 * 1024.0 * 1024.0, heap_limit * 0.01))
+        increase = ending - baseline
+        growth[name] = {
+            "baselineEndpointMedian": baseline,
+            "endingEndpointMedian": ending,
+            "increase": increase,
+            "tolerance": tolerance,
+            "status": "STABLE_WITHIN_TOLERANCE" if increase <= tolerance else "INCREASING",
+        }
+        if increase > tolerance:
+            raise RuntimeError("{} increased by {:.0f}, beyond the {:.0f} resource-growth tolerance".format(
+                name, increase, tolerance))
+    assessment["endpointWindowSeconds"] = endpoint_window_seconds
+    assessment["growth"] = growth
+    return assessment
+
+
+def capture_incomplete_evidence(evidence_root, run_directory, checkpoint_dir, run_id,
+                                commit_sha, elapsed_seconds, reason, exit_code=None):
+    target_run = evidence_root / "load" / run_id
+    if run_directory.is_dir():
+        target_run.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copytree(run_directory, target_run, dirs_exist_ok=True)
+    checkpoint = latest_checkpoint(checkpoint_dir, run_id)
+    counters = ("scheduled", "started", "completed", "success", "failure", "runtimeError", "otherOutcome", "dropped",
+                "currentInFlight", "measuredCompleted", "measuredCompletedThroughput")
+    values = read_checkpoint_metrics(checkpoint) if checkpoint else {}
+    partial_metrics = {key: values.get(key) for key in counters if key in values}
+    if "generator" in values:
+        partial_metrics["generator"] = values["generator"]
+    result = "PARTIAL" if checkpoint else "REPORT_UNAVAILABLE"
+    acceptance = {
+        "schemaVersion": "att-load-25h-soak/v1",
+        "runId": run_id,
+        "commitSha": commit_sha,
+        "result": result,
+        "complete": False,
+        "elapsedSeconds": max(0.0, elapsed_seconds),
+        "reason": str(reason)[:2000],
+        "checkpointDirectory": "load/{}/checkpoints/{}".format(run_id, CHECKPOINT_SCOPE),
+    }
+    if exit_code is not None:
+        acceptance["exitCode"] = exit_code
+    if checkpoint:
+        acceptance["latestCheckpoint"] = {
+            "sequence": checkpoint.get("sequence"),
+            "capturedAt": checkpoint.get("capturedAt"),
+            "finalized": bool(checkpoint.get("finalized", False)),
+            "metrics": partial_metrics,
+        }
+    atomic_json(evidence_root / "acceptance.json", acceptance)
+    return acceptance
+
+
 def install_soak_package(repository, runtime_root, package_root, arrival_rate, duration_hours, max_concurrent):
     launcher = runtime_root / ("att.bat" if os.name == "nt" else "att.sh")
     if not launcher.is_file() or not (runtime_root / "lib").is_dir():
@@ -143,7 +336,7 @@ def install_soak_package(repository, runtime_root, package_root, arrival_rate, d
         "seed: 177\n"
         "workloads:\n"
         "  - id: local-soak\n"
-        "    target: {type: template, id: LOAD_SOAK_NOOP}\n"
+        "    target: {{type: template, id: LOAD_SOAK_NOOP}}\n"
         "    load:\n"
         "      arrivalRate: {}/s\n"
         "      warmup: 0s\n"
@@ -171,7 +364,7 @@ def delta_row(previous, current):
                - datetime.fromisoformat(previous["capturedAt"].replace("Z", "+00:00"))).total_seconds()
     if elapsed <= 0:
         raise RuntimeError("checkpoint timestamps did not advance")
-    counters = ("scheduled", "started", "completed", "success", "failure", "runtimeError", "dropped")
+    counters = ("scheduled", "started", "completed", "success", "failure", "runtimeError", "otherOutcome", "dropped")
     deltas = {key: int(current_metrics.get(key, 0)) - int(previous_metrics.get(key, 0)) for key in counters}
     if any(value < 0 for value in deltas.values()):
         raise RuntimeError("checkpoint counters moved backwards")
@@ -187,6 +380,7 @@ def delta_row(previous, current):
         "completedTPS": deltas["completed"] / elapsed,
         "successfulTPS": deltas["success"] / elapsed,
         "failedCompletions": deltas["failure"] + deltas["runtimeError"],
+        "otherOutcomes": deltas["otherOutcome"],
         "dropped": deltas["dropped"],
         "counts": deltas,
     }
@@ -241,6 +435,7 @@ def verify_report_bundle(run_directory):
             or summary.get("durationMs") != manifest.get("durationMs")
             or summary.get("executionStatus") != manifest.get("executionStatus")
             or summary.get("performanceVerdict") != manifest.get("performanceVerdict")
+            or summary.get("metrics", {}).get("accounting", {}).get("state") != manifest.get("accountingStatus")
             or summary.get("report") != "report/index.html"
             or summary.get("reportManifest") != "load-report-manifest.json"):
         raise RuntimeError("LOAD summary does not match its committed report bundle")
@@ -308,7 +503,10 @@ def run_soak(args):
             previous = None
             last_sequence = 0
             trend = []
+            jvm_resource_samples = []
+            process_resource_samples = []
             last_progress = time.monotonic()
+            last_os_sample = 0.0
 
             def consume_checkpoints():
                 nonlocal previous, last_sequence, last_progress
@@ -326,16 +524,32 @@ def run_soak(args):
                     previous = checkpoint
                     last_sequence = sequence
                     last_progress = time.monotonic()
+                    metrics = read_checkpoint_metrics(checkpoint)
+                    jvm_resource_samples.append({
+                        "checkpointSequence": sequence,
+                        "capturedAt": checkpoint.get("capturedAt"),
+                        "elapsedSeconds": last_progress - started_monotonic,
+                        "generator": metrics.get("generator", {}),
+                    })
+                    atomic_json(evidence_root / "jvm-resource-trend.json", jvm_resource_samples)
 
             try:
                 while process.poll() is None:
                     consume_checkpoints()
+                    now = time.monotonic()
+                    if now - last_os_sample >= 60.0:
+                        sample = process_resource_sample(process.pid)
+                        sample["sampledAt"] = datetime.now().astimezone().isoformat()
+                        sample["elapsedSeconds"] = now - started_monotonic
+                        process_resource_samples.append(sample)
+                        atomic_json(evidence_root / "process-resource-samples.json", process_resource_samples)
+                        last_os_sample = now
                     if time.monotonic() - last_progress > 600:
                         raise RuntimeError("no new verified LOAD checkpoint arrived for ten minutes")
                     time.sleep(2.0)
                 exit_code = process.wait()
                 consume_checkpoints()
-            except BaseException:
+            except BaseException as failure:
                 if process.poll() is None:
                     if os.name == "nt":
                         process.kill()
@@ -345,6 +559,10 @@ def run_soak(args):
                             process.wait(timeout=5)
                         except subprocess.TimeoutExpired:
                             os.killpg(process.pid, signal.SIGKILL)
+                run_directory = package_root / "output" / "load" / run_id
+                capture_incomplete_evidence(evidence_root, run_directory, checkpoint_dir, run_id,
+                                            args.commit_sha, time.monotonic() - started_monotonic,
+                                            failure, process.poll())
                 raise
 
         run_directory = package_root / "output" / "load" / run_id
@@ -380,10 +598,17 @@ def run_soak(args):
             raise RuntimeError("ATT LOAD exited with {}: {}".format(exit_code, "\n".join(stderr_log.read_text(encoding="utf-8", errors="replace").splitlines()[-20:])))
         manifest = verify_report_bundle(run_directory)
         metrics = summary.get("metrics", {})
+        accounting = metrics.get("accounting", {})
         aggregate_checkpoints = metrics.get("checkpoints", {})
         workload = summary.get("workloads", {}).get("local-soak", {})
         workload_metrics = workload.get("metrics", {})
+        workload_accounting = workload_metrics.get("accounting", {})
         workload_checkpoints = workload_metrics.get("checkpoints", {})
+        if accounting.get("state") != "VERIFIED" or workload_accounting.get("state") != "VERIFIED":
+            raise RuntimeError("LOAD run, phase, or workload accounting did not reach VERIFIED state")
+        workload_aggregate = accounting.get("workloadAggregate", {})
+        if workload_aggregate and workload_aggregate.get("state") != "VERIFIED":
+            raise RuntimeError("aggregate counters do not equal the sum of workload counters")
         if (not aggregate_checkpoints.get("enabled") or aggregate_checkpoints.get("writeFailures") != 0
                 or not workload_checkpoints.get("enabled") or workload_checkpoints.get("writeFailures") != 0):
             raise RuntimeError("LOAD checkpointing was disabled or reported a write failure")
@@ -404,6 +629,12 @@ def run_soak(args):
             raise RuntimeError("arrival conservation failed: scheduled != started + dropped")
         if int(metrics.get("completed", 0)) != int(metrics.get("success", 0)) + int(metrics.get("failure", 0)) + int(metrics.get("runtimeError", 0)):
             raise RuntimeError("completion conservation failed: completed outcomes do not reconcile")
+        if int(metrics.get("failure", 0)) + int(metrics.get("runtimeError", 0)) != 0:
+            raise RuntimeError("acceptance failed: completed LOAD iterations include SUT failures or runtime errors")
+        if int(metrics.get("otherOutcome", 0)) != 0:
+            raise RuntimeError("acceptance failed: completed LOAD iterations include non-pass outcomes")
+        if int(metrics.get("success", 0)) != int(metrics.get("completed", 0)):
+            raise RuntimeError("acceptance failed: not every completed LOAD iteration succeeded")
         if int(metrics.get("currentInFlight", 0)) != 0:
             raise RuntimeError("clean drain left unresolved iterations")
         steady_rows = []
@@ -415,12 +646,15 @@ def run_soak(args):
                 continue  # The final checkpoint can follow a short clean-drain interval.
             if interval_seconds > 360.0:
                 raise RuntimeError("a checkpoint interval exceeded six minutes")
-            if row["completedTPS"] < MIN_COMPLETED_TPS or row["dropped"] != 0 or row["failedCompletions"] != 0:
+            if (row["completedTPS"] < MIN_COMPLETED_TPS or row["dropped"] != 0
+                    or row["failedCompletions"] != 0 or row["otherOutcomes"] != 0):
                 raise RuntimeError("five-minute acceptance window failed: {}".format(row))
             steady_rows.append(row)
         sustained_seconds = sum(row["durationSeconds"] for row in steady_rows)
         if sustained_seconds <= 24.0 * 60.0 * 60.0:
             raise RuntimeError("only {:.2f} continuous hours met the five-minute completion gate".format(sustained_seconds / 3600.0))
+        resource_assessment = assess_resource_evidence(
+            process_resource_samples, jvm_resource_samples, sustained_seconds)
 
         evidence = {
             "schemaVersion": "att-load-25h-soak/v1",
@@ -437,6 +671,7 @@ def run_soak(args):
             "successful": metrics.get("success"),
             "sutFailures": metrics.get("failure"),
             "runtimeErrors": metrics.get("runtimeError"),
+            "otherOutcomes": metrics.get("otherOutcome"),
             "dropped": metrics.get("dropped"),
             "measuredCompletedTPS": throughput,
             "fiveMinuteIntervals": len(steady_rows),
@@ -449,6 +684,17 @@ def run_soak(args):
                 "cpuCount": os.cpu_count(),
                 "memoryBytes": total_memory_bytes(),
                 "java": java_string(environment.get("JAVA_HOME")),
+            },
+            "resources": {
+                "processSamples": len(process_resource_samples),
+                "jvmCheckpointSamples": len(jvm_resource_samples),
+                "assessment": resource_assessment,
+                "process": summarize_resource_series(process_resource_samples, "", ("residentBytes", "threads", "openFileDescriptors")),
+                "jvm": summarize_resource_series(jvm_resource_samples, "generator", (
+                    "heapUsedBytes", "heapPeakUsedBytes", "heapCommittedBytes", "liveThreads",
+                    "liveThreadsPeak", "gcCollectionCount", "gcCollectionTimeMs", "processCpuPercent")),
+                "processSamplesFile": "process-resource-samples.json",
+                "jvmTrendFile": "jvm-resource-trend.json",
             },
             "reportManifest": "load/" + run_id + "/load-report-manifest.json",
             "trendFile": "five-minute-trend.json",
@@ -472,6 +718,25 @@ def main():
     args = parser.parse_args()
     try:
         run_soak(args)
+    except KeyboardInterrupt:
+        evidence_root = args.output.resolve()
+        evidence_root.mkdir(parents=True, exist_ok=True)
+        try:
+            existing = json.loads((evidence_root / "acceptance.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            existing = {}
+        if existing.get("result") not in ("PARTIAL", "REPORT_UNAVAILABLE", "PASS"):
+            existing.update({
+                "schemaVersion": "att-load-25h-soak/v1",
+                "runId": args.run_id or existing.get("runId"),
+                "commitSha": args.commit_sha,
+                "result": "REPORT_UNAVAILABLE",
+                "complete": False,
+                "reason": "Soak runner was interrupted before it could preserve a verified checkpoint.",
+            })
+            atomic_json(evidence_root / "acceptance.json", existing)
+        print("LOAD soak interrupted; retained evidence is marked incomplete.", file=sys.stderr)
+        raise SystemExit(130)
     except Exception as failure:
         evidence_root = args.output.resolve()
         try:
@@ -479,12 +744,12 @@ def main():
         except (OSError, ValueError):
             existing = {}
         if existing.get("result") != "PASS":
-            unavailable = existing.get("result") == "REPORT_UNAVAILABLE"
+            state = existing.get("result")
             existing.update({
                 "schemaVersion": "att-load-25h-soak/v1",
                 "runId": args.run_id or existing.get("runId"),
                 "commitSha": args.commit_sha,
-                "result": "REPORT_UNAVAILABLE" if unavailable else "FAILED",
+                "result": state if state in ("PARTIAL", "REPORT_UNAVAILABLE") else "FAILED",
                 "failure": str(failure),
             })
             atomic_json(evidence_root / "acceptance.json", existing)

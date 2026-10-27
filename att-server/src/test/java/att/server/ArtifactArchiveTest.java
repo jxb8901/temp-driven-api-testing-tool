@@ -35,7 +35,7 @@ class ArtifactArchiveTest {
         Path output=Files.createDirectory(temporary.resolve("byte-preserving-output"));
         Map<String,String> sources=Map.of(
                 "examples/load-summary.json", "{\"payload\":\"keep exact bytes\\n\"}",
-                "examples/load-summary.yaml", "payload: '  keep  spaces  '\\n",
+                "examples/load-summary.yaml", "payload: '  keep  spaces  '\n",
                 "examples/report/index.html", "<!doctype html><html><script>window.T=1</script><a href=\"../missing.log\">link</a></html>",
                 "examples/report-commit-manifest.json", "{\"sha256\":\"source-defined\"}");
         for(Map.Entry<String,String> entry:sources.entrySet()) {
@@ -239,6 +239,7 @@ class ArtifactArchiveTest {
     @Test void totalAndEntryCountCapsFailPublicationWithTypedLimitEvidence() throws Exception {
         Path totalOutput=Files.createDirectory(temporary.resolve("total-cap-output"));
         byte[] part=new byte[15*1024*1024];
+        java.util.Arrays.fill(part,(byte)'x');
         for(int i=0;i<9;i++)Files.write(totalOutput.resolve("part-"+i+".log"),part);
         ArtifactArchive.LimitFailure total=assertThrows(ArtifactArchive.LimitFailure.class,
                 ()->ArtifactArchive.build(totalOutput,temporary.resolve("total-cap.zip")));

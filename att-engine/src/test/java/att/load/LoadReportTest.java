@@ -133,7 +133,7 @@ class LoadReportTest {
         Files.createDirectories(runDirectory.resolve("executions/exec-1"));
         Files.write(runDirectory.resolve("executions/exec-1/case log<&.log"), Collections.singletonList("case log"), StandardCharsets.UTF_8);
         Path report = new LoadReportWriter().write(temp, result);
-        assertEquals(runDirectory.resolve("report/index.html").toAbsolutePath().normalize(), report.toAbsolutePath().normalize());
+        assertEquals(runDirectory.resolve("report/index.html").toRealPath(), report.toRealPath());
         assertTrue(Files.isRegularFile(runDirectory.resolve("load-summary.json")));
         assertTrue(Files.isRegularFile(runDirectory.resolve("load-summary.yaml")));
         assertTrue(Files.isRegularFile(report));

@@ -94,6 +94,7 @@ final class LoadWindowMetrics {
         if (kind == 2) {
             if (event.status() == ResultStatus.PASS) point.counts[4]++;
             else if (event.status() == ResultStatus.ERROR || event.status() == ResultStatus.INVALID) point.counts[6]++;
+            else if (event.status() == ResultStatus.SKIPPED) point.counts[7]++;
             else point.counts[5]++;
         }
         if (kind == 1) point.concurrencyDelta++;
@@ -157,7 +158,7 @@ final class LoadWindowMetrics {
         result.put("capacity", SERIES_CAPACITY);
         result.put("coverage", "Whole execution; uniform power-of-two roll-up, no historical eviction");
         List<Map<String, Object>> points = new ArrayList<Map<String, Object>>();
-        String[] names = {"scheduled", "started", "completed", "dropped", "successful", "sutFailure", "runtimeError"};
+        String[] names = {"scheduled", "started", "completed", "dropped", "successful", "sutFailure", "runtimeError", "otherOutcome"};
         long inFlight = 0L;
         for (Map.Entry<Long, Point> entry : series.entrySet()) {
             Map<String, Object> point = new LinkedHashMap<String, Object>();
@@ -218,7 +219,7 @@ final class LoadWindowMetrics {
         value.put("queueDepthMean", point.queueSamples == 0L ? null
                 : point.queueDepthTotal / (double) point.queueSamples);
         value.put("queueDepthPeak", point.queueSamples == 0L ? null : point.queueDepthPeak);
-        String[] names = {"scheduled", "started", "completed", "dropped", "successful", "sutFailure", "runtimeError"};
+        String[] names = {"scheduled", "started", "completed", "dropped", "successful", "sutFailure", "runtimeError", "otherOutcome"};
         for (int i = 0; i < names.length; i++) {
             value.put(names[i], point.counts[i]);
             value.put(names[i] + "Rate", point.counts[i] * 1000.0 / durationMs);
@@ -336,7 +337,7 @@ final class LoadWindowMetrics {
     }
 
     private static final class Point {
-        final long[] counts = new long[7];
+        final long[] counts = new long[8];
         final Samples latencies = new Samples(128);
         long concurrencyDelta;
         long schedulerLagTotalMs, schedulerLagCount, submitLagTotalMs, submitLagCount;
@@ -356,9 +357,9 @@ final class LoadWindowMetrics {
         final String name;
         final long start, end;
         final LongAdder scheduled = new LongAdder(), started = new LongAdder(), completed = new LongAdder();
-        final LongAdder successful = new LongAdder(), sutFailure = new LongAdder(), runtimeError = new LongAdder(), dropped = new LongAdder();
+        final LongAdder successful = new LongAdder(), sutFailure = new LongAdder(), runtimeError = new LongAdder(), otherOutcome = new LongAdder(), dropped = new LongAdder();
         final LongAdder cohortStarted = new LongAdder(), cohortCompleted = new LongAdder(), cohortSuccess = new LongAdder();
-        final LongAdder cohortSutFailure = new LongAdder(), cohortRuntimeError = new LongAdder();
+        final LongAdder cohortSutFailure = new LongAdder(), cohortRuntimeError = new LongAdder(), cohortOtherOutcome = new LongAdder();
         final LongAdder occupiedMs = new LongAdder(), lagMs = new LongAdder(), lagCount = new LongAdder();
         final LongAdder submitLagMs = new LongAdder(), submitLagCount = new LongAdder();
         final LongAdder queueDepthTotal = new LongAdder(), queueSamples = new LongAdder();
@@ -385,12 +386,14 @@ final class LoadWindowMetrics {
                 completed.increment();
                 if (event.success()) successful.increment();
                 else if (runtime(event)) runtimeError.increment();
+                else if (event.status() == ResultStatus.SKIPPED) otherOutcome.increment();
                 else sutFailure.increment();
             }
             if (contains(event.scheduledAtEpochMs())) {
                 cohortCompleted.increment(); latency.add(event.latencyMs());
                 if (event.success()) cohortSuccess.increment();
                 else if (runtime(event)) cohortRuntimeError.increment();
+                else if (event.status() == ResultStatus.SKIPPED) cohortOtherOutcome.increment();
                 else cohortSutFailure.increment();
             }
             Long observedStart = activeStarts.remove(key);
@@ -434,7 +437,7 @@ final class LoadWindowMetrics {
             result.put("notEvaluatedReason", valid ? null : !finished ? "RUN_INCOMPLETE" : duration == 0L ? "ZERO_DURATION" : actualEnd < effectiveEnd ? "WINDOW_INCOMPLETE" : "NO_EVENTS");
             result.put("scheduled", scheduled.sum()); result.put("started", started.sum()); result.put("completed", completed.sum());
             result.put("successful", successful.sum()); result.put("sutFailure", sutFailure.sum());
-            result.put("runtimeError", runtimeError.sum()); result.put("dropped", dropped.sum());
+            result.put("runtimeError", runtimeError.sum()); result.put("otherOutcome", otherOutcome.sum()); result.put("dropped", dropped.sum());
             result.put("scheduledRate", rate(scheduled.sum(), duration, valid));
             result.put("startedRate", rate(started.sum(), duration, valid));
             result.put("completedRate", rate(completed.sum(), duration, valid));
@@ -451,6 +454,7 @@ final class LoadWindowMetrics {
             cohort.put("basis", "scheduled timestamp; eventual outcomes include later phases and drain");
             cohort.put("completed", cohortCompleted.sum()); cohort.put("successful", cohortSuccess.sum());
             cohort.put("sutFailure", cohortSutFailure.sum()); cohort.put("runtimeError", cohortRuntimeError.sum());
+            cohort.put("otherOutcome", cohortOtherOutcome.sum());
             cohort.put("completedRate", rate(cohortCompleted.sum(), duration, valid));
             cohort.put("successfulRate", rate(cohortSuccess.sum(), duration, valid));
             cohort.put("sutErrorRate", ratio(cohortSutFailure.sum(), cohortCompleted.sum(), valid));

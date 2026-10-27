@@ -218,6 +218,25 @@ class LoadTerminalResultTest {
         assertEquals("HTTP_RESPONSE_TOO_LARGE", ((Map<?,?>) diagnostics.get("primaryError")).get("code"));
     }
 
+    @Test void accountingStatusAndBoundedViolationsSurviveTheWorkerProjection() throws Exception {
+        List<Map<String,Object>> violations = new ArrayList<>();
+        for (int index = 0; index < 40; index++) violations.add(fields("code", "ARRIVAL_CONSERVATION_FAILED",
+                "field", "phase:STEADY.scheduled", "actual", index, "expected", index + 1));
+        Map<String,Object> summary = detailedSummary(null, null);
+        Map<String,Object> metrics = new LinkedHashMap<>((Map<String,Object>) summary.get("metrics"));
+        metrics.put("accounting", fields("state", "FAILED", "finalized", Boolean.TRUE, "scopesChecked", 5,
+                "violations", violations));
+        summary.put("metrics", metrics);
+        Map<String,Object> projected = LoadTerminalResult.projectOperationResult(
+                fields("status", "ERROR", "exitCode", 3, "summary", summary), "ERROR", 3);
+        Map<?,?> compact = (Map<?,?>) projected.get("summary");
+        Map<?,?> accounting = (Map<?,?>) ((Map<?,?>) compact.get("metrics")).get("accounting");
+        assertEquals("FAILED", accounting.get("state"));
+        assertEquals(Boolean.TRUE, accounting.get("finalized"));
+        assertEquals(8, ((List<?>) accounting.get("violations")).size());
+        assertTrue(JSON.writeValueAsBytes(compact).length <= LoadTerminalResult.MAX_SUMMARY_BYTES);
+    }
+
     @Test void terminalExecutionOutcomesAndExitCodesRemainIndependentOfPerformanceVerdict() {
         for (Object[] outcome : new Object[][] { {"PASS", 0}, {"FAIL", 1}, {"ERROR", 3}, {"CANCELLED", 143} }) {
             String status = (String) outcome[0];

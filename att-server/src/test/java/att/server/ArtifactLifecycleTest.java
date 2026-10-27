@@ -318,7 +318,7 @@ class ArtifactLifecycleTest {
             runtime.retryArtifactArchive(id);awaitState(runtime,id,"READY");
             awaitMetrics(runtime,id,"READY");
             String published=new String(runtime.archiveEntry(id,"case.log"),java.nio.charset.StandardCharsets.UTF_8);
-            assertEquals(Files.readString(output.resolve("case.log")),published);
+            assertEquals("password=[REDACTED_SECRET]\nbusiness=retained",published);
             long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(5);
             while(Files.exists(output)&&System.nanoTime()<deadline)Thread.sleep(10);
             assertFalse(Files.exists(output));

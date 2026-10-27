@@ -47,33 +47,44 @@ final class LoadMetricsCheckpointStore {
     private final Path relativeDirectory;
     private final String runId;
     private final String scope;
+    private final long intervalMs;
     private final AtomicLong sequence = new AtomicLong();
     private final AtomicLong writeFailures = new AtomicLong();
+    private final java.util.concurrent.atomic.AtomicBoolean finishInvoked = new java.util.concurrent.atomic.AtomicBoolean();
     private volatile long lastCheckpointAt;
     private volatile String lastFailureCode;
     private volatile ScheduledFuture<?> scheduled;
+    private boolean finalCheckpointWritten;
 
     LoadMetricsCheckpointStore(Path directory, String runId, String scope) {
+        this(directory, runId, scope, INTERVAL_MS);
+    }
+
+    LoadMetricsCheckpointStore(Path directory, String runId, String scope, long intervalMs) {
+        if (intervalMs < 1L) throw new IllegalArgumentException("LOAD checkpoint interval must be positive.");
         Path normalized = directory.toAbsolutePath().normalize();
         this.outputRoot = normalized.getParent().getParent().getParent().getParent();
         if (outputRoot == null) throw new IllegalArgumentException("LOAD checkpoint path has no output root.");
         this.relativeDirectory = outputRoot.relativize(normalized);
         this.runId = runId;
         this.scope = scope;
+        this.intervalMs = intervalMs;
     }
 
     void start(Supplier<LoadMetricsSnapshot> snapshotSupplier) {
         scheduled = WRITERS.scheduleAtFixedRate(() -> checkpoint(snapshotSupplier, false),
-                INTERVAL_MS, INTERVAL_MS, TimeUnit.MILLISECONDS);
+                intervalMs, intervalMs, TimeUnit.MILLISECONDS);
     }
 
     void finish(Supplier<LoadMetricsSnapshot> snapshotSupplier) {
+        if (!finishInvoked.compareAndSet(false, true)) return;
         ScheduledFuture<?> task = scheduled;
         if (task != null) task.cancel(false);
         checkpoint(snapshotSupplier, true);
     }
 
-    private void checkpoint(Supplier<LoadMetricsSnapshot> snapshotSupplier, boolean finalized) {
+    private synchronized void checkpoint(Supplier<LoadMetricsSnapshot> snapshotSupplier, boolean finalized) {
+        if (snapshotSupplier == null || finalCheckpointWritten || (!finalized && finishInvoked.get())) return;
         LoadMetricsSnapshot snapshot;
         try { snapshot = snapshotSupplier.get(); }
         catch (RuntimeException failure) {
@@ -85,7 +96,7 @@ final class LoadMetricsCheckpointStore {
     }
 
     private synchronized void checkpoint(LoadMetricsSnapshot snapshot, boolean finalized) {
-        if (snapshot == null) return;
+        if (snapshot == null || finalCheckpointWritten) return;
         long next = sequence.incrementAndGet();
         Path temporary = null;
         try {
@@ -114,6 +125,7 @@ final class LoadMetricsCheckpointStore {
             temporary = null;
             lastCheckpointAt = System.currentTimeMillis();
             lastFailureCode = null;
+            if (finalized) finalCheckpointWritten = true;
             retainLatestGenerations();
         } catch (Exception failure) {
             writeFailures.incrementAndGet();
@@ -126,7 +138,7 @@ final class LoadMetricsCheckpointStore {
     Map<String, Object> status() {
         Map<String, Object> result = new LinkedHashMap<String, Object>();
         result.put("enabled", Boolean.TRUE);
-        result.put("intervalMs", INTERVAL_MS);
+        result.put("intervalMs", intervalMs);
         result.put("sequence", sequence.get());
         result.put("lastCheckpointAtEpochMs", lastCheckpointAt);
         result.put("writeFailures", writeFailures.get());
