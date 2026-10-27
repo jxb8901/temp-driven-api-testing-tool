@@ -182,14 +182,17 @@ public final class LoadRunResult {
         completeness.put("omittedCounts", omitted); completeness.put("detailSource", "load-summary.json");
         source.put("detailCompleteness", completeness);
         Map<String, Object> archive = new LinkedHashMap<String, Object>();
+        boolean reportProduced = !"FAILED".equals(reportAvailability) && !"OMITTED".equals(reportAvailability);
         Map<String, Object> paths = new LinkedHashMap<String, Object>();
-        paths.put("loadSummaryJson", "load/" + runId + "/load-summary.json");
-        paths.put("loadSummaryYaml", "load/" + runId + "/load-summary.yaml");
-        paths.put("report", "load/" + runId + "/report/index.html");
-        String archiveState = "FAILED".equals(reportAvailability) ? "FAILED" : "PENDING";
+        if (reportProduced) {
+            paths.put("loadSummaryJson", "load/" + runId + "/load-summary.json");
+            paths.put("loadSummaryYaml", "load/" + runId + "/load-summary.yaml");
+            paths.put("report", "load/" + runId + "/report/index.html");
+        }
+        String archiveState = reportProduced ? "PENDING" : "FAILED";
         archive.put("paths", paths); archive.put("status", archiveState); archive.put("reportAvailability", archiveState);
-        if ("FAILED".equals(archiveState)) archive.put("omissionReason", "LOAD_REPORT_WRITE_FAILED");
-        source.put("archive", archive); source.put("reportProduced", Boolean.TRUE);
+        if (!reportProduced) archive.put("omissionReason", "LOAD_REPORT_WRITE_FAILED");
+        source.put("archive", archive); source.put("reportProduced", reportProduced);
         if (configuration != null) source.put("configuration", configuration);
         return LoadTerminalResult.compact(source);
     }
