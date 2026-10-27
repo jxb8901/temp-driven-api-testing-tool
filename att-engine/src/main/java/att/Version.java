@@ -68,8 +68,8 @@ public final class Version {
     public static final String LOAD_SUMMARY_SCHEMA_V1_2 = "att-load-summary/v1.2";
     public static final String LOAD_SUMMARY_SCHEMA_V1_3 = "att-load-summary/v1.3";
     public static final String LOAD_WORKLOAD_DETAIL_SCHEMA_VERSION = "att-load-workload-detail/v1";
-    public static final String PREVIOUS_LOAD_SUMMARY_SCHEMA = LOAD_SUMMARY_SCHEMA_V1_1;
-    public static final String LOAD_SUMMARY_SCHEMA = LOAD_SUMMARY_SCHEMA_V1_2;
+    public static final String PREVIOUS_LOAD_SUMMARY_SCHEMA = LOAD_SUMMARY_SCHEMA_V1_2;
+    public static final String LOAD_SUMMARY_SCHEMA = LOAD_SUMMARY_SCHEMA_V1_3;
 
     private Version() {}
 
