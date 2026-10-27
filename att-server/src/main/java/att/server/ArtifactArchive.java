@@ -85,7 +85,7 @@ final class ArtifactArchive {
         try {
             List<Path> candidates=inventory(root,maxCandidates);
             if(metrics!=null){metrics.value.candidateCount=(long)candidates.size();usage(metrics.value.limitUsage,"artifact.inventory.candidates",candidates.size(),maxCandidates);}
-            Set<String> names=new HashSet<>();List<String> approved=new ArrayList<>();long total=0;int omitted=0;long oversizedOmission=0L;long largestEntryBytes=0L;
+            Set<String> names=new HashSet<>();List<String> approved=new ArrayList<>();long total=0;int omitted=0;long oversizedOmission=0L;long largestEntryBytes=0L;int entryCapOmissions=0;
             Map<String,byte[]> memoryExports=new LinkedHashMap<>();long retained=0;
             for(Path candidate:candidates) {
                 if(root.relativize(candidate).getNameCount()>=64&&Files.isDirectory(candidate,LinkOption.NOFOLLOW_LINKS))throw new IllegalArgumentException("Artifact directory depth exceeds limits");
@@ -95,7 +95,7 @@ final class ArtifactArchive {
                 if(metrics!=null)metrics.source(Files.size(candidate));
                 String relative=root.relativize(candidate).toString().replace('\\','/'),lower=relative.toLowerCase(Locale.ROOT);
                 if(!safePath(relative)||lower.equals(MANIFEST)||!SAFE_EXTENSIONS.contains(extension(relative))||names.contains(lower)){omitted++;if(metrics!=null)metrics.value.omittedEntries=(long)omitted;continue;}
-                if(approved.size()>=MAX_ENTRIES)throw new LimitFailure("Artifact entry count exceeds limits","artifact.archive.entries",MAX_ENTRIES,approved.size()+1L);
+                if(approved.size()>=MAX_ENTRIES){omitted++;entryCapOmissions++;if(metrics!=null)metrics.value.omittedEntries=(long)omitted;continue;}
                 long sourceSize=Files.size(candidate);
                 largestEntryBytes=Math.max(largestEntryBytes,sourceSize);
                 if(sourceSize>MAX_ENTRY_BYTES){omitted++;oversizedOmission=Math.max(oversizedOmission,sourceSize);if(metrics!=null)metrics.value.omittedEntries=(long)omitted;continue;}
@@ -139,7 +139,12 @@ final class ArtifactArchive {
                 manifest.put("version",1);manifest.put("policy","att-export-approved-bytes-v1");manifest.put("entries",entries);manifest.put("complete",omitted==0);
                 manifest.put("omissions",omitted==0?List.of():List.of(Map.of("count",omitted,"reason",OMISSION_REASON)));
                 if(omitted>0){
-                    Map<String,Object> notice=oversizedOmission>0
+                    Map<String,Object> notice=entryCapOmissions>0
+                            ? LimitDiagnostic.create("ATT-ARTIFACT-OMITTED","Some output entries exceeded the bounded ZIP entry budget",
+                                    "artifact.archive.entries",MAX_ENTRIES,(long)MAX_ENTRIES+entryCapOmissions,
+                                    "server.artifactPublication",LimitOutcome.ARTIFACT_OMITTED,"publication",
+                                    "Limit retained evidence or split LOAD output into multiple runs.","archive.zip")
+                            : oversizedOmission>0
                             ? LimitDiagnostic.create("ATT-ARTIFACT-OMITTED","Some output files exceeded the per-entry publication limit",
                                     "artifact.archive.entryBytes",MAX_ENTRY_BYTES,oversizedOmission,"server.artifactPublication",
                                     LimitOutcome.ARTIFACT_OMITTED,"publication","Use smaller evidence files or split detailed output across bounded artifacts.","archive.zip")
@@ -199,8 +204,19 @@ final class ArtifactArchive {
                 return java.nio.file.FileVisitResult.CONTINUE;
             }
         });
-        candidates.sort(Comparator.comparing(path -> root.relativize(path).toString()));
+        // Keep primary LOAD reports and their referenced detail sidecars ahead of optional evidence.
+        // Surplus evidence is omitted rather than making the entire report ZIP unavailable.
+        candidates.sort(Comparator.comparingInt((Path path) -> archivePriority(root.relativize(path).toString().replace('\\','/')))
+                .thenComparing(path -> root.relativize(path).toString()));
         return candidates;
+    }
+
+    private static int archivePriority(String path) {
+        if (path.endsWith("/load-summary.json") || path.endsWith("/load-summary.yaml")
+                || path.endsWith("/report/index.html") || path.endsWith("/report-commit-manifest.json")) return 0;
+        if (path.contains("/details/v1/")) return 1;
+        if (path.endsWith("/configuration.json")) return 2;
+        return 3;
     }
 
     private static void usage(Map<String,Map<String,Object>> target,String name,long value,long limit){
