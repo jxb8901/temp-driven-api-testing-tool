@@ -582,7 +582,8 @@ function LiveLoadSummary({ job, active, progress, history, trend, streamHistory,
   job: JobView | null; active: boolean; progress: LoadLiveProgressSnapshot | null;
   history: LoadLiveProgressPoint[]; trend: LoadLiveProgressPoint[]; streamHistory?: readonly LoadLiveProgressPoint[]; checkpointHistory?: readonly import('./types').LoadCheckpointInterval[]; connection: JobStreamConnection; now: number;
 }) {
-  if (!active || job?.command !== 'load') return null;
+  const partial = Boolean(!active && job && ['CANCELLED', 'ERROR', 'INVALID', 'FAIL'].includes(job.status) && progress);
+  if ((!active && !partial) || job?.command !== 'load') return null;
   const plans = job.targetIdentity?.workloads || [];
   const latestAge = progress ? Math.max(0, now - Date.parse(progress.serverReceivedAt || progress.capturedAt)) : null;
   const freshness = latestAge == null || !Number.isFinite(latestAge) ? 'Waiting for first sample'
@@ -616,10 +617,11 @@ function LiveLoadSummary({ job, active, progress, history, trend, streamHistory,
   if (latestCheckpoint?.state === 'VERIFIED' && !checkpoints.some(item => item.endSequence === latestCheckpoint.endSequence)) checkpoints.push(latestCheckpoint);
   checkpoints.sort((left, right) => (left.endSequence ?? 0) - (right.endSequence ?? 0));
   return <section className="att-live-load-summary" aria-label="Live LOAD progress">
-    <div className="att-live-load-heading"><div><h3>Live LOAD progress</h3><p>Worker samples are coalesced about every five seconds; live counters are not per-iteration events.</p></div>
+    <div className="att-live-load-heading"><div><h3>{partial ? 'Last live LOAD snapshot' : 'Live LOAD progress'}</h3><p>Worker samples are coalesced about every five seconds; live counters are not per-iteration events.</p></div>
       <span className={latestAge != null && latestAge <= 15_000 ? 'att-live-fresh' : 'att-live-stale'}>{freshness}</span>
     </div>
-    <p>Execution outcome: IN_PROGRESS · Performance/threshold verdict: NOT_FINAL</p>
+    {partial ? <p>Partial pre-terminal telemetry; the canonical terminal result and archive are authoritative.</p>
+      : <p>Execution outcome: IN_PROGRESS · Performance/threshold verdict: NOT_FINAL</p>}
     <p>Status: {job.status}{progress ? ` · Phase ${progress.phase.replaceAll('_', ' ')}` : ''}</p>
     {progress ? <>
       <dl className="att-live-load-metrics">
@@ -644,7 +646,7 @@ function LiveLoadSummary({ job, active, progress, history, trend, streamHistory,
             <td>{countText(phaseCounts.completed)} / {countText(phaseCounts.passed)}</td>
             <td>{countText(phaseCounts.sutFailures)} / {countText(phaseCounts.runtimeErrors)} / {countText(phaseCounts.dropped)}</td>
           </tr>)}</tbody></table></div></details>}
-      {totalPlannedMs > 0 && progress.phase !== 'PREPARING' && <p>Scheduler plan: {METRIC_NUMBER_FORMATTER.format(Math.min(100, progress.elapsedMs * 100 / totalPlannedMs))}% elapsed
+      {!partial && totalPlannedMs > 0 && progress.phase !== 'PREPARING' && <p>Scheduler plan: {METRIC_NUMBER_FORMATTER.format(Math.min(100, progress.elapsedMs * 100 / totalPlannedMs))}% elapsed
         {progress.elapsedMs >= totalPlannedMs ? ' · Planned scheduler time elapsed; workers may still be draining.' : ` · Approximately ${plannedWorkloadDuration(totalPlannedMs - progress.elapsedMs)} remaining`}.</p>}
       {progress.latestFailure && <p>Latest failure: {progress.latestFailure.status}{progress.latestFailure.code ? ` · ${progress.latestFailure.code}` : ''} · {progress.latestFailure.capturedAt}</p>}
       {latency?.sampleCount ? <p>Latency percentiles are estimates from a bounded histogram ({METRIC_NUMBER_FORMATTER.format(latency.sampleCount)} samples).</p> : null}
@@ -758,7 +760,7 @@ export const MetricsPanel = memo(function MetricsPanel({ job, payload = null, me
   return <section className="att-job-panel" role="tabpanel" id="job-panel-metrics" aria-labelledby="job-tab-metrics" hidden={hidden} tabIndex={0}>
     <Profiler id="job-metrics-content" onRender={() => onProfilerCommit?.()}><h2>Metrics</h2>
     <p className="att-help">Only values returned by the job API are shown. Server timings and Worker JVM metrics are separate from Load result metrics.</p>
-    {activeLoad && <LiveLoadSummary job={job} active={activeLoad} progress={liveProgress} history={liveHistory} trend={liveTrend} streamHistory={streamHistory} checkpointHistory={checkpointHistory} connection={streamConnection} now={now} />}
+    <LiveLoadSummary job={job} active={activeLoad} progress={liveProgress} history={liveHistory} trend={liveTrend} streamHistory={streamHistory} checkpointHistory={checkpointHistory} connection={streamConnection} now={now} />
     {!activeLoad && terminal && <CompactLoadSummary payload={payload} archiveState={reportAvailability} archiveMessage={reportError} />}
     {coverage && <p className="att-help">LoadMetrics retains at most {displayValue(coverage.loadMetricsBucketCapacity)} one-second buckets; retained coverage is {displayValue(coverage.observedBucketCoverageMs ?? 0)} ms. The window series uses {displayValue(coverage.windowSeriesBinWidthMs)} ms bins across {displayValue(coverage.windowSeriesCapacity)} slots ({displayValue(coverage.windowSeriesCoverage || 'coverage not reported')}).</p>}
     {job && <MetricTable title="Server timings" rows={numericRows(job.performance?.timings)} unit="ms" />}

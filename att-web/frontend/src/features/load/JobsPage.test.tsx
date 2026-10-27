@@ -492,6 +492,11 @@ describe('JobsPage React feature', () => {
     expect(metrics.querySelector('[aria-label="Verified checkpoint intervals"]')?.textContent).toContain('590 / 5 / 3 / 2');
     expect(metrics.querySelector('[aria-label="Verified checkpoint intervals"]')?.textContent).toContain('23.5 ms (10 observations)');
     expect(getArchive).not.toHaveBeenCalled();
+    const subscription = vi.mocked(api.subscribeJob).mock.calls[0]?.[1];
+    await act(async () => { subscription?.onEvent({ id: 'terminal', type: 'status', data: { status: 'CANCELLED' } }); });
+    expect(metrics.textContent).toContain('Last live LOAD snapshot');
+    expect(metrics.textContent).toContain('Partial pre-terminal telemetry');
+    expect(metrics.textContent).not.toContain('Execution outcome: IN_PROGRESS');
   });
 
   it('renders the compact terminal result and primary ERROR cause without requesting an archive on initial detail load', async () => {

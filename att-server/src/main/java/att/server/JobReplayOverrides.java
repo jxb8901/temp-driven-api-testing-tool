@@ -42,8 +42,20 @@ final class JobReplayOverrides {
         if(overrides.has("load")) {
             JsonNode load=overrides.get("load");requireObject(load,"load overrides must be an object");
             allowFields(load,PHASE_TIMINGS);
-            JsonNode previous=scenario.path("load").deepCopy();
+            ObjectNode previous=scenario.path("load") instanceof ObjectNode ? ((ObjectNode)scenario.path("load")).deepCopy() : ServerRuntime.JSON.createObjectNode();
+            JsonNode retainedWorkloads=scenario.path("workloads");
+            if(retainedWorkloads.isArray() && retainedWorkloads.size()>0) {
+                ObjectNode effective=effectiveTiming(previous,retainedWorkloads.get(0));
+                for(int index=1;index<retainedWorkloads.size();index++)
+                    if(!sameTiming(effective,effectiveTiming(previous,retainedWorkloads.get(index))))
+                        throw new IllegalArgumentException("Replay workloads have different effective phase timing at workloads["+index+"].load; use a shared timing envelope");
+                previous=effective;
+            }
             ObjectNode target=scenario.with("load");
+            for(String field:PHASE_TIMINGS) {
+                JsonNode value=previous.get(field);
+                if(value==null||value.isNull())target.remove(field);else target.set(field,value.deepCopy());
+            }
             load.fields().forEachRemaining(entry->{
                 JsonNode value=entry.getValue();
                 if(value==null||value.isNull()||value.isTextual()&&value.asText().isBlank())target.remove(entry.getKey());
@@ -72,7 +84,7 @@ final class JobReplayOverrides {
                 if(patch.has("load")) {
                     JsonNode load=patch.get("load");requireObject(load,"workload load override must be an object");
                     allowFields(load,Set.of("users","arrivalRate","maxConcurrent","overloadPolicy"));
-                    boolean arrival=workload.path("load").has("arrivalRate");
+                    boolean arrival=isArrivalModel(scenario,workload);
                     if(arrival&&load.has("users")||!arrival&&load.has("arrivalRate"))
                         throw new IllegalArgumentException("Replay cannot convert between Arrival Rate and Virtual Users models");
                     merge(workload.with("load"),load);
@@ -87,11 +99,22 @@ final class JobReplayOverrides {
         if(workloads.isArray()) {
             Boolean arrivalModel=null;
             for(JsonNode workload:workloads) {
-                boolean arrival=workload.path("load").has("arrivalRate");
+                boolean arrival=isArrivalModel(scenario,workload);
                 if(arrivalModel!=null&&arrivalModel.booleanValue()!=arrival)throw new IllegalArgumentException("All replay workloads must keep the original LOAD model");
                 arrivalModel=Boolean.valueOf(arrival);
             }
         }
+    }
+
+    private static ObjectNode effectiveTiming(ObjectNode root,JsonNode workload) {
+        ObjectNode effective=root.deepCopy();JsonNode local=workload.path("load");
+        for(String field:PHASE_TIMINGS)if(local.has(field))effective.set(field,local.get(field).deepCopy());
+        return effective;
+    }
+
+    private static boolean isArrivalModel(JsonNode scenario,JsonNode workload) {
+        JsonNode local=workload.path("load");
+        return local.has("arrivalRate")||(!local.has("users")&&scenario.path("load").has("arrivalRate"));
     }
 
     private static boolean sameTiming(JsonNode before,JsonNode after) {

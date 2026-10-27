@@ -507,7 +507,7 @@ class ServerRuntimeJobReplayTest {
                 "workloads",List.of(Map.of("id","primary","load",Map.of("users",10)))))));
     }
 
-    @Test void replayKeepsWorkloadTimingWhenSharedOverrideIsSemanticallyUnchanged() {
+    @Test void replayComparesEditedTimingWithEffectiveWorkloadTiming() {
         var source=ServerRuntime.JSON.createObjectNode();source.put("executionType","load");source.put("packageId","p");
         var scenario=source.putObject("scenario");scenario.putObject("load").put("duration","30m");
         var workloads=scenario.putArray("workloads");
@@ -515,9 +515,67 @@ class ServerRuntimeJobReplayTest {
         var edits=ServerRuntime.JSON.createObjectNode();edits.putObject("load").put("duration","1800s");
         var updated=JobReplayOverrides.apply(source,edits).path("scenario");
         assertEquals("1800s",updated.path("load").path("duration").asText());
-        assertEquals("60m",updated.path("workloads").get(0).path("load").path("duration").asText());
-        assertEquals("60m",updated.path("workloads").get(1).path("load").path("duration").asText());
+        assertFalse(updated.path("workloads").get(0).path("load").has("duration"));
+        assertFalse(updated.path("workloads").get(1).path("load").has("duration"));
         assertEquals("30m",source.path("scenario").path("load").path("duration").asText());
+    }
+
+    @Test void replayPreservesWorkloadOnlyPhasesWhenEditingAnotherPhase() {
+        var source=ServerRuntime.JSON.createObjectNode();source.put("executionType","load");
+        var scenario=source.putObject("scenario");var workloads=scenario.putArray("workloads");
+        for(String id:List.of("one","two"))workloads.addObject().put("id",id).putObject("load").put("users",1).put("duration","10s").put("rampUp","2s");
+        var edits=ServerRuntime.JSON.createObjectNode();edits.putObject("load").put("warmup","1s");
+        var updated=JobReplayOverrides.apply(source,edits).path("scenario");
+        assertEquals("10s",updated.path("load").path("duration").asText());
+        assertEquals("2s",updated.path("load").path("rampUp").asText());
+        assertEquals("1s",updated.path("load").path("warmup").asText());
+        assertFalse(updated.path("workloads").get(0).path("load").has("duration"));
+        assertEquals("10s",source.path("scenario").path("workloads").get(0).path("load").path("duration").asText());
+    }
+
+    @Test void equivalentEffectiveTimingKeepsRetainedWorkloadValues() {
+        var source=ServerRuntime.JSON.createObjectNode();source.put("executionType","load");
+        var scenario=source.putObject("scenario");scenario.putObject("load").put("duration","30m");
+        scenario.putArray("workloads").addObject().put("id","one").putObject("load").put("users",1).put("duration","60m");
+        var edits=ServerRuntime.JSON.createObjectNode();edits.putObject("load").put("duration","3600s");
+        var updated=JobReplayOverrides.apply(source,edits).path("scenario");
+        assertEquals("60m",updated.path("workloads").get(0).path("load").path("duration").asText());
+        assertEquals("3600s",updated.path("load").path("duration").asText());
+    }
+
+    @Test void replayRejectsNonuniformRetainedWorkloadTiming() {
+        var source=ServerRuntime.JSON.createObjectNode();source.put("executionType","load");
+        var workloads=source.putObject("scenario").putArray("workloads");
+        workloads.addObject().put("id","one").putObject("load").put("users",1).put("duration","10s");
+        workloads.addObject().put("id","two").putObject("load").put("users",1).put("duration","20s");
+        var edits=ServerRuntime.JSON.createObjectNode();edits.putObject("load").put("duration","1h");
+        IllegalArgumentException failure=assertThrows(IllegalArgumentException.class,()->JobReplayOverrides.apply(source,edits));
+        assertTrue(failure.getMessage().contains("workloads[1].load"));
+    }
+
+    @Test void replaySynchronizesEachSharedPhaseAcrossWorkloads() {
+        for(String field:List.of("warmup","rampUp","duration","rampDown")) {
+            var source=ServerRuntime.JSON.createObjectNode();source.put("executionType","load");
+            var workloads=source.putObject("scenario").putArray("workloads");
+            for(String id:List.of("one","two"))workloads.addObject().put("id",id).putObject("load").put("users",1)
+                    .put("warmup","1s").put("rampUp","2s").put("duration","10s").put("rampDown","3s");
+            var edits=ServerRuntime.JSON.createObjectNode();edits.putObject("load").put(field,"1h");
+            var updated=JobReplayOverrides.apply(source,edits).path("scenario");
+            assertEquals("1h",updated.path("load").path(field).asText());
+            for(JsonNode workload:updated.path("workloads"))for(String phase:List.of("warmup","rampUp","duration","rampDown"))
+                assertFalse(workload.path("load").has(phase),field+" must use the shared "+phase+" value");
+            assertEquals("10s",source.path("scenario").path("workloads").get(0).path("load").path("duration").asText());
+        }
+    }
+
+    @Test void replayRespectsWorkloadModelInheritedFromRootLoad() {
+        var source=ServerRuntime.JSON.createObjectNode();source.put("executionType","load");
+        var scenario=source.putObject("scenario");scenario.putObject("load").put("duration","10s").put("arrivalRate","5/s").put("maxConcurrent",10);
+        scenario.putArray("workloads").addObject().put("id","one").putObject("target").put("type","template").put("id","SIMPLE");
+        var overrides=ServerRuntime.JSON.valueToTree(Map.of("workloads",List.of(Map.of("id","one","load",Map.of("arrivalRate","6/s")))));
+        var result=JobReplayOverrides.apply(source,overrides).path("scenario");
+        assertEquals("6/s",result.path("workloads").get(0).path("load").path("arrivalRate").asText());
+        assertEquals("5/s",source.path("scenario").path("load").path("arrivalRate").asText());
     }
 
     @Test void replayDraftReferenceExpiresAndIsLostOnServerRestart() throws Exception {
