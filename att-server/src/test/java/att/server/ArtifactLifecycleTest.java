@@ -430,10 +430,13 @@ class ArtifactLifecycleTest {
             Files.write(output.resolve("invalid-utf8.log"), new byte[] {(byte)0xc3, (byte)0x28});
             Files.write(output.resolve("binary.log"), new byte[] {0, 1});
             Map<String,byte[]> projected = new java.util.LinkedHashMap<>();
-            for (String name : List.of("evidence.json", "evidence.yaml", "case.log", "result.xml", "result.csv")) {
-                byte[] bytes = runtime.publicArtifact(id, output.resolve(name));
-                assertFalse(new String(bytes, java.nio.charset.StandardCharsets.UTF_8).contains("export-canary-"), name);
-                projected.put(name, bytes);
+            // The producer/fixture must create safe public artifacts before archiving. Publication
+            // preserves these bytes without any Server-side rewrite, including the HTML report.
+            for (String name : List.of("evidence.json", "evidence.yaml", "case.log", "result.xml", "result.csv", "report.html")) {
+                byte[] producerBytes = runtime.publicArtifact(id, output.resolve(name));
+                assertFalse(new String(producerBytes, java.nio.charset.StandardCharsets.UTF_8).contains("export-canary-"), name);
+                Files.write(output.resolve(name), producerBytes);
+                projected.put(name, producerBytes);
             }
             runtime.scheduleArtifactArchive(id); awaitState(runtime, id, "READY");
             Map<String,Object> manifest = ArtifactArchive.verify(runtime.artifactArchivePath(id), true);
