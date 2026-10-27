@@ -166,7 +166,27 @@ class LoadSoakEvidenceTest(unittest.TestCase):
         self.assertEqual(25, parameters["durationHours"])
         self.assertEqual(512, parameters["maxConcurrent"])
         self.assertEqual(150 * 25 * 60 * 60, parameters["expectedScheduledArrivals"])
+        self.assertEqual(soak.SOAK_THRESHOLDS, parameters["thresholds"])
         self.assertEqual("metrics", parameters["evidenceMode"])
+
+    def test_generated_soak_scenario_requires_overall_completed_and_successful_rate(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            repository = root / "repository"
+            (repository / "schemas").mkdir(parents=True)
+            runtime = root / "runtime-source"
+            (runtime / "lib").mkdir(parents=True)
+            launcher = runtime / "att.sh"
+            launcher.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+            package_root = root / "installed" / "packages" / "default"
+            package_root.mkdir(parents=True)
+
+            scenario, _ = soak.install_soak_package(repository, runtime, package_root, 150, 25, 512)
+
+            text = scenario.read_text(encoding="utf-8")
+            self.assertIn('completedRate: \">= 100/s\"', text)
+            self.assertIn('successfulRate: \">= 100/s\"', text)
+            self.assertIn('droppedRate: \"<= 0%\"', text)
 
     def test_report_bundle_requires_every_hash_and_essential_file(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -181,8 +201,18 @@ class LoadSoakEvidenceTest(unittest.TestCase):
                         "runId": "run",
                         "durationMs": 90000000,
                         "executionStatus": "PASS",
-                        "performanceVerdict": "NOT_EVALUATED",
-                        "metrics": {"accounting": {"state": "VERIFIED"}},
+                        "performanceVerdict": "MET",
+                        "thresholds": {"status": "MET", "performanceVerdict": "MET", "results": [
+                            {"name": "overall.completedRate", "actual": "150.000/s", "status": "PASS"},
+                            {"name": "overall.successfulRate", "actual": "150.000/s", "status": "PASS"},
+                            {"name": "overall.droppedRate", "actual": "0.000%", "status": "PASS"},
+                        ]},
+                        "metrics": {
+                            "accounting": {"state": "VERIFIED"},
+                            "windowMetrics": {"windows": {"all": {
+                                "completedRate": 150.0, "successfulRate": 150.0, "droppedRate": 0.0,
+                            }}},
+                        },
                         "report": "report/index.html",
                         "reportManifest": "load-report-manifest.json",
                     }).encode("utf-8")
@@ -192,10 +222,19 @@ class LoadSoakEvidenceTest(unittest.TestCase):
                 rows.append({"path": name, "lengthBytes": len(data), "sha256": hashlib.sha256(data).hexdigest()})
             manifest = {"schemaVersion": "att-load-report-manifest/v1", "state": "COMPLETE",
                         "complete": True, "runId": "run", "durationMs": 90000000,
-                        "executionStatus": "PASS", "performanceVerdict": "NOT_EVALUATED",
+                        "executionStatus": "PASS", "performanceVerdict": "MET",
                         "accountingStatus": "VERIFIED", "files": rows}
             (run / "load-report-manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
-            self.assertEqual("COMPLETE", soak.verify_report_bundle(run)["state"])
+            verified = soak.verify_report_bundle(run)
+            summary = json.loads((run / "load-summary.json").read_text(encoding="utf-8"))
+            self.assertEqual("COMPLETE", verified["state"])
+            self.assertEqual("MET", soak.verify_soak_performance_verdict(verified, summary))
+            with self.assertRaisesRegex(RuntimeError, "did not evaluate its performance thresholds as MET"):
+                soak.verify_soak_performance_verdict(dict(verified, performanceVerdict="NOT_EVALUATED"), summary)
+            low_rate = json.loads(json.dumps(summary))
+            low_rate["metrics"]["windowMetrics"]["windows"]["all"]["completedRate"] = 99.0
+            with self.assertRaisesRegex(RuntimeError, "completedRate is below"):
+                soak.verify_soak_performance_verdict(verified, low_rate)
             (run / "report/index.html").write_text("tampered", encoding="utf-8")
             with self.assertRaises(RuntimeError):
                 soak.verify_report_bundle(run)
@@ -318,9 +357,14 @@ class LoadSoakEvidenceTest(unittest.TestCase):
         self.assertEqual("CAPTURED", result["status"])
         self.assertTrue(result["process"]["series"]["openFileDescriptors"]["summary"]["available"])
         self.assertEqual("STABLE_WITHIN_TOLERANCE", result["growth"]["threads"]["status"])
+        self.assertEqual("STABLE_WITHIN_TOLERANCE", result["growth"]["residentBytes"]["status"])
         with self.assertRaisesRegex(RuntimeError, "resource series openFileDescriptors"):
             missing_fd = [dict(row, openFileDescriptors=None) for row in process_rows]
             soak.assess_resource_evidence(missing_fd, jvm_rows, 24 * 3600)
+        with self.assertRaisesRegex(RuntimeError, "residentBytes increased"):
+            growing_rss = [dict(row, residentBytes=100_000_000 + index * 1_000_000)
+                           for index, row in enumerate(process_rows)]
+            soak.assess_resource_evidence(growing_rss, jvm_rows, 24 * 3600)
         with self.assertRaisesRegex(RuntimeError, "heapUsedBytes increased"):
             growing_heap = [dict(row, generator=dict(row["generator"], heapUsedBytes=index * 1024 * 1024))
                             for index, row in enumerate(jvm_rows)]

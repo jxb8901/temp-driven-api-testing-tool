@@ -4,6 +4,7 @@
 import argparse
 import hashlib
 import json
+import math
 import os
 import platform
 import shutil
@@ -25,6 +26,13 @@ MIN_COMPLETIONS = 9_000_000
 SOAK_SEED = 177
 SOAK_TARGET_TYPE = "template"
 SOAK_TARGET_ID = "LOAD_SOAK_NOOP"
+SOAK_THRESHOLDS = {
+    "overall": {
+        "completedRate": ">= 100/s",
+        "successfulRate": ">= 100/s",
+        "droppedRate": "<= 0%",
+    },
+}
 REPORT_FILES = {
     "load-summary.json",
     "load-summary.yaml",
@@ -139,6 +147,7 @@ def parameter_set(arrival_rate, duration_hours, max_concurrent):
         "rampDownSeconds": 0,
         "maxConcurrent": max_concurrent,
         "overloadPolicy": "drop",
+        "thresholds": SOAK_THRESHOLDS,
         "evidenceMode": "metrics",
         "expectedScheduledArrivals": expected_scheduled_arrivals(arrival_rate, duration_hours),
     }
@@ -265,6 +274,7 @@ def assess_resource_evidence(process_rows, jvm_rows, minimum_span_seconds):
     growth = {}
     for name, rows, section, key, tolerance in (
         ("openFileDescriptors", process_rows, "", "openFileDescriptors", 2.0),
+        ("residentBytes", process_rows, "", "residentBytes", None),
         ("threads", process_rows, "", "threads", None),
         ("heapUsedBytes", jvm_rows, "generator", "heapUsedBytes", None),
     ):
@@ -289,6 +299,9 @@ def assess_resource_evidence(process_rows, jvm_rows, minimum_span_seconds):
         ending = statistics.median(end_values)
         if tolerance is None and name == "threads":
             tolerance = max(2.0, baseline * 0.05)
+        elif tolerance is None and name == "residentBytes":
+            tolerance = max(64.0 * 1024.0 * 1024.0,
+                            min(256.0 * 1024.0 * 1024.0, baseline * 0.10))
         elif tolerance is None:
             heap_limits = [row.get("generator", {}).get("heapMaxBytes") for row in jvm_rows
                            if isinstance(row.get("generator"), dict)]
@@ -408,6 +421,11 @@ def install_soak_package(repository, runtime_root, package_root, arrival_rate, d
         "      rampDown: 0s\n"
         "      maxConcurrent: {}\n"
         "      overloadPolicy: drop\n"
+        "thresholds:\n"
+        "  overall:\n"
+        "    completedRate: \">= 100/s\"\n"
+        "    successfulRate: \">= 100/s\"\n"
+        "    droppedRate: \"<= 0%\"\n"
         "evidence:\n"
         "  mode: metrics\n"
     ).format(SOAK_SEED, SOAK_TARGET_TYPE, SOAK_TARGET_ID, arrival_rate, duration_hours, max_concurrent)
@@ -523,6 +541,54 @@ def verify_report_bundle(run_directory):
             or summary.get("reportManifest") != "load-report-manifest.json"):
         raise RuntimeError("LOAD summary does not match its committed report bundle")
     return manifest
+
+
+def verify_soak_performance_verdict(manifest, summary):
+    if manifest.get("executionStatus") != "PASS":
+        raise RuntimeError("the completed LOAD report does not have PASS execution status")
+    if manifest.get("performanceVerdict") != "MET":
+        raise RuntimeError("the completed LOAD report did not evaluate its performance thresholds as MET")
+    threshold_summary = summary.get("thresholds")
+    if not isinstance(threshold_summary, dict) or not isinstance(threshold_summary.get("results"), list):
+        raise RuntimeError("the LOAD report does not contain evaluated threshold results")
+    if threshold_summary.get("status") != "MET" or threshold_summary.get("performanceVerdict") != "MET":
+        raise RuntimeError("the LOAD report threshold summary did not reach MET")
+    threshold_rows = threshold_summary["results"]
+    required_thresholds = {"overall.completedRate", "overall.successfulRate", "overall.droppedRate"}
+    threshold_results = {row.get("name"): row for row in threshold_rows if isinstance(row, dict)}
+    passed = {name for name, row in threshold_results.items() if row.get("status") == "PASS"}
+    missing = required_thresholds - passed
+    if missing:
+        raise RuntimeError("the LOAD report is missing passing soak thresholds: {}".format(", ".join(sorted(missing))))
+    metrics = summary.get("metrics")
+    if not isinstance(metrics, dict):
+        raise RuntimeError("the LOAD report does not contain metrics")
+    window_metrics = metrics.get("windowMetrics")
+    windows = window_metrics.get("windows", {}) if isinstance(window_metrics, dict) else {}
+    overall = windows.get("all", {}) if isinstance(windows, dict) else {}
+    if not isinstance(overall, dict):
+        raise RuntimeError("the LOAD report does not contain overall window metrics")
+    for metric in ("completedRate", "successfulRate"):
+        value = overall.get(metric)
+        if not isinstance(value, (int, float)) or not math.isfinite(value) or value < MIN_COMPLETED_TPS:
+            raise RuntimeError("the overall LOAD report {} is below {:.0f}/s or unavailable".format(
+                metric, MIN_COMPLETED_TPS))
+        actual = threshold_results["overall." + metric].get("actual")
+        if not isinstance(actual, str) or not actual.endswith("/s"):
+            raise RuntimeError("the LOAD report threshold actual is invalid for {}".format(metric))
+        try:
+            threshold_rate = float(actual[:-2])
+        except ValueError:
+            raise RuntimeError("the LOAD report threshold actual is invalid for {}".format(metric))
+        if not math.isfinite(threshold_rate) or threshold_rate < MIN_COMPLETED_TPS \
+                or abs(threshold_rate - float(value)) > 0.00051:
+            raise RuntimeError("the LOAD report threshold result does not match overall {}".format(metric))
+    if overall.get("droppedRate") != 0:
+        raise RuntimeError("the overall LOAD report contains dropped arrivals")
+    dropped_actual = threshold_results["overall.droppedRate"].get("actual")
+    if dropped_actual != "0.000%":
+        raise RuntimeError("the LOAD report dropped-rate threshold did not record zero drops")
+    return manifest["performanceVerdict"]
 
 
 def verify_final_checkpoint(directory, run_id, scope, expected_sequence):
@@ -700,6 +766,7 @@ def run_soak(args):
             raise RuntimeError("ATT LOAD exited with {}: {}".format(exit_code, "\n".join(stderr_log.read_text(encoding="utf-8", errors="replace").splitlines()[-20:])))
         manifest = verify_report_bundle(run_directory)
         metrics = summary.get("metrics", {})
+        verify_soak_performance_verdict(manifest, summary)
         accounting = metrics.get("accounting", {})
         aggregate_checkpoints = metrics.get("checkpoints", {})
         workload = summary.get("workloads", {}).get("local-soak", {})
