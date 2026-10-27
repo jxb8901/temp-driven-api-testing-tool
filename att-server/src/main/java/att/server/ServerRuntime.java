@@ -826,7 +826,7 @@ final class ServerRuntime implements AutoCloseable {
             }
             int exit=process.waitFor();job.workerTerminatedNanos=System.nanoTime();job.exitCode=exit;
             if(!job.resultReceived&&!job.terminal()) {
-                if(job.cancelRequested&&"load".equals(job.command))finish(job,"CANCELLED",143);
+                if(job.cancelRequested)finish(job,"CANCELLED",143);
                 else {recordWorkerExit(job,exit);finish(job,"ERROR",exit==0?3:exit);}
             }
             else if(!job.terminal()) {String state=exit==0?"PASS":"FAIL";finish(job,state,exit);}
@@ -966,7 +966,7 @@ final class ServerRuntime implements AutoCloseable {
                 }
                 String status=event.path("status").asText("ERROR");
                 int code=event.path("exitCode").asInt(3);
-                if(job.cancelRequested&&"load".equals(job.command)){status="CANCELLED";code=143;}
+                if(job.cancelRequested){status="CANCELLED";code=143;}
                 Object result=safe.get("result");
                 if("load".equals(job.command)) {
                     Map<String,Object> original=result instanceof Map<?,?>?(Map<String,Object>)result:new LinkedHashMap<>();
