@@ -84,13 +84,21 @@ async function main() {
       if (method === 'POST' && resource === 'jobs/load') return json({ jobId, status: 'RUNNING', command: 'load', packageId: 'payments' }, 202);
       if (liveMode && method === 'GET' && resource === `jobs/${jobId}`) {
         const now = new Date().toISOString();
+        const interval = { schemaVersion: 'att-load-checkpoint-interval/v1', state: 'VERIFIED', startSequence: 1, endSequence: 2,
+          startAt: new Date(Date.parse(now) - 300_000).toISOString(), endAt: now, durationMs: 300_000,
+          counts: { completed: 60, success: 55, failure: 2, runtimeError: 1, dropped: 2 }, latencySampleCount: 60, latencyMeanMs: 21 };
         const sample = (elapsedMs, phase, completed) => ({ schemaVersion: 'att-load-live-progress/v1', capturedAt: now, serverReceivedAt: now, elapsedMs, phase,
           counts: { completed, passed: completed - 1, sutFailures: 1, runtimeErrors: 0, dropped: 0, active: 1, queued: 0, schedulerLagMeanMs: 2 },
           latency: { sampleCount: completed, meanMs: 21, p95Ms: 31, p99Ms: 63 },
-          workloads: { checkout: { completed, passed: completed - 1, latency: { sampleCount: completed, meanMs: 21, p95Ms: 31, p99Ms: 63 } } } });
+          checkpointInterval: interval,
+          workloads: { checkout: { completed, passed: completed - 1, latency: { sampleCount: completed, meanMs: 21, p95Ms: 31, p99Ms: 63 } },
+            refunds: { completed: completed / 2, passed: completed / 2, latency: { sampleCount: completed / 2, meanMs: 25, p95Ms: 35, p99Ms: 70 } } } });
         const first = sample(5000, 'WARMUP', 4), second = sample(10000, 'STEADY', 8), latest = sample(15000, 'STEADY', 12);
-        return json({ ...job, status: 'RUNNING', targetIdentity: { workloads: [{ name: 'checkout', model: 'arrivalRate', arrivalRate: 2, totalDurationMs: 60000, targets: [] }] },
-          loadProgress: latest, loadProgressTrend: [first, second], loadProgressHistory: [first, second] });
+        return json({ ...job, status: 'RUNNING', targetIdentity: { workloads: [
+          { name: 'checkout', model: 'arrivalRate', arrivalRate: 2, totalDurationMs: 60000, targets: [] },
+          { name: 'refunds', model: 'arrivalRate', arrivalRate: 1, totalDurationMs: 60000, targets: [] },
+        ] },
+          loadProgress: latest, loadProgressTrend: [first, second], loadProgressHistory: [first, second], loadCheckpointHistory: [interval] });
       }
       if (liveMode && method === 'GET' && resource === `jobs/${jobId}/result`) return json({ job, result: null });
       if (liveMode && method === 'GET' && resource === `jobs/${jobId}/events`) return route.fulfill({ status: 200, contentType: 'text/event-stream', body: 'id: 1\nevent: status\ndata: {"status":"RUNNING"}\nretry: 1000\n\n' });
@@ -289,6 +297,8 @@ async function main() {
     const liveMetrics = page.locator('#job-panel-metrics');
     await liveMetrics.getByRole('img', { name: 'Workload completed and successful throughput trend' }).waitFor();
     assert.match(await liveMetrics.innerText(), /Configured steady target/);
+    assert.match(await liveMetrics.innerText(), /Verified aggregate intervals/);
+    assert.match(await liveMetrics.innerText(), /Approximate age/);
     await page.setViewportSize({ width: 390, height: 844 });
     await assertAxe(page, 'Live LOAD trends should remain accessible on a narrow viewport');
 
