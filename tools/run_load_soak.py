@@ -394,6 +394,26 @@ def delta_row(previous, current):
     }
 
 
+def expected_scheduled_arrivals(arrival_rate, duration_hours):
+    """The soak scenario has one steady phase and no warmup or ramps."""
+    if arrival_rate <= 0 or duration_hours <= 0:
+        raise ValueError("arrival rate and duration must be positive")
+    return int(arrival_rate) * int(duration_hours) * 60 * 60
+
+
+def verify_scheduled_arrivals(metrics, arrival_rate, duration_hours):
+    expected_rate = float(arrival_rate)
+    configured_rate = metrics.get("configuredArrivalRatePerSecond")
+    if not isinstance(configured_rate, (int, float)) or configured_rate != expected_rate:
+        raise RuntimeError("LOAD report configured arrival rate does not match the soak scenario")
+    expected = expected_scheduled_arrivals(arrival_rate, duration_hours)
+    scheduled = metrics.get("scheduled")
+    if not isinstance(scheduled, int) or scheduled != expected:
+        raise RuntimeError("scheduled arrivals {} did not match the configured scenario total {}".format(
+            scheduled, expected))
+    return expected
+
+
 def verify_report_bundle(run_directory):
     manifest_path = run_directory / "load-report-manifest.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -612,6 +632,8 @@ def run_soak(args):
         workload_metrics = workload.get("metrics", {})
         workload_accounting = workload_metrics.get("accounting", {})
         workload_checkpoints = workload_metrics.get("checkpoints", {})
+        verify_scheduled_arrivals(metrics, args.arrival_rate, args.duration_hours)
+        verify_scheduled_arrivals(workload_metrics, args.arrival_rate, args.duration_hours)
         if accounting.get("state") != "VERIFIED" or workload_accounting.get("state") != "VERIFIED":
             raise RuntimeError("LOAD run, phase, or workload accounting did not reach VERIFIED state")
         workload_aggregate = accounting.get("workloadAggregate", {})

@@ -147,6 +147,15 @@ class LoadSoakEvidenceTest(unittest.TestCase):
         self.assertEqual(0, row["otherOutcomes"])
         self.assertEqual(0, row["dropped"])
 
+    def test_acceptance_requires_the_exact_configured_arrival_total(self):
+        expected = 150 * 25 * 60 * 60
+        metrics = {"configuredArrivalRatePerSecond": 150.0, "scheduled": expected}
+        self.assertEqual(expected, soak.verify_scheduled_arrivals(metrics, 150, 25))
+        with self.assertRaisesRegex(RuntimeError, "scheduled arrivals"):
+            soak.verify_scheduled_arrivals(dict(metrics, scheduled=expected - 1), 150, 25)
+        with self.assertRaisesRegex(RuntimeError, "configured arrival rate"):
+            soak.verify_scheduled_arrivals(dict(metrics, configuredArrivalRatePerSecond=100.0), 150, 25)
+
     def test_report_bundle_requires_every_hash_and_essential_file(self):
         with tempfile.TemporaryDirectory() as temporary:
             run = Path(temporary) / "run"
