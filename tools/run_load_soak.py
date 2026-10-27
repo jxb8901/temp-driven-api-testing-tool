@@ -22,6 +22,9 @@ CHECKPOINT_SCHEMA = "att-load-metrics-checkpoint/v2"
 REQUIRED_DURATION_HOURS = 25
 MIN_COMPLETED_TPS = 100.0
 MIN_COMPLETIONS = 9_000_000
+SOAK_SEED = 177
+SOAK_TARGET_TYPE = "template"
+SOAK_TARGET_ID = "LOAD_SOAK_NOOP"
 REPORT_FILES = {
     "load-summary.json",
     "load-summary.yaml",
@@ -96,8 +99,13 @@ def latest_checkpoint(directory, run_id, scope=AGGREGATE_CHECKPOINT_SCOPE):
 
 def java_string(java_home):
     java = Path(java_home) / "bin" / ("java.exe" if os.name == "nt" else "java") if java_home else Path(shutil.which("java") or "java")
-    result = subprocess.run([str(java), "-version"], text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, check=False)
-    return result.stdout.splitlines()[0] if result.stdout else "unavailable"
+    try:
+        result = subprocess.run([str(java), "-version"], text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, check=False)
+        return result.stdout.splitlines()[0] if result.stdout else "unavailable"
+    except Exception:
+        # Runtime identification is best-effort and must not prevent truthful
+        # failure/checkpoint evidence from being retained.
+        return "unavailable"
 
 
 def total_memory_bytes():
@@ -107,7 +115,45 @@ def total_memory_bytes():
                 return int(line.split()[1]) * 1024
     except (OSError, ValueError, IndexError):
         pass
+    try:
+        page_size = int(os.sysconf("SC_PAGE_SIZE"))
+        page_count = int(os.sysconf("SC_PHYS_PAGES"))
+        if page_size > 0 and page_count > 0:
+            return page_size * page_count
+    except (AttributeError, OSError, ValueError):
+        pass
     return None
+
+
+def parameter_set(arrival_rate, duration_hours, max_concurrent):
+    return {
+        "executionPath": "CLI Local",
+        "scenarioFile": "load-soak.yaml",
+        "model": "ARRIVAL_RATE",
+        "target": {"type": SOAK_TARGET_TYPE, "id": SOAK_TARGET_ID},
+        "seed": SOAK_SEED,
+        "arrivalRatePerSecond": arrival_rate,
+        "warmupSeconds": 0,
+        "rampUpSeconds": 0,
+        "durationHours": duration_hours,
+        "rampDownSeconds": 0,
+        "maxConcurrent": max_concurrent,
+        "overloadPolicy": "drop",
+        "evidenceMode": "metrics",
+        "expectedScheduledArrivals": expected_scheduled_arrivals(arrival_rate, duration_hours),
+    }
+
+
+def runtime_metadata(environment):
+    machine = platform.machine()
+    return {
+        "platform": "{} {} {}".format(platform.system(), platform.release(), platform.version()),
+        "processor": os.environ.get("PROCESSOR_IDENTIFIER") or machine,
+        "architecture": machine,
+        "cpuCount": os.cpu_count(),
+        "memoryBytes": total_memory_bytes(),
+        "java": java_string(environment.get("JAVA_HOME")),
+    }
 
 
 def process_resource_sample(pid):
@@ -266,7 +312,8 @@ def assess_resource_evidence(process_rows, jvm_rows, minimum_span_seconds):
 
 
 def capture_incomplete_evidence(evidence_root, run_directory, checkpoint_dir, run_id,
-                                commit_sha, elapsed_seconds, reason, exit_code=None):
+                                commit_sha, elapsed_seconds, reason, exit_code=None,
+                                parameters=None, runtime=None):
     target_run = evidence_root / "load" / run_id
     if run_directory.is_dir():
         target_run.parent.mkdir(parents=True, exist_ok=True)
@@ -290,8 +337,13 @@ def capture_incomplete_evidence(evidence_root, run_directory, checkpoint_dir, ru
         "complete": False,
         "elapsedSeconds": max(0.0, elapsed_seconds),
         "reason": reason_text[:2000],
+        "metadataFile": "run-metadata.json",
         "checkpointDirectory": "load/{}/checkpoints/{}".format(run_id, AGGREGATE_CHECKPOINT_SCOPE),
     }
+    if parameters is not None:
+        acceptance["parameterSet"] = parameters
+    if runtime is not None:
+        acceptance["runtime"] = runtime
     if exit_code is not None:
         acceptance["exitCode"] = exit_code
     if checkpoint:
@@ -344,10 +396,10 @@ def install_soak_package(repository, runtime_root, package_root, arrival_rate, d
         "    expression: synthetic\n", encoding="utf-8")
     scenario = (
         "schemaVersion: att-load/v1.9\n"
-        "seed: 177\n"
+        "seed: {}\n"
         "workloads:\n"
         "  - id: local-soak\n"
-        "    target: {{type: template, id: LOAD_SOAK_NOOP}}\n"
+        "    target: {{type: {}, id: {}}}\n"
         "    load:\n"
         "      arrivalRate: {}/s\n"
         "      warmup: 0s\n"
@@ -358,7 +410,7 @@ def install_soak_package(repository, runtime_root, package_root, arrival_rate, d
         "      overloadPolicy: drop\n"
         "evidence:\n"
         "  mode: metrics\n"
-    ).format(arrival_rate, duration_hours, max_concurrent)
+    ).format(SOAK_SEED, SOAK_TARGET_TYPE, SOAK_TARGET_ID, arrival_rate, duration_hours, max_concurrent)
     scenario_path = package_root / "load-soak.yaml"
     scenario_path.write_text(scenario, encoding="utf-8")
     return scenario_path, install_root / launcher.name
@@ -497,11 +549,25 @@ def run_soak(args):
     if previous_acceptance.get("runId") == run_id and previous_acceptance.get("result") == "PASS":
         raise RuntimeError("acceptance evidence already exists for run ID {}".format(run_id))
     args.run_id = run_id
+    parameters = parameter_set(args.arrival_rate, args.duration_hours, args.max_concurrent)
+    environment = os.environ.copy()
+    runtime = runtime_metadata(environment)
+    metadata = {
+        "schemaVersion": "att-load-25h-soak/v1",
+        "runId": run_id,
+        "commitSha": args.commit_sha,
+        "parameterSet": parameters,
+        "runtime": runtime,
+    }
+    atomic_json(evidence_root / "run-metadata.json", metadata)
     atomic_json(evidence_root / "acceptance.json", {
         "schemaVersion": "att-load-25h-soak/v1",
         "runId": run_id,
         "commitSha": args.commit_sha,
         "result": "RUNNING",
+        "metadataFile": "run-metadata.json",
+        "parameterSet": parameters,
+        "runtime": runtime,
     })
     if args.duration_hours < REQUIRED_DURATION_HOURS:
         raise RuntimeError("the release gate requires at least 25 measured hours")
@@ -522,7 +588,6 @@ def run_soak(args):
                    "--output-dir", "output", "--format", "json", "--quiet"]
         if os.name == "nt":
             command = [os.environ.get("COMSPEC", "cmd.exe"), "/c"] + command
-        environment = os.environ.copy()
         environment["ATT_HOME"] = str(package_root.parent.parent)
         environment["ATT_PACKAGE_ROOT"] = str(package_root)
         started_wall = datetime.now().astimezone().isoformat()
@@ -593,7 +658,7 @@ def run_soak(args):
                 run_directory = package_root / "output" / "load" / run_id
                 capture_incomplete_evidence(evidence_root, run_directory, checkpoint_dir, run_id,
                                             args.commit_sha, time.monotonic() - started_monotonic,
-                                            failure, process.poll())
+                                            failure, process.poll(), parameters, runtime)
                 raise
 
         run_directory = package_root / "output" / "load" / run_id
@@ -608,6 +673,9 @@ def run_soak(args):
                 "runId": run_id,
                 "commitSha": args.commit_sha,
                 "result": "REPORT_UNAVAILABLE",
+                "metadataFile": "run-metadata.json",
+                "parameterSet": parameters,
+                "runtime": runtime,
                 "exitCode": process.returncode,
                 "checkpointDirectory": "load/{}/checkpoints/{}".format(run_id, AGGREGATE_CHECKPOINT_SCOPE),
                 "reason": "ATT exited without a canonical LOAD summary or report commit manifest; any retained checkpoints remain incomplete evidence.",
@@ -623,6 +691,9 @@ def run_soak(args):
                 "runId": run_id,
                 "commitSha": args.commit_sha,
                 "result": "FAILED",
+                "metadataFile": "run-metadata.json",
+                "parameterSet": parameters,
+                "runtime": runtime,
                 "exitCode": exit_code,
                 "reportManifest": "load/{}/load-report-manifest.json".format(run_id),
             })
@@ -693,6 +764,8 @@ def run_soak(args):
             "schemaVersion": "att-load-25h-soak/v1",
             "runId": run_id,
             "commitSha": args.commit_sha,
+            "metadataFile": "run-metadata.json",
+            "parameterSet": parameters,
             "startedAt": started_wall,
             "elapsedSeconds": time.monotonic() - started_monotonic,
             "durationHours": duration_ms / 3_600_000.0,
@@ -711,13 +784,7 @@ def run_soak(args):
             "qualifiedDurationSeconds": sustained_seconds,
             "checkpointSequence": manifest.get("checkpointSequence"),
             "checkpointSequences": manifest.get("checkpointSequences", {}),
-            "runtime": {
-                "platform": platform.platform(),
-                "processor": platform.processor(),
-                "cpuCount": os.cpu_count(),
-                "memoryBytes": total_memory_bytes(),
-                "java": java_string(environment.get("JAVA_HOME")),
-            },
+            "runtime": runtime,
             "resources": {
                 "processSamples": len(process_resource_samples),
                 "jvmCheckpointSamples": len(jvm_resource_samples),

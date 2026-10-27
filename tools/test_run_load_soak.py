@@ -156,6 +156,18 @@ class LoadSoakEvidenceTest(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "configured arrival rate"):
             soak.verify_scheduled_arrivals(dict(metrics, configuredArrivalRatePerSecond=100.0), 150, 25)
 
+    def test_parameter_set_records_seed_target_and_all_arrival_controls(self):
+        parameters = soak.parameter_set(150, 25, 512)
+        self.assertEqual("CLI Local", parameters["executionPath"])
+        self.assertEqual({"type": "template", "id": "LOAD_SOAK_NOOP"}, parameters["target"])
+        self.assertEqual(177, parameters["seed"])
+        self.assertEqual("ARRIVAL_RATE", parameters["model"])
+        self.assertEqual(150, parameters["arrivalRatePerSecond"])
+        self.assertEqual(25, parameters["durationHours"])
+        self.assertEqual(512, parameters["maxConcurrent"])
+        self.assertEqual(150 * 25 * 60 * 60, parameters["expectedScheduledArrivals"])
+        self.assertEqual("metrics", parameters["evidenceMode"])
+
     def test_report_bundle_requires_every_hash_and_essential_file(self):
         with tempfile.TemporaryDirectory() as temporary:
             run = Path(temporary) / "run"
@@ -207,12 +219,17 @@ class LoadSoakEvidenceTest(unittest.TestCase):
             seal_checkpoint(checkpoint)
             write_checkpoint(checkpoint_dir / "checkpoint-00000000000000000007.json", checkpoint)
             evidence_root = root / "evidence"
+            parameters = soak.parameter_set(150, 25, 512)
+            runtime = {"platform": "test", "java": "test runtime"}
             result = soak.capture_incomplete_evidence(evidence_root, run, checkpoint_dir, "run-2",
-                                                      "abc123", 301.5, KeyboardInterrupt(), -15)
+                                                      "abc123", 301.5, KeyboardInterrupt(), -15,
+                                                      parameters, runtime)
             self.assertEqual("PARTIAL", result["result"])
             self.assertFalse(result["complete"])
             self.assertEqual("runner interrupted", result["reason"])
             self.assertEqual(7, result["latestCheckpoint"]["sequence"])
+            self.assertEqual(parameters, result["parameterSet"])
+            self.assertEqual(runtime, result["runtime"])
             self.assertTrue((evidence_root / "load" / "run-2" / "partial.txt").is_file())
             saved = json.loads((evidence_root / "acceptance.json").read_text(encoding="utf-8"))
             self.assertEqual("PARTIAL", saved["result"])
@@ -270,6 +287,9 @@ class LoadSoakEvidenceTest(unittest.TestCase):
             saved = json.loads((evidence / "acceptance.json").read_text(encoding="utf-8"))
             self.assertEqual("PARTIAL", saved["result"])
             self.assertFalse(saved["complete"])
+            self.assertEqual("run-metadata.json", saved["metadataFile"])
+            self.assertEqual(177, saved["parameterSet"]["seed"])
+            self.assertEqual("abc123", json.loads((evidence / "run-metadata.json").read_text(encoding="utf-8"))["commitSha"])
 
     def test_resource_summaries_report_observed_slope_and_unavailable_counters(self):
         rows = [
