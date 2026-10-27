@@ -83,6 +83,55 @@ describe('LoadPage React feature', () => {
     expect([...host.querySelectorAll('button')].find(button=>button.textContent==='Validate scenario')?.disabled).toBe(false);
   });
 
+  it('discards an in-flight replay validation after an edit and uses only the next intent', async () => {
+    const api=makeApi(),confirmStart=vi.fn(()=>true);let resolveFirst!:(result:any)=>void;
+    api.getJobReplayEditorDraft=vi.fn().mockResolvedValue({schemaVersion:'att-job-replay-draft/v1',draftRef:'C0123456789ABCDEF0123456789ABCDEF',sourceJobId:'J0123456789ABCDEF',packageId:'payments',executionType:'load',sourcePolicy:'current',
+      originalRevision:'a'.repeat(64),currentRevision:'b'.repeat(64),configuration:{packageId:'payments',environment:'SIT'},expiresAt:new Date(Date.now()+60000).toISOString(),missingFields:[],
+      definition:{executionType:'load',packageId:'payments',scenario:{schemaVersion:'att-load/v1.9',load:{duration:'30m'},workloads:[{id:'main',target:{type:'template',id:'checkout'},load:{users:2}}]}}});
+    api.createJobReplayDraft=vi.fn().mockImplementationOnce(()=>new Promise(resolve=>{resolveFirst=resolve;})).mockResolvedValueOnce({jobId:'J0123456789ABCDEF',available:true,sourcePolicy:'current',intentId:'new-intent',draftId:'new-draft',
+      preview:{draftId:'new-draft',previewYaml:'schemaVersion: att-load/v1.9',expiresAt:new Date(Date.now()+60000).toISOString(),redacted:false,diagnostics:[]}});
+    api.rerunJob=vi.fn().mockResolvedValue({jobId:'J-new'});
+    await act(async()=>root.render(<NavigationGuardContext.Provider value={{navigate:vi.fn(),registerUnsavedChanges:vi.fn(()=>vi.fn())} as never}><LoadPage
+      api={api} packages={[{packageId:'payments',displayName:'Payments'}]} selectedPackage="payments" selectedEnvironment="" environments={['SIT']} inlineLoadEnabled={false}
+      replayDraftId="C0123456789ABCDEF0123456789ABCDEF" replaySourceJobId="J0123456789ABCDEF" onPackageChange={vi.fn()} onEnvironmentChange={vi.fn()} onJobAccepted={vi.fn()} confirmStart={confirmStart}
+    /></NavigationGuardContext.Provider>));
+    await flush();
+    await click([...host.querySelectorAll('button')].find(button=>button.textContent==='Validate scenario')!);
+    const duration=host.querySelector('[aria-label="Measured duration value"]') as HTMLInputElement;
+    await act(async()=>{Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!.call(duration,'45');duration.dispatchEvent(new Event('input',{bubbles:true}));});
+    await act(async()=>resolveFirst({jobId:'J0123456789ABCDEF',available:true,sourcePolicy:'current',intentId:'old-intent',draftId:'old-draft',
+      preview:{draftId:'old-draft',previewYaml:'old',expiresAt:new Date(Date.now()+60000).toISOString(),redacted:false,diagnostics:[]}}));
+    await flush();
+    expect(host.querySelector('[aria-label="Review LOAD"]')).toBeNull();
+    expect([...host.querySelectorAll('button')].find(button=>button.textContent==='Run new LOAD Job')?.disabled).toBe(true);
+    await click([...host.querySelectorAll('button')].find(button=>button.textContent==='Validate scenario')!);
+    await flush();
+    expect(api.createJobReplayDraft).toHaveBeenCalledTimes(2);
+    await click([...host.querySelectorAll('button')].find(button=>button.textContent==='Run new LOAD Job')!);
+    expect(api.rerunJob).toHaveBeenCalledWith('J0123456789ABCDEF','new-intent','current');
+  });
+
+  it('preserves unsupported retained LOAD target types and requires an explicit supported choice', async () => {
+    const api=makeApi();
+    api.getJobReplayEditorDraft=vi.fn().mockResolvedValue({schemaVersion:'att-job-replay-draft/v1',draftRef:'C0123456789ABCDEF0123456789ABCDEF',sourceJobId:'J0123456789ABCDEF',packageId:'payments',executionType:'load',sourcePolicy:'current',
+      originalRevision:'a'.repeat(64),currentRevision:'b'.repeat(64),configuration:{packageId:'payments'},expiresAt:new Date(Date.now()+60000).toISOString(),missingFields:[],
+      definition:{executionType:'load',packageId:'payments',scenario:{schemaVersion:'att-load/v1.9',load:{duration:'30m'},workloads:[{id:'main',target:{type:'legacy-target',id:'checkout'},load:{users:2}}]}}});
+    api.createJobReplayDraft=vi.fn();
+    await act(async()=>root.render(<NavigationGuardContext.Provider value={{navigate:vi.fn(),registerUnsavedChanges:vi.fn(()=>vi.fn())} as never}><LoadPage
+      api={api} packages={[{packageId:'payments',displayName:'Payments'}]} selectedPackage="payments" selectedEnvironment="" environments={['SIT']} inlineLoadEnabled={false}
+      replayDraftId="C0123456789ABCDEF0123456789ABCDEF" replaySourceJobId="J0123456789ABCDEF" onPackageChange={vi.fn()} onEnvironmentChange={vi.fn()} onJobAccepted={vi.fn()}
+    /></NavigationGuardContext.Provider>));
+    await flush();
+    const targetType=[...host.querySelectorAll('label')].find(label=>label.textContent?.includes('Target type'))?.querySelector('select') as HTMLSelectElement;
+    expect(targetType.value).toBe('unsupported:legacy-target');
+    expect(host.textContent).toContain('Retained target type “legacy-target” is unsupported');
+    await click([...host.querySelectorAll('button')].find(button=>button.textContent==='Validate scenario')!);
+    await flush();
+    expect(host.querySelector('[aria-label="LOAD validation details"]')?.textContent).toContain('unsupported target type');
+    expect(api.createJobReplayDraft).not.toHaveBeenCalled();
+    expect([...host.querySelectorAll('button')].find(button=>button.textContent==='Run new LOAD Job')?.disabled).toBe(true);
+  });
+
   it('prefills a package-backed LOAD draft, preserves workload identity and validates edited timing', async () => {
     const api=makeApi(),confirmStart=vi.fn(()=>true),onJobAccepted=vi.fn();
     api.getJobReplayEditorDraft=vi.fn().mockResolvedValue({schemaVersion:'att-job-replay-draft/v1',draftRef:'C0123456789ABCDEF0123456789ABCDEF',sourceJobId:'J0123456789ABCDEF',packageId:'payments',executionType:'load',sourcePolicy:'current',

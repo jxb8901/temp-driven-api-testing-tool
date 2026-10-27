@@ -195,6 +195,20 @@ it('keeps an invalid retained RUN target editable and blocks execution until cur
   expect(host.textContent).toContain('target.id');expect(host.querySelector('.att-run-review .button-primary')).toBeNull();expect(api.submitRun).not.toHaveBeenCalled();
 });
 
+it('keeps edited replay inputs when environment changes reload typed target defaults', async () => {
+  vi.mocked(api.getJobReplayEditorDraft).mockResolvedValue({schemaVersion:'att-job-replay-draft/v1',draftRef:'R0123456789ABCDEF0123456789ABCDEF',sourceJobId:'J0123456789ABCDEF',packageId:'payments',executionType:'run',sourcePolicy:'current',
+    originalRevision:'a'.repeat(64),currentRevision:'b'.repeat(64),configuration:{environment:'SIT'},expiresAt:new Date(Date.now()+60000).toISOString(),missingFields:[],
+    definition:{schemaVersion:'att-execution/v1',executionType:'run',packageId:'payments',environment:'SIT',target:{type:'tool',id:'lookup-customer'},input:{inputs:{requestId:'original-value'}},options:{debug:false}}});
+  vi.mocked(api.getDebugForm).mockResolvedValue({target:{type:'tool',id:'lookup-customer'},input:{inputs:{requestId:'fresh-default'}}});
+  await act(async()=>root.render(<NavigationGuardContext.Provider value={guard}><RunPage packageId="payments" replayDraftId="R0123456789ABCDEF0123456789ABCDEF" replaySourceJobId="J0123456789ABCDEF" onAccepted={onAccepted} onSchedule={onSchedule} schedulingEnabled /></NavigationGuardContext.Provider>));
+  await settleDebugForm();
+  const input=host.querySelector('[aria-label="requestId value"]') as HTMLInputElement;
+  await act(async()=>{Object.getOwnPropertyDescriptor(Object.getPrototypeOf(input),'value')!.set!.call(input,'operator-edited');input.dispatchEvent(new Event('input',{bubbles:true}));});
+  await change('Environment','UAT');
+  await settleDebugForm();
+  expect((host.querySelector('[aria-label="requestId value"]') as HTMLInputElement).value).toBe('operator-edited');
+});
+
 it('renders one alert when a validated RUN replay becomes stale at submit', async () => {
   vi.mocked(api.getJobReplayEditorDraft).mockResolvedValue({schemaVersion:'att-job-replay-draft/v1',draftRef:'R0123456789ABCDEF0123456789ABCDEF',sourceJobId:'J0123456789ABCDEF',packageId:'payments',executionType:'run',sourcePolicy:'current',
     originalRevision:'a'.repeat(64),currentRevision:'b'.repeat(64),configuration:{environment:'SIT',environmentOrigin:'package'},expiresAt:new Date(Date.now()+60000).toISOString(),missingFields:[],

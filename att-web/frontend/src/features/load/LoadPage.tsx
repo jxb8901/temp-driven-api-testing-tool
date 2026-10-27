@@ -128,6 +128,8 @@ export function makeScenario(
   if (!timing.duration.trim()) throw new Error('Measured duration is required.');
   scenario.load = rootLoad;
   scenario.workloads = workloads.map(workload => {
+    if (!['case', 'template', 'flow', 'tool'].includes(workload.target.type))
+      throw new Error(`Workload ${workload.id} has unsupported target type “${workload.target.type}”. Choose a supported target type before validating.`);
     const row: JsonObject = { id: workload.id.trim(), load: {} };
     if (!row.id) throw new Error('Every workload needs an ID.');
     const load: JsonObject = { ...workload.loadPolicy };
@@ -160,6 +162,8 @@ export function makeScenario(
       row.inputs = asObject(defaults.inputs);
       row.vars = asObject(defaults.vars);
       row.mix = workload.mix.map(entry => {
+        if (!['case', 'template', 'flow', 'tool'].includes(entry.type))
+          throw new Error(`Workload ${workload.id} mix target type “${entry.type}” is unsupported. Choose a supported target type before validating.`);
         if (!entry.businessValid) throw new Error(`Mix target ${entry.id} has invalid business values.`);
         const weight = Number(entry.weight);
         if (!Number.isSafeInteger(weight) || weight < 1) throw new Error(`Mix target ${entry.id} needs a positive whole-number weight.`);
@@ -219,9 +223,10 @@ export function initialTiming(policy: JsonObject): TimingDraft {
   };
 }
 
-export function retainedScenarioToEditor(value: unknown): { model: LoadModel; timing: TimingDraft; workloads: WorkloadDraft[]; advanced: { execution: string; testdata: string; thresholds: string; evidence: string; seed: string } } {
+export function retainedScenarioToEditor(value: unknown): { model: LoadModel; timing: TimingDraft; workloads: WorkloadDraft[]; advanced: { execution: string; testdata: string; thresholds: string; evidence: string; seed: string }; diagnostics: ServerDiagnostic[] } {
   const scenario=asObject(value),rootLoad=asObject(scenario.load),rows=Array.isArray(scenario.workloads)?scenario.workloads:[];
   if(!rows.length)throw new Error('The retained LOAD draft has no workloads.');
+  const targetDiagnostics:ServerDiagnostic[]=[];
   const firstLoad={...rootLoad,...asObject(asObject(rows[0]).load)};
   const isArrival=firstLoad.arrivalRate!=null;
   const model:LoadModel=isArrival?'arrivalRate':'virtualUsers';
@@ -231,19 +236,21 @@ export function retainedScenarioToEditor(value: unknown): { model: LoadModel; ti
     const explicit=load[field];if(rootLoad[field]!=null&&explicit!=null&&String(rootLoad[field])!==String(explicit))throw new Error(`The retained LOAD has conflicting ${field} values. Review the source Job before editing.`);
     if(rootLoad[field]==null&&explicit!=null&&String(explicit)!==timing[field])throw new Error(`The retained LOAD workloads do not share one ${field} value. Review the source Job before editing.`);
   }}
-  const targetDraft=(raw:unknown,inputs:unknown,vars:unknown):TargetDraft=>{
+  const targetDraft=(raw:unknown,inputs:unknown,vars:unknown,field:string):TargetDraft=>{
     const target=asObject(raw),rawType=String(target.type||'template');
-    const type=(['case','template','flow','tool'].includes(rawType)?rawType:'template') as LoadTargetType;
-    const business={inputs:asObject(inputs),...(type==='tool'?{arguments:asObject(target.arguments)}:{vars:asObject(vars)})};
+    const supported=['case','template','flow','tool'].includes(rawType);
+    if(!supported)targetDiagnostics.push({code:'ATT-LOAD-UNSUPPORTED-TARGET-TYPE',field,summary:`Retained target type “${rawType}” is unsupported. Choose a supported target type explicitly.`});
+    const type=(supported?rawType:`unsupported:${rawType}`) as LoadTargetType;
+    const business={inputs:asObject(inputs),...(rawType==='tool'?{arguments:asObject(target.arguments)}:{vars:asObject(vars)})};
     return {type,id:String(target.id||''),businessJson:JSON.stringify(business,null,2),businessValid:true};
   };
   const workloads=rows.map((raw,index)=>{
     const row=asObject(raw),load={...rootLoad,...asObject(row.load)},execution=asObject(row.execution),mixRows=Array.isArray(row.mix)?row.mix:[];
-    const mix:MixDraft[]=mixRows.map(rawMix=>{
-      const item=asObject(rawMix),target=asObject(item.target),targetDraftValue=targetDraft(target,item.inputs,item.vars);
+    const mix:MixDraft[]=mixRows.map((rawMix,mixIndex)=>{
+      const item=asObject(rawMix),target=asObject(item.target),targetDraftValue=targetDraft(target,item.inputs,item.vars,`scenario.workloads[${index}].mix[${mixIndex}].target.type`);
       return {...targetDraftValue,entryId:String(item.id??''),weight:String(item.weight??'')};
     });
-    const target=targetDraft(row.target,row.inputs,row.vars);
+    const target=targetDraft(row.target,row.inputs,row.vars,`scenario.workloads[${index}].target.type`);
     if(row.target&&target.type==='tool')target.businessJson=JSON.stringify({inputs:asObject(row.inputs),arguments:asObject(asObject(row.target).arguments)},null,2);
     const testdata=asObject(row.testdata),thresholds=asObject(row.thresholds),evidence=asObject(row.evidence);
     const pacing={...load};for(const field of phaseFields)delete pacing[field];
@@ -256,7 +263,7 @@ export function retainedScenarioToEditor(value: unknown): { model: LoadModel; ti
   });
   const advanced={execution:JSON.stringify(asObject(scenario.execution),null,2),testdata:JSON.stringify(Array.isArray(scenario.testdata)?scenario.testdata:[],null,2),
     thresholds:JSON.stringify(asObject(scenario.thresholds),null,2),evidence:JSON.stringify(asObject(scenario.evidence),null,2),seed:scenario.seed==null?'':String(scenario.seed)};
-  return {model,timing,workloads,advanced};
+  return {model,timing,workloads,advanced,diagnostics:targetDiagnostics};
 }
 
 function effectiveDuration(timing:TimingDraft):string {
@@ -297,6 +304,7 @@ export function LoadPage(props: LoadFeatureProps): React.JSX.Element {
   const [missingReplayFields, setMissingReplayFields] = useState<string[]>([]);
   const navigation=useNavigationGuard();
   const requestSequence = useRef(0);
+  const replayValidationGeneration = useRef(0);
   const packageRef = useRef(selectedPackage);
   const submitLock = useRef(false);
   const releaseReplayNavigationGuard = useRef<() => void>(() => {});
@@ -308,7 +316,7 @@ export function LoadPage(props: LoadFeatureProps): React.JSX.Element {
     releaseReplayNavigationGuard.current=release;
     return()=>{release();if(releaseReplayNavigationGuard.current===release)releaseReplayNavigationGuard.current=()=>{};};
   },[navigation.registerUnsavedChanges,replayDirty,replaySourceJobId]);
-  function markReplayDirty(){if(replaySourceJobId){setReplayDirty(true);setReplayReview(null);setDraft(null);setDraftState('idle');}}
+  function markReplayDirty(){if(replaySourceJobId){replayValidationGeneration.current++;setReplayDirty(true);setReplayReview(null);setDraft(null);setDraftState('idle');}}
 
   useEffect(() => {
     if(!replayDraftId||!replaySourceJobId)return;
@@ -393,6 +401,7 @@ export function LoadPage(props: LoadFeatureProps): React.JSX.Element {
     try {
       const seeded=retainedScenarioToEditor(replayEditorDefinition.scenario);
       replaySeeded.current=true;setModel(seeded.model);setTiming(seeded.timing);setWorkloads(seeded.workloads);setAdvanced(seeded.advanced);
+      if(seeded.diagnostics.length)setDiagnostics(current=>[...current,...seeded.diagnostics]);
       setDraft(null);setDraftState('idle');setDraftMessage('Job settings loaded. Edit the fields, then validate against the current Package.');
       setReplayDraftLoading(false);
     } catch(error) {setReplayDraftError(error instanceof Error?error.message:'The retained LOAD definition cannot be edited safely.');setReplayDraftLoading(false);}
@@ -427,9 +436,14 @@ export function LoadPage(props: LoadFeatureProps): React.JSX.Element {
     setDiagnostics([]);
     let scenario: JsonObject;
     try { scenario = readScenario(); }
-    catch (error) { setDraftState('error'); setDraftMessage(error instanceof Error ? error.message : 'Correct the scenario fields.'); return; }
+    catch (error) {
+      const message=error instanceof Error?error.message:'Correct the scenario fields.';
+      if(message.includes('unsupported target type'))setDiagnostics([{code:'ATT-LOAD-UNSUPPORTED-TARGET-TYPE',field:'scenario.workloads.target.type',summary:message}]);
+      setDraftState('error'); setDraftMessage(message); return;
+    }
     const packageId = selectedPackage;
     const sequence = ++requestSequence.current;
+    const validationGeneration = ++replayValidationGeneration.current;
     setDraft(null);
     setDraftState('validating');
     setDraftMessage('Validating the complete scenario on the Server…');
@@ -453,6 +467,7 @@ export function LoadPage(props: LoadFeatureProps): React.JSX.Element {
         };
         for(const field of ['execution','testdata','thresholds','evidence','seed'])if(scenario[field]!=null)overrides[field]=scenario[field];
         const replay=await api.createJobReplayDraft(replaySourceJobId,{sourcePolicy:'current',overrides});
+        if(validationGeneration!==replayValidationGeneration.current||sequence!==requestSequence.current||packageId!==selectedPackage)return;
         setMissingReplayFields(replay.missingFields||[]);
         setReplayReview(replay);
         if(!replay.intentId) {
@@ -468,7 +483,7 @@ export function LoadPage(props: LoadFeatureProps): React.JSX.Element {
           scenario,
         });
       }
-      if (sequence !== requestSequence.current || packageId !== selectedPackage) return;
+      if (validationGeneration!==replayValidationGeneration.current||sequence !== requestSequence.current || packageId !== selectedPackage) return;
       setDraft(response);
       setDiagnostics(response.diagnostics || []);
       setDraftState('valid');
@@ -476,7 +491,7 @@ export function LoadPage(props: LoadFeatureProps): React.JSX.Element {
         ? 'Server validation passed. The preview hides sensitive fields; copy and export are disabled.'
         : 'Server validation passed. Review the complete normalized scenario before starting.');
     } catch (error) {
-      if (sequence !== requestSequence.current) return;
+      if (validationGeneration!==replayValidationGeneration.current||sequence !== requestSequence.current) return;
       const details = error as Error & { diagnostics?: unknown };
       const serverDiagnostics = Array.isArray(details.diagnostics) ? details.diagnostics as ServerDiagnostic[] : [];
       setDiagnostics(serverDiagnostics);
@@ -971,6 +986,7 @@ export function TargetEditor({ target, packageId, environment, model, api, inlin
     <div className="att-load-grid">
       <label>Target type
         <select value={target.type} onChange={event => onChange({ ...target, type: event.target.value as LoadTargetType })}>
+          {target.type.startsWith('unsupported:')&&<option value={target.type}>Unsupported retained type: {target.type.slice('unsupported:'.length)}</option>}
           <option value="template">Template</option><option value="flow">Flow</option><option value="tool">Tool</option>
         </select>
       </label>

@@ -54,7 +54,7 @@ export function RunPage({ packageId: initialPackage = '', initialTarget, initial
   const [replayDraftLoading, setReplayDraftLoading] = useState(Boolean(replayDraftId&&replaySourceJobId));
   const [replayDraftError, setReplayDraftError] = useState('');
   const [missingReplayFields,setMissingReplayFields]=useState<string[]>([]);
-  const replayInputRef = useRef<JsonObject | undefined>(undefined);
+  const replayInputRef = useRef<string | undefined>(undefined);
   const releaseNavigationGuard = useRef<() => void>(() => {});
   const environmentRef = useRef(environment);
   environmentRef.current = environment;
@@ -71,8 +71,8 @@ export function RunPage({ packageId: initialPackage = '', initialTarget, initial
       setPackage(retained.packageId);setEnvironment(replayEnvironmentOrigin.current==='package'?'':retained.environment||String(draft.configuration?.environment||''));
       setMissingReplayFields(draft.missingFields||[]);
       if(retained.target){setType(retained.target.type);setId(retained.target.id);}else if(retained.selection){setType('batch');setId('');}else{setType('case');setId('');}
-      setSelection(JSON.stringify(retained.selection||{all:true},null,2));replayInputRef.current=retained.input;
-      setInput(JSON.stringify(retained.input||{},null,2));setDebug(Boolean(retained.options?.debug));setFailFast(Boolean(retained.options?.failFast));
+      setSelection(JSON.stringify(retained.selection||{all:true},null,2));replayInputRef.current=JSON.stringify(retained.input||{},null,2);
+      setInput(replayInputRef.current);setDebug(Boolean(retained.options?.debug));setFailFast(Boolean(retained.options?.failFast));
       setReplaySourceDefinition((draft.originalDefinition||retained) as unknown as RunDefinition);
       setReplayReview({jobId:draft.sourceJobId,available:true,...draft,definition:draft.definition,originalDefinition:draft.originalDefinition||draft.definition});
       setValidationDiagnostics(draft.diagnostics||[]);setMissingReplayFields(draft.missingFields||[]);
@@ -127,7 +127,7 @@ export function RunPage({ packageId: initialPackage = '', initialTarget, initial
       api.getDebugForm(identity, environment.trim() || undefined, controller.signal).then(response => {
         if (controller.signal.aborted) return;
         setDebugForm(response);
-        setInput(JSON.stringify(replayInputRef.current !== undefined ? replayInputRef.current : response.input || {}, null, 2));
+        setInput(replayInputRef.current !== undefined ? replayInputRef.current : JSON.stringify(response.input || {}, null, 2));
         setFormResetKey(value => value + 1);
         setFormValid(true);
         setDebugFormState('ready');
@@ -231,10 +231,10 @@ export function RunPage({ packageId: initialPackage = '', initialTarget, initial
               <p>Typed fields use the selected target's safe Debug defaults. Advanced JSON remains available for nested inputs.</p>
               {debugForm.redacted && <p role="note">Hidden package defaults remain protected until you choose a typed override.</p>}
               <TypedSidecarForm value={object(businessInput)} groups={sidecarGroups} resetKey={formResetKey}
-                onChange={value => changed(() => setInput(JSON.stringify(value, null, 2)))}
+                onChange={value => {const serialized=JSON.stringify(value,null,2);replayInputRef.current=serialized;changed(() => setInput(serialized));}}
                 onValidityChange={valid => { setFormValid(valid); if (!valid) { setDraft(null); setDefinition(null); } }} />
             </>
-            : <CodeEditor label="Target input" readOnly={false} value={businessInput} language="json" onChange={value => changed(() => setInput(value))} />}
+            : <CodeEditor label="Target input" readOnly={false} value={businessInput} language="json" onChange={value => {replayInputRef.current=value;changed(() => setInput(value));}} />}
         </>
         : targetType === 'case' && !initialTarget ? <p>Case inputs come from the package Excel and sidecar definitions.</p> : null}
       <label className="att-run-diagnostics"><input type="checkbox" checked={debug} onChange={e => changed(() => setDebug(e.target.checked))} />Debug diagnostics</label>
