@@ -24,6 +24,8 @@ async function main() {
     let sentInitialStatus = false;
     let reconnected = false;
     let eventConnectionCount = 0;
+    let liveArchiveReads = 0;
+    let liveArchiveTextReads = 0;
     let resolveCancellation;
     let resolveResume;
     const cancellationRequested = new Promise(resolve => { resolveCancellation = resolve; });
@@ -94,14 +96,36 @@ async function main() {
           workloads: { checkout: { completed, passed: completed - 1, latency: { sampleCount: completed, meanMs: 21, p95Ms: 31, p99Ms: 63 } },
             refunds: { completed: completed / 2, passed: completed / 2, latency: { sampleCount: completed / 2, meanMs: 25, p95Ms: 35, p99Ms: 70 } } } });
         const first = sample(5000, 'WARMUP', 4), second = sample(10000, 'STEADY', 8), latest = sample(15000, 'STEADY', 12);
-        return json({ ...job, status: 'RUNNING', targetIdentity: { workloads: [
+        return json({ ...job, status: cancelRequested ? 'CANCELLED' : 'RUNNING', targetIdentity: { workloads: [
           { name: 'checkout', model: 'arrivalRate', arrivalRate: 2, totalDurationMs: 60000, targets: [] },
           { name: 'refunds', model: 'arrivalRate', arrivalRate: 1, totalDurationMs: 60000, targets: [] },
         ] },
           loadProgress: latest, loadProgressTrend: [first, second], loadProgressHistory: [first, second], loadCheckpointHistory: [interval] });
       }
-      if (liveMode && method === 'GET' && resource === `jobs/${jobId}/result`) return json({ job, result: null });
-      if (liveMode && method === 'GET' && resource === `jobs/${jobId}/events`) return route.fulfill({ status: 200, contentType: 'text/event-stream', body: 'id: 1\nevent: status\ndata: {"status":"RUNNING"}\nretry: 1000\n\n' });
+      if (liveMode && method === 'GET' && resource === `jobs/${jobId}/result`) return json({
+        job: { ...job, status: cancelRequested ? 'CANCELLED' : 'RUNNING' },
+        result: cancelRequested ? { status: 'CANCELLED', summary: {
+          schemaVersion: 'att-load-terminal-result/v1', execution: { status: 'CANCELLED' },
+          performance: { verdict: 'NOT_EVALUATED' },
+          metrics: { scheduled: 60, started: 60, completed: 12, success: 11, runtimeError: 0, failure: 1,
+            completedThroughput: 12, successfulThroughput: 11 }, thresholds: { verdict: 'NOT_EVALUATED' },
+          archive: { reportAvailability: 'ARCHIVING' },
+        } } : null,
+      });
+      if (liveMode && method === 'GET' && resource === `jobs/${jobId}/events`) return route.fulfill({ status: 200, contentType: 'text/event-stream', body: cancelRequested
+        ? 'id: 2\nevent: status\ndata: {"status":"CANCELLED"}\n\n'
+        : 'id: 1\nevent: status\ndata: {"status":"RUNNING"}\nretry: 1000\n\n' });
+      if (liveMode && cancelRequested && method === 'GET' && resource === `jobs/${jobId}/artifacts`) {
+        liveArchiveReads += 1;
+        return json({ items: liveArchiveReads < 2 ? [] : [{ path: 'load-summary.json', size: 512 }], primaryReports: [],
+          archiveStatus: liveArchiveReads < 2 ? 'ARCHIVING' : 'READY' });
+      }
+      if (liveMode && cancelRequested && method === 'GET' && resource === `jobs/${jobId}/artifacts/view/load-summary.json`) {
+        liveArchiveTextReads += 1;
+        return route.fulfill({ status: 200, contentType: 'application/json; charset=utf-8', body: JSON.stringify({
+          metrics: { completedThroughput: 12, buckets: {} }, workloads: { checkout: { completed: 8 }, refunds: { completed: 4 } },
+        }) });
+      }
       if (method === 'GET' && resource === `jobs/${jobId}`) return json({ ...job, status: cancelRequested ? 'CANCELLED' : 'RUNNING' });
       if (method === 'GET' && resource === `jobs/${jobId}/result`) return json({
         job, result: { status: 'PASS', metrics: { completedThroughput: 120, p95Ms: 85, buckets: {
@@ -287,6 +311,7 @@ async function main() {
     assert.equal(await statusFilter.inputValue(), 'RUNNING');
 
     liveMode = true;
+    cancelRequested = false;
     await page.goto(`${base}#/jobs/${jobId}`);
     await page.getByRole('tab', { name: 'Results', exact: true }).click();
     const liveResults = page.locator('#job-panel-results');
@@ -301,6 +326,22 @@ async function main() {
     assert.match(await liveMetrics.innerText(), /Approximate age/);
     await page.setViewportSize({ width: 390, height: 844 });
     await assertAxe(page, 'Live LOAD trends should remain accessible on a narrow viewport');
+
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    await page.getByRole('button', { name: 'Cancel job' }).click();
+    await page.waitForFunction(() => document.querySelector('.att-job-actions .att-status-badge')?.textContent?.trim() === 'CANCELLED', null, { timeout: 10_000 });
+    await page.getByRole('tab', { name: 'Results', exact: true }).click();
+    const terminalResults = page.locator('#job-panel-results');
+    await terminalResults.getByText('Partial pre-terminal telemetry; the canonical terminal result and archive are authoritative.').waitFor();
+    await terminalResults.getByText('Server result returned.', { exact: true }).waitFor();
+    await terminalResults.getByText('CANCELLED', { exact: true }).waitFor();
+    await terminalResults.getByText('READY — approved report artifacts are available.', { exact: true }).waitFor({ timeout: 10_000 });
+    const archivedWorkloads = terminalResults.getByRole('region', { name: 'Archived workload details' });
+    await archivedWorkloads.getByRole('heading', { name: 'Archived workload details' }).waitFor({ timeout: 10_000 });
+    await archivedWorkloads.getByRole('row', { name: /checkout/ }).waitFor();
+    await archivedWorkloads.getByRole('row', { name: /refunds/ }).waitFor();
+    assert.equal(liveArchiveReads >= 2, true, 'terminal results should poll a pending archive until it is ready');
+    assert.equal(liveArchiveTextReads, 1, 'terminal results should read the authorized archived LOAD summary');
 
     assert.deepEqual(pageErrors, [], 'Load/Jobs UI should not report uncaught browser errors');
     console.log('ATT Load/Jobs browser acceptance passed.');
