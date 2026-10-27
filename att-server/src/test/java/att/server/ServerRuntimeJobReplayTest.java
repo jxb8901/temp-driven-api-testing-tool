@@ -49,7 +49,7 @@ class ServerRuntimeJobReplayTest {
         Files.writeString(root.resolve("testcase/cases.yaml"),"schemaVersion: att-sidecar/v2.2\nid: cases\nexcel:\n  sheet: default=Cases\n  caseId: ID\n  tags: Tags\nstages:\n  - key: main\n    template: Template\n    required: true\n");
         new att.api.DefaultAttService().snapshot(new att.api.SnapshotRequest(root,runtimeConfig,"SIT",List.of(workbook),null,java.util.Set.of(),false));
         Path server=temp.resolve("unified-server.yaml");
-        Files.writeString(server,"server:\n  runtimeConfigPath: "+ServerRuntimeTestSupport.yaml(runtimeConfig)+"\n  dataDir: "+ServerRuntimeTestSupport.yaml(temp.resolve("unified-data"))+"\n  javaExecutable: "+ServerRuntimeTestSupport.yaml(javaBin)+"\n  auth: {mode: local}\n  inspection:\n    enabled: true\n    timeoutMs: 30000\n  inlineLoad: {enabled: true}\n  scheduling:\n    enabled: true\nworkers:\n  maxConcurrent: 1\n  queuedLimit: 2\npackages:\n  allowedRoots: ["+ServerRuntimeTestSupport.yaml(root)+"]\n  entries:\n    p: "+ServerRuntimeTestSupport.yaml(root)+"\n");
+        Files.writeString(server,"server:\n  runtimeConfigPath: "+ServerRuntimeTestSupport.yaml(runtimeConfig)+"\n  dataDir: "+ServerRuntimeTestSupport.yaml(temp.resolve("unified-data"))+"\n  javaExecutable: "+ServerRuntimeTestSupport.yaml(javaBin)+"\n  auth: {mode: local}\n  inspection:\n    enabled: true\n    timeoutMs: 30000\n  inlineLoad: {enabled: true, maxDurationSeconds: 86400}\n  scheduling:\n    enabled: true\nworkers:\n  maxConcurrent: 1\n  queuedLimit: 2\npackages:\n  allowedRoots: ["+ServerRuntimeTestSupport.yaml(root)+"]\n  entries:\n    p: "+ServerRuntimeTestSupport.yaml(root)+"\n");
         Path libs=Files.createDirectory(temp.resolve("unified-libs"));
         for(String module:List.of("att-worker","att-engine","att-server-api","att-security"))ServerRuntimeTestSupport.addModuleJar(libs,module,Path.of(module+"/target/classes"));
         ServerRuntimeTestSupport.addWorkerClasspathJars(libs);
@@ -283,7 +283,7 @@ class ServerRuntimeJobReplayTest {
     @Test void currentPackageReplayCreatesEditableBoundDraftAndKeepsPathBackedLoadIndependent() throws Exception {
         Fixture fixture=fixture();String original;String originalResult;String originalRevision;
         Files.writeString(fixture.root.resolve("load/smoke.yaml"),"schemaVersion: att-load/v1.9\n"
-                +"load: {warmup: 1s, rampUp: 2s, duration: 1s, rampDown: 1s}\n"
+                +"load: {warmup: 0ms, rampUp: 0ms, duration: 1s, rampDown: 0ms}\n"
                 +"workloads:\n"
                 +"  - id: smoke-a\n    target: {type: template, id: SIMPLE}\n    load: {users: 1}\n"
                 +"  - id: smoke-b\n    mix: [{id: simple, weight: 100, target: {type: template, id: SIMPLE}}]\n    load: {users: 1}\n"
@@ -295,7 +295,7 @@ class ServerRuntimeJobReplayTest {
             Files.writeString(fixture.root.resolve("templates/SIMPLE/template.yaml"),"# compatible current package change\n",java.nio.file.StandardOpenOption.APPEND);
             ServerRuntime.JobConflictException strict=assertThrows(ServerRuntime.JobConflictException.class,()->runtime.createJobReplayDraft(original,"alice",ServerRuntime.JSON.valueToTree(Map.of("sourcePolicy","strict"))));
             assertEquals("ATT-SERVER-REPLAY-REVISION-CONFLICT",strict.code);
-            Map<String,Object> edits=Map.of("load",Map.of("warmup","3s","rampUp","5s","duration","24h","rampDown","2s"),
+            Map<String,Object> edits=Map.of("load",Map.of("duration","24h"),
                     "workloads",List.of(Map.of("id","smoke-a","load",Map.of("users",2)),Map.of("id","smoke-b","load",Map.of("users",3))));
             Map<String,Object> review=runtime.createJobReplayDraft(original,"alice",ServerRuntime.JSON.valueToTree(Map.of("sourcePolicy","current","overrides",edits)));
             assertEquals("att-job-replay-draft/v1",review.get("schemaVersion"));assertNotEquals(originalRevision,review.get("currentRevision"));
@@ -336,6 +336,46 @@ class ServerRuntimeJobReplayTest {
             assertEquals("ATT-SERVER-REPLAY-DRAFT-STALE",stale.code);
             assertEquals(jobsBeforeStaleSubmit,jobCount(runtime,"alice"),"A stale validated replay must not create a Job");
             assertEquals(originalResult,runtime.store.get(original).get("resultJson"));
+        }
+    }
+
+    @Test void packageBackedReplayEnforcesScheduledLimits() throws Exception {
+        Fixture fixture=fixture();
+        Files.writeString(fixture.root.resolve("load/replay-limits.yaml"),"schemaVersion: att-load/v1.9\n"
+                +"load: {warmup: 1s, rampUp: 2s, duration: 10s, rampDown: 1s}\nworkloads:\n"
+                +"  - id: paced\n    target: {type: template, id: SIMPLE}\n    load: {users: 1}\n"
+                +"  - id: paced-mix\n    mix: [{id: simple, weight: 100, target: {type: template, id: SIMPLE}}]\n    load: {users: 1}\n"
+                +"thresholds: {minThroughput: '>= 0/s'}\nevidence: {mode: metrics, maxSamples: 10}\n");
+        String original;
+        try(ServerRuntime runtime=fixture.open()) {
+            users(runtime);
+            original=String.valueOf(runtime.submit("load",ServerRuntime.JSON.valueToTree(Map.of("packageId","p","scenario","load/replay-limits.yaml","environment","SIT")),"alice").get("jobId"));
+            await(runtime,original);
+            assertNotNull(runtime.store.executionSpec(original).get("spec"),"Fixture source Job must retain a replay spec: "+runtime.store.executionSpec(original));
+        }
+        String server=Files.readString(fixture.server);
+        String bounded=server.replace("inlineLoad: {enabled: true, maxDurationSeconds: 86400}",
+                "inlineLoad: {enabled: true, maxWorkloads: 3, maxTargets: 4, maxTotalUsers: 2, maxAggregateArrivalRatePerSecond: 10, maxConcurrentPerWorkload: 10, maxTotalConcurrent: 20, maxDurationSeconds: 3600}");
+        assertNotEquals(server,bounded,"Test fixture must configure scheduled LOAD limits");
+        Files.writeString(fixture.server,bounded);
+        try(ServerRuntime runtime=fixture.open()) {
+            List<Map<String,Object>> excessive=List.of(
+                    Map.of("load",Map.of("duration","2h")),
+                    Map.of("workloads",List.of(Map.of("id","paced","load",Map.of("users",2)),Map.of("id","paced-mix","load",Map.of("users",1))))).stream()
+                    .map(overrides->Map.of("sourcePolicy","current","overrides",overrides)).toList();
+            List<String> limits=List.of("maxDurationSeconds","maxTotalUsers");
+            for(int index=0;index<excessive.size();index++) {
+                Map<String,Object> review=runtime.createJobReplayDraft(original,"alice",ServerRuntime.JSON.valueToTree(excessive.get(index)));
+                assertEquals("invalid",review.get("validationState"),"The replay must stop before issuing an intent for an exceeded scheduled limit");
+                assertNull(review.get("intentId"));
+                JsonNode diagnostics=ServerRuntime.JSON.valueToTree(review).path("diagnostics");
+                assertTrue(diagnostics.isArray()&&diagnostics.size()>0);
+                assertTrue(diagnostics.get(0).path("summary").asText().contains(limits.get(index)),diagnostics.toString());
+            }
+            Map<String,Object> excessArrival=Map.of("load",Map.of("duration","10s"),"workloads",List.of(Map.of("id","paced","target",Map.of("type","template","id","SIMPLE"),"load",Map.of("arrivalRate","11/s","maxConcurrent",4))));
+            assertTrue(assertThrows(ServerRuntime.InlineLoadLimitException.class,()->ServerRuntime.validateScheduledLoadLimits(runtime.config.inlineLoad,excessArrival)).getMessage().contains("maxAggregateArrivalRatePerSecond"));
+            Map<String,Object> excessConcurrency=Map.of("load",Map.of("duration","10s"),"workloads",List.of(Map.of("id","paced","target",Map.of("type","template","id","SIMPLE"),"load",Map.of("arrivalRate","2/s","maxConcurrent",11))));
+            assertTrue(assertThrows(ServerRuntime.InlineLoadLimitException.class,()->ServerRuntime.validateScheduledLoadLimits(runtime.config.inlineLoad,excessConcurrency)).getMessage().contains("maxConcurrentPerWorkload"));
         }
     }
 
