@@ -9,7 +9,7 @@ async function main(){
     const schedule={id:'SECRET-SCHEDULE-ID',name:'Nightly workload',packageId:'payments',environment:'SIT',executionType:'load',jobType:'load',enabled:true,timezone:'UTC',cron:'0 2 * * *',nextRunAt:'2099-01-01T02:00:00Z',createdBy:'alice',maxConcurrentRuns:1,targetIdentity:{type:'flow',id:'common.flow',workloadCount:1,bindingCount:1,workloads:[{name:'primary',targets:[{type:'flow',id:'common.flow'}],model:'arrivalRate',arrivalRate:'10/s',duration:'5m',warmup:'10s',rampUp:'20s',totalDurationMs:330000}]}};
     await context.route('**/api/v1/**',async route=>{
       const request=route.request(),url=new URL(request.url()),path=decodeURIComponent(url.pathname.split('/api/v1/')[1]||'');const json=(body,status=200)=>route.fulfill({json:body,status});
-      if(path==='version')return json({apiVersion:'1',version:'4.2.4',loadSchedulingEnabled:true,authMode:'container'});
+      if(path==='version')return json({apiVersion:'1',version:'4.2.5',loadSchedulingEnabled:true,authMode:'container'});
       if(path==='auth/capabilities')return route.fallback();
       if(path==='packages')return json({items:[{packageId:'payments'}]});
       if(path==='schedules'||path==='load-schedules')return json({items:[schedule]});

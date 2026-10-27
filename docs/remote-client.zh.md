@@ -1,6 +1,6 @@
 # ATT Remote 用戶端
 
-<!-- att-doc-status: legacy-current release=4.2.4 -->
+<!-- att-doc-status: legacy-current release=4.2.5 -->
 
 
 ATT Remote 可透過現有 `att.sh` 或 `att.bat` 使用 ATT Server。它會呼叫 Server 公開的 REST API、透過 SSE 追蹤工作事件，並以 ATT exit code 回傳 canonical result。Local command 仍在本機執行。

@@ -1,4 +1,4 @@
-<!-- att-doc-status: current release=4.2.4 -->
+<!-- att-doc-status: current release=4.2.5 -->
 
 # Schedule API
 
@@ -8,4 +8,4 @@ The current REST route table, request shape, authorization and occurrence-histor
 
 Use the Server operational guide for package revision policy, retained history, overlap limits, shutdown and recovery behavior: [Jobs and Schedules operations](../../operations/server-jobs-schedules.md).
 
-The legacy path name /load-schedules remains supported for the current 4.2.4 REST API. The interface does not expose future CLI management commands from #294.
+The legacy path name /load-schedules remains supported for the current 4.2.5 REST API. The interface does not expose future CLI management commands from #294.

@@ -1,8 +1,8 @@
-<!-- att-doc-status: current release=4.2.4 -->
+<!-- att-doc-status: current release=4.2.5 -->
 
 # Documentation architecture and truth matrix
 
-本頁記錄 ATT 4.2.4 的文件 owner、feature/interface availability 及 migration 決策。產品 capability 以已發行 source、schema、test 及已合併行為核實；open issue 或未合併 implementation 不會自動成為 Current。
+本頁記錄 ATT 4.2.5 的文件 owner、feature/interface availability 及 migration 決策。產品 capability 以已發行 source、schema、test 及已合併行為核實；open issue 或未合併 implementation 不會自動成為 Current。
 
 ## Inventory 與 link impact
 
@@ -17,7 +17,7 @@ Documentation release gate 會檢查目前 entry point、配對 source module、
 
 ## Feature、interface 及 availability matrix
 
-| Capability | ATT 4.2.4 Local CLI | ATT Remote 相容 CLI | Studio 及 REST | Engine 或 Server | Status |
+| Capability | ATT 4.2.5 Local CLI | ATT Remote 相容 CLI | Studio 及 REST | Engine 或 Server | Status |
 |---|---|---|---|---|---|
 | Functional Case execution | Current run command 選擇 workbook Case | Current remote run 提交 Server 工作 | Current unified RUN 支援 Case 及選取的 Case batch | Engine 執行 Case；Server 驗證 draft 並擁有 Job | Current |
 | Template、Flow、Tool execution | Current standalone debug command | Current remote debug command | Current unified RUN 支援這些 resource；Debug 是選用診斷模式 | 共用 execution 及 Action contract | Current；local CLI command 是 legacy |
@@ -25,7 +25,7 @@ Documentation release gate 會檢查目前 entry point、配對 source module、
 | VALIDATE | Current Package 及 selected dependency validation | Current remote validation | Current Studio 及 REST validation flow | Read-only validation；不執行 business work | Current |
 | Shared Configuration 及 Package Manifest | Current config 及 Package validation | Remote work 使用 Server-owned configuration | Current inspector 及 Package authoring flow | Global Runtime Configuration；選用 Package Manifest 與 Package Testdata | Current |
 | Jobs 及 Schedules | 只有 Local Run ID 及 output | Current Job list、watch、result、cancel 及 artifact command | Current Job、Schedule 及 history view | Server 持久化 Job 與 Schedule definition | Server capability；沒有 Local Job store |
-| CLI vNext 共用 run、load、validate grammar | 4.2.4 尚未發行 | Proposed Local/Server selection syntax | 此 proposal 不會移除 Studio 或 REST capability | Parser implementation 在 PR #296 未合併 branch | Planned；只可於 release 核實後升級 |
+| CLI vNext 共用 run、load、validate grammar | 4.2.5 尚未發行 | Proposed Local/Server selection syntax | 此 proposal 不會移除 Studio 或 REST capability | Parser implementation 在 PR #296 未合併 branch | Planned；只可於 release 核實後升級 |
 | #294 CLI management resource | 不提供 | 不包括在 proposed grammar | Server 及 Studio resource 分開提供 | 未來 P3 proposal | Planned future work |
 | Workbook Snapshot generation | Current 明確的 snapshot authoring command | 不適用 | Studio authoring tool 分開處理 | Snapshot generation 不是 VALIDATE 副作用 | Current |
 
@@ -57,7 +57,7 @@ Documentation release gate 會檢查目前 entry point、配對 source module、
 
 | Existing source | 決策 | 目前 destination |
 |---|---|---|
-| Root README | 以 Package-oriented platform 及可執行的 4.2.4 workflow 重寫 | [README](../../README.md) |
+| Root README | 以 Package-oriented platform 及可執行的 4.2.5 workflow 重寫 | [README](../../README.md) |
 | docs/README.md | 以讀者、任務及 availability 導航取代單一 workflow | [Documentation map](../README.md) |
 | docs/reference/cli.md 及中文配對 | 保留已發行的 4.2.4 verb 為 Current；從 current Reference 移除 proposal | [CLI Reference](../reference.zh/cli.md) |
 | CLI Reference 的 vNext 部分及 proposed example | 移至獨立 Planned 文件，直到核實 release | [Proposed CLI vNext](../interfaces/cli/vnext-proposed.zh.md) |
@@ -65,7 +65,7 @@ Documentation release gate 會檢查目前 entry point、配對 source module、
 | docs/server-deployment.md 及中文配對 | 保留舊路徑與 heading anchor 作為 compatibility stub | [Deployment](../operations/server-deployment.zh.md)、[Configuration](../operations/server-configuration.zh.md)、[Security](../operations/security.zh.md) 及 [API v1](../interfaces/server-api/README.zh.md) |
 | docs/att-server-web-ui.md 及中文配對 | 保留舊路徑與 heading anchor 作為 compatibility stub | [Studio interface pages](../interfaces/studio/navigation.zh.md) |
 | REST API 及 SSE section | 按 route concern 拆分，不更改 request contract | [Versioned Server API](../interfaces/server-api/README.zh.md) |
-| Server release-specific operational section | 保留目前 4.2.4 policy，移至 Operations | [Jobs and Schedules operations](../operations/server-jobs-schedules.zh.md) |
+| Server release-specific operational section | 保留目前 4.2.5 policy，移至 Operations | [Jobs and Schedules operations](../operations/server-jobs-schedules.zh.md) |
 | Issue #176 rollout checklist | 保留為 historical record | [Archived checklist](../history/issue-176-server-rollout.zh.md) |
 | Load mode introduction 與 task navigation | 增加 task guide 及六種 mode concept page；schema/execution owner 留在 Reference | [Load guide](../guides/load-testing.zh.md)、[Load model](../concepts/load-model.zh.md)、[Load Reference](../reference.zh/execution-modes/load.md) |
 | docs/reference/ 及 docs/reference.zh/ | 保留配對 editable normative module 及 manifest | [Reference sources](../reference/README.md) 及 [繁體中文 sources](../reference.zh/README.md) |
@@ -74,9 +74,9 @@ Documentation release gate 會檢查目前 entry point、配對 source module、
 
 ## Current 與 Planned CLI migration
 
-ATT 4.2.4 保留明確的 workbook Snapshot authoring、Package validation 及 legacy Case execution。Current Quick Start 仍可在此 interface 執行。VALIDATE 會讀取並檢查 authored file，絕不產生或更新 Snapshot。
+ATT 4.2.5 保留明確的 workbook Snapshot authoring、Package validation 及 legacy Case execution。Current Quick Start 仍可在此 interface 執行。VALIDATE 會讀取並檢查 authored file，絕不產生或更新 Snapshot。
 
-| 4.2.4 相容語法 | Proposed vNext 語法 | 狀態 |
+| 4.2.5 相容語法 | Proposed vNext 語法 | 狀態 |
 |---|---|---|
 | 使用 workbook suite 與 Case selection 執行 run | 用明確 Local selection 執行 run suite 或 case | Planned |
 | 對 Template、Flow 或 Tool 使用 standalone debug | 以 typed target 執行 run，並可選 Debug diagnostics | Planned |
