@@ -35,16 +35,11 @@ class ApiServletIntegratedLimitsTest {
     private static final int DEFAULT_INSPECTION_TIMEOUT_MS=30_000;
     @TempDir Path temp;
 
-    @Test void inspectionEndpointSeparatesDeterministicScanLimitsPartialSuitesAndQueueSaturation() throws Exception {
+    @Test void inspectionEndpointRejectsDeterministicWorkbookCountLimit() throws Exception {
         Path packages=Files.createDirectories(temp.resolve("packages"));
         Path counted=createPackage(packages.resolve("counted"));
-        Path oversized=createPackage(packages.resolve("oversized"));
         Path cases=Files.createDirectories(counted.resolve("testcase"));
         for(int index=0;index<=500;index++)Files.createFile(cases.resolve(String.format("case-%03d.xlsx",index)));
-        Path oversizedCases=Files.createDirectories(oversized.resolve("testcase"));
-        try(java.io.RandomAccessFile file=new java.io.RandomAccessFile(oversizedCases.resolve("large.xlsx").toFile(),"rw")) {
-            file.setLength(32L*1024L*1024L+1L);
-        }
         Path runtimeConfig=sharedRuntimeConfig();
         Path libs=workerLibraries("inspection-libs");
         try(ServerRuntime runtime=runtime(packages,runtimeConfig,"inspection-data",DEFAULT_INSPECTION_TIMEOUT_MS,null,libs)) {
@@ -59,7 +54,21 @@ class ApiServletIntegratedLimitsTest {
             assertEquals(501,diagnostic.path("observed").asInt());
             assertEquals("SUBMISSION_REJECTED",diagnostic.path("outcome").asText());
             assertFalse(new String(scan.body(),StandardCharsets.UTF_8).contains(packages.toString()));
+            stopInspectionProcesses(runtime);
+        }
+    }
 
+    @Test void inspectionEndpointReturnsPartialSuiteForOversizedWorkbook() throws Exception {
+        Path packages=Files.createDirectories(temp.resolve("partial-packages"));
+        Path oversized=createPackage(packages.resolve("oversized"));
+        Path oversizedCases=Files.createDirectories(oversized.resolve("testcase"));
+        try(java.io.RandomAccessFile file=new java.io.RandomAccessFile(oversizedCases.resolve("large.xlsx").toFile(),"rw")) {
+            file.setLength(32L*1024L*1024L+1L);
+        }
+        Path runtimeConfig=sharedRuntimeConfig();
+        Path libs=workerLibraries("partial-libs");
+        try(ServerRuntime runtime=runtime(packages,runtimeConfig,"partial-data",DEFAULT_INSPECTION_TIMEOUT_MS,null,libs)) {
+            ApiServlet servlet=servlet(runtime);
             Captured partial=invoke(servlet,"GET","/packages/oversized/resources",Collections.singletonMap("type","case"),new byte[0]);
             JsonNode response=ServerRuntime.JSON.readTree(partial.body());
             assertEquals(200,partial.status);
@@ -69,7 +78,17 @@ class ApiServletIntegratedLimitsTest {
             assertEquals("resourceInspector.maxWorkbookBytes",suiteDiagnostic.path("limitName").asText(),new String(partial.body(),StandardCharsets.UTF_8));
             assertEquals(32L*1024L*1024L,suiteDiagnostic.path("configuredLimit").asLong());
             assertEquals("DATA_TRUNCATED",suiteDiagnostic.path("outcome").asText());
+            stopInspectionProcesses(runtime);
+        }
+    }
 
+    @Test void inspectionEndpointRejectsWhenQueueIsSaturated() throws Exception {
+        Path packages=Files.createDirectories(temp.resolve("saturated-packages"));
+        createPackage(packages.resolve("oversized"));
+        Path runtimeConfig=sharedRuntimeConfig();
+        Path libs=workerLibraries("saturated-libs");
+        try(ServerRuntime runtime=runtime(packages,runtimeConfig,"saturated-data",DEFAULT_INSPECTION_TIMEOUT_MS,null,libs)) {
+            ApiServlet servlet=servlet(runtime);
             Semaphore inspectionSlots=semaphore(runtime,"inspectionTaskSlots");
             inspectionSlots.acquire();
             try {
