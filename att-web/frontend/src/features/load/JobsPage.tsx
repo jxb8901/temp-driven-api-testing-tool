@@ -715,7 +715,7 @@ function LiveLoadSummary({ job, active, progress, history, trend, streamHistory,
       </dl>
       <p>The counters above are all-phase totals. Rates marked measured-window exclude warmup.</p>
       {progress.phases && Object.keys(progress.phases).length > 0 && <details><summary>Phase totals</summary>
-        <div className="att-table-scroll"><table><caption>Actual counters by phase</caption><thead><tr><th>Phase</th><th>Measurement scope</th><th>Completed / PASS</th><th>FAIL / ERROR / drop</th></tr></thead>
+        <div className="att-table-scroll" tabIndex={0} role="region" aria-label="Actual counters by phase"><table><caption>Actual counters by phase</caption><thead><tr><th>Phase</th><th>Measurement scope</th><th>Completed / PASS</th><th>FAIL / ERROR / drop</th></tr></thead>
           <tbody>{Object.entries(progress.phases).map(([phase, phaseCounts]) => <tr key={phase}>
             <th scope="row">{phase.replaceAll('_', ' ')}</th><td>{phase === 'WARMUP' ? 'Unmeasured' : ['RAMP_UP', 'STEADY', 'RAMP_DOWN'].includes(phase) ? 'Measured' : 'Unknown'}</td>
             <td>{countText(phaseCounts.completed)} / {countText(phaseCounts.passed)}</td>
@@ -763,7 +763,7 @@ function LiveLoadSummary({ job, active, progress, history, trend, streamHistory,
         {latestCheckpoint?.state === 'DEGRADED' && <p role="alert">Checkpoint coverage is degraded: a checkpoint is missing, invalid, or out of sequence.</p>}
         {checkpoints.some(item => item.coverageGap) && <p role="alert">Checkpoint history has a gap; the displayed intervals do not cover the entire run.</p>}
         {checkpoints.length === 0 ? <p>No verified checkpoint interval is available yet.</p> :
-          <div className="att-table-scroll"><table><caption>Verified aggregate intervals</caption><thead><tr><th>Interval end</th><th>Duration</th><th>Completed TPS</th><th>PASS / FAIL / ERROR / drop</th><th>Mean latency (measured)</th></tr></thead>
+          <div className="att-table-scroll" tabIndex={0} role="region" aria-label="Verified aggregate intervals"><table><caption>Verified aggregate intervals</caption><thead><tr><th>Interval end</th><th>Duration</th><th>Completed TPS</th><th>PASS / FAIL / ERROR / drop</th><th>Mean latency (measured)</th></tr></thead>
             <tbody>{checkpoints.slice(-64).reverse().map(item => <tr key={item.endSequence}>
               <td>{item.endAt}</td><td>{plannedWorkloadDuration(item.durationMs)}</td>
               <td>{item.durationMs && item.counts ? METRIC_NUMBER_FORMATTER.format((item.counts.completed ?? 0) * 1000 / item.durationMs) : 'Not available'}</td>
@@ -771,7 +771,7 @@ function LiveLoadSummary({ job, active, progress, history, trend, streamHistory,
               <td>{item.latencyMeanMs == null ? 'Not available' : `${METRIC_NUMBER_FORMATTER.format(item.latencyMeanMs)} ms (${item.latencySampleCount} observations)`}</td>
             </tr>)}</tbody></table></div>}
       </section>
-      {plans.length > 0 && <div className="att-table-scroll"><table className="att-live-workload-table">
+      {plans.length > 0 && <div className="att-table-scroll" tabIndex={0} role="region" aria-label="Configured workload targets and actual progress"><table className="att-live-workload-table">
         <caption>Configured workload targets and actual progress</caption><thead><tr><th scope="col">Workload</th><th scope="col">Configured target</th><th scope="col">Phase</th><th scope="col">Planned duration</th><th scope="col">Actual completed / PASS</th><th scope="col">Average completed TPS</th><th scope="col">FAIL / ERROR / drop</th><th scope="col">Mean / p95 / p99 latency</th></tr></thead>
         <tbody>{plans.map((plan, index) => {
           const actual = workloadActual[plan.name];

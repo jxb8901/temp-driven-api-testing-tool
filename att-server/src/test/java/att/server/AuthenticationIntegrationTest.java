@@ -406,8 +406,9 @@ class AuthenticationIntegrationTest {
             assertEquals("PASS",loadJob.path("status").asText(),"The authenticated Advanced Load REST route must validate and submit its immutable Worker scenario");
             assertEquals("att",loadJob.path("principal").asText(),"Authenticated requests must ignore caller-supplied attribution labels");
             assertFalse(loadJob.has("attributionPrincipal"),"Attribution reuses the existing principal property");
+            boolean verifyPeriodicCheckpoint=Boolean.getBoolean("att.test.liveCheckpoint");
             JsonNode longScenario=ServerRuntime.JSON.valueToTree(Map.of("schemaVersion","att-load/v1.6",
-                    "load",Map.of("users",1,"duration","30s"),"workloads",List.of(Map.of("id","cancel-resume",
+                    "load",Map.of("users",1,"duration",verifyPeriodicCheckpoint?"7m":"30s"),"workloads",List.of(Map.of("id","cancel-resume",
                             "load",Map.of("users",1),"execution",Map.of("thinkTime","500ms"),
                             "target",Map.of("type","template","id","FORM"),"inputs",Map.of("value","cancel-resume")))));
             JsonNode longDraft=postJson(port,"/att/api/v1/drafts/load",basic,
@@ -428,6 +429,21 @@ class AuthenticationIntegrationTest {
             assertTrue(runningLoad.path("loadProgress").path("counts").path("completed").asLong()>0,"The actual Worker must publish live counters through the Job API");
             assertTrue(runningLoad.path("loadProgress").path("elapsedMs").asLong()>0);
             assertLiveProgressInSse(port,basic,cancellableJobId);
+            if(verifyPeriodicCheckpoint) {
+                long checkpointDeadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(390);
+                do {
+                    runningLoad=getJson(port,"/att/api/v1/jobs/"+cancellableJobId,basic);
+                    if(runningLoad.path("loadCheckpointHistory").size()>0)break;
+                    assertEquals("RUNNING",runningLoad.path("status").asText(),"Worker must remain active while waiting for the periodic checkpoint");
+                    Thread.sleep(1000);
+                } while(System.nanoTime()<checkpointDeadline);
+                JsonNode interval=runningLoad.path("loadCheckpointHistory").path(0);
+                assertEquals("VERIFIED",interval.path("state").asText(),runningLoad.toString());
+                assertEquals(1L,interval.path("startSequence").asLong());assertEquals(2L,interval.path("endSequence").asLong());
+                assertTrue(interval.path("counts").path("completed").asLong()>0,"The validated interval contains actual Worker measurements");
+                assertFalse(interval.toString().contains("/checkpoints/"),"Worker filesystem paths are not exposed");
+                System.out.println("LOAD_LIVE_CHECKPOINT_INTEGRATION durationMs="+interval.path("durationMs").asLong()+" completed="+interval.path("counts").path("completed").asLong());
+            }
             assertEquals(200,cancelJob(port,basic,cancellableJobId),"The real Tomcat API must accept cancellation of an active Load job");
             long cancelDeadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(15);
             JsonNode cancelledJob=getJson(port,"/att/api/v1/jobs/"+cancellableJobId,basic);

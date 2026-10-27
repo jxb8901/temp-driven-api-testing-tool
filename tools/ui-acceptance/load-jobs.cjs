@@ -19,6 +19,7 @@ async function main() {
     const page = await context.newPage();
     const pageErrors = [];
     let cancelRequested = false;
+    let liveMode = false;
     let delayJobs = false;
     let sentInitialStatus = false;
     let reconnected = false;
@@ -81,6 +82,18 @@ async function main() {
         diagnostics: [], expiresAt: new Date(Date.now() + 60_000).toISOString(),
       }, 201);
       if (method === 'POST' && resource === 'jobs/load') return json({ jobId, status: 'RUNNING', command: 'load', packageId: 'payments' }, 202);
+      if (liveMode && method === 'GET' && resource === `jobs/${jobId}`) {
+        const now = new Date().toISOString();
+        const sample = (elapsedMs, phase, completed) => ({ schemaVersion: 'att-load-live-progress/v1', capturedAt: now, serverReceivedAt: now, elapsedMs, phase,
+          counts: { completed, passed: completed - 1, sutFailures: 1, runtimeErrors: 0, dropped: 0, active: 1, queued: 0, schedulerLagMeanMs: 2 },
+          latency: { sampleCount: completed, meanMs: 21, p95Ms: 31, p99Ms: 63 },
+          workloads: { checkout: { completed, passed: completed - 1, latency: { sampleCount: completed, meanMs: 21, p95Ms: 31, p99Ms: 63 } } } });
+        const first = sample(5000, 'WARMUP', 4), second = sample(10000, 'STEADY', 8), latest = sample(15000, 'STEADY', 12);
+        return json({ ...job, status: 'RUNNING', targetIdentity: { workloads: [{ name: 'checkout', model: 'arrivalRate', arrivalRate: 2, totalDurationMs: 60000, targets: [] }] },
+          loadProgress: latest, loadProgressTrend: [first, second], loadProgressHistory: [first, second] });
+      }
+      if (liveMode && method === 'GET' && resource === `jobs/${jobId}/result`) return json({ job, result: null });
+      if (liveMode && method === 'GET' && resource === `jobs/${jobId}/events`) return route.fulfill({ status: 200, contentType: 'text/event-stream', body: 'id: 1\nevent: status\ndata: {"status":"RUNNING"}\nretry: 1000\n\n' });
       if (method === 'GET' && resource === `jobs/${jobId}`) return json({ ...job, status: cancelRequested ? 'CANCELLED' : 'RUNNING' });
       if (method === 'GET' && resource === `jobs/${jobId}/result`) return json({
         job, result: { status: 'PASS', metrics: { completedThroughput: 120, p95Ms: 85, buckets: {
@@ -264,6 +277,20 @@ async function main() {
     await page.getByRole('status').filter({ hasText: /Showing .* of 1 Jobs/ }).waitFor();
     await page.getByRole('link', { name: 'Unknown target · ' + jobId }).waitFor({ timeout: 10_000 });
     assert.equal(await statusFilter.inputValue(), 'RUNNING');
+
+    liveMode = true;
+    await page.goto(`${base}#/jobs/${jobId}`);
+    await page.getByRole('tab', { name: 'Results', exact: true }).click();
+    const liveResults = page.locator('#job-panel-results');
+    await liveResults.getByRole('heading', { name: 'Live LOAD progress' }).waitFor();
+    assert.match(await liveResults.innerText(), /Completed \/ PASS\s*12 \/ 11/);
+    assert.doesNotMatch(await liveResults.innerText(), /The Server has not returned a result payload|Execution outcomePASS/);
+    await page.getByRole('tab', { name: 'Metrics', exact: true }).click();
+    const liveMetrics = page.locator('#job-panel-metrics');
+    await liveMetrics.getByRole('img', { name: 'Workload completed and successful throughput trend' }).waitFor();
+    assert.match(await liveMetrics.innerText(), /Configured steady target/);
+    await page.setViewportSize({ width: 390, height: 844 });
+    await assertAxe(page, 'Live LOAD trends should remain accessible on a narrow viewport');
 
     assert.deepEqual(pageErrors, [], 'Load/Jobs UI should not report uncaught browser errors');
     console.log('ATT Load/Jobs browser acceptance passed.');

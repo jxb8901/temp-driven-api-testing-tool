@@ -8,6 +8,13 @@ import java.util.Map;
 import static org.junit.jupiter.api.Assertions.*;
 
 class ExecutionConsoleFormatterTest {
+    @Test void tokenRetainsSafeIdentifiersAndSanitizesUnsafeOrLongValues() {
+        String safe="workload-A_12:part.test";
+        assertSame(safe,ExecutionConsoleFormatter.token(safe,"unknown"));
+        assertEquals("bad_name__",ExecutionConsoleFormatter.token("bad name/\n","unknown"));
+        assertEquals(96,ExecutionConsoleFormatter.token(String.join("",java.util.Collections.nCopies(100,"x")),"unknown").length());
+        assertEquals("unknown",ExecutionConsoleFormatter.token("","unknown"));
+    }
     @Test void explicitPublishedPolicyIsIndependentAndRedactsBeforeTruncation() {
         String text=String.join("",java.util.Collections.nCopies(8000,"x"))+" password=hidden";
         assertEquals(8016, text.length());
