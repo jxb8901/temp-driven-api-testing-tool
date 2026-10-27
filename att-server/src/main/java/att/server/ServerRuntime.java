@@ -1374,7 +1374,7 @@ final class ServerRuntime implements AutoCloseable {
             if(bucket%4==0) {
                 point=new LinkedHashMap<>(point);point.put("workloads",compactWorkloadTrend(saved.get("workloads")));
             }
-            job.loadProgressTrend.put(bucket,point);
+            if(bucket==0)job.loadProgressTrend.putIfAbsent(bucket,point);else job.loadProgressTrend.put(bucket,point);
             Map<String,Object> state=new LinkedHashMap<>();state.put("latest",saved);state.put("recent",new ArrayList<>(job.loadProgressHistory));state.put("trend",new ArrayList<>(job.loadProgressTrend.values()));state.put("checkpoints",new ArrayList<>(job.loadCheckpointHistory));
             job.loadProgressJson=JSON.writeValueAsString(state);store.updateLoadProgress(job.id,job.loadProgressJson);return true;
         }

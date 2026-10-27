@@ -186,6 +186,9 @@ class ServerRuntimeLoadTerminalResultTest {
             }
             assertEquals(60,job.loadProgressHistory.size());assertEquals(64,job.loadCheckpointHistory.size());
             assertTrue(job.loadProgressTrend.size()<=256);assertEquals(2881L,((Number)job.loadCheckpointHistory.get(63).get("endSequence")).longValue());
+            List<Map<String,Object>> trend=new ArrayList<>(job.loadProgressTrend.values());
+            assertEquals(300_000L,((Number)trend.get(0).get("elapsedMs")).longValue(),"The first observation survives bucket replacement");
+            assertEquals(864_000_000L,((Number)trend.get(trend.size()-1).get("elapsedMs")).longValue(),"The latest observation remains visible");
             int bytes=JSON.writeValueAsBytes(runtime.jobRecord(job.id)).length;assertTrue(bytes<1_000_000,"Bounded job payload: "+bytes);
             System.out.println("LOAD_LIVE_SOAK_BENCHMARK simulatedHours=240 samples=2880 workloads=32 jobBytes="+bytes+" processingMs="+java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(System.nanoTime()-began));
         }

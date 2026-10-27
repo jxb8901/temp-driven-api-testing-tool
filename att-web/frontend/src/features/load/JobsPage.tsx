@@ -560,19 +560,22 @@ function boundedLivePoints(input: readonly LoadLiveProgressPoint[]): LoadLivePro
   return ordered.length <= 320 ? ordered : Array.from({ length: 320 }, (_, index) => ordered[Math.floor(index * (ordered.length - 1) / 319)]!);
 }
 
-function WorkloadTrends({ points, names }: { points: readonly LoadLiveProgressPoint[]; names: string[] }) {
+function WorkloadTrends({ points, plans }: { points: readonly LoadLiveProgressPoint[]; plans: NonNullable<import('./types').TargetIdentity['workloads']> }) {
+  const names = plans.map(plan => plan.name).filter(Boolean);
   const [selected, setSelected] = useState(names[0] || '');
   const name = names.includes(selected) ? selected : names[0];
   if (!name) return null;
+  const target = configuredRatePerSecond(plans.find(plan => plan.name === name)?.arrivalRate);
   const workloadPoints = points.filter(point => point.workloads?.[name]).map(point => ({ ...point, counts: point.workloads![name]!, latency: point.workloads![name]!.latency }));
   const rates = liveThroughputPoints(workloadPoints).map(point => ({ capturedAt: '', elapsedMs: point.elapsedMs, phase: workloadPoints.find(sample => sample.elapsedMs === point.elapsedMs)?.phase || 'UNKNOWN', counts: { completed: point.completed, passed: point.passed } }));
   return <section aria-label="Workload trends"><h4>Workload trends</h4>
     <label>Workload <select value={name} onChange={event => setSelected(event.target.value)}>{names.map(item => <option key={item} value={item}>{item}</option>)}</select></label>
-    <p>Rates are calculated between retained samples; latency percentiles are histogram estimates. Long-run history is coarsened.</p>
+    <p>Rates are calculated between retained samples; the configured target applies during steady state. Latency percentiles are histogram estimates. Long-run history is coarsened.</p>
     {rates.length < 2 && <p>Waiting for enough workload samples to show a trend.</p>}
     <LiveSampleChart label="Workload completed and successful throughput" unit="TPS" points={rates} series={[
       { name: 'Completed', color: '#3157c8', read: point => point.counts.completed },
       { name: 'Successful', color: '#23834f', read: point => point.counts.passed },
+      ...(target == null ? [] : [{ name: 'Configured steady target', color: '#8a5a00', read: (point: LoadLiveProgressPoint) => point.phase === 'STEADY' ? target : null }]),
     ]} />
     <LiveSampleChart label="Workload sampled latency" unit="milliseconds" points={workloadPoints} series={[
       { name: 'Mean', color: '#3157c8', read: point => point.latency?.meanMs },
@@ -750,7 +753,7 @@ function LiveLoadSummary({ job, active, progress, history, trend, streamHistory,
           { name: 'p95 estimate', color: '#23834f', read: point => point.latency?.p95Ms },
           { name: 'p99 estimate', color: '#8a3259', read: point => point.latency?.p99Ms },
         ]} />
-        <WorkloadTrends points={samplePoints} names={plans.map(plan => plan.name).filter(Boolean)} />
+        <WorkloadTrends points={samplePoints} plans={plans} />
       </section>}
       <section aria-label="Verified checkpoint intervals">
         <h4>Recent checkpoint intervals</h4>
