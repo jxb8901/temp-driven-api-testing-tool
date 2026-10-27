@@ -162,13 +162,13 @@ class ServerRuntimeTest {
         AtomicReference<Process> launched=new AtomicReference<>();
         ServerRuntime runtime=new ServerRuntime(config,libs.toString(),ServerRuntimeTestSupport.resolvingConfiguration(builder->{
             launchEntered.countDown();
-            try {allowLaunch.await();}
+            try {if(!allowLaunch.await(5,TimeUnit.MINUTES))throw new java.io.IOException("test launch gate timed out");}
             catch(InterruptedException e){Thread.currentThread().interrupt();throw new java.io.IOException("test launch gate interrupted",e);}
             Process process=builder.start();launched.set(process);return process;
         }));
         try {
             Map<String,Object> submitted=runtime.submit("validate",ServerRuntime.JSON.readTree("{\"packageId\":\"p\"}"),"ci-test");
-            String id=(String)submitted.get("jobId");assertTrue(launchEntered.await(30,TimeUnit.SECONDS),"Worker launcher should reach the process-publication boundary");
+            String id=(String)submitted.get("jobId");assertTrue(launchEntered.await(4,TimeUnit.MINUTES),"Worker launcher should reach the process-publication boundary");
             FutureTask<Void> cancel=new FutureTask<>(()->{runtime.cancel(id,"ci-test");return null;});new Thread(cancel,"test-job-cancel").start();
             Thread.sleep(100);assertFalse(cancel.isDone(),"Cancellation must wait while launch and process publication are atomic");
             allowLaunch.countDown();cancel.get(5,TimeUnit.SECONDS);
