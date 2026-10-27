@@ -78,7 +78,7 @@ async function main(){
       await page.addScriptTag({path:require.resolve('axe-core/axe.min.js')});const violations=await page.evaluate(async()=> (await axe.run(document.querySelector('.att-jobs-page'),{runOnly:{type:'tag',values:['wcag2a','wcag2aa','wcag21aa']}})).violations);assert.deepEqual(violations,[]);
             if(process.env.ATT_UI_SCREENSHOT_DIR)await page.screenshot({path:`${process.env.ATT_UI_SCREENSHOT_DIR}/jobs-${viewport.width}.png`,fullPage:true});
     }
-    await page.goto(base+'#/schedules');await page.getByRole('heading',{name:'Schedules',exact:true,level:1}).waitFor();await page.getByText('target 10/s arrivals (configured rate)',{exact:false}).filter({visible:true}).first().waitFor();assert.equal(await page.getByText(/SECRET-SCHEDULE-ID/).count(),0);
+    await page.goto(base+'#/schedules');await page.getByRole('heading',{name:'Schedules',exact:true,level:1}).waitFor();await page.getByText('Configured target rate 10/s',{exact:false}).filter({visible:true}).first().waitFor();assert.equal(await page.getByText(/SECRET-SCHEDULE-ID/).count(),0);
     const id=all[0].jobId;await page.goto(base+`#/jobs/${id}/console?view=events`);await page.getByRole('tab',{name:'Events',exact:true}).waitFor();assert.equal(await page.getByRole('tab',{name:'Events',exact:true}).getAttribute('aria-selected'),'true');
     for(const tab of ['Overview','Live Output','Events','Results','Artifacts','Metrics']){await page.getByRole('tab',{name:tab,exact:true}).click();assert.ok(page.url().includes(id));}
     await page.reload();await page.getByRole('tab',{name:'Metrics',exact:true}).waitFor();assert.equal(await page.getByRole('tab',{name:'Metrics',exact:true}).getAttribute('aria-selected'),'true');
