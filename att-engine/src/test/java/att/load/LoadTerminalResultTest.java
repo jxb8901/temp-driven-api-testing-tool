@@ -112,6 +112,7 @@ class LoadTerminalResultTest {
         assertEquals("PASS", execution.get("status"));
         assertEquals(0, ((Number) execution.get("exitCode")).intValue());
         assertEquals("FAILED", archive.get("status"));
+        assertTrue(((Map<?, ?>) archive.get("paths")).isEmpty());
         assertEquals("ATT-LOAD-EVIDENCE-QUOTA", evidenceNotice.get("code"));
         assertEquals("DATA_TRUNCATED", evidenceNotice.get("outcome"));
         assertEquals("load.evidence.maxFailureSamples", evidenceNotice.get("limitName"));
