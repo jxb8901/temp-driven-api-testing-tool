@@ -3903,7 +3903,10 @@ final class ServerRuntime implements AutoCloseable {
         // payloads incorrectly classifies legitimate remotePath values and report scripts.
         String name=file.getFileName().toString().toLowerCase(java.util.Locale.ROOT);
         boolean html=name.endsWith(".html")||name.endsWith(".htm");
-        if(!html && !att.server.api.internal.DiagnosticSanitizer.redactText(text).equals(text))
+        boolean structured=name.endsWith(".json")||name.endsWith(".yaml")||name.endsWith(".yml");
+        // Structured snapshots are already protected by the typed exportValue check below.
+        // Text heuristics are not idempotent on quoted YAML and may discard valid case.yaml.
+        if(!html && !structured && !att.server.api.internal.DiagnosticSanitizer.redactText(text).equals(text))
             throw new IllegalArgumentException("Artifact contains unapproved sensitive text");
         if((name.endsWith(".log")||name.endsWith(".txt")||name.endsWith(".md"))
                 && !att.server.api.internal.DiagnosticSanitizer.redactAbsolutePaths(text).equals(text))
