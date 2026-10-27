@@ -698,6 +698,7 @@ function LiveLoadSummary({ job, active, progress, history, trend, streamHistory,
     {partial ? <p>Partial pre-terminal telemetry; the canonical terminal result and archive are authoritative.</p>
       : <p>Execution outcome: IN_PROGRESS · Performance/threshold verdict: NOT_FINAL</p>}
     <p>Status: {job.status}{progress ? ` · Phase ${progress.phase.replaceAll('_', ' ')}` : ''}</p>
+    {progress?.telemetryPersistence?.state === 'DEGRADED' && <p role="alert">{progress.telemetryPersistence.diagnostic || 'Optional live LOAD telemetry persistence is degraded; the latest in-memory snapshot remains available and retries continue.'}{progress.telemetryPersistence.retryAfterMs ? ` Retrying in about ${METRIC_NUMBER_FORMATTER.format(progress.telemetryPersistence.retryAfterMs / 1000)}s.` : ''}</p>}
     {progress ? <>
       <dl className="att-live-load-metrics">
         <div><dt>Current phase</dt><dd>{progress.phase.replaceAll('_', ' ')}</dd></div>

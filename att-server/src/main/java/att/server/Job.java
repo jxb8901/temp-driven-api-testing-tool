@@ -7,6 +7,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Collections;
+import java.io.OutputStream;
 
 final class Job {
     final String id,command,packageId,principal;
@@ -29,12 +30,16 @@ final class Job {
     volatile Map<String,Object> targetIdentity;
     volatile Map<String,Object> loadProgress;
     volatile String loadProgressJson;
+    volatile boolean loadProgressPersistenceDegraded;
+    volatile long lastLoadProgressPersistenceAttemptNanos;
     final List<Map<String,Object>> loadProgressHistory=new ArrayList<>();
     final List<Map<String,Object>> loadCheckpointHistory=new ArrayList<>();
     final Map<Integer,Map<String,Object>> loadProgressTrend=new LinkedHashMap<>();
     volatile String primaryDiagnosticJson;
     final List<Map<String,Object>> secondaryDiagnostics=new ArrayList<>();
     volatile boolean resultReceived;
+    volatile boolean cancelRequested;
+    volatile OutputStream workerControlStream;
     volatile String workerDispatch="cold";
     volatile String prewarmFallbackReason;
     volatile Double prewarmEligibilityMs;

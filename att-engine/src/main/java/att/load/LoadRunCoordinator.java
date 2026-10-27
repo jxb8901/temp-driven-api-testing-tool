@@ -224,10 +224,20 @@ public final class LoadRunCoordinator implements AutoCloseable {
 
             Map<String, LoadRunResult> workloadResults = new LinkedHashMap<String, LoadRunResult>();
             LoadThresholdEvaluator evaluator = new LoadThresholdEvaluator();
+            boolean cancelledRun = false;
             for (LoadWorkload workload : scenario.workloads()) {
-                LoadRunResult childResult = futures.get(workload.id()).get();
+                LoadRunResult childResult;
+                while (true) {
+                    try { childResult = futures.get(workload.id()).get(); break; }
+                    catch (InterruptedException interrupted) {
+                        cancelledRun = true;
+                        cancelAll();
+                        Thread.interrupted();
+                    }
+                }
                 LoadScenario child = scenario.forWorkload(workload);
-                childResult = childResult.withThresholds(evaluator.evaluate(child, childResult.metrics()));
+                if (cancelledRun || childResult.cancelled()) childResult = childResult.withCancelled();
+                else childResult = childResult.withThresholds(evaluator.evaluate(child, childResult.metrics()));
                 if (workload.mixed()) {
                     Map<String, Object> mixSummary = new LinkedHashMap<String, Object>();
                     long workloadSelected = 0L;
@@ -253,6 +263,7 @@ public final class LoadRunCoordinator implements AutoCloseable {
             LoadRunResult result = new LoadRunResult(runId, scenario, startInstant, LoadSchedulerSupport.instant(endedAt), aggregate.snapshot(),
                     LoadThresholdSummary.empty(), Collections.<String, Object>emptyMap(),
                     resources.metrics(), workloadResults);
+            if (cancelledRun) result = result.withCancelled();
             Map<String, Object> testdata = new LinkedHashMap<String, Object>();
             Map<String, Object> perWorkload = new LinkedHashMap<String, Object>();
             long mappings = 0L, requests = 0L, evaluations = 0L, cacheHits = 0L;

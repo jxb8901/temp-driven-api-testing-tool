@@ -168,6 +168,8 @@ export interface LoadLiveProgressPoint {
 }
 export interface LoadLiveProgressSnapshot extends LoadLiveProgressPoint {
   schemaVersion: 'att-load-live-progress/v1';
+  runId?: string;
+  telemetryPersistence?: { state: 'HEALTHY' | 'DEGRADED'; diagnostic?: string; retryAfterMs?: number };
   checkpointInterval?: LoadCheckpointInterval;
   latestFailure?: { status: string; capturedAt: string; code?: string };
   phases?: Record<string, LoadLiveProgressCounts>;

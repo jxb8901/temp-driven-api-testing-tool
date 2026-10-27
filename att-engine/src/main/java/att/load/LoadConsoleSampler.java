@@ -15,6 +15,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicLongArray;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 
@@ -51,7 +52,7 @@ public final class LoadConsoleSampler {
     private final ConcurrentHashMap<String,Counters> liveWorkloads = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String,Counters> livePhases = new ConcurrentHashMap<>();
     private final AtomicBoolean liveWorkloadsTruncated = new AtomicBoolean();
-    private volatile String livePhase = "PREPARING";
+    private final AtomicReference<Phase> livePhase = new AtomicReference<>(new Phase(0,"PREPARING"));
     private volatile Map<String,Object> latestFailure;
     private volatile ScheduledExecutorService periodic;
     private volatile String model = "unknown";
@@ -115,7 +116,7 @@ public final class LoadConsoleSampler {
     public void observePreparedStart(String loadModel, String observedRunId, String phase) {
         adoptRunId(observedRunId);
         schedulerStartedNanos.compareAndSet(0L,System.nanoTime());
-        if(phase!=null)livePhase=ExecutionConsoleFormatter.token(phase,"UNKNOWN");
+        if(phase!=null)advanceLivePhase(phase);
         if (loadModel != null) model = ExecutionConsoleFormatter.token(loadModel, model);
         if (startEmitted.compareAndSet(false, true)) {
             startedNanos.compareAndSet(0L,System.nanoTime());
@@ -130,7 +131,7 @@ public final class LoadConsoleSampler {
         schedulerStartedNanos.compareAndSet(0L,System.nanoTime());
         liveCounters.observe(event);
         String phaseKey=ExecutionConsoleFormatter.token(event.phase(),"UNKNOWN");
-        livePhase=phaseKey;
+        advanceLivePhase(phaseKey);
         Counters phaseCounters=boundedCounters(livePhases,phaseKey,8);
         if(phaseCounters!=null)phaseCounters.observe(event);
         if(event.workloadId()!=null&&!event.workloadId().trim().isEmpty()) {
@@ -178,9 +179,10 @@ public final class LoadConsoleSampler {
         long began=schedulerStartedNanos.get();long elapsedMs=began==0L?0L:Math.max(0L,TimeUnit.NANOSECONDS.toMillis(System.nanoTime()-began));
         Map<String,Object> snapshot=new LinkedHashMap<>();
         snapshot.put("schemaVersion","att-load-live-progress/v1");
+        snapshot.put("runId",runId);
         snapshot.put("capturedAt",Instant.now().toString());
         snapshot.put("elapsedMs",elapsedMs);
-        snapshot.put("phase",livePhase);
+        snapshot.put("phase",livePhase.get().name);
         snapshot.put("counts",liveCounters.toMap());
         Map<String,Object> rates=new LinkedHashMap<>();
         rates.put("completedTps",rate(liveCounters.completed.get(),elapsedMs));
@@ -218,6 +220,35 @@ public final class LoadConsoleSampler {
             if(counters.size()>=limit)return null;
             current=new Counters();counters.put(key,current);return current;
         }
+    }
+
+    private void advanceLivePhase(String rawPhase) {
+        String name=ExecutionConsoleFormatter.token(rawPhase,"UNKNOWN");
+        int order;
+        switch(name) {
+            case "PREPARING": order=0;break;
+            case "WARMUP": order=1;break;
+            case "RAMP_UP": order=2;break;
+            case "STEADY": order=3;break;
+            case "RAMP_DOWN": order=4;break;
+            case "DRAIN":
+            case "DRAINING": order=5;break;
+            case "COMPLETE":
+            case "FINISHED": order=6;break;
+            default: order=-1;break;
+        }
+        if(order<0)return;
+        Phase candidate=new Phase(order,name);
+        while(true) {
+            Phase current=livePhase.get();
+            if(candidate.order<=current.order)return;
+            if(livePhase.compareAndSet(current,candidate))return;
+        }
+    }
+
+    private static final class Phase {
+        final int order;final String name;
+        Phase(int order,String name){this.order=order;this.name=name;}
     }
 
     private static final class Counters {

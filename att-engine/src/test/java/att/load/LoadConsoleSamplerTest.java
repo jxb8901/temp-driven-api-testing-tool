@@ -43,6 +43,29 @@ class LoadConsoleSamplerTest {
         assertTrue(((Number)sampler.snapshot().get("elapsedMs")).longValue()>0L);
         sampler.finish("PASS");
     }
+
+    @Test void lateCompletionsKeepHistoricalAttributionWithoutRegressingLivePhase() {
+        LoadConsoleSampler sampler=new LoadConsoleSampler("phase-order",5000L,1000L);
+        sampler.observePreparedStart("arrivalRate","phase-order","WARMUP");
+        sampler.onEvent(LoadEvent.completed("phase-order","arrivalRate","WARMUP","warmup-1",null,1,1L,2L,3L,ResultStatus.PASS));
+        sampler.onEvent(LoadEvent.completed("phase-order","arrivalRate","STEADY","steady-1",null,2,2L,3L,4L,ResultStatus.PASS));
+        sampler.onEvent(LoadEvent.completed("phase-order","arrivalRate","WARMUP","warmup-late",null,3,3L,4L,5L,ResultStatus.PASS));
+
+        Map<String,Object> steadySnapshot=sampler.snapshot();
+        assertEquals("STEADY",steadySnapshot.get("phase"));
+        Map<?,?> steadyPhases=(Map<?,?>)steadySnapshot.get("phases");
+        assertEquals(2L,((Map<?,?>)steadyPhases.get("WARMUP")).get("completed"));
+        assertEquals(1L,((Map<?,?>)steadyPhases.get("STEADY")).get("completed"));
+
+        sampler.onEvent(LoadEvent.completed("phase-order","arrivalRate","RAMP_DOWN","ramp-down-1",null,4,4L,5L,6L,ResultStatus.PASS));
+        sampler.onEvent(LoadEvent.completed("phase-order","arrivalRate","STEADY","steady-late",null,5,5L,6L,7L,ResultStatus.PASS));
+        Map<String,Object> drainSnapshot=sampler.snapshot();
+        assertEquals("RAMP_DOWN",drainSnapshot.get("phase"));
+        Map<?,?> drainPhases=(Map<?,?>)drainSnapshot.get("phases");
+        assertEquals(2L,((Map<?,?>)drainPhases.get("STEADY")).get("completed"));
+        assertEquals(1L,((Map<?,?>)drainPhases.get("RAMP_DOWN")).get("completed"));
+        sampler.finish("PASS");
+    }
     @Test void exposesBoundedProgressCountsAndLatencyWithoutIterationIdentity() {
         LoadConsoleSampler sampler=new LoadConsoleSampler("live-progress",5000L,1000L);
         sampler.startLine("arrivalRate");
@@ -101,6 +124,7 @@ class LoadConsoleSamplerTest {
                 "VU-1", 2, 1L, 2L, 5L, ResultStatus.PASS));
         assertNotNull(progress);
         assertTrue(progress.startsWith("[LOAD] PROGRESS runId=load-generated"));
+        assertEquals("load-generated",sampler.snapshot().get("runId"),"Coalesced progress carries the adopted run identity");
         assertTrue(sampler.finish("FAIL").startsWith("[LOAD] COMPLETE runId=load-generated status=FAIL"));
     }
 

@@ -74,6 +74,23 @@ function eventPreview(event: JobEvent): string {
       .slice(0, 4).map(([key, metric]) => `${key}: ${metric}`).join(' · ');
     if (compact) parts.push(compact);
   }
+  const loadProgressRaw = value('loadProgress');
+  if (loadProgressRaw && typeof loadProgressRaw === 'object' && !Array.isArray(loadProgressRaw)) {
+    const loadProgress = loadProgressRaw as Record<string, unknown>;
+    const counts = loadProgress.counts && typeof loadProgress.counts === 'object' && !Array.isArray(loadProgress.counts)
+      ? loadProgress.counts as Record<string, unknown> : {};
+    const rates = loadProgress.rates && typeof loadProgress.rates === 'object' && !Array.isArray(loadProgress.rates)
+      ? loadProgress.rates as Record<string, unknown> : {};
+    const latency = loadProgress.latency && typeof loadProgress.latency === 'object' && !Array.isArray(loadProgress.latency)
+      ? loadProgress.latency as Record<string, unknown> : {};
+    const live = [
+      typeof rates.completedTps === 'number' ? `Completed TPS: ${rates.completedTps}` : '',
+      typeof counts.completed === 'number' ? `Completed: ${counts.completed}` : '',
+      typeof counts.runtimeErrors === 'number' ? `Runtime errors: ${counts.runtimeErrors}` : '',
+      typeof latency.p95Ms === 'number' ? `p95 latency: ${latency.p95Ms} ms` : '',
+    ].filter(Boolean).slice(0, 4).join(' · ');
+    if (live) parts.push(live);
+  }
   return parts.join(' · ').slice(0, 280);
 }
 
@@ -93,25 +110,52 @@ function EventKeyFacts({ event }: { event: JobStreamEvent }) {
   const root = event.data && typeof event.data === 'object' && !Array.isArray(event.data) ? event.data as Record<string, unknown> : {};
   const payload = root.data && typeof root.data === 'object' && !Array.isArray(root.data) ? root.data as Record<string, unknown> : {};
   const read = (key: string) => root[key] ?? payload[key];
+  const loadProgressRaw = read('loadProgress');
+  const loadProgress = loadProgressRaw && typeof loadProgressRaw === 'object' && !Array.isArray(loadProgressRaw)
+    ? loadProgressRaw as Record<string, unknown> : {};
+  const progressCounts = loadProgress.counts && typeof loadProgress.counts === 'object' && !Array.isArray(loadProgress.counts)
+    ? loadProgress.counts as Record<string, unknown> : {};
+  const progressRates = loadProgress.rates && typeof loadProgress.rates === 'object' && !Array.isArray(loadProgress.rates)
+    ? loadProgress.rates as Record<string, unknown> : {};
+  const progressLatency = loadProgress.latency && typeof loadProgress.latency === 'object' && !Array.isArray(loadProgress.latency)
+    ? loadProgress.latency as Record<string, unknown> : {};
+  const rawMetrics = read('metrics');
+  const metricsSource = rawMetrics && typeof rawMetrics === 'object' && !Array.isArray(rawMetrics)
+    ? rawMetrics as Record<string, unknown> : {};
+  const metricValue = (key: string) => metricsSource[key] ?? read(key);
   const time = [root.timestamp, root.createdAt, root.time, root.at, payload.timestamp, payload.createdAt, payload.time]
     .find(item => typeof item === 'string' && Number.isFinite(Date.parse(item)));
+  const eventIdentity = eventFactRows({ eventId: event.id, eventType: event.type }, [['eventId', 'Event ID'], ['eventType', 'Event type']]);
   const identity = eventFactRows({ workloadId: read('workloadId'), workloadName: read('workloadName'), targetType: read('targetType'), targetId: read('targetId'), target: read('target') }, [
     ['workloadId', 'Workload'], ['workloadName', 'Workload name'], ['targetType', 'Target type'], ['targetId', 'Target ID'], ['target', 'Target'],
   ]);
-  const execution = eventFactRows({ phase: read('phase'), outcome: read('outcome'), status: read('status'), sequence: read('sequence'), iteration: read('iteration'), user: read('user') }, [
-    ['phase', 'Phase'], ['outcome', 'Outcome'], ['status', 'Event status'], ['sequence', 'Sequence'], ['iteration', 'Iteration'], ['user', 'User'],
+  const execution = eventFactRows({ runId: read('runId') ?? loadProgress.runId, phase: loadProgress.phase ?? read('phase'), outcome: read('outcome'), status: read('status'), sequence: read('sequence') ?? event.seq, iterationId: read('iterationId') ?? read('iteration'), user: read('user') }, [
+    ['runId', 'Run ID'], ['phase', 'Phase'], ['outcome', 'Outcome'], ['status', 'Event status'], ['sequence', 'Sequence'], ['iterationId', 'Iteration ID'], ['user', 'User'],
   ]);
   if (typeof time === 'string') execution.unshift({ label: 'Event time', value: dateTime(time) });
-  const metricSource = read('metrics') ?? payload.metrics;
-  const metrics = eventFactRows(metricSource, [
-    ['configuredArrivalRate', 'Configured target rate'], ['actualTps', 'Actual TPS'], ['completedThroughput', 'Completed TPS'], ['successfulThroughput', 'Successful TPS'],
-    ['scheduled', 'Scheduled'], ['started', 'Started'], ['completed', 'Completed'], ['passed', 'Passed'], ['success', 'Passed'], ['failure', 'SUT failures'],
-    ['runtimeError', 'Runtime errors'], ['dropped', 'Dropped'], ['active', 'Active'], ['queued', 'Queued'], ['schedulerLagMs', 'Scheduler lag (ms)'],
-    ['meanLatencyMs', 'Mean latency (ms)'], ['p95Ms', 'p95 latency (ms)'], ['p99Ms', 'p99 latency (ms)'],
+  const performance = {
+    configuredArrivalRate: metricValue('configuredArrivalRate'), actualTps: metricValue('actualTps'),
+    completedTps: progressRates.completedTps ?? metricValue('completedTps') ?? metricValue('completedThroughput'),
+    successfulTps: progressRates.successfulTps ?? metricValue('successfulTps') ?? metricValue('successfulThroughput'),
+    scheduled: progressCounts.scheduled ?? metricValue('scheduled'), started: progressCounts.started ?? metricValue('started'),
+    completed: progressCounts.completed ?? metricValue('completed'), passed: progressCounts.passed ?? metricValue('passed') ?? metricValue('success'),
+    sutFailures: progressCounts.sutFailures ?? metricValue('sutFailures') ?? metricValue('failure'),
+    runtimeErrors: progressCounts.runtimeErrors ?? metricValue('runtimeErrors') ?? metricValue('runtimeError'),
+    dropped: progressCounts.dropped ?? metricValue('dropped'), active: progressCounts.active ?? metricValue('active'),
+    queued: progressCounts.queued ?? metricValue('queued'), schedulerLagMs: read('schedulerLagMs') ?? metricValue('schedulerLagMs'),
+    schedulerLagMeanMs: progressCounts.schedulerLagMeanMs,
+    latencyMs: read('latencyMs'), meanLatencyMs: progressLatency.meanMs ?? metricValue('meanLatencyMs') ?? metricValue('meanMs'),
+    p95Ms: progressLatency.p95Ms ?? metricValue('p95Ms'), p99Ms: progressLatency.p99Ms ?? metricValue('p99Ms'),
+  };
+  const performanceRows = eventFactRows(performance, [
+    ['configuredArrivalRate', 'Configured target rate'], ['actualTps', 'Actual TPS'], ['completedTps', 'Completed TPS'], ['successfulTps', 'Successful TPS'],
+    ['scheduled', 'Scheduled'], ['started', 'Started'], ['completed', 'Completed'], ['passed', 'Passed'], ['sutFailures', 'SUT failures'],
+    ['runtimeErrors', 'Runtime errors'], ['dropped', 'Dropped'], ['active', 'Active'], ['queued', 'Queued'], ['schedulerLagMs', 'Scheduler lag (ms)'],
+    ['schedulerLagMeanMs', 'Mean scheduler lag (ms)'], ['latencyMs', 'Latency (ms)'], ['meanLatencyMs', 'Mean latency (ms)'], ['p95Ms', 'p95 latency (ms)'], ['p99Ms', 'p99 latency (ms)'],
   ]);
   const diagnostics = eventFactRows({ code: read('code'), severity: read('severity'), message: read('message') }, [['code', 'Code'], ['severity', 'Severity'], ['message', 'Message']]);
   const groups = [
-    ['Identity', identity], ['Execution', execution], ['Performance', metrics], ['Diagnostic', diagnostics],
+    ['Event', eventIdentity], ['Identity', identity], ['Execution', execution], ['Performance', performanceRows], ['Diagnostic', diagnostics],
   ] as const;
   const present = groups.filter(([, rows]) => rows.length > 0);
   if (!present.length) return null;

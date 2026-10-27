@@ -10,12 +10,15 @@ import org.junit.jupiter.api.io.TempDir;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -264,6 +267,50 @@ class ServerRuntimeLoadTerminalResultTest {
             assertEquals("ATT-JOURNAL-EVENT-TRUNCATED",journalNotice.path("code").asText());
             assertEquals("DATA_TRUNCATED",journalNotice.path("outcome").asText());
             stopInspectionProcesses(runtime);
+        }
+    }
+
+    @Test void transientLiveProgressPersistenceFailureDoesNotStopWorkerAndRetries() throws Exception {
+        ServerRuntime.WorkerProcessLauncher launcher=builder->new ProcessBuilder(
+                Path.of(System.getProperty("java.home"),"bin",System.getProperty("os.name","").toLowerCase().contains("win")?"java.exe":"java").toString(),
+                "-cp",System.getProperty("surefire.test.class.path",System.getProperty("java.class.path")),RecoveringTelemetryWorker.class.getName()).start();
+        Path libs=workerLibraries("telemetry-retry-libs");
+        AtomicInteger persistenceAttempts=new AtomicInteger();AtomicReference<ServerRuntime> runtimeRef=new AtomicReference<>();
+        ServerRuntime.LoadProgressPersistence writer=(jobId,json)->{
+            int attempt=persistenceAttempts.incrementAndGet();
+            if(attempt==2)throw new IOException("injected optional telemetry write failure");
+            runtimeRef.get().store.updateLoadProgress(jobId,json);
+        };
+        try(ServerRuntime runtime=runtime("telemetry-retry",launcher,libs,writer)) {
+            runtimeRef.set(runtime);
+            Map<String,Object> accepted=runtime.submit("load",JSON.createObjectNode().put("packageId","p"),"integration");
+            String id=String.valueOf(accepted.get("jobId"));Job submittedJob=runtime.jobs.get(id);
+            assertNotNull(submittedJob,"the Worker supervision path must start the test process");
+            Map<String,Object> stored=null;long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(30);
+            while(System.nanoTime()<deadline) {
+                stored=runtime.store.get(id);
+                if(stored!=null&&"PASS".equals(stored.get("status"))&&!runtime.jobs.containsKey(id))break;
+                Thread.sleep(20L);
+            }
+            assertNotNull(stored,"the Worker did not deliver its terminal result");
+            assertEquals("PASS",stored.get("status"),"an optional telemetry-store failure must not fail LOAD supervision");
+            assertEquals(3,persistenceAttempts.get(),"the Worker sends a later coalesced snapshot after the bounded retry interval");
+
+            boolean degradedPublished=false;
+            for(Map<String,Object> event:submittedJob.events.after(0)) {
+                if(!"progress".equals(event.get("event"))||!(event.get("data") instanceof Map<?,?> data))continue;
+                Object progress=data.get("loadProgress");
+                if(progress instanceof Map<?,?> snapshot&&snapshot.get("telemetryPersistence") instanceof Map<?,?> health
+                        &&"DEGRADED".equals(health.get("state"))) {
+                    assertTrue(String.valueOf(health.get("diagnostic")).contains("retries continue"));
+                    degradedPublished=true;
+                }
+            }
+            assertTrue(degradedPublished,"the in-memory/SSE snapshot should report bounded telemetry degradation");
+            Map<?,?> persistedProgress=(Map<?,?>)runtime.jobRecord(id).get("loadProgress");
+            assertEquals("telemetry-retry",persistedProgress.get("runId"),"The Server retains the sanitized logical run identity");
+            assertEquals(16000L,((Number)persistedProgress.get("elapsedMs")).longValue());
+            assertEquals("HEALTHY",((Map<?,?>)persistedProgress.get("telemetryPersistence")).get("state"),"the successful retry restores durable telemetry health");
         }
     }
 
@@ -539,6 +586,11 @@ class ServerRuntimeLoadTerminalResultTest {
     }
 
     private ServerRuntime runtime(String name,ServerRuntime.WorkerProcessLauncher launcher,Path libs) throws Exception {
+        return runtime(name,launcher,libs,null);
+    }
+
+    private ServerRuntime runtime(String name,ServerRuntime.WorkerProcessLauncher launcher,Path libs,
+                                  ServerRuntime.LoadProgressPersistence progressPersistence) throws Exception {
         Path allowed = Files.createDirectories(temp.resolve(name + "-packages"));
         Path pkg = Files.createDirectories(allowed.resolve("p"));
         Path data = temp.resolve(name + "-data");
@@ -546,7 +598,8 @@ class ServerRuntimeLoadTerminalResultTest {
         Files.writeString(configFile, "server:\n  dataDir: " + ServerRuntimeTestSupport.yaml(data)
                 + "\nworkers: {}\npackages:\n  allowedRoots:\n    - " + ServerRuntimeTestSupport.yaml(allowed)
                 + "\n  entries:\n    p: " + ServerRuntimeTestSupport.yaml(pkg) + "\n");
-        return new ServerRuntime(ServerConfig.load(configFile), libs==null?null:libs.toString(), ServerRuntimeTestSupport.resolvingConfiguration(launcher));
+        return new ServerRuntime(ServerConfig.load(configFile), libs==null?null:libs.toString(), ServerRuntimeTestSupport.resolvingConfiguration(launcher),
+                java.time.Clock.systemUTC(),ArtifactArchive::build,progressPersistence);
     }
 
     private Path workerLibraries(String name) throws Exception {
@@ -584,6 +637,28 @@ class ServerRuntimeLoadTerminalResultTest {
             System.out.println("{\"type\":\"RESULT\",\"status\":\"ERROR\",\"exitCode\":3,\"result\":{\"executionId\":\"load-e2e\",\"status\":\"ERROR\",\"exitCode\":3,\"summary\":{\"schemaVersion\":\"att-load-summary/v1.2\",\"runId\":\"load-e2e\",\"status\":\"ERROR\",\"executionStatus\":\"ERROR\",\"metrics\":{\"scheduled\":1,\"started\":1,\"completed\":0,\"runtimeError\":1}}}}");
             System.out.flush();
             System.exit(3);
+        }
+    }
+
+    public static class RecoveringTelemetryWorker {
+        public static void main(String[] args) throws Exception {
+            try(var reader=new java.io.BufferedReader(new java.io.InputStreamReader(System.in,StandardCharsets.UTF_8))) {reader.readLine();}
+            emitProgress(5000L);
+            emitProgress(10000L);
+            Thread.sleep(5200L);
+            emitProgress(16000L);
+            System.out.println(ServerRuntime.JSON.writeValueAsString(fields("type","RESULT","status","PASS","exitCode",0,
+                    "result",legacyResult("PASS",0,null,false,1))));System.out.flush();
+        }
+
+        private static void emitProgress(long elapsedMs) throws Exception {
+            long completed=elapsedMs/1000L;
+            Map<String,Object> counts=fields("scheduled",completed,"started",completed,"completed",completed,"passed",completed,
+                    "sutFailures",0L,"runtimeErrors",0L,"dropped",0L,"other",0L,"active",0L,"queued",0L);
+            Map<String,Object> progress=fields("schemaVersion","att-load-live-progress/v1","runId","telemetry-retry","capturedAt",java.time.Instant.now().toString(),
+                    "elapsedMs",elapsedMs,"phase","STEADY","counts",counts,"measuredCounts",new LinkedHashMap<>(counts),
+                    "rates",fields("completedTps",10.0,"successfulTps",10.0),"latency",fields("sampleCount",completed,"meanMs",10.0,"p95Ms",15.0,"p99Ms",20.0));
+            System.out.println(ServerRuntime.JSON.writeValueAsString(fields("type","PROGRESS","loadProgress",progress)));System.out.flush();
         }
     }
 

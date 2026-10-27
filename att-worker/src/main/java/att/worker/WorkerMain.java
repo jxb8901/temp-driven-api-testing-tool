@@ -43,8 +43,10 @@ public final class WorkerMain {
     private long inspectionResponseBytes;
     private Map<String,Object> lastInspectionMetrics;
     private Path executionOutput;
+    private BufferedReader controlInput;
     private att.load.LoadConsoleSampler loadSampler;
     private String loadSummaryLine;
+    private volatile boolean shutdownCancellationRequested;
     private WorkerMain(PrintStream protocol) { this.protocol=protocol; }
     public static void main(String[] args) throws Exception {
         // Trusted evidence retains original diagnostics. Protocol secrets are protected
@@ -81,25 +83,24 @@ public final class WorkerMain {
             return;
         }
         int exit=worker.execute();
-        if(exit!=0) System.exit(exit);
+        if(exit!=0&&!worker.shutdownCancellationRequested) System.exit(exit);
     }
     private int execute() throws Exception {
-        JsonParser parser=mapper.getFactory().createParser(new BufferedReader(new InputStreamReader(System.in,StandardCharsets.UTF_8)));
+        controlInput=new BufferedReader(new InputStreamReader(System.in,StandardCharsets.UTF_8));
+        String requestLine;
+        try { requestLine=controlInput.readLine(); }
+        catch(Exception error) { emit(WorkerEvent.Type.STATUS,fields("status","RUNNING")); return fail("WORKER_REQUEST_INVALID","Unable to parse Worker request JSON"); }
         JsonNode input;
         try {
+            JsonParser parser=mapper.getFactory().createParser(requestLine);
             input=mapper.readTree(parser);
+            if(parser.nextToken()!=null) { emit(WorkerEvent.Type.STATUS,fields("status","RUNNING")); return fail("WORKER_REQUEST_INVALID","Only one JSON request is accepted per Worker process"); }
         } catch(Exception error) {
             emit(WorkerEvent.Type.STATUS,fields("status","RUNNING"));
             return fail("WORKER_REQUEST_INVALID","Unable to parse Worker request JSON");
         }
         if(input==null) { emit(WorkerEvent.Type.STATUS,fields("status","RUNNING")); return fail("WORKER_REQUEST_INVALID","A JSON request is required"); }
         if(input!=null&&input.hasNonNull("jobId")) jobId=input.get("jobId").asText();
-        try {
-            if(parser.nextToken()!=null) { emit(WorkerEvent.Type.STATUS,fields("status","RUNNING")); return fail("WORKER_REQUEST_INVALID","Only one JSON request is accepted per Worker process"); }
-        } catch(Exception error) {
-            emit(WorkerEvent.Type.STATUS,fields("status","RUNNING"));
-            return fail("WORKER_REQUEST_INVALID","Unable to parse Worker request JSON");
-        }
         return executeRequest(input);
     }
 
@@ -172,6 +173,12 @@ public final class WorkerMain {
             if(!java.security.MessageDigest.isEqual(request.expectedSchemaRegistryDigest.getBytes(StandardCharsets.US_ASCII),
                     actual.getBytes(StandardCharsets.US_ASCII)))
                 return fail("WORKER_SCHEMA_REGISTRY_MISMATCH","The Worker Schema Registry does not match the Server's validated Local Runtime; install the matching Local archive");
+        }
+        if ("load".equals(request.command)) {
+            Thread executionThread = Thread.currentThread();
+            Thread control = new Thread(() -> listenForLoadCancellation(controlInput, executionThread), "att-worker-load-control");
+            control.setDaemon(true);
+            control.start();
         }
         long processingStarted=System.nanoTime();
         long buildsBefore=InspectionMetrics.JVM.count(INDEX_BUILD),loadsBefore=InspectionMetrics.JVM.count(CONFIG_LOAD),bytesBefore=InspectionMetrics.JVM.count(READ_BYTES);
@@ -288,6 +295,23 @@ public final class WorkerMain {
             emitResult(fields("status",status,"exitCode",exit,"result",failedResult));
             return exit;
         }
+    }
+
+    private void listenForLoadCancellation(BufferedReader input, Thread executionThread) {
+        if(input==null)return;
+        try {
+            String line;
+            while((line=input.readLine())!=null) {
+                try {
+                    JsonNode command=mapper.readTree(line);
+                    if("CANCEL".equals(command.path("type").asText())&&jobId!=null&&jobId.equals(command.path("jobId").asText())) {
+                        shutdownCancellationRequested=true;
+                        executionThread.interrupt();
+                        return;
+                    }
+                } catch(Exception ignored) { /* Ignore malformed optional control lines. */ }
+            }
+        } catch(Exception ignored) { /* Closing stdin ends the optional control channel. */ }
     }
     private OperationResult dispatch(WorkerRequest r) throws Exception {
         if(r.packageRoot==null||r.packageRoot.trim().isEmpty()) throw new IllegalArgumentException("packageRoot is required");

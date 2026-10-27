@@ -150,8 +150,9 @@ public final class ClosedVuScheduler implements LoadScheduler {
                 VuCompletion arrived;
                 try { arrived = timing.await(completions, wait); }
                 catch (InterruptedException interrupted) {
-                    if (cancelled.get()) continue;
-                    throw interrupted;
+                    if (!cancelled.get()) cancel();
+                    Thread.interrupted();
+                    continue;
                 }
                 if (arrived != null) {
                     arrived.user.running = false;
@@ -164,7 +165,8 @@ public final class ClosedVuScheduler implements LoadScheduler {
             }
         } finally { shutdown(); controlThread = null; }
         long endedAt = timing.now(); metrics.finish(endedAt);
-        return new LoadRunResult(runId, scenario, start, LoadSchedulerSupport.instant(endedAt), metrics.snapshot());
+        LoadRunResult result = new LoadRunResult(runId, scenario, start, LoadSchedulerSupport.instant(endedAt), metrics.snapshot());
+        return cancelled.get() ? result.withCancelled() : result;
     }
 
     private boolean submitIteration(final VuState user, final long startedAt, final LoadMetrics metrics,

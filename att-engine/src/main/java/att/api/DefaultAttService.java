@@ -253,7 +253,7 @@ public final class DefaultAttService implements AttService {
             resultPaths.put("report",OperationResult.display(report,request.packageRoot()));
             resultPaths.put("reportManifest",OperationResult.display(runDir.resolve("load-report-manifest.json"),request.packageRoot()));
         }
-        return new LoadResult(id,result.status().name(),result.exitCode(),elapsed(started),Collections.<Diagnostic>emptyList(),
+        return new LoadResult(id,result.cancelled()?"CANCELLED":result.status().name(),result.exitCode(),elapsed(started),Collections.<Diagnostic>emptyList(),
                 resultPaths,result,att.config.ConfigurationEvidence.metadata(cfg),reportAvailability);
     }
     private static Map<String,Object> withConfiguration(Map<String,Object> summary, FrameworkConfig config) {

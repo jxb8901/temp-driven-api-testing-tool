@@ -79,6 +79,51 @@ describe('JobConsoleView', () => {
     expect(host.querySelector('pre.att-console')?.textContent).toContain('early console output');
   });
 
+  it('maps Worker LOAD iteration and coalesced progress payloads into bounded event facts', async () => {
+    const { api, handler } = makeApi();
+    await act(async () => root.render(<JobConsoleView api={api} jobId={job.jobId} job={job} view="events" />));
+    act(() => {
+      handler().onEvent({ id: 'evt-load-42', type: 'progress', data: {
+        runId: 'run-42', workloadId: 'checkout', targetType: 'template', targetId: 'payment', model: 'arrivalRate',
+        phase: 'WARMUP', iterationId: 'iteration-42', sequence: 42, schedulerLagMs: 7, latencyMs: 125, status: 'PASS',
+      } });
+      handler().onEvent({ id: 'evt-load-live', type: 'progress', data: {
+        phase: 'PROGRESS', loadProgress: {
+          schemaVersion: 'att-load-live-progress/v1', runId: 'run-live-43', capturedAt: '2026-10-28T00:00:00Z', elapsedMs: 10000, phase: 'STEADY',
+          counts: { scheduled: 100, started: 90, completed: 80, passed: 75, sutFailures: 2, runtimeErrors: 3, dropped: 1, active: 10, queued: 9 },
+          rates: { completedTps: 20.5, successfulTps: 19.25 },
+          latency: { sampleCount: 80, meanMs: 12.5, p95Ms: 25, p99Ms: 31 },
+        },
+      } });
+    });
+    await flushEvents();
+
+    const rows = [...host.querySelectorAll('.att-job-events > li[aria-posinset]')];
+    expect(rows).toHaveLength(2);
+    const workerFacts = rows[0].querySelector('.att-event-key-facts')!;
+    expect(workerFacts.textContent).toContain('Event ID');
+    expect(workerFacts.textContent).toContain('evt-load-42');
+    expect(workerFacts.textContent).toContain('Event type');
+    expect(workerFacts.textContent).toContain('Run ID');
+    expect(workerFacts.textContent).toContain('run-42');
+    expect(workerFacts.textContent).toContain('Iteration ID');
+    expect(workerFacts.textContent).toContain('iteration-42');
+    expect(workerFacts.textContent).toContain('Latency (ms)');
+    expect(workerFacts.textContent).toContain('Scheduler lag (ms)');
+
+    const progressFacts = rows[1].querySelector('.att-event-key-facts')!;
+    expect(progressFacts.textContent).toContain('Run IDrun-live-43');
+    expect(progressFacts.textContent).toContain('PhaseSTEADY');
+    expect(progressFacts.textContent).toContain('Completed TPS20.5');
+    expect(progressFacts.textContent).toContain('Successful TPS19.25');
+    expect(progressFacts.textContent).toContain('Scheduled100');
+    expect(progressFacts.textContent).toContain('Runtime errors3');
+    expect(progressFacts.textContent).toContain('p95 latency (ms)25');
+    const rawPayload = rows[1].querySelector('.att-event-payload')!;
+    expect(workerFacts.compareDocumentPosition(rows[0].querySelector('.att-event-payload')!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(progressFacts.compareDocumentPosition(rawPayload) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
   it('builds an encoded same-origin full Details URL', () => {
     const value = new URL(consoleRouteUrl(job.jobId, 'events'));
     expect(value.origin).toBe(window.location.origin);

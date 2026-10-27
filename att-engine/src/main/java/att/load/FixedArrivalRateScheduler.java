@@ -136,8 +136,9 @@ public final class FixedArrivalRateScheduler implements LoadScheduler {
                 // the integer arrival count. Make progress to the next clock tick in that case.
                 try { timing.await(schedulerWakeups, Math.max(1L, wait)); }
                 catch (InterruptedException interrupted) {
-                    if (cancelled.get()) break;
-                    throw interrupted;
+                    if (!cancelled.get()) cancel();
+                    Thread.interrupted();
+                    break;
                 }
             }
         } finally {
@@ -145,7 +146,8 @@ public final class FixedArrivalRateScheduler implements LoadScheduler {
             finally { shutdown(); controlThread = null; }
         }
         long endedAt = timing.now(); metrics.finish(endedAt);
-        return new LoadRunResult(runId, scenario, start, LoadSchedulerSupport.instant(endedAt), metrics.snapshot());
+        LoadRunResult result = new LoadRunResult(runId, scenario, start, LoadSchedulerSupport.instant(endedAt), metrics.snapshot());
+        return cancelled.get() ? result.withCancelled() : result;
     }
 
     private void submit(LoadMetrics metrics, String phase, String id, long sequenceValue,

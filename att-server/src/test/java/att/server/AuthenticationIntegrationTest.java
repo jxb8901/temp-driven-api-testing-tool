@@ -450,8 +450,37 @@ class AuthenticationIntegrationTest {
             while(!"CANCELLED".equals(cancelledJob.path("status").asText())&&System.nanoTime()<cancelDeadline) {
                 Thread.sleep(20);cancelledJob=getJson(port,"/att/api/v1/jobs/"+cancellableJobId,basic);
             }
-            assertEquals("CANCELLED",cancelledJob.path("status").asText(),"The running Load job must reach a terminal cancellation state");
+            JsonNode cancellationResult=getJson(port,"/att/api/v1/jobs/"+cancellableJobId+"/result",basic);
+            assertEquals("CANCELLED",cancelledJob.path("status").asText(),"The running Load job must reach a terminal cancellation state: "+cancelledJob+" result="+cancellationResult);
             assertTrue(cancelledJob.path("loadProgress").path("counts").path("completed").asLong()>0,"The last real Worker sample survives cancellation");
+            String resultRoute="/att/api/v1/jobs/"+cancellableJobId+"/result";
+            long resultDeadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(30);JsonNode canonicalResponse;
+            do {
+                canonicalResponse=getJson(port,resultRoute,basic);
+                if("att-load-terminal-result/v1".equals(canonicalResponse.path("result").path("summary").path("schemaVersion").asText()))break;
+                Thread.sleep(50);
+            } while(System.nanoTime()<resultDeadline);
+            JsonNode canonicalResult=canonicalResponse.path("result");
+            JsonNode canonicalSummary=canonicalResult.path("summary");
+            assertEquals("att-load-terminal-result/v1",canonicalSummary.path("schemaVersion").asText(),"Cancellation must publish the canonical compact result");
+            assertEquals("CANCELLED",canonicalSummary.path("execution").path("status").asText());
+            String summaryPath=canonicalSummary.path("archive").path("paths").path("loadSummaryJson").asText();
+            assertTrue(summaryPath.endsWith("/load-summary.json"),"terminal result="+cancellationResult+" summary="+canonicalSummary);
+            String artifactRoute="/att/api/v1/jobs/"+cancellableJobId+"/artifacts";
+            long archiveDeadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(30);JsonNode finalArchive;
+            do {
+                finalArchive=getJson(port,artifactRoute,basic);
+                if("READY".equals(finalArchive.path("archiveStatus").asText())&&finalArchive.toString().contains(summaryPath))break;
+                assertNotEquals("FAILED",finalArchive.path("archiveStatus").asText(),finalArchive.toString());
+                Thread.sleep(100);
+            } while(System.nanoTime()<archiveDeadline);
+            assertEquals("READY",finalArchive.path("archiveStatus").asText(),"The LOAD summary must become available from the terminal archive");
+            assertTrue(finalArchive.toString().contains(summaryPath),finalArchive.toString());
+            JsonNode archivedSummary=getJson(port,artifactRoute+"/view/"+summaryPath,basic);
+            assertEquals("att-load-summary/v1.3",archivedSummary.path("schemaVersion").asText());
+            assertEquals("CANCELLED",archivedSummary.path("status").asText());
+            assertEquals(canonicalSummary.path("metrics").path("completed").asLong(),archivedSummary.path("metrics").path("completed").asLong(),
+                    "The archived final report and canonical result must reconcile completed counts");
             assertLastEventIdResume(port,basic,cancellableJobId,resumeAfter);
             // Exercise the real public API behind the authenticated browser console.
             String jobId=submitJob(port,basic);

@@ -72,6 +72,7 @@ final class ServerRuntime implements AutoCloseable {
     static final int MAX_ARTIFACT_READ_SLOTS=8;
     private static final int MAX_VALIDATION_PACKAGE_ENTRIES=20000, MAX_VALIDATION_ENVIRONMENTS=100, MAX_VNEXT_VALIDATION_PACKAGES=200;
     private static final long MAX_TOTAL_VNEXT_VALIDATION_WORK_UNITS=10000000L;
+    private static final long LOAD_PROGRESS_PERSISTENCE_RETRY_NANOS=TimeUnit.SECONDS.toNanos(5);
     static final long DRAFT_TTL_MILLIS=TimeUnit.MINUTES.toMillis(10);
     static final int MAX_STREAM_OBSERVERS=32;
     private static final int INSPECTION_EXPLORER_PRIORITY_BURST=3;
@@ -81,6 +82,7 @@ final class ServerRuntime implements AutoCloseable {
     }
     final ServerConfig config;
     final JobStore store;
+    private final LoadProgressPersistence loadProgressPersistence;
     final AuthService auth;
     final ThreadPoolExecutor workers,streams,inspectors;
     private final ThreadPoolExecutor eventCompactions=new ThreadPoolExecutor(2,2,0,TimeUnit.MILLISECONDS,new ArrayBlockingQueue<>(1024),r->{Thread t=new Thread(r,"att-server-event-compactor");t.setDaemon(true);return t;},new ThreadPoolExecutor.AbortPolicy());
@@ -153,8 +155,12 @@ final class ServerRuntime implements AutoCloseable {
         this(config,workerLibs,processLauncher,clock,ArtifactArchive::build);
     }
     ServerRuntime(ServerConfig config,String workerLibs,WorkerProcessLauncher processLauncher,Clock clock,ArtifactPublisher artifactPublisher) throws Exception {
+        this(config,workerLibs,processLauncher,clock,artifactPublisher,null);
+    }
+    ServerRuntime(ServerConfig config,String workerLibs,WorkerProcessLauncher processLauncher,Clock clock,ArtifactPublisher artifactPublisher,
+                  LoadProgressPersistence loadProgressPersistence) throws Exception {
         if(Runtime.version().feature()<17)throw new IllegalStateException("ATT Server requires Java 17 or later; detected Java "+Runtime.version().feature());
-        this.config=config;this.artifactPublisher=java.util.Objects.requireNonNull(artifactPublisher);this.workerLibs=workerLibs==null?null:Paths.get(workerLibs).toAbsolutePath().normalize();this.workerSchemaRegistryDigest=WorkerRuntimeClasspath.schemaRegistryDigestIfPresent(this.workerLibs);this.processLauncher=processLauncher;this.clock=java.util.Objects.requireNonNull(clock);this.store=new JobStore(config);try{this.auth=new AuthService(config,store);}catch(Exception failed){store.close();throw failed;}this.loadSlots=new Semaphore(config.maxConcurrentLoad,true);this.admissionSlots=new Semaphore(config.maxConcurrent+config.queuedLimit,true);
+        this.config=config;this.artifactPublisher=java.util.Objects.requireNonNull(artifactPublisher);this.workerLibs=workerLibs==null?null:Paths.get(workerLibs).toAbsolutePath().normalize();this.workerSchemaRegistryDigest=WorkerRuntimeClasspath.schemaRegistryDigestIfPresent(this.workerLibs);this.processLauncher=processLauncher;this.clock=java.util.Objects.requireNonNull(clock);this.store=new JobStore(config);this.loadProgressPersistence=loadProgressPersistence==null?this.store::updateLoadProgress:loadProgressPersistence;try{this.auth=new AuthService(config,store);}catch(Exception failed){store.close();throw failed;}this.loadSlots=new Semaphore(config.maxConcurrentLoad,true);this.admissionSlots=new Semaphore(config.maxConcurrent+config.queuedLimit,true);
         manifestPublisher=new PackageManifestPublisher(config.dataDir,config.packageConfiguration,clock,
                 this::manifestEditableRoot,this::validateManifestCandidate,
                 (actor,action,packageId,detail)->store.audit(actor,action,null,packageId,detail));
@@ -782,6 +788,7 @@ final class ServerRuntime implements AutoCloseable {
             // Inspector work must not hold the cancellation/process-publication lock.
             String warmRevision=prewarmRevision(job);
             Process process;
+            OutputStream workerInput;
             synchronized(job) {
                 // Publish the process while holding the same lock used by cancel(). A
                 // cancellation that wins before launch prevents the Worker from starting;
@@ -801,12 +808,15 @@ final class ServerRuntime implements AutoCloseable {
                 job.workerSpawnStartedNanos=System.nanoTime();
                 process=warm==null?startWorkerProcess(coldBuilder):warm.process;
                 job.workerSpawnedNanos=System.nanoTime();job.process=process;job.processFence=warm==null?new WorkerProcessFence(process):warm.fence;
+                workerInput=process.getOutputStream();
                 if(warm!=null){job.workerDispatch="warm";job.prewarmBootstrapMs=(warm.readyNanos-warm.startedNanos)/1_000_000.0;}
                 job.workerPid=process.pid();job.workerStartTime=process.info().startInstant().orElse(Instant.now());job.startedAt=Instant.now();transition(job,"RUNNING");rememberWorkerProcesses(job,job.processFence);
                 if(warm!=null)warm.transferred();
             }
             startStderrDrainer(process,"att-server-worker-stderr");
-            try(var out=process.getOutputStream()){out.write(workerRequestBytes(job.request,warm!=null));out.write('\n');out.flush();}
+            workerInput.write(workerRequestBytes(job.request,warm!=null));workerInput.write('\n');workerInput.flush();
+            if(!"load".equals(job.command))workerInput.close();
+            else synchronized(job) {job.workerControlStream=workerInput;}
             try(var reader=new java.io.BufferedInputStream(process.getInputStream())) {
                 att.server.api.internal.WorkerProtocol.Frame frame;
                 while((frame=att.server.api.internal.WorkerProtocol.read(reader,att.server.api.internal.WorkerProtocol.MAX_FRAME_BYTES))!=null) {
@@ -815,12 +825,17 @@ final class ServerRuntime implements AutoCloseable {
                 }
             }
             int exit=process.waitFor();job.workerTerminatedNanos=System.nanoTime();job.exitCode=exit;
-            if(!job.resultReceived&&!job.terminal()){recordWorkerExit(job,exit);finish(job,"ERROR",exit==0?3:exit);}
+            if(!job.resultReceived&&!job.terminal()) {
+                if(job.cancelRequested&&"load".equals(job.command))finish(job,"CANCELLED",143);
+                else {recordWorkerExit(job,exit);finish(job,"ERROR",exit==0?3:exit);}
+            }
             else if(!job.terminal()) {String state=exit==0?"PASS":"FAIL";finish(job,state,exit);}
         } catch(InterruptedException e){Thread.currentThread().interrupt();stopWorkerTree(job);if(!job.terminal())finishQuietly(job,"CANCELLED",143,"ATT-SERVER-CANCELLED","Worker was cancelled");}
           catch(Exception e){stopWorkerTree(job);if(!job.terminal())finishQuietly(job,"ERROR",3,"ATT-SERVER-WORKER-FAILED",safeMessage(e));}
         finally {
             stopWorkerTree(job);
+            OutputStream workerInput=job.workerControlStream;job.workerControlStream=null;
+            if(workerInput!=null)try{workerInput.close();}catch(Exception ignored){}
             if(warm!=null&&job.processFence!=null&&job.processFence.stopped())try{warm.transferred();}catch(Exception ignored) { }
             boolean stopped=job.processFence==null ? job.process==null||!job.process.isAlive() : job.processFence.stopped();
             if(stopped&&job.process!=null){if(job.workerTerminatedNanos==0)job.workerTerminatedNanos=System.nanoTime();job.process=null;if(!closing)try{store.update(job);}catch(Exception ignored){}}
@@ -926,7 +941,8 @@ final class ServerRuntime implements AutoCloseable {
         switch(type){case "STATUS"->{String status=event.path("status").asText("");if("RUNNING".equals(status)&&"PREPARING".equals(job.status))transition(job,"RUNNING");}
             case "PROGRESS"->{Object progress=safe.get("loadProgress");if("load".equals(job.command)&&progress instanceof Map) {
                     Map<String,Object> sanitized=sanitizeLoadProgress((Map<?,?>)progress);
-                    if(sanitized==null||!recordLoadProgress(job,sanitized))safe.remove("loadProgress");else safe.put("loadProgress",sanitized);
+                    Map<String,Object> recorded=sanitized==null?null:recordLoadProgress(job,sanitized);
+                    if(recorded==null)safe.remove("loadProgress");else safe.put("loadProgress",recorded);
                 } else safe.remove("loadProgress");append(job,"progress",safe);}
             case "LOG"->append(job,"log",safe);case "DIAGNOSTIC"->{
                 String eventDiagnostic=JSON.writeValueAsString(safe);
@@ -950,6 +966,7 @@ final class ServerRuntime implements AutoCloseable {
                 }
                 String status=event.path("status").asText("ERROR");
                 int code=event.path("exitCode").asInt(3);
+                if(job.cancelRequested&&"load".equals(job.command)){status="CANCELLED";code=143;}
                 Object result=safe.get("result");
                 if("load".equals(job.command)) {
                     Map<String,Object> original=result instanceof Map<?,?>?(Map<String,Object>)result:new LinkedHashMap<>();
@@ -1081,9 +1098,40 @@ final class ServerRuntime implements AutoCloseable {
     String cancel(String id,String principal) throws Exception {
         if("local".equals(config.authMode))requireJobOwner(id,principal);
         Job j=jobs.get(id);if(j==null){Map<String,Object> stored=store.get(id);if(stored==null||!JOB_ID.matcher(id).matches())throw new NotFoundException();return String.valueOf(stored.get("status"));}
+        boolean stopProcess=false;OutputStream controlStream=null;
         synchronized(j){if(j.terminal())return j.status;append(j,"status",Map.of("jobId",id,"status","CANCEL_REQUESTED"));
             Process p=j.process;if(p==null){FutureTask<Void> task=tasks.remove(id);if(task!=null){boolean cancelled=task.cancel(false);workers.remove(task);if(cancelled){AdmissionLease lease=leases.remove(id);if(lease!=null)lease.release();}}finish(j,"CANCELLED",143);jobs.remove(id,j);scheduleArtifactArchive(id);}
-            else {stopWorkerTree(j);finish(j,"CANCELLED",143);}}
+            else {j.cancelRequested=true;controlStream=j.workerControlStream;stopProcess=true;}}
+        // Never hold the Job monitor while waiting for the Worker to exit. The
+        // protocol reader needs that same monitor to accept the final live LOAD
+        // snapshot and RESULT during graceful cancellation.
+        if(stopProcess) {
+            boolean workerStopped=false;
+            if("load".equals(j.command)) {
+                long readyDeadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(5);
+                while(controlStream==null&&System.nanoTime()<readyDeadline) {
+                    if(j.process==null||!j.process.isAlive())break;
+                    Thread.sleep(5L);controlStream=j.workerControlStream;
+                }
+            }
+            if("load".equals(j.command)&&controlStream!=null) {
+                try {controlStream.write(JSON.writeValueAsBytes(Map.of("type","CANCEL","jobId",id)));controlStream.write('\n');controlStream.flush();}
+                catch(Exception unavailable) { /* Fall back to process termination below. */ }
+                try {
+                    WorkerProcessFence fence=j.processFence;
+                    if(fence!=null)workerStopped=fence.awaitStopped(config.gracefulStopMs);
+                    else {Process process=j.process;workerStopped=process==null||process.waitFor(config.gracefulStopMs,TimeUnit.MILLISECONDS);}
+                } catch(InterruptedException interrupted) {Thread.currentThread().interrupt();}
+            }
+            if(!workerStopped)stopWorkerTree(j);
+            // Let the protocol reader consume any RESULT frame already written
+            // before the Worker exited. It owns terminal persistence for an
+            // active process; this fallback is only for a Worker that closed
+            // without a result.
+            long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(2);
+            while(!j.terminal()&&System.nanoTime()<deadline)Thread.sleep(5L);
+            synchronized(j){if(!j.terminal())finish(j,"CANCELLED",143);}
+        }
         store.audit(principal,"CANCEL",id,j.packageId,"CANCELLED");return j.status;
     }
     Map<String,Object> pinJob(String id,boolean pinned,String actor) throws Exception {return pinJob(id,pinned,null,actor);}
@@ -1234,6 +1282,7 @@ final class ServerRuntime implements AutoCloseable {
         if(!"att-load-live-progress/v1".equals(raw.get("schemaVersion")))return null;
         long elapsed=boundedLong(raw.get("elapsedMs"),0L,Long.MAX_VALUE);if(elapsed<0)return null;
         Map<String,Object> snapshot=new LinkedHashMap<>();snapshot.put("schemaVersion","att-load-live-progress/v1");
+        String runId=safeProgressName(raw.get("runId"));if(!runId.isBlank())snapshot.put("runId",runId);
         String captured=raw.get("capturedAt") instanceof String?(String)raw.get("capturedAt"):null;
         if(captured==null||captured.length()>40||!validTimestamp(captured))return null;
         snapshot.put("capturedAt",captured);snapshot.put("elapsedMs",elapsed);
@@ -1339,13 +1388,13 @@ final class ServerRuntime implements AutoCloseable {
     private static double boundedDouble(Object value) {if(!(value instanceof Number))return Double.NaN;try{return new java.math.BigDecimal(String.valueOf(value)).doubleValue();}catch(NumberFormatException invalid){return Double.NaN;}}
     private static boolean validTimestamp(String value){try{Instant.parse(value);return true;}catch(Exception invalid){return false;}}
 
-    private boolean recordLoadProgress(Job job,Map<String,Object> progress) throws Exception {
+    private Map<String,Object> recordLoadProgress(Job job,Map<String,Object> progress) {
         synchronized(job) {
             if(job.loadProgress!=null) {
                 long previous=((Number)job.loadProgress.get("elapsedMs")).longValue();
-                long next=((Number)progress.get("elapsedMs")).longValue();if(next<previous)return false;
+                long next=((Number)progress.get("elapsedMs")).longValue();if(next<previous)return null;
                 if(!monotonicProgressCounts(job.loadProgress.get("counts"),progress.get("counts")) ||
-                        !monotonicProgressCounts(job.loadProgress.get("measuredCounts"),progress.get("measuredCounts")))return false;
+                        !monotonicProgressCounts(job.loadProgress.get("measuredCounts"),progress.get("measuredCounts")))return null;
             }
             Map<String,Object> saved=new LinkedHashMap<>(progress);
             Object incomingCheckpoint=saved.get("checkpointInterval");
@@ -1376,8 +1425,38 @@ final class ServerRuntime implements AutoCloseable {
             }
             if(bucket==0)job.loadProgressTrend.putIfAbsent(bucket,point);else job.loadProgressTrend.put(bucket,point);
             Map<String,Object> state=new LinkedHashMap<>();state.put("latest",saved);state.put("recent",new ArrayList<>(job.loadProgressHistory));state.put("trend",new ArrayList<>(job.loadProgressTrend.values()));state.put("checkpoints",new ArrayList<>(job.loadCheckpointHistory));
-            job.loadProgressJson=JSON.writeValueAsString(state);store.updateLoadProgress(job.id,job.loadProgressJson);return true;
+            long now=System.nanoTime();
+            boolean retryDue=!job.loadProgressPersistenceDegraded||job.lastLoadProgressPersistenceAttemptNanos==0L
+                    ||now-job.lastLoadProgressPersistenceAttemptNanos>=LOAD_PROGRESS_PERSISTENCE_RETRY_NANOS;
+            if(retryDue) {
+                job.lastLoadProgressPersistenceAttemptNanos=now;
+                saved.put("telemetryPersistence",Map.of("state","HEALTHY"));
+                try {
+                    String candidate=JSON.writeValueAsString(state);
+                    loadProgressPersistence.update(job.id,candidate);
+                    job.loadProgressPersistenceDegraded=false;
+                    job.loadProgressJson=candidate;
+                } catch(Exception unavailable) {
+                    job.loadProgressPersistenceDegraded=true;
+                    saved.put("telemetryPersistence",loadProgressPersistenceHealth(job.lastLoadProgressPersistenceAttemptNanos,now));
+                    job.loadProgressJson=serializeLoadProgressState(state);
+                }
+            } else {
+                saved.put("telemetryPersistence",loadProgressPersistenceHealth(job.lastLoadProgressPersistenceAttemptNanos,now));
+                job.loadProgressJson=serializeLoadProgressState(state);
+            }
+            return new LinkedHashMap<>(saved);
         }
+    }
+
+    private static Map<String,Object> loadProgressPersistenceHealth(long lastAttemptNanos,long nowNanos) {
+        long retryAfterMs=Math.max(0L,TimeUnit.NANOSECONDS.toMillis(LOAD_PROGRESS_PERSISTENCE_RETRY_NANOS-Math.max(0L,nowNanos-lastAttemptNanos)));
+        return Map.of("state","DEGRADED","diagnostic","Optional live LOAD telemetry persistence is degraded; the latest in-memory snapshot remains available and retries continue.","retryAfterMs",retryAfterMs);
+    }
+
+    private static String serializeLoadProgressState(Map<String,Object> state) {
+        try {return JSON.writeValueAsString(state);}
+        catch(Exception unavailable) {return null;}
     }
 
     private static boolean monotonicProgressCounts(Object before,Object after) {
@@ -4492,6 +4571,7 @@ final class ServerRuntime implements AutoCloseable {
     private static void forceTree(Process process){process.toHandle().descendants().forEach(ProcessHandle::destroyForcibly);process.destroyForcibly();}
     @FunctionalInterface interface WorkerProcessLauncher { Process start(ProcessBuilder builder) throws java.io.IOException; }
     @FunctionalInterface interface ArtifactPublisher { Path publish(Path output,Path archive,ArtifactArchive.EntryValidator validator) throws Exception; }
+    @FunctionalInterface interface LoadProgressPersistence { void update(String jobId,String progressJson) throws Exception; }
     private static final class AdmissionLease {
         private final Semaphore admission,load;private final java.util.concurrent.atomic.AtomicBoolean released=new java.util.concurrent.atomic.AtomicBoolean();
         AdmissionLease(Semaphore admission,Semaphore load){this.admission=admission;this.load=load;}
