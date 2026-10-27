@@ -424,7 +424,8 @@ class ArtifactPublicationFaultTest {
                     });
                     expiry.get(5,TimeUnit.SECONDS);
                     assertNotNull(runtime.store.get(job.id), "An active archive reader must fence expiry");
-                    assertTrue(new String(runtime.archiveEntry(job.id, "case.log"), java.nio.charset.StandardCharsets.UTF_8).contains("business=unchanged"));
+                    assertThrows(ServerRuntime.NotFoundException.class, () -> runtime.archiveEntry(job.id, "case.log"),
+                            "unapproved producer output must not become an archive entry");
                     assertArrayEquals(archive, Files.readAllBytes(runtime.artifactArchivePath(job.id)));
                 }
                 long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
