@@ -535,7 +535,7 @@ describe('JobsPage React feature', () => {
         schemaVersion: 'att-load-terminal-result/v1',
         execution: { executionId: 'run-compact', status: 'ERROR', exitCode: 17, durationMs: 12000 },
         performance: { executionStatus: 'ERROR', verdict: 'NOT_EVALUATED' },
-        metrics: { scheduled: 100, started: 98, completed: 90, success: 80, runtimeError: 7, failure: 3, completedThroughput: 7.5 },
+        metrics: { scheduled: 10000, started: 98, completed: 90, success: 80, runtimeError: 7, failure: 3, completedThroughput: 0.9988014382740711 },
         thresholds: { verdict: 'PASS', total: 2 },
         diagnostics: {
           primaryError: { code: 'MQ_POOL_TIMEOUT', summary: 'Connection pool wait timed out.', outcome: 'EXECUTION_ERROR' },
@@ -566,6 +566,9 @@ describe('JobsPage React feature', () => {
     expect(cause !== null && notices !== null
       && Boolean(cause.compareDocumentPosition(notices) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
     expect(overview.textContent).toContain('90 / 80');
+    expect(overview.textContent).toContain('10,000 / 98');
+    expect(overview.textContent).toContain('0.999 / Not available TPS');
+    expect(overview.querySelector('[aria-label="Compact LOAD result"]')?.textContent).not.toContain('0.9988014382740711');
     expect(getArchive).not.toHaveBeenCalled();
     const raw = host.querySelector('#job-panel-results details[open]');
     expect(raw).toBeNull();

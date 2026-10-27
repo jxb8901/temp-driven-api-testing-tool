@@ -520,16 +520,17 @@ function CompactLoadSummary({ payload, archiveState, archiveMessage }: { payload
     FAILED: 'FAILED — the inline result remains available.', EXPIRED: 'EXPIRED — the archive is no longer available.', OMITTED: 'OMITTED — the report was not included in the archive.',
     ERROR: 'Archive status could not be checked.', UNAVAILABLE: 'Open Artifacts to check the report archive.',
   };
+  const metric = (value: unknown) => typeof value === 'number' && Number.isFinite(value) ? METRIC_NUMBER_FORMATTER.format(value) : 'Not available';
   return <section className="att-load-terminal-summary" aria-label="Compact LOAD result">
     <h3>LOAD result summary</h3>
     <dl>
       <div><dt>Execution outcome</dt><dd>{String(execution.status || performance.executionStatus || 'Not reported')}</dd></div>
       <div><dt>Performance verdict</dt><dd>{String(performance.verdict || 'NOT_EVALUATED')}</dd></div>
-      <div><dt>Scheduled / started</dt><dd>{displayValue(metrics.scheduled ?? 0)} / {displayValue(metrics.started ?? 0)}</dd></div>
-      <div><dt>Completed / successful</dt><dd>{displayValue(metrics.completed ?? 0)} / {displayValue(metrics.success ?? 0)}</dd></div>
-      <div><dt>Runtime ERROR / SUT FAIL</dt><dd>{displayValue(metrics.runtimeError ?? 0)} / {displayValue(metrics.failure ?? 0)}</dd></div>
-      <div><dt>Completed / successful TPS</dt><dd>{displayValue(metrics.completedThroughput ?? 0)} / {displayValue(metrics.successfulThroughput ?? 0)}</dd></div>
-      <div><dt>Threshold verdict</dt><dd>{String(thresholds.verdict || 'NOT_EVALUATED')} ({displayValue(thresholds.total ?? 0)} checks)</dd></div>
+      <div><dt>Scheduled / started</dt><dd>{metric(metrics.scheduled)} / {metric(metrics.started)}</dd></div>
+      <div><dt>Completed / successful</dt><dd>{metric(metrics.completed)} / {metric(metrics.success)}</dd></div>
+      <div><dt>Runtime ERROR / SUT FAIL</dt><dd>{metric(metrics.runtimeError)} / {metric(metrics.failure)}</dd></div>
+      <div><dt>Completed / successful TPS</dt><dd>{metric(metrics.completedThroughput)} / {metric(metrics.successfulThroughput)} TPS</dd></div>
+      <div><dt>Threshold verdict</dt><dd>{String(thresholds.verdict || 'NOT_EVALUATED')}{typeof thresholds.total === 'number' && Number.isFinite(thresholds.total) ? ` (${metric(thresholds.total)} checks)` : ''}</dd></div>
       <div><dt>Detailed report</dt><dd>{availabilityText[reportedState] || reportedState}</dd></div>
     </dl>
     {root && <section aria-label="LOAD root-cause diagnosis" role="alert">
@@ -1026,7 +1027,7 @@ function JobDetail({ api, jobId, onShowList, confirmCancel, onOpenJob, onSchedul
       <h2>Results</h2>
       <LiveLoadSummary job={displayedJob} active={activeLoad} progress={liveProgress} history={job?.loadProgressHistory || []} trend={job?.loadProgressTrend || []} streamHistory={eventStream.liveProgressHistory} checkpointHistory={eventStream.checkpointHistory} connection={eventStream.connection} now={clockNow} terminalResultAvailable={payloadTerminal && Boolean(result?.result)} />
       {Boolean(resultMetrics(result)) && <section aria-label="Failure diagnosis"><h3>Failure diagnosis</h3>
-        <p>Runtime errors (all phases): {displayValue(resultMetrics(result)?.runtimeError ?? 0)}; measured runtime errors: {displayValue(resultMetrics(result)?.measuredRuntimeError ?? 0)}.</p>
+        <p>Runtime errors (all phases): {typeof resultMetrics(result)?.runtimeError === 'number' ? METRIC_NUMBER_FORMATTER.format(resultMetrics(result)!.runtimeError as number) : 'Not available'}; measured runtime errors: {typeof resultMetrics(result)?.measuredRuntimeError === 'number' ? METRIC_NUMBER_FORMATTER.format(resultMetrics(result)!.measuredRuntimeError as number) : 'Not available'}.</p>
         <p>Thresholds and execution outcome are independent. Completed TPS includes unsuccessful completions; successfulThroughput counts PASS only.</p>
         {primaryLoadError(result) && <p role="alert">{String(primaryLoadError(result)?.code || 'LOAD runtime error')}: {String(primaryLoadError(result)?.summary || 'The LOAD ended with ERROR.')}</p>}
         {Array.isArray(resultMetrics(result)?.failureDiagnostics) && <pre>{displayValue(resultMetrics(result)?.failureDiagnostics)}</pre>}
