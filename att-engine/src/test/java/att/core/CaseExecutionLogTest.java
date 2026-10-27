@@ -19,6 +19,28 @@ class CaseExecutionLogTest {
     @org.junit.jupiter.api.BeforeEach void enableLegacyPathPresentation() { PathPresentation.configure(true, true); }
     @org.junit.jupiter.api.AfterEach void restoreDefaultPathPresentation() { PathPresentation.configure(false, false); }
 
+    @Test void workerModeRedactsHostPathsAtWriteWhilePreservingAuthoredExpressions() throws Exception {
+        Path root=Files.createDirectories(tempDir.resolve("sensitive-producer-package"));
+        Path logFile=tempDir.resolve("worker-safe.log");
+        String prior=System.getProperty("att.worker.safeOutput");
+        try {
+            System.setProperty("att.worker.safeOutput","true");
+            try(CaseExecutionLog log=new CaseExecutionLog(logFile)) {
+                log.setProjectRoot(root);
+                log.appendRaw("DEBUG ERROR", "Invalid Action expression: &{./Pacs008.xml}\nDebug input: "
+                        + root.resolve("templates/flows/diagnostic/debug.yaml") + "\n");
+            }
+        } finally {
+            if(prior==null)System.clearProperty("att.worker.safeOutput");
+            else System.setProperty("att.worker.safeOutput",prior);
+        }
+        String text=Files.readString(logFile);
+        assertTrue(text.contains("&{./Pacs008.xml}"),text);
+        assertTrue(text.contains("debug.yaml"),text);
+        assertFalse(text.contains(root.toString()),text);
+        assertEquals(text,att.server.api.internal.DiagnosticSanitizer.redactAbsolutePaths(text));
+    }
+
     @Test void trustedWorkerEvidencePreservesAuthoredTokensAndAlwaysProtectsSecrets() throws Exception {
         att.core.PathPresentation.configure(false,false);
         Path root=Files.createDirectories(tempDir.resolve("trusted-package"));
