@@ -193,7 +193,10 @@ public final class LoadConsoleSampler {
         }
         snapshot.put("measuredCounts",measured);
         Map<String,Object> phases=new TreeMap<>();livePhases.forEach((key,value)->phases.put(key,value.toMap()));snapshot.put("phases",phases);
-        Map<String,Object> workloads=new TreeMap<>();liveWorkloads.forEach((key,value)->workloads.put(key,value.toMap()));
+        Map<String,Object> workloads=new TreeMap<>();liveWorkloads.forEach((key,value)->{
+            Map<String,Object> workload=value.toMap();workload.put("latency",value.latencyMap());
+            workloads.put(key,workload);
+        });
         snapshot.put("workloads",workloads);snapshot.put("workloadsTruncated",liveWorkloadsTruncated.get());
         return snapshot;
     }

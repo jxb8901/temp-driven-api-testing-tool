@@ -39,6 +39,8 @@ class LoadConsoleSamplerTest {
         assertEquals(1L,counts.get("dropped"));assertEquals(0L,counts.get("queued"));
         @SuppressWarnings("unchecked") Map<String,Object> latency=(Map<String,Object>)snapshot.get("latency");
         assertEquals(1L,latency.get("sampleCount"));assertEquals(50.0,latency.get("meanMs"));
+        Map<?,?> workload=(Map<?,?>)((Map<?,?>)snapshot.get("workloads")).get("checkout");
+        assertEquals(50.0,((Map<?,?>)workload.get("latency")).get("meanMs"));
         assertFalse(snapshot.toString().contains("private-iteration"));
         assertEquals("DROPPED",((Map<?,?>)snapshot.get("latestFailure")).get("status"));
         assertTrue(snapshot.containsKey("measuredCounts"));assertTrue(snapshot.containsKey("phases"));

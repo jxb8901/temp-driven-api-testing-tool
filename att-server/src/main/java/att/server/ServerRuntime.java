@@ -1264,7 +1264,13 @@ final class ServerRuntime implements AutoCloseable {
         Map<String,Object> workloads=new TreeMap<>();Object rawWorkloads=raw.get("workloads");
         if(rawWorkloads instanceof Map<?,?>)for(Map.Entry<?,?> entry:((Map<?,?>)rawWorkloads).entrySet()) {
             if(workloads.size()>=32)break;String name=safeProgressName(entry.getKey());if(name.isBlank())continue;
-            Map<String,Object> value=progressCounts(entry.getValue());if(value!=null)workloads.put(name,value);
+            Map<String,Object> value=progressCounts(entry.getValue());if(value!=null) {
+                if(entry.getValue() instanceof Map<?,?>) {
+                    Map<String,Object> workloadLatency=progressLatency(((Map<?,?>)entry.getValue()).get("latency"));
+                    if(workloadLatency!=null)value.put("latency",workloadLatency);
+                }
+                workloads.put(name,value);
+            }
         }
         snapshot.put("workloads",workloads);snapshot.put("workloadsTruncated",Boolean.TRUE.equals(raw.get("workloadsTruncated"))||workloads.size()<sizeOf(raw.get("workloads")));
         snapshot.put("serverReceivedAt",Instant.now().toString());
@@ -1338,6 +1344,8 @@ final class ServerRuntime implements AutoCloseable {
             if(job.loadProgress!=null) {
                 long previous=((Number)job.loadProgress.get("elapsedMs")).longValue();
                 long next=((Number)progress.get("elapsedMs")).longValue();if(next<previous)return false;
+                if(!monotonicProgressCounts(job.loadProgress.get("counts"),progress.get("counts")) ||
+                        !monotonicProgressCounts(job.loadProgress.get("measuredCounts"),progress.get("measuredCounts")))return false;
             }
             Map<String,Object> saved=new LinkedHashMap<>(progress);
             Object incomingCheckpoint=saved.get("checkpointInterval");
@@ -1366,6 +1374,16 @@ final class ServerRuntime implements AutoCloseable {
             Map<String,Object> state=new LinkedHashMap<>();state.put("latest",saved);state.put("recent",new ArrayList<>(job.loadProgressHistory));state.put("trend",new ArrayList<>(job.loadProgressTrend.values()));state.put("checkpoints",new ArrayList<>(job.loadCheckpointHistory));
             job.loadProgressJson=JSON.writeValueAsString(state);store.updateLoadProgress(job.id,job.loadProgressJson);return true;
         }
+    }
+
+    private static boolean monotonicProgressCounts(Object before,Object after) {
+        if(!(before instanceof Map<?,?>)||!(after instanceof Map<?,?>))return false;
+        Map<?,?> old=(Map<?,?>)before,current=(Map<?,?>)after;
+        for(String key:List.of("scheduled","started","completed","passed","sutFailures","runtimeErrors","dropped","other")) {
+            Object left=old.get(key),right=current.get(key);
+            if(left instanceof Number && (!(right instanceof Number)||((Number)right).longValue()<((Number)left).longValue()))return false;
+        }
+        return true;
     }
 
     private static Map<String,Object> progressHistoryPoint(Map<String,Object> snapshot) {

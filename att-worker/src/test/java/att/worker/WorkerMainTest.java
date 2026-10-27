@@ -35,6 +35,15 @@ class WorkerMainTest {
     @TempDir Path temp;
     private final ObjectMapper mapper=new ObjectMapper();
 
+    @Test void missingCheckpointIsMarkedDegradedAfterExpectedInterval() throws Exception {
+        try(WorkerMain.CheckpointProjection projection=new WorkerMain.CheckpointProjection(temp,"missing")) {
+            Map<String,Object> progress=new java.util.LinkedHashMap<String,Object>();progress.put("elapsedMs",331_000L);
+            long deadline=System.nanoTime()+java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
+            while(!progress.containsKey("checkpointInterval") && System.nanoTime()<deadline) { projection.addTo(progress); if(!progress.containsKey("checkpointInterval"))Thread.sleep(10L); }
+            assertEquals("DEGRADED",((Map<?,?>)progress.get("checkpointInterval")).get("state"));
+        }
+    }
+
     @Test void repeatedWorkerJvmsShareOneTrustedSchemaCacheAndRepairPartialExtraction() throws Exception {
         Path temporary=temp.resolve("trusted-schema-temp");
         Files.createDirectories(temporary);

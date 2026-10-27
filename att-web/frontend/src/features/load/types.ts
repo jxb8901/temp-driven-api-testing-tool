@@ -157,6 +157,7 @@ export interface LoadLiveProgressCounts {
   scheduled?: number; started?: number; completed?: number; passed?: number; sutFailures?: number;
   runtimeErrors?: number; dropped?: number; other?: number; active?: number; queued?: number;
   schedulerLagMeanMs?: number | null;
+  latency?: { sampleCount?: number; meanMs?: number | null; p95Ms?: number | null; p99Ms?: number | null; percentileMethod?: string };
 }
 export interface LoadLiveProgressPoint {
   capturedAt: string; serverReceivedAt?: string; elapsedMs: number; phase: string;

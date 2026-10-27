@@ -43,7 +43,7 @@ public final class LoadCheckpointIntervals {
                     candidates = files.filter(path -> path.getFileName().toString().matches("checkpoint-[0-9]{20}\\.json"))
                             .limit(2L).count();
                 }
-                if (candidates > checkpoints.size() || (checkpoints.size() == 1 &&
+                if (candidates == 0L || candidates > checkpoints.size() || (checkpoints.size() == 1 &&
                         ((Number) checkpoints.get(0).get("sequence")).longValue() > 1L))
                     result.put("state", "DEGRADED");
                 return result;

@@ -948,7 +948,13 @@ public final class WorkerMain {
             reader.scheduleWithFixedDelay(() -> latest=att.load.LoadCheckpointIntervals.read(this.output,this.runId),0L,30L,java.util.concurrent.TimeUnit.SECONDS);
         }
         void observeRunId(String observed) { if((runId==null || runId.trim().isEmpty()) && observed!=null && !"null".equals(observed))runId=observed; }
-        void addTo(Map<String,Object> progress) { Map<String,Object> value=latest; if(value!=null)progress.put("checkpointInterval",value); }
+        void addTo(Map<String,Object> progress) {
+            Map<String,Object> value=latest;
+            if(value!=null && "WAITING".equals(value.get("state")) && progress.get("elapsedMs") instanceof Number &&
+                    ((Number)progress.get("elapsedMs")).longValue()>330_000L)
+                value=fields("schemaVersion","att-load-checkpoint-interval/v1","state","DEGRADED");
+            if(value!=null)progress.put("checkpointInterval",value);
+        }
         @Override public void close() { reader.shutdownNow(); }
     }
     private int fail(String code,String message) throws Exception { emit(WorkerEvent.Type.DIAGNOSTIC,fields("code",code,"message",message,

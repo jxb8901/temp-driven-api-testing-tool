@@ -64,6 +64,7 @@
 .att-live-load-completed, .att-live-load-passed { fill: none; stroke-width: 2.5; vector-effect: non-scaling-stroke; }
 .att-live-load-completed { stroke: var(--att-color-primary, #3157c8); }
 .att-live-load-passed { stroke: #23834f; }
+.att-live-load-target { fill: none; stroke: #8a5a00; stroke-width: 1.5; stroke-dasharray: 4 3; vector-effect: non-scaling-stroke; }
 .att-live-load-chart figcaption { display: flex; flex-wrap: wrap; gap: 1rem; color: var(--att-color-muted, #637087); font-size: .82rem; }
 .att-live-load-chart figcaption span { display: inline-flex; align-items: center; gap: .35rem; }
 .att-live-load-chart figcaption i { display: inline-block; width: .8rem; height: .2rem; background: var(--att-color-primary, #3157c8); }

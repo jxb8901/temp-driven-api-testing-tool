@@ -549,8 +549,9 @@ function CompactLoadSummary({ payload, archiveState, archiveMessage }: { payload
 }
 
 function liveThroughputPoints(input: LoadLiveProgressPoint[]): Array<{ elapsedMs: number; completed: number; passed: number }> {
-  const points = [...new Map(input.filter(point => Number.isFinite(point.elapsedMs)).map(point => [point.elapsedMs, point])).values()]
-    .sort((left, right) => left.elapsedMs - right.elapsedMs).slice(-320);
+  const ordered = [...new Map(input.filter(point => Number.isFinite(point.elapsedMs)).map(point => [point.elapsedMs, point])).values()]
+    .sort((left, right) => left.elapsedMs - right.elapsedMs);
+  const points = ordered.length <= 320 ? ordered : Array.from({ length: 320 }, (_, index) => ordered[Math.floor(index * (ordered.length - 1) / 319)]!);
   const output: Array<{ elapsedMs: number; completed: number; passed: number }> = [];
   for (let index = 1; index < points.length; index += 1) {
     const previous = points[index - 1]!;
@@ -568,9 +569,18 @@ function liveThroughputPoints(input: LoadLiveProgressPoint[]): Array<{ elapsedMs
   return output;
 }
 
-function LiveLoadSummary({ job, active, progress, history, trend, checkpointHistory, connection, now }: {
+function configuredRatePerSecond(value: number | string | undefined): number | null {
+  if (typeof value === 'number') return Number.isFinite(value) && value > 0 ? value : null;
+  if (typeof value !== 'string') return null;
+  const match = /^([0-9]+(?:\.[0-9]+)?)\/(s|m)$/.exec(value.trim());
+  if (!match) return null;
+  const result = Number(match[1]) / (match[2] === 'm' ? 60 : 1);
+  return Number.isFinite(result) && result > 0 ? result : null;
+}
+
+function LiveLoadSummary({ job, active, progress, history, trend, streamHistory, checkpointHistory, connection, now }: {
   job: JobView | null; active: boolean; progress: LoadLiveProgressSnapshot | null;
-  history: LoadLiveProgressPoint[]; trend: LoadLiveProgressPoint[]; checkpointHistory?: readonly import('./types').LoadCheckpointInterval[]; connection: JobStreamConnection; now: number;
+  history: LoadLiveProgressPoint[]; trend: LoadLiveProgressPoint[]; streamHistory?: readonly LoadLiveProgressPoint[]; checkpointHistory?: readonly import('./types').LoadCheckpointInterval[]; connection: JobStreamConnection; now: number;
 }) {
   if (!active || job?.command !== 'load') return null;
   const plans = job.targetIdentity?.workloads || [];
@@ -578,9 +588,13 @@ function LiveLoadSummary({ job, active, progress, history, trend, checkpointHist
   const freshness = latestAge == null || !Number.isFinite(latestAge) ? 'Waiting for first sample'
     : latestAge > 15_000 ? `Stale · last sample ${METRIC_NUMBER_FORMATTER.format(latestAge / 1000)}s ago`
       : `Fresh · last sample ${METRIC_NUMBER_FORMATTER.format(latestAge / 1000)}s ago`;
-  const chartInput = [...trend, ...history, ...(progress ? [progress] : [])];
+  const chartInput = [...trend, ...history, ...(streamHistory || []), ...(progress ? [progress] : [])];
   const chart = liveThroughputPoints(chartInput);
-  const chartMax = Math.max(1, ...chart.flatMap(point => [point.completed, point.passed]));
+  const configuredRates = plans.map(plan => configuredRatePerSecond(plan.arrivalRate));
+  const configuredTarget = configuredRates.length && configuredRates.every(rate => rate != null)
+    ? configuredRates.reduce<number>((sum, rate) => sum + (rate ?? 0), 0) : null;
+  const chartMax = Math.max(1, configuredTarget ?? 0, ...chart.flatMap(point => [point.completed, point.passed]));
+  const rolling = chart[chart.length - 1];
   const firstElapsed = chart[0]?.elapsedMs ?? 0;
   const chartSpan = Math.max(1, (chart[chart.length - 1]?.elapsedMs ?? firstElapsed) - firstElapsed);
   const chartPath = (field: 'completed' | 'passed') => {
@@ -615,12 +629,21 @@ function LiveLoadSummary({ job, active, progress, history, trend, checkpointHist
         <div><dt>Completed / PASS</dt><dd>{countText(counts?.completed)} / {countText(counts?.passed)}</dd></div>
         <div><dt>SUT FAIL / runtime ERROR</dt><dd>{countText(counts?.sutFailures)} / {countText(counts?.runtimeErrors)}</dd></div>
         <div><dt>Dropped / active / queued</dt><dd>{countText(counts?.dropped)} / {countText(counts?.active)} / {countText(counts?.queued)}</dd></div>
-        <div><dt>Actual completed / successful TPS</dt><dd>{countText(progress.rates?.completedTps)} / {countText(progress.rates?.successfulTps)}</dd></div>
+        <div><dt>Average completed / successful TPS</dt><dd>{countText(progress.rates?.completedTps)} / {countText(progress.rates?.successfulTps)}</dd></div>
+        <div><dt>Recent completed / successful TPS</dt><dd>{countText(rolling?.completed)} / {countText(rolling?.passed)}</dd></div>
+        <div><dt>Configured steady target TPS</dt><dd>{countText(configuredTarget ?? undefined)}</dd></div>
         <div><dt>Latency mean / p95 / p99</dt><dd>{latency?.meanMs == null ? 'Not available' : `${METRIC_NUMBER_FORMATTER.format(latency.meanMs)} / ${latency.p95Ms == null ? '—' : METRIC_NUMBER_FORMATTER.format(latency.p95Ms)} / ${latency.p99Ms == null ? '—' : METRIC_NUMBER_FORMATTER.format(latency.p99Ms)} ms`}</dd></div>
         <div><dt>Measured-window PASS rate</dt><dd>{measuredRate(measured?.passed)}</dd></div>
         <div><dt>Measured-window SUT FAIL / runtime ERROR rate</dt><dd>{measuredRate(measured?.sutFailures)} / {measuredRate(measured?.runtimeErrors)}</dd></div>
       </dl>
       <p>The counters above are all-phase totals. Rates marked measured-window exclude warmup.</p>
+      {progress.phases && Object.keys(progress.phases).length > 0 && <details><summary>Phase totals</summary>
+        <div className="att-table-scroll"><table><caption>Actual counters by phase</caption><thead><tr><th>Phase</th><th>Measurement scope</th><th>Completed / PASS</th><th>FAIL / ERROR / drop</th></tr></thead>
+          <tbody>{Object.entries(progress.phases).map(([phase, phaseCounts]) => <tr key={phase}>
+            <th scope="row">{phase.replaceAll('_', ' ')}</th><td>{phase === 'WARMUP' ? 'Unmeasured' : ['RAMP_UP', 'STEADY', 'RAMP_DOWN'].includes(phase) ? 'Measured' : 'Unknown'}</td>
+            <td>{countText(phaseCounts.completed)} / {countText(phaseCounts.passed)}</td>
+            <td>{countText(phaseCounts.sutFailures)} / {countText(phaseCounts.runtimeErrors)} / {countText(phaseCounts.dropped)}</td>
+          </tr>)}</tbody></table></div></details>}
       {totalPlannedMs > 0 && progress.phase !== 'PREPARING' && <p>Scheduler plan: {METRIC_NUMBER_FORMATTER.format(Math.min(100, progress.elapsedMs * 100 / totalPlannedMs))}% elapsed
         {progress.elapsedMs >= totalPlannedMs ? ' · Planned scheduler time elapsed; workers may still be draining.' : ` · Approximately ${plannedWorkloadDuration(totalPlannedMs - progress.elapsedMs)} remaining`}.</p>}
       {progress.latestFailure && <p>Latest failure: {progress.latestFailure.status}{progress.latestFailure.code ? ` · ${progress.latestFailure.code}` : ''} · {progress.latestFailure.capturedAt}</p>}
@@ -630,8 +653,9 @@ function LiveLoadSummary({ job, active, progress, history, trend, checkpointHist
           <path d="M 24 100 H 604" className="att-live-load-axis" />
           <path d={chartPath('completed')} className="att-live-load-completed" />
           <path d={chartPath('passed')} className="att-live-load-passed" />
+          {configuredTarget != null && <path d={`M 24 ${(100 - configuredTarget / chartMax * 84).toFixed(1)} H 604`} className="att-live-load-target" />}
         </svg>
-        <figcaption><span><i className="att-live-load-legend-completed" /> Completed TPS</span><span><i className="att-live-load-legend-passed" /> Successful TPS</span><span>{chart.length} sampled intervals</span></figcaption>
+        <figcaption><span><i className="att-live-load-legend-completed" /> Completed TPS</span><span><i className="att-live-load-legend-passed" /> Successful TPS</span>{configuredTarget != null && <span>Configured steady target: {countText(configuredTarget)} TPS (ramps may differ)</span>}<span>{chart.length} sampled intervals</span></figcaption>
       </figure>}
       <section aria-label="Verified checkpoint intervals">
         <h4>Recent checkpoint intervals</h4>
@@ -649,13 +673,17 @@ function LiveLoadSummary({ job, active, progress, history, trend, checkpointHist
             </tr>)}</tbody></table></div>}
       </section>
       {plans.length > 0 && <div className="att-table-scroll"><table className="att-live-workload-table">
-        <caption>Configured workload targets and actual progress</caption><thead><tr><th scope="col">Workload</th><th scope="col">Configured target</th><th scope="col">Planned duration</th><th scope="col">Actual completed / PASS</th></tr></thead>
+        <caption>Configured workload targets and actual progress</caption><thead><tr><th scope="col">Workload</th><th scope="col">Configured target</th><th scope="col">Phase</th><th scope="col">Planned duration</th><th scope="col">Actual completed / PASS</th><th scope="col">Average completed TPS</th><th scope="col">FAIL / ERROR / drop</th><th scope="col">Mean / p95 / p99 latency</th></tr></thead>
         <tbody>{plans.map((plan, index) => {
           const actual = workloadActual[plan.name];
           return <tr key={`${plan.name}-${index}`}><th scope="row">{plan.name || `Workload ${index + 1}`}</th>
             <td>{workloadPacing(plan)}{plan.targets?.length ? <small>{plan.targets.map(target => `${target.type}:${target.id}`).join(', ')}</small> : null}</td>
+            <td>{progress.phase.replaceAll('_', ' ')}</td>
             <td>{plannedWorkloadDuration(plan.totalDurationMs)}</td>
-            <td>{actual ? `${METRIC_NUMBER_FORMATTER.format(actual.completed || 0)} / ${METRIC_NUMBER_FORMATTER.format(actual.passed || 0)}` : 'Not available'}</td>
+            <td>{actual ? `${countText(actual.completed)} / ${countText(actual.passed)}` : 'Not available'}</td>
+            <td>{actual?.completed != null && progress.elapsedMs > 0 ? METRIC_NUMBER_FORMATTER.format(actual.completed * 1000 / progress.elapsedMs) : 'Not available'}</td>
+            <td>{actual ? `${countText(actual.sutFailures)} / ${countText(actual.runtimeErrors)} / ${countText(actual.dropped)}` : 'Not available'}</td>
+            <td>{actual?.latency?.meanMs == null ? 'Not available' : `${countText(actual.latency.meanMs)} / ${countText(actual.latency.p95Ms ?? undefined)} / ${countText(actual.latency.p99Ms ?? undefined)} ms (estimated percentiles)`}</td>
           </tr>;
         })}</tbody>
       </table></div>}
@@ -701,7 +729,7 @@ export const ArtifactsPanel = memo(function ArtifactsPanel({ api, jobId, refresh
 });
 
 export const MetricsPanel = memo(function MetricsPanel({ job, payload = null, metrics, resultState, archiveMetrics, reportAvailability = 'idle', reportError = '', onRetryReport = () => {}, reportDetailsLoaded = false, buckets, charts, hidden, onProfilerCommit,
-  activeLoad = false, liveProgress = null, liveHistory = [], liveTrend = [], checkpointHistory = [], streamConnection = 'connecting', now = Date.now() }: {
+  activeLoad = false, liveProgress = null, liveHistory = [], liveTrend = [], streamHistory = [], checkpointHistory = [], streamConnection = 'connecting', now = Date.now() }: {
   job: JobView | null;
   payload?: JobResultResponse | null;
   metrics: Record<string, unknown> | null;
@@ -719,6 +747,7 @@ export const MetricsPanel = memo(function MetricsPanel({ job, payload = null, me
   liveProgress?: LoadLiveProgressSnapshot | null;
   liveHistory?: LoadLiveProgressPoint[];
   liveTrend?: LoadLiveProgressPoint[];
+  streamHistory?: readonly LoadLiveProgressPoint[];
   checkpointHistory?: readonly import('./types').LoadCheckpointInterval[];
   streamConnection?: JobStreamConnection;
   now?: number;
@@ -729,7 +758,7 @@ export const MetricsPanel = memo(function MetricsPanel({ job, payload = null, me
   return <section className="att-job-panel" role="tabpanel" id="job-panel-metrics" aria-labelledby="job-tab-metrics" hidden={hidden} tabIndex={0}>
     <Profiler id="job-metrics-content" onRender={() => onProfilerCommit?.()}><h2>Metrics</h2>
     <p className="att-help">Only values returned by the job API are shown. Server timings and Worker JVM metrics are separate from Load result metrics.</p>
-    {activeLoad && <LiveLoadSummary job={job} active={activeLoad} progress={liveProgress} history={liveHistory} trend={liveTrend} checkpointHistory={checkpointHistory} connection={streamConnection} now={now} />}
+    {activeLoad && <LiveLoadSummary job={job} active={activeLoad} progress={liveProgress} history={liveHistory} trend={liveTrend} streamHistory={streamHistory} checkpointHistory={checkpointHistory} connection={streamConnection} now={now} />}
     {!activeLoad && terminal && <CompactLoadSummary payload={payload} archiveState={reportAvailability} archiveMessage={reportError} />}
     {coverage && <p className="att-help">LoadMetrics retains at most {displayValue(coverage.loadMetricsBucketCapacity)} one-second buckets; retained coverage is {displayValue(coverage.observedBucketCoverageMs ?? 0)} ms. The window series uses {displayValue(coverage.windowSeriesBinWidthMs)} ms bins across {displayValue(coverage.windowSeriesCapacity)} slots ({displayValue(coverage.windowSeriesCoverage || 'coverage not reported')}).</p>}
     {job && <MetricTable title="Server timings" rows={numericRows(job.performance?.timings)} unit="ms" />}
@@ -926,7 +955,7 @@ function JobDetail({ api, jobId, onShowList, confirmCancel, onOpenJob, onSchedul
     <StructuredEventsPanel api={api} jobId={jobId} job={displayedJob} hidden={activeTab !== 'events'} />
     <section className="att-job-panel" role="tabpanel" id="job-panel-results" aria-labelledby="job-tab-results" hidden={activeTab !== 'results'} tabIndex={0}>
       <h2>Results</h2>
-      <LiveLoadSummary job={job} active={activeLoad} progress={liveProgress} history={job?.loadProgressHistory || []} trend={job?.loadProgressTrend || []} checkpointHistory={eventStream.checkpointHistory} connection={eventStream.connection} now={clockNow} />
+      <LiveLoadSummary job={displayedJob} active={activeLoad} progress={liveProgress} history={job?.loadProgressHistory || []} trend={job?.loadProgressTrend || []} streamHistory={eventStream.liveProgressHistory} checkpointHistory={eventStream.checkpointHistory} connection={eventStream.connection} now={clockNow} />
       {Boolean(resultMetrics(result)) && <section aria-label="Failure diagnosis"><h3>Failure diagnosis</h3>
         <p>Runtime errors (all phases): {displayValue(resultMetrics(result)?.runtimeError ?? 0)}; measured runtime errors: {displayValue(resultMetrics(result)?.measuredRuntimeError ?? 0)}.</p>
         <p>Thresholds and execution outcome are independent. Completed TPS includes unsuccessful completions; successfulThroughput counts PASS only.</p>
@@ -954,10 +983,10 @@ function JobDetail({ api, jobId, onShowList, confirmCancel, onOpenJob, onSchedul
       </>}
     </section>
     <ArtifactsPanel api={api} jobId={jobId} refresh={detailRefresh} onMetrics={setArchiveMetrics} hidden={activeTab !== 'artifacts'} />
-    <MetricsPanel job={job} payload={result} metrics={metrics} resultState={resultState} archiveMetrics={report.archiveMetrics || archiveMetrics}
+    <MetricsPanel job={displayedJob} payload={result} metrics={metrics} resultState={resultState} archiveMetrics={report.archiveMetrics || archiveMetrics}
       reportAvailability={report.availability} reportError={report.error} onRetryReport={report.retry} reportDetailsLoaded={Boolean(report.detailMetrics)}
       buckets={buckets} charts={charts} hidden={activeTab !== 'metrics'} activeLoad={activeLoad} liveProgress={liveProgress}
-      liveHistory={job?.loadProgressHistory || []} liveTrend={job?.loadProgressTrend || []} checkpointHistory={eventStream.checkpointHistory} streamConnection={eventStream.connection} now={clockNow} />
+      liveHistory={job?.loadProgressHistory || []} liveTrend={job?.loadProgressTrend || []} streamHistory={eventStream.liveProgressHistory} checkpointHistory={eventStream.checkpointHistory} streamConnection={eventStream.connection} now={clockNow} />
   </div>;
 }
 

@@ -14,6 +14,7 @@ export type JobConsoleLine = Readonly<{ seq: number; id?: string; receivedAt: st
 
 export interface JobEventStreamSnapshot {
   readonly latestLoadProgress?: LoadLiveProgressSnapshot;
+  readonly liveProgressHistory?: readonly LoadLiveProgressSnapshot[];
   readonly checkpointHistory?: readonly LoadCheckpointInterval[];
   readonly events: readonly JobStreamEvent[];
   readonly consoleLines: readonly JobConsoleLine[];
@@ -104,6 +105,7 @@ class BoundedIdIndex {
 
 interface Entry {
   latestLoadProgress?: LoadLiveProgressSnapshot;
+  liveProgressHistory: LoadLiveProgressSnapshot[];
   checkpointHistory: LoadCheckpointInterval[];
   buffer: EventRing;
   consoleBuffer: ConsoleRing;
@@ -206,6 +208,7 @@ function publish(entry: Entry): void {
   clearCounterFlushTimer(entry);
   entry.snapshot = Object.freeze({
     latestLoadProgress: entry.latestLoadProgress,
+    liveProgressHistory: Object.freeze([...entry.liveProgressHistory]),
     checkpointHistory: Object.freeze([...entry.checkpointHistory]),
     events: entry.buffer.snapshot(),
     consoleLines: entry.consoleBuffer.snapshot(),
@@ -259,7 +262,7 @@ function entryFor(api: LoadJobsApi, jobId: string): Entry {
   if (!entry) {
     entry = {
       buffer: new EventRing(), consoleBuffer: new ConsoleRing(), idIndex: new BoundedIdIndex(),
-      connection: 'connecting', journalTruncated: false, checkpointHistory: [],
+      connection: 'connecting', journalTruncated: false, checkpointHistory: [], liveProgressHistory: [],
       duplicatesIgnored: 0, staleIgnored: 0, gaps: 0,
       statusSnapshot: EMPTY_STATUS_SNAPSHOT,
       listeners: new Set(), nextSequence: 0, consumerCount: 0, dirty: false, pendingCounters: false,
@@ -338,6 +341,11 @@ function ingest(entry: Entry, event: JobEvent): boolean {
     if (candidate && candidate.schemaVersion === 'att-load-live-progress/v1' && Number.isFinite(candidate.elapsedMs)
         && (!entry.latestLoadProgress || candidate.elapsedMs >= entry.latestLoadProgress.elapsedMs)) {
       entry.latestLoadProgress = candidate;
+      const prior = entry.liveProgressHistory[entry.liveProgressHistory.length - 1];
+      if (!prior || candidate.elapsedMs > prior.elapsedMs) {
+        entry.liveProgressHistory.push(candidate);
+        if (entry.liveProgressHistory.length > 60) entry.liveProgressHistory.shift();
+      } else if (candidate.elapsedMs === prior.elapsedMs) entry.liveProgressHistory[entry.liveProgressHistory.length - 1] = candidate;
       const interval = candidate.checkpointInterval;
       if (interval?.state === 'VERIFIED' && typeof interval.endSequence === 'number' &&
           !entry.checkpointHistory.some(item => item.endSequence === interval.endSequence)) {

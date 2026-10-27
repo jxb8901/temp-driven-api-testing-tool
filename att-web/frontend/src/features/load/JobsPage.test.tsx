@@ -458,6 +458,7 @@ describe('JobsPage React feature', () => {
       ...second, elapsedMs: 20_000, schemaVersion: 'att-load-live-progress/v1' as const,
       counts: { scheduled: 20, started: 19, completed: 10, passed: 6, sutFailures: 1, runtimeErrors: 1, dropped: 0, active: 9, queued: 1 },
       measuredCounts: { completed: 8, passed: 6, sutFailures: 1, runtimeErrors: 1 },
+      phases: { WARMUP: { completed: 2, passed: 2 }, STEADY: { completed: 8, passed: 6, sutFailures: 1, runtimeErrors: 1 } },
       rates: { completedTps: 2, successfulTps: 1.6 }, latency: { sampleCount: 10, meanMs: 40, p95Ms: 64, p99Ms: 127 },
       checkpointInterval: { schemaVersion: 'att-load-checkpoint-interval/v1' as const, state: 'VERIFIED' as const, startSequence: 1, endSequence: 2,
         startAt: now, endAt: now, durationMs: 300_000, latencySampleCount: 10, latencyMeanMs: 23.5, counts: { completed: 600, success: 590, failure: 5, runtimeError: 3, dropped: 2 } },
@@ -475,12 +476,16 @@ describe('JobsPage React feature', () => {
     expect(results.textContent).toContain('Execution outcome: IN_PROGRESS');
     expect(results.textContent).toContain('Performance/threshold verdict: NOT_FINAL');
     expect(results.textContent).toContain('75% (6 / 8 measured completions)');
+    expect(results.textContent).toContain('WARMUPUnmeasured2 / 2');
+    expect(results.textContent).toContain('STEADYMeasured8 / 6');
     expect(results.textContent).toContain('Configured target rate 2');
     expect(results.textContent).not.toContain('The Server has not returned a result payload');
     expect(results.textContent).not.toContain('Detailed metrics are waiting for the artifact archive');
     await click(host.querySelector('#job-tab-metrics')!);
     const metrics = host.querySelector('#job-panel-metrics')!;
-    expect(metrics.textContent).toContain('Actual completed / successful TPS2 / 1.6');
+    expect(metrics.textContent).toContain('Average completed / successful TPS2 / 1.6');
+    expect(metrics.textContent).toContain('Configured steady target TPS2');
+    expect(metrics.querySelector('.att-live-load-target')).not.toBeNull();
     expect(metrics.querySelector('svg[aria-label="Live completed and successful throughput trend"]')).not.toBeNull();
     expect(metrics.querySelector('.att-live-load-completed')?.getAttribute('d')).not.toBe(metrics.querySelector('.att-live-load-passed')?.getAttribute('d'));
     expect(metrics.textContent).toContain('Latency percentiles are estimates from a bounded histogram');
