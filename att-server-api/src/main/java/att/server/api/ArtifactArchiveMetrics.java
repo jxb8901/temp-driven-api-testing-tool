@@ -13,7 +13,9 @@ public final class ArtifactArchiveMetrics {
     public String failureReason;
     public Double queueWaitMs;
     public Double publicationWallMs;
-    public Double scanClassificationRedactionMs;
+    /** Legacy metric retained when reading persisted v1 snapshots. New publications use scanValidationPreservationMs. */
+    @Deprecated public Double scanClassificationRedactionMs;
+    public Double scanValidationPreservationMs;
     public Double zipWriteMs;
     public Double verificationFsyncMs;
     public Double cleanupMs;
@@ -30,7 +32,7 @@ public final class ArtifactArchiveMetrics {
     public Double compressionRatio;
     public Long temporaryExportFiles;
     public Long temporaryExportBytes;
-    /** Bytes reread from sanitized spill files; null on metrics written before this counter existed. */
+    /** Bytes reread from validated producer-byte spill files; null on metrics written before this counter existed. */
     public Long temporaryExportReadBytes;
     /** Uncompressed approved payload bytes passed to ZIP entries, including the manifest. */
     public Long zipWriteInputBytes;

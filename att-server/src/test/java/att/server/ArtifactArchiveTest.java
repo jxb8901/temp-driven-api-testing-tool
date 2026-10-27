@@ -24,7 +24,7 @@ class ArtifactArchiveTest {
         assertThrows(IllegalArgumentException.class,
                 () -> ServerRuntime.approvedArtifactBytes(output.resolve("raw-secret.log")));
         Path archive=temporary.resolve("mixed-approval.zip");
-        ArtifactArchive.build(output,archive,ServerRuntime::approvedArtifactBytes);
+        ArtifactArchive.build(output,archive,ServerRuntime::validateApprovedArtifactBytes);
         Map<String,Object> manifest=ArtifactArchive.verify(archive,true);
         assertEquals(false,manifest.get("complete"));
         assertEquals("safe business payload\n",new String(ArtifactArchive.read(archive,"safe.log"),StandardCharsets.UTF_8));
@@ -34,16 +34,16 @@ class ArtifactArchiveTest {
     @Test void preservesProducerBytesAndDigestsForReportsAndCommitManifest() throws Exception {
         Path output=Files.createDirectory(temporary.resolve("byte-preserving-output"));
         Map<String,String> sources=Map.of(
-                "load/run/load-summary.json", "{\"customerName\":\"Business Customer\"}",
-                "load/run/load-summary.yaml", "customerName: '  Business Customer  '\n",
-                "load/run/report/index.html", "<!doctype html><html><script>window.T=1</script><a href=\"../missing.log\">link</a></html>",
-                "load/run/report-commit-manifest.json", "{\"sha256\":\"source-defined\"}");
+                "examples/load-summary.json", "{\"payload\":\"keep exact bytes\\n\"}",
+                "examples/load-summary.yaml", "payload: '  keep  spaces  '\\n",
+                "examples/report/index.html", "<!doctype html><html><script>window.T=1</script><a href=\"../missing.log\">link</a></html>",
+                "examples/report-commit-manifest.json", "{\"sha256\":\"source-defined\"}");
         for(Map.Entry<String,String> entry:sources.entrySet()) {
             Path file=output.resolve(entry.getKey());Files.createDirectories(file.getParent());
             Files.writeString(file,entry.getValue(),StandardCharsets.UTF_8);
         }
         Path zip=temporary.resolve("byte-preserved.zip");
-        ArtifactArchive.build(output,zip,ServerRuntime::approvedArtifactBytes);
+        ArtifactArchive.build(output,zip,ServerRuntime::validateApprovedArtifactBytes);
         Map<String,Object> manifest=ArtifactArchive.verify(zip,true);
         assertEquals("att-export-approved-bytes-v1",manifest.get("policy"));
         for(String path:sources.keySet()) {
@@ -56,72 +56,71 @@ class ArtifactArchiveTest {
 
     @Test void detailSidecarsTakePriorityOverSurplusEvidenceAtEntryCap() throws Exception {
         Path output=Files.createDirectory(temporary.resolve("evidence-heavy-output"));
-        Path report=output.resolve("load/run/load-summary.json");Files.createDirectories(report.getParent());
+        Path report=output.resolve("reports/load-summary.json");Files.createDirectories(report.getParent());
         Files.writeString(report,"{\"schemaVersion\":\"att-load-summary/v1.3\"}");
-        Path detail=output.resolve("load/run/details/v1/manifest.json");Files.createDirectories(detail.getParent());
+        Path detail=output.resolve("reports/details/v1/manifest.json");Files.createDirectories(detail.getParent());
         Files.writeString(detail,"{\"schemaVersion\":\"att-load-detail-manifest/v1\"}");
-        Path evidence=Files.createDirectories(output.resolve("load/run/samples"));
+        Path evidence=Files.createDirectories(output.resolve("reports/samples"));
         for(int i=0;i<ArtifactArchive.MAX_ENTRIES+100;i++)Files.writeString(evidence.resolve(String.format("%05d.log",i)),"evidence");
         Path zip=temporary.resolve("evidence-heavy.zip");
-        ArtifactArchive.build(output,zip,Files::readAllBytes);
+        ArtifactArchive.build(output,zip);
         Map<String,Object> manifest=ArtifactArchive.verify(zip,true);
         assertEquals(false,manifest.get("complete"));
         assertEquals(ArtifactArchive.MAX_ENTRIES,((List<?>)manifest.get("entries")).size());
-        assertArrayEquals(Files.readAllBytes(report),ArtifactArchive.read(zip,"load/run/load-summary.json"));
-        assertArrayEquals(Files.readAllBytes(detail),ArtifactArchive.read(zip,"load/run/details/v1/manifest.json"));
+        assertArrayEquals(Files.readAllBytes(report),ArtifactArchive.read(zip,"reports/load-summary.json"));
+        assertArrayEquals(Files.readAllBytes(detail),ArtifactArchive.read(zip,"reports/details/v1/manifest.json"));
     }
 
-    @Test void writesManifestForThePublishedBytesAndReadsOnlyApprovedEntries() throws Exception {
+    @Test void preservesProducerHtmlBytesAndReadsOnlyApprovedEntries() throws Exception {
         Path output=Files.createDirectory(temporary.resolve("output"));
         Path report=output.resolve("report/index.html");Files.createDirectories(report.getParent());
-        Files.writeString(report,"<html>password: secret-value</html>",StandardCharsets.UTF_8);
+        byte[] original="<html>password: secret-value<script>window.payload = '<raw>'</script></html>".getBytes(StandardCharsets.UTF_8);
+        Files.write(report,original);
         Files.writeString(output.resolve("untrusted.bin"),"private binary bytes");
         Path archive=temporary.resolve("job/artifacts.zip");
 
-        ArtifactArchive.build(output,archive,file->att.server.api.internal.DiagnosticSanitizer.redactText(Files.readString(file)).getBytes(StandardCharsets.UTF_8));
+        ArtifactArchive.build(output,archive);
 
         byte[] published=ArtifactArchive.read(archive,"report/index.html");
-        assertTrue(new String(published,StandardCharsets.UTF_8).contains("password: [REDACTED_SECRET]"));
-        assertEquals(ArtifactArchive.sha256(published),manifestEntry(archive,"report/index.html").get("sha256"));
+        assertArrayEquals(original,published,"Archive must retain Engine/Worker HTML bytes without rewriting");
+        assertEquals(ArtifactArchive.sha256(original),manifestEntry(archive,"report/index.html").get("sha256"));
         assertTrue(manifestEntry(archive,"report/index.html").get("report").equals(Boolean.TRUE));
         assertThrows(java.io.FileNotFoundException.class,()->ArtifactArchive.read(archive,"untrusted.bin"));
         assertThrows(IllegalArgumentException.class,()->ArtifactArchive.read(archive,"../secret.txt"));
     }
 
-    @Test void cappedMemoryAndSpillPublishExactlyTheSameApprovedSnapshot() throws Exception {
+    @Test void cappedMemoryAndSpillPublishExactlyTheSameProducerSnapshot() throws Exception {
         Path output=Files.createDirectory(temporary.resolve("staging-output"));
-        Map<String,String> sources=Map.of("a.log","approved password: synthetic-secret\n"+"x".repeat(300),
-                "b.log","approved password: synthetic-secret\n"+"y".repeat(2048),
+        Map<String,String> sources=Map.of("a.log","producer password: [REDACTED_SECRET]\n"+"x".repeat(300),
+                "b.log","producer password: [REDACTED_SECRET]\n"+"y".repeat(2048),
                 "index.html","<a href=\"a.log\">A</a><a href=\"b.log\">B</a><a href=\"private.bin\">Omitted</a>");
         Files.writeString(output.resolve("private.bin"),"not publishable");
         Path disk=temporary.resolve("disk/artifacts.zip"),memory=temporary.resolve("memory/artifacts.zip");
         for(long budget:new long[]{0,1024}) {
             for(var source:sources.entrySet())Files.writeString(output.resolve(source.getKey()),source.getValue());
-            var calls=new java.util.HashMap<Path,Integer>();
+            var mutated=new java.util.concurrent.atomic.AtomicBoolean();
             ArtifactMetricsRecorder recorder=new ArtifactMetricsRecorder(System.nanoTime(),1);
             ArtifactMetricsRecorder.CURRENT.set(recorder);
             try {
-                ArtifactArchive.build(output,budget==0?disk:memory,path->{
-                    calls.merge(path,1,Integer::sum);
-                    byte[] approved=att.server.api.internal.DiagnosticSanitizer.redactText(Files.readString(path)).getBytes(StandardCharsets.UTF_8);
-                    // Later raw mutation cannot change the already-approved snapshot.
-                    Files.writeString(path,"password: replaced-raw-secret");return approved;
-                },budget);
+                ArtifactArchive.build(output,budget==0?disk:memory,budget,path->{
+                    if(mutated.compareAndSet(false,true))for(String name:sources.keySet())
+                        Files.writeString(output.resolve(name),"password: changed-after-snapshot");
+                });
             } finally {recorder.finish();ArtifactMetricsRecorder.CURRENT.remove();}
-            assertEquals(3,calls.size());assertTrue(calls.values().stream().allMatch(count->count==1));
+            assertTrue(mutated.get());
             assertTrue(recorder.value.memoryExportPeakBytes<=budget);
             assertEquals(budget==0?3:1,recorder.value.temporaryExportFiles.longValue());
             assertTrue(recorder.value.temporaryExportBytes>2048);
             assertEquals(recorder.value.temporaryExportBytes,recorder.value.temporaryExportReadBytes,
-                    "Spilled sanitized payload is read once for ZIP publication");
+                    "Spilled producer bytes are read once for ZIP publication");
             assertEquals(recorder.value.zipWriteInputBytes,recorder.value.verificationBytesRead,
                     "Publication digest verification rereads exactly the bytes written to ZIP entries");
         }
         assertEquals(ArtifactArchive.verify(disk,true),ArtifactArchive.verify(memory,true));
         for(String path:sources.keySet()) {
             byte[] expected=ArtifactArchive.read(disk,path),actual=ArtifactArchive.read(memory,path);
-            assertArrayEquals(expected,actual);String text=new String(actual,StandardCharsets.UTF_8);
-            assertFalse(text.contains("synthetic-secret"));assertFalse(text.contains("replaced-raw-secret"));
+            assertArrayEquals(expected,actual);
+            assertArrayEquals(sources.get(path).getBytes(StandardCharsets.UTF_8),actual,"ZIP entries must equal the pre-write producer snapshot");
         }
         String html=new String(ArtifactArchive.read(memory,"index.html"),StandardCharsets.UTF_8);
         assertTrue(html.contains("href=\"a.log\""));assertTrue(html.contains("href=\"b.log\""));
@@ -135,7 +134,7 @@ class ArtifactArchiveTest {
             Path file=output.resolve("workload-"+(i%4)+"/case-"+i+".log");
             Files.createDirectories(file.getParent());Files.writeString(file,"evidence "+i);
         }
-        Path archive=temporary.resolve("large.zip");ArtifactArchive.build(output,archive,Files::readAllBytes);
+        Path archive=temporary.resolve("large.zip");ArtifactArchive.build(output,archive);
         long started=System.nanoTime();
         for(int i=0;i<8;i++)assertEquals("evidence "+i,new String(ArtifactArchive.read(archive,"workload-"+(i%4)+"/case-"+i+".log"),StandardCharsets.UTF_8));
         System.out.println("2048-entry archive, 8 independent previews: "+((System.nanoTime()-started)/1_000_000)+" ms");
@@ -158,7 +157,7 @@ class ArtifactArchiveTest {
         Path output=Files.createDirectory(temporary.resolve("mutable-output"));
         String payload="unique-approved-value";
         Files.writeString(output.resolve("case.log"),payload);
-        Path archive=temporary.resolve("mutable.zip");ArtifactArchive.build(output,archive,Files::readAllBytes);
+        Path archive=temporary.resolve("mutable.zip");ArtifactArchive.build(output,archive);
         try(var read=ArtifactArchive.openVerified(archive,false)) {
             byte[] bytes=Files.readAllBytes(archive);
             int offset=new String(bytes,StandardCharsets.ISO_8859_1).indexOf(payload);
@@ -179,7 +178,7 @@ class ArtifactArchiveTest {
 
     @Test void rejectsUnmanifestedEntriesAndTamperedDigestsFromIndependentZips() throws Exception {
         Path output=Files.createDirectory(temporary.resolve("output"));Files.writeString(output.resolve("case.log"),"approved");
-        Path good=temporary.resolve("good.zip");ArtifactArchive.build(output,good,Files::readAllBytes);
+        Path good=temporary.resolve("good.zip");ArtifactArchive.build(output,good);
         Path extra=temporary.resolve("extra.zip");
         rewrite(good,extra,Map.of("private.txt","raw-secret".getBytes(StandardCharsets.UTF_8)));
         assertThrows(IllegalArgumentException.class,()->ArtifactArchive.verify(extra,true));
@@ -207,7 +206,7 @@ class ArtifactArchiveTest {
         Files.writeString(output.resolve("case.log"),"safe");Files.write(output.resolve("secret-binary.bin"),new byte[]{0,1});
         Path outside=Files.writeString(temporary.resolve("secret.txt"),"outside-secret");Files.createSymbolicLink(output.resolve("outside.log"),outside);
         Files.writeString(output.resolve("A.log"),"first");Files.writeString(output.resolve("a.log"),"second");
-        Path archive=temporary.resolve("archive.zip");ArtifactArchive.build(output,archive,Files::readAllBytes);
+        Path archive=temporary.resolve("archive.zip");ArtifactArchive.build(output,archive);
         Map<String,Object> manifest=ArtifactArchive.verify(archive,true);
         assertEquals(false,manifest.get("complete"));
         assertFalse(manifest.toString().contains("secret-binary"));assertFalse(manifest.toString().contains("outside.log"));
@@ -220,7 +219,7 @@ class ArtifactArchiveTest {
         Files.writeString(report.resolve("index.html"),"<a href=\"oversized.html\">Open details</a>",StandardCharsets.UTF_8);
         Files.write(report.resolve("oversized.html"),new byte[(int)ArtifactArchive.MAX_ENTRY_BYTES+1]);
         Path archive=temporary.resolve("oversized-report.zip");
-        ArtifactArchive.build(output,archive,Files::readAllBytes);
+        ArtifactArchive.build(output,archive);
 
         Map<String,Object> manifest=ArtifactArchive.verify(archive,true);
         assertEquals(false,manifest.get("complete"));
@@ -239,9 +238,10 @@ class ArtifactArchiveTest {
 
     @Test void totalAndEntryCountCapsFailPublicationWithTypedLimitEvidence() throws Exception {
         Path totalOutput=Files.createDirectory(temporary.resolve("total-cap-output"));
-        for(int i=0;i<9;i++)Files.createFile(totalOutput.resolve("part-"+i+".log"));
-        ArtifactArchive.LimitFailure total=assertThrows(ArtifactArchive.LimitFailure.class,()->ArtifactArchive.build(
-                totalOutput,temporary.resolve("total-cap.zip"),file->new byte[15*1024*1024]));
+        byte[] part=new byte[15*1024*1024];
+        for(int i=0;i<9;i++)Files.write(totalOutput.resolve("part-"+i+".log"),part);
+        ArtifactArchive.LimitFailure total=assertThrows(ArtifactArchive.LimitFailure.class,
+                ()->ArtifactArchive.build(totalOutput,temporary.resolve("total-cap.zip")));
         assertEquals("artifact.archive.totalBytes",total.limitName);
         assertEquals(ArtifactArchive.MAX_TOTAL_BYTES,total.limit);
         assertTrue(total.observed>ArtifactArchive.MAX_TOTAL_BYTES);
@@ -250,7 +250,7 @@ class ArtifactArchiveTest {
         Path entriesOutput=Files.createDirectory(temporary.resolve("entry-cap-output"));
         for(int i=0;i<ArtifactArchive.MAX_ENTRIES+1;i++)Files.createFile(entriesOutput.resolve(i+".log"));
         Path cappedZip=temporary.resolve("entry-cap.zip");
-        ArtifactArchive.build(entriesOutput,cappedZip,Files::readAllBytes);
+        ArtifactArchive.build(entriesOutput,cappedZip);
         Map<String,Object> cappedManifest=ArtifactArchive.verify(cappedZip,true);
         assertEquals(false,cappedManifest.get("complete"));
         assertEquals(ArtifactArchive.MAX_ENTRIES,((List<?>)cappedManifest.get("entries")).size());
@@ -264,9 +264,30 @@ class ArtifactArchiveTest {
             for(int i=0;i<600;i++)Files.writeString(samples.resolve(i+".log"),"sample "+i);
         }
         writeCanonicalLoadReport(output.resolve("load/run"), "run");
-        Path archive=temporary.resolve("archive.zip");ArtifactArchive.build(output,archive,Files::readAllBytes);
-        assertEquals(1205,((java.util.List<?>)ArtifactArchive.verify(archive,true).get("entries")).size());
-        assertTrue(new String(ArtifactArchive.read(archive,"load/run/report/index.html"),StandardCharsets.UTF_8).contains("href=\"../load-summary.json\""));
+        Path archive=temporary.resolve("archive.zip");ArtifactArchive.build(output,archive);
+        Map<String,Object> archiveManifest=ArtifactArchive.verify(archive,true);
+        assertEquals(1205,((java.util.List<?>)archiveManifest.get("entries")).size());
+        String report=new String(ArtifactArchive.read(archive,"load/run/report/index.html"),StandardCharsets.UTF_8);
+        assertTrue(report.contains("href=\"../load-summary.json\""));
+        assertTrue(new String(ArtifactArchive.read(archive,"load/run/load-summary.json"),StandardCharsets.UTF_8)
+                .contains("\"report\":\"report/index.html\""));
+        assertTrue(new String(ArtifactArchive.read(archive,"load/run/load-summary.yaml"),StandardCharsets.UTF_8)
+                .contains("report: report/index.html"));
+        byte[] loadManifest=Files.readAllBytes(output.resolve("load/run/"+ArtifactArchive.LOAD_REPORT_MANIFEST));
+        assertArrayEquals(loadManifest,ArtifactArchive.read(archive,"load/run/"+ArtifactArchive.LOAD_REPORT_MANIFEST));
+        assertEquals(ArtifactArchive.sha256(loadManifest),manifestEntry(archive,"load/run/"+ArtifactArchive.LOAD_REPORT_MANIFEST).get("sha256"));
+        Path run=output.resolve("load/run");
+        @SuppressWarnings("unchecked") Map<String,Object> committed=new com.fasterxml.jackson.databind.ObjectMapper()
+                .readValue(Files.readAllBytes(run.resolve(ArtifactArchive.LOAD_REPORT_MANIFEST)),Map.class);
+        for(Object value:(List<?>)committed.get("files")) {
+            Map<?,?> row=(Map<?,?>)value;String path="load/run/"+row.get("path");
+            byte[] source=Files.readAllBytes(output.resolve(path));
+            byte[] zipped=ArtifactArchive.read(archive,path);
+            assertArrayEquals(source,zipped,path);
+            assertEquals(row.get("lengthBytes"),source.length,path);
+            assertEquals(row.get("sha256"),ArtifactArchive.sha256(zipped),path);
+            assertEquals(row.get("sha256"),manifestEntry(archive,path).get("sha256"),path);
+        }
     }
 
     @Test void loadArchiveRejectsMissingOrCorruptReportCommit() throws Exception {
@@ -274,12 +295,12 @@ class ArtifactArchiveTest {
         Files.createDirectories(missing.resolve("load/run/report"));
         Files.writeString(missing.resolve("load/run/report/index.html"),"<html>report</html>");
         Files.writeString(missing.resolve("load/run/load-summary.json"),"{\"report\":\"report/index.html\"}");
-        assertThrows(java.io.IOException.class,()->ArtifactArchive.build(missing,temporary.resolve("missing.zip"),Files::readAllBytes));
+        assertThrows(java.io.IOException.class,()->ArtifactArchive.build(missing,temporary.resolve("missing.zip")));
 
         Path corrupt=Files.createDirectory(temporary.resolve("corrupt-report-commit"));
         writeCanonicalLoadReport(corrupt.resolve("load/run"),"run");
         Files.writeString(corrupt.resolve("load/run/report/index.html"),"<html>tampered</html>");
-        assertThrows(java.io.IOException.class,()->ArtifactArchive.build(corrupt,temporary.resolve("corrupt.zip"),Files::readAllBytes));
+        assertThrows(java.io.IOException.class,()->ArtifactArchive.build(corrupt,temporary.resolve("corrupt.zip")));
         assertFalse(Files.exists(temporary.resolve("missing.zip")));
         assertFalse(Files.exists(temporary.resolve("corrupt.zip")));
     }
@@ -306,10 +327,10 @@ class ArtifactArchiveTest {
                 new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsBytes(manifest));
     }
 
-    @Test void publisherFailureLeavesRawOutputAndNoPublishedOrStagingArchive() throws Exception {
+    @Test void archiveWriteFailureLeavesRawOutputAndNoPublishedOrStagingArchive() throws Exception {
         Path output=Files.createDirectory(temporary.resolve("output"));Files.writeString(output.resolve("case.log"),"raw");
         Path archive=temporary.resolve("job/artifacts.zip");
-        assertThrows(java.io.IOException.class,()->ArtifactArchive.build(output,archive,file->{throw new java.io.IOException("disk full");}));
+        assertThrows(java.io.IOException.class,()->ArtifactArchive.build(output,archive,1024,path->{throw new java.io.IOException("disk full");}));
         assertEquals("raw",Files.readString(output.resolve("case.log")));assertFalse(Files.exists(archive));
         try(var paths=Files.list(archive.getParent())){assertEquals(0,paths.count());}
     }
@@ -318,30 +339,29 @@ class ArtifactArchiveTest {
         Path output=Files.createDirectory(temporary.resolve("interrupted-output"));
         Files.writeString(output.resolve("a.log"),"original-a");Files.writeString(output.resolve("b.log"),"original-b");
         Path archive=temporary.resolve("interrupted-job/artifacts.zip");
-        ArtifactArchive.build(output,archive,Files::readAllBytes);
+        ArtifactArchive.build(output,archive);
         byte[] priorArchive=Files.readAllBytes(archive);
         Files.writeString(output.resolve("a.log"),"replacement-a");Files.writeString(output.resolve("b.log"),"replacement-b");
 
-        var publisherEntered=new java.util.concurrent.CountDownLatch(1);
-        var releasePublisher=new java.util.concurrent.CountDownLatch(1);
+        var writerPaused=new java.util.concurrent.CountDownLatch(1);
+        var releaseWriter=new java.util.concurrent.CountDownLatch(1);
         var failure=new java.util.concurrent.atomic.AtomicReference<Throwable>();
         Thread writer=new Thread(()->{
             try {
-                ArtifactArchive.build(output,archive,file->{
-                    if("b.log".equals(file.getFileName().toString())) {
-                        publisherEntered.countDown();releasePublisher.await();
+                ArtifactArchive.build(output,archive,0,path->{
+                    if("a.log".equals(path)) {
+                        writerPaused.countDown();releaseWriter.await();
                     }
-                    return Files.readAllBytes(file);
-                },0);
+                });
             } catch(Throwable error) { failure.set(error); }
         },"artifact-interruption-fixture");
         writer.start();
         try {
-            assertTrue(publisherEntered.await(5,java.util.concurrent.TimeUnit.SECONDS),"Writer should reach the blocked second export after spilling the first");
+            assertTrue(writerPaused.await(5,java.util.concurrent.TimeUnit.SECONDS),"Writer should pause after writing the first spilled entry");
             writer.interrupt();writer.join(5000);
             assertFalse(writer.isAlive(),"Interrupted archive writer should exit");
         } finally {
-            releasePublisher.countDown();
+            releaseWriter.countDown();
             if(writer.isAlive()) {writer.interrupt();writer.join(5000);}
         }
 
@@ -349,7 +369,7 @@ class ArtifactArchiveTest {
         assertArrayEquals(priorArchive,Files.readAllBytes(archive),"Uncommitted ZIP must not replace the prior archive");
         assertEquals("replacement-a",Files.readString(output.resolve("a.log")));
         assertEquals("replacement-b",Files.readString(output.resolve("b.log")));
-        try(var paths=Files.list(archive.getParent())) { assertEquals(java.util.List.of(archive),paths.toList(),"ZIP and sanitized-export staging must both be removed"); }
+        try(var paths=Files.list(archive.getParent())) { assertEquals(java.util.List.of(archive),paths.toList(),"ZIP staging must be removed"); }
     }
 
     @Test void rejectsLinkAndSpecialFileAttributesEvenWithValidManifestAndDigests() throws Exception {
@@ -492,7 +512,7 @@ class ArtifactArchiveTest {
         Path output = Files.createDirectory(temporary.resolve("unicode-output"));
         String name = "caf\u00e9.log";
         Files.writeString(output.resolve(name), "approved");
-        Path good = ArtifactArchive.build(output, temporary.resolve("unicode-source.zip"), Files::readAllBytes);
+        Path good = ArtifactArchive.build(output, temporary.resolve("unicode-source.zip"));
         Path archive = temporary.resolve("timestamps.zip");
         try (ZipFile source = new ZipFile(good.toFile());
              var zip = new java.util.zip.ZipOutputStream(Files.newOutputStream(archive))) {
@@ -513,7 +533,7 @@ class ArtifactArchiveTest {
     private Path simpleArchive() throws Exception {
         Path output = Files.createDirectory(temporary.resolve("fixture-output"));
         Files.writeString(output.resolve("case.log"), "approved");
-        return ArtifactArchive.build(output, temporary.resolve("fixture.zip"), Files::readAllBytes);
+        return ArtifactArchive.build(output, temporary.resolve("fixture.zip"));
     }
     private void assertRejectedArchive(Path archive) throws Exception {
         // These fixtures remain readable to the JDK and have intact approved payloads.

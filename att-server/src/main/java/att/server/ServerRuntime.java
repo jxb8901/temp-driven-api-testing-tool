@@ -3757,8 +3757,8 @@ final class ServerRuntime implements AutoCloseable {
                     archiveStatus(id,"ARCHIVING","");
                     if(!Files.isDirectory(output))throw new java.io.IOException("Worker output is unavailable");
                     cleanupArtifactStaging(archive.getParent());
-                    // Preserve producer-approved bytes in the ZIP. Archive publication never redacts or rewrites.
-                    artifactPublisher.publish(output,archive,ServerRuntime::approvedArtifactBytes);
+                    // Preserve the exact bytes produced by the Engine/Worker; ZIP publication never rewrites them.
+                    artifactPublisher.publish(output,archive,ServerRuntime::validateApprovedArtifactBytes);
                 }
                 metrics.phase("publication");
                 archiveStatus(id,"READY","");
@@ -3889,6 +3889,12 @@ final class ServerRuntime implements AutoCloseable {
         final int limit=16*1024*1024;
         byte[] bytes;
         try(var input=Files.newInputStream(file)){bytes=input.readNBytes(limit+1);}
+        validateApprovedArtifactBytes(file,bytes);
+        return bytes;
+    }
+    /** Reject unsafe captured output while leaving accepted bytes owned by ArtifactArchive unchanged. */
+    static void validateApprovedArtifactBytes(Path file,byte[] bytes) {
+        final int limit=16*1024*1024;
         if(bytes.length>limit)throw new IllegalArgumentException("Artifact exceeds the safe text download limit (16 MiB)");
         String text;
         try {text=java.nio.charset.StandardCharsets.UTF_8.newDecoder()
@@ -3927,7 +3933,6 @@ final class ServerRuntime implements AutoCloseable {
             } catch(IllegalArgumentException rejected) {throw rejected;}
               catch(Exception invalid) {throw new IllegalArgumentException("Invalid structured artifact cannot be exported");}
         }
-        return bytes;
     }
     /** Legacy sanitized export projection; retained only for compatibility tests and callers. */
     byte[] publicArtifact(String id, Path file) throws Exception {
@@ -4290,7 +4295,7 @@ final class ServerRuntime implements AutoCloseable {
     private static void terminateTree(Process process){process.toHandle().descendants().forEach(ProcessHandle::destroy);process.destroy();}
     private static void forceTree(Process process){process.toHandle().descendants().forEach(ProcessHandle::destroyForcibly);process.destroyForcibly();}
     @FunctionalInterface interface WorkerProcessLauncher { Process start(ProcessBuilder builder) throws java.io.IOException; }
-    @FunctionalInterface interface ArtifactPublisher { Path publish(Path output,Path archive,ArtifactArchive.Publisher publisher) throws Exception; }
+    @FunctionalInterface interface ArtifactPublisher { Path publish(Path output,Path archive,ArtifactArchive.EntryValidator validator) throws Exception; }
     private static final class AdmissionLease {
         private final Semaphore admission,load;private final java.util.concurrent.atomic.AtomicBoolean released=new java.util.concurrent.atomic.AtomicBoolean();
         AdmissionLease(Semaphore admission,Semaphore load){this.admission=admission;this.load=load;}

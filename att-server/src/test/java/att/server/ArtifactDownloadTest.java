@@ -40,7 +40,7 @@ class ArtifactDownloadTest {
             Job job=new Job(id,"run","p","user-a",new WorkerRequest(),new JobEvents(output.getParent().resolve("events.jsonl"),100));
             runtime.store.insert(job,"{}");job.status="PASS";job.finishedAt=Instant.now();runtime.store.update(job);
             Path archive=runtime.artifactArchivePath(id);
-            ArtifactArchive.build(output,archive,Files::readAllBytes);
+            ArtifactArchive.build(output,archive);
             Files.writeString(archive.resolveSibling("archive-status.json"),"{\"state\":\"READY\"}");
             byte[] approved=Files.readAllBytes(archive);
             Path replacement=Files.writeString(temp.resolve("replacement.zip"),"UNVERIFIED REPLACEMENT");
@@ -121,7 +121,7 @@ class ArtifactDownloadTest {
 
     private Path archive() throws Exception {
         Path output=Files.createDirectory(temp.resolve("output"));Files.writeString(output.resolve("case.log"),"approved");
-        return ArtifactArchive.build(output,temp.resolve("artifacts.zip"),Files::readAllBytes);
+        return ArtifactArchive.build(output,temp.resolve("artifacts.zip"));
     }
     private Path directory(ArtifactDownload download) throws Exception {
         var field=ArtifactDownload.class.getDeclaredField("directory");field.setAccessible(true);return (Path)field.get(download);

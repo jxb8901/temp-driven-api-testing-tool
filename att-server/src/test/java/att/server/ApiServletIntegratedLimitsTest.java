@@ -205,7 +205,7 @@ class ApiServletIntegratedLimitsTest {
             Files.writeString(output.resolve("case.log"),"approved");
             Job job=new Job(id,"run","p","alice",new WorkerRequest(),new JobEvents(output.getParent().resolve("events.jsonl"),100));
             job.status="PASS";job.exitCode=0;job.finishedAt=Instant.now();runtime.store.insert(job,"{}");
-            ArtifactArchive.build(output,runtime.artifactArchivePath(id),Files::readAllBytes);
+            ArtifactArchive.build(output,runtime.artifactArchivePath(id));
             Files.writeString(runtime.artifactArchivePath(id).resolveSibling("archive-status.json"),"{\"state\":\"READY\"}");
             int acquired=0;while(runtime.acquireArtifactReadSlot())acquired++;
             assertEquals(8,acquired);
@@ -242,7 +242,7 @@ class ApiServletIntegratedLimitsTest {
         job.status="PASS";job.exitCode=0;job.finishedAt=Instant.now();runtime.store.insert(job,"{}");
         Path status=runtime.artifactArchivePath(id).resolveSibling("archive-status.json");
         if(ready) {
-            ArtifactArchive.build(output,runtime.artifactArchivePath(id),Files::readAllBytes);
+            ArtifactArchive.build(output,runtime.artifactArchivePath(id));
             Files.writeString(status,"{\"state\":\"READY\"}");
         } else if(!"PENDING".equals(state))Files.writeString(status,"{\"state\":\""+state+"\"}");
         Captured result=invoke(servlet,"GET","/jobs/"+id+"/artifacts/view/case.log",Collections.emptyMap(),new byte[0]);

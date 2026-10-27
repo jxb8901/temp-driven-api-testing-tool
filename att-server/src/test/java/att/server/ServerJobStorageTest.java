@@ -115,7 +115,7 @@ class ServerJobStorageTest {
         try(ServerRuntime runtime=runtime("pin-during-download",null,Clock.systemUTC())) {
             Instant finished=Instant.parse("2026-01-01T00:00:00Z");String downloading="J0000000000000906",pin="J0000000000000907";
             Path source=Files.createDirectories(jobDir(runtime,downloading).resolve("output"));Files.writeString(source.resolve("report.txt"),"download");
-            seedRow(runtime,downloading,"PASS",finished,false);ArtifactArchive.build(source,runtime.artifactArchivePath(downloading),file->runtime.publicArtifact(downloading,file));
+            seedRow(runtime,downloading,"PASS",finished,false);ArtifactArchive.build(source,runtime.artifactArchivePath(downloading));
             Files.writeString(jobDir(runtime,downloading).resolve("archive-status.json"),"{\"state\":\"READY\",\"reason\":\"\",\"manifestVersion\":1}");
             seed(runtime,pin,"PASS",finished,false,1024);
             try(ServerRuntime.ArtifactRead open=runtime.openArtifactArchive(downloading,true)) {

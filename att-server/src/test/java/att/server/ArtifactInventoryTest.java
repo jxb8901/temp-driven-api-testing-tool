@@ -24,16 +24,14 @@ class ArtifactInventoryTest {
         long started = System.nanoTime();
         Path archive = temporary.resolve("artifacts.zip");
         if (Boolean.getBoolean("att.inventory.baseline")) {
-            assertThrows(IllegalArgumentException.class, () -> ArtifactArchive.build(output, archive, Files::readAllBytes));
+            assertThrows(IllegalArgumentException.class, () -> ArtifactArchive.build(output, archive));
         } else {
-            ArtifactArchive.build(output, archive, source -> {
-                assertEquals(output.resolve("report.json").toRealPath(), source);
-                return Files.readAllBytes(source);
-            });
+            ArtifactArchive.build(output, archive);
             var manifest = ArtifactArchive.verify(archive, true);
             assertEquals(true, manifest.get("complete"));
             assertEquals(List.of(), manifest.get("omissions"));
             assertEquals(1, ((List<?>) manifest.get("entries")).size());
+            assertEquals("report.json", ((Map<?,?>)((List<?>)manifest.get("entries")).get(0)).get("path"));
         }
         System.out.println("INVENTORY_BENCHMARK privateFiles=100004 baseline=" + Boolean.getBoolean("att.inventory.baseline")
                 + " publicationMs=" + (System.nanoTime() - started) / 1_000_000.0);
@@ -50,10 +48,7 @@ class ArtifactInventoryTest {
 
         long started = System.nanoTime();
         Path archive = temporary.resolve("boundary-artifacts.zip");
-        ArtifactArchive.build(output, archive, source -> {
-            assertEquals(output.resolve("load/report.json").toRealPath(), source);
-            return Files.readAllBytes(source);
-        });
+        ArtifactArchive.build(output, archive);
 
         Map<?, ?> manifest = ArtifactArchive.verify(archive, true);
         assertEquals(true, manifest.get("complete"));
@@ -75,7 +70,7 @@ class ArtifactInventoryTest {
         Files.createDirectories(link.getParent());
         Files.createSymbolicLink(link, outside);
         Path archive = temporary.resolve("archive.zip");
-        ArtifactArchive.build(output, archive, Files::readAllBytes);
+        ArtifactArchive.build(output, archive);
         assertEquals("eligible", new String(ArtifactArchive.read(archive, "load/run/.EXEC-ID-RESERVATIONS/case.log"), java.nio.charset.StandardCharsets.UTF_8));
         assertEquals(false, ArtifactArchive.verify(archive, true).get("complete"));
         assertThrows(java.io.FileNotFoundException.class, () -> ArtifactArchive.read(archive, "load/other/.exec-id-reservations/secret.json"));
@@ -84,16 +79,16 @@ class ArtifactInventoryTest {
     @Test void untrustedCandidateAndDepthLimitsRemainEnforced() throws Exception {
         Path output = Files.createDirectory(temporary.resolve("output"));
         for (int i = 0; i < ArtifactArchive.MAX_CANDIDATES; i++) Files.createFile(output.resolve(i + ".bin"));
-        assertTrue(assertThrows(IllegalArgumentException.class, () -> ArtifactArchive.build(output, temporary.resolve("limit.zip"), Files::readAllBytes))
+        assertTrue(assertThrows(IllegalArgumentException.class, () -> ArtifactArchive.build(output, temporary.resolve("limit.zip")))
                 .getMessage().contains("inventory"));
         Files.delete(output.resolve("0.bin"));
         Path boundary = temporary.resolve("boundary.zip");
-        ArtifactArchive.build(output, boundary, Files::readAllBytes);
+        ArtifactArchive.build(output, boundary);
         assertEquals(false, ArtifactArchive.verify(boundary, true).get("complete"));
         Path deep = Files.createDirectory(temporary.resolve("deep"));
         Path directory = deep;
         for (int i = 0; i < 64; i++) directory = Files.createDirectory(directory.resolve("a"));
-        assertTrue(assertThrows(IllegalArgumentException.class, () -> ArtifactArchive.build(deep, temporary.resolve("deep.zip"), Files::readAllBytes))
+        assertTrue(assertThrows(IllegalArgumentException.class, () -> ArtifactArchive.build(deep, temporary.resolve("deep.zip")))
                 .getMessage().contains("depth"));
     }
 }

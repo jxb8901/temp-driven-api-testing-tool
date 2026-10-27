@@ -87,7 +87,7 @@ class ArtifactHtmlPolicyTest {
         assertEquals(0,document.select("[onload],[onmouseover],svg[href],script[src]").size());
         assertFalse(document.outerHtml().contains("alert('injected')"));
 
-        Path archive=ArtifactArchive.build(tempDir.resolve("output"),tempDir.resolve("offline-report.zip"),Files::readAllBytes);
+        Path archive=ArtifactArchive.build(tempDir.resolve("output"),tempDir.resolve("offline-report.zip"));
         byte[] archived=ArtifactArchive.read(archive,"load/offline/report/index.html");
         assertChartCards(Jsoup.parse(new String(archived,StandardCharsets.UTF_8)));
     }

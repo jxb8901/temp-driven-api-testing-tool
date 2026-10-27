@@ -3123,27 +3123,23 @@ Load Template CLI: `load --list-templates [--format json]`, `load --debug <type>
 
 ### ATT Server Job artifact 發佈
 
-Worker 檔案在 Server 核准其最終 bytes 前，均屬 **Raw/Trusted Worker Output**；只符合目錄邊界不代表可安全匯出。此邊界適用於 RUN（含 Debug mode、Case、Template、Flow、Tool、batch）、LOAD 及保留的 legacy Jobs。
+Worker 檔案在 Server 核准前會留在私有目錄。Artifact producer 在寫檔前套用敏感資料保護。Archive 不是遮罩邊界：它驗證路徑、檔案類型、大小及 UTF-8 文字，然後原樣保留擷取到的 producer bytes。此邊界適用於 RUN（含 Debug mode、Case、Template、Flow、Tool、batch）、LOAD 及保留的 legacy Jobs。
 
 執行結束後，Server 非同步建立唯一的 `artifacts.zip`。Archive 狀態為 `PENDING`、`ARCHIVING`、`READY` 或 `FAILED`，與 Job result 分開；PASS/FAIL/ERROR/INVALID/CANCELLED 不會因發佈未完成而改變。驗證及原子發佈成功後刪除 loose output。ZIP 是唯一持久 artifact payload；metadata、audit、events 及 archive-status 記錄另行保留。
 
 #### 發佈及敏感資料政策
 
-只接納一般、非 symlink 的 UTF-8 檔案，副檔名包括 `txt`、`log`、`json`、`yaml`、`yml`、`xml`、`html`、`htm`、`css`、`csv`、`md`。Binary、無效 UTF-8、無效 structured data、巢狀 archive 及不支援格式會被排除；公開 manifest 不會列出被拒絕的檔名。Studio 會顯示 omissions，不會把不完整匯出稱為完整 raw output。
+Archive 接納一般、非 symlink 的 UTF-8 文字檔，副檔名包括 `txt`、`log`、`json`、`yaml`、`yml`、`xml`、`html`、`htm`、`css`、`csv`、`md`。Binary、無效 UTF-8、NUL bytes、巢狀 archive 及不支援格式會被排除；公開 manifest 不會列出被拒絕的檔名。Archive 將 JSON/YAML 視為 producer 寫入的文字，不會在發佈時解析、遮罩或重新序列化。Studio 會顯示 omissions，不會把不完整匯出稱為完整 output。
 
-Logs、文字、XML、HTML、CSV 會套用必要的 secret-field、authorization header、bearer/basic token、連線 URL 憑證、private key 及 cookie 保護，並投影 host-local paths。JSON/YAML（包括 Tool/DB 結果、服務回應及 Evidence）先經有界 safe loader 解析，再遞迴保護敏感欄位及明確分類為 `secret` 的 record，最後序列化為有效格式。一般 business values（包括姓名或可能受規管的資料）若不符合明確敏感規則便會保留；不提供任意 PII 自動偵測。操作 Job 的授權不等於 raw-secret 匯出權限，也沒有公開 raw-export 或 raw-file fallback。
+Logs、文字、XML、CSV 及生成的 structured results 由 producer 在寫檔前套用相關 secret、credential 及 path 保護；Archive 原樣保留結果 bytes。一般 business values（包括姓名或可能受規管的資料）若不符合 producer 的明確敏感規則便會保留；不提供任意 PII 自動偵測。操作 Job 的授權不等於 raw-secret 匯出權限，也沒有公開 raw-export 或 raw-file fallback。
 
-支援的敏感名稱包括 password/passphrase、token、secret、credentials、API/access/private key、authorization、cookies。Structured field name 內符合明確 secret text 規則的內容亦會受保護；secret/path projection 後名稱衝突會拒絕該 entry，不會靜默覆寫 business field。敏感 business data 應放在明確敏感的欄位，或把其所屬 structured record 分類為 `secret`。
+Producer 端保護的敏感名稱包括 password/passphrase、token、secret、credentials、API/access/private key、authorization、cookies。Structured field name 內符合明確 secret text 規則的內容亦會受保護；secret/path projection 後名稱衝突會由 producer 拒絕，不會靜默覆寫 business field。敏感 business data 應放在明確敏感的欄位，或把其所屬 structured record 分類為 `secret`。Producer 必須在資料進入 archive input tree 前完成保護。
 
-Artifact data 不可使用 Server-issued Debug default-pointer 例外。已知私有 Job/Package prefix 即使位於 remote-location field 亦會投影；location field 不會令任意巢狀 object 免除保護。一般 remote path、queue name 等 semantic location scalar 仍屬 business value。
-
-JSON 拒絕 duplicate key、尾隨 document 及超過 64 層的 nesting。YAML 拒絕 duplicate key、collection alias 和 unsafe tag。Numeric scalar 最多 1,000 characters；finite decimal 及大型 integer 在匯出時保留精確數值，包括 YAML base-60 number。不支援的 non-finite YAML number 會令 entry 被拒絕，不會發佈經 rounding 或無效的值。
-
-HTML 發佈前經 parser 清理：保留已核准的 relative links、inline styling 及 digest allowlist 中經審核的內建 RUN search/sort script；移除其他 script、active markup、external links、base URL 及離開已核准 archive 的 navigation。缺少或排除的 evidence link 會標示 unavailable。最終 HTML 內含 offline CSP；online viewer 另加 opaque-origin sandbox、相同 restrictive CSP、禁止 forms 及 Studio-origin 權限。任意自訂 raw HTML 的 controls 因而可能與發佈版本不同。
+Engine 生成的 artifact data 會在寫檔前套用 path 及 secret projection。Archive 不檢查 semantic fields，也不改寫已知 paths。HTTP HTML preview 使用 opaque-origin sandbox、restrictive CSP、禁止 forms，且不授予 Studio-origin 權限。下載報告的 relative links 會依 archive 內檔案配置解析，前提是目標檔案存在。
 
 #### Manifest 及 Resource limits
 
-`export-manifest-v1.json` 使用 manifest version `1`、policy `att-export-approved-bytes-v1`（仍可讀取舊版 `att-export-safe-text-v2` ZIP）。ZIP 完整保留 producer 輸出的核准 bytes；敏感值必須在 artifact 生成前完成遮罩。每個 entry 記錄 logical path、media type、byte size、SHA-256、report/preview eligibility、classification 及 publication decision。`complete` 和彙總 `omissions` 不包含被拒絕的檔名或值。ZIP、preview 及解壓檔案使用完全相同的最終 bytes；GET 不會再次獨立遮罩。
+`export-manifest-v1.json` 使用 manifest version `1`、policy `att-export-approved-bytes-v1`；新 entry 的 decision 為 `preserved`（仍可讀取舊版 `att-export-safe-text-v2` ZIP）。ZIP 完整保留 producer 輸出的核准 bytes；敏感值必須在 artifact 生成前完成遮罩。每個 entry 記錄 logical path、media type、精確 byte size、SHA-256、report/preview eligibility、classification 及 publication decision。`complete` 和彙總 `omissions` 不包含被拒絕的檔名或值。ZIP、preview 及解壓檔案使用相同的已擷取 bytes；GET 不會再次獨立遮罩。
 
 Inventory 不受 `server.maxArtifacts` 限制：最多 50,000 filesystem candidates、深度 64、10,000 已發佈 entries、每項 16 MiB、總 bytes 128 MiB、manifest 8 MiB。超出總量上限會使發佈失敗並保留私有來源。ZIP 使用 STORED encoding，避免重複 log 的 compression-ratio 歧義。Reader 拒絕不安全路徑、control characters、encoded traversal、重複或大小寫衝突名稱、過大或高壓縮比 entries、未列入 manifest 的 entries 及 integrity mismatch。Writer 為單一有界佇列，同時最多八個 artifact reads。
 
