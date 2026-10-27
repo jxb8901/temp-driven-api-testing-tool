@@ -59,7 +59,7 @@ Documentation release gate 會檢查目前 entry point、配對 source module、
 |---|---|---|
 | Root README | 以 Package-oriented platform 及可執行的 4.2.5 workflow 重寫 | [README](../../README.md) |
 | docs/README.md | 以讀者、任務及 availability 導航取代單一 workflow | [Documentation map](../README.md) |
-| docs/reference/cli.md 及中文配對 | 保留已發行的 4.2.4 verb 為 Current；從 current Reference 移除 proposal | [CLI Reference](../reference.zh/cli.md) |
+| docs/reference/cli.md 及中文配對 | 保留已發行的 4.2.5 verb 為 Current；從 current Reference 移除 proposal | [CLI Reference](../reference.zh/cli.md) |
 | CLI Reference 的 vNext 部分及 proposed example | 移至獨立 Planned 文件，直到核實 release | [Proposed CLI vNext](../interfaces/cli/vnext-proposed.zh.md) |
 | docs/remote-client.md 及中文配對 | 保留為 legacy ATT Remote profile、Job 及 artifact 指南 | [ATT Remote guide](../remote-client.zh.md) |
 | docs/server-deployment.md 及中文配對 | 保留舊路徑與 heading anchor 作為 compatibility stub | [Deployment](../operations/server-deployment.zh.md)、[Configuration](../operations/server-configuration.zh.md)、[Security](../operations/security.zh.md) 及 [API v1](../interfaces/server-api/README.zh.md) |
