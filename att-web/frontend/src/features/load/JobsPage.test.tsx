@@ -557,14 +557,14 @@ describe('JobsPage React feature', () => {
     expect(panel.textContent).toContain('Load time-series buckets');
     expect(panel.querySelectorAll('[aria-label="Returned Load time-series buckets"] tbody tr')).toHaveLength(40);
     expect(panel.textContent).toContain('40');
-    expect(textRead.mock.calls.some(call => call[1].includes('diagnostics-0002'))).toBe(false,
-      'Metrics must not eagerly download non-chart series');
+    expect(textRead.mock.calls.some(call => call[1].includes('diagnostics-0002')),
+      'Metrics must not eagerly download non-chart series').toBe(false);
     await click(host.querySelector('#job-tab-results')!);
     await advance();
     await click(host.querySelector('#job-tab-metrics')!);
     await advance();
-    expect(textRead.mock.calls.filter(call => call[1].includes('series-0001')).length).toBe(1,
-      'tab switches should reuse the already verified sidecar');
+    expect(textRead.mock.calls.filter(call => call[1].includes('series-0001')).length,
+      'tab switches should reuse the already verified sidecar').toBe(1);
   });
 
   it('loads archived evidence and workload details only when Results is opened', async () => {
