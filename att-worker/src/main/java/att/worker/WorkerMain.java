@@ -43,7 +43,7 @@ public final class WorkerMain {
     private long inspectionResponseBytes;
     private Map<String,Object> lastInspectionMetrics;
     private Path executionOutput;
-    private BufferedReader controlInput;
+    private JsonParser controlParser;
     private att.load.LoadConsoleSampler loadSampler;
     private String loadSummaryLine;
     private volatile boolean shutdownCancellationRequested;
@@ -86,21 +86,24 @@ public final class WorkerMain {
         if(exit!=0&&!worker.shutdownCancellationRequested) System.exit(exit);
     }
     private int execute() throws Exception {
-        controlInput=new BufferedReader(new InputStreamReader(System.in,StandardCharsets.UTF_8));
-        String requestLine;
-        try { requestLine=controlInput.readLine(); }
-        catch(Exception error) { emit(WorkerEvent.Type.STATUS,fields("status","RUNNING")); return fail("WORKER_REQUEST_INVALID","Unable to parse Worker request JSON"); }
         JsonNode input;
         try {
-            JsonParser parser=mapper.getFactory().createParser(requestLine);
-            input=mapper.readTree(parser);
-            if(parser.nextToken()!=null) { emit(WorkerEvent.Type.STATUS,fields("status","RUNNING")); return fail("WORKER_REQUEST_INVALID","Only one JSON request is accepted per Worker process"); }
+            controlParser=mapper.getFactory().createParser(new BufferedReader(new InputStreamReader(System.in,StandardCharsets.UTF_8)));
+            input=mapper.readTree(controlParser);
         } catch(Exception error) {
             emit(WorkerEvent.Type.STATUS,fields("status","RUNNING"));
             return fail("WORKER_REQUEST_INVALID","Unable to parse Worker request JSON");
         }
         if(input==null) { emit(WorkerEvent.Type.STATUS,fields("status","RUNNING")); return fail("WORKER_REQUEST_INVALID","A JSON request is required"); }
         if(input!=null&&input.hasNonNull("jobId")) jobId=input.get("jobId").asText();
+        if(!"load".equals(input.path("command").asText())) {
+            try {
+                if(controlParser.nextToken()!=null) { emit(WorkerEvent.Type.STATUS,fields("status","RUNNING")); return fail("WORKER_REQUEST_INVALID","Only one JSON request is accepted per Worker process"); }
+            } catch(Exception error) {
+                emit(WorkerEvent.Type.STATUS,fields("status","RUNNING"));
+                return fail("WORKER_REQUEST_INVALID","Unable to parse Worker request JSON");
+            }
+        }
         return executeRequest(input);
     }
 
@@ -176,7 +179,7 @@ public final class WorkerMain {
         }
         if ("load".equals(request.command)) {
             Thread executionThread = Thread.currentThread();
-            Thread control = new Thread(() -> listenForLoadCancellation(controlInput, executionThread), "att-worker-load-control");
+            Thread control = new Thread(() -> listenForLoadCancellation(controlParser, executionThread), "att-worker-load-control");
             control.setDaemon(true);
             control.start();
         }
@@ -297,19 +300,16 @@ public final class WorkerMain {
         }
     }
 
-    private void listenForLoadCancellation(BufferedReader input, Thread executionThread) {
+    private void listenForLoadCancellation(JsonParser input, Thread executionThread) {
         if(input==null)return;
         try {
-            String line;
-            while((line=input.readLine())!=null) {
-                try {
-                    JsonNode command=mapper.readTree(line);
-                    if("CANCEL".equals(command.path("type").asText())&&jobId!=null&&jobId.equals(command.path("jobId").asText())) {
-                        shutdownCancellationRequested=true;
-                        executionThread.interrupt();
-                        return;
-                    }
-                } catch(Exception ignored) { /* Ignore malformed optional control lines. */ }
+            while(input.nextToken()!=null) {
+                JsonNode command=mapper.readTree(input);
+                if("CANCEL".equals(command.path("type").asText())&&jobId!=null&&jobId.equals(command.path("jobId").asText())) {
+                    shutdownCancellationRequested=true;
+                    executionThread.interrupt();
+                    return;
+                }
             }
         } catch(Exception ignored) { /* Closing stdin ends the optional control channel. */ }
     }
