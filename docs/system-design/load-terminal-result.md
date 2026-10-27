@@ -72,7 +72,16 @@ PENDING or has FAILED.
 
 ## Detailed artifacts and metrics coverage
 
-`LoadReportWriter` emits archived `load-summary.json` and YAML with the additive
+`LoadReportWriter` stages `load-summary.json`, YAML, standalone HTML, and
+versioned details before promoting them into the run directory. It writes
+`load-report-manifest.json` last with bundle state, run identity, measured
+duration, checkpoint sequence references, and each report path's byte length
+and SHA-256. The manifest is the commit marker: a failure during rendering or
+promotion leaves it absent. The Server refuses to publish a canonical LOAD
+summary unless the marker, all four essential report files, all listed hashes,
+and the versioned detail manifest verify.
+
+The report uses the additive
 `att-load-summary/v1.3` schema. It preserves exact aggregate counters and
 thresholds while moving long aggregate and per-workload metric collections into
 `details/v1/` files described by `details/v1/manifest.json` using

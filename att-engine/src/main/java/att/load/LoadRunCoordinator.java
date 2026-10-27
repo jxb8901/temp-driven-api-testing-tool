@@ -205,6 +205,8 @@ public final class LoadRunCoordinator implements AutoCloseable {
             final long startedAt = timing.now();
             final Instant startInstant = LoadSchedulerSupport.instant(startedAt);
             final LoadMetrics aggregate = LoadMetrics.forScenario(scenario, startedAt, rateWindow);
+            aggregate.enableCheckpoints(outputRoot.resolve("load").resolve(runId).resolve("checkpoints").resolve("aggregate"),
+                    runId, "aggregate");
             aggregateHolder[0] = aggregate;
             for (LoadScheduler scheduler : schedulers.values()) {
                 if (scheduler instanceof ClosedVuScheduler)

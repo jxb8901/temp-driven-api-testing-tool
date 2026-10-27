@@ -53,6 +53,27 @@ class LoadThresholdWindowTest {
         assertEquals("NOT_EVALUATED", run.toMap().get("performanceVerdict"));
     }
 
+    @Test void overallCompletedRateThresholdEvaluatesTheFullConfiguredWindow() {
+        Map<String, Object> thresholds = Collections.<String, Object>singletonMap("overall",
+                map("completedRate", ">= 1/s", "successfulRate", ">= 1/s", "droppedRate", "<= 0%"));
+        LoadScenario scenario = scenario(thresholds, 0L, 2_000L, 0L);
+        LoadMetrics metrics = LoadMetrics.forScenario(scenario, 10_000L, 2_000L);
+        for (int i = 0; i < 2; i++) {
+            long scheduledAt = 10_000L + i * 1_000L;
+            metrics.onEvent(LoadEvent.completed("overall-threshold", "arrivalRate", "STEADY", "i" + i,
+                    null, i + 1L, scheduledAt, scheduledAt, scheduledAt + 10L, ResultStatus.PASS));
+        }
+        metrics.finish(12_000L);
+
+        LoadThresholdSummary verdict = new LoadThresholdEvaluator().evaluate(scenario, metrics.snapshot());
+        assertEquals("MET", verdict.status(), () -> att.validation.JsonSupport.write(verdict.toMap()));
+        assertTrue(verdict.results().stream().anyMatch(result -> "overall.completedRate".equals(result.name())
+                && "PASS".equals(result.status()) && "1.000/s".equals(result.actual())));
+        LoadRunResult run = new LoadRunResult("overall-threshold", scenario, Instant.ofEpochMilli(10_000L),
+                Instant.ofEpochMilli(12_000L), metrics.snapshot(), verdict, Collections.<String, Object>emptyMap());
+        assertEquals("MET", run.performanceVerdict());
+    }
+
     private static LoadScenario scenario(Map<String, Object> thresholds, long rampUp, long steady, long rampDown) {
         LoadWorkload workload = new LoadWorkload("work", "template", "PAYMENTS", Collections.emptyMap(), Collections.emptyMap(),
                 LoadScenario.Model.ARRIVAL_RATE, 0, 10.0, "10/s", Duration.ZERO, Duration.ofMillis(rampUp),

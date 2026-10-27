@@ -1674,19 +1674,34 @@ final class ServerRuntime implements AutoCloseable {
         return runDraftView(draft);
     }
     private void resolveFailedCases(ObjectNode input,String principal,String packageId) throws Exception {
-        Path selectedManifest=null;
+        byte[] selectedManifest=null;
         for(Map<String,Object> previous:store.listOwned(100,principal)) {
-            if(!packageId.equals(previous.get("packageId"))||!"run".equals(previous.get("command"))||!List.of("PASS","FAIL","ERROR","INVALID").contains(previous.get("status")))continue;
-            Path output=config.dataDir.resolve("jobs").resolve(String.valueOf(previous.get("jobId"))).resolve("output");
-            if(!Files.isDirectory(output))continue;
-            List<Path> manifests;
-            try(var files=Files.walk(output,3)){manifests=files.filter(file->file.getFileName().toString().equals("run.yaml")&&Files.isRegularFile(file,java.nio.file.LinkOption.NOFOLLOW_LINKS)).toList();}
-            if(manifests.isEmpty())continue; // A Template/Flow/Tool RUN has a specialized report, not a Case manifest.
-            if(manifests.size()!=1||Files.size(manifests.get(0))>8*1024*1024)throw new IllegalArgumentException("Previous Case RUN manifest is unavailable or exceeds the selection limit");
-            selectedManifest=manifests.get(0);break;
+            if(!principal.equals(previous.get("principal"))||!packageId.equals(previous.get("packageId"))||!"run".equals(previous.get("command"))||!List.of("PASS","FAIL","ERROR","INVALID").contains(previous.get("status")))continue;
+            String previousJobId=String.valueOf(previous.get("jobId"));
+            Path output=config.dataDir.resolve("jobs").resolve(previousJobId).resolve("output");
+            if(Files.isDirectory(output)) {
+                List<Path> manifests=List.of();
+                try(var files=Files.walk(output,3)){manifests=files.filter(file->file.getFileName().toString().equals("run.yaml")&&Files.isRegularFile(file,java.nio.file.LinkOption.NOFOLLOW_LINKS)).toList();}
+                catch(java.nio.file.NoSuchFileException archivedDuringScan) {
+                    // The archive writer can remove the source after the directory check.
+                }
+                if(manifests.size()>1)throw new IllegalArgumentException("Previous Case RUN manifest is unavailable or exceeds the selection limit");
+                if(manifests.size()==1) {
+                    Path manifest=manifests.get(0);
+                    try {
+                        if(Files.size(manifest)>8*1024*1024)throw new IllegalArgumentException("Previous Case RUN manifest is unavailable or exceeds the selection limit");
+                        selectedManifest=Files.readAllBytes(manifest);
+                    } catch(java.nio.file.NoSuchFileException archivedDuringRead) {
+                        // Archive cleanup can remove the source between discovery and reading; use its verified ZIP copy below.
+                    }
+                }
+            }
+            if(selectedManifest==null)selectedManifest=archivedCaseRunManifest(previousJobId);
+            if(selectedManifest!=null)break;
+            // A Template/Flow/Tool RUN has a specialized report, not a Case manifest.
         }
         if(selectedManifest==null)throw new IllegalArgumentException("No completed owned Case RUN is available for rerunFailed");
-        Object document=new Yaml().load(Files.readString(selectedManifest));
+        Object document=new Yaml().load(new String(selectedManifest,StandardCharsets.UTF_8));
         if(!(document instanceof Map<?,?> manifest)||!(manifest.get("cases") instanceof List<?> cases))throw new IllegalArgumentException("Previous Case RUN manifest is invalid");
         List<String> failed=new ArrayList<>();
         for(Object value:cases)if(value instanceof Map<?,?> row&&List.of("FAIL","ERROR","INVALID").contains(row.get("status"))&&row.get("caseId") instanceof String id) {
@@ -1694,6 +1709,20 @@ final class ServerRuntime implements AutoCloseable {
         }
         if(failed.isEmpty())throw new IllegalArgumentException("Previous Case RUN has no failed cases matching this selection");
         input.set("caseIds",JSON.valueToTree(failed));input.remove("rerunFailed");
+    }
+    private byte[] archivedCaseRunManifest(String jobId) throws Exception {
+        try(ArtifactRead archive=openArtifactArchive(jobId,false)) {
+            List<Map<?,?>> manifests=new ArrayList<>();
+            Object entries=archive.verified.manifest.get("entries");
+            if(entries instanceof List<?> rows)for(Object value:rows)if(value instanceof Map<?,?> row
+                    &&row.get("path") instanceof String path&&(path.equals("run.yaml")||path.endsWith("/run.yaml")))manifests.add(row);
+            if(manifests.isEmpty())return null;
+            if(manifests.size()!=1||!(manifests.get(0).get("size") instanceof Number size)||size.longValue()>8*1024*1024)
+                throw new IllegalArgumentException("Previous Case RUN manifest is unavailable or exceeds the selection limit");
+            return archive.verified.read(String.valueOf(manifests.get(0).get("path")));
+        } catch(ArchiveUnavailableException unavailable) {
+            return null;
+        }
     }
     private Map<String,Object> runDraftView(RunDraft draft) {
         Map<String,Object> view=new LinkedHashMap<>(draft.preview);
@@ -3757,8 +3786,8 @@ final class ServerRuntime implements AutoCloseable {
                     archiveStatus(id,"ARCHIVING","");
                     if(!Files.isDirectory(output))throw new java.io.IOException("Worker output is unavailable");
                     cleanupArtifactStaging(archive.getParent());
-                    // Preserve producer-approved bytes in the ZIP. Archive publication never redacts or rewrites.
-                    artifactPublisher.publish(output,archive,ServerRuntime::approvedArtifactBytes);
+                    // Preserve the exact bytes produced by the Engine/Worker; ZIP publication never rewrites them.
+                    artifactPublisher.publish(output,archive,ServerRuntime::validateApprovedArtifactBytes);
                 }
                 metrics.phase("publication");
                 archiveStatus(id,"READY","");
@@ -3889,6 +3918,12 @@ final class ServerRuntime implements AutoCloseable {
         final int limit=16*1024*1024;
         byte[] bytes;
         try(var input=Files.newInputStream(file)){bytes=input.readNBytes(limit+1);}
+        validateApprovedArtifactBytes(file,bytes);
+        return bytes;
+    }
+    /** Reject unsafe captured output while leaving accepted bytes owned by ArtifactArchive unchanged. */
+    static void validateApprovedArtifactBytes(Path file,byte[] bytes) {
+        final int limit=16*1024*1024;
         if(bytes.length>limit)throw new IllegalArgumentException("Artifact exceeds the safe text download limit (16 MiB)");
         String text;
         try {text=java.nio.charset.StandardCharsets.UTF_8.newDecoder()
@@ -3927,7 +3962,6 @@ final class ServerRuntime implements AutoCloseable {
             } catch(IllegalArgumentException rejected) {throw rejected;}
               catch(Exception invalid) {throw new IllegalArgumentException("Invalid structured artifact cannot be exported");}
         }
-        return bytes;
     }
     /** Legacy sanitized export projection; retained only for compatibility tests and callers. */
     byte[] publicArtifact(String id, Path file) throws Exception {
@@ -4290,7 +4324,7 @@ final class ServerRuntime implements AutoCloseable {
     private static void terminateTree(Process process){process.toHandle().descendants().forEach(ProcessHandle::destroy);process.destroy();}
     private static void forceTree(Process process){process.toHandle().descendants().forEach(ProcessHandle::destroyForcibly);process.destroyForcibly();}
     @FunctionalInterface interface WorkerProcessLauncher { Process start(ProcessBuilder builder) throws java.io.IOException; }
-    @FunctionalInterface interface ArtifactPublisher { Path publish(Path output,Path archive,ArtifactArchive.Publisher publisher) throws Exception; }
+    @FunctionalInterface interface ArtifactPublisher { Path publish(Path output,Path archive,ArtifactArchive.EntryValidator validator) throws Exception; }
     private static final class AdmissionLease {
         private final Semaphore admission,load;private final java.util.concurrent.atomic.AtomicBoolean released=new java.util.concurrent.atomic.AtomicBoolean();
         AdmissionLease(Semaphore admission,Semaphore load){this.admission=admission;this.load=load;}

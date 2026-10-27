@@ -22,6 +22,43 @@ import static org.junit.jupiter.api.Assertions.*;
 class LoadReportTest {
     @TempDir Path temp;
 
+    @Test void publishesReportBundleManifestWithVerifiedFileChecksums() throws Exception {
+        Instant started = Instant.parse("2026-10-26T00:00:00Z");
+        LoadScenario scenario = new LoadScenario(Paths.get("manifest.yaml"), "template", "SIMPLE",
+                Collections.emptyMap(), Collections.emptyMap(), LoadScenario.Model.CLOSED, 1, 0.0, "closed",
+                Duration.ZERO, Duration.ZERO, Duration.ofSeconds(2), Duration.ZERO, Duration.ZERO,
+                1, "drop", Collections.emptyMap(), Collections.emptyMap());
+        LoadMetrics metrics = LoadMetrics.forScenario(scenario, started.toEpochMilli(), 2_000L);
+        metrics.finish(started.plusSeconds(2).toEpochMilli());
+        LoadRunResult result = new LoadRunResult("report-manifest", scenario, started, started.plusSeconds(2), metrics.snapshot());
+
+        Path report = new LoadReportWriter().write(temp, result);
+        Path runDirectory = temp.resolve("load/report-manifest");
+        @SuppressWarnings("unchecked") Map<String, Object> manifest = att.validation.JsonSupport.mapper()
+                .readValue(runDirectory.resolve(LoadReportWriter.REPORT_MANIFEST).toFile(), Map.class);
+        assertEquals(LoadReportWriter.REPORT_MANIFEST_SCHEMA, manifest.get("schemaVersion"));
+        assertEquals("COMPLETE", manifest.get("state"));
+        assertEquals(Boolean.TRUE, manifest.get("complete"));
+        assertEquals("report-manifest", manifest.get("runId"));
+        @SuppressWarnings("unchecked") List<Map<String, Object>> files = (List<Map<String, Object>>) manifest.get("files");
+        assertTrue(files.stream().anyMatch(row -> "load-summary.json".equals(row.get("path"))));
+        assertTrue(files.stream().anyMatch(row -> "load-summary.yaml".equals(row.get("path"))));
+        assertTrue(files.stream().anyMatch(row -> "report/index.html".equals(row.get("path"))));
+        assertTrue(files.stream().anyMatch(row -> "details/v1/manifest.json".equals(row.get("path"))));
+        for (Map<String, Object> file : files) {
+            String relative = (String) file.get("path");
+            Path target = runDirectory.resolve(relative).normalize();
+            assertTrue(target.startsWith(runDirectory));
+            byte[] bytes = Files.readAllBytes(target);
+            assertEquals(bytes.length, ((Number) file.get("lengthBytes")).longValue());
+            assertEquals(sha256(bytes), file.get("sha256"), relative);
+        }
+        @SuppressWarnings("unchecked") Map<String, Object> summary = att.validation.JsonSupport.mapper()
+                .readValue(runDirectory.resolve("load-summary.json").toFile(), Map.class);
+        assertEquals(LoadReportWriter.REPORT_MANIFEST, summary.get("reportManifest"));
+        assertTrue(Files.isRegularFile(report));
+    }
+
     @Test void reportBudgetFailureRemovesPartialReportAndSidecarFiles() throws Exception {
         Instant started = Instant.parse("2026-10-26T00:00:00Z");
         long startMs = started.toEpochMilli();
@@ -96,7 +133,7 @@ class LoadReportTest {
         Files.createDirectories(runDirectory.resolve("executions/exec-1"));
         Files.write(runDirectory.resolve("executions/exec-1/case log<&.log"), Collections.singletonList("case log"), StandardCharsets.UTF_8);
         Path report = new LoadReportWriter().write(temp, result);
-        assertEquals(runDirectory.resolve("report/index.html").toAbsolutePath().normalize(), report.toAbsolutePath().normalize());
+        assertEquals(runDirectory.resolve("report/index.html").toRealPath(), report.toRealPath());
         assertTrue(Files.isRegularFile(runDirectory.resolve("load-summary.json")));
         assertTrue(Files.isRegularFile(runDirectory.resolve("load-summary.yaml")));
         assertTrue(Files.isRegularFile(report));
@@ -473,5 +510,12 @@ class LoadReportTest {
         StringBuilder out = new StringBuilder(Math.min(count, 1) * value.length());
         for (int i = 0; i < count; i++) out.append(value);
         return out.toString();
+    }
+
+    private static String sha256(byte[] bytes) throws Exception {
+        byte[] digest = java.security.MessageDigest.getInstance("SHA-256").digest(bytes);
+        StringBuilder value = new StringBuilder(64);
+        for (byte item : digest) value.append(String.format(java.util.Locale.ROOT, "%02x", item & 0xff));
+        return value.toString();
     }
 }

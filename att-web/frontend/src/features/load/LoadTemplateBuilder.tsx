@@ -141,6 +141,10 @@ export function LoadTemplateBuilder(props: LoadFeatureProps & { templateId: stri
     {!definition && <button className="button button-quiet" type="button" onClick={() => setReload(value => value + 1)}>Retry</button>}
     <label>Environment <select value={environment} onChange={event => onEnvironmentChange(event.target.value)}><option value="">Default environment</option>{environments.map(value => <option key={value}>{value}</option>)}</select></label>
       <EnvironmentResolutionNotice packageId={packageId} environment={environment} />
+    <aside className="att-help" role="note">
+      <p>Browser-created LOAD drafts follow the Server duration limit shown below (up to 24 hours). For a longer run, use a saved package LOAD scenario; that path-based flow does not use the inline draft duration cap.</p>
+      <button className="button button-quiet" type="button" onClick={() => navigation.navigate({ kind: 'load', tab: 'scenarios', catalog: { packageFilter: packageId, environment } })}>Open package LOAD scenarios</button>
+    </aside>
     <p>{workloads.length} Workloads · {targets.length} Target bindings · {unique} Unique targets · {model === 'virtualUsers' ? `${workloads.reduce((sum,row) => sum + Number(row.users),0)} total VU` : `${workloads.reduce((sum,row) => { const [rate,unit] = row.arrivalRate.split('/'); return sum + Number(rate) / (unit === 'm' ? 60 : 1); },0)} configured arrivals/sec`}</p>
     {limits.maxTotalUsers > 0 && <p className="att-help">Server limits: {limits.maxWorkloads} workloads · {limits.maxTargets} bindings · {limits.maxTotalUsers} users · {limits.maxAggregateArrivalRatePerSecond} arrivals/sec · {limits.maxTotalConcurrent} total concurrent · {limits.maxDurationSeconds}s duration</p>}
     {definition && <>

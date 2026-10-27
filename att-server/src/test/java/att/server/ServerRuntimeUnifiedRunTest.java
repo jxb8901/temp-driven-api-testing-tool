@@ -108,8 +108,10 @@ class ServerRuntimeUnifiedRunTest {
             Map<String,Object> accepted=runtime.submitRunDraft(ServerRuntime.JSON.valueToTree(Map.of("packageId","p","draftId",allDraft.get("draftId"))),"alice","alice");
             Map<String,Object> allResult=ServerRuntimeTestSupport.awaitUnifiedJob(runtime,String.valueOf(accepted.get("jobId")));
             assertEquals("FAIL",((Map<?,?>)allResult.get("job")).get("status"),allResult.toString());
-            Path completedOutput=temp.resolve("unified-data").resolve("jobs").resolve(String.valueOf(accepted.get("jobId"))).resolve("output");
-            assertTrue(Files.isRegularFile(completedOutput.resolve("latest-run.yaml")),allResult.toString());
+            String completedJobId=String.valueOf(accepted.get("jobId"));
+            Path completedOutput=temp.resolve("unified-data").resolve("jobs").resolve(completedJobId).resolve("output");
+            awaitArchivedOutput(runtime,completedJobId,completedOutput);
+            assertTrue(runtime.archiveEntry(completedJobId,"latest-run.yaml").length>0,allResult.toString());
             var rerun=(com.fasterxml.jackson.databind.node.ObjectNode)all.deepCopy();rerun.set("selection",ServerRuntime.JSON.valueToTree(Map.of("rerunFailed",true)));
             Map<String,Object> failed=runtime.createRunDraft(rerun,"alice");assertEquals(List.of("cases.default.C2"),failed.get("selectedCaseIds"));
             Map<String,Object> stale=runtime.createRunDraft(selection,"alice");
@@ -129,5 +131,14 @@ class ServerRuntimeUnifiedRunTest {
             assertEquals("PASS",((Map<?,?>)ServerRuntimeTestSupport.awaitUnifiedJob(runtime,String.valueOf(oneSlotAccepted.get("jobId"))).get("job")).get("status"));
             assertDoesNotThrow(()->runtime.createDebugDraft(debugInput,"quota-boundary"),"A resource RUN draft must occupy and release one quota slot");
         }
+    }
+
+    private static void awaitArchivedOutput(ServerRuntime runtime,String jobId,Path output) throws Exception {
+        long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(30);
+        while(System.nanoTime()<deadline) {
+            if("READY".equals(runtime.artifactIndex(jobId).get("archiveStatus"))&&!Files.exists(output))return;
+            Thread.sleep(20);
+        }
+        fail("Archive cleanup did not remove the RUN output: "+runtime.artifactIndex(jobId));
     }
 }

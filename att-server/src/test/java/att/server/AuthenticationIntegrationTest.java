@@ -247,10 +247,10 @@ class AuthenticationIntegrationTest {
             } while(System.nanoTime()<archiveDeadline);
             assertEquals("READY",archiveIndex.path("archiveStatus").asText());
             Path archiveOutput=Files.createDirectory(temp.resolve("approved-archive-fixture"));
-            Files.writeString(archiveOutput.resolve("case.log"),"password=export-canary\nbusiness=preserved\n");
-            Files.writeString(archiveOutput.resolve("report.html"),"<html><a href=\"case.log\">Case log</a><script>fetch('/api/v1/jobs')</script></html>");
-            ArtifactArchive.build(archiveOutput,data.resolve("jobs").resolve(archiveJobId).resolve("artifacts.zip"),file->
-                    att.server.api.internal.DiagnosticSanitizer.redactText(Files.readString(file)).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            Files.writeString(archiveOutput.resolve("case.log"),"password=[REDACTED_SECRET]\nbusiness=preserved\n");
+            String reportHtml="<html><a href=\"case.log\">Case log</a><script>fetch('/api/v1/jobs')</script></html>";
+            Files.writeString(archiveOutput.resolve("report.html"),reportHtml);
+            ArtifactArchive.build(archiveOutput,data.resolve("jobs").resolve(archiveJobId).resolve("artifacts.zip"));
             for(String route:List.of(artifactBase,artifactBase+"/archive.zip",artifactBase+"/view/case.log",artifactBase+"/view/report.html")) {
                 assertEquals(200,sendWithCookie(client,port,"GET",route,viewerCookie,null,null,null).statusCode(),route);
                 assertEquals(200,sendBasicViaTrustedProxy(client,port,"GET",route,"https://att.example.test",null,colleagueBasic,null).statusCode(),"Every USER may read another USER's approved archive: "+route);
@@ -259,9 +259,10 @@ class AuthenticationIntegrationTest {
             }
             HttpResponse<String> archivedLog=sendWithCookie(client,port,"GET",artifactBase+"/view/case.log",viewerCookie,null,null,null);
             assertEquals("sandbox; default-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'self'",archivedLog.headers().firstValue("Content-Security-Policy").orElseThrow());
-            assertFalse(archivedLog.body().contains("export-canary"));assertTrue(archivedLog.body().contains("business=preserved"));
+            assertEquals("password=[REDACTED_SECRET]\nbusiness=preserved\n",archivedLog.body());
             assertTrue(archivedLog.headers().firstValue("Content-Type").orElseThrow().startsWith("text/plain"));
             HttpResponse<String> archivedHtml=sendWithCookie(client,port,"GET",artifactBase+"/view/report.html",viewerCookie,null,null,null);
+            assertEquals(reportHtml,archivedHtml.body(),"The preview serves the original report bytes and applies sandbox policy through response headers");
             assertTrue(archivedHtml.headers().firstValue("Content-Security-Policy").orElseThrow().contains("sandbox allow-scripts; default-src 'none'"));
             assertEquals("SAMEORIGIN",archivedHtml.headers().firstValue("X-Frame-Options").orElseThrow());
             assertEquals("private, no-store",archivedHtml.headers().firstValue("Cache-Control").orElseThrow());

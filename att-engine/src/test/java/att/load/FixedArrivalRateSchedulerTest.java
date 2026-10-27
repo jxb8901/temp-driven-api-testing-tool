@@ -38,6 +38,27 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class FixedArrivalRateSchedulerTest {
     @TempDir Path testdataRoot;
 
+    @Test
+    void rejectedSubmissionIsRetainedAsAClassifiedDroppedArrival() throws Exception {
+        LoadScenario scenario = scenario(10.0, 0L, 0L, 500L, 0L, 1);
+        FakeTiming fake = new FakeTiming();
+        List<LoadEvent> events = Collections.synchronizedList(new ArrayList<LoadEvent>());
+        LoadRunResult result = new FixedArrivalRateScheduler(scenario, request -> result(request.iterationId()),
+                "forced-rejection", events::add, fake.timing(),
+                () -> { throw new java.util.concurrent.RejectedExecutionException("forced for accounting test"); })
+                .run();
+
+        assertEquals(FixedArrivalRateScheduler.arrivalsBeforeDeadline(scenario), result.metrics().longValue("dropped"));
+        assertEquals(result.metrics().longValue("dropped"), events.stream().filter(LoadEvent::dropped).count());
+        assertTrue(events.stream().filter(LoadEvent::dropped)
+                .allMatch(event -> "SUBMISSION_REJECTED".equals(event.errorType())));
+        @SuppressWarnings("unchecked") Map<String, Object> dropClassifications =
+                (Map<String, Object>) result.metrics().value("dropClassifications");
+        assertEquals(result.metrics().longValue("dropped"),
+                ((Number) dropClassifications.get("SUBMISSION_REJECTED")).longValue());
+        assertEquals(0L, result.metrics().longValue("currentInFlight"));
+    }
+
     @Test void oneSchedulerExceptionRetainsClassifiedDiagnosticWithoutCaseLog() throws Exception {
         LoadScenario scenario=scenario(10,0,0,500,0,1);
         java.util.concurrent.atomic.AtomicInteger calls=new java.util.concurrent.atomic.AtomicInteger();

@@ -227,7 +227,7 @@ class ServerRuntimeLoadTerminalResultTest {
         assertTrue(((Map<?,?>) summaryMetrics.get("metrics")).containsKey("detailSeries"));
         assertTrue(Files.size(report) > 0L);
 
-        Path archive = ArtifactArchive.build(output, temp.resolve("synthetic-long-load.zip"), Files::readAllBytes, 0L);
+        Path archive = ArtifactArchive.build(output, temp.resolve("synthetic-long-load.zip"), 0L);
         long includedBytes = 0L; int includedEntries = 0; long detailBytes = 0L; int detailFiles = 0; long maxEntryBytes = 0L;
         try (java.util.zip.ZipFile zip = new java.util.zip.ZipFile(archive.toFile())) {
             java.util.Enumeration<? extends java.util.zip.ZipEntry> entries = zip.entries();

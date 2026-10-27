@@ -38,7 +38,7 @@ class ArtifactPublicationFaultTest {
             long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(5);
             while(job.processFence==null&&System.nanoTime()<deadline)Thread.sleep(10);
             assertNotNull(job.processFence);
-            Files.writeString(runtime.outputDirectoryForJob(first).resolve("case.log"),"password=private-canary");
+            Files.writeString(runtime.outputDirectoryForJob(first).resolve("case.log"),"password=[REDACTED_SECRET]");
             if(!"ledger-failure".equals(failure))job.processFence.unverified();
             if("ledger-failure".equals(failure))sql(config,"ALTER TABLE job_worker_processes RENAME TO unavailable_worker_processes");
             if("quarantine-store-failure".equals(failure))sql(config,"ALTER TABLE jobs RENAME COLUMN worker_quarantined TO unavailable_quarantine");
@@ -93,9 +93,9 @@ class ArtifactPublicationFaultTest {
 
     @Test void terminalResultDoesNotBypassTheActiveExecutionFence() throws Exception {
         AtomicInteger publications = new AtomicInteger();
-        try (ServerRuntime runtime = runtime((output, archive, publisher) -> {
+        try (ServerRuntime runtime = runtime((output, archive, validator) -> {
             publications.incrementAndGet();
-            return ArtifactArchive.build(output, archive, publisher);
+            return ArtifactArchive.build(output, archive,validator);
         })) {
             Job job = terminalJob(runtime, "J0000000000000001");
             runtime.jobs.put(job.id, job);
@@ -111,7 +111,7 @@ class ArtifactPublicationFaultTest {
     }
 
     @Test void candidateLimitPublicationPersistsStructuredArchiveFailureDiagnostic() throws Exception {
-        ServerRuntime.ArtifactPublisher capped=(output,archive,publisher)->ArtifactArchive.buildForTest(output,archive,publisher,2);
+        ServerRuntime.ArtifactPublisher capped=(output,archive,validator)->ArtifactArchive.buildForTest(output,archive,2,validator);
         try(ServerRuntime runtime=runtime(capped)) {
             String id="J0000000000000298";
             Job job=terminalJob(runtime,id);job.exitCode=0;runtime.store.update(job);
@@ -134,7 +134,7 @@ class ArtifactPublicationFaultTest {
     }
 
     @Test void archiveLimitFailureHasItsOwnStructuredStateAndPreservesExecutionOutcome() throws Exception {
-        try (ServerRuntime runtime = runtime((output, archive, publisher) -> {
+        try (ServerRuntime runtime = runtime((output, archive, validator) -> {
             throw new ArtifactArchive.LimitFailure("total cap", "artifact.archive.totalBytes",
                     ArtifactArchive.MAX_TOTAL_BYTES, ArtifactArchive.MAX_TOTAL_BYTES + 1L);
         })) {
@@ -201,12 +201,12 @@ class ArtifactPublicationFaultTest {
         org.junit.jupiter.api.Assumptions.assumeFalse(isWindows(), "Uses a POSIX Worker protocol fixture");
         CountDownLatch archiving = new CountDownLatch(1), release = new CountDownLatch(1);
         AtomicInteger publications = new AtomicInteger();
-        try (ServerRuntime runtime = runtime((output, archive, publisher) -> {
+        try (ServerRuntime runtime = runtime((output, archive, validator) -> {
             if (publications.incrementAndGet() == 1) {
                 archiving.countDown();
                 if (!release.await(10, TimeUnit.SECONDS)) throw new java.io.IOException("Test publication gate expired");
             }
-            return ArtifactArchive.build(output, archive, publisher);
+            return ArtifactArchive.build(output, archive,validator);
         })) {
             try {
                 var request = ServerRuntime.JSON.createObjectNode().put("packageId", "p");
@@ -285,9 +285,9 @@ class ArtifactPublicationFaultTest {
 
     @Test void simulatedDiskFailurePreservesPrivateSourceAndRetryPublishesOnlyApprovedBytes() throws Exception {
         AtomicInteger attempts = new AtomicInteger();
-        try (ServerRuntime runtime = runtime((output, archive, publisher) -> {
+        try (ServerRuntime runtime = runtime((output, archive, validator) -> {
             if (attempts.incrementAndGet() == 1) throw new java.nio.file.FileSystemException(output.toString(), null, "disk-full-private-canary");
-            return ArtifactArchive.build(output, archive, publisher);
+            return ArtifactArchive.build(output, archive,validator);
         })) {
             Job job = terminalJob(runtime, "J0000000000000001");
             runtime.scheduleArtifactArchive(job.id);
@@ -310,13 +310,13 @@ class ArtifactPublicationFaultTest {
     @Test void retriesAcceptedDuringPublicationAreCoalescedAndNotLostOnFailure() throws Exception {
         CountDownLatch entered = new CountDownLatch(1), release = new CountDownLatch(1);
         AtomicInteger attempts = new AtomicInteger();
-        try (ServerRuntime runtime = runtime((output, archive, publisher) -> {
+        try (ServerRuntime runtime = runtime((output, archive, validator) -> {
             if (attempts.incrementAndGet() == 1) {
                 entered.countDown();
                 if (!release.await(10, TimeUnit.SECONDS)) throw new java.io.IOException("Publication gate expired");
                 throw new java.io.IOException("Injected publication failure");
             }
-            return ArtifactArchive.build(output, archive, publisher);
+            return ArtifactArchive.build(output, archive,validator);
         })) {
             try {
                 Job job = terminalJob(runtime, "J0000000000000001");
@@ -334,9 +334,9 @@ class ArtifactPublicationFaultTest {
         org.junit.jupiter.api.Assumptions.assumeTrue(Files.getFileAttributeView(temp,
                 java.nio.file.attribute.PosixFileAttributeView.class) != null, "Requires POSIX directory permissions");
         AtomicInteger publications = new AtomicInteger();
-        try (ServerRuntime runtime = runtime((output, archive, publisher) -> {
+        try (ServerRuntime runtime = runtime((output, archive, validator) -> {
             publications.incrementAndGet();
-            return ArtifactArchive.build(output, archive, publisher);
+            return ArtifactArchive.build(output, archive,validator);
         })) {
             Job job = terminalJob(runtime, "J0000000000000001");
             Path output = runtime.outputDirectoryForJob(job.id);
@@ -378,7 +378,7 @@ class ArtifactPublicationFaultTest {
         CountDownLatch first = new CountDownLatch(1), releaseFirst = new CountDownLatch(1);
         CountDownLatch retry = new CountDownLatch(1), releaseRetry = new CountDownLatch(1);
         AtomicInteger attempts = new AtomicInteger();
-        try (ServerRuntime runtime = runtime((output, archive, publisher) -> {
+        try (ServerRuntime runtime = runtime((output, archive, validator) -> {
             if (attempts.incrementAndGet() == 1) {
                 first.countDown();
                 if (!releaseFirst.await(10, TimeUnit.SECONDS)) throw new java.io.IOException("Initial gate expired");
@@ -386,7 +386,7 @@ class ArtifactPublicationFaultTest {
             }
             retry.countDown();
             if (!releaseRetry.await(10, TimeUnit.SECONDS)) throw new java.io.IOException("Retry gate expired");
-            return ArtifactArchive.build(output, archive, publisher);
+            return ArtifactArchive.build(output, archive,validator);
         })) {
             try {
                 Job job = terminalJob(runtime, "J0000000000000001");
@@ -440,7 +440,7 @@ class ArtifactPublicationFaultTest {
     @Test void cancellationArchivesPartialOutputOnlyAfterTheSurvivingWriterIsStopped() throws Exception {
         org.junit.jupiter.api.Assumptions.assumeFalse(isWindows(), "Uses a POSIX Worker and detached-writer fixture");
         Path writer = Files.writeString(temp.resolve("writer.sh"), "#!/bin/sh\ntrap '' TERM\n"
-                + "printf 'password=private-cancel-canary\\nbusiness=partial\\n' >> \"$1/case.log\"\n"
+                + "printf 'password=att-test-private-canary\\nbusiness=partial\\n' >> \"$1/case.log\"\n"
                 + "touch \"$1/child.ready\"\n"
                 + "while :; do printf 'business=partial\\n' >> \"$1/case.log\"; sleep 0.02; done\n");
         String launcher = "#!/bin/sh\nIFS= read -r request\n"
@@ -449,11 +449,11 @@ class ArtifactPublicationFaultTest {
                 + "echo $! > \"$output/child.pid\"\nwait\n";
         var child = new java.util.concurrent.atomic.AtomicReference<ProcessHandle>();
         AtomicInteger publications = new AtomicInteger();
-        try (ServerRuntime runtime = runtime((output, archive, publisher) -> {
+        try (ServerRuntime runtime = runtime((output, archive, validator) -> {
             assertNotNull(child.get());
             assertFalse(child.get().isAlive(), "A surviving child must not write during publication");
             publications.incrementAndGet();
-            return ArtifactArchive.build(output, archive, publisher);
+            return ArtifactArchive.build(output, archive,validator);
         }, launcher)) {
             try {
                 String id = String.valueOf(runtime.submit("run", ServerRuntime.JSON.createObjectNode().put("packageId", "p"), "user-a").get("jobId"));

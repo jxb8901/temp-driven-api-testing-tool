@@ -122,7 +122,7 @@ public final class ApiServlet extends HttpServlet {
                 res.setContentType(mime+"; charset=UTF-8");res.setHeader("X-Content-Type-Options","nosniff");
                 res.setHeader("Cache-Control","private, no-store");res.setHeader("Content-Disposition","inline");
                 // Text destinations must remain navigable inside the report iframe, not inherit API frame denial.
-                String policy=html?"sandbox allow-scripts; "+ArtifactHtmlPolicy.CONTENT_POLICY
+                String policy=html?"sandbox allow-scripts; "+ArtifactPreviewPolicy.CONTENT_POLICY
                         :"sandbox; default-src 'none'; base-uri 'none'; form-action 'none'";
                 res.setHeader("Content-Security-Policy",policy+"; frame-ancestors 'self'");
                 res.setContentLengthLong(bytes.length);res.getOutputStream().write(bytes);return;

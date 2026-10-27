@@ -98,6 +98,7 @@ public final class FixedArrivalRateScheduler implements LoadScheduler {
         long startedAt = startGate == null ? timing.now() : startGate.awaitStart();
         Instant start = LoadSchedulerSupport.instant(startedAt);
         final LoadMetrics metrics = LoadMetrics.forScenario(scenario, startedAt, LoadPhase.totalMs(scenario));
+        enableCheckpoints(metrics);
         if (workers == null) {
             workers = new ThreadPoolExecutor(scenario.maxConcurrent(), scenario.maxConcurrent(), 0L, TimeUnit.MILLISECONDS,
                     new ArrayBlockingQueue<Runnable>(scenario.maxConcurrent()),
@@ -220,6 +221,8 @@ public final class FixedArrivalRateScheduler implements LoadScheduler {
             synchronized (admissionLock) {
                 if (cancelled.get()) {
                     inFlight.decrementAndGet();
+                    LoadSchedulerSupport.emit(metrics, listener, tag(LoadEvent.rejected(runId, "arrivalRate", phase, id,
+                            sequenceValue, dueAt, timing.now(), "CANCELLED_BEFORE_ADMISSION")));
                     signalWorkerChange();
                     return;
                 }
@@ -228,11 +231,15 @@ public final class FixedArrivalRateScheduler implements LoadScheduler {
                 catch (RejectedExecutionException rejected) {
                     admittedTasks.remove(id, taskHandle);
                     inFlight.decrementAndGet();
+                    LoadSchedulerSupport.emit(metrics, listener, tag(LoadEvent.rejected(runId, "arrivalRate", phase, id,
+                            sequenceValue, dueAt, timing.now(), "SUBMISSION_REJECTED")));
                     signalWorkerChange();
                 }
             }
         } catch (RejectedExecutionException rejected) {
             inFlight.decrementAndGet();
+            LoadSchedulerSupport.emit(metrics, listener, tag(LoadEvent.rejected(runId, "arrivalRate", phase, id,
+                    sequenceValue, dueAt, timing.now(), "SUBMISSION_REJECTED")));
             signalWorkerChange();
         }
     }
@@ -243,6 +250,15 @@ public final class FixedArrivalRateScheduler implements LoadScheduler {
         synchronized (completionMonitor) { completionMonitor.notifyAll(); }
     }
 
+    private void enableCheckpoints(LoadMetrics metrics) {
+        if (evidenceOutputRoot == null) return;
+        String workload = scenario.workloadId() == null ? "aggregate" : "workload-" + safe(scenario.workloadId());
+        String directory = scenario.workloadId() == null ? "aggregate"
+                : LoadMetricsCheckpointStore.workloadCheckpointDirectoryName(scenario.workloadId());
+        metrics.enableCheckpoints(evidenceOutputRoot.resolve("load").resolve(runId).resolve("checkpoints").resolve(directory),
+                runId, workload);
+    }
+
     private LoadEvent tag(LoadEvent event) {
         return scenario.legacyV10() ? event : event.withWorkloadIdentity(
                 scenario.workloadId(), scenario.targetType(), scenario.targetId());
@@ -250,7 +266,8 @@ public final class FixedArrivalRateScheduler implements LoadScheduler {
     private Path evidenceOutputRoot(String iterationId) {
         if (evidenceStore == null || evidenceOutputRoot == null || !evidenceStore.reserveSuccessEvidence(iterationId, scenario.workloadId())) return null;
         Path root = evidenceOutputRoot.resolve("load").resolve(runId).resolve("iterations");
-        return scenario.legacyV10() ? root : root.resolve(safe(scenario.workloadId()));
+        return scenario.legacyV10() ? root : root.resolve(
+                LoadMetricsCheckpointStore.workloadCheckpointDirectoryName(scenario.workloadId()));
     }
     private long remainingRunMillis(long startedAt) {
         return LoadPhase.totalMs(scenario) - (timing.now() - startedAt);

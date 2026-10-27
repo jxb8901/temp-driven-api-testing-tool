@@ -182,9 +182,9 @@ public final class LoadTerminalResult {
     }
 
     private static Map<String, Object> metricSummary(Map<?, ?> source) {
-        String[] counters = {"scheduled", "started", "completed", "success", "failure", "runtimeError", "dropped",
+        String[] counters = {"scheduled", "started", "completed", "success", "failure", "runtimeError", "otherOutcome", "dropped",
                 "measuredScheduled", "measuredStarted", "measuredCompleted", "measuredSuccess", "measuredFailure",
-                "measuredRuntimeError", "measuredDropped", "latencyObservationCount", "latencySampleCount",
+                "measuredRuntimeError", "measuredOtherOutcome", "measuredDropped", "latencyObservationCount", "latencySampleCount",
                 "maxInFlight", "maxActiveVus", "configuredUsers", "configuredMaxConcurrent"};
         String[] rates = {"achievedArrivalRate", "measuredAchievedArrivalRate", "completedThroughput",
                 "measuredCompletedThroughput", "successfulThroughput", "p50Ms", "p90Ms", "p95Ms", "p99Ms",
@@ -192,6 +192,8 @@ public final class LoadTerminalResult {
         Map<String, Object> out = new LinkedHashMap<String, Object>();
         for (String key : counters) putNumber(out, key, source.get(key));
         for (String key : rates) putNumber(out, key, source.get(key));
+        Map<String, Object> accounting = accountingSummary(source.get("accounting"));
+        if (!accounting.isEmpty()) out.put("accounting", accounting);
         return out;
     }
 
@@ -239,8 +241,10 @@ public final class LoadTerminalResult {
                 putText(item, "performanceVerdict", workload.get("performanceVerdict"), 24);
                 Map<?, ?> metrics = map(workload.get("metrics"));
                 Map<String, Object> counters = new LinkedHashMap<String, Object>();
-                for (String key : new String[] {"scheduled", "started", "completed", "success", "failure", "runtimeError", "dropped"})
+                for (String key : new String[] {"scheduled", "started", "completed", "success", "failure", "runtimeError", "otherOutcome", "dropped"})
                     putNumber(counters, key, metrics.get(key));
+                Map<String, Object> accounting = accountingSummary(metrics.get("accounting"));
+                if (!accounting.isEmpty()) counters.put("accounting", accounting);
                 if (!counters.isEmpty()) item.put("metrics", counters);
                 items.add(item);
             }
@@ -260,13 +264,56 @@ public final class LoadTerminalResult {
             putText(item, "performanceVerdict", workload.get("performanceVerdict"), 24);
             Map<?, ?> metrics = map(workload.get("metrics"));
             Map<String, Object> counters = new LinkedHashMap<String, Object>();
-            for (String key : new String[] {"scheduled", "started", "completed", "success", "failure", "runtimeError", "dropped"})
+            for (String key : new String[] {"scheduled", "started", "completed", "success", "failure", "runtimeError", "otherOutcome", "dropped"})
                 putNumber(counters, key, metrics.get(key));
+            Map<String, Object> accounting = accountingSummary(metrics.get("accounting"));
+            if (!accounting.isEmpty()) counters.put("accounting", accounting);
             if (!counters.isEmpty()) item.put("metrics", counters);
             if (!item.isEmpty()) items.add(item);
         }
         out.put("total", total); out.put("items", items);
         out.put("omittedCount", Math.max(0, total - items.size()));
+        return out;
+    }
+
+    private static Map<String, Object> accountingSummary(Object value) {
+        Map<?, ?> source = map(value);
+        if (source.isEmpty()) return Collections.emptyMap();
+        Map<String, Object> out = new LinkedHashMap<String, Object>();
+        putText(out, "state", source.get("state"), 24);
+        if (source.get("finalized") instanceof Boolean) out.put("finalized", source.get("finalized"));
+        putNumber(out, "scopesChecked", source.get("scopesChecked"));
+        Map<?, ?> workloadAggregate = map(source.get("workloadAggregate"));
+        if (!workloadAggregate.isEmpty()) {
+            Map<String, Object> aggregate = new LinkedHashMap<String, Object>();
+            putText(aggregate, "state", workloadAggregate.get("state"), 24);
+            putNumber(aggregate, "workloadCount", workloadAggregate.get("workloadCount"));
+            Map<?, ?> sums = map(workloadAggregate.get("sums"));
+            Map<String, Object> boundedSums = new LinkedHashMap<String, Object>();
+            for (String key : new String[] {"scheduled", "started", "completed", "success", "failure", "runtimeError", "otherOutcome", "dropped", "currentInFlight"})
+                putNumber(boundedSums, key, sums.get(key));
+            if (!boundedSums.isEmpty()) aggregate.put("sums", boundedSums);
+            aggregate.put("violations", boundedViolations(workloadAggregate.get("violations")));
+            out.put("workloadAggregate", aggregate);
+        }
+        out.put("violations", boundedViolations(source.get("violations")));
+        return out;
+    }
+
+    private static List<Map<String, Object>> boundedViolations(Object value) {
+        List<Map<String, Object>> out = new ArrayList<Map<String, Object>>();
+        if (!(value instanceof Iterable)) return out;
+        for (Object item : (Iterable<?>) value) {
+            if (!(item instanceof Map) || out.size() >= 8) continue;
+            Map<?, ?> source = (Map<?, ?>) item;
+            Map<String, Object> bounded = new LinkedHashMap<String, Object>();
+            putText(bounded, "code", source.get("code"), 64);
+            putText(bounded, "field", source.get("field"), 96);
+            putNumber(bounded, "actual", source.get("actual"));
+            putNumber(bounded, "expected", source.get("expected"));
+            if (!bounded.containsKey("expected")) putText(bounded, "expected", source.get("expected"), 32);
+            out.add(bounded);
+        }
         return out;
     }
 

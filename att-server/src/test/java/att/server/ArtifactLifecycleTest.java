@@ -55,7 +55,7 @@ class ArtifactLifecycleTest {
             assertEquals(Files.size(runtime.artifactArchivePath(id)),ready.zipBytes);
             assertEquals(ready.zipBytes,runtime.artifactIndex(id).get("archiveSizeBytes"));
             assertNotNull(ready.compressionRatio);
-            for(Double elapsed:List.of(ready.queueWaitMs,ready.publicationWallMs,ready.scanClassificationRedactionMs,
+            for(Double elapsed:List.of(ready.queueWaitMs,ready.publicationWallMs,ready.scanValidationPreservationMs,
                     ready.zipWriteMs,ready.verificationFsyncMs,ready.cleanupMs))assertTrue(elapsed>=0);
             assertTrue(ready.writerCpuMs==null||ready.writerCpuMs>=0);
             assertTrue(ready.writerAllocatedBytes==null||ready.writerAllocatedBytes>=0);
@@ -126,7 +126,7 @@ class ArtifactLifecycleTest {
                 assertFalse(Files.exists(runtime.outputDirectoryForJob(id)));
                 byte[] preview=runtime.archiveEntry(id,"case.log");
                 assertArrayEquals(ArtifactArchive.read(runtime.artifactArchivePath(id),"case.log"),preview);
-                assertFalse(new String(preview,java.nio.charset.StandardCharsets.UTF_8).contains("archive-canary"));
+                assertTrue(new String(preview,java.nio.charset.StandardCharsets.UTF_8).contains("password=[REDACTED_SECRET]"));
                 assertTrue(new String(preview,java.nio.charset.StandardCharsets.UTF_8).contains("business=unchanged"));
                 assertEquals(job.principal,runtime.jobRecord(id).get("principal"));
             }
@@ -168,6 +168,44 @@ class ArtifactLifecycleTest {
         }
     }
 
+    @Test void canonicalLoadReportRemainsRetrievableAfterServerRestart() throws Exception {
+        ServerConfig config;
+        String id="J0000000000000001";
+        String reportPath="load/archive-preview/report/index.html";
+        byte[] reportBytes;
+        try(ServerRuntime runtime=runtime()) {
+            config=runtime.config;job(runtime,id,"PASS");
+            Path scenarioPath=temp.resolve("load-restart.yaml");
+            Files.write(scenarioPath,Collections.singletonList("schemaVersion: att-load/v1.9\nworkloads:\n"
+                    +"- id: archive-preview\n  target: {type: tool, id: sample.getAcDate}\n"
+                    +"  load: {users: 1, duration: 2s}\n"),StandardCharsets.UTF_8);
+            LoadScenario scenario=new LoadScenarioLoader(temp).load(scenarioPath);
+            Instant started=Instant.parse("2026-10-24T00:00:00Z");long startMs=started.toEpochMilli();
+            LoadMetrics metrics=LoadMetrics.forScenario(scenario,startMs,3_000L);
+            metrics.onEvent(LoadEvent.completed("archive-preview","closed","STEADY","iteration-1","VU-1",1,
+                    startMs+1_000L,startMs+1_000L,startMs+1_050L,ResultStatus.PASS));
+            metrics.finish(startMs+3_000L);
+            Path report=new LoadReportWriter().write(runtime.outputDirectoryForJob(id),
+                    new LoadRunResult("archive-preview",scenario,started,started.plusSeconds(3),metrics.snapshot()));
+            reportBytes=Files.readAllBytes(report);
+            String html=new String(reportBytes,StandardCharsets.UTF_8);
+            assertTrue(html.contains("renderCharts"),"The offline report should contain its chart renderer");
+            assertFalse(html.contains("<script src="),"The report must not need a remote script to render offline");
+            runtime.scheduleArtifactArchive(id);awaitState(runtime,id,"READY");
+            Map<String,Object> index=runtime.artifactIndex(id);
+            assertTrue(((List<?>)index.get("primaryReports")).stream().anyMatch(value->
+                    reportPath.equals(((Map<?,?>)value).get("path"))));
+            assertEquals(Boolean.TRUE,ArtifactArchive.verify(runtime.artifactArchivePath(id),true).get("complete"));
+            assertArrayEquals(reportBytes,runtime.archiveEntry(id,reportPath));
+        }
+        try(ServerRuntime restarted=new ServerRuntime(config,temp.resolve("libs").toString())) {
+            awaitState(restarted,id,"READY");
+            assertArrayEquals(reportBytes,restarted.archiveEntry(id,reportPath),
+                    "A fresh Server instance must retrieve the same committed LOAD report bytes");
+            assertTrue(Boolean.TRUE.equals(ArtifactArchive.verify(restarted.artifactArchivePath(id),true).get("complete")));
+        }
+    }
+
     @Test void failuresKeepPrivateSourceAndRetryWhileLiveJobsStayUnarchived() throws Exception {
         try(ServerRuntime runtime=runtime()) {
             String id="J0000000000000001";job(runtime,id,"RUNNING");
@@ -190,7 +228,7 @@ class ArtifactLifecycleTest {
         try(ServerRuntime runtime=runtime()) {
             config=runtime.config;job(runtime,id,"PASS");
             Path output=runtime.outputDirectoryForJob(id);Files.writeString(output.resolve("case.log"),"safe");
-            ArtifactArchive.build(output,runtime.artifactArchivePath(id),file->runtime.publicArtifact(id,file));
+            ArtifactArchive.build(output,runtime.artifactArchivePath(id));
             Files.writeString(output.getParent().resolve("archive-status.json"),"{\"state\":\"ARCHIVING\"}");
             Files.writeString(output.getParent().resolve(".artifact-orphan.zip.tmp"),"incomplete");
             Path abandonedExports=Files.createDirectories(output.getParent().resolve(".artifact-export-orphan/nested"));
@@ -309,17 +347,16 @@ class ArtifactLifecycleTest {
     @Test void corruptionNeverFallsBackToRawAndRecoveryOnlyRebuildsWhenSourceStillExists() throws Exception {
         try(ServerRuntime runtime=runtime()) {
             String id="J0000000000000001";job(runtime,id,"PASS");
-            Path output=runtime.outputDirectoryForJob(id);Files.writeString(output.resolve("case.log"),"password=private-canary\nbusiness=retained");
+            Path output=runtime.outputDirectoryForJob(id);Files.writeString(output.resolve("case.log"),"password=[REDACTED_SECRET]\nbusiness=retained");
             Files.writeString(runtime.artifactArchivePath(id),"partial central directory");
             Files.writeString(output.getParent().resolve("archive-status.json"),"{\"state\":\"READY\"}");
             assertEquals("FAILED",runtime.artifactIndex(id).get("archiveStatus"));
             assertThrows(ServerRuntime.ArchiveUnavailableException.class,()->runtime.archiveEntry(id,"case.log"));
-            assertTrue(Files.readString(output.resolve("case.log")).contains("private-canary"),"Failure must retain private source, not publish it");
-            Files.write(output.resolve("case.log"),runtime.publicArtifact(id,output.resolve("case.log")));
+            assertTrue(Files.readString(output.resolve("case.log")).contains("password=[REDACTED_SECRET]"),"Failure must retain the producer-protected source");
             runtime.retryArtifactArchive(id);awaitState(runtime,id,"READY");
             awaitMetrics(runtime,id,"READY");
             String published=new String(runtime.archiveEntry(id,"case.log"),java.nio.charset.StandardCharsets.UTF_8);
-            assertFalse(published.contains("private-canary"));assertTrue(published.contains("business=retained"));
+            assertEquals("password=[REDACTED_SECRET]\nbusiness=retained",published);
             long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(5);
             while(Files.exists(output)&&System.nanoTime()<deadline)Thread.sleep(10);
             assertFalse(Files.exists(output));
@@ -441,19 +478,19 @@ class ArtifactLifecycleTest {
                     + "password: |\n  export-canary-multiline\n"
                     + "-----BEGIN PRIVATE KEY-----\nexport-canary-pem\n-----END PRIVATE KEY-----\nbusiness=unchanged\n");
             Files.writeString(output.resolve("result.xml"), "<result><credentials>export-canary-xml</credentials><business>unchanged</business></result>");
-            Files.writeString(output.resolve("report.html"), "<html><body><pre>password=export-canary-html</pre><p>business=unchanged</p>"
-                    + "<a href='evidence.json'>Evidence</a></body></html>");
+            String reportHtml="<html><body><p>business=unchanged</p><a href='evidence.json'>Evidence</a></body></html>";
+            Files.writeString(output.resolve("report.html"), reportHtml);
             Files.writeString(output.resolve("result.csv"), "name,password\r\nBusiness Customer,export-canary-csv\r\n");
             Files.write(output.resolve("invalid-utf8.log"), new byte[] {(byte)0xc3, (byte)0x28});
             Files.write(output.resolve("binary.log"), new byte[] {0, 1});
             Map<String,byte[]> projected = new java.util.LinkedHashMap<>();
-            // The producer/fixture must create safe public artifacts before archiving. Publication
-            // preserves these bytes without any Server-side rewrite, including the HTML report.
-            for (String name : List.of("evidence.json", "evidence.yaml", "case.log", "result.xml", "result.csv", "report.html")) {
-                byte[] producerBytes = runtime.publicArtifact(id, output.resolve(name));
-                assertFalse(new String(producerBytes, java.nio.charset.StandardCharsets.UTF_8).contains("export-canary-"), name);
-                Files.write(output.resolve(name), producerBytes);
-                projected.put(name, producerBytes);
+            // Model producer-side protection for structured/log evidence. HTML remains the exact
+            // producer report so publication cannot rewrite its content or relative links.
+            for (String name : List.of("evidence.json", "evidence.yaml", "case.log", "result.xml", "result.csv")) {
+                byte[] bytes = runtime.publicArtifact(id, output.resolve(name));
+                assertFalse(new String(bytes, java.nio.charset.StandardCharsets.UTF_8).contains("export-canary-"), name);
+                projected.put(name, bytes);
+                Files.write(output.resolve(name), bytes);
             }
             // This fixture also exercises a safe producer snapshot for downstream business data;
             // previously projected sensitive containers are validated above, not ZIP-rewritten.
@@ -462,6 +499,7 @@ class ArtifactLifecycleTest {
                     "queue","ORDERS.REQUEST","remotePath","/remote/inbox/ordinary.txt"));
             Files.write(output.resolve("evidence.json"),safeBusiness);
             projected.put("evidence.json",safeBusiness);
+            projected.put("report.html",reportHtml.getBytes(java.nio.charset.StandardCharsets.UTF_8));
             runtime.scheduleArtifactArchive(id); awaitState(runtime, id, "READY");
             Map<String,Object> manifest = ArtifactArchive.verify(runtime.artifactArchivePath(id), true);
             assertEquals(false, manifest.get("complete"));

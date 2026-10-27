@@ -32,7 +32,7 @@ final class ArtifactMetricsRecorder {
         if (phase != null) {
             double elapsed = millis(now - phaseStarted);
             switch (phase) {
-                case "scan_classification_redaction" -> value.scanClassificationRedactionMs = add(value.scanClassificationRedactionMs, elapsed);
+                case "scan_validate_preserve" -> value.scanValidationPreservationMs = add(value.scanValidationPreservationMs, elapsed);
                 case "zip_write" -> value.zipWriteMs = add(value.zipWriteMs, elapsed);
                 case "verification_fsync" -> value.verificationFsyncMs = add(value.verificationFsyncMs, elapsed);
                 case "cleanup" -> value.cleanupMs = add(value.cleanupMs, elapsed);

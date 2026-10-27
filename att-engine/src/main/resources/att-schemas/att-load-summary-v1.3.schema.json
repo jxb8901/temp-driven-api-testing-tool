@@ -67,6 +67,9 @@
     "report": {
       "const": "report/index.html"
     },
+    "reportManifest": {
+      "const": "load-report-manifest.json"
+    },
     "detailManifestPath": {
       "type": "string",
       "const": "details/v1/manifest.json"

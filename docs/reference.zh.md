@@ -1515,6 +1515,8 @@ ATT 在 run root 寫入有界 load-summary.json/yaml 與 self-contained report/i
 
 直接 Engine／CLI `OperationResult` 輸出仍保留舊版完整 summary 詳細格式；其 schema 定義仍存於 `schemas/history/`。`LoadReportWriter` 輸出的 archived report 使用新增欄位的 `att-load-summary/v1.3`，並將大型 aggregate／per-workload metric collection 移至相對路徑 `details/v1/` sidecar，由 `details/v1/manifest.json` 引用。Inline collection 最多顯示 32 項 preview；每個 sidecar chunk 最多 4 MiB，sidecar 集合上限為 100 MiB／9,000 個檔案，完整 report output 上限為 120 MiB，每個主要 report 檔案最多 16 MiB。Aggregate counters 和 thresholds 維持精確。Server 代理 Job Results 則在 `result.summary` 使用 `att-load-terminal-result/v1`：執行結果、performance verdict、有界 aggregate counters、workload／threshold 預覽、主要診斷及 detail/archive 狀態。精簡 summary 上限為 32 KiB；量度終端 journal 和 SSE envelope 後均低於 48 KiB，並低於不變的 64 KiB journal event-data 上限。Worker frame 的 1 MiB 上限也維持不變。LOAD scheduling、virtual-user 和 arrival-rate 語義不變。
 
+Scenario 超過 24 小時時，Engine 會執行 read-only preflight 並在 summary 記錄 `resources.preflight`；此提示不會只因 duration 過長而拒絕 run。Browser inline draft 仍受 Server duration cap 限制；較長的 run 使用 package path-based LOAD。選擇性 CLI Local 手動 benchmark 見 [25 小時 LOAD soak acceptance 指南](operations/load-soak-acceptance.zh.md)。
+
 完整 buckets、failure samples、workload／threshold 細節及 evidence 仍保存在 `load-summary.json`、`load-summary.yaml`、`report/index.html` 及版本化 sidecar，Server 只透過現有授權 artifact archive routes 提供。Studio 先顯示精簡結果；開啟 Results 才載入 evidence/workload preview，開啟 Metrics 才載入 metric-series sidecar。初始 Job Details 不會請求 artifact。Archive availability 與執行結果獨立；`PENDING`、`ARCHIVING`、`READY`、`FAILED` 或詳細資料 omitted 均不會改變終端狀態或 exit code。ERROR 和 INVALID 會優先保留真實 runtime/preparation/validation 原因，而非 Worker／Journal truncation 或 archive 診斷。
 
 Load v1.9 新增 `all`、`measured`、`steady` 三個 event-time window。`measured` 從 warm-up 後開始，包含 ramp-up、steady、ramp-down；`steady` 只涵蓋配置的穩態 duration。HTML report 預設顯示 `steady`，並可切換其他 window。Scheduled、started、completed rate 依各 event timestamp 及配置 window duration 計算，因此 `startedRate` 仍按 event time 計算。`admissionRate` 則使用相同的 scheduled cohort：分子是該 window 內排程且在 run 結束前已開始的 arrival，分母是該 window 內全部排程 arrival；run 結束仍未開始的 arrival 視為未准入。Latency percentile 和 outcome count 依 scheduled cohort 計算，因此 drain 完成的 iteration 仍屬於其 scheduled phase。既有 top-level metric 名稱及 legacy 語義仍保留。
@@ -3123,27 +3125,23 @@ Load Template CLI: `load --list-templates [--format json]`, `load --debug <type>
 
 ### ATT Server Job artifact 發佈
 
-Worker 檔案在 Server 核准其最終 bytes 前，均屬 **Raw/Trusted Worker Output**；只符合目錄邊界不代表可安全匯出。此邊界適用於 RUN（含 Debug mode、Case、Template、Flow、Tool、batch）、LOAD 及保留的 legacy Jobs。
+Worker 檔案在 Server 核准前會留在私有目錄。Artifact producer 在寫檔前套用敏感資料保護。Archive 不是遮罩邊界：它驗證路徑、檔案類型、大小及 UTF-8 文字，然後原樣保留擷取到的 producer bytes。此邊界適用於 RUN（含 Debug mode、Case、Template、Flow、Tool、batch）、LOAD 及保留的 legacy Jobs。
 
 執行結束後，Server 非同步建立唯一的 `artifacts.zip`。Archive 狀態為 `PENDING`、`ARCHIVING`、`READY` 或 `FAILED`，與 Job result 分開；PASS/FAIL/ERROR/INVALID/CANCELLED 不會因發佈未完成而改變。驗證及原子發佈成功後刪除 loose output。ZIP 是唯一持久 artifact payload；metadata、audit、events 及 archive-status 記錄另行保留。
 
 #### 發佈及敏感資料政策
 
-只接納一般、非 symlink 的 UTF-8 檔案，副檔名包括 `txt`、`log`、`json`、`yaml`、`yml`、`xml`、`html`、`htm`、`css`、`csv`、`md`。Binary、無效 UTF-8、無效 structured data、巢狀 archive 及不支援格式會被排除；公開 manifest 不會列出被拒絕的檔名。Studio 會顯示 omissions，不會把不完整匯出稱為完整 raw output。
+Archive 接納一般、非 symlink 的 UTF-8 文字檔，副檔名包括 `txt`、`log`、`json`、`yaml`、`yml`、`xml`、`html`、`htm`、`css`、`csv`、`md`。Binary、無效 UTF-8、NUL bytes、巢狀 archive 及不支援格式會被排除；公開 manifest 不會列出被拒絕的檔名。Archive 將 JSON/YAML 視為 producer 寫入的文字，不會在發佈時解析、遮罩或重新序列化。Studio 會顯示 omissions，不會把不完整匯出稱為完整 output。
 
-Logs、文字、XML、HTML、CSV 會套用必要的 secret-field、authorization header、bearer/basic token、連線 URL 憑證、private key 及 cookie 保護，並投影 host-local paths。JSON/YAML（包括 Tool/DB 結果、服務回應及 Evidence）先經有界 safe loader 解析，再遞迴保護敏感欄位及明確分類為 `secret` 的 record，最後序列化為有效格式。一般 business values（包括姓名或可能受規管的資料）若不符合明確敏感規則便會保留；不提供任意 PII 自動偵測。操作 Job 的授權不等於 raw-secret 匯出權限，也沒有公開 raw-export 或 raw-file fallback。
+Logs、文字、XML、CSV 及生成的 structured results 由 producer 在寫檔前套用相關 secret、credential 及 path 保護；Archive 原樣保留結果 bytes。一般 business values（包括姓名或可能受規管的資料）若不符合 producer 的明確敏感規則便會保留；不提供任意 PII 自動偵測。操作 Job 的授權不等於 raw-secret 匯出權限，也沒有公開 raw-export 或 raw-file fallback。
 
-支援的敏感名稱包括 password/passphrase、token、secret、credentials、API/access/private key、authorization、cookies。Structured field name 內符合明確 secret text 規則的內容亦會受保護；secret/path projection 後名稱衝突會拒絕該 entry，不會靜默覆寫 business field。敏感 business data 應放在明確敏感的欄位，或把其所屬 structured record 分類為 `secret`。
+Producer 端保護的敏感名稱包括 password/passphrase、token、secret、credentials、API/access/private key、authorization、cookies。Structured field name 內符合明確 secret text 規則的內容亦會受保護；secret/path projection 後名稱衝突會由 producer 拒絕，不會靜默覆寫 business field。敏感 business data 應放在明確敏感的欄位，或把其所屬 structured record 分類為 `secret`。Producer 必須在資料進入 archive input tree 前完成保護。
 
-Artifact data 不可使用 Server-issued Debug default-pointer 例外。已知私有 Job/Package prefix 即使位於 remote-location field 亦會投影；location field 不會令任意巢狀 object 免除保護。一般 remote path、queue name 等 semantic location scalar 仍屬 business value。
-
-JSON 拒絕 duplicate key、尾隨 document 及超過 64 層的 nesting。YAML 拒絕 duplicate key、collection alias 和 unsafe tag。Numeric scalar 最多 1,000 characters；finite decimal 及大型 integer 在匯出時保留精確數值，包括 YAML base-60 number。不支援的 non-finite YAML number 會令 entry 被拒絕，不會發佈經 rounding 或無效的值。
-
-HTML 發佈前經 parser 清理：保留已核准的 relative links、inline styling 及 digest allowlist 中經審核的內建 RUN search/sort script；移除其他 script、active markup、external links、base URL 及離開已核准 archive 的 navigation。缺少或排除的 evidence link 會標示 unavailable。最終 HTML 內含 offline CSP；online viewer 另加 opaque-origin sandbox、相同 restrictive CSP、禁止 forms 及 Studio-origin 權限。任意自訂 raw HTML 的 controls 因而可能與發佈版本不同。
+Engine 生成的 artifact data 會在寫檔前套用 path 及 secret projection。Archive 不檢查 semantic fields，也不改寫已知 paths。HTTP HTML preview 使用 opaque-origin sandbox、restrictive CSP、禁止 forms，且不授予 Studio-origin 權限。下載報告的 relative links 會依 archive 內檔案配置解析，前提是目標檔案存在。
 
 #### Manifest 及 Resource limits
 
-`export-manifest-v1.json` 使用 manifest version `1`、policy `att-export-approved-bytes-v1`（仍可讀取舊版 `att-export-safe-text-v2` ZIP）。ZIP 完整保留 producer 輸出的核准 bytes；敏感值必須在 artifact 生成前完成遮罩。每個 entry 記錄 logical path、media type、byte size、SHA-256、report/preview eligibility、classification 及 publication decision。`complete` 和彙總 `omissions` 不包含被拒絕的檔名或值。ZIP、preview 及解壓檔案使用完全相同的最終 bytes；GET 不會再次獨立遮罩。
+`export-manifest-v1.json` 使用 manifest version `1`、policy `att-export-approved-bytes-v1`；新 entry 的 decision 為 `preserved`（仍可讀取舊版 `att-export-safe-text-v2` ZIP）。ZIP 完整保留 producer 輸出的核准 bytes；敏感值必須在 artifact 生成前完成遮罩。每個 entry 記錄 logical path、media type、精確 byte size、SHA-256、report/preview eligibility、classification 及 publication decision。`complete` 和彙總 `omissions` 不包含被拒絕的檔名或值。ZIP、preview 及解壓檔案使用相同的已擷取 bytes；GET 不會再次獨立遮罩。
 
 Inventory 不受 `server.maxArtifacts` 限制：最多 50,000 filesystem candidates、深度 64、10,000 已發佈 entries、每項 16 MiB、總 bytes 128 MiB、manifest 8 MiB。超出總量上限會使發佈失敗並保留私有來源。ZIP 使用 STORED encoding，避免重複 log 的 compression-ratio 歧義。Reader 拒絕不安全路徑、control characters、encoded traversal、重複或大小寫衝突名稱、過大或高壓縮比 entries、未列入 manifest 的 entries 及 integrity mismatch。Writer 為單一有界佇列，同時最多八個 artifact reads。
 
@@ -3163,7 +3161,7 @@ Authenticated archive index 僅在 ZIP 已驗證且為 READY 時回傳 `archiveS
 
 ZIP download 在 JVM 的 OS temporary directory 建立 request-private snapshot，每份最多 140 MiB。Server 先驗證完整副本及所有 entry digest，再設定 download headers；response length 取自該副本，並從相同 open handle 串流。每個 64 KiB buffer 在寫出前比對已保存的 SHA-256，因此 published pathname 後續被替換或原地修改，都不能以其他 bytes 取代 response。既有八個 concurrent reader 上限亦限制同時存在的 download snapshot，部署時須預留 temporary disk space。正常完成、disconnect 或 approval 失敗會關閉及刪除副本；process 突然終止可能留下 temporary files，須由 OS 或 operator 清理。Entry preview 仍使用獨立 request-scoped verified ZIP handle 及逐 entry digest/CRC 檢查。
 
-**Jobs and results → Metrics** 的 **Artifact archive** 顯示獨立 Server 發佈指標，即使 terminal ERROR Job 沒有 Load result 亦可查看。Job detail 和 archive index 都提供 typed `archiveMetrics`（version 1），獨立持久化，不會混入 Worker execution metrics。Attempts/retries 跨重啟保留；時間和 resource 用量描述最新 writer attempt。Queue wait 至 writer 開始時結束；`publicationWallMs` 包括 writer finalization 和 cleanup，但不含 queue wait。Stage milliseconds 分別量度 scan/classification/redaction、ZIP compression/write、verification/file-fsync 和 private/staging cleanup。Source file count/bytes 計入被拒絕的 regular file；included/omitted count 描述該次發佈。Ratio 為 approved uncompressed entry bytes 除以完整 ZIP bytes（包含 manifest），並非節省空間百分比。Source byte sum 最多為 signed 64-bit 上限。
+**Jobs and results → Metrics** 的 **Artifact archive** 顯示獨立 Server 發佈指標，即使 terminal ERROR Job 沒有 Load result 亦可查看。Job detail 和 archive index 都提供 typed `archiveMetrics`（version 1），獨立持久化，不會混入 Worker execution metrics。Attempts/retries 跨重啟保留；時間和 resource 用量描述最新 writer attempt。Queue wait 至 writer 開始時結束；`publicationWallMs` 包括 writer finalization 和 cleanup，但不含 queue wait。Stage milliseconds 分別量度 scan、validation 和 byte capture、ZIP compression/write、verification/file-fsync 和 private/staging cleanup。Source file count/bytes 計入被拒絕的 regular file；included/omitted count 描述該次發佈。Ratio 為 approved uncompressed entry bytes 除以完整 ZIP bytes（包含 manifest），並非節省空間百分比。Source byte sum 最多為 signed 64-bit 上限。
 
 `writerCpuMs` 僅量度 Server writer thread，且須 JVM 已支援並啟用 thread CPU timing。`writerAllocatedBytes` 是該 thread 的 allocated-byte delta，不是 retained memory、JVM heap 或 peak memory；不會量度 Worker CPU 或主動啟用 JVM instrumentation。不支援／未啟用的量度或未執行的 stage（例如重用既有 verified ZIP）回傳 `null` 並顯示 Unavailable，不會填入假零。真正 empty input 的 file/entry count 為零，但 ZIP 仍有 manifest。Outcome 和 failure phase/reason 僅使用固定安全 code，不包含 filename、data 或 exception message。RUNNING 代表 attempt 尚未完成；cleanup 失敗時為 CLEANUP_PENDING，但已驗證 ZIP 仍可下載。Metrics store 失敗會記錄安全 warning，不會改變 publication safety 或回退至 raw output。
 

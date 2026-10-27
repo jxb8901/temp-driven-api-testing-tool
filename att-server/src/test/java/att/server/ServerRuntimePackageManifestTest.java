@@ -114,9 +114,8 @@ class ServerRuntimePackageManifestTest {
             assertEquals("package",replayedSpec.configuration().get("environmentOrigin"));
             assertEquals("package.yaml",((Map<?,?>)replayedSpec.configuration().get("authoredPaths")).get("environment"));
             assertEquals(approved,runtime.jobRecord(jobId).get("configuration"),"Rerunning must leave the original Job configuration unchanged");
-            Path originalOutput=runtime.config.dataDir.resolve("jobs").resolve(jobId).resolve("output");
-            if(Files.isDirectory(originalOutput))for(Map.Entry<String,byte[]> entry:originalEvidence.entrySet())
-                assertArrayEquals(entry.getValue(),Files.readAllBytes(originalOutput.resolve(entry.getKey())),"Rerunning must not change the original Job's evidence");
+            for(Map.Entry<String,byte[]> entry:originalEvidence.entrySet())
+                assertArrayEquals(entry.getValue(),runtime.archiveEntry(jobId,entry.getKey()),"Rerunning must not change the original Job's evidence");
             var forged=ServerRuntime.JSON.createObjectNode();forged.put("packageId","owner");forged.set("configurationProvenance",ServerRuntime.JSON.valueToTree(approved));
             assertThrows(IllegalArgumentException.class,()->runtime.submit("debug",forged,"owner"));
         }
@@ -133,16 +132,21 @@ class ServerRuntimePackageManifestTest {
     }
 
     private static Map<String,byte[]> captureConfigurationEvidence(ServerRuntime runtime,String jobId,Map<String,Object> approved) throws Exception {
-        Path output=runtime.config.dataDir.resolve("jobs").resolve(jobId).resolve("output");
         Map<String,byte[]> found=new java.util.LinkedHashMap<>();
-        try(var files=Files.walk(output)) {
-            List<Path> evidence=files.filter(file->file.getFileName().toString().equals("configuration.json")).toList();
-            assertTrue(evidence.size()>=2,"Job and operation artifacts must retain evidence before archival");
-            for(Path file:evidence) {
-                byte[] bytes=Files.readAllBytes(file);
-                assertEquals(approved,ServerRuntime.JSON.readValue(bytes,Map.class));
-                found.put(output.relativize(file).toString(),bytes);
-            }
+        long archiveDeadline=System.nanoTime()+java.util.concurrent.TimeUnit.SECONDS.toNanos(30);
+        Map<String,Object> archive=runtime.artifactIndex(jobId);
+        while(!"READY".equals(archive.get("archiveStatus"))&&System.nanoTime()<archiveDeadline) {
+            Thread.sleep(20);archive=runtime.artifactIndex(jobId);
+        }
+        assertEquals("READY",archive.get("archiveStatus"),"Completed job evidence must be published before source cleanup");
+        List<?> items=(List<?>)archive.get("items");
+        List<String> evidence=items.stream().filter(Map.class::isInstance).map(Map.class::cast)
+                .map(item->String.valueOf(item.get("path"))).filter(path->path.endsWith("configuration.json")).toList();
+        assertTrue(evidence.size()>=2,"Job and operation artifacts must retain evidence");
+        for(String path:evidence) {
+            byte[] bytes=runtime.archiveEntry(jobId,path);
+            assertEquals(approved,ServerRuntime.JSON.readValue(bytes,Map.class));
+            found.put(path,bytes);
         }
         return found;
     }

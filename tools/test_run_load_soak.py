@@ -1,0 +1,375 @@
+import hashlib
+import importlib.util
+import json
+import tempfile
+import unittest
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from types import SimpleNamespace
+from unittest import mock
+
+MODULE_PATH = Path(__file__).with_name("run_load_soak.py")
+SPEC = importlib.util.spec_from_file_location("run_load_soak", MODULE_PATH)
+soak = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(soak)
+
+
+def seal_checkpoint(checkpoint):
+    checkpoint["schemaVersion"] = soak.CHECKPOINT_SCHEMA
+    checkpoint.pop("integritySha256", None)
+    envelope = json.dumps(checkpoint, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    checkpoint["integritySha256"] = hashlib.sha256(envelope).hexdigest()
+    return checkpoint
+
+
+def write_checkpoint(path, checkpoint):
+    path.write_text(json.dumps(checkpoint, separators=(",", ":"), ensure_ascii=False), encoding="utf-8")
+
+
+class LoadSoakEvidenceTest(unittest.TestCase):
+    def test_case_distinct_workload_checkpoint_directories_do_not_alias_on_casefolding_filesystems(self):
+        upper = soak.workload_checkpoint_directory("Payments")
+        lower = soak.workload_checkpoint_directory("payments")
+        self.assertNotEqual(upper.casefold(), lower.casefold())
+        self.assertEqual(soak.CHECKPOINT_DIRECTORY, soak.workload_checkpoint_directory("local-soak"))
+
+    def test_macos_resource_sampling_uses_supported_process_thread_rows(self):
+        def process_output(command, **kwargs):
+            if command[:3] == ["ps", "-o", "rss="]:
+                return "120000\n"
+            if command[:2] == ["ps", "-M"]:
+                return "USER PID COMMAND\nuser 123 java\n  123 thread-a\n  123 thread-b\n"
+            if command[0] == "lsof":
+                return "COMMAND PID USER FD TYPE NAME\njava 123 user cwd DIR /tmp\njava 123 user txt REG /tmp/att.jar\n"
+            raise AssertionError("unexpected command: {}".format(command))
+
+        with mock.patch.object(soak.platform, "system", return_value="Darwin"), \
+                mock.patch.object(soak.subprocess, "check_output", side_effect=process_output):
+            sample = soak.process_resource_sample(123)
+
+        self.assertTrue(sample["supported"])
+        self.assertEqual(120000 * 1024, sample["residentBytes"])
+        self.assertEqual(3, sample["threads"])
+        self.assertEqual(2, sample["openFileDescriptors"])
+
+    def test_checkpoint_reader_checks_identity_and_integrity(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            payload = {"metrics": {"completed": 30000, "success": 30000}}
+            checkpoint = {
+                "schemaVersion": soak.CHECKPOINT_SCHEMA,
+                "state": "CHECKPOINT",
+                "runId": "run-1",
+                "scope": soak.CHECKPOINT_SCOPE,
+                "sequence": 1,
+                "capturedAt": datetime.now(timezone.utc).isoformat(),
+                "finalized": False,
+                "payload": payload,
+            }
+            seal_checkpoint(checkpoint)
+            write_checkpoint(directory / "checkpoint-00000000000000000001.json", checkpoint)
+            self.assertEqual(1, soak.latest_checkpoint(directory, "run-1", soak.CHECKPOINT_SCOPE)["sequence"])
+            self.assertIsNone(soak.latest_checkpoint(directory, "other-run", soak.CHECKPOINT_SCOPE))
+            checkpoint["payload"]["metrics"]["completed"] = 1
+            write_checkpoint(directory / "checkpoint-00000000000000000001.json", checkpoint)
+            self.assertIsNone(soak.latest_checkpoint(directory, "run-1", soak.CHECKPOINT_SCOPE))
+
+    def test_checkpoint_digest_covers_timestamp_state_identity_and_sequence(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            payload = {"metrics": {"scheduled": 1, "started": 1, "completed": 1, "success": 1}}
+            original = seal_checkpoint({
+                "state": "FINAL_CHECKPOINT", "runId": "run-envelope", "scope": "aggregate",
+                "sequence": 1, "capturedAt": "2026-10-27T00:00:00Z", "finalized": True,
+                "payload": payload,
+            })
+            original_digest = original["integritySha256"]
+            variants = []
+            timestamp = json.loads(json.dumps(original)); timestamp["capturedAt"] = "2026-10-27T00:05:00Z"
+            variants.append((timestamp, "run-envelope", "aggregate", 1))
+            state = json.loads(json.dumps(original)); state["state"] = "CHECKPOINT"; state["finalized"] = False
+            variants.append((state, "run-envelope", "aggregate", 1))
+            run_id = json.loads(json.dumps(original)); run_id["runId"] = "other-run"
+            variants.append((run_id, "other-run", "aggregate", 1))
+            scope = json.loads(json.dumps(original)); scope["scope"] = "other-scope"
+            variants.append((scope, "run-envelope", "other-scope", 1))
+            sequence = json.loads(json.dumps(original)); sequence["sequence"] = 2
+            variants.append((sequence, "run-envelope", "aggregate", 2))
+
+            for variant, run_id, scope_id, sequence_id in variants:
+                variant["integritySha256"] = original_digest
+                path = directory / "checkpoint-{:020d}.json".format(sequence_id)
+                write_checkpoint(path, variant)
+                self.assertIsNone(soak.latest_checkpoint(directory, run_id, scope_id), variant["state"])
+                path.unlink()
+
+    def test_aggregate_checkpoint_scope_is_used_for_soak_progress(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            payload = {"metrics": {"scheduled": 12, "started": 12, "completed": 12, "success": 12}}
+            checkpoint = {
+                "schemaVersion": soak.CHECKPOINT_SCHEMA,
+                "state": "CHECKPOINT",
+                "runId": "run-aggregate",
+                "scope": "aggregate",
+                "sequence": 1,
+                "capturedAt": datetime.now(timezone.utc).isoformat(),
+                "finalized": False,
+                "payload": payload,
+            }
+            seal_checkpoint(checkpoint)
+            (directory / "checkpoint-00000000000000000001.json").write_text(
+                json.dumps(checkpoint, separators=(",", ":")), encoding="utf-8")
+            self.assertEqual("aggregate", soak.AGGREGATE_CHECKPOINT_SCOPE)
+            self.assertEqual(1, soak.latest_checkpoint(directory, "run-aggregate")["sequence"])
+
+    def test_five_minute_rates_keep_scheduled_started_completed_and_success_distinct(self):
+        start = datetime(2026, 10, 26, tzinfo=timezone.utc)
+
+        def checkpoint(sequence, seconds, metrics):
+            return {
+                "sequence": sequence,
+                "capturedAt": (start + timedelta(seconds=seconds)).isoformat(),
+                "payload": {"metrics": metrics},
+            }
+
+        before = checkpoint(1, 0, {"scheduled": 0, "started": 0, "completed": 0, "success": 0,
+                                   "failure": 0, "runtimeError": 0, "dropped": 0})
+        after = checkpoint(2, 300, {"configuredArrivalRatePerSecond": 150, "scheduled": 45000,
+                                    "started": 45000, "completed": 30000, "success": 29999,
+                                    "failure": 1, "runtimeError": 0, "otherOutcome": 0, "dropped": 0})
+        row = soak.delta_row(before, after)
+        self.assertEqual(150.0, row["scheduledTPS"])
+        self.assertEqual(150.0, row["startedTPS"])
+        self.assertEqual(100.0, row["completedTPS"])
+        self.assertAlmostEqual(29999 / 300.0, row["successfulTPS"])
+        self.assertEqual(1, row["failedCompletions"])
+        self.assertEqual(0, row["otherOutcomes"])
+        self.assertEqual(0, row["dropped"])
+
+    def test_acceptance_requires_the_exact_configured_arrival_total(self):
+        expected = 150 * 25 * 60 * 60
+        metrics = {"configuredArrivalRatePerSecond": 150.0, "scheduled": expected}
+        self.assertEqual(expected, soak.verify_scheduled_arrivals(metrics, 150, 25))
+        with self.assertRaisesRegex(RuntimeError, "scheduled arrivals"):
+            soak.verify_scheduled_arrivals(dict(metrics, scheduled=expected - 1), 150, 25)
+        with self.assertRaisesRegex(RuntimeError, "configured arrival rate"):
+            soak.verify_scheduled_arrivals(dict(metrics, configuredArrivalRatePerSecond=100.0), 150, 25)
+
+    def test_parameter_set_records_seed_target_and_all_arrival_controls(self):
+        parameters = soak.parameter_set(150, 25, 512)
+        self.assertEqual("CLI Local", parameters["executionPath"])
+        self.assertEqual({"type": "template", "id": "LOAD_SOAK_NOOP"}, parameters["target"])
+        self.assertEqual(177, parameters["seed"])
+        self.assertEqual("ARRIVAL_RATE", parameters["model"])
+        self.assertEqual(150, parameters["arrivalRatePerSecond"])
+        self.assertEqual(25, parameters["durationHours"])
+        self.assertEqual(512, parameters["maxConcurrent"])
+        self.assertEqual(150 * 25 * 60 * 60, parameters["expectedScheduledArrivals"])
+        self.assertEqual(soak.SOAK_THRESHOLDS, parameters["thresholds"])
+        self.assertEqual("metrics", parameters["evidenceMode"])
+
+    def test_generated_soak_scenario_requires_overall_completed_and_successful_rate(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            repository = root / "repository"
+            (repository / "schemas").mkdir(parents=True)
+            runtime = root / "runtime-source"
+            (runtime / "lib").mkdir(parents=True)
+            launcher = runtime / "att.sh"
+            launcher.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+            package_root = root / "installed" / "packages" / "default"
+            package_root.mkdir(parents=True)
+
+            scenario, _ = soak.install_soak_package(repository, runtime, package_root, 150, 25, 512)
+
+            text = scenario.read_text(encoding="utf-8")
+            self.assertIn('completedRate: \">= 100/s\"', text)
+            self.assertIn('successfulRate: \">= 100/s\"', text)
+            self.assertIn('droppedRate: \"<= 0%\"', text)
+
+    def test_report_bundle_requires_every_hash_and_essential_file(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            run = Path(temporary) / "run"
+            run.mkdir()
+            rows = []
+            for name in sorted(soak.REPORT_FILES):
+                target = run / name
+                target.parent.mkdir(parents=True, exist_ok=True)
+                if name == "load-summary.json":
+                    data = json.dumps({
+                        "runId": "run",
+                        "durationMs": 90000000,
+                        "executionStatus": "PASS",
+                        "performanceVerdict": "MET",
+                        "thresholds": {"status": "MET", "performanceVerdict": "MET", "results": [
+                            {"name": "overall.completedRate", "actual": "150.000/s", "status": "PASS"},
+                            {"name": "overall.successfulRate", "actual": "150.000/s", "status": "PASS"},
+                            {"name": "overall.droppedRate", "actual": "0.000%", "status": "PASS"},
+                        ]},
+                        "metrics": {
+                            "accounting": {"state": "VERIFIED"},
+                            "windowMetrics": {"windows": {"all": {
+                                "completedRate": 150.0, "successfulRate": 150.0, "droppedRate": 0.0,
+                            }}},
+                        },
+                        "report": "report/index.html",
+                        "reportManifest": "load-report-manifest.json",
+                    }).encode("utf-8")
+                else:
+                    data = ("content:" + name).encode("utf-8")
+                target.write_bytes(data)
+                rows.append({"path": name, "lengthBytes": len(data), "sha256": hashlib.sha256(data).hexdigest()})
+            manifest = {"schemaVersion": "att-load-report-manifest/v1", "state": "COMPLETE",
+                        "complete": True, "runId": "run", "durationMs": 90000000,
+                        "executionStatus": "PASS", "performanceVerdict": "MET",
+                        "accountingStatus": "VERIFIED", "files": rows}
+            (run / "load-report-manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+            verified = soak.verify_report_bundle(run)
+            summary = json.loads((run / "load-summary.json").read_text(encoding="utf-8"))
+            self.assertEqual("COMPLETE", verified["state"])
+            self.assertEqual("MET", soak.verify_soak_performance_verdict(verified, summary))
+            with self.assertRaisesRegex(RuntimeError, "did not evaluate its performance thresholds as MET"):
+                soak.verify_soak_performance_verdict(dict(verified, performanceVerdict="NOT_EVALUATED"), summary)
+            low_rate = json.loads(json.dumps(summary))
+            low_rate["metrics"]["windowMetrics"]["windows"]["all"]["completedRate"] = 99.0
+            with self.assertRaisesRegex(RuntimeError, "completedRate is below"):
+                soak.verify_soak_performance_verdict(verified, low_rate)
+            (run / "report/index.html").write_text("tampered", encoding="utf-8")
+            with self.assertRaises(RuntimeError):
+                soak.verify_report_bundle(run)
+
+    def test_interruption_preserves_verified_checkpoints_as_incomplete_evidence(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            run = root / "scratch" / "output" / "load" / "run-2"
+            checkpoint_dir = run / "checkpoints" / soak.AGGREGATE_CHECKPOINT_SCOPE
+            checkpoint_dir.mkdir(parents=True)
+            (run / "partial.txt").write_text("preserve", encoding="utf-8")
+            payload = {"metrics": {"scheduled": 5000, "started": 5000, "completed": 4999,
+                                   "success": 4999, "failure": 0, "runtimeError": 0,
+                                   "dropped": 0, "currentInFlight": 1}}
+            checkpoint = {
+                "schemaVersion": soak.CHECKPOINT_SCHEMA, "state": "CHECKPOINT",
+                "runId": "run-2", "scope": soak.AGGREGATE_CHECKPOINT_SCOPE, "sequence": 7,
+                "capturedAt": datetime.now(timezone.utc).isoformat(), "finalized": False,
+                "payload": payload,
+            }
+            seal_checkpoint(checkpoint)
+            write_checkpoint(checkpoint_dir / "checkpoint-00000000000000000007.json", checkpoint)
+            evidence_root = root / "evidence"
+            parameters = soak.parameter_set(150, 25, 512)
+            runtime = {"platform": "test", "java": "test runtime"}
+            result = soak.capture_incomplete_evidence(evidence_root, run, checkpoint_dir, "run-2",
+                                                      "abc123", 301.5, KeyboardInterrupt(), -15,
+                                                      parameters, runtime)
+            self.assertEqual("PARTIAL", result["result"])
+            self.assertFalse(result["complete"])
+            self.assertEqual("runner interrupted", result["reason"])
+            self.assertEqual(7, result["latestCheckpoint"]["sequence"])
+            self.assertEqual(parameters, result["parameterSet"])
+            self.assertEqual(runtime, result["runtime"])
+            self.assertTrue((evidence_root / "load" / "run-2" / "partial.txt").is_file())
+            saved = json.loads((evidence_root / "acceptance.json").read_text(encoding="utf-8"))
+            self.assertEqual("PARTIAL", saved["result"])
+
+    def test_fake_process_failure_preserves_checkpoint_before_temporary_runtime_cleanup(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            runtime = root / "runtime"
+            (runtime / "lib").mkdir(parents=True)
+            launcher = runtime / "att.sh"
+            launcher.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+            evidence = root / "evidence"
+            args = SimpleNamespace(
+                repository_root=Path(__file__).resolve().parents[1], runtime_root=runtime,
+                output=evidence, run_id="fake-process-run", commit_sha="abc123",
+                duration_hours=25, arrival_rate=150, max_concurrent=512,
+            )
+
+            class FakeProcess:
+                pid = 987654
+                returncode = None
+
+                def poll(self):
+                    return self.returncode
+
+                def wait(self, timeout=None):
+                    self.returncode = -15
+                    return self.returncode
+
+            def start_fake_process(command, cwd, env, **kwargs):
+                checkpoint_dir = Path(env["ATT_PACKAGE_ROOT"]) / "output/load/fake-process-run/checkpoints" / soak.AGGREGATE_CHECKPOINT_SCOPE
+                checkpoint_dir.mkdir(parents=True)
+                payload = {"metrics": {"scheduled": 12, "started": 12, "completed": 11,
+                                        "success": 11, "failure": 0, "runtimeError": 0,
+                                        "dropped": 0, "currentInFlight": 1}}
+                checkpoint = {
+                    "schemaVersion": soak.CHECKPOINT_SCHEMA, "state": "CHECKPOINT",
+                    "runId": "fake-process-run", "scope": soak.AGGREGATE_CHECKPOINT_SCOPE,
+                    "sequence": 2, "capturedAt": datetime.now(timezone.utc).isoformat(),
+                    "finalized": False, "payload": payload,
+                }
+                seal_checkpoint(checkpoint)
+                write_checkpoint(checkpoint_dir / "checkpoint-00000000000000000002.json", checkpoint)
+                return FakeProcess()
+
+            with mock.patch.object(soak.subprocess, "Popen", side_effect=start_fake_process), \
+                    mock.patch.object(soak.os, "killpg", return_value=None), \
+                    self.assertRaisesRegex(RuntimeError, "first verified checkpoint is missing"):
+                soak.run_soak(args)
+
+            copied = evidence / "load/fake-process-run/checkpoints" / soak.AGGREGATE_CHECKPOINT_SCOPE
+            saved_checkpoint = soak.latest_checkpoint(copied, "fake-process-run")
+            self.assertIsNotNone(saved_checkpoint)
+            self.assertEqual(2, saved_checkpoint["sequence"])
+            saved = json.loads((evidence / "acceptance.json").read_text(encoding="utf-8"))
+            self.assertEqual("PARTIAL", saved["result"])
+            self.assertFalse(saved["complete"])
+            self.assertEqual("run-metadata.json", saved["metadataFile"])
+            self.assertEqual(177, saved["parameterSet"]["seed"])
+            self.assertEqual("abc123", json.loads((evidence / "run-metadata.json").read_text(encoding="utf-8"))["commitSha"])
+
+    def test_resource_summaries_report_observed_slope_and_unavailable_counters(self):
+        rows = [
+            {"elapsedSeconds": 0, "residentBytes": 1000, "threads": 10},
+            {"elapsedSeconds": 3600, "residentBytes": 1600, "threads": 12},
+        ]
+        summary = soak.summarize_resource_series(rows, "", ("residentBytes", "threads", "openFileDescriptors"))
+        self.assertEqual(600, summary["residentBytes"]["slopePerHour"])
+        self.assertEqual(12, summary["threads"]["maximum"])
+        self.assertFalse(summary["openFileDescriptors"]["available"])
+
+    def test_resource_acceptance_requires_dense_os_and_jvm_trends(self):
+        process_rows = []
+        for elapsed in range(0, 25 * 3600 + 1, 60):
+            process_rows.append({"elapsedSeconds": elapsed, "pid": 123, "supported": True,
+                                 "residentBytes": 100000 + elapsed, "threads": 20,
+                                 "openFileDescriptors": 100})
+        jvm_rows = []
+        for sequence, elapsed in enumerate(range(0, 25 * 3600 + 1, 300), 1):
+            jvm_rows.append({"elapsedSeconds": elapsed, "generator": {
+                "heapUsedBytes": 1000 + sequence, "heapCommittedBytes": 2000,
+                "liveThreads": 20, "gcCollectionCount": sequence,
+                "gcCollectionTimeMs": sequence * 2,
+            }})
+        result = soak.assess_resource_evidence(process_rows, jvm_rows, 24 * 3600)
+        self.assertEqual("CAPTURED", result["status"])
+        self.assertTrue(result["process"]["series"]["openFileDescriptors"]["summary"]["available"])
+        self.assertEqual("STABLE_WITHIN_TOLERANCE", result["growth"]["threads"]["status"])
+        self.assertEqual("STABLE_WITHIN_TOLERANCE", result["growth"]["residentBytes"]["status"])
+        with self.assertRaisesRegex(RuntimeError, "resource series openFileDescriptors"):
+            missing_fd = [dict(row, openFileDescriptors=None) for row in process_rows]
+            soak.assess_resource_evidence(missing_fd, jvm_rows, 24 * 3600)
+        with self.assertRaisesRegex(RuntimeError, "residentBytes increased"):
+            growing_rss = [dict(row, residentBytes=100_000_000 + index * 1_000_000)
+                           for index, row in enumerate(process_rows)]
+            soak.assess_resource_evidence(growing_rss, jvm_rows, 24 * 3600)
+        with self.assertRaisesRegex(RuntimeError, "heapUsedBytes increased"):
+            growing_heap = [dict(row, generator=dict(row["generator"], heapUsedBytes=index * 1024 * 1024))
+                            for index, row in enumerate(jvm_rows)]
+            soak.assess_resource_evidence(process_rows, growing_heap, 24 * 3600)
+
+
+if __name__ == "__main__":
+    unittest.main()

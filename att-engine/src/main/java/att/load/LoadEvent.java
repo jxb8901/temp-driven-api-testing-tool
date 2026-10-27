@@ -117,6 +117,13 @@ public final class LoadEvent {
                 Math.max(0L, observedAt - scheduledAt), 0L, true, false, false, true, null, null, null);
     }
 
+    /** A due arrival that could not be admitted, with its reason retained in bounded event metadata. */
+    public static LoadEvent rejected(String runId, String model, String phase, String iterationId, long sequence,
+                                     long scheduledAt, long observedAt, String reason) {
+        return new LoadEvent(runId, null, null, null, model, phase, iterationId, null, sequence, scheduledAt, 0L, 0L,
+                Math.max(0L, observedAt - scheduledAt), 0L, true, false, false, true, null, reason, null);
+    }
+
     public String runId() { return runId; }
     public String workloadId() { return workloadId; }
     public String mixId() { return mixId; }

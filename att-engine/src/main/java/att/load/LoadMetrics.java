@@ -37,8 +37,9 @@ public final class LoadMetrics implements LoadEventListener {
             new java.util.concurrent.atomic.AtomicReference<Map<String, Object>>();
     private final Set<String> activeUsers = Collections.newSetFromMap(new ConcurrentHashMap<String, Boolean>());
     private final AtomicLong scheduled = new AtomicLong(), measuredScheduled = new AtomicLong(), started = new AtomicLong(), completed = new AtomicLong();
-    private final AtomicLong success = new AtomicLong(), failure = new AtomicLong(), runtimeError = new AtomicLong(), dropped = new AtomicLong();
-    private final AtomicLong measuredCompleted = new AtomicLong(), measuredFailure = new AtomicLong(), measuredSuccess = new AtomicLong(), measuredRuntimeError = new AtomicLong(), measuredDropped = new AtomicLong();
+    private final AtomicLong success = new AtomicLong(), failure = new AtomicLong(), runtimeError = new AtomicLong(), otherOutcome = new AtomicLong(), dropped = new AtomicLong();
+    private final AtomicLong capacityDropped = new AtomicLong(), submissionRejected = new AtomicLong(), cancelledBeforeAdmission = new AtomicLong();
+    private final AtomicLong measuredCompleted = new AtomicLong(), measuredFailure = new AtomicLong(), measuredSuccess = new AtomicLong(), measuredRuntimeError = new AtomicLong(), measuredOtherOutcome = new AtomicLong(), measuredDropped = new AtomicLong();
     private final AtomicInteger inFlight = new AtomicInteger(), maxInFlight = new AtomicInteger();
     private final AtomicInteger activeVus = new AtomicInteger(), maxActiveVus = new AtomicInteger();
     private final AtomicLong measuredLatencyCount = new AtomicLong(), warmupCompleted = new AtomicLong(), measuredStarted = new AtomicLong();
@@ -50,6 +51,9 @@ public final class LoadMetrics implements LoadEventListener {
     private final AtomicInteger workerQueueDepth = new AtomicInteger(), workerQueueDepthPeak = new AtomicInteger();
     private final GeneratorTelemetry generatorTelemetry = new GeneratorTelemetry();
     private final AtomicLong measuredWindowStartMs = new AtomicLong(NO_TIMESTAMP);
+    private final AtomicInteger activeMutators = new AtomicInteger();
+    private final java.util.concurrent.atomic.AtomicBoolean snapshotInProgress = new java.util.concurrent.atomic.AtomicBoolean();
+    private final java.util.concurrent.atomic.AtomicBoolean finishStarted = new java.util.concurrent.atomic.AtomicBoolean();
     private final java.util.List<Map<String,Object>> failureSamples = new java.util.ArrayList<Map<String,Object>>();
     private final Object errorClassificationLock = new Object();
     private final String model;
@@ -60,6 +64,8 @@ public final class LoadMetrics implements LoadEventListener {
     private final double configuredArrivalRatePerSecond;
     private final LoadWindowMetrics windowMetrics;
     private volatile long endedAtEpochMs;
+    private volatile boolean finished;
+    private volatile LoadMetricsCheckpointStore checkpointStore;
 
     public LoadMetrics(String model, long startedAtEpochMs) { this(model, startedAtEpochMs, 0L, 0, 0.0, 0); }
     public LoadMetrics(String model, long startedAtEpochMs, long rateWindowMs) { this(model, startedAtEpochMs, rateWindowMs, 0, 0.0, 0); }
@@ -97,6 +103,12 @@ public final class LoadMetrics implements LoadEventListener {
 
     @Override public void onEvent(LoadEvent event) {
         if (event == null) return;
+        beginMutation();
+        try { recordEvent(event); }
+        finally { endMutation(); }
+    }
+
+    private void recordEvent(LoadEvent event) {
         if (windowMetrics != null) windowMetrics.onEvent(event);
         generatorTelemetry.sample(isWarmup(event));
         if (event.scheduled()) {
@@ -105,6 +117,9 @@ public final class LoadMetrics implements LoadEventListener {
         }
         if (event.dropped()) {
             dropped.incrementAndGet();
+            if ("SUBMISSION_REJECTED".equals(event.errorType())) submissionRejected.incrementAndGet();
+            else if ("CANCELLED_BEFORE_ADMISSION".equals(event.errorType())) cancelledBeforeAdmission.incrementAndGet();
+            else capacityDropped.incrementAndGet();
             if (!isWarmup(event)) measuredDropped.incrementAndGet();
         }
         if (event.started()) {
@@ -136,6 +151,9 @@ public final class LoadMetrics implements LoadEventListener {
             } else if (event.status() == ResultStatus.ERROR || event.status() == ResultStatus.INVALID) {
                 runtimeError.incrementAndGet();
                 if (!isWarmup(event)) measuredRuntimeError.incrementAndGet();
+            } else if (event.status() == ResultStatus.SKIPPED) {
+                otherOutcome.incrementAndGet();
+                if (!isWarmup(event)) measuredOtherOutcome.incrementAndGet();
             } else {
                 failure.incrementAndGet();
                 if (!isWarmup(event)) measuredFailure.incrementAndGet();
@@ -159,15 +177,29 @@ public final class LoadMetrics implements LoadEventListener {
             }
         }
 
-        if (event.phase() != null) phase(event.phase()).accept(event, inFlight.get(), activeVus.get());
+        if (event.phase() != null) phase(event.phase()).accept(event, activeVus.get());
         long bucketStart = Math.floorDiv(event.scheduledAtEpochMs(), 1000L) * 1000L;
         Bucket bucket = bucket(bucketStart);
         if (bucket != null) bucket.accept(event, inFlight.get(), activeVus.get());
     }
 
     public void finish(long endedAtEpochMs) {
-        this.endedAtEpochMs = endedAtEpochMs;
-        if (windowMetrics != null) windowMetrics.finish(endedAtEpochMs);
+        if (!finishStarted.compareAndSet(false, true)) return;
+        beginMutation();
+        try {
+            this.endedAtEpochMs = endedAtEpochMs;
+            if (windowMetrics != null) windowMetrics.finish(endedAtEpochMs);
+            this.finished = true;
+        } finally { endMutation(); }
+        LoadMetricsCheckpointStore store = checkpointStore;
+        if (store != null) store.finish(this::snapshot);
+    }
+    void enableCheckpoints(java.nio.file.Path directory, String runId, String scope) {
+        if (directory == null) return;
+        if (checkpointStore != null) throw new IllegalStateException("LOAD metrics checkpoints are already enabled");
+        LoadMetricsCheckpointStore store = new LoadMetricsCheckpointStore(directory, runId, scope);
+        checkpointStore = store;
+        store.start(this::snapshot);
     }
     public long scheduled() { return scheduled.get(); }
     public long started() { return started.get(); }
@@ -175,45 +207,70 @@ public final class LoadMetrics implements LoadEventListener {
     public long success() { return success.get(); }
     public long failure() { return failure.get(); }
     public long runtimeError() { return runtimeError.get(); }
+    public long otherOutcome() { return otherOutcome.get(); }
     public long dropped() { return dropped.get(); }
     public int currentInFlight() { return inFlight.get(); }
     public int maxInFlight() { return maxInFlight.get(); }
 
     public void recordSchedulerWakeup(int queueDepth) {
-        schedulerWakeups.incrementAndGet();
-        recordWorkerQueueDepth(queueDepth);
+        beginMutation();
+        try {
+            recordSchedulerWakeupUnsafe(queueDepth);
+        } finally { endMutation(); }
     }
     public void recordSchedulerWakeupAt(long timestampEpochMs, int queueDepth) {
-        recordSchedulerWakeup(queueDepth);
-        if (windowMetrics != null) windowMetrics.recordSchedulerSample(timestampEpochMs, queueDepth);
+        beginMutation();
+        try {
+            recordSchedulerWakeupUnsafe(queueDepth);
+            if (windowMetrics != null) windowMetrics.recordSchedulerSample(timestampEpochMs, queueDepth);
+        } finally { endMutation(); }
     }
     public void recordSubmitLag(long millis, int queueDepth) {
-        long value = Math.max(0L, millis);
-        submitLagCount.incrementAndGet(); submitLagSumMs.addAndGet(value); updateMax(submitLagMaxMs, value);
-        recordWorkerQueueDepth(queueDepth);
+        beginMutation();
+        try {
+            recordSubmitLagUnsafe(millis, queueDepth);
+        } finally { endMutation(); }
     }
     public void recordSubmitLagAt(long timestampEpochMs, long millis, int queueDepth) {
-        recordSubmitLag(millis, queueDepth);
-        if (windowMetrics != null) windowMetrics.recordSubmitSample(timestampEpochMs, millis, queueDepth);
+        beginMutation();
+        try {
+            recordSubmitLagUnsafe(millis, queueDepth);
+            if (windowMetrics != null) windowMetrics.recordSubmitSample(timestampEpochMs, millis, queueDepth);
+        } finally { endMutation(); }
     }
     public void recordWorkerQueueDepth(int depth) {
-        int value = Math.max(0, depth); workerQueueDepth.set(value); updateMax(workerQueueDepthPeak, value);
+        beginMutation();
+        try { recordWorkerQueueDepthUnsafe(depth); }
+        finally { endMutation(); }
     }
     public void mergeSchedulerTelemetry(Map<String, Object> values) {
         if (values == null) return;
-        Object wakeups = values.get("schedulerWakeups");
-        if (wakeups instanceof Number) schedulerWakeups.addAndGet(((Number) wakeups).longValue());
-        Object count = values.get("submitLagCount"), mean = values.get("submitLagMeanMs"), maximum = values.get("submitLagMaxMs");
-        if (count instanceof Number) {
-            long n = ((Number) count).longValue(); submitLagCount.addAndGet(n);
-            if (mean instanceof Number) submitLagSumMs.addAndGet(Math.round(((Number) mean).doubleValue() * n));
-        }
-        if (maximum instanceof Number) updateMax(submitLagMaxMs, ((Number) maximum).longValue());
-        Object peak = values.get("workerQueueDepthPeak");
-        if (peak instanceof Number) updateMax(workerQueueDepthPeak, ((Number) peak).intValue());
+        beginMutation();
+        try {
+            Object wakeups = values.get("schedulerWakeups");
+            if (wakeups instanceof Number) schedulerWakeups.addAndGet(((Number) wakeups).longValue());
+            Object count = values.get("submitLagCount"), mean = values.get("submitLagMeanMs"), maximum = values.get("submitLagMaxMs");
+            if (count instanceof Number) {
+                long n = ((Number) count).longValue(); submitLagCount.addAndGet(n);
+                if (mean instanceof Number) submitLagSumMs.addAndGet(Math.round(((Number) mean).doubleValue() * n));
+            }
+            if (maximum instanceof Number) updateMax(submitLagMaxMs, ((Number) maximum).longValue());
+            Object peak = values.get("workerQueueDepthPeak");
+            if (peak instanceof Number) updateMax(workerQueueDepthPeak, ((Number) peak).intValue());
+        } finally { endMutation(); }
     }
 
     public LoadMetricsSnapshot snapshot() {
+        while (!snapshotInProgress.compareAndSet(false, true)) Thread.yield();
+        try {
+            while (activeMutators.get() != 0) Thread.yield();
+            return snapshotUnsafe();
+        } finally {
+            snapshotInProgress.set(false);
+        }
+    }
+
+    private LoadMetricsSnapshot snapshotUnsafe() {
         long[] sorted = latencies.snapshot();
         Arrays.sort(sorted);
         long ended = endedAtEpochMs == 0L ? System.currentTimeMillis() : endedAtEpochMs;
@@ -237,7 +294,13 @@ public final class LoadMetrics implements LoadEventListener {
         result.put("success", success.get());
         result.put("failure", failure.get());
         result.put("runtimeError", runtimeError.get());
+        result.put("otherOutcome", otherOutcome.get());
         result.put("dropped", dropped.get());
+        Map<String, Object> dropClassifications = new LinkedHashMap<String, Object>();
+        dropClassifications.put("CAPACITY_LIMIT", capacityDropped.get());
+        dropClassifications.put("SUBMISSION_REJECTED", submissionRejected.get());
+        dropClassifications.put("CANCELLED_BEFORE_ADMISSION", cancelledBeforeAdmission.get());
+        result.put("dropClassifications", dropClassifications);
         result.put("measuredDropped", measuredDropped.get());
         result.put("currentInFlight", inFlight.get());
         result.put("maxInFlight", maxInFlight.get());
@@ -248,6 +311,7 @@ public final class LoadMetrics implements LoadEventListener {
         result.put("measuredSuccess", measuredSuccess.get());
         result.put("measuredFailure", measuredFailure.get());
         result.put("measuredRuntimeError", measuredRuntimeError.get());
+        result.put("measuredOtherOutcome", measuredOtherOutcome.get());
         result.put("sutErrorRate", measuredCompleted.get() == 0L ? 0.0 : ((double) measuredFailure.get()) / measuredCompleted.get());
         result.put("runtimeErrorRate", measuredCompleted.get() == 0L ? 0.0 : ((double) measuredRuntimeError.get()) / measuredCompleted.get());
         result.put("totalErrorRate", measuredCompleted.get() == 0L ? 0.0 : ((double) measuredFailure.get()+measuredRuntimeError.get()) / measuredCompleted.get());
@@ -305,7 +369,33 @@ public final class LoadMetrics implements LoadEventListener {
             PhaseStats value = phases.get(phase);
             if (value != null) phaseMap.put(phase, value.toMap());
         }
+        result.put("accounting", LoadMetricsAccounting.evaluate(result, phaseMap, finished));
+        LoadMetricsCheckpointStore store = checkpointStore;
+        if (store != null) result.put("checkpoints", store.status());
         return new LoadMetricsSnapshot(result, bucketMap, phaseMap);
+    }
+
+    private void beginMutation() {
+        while (true) {
+            while (snapshotInProgress.get()) Thread.yield();
+            activeMutators.incrementAndGet();
+            if (!snapshotInProgress.get()) return;
+            activeMutators.decrementAndGet();
+        }
+    }
+    private void endMutation() { activeMutators.decrementAndGet(); }
+
+    private void recordSchedulerWakeupUnsafe(int queueDepth) {
+        schedulerWakeups.incrementAndGet();
+        recordWorkerQueueDepthUnsafe(queueDepth);
+    }
+    private void recordSubmitLagUnsafe(long millis, int queueDepth) {
+        long value = Math.max(0L, millis);
+        submitLagCount.incrementAndGet(); submitLagSumMs.addAndGet(value); updateMax(submitLagMaxMs, value);
+        recordWorkerQueueDepthUnsafe(queueDepth);
+    }
+    private void recordWorkerQueueDepthUnsafe(int depth) {
+        int value = Math.max(0, depth); workerQueueDepth.set(value); updateMax(workerQueueDepthPeak, value);
     }
 
     private PhaseStats phase(String name) {
@@ -478,16 +568,16 @@ public final class LoadMetrics implements LoadEventListener {
         private final ConcurrentHashMap<String, LongAdder> classifications = new ConcurrentHashMap<String, LongAdder>();
         private final Object classificationLock = new Object();
         private final LongAdder scheduled = new LongAdder(), started = new LongAdder(), completed = new LongAdder();
-        private final LongAdder success = new LongAdder(), failure = new LongAdder(), runtimeError = new LongAdder(), dropped = new LongAdder();
+        private final LongAdder success = new LongAdder(), failure = new LongAdder(), runtimeError = new LongAdder(), otherOutcome = new LongAdder(), dropped = new LongAdder();
         private final LongAdder measuredScheduled = new LongAdder(), measuredStarted = new LongAdder(), measuredCompleted = new LongAdder();
-        private final LongAdder measuredSuccess = new LongAdder(), measuredFailure = new LongAdder(), measuredRuntimeError = new LongAdder(), measuredDropped = new LongAdder();
+        private final LongAdder measuredSuccess = new LongAdder(), measuredFailure = new LongAdder(), measuredRuntimeError = new LongAdder(), measuredOtherOutcome = new LongAdder(), measuredDropped = new LongAdder();
         private final LongAdder schedulerLagCount = new LongAdder(), schedulerLagSumMs = new LongAdder(), latencyCount = new LongAdder(), latencySumMs = new LongAdder();
         private final AtomicLong schedulerLagMaxMs = new AtomicLong(), latencyMinMs = new AtomicLong(Long.MAX_VALUE), latencyMaxMs = new AtomicLong();
         private final AtomicInteger currentInFlight = new AtomicInteger(), maxInFlight = new AtomicInteger(), activeVus = new AtomicInteger(), maxActiveVus = new AtomicInteger();
 
         private PhaseStats(String name) { this.name = name; }
 
-        private void accept(LoadEvent event, int currentInFlight, int activeVus) {
+        private void accept(LoadEvent event, int activeVus) {
             long eventStart = event.scheduledAtEpochMs() > 0L ? event.scheduledAtEpochMs() : event.startedAtEpochMs();
             if (eventStart > 0L) updateMin(startAt, eventStart);
             long eventEnd = event.completedAtEpochMs() > 0L ? event.completedAtEpochMs()
@@ -497,6 +587,7 @@ public final class LoadMetrics implements LoadEventListener {
             if (event.scheduled()) { scheduled.increment(); if (measured) measuredScheduled.increment(); }
             if (event.started()) {
                 started.increment(); if (measured) measuredStarted.increment();
+                currentInFlight.incrementAndGet();
                 recordLag(event);
             } else if (event.dropped()) {
                 recordLag(event);
@@ -504,10 +595,13 @@ public final class LoadMetrics implements LoadEventListener {
             if (event.dropped()) { dropped.increment(); if (measured) measuredDropped.increment(); }
             if (event.completed()) {
                 completed.increment();
+                currentInFlight.updateAndGet(value -> Math.max(0, value - 1));
                 if(event.status()!=null && event.status()!=ResultStatus.PASS) recordClassification(event);
                 if (event.status() == ResultStatus.PASS) { success.increment(); if (measured) measuredSuccess.increment(); }
                 else if (event.status() == ResultStatus.ERROR || event.status() == ResultStatus.INVALID) {
                     runtimeError.increment(); if (measured) measuredRuntimeError.increment();
+                } else if (event.status() == ResultStatus.SKIPPED) {
+                    otherOutcome.increment(); if (measured) measuredOtherOutcome.increment();
                 } else { failure.increment(); if (measured) measuredFailure.increment(); }
                 if (measured) {
                     measuredCompleted.increment();
@@ -518,7 +612,6 @@ public final class LoadMetrics implements LoadEventListener {
                     latencies.add(latency, observation);
                 }
             }
-            this.currentInFlight.set(Math.max(0, currentInFlight));
             this.activeVus.set(Math.max(0, activeVus));
             updateMax(maxInFlight, this.currentInFlight.get());
             updateMax(maxActiveVus, this.activeVus.get());
@@ -559,6 +652,7 @@ public final class LoadMetrics implements LoadEventListener {
             long successCount = success.sum(), measuredSuccessCount = measuredSuccess.sum();
             long failureCount = failure.sum(), measuredFailureCount = measuredFailure.sum();
             long runtimeErrorCount = runtimeError.sum(), measuredRuntimeErrorCount = measuredRuntimeError.sum();
+            long otherOutcomeCount = otherOutcome.sum(), measuredOtherOutcomeCount = measuredOtherOutcome.sum();
             long droppedCount = dropped.sum(), measuredDroppedCount = measuredDropped.sum();
             long lagCount = schedulerLagCount.sum(), lagSum = schedulerLagSumMs.sum();
             long observedLatencyCount = latencyCount.sum(), observedLatencySum = latencySumMs.sum();
@@ -577,6 +671,7 @@ public final class LoadMetrics implements LoadEventListener {
             result.put("success", successCount); result.put("measuredSuccess", measuredSuccessCount);
             result.put("failure", failureCount); result.put("measuredFailure", measuredFailureCount);
             result.put("runtimeError", runtimeErrorCount); result.put("measuredRuntimeError", measuredRuntimeErrorCount);
+            result.put("otherOutcome", otherOutcomeCount); result.put("measuredOtherOutcome", measuredOtherOutcomeCount);
             result.put("dropped", droppedCount); result.put("measuredDropped", measuredDroppedCount);
             result.put("completedThroughput", measuredCompletedCount / seconds);
             result.put("sutErrorRate", measuredCompletedCount == 0L ? 0.0 : ((double) measuredFailureCount) / measuredCompletedCount);
@@ -611,8 +706,8 @@ public final class LoadMetrics implements LoadEventListener {
         private final Object errorLock = new Object();
         private final java.util.concurrent.atomic.AtomicReference<String> phase = new java.util.concurrent.atomic.AtomicReference<String>();
         private final LongAdder scheduled = new LongAdder(), measuredScheduled = new LongAdder(), started = new LongAdder();
-        private final LongAdder completed = new LongAdder(), success = new LongAdder(), failure = new LongAdder(), dropped = new LongAdder();
-        private final LongAdder measuredSuccess = new LongAdder(), measuredRuntimeError = new LongAdder();
+        private final LongAdder completed = new LongAdder(), success = new LongAdder(), failure = new LongAdder(), otherOutcome = new LongAdder(), dropped = new LongAdder();
+        private final LongAdder measuredSuccess = new LongAdder(), measuredRuntimeError = new LongAdder(), measuredOtherOutcome = new LongAdder();
         private final LongAdder measuredDropped = new LongAdder(), warmupCompleted = new LongAdder(), sutFailure = new LongAdder(), runtimeError = new LongAdder();
         private final LongAdder schedulerLagCount = new LongAdder(), schedulerLagSumMs = new LongAdder(), latencyCount = new LongAdder(), latencySumMs = new LongAdder();
         private final AtomicLong schedulerLagMaxMs = new AtomicLong(), latencyMinMs = new AtomicLong(Long.MAX_VALUE), latencyMaxMs = new AtomicLong();
@@ -650,11 +745,14 @@ public final class LoadMetrics implements LoadEventListener {
             updateMax(maxActiveVus, this.activeVus.get());
             if (event.completed()) {
                 completed.increment();
-                if (event.success()) success.increment(); else failure.increment();
+                if (event.status() == ResultStatus.PASS) success.increment();
+                else if (event.status() == ResultStatus.SKIPPED) otherOutcome.increment();
+                else failure.increment();
                 if (isWarmup(event)) warmupCompleted.increment();
                 else {
                     if (event.status() == ResultStatus.PASS)measuredSuccess.increment();
                     else if(event.status()==ResultStatus.ERROR || event.status()==ResultStatus.INVALID)measuredRuntimeError.increment();
+                    else if(event.status()==ResultStatus.SKIPPED)measuredOtherOutcome.increment();
                     else sutFailure.increment();
                     addLatency(event.latencyMs());
                 }
@@ -719,12 +817,13 @@ public final class LoadMetrics implements LoadEventListener {
             result.put("success", success.sum());
             result.put("failure", failure.sum());
             result.put("runtimeError", runtimeError.sum());
+            result.put("otherOutcome", otherOutcome.sum());
             result.put("dropped", dropped.sum());
             result.put("measuredDropped", measuredDropped.sum());
             result.put("warmupCompleted", warmupCount);
             result.put("measuredCompleted", measuredCount);
             result.put("sutErrorRate", measuredCount == 0L ? 0.0 : ((double) sutFailure.sum()) / measuredCount);
-            result.put("measuredSuccess",measuredSuccess.sum());result.put("measuredFailure",sutFailure.sum());result.put("measuredRuntimeError",measuredRuntimeError.sum());
+            result.put("measuredSuccess",measuredSuccess.sum());result.put("measuredFailure",sutFailure.sum());result.put("measuredRuntimeError",measuredRuntimeError.sum());result.put("measuredOtherOutcome",measuredOtherOutcome.sum());
             result.put("runtimeErrorRate",measuredCount==0L?0.0:((double)measuredRuntimeError.sum())/measuredCount);
             result.put("totalErrorRate",measuredCount==0L?0.0:((double)sutFailure.sum()+measuredRuntimeError.sum())/measuredCount);
             result.put("successfulThroughput",measuredSuccess.sum());

@@ -91,6 +91,7 @@ public final class ClosedVuScheduler implements LoadScheduler {
         final Instant start = LoadSchedulerSupport.instant(startedAt);
         final long runSeed = LoadRandomization.effectiveSeed(scenario, runId);
         final LoadMetrics metrics = LoadMetrics.forScenario(scenario, startedAt, 0L);
+        enableCheckpoints(metrics);
         // Iteration execution is synchronous and may block on SUT I/O, so worker
         // capacity can grow to preserve every configured closed VU's slot.
         int workerCount = scenario.users();
@@ -247,6 +248,15 @@ public final class ClosedVuScheduler implements LoadScheduler {
         return true;
     }
 
+    private void enableCheckpoints(LoadMetrics metrics) {
+        if (evidenceOutputRoot == null) return;
+        String workload = scenario.workloadId() == null ? "aggregate" : "workload-" + safe(scenario.workloadId());
+        String directory = scenario.workloadId() == null ? "aggregate"
+                : LoadMetricsCheckpointStore.workloadCheckpointDirectoryName(scenario.workloadId());
+        metrics.enableCheckpoints(evidenceOutputRoot.resolve("load").resolve(runId).resolve("checkpoints").resolve(directory),
+                runId, workload);
+    }
+
     private long nextWakeAt(java.util.List<VuState> users, long now, long elapsed, int active,
                             long startedAt, int inFlight) {
         long end = safeAdd(startedAt, LoadPhase.totalMs(scenario));
@@ -291,7 +301,8 @@ public final class ClosedVuScheduler implements LoadScheduler {
     private Path evidenceOutputRoot(String iterationId) {
         if (evidenceStore == null || evidenceOutputRoot == null || !evidenceStore.reserveSuccessEvidence(iterationId, scenario.workloadId())) return null;
         Path root = evidenceOutputRoot.resolve("load").resolve(runId).resolve("iterations");
-        return scenario.legacyV10() ? root : root.resolve(safe(scenario.workloadId()));
+        return scenario.legacyV10() ? root : root.resolve(
+                LoadMetricsCheckpointStore.workloadCheckpointDirectoryName(scenario.workloadId()));
     }
     int activeUsers(long elapsedMs) { return activeUsers(scenario, elapsedMs); }
     static int activeUsers(LoadScenario scenario, long elapsedMs) {
