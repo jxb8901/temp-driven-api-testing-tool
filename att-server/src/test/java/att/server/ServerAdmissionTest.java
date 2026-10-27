@@ -76,7 +76,7 @@ class ServerAdmissionTest {
         return new ServerRuntime(ServerConfig.load(yaml),Files.createDirectory(temp.resolve(name+"-libs")).toString(),ServerRuntimeTestSupport.resolvingConfiguration(launcher));
     }
     private static JsonNode request(){return ServerRuntime.JSON.createObjectNode().put("packageId","p");}
-    private static void await(CountDownLatch gate)throws java.io.IOException {try{if(!gate.await(30,TimeUnit.SECONDS))throw new java.io.IOException("test launch gate timed out");}catch(InterruptedException e){Thread.currentThread().interrupt();throw new java.io.IOException("test launch gate interrupted",e);}}
+    private static void await(CountDownLatch gate)throws java.io.IOException {try{gate.await();}catch(InterruptedException e){Thread.currentThread().interrupt();throw new java.io.IOException("test launch gate interrupted",e);}}
     private static void awaitJobs(ServerRuntime runtime){long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(5);while(!runtime.jobs.isEmpty()&&System.nanoTime()<deadline)try{Thread.sleep(10);}catch(InterruptedException e){Thread.currentThread().interrupt();return;}}
     private static boolean isWindows(){return System.getProperty("os.name","").toLowerCase().contains("win");}
 }

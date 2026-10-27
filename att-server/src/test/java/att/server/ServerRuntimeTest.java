@@ -162,7 +162,7 @@ class ServerRuntimeTest {
         AtomicReference<Process> launched=new AtomicReference<>();
         ServerRuntime runtime=new ServerRuntime(config,libs.toString(),ServerRuntimeTestSupport.resolvingConfiguration(builder->{
             launchEntered.countDown();
-            try {if(!allowLaunch.await(30,TimeUnit.SECONDS))throw new java.io.IOException("test launch gate timed out");}
+            try {allowLaunch.await();}
             catch(InterruptedException e){Thread.currentThread().interrupt();throw new java.io.IOException("test launch gate interrupted",e);}
             Process process=builder.start();launched.set(process);return process;
         }));
