@@ -1370,7 +1370,11 @@ final class ServerRuntime implements AutoCloseable {
             Map<String,Object> point=progressHistoryPoint(saved);
             job.loadProgressHistory.add(point);if(job.loadProgressHistory.size()>60)job.loadProgressHistory.remove(0);
             long elapsed=((Number)saved.get("elapsedMs")).longValue();long planned=plannedLoadDurationMs(job);
-            int bucket=(int)Math.max(0L,Math.min(255L,(long)(elapsed*256.0/Math.max(1L,planned))));job.loadProgressTrend.put(bucket,point);
+            int bucket=(int)Math.max(0L,Math.min(255L,(long)(elapsed*256.0/Math.max(1L,planned))));
+            if(bucket%4==0) {
+                point=new LinkedHashMap<>(point);point.put("workloads",compactWorkloadTrend(saved.get("workloads")));
+            }
+            job.loadProgressTrend.put(bucket,point);
             Map<String,Object> state=new LinkedHashMap<>();state.put("latest",saved);state.put("recent",new ArrayList<>(job.loadProgressHistory));state.put("trend",new ArrayList<>(job.loadProgressTrend.values()));state.put("checkpoints",new ArrayList<>(job.loadCheckpointHistory));
             job.loadProgressJson=JSON.writeValueAsString(state);store.updateLoadProgress(job.id,job.loadProgressJson);return true;
         }
@@ -1391,6 +1395,17 @@ final class ServerRuntime implements AutoCloseable {
         for(String key:List.of("capturedAt","serverReceivedAt","elapsedMs","phase","counts","measuredCounts","rates","latency"))
             if(snapshot.containsKey(key))point.put(key,snapshot.get(key));
         return point;
+    }
+
+    private static Map<String,Object> compactWorkloadTrend(Object raw) {
+        Map<String,Object> output=new TreeMap<>();if(!(raw instanceof Map<?,?>))return output;
+        for(Map.Entry<?,?> entry:((Map<?,?>)raw).entrySet()) {
+            if(!(entry.getKey() instanceof String)||!(entry.getValue() instanceof Map<?,?>))continue;
+            Map<?,?> source=(Map<?,?>)entry.getValue();Map<String,Object> values=new LinkedHashMap<>();
+            for(String key:List.of("completed","passed","sutFailures","runtimeErrors","dropped","latency"))if(source.containsKey(key))values.put(key,source.get(key));
+            output.put((String)entry.getKey(),values);
+        }
+        return output;
     }
 
     private static long plannedLoadDurationMs(Job job) {

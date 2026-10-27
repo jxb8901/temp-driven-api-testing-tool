@@ -154,6 +154,9 @@ class ServerRuntimeLoadTerminalResultTest {
             assertEquals(10000L,((Number)((Map<?,?>)record.get("loadProgress")).get("elapsedMs")).longValue());
             assertEquals(3,((List<?>)record.get("loadProgressHistory")).size());
             assertEquals(2,((List<?>)record.get("loadProgressTrend")).size());
+            Map<?,?> firstTrend=(Map<?,?>)((List<?>)record.get("loadProgressTrend")).get(0);
+            assertEquals(7L,((Number)((Map<?,?>)((Map<?,?>)firstTrend.get("workloads")).get("steady")).get("completed")).longValue());
+            assertFalse(((Map<?,?>)((Map<?,?>)firstTrend.get("workloads")).get("steady")).containsKey("scheduled"),"Workload trend retains a compact projection");
             assertEquals(1,((List<?>)record.get("loadCheckpointHistory")).size(),"Repeated checkpoint intervals are deduplicated");
             assertEquals(23.5,((Number)((Map<?,?>)((List<?>)record.get("loadCheckpointHistory")).get(0)).get("latencyMeanMs")).doubleValue());
             assertFalse(JSON.writeValueAsString(record.get("loadCheckpointHistory")).contains("/private"));
@@ -162,26 +165,29 @@ class ServerRuntimeLoadTerminalResultTest {
         }
     }
 
-    @Test void simulatedTwentyFiveHourLiveHistoryRemainsBounded() throws Exception {
+    @Test void simulatedTenDayLiveHistoryRemainsBounded() throws Exception {
         try(ServerRuntime runtime=runtime("live-load-soak")) {
             Job job=createJob(runtime,"J0000000000000302");
             job.targetIdentity=fields("workloads",List.of(fields("name","steady","totalDurationMs",864_000_000L)));
             Map<String,Object> counters=fields("scheduled",0L,"started",0L,"completed",0L,"passed",0L,"sutFailures",0L,"runtimeErrors",0L,"dropped",0L,"other",0L);
+            Map<String,Object> workloads=new LinkedHashMap<>();
+            for(int index=0;index<32;index++)workloads.put("workload-"+index,fields("completed",0L,"passed",0L,"sutFailures",0L,"runtimeErrors",0L,"dropped",0L,
+                    "latency",fields("sampleCount",1L,"meanMs",12.0,"p95Ms",15.0,"p99Ms",31.0)));
             Map<String,Object> intervalCounts=new LinkedHashMap<>();
             for(String key:List.of("scheduled","started","completed","success","failure","runtimeError","otherOutcome","dropped","measuredScheduled","measuredStarted","measuredCompleted","measuredSuccess","measuredFailure","measuredRuntimeError","measuredOtherOutcome","measuredDropped"))intervalCounts.put(key,0L);
             java.time.Instant start=java.time.Instant.parse("2026-10-27T00:00:00Z");long began=System.nanoTime();
-            for(int index=1;index<=300;index++) {
+            for(int index=1;index<=2880;index++) {
                 java.time.Instant before=start.plusSeconds((index-1L)*300L),after=start.plusSeconds(index*300L);
                 Map<String,Object> interval=fields("schemaVersion","att-load-checkpoint-interval/v1","state","VERIFIED","startSequence",(long)index,"endSequence",index+1L,
                         "startAt",before.toString(),"endAt",after.toString(),"durationMs",300_000L,"counts",intervalCounts);
                 Map<String,Object> snapshot=fields("schemaVersion","att-load-live-progress/v1","capturedAt",after.toString(),"elapsedMs",index*300_000L,"phase","STEADY",
-                        "counts",counters,"measuredCounts",counters,"rates",fields("completedTps",0.0,"successfulTps",0.0),"latency",fields("sampleCount",0L),"checkpointInterval",interval);
+                        "counts",counters,"measuredCounts",counters,"rates",fields("completedTps",0.0,"successfulTps",0.0),"latency",fields("sampleCount",0L),"checkpointInterval",interval,"workloads",workloads);
                 runtime.handleWorkerEvent(job,JSON.writeValueAsString(fields("type","PROGRESS","loadProgress",snapshot)));
             }
             assertEquals(60,job.loadProgressHistory.size());assertEquals(64,job.loadCheckpointHistory.size());
-            assertTrue(job.loadProgressTrend.size()<=256);assertEquals(301L,((Number)job.loadCheckpointHistory.get(63).get("endSequence")).longValue());
+            assertTrue(job.loadProgressTrend.size()<=256);assertEquals(2881L,((Number)job.loadCheckpointHistory.get(63).get("endSequence")).longValue());
             int bytes=JSON.writeValueAsBytes(runtime.jobRecord(job.id)).length;assertTrue(bytes<1_000_000,"Bounded job payload: "+bytes);
-            System.out.println("LOAD_LIVE_SOAK_BENCHMARK simulatedHours=25 samples=300 jobBytes="+bytes+" processingMs="+java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(System.nanoTime()-began));
+            System.out.println("LOAD_LIVE_SOAK_BENCHMARK simulatedHours=240 samples=2880 workloads=32 jobBytes="+bytes+" processingMs="+java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(System.nanoTime()-began));
         }
     }
 

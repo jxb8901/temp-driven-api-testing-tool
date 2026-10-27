@@ -164,13 +164,13 @@ export interface LoadLiveProgressPoint {
   counts: LoadLiveProgressCounts; measuredCounts?: LoadLiveProgressCounts;
   rates?: { completedTps?: number; successfulTps?: number };
   latency?: { sampleCount?: number; meanMs?: number | null; p95Ms?: number | null; p99Ms?: number | null; percentileMethod?: string };
+  workloads?: Record<string, LoadLiveProgressCounts>;
 }
 export interface LoadLiveProgressSnapshot extends LoadLiveProgressPoint {
   schemaVersion: 'att-load-live-progress/v1';
   checkpointInterval?: LoadCheckpointInterval;
   latestFailure?: { status: string; capturedAt: string; code?: string };
   phases?: Record<string, LoadLiveProgressCounts>;
-  workloads?: Record<string, LoadLiveProgressCounts>;
   workloadsTruncated?: boolean;
 }
 export interface LoadCheckpointInterval {
