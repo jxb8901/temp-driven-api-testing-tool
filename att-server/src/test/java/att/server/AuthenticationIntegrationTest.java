@@ -417,6 +417,17 @@ class AuthenticationIntegrationTest {
             String cancellableJobId=cancellable.path("jobId").asText();
             assertTrue(cancellableJobId.matches("J[0-9A-F]{16}"));
             long resumeAfter=assertRetainedSseEvent(port,basic,cancellableJobId);
+            long liveDeadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(20);JsonNode runningLoad;
+            do {
+                runningLoad=getJson(port,"/att/api/v1/jobs/"+cancellableJobId,basic);
+                if(runningLoad.path("loadProgress").path("counts").path("completed").asLong()>0)break;
+                Thread.sleep(100);
+            } while(System.nanoTime()<liveDeadline);
+            assertEquals("RUNNING",runningLoad.path("status").asText(),runningLoad.toString());
+            assertEquals("att-load-live-progress/v1",runningLoad.path("loadProgress").path("schemaVersion").asText());
+            assertTrue(runningLoad.path("loadProgress").path("counts").path("completed").asLong()>0,"The actual Worker must publish live counters through the Job API");
+            assertTrue(runningLoad.path("loadProgress").path("elapsedMs").asLong()>0);
+            assertLiveProgressInSse(port,basic,cancellableJobId);
             assertEquals(200,cancelJob(port,basic,cancellableJobId),"The real Tomcat API must accept cancellation of an active Load job");
             long cancelDeadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(15);
             JsonNode cancelledJob=getJson(port,"/att/api/v1/jobs/"+cancellableJobId,basic);
@@ -424,6 +435,7 @@ class AuthenticationIntegrationTest {
                 Thread.sleep(20);cancelledJob=getJson(port,"/att/api/v1/jobs/"+cancellableJobId,basic);
             }
             assertEquals("CANCELLED",cancelledJob.path("status").asText(),"The running Load job must reach a terminal cancellation state");
+            assertTrue(cancelledJob.path("loadProgress").path("counts").path("completed").asLong()>0,"The last real Worker sample survives cancellation");
             assertLastEventIdResume(port,basic,cancellableJobId,resumeAfter);
             // Exercise the real public API behind the authenticated browser console.
             String jobId=submitJob(port,basic);
@@ -765,6 +777,17 @@ class AuthenticationIntegrationTest {
         try(var reader=new java.io.BufferedReader(new java.io.InputStreamReader(c.getInputStream(),java.nio.charset.StandardCharsets.UTF_8))) {
             String line=reader.readLine();assertNotNull(line,"SSE must replay retained job events");assertTrue(line.startsWith("id: "),"SSE must replay retained job events");
             return Long.parseLong(line.substring(4));
+        } finally {c.disconnect();}
+    }
+    private static void assertLiveProgressInSse(int port,String authorization,String id)throws Exception {
+        HttpURLConnection c=(HttpURLConnection)new URL("http://127.0.0.1:"+port+"/att/api/v1/jobs/"+id+"/events").openConnection();
+        c.setReadTimeout(10000);c.setRequestProperty("Authorization",authorization);assertEquals(200,c.getResponseCode());
+        try(var reader=new java.io.BufferedReader(new java.io.InputStreamReader(c.getInputStream(),java.nio.charset.StandardCharsets.UTF_8))) {
+            String line;boolean found=false;while((line=reader.readLine())!=null)if(line.startsWith("data: ")) {
+                JsonNode progress=ServerRuntime.JSON.readTree(line.substring(6)).path("loadProgress");
+                if(progress.path("counts").path("completed").asLong()>0){assertEquals("att-load-live-progress/v1",progress.path("schemaVersion").asText());found=true;break;}
+            }
+            assertTrue(found,"The real Worker progress must be replayed through the authorized SSE journal");
         } finally {c.disconnect();}
     }
     private static void assertLastEventIdResume(int port,String authorization,String id,long cursor)throws Exception {
