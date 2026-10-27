@@ -14,6 +14,6 @@ ATT Server accepts an authorized execution request and creates a durable Job rec
 
 A Schedule is a Server-owned definition that can submit later Jobs. Its definition, recurrence and occurrence history are separate from any one Job. Schedules retain the validated input and revision policy required by the Server contract; changing the source may require revalidation.
 
-In 4.2.4, use the current legacy ATT Remote commands or Studio to manage Server Jobs. CLI vNext and its future interface-specific options remain [Planned](../interfaces/cli/vnext-proposed.md). Future #294 management commands are not part of that proposal.
+In 4.2.5, use the current legacy ATT Remote commands or Studio to manage Server Jobs. CLI vNext and its future interface-specific options remain [Planned](../interfaces/cli/vnext-proposed.md). Future #294 management commands are not part of that proposal.
 
 See the [Server Job API](../interfaces/server-api/jobs-and-events.md), [Schedules API](../interfaces/server-api/schedules.md) and [legacy Remote guide](../remote-client.md).
