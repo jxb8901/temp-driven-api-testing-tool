@@ -28,7 +28,7 @@ class PackageManifestExecutionTest {
                     +"  show: {type: log, message: 'package="+name+"'}\n");
             write(root.resolve("templates/flows/debug.yaml"),"schemaVersion: att-debug/v1.2\n");
             write(root.resolve("load/scenario.yaml"),"schemaVersion: att-load/v1.3\nworkloads:\n"
-                    +"  - id: sample\n    target: {type: flow, id: sample.shared.v1}\n    load: {users: 1, duration: 100ms}\n"
+                    +"  - id: sample\n    target: {type: flow, id: sample.shared.v1}\n    load: {users: 1, duration: 1s}\n"
                     +"    execution: {thinkTime: 0ms}\nevidence: {mode: metrics}\n");
             Path suite=root.resolve("testcase/sample.xlsx");Files.createDirectories(suite.getParent());
             try(XSSFWorkbook workbook=new XSSFWorkbook();java.io.OutputStream output=Files.newOutputStream(suite)) {
@@ -50,7 +50,7 @@ class PackageManifestExecutionTest {
             DebugResult debug=service.debug(new DebugRequest(root,config,null,null,"debug-"+name,"flow","sample.shared.v1",null,false));
             assertEquals("PASS",debug.status(),debug.toMap().toString());
             LoadResult quick=service.load(new LoadRequest(root,config,null,null,"quick-"+name,null,"flow","sample.shared.v1","1",null,
-                    null,null,"100ms",null,"0ms",null,null,Collections.emptyList()));
+                    null,null,"1s",null,"0ms",null,null,Collections.emptyList()));
             assertEquals("PASS",quick.status(),quick.toMap().toString());
             assertTrue(((Number)((java.util.Map<?,?>)quick.summary().get("metrics")).get("completed")).longValue()>0);
             LoadResult path=service.load(new LoadRequest(root,config,null,null,"path-"+name,root.resolve("load/scenario.yaml"),null,null,null,null,
