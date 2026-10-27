@@ -548,10 +548,14 @@ function CompactLoadSummary({ payload, archiveState, archiveMessage }: { payload
   </section>;
 }
 
-function liveThroughputPoints(input: LoadLiveProgressPoint[]): Array<{ elapsedMs: number; completed: number; passed: number }> {
+function boundedLivePoints(input: readonly LoadLiveProgressPoint[]): LoadLiveProgressPoint[] {
   const ordered = [...new Map(input.filter(point => Number.isFinite(point.elapsedMs)).map(point => [point.elapsedMs, point])).values()]
     .sort((left, right) => left.elapsedMs - right.elapsedMs);
-  const points = ordered.length <= 320 ? ordered : Array.from({ length: 320 }, (_, index) => ordered[Math.floor(index * (ordered.length - 1) / 319)]!);
+  return ordered.length <= 320 ? ordered : Array.from({ length: 320 }, (_, index) => ordered[Math.floor(index * (ordered.length - 1) / 319)]!);
+}
+
+function liveThroughputPoints(input: LoadLiveProgressPoint[]): Array<{ elapsedMs: number; completed: number; passed: number }> {
+  const points = boundedLivePoints(input);
   const output: Array<{ elapsedMs: number; completed: number; passed: number }> = [];
   for (let index = 1; index < points.length; index += 1) {
     const previous = points[index - 1]!;
@@ -569,6 +573,41 @@ function liveThroughputPoints(input: LoadLiveProgressPoint[]): Array<{ elapsedMs
   return output;
 }
 
+function LiveSampleChart({ label, unit, points, series }: {
+  label: string; unit: string; points: readonly LoadLiveProgressPoint[];
+  series: Array<{ name: string; color: string; read: (point: LoadLiveProgressPoint) => number | null | undefined }>;
+}) {
+  const valid = points.filter(point => series.some(item => { const value = item.read(point); return value != null && Number.isFinite(value) && value >= 0; }));
+  if (valid.length < 2) return null;
+  const first = valid[0]!.elapsedMs, span = Math.max(1, valid[valid.length - 1]!.elapsedMs - first);
+  const max = Math.max(1, ...valid.flatMap(point => series.map(item => { const value = item.read(point); return value != null && Number.isFinite(value) && value >= 0 ? value : 0; })));
+  const phases = valid.map(point => point.phase).filter((phase, index, all) => index === 0 || phase !== all[index - 1]);
+  const path = (item: typeof series[number]) => {
+    let connected = false;
+    return points.map(point => {
+      const value = item.read(point);
+      if (value == null || !Number.isFinite(value) || value < 0) { connected = false; return ''; }
+      const part = `${connected ? 'L' : 'M'} ${(24 + (point.elapsedMs - first) * 580 / span).toFixed(1)} ${(100 - value * 84 / max).toFixed(1)}`;
+      connected = true; return part;
+    }).filter(Boolean).join(' ');
+  };
+  return <figure className="att-live-load-chart">
+    <svg viewBox="0 0 620 112" role="img" aria-label={`${label} trend`}>
+      {valid.slice(0, -1).map((point, index) => {
+        const next = valid[index + 1]!;
+        const fill = point.phase === 'WARMUP' ? '#fff0c2' : point.phase === 'RAMP_UP' || point.phase === 'RAMP_DOWN' ? '#e7edff' : undefined;
+        return fill ? <rect key={`${point.elapsedMs}-${index}`} x={24 + (point.elapsedMs - first) * 580 / span} y="16" width={(next.elapsedMs - point.elapsedMs) * 580 / span} height="84" fill={fill} aria-hidden="true" /> : null;
+      })}
+      <path d="M 24 100 H 604" className="att-live-load-axis" />
+      {series.map(item => <path key={item.name} d={path(item)} fill="none" stroke={item.color} strokeWidth="2.5" vectorEffect="non-scaling-stroke" />)}
+    </svg>
+    <figcaption><strong>{label}</strong><span>0–{METRIC_NUMBER_FORMATTER.format(max)} {unit} · {plannedWorkloadDuration(first)} to {plannedWorkloadDuration(valid[valid.length - 1]!.elapsedMs)}</span>
+      {series.map(item => <span key={item.name}><i style={{ background: item.color }} /> {item.name}</span>)}
+      <span>Sampled phases: {phases.map(phase => phase.replaceAll('_', ' ')).join(' → ')}</span>
+    </figcaption>
+  </figure>;
+}
+
 function configuredRatePerSecond(value: number | string | undefined): number | null {
   if (typeof value === 'number') return Number.isFinite(value) && value > 0 ? value : null;
   if (typeof value !== 'string') return null;
@@ -578,9 +617,9 @@ function configuredRatePerSecond(value: number | string | undefined): number | n
   return Number.isFinite(result) && result > 0 ? result : null;
 }
 
-function LiveLoadSummary({ job, active, progress, history, trend, streamHistory, checkpointHistory, connection, now }: {
+function LiveLoadSummary({ job, active, progress, history, trend, streamHistory, checkpointHistory, connection, now, showTrends = false }: {
   job: JobView | null; active: boolean; progress: LoadLiveProgressSnapshot | null;
-  history: LoadLiveProgressPoint[]; trend: LoadLiveProgressPoint[]; streamHistory?: readonly LoadLiveProgressPoint[]; checkpointHistory?: readonly import('./types').LoadCheckpointInterval[]; connection: JobStreamConnection; now: number;
+  history: LoadLiveProgressPoint[]; trend: LoadLiveProgressPoint[]; streamHistory?: readonly LoadLiveProgressPoint[]; checkpointHistory?: readonly import('./types').LoadCheckpointInterval[]; connection: JobStreamConnection; now: number; showTrends?: boolean;
 }) {
   const partial = Boolean(!active && job && ['CANCELLED', 'ERROR', 'INVALID', 'FAIL'].includes(job.status) && progress);
   if ((!active && !partial) || job?.command !== 'load') return null;
@@ -591,6 +630,7 @@ function LiveLoadSummary({ job, active, progress, history, trend, streamHistory,
       : `Fresh · last sample ${METRIC_NUMBER_FORMATTER.format(latestAge / 1000)}s ago`;
   const chartInput = [...trend, ...history, ...(streamHistory || []), ...(progress ? [progress] : [])];
   const chart = liveThroughputPoints(chartInput);
+  const samplePoints = boundedLivePoints(chartInput);
   const configuredRates = plans.map(plan => configuredRatePerSecond(plan.arrivalRate));
   const configuredTarget = configuredRates.length && configuredRates.every(rate => rate != null)
     ? configuredRates.reduce<number>((sum, rate) => sum + (rate ?? 0), 0) : null;
@@ -659,6 +699,26 @@ function LiveLoadSummary({ job, active, progress, history, trend, streamHistory,
         </svg>
         <figcaption><span><i className="att-live-load-legend-completed" /> Completed TPS</span><span><i className="att-live-load-legend-passed" /> Successful TPS</span>{configuredTarget != null && <span>Configured steady target: {countText(configuredTarget)} TPS (ramps may differ)</span>}<span>{chart.length} sampled intervals</span></figcaption>
       </figure>}
+      {showTrends && <section aria-label="Live sampled metric trends">
+        <p>Samples retain their actual elapsed timestamps. FAIL, ERROR, and drop totals are cumulative; latency percentiles are histogram estimates.</p>
+        <LiveSampleChart label="Cumulative failures and drops" unit="iterations" points={samplePoints} series={[
+          { name: 'SUT FAIL', color: '#b04724', read: point => point.counts.sutFailures },
+          { name: 'Runtime ERROR', color: '#8a3259', read: point => point.counts.runtimeErrors },
+          { name: 'Dropped', color: '#8a5a00', read: point => point.counts.dropped },
+        ]} />
+        <LiveSampleChart label="Active and queued" unit="iterations" points={samplePoints} series={[
+          { name: 'Active', color: '#3157c8', read: point => point.counts.active },
+          { name: 'Queued', color: '#8a5a00', read: point => point.counts.queued },
+        ]} />
+        <LiveSampleChart label="Mean scheduler lag" unit="milliseconds" points={samplePoints} series={[
+          { name: 'Mean lag', color: '#3157c8', read: point => point.counts.schedulerLagMeanMs },
+        ]} />
+        <LiveSampleChart label="Sampled latency" unit="milliseconds" points={samplePoints} series={[
+          { name: 'Mean', color: '#3157c8', read: point => point.latency?.meanMs },
+          { name: 'p95 estimate', color: '#23834f', read: point => point.latency?.p95Ms },
+          { name: 'p99 estimate', color: '#8a3259', read: point => point.latency?.p99Ms },
+        ]} />
+      </section>}
       <section aria-label="Verified checkpoint intervals">
         <h4>Recent checkpoint intervals</h4>
         <p>Provisional aggregate measurements from integrity-verified checkpoints; the latest 64 intervals are retained.</p>
@@ -760,7 +820,7 @@ export const MetricsPanel = memo(function MetricsPanel({ job, payload = null, me
   return <section className="att-job-panel" role="tabpanel" id="job-panel-metrics" aria-labelledby="job-tab-metrics" hidden={hidden} tabIndex={0}>
     <Profiler id="job-metrics-content" onRender={() => onProfilerCommit?.()}><h2>Metrics</h2>
     <p className="att-help">Only values returned by the job API are shown. Server timings and Worker JVM metrics are separate from Load result metrics.</p>
-    <LiveLoadSummary job={job} active={activeLoad} progress={liveProgress} history={liveHistory} trend={liveTrend} streamHistory={streamHistory} checkpointHistory={checkpointHistory} connection={streamConnection} now={now} />
+    <LiveLoadSummary job={job} active={activeLoad} progress={liveProgress} history={liveHistory} trend={liveTrend} streamHistory={streamHistory} checkpointHistory={checkpointHistory} connection={streamConnection} now={now} showTrends />
     {!activeLoad && terminal && <CompactLoadSummary payload={payload} archiveState={reportAvailability} archiveMessage={reportError} />}
     {coverage && <p className="att-help">LoadMetrics retains at most {displayValue(coverage.loadMetricsBucketCapacity)} one-second buckets; retained coverage is {displayValue(coverage.observedBucketCoverageMs ?? 0)} ms. The window series uses {displayValue(coverage.windowSeriesBinWidthMs)} ms bins across {displayValue(coverage.windowSeriesCapacity)} slots ({displayValue(coverage.windowSeriesCoverage || 'coverage not reported')}).</p>}
     {job && <MetricTable title="Server timings" rows={numericRows(job.performance?.timings)} unit="ms" />}

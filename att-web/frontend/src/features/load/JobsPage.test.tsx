@@ -452,8 +452,8 @@ describe('JobsPage React feature', () => {
 
   it('shows sampled live LOAD progress in Results and Metrics without terminal archive wording', async () => {
     const now = new Date().toISOString();
-    const first = { capturedAt: now, serverReceivedAt: now, elapsedMs: 10_000, phase: 'STEADY', counts: { scheduled: 10, started: 10, completed: 4, passed: 3 } };
-    const second = { ...first, elapsedMs: 15_000, counts: { scheduled: 15, started: 15, completed: 8, passed: 5 } };
+    const first = { capturedAt: now, serverReceivedAt: now, elapsedMs: 10_000, phase: 'STEADY', counts: { scheduled: 10, started: 10, completed: 4, passed: 3, sutFailures: 1, runtimeErrors: 0, dropped: 0, active: 6, queued: 0, schedulerLagMeanMs: 2 }, latency: { sampleCount: 4, meanMs: 30, p95Ms: 63, p99Ms: 63 } };
+    const second = { ...first, elapsedMs: 15_000, counts: { scheduled: 15, started: 15, completed: 8, passed: 5, sutFailures: 2, runtimeErrors: 1, dropped: 0, active: 7, queued: 0, schedulerLagMeanMs: 3 } };
     const progress = {
       ...second, elapsedMs: 20_000, schemaVersion: 'att-load-live-progress/v1' as const,
       counts: { scheduled: 20, started: 19, completed: 10, passed: 6, sutFailures: 1, runtimeErrors: 1, dropped: 0, active: 9, queued: 1 },
@@ -486,6 +486,8 @@ describe('JobsPage React feature', () => {
     expect(metrics.textContent).toContain('Average completed / successful TPS2 / 1.6');
     expect(metrics.textContent).toContain('Configured steady target TPS2');
     expect(metrics.querySelector('.att-live-load-target')).not.toBeNull();
+    for (const name of ['Cumulative failures and drops', 'Active and queued', 'Mean scheduler lag', 'Sampled latency'])
+      expect(metrics.querySelector(`svg[aria-label="${name} trend"]`)).not.toBeNull();
     expect(metrics.querySelector('svg[aria-label="Live completed and successful throughput trend"]')).not.toBeNull();
     expect(metrics.querySelector('.att-live-load-completed')?.getAttribute('d')).not.toBe(metrics.querySelector('.att-live-load-passed')?.getAttribute('d'));
     expect(metrics.textContent).toContain('Latency percentiles are estimates from a bounded histogram');
