@@ -32,8 +32,8 @@ class ArtifactArchiveTest {
     @Test void preservesProducerBytesAndDigestsForReportsAndCommitManifest() throws Exception {
         Path output=Files.createDirectory(temporary.resolve("byte-preserving-output"));
         Map<String,String> sources=Map.of(
-                "load/run/load-summary.json", "{\"payload\":\"keep exact bytes\\n\"}",
-                "load/run/load-summary.yaml", "payload: '  keep  spaces  '\\n",
+                "load/run/load-summary.json", "{\"customerName\":\"Business Customer\"}",
+                "load/run/load-summary.yaml", "customerName: '  Business Customer  '\\n",
                 "load/run/report/index.html", "<!doctype html><html><script>window.T=1</script><a href=\"../missing.log\">link</a></html>",
                 "load/run/report-commit-manifest.json", "{\"sha256\":\"source-defined\"}");
         for(Map.Entry<String,String> entry:sources.entrySet()) {
