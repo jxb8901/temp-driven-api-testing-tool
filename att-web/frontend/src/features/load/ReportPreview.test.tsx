@@ -21,8 +21,8 @@ describe('authenticated isolated report preview', () => {
     }
   });
 
-  it('retains opaque-origin sandbox, inherits the Studio nonce, and prevents fallback link navigation', () => {
-    const html = prepareReportHtml(report, 'run/report/index.html', 'STUDIO_NONCE');
+  it('retains opaque-origin sandbox, inherits the Studio nonce, and prevents fallback link navigation', async () => {
+    const html = await prepareReportHtml(report, 'run/report/index.html', 'STUDIO_NONCE');
     const document = new DOMParser().parseFromString(html, 'text/html');
     expect(document.querySelector('meta[http-equiv="Content-Security-Policy"]')?.getAttribute('content'))
       .toContain("'sha256-zhg8uc2ehLr1YOtvIswiYT86nszYQvE88Tg1hupHR80='");
@@ -33,8 +33,13 @@ describe('authenticated isolated report preview', () => {
     expect(log?.hasAttribute('href')).toBe(false);
     expect(document.querySelector('a[href="#summary"]')).not.toBeNull();
     expect(document.querySelector('a[href^="https://"]')).toBeNull();
-    expect(() => prepareReportHtml('<html><script>alert(1)</script></html>', 'report/index.html', 'NONCE'))
-      .toThrow('Content Security Policy');
+    const unsafe = await prepareReportHtml('<html><script>alert(1)</script><img src="https://outside.invalid/x" onerror="alert(2)"></html>', 'report/index.html', 'NONCE');
+    const sanitized = new DOMParser().parseFromString(unsafe, 'text/html');
+    expect(sanitized.querySelectorAll('script')).toHaveLength(1); // ATT's fixed navigation bridge only
+    expect(unsafe).not.toContain('alert(1)');
+    expect(unsafe).not.toContain('alert(2)');
+    expect(sanitized.querySelector('img')?.hasAttribute('src')).toBe(false);
+    expect(sanitized.querySelector('meta[http-equiv="Content-Security-Policy"]')?.getAttribute('content')).toContain("default-src 'none'");
   });
 
   let host: HTMLDivElement;
