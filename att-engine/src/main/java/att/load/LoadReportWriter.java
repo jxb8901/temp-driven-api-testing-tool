@@ -4,6 +4,9 @@ import att.validation.JsonSupport;
 import org.yaml.snakeyaml.Yaml;
 
 import java.io.IOException;
+import java.io.OutputStream;
+import java.io.OutputStreamWriter;
+import java.io.FilterOutputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
@@ -26,15 +29,20 @@ public final class LoadReportWriter {
             Files.createDirectories(runDirectory.resolve("report"));
             Map<String, Object> map = result.toMap();
             long detailBytes = LoadReportDetailWriter.write(runDirectory, map);
-            byte[] json = JsonSupport.mapper().writerWithDefaultPrettyPrinter().writeValueAsBytes(map);
-            byte[] yaml = new Yaml().dump(map).getBytes(StandardCharsets.UTF_8);
-            byte[] reportHtml = html(runDirectory, result, map).getBytes(StandardCharsets.UTF_8);
-            long reportBytes = detailBytes + json.length + yaml.length + reportHtml.length;
-            if (reportBytes > MAX_REPORT_TOTAL_BYTES)
-                throw new IOException("LOAD detailed report output exceeds its 120 MiB bounded report budget.");
-            writeBounded(runDirectory.resolve("load-summary.json"), json);
-            writeBounded(runDirectory.resolve("load-summary.yaml"), yaml);
-            writeBounded(runDirectory.resolve("report/index.html"), reportHtml);
+            // Stream each representation through the shared byte budget. Never hold three large
+            // JSON/YAML/HTML byte arrays in the Worker heap before checking the archive limit.
+            ReportByteBudget budget = new ReportByteBudget(detailBytes);
+            try (OutputStream output = budget.open(runDirectory.resolve("load-summary.json"))) {
+                JsonSupport.mapper().writerWithDefaultPrettyPrinter().writeValue(output, map);
+            }
+            try (OutputStream output = budget.open(runDirectory.resolve("load-summary.yaml"));
+                 OutputStreamWriter writer = new OutputStreamWriter(output, StandardCharsets.UTF_8)) {
+                new Yaml().dump(map, writer);
+            }
+            try (OutputStream output = budget.open(runDirectory.resolve("report/index.html"));
+                 OutputStreamWriter writer = new OutputStreamWriter(output, StandardCharsets.UTF_8)) {
+                writer.write(html(runDirectory, result, map));
+            }
             return runDirectory.resolve("report/index.html");
         } catch (IOException | RuntimeException failure) {
             removePartialArtifacts(runDirectory, failure);
@@ -58,11 +66,32 @@ public final class LoadReportWriter {
         }
     }
 
-    private static void writeBounded(Path path, byte[] bytes) throws IOException {
-        if (bytes.length > MAX_REPORT_FILE_BYTES)
-            throw new IOException("LOAD report file exceeds the 16 MiB artifact entry limit (" + bytes.length
-                    + " bytes): " + path.getFileName());
-        Files.write(path, bytes);
+    /** Enforce per-file and cross-file UTF-8 byte caps while writing, not after allocation. */
+    private static final class ReportByteBudget {
+        private long total;
+        ReportByteBudget(long detailBytes) throws IOException {
+            if (detailBytes > MAX_REPORT_TOTAL_BYTES)
+                throw new IOException("LOAD detailed report output exceeds its 120 MiB bounded report budget.");
+            total = detailBytes;
+        }
+        OutputStream open(Path path) throws IOException {
+            OutputStream target = Files.newOutputStream(path);
+            return new FilterOutputStream(target) {
+                private long fileBytes;
+                private void check(int size) throws IOException {
+                    if (size < 0 || fileBytes > MAX_REPORT_FILE_BYTES - size)
+                        throw new IOException("LOAD report file exceeds the 16 MiB artifact entry limit: " + path.getFileName());
+                    if (total > MAX_REPORT_TOTAL_BYTES - size)
+                        throw new IOException("LOAD detailed report output exceeds its 120 MiB bounded report budget.");
+                    fileBytes += size;
+                    total += size;
+                }
+                @Override public void write(int value) throws IOException { check(1); out.write(value); }
+                @Override public void write(byte[] bytes, int offset, int length) throws IOException {
+                    check(length); out.write(bytes, offset, length);
+                }
+            };
+        }
     }
 
     private String html(Path runDirectory, LoadRunResult result, Map<String, Object> summary) {
