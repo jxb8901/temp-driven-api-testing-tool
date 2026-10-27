@@ -131,11 +131,12 @@ public final class LoadConsoleSampler {
         liveCounters.observe(event);
         String phaseKey=ExecutionConsoleFormatter.token(event.phase(),"UNKNOWN");
         livePhase=phaseKey;
-        if(livePhases.size()<8||livePhases.containsKey(phaseKey))livePhases.computeIfAbsent(phaseKey,ignored->new Counters()).observe(event);
+        Counters phaseCounters=boundedCounters(livePhases,phaseKey,8);
+        if(phaseCounters!=null)phaseCounters.observe(event);
         if(event.workloadId()!=null&&!event.workloadId().trim().isEmpty()) {
             String workloadKey=ExecutionConsoleFormatter.token(event.workloadId(),"unknown");
-            if(liveWorkloads.size()<32||liveWorkloads.containsKey(workloadKey))liveWorkloads.computeIfAbsent(workloadKey,ignored->new Counters()).observe(event);
-            else liveWorkloadsTruncated.set(true);
+            Counters workloadCounters=boundedCounters(liveWorkloads,workloadKey,32);
+            if(workloadCounters!=null)workloadCounters.observe(event);else liveWorkloadsTruncated.set(true);
         }
         adoptRunId(event.runId());
         if (event.model() != null) model = ExecutionConsoleFormatter.token(event.model(), model);
@@ -209,6 +210,15 @@ public final class LoadConsoleSampler {
         }
     }
     private static double rate(long count,long elapsedMs) {return elapsedMs<=0L?0.0:count*1000.0/elapsedMs;}
+
+    private static Counters boundedCounters(ConcurrentHashMap<String,Counters> counters,String key,int limit) {
+        Counters current=counters.get(key);if(current!=null)return current;
+        synchronized(counters) {
+            current=counters.get(key);if(current!=null)return current;
+            if(counters.size()>=limit)return null;
+            current=new Counters();counters.put(key,current);return current;
+        }
+    }
 
     private static final class Counters {
         final AtomicLong scheduled=new AtomicLong(),started=new AtomicLong(),completed=new AtomicLong(),passed=new AtomicLong();

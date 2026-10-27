@@ -17,6 +17,23 @@ import java.util.concurrent.atomic.AtomicInteger;
 import static org.junit.jupiter.api.Assertions.*;
 
 class LoadConsoleSamplerTest {
+    @Test void concurrentlyDiscoveredWorkloadsAndPhasesStayWithinTheirCaps() throws Exception {
+        LoadConsoleSampler sampler=new LoadConsoleSampler("concurrent",5000L,1000L);
+        int workers=64;CyclicBarrier start=new CyclicBarrier(workers);ExecutorService executor=Executors.newFixedThreadPool(workers);
+        List<Future<?>> tasks=new ArrayList<>();
+        try {
+            for(int i=0;i<workers;i++) {final int id=i;tasks.add(executor.submit(()->{
+                start.await();sampler.onEvent(LoadEvent.completed("concurrent","arrivalRate","phase-"+id,"iteration","VU",id,1L,2L,3L,ResultStatus.PASS)
+                        .withWorkloadIdentity("workload-"+id,"template","TEST"));return null;
+            }));}
+            for(Future<?> task:tasks)task.get(10,TimeUnit.SECONDS);
+            Map<String,Object> snapshot=sampler.snapshot();
+            assertEquals(32,((Map<?,?>)snapshot.get("workloads")).size());
+            assertEquals(8,((Map<?,?>)snapshot.get("phases")).size());
+            assertEquals(Boolean.TRUE,snapshot.get("workloadsTruncated"));
+            assertEquals((long)workers,((Map<?,?>)snapshot.get("counts")).get("completed"),"The global count includes observations beyond the detail cap");
+        } finally {executor.shutdownNow();executor.awaitTermination(10,TimeUnit.SECONDS);sampler.finish("PASS");}
+    }
     @Test void preparationDoesNotAdvanceSchedulerElapsedTime() throws Exception {
         LoadConsoleSampler sampler=new LoadConsoleSampler("preparing",5000L,1000L);
         Thread.sleep(20L);
