@@ -168,6 +168,44 @@ class ArtifactLifecycleTest {
         }
     }
 
+    @Test void canonicalLoadReportRemainsRetrievableAfterServerRestart() throws Exception {
+        ServerConfig config;
+        String id="J0000000000000001";
+        String reportPath="load/archive-preview/report/index.html";
+        byte[] reportBytes;
+        try(ServerRuntime runtime=runtime()) {
+            config=runtime.config;job(runtime,id,"PASS");
+            Path scenarioPath=temp.resolve("load-restart.yaml");
+            Files.write(scenarioPath,Collections.singletonList("schemaVersion: att-load/v1.9\nworkloads:\n"
+                    +"- id: archive-preview\n  target: {type: tool, id: sample.getAcDate}\n"
+                    +"  load: {users: 1, duration: 2s}\n"),StandardCharsets.UTF_8);
+            LoadScenario scenario=new LoadScenarioLoader(temp).load(scenarioPath);
+            Instant started=Instant.parse("2026-10-24T00:00:00Z");long startMs=started.toEpochMilli();
+            LoadMetrics metrics=LoadMetrics.forScenario(scenario,startMs,3_000L);
+            metrics.onEvent(LoadEvent.completed("archive-preview","closed","STEADY","iteration-1","VU-1",1,
+                    startMs+1_000L,startMs+1_000L,startMs+1_050L,ResultStatus.PASS));
+            metrics.finish(startMs+3_000L);
+            Path report=new LoadReportWriter().write(runtime.outputDirectoryForJob(id),
+                    new LoadRunResult("archive-preview",scenario,started,started.plusSeconds(3),metrics.snapshot()));
+            reportBytes=Files.readAllBytes(report);
+            String html=new String(reportBytes,StandardCharsets.UTF_8);
+            assertTrue(html.contains("renderCharts"),"The offline report should contain its chart renderer");
+            assertFalse(html.contains("<script src="),"The report must not need a remote script to render offline");
+            runtime.scheduleArtifactArchive(id);awaitState(runtime,id,"READY");
+            Map<String,Object> index=runtime.artifactIndex(id);
+            assertTrue(((List<?>)index.get("primaryReports")).stream().anyMatch(value->
+                    reportPath.equals(((Map<?,?>)value).get("path"))));
+            assertEquals(Boolean.TRUE,ArtifactArchive.verify(runtime.artifactArchivePath(id),true).get("complete"));
+            assertArrayEquals(reportBytes,runtime.archiveEntry(id,reportPath));
+        }
+        try(ServerRuntime restarted=new ServerRuntime(config,temp.resolve("libs").toString())) {
+            awaitState(restarted,id,"READY");
+            assertArrayEquals(reportBytes,restarted.archiveEntry(id,reportPath),
+                    "A fresh Server instance must retrieve the same committed LOAD report bytes");
+            assertTrue(Boolean.TRUE.equals(ArtifactArchive.verify(restarted.artifactArchivePath(id),true).get("complete")));
+        }
+    }
+
     @Test void failuresKeepPrivateSourceAndRetryWhileLiveJobsStayUnarchived() throws Exception {
         try(ServerRuntime runtime=runtime()) {
             String id="J0000000000000001";job(runtime,id,"RUNNING");
