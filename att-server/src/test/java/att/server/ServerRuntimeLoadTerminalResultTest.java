@@ -14,6 +14,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -105,6 +106,40 @@ class ServerRuntimeLoadTerminalResultTest {
             Map<?,?> eventData = (Map<?,?>) terminal.get("data");
             assertEquals("ATT-SERVER-WORKER-EXITED", JSON.valueToTree(eventData).path("result").path("summary")
                     .path("diagnostics").path("primaryError").path("code").asText());
+        }
+    }
+
+    @Test void persistsOnlyAllowlistedMonotonicLiveLoadProgressAndBoundsHistory() throws Exception {
+        try(ServerRuntime runtime=runtime("live-load-progress")) {
+            Job job=createJob(runtime,"J0000000000000301");
+            job.targetIdentity=fields("workloads",List.of(fields("name","steady","totalDurationMs",10000L)));
+            Map<String,Object> snapshot=fields("schemaVersion","att-load-live-progress/v1","capturedAt","2026-10-27T00:00:05Z","elapsedMs",5000L,
+                    "phase","STEADY","counts",fields("scheduled",10L,"started",9L,"completed",7L,"passed",6L,"sutFailures",1L,"runtimeErrors",0L,"dropped",0L,"active",2L,"queued",1L),
+                    "measuredCounts",fields("completed",7L,"passed",6L),"rates",fields("completedTps",1.4,"successfulTps",1.2),
+                    "latency",fields("sampleCount",7L,"meanMs",52.0,"p95Ms",63L,"p99Ms",63L),
+                    "phases",fields("STEADY",fields("completed",7L)),"workloads",fields("steady",fields("completed",7L),"/private/path",fields("completed",99L)),
+                    "password","secret-value","filesystemPath","/private/secret/path");
+            runtime.handleWorkerEvent(job,JSON.writeValueAsString(fields("type","PROGRESS","loadProgress",snapshot)));
+            assertEquals(5000L,((Number)job.loadProgress.get("elapsedMs")).longValue());
+            assertEquals(1,job.loadProgressHistory.size());assertEquals(1,job.loadProgressTrend.size());
+            assertFalse(JSON.writeValueAsString(job.loadProgress).contains("secret-value"));
+            assertFalse(JSON.writeValueAsString(job.loadProgress).contains("/private"));
+            assertEquals(Set.of("steady"),((Map<?,?>)job.loadProgress.get("workloads")).keySet());
+
+            Map<String,Object> regressive=new LinkedHashMap<>(snapshot);regressive.put("elapsedMs",4000L);
+            runtime.handleWorkerEvent(job,JSON.writeValueAsString(fields("type","PROGRESS","loadProgress",regressive)));
+            assertEquals(5000L,((Number)job.loadProgress.get("elapsedMs")).longValue(),"A reconnect replay with an older sample cannot replace the latest snapshot");
+            Map<String,Object> persisted=(Map<String,Object>)runtime.store.get(job.id).get("loadProgress");
+            assertEquals(5000L,((Number)persisted.get("elapsedMs")).longValue());
+            Map<String,Object> latestEvent=job.events.after(0).stream().filter(event->"progress".equals(event.get("event"))).reduce((left,right)->right).orElseThrow();
+            assertFalse(JSON.writeValueAsString(latestEvent.get("data")).contains("loadProgress"),"The stale progress snapshot is omitted from the published event");
+
+            Map<String,Object> next=new LinkedHashMap<>(snapshot);next.put("capturedAt","2026-10-27T00:00:10Z");next.put("elapsedMs",10000L);
+            runtime.handleWorkerEvent(job,JSON.writeValueAsString(fields("type","PROGRESS","loadProgress",next)));
+            Map<String,Object> record=runtime.jobRecord(job.id);
+            assertEquals(10000L,((Number)((Map<?,?>)record.get("loadProgress")).get("elapsedMs")).longValue());
+            assertEquals(2,((List<?>)record.get("loadProgressHistory")).size());
+            assertEquals(2,((List<?>)record.get("loadProgressTrend")).size());
         }
     }
 

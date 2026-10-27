@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } fro
 import { ApiError, type AsyncState, type PackageSummary } from '../../types';
 import { formatRoute, useNavigationGuard, type AppRoute } from '../../router';
 import { useCountdownNow } from '../../useCountdownNow';
+import { plannedWorkloadDuration, workloadPacing, workloadPhaseSummary } from '../load/loadWorkloadSummary';
 import type { SchedulesApi, ScheduleDefinition, ScheduleOccurrence, ValidatedScheduleIntent } from './types';
 import {
   createScheduleDraft, cronForDraft, draftFromSchedule, explainOccurrence,
@@ -149,8 +150,8 @@ function LoadScheduleSummary({ schedule }: { schedule: ScheduleDefinition }) {
   if (!identity?.workloads?.length) return <small>Load setup: Not available</small>;
   return <div className="att-schedule-load-summary">{identity.workloadCount!>1 && <small>{identity.workloadCount} workloads · {identity.bindingCount} target bindings</small>}{identity.workloads.map((workload,index)=><div key={index}>
     <strong>{workload.name || `Workload ${index+1}`}</strong><small>{workload.targets.map(t=>`${t.type} · ${t.id}`).join(' / ') || 'Target: Not available'}</small>
-    <small>{workload.model} · {workload.arrivalRate!=null?`target ${workload.arrivalRate} arrivals (configured rate)`:workload.users!=null?`${workload.users} VUs`:'VU / target rate: Not available'} · Planned total {workload.totalDurationMs!=null?`${workload.totalDurationMs/1000}s`:'Not available'}</small>
-    <small>Steady {workload.duration || 'Not available'}{workload.warmup!=null?` · Warmup ${workload.warmup}`:''}{workload.rampUp!=null?` · Ramp-up ${workload.rampUp}`:''}{workload.rampDown!=null?` · Ramp-down ${workload.rampDown}`:''}</small>
+    <small>{workload.model} · {workloadPacing(workload)} · Planned total {plannedWorkloadDuration(workload.totalDurationMs)}</small>
+    <small>{workloadPhaseSummary(workload)}</small>
   </div>)}{identity.truncated && <small>First 32 workload / target summaries shown. Open Edit for the saved definition.</small>}</div>;
 }
 

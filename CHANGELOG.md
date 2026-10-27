@@ -1,5 +1,11 @@
 # Changelog
 
+# ATT 4.2.6 - 2026-10-27
+
+- Raise the configured LOAD envelope limit to 10 days and apply root plus workload timing consistently across drafts, schedules, and replay validation (#306).
+- Add bounded live LOAD progress to Job Results and Metrics, with persisted history, throughput trends, phase counts, and latency estimates (#306).
+- Improve workload summaries, console retention, structured event previews, and replay timing review in Studio (#306).
+
 # ATT 4.2.5 - 2026-10-27
 
 - Publish compact, versioned LOAD terminal results with artifact-backed details, durable failure causes, and Studio evidence access (#297).

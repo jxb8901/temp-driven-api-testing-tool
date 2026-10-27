@@ -2,15 +2,20 @@ import { useMemo, useSyncExternalStore } from 'react';
 import type { JobEvent, JobEventHandlers, LoadJobsApi } from './types';
 
 export const MAX_EVENTS = 500;
+export const MAX_CONSOLE_LINES = 2000;
+const MAX_CONSOLE_LINE_LENGTH = 4000;
 export const EVENT_FLUSH_INTERVAL_MS = 100;
 export const COUNTER_FLUSH_INTERVAL_MS = 1000;
 export const MAX_TRACKED_EVENT_IDS = 2000;
 
 export type JobStreamConnection = 'connecting' | 'connected' | 'reconnecting' | 'completed';
 export type JobStreamEvent = Readonly<JobEvent & { seq: number; consoleText: string }>;
+export type JobConsoleLine = Readonly<{ seq: number; id?: string; receivedAt: string; text: string }>;
 
 export interface JobEventStreamSnapshot {
   readonly events: readonly JobStreamEvent[];
+  readonly consoleLines: readonly JobConsoleLine[];
+  readonly consoleTruncated: boolean;
   readonly connection: JobStreamConnection;
   readonly journalTruncated: boolean;
   readonly duplicatesIgnored: number;
@@ -46,6 +51,30 @@ class EventRing {
   }
 }
 
+class ConsoleRing {
+  private readonly slots: Array<JobConsoleLine | undefined> = new Array(MAX_CONSOLE_LINES);
+  private start = 0;
+  private size = 0;
+  private truncated = false;
+
+  append(line: JobConsoleLine): void {
+    if (this.size < MAX_CONSOLE_LINES) {
+      this.slots[(this.start + this.size) % MAX_CONSOLE_LINES] = line;
+      this.size += 1;
+      return;
+    }
+    this.slots[this.start] = line;
+    this.start = (this.start + 1) % MAX_CONSOLE_LINES;
+    this.truncated = true;
+  }
+
+  snapshot(): readonly JobConsoleLine[] {
+    return Object.freeze(Array.from({ length: this.size }, (_, index) => this.slots[(this.start + index) % MAX_CONSOLE_LINES]!));
+  }
+
+  wasTruncated(): boolean { return this.truncated; }
+}
+
 class BoundedIdIndex {
   private readonly ids = new Set<string>();
   private readonly order: Array<string | undefined> = new Array(MAX_TRACKED_EVENT_IDS);
@@ -73,6 +102,7 @@ class BoundedIdIndex {
 
 interface Entry {
   buffer: EventRing;
+  consoleBuffer: ConsoleRing;
   idIndex: BoundedIdIndex;
   connection: JobStreamConnection;
   journalTruncated: boolean;
@@ -97,7 +127,7 @@ interface Entry {
 const stores = new WeakMap<object, Map<string, Entry>>();
 const EMPTY_EVENTS: readonly JobStreamEvent[] = Object.freeze([]);
 const EMPTY_SNAPSHOT: JobEventStreamSnapshot = Object.freeze({
-  events: EMPTY_EVENTS, connection: 'connecting', journalTruncated: false,
+  events: EMPTY_EVENTS, consoleLines: Object.freeze([]), consoleTruncated: false, connection: 'connecting', journalTruncated: false,
   duplicatesIgnored: 0, staleIgnored: 0, gaps: 0,
 });
 const EMPTY_STATUS_SNAPSHOT: JobEventStatusSnapshot = Object.freeze({ status: undefined, text: undefined, eventRevision: 0, resultEvent: false });
@@ -172,6 +202,8 @@ function publish(entry: Entry): void {
   clearCounterFlushTimer(entry);
   entry.snapshot = Object.freeze({
     events: entry.buffer.snapshot(),
+    consoleLines: entry.consoleBuffer.snapshot(),
+    consoleTruncated: entry.consoleBuffer.wasTruncated(),
     connection: entry.connection,
     journalTruncated: entry.journalTruncated,
     duplicatesIgnored: entry.duplicatesIgnored,
@@ -220,7 +252,7 @@ function entryFor(api: LoadJobsApi, jobId: string): Entry {
   let entry = byJob.get(jobId);
   if (!entry) {
     entry = {
-      buffer: new EventRing(), idIndex: new BoundedIdIndex(),
+      buffer: new EventRing(), consoleBuffer: new ConsoleRing(), idIndex: new BoundedIdIndex(),
       connection: 'connecting', journalTruncated: false,
       duplicatesIgnored: 0, staleIgnored: 0, gaps: 0,
       statusSnapshot: EMPTY_STATUS_SNAPSHOT,
@@ -281,6 +313,10 @@ function ingest(entry: Entry, event: JobEvent): boolean {
     receivedAt: event.receivedAt || new Date().toISOString(),
     consoleText: strippedConsoleText(event),
   });
+  if (stored.consoleText) entry.consoleBuffer.append(Object.freeze({
+    seq: stored.seq, id: stored.id, receivedAt: stored.receivedAt,
+    text: stored.consoleText.length <= MAX_CONSOLE_LINE_LENGTH ? stored.consoleText : `${stored.consoleText.slice(0, MAX_CONSOLE_LINE_LENGTH)} [console line truncated]`,
+  }));
   if (event.type === 'status' || event.type === 'result') {
     const status = eventStatus(event);
     if (status) entry.status = status;

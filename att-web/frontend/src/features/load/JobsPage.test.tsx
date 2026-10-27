@@ -139,10 +139,11 @@ describe('JobsPage React feature', () => {
     await act(async () => root.render(<JobsPage api={api} jobId="JOB-204" onOpenJob={vi.fn()} onShowList={vi.fn()} />));
     const handlers=vi.mocked(api.subscribeJob).mock.calls[0][1];
     const text='diagnostic '+ 'x'.repeat(8000) + ' expanded-entry-end';
+    const expectedConsole=text.slice(0,4000)+' [console line truncated]';
     await act(async () => handlers.onEvent({id:'1',type:'log',data:{console:text,truncated:true,journalLimit:{limitBytes:65536}}}));
     await advance(100);
     await click(host.querySelector('#job-tab-live')!);
-    expect(host.querySelector('[aria-label="Live output"]')?.textContent).toBe(text);
+    expect(host.querySelector('[aria-label="Live output"]')?.textContent).toBe(expectedConsole);
     expect(host.querySelector('#job-panel-live')?.textContent).toContain('Some event payload fields were truncated by the journal');
     await click(host.querySelector('#job-tab-events')!);
     expect(host.querySelector('#job-panel-events')?.textContent).toContain('Events preview clipped');
@@ -182,7 +183,8 @@ describe('JobsPage React feature', () => {
     const api = makeApi({ getJob, getJobResult });
     await act(async () => root.render(<JobsPage api={api} jobId="JOB-204" onOpenJob={vi.fn()} onShowList={vi.fn()} />));
     expect(host.querySelector('#job-panel-metrics')?.textContent).not.toContain('heapPeakUsedBytes');
-    expect(host.querySelector('#job-panel-results')?.textContent).toContain('The Server has not returned a result payload.');
+    expect(host.querySelector('#job-panel-results')?.textContent).toContain('Live LOAD progress');
+    expect(host.querySelector('#job-panel-results')?.textContent).not.toContain('The Server has not returned a result payload.');
     const handlers = vi.mocked(api.subscribeJob).mock.calls[0][1];
     await act(async () => handlers.onEvent({ id: 'terminal', type, data: { status } }));
     await click(host.querySelector('#job-tab-metrics')!);
@@ -446,6 +448,35 @@ describe('JobsPage React feature', () => {
     expect(host.querySelector('#job-panel-live pre.att-console')?.textContent).toContain('[RUN] worker ready');
     expect(host.querySelector('#job-panel-live pre.att-console')?.innerHTML).not.toContain('<');
     expect(host.querySelector('#job-panel-live')?.textContent).toContain('connected');
+  });
+
+  it('shows sampled live LOAD progress in Results and Metrics without terminal archive wording', async () => {
+    const now = new Date().toISOString();
+    const first = { capturedAt: now, serverReceivedAt: now, elapsedMs: 10_000, phase: 'STEADY', counts: { scheduled: 10, started: 10, completed: 4, passed: 3 } };
+    const second = { ...first, elapsedMs: 15_000, counts: { scheduled: 15, started: 15, completed: 8, passed: 7 } };
+    const progress = {
+      ...second, elapsedMs: 20_000, schemaVersion: 'att-load-live-progress/v1' as const,
+      counts: { scheduled: 20, started: 19, completed: 10, passed: 8, sutFailures: 1, runtimeErrors: 1, dropped: 0, active: 9, queued: 1 },
+      rates: { completedTps: 2, successfulTps: 1.6 }, latency: { sampleCount: 10, meanMs: 40, p95Ms: 64, p99Ms: 127 },
+      workloads: { steady: { scheduled: 20, started: 19, completed: 10, passed: 8 } },
+    };
+    const liveJob: JobView = { ...sampleJob, targetIdentity: { workloads: [{ name: 'steady', targets: [{ type: 'flow', id: 'checkout' }], model: 'arrivalRate', arrivalRate: 2, maxConcurrent: 20, totalDurationMs: 60_000 }] },
+      loadProgress: progress, loadProgressHistory: [first, second], loadProgressTrend: [first] };
+    const getArchive = vi.fn(async () => ({ archiveStatus: 'READY' as const, archiveSizeBytes: 0, items: [], primaryReports: [] }));
+    const api = makeApi({ getJob: vi.fn(async () => liveJob), getJobResult: vi.fn(async () => ({ job: sampleResult.job, result: null })), getJobArtifactArchive: getArchive });
+    await act(async () => root.render(<JobsPage api={api} jobId="JOB-204" onOpenJob={vi.fn()} onShowList={vi.fn()} />));
+    await click(host.querySelector('#job-tab-results')!);
+    const results = host.querySelector('#job-panel-results')!;
+    expect(results.textContent).toContain('Live LOAD progress');
+    expect(results.textContent).toContain('Completed / PASS10 / 8');
+    expect(results.textContent).toContain('Configured target rate 2');
+    expect(results.textContent).not.toContain('The Server has not returned a result payload');
+    expect(results.textContent).not.toContain('Detailed metrics are waiting for the artifact archive');
+    await click(host.querySelector('#job-tab-metrics')!);
+    const metrics = host.querySelector('#job-panel-metrics')!;
+    expect(metrics.textContent).toContain('Actual completed / successful TPS2 / 1.6');
+    expect(metrics.querySelector('svg[aria-label="Live completed and successful throughput trend"]')).not.toBeNull();
+    expect(getArchive).not.toHaveBeenCalled();
   });
 
   it('renders the compact terminal result and primary ERROR cause without requesting an archive on initial detail load', async () => {
@@ -763,17 +794,17 @@ describe('JobsPage React feature', () => {
 
     await click(host.querySelector('#job-tab-live')!);
     const live = host.querySelector('#job-panel-live')!;
-    expect(live.textContent).toContain('This Job has no console lines');
+    expect(live.textContent).toContain('The Job has finished and no console lines were recorded.');
     await act(async () => handlers?.onEvent({ id: '7', type: 'log', data: { message: '<b>secret</b>', console: '[RUN] case=one\n[RUN] case=two' } }));
     await advance(100);
     expect(live.querySelector('pre.att-console')?.textContent).toBe('[RUN] case=one\n[RUN] case=two');
     expect(live.querySelector('pre.att-console')?.innerHTML).not.toContain('<b>');
     expect([...live.querySelectorAll('button')].some(button => button.textContent === 'Copy Output')).toBe(true);
     await click([...live.querySelectorAll('button')].find(button => button.textContent === 'Clear view')!);
-    expect(live.querySelector('pre.att-console')).toBeNull();
+    expect(live.querySelector('pre.att-console')?.textContent).toBe('');
     await act(async () => handlers?.onEvent({ id: '7', type: 'log', data: { console: '[RUN] replay must stay cleared' } }));
     await advance(100);
-    expect(live.querySelector('pre.att-console')).toBeNull();
+    expect(live.querySelector('pre.att-console')?.textContent).toBe('');
     await act(async () => handlers?.onEvent({ id: '8', type: 'log', data: { console: '[RUN] after clear' } }));
     await advance(100);
     expect(live.querySelector('pre.att-console')?.textContent).toBe('[RUN] after clear');
@@ -832,15 +863,16 @@ describe('JobsPage React feature', () => {
     const events = host.querySelector('#job-panel-events')!;
     const first = events.querySelector('details')!;
     expect(first.open).toBe(true);
-    expect(first.querySelector('.att-event-preview')?.textContent).toContain('status=RUNNING');
-    expect(first.querySelector('.att-event-preview')?.textContent).toContain('phase=STEADY');
-    expect(first.querySelector('.att-event-preview')?.textContent).toContain('sequence=4');
-    expect(first.querySelector('.att-event-preview')?.textContent).toContain('message=steady progress');
-    expect(first.querySelector('.att-event-preview')?.textContent).toContain('metrics=completed=4, failed=0');
+    expect(first.querySelector('.att-event-preview')?.textContent).toContain('Status: RUNNING');
+    expect(first.querySelector('.att-event-preview')?.textContent).toContain('Phase: STEADY');
+    expect(first.querySelector('.att-event-preview')?.textContent).toContain('Sequence: 4');
+    expect(first.querySelector('.att-event-preview')?.textContent).toContain('steady progress');
+    expect(first.querySelector('.att-event-preview')?.textContent).toContain('completed: 4');
+    expect(first.querySelector('.att-event-preview')?.textContent).toContain('failed: 0');
     expect(first.querySelector('pre.att-event-payload')?.textContent).toContain('"phase": "STEADY"');
     await click(first.querySelector('summary')!);
     expect(first.open).toBe(false);
-    expect(first.querySelector('.att-event-preview')?.textContent).toContain('status=RUNNING');
+    expect(first.querySelector('.att-event-preview')?.textContent).toContain('Status: RUNNING');
     await click([...events.querySelectorAll('button')].find(button => button.textContent === 'Expand all')!);
     expect(events.querySelector('details')?.open).toBe(true);
     await click([...events.querySelectorAll('button')].find(button => button.textContent === 'Collapse all')!);
@@ -860,7 +892,7 @@ describe('JobsPage React feature', () => {
     expect(api.subscribeJob).toHaveBeenCalledTimes(1);
     const logFilter = events.querySelector<HTMLInputElement>('input[aria-label="log"]')!;
     await click(logFilter);
-    expect(events.textContent).toContain('sequence=5');
+    expect(events.textContent).toContain('Sequence: 5');
     expect(events.textContent).not.toContain('console line');
     expect(events.querySelector<HTMLInputElement>('[aria-label="Events auto-scroll"]')?.checked).toBe(true);
     await click(host.querySelector('#job-tab-live')!);
@@ -914,6 +946,23 @@ describe('JobsPage React feature', () => {
     expect(shell.style.position).toBe('');
     expect(shell.style.height).toBe(`${before + 64}px`);
     expect(live.querySelector('[aria-label="Resize live output"]')).not.toBeNull();
+  });
+
+  it('uses diagnostic fields in a typed collapsed event preview without repeating the event heading', async () => {
+    const api = makeApi();
+    await act(async () => root.render(<JobsPage api={api} jobId="JOB-204" onOpenJob={vi.fn()} onShowList={vi.fn()} />));
+    const handlers = vi.mocked(api.subscribeJob).mock.calls[0]?.[1];
+    await act(async () => handlers?.onEvent({ id: 'diag-1', type: 'diagnostic', data: { code: 'HTTP_RESPONSE_TOO_LARGE', severity: 'WARN', stage: 'execution', message: 'Response was bounded' } }));
+    await advance(100);
+    await click(host.querySelector('#job-tab-events')!);
+    const row = host.querySelector('#job-panel-events details')!;
+    expect(row.querySelector('summary strong')?.textContent).toBe('diagnostic');
+    const preview = row.querySelector('.att-event-preview')?.textContent || '';
+    expect(preview).toContain('Code: HTTP_RESPONSE_TOO_LARGE');
+    expect(preview).toContain('Severity: WARN');
+    expect(preview).toContain('Stage: execution');
+    expect(preview).not.toMatch(/^diagnostic\b/i);
+    expect(row.querySelector('pre.att-event-payload')?.textContent).toContain('"code": "HTTP_RESPONSE_TOO_LARGE"');
   });
 
   it('does not treat the browser event window as a truncated Server journal', async () => {

@@ -29,6 +29,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.UUID;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.ConcurrentHashMap;
@@ -741,7 +742,8 @@ final class ServerRuntime implements AutoCloseable {
                 else if(request.caseIds!=null)fallback.putObject("selection").set("caseIds",JSON.valueToTree(request.caseIds));
                 listDefinition=fallback;
             }
-            summaryFields.put("targetIdentity",JobListIdentity.from(listDefinition));
+            job.targetIdentity=JobListIdentity.from(listDefinition);
+            summaryFields.put("targetIdentity",job.targetIdentity);
             String summary=JSON.writeValueAsString(summaryFields);
             store.insert(job,summary,JobListIdentity.searchTargets(listDefinition));persisted=true;jobs.put(id,job);append(job,"status",Map.of("jobId",id,"status","QUEUED"));
             FutureTask<Void> task=new FutureTask<>(()->{execute(job,activeJobPath,lease);return null;});tasks.put(id,task);leases.put(id,lease);
@@ -922,7 +924,11 @@ final class ServerRuntime implements AutoCloseable {
         if("STATUS".equals(type)&&job.workerReadyNanos==0)job.workerReadyNanos=eventNanos;
         if(("PROGRESS".equals(type)||"LOG".equals(type))&&job.executionReadyNanos==0)job.executionReadyNanos=eventNanos;
         switch(type){case "STATUS"->{String status=event.path("status").asText("");if("RUNNING".equals(status)&&"PREPARING".equals(job.status))transition(job,"RUNNING");}
-            case "PROGRESS"->append(job,"progress",safe);case "LOG"->append(job,"log",safe);case "DIAGNOSTIC"->{
+            case "PROGRESS"->{Object progress=safe.get("loadProgress");if("load".equals(job.command)&&progress instanceof Map) {
+                    Map<String,Object> sanitized=sanitizeLoadProgress((Map<?,?>)progress);
+                    if(sanitized==null||!recordLoadProgress(job,sanitized))safe.remove("loadProgress");else safe.put("loadProgress",sanitized);
+                } else safe.remove("loadProgress");append(job,"progress",safe);}
+            case "LOG"->append(job,"log",safe);case "DIAGNOSTIC"->{
                 String eventDiagnostic=JSON.writeValueAsString(safe);
                 if(hasClassifiedCause(eventDiagnostic)) {
                     if(job.primaryDiagnosticJson==null)job.primaryDiagnosticJson=eventDiagnostic;
@@ -1223,6 +1229,104 @@ final class ServerRuntime implements AutoCloseable {
         record.put("archiveMetrics",store.archiveMetrics(id));
         return record;
     }
+
+    private static Map<String,Object> sanitizeLoadProgress(Map<?,?> raw) {
+        if(!"att-load-live-progress/v1".equals(raw.get("schemaVersion")))return null;
+        long elapsed=boundedLong(raw.get("elapsedMs"),0L,Long.MAX_VALUE);if(elapsed<0)return null;
+        Map<String,Object> snapshot=new LinkedHashMap<>();snapshot.put("schemaVersion","att-load-live-progress/v1");
+        String captured=raw.get("capturedAt") instanceof String?(String)raw.get("capturedAt"):null;
+        if(captured==null||captured.length()>40||!validTimestamp(captured))return null;
+        snapshot.put("capturedAt",captured);snapshot.put("elapsedMs",elapsed);
+        String phase=raw.get("phase") instanceof String?((String)raw.get("phase")).toUpperCase(java.util.Locale.ROOT):"UNKNOWN";
+        if(!Set.of("PREPARING","WARMUP","RAMP_UP","STEADY","RAMP_DOWN","COMPLETE","UNKNOWN","PROGRESS").contains(phase))phase="UNKNOWN";
+        snapshot.put("phase",phase);
+        Map<String,Object> counts=progressCounts(raw.get("counts"));if(counts==null)return null;snapshot.put("counts",counts);
+        Map<String,Object> measured=progressCounts(raw.get("measuredCounts"));if(measured==null)return null;snapshot.put("measuredCounts",measured);
+        Map<String,Object> rates=progressNumbers(raw.get("rates"),Set.of("completedTps","successfulTps"));if(rates==null)return null;snapshot.put("rates",rates);
+        Map<String,Object> latency=progressLatency(raw.get("latency"));if(latency==null)return null;snapshot.put("latency",latency);
+        Map<String,Object> phases=new TreeMap<>();Object rawPhases=raw.get("phases");
+        if(rawPhases instanceof Map<?,?>)for(Map.Entry<?,?> entry:((Map<?,?>)rawPhases).entrySet()) {
+            if(phases.size()>=8)break;String name=safeProgressName(entry.getKey());if(!Set.of("WARMUP","RAMP_UP","STEADY","RAMP_DOWN","COMPLETE","PREPARING","UNKNOWN").contains(name))continue;
+            Map<String,Object> value=progressCounts(entry.getValue());if(value!=null)phases.put(name,value);
+        }
+        snapshot.put("phases",phases);
+        Map<String,Object> workloads=new TreeMap<>();Object rawWorkloads=raw.get("workloads");
+        if(rawWorkloads instanceof Map<?,?>)for(Map.Entry<?,?> entry:((Map<?,?>)rawWorkloads).entrySet()) {
+            if(workloads.size()>=32)break;String name=safeProgressName(entry.getKey());if(name.isBlank())continue;
+            Map<String,Object> value=progressCounts(entry.getValue());if(value!=null)workloads.put(name,value);
+        }
+        snapshot.put("workloads",workloads);snapshot.put("workloadsTruncated",Boolean.TRUE.equals(raw.get("workloadsTruncated"))||workloads.size()<sizeOf(raw.get("workloads")));
+        snapshot.put("serverReceivedAt",Instant.now().toString());
+        return snapshot;
+    }
+
+    private static Map<String,Object> progressCounts(Object raw) {
+        if(!(raw instanceof Map<?,?>))return null;Map<String,Object> result=new LinkedHashMap<>();Map<?,?> source=(Map<?,?>)raw;
+        for(String key:List.of("scheduled","started","completed","passed","sutFailures","runtimeErrors","dropped","other","active","queued")) {
+            Object value=source.get(key);if(value==null)continue;long count=boundedLong(value,0L,Long.MAX_VALUE);if(count<0)return null;result.put(key,count);
+        }
+        for(String key:List.of("schedulerLagMeanMs"))if(source.containsKey(key)) {
+            Object value=source.get(key);if(value==null){result.put(key,null);continue;}double number=boundedDouble(value);if(!Double.isFinite(number)||number<0)return null;result.put(key,number);
+        }
+        return result;
+    }
+
+    private static Map<String,Object> progressNumbers(Object raw,Set<String> allow) {
+        if(!(raw instanceof Map<?,?>))return null;Map<String,Object> result=new LinkedHashMap<>();
+        for(String key:allow) {Object value=((Map<?,?>)raw).get(key);if(value==null)continue;double number=boundedDouble(value);if(!Double.isFinite(number)||number<0)return null;result.put(key,number);}
+        return result;
+    }
+
+    private static Map<String,Object> progressLatency(Object raw) {
+        if(!(raw instanceof Map<?,?>))return null;Map<?,?> source=(Map<?,?>)raw;Map<String,Object> result=new LinkedHashMap<>();
+        long samples=boundedLong(source.get("sampleCount"),0L,Long.MAX_VALUE);if(samples<0)return null;result.put("sampleCount",samples);
+        for(String key:List.of("meanMs","p95Ms","p99Ms")) {
+            Object value=source.get(key);if(value==null){result.put(key,null);continue;}
+            double number=boundedDouble(value);if(!Double.isFinite(number)||number<0)return null;result.put(key,number);
+        }
+        result.put("percentileMethod","bounded log histogram estimate");return result;
+    }
+
+    private static String safeProgressName(Object raw) {
+        if(!(raw instanceof String))return "";String value=((String)raw).trim();return value.matches("[A-Za-z0-9][A-Za-z0-9._-]{0,127}")?value:"";
+    }
+    private static int sizeOf(Object value){return value instanceof Map<?,?>?((Map<?,?>)value).size():0;}
+    private static long boundedLong(Object value,long minimum,long maximum) {
+        if(!(value instanceof Number))return -1L;try{long number=new java.math.BigDecimal(String.valueOf(value)).longValueExact();return number<minimum||number>maximum?-1L:number;}catch(NumberFormatException|ArithmeticException invalid){return -1L;}
+    }
+    private static double boundedDouble(Object value) {if(!(value instanceof Number))return Double.NaN;try{return new java.math.BigDecimal(String.valueOf(value)).doubleValue();}catch(NumberFormatException invalid){return Double.NaN;}}
+    private static boolean validTimestamp(String value){try{Instant.parse(value);return true;}catch(Exception invalid){return false;}}
+
+    private boolean recordLoadProgress(Job job,Map<String,Object> progress) throws Exception {
+        synchronized(job) {
+            if(job.loadProgress!=null) {
+                long previous=((Number)job.loadProgress.get("elapsedMs")).longValue();
+                long next=((Number)progress.get("elapsedMs")).longValue();if(next<previous)return false;
+            }
+            Map<String,Object> saved=new LinkedHashMap<>(progress);job.loadProgress=saved;
+            Map<String,Object> point=progressHistoryPoint(saved);
+            job.loadProgressHistory.add(point);if(job.loadProgressHistory.size()>60)job.loadProgressHistory.remove(0);
+            long elapsed=((Number)saved.get("elapsedMs")).longValue();long planned=plannedLoadDurationMs(job);
+            int bucket=(int)Math.max(0L,Math.min(255L,(long)(elapsed*256.0/Math.max(1L,planned))));job.loadProgressTrend.put(bucket,point);
+            Map<String,Object> state=new LinkedHashMap<>();state.put("latest",saved);state.put("recent",new ArrayList<>(job.loadProgressHistory));state.put("trend",new ArrayList<>(job.loadProgressTrend.values()));
+            job.loadProgressJson=JSON.writeValueAsString(state);store.updateLoadProgress(job.id,job.loadProgressJson);return true;
+        }
+    }
+
+    private static Map<String,Object> progressHistoryPoint(Map<String,Object> snapshot) {
+        Map<String,Object> point=new LinkedHashMap<>();
+        for(String key:List.of("capturedAt","serverReceivedAt","elapsedMs","phase","counts","measuredCounts","rates","latency"))
+            if(snapshot.containsKey(key))point.put(key,snapshot.get(key));
+        return point;
+    }
+
+    private static long plannedLoadDurationMs(Job job) {
+        long maximum=0L;Object raw=job.targetIdentity==null?null:job.targetIdentity.get("workloads");
+        if(raw instanceof List<?>)for(Object item:(List<?>)raw)if(item instanceof Map<?,?>) {
+            Object duration=((Map<?,?>)item).get("totalDurationMs");if(duration instanceof Number)maximum=Math.max(maximum,((Number)duration).longValue());
+        }
+        return maximum>0?maximum:TimeUnit.DAYS.toMillis(10);
+    }
     Map<String,Object> resultRecord(String id) throws Exception {
         if(!JOB_ID.matcher(id).matches())throw new NotFoundException();
         Job active=jobs.get(id);
@@ -1424,7 +1528,7 @@ final class ServerRuntime implements AutoCloseable {
         if(environment!=null)environment=inspectionEnvironment(environment,"environment");
         WorkerRequest request=inspectionRequest(packageId,root,environment);
         request.inspectionAction="quick-load-policy";request.loadModel=model;request.inspectionPath=templateId;
-        Map<String,Object> result=executeInspection(root,request);result.remove("revisionDigest");return result;
+        Map<String,Object> result=executeInspection(root,request);result.remove("revisionDigest");result.put("limits",inlineLoadLimitView());return result;
     }
     Map<String,Object> inspectLoadTemplates(String packageId,String query,int offset,int limit,String principal) throws Exception {
         if(!config.inspection.enabled)throw new NotFoundException();
@@ -1434,11 +1538,14 @@ final class ServerRuntime implements AutoCloseable {
         WorkerRequest request=inspectionRequest(packageId,root,null);
         request.inspectionAction="load-templates";request.inspectionQuery=query;request.inspectionOffset=offset;request.inspectionLimit=limit;
         Map<String,Object> result=executeInspection(root,request);
-        result.put("limits",Map.of("maxWorkloads",config.inlineLoad.maxWorkloads,"maxTargets",config.inlineLoad.maxTargets,
+        result.put("limits",inlineLoadLimitView());
+        return result;
+    }
+    private Map<String,Object> inlineLoadLimitView() {
+        return Map.of("maxWorkloads",config.inlineLoad.maxWorkloads,"maxTargets",config.inlineLoad.maxTargets,
                 "maxTotalUsers",config.inlineLoad.maxTotalUsers,"maxAggregateArrivalRatePerSecond",config.inlineLoad.maxAggregateArrivalRatePerSecond,
                 "maxConcurrentPerWorkload",config.inlineLoad.maxConcurrentPerWorkload,"maxTotalConcurrent",config.inlineLoad.maxTotalConcurrent,
-                "maxDurationSeconds",config.inlineLoad.maxDurationSeconds));
-        return result;
+                "maxDurationSeconds",config.inlineLoad.maxDurationSeconds);
     }
     private Map<String,Object> inspectDebugFormInternal(String packageId,String type,String resourceId,String environment,
                                                         String principal) throws Exception {
@@ -2186,6 +2293,7 @@ final class ServerRuntime implements AutoCloseable {
         long totalUsers=0L,totalTargets=0L,totalArrivalConcurrency=0L;
         double totalArrivalRate=0.0;
         long maximumEnvelopeMs=0L;
+        Map<?,?> rootLoad=scenario.get("load") instanceof Map?(Map<?,?>)scenario.get("load"):Collections.emptyMap();
         for(int i=0;i<workloads.size();i++) {
             Object raw=workloads.get(i);
             if(!(raw instanceof Map))throw new IllegalArgumentException("Validated Load workload is invalid");
@@ -2196,8 +2304,8 @@ final class ServerRuntime implements AutoCloseable {
             else throw new IllegalArgumentException("Validated Load target is invalid");
 
             Object rawLoad=workload.get("load");
-            if(!(rawLoad instanceof Map))throw new IllegalArgumentException("Validated Load pacing is invalid");
-            Map<?,?> load=(Map<?,?>)rawLoad;
+            if(rawLoad!=null&&!(rawLoad instanceof Map))throw new IllegalArgumentException("Validated Load pacing is invalid");
+            Map<Object,Object> load=new LinkedHashMap<>();load.putAll(rootLoad);if(rawLoad instanceof Map)load.putAll((Map<?,?>)rawLoad);
             if(load.get("users") instanceof Number) {
                 totalUsers=addWithinLimit(totalUsers,validatedCount(load.get("users"),"users"),limits.maxTotalUsers,
                         "Scenario exceeds server.inlineLoad.maxTotalUsers");
@@ -2216,13 +2324,10 @@ final class ServerRuntime implements AutoCloseable {
             maximumEnvelopeMs=Math.max(maximumEnvelopeMs,envelope);
         }
         if(maximumEnvelopeMs>TimeUnit.SECONDS.toMillis(limits.maxDurationSeconds))
-            throw new InlineLoadLimitException("Scenario exceeds server.inlineLoad.maxDurationSeconds");
+            throw new InlineLoadLimitException("Effective LOAD envelope is "+maximumEnvelopeMs+" ms; server.inlineLoad.maxDurationSeconds permits "+TimeUnit.SECONDS.toMillis(limits.maxDurationSeconds)+" ms");
     }
     static void validatePackageBackedReplayLoadLimits(ServerConfig.InlineLoad limits,Map<String,Object> scenario) {
         validateScheduledLoadLimits(limits,scenario);
-        Object rootLoad=scenario.get("load");
-        if(rootLoad instanceof Map&&replayRootDurationEnvelopeMillis((Map<?,?>)rootLoad)>TimeUnit.SECONDS.toMillis(limits.maxDurationSeconds))
-            throw new InlineLoadLimitException("Scenario exceeds server.inlineLoad.maxDurationSeconds");
     }
     private static long addWithinLimit(long total,long value,long maximum,String message) {
         if(value<0||total>maximum-value)throw new InlineLoadLimitException(message);
@@ -2248,6 +2353,11 @@ final class ServerRuntime implements AutoCloseable {
         return rate;
     }
     private static long durationMillis(Object value,String field) {
+        if(value==null)return 0L;
+        if(value instanceof Number) {
+            try {long milliseconds=new java.math.BigDecimal(String.valueOf(value)).longValueExact();if(milliseconds<0)throw new IllegalArgumentException("Validated Load "+field+" is invalid");return milliseconds;}
+            catch(NumberFormatException|ArithmeticException invalid){throw new IllegalArgumentException("Validated Load "+field+" is invalid",invalid);}
+        }
         if(!(value instanceof String))throw new IllegalArgumentException("Validated Load "+field+" is invalid");
         java.util.regex.Matcher matcher=INLINE_LOAD_DURATION.matcher(((String)value).trim());
         if(!matcher.matches())throw new IllegalArgumentException("Validated Load "+field+" is invalid");
@@ -2261,37 +2371,6 @@ final class ServerRuntime implements AutoCloseable {
             return Math.addExact(Math.addExact(durationMillis(load.get("warmup"),"warmup"),durationMillis(load.get("rampUp"),"rampUp")),
                     Math.addExact(durationMillis(load.get("duration"),"duration"),durationMillis(load.get("rampDown"),"rampDown")));
         } catch(ArithmeticException overflow) { return Long.MAX_VALUE; }
-    }
-    private static long replayRootDurationEnvelopeMillis(Map<?,?> load) {
-        try {
-            return Math.addExact(Math.addExact(replayRootDurationMillis(load.get("warmup"),"warmup"),replayRootDurationMillis(load.get("rampUp"),"rampUp")),
-                    Math.addExact(replayRootDurationMillis(load.get("duration"),"duration"),replayRootDurationMillis(load.get("rampDown"),"rampDown")));
-        } catch(ArithmeticException overflow) { return Long.MAX_VALUE; }
-    }
-    private static long replayRootDurationMillis(Object value,String field) {
-        // Retained root timing can be represented as normalized millisecond numbers; omitted phases are zero.
-        if(value==null)return 0L;
-        if(value instanceof Number) {
-            try {
-                long milliseconds=new java.math.BigDecimal(String.valueOf(value)).longValueExact();
-                if(milliseconds<0)throw new IllegalArgumentException("Validated replay Load "+field+" is invalid");
-                return milliseconds;
-            } catch(NumberFormatException|ArithmeticException invalid) {
-                throw new IllegalArgumentException("Validated replay Load "+field+" is invalid",invalid);
-            }
-        }
-        if(!(value instanceof String))throw new IllegalArgumentException("Validated replay Load "+field+" is invalid");
-        String text=((String)value).trim();
-        if(text.matches("[0-9]+"))return Long.parseLong(text);
-        java.util.regex.Matcher matcher=INLINE_LOAD_DURATION.matcher(text);
-        if(!matcher.matches())throw new IllegalArgumentException("Validated replay Load "+field+" is invalid");
-        try {
-            long amount=Long.parseLong(matcher.group(1));
-            long multiplier="ms".equals(matcher.group(2))?1L:"s".equals(matcher.group(2))?1000L:"m".equals(matcher.group(2))?60000L:3600000L;
-            return Math.multiplyExact(amount,multiplier);
-        } catch(NumberFormatException|ArithmeticException invalid) {
-            throw new IllegalArgumentException("Validated replay Load "+field+" is invalid",invalid);
-        }
     }
     private static String optionalText(JsonNode object,String name) {
         JsonNode value=object.get(name);if(value==null||value.isNull())return null;

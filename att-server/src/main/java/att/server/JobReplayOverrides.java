@@ -5,11 +5,16 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.nio.charset.StandardCharsets;
 import java.util.HashSet;
+import java.math.BigDecimal;
 import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /** Bounded, typed replay edits. The normal package validators remain authoritative. */
 final class JobReplayOverrides {
     static final int MAX_BYTES=32768;
+    private static final Set<String> PHASE_TIMINGS=Set.of("warmup","rampUp","duration","rampDown");
+    private static final Pattern DURATION=Pattern.compile("^([0-9]+)(ms|s|m|h)$");
     private JobReplayOverrides() {}
 
     static ObjectNode apply(ObjectNode source,JsonNode overrides) {
@@ -36,8 +41,20 @@ final class JobReplayOverrides {
         ObjectNode scenario=(ObjectNode)scenarioNode;
         if(overrides.has("load")) {
             JsonNode load=overrides.get("load");requireObject(load,"load overrides must be an object");
-            allowFields(load,Set.of("warmup","rampUp","duration","rampDown"));
-            ObjectNode target=scenario.with("load");merge(target,load);
+            allowFields(load,PHASE_TIMINGS);
+            JsonNode previous=scenario.path("load").deepCopy();
+            ObjectNode target=scenario.with("load");
+            load.fields().forEachRemaining(entry->{
+                JsonNode value=entry.getValue();
+                if(value==null||value.isNull()||value.isTextual()&&value.asText().isBlank())target.remove(entry.getKey());
+                else target.set(entry.getKey(),value.deepCopy());
+            });
+            if(!sameTiming(previous,target)) {
+                JsonNode workloads=scenario.path("workloads");
+                if(workloads.isArray())for(JsonNode workload:workloads)
+                    if(workload instanceof ObjectNode&&workload.path("load") instanceof ObjectNode)
+                        ((ObjectNode)workload.path("load")).remove(PHASE_TIMINGS);
+            }
         }
         if(overrides.has("workloads")) {
             JsonNode patches=overrides.get("workloads");
@@ -74,6 +91,35 @@ final class JobReplayOverrides {
                 if(arrivalModel!=null&&arrivalModel.booleanValue()!=arrival)throw new IllegalArgumentException("All replay workloads must keep the original LOAD model");
                 arrivalModel=Boolean.valueOf(arrival);
             }
+        }
+    }
+
+    private static boolean sameTiming(JsonNode before,JsonNode after) {
+        try {
+            for(String field:PHASE_TIMINGS)if(durationMillis(before.get(field))!=durationMillis(after.get(field)))return false;
+            return true;
+        } catch(IllegalArgumentException invalidTiming) {
+            // Keep malformed edits in the draft so the normal scenario validator can
+            // return field-level diagnostics instead of failing replay construction.
+            return false;
+        }
+    }
+
+    /** Retained timing can be represented as a unit string or normalized milliseconds. */
+    private static long durationMillis(JsonNode value) {
+        if(value==null||value.isNull())return 0L;
+        try {
+            if(value.isNumber())return new BigDecimal(value.asText()).longValueExact();
+            if(!value.isTextual())throw new IllegalArgumentException("Replay timing must be an integer duration");
+            String text=value.asText().trim();
+            if(text.matches("[0-9]+"))return Long.parseLong(text);
+            Matcher matcher=DURATION.matcher(text);
+            if(!matcher.matches())throw new IllegalArgumentException("Replay timing must use <integer><ms|s|m|h>");
+            long amount=Long.parseLong(matcher.group(1));
+            long multiplier=switch(matcher.group(2)){case "ms"->1L;case "s"->1000L;case "m"->60000L;default->3600000L;};
+            return Math.multiplyExact(amount,multiplier);
+        } catch(ArithmeticException|NumberFormatException invalid) {
+            throw new IllegalArgumentException("Replay timing is too large",invalid);
         }
     }
 

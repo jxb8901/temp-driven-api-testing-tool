@@ -6,6 +6,7 @@ import java.util.LinkedHashMap;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Collections;
 
 final class Job {
     final String id,command,packageId,principal;
@@ -25,6 +26,11 @@ final class Job {
     volatile Map<String,Object> workerMetrics;
     volatile Map<String,Object> protocolDiagnostic;
     volatile Map<String,Object> journalDiagnostic;
+    volatile Map<String,Object> targetIdentity;
+    volatile Map<String,Object> loadProgress;
+    volatile String loadProgressJson;
+    final List<Map<String,Object>> loadProgressHistory=new ArrayList<>();
+    final Map<Integer,Map<String,Object>> loadProgressTrend=new LinkedHashMap<>();
     volatile String primaryDiagnosticJson;
     final List<Map<String,Object>> secondaryDiagnostics=new ArrayList<>();
     volatile boolean resultReceived;
@@ -60,7 +66,7 @@ final class Job {
     private static void addDuration(Map<String,Object> target,String name,long start,long end){
         if(start>0&&end>=start)target.put(name,(end-start)/1_000_000.0);
     }
-    Map<String,Object> view(){Map<String,Object> m=new LinkedHashMap<>();m.put("jobId",id);if(rerunOfJobId!=null)m.put("rerunOfJobId",rerunOfJobId);m.put("command",command);m.put("executionType",executionType(command));m.put("packageId",packageId);m.put("principal",principal);m.put("status",status);if(request.configurationProvenance!=null)m.put("configuration",request.configurationProvenance);if(request.environment!=null)m.put("environment",request.environment);m.put("createdAt",createdAt.toString());m.put("startedAt",startedAt==null?null:startedAt.toString());m.put("finishedAt",finishedAt==null?null:finishedAt.toString());m.put("exitCode",exitCode);Map<String,Object> performance=performance();if(!performance.isEmpty())m.put("performance",performance);return m;}
+    synchronized Map<String,Object> view(){Map<String,Object> m=new LinkedHashMap<>();m.put("jobId",id);if(rerunOfJobId!=null)m.put("rerunOfJobId",rerunOfJobId);m.put("command",command);m.put("executionType",executionType(command));m.put("packageId",packageId);m.put("principal",principal);m.put("status",status);if(targetIdentity!=null)m.put("targetIdentity",targetIdentity);if(loadProgress!=null){m.put("loadProgress",loadProgress);m.put("loadProgressHistory",List.copyOf(loadProgressHistory));m.put("loadProgressTrend",List.copyOf(loadProgressTrend.values()));}if(request.configurationProvenance!=null)m.put("configuration",request.configurationProvenance);if(request.environment!=null)m.put("environment",request.environment);m.put("createdAt",createdAt.toString());m.put("startedAt",startedAt==null?null:startedAt.toString());m.put("finishedAt",finishedAt==null?null:finishedAt.toString());m.put("exitCode",exitCode);Map<String,Object> performance=performance();if(!performance.isEmpty())m.put("performance",performance);return m;}
     static String executionType(String command){return "debug".equals(command)?"run":command;}
     synchronized boolean terminal(){return "PASS".equals(status)||"FAIL".equals(status)||"ERROR".equals(status)||"INVALID".equals(status)||"CANCELLED".equals(status);}
 }

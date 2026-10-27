@@ -1,6 +1,6 @@
 # Validate configuration and Packages
 
-The current ATT 4.2.5 VALIDATE command checks authored inputs without running business work.
+The current ATT 4.2.6 VALIDATE command checks authored inputs without running business work.
 
 ## Validate the Package
 

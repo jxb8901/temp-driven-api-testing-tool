@@ -8,6 +8,7 @@ import { DurationField, initialTiming, JsonArrayField, JsonObjectField, makeScen
   type TargetDraft, type TimingDraft, type WorkloadDraft } from './LoadPage';
 import type { LoadDraftResponse, LoadFeatureProps, LoadModel } from './types';
 import type { LoadTemplateDefinition } from './templateTypes';
+import { effectiveLoadEnvelopeMs, plannedWorkloadDuration } from './loadWorkloadSummary';
 
 type Obj = Record<string, unknown>;
 const object = (value: unknown): Obj => value && typeof value === 'object' && !Array.isArray(value) ? value as Obj : {};
@@ -35,6 +36,12 @@ export function LoadTemplateBuilder(props: LoadFeatureProps & { templateId: stri
   const sequence = useRef(0), loadSequence = useRef(0), slots = useRef(100);
   const [mixTarget, setMixTarget] = useState<{ slot: number; value: TargetDraft } | null>(null);
   const model: LoadModel = definition?.mode.endsWith('tps') ? 'arrivalRate' : 'virtualUsers';
+  const effectiveWorkloadEnvelopes=workloads.map(workload=>{
+    const phases=['warmup','rampUp','duration','rampDown'].map(field=>String(workload.loadPolicy?.[field]??timing[field as keyof TimingDraft]??''));
+    return {id:workload.id,milliseconds:phases[2]?.trim()?effectiveLoadEnvelopeMs(phases):null};
+  });
+  const effectiveEnvelopeMs=effectiveWorkloadEnvelopes.length&&effectiveWorkloadEnvelopes.every(item=>item.milliseconds!=null)
+    ?Math.max(...effectiveWorkloadEnvelopes.map(item=>item.milliseconds!)):null;
   const mixed = Boolean(definition?.mode.endsWith('mix'));
   const multiple = Boolean(definition?.mode.startsWith('multi-'));
   const unregisterDirty = useRef<(() => void) | null>(null);
@@ -113,7 +120,7 @@ export function LoadTemplateBuilder(props: LoadFeatureProps & { templateId: stri
     finally { setBusy(false); }
   }
   async function run() {
-    if (!draft || Date.parse(draft.expiresAt) <= Date.now() || busy || !window.confirm(`Start LOAD in ${packageId} / ${environment || 'default'}: ${workloads.length} workloads, ${targets.length} bindings (${unique} unique targets), ${model === 'virtualUsers' ? workloads.reduce((sum,row) => sum + Number(row.users),0) + ' users' : workloads.map(row => row.arrivalRate + ' (max ' + row.maxConcurrent + ' concurrent)').join(', ')}, duration ${timing.duration}?`)) return;
+    if (!draft || Date.parse(draft.expiresAt) <= Date.now() || busy || !window.confirm(`Start LOAD in ${packageId} / ${environment || 'default'}: ${workloads.length} workloads, ${targets.length} bindings (${unique} unique targets), ${model === 'virtualUsers' ? workloads.reduce((sum,row) => sum + Number(row.users),0) + ' users' : workloads.map(row => row.arrivalRate + ' (max ' + row.maxConcurrent + ' concurrent)').join(', ')}, effective duration ${effectiveEnvelopeMs==null?'requires validation':plannedWorkloadDuration(effectiveEnvelopeMs)}?`)) return;
     setBusy(true);
     try { const accepted = await props.api.submitLoadDraft({ packageId, draftId: draft.draftId }); setDirty(false); unregisterDirty.current?.(); props.onJobAccepted(accepted.jobId); }
     catch (error) { setDraft(null); setMessage(error instanceof Error ? error.message : 'Run was not accepted.'); }
@@ -142,11 +149,12 @@ export function LoadTemplateBuilder(props: LoadFeatureProps & { templateId: stri
     <label>Environment <select value={environment} onChange={event => onEnvironmentChange(event.target.value)}><option value="">Default environment</option>{environments.map(value => <option key={value}>{value}</option>)}</select></label>
       <EnvironmentResolutionNotice packageId={packageId} environment={environment} />
     <aside className="att-help" role="note">
-      <p>Browser-created LOAD drafts follow the Server duration limit shown below (up to 24 hours). For a longer run, use a saved package LOAD scenario; that path-based flow does not use the inline draft duration cap.</p>
+      <p>Browser-created and package-backed LOAD scenarios follow the Server duration limit shown below (up to 10 days). The limit applies to warmup, ramp-up, steady duration, and ramp-down combined.</p>
       <button className="button button-quiet" type="button" onClick={() => navigation.navigate({ kind: 'load', tab: 'scenarios', catalog: { packageFilter: packageId, environment } })}>Open package LOAD scenarios</button>
     </aside>
     <p>{workloads.length} Workloads · {targets.length} Target bindings · {unique} Unique targets · {model === 'virtualUsers' ? `${workloads.reduce((sum,row) => sum + Number(row.users),0)} total VU` : `${workloads.reduce((sum,row) => { const [rate,unit] = row.arrivalRate.split('/'); return sum + Number(rate) / (unit === 'm' ? 60 : 1); },0)} configured arrivals/sec`}</p>
-    {limits.maxTotalUsers > 0 && <p className="att-help">Server limits: {limits.maxWorkloads} workloads · {limits.maxTargets} bindings · {limits.maxTotalUsers} users · {limits.maxAggregateArrivalRatePerSecond} arrivals/sec · {limits.maxTotalConcurrent} total concurrent · {limits.maxDurationSeconds}s duration</p>}
+    {limits.maxTotalUsers > 0 && <p className="att-help">Server limits: {limits.maxWorkloads} workloads · {limits.maxTargets} bindings · {limits.maxTotalUsers} users · {limits.maxAggregateArrivalRatePerSecond} arrivals/sec · {limits.maxTotalConcurrent} total concurrent · {plannedWorkloadDuration(limits.maxDurationSeconds*1000)} ({limits.maxDurationSeconds}s) effective duration</p>}
+    {definition && <p className="att-help">Current effective envelope: {effectiveEnvelopeMs==null?'requires valid phase values':`${plannedWorkloadDuration(effectiveEnvelopeMs)} maximum across ${effectiveWorkloadEnvelopes.length} workloads`} (warmup + ramp-up + steady duration + ramp-down).</p>}
     {definition && <>
       <button className="button button-quiet" type="button" onClick={() => setEdit({ kind: 'settings', timing: clone(timing), advanced: clone(advanced) })}>⚙ Common Settings</button>
       {!multiple && mixed ? <><label>Shared users <input type="number" min="1" value={workloads[0]?.users || ''} onChange={event => update(0,{ ...workloads[0], users: event.target.value })} /></label>{workloads[0] && mixTable(workloads[0], value => update(0,value), slot => setEdit({ kind: 'target', index: 0, slot, value: clone(workloads[0].mix[slot]) }))}</> :

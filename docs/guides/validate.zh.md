@@ -1,6 +1,6 @@
 # 驗證 configuration 與 Package
 
-目前 ATT 4.2.5 VALIDATE command 會檢查 authored input，但不會執行 business work。
+目前 ATT 4.2.6 VALIDATE command 會檢查 authored input，但不會執行 business work。
 
 ## 驗證 Package
 

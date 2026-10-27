@@ -83,10 +83,21 @@ export interface ServerDiagnostic {
 export interface LoadPolicyResponse {
   model: LoadModel;
   policy: Record<string, unknown>;
+  limits?: LoadServerLimits;
   previewYaml?: string;
   redacted?: boolean;
   templates?: LoadPolicyTemplate[];
   templateCatalogTruncated?: boolean;
+}
+
+export interface LoadServerLimits {
+  maxWorkloads: number;
+  maxTargets: number;
+  maxTotalUsers: number;
+  maxAggregateArrivalRatePerSecond: number;
+  maxConcurrentPerWorkload: number;
+  maxTotalConcurrent: number;
+  maxDurationSeconds: number;
 }
 
 export interface LoadPolicyTemplate {
@@ -140,7 +151,24 @@ export interface JobAccepted {
 export interface TargetIdentity {
   type?: string; id?: string; signature?: string; targets?: Array<{ type: string; id: string }>;
   workloadCount?: number; bindingCount?: number; truncated?: boolean;
-  workloads?: Array<{ name: string; targets: Array<{type: string; id: string}>; model: string; users?: number; arrivalRate?: string; duration?: string; totalDurationMs?: number; warmup?: string; rampUp?: string; rampDown?: string }>;
+  workloads?: Array<{ name: string; targets: Array<{type: string; id: string}>; model: string; users?: number; arrivalRate?: number | string; maxConcurrent?: number; duration?: string; totalDurationMs?: number; warmup?: string; rampUp?: string; rampDown?: string }>;
+}
+export interface LoadLiveProgressCounts {
+  scheduled?: number; started?: number; completed?: number; passed?: number; sutFailures?: number;
+  runtimeErrors?: number; dropped?: number; other?: number; active?: number; queued?: number;
+  schedulerLagMeanMs?: number | null;
+}
+export interface LoadLiveProgressPoint {
+  capturedAt: string; serverReceivedAt?: string; elapsedMs: number; phase: string;
+  counts: LoadLiveProgressCounts; measuredCounts?: LoadLiveProgressCounts;
+  rates?: { completedTps?: number; successfulTps?: number };
+  latency?: { sampleCount?: number; meanMs?: number | null; p95Ms?: number | null; p99Ms?: number | null; percentileMethod?: string };
+}
+export interface LoadLiveProgressSnapshot extends LoadLiveProgressPoint {
+  schemaVersion: 'att-load-live-progress/v1';
+  phases?: Record<string, LoadLiveProgressCounts>;
+  workloads?: Record<string, LoadLiveProgressCounts>;
+  workloadsTruncated?: boolean;
 }
 export interface JobsQuery {
   offset?: number; limit?: number; principal?: string; principalMode?: string; packageId?: string; executionType?: string;
@@ -175,6 +203,9 @@ export interface JobSummary {
 
 export interface JobView extends JobSummary {
   archiveMetrics?: ArtifactArchiveMetrics | null;
+  loadProgress?: LoadLiveProgressSnapshot;
+  loadProgressHistory?: LoadLiveProgressPoint[];
+  loadProgressTrend?: LoadLiveProgressPoint[];
   performance?: {
     timings?: Record<string, unknown>;
     worker?: Record<string, unknown>;

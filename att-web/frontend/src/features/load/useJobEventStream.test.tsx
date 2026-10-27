@@ -10,6 +10,7 @@ import {
   hasJobEventStreamEntryForTesting,
   jobEventStreamStateForTesting,
   MAX_EVENTS,
+  MAX_CONSOLE_LINES,
   MAX_TRACKED_EVENT_IDS,
   useJobEventStream,
   type JobEventStreamSnapshot,
@@ -104,6 +105,35 @@ describe('useJobEventStream', () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(COUNTER_FLUSH_INTERVAL_MS); });
     expect(host.querySelector('output')?.getAttribute('data-stale')).toBe('1');
     expect(host.querySelector('output')?.textContent?.split(',')[0]).toBe('9501');
+  });
+
+  it('retains console text in its own bounded ring when the event ring evicts those events', async () => {
+    const { api, latestHandler } = makeApi();
+    await act(async () => root.render(<Consumer api={api} jobId="J1" />));
+    act(() => {
+      latestHandler('J1')?.onEvent({ id: '1', type: 'log', data: { console: 'early console line' } });
+      for (let id = 2; id <= MAX_EVENTS + 1; id += 1) latestHandler('J1')?.onEvent({ id: String(id), type: 'progress', data: { phase: 'RUNNING' } });
+    });
+    await flush();
+    const snapshot = jobEventStreamStateForTesting(api, 'J1')?.snapshot;
+    expect(snapshot?.events).toHaveLength(MAX_EVENTS);
+    expect(snapshot?.events.some(event => event.id === '1')).toBe(false);
+    expect(snapshot?.consoleLines.map(line => line.text)).toContain('early console line');
+    expect(snapshot?.consoleTruncated).toBe(false);
+  });
+
+  it('bounds console retention independently and reports evicted console text', async () => {
+    const { api, latestHandler } = makeApi();
+    await act(async () => root.render(<Consumer api={api} jobId="J1" />));
+    act(() => {
+      for (let id = 1; id <= MAX_CONSOLE_LINES + 1; id += 1) latestHandler('J1')?.onEvent({ id: String(id), type: 'log', data: { console: `line-${id}` } });
+    });
+    await flush();
+    const lines = jobEventStreamStateForTesting(api, 'J1')?.snapshot.consoleLines;
+    expect(lines).toHaveLength(MAX_CONSOLE_LINES);
+    expect(lines?.[0]?.text).toBe('line-2');
+    expect(lines?.at(-1)?.text).toBe(`line-${MAX_CONSOLE_LINES + 1}`);
+    expect(jobEventStreamStateForTesting(api, 'J1')?.snapshot.consoleTruncated).toBe(true);
   });
 
   it('ignores duplicates within and older than the visible window, including non-numeric IDs', async () => {

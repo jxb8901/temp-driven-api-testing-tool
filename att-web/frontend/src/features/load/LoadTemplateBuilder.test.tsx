@@ -50,7 +50,7 @@ it('isolates nested mix edits until Save and composes stable IDs separately from
 
 it('explains the inline duration cap and opens package scenarios with package and environment context',async () => {
  await render();
- expect(host.textContent).toContain('up to 24 hours');
+ expect(host.textContent).toContain('up to 10 days');
  await click('Open package LOAD scenarios');
  expect(navigate).toHaveBeenCalledWith({ kind: 'load', tab: 'scenarios', catalog: { packageFilter: 'p', environment: 'SIT' } });
 });
@@ -75,6 +75,7 @@ it('round-trips workload timing, ramps and ranged think time while applying deli
  })) };
  endpoints.listLoadTemplates.mockResolvedValue({ items: [{ id: 'builtin:multi-workload-mix', validation: 'valid', definition: source }], revisionDigest: 'source-revision' });
  await render(); await bindAllTargets();
+ expect(host.textContent).toContain('Current effective envelope: 28s maximum across 2 workloads');
  endpoints.createLoadTemplateDraft.mockResolvedValue({ draftId:'A1', expiresAt:new Date(Date.now()+60000).toISOString(), previewYaml:'safe' });
  await click('Validate');
  let composed = endpoints.createLoadTemplateDraft.mock.calls[0][2].definition;

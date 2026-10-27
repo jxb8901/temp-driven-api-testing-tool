@@ -130,7 +130,7 @@ def row_for(path, version, inbound):
         quality, disposition, destination = "Legacy syntax retained; vNext proposal is separate", "KEEP LEGACY", rel
         tests = "Current CLI contract and Markdown link checks"
     elif rel.startswith("docs/quick-start"):
-        audience, owner, applicable, status = "New user", "Current 4.2.5 CLI workflow", version, "Current tutorial"
+        audience, owner, applicable, status = "New user", "Current 4.2.6 CLI workflow", version, "Current tutorial"
         quality, disposition, destination = "Runnable Current workflow; Snapshot authoring remains explicit", "KEEP", rel
         tests = "DocumentationExamplesTest; current CLI and Markdown link checks"
     elif rel.startswith("docs/performance/"):

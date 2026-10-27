@@ -139,6 +139,23 @@ class ServerRuntimeJobReplayTest {
         }
     }
 
+    @Test void effectiveRootLoadEnvelopeAcceptsTenDaysAndRejectsOneMillisecondMore() throws Exception {
+        Fixture fixture=fixture();
+        String configured=Files.readString(fixture.server).replace("maxDurationSeconds: 86400","maxDurationSeconds: 864000");
+        assertNotEquals(Files.readString(fixture.server),configured,"Test fixture must allow the ten-day boundary");
+        Files.writeString(fixture.server,configured);
+        try(ServerRuntime runtime=fixture.open()) {
+            Map<String,Object> exact=Map.of("load",Map.of("users",1,"duration",864000000),
+                    "workloads",List.of(Map.of("id","inherited","target",Map.of("type","template","id","SIMPLE"))));
+            assertDoesNotThrow(()->ServerRuntime.validateScheduledLoadLimits(runtime.config.inlineLoad,exact),"Root load settings are inherited by workloads");
+            Map<String,Object> excess=Map.of("load",Map.of("users",1,"duration",864000001),
+                    "workloads",List.of(Map.of("id","inherited","target",Map.of("type","template","id","SIMPLE"))));
+            String message=assertThrows(ServerRuntime.InlineLoadLimitException.class,
+                    ()->ServerRuntime.validatePackageBackedReplayLoadLimits(runtime.config.inlineLoad,excess)).getMessage();
+            assertTrue(message.contains("864000001 ms"),message);assertTrue(message.contains("864000000 ms"),message);
+        }
+    }
+
     @Test void fileBackedLoadSchedulesPinAndEnforceTheirCreationRevision() throws Exception {
         Fixture fixture=fixture();String strictId,pauseId,strictRevision;
         try(ServerRuntime runtime=fixture.open()) {
@@ -384,7 +401,7 @@ class ServerRuntimeJobReplayTest {
                     "workloads",List.of(Map.of("id","paced","target",Map.of("type","template","id","SIMPLE"),"load",Map.of("warmup","0ms","rampUp","0ms","duration","1s","rampDown","0ms","users",1))));
             assertDoesNotThrow(()->ServerRuntime.validatePackageBackedReplayLoadLimits(runtime.config.inlineLoad,withinMixedDuration));
             Map<String,Object> overRootEnvelope=Map.of("load",Map.of("warmup",0,"rampUp","1ms","duration",3600000,"rampDown",0),
-                    "workloads",List.of(Map.of("id","paced","target",Map.of("type","template","id","SIMPLE"),"load",Map.of("warmup","0ms","rampUp","0ms","duration","1s","rampDown","0ms","users",1))));
+                    "workloads",List.of(Map.of("id","paced","target",Map.of("type","template","id","SIMPLE"),"load",Map.of("users",1))));
             assertTrue(assertThrows(ServerRuntime.InlineLoadLimitException.class,()->ServerRuntime.validatePackageBackedReplayLoadLimits(runtime.config.inlineLoad,overRootEnvelope)).getMessage().contains("maxDurationSeconds"));
         }
     }
@@ -466,7 +483,7 @@ class ServerRuntimeJobReplayTest {
         var common=scenario.putObject("load");common.put("warmup","2s");common.put("rampUp","3s");common.put("duration","30m");common.put("rampDown","4s");
         var workloads=scenario.putArray("workloads");
         for(String id:List.of("primary","mixed")) {
-            var workload=workloads.addObject();workload.put("id",id);workload.putObject("load").put("arrivalRate","2/s").put("maxConcurrent",4).put("overloadPolicy","drop");
+            var workload=workloads.addObject();workload.put("id",id);workload.putObject("load").put("arrivalRate","2/s").put("maxConcurrent",4).put("overloadPolicy","drop").put("duration","primary".equals(id)?"30m":"1800s");
             if("mixed".equals(id))workload.putArray("mix").addObject().put("id","checkout-slot").put("weight",100).putObject("target").put("type","template").put("id","SIMPLE");
         }
         scenario.putObject("thresholds").put("p95Ms",800);scenario.putObject("evidence").put("mode","failures");
@@ -481,10 +498,26 @@ class ServerRuntimeJobReplayTest {
         assertEquals("checkout-slot",result.path("workloads").get(1).path("mix").get(0).path("id").asText());
         assertEquals("5/s",result.path("workloads").get(0).path("load").path("arrivalRate").asText());
         assertEquals(8,result.path("workloads").get(0).path("load").path("maxConcurrent").asInt());
+        assertFalse(result.path("workloads").get(0).path("load").has("duration"),"Changed shared timing removes stale workload phase overrides");
+        assertFalse(result.path("workloads").get(1).path("load").has("duration"));
+        assertEquals("30m",source.path("scenario").path("workloads").get(0).path("load").path("duration").asText(),"Replay edits must not mutate the retained source definition");
         assertFalse(result.path("workloads").get(0).path("load").has("users"));
         assertEquals(500,result.path("thresholds").path("p95Ms").asInt());assertEquals("all",result.path("evidence").path("mode").asText());
         assertThrows(IllegalArgumentException.class,()->JobReplayOverrides.apply(source,ServerRuntime.JSON.valueToTree(Map.of(
                 "workloads",List.of(Map.of("id","primary","load",Map.of("users",10)))))));
+    }
+
+    @Test void replayKeepsWorkloadTimingWhenSharedOverrideIsSemanticallyUnchanged() {
+        var source=ServerRuntime.JSON.createObjectNode();source.put("executionType","load");source.put("packageId","p");
+        var scenario=source.putObject("scenario");scenario.putObject("load").put("duration","30m");
+        var workloads=scenario.putArray("workloads");
+        for(String id:List.of("one","two"))workloads.addObject().put("id",id).putObject("load").put("users",1).put("duration","60m");
+        var edits=ServerRuntime.JSON.createObjectNode();edits.putObject("load").put("duration","1800s");
+        var updated=JobReplayOverrides.apply(source,edits).path("scenario");
+        assertEquals("1800s",updated.path("load").path("duration").asText());
+        assertEquals("60m",updated.path("workloads").get(0).path("load").path("duration").asText());
+        assertEquals("60m",updated.path("workloads").get(1).path("load").path("duration").asText());
+        assertEquals("30m",source.path("scenario").path("load").path("duration").asText());
     }
 
     @Test void replayDraftReferenceExpiresAndIsLostOnServerRestart() throws Exception {

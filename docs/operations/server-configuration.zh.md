@@ -1,4 +1,4 @@
-<!-- att-doc-status: current release=4.2.5 -->
+<!-- att-doc-status: current release=4.2.6 -->
 
 # ATT Server 設定
 
@@ -146,7 +146,7 @@ Inline Load 設定使用以下預設值及硬性範圍：
 | `maxAggregateArrivalRatePerSecond` | 100 | 大於 0 至 1,000,000 | 所有 Arrival Rate workload 轉為每秒請求數後的總和 |
 | `maxConcurrentPerWorkload` | 100 | 1–1,000,000 | 每個 Arrival Rate workload |
 | `maxTotalConcurrent` | 1,000 | 1–1,000,000 | 所有 Arrival Rate workload 的 `maxConcurrent` 總和 |
-| `maxDurationSeconds` | 3,600 | 1–86,400 | warmup、ramp-up、duration 及 ramp-down 總和 |
+| `maxDurationSeconds` | 3,600 | 1–864,000 | LOAD 完整 envelope 上限：warmup + ramp-up + duration + ramp-down，最多 10 日 |
 
 `dataDir` 必須是絕對路徑。啟動時，allowed root、package root 及 Worker library directory 必須已存在。系統會將 package 路徑 canonicalize；若 symlink 指向 allowed root 以外，便會拒絕。Client 提交 `packageId`，不能指定 package 路徑、輸出路徑、Worker 執行檔或 classpath。v1 不提供 package 註冊或修改 API。
 

@@ -77,6 +77,7 @@ final class JobStore implements AutoCloseable {
             s.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS target_identity CLOB");
             s.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS target_sort VARCHAR(600) DEFAULT 'Unknown target' NOT NULL");
             s.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS target_group VARCHAR(64) DEFAULT 'legacy' NOT NULL");
+            s.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS load_progress_json CLOB");
             s.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS environment VARCHAR(128) DEFAULT '' NOT NULL");
             s.execute("CREATE INDEX IF NOT EXISTS jobs_target_page_idx ON jobs(target_sort,target_group,created_at,job_id)");
             s.execute("CREATE INDEX IF NOT EXISTS jobs_created_page_idx ON jobs(created_at,job_id)");
@@ -532,6 +533,11 @@ final class JobStore implements AutoCloseable {
                 }
                 if(scheduleId!=null)pruneScheduleExecutions(scheduleId);
             }
+        }
+    }
+    synchronized void updateLoadProgress(String jobId,String progressJson) throws Exception {
+        try(Connection c=connect();PreparedStatement p=c.prepareStatement("UPDATE jobs SET load_progress_json=? WHERE job_id=?")) {
+            p.setString(1,progressJson);p.setString(2,jobId);p.executeUpdate();
         }
     }
     synchronized List<String> auditOutcomes(String action) throws Exception {
@@ -1006,9 +1012,12 @@ final class JobStore implements AutoCloseable {
     }
     // Job reads own their connection and result data; allow API polling alongside writes.
     java.util.Map<String,Object> get(String id) throws Exception {
-        try(Connection c=connect();PreparedStatement p=c.prepareStatement("SELECT job_id,command,package_id,principal,status,created_at,started_at,finished_at,worker_pid,exit_code,result_json,diagnostic_json,att_version,performance_json,retention_state,pinned,pinned_at,pinned_by,pin_reason,request_summary FROM jobs WHERE job_id=?")) {
+        try(Connection c=connect();PreparedStatement p=c.prepareStatement("SELECT job_id,command,package_id,principal,status,created_at,started_at,finished_at,worker_pid,exit_code,result_json,diagnostic_json,att_version,performance_json,retention_state,pinned,pinned_at,pinned_by,pin_reason,request_summary,target_identity,load_progress_json FROM jobs WHERE job_id=?")) {
             p.setString(1,id);try(ResultSet r=p.executeQuery()){if(!r.next()||"DELETING".equals(r.getString(15)))return null;var m=new java.util.LinkedHashMap<String,Object>();m.put("jobId",r.getString(1));m.put("command",r.getString(2));m.put("executionType",Job.executionType(r.getString(2)));m.put("packageId",r.getString(3));m.put("principal",r.getString(4));m.put("status",r.getString(5));m.put("createdAt",r.getString(6));m.put("startedAt",r.getString(7));m.put("finishedAt",r.getString(8));m.put("workerPid",r.getObject(9));m.put("exitCode",r.getObject(10));m.put("resultJson",r.getString(11));m.put("diagnosticJson",r.getString(12));m.put("attVersion",r.getString(13));m.put("performanceJson",r.getString(14));m.put("pinned",r.getBoolean(16));m.put("pinnedAt",r.getString(17));m.put("pinnedBy",r.getString(18));m.put("pinReason",r.getString(19));m.put("deletionState",r.getString(15));
-                String summary=r.getString(20);if(summary!=null)try{Map<?,?> details=ServerRuntime.JSON.readValue(summary,Map.class);for(String key:List.of("environment","configuration"))if(details.get(key)!=null)m.put(key,details.get(key));}catch(Exception ignored){}return m;}}
+                String summary=r.getString(20);if(summary!=null)try{Map<?,?> details=ServerRuntime.JSON.readValue(summary,Map.class);for(String key:List.of("environment","configuration"))if(details.get(key)!=null)m.put(key,details.get(key));}catch(Exception ignored){}
+                String identity=r.getString(21);if(identity!=null)try{m.put("targetIdentity",ServerRuntime.JSON.readValue(identity,Map.class));}catch(Exception ignored){}
+                String progress=r.getString(22);if(progress!=null)try{Map<?,?> state=ServerRuntime.JSON.readValue(progress,Map.class);for(String key:List.of("latest","recent","trend"))if(state.get(key)!=null)m.put(switch(key){case "latest"->"loadProgress";case "recent"->"loadProgressHistory";default->"loadProgressTrend";},state.get(key));}catch(Exception ignored){}
+                return m;}}
     }
     private Connection connect() throws Exception{if(closed)throw new IllegalStateException("Job store is closed");return DriverManager.getConnection(url,"sa","");}
     private static String text(Instant value){return value==null?null:value.toString();}

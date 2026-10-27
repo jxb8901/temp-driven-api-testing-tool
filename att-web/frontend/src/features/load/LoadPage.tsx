@@ -8,12 +8,14 @@ import type { JsonObject as SidecarJsonObject } from '../explorer/types';
 import type {
   LoadFeatureProps,
   LoadModel,
+  LoadServerLimits,
   LoadTargetType,
   ServerDiagnostic,
   TargetResource,
 } from './types';
 import type { JobReplay, JobReplayEditorDraft } from './types';
 import { useNavigationGuard } from '../../router';
+import { effectiveLoadEnvelopeMs, plannedWorkloadDuration, sameLoadTiming } from './loadWorkloadSummary';
 
 type JsonObject = Record<string, unknown>;
 type ThinkTime = string | { min: string; max: string };
@@ -117,6 +119,7 @@ export function makeScenario(
   timing: TimingDraft,
   workloads: WorkloadDraft[],
   advanced: { execution: string; testdata: string; thresholds: string; evidence: string; seed: string },
+  options: { clearWorkloadTimingOverrides?: boolean } = {},
 ): JsonObject {
   const scenario: JsonObject = { ...policy, schemaVersion: String(policy.schemaVersion || 'att-load/v1.9') };
   const rootLoad = { ...asObject(policy.load) };
@@ -133,6 +136,9 @@ export function makeScenario(
     const row: JsonObject = { id: workload.id.trim(), load: {} };
     if (!row.id) throw new Error('Every workload needs an ID.');
     const load: JsonObject = { ...workload.loadPolicy };
+    if (options.clearWorkloadTimingOverrides) {
+      for (const field of ['warmup', 'rampUp', 'duration', 'rampDown']) delete load[field];
+    }
     const execution: JsonObject = { ...workload.executionPolicy };
     if (model === 'virtualUsers') {
       const users = Number(workload.users);
@@ -231,10 +237,10 @@ export function retainedScenarioToEditor(value: unknown): { model: LoadModel; ti
   const isArrival=firstLoad.arrivalRate!=null;
   const model:LoadModel=isArrival?'arrivalRate':'virtualUsers';
   const phaseFields=['warmup','rampUp','duration','rampDown'] as const;
-  const timing=Object.fromEntries(phaseFields.map(field=>[field,String(firstLoad[field]??'')])) as TimingDraft;
-  for(const raw of rows){const load=asObject(asObject(raw).load);for(const field of phaseFields){
-    const explicit=load[field];if(rootLoad[field]!=null&&explicit!=null&&String(rootLoad[field])!==String(explicit))throw new Error(`The retained LOAD has conflicting ${field} values. Review the source Job before editing.`);
-    if(rootLoad[field]==null&&explicit!=null&&String(explicit)!==timing[field])throw new Error(`The retained LOAD workloads do not share one ${field} value. Review the source Job before editing.`);
+  const firstEffective={...rootLoad,...asObject(asObject(rows[0]).load)};
+  const timing=Object.fromEntries(phaseFields.map(field=>[field,String(firstEffective[field]??'')])) as TimingDraft;
+  for(const raw of rows){const effective={...rootLoad,...asObject(asObject(raw).load)};for(const field of phaseFields){
+    if(!sameLoadTiming(firstEffective[field],effective[field]))throw new Error(`The retained LOAD workloads have different effective ${field} values. Edit the source scenario so Studio can safely represent one shared timing envelope.`);
   }}
   const targetDraft=(raw:unknown,inputs:unknown,vars:unknown,field:string):TargetDraft=>{
     const target=asObject(raw),rawType=String(target.type||'template');
@@ -267,10 +273,16 @@ export function retainedScenarioToEditor(value: unknown): { model: LoadModel; ti
 }
 
 function effectiveDuration(timing:TimingDraft):string {
-  const phases=[timing.warmup,timing.rampUp,timing.duration,timing.rampDown].filter(Boolean);
-  let total=0;
-  for(const phase of phases){const match=/^(\d+)(ms|s|m|h)$/.exec(phase.trim());if(!match)return 'Requires validation';const factor=match[2]==='ms'?1:match[2]==='s'?1000:match[2]==='m'?60000:3600000;total+=Number(match[1])*factor;}
-  return `${total} ms (sum of warm-up, ramp-up, measured duration and ramp-down)`;
+  const total=timing.duration.trim()?effectiveLoadEnvelopeMs([timing.warmup,timing.rampUp,timing.duration,timing.rampDown]):null;
+  return total==null?'Requires validation':`${plannedWorkloadDuration(total)} (sum of warm-up, ramp-up, measured duration and ramp-down)`;
+}
+
+function effectiveWorkloadDuration(scenarioValue:unknown,workloadValue:unknown):string {
+  const scenario=asObject(scenarioValue),workload=asObject(workloadValue);
+  const effective={...asObject(scenario.load),...asObject(workload.load)};
+  if(effective.duration==null||String(effective.duration).trim()==='')return 'Requires validation';
+  const total=effectiveLoadEnvelopeMs(['warmup','rampUp','duration','rampDown'].map(field=>effective[field]==null?'':String(effective[field])));
+  return total==null?'Requires validation':plannedWorkloadDuration(total);
 }
 
 export function LoadPage(props: LoadFeatureProps): React.JSX.Element {
@@ -280,9 +292,11 @@ export function LoadPage(props: LoadFeatureProps): React.JSX.Element {
   } = props;
   const [model, setModel] = useState<LoadModel>('virtualUsers');
   const [policy, setPolicy] = useState<JsonObject | null>(null);
+  const [serverLimits, setServerLimits] = useState<LoadServerLimits | null>(null);
   const [policyState, setPolicyState] = useState<'idle' | 'loading' | 'ready' | 'error' | 'disabled'>('idle');
   const [policyMessage, setPolicyMessage] = useState('Choose a package to load the Server policy.');
   const [timing, setTiming] = useState<TimingDraft>({ warmup: '', rampUp: '', duration: '', rampDown: '' });
+  const effectiveEnvelopeMs = timing.duration.trim() ? effectiveLoadEnvelopeMs([timing.warmup, timing.rampUp, timing.duration, timing.rampDown]) : null;
   const [workloads, setWorkloads] = useState<WorkloadDraft[]>([]);
   const [advanced, setAdvanced] = useState({ execution: '{}', testdata: '[]', thresholds: '{}', evidence: '{}', seed: '' });
   const [draft, setDraft] = useState<import('./types').LoadDraftResponse | null>(null);
@@ -355,6 +369,7 @@ export function LoadPage(props: LoadFeatureProps): React.JSX.Element {
       setAdvanced({ execution: '{}', testdata: '[]', thresholds: '{}', evidence: '{}', seed: '' });
     }
     if (!selectedPackage) {
+      setServerLimits(null);
       setPolicyState('idle');
       setPolicyMessage('Choose a package to load the Server policy.');
       return () => controller.abort();
@@ -365,12 +380,14 @@ export function LoadPage(props: LoadFeatureProps): React.JSX.Element {
       return () => controller.abort();
     }
     setPolicyState('loading');
+    setServerLimits(null);
     setPolicyMessage('Loading safe model policy defaults…');
     api.getLoadPolicy(selectedPackage, model, selectedEnvironment || undefined, controller.signal)
       .then(response => {
         if (sequence !== requestSequence.current) return;
         const nextPolicy = asObject(response.policy);
         setPolicy(nextPolicy);
+        setServerLimits(response.limits || null);
         setPolicyState('ready');
         setPolicyMessage(response.redacted
           ? 'Safe policy defaults loaded. Sensitive values remain hidden.'
@@ -410,7 +427,7 @@ export function LoadPage(props: LoadFeatureProps): React.JSX.Element {
   useEffect(() => {
     if (!policy) { setRawScenarioJson(''); return; }
     try {
-      setRawScenarioJson(JSON.stringify(makeScenario(policy, model, timing, workloads, advanced), null, 2));
+      setRawScenarioJson(JSON.stringify(makeScenario(policy, model, timing, workloads, advanced, { clearWorkloadTimingOverrides: true }), null, 2));
       setAdvancedJsonError('');
     } catch {
       // The structured fields remain editable until their values form a valid draft.
@@ -427,7 +444,7 @@ export function LoadPage(props: LoadFeatureProps): React.JSX.Element {
     if (advancedJsonError) throw new Error(advancedJsonError);
     const editorError = Object.values(thresholdEditorErrors).find(Boolean);
     if (editorError) throw new Error(editorError);
-    return makeScenario(policy, model, timing, workloads, advanced);
+    return makeScenario(policy, model, timing, workloads, advanced, { clearWorkloadTimingOverrides: true });
   }
 
   async function validateScenario() {
@@ -454,7 +471,7 @@ export function LoadPage(props: LoadFeatureProps): React.JSX.Element {
         const scenarioLoad=asObject(scenario.load),scenarioWorkloads=Array.isArray(scenario.workloads)?scenario.workloads:[];
         const environmentOverride=replayEnvironmentOrigin.current==='package'&&selectedEnvironment===replayPackageDefaultEnvironment.current?'':selectedEnvironment||'';
         const overrides:Record<string,unknown>={environment:environmentOverride,
-          load:Object.fromEntries(['warmup','rampUp','duration','rampDown'].filter(field=>scenarioLoad[field]!=null).map(field=>[field,scenarioLoad[field]])),
+          load:Object.fromEntries(['warmup','rampUp','duration','rampDown'].map(field=>[field,scenarioLoad[field]??null])),
           workloads:scenarioWorkloads.map(raw=>{
             const row=asObject(raw),load=asObject(row.load);
             const pacing=model==='arrivalRate'
@@ -654,7 +671,20 @@ export function LoadPage(props: LoadFeatureProps): React.JSX.Element {
           <DurationField label="Measured duration" required value={timing.duration} onChange={value => setTiming(current => ({ ...current, duration: value }))} />
           <DurationField label="Ramp-down" value={timing.rampDown} onChange={value => setTiming(current => ({ ...current, rampDown: value }))} />
           <p className="att-help">Use integer ms, s, m, or h values. The Server checks duration bounds and the shared timing envelope.</p>
+          {serverLimits && <p className="att-help">Server maximum effective envelope: {plannedWorkloadDuration(serverLimits.maxDurationSeconds * 1000)} ({serverLimits.maxDurationSeconds}s). Current envelope: {effectiveEnvelopeMs == null ? 'requires valid phase values' : plannedWorkloadDuration(effectiveEnvelopeMs)}.</p>}
+          {serverLimits && effectiveEnvelopeMs != null && effectiveEnvelopeMs > serverLimits.maxDurationSeconds * 1000 && <p role="alert" className="att-inline-error">Current envelope {plannedWorkloadDuration(effectiveEnvelopeMs)} exceeds the configured limit {plannedWorkloadDuration(serverLimits.maxDurationSeconds * 1000)}. Reduce the phase values before submitting.</p>}
         </fieldset>
+        {replaySourceJobId && replayEditorDefinition && <section className="att-replay-workload-timing" aria-label="Effective replay timing by workload">
+          <h3>Effective phase plan by workload</h3>
+          <p className="att-help">Source values include workload-level overrides after the Engine merge. Editing the shared timing envelope applies the current plan to every workload.</p>
+          <div className="att-table-scroll"><table><caption>Source and proposed effective duration for each LOAD workload</caption><thead><tr><th scope="col">Workload</th><th scope="col">Source effective duration</th><th scope="col">Current plan</th></tr></thead><tbody>
+            {(Array.isArray(asObject((replayOriginalDefinition||replayEditorDefinition).scenario).workloads)?asObject((replayOriginalDefinition||replayEditorDefinition).scenario).workloads as unknown[]:[]).slice(0,32).map((workload,index)=>{
+              const row=asObject(workload);return <tr key={`${String(row.id||'workload')}-${index}`}><th scope="row">{String(row.id||`Workload ${index+1}`)}</th>
+                <td>{effectiveWorkloadDuration((replayOriginalDefinition||replayEditorDefinition).scenario,workload)}</td><td>{effectiveDuration(timing)}</td></tr>;
+            })}
+          </tbody></table></div>
+          {Array.isArray(asObject((replayOriginalDefinition||replayEditorDefinition).scenario).workloads) && (asObject((replayOriginalDefinition||replayEditorDefinition).scenario).workloads as unknown[]).length>32 && <p>Showing the first 32 workload plans.</p>}
+        </section>}
       </section>
 
       <section id="load-workloads" className="att-load-section" aria-labelledby="load-workloads-title" tabIndex={-1}>

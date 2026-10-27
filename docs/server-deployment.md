@@ -1,4 +1,4 @@
-<!-- att-doc-status: compatibility release=4.2.5 -->
+<!-- att-doc-status: compatibility release=4.2.6 -->
 
 # ATT Server deployment and API
 

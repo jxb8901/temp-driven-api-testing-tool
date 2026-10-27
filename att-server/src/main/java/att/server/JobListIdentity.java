@@ -35,14 +35,18 @@ final class JobListIdentity {
             signature.add(json(List.of(text(workload.path("id")),normalized)));
             if(summaries.size()<32) {
                 Map<String,Object> summary=new LinkedHashMap<>();summary.put("name",text(workload.path("id")));summary.put("targets",members.stream().limit(Math.max(0,32-previewBindings)).toList());previewBindings+=Math.min(members.size(),Math.max(0,32-previewBindings));
-                JsonNode load=workload.path("load");
-                for(String key:List.of("users","arrivalRate","duration","warmup","rampUp","rampDown")) {
-                    JsonNode value=load.get(key);if(value!=null&&value.isValueNode()&&!value.isNull()&&value.asText().length()<=128)summary.put(key,value.isNumber()?value.numberValue():value.asText());
+                JsonNode rootLoad=scenario.path("load"), workloadLoad=workload.path("load");
+                for(String key:List.of("users","arrivalRate","maxConcurrent","duration","warmup","rampUp","rampDown")) {
+                    JsonNode value=effectiveLoadValue(rootLoad,workloadLoad,key);if(value!=null&&value.isValueNode()&&!value.isNull()&&value.asText().length()<=128)summary.put(key,value.isNumber()?value.numberValue():value.asText());
                 }
-                Long total=duration(load.path("duration"));
-                for(String phase:List.of("warmup","rampUp","rampDown"))if(total!=null&&load.has(phase)) {Long time=duration(load.get(phase));try{total=time==null?null:Math.addExact(total,time);}catch(ArithmeticException overflow){total=null;}}
+                JsonNode durationValue=effectiveLoadValue(rootLoad,workloadLoad,"duration");
+                Long total=durationValue==null||durationValue.isNull()?null:duration(durationValue);
+                for(String phase:List.of("warmup","rampUp","rampDown")) {
+                    JsonNode phaseValue=effectiveLoadValue(rootLoad,workloadLoad,phase);
+                    if(total!=null&&phaseValue!=null&&!phaseValue.isNull()) {Long time=duration(phaseValue);try{total=time==null?null:Math.addExact(total,time);}catch(ArithmeticException overflow){total=null;}}
+                }
                 if(total!=null)summary.put("totalDurationMs",total);
-                summary.put("model",load.hasNonNull("arrivalRate")?"arrivalRate":load.hasNonNull("users")?"virtualUsers":"Not available");summaries.add(summary);
+                summary.put("model",nonNull(effectiveLoadValue(rootLoad,workloadLoad,"arrivalRate"))?"arrivalRate":nonNull(effectiveLoadValue(rootLoad,workloadLoad,"users"))?"virtualUsers":"Not available");summaries.add(summary);
             }
         }
         Collections.sort(signature);
@@ -81,8 +85,11 @@ final class JobListIdentity {
         return Set.of("flow","template","tool","case").contains(type)&&!id.isBlank()?Map.of("type",type,"id",id):Map.of();
     }
     private static String text(JsonNode node){String value=node.asText("");return value.length()<=512&&!value.chars().anyMatch(Character::isISOControl)?value:"";}
+    private static JsonNode effectiveLoadValue(JsonNode root,JsonNode workload,String key){return workload!=null&&workload.isObject()&&workload.has(key)?workload.get(key):root==null?null:root.get(key);}
+    private static boolean nonNull(JsonNode value){return value!=null&&!value.isNull();}
     private static String json(Object value){try{return ServerRuntime.JSON.writeValueAsString(value);}catch(Exception failed){throw new IllegalArgumentException(failed);}}
     private static Long duration(JsonNode node) {
+        if(node.isNumber())try{return node.decimalValue().longValueExact();}catch(ArithmeticException invalid){return null;}
         String value=node.asText("");var match=java.util.regex.Pattern.compile("([0-9]+(?:\\.[0-9]+)?)(ms|s|m|h)").matcher(value);
         if(!match.matches())return null;
         try{return new java.math.BigDecimal(match.group(1)).multiply(java.math.BigDecimal.valueOf(switch(match.group(2)){case "ms"->1;case "s"->1000;case "m"->60000;default->3600000;})).longValueExact();}

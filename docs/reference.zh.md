@@ -1,7 +1,7 @@
-# ATT v4.2.5 使用手冊與參考
+# ATT v4.2.6 使用手冊與參考
 
 Author: Jeffrey + ChatGPT
-Version: 4.2.5
+Version: 4.2.6
 Status: 規範性使用者文件；由模組化來源自動生成
 
 <!-- GENERATED FILE. Edit docs/reference*/ modules, not this combined output. -->
@@ -101,7 +101,7 @@ Status: 規範性使用者文件；由模組化來源自動生成
   - [API paths](#api-paths)
 - [CLI 參考](#cli-參考)
   - [選擇命令](#選擇命令)
-  - [ATT 4.2.5 的可用性](#att-425-的可用性)
+  - [ATT 4.2.6 的可用性](#att-426-的可用性)
   - [編譯 source checkout](#編譯-source-checkout)
   - [按任務查閱語法、option 和範例](#按任務查閱語法option-和範例)
   - [透過 CLI 使用 ATT Server](#透過-cli-使用-att-server)
@@ -938,9 +938,9 @@ RUN 是 Case、選定 Cases 或單一 Template/Flow/Tool 的功能執行模型�
 
 ### 統一 RUN 與排程
 
-<!-- att-doc-status: current release=4.2.5 -->
+<!-- att-doc-status: current release=4.2.6 -->
 
-ATT 4.2.5 將功能性單次執行統一為 **RUN**，支援 Case、Template、Flow、Tool，以及所選 Case 批次。**Debug** 是 RUN 的診斷選項。**LOAD** 保留效能引擎、負載控制和專用報告。
+ATT 4.2.6 將功能性單次執行統一為 **RUN**，支援 Case、Template、Flow、Tool，以及所選 Case 批次。**Debug** 是 RUN 的診斷選項。**LOAD** 保留效能引擎、負載控制和專用報告。
 
 已發行的 Local CLI 保留其 interface-specific 相容邊界：run verb 選取 workbook Case，standalone debug 執行一個 Template、Flow 或 Tool。ATT Remote 保留舊版 Server command。此共用 RUN model 不代表 proposed vNext CLI grammar 已發行；請參閱[規劃中的 vNext page](interfaces/cli/vnext-proposed.zh.md)。
 
@@ -1027,7 +1027,7 @@ LOAD 排程繼續支援套件 scenario 路徑及已驗證 Load draft，沿用 sc
 
 #### 遷移既有用戶端
 
-| 既有介面 | 4.2.5 對應 |
+| 既有介面 | 4.2.6 對應 |
 |---|---|
 | CLI `validate`、`run`、`report` | 保留驗證、Case RUN、報告命令 |
 | CLI `--suite`、`--suite-dir`、`--case`、`--tag`、`--rerun-failed` | 保留選取行為；Server 批次使用 `selection` |
@@ -1036,7 +1036,7 @@ LOAD 排程繼續支援套件 scenario 路徑及已驗證 Load draft，沿用 sc
 | `/load-schedules`、`jobType:load/debug` | 共用 scheduler 相容路徑，保留既有定義 |
 | `/jobs/...`、既有 Studio 工作/結果連結 | 保留共用 history、取消、事件與結果路徑 |
 
-4.2.5 沒有移除舊 endpoint。`GET /api/v1/version` 公開 `unifiedRunVersion:att-execution/v1`。新 Studio Resource表單在舊 Server 缺少此能力時，可使用舊 Debug draft。統一 Case/batch draft 需要 4.2.5；舊部署可繼續使用 Explorer Case 操作。Server/Worker 應配套部署，舊 Worker 不支援Resource RUN dispatch。
+4.2.6 沒有移除舊 endpoint。`GET /api/v1/version` 公開 `unifiedRunVersion:att-execution/v1`。新 Studio Resource表單在舊 Server 缺少此能力時，可使用舊 Debug draft。統一 Case/batch draft 需要 4.2.6；舊部署可繼續使用 Explorer Case 操作。Server/Worker 應配套部署，舊 Worker 不支援Resource RUN dispatch。
 
 持久化使用既有 H2 table 的附加 JSON 欄位，不改寫舊 LOAD row。降版前先停止排程、匯出新定義、移除 RUN/單次定義，再還原升級前資料庫備份，避免舊 scheduler 把 RUN 當成 LOAD。保留的 artifact 與資料庫 metadata 分開儲存。
 
@@ -1067,9 +1067,9 @@ Schedule 使用一般已驗證 draft 合約。RUN Debug 仍使用 `options.debug
 
 ### Run 模式
 
-<!-- att-doc-status: current release=4.2.5 -->
+<!-- att-doc-status: current release=4.2.6 -->
 
-ATT 4.2.5 Local CLI 的 run command 是 legacy Case adapter，會執行 Workbook 中選取的 authored Testcase。較完整的 functional model 與 direct resource target 定義於 [Unified RUN](reference.zh/execution-modes/unified-run.md)。
+ATT 4.2.6 Local CLI 的 run command 是 legacy Case adapter，會執行 Workbook 中選取的 authored Testcase。較完整的 functional model 與 direct resource target 定義於 [Unified RUN](reference.zh/execution-modes/unified-run.md)。
 
 ```sh
 ./att.sh run --all
@@ -1515,7 +1515,7 @@ ATT 在 run root 寫入有界 load-summary.json/yaml 與 self-contained report/i
 
 直接 Engine／CLI `OperationResult` 輸出仍保留舊版完整 summary 詳細格式；其 schema 定義仍存於 `schemas/history/`。`LoadReportWriter` 輸出的 archived report 使用新增欄位的 `att-load-summary/v1.3`，並將大型 aggregate／per-workload metric collection 移至相對路徑 `details/v1/` sidecar，由 `details/v1/manifest.json` 引用。Inline collection 最多顯示 32 項 preview；每個 sidecar chunk 最多 4 MiB，sidecar 集合上限為 100 MiB／9,000 個檔案，完整 report output 上限為 120 MiB，每個主要 report 檔案最多 16 MiB。Aggregate counters 和 thresholds 維持精確。Server 代理 Job Results 則在 `result.summary` 使用 `att-load-terminal-result/v1`：執行結果、performance verdict、有界 aggregate counters、workload／threshold 預覽、主要診斷及 detail/archive 狀態。精簡 summary 上限為 32 KiB；量度終端 journal 和 SSE envelope 後均低於 48 KiB，並低於不變的 64 KiB journal event-data 上限。Worker frame 的 1 MiB 上限也維持不變。LOAD scheduling、virtual-user 和 arrival-rate 語義不變。
 
-Scenario 超過 24 小時時，Engine 會執行 read-only preflight 並在 summary 記錄 `resources.preflight`；此提示不會只因 duration 過長而拒絕 run。Browser inline draft 仍受 Server duration cap 限制；較長的 run 使用 package path-based LOAD。選擇性 CLI Local 手動 benchmark 見 [25 小時 LOAD soak acceptance 指南](operations/load-soak-acceptance.zh.md)。
+長時間 scenario 會由 Engine 執行 read-only preflight 並在 summary 記錄 `resources.preflight`；此提示不會只因 duration 過長而拒絕 run。Browser inline draft 及 package-backed scenario 均受 Server 設定的完整 envelope 上限 (`server.inlineLoad.maxDurationSeconds`，最多 10 日) 限制。選擇性 CLI Local 手動 benchmark 見 [25 小時 LOAD soak acceptance 指南](operations/load-soak-acceptance.zh.md)。
 
 完整 buckets、failure samples、workload／threshold 細節及 evidence 仍保存在 `load-summary.json`、`load-summary.yaml`、`report/index.html` 及版本化 sidecar，Server 只透過現有授權 artifact archive routes 提供。Studio 先顯示精簡結果；開啟 Results 才載入 evidence/workload preview，開啟 Metrics 才載入 metric-series sidecar。初始 Job Details 不會請求 artifact。Archive availability 與執行結果獨立；`PENDING`、`ARCHIVING`、`READY`、`FAILED` 或詳細資料 omitted 均不會改變終端狀態或 exit code。ERROR 和 INVALID 會優先保留真實 runtime/preparation/validation 原因，而非 Worker／Journal truncation 或 archive 診斷。
 
@@ -2862,7 +2862,7 @@ python tools/migrate_package_config.py --config config/config.yaml --server-conf
 
 ## CLI 參考
 
-<!-- att-doc-status: current release=4.2.5 -->
+<!-- att-doc-status: current release=4.2.6 -->
 
 
 ### 選擇命令
@@ -2882,11 +2882,11 @@ python tools/migrate_package_config.py --config config/config.yaml --server-conf
 | `clean` | 刪除文檔化的 ATT 生成輸出 | 否 |
 | `remote` | 透過 ATT Server REST/SSE API 提交及管理工作 | ATT Server |
 
-上表列出 ATT 4.2.5 CLI command。獨立的 vNext proposal 尚未包含在此 release。
+上表列出 ATT 4.2.6 CLI command。獨立的 vNext proposal 尚未包含在此 release。
 
-### ATT 4.2.5 的可用性
+### ATT 4.2.6 的可用性
 
-本 Reference 說明 ATT 4.2.5 已發行的 CLI。vNext grammar 是獨立的[規劃中 proposal](interfaces/cli/vnext-proposed.zh.md)，並非目前 command interface。本版本繼續支援 legacy command。
+本 Reference 說明 ATT 4.2.6 已發行的 CLI。vNext grammar 是獨立的[規劃中 proposal](interfaces/cli/vnext-proposed.zh.md)，並非目前 command interface。本版本繼續支援 legacy command。
 
 ### 編譯 source checkout
 
@@ -3385,7 +3385,7 @@ Assertion 為 false 會令 Case execution 變成 FAIL。無效表達式語法/�
 ```json
 {
   "schemaVersion": "att-validation/v2.1",
-  "attVersion": "4.2.5",
+  "attVersion": "4.2.6",
   "valid": false,
   "mode": "package",
   "summary": {"errors": 1, "warnings": 0, "suites": 1, "cases": 22, "templates": 7, "tools": 7},
@@ -3424,7 +3424,7 @@ python3 tools/validate_reference_content.py
 ./att.sh validate --package
 ```
 
-`build.sh` 會執行 release gate、重新生成 modular Reference Manual、建立 application jar 和 release archive，並 smoke-test 解壓後的 local package。Reference generation 另外需要 Python 3 與 Pandoc。它會輸出供 CLI 使用的 `att-4.2.5-local.tar.gz`、包含 WAR 和部署指南的 `att-4.2.5-server.tar.gz`，以及 source archive `att-4.2.5-src.tar.gz`。每個 binary archive 均須小於 25 MB。Local package 不再包含 WAR 或其中重複的 runtime library。
+`build.sh` 會執行 release gate、重新生成 modular Reference Manual、建立 application jar 和 release archive，並 smoke-test 解壓後的 local package。Reference generation 另外需要 Python 3 與 Pandoc。它會輸出供 CLI 使用的 `att-4.2.6-local.tar.gz`、包含 WAR 和部署指南的 `att-4.2.6-server.tar.gz`，以及 source archive `att-4.2.6-src.tar.gz`。每個 binary archive 均須小於 25 MB。Local package 不再包含 WAR 或其中重複的 runtime library。
 
 ### Runtime dependencies
 
@@ -3653,7 +3653,7 @@ Timeout range、evidence sample bound、result limit、pool size 等 operational
 
 #### 為什麼 `Att.bat` 會要求 Maven，或者為什麼 `.sh` Tool 在 windows 上失敗？
 
-在二進制發布中，`att.bat` 會找到有版本號的 runtime JAR，例如 `lib\att-local-4.2.5.jar`，只需要 Java 8+。每個 `ATT_HOME/lib` 只保留一個 `att-local-<version>.jar`，讓啟動器能明確選取 runtime。源碼樹中，`att.bat` 會在 Maven 位於 `PATH` 時使用 Maven；沒有 Maven 時，需要已有的 `target\classes`。先用 `att.bat version` 確認啟動器後再校驗套件。
+在二進制發布中，`att.bat` 會找到有版本號的 runtime JAR，例如 `lib\att-local-4.2.6.jar`，只需要 Java 8+。每個 `ATT_HOME/lib` 只保留一個 `att-local-<version>.jar`，讓啟動器能明確選取 runtime。源碼樹中，`att.bat` 會在 Maven 位於 `PATH` 時使用 Maven；沒有 Maven 時，需要已有的 `target\classes`。先用 `att.bat version` 確認啟動器後再校驗套件。
 
 啟動器讓 ATT 自身跨平臺；它無法翻譯外部 Tool 可執行文件。請為 Windows 配置 `.bat`、`.cmd`、PowerShell 腳本（需要顯式 `powershell`/`pwsh` argv）或原生可執行文件，而不是 POSIX-only `.sh`。PATH 校驗遵循 Windows `PATHEXT`，因此如 `pwsh` 這類名稱可解析為 `pwsh.exe`。維護多平臺版本時，請保持參數契約和 stdout 輸出格式一致。
 

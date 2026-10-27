@@ -10,6 +10,7 @@ public final class LoadPolicyForm {
     public String previewYaml;
     public Boolean redacted;
     public List<Template> templates;
+    public Map<String, Object> limits;
     public Boolean templateCatalogTruncated;
     public String requestId;
 

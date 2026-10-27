@@ -182,12 +182,12 @@ async function main() {
       }
     }
     await fs.writeFile(path.join(outputDirectory, 'manifest.json'), `${JSON.stringify({
-      repositoryVersion: '4.2.5', generatedAt: new Date().toISOString(), platform: process.platform,
+      repositoryVersion: '4.2.6', generatedAt: new Date().toISOString(), platform: process.platform,
       architecture: process.arch, captures: manifest,
     }, null, 2)}\n`);
     if (updateVisualBaselines) {
       await fs.writeFile(path.join(visualBaselineDirectory, 'manifest.json'), `${JSON.stringify({
-        repositoryVersion: '4.2.5', generatedAt: new Date().toISOString(), platform: process.platform,
+        repositoryVersion: '4.2.6', generatedAt: new Date().toISOString(), platform: process.platform,
         architecture: process.arch,
         maxChangedPixelRatio: visualDifferenceLimit, channelTolerance, captures: manifest,
         reviewReason: baselineReviewReason,
@@ -207,7 +207,7 @@ async function main() {
     }
     if (visualDifferences.length > 0) {
       await fs.writeFile(reportJsonPath, `${JSON.stringify({
-        repositoryVersion: '4.2.5',
+        repositoryVersion: '4.2.6',
         generatedAt: new Date().toISOString(),
         platform: process.platform,
         maxChangedPixelRatio: visualDifferenceLimit,

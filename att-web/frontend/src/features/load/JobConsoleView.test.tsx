@@ -66,6 +66,19 @@ describe('JobConsoleView', () => {
     expect(vi.mocked(api.subscribeJob).mock.calls[0][0]).toBe(job.jobId);
   });
 
+  it('keeps the live console mounted and preserves console text after event-ring eviction', async () => {
+    const { api, handler } = makeApi();
+    await act(async () => root.render(<JobConsoleView api={api} jobId={job.jobId} job={job} view="live" />));
+    const shell = host.querySelector('.att-console-shell');
+    act(() => {
+      handler().onEvent({ id: '1', type: 'log', data: { console: 'early console output' } });
+      for (let id = 2; id <= MAX_EVENTS + 1; id += 1) handler().onEvent({ id: String(id), type: 'progress', data: { phase: 'RUNNING' } });
+    });
+    await flushEvents();
+    expect(host.querySelector('.att-console-shell')).toBe(shell);
+    expect(host.querySelector('pre.att-console')?.textContent).toContain('early console output');
+  });
+
   it('builds an encoded same-origin full Details URL', () => {
     const value = new URL(consoleRouteUrl(job.jobId, 'events'));
     expect(value.origin).toBe(window.location.origin);

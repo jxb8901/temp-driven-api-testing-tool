@@ -6,7 +6,7 @@ ATT separates functional execution, Load generation and read-only validation.
 
 The execution model supports a Case, Template, Flow or Tool target, including a selected batch of Cases. ATT Studio and Server expose these through unified RUN drafts and Jobs. Debug is an optional RUN diagnostic mode for supported Server targets.
 
-ATT 4.2.5 keeps interface-specific compatibility behavior: the Local CLI's run command executes workbook Cases, while its standalone debug command runs one Template, Flow or Tool. The legacy ATT Remote client keeps corresponding Server commands. These command names do not define separate Engine semantics.
+ATT 4.2.6 keeps interface-specific compatibility behavior: the Local CLI's run command executes workbook Cases, while its standalone debug command runs one Template, Flow or Tool. The legacy ATT Remote client keeps corresponding Server commands. These command names do not define separate Engine semantics.
 
 ## LOAD
 

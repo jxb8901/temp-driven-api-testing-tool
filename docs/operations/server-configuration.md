@@ -1,4 +1,4 @@
-<!-- att-doc-status: current release=4.2.5 -->
+<!-- att-doc-status: current release=4.2.6 -->
 
 # ATT Server configuration
 
@@ -164,7 +164,7 @@ Inline Load settings use these defaults and hard ranges:
 | `maxAggregateArrivalRatePerSecond` | 100 | greater than 0 to 1,000,000 | Sum of Arrival Rate workloads, normalized to requests per second |
 | `maxConcurrentPerWorkload` | 100 | 1–1,000,000 | Each Arrival Rate workload |
 | `maxTotalConcurrent` | 1,000 | 1–1,000,000 | Sum of `maxConcurrent` across Arrival Rate workloads |
-| `maxDurationSeconds` | 3,600 | 1–86,400 | Sum of warmup, ramp-up, duration, and ramp-down |
+| `maxDurationSeconds` | 3,600 | 1–864,000 | Maximum effective LOAD envelope: warmup + ramp-up + duration + ramp-down, up to 10 days |
 
 `dataDir` must be absolute. Package roots, allowed roots, and configured Worker library directories must exist at startup. Package paths are canonicalized; symlinks that resolve outside an allowed root are rejected. Clients submit `packageId`; they cannot select a package path, output path, Worker executable, or classpath. Package registration and mutation endpoints are not available in v1.
 

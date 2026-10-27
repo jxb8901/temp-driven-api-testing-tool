@@ -1,6 +1,6 @@
 # CLI reference
 
-<!-- att-doc-status: current release=4.2.5 -->
+<!-- att-doc-status: current release=4.2.6 -->
 
 
 ## Choose a command
@@ -20,11 +20,11 @@
 | `clean` | Remove documented ATT-generated output | No |
 | `remote` | Submit and manage jobs through ATT Server's REST/SSE API | ATT Server |
 
-The commands in this table are the ATT 4.2.5 CLI. The separate vNext proposal is not part of this release.
+The commands in this table are the ATT 4.2.6 CLI. The separate vNext proposal is not part of this release.
 
-## Availability in ATT 4.2.5
+## Availability in ATT 4.2.6
 
-This Reference describes the CLI shipped with ATT 4.2.5. The vNext grammar is a separate [Planned proposal](../interfaces/cli/vnext-proposed.md); it is not a current command interface. Legacy commands remain supported in this release.
+This Reference describes the CLI shipped with ATT 4.2.6. The vNext grammar is a separate [Planned proposal](../interfaces/cli/vnext-proposed.md); it is not a current command interface. Legacy commands remain supported in this release.
 
 ## Build a source checkout
 

@@ -444,7 +444,7 @@ public final class ServerConfig {
         int users=inlineIntValue(values,"maxTotalUsers",100,1,100000);
         int concurrent=inlineIntValue(values,"maxConcurrentPerWorkload",100,1,1000000);
         int totalConcurrent=inlineIntValue(values,"maxTotalConcurrent",1000,1,1000000);
-        int duration=inlineIntValue(values,"maxDurationSeconds",3600,1,86400);
+        int duration=inlineIntValue(values,"maxDurationSeconds",3600,1,864000);
         Object configuredRate=values.get("maxAggregateArrivalRatePerSecond");
         double rate=configuredRate==null?100.0:configuredRate instanceof Number?((Number)configuredRate).doubleValue():Double.NaN;
         if(!Double.isFinite(rate)||rate<=0.0||rate>1000000.0)
