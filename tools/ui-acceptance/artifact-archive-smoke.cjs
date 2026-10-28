@@ -97,7 +97,7 @@ async function main() {
         process.stdout.write(`Checking online/offline report ${reportPath}\n`);
         const reportUrl = `${origin}/tools/att/api/v1/jobs/${fixture.jobId}/artifacts/view/${reportPath.split('/').map(encodeURIComponent).join('/')}`;
         const reportResponse = page.waitForResponse(response => response.url() === reportUrl && response.status() === 200);
-        await archive.getByRole('button', { name: `View Report: ${reportPath}`, exact: true }).click();
+        await archive.getByRole('button', { name: `View report ${reportPath}`, exact: true }).click();
         await reportResponse;
         const iframe = page.locator(`iframe[title=${JSON.stringify(`Report: ${reportPath}`)}]`);
         await iframe.waitFor();
