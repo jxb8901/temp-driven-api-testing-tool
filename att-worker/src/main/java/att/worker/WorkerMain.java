@@ -232,6 +232,7 @@ public final class WorkerMain {
             else if(error instanceof PackageResourceInspector.ResourceNotFoundException) { code="ATT-RESOURCE-NOT-FOUND"; message="Package resource was not found"; }
             else if(error instanceof PackageResourceInspector.ResponseTooLargeException) { code="ATT-RESOURCE-RESPONSE-TOO-LARGE"; message="Package resource response exceeded the configured limit"; }
             else if(error instanceof PackageResourceInspector.ResourceLimitException) { code="ATT-RESOURCE-LIMIT"; message="Package resource inspection exceeded a configured scan limit"; }
+            else if(error instanceof PackageResourceInspector.InvalidResourceRootException) { code="ATT-RESOURCE-ROOT-INVALID"; message="A configured Package resource root is invalid or unavailable"; exit=2; status="INVALID"; }
             else if(error instanceof PackageResourceInspector.StaleResourceCursorException
                     &&("run".equals(request.command)||"debug".equals(request.command)||"load".equals(request.command))
                     &&request.expectedRevisionDigest!=null) { code="ATT-SERVER-DRAFT-STALE"; message="Package content changed after preview; rebuild the draft"; exit=2; status="INVALID"; }
@@ -256,6 +257,12 @@ public final class WorkerMain {
                 diagnostic.putAll(att.server.api.LimitDiagnostic.create("ATT-RESOURCE-LIMIT",message,
                         limited.limitName,limited.configuredLimit,limited.observed,"package",att.server.api.LimitOutcome.SUBMISSION_REJECTED,
                         "inspection","Reduce configuration inspection scope or split referenced configuration into bounded files before retrying.",null));
+            }
+            if(error instanceof PackageResourceInspector.InvalidResourceRootException) {
+                PackageResourceInspector.InvalidResourceRootException invalid=(PackageResourceInspector.InvalidResourceRootException)error;
+                diagnostic.put("summary","A configured Package resource root exists but is invalid or unavailable.");
+                diagnostic.put("field",invalid.field());
+                diagnostic.put("suggestion","Restore the configured optional directory or correct its Package path, then refresh inspection.");
             }
             if(request.registeredPackageId!=null&&request.registeredPackageId.matches("[A-Za-z0-9][A-Za-z0-9._-]{0,127}"))
                 diagnostic.put("packageId",request.registeredPackageId);

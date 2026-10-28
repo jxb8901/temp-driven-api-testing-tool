@@ -630,6 +630,9 @@ final class ServerRuntime implements AutoCloseable {
         return submit(command,input,principal,serverIssuedDraft,scheduleOccurrenceId,scheduleIssued,rerunOfJobId,replayIntent,prevalidatedSpec,false);
     }
     private Map<String,Object> submit(String command,JsonNode input,String principal,boolean serverIssuedDraft,String scheduleOccurrenceId,boolean scheduleIssued,String rerunOfJobId,String replayIntent,JobExecutionSpec prevalidatedSpec,boolean fileBackedReplay) throws Exception {
+        return submit(command,input,principal,serverIssuedDraft,scheduleOccurrenceId,scheduleIssued,rerunOfJobId,replayIntent,prevalidatedSpec,fileBackedReplay,null);
+    }
+    private Map<String,Object> submit(String command,JsonNode input,String principal,boolean serverIssuedDraft,String scheduleOccurrenceId,boolean scheduleIssued,String rerunOfJobId,String replayIntent,JobExecutionSpec prevalidatedSpec,boolean fileBackedReplay,JobProvenance provenance) throws Exception {
         admissionLifecycle.readLock().lock();
         try {
         if(closing)throw new QueueFullException("Server is shutting down");
@@ -733,7 +736,13 @@ final class ServerRuntime implements AutoCloseable {
             jobPath=config.dataDir.resolve("jobs").resolve(id);Files.createDirectories(jobPath.resolve("output"));final Path activeJobPath=jobPath;
             JobEvents events=new JobEvents(jobPath.resolve("events.jsonl"),config.maxEventsPerJob,eventCompactions);
             Job job=new Job(id,command,packageId,principal,request,events);job.scheduleOccurrenceId=scheduleOccurrenceId;job.requestReceivedNanos=requestReceivedNanos;
-            job.executionSpec=executionSpec;job.replayUnavailable=replayUnavailable;job.rerunOfJobId=rerunOfJobId;job.replayIntent=replayIntent;job.replayOwner=replayOwner;job.originatingScheduleId=originatingScheduleId;
+            if(provenance==null) {
+                job.submissionSource="manual";job.originatingScheduleId=originatingScheduleId;job.executionPrincipal=principal;job.submittedBy=principal;
+            } else {
+                job.submissionSource="scheduled";job.originatingScheduleId=provenance.scheduleId;job.scheduleOwner=provenance.scheduleOwner;
+                job.executionPrincipal=provenance.executionPrincipal;job.submittedBy=provenance.submittedBy;job.triggeredBy=provenance.triggeredBy;
+            }
+            job.executionSpec=executionSpec;job.replayUnavailable=replayUnavailable;job.rerunOfJobId=rerunOfJobId;job.replayIntent=replayIntent;job.replayOwner=replayOwner;if(job.originatingScheduleId==null)job.originatingScheduleId=originatingScheduleId;
             Map<String,Object> summaryFields=new LinkedHashMap<>();summaryFields.put("command",command);summaryFields.put("packageId",packageId);
             summaryFields.put("configuration",configuration);
             Files.write(jobPath.resolve("output/configuration.json"),JSON.writeValueAsBytes(configuration));
@@ -2751,6 +2760,32 @@ final class ServerRuntime implements AutoCloseable {
                 throw new InspectionConfigurationException(diagnostics.isEmpty()
                         ?safeInspectionDiagnostics(List.of(),root):diagnostics);
         }
+        boolean inspectorEndpoint=List.of("list","detail","source","source-file","debug-form","quick-load-form",
+                "load-catalog","load-detail","load-source","load-templates","quick-load-policy").contains(request.inspectionAction);
+        if(inspectorEndpoint&&("ATT-RESOURCE-ROOT-INVALID".equals(workerError)
+                ||"WORKER_REQUEST_INVALID".equals(workerError))) {
+            Object raw=envelope.get("diagnostics");
+            List<Map<String,Object>> diagnostics=raw instanceof List
+                    ?safeInspectionDiagnostics((List<?>)raw,root):new ArrayList<>();
+            if(diagnostics.isEmpty()||"ATT-CFG-001".equals(diagnostics.get(0).get("code"))) {
+                String code="ATT-RESOURCE-ROOT-INVALID".equals(workerError)
+                        ?"ATT-RESOURCE-ROOT-INVALID":"ATT-RESOURCE-VALIDATION-FAILED";
+                Object rawMessage=envelope.get("message");
+                String summary=rawMessage instanceof String?(String)rawMessage:"Package inspection input or configuration is invalid.";
+                summary=att.server.api.internal.DiagnosticSanitizer.redactAbsolutePaths(
+                        att.server.api.internal.DiagnosticSanitizer.redactText(summary),root);
+                diagnostics=List.of(Map.of("code",code,"summary",summary));
+            } else if("WORKER_REQUEST_INVALID".equals(workerError)) {
+                for(Map<String,Object> diagnostic:diagnostics)
+                    if("WORKER_REQUEST_INVALID".equals(diagnostic.get("code")))diagnostic.put("code","ATT-RESOURCE-VALIDATION-FAILED");
+            }
+            String code="ATT-RESOURCE-ROOT-INVALID".equals(workerError)
+                    ?"ATT-RESOURCE-ROOT-INVALID":"ATT-RESOURCE-VALIDATION-FAILED";
+            java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).warning(
+                    "ATT inspection validation rejected package="+String.valueOf(request.registeredPackageId)
+                            +" action="+String.valueOf(request.inspectionAction)+" code="+code);
+            throw new InspectionValidationException(code,diagnostics);
+        }
         boolean draftInspection=("package-configuration".equals(request.inspectionType)&&"validate".equals(request.inspectionAction))||"run-input".equals(request.inspectionAction)||"debug-input".equals(request.inspectionAction)||"debug-form".equals(request.inspectionAction)
                 ||"quick-load-input".equals(request.inspectionAction)||"quick-load-form".equals(request.inspectionAction)
                 ||"load-templates".equals(request.inspectionAction)||"load-template-compose".equals(request.inspectionAction)
@@ -2864,13 +2899,15 @@ final class ServerRuntime implements AutoCloseable {
         for(Object raw:rawDiagnostics)if(raw instanceof Map) {
             @SuppressWarnings("unchecked") Map<String,Object> value=(Map<String,Object>)raw;
             Map<String,Object> safe=new LinkedHashMap<>();
-            for(String key:List.of("code","summary","detail","field","file","suggestion","packageId")) {
+            for(String key:List.of("code","summary","detail","field","file","sourceFile","resourceId","suggestion","packageId")) {
                 Object item=value.get(key);
                 if(item instanceof String) {
                     String text=att.server.api.internal.DiagnosticSanitizer.redactText((String)item);
                     safe.put(key,att.server.api.internal.DiagnosticSanitizer.redactAbsolutePaths(text,root));
                 }
             }
+            for(String key:List.of("line","column","sourceColumn"))
+                if(value.get(key) instanceof Number)safe.put(key,value.get(key));
             if(!safe.isEmpty())diagnostics.add(safe);
         }
         if(diagnostics.isEmpty())diagnostics.add(Map.of("code","ATT-CFG-001","summary","Package configuration is invalid or incomplete."));
@@ -3286,7 +3323,8 @@ final class ServerRuntime implements AutoCloseable {
         requireSchedulingEnabled();requireLocalOperator(principal);
         LoadSchedule schedule=store.authorizeManualScheduleExecution(id,principal,"local".equals(config.authMode),clock.instant().toString());
         if(schedule==null)throw new NotFoundException();
-        Map<String,Object> occurrence=loadScheduleScheduler.trigger(schedule,principal);
+        String executionPrincipal=schedule.executionPrincipal==null||schedule.executionPrincipal.isBlank()?schedule.createdBy:schedule.executionPrincipal;
+        Map<String,Object> occurrence=loadScheduleScheduler.trigger(schedule,executionPrincipal,principal);
         store.audit(principal,"SCHEDULE_TRIGGER",String.valueOf(occurrence.get("jobId")),schedule.packageId,String.valueOf(occurrence.get("status")));
         return occurrence;
     }
@@ -3296,20 +3334,26 @@ final class ServerRuntime implements AutoCloseable {
     }
 
     private Map<String,Object> submitScheduledJob(LoadSchedule schedule,String occurrenceId,String executionPrincipal) throws Exception {
+        Map<String,Object> occurrence=store.scheduleExecution(occurrenceId);
+        String triggeredBy=occurrence==null?null:(String)occurrence.get("triggeredBy");
+        String actualExecutionPrincipal=executionPrincipal==null||executionPrincipal.isBlank()
+                ?(schedule.executionPrincipal==null||schedule.executionPrincipal.isBlank()?schedule.createdBy:schedule.executionPrincipal)
+                :executionPrincipal;
+        JobProvenance provenance=new JobProvenance(schedule.id,schedule.createdBy,actualExecutionPrincipal,triggeredBy,triggeredBy);
         schedule=prepareScheduledExecution(schedule,executionPrincipal);
         Map<String,Object> accepted="run".equals(schedule.effectiveJobType())
-                ?submitScheduledRun(schedule,occurrenceId,executionPrincipal)
+                ?submitScheduledRun(schedule,occurrenceId,actualExecutionPrincipal,provenance)
                 :"debug".equals(schedule.effectiveJobType())
-                ? submitScheduledDebug(schedule,occurrenceId)
-                : submitScheduledLoad(schedule,occurrenceId);
+                ? submitScheduledDebug(schedule,occurrenceId,actualExecutionPrincipal,provenance)
+                : submitScheduledLoad(schedule,occurrenceId,actualExecutionPrincipal,provenance);
         store.audit(executionPrincipal,"SCHEDULE_EXECUTE",String.valueOf(accepted.get("jobId")),schedule.packageId,"ACCEPTED");
         return accepted;
     }
 
-    private Map<String,Object> submitScheduledRun(LoadSchedule schedule,String occurrenceId,String executionPrincipal) throws Exception {
+    private Map<String,Object> submitScheduledRun(LoadSchedule schedule,String occurrenceId,String executionPrincipal,JobProvenance provenance) throws Exception {
         ObjectNode input=JSON.valueToTree(schedule.runInput);input.set("configurationProvenance",JSON.valueToTree(schedule.configuration));applyInspectionPolicy(input,schedule.packageId);
         JobExecutionSpec retained=capturePrevalidatedExecutionSpec("run",input,null);
-        return submit("run",input,executionPrincipal,true,occurrenceId,true,null,null,retained);
+        return submit("run",input,executionPrincipal,true,occurrenceId,true,null,null,retained,false,provenance);
     }
     private void validateScheduledRun(LoadSchedule schedule) throws Exception {
         Path root=packageRoot(schedule.packageId);if(root==null)throw new NotFoundException();validatePackageRoot(root);
@@ -3390,7 +3434,7 @@ final class ServerRuntime implements AutoCloseable {
         return null;
     }
 
-    private Map<String,Object> submitScheduledLoad(LoadSchedule schedule,String occurrenceId) throws Exception {
+    private Map<String,Object> submitScheduledLoad(LoadSchedule schedule,String occurrenceId,String executionPrincipal,JobProvenance provenance) throws Exception {
         Path root=packageRoot(schedule.packageId);
         if(root==null||!Files.isDirectory(root,java.nio.file.LinkOption.NOFOLLOW_LINKS))
             throw new IllegalArgumentException("Configured schedule package is no longer available");
@@ -3403,10 +3447,10 @@ final class ServerRuntime implements AutoCloseable {
         input.set("inlineLoadScenario",JSON.valueToTree(scenario));input.put("expectedRevisionDigest",schedule.expectedRevisionDigest);
         applyInspectionPolicy(input,schedule.packageId);
         JobExecutionSpec retained=schedule.validatedSensitiveSource?null:capturePrevalidatedExecutionSpec("load",input,occurrenceId);
-        return submit("load",input,"load-schedule:"+schedule.id,true,occurrenceId,true,null,null,retained);
+        return submit("load",input,"load-schedule:"+schedule.id,true,occurrenceId,true,null,null,retained,false,provenance);
     }
 
-    private Map<String,Object> submitScheduledDebug(LoadSchedule schedule,String occurrenceId) throws Exception {
+    private Map<String,Object> submitScheduledDebug(LoadSchedule schedule,String occurrenceId,String executionPrincipal,JobProvenance provenance) throws Exception {
         Path root=packageRoot(schedule.packageId);
         if(root==null||!Files.isDirectory(root,java.nio.file.LinkOption.NOFOLLOW_LINKS))
             throw new IllegalArgumentException("Configured schedule package is no longer available");
@@ -3420,7 +3464,7 @@ final class ServerRuntime implements AutoCloseable {
         input.set("inlineDebugInput",JSON.valueToTree(schedule.inlineDebugInput));input.put("expectedRevisionDigest",revisionDigest);
         input.put("draftResourceId",schedule.debugResourceId);applyInspectionPolicy(input,schedule.packageId);
         JobExecutionSpec retained=capturePrevalidatedExecutionSpec("debug",input,null);
-        return submit("debug",input,"debug-schedule:"+schedule.id,true,occurrenceId,true,null,null,retained);
+        return submit("debug",input,"debug-schedule:"+schedule.id,true,occurrenceId,true,null,null,retained,false,provenance);
     }
 
     private String validateScheduledDebugInput(Path root,LoadSchedule schedule) throws Exception {
@@ -4581,6 +4625,17 @@ final class ServerRuntime implements AutoCloseable {
         void release(){if(released.compareAndSet(false,true)){admission.release();if(load!=null)load.release();}}
     }
     static final class QueueFullException extends RuntimeException {QueueFullException(String m){super(m);}}
+    private static final class JobProvenance {
+        final String scheduleId,scheduleOwner,executionPrincipal,submittedBy,triggeredBy;
+        JobProvenance(String scheduleId,String scheduleOwner,String executionPrincipal,String submittedBy,String triggeredBy) {
+            this.scheduleId=provenanceText(scheduleId,40);this.scheduleOwner=provenanceText(scheduleOwner,256);
+            this.executionPrincipal=provenanceText(executionPrincipal,256);this.submittedBy=provenanceText(submittedBy,256);this.triggeredBy=provenanceText(triggeredBy,256);
+        }
+        private static String provenanceText(String value,int max) {
+            if(value==null||value.isBlank()||value.length()>max||value.chars().anyMatch(Character::isISOControl))return null;
+            return value;
+        }
+    }
     static final class JobConflictException extends RuntimeException {final String code;JobConflictException(String code,String message){super(message);this.code=code;}}
     static final class NotFoundException extends RuntimeException {}
     static final class ReplayDraftExpiredException extends RuntimeException {}
@@ -4601,6 +4656,16 @@ final class ServerRuntime implements AutoCloseable {
         final List<Map<String,Object>> diagnostics;
         InspectionConfigurationException(List<Map<String,Object>> diagnostics){this.diagnostics=Collections.unmodifiableList(new ArrayList<>(diagnostics));}
         String summary(){Object summary=diagnostics.get(0).get("summary");return summary instanceof String?(String)summary:"Package configuration is invalid or incomplete.";}
+    }
+    static final class InspectionValidationException extends RuntimeException {
+        final String code;
+        final List<Map<String,Object>> diagnostics;
+        InspectionValidationException(String code,List<Map<String,Object>> diagnostics) {
+            super(diagnostics.isEmpty()?"Package inspection input or configuration is invalid.":String.valueOf(diagnostics.get(0).get("summary")));
+            this.code=code;
+            this.diagnostics=Collections.unmodifiableList(new ArrayList<>(diagnostics));
+        }
+        String summary(){return getMessage();}
     }
     static final class InspectionTimeoutException extends RuntimeException {}
     static final class InspectionResponseTooLargeException extends RuntimeException {}

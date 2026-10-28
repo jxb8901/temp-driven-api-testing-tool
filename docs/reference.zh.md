@@ -2752,6 +2752,8 @@ defaults:
 
 沒有 Manifest 時，使用慣例根目錄 `templates`、`testcase`，Package Testdata inventory 為空。Global `templates.root`、`testcase.root` 不再決定 Package 業務根目錄。
 
+檢查時可省略慣例目錄 `templates/`、`testcase/` 及 `load/`。目錄不存在時，Explorer、LOAD Catalog 及 Quick Load 會為該根目錄回傳空 inventory。若已設定或慣例根目錄存在，但不是可讀目錄或解析後超出 canonical Package，檢查會回傳已淨化的 `ATT-RESOURCE-ROOT-INVALID` 診斷；不會跟隨不安全路徑，也不會把存在但無效的目錄當成空目錄。
+
 ### 解析 Environment
 
 明確 request 或既有 CLI `--env` 優先；未指定時使用 Package 的 `defaultEnvironment`，再回退至中央預設值。名稱會解析成中央 profile 的正式拼寫。Effective 檢視顯示實際 Environment 及來源。

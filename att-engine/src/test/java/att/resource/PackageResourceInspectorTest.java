@@ -905,13 +905,52 @@ class PackageResourceInspectorTest {
                 ()->inspector.inspect("list","template",null,null,0,100));
     }
 
-    @Test void returnsSafeDiagnosticsWhenOneConfiguredResourceRootCannotBeInspected() throws Exception {
+    @Test void missingOptionalTestcaseRootIsAnEmptyInventory() throws Exception {
         Path root=packageWithTemplate("missing-case-root", "PAYMENT", "description: item");
         Files.delete(root.resolve("testcase"));
         PackageResourceInspector inspector=new PackageResourceInspector(root,Paths.get("config/config.yaml"),"SIT",Collections.<String>emptyList(),65536,262144);
         Map<String,Object> page=inspector.inspect("list","case",null,null,0,10);
-        assertTrue(page.toString().contains("ATT-RESOURCE-CASE-ROOT-UNAVAILABLE"));
+        assertTrue(((List<?>)page.get("items")).isEmpty());
+        assertFalse(page.toString().contains("ATT-RESOURCE-CASE-ROOT-UNAVAILABLE"));
         assertFalse(page.toString().contains(root.toString()));
+    }
+
+    @Test void emptyPackageAndManifestOnlyPackageDiscoverSafelyWithoutCreatingOptionalRoots() throws Exception {
+        Path sharedConfig=Paths.get("config/config.yaml").toAbsolutePath();
+        assertTrue(Files.isRegularFile(sharedConfig));
+        for(String name:List.of("empty-package","manifest-only-package")) {
+            Path root=Files.createDirectory(temp.resolve(name));
+            if(name.startsWith("manifest"))writeUtf8(root.resolve("package.yaml"),"schemaVersion: att-package/v1\n");
+            PackageResourceInspector inspector=new PackageResourceInspector(root,sharedConfig,"SIT",Collections.emptyList(),65536,262144);
+            @SuppressWarnings("unchecked") Map<String,Object> catalog=inspector.inspectLoadCatalog(null,0,100,null);
+            assertTrue(((List<?>)catalog.get("items")).isEmpty(),catalog.toString());
+            assertEquals(0,catalog.get("total"));
+            assertNull(catalog.get("nextOffset"));
+            assertTrue(String.valueOf(catalog.get("revisionDigest")).matches("[a-f0-9]{64}"));
+            @SuppressWarnings("unchecked") Map<String,Object> resources=inspector.inspect("list",null,null,null,0,100);
+            @SuppressWarnings("unchecked") List<Map<String,Object>> items=(List<Map<String,Object>>)resources.get("items");
+            assertFalse(items.stream().anyMatch(item->"template".equals(item.get("type"))||"case".equals(item.get("type"))));
+            try(java.util.stream.Stream<Path> children=Files.list(root)){assertEquals(name.startsWith("manifest")?List.of("package.yaml"):List.of(),children.map(p->p.getFileName().toString()).sorted().collect(Collectors.toList()));}
+        }
+    }
+
+    @Test void eachOptionalInventoryRootCanBePresentIndependentlyButInvalidRootsFailClosed() throws Exception {
+        Path sharedConfig=Paths.get("config/config.yaml").toAbsolutePath();
+        for(String rootName:List.of("templates","testcase","load")) {
+            Path root=Files.createDirectory(temp.resolve("only-"+rootName));Files.createDirectory(root.resolve(rootName));
+            PackageResourceInspector inspector=new PackageResourceInspector(root,sharedConfig,"SIT",Collections.emptyList(),65536,262144);
+            if("load".equals(rootName))assertEquals(0,inspector.inspectLoadCatalog(null,0,100,null).get("total"));
+            else assertNotNull(inspector.inspect("list",null,null,null,0,100));
+        }
+        for(String rootName:List.of("templates","testcase","load")) {
+            Path root=Files.createDirectory(temp.resolve("invalid-"+rootName));writeUtf8(root.resolve(rootName),"not a directory");
+            PackageResourceInspector inspector=new PackageResourceInspector(root,sharedConfig,"SIT",Collections.emptyList(),65536,262144);
+            PackageResourceInspector.InvalidResourceRootException invalid=rootName.equals("load")
+                    ?assertThrows(PackageResourceInspector.InvalidResourceRootException.class,()->inspector.inspectLoadCatalog(null,0,100,null))
+                    :assertThrows(PackageResourceInspector.InvalidResourceRootException.class,()->inspector.inspect("list",null,null,null,0,100));
+            assertFalse(invalid.getMessage().contains(root.toString()));
+            assertTrue(invalid.field().contains(rootName.equals("templates")?"templatesRoot":rootName.equals("testcase")?"testcaseRoot":"load"));
+        }
     }
 
     @Test void templateCatalogRevisionIsStableAcrossEnvironmentAndSourcesAreNotLegacyScenarios() throws Exception {

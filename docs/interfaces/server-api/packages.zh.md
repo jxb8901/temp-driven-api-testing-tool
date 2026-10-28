@@ -45,6 +45,8 @@ GET /api/v1/packages/payments/resources/template/{resourceId}/source-file?refere
 
 無效清單參數會回傳 `400`；未知 package/resource 使用相同的 `404` 格式。過期 cursor 回傳 `409`，超大回應回傳 `413`，探索佇列已滿回傳 `503`，Inspector 逾時回傳 `504`。錯誤回應使用既有的 `error.code`、`error.summary` 及 `requestId` 格式，不會包含實體路徑或 parser exception 訊息。
 
+Package inspection 將不存在的選填 `templates/`、`testcase/` 及 `load/` 根目錄視為空 inventory。若根目錄存在但不是可讀目錄，或解析後超出 canonical Package，會回傳 HTTP `422 ATT-RESOURCE-ROOT-INVALID`，並以安全的 `field` 指出受影響根目錄。其他 Worker validation errors 回傳 `422 ATT-RESOURCE-VALIDATION-FAILED`；兩種回應都不會包含絕對路徑或 parser 細節。
+
 ## Package configuration inspection
 
 設定檢查使用與 package resource 相同、受界限限制的 inspection Worker。以下唯讀 endpoint 使用 Server 解析出的已驗證或匿名身份：

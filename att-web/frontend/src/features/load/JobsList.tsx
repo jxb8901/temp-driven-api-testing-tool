@@ -1,5 +1,5 @@
-import { PrincipalCombobox } from "./PrincipalCombobox";
 import { Fragment, useEffect, useRef, useState, type KeyboardEvent } from 'react';
+import { IdentityCombobox, type IdentityFilter } from './IdentityCombobox';
 import type { JobsFeatureProps, JobsQueryResult, JobSummary } from './types';
 import { JobReplayActions } from './JobReplayActions';
 import { JobStateIcons } from './JobStateIcons';
@@ -13,7 +13,10 @@ function targetLabel(job: JobSummary) { const t = job.targetIdentity; return t?.
 function groupKey(job: Pick<JobSummary, 'packageId' | 'environment' | 'targetGroup'>) { return JSON.stringify([job.packageId, job.environment || '', job.targetGroup || 'legacy']); }
 function storedSize() { try { const n = Number(localStorage.getItem('att.jobs.pageSize')); return [25, 50, 100].includes(n) ? n : 100; } catch { return 100; } }
 function savedFilters(): Record<string, string> { try { const value = JSON.parse(sessionStorage.getItem('att.jobs.filters') || '{}'); return value && typeof value === 'object' ? Object.fromEntries(Object.entries(value).filter((entry): entry is [string, string] => typeof entry[1] === 'string')) : {}; } catch { return {}; } }
-function scheduled(job: JobSummary) { return !!job.scheduled || /^(load|debug)-schedule:/.test(job.principal || ''); }
+function savedIdentity(filters: Record<string,string>, key: string): IdentityFilter {
+  const mode=filters[`${key}Mode`];return {mode:mode==='mine'||mode==='text'?mode:'all',value:filters[key]||'',exact:filters[`${key}Exact`]==='true'};
+}
+function scheduled(job: JobSummary) { return job.submissionSource ? job.submissionSource === 'scheduled' : !!job.scheduled || /^(load|debug)-schedule:/.test(job.principal || ''); }
 function elapsed(job: JobSummary, now: number) {
   if (!job.startedAt) return '—';
   const end = job.finishedAt ? Date.parse(job.finishedAt) : !['RUNNING', 'CANCEL_REQUESTED'].includes(job.status) ? NaN : now;
@@ -41,7 +44,11 @@ export function JobsList({ api, onOpenJob, onSchedule, onEditSchedule, execution
   const [saved] = useState(savedFilters);
   const [moreFilters, setMoreFilters] = useState(false);
   const [result, setResult] = useState<JobsQueryResult>({items: [], total: 0, offset: 0, limit: 100, groups: [], principalSuggestions: [], packageSuggestions: []});
-  const [principal, setPrincipal] = useState(saved.principal || ''); const [principalMode,setPrincipalMode]=useState(saved.principalMode || 'all'); const [packageId, setPackage] = useState(saved.packageId || ''); const [type, setType] = useState(executionType || saved.type || '');
+  const [source, setSource] = useState<'manual'|'scheduled'|''>((saved.submissionSource==='manual'||saved.submissionSource==='scheduled'?saved.submissionSource:saved.principalMode==='schedule'?'scheduled':''));
+  const [executionIdentity,setExecutionIdentity]=useState<IdentityFilter>(()=>savedIdentity(saved,'executionPrincipal'));
+  const [ownerIdentity,setOwnerIdentity]=useState<IdentityFilter>(()=>savedIdentity(saved,'scheduleOwner'));
+  const [triggerIdentity,setTriggerIdentity]=useState<IdentityFilter>(()=>savedIdentity(saved,'triggeredBy'));
+  const [packageId, setPackage] = useState(saved.packageId || ''); const [type, setType] = useState(executionType || saved.type || '');
   const [status, setStatus] = useState(saved.status || ''); const [from, setFrom] = useState(saved.from || ''); const [to, setTo] = useState(saved.to || '');
   const [pinned, setPinned] = useState(saved.pinned === 'true'); const [deletion, setDeletion] = useState(saved.deletion || 'all'); const [search, setSearch] = useState(saved.search || '');
   const [sort, setSort] = useState(saved.sort || 'newest'); const [grouped, setGrouped] = useState(saved.grouped === 'true'); const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
@@ -51,14 +58,17 @@ export function JobsList({ api, onOpenJob, onSchedule, onEditSchedule, execution
   const mutationLock = useRef(false); const sequence = useRef(0); const [copyState, setCopyState] = useState('');
   const previousType = useRef(executionType);
   useEffect(() => { if (previousType.current !== executionType) { previousType.current = executionType; setType(executionType || ''); setPage(0); } }, [executionType]);
-  useEffect(() => { try { sessionStorage.setItem('att.jobs.filters', JSON.stringify({principal, principalMode, packageId, type, status, from, to, deletion, search, sort, pinned: String(pinned), grouped: String(grouped)})); } catch { /* Storage can be unavailable. */ } }, [principal, principalMode, packageId, type, status, from, to, deletion, search, sort, pinned, grouped]);
+  useEffect(() => { try { sessionStorage.setItem('att.jobs.filters', JSON.stringify({submissionSource:source,executionPrincipal:executionIdentity.value,executionPrincipalMode:executionIdentity.mode,executionPrincipalExact:String(executionIdentity.exact),scheduleOwner:ownerIdentity.value,scheduleOwnerMode:ownerIdentity.mode,scheduleOwnerExact:String(ownerIdentity.exact),triggeredBy:triggerIdentity.value,triggeredByMode:triggerIdentity.mode,triggeredByExact:String(triggerIdentity.exact),packageId,type,status,from,to,deletion,search,sort,pinned:String(pinned),grouped:String(grouped)})); } catch { /* Storage can be unavailable. */ } }, [source,executionIdentity,ownerIdentity,triggerIdentity,packageId,type,status,from,to,deletion,search,sort,pinned,grouped]);
   useEffect(() => { const timer = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(timer); }, []);
   useEffect(() => {
     const controller = new AbortController(); const current = ++sequence.current; setLoading(true); setError('');
     const timer = setTimeout(async () => {
       try {
-        const mode = principalMode;
-        const query = { offset: page * pageSize, limit: pageSize, principal: mode === 'text' ? principal : undefined, principalMode: mode, packageId: packageId || undefined, executionType: type || undefined, status: status || undefined, from: from ? new Date(`${from}T00:00:00`).toISOString() : undefined, to: to ? new Date(`${to}T23:59:59.999`).toISOString() : undefined, search: search || undefined, sort: grouped ? 'target-asc' : sort, pinnedOnly: pinned, deletion, groupBy: grouped ? 'target' : undefined, signal: controller.signal };
+        const query = { offset: page * pageSize, limit: pageSize, submissionSource:source||undefined,
+          executionPrincipal:executionIdentity.mode==='text'?executionIdentity.value:undefined,executionPrincipalMode:executionIdentity.mode,executionPrincipalExact:executionIdentity.exact||undefined,
+          scheduleOwner:ownerIdentity.mode==='text'?ownerIdentity.value:undefined,scheduleOwnerMode:ownerIdentity.mode,scheduleOwnerExact:ownerIdentity.exact||undefined,
+          triggeredBy:triggerIdentity.mode==='text'?triggerIdentity.value:undefined,triggeredByMode:triggerIdentity.mode,triggeredByExact:triggerIdentity.exact||undefined,
+          packageId: packageId || undefined, executionType: type || undefined, status: status || undefined, from: from ? new Date(`${from}T00:00:00`).toISOString() : undefined, to: to ? new Date(`${to}T23:59:59.999`).toISOString() : undefined, search: search || undefined, sort: grouped ? 'target-asc' : sort, pinnedOnly: pinned, deletion, groupBy: grouped ? 'target' : undefined, signal: controller.signal };
         if (!api.queryJobs) throw new Error('This Server does not support paginated Jobs. Refresh Studio and Server together.');
         const response = await api.queryJobs(query);
         if (controller.signal.aborted || sequence.current !== current) return;
@@ -68,7 +78,7 @@ export function JobsList({ api, onOpenJob, onSchedule, onEditSchedule, execution
       finally { if (!controller.signal.aborted && sequence.current === current) setLoading(false); }
     }, 180);
     return () => { clearTimeout(timer); controller.abort(); };
-  }, [api, page, pageSize, principal, principalMode, packageId, type, status, from, to, pinned, deletion, search, sort, grouped, version]);
+  }, [api, page, pageSize, source, executionIdentity, ownerIdentity, triggerIdentity, packageId, type, status, from, to, pinned, deletion, search, sort, grouped, version]);
   async function mutate(ids: string[], action: 'pin' | 'unpin' | 'mark' | 'unmark') {
     if (mutationLock.current || loading || !ids.length) return;
     mutationLock.current = true; setBusy(true); setOutcomes([]); setError('');
@@ -87,7 +97,7 @@ export function JobsList({ api, onOpenJob, onSchedule, onEditSchedule, execution
     finally { mutationLock.current = false; setBusy(false); setVersion(value => value + 1); }
   }
   const update = (setter: (value: string) => void) => (event: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => { setter(event.currentTarget.value); setPage(0); };
-  const extraFilters = [from && `From ${from}`, to && `To ${to}`, deletion !== 'all' && `Deletion: ${deletion}`, pinned && 'Pinned only'].filter(Boolean);
+  const extraFilters = [ownerIdentity.mode==='mine'?'Schedule Owner: Mine':ownerIdentity.mode==='text'&&ownerIdentity.value?`Schedule Owner: ${ownerIdentity.value}`:'',triggerIdentity.mode==='mine'?'Triggered by: Mine':triggerIdentity.mode==='text'&&triggerIdentity.value?`Triggered by: ${triggerIdentity.value}`:'',from && `From ${from}`, to && `To ${to}`, deletion !== 'all' && `Deletion: ${deletion}`, pinned && 'Pinned only'].filter(Boolean);
   const rows = result.items, pages = Math.max(1, Math.ceil(result.total / pageSize));
   const groups = new Map<string, JobSummary[]>(); for (const job of rows) { const key = groupKey(job); groups.set(key, [...(groups.get(key) || []), job]); }
   const blocked = busy || loading;
@@ -110,14 +120,18 @@ export function JobsList({ api, onOpenJob, onSchedule, onEditSchedule, execution
       </div> : null}
       <span className="att-job-tertiary"><code title={job.jobId}>{job.jobId.length > 12 ? `${job.jobId.slice(0,6)}…${job.jobId.slice(-4)}` : job.jobId}</code> <button type="button" className="att-link-button" aria-label={`Copy full Job ID ${job.jobId}`} title="Copy full Job ID" onClick={() => { void navigator.clipboard.writeText(job.jobId).then(() => setCopyState(`Copied ${job.jobId}`)).catch(() => setCopyState(`Copy unavailable: ${job.jobId}`)); }}>⧉</button></span>
     </th>
-    <td data-label="Type / Status"><strong>{job.executionType || (job.command === 'debug' ? 'run' : job.command)}</strong> <StatusBadge status={job.status} /><span className="att-job-secondary">{scheduled(job) ? 'Schedule' : job.principal || 'Unknown principal'}</span>{job.deletionState === 'DELETE_REQUESTED' && <span className="att-job-secondary">Pending deletion</span>}</td>
+    <td data-label="Type / Status"><strong>{job.executionType || (job.command === 'debug' ? 'run' : job.command)}</strong> <StatusBadge status={job.status} />
+      {scheduled(job) ? <details className="att-job-provenance"><summary>Scheduled · Owner: {job.scheduleOwner || 'Unknown'} · Execution Principal: {job.executionPrincipal || 'Unknown'}</summary><span className="att-job-secondary">Schedule ID: {job.scheduleId || job.originatingScheduleId || 'Unknown'}</span>{job.triggeredBy && <span className="att-job-secondary">Triggered by: {job.triggeredBy}</span>}</details>
+        : <span className="att-job-secondary">Manual · Submitted by {job.submittedBy || job.principal || 'Unknown'}</span>}
+      {job.deletionState === 'DELETE_REQUESTED' && <span className="att-job-secondary">Pending deletion</span>}</td>
     <td data-label="Timing" className="att-job-timing">{[['Created',job.createdAt],['Started',job.startedAt],['Finished',job.finishedAt]].map(([label,value]) => <span key={label}>{label} <time dateTime={value || undefined} title={value || undefined}>{timestamp(value)}</time></span>)}<strong>Elapsed {elapsed(job,now)}</strong></td>
     <td data-label="Actions"><div className="att-jobs-row-actions"><JobStateIcons job={job} busy={blocked} onPin={api.pinJobs ? () => void mutate([job.jobId],job.pinned?'unpin':'pin') : undefined} onDelete={api.setDeletionRequested ? () => void mutate([job.jobId],job.deletionState==='DELETE_REQUESTED'?'unmark':'mark') : undefined} /><JobReplayActions api={api} configuration={{executionType:job.executionType || job.command,packageId:job.packageId}} jobId={job.jobId} onOpenJob={onOpenJob} onSchedule={onSchedule} onEditSchedule={onEditSchedule} /></div></td>
   </tr>; }
   return <div className="page-content att-jobs-page att-query-workspace" aria-labelledby="jobs-title">
     <header className="att-feature-header"><div><p className="att-eyebrow">Jobs and results</p><h1 id="jobs-title">Jobs</h1></div></header>
     <section className="att-query-filter-panel att-jobs-filter-panel" aria-label="Job filters"><fieldset disabled={busy} className="att-jobs-filter-grid">
-      <label title="Server-filtered · up to 30 matching known principals; type to search">Principal<PrincipalCombobox value={principal} suggestions={result.principalSuggestions} disabled={busy} onChange={(value,mode)=>{setPrincipal(value);setPrincipalMode(mode);setPage(0);}} /></label>
+      <label>Source<select aria-label="Source" value={source} onChange={event=>{setSource(event.currentTarget.value as 'manual'|'scheduled'|'');setPage(0);}}><option value="">All sources</option><option value="manual">Manual</option><option value="scheduled">Scheduled</option></select></label>
+      <label title="Server-filtered by the saved Worker execution identity">Execution Principal<IdentityCombobox label="Execution Principal" value={executionIdentity.value} mode={executionIdentity.mode} suggestions={result.executionPrincipalSuggestions||[]} disabled={busy} onChange={filter=>{setExecutionIdentity(filter);setPage(0);}} /></label>
       <label>Package<select aria-label="Package" value={packageId} onChange={update(setPackage)}><option value="">All packages</option>{[...new Set([...result.packageSuggestions,...(packageId?[packageId]:[])])].map(value => <option key={value}>{value}</option>)}</select></label>
       <label>Type<select aria-label="Type" value={type} onChange={event => {setType(event.currentTarget.value);setPage(0);onExecutionTypeChange?.(event.currentTarget.value==='load'?'load':undefined);}}><option value="">All types</option><option value="run">RUN / Debug</option><option value="load">LOAD</option><option value="validate">Validate</option></select></label>
       <label>Status<select aria-label="Status" value={status} onChange={update(setStatus)}><option value="">All statuses</option>{['QUEUED','PREPARING','RUNNING','CANCEL_REQUESTED',...terminalStatuses].map(value => <option key={value}>{value}</option>)}</select></label>
@@ -126,9 +140,11 @@ export function JobsList({ api, onOpenJob, onSchedule, onEditSchedule, execution
     <div className="att-jobs-filter-actions">
       <button type="button" disabled={busy} aria-expanded={moreFilters} aria-controls="jobs-more-filters" onClick={() => setMoreFilters(value => !value)}>More filters{extraFilters.length ? ` (${extraFilters.length})` : ''}</button>
       {extraFilters.length > 0 && <span className="att-jobs-active-filters">{extraFilters.join(' · ')}</span>}
-      <div className="att-query-filter-actions"><button type="button" disabled={busy} onClick={() => {setPrincipal('');setPrincipalMode('all');setPackage('');setType('');setStatus('');setFrom('');setTo('');setPinned(false);setDeletion('all');setSearch('');setSort('newest');setPage(0);onExecutionTypeChange?.(undefined);}}>Clear filters</button><button type="button" disabled={busy || loading} onClick={() => setVersion(value=>value+1)}>Refresh jobs</button></div>
+      <div className="att-query-filter-actions"><button type="button" disabled={busy} onClick={() => {setSource('');setExecutionIdentity({mode:'all',value:'',exact:false});setOwnerIdentity({mode:'all',value:'',exact:false});setTriggerIdentity({mode:'all',value:'',exact:false});setPackage('');setType('');setStatus('');setFrom('');setTo('');setPinned(false);setDeletion('all');setSearch('');setSort('newest');setPage(0);onExecutionTypeChange?.(undefined);}}>Clear filters</button><button type="button" disabled={busy || loading} onClick={() => setVersion(value=>value+1)}>Refresh jobs</button></div>
     </div>
     <fieldset id="jobs-more-filters" disabled={busy} hidden={!moreFilters} className="att-jobs-filter-grid att-jobs-more-filters">
+      <label>Schedule Owner<IdentityCombobox label="Schedule Owner" value={ownerIdentity.value} mode={ownerIdentity.mode} suggestions={result.scheduleOwnerSuggestions||[]} disabled={busy} onChange={filter=>{setOwnerIdentity(filter);setPage(0);}} /></label>
+      <label>Triggered by<IdentityCombobox label="Triggered by" value={triggerIdentity.value} mode={triggerIdentity.mode} suggestions={result.triggeredBySuggestions||[]} disabled={busy} onChange={filter=>{setTriggerIdentity(filter);setPage(0);}} /></label>
       <label>Created from<input type="date" value={from} onChange={update(setFrom)} /></label><label>Created to<input type="date" value={to} onChange={update(setTo)} /></label>
       <label>Deletion state<select aria-label="Deletion state" value={deletion} onChange={update(setDeletion)}><option value="all">All Jobs</option><option value="pending">Pending deletion</option><option value="unmarked">Unmarked</option></select></label>
       <label>Pin state<select aria-label="Pin state" value={pinned?'pinned':'all'} onChange={event => {setPinned(event.currentTarget.value==='pinned');setPage(0);}}><option value="all">All pin states</option><option value="pinned">Pinned only</option></select></label>

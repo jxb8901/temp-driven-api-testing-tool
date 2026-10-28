@@ -12,16 +12,16 @@ const ExplorerPage = lazy(() => import('./features/explorer/ExplorerPage').then(
 import type { ExplorerPageProps, ResourceSourceReference } from './features/explorer/types';
 const LoadPage = lazy(() => import('./features/load/LoadPage').then(module => ({ default: module.LoadPage })));
 const JobsPage = lazy(() => import('./features/load/JobsPage').then(module => ({ default: module.JobsPage })));
+const QuickLoadPage = lazy(() => import('./features/load/QuickLoadPage').then(module => ({ default: module.QuickLoadPage })));
+const LoadCatalogPage = lazy(() => import('./features/load/LoadCatalogPage').then(module => ({ default: module.LoadCatalogPage })));
+const LoadResourceDetailPage = lazy(() => import('./features/load/LoadResourceDetailPage').then(module => ({ default: module.LoadResourceDetailPage })));
 const StandaloneJobArtifactPage = lazy(() => import('./features/load/StandaloneJobArtifactPage').then(module => ({ default: module.StandaloneJobArtifactPage })));
 import type { LoadJobsApi, PackageOption } from './features/load/types';
 const SettingsPage = lazy(() => import('./SettingsPage').then(module => ({ default: module.SettingsPage })));
 import { ConfigurationWorkspace } from './features/explorer/ConfigurationWorkspace';
 import { PackageManifestWorkspace } from './features/explorer/PackageManifestWorkspace';
-import { QuickLoadPage } from './features/load/QuickLoadPage';
 const LoadTestingPage = lazy(() => import('./features/load/LoadTestingPage').then(module => ({ default: module.LoadTestingPage })));
 const LoadTemplateBuilder = lazy(() => import('./features/load/LoadTemplateBuilder').then(module => ({ default: module.LoadTemplateBuilder })));
-import { LoadCatalogPage } from './features/load/LoadCatalogPage';
-import { LoadResourceDetailPage } from './features/load/LoadResourceDetailPage';
 import type { ValidatedScheduleIntent } from './features/schedules/types';
 
 const ScheduledLoadPage = lazy(() => import('./features/schedules/ScheduledLoadPage').then(module => ({ default: module.ScheduledLoadPage })));
@@ -236,7 +236,7 @@ function QuickLoadRouteView({ route, inlineLoadEnabled, schedulingEnabled, onSch
     ? { kind: 'package', packageId: route.packageId, resource: route.target }
     : { kind: 'load' }), [navigation.navigate, route.packageId, route.target]);
   const onJobAccepted = useCallback((jobId: string) => workspace.onJobAccepted({ jobId, packageId: route.packageId }), [route.packageId, workspace.onJobAccepted]);
-  return <QuickLoadPage
+  return <Suspense fallback={<div className="page-content" role="status" aria-busy="true">Loading Quick Load…</div>}><QuickLoadPage
     api={loadJobsApi}
     packageId={route.packageId}
     target={route.target}
@@ -255,7 +255,7 @@ function QuickLoadRouteView({ route, inlineLoadEnabled, schedulingEnabled, onSch
     onSchedule={onSchedule}
     onCancel={onCancel}
     registerUnsavedChanges={navigation.registerUnsavedChanges}
-  />;
+  /></Suspense>;
 }
 
 function LoadResourceRouteView({ route, inlineLoadEnabled }: {
@@ -289,13 +289,13 @@ function LoadResourceRouteView({ route, inlineLoadEnabled }: {
     workspace.onEnvironmentChange(environment);
     navigation.navigate({ ...route, environment });
   }, [navigation.navigate, route, workspace.onEnvironmentChange]);
-  return <LoadResourceDetailPage api={api} packageId={route.packageId} resourceId={route.resourceId}
+  return <Suspense fallback={<div className="page-content" role="status" aria-busy="true">Loading LOAD resource…</div>}><LoadResourceDetailPage api={api} packageId={route.packageId} resourceId={route.resourceId}
     environment={selectedEnvironment} environments={environments} environmentState={environmentState}
     environmentNotice={environmentNotice} onRetryEnvironments={() => setEnvironmentReload(value => value + 1)} inlineLoadEnabled={inlineLoadEnabled}
     onEnvironmentChange={onEnvironmentChange}
     onBack={() => navigation.navigate(route.returnTo || '#/advanced-load')}
     onQuickLoad={(packageId, detail) => navigation.navigate({ kind: 'quick-load', packageId,
-      templateId: detail.resourceId, model: detail.model || 'virtualUsers', environment: selectedEnvironment })} />;
+      templateId: detail.resourceId, model: detail.model || 'virtualUsers', environment: selectedEnvironment })} /></Suspense>;
 }
 
 export default function App() {

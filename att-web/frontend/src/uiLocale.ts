@@ -377,11 +377,21 @@ export function readUiLocalePreference(): UiLocalePreference {
   return 'browser';
 }
 
-export function saveUiLocalePreference(preference: UiLocalePreference): void {
+export function readStoredUiLocalePreference(): UiLocale | undefined {
+  try { const saved=localStorage.getItem(localeKey);return saved==='en'||saved==='zh-Hant'?saved:undefined; }
+  catch { return undefined; }
+}
+
+export function saveUiLocalePreference(preference: UiLocalePreference): boolean {
   try {
     if (preference === 'browser') localStorage.removeItem(localeKey);
     else localStorage.setItem(localeKey, preference);
-  } catch { /* The preference remains active for this session. */ }
+    return true;
+  } catch { return false; }
+}
+
+export function clearStoredUiLocalePreference(): boolean {
+  try { localStorage.removeItem(localeKey);return true; } catch { return false; }
 }
 
 type TranslationState = { original: string; translated: string };

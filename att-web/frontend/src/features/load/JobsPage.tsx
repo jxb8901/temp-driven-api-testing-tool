@@ -9,6 +9,7 @@ import { api as serverApi } from '../../api';
 import { artifactApi } from './artifactApi';
 import { memo, Profiler, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import './load.css';
+import './JobsPage.css';
 import { JobArtifacts } from './JobArtifacts';
 import type { JobResultResponse, JobStatus, JobSummary, JobView, JobsFeatureProps, LoadJobsApi, LoadLiveProgressPoint, LoadLiveProgressSnapshot } from './types';
 import { JobConsoleView } from './JobConsoleView';

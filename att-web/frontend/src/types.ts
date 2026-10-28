@@ -38,6 +38,7 @@ export interface ServerVersion {
   inlineLoadEnabled: boolean;
   loadSchedulingEnabled?: boolean;
   authMode?: 'container' | 'local';
+  authenticationRequired?: boolean;
 }
 
 export interface LocalAuthUser {

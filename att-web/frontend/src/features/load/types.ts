@@ -183,15 +183,21 @@ export interface LoadCheckpointInterval {
 }
 export interface JobsQuery {
   offset?: number; limit?: number; principal?: string; principalMode?: string; packageId?: string; executionType?: string;
+  submissionSource?: 'manual' | 'scheduled';
+  executionPrincipal?: string; executionPrincipalMode?: 'all' | 'mine' | 'text'; executionPrincipalExact?: boolean;
+  scheduleOwner?: string; scheduleOwnerMode?: 'all' | 'mine' | 'text'; scheduleOwnerExact?: boolean;
+  triggeredBy?: string; triggeredByMode?: 'all' | 'mine' | 'text'; triggeredByExact?: boolean;
   status?: string; from?: string; to?: string; search?: string; sort?: string; deletion?: string; pinnedOnly?: boolean; groupBy?: string; signal?: AbortSignal;
 }
 export interface JobsQueryResult {
   items: JobSummary[]; total: number; offset: number; limit: number; nextOffset?: number | null;
   groups: Array<{ packageId: string; environment: string; targetGroup: string; total: number; lastCreatedAt: string; statuses: Record<string,number> }>;
-  principalSuggestions: string[]; packageSuggestions: string[];
+  principalSuggestions: string[]; executionPrincipalSuggestions?: string[]; scheduleOwnerSuggestions?: string[]; triggeredBySuggestions?: string[]; packageSuggestions: string[];
 }
 export interface JobSummary {
   scheduled?: boolean; targetIdentity?: TargetIdentity; targetGroup?: string; deletionState?: string | null;
+  submissionSource?: 'manual' | 'scheduled' | string; scheduleId?: string | null; originatingScheduleId?: string | null;
+  scheduleOwner?: string | null; executionPrincipal?: string | null; submittedBy?: string | null; triggeredBy?: string | null;
   rerunOfJobId?: string;
   pinned?: boolean;
   pinnedAt?: string | null;

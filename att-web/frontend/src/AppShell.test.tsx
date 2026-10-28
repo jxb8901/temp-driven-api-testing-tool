@@ -1,10 +1,11 @@
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { AppShell } from './AppShell';
+import { AppShell, useAppShellContext } from './AppShell';
 import { api } from './api';
 import { inspectionCache } from './inspectionCache';
 import type { RouteState } from './router';
+import { ApiError } from './types';
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -25,7 +26,17 @@ describe('AppShell', () => {
       configurationAdmin: true,
       capabilities: { operate: true, accountManage: true, systemSettingsWrite: true, configurationAdmin: true },
     });
+    vi.spyOn(api, 'getUserPreferences').mockResolvedValue({ available: false, reason: 'unsupported' });
+    vi.spyOn(api, 'putUserPreferences').mockResolvedValue({ available: true });
   });
+
+  function PreferenceProbe() {
+    const context = useAppShellContext();
+    return <div data-theme-preference={context.themePreference} data-language-preference={context.uiLocalePreference}
+      data-preference-status={context.preferenceStatus}>
+      <button type="button" onClick={() => context.onThemePreferenceChange('dark')}>Choose dark</button>
+    </div>;
+  }
 
   it('renders standalone consoles without global navigation or a floating console host', async () => {
     host = document.createElement('div'); document.body.append(host); root = createRoot(host);
@@ -193,5 +204,87 @@ describe('AppShell', () => {
     expect(host.querySelector('#change-password-title')?.textContent).toBe('Change your password');
     expect(host.querySelector('dialog[open]')).not.toBeNull();
     expect(api.getCurrentUser).toHaveBeenCalledOnce();
+  });
+
+  it('uses account preferences ahead of legacy browser values', async () => {
+    vi.spyOn(api,'getCurrentUser').mockResolvedValue({loginId:'jane',displayName:'Jane Tester',role:'USER'});
+    vi.spyOn(api,'getUserPreferences').mockResolvedValue({available:true,language:'zh-Hant',theme:'dark',version:2});
+    localStorage.setItem('att-ui-theme','light');
+    localStorage.setItem('att-ui-language','en');
+    host=document.createElement('div');document.body.append(host);root=createRoot(host);
+    const navigation:RouteState={route:{kind:'dashboard'},pendingNavigation:null,pendingDescription:'',isDirty:false,
+      navigate:vi.fn(),registerUnsavedChanges:vi.fn(()=>()=>{}),confirmNavigation:vi.fn(),cancelNavigation:vi.fn()};
+    await act(async()=>{root?.render(<AppShell route={navigation.route} navigation={navigation}
+      serverVersion={{status:'ready',data:{apiVersion:'1',authMode:'local',inlineLoadEnabled:false}}}
+      selectedPackage="" selectedEnvironment="" onPackageChange={vi.fn()} onEnvironmentChange={vi.fn()} onJobAccepted={vi.fn()}>
+      <PreferenceProbe /></AppShell>);await new Promise(resolve=>setTimeout(resolve,0));});
+    expect(host.querySelector('[data-theme-preference="dark"][data-language-preference="zh-Hant"]')).not.toBeNull();
+    expect(localStorage.getItem('att-ui-theme')).toBeNull();
+    expect(localStorage.getItem('att-ui-language')).toBeNull();
+    expect(api.putUserPreferences).not.toHaveBeenCalled();
+  });
+
+  it('migrates legacy browser values only through the absent-value migration path', async () => {
+    vi.spyOn(api,'getCurrentUser').mockResolvedValue({loginId:'jane',displayName:'Jane Tester',role:'USER'});
+    vi.spyOn(api,'getUserPreferences').mockResolvedValue({available:true,language:null,theme:null,version:0});
+    localStorage.setItem('att-ui-theme','dark');
+    localStorage.setItem('att-ui-language','zh-Hant');
+    host=document.createElement('div');document.body.append(host);root=createRoot(host);
+    const navigation:RouteState={route:{kind:'dashboard'},pendingNavigation:null,pendingDescription:'',isDirty:false,
+      navigate:vi.fn(),registerUnsavedChanges:vi.fn(()=>()=>{}),confirmNavigation:vi.fn(),cancelNavigation:vi.fn()};
+    await act(async()=>{root?.render(<AppShell route={navigation.route} navigation={navigation}
+      serverVersion={{status:'ready',data:{apiVersion:'1',authMode:'local',inlineLoadEnabled:false}}}
+      selectedPackage="" selectedEnvironment="" onPackageChange={vi.fn()} onEnvironmentChange={vi.fn()} onJobAccepted={vi.fn()}>
+      <PreferenceProbe /></AppShell>);await new Promise(resolve=>setTimeout(resolve,0));});
+    expect(api.putUserPreferences).toHaveBeenCalledWith({language:'zh-Hant',theme:'dark',migrateIfAbsent:true});
+    expect(host.querySelector('[data-theme-preference="dark"][data-language-preference="zh-Hant"]')).not.toBeNull();
+    expect(localStorage.getItem('att-ui-theme')).toBeNull();
+    expect(localStorage.getItem('att-ui-language')).toBeNull();
+  });
+
+  it('saves a change to the loaded account and exposes completion status', async () => {
+    vi.spyOn(api,'getCurrentUser').mockResolvedValue({loginId:'jane',displayName:'Jane Tester',role:'USER'});
+    vi.spyOn(api,'getUserPreferences').mockResolvedValue({available:true,language:'en',theme:'light',version:1});
+    host=document.createElement('div');document.body.append(host);root=createRoot(host);
+    const navigation:RouteState={route:{kind:'dashboard'},pendingNavigation:null,pendingDescription:'',isDirty:false,
+      navigate:vi.fn(),registerUnsavedChanges:vi.fn(()=>()=>{}),confirmNavigation:vi.fn(),cancelNavigation:vi.fn()};
+    await act(async()=>{root?.render(<AppShell route={navigation.route} navigation={navigation}
+      serverVersion={{status:'ready',data:{apiVersion:'1',authMode:'local',inlineLoadEnabled:false}}}
+      selectedPackage="" selectedEnvironment="" onPackageChange={vi.fn()} onEnvironmentChange={vi.fn()} onJobAccepted={vi.fn()}>
+      <PreferenceProbe /></AppShell>);await new Promise(resolve=>setTimeout(resolve,0));});
+    await act(async()=>{(host?.querySelector('[data-theme-preference] button') as HTMLButtonElement).click();await Promise.resolve();});
+    expect(api.putUserPreferences).toHaveBeenCalledWith({theme:'dark'});
+    expect(host.querySelector('[data-theme-preference="dark"][data-preference-status="saved"]')).not.toBeNull();
+  });
+
+  it('keeps preferences in browser storage when no authenticated account exists', async () => {
+    host=document.createElement('div');document.body.append(host);root=createRoot(host);
+    const navigation:RouteState={route:{kind:'dashboard'},pendingNavigation:null,pendingDescription:'',isDirty:false,
+      navigate:vi.fn(),registerUnsavedChanges:vi.fn(()=>()=>{}),confirmNavigation:vi.fn(),cancelNavigation:vi.fn()};
+    await act(async()=>{root?.render(<AppShell route={navigation.route} navigation={navigation}
+      serverVersion={{status:'ready',data:{apiVersion:'1',authenticationRequired:false,inlineLoadEnabled:false}}}
+      selectedPackage="" selectedEnvironment="" onPackageChange={vi.fn()} onEnvironmentChange={vi.fn()} onJobAccepted={vi.fn()}>
+      <PreferenceProbe /></AppShell>);await Promise.resolve();});
+    await act(async()=>{(host?.querySelector('[data-theme-preference] button') as HTMLButtonElement).click();await Promise.resolve();});
+    expect(host.querySelector('[data-theme-preference="dark"][data-preference-status="browser-only"]')).not.toBeNull();
+    expect(localStorage.getItem('att-ui-theme')).toBe('dark');
+    expect(api.getUserPreferences).not.toHaveBeenCalled();
+    expect(api.putUserPreferences).not.toHaveBeenCalled();
+  });
+
+  it('falls back to browser preferences when an older Server has no preference endpoint', async () => {
+    vi.spyOn(api,'getCurrentUser').mockResolvedValue({loginId:'jane',displayName:'Jane Tester',role:'USER'});
+    vi.spyOn(api,'getUserPreferences').mockRejectedValue(new ApiError('Not found',{status:404}));
+    host=document.createElement('div');document.body.append(host);root=createRoot(host);
+    const navigation:RouteState={route:{kind:'dashboard'},pendingNavigation:null,pendingDescription:'',isDirty:false,
+      navigate:vi.fn(),registerUnsavedChanges:vi.fn(()=>()=>{}),confirmNavigation:vi.fn(),cancelNavigation:vi.fn()};
+    await act(async()=>{root?.render(<AppShell route={navigation.route} navigation={navigation}
+      serverVersion={{status:'ready',data:{apiVersion:'1',authMode:'local',inlineLoadEnabled:false}}}
+      selectedPackage="" selectedEnvironment="" onPackageChange={vi.fn()} onEnvironmentChange={vi.fn()} onJobAccepted={vi.fn()}>
+      <PreferenceProbe /></AppShell>);await new Promise(resolve=>setTimeout(resolve,0));});
+    await act(async()=>{(host?.querySelector('[data-theme-preference] button') as HTMLButtonElement).click();await Promise.resolve();});
+    expect(host.querySelector('[data-theme-preference="dark"][data-preference-status="browser-only"]')).not.toBeNull();
+    expect(localStorage.getItem('att-ui-theme')).toBe('dark');
+    expect(api.putUserPreferences).not.toHaveBeenCalled();
   });
 });

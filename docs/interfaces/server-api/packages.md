@@ -45,6 +45,8 @@ The detail response contains `resource`, `definition`, `diagnostics`, and `reque
 
 Invalid list parameters return `400`; unknown packages/resources return the same `404` shape. Stale cursors return `409`, oversized responses `413`, a full inspection queue `503`, and an inspector timeout `504`. Error responses use the existing `error.code`, `error.summary`, and `requestId` envelope; they do not include physical paths or parser exception messages.
 
+Package inspection treats absent optional `templates/`, `testcase/`, and `load/` roots as empty inventories. A present root that is not a readable directory or that escapes the canonical Package returns HTTP `422 ATT-RESOURCE-ROOT-INVALID` with a safe `field` identifying the affected root. Other Worker validation errors return `422 ATT-RESOURCE-VALIDATION-FAILED`; neither response includes an absolute path or parser detail.
+
 ## Package configuration inspection
 
 Configuration inspection uses the same bounded inspection Worker as package resources. These read-only endpoints use the resolved authenticated or anonymous identity:

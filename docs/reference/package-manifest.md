@@ -35,6 +35,8 @@ Paths use forward slashes and stay relative to the selected Package. Absolute pa
 
 Without a Manifest, the Package uses conventional `templates` and `testcase` roots and an empty Package Testdata inventory. Global `templates.root` and `testcase.root` no longer choose business roots.
 
+The conventional `templates/`, `testcase/`, and `load/` directories are optional for inspection. If a directory is absent, Explorer, LOAD Catalog, and Quick Load return an empty inventory for that root. If a configured or conventional root exists but is not a readable directory, or resolves outside the canonical Package, inspection fails with a sanitized `ATT-RESOURCE-ROOT-INVALID` diagnostic; it never follows an unsafe path or treats an invalid present root as empty.
+
 ## Resolve an Environment
 
 An explicit request or supported CLI `--env` selects the profile first. Otherwise, `defaultEnvironment` selects an existing central profile; the central default applies when the Manifest omits it. Profile names resolve to their canonical central spelling. The Effective view shows the selected profile and its origin.

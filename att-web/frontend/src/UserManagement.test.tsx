@@ -48,6 +48,7 @@ describe('UserManagementPanel',()=>{
     const context:AppShellContextValue={
       selectedPackage:'',selectedEnvironment:'',themePreference:'system',uiLocale:'en',uiLocalePreference:'browser',authMode,canRevealConfigurationFields:false,
       accessCapabilities:{operate:role==='USER',accountManage:role==='ADMIN',systemSettingsWrite:role==='ADMIN',configurationAdmin:false},
+      preferenceStatus:'idle',
       currentUser:{loginId:role==='ADMIN'?'admin':'jane',displayName:role==='ADMIN'?'ATT Admin':'Jane Tester',role},
       onPackageChange:vi.fn(),onEnvironmentChange:vi.fn(),onThemePreferenceChange:vi.fn(),onUiLocaleChange:vi.fn(),onJobAccepted:vi.fn(),
     };

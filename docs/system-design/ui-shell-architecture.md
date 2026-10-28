@@ -23,7 +23,7 @@ Vite emits static files to `att-web/frontend/dist`. Maven copies those files int
 ## State and integration boundaries
 
 - `types.ts`, `api.ts`, `state.ts`, and `router.ts` are the shared TypeScript foundation. Feature operations can be added centrally to `api.ts`; pages do not construct API URLs.
-- `ServerVersion.inlineLoadEnabled` and `loadSchedulingEnabled` are retained as server capabilities and passed into the shell and feature routes. The API does not expose the current principal, so the identity chip says “Server managed” and “not exposed by API.”
+- `ServerVersion.inlineLoadEnabled`, `loadSchedulingEnabled`, and `authenticationRequired` are retained as server capabilities and passed into the shell and feature routes. The API does not expose the current principal, so the identity chip says “Server managed” and “not exposed by API.”
 - `AppRoute` has dashboard, package collection, package/resource, first-level Configuration, single-target Quick Load, jobs/job, Advanced Load/package, Scheduled Load, and Settings variants. `useNavigationGuard()` provides `navigate()` and `registerUnsavedChanges()`; the shell presents a keyboard-accessible discard dialog for internal and browser-history navigation.
 - Package, environment, and accepted-job callbacks are exposed through shell context so later modules can stay controlled by the application root.
 - Dashboard summaries and lists use only `/version`, `/packages`, and `/jobs` responses. Counts describe returned rows; an API error is not displayed as zero.
@@ -31,7 +31,9 @@ Vite emits static files to `att-web/frontend/dist`. Maven copies those files int
 
 ## Browser language and CSP
 
-`uiLocale.ts` translates rendered text and accessibility attributes between English and Traditional Chinese. The preference is browser-managed by default, follows `navigator.language` changes, or stores an explicit choice in browser local storage. The login page reads that same preference for its standalone messages. The language change does not alter API payloads, resource identifiers, source text, or code examples.
+`uiLocale.ts` translates rendered text and accessibility attributes between English and Traditional Chinese. `/api/v1/auth/me/preferences` stores language and theme by the authenticated account's stable server identity. The Studio loads these values before settling on legacy browser values, then browser language and system theme defaults. Existing explicit browser values migrate only when the account has no saved value; later browser edits never replace an account value. Anonymous deployments and older Servers without this endpoint use local browser storage and report that persistence state in Settings. Account changes clear shared legacy browser keys before the next account is loaded. The login page reads the browser language preference for its standalone messages. The language change does not alter API payloads, resource identifiers, source text, or code examples.
+
+Browser-only settings belong to a browser profile and origin. An origin is the scheme, hostname, and port; changing `http` to `https`, hostname, or port selects different local storage. A context path does not change the origin. To diagnose a missing legacy browser language value, run `localStorage.getItem('att-ui-language')` in DevTools on the same origin and browser profile.
 
 `SecurityHeadersFilter` issues a per-response nonce for the Studio document and replaces the matching marker in the packaged Vite HTML. CodeMirror receives nonce-authorized style elements and the Studio document alone permits inline style attributes for editor geometry. API, login, download, and other responses keep inline styles disabled; scripts and network connections remain same-origin. The filter also redirects the context root to `/ui/` when the servlet container passes that request through to the application.
 
@@ -55,7 +57,7 @@ Scheduled Load is a lazily loaded React route. The shell advertises it only when
 
 Quick and Advanced Load can open schedule creation as a dialog over the current editor. Cancel returns to the validated Load draft, and the Server rejects inline snapshots containing classified sensitive values before persistence.
 
-The shell follows `prefers-color-scheme` until a user selects a theme. The Settings route offers System, Light, and Dark preferences; explicit choices are stored in this browser, while System removes the override. `/` and `Ctrl K`/`⌘ K` open the page palette, `?` opens shortcut help, and Escape closes dialogs and mobile navigation. On Advanced Load, `Ctrl Enter`/`⌘ Enter` invokes the existing confirmation for a live validated draft.
+The shell follows `prefers-color-scheme` until a user selects a theme. The Settings route offers System, Light, and Dark preferences; when account storage is available, each choice is saved to the authenticated account. Otherwise it remains in browser storage and Settings reports the fallback. `/` and `Ctrl K`/`⌘ K` open the page palette, `?` opens shortcut help, and Escape closes dialogs and mobile navigation. On Advanced Load, `Ctrl Enter`/`⌘ Enter` invokes the existing confirmation for a live validated draft.
 
 ## Phase screenshots
 
