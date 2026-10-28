@@ -344,7 +344,8 @@ describe('JobsPage React feature', () => {
     await click(host.querySelector('#job-tab-artifacts')!);
     await advance();
     const panel = host.querySelector('#job-panel-artifacts')!;
-    expect(panel.textContent).toContain('View Report: load/run/report/index.html');
+    expect(panel.textContent).toContain('View Report: index.html');
+    expect(panel.textContent).toContain('load/run/report/index.html');
     expect([...panel.querySelectorAll('a')].map(link => link.textContent)).toEqual([
       'Download Artifacts (.zip)', 'Open in new tab', 'Open in new tab',
     ]);
@@ -356,6 +357,8 @@ describe('JobsPage React feature', () => {
     await click([...panel.querySelectorAll('button')].find(button => button.textContent === 'Load more artifacts')!);
     expect(panel.textContent).toContain('nested/evidence.json');
     expect(panel.textContent).toContain('case.log');
+    const casePreview=[...panel.querySelectorAll<HTMLButtonElement>('button')].find(button=>button.textContent==='case.log');
+    expect(casePreview?.getAttribute('aria-label')).toBe('Preview case.log');
     await click([...panel.querySelectorAll('button')].find(button => button.textContent?.startsWith('View Report:'))!);
     await advance();
     const previewLink = panel.querySelector<HTMLAnchorElement>('[aria-label="Artifact preview"] a');
@@ -374,6 +377,33 @@ describe('JobsPage React feature', () => {
     expect(api.getJobArtifactArchive).toHaveBeenCalledTimes(2);
     expect(panel.textContent).toContain('nested/evidence.json');
     expect(panel.querySelector('iframe')).toBe(frame);
+  });
+
+  it('shows full-archive category totals and searches loaded paths for workload names', async () => {
+    const api=makeApi({getJobArtifactArchive:vi.fn(async()=>({archiveStatus:'READY' as const,
+      items:[{path:'load/run/checkpoints/workload-0001/checkpoint-00000000000000000002.json',size:80},
+        {path:'load/run/details/v1/shared/series-a.json',size:20},
+        {path:'load/run/samples/workload-0001/EXEC-100/case.log',size:10}],
+      primaryReports:[{path:'load/run/report/index.html',report:true,size:100}],nextOffset:null,
+      archiveItemsCount:4,archiveItemsBytes:210,archiveSizeBytes:300,
+      categorySummary:{recoveryCheckpoints:{count:1,bytes:80},metricsTimeSeries:{count:1,bytes:20},
+        executionEvidence:{count:1,bytes:10},summaryManifests:{count:1,bytes:100}}}))});
+    await act(async()=>root.render(<JobArtifacts api={api} jobId="JOB-204" refresh={0}/>));
+    await advance();
+    expect(host.textContent).toContain('3 loaded of 4 files');
+    expect(host.textContent).toContain('Recovery checkpoints · 1 files');
+    expect(host.textContent).toContain('workload-0001 · 1 files');
+    expect(host.textContent).toContain('Execution EXEC-100 · 1 files');
+    expect(host.textContent).toContain('View Report: index.html');
+    expect([...host.querySelectorAll('button')].filter(button => button.textContent?.startsWith('View Report:'))).toHaveLength(1);
+    const search=host.querySelector<HTMLInputElement>('input[type="search"]')!;
+    await act(async()=>{
+      const setter=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')?.set;
+      setter?.call(search,'workload-0001');search.dispatchEvent(new Event('input',{bubbles:true}));
+    });
+    expect(host.textContent).toContain('checkpoint-00000000000000000002.json');
+    expect(host.textContent).not.toContain('View Report: index.html');
+    expect(host.textContent).toContain('load/run/checkpoints/workload-0001/');
   });
 
   it('reconciles 150 visible artifacts without closing an unchanged report on manual refresh', async () => {
@@ -667,6 +697,35 @@ describe('JobsPage React feature', () => {
       'tab switches should reuse the already verified sidecar').toBe(1);
   });
 
+  it('restores shared v2 metric sidecars for the aggregate chart', async () => {
+    const compact: JobResultResponse = { job: { jobId: 'JOB-209', command: 'load', status: 'PASS' }, result: { status: 'PASS', summary: {
+      schemaVersion: 'att-load-terminal-result/v1', execution: { status: 'PASS' }, performance: { verdict: 'MET' },
+      metrics: { scheduled: 40, started: 40, completed: 40, success: 40 },
+      archive: { reportAvailability: 'PENDING', status: 'PENDING' },
+    } } };
+    const buckets = Object.fromEntries(Array.from({ length: 40 }, (_, index) => {
+      const epoch = 1_800_000_000_000 + index * 1000;
+      return [String(epoch), { bucketStartEpochMs: epoch, completedTps: index + 1, p95Ms: index + 20, p99Ms: index + 30 }];
+    }));
+    const preview = Object.fromEntries(Object.entries(buckets).slice(0, 32));
+    const sharedPath = 'details/v1/shared/series-abc.json';
+    const archiveRead = vi.fn(async () => ({ archiveStatus: 'READY' as const, items: [], primaryReports: [{ path: 'load/run/load-summary.json', size: 1000 }] }));
+    const textRead = vi.fn(async (_jobId: string, path: string) => path.endsWith('load-summary.json')
+      ? JSON.stringify({ metrics: { scheduled: 40, completed: 40, buckets: preview, detailSeries: {
+        schemaVersion: 'att-load-detail-reference/v1', complete: true, series: [{ scope: 'aggregate', target: 'metrics/buckets',
+          kind: 'map', count: 40, inlinePreviewCount: 32, complete: true, sharedContent: true, files: [sharedPath] }],
+      } } })
+      : JSON.stringify({ schemaVersion: 'att-load-detail-series/v2', kind: 'map', part: 1, parts: 1, total: 40,
+        contentSha256: 'a'.repeat(64), items: buckets }));
+    const api = makeApi({ getJobResult: vi.fn(async () => compact), getJobArtifactArchive: archiveRead, getJobArtifactText: textRead });
+    await act(async () => root.render(<JobsPage api={api} jobId="JOB-209" onOpenJob={vi.fn()} onShowList={vi.fn()} />));
+    await advance();
+    await click(host.querySelector('#job-tab-metrics')!);
+    await advance();
+    expect(textRead).toHaveBeenNthCalledWith(2, 'JOB-209', `load/run/${sharedPath}`, expect.any(AbortSignal));
+    expect(host.querySelector('#job-panel-metrics')?.querySelectorAll('[aria-label="Returned Load time-series buckets"] tbody tr')).toHaveLength(40);
+  });
+
   it('loads archived evidence and workload details only when Results is opened', async () => {
     const compact: JobResultResponse = { job: { jobId: 'JOB-205', command: 'load', status: 'PASS' }, result: { status: 'PASS', summary: {
       schemaVersion: 'att-load-terminal-result/v1', execution: { status: 'PASS' }, performance: { verdict: 'MET' },
@@ -774,12 +833,12 @@ describe('JobsPage React feature', () => {
           workloads: {
             payment: {
               targetId: 'PAYMENT_TEMPLATE', maxSuccessSamples: 10, maxFailureSamples: 20,
-              eligibleSuccessCount: 15, samplingIneligibleSuccessCount: 2, retainedSuccessCount: 10,
+              eligibleSuccessCount: 15, completedSuccessCount: 15, hashQualifiedSuccessCount: 13, samplingIneligibleSuccessCount: 2, retainedSuccessCount: 10,
               retainedFailureCount: 20, skippedSuccessQuotaCount: 5, skippedFailureQuotaCount: 0, skippedMissingEvidenceCount: 1,
             },
             queue: {
               targetId: 'QUEUE_TEMPLATE', maxSuccessSamples: 5, maxFailureSamples: 30,
-              eligibleSuccessCount: 7, samplingIneligibleSuccessCount: 1, retainedSuccessCount: 2, retainedFailureCount: 3,
+              eligibleSuccessCount: 7, completedSuccessCount: 7, hashQualifiedSuccessCount: 6, samplingIneligibleSuccessCount: 1, retainedSuccessCount: 2, retainedFailureCount: 3,
             },
           },
         },
@@ -795,10 +854,61 @@ describe('JobsPage React feature', () => {
     expect(summary.textContent).toContain('Success cap');
     const paymentRow = [...summary.querySelectorAll('tbody tr')].find(row => row.textContent?.includes('payment'))!;
     expect([...paymentRow.querySelectorAll('td')].map(cell => cell.textContent)).toEqual([
-      'PAYMENT_TEMPLATE', '10', '20', '15', '2', '10', '20', 'Success: 5 · Failure: 0', '1',
+      'PAYMENT_TEMPLATE', '10', '20', '15', '13', '2', '10', '20', 'Success: 5 · Failure: 0 · Unclassified: Not reported', '1',
     ]);
     expect(summary.textContent).not.toContain('borrowed');
     expect(summary.textContent).not.toContain('reclaimed borrow');
+  });
+
+  it('shows hash eligibility, legacy cap denials, and time-window coverage', async () => {
+    const evidenceResult: JobResultResponse = {
+      ...sampleResult,
+      result: {
+        ...sampleResult.result,
+        evidence: {
+          policy: {
+            quotaMode: 'legacyCombined', maxSamples: 10, sampleRate: 0.1,
+            successSamplingHash: 'murmur3-32-v1', successSamplingEncoding: 'UTF-8',
+            retentionStrategy: 'timeWindowStratifiedV1',
+          },
+          completedSuccessCount: 20, hashQualifiedSuccessCount: 2, samplingIneligibleSuccessCount: 18,
+          retainedSuccessCount: 1, retainedFailureCount: 2,
+          successQuotaExceeded: true, failureQuotaExceeded: true, combinedQuotaExceeded: true,
+          skippedSuccessQuotaCount: 1, skippedFailureQuotaCount: 4, skippedUnclassifiedQuotaCount: 0,
+          skippedMissingEvidenceCount: 1,
+          warning: 'Legacy combined evidence cap limited retention; aggregate metrics remain complete.',
+          retentionCoverage: {
+            strategy: 'timeWindowStratifiedV1', populatedTimeWindowCount: 3,
+            retainedByTimeWindow: { '0': 1, '4': 1, '9': 1 }, retainedByPhase: { STEADY: 2, RAMP_DOWN: 1 }, appendOnly: true,
+          },
+          workloads: {
+            payment: {
+              targetId: 'PAYMENT_TEMPLATE', completedSuccessCount: 20, hashQualifiedSuccessCount: 2,
+              samplingIneligibleSuccessCount: 18, retainedSuccessCount: 1, retainedFailureCount: 2,
+              skippedSuccessQuotaCount: 1, skippedFailureQuotaCount: 4, skippedUnclassifiedQuotaCount: 0,
+              skippedMissingEvidenceCount: 1,
+            },
+          },
+          items: [],
+        },
+      },
+    };
+    const api = makeApi({ getJobResult: vi.fn(async () => evidenceResult) });
+    await act(async () => root.render(<JobsPage api={api} jobId="JOB-204" onOpenJob={vi.fn()} onShowList={vi.fn()} confirmCancel={() => true} />));
+    await act(async () => { await Promise.resolve(); });
+
+    const summary = host.querySelector('[aria-label="Retained evidence quotas"]')!;
+    expect(summary.textContent).toContain('Legacy combined cap shared by successful samples and failure evidence');
+    expect(summary.textContent).toContain('murmur3-32-v1');
+    expect(summary.textContent).toContain('over UTF-8 iteration IDs');
+    expect(summary.textContent).toContain('Completed successes20');
+    expect(summary.textContent).toContain('Hash-qualified successes2');
+    expect(summary.textContent).toContain('Success samples skipped at limit1');
+    expect(summary.textContent).toContain('Failure samples skipped at limit4');
+    expect(summary.textContent).toContain('3 time windows contain retained evidence');
+    expect(summary.textContent).toContain('By time window: 0: 1, 4: 1, 9: 1');
+    expect(summary.textContent).toContain('By phase: STEADY: 2, RAMP_DOWN: 1');
+    expect(summary.textContent).toContain('Unclassified: 0');
   });
 
   it('does not overwrite a terminal SSE event with a delayed cancel response', async () => {

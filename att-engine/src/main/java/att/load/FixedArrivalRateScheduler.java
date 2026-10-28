@@ -101,6 +101,7 @@ public final class FixedArrivalRateScheduler implements LoadScheduler {
         long startedAt = startGate == null ? timing.now() : startGate.awaitStart();
         Instant start = LoadSchedulerSupport.instant(startedAt);
         long total = LoadPhase.totalMs(scenario);
+        if (evidenceStore != null) evidenceStore.registerRunTimeline(scenario.workloadId(), startedAt, total);
         long generationDeadline = safeDue(startedAt, total);
         final LoadMetrics metrics = LoadMetrics.forScenario(scenario, startedAt, total);
         enableCheckpoints(metrics);
@@ -203,7 +204,7 @@ public final class FixedArrivalRateScheduler implements LoadScheduler {
                         request = request.withTestdataOrdinal(testdataOrdinal)
                                 .withTestdataWaitAllowed(() -> !cancelled.get() && remainingRunMillis(runStartedAt) > 0L);
                         if (!scenario.legacyV10()) request = request.withWorkloadId(scenario.workloadId());
-                        Path evidenceRoot = evidenceOutputRoot(id);
+                        Path evidenceRoot = evidenceOutputRoot(id, dueAt);
                         if (evidenceRoot != null) {
                             request = request.withOutputDirectory(evidenceRoot)
                                     .withEvidenceRetention(true, false);
@@ -212,9 +213,9 @@ public final class FixedArrivalRateScheduler implements LoadScheduler {
                         }
                         if (evidenceStore != null)
                             request = request.withFailureLogCapture(
-                                    evidenceStore.retainsFailureEvidence(scenario.workloadId()));
+                            evidenceStore.retainsFailureEvidence(scenario.workloadId(), dueAt));
                         IterationResult result = executor.execute(request);
-                        if (result.status() != att.core.ResultStatus.PASS && evidenceStore != null && evidenceStore.claimFailureEvidence(id, scenario.workloadId())) {
+                        if (result.status() != att.core.ResultStatus.PASS && evidenceStore != null && evidenceStore.claimFailureEvidence(id, scenario.workloadId(), dueAt)) {
                             result = result.materializeEvidence();
                         } else if (result.status() != att.core.ResultStatus.PASS && evidenceStore != null) {
                             evidenceStore.releaseEvidence(id);
@@ -225,7 +226,7 @@ public final class FixedArrivalRateScheduler implements LoadScheduler {
                         if(status!=att.core.ResultStatus.PASS)failureDiagnostic=LoadFailureDiagnostic.result(result);
                     }
                 } catch (RuntimeException error) {
-                    if (evidenceStore != null && !evidenceStore.claimFailureEvidence(id, scenario.workloadId())) evidenceStore.releaseEvidence(id);
+                    if (evidenceStore != null && !evidenceStore.claimFailureEvidence(id, scenario.workloadId(), dueAt)) evidenceStore.releaseEvidence(id);
                     status = att.core.ResultStatus.ERROR; errorType = "LOAD_ITERATION_EXCEPTION";failureDiagnostic=LoadFailureDiagnostic.exception(error);
                 }
                 finally {
@@ -319,8 +320,8 @@ public final class FixedArrivalRateScheduler implements LoadScheduler {
         return scenario.legacyV10() ? event : event.withWorkloadIdentity(
                 scenario.workloadId(), scenario.targetType(), scenario.targetId());
     }
-    private Path evidenceOutputRoot(String iterationId) {
-        if (evidenceStore == null || evidenceOutputRoot == null || !evidenceStore.reserveSuccessEvidence(iterationId, scenario.workloadId())) return null;
+    private Path evidenceOutputRoot(String iterationId, long plannedAtEpochMs) {
+        if (evidenceStore == null || evidenceOutputRoot == null || !evidenceStore.reserveSuccessEvidence(iterationId, scenario.workloadId(), plannedAtEpochMs)) return null;
         Path root = evidenceOutputRoot.resolve("load").resolve(runId).resolve("iterations");
         return scenario.legacyV10() ? root : root.resolve(
                 LoadMetricsCheckpointStore.workloadCheckpointDirectoryName(scenario.workloadId()));

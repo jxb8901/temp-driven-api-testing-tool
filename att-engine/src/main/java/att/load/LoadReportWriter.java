@@ -641,8 +641,30 @@ public final class LoadReportWriter {
                         .append(escape(String.valueOf(defaults.get("maxSuccessSamples"))))
                         .append(", failure ").append(escape(String.valueOf(defaults.get("maxFailureSamples"))))
                         .append(". Workload overrides and retained coverage are shown below.");
-            } else html.append("Legacy combined cap: ").append(escape(String.valueOf(policy.get("maxSamples"))));
+            } else html.append("Legacy combined cap: ").append(escape(String.valueOf(policy.get("maxSamples"))))
+                    .append(" shared by successful samples and failure evidence");
             html.append(".</p>");
+            if(policy.get("successSamplingHash")!=null)
+                html.append("<p>Success sample eligibility uses ").append(escape(String.valueOf(policy.get("successSamplingHash"))))
+                        .append(" over ").append(escape(String.valueOf(policy.get("successSamplingEncoding"))))
+                        .append(" iteration IDs. Hash-qualified successes are candidates; quota retention is a separate decision.</p>");
+            Object coverageValue=evidence.get("retentionCoverage");
+            if(coverageValue instanceof Map) {
+                Map<?,?> coverage=(Map<?,?>)coverageValue;
+                html.append("<p>Retention selection: ").append(escape(String.valueOf(coverage.get("strategy"))))
+                        .append("; ").append(escape(display(coverage.get("populatedTimeWindowCount"))))
+                        .append(" time windows contain evidence. Retained entries are append-only; slots are first-come within each window.");
+                if(coverage.get("retainedByTimeWindow") instanceof Map && !((Map<?,?>)coverage.get("retainedByTimeWindow")).isEmpty())
+                    html.append(" By time window: ").append(escape(displayCounts((Map<?,?>)coverage.get("retainedByTimeWindow")))).append(".");
+                if(coverage.get("retainedByPhase") instanceof Map && !((Map<?,?>)coverage.get("retainedByPhase")).isEmpty())
+                    html.append(" By phase: ").append(escape(displayCounts((Map<?,?>)coverage.get("retainedByPhase")))).append(".");
+                html.append("</p>");
+            }
+            if(evidence.get("completedSuccessCount")!=null)
+                html.append("<p>Completed successes: ").append(escape(display(evidence.get("completedSuccessCount"))))
+                        .append("; hash-qualified: ").append(escape(display(evidence.get("hashQualifiedSuccessCount"))))
+                        .append("; sampling-ineligible: ").append(escape(display(evidence.get("samplingIneligibleSuccessCount"))))
+                        .append("; quota skips and missing evidence are reported separately below.</p>");
             if(evidence.get("warning")!=null)html.append("<p class=\"warning\" role=\"alert\">").append(escape(String.valueOf(evidence.get("warning")))).append("</p>");
             Object workloadValue=evidence.get("workloads");
             if(workloadValue instanceof Map && !((Map<?,?>)workloadValue).isEmpty()) {
@@ -650,7 +672,7 @@ public final class LoadReportWriter {
                 html.append("<h3>Evidence coverage by workload</h3><div class=\"scroll\"><table><thead><tr><th>Workload</th>");
                 html.append("<th>Target</th>");
                 if(perWorkload)html.append("<th>Success cap</th><th>Failure cap</th>");
-                html.append("<th>Eligible successes</th><th>Sampling ineligible</th><th>Success retained</th><th>Failure retained</th><th>Success quota skips</th><th>Failure quota skips</th><th>Missing evidence</th></tr></thead><tbody>");
+                html.append("<th>Completed successes</th><th>Hash-qualified successes</th><th>Sampling ineligible</th><th>Success retained</th><th>Failure retained</th><th>Success quota skips</th><th>Failure quota skips</th><th>Outcome-unclassified quota skips</th><th>Missing evidence</th></tr></thead><tbody>");
                 for(Map.Entry<?,?> entry:((Map<?,?>)workloadValue).entrySet()) {
                     if(!(entry.getValue() instanceof Map))continue;
                     Map<?,?> row=(Map<?,?>)entry.getValue();
@@ -658,7 +680,7 @@ public final class LoadReportWriter {
                     html.append("<td>").append(escape(display(row.get("targetId")))).append("</td>");
                     if(perWorkload)for(String key:new String[]{"maxSuccessSamples","maxFailureSamples"})
                         html.append("<td>").append(escape(display(row.get(key)))).append("</td>");
-                    for(String key:new String[]{"eligibleSuccessCount","samplingIneligibleSuccessCount","retainedSuccessCount","retainedFailureCount","skippedSuccessQuotaCount","skippedFailureQuotaCount","skippedMissingEvidenceCount"})
+                    for(String key:new String[]{"completedSuccessCount","hashQualifiedSuccessCount","samplingIneligibleSuccessCount","retainedSuccessCount","retainedFailureCount","skippedSuccessQuotaCount","skippedFailureQuotaCount","skippedUnclassifiedQuotaCount","skippedMissingEvidenceCount"})
                         html.append("<td>").append(escape(display(row.get(key)))).append("</td>");
                     html.append("</tr>");
                 }
@@ -826,6 +848,11 @@ public final class LoadReportWriter {
                     .stripTrailingZeros().toPlainString();
         }
         return String.valueOf(value);
+    }
+    private String displayCounts(Map<?,?> values) {
+        List<String> parts=new ArrayList<String>();
+        for(Map.Entry<?,?> entry:values.entrySet())parts.add(String.valueOf(entry.getKey())+": "+display(entry.getValue()));
+        return String.join(", ",parts);
     }
     private String escape(String value) {
         if (value == null) return "";

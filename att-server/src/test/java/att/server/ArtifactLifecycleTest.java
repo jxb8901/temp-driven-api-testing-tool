@@ -191,10 +191,18 @@ class ArtifactLifecycleTest {
             String html=new String(reportBytes,StandardCharsets.UTF_8);
             assertTrue(html.contains("renderCharts"),"The offline report should contain its chart renderer");
             assertFalse(html.contains("<script src="),"The report must not need a remote script to render offline");
+            Path retainedEvidence=runtime.outputDirectoryForJob(id).resolve("load/archive-preview/samples/EXEC-1/case.log");
+            Files.createDirectories(retainedEvidence.getParent());Files.writeString(retainedEvidence,"sample evidence\n");
             runtime.scheduleArtifactArchive(id);awaitState(runtime,id,"READY");
             Map<String,Object> index=runtime.artifactIndex(id);
             assertTrue(((List<?>)index.get("primaryReports")).stream().anyMatch(value->
                     reportPath.equals(((Map<?,?>)value).get("path"))));
+            Map<?,?> categorySummary=(Map<?,?>)index.get("categorySummary");
+            assertTrue(((Number)index.get("archiveItemsCount")).longValue()>0L);
+            assertTrue(((Number)index.get("archiveItemsBytes")).longValue()>0L);
+            assertTrue(((Number)((Map<?,?>)categorySummary.get("summaryManifests")).get("count")).longValue()>0L);
+            assertTrue(((Number)((Map<?,?>)categorySummary.get("metricsTimeSeries")).get("count")).longValue()>0L);
+            assertEquals(1L,((Number)((Map<?,?>)categorySummary.get("executionEvidence")).get("count")).longValue());
             assertEquals(Boolean.TRUE,ArtifactArchive.verify(runtime.artifactArchivePath(id),true).get("complete"));
             assertArrayEquals(reportBytes,runtime.archiveEntry(id,reportPath));
         }

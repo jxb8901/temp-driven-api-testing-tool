@@ -23,6 +23,7 @@ schemas:
   att-load-detail-manifest/v1: att-load-detail-manifest-v1.schema.json
   att-load-detail-reference/v1: att-load-detail-reference-v1.schema.json
   att-load-detail-series/v1: att-load-detail-series-v1.schema.json
+  att-load-detail-series/v2: att-load-detail-series-v2.schema.json
   att-load-workload-detail/v1: att-load-workload-detail-v1.schema.json
   att-load-summary/v1.2: history/att-load-summary-v1.2.schema.json
   att-load-summary/v1.1: history/att-load-summary-v1.1.schema.json

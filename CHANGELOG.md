@@ -9,6 +9,10 @@ Total output lines: 281
 - Persist immutable Job provenance with separate source, execution identity and Schedule Owner filters, using the Schedules filter layout (#309).
 - Store language and theme preferences per authenticated account in Server H2, report save state for every edited field, and retain failed edits for retry (#310).
 - Enforce an exclusive LOAD arrival-generation deadline at admission, reject overdue arrivals, and drain all admitted work even when a queued task starts after generation ends (#312).
+- Use versioned MurmurHash3 sampling, append-only time-window retention, and accurate LOAD evidence quota/disposition coverage across JSON, HTML, and Studio reports (#313).
+- Add bounded per-entry STORED/DEFLATE/AUTO artifact compression with a safe 200:1 fallback and publication metrics (#314).
+- Exclude routine checkpoints only for a verified complete report with `executionStatus: PASS`, retain recovery evidence for cancelled/error or unavailable-report runs, share exactly equal single-workload detail payloads with measured byte savings, and categorize artifact browsing (#315).
+- Bound Job event journal reload, line size, retained memory, cache size, and on-disk growth; make compaction verifiable and convergent at the byte cap, and isolate storage failures with per-Job diagnostics and rate-limited retries (#316).
 
 # ATT 4.2.6 - 2026-10-27
 

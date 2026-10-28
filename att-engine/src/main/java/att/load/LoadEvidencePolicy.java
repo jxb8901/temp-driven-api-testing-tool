@@ -3,6 +3,7 @@ package att.load;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.nio.charset.StandardCharsets;
 
 /**
  * Resolved success/failure evidence policy for a Load run.
@@ -25,6 +26,11 @@ public final class LoadEvidencePolicy {
     /** Preflight safety budget for the sum of effective per-workload caps, per outcome. */
     public static final int MAX_AGGREGATE_CAP = 1000000;
     public static final String QUOTA_SCOPE_PER_WORKLOAD = "perWorkload";
+    /** Stable sampling contract: UTF-8 identity bytes, MurmurHash3 x86 32-bit, seed 0. */
+    public static final String SUCCESS_HASH_VERSION = "murmur3-32-v1";
+    /** Retention slots are allocated to equal run-time windows without replacing retained evidence. */
+    public static final String RETENTION_STRATEGY = "timeWindowStratifiedV1";
+    public static final int MAX_RETENTION_WINDOWS = 10;
     private final Success success; private final Failure failure; private final double sampleRate; private final int maxSamples;
     private final boolean splitQuotas;
     private final int maxSuccessSamples, maxFailureSamples;
@@ -206,6 +212,10 @@ public final class LoadEvidencePolicy {
         Map<String,Object> result=new java.util.LinkedHashMap<String,Object>();
         result.put("success",success.name().toLowerCase(java.util.Locale.ROOT));
         result.put("failure",failure.name().toLowerCase(java.util.Locale.ROOT));result.put("sampleRate",sampleRate);
+        result.put("successSamplingHash",SUCCESS_HASH_VERSION);
+        result.put("successSamplingEncoding","UTF-8");
+        result.put("retentionStrategy",RETENTION_STRATEGY);
+        result.put("retentionMaxWindows",MAX_RETENTION_WINDOWS);
         if(perWorkload) {
             result.put("quotaScope",QUOTA_SCOPE_PER_WORKLOAD);
             result.put("quotaMode",QUOTA_SCOPE_PER_WORKLOAD);
@@ -246,8 +256,50 @@ public final class LoadEvidencePolicy {
     public boolean retainFailure() { return failure == Failure.FULL; }
     public boolean sampleSuccess(String iterationId) {
         if (iterationId == null || success != Success.SAMPLE || sampleRate <= 0.0) return false;
-        long hash = ((long) iterationId.hashCode()) & 0xffffffffL;
-        return (hash % 1000000L) < Math.round(sampleRate * 1000000.0);
+        long unsignedHash = Integer.toUnsignedLong(murmur3_32(iterationId.getBytes(StandardCharsets.UTF_8), 0));
+        long threshold = (long) Math.floor(sampleRate * 4294967296.0d);
+        return unsignedHash < threshold;
+    }
+
+    /** MurmurHash3 x86 32-bit, seed 0; all arithmetic intentionally wraps modulo 2^32. */
+    static int murmur3_32(byte[] data, int seed) {
+        int hash = seed;
+        int roundedEnd = data.length & 0xfffffffc;
+        for (int offset = 0; offset < roundedEnd; offset += 4) {
+            int key = (data[offset] & 0xff)
+                    | ((data[offset + 1] & 0xff) << 8)
+                    | ((data[offset + 2] & 0xff) << 16)
+                    | ((data[offset + 3] & 0xff) << 24);
+            key *= 0xcc9e2d51;
+            key = Integer.rotateLeft(key, 15);
+            key *= 0x1b873593;
+            hash ^= key;
+            hash = Integer.rotateLeft(hash, 13);
+            hash = hash * 5 + 0xe6546b64;
+        }
+
+        int tail = 0;
+        switch (data.length & 3) {
+            case 3: tail ^= (data[roundedEnd + 2] & 0xff) << 16;
+            case 2: tail ^= (data[roundedEnd + 1] & 0xff) << 8;
+            case 1:
+                tail ^= data[roundedEnd] & 0xff;
+                tail *= 0xcc9e2d51;
+                tail = Integer.rotateLeft(tail, 15);
+                tail *= 0x1b873593;
+                hash ^= tail;
+                break;
+            default:
+                break;
+        }
+
+        hash ^= data.length;
+        hash ^= hash >>> 16;
+        hash *= 0x85ebca6b;
+        hash ^= hash >>> 13;
+        hash *= 0xc2b2ae35;
+        hash ^= hash >>> 16;
+        return hash;
     }
     public boolean retain(LoadEvent event, int currentSamples) {
         if (event == null || currentSamples >= (splitQuotas ? (event.success()?maxSuccessSamples:maxFailureSamples) : maxSamples)) return false;

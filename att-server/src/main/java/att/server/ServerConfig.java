@@ -29,6 +29,7 @@ public final class ServerConfig {
     public final int maxConcurrent, queuedLimit, maxConcurrentLoad, gracefulStopMs, jobRetentionDays;
     public final int workerHeapInitialMb, workerHeapMaxMb;
     public final int maxRequestBytes, maxEventsPerJob, maxArtifacts;
+    public final long maxEventJournalBytes, maxEventJournalMemoryBytes;
     public final boolean authenticationRequired;
     public final String authMode;
     public final Security security;
@@ -41,17 +42,21 @@ public final class ServerConfig {
     public final Authorization authorization;
     public final JobStorage jobStorage;
     public final LiveOutput liveOutput;
+    public final ArchiveCompression archiveCompression;
     public final ExecutionPool executionPool;
     final PackageConfigurationPolicy packageConfiguration;
 
     private ServerConfig(Path sourceFile, Path dataDir, Path runtimeConfigPath, Path javaExecutable, int maxConcurrent, int queuedLimit,
                          int maxConcurrentLoad, int gracefulStopMs, int jobRetentionDays,
                          int workerHeapInitialMb, int workerHeapMaxMb, int maxRequestBytes,
-                         int maxEventsPerJob, int maxArtifacts, boolean authenticationRequired, String authMode, Security security, Map<String, Path> packages, List<Path> allowedRoots, List<Path> workerLibraryDirs, Inspection inspection, InlineLoad inlineLoad, Scheduling scheduling, Authorization authorization, JobStorage jobStorage, LiveOutput liveOutput, ExecutionPool executionPool, PackageConfigurationPolicy packageConfiguration) {
+                         int maxEventsPerJob, long maxEventJournalBytes, int maxArtifacts, boolean authenticationRequired, String authMode, Security security, Map<String, Path> packages, List<Path> allowedRoots, List<Path> workerLibraryDirs, Inspection inspection, InlineLoad inlineLoad, Scheduling scheduling, Authorization authorization, JobStorage jobStorage, LiveOutput liveOutput, ArchiveCompression archiveCompression, ExecutionPool executionPool, PackageConfigurationPolicy packageConfiguration) {
         this.sourceFile=sourceFile;this.dataDir=dataDir; this.runtimeConfigPath=runtimeConfigPath; this.javaExecutable=javaExecutable; this.maxConcurrent=maxConcurrent;
         this.queuedLimit=queuedLimit; this.maxConcurrentLoad=maxConcurrentLoad; this.gracefulStopMs=gracefulStopMs;this.jobRetentionDays=jobRetentionDays;
         this.workerHeapInitialMb=workerHeapInitialMb;this.workerHeapMaxMb=workerHeapMaxMb;
-        this.maxRequestBytes=maxRequestBytes; this.maxEventsPerJob=maxEventsPerJob; this.maxArtifacts=maxArtifacts;this.authenticationRequired=authenticationRequired;this.authMode=authMode;this.security=security;
+        this.maxRequestBytes=maxRequestBytes; this.maxEventsPerJob=maxEventsPerJob;this.maxEventJournalBytes=maxEventJournalBytes; this.maxArtifacts=maxArtifacts;this.authenticationRequired=authenticationRequired;this.authMode=authMode;this.security=security;
+        long retainedJobLimit=Math.max(1L,(long)maxConcurrent+queuedLimit);
+        this.maxEventJournalMemoryBytes=Math.max(1024L,
+                Math.min(JobEvents.MAX_RETAINED_MEMORY_BYTES,(128L*1024L*1024L)/retainedJobLimit));
         this.packages=Collections.unmodifiableMap(new LinkedHashMap<>(packages));
         this.allowedRoots=List.copyOf(allowedRoots);
         this.workerLibraryDirs=List.copyOf(workerLibraryDirs);
@@ -59,7 +64,7 @@ public final class ServerConfig {
         this.inlineLoad=inlineLoad;
         this.scheduling=scheduling;
         this.authorization=authorization;
-        this.jobStorage=jobStorage;this.liveOutput=liveOutput;
+        this.jobStorage=jobStorage;this.liveOutput=liveOutput;this.archiveCompression=archiveCompression;
         this.executionPool=executionPool;this.packageConfiguration=packageConfiguration;
     }
 
@@ -143,8 +148,12 @@ public final class ServerConfig {
         int retention=intValue(server,"jobRetentionDays",30,1,3650);
         JobStorage jobStorage=jobStorage(server.get("jobStorage"));
         LiveOutput liveOutput=liveOutput(server.get("liveOutput"));
+        ArchiveCompression archiveCompression=archiveCompression(server.get("artifacts"));
         int request=intValue(server,"maxRequestBytes",1048576,1024,16777216), events=intValue(server,"maxEventsPerJob",10000,100,1000000),
-            artifacts=intValue(server,"maxArtifacts",1000,1,100000);boolean authenticationRequired=boolValue(server,"authenticationRequired",true);
+            artifacts=intValue(server,"maxArtifacts",1000,1,100000);
+        long eventJournalBytes=longValue(server,"maxEventJournalBytes",JobEvents.DEFAULT_MAX_JOURNAL_BYTES,
+                1024L*1024L,256L*1024L*1024L);
+        boolean authenticationRequired=boolValue(server,"authenticationRequired",true);
         Map<?,?> auth=server.get("auth")==null?Collections.emptyMap():map(server.get("auth"),"server.auth");
         String authMode=auth.get("mode")==null?"container":string(auth.get("mode"),"server.auth.mode").toLowerCase(Locale.ROOT);
         if(!Set.of("container","local").contains(authMode))throw new IllegalArgumentException("server.auth.mode must be container or local");
@@ -173,7 +182,30 @@ public final class ServerConfig {
         if (initializeDataDirectory) {
             privateDirectory(realData);privateDirectory(realData.resolve("db"));privateDirectory(realData.resolve("jobs"));
         }
-        return new ServerConfig(configFile,realData,runtimeConfig,java,max,queue,load,stop,retention,heapInitial,heapMax,request,events,artifacts,authenticationRequired,authMode,security,resolved,allowed,workerLibraries,inspection,inlineLoad,scheduling,authorization,jobStorage,liveOutput,executionPool,PackageConfigurationPolicy.load(server.get("packageConfiguration")));
+        return new ServerConfig(configFile,realData,runtimeConfig,java,max,queue,load,stop,retention,heapInitial,heapMax,request,events,eventJournalBytes,artifacts,authenticationRequired,authMode,security,resolved,allowed,workerLibraries,inspection,inlineLoad,scheduling,authorization,jobStorage,liveOutput,archiveCompression,executionPool,PackageConfigurationPolicy.load(server.get("packageConfiguration")));
+    }
+
+    public static final class ArchiveCompression {
+        public final String mode;
+        public final int level;
+        ArchiveCompression(String mode,int level){this.mode=mode;this.level=level;}
+        static ArchiveCompression defaults(){return new ArchiveCompression("store",3);}
+    }
+
+    private static ArchiveCompression archiveCompression(Object raw) {
+        if(raw==null)return ArchiveCompression.defaults();
+        Map<?,?> artifacts=map(raw,"server.artifacts");
+        for(Object key:artifacts.keySet())if(!"compression".equals(key))
+            throw new IllegalArgumentException("server.artifacts contains an unknown setting");
+        if(artifacts.get("compression")==null)return ArchiveCompression.defaults();
+        Map<?,?> compression=map(artifacts.get("compression"),"server.artifacts.compression");
+        for(Object key:compression.keySet())if(!Set.of("mode","level").contains(key))
+            throw new IllegalArgumentException("server.artifacts.compression contains an unknown setting");
+        String mode=compression.get("mode")==null?"store":string(compression.get("mode"),"server.artifacts.compression.mode").toLowerCase(Locale.ROOT);
+        if(!Set.of("store","deflate","auto").contains(mode))
+            throw new IllegalArgumentException("server.artifacts.compression.mode must be store, deflate, or auto");
+        int level=intValue(compression,"level",3,1,9);
+        return new ArchiveCompression(mode,level);
     }
 
     public static final class ExecutionPool {
@@ -271,6 +303,14 @@ public final class ServerConfig {
     private static int intValue(Map<?,?> map,String key,int fallback,int min,int max) {
         Object v=map.get(key); if(v==null)return fallback; if(!(v instanceof Number n)) throw new IllegalArgumentException(key+" must be an integer");
         int value=n.intValue(); if(value<min||value>max) throw new IllegalArgumentException(key+" must be between "+min+" and "+max); return value;
+    }
+    private static long longValue(Map<?,?> map,String key,long fallback,long min,long max) {
+        Object value=map.get(key);
+        if(value==null)return fallback;
+        if(!(value instanceof Number number)||number.doubleValue()!=Math.rint(number.doubleValue())
+                ||number.doubleValue()<min||number.doubleValue()>max)
+            throw new IllegalArgumentException("server."+key+" must be an integer from "+min+" to "+max+" bytes");
+        return number.longValue();
     }
     private static String string(Object v,String field){ if(!(v instanceof String s)||s.isBlank()) throw new IllegalArgumentException(field+" is required"); return s.trim(); }
     private static Map<?,?> map(Object v,String field){ if(!(v instanceof Map<?,?> m)) throw new IllegalArgumentException(field+" must be a mapping"); return m; }

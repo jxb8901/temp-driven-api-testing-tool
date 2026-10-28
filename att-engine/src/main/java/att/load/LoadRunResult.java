@@ -343,9 +343,15 @@ public final class LoadRunResult {
     private Map<String, Object> evidenceQuotaNotice() {
         long skippedSuccess = number(evidence.get("skippedSuccessQuotaCount"));
         long skippedFailure = number(evidence.get("skippedFailureQuotaCount"));
+        long skippedUnclassified = number(evidence.get("skippedUnclassifiedQuotaCount"));
         long skipped = skippedSuccess > Long.MAX_VALUE - skippedFailure ? Long.MAX_VALUE : skippedSuccess + skippedFailure;
+        skipped = skipped > Long.MAX_VALUE - skippedUnclassified ? Long.MAX_VALUE : skipped + skippedUnclassified;
         if (skipped <= 0L) return null;
-        String limitName = skippedSuccess > 0L && skippedFailure > 0L ? "load.evidence.sampleQuota"
+        Object policyValue = evidence.get("policy");
+        boolean legacyCombined = Boolean.TRUE.equals(evidence.get("combinedQuotaExceeded"))
+                || policyValue instanceof Map && "legacyCombined".equals(((Map<?, ?>) policyValue).get("quotaMode"));
+        String limitName = legacyCombined ? "load.evidence.maxSamples"
+                : skippedSuccess > 0L && skippedFailure > 0L ? "load.evidence.sampleQuota"
                 : skippedFailure > 0L ? "load.evidence.maxFailureSamples" : "load.evidence.maxSuccessSamples";
         return att.server.api.LimitDiagnostic.create("ATT-LOAD-EVIDENCE-QUOTA",
                 "Some iteration evidence was not retained after its configured quota was reached; aggregate metrics remain complete.",

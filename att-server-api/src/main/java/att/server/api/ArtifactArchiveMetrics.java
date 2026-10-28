@@ -30,6 +30,19 @@ public final class ArtifactArchiveMetrics {
     public Long includedBytes;
     public Long zipBytes;
     public Double compressionRatio;
+    public String configuredCompressionMode;
+    public String effectiveCompressionMode;
+    public Integer compressionLevel;
+    public Double compressionDurationMs;
+    public Long storedEntries;
+    public Long deflatedEntries;
+    public Long compressedPayloadBytes;
+    public Long archiveOverheadBytes;
+    public Double compressionSavingsPercent;
+    public Long compressionFallbackCount;
+    public Map<String, Long> compressionFallbackReasons;
+    public Long intentionallyExcludedRecoveryCheckpointFiles;
+    public Long intentionallyExcludedRecoveryCheckpointBytes;
     public Long temporaryExportFiles;
     public Long temporaryExportBytes;
     /** Bytes reread from validated producer-byte spill files; null on metrics written before this counter existed. */

@@ -274,10 +274,26 @@ export interface ArtifactArchiveMetrics {
   includedBytes?: number | null;
   zipBytes?: number | null;
   compressionRatio?: number | null;
+  configuredCompressionMode?: string | null;
+  effectiveCompressionMode?: string | null;
+  compressionLevel?: number | null;
+  compressionDurationMs?: number | null;
+  storedEntries?: number | null;
+  deflatedEntries?: number | null;
+  compressedPayloadBytes?: number | null;
+  archiveOverheadBytes?: number | null;
+  compressionSavingsPercent?: number | null;
+  compressionFallbackCount?: number | null;
+  compressionFallbackReasons?: Record<string, number> | null;
+  intentionallyExcludedRecoveryCheckpointFiles?: number | null;
+  intentionallyExcludedRecoveryCheckpointBytes?: number | null;
 }
 
 export interface JobArtifactArchive {
   archiveSizeBytes?: number | null;
+  archiveItemsCount?: number | null;
+  archiveItemsBytes?: number | null;
+  categorySummary?: Partial<Record<'summaryManifests' | 'metricsTimeSeries' | 'executionEvidence' | 'recoveryCheckpoints' | 'other', { count: number; bytes: number }>>;
   archiveMetrics?: ArtifactArchiveMetrics | null;
   archiveStatus: 'PENDING' | 'ARCHIVING' | 'READY' | 'FAILED' | 'EXPIRED';
   items: JobArtifact[];

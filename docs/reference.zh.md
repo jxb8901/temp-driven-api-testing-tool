@@ -1330,7 +1330,7 @@ Preparation 每個 run 的 DB/MQ initial session 上限為 64 個，每個 Worke
 
 #### 獨立 evidence 配額
 
-`att-load/v1.9` 支援兩種配額模型。Legacy scenario 完全保留既有行為：明確 `maxSamples` 是整個 run 的單一合併上限；明確 `maxFailureSamples` 會啟用整次 run 共用的 success/failure 上限。兩者皆未設定時，亦保留既有 mode defaults，包括預設不設上限的 `all`。
+`att-load/v1.9` 支援兩種配額模型。Legacy scenario 保留既有配額範圍和硬上限：`maxSamples` 是整個 run 的合併上限；`maxFailureSamples` 會啟用整次 run 共用的 success/failure 上限。兩者皆未設定時，亦保留既有 mode defaults，包括預設不設上限的 `all`。有上限的 run 會改用固定 run-time window 分配保留名額，因此保留哪些 iteration 可能與舊版本不同；配置上限和 success/failure 共用規則維持不變。
 
 可選的 `evidence.quotaScope: perWorkload` 會啟用獨立模型。此為明確 opt-in，既有 scenario 不會被靜默重新解釋：
 
@@ -1363,7 +1363,11 @@ Per-workload 模式不可與 root `maxSamples`、`maxSuccessSamples` 或 `maxFai
 
 `sampleRate` 只用於抽樣 PASS；FAIL/ERROR（包括操作層 TIMEOUT）直接使用 failure cap，不經抽樣。`failure: full` 受 effective failure cap 限制，不保證每個失敗都會保留。Failure log 維持 65,536 字元 tail、強制 secret protection 及延後 resource formatting。
 
-`load-summary.json`／YAML、HTML report 及 Studio job result 會顯示 resolved `evidence.policy`、aggregate retained counts、各類配額用盡旗標，以及因配額／缺失 evidence 而略過的計數。Per-workload coverage 包含 workload 與 target ID、effective `maxSuccessSamples` 與 `maxFailureSamples`、完成的 PASS iteration、因 sampling hash 而未選取的 PASS、已保留 sample、配額略過及缺失 evidence。任一或多個 failure 配額達上限時，report 與 Studio 會警告；aggregate metrics、thresholds 及 failure events 繼續完整統計。保留連結仍使用 `samples/`、`failures/`，並保留 EXEC.ID、case.log、case.yaml。Studio 會分開顯示 legacy／shared caps 與明確 per-workload scope、effective defaults 及 workload overrides，並與 advanced JSON 同步。見[per-workload 範例](../examples/load/independent-evidence.yaml)。
+抽樣 PASS 的資格由 MurmurHash3 x86 32-bit（seed 0）計算，輸入是以 UTF-8 編碼的 iteration ID。ATT 將結果視為 unsigned 32-bit 整數，低於 `floor(sampleRate × 2^32)` 才合格；resolved policy 會記錄 `murmur3-32-v1`。Hash 合格不代表一定保留：仍須有可用配額名額及 evidence artifact。
+
+有上限的 evidence 名額會按 planned run duration 分配到最多十個等長 window；各 outcome cap 和 workload cap 分別分配。名額少於十個時，每個名額使用一個 window。名額只會新增，不會替換、撤回、借用空 window 容量或刪除已保留 artifact。每個 window 內仍採先到先得，因此 cap 較小、某個 window 沒有合格候選，或候選速率不均時，代表性仍可能受限。Legacy `maxSamples` 維持單一合併上限，success 和 failure 共用各 window 名額。無上限保留及沒有 scheduler timeline 的直接 store 呼叫維持原有行為。
+
+`load-summary.json`／YAML、HTML report 及 Studio job result 會顯示 resolved sampling hash 和 retention strategy、完成的 success、hash 合格數、sampling-ineligible success、已保留 evidence、success/failure 配額拒絕、無法判定 outcome 的相容性 reservation，以及缺失 artifact。抽樣模式下，completed success = hash 合格 + sampling-ineligible。若 hash 合格的 success 之後變成 failure，quota denial 會按最後 outcome 只計一次；missing artifact 只計已預留但完成後缺少 artifact 的 outcome。這些欄位位於不同階段，不能當成可相加的 retention funnel。Workload row 亦會顯示 target ID 及有效 per-workload cap。Report 會顯示各 time window 和 phase 的保留情況；legacy combined cap 或類別配額拒絕候選時會發出警告，aggregate metrics、thresholds 和 failure events 繼續完整統計。保留連結仍使用 `samples/`、`failures/`，並保留 EXEC.ID、case.log、case.yaml。Studio 會分開顯示 legacy／shared caps 與明確 per-workload scope、effective defaults 及 workload overrides，並與 advanced JSON 同步。見[per-workload 範例](../examples/load/independent-evidence.yaml)。
 
 
 #### 定義 Load scenario
@@ -1503,7 +1507,7 @@ Metrics-only iteration 雖有 `EXEC.ID`，但除非 operation 寫入 artifact �
 
 #### 選擇要保留的 iteration evidence
 
-`evidence.mode` 支援 `metrics`、`failures`、`samples`、`all`；預設為 `failures`。這些 mode 分別將 effective success/failure policy 預設為 `none/none`、`none/full`、`sample/full`、`full/full`。`evidence.success` 與 `evidence.failure` 可各自覆寫預設。`sampleRate` 與所選的 legacy／shared 或 per-workload caps 限制保留 evidence。Dropped arrival 不建立 iteration evidence。
+`evidence.mode` 支援 `metrics`、`failures`、`samples`、`all`；預設為 `failures`。這些 mode 分別將 effective success/failure policy 預設為 `none/none`、`none/full`、`sample/full`、`full/full`。`evidence.success` 與 `evidence.failure` 可各自覆寫預設。`sampleRate` 決定 hash 資格；配額 window 另行決定實際保留項目。Dropped arrival 不建立 iteration evidence。有上限的選取使用最多十個 append-only time window，並在每個 window 內先到先得；抽樣和代表性限制見[獨立 evidence 配額](#獨立-evidence-配額)。
 
 Case-log capture 依 effective success/failure policy 及剩餘 retention capacity 決定。Failure policy 為 `full` 且仍有 `maxSamples` slot 時，符合條件的 failure（包括 `samples` 中未被抽中的 success）會保留經 redaction 的 rolling log tail，上限為 65,536 個字符。ATT 只會在 failure 取得 retention slot 後 materialize failure log。Tail 被截斷時會加上 marker 標示較早事件已省略，並在末尾保留最新的 action 和 runtime failure details。容量耗盡後不再保留 failure log。Sampled success 和 full-success policy 會保留完整的 deferred log。例如 `mode: metrics, failure: full` 會在容量允許時進行有界 failure capture；`mode: failures, failure: none` 則會停用此功能。Implementation 和 storage 細節見 [Load scheduler design](system-design/load-scheduler.zh.md)。
 
@@ -3145,9 +3149,9 @@ Engine 生成的 artifact data 會在寫檔前套用 path 及 secret projection�
 
 `export-manifest-v1.json` 使用 manifest version `1`、policy `att-export-approved-bytes-v1`；新 entry 的 decision 為 `preserved`（仍可讀取舊版 `att-export-safe-text-v2` ZIP）。ZIP 完整保留 producer 輸出的核准 bytes；敏感值必須在 artifact 生成前完成遮罩。每個 entry 記錄 logical path、media type、精確 byte size、SHA-256、report/preview eligibility、classification 及 publication decision。`complete` 和彙總 `omissions` 不包含被拒絕的檔名或值。ZIP、preview 及解壓檔案使用相同的已擷取 bytes；GET 不會再次獨立遮罩。
 
-Inventory 不受 `server.maxArtifacts` 限制：最多 50,000 filesystem candidates、深度 64、10,000 已發佈 entries、每項 16 MiB、總 bytes 128 MiB、manifest 8 MiB。超出總量上限會使發佈失敗並保留私有來源。ZIP 使用 STORED encoding，避免重複 log 的 compression-ratio 歧義。Reader 拒絕不安全路徑、control characters、encoded traversal、重複或大小寫衝突名稱、過大或高壓縮比 entries、未列入 manifest 的 entries 及 integrity mismatch。Writer 為單一有界佇列，同時最多八個 artifact reads。
+Inventory 不受 `server.maxArtifacts` 限制：最多 50,000 filesystem candidates、深度 64、10,000 已發佈 entries、每項 16 MiB、總 bytes 128 MiB、manifest 8 MiB。超出總量上限會使發佈失敗並保留私有來源。ZIP 預設使用 STORED；Server 設定可選有界的逐 entry DEFLATE 或 AUTO，並維持 200:1 ratio 上限。Reader 拒絕不安全路徑、control characters、encoded traversal、重複或大小寫衝突名稱、過大或高壓縮比 entries、未列入 manifest 的 entries 及 integrity mismatch。Writer 為單一有界佇列，同時最多八個 artifact reads。
 
-Reader 在信任 manifest 前，亦會比較 ZIP central directory 與 local header。Link、special-file 或 Windows reparse attribute、file/directory prefix collision、覆寫 filename 的 extra field、comment、隱藏 prefix／record、重疊 entry、multipart archive 及 ZIP64 均會被拒絕。受限 export profile 只接受 STORED／Deflate entry 及 timestamp-only extra metadata；ATT 寫入 STORED entry。Manifest parsing 拒絕 duplicate key、尾隨 document、fractional version／size、未知 field，以及不符合 policy 的 omission 文字。ZIP 結構可讀並不代表已核准匯出。
+Reader 在信任 manifest 前，亦會比較 ZIP central directory 與 local header。Link、special-file 或 Windows reparse attribute、file/directory prefix collision、覆寫 filename 的 extra field、comment、隱藏 prefix／record、重疊 entry、multipart archive 及 ZIP64 均會被拒絕。受限 export profile 只接受 STORED／Deflate entry 及 timestamp-only extra metadata；預設仍為 STORED。Manifest parsing 拒絕 duplicate key、尾隨 document、fractional version／size、未知 field，以及不符合 policy 的 omission 文字。ZIP 結構可讀並不代表已核准匯出。
 
 #### 分離及還原 Job 主控台
 
@@ -3158,6 +3162,12 @@ Studio 可從 Live Output、Events 或 Job 詳情標題開啟非 modal floating 
 #### 檢視及下載 Job archive
 
 在 Job Details 開啟 **Artifacts**。報告清單獨立於分頁；使用 **View Report** 或 **Preview** 開啟內容。文字 viewer 提供唯讀、search、copy、line numbers，顯示最多 200,000 characters；**Load more artifacts** 載入後續頁面。**Download Artifacts (.zip)** 是唯一下載操作。解壓後可直接開啟 HTML，relative links 保持相同 archive hierarchy。
+
+Index 亦會回報整份 archive 中 summaries/manifests、metrics/time series、execution evidence、recovery checkpoints 及其他檔案的 entry count 和 uncompressed bytes。Studio 會先顯示 primary report，再把其他項目放在預設收合的 categories；若安全 path 有 workload 與 execution 元件，execution evidence 會依 workload 和執行分組。搜尋會比對已載入頁面的 path 或 workload，載入更多頁面可擴大搜尋範圍。Artifact row 顯示精簡 filename，並可查看完整核准 archive path。
+
+Server 會分別驗證 report 完整性、execution status、performance verdict 及 archive status。只有 canonical report 通過完整性驗證而且 `executionStatus: PASS` 時，LOAD ZIP 才會排除一般 recovery checkpoint；`NOT_MET` performance verdict 會獨立呈現，不會改變此規則。Cancelled 或 runtime-error 的 run 即使已提交完整診斷 report，仍會保留每個 scope 最新兩代 integrity-verified checkpoints。Report 缺失、不完整、損壞、中斷或無法使用時，每個 scope 最多保留最新兩代 verified checkpoints。不完整或損壞的 report bundle 會整組省略，並保留可預覽的 verified checkpoints，同時如實回報 archive omissions。Report commit 驗證完成前不會刪除 source checkpoints。
+
+相同的大型 aggregate 與單一 workload series 共用 sidecar 時，版本化 detail manifest 會記錄重用的 sidecar 檔案數和精確省下的序列化 bytes。不同值或多 workload 執行仍保留各自 scoped files。
 
 Authenticated archive index 僅在 ZIP 已驗證且為 READY 時回傳 `archiveSizeBytes`。Studio 在 ZIP download 旁顯示 human-readable size，不會為計算大小下載 ZIP 或發送 HEAD request。
 
@@ -3487,7 +3497,7 @@ Maintainer implementation sequencing、scheduler internals、resource-owner deta
 | Load Template | `att-load-template/v1` | `schemas/att-load-template-v1.schema.json` |
 | Load bindings | `att-load-bindings/v1` | `schemas/att-load-bindings-v1.schema.json` |
 | Load summary | 直接 Engine／CLI：legacy summary contract (schema under `schemas/history/`)；封存報告：att-load-summary/v1.3 |
-| LOAD report detail files | att-load-detail-manifest/v1、att-load-detail-reference/v1、att-load-detail-series/v1、att-load-workload-detail/v1 |
+| LOAD report detail files | att-load-detail-manifest/v1、att-load-detail-reference/v1、att-load-detail-series/v1、att-load-detail-series/v2（shared payload）、att-load-workload-detail/v1 |
 | Run manifest | att-run/v2.1 |
 | 舊版 Package validation JSON | `att-validation/v2.1` |
 | 精簡 CLI 階層式 validation report | `att-validation/v1` |

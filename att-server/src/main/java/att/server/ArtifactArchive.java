@@ -22,9 +22,11 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.io.OutputStream;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
-import java.util.zip.ZipOutputStream;
+import java.util.zip.Deflater;
+import java.util.zip.DeflaterOutputStream;
 
 /** Builds the sole public representation of a Job's output. Raw Worker output is never served. */
 final class ArtifactArchive {
@@ -40,6 +42,9 @@ final class ArtifactArchive {
     static final long MAX_ARCHIVE_BYTES = MAX_TOTAL_BYTES + MAX_MANIFEST_BYTES + 4L * 1024 * 1024;
     private static final Set<String> SAFE_EXTENSIONS = Set.of("txt", "log", "json", "yaml", "yml", "xml", "html", "htm", "css", "csv", "md");
     private static final String OMISSION_REASON = "unsupported, unsafe, duplicate, binary, oversized, or unapproved output";
+    private static final int AUTO_MIN_BYTES = 256;
+    private static final int AUTO_MIN_SAVINGS_PERCENT = 5;
+    private static final long DEFLATE_STAGING_OVERHEAD_BYTES = 64L * 1024L;
     private static final ObjectMapper JSON = new ObjectMapper(com.fasterxml.jackson.core.JsonFactory.builder()
             .enable(com.fasterxml.jackson.core.StreamReadFeature.STRICT_DUPLICATE_DETECTION)
             .streamReadConstraints(com.fasterxml.jackson.core.StreamReadConstraints.builder()
@@ -50,51 +55,71 @@ final class ArtifactArchive {
     @FunctionalInterface interface ZipProgress { void entryWritten(String path) throws Exception; }
     record Entry(String path, String mediaType, long size, String sha256, String classification, String decision, boolean report, boolean preview) {}
     private record ReportFile(long size,String sha256) {}
+    private static final class LoadReportInventory {
+        final Map<String,ReportFile> required=new LinkedHashMap<>();
+        final Set<String> incompleteRuns=new HashSet<>();
+        final Set<String> completeSuccessfulRuns=new HashSet<>();
+        final Set<String> verifiedCheckpoints=new HashSet<>();
+        final Set<String> retainedCheckpoints=new HashSet<>();
+    }
 
     private ArtifactArchive() {}
 
     static Path build(Path output, Path archive) throws Exception {
-        return build(output,archive,MAX_MEMORY_EXPORT_BYTES,null,MAX_CANDIDATES,null);
+        return build(output,archive,MAX_MEMORY_EXPORT_BYTES,null,MAX_CANDIDATES,null,ServerConfig.ArchiveCompression.defaults());
     }
 
     /** Validate a copy of captured producer bytes so the validator cannot mutate the ZIP payload. */
     static Path build(Path output,Path archive,EntryValidator validator) throws Exception {
-        return build(output,archive,MAX_MEMORY_EXPORT_BYTES,null,MAX_CANDIDATES,validator);
+        return build(output,archive,MAX_MEMORY_EXPORT_BYTES,null,MAX_CANDIDATES,validator,ServerConfig.ArchiveCompression.defaults());
+    }
+
+    static Path build(Path output,Path archive,EntryValidator validator,ServerConfig.ArchiveCompression compression) throws Exception {
+        return build(output,archive,MAX_MEMORY_EXPORT_BYTES,null,MAX_CANDIDATES,validator,compression);
     }
 
     /** The zero-budget path also provides a controlled disk-staging benchmark. */
     static Path build(Path output, Path archive,long memoryBudget) throws Exception {
-        return build(output,archive,memoryBudget,null,MAX_CANDIDATES,null);
+        return build(output,archive,memoryBudget,null,MAX_CANDIDATES,null,ServerConfig.ArchiveCompression.defaults());
     }
 
     static Path build(Path output,Path archive,long memoryBudget,EntryValidator validator) throws Exception {
-        return build(output,archive,memoryBudget,null,MAX_CANDIDATES,validator);
+        return build(output,archive,memoryBudget,null,MAX_CANDIDATES,validator,ServerConfig.ArchiveCompression.defaults());
     }
 
     /** Package-private progress seam for deterministic process-crash lifecycle tests. */
     static Path build(Path output, Path archive,long memoryBudget,ZipProgress progress) throws Exception {
-        return build(output,archive,memoryBudget,progress,MAX_CANDIDATES,null);
+        return build(output,archive,memoryBudget,progress,MAX_CANDIDATES,null,ServerConfig.ArchiveCompression.defaults());
     }
 
     /** Test-only cap seam; production entry points always retain MAX_CANDIDATES. */
     static Path buildForTest(Path output,Path archive,int maxCandidates) throws Exception {
         if(maxCandidates<1||maxCandidates>MAX_CANDIDATES)throw new IllegalArgumentException("Invalid test candidate cap");
-        return build(output,archive,MAX_MEMORY_EXPORT_BYTES,null,maxCandidates,null);
+        return build(output,archive,MAX_MEMORY_EXPORT_BYTES,null,maxCandidates,null,ServerConfig.ArchiveCompression.defaults());
     }
 
     static Path buildForTest(Path output,Path archive,int maxCandidates,EntryValidator validator) throws Exception {
         if(maxCandidates<1||maxCandidates>MAX_CANDIDATES)throw new IllegalArgumentException("Invalid test candidate cap");
-        return build(output,archive,MAX_MEMORY_EXPORT_BYTES,null,maxCandidates,validator);
+        return build(output,archive,MAX_MEMORY_EXPORT_BYTES,null,maxCandidates,validator,ServerConfig.ArchiveCompression.defaults());
     }
 
-    private static Path build(Path output,Path archive,long memoryBudget,ZipProgress progress,int maxCandidates,EntryValidator validator) throws Exception {
+    private static Path build(Path output,Path archive,long memoryBudget,ZipProgress progress,int maxCandidates,
+                              EntryValidator validator,ServerConfig.ArchiveCompression compression) throws Exception {
         if(memoryBudget<0||memoryBudget>MAX_MEMORY_EXPORT_BYTES)throw new IllegalArgumentException("Artifact memory budget exceeds limits");
+        if(compression==null)throw new IllegalArgumentException("Artifact archive compression policy is required");
         ArtifactMetricsRecorder metrics = ArtifactMetricsRecorder.CURRENT.get();
         if (metrics != null) {
             metrics.phase("scan_validate_preserve");
             metrics.value.sourceFiles=0L;metrics.value.sourceBytes=0L;
             metrics.value.includedEntries=0L;metrics.value.omittedEntries=0L;metrics.value.includedBytes=0L;
             metrics.value.temporaryExportFiles=0L;metrics.value.temporaryExportBytes=0L;metrics.value.memoryExportPeakBytes=0L;
+            metrics.value.configuredCompressionMode=compression.mode;
+            metrics.value.compressionLevel=compression.level;
+            metrics.value.storedEntries=0L;metrics.value.deflatedEntries=0L;metrics.value.compressedPayloadBytes=0L;
+            metrics.value.compressionDurationMs=0.0d;metrics.value.compressionFallbackCount=0L;
+            metrics.value.compressionFallbackReasons=new LinkedHashMap<String,Long>();
+            metrics.value.intentionallyExcludedRecoveryCheckpointFiles=0L;
+            metrics.value.intentionallyExcludedRecoveryCheckpointBytes=0L;
         }
         if (Files.isSymbolicLink(output)) throw new IllegalArgumentException("Job output root must not be a symbolic link");
         Path requestedRoot=output.toAbsolutePath().normalize(),root=output.toRealPath();
@@ -106,7 +131,7 @@ final class ArtifactArchive {
         try {
             List<Path> candidates=inventory(root,maxCandidates);
             if(metrics!=null){metrics.value.candidateCount=(long)candidates.size();usage(metrics.value.limitUsage,"artifact.inventory.candidates",candidates.size(),maxCandidates);}
-            Map<String,ReportFile> requiredLoadReportEntries=validateLoadReportBundles(root,candidates);
+            LoadReportInventory loadReports=validateLoadReportBundles(root,candidates);
             Set<String> names=new HashSet<>();List<String> approved=new ArrayList<>();long total=0;int omitted=0;long oversizedOmission=0L;long largestEntryBytes=0L;int entryCapOmissions=0;
             Map<String,byte[]> memoryExports=new LinkedHashMap<>();long retained=0;
             for(Path candidate:candidates) {
@@ -114,11 +139,27 @@ final class ArtifactArchive {
                 if(candidate.equals(root)||Files.isDirectory(candidate,LinkOption.NOFOLLOW_LINKS))continue;
                 if(Files.isSymbolicLink(candidate)||!Files.isRegularFile(candidate,LinkOption.NOFOLLOW_LINKS)){omitted++;if(metrics!=null)metrics.value.omittedEntries=(long)omitted;continue;}
                 if(!candidate.toRealPath().startsWith(root))throw new IllegalArgumentException("Artifact escaped its private directory");
-                if(metrics!=null)metrics.source(Files.size(candidate));
-                String relative=root.relativize(candidate).toString().replace('\\','/'),lower=relative.toLowerCase(Locale.ROOT);
+                long sourceSize=Files.size(candidate);
+                if(metrics!=null)metrics.source(sourceSize);
+                String relative=root.relativize(candidate).toString().replace('\\','/');
+                String checkpointRun=checkpointRunId(relative);
+                if(checkpointRun!=null&&(loadReports.completeSuccessfulRuns.contains(checkpointRun)
+                        ||loadReports.verifiedCheckpoints.contains(relative)&&!loadReports.retainedCheckpoints.contains(relative))) {
+                    if(metrics!=null) {
+                        metrics.value.intentionallyExcludedRecoveryCheckpointFiles=add(metrics.value.intentionallyExcludedRecoveryCheckpointFiles,1L);
+                        metrics.value.intentionallyExcludedRecoveryCheckpointBytes=add(metrics.value.intentionallyExcludedRecoveryCheckpointBytes,sourceSize);
+                    }
+                    continue;
+                }
+                if(checkpointRun!=null&&!loadReports.verifiedCheckpoints.contains(relative)) {
+                    omitted++;if(metrics!=null)metrics.value.omittedEntries=(long)omitted;continue;
+                }
+                if(isLoadReportPayload(relative)&&loadReports.incompleteRuns.contains(loadRunId(relative))) {
+                    omitted++;if(metrics!=null)metrics.value.omittedEntries=(long)omitted;continue;
+                }
+                String lower=relative.toLowerCase(Locale.ROOT);
                 if(!safePath(relative)||lower.equals(MANIFEST)||!SAFE_EXTENSIONS.contains(extension(relative))||names.contains(lower)){omitted++;if(metrics!=null)metrics.value.omittedEntries=(long)omitted;continue;}
                 if(approved.size()>=MAX_ENTRIES){omitted++;entryCapOmissions++;if(metrics!=null)metrics.value.omittedEntries=(long)omitted;continue;}
-                long sourceSize=Files.size(candidate);
                 largestEntryBytes=Math.max(largestEntryBytes,sourceSize);
                 if(sourceSize>MAX_ENTRY_BYTES){omitted++;oversizedOmission=Math.max(oversizedOmission,sourceSize);if(metrics!=null)metrics.value.omittedEntries=(long)omitted;continue;}
                 byte[] bytes;
@@ -129,7 +170,7 @@ final class ArtifactArchive {
                     omitted++;if(metrics!=null)metrics.value.omittedEntries=(long)omitted;continue;
                 }
                 if(bytes.length>MAX_ENTRY_BYTES){omitted++;oversizedOmission=Math.max(oversizedOmission,bytes.length);if(metrics!=null)metrics.value.omittedEntries=(long)omitted;continue;}
-                ReportFile committed=requiredLoadReportEntries.get(relative);
+                ReportFile committed=loadReports.required.get(relative);
                 if(committed!=null&&(bytes.length!=committed.size()||!sha256(bytes).equals(committed.sha256())))
                     throw new java.io.IOException("A committed LOAD report file changed while it was captured.");
                 largestEntryBytes=Math.max(largestEntryBytes,bytes.length);
@@ -143,15 +184,15 @@ final class ArtifactArchive {
                     if(metrics!=null){metrics.value.temporaryExportFiles++;metrics.value.temporaryExportBytes+=bytes.length;}
                 }
             }
-            if(!approved.containsAll(requiredLoadReportEntries.keySet())) {
-                Set<String> missing=new HashSet<>(requiredLoadReportEntries.keySet());
+            if(!approved.containsAll(loadReports.required.keySet())) {
+                Set<String> missing=new HashSet<>(loadReports.required.keySet());
                 missing.removeAll(approved);
                 throw new java.io.IOException("A verified LOAD report bundle contains files that cannot be published: " + missing.size());
             }
             // ZIP bytes are exactly the validated producer bytes; publication must not rewrite HTML links or scripts.
             List<Entry> entries=new ArrayList<>();total=0;
             if(metrics!=null)metrics.phase("zip_write");
-            try(ZipOutputStream zip=new ZipOutputStream(Files.newOutputStream(staging))) {
+            try(ArtifactZipWriter zip=new ArtifactZipWriter(Files.newOutputStream(staging),MAX_ARCHIVE_BYTES)) {
                 for(String relative:approved) {
                     // Both paths contain the exact producer bytes captured in pass 1.
                     // Never reopen mutable Worker output while writing the ZIP.
@@ -166,7 +207,7 @@ final class ArtifactArchive {
                     total+=bytes.length;
                     largestEntryBytes=Math.max(largestEntryBytes,bytes.length);
                     entries.add(new Entry(relative,mediaType(relative),bytes.length,sha256(bytes),"textual-output","preserved",report,true));
-                    writeEntry(zip,relative,bytes);
+                    writeEntry(zip,relative,bytes,exports,compression);
                     if(metrics!=null){metrics.value.includedEntries++;metrics.value.includedBytes+=bytes.length;}
                     if(progress!=null)progress.entryWritten(relative);
                 }
@@ -190,14 +231,25 @@ final class ArtifactArchive {
                 }else manifest.put("diagnostics",List.of());
                 byte[] bytes=JSON.writeValueAsBytes(manifest);
                 if(bytes.length>MAX_MANIFEST_BYTES)throw new LimitFailure("Artifact manifest exceeds limits","artifact.archive.manifestBytes",MAX_MANIFEST_BYTES,bytes.length);
-                writeEntry(zip,MANIFEST,bytes);
+                writeEntry(zip,MANIFEST,bytes,exports,compression);
+                zip.finish();
             }
             if(metrics!=null)metrics.phase("verification_fsync");
             verify(staging,true);
             try(var channel=java.nio.channels.FileChannel.open(staging,java.nio.file.StandardOpenOption.WRITE)){channel.force(true);}
             Files.move(staging,destination,StandardCopyOption.ATOMIC_MOVE,StandardCopyOption.REPLACE_EXISTING);
             published=true;
-            if(metrics!=null){metrics.value.zipBytes=Files.size(destination);usage(metrics.value.limitUsage,"artifact.archive.entries",entries.size(),MAX_ENTRIES);usage(metrics.value.limitUsage,"artifact.archive.totalBytes",total,MAX_TOTAL_BYTES);usage(metrics.value.limitUsage,"artifact.archive.entryBytes",largestEntryBytes,MAX_ENTRY_BYTES);}
+            if(metrics!=null){
+                metrics.value.zipBytes=Files.size(destination);
+                long stored=metrics.value.storedEntries==null?0L:metrics.value.storedEntries;
+                long deflated=metrics.value.deflatedEntries==null?0L:metrics.value.deflatedEntries;
+                metrics.value.effectiveCompressionMode=deflated==0L?"store":stored==0L?"deflate":"mixed";
+                metrics.value.archiveOverheadBytes=Math.max(0L,metrics.value.zipBytes-(metrics.value.compressedPayloadBytes==null?0L:metrics.value.compressedPayloadBytes));
+                long input=metrics.value.zipWriteInputBytes==null?0L:metrics.value.zipWriteInputBytes;
+                long compressed=metrics.value.compressedPayloadBytes==null?0L:metrics.value.compressedPayloadBytes;
+                metrics.value.compressionSavingsPercent=input==0L?0.0d:Math.max(0.0d,100.0d*(input-compressed)/input);
+                usage(metrics.value.limitUsage,"artifact.archive.entries",entries.size(),MAX_ENTRIES);usage(metrics.value.limitUsage,"artifact.archive.totalBytes",total,MAX_TOTAL_BYTES);usage(metrics.value.limitUsage,"artifact.archive.entryBytes",largestEntryBytes,MAX_ENTRY_BYTES);
+            }
             return destination;
         } catch(Exception failure) {
             if(metrics!=null&&failure instanceof LimitFailure){LimitFailure limited=(LimitFailure)failure;
@@ -255,8 +307,8 @@ final class ArtifactArchive {
         return 3;
     }
 
-    /** Verify the Engine's committed LOAD bundle before any of its entries enter the ZIP. */
-    private static Map<String,ReportFile> validateLoadReportBundles(Path root,List<Path> candidates) throws Exception {
+    /** Verify completed LOAD bundles before publication and retain recovery data for every non-success run. */
+    private static LoadReportInventory validateLoadReportBundles(Path root,List<Path> candidates) throws Exception {
         Set<String> candidateNames=new HashSet<>();
         Set<String> runIds=new HashSet<>();
         for(Path candidate:candidates) {
@@ -265,69 +317,165 @@ final class ArtifactArchive {
             String[] parts=relative.split("/");
             if(parts.length==3&&"load".equals(parts[0])
                     &&("load-summary.json".equals(parts[2])||LOAD_REPORT_MANIFEST.equals(parts[2])))runIds.add(parts[1]);
+            if(checkpointRunId(relative)!=null)runIds.add(parts[1]);
         }
-        Map<String,ReportFile> required=new LinkedHashMap<>();
+        LoadReportInventory result=new LoadReportInventory();
         for(String runId:runIds) {
-            if(!safePath(runId))throw new java.io.IOException("Unsafe LOAD run identifier in report inventory.");
             String prefix="load/"+runId+"/";
-            String manifestName=prefix+LOAD_REPORT_MANIFEST;
-            if(!candidateNames.contains(manifestName))
-                throw new java.io.IOException("LOAD report bundle is missing its completion manifest.");
-            Path runDirectory=root.resolve("load").resolve(runId).normalize();
-            Path manifestPath=runDirectory.resolve(LOAD_REPORT_MANIFEST);
-            if(!manifestPath.startsWith(root)||Files.isSymbolicLink(manifestPath)
-                    ||!Files.isRegularFile(manifestPath,LinkOption.NOFOLLOW_LINKS)||Files.size(manifestPath)>MAX_ENTRY_BYTES)
-                throw new java.io.IOException("LOAD report completion manifest is not a bounded regular file.");
-            byte[] manifestBytes=readProducerBytes(manifestPath);
-            com.fasterxml.jackson.databind.JsonNode manifest=JSON.readTree(manifestBytes);
-            if(!LOAD_REPORT_MANIFEST_SCHEMA.equals(manifest.path("schemaVersion").asText())
-                    ||!"COMPLETE".equals(manifest.path("state").asText())
-                    ||!manifest.path("complete").asBoolean(false)
-                    ||!runId.equals(manifest.path("runId").asText()))
-                throw new java.io.IOException("LOAD report completion manifest is invalid or incomplete.");
-            com.fasterxml.jackson.databind.JsonNode fileRows=manifest.path("files");
-            if(!fileRows.isArray()||fileRows.isEmpty()||fileRows.size()>9000)
-                throw new java.io.IOException("LOAD report completion manifest has an invalid file inventory.");
-            Set<String> listed=new HashSet<>();
-            long total=0L;
-            for(com.fasterxml.jackson.databind.JsonNode row:fileRows) {
-                String name=row.path("path").asText("");
-                long length=row.path("lengthBytes").asLong(-1L);
-                String digest=row.path("sha256").asText("");
-                if(!safePath(name)||!name.startsWith("details/")&&!name.startsWith("report/")
-                        &&!Set.of("load-summary.json","load-summary.yaml").contains(name)
-                        ||!listed.add(name)||!digest.matches("[0-9a-f]{64}")||length<0||length>MAX_ENTRY_BYTES)
-                    throw new java.io.IOException("LOAD report completion manifest contains an unsafe or duplicate file entry.");
-                if(total>MAX_TOTAL_BYTES-length)throw new java.io.IOException("LOAD report bundle exceeds the archive byte limit.");
-                total+=length;
-                Path file=runDirectory.resolve(name).normalize();
-                String archiveName=prefix+name;
-                if(!file.startsWith(runDirectory)||Files.isSymbolicLink(file)
-                        ||!Files.isRegularFile(file,LinkOption.NOFOLLOW_LINKS)||!candidateNames.contains(archiveName))
-                    throw new java.io.IOException("A LOAD report file is missing from the bounded archive inventory.");
-                byte[] producerBytes=readProducerBytes(file);
-                if(producerBytes.length!=length||!digest.equals(sha256(producerBytes)))
-                    throw new java.io.IOException("A LOAD report file does not match its completion manifest.");
-                required.put(archiveName,new ReportFile(length,digest));
+            try {
+                if(!safePath(runId))throw new java.io.IOException("Unsafe LOAD run identifier in report inventory.");
+                String manifestName=prefix+LOAD_REPORT_MANIFEST;
+                if(!candidateNames.contains(manifestName))
+                    throw new java.io.IOException("LOAD report bundle is missing its completion manifest.");
+                Path runDirectory=root.resolve("load").resolve(runId).normalize();
+                Path manifestPath=runDirectory.resolve(LOAD_REPORT_MANIFEST);
+                if(!manifestPath.startsWith(root)||Files.isSymbolicLink(manifestPath)
+                        ||!Files.isRegularFile(manifestPath,LinkOption.NOFOLLOW_LINKS)||Files.size(manifestPath)>MAX_ENTRY_BYTES)
+                    throw new java.io.IOException("LOAD report completion manifest is not a bounded regular file.");
+                byte[] manifestBytes=readProducerBytes(manifestPath);
+                com.fasterxml.jackson.databind.JsonNode manifest=JSON.readTree(manifestBytes);
+                if(!LOAD_REPORT_MANIFEST_SCHEMA.equals(manifest.path("schemaVersion").asText())
+                        ||!"COMPLETE".equals(manifest.path("state").asText())
+                        ||!manifest.path("complete").asBoolean(false)
+                        ||!runId.equals(manifest.path("runId").asText()))
+                    throw new java.io.IOException("LOAD report completion manifest is invalid or incomplete.");
+                com.fasterxml.jackson.databind.JsonNode fileRows=manifest.path("files");
+                if(!fileRows.isArray()||fileRows.isEmpty()||fileRows.size()>9000)
+                    throw new java.io.IOException("LOAD report completion manifest has an invalid file inventory.");
+                Set<String> listed=new HashSet<>();
+                long total=0L;
+                Map<String,ReportFile> verifiedRun=new LinkedHashMap<>();
+                for(com.fasterxml.jackson.databind.JsonNode row:fileRows) {
+                    String name=row.path("path").asText("");
+                    long length=row.path("lengthBytes").asLong(-1L);
+                    String digest=row.path("sha256").asText("");
+                    if(!safePath(name)||!name.startsWith("details/")&&!name.startsWith("report/")
+                            &&!Set.of("load-summary.json","load-summary.yaml").contains(name)
+                            ||!listed.add(name)||!digest.matches("[0-9a-f]{64}")||length<0||length>MAX_ENTRY_BYTES)
+                        throw new java.io.IOException("LOAD report completion manifest contains an unsafe or duplicate file entry.");
+                    if(total>MAX_TOTAL_BYTES-length)throw new java.io.IOException("LOAD report bundle exceeds the archive byte limit.");
+                    total+=length;
+                    Path file=runDirectory.resolve(name).normalize();
+                    String archiveName=prefix+name;
+                    if(!file.startsWith(runDirectory)||Files.isSymbolicLink(file)
+                            ||!Files.isRegularFile(file,LinkOption.NOFOLLOW_LINKS)||!candidateNames.contains(archiveName))
+                        throw new java.io.IOException("A LOAD report file is missing from the bounded archive inventory.");
+                    byte[] producerBytes=readProducerBytes(file);
+                    if(producerBytes.length!=length||!digest.equals(sha256(producerBytes)))
+                        throw new java.io.IOException("A LOAD report file does not match its completion manifest.");
+                    verifiedRun.put(archiveName,new ReportFile(length,digest));
+                }
+                Set<String> essential=Set.of("load-summary.json","load-summary.yaml","report/index.html","details/v1/manifest.json");
+                if(!listed.containsAll(essential))throw new java.io.IOException("LOAD report bundle is missing an essential report file.");
+                com.fasterxml.jackson.databind.JsonNode summary=JSON.readTree(runDirectory.resolve("load-summary.json").toFile());
+                if(!runId.equals(summary.path("runId").asText())
+                        ||!summary.path("executionStatus").isTextual()
+                        ||!summary.path("performanceVerdict").isTextual()
+                        ||summary.path("durationMs").asLong(-1L)!=manifest.path("durationMs").asLong(-2L)
+                        ||!summary.path("executionStatus").asText().equals(manifest.path("executionStatus").asText())
+                        ||!summary.path("performanceVerdict").asText().equals(manifest.path("performanceVerdict").asText())
+                        ||!LOAD_REPORT_MANIFEST.equals(summary.path("reportManifest").asText())
+                        ||!"report/index.html".equals(summary.path("report").asText()))
+                    throw new java.io.IOException("LOAD summary does not reference its committed report bundle.");
+                com.fasterxml.jackson.databind.JsonNode details=JSON.readTree(runDirectory.resolve("details/v1/manifest.json").toFile());
+                if(!details.path("complete").asBoolean(false))
+                    throw new java.io.IOException("LOAD detailed metrics manifest is incomplete.");
+                verifiedRun.put(manifestName,new ReportFile(manifestBytes.length,sha256(manifestBytes)));
+                result.required.putAll(verifiedRun);
+                // Checkpoint retirement requires both a verified complete report and normal execution.
+                // A performance-threshold NOT_MET verdict is independent and does not retain routine checkpoints.
+                if("PASS".equals(summary.path("executionStatus").asText()))result.completeSuccessfulRuns.add(runId);
+            } catch(Exception invalidBundle) {
+                result.incompleteRuns.add(runId);
+                result.required.keySet().removeIf(path->path.startsWith(prefix));
             }
-            Set<String> essential=Set.of("load-summary.json","load-summary.yaml","report/index.html","details/v1/manifest.json");
-            if(!listed.containsAll(essential))throw new java.io.IOException("LOAD report bundle is missing an essential report file.");
-            com.fasterxml.jackson.databind.JsonNode summary=JSON.readTree(runDirectory.resolve("load-summary.json").toFile());
-            if(!runId.equals(summary.path("runId").asText())
-                    ||!summary.path("executionStatus").isTextual()
-                    ||!summary.path("performanceVerdict").isTextual()
-                    ||summary.path("durationMs").asLong(-1L)!=manifest.path("durationMs").asLong(-2L)
-                    ||!summary.path("executionStatus").asText().equals(manifest.path("executionStatus").asText())
-                    ||!summary.path("performanceVerdict").asText().equals(manifest.path("performanceVerdict").asText())
-                    ||!LOAD_REPORT_MANIFEST.equals(summary.path("reportManifest").asText())
-                    ||!"report/index.html".equals(summary.path("report").asText()))
-                throw new java.io.IOException("LOAD summary does not reference its committed report bundle.");
-            com.fasterxml.jackson.databind.JsonNode details=JSON.readTree(runDirectory.resolve("details/v1/manifest.json").toFile());
-            if(!details.path("complete").asBoolean(false))
-                throw new java.io.IOException("LOAD detailed metrics manifest is incomplete.");
-            required.put(manifestName,new ReportFile(manifestBytes.length,sha256(manifestBytes)));
         }
-        return required;
+        retainVerifiedCheckpoints(root,candidates,result);
+        return result;
+    }
+
+    private static void retainVerifiedCheckpoints(Path root,List<Path> candidates,LoadReportInventory result) throws Exception {
+        Map<String,List<CheckpointCandidate>> byScope=new LinkedHashMap<>();
+        for(Path candidate:candidates) {
+            String relative=root.relativize(candidate).toString().replace('\\','/');
+            String runId=checkpointRunId(relative);
+            if(runId==null||result.completeSuccessfulRuns.contains(runId)||Files.isSymbolicLink(candidate)
+                    ||!Files.isRegularFile(candidate,LinkOption.NOFOLLOW_LINKS)||Files.size(candidate)>MAX_ENTRY_BYTES)continue;
+            try {
+                byte[] bytes=readProducerBytes(candidate);
+                com.fasterxml.jackson.databind.JsonNode checkpoint=JSON.readTree(bytes);
+                String scope=checkpoint.path("scope").asText("");
+                long sequence=checkpoint.path("sequence").asLong(-1L);
+                String state=checkpoint.path("state").asText("");
+                String filename="checkpoint-"+String.format(Locale.ROOT,"%020d",sequence)+".json";
+                String directory=relative.split("/")[3];
+                boolean aggregate="aggregate".equals(directory)&&"aggregate".equals(scope);
+                boolean workload=directory.equals(workloadCheckpointDirectoryName(scope))&&!"aggregate".equals(scope);
+                if(!LOAD_CHECKPOINT_SCHEMA.equals(checkpoint.path("schemaVersion").asText())
+                        ||!runId.equals(checkpoint.path("runId").asText())||scope.isBlank()||sequence<1L
+                        ||!filename.equals(candidate.getFileName().toString())
+                        ||!("CHECKPOINT".equals(state)||"FINAL_CHECKPOINT".equals(state))
+                        ||checkpoint.path("finalized").asBoolean()!="FINAL_CHECKPOINT".equals(state)
+                        ||!checkpoint.path("capturedAt").isTextual()||!checkpoint.path("payload").path("metrics").isObject()
+                        ||!aggregate&&!workload
+                        ||!checkpointDigestMatches(bytes,checkpoint.path("integritySha256").asText("")))continue;
+                result.verifiedCheckpoints.add(relative);
+                byScope.computeIfAbsent(runId+"\u0000"+scope,key->new ArrayList<>()).add(new CheckpointCandidate(relative,sequence));
+            } catch(Exception invalid) { /* Preserve only individually verified recovery generations. */ }
+        }
+        for(List<CheckpointCandidate> candidatesForScope:byScope.values())
+            candidatesForScope.stream().sorted(Comparator.comparingLong(CheckpointCandidate::sequence).reversed())
+                    .limit(2).forEach(value->result.retainedCheckpoints.add(value.path));
+    }
+
+    private static final String LOAD_CHECKPOINT_SCHEMA="att-load-metrics-checkpoint/v2";
+    private record CheckpointCandidate(String path,long sequence) {}
+
+    private static String checkpointRunId(String path) {
+        String[] parts=path.split("/");
+        return parts.length==5&&"load".equals(parts[0])&&"checkpoints".equals(parts[2])
+                &&("aggregate".equals(parts[3])||parts[3].matches("workload-[A-Za-z0-9_.-]+-[a-f0-9]{64}"))
+                &&parts[4].matches("checkpoint-[0-9]{20}\\.json")?parts[1]:null;
+    }
+
+    private static String loadRunId(String path) {
+        String[] parts=path.split("/");return parts.length>=2&&"load".equals(parts[0])?parts[1]:null;
+    }
+
+    private static boolean isLoadReportPayload(String path) {
+        String[] parts=path.split("/");
+        if(parts.length<3||!"load".equals(parts[0]))return false;
+        String relative=path.substring(("load/"+parts[1]+"/").length());
+        return Set.of("load-summary.json","load-summary.yaml",LOAD_REPORT_MANIFEST).contains(relative)
+                ||relative.startsWith("report/")||relative.startsWith("details/");
+    }
+
+    private static String workloadCheckpointDirectoryName(String workloadId) throws Exception {
+        String safe=workloadId.replaceAll("[^A-Za-z0-9_.-]","_");
+        return "workload-"+safe+"-"+sha256(workloadId.getBytes(StandardCharsets.UTF_8));
+    }
+
+    private static boolean checkpointDigestMatches(byte[] bytes,String expected) throws Exception {
+        if(!expected.matches("[a-f0-9]{64}"))return false;
+        byte[] marker=",\"integritySha256\":\"".getBytes(StandardCharsets.US_ASCII);
+        int start=lastIndexOf(bytes,marker);
+        if(start<0)return false;
+        int digestStart=start+marker.length;
+        if(bytes.length!=digestStart+66||bytes[digestStart+64]!='"'||bytes[digestStart+65]!='}')return false;
+        for(int index=digestStart;index<digestStart+64;index++) {
+            int value=bytes[index]&0xff;
+            if(!(value>='0'&&value<='9')&&!(value>='a'&&value<='f'))return false;
+        }
+        byte[] envelope=java.util.Arrays.copyOf(bytes,start+1);envelope[start]='}';
+        return expected.equals(sha256(envelope));
+    }
+
+    private static int lastIndexOf(byte[] source,byte[] target) {
+        for(int start=source.length-target.length;start>=0;start--) {
+            int offset=0;while(offset<target.length&&source[start+offset]==target[offset])offset++;
+            if(offset==target.length)return start;
+        }
+        return -1;
     }
 
     private static byte[] readProducerBytes(Path file) throws java.io.IOException {
@@ -510,14 +658,54 @@ final class ArtifactArchive {
         return true;
     }
 
-    private static void writeEntry(ZipOutputStream zip, String path, byte[] bytes) throws Exception {
-        // STORED makes size/ratio limits deterministic even for highly repetitive legitimate logs.
-        var crc = new java.util.zip.CRC32(); crc.update(bytes);
-        ZipEntry entry = new ZipEntry(path); entry.setMethod(ZipEntry.STORED); entry.setSize(bytes.length); entry.setCompressedSize(bytes.length); entry.setCrc(crc.getValue());
-        zip.putNextEntry(entry); zip.write(bytes); zip.closeEntry();
+    private static void writeEntry(ArtifactZipWriter zip,String path,byte[] bytes,Path staging,
+                                   ServerConfig.ArchiveCompression policy) throws Exception {
         ArtifactMetricsRecorder metrics=ArtifactMetricsRecorder.CURRENT.get();
-        if(metrics!=null)metrics.value.zipWriteInputBytes=add(metrics.value.zipWriteInputBytes,bytes.length);
+        String mode=policy.mode;
+        boolean tryDeflate="deflate".equals(mode)||("auto".equals(mode)&&bytes.length>=AUTO_MIN_BYTES);
+        Path compressed=null;
+        long compressedSize=bytes.length;
+        int method=ArtifactZipWriter.STORED;
+        if(tryDeflate) {
+            compressed=Files.createTempFile(staging,".deflate-",".tmp");
+            Deflater deflater=new Deflater(policy.level,true);
+            long started=System.nanoTime();
+            try(OutputStream file=Files.newOutputStream(compressed);
+                DeflaterOutputStream output=new DeflaterOutputStream(file,deflater,8192,true)) {
+                output.write(bytes);
+                output.finish();
+            } catch(Exception failure) {
+                Files.deleteIfExists(compressed);throw failure;
+            } finally { deflater.end(); }
+            if(metrics!=null)metrics.value.compressionDurationMs=addDouble(metrics.value.compressionDurationMs,
+                    (System.nanoTime()-started)/1_000_000.0d);
+            compressedSize=Files.size(compressed);
+            String fallback=null;
+            if(compressedSize>bytes.length+DEFLATE_STAGING_OVERHEAD_BYTES) fallback="staging_bound";
+            else if(bytes.length>Math.max(1L,compressedSize)*200L) fallback="ratio_limit";
+            else if("auto".equals(mode)&&100L*(bytes.length-compressedSize)<(long)AUTO_MIN_SAVINGS_PERCENT*bytes.length)
+                fallback="low_gain";
+            if(fallback==null)method=ArtifactZipWriter.DEFLATED;
+            else {
+                if(metrics!=null) {
+                    metrics.value.compressionFallbackCount=add(metrics.value.compressionFallbackCount,1L);
+                    Map<String,Long> reasons=metrics.value.compressionFallbackReasons;
+                    reasons.put(fallback,add(reasons.get(fallback),1L));
+                }
+                Files.deleteIfExists(compressed);compressed=null;compressedSize=bytes.length;
+            }
+        }
+        zip.write(path,bytes,method,compressed,compressedSize);
+        if(metrics!=null) {
+            metrics.value.zipWriteInputBytes=add(metrics.value.zipWriteInputBytes,bytes.length);
+            metrics.value.compressedPayloadBytes=add(metrics.value.compressedPayloadBytes,compressedSize);
+            if(method==ArtifactZipWriter.DEFLATED)metrics.value.deflatedEntries=add(metrics.value.deflatedEntries,1L);
+            else metrics.value.storedEntries=add(metrics.value.storedEntries,1L);
+        }
+        if(compressed!=null)Files.deleteIfExists(compressed);
     }
+
+    private static double addDouble(Double current,double next) { return (current==null?0.0d:current)+next; }
 
     private static void countVerificationRead(long bytes) {
         ArtifactMetricsRecorder metrics=ArtifactMetricsRecorder.CURRENT.get();

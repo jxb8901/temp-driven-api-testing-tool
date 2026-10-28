@@ -86,6 +86,10 @@ Archive 狀態分別回報為
 `PENDING`、`ARCHIVING`、`READY`、`FAILED`，或受 export policy 省略。Artifact
 不存在或被省略時，inline 執行結果仍然保留。
 
+Server 會分別驗證 report 完整性、execution status、performance verdict 及 archive status。只有 canonical report bundle 通過完整性驗證而且 execution status 為 `PASS` 時，才會從 ZIP 排除一般 recovery checkpoint；SUT threshold 的 `NOT_MET` 會獨立報告，不會改變此規則。即使 cancelled 或 runtime-error 的 run 已提交完整診斷 report，仍會保留每個 scope 最新兩代且 integrity 已驗證的 checkpoint。Report 缺失、不完整或損壞時會整組省略，archive 標記為 incomplete，並保留可用的 verified checkpoint。刻意排除 checkpoint 不會新增 archive omission。此判斷在驗證 report 後進行，不會在 publication 前刪除 Worker source files。
+
+大型 aggregate 與單一 workload detail collection 只有在恰好一個 workload，且完整 collection value 完全相同時，才共用 `details/v1/shared/` 中的 `att-load-detail-series/v2` sidecar。Aggregate 和 workload reference 各自保留 scope 及 target metadata。任何 value 不同或有多個 workload 時，保留分別 scoped 的 v1 payload files。Detail manifest 會記錄重用的 shared files 數量及精確省下的序列化 bytes。ZIP manifest 和既有 bounded entry 檢查仍會保護 shared bytes。
+
 Inline 結果會說明 `LoadMetrics` 最多只保留 4,096 個一秒 bucket 的 rolling
 window。`LoadWindowMetrics` 會回報實際涵蓋範圍、bin 寬度及有界 series 容量。
 長時間執行不可被描述為保留了完整期間的每秒趨勢，因較早 bucket 可能已被覆寫。

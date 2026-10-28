@@ -16,6 +16,7 @@ final class LoadReportDetailWriter {
     static final String MANIFEST_SCHEMA = "att-load-detail-manifest/v1";
     static final String REFERENCE_SCHEMA = "att-load-detail-reference/v1";
     static final String SERIES_SCHEMA = "att-load-detail-series/v1";
+    static final String SHARED_SERIES_SCHEMA = "att-load-detail-series/v2";
     static final String MANIFEST_PATH = "details/v1/manifest.json";
     private static final int MAX_INLINE_ITEMS = 32;
     private static final int MAX_CHUNK_BYTES = 4 * 1024 * 1024;
@@ -29,12 +30,14 @@ final class LoadReportDetailWriter {
     static long write(Path runDirectory, Map<String, Object> summary) throws IOException {
         DetailBudget budget = new DetailBudget(runDirectory);
         List<Map<String, Object>> records = new ArrayList<Map<String, Object>>();
+        Map<String,Object> sharedTargets=identicalSingleWorkloadSeries(summary);
+        SharedSeriesStore sharedStore=new SharedSeriesStore();
 
         Object rawAggregateMetrics = summary.get("metrics");
         if (rawAggregateMetrics instanceof Map) {
             Map<String, Object> aggregateMetrics = mutableMap(castMap(rawAggregateMetrics));
             List<Map<String, Object>> aggregateSeries = externalizeCollections(aggregateMetrics, "metrics", "aggregate", null,
-                    "details/v1/aggregate", budget);
+                    "details/v1/aggregate", budget, sharedTargets, sharedStore);
             if (!aggregateSeries.isEmpty()) {
                 aggregateMetrics.put("detailSeries", reference(aggregateSeries));
                 records.addAll(aggregateSeries);
@@ -56,7 +59,8 @@ final class LoadReportDetailWriter {
                 List<Map<String, Object>> workloadSeries = new ArrayList<Map<String, Object>>();
                 if (rawMetrics instanceof Map) {
                     Map<String, Object> metrics = mutableMap(castMap(rawMetrics));
-                    workloadSeries = externalizeCollections(metrics, "metrics", "workload", workloadId, workloadDir, budget);
+                    workloadSeries = externalizeCollections(metrics, "metrics", "workload", workloadId, workloadDir, budget,
+                            sharedTargets, sharedStore);
                     if (!workloadSeries.isEmpty()) metrics.put("detailSeries", reference(workloadSeries));
                     row.put("metrics", metrics);
                 }
@@ -75,6 +79,11 @@ final class LoadReportDetailWriter {
         Map<String, Object> manifest = fields("schemaVersion", MANIFEST_SCHEMA, "complete", Boolean.TRUE,
                 "aggregate", fields("series", aggregateSeries(summary)), "workloads", workloadRecords,
                 "series", records);
+        if(!sharedTargets.isEmpty()) {
+            manifest.put("sharedSeriesSchema",SHARED_SERIES_SCHEMA);
+            manifest.put("sharedSeriesReusedFileCount",sharedStore.reusedFileCount);
+            manifest.put("sharedSeriesSavingsBytes",sharedStore.reusedBytes);
+        }
         byte[] manifestBytes = writeManifestWithAccurateBudget(manifest, budget);
         budget.write(MANIFEST_PATH, manifestBytes, MAX_MANIFEST_BYTES);
         summary.put("schemaVersion", att.Version.LOAD_SUMMARY_SCHEMA_V1_3);
@@ -110,43 +119,150 @@ final class LoadReportDetailWriter {
         return fields("schemaVersion", REFERENCE_SCHEMA, "complete", Boolean.TRUE, "series", series);
     }
 
+    private static Map<String,Object> identicalSingleWorkloadSeries(Map<String,Object> summary) {
+        Object rawAggregate=summary.get("metrics"),rawWorkloads=summary.get("workloads");
+        if(!(rawAggregate instanceof Map)||!(rawWorkloads instanceof Map)||((Map<?,?>)rawWorkloads).size()!=1)
+            return Collections.emptyMap();
+        Object onlyWorkload=((Map<?,?>)rawWorkloads).values().iterator().next();
+        if(!(onlyWorkload instanceof Map)||!(((Map<?,?>)onlyWorkload).get("metrics") instanceof Map))return Collections.emptyMap();
+        Map<String,Object> aggregate=new LinkedHashMap<>(),perWorkload=new LinkedHashMap<>();
+        collectLargeSeries(castMap(rawAggregate),"metrics",aggregate);
+        collectLargeSeries(castMap(((Map<?,?>)onlyWorkload).get("metrics")),"metrics",perWorkload);
+        Map<String,Object> shared=new LinkedHashMap<>();
+        for(Map.Entry<String,Object> entry:aggregate.entrySet())
+            if(perWorkload.containsKey(entry.getKey())&&sameSeriesBytes(entry.getValue(),perWorkload.get(entry.getKey())))
+                shared.put(entry.getKey(),entry.getValue());
+        return shared;
+    }
+
+    private static boolean sameSeriesBytes(Object first,Object second) {
+        if(!java.util.Objects.deepEquals(first,second))return false;
+        try { return java.util.Arrays.equals(JsonSupport.mapper().writeValueAsBytes(first),JsonSupport.mapper().writeValueAsBytes(second)); }
+        catch(IOException invalid) { return false; }
+    }
+
+    private static void collectLargeSeries(Map<String,Object> values,String target,Map<String,Object> found) {
+        for(Map.Entry<String,Object> entry:values.entrySet()) {
+            if("detailSeries".equals(entry.getKey()))continue;
+            collectLargeSeriesValue(entry.getValue(),target+"/"+pointer(entry.getKey()),found);
+        }
+    }
+
+    private static void collectLargeSeriesValue(Object value,String target,Map<String,Object> found) {
+        if(value instanceof Map<?,?>) {
+            Map<?,?> source=(Map<?,?>)value;
+            if(source.size()>MAX_INLINE_ITEMS&&isMetricMapSeries(target)) {found.put(target,value);return;}
+            for(Map.Entry<?,?> entry:source.entrySet())if(entry.getKey() instanceof String)
+                collectLargeSeriesValue(entry.getValue(),target+"/"+pointer((String)entry.getKey()),found);
+        } else if(value instanceof List<?>) {
+            List<?> list=(List<?>)value;
+            if(list.size()>MAX_INLINE_ITEMS){found.put(target,value);return;}
+            for(int index=0;index<list.size();index++)collectLargeSeriesValue(list.get(index),target+"/"+index,found);
+        }
+    }
+
+    private static final class SharedSeriesStore {
+        private final Map<String,String> written=new LinkedHashMap<>();
+        private long reusedFileCount;
+        private long reusedBytes;
+
+        List<String> writeMapChunks(Map<String,Object> source,DetailBudget budget) throws IOException {
+            List<Map<String,Object>> chunks=new ArrayList<>();Map<String,Object> chunk=new LinkedHashMap<>();int payloadBytes=2;
+            for(Map.Entry<String,Object> entry:source.entrySet()) {
+                int itemBytes=JsonSupport.mapper().writeValueAsBytes(fields(entry.getKey(),entry.getValue())).length+1;
+                if(itemBytes>MAX_CHUNK_PAYLOAD_BYTES)throw new IOException("A shared LOAD metric map item exceeds the detailed artifact file budget.");
+                if(!chunk.isEmpty()&&payloadBytes+itemBytes>MAX_CHUNK_PAYLOAD_BYTES){chunks.add(chunk);chunk=new LinkedHashMap<>();payloadBytes=2;}
+                chunk.put(entry.getKey(),entry.getValue());payloadBytes+=itemBytes;
+            }
+            if(!chunk.isEmpty())chunks.add(chunk);
+            return writeChunks("map",source.size(),chunks,budget);
+        }
+
+        List<String> writeListChunks(List<Object> source,DetailBudget budget) throws IOException {
+            List<List<Object>> chunks=new ArrayList<>();List<Object> chunk=new ArrayList<>();int payloadBytes=2;
+            for(Object item:source) {
+                int itemBytes=JsonSupport.mapper().writeValueAsBytes(Collections.singletonList(item)).length;
+                if(itemBytes>MAX_CHUNK_PAYLOAD_BYTES)throw new IOException("A shared LOAD metric list item exceeds the detailed artifact file budget.");
+                if(!chunk.isEmpty()&&payloadBytes+itemBytes>MAX_CHUNK_PAYLOAD_BYTES){chunks.add(chunk);chunk=new ArrayList<>();payloadBytes=2;}
+                chunk.add(item);payloadBytes+=itemBytes;
+            }
+            if(!chunk.isEmpty())chunks.add(chunk);
+            return writeChunks("list",source.size(),chunks,budget);
+        }
+
+        private List<String> writeChunks(String kind,int total,List<?> chunks,DetailBudget budget) throws IOException {
+            List<String> paths=new ArrayList<>();int part=0;
+            for(Object items:chunks) {
+                int current=++part;
+                byte[] payload=JsonSupport.mapper().writeValueAsBytes(items);
+                Map<String,Object> file=fields("schemaVersion",SHARED_SERIES_SCHEMA,"kind",kind,"part",current,
+                        "parts",chunks.size(),"total",total,"contentSha256",sha256(payload),"items",items);
+                byte[] bytes=JsonSupport.mapper().writeValueAsBytes(file);
+                if(bytes.length>MAX_CHUNK_BYTES)throw new IOException("A shared LOAD metric chunk exceeded its detailed artifact file budget.");
+                String path="details/v1/shared/series-"+sha256(bytes)+".json";
+                if(!written.containsKey(path)){budget.write(path,bytes,MAX_CHUNK_BYTES);written.put(path,path);}
+                else {reusedFileCount++;reusedBytes=add(reusedBytes,bytes.length);}
+                paths.add(path);
+            }
+            return paths;
+        }
+    }
+
+    private static long add(long current,long amount) {
+        return amount>Long.MAX_VALUE-current?Long.MAX_VALUE:current+amount;
+    }
+
+    private static String sha256(byte[] bytes) throws IOException {
+        try {
+            byte[] digest=java.security.MessageDigest.getInstance("SHA-256").digest(bytes);
+            StringBuilder value=new StringBuilder(64);for(byte item:digest)value.append(String.format(java.util.Locale.ROOT,"%02x",item&0xff));
+            return value.toString();
+        } catch(java.security.NoSuchAlgorithmException unavailable) { throw new IOException("SHA-256 is unavailable for shared LOAD detail files.",unavailable); }
+    }
+
     private static List<Map<String, Object>> externalizeCollections(Map<String, Object> metrics, String root,
-            String scope, String workloadId, String directory, DetailBudget budget) throws IOException {
+            String scope, String workloadId, String directory, DetailBudget budget,
+            Map<String,Object> sharedTargets,SharedSeriesStore sharedStore) throws IOException {
         List<Map<String, Object>> records = new ArrayList<Map<String, Object>>();
         CollectionSequence sequence = new CollectionSequence();
         for (Map.Entry<String, Object> entry : new ArrayList<Map.Entry<String, Object>>(metrics.entrySet())) {
             if ("detailSeries".equals(entry.getKey())) continue;
             metrics.put(entry.getKey(), externalize(entry.getValue(), root + "/" + pointer(entry.getKey()), scope,
-                    workloadId, directory, budget, records, sequence));
+                    workloadId, directory, budget, records, sequence, sharedTargets, sharedStore));
         }
         return records;
     }
 
     private static Object externalize(Object value, String target, String scope, String workloadId, String directory,
                                       DetailBudget budget, List<Map<String, Object>> records,
-                                      CollectionSequence sequence) throws IOException {
+                                      CollectionSequence sequence,Map<String,Object> sharedTargets,
+                                      SharedSeriesStore sharedStore) throws IOException {
         if (value instanceof Map) {
             Map<String, Object> map = mutableMap(castMap(value));
             if (map.size() > MAX_INLINE_ITEMS && isMetricMapSeries(target)) {
-                List<String> files = writeMapChunks(map, target, scope, workloadId, directory, budget, sequence.next());
-                records.add(seriesRecord(target, scope, workloadId, "map", map.size(), files));
+                boolean shared=sharedTargets.containsKey(target);
+                List<String> files = shared?sharedStore.writeMapChunks(map,budget):
+                        writeMapChunks(map, target, scope, workloadId, directory, budget, sequence.next());
+                records.add(seriesRecord(target, scope, workloadId, "map", map.size(), files,shared));
                 return previewMap(map, MAX_INLINE_ITEMS);
             }
             for (Map.Entry<String, Object> entry : new ArrayList<Map.Entry<String, Object>>(map.entrySet()))
                 map.put(entry.getKey(), externalize(entry.getValue(), target + "/" + pointer(entry.getKey()), scope,
-                        workloadId, directory, budget, records, sequence));
+                        workloadId, directory, budget, records, sequence,sharedTargets,sharedStore));
             return map;
         }
         if (value instanceof List) {
             List<Object> list = mutableList((List<?>) value);
             if (list.size() > MAX_INLINE_ITEMS) {
-                List<String> files = writeListChunks(list, target, scope, workloadId, directory, budget, sequence.next());
-                records.add(seriesRecord(target, scope, workloadId, "list", list.size(), files));
+                boolean shared=sharedTargets.containsKey(target);
+                List<String> files = shared?sharedStore.writeListChunks(list,budget):
+                        writeListChunks(list, target, scope, workloadId, directory, budget, sequence.next());
+                records.add(seriesRecord(target, scope, workloadId, "list", list.size(), files,shared));
                 return previewList(list, MAX_INLINE_ITEMS);
             }
             for (int index = 0; index < list.size(); index++)
                 list.set(index, externalize(list.get(index), target + "/" + index, scope, workloadId, directory,
-                        budget, records, sequence));
+                        budget, records, sequence,sharedTargets,sharedStore));
             return list;
         }
         return value;
@@ -154,10 +270,16 @@ final class LoadReportDetailWriter {
 
     private static Map<String, Object> seriesRecord(String target, String scope, String workloadId,
                                                     String kind, int count, List<String> files) {
+        return seriesRecord(target,scope,workloadId,kind,count,files,false);
+    }
+
+    private static Map<String, Object> seriesRecord(String target, String scope, String workloadId,
+                                                    String kind, int count, List<String> files,boolean shared) {
         Map<String, Object> record = fields("scope", scope, "target", target, "kind", kind,
                 "count", count, "inlinePreviewCount", Math.min(MAX_INLINE_ITEMS, count),
                 "complete", Boolean.TRUE, "files", files);
         if (workloadId != null) record.put("workloadId", workloadId);
+        if(shared)record.put("sharedContent",Boolean.TRUE);
         return record;
     }
 

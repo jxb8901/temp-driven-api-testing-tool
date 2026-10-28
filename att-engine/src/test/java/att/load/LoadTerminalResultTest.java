@@ -122,6 +122,19 @@ class LoadTerminalResultTest {
         assertFalse(diagnostics.containsKey("primaryError"));
         assertFalse(json.writeValueAsString(compact).contains("business-payload"));
         assertTrue(json.writeValueAsBytes(compact).length < 48 * 1024);
+
+        Map<String,Object> legacyEvidence = fields("skippedSuccessQuotaCount", 0L,
+                "skippedFailureQuotaCount", 0L, "skippedUnclassifiedQuotaCount", 1L,
+                "combinedQuotaExceeded", Boolean.TRUE,
+                "policy", fields("quotaMode", "legacyCombined", "maxSamples", 1));
+        LoadRunResult legacy = new LoadRunResult("legacy-quota-run", scenario,
+                Instant.ofEpochMilli(1_000L), Instant.ofEpochMilli(2_000L), metrics.snapshot(),
+                LoadThresholdSummary.empty(), legacyEvidence);
+        Map<?,?> legacyDiagnostics = (Map<?,?>) legacy.toTerminalSummary(null, "FAILED").get("diagnostics");
+        Map<?,?> legacyNotice = (Map<?,?>) ((java.util.List<?>) legacyDiagnostics.get("secondaryNotices")).get(0);
+        assertEquals("load.evidence.maxSamples", legacyNotice.get("limitName"),
+                "Legacy combined denials, including outcome-unclassified reservations, name the shared cap");
+        assertEquals(1L, legacyNotice.get("observed"));
     }
 
     @Test void preparationDeadlineAndConnectionBudgetArePrimaryExecutionErrors() {

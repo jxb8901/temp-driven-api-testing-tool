@@ -99,6 +99,10 @@ preview/download routes. Archive states are reported as
 `PENDING`, `ARCHIVING`, `READY`, `FAILED`, or omitted by export policy. Missing
 or omitted artifacts do not remove the inline outcome.
 
+The Server validates report completeness independently from the run's execution status, performance verdict and archive status. It excludes routine recovery checkpoints only when the canonical report bundle is verified complete and execution status is `PASS`; a `NOT_MET` performance verdict does not change this policy because SUT thresholds are reported separately. A cancelled or runtime-error run retains the latest two integrity-verified checkpoint generations per scope even when it committed a complete diagnostic report. An absent, incomplete or corrupt report is omitted as a bundle, and the archive is marked incomplete while verified checkpoints remain available. Intentional checkpoint exclusion does not create an archive omission. This decision happens after report verification and never deletes Worker source files before publication.
+
+Large aggregate and single-workload detail collections share a `details/v1/shared/` sidecar with `att-load-detail-series/v2` only when there is exactly one workload and the complete collection values match. Aggregate and workload references keep their own scope and target metadata. Any value mismatch or multi-workload run keeps separately scoped v1 payload files. The detail manifest reports the number of reused shared files and exact serialized bytes saved. The ZIP manifest and existing bounded entry checks continue to protect the shared bytes.
+
 The inline result reports that `LoadMetrics` retains a rolling window of at
 most 4,096 one-second buckets. `LoadWindowMetrics` reports its actual coverage,
 bin width, and bounded series capacity. A long run must not be described as

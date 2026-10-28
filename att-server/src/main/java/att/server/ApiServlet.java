@@ -537,17 +537,26 @@ public final class ApiServlet extends HttpServlet {
         } finally {if(!handedOff)runtime.streamSlots.release();}
     }
     private void stream(AsyncContext async,String jobId,JobEvents journal,long cursor,Path outputDirectory,Path packageRoot,String sessionHash){
-        long lastWrite=System.nanoTime();java.util.concurrent.ArrayBlockingQueue<Boolean> wakeup=new java.util.concurrent.ArrayBlockingQueue<>(1);
+        long lastWrite=System.nanoTime();String lastJournalNotice=null;java.util.concurrent.ArrayBlockingQueue<Boolean> wakeup=new java.util.concurrent.ArrayBlockingQueue<>(1);
         AutoCloseable subscription=journal.listen(event->wakeup.offer(Boolean.TRUE));wakeup.offer(Boolean.TRUE);
         try(PrintWriter out=async.getResponse().getWriter()){
             while(true){
                 wakeup.poll(15,TimeUnit.SECONDS);
                 if(sessionHash!=null&&!runtime.auth.sessionStillValid(sessionHash))break;
+                Map<String,Object> journalNotice=journal.diagnostic();
+                if(journalNotice!=null) {
+                    String fingerprint=journalNotice.get("code")+"|"+journalNotice.get("journalPersistence")+"|"+journalNotice.get("summary");
+                    if(!fingerprint.equals(lastJournalNotice)) {
+                        out.print("event: diagnostic\ndata: "+ServerRuntime.JSON.writeValueAsString(journalNotice)+"\n\n");
+                        out.flush();if(out.checkError())return;lastWrite=System.nanoTime();lastJournalNotice=fingerprint;
+                    }
+                }
                 List<Map<String,Object>> events=journal.after(cursor,100);
                 for(Map<String,Object> event:events){long id=((Number)event.get("id")).longValue();Object projected=runtime.publicEventData(event.get("data"),outputDirectory,packageRoot);if(projected instanceof com.fasterxml.jackson.databind.node.ObjectNode node && journal.truncatedHistory() && id==journal.oldestId()){node.put("historyTruncated",true);node.set("historyLimit",ServerRuntime.JSON.valueToTree(att.server.api.LimitDiagnostic.create("ATT-JOURNAL-HISTORY-EVICTED","Earlier Job events are outside the retained journal window","server.maxEventsPerJob",runtime.config.maxEventsPerJob,journal.oldestId()-1,"server.eventJournal",att.server.api.LimitOutcome.HISTORY_EVICTED,"presentation","Use pagination or retained report artifacts for longer history",null)));}out.print("id: "+id+"\nevent: "+event.get("event")+"\ndata: "+ServerRuntime.JSON.writeValueAsString(projected)+"\n\n");cursor=id;}
                 if(!events.isEmpty()){out.flush();if(out.checkError())return;lastWrite=System.nanoTime();}
                 if(journal.hasMore(cursor)){wakeup.offer(Boolean.TRUE);continue;}
-                if(runtime.terminal(jobId)&&journal.resultDeliveredThrough(cursor)&&!journal.hasMore(cursor))break;
+                if(runtime.terminal(jobId)&&!journal.hasMore(cursor)
+                        &&(journal.resultDeliveredThrough(cursor)||journal.historyDegraded()))break;
                 if(System.nanoTime()-lastWrite>TimeUnit.SECONDS.toNanos(15)){out.print(": keepalive\n\n");out.flush();if(out.checkError())return;lastWrite=System.nanoTime();}
             }
         }catch(Exception ignored){}finally{

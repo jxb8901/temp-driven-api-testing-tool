@@ -37,4 +37,4 @@ mvn -B -ntp -pl att-server -am \
 
 The report includes across-run p50/p95, coefficient of variation, first-event time, replay time, and each raw sample. The baseline comparison reports descriptive p50/p95 append-latency and throughput ratios for matching scenarios. Treat ratios as observations, not a CI gate; control machine load and repeat noisy samples before drawing conclusions.
 
-The deterministic `JobEventsTest` suite separately covers retained IDs, cursor order and limits, concurrent job journals, slow-subscriber wake-up coalescing, and restart/replay while asynchronous compaction is pending.
+The deterministic `JobEventsTest` suite separately covers retained IDs, cursor order and limits, concurrent job journals, slow-subscriber wake-up coalescing, and restart/replay while asynchronous compaction is pending. It also uses sparse multi-gigabyte files to check bounded tail scanning, oversized and unterminated records, byte-cap compaction, and memory-only event delivery when storage headroom is exhausted. These synthetic checks do not claim a 23-hour or 100-events-per-second production soak.

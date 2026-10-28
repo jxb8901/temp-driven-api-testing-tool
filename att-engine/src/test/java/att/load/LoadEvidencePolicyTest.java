@@ -364,6 +364,94 @@ class LoadEvidencePolicyTest {
         assertFalse(capped.retainsFailureEvidence(), "retained evidence at the cap cannot be extended");
     }
 
+    @Test void stableHashSamplingIsWellDistributedAcrossSequentialIdsPrefixesAndPhases() {
+        LoadEvidencePolicy sampled=policy("mode","samples","sampleRate",0.10);
+        String observedPrefix="load-1793151008298-sub20370-arrival-";
+        int selected=0;
+        for(int i=1;i<=13824;i++)if(sampled.sampleSuccess(observedPrefix+i))selected++;
+        assertTrue(selected>1200&&selected<1560,"10% sample of observed sequential IDs should be close to rate; selected="+selected);
+        assertEquals((int)0xf6a5c420L,LoadEvidencePolicy.murmur3_32("foo".getBytes(java.nio.charset.StandardCharsets.UTF_8),0),
+                "MurmurHash3 x86 32-bit matches the published seed-0 reference vector");
+        assertEquals(sampled.sampleSuccess(observedPrefix+12345),
+                policy("mode","samples","sampleRate",0.10).sampleSuccess(observedPrefix+12345),
+                "hash selection is stable across independently resolved policies");
+        assertEquals(LoadEvidencePolicy.SUCCESS_HASH_VERSION,sampled.toMap().get("successSamplingHash"));
+        assertEquals("UTF-8",sampled.toMap().get("successSamplingEncoding"));
+
+        String[] workloads={"payment","queue","billing"};
+        String[] phases={"WARMUP","RAMP_UP","STEADY","RAMP_DOWN"};
+        for(String workload:workloads)for(String phase:phases) {
+            int groupSelected=0;
+            for(int i=1;i<=5000;i++) {
+                String id="load-run-"+workload+"-"+phase+"-arrival-"+i;
+                if(sampled.sampleSuccess(id))groupSelected++;
+            }
+            assertTrue(groupSelected>400&&groupSelected<600,
+                    workload+"/"+phase+" should not have a prefix or phase-specific sampling block: "+groupSelected);
+        }
+    }
+
+    @Test void boundedCombinedRetentionKeepsAppendOnlySamplesAcrossThePlannedRun() throws Exception {
+        LoadEvidenceStore store=new LoadEvidenceStore(policy("mode","samples","sampleRate",1.0,"maxSamples",10));
+        store.registerRunTimeline(null,0L,10000L);
+        String[] phases={"WARMUP","WARMUP","RAMP_UP","RAMP_UP","STEADY","STEADY","STEADY","RAMP_DOWN","RAMP_DOWN","RAMP_DOWN"};
+        for(int window=0;window<10;window++)for(int item=0;item<20;item++) {
+            long plannedAt=window*1000L+item;
+            String id="run-arrival-"+(window*20+item+1);
+            store.reserveSuccessEvidence(id,null,plannedAt);
+            store.onEvent(eventAt(id,ResultStatus.PASS,phases[window],plannedAt));
+        }
+        assertEquals(10,store.events().size());
+        assertEquals(10,store.events().stream().map(value->value.scheduledAtEpochMs()/1000L).distinct().count(),
+                "each retained sample remains in its original run-time window");
+        Map<String,Object> stats=store.statistics();
+        assertEquals(200L,stats.get("completedSuccessCount"));
+        assertEquals(200L,stats.get("hashQualifiedSuccessCount"));
+        assertEquals(0L,stats.get("samplingIneligibleSuccessCount"));
+        assertEquals(10,stats.get("retainedSuccessCount"));
+        assertEquals(190L,stats.get("skippedSuccessQuotaCount"));
+        assertEquals(true,stats.get("combinedQuotaExceeded"));
+        assertEquals(LoadEvidencePolicy.RETENTION_STRATEGY,
+                ((Map<?,?>)stats.get("retentionCoverage")).get("strategy"));
+        assertEquals(true,((Map<?,?>)stats.get("retentionCoverage")).get("appendOnly"));
+    }
+
+    @Test void legacyCombinedQuotaDenialsCoverSuccessFailureMixedAndOutcomeReclassification() throws Exception {
+        LoadEvidenceStore successes=new LoadEvidenceStore(policy("mode","samples","sampleRate",1.0,"maxSamples",2));
+        for(int i=0;i<3;i++) {
+            String id="success-"+i;
+            boolean reserved=successes.reserveSuccessEvidence(id);
+            if(reserved)successes.onEvent(event(id,ResultStatus.PASS));
+            else successes.onEvent(event(id,ResultStatus.PASS));
+        }
+        assertEquals(2,successes.events().size());
+        assertEquals(1L,successes.statistics().get("skippedSuccessQuotaCount"));
+        assertEquals(true,successes.statistics().get("combinedQuotaExceeded"));
+
+        LoadEvidenceStore failures=new LoadEvidenceStore(policy("mode","metrics","failure","full","maxSamples",2));
+        for(int i=0;i<3;i++) {
+            String id="failure-"+i;
+            if(failures.claimFailureEvidence(id))failures.onEvent(event(id,ResultStatus.FAIL));
+            else failures.onEvent(event(id,ResultStatus.FAIL));
+        }
+        assertEquals(2,failures.events().size());
+        assertEquals(1L,failures.statistics().get("skippedFailureQuotaCount"));
+        assertEquals(true,failures.statistics().get("combinedQuotaExceeded"));
+
+        LoadEvidenceStore mixed=new LoadEvidenceStore(policy("mode","samples","sampleRate",1.0,"maxSamples",2));
+        assertTrue(mixed.reserveSuccessEvidence("retained-success"));
+        mixed.onEvent(event("retained-success",ResultStatus.PASS));
+        assertTrue(mixed.claimFailureEvidence("retained-failure"));
+        mixed.onEvent(event("retained-failure",ResultStatus.FAIL));
+        assertFalse(mixed.reserveSuccessEvidence("denied-then-fails"));
+        assertFalse(mixed.claimFailureEvidence("denied-then-fails"));
+        mixed.onEvent(event("denied-then-fails",ResultStatus.FAIL));
+        assertEquals(2,mixed.events().size());
+        assertEquals(0L,mixed.statistics().get("skippedSuccessQuotaCount"),"one failed iteration is not double-counted as a skipped success");
+        assertEquals(1L,mixed.statistics().get("skippedFailureQuotaCount"));
+        assertEquals(0L,mixed.statistics().get("skippedUnclassifiedQuotaCount"));
+    }
+
     private static LoadEvidencePolicy policyStore(Object... values) {
         return LoadEvidencePolicy.from(scenario(values));
     }
@@ -446,6 +534,15 @@ class LoadEvidencePolicyTest {
         Files.write(caseLog, Collections.singletonList("evidence"));
         return LoadEvent.completed("run", "closed", "STEADY", id, "VU-1", 1,
                 0L, 0L, 1L, status, new EvidenceRef(workspace, caseLog, null));
+    }
+
+    private LoadEvent eventAt(String id, ResultStatus status, String phase, long scheduledAt) throws Exception {
+        Path workspace=temp.resolve(id);
+        Files.createDirectories(workspace);
+        Path caseLog=workspace.resolve("case.log");
+        Files.write(caseLog,Collections.singletonList("evidence"));
+        return LoadEvent.completed("run","arrivalRate",phase,id,null,1,scheduledAt,scheduledAt,scheduledAt+1L,
+                status,new EvidenceRef(workspace,caseLog,null));
     }
 
     private LoadEvent event(String id, String workload, ResultStatus status) throws Exception {

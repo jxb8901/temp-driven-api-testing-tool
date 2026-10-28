@@ -19,6 +19,7 @@
           "count": { "type": "integer", "minimum": 1 },
           "inlinePreviewCount": { "type": "integer", "minimum": 0, "maximum": 32 },
           "complete": { "const": true },
+          "sharedContent": { "const": true },
           "files": {
             "type": "array",
             "minItems": 1,
