@@ -1,6 +1,6 @@
 # 執行 functional test
 
-本指南使用目前 ATT 4.2.5 Local CLI，明確保留 Snapshot 建立步驟，並執行已提交的 offline Case。
+本指南使用目前 ATT 4.2.6 Local CLI，明確保留 Snapshot 建立步驟，並執行已提交的 offline Case。
 
 ## 1. 編譯 source checkout
 

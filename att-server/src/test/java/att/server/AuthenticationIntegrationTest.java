@@ -236,6 +236,7 @@ class AuthenticationIntegrationTest {
             String colleagueBasic="Basic "+Base64.getEncoder().encodeToString("basic-user:basic user secure password".getBytes(java.nio.charset.StandardCharsets.UTF_8));
             assertEquals(200,sendBasicViaTrustedProxy(client,port,"GET","/att/api/v1/jobs/"+ownedJobId,"https://att.example.test",null,colleagueBasic,null).statusCode(),"Active USERs share Jobs across accounts");
             assertEquals(403,sendWithCookie(client,port,"GET","/att/api/v1/jobs/"+ownedJobId,ownerCookie,null,null,null).statusCode(),"ADMIN accounts do not receive Job operations");
+            assertAuthorizedLiveLoadProjection(tomcat,client,port,viewerCookie,ownerCookie,colleagueBasic);
             String archiveJobId=ownedJobId;
             String artifactBase="/att/api/v1/jobs/"+archiveJobId+"/artifacts";
             long archiveDeadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(30);
@@ -405,8 +406,9 @@ class AuthenticationIntegrationTest {
             assertEquals("PASS",loadJob.path("status").asText(),"The authenticated Advanced Load REST route must validate and submit its immutable Worker scenario");
             assertEquals("att",loadJob.path("principal").asText(),"Authenticated requests must ignore caller-supplied attribution labels");
             assertFalse(loadJob.has("attributionPrincipal"),"Attribution reuses the existing principal property");
+            boolean verifyPeriodicCheckpoint=Boolean.getBoolean("att.test.liveCheckpoint");
             JsonNode longScenario=ServerRuntime.JSON.valueToTree(Map.of("schemaVersion","att-load/v1.6",
-                    "load",Map.of("users",1,"duration","30s"),"workloads",List.of(Map.of("id","cancel-resume",
+                    "load",Map.of("users",1,"duration",verifyPeriodicCheckpoint?"7m":"30s"),"workloads",List.of(Map.of("id","cancel-resume",
                             "load",Map.of("users",1),"execution",Map.of("thinkTime","500ms"),
                             "target",Map.of("type","template","id","FORM"),"inputs",Map.of("value","cancel-resume")))));
             JsonNode longDraft=postJson(port,"/att/api/v1/drafts/load",basic,
@@ -416,13 +418,69 @@ class AuthenticationIntegrationTest {
             String cancellableJobId=cancellable.path("jobId").asText();
             assertTrue(cancellableJobId.matches("J[0-9A-F]{16}"));
             long resumeAfter=assertRetainedSseEvent(port,basic,cancellableJobId);
+            long liveDeadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(20);JsonNode runningLoad;
+            do {
+                runningLoad=getJson(port,"/att/api/v1/jobs/"+cancellableJobId,basic);
+                if(runningLoad.path("loadProgress").path("counts").path("completed").asLong()>0)break;
+                Thread.sleep(100);
+            } while(System.nanoTime()<liveDeadline);
+            assertEquals("RUNNING",runningLoad.path("status").asText(),runningLoad.toString());
+            assertEquals("att-load-live-progress/v1",runningLoad.path("loadProgress").path("schemaVersion").asText());
+            assertTrue(runningLoad.path("loadProgress").path("counts").path("completed").asLong()>0,"The actual Worker must publish live counters through the Job API");
+            assertTrue(runningLoad.path("loadProgress").path("elapsedMs").asLong()>0);
+            assertLiveProgressInSse(port,basic,cancellableJobId);
+            if(verifyPeriodicCheckpoint) {
+                long checkpointDeadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(390);
+                do {
+                    runningLoad=getJson(port,"/att/api/v1/jobs/"+cancellableJobId,basic);
+                    if(runningLoad.path("loadCheckpointHistory").size()>0)break;
+                    assertEquals("RUNNING",runningLoad.path("status").asText(),"Worker must remain active while waiting for the periodic checkpoint");
+                    Thread.sleep(1000);
+                } while(System.nanoTime()<checkpointDeadline);
+                JsonNode interval=runningLoad.path("loadCheckpointHistory").path(0);
+                assertEquals("VERIFIED",interval.path("state").asText(),runningLoad.toString());
+                assertEquals(1L,interval.path("startSequence").asLong());assertEquals(2L,interval.path("endSequence").asLong());
+                assertTrue(interval.path("counts").path("completed").asLong()>0,"The validated interval contains actual Worker measurements");
+                assertFalse(interval.toString().contains("/checkpoints/"),"Worker filesystem paths are not exposed");
+                System.out.println("LOAD_LIVE_CHECKPOINT_INTEGRATION durationMs="+interval.path("durationMs").asLong()+" completed="+interval.path("counts").path("completed").asLong());
+            }
             assertEquals(200,cancelJob(port,basic,cancellableJobId),"The real Tomcat API must accept cancellation of an active Load job");
             long cancelDeadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(15);
             JsonNode cancelledJob=getJson(port,"/att/api/v1/jobs/"+cancellableJobId,basic);
             while(!"CANCELLED".equals(cancelledJob.path("status").asText())&&System.nanoTime()<cancelDeadline) {
                 Thread.sleep(20);cancelledJob=getJson(port,"/att/api/v1/jobs/"+cancellableJobId,basic);
             }
-            assertEquals("CANCELLED",cancelledJob.path("status").asText(),"The running Load job must reach a terminal cancellation state");
+            JsonNode cancellationResult=getJson(port,"/att/api/v1/jobs/"+cancellableJobId+"/result",basic);
+            assertEquals("CANCELLED",cancelledJob.path("status").asText(),"The running Load job must reach a terminal cancellation state: "+cancelledJob+" result="+cancellationResult);
+            assertTrue(cancelledJob.path("loadProgress").path("counts").path("completed").asLong()>0,"The last real Worker sample survives cancellation");
+            String resultRoute="/att/api/v1/jobs/"+cancellableJobId+"/result";
+            long resultDeadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(30);JsonNode canonicalResponse;
+            do {
+                canonicalResponse=getJson(port,resultRoute,basic);
+                if("att-load-terminal-result/v1".equals(canonicalResponse.path("result").path("summary").path("schemaVersion").asText()))break;
+                Thread.sleep(50);
+            } while(System.nanoTime()<resultDeadline);
+            JsonNode canonicalResult=canonicalResponse.path("result");
+            JsonNode canonicalSummary=canonicalResult.path("summary");
+            assertEquals("att-load-terminal-result/v1",canonicalSummary.path("schemaVersion").asText(),"Cancellation must publish the canonical compact result");
+            assertEquals("CANCELLED",canonicalSummary.path("execution").path("status").asText());
+            String summaryPath=canonicalSummary.path("archive").path("paths").path("loadSummaryJson").asText();
+            assertTrue(summaryPath.endsWith("/load-summary.json"),"terminal result="+cancellationResult+" summary="+canonicalSummary);
+            String artifactRoute="/att/api/v1/jobs/"+cancellableJobId+"/artifacts";
+            long archiveDeadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(30);JsonNode finalArchive;
+            do {
+                finalArchive=getJson(port,artifactRoute,basic);
+                if("READY".equals(finalArchive.path("archiveStatus").asText())&&finalArchive.toString().contains(summaryPath))break;
+                assertNotEquals("FAILED",finalArchive.path("archiveStatus").asText(),finalArchive.toString());
+                Thread.sleep(100);
+            } while(System.nanoTime()<archiveDeadline);
+            assertEquals("READY",finalArchive.path("archiveStatus").asText(),"The LOAD summary must become available from the terminal archive");
+            assertTrue(finalArchive.toString().contains(summaryPath),finalArchive.toString());
+            JsonNode archivedSummary=getJson(port,artifactRoute+"/view/"+summaryPath,basic);
+            assertEquals("att-load-summary/v1.3",archivedSummary.path("schemaVersion").asText());
+            assertEquals("CANCELLED",archivedSummary.path("status").asText());
+            assertEquals(canonicalSummary.path("metrics").path("completed").asLong(),archivedSummary.path("metrics").path("completed").asLong(),
+                    "The archived final report and canonical result must reconcile completed counts");
             assertLastEventIdResume(port,basic,cancellableJobId,resumeAfter);
             // Exercise the real public API behind the authenticated browser console.
             String jobId=submitJob(port,basic);
@@ -471,7 +529,7 @@ class AuthenticationIntegrationTest {
             assertEquals(200,request(port,null));assertEquals(200,get(port,"/att/ui/index.html",null));
             assertEquals(200,get(port,"/att/ui/app.js",null));
             assertEquals(200,get(port,"/att/api/v1/health",null));
-            assertEquals("4.2.5",getJson(port,"/att/api/v1/version",null).path("version").asText());
+            assertEquals("4.2.6",getJson(port,"/att/api/v1/version",null).path("version").asText());
             assertEquals("debug",getJson(port,"/att/api/v1/packages/debug",null).path("packageId").asText());
             JsonNode resources=getJson(port,"/att/api/v1/packages/debug/resources?type=template",null);
             String resourceId=resources.path("items").get(0).path("resourceId").asText();
@@ -766,6 +824,17 @@ class AuthenticationIntegrationTest {
             return Long.parseLong(line.substring(4));
         } finally {c.disconnect();}
     }
+    private static void assertLiveProgressInSse(int port,String authorization,String id)throws Exception {
+        HttpURLConnection c=(HttpURLConnection)new URL("http://127.0.0.1:"+port+"/att/api/v1/jobs/"+id+"/events").openConnection();
+        c.setReadTimeout(10000);c.setRequestProperty("Authorization",authorization);assertEquals(200,c.getResponseCode());
+        try(var reader=new java.io.BufferedReader(new java.io.InputStreamReader(c.getInputStream(),java.nio.charset.StandardCharsets.UTF_8))) {
+            String line;boolean found=false;while((line=reader.readLine())!=null)if(line.startsWith("data: ")) {
+                JsonNode progress=ServerRuntime.JSON.readTree(line.substring(6)).path("loadProgress");
+                if(progress.path("counts").path("completed").asLong()>0){assertEquals("att-load-live-progress/v1",progress.path("schemaVersion").asText());found=true;break;}
+            }
+            assertTrue(found,"The real Worker progress must be replayed through the authorized SSE journal");
+        } finally {c.disconnect();}
+    }
     private static void assertLastEventIdResume(int port,String authorization,String id,long cursor)throws Exception {
         HttpURLConnection c=(HttpURLConnection)new URL("http://127.0.0.1:"+port+"/att/api/v1/jobs/"+id+"/events").openConnection();
         c.setReadTimeout(10000);if(authorization!=null)c.setRequestProperty("Authorization",authorization);
@@ -886,6 +955,34 @@ class AuthenticationIntegrationTest {
         assertTrue(output.toString(java.nio.charset.StandardCharsets.UTF_8).contains("Remote Run(anonym)"),"Remote job output displays the Server-formatted principal");
     }
     private static void restore(String old){if(old==null)System.clearProperty("att.server.config");else System.setProperty("att.server.config",old);}
+    private static void assertAuthorizedLiveLoadProjection(Tomcat tomcat,HttpClient client,int port,String userCookie,String adminCookie,String colleagueBasic)throws Exception {
+        Context context=(Context)tomcat.getHost().findChild("/att");Object runtime=context.getServletContext().getAttribute(ServerBootstrap.RUNTIME);ClassLoader loader=runtime.getClass().getClassLoader();
+        Object config=field(runtime,"config");Path dataDir=(Path)field(config,"dataDir");int maxEvents=(Integer)field(config,"maxEventsPerJob");
+        String id="J"+java.util.UUID.randomUUID().toString().replace("-","").substring(0,16).toUpperCase();Path directory=Files.createDirectories(dataDir.resolve("jobs").resolve(id));
+        Class<?> journalType=Class.forName("att.server.JobEvents",true,loader);var journalConstructor=journalType.getDeclaredConstructor(Path.class,int.class);journalConstructor.setAccessible(true);Object journal=journalConstructor.newInstance(directory.resolve("events.jsonl"),maxEvents);
+        Class<?> requestType=Class.forName("att.server.api.WorkerRequest",true,loader);Object request=requestType.getConstructor().newInstance();
+        Class<?> jobType=Class.forName("att.server.Job",true,loader);var constructor=jobType.getDeclaredConstructor(String.class,String.class,String.class,String.class,requestType,journalType);constructor.setAccessible(true);Object job=constructor.newInstance(id,"load","p","viewer",request,journal);
+        Object store=field(runtime,"store");var insert=store.getClass().getDeclaredMethod("insert",jobType,String.class);insert.setAccessible(true);insert.invoke(store,job,"{}");
+        @SuppressWarnings("unchecked") Map<String,Object> jobs=(Map<String,Object>)field(runtime,"jobs");jobs.put(id,job);
+        Map<String,Object> intervalCounts=new java.util.LinkedHashMap<>();for(String key:List.of("scheduled","started","completed","success","failure","runtimeError","otherOutcome","dropped","measuredScheduled","measuredStarted","measuredCompleted","measuredSuccess","measuredFailure","measuredRuntimeError","measuredOtherOutcome","measuredDropped"))intervalCounts.put(key,1L);
+        Map<String,Object> interval=Map.of("schemaVersion","att-load-checkpoint-interval/v1","state","VERIFIED","startSequence",1L,"endSequence",2L,"startAt","2026-10-27T00:00:00Z","endAt","2026-10-27T00:05:00Z","durationMs",300000L,"counts",intervalCounts,"path","/private/worker/secret");
+        Map<String,Object> sample=new java.util.LinkedHashMap<>(Map.of("schemaVersion","att-load-live-progress/v1","capturedAt","2026-10-27T00:05:00Z","elapsedMs",300000L,"phase","STEADY","counts",Map.of("completed",7L,"passed",6L),"checkpointInterval",interval,"password","secret-value"));
+        sample.put("measuredCounts",Map.of("completed",7L,"passed",6L));sample.put("rates",Map.of("completedTps",0.02));sample.put("latency",Map.of("sampleCount",0L));
+        var event=runtime.getClass().getDeclaredMethod("handleWorkerEvent",jobType,String.class);event.setAccessible(true);event.invoke(runtime,job,ServerRuntime.JSON.writeValueAsString(Map.of("type","PROGRESS","loadProgress",sample)));
+        String route="/att/api/v1/jobs/"+id;HttpResponse<String> authorized=sendWithCookie(client,port,"GET",route,userCookie,null,null,null);
+        assertEquals(200,authorized.statusCode(),authorized.body());JsonNode payload=ServerRuntime.JSON.readTree(authorized.body());
+        assertEquals(7,payload.path("loadProgress").path("counts").path("completed").asInt());assertEquals(2,payload.path("loadCheckpointHistory").get(0).path("endSequence").asInt());
+        assertFalse(authorized.body().contains("secret-value"));assertFalse(authorized.body().contains("/private/worker"));
+        assertEquals(200,sendBasicViaTrustedProxy(client,port,"GET",route,"https://att.example.test",null,colleagueBasic,null).statusCode(),"Active users can read shared Job telemetry");
+        for(String path:List.of(route,route+"/events")) {
+            assertEquals(403,sendWithCookie(client,port,"GET",path,adminCookie,null,null,null).statusCode(),"ADMIN-only access is denied: "+path);
+            assertEquals(401,send(client,port,"GET",path,null,null,null).statusCode(),"Anonymous access is denied: "+path);
+        }
+        HttpURLConnection stream=(HttpURLConnection)new URL("http://127.0.0.1:"+port+route+"/events").openConnection();stream.setConnectTimeout(3000);stream.setReadTimeout(5000);stream.setRequestProperty("Cookie",userCookie);
+        try {assertEquals(200,stream.getResponseCode());try(var reader=new java.io.BufferedReader(new java.io.InputStreamReader(stream.getInputStream(),java.nio.charset.StandardCharsets.UTF_8))) {
+            String line;boolean found=false;while((line=reader.readLine())!=null){if(line.startsWith("data: ")&&line.contains("loadProgress")){assertTrue(line.contains("checkpointInterval"));assertFalse(line.contains("secret-value"));assertFalse(line.contains("/private/worker"));found=true;break;}}assertTrue(found,"Authorized SSE replays the sanitized live snapshot");
+        }} finally {stream.disconnect();jobs.remove(id);}
+    }
     private static int postBody(int port,String authorization,String contentType,String origin,String body)throws Exception {
         try(java.net.Socket socket=new java.net.Socket("127.0.0.1",port)) {socket.setSoTimeout(3000);java.io.OutputStream out=socket.getOutputStream();StringBuilder request=new StringBuilder("POST /att/api/v1/jobs/run HTTP/1.1\r\nHost: 127.0.0.1:").append(port).append("\r\nConnection: close\r\nAuthorization: ").append(authorization).append("\r\nContent-Type: ").append(contentType).append("\r\nContent-Length: ").append(body.getBytes(java.nio.charset.StandardCharsets.UTF_8).length).append("\r\n");if(origin!=null)request.append("Origin: ").append(origin).append("\r\n");request.append("\r\n").append(body);out.write(request.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));out.flush();String status=new java.io.BufferedReader(new java.io.InputStreamReader(socket.getInputStream(),java.nio.charset.StandardCharsets.UTF_8)).readLine();return Integer.parseInt(status.split(" ")[1]);}
     }

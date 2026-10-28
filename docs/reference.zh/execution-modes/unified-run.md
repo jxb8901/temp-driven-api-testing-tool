@@ -1,8 +1,8 @@
 # 統一 RUN 與排程
 
-<!-- att-doc-status: current release=4.2.5 -->
+<!-- att-doc-status: current release=4.2.6 -->
 
-ATT 4.2.5 將功能性單次執行統一為 **RUN**，支援 Case、Template、Flow、Tool，以及所選 Case 批次。**Debug** 是 RUN 的診斷選項。**LOAD** 保留效能引擎、負載控制和專用報告。
+ATT 4.2.6 將功能性單次執行統一為 **RUN**，支援 Case、Template、Flow、Tool，以及所選 Case 批次。**Debug** 是 RUN 的診斷選項。**LOAD** 保留效能引擎、負載控制和專用報告。
 
 已發行的 Local CLI 保留其 interface-specific 相容邊界：run verb 選取 workbook Case，standalone debug 執行一個 Template、Flow 或 Tool。ATT Remote 保留舊版 Server command。此共用 RUN model 不代表 proposed vNext CLI grammar 已發行；請參閱[規劃中的 vNext page](../../interfaces/cli/vnext-proposed.zh.md)。
 
@@ -89,7 +89,7 @@ LOAD 排程繼續支援套件 scenario 路徑及已驗證 Load draft，沿用 sc
 
 ## 遷移既有用戶端
 
-| 既有介面 | 4.2.5 對應 |
+| 既有介面 | 4.2.6 對應 |
 |---|---|
 | CLI `validate`、`run`、`report` | 保留驗證、Case RUN、報告命令 |
 | CLI `--suite`、`--suite-dir`、`--case`、`--tag`、`--rerun-failed` | 保留選取行為；Server 批次使用 `selection` |
@@ -98,7 +98,7 @@ LOAD 排程繼續支援套件 scenario 路徑及已驗證 Load draft，沿用 sc
 | `/load-schedules`、`jobType:load/debug` | 共用 scheduler 相容路徑，保留既有定義 |
 | `/jobs/...`、既有 Studio 工作/結果連結 | 保留共用 history、取消、事件與結果路徑 |
 
-4.2.5 沒有移除舊 endpoint。`GET /api/v1/version` 公開 `unifiedRunVersion:att-execution/v1`。新 Studio Resource表單在舊 Server 缺少此能力時，可使用舊 Debug draft。統一 Case/batch draft 需要 4.2.5；舊部署可繼續使用 Explorer Case 操作。Server/Worker 應配套部署，舊 Worker 不支援Resource RUN dispatch。
+4.2.6 沒有移除舊 endpoint。`GET /api/v1/version` 公開 `unifiedRunVersion:att-execution/v1`。新 Studio Resource表單在舊 Server 缺少此能力時，可使用舊 Debug draft。統一 Case/batch draft 需要 4.2.6；舊部署可繼續使用 Explorer Case 操作。Server/Worker 應配套部署，舊 Worker 不支援Resource RUN dispatch。
 
 持久化使用既有 H2 table 的附加 JSON 欄位，不改寫舊 LOAD row。降版前先停止排程、匯出新定義、移除 RUN/單次定義，再還原升級前資料庫備份，避免舊 scheduler 把 RUN 當成 LOAD。保留的 artifact 與資料庫 metadata 分開儲存。
 

@@ -55,7 +55,14 @@
 .att-console-resize:focus-visible { outline: 2px solid #8eb4ff; outline-offset: 2px; }
 .att-job-events { max-height: min(36rem, 70vh); overflow: auto; }
 .att-job-events pre.att-event-payload { max-height: 8rem; overflow: auto; }
-.att-event-preview { display: block; margin-top: .2rem; color: var(--att-color-text, #182237); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: .82rem; font-weight: 500; white-space: pre-wrap; overflow-wrap: anywhere; }
+.att-event-preview { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; max-height: 2.7em; overflow: hidden; margin-top: .2rem; color: var(--att-color-text, #182237); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: .82rem; font-weight: 500; line-height: 1.35; white-space: pre-wrap; overflow-wrap: anywhere; }
+.att-event-key-facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 15rem), 1fr)); gap: .65rem; margin-block: .5rem; }
+.att-event-key-facts > div { min-width: 0; padding: .55rem; border: 1px solid var(--att-color-border, #dce2ec); border-radius: var(--att-radius-control, .55rem); background: var(--att-color-surface, #fff); }
+.att-event-key-facts h4 { margin: 0 0 .35rem; font-size: .8rem; }
+.att-event-key-facts dl { display: grid; grid-template-columns: minmax(6rem, auto) minmax(0, 1fr); gap: .2rem .5rem; margin: 0; font-size: .78rem; }
+.att-event-key-facts dl > div { display: contents; }
+.att-event-key-facts dt { color: var(--att-color-muted, #637087); }
+.att-event-key-facts dd { min-width: 0; margin: 0; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
 @media (prefers-reduced-motion: reduce) { .att-job-panel pre.att-console { scroll-behavior: auto; } }
 .att-event-controls { display:flex; flex-wrap:wrap; align-items:end; gap:var(--att-space-2, .5rem); margin-block:var(--att-space-3, .75rem); padding:var(--att-space-3, .75rem); border:1px solid var(--att-color-border, #dce2ec); border-radius:var(--att-radius-control, .55rem); background:var(--att-color-surface, #fff); }
 .att-event-controls label { display:grid; gap:.25rem; color:var(--att-color-muted, #637087); font-size:.76rem; }

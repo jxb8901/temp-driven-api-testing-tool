@@ -10,10 +10,11 @@ import { artifactApi } from './artifactApi';
 import { memo, Profiler, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import './load.css';
 import { JobArtifacts } from './JobArtifacts';
-import type { JobResultResponse, JobStatus, JobSummary, JobView, JobsFeatureProps, LoadJobsApi } from './types';
+import type { JobResultResponse, JobStatus, JobSummary, JobView, JobsFeatureProps, LoadJobsApi, LoadLiveProgressPoint, LoadLiveProgressSnapshot } from './types';
 import { JobConsoleView } from './JobConsoleView';
 import { useJobConsole } from './JobConsoleContext';
-import { useJobEventStatus } from './useJobEventStream';
+import { useJobEventStatus, useJobEventStream, type JobStreamConnection } from './useJobEventStream';
+import { plannedWorkloadDuration, workloadPacing } from './loadWorkloadSummary';
 
 function executionType(job: JobSummary): string { return job.executionType || (job.command === 'debug' ? 'run' : job.command); }
 
@@ -519,16 +520,17 @@ function CompactLoadSummary({ payload, archiveState, archiveMessage }: { payload
     FAILED: 'FAILED — the inline result remains available.', EXPIRED: 'EXPIRED — the archive is no longer available.', OMITTED: 'OMITTED — the report was not included in the archive.',
     ERROR: 'Archive status could not be checked.', UNAVAILABLE: 'Open Artifacts to check the report archive.',
   };
+  const metric = (value: unknown) => typeof value === 'number' && Number.isFinite(value) ? METRIC_NUMBER_FORMATTER.format(value) : 'Not available';
   return <section className="att-load-terminal-summary" aria-label="Compact LOAD result">
     <h3>LOAD result summary</h3>
     <dl>
       <div><dt>Execution outcome</dt><dd>{String(execution.status || performance.executionStatus || 'Not reported')}</dd></div>
       <div><dt>Performance verdict</dt><dd>{String(performance.verdict || 'NOT_EVALUATED')}</dd></div>
-      <div><dt>Scheduled / started</dt><dd>{displayValue(metrics.scheduled ?? 0)} / {displayValue(metrics.started ?? 0)}</dd></div>
-      <div><dt>Completed / successful</dt><dd>{displayValue(metrics.completed ?? 0)} / {displayValue(metrics.success ?? 0)}</dd></div>
-      <div><dt>Runtime ERROR / SUT FAIL</dt><dd>{displayValue(metrics.runtimeError ?? 0)} / {displayValue(metrics.failure ?? 0)}</dd></div>
-      <div><dt>Completed / successful TPS</dt><dd>{displayValue(metrics.completedThroughput ?? 0)} / {displayValue(metrics.successfulThroughput ?? 0)}</dd></div>
-      <div><dt>Threshold verdict</dt><dd>{String(thresholds.verdict || 'NOT_EVALUATED')} ({displayValue(thresholds.total ?? 0)} checks)</dd></div>
+      <div><dt>Scheduled / started</dt><dd>{metric(metrics.scheduled)} / {metric(metrics.started)}</dd></div>
+      <div><dt>Completed / successful</dt><dd>{metric(metrics.completed)} / {metric(metrics.success)}</dd></div>
+      <div><dt>Runtime ERROR / SUT FAIL</dt><dd>{metric(metrics.runtimeError)} / {metric(metrics.failure)}</dd></div>
+      <div><dt>Completed / successful TPS</dt><dd>{metric(metrics.completedThroughput)} / {metric(metrics.successfulThroughput)} TPS</dd></div>
+      <div><dt>Threshold verdict</dt><dd>{String(thresholds.verdict || 'NOT_EVALUATED')}{typeof thresholds.total === 'number' && Number.isFinite(thresholds.total) ? ` (${metric(thresholds.total)} checks)` : ''}</dd></div>
       <div><dt>Detailed report</dt><dd>{availabilityText[reportedState] || reportedState}</dd></div>
     </dl>
     {root && <section aria-label="LOAD root-cause diagnosis" role="alert">
@@ -544,6 +546,249 @@ function CompactLoadSummary({ payload, archiveState, archiveMessage }: { payload
       </li>)}</ul>
     </section>}
     {archiveMessage && <p role={reportedState === 'OMITTED' || reportedState === 'FAILED' || reportedState === 'EXPIRED' || reportedState === 'ERROR' ? 'alert' : 'status'}>{archiveMessage}</p>}
+  </section>;
+}
+
+function boundedLivePoints(input: readonly LoadLiveProgressPoint[]): LoadLiveProgressPoint[] {
+  const byTime = new Map<number, LoadLiveProgressPoint>();
+  for (const point of input) if (Number.isFinite(point.elapsedMs)) {
+    const previous = byTime.get(point.elapsedMs);
+    byTime.set(point.elapsedMs, previous && !point.workloads ? { ...point, workloads: previous.workloads } : point);
+  }
+  const ordered = [...byTime.values()]
+    .sort((left, right) => left.elapsedMs - right.elapsedMs);
+  return ordered.length <= 320 ? ordered : Array.from({ length: 320 }, (_, index) => ordered[Math.floor(index * (ordered.length - 1) / 319)]!);
+}
+
+function WorkloadTrends({ points, plans }: { points: readonly LoadLiveProgressPoint[]; plans: NonNullable<import('./types').TargetIdentity['workloads']> }) {
+  const names = plans.map(plan => plan.name).filter(Boolean);
+  const [selected, setSelected] = useState(names[0] || '');
+  const name = names.includes(selected) ? selected : names[0];
+  if (!name) return null;
+  const target = configuredRatePerSecond(plans.find(plan => plan.name === name)?.arrivalRate);
+  const workloadPoints = points.filter(point => point.workloads?.[name]).map(point => ({ ...point, counts: point.workloads![name]!, latency: point.workloads![name]!.latency }));
+  const rates = liveThroughputPoints(workloadPoints).map(point => ({ capturedAt: '', elapsedMs: point.elapsedMs, phase: workloadPoints.find(sample => sample.elapsedMs === point.elapsedMs)?.phase || 'UNKNOWN', counts: { completed: point.completed, passed: point.passed } }));
+  return <section aria-label="Workload trends"><h4>Workload trends</h4>
+    <label>Workload <select value={name} onChange={event => setSelected(event.target.value)}>{names.map(item => <option key={item} value={item}>{item}</option>)}</select></label>
+    <p>Rates are calculated between retained samples; the configured target applies during steady state. Latency percentiles are histogram estimates. Long-run history is coarsened.</p>
+    {rates.length < 2 && <p>Waiting for enough workload samples to show a trend.</p>}
+    <LiveSampleChart label="Workload completed and successful throughput" unit="TPS" points={rates} series={[
+      { name: 'Completed', color: '#3157c8', read: point => point.counts.completed },
+      { name: 'Successful', color: '#23834f', read: point => point.counts.passed },
+      ...(target == null ? [] : [{ name: 'Configured steady target', color: '#8a5a00', read: (point: LoadLiveProgressPoint) => point.phase === 'STEADY' ? target : null }]),
+    ]} />
+    <LiveSampleChart label="Workload sampled latency" unit="milliseconds" points={workloadPoints} series={[
+      { name: 'Mean', color: '#3157c8', read: point => point.latency?.meanMs },
+      { name: 'p95 estimate', color: '#23834f', read: point => point.latency?.p95Ms },
+      { name: 'p99 estimate', color: '#8a3259', read: point => point.latency?.p99Ms },
+    ]} />
+  </section>;
+}
+
+function liveThroughputPoints(input: LoadLiveProgressPoint[]): Array<{ elapsedMs: number; completed: number; passed: number }> {
+  const points = boundedLivePoints(input);
+  const output: Array<{ elapsedMs: number; completed: number; passed: number }> = [];
+  for (let index = 1; index < points.length; index += 1) {
+    const previous = points[index - 1]!;
+    const current = points[index]!;
+    const elapsed = current.elapsedMs - previous.elapsedMs;
+    const values = [previous.counts.completed, current.counts.completed, previous.counts.passed, current.counts.passed];
+    if (elapsed <= 0 || values.some(value => typeof value !== 'number' || !Number.isFinite(value)) ||
+        current.counts.completed! < previous.counts.completed! || current.counts.passed! < previous.counts.passed!) continue;
+    output.push({
+      elapsedMs: current.elapsedMs,
+      completed: (current.counts.completed! - previous.counts.completed!) * 1000 / elapsed,
+      passed: (current.counts.passed! - previous.counts.passed!) * 1000 / elapsed,
+    });
+  }
+  return output;
+}
+
+function LiveSampleChart({ label, unit, points, series }: {
+  label: string; unit: string; points: readonly LoadLiveProgressPoint[];
+  series: Array<{ name: string; color: string; read: (point: LoadLiveProgressPoint) => number | null | undefined }>;
+}) {
+  const valid = points.filter(point => series.some(item => { const value = item.read(point); return value != null && Number.isFinite(value) && value >= 0; }));
+  if (valid.length < 2) return null;
+  const first = valid[0]!.elapsedMs, span = Math.max(1, valid[valid.length - 1]!.elapsedMs - first);
+  const max = Math.max(1, ...valid.flatMap(point => series.map(item => { const value = item.read(point); return value != null && Number.isFinite(value) && value >= 0 ? value : 0; })));
+  const phases = valid.map(point => point.phase).filter((phase, index, all) => index === 0 || phase !== all[index - 1]);
+  const path = (item: typeof series[number]) => {
+    let connected = false;
+    return points.map(point => {
+      const value = item.read(point);
+      if (value == null || !Number.isFinite(value) || value < 0) { connected = false; return ''; }
+      const part = `${connected ? 'L' : 'M'} ${(24 + (point.elapsedMs - first) * 580 / span).toFixed(1)} ${(100 - value * 84 / max).toFixed(1)}`;
+      connected = true; return part;
+    }).filter(Boolean).join(' ');
+  };
+  return <figure className="att-live-load-chart">
+    <svg viewBox="0 0 620 112" role="img" aria-label={`${label} trend`}>
+      {valid.slice(0, -1).map((point, index) => {
+        const next = valid[index + 1]!;
+        const fill = point.phase === 'WARMUP' ? '#fff0c2' : point.phase === 'RAMP_UP' || point.phase === 'RAMP_DOWN' ? '#e7edff' : undefined;
+        return fill ? <rect key={`${point.elapsedMs}-${index}`} x={24 + (point.elapsedMs - first) * 580 / span} y="16" width={(next.elapsedMs - point.elapsedMs) * 580 / span} height="84" fill={fill} aria-hidden="true" /> : null;
+      })}
+      <path d="M 24 100 H 604" className="att-live-load-axis" />
+      {series.map(item => <path key={item.name} d={path(item)} fill="none" stroke={item.color} strokeWidth="2.5" vectorEffect="non-scaling-stroke" />)}
+    </svg>
+    <figcaption><strong>{label}</strong><span>0–{METRIC_NUMBER_FORMATTER.format(max)} {unit} · {plannedWorkloadDuration(first)} to {plannedWorkloadDuration(valid[valid.length - 1]!.elapsedMs)}</span>
+      {series.map(item => <span key={item.name}><i style={{ background: item.color }} /> {item.name}</span>)}
+      <span>Sampled phases: {phases.map(phase => phase.replaceAll('_', ' ')).join(' → ')}</span>
+    </figcaption>
+  </figure>;
+}
+
+function configuredRatePerSecond(value: number | string | undefined): number | null {
+  if (typeof value === 'number') return Number.isFinite(value) && value > 0 ? value : null;
+  if (typeof value !== 'string') return null;
+  const match = /^([0-9]+(?:\.[0-9]+)?)\/(s|m)$/.exec(value.trim());
+  if (!match) return null;
+  const result = Number(match[1]) / (match[2] === 'm' ? 60 : 1);
+  return Number.isFinite(result) && result > 0 ? result : null;
+}
+
+function LiveLoadSummary({ job, active, progress, history, trend, streamHistory, checkpointHistory, connection, now, showTrends = false, terminalResultAvailable = false }: {
+  job: JobView | null; active: boolean; progress: LoadLiveProgressSnapshot | null;
+  history: LoadLiveProgressPoint[]; trend: LoadLiveProgressPoint[]; streamHistory?: readonly LoadLiveProgressPoint[]; checkpointHistory?: readonly import('./types').LoadCheckpointInterval[]; connection: JobStreamConnection; now: number; showTrends?: boolean; terminalResultAvailable?: boolean;
+}) {
+  const partial = Boolean(!active && job && isTerminalStatus(job.status) && progress && (!terminalResultAvailable || ['CANCELLED', 'ERROR', 'INVALID', 'FAIL'].includes(job.status)));
+  if ((!active && !partial) || job?.command !== 'load') return null;
+  const plans = job.targetIdentity?.workloads || [];
+  const latestAge = progress ? Math.max(0, now - Date.parse(progress.serverReceivedAt || progress.capturedAt)) : null;
+  const freshness = latestAge == null || !Number.isFinite(latestAge) ? 'Waiting for first sample'
+    : latestAge > 15_000 ? `Stale · last sample ${METRIC_NUMBER_FORMATTER.format(latestAge / 1000)}s ago`
+      : `Fresh · last sample ${METRIC_NUMBER_FORMATTER.format(latestAge / 1000)}s ago`;
+  const chartInput = [...trend, ...history, ...(streamHistory || []), ...(progress ? [progress] : [])];
+  const chart = liveThroughputPoints(chartInput);
+  const samplePoints = boundedLivePoints(chartInput);
+  const configuredRates = plans.map(plan => configuredRatePerSecond(plan.arrivalRate));
+  const configuredTarget = configuredRates.length && configuredRates.every(rate => rate != null)
+    ? configuredRates.reduce<number>((sum, rate) => sum + (rate ?? 0), 0) : null;
+  const chartMax = Math.max(1, configuredTarget ?? 0, ...chart.flatMap(point => [point.completed, point.passed]));
+  const rolling = chart[chart.length - 1];
+  const firstElapsed = chart[0]?.elapsedMs ?? 0;
+  const chartSpan = Math.max(1, (chart[chart.length - 1]?.elapsedMs ?? firstElapsed) - firstElapsed);
+  const chartPath = (field: 'completed' | 'passed') => {
+    if (chart.length < 2) return '';
+    return chart.map((point, index) => `${index ? 'L' : 'M'} ${(24 + (point.elapsedMs - firstElapsed) * 580 / chartSpan).toFixed(1)} ${(100 - point[field] / chartMax * 84).toFixed(1)}`).join(' ');
+  };
+  const counts = progress?.counts;
+  const latency = progress?.latency;
+  const totalPlannedMs = Math.max(0, ...plans.map(plan => plan.totalDurationMs || 0));
+  const countText = (value: number | undefined) => value == null ? 'Not available' : METRIC_NUMBER_FORMATTER.format(value);
+  const workloadActual = progress?.workloads || {};
+  const measured = progress?.measuredCounts;
+  const measuredCompleted = measured?.completed;
+  const measuredRate = (value: number | undefined) => value == null || measuredCompleted == null || measuredCompleted <= 0
+    ? 'Not available' : `${METRIC_NUMBER_FORMATTER.format(value * 100 / measuredCompleted)}% (${METRIC_NUMBER_FORMATTER.format(value)} / ${METRIC_NUMBER_FORMATTER.format(measuredCompleted)} measured completions)`;
+  const latestCheckpoint = progress?.checkpointInterval;
+  const checkpoints = [...(job.loadCheckpointHistory || [])];
+  for (const interval of checkpointHistory || []) if (!checkpoints.some(item => item.endSequence === interval.endSequence)) checkpoints.push(interval);
+  if (latestCheckpoint?.state === 'VERIFIED' && !checkpoints.some(item => item.endSequence === latestCheckpoint.endSequence)) checkpoints.push(latestCheckpoint);
+  checkpoints.sort((left, right) => (left.endSequence ?? 0) - (right.endSequence ?? 0));
+  const lastCheckpoint = checkpoints[checkpoints.length - 1];
+  const checkpointLag = progress && lastCheckpoint?.endAt ? Date.parse(progress.capturedAt) - Date.parse(lastCheckpoint.endAt) : NaN;
+  const checkpointAge = Number.isFinite(checkpointLag) && checkpointLag >= 0 && latestAge != null && Number.isFinite(latestAge)
+    ? checkpointLag + latestAge : null;
+  return <section className="att-live-load-summary" aria-label="Live LOAD progress">
+    <div className="att-live-load-heading"><div><h3>{partial ? 'Last live LOAD snapshot' : 'Live LOAD progress'}</h3><p>Worker samples are coalesced about every five seconds; live counters are not per-iteration events.</p></div>
+      <span className={latestAge != null && latestAge <= 15_000 ? 'att-live-fresh' : 'att-live-stale'}>{freshness}</span>
+    </div>
+    {partial ? <p>Partial pre-terminal telemetry; the canonical terminal result and archive are authoritative.</p>
+      : <p>Execution outcome: IN_PROGRESS · Performance/threshold verdict: NOT_FINAL</p>}
+    <p>Status: {job.status}{progress ? ` · Phase ${progress.phase.replaceAll('_', ' ')}` : ''}</p>
+    {progress?.telemetryPersistence?.state === 'DEGRADED' && <p role="alert">{progress.telemetryPersistence.diagnostic || 'Optional live LOAD telemetry persistence is degraded; the latest in-memory snapshot remains available and retries continue.'}{progress.telemetryPersistence.retryAfterMs ? ` Retrying in about ${METRIC_NUMBER_FORMATTER.format(progress.telemetryPersistence.retryAfterMs / 1000)}s.` : ''}</p>}
+    {progress ? <>
+      <dl className="att-live-load-metrics">
+        <div><dt>Current phase</dt><dd>{progress.phase.replaceAll('_', ' ')}</dd></div>
+        <div><dt>Elapsed / planned</dt><dd>{plannedWorkloadDuration(progress.elapsedMs)} / {plannedWorkloadDuration(totalPlannedMs)}</dd></div>
+        <div><dt>Scheduled / started</dt><dd>{countText(counts?.scheduled)} / {countText(counts?.started)}</dd></div>
+        <div><dt>Completed / PASS</dt><dd>{countText(counts?.completed)} / {countText(counts?.passed)}</dd></div>
+        <div><dt>SUT FAIL / runtime ERROR</dt><dd>{countText(counts?.sutFailures)} / {countText(counts?.runtimeErrors)}</dd></div>
+        <div><dt>Dropped / active / queued</dt><dd>{countText(counts?.dropped)} / {countText(counts?.active)} / {countText(counts?.queued)}</dd></div>
+        <div><dt>Average completed / successful TPS</dt><dd>{countText(progress.rates?.completedTps)} / {countText(progress.rates?.successfulTps)}</dd></div>
+        <div><dt>Recent completed / successful TPS</dt><dd>{countText(rolling?.completed)} / {countText(rolling?.passed)}</dd></div>
+        <div><dt>Configured steady target TPS</dt><dd>{countText(configuredTarget ?? undefined)}</dd></div>
+        <div><dt>Latency mean / p95 / p99</dt><dd>{latency?.meanMs == null ? 'Not available' : `${METRIC_NUMBER_FORMATTER.format(latency.meanMs)} / ${latency.p95Ms == null ? '—' : METRIC_NUMBER_FORMATTER.format(latency.p95Ms)} / ${latency.p99Ms == null ? '—' : METRIC_NUMBER_FORMATTER.format(latency.p99Ms)} ms`}</dd></div>
+        <div><dt>Measured-window PASS rate</dt><dd>{measuredRate(measured?.passed)}</dd></div>
+        <div><dt>Measured-window SUT FAIL / runtime ERROR rate</dt><dd>{measuredRate(measured?.sutFailures)} / {measuredRate(measured?.runtimeErrors)}</dd></div>
+      </dl>
+      <p>The counters above are all-phase totals. Rates marked measured-window exclude warmup.</p>
+      {progress.phases && Object.keys(progress.phases).length > 0 && <details><summary>Phase totals</summary>
+        <div className="att-table-scroll" tabIndex={0} role="region" aria-label="Actual counters by phase"><table><caption>Actual counters by phase</caption><thead><tr><th>Phase</th><th>Measurement scope</th><th>Completed / PASS</th><th>FAIL / ERROR / drop</th></tr></thead>
+          <tbody>{Object.entries(progress.phases).map(([phase, phaseCounts]) => <tr key={phase}>
+            <th scope="row">{phase.replaceAll('_', ' ')}</th><td>{phase === 'WARMUP' ? 'Unmeasured' : ['RAMP_UP', 'STEADY', 'RAMP_DOWN'].includes(phase) ? 'Measured' : 'Unknown'}</td>
+            <td>{countText(phaseCounts.completed)} / {countText(phaseCounts.passed)}</td>
+            <td>{countText(phaseCounts.sutFailures)} / {countText(phaseCounts.runtimeErrors)} / {countText(phaseCounts.dropped)}</td>
+          </tr>)}</tbody></table></div></details>}
+      {!partial && totalPlannedMs > 0 && progress.phase !== 'PREPARING' && <p>Scheduler plan: {METRIC_NUMBER_FORMATTER.format(Math.min(100, progress.elapsedMs * 100 / totalPlannedMs))}% elapsed
+        {progress.elapsedMs >= totalPlannedMs ? ' · Planned scheduler time elapsed; workers may still be draining.' : ` · Approximately ${plannedWorkloadDuration(totalPlannedMs - progress.elapsedMs)} remaining`}.</p>}
+      {progress.latestFailure && <p>Latest failure: {progress.latestFailure.status}{progress.latestFailure.code ? ` · ${progress.latestFailure.code}` : ''} · {progress.latestFailure.capturedAt}</p>}
+      {latency?.sampleCount ? <p>Latency percentiles are estimates from a bounded histogram ({METRIC_NUMBER_FORMATTER.format(latency.sampleCount)} samples).</p> : null}
+      {chart.length > 1 && <figure className="att-live-load-chart">
+        <svg viewBox="0 0 620 112" role="img" aria-label="Live completed and successful throughput trend">
+          <path d="M 24 100 H 604" className="att-live-load-axis" />
+          <path d={chartPath('completed')} className="att-live-load-completed" />
+          <path d={chartPath('passed')} className="att-live-load-passed" />
+          {configuredTarget != null && <path d={`M 24 ${(100 - configuredTarget / chartMax * 84).toFixed(1)} H 604`} className="att-live-load-target" />}
+        </svg>
+        <figcaption><span><i className="att-live-load-legend-completed" /> Completed TPS</span><span><i className="att-live-load-legend-passed" /> Successful TPS</span>{configuredTarget != null && <span>Configured steady target: {countText(configuredTarget)} TPS (ramps may differ)</span>}<span>{chart.length} sampled intervals</span></figcaption>
+      </figure>}
+      {showTrends && <section aria-label="Live sampled metric trends">
+        <p>Samples retain their actual elapsed timestamps. FAIL, ERROR, and drop totals are cumulative; latency percentiles are histogram estimates.</p>
+        <LiveSampleChart label="Cumulative failures and drops" unit="iterations" points={samplePoints} series={[
+          { name: 'SUT FAIL', color: '#b04724', read: point => point.counts.sutFailures },
+          { name: 'Runtime ERROR', color: '#8a3259', read: point => point.counts.runtimeErrors },
+          { name: 'Dropped', color: '#8a5a00', read: point => point.counts.dropped },
+        ]} />
+        <LiveSampleChart label="Active and queued" unit="iterations" points={samplePoints} series={[
+          { name: 'Active', color: '#3157c8', read: point => point.counts.active },
+          { name: 'Queued', color: '#8a5a00', read: point => point.counts.queued },
+        ]} />
+        <LiveSampleChart label="Mean scheduler lag" unit="milliseconds" points={samplePoints} series={[
+          { name: 'Mean lag', color: '#3157c8', read: point => point.counts.schedulerLagMeanMs },
+        ]} />
+        <LiveSampleChart label="Sampled latency" unit="milliseconds" points={samplePoints} series={[
+          { name: 'Mean', color: '#3157c8', read: point => point.latency?.meanMs },
+          { name: 'p95 estimate', color: '#23834f', read: point => point.latency?.p95Ms },
+          { name: 'p99 estimate', color: '#8a3259', read: point => point.latency?.p99Ms },
+        ]} />
+        <WorkloadTrends points={samplePoints} plans={plans} />
+      </section>}
+      <section aria-label="Verified checkpoint intervals">
+        <h4>Recent checkpoint intervals</h4>
+        <p>Provisional aggregate measurements from integrity-verified checkpoints; the latest 64 intervals are retained.</p>
+        {lastCheckpoint && <p>Latest checkpoint ended {lastCheckpoint.endAt}. {checkpointAge == null ? 'Checkpoint age is unavailable because timestamps could not be compared.' : `Approximate age ${METRIC_NUMBER_FORMATTER.format(checkpointAge / 1000)}s.`} Interval latency uses measured-window observations; interval percentiles are unavailable.</p>}
+        {active && checkpointAge != null && checkpointAge > 330_000 && <p role="alert">The latest verified checkpoint is stale; interval history may be incomplete.</p>}
+        {latestCheckpoint?.state === 'DEGRADED' && <p role="alert">Checkpoint coverage is degraded: a checkpoint is missing, invalid, or out of sequence.</p>}
+        {checkpoints.some(item => item.coverageGap) && <p role="alert">Checkpoint history has a gap; the displayed intervals do not cover the entire run.</p>}
+        {checkpoints.length === 0 ? <p>No verified checkpoint interval is available yet.</p> :
+          <div className="att-table-scroll" tabIndex={0} role="region" aria-label="Verified aggregate intervals"><table><caption>Verified aggregate intervals</caption><thead><tr><th>Interval end</th><th>Duration</th><th>Completed TPS</th><th>PASS / FAIL / ERROR / drop</th><th>Mean latency (measured)</th></tr></thead>
+            <tbody>{checkpoints.slice(-64).reverse().map(item => <tr key={item.endSequence}>
+              <td>{item.endAt}</td><td>{plannedWorkloadDuration(item.durationMs)}</td>
+              <td>{item.durationMs && item.counts ? METRIC_NUMBER_FORMATTER.format((item.counts.completed ?? 0) * 1000 / item.durationMs) : 'Not available'}</td>
+              <td>{item.counts ? ['success', 'failure', 'runtimeError', 'dropped'].map(key => METRIC_NUMBER_FORMATTER.format(item.counts?.[key] ?? 0)).join(' / ') : 'Not available'}</td>
+              <td>{item.latencyMeanMs == null ? 'Not available' : `${METRIC_NUMBER_FORMATTER.format(item.latencyMeanMs)} ms (${item.latencySampleCount} observations)`}</td>
+            </tr>)}</tbody></table></div>}
+      </section>
+      {plans.length > 0 && <div className="att-table-scroll" tabIndex={0} role="region" aria-label="Configured workload targets and actual progress"><table className="att-live-workload-table">
+        <caption>Configured workload targets and actual progress</caption><thead><tr><th scope="col">Workload</th><th scope="col">Configured target</th><th scope="col">Phase</th><th scope="col">Planned duration</th><th scope="col">Actual completed / PASS</th><th scope="col">Average completed TPS</th><th scope="col">FAIL / ERROR / drop</th><th scope="col">Mean / p95 / p99 latency</th></tr></thead>
+        <tbody>{plans.map((plan, index) => {
+          const actual = workloadActual[plan.name];
+          return <tr key={`${plan.name}-${index}`}><th scope="row">{plan.name || `Workload ${index + 1}`}</th>
+            <td>{workloadPacing(plan)}{plan.targets?.length ? <small>{plan.targets.map(target => `${target.type}:${target.id}`).join(', ')}</small> : null}</td>
+            <td>{progress.phase.replaceAll('_', ' ')}</td>
+            <td>{plannedWorkloadDuration(plan.totalDurationMs)}</td>
+            <td>{actual ? `${countText(actual.completed)} / ${countText(actual.passed)}` : 'Not available'}</td>
+            <td>{actual?.completed != null && progress.elapsedMs > 0 ? METRIC_NUMBER_FORMATTER.format(actual.completed * 1000 / progress.elapsedMs) : 'Not available'}</td>
+            <td>{actual ? `${countText(actual.sutFailures)} / ${countText(actual.runtimeErrors)} / ${countText(actual.dropped)}` : 'Not available'}</td>
+            <td>{actual?.latency?.meanMs == null ? 'Not available' : `${countText(actual.latency.meanMs)} / ${countText(actual.latency.p95Ms ?? undefined)} / ${countText(actual.latency.p99Ms ?? undefined)} ms (estimated percentiles)`}</td>
+          </tr>;
+        })}</tbody>
+      </table></div>}
+      <p className="att-live-load-connection" role="status">SSE {connection}; latest Worker sample received {progress.serverReceivedAt || progress.capturedAt}.</p>
+    </> : <p role="status">The active job is waiting for its first Worker progress sample. SSE {connection}.</p>}
   </section>;
 }
 
@@ -583,7 +828,8 @@ export const ArtifactsPanel = memo(function ArtifactsPanel({ api, jobId, refresh
   </section>;
 });
 
-export const MetricsPanel = memo(function MetricsPanel({ job, payload = null, metrics, resultState, archiveMetrics, reportAvailability = 'idle', reportError = '', onRetryReport = () => {}, reportDetailsLoaded = false, buckets, charts, hidden, onProfilerCommit }: {
+export const MetricsPanel = memo(function MetricsPanel({ job, payload = null, metrics, resultState, archiveMetrics, reportAvailability = 'idle', reportError = '', onRetryReport = () => {}, reportDetailsLoaded = false, buckets, charts, hidden, onProfilerCommit,
+  activeLoad = false, liveProgress = null, liveHistory = [], liveTrend = [], streamHistory = [], checkpointHistory = [], streamConnection = 'connecting', now = Date.now(), terminalResultAvailable = false }: {
   job: JobView | null;
   payload?: JobResultResponse | null;
   metrics: Record<string, unknown> | null;
@@ -597,6 +843,15 @@ export const MetricsPanel = memo(function MetricsPanel({ job, payload = null, me
   charts: MetricSeries[];
   hidden: boolean;
   onProfilerCommit?: () => void;
+  activeLoad?: boolean;
+  liveProgress?: LoadLiveProgressSnapshot | null;
+  liveHistory?: LoadLiveProgressPoint[];
+  liveTrend?: LoadLiveProgressPoint[];
+  streamHistory?: readonly LoadLiveProgressPoint[];
+  checkpointHistory?: readonly import('./types').LoadCheckpointInterval[];
+  streamConnection?: JobStreamConnection;
+  now?: number;
+  terminalResultAvailable?: boolean;
 }) {
   const terminal = loadTerminalSummary(payload);
   const coverage = terminal?.metricCoverage && typeof terminal.metricCoverage === 'object'
@@ -604,24 +859,25 @@ export const MetricsPanel = memo(function MetricsPanel({ job, payload = null, me
   return <section className="att-job-panel" role="tabpanel" id="job-panel-metrics" aria-labelledby="job-tab-metrics" hidden={hidden} tabIndex={0}>
     <Profiler id="job-metrics-content" onRender={() => onProfilerCommit?.()}><h2>Metrics</h2>
     <p className="att-help">Only values returned by the job API are shown. Server timings and Worker JVM metrics are separate from Load result metrics.</p>
-    {terminal && <CompactLoadSummary payload={payload} archiveState={reportAvailability} archiveMessage={reportError} />}
+    <LiveLoadSummary job={job} active={activeLoad} progress={liveProgress} history={liveHistory} trend={liveTrend} streamHistory={streamHistory} checkpointHistory={checkpointHistory} connection={streamConnection} now={now} terminalResultAvailable={terminalResultAvailable} showTrends />
+    {!activeLoad && terminal && <CompactLoadSummary payload={payload} archiveState={reportAvailability} archiveMessage={reportError} />}
     {coverage && <p className="att-help">LoadMetrics retains at most {displayValue(coverage.loadMetricsBucketCapacity)} one-second buckets; retained coverage is {displayValue(coverage.observedBucketCoverageMs ?? 0)} ms. The window series uses {displayValue(coverage.windowSeriesBinWidthMs)} ms bins across {displayValue(coverage.windowSeriesCapacity)} slots ({displayValue(coverage.windowSeriesCoverage || 'coverage not reported')}).</p>}
     {job && <MetricTable title="Server timings" rows={numericRows(job.performance?.timings)} unit="ms" />}
     {job && <MetricTable title="Worker metrics" rows={numericRows(job.performance?.worker)} />}
     <ArchiveMetrics value={archiveMetrics || job?.archiveMetrics} />
     {metrics && <MetricTable title="Load result metrics" rows={loadMetricRows(metrics)} />}
-    {!metrics && <p role="status">{resultState === 'loading' || resultState === 'refreshing' ? 'Load result metrics are loading.' : job?.command === 'load' ? 'No Load metrics summary was returned. No chart or derived metric is shown.' : 'This command has no Load metric summary.'}</p>}
-    {job?.command === 'load' && reportAvailability === 'PENDING' && <p role="status">Detailed metrics are waiting for the artifact archive.</p>}
-    {job?.command === 'load' && reportAvailability === 'ARCHIVING' && <p role="status">Detailed metrics will load when archive publication finishes.</p>}
-    {job?.command === 'load' && reportAvailability === 'FAILED' && <p role="alert">The artifact archive failed. Inline metrics remain available. <button type="button" onClick={onRetryReport}>Refresh archive status</button></p>}
-    {job?.command === 'load' && reportAvailability === 'EXPIRED' && <p role="alert">The artifact archive expired. Inline metrics remain available.</p>}
-    {job?.command === 'load' && reportAvailability === 'OMITTED' && <p role="status">The detailed metrics artifact was omitted or was not produced. Inline metrics remain available.</p>}
-    {job?.command === 'load' && reportAvailability === 'ERROR' && <p role="alert">{reportError || 'The detailed LOAD report could not be loaded.'} <button type="button" onClick={onRetryReport}>Retry</button></p>}
+    {!metrics && !activeLoad && <p role="status">{resultState === 'loading' || resultState === 'refreshing' ? 'Load result metrics are loading.' : job?.command === 'load' ? 'No Load metrics summary was returned. No chart or derived metric is shown.' : 'This command has no Load metric summary.'}</p>}
+    {!activeLoad && job?.command === 'load' && reportAvailability === 'PENDING' && <p role="status">Detailed metrics are waiting for the artifact archive.</p>}
+    {!activeLoad && job?.command === 'load' && reportAvailability === 'ARCHIVING' && <p role="status">Detailed metrics will load when archive publication finishes.</p>}
+    {!activeLoad && job?.command === 'load' && reportAvailability === 'FAILED' && <p role="alert">The artifact archive failed. Inline metrics remain available. <button type="button" onClick={onRetryReport}>Refresh archive status</button></p>}
+    {!activeLoad && job?.command === 'load' && reportAvailability === 'EXPIRED' && <p role="alert">The artifact archive expired. Inline metrics remain available.</p>}
+    {!activeLoad && job?.command === 'load' && reportAvailability === 'OMITTED' && <p role="status">The detailed metrics artifact was omitted or was not produced. Inline metrics remain available.</p>}
+    {!activeLoad && job?.command === 'load' && reportAvailability === 'ERROR' && <p role="alert">{reportError || 'The detailed LOAD report could not be loaded.'} <button type="button" onClick={onRetryReport}>Retry</button></p>}
     {buckets.length > 0 && charts.map(series => <TimeSeriesChart key={series.field} series={series} />)}
     {buckets.length > 0 && !charts.length && <p role="status">The report returned buckets, but this view cannot chart them without timestamps and complete numeric samples. Raw returned values remain available in the table.</p>}
     {buckets.length > 0 && <BucketTable buckets={buckets} />}
     {metrics && !buckets.length && reportAvailability === 'READY' && reportDetailsLoaded && <p role="status">No time-series buckets were included in the archived report. Summary metrics are shown above.</p>}
-    {!job?.performance?.timings && !job?.performance?.worker && !archiveMetrics && !job?.archiveMetrics && !metrics && resultState !== 'loading' && <p role="status">The API did not return metrics for this job.</p>}</Profiler>
+    {!activeLoad && !job?.performance?.timings && !job?.performance?.worker && !archiveMetrics && !job?.archiveMetrics && !metrics && resultState !== 'loading' && <p role="status">The API did not return metrics for this job.</p>}</Profiler>
   </section>;
 });
 
@@ -650,11 +906,28 @@ function JobDetail({ api, jobId, onShowList, confirmCancel, onOpenJob, onSchedul
   const cancellationLock = useRef(false);
   const terminalStatus = useRef<JobStatus | null>(null);
   const terminalReconciled = useRef(false);
+  const resultReconciled = useRef(false);
   const requestSequence = useRef(0);
   const consoleContext = useJobConsole();
   const statusSnapshot = useJobEventStatus(api, jobId, job?.status);
+  const eventStream = useJobEventStream(api, jobId);
   const selectedStatus = (statusSnapshot.status || job?.status || 'UNKNOWN') as JobStatus;
+  const payloadStatus = result?.result?.status ?? result?.job?.status;
+  const payloadTerminal = typeof payloadStatus === 'string' && !['QUEUED', 'PREPARING', 'RUNNING', 'CANCEL_REQUESTED'].includes(payloadStatus);
+  const activeLoad = Boolean(job?.command === 'load' && ['QUEUED', 'PREPARING', 'RUNNING', 'CANCEL_REQUESTED'].includes(selectedStatus) && !payloadTerminal);
   const displayedJob = useMemo(() => job && selectedStatus !== job.status ? { ...job, status: selectedStatus } : job, [job, selectedStatus]);
+  const eventProgress = eventStream.latestLoadProgress || null;
+  const liveProgress = useMemo(() => {
+    if (!eventProgress) return job?.loadProgress || null;
+    if (!job?.loadProgress || eventProgress.elapsedMs >= job.loadProgress.elapsedMs) return eventProgress;
+    return job.loadProgress;
+  }, [eventProgress, job?.loadProgress]);
+  const [clockNow, setClockNow] = useState(Date.now());
+  useEffect(() => {
+    if (!activeLoad) return;
+    const timer = setInterval(() => setClockNow(Date.now()), 5000);
+    return () => clearInterval(timer);
+  }, [activeLoad]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -685,10 +958,10 @@ function JobDetail({ api, jobId, onShowList, confirmCancel, onOpenJob, onSchedul
     if (statusSnapshot.eventRevision === 0) return;
     const terminal = Boolean(statusSnapshot.status && isTerminalStatus(statusSnapshot.status as JobStatus));
     if (terminal) terminalStatus.current = statusSnapshot.status as JobStatus;
-    if (!terminalReconciled.current && (terminal || statusSnapshot.resultEvent)) {
-      terminalReconciled.current = true;
-      setTerminalRefresh(value => value + 1);
-    }
+    let refresh = false;
+    if (terminal && !terminalReconciled.current) { terminalReconciled.current = true; refresh = true; }
+    if (statusSnapshot.resultEvent && !resultReconciled.current) { resultReconciled.current = true; if (!result?.result) refresh = true; }
+    if (refresh) setTerminalRefresh(value => value + 1);
   }, [statusSnapshot]);
 
   async function changeJobPin(pinned: boolean, reason = '') {
@@ -735,7 +1008,7 @@ function JobDetail({ api, jobId, onShowList, confirmCancel, onOpenJob, onSchedul
   const jobStatus = selectedStatus;
   const canCancel = Boolean(job && ['QUEUED', 'PREPARING', 'RUNNING'].includes(jobStatus));
   const isLoadResult = job?.command === 'load' || loadTerminalSummary(result) !== null;
-  const report = useLoadArchiveSummary(api, jobId, isLoadResult && (activeTab === 'results' || activeTab === 'metrics'),
+  const report = useLoadArchiveSummary(api, jobId, isLoadResult && !activeLoad && (activeTab === 'results' || activeTab === 'metrics'),
     activeTab === 'results' || activeTab === 'metrics', activeTab === 'metrics');
   const inlineMetrics = useMemo(() => resultMetrics(result), [result]);
   const metrics = useMemo(() => report.detailMetrics ? { ...(inlineMetrics || {}), ...report.detailMetrics } : inlineMetrics, [inlineMetrics, report.detailMetrics]);
@@ -784,8 +1057,9 @@ function JobDetail({ api, jobId, onShowList, confirmCancel, onOpenJob, onSchedul
     <StructuredEventsPanel api={api} jobId={jobId} job={displayedJob} hidden={activeTab !== 'events'} />
     <section className="att-job-panel" role="tabpanel" id="job-panel-results" aria-labelledby="job-tab-results" hidden={activeTab !== 'results'} tabIndex={0}>
       <h2>Results</h2>
+      <LiveLoadSummary job={displayedJob} active={activeLoad} progress={liveProgress} history={job?.loadProgressHistory || []} trend={job?.loadProgressTrend || []} streamHistory={eventStream.liveProgressHistory} checkpointHistory={eventStream.checkpointHistory} connection={eventStream.connection} now={clockNow} terminalResultAvailable={payloadTerminal && Boolean(result?.result)} />
       {Boolean(resultMetrics(result)) && <section aria-label="Failure diagnosis"><h3>Failure diagnosis</h3>
-        <p>Runtime errors (all phases): {displayValue(resultMetrics(result)?.runtimeError ?? 0)}; measured runtime errors: {displayValue(resultMetrics(result)?.measuredRuntimeError ?? 0)}.</p>
+        <p>Runtime errors (all phases): {typeof resultMetrics(result)?.runtimeError === 'number' ? METRIC_NUMBER_FORMATTER.format(resultMetrics(result)!.runtimeError as number) : 'Not available'}; measured runtime errors: {typeof resultMetrics(result)?.measuredRuntimeError === 'number' ? METRIC_NUMBER_FORMATTER.format(resultMetrics(result)!.measuredRuntimeError as number) : 'Not available'}.</p>
         <p>Thresholds and execution outcome are independent. Completed TPS includes unsuccessful completions; successfulThroughput counts PASS only.</p>
         {primaryLoadError(result) && <p role="alert">{String(primaryLoadError(result)?.code || 'LOAD runtime error')}: {String(primaryLoadError(result)?.summary || 'The LOAD ended with ERROR.')}</p>}
         {Array.isArray(resultMetrics(result)?.failureDiagnostics) && <pre>{displayValue(resultMetrics(result)?.failureDiagnostics)}</pre>}
@@ -793,7 +1067,7 @@ function JobDetail({ api, jobId, onShowList, confirmCancel, onOpenJob, onSchedul
       {resultState === 'loading' && <p role="status" aria-busy="true">Loading result…</p>}
       {resultState === 'refreshing' && <p role="status" aria-busy="true">Refreshing result…</p>}
       {resultError && <p role="alert" className="att-inline-error">{resultError}</p>}
-      {result && <><p>{result.result ? 'Server result returned.' : 'The Server has not returned a result payload.'}</p>
+      {result && <>{(result.result || !activeLoad) && <p>{result.result ? 'Server result returned.' : 'The Server has not returned a result payload.'}</p>}
         <CompactLoadSummary payload={result} archiveState={report.availability} archiveMessage={report.error} />
         {result.diagnostic && <details><summary>Server diagnostic</summary><pre>{displayValue(result.diagnostic)}</pre></details>}
         {job?.command === 'load' && report.availability === 'loading' && <p role="status" aria-busy="true">Loading authorized evidence and workload details…</p>}
@@ -811,9 +1085,10 @@ function JobDetail({ api, jobId, onShowList, confirmCancel, onOpenJob, onSchedul
       </>}
     </section>
     <ArtifactsPanel api={api} jobId={jobId} refresh={detailRefresh} onMetrics={setArchiveMetrics} hidden={activeTab !== 'artifacts'} />
-    <MetricsPanel job={job} payload={result} metrics={metrics} resultState={resultState} archiveMetrics={report.archiveMetrics || archiveMetrics}
+    <MetricsPanel job={displayedJob} payload={result} metrics={metrics} resultState={resultState} archiveMetrics={report.archiveMetrics || archiveMetrics}
       reportAvailability={report.availability} reportError={report.error} onRetryReport={report.retry} reportDetailsLoaded={Boolean(report.detailMetrics)}
-      buckets={buckets} charts={charts} hidden={activeTab !== 'metrics'} />
+      buckets={buckets} charts={charts} hidden={activeTab !== 'metrics'} activeLoad={activeLoad} liveProgress={liveProgress}
+      liveHistory={job?.loadProgressHistory || []} liveTrend={job?.loadProgressTrend || []} streamHistory={eventStream.liveProgressHistory} checkpointHistory={eventStream.checkpointHistory} streamConnection={eventStream.connection} now={clockNow} terminalResultAvailable={payloadTerminal && Boolean(result?.result)} />
   </div>;
 }
 

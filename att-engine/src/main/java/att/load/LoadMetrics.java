@@ -345,6 +345,7 @@ public final class LoadMetrics implements LoadEventListener {
         result.put("latencySampleRate", measuredLatencyCount.get() == 0L ? 0.0
                 : Math.min(1.0, ((double) sorted.length) / measuredLatencyCount.get()));
         result.put("latencyObservationCount", measuredLatencyCount.get());
+        result.put("latencySumMs", latencySumMs.get());
         result.put("latencyMinMs", measuredLatencyCount.get() == 0L ? 0L : latencyMinMs.get());
         result.put("latencyMeanMs", measuredLatencyCount.get() == 0L ? 0.0 : ((double) latencySumMs.get()) / measuredLatencyCount.get());
         result.put("p50Ms", percentile(sorted, 0.50));

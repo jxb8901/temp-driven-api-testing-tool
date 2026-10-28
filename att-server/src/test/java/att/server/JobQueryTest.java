@@ -148,7 +148,8 @@ class JobQueryTest {
     @Test void summariesAreSanitizedAndCompositeSignatureIgnoresBindingOrder() throws Exception {
         var scenario=ServerRuntime.JSON.readTree("{\"workloads\":[{\"id\":\"mix\",\"mix\":[{\"target\":{\"type\":\"tool\",\"id\":\"x\",\"arguments\":{\"password\":\"private\"}}},{\"target\":{\"type\":\"flow\",\"id\":\"y\"}}],\"load\":{\"users\":3,\"duration\":\"2s\",\"warmup\":\"1s\",\"rampUp\":\"1s\",\"maxConcurrent\":500}}]}");
         var summary=JobListIdentity.load(scenario);assertEquals(2,summary.get("bindingCount"));
-        assertFalse(ServerRuntime.JSON.writeValueAsString(summary).contains("private"));assertFalse(ServerRuntime.JSON.writeValueAsString(summary).contains("maxConcurrent"));
+        assertFalse(ServerRuntime.JSON.writeValueAsString(summary).contains("private"));assertTrue(ServerRuntime.JSON.writeValueAsString(summary).contains("maxConcurrent"));
+        assertEquals(500,((Map<?,?>)((List<?>)summary.get("workloads")).get(0)).get("maxConcurrent"));
         var workloads=(List<?>)summary.get("workloads");assertEquals(4000L,((Map<?,?>)workloads.get(0)).get("totalDurationMs"));
         var mix=(com.fasterxml.jackson.databind.node.ArrayNode)scenario.path("workloads").get(0).path("mix");var first=mix.remove(0);mix.add(first);
         assertEquals(summary.get("signature"),JobListIdentity.load(scenario).get("signature"));
@@ -156,5 +157,13 @@ class JobQueryTest {
         var singleLoad=JobListIdentity.load(ServerRuntime.JSON.readTree("{\"workloads\":[{\"id\":\"renamable-workload\",\"target\":{\"type\":\"flow\",\"id\":\"y\"},\"load\":{\"users\":1,\"duration\":\"1s\"}}]}"));
         var singleRun=JobListIdentity.from(ServerRuntime.JSON.readTree("{\"executionType\":\"run\",\"target\":{\"type\":\"flow\",\"id\":\"y\"}}"));
         assertEquals(singleRun.get("signature"),singleLoad.get("signature"),"A single target groups by its canonical identity across RUN and LOAD");
+    }
+    @Test void workloadPlanUsesEffectiveRootThenWorkloadTiming() throws Exception {
+        var scenario=ServerRuntime.JSON.readTree("{\"load\":{\"duration\":\"20s\",\"warmup\":\"2s\",\"rampUp\":\"3s\",\"rampDown\":\"1s\",\"users\":4},\"workloads\":[{\"id\":\"override\",\"load\":{\"duration\":\"60s\",\"arrivalRate\":5,\"maxConcurrent\":12}},{\"id\":\"inherited\"}]}");
+        var workloads=(List<Map<?,?>>)JobListIdentity.load(scenario).get("workloads");
+        assertEquals("arrivalRate",workloads.get(0).get("model"));assertEquals(12,workloads.get(0).get("maxConcurrent"));
+        assertEquals(66_000L,workloads.get(0).get("totalDurationMs"),"Workload duration overrides root duration; the other root phases remain effective");
+        assertEquals("virtualUsers",workloads.get(1).get("model"));assertEquals(4,workloads.get(1).get("users"));
+        assertEquals(26_000L,workloads.get(1).get("totalDurationMs"),"Root timing is inherited when the workload omits a phase");
     }
 }

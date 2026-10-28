@@ -90,6 +90,7 @@ server:
     maxAggregateArrivalRatePerSecond: 100
     maxConcurrentPerWorkload: 100
     maxTotalConcurrent: 1000
+    # Effective LOAD envelope (warmup + ramp-up + duration + ramp-down), maximum 864000 seconds.
     maxDurationSeconds: 3600
   # Recurring package-backed Load schedules are disabled unless enabled here.
   scheduling:

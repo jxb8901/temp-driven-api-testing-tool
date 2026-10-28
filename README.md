@@ -1,4 +1,4 @@
-# ATT 4.2.5 — API and integration testing
+# ATT 4.2.6 — API and integration testing
 
 ATT is a Package-oriented platform for functional API and integration testing and controlled Load testing. A Package groups Testcases, Templates, Flows, Tools, Testdata and other business resources behind one registered root. Shared Runtime Configuration and Environment profiles bind those resources to SIT, UAT or another environment.
 
@@ -8,7 +8,7 @@ ATT supports Local execution, an optional ATT Server control plane, a browser St
 
 *Illustrative Studio UI-shell baseline with sample Package and Job data; the version badge belongs to that screenshot baseline.*
 
-## Quick Start: current 4.2.5 CLI
+## Quick Start: current 4.2.6 CLI
 
 This source-checkout walkthrough uses the shipped legacy CLI. Snapshot generation is an explicit authoring step; validation does not create or update snapshots.
 
@@ -34,7 +34,7 @@ Open [Quick Start](docs/quick-start.md) for the full offline fixture, validation
 - [Concepts](docs/concepts/): Package, authoring, execution, configuration and Server lifecycle.
 - [Guides](docs/guides/): task-oriented RUN, LOAD and validation procedures.
 - [Current CLI Reference](docs/reference/cli.md) and [ATT Remote compatibility guide](docs/remote-client.md).
-- [Proposed CLI vNext](docs/interfaces/cli/vnext-proposed.md) is a plan for a later release. It is not available in ATT 4.2.5.
+- [Proposed CLI vNext](docs/interfaces/cli/vnext-proposed.md) is a plan for a later release. It is not available in ATT 4.2.6.
 - [Generated Reference Manual](docs/reference.md) and [繁體中文 Reference](docs/reference.zh.md).
 - [Server deployment](docs/operations/server-deployment.md), [Studio interfaces](docs/interfaces/studio/), and [Server API v1](docs/interfaces/server-api/).
 - [Documentation architecture and inventory](docs/system-design/documentation-architecture.md); [history archive](docs/history/README.md).

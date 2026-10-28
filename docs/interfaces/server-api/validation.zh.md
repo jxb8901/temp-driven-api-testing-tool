@@ -2,7 +2,7 @@
 
 # Proposed Server Validation API
 
-> **規劃中，尚未發佈。** 此擬議 route 不屬於 ATT 4.2.5。現行 path-based validation 請使用 [REST API v1](v1.zh.md) 的 `POST /api/v1/jobs/validate`；該 endpoint 會提交非同步 Job。
+> **規劃中，尚未發佈。** 此擬議 route 不屬於 ATT 4.2.6。現行 path-based validation 請使用 [REST API v1](v1.zh.md) 的 `POST /api/v1/jobs/validate`；該 endpoint 會提交非同步 Job。
 
 ## Endpoint
 

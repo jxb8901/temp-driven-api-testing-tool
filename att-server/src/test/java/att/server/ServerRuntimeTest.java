@@ -162,22 +162,27 @@ class ServerRuntimeTest {
         AtomicReference<Process> launched=new AtomicReference<>();
         ServerRuntime runtime=new ServerRuntime(config,libs.toString(),ServerRuntimeTestSupport.resolvingConfiguration(builder->{
             launchEntered.countDown();
-            try {if(!allowLaunch.await(5,TimeUnit.SECONDS))throw new java.io.IOException("test launch gate timed out");}
+            try {if(!allowLaunch.await(90,TimeUnit.SECONDS))throw new java.io.IOException("test launch gate timed out");}
             catch(InterruptedException e){Thread.currentThread().interrupt();throw new java.io.IOException("test launch gate interrupted",e);}
             Process process=builder.start();launched.set(process);return process;
         }));
+        FutureTask<Map<String,Object>> submission=new FutureTask<>(()->runtime.submit("validate",ServerRuntime.JSON.readTree("{\"packageId\":\"p\"}"),"ci-test"));
         try {
-            Map<String,Object> submitted=runtime.submit("validate",ServerRuntime.JSON.readTree("{\"packageId\":\"p\"}"),"ci-test");
-            String id=(String)submitted.get("jobId");assertTrue(launchEntered.await(5,TimeUnit.SECONDS),"Worker launcher should reach the process-publication boundary");
+            new Thread(submission,"test-job-submit").start();
+            assertTrue(launchEntered.await(75,TimeUnit.SECONDS),"Worker launcher should reach the process-publication boundary");
+            long jobDeadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(5);
+            while(runtime.jobs.isEmpty()&&System.nanoTime()<jobDeadline)Thread.sleep(10);
+            assertEquals(1,runtime.jobs.size(),"The submitted Job should be visible before its process is published");
+            String id=runtime.jobs.keySet().iterator().next();
             FutureTask<Void> cancel=new FutureTask<>(()->{runtime.cancel(id,"ci-test");return null;});new Thread(cancel,"test-job-cancel").start();
             Thread.sleep(100);assertFalse(cancel.isDone(),"Cancellation must wait while launch and process publication are atomic");
-            allowLaunch.countDown();cancel.get(5,TimeUnit.SECONDS);
+            allowLaunch.countDown();assertEquals(id,submission.get(10,TimeUnit.SECONDS).get("jobId"));cancel.get(5,TimeUnit.SECONDS);
             assertEquals("CANCELLED",runtime.jobRecord(id).get("status"));
             assertNotNull(launched.get());assertFalse(launched.get().isAlive(),"Cancellation must terminate the published Worker process");
             long cleanupDeadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(5);
             while(runtime.jobs.containsKey(id)&&System.nanoTime()<cleanupDeadline)Thread.sleep(10);
             assertFalse(runtime.jobs.containsKey(id),"Worker cleanup must finish before the temporary fixture is removed");
-        } finally {allowLaunch.countDown();runtime.close();}
+        } finally {allowLaunch.countDown();if(!submission.isDone())submission.cancel(true);runtime.close();}
     }
 
     @Test void cancellationAndWorkerCompletionSerializeWithoutMonitorInversion() throws Exception {

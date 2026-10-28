@@ -1,4 +1,4 @@
-<!-- att-doc-status: current release=4.2.5 -->
+<!-- att-doc-status: current release=4.2.6 -->
 
 # ATT Studio interfaces
 

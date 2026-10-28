@@ -1,7 +1,7 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type PointerEvent } from 'react';
 import { formatRoute } from '../../router';
 import type { JobEvent, JobView, LoadJobsApi } from './types';
-import { MAX_EVENTS, useJobEventStream, type JobStreamEvent } from './useJobEventStream';
+import { MAX_CONSOLE_LINES, MAX_EVENTS, useJobEventStream, type JobStreamEvent } from './useJobEventStream';
 import './JobConsoleView.css';
 
 export type JobConsoleViewMode = 'live' | 'events';
@@ -48,18 +48,120 @@ function eventPreview(event: JobEvent): string {
   if (data === null || data === undefined) return '';
   if (typeof data !== 'object' || Array.isArray(data)) return typeof data === 'string' ? data : String(data);
   const record = data as Record<string, unknown>;
-  const parts = ['status', 'phase', 'sequence', 'message', 'error', 'summary'].flatMap(key => {
-    const value = record[key];
-    return typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean' ? [`${key}=${value}`] : [];
-  });
-  const metrics = record.metrics;
+  const nested = record.data && typeof record.data === 'object' && !Array.isArray(record.data) ? record.data as Record<string, unknown> : {};
+  const value = (key: string) => record[key] ?? nested[key];
+  const compact = (raw: unknown): string => {
+    if (typeof raw !== 'string' && typeof raw !== 'number' && typeof raw !== 'boolean') return '';
+    return String(raw).replace(/[\r\n\t]+/g, ' ').slice(0, 100);
+  };
+  const parts: string[] = [];
+  const fields: Record<string, Array<[string, string]>> = {
+    status: [['Status', 'status'], ['Message', 'message'], ['Summary', 'summary']],
+    progress: [['Outcome', 'outcome'], ['Status', 'status'], ['Verdict', 'verdict'], ['Phase', 'phase'], ['Workload', 'workloadId'], ['Target', 'targetId'], ['Sequence', 'sequence'], ['Iteration', 'iteration'], ['Message', 'message']],
+    diagnostic: [['Code', 'code'], ['Severity', 'severity'], ['Stage', 'stage'], ['Outcome', 'outcome'], ['Message', 'message'], ['Summary', 'summary']],
+    result: [['Status', 'status'], ['Exit code', 'exitCode'], ['Verdict', 'verdict'], ['Summary', 'summary']],
+    log: [['Level', 'level'], ['Message', 'message'], ['Console', 'console']],
+  };
+  for (const [label, key] of fields[event.type] || fields.progress!) {
+    const formatted = compact(value(key));
+    if (formatted && parts.length < 6) parts.push(`${label}: ${formatted}`);
+  }
+  const metrics = event.type === 'progress' || event.type === 'result' ? value('metrics') : undefined;
   if (metrics && typeof metrics === 'object' && !Array.isArray(metrics)) {
     const compact = Object.entries(metrics as Record<string, unknown>)
-      .filter((entry): entry is [string, string | number | boolean] => ['string', 'number', 'boolean'].includes(typeof entry[1]))
-      .slice(0, 6).map(([key, value]) => `${key}=${value}`).join(', ');
-    if (compact) parts.push(`metrics=${compact}`);
+      .filter((entry): entry is [string, string | number | boolean] => ['string', 'number', 'boolean'].includes(typeof entry[1])
+        && ['scheduled', 'started', 'completed', 'passed', 'failed', 'errors', 'dropped', 'active', 'queued', 'actualTps', 'completedTps', 'p95Ms'].includes(entry[0]))
+      .slice(0, 4).map(([key, metric]) => `${key}: ${metric}`).join(' · ');
+    if (compact) parts.push(compact);
   }
-  return parts.join(' · ');
+  const loadProgressRaw = value('loadProgress');
+  if (loadProgressRaw && typeof loadProgressRaw === 'object' && !Array.isArray(loadProgressRaw)) {
+    const loadProgress = loadProgressRaw as Record<string, unknown>;
+    const counts = loadProgress.counts && typeof loadProgress.counts === 'object' && !Array.isArray(loadProgress.counts)
+      ? loadProgress.counts as Record<string, unknown> : {};
+    const rates = loadProgress.rates && typeof loadProgress.rates === 'object' && !Array.isArray(loadProgress.rates)
+      ? loadProgress.rates as Record<string, unknown> : {};
+    const latency = loadProgress.latency && typeof loadProgress.latency === 'object' && !Array.isArray(loadProgress.latency)
+      ? loadProgress.latency as Record<string, unknown> : {};
+    const live = [
+      typeof rates.completedTps === 'number' ? `Completed TPS: ${rates.completedTps}` : '',
+      typeof counts.completed === 'number' ? `Completed: ${counts.completed}` : '',
+      typeof counts.runtimeErrors === 'number' ? `Runtime errors: ${counts.runtimeErrors}` : '',
+      typeof latency.p95Ms === 'number' ? `p95 latency: ${latency.p95Ms} ms` : '',
+    ].filter(Boolean).slice(0, 4).join(' · ');
+    if (live) parts.push(live);
+  }
+  return parts.join(' · ').slice(0, 280);
+}
+
+type FactRow = { label: string; value: string };
+function eventFactRows(value: unknown, keys: Array<[string, string]>): FactRow[] {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return [];
+  const record = value as Record<string, unknown>;
+  return keys.flatMap(([key, label]) => {
+    const item = record[key];
+    if (item === undefined || item === null || (typeof item !== 'string' && typeof item !== 'number' && typeof item !== 'boolean')) return [];
+    const formatted = String(item).replace(/[\r\n\t]+/g, ' ').slice(0, 240);
+    return formatted ? [{ label, value: formatted }] : [];
+  });
+}
+
+function EventKeyFacts({ event }: { event: JobStreamEvent }) {
+  const root = event.data && typeof event.data === 'object' && !Array.isArray(event.data) ? event.data as Record<string, unknown> : {};
+  const payload = root.data && typeof root.data === 'object' && !Array.isArray(root.data) ? root.data as Record<string, unknown> : {};
+  const read = (key: string) => root[key] ?? payload[key];
+  const loadProgressRaw = read('loadProgress');
+  const loadProgress = loadProgressRaw && typeof loadProgressRaw === 'object' && !Array.isArray(loadProgressRaw)
+    ? loadProgressRaw as Record<string, unknown> : {};
+  const progressCounts = loadProgress.counts && typeof loadProgress.counts === 'object' && !Array.isArray(loadProgress.counts)
+    ? loadProgress.counts as Record<string, unknown> : {};
+  const progressRates = loadProgress.rates && typeof loadProgress.rates === 'object' && !Array.isArray(loadProgress.rates)
+    ? loadProgress.rates as Record<string, unknown> : {};
+  const progressLatency = loadProgress.latency && typeof loadProgress.latency === 'object' && !Array.isArray(loadProgress.latency)
+    ? loadProgress.latency as Record<string, unknown> : {};
+  const rawMetrics = read('metrics');
+  const metricsSource = rawMetrics && typeof rawMetrics === 'object' && !Array.isArray(rawMetrics)
+    ? rawMetrics as Record<string, unknown> : {};
+  const metricValue = (key: string) => metricsSource[key] ?? read(key);
+  const time = [root.timestamp, root.createdAt, root.time, root.at, payload.timestamp, payload.createdAt, payload.time]
+    .find(item => typeof item === 'string' && Number.isFinite(Date.parse(item)));
+  const eventIdentity = eventFactRows({ eventId: event.id, eventType: event.type }, [['eventId', 'Event ID'], ['eventType', 'Event type']]);
+  const identity = eventFactRows({ workloadId: read('workloadId'), workloadName: read('workloadName'), targetType: read('targetType'), targetId: read('targetId'), target: read('target') }, [
+    ['workloadId', 'Workload'], ['workloadName', 'Workload name'], ['targetType', 'Target type'], ['targetId', 'Target ID'], ['target', 'Target'],
+  ]);
+  const execution = eventFactRows({ runId: read('runId') ?? loadProgress.runId, phase: loadProgress.phase ?? read('phase'), outcome: read('outcome'), status: read('status'), sequence: read('sequence') ?? event.seq, iterationId: read('iterationId') ?? read('iteration'), user: read('user') }, [
+    ['runId', 'Run ID'], ['phase', 'Phase'], ['outcome', 'Outcome'], ['status', 'Event status'], ['sequence', 'Sequence'], ['iterationId', 'Iteration ID'], ['user', 'User'],
+  ]);
+  if (typeof time === 'string') execution.unshift({ label: 'Event time', value: dateTime(time) });
+  const performance = {
+    configuredArrivalRate: metricValue('configuredArrivalRate'), actualTps: metricValue('actualTps'),
+    completedTps: progressRates.completedTps ?? metricValue('completedTps') ?? metricValue('completedThroughput'),
+    successfulTps: progressRates.successfulTps ?? metricValue('successfulTps') ?? metricValue('successfulThroughput'),
+    scheduled: progressCounts.scheduled ?? metricValue('scheduled'), started: progressCounts.started ?? metricValue('started'),
+    completed: progressCounts.completed ?? metricValue('completed'), passed: progressCounts.passed ?? metricValue('passed') ?? metricValue('success'),
+    sutFailures: progressCounts.sutFailures ?? metricValue('sutFailures') ?? metricValue('failure'),
+    runtimeErrors: progressCounts.runtimeErrors ?? metricValue('runtimeErrors') ?? metricValue('runtimeError'),
+    dropped: progressCounts.dropped ?? metricValue('dropped'), active: progressCounts.active ?? metricValue('active'),
+    queued: progressCounts.queued ?? metricValue('queued'), schedulerLagMs: read('schedulerLagMs') ?? metricValue('schedulerLagMs'),
+    schedulerLagMeanMs: progressCounts.schedulerLagMeanMs,
+    latencyMs: read('latencyMs'), meanLatencyMs: progressLatency.meanMs ?? metricValue('meanLatencyMs') ?? metricValue('meanMs'),
+    p95Ms: progressLatency.p95Ms ?? metricValue('p95Ms'), p99Ms: progressLatency.p99Ms ?? metricValue('p99Ms'),
+  };
+  const performanceRows = eventFactRows(performance, [
+    ['configuredArrivalRate', 'Configured target rate'], ['actualTps', 'Actual TPS'], ['completedTps', 'Completed TPS'], ['successfulTps', 'Successful TPS'],
+    ['scheduled', 'Scheduled'], ['started', 'Started'], ['completed', 'Completed'], ['passed', 'Passed'], ['sutFailures', 'SUT failures'],
+    ['runtimeErrors', 'Runtime errors'], ['dropped', 'Dropped'], ['active', 'Active'], ['queued', 'Queued'], ['schedulerLagMs', 'Scheduler lag (ms)'],
+    ['schedulerLagMeanMs', 'Mean scheduler lag (ms)'], ['latencyMs', 'Latency (ms)'], ['meanLatencyMs', 'Mean latency (ms)'], ['p95Ms', 'p95 latency (ms)'], ['p99Ms', 'p99 latency (ms)'],
+  ]);
+  const diagnostics = eventFactRows({ code: read('code'), severity: read('severity'), message: read('message') }, [['code', 'Code'], ['severity', 'Severity'], ['message', 'Message']]);
+  const groups = [
+    ['Event', eventIdentity], ['Identity', identity], ['Execution', execution], ['Performance', performanceRows], ['Diagnostic', diagnostics],
+  ] as const;
+  const present = groups.filter(([, rows]) => rows.length > 0);
+  if (!present.length) return null;
+  return <section className="att-event-key-facts" aria-label="Event key facts">{present.map(([group, rows]) => <div key={group}>
+    <h4>{group}</h4><dl>{rows.map((row, index) => <div key={`${row.label}-${index}`}><dt>{row.label}</dt><dd>{row.value}</dd></div>)}</dl>
+  </div>)}</section>;
 }
 
 function eventTimestamp(event: JobEvent): string {
@@ -115,6 +217,7 @@ function EventPayload({ event, expanded }: { event: JobStreamEvent; expanded: bo
   if (!expanded) return null;
   const payload = displayValue(event.data);
   return <>
+    <EventKeyFacts event={event} />
     <pre className="att-event-payload">{payload.slice(0, MAX_LINE_LENGTH)}</pre>
     {payload.length > MAX_LINE_LENGTH && <details open={retainedExpanded} onToggle={event => setRetainedExpanded(event.currentTarget.open)}><summary onClick={event => { event.preventDefault(); setRetainedExpanded(value => !value); }}>Events preview clipped — expand retained payload</summary>{retainedExpanded && <pre>{payload.slice(0, 65536)}</pre>}</details>}
     {retainedExpanded && payload.length > 65536 && <p>Retained payload display limited to 65,536 characters.</p>}
@@ -214,10 +317,10 @@ export function JobConsoleView({
   const displayedStatus = statusProjection.status || job?.status || 'Unknown';
   const liveEvents = useMemo(() => {
     const query = liveSearch.trim().toLocaleLowerCase();
-    return events.filter(event => event.seq > consoleFloor && event.consoleText
-      && (!query || event.consoleText.toLocaleLowerCase().includes(query)));
-  }, [events, liveSearch, consoleFloor]);
-  const liveLines = useMemo(() => liveEvents.map(event => event.consoleText), [liveEvents]);
+    return stream.consoleLines.filter(line => line.seq > consoleFloor && line.text
+      && (!query || line.text.toLocaleLowerCase().includes(query)));
+  }, [stream.consoleLines, liveSearch, consoleFloor]);
+  const liveLines = useMemo(() => liveEvents.map(line => line.text), [liveEvents]);
   const liveTailIdentity = liveEvents.length ? liveEvents[liveEvents.length - 1]!.seq : null;
   const visibleEvents = useMemo(() => {
     const query = eventSearch.trim().toLocaleLowerCase();
@@ -426,21 +529,23 @@ export function JobConsoleView({
       <label><input type="checkbox" aria-label={`${view === 'live' ? 'Live output' : 'Events'} auto-scroll`} checked={view === 'live' ? liveAutoScroll : eventsAutoScroll} onChange={event => view === 'live' ? setLiveAutoScroll(event.currentTarget.checked) : setEventsAutoScroll(event.currentTarget.checked)} /> Auto-scroll</label>
       <button type="button" aria-pressed={view === 'live' ? liveScrollPaused : eventsScrollPaused} onClick={() => view === 'live' ? setLiveScrollPaused(value => !value) : eventsScrollPaused ? resumeEventsAutoScroll() : setEventsScrollPaused(true)}>{(view === 'live' ? liveScrollPaused : eventsScrollPaused) ? 'Resume auto-scroll' : 'Pause auto-scroll'}</button>
       <button type="button" onClick={() => void copyVisible()} disabled={view === 'live' ? !liveLines.length : !visibleEvents.length}>Copy {view === 'live' ? 'Output' : 'Events'}</button>
-      {view === 'live' && <button type="button" onClick={() => setConsoleFloor(events.reduce((floor, event) => Math.max(floor, event.seq), consoleFloor))}>Clear view</button>}
+      {view === 'live' && <button type="button" onClick={() => setConsoleFloor(stream.consoleLines.reduce((floor, line) => Math.max(floor, line.seq), consoleFloor))}>Clear view</button>}
       {view === 'events' && <><label><input type="checkbox" aria-label="All Events" checked={eventTypeFilter.length === EVENT_TYPES.length} onChange={event => setEventTypeFilter(event.currentTarget.checked ? [...EVENT_TYPES] : [])} /> All Events</label><button type="button" onClick={() => { setEventsExpanded(true); setEventOpen({}); }}>Expand all</button><button type="button" onClick={() => { setEventsExpanded(false); setEventOpen({}); setEventsScrollPaused(true); }}>Collapse all</button></>}
     </div>
     {copyStatus && <p role="status">{copyStatus}</p>}
     {journalEntryTruncated && <p role="note">Some event payload fields were truncated by the journal byte budget. A preserved console preview can still be complete; [truncated by journal] marks a shortened console entry.</p>}
     {protocolEntryTruncated && <p role="note">Some event payload fields were truncated by the Worker protocol limit. Inspect artifacts for retained full details.</p>}
     {(historyTruncated || browserTruncated) && <p role="note">{historyTruncated && <span>Earlier journal events are no longer retained.</span>}{historyTruncated && browserTruncated && ' '}{browserTruncated && <span>This browser keeps the latest {MAX_EVENTS} events.</span>}</p>}
+    {view === 'live' && stream.consoleTruncated && <p role="note">Earlier console output has been evicted; this browser keeps the latest {MAX_CONSOLE_LINES} console entries independently of the event journal.</p>}
     {diagnostics && <p className="att-help">{diagnostics}</p>}
     {view === 'live' ? <>
       <p className="att-help">Live Output shows Server console lines. ANSI control sequences are removed safely for display.</p>
-      {(liveLines.length || standalone) ? <div className="att-console-shell" data-maximized={(onMaximize ? maximized : localMaximized) ? 'true' : 'false'} style={!onMaximize && localMaximized ? { position: 'fixed', top: 12, left: 12, right: 12, bottom: 12, height: 'auto', maxHeight: 'none', zIndex: 50 } : { height: consoleHeight }}>
+      <div className="att-console-shell" data-maximized={(onMaximize ? maximized : localMaximized) ? 'true' : 'false'} style={!onMaximize && localMaximized ? { position: 'fixed', top: 12, left: 12, right: 12, bottom: 12, height: 'auto', maxHeight: 'none', zIndex: 50 } : { height: consoleHeight }}>
         {(!onMaximize && localMaximized) && <div className="att-console-maximized-bar"><button type="button" onClick={() => setLocalMaximized(false)}>Restore</button></div>}
-        <pre ref={consoleRef} className="att-console" aria-label="Live output" data-appearance="terminal" onScroll={onLiveScroll} style={{ background: '#0d1117', color: '#f5f7fa', whiteSpace: 'pre', overflow: 'auto' }}>{liveLines.length ? liveLines.join('\n') : 'No console lines match the current view. Waiting for available output…'}</pre>
+        <pre ref={consoleRef} className="att-console" aria-label="Live output" data-appearance="terminal" onScroll={onLiveScroll} style={{ background: '#0d1117', color: '#f5f7fa', whiteSpace: 'pre', overflow: 'auto' }}>{liveLines.join('\n')}</pre>
         {!standalone && !(onMaximize ? maximized : localMaximized) && <div role="separator" aria-orientation="horizontal" aria-label="Resize live output" aria-valuemin={CONSOLE_MIN_HEIGHT} aria-valuemax={consoleMaxHeight()} aria-valuenow={consoleHeight} tabIndex={0} className="att-console-resize" onPointerDown={resizeConsole} onKeyDown={resizeConsoleByKeyboard} />}
-      </div> : <p role="status">{events.length ? (liveSearch.trim() ? 'No console lines match the current search.' : 'This Job has no console lines. Structured events remain on the Events tab.') : stream.connection === 'completed' ? 'The Job has finished and no console lines were recorded.' : stream.connection === 'reconnecting' ? 'Reconnecting to live output; no recent console lines are available.' : 'Connected; no console lines have been emitted yet.'}</p>}
+      </div>
+      {!liveLines.length && <p role="status">{stream.consoleLines.length && liveSearch.trim() ? 'No console lines match the current search.' : stream.connection === 'completed' && !stream.consoleLines.length ? 'The Job has finished and no console lines were recorded.' : stream.connection === 'reconnecting' ? 'Reconnecting to live output; no recent console lines are available.' : stream.connection === 'connected' && !stream.consoleLines.length ? 'Connected; no console lines have been emitted yet.' : 'Waiting for available output…'}</p>}
     </> : visibleEvents.length ? <ol ref={eventsRef} className="att-job-events" aria-label="Structured job events" onScroll={onEventsScroll}>
       <VirtualSpacer height={eventMetrics.offsets[eventMetrics.start]} className="att-event-virtual-spacer" />
       {virtualEvents.map((event, offset) => {

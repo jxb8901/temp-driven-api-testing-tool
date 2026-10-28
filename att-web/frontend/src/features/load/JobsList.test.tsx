@@ -25,6 +25,19 @@ it('renders target-first rows, exact navigation, copyable ID, Schedule principal
   await click(host.querySelector('[aria-label="Copy full Job ID J1234567890ABCDEF"]'));expect(writeText).toHaveBeenCalledWith(job.jobId);
   expect(host.querySelector('code')?.textContent).toBe('J12345…CDEF');
 });
+it('shows the immutable LOAD pacing plan on the Job row and expands workload details on demand',async()=>{
+  const planned={...job,targetIdentity:{type:'load',id:'2 workloads / 2 target bindings',workloadCount:2,bindingCount:2,workloads:[
+    {name:'checkout',targets:[{type:'template',id:'PAYMENT'}],model:'arrivalRate',arrivalRate:'5/s',maxConcurrent:16,duration:'2h',warmup:'10m',rampUp:'5m',rampDown:'5m',totalDurationMs:8400000},
+    {name:'account',targets:[{type:'flow',id:'ACCOUNT'}],model:'virtualUsers',users:12,duration:'1h',totalDurationMs:3600000},
+  ]}};
+  await render({queryJobs:vi.fn(async()=>response([planned]))});
+  expect(host.textContent).toContain('Configured target rate 5/s · max concurrent 16 · Planned 2h 20m');
+  expect(host.querySelector('.att-job-load-summary details')?.hasAttribute('open')).toBe(false);
+  await click(host.querySelector('.att-job-load-summary summary'));
+  expect(host.querySelector('.att-job-load-summary details')?.hasAttribute('open')).toBe(true);
+  expect(host.textContent).toContain('ACCOUNT');
+  expect(host.textContent).toContain('12 VUs · Planned 1h');
+});
 it('uses exact server page membership for footer mutations including collapsed groups and reports mixed outcomes',async()=>{
   const items=Array.from({length:100},(_,i)=>({...job,jobId:`J${i}`}));
   const queryJobs=vi.fn(async()=>response(items,{total:240,groups:[{packageId:'p',environment:'prod',targetGroup:'sig',total:240,lastCreatedAt:job.createdAt!,statuses:{PASS:240}}]}));

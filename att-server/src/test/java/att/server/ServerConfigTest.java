@@ -246,6 +246,17 @@ class ServerConfigTest {
                 +"\n  inlineLoad:\n    enabled: true\n    maxTotalConcurent: 42\nworkers: {}\npackages:\n  allowedRoots:\n    - "+yaml(allowed)+"\n  entries:\n    p: "+yaml(pkg)+"\n");
         IllegalArgumentException error=assertThrows(IllegalArgumentException.class,()->ServerConfig.load(unknown));assertTrue(error.getMessage().contains("unknown setting"));
     }
+    @Test void acceptsTenDayInlineLoadLimitAndRejectsOneSecondMore() throws Exception {
+        Path allowed=Files.createDirectory(temp.resolve("duration-packages"));Path pkg=Files.createDirectory(allowed.resolve("p"));
+        Path java=Path.of(System.getProperty("java.home"),"bin",System.getProperty("os.name","").toLowerCase().contains("win")?"java.exe":"java");
+        Path valid=temp.resolve("duration-864000.yaml");Files.writeString(valid,"server:\n  dataDir: "+yaml(temp.resolve("duration-data"))+"\n  javaExecutable: "+yaml(java)
+                +"\n  inlineLoad:\n    enabled: true\n    maxDurationSeconds: 864000\nworkers: {}\npackages:\n  allowedRoots:\n    - "+yaml(allowed)+"\n  entries:\n    p: "+yaml(pkg)+"\n");
+        assertEquals(864000,ServerConfig.load(valid).inlineLoad.maxDurationSeconds);
+        Path invalid=temp.resolve("duration-864001.yaml");Files.writeString(invalid,"server:\n  dataDir: "+yaml(temp.resolve("duration-data-invalid"))+"\n  javaExecutable: "+yaml(java)
+                +"\n  inlineLoad:\n    enabled: true\n    maxDurationSeconds: 864001\nworkers: {}\npackages:\n  allowedRoots:\n    - "+yaml(allowed)+"\n  entries:\n    p: "+yaml(pkg)+"\n");
+        IllegalArgumentException error=assertThrows(IllegalArgumentException.class,()->ServerConfig.load(invalid));
+        assertTrue(error.getMessage().contains("maxDurationSeconds"),error.getMessage());
+    }
     @Test void rejectsPackageRootsOutsideConfiguredAllowedRoots() throws Exception {
         Path allowed=Files.createDirectory(temp.resolve("allowed"));Path outside=Files.createDirectory(temp.resolve("outside"));
         Path java=Path.of(System.getProperty("java.home"),"bin",System.getProperty("os.name","").toLowerCase().contains("win")?"java.exe":"java");

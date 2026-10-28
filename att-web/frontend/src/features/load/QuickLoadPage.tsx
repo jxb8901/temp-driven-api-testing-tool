@@ -3,7 +3,8 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { TypedSidecarForm } from '../explorer/TypedSidecarForm';
 import type { JsonObject as SidecarObject, JsonValue } from '../explorer/types';
 import { CodeEditor } from '../code/CodeEditor';
-import type { LoadDraftResponse, LoadJobsApi, LoadModel, LoadPolicyTemplate, LoadTargetType, ServerDiagnostic } from './types';
+import type { LoadDraftResponse, LoadJobsApi, LoadModel, LoadPolicyTemplate, LoadServerLimits, LoadTargetType, ServerDiagnostic } from './types';
+import { effectiveLoadEnvelopeMs, plannedWorkloadDuration } from './loadWorkloadSummary';
 import { ApiError } from '../../types';
 import './load.css';
 
@@ -123,6 +124,7 @@ export function QuickLoadPage({ api, packageId, target, initialTemplateId = '', 
   const [templateId, setTemplateId] = useState(initialTemplateId);
   const [preset, setPreset] = useState('package-policy');
   const [policy, setPolicy] = useState<JsonObject | null>(null);
+  const [serverLimits, setServerLimits] = useState<LoadServerLimits | null>(null);
   const [templates, setTemplates] = useState<LoadPolicyTemplate[]>([]);
   const [templateCatalogTruncated, setTemplateCatalogTruncated] = useState(false);
   const [policyState, setPolicyState] = useState<'loading' | 'ready' | 'error' | 'disabled'>('loading');
@@ -169,6 +171,7 @@ export function QuickLoadPage({ api, packageId, target, initialTemplateId = '', 
     try { return logicalTargetId ? makeScenario(policy, model, logicalTargetId, targetType, users, tps, maxConcurrent, duration, timing, business, advanced) : null; }
     catch { return null; }
   }, [policy, model, logicalTargetId, targetType, environment, users, tps, maxConcurrent, duration, timing, business, advanced]);
+  const effectiveEnvelopeMs = duration.trim() ? effectiveLoadEnvelopeMs([timing.warmup, timing.rampUp, duration, timing.rampDown]) : null;
   const rawJson = scenario ? JSON.stringify(scenario, null, 2) : '';
   const scenarioFingerprint = JSON.stringify([identityKey, environment, model, templateId, preset, rawJson]);
   const scenarioFingerprintRef = useRef(scenarioFingerprint);
@@ -221,14 +224,14 @@ export function QuickLoadPage({ api, packageId, target, initialTemplateId = '', 
     const resetForPolicySelection = pendingModelPolicySelection.current || pendingTemplatePolicySelection.current;
     const preserveDraft = dirtyRef.current && !identityChanged && !resetForPolicySelection;
     const controller = new AbortController(); const request = ++policySequence.current;
-    setPolicy(null); setDraft(null); setDraftState('idle'); setError(''); setDiagnostics([]); setPolicyState(inlineLoadEnabled ? 'loading' : 'disabled');
+    setPolicy(null); setServerLimits(null); setDraft(null); setDraftState('idle'); setError(''); setDiagnostics([]); setPolicyState(inlineLoadEnabled ? 'loading' : 'disabled');
     setPolicyMessage(inlineLoadEnabled ? 'Loading safe policy defaults…' : 'Browser-created Load drafts are disabled by Server configuration.');
     if (!packageId || !targetType || !inlineLoadEnabled) return () => controller.abort();
     api.getLoadPolicy(packageId, model, environment || undefined, controller.signal, templateId || undefined).then(response => {
       if (controller.signal.aborted || request !== policySequence.current) return;
       pendingModelPolicySelection.current = false;
       pendingTemplatePolicySelection.current = false;
-      const loaded = asObject(response.policy); setPolicy(loaded); setTemplates(response.templates || []);
+      const loaded = asObject(response.policy); setPolicy(loaded); setServerLimits(response.limits || null); setTemplates(response.templates || []);
       setTemplateCatalogTruncated(Boolean(response.templateCatalogTruncated)); setPolicyState('ready');
       setPolicyMessage(response.redacted ? 'Safe model-specific policy defaults loaded. Sensitive values remain protected.' : 'The selected model’s package policy or Server fallback is loaded. Validate before running.');
       if (!preserveDraft) {
@@ -394,6 +397,8 @@ export function QuickLoadPage({ api, packageId, target, initialTemplateId = '', 
           : <label>Target TPS<input value={tps} onChange={event => change(setTps, event.currentTarget.value)} placeholder="e.g. 5/s" /></label>}
         {model === 'arrivalRate' && <label>Maximum concurrent<input type="number" min="1" step="1" value={maxConcurrent} onChange={event => change(setMaxConcurrent, event.currentTarget.value)} /></label>}
         <label>Duration<input value={duration} onChange={event => change(setDuration, event.currentTarget.value)} placeholder="e.g. 30s or 5m" /></label>
+        {serverLimits && <p className="att-help">Server duration limit: {serverLimits.maxDurationSeconds}s. Planned effective envelope: {effectiveEnvelopeMs == null ? 'enter valid ms, s, m, or h phases' : plannedWorkloadDuration(effectiveEnvelopeMs)} (warm-up + ramp-up + measured duration + ramp-down).</p>}
+        {serverLimits && effectiveEnvelopeMs != null && effectiveEnvelopeMs > serverLimits.maxDurationSeconds * 1000 && <p role="alert" className="att-inline-error">Planned effective envelope {plannedWorkloadDuration(effectiveEnvelopeMs)} exceeds the Server limit {plannedWorkloadDuration(serverLimits.maxDurationSeconds * 1000)}. Reduce one or more phases before validating.</p>}
       </div>
       <EnvironmentResolutionNotice packageId={packageId} environment={environment} />
       {environmentState === 'loading' && <p role="status">Loading package environments…</p>}{environmentState === 'error' && <p className="att-help" role="alert">Environment profiles are unavailable; the package default remains selectable.{onRetryEnvironments && <> <button className="button button-quiet" type="button" onClick={onRetryEnvironments}>Retry profiles</button></>}</p>}

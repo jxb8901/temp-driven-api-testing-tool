@@ -119,6 +119,16 @@ final class WorkerProcessFence {
         return true;
     }
 
+    boolean awaitStopped(long millis) throws InterruptedException {
+        long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(millis);
+        while (!observedStopped()) {
+            observe();
+            if (System.nanoTime() >= deadline) return false;
+            Thread.sleep(10L);
+        }
+        return true;
+    }
+
     void whenStopped(Runnable action) {
         List<CompletableFuture<?>> exits = new ArrayList<>();
         synchronized (this) {

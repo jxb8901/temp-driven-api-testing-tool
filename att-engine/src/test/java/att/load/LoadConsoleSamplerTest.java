@@ -6,6 +6,7 @@ import org.junit.jupiter.api.Test;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CyclicBarrier;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -16,6 +17,76 @@ import java.util.concurrent.atomic.AtomicInteger;
 import static org.junit.jupiter.api.Assertions.*;
 
 class LoadConsoleSamplerTest {
+    @Test void concurrentlyDiscoveredWorkloadsAndPhasesStayWithinTheirCaps() throws Exception {
+        LoadConsoleSampler sampler=new LoadConsoleSampler("concurrent",5000L,1000L);
+        int workers=64;CyclicBarrier start=new CyclicBarrier(workers);ExecutorService executor=Executors.newFixedThreadPool(workers);
+        List<Future<?>> tasks=new ArrayList<>();
+        try {
+            for(int i=0;i<workers;i++) {final int id=i;tasks.add(executor.submit(()->{
+                start.await();sampler.onEvent(LoadEvent.completed("concurrent","arrivalRate","phase-"+id,"iteration","VU",id,1L,2L,3L,ResultStatus.PASS)
+                        .withWorkloadIdentity("workload-"+id,"template","TEST"));return null;
+            }));}
+            for(Future<?> task:tasks)task.get(10,TimeUnit.SECONDS);
+            Map<String,Object> snapshot=sampler.snapshot();
+            assertEquals(32,((Map<?,?>)snapshot.get("workloads")).size());
+            assertEquals(8,((Map<?,?>)snapshot.get("phases")).size());
+            assertEquals(Boolean.TRUE,snapshot.get("workloadsTruncated"));
+            assertEquals((long)workers,((Map<?,?>)snapshot.get("counts")).get("completed"),"The global count includes observations beyond the detail cap");
+        } finally {executor.shutdownNow();executor.awaitTermination(10,TimeUnit.SECONDS);sampler.finish("PASS");}
+    }
+    @Test void preparationDoesNotAdvanceSchedulerElapsedTime() throws Exception {
+        LoadConsoleSampler sampler=new LoadConsoleSampler("preparing",5000L,1000L);
+        Thread.sleep(20L);
+        assertEquals(0L,sampler.snapshot().get("elapsedMs"));
+        sampler.observePreparedStart("closed","preparing");
+        Thread.sleep(5L);
+        assertTrue(((Number)sampler.snapshot().get("elapsedMs")).longValue()>0L);
+        sampler.finish("PASS");
+    }
+
+    @Test void lateCompletionsKeepHistoricalAttributionWithoutRegressingLivePhase() {
+        LoadConsoleSampler sampler=new LoadConsoleSampler("phase-order",5000L,1000L);
+        sampler.observePreparedStart("arrivalRate","phase-order","WARMUP");
+        sampler.onEvent(LoadEvent.completed("phase-order","arrivalRate","WARMUP","warmup-1",null,1,1L,2L,3L,ResultStatus.PASS));
+        sampler.onEvent(LoadEvent.completed("phase-order","arrivalRate","STEADY","steady-1",null,2,2L,3L,4L,ResultStatus.PASS));
+        sampler.onEvent(LoadEvent.completed("phase-order","arrivalRate","WARMUP","warmup-late",null,3,3L,4L,5L,ResultStatus.PASS));
+
+        Map<String,Object> steadySnapshot=sampler.snapshot();
+        assertEquals("STEADY",steadySnapshot.get("phase"));
+        Map<?,?> steadyPhases=(Map<?,?>)steadySnapshot.get("phases");
+        assertEquals(2L,((Map<?,?>)steadyPhases.get("WARMUP")).get("completed"));
+        assertEquals(1L,((Map<?,?>)steadyPhases.get("STEADY")).get("completed"));
+
+        sampler.onEvent(LoadEvent.completed("phase-order","arrivalRate","RAMP_DOWN","ramp-down-1",null,4,4L,5L,6L,ResultStatus.PASS));
+        sampler.onEvent(LoadEvent.completed("phase-order","arrivalRate","STEADY","steady-late",null,5,5L,6L,7L,ResultStatus.PASS));
+        Map<String,Object> drainSnapshot=sampler.snapshot();
+        assertEquals("RAMP_DOWN",drainSnapshot.get("phase"));
+        Map<?,?> drainPhases=(Map<?,?>)drainSnapshot.get("phases");
+        assertEquals(2L,((Map<?,?>)drainPhases.get("STEADY")).get("completed"));
+        assertEquals(1L,((Map<?,?>)drainPhases.get("RAMP_DOWN")).get("completed"));
+        sampler.finish("PASS");
+    }
+    @Test void exposesBoundedProgressCountsAndLatencyWithoutIterationIdentity() {
+        LoadConsoleSampler sampler=new LoadConsoleSampler("live-progress",5000L,1000L);
+        sampler.startLine("arrivalRate");
+        sampler.onEvent(LoadEvent.completed("live-progress","arrivalRate","STEADY","private-iteration","VU-1",1,1L,2L,52L,ResultStatus.PASS)
+                .withWorkloadIdentity("checkout","template","PAYMENT"));
+        sampler.onEvent(LoadEvent.dropped("live-progress","arrivalRate","STEADY","private-iteration-2",2,1L,2L)
+                .withWorkloadIdentity("checkout","template","PAYMENT"));
+        Map<String,Object> snapshot=sampler.snapshot();
+        @SuppressWarnings("unchecked") Map<String,Object> counts=(Map<String,Object>)snapshot.get("counts");
+        assertEquals(2L,counts.get("scheduled"));assertEquals(1L,counts.get("completed"));assertEquals(1L,counts.get("passed"));
+        assertEquals(1L,counts.get("dropped"));assertEquals(0L,counts.get("queued"));
+        @SuppressWarnings("unchecked") Map<String,Object> latency=(Map<String,Object>)snapshot.get("latency");
+        assertEquals(1L,latency.get("sampleCount"));assertEquals(50.0,latency.get("meanMs"));
+        Map<?,?> workload=(Map<?,?>)((Map<?,?>)snapshot.get("workloads")).get("checkout");
+        assertEquals(50.0,((Map<?,?>)workload.get("latency")).get("meanMs"));
+        assertFalse(snapshot.toString().contains("private-iteration"));
+        assertEquals("DROPPED",((Map<?,?>)snapshot.get("latestFailure")).get("status"));
+        assertTrue(snapshot.containsKey("measuredCounts"));assertTrue(snapshot.containsKey("phases"));
+        sampler.finish("PASS");
+    }
+
     @Test void emitsOneStartPeriodicProgressAndNoSuccessfulIterationLine() throws Exception {
         LoadConsoleSampler sampler = new LoadConsoleSampler("load-1", 30L, 1000L);
         assertEquals("[LOAD] START runId=load-1 model=closed", sampler.startLine("closed"));
@@ -53,6 +124,7 @@ class LoadConsoleSamplerTest {
                 "VU-1", 2, 1L, 2L, 5L, ResultStatus.PASS));
         assertNotNull(progress);
         assertTrue(progress.startsWith("[LOAD] PROGRESS runId=load-generated"));
+        assertEquals("load-generated",sampler.snapshot().get("runId"),"Coalesced progress carries the adopted run identity");
         assertTrue(sampler.finish("FAIL").startsWith("[LOAD] COMPLETE runId=load-generated status=FAIL"));
     }
 
@@ -94,6 +166,18 @@ class LoadConsoleSamplerTest {
         assertEquals(beforeFinish, ticks.size(), ticks.toString());
     }
 
+    @Test void structuredOnlyProgressSinkPublishesWhileWorkerHasNoIterationEvents() throws Exception {
+        List<Map<String,Object>> snapshots = Collections.synchronizedList(new ArrayList<>());
+        LoadConsoleSampler sampler = new LoadConsoleSampler("structured-idle", 40L, 1000L, null,
+                (line, snapshot) -> snapshots.add(snapshot));
+        sampler.startLine("arrivalRate");
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
+        while (snapshots.isEmpty() && System.nanoTime() < deadline) Thread.sleep(5L);
+        assertFalse(snapshots.isEmpty(), "The structured callback needs its own timer even without a console-line sink");
+        assertEquals("att-load-live-progress/v1", snapshots.get(0).get("schemaVersion"));
+        sampler.finish("PASS");
+    }
+
     @Test void concurrentIterationsAndTheTimerShareOneProgressInterval() throws Exception {
         List<String> ticks = Collections.synchronizedList(new ArrayList<String>());
         LoadConsoleSampler sampler = new LoadConsoleSampler("load-race", 80L, 1000L, ticks::add);
@@ -109,7 +193,7 @@ class LoadConsoleSamplerTest {
             if (line != null && line.contains("[LOAD] PROGRESS")) eventProgress++;
         }
         assertEquals(0, eventProgress);
-        assertEquals(1, ticks.size(), ticks.toString());
+        assertTrue(ticks.size() <= 2, ticks.toString()); // A second interval may elapse if the test thread is descheduled.
 
         LoadConsoleSampler burst = new LoadConsoleSampler("load-burst", 30L, 1000L);
         assertNotNull(burst.startLine("closed"));

@@ -193,12 +193,19 @@ final class LoadMetricsCheckpointStore {
     }
 
     static Map<String, Object> readLatest(Path directory, String runId, String scope) throws IOException {
+        List<Map<String, Object>> verified = readVerifiedGenerations(directory, runId, scope);
+        return verified.isEmpty() ? null : verified.get(0);
+    }
+
+    /** Returns at most the two retained generations in descending sequence order. */
+    static List<Map<String, Object>> readVerifiedGenerations(Path directory, String runId, String scope) throws IOException {
+        List<Map<String, Object>> verified = new ArrayList<Map<String, Object>>();
         if (directory == null || Files.isSymbolicLink(directory) || !Files.isDirectory(directory, LinkOption.NOFOLLOW_LINKS))
-            return null;
+            return verified;
         List<Path> generations = new ArrayList<Path>();
         try (Stream<Path> paths = Files.list(directory)) {
             paths.filter(path -> path.getFileName().toString().matches("checkpoint-[0-9]{20}\\.json"))
-                    .sorted(Comparator.comparing(Path::getFileName).reversed()).forEach(generations::add);
+                    .sorted(Comparator.comparing(Path::getFileName).reversed()).limit(RETAINED_GENERATIONS).forEach(generations::add);
         }
         for (Path path : generations) {
             if (Files.isSymbolicLink(path) || !Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS)
@@ -220,12 +227,12 @@ final class LoadMetricsCheckpointStore {
                 String actual = sha256(integrityEnvelopeBytes(checkpointBytes));
                 if (!expected.equals(actual)) continue;
                 @SuppressWarnings("unchecked") Map<String, Object> parsed = JSON.convertValue(checkpoint, Map.class);
-                return parsed;
+                verified.add(parsed);
             } catch (Exception invalid) {
                 // A truncated newest generation does not hide the previous verified generation.
             }
         }
-        return null;
+        return verified;
     }
 
     /** Remove the final digest member to recover the exact envelope bytes hashed by the writer. */

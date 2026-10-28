@@ -43,8 +43,10 @@ public final class WorkerMain {
     private long inspectionResponseBytes;
     private Map<String,Object> lastInspectionMetrics;
     private Path executionOutput;
+    private JsonParser controlParser;
     private att.load.LoadConsoleSampler loadSampler;
     private String loadSummaryLine;
+    private volatile boolean shutdownCancellationRequested;
     private WorkerMain(PrintStream protocol) { this.protocol=protocol; }
     public static void main(String[] args) throws Exception {
         // Trusted evidence retains original diagnostics. Protocol secrets are protected
@@ -81,24 +83,26 @@ public final class WorkerMain {
             return;
         }
         int exit=worker.execute();
-        if(exit!=0) System.exit(exit);
+        if(exit!=0&&!worker.shutdownCancellationRequested) System.exit(exit);
     }
     private int execute() throws Exception {
-        JsonParser parser=mapper.getFactory().createParser(new BufferedReader(new InputStreamReader(System.in,StandardCharsets.UTF_8)));
         JsonNode input;
         try {
-            input=mapper.readTree(parser);
+            controlParser=mapper.getFactory().createParser(new BufferedReader(new InputStreamReader(System.in,StandardCharsets.UTF_8)));
+            input=mapper.readTree(controlParser);
         } catch(Exception error) {
             emit(WorkerEvent.Type.STATUS,fields("status","RUNNING"));
             return fail("WORKER_REQUEST_INVALID","Unable to parse Worker request JSON");
         }
         if(input==null) { emit(WorkerEvent.Type.STATUS,fields("status","RUNNING")); return fail("WORKER_REQUEST_INVALID","A JSON request is required"); }
         if(input!=null&&input.hasNonNull("jobId")) jobId=input.get("jobId").asText();
-        try {
-            if(parser.nextToken()!=null) { emit(WorkerEvent.Type.STATUS,fields("status","RUNNING")); return fail("WORKER_REQUEST_INVALID","Only one JSON request is accepted per Worker process"); }
-        } catch(Exception error) {
-            emit(WorkerEvent.Type.STATUS,fields("status","RUNNING"));
-            return fail("WORKER_REQUEST_INVALID","Unable to parse Worker request JSON");
+        if(!"load".equals(input.path("command").asText())) {
+            try {
+                if(controlParser.nextToken()!=null) { emit(WorkerEvent.Type.STATUS,fields("status","RUNNING")); return fail("WORKER_REQUEST_INVALID","Only one JSON request is accepted per Worker process"); }
+            } catch(Exception error) {
+                emit(WorkerEvent.Type.STATUS,fields("status","RUNNING"));
+                return fail("WORKER_REQUEST_INVALID","Unable to parse Worker request JSON");
+            }
         }
         return executeRequest(input);
     }
@@ -172,6 +176,12 @@ public final class WorkerMain {
             if(!java.security.MessageDigest.isEqual(request.expectedSchemaRegistryDigest.getBytes(StandardCharsets.US_ASCII),
                     actual.getBytes(StandardCharsets.US_ASCII)))
                 return fail("WORKER_SCHEMA_REGISTRY_MISMATCH","The Worker Schema Registry does not match the Server's validated Local Runtime; install the matching Local archive");
+        }
+        if ("load".equals(request.command)) {
+            Thread executionThread = Thread.currentThread();
+            Thread control = new Thread(() -> listenForLoadCancellation(controlParser, executionThread), "att-worker-load-control");
+            control.setDaemon(true);
+            control.start();
         }
         long processingStarted=System.nanoTime();
         long buildsBefore=InspectionMetrics.JVM.count(INDEX_BUILD),loadsBefore=InspectionMetrics.JVM.count(CONFIG_LOAD),bytesBefore=InspectionMetrics.JVM.count(READ_BYTES);
@@ -289,6 +299,20 @@ public final class WorkerMain {
             return exit;
         }
     }
+
+    private void listenForLoadCancellation(JsonParser input, Thread executionThread) {
+        if(input==null)return;
+        try {
+            while(input.nextToken()!=null) {
+                JsonNode command=mapper.readTree(input);
+                if("CANCEL".equals(command.path("type").asText())&&jobId!=null&&jobId.equals(command.path("jobId").asText())) {
+                    shutdownCancellationRequested=true;
+                    executionThread.interrupt();
+                    return;
+                }
+            }
+        } catch(Exception ignored) { /* Closing stdin ends the optional control channel. */ }
+    }
     private OperationResult dispatch(WorkerRequest r) throws Exception {
         if(r.packageRoot==null||r.packageRoot.trim().isEmpty()) throw new IllegalArgumentException("packageRoot is required");
         Path root=Paths.get(r.packageRoot).toAbsolutePath().normalize();
@@ -305,20 +329,27 @@ public final class WorkerMain {
             if(r.expectedRevisionDigest!=null) verifyRevision(root,config,r);
             return service.debug(new DebugRequest(root,config,r.environment,output,r.runId,text(t,"type"),text(t,"id"),path(r.debugInput),bool(r.unsafeFailureDetails),event -> emitExecution(event),r.debugId,r.overrides,false,null,r.inlineDebugInput)); }
         if("load".equals(r.command)) { Map<String,Object> t=r.target==null?Collections.<String,Object>emptyMap():r.target; Map<String,String> l=r.load==null?Collections.<String,String>emptyMap():r.load;
-            loadSampler=new att.load.LoadConsoleSampler(r.runId, line -> { try { emit(WorkerEvent.Type.PROGRESS, fields("console", line, "phase", "PROGRESS")); } catch(Exception error) { throw new IllegalStateException(error); } });
+            final CheckpointProjection checkpoints = new CheckpointProjection(executionOutput, r.runId);
+            loadSampler=new att.load.LoadConsoleSampler(r.runId,5000L,1000L,null,(line,progress) -> { try { checkpoints.addTo(progress); emit(WorkerEvent.Type.PROGRESS, fields("console",line,"phase","PROGRESS","loadProgress",progress)); } catch(Exception error) { throw new IllegalStateException(error); } });
             att.load.LoadEventListener observer = new att.load.LoadEventListener() {
                 @Override public void onEvent(att.load.LoadEvent event) { try {
+                    checkpoints.observeRunId(event.runId());
                     String start=loadSampler.startLine(event.model(), event.runId());
                     if(start!=null) emit(WorkerEvent.Type.PROGRESS, fields("console", start, "runId", event.runId(), "phase", "START"));
                     Map<String,Object> payload=event.toMap(root);
                     String line=loadSampler.onEvent(event);
-                    if(line!=null) payload.put("console", line);
+                    if(line!=null) {
+                        payload.put("console", line);
+                        if(line.startsWith("[LOAD] PROGRESS ")) { Map<String,Object> progress=loadSampler.snapshot(); checkpoints.addTo(progress); payload.put("loadProgress",progress); }
+                    }
                     emit(WorkerEvent.Type.PROGRESS, payload);
                 } catch(Exception error) { throw new IllegalStateException(error); } }
                 @Override public void onPreparationEvent(Map<String,Object> event) { try {
                     String loadEvent=String.valueOf(event.get("event"));
-                    if ("LOAD_START".equals(loadEvent))
-                        loadSampler.observePreparedStart(String.valueOf(event.get("model")), String.valueOf(event.get("runId")));
+                    if ("LOAD_START".equals(loadEvent)) {
+                        checkpoints.observeRunId(String.valueOf(event.get("runId")));
+                        loadSampler.observePreparedStart(String.valueOf(event.get("model")), String.valueOf(event.get("runId")), String.valueOf(event.get("phase")));
+                    }
                     Map<String,Object> payload=new java.util.LinkedHashMap<String,Object>(event);
                     payload.put("loadEvent", loadEvent);
                     payload.put("phase", "PREPARATION");
@@ -326,12 +357,14 @@ public final class WorkerMain {
                 } catch(Exception error) { throw new IllegalStateException(error); } }
             };
             att.api.OperationResult loadResult;
+            try {
             if(r.inlineLoadScenario!=null) {
                 if(r.expectedRevisionDigest!=null) verifyRevision(root,config,r);
                 att.load.LoadScenario parsed=new att.load.LoadScenarioLoader(root).loadInline(r.inlineLoadScenario);
                 loadResult=service.load(new LoadRequest(root,config,r.environment,output,r.runId,null,null,null,
                         null,null,null,null,null,null,null,null,null,r.overrides,observer,parsed,false));
             } else loadResult=service.load(new LoadRequest(root,config,r.environment,output,r.runId,path(r.scenario),optionalText(t,"type"),optionalText(t,"id"),l.get("users"),l.get("arrivalRate"),l.get("warmup"),l.get("rampUp"),l.get("duration"),l.get("rampDown"),l.get("thinkTime"),l.get("maxConcurrent"),l.get("overloadPolicy"),r.overrides,observer));
+            } finally { checkpoints.close(); }
             loadSummaryLine=loadSampler.finish(loadResult.status());
             return loadResult; }
         if("validate".equals(r.command)) return service.validate(new ValidateRequest(root,config,r.environment,paths(r.suites),path(r.suiteDirectory),set(r.caseIds),set(r.tags),set(r.excludeTags),bool(r.all),r.validationScope));
@@ -925,6 +958,28 @@ public final class WorkerMain {
                 lastInspectionMetrics=metrics;
             }
         payload.put("workerMetrics",resourceTelemetry.snapshot());emit(WorkerEvent.Type.RESULT,payload);
+    }
+    static final class CheckpointProjection implements AutoCloseable {
+        private final Path output;
+        private volatile String runId;
+        private volatile Map<String,Object> latest;
+        private final java.util.concurrent.ScheduledExecutorService reader;
+        CheckpointProjection(Path output,String runId) {
+            this.output=output; this.runId=runId;
+            reader=java.util.concurrent.Executors.newSingleThreadScheduledExecutor(task -> {
+                Thread thread=new Thread(task,"att-load-checkpoint-projection"); thread.setDaemon(true); return thread;
+            });
+            reader.scheduleWithFixedDelay(() -> latest=att.load.LoadCheckpointIntervals.read(this.output,this.runId),0L,30L,java.util.concurrent.TimeUnit.SECONDS);
+        }
+        void observeRunId(String observed) { if((runId==null || runId.trim().isEmpty()) && observed!=null && !"null".equals(observed))runId=observed; }
+        void addTo(Map<String,Object> progress) {
+            Map<String,Object> value=latest;
+            if(value!=null && "WAITING".equals(value.get("state")) && progress.get("elapsedMs") instanceof Number &&
+                    ((Number)progress.get("elapsedMs")).longValue()>330_000L)
+                value=fields("schemaVersion","att-load-checkpoint-interval/v1","state","DEGRADED");
+            if(value!=null)progress.put("checkpointInterval",value);
+        }
+        @Override public void close() { reader.shutdownNow(); }
     }
     private int fail(String code,String message) throws Exception { emit(WorkerEvent.Type.DIAGNOSTIC,fields("code",code,"message",message,
             "outcome",att.server.api.LimitOutcome.SUBMISSION_REJECTED.name(),"stage","submission")); emitResult(fields("status","INVALID","exitCode",2,"result",fields("executionId",null,"status","INVALID","exitCode",2))); return 2; }

@@ -3,12 +3,20 @@ package att.load;
 import att.console.ExecutionConsoleFormatter;
 import att.core.ResultStatus;
 
+import java.time.Instant;
+import java.util.LinkedHashMap;
+import java.util.Map;
+import java.util.TreeMap;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicLongArray;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 
 /**
@@ -22,7 +30,8 @@ public final class LoadConsoleSampler {
     private final AtomicBoolean runIdAdopted = new AtomicBoolean();
     private final long intervalNanos;
     private final long errorIntervalNanos;
-    private final long startedNanos = System.nanoTime();
+    private final AtomicLong startedNanos = new AtomicLong();
+    private final AtomicLong schedulerStartedNanos = new AtomicLong();
     private final AtomicLong scheduled = new AtomicLong();
     private final AtomicLong started = new AtomicLong();
     private final AtomicLong completed = new AtomicLong();
@@ -38,6 +47,13 @@ public final class LoadConsoleSampler {
     private final AtomicBoolean periodicArmed = new AtomicBoolean();
     private final Object errorLock = new Object();
     private final Consumer<String> periodicSink;
+    private final BiConsumer<String,Map<String,Object>> structuredPeriodicSink;
+    private final Counters liveCounters = new Counters();
+    private final ConcurrentHashMap<String,Counters> liveWorkloads = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String,Counters> livePhases = new ConcurrentHashMap<>();
+    private final AtomicBoolean liveWorkloadsTruncated = new AtomicBoolean();
+    private final AtomicReference<Phase> livePhase = new AtomicReference<>(new Phase(0,"PREPARING"));
+    private volatile Map<String,Object> latestFailure;
     private volatile ScheduledExecutorService periodic;
     private volatile String model = "unknown";
     private final AtomicLong lastProgressNanos = new AtomicLong();
@@ -56,6 +72,11 @@ public final class LoadConsoleSampler {
     }
 
     public LoadConsoleSampler(String runId, long intervalMs, long errorIntervalMs, Consumer<String> periodicProgress) {
+        this(runId,intervalMs,errorIntervalMs,periodicProgress,null);
+    }
+
+    public LoadConsoleSampler(String runId,long intervalMs,long errorIntervalMs,Consumer<String> periodicProgress,
+                              BiConsumer<String,Map<String,Object>> structuredPeriodicProgress) {
         String supplied = runId == null ? "" : runId.trim();
         if (supplied.isEmpty()) this.runId = "unknown";
         else {
@@ -65,6 +86,7 @@ public final class LoadConsoleSampler {
         this.intervalNanos = TimeUnit.MILLISECONDS.toNanos(Math.max(1L, intervalMs));
         this.errorIntervalNanos = TimeUnit.MILLISECONDS.toNanos(Math.max(0L, errorIntervalMs));
         this.periodicSink = periodicProgress;
+        this.structuredPeriodicSink = structuredPeriodicProgress;
     }
 
     /** One start line for the run. Later calls return null. */
@@ -80,16 +102,24 @@ public final class LoadConsoleSampler {
         adoptRunId(observedRunId);
         if (!startEmitted.compareAndSet(false, true)) return null;
         model = ExecutionConsoleFormatter.token(loadModel, "unknown");
+        startedNanos.compareAndSet(0L,System.nanoTime());
         lastProgressNanos.set(System.nanoTime());
         armPeriodic();
         return ExecutionConsoleFormatter.loadStart(runId, model, null);
     }
 
-    /** Adopts the Engine's explicit pre-scheduler START event without emitting a second START line. */
+    /** Adopts the Engine's scheduler START event without emitting a second START line. */
     public void observePreparedStart(String loadModel, String observedRunId) {
+        observePreparedStart(loadModel, observedRunId, null);
+    }
+
+    public void observePreparedStart(String loadModel, String observedRunId, String phase) {
         adoptRunId(observedRunId);
+        schedulerStartedNanos.compareAndSet(0L,System.nanoTime());
+        if(phase!=null)advanceLivePhase(phase);
         if (loadModel != null) model = ExecutionConsoleFormatter.token(loadModel, model);
         if (startEmitted.compareAndSet(false, true)) {
+            startedNanos.compareAndSet(0L,System.nanoTime());
             lastProgressNanos.set(System.nanoTime());
             armPeriodic();
         }
@@ -98,6 +128,17 @@ public final class LoadConsoleSampler {
     /** Returns a console line, or null when this iteration should stay off the console. */
     public String onEvent(LoadEvent event) {
         if (event == null || finished.get()) return null;
+        schedulerStartedNanos.compareAndSet(0L,System.nanoTime());
+        liveCounters.observe(event);
+        String phaseKey=ExecutionConsoleFormatter.token(event.phase(),"UNKNOWN");
+        advanceLivePhase(phaseKey);
+        Counters phaseCounters=boundedCounters(livePhases,phaseKey,8);
+        if(phaseCounters!=null)phaseCounters.observe(event);
+        if(event.workloadId()!=null&&!event.workloadId().trim().isEmpty()) {
+            String workloadKey=ExecutionConsoleFormatter.token(event.workloadId(),"unknown");
+            Counters workloadCounters=boundedCounters(liveWorkloads,workloadKey,32);
+            if(workloadCounters!=null)workloadCounters.observe(event);else liveWorkloadsTruncated.set(true);
+        }
         adoptRunId(event.runId());
         if (event.model() != null) model = ExecutionConsoleFormatter.token(event.model(), model);
         if (event.scheduled()) scheduled.incrementAndGet();
@@ -115,6 +156,11 @@ public final class LoadConsoleSampler {
             else errors.incrementAndGet();
         }
         if (event.dropped() || (event.completed() && !event.success())) {
+            Map<String,Object> failure=new LinkedHashMap<>();
+            failure.put("status",event.dropped()?"DROPPED":event.status()==null?"ERROR":event.status().name());
+            failure.put("capturedAt",Instant.now().toString());
+            String type=event.errorType();if(type!=null && type.matches("[A-Za-z][A-Za-z0-9_.-]{0,63}"))failure.put("code",type);
+            latestFailure=failure;
             String error = errorLine(event);
             if (error != null) return error;
         }
@@ -128,8 +174,132 @@ public final class LoadConsoleSampler {
         return progress("COMPLETE", ExecutionConsoleFormatter.token(status, "UNKNOWN"));
     }
 
+    /** Bounded, sanitized live counters for the Server's coalesced Job progress snapshot. */
+    public Map<String,Object> snapshot() {
+        long began=schedulerStartedNanos.get();long elapsedMs=began==0L?0L:Math.max(0L,TimeUnit.NANOSECONDS.toMillis(System.nanoTime()-began));
+        Map<String,Object> snapshot=new LinkedHashMap<>();
+        snapshot.put("schemaVersion","att-load-live-progress/v1");
+        snapshot.put("runId",runId);
+        snapshot.put("capturedAt",Instant.now().toString());
+        snapshot.put("elapsedMs",elapsedMs);
+        snapshot.put("phase",livePhase.get().name);
+        snapshot.put("counts",liveCounters.toMap());
+        Map<String,Object> rates=new LinkedHashMap<>();
+        rates.put("completedTps",rate(liveCounters.completed.get(),elapsedMs));
+        rates.put("successfulTps",rate(liveCounters.passed.get(),elapsedMs));
+        snapshot.put("rates",rates);
+        snapshot.put("latency",liveCounters.latencyMap());
+        if(latestFailure!=null)snapshot.put("latestFailure",latestFailure);
+        Map<String,Object> measured=new LinkedHashMap<>();
+        for(String phase:new String[]{"RAMP_UP","STEADY","RAMP_DOWN"}) {
+            Counters counters=livePhases.get(phase);if(counters!=null)mergeCounters(measured,counters);
+        }
+        snapshot.put("measuredCounts",measured);
+        Map<String,Object> phases=new TreeMap<>();livePhases.forEach((key,value)->phases.put(key,value.toMap()));snapshot.put("phases",phases);
+        Map<String,Object> workloads=new TreeMap<>();liveWorkloads.forEach((key,value)->{
+            Map<String,Object> workload=value.toMap();workload.put("latency",value.latencyMap());
+            workloads.put(key,workload);
+        });
+        snapshot.put("workloads",workloads);snapshot.put("workloadsTruncated",liveWorkloadsTruncated.get());
+        return snapshot;
+    }
+
+    private static void mergeCounters(Map<String,Object> target,Counters counters) {
+        for(Map.Entry<String,Object> entry:counters.toMap().entrySet()) {
+            if("schedulerLagMeanMs".equals(entry.getKey()))continue;
+            target.merge(entry.getKey(),entry.getValue(),(left,right)->left instanceof Number&&right instanceof Number
+                    ?((Number)left).longValue()+((Number)right).longValue():right);
+        }
+    }
+    private static double rate(long count,long elapsedMs) {return elapsedMs<=0L?0.0:count*1000.0/elapsedMs;}
+
+    private static Counters boundedCounters(ConcurrentHashMap<String,Counters> counters,String key,int limit) {
+        Counters current=counters.get(key);if(current!=null)return current;
+        synchronized(counters) {
+            current=counters.get(key);if(current!=null)return current;
+            if(counters.size()>=limit)return null;
+            current=new Counters();counters.put(key,current);return current;
+        }
+    }
+
+    private void advanceLivePhase(String rawPhase) {
+        String name=ExecutionConsoleFormatter.token(rawPhase,"UNKNOWN");
+        int order;
+        switch(name) {
+            case "PREPARING": order=0;break;
+            case "WARMUP": order=1;break;
+            case "RAMP_UP": order=2;break;
+            case "STEADY": order=3;break;
+            case "RAMP_DOWN": order=4;break;
+            case "DRAIN":
+            case "DRAINING": order=5;break;
+            case "COMPLETE":
+            case "FINISHED": order=6;break;
+            default: order=-1;break;
+        }
+        if(order<0)return;
+        Phase candidate=new Phase(order,name);
+        while(true) {
+            Phase current=livePhase.get();
+            if(candidate.order<=current.order)return;
+            if(livePhase.compareAndSet(current,candidate))return;
+        }
+    }
+
+    private static final class Phase {
+        final int order;final String name;
+        Phase(int order,String name){this.order=order;this.name=name;}
+    }
+
+    private static final class Counters {
+        final AtomicLong scheduled=new AtomicLong(),started=new AtomicLong(),completed=new AtomicLong(),passed=new AtomicLong();
+        final AtomicLong sutFailures=new AtomicLong(),runtimeErrors=new AtomicLong(),dropped=new AtomicLong(),other=new AtomicLong();
+        final AtomicLong latencyTotalMs=new AtomicLong(),latencySamples=new AtomicLong(),schedulerLagTotalMs=new AtomicLong(),schedulerLagSamples=new AtomicLong();
+        final AtomicLongArray latencyHistogram=new AtomicLongArray(64);
+        void observe(LoadEvent event) {
+            if(event.scheduled())scheduled.incrementAndGet();
+            if(event.started())started.incrementAndGet();
+            if(event.dropped())dropped.incrementAndGet();
+            if(event.started()||event.dropped()) {schedulerLagTotalMs.addAndGet(Math.max(0L,event.schedulerLagMs()));schedulerLagSamples.incrementAndGet();}
+            if(event.completed()) {
+                completed.incrementAndGet();
+                if(event.status()==ResultStatus.PASS)passed.incrementAndGet();
+                else if(event.status()==ResultStatus.FAIL)sutFailures.incrementAndGet();
+                else if(event.status()==ResultStatus.ERROR||event.status()==null)runtimeErrors.incrementAndGet();
+                else other.incrementAndGet();
+                if(event.latencyMs()>=0L) {
+                    latencyTotalMs.addAndGet(event.latencyMs());latencySamples.incrementAndGet();
+                    int bucket=event.latencyMs()==0L?0:64-Long.numberOfLeadingZeros(event.latencyMs());
+                    latencyHistogram.incrementAndGet(Math.min(63,bucket));
+                }
+            }
+        }
+        Map<String,Object> toMap() {
+            long scheduledCount=scheduled.get(),startedCount=started.get(),completedCount=completed.get(),droppedCount=dropped.get();
+            Map<String,Object> value=new LinkedHashMap<>();
+            value.put("scheduled",scheduledCount);value.put("started",startedCount);value.put("completed",completedCount);value.put("passed",passed.get());
+            value.put("sutFailures",sutFailures.get());value.put("runtimeErrors",runtimeErrors.get());value.put("dropped",droppedCount);value.put("other",other.get());
+            value.put("active",Math.max(0L,startedCount-completedCount));value.put("queued",Math.max(0L,scheduledCount-startedCount-droppedCount));
+            value.put("schedulerLagMeanMs",schedulerLagSamples.get()==0?null:(double)schedulerLagTotalMs.get()/schedulerLagSamples.get());
+            return value;
+        }
+        Map<String,Object> latencyMap() {
+            long samples=latencySamples.get();Map<String,Object> value=new LinkedHashMap<>();
+            value.put("sampleCount",samples);value.put("meanMs",samples==0?null:(double)latencyTotalMs.get()/samples);
+            value.put("p95Ms",percentile(.95,samples));value.put("p99Ms",percentile(.99,samples));
+            value.put("percentileMethod","bounded log histogram estimate");return value;
+        }
+        Long percentile(double quantile,long samples) {
+            if(samples==0)return null;long threshold=(long)Math.ceil(samples*quantile),seen=0;
+            for(int bucket=0;bucket<latencyHistogram.length();bucket++) {
+                seen+=latencyHistogram.get(bucket);if(seen>=threshold)return bucket==0?0L:bucket>=63?Long.MAX_VALUE:(1L<<bucket)-1L;
+            }
+            return null;
+        }
+    }
+
     private void armPeriodic() {
-        if (periodicSink == null || !periodicArmed.compareAndSet(false, true)) return;
+        if ((periodicSink == null && structuredPeriodicSink == null) || !periodicArmed.compareAndSet(false, true)) return;
         ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor(new ThreadFactory() {
             @Override public Thread newThread(Runnable task) {
                 Thread thread = new Thread(task, "att-load-console-sampler");
@@ -150,7 +320,10 @@ public final class LoadConsoleSampler {
     private void publishPeriodic() {
         if (finished.get() || !claimProgress(System.nanoTime()) || finished.get()) return;
         String line = progress("PROGRESS", null);
-        if (line != null) periodicSink.accept(line);
+        if (line != null) {
+            if(periodicSink!=null)periodicSink.accept(line);
+            if(structuredPeriodicSink!=null)structuredPeriodicSink.accept(line,snapshot());
+        }
     }
 
     private void stopPeriodic() {
@@ -196,7 +369,8 @@ public final class LoadConsoleSampler {
     }
 
     private String progress(String label, String terminalStatus) {
-        long elapsedMs = Math.max(0L, TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedNanos));
+        long began = startedNanos.get();
+        long elapsedMs = began == 0L ? 0L : Math.max(0L, TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - began));
         long completeCount = completed.get();
         long samples = latencySamples.get();
         double throughput = elapsedMs == 0L ? 0.0 : completeCount * 1000.0 / elapsedMs;

@@ -237,8 +237,8 @@ public final class LoadReportWriter {
     private String html(Path runDirectory, LoadRunResult result, Map<String, Object> summary) {
         @SuppressWarnings("unchecked") Map<String, Object> metrics = (Map<String, Object>) summary.get("metrics");
         StringBuilder html = new StringBuilder(64 * 1024);
-        String status = result.status().name();
-        String statusClass = result.passed() ? "pass" : "fail";
+        String status = result.cancelled() ? "CANCELLED" : result.status().name();
+        String statusClass = result.passed() ? "pass" : result.cancelled() ? "info" : "fail";
         html.append("<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">");
         html.append("<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">");
         html.append("<title>ATT Load ").append(escape(result.runId())).append("</title>");

@@ -10,11 +10,15 @@ import org.junit.jupiter.api.io.TempDir;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -108,6 +112,91 @@ class ServerRuntimeLoadTerminalResultTest {
         }
     }
 
+    @Test void persistsOnlyAllowlistedMonotonicLiveLoadProgressAndBoundsHistory() throws Exception {
+        try(ServerRuntime runtime=runtime("live-load-progress")) {
+            Job job=createJob(runtime,"J0000000000000301");
+            job.targetIdentity=fields("workloads",List.of(fields("name","steady","totalDurationMs",10000L)));
+            Map<String,Object> snapshot=fields("schemaVersion","att-load-live-progress/v1","capturedAt","2026-10-27T00:00:05Z","elapsedMs",5000L,
+                    "phase","STEADY","counts",fields("scheduled",10L,"started",9L,"completed",7L,"passed",6L,"sutFailures",1L,"runtimeErrors",0L,"dropped",0L,"active",2L,"queued",1L),
+                    "measuredCounts",fields("completed",7L,"passed",6L),"rates",fields("completedTps",1.4,"successfulTps",1.2),
+                    "latency",fields("sampleCount",7L,"meanMs",52.0,"p95Ms",63L,"p99Ms",63L),
+                    "latestFailure",fields("status","ERROR","capturedAt","2026-10-27T00:00:04Z","code","TIMEOUT","message","secret-value"),
+                    "phases",fields("STEADY",fields("completed",7L)),"workloads",fields("steady",fields("completed",7L,"latency",fields("sampleCount",7L,"meanMs",52.0,"p95Ms",63L,"p99Ms",63L)),"/private/path",fields("completed",99L)),
+                    "password","secret-value","filesystemPath","/private/secret/path");
+            runtime.handleWorkerEvent(job,JSON.writeValueAsString(fields("type","PROGRESS","loadProgress",snapshot)));
+            assertEquals(5000L,((Number)job.loadProgress.get("elapsedMs")).longValue());
+            assertEquals(1,job.loadProgressHistory.size());assertEquals(1,job.loadProgressTrend.size());
+            assertFalse(JSON.writeValueAsString(job.loadProgress).contains("secret-value"));
+            assertEquals("TIMEOUT",((Map<?,?>)job.loadProgress.get("latestFailure")).get("code"));
+            assertFalse(JSON.writeValueAsString(job.loadProgress).contains("/private"));
+            assertEquals(Set.of("steady"),((Map<?,?>)job.loadProgress.get("workloads")).keySet());
+            assertEquals(52.0,((Map<?,?>)((Map<?,?>)((Map<?,?>)job.loadProgress.get("workloads")).get("steady")).get("latency")).get("meanMs"));
+
+            Map<String,Object> regressive=new LinkedHashMap<>(snapshot);regressive.put("elapsedMs",4000L);
+            runtime.handleWorkerEvent(job,JSON.writeValueAsString(fields("type","PROGRESS","loadProgress",regressive)));
+            assertEquals(5000L,((Number)job.loadProgress.get("elapsedMs")).longValue(),"A reconnect replay with an older sample cannot replace the latest snapshot");
+            Map<String,Object> persisted=(Map<String,Object>)runtime.store.get(job.id).get("loadProgress");
+            assertEquals(5000L,((Number)persisted.get("elapsedMs")).longValue());
+            Map<String,Object> latestEvent=job.events.after(0).stream().filter(event->"progress".equals(event.get("event"))).reduce((left,right)->right).orElseThrow();
+            assertFalse(JSON.writeValueAsString(latestEvent.get("data")).contains("loadProgress"),"The stale progress snapshot is omitted from the published event");
+
+            Map<String,Object> regressiveCounts=new LinkedHashMap<>(snapshot);regressiveCounts.put("elapsedMs",6000L);
+            regressiveCounts.put("counts",fields("scheduled",10L,"started",9L,"completed",6L,"passed",6L,"sutFailures",1L,"runtimeErrors",0L,"dropped",0L,"active",3L,"queued",1L));
+            runtime.handleWorkerEvent(job,JSON.writeValueAsString(fields("type","PROGRESS","loadProgress",regressiveCounts)));
+            assertEquals(5000L,((Number)job.loadProgress.get("elapsedMs")).longValue(),"Increasing elapsed time cannot hide regressing counters");
+
+            Map<String,Object> next=new LinkedHashMap<>(snapshot);next.put("capturedAt","2026-10-27T00:00:10Z");next.put("elapsedMs",10000L);
+            Map<String,Object> intervalCounts=new LinkedHashMap<>();
+            for(String key:List.of("scheduled","started","completed","success","failure","runtimeError","otherOutcome","dropped","measuredScheduled","measuredStarted","measuredCompleted","measuredSuccess","measuredFailure","measuredRuntimeError","measuredOtherOutcome","measuredDropped"))intervalCounts.put(key,1L);
+            Map<String,Object> interval=fields("schemaVersion","att-load-checkpoint-interval/v1","state","VERIFIED","startSequence",1L,"endSequence",2L,
+                    "startAt","2026-10-27T00:00:00Z","endAt","2026-10-27T00:05:00Z","durationMs",300000L,"counts",intervalCounts,"latencySampleCount",10L,"latencyMeanMs",23.5,"path","/private/secret");
+            next.put("checkpointInterval",interval);
+            runtime.handleWorkerEvent(job,JSON.writeValueAsString(fields("type","PROGRESS","loadProgress",next)));
+            runtime.handleWorkerEvent(job,JSON.writeValueAsString(fields("type","PROGRESS","loadProgress",next)));
+            Map<String,Object> record=runtime.jobRecord(job.id);
+            assertEquals(10000L,((Number)((Map<?,?>)record.get("loadProgress")).get("elapsedMs")).longValue());
+            assertEquals(3,((List<?>)record.get("loadProgressHistory")).size());
+            assertEquals(2,((List<?>)record.get("loadProgressTrend")).size());
+            Map<?,?> firstTrend=(Map<?,?>)((List<?>)record.get("loadProgressTrend")).get(0);
+            assertEquals(7L,((Number)((Map<?,?>)((Map<?,?>)firstTrend.get("workloads")).get("steady")).get("completed")).longValue());
+            assertFalse(((Map<?,?>)((Map<?,?>)firstTrend.get("workloads")).get("steady")).containsKey("scheduled"),"Workload trend retains a compact projection");
+            assertEquals(1,((List<?>)record.get("loadCheckpointHistory")).size(),"Repeated checkpoint intervals are deduplicated");
+            assertEquals(23.5,((Number)((Map<?,?>)((List<?>)record.get("loadCheckpointHistory")).get(0)).get("latencyMeanMs")).doubleValue());
+            assertFalse(JSON.writeValueAsString(record.get("loadCheckpointHistory")).contains("/private"));
+            runtime.jobs.remove(job.id);
+            assertEquals(1,((List<?>)runtime.jobRecord(job.id).get("loadCheckpointHistory")).size(),"Checkpoint history survives Job eviction");
+        }
+    }
+
+    @Test void simulatedTenDayLiveHistoryRemainsBounded() throws Exception {
+        try(ServerRuntime runtime=runtime("live-load-soak")) {
+            Job job=createJob(runtime,"J0000000000000302");
+            job.targetIdentity=fields("workloads",List.of(fields("name","steady","totalDurationMs",864_000_000L)));
+            Map<String,Object> counters=fields("scheduled",0L,"started",0L,"completed",0L,"passed",0L,"sutFailures",0L,"runtimeErrors",0L,"dropped",0L,"other",0L);
+            Map<String,Object> workloads=new LinkedHashMap<>();
+            for(int index=0;index<32;index++)workloads.put("workload-"+index,fields("completed",0L,"passed",0L,"sutFailures",0L,"runtimeErrors",0L,"dropped",0L,
+                    "latency",fields("sampleCount",1L,"meanMs",12.0,"p95Ms",15.0,"p99Ms",31.0)));
+            Map<String,Object> intervalCounts=new LinkedHashMap<>();
+            for(String key:List.of("scheduled","started","completed","success","failure","runtimeError","otherOutcome","dropped","measuredScheduled","measuredStarted","measuredCompleted","measuredSuccess","measuredFailure","measuredRuntimeError","measuredOtherOutcome","measuredDropped"))intervalCounts.put(key,0L);
+            java.time.Instant start=java.time.Instant.parse("2026-10-27T00:00:00Z");long began=System.nanoTime();
+            for(int index=1;index<=2880;index++) {
+                java.time.Instant before=start.plusSeconds((index-1L)*300L),after=start.plusSeconds(index*300L);
+                Map<String,Object> interval=fields("schemaVersion","att-load-checkpoint-interval/v1","state","VERIFIED","startSequence",(long)index,"endSequence",index+1L,
+                        "startAt",before.toString(),"endAt",after.toString(),"durationMs",300_000L,"counts",intervalCounts);
+                Map<String,Object> snapshot=fields("schemaVersion","att-load-live-progress/v1","capturedAt",after.toString(),"elapsedMs",index*300_000L,"phase","STEADY",
+                        "counts",counters,"measuredCounts",counters,"rates",fields("completedTps",0.0,"successfulTps",0.0),"latency",fields("sampleCount",0L),"checkpointInterval",interval,"workloads",workloads);
+                runtime.handleWorkerEvent(job,JSON.writeValueAsString(fields("type","PROGRESS","loadProgress",snapshot)));
+            }
+            assertEquals(60,job.loadProgressHistory.size());assertEquals(64,job.loadCheckpointHistory.size());
+            assertTrue(job.loadProgressTrend.size()<=256);assertEquals(2881L,((Number)job.loadCheckpointHistory.get(63).get("endSequence")).longValue());
+            List<Map<String,Object>> trend=new ArrayList<>(job.loadProgressTrend.values());
+            assertEquals(300_000L,((Number)trend.get(0).get("elapsedMs")).longValue(),"The first observation survives bucket replacement");
+            assertEquals(864_000_000L,((Number)trend.get(trend.size()-1).get("elapsedMs")).longValue(),"The latest observation remains visible");
+            int bytes=JSON.writeValueAsBytes(runtime.jobRecord(job.id)).length;assertTrue(bytes<1_000_000,"Bounded job payload: "+bytes);
+            System.out.println("LOAD_LIVE_SOAK_BENCHMARK simulatedHours=240 samples=2880 workloads=32 jobBytes="+bytes+" processingMs="+java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(System.nanoTime()-began));
+        }
+    }
+
     @Test void storesWorkerOversizeFallbackCauseWithoutPromotingTransportTruncation() throws Exception {
         try (ServerRuntime runtime = runtime("worker-fallback-cause")) {
             String id = "J0000000000000300";
@@ -178,6 +267,50 @@ class ServerRuntimeLoadTerminalResultTest {
             assertEquals("ATT-JOURNAL-EVENT-TRUNCATED",journalNotice.path("code").asText());
             assertEquals("DATA_TRUNCATED",journalNotice.path("outcome").asText());
             stopInspectionProcesses(runtime);
+        }
+    }
+
+    @Test void transientLiveProgressPersistenceFailureDoesNotStopWorkerAndRetries() throws Exception {
+        ServerRuntime.WorkerProcessLauncher launcher=builder->new ProcessBuilder(
+                Path.of(System.getProperty("java.home"),"bin",System.getProperty("os.name","").toLowerCase().contains("win")?"java.exe":"java").toString(),
+                "-cp",System.getProperty("surefire.test.class.path",System.getProperty("java.class.path")),RecoveringTelemetryWorker.class.getName()).start();
+        Path libs=workerLibraries("telemetry-retry-libs");
+        AtomicInteger persistenceAttempts=new AtomicInteger();AtomicReference<ServerRuntime> runtimeRef=new AtomicReference<>();
+        ServerRuntime.LoadProgressPersistence writer=(jobId,json)->{
+            int attempt=persistenceAttempts.incrementAndGet();
+            if(attempt==2)throw new IOException("injected optional telemetry write failure");
+            runtimeRef.get().store.updateLoadProgress(jobId,json);
+        };
+        try(ServerRuntime runtime=runtime("telemetry-retry",launcher,libs,writer)) {
+            runtimeRef.set(runtime);
+            Map<String,Object> accepted=runtime.submit("load",JSON.createObjectNode().put("packageId","p"),"integration");
+            String id=String.valueOf(accepted.get("jobId"));Job submittedJob=runtime.jobs.get(id);
+            assertNotNull(submittedJob,"the Worker supervision path must start the test process");
+            Map<String,Object> stored=null;long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(30);
+            while(System.nanoTime()<deadline) {
+                stored=runtime.store.get(id);
+                if(stored!=null&&"PASS".equals(stored.get("status"))&&!runtime.jobs.containsKey(id))break;
+                Thread.sleep(20L);
+            }
+            assertNotNull(stored,"the Worker did not deliver its terminal result");
+            assertEquals("PASS",stored.get("status"),"an optional telemetry-store failure must not fail LOAD supervision");
+            assertEquals(3,persistenceAttempts.get(),"the Worker sends a later coalesced snapshot after the bounded retry interval");
+
+            boolean degradedPublished=false;
+            for(Map<String,Object> event:submittedJob.events.after(0)) {
+                if(!"progress".equals(event.get("event"))||!(event.get("data") instanceof Map<?,?> data))continue;
+                Object progress=data.get("loadProgress");
+                if(progress instanceof Map<?,?> snapshot&&snapshot.get("telemetryPersistence") instanceof Map<?,?> health
+                        &&"DEGRADED".equals(health.get("state"))) {
+                    assertTrue(String.valueOf(health.get("diagnostic")).contains("retries continue"));
+                    degradedPublished=true;
+                }
+            }
+            assertTrue(degradedPublished,"the in-memory/SSE snapshot should report bounded telemetry degradation");
+            Map<?,?> persistedProgress=(Map<?,?>)runtime.jobRecord(id).get("loadProgress");
+            assertEquals("telemetry-retry",persistedProgress.get("runId"),"The Server retains the sanitized logical run identity");
+            assertEquals(16000L,((Number)persistedProgress.get("elapsedMs")).longValue());
+            assertEquals("HEALTHY",((Map<?,?>)persistedProgress.get("telemetryPersistence")).get("state"),"the successful retry restores durable telemetry health");
         }
     }
 
@@ -453,6 +586,11 @@ class ServerRuntimeLoadTerminalResultTest {
     }
 
     private ServerRuntime runtime(String name,ServerRuntime.WorkerProcessLauncher launcher,Path libs) throws Exception {
+        return runtime(name,launcher,libs,null);
+    }
+
+    private ServerRuntime runtime(String name,ServerRuntime.WorkerProcessLauncher launcher,Path libs,
+                                  ServerRuntime.LoadProgressPersistence progressPersistence) throws Exception {
         Path allowed = Files.createDirectories(temp.resolve(name + "-packages"));
         Path pkg = Files.createDirectories(allowed.resolve("p"));
         Path data = temp.resolve(name + "-data");
@@ -460,7 +598,8 @@ class ServerRuntimeLoadTerminalResultTest {
         Files.writeString(configFile, "server:\n  dataDir: " + ServerRuntimeTestSupport.yaml(data)
                 + "\nworkers: {}\npackages:\n  allowedRoots:\n    - " + ServerRuntimeTestSupport.yaml(allowed)
                 + "\n  entries:\n    p: " + ServerRuntimeTestSupport.yaml(pkg) + "\n");
-        return new ServerRuntime(ServerConfig.load(configFile), libs==null?null:libs.toString(), ServerRuntimeTestSupport.resolvingConfiguration(launcher));
+        return new ServerRuntime(ServerConfig.load(configFile), libs==null?null:libs.toString(), ServerRuntimeTestSupport.resolvingConfiguration(launcher),
+                java.time.Clock.systemUTC(),ArtifactArchive::build,progressPersistence);
     }
 
     private Path workerLibraries(String name) throws Exception {
@@ -498,6 +637,28 @@ class ServerRuntimeLoadTerminalResultTest {
             System.out.println("{\"type\":\"RESULT\",\"status\":\"ERROR\",\"exitCode\":3,\"result\":{\"executionId\":\"load-e2e\",\"status\":\"ERROR\",\"exitCode\":3,\"summary\":{\"schemaVersion\":\"att-load-summary/v1.2\",\"runId\":\"load-e2e\",\"status\":\"ERROR\",\"executionStatus\":\"ERROR\",\"metrics\":{\"scheduled\":1,\"started\":1,\"completed\":0,\"runtimeError\":1}}}}");
             System.out.flush();
             System.exit(3);
+        }
+    }
+
+    public static class RecoveringTelemetryWorker {
+        public static void main(String[] args) throws Exception {
+            try(var reader=new java.io.BufferedReader(new java.io.InputStreamReader(System.in,StandardCharsets.UTF_8))) {reader.readLine();}
+            emitProgress(5000L);
+            emitProgress(10000L);
+            Thread.sleep(5200L);
+            emitProgress(16000L);
+            System.out.println(ServerRuntime.JSON.writeValueAsString(fields("type","RESULT","status","PASS","exitCode",0,
+                    "result",legacyResult("PASS",0,null,false,1))));System.out.flush();
+        }
+
+        private static void emitProgress(long elapsedMs) throws Exception {
+            long completed=elapsedMs/1000L;
+            Map<String,Object> counts=fields("scheduled",completed,"started",completed,"completed",completed,"passed",completed,
+                    "sutFailures",0L,"runtimeErrors",0L,"dropped",0L,"other",0L,"active",0L,"queued",0L);
+            Map<String,Object> progress=fields("schemaVersion","att-load-live-progress/v1","runId","telemetry-retry","capturedAt",java.time.Instant.now().toString(),
+                    "elapsedMs",elapsedMs,"phase","STEADY","counts",counts,"measuredCounts",new LinkedHashMap<>(counts),
+                    "rates",fields("completedTps",10.0,"successfulTps",10.0),"latency",fields("sampleCount",completed,"meanMs",10.0,"p95Ms",15.0,"p99Ms",20.0));
+            System.out.println(ServerRuntime.JSON.writeValueAsString(fields("type","PROGRESS","loadProgress",progress)));System.out.flush();
         }
     }
 

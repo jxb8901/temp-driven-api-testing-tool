@@ -139,10 +139,11 @@ describe('JobsPage React feature', () => {
     await act(async () => root.render(<JobsPage api={api} jobId="JOB-204" onOpenJob={vi.fn()} onShowList={vi.fn()} />));
     const handlers=vi.mocked(api.subscribeJob).mock.calls[0][1];
     const text='diagnostic '+ 'x'.repeat(8000) + ' expanded-entry-end';
+    const expectedConsole=text.slice(0,4000)+' [console line truncated]';
     await act(async () => handlers.onEvent({id:'1',type:'log',data:{console:text,truncated:true,journalLimit:{limitBytes:65536}}}));
     await advance(100);
     await click(host.querySelector('#job-tab-live')!);
-    expect(host.querySelector('[aria-label="Live output"]')?.textContent).toBe(text);
+    expect(host.querySelector('[aria-label="Live output"]')?.textContent).toBe(expectedConsole);
     expect(host.querySelector('#job-panel-live')?.textContent).toContain('Some event payload fields were truncated by the journal');
     await click(host.querySelector('#job-tab-events')!);
     expect(host.querySelector('#job-panel-events')?.textContent).toContain('Events preview clipped');
@@ -182,7 +183,8 @@ describe('JobsPage React feature', () => {
     const api = makeApi({ getJob, getJobResult });
     await act(async () => root.render(<JobsPage api={api} jobId="JOB-204" onOpenJob={vi.fn()} onShowList={vi.fn()} />));
     expect(host.querySelector('#job-panel-metrics')?.textContent).not.toContain('heapPeakUsedBytes');
-    expect(host.querySelector('#job-panel-results')?.textContent).toContain('The Server has not returned a result payload.');
+    expect(host.querySelector('#job-panel-results')?.textContent).toContain('Live LOAD progress');
+    expect(host.querySelector('#job-panel-results')?.textContent).not.toContain('The Server has not returned a result payload.');
     const handlers = vi.mocked(api.subscribeJob).mock.calls[0][1];
     await act(async () => handlers.onEvent({ id: 'terminal', type, data: { status } }));
     await click(host.querySelector('#job-tab-metrics')!);
@@ -214,6 +216,31 @@ describe('JobsPage React feature', () => {
     expect(host.querySelector('#job-panel-results')?.textContent).toContain('ATT-SERVER-WORKER-EXITED');
     expect(host.querySelector('.att-raw-result')).toBeNull();
     expect(getJobResult).toHaveBeenCalledTimes(2);
+  });
+
+  it('retains the last live sample until a later result event refreshes the canonical result', async () => {
+    const now = new Date().toISOString();
+    const progress = { schemaVersion: 'att-load-live-progress/v1' as const, capturedAt: now, serverReceivedAt: now, elapsedMs: 5000, phase: 'STEADY', counts: { completed: 7, passed: 6 } };
+    const running: JobView = { ...sampleJob, loadProgress: progress };
+    const done: JobView = { ...running, status: 'PASS' };
+    const getJob = vi.fn().mockResolvedValueOnce(running).mockResolvedValue(done);
+    const getJobResult = vi.fn().mockResolvedValueOnce({ job: running, result: null }).mockResolvedValueOnce({ job: done, result: null })
+      .mockResolvedValue({ job: done, result: { status: 'PASS', summary: { schemaVersion: 'att-load-terminal-result/v1', execution: { status: 'PASS' }, metrics: { completed: 9, success: 8 } } } });
+    const api = makeApi({ getJob, getJobResult });
+    await act(async () => root.render(<JobsPage api={api} jobId="JOB-204" onOpenJob={vi.fn()} onShowList={vi.fn()} />));
+    await click(host.querySelector('#job-tab-results')!);
+    const handlers = vi.mocked(api.subscribeJob).mock.calls[0]![1];
+    await act(async () => handlers.onEvent({ id: 'done-status', type: 'status', data: { status: 'PASS' } }));
+    const results = host.querySelector('#job-panel-results')!;
+    expect(results.textContent).toContain('Last live LOAD snapshot');
+    expect(results.textContent).toContain('Completed / PASS7 / 6');
+    expect(getJobResult).toHaveBeenCalledTimes(2);
+    await act(async () => handlers.onEvent({ id: 'later-result', type: 'result', data: { status: 'PASS' } }));
+    expect(getJobResult).toHaveBeenCalledTimes(3);
+    expect(results.textContent).not.toContain('Last live LOAD snapshot');
+    expect(results.textContent).toContain('Completed / successful9 / 8');
+    await act(async () => handlers.onEvent({ id: 'replay-result', type: 'result', data: { status: 'PASS' } }));
+    expect(getJobResult).toHaveBeenCalledTimes(3);
   });
 
   it('aborts initial snapshots and ignores their late responses after terminal SSE', async () => {
@@ -448,6 +475,66 @@ describe('JobsPage React feature', () => {
     expect(host.querySelector('#job-panel-live')?.textContent).toContain('connected');
   });
 
+  it('shows sampled live LOAD progress in Results and Metrics without terminal archive wording', async () => {
+    const now = new Date().toISOString();
+    const first = { capturedAt: now, serverReceivedAt: now, elapsedMs: 10_000, phase: 'WARMUP', counts: { scheduled: 10, started: 10, completed: 4, passed: 3, sutFailures: 1, runtimeErrors: 0, dropped: 0, active: 6, queued: 0, schedulerLagMeanMs: 2 }, latency: { sampleCount: 4, meanMs: 30, p95Ms: 63, p99Ms: 63 }, workloads: { steady: { completed: 4, passed: 3, latency: { sampleCount: 4, meanMs: 30, p95Ms: 63, p99Ms: 63 } } } };
+    const second = { ...first, elapsedMs: 15_000, phase: 'STEADY', counts: { scheduled: 15, started: 15, completed: 8, passed: 5, sutFailures: 2, runtimeErrors: 1, dropped: 0, active: 7, queued: 0, schedulerLagMeanMs: 3 }, workloads: { steady: { completed: 8, passed: 5, latency: { sampleCount: 8, meanMs: 35, p95Ms: 63, p99Ms: 63 } } } };
+    const progress = {
+      ...second, elapsedMs: 20_000, schemaVersion: 'att-load-live-progress/v1' as const,
+      counts: { scheduled: 20, started: 19, completed: 10, passed: 6, sutFailures: 1, runtimeErrors: 1, dropped: 0, active: 9, queued: 1 },
+      measuredCounts: { completed: 8, passed: 6, sutFailures: 1, runtimeErrors: 1 },
+      phases: { WARMUP: { completed: 2, passed: 2 }, STEADY: { completed: 8, passed: 6, sutFailures: 1, runtimeErrors: 1 } },
+      rates: { completedTps: 2, successfulTps: 1.6 }, latency: { sampleCount: 10, meanMs: 40, p95Ms: 64, p99Ms: 127 },
+      telemetryPersistence: { state: 'DEGRADED' as const, diagnostic: 'Optional live LOAD telemetry persistence is degraded; the latest in-memory snapshot remains available and retries continue.', retryAfterMs: 2500 },
+      checkpointInterval: { schemaVersion: 'att-load-checkpoint-interval/v1' as const, state: 'VERIFIED' as const, startSequence: 1, endSequence: 2,
+        startAt: now, endAt: new Date(Date.parse(now) - 360_000).toISOString(), durationMs: 300_000, latencySampleCount: 10, latencyMeanMs: 23.5, counts: { completed: 600, success: 590, failure: 5, runtimeError: 3, dropped: 2 } },
+      workloads: { steady: { scheduled: 20, started: 19, completed: 10, passed: 8 } },
+    };
+    const liveJob: JobView = { ...sampleJob, targetIdentity: { workloads: [{ name: 'steady', targets: [{ type: 'flow', id: 'checkout' }], model: 'arrivalRate', arrivalRate: 2, maxConcurrent: 20, totalDurationMs: 60_000 }] },
+      loadProgress: progress, loadProgressHistory: [first, second], loadProgressTrend: [first] };
+    const getArchive = vi.fn(async () => ({ archiveStatus: 'READY' as const, archiveSizeBytes: 0, items: [], primaryReports: [] }));
+    const api = makeApi({ getJob: vi.fn(async () => liveJob), getJobResult: vi.fn(async () => ({ job: sampleResult.job, result: null })), getJobArtifactArchive: getArchive });
+    await act(async () => root.render(<JobsPage api={api} jobId="JOB-204" onOpenJob={vi.fn()} onShowList={vi.fn()} />));
+    await click(host.querySelector('#job-tab-results')!);
+    const results = host.querySelector('#job-panel-results')!;
+    expect(results.textContent).toContain('Live LOAD progress');
+    expect(results.textContent).toContain('Completed / PASS10 / 6');
+    expect(results.textContent).toContain('Execution outcome: IN_PROGRESS');
+    expect(results.textContent).toContain('Performance/threshold verdict: NOT_FINAL');
+    expect(results.textContent).toContain('Optional live LOAD telemetry persistence is degraded');
+    expect(results.textContent).toContain('Retrying in about 2.5s.');
+    expect(results.textContent).toContain('75% (6 / 8 measured completions)');
+    expect(results.textContent).toContain('WARMUPUnmeasured2 / 2');
+    expect(results.textContent).toContain('STEADYMeasured8 / 6');
+    expect(results.textContent).toContain('Configured target rate 2');
+    expect(results.textContent).not.toContain('The Server has not returned a result payload');
+    expect(results.textContent).not.toContain('Detailed metrics are waiting for the artifact archive');
+    await click(host.querySelector('#job-tab-metrics')!);
+    const metrics = host.querySelector('#job-panel-metrics')!;
+    expect(metrics.textContent).toContain('Average completed / successful TPS2 / 1.6');
+    expect(metrics.textContent).toContain('Configured steady target TPS2');
+    expect(metrics.querySelector('.att-live-load-target')).not.toBeNull();
+    for (const name of ['Cumulative failures and drops', 'Active and queued', 'Mean scheduler lag', 'Sampled latency'])
+      expect(metrics.querySelector(`svg[aria-label="${name} trend"]`)).not.toBeNull();
+    expect(metrics.querySelector('svg[aria-label="Live completed and successful throughput trend"]')).not.toBeNull();
+    expect(metrics.querySelector('svg[aria-label="Workload completed and successful throughput trend"]')).not.toBeNull();
+    expect(metrics.querySelector('svg[aria-label="Workload sampled latency trend"]')).not.toBeNull();
+    expect(metrics.querySelector('[aria-label="Workload trends"]')?.textContent).toContain('Configured steady target');
+    expect(metrics.querySelector('[aria-label="Workload trends"]')?.textContent).toContain('WARMUP → STEADY');
+    expect(metrics.querySelector('.att-live-load-completed')?.getAttribute('d')).not.toBe(metrics.querySelector('.att-live-load-passed')?.getAttribute('d'));
+    expect(metrics.textContent).toContain('Latency percentiles are estimates from a bounded histogram');
+    expect(metrics.querySelector('[aria-label="Verified checkpoint intervals"]')?.textContent).toContain('590 / 5 / 3 / 2');
+    expect(metrics.querySelector('[aria-label="Verified checkpoint intervals"]')?.textContent).toContain('23.5 ms (10 observations)');
+    expect(metrics.textContent).toContain('Approximate age 360');
+    expect(metrics.textContent).toContain('The latest verified checkpoint is stale');
+    expect(getArchive).not.toHaveBeenCalled();
+    const subscription = vi.mocked(api.subscribeJob).mock.calls[0]?.[1];
+    await act(async () => { subscription?.onEvent({ id: 'terminal', type: 'status', data: { status: 'CANCELLED' } }); });
+    expect(metrics.textContent).toContain('Last live LOAD snapshot');
+    expect(metrics.textContent).toContain('Partial pre-terminal telemetry');
+    expect(metrics.textContent).not.toContain('Execution outcome: IN_PROGRESS');
+  });
+
   it('renders the compact terminal result and primary ERROR cause without requesting an archive on initial detail load', async () => {
     const compact: JobResultResponse = {
       job: { jobId: 'JOB-204', command: 'load', status: 'ERROR', exitCode: 17 },
@@ -455,7 +542,7 @@ describe('JobsPage React feature', () => {
         schemaVersion: 'att-load-terminal-result/v1',
         execution: { executionId: 'run-compact', status: 'ERROR', exitCode: 17, durationMs: 12000 },
         performance: { executionStatus: 'ERROR', verdict: 'NOT_EVALUATED' },
-        metrics: { scheduled: 100, started: 98, completed: 90, success: 80, runtimeError: 7, failure: 3, completedThroughput: 7.5 },
+        metrics: { scheduled: 10000, started: 98, completed: 90, success: 80, runtimeError: 7, failure: 3, completedThroughput: 0.9988014382740711 },
         thresholds: { verdict: 'PASS', total: 2 },
         diagnostics: {
           primaryError: { code: 'MQ_POOL_TIMEOUT', summary: 'Connection pool wait timed out.', outcome: 'EXECUTION_ERROR' },
@@ -486,6 +573,9 @@ describe('JobsPage React feature', () => {
     expect(cause !== null && notices !== null
       && Boolean(cause.compareDocumentPosition(notices) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
     expect(overview.textContent).toContain('90 / 80');
+    expect(overview.textContent).toContain('10,000 / 98');
+    expect(overview.textContent).toContain('0.999 / Not available TPS');
+    expect(overview.querySelector('[aria-label="Compact LOAD result"]')?.textContent).not.toContain('0.9988014382740711');
     expect(getArchive).not.toHaveBeenCalled();
     const raw = host.querySelector('#job-panel-results details[open]');
     expect(raw).toBeNull();
@@ -763,17 +853,17 @@ describe('JobsPage React feature', () => {
 
     await click(host.querySelector('#job-tab-live')!);
     const live = host.querySelector('#job-panel-live')!;
-    expect(live.textContent).toContain('This Job has no console lines');
+    expect(live.textContent).toContain('The Job has finished and no console lines were recorded.');
     await act(async () => handlers?.onEvent({ id: '7', type: 'log', data: { message: '<b>secret</b>', console: '[RUN] case=one\n[RUN] case=two' } }));
     await advance(100);
     expect(live.querySelector('pre.att-console')?.textContent).toBe('[RUN] case=one\n[RUN] case=two');
     expect(live.querySelector('pre.att-console')?.innerHTML).not.toContain('<b>');
     expect([...live.querySelectorAll('button')].some(button => button.textContent === 'Copy Output')).toBe(true);
     await click([...live.querySelectorAll('button')].find(button => button.textContent === 'Clear view')!);
-    expect(live.querySelector('pre.att-console')).toBeNull();
+    expect(live.querySelector('pre.att-console')?.textContent).toBe('');
     await act(async () => handlers?.onEvent({ id: '7', type: 'log', data: { console: '[RUN] replay must stay cleared' } }));
     await advance(100);
-    expect(live.querySelector('pre.att-console')).toBeNull();
+    expect(live.querySelector('pre.att-console')?.textContent).toBe('');
     await act(async () => handlers?.onEvent({ id: '8', type: 'log', data: { console: '[RUN] after clear' } }));
     await advance(100);
     expect(live.querySelector('pre.att-console')?.textContent).toBe('[RUN] after clear');
@@ -832,15 +922,16 @@ describe('JobsPage React feature', () => {
     const events = host.querySelector('#job-panel-events')!;
     const first = events.querySelector('details')!;
     expect(first.open).toBe(true);
-    expect(first.querySelector('.att-event-preview')?.textContent).toContain('status=RUNNING');
-    expect(first.querySelector('.att-event-preview')?.textContent).toContain('phase=STEADY');
-    expect(first.querySelector('.att-event-preview')?.textContent).toContain('sequence=4');
-    expect(first.querySelector('.att-event-preview')?.textContent).toContain('message=steady progress');
-    expect(first.querySelector('.att-event-preview')?.textContent).toContain('metrics=completed=4, failed=0');
+    expect(first.querySelector('.att-event-preview')?.textContent).toContain('Status: RUNNING');
+    expect(first.querySelector('.att-event-preview')?.textContent).toContain('Phase: STEADY');
+    expect(first.querySelector('.att-event-preview')?.textContent).toContain('Sequence: 4');
+    expect(first.querySelector('.att-event-preview')?.textContent).toContain('steady progress');
+    expect(first.querySelector('.att-event-preview')?.textContent).toContain('completed: 4');
+    expect(first.querySelector('.att-event-preview')?.textContent).toContain('failed: 0');
     expect(first.querySelector('pre.att-event-payload')?.textContent).toContain('"phase": "STEADY"');
     await click(first.querySelector('summary')!);
     expect(first.open).toBe(false);
-    expect(first.querySelector('.att-event-preview')?.textContent).toContain('status=RUNNING');
+    expect(first.querySelector('.att-event-preview')?.textContent).toContain('Status: RUNNING');
     await click([...events.querySelectorAll('button')].find(button => button.textContent === 'Expand all')!);
     expect(events.querySelector('details')?.open).toBe(true);
     await click([...events.querySelectorAll('button')].find(button => button.textContent === 'Collapse all')!);
@@ -860,7 +951,7 @@ describe('JobsPage React feature', () => {
     expect(api.subscribeJob).toHaveBeenCalledTimes(1);
     const logFilter = events.querySelector<HTMLInputElement>('input[aria-label="log"]')!;
     await click(logFilter);
-    expect(events.textContent).toContain('sequence=5');
+    expect(events.textContent).toContain('Sequence: 5');
     expect(events.textContent).not.toContain('console line');
     expect(events.querySelector<HTMLInputElement>('[aria-label="Events auto-scroll"]')?.checked).toBe(true);
     await click(host.querySelector('#job-tab-live')!);
@@ -914,6 +1005,23 @@ describe('JobsPage React feature', () => {
     expect(shell.style.position).toBe('');
     expect(shell.style.height).toBe(`${before + 64}px`);
     expect(live.querySelector('[aria-label="Resize live output"]')).not.toBeNull();
+  });
+
+  it('uses diagnostic fields in a typed collapsed event preview without repeating the event heading', async () => {
+    const api = makeApi();
+    await act(async () => root.render(<JobsPage api={api} jobId="JOB-204" onOpenJob={vi.fn()} onShowList={vi.fn()} />));
+    const handlers = vi.mocked(api.subscribeJob).mock.calls[0]?.[1];
+    await act(async () => handlers?.onEvent({ id: 'diag-1', type: 'diagnostic', data: { code: 'HTTP_RESPONSE_TOO_LARGE', severity: 'WARN', stage: 'execution', message: 'Response was bounded' } }));
+    await advance(100);
+    await click(host.querySelector('#job-tab-events')!);
+    const row = host.querySelector('#job-panel-events details')!;
+    expect(row.querySelector('summary strong')?.textContent).toBe('diagnostic');
+    const preview = row.querySelector('.att-event-preview')?.textContent || '';
+    expect(preview).toContain('Code: HTTP_RESPONSE_TOO_LARGE');
+    expect(preview).toContain('Severity: WARN');
+    expect(preview).toContain('Stage: execution');
+    expect(preview).not.toMatch(/^diagnostic\b/i);
+    expect(row.querySelector('pre.att-event-payload')?.textContent).toContain('"code": "HTTP_RESPONSE_TOO_LARGE"');
   });
 
   it('does not treat the browser event window as a truncated Server journal', async () => {

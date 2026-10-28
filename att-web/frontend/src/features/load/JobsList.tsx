@@ -5,6 +5,7 @@ import { JobReplayActions } from './JobReplayActions';
 import { JobStateIcons } from './JobStateIcons';
 import { StatusBadge } from './StatusBadge';
 import { formatRoute } from '../../router';
+import { plannedWorkloadDuration, workloadPacing, workloadPhaseSummary } from './loadWorkloadSummary';
 
 const terminalStatuses = ['PASS', 'FAIL', 'ERROR', 'INVALID', 'CANCELLED'];
 function timestamp(value?: string | null) { return value && Number.isFinite(Date.parse(value)) ? new Date(value).toLocaleString() : '—'; }
@@ -96,6 +97,17 @@ export function JobsList({ api, onOpenJob, onSchedule, onEditSchedule, execution
     <th scope="row" data-label="Target / Package / Environment"><a className="att-job-target" href={formatRoute({kind:'jobs',jobId:job.jobId})} onClick={event => { if (!event.ctrlKey && !event.metaKey && !event.shiftKey && event.button === 0) {event.preventDefault();onOpenJob(job.jobId);} }}>{targetLabel(job)}{!job.targetIdentity?.type && ` · ${job.jobId}`}</a>
       <span className="att-job-secondary">{job.packageId} · {job.environment || 'Package default'}</span>
       {job.scenario && <span className="att-job-secondary">{job.scenario}</span>}
+      {(job.executionType === 'load' || job.command === 'load') && job.targetIdentity?.workloads?.length ? <div className="att-job-load-summary">
+        <span>{workloadPacing(job.targetIdentity.workloads[0]!)} · Planned {plannedWorkloadDuration(job.targetIdentity.workloads[0]!.totalDurationMs)}</span>
+        {job.targetIdentity.workloads.length > 1 && <details><summary>{job.targetIdentity.workloadCount || job.targetIdentity.workloads.length} workload breakdown</summary>
+          {job.targetIdentity.workloads.map((workload, index) => <div key={`${workload.name}-${index}`}><strong>{workload.name || `Workload ${index + 1}`}</strong>
+            <span>{workload.targets.map(target => `${target.type} · ${target.id}`).join(' / ') || 'Target not available'}</span>
+            <span>{workloadPacing(workload)} · Planned {plannedWorkloadDuration(workload.totalDurationMs)}</span>
+            <span>{workloadPhaseSummary(workload)}</span>
+          </div>)}
+          {job.targetIdentity.truncated && <span>First 32 workload / target summaries shown.</span>}
+        </details>}
+      </div> : null}
       <span className="att-job-tertiary"><code title={job.jobId}>{job.jobId.length > 12 ? `${job.jobId.slice(0,6)}…${job.jobId.slice(-4)}` : job.jobId}</code> <button type="button" className="att-link-button" aria-label={`Copy full Job ID ${job.jobId}`} title="Copy full Job ID" onClick={() => { void navigator.clipboard.writeText(job.jobId).then(() => setCopyState(`Copied ${job.jobId}`)).catch(() => setCopyState(`Copy unavailable: ${job.jobId}`)); }}>⧉</button></span>
     </th>
     <td data-label="Type / Status"><strong>{job.executionType || (job.command === 'debug' ? 'run' : job.command)}</strong> <StatusBadge status={job.status} /><span className="att-job-secondary">{scheduled(job) ? 'Schedule' : job.principal || 'Unknown principal'}</span>{job.deletionState === 'DELETE_REQUESTED' && <span className="att-job-secondary">Pending deletion</span>}</td>

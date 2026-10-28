@@ -1,4 +1,4 @@
-<!-- att-doc-status: current release=4.2.5 -->
+<!-- att-doc-status: current release=4.2.6 -->
 
 # Schedule API
 
@@ -8,4 +8,4 @@ Schedule 是由 Server 擁有的定義，可於稍後提交 Job，但它不是 L
 
 Package revision policy、保留的 history、overlap limit、shutdown 及 recovery 行為請參閱 [Jobs and Schedules operations](../../operations/server-jobs-schedules.zh.md)。
 
-Legacy path 名稱 /load-schedules 仍受目前 4.2.5 REST API 支援。本 interface 不會宣告 #294 未來 CLI management command 已提供。
+Legacy path 名稱 /load-schedules 仍受目前 4.2.6 REST API 支援。本 interface 不會宣告 #294 未來 CLI management command 已提供。

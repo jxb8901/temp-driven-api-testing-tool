@@ -1,6 +1,8 @@
 # Historical target indexing during active execution
 
+<!-- att-docs:historical -->
 Measured for PR #289 / ATT 4.2.5 on 24 October 2026, on macOS ARM64, eight logical CPUs and Java 26.0.1. Raw samples and complete LOAD metrics are in [the JSONL evidence](baselines/jobs-target-concurrency-2026-10-24.jsonl).
+<!-- /att-docs:historical -->
 
 ## Reproduce
 

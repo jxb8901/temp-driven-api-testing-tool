@@ -24,6 +24,28 @@ import static org.junit.jupiter.api.Assertions.*;
 class LoadMetricsCheckpointStoreTest {
     @TempDir Path temp;
 
+    @Test void intervalProjectionRequiresTwoVerifiedConsecutiveMonotonicGenerations() throws Exception {
+        Path directory = temp.resolve("load/run/checkpoints/aggregate");
+        LoadMetrics metrics = new LoadMetrics("closed", System.currentTimeMillis(), 1_000L);
+        LoadMetricsCheckpointStore store = new LoadMetricsCheckpointStore(directory, "run", "aggregate", 60_000L);
+        store.start(metrics::snapshot);
+        assertEquals("WAITING", LoadCheckpointIntervals.read(temp, "run").get("state"));
+        Thread.sleep(10L);
+        metrics.onEvent(LoadEvent.completed("run", "closed", "STEADY", "iteration-1", null, 1,
+                1L, 1L, 11L, ResultStatus.PASS));
+        store.finish(metrics::snapshot);
+        Map<String, Object> interval = LoadCheckpointIntervals.read(temp, "run");
+        assertEquals("VERIFIED", interval.get("state"));
+        assertEquals(1L, ((Number) ((Map<?, ?>) interval.get("counts")).get("completed")).longValue());
+        assertEquals(1L, ((Number) ((Map<?, ?>) interval.get("counts")).get("success")).longValue());
+        assertEquals(1L, ((Number) interval.get("latencySampleCount")).longValue());
+        assertEquals(10.0, ((Number) interval.get("latencyMeanMs")).doubleValue());
+        Path newest = directory.resolve("checkpoint-00000000000000000002.json");
+        Files.write(newest, "{}".getBytes(StandardCharsets.UTF_8));
+        assertEquals("DEGRADED", LoadCheckpointIntervals.read(temp, "run").get("state"));
+        assertEquals("DEGRADED", LoadCheckpointIntervals.read(temp, "../outside").get("state"));
+    }
+
     @Test void writesVerifiableFinalCheckpointWithExactMetricsAndIdentity() throws Exception {
         Instant started = Instant.parse("2026-10-26T00:00:00Z");
         LoadScenario scenario = new LoadScenario(Paths.get("checkpoint.yaml"), "template", "SIMPLE",

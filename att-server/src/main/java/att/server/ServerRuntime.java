@@ -29,6 +29,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.UUID;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.ConcurrentHashMap;
@@ -71,6 +72,7 @@ final class ServerRuntime implements AutoCloseable {
     static final int MAX_ARTIFACT_READ_SLOTS=8;
     private static final int MAX_VALIDATION_PACKAGE_ENTRIES=20000, MAX_VALIDATION_ENVIRONMENTS=100, MAX_VNEXT_VALIDATION_PACKAGES=200;
     private static final long MAX_TOTAL_VNEXT_VALIDATION_WORK_UNITS=10000000L;
+    private static final long LOAD_PROGRESS_PERSISTENCE_RETRY_NANOS=TimeUnit.SECONDS.toNanos(5);
     static final long DRAFT_TTL_MILLIS=TimeUnit.MINUTES.toMillis(10);
     static final int MAX_STREAM_OBSERVERS=32;
     private static final int INSPECTION_EXPLORER_PRIORITY_BURST=3;
@@ -80,6 +82,7 @@ final class ServerRuntime implements AutoCloseable {
     }
     final ServerConfig config;
     final JobStore store;
+    private final LoadProgressPersistence loadProgressPersistence;
     final AuthService auth;
     final ThreadPoolExecutor workers,streams,inspectors;
     private final ThreadPoolExecutor eventCompactions=new ThreadPoolExecutor(2,2,0,TimeUnit.MILLISECONDS,new ArrayBlockingQueue<>(1024),r->{Thread t=new Thread(r,"att-server-event-compactor");t.setDaemon(true);return t;},new ThreadPoolExecutor.AbortPolicy());
@@ -152,8 +155,12 @@ final class ServerRuntime implements AutoCloseable {
         this(config,workerLibs,processLauncher,clock,ArtifactArchive::build);
     }
     ServerRuntime(ServerConfig config,String workerLibs,WorkerProcessLauncher processLauncher,Clock clock,ArtifactPublisher artifactPublisher) throws Exception {
+        this(config,workerLibs,processLauncher,clock,artifactPublisher,null);
+    }
+    ServerRuntime(ServerConfig config,String workerLibs,WorkerProcessLauncher processLauncher,Clock clock,ArtifactPublisher artifactPublisher,
+                  LoadProgressPersistence loadProgressPersistence) throws Exception {
         if(Runtime.version().feature()<17)throw new IllegalStateException("ATT Server requires Java 17 or later; detected Java "+Runtime.version().feature());
-        this.config=config;this.artifactPublisher=java.util.Objects.requireNonNull(artifactPublisher);this.workerLibs=workerLibs==null?null:Paths.get(workerLibs).toAbsolutePath().normalize();this.workerSchemaRegistryDigest=WorkerRuntimeClasspath.schemaRegistryDigestIfPresent(this.workerLibs);this.processLauncher=processLauncher;this.clock=java.util.Objects.requireNonNull(clock);this.store=new JobStore(config);try{this.auth=new AuthService(config,store);}catch(Exception failed){store.close();throw failed;}this.loadSlots=new Semaphore(config.maxConcurrentLoad,true);this.admissionSlots=new Semaphore(config.maxConcurrent+config.queuedLimit,true);
+        this.config=config;this.artifactPublisher=java.util.Objects.requireNonNull(artifactPublisher);this.workerLibs=workerLibs==null?null:Paths.get(workerLibs).toAbsolutePath().normalize();this.workerSchemaRegistryDigest=WorkerRuntimeClasspath.schemaRegistryDigestIfPresent(this.workerLibs);this.processLauncher=processLauncher;this.clock=java.util.Objects.requireNonNull(clock);this.store=new JobStore(config);this.loadProgressPersistence=loadProgressPersistence==null?this.store::updateLoadProgress:loadProgressPersistence;try{this.auth=new AuthService(config,store);}catch(Exception failed){store.close();throw failed;}this.loadSlots=new Semaphore(config.maxConcurrentLoad,true);this.admissionSlots=new Semaphore(config.maxConcurrent+config.queuedLimit,true);
         manifestPublisher=new PackageManifestPublisher(config.dataDir,config.packageConfiguration,clock,
                 this::manifestEditableRoot,this::validateManifestCandidate,
                 (actor,action,packageId,detail)->store.audit(actor,action,null,packageId,detail));
@@ -741,7 +748,8 @@ final class ServerRuntime implements AutoCloseable {
                 else if(request.caseIds!=null)fallback.putObject("selection").set("caseIds",JSON.valueToTree(request.caseIds));
                 listDefinition=fallback;
             }
-            summaryFields.put("targetIdentity",JobListIdentity.from(listDefinition));
+            job.targetIdentity=JobListIdentity.from(listDefinition);
+            summaryFields.put("targetIdentity",job.targetIdentity);
             String summary=JSON.writeValueAsString(summaryFields);
             store.insert(job,summary,JobListIdentity.searchTargets(listDefinition));persisted=true;jobs.put(id,job);append(job,"status",Map.of("jobId",id,"status","QUEUED"));
             FutureTask<Void> task=new FutureTask<>(()->{execute(job,activeJobPath,lease);return null;});tasks.put(id,task);leases.put(id,lease);
@@ -780,6 +788,7 @@ final class ServerRuntime implements AutoCloseable {
             // Inspector work must not hold the cancellation/process-publication lock.
             String warmRevision=prewarmRevision(job);
             Process process;
+            OutputStream workerInput;
             synchronized(job) {
                 // Publish the process while holding the same lock used by cancel(). A
                 // cancellation that wins before launch prevents the Worker from starting;
@@ -799,12 +808,15 @@ final class ServerRuntime implements AutoCloseable {
                 job.workerSpawnStartedNanos=System.nanoTime();
                 process=warm==null?startWorkerProcess(coldBuilder):warm.process;
                 job.workerSpawnedNanos=System.nanoTime();job.process=process;job.processFence=warm==null?new WorkerProcessFence(process):warm.fence;
+                workerInput=process.getOutputStream();
                 if(warm!=null){job.workerDispatch="warm";job.prewarmBootstrapMs=(warm.readyNanos-warm.startedNanos)/1_000_000.0;}
                 job.workerPid=process.pid();job.workerStartTime=process.info().startInstant().orElse(Instant.now());job.startedAt=Instant.now();transition(job,"RUNNING");rememberWorkerProcesses(job,job.processFence);
                 if(warm!=null)warm.transferred();
             }
             startStderrDrainer(process,"att-server-worker-stderr");
-            try(var out=process.getOutputStream()){out.write(workerRequestBytes(job.request,warm!=null));out.write('\n');out.flush();}
+            workerInput.write(workerRequestBytes(job.request,warm!=null));workerInput.write('\n');workerInput.flush();
+            if(!"load".equals(job.command))workerInput.close();
+            else synchronized(job) {job.workerControlStream=workerInput;}
             try(var reader=new java.io.BufferedInputStream(process.getInputStream())) {
                 att.server.api.internal.WorkerProtocol.Frame frame;
                 while((frame=att.server.api.internal.WorkerProtocol.read(reader,att.server.api.internal.WorkerProtocol.MAX_FRAME_BYTES))!=null) {
@@ -813,12 +825,20 @@ final class ServerRuntime implements AutoCloseable {
                 }
             }
             int exit=process.waitFor();job.workerTerminatedNanos=System.nanoTime();job.exitCode=exit;
-            if(!job.resultReceived&&!job.terminal()){recordWorkerExit(job,exit);finish(job,"ERROR",exit==0?3:exit);}
+            if(!job.resultReceived&&!job.terminal()) {
+                if(job.cancelRequested)finish(job,"CANCELLED",143);
+                else {recordWorkerExit(job,exit);finish(job,"ERROR",exit==0?3:exit);}
+            }
             else if(!job.terminal()) {String state=exit==0?"PASS":"FAIL";finish(job,state,exit);}
         } catch(InterruptedException e){Thread.currentThread().interrupt();stopWorkerTree(job);if(!job.terminal())finishQuietly(job,"CANCELLED",143,"ATT-SERVER-CANCELLED","Worker was cancelled");}
-          catch(Exception e){stopWorkerTree(job);if(!job.terminal())finishQuietly(job,"ERROR",3,"ATT-SERVER-WORKER-FAILED",safeMessage(e));}
+          catch(Exception e){stopWorkerTree(job);if(!job.terminal()){
+              if(job.cancelRequested)finishQuietly(job,"CANCELLED",143,"ATT-SERVER-CANCELLED","Worker was cancelled");
+              else finishQuietly(job,"ERROR",3,"ATT-SERVER-WORKER-FAILED",safeMessage(e));
+          }}
         finally {
             stopWorkerTree(job);
+            OutputStream workerInput=job.workerControlStream;job.workerControlStream=null;
+            if(workerInput!=null)try{workerInput.close();}catch(Exception ignored){}
             if(warm!=null&&job.processFence!=null&&job.processFence.stopped())try{warm.transferred();}catch(Exception ignored) { }
             boolean stopped=job.processFence==null ? job.process==null||!job.process.isAlive() : job.processFence.stopped();
             if(stopped&&job.process!=null){if(job.workerTerminatedNanos==0)job.workerTerminatedNanos=System.nanoTime();job.process=null;if(!closing)try{store.update(job);}catch(Exception ignored){}}
@@ -922,7 +942,12 @@ final class ServerRuntime implements AutoCloseable {
         if("STATUS".equals(type)&&job.workerReadyNanos==0)job.workerReadyNanos=eventNanos;
         if(("PROGRESS".equals(type)||"LOG".equals(type))&&job.executionReadyNanos==0)job.executionReadyNanos=eventNanos;
         switch(type){case "STATUS"->{String status=event.path("status").asText("");if("RUNNING".equals(status)&&"PREPARING".equals(job.status))transition(job,"RUNNING");}
-            case "PROGRESS"->append(job,"progress",safe);case "LOG"->append(job,"log",safe);case "DIAGNOSTIC"->{
+            case "PROGRESS"->{Object progress=safe.get("loadProgress");if("load".equals(job.command)&&progress instanceof Map) {
+                    Map<String,Object> sanitized=sanitizeLoadProgress((Map<?,?>)progress);
+                    Map<String,Object> recorded=sanitized==null?null:recordLoadProgress(job,sanitized);
+                    if(recorded==null)safe.remove("loadProgress");else safe.put("loadProgress",recorded);
+                } else safe.remove("loadProgress");append(job,"progress",safe);}
+            case "LOG"->append(job,"log",safe);case "DIAGNOSTIC"->{
                 String eventDiagnostic=JSON.writeValueAsString(safe);
                 if(hasClassifiedCause(eventDiagnostic)) {
                     if(job.primaryDiagnosticJson==null)job.primaryDiagnosticJson=eventDiagnostic;
@@ -944,6 +969,7 @@ final class ServerRuntime implements AutoCloseable {
                 }
                 String status=event.path("status").asText("ERROR");
                 int code=event.path("exitCode").asInt(3);
+                if(job.cancelRequested){status="CANCELLED";code=143;}
                 Object result=safe.get("result");
                 if("load".equals(job.command)) {
                     Map<String,Object> original=result instanceof Map<?,?>?(Map<String,Object>)result:new LinkedHashMap<>();
@@ -1075,9 +1101,40 @@ final class ServerRuntime implements AutoCloseable {
     String cancel(String id,String principal) throws Exception {
         if("local".equals(config.authMode))requireJobOwner(id,principal);
         Job j=jobs.get(id);if(j==null){Map<String,Object> stored=store.get(id);if(stored==null||!JOB_ID.matcher(id).matches())throw new NotFoundException();return String.valueOf(stored.get("status"));}
+        boolean stopProcess=false;OutputStream controlStream=null;
         synchronized(j){if(j.terminal())return j.status;append(j,"status",Map.of("jobId",id,"status","CANCEL_REQUESTED"));
             Process p=j.process;if(p==null){FutureTask<Void> task=tasks.remove(id);if(task!=null){boolean cancelled=task.cancel(false);workers.remove(task);if(cancelled){AdmissionLease lease=leases.remove(id);if(lease!=null)lease.release();}}finish(j,"CANCELLED",143);jobs.remove(id,j);scheduleArtifactArchive(id);}
-            else {stopWorkerTree(j);finish(j,"CANCELLED",143);}}
+            else {j.cancelRequested=true;controlStream=j.workerControlStream;stopProcess=true;}}
+        // Never hold the Job monitor while waiting for the Worker to exit. The
+        // protocol reader needs that same monitor to accept the final live LOAD
+        // snapshot and RESULT during graceful cancellation.
+        if(stopProcess) {
+            boolean workerStopped=false;
+            if("load".equals(j.command)) {
+                long readyDeadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(5);
+                while(controlStream==null&&System.nanoTime()<readyDeadline) {
+                    if(j.process==null||!j.process.isAlive())break;
+                    Thread.sleep(5L);controlStream=j.workerControlStream;
+                }
+            }
+            if("load".equals(j.command)&&controlStream!=null) {
+                try {controlStream.write(JSON.writeValueAsBytes(Map.of("type","CANCEL","jobId",id)));controlStream.write('\n');controlStream.flush();}
+                catch(Exception unavailable) { /* Fall back to process termination below. */ }
+                try {
+                    WorkerProcessFence fence=j.processFence;
+                    if(fence!=null)workerStopped=fence.awaitStopped(config.gracefulStopMs);
+                    else {Process process=j.process;workerStopped=process==null||process.waitFor(config.gracefulStopMs,TimeUnit.MILLISECONDS);}
+                } catch(InterruptedException interrupted) {Thread.currentThread().interrupt();}
+            }
+            if(!workerStopped)stopWorkerTree(j);
+            // Let the protocol reader consume any RESULT frame already written
+            // before the Worker exited. It owns terminal persistence for an
+            // active process; this fallback is only for a Worker that closed
+            // without a result.
+            long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(2);
+            while(!j.terminal()&&System.nanoTime()<deadline)Thread.sleep(5L);
+            synchronized(j){if(!j.terminal())finish(j,"CANCELLED",143);}
+        }
         store.audit(principal,"CANCEL",id,j.packageId,"CANCELLED");return j.status;
     }
     Map<String,Object> pinJob(String id,boolean pinned,String actor) throws Exception {return pinJob(id,pinned,null,actor);}
@@ -1222,6 +1279,223 @@ final class ServerRuntime implements AutoCloseable {
         if(performance!=null&&!performance.isBlank())record.put("performance",JSON.readValue(performance,Map.class));
         record.put("archiveMetrics",store.archiveMetrics(id));
         return record;
+    }
+
+    private static Map<String,Object> sanitizeLoadProgress(Map<?,?> raw) {
+        if(!"att-load-live-progress/v1".equals(raw.get("schemaVersion")))return null;
+        long elapsed=boundedLong(raw.get("elapsedMs"),0L,Long.MAX_VALUE);if(elapsed<0)return null;
+        Map<String,Object> snapshot=new LinkedHashMap<>();snapshot.put("schemaVersion","att-load-live-progress/v1");
+        String runId=safeProgressName(raw.get("runId"));if(!runId.isBlank())snapshot.put("runId",runId);
+        String captured=raw.get("capturedAt") instanceof String?(String)raw.get("capturedAt"):null;
+        if(captured==null||captured.length()>40||!validTimestamp(captured))return null;
+        snapshot.put("capturedAt",captured);snapshot.put("elapsedMs",elapsed);
+        String phase=raw.get("phase") instanceof String?((String)raw.get("phase")).toUpperCase(java.util.Locale.ROOT):"UNKNOWN";
+        if(!Set.of("PREPARING","WARMUP","RAMP_UP","STEADY","RAMP_DOWN","COMPLETE","UNKNOWN","PROGRESS").contains(phase))phase="UNKNOWN";
+        snapshot.put("phase",phase);
+        Map<String,Object> counts=progressCounts(raw.get("counts"));if(counts==null)return null;snapshot.put("counts",counts);
+        Map<String,Object> measured=progressCounts(raw.get("measuredCounts"));if(measured==null)return null;snapshot.put("measuredCounts",measured);
+        Map<String,Object> rates=progressNumbers(raw.get("rates"),Set.of("completedTps","successfulTps"));if(rates==null)return null;snapshot.put("rates",rates);
+        Map<String,Object> latency=progressLatency(raw.get("latency"));if(latency==null)return null;snapshot.put("latency",latency);
+        if(raw.get("latestFailure") instanceof Map<?,?>) {
+            Map<?,?> failure=(Map<?,?>)raw.get("latestFailure");Object status=failure.get("status"),time=failure.get("capturedAt"),code=failure.get("code");
+            if(status instanceof String && Set.of("DROPPED","FAIL","ERROR","INVALID","SKIPPED").contains(status) && time instanceof String && ((String)time).length()<=40 && validTimestamp((String)time)) {
+                Map<String,Object> projected=new LinkedHashMap<>();projected.put("status",status);projected.put("capturedAt",time);
+                if(code instanceof String && ((String)code).matches("[A-Za-z][A-Za-z0-9_.-]{0,63}"))projected.put("code",code);
+                snapshot.put("latestFailure",projected);
+            }
+        }
+        Map<String,Object> checkpoint=progressCheckpoint(raw.get("checkpointInterval"));
+        if(raw.containsKey("checkpointInterval") && checkpoint==null)checkpoint=Map.of("schemaVersion","att-load-checkpoint-interval/v1","state","DEGRADED");
+        if(checkpoint!=null)snapshot.put("checkpointInterval",checkpoint);
+        Map<String,Object> phases=new TreeMap<>();Object rawPhases=raw.get("phases");
+        if(rawPhases instanceof Map<?,?>)for(Map.Entry<?,?> entry:((Map<?,?>)rawPhases).entrySet()) {
+            if(phases.size()>=8)break;String name=safeProgressName(entry.getKey());if(!Set.of("WARMUP","RAMP_UP","STEADY","RAMP_DOWN","COMPLETE","PREPARING","UNKNOWN").contains(name))continue;
+            Map<String,Object> value=progressCounts(entry.getValue());if(value!=null)phases.put(name,value);
+        }
+        snapshot.put("phases",phases);
+        Map<String,Object> workloads=new TreeMap<>();Object rawWorkloads=raw.get("workloads");
+        if(rawWorkloads instanceof Map<?,?>)for(Map.Entry<?,?> entry:((Map<?,?>)rawWorkloads).entrySet()) {
+            if(workloads.size()>=32)break;String name=safeProgressName(entry.getKey());if(name.isBlank())continue;
+            Map<String,Object> value=progressCounts(entry.getValue());if(value!=null) {
+                if(entry.getValue() instanceof Map<?,?>) {
+                    Map<String,Object> workloadLatency=progressLatency(((Map<?,?>)entry.getValue()).get("latency"));
+                    if(workloadLatency!=null)value.put("latency",workloadLatency);
+                }
+                workloads.put(name,value);
+            }
+        }
+        snapshot.put("workloads",workloads);snapshot.put("workloadsTruncated",Boolean.TRUE.equals(raw.get("workloadsTruncated"))||workloads.size()<sizeOf(raw.get("workloads")));
+        snapshot.put("serverReceivedAt",Instant.now().toString());
+        return snapshot;
+    }
+
+    private static Map<String,Object> progressCounts(Object raw) {
+        if(!(raw instanceof Map<?,?>))return null;Map<String,Object> result=new LinkedHashMap<>();Map<?,?> source=(Map<?,?>)raw;
+        for(String key:List.of("scheduled","started","completed","passed","sutFailures","runtimeErrors","dropped","other","active","queued")) {
+            Object value=source.get(key);if(value==null)continue;long count=boundedLong(value,0L,Long.MAX_VALUE);if(count<0)return null;result.put(key,count);
+        }
+        for(String key:List.of("schedulerLagMeanMs"))if(source.containsKey(key)) {
+            Object value=source.get(key);if(value==null){result.put(key,null);continue;}double number=boundedDouble(value);if(!Double.isFinite(number)||number<0)return null;result.put(key,number);
+        }
+        return result;
+    }
+
+    private static Map<String,Object> progressCheckpoint(Object raw) {
+        if(!(raw instanceof Map<?,?>))return null;Map<?,?> source=(Map<?,?>)raw;
+        if(!"att-load-checkpoint-interval/v1".equals(source.get("schemaVersion")))return null;
+        Object state=source.get("state");if(!(state instanceof String)||!Set.of("WAITING","DEGRADED","VERIFIED").contains(state))return null;
+        Map<String,Object> value=new LinkedHashMap<>();value.put("schemaVersion","att-load-checkpoint-interval/v1");value.put("state",state);
+        if(!"VERIFIED".equals(state))return value;
+        long start=boundedLong(source.get("startSequence"),1L,Long.MAX_VALUE-1L),end=boundedLong(source.get("endSequence"),2L,Long.MAX_VALUE);
+        long duration=boundedLong(source.get("durationMs"),1L,TimeUnit.DAYS.toMillis(11));
+        if(start<1L||end!=start+1L||duration<1L||!(source.get("startAt") instanceof String)||!(source.get("endAt") instanceof String))return null;
+        String startAt=(String)source.get("startAt"),endAt=(String)source.get("endAt");
+        if(startAt.length()>40||endAt.length()>40||!validTimestamp(startAt)||!validTimestamp(endAt))return null;
+        try {if(java.time.Duration.between(Instant.parse(startAt),Instant.parse(endAt)).toMillis()!=duration)return null;}catch(Exception invalid){return null;}
+        if(!(source.get("counts") instanceof Map<?,?>))return null;Map<?,?> rawCounts=(Map<?,?>)source.get("counts");Map<String,Object> counts=new LinkedHashMap<>();
+        for(String key:List.of("scheduled","started","completed","success","failure","runtimeError","otherOutcome","dropped","measuredScheduled","measuredStarted","measuredCompleted","measuredSuccess","measuredFailure","measuredRuntimeError","measuredOtherOutcome","measuredDropped")) {
+            long count=boundedLong(rawCounts.get(key),0L,Long.MAX_VALUE);if(count<0L)return null;counts.put(key,count);
+        }
+        value.put("startSequence",start);value.put("endSequence",end);value.put("startAt",startAt);value.put("endAt",endAt);value.put("durationMs",duration);value.put("counts",counts);
+        if(source.containsKey("latencySampleCount")) {
+            long samples=boundedLong(source.get("latencySampleCount"),0L,Long.MAX_VALUE);if(samples<0L)return null;
+            value.put("latencySampleCount",samples);
+            if(samples>0L) {double mean=boundedDouble(source.get("latencyMeanMs"));if(!Double.isFinite(mean)||mean<0.0)return null;value.put("latencyMeanMs",mean);}
+        }
+        return value;
+    }
+
+    private static Map<String,Object> progressNumbers(Object raw,Set<String> allow) {
+        if(!(raw instanceof Map<?,?>))return null;Map<String,Object> result=new LinkedHashMap<>();
+        for(String key:allow) {Object value=((Map<?,?>)raw).get(key);if(value==null)continue;double number=boundedDouble(value);if(!Double.isFinite(number)||number<0)return null;result.put(key,number);}
+        return result;
+    }
+
+    private static Map<String,Object> progressLatency(Object raw) {
+        if(!(raw instanceof Map<?,?>))return null;Map<?,?> source=(Map<?,?>)raw;Map<String,Object> result=new LinkedHashMap<>();
+        long samples=boundedLong(source.get("sampleCount"),0L,Long.MAX_VALUE);if(samples<0)return null;result.put("sampleCount",samples);
+        for(String key:List.of("meanMs","p95Ms","p99Ms")) {
+            Object value=source.get(key);if(value==null){result.put(key,null);continue;}
+            double number=boundedDouble(value);if(!Double.isFinite(number)||number<0)return null;result.put(key,number);
+        }
+        result.put("percentileMethod","bounded log histogram estimate");return result;
+    }
+
+    private static String safeProgressName(Object raw) {
+        if(!(raw instanceof String))return "";String value=((String)raw).trim();return value.matches("[A-Za-z0-9][A-Za-z0-9._-]{0,127}")?value:"";
+    }
+    private static int sizeOf(Object value){return value instanceof Map<?,?>?((Map<?,?>)value).size():0;}
+    private static long boundedLong(Object value,long minimum,long maximum) {
+        if(!(value instanceof Number))return -1L;try{long number=new java.math.BigDecimal(String.valueOf(value)).longValueExact();return number<minimum||number>maximum?-1L:number;}catch(NumberFormatException|ArithmeticException invalid){return -1L;}
+    }
+    private static double boundedDouble(Object value) {if(!(value instanceof Number))return Double.NaN;try{return new java.math.BigDecimal(String.valueOf(value)).doubleValue();}catch(NumberFormatException invalid){return Double.NaN;}}
+    private static boolean validTimestamp(String value){try{Instant.parse(value);return true;}catch(Exception invalid){return false;}}
+
+    private Map<String,Object> recordLoadProgress(Job job,Map<String,Object> progress) {
+        synchronized(job) {
+            if(job.loadProgress!=null) {
+                long previous=((Number)job.loadProgress.get("elapsedMs")).longValue();
+                long next=((Number)progress.get("elapsedMs")).longValue();if(next<previous)return null;
+                if(!monotonicProgressCounts(job.loadProgress.get("counts"),progress.get("counts")) ||
+                        !monotonicProgressCounts(job.loadProgress.get("measuredCounts"),progress.get("measuredCounts")))return null;
+            }
+            Map<String,Object> saved=new LinkedHashMap<>(progress);
+            Object incomingCheckpoint=saved.get("checkpointInterval");
+            if(incomingCheckpoint instanceof Map<?,?> && "VERIFIED".equals(((Map<?,?>)incomingCheckpoint).get("state")) && !job.loadCheckpointHistory.isEmpty()) {
+                long sequence=((Number)((Map<?,?>)incomingCheckpoint).get("endSequence")).longValue();
+                long previous=((Number)job.loadCheckpointHistory.get(job.loadCheckpointHistory.size()-1).get("endSequence")).longValue();
+                if(sequence<previous)saved.put("checkpointInterval",Map.of("schemaVersion","att-load-checkpoint-interval/v1","state","DEGRADED"));
+            }
+            job.loadProgress=saved;
+            Object checkpoint=saved.get("checkpointInterval");
+            if(checkpoint instanceof Map<?,?> && "VERIFIED".equals(((Map<?,?>)checkpoint).get("state"))) {
+                @SuppressWarnings("unchecked") Map<String,Object> interval=(Map<String,Object>)checkpoint;
+                long sequence=((Number)interval.get("endSequence")).longValue();
+                long previous=job.loadCheckpointHistory.isEmpty()?0L:((Number)job.loadCheckpointHistory.get(job.loadCheckpointHistory.size()-1).get("endSequence")).longValue();
+                if(sequence>previous) {
+                    Map<String,Object> entry=new LinkedHashMap<>(interval);
+                    if((previous==0L && sequence>2L)||(previous>0L && sequence>previous+1L))entry.put("coverageGap",true);
+                    saved.put("checkpointInterval",entry);
+                    job.loadCheckpointHistory.add(entry);if(job.loadCheckpointHistory.size()>64)job.loadCheckpointHistory.remove(0);
+                }
+            }
+            Map<String,Object> point=progressHistoryPoint(saved);
+            job.loadProgressHistory.add(point);if(job.loadProgressHistory.size()>60)job.loadProgressHistory.remove(0);
+            long elapsed=((Number)saved.get("elapsedMs")).longValue();long planned=plannedLoadDurationMs(job);
+            int bucket=(int)Math.max(0L,Math.min(255L,(long)(elapsed*256.0/Math.max(1L,planned))));
+            if(bucket%4==0) {
+                point=new LinkedHashMap<>(point);point.put("workloads",compactWorkloadTrend(saved.get("workloads")));
+            }
+            if(bucket==0)job.loadProgressTrend.putIfAbsent(bucket,point);else job.loadProgressTrend.put(bucket,point);
+            Map<String,Object> state=new LinkedHashMap<>();state.put("latest",saved);state.put("recent",new ArrayList<>(job.loadProgressHistory));state.put("trend",new ArrayList<>(job.loadProgressTrend.values()));state.put("checkpoints",new ArrayList<>(job.loadCheckpointHistory));
+            long now=System.nanoTime();
+            boolean retryDue=!job.loadProgressPersistenceDegraded||job.lastLoadProgressPersistenceAttemptNanos==0L
+                    ||now-job.lastLoadProgressPersistenceAttemptNanos>=LOAD_PROGRESS_PERSISTENCE_RETRY_NANOS;
+            if(retryDue) {
+                job.lastLoadProgressPersistenceAttemptNanos=now;
+                saved.put("telemetryPersistence",Map.of("state","HEALTHY"));
+                try {
+                    String candidate=JSON.writeValueAsString(state);
+                    loadProgressPersistence.update(job.id,candidate);
+                    job.loadProgressPersistenceDegraded=false;
+                    job.loadProgressJson=candidate;
+                } catch(Exception unavailable) {
+                    job.loadProgressPersistenceDegraded=true;
+                    saved.put("telemetryPersistence",loadProgressPersistenceHealth(job.lastLoadProgressPersistenceAttemptNanos,now));
+                    job.loadProgressJson=serializeLoadProgressState(state);
+                }
+            } else {
+                saved.put("telemetryPersistence",loadProgressPersistenceHealth(job.lastLoadProgressPersistenceAttemptNanos,now));
+                job.loadProgressJson=serializeLoadProgressState(state);
+            }
+            return new LinkedHashMap<>(saved);
+        }
+    }
+
+    private static Map<String,Object> loadProgressPersistenceHealth(long lastAttemptNanos,long nowNanos) {
+        long retryAfterMs=Math.max(0L,TimeUnit.NANOSECONDS.toMillis(LOAD_PROGRESS_PERSISTENCE_RETRY_NANOS-Math.max(0L,nowNanos-lastAttemptNanos)));
+        return Map.of("state","DEGRADED","diagnostic","Optional live LOAD telemetry persistence is degraded; the latest in-memory snapshot remains available and retries continue.","retryAfterMs",retryAfterMs);
+    }
+
+    private static String serializeLoadProgressState(Map<String,Object> state) {
+        try {return JSON.writeValueAsString(state);}
+        catch(Exception unavailable) {return null;}
+    }
+
+    private static boolean monotonicProgressCounts(Object before,Object after) {
+        if(!(before instanceof Map<?,?>)||!(after instanceof Map<?,?>))return false;
+        Map<?,?> old=(Map<?,?>)before,current=(Map<?,?>)after;
+        for(String key:List.of("scheduled","started","completed","passed","sutFailures","runtimeErrors","dropped","other")) {
+            Object left=old.get(key),right=current.get(key);
+            if(left instanceof Number && (!(right instanceof Number)||((Number)right).longValue()<((Number)left).longValue()))return false;
+        }
+        return true;
+    }
+
+    private static Map<String,Object> progressHistoryPoint(Map<String,Object> snapshot) {
+        Map<String,Object> point=new LinkedHashMap<>();
+        for(String key:List.of("capturedAt","serverReceivedAt","elapsedMs","phase","counts","measuredCounts","rates","latency"))
+            if(snapshot.containsKey(key))point.put(key,snapshot.get(key));
+        return point;
+    }
+
+    private static Map<String,Object> compactWorkloadTrend(Object raw) {
+        Map<String,Object> output=new TreeMap<>();if(!(raw instanceof Map<?,?>))return output;
+        for(Map.Entry<?,?> entry:((Map<?,?>)raw).entrySet()) {
+            if(!(entry.getKey() instanceof String)||!(entry.getValue() instanceof Map<?,?>))continue;
+            Map<?,?> source=(Map<?,?>)entry.getValue();Map<String,Object> values=new LinkedHashMap<>();
+            for(String key:List.of("completed","passed","sutFailures","runtimeErrors","dropped","latency"))if(source.containsKey(key))values.put(key,source.get(key));
+            output.put((String)entry.getKey(),values);
+        }
+        return output;
+    }
+
+    private static long plannedLoadDurationMs(Job job) {
+        long maximum=0L;Object raw=job.targetIdentity==null?null:job.targetIdentity.get("workloads");
+        if(raw instanceof List<?>)for(Object item:(List<?>)raw)if(item instanceof Map<?,?>) {
+            Object duration=((Map<?,?>)item).get("totalDurationMs");if(duration instanceof Number)maximum=Math.max(maximum,((Number)duration).longValue());
+        }
+        return maximum>0?maximum:TimeUnit.DAYS.toMillis(10);
     }
     Map<String,Object> resultRecord(String id) throws Exception {
         if(!JOB_ID.matcher(id).matches())throw new NotFoundException();
@@ -1424,7 +1698,7 @@ final class ServerRuntime implements AutoCloseable {
         if(environment!=null)environment=inspectionEnvironment(environment,"environment");
         WorkerRequest request=inspectionRequest(packageId,root,environment);
         request.inspectionAction="quick-load-policy";request.loadModel=model;request.inspectionPath=templateId;
-        Map<String,Object> result=executeInspection(root,request);result.remove("revisionDigest");return result;
+        Map<String,Object> result=executeInspection(root,request);result.remove("revisionDigest");result.put("limits",inlineLoadLimitView());return result;
     }
     Map<String,Object> inspectLoadTemplates(String packageId,String query,int offset,int limit,String principal) throws Exception {
         if(!config.inspection.enabled)throw new NotFoundException();
@@ -1434,11 +1708,14 @@ final class ServerRuntime implements AutoCloseable {
         WorkerRequest request=inspectionRequest(packageId,root,null);
         request.inspectionAction="load-templates";request.inspectionQuery=query;request.inspectionOffset=offset;request.inspectionLimit=limit;
         Map<String,Object> result=executeInspection(root,request);
-        result.put("limits",Map.of("maxWorkloads",config.inlineLoad.maxWorkloads,"maxTargets",config.inlineLoad.maxTargets,
+        result.put("limits",inlineLoadLimitView());
+        return result;
+    }
+    private Map<String,Object> inlineLoadLimitView() {
+        return Map.of("maxWorkloads",config.inlineLoad.maxWorkloads,"maxTargets",config.inlineLoad.maxTargets,
                 "maxTotalUsers",config.inlineLoad.maxTotalUsers,"maxAggregateArrivalRatePerSecond",config.inlineLoad.maxAggregateArrivalRatePerSecond,
                 "maxConcurrentPerWorkload",config.inlineLoad.maxConcurrentPerWorkload,"maxTotalConcurrent",config.inlineLoad.maxTotalConcurrent,
-                "maxDurationSeconds",config.inlineLoad.maxDurationSeconds));
-        return result;
+                "maxDurationSeconds",config.inlineLoad.maxDurationSeconds);
     }
     private Map<String,Object> inspectDebugFormInternal(String packageId,String type,String resourceId,String environment,
                                                         String principal) throws Exception {
@@ -2186,6 +2463,7 @@ final class ServerRuntime implements AutoCloseable {
         long totalUsers=0L,totalTargets=0L,totalArrivalConcurrency=0L;
         double totalArrivalRate=0.0;
         long maximumEnvelopeMs=0L;
+        Map<?,?> rootLoad=scenario.get("load") instanceof Map?(Map<?,?>)scenario.get("load"):Collections.emptyMap();
         for(int i=0;i<workloads.size();i++) {
             Object raw=workloads.get(i);
             if(!(raw instanceof Map))throw new IllegalArgumentException("Validated Load workload is invalid");
@@ -2196,8 +2474,8 @@ final class ServerRuntime implements AutoCloseable {
             else throw new IllegalArgumentException("Validated Load target is invalid");
 
             Object rawLoad=workload.get("load");
-            if(!(rawLoad instanceof Map))throw new IllegalArgumentException("Validated Load pacing is invalid");
-            Map<?,?> load=(Map<?,?>)rawLoad;
+            if(rawLoad!=null&&!(rawLoad instanceof Map))throw new IllegalArgumentException("Validated Load pacing is invalid");
+            Map<Object,Object> load=new LinkedHashMap<>();load.putAll(rootLoad);if(rawLoad instanceof Map)load.putAll((Map<?,?>)rawLoad);
             if(load.get("users") instanceof Number) {
                 totalUsers=addWithinLimit(totalUsers,validatedCount(load.get("users"),"users"),limits.maxTotalUsers,
                         "Scenario exceeds server.inlineLoad.maxTotalUsers");
@@ -2216,13 +2494,10 @@ final class ServerRuntime implements AutoCloseable {
             maximumEnvelopeMs=Math.max(maximumEnvelopeMs,envelope);
         }
         if(maximumEnvelopeMs>TimeUnit.SECONDS.toMillis(limits.maxDurationSeconds))
-            throw new InlineLoadLimitException("Scenario exceeds server.inlineLoad.maxDurationSeconds");
+            throw new InlineLoadLimitException("Effective LOAD envelope is "+maximumEnvelopeMs+" ms; server.inlineLoad.maxDurationSeconds permits "+TimeUnit.SECONDS.toMillis(limits.maxDurationSeconds)+" ms");
     }
     static void validatePackageBackedReplayLoadLimits(ServerConfig.InlineLoad limits,Map<String,Object> scenario) {
         validateScheduledLoadLimits(limits,scenario);
-        Object rootLoad=scenario.get("load");
-        if(rootLoad instanceof Map&&replayRootDurationEnvelopeMillis((Map<?,?>)rootLoad)>TimeUnit.SECONDS.toMillis(limits.maxDurationSeconds))
-            throw new InlineLoadLimitException("Scenario exceeds server.inlineLoad.maxDurationSeconds");
     }
     private static long addWithinLimit(long total,long value,long maximum,String message) {
         if(value<0||total>maximum-value)throw new InlineLoadLimitException(message);
@@ -2248,6 +2523,11 @@ final class ServerRuntime implements AutoCloseable {
         return rate;
     }
     private static long durationMillis(Object value,String field) {
+        if(value==null)return 0L;
+        if(value instanceof Number) {
+            try {long milliseconds=new java.math.BigDecimal(String.valueOf(value)).longValueExact();if(milliseconds<0)throw new IllegalArgumentException("Validated Load "+field+" is invalid");return milliseconds;}
+            catch(NumberFormatException|ArithmeticException invalid){throw new IllegalArgumentException("Validated Load "+field+" is invalid",invalid);}
+        }
         if(!(value instanceof String))throw new IllegalArgumentException("Validated Load "+field+" is invalid");
         java.util.regex.Matcher matcher=INLINE_LOAD_DURATION.matcher(((String)value).trim());
         if(!matcher.matches())throw new IllegalArgumentException("Validated Load "+field+" is invalid");
@@ -2261,37 +2541,6 @@ final class ServerRuntime implements AutoCloseable {
             return Math.addExact(Math.addExact(durationMillis(load.get("warmup"),"warmup"),durationMillis(load.get("rampUp"),"rampUp")),
                     Math.addExact(durationMillis(load.get("duration"),"duration"),durationMillis(load.get("rampDown"),"rampDown")));
         } catch(ArithmeticException overflow) { return Long.MAX_VALUE; }
-    }
-    private static long replayRootDurationEnvelopeMillis(Map<?,?> load) {
-        try {
-            return Math.addExact(Math.addExact(replayRootDurationMillis(load.get("warmup"),"warmup"),replayRootDurationMillis(load.get("rampUp"),"rampUp")),
-                    Math.addExact(replayRootDurationMillis(load.get("duration"),"duration"),replayRootDurationMillis(load.get("rampDown"),"rampDown")));
-        } catch(ArithmeticException overflow) { return Long.MAX_VALUE; }
-    }
-    private static long replayRootDurationMillis(Object value,String field) {
-        // Retained root timing can be represented as normalized millisecond numbers; omitted phases are zero.
-        if(value==null)return 0L;
-        if(value instanceof Number) {
-            try {
-                long milliseconds=new java.math.BigDecimal(String.valueOf(value)).longValueExact();
-                if(milliseconds<0)throw new IllegalArgumentException("Validated replay Load "+field+" is invalid");
-                return milliseconds;
-            } catch(NumberFormatException|ArithmeticException invalid) {
-                throw new IllegalArgumentException("Validated replay Load "+field+" is invalid",invalid);
-            }
-        }
-        if(!(value instanceof String))throw new IllegalArgumentException("Validated replay Load "+field+" is invalid");
-        String text=((String)value).trim();
-        if(text.matches("[0-9]+"))return Long.parseLong(text);
-        java.util.regex.Matcher matcher=INLINE_LOAD_DURATION.matcher(text);
-        if(!matcher.matches())throw new IllegalArgumentException("Validated replay Load "+field+" is invalid");
-        try {
-            long amount=Long.parseLong(matcher.group(1));
-            long multiplier="ms".equals(matcher.group(2))?1L:"s".equals(matcher.group(2))?1000L:"m".equals(matcher.group(2))?60000L:3600000L;
-            return Math.multiplyExact(amount,multiplier);
-        } catch(NumberFormatException|ArithmeticException invalid) {
-            throw new IllegalArgumentException("Validated replay Load "+field+" is invalid",invalid);
-        }
     }
     private static String optionalText(JsonNode object,String name) {
         JsonNode value=object.get(name);if(value==null||value.isNull())return null;
@@ -4325,6 +4574,7 @@ final class ServerRuntime implements AutoCloseable {
     private static void forceTree(Process process){process.toHandle().descendants().forEach(ProcessHandle::destroyForcibly);process.destroyForcibly();}
     @FunctionalInterface interface WorkerProcessLauncher { Process start(ProcessBuilder builder) throws java.io.IOException; }
     @FunctionalInterface interface ArtifactPublisher { Path publish(Path output,Path archive,ArtifactArchive.EntryValidator validator) throws Exception; }
+    @FunctionalInterface interface LoadProgressPersistence { void update(String jobId,String progressJson) throws Exception; }
     private static final class AdmissionLease {
         private final Semaphore admission,load;private final java.util.concurrent.atomic.AtomicBoolean released=new java.util.concurrent.atomic.AtomicBoolean();
         AdmissionLease(Semaphore admission,Semaphore load){this.admission=admission;this.load=load;}

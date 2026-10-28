@@ -5,11 +5,16 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.nio.charset.StandardCharsets;
 import java.util.HashSet;
+import java.math.BigDecimal;
 import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /** Bounded, typed replay edits. The normal package validators remain authoritative. */
 final class JobReplayOverrides {
     static final int MAX_BYTES=32768;
+    private static final Set<String> PHASE_TIMINGS=Set.of("warmup","rampUp","duration","rampDown");
+    private static final Pattern DURATION=Pattern.compile("^([0-9]+)(ms|s|m|h)$");
     private JobReplayOverrides() {}
 
     static ObjectNode apply(ObjectNode source,JsonNode overrides) {
@@ -36,8 +41,32 @@ final class JobReplayOverrides {
         ObjectNode scenario=(ObjectNode)scenarioNode;
         if(overrides.has("load")) {
             JsonNode load=overrides.get("load");requireObject(load,"load overrides must be an object");
-            allowFields(load,Set.of("warmup","rampUp","duration","rampDown"));
-            ObjectNode target=scenario.with("load");merge(target,load);
+            allowFields(load,PHASE_TIMINGS);
+            ObjectNode previous=scenario.path("load") instanceof ObjectNode ? ((ObjectNode)scenario.path("load")).deepCopy() : ServerRuntime.JSON.createObjectNode();
+            JsonNode retainedWorkloads=scenario.path("workloads");
+            if(retainedWorkloads.isArray() && retainedWorkloads.size()>0) {
+                ObjectNode effective=effectiveTiming(previous,retainedWorkloads.get(0));
+                for(int index=1;index<retainedWorkloads.size();index++)
+                    if(!sameTiming(effective,effectiveTiming(previous,retainedWorkloads.get(index))))
+                        throw new IllegalArgumentException("Replay workloads have different effective phase timing at workloads["+index+"].load; use a shared timing envelope");
+                previous=effective;
+            }
+            ObjectNode target=scenario.with("load");
+            for(String field:PHASE_TIMINGS) {
+                JsonNode value=previous.get(field);
+                if(value==null||value.isNull())target.remove(field);else target.set(field,value.deepCopy());
+            }
+            load.fields().forEachRemaining(entry->{
+                JsonNode value=entry.getValue();
+                if(value==null||value.isNull()||value.isTextual()&&value.asText().isBlank())target.remove(entry.getKey());
+                else target.set(entry.getKey(),value.deepCopy());
+            });
+            if(!sameTiming(previous,target)) {
+                JsonNode workloads=scenario.path("workloads");
+                if(workloads.isArray())for(JsonNode workload:workloads)
+                    if(workload instanceof ObjectNode&&workload.path("load") instanceof ObjectNode)
+                        ((ObjectNode)workload.path("load")).remove(PHASE_TIMINGS);
+            }
         }
         if(overrides.has("workloads")) {
             JsonNode patches=overrides.get("workloads");
@@ -55,7 +84,7 @@ final class JobReplayOverrides {
                 if(patch.has("load")) {
                     JsonNode load=patch.get("load");requireObject(load,"workload load override must be an object");
                     allowFields(load,Set.of("users","arrivalRate","maxConcurrent","overloadPolicy"));
-                    boolean arrival=workload.path("load").has("arrivalRate");
+                    boolean arrival=isArrivalModel(scenario,workload);
                     if(arrival&&load.has("users")||!arrival&&load.has("arrivalRate"))
                         throw new IllegalArgumentException("Replay cannot convert between Arrival Rate and Virtual Users models");
                     merge(workload.with("load"),load);
@@ -70,10 +99,50 @@ final class JobReplayOverrides {
         if(workloads.isArray()) {
             Boolean arrivalModel=null;
             for(JsonNode workload:workloads) {
-                boolean arrival=workload.path("load").has("arrivalRate");
+                boolean arrival=isArrivalModel(scenario,workload);
                 if(arrivalModel!=null&&arrivalModel.booleanValue()!=arrival)throw new IllegalArgumentException("All replay workloads must keep the original LOAD model");
                 arrivalModel=Boolean.valueOf(arrival);
             }
+        }
+    }
+
+    private static ObjectNode effectiveTiming(ObjectNode root,JsonNode workload) {
+        ObjectNode effective=root.deepCopy();JsonNode local=workload.path("load");
+        for(String field:PHASE_TIMINGS)if(local.has(field))effective.set(field,local.get(field).deepCopy());
+        return effective;
+    }
+
+    private static boolean isArrivalModel(JsonNode scenario,JsonNode workload) {
+        JsonNode local=workload.path("load");
+        return local.has("arrivalRate")||(!local.has("users")&&scenario.path("load").has("arrivalRate"));
+    }
+
+    private static boolean sameTiming(JsonNode before,JsonNode after) {
+        try {
+            for(String field:PHASE_TIMINGS)if(durationMillis(before.get(field))!=durationMillis(after.get(field)))return false;
+            return true;
+        } catch(IllegalArgumentException invalidTiming) {
+            // Keep malformed edits in the draft so the normal scenario validator can
+            // return field-level diagnostics instead of failing replay construction.
+            return false;
+        }
+    }
+
+    /** Retained timing can be represented as a unit string or normalized milliseconds. */
+    private static long durationMillis(JsonNode value) {
+        if(value==null||value.isNull())return 0L;
+        try {
+            if(value.isNumber())return new BigDecimal(value.asText()).longValueExact();
+            if(!value.isTextual())throw new IllegalArgumentException("Replay timing must be an integer duration");
+            String text=value.asText().trim();
+            if(text.matches("[0-9]+"))return Long.parseLong(text);
+            Matcher matcher=DURATION.matcher(text);
+            if(!matcher.matches())throw new IllegalArgumentException("Replay timing must use <integer><ms|s|m|h>");
+            long amount=Long.parseLong(matcher.group(1));
+            long multiplier=switch(matcher.group(2)){case "ms"->1L;case "s"->1000L;case "m"->60000L;default->3600000L;};
+            return Math.multiplyExact(amount,multiplier);
+        } catch(ArithmeticException|NumberFormatException invalid) {
+            throw new IllegalArgumentException("Replay timing is too large",invalid);
         }
     }
 

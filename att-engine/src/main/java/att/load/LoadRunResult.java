@@ -23,6 +23,7 @@ public final class LoadRunResult {
     private final Map<String, Object> evidence;
     private final Map<String, Object> resources;
     private final Map<String, LoadRunResult> workloads;
+    private final boolean cancelled;
 
     public LoadRunResult(String runId, LoadScenario scenario, Instant startedAt, Instant endedAt,
                          LoadMetricsSnapshot metrics) {
@@ -33,23 +34,29 @@ public final class LoadRunResult {
     public LoadRunResult(String runId, LoadScenario scenario, Instant startedAt, Instant endedAt,
                          LoadMetricsSnapshot metrics, LoadThresholdSummary thresholds, Map<String, Object> evidence) {
         this(runId, scenario, startedAt, endedAt, metrics, thresholds, evidence,
-                Collections.<String, Object>emptyMap(), Collections.<String, LoadRunResult>emptyMap());
+                Collections.<String, Object>emptyMap(), Collections.<String, LoadRunResult>emptyMap(), false);
     }
     public LoadRunResult(String runId, LoadScenario scenario, Instant startedAt, Instant endedAt,
                          LoadMetricsSnapshot metrics, LoadThresholdSummary thresholds, Map<String, Object> evidence,
                          Map<String, Object> resources) {
         this(runId, scenario, startedAt, endedAt, metrics, thresholds, evidence, resources,
-                Collections.<String, LoadRunResult>emptyMap());
+                Collections.<String, LoadRunResult>emptyMap(), false);
     }
     LoadRunResult(String runId, LoadScenario scenario, Instant startedAt, Instant endedAt,
                   LoadMetricsSnapshot metrics, LoadThresholdSummary thresholds, Map<String, Object> evidence,
                   Map<String, Object> resources, Map<String, LoadRunResult> workloads) {
+        this(runId, scenario, startedAt, endedAt, metrics, thresholds, evidence, resources, workloads, false);
+    }
+    private LoadRunResult(String runId, LoadScenario scenario, Instant startedAt, Instant endedAt,
+                          LoadMetricsSnapshot metrics, LoadThresholdSummary thresholds, Map<String, Object> evidence,
+                          Map<String, Object> resources, Map<String, LoadRunResult> workloads, boolean cancelled) {
         this.runId = runId; this.scenario = scenario; this.startedAt = startedAt; this.endedAt = endedAt;
         this.metrics = metrics; this.thresholds = thresholds == null ? LoadThresholdSummary.empty() : thresholds;
         this.evidence = immutable(evidence); this.resources = immutable(resources);
         this.workloads = workloads == null || workloads.isEmpty()
                 ? Collections.<String, LoadRunResult>emptyMap()
                 : Collections.unmodifiableMap(new LinkedHashMap<String, LoadRunResult>(workloads));
+        this.cancelled = cancelled;
     }
 
     public String runId() { return runId; }
@@ -62,6 +69,7 @@ public final class LoadRunResult {
     public Map<String, Object> resources() { return resources; }
     public Map<String, LoadRunResult> workloads() { return workloads; }
     public boolean multiWorkload() { return !workloads.isEmpty(); }
+    public boolean cancelled() { return cancelled; }
 
     public ResultStatus status() {
         if (preparationFailed()) return ResultStatus.ERROR;
@@ -74,6 +82,7 @@ public final class LoadRunResult {
     }
     /** Existing execution outcome, kept distinct from the configured performance verdict. */
     public String executionStatus() {
+        if (cancelled) return "CANCELLED";
         if (preparationFailed()) return "ERROR";
         if (accountingFailed()) return "ERROR";
         if (runtimeErrorCount() > 0L) return "ERROR";
@@ -81,6 +90,7 @@ public final class LoadRunResult {
         return "PASS";
     }
     public String performanceVerdict() {
+        if (cancelled) return "NOT_EVALUATED";
         boolean configured = thresholdsConfigured();
         boolean notMet = !thresholds.results().isEmpty() && "NOT_MET".equals(thresholds.status());
         boolean notEvaluated = !thresholds.results().isEmpty() && "NOT_EVALUATED".equals(thresholds.status());
@@ -103,24 +113,31 @@ public final class LoadRunResult {
         for (LoadRunResult workload : workloads.values()) if (workload.thresholdsConfigured()) return true;
         return false;
     }
-    public int exitCode() { return ResultAggregator.exitCode(status()); }
-    public boolean passed() { return status() == ResultStatus.PASS; }
+    public int exitCode() { return cancelled ? 143 : ResultAggregator.exitCode(status()); }
+    public boolean passed() { return !cancelled && status() == ResultStatus.PASS; }
     public LoadRunResult withThresholds(LoadThresholdSummary value) {
-        return new LoadRunResult(runId, scenario, startedAt, endedAt, metrics, value, evidence, resources, workloads);
+        return new LoadRunResult(runId, scenario, startedAt, endedAt, metrics, cancelled ? LoadThresholdSummary.empty() : value, evidence, resources, workloads, cancelled);
     }
     public LoadRunResult withEvidence(Map<String, Object> value) {
-        return new LoadRunResult(runId, scenario, startedAt, endedAt, metrics, thresholds, value, resources, workloads);
+        return new LoadRunResult(runId, scenario, startedAt, endedAt, metrics, thresholds, value, resources, workloads, cancelled);
     }
     public LoadRunResult withResources(Map<String, Object> value) {
         Map<String, Object> combined = new LinkedHashMap<String, Object>(resources);
         if (value != null) combined.putAll(value);
-        return new LoadRunResult(runId, scenario, startedAt, endedAt, metrics, thresholds, evidence, combined, workloads);
+        return new LoadRunResult(runId, scenario, startedAt, endedAt, metrics, thresholds, evidence, combined, workloads, cancelled);
+    }
+    public LoadRunResult withCancelled() {
+        if (cancelled) return this;
+        Map<String, LoadRunResult> cancelledWorkloads = new LinkedHashMap<String, LoadRunResult>();
+        workloads.forEach((id, workload) -> cancelledWorkloads.put(id, workload.withCancelled()));
+        return new LoadRunResult(runId, scenario, startedAt, endedAt, metrics, LoadThresholdSummary.empty(), evidence,
+                resources, cancelledWorkloads, true);
     }
 
     public Map<String, Object> toMap() {
         Map<String, Object> result = new LinkedHashMap<String, Object>();
         result.put("schemaVersion", Version.LOAD_SUMMARY_SCHEMA);
-        result.put("status", status().name()); result.put("executionStatus", executionStatus());
+        result.put("status", cancelled ? "CANCELLED" : status().name()); result.put("executionStatus", executionStatus());
         result.put("performanceVerdict", performanceVerdict()); result.put("exitCode", exitCode());
         result.put("runId", runId); result.put("startedAt", startedAt.toString()); result.put("endedAt", endedAt.toString());
         result.put("durationMs", Math.max(0L, Duration.between(startedAt, endedAt).toMillis()));
@@ -155,7 +172,7 @@ public final class LoadRunResult {
     public Map<String, Object> toTerminalSummary(Map<String, Object> configuration, String reportAvailability) {
         Map<String, Object> source = new LinkedHashMap<String, Object>();
         long durationMs = Math.max(0L, Duration.between(startedAt, endedAt).toMillis());
-        source.put("executionId", runId); source.put("runId", runId); source.put("status", status().name());
+        source.put("executionId", runId); source.put("runId", runId); source.put("status", cancelled ? "CANCELLED" : status().name());
         source.put("exitCode", exitCode()); source.put("durationMs", durationMs);
         source.put("startedAt", startedAt.toString()); source.put("endedAt", endedAt.toString());
         source.put("executionStatus", executionStatus()); source.put("performanceVerdict", performanceVerdict());
@@ -167,7 +184,7 @@ public final class LoadRunResult {
         for (Map.Entry<String, LoadRunResult> entry : workloads.entrySet()) {
             LoadRunResult workload = entry.getValue();
             Map<String, Object> summary = new LinkedHashMap<String, Object>();
-            summary.put("status", workload.status().name()); summary.put("executionStatus", workload.executionStatus());
+            summary.put("status", workload.cancelled() ? "CANCELLED" : workload.status().name()); summary.put("executionStatus", workload.executionStatus());
             summary.put("performanceVerdict", workload.performanceVerdict()); summary.put("metrics", workload.metrics().values());
             workloadSummaries.put(entry.getKey(), summary);
         }
@@ -378,7 +395,7 @@ public final class LoadRunResult {
         for (Map.Entry<String, LoadRunResult> entry : workloads.entrySet()) {
             LoadRunResult value = entry.getValue();
             Map<String, Object> item = new LinkedHashMap<String, Object>();
-            item.put("status", value.status().name());
+            item.put("status", value.cancelled() ? "CANCELLED" : value.status().name());
             item.put("executionStatus", value.executionStatus());
             item.put("performanceVerdict", value.performanceVerdict());
             if (value.scenario().workload().mixed()) item.put("mix", value.resources().get("mix"));

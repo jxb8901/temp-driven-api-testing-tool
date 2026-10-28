@@ -218,6 +218,15 @@ public final class ExecutionConsoleFormatter {
     /** Bounded identifier used by LOAD lines. Locale-independent and free of control characters. */
     public static String token(String value, String fallback) {
         if (value == null || value.isEmpty()) return fallback;
+        if (value.length() <= 96) {
+            boolean safe = true;
+            for (int i = 0; i < value.length(); i++) {
+                char c = value.charAt(i);
+                if (!((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')
+                        || c == '_' || c == '.' || c == ':' || c == '-')) { safe = false; break; }
+            }
+            if (safe) return value;
+        }
         String normalized = value.replaceAll("[^A-Za-z0-9_.:-]", "_");
         return normalized.length() <= 96 ? normalized : normalized.substring(0, 96);
     }

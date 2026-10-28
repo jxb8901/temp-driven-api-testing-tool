@@ -60,6 +60,15 @@ describe('LoadPage React feature', () => {
     expect(retainedScenarioToEditor({schemaVersion:'att-load/v1.9',load:{duration:'30m'},workloads:[{id:'unavailable',target:{type:'template',id:'checkout'}}]}).workloads[0].users).toBe('');
     const arrival=retainedScenarioToEditor({schemaVersion:'att-load/v1.9',load:{duration:'24h',arrivalRate:'3/s',maxConcurrent:6,overloadPolicy:'drop'},workloads:[{id:'arrival-root',target:{type:'template',id:'checkout'}}]});
     expect(arrival.model).toBe('arrivalRate');expect(arrival.workloads[0].arrivalRate).toBe('3/s');expect(arrival.workloads[0].maxConcurrent).toBe('6');
+    const semanticallySame=retainedScenarioToEditor({schemaVersion:'att-load/v1.9',load:{warmup:'2000ms',rampUp:'3s',duration:'30m',rampDown:'4s'},workloads:[
+      {id:'same-a',target:{type:'template',id:'checkout'}},
+      {id:'same-b',target:{type:'template',id:'refund'},load:{warmup:'2s',duration:'1800s'}},
+    ]});
+    expect(semanticallySame.timing).toEqual({warmup:'2000ms',rampUp:'3s',duration:'30m',rampDown:'4s'});
+    expect(()=>retainedScenarioToEditor({schemaVersion:'att-load/v1.9',load:{duration:'30m'},workloads:[
+      {id:'same-a',target:{type:'template',id:'checkout'}},
+      {id:'different',target:{type:'template',id:'refund'},load:{duration:'1h'}},
+    ]})).toThrow('different effective duration');
   });
 
   it('hides default LOAD controls and disables validation until the replay draft is applied', async () => {
@@ -152,6 +161,8 @@ describe('LoadPage React feature', () => {
     expect(api.getJobReplayEditorDraft).toHaveBeenCalledWith('J0123456789ABCDEF','C0123456789ABCDEF0123456789ABCDEF');
     expect((host.querySelector('[aria-label="Measured duration value"]') as HTMLInputElement).value).toBe('30');
     expect((host.querySelector('[aria-label="Measured duration unit"]') as HTMLSelectElement).value).toBe('m');
+    const phasePlan=host.querySelector('[aria-label="Effective replay timing by workload"]')!;
+    expect(phasePlan.textContent).toContain('30m 9s');
     expect(([...host.querySelectorAll('label')].find(label=>label.textContent?.startsWith('Workload ID'))?.querySelector('input') as HTMLInputElement).value).toBe('checkout-main');
     const model=[...host.querySelectorAll('label')].find(label=>label.textContent?.includes('Load model'))?.querySelector('select') as HTMLSelectElement;
     expect(model.disabled).toBe(true);
@@ -160,6 +171,7 @@ describe('LoadPage React feature', () => {
     const unit=host.querySelector('[aria-label="Measured duration unit"]') as HTMLSelectElement;
     await act(async()=>{unit.value='h';unit.dispatchEvent(new Event('change',{bubbles:true}));});
     expect(host.textContent).not.toContain('Effective duration:');
+    expect(phasePlan.textContent).toContain('1d 9s');
     await click([...host.querySelectorAll('button')].find(button=>button.textContent==='Validate scenario')!);await flush();
     expect(api.createJobReplayDraft).toHaveBeenCalledWith('J0123456789ABCDEF',expect.objectContaining({sourcePolicy:'current',overrides:expect.objectContaining({
       environment:'',load:expect.objectContaining({duration:'24h',warmup:'2s',rampUp:'3s',rampDown:'4s'}),
