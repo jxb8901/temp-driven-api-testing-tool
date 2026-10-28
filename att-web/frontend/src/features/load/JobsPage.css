@@ -1,9 +1,12 @@
 /* Jobs uses the shared Schedules filter geometry and controls. */
 .att-jobs-page .att-query-filter-panel, .att-jobs-page .att-query-results-panel { padding: var(--att-space-4); gap: var(--att-space-3); }
 .att-jobs-filter-grid { grid-template-columns: repeat(auto-fit, minmax(min(100%, 11rem), 1fr)); gap: var(--att-space-3); }
+.att-jobs-filter-grid:not(.att-jobs-more-filters) { grid-template-columns: minmax(0, .8fr) minmax(0, 1.25fr) minmax(0, .8fr) minmax(0, .75fr) minmax(0, .85fr) minmax(0, 1.4fr); }
+@media (max-width: 1100px) { .att-jobs-filter-grid:not(.att-jobs-more-filters) { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 800px) { .att-jobs-filter-grid:not(.att-jobs-more-filters) { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .att-jobs-filter-grid input, .att-jobs-filter-grid select, .att-jobs-toolbar select { min-height: 42px; padding: .55rem .7rem; }
 .att-jobs-filter-grid label { gap: var(--att-space-2); font-size: .82rem; }
 .att-jobs-more-filters { grid-template-columns: repeat(auto-fit, minmax(min(100%, 11rem), 1fr)); padding-top: 0; }
 .att-job-provenance { margin-top: .25rem; overflow-wrap: anywhere; }
 .att-job-provenance summary { cursor: pointer; }
-@media (max-width: 620px) { .att-jobs-page .att-query-filter-panel, .att-jobs-page .att-query-results-panel { padding: var(--att-space-3); } .att-jobs-filter-grid { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 620px) { .att-jobs-page .att-query-filter-panel, .att-jobs-page .att-query-results-panel { padding: var(--att-space-3); } .att-jobs-filter-grid { grid-template-columns: minmax(0, 1fr); } .att-jobs-filter-grid:not(.att-jobs-more-filters) { grid-template-columns: minmax(0, 1fr); } }
