@@ -22,7 +22,7 @@ class ServerAdmissionTest {
     @Test void queueRejectionCreatesNoDurableJobRecordOrDirectory() throws Exception {
         org.junit.jupiter.api.Assumptions.assumeFalse(isWindows(),"Uses a POSIX test launcher");
         CountDownLatch launched=new CountDownLatch(1),allowLaunch=new CountDownLatch(1);
-        ServerRuntime runtime=runtime("queue",1,0,1,30,builder->{launched.countDown();await(allowLaunch);return builder.start();});
+        ServerRuntime runtime=runtime("queue",1,0,1,30,builder->{launched.countDown();await(allowLaunch,30,TimeUnit.SECONDS);return builder.start();});
         String id=null;
         try {
             id=(String)runtime.submit("validate",request(),"ci").get("jobId");assertTrue(launched.await(5,TimeUnit.SECONDS));
@@ -36,7 +36,7 @@ class ServerAdmissionTest {
     @Test void loadLimitIsAppliedBeforeGeneralWorkerThreadsAreOccupied() throws Exception {
         org.junit.jupiter.api.Assumptions.assumeFalse(isWindows(),"Uses a POSIX test launcher");
         CountDownLatch firstLaunch=new CountDownLatch(1),secondLaunch=new CountDownLatch(1),allowLaunch=new CountDownLatch(1);java.util.concurrent.atomic.AtomicInteger launchCount=new java.util.concurrent.atomic.AtomicInteger();
-        ServerRuntime runtime=runtime("load",2,1,1,30,builder->{if(launchCount.incrementAndGet()==1)firstLaunch.countDown();else secondLaunch.countDown();await(allowLaunch);return builder.start();});
+        ServerRuntime runtime=runtime("load",2,1,1,30,builder->{if(launchCount.incrementAndGet()==1)firstLaunch.countDown();else secondLaunch.countDown();await(allowLaunch,30,TimeUnit.SECONDS);return builder.start();});
         String loadId=null,runId=null;
         try {
             loadId=(String)runtime.submit("load",request(),"ci").get("jobId");assertTrue(firstLaunch.await(5,TimeUnit.SECONDS));

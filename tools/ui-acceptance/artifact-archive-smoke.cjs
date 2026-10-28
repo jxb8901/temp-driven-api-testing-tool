@@ -4,6 +4,17 @@ const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 const { launchBrowser } = require('./browser-support.cjs');
 
+function artifactCategory(path) {
+  const lower = path.toLowerCase();
+  const leaf = lower.slice(lower.lastIndexOf('/') + 1);
+  if (lower.includes('/checkpoints/')) return 'Recovery checkpoints';
+  if (lower.includes('/details/') || lower.includes('/timeseries/') || leaf.startsWith('series-') || leaf.includes('metric')) return 'Metrics and time series';
+  if (leaf.includes('summary') || leaf.includes('manifest') || lower.endsWith('/report/index.html')) return 'Summaries and manifests';
+  if (lower.includes('/evidence/') || lower.includes('/samples/') || lower.includes('/events/') || lower.includes('/failures/')
+    || lower.includes('/iterations/') || lower.includes('/executions/') || leaf.includes('iteration')) return 'Execution evidence';
+  return 'Other artifacts';
+}
+
 // Fixtures come from real RUN/LOAD jobs in ServerWarUiIT, not a mocked API.
 async function main() {
   const [origin, fixturePath] = process.argv.slice(2);
@@ -65,7 +76,8 @@ async function main() {
       const text = fixture.entries.find(entry => /\.(log|ya?ml|json|txt)$/.test(entry.path));
       assert.ok(text, 'Real jobs must include text artifacts');
       // The first index page is bounded; request more pages until the chosen entry is visible.
-      const preview = archive.getByRole('button', { name: `Preview: ${text.path}`, exact: true });
+      await archive.getByText(new RegExp(`^${artifactCategory(text.path)} ·`)).click();
+      const preview = archive.getByRole('button', { name: `Preview ${text.path}`, exact: true });
       while (!await preview.count()) {
         const more = archive.getByRole('button', { name: 'Load more artifacts', exact: true });
         assert.equal(await more.count(), 1, `Missing preview for ${text.path}`);

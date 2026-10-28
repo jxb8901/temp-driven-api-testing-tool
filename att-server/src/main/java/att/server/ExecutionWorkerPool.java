@@ -41,7 +41,11 @@ final class ExecutionWorkerPool implements AutoCloseable {
     private record RecoveryProcess(ProcessHandle handle,Instant start) {
         boolean alive() {
             if(!handle.isAlive())return false;
-            Instant actual=handle.info().startInstant().orElseThrow(()->new IllegalStateException("Prewarm recovery identity unavailable"));
+            // ProcessHandle can briefly omit startInstant while a forcibly stopped process is
+            // exiting. Treat unknown identity as still alive so recovery waits or fails closed
+            // without deleting its durable marker prematurely.
+            Instant actual=handle.info().startInstant().orElse(null);
+            if(actual==null)return true;
             return start.equals(actual);
         }
     }
