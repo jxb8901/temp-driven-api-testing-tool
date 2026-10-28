@@ -2647,7 +2647,7 @@ public final class PackageResourceInspector implements AutoCloseable {
     private Path optionalPackageDirectory(Path candidate, String field) {
         try {
             Path safe = resources.internalCandidate(candidate);
-            if (!Files.exists(safe, LinkOption.NOFOLLOW_LINKS)) return null;
+            if (PackageResourceResolver.readAttributesIfPresent(safe) == null) return null;
             PackageResourceResolver.PackageResource directory = resources.fromInternalPath(safe, PackageResourceResolver.Kind.DIRECTORY);
             if (!Files.isReadable(directory.canonicalPath())) throw invalidResourceRoot(field);
             return directory.canonicalPath();

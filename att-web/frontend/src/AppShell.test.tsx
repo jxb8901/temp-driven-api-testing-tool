@@ -35,6 +35,7 @@ describe('AppShell', () => {
     return <div data-theme-preference={context.themePreference} data-language-preference={context.uiLocalePreference}
       data-preference-status={context.preferenceStatus}>
       <button type="button" onClick={() => context.onThemePreferenceChange('dark')}>Choose dark</button>
+      <button type="button" onClick={() => context.onUiLocaleChange('zh-Hant')}>Choose Traditional Chinese</button>
     </div>;
   }
 
@@ -255,6 +256,38 @@ describe('AppShell', () => {
     await act(async()=>{(host?.querySelector('[data-theme-preference] button') as HTMLButtonElement).click();await Promise.resolve();});
     expect(api.putUserPreferences).toHaveBeenCalledWith({theme:'dark'});
     expect(host.querySelector('[data-theme-preference="dark"][data-preference-status="saved"]')).not.toBeNull();
+  });
+
+  it('keeps save status pending until the latest queued preference edit completes', async () => {
+    vi.spyOn(api,'getCurrentUser').mockResolvedValue({loginId:'jane',displayName:'Jane Tester',role:'USER'});
+    vi.spyOn(api,'getUserPreferences').mockResolvedValue({available:true,language:'en',theme:'light',version:1});
+    let resolveFirst: (value:{available:boolean})=>void = () => undefined;
+    let rejectSecond: (reason?:unknown)=>void = () => undefined;
+    const firstPut=new Promise<{available:boolean}>(resolve=>{resolveFirst=resolve;});
+    const secondPut=new Promise<{available:boolean}>((_,reject)=>{rejectSecond=reject;});
+    const put=vi.spyOn(api,'putUserPreferences').mockReturnValueOnce(firstPut).mockReturnValueOnce(secondPut);
+    host=document.createElement('div');document.body.append(host);root=createRoot(host);
+    const navigation:RouteState={route:{kind:'dashboard'},pendingNavigation:null,pendingDescription:'',isDirty:false,
+      navigate:vi.fn(),registerUnsavedChanges:vi.fn(()=>()=>{}),confirmNavigation:vi.fn(),cancelNavigation:vi.fn()};
+    await act(async()=>{root?.render(<AppShell route={navigation.route} navigation={navigation}
+      serverVersion={{status:'ready',data:{apiVersion:'1',authMode:'local',inlineLoadEnabled:false}}}
+      selectedPackage="" selectedEnvironment="" onPackageChange={vi.fn()} onEnvironmentChange={vi.fn()} onJobAccepted={vi.fn()}>
+      <PreferenceProbe /></AppShell>);await new Promise(resolve=>setTimeout(resolve,0));});
+
+    await act(async()=>{
+      (host?.querySelector('[data-language-preference] button') as HTMLButtonElement).click();
+      await new Promise(resolve=>setTimeout(resolve,0));
+    });
+    expect(put).toHaveBeenCalledTimes(1);
+    await act(async()=>{(host?.querySelector('[data-theme-preference] button') as HTMLButtonElement).click();});
+    expect(host.querySelector('[data-preference-status="saving"]')).not.toBeNull();
+
+    await act(async()=>{resolveFirst({available:true});await new Promise(resolve=>setTimeout(resolve,0));});
+    expect(put).toHaveBeenCalledTimes(2);
+    expect(host.querySelector('[data-preference-status="saving"]')).not.toBeNull();
+
+    await act(async()=>{rejectSecond(new Error('latest preference write failed'));await new Promise(resolve=>setTimeout(resolve,0));});
+    expect(host.querySelector('[data-preference-status="failed"]')).not.toBeNull();
   });
 
   it('preserves the untouched legacy preference after a transient read failure and a one-field save', async () => {

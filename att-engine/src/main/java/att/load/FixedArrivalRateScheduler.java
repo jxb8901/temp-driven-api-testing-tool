@@ -100,7 +100,9 @@ public final class FixedArrivalRateScheduler implements LoadScheduler {
         }
         long startedAt = startGate == null ? timing.now() : startGate.awaitStart();
         Instant start = LoadSchedulerSupport.instant(startedAt);
-        final LoadMetrics metrics = LoadMetrics.forScenario(scenario, startedAt, LoadPhase.totalMs(scenario));
+        long total = LoadPhase.totalMs(scenario);
+        long generationDeadline = safeDue(startedAt, total);
+        final LoadMetrics metrics = LoadMetrics.forScenario(scenario, startedAt, total);
         enableCheckpoints(metrics);
         if (workers == null) {
             workers = new ThreadPoolExecutor(scenario.maxConcurrent(), scenario.maxConcurrent(), 0L, TimeUnit.MILLISECONDS,
@@ -120,9 +122,14 @@ public final class FixedArrivalRateScheduler implements LoadScheduler {
                 LoadMetrics aggregate = aggregateSchedulerMetrics;
                 if (aggregate != null) aggregate.recordSchedulerWakeupAt(nowAtWake, queueDepth);
                 long elapsed = nowAtWake - startedAt;
-                long total = LoadPhase.totalMs(scenario);
                 long desired = elapsed >= total ? arrivalsBeforeDeadline(scenario) : arrivalsDueAt(scenario, elapsed);
                 while (scheduledCount < desired) {
+                    long admissionNow = timing.now();
+                    if (admissionNow >= generationDeadline) {
+                        scheduledCount = rejectExpiredArrivals(metrics, scheduledCount,
+                                arrivalsBeforeDeadline(scenario), startedAt, total, admissionNow);
+                        break;
+                    }
                     long plannedSequence = scheduledCount + 1L;
                     long dueOffset = plannedDueOffset(scenario, plannedSequence);
                     if (dueOffset >= total) break; // Generation is the half-open interval [start, end).
@@ -136,11 +143,19 @@ public final class FixedArrivalRateScheduler implements LoadScheduler {
                     if (inFlight.get() >= scenario.maxConcurrent()) {
                         LoadSchedulerSupport.emit(metrics, listener, tag(LoadEvent.dropped(runId, "arrivalRate", phase, iterationId,
                                 plannedSequence, dueAt, timing.now())));
-                    } else submit(metrics, phase, iterationId, plannedSequence, admittedTestdataOrdinal++, dueAt, startedAt);
+                    } else if (submit(metrics, phase, iterationId, plannedSequence, admittedTestdataOrdinal, dueAt,
+                            startedAt, generationDeadline)) admittedTestdataOrdinal++;
                 }
-                if (elapsed >= total) break;
+                long nowAfterScheduling = timing.now();
+                if (nowAfterScheduling >= generationDeadline) {
+                    scheduledCount = rejectExpiredArrivals(metrics, scheduledCount,
+                            arrivalsBeforeDeadline(scenario), startedAt, total, nowAfterScheduling);
+                    break;
+                }
+                long elapsedAfterScheduling = nowAfterScheduling - startedAt;
+                if (elapsedAfterScheduling >= total) break;
                 long nextDue = plannedDue(scenario, startedAt, scheduledCount + 1L);
-                long wait = Math.min(total - elapsed, nextDue - timing.now());
+                long wait = Math.min(total - elapsedAfterScheduling, nextDue - nowAfterScheduling);
                 // Floating-point phase boundaries can put the inverse one millisecond behind
                 // the integer arrival count. Make progress to the next clock tick in that case.
                 try { timing.await(schedulerWakeups, Math.max(1L, wait)); }
@@ -159,8 +174,8 @@ public final class FixedArrivalRateScheduler implements LoadScheduler {
         return cancelled.get() ? result.withCancelled() : result;
     }
 
-    private void submit(LoadMetrics metrics, String phase, String id, long sequenceValue,
-                        long testdataOrdinal, long dueAt, long runStartedAt) {
+    private boolean submit(LoadMetrics metrics, String phase, String id, long sequenceValue,
+                           long testdataOrdinal, long dueAt, long runStartedAt, long generationDeadline) {
         inFlight.incrementAndGet();
         try {
             if (beforeSubmitHook != null) beforeSubmitHook.run();
@@ -169,6 +184,11 @@ public final class FixedArrivalRateScheduler implements LoadScheduler {
             FutureTask<Void> task = new FutureTask<Void>(() -> {
                 boolean cancelledBeforeStart = taskHandle.begin();
                 long iterationStarted = timing.now();
+                if (iterationStarted >= generationDeadline) {
+                    rejectBeforeAdmission(metrics, phase, id, sequenceValue, dueAt, iterationStarted,
+                            taskHandle, cancelledBeforeStart ? "CANCELLED_BEFORE_ADMISSION" : "GENERATION_DEADLINE_EXPIRED");
+                    return null;
+                }
                 int queueDepth = workers.getQueue().size();
                 metrics.recordSubmitLagAt(iterationStarted, iterationStarted - dueAt, queueDepth);
                 LoadMetrics aggregate = aggregateSchedulerMetrics;
@@ -235,9 +255,18 @@ public final class FixedArrivalRateScheduler implements LoadScheduler {
                     LoadSchedulerSupport.emit(metrics, listener, tag(LoadEvent.rejected(runId, "arrivalRate", phase, id,
                             sequenceValue, dueAt, timing.now(), "CANCELLED_BEFORE_ADMISSION")));
                     signalWorkerChange();
-                    return;
+                    return false;
                 }
                 admittedTasks.put(id, taskHandle);
+                long admissionNow = timing.now();
+                if (admissionNow >= generationDeadline) {
+                    admittedTasks.remove(id, taskHandle);
+                    inFlight.decrementAndGet();
+                    LoadSchedulerSupport.emit(metrics, listener, tag(LoadEvent.rejected(runId, "arrivalRate", phase, id,
+                            sequenceValue, dueAt, admissionNow, "GENERATION_DEADLINE_EXPIRED")));
+                    signalWorkerChange();
+                    return false;
+                }
                 try { workers.execute(task); }
                 catch (RejectedExecutionException rejected) {
                     admittedTasks.remove(id, taskHandle);
@@ -245,12 +274,45 @@ public final class FixedArrivalRateScheduler implements LoadScheduler {
                     LoadSchedulerSupport.emit(metrics, listener, tag(LoadEvent.rejected(runId, "arrivalRate", phase, id,
                             sequenceValue, dueAt, timing.now(), "SUBMISSION_REJECTED")));
                     signalWorkerChange();
+                    return false;
                 }
+                return true;
             }
         } catch (RejectedExecutionException rejected) {
             inFlight.decrementAndGet();
             LoadSchedulerSupport.emit(metrics, listener, tag(LoadEvent.rejected(runId, "arrivalRate", phase, id,
                     sequenceValue, dueAt, timing.now(), "SUBMISSION_REJECTED")));
+            signalWorkerChange();
+            return false;
+        }
+    }
+
+    private long rejectExpiredArrivals(LoadMetrics metrics, long scheduledCount, long plannedArrivals,
+                                      long startedAt, long total, long observedAt) {
+        while (scheduledCount < plannedArrivals) {
+            long sequence = scheduledCount + 1L;
+            long dueOffset = plannedDueOffset(scenario, sequence);
+            if (dueOffset >= total) break;
+            LoadPhase phase = LoadPhase.at(scenario, dueOffset);
+            if (phase == LoadPhase.COMPLETE) break;
+            String prefix = scenario.legacyV10() ? runId : runId + "-" + safe(scenario.workloadId());
+            String iterationId = prefix + "-arrival-" + sequence;
+            long dueAt = safeDue(startedAt, dueOffset);
+            scheduledCount = sequence;
+            LoadSchedulerSupport.emit(metrics, listener, tag(LoadEvent.rejected(runId, "arrivalRate", phase.name(), iterationId,
+                    sequence, dueAt, observedAt, "GENERATION_DEADLINE_EXPIRED")));
+        }
+        return scheduledCount;
+    }
+
+    private void rejectBeforeAdmission(LoadMetrics metrics, String phase, String id, long sequenceValue,
+                                       long dueAt, long observedAt, TaskHandle taskHandle, String reason) {
+        try {
+            LoadSchedulerSupport.emit(metrics, listener, tag(LoadEvent.rejected(runId, "arrivalRate", phase, id,
+                    sequenceValue, dueAt, observedAt, reason)));
+        } finally {
+            inFlight.decrementAndGet();
+            admittedTasks.remove(id, taskHandle);
             signalWorkerChange();
         }
     }

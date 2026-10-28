@@ -38,7 +38,7 @@ public final class LoadMetrics implements LoadEventListener {
     private final Set<String> activeUsers = Collections.newSetFromMap(new ConcurrentHashMap<String, Boolean>());
     private final AtomicLong scheduled = new AtomicLong(), measuredScheduled = new AtomicLong(), started = new AtomicLong(), completed = new AtomicLong();
     private final AtomicLong success = new AtomicLong(), failure = new AtomicLong(), runtimeError = new AtomicLong(), otherOutcome = new AtomicLong(), dropped = new AtomicLong();
-    private final AtomicLong capacityDropped = new AtomicLong(), submissionRejected = new AtomicLong(), cancelledBeforeAdmission = new AtomicLong();
+    private final AtomicLong capacityDropped = new AtomicLong(), submissionRejected = new AtomicLong(), cancelledBeforeAdmission = new AtomicLong(), deadlineExpiredDropped = new AtomicLong();
     private final AtomicLong measuredCompleted = new AtomicLong(), measuredFailure = new AtomicLong(), measuredSuccess = new AtomicLong(), measuredRuntimeError = new AtomicLong(), measuredOtherOutcome = new AtomicLong(), measuredDropped = new AtomicLong();
     private final AtomicInteger inFlight = new AtomicInteger(), maxInFlight = new AtomicInteger();
     private final AtomicInteger activeVus = new AtomicInteger(), maxActiveVus = new AtomicInteger();
@@ -119,6 +119,7 @@ public final class LoadMetrics implements LoadEventListener {
             dropped.incrementAndGet();
             if ("SUBMISSION_REJECTED".equals(event.errorType())) submissionRejected.incrementAndGet();
             else if ("CANCELLED_BEFORE_ADMISSION".equals(event.errorType())) cancelledBeforeAdmission.incrementAndGet();
+            else if ("GENERATION_DEADLINE_EXPIRED".equals(event.errorType())) deadlineExpiredDropped.incrementAndGet();
             else capacityDropped.incrementAndGet();
             if (!isWarmup(event)) measuredDropped.incrementAndGet();
         }
@@ -300,6 +301,7 @@ public final class LoadMetrics implements LoadEventListener {
         dropClassifications.put("CAPACITY_LIMIT", capacityDropped.get());
         dropClassifications.put("SUBMISSION_REJECTED", submissionRejected.get());
         dropClassifications.put("CANCELLED_BEFORE_ADMISSION", cancelledBeforeAdmission.get());
+        dropClassifications.put("GENERATION_DEADLINE_EXPIRED", deadlineExpiredDropped.get());
         result.put("dropClassifications", dropClassifications);
         result.put("measuredDropped", measuredDropped.get());
         result.put("currentInFlight", inFlight.get());

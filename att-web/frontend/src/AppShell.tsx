@@ -234,6 +234,7 @@ export function AppShell({
   const preferenceEdits=useRef({language:0,theme:0});
   const pendingPreferenceWrite=useRef<{language?:UiLocalePreference;theme?:ThemePreference}>({});
   const preferenceWriteChain=useRef<Promise<void>>(Promise.resolve());
+  const preferenceStatusGeneration=useRef(0);
   const lastPreferenceIdentity=useRef<string|null>(null);
   const [authContextKey,setAuthContextKey]=useState('');
   const [canRevealConfigurationFields, setCanRevealConfigurationFields] = useState(false);
@@ -280,6 +281,7 @@ export function AppShell({
     try{if(preference==='system')localStorage.removeItem('att-ui-theme');else localStorage.setItem('att-ui-theme',preference);return true;}catch{return false;}
   };
   const queuePreferenceWrite = (input:{language?:UiLocalePreference;theme?:ThemePreference},migrateIfAbsent=false) => {
+    const statusGeneration=++preferenceStatusGeneration.current;
     const languageEdit=preferenceEdits.current.language,themeEdit=preferenceEdits.current.theme;
     const identity=lastPreferenceIdentity.current;
     setPreferenceStatus('saving');
@@ -287,13 +289,13 @@ export function AppShell({
       return identity===lastPreferenceIdentity.current?api.putUserPreferences({...input,...(migrateIfAbsent?{migrateIfAbsent:true}:{})}):null;
     });
     preferenceWriteChain.current=write.then(result=>{
-      if(result)setPreferenceStatus('saved');
+      if(result&&statusGeneration===preferenceStatusGeneration.current)setPreferenceStatus('saved');
       if(result?.available) {
         if(input.language!==undefined&&languageEdit===preferenceEdits.current.language)clearLegacyLanguagePreference();
         if(input.theme!==undefined&&themeEdit===preferenceEdits.current.theme)clearLegacyThemePreference();
       }
     }).catch(()=>{
-      setPreferenceStatus('failed');
+      if(statusGeneration===preferenceStatusGeneration.current)setPreferenceStatus('failed');
     });
     return preferenceWriteChain.current;
   };
@@ -329,20 +331,21 @@ export function AppShell({
     return () => controller.abort();
   }, [versionData?.authMode, versionData?.apiVersion, inspectionSessionEpoch]);
   useEffect(() => {
-    if(!versionData){preferencesAvailableRef.current=null;return;}
-    if(versionData.authenticationRequired===false){preferencesAvailableRef.current=false;setPreferenceStatus('browser-only');return;}
+    if(!versionData){preferenceStatusGeneration.current++;preferencesAvailableRef.current=null;return;}
+    if(versionData.authenticationRequired===false){preferenceStatusGeneration.current++;preferencesAvailableRef.current=false;setPreferenceStatus('browser-only');return;}
     if(versionData.authMode==='local'&&!currentUser)return;
     if(!authContextKey)return;
     const controller=new AbortController();
     const identity=versionData.authMode==='local'?`local:${currentUser?.loginId||''}`:`container:${authContextKey}`;
-    if(lastPreferenceIdentity.current&&lastPreferenceIdentity.current!==identity){clearLegacyPreferences();applyThemePreference('system');applyLocalePreference('browser');pendingPreferenceWrite.current={};preferenceEdits.current={language:preferenceEdits.current.language+1,theme:preferenceEdits.current.theme+1};}
+    if(lastPreferenceIdentity.current&&lastPreferenceIdentity.current!==identity){preferenceStatusGeneration.current++;clearLegacyPreferences();applyThemePreference('system');applyLocalePreference('browser');pendingPreferenceWrite.current={};preferenceEdits.current={language:preferenceEdits.current.language+1,theme:preferenceEdits.current.theme+1};}
     lastPreferenceIdentity.current=identity;
     preferencesAvailableRef.current=null;
+    const statusGeneration=++preferenceStatusGeneration.current;
     const languageEdit=preferenceEdits.current.language,themeEdit=preferenceEdits.current.theme;
     setPreferenceStatus('loading');
     void api.getUserPreferences(controller.signal).then(async remote=>{
       if(controller.signal.aborted)return;
-      if(!remote.available){preferencesAvailableRef.current=false;pendingPreferenceWrite.current={};setPreferenceStatus('browser-only');return;}
+      if(!remote.available){preferencesAvailableRef.current=false;pendingPreferenceWrite.current={};if(statusGeneration===preferenceStatusGeneration.current)setPreferenceStatus('browser-only');return;}
       preferencesAvailableRef.current=true;
       const legacyLanguage=readStoredUiLocalePreference();let legacyTheme:ThemePreference|undefined;
       try{const value=localStorage.getItem('att-ui-theme');if(value==='light'||value==='dark')legacyTheme=value;}catch{/* Migration is unavailable when browser storage is blocked. */}
@@ -354,11 +357,11 @@ export function AppShell({
       if(canApplyTheme){if(remote.theme)applyThemePreference(remote.theme);else if(legacyTheme){migration.theme=legacyTheme;applyThemePreference(legacyTheme);}}
       if(Object.keys(migration).length)void queuePreferenceWrite(migration,true);
       if(Object.keys(pending).length)void queuePreferenceWrite(pending);
-      if(!Object.keys(migration).length&&!Object.keys(pending).length){clearLegacyPreferences();setPreferenceStatus(remote.language||remote.theme?'saved':'idle');}
+      if(!Object.keys(migration).length&&!Object.keys(pending).length){clearLegacyPreferences();if(statusGeneration===preferenceStatusGeneration.current)setPreferenceStatus(remote.language||remote.theme?'saved':'idle');}
     }).catch((reason:unknown)=>{
       if(controller.signal.aborted)return;
-      if(reason instanceof ApiError&&reason.status===404){preferencesAvailableRef.current=false;pendingPreferenceWrite.current={};setPreferenceStatus('browser-only');return;}
-      preferencesAvailableRef.current=true;setPreferenceStatus('failed');
+      if(reason instanceof ApiError&&reason.status===404){preferencesAvailableRef.current=false;pendingPreferenceWrite.current={};if(statusGeneration===preferenceStatusGeneration.current)setPreferenceStatus('browser-only');return;}
+      preferencesAvailableRef.current=true;if(statusGeneration===preferenceStatusGeneration.current)setPreferenceStatus('failed');
     });
     return()=>controller.abort();
   },[versionData?.authMode,versionData?.authenticationRequired,versionData?.apiVersion,currentUser?.loginId,authContextKey]);

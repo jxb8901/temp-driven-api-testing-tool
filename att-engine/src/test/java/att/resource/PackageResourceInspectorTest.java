@@ -12,11 +12,16 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.AccessDeniedException;
+import java.nio.file.attribute.BasicFileAttributes;
+import java.nio.file.attribute.PosixFilePermission;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.EnumSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -951,6 +956,36 @@ class PackageResourceInspectorTest {
                     :assertThrows(PackageResourceInspector.InvalidResourceRootException.class,()->inspector.inspect("list",null,null,null,0,100));
             assertFalse(invalid.getMessage().contains(root.toString()));
             assertTrue(invalid.field().contains(rootName.equals("templates")?"templatesRoot":rootName.equals("testcase")?"testcaseRoot":"load"));
+        }
+    }
+
+    @Test void inaccessibleOptionalRootAncestorIsNotTreatedAsMissing() throws Exception {
+        Path root=Files.createDirectories(temp.resolve("inaccessible-optional-root"));
+        Path restricted=Files.createDirectory(root.resolve("restricted"));
+        Path templates=Files.createDirectory(restricted.resolve("templates"));
+        writeUtf8(templates.resolve("sentinel.yaml"),templateYaml("SENTINEL","description: inaccessible"));
+        Files.createDirectory(root.resolve("testcase"));
+        writeUtf8(root.resolve("package.yaml"),"schemaVersion: att-package/v1\nresources:\n  templatesRoot: restricted/templates\n");
+        Path sharedConfig=Files.createDirectories(temp.resolve("runtime/config")).resolve("config.yaml");
+        writeUtf8(sharedConfig,"schemaVersion: att-config/v2.12\nenvironment: SIT\nenvironments:\n  SIT: {}\n"
+                +"testcase:\n  root: testcase\ntemplates:\n  root: templates\n");
+        PackageResourceInspector inspector=new PackageResourceInspector(root,sharedConfig,"SIT",Collections.emptyList(),65536,262144);
+        PackageResourceResolver resolver=new PackageResourceResolver(root);
+        org.junit.jupiter.api.Assumptions.assumeTrue(Files.getFileStore(root).supportsFileAttributeView("posix"),
+                "This regression requires POSIX directory permissions");
+        Set<PosixFilePermission> originalPermissions=Files.getPosixFilePermissions(restricted);
+        try {
+            Files.setPosixFilePermissions(restricted,EnumSet.of(PosixFilePermission.OWNER_READ,PosixFilePermission.OWNER_WRITE));
+            boolean traversalDenied=false;
+            try { Files.readAttributes(templates,BasicFileAttributes.class,java.nio.file.LinkOption.NOFOLLOW_LINKS); }
+            catch(AccessDeniedException expected) { traversalDenied=true; }
+            org.junit.jupiter.api.Assumptions.assumeTrue(traversalDenied,
+                    "This regression requires a non-root account that cannot traverse the restricted directory");
+            assertThrows(IllegalArgumentException.class,()->resolver.internalCandidate(templates));
+            assertThrows(PackageResourceInspector.InvalidResourceRootException.class,
+                    ()->inspector.inspect("list","template",null,null,0,10));
+        } finally {
+            Files.setPosixFilePermissions(restricted,originalPermissions);
         }
     }
 

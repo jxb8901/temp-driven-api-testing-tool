@@ -218,6 +218,76 @@ class FixedArrivalRateSchedulerTest {
     }
 
     @Test
+    void stalledSchedulerRejectsOverdueAdmissionsAndDrainsAlreadyStartedWork() throws Exception {
+        LoadScenario scenario = scenario(10.0, "10/s", 0L, 0L, 1_000L, 0L, 2);
+        AtomicLong now = new AtomicLong(10_000L);
+        AtomicInteger submitCalls = new AtomicInteger();
+        CountDownLatch firstEntered = new CountDownLatch(1);
+        CountDownLatch deadlineCrossed = new CountDownLatch(1);
+        CountDownLatch releaseFirst = new CountDownLatch(1);
+        List<IterationRequest> requests = Collections.synchronizedList(new ArrayList<IterationRequest>());
+        List<LoadEvent> events = Collections.synchronizedList(new ArrayList<LoadEvent>());
+        Runnable beforeSubmit = () -> {
+            if (submitCalls.incrementAndGet() != 2) return;
+            try {
+                if (!firstEntered.await(2L, TimeUnit.SECONDS)) throw new IllegalStateException("first arrival did not start");
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                throw new IllegalStateException(interrupted);
+            }
+            now.set(11_500L);
+            deadlineCrossed.countDown();
+        };
+        LoadSchedulerTiming timing = new LoadSchedulerTiming(now::get, millis -> {
+            if (millis > 0L) now.addAndGet(millis);
+            Thread.yield();
+        });
+        FixedArrivalRateScheduler scheduler = new FixedArrivalRateScheduler(scenario, request -> {
+            requests.add(request);
+            firstEntered.countDown();
+            try { releaseFirst.await(); }
+            catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                throw new IllegalStateException(interrupted);
+            }
+            return result(request.iterationId());
+        }, "stalled-arrival-deadline", events::add, timing, beforeSubmit);
+        ExecutorService control = Executors.newSingleThreadExecutor();
+        Future<LoadRunResult> future = control.submit(scheduler::run);
+        try {
+            assertTrue(firstEntered.await(2L, TimeUnit.SECONDS));
+            assertTrue(deadlineCrossed.await(2L, TimeUnit.SECONDS));
+            releaseFirst.countDown();
+            LoadRunResult result = future.get(5L, TimeUnit.SECONDS);
+
+            assertEquals(10L, result.metrics().longValue("scheduled"));
+            assertEquals(1L, result.metrics().longValue("started"));
+            assertEquals(1L, result.metrics().longValue("completed"));
+            assertEquals(9L, result.metrics().longValue("dropped"));
+            assertEquals(0L, result.metrics().longValue("runtimeError"));
+            assertEquals(0L, result.metrics().longValue("currentInFlight"));
+            assertEquals(1, requests.size(), "no overdue request reaches an iteration worker");
+            assertTrue(events.stream().filter(LoadEvent::started)
+                    .allMatch(event -> event.startedAtEpochMs() < 11_000L));
+            assertTrue(events.stream().filter(LoadEvent::dropped)
+                    .allMatch(event -> "GENERATION_DEADLINE_EXPIRED".equals(event.errorType())
+                            && event.scheduledAtEpochMs() < 11_000L));
+            @SuppressWarnings("unchecked") Map<String, Object> classifications =
+                    (Map<String, Object>) result.metrics().value("dropClassifications");
+            assertEquals(9L, ((Number) classifications.get("GENERATION_DEADLINE_EXPIRED")).longValue());
+            LoadEvent completion = events.stream().filter(LoadEvent::completed).findFirst().orElseThrow(AssertionError::new);
+            assertTrue(completion.scheduledAtEpochMs() < 11_000L);
+            assertTrue(completion.completedAtEpochMs() > 11_000L,
+                    "the iteration admitted before the deadline must remain eligible to finish during DRAIN");
+        } finally {
+            releaseFirst.countDown();
+            scheduler.close();
+            control.shutdownNow();
+            control.awaitTermination(5L, TimeUnit.SECONDS);
+        }
+    }
+
+    @Test
     void directArrivalDeadlinesMatchThePhaseIntegralAcrossEveryPhase() {
         LoadScenario scenario = scenario(7.3, 17L, 113L, 89L, 71L, 4);
         long start = 5000L;
