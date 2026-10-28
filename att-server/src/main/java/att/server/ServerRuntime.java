@@ -2761,6 +2761,13 @@ final class ServerRuntime implements AutoCloseable {
         catch(java.util.concurrent.TimeoutException timeout){cancelInspectionTask(task);throw new InspectionTimeoutException();}
         catch(InterruptedException interrupted){cancelInspectionTask(task);Thread.currentThread().interrupt();throw interrupted;}
         catch(ExecutionException failure){Throwable cause=failure.getCause();if(cause instanceof Exception)throw (Exception)cause;throw new IllegalStateException("Package inspection failed",cause);}
+        finally {
+            // FutureTask can publish completion to get() callers before run() reaches its
+            // finally block. Release completed work here too, so an immediate next request
+            // does not observe a stale full-capacity slot. Timed-out/cancelled work keeps its
+            // slot until it is removed from the queue or its worker actually exits.
+            if(!task.isCancelled())task.releaseSlot();
+        }
         String workerError=(String)envelope.get("errorCode");
         if("package-configuration".equals(request.inspectionType)&&"ATT-CFG-001".equals(workerError)) {
             Object raw=envelope.get("diagnostics");

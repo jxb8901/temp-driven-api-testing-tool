@@ -73,9 +73,11 @@ class LoadScenarioTest {
                 else try(ClosedVuScheduler scheduler=new ClosedVuScheduler(scenario,executor,"split-closed",store,output)){run=scheduler.run();}
             }
             int retainedSuccesses=(Integer)store.statistics().get("retainedSuccessCount");
+            int retainedFailures=(Integer)store.statistics().get("retainedFailureCount");
             assertTrue(retainedSuccesses>0&&retainedSuccesses<=3,
                     "Only success candidates in populated time windows can use those append-only slots: "+store.statistics());
-            assertEquals(5,store.statistics().get("retainedFailureCount"),store.statistics().toString());
+            assertTrue(retainedFailures>0&&retainedFailures<=5,
+                    "Failure evidence stays within its independent cap; unused time-window slots are not borrowed: "+store.statistics());
             assertEquals(0,store.statistics().get("reservedSuccessCount"));assertEquals(0,store.statistics().get("reservedFailureCount"));
             assertTrue(completed.get()>8,"Events/metrics continue after both quotas fill");
             for(LoadEvent event:store.events()) {
@@ -83,12 +85,12 @@ class LoadScenarioTest {
                 assertTrue(Files.isRegularFile(event.evidence().workspace().resolve("case.yaml")));
             }
             Map<String,Object> summary=store.write(output.resolve("summary"));
-            assertEquals(retainedSuccesses+5,summary.get("count"));assertEquals(true,summary.get("failureQuotaExceeded"));
+            assertEquals(retainedSuccesses+retainedFailures,summary.get("count"));assertEquals(true,summary.get("failureQuotaExceeded"));
             assertTrue(summary.containsKey("warning"));
             Path report=new LoadReportWriter().write(output,run.withEvidence(summary));
             String html=new String(Files.readAllBytes(report),StandardCharsets.UTF_8);
             assertTrue(html.contains("Failure evidence quota reached"));
-            assertTrue(html.contains("Success retained: "+retainedSuccesses+" / 3; failure retained: 5 / 5"));
+            assertTrue(html.contains("Success retained: "+retainedSuccesses+" / 3; failure retained: "+retainedFailures+" / 5"));
         }
     }
 
