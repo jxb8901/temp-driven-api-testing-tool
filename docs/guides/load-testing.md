@@ -26,7 +26,7 @@ List and preview operations start no traffic. Removing preview from a valid exec
 
 ## Long-running LOAD runs
 
-Browser-created Quick and Advanced Load drafts use the Server's configured inline duration limit (`server.inlineLoad.maxDurationSeconds`, up to 864,000 seconds / 10 days). Package-backed scenarios use the same effective-envelope validation and configured Server limit. The full envelope is warmup + ramp-up + steady duration + ramp-down. For example:
+Browser-created Quick and Advanced Load drafts use the Server's configured inline duration limit (`server.inlineLoad.maxDurationSeconds`, up to 864,000 seconds / 10 days). Package-backed scenarios use the same effective-envelope validation and configured Server limit. The full envelope runs in ramp-up + warmup + steady duration + ramp-down order. For example:
 
 ~~~sh
 ./att.sh load load/overnight.yaml --config config/config.yaml --env SIT

@@ -14,9 +14,9 @@ public final class LoadScenarioBuilder {
     private static final List<String> POLICY_FIELDS = Arrays.asList(
             "schemaVersion", "seed", "testdata", "load", "execution", "thresholds", "evidence");
     private static final List<String> VIRTUAL_USER_FIELDS = Arrays.asList(
-            "users", "warmup", "rampUp", "duration", "rampDown");
+            "users", "rampUp", "warmup", "duration", "rampDown");
     private static final List<String> ARRIVAL_RATE_FIELDS = Arrays.asList(
-            "arrivalRate", "maxConcurrent", "overloadPolicy", "warmup", "rampUp", "duration", "rampDown");
+            "arrivalRate", "maxConcurrent", "overloadPolicy", "rampUp", "warmup", "duration", "rampDown");
 
     private final LoadScenarioLoader loader;
 

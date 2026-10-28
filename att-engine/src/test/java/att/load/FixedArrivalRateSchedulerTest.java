@@ -92,6 +92,21 @@ class FixedArrivalRateSchedulerTest {
                 < FixedArrivalRateScheduler.plannedDue(scenario, 0L, 2L));
     }
 
+    @Test void rampUpWarmupSteadyRampDownScheduleExactExampleCounts() {
+        LoadScenario scenario = scenario(100.0, "100/s", 60_000L, 60_000L, 180_000L, 60_000L, 1000);
+        assertEquals(3_000.0, FixedArrivalRateScheduler.cumulativeArrivals(scenario, 60_000L), 0.000001);
+        assertEquals(9_000.0, FixedArrivalRateScheduler.cumulativeArrivals(scenario, 120_000L), 0.000001);
+        assertEquals(27_000.0, FixedArrivalRateScheduler.cumulativeArrivals(scenario, 300_000L), 0.000001);
+        assertEquals(30_000.0, FixedArrivalRateScheduler.cumulativeArrivals(scenario, 360_000L), 0.000001);
+        assertEquals(30_000L, FixedArrivalRateScheduler.arrivalsBeforeDeadline(scenario));
+        assertEquals(LoadPhase.RAMP_UP, LoadPhase.at(scenario, 0L));
+        assertEquals(LoadPhase.WARMUP, LoadPhase.at(scenario, 60_000L));
+        assertEquals(LoadPhase.STEADY, LoadPhase.at(scenario, 120_000L));
+        assertEquals(LoadPhase.RAMP_DOWN, LoadPhase.at(scenario, 300_000L));
+        assertTrue(FixedArrivalRateScheduler.plannedDue(scenario, 0L, 30_000L) < 360_000L);
+        assertTrue(FixedArrivalRateScheduler.plannedDue(scenario, 0L, 30_001L) >= 360_000L);
+    }
+
     @Test
     void fourHourMinuteRateReproducerExcludesTheExactGenerationDeadline() throws Exception {
         // The configured minute rate is exact, but converting it to a double per-second rate

@@ -421,16 +421,21 @@ public final class LoadRunResult {
     private Map<String, Object> timing() {
         Map<String, Object> result = new LinkedHashMap<String, Object>();
         List<Map<String, Object>> phases = new ArrayList<Map<String, Object>>();
-        String[] names = {"WARMUP", "RAMP_UP", "STEADY", "RAMP_DOWN"};
-        Duration[] durations = {scenario.warmup(), scenario.rampUp(), scenario.duration(), scenario.rampDown()};
+        String[] names = {"RAMP_UP", "WARMUP", "STEADY", "RAMP_DOWN"};
+        Duration[] durations = {scenario.rampUp(), scenario.warmup(), scenario.duration(), scenario.rampDown()};
         Instant cursor = startedAt;
         for (int index = 0; index < names.length; index++) {
             Instant end = cursor.plus(durations[index]);
             Map<String, Object> phase = new LinkedHashMap<String, Object>();
             phase.put("phase", names[index]); phase.put("startAt", cursor.toString()); phase.put("endAt", end.toString());
-            phase.put("durationMs", durations[index].toMillis()); phase.put("measured", index != 0);
+            phase.put("durationMs", durations[index].toMillis()); phase.put("measured", index >= 2);
             phases.add(phase); cursor = end;
         }
+        Instant drainEnd = endedAt.isBefore(cursor) ? cursor : endedAt;
+        Map<String, Object> drain = new LinkedHashMap<String, Object>();
+        drain.put("phase", "DRAIN"); drain.put("startAt", cursor.toString()); drain.put("endAt", drainEnd.toString());
+        drain.put("durationMs", Math.max(0L, Duration.between(cursor, drainEnd).toMillis())); drain.put("measured", false);
+        phases.add(drain);
         result.put("startedAt", startedAt.toString()); result.put("endedAt", endedAt.toString());
         result.put("durationMs", Math.max(0L, Duration.between(startedAt, endedAt).toMillis()));
         result.put("phases", phases);

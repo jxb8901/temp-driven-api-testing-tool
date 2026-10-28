@@ -29,19 +29,21 @@ class ClosedVuSchedulerTest {
     void phaseBoundariesAndLinearConcurrencyAreDeterministic() {
         LoadScenario scenario = scenario(4, 10L, 20L, 30L, 10L, 0L);
 
-        assertEquals(LoadPhase.WARMUP, LoadPhase.at(scenario, 0L));
-        assertEquals(LoadPhase.WARMUP, LoadPhase.at(scenario, 9L));
-        assertEquals(LoadPhase.RAMP_UP, LoadPhase.at(scenario, 10L));
-        assertEquals(LoadPhase.RAMP_UP, LoadPhase.at(scenario, 29L));
+        assertEquals(LoadPhase.RAMP_UP, LoadPhase.at(scenario, 0L));
+        assertEquals(LoadPhase.RAMP_UP, LoadPhase.at(scenario, 9L));
+        assertEquals(LoadPhase.RAMP_UP, LoadPhase.at(scenario, 19L));
+        assertEquals(LoadPhase.WARMUP, LoadPhase.at(scenario, 20L));
+        assertEquals(LoadPhase.WARMUP, LoadPhase.at(scenario, 29L));
         assertEquals(LoadPhase.STEADY, LoadPhase.at(scenario, 30L));
         assertEquals(LoadPhase.STEADY, LoadPhase.at(scenario, 59L));
         assertEquals(LoadPhase.RAMP_DOWN, LoadPhase.at(scenario, 60L));
         assertEquals(LoadPhase.RAMP_DOWN, LoadPhase.at(scenario, 69L));
         assertEquals(LoadPhase.COMPLETE, LoadPhase.at(scenario, 70L));
 
-        assertEquals(4, ClosedVuScheduler.activeUsers(scenario, 0L));
-        assertEquals(1, ClosedVuScheduler.activeUsers(scenario, 10L));
-        assertEquals(2, ClosedVuScheduler.activeUsers(scenario, 20L));
+        assertEquals(1, ClosedVuScheduler.activeUsers(scenario, 0L));
+        assertEquals(2, ClosedVuScheduler.activeUsers(scenario, 10L));
+        assertEquals(4, ClosedVuScheduler.activeUsers(scenario, 19L));
+        assertEquals(4, ClosedVuScheduler.activeUsers(scenario, 20L));
         assertEquals(4, ClosedVuScheduler.activeUsers(scenario, 29L));
         assertEquals(4, ClosedVuScheduler.activeUsers(scenario, 30L));
         assertEquals(4, ClosedVuScheduler.activeUsers(scenario, 60L));
@@ -55,6 +57,16 @@ class ClosedVuSchedulerTest {
         assertEquals(3, ClosedVuScheduler.activeUsers(noRamps, 0L));
         assertEquals(LoadPhase.COMPLETE, LoadPhase.at(noRamps, 20L));
         assertEquals(0, ClosedVuScheduler.activeUsers(noRamps, 20L));
+    }
+
+    @Test void singleUserRampUpNeverDropsToZeroAndWarmupStartsAtFullTarget() {
+        LoadScenario scenario = scenario(1, 3L, 2L, 5L, 1L, 0L);
+        assertEquals(LoadPhase.RAMP_UP, LoadPhase.at(scenario, 0L));
+        assertEquals(1, ClosedVuScheduler.activeUsers(scenario, 0L));
+        assertEquals(LoadPhase.WARMUP, LoadPhase.at(scenario, 2L));
+        assertEquals(1.0, LoadPhase.fraction(scenario, 2L));
+        assertEquals(1, ClosedVuScheduler.activeUsers(scenario, 2L));
+        assertEquals(LoadPhase.STEADY, LoadPhase.at(scenario, 5L));
     }
 
     @Test

@@ -2,11 +2,53 @@ package att.load;
 
 import att.core.ResultStatus;
 import org.junit.jupiter.api.Test;
+import java.nio.file.Paths;
+import java.time.Duration;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import static org.junit.jupiter.api.Assertions.*;
 
 class LoadWindowMetricsTest {
+    @Test void rampUpAndWarmupArePreparationPhasesAndMeasuredWindowsStartAfterBoth() {
+        long start = 10_000L;
+        LoadScenario scenario = new LoadScenario(Paths.get("phase-order.yaml"), "template", "NOOP",
+                Collections.emptyMap(), Collections.emptyMap(), LoadScenario.Model.ARRIVAL_RATE, 0, 1.0, "1/s",
+                Duration.ofSeconds(1), Duration.ofSeconds(1), Duration.ofSeconds(3), Duration.ofSeconds(1), Duration.ZERO,
+                4, "drop", Collections.emptyMap(), Collections.emptyMap());
+        LoadMetrics metrics = LoadMetrics.forScenario(scenario, start, 5_000L);
+        metrics.onEvent(LoadEvent.completed("r", "arrivalRate", "RAMP_UP", "ramp", null, 1,
+                start + 500L, start + 500L, start + 510L, ResultStatus.PASS));
+        metrics.onEvent(LoadEvent.completed("r", "arrivalRate", "WARMUP", "warmup", null, 2,
+                start + 1_500L, start + 1_500L, start + 1_510L, ResultStatus.PASS));
+        metrics.onEvent(LoadEvent.completed("r", "arrivalRate", "STEADY", "steady", null, 3,
+                start + 2_500L, start + 2_500L, start + 2_510L, ResultStatus.PASS));
+        metrics.onEvent(LoadEvent.completed("r", "arrivalRate", "RAMP_DOWN", "down", null, 4,
+                start + 5_500L, start + 5_500L, start + 5_510L, ResultStatus.PASS));
+        metrics.onEvent(LoadEvent.completed("r", "arrivalRate", "DRAIN", "drain", null, 5,
+                start + 6_000L, start + 6_000L, start + 6_010L, ResultStatus.PASS));
+        metrics.finish(start + 6_010L);
+
+        LoadMetricsSnapshot snapshot = metrics.snapshot();
+        assertEquals(5L, snapshot.value("completed"));
+        assertEquals(2L, snapshot.value("measuredScheduled"));
+        assertEquals(2L, snapshot.value("measuredCompleted"));
+        assertEquals(0.5, ((Number) snapshot.value("measuredAchievedArrivalRate")).doubleValue(), 0.000001,
+                "the measured throughput denominator covers Steady + Ramp-down and excludes DRAIN");
+        assertEquals(1L, snapshot.value("warmupCompleted"), "the legacy warmupCompleted counter remains Warm-up-only");
+        assertEquals(Boolean.FALSE, snapshot.phases().get("RAMP_UP").get("measured"));
+        assertEquals(Boolean.FALSE, snapshot.phases().get("WARMUP").get("measured"));
+        assertEquals(Boolean.TRUE, snapshot.phases().get("STEADY").get("measured"));
+        assertEquals(Boolean.TRUE, snapshot.phases().get("RAMP_DOWN").get("measured"));
+        assertEquals(Boolean.FALSE, snapshot.phases().get("DRAIN").get("measured"));
+
+        @SuppressWarnings("unchecked") Map<String,Object> windows = (Map<String,Object>) snapshot.value("windowMetrics");
+        @SuppressWarnings("unchecked") List<Map<String,Object>> boundaries = (List<Map<String,Object>>) windows.get("phaseBoundaries");
+        assertEquals(List.of("RAMP_UP", "WARMUP", "STEADY", "RAMP_DOWN", "DRAIN"),
+                boundaries.stream().map(row -> row.get("phase")).toList());
+        assertEquals(start + 2_000L, boundaries.get(2).get("windowStartEpochMs"));
+    }
+
     @Test void windowSeriesKeepSubsecondSteadyTrafficAndExcludeWarmup() {
         long start = 10_000L;
         LoadWindowMetrics metrics = new LoadWindowMetrics(start, 250L, 0L, 250L, 0L);

@@ -362,9 +362,9 @@ public final class FixedArrivalRateScheduler implements LoadScheduler {
     private static double approximateCumulativeArrivals(LoadScenario scenario, long elapsedMs) {
         long total = LoadPhase.totalMs(scenario); long step = Math.max(0L, Math.min(total, elapsedMs));
         double rate = scenario.arrivalRatePerSecond(); double result = 0.0; long cursor = 0L;
-        long warmup = scenario.warmup().toMillis(); long rampUp = scenario.rampUp().toMillis(); long steady = scenario.duration().toMillis(); long rampDown = scenario.rampDown().toMillis();
-        long warmupElapsed = Math.min(step, warmup); result += rate * warmupElapsed / 1000.0; cursor += warmup; if (step <= cursor) return result;
-        long upElapsed = Math.min(step - cursor, rampUp); result += rampArea(rate, rampUp, upElapsed, true); cursor += rampUp; if (step <= cursor) return result;
+        long rampUp = scenario.rampUp().toMillis(); long warmup = scenario.warmup().toMillis(); long steady = scenario.duration().toMillis(); long rampDown = scenario.rampDown().toMillis();
+        long upElapsed = Math.min(step, rampUp); result += rampArea(rate, rampUp, upElapsed, true); cursor += rampUp; if (step <= cursor) return result;
+        long warmupElapsed = Math.min(step - cursor, warmup); result += rate * warmupElapsed / 1000.0; cursor += warmup; if (step <= cursor) return result;
         long steadyElapsed = Math.min(step - cursor, steady); result += rate * steadyElapsed / 1000.0; cursor += steady; if (step <= cursor) return result;
         long downElapsed = Math.min(step - cursor, rampDown); result += rampArea(rate, rampDown, downElapsed, false); return result;
     }
@@ -383,19 +383,19 @@ public final class FixedArrivalRateScheduler implements LoadScheduler {
         double target = sequenceValue - 1.0;
         double rate = scenario.arrivalRatePerSecond();
         long cursor = 0L;
-        long warmup = scenario.warmup().toMillis();
         long rampUp = scenario.rampUp().toMillis();
+        long warmup = scenario.warmup().toMillis();
         long steady = scenario.duration().toMillis();
         long rampDown = scenario.rampDown().toMillis();
-        double area = rate * warmup / 1000.0;
+        double area = rate * rampUp / 2000.0;
         long approximate;
-        if (target <= area) approximate = inverseLinear(target, rate);
+        if (target <= area && rampUp > 0L) approximate = inverseRampUp(target, rate, rampUp);
         else {
-            target -= area; cursor += warmup;
-            area = rate * rampUp / 2000.0;
-            if (target <= area && rampUp > 0L) approximate = saturatedOffsetAdd(cursor, inverseRampUp(target, rate, rampUp));
+            target -= area; cursor += rampUp;
+            area = rate * warmup / 1000.0;
+            if (target <= area) approximate = saturatedOffsetAdd(cursor, inverseLinear(target, rate));
             else {
-                target -= area; cursor += rampUp;
+                target -= area; cursor += warmup;
                 area = rate * steady / 1000.0;
                 if (target <= area) approximate = saturatedOffsetAdd(cursor, inverseLinear(target, rate));
                 else {
@@ -471,16 +471,12 @@ public final class FixedArrivalRateScheduler implements LoadScheduler {
         }
         Fraction at(long elapsedMs) {
             long step = Math.max(0L, Math.min(total, elapsedMs));
-            long warmup = scenario.warmup().toMillis();
             long rampUp = scenario.rampUp().toMillis();
+            long warmup = scenario.warmup().toMillis();
             long steady = scenario.duration().toMillis();
             long rampDown = scenario.rampDown().toMillis();
             long cursor = 0L;
             Fraction result = Fraction.ZERO;
-            long warmupElapsed = Math.min(step, warmup);
-            result = result.add(rate.multiplyDivide(BigInteger.valueOf(warmupElapsed), BigInteger.valueOf(1000L)));
-            cursor += warmup;
-            if (step <= cursor) return result;
             long upElapsed = Math.min(step - cursor, rampUp);
             if (rampUp > 0L) {
                 BigInteger elapsed = BigInteger.valueOf(upElapsed);
@@ -488,6 +484,10 @@ public final class FixedArrivalRateScheduler implements LoadScheduler {
                 result = result.add(rate.multiplyDivide(elapsed.multiply(elapsed), divisor));
             }
             cursor += rampUp;
+            if (step <= cursor) return result;
+            long warmupElapsed = Math.min(step - cursor, warmup);
+            result = result.add(rate.multiplyDivide(BigInteger.valueOf(warmupElapsed), BigInteger.valueOf(1000L)));
+            cursor += warmup;
             if (step <= cursor) return result;
             long steadyElapsed = Math.min(step - cursor, steady);
             result = result.add(rate.multiplyDivide(BigInteger.valueOf(steadyElapsed), BigInteger.valueOf(1000L)));

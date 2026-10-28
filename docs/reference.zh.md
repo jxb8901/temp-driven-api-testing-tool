@@ -1,3687 +1,135 @@
-# ATT v4.2.6 使用手冊與參考
-
-Author: Jeffrey + ChatGPT
-Version: 4.2.6
-Status: 規範性使用者文件；由模組化來源自動生成
-
-<!-- GENERATED FILE. Edit docs/reference*/ modules, not this combined output. -->
-
-**目錄**
-
-- [概覽與 Product model](#概覽與-product-model)
-  - [產品模型](#產品模型)
-  - [RUN 與 LOAD 執行模型](#run-與-load-執行模型)
-  - [五種 Resource 是同級概念](#五種-resource-是同級概念)
-  - [Package 邊界](#package-邊界)
-  - [如何使用本手冊](#如何使用本手冊)
-- [Test authoring](#test-authoring)
-  - [編寫並執行 Testcase](#編寫並執行-testcase)
-  - [區分 Testcase 與 Case execution](#區分-testcase-與-case-execution)
-  - [編寫契約](#編寫契約)
-  - [Workbook](#workbook)
-  - [Stage](#stage)
-  - [Template](#template)
-  - [Flow](#flow)
-  - [Authoring lifecycle](#authoring-lifecycle)
-  - [Test data ownership](#test-data-ownership)
-  - [Testdata registry 與 input mapping](#testdata-registry-與-input-mapping)
-  - [進階 Workbook 與 Snapshot 細節](#進階-workbook-與-snapshot-細節)
-- [Actions 與 typed values](#actions-與-typed-values)
-  - [Action 類型](#action-類型)
-  - [區分邏輯值與表示方式](#區分邏輯值與表示方式)
-  - [File-content expression 回傳 string](#file-content-expression-回傳-string)
-  - [Tool、DB 與 Flow 結果](#tooldb-與-flow-結果)
-  - [Tool Evidence collector](#tool-evidence-collector)
-  - [Log：將型別化值轉成人類可讀日誌](#log將型別化值轉成人類可讀日誌)
-  - [Expressions 與變數 scope](#expressions-與變數-scope)
-  - [Resource output Evidence](#resource-output-evidence)
-  - [Action output 與 Evidence path](#action-output-與-evidence-path)
-  - [共用 Retry 與 boolean condition](#共用-retry-與-boolean-condition)
-- [Runtime 與 Context model](#runtime-與-context-model)
-  - [Identity roots](#identity-roots)
-  - [META 欄位清單與生命週期](#meta-欄位清單與生命週期)
-  - [Invocation 與 scope 規則](#invocation-與-scope-規則)
-  - [Optional lookup 與相容性](#optional-lookup-與相容性)
-  - [Lifecycle 導覽](#lifecycle-導覽)
-- [Expressions 與 built-ins](#expressions-與-built-ins)
-  - [統一 Expression engine](#統一-expression-engine)
-  - [File-content expression](#file-content-expression)
-  - [Argument 結果型別](#argument-結果型別)
-  - [Testdata input mapping 語法](#testdata-input-mapping-語法)
-  - [操作符](#操作符)
-  - [內建函數](#內建函數)
-  - [Resource helper methods](#resource-helper-methods)
-  - [Expression scope 與錯誤](#expression-scope-與錯誤)
-  - [Retry condition 的生命週期](#retry-condition-的生命週期)
-- [RUN 與 LOAD 執行 adapter](#run-與-load-執行-adapter)
-  - [統一 RUN 與排程](#統一-run-與排程)
-  - [Run 模式](#run-模式)
-  - [Standalone Debug](#standalone-debug)
-  - [Load 模式](#load-模式)
-- [Resources 與 integrations](#resources-與-integrations)
-  - [Operation result 與 Evidence](#operation-result-與-evidence)
-  - [Tool](#tool)
-  - [DBHelper](#dbhelper-1)
-  - [MQHelper](#mqhelper-1)
-  - [HTTPHelper](#httphelper-1)
-  - [SSHHelper：邏輯 SSH 目標](#sshhelper邏輯-ssh-目標)
-- [可靠性與執行控制](#可靠性與執行控制)
-  - [Assertion 與 status](#assertion-與-status)
-  - [`runWhen` 與 `onFailure`](#runwhen-與-onfailure)
-  - [Timeout](#timeout)
-  - [Retry 與 attempts](#retry-與-attempts)
-  - [Evidence collectors](#evidence-collectors)
-  - [Transaction/Resource lifecycle](#transactionresource-lifecycle)
-  - [Aggregation](#aggregation)
-  - [Stage execution controls](#stage-execution-controls)
-  - [Tool Timeout precedence](#tool-timeout-precedence)
-  - [Direct DB timeout 與 retry eligibility](#direct-db-timeout-與-retry-eligibility)
-- [Configuration 與 environments](#configuration-與-environments)
-  - [Package ownership](#package-ownership)
-  - [Studio 共用 Configuration](#studio-共用-configuration)
-  - [按任務查找配置](#按任務查找配置)
-  - [配置層與優先級](#配置層與優先級)
-  - [使用 `X-` 忽略或停用 ATT 配置項](#使用-x-忽略或停用-att-配置項)
-  - [選擇 environment profile](#選擇-environment-profile)
-  - [Schema catalog](#schema-catalog)
-  - [設定 package-wide options](#設定-package-wide-options)
-  - [標識符和路徑約束](#標識符和路徑約束)
-  - [Topology 與 secrets](#topology-與-secrets)
-  - [Cross-mode consistency](#cross-mode-consistency)
-  - [分開的 Configuration files](#分開的-configuration-files)
-  - [`config.report.fileNamePattern`](#configreportfilenamepattern)
-  - [Configuration owners](#configuration-owners)
-- [Package Manifest](#package-manifest)
-  - [宣告 Package 預設值](#宣告-package-預設值)
-  - [解析 Environment](#解析-environment)
-  - [套用 typed defaults](#套用-typed-defaults)
-  - [解析 invocation Testdata](#解析-invocation-testdata)
-  - [在 Studio 檢視及發布](#在-studio-檢視及發布)
-  - [遷移舊 Package inventory](#遷移舊-package-inventory)
-  - [API paths](#api-paths)
-- [CLI 參考](#cli-參考)
-  - [選擇命令](#選擇命令)
-  - [ATT 4.2.6 的可用性](#att-426-的可用性)
-  - [編譯 source checkout](#編譯-source-checkout)
-  - [按任務查閱語法、option 和範例](#按任務查閱語法option-和範例)
-  - [透過 CLI 使用 ATT Server](#透過-cli-使用-att-server)
-  - [Typed overrides and quick Load](#typed-overrides-and-quick-load)
-  - [Debug input 與 output](#debug-input-與-output)
-  - [退出碼](#退出碼)
-  - [完整 CLI option matrix](#完整-cli-option-matrix)
-  - [路徑顯示](#路徑顯示)
-- [結果、報告與 evidence](#結果報告與-evidence)
-  - [ATT Server Job artifact 發佈](#att-server-job-artifact-發佈)
-  - [查找 Run artifacts](#查找-run-artifacts)
-  - [在 HTML 報表中查看 Case execution 結果](#在-html-報表中查看-case-execution-結果)
-  - [診斷 Tool evidence collector 失敗](#診斷-tool-evidence-collector-失敗)
-  - [將 execution 結果寫入 Workbook](#將-execution-結果寫入-workbook)
-  - [匯出 JUnit 結果](#匯出-junit-結果)
-  - [查看 CI JSON 彙總](#查看-ci-json-彙總)
-  - [重現 Run](#重現-run)
-  - [生成文檔並管理 package 輸出](#生成文檔並管理-package-輸出)
-  - [從 execution identity 追蹤 artifact](#從-execution-identity-追蹤-artifact)
-  - [查閱 generated-output schemas](#查閱-generated-output-schemas)
-  - [Reading `case.log` and `case.yaml`](#reading-caselog-and-caseyaml)
-- [Validation 與 troubleshooting](#validation-與-troubleshooting)
-  - [選擇第一個診斷步驟](#選擇第一個診斷步驟)
-  - [先從 Validation 開始](#先從-validation-開始)
-  - [常見問題](#常見問題)
-  - [安全提醒](#安全提醒)
-  - [Validation JSON 合約](#validation-json-合約)
-- [CI、打包與運維](#ci打包與運維)
-  - [Development/release gates](#developmentrelease-gates)
-  - [Runtime dependencies](#runtime-dependencies)
-  - [Studio inspection cache](#studio-inspection-cache)
-  - [Documentation operations](#documentation-operations)
-  - [CI 與 environment promotion](#ci-與-environment-promotion)
-- [Appendix A — schema 與 version matrix](#appendix-a-schema-與-version-matrix)
-- [Appendix B — compatibility 與 deprecated aliases](#appendix-b-compatibility-與-deprecated-aliases)
-- [Appendix C — migration notes](#appendix-c-migration-notes)
-  - [Load 獨立 evidence 配額](#load-獨立-evidence-配額)
-  - [MQ request queue 路由](#mq-request-queue-路由)
-  - [File arguments 與 case log paths](#file-arguments-與-case-log-paths)
-  - [Previous release Testdata migration](#previous-release-testdata-migration)
-  - [Execution identity format migration](#execution-identity-format-migration)
-  - [Load mix migration](#load-mix-migration)
-  - [Historical schema migration](#historical-schema-migration)
-  - [Debug schema migration](#debug-schema-migration)
-  - [Environment profile migration](#environment-profile-migration)
-  - [Load execution identity migration](#load-execution-identity-migration)
-  - [Load v1.9 readiness 與 windowed metrics](#load-v19-readiness-與-windowed-metrics)
-- [Appendix D — limits、security guarantees 與 advanced diagnostics](#appendix-d-limitssecurity-guarantees-與-advanced-diagnostics)
-  - [Limits 與預設值](#limits-與預設值)
-  - [Collector projection 與 redaction guarantees](#collector-projection-與-redaction-guarantees)
-  - [Advanced diagnostics](#advanced-diagnostics)
-## 概覽與 Product model
-
-ATT 把測試意圖與整合機制分離。測試數據以 workbook／sidecar／snapshot 版本化；Template 與 Flow 定義可重用行為；Resource 把這些行為連接到外部系統。
-
-### 產品模型
-
-```text
-Testcase
-  `-- ordered Stage
-        `-- Template
-              |-- Action
-              |     |-- file-content expression / assert / log / assign
-              |     |-- Tool
-              |     `-- DB
-              `-- Flow -> ordered Actions
-```
-
-**Testcase** 是作者編寫並正規化的 Workbook row。**Case execution** 是 Run 對該 Testcase 的一次執行；其完整 Case ID 標識 Testcase，並沿用於執行結果和 evidence。討論 Workbook data 和 authoring 時使用 *Testcase*；討論 runtime status、日誌、報表和 artifacts 時使用 *Case execution*。**Stage** 選擇 Template 並提供 stage-private data；**Template** 是可執行 scenario 邊界；**Flow** 是具有獨立 Action scope 的可重用 Template 邏輯；**Action** 是一個有序工作單元；**Resource** 是 Action 或允許的 expression call 所使用的 Tool、DBHelper、MQHelper、HTTPHelper 或 SSHHelper。
-
-### RUN 與 LOAD 執行模型
-
-RUN 單次執行功能目標或 Case selection；Debug 為診斷選項；LOAD 保留效能引擎。請參閱[統一 RUN 與排程](reference.zh/execution-modes/unified-run.md)。舊 adapter 保留專用輸入及報告：
-
-| 模式 | 主要輸入 | 重用內容 |
-|---|---|---|
-| Run | workbook Testcase 與 Stage selector | Template、Flow、Tool、DB/MQ/HTTP/SSH |
-| Debug | `att-debug/v1.2` sidecar 或 `--input` | 單一 Template、Flow 或 Tool target |
-| Load | `att-load/v1.9` scenario | 重複執行一個或多個 Template、Flow 或 Tool workload |
-
-可重用 Template/Flow 應依賴 `EXEC.INPUT`、`EXEC.VARS`、`EXEC.ACTIONS`、`META` 和 Action-local `output`。執行模式與 scheduler identity 只保留在 framework evidence，不會成為 expression data。
-
-### 五種 Resource 是同級概念
-
-Tool、DBHelper、MQHelper、HTTPHelper 和 SSHHelper 是獨立 Resource 類型。它們的配置與 lifecycle 不同，但 Action 會透過 `output.result` 發布原生 typed result，並將可選的 presentation evidence 分開保存。公開 expression 應讀取 Action result/evidence，而不是 resource 內部 connection/process state。
-
-```text
-Tool ------\
-DBHelper ---+
-MQHelper ---+--> typed operation result --> Action output
-HTTPHelper -+
-SSHHelper --/
-```
-
-### Package 邊界
-
-每個 Package 包含自己的 business files，例如 `testcase/`、`templates/`、package-local `tools/`、`testdata/` 及生成的 `output/`。所有 Package 共用 `ATT_HOME/config/` 下的 runtime configuration；受信任 schemas 由 ATT 內嵌載入。Package 不需要自己的 `config/` 或 `schemas/` 目錄。ATT 會在執行前驗證 path 與 identifier。Credential 應放在環境變數或外部 secrets 管理，不應提交到 YAML。
-
-需要逐步建立一個可工作的 package，請使用 `docs/quick-start.md`；本 Reference 其餘內容是規範性查閱文件。
-
-### 如何使用本手冊
-
-| 目標 | 文件 |
-|---|---|
-| 建立第一個 ATT package | [Quick Start](quick-start.zh.md) |
-| 理解核心 ATT model | [Product model](reference.zh/overview.md)、[Test Authoring](reference.zh/test-authoring.md)、[Actions](reference.zh/actions.md)、[Runtime and Context](reference.zh/runtime-context.md) 和 [Run mode](reference.zh/execution-modes/run.md) |
-| 配置 DB/MQ/HTTP/SSH | [Resources](reference.zh/resources/overview.md) |
-| 查閱 CLI option | [CLI Reference](reference.zh/cli.md) |
-| 診斷失敗 | [Validation and Troubleshooting](reference.zh/validation-diagnostics.md) |
-| 升級舊 package | [Migration Notes](reference.zh/appendices/migrations.md) |
-
-Reference 定義 public contract；README、Quick Start 與 examples 按特定任務說明這份 contract。每項 contract 由一個 semantic owner 定義，其他 Reference 頁面提供摘要並連結至 owner。
-
-## Test authoring
-
-### 編寫並執行 Testcase
-
-Testcase 是一個正規化 Workbook row；Run 會為每個選中的 row 建立一次 Case execution。按以下流程編寫、驗證和執行變更。
-
-1. 編輯 Workbook，並在 Sidecar 中映射欄位。
-2. 產生 Snapshot 並檢查差異。
-3. 使用 ./att.sh validate --package 驗證 package。
-4. 使用 [Debug](reference.zh/execution-modes/debug.md) 隔離 Template、Flow 或 Tool，再使用 [Run](reference.zh/execution-modes/run.md) 建立 Case execution。
-
-以下各節定義 authoring contract。公式單元格、多行表頭和 XML 序列化詳情見[進階 Workbook 與 Snapshot 細節](#進階-workbook-與-snapshot-細節)。
-
-### 區分 Testcase 與 Case execution
-
-**Testcase** 是 Sidecar mapping 和 Snapshot normalization 後由作者編寫的 Workbook row。它的完整 Case ID 格式為 `workbookId.groupId.rowCaseId`。**Case execution** 是 Run 對該 Testcase 的一次 runtime 執行，並有自己的 status 和 evidence。兩者共用 identifier，但概念不同。本頁使用 *Testcase* 表示 Workbook 內容，使用 *Case execution* 表示執行工作。
-
-### 編寫契約
-
-本頁說明正常日常工作流中的數據流轉順序。
-
-| 需求 | 使用 |
-|---|---|
-| Stage execution entry point | Template |
-| 可重用 Template logic | Flow |
-| 一個有序 operation | Action |
-| 外部能力 | Resource |
-| Testcase/Stage business input | EXEC.INPUT |
-| 跨 Action mutable state | EXEC.VARS |
-
-### Workbook
-
-#### Workbook、Sidecar 和 Snapshot 之間的關系
-
-每個 `.xlsx` Workbook 都要求有一個 YAML Sidecar 和一個生成的 XML Snapshot，它們必須具有相同的基名且位於同一目錄：
-
-```text
-testcase/payment_regression.xlsx
-testcase/payment_regression.yaml
-testcase/payment_regression.xml
-```
-
-Sidecar 將 Excel 結構映射為 ATT 概念。它負責 sheet 映射、表頭、Testcase 數據、有序 Stage 及可選報告列標簽；timeout/retry 不屬於 Workbook 配置。
-
-```yaml
-schemaVersion: att-sidecar/v2.2
-id: paymentRegression
-excel:
-  sheet: payment=支付測試案例集, batch=批量測試案例集
-  headerRows: 2
-  caseId: 案例編號
-  tags: 標籤
-  dataColumns: caseName=案例名稱, amount=金額, expected=預期結果(yaml)
-stages:
-  - key: invoke
-    template: 執行模板
-    dataColumns: channel=渠道, options=執行參數(yaml)
-    required: true
-    runWhen: normal
-    onFailure: stop
-```
-
-根 `id` 是必需的，並且必須在整個包中唯一。`excel.sheet` 可以接受一個 sheet 名稱，或以逗號分隔的 `groupId=sheetName` 條目。如果只給出一個 sheet 且沒有 group ID，ATT 會使用 `default`。完整 Case ID 的形式始終是 `workbookId.groupId.rowCaseId`，並且必須在整個包中唯一。
-
-在修改 Excel 後，執行 `./att.sh snapshot --suite testcase/payment_regression.xlsx`。生成的 `payment_regression.xml` 使用模式 `att-testcases/v2.4`，並僅存儲歸一化後的 Sidecar 映射語義。它保留 group、Case、標簽、map/list 和 Stage 順序，使用顯式值類型，並排除樣式和無關 Workbook 內容。請審查並提交生成的 XML；不要手工修改。
-
-普通 `run` 和每一種 `validate` 模式都會保持只讀，如果 XML 缺失、無效、非規範或過期，則會在輸出創建前失敗。`run --update-snapshot` 會顯式允許 ATT 在應用相同驗證與校驗規則前，僅為選中的完整 Workbook 刷新已更改的 Snapshot。它不會寫入部分 Case/標簽 Snapshot，不會在更新期間調用 Tool，拒絕 Snapshot 符號鏈接，並且當與 `--dry-run` 組合使用時仍會執行授權更新。字節內容完全相同的 Snapshot 不會被重寫。
-
-#### 映射數據列
-
-`dataColumns` 可以接受：
-
-```text
-ColumnName
-alias=ColumnName
-ColumnName(yaml)
-alias=ColumnName(yaml)
-```
-
-普通列作為字符串進入 Context。`(yaml)` 列則會把顯示的單元格值解析為 YAML 標量、列表或映射。
-
-雙引號可保護逗號、等號和括號：
-
-```yaml
-dataColumns: amount=金額, note="備註,補充", formula="規則=值", payload="請求(yaml)"(yaml)
-```
-
-最後的 `(yaml)` 是 ATT 的解析標記。在最後一個例子中，物理 Excel 表頭名是 `請求(yaml)`。
-
-#### 空白值
-
-`N/A`、`NA`、`NULL`、`NONE`、空單元格和僅包含空白字符的值都會歸一化為空白。普通空白數據值會變為空字符串。空白 `(yaml)` 單元格則保持為空白，不進行解析。
-
-必需 Stage 選擇器會拒絕空白值。可選 Stage 如果選擇器為空白，則跳過。
-
-#### Workbook / Sidecar
-
-| 對象 | 允許屬性 | 必填/約束 |
-|---|---|---|
-| 根對象 | `schemaVersion`、`id`、`excel`、`stages`、`report`、`x-*` | `schemaVersion`、包內唯一 `id`、`excel`、非空 `stages` 必需 |
-| `excel` | `sheet`、`headerRows`、`caseId`、`tags`、`dataColumns` | `sheet`、`caseId`、`tags` 必需；`headerRows >= 1` |
-| `stages[]` | `key`、`template`、`dataColumns`、`required`、`runWhen`、`onFailure` | `key`/`template` 必需；`key` 不能含點號 |
-| `report` | `columns` | 值為字符串 |
-
-只有 Sidecar 根對象允許 `x-*`；`excel`、stages 和 Sidecar `report` 拒絕擴展和其他未知字段。Sidecar 不能覆蓋 timeout、retry、Tool、Template 根、環境或輸出根。
-
-### Stage
-
-每個 Sidecar Stage 都有一個不含點號的 `key`，以及一個命名物理 Excel 選擇器列的 `template` 字段。選擇器單元格可以包含符號 Template 名、完整相對 Template 路徑，或 YAML 映射：
-
-| 單元格值 | 含義 |
-|---|---|
-| `PAYMENT_INVOKE` | 符號名稱簡寫 |
-| `payment/local/CT001` | 相對 `templates.root` 的完整路徑簡寫 |
-| `name: PAYMENT_INVOKE` | 明確的符號名稱映射 |
-| `name: PAYMENT_INVOKE` 加其他鍵 | Template 選擇 + Stage 私有行數據 |
-
-ATT 會先將 `name` 作為全局唯一的符號名解析。只有在沒有符號名匹配時，才會嘗試完整相對 Template 路徑。絕對路徑、部分路徑、以及逃逸出 `templates.root` 的路徑都是非法的。
-
-所有選擇器映射鍵（包括 `name`）都會復制到 Stage Context 中。`stages[].dataColumns` 會增加更多 Stage 私有值。選擇器映射與 Stage 數據列之間如果出現重復鍵，則報錯。
-
-
-Stage 的 `required`、`runWhen` 與 `onFailure` 規則見 [Reliability](reference.zh/reliability-execution-control.md)。
-
-### Template
-
-只有直接包含 template.yaml 的目錄纔是可呼叫 Template。ATT 使用 att-template/v3.6。每個 Template 都需要非空且有序的 actions map，以及 description。
-
-每個 Action 依類型使用不同契約。`&{templates/payment/request.xml}` 這類 file-content expression 會將 exact UTF-8 檔案內容作為 String 回傳，不會建立檔案。Tool/DB/HTTP/MQ/SSH action 發布原生型別化 operation result。Log 將 typed value 格式化為人類可讀內容。Assign 將值發布至 EXEC.VARS；Flow 在巢狀 Action scope 執行。
-
-完整欄位、範例、typed result/evidence model、HTTP/MQ/SSH boundary 與 migration guidance，請參閱[Action 與型別化值](reference.zh/actions.md)。[Expressions and Built-ins](reference.zh/expressions.md) 定義共用 expression language；[Load](reference.zh/execution-modes/load.md) 定義 ID initialization scope。
-
-### Flow
-
-Flow 是可重用的 Template logic，使用 `att-flow/v3.6`，並由 `flow.yaml` 定義。必填欄位為 `schemaVersion`、versioned canonical `id`（例如 `common.payment.v1`）、`name`、`description` 及非空有序 `actions` map。Template 的 Flow Action 以 `use: common.payment.v1` 呼叫它。每次 invocation 建立新的 `EXEC.ACTIONS` scope；回傳後恢復 caller scope。`META.FLOW` 只在 invocation 期間存在。[Actions](reference.zh/actions.md) 定義 Flow result 與 Assign behavior；[Context](reference.zh/runtime-context.md) 定義 lifetime。
-
-### Authoring lifecycle
-
-更新 Workbook 後產生 Snapshot，檢視並提交差異；編輯 Sidecar、Template、Flow 或 Resource 後執行 `./att.sh validate --package`。用 [Debug](reference.zh/execution-modes/debug.md) 隔離檢查，再以 [Run](reference.zh/execution-modes/run.md) 從 Testcase 建立 Case execution。循序建立第一個 package 請使用 [Quick Start](quick-start.zh.md)。
-
-### Test data ownership
-
-Workbook/Sidecar/Snapshot 定義 Testcase data；Testcase 與 Stage 的 business input 進入 `EXEC.INPUT`。[Context](reference.zh/runtime-context.md) 定義 scope 與 lifetime；Run 會把每個選中的 Testcase 轉為 Case execution。Environment selection 由 [Configuration](reference.zh/configuration.md) 定義。
-
-### Testdata registry 與 input mapping
-
-可用 `att-testdata/v1.0` descriptor 儲存可重用 records；只在 Case、Stage、Debug `inputs` 或 Load workload `inputs` mapping 中引用。完整 `@{id}` 會保留 record 的原生 map/list/scalar 型別；`@{id.path}` 可讀取巢狀值，也支援數字 list index。內嵌參照（例如 `"ORD-@{accounts.id}"`）會產生文字，因此所選 record 的欄位必須是 scalar。Mapping 中的 `${...}` 只能讀取該 mapping 解析前已初始化的 Context root。允許的 root 依 mapping 階段而異，並會在 execution 開始前驗證（Load 則在 scheduler 啟動前驗證）：
-
-- Run Case/Stage mapping 可讀取 `EXEC.ID`、`EXEC.RUN_ID`、`EXEC.STARTED_AT`、`EXEC.RUN_STARTED_AT`、`EXEC.OUTPUT_DIR`，以及 `META.SOURCE` 或 `META.TARGET`。
-- Debug `inputs` 可讀取相同的 execution root 與 metadata，另加 `META.TEMPLATE`。
-- Load workload `inputs` 可讀取 `EXEC.RUN_ID`、`EXEC.STARTED_AT`、`EXEC.RUN_STARTED_AT`、已初始化的 `EXEC.LOAD` identity fields，以及 `META.SOURCE`、`META.TARGET` 或 `META.TEMPLATE`。`EXEC.ID` 與 `EXEC.OUTPUT_DIR` 只會在 input 解析後初始化。Arrival-rate workload 不提供 `EXEC.LOAD.USER_ID`；若 mapping 要同時支援兩種模型，請使用 optional path `${EXEC.LOAD.USER_ID?}`。
-
-所有 mode 都拒絕引用 `EXEC.INPUT`（正在建立的值）、`EXEC.VARS`、`EXEC.ACTIONS`、Action `output` 及 invocation-scoped helper metadata。V1 mapping grammar 會評估 literal、selected-record `@{...}` reference 及 `${...}` Context reference；不會評估 built-in call。`#{...}`、`&{...}` 和 `%{...}` 都不是 input-mapping expression。
-
-~~~yaml
-schemaVersion: att-testdata/v1.0
-id: accounts
-records:
-  - {id: "A-100", tier: gold}
-  - {id: "A-200", tier: silver}
-selection: {strategy: sequential, exhaustion: recycle}
-~~~
-
-Generated records 為 virtual 並可按 index 存取；ATT 只物化被選中的 record。Inclusive integer range 上限為 1,000,000 筆，且 `%{seq}` 是唯一支援的 generated-record substitution：
-
-~~~yaml
-schemaVersion: att-testdata/v1.0
-id: generatedAccounts
-records:
-  generate:
-    seq: {from: 100, to: 999999, format: "%06d"}
-  record: {id: "A-%{seq}", amount: 42}
-selection: {strategy: roundRobin, exhaustion: stop}
-~~~
-
-[Package Manifest](reference.zh/package-manifest.md) 宣告 Package Testdata registry，以及可選的 Environment replacement lists。Load scenario 可在頂層宣告本地 `testdata` imports；同 ID 會在該次 Load 完整取代 environment descriptor。單一 layer 內的重複 ID 會報錯。一般 Run/Debug 只延遲啟用實際引用的 ID；`validate --package` 會檢查全部 Manifest descriptor layers。Template、Flow 與 Tool 定義只能透過 `EXEC.INPUT` 取得已解析資料，不可直接寫 `@{...}` 或 `%{...}`。詳見[Environment 與 Test Data](reference.zh/configuration.md)、[Load](reference.zh/execution-modes/load.md) 及維護者的 [testdata design](system-design/testdata.zh.md)。
-
-### 進階 Workbook 與 Snapshot 細節
-
-#### 安全地正規化 XML 文字
-
-包含 LF 或 XML 特殊字符 `&`、`<`、`>` 的字符串值會使用 CDATA；文字 `]]>` 會被拆分成相鄰 CDATA 段，並在解析時精確重建。LF 前的空格或製表符會使用 `&#32;`/`&#9;` 插入兩個 CDATA 段之間，從而保留值而不觸發 Git 行尾空白警告。請審查並提交該 XML；不要手工修改它。
-
-#### 公式、日期、百分比和科學記數法單元格
-
-V2.4 會拒絕在配置的 Case ID、標簽、Case 數據、Stage 選擇器和 Stage 數據列中使用公式單元格。公式定義與緩存/顯示結果可能不一致，因此不能用於生成可信的語義 Snapshot。請在 Excel 中重新計算後將結果粘貼為字面值，或者在專門的 ATT 步驟中進行計算。
-
-與配置 Testcase 列相交且位於 `excel.headerRows` 以下的合並區域也會被拒絕。完全位於配置表頭區域內的合並展示單元格則允許。
-
-對於非公式單元格，ATT 導入顯示文本。其精確表示遵循 Workbook 單元格格式和運行時區域設置：
-
-| Excel 值與格式 | Context 值 |
-|---|---|
-| `45292` 格式化為 `yyyy-mm-dd` | `2024-01-01` |
-| `0.125` 格式化為 `0.0%` | `12.5%` |
-| `123000` 格式化為 `0.00E+00` | `1.23E+05` |
-| `000123` 以文本形式存儲/格式化 | `000123` |
-
-普通列仍然是字符串。`(yaml)` 列可能將顯示文本轉換為其他 YAML 類型。對於日期、百分比、科學計數、賬號或代碼這類文本，應該使用引號把 YAML 標量包起來，以便保持為字符串。
-
-#### 多行表頭
-
-`headerRows: 2` 表示第 1–2 行是表頭，數據從第 3 行開始。ATT 會掃描每個物理列從上到下，使用最後一個非空且已去除首尾空白的表頭單元格：
-
-```text
-第 1 行：基础数据 |           | 执行 |
-第 2 行：Case ID    | Case name | Template  | Parameters
-有效值：Case ID, Case name, Template, Parameters
-```
-
-ATT 不會拼接父子標簽。表頭匹配會移除空格、製表符、換行符、NBSP 以及其他 Unicode 空白字符；匹配其餘部分仍區分大小寫。例如，`案例 編號`、`案例\n編號`、`案例編號` 會被視為同一列。每個有效表頭在歸一化後必須唯一，因此僅因空白差異而不同的兩個物理表頭會被認為是重復表頭錯誤。Testcase 加載和結果 Workbook 寫回使用相同的投影邏輯；結果列如果原本不存在，則會寫入最終表頭行。
-
-## Actions 與 typed values
-
-本頁定義 ATT 現行 Action 契約。Template 使用 att-template/v3.6。每個完成的 Action 都會在 output.result 發布邏輯型別化值；Action 不使用共用的 result.format/path/overwrite 物件。Resource 配置請從[Resources](reference.zh/resources/overview.md)開始查閱。
-
-### Action 類型
-
-| 類型 | 必填欄位 | 結果與行為 |
-|---|---|---|
-| tool | call | 呼叫已配置 Tool、built-in 或 helper，保留原生型別化結果；DB query/scalar/update 也是普通 Tool call。 |
-| assert | assert | 評估布林條件並記錄 PASS 或 FAIL。expected、actual 是可選診斷值。 |
-| log | message 或 value | 將型別化值格式化後寫入 Case 日誌。欄位為 message、value、format。 |
-| assign | name、expression | 將 expression 的型別化結果發布至 EXEC.VARS。 |
-| flow | use | 在巢狀 Action scope 執行已註冊 Flow，返回時還原 caller scope。 |
-
-Actions 按 YAML 順序執行。依類型允許時，也可定義 id、description、onFailure、runWhen。Action ID 在 scope 內必須唯一。類型不支援的欄位會在 validation 失敗。共用 Action result、Log file 與 Log fields 不屬於現行契約。
-
-關於以小寫 `x-` 在 validation 或 execution 前停用 ATT 擁有的 Action 字段/keyed entries，以及它與 `runWhen: false` 的差別，請見[Configuration](reference.zh/configuration.md#使用-x-忽略或停用-att-配置項)。
-
-### 區分邏輯值與表示方式
-
-ATT 將 operation 的邏輯結果與人類可讀或 wire representation 分開：
-
-| Boundary | 欄位/值 | 用途 |
-|---|---|---|
-| Command Tool stdout | stdoutFormat | 將外部 stdout 解析為型別化結果。 |
-| HTTP/MQ response | responseFormat | 將外部 response bytes 解析為型別化結果。 |
-| File-content expression | `String` | 讀取安全的 UTF-8 package file，並在 expression evaluation 後保留其字元。 |
-| 透過 HTTP/MQ 傳送抽象 Map/List | requestFormat | 在 outbound boundary 序列化該值。 |
-| Log 或 resource evidence | format / evidence.output.format | 產生人類可讀表示。 |
-
-DB result 本身已是型別化值。Tool、Action、Template、Flow 和 expression results 在 ATT 中傳遞時均保留型別。
-
-DB query、scalar、update operation 在普通 `type: tool` Action 內使用 `db.<helper>.query(...)`、`db.<helper>.scalar(...)`、`db.<helper>.update(...)`。DB call 接受一個 String `sql`，以及 `params` 或 `parameters` 其中一種；`sql=&{package-relative-file.sql}` 可提供 package SQL 內容。歷史 `type: db` Action 只由 archived schema 保留。
-
-### File-content expression 回傳 string
-
-歷史 Render Action 的現行替代方式是 typed file-content value expression `&{path}`。它一定回傳一個 `String`，不會推斷 document format、parse 副檔名、展開 glob 或建立輸出檔：
-
-~~~yaml
-requestText:
-  type: assign
-  name: requestText
-  expression: "&{templates/payment/payload/request.xml}"
-~~~
-
-`${...}` 仍然是 Context reference，`#{...}` 仍然是 expression/call，`&{...}` 是 static、one-file locator；v1 沒有 glob 或 dynamic locator。Locator 相對 canonical ATT package root。`./` 或 `../` descriptor-relative path 只有在 canonical target 仍在該 root 內才允許。Absolute path、missing file、directory、symlink escape、非 UTF-8 bytes、前後空白和 glob syntax 都會在 validation 失敗。
-
-普通 UTF-8 file 會原樣回傳。如果 file 包含 `${...}` 或 `#{...}`，ATT 只 compile 一次這些 node，並在每次 execution 評估；compiled plan immutable，dynamic value 不會被當成第二份 template 重新 parse。Run 和 Debug 會重用 plan，直到 file fingerprint 改變。Load 會在 scheduling 前 validation 並 capture selected file identity、content 和 compiled dependency closure，因此 active iteration 看到穩定 snapshot。
-
-若要由後續 Action 重用 String，使用 Assign：
-
-~~~yaml
-requestText:
-  type: assign
-  name: requestText
-  expression: "&{templates/payment/payload/request.xml}"
-
-sendRequest:
-  type: tool
-  call: "#{http.payment.post(body=${EXEC.VARS.requestText})}"
-~~~
-
-HTTP/MQ 請將 String 直接傳給 body/payload。Resource 使用其配置的 charset/CCSID 編碼原文；Content-Type 與 MQ transport metadata 仍由 resource 管理。`&{...}` 可用於 Tool/Helper call argument、Assign expression、Log value 和其他 typed value 位置。
-
-requestFormat 僅供 Map 或 List 等抽象結構化值使用。此類 body 必須明確指定格式，例如 requestFormat=json。String 與 requestFormat 同時出現會失敗，確保 file-content result 不會被靜默 parse/serialize。HTTP、MQ、SSH Resource call 會將 file-content content 作為 String value 消費，不會解析 local file-path argument。
-
-### Tool、DB 與 Flow 結果
-
-Command-backed Tool 在 Tool descriptor 宣告 stdoutFormat：
-
-~~~yaml
-tools:
-  getOrder:
-    command: [./get-order.sh]
-    stdoutFormat: json
-~~~
-
-stdoutFormat 是 ingress parser；stdout 只解析一次成為 output.result，並非輸出序列化設定。Call-backed Tool 及 DB/HTTP/MQ/SSH operation 保留 native implementation 回傳的型別。
-
-DB action 使用 db 及 query 或 update 其中一個區塊。SQL、bind parameters、transaction controls 和 DB evidence 依 DB action 與 DBHelper 契約處理。
-
-Flow action 使用 canonical Flow ID 的 use。Flow 在新的 EXEC.ACTIONS scope 執行，返回時將結果/evidence 發布給 caller。META.FLOW 只在該次 invocation 執行期間存在。
-
-### Tool Evidence collector
-
-Tool Action 可定義第一級 `evidence` collector，用來在 Action assertion 前收集診斷資料。執行順序是：
-
-```text
-primary Tool call
-    -> typed primary output.result
-    -> evidence collector call(s)
-    -> Action assertion
-    -> PASS / FAIL / ERROR
-```
-
-Collector 是診斷 operation，不是替代 Action。每個 collector 有自己的型別化 result，不會取代或修改 primary `output.result`：
-
-```yaml
-callPayment:
-  type: tool
-  call: >-
-    #{mq.payment.request(
-      payload=${EXEC.VARS.requestText},
-      responseFormat='xml'
-    )}
-  evidence:
-    appLog:
-      call: >-
-        #{ssh.app.execute(
-          command='grep "${EXEC.INPUT.txnId}" /app/log/payment.log | tail -100'
-        )}
-      timeoutMs: 10000
-      onFailure: continue
-  assert: >-
-    ${output.result.replyReceived} == true
-```
-
-包含 assertion 在內，Action active 時可使用：
-
-```text
-${output.result}
-${output.evidence.collectors.<collectorId>.result}
-${output.evidence.collectors.<collectorId>.status}
-```
-
-Action 發布後，對應值位於 `EXEC.ACTIONS`：
-
-```text
-${EXEC.ACTIONS.callPayment.output.result}
-${EXEC.ACTIONS.callPayment.output.evidence.collectors.appLog.result}
-${EXEC.ACTIONS.callPayment.output.evidence.collectors.appLog.status}
-```
-
-Public shape 會將 primary resource evidence 與 collector evidence 分開：
-
-```text
-output
-├── result                         # primary Tool logical result
-├── evidence
-│   ├── <resource-kind>            # primary operation evidence
-│   └── collectors
-│       └── <collectorId>
-│           ├── result             # typed collector result
-│           ├── status
-│           ├── invocationId
-│           └── durationMs
-└── attempts
-    └── [n]
-        └── evidence.collectors.<collectorId>.result/status
-```
-
-Tool retry 時，每個 primary attempt 都會在該 attempt assertion 前執行 collector。Top-level `output.evidence.collectors.<id>` 是最後／勝出的 attempt；`output.attempts[n].evidence.collectors.<id>` 保留每個 attempt，包括較早的 failure。發布後的歷史路徑是 `${EXEC.ACTIONS.<actionId>.output.attempts[0].evidence.collectors.<id>.result}`。
-
-`call` 必填。`timeoutMs` 與 primary Tool timeout 獨立。應用程式 log 的一般診斷模式使用 `onFailure: continue`，避免收集 log 失敗掩蓋原本的 business 或 assertion failure；`stop` 則令 collector failure 成為 Action error。Collector 的 status 與 diagnostic 仍可觀察，且 collector failure 不會改變 primary logical result。若資料是後續 assertion 要使用的正常 business/test value，應使用普通 Tool/Log/Assign Action，而非 evidence collector。
-
-Collector result 遵守一般 typed-result 規則。放在 evidence 下不代表會轉成 String；Map、List 和 file-content `String` 均保留型別。在 Load 中，明確要求的 collector execution 與 helper `evidence.output` serialization 是兩件事；resource-output 格式化仍由 Load evidence policy 控制，不會靜默取代或刪除 author-requested collector。
-
-### Log：將型別化值轉成人類可讀日誌
-
-Log 是 presentation Action，因此有自己的 format 欄位：
-
-~~~yaml
-logOrder:
-  type: log
-  message: "Order response"
-  value: "${EXEC.ACTIONS.callOrder.output.result}"
-  format: yaml
-~~~
-
-Log 是一般 Case-log entry，沒有 user-authored severity；現行 v3.6 契約移除 `level`，migration 時請刪除該欄位。歷史 v3.4/v3.5 Template／Flow descriptor 為 compatibility 仍接受其 schema 定義的 Log level。Internal diagnostic severity 維持獨立。message 或 value 至少要有一項。message 以文字求值。value 可接受任意型別化值，包括巢狀 map/list。完整的 ${...} 和 #{...} expression 保留原始型別；map/list 子節點會遞迴求值，不會將數字、布林、null 或巢狀值轉成字串。format 支援 text、json、yaml、xml、sqlplus，只控制寫入 Case 日誌的字串。指定 format 時必須提供 value。
-
-同時提供 message 和 value 時，Log 輸出 message、換行，再輸出格式化 value。output.result 是最終字串。File-content String 會原樣輸出；Log 不會推斷或附加 document format，也不會讀取檔案或使用 fields map。需要結構化日誌時，將 typed map/list 放到 value。
-
-### Expressions 與變數 scope
-
-Action expression 使用一般 ATT expression engine。完整 ${...} 或 #{...} expression 保留結果型別；expression 放在一般字串內才會成為 String。請參閱[Expressions and Built-ins](reference.zh/expressions.md)。
-
-assign 會將 typed value 發布至 EXEC.VARS.<name> 一次。name 必須符合 [A-Za-z_][A-Za-z0-9_]*，且在 Case 中唯一。一個 Stage 指派的值可供後續 Stage 使用。Action 執行期間可讀取 output.*，發布後可讀取 EXEC.ACTIONS.<id>.output.*。Flow 有暫時 Action namespace；若 caller 在 Flow 返回後仍需要該值，請發布到 EXEC.VARS。
-
-### Resource output Evidence
-
-Resource evidence 與邏輯 result 分離。Helper 可設定可選的 evidence.output presentation policy：
-
-~~~yaml
-evidence:
-  output:
-    format: json
-    maxChars: 10000
-~~~
-
-此設定會在 operation metadata 旁加入有長度上限的人類可讀 Snapshot，不會改變 output.result 或 response parsing。Load 的 evidence.resources.output 可設 inherit（預設）或 none。none 會略過 resource-output 格式化與檔案物化。Metrics-only iteration 不建立 execution 目錄。Iteration evidence 被保留後，符合條件的 resource output 才會延遲格式化至該 workspace。
-
-### Action output 與 Evidence path
-
-| Path | 意義與可用時機 |
-|---|---|
-| `output.result` | Action active（包括 assertion）期間的 primary typed result。 |
-| `output.evidence.collectors.<id>.result` | Active Tool evidence collector 的 typed result。 |
-| `output.evidence.collectors.<id>.status` | Collector 的 `PASS`／`ERROR` status。 |
-| `output.evidence.collectors.<id>.error` | Collector 失敗時的 bounded failure summary；有可用訊息時包含非空 `message`。 |
-| `output.evidence.collectors.<id>.evidence` | 保留 bounded/redacted 的 underlying Tool/resource evidence，包括 executor 提供的 resource identity 與 native failure fields。 |
-| `EXEC.ACTIONS.<actionId>.output.result` | Action 完成後發布的 primary typed result。 |
-| `EXEC.ACTIONS.<actionId>.output.evidence.collectors.<id>.result` | 發布後最後／勝出的 collector result。 |
-| `EXEC.ACTIONS.<actionId>.output.evidence.collectors.<id>.status` | 發布後最後／勝出的 collector status。 |
-| `EXEC.ACTIONS.<actionId>.output.evidence.collectors.<id>.error/evidence` | 發布後的 collector failure summary 與保留的 operation evidence。 |
-| `EXEC.ACTIONS.<actionId>.output.attempts[n].evidence.collectors.<id>.result/status` | 指定 retry attempt 的 collector result/status；後續成功後仍保留較早 attempt。 |
-| `EXEC.ACTIONS.<actionId>.output.attempts[n].evidence.collectors.<id>.error/evidence` | 該 collector attempt 的 failure summary 與 underlying evidence。 |
-
-String、Number、Boolean、null、Map、List 等值跨越 Action/Template/Flow boundary 時都保留原型別。
-
-### 共用 Retry 與 boolean condition
-
-Tool Action（包括可重試的 DB query/scalar call）共用 `retry` 契約。`maxAttempts`（2–10）、`intervalMs`（0–3600000）及非空 `retryOn`（ASSERTION/TIMEOUT）仍為必填；`when` 是可選的非空 Boolean expression String。Mutating DB update 及 SSH transfer 的既有 retry 限制維持不變。
-
-~~~yaml
-retry:
-  maxAttempts: 3
-  intervalMs: 1000
-  retryOn: [TIMEOUT]
-  when: "#{${output.evidence.mq.invocations[0].reasonCode?} != 2033}"
-~~~
-
-每個 attempt 先執行 operation、發布當前 result/evidence/diagnostic、評估可用 assertion，然後分類 retry category。只有 `retryOn` 符合且尚有 attempt 可執行時，才評估 `when`。未配置時維持一般 retry 行為；true 才等待 interval 並重試，false 保留當前 TIMEOUT/FAIL 且不重試。沒有符合 category、成功或達到 maxAttempts 時均不評估 gate。
-
-`when` 可讀取 `output.status`、`output.result`、`output.evidence`、`output.diagnostic`、從 1 開始的 `output.attempt`，以及當前 scope 允許的 EXEC/META path。Top-level output 在每次 attempt 開始時清除，不會讀到前次的 result/evidence。歷史紀錄保留於 `output.attempts[n]`；`retryDecision` 記錄 category、candidate、whenEvaluated、whenResult（有評估時）、allowed 與 reason（例如 WHEN_FALSE、MAX_ATTEMPTS）。
-
-Condition 使用正常 `${...}`/`#{...}` 型別規則，必須回傳 Boolean；字串 'false' 或數字不會轉成 Boolean。`when: "#{false}"` 可停止 retry。Strict missing path 與 expression error 使用一般 diagnostic，定位至 retry.when 並停止重試。Pure deterministic built-in 可使用；Tool/DB/MQ/HTTP/SSH、file/file-content、sequence、random 與 current-time operation 均禁止。可確定的 syntax/type error 在 validation 時拒絕；runtime result 的型別與 missing path 在 gate 評估時檢查。
-
-TIMEOUT 是 canonical Action outcome；suite/report aggregate 的 operation failure 仍為 ERROR。對 MQ request、HTTP POST 等非冪等操作，作者必須決定是否可重播。未加 when 的 TIMEOUT retry 可能重複 business transaction；ATT 不會默默抑制 MQ retry。請參閱 [MQHelper 範例](reference.zh/resources/mqhelper.md)。
-
-## Runtime 與 Context model
-
-Run、Debug、Load 共用 canonical EXEC/META expression model。EXEC 透過 framework lifecycle 和明確的 input/variable/action publication 更新。META 是 curated、immutable、secret-safe 的描述資訊。
-
-Standalone Debug bootstrap value 會映射到這些 canonical root：`inputs` 寫入 `EXEC.INPUT`，Template/Flow 的 `vars` 會在 target 開始前 seed `EXEC.VARS`。v1.1 schema、typed literal 規則及受保護的 framework roots 請參考 [Standalone Debug](reference.zh/execution-modes/debug.md)。
-
-### Identity roots
-
-| 路徑 | 意義與型別 | 可用時機 |
-|---|---|---|
-| EXEC.ID | 目前 Case、Debug execution 或 Load iteration ID；String。 | execution initialization 後；Load 在 business action 前產生。 |
-| EXEC.RUN_ID | 外層 ATT Run ID；String。 | 三種模式均可用，同一 run 的 Cases/iterations 共用。 |
-| EXEC.STARTED_AT | 目前 execution 開始時間；ISO-8601 String。 | 三種模式均可用。 |
-| EXEC.RUN_STARTED_AT | 外層 run 開始時間；ISO-8601 String。 | 三種模式均可用。 |
-| EXEC.OUTPUT_DIR | execution workspace 絕對路徑。 | 初始化後可用；Load 中可能先有 planned path，尚未實際建立。 |
-| EXEC.INPUT | Case/stage、Debug sidecar 或 Load workload input map。 | 三種模式均可用；Stage input 暫時 overlay Case input。 |
-| EXEC.VARS | assign 發布的型別化值。 | 三種模式均可用；指派前為空。 |
-| EXEC.ACTIONS | active Template/Flow scope 已完成的 Actions。 | 發布 Action 後可用；Flow 有巢狀 scope。 |
-| EXEC.LOAD.MODEL | closed 或 arrivalRate。 | 僅 Load；ID 產生前可用。 |
-| EXEC.LOAD.WORKLOAD_ID | 配置的 workload ID。 | 僅 Load；ID 產生前可用。 |
-| EXEC.LOAD.USER_ID | 穩定 virtual user ID。 | 僅 closed Load；arrival-rate 缺席。 |
-| EXEC.LOAD.ITERATION | 數值 iteration 序號。 | 僅 Load；ID 產生前可用。 |
-| EXEC.LOAD.PHASE | WARMUP、RAMP_UP、STEADY 或 RAMP_DOWN。 | 僅 Load；ID 產生前可用。 |
-
-EXEC.LOAD 只公開穩定 identity。Scheduler counter、queue state 與 timing diagnostics 留在 evidence-only DIAG.load，不能作為 expression root。
-
-### META 欄位清單與生命週期
-
-公開 META root 包含 `SOURCE`、`TARGET`、`TEMPLATE`、`FLOW`、`TOOL`、`DBHELPER`、`MQHELPER`、`HTTPHELPER` 和 `SSHHELPER`。`META.PACKAGE_ROOT` 和 `CASE.outputDirectory` 已從 author Context 移除。讀取 package content 請使用 `&{logical/package/resource}`；execution output 請使用 `EXEC.OUTPUT_DIR`。舊有 `META.PROJECT.id` 與 `META.PROJECT.root` 已移除，不提供相容 alias。Package resource 使用 package-relative logical name；只有 `EXEC.OUTPUT_DIR` 公開 execution path。META 只包含描述欄位；元件在目前 mode/scope 尚未 active 時，相應路徑可能不存在。
-
-| 公開路徑 | 意義、type 與範例 | Mode 與可用時機 | Scope 與缺席時機 |
-|---|---|---|---|
-| META.SOURCE.type | Source 類型；String：`testcase`、`debug` 或 `load`。 | Run、Debug、Load。 | Execution-wide。 |
-| META.SOURCE.path | Package-relative logical source name；String，例如 `testcase/payment.xlsx`、`debug.yaml` 或 `load/payment.yaml`。 | Run、Debug、Load，source file 存在時。 | Execution-wide；memory source 可缺席。 |
-| META.SOURCE.caseId | Canonical TestCase 或 synthetic Debug Case ID；String，例如 `payment.default.P001`。 | Run、Debug。 | Execution-wide；Load 缺席。 |
-| META.SOURCE.workbookId | Workbook identifier；String，例如 `payment`。 | Run。 | Execution-wide；非 workbook Case 缺席。 |
-| META.SOURCE.groupId | Workbook group identifier；String，例如 `default`。 | Run。 | Execution-wide；非 workbook Case 缺席。 |
-| META.SOURCE.rowCaseId | Workbook row 的 Case ID；String，例如 `P001`。 | Run。 | Execution-wide；非 workbook Case 缺席。 |
-| META.SOURCE.sheet | Workbook sheet 名稱；String，例如 `Payment`。 | Run，adapter 有提供時。 | Execution-wide；Debug/Load 或無值時缺席。 |
-| META.SOURCE.row | Workbook 由 1 起始的 row number；Number，例如 `12`。 | Run，adapter 有提供時。 | Execution-wide；Debug/Load 或無值時缺席。 |
-| META.SOURCE.workbook | 可選 workbook label；有值時為 String，例如 `payment_regression.xlsx`。 | Run，adapter 有提供時。 | Execution-wide；否則缺席。 |
-| META.SOURCE.scenario | 不含副檔名的 Load scenario 名稱；String，例如 `payment-smoke`。 | Load。 | Execution-wide；非 Load 時缺席。 |
-| META.TARGET.type | 已解析 target 類型；String：`testcase`、`template`、`flow` 或 `tool`。 | Run、Debug、Load；選定 target 後。 | Execution-wide。 |
-| META.TARGET.id | 已解析 target identifier；String，例如 `PAYMENT_INVOKE` 或 `payment.flow.v1`。 | Run、Debug、Load；選定 target 後。 | Execution-wide。 |
-| META.TEMPLATE.id | Active Template 或已解析 Load execution-wrapper ID；String，例如 `PAYMENT_INVOKE`。 | Run/Debug 的 Stage 執行期間；Load 的 target resolution 後及 wrapper 執行期間。 | Component scope；解析前缺席，scope 結束後 restore/remove。Load Flow/Tool target 使用已解析的 synthetic wrapper。 |
-| META.TEMPLATE.path | Package-relative logical Template 或 execution-wrapper 目錄；String，例如 `templates/PAYMENT_INVOKE`。 | 與 META.TEMPLATE.id 相同。 | Component scope；解析前缺席，scope 結束後 restore/remove。 |
-| META.FLOW.id | Active Flow ID；String，例如 `payment.request.v1`。 | Run、Debug、Load 的 Flow invocation 期間。 | Invocation scope；進入 push、返回 restore、inactive 時缺席。 |
-| META.FLOW.invocationId | Caller Action ID；String，例如 `sendRequest`。 | 與 META.FLOW.id 相同。 | 沒有 active Flow 時缺席。 |
-| META.FLOW.depth | 由 1 開始的巢狀 Flow 深度；Number，例如 `1`。 | 與 META.FLOW.id 相同。 | 沒有 active Flow 時缺席。 |
-| META.TOOL.id | Active configured Tool 或 built-in 名稱；String，例如 `payment.queryOrder` 或 `upper`。 | Run、Debug、Load invocation 期間。 | Invocation scope；返回後不保留最後一次 Tool。 |
-| META.TOOL.type | Invocation 類型；String，例如 `tool` 或 `builtin`。 | 與 META.TOOL.id 相同。 | 外層 invocation 不存在時，返回後缺席。 |
-| META.DBHELPER.id | Logical DBHelper ID；String，例如 `orders`。 | Run、Debug、Load 的 DBHelper operation/DB Action 期間。 | Invocation scope；外層 scope 不存在時返回後缺席。 |
-| META.DBHELPER.type | Resource 類型；String，`dbhelper`。 | 與 META.DBHELPER.id 相同。 | 外層 scope 不存在時返回後缺席。 |
-| META.MQHELPER.id | Logical MQHelper ID；String，例如 `payment`。 | Run、Debug、Load 的 MQHelper operation 期間。 | Invocation scope；push/restore，返回後無外層 scope 時缺席。 |
-| META.MQHELPER.type | Resource 類型；String，`mqhelper`。 | 與 META.MQHELPER.id 相同。 | 返回後無外層 scope 時缺席。 |
-| META.HTTPHELPER.id | Logical HTTPHelper ID；String，例如 `payment`。 | Run、Debug、Load 的 HTTPHelper operation 期間。 | Invocation scope；push/restore，返回後無外層 scope 時缺席。 |
-| META.HTTPHELPER.type | Resource 類型；String，`httphelper`。 | 與 META.HTTPHELPER.id 相同。 | 返回後無外層 scope 時缺席。 |
-| META.SSHHELPER.id | Logical SSHHelper ID；String，例如 `application`。 | Run、Debug、Load 的 SSH Resource Helper operation 期間。 | Invocation scope；push/restore，返回後無外層 scope 時缺席。 |
-| META.SSHHELPER.type | Resource 類型；String，`sshhelper`。 | 與 META.SSHHELPER.id 相同。 | 返回後無外層 scope 時缺席。 |
-
-META.SSHHELPER 只公開 logical helper ID 和 resource type。SSH endpoint、user、identity file、credentials 留在 executor 內部，不會公開在 META。
-
-ATT 會遞迴過濾 password、secret、token、authorization/cookie、API key、private key 等 secret-bearing keys。Expressions 與 adapters 可讀 META，但不能修改。
-
-### Invocation 與 scope 規則
-
-進入 Template、Flow、Tool、helper invocation 時，公開該 active scope 的 metadata。巢狀呼叫會 push frame，離開時 restore 前一份 metadata。沒有 active invocation 時，其 branch 缺席。請勿依賴「最後一次呼叫」狀態。
-
-EXEC.INPUT 是 canonical input map。Stage 暫時 overlay Case input，完成後還原。EXEC.VARS 可供同一 Case 後續 Stages 共用。EXEC.ACTIONS 屬於 active Template/Flow。Action 執行期間讀 local output，完成後發布到 EXEC.ACTIONS.<id>.output。
-
-### Optional lookup 與相容性
-
-${path} 是 strict lookup。${path?} 在允許的 map/list 缺失路徑回傳 null；不會讓錯誤語法或不合法 scope access 變有效。CASE、RUN、ACTIONS alias 只在能一對一對應 canonical data 時保留。新 Template 請使用 EXEC/META。
-
-### Lifecycle 導覽
-
-Action-local `output` 與發布後的 `EXEC.ACTIONS.<id>.output` contract 見[Actions](reference.zh/actions.md)。[Debug](reference.zh/execution-modes/debug.md) 與 [Load](reference.zh/execution-modes/load.md) 分別定義 bootstrap vars、identity initialization 與可用 scope；[Results](reference.zh/results-reports-evidence.md) 定義 artifact navigation。
-
-## Expressions 與 built-ins
-
-### 統一 Expression engine
-
-ATT 的 runtime Template、Flow、Action、Tool call 共用一個 expression engine：
-
-- ${path} 讀取 Context 值，並可插入一般文字。
-- #{expression} 評估型別化 expression，支援 Context operands、built-in calls、list literals、括號、一元運算、算術、比較、like、in、null 檢查及布林邏輯。
-
-完整 expression 會保留回傳型別，例如 Number、Boolean、Map 或 List；expression 放在一般文字中會產生 String。請使用 canonical EXEC/META paths；optional lookup 在路徑尾端加問號。
-
-~~~yaml
-assert: "#{${EXEC.INPUT.amount} > 0}"
-description: "case=${META.SOURCE.caseId}; value=#{upper(${EXEC.INPUT.name})}"
-~~~
-
-依各欄位支援的形式使用 expression。File-content 內容、Action description/assert、Log message/value、assign expression 和 Tool call 使用一般 runtime model。Log value 可遞迴包含 typed expressions，詳見[Action 與型別化值](reference.zh/actions.md)。
-
-### File-content expression
-
-`&{path}` 是 file-content expression：它讀取 package resource 中一個靜態指定的 regular UTF-8 檔案，並回傳原始 String content。Bare name 從 package root 解析；明確 `./` 和 `../` locator 從引用 descriptor 的目錄解析。Resolver 會拒絕 absolute name、package escape，以及指向 package 外的 symlink。它不會推斷或解析文件格式、展開 glob 或建立 output file。Absolute path、missing file、directory、symlink escape、非 UTF-8 bytes、前後空白、glob syntax 及 dynamic locator 都會在 validation 失敗。File content 不會自動解析為 JSON、YAML 或 XML。
-
-### Argument 結果型別
-
-Argument expression 會先遞迴求值，再呼叫接收它的 function。Target argument contract 只套用在最終結果：例如 `str.substr` 先接收 `&{...}` 產生的 file String，再回傳 String，最後 outer target argument 才執行型別與 range 檢查。因此 `waitMs=#{str.substr(&{params/wait.txt}, 0, 4)}` 在結果為 integral value 時可供 numeric helper 使用；String payload 則保留所有原始字元。Scalar String 只會在數值或 Boolean parsing 時 trim，不會全域修剪 String/payload。Map/List 會保留型別；不會依副檔名或檔案內容推斷並解析結構。
-
-Package validation 會在 inputs 靜態可知時解析 literal、static file content 及明確 pure built-in，再套用與 runtime 相同的 target argument contract。Runtime-dependent expression 會檢查結構及已宣告型別，並將最終值/range 檢查留待執行；validation 絕不執行 Tool、resource 或 external call 來取得值。
-
-Standalone value 或嵌入較大 expression 時，請使用 YAML string：
-
-~~~yaml
-prepareRequest:
-  type: assign
-  name: requestText
-  expression: "&{templates/payment/payload/request.xml}"
-send:
-  type: tool
-  call: "#{http.payment.post(body=${EXEC.VARS.requestText})}"
-~~~
-
-檔案內的 `${...}` 與 `#{...}` 會在 file value 使用時編譯及求值。Run 與 Debug 會 cache compiled plan，並在 file fingerprint 改變時失效；Load 會為 scenario freeze 已驗證的 file identity、content 及 compiled plan。File output 不會再被當作新的 expression source 解析。
-
-### Testdata input mapping 語法
-
-Testdata reference 會在準備 Case/Stage、Debug 或 Load input map 時解析，不屬於一般 `${...}` / `#{...}` expression engine。使用 `@{id}` 保留所選 record 的原生型別；`@{id.object.path}` 或 `@{id.items[0]}` 可讀取巢狀值；scalar interpolation 可組合文字。同一 mapping/lifetime 中，一個 logical ID 只選一次，因此該 mapping 內對同 ID 的引用會得到同一筆 record。Interpolation 不接受 null、map 或 list。`${...}` 可讀取已初始化 Context，但不能讀取 `EXEC.INPUT`，因為 input 建構不能依賴自身。Reusable Template、Flow 和 Tool definition 不可直接包含 testdata marker；它們只會使用已解析的 `EXEC.INPUT` 值。
-
-Descriptor 和 generated record 語法見[Testdata Registry 與 Input Mapping](reference.zh/test-authoring.md)。
-
-### 操作符
-
-支持的斷言操作符有：
-
-- `==`
-- `!=`
-- `>`
-- `>=`
-- `<`
-- `<=`
-- `like`
-- `in`
-- `is null`
-- `is not null`
-- `not`
-- `and`
-- `or`
-
-`like` 是大小寫不敏感的操作符關鍵詞，但規範寫法使用小寫。它匹配完整值，並使用 SQL 風格通配符：
-
-- `%` 匹配零個或多個字符
-- `_` 匹配恰好一個字符
-- 匹配本身是大小寫敏感的
-
-### 內建函數
-
-只有作者直接撰寫的 file-expression node 才會求值。Context value、Tool result 和 file output 即使包含 `&{...}`，亦維持 literal String。檔案內的 Context path 和 call 依 enclosing Action 的一般 ordering、scope 和 resource validation 規則驗證。V1 在 Run、Debug、validation 和 Load snapshot discovery 都拒絕 file-content 內容中的巢狀 `&{...}`，包括 `#{...}` argument 內的 locator。
-
-內建函數通過 `#{...}` 調用。Canonical 名稱使用 framework-owned `str.*`、`date.*`、`file.*`、`misc.*` 與 `seq.*` package；舊 flat 名稱保留為兼容 alias。Tool group 同樣以 `group.tool` 組成 package-like 調用名；配置 Tool 不得佔用 built-in package root 或任何 canonical／legacy built-in 名稱。
-
-| 函數 | 目的 | 示例 |
-|---|---|---|
-| `seq.next` | 返回 run-scoped `Long`；可選名稱及寬度用於獨立計數或精確寬度的零填充文字 | `#{seq.next('payment', 10)}` |
-| `str.upper/lower/trim` | 大小寫與首尾空白處理 | `#{str.upper(value=${EXEC.INPUT.currency})}` |
-| `str.ltrim/rtrim` | 去除前導／尾隨空白 | `#{str.ltrim(${EXEC.INPUT.reference})}` |
-| `str.length` | 返回文本長度 | `#{str.length(value=${EXEC.INPUT.reference})}` |
-| `str.concat` | 拼接參數 | `#{str.concat(a='PAY-', b=${EXEC.INPUT.caseId})}` |
-| `str.substr/indexOf` | 截取子串／返回位置 | `#{str.substr(${EXEC.INPUT.reference}, 0, 8)}` |
-| `str.contains/startsWith/endsWith` | 測試字面包含、前綴、後綴 | `#{str.contains(${EXEC.INPUT.message}, 'SUCCESS')}` |
-| `str.replace` | 字面替換 | `#{str.replace(${EXEC.INPUT.reference}, '-', '')}` |
-| `str.lpad/rpad` | 左／右填充 | `#{str.lpad(${EXEC.INPUT.sequence}, 8, '0')}` |
-| `str.repeat` | 重復值 | `#{str.repeat(3, '9')}` |
-| `date.sysdate/systimestamp` | 返回系統日期／時間戳 | `#{date.sysdate('yyyyMMdd')}` |
-| `date.format` | 格式化 ISO 日期 | `#{date.format(${EXEC.INPUT.timestamp}, 'yyyyMMdd', 'Asia/Hong_Kong')}` |
-| `date.add` | 日期增減 | `#{date.add(${EXEC.INPUT.businessDate}, 1, 'day')}` |
-| `misc.string/number/boolean` | 類型轉換與歸一化 | `#{misc.number(value='12.50')}` |
-| `misc.coalesce/nvl` | 返回非空值或默認值 | `#{misc.nvl(${EXEC.INPUT.optional}, 'N/A')}` |
-| `misc.iif` | 從布爾值選擇兩個值之一 | `#{misc.iif(${EXEC.INPUT.enabled}, 'Y', 'N')}` |
-| `misc.randomChoice` | 從輸入中隨機選擇 | `#{misc.randomChoice('A', 'B', 'C')}` |
-
-#### `Seq.next` Run-scoped 序列
-
-`seq.next` 支援以下四種位置參數 overload（同一組參數亦可使用 `name`、`width` 具名傳入；不可混用具名與位置參數）：
-
-| 呼叫 | 計數器 | 返回值 |
-|---|---|---|
-| `#{seq.next()}` | 預設序列 | 遞增的 Java `Long` |
-| `#{seq.next('payment')}` | 名為 `payment` 的獨立序列 | 遞增的 Java `Long` |
-| `#{seq.next(10)}` | 預設序列 | Java `String`，十進位值左側補零至恰好 10 個字元 |
-| `#{seq.next('payment', 10)}` | 名為 `payment` 的序列 | Java `String`，十進位值左側補零至恰好 10 個字元 |
-
-預設序列與每個具名序列互相獨立，且各自從 1 開始。狀態由單次 ATT Run 擁有：Run 內所有 Testcase／suite 共用計數器；Debug 的單次 execution 使用新 service；Load 的所有 workload 與並行 iteration 共用計數器。每個序列計數器均為 thread-safe，在該 Run 內發出唯一且單調遞增的值；並行排程不保證哪個 VU 取得哪個值。新 Run、新 Debug execution 或新 Load run 都會重新從 1 開始。不公開 `EXEC.SEQUENCES` Context node，也沒有 reset/current API。
-
-| 模式 | 範例用法 | Scope 說明 |
-|---|---|---|
-| Testcase | 在 `assign` Action 中：`expression: "#{seq.next('payment', 10)}"` | 同一 Run 的連續 Cases 共用 `payment` 計數器。 |
-| Debug | 在 `assign` Action 中：`expression: "#{seq.next()}"` | 新的單次 Debug execution 從 1 開始。 |
-| Load | 在 target Template/Flow 的 `assign` Action 中：`expression: "#{seq.next('load-order', 10)}"` | Iterations 共用計數器；並行呼叫唯一，但不保證每個 VU 的固定分配順序。 |
-
-`width` 必須是 1 至 1000 的整數。序列名稱必須是非空白文字；只有一個位置參數時，數字代表 `width`，字串代表序列名稱。超過兩個參數、混合具名與位置參數、無效參數型別、空白名稱、小數／零／負數／超出範圍的 width 都會報錯；diagnostic 會指出 `seq.next` 及錯誤的參數數量、型別或範圍。若補零後的數值位數超過 `width`，或底層 `Long` 計數器溢位，求值會明確失敗；ATT 不會截斷序列值，也不會默默超出指定寬度。
-
-
-
-
-
-### Resource helper methods
-
-已配置的 `db.*`、`mq.*`、`ssh.*` 和 `http.*` 使用相同的 `#{...}` 語法，但它們是會存取外部系統並返回 typed result 的 resource operation，並非 pure built-in。MQ、SSH 和 HTTP call 必須是 `type: tool` Action 的主要 `call`。DB `query` 和 `scalar` 亦可用於支援的 expression 欄位；`db.update` 必須是 `type: tool` Action 的主要 call。這些操作不可用於 `retry.when`；該欄位只接受 deterministic pure built-in。以下參數均使用具名形式；省略 optional 參數時會採用 helper 配置的預設值。完整 resource/result 契約見各 helper 頁面。
-
-#### DBHelper
-
-| Method | 參數（未標 optional 即必填） | 示例 |
-|---|---|---|
-| `db.<id>.query` / `db.<id>.scalar` | `sql: String`；optional `params: List` **或** `parameters: Map<String, value>`（兩者互斥；預設沒有 bind value）。`sql` 可為 inline SQL 或返回 String 的 file-content expression。 | `#{db.orders.query(sql='select status from orders where id = :id', parameters={id: ${EXEC.INPUT.orderId}})}` |
-| `db.<id>.update` | 與 `query` 相同的參數和型別；只可作為 Tool Action 的主要 call。 | `#{db.orders.update(sql='update orders set status = ? where id = ?', params=['DONE', ${EXEC.INPUT.orderId}])}` |
-
-`query` 返回 typed rows，`scalar` 返回 scalar result，`update` 返回更新結果。SQL binding、transaction 和 result 詳情見 [DBHelper](reference.zh/resources/dbhelper.md)。
-
-#### MQHelper
-
-| Method | 參數（未標 optional 即必填） | 示例 |
-|---|---|---|
-| `mq.<id>.send` | `payload: String、byte[] 或 structured Map/List`（必填）；`queue: String` 在未配置 request queue 時必填。Optional `requestFormat: text\|json\|yaml\|xml`（Map/List 必填）、`instance: String`（選擇已配置的 physical instance）。 | `#{mq.payment.send(queue='PAYMENT.REQUEST', payload=${EXEC.VARS.requestText})}` |
-| `mq.<id>.receive` | `queue: String` 在未配置 reply queue 時必填。Optional `waitMs: Integer`（預設 10,000 ms 或 helper setting）、`correlationId: String`、`responseFormat: text\|json\|yaml\|xml`（預設 `text` 或 helper setting）、`instance: String`。 | `#{mq.payment.receive(queue='PAYMENT.REPLY', waitMs=5000, responseFormat='json')}` |
-| `mq.<id>.request` | `payload` 同上；有效的 `requestQueue` 和 `replyQueue` 必須存在（可由 helper defaults 提供）。Optional `requestFormat` 同上、`waitMs: Integer`（預設 10,000 ms 或 helper setting）、`responseFormat`（預設 `text` 或 helper setting）、`instance: String`。 | `#{mq.payment.request(requestQueue='PAYMENT.REQUEST', replyQueue='PAYMENT.REPLY', payload=${EXEC.VARS.requestText}, waitMs=5000, responseFormat='xml')}` |
-
-`requestFormat` 只用於 structured payload；String 會原樣傳送，不可與它同時使用。`waitMs` 範圍為 0–3,600,000。已配置 queue defaults 和 typed reply 詳情見 [MQHelper](reference.zh/resources/mqhelper.md)。
-
-#### SSHHelper
-
-| Method | 參數（未標 optional 即必填） | 示例 |
-|---|---|---|
-| `ssh.<id>.execute` | `command: String`；optional `stdoutFormat: text\|json\|yaml\|xml`（預設 `text`）、`timeoutMs: Integer`（預設 60,000 ms，且受 Action deadline 限制）。 | `#{ssh.application.execute(command='systemctl is-active example.service', stdoutFormat='text', timeoutMs=5000)}` |
-| `ssh.<id>.upload` | `remotePath: String`、`payload: String 或 byte[]`；optional `overwrite: Boolean`（預設 `true`）、`timeoutMs: Integer`（預設 60,000 ms）。 | `#{ssh.application.upload(remotePath='/srv/app/request.json', payload=${EXEC.VARS.requestText}, overwrite=true)}` |
-| `ssh.<id>.stat` / `ssh.<id>.mkdirs` / `ssh.<id>.delete` | `remotePath: String`；optional `timeoutMs: Integer`（預設 60,000 ms）；`delete` 另外接受 `missingOk: Boolean`（預設 `false`）。 | `#{ssh.application.stat(remotePath='/srv/app/result.json')}` |
-| `ssh.<id>.move` | `sourcePath: String`、`targetPath: String`；optional `overwrite: Boolean`（預設 `false`）、`timeoutMs: Integer`（預設 60,000 ms）。 | `#{ssh.application.move(sourcePath='/srv/app/out.json', targetPath='/srv/app/archive/out.json', overwrite=false)}` |
-
-SSH operation 只接受具名參數；path 是 remote path，upload 接受內容而非 local file path。Path 限制、返回值及 timeout/retry 行為見 [SSHHelper](reference.zh/resources/sshhelper.md)。
-
-#### HTTPHelper
-
-`http.<id>.get(...)` 和 `http.<id>.post(...)` 由 method 名稱決定 HTTP method；`http.<id>.request(...)` 另需 `method: String`（`GET`、`POST`、`PUT`、`PATCH`、`DELETE`、`HEAD` 或 `OPTIONS`）。三種 method 都接受以下 optional 具名參數：
-
-| 參數 | 型別及預設值 | 說明 |
-|---|---|---|
-| `path` | `String`，預設 `''` | 相對於已配置的 base URL；不可提供 absolute URL、query string 或 fragment。 |
-| `query` | `Map<String, value>`，optional | Iterable value 會成為重複的 query parameter。 |
-| `headers` | `Map<String, value>`，optional | 與已配置 headers 合併；value 會轉成文字。 |
-| `body` | `String`、`byte[]` 或 structured Map/List，optional | GET 和 HEAD 不接受 body。Map/List 必須提供 `requestFormat`。 |
-| `requestFormat` | `text\|json\|yaml\|xml`，optional | 只在 Map/List body 時必填；String/byte[] 原樣傳送。 |
-| `contentType` | `String`，optional | 覆蓋 request Content-Type header。 |
-| `responseFormat` | `auto\|text\|json\|yaml\|xml`，預設 helper 設定（預設為 `auto`） | `auto` 會按 response Content-Type 決定格式。 |
-| `connectTimeoutMs`、`readTimeoutMs`、`connectionRequestTimeoutMs` | `Integer` 1–3,600,000 ms，optional | 覆蓋相應 helper timeout；三者 descriptor default 依次為 5,000 ms、30,000 ms、5,000 ms。 |
-| `followRedirects` | `Boolean`，預設 helper 設定（預設為 `false`） | 最多跟隨 runtime 限制數量的 redirect。 |
-
-示例：`#{http.payment.post(path='/v1/payments', query={dryRun: true}, headers={Accept: 'application/json'}, body=${EXEC.INPUT.request}, requestFormat='json', responseFormat='json')}`。Timeout 範圍、body encoding 及 response parsing 見 [HTTPHelper](reference.zh/resources/httphelper.md)。
-
-### Expression scope 與錯誤
-
-Expression language 由本頁定義；可用 roots 與求值時機由欄位的 semantic owner 定義：[Tool command/call](reference.zh/resources/tools.md)、[Load identity 與 vars](reference.zh/execution-modes/load.md)、[Debug vars](reference.zh/execution-modes/debug.md)、[report filename](reference.zh/configuration.md)。`${path?}` 只允許缺少的 map/list path 回傳 null；語法錯誤與非法 scope 仍會失敗。Expression syntax 或缺少的必需 Context path 會提供結構化 diagnostic；見[Validation](reference.zh/validation-diagnostics.md)。
-
-已移除 presentation-only `dbText`／`misc.dbText`、`prettyPrint`／`misc.prettyPrint`／`format.pretty` 和所有 local `file.*`／legacy file alias。DB result 保持 typed；顯示時改用 Log `value: ${EXEC.ACTIONS.queryOrders.output.result}` 加 `format: sqlplus`，Map/List 則使用 `format: json` 或 `yaml`。Package content 使用 `&{...}`，並將 String 傳入 HTTP body、MQ payload 或 SSH upload payload。SSHHelper upload 只接受 content；native SSH download 已移除。ATT local output 由 framework 管理。移除的 API 會提供 migration diagnostic。
-
-### Retry condition 的生命週期
-
-`retry.when` 在當前 attempt 完成後、retryOn 符合且尚有 attempt 時才評估。`output.*` 綁定當前 result/evidence/diagnostic 及 `output.attempt`。Normal Boolean typing、strict/optional Context path 契約均適用。僅允許 deterministic pure built-in；external、file、sequence、random 及 current-time operation 禁止。詳見 [Actions retry](reference.zh/actions.md)。
-
-## RUN 與 LOAD 執行 adapter
-
-RUN 是 Case、選定 Cases 或單一 Template/Flow/Tool 的功能執行模型；Debug 是選用的診斷選項。LOAD 保留效能引擎與併發語義。驗證及遷移範例請參閱[統一 RUN 與排程](reference.zh/execution-modes/unified-run.md)。
-
-現有 Engine adapter 與輸出格式保持相容：
-
-| RUN/LOAD adapter | `EXEC.ID` | 執行單位 | 主要結果位置 |
-|---|---|---|---|
-| RUN：Case runner | canonical Case ID | selected Testcase | `output/<RunID>/` |
-| RUN：Resource runner（舊 Debug adapter） | debug ID | 單一 target invocation | `output/debug/<debugId>/` |
-| LOAD | run 內唯一的 iteration execution ID | 重複 target iterations | `output/load/<runId>/` |
-
-`EXEC.RUN_ID` 表示外層 ATT run。模式與 scheduler 資料只保存在 evidence-only `DIAG`；`EXEC.MODE`、`EXEC.LOAD` 與 `DIAG` 均不能供 expression 使用。
-
-所有 adapter 都先解析 environment、建立 canonical Context、驗證 dependency closure，再使用相同的 Template/Flow/Tool/DB/MQ/HTTP/SSH contract。Selection、scheduling 與 reporting 不會建立另一套 expression 或參數綁定語義。啟用 Debug 診斷只影響診斷事件，不會改變呼叫次數或權限。
-
-### 統一 RUN 與排程
-
-<!-- att-doc-status: current release=4.2.6 -->
-
-ATT 4.2.6 將功能性單次執行統一為 **RUN**，支援 Case、Template、Flow、Tool，以及所選 Case 批次。**Debug** 是 RUN 的診斷選項。**LOAD** 保留效能引擎、負載控制和專用報告。
-
-已發行的 Local CLI 保留其 interface-specific 相容邊界：run verb 選取 workbook Case，standalone debug 執行一個 Template、Flow 或 Tool。ATT Remote 保留舊版 Server command。此共用 RUN model 不代表 proposed vNext CLI grammar 已發行；請參閱[規劃中的 vNext page](interfaces/cli/vnext-proposed.zh.md)。
-
-#### 驗證及執行 RUN
-
-使用 ATT Studio 相同的已驗證 Server origin 和 context path，向 `POST /api/v1/drafts/run` 提交：
-
-```json
-{
-  "schemaVersion": "att-execution/v1",
-  "executionType": "run",
-  "packageId": "payments",
-  "environment": "SIT",
-  "target": {"type": "template", "id": "PAYMENT"},
-  "input": {"schemaVersion": "att-debug/v1.2", "inputs": {"amount": 100}},
-  "options": {"debug": false}
-}
-```
-
-將 `payments`、`SIT`、`PAYMENT` 換成已設定的套件值。檢閱安全預覽後，向 `POST /api/v1/jobs/run` 提交 `{"packageId":"payments","draftId":"R..."}`。工作沿用現有狀態、取消、事件、結果和 artifact 路徑。開啟頁面或切換模式不會提交工作。
-
-請求遵循 `schemas/att-execution-v1.schema.json`。未知欄位、混合 target/selection 的請求均會被拒絕。Draft 有效期為十分鐘，綁定驗證身分及套件 revision。套件改變後必須重新驗證。無效輸入回傳 HTTP 400、不可用 draft 回傳 404、revision 改變回傳 409、工作或 draft 容量已滿回傳 429。Inspection 的容量、時間及大小限制仍然生效。
-
-單一 Case 使用 `target:{"type":"case","id":"payments.default.PAY001"}`，並省略 `input`。Case 沿用 Excel/sidecar 綁定。Template、Flow、Tool 保留 Debug sidecar 的省略、明確 null、literal、expression、vars 和 Tool arguments 語義；不會將 Case 參數轉成Resource輸入。
-
-#### 選取批次
-
-以明確 selection 取代 target 和 input：
-
-```json
-{
-  "schemaVersion": "att-execution/v1",
-  "executionType": "run",
-  "packageId": "payments",
-  "environment": "UAT",
-  "selection": {
-    "suites": ["testcase/payments.xlsx"],
-    "caseIds": ["payments.default.PAY001"],
-    "tags": ["smoke"],
-    "excludeTags": ["slow"]
-  },
-  "options": {"debug": true, "failFast": false}
-}
-```
-
-`suites` 與 `suiteDirectory` 互斥；後者選取套件內的 group 目錄。Case/tag 篩選沿用 CLI 交集規則，任一要求的 tag 可匹配，excludeTags 則排除匹配 Case。`all:true` 表示套件選取。陣列必須非空、不重複，最多 1000 個值。驗證會解析並固定最多 10000 個 Case ID；空選取不會退回執行全部 Case。
-
-`rerunFailed:true` 從呼叫者最近 100 個擁有的工作中，選取同套件最近一個已完成 Case RUN 的失敗項目，與明確 Case/tag 篩選取交集，再固定 ID。Manifest 不可用或沒有匹配失敗項目會驗證失敗。既有 CLI `--rerun-failed` 繼續使用本機 output history。
-
-#### 啟用 Debug 診斷
-
-`options.debug:true` 會保留額外 Debug 執行事件，不會增加次數、並行度、權限或啟用 unsafe failure details。Server 中央大小限制、披露政策、敏感資料過濾和 artifact 控制仍然適用。功能測試和 Resource 執行保留專用報告，並共用工作路徑。
-
-#### 排程已驗證的定義
-
-Canonical 建立請求使用 `schemas/att-schedule-v2.schema.json`；舊路由保留原有的選用欄位。
-
-向 `POST /api/v1/schedules` 建立 RUN 排程：
-
-```json
-{
-  "schemaVersion": "att-schedule/v2",
-  "name": "Nightly payment checks",
-  "executionType": "run",
-  "packageId": "payments",
-  "environment": "SIT",
-  "draftId": "R...",
-  "timezone": "Asia/Hong_Kong",
-  "cron": "0 2 * * *",
-  "maxConcurrentRuns": 1,
-  "enabled": false
-}
-```
-
-使用驗證回傳的 draft ID。RUN 排程保存已驗證輸入、Case 選取及 revision，而非可變查詢。套件、目標、environment、config 改變後必須建立新排程。受保護的套件預設值以路徑綁定 keep marker 表示；提交的敏感覆寫值不可持久化。
-
-LOAD 排程繼續支援套件 scenario 路徑及已驗證 Load draft，沿用 scenario 驗證及負載上限。舊式 package-path LOAD 排程每次執行前驗證目前套件 scenario；公開 `revisionPolicy` 區分此模式與 revision 綁定 RUN snapshot。
-
-可使用五欄 `cron` 加 IANA timezone，或單次 `runAt` instant，例如 `2026-10-20T02:00:00+08:00`；不可同時提供。排程只保留一個 trigger：更新時提供任一欄位會取代已儲存的 trigger，兩者皆未提供則保留現有 trigger。單次觸發只會被領取一次。春季 DST 不存在的本地時間會跳過；秋季重複時間可產生兩個 instant，但仍受最短間隔限制。啟用前可用 `POST /api/v1/schedules/preview` 預覽時間。
-
-共用 scheduler 先記錄 occurrence，再提交工作。每排程及全域 overlap 容量已滿會跳過該次；一般 Worker/Load admission 上限仍生效。重啟或延誤 misfire 不會補跑。提交失敗遵循 `server.scheduling.failurePolicy`，不會自動重試執行。取消工作只取消該次 occurrence，暫停排程則阻止未來觸發。工作與 occurrence retention 沿用 Server 上限。
-
-所有 active local `USER` 或通過 `server.authorization.userRole` 的 authenticated container principal 均可管理共用 RUN/LOAD 排程。`ADMIN` 僅有系統及帳戶管理權限。排程建立者會保留作為 audit 資訊，但不限制其他 active USER 查看、編輯、暫停、觸發或刪除排程。Local auth 的排程建立者在 scheduled RUN 觸發時必須仍是 active `USER`。Container role 會在每個管理請求檢查；背景 scheduler 無法查詢外部 realm，因此建立者失去 USER role 時，其他 operator 必須暫停排程。Scheduled RUN job 仍以建立者身分記錄 audit。
-
-#### 遷移既有用戶端
-
-| 既有介面 | 4.2.6 對應 |
-|---|---|
-| CLI `validate`、`run`、`report` | 保留驗證、Case RUN、報告命令 |
-| CLI `--suite`、`--suite-dir`、`--case`、`--tag`、`--rerun-failed` | 保留選取行為；Server 批次使用 `selection` |
-| Debug CLI、sidecar、`/jobs/debug`、`/drafts/debug` | 相容Resource RUN，保留舊式診斷行為 |
-| `/jobs/run` 舊式 Case selection | 保留 Case adapter |
-| `/load-schedules`、`jobType:load/debug` | 共用 scheduler 相容路徑，保留既有定義 |
-| `/jobs/...`、既有 Studio 工作/結果連結 | 保留共用 history、取消、事件與結果路徑 |
-
-4.2.6 沒有移除舊 endpoint。`GET /api/v1/version` 公開 `unifiedRunVersion:att-execution/v1`。新 Studio Resource表單在舊 Server 缺少此能力時，可使用舊 Debug draft。統一 Case/batch draft 需要 4.2.6；舊部署可繼續使用 Explorer Case 操作。Server/Worker 應配套部署，舊 Worker 不支援Resource RUN dispatch。
-
-持久化使用既有 H2 table 的附加 JSON 欄位，不改寫舊 LOAD row。降版前先停止排程、匯出新定義、移除 RUN/單次定義，再還原升級前資料庫備份，避免舊 scheduler 把 RUN 當成 LOAD。保留的 artifact 與資料庫 metadata 分開儲存。
-
-#### Replay 與從 Job 建立新執行
-
-在 **Jobs**、**Job Details** 或 **LOAD History** 選擇 **Rerun with same settings** 或 **Configure & Rerun**。兩者都會建立一個獲授權的 Server draft，並在執行前依目前 Package/Environment 驗證。標準 RUN 或 LOAD editor 只會收到不透明的 `draftRef`，進入後再向 Server 取得 sanitized 定義；定義不會放入 URL 或 browser storage。
-
-**Rerun with same settings** 預設使用 **Use current Package**：沿用 Job 中安全保留的執行參數，依目前 Package 重新解析 Target 與設定，再顯示原始／目前 revision 及驗證結果供確認。它不會在無提示下以最新 YAML defaults 取代保留的 Scenario。**Require original revision (strict)** 是重現選項。Revision 不符時回傳 `ATT-SERVER-REPLAY-REVISION-CONFLICT`，並提供 **Review with current Package**；儲存的 metadata 無法還原已缺失的歷史 source bytes。`server.scheduling.packageChangePolicy` 及 Schedule 層級的 `ignore` 只套用於排程執行，不會控制手動 Rerun。
-
-**Configure & Rerun** 會在一般 editor 預填支援且安全保留的設定。可修改 RUN Target／Case selection、options 與安全 inputs，或 LOAD timing、workloads、模型專屬 pacing、concurrency、thresholds、evidence 及安全 testdata selection。**Validate** 會以有界 typed overrides 建立新 review intent；**Review changes** 顯示前後值、LOAD phases 總和、目前 revision，以及 configured arrival rate 與 measured TPS 的差異。按 **Run** 會以 `rerunOfJobId` 建立獨立 Job；Cancel／Back 不會修改來源 Job、報告、Schedule 或 package files。Package-file-backed LOAD 使用安全保留的 package-relative source route，不套用僅 inline draft 使用的 duration 上限。
-
-Schedule 維持獨立流程：**Edit existing schedule**、**Create new schedule** 或 **Run now**。既有排程 `strict`／`pause`／`ignore` 語意不變。
-
-新保留的 execution spec 使用 `att-job-execution/v2`，parser 仍接受 v1。Replay draft 使用 `att-job-replay-draft/v1`。Draft reference 和 confirmation intent 綁定目前 principal，十分鐘後到期；兩者存在 Server 記憶體，Server restart 後會失效，需重新從來源 Job 建立。沒有安全保留定義的來源 Job、缺少敏感輸入、draft 過期、Resource 移除、schema 無效及容量拒絕會使用不同錯誤回應。系統不會從 log 或 artifact 重建秘密、Worker transport data、host root 或不安全路徑。
-
-未保留執行定義的歷史 Job 會顯示 **Rerun unavailable for this historical job**。僅驗證的 Job、安全保留失敗或包含已分類敏感輸入的 Job，不能進行精確 replay。含有原始 overrides 或未解析 `rerunFailed` 歷史選擇的舊式直接提交，須先建立新的驗證 draft 才能安全保留。請設定新執行，並透過正常的受保護輸入流程補充憑證。不可從 log、artifact 或已遮罩預覽重建執行。安全定義上限為 256 KiB，不包含 Worker transport 欄位及主機根目錄。
-
-Job lifecycle API 在 `/api/v1` 下提供以下 endpoint：
-
-| Method 與 path | 結果 |
-| --- | --- |
-| `GET /jobs/{jobId}/replay` | 已授權的安全定義及不可用原因。 |
-| `POST /jobs/{jobId}/replay-draft`，body 為 `{"sourcePolicy":"current"}` 或 `{"sourcePolicy":"strict","overrides":{...}}` | 驗證 `att-job-replay-draft/v1`、不透明 `draftRef` 及確認 `intentId`；不建立 Job 或 Schedule。省略 `sourcePolicy` 時沿用舊版 strict 行為。 |
-| `GET /jobs/{jobId}/replay-draft/{draftRef}` | 綁定 principal 的 sanitized editor 定義及目前 configuration provenance；route 不包含定義。 |
-| `POST /jobs/{jobId}/rerun`，body 為 `{"intentId":"...","confirm":true,"sourcePolicy":"current"}` | 建立獨立 Job，回傳 HTTP 202 及 `Location`；相同 intent 重試時回傳已接受的 Job。 |
-
-Schedule 使用一般已驗證 draft 合約。RUN Debug 仍使用 `options.debug`。Replay 限制於提交者或保留的排程執行 owner。若 Package 在驗證後改變，回傳 `ATT-SERVER-REPLAY-DRAFT-STALE`；draft 過期或 Server restart 後遺失則回傳 `ATT-SERVER-REPLAY-DRAFT-EXPIRED`；容量限制回傳 HTTP 429。重用已接受 intent 會回傳同一 Job。
-
-### Run 模式
-
-<!-- att-doc-status: current release=4.2.6 -->
-
-ATT 4.2.6 Local CLI 的 run command 是 legacy Case adapter，會執行 Workbook 中選取的 authored Testcase。較完整的 functional model 與 direct resource target 定義於 [Unified RUN](reference.zh/execution-modes/unified-run.md)。
-
-```sh
-./att.sh run --all
-./att.sh run --suite testcase/payment.xlsx --case payment.payment.TC001
-./att.sh run --all --tag smoke --exclude-tag slow
-```
-
-ATT 先載入 effective configuration/environment、驗證 canonical workbook snapshot 和 selected dependency closure、保留唯一 Run ID，然後為每個選中的 Testcase 啟動一次 Case execution。Stages 依序執行。每個 Stage selector 都會解析為 Template；Action 按 YAML 順序執行，並受 `runWhen` / `onFailure` 控制。
-
-沒有 `--run-id <id>` 時，可使用 `execution.runIdFormat` 產生外層 Run ID；否則沿用 `run.id.timestampFormat` default。Format 在發布 `EXEC.RUN_ID` 或 output path 前只初始化一次。可用 Context 與 built-ins 見[package-wide configuration](reference.zh/configuration.md#設定-package-wide-options)。CLI ID 是優先級最高的 literal override。
-
-Run evidence 直接寫到 `output/<RunID>/`。完成後才發布 `run.yaml`、Case directories/logs、結果 workbook、HTML/CI output，並更新 `latest-run.yaml`。已存在的 Run ID 會被拒絕，不會覆寫。`run --update-snapshot` 是執行前明確授權更新 snapshot 的唯一流程。
-
-Status aggregation 的嚴重度為 ERROR > INVALID > FAIL > PASS > SKIPPED。Process exit code：`0` 表示沒有失敗狀態、`1` 表示測試/assertion failure、`2` 表示 command/configuration/validation 無效、`3` 表示 runtime/infrastructure error。
-
-selector 和 option 請看 [CLI Reference](reference.zh/cli.md)，Stage 和 Action control 請看 [Reliability and Execution Control](reference.zh/reliability-execution-control.md)，artifact contract 請看 [Results, Reports, and Evidence](reference.zh/results-reports-evidence.md)。
-
-在 Studio 從 Job 選擇 **Configure & Rerun**，會把安全保留的 RUN target 或 exact Case selection、environment、Debug／fail-fast options 及符合安全條件的 typed inputs 載入此標準 RUN editor。修改後需依目前 Package 驗證，再檢查並提交。Source policy 與 API 行為見 [Job replay 與建立新執行](reference.zh/execution-modes/unified-run.md)。
-
-### Standalone Debug
-
-Debug 可在沒有 workbook Testcase 的情況下執行單一 Template、Flow 或 Tool。
-
-```sh
-./att.sh debug template PAYMENT_INVOKE
-./att.sh debug flow common.compose.v1 --input /tmp/compose.debug.yaml
-./att.sh debug tool fpp.invokeApi --input /tmp/invoke.debug.yaml --env UAT
-./att.sh debug template PAYMENT_INVOKE --profile
-```
-
-不帶 target 執行 `./att.sh debug`，會列出 statically valid、可執行的 Tool、Template 和 Flow，附 copyable command。只會顯示實際存在的 regular non-symlink default sidecar。Discovery 會檢查 selected target dependencies，但不建立 Debug output，也不呼叫 Tool。可用 `--format json` 取得 machine-readable 結果。
-
-Debug input 使用現行 `schemaVersion: att-debug/v1.2`。Top-level 支援 `case`、可選 `stage`、`inputs`、`vars`、`arguments`、grouped `tools.<localKey>.arguments`，以及可選 `testdata`。`testdata` 列出 package-relative descriptor path，並作為此 Debug invocation 專用的 whole-descriptor overlay，疊加在所選 environment registry 上；local layer 內重複的 path 或 ID 會被拒絕。Overlay 不會供 Run 使用。若 sidecar 含 Debug-local imports，`load --debug` 會明確拒絕；請將 imports 放到 Load scenario。`inputs` 會適配到 canonical `EXEC.INPUT`；Template/Flow 的 `vars` 會以 typed bootstrap tree 評估，並在 target 開始前 seed canonical `EXEC.VARS`。Tool Debug 使用 `arguments`，不支援 `vars`。Framework-owned identity、output、Actions、resource metadata 與 compatibility view 不能被 user input 覆寫。Schema migration 見 [Migration Notes](reference.zh/appendices/migrations.md)。
-
-#### Standalone Debug bootstrap data
-
-三種 input contract 有意分開：
-
-| Debug 欄位 | Runtime destination | 用途 |
-|---|---|---|
-| `inputs` | `EXEC.INPUT` | Flow/Template 直接消費的 business input |
-| `vars` | initial `EXEC.VARS` | 可重用 Flow/Template 原本由 caller 準備的值 |
-| `arguments` / `tools.<localKey>.arguments` | Tool argument contract | standalone Tool Debug 的明確參數 |
-
-只消費 `EXEC.INPUT` 的 Flow 不需要 `vars`。若 Flow 正常由 parent Flow 先發布 `EXEC.VARS.refNo`，可用 scalar 或 typed structure 直接 debug：
-
-Debug `inputs` 與 Run 使用相同 Testdata mapping 語法：以 `--env` 選擇已配置的 environment，再使用完整 `@{id}`／`@{id.path}` reference 或 scalar interpolation。ATT 會先解析再發布到 `EXEC.INPUT`；Reusable Template、Flow 或 Tool definition 內仍不可直接使用 Testdata marker。詳見[Testdata Registry 與 Input Mapping](reference.zh/test-authoring.md)。
-
-```yaml
-schemaVersion: att-debug/v1.2
-inputs:
-  amount: 100
-vars:
-  refNo: REF001
-  txnSeq: 23
-  tags: [SIT, PAYMENT]
-  order:
-    id: ORD001
-    amount: 100
-```
-
-```sh
-./att.sh debug flow common.payment --input common.payment.debug.yaml
-```
-
-若 Debug 需要不應加入共用 environment config 的 descriptor，可在 sidecar 指定 `testdata`：
-
-```yaml
-schemaVersion: att-debug/v1.2
-testdata: [debug-data/accounts.yaml]
-inputs:
-  accountId: '@{accounts.id}'
-```
-
-Descriptor path 相對於 package root，並使用一般 `att-testdata/v1.0` 格式。
-
-若 collector failure 的安全投影隱藏了診斷細節，可在本機執行時明確選用 `--unsafe-failure-details`：
-
-```sh
-./att.sh debug template PAYMENT_INVOKE --unsafe-failure-details
-```
-
-此 flag 僅供 standalone `debug` 使用。ATT 會在執行前顯示警告，保留 configured-secret redaction，並在 result 寫入 `failureDetailMode: local-unsafe`。它不會 dump raw inputs、argv、request body 或 Context values。預設仍為 `safe-default`；Run、Validate、Snapshot 及 `load --debug` 不能啟用此 override。
-
-`vars` 使用共用 expression engine：完整 `${EXEC.INPUT.amount}` 保留原生型別；混合文字會成為字串；`#{...}` 保留 expression result 型別。Map/list 會遞迴處理，map key 維持字面值。Vars 可按任意順序相依；循環、缺少 var、不可用 root 及 side-effecting call 會在 target 開始前失敗。第一次正常 `assign` 可以取代 bootstrap variable，之後仍遵守一般 duplicate-assignment rules。Final values 會使用既有 canonical `EXEC.VARS`/`CASE.VARS` context 及 result artifacts，並套用既有 redaction policy；不會建立第二個 Debug-only namespace。
-
-Bootstrap value 可使用已初始化 execution identity、`EXEC.INPUT`、有提供時的 `EXEC.LOAD`、其他 `EXEC.VARS.<name>`，以及穩定 project/source/target/template metadata。`EXEC.ACTIONS`、action-local `output`、invocation-scoped metadata 不可用。Tool/DB/MQ/HTTP/SSH/process/filesystem 或 stateful calls 會被拒絕；安全純 built-in 使用 ATT 一般 parser。可重複使用 `--set input.path=value`、`--set vars.path=value`，以及僅限 Tool 的 `--set arg.name=value`。值以 safe YAML 解析；可用巢狀 map 及數字 list index。例：`--set 'vars.refNo=${EXEC.INPUT.refNo}'` 會在 evaluation 前修改原始定義。
-
-未指定 `--input` 時，Template/Flow 會在旁邊尋找 `debug.yaml`；grouped Tool 會查找 `config/tools/<group>.debug.yaml`，ungrouped Tool 使用 `config/tools/<localKey>.debug.yaml`。沒有 default sidecar 時請使用 `--input`；明確的 `--input` 會取代 auto-discovery。`--env` 在 target validation 之前使用與 Run/Validate/Load 相同的 environment resolver。
-
-Debug 執行 target-scoped validation：只驗證 selected Template/Flow dependency closure 或 Tool contract，不要求無關 workbook。Template/Flow debug 使用與 Run 相同的 Action/Flow scope rule；Tool debug 使用相同 configured Tool invocation contract。
-
-每次 invocation 隔離於：
-
-```text
-output/debug/<debugId>/
-├── case.log
-├── result.yaml
-├── performance.json       # 使用 --profile 時
-└── artifacts/
-```
-
-`--profile` 會記錄從 Java main entry 到第一個已輸出的 progress event 及第一個 target action 的 monotonic timing，並記錄 config、input、validation、context setup、resource-helper setup、action execution、finalization 和 result-write phases。報告的 `totalMs` 不包括 shell launcher 和 JVM startup。若沒有輸出 progress event（例如 quiet run），first-console phase 會省略。可參考[與 3.7.3 比較的流程](system-design/debug-startup-benchmark.zh.md)執行可重複的 startup benchmark。
-
-`execution.debugIdFormat` 可使用 package 與 target metadata 設定 standalone `<debugId>`；`--debug-id <id>` 可指定 exact literal。明確或配置的 ID 若目錄已存在會 fail；legacy `<type>-<targetId>` default 仍會加 timestamp suffix。解析後的 Debug ID 同時用於目錄名、`debugId`、`EXEC.RUN_ID` 和 `EXEC.ID`。
-
-Debug 不建立或更新普通 `latest-run.yaml`。Exit code：`0` PASS、`1` FAIL、`2` CLI/config/input/validation 無效、`3` runtime error。它在 selected reusable-component 邊界上與正常執行等價，但**不是** workbook Case：除非 debug input/artifact 明確提供，否則沒有 workbook selection、Stage history 或 result-workbook lifecycle。
-
-#### Debug 排錯與 MQ payload 路徑
-
-當 debug target 無法解析時，先確認 target kind 及 identifier，再用 `--input <path>` 排除 sidecar discovery 因素。Template/Flow debug 會尋找 `<target directory>/debug.yaml`；grouped Tool debug 會尋找 `config/tools/<group>.debug.yaml`。只會驗證 selected target 的 dependency closure，因此不需要無關 workbook 或 Case 檔案。
-
-Debug、Run、Load 都使用相同的 `&{package-relative-file}` expression，再將 UTF-8 String 傳入 HTTP `body`、MQ `payload` 或 SSH upload `payload`。這些 Resource Helper 不會解析各自的 local path。Validation 會在外部 I/O 前解析 package file；舊 HTTP/MQ `file`、SSH upload `localPath` 及 SSH `download` call 均會被拒絕。
-
-按 output directory 分辨排錯階段：
-
-| 症狀 | 檢查 |
-|---|---|
-| `Debug input file does not exist` | 在 selected target 旁加入 sidecar，或明確傳入 `--input`。 |
-| `Debug input uses a historical schemaVersion` | 使用 active Debug schema；見 [Migration Notes](reference.zh/appendices/migrations.md)；只有 Flow/Template 需要 caller-prepared `EXEC.VARS` 時才加入 `vars`。 |
-| `target` 或 dependency validation 失敗 | 確認 target type/id，並查看回報的 dependency field；不需要無關 workbook。 |
-| MQ 回報 payload 遺失或不安全 | 核對 package 內的絕對路徑或 Case-output 內的相對路徑，移除 traversal 及 symlink。 |
-| action 已執行但輸出不符預期 | 查看 `output/debug/<debugId>/` 下的 `case.log`、`result.yaml` 及 action artifacts，並對照 rendered inputs 與 selected environment。 |
-
-Load 專用的 evidence retention（`metrics`、`failures`、`samples`、`all`）不適用於 standalone Debug invocation。Debug 會在自己的 debug directory 保留 invocation result 與 artifacts；同一 target 若由 Load run 執行，請參考 [Load evidence retention](reference.zh/execution-modes/load.md#選擇要保留的-iteration-evidence)。
-
-##### CLI configuration examples
-
-`run`、`debug` 和 `load` 默認採用交互式 verbose 行為。Lifecycle、Case、Stage、Action、Resource attempt、retry、assertion 和錯誤事件會即時寫出並及時 flush。實時 Case-log 鏡像復用與 `case.log` 相同的脫敏 append 路徑；`case.log`、`case.yaml`/`result.yaml`、report 和 evidence 仍是持久化事實來源。並發 Case-log 區塊會帶有 Case ID 前綴。`--quiet` 抑制詳細實時進度，但保留最終摘要和錯誤。使用 `--format json` 時，機器可讀內容仍寫入 stdout，實時進度寫入 stderr。Load 只定期輸出有界計數/速率並節流錯誤，不會為每個成功 iteration 輸出一大段內容。
-
-以下每個文件都是完整的 `att-debug/v1.2` 文檔，展示 Template、Flow、分組 Tool、未分組 Tool 和臨時覆蓋值的不同寫法。
-
-Template sidecar（`templates/PAYMENT_INVOKE/debug.yaml`）：
-
-```yaml
-schemaVersion: att-debug/v1.2
-case:
-  caseName: PAYMENT debug
-  amount: 100
-  environment: SIT
-stage:
-  key: invoke
-  values:
-    channel: WEB
-    sourceRef: SRC-001
-```
-
-執行：
-
-```sh
-./att.sh debug template PAYMENT_INVOKE
-```
-
-Template 表達式應優先讀取 `${EXEC.INPUT.amount}`、`${EXEC.INPUT.environment}` 和當前 Stage 的 `${EXEC.INPUT.channel}`；當前 Stage 的 `values` 會在該 Stage 期間覆蓋同名 Case-level input，Stage 結束後恢復。對應的 `CASE.*` 路徑仍是兼容 aliases，`CASE.STAGES.*` 只保留為舊的執行／證據視圖。
-
-Flow sidecar（`templates/flows/common/compose/debug.yaml`）：
-
-```yaml
-schemaVersion: att-debug/v1.2
-case:
-  caseName: Compose debug
-  traceId: TRACE-001
-stage:
-  key: DEBUG
-  values:
-    mode: SIT
-inputs:
-  source: payment
-  suffix: -debug
-```
-
-執行：
-
-```sh
-./att.sh debug flow common.compose.v1
-```
-
-Flow 可用 `${EXEC.INPUT.source}` 讀取 `inputs`；如果沒有名為 `inputs` 的業務字段，舊定義仍可用只讀兼容視圖 `${CASE.inputs.source}`，但不會把整棵 `inputs` 子樹重復寫入 `EXEC.INPUT`。
-
-分組 Tool sidecar（`fpp.invokeApi` 對應 `config/tools/fpp.debug.yaml`）：
-
-```yaml
-schemaVersion: att-debug/v1.2
-case:
-  RefNo: REF001
-tools:
-  invokeApi:
-    arguments:
-      requestId: REF001
-      requestType: PAYMENT
-      requestFile: /tmp/payment-request.xml
-      apiLogPath: /tmp/payment-api.log
-```
-
-執行：
-
-```sh
-./att.sh debug tool fpp.invokeApi
-```
-
-`invokeApi` 是 Tool group 內的 local key；參數值必須是 Tool descriptor 接受的 scalar 或 list。Standalone Tool adapter 不接受用 map literal 表示普通 Tool 參數。
-
-未分組 Tool sidecar（`config/tools/invokePaymentApi.debug.yaml`）：
-
-```yaml
-schemaVersion: att-debug/v1.2
-arguments:
-  requestFile: /tmp/payment-request.xml
-  environment: SIT
-```
-
-執行：
-
-```sh
-./att.sh debug tool invokePaymentApi
-```
-
-未分組 Tool 使用根 `arguments`；不需要再包一層 `tools.invokePaymentApi.arguments`。
-
-臨時覆蓋自動發現的 sidecar：
-
-```sh
-./att.sh debug template PAYMENT_INVOKE \
-  --input /tmp/payment-debug.yaml \
-  --output-dir /tmp/att-debug --format json
-```
-
-明確指定的 `--input` 優先於目標旁邊的 `debug.yaml`。缺少文件、schema 錯誤、未知或缺少 Tool 參數等輸入／配置錯誤會返回 exit code `2`，並在診斷中標出 `Debug input: ...`。
-
-保護字段例子：
-
-```yaml
-schemaVersion: att-debug/v1.2
-case:
-  caseId: pretend-id
-  outputDirectory: /tmp/pretend-output
-  VARS: {shouldNotReplace: true}
-  STAGES: {shouldNotReplace: true}
-```
-
-即使輸入包含這些字段，`EXEC.ID`、`EXEC.RUN_ID`、`EXEC.OUTPUT_DIR`、`EXEC.VARS`、`EXEC.ACTIONS` 以及對應的 `CASE.*`、`RUN.*`、`ACTIONS.*`、`TOOL.*` 和 `DB.*` aliases 仍由框架生成。模式及 scheduler 診斷不會暴露給 expressions。`EXEC.STAGES` 不是 canonical Context 節點；Stage 歷史仍由舊的 `CASE.STAGES` 證據視圖保存。診斷時查看 `output/debug/<debugId>/case.log`、`result.yaml` 和 `artifacts/case.yaml`。
-
-### Load 模式
-
-ATT 接受 att-load/v1.9 scenario。Scenario 有一個或多個 workload；每個 workload 使用單一固定 Template、Flow 或 Tool target，或使用 closed-user weighted target mix。Workload 配置 inputs、testdata policy、bootstrap vars 與 pacing。Root defaults 可供多個 workload 共用，workload-local 欄位會覆蓋它們。Scheduler 啟動前會驗證並預先 resolve 所有 target。
-
-使用上一版 workload schema 的 descriptor 仍相容，載入時會 normalize 至現行 schema。
-
-不帶 scenario 執行 `./att.sh load`，會發現 `load/` 下有效的完整 Load descriptor。只考慮宣告 `schemaVersion: att-load/*` 的 YAML；其他 YAML 會忽略，無效的已宣告 descriptor 則附 diagnostic 顯示。Discovery 會 resolve 並驗證 target，但不啟動 scheduler 或呼叫 resource。
-
-#### LOAD 啟動前準備被引用的 resource
-
-Target 驗證及 Load plan preparation 完成後，ATT 只會發現所選 Template、Flow、主要及巢狀 Tool call，以及已凍結 Render payload expression 可到達的 DB、MQ、HTTP helper，並在 scheduler start gate 開啟前準備它們。Global configuration 中未使用的 helper 不會被啟動。無法靜態 resolve 的 reference 會標記為 `SKIPPED_DYNAMIC`，並在首次使用時維持 lazy preparation。
-
-每個被引用 DB helper 會建立足夠的不同實體 connection，至少同時有 `max(1, minIdle)` 個可用 session。原有 `minIdle`、`maxSize` 設定不變，pool 後續正常擴充仍採 lazy 模式。MQ readiness 會為配置的實體 instance 建立 idle connection，但不會開啟 queue、傳送 message 或執行 business request。HTTP readiness 只建立 client 及 TLS 設定，不會連線或發出 request。
-
-Preparation 每個 run 的 DB/MQ initial session 上限為 64 個，每個 Worker JVM 上限為 256 個，並受 deadline 及 cancellation 控制。ATT Server 每個 Server process 最多同時執行四個 LOAD Worker，因此由該 Server 提交的 LOAD 工作共用 256 個 initial session 的 aggregate 上限。Resource owner 完成 close 前，cleanup 會繼續計算其 reservation。此 scheduler 上限只涵蓋該 Server process 提交的 LOAD；RUN/Debug、CLI 或直接 Engine process，以及其他 Server instance 不在 admission budget 內，仍可能增加共用 backend 的 session。失敗會在任何 iteration admitted 前停止 run。Live output 和 structured event 會顯示各 helper readiness；run summary 會記錄準備結果。此 barrier 只適用 LOAD，也不會取代已配置的 warm-up traffic。
-
-#### 獨立 evidence 配額
-
-`att-load/v1.9` 支援兩種配額模型。Legacy scenario 保留既有配額範圍和硬上限：`maxSamples` 是整個 run 的合併上限；`maxFailureSamples` 會啟用整次 run 共用的 success/failure 上限。兩者皆未設定時，亦保留既有 mode defaults，包括預設不設上限的 `all`。有上限的 run 會改用固定 run-time window 分配保留名額，因此保留哪些 iteration 可能與舊版本不同；配置上限和 success/failure 共用規則維持不變。
-
-可選的 `evidence.quotaScope: perWorkload` 會啟用獨立模型。此為明確 opt-in，既有 scenario 不會被靜默重新解釋：
-
-~~~yaml
-evidence:
-  quotaScope: perWorkload
-  success: sample
-  failure: full
-  sampleRate: 0.1
-  defaults:
-    maxSuccessSamples: 10
-    maxFailureSamples: 20
-workloads:
-  - id: payment-api
-    target: {type: template, id: PAYMENT_INVOKE}
-    load: {users: 10, duration: 2m}
-  - id: mq-processing
-    target: {type: tool, id: sample.getAcDate}
-    load: {users: 5, duration: 2m}
-    evidence:
-      maxSuccessSamples: 5
-      maxFailureSamples: 30
-~~~
-
-在此模式下，root `success`、`failure`、`sampleRate` 與 `resources` 仍是共用的 capture policy。`evidence.defaults` 提供每個 workload 預設的 `maxSuccessSamples` 與 `maxFailureSamples`；未設定的 default 為 **1,000**。`workloads[].evidence` 可覆寫任一 cap，且只接受這兩個 cap 欄位；只覆寫一項時，另一項繼承 default。Cap 為 0–1,000,000 的整數；0 表示該 workload 的該類別不保留 evidence。上例中，`payment-api` 為 10 success／20 failure，`mq-processing` 為 5 success／30 failure。
-
-Per-workload 模式不可與 root `maxSamples`、`maxSuccessSamples` 或 `maxFailureSamples` 混用；`evidence.defaults` 或任何 workload cap override 都必須配合 `quotaScope: perWorkload`。執行前，ATT 會驗證所有 effective success caps 的總和及所有 effective failure caps 的總和；任一總和不得超過 aggregate safety budget 1,000,000。這是 preflight allocation 上限，不是 runtime global allocator。
-
-每個 workload 各自擁有 cap。任一 workload 達到 success 或 failure cap，都不會預留其他 workload 的容量；未使用容量就是維持未使用。沒有 lending、borrowing、repayment、reclaiming、revocation 或由配額驅動的 artifact 刪除。只要 workload 自己的 cap 仍有空間，其第一個合格 success 或 failure 就會被接受，即使其他 workload 已全部額滿。保留的 evidence 在整個 run 內只增不減。取消、拒絕、PASS-to-FAIL 重新分類、dropped／未開始 arrival 或 evidence 缺失時，會釋放預留。Success 與 failure 容量互相獨立，一類用盡不會抑制另一類。
-
-`sampleRate` 只用於抽樣 PASS；FAIL/ERROR（包括操作層 TIMEOUT）直接使用 failure cap，不經抽樣。`failure: full` 受 effective failure cap 限制，不保證每個失敗都會保留。Failure log 維持 65,536 字元 tail、強制 secret protection 及延後 resource formatting。
-
-抽樣 PASS 的資格由 MurmurHash3 x86 32-bit（seed 0）計算，輸入是以 UTF-8 編碼的 iteration ID。ATT 將結果視為 unsigned 32-bit 整數，低於 `floor(sampleRate × 2^32)` 才合格；resolved policy 會記錄 `murmur3-32-v1`。Hash 合格不代表一定保留：仍須有可用配額名額及 evidence artifact。
-
-有上限的 evidence 名額會按 planned run duration 分配到最多十個等長 window；各 outcome cap 和 workload cap 分別分配。名額少於十個時，每個名額使用一個 window。名額只會新增，不會替換、撤回、借用空 window 容量或刪除已保留 artifact。每個 window 內仍採先到先得，因此 cap 較小、某個 window 沒有合格候選，或候選速率不均時，代表性仍可能受限。Legacy `maxSamples` 維持單一合併上限，success 和 failure 共用各 window 名額。無上限保留及沒有 scheduler timeline 的直接 store 呼叫維持原有行為。
-
-`load-summary.json`／YAML、HTML report 及 Studio job result 會顯示 resolved sampling hash 和 retention strategy、完成的 success、hash 合格數、sampling-ineligible success、已保留 evidence、success/failure 配額拒絕、無法判定 outcome 的相容性 reservation，以及缺失 artifact。抽樣模式下，completed success = hash 合格 + sampling-ineligible。若 hash 合格的 success 之後變成 failure，quota denial 會按最後 outcome 只計一次；missing artifact 只計已預留但完成後缺少 artifact 的 outcome。這些欄位位於不同階段，不能當成可相加的 retention funnel。Workload row 亦會顯示 target ID 及有效 per-workload cap。Report 會顯示各 time window 和 phase 的保留情況；legacy combined cap 或類別配額拒絕候選時會發出警告，aggregate metrics、thresholds 和 failure events 繼續完整統計。保留連結仍使用 `samples/`、`failures/`，並保留 EXEC.ID、case.log、case.yaml。Studio 會分開顯示 legacy／shared caps 與明確 per-workload scope、effective defaults 及 workload overrides，並與 advanced JSON 同步。見[per-workload 範例](../examples/load/independent-evidence.yaml)。
-
-
-#### 定義 Load scenario
-
-~~~yaml
-schemaVersion: att-load/v1.9
-testdata: [examples/testdata/generated-account.yaml]
-workloads:
-  - id: payment
-    target: {type: template, id: PAYMENT_INVOKE}
-    inputs: {region: HK, account: "@{generatedAccounts}", accountId: "@{generatedAccounts.id}"}
-    testdata:
-      generatedAccounts:
-        scope: iteration
-        selection: {strategy: sequential, exhaustion: recycle}
-    vars:
-      baseAmount: "${EXEC.INPUT.amount}"
-      total: "#{${EXEC.INPUT.amount} * 2}"
-      reference: "REF-${EXEC.LOAD.USER_ID}-${EXEC.LOAD.ITERATION}"
-    load:
-      users: 20
-      warmup: 10s
-      rampUp: 5s
-      duration: 1m
-      rampDown: 5s
-    execution:
-      thinkTime: 500ms
-    thresholds:
-      p95: "< 800ms"
-      errorRate: "< 1%"
-thresholds:
-  minThroughput: ">= 10/s"
-evidence:
-  mode: failures
-  resources:
-    output: none
-~~~
-
-#### 將 closed-user work 分配到多個 target
-
-Workload 可用 `mix` 代替 `target`，讓每位 closed user 的下一次 iteration 在預先 resolve 的 targets 之間選擇。每個 entry 包含唯一 `id`、正整數 `weight`，以及 Template、Flow 或 Tool `target`。Selector 由 run seed、workload ID、穩定 VU ID 和該 VU 的 iteration number 決定；切換 target 不會重設 VU 或 think-time random stream。Weight 表示選擇機率，短時間 run 不保證精確符合比例。
-
-~~~yaml
-schemaVersion: att-load/v1.9
-seed: 73
-workloads:
-  - id: checkout
-    inputs: {region: HK}
-    mix:
-      - id: browse
-        weight: 60
-        target: {type: template, id: BROWSE}
-        inputs: {operation: browse}
-      - id: purchase
-        weight: 30
-        target: {type: flow, id: PURCHASE}
-        inputs: {operation: purchase}
-      - id: report
-        weight: 10
-        target: {type: tool, id: REPORT, arguments: {format: csv}}
-    load: {users: 20, duration: 1m}
-~~~
-
-Workload `inputs` 和 `vars` 提供預設值；entry 中相同名稱的 top-level key 會取代預設值。Tool arguments 必須放在 entry 的 `target.arguments`，Tool entry 不可宣告 `vars`。Mix 僅支援 closed model。每次 iteration 完成並經正常 think time 後才選下一個 target。`EXEC.LOAD.MIX_ID`、`TARGET_TYPE` 和 `TARGET_ID` 會在 execution ID expressions、testdata 及 bootstrap vars 評估前發布。切換 target 時，testdata selection state 仍按 workload/VU scope 共用。
-
-Run summary 和 HTML report 會列出設定 weight、實際選擇次數及有界 per-entry metrics。Overall 和 workload percentiles 各自使用 aggregate latency collector 計算；ATT 不會平均各 entry percentile。Event 和 retained evidence 會包含所選的 `mixId` 及 target identity。
-
-Target 支援 template、flow 或 tool；Tool target 可有 named arguments，但不能宣告 bootstrap vars。Workload inputs 會成為每個 iteration 的 EXEC.INPUT；Template/Flow 的 workload vars 則在每個開始的 iteration 建立全新的初始 EXEC.VARS tree。同一 scenario 的 workloads 必須使用相同 model（closed users 或 arrivalRate）與相同 warmup/rampUp/duration/rampDown 時間窗口。它們是獨立 pacing 的固定 target，不是 transaction mix。
-
-| Workload 欄位 | Runtime destination | Contract |
-|---|---|---|
-| `inputs` | `EXEC.INPUT` | Business input；不作為 bootstrap variables |
-| `vars` | initial `EXEC.VARS` | Template/Flow typed expression tree；每個 execution 獨立評估 |
-| `target.arguments` | Tool arguments | 僅供 Tool call；與 `EXEC.INPUT`、`EXEC.VARS` 分開 |
-
-ATT 會在每個 iteration boundary 將 inputs map snapshot 一次，形成深層 immutable tree。複製 request metadata 時會重用這個 snapshot；Load adapter 會將巢狀 value 直接傳入該 iteration 的 `EXEC.INPUT` map，不再複製巢狀內容。開始 iteration 後，caller 修改來源 map 不會影響該 iteration；不同 iteration 也不會共用 input snapshot。
-
-#### 映射 inputs 並選擇 testdata
-
-Environment profile 提供共享的 `testdata` descriptor list。Scenario 可選擇在頂層宣告 package-relative YAML `testdata` imports，形成僅供該次 Load 使用的 overlay。同 ID 的 Load-local descriptor 會完整取代 environment descriptor，不會合併 records 或 selection 設定。任一 layer 內的重複 ID 都會使 validation 失敗。
-
-使用 `inputs` 將 `@{id}`、`@{id.path}` 或 scalar interpolation 映射到 `EXEC.INPUT`。同一 mapping 內每個 ID 只選一次 record；`scope` 決定何時重新選擇：`workload`、`user` 或 `iteration`。Load 預設為 `iteration`。`user` 只適用 closed-VU workload，在 `arrivalRate` 無效。Workload `testdata` map 只存 policy，不負責匯入 descriptor。其 `selection` 若有設定，會整份取代 descriptor selection policy。Policy 支援 `sequential`、`roundRobin`、有 seed 的 `random`，以及 exhaustion `error`（預設）、`recycle` 或 `stop`。耗盡後 `stop` 會平順停止該 workload。單筆 descriptor 不需要 selection policy。
-
-Selection evidence 只記錄 testdata ID、來源 layer、record index、適用時的 generated sequence、scope、strategy 與 random seed，不包含 record 內容。Run/Debug 只載入 mapping 有引用的 ID；Load 會在 scheduler 啟動前驗證被引用的 ID 及 workload policy。
-
-#### 初始化 Template 和 Flow variables
-
-Scheduler identity 及唯一 EXEC.ID/EXEC.OUTPUT_DIR 初始化完成後，ATT 會在 Template 或 Flow 開始前評估 workload 的 vars tree。完整 `${...}` reference 保留原生型別，混合文字會轉成字串，`#{...}` 使用一般 typed expression parser，巢狀 map/list 會遞迴評估。Vars 之間的依賴不受宣告順序影響；缺少變數或循環會在 target 開始前失敗。每個 iteration 都有獨立 map/list，因此併發 user/workload 不會共用可變值。第一次一般 `assign` 可取代 bootstrap variable。
-
-Bootstrap expression 可使用已初始化的 `EXEC.RUN_ID`、`EXEC.ID`、`EXEC.OUTPUT_DIR`、`EXEC.INPUT`、`EXEC.LOAD`、其他 `EXEC.VARS.<name>`，以及穩定的 project/source/target/template metadata。`EXEC.ACTIONS`、action-local `output`、invocation-scoped metadata，以及 Tool/DB/MQ/HTTP/SSH/process/filesystem 或 stateful calls 不可用。只允許安全的純 built-in。Tool arguments 與 vars 是不同 contract。
-
-#### 選擇 closed-user 或 arrival-rate workload
-
-Closed workload 使用正整數 load.users。每個穩定 virtual user 重複執行固定 target，並在下一次 iteration 前遵守 execution.thinkTime。thinkTime 可設 duration 或 {min, max} range。
-
-Arrival-rate workload 使用 `load.arrivalRate`、正整數 `load.maxConcurrent` 與 `overloadPolicy: drop`。Scheduler 依絕對 due time 排程。超過 maxConcurrent 的 arrival 記為 generator drop；不排隊，也不算 SUT error。Arrival-rate 沒有持續 USER_ID，也不能配置 `thinkTime`。
-
-Closed workload 會在 iteration 同步執行時保留配置的 virtual user 數量。Scheduler 和 worker-pool implementation 請看 [Load scheduler design](system-design/load-scheduler.zh.md)。
-
-#### 設定 pacing 並估算 Resource pool 容量
-
-穩定 arrival rate 下，可使用 Little's law 估算平均同時處理中的 request 數：
-
-```text
-平均 concurrency ≈ arrival rate（requests/second）× 平均 response time（seconds）
-```
-
-例如 HTTP 每秒 20 個 request、平均 response time 為 1.5 秒，約需 30 條 concurrent connection，才不會先受 client pool 限制。HTTP 預設 `pool.maxConnections: 50`、`pool.maxConnectionsPerRoute: 20`；請按 workload 需要調整兩者，並確保 per-route 值不大於總數。另為 latency 變化及其他 route 留出 headroom，再查看 `resources.http` 的 active/idle/waiting/peak observations。Pool capacity 是 generator-side 上限，不代表應向未確認承載能力的 service 發送該流量。
-
-DB workload 可用相同估算，將 DB operations/second 乘以 connection lease 平均時間（connection 借出後仍被使用的時間）。例如每秒 40 次 operation、平均 lease 100 ms，約需四條 concurrent connection。每個 DB helper 的 `pool.maxSize` 可按此 concurrency 加上 headroom 設定，再查看其 `resources.db` active/idle/waiting、borrow timeout 及 total borrow wait metrics。每個 helper 預設 maximum 為 20；這是 client-side 上限，並非建議的目標 database 容量。
-
-MQ request/reply 若每秒 10 個 request、平均 reply time 為 3 秒，整個 workload 約需 30 條 leased connection。`pool.maxSize` 應按每個**實體 MQ instance** 的預期 in-flight request 數 sizing，而非按 logical helper。單一 instance（或 request 固定送往一個 instance）約需 30 條再加 headroom。兩個平均分配的 instance 平均各需約 15 條；亦要考慮 selection skew 並確認實際分佈。`resources.mq` 按實體 instance 顯示 pool metrics，請逐一查看 waiting、timeout 及 response latency。`minIdle` 會在該實體 pool 首次被使用並建立時套用，不會在 Load 開始前建立或預熱 pool。若要避免 connection creation 影響 measured steady state，請配合 Load warm-up / first-use warm-up phase 使用 `minIdle`。負載變化時，請依觀察到的平均 latency 重新估算；tail latency 可用於 headroom 規劃，但不是公式中的平均值。
-
-duration 必填。warmup、rampUp、rampDown 預設為零。Warm-up 送出真實 traffic，但不計入 measured threshold aggregates。可選 seed 使 closed-VU think-time randomization 可重複。
-
-#### 識別 iterations 並查看其 artifacts
-
-每個 started iteration 會在 bootstrap vars 與 Target 執行前取得 engine-managed `EXEC.ID`；`EXEC.RUN_ID` 維持外層 Run。詳見 [ID 初始化](#檢查-execid-可用欄位)。
-
-產生的 ID 必須非空且是安全的 path segment。重複 ID 會在 target 啟動前失敗；ATT 不會靜默附加 suffix。
-
-~~~text
-output/load/<RUN_ID>/
-├── load-summary.json
-├── load-summary.yaml
-├── report/index.html
-├── executions/<EXEC.ID>/
-│   ├── case.log
-│   └── 寫入 EXEC.OUTPUT_DIR 的 action outputs
-├── failures/<EXEC.ID>/case.log
-├── failures/<EXEC.ID>/case.yaml
-├── samples/<EXEC.ID>/case.log
-└── samples/<EXEC.ID>/case.yaml
-~~~
-
-Metrics-only iteration 雖有 `EXEC.ID`，但除非 operation 寫入 artifact 或 retention materialize evidence，否則不會建立 per-iteration execution directory。Iteration 執行期間 `EXEC.OUTPUT_DIR` 維持 `executions/<EXEC.ID>` 的 logical planned path。保留的 failure 或 sampled success 會將 evidence 複製到 `failures/<EXEC.ID>/` 或 `samples/<EXEC.ID>/`。Report/evidence summary 顯示 `EXEC.ID`；有保留 `case.log` 時提供連結。Optional Resource output formatting 會延遲至 iteration 被保留後；明確要求的 Tool evidence collector 仍會執行。
-
-#### 選擇要保留的 iteration evidence
-
-`evidence.mode` 支援 `metrics`、`failures`、`samples`、`all`；預設為 `failures`。這些 mode 分別將 effective success/failure policy 預設為 `none/none`、`none/full`、`sample/full`、`full/full`。`evidence.success` 與 `evidence.failure` 可各自覆寫預設。`sampleRate` 決定 hash 資格；配額 window 另行決定實際保留項目。Dropped arrival 不建立 iteration evidence。有上限的選取使用最多十個 append-only time window，並在每個 window 內先到先得；抽樣和代表性限制見[獨立 evidence 配額](#獨立-evidence-配額)。
-
-Case-log capture 依 effective success/failure policy 及剩餘 retention capacity 決定。Failure policy 為 `full` 且仍有 `maxSamples` slot 時，符合條件的 failure（包括 `samples` 中未被抽中的 success）會保留經 redaction 的 rolling log tail，上限為 65,536 個字符。ATT 只會在 failure 取得 retention slot 後 materialize failure log。Tail 被截斷時會加上 marker 標示較早事件已省略，並在末尾保留最新的 action 和 runtime failure details。容量耗盡後不再保留 failure log。Sampled success 和 full-success policy 會保留完整的 deferred log。例如 `mode: metrics, failure: full` 會在容量允許時進行有界 failure capture；`mode: failures, failure: none` 則會停用此功能。Implementation 和 storage 細節見 [Load scheduler design](system-design/load-scheduler.zh.md)。
-
-evidence.resources.output 支援 inherit（預設）或 none。none 停用可選的人類可讀 resource-output 格式化與物化，但保留 typed result、stdoutFormat/responseFormat parsing、exact file-content String 與 requestFormat 行為。Load 將 resource output 延至 iteration 被保留後才處理；metrics-only iteration 不做 business-output formatting 或 evidence file I/O。
-
-#### 查看 Load 結果並設定 thresholds
-
-ATT 在 run root 寫入有界 load-summary.json/yaml 與 self-contained report/index.html。Report 對 retained execution 顯示 EXEC.ID、workload/target identity、status、timing；有保留 case.log 時提供 link。Aggregate latency percentile 由 aggregate latency collector 計算，不會平均 workload percentile。
-
-直接 Engine／CLI `OperationResult` 輸出仍保留舊版完整 summary 詳細格式；其 schema 定義仍存於 `schemas/history/`。`LoadReportWriter` 輸出的 archived report 使用新增欄位的 `att-load-summary/v1.3`，並將大型 aggregate／per-workload metric collection 移至相對路徑 `details/v1/` sidecar，由 `details/v1/manifest.json` 引用。Inline collection 最多顯示 32 項 preview；每個 sidecar chunk 最多 4 MiB，sidecar 集合上限為 100 MiB／9,000 個檔案，完整 report output 上限為 120 MiB，每個主要 report 檔案最多 16 MiB。Aggregate counters 和 thresholds 維持精確。Server 代理 Job Results 則在 `result.summary` 使用 `att-load-terminal-result/v1`：執行結果、performance verdict、有界 aggregate counters、workload／threshold 預覽、主要診斷及 detail/archive 狀態。精簡 summary 上限為 32 KiB；量度終端 journal 和 SSE envelope 後均低於 48 KiB，並低於不變的 64 KiB journal event-data 上限。Worker frame 的 1 MiB 上限也維持不變。LOAD scheduling、virtual-user 和 arrival-rate 語義不變。
-
-長時間 scenario 會由 Engine 執行 read-only preflight 並在 summary 記錄 `resources.preflight`；此提示不會只因 duration 過長而拒絕 run。Browser inline draft 及 package-backed scenario 均受 Server 設定的完整 envelope 上限 (`server.inlineLoad.maxDurationSeconds`，最多 10 日) 限制。選擇性 CLI Local 手動 benchmark 見 [25 小時 LOAD soak acceptance 指南](operations/load-soak-acceptance.zh.md)。
-
-完整 buckets、failure samples、workload／threshold 細節及 evidence 仍保存在 `load-summary.json`、`load-summary.yaml`、`report/index.html` 及版本化 sidecar，Server 只透過現有授權 artifact archive routes 提供。Studio 先顯示精簡結果；開啟 Results 才載入 evidence/workload preview，開啟 Metrics 才載入 metric-series sidecar。初始 Job Details 不會請求 artifact。Archive availability 與執行結果獨立；`PENDING`、`ARCHIVING`、`READY`、`FAILED` 或詳細資料 omitted 均不會改變終端狀態或 exit code。ERROR 和 INVALID 會優先保留真實 runtime/preparation/validation 原因，而非 Worker／Journal truncation 或 archive 診斷。
-
-Load v1.9 新增 `all`、`measured`、`steady` 三個 event-time window。`measured` 從 warm-up 後開始，包含 ramp-up、steady、ramp-down；`steady` 只涵蓋配置的穩態 duration。HTML report 預設顯示 `steady`，並可切換其他 window。Scheduled、started、completed rate 依各 event timestamp 及配置 window duration 計算，因此 `startedRate` 仍按 event time 計算。`admissionRate` 則使用相同的 scheduled cohort：分子是該 window 內排程且在 run 結束前已開始的 arrival，分母是該 window 內全部排程 arrival；run 結束仍未開始的 arrival 視為未准入。Latency percentile 和 outcome count 依 scheduled cohort 計算，因此 drain 完成的 iteration 仍屬於其 scheduled phase。既有 top-level metric 名稱及 legacy 語義仍保留。
-
-巢狀 `thresholds.steady` 和 `thresholds.overall` 分別對 steady 與 all-execution window 評估。原有 top-level threshold 保持先前 measured-run 語義。Window 不完整或無法評估時回報 `NOT_EVALUATED`，不視為 performance pass。Report 會把 execution status 與 performance verdict 分開，並顯示 percentile sample／observation count，讓稀疏估算可被辨識。直接 Engine／CLI summary 使用 legacy summary contract (schema under `schemas/history/`)；archived report 使用新增 `detailManifestPath` 和 workload sidecar references 的 `att-load-summary/v1.3`。
-
-Summary 的 `thresholds` object 中，`status` 和 `performanceVerdict` 是 authoritative tri-state 欄位，值為 `MET`、`NOT_MET` 或 `NOT_EVALUATED`。Optional `legacyPassed` boolean 維持舊有 `passed()` 語義：已配置但無法評估的 threshold 為 false，未配置 threshold 時為 true。Consumer 應使用 tri-state 欄位，區分 evidence 不完整與 threshold 未達標。
-
-Summary 會將 generator observation 與 SUT outcome 分開。`metrics.generator` 包含 sampled heap used/committed/maximum、觀察到的 peak live threads、GC count/time，以及 JVM 支援時的 process CPU。Sampling 限制為每 100 ms 至多一次，較短暫的 peak 可能錯過。`schedulerWakeups`、`submitLag*` 與 `workerQueueDepth*` 描述 scheduler pressure；arrival drops 與 SUT error 分開。`resources.http` 會按 HTTP helper 報告 active/idle/waiting 與觀察到的 peak connections，並與 DB、MQ、Render pool/plan diagnostics 並列；`resources.resourceMetricSamples` 顯示 rate-limited resource observations 的數量。`resources.executionIds` 顯示 custom execution-ID reservation 數量。Testdata mapping/selection counts 位於 `resources.generator.testdata`；解讀方式和 implementation limits 見 [Load Generator Telemetry](system-design/load-telemetry.zh.md)。
-
-`latencySampleCapacity`、`latencySampleCount`、`latencyObservationCount` 及 `latencySampleRate` 描述 run-level percentile estimate；精確 latency aggregates 仍保持精確。Run-level reservoir 最多保留 4,096 個 sample。Legacy `metrics.phases.*` 每個 phase 最多保留 256 個 percentile sample；每個 configured window 的 `metrics.windowMetrics.windows.*.cohort.latency` 則使用獨立的 4,096-sample reservoir。`metrics.windowMetrics.timeSeries.points` 的每個 chart bin 最多保留 128 個 latency sample。
-
-`metrics.windowMetrics.timeSeries.points` 全執行序列最多保留 2,048 個有資料的 time bin，初始寬度為 1,000 ms。資料 bin 超過容量時，ATT 會合併相鄰 bin，並以 power-of-two coarsening 將 bucket 寬度加倍。系統不會淘汰歷史 bin，因此較長的 run 會以較低的時間解析度保留歷史資料。`metrics.windowMetrics.timeSeries.windowSeries.measured.points` 和 `metrics.windowMetrics.timeSeries.windowSeries.steady.points` 是各自獨立的序列，各自最多 2,048 個 bin。它們按 configured window 起點對齊，初始寬度為 1,000 ms 與 window duration 兩者中較小者，並會在 window boundary 截短最後一個 partial bucket；它們使用相同的 coarsening 和不淘汰歷史資料政策。Compatibility `metrics.buckets` 是獨立的 legacy series：使用 circular buffer 保留最新 4,096 個一秒 bucket，並淘汰較舊項目。ATT 不會平均 workload percentile 來計算整體 percentile。
-
-Load telemetry 欄位在舊版直接 summary contract（schema under `schemas/history/`）下仍屬 optional；archived report 使用 `att-load-summary/v1.3` 及 sidecar references。Server Job Results 使用另一個版本化契約 `att-load-terminal-result/v1`；需要完整 metrics 的 consumer 應在 archive 顯示 READY 後跟隨 `detailManifestPath` 及相對 chunk references。
-
-Sampling limits、metrics 解讀方式和 maintainer verification 請看 [Load Generator Telemetry](system-design/load-telemetry.zh.md) 及[精簡 LOAD 終端結果](system-design/load-terminal-result.zh.md)。執行確定性的短時間對照與模擬長時間 transfer benchmark：`mvn -q -o -pl att-server -am -Dtest=ServerRuntimeLoadTerminalResultTest#benchmarkShortAndSyntheticLongMultiWorkloadTransferSizes -Datt.skipFrontendUnitTests=true -Dsurefire.failIfNoSpecifiedTests=false test`。該測試會建構等同 30–60 分鐘的多 workload 結果，不會真的執行長時間 LOAD。
-
-Root thresholds 只套用於 aggregate run；workload thresholds 只套用於個別 workload，不會從 root 繼承。Threshold 失敗回傳 FAIL/exit 1。設定或 target 無效回傳 exit 2；runtime/infrastructure error 回傳 ERROR/exit 3。Generator drop 不屬於 SUT error。
-
-#### 取消 Load run
-
-取消時，ATT 會停止新的 admission，並 interrupt 已 admission 的 iterations。已 admission 工作的 completion events 會先 drain 並計入 outcomes，之後才 finalize workload results 和 metrics。
-
-#### 了解 Load 執行期間的 payload 變化
-
-Load workload 啟動前，ATT 會為每個可達的 Render payload glob 解析一次，並凍結該 run 匹配到的 UTF-8 source content。Run 進行中對 payload 的編輯、替換或新增 glob match 不影響該 run 的 iterations；下一次 Load run 會重新解析 package。一般 Run 與 Debug 每次 execution 使用新 plan，因此下一次 execution 會讀取編輯後的內容。
-
-每個 iteration 都會以自己的 Context 評估 Context reference、built-in call 及 external call。`seq.next()`、clock/random function 及 external call 等 stateful call 會在每次 iteration 執行。Render 在記憶體回傳 String，因此將 `ACTIONS.<id>.output.result` 傳給下游 action 不會建立中間 Render file。只有 operation 明確需要檔案時才使用 `EXEC.OUTPUT_DIR`。
-
-使用 `--profile` 時，`performance.json` 會記錄 `renderPlansCompiled`、`renderPlanCacheHits`、`renderPayloadResolutions`、`renderPayloadResolutionCacheHits`、`renderEvaluations`、`renderArtifactWrites` 與 `renderSourceBytes`。Load 如何準備 plans 並在 iterations 間重用 immutable source data，請看 [Load scheduler design](system-design/load-scheduler.zh.md)。
-
-使用 `--profile` 時，`performance.json` 的 `resources.execution` 會包含 `executionPlansCompiled`、`actionPlansCompiled` 與 `actionEvaluations`。Plan 和 resolver reuse 的 implementation 見 [Load scheduler design](system-design/load-scheduler.zh.md)。
-
-#### 從 CLI 覆蓋 workload 設定
-
-單一 workload 可用 --users、--arrival-rate、--warmup、--ramp-up、--duration、--ramp-down、--think-time、--max-concurrent 等 option 覆蓋對應 YAML。多 workload 使用未指定 workload 的 load-model override 會失敗。
-
-重複的 `--set` 可用 `input.path=value`、僅限 Tool 的 `arg.name=value`，或僅限 Template/Flow 的 `vars.path=value`。值使用 safe YAML 解析並保留型別；實用時支援巢狀 map 與數字 list index，例如 `input.customer.ids[0]=42`。重複賦值依序套用，最後一個值生效；解析 override 時不會評估 ATT expression。多 workload scenario 會拒絕未限定的 override。
-
-可選的 `load/load.yaml` 使用現行 `att-load/v1.9` policy-only descriptor，不含 target、inputs 或 Tool arguments。它提供預設 `load` policy，並可選擇包含 `execution`、`thresholds`、`evidence`、`seed` 及 Load-local `testdata` imports。明確 CLI pacing 會覆蓋 policy。`load --debug template|flow|tool <id>` 會將 sidecar 的 `inputs`、`vars` 或 Tool `arguments` promotion 成暫時的單一 workload scenario，然後使用正常 Load validation、scheduler 和 evidence pipeline；不會先執行 Debug。沒有 policy 時，請在 CLI 提供完整 policy，例如 `--users 2 --duration 10s`（arrival-rate 還需要 `--max-concurrent` 和 `--overload-policy`）。
-
-Policy descriptor 範例（複製到 `load/load.yaml`）：
-
-~~~yaml
-schemaVersion: att-load/v1.9
-load: {users: 2, duration: 10s}
-execution: {thinkTime: 250ms}
-evidence: {mode: failures}
-~~~
-
-~~~sh
-./att.sh load ../examples/load/closed-smoke.yaml
-./att.sh load ../examples/load/arrival-smoke.yaml --format json
-./att.sh load ../examples/load/multi-closed.yaml
-./att.sh load ../examples/load/multi-arrival.yaml
-./att.sh debug template PAYMENT_INVOKE --set 'vars.reference=${EXEC.INPUT.reference}'
-./att.sh load --debug flow common.payment --users 2 --duration 10s --set 'vars.reference=${EXEC.INPUT.reference}'
-./att.sh debug
-./att.sh load
-./att.sh load --debug tool fpp.invokeApi --set arg.requestId=42
-~~~
-
-可複製範例與欄位說明見 [examples/load/README.md](../examples/load/README.md)；schema migration 見 [Migration Notes](reference.zh/appendices/migrations.md)。
-
-#### 檢查 EXEC.ID 可用欄位
-
-ATT 為每個 started iteration 配置唯一的 engine-managed `EXEC.ID`：`<runId>-execution-<sequence>`。同一 Run 的所有 Workload、Target、Mix entry 及 phase 共用一個 thread-safe、單調遞增的 allocator。ID 在 bootstrap vars 與 Target action 前發布；`EXEC.RUN_ID` 保持為外層 Run identity。Collision tracking 不會建立 per-iteration 檔案或持續增長的 ID registry。
-
-目前及歷史 Load Scenario、policy-only YAML、inline draft，以及已儲存的 Schedule／Worker snapshot，都拒絕 `execution.execIdFormat`，包括空值。請移除此欄位並遷移至 `att-load/v1.9`，檢查依賴 artifact path 的整合，改用獨立 input／variable 保存 business correlation。歷史 artifact 保留原路徑；歷史 schema 檔案仍供檢視。不含自訂 ID 的歷史resource會正規化至目前 contract。受影響的 immutable schedule 須透過一般 reviewed-draft 流程建立替代版本。
-
-生成 ID 沿用安全 path segment grammar 及 240 字元上限；Load execution prefix 保留符合 ASCII grammar 的 Run ID；其他合法 Run ID（包括 Unicode、內含空格）使用 `run-<Run ID UTF-8 的 SHA-256>`，每個 Run 只計算一次。外層 Run 目錄及 `EXEC.RUN_ID` 保留原值。 所有 prefix 均預留 `-execution-` 與 signed-long sequence 空間。Sequence 耗盡後持續失敗，不會 wrap。每個 Run output namespace 只透過 `.execution-owner` 原子 claim 一次；第二個 owner 或 restart 必須選用新的外層 Run ID。Claim 由安全的 completed-Job artifact retention 隨 Run 目錄清理。舊 reservation 目錄只可由 completed-Job retention 清理，不能在舊 process 仍可能使用時刪除。Metrics-only evidence 保持 lazy；單一 Run metadata 檔不會建立 iteration workspace。
-
-外層 `execution.runIdFormat`、`execution.debugIdFormat`、literal `--run-id` 與 `--debug-id` 行為不變。Diagnostic iteration／VU／Workload／Mix ID 與 scheduler event sequence 仍獨立於 `EXEC.ID`。分散式 Worker 必須使用互不重疊的 namespace 或共用 allocator；獨立 process-local counter 不能安全共用同一 Run namespace。
-
-#### 錯誤率與失敗診斷（4.2.4）
-
-測量階段完成項目分為 PASS、SUT 失敗及執行期 ERROR/INVALID。Warm-up 不計入測量錯誤率，但仍可使執行結果成為 ERROR。產生器丟棄獨立計算。
-
-| 指標 | 分子 / 分母 |
-| --- | --- |
-| `sutErrorRate`／原有 `errorRate` 門檻 | `measuredFailure / measuredCompleted` |
-| `runtimeErrorRate` | `measuredRuntimeError / measuredCompleted` |
-| `totalErrorRate` | `(measuredFailure + measuredRuntimeError) / measuredCompleted` |
-| `completedThroughput` | 全部測量完成數 / 測量秒數 |
-| `successfulThroughput` | 測量 PASS 數 / 測量秒數 |
-
-可選的 `runtimeErrorRate`、`totalErrorRate` 門檻採用百分比比較，例如 `{errorRate: '< 1%', totalErrorRate: '< 1%'}`。`errorRate` 保留僅計 SUT FAIL 的含義，不包含執行期錯誤或丟棄。Thresholds PASS 可與 Execution ERROR 同時出現；門檻通過或完成 TPS 均不代表執行成功。沒有測量完成項目時，JSON/YAML 的錯誤率維持數值零以相容舊消費者，HTML 顯示 N/A。報告摘要沒有門檻時顯示 `Thresholds: none configured`；有門檻時顯示 `Thresholds: N passed / M failed`。
-
-Runtime failures / Failure diagnosis 顯示全部／測量執行期錯誤數，並於每個彙總、workload 或 mix 收集器保留最多 100 個已遮罩的輕量失敗樣本。樣本包含 iteration、序號、階段、時間、workload/mix、結果、分類、診斷來源／代碼／摘要及證據狀態；達到樣本上限後仍完整計數。沒有樣本時，報告顯示 `No lightweight failure samples were recorded.`。排程器例外與執行器回傳失敗分開顯示；公開資料不含 stack trace、已分類秘密或主機路徑。保留的 Case Log 可從 Evidence 區段連結開啟。`NO_CASE_LOG`、`WORKSPACE_MISSING`、`EVIDENCE_IO_ERROR`、`EVIDENCE_MATERIALIZATION_ERROR`、`NOT_RETAINED_BY_POLICY` 分別說明證據缺失原因，不改變 iteration 結果，也不額外計為一次失敗。
-
-#### 不綁定 Target 的 Load Templates
-
-Load testing 預設開啟 **Templates**。六種模式共同使用 `att-load-template/v1`：`single-vu`、`single-tps`、`single-workload-mix`、`multi-vu`、`multi-tps`、`multi-workload-mix`。Single VU/TPS 沿用 Quick Load；mix weights 是每個 workload 內的 iteration 選擇機率，不會分配固定 VU。各 workload 獨立持有 users 或 requested arrivals；所有 workload 共用 phase timing。實際 throughput 和 generator drops 另行報告。
-
-**Scenarios** 保留 executable YAML 與 **Legacy Quick Load Policy**，排除 `load/templates/`、`load/bindings/`。**View LOAD Jobs** 開啟 Jobs and results，使用 Server 授權後的 LOAD 篩選及分頁，detail/back 繼續保留 URL filter。
-
-內建 ID 為 `builtin:<mode>`。Package template 放於 `load/templates/`，binding 放於 `load/bindings/`；只允許 package-relative、安全且通過 schema 的檔案，每檔最多 256 KiB，catalog 掃描有上限。Template 只保存結構與 policy，不保存 Target ID 或 business values。完整 YAML 範例見英文同名章節；template 欄位為 `schemaVersion`、`name`、`mode`、`policy`、`workloads`。Workload 宣告穩定 `id`、可選 `load` override、mix slot 的 `id/weight`。Binding descriptor 使用 `att-load-bindings/v1`，`bindings.<workloadId>.target` 或 `bindings.<workloadId>.mix.<slotId>` 指向 `{type,id}`。
-
-Catalog inspection 每頁最多 100 項，亦受序列化 response 大小限制（預設 256 KiB）。須持續跟隨 `nextOffset`，直到其為 null；每頁保留完整 definition，相同 query 與 offset 可取得對應 definition，毋須額外 detail request。若單一 definition 已超出大小限制，catalog 仍列出 metadata，但標示 `response-too-large` 並省略 definition；可縮小檔案供 Studio 使用，或在 CLI 直接以檔案 reference compose。CLI `load --list-templates` 自動讀取所有分頁，並保留掃描上限的 `truncated` 標示。
-
-例如 workload-a 使用 10 VU、A/B 70/30，workload-b 使用 20 VU、B/C 40/60，即 2 workloads、4 bindings、3 unique targets、30 VU；重複 Target 不合併 workload。額外 binding 必須有 `prototype`，明確指向同 scope 的原有 slot，複製 policy 而不複製 Target；不可省略必要 slot。Descriptor 最多 128 workloads/entries，Server 可設定更低 aggregate limits。
-
-Builder 以精簡表格顯示 users/rates、bindings、weights。Workload、mix、Target、common settings 使用 Save/Cancel modal；Cancel/Escape 捨棄暫存修改。每個 Target 的 typed sidecar inputs/vars/Tool arguments 獨立載入；優先次序為 template policy、safe sidecar defaults、explicit binding values、適用的 CLI overrides。Debug-local testdata imports 不會自動提升，須明確宣告 Load testdata。Binding 亦可指定 workload inputs/vars/testdata selection。Business inputs/vars 按 key 合併，優先順序為 safe sidecar defaults、Target binding、workload binding；後者覆蓋同名 key，其餘 key 保留。Studio validation 及編輯會保留各 workload 的 timing、ramps、execution settings 與 ranged think time。
-
-Validate 經由共享 Engine composer 建立完整 `att-load/v1.9` immutable draft；Review 顯示 Server-normalized redacted YAML。儲存修改或更改 Environment 會使驗證失效；提交時再次檢查 package/source revision。Run 前確認 traffic；Schedule 沿用相同 draft、權限、limits、expiry 和 revision policy。不使用 browser storage 或寫入 package source。
-
-LOAD Job 的 **Configure & Rerun** 使用此標準 editor 及 Server 發出的 `draftRef`。它會預填安全保留的 scenario、environment、workload IDs/mix、model、pacing、timing phases、thresholds、evidence 及可安全保留的 inputs。修改共用 timing envelope 與模型專屬欄位後，需依目前 Package 驗證並檢查差異。Current-package rerun 不會無提示重載最新 YAML defaults，也不會把 Arrival Rate 轉成 Virtual Users。File-backed LOAD replay 會沿用 package-relative source route，不套用只供 inline draft 使用的 duration 上限；詳見 [Job replay](reference.zh/execution-modes/unified-run.md)。
-
-```bash
-./att.sh load --list-templates --format json
-./att.sh load --debug template BROWSE --load-template builtin:single-vu --preview
-./att.sh load --debug --load-template load/templates/mixed.yaml --bindings load/bindings/mixed.yaml --env SIT --preview --format json
-```
-
-Windows `att.bat` 使用相同參數。List/preview 不啟動 traffic；確認 composed scenario 後才移除 `--preview`。Multi-target 必須提供完整 bindings，拒絕不明確的 `--input`、`--set`、`--users`、`--arrival-rate`、`--think-time`、`--max-concurrent`、`--overload-policy`；duration/warmup/ramp timing 可共同覆蓋。既有不帶 template 的 single-target grammar 和無參數 scenario discovery 不變；validation error 回傳非零 exit code 與欄位位置。
-
-## Resources 與 integrations
-
-Tool、DBHelper、MQHelper、HTTPHelper、SSHHelper 是同級 integration/resource 類型。SSHHelper 為 command-backed Tool 提供路由，也提供 `ssh.<helperId>.execute|upload` 及 remote filesystem operation；最後收斂到 common operation-result/evidence contract。
-
-```text
-Tool      -> process/call operation --\
-DBHelper  -> JDBC operation ----------+--> Action output
-MQHelper  -> MQ operation ------------/
-HTTPHelper -> HTTP operation ---------/
-SSHHelper -> SSH routing 或 Resource Helper /
-```
-
-Resource ID 是 Template/expression 或 Tool group 所引用的 logical contract。Environment profile 可把相同 DB/MQ/HTTP/SSH logical ID 綁定到不同 descriptor，無需修改 Action YAML。
-
-小寫 `x-` 可停用 ATT 擁有的 resource 配置字段及 keyed entries；但不會移除 HTTP header 名稱或 DB parameters 等 user data。詳情見[Configuration](reference.zh/configuration.md#使用-x-忽略或停用-att-配置項)。
-
-### Operation result 與 Evidence
-
-ATT 將 operation 的邏輯結果與執行 evidence 分開：
-
-~~~text
-Operation
-├── result       # native typed value
-└── evidence     # 有界的 execution/transport metadata
-~~~
-
-Action 在 output.result 發布最後的 operation value。Action status、assertion detail、diagnostic、attempts 描述執行，不會取代 business result。Command stdout 使用 stdoutFormat 解析；HTTP/MQ/SSH response 或 stdout 使用各自的 responseFormat；DB operation 回傳 native typed value。File-content expression 回傳原樣 file text String，詳見[Action 與型別化值](reference.zh/actions.md)。
-
-Resource evidence 可包含低成本 metadata。Helper 也可選擇配置人類可讀 snapshot：
-
-~~~yaml
-evidence:
-  output:
-    format: json
-    maxChars: 10000
-~~~
-
-Evidence output 支援 json、yaml、xml、text、sqlplus。這只用於 presentation，不會修改或取代 output.result。含 secrets 的值會過濾或省略。
-
-Load scenario 可將 evidence.resources.output 設為 inherit（預設）或 none。none 略過可選的 resource-output formatting/materialization；inherit 會等 success sample 或 failure 取得 retention slot 後才格式化。Metrics-only iteration 不序列化 resource output，也不建立 evidence workspace。Transport parsing 與 file-content String representation 不變。
-
-### Tool
-
-Tool 是具名的 external 或 framework-native capability。Descriptor 必須二選一使用 command 或 call。
-
-#### Command-backed Tool
-
-Command Tool 使用 stdoutFormat 將外部 stdout 解析為型別化結果：
-
-~~~yaml
-tools:
-  queryOrder:
-    command: [./tools/query-order.sh]
-    stdoutFormat: json
-    arguments: {}
-~~~
-
-stdoutFormat 支援 text、json、yaml、xml。ATT 只解析一次 stdout，再將 typed value 發布於 output.result。此欄位不控制人類可讀日誌或檔案輸出。Exit code、有界 stdout/stderr preview 和 process artifacts 都屬於 evidence。
-
-#### Call-backed Tool
-
-Call-backed Tool 呼叫 built-in 或支援的原生 DB/MQ/HTTP/SSH operation，其 native typed return value 發布於 output.result。Call-backed descriptor 不宣告 stdoutFormat。
-
-~~~yaml
-tools:
-  queryOrder:
-    call: "#{db.orders.query(sql='select id from orders where id=:id', parameters={id: ${input.orderId}})}"
-    arguments:
-      orderId:
-        name: Order ID
-        description: Order key
-        required: true
-~~~
-
-Tool invocation 沒有 result.format/path/overwrite 契約。檔案持久化只由明確定義該 API 的 resource 負責；人類可讀表示屬於 Log 或配置的 evidence output。HTTP/MQ/SSH parsing 或 transfer 由各自 transport boundary 管理。
-
-Action result 規則見[Action 與型別化值](reference.zh/actions.md)；typed result/evidence 的區分見[Operation Result and Evidence](reference.zh/resources/operation-result.md)。
-
-#### Tool 定義中的 `command` 表達式
-
-##### Context and legal forms
-
-Tool 的 `command` 也擁有獨立的受限 Context，只能引用該 Tool `arguments` 映射中聲明的鍵。canonical 文檔及新配置應使用 `${input.<argument>}`：
-
-| 形式 | 含義 |
-|---|---|
-| `${input.requestText}` | canonical Tool 本地輸入引用 |
-| `${TOOL.input.requestText}` | legacy 完整別名；會產生 `CONTEXT_TOOL_INPUT_SHORTHAND` |
-| `${requestText}` | deprecated shorthand；僅在唯一對應已聲明參數時兼容，並產生遷移 warning |
-
-`${TOOL.input.argument}` 與 `${argument}` 只有在名稱恰好對應當前 Tool 一個已聲明參數時才會接受，並產生 `CONTEXT_TOOL_INPUT_SHORTHAND`；`att validate` 會給出精確的 `${input.argument}` 替換。未聲明或有歧義的 shorthand 會報錯。command-backed 與 call-backed Tool 使用相同規則。
-
-例如：
-
-```yaml
-tools:
-  invokePaymentApi:
-    name: Invoke Payment API
-    description: Invoke a file-content payment request
-    command:
-      - ./tools/invoke_payment_api.sh
-      - "${input.requestText}"
-      - "${input.environment}"
-    stdoutFormat: json
-    arguments:
-      requestText:
-        name: Request Body
-        description: Request body String
-        required: true
-      environment:
-        name: Environment
-        description: Target environment
-        required: true
-```
-
-每個 YAML command list item 在 interpolation 後仍是一個 atomic argv；值中含空格、引號或類似 shell 的字符也不會再次分詞。ATT 不會啟動本地 shell。
-
-##### 引號、Context value 與 atomic argv
-
-Tool call 內的引號屬於 ATT expression grammar，並不是 shell quote。外層 `'...'` 或 `"..."` delimiter 在調用前會移除；另一種引號是普通字符；與 delimiter 相同的引號可用反斜線 escape。Quoted value 內嵌 `${...}` 會做 interpolation；未加引號的 canonical Context path 則直接傳遞 typed value。
-
-以下 Tool 會把每個輸入保持為一個 argv：
-
-```yaml
-tools:
-  writeAudit:
-    name: Write audit
-    description: Write one audit message for one source file
-    command: [./tools/write_audit.sh, "${input.message}", "${input.sourceFile}"]
-    stdoutFormat: yaml
-    arguments:
-      message:
-        name: Message
-        description: Exact audit message
-        required: true
-      sourceFile:
-        name: Source file
-        description: File associated with the message
-        required: true
-```
-
-當 call 同時包含多層引號時，建議使用 YAML block scalar：
-
-```yaml
-singleQuote:
-  type: tool
-  call: >-
-    #{writeAudit(
-        message="Customer O'Reilly",
-        sourceFile=${EXEC.INPUT.sourceFile}
-    )}
-
-doubleQuote:
-  type: tool
-  call: >-
-    #{writeAudit(
-        message='status="READY"',
-        sourceFile=${EXEC.INPUT.sourceFile}
-    )}
-
-mixedQuotesAndContext:
-  type: tool
-  call: >-
-    #{writeAudit(
-        message="O'Reilly said \"READY\" for ${EXEC.INPUT.caseId}",
-        sourceFile=${EXEC.INPUT.sourceFile}
-    )}
-```
-
-Child process 收到的三條 message 分別是 `Customer O'Reilly`、`status="READY"`，以及例如 `O'Reilly said "READY" for payment.payment.TC001`。Context value 自身包含任一種引號時，無需 caller 做 shell escaping，仍只佔一個 argv。
-
-如果堅持把 call 寫成單行，還需額外處理獨立的 YAML escaping 層：
-
-```yaml
-call: "#{writeAudit(message='status=\"READY\"', sourceFile=${EXEC.INPUT.sourceFile})}"
-call: '#{writeAudit(message="O''Reilly", sourceFile=${EXEC.INPUT.sourceFile})}'
-```
-
-第一行是為 YAML double-quoted scalar escape 雙引號；第二行是為 YAML single-quoted scalar 把 apostrophe 寫成兩個。之後 expression engine 才會解析所得的 `#{...}`。
-
-普通 process-backed Tool 不會讓 shell 重新解釋已解析輸入。Context value 內的 `$HOME`、`$(date)`、`a*.xml`、`|`、`>` 與引號都按字面傳遞。需要 shell-like behavior 時應使用經過審查的 wrapper；隨包提供的 `fpp.exehelper` 和 `fpp.loghelper` 只提供上文明確說明的 pathname expansion。
-
-##### Illegal forms and token restrictions
-
-未聲明或有歧義的 shorthand 會報錯。Process-backed Tool 不會對已解析的輸入執行 shell expansion 或重新分詞；需要 shell-like behavior 時，應使用經過審查的 wrapper。
-
-#### Tool 定義中的 `call` 表達式
-
-Call-backed Tool 使用相同的聲明參數理念，但保留 typed value，並只允許 pure built-in 與一個主要 DB query/scalar/update。`${input.customerId}` 來自外層 Tool call，不是 Case 全局變量；`CASE`／`ACTIONS` 等 root 在定義中不可見。Inline SQL 與 package-contained SQL file 內容都在此 scope render，測試數據仍應放在 `params` 並使用 JDBC `?`。
-
-#### Inline Tool descriptor fields
-
-Global `tools` and Tool-group `tools` entries use the same Tool contract:
-
-| Object | Allowed properties |
-|---|---|
-| `tools.<key>` | `name`, `description`, exactly one of `command`/`call`, optional `arguments`; command Tools require `stdoutFormat`, call-backed Tools may use `cache`; `x-*` |
-| call-backed `tools.<key>.cache` | required `scope: case|db` |
-| `arguments.<key>` | `name`, `description`, `required`, optional `type`, `enumValues`（僅 `type: enum` 時必須），`argName`、`argNameMode`、`delimit`、`x-*` |
-
-`type` 宣告 configured Tool 完整解析後的值 contract，可用 `any`、`string`、`integer`、`long`、`decimal`、`boolean`、`enum`、`bytes`、`map` 或 `list`。未填 `type` 時仍按 `any` 處理，維持舊 descriptor 行為。數值和 Boolean scalar 接受原生值或去除前後空白的數字／`true`／`false` 字串；enum 必須符合其中一個 `enumValues`；`bytes` 接受 byte array 或 UTF-8 String。`string`、`map` 和 `list` 要求原生值型別吻合。這些檢查在巢狀 expression 完整解析後執行；靜態安全可求值的內容會在 validation 檢查，其餘在 runtime 檢查。
-
-### DBHelper
-
-DBHelper 是獨立於 Tool 的一級 JDBC resource。每個 descriptor 使用 `schemaVersion: att-dbhelper/v2.6` 和穩定 logical `id`；global `dbhelpers` 只引用 descriptor file。
-
-```yaml
-schemaVersion: att-dbhelper/v2.6
-id: orders
-name: Orders database
-description: Orders JDBC resource
-connection:
-  driverClass: oracle.jdbc.OracleDriver
-  url: ${ENV:ORDERS_DB_URL}
-  username: ${ENV:ORDERS_DB_USERNAME}
-  password: ${ENV:ORDERS_DB_PASSWORD}
-```
-
-Credential 可從 environment variable 解析，但不能發布到 `META`、report 或 diagnostic。JDBC driver jar 由使用者放入 `lib/`；ATT 不內置 database driver。
-
-在現行 `att-template/v3.6` 契約中，DB operation 在普通 `type: tool` Action 內使用 `#{db.<id>.query(...)}`、`scalar(...)` 或 `update(...)` call。Call 必須有一個 String `sql` argument。SQL 若存放於 package，可使用 `sql=&{sql/find-order.sql}`；`sqlFile` 只供 historical compatibility。Positional `params` 與 named `parameters` 互斥，並使用相同 JDBC binding 規則。
-
-Query 返回 typed row/scalar；update 返回規範的 update result。Operation、SQL/parameter evidence 進入 common Action envelope；secret credential 永遠不是 evidence。Parameter evidence 按 descriptor/Action 的 masking/type policy 處理。
-
-[Reliability](reference.zh/reliability-execution-control.md) 定義 Action timeout precedence、Retry eligibility、attempt limits 與 replay caution；DBHelper 定義 statement timeout 與 transaction lifecycle。Eligible query 範例：
-
-```yaml
-actions:
-  waitForOrder:
-    timeoutMs: 1500
-    type: tool
-    call: >-
-      #{db.orders.query(
-        sql='select status from orders where id = :id',
-        parameters={id: ${EXEC.INPUT.orderId}}
-      )}
-    assert: "#{${output.result.rowCount} == 1 and ${output.result.rows[0].STATUS} == 'DONE'}"
-    retry:
-      maxAttempts: 5
-      intervalMs: 500
-      retryOn: [ASSERTION, TIMEOUT]
-```
-
-明確的 update 亦使用 Tool Action，而且不可使用 automatic retry：
-
-```yaml
-actions:
-  markOrder:
-    type: tool
-    call: "#{db.orders.update(sql='update orders set status = ? where id = ?', params=['DONE', ${EXEC.INPUT.orderId}])}"
-```
-
-歷史 v3.5/v3.4 的 `type: db` Action 及其 `query`/`update` block 只會由 archived schema 與 compatibility loader 支援。
-
-DBHelper 擁有 descriptor 定義的 connection/statement limit、query timeout、transaction behavior。Transaction finalization 綁定 Case/iteration lifecycle；commit/rollback/reconnect 是 resource operation，不是 public Context root。Action-level timeout/retry 只擴展共同 Action lifecycle，不改變 DBHelper identity 或 Context model。
-
-#### DBHelper 配置
-
-| 路徑 | 必填/默認值 | 約束 |
-|---|---|---|
-| `schemaVersion` | 必填 | `att-dbhelper/v2.6` |
-| `id` | 必填 | `[A-Za-z_][A-Za-z0-9_-]*`；全包忽略大小寫後唯一 |
-| `name`、`description` | 必填 | 非空顯示文字 |
-| `connection.url` | 必填 | 非空 JDBC URL |
-| `connection.username/password` | `""` | 字符串；可用完整 `${ENV:NAME}` |
-| `connection.driverClass` | `""` | 可選顯式 class；默認 JDBC discovery |
-| `connection.properties` | `{}` | 字符串鍵和值；敏感鍵在錯誤中淨化 |
-| `connection.readOnly` | `false` | 布爾值；update Action 在 prepare 前拒絕 |
-| `connection.isolation` | `driverDefault` | `driverDefault`／`readUncommitted`／`readCommitted`／`repeatableRead`／`serializable` |
-| `statement.timeoutSeconds` | `30` | 每個 statement 使用的整數 1–3600 秒 |
-| `transaction.scope` | `case` | `case` 或 `statement` |
-| `transaction.onEnd` | `rollback` | `commit` 或 `rollback` |
-| `result.maxRows` | `1000` | 整數 1–1000000 |
-| `result.maxCellBytes` | `1048576` | 整數 1–1073741824 |
-| `result.maxBytes` | `10485760` | 整數 1–1073741824，且不小於 maxCellBytes |
-| `evidence.sql` | `full` | `full` 或 `hash` |
-| `evidence.parameters` | `values` | `masked`、`types` 或 `values`；使用 values 可能暴露敏感業務數據 |
-| `evidence.output` | 不啟用 | `format: json\|yaml\|xml\|text\|sqlplus`；`maxChars` 預設 10000（1–1000000） |
-| `pool` | 默認值 | `maxSize` 默認 20、`minIdle` 默認 0、`connectionTimeout` 默認 2s；`maxSize` 為 1–10000，`minIdle` 不可大於 `maxSize`，timeout 至少 250ms |
-
-Query result byte limit 逐 row 累加；CLOB UTF-8 bytes 在讀取 chunks 時計算，使限制檢查隨結果大小線性成長。
-
-LOAD 的 run-scoped connection provider 在 `scope: statement` 的每次 statement transaction、結果 materialization、statement close 及 cancellation cleanup 完成後歸還 connection；後續 DB Action 重新借用。`statement/commit` 使用 JDBC auto-commit；`statement/rollback` 在歸還前 rollback。Query/update failure 亦在 cleanup 後歸還，不會自動重試 SQL。
-
-`scope: case` 保留 shared connection 至 Case finalization，維持 read-your-writes 與 rollback-only 行為；預設仍為 `case/rollback`。直接 RUN/DEBUG connection 的生命週期維持原狀。只有各 Action 獨立時才明確選用 statement scope；由 Case scope 改為 statement scope 會改變 transaction 語意。
-
-LOAD `resources.db` 按 helper 增加 aggregate `totalConnectionHoldMs`、`releasedConnections`、`totalStatementMs`、`statementCount`、`activePeak` 及 sampled `observedWaitingPeak`，並保留原有 borrow count/wait/timeout metrics。Hold time 從借用成功至 close 完成；statement time 不含 pool acquisition，但包含結果與 resource cleanup。Sampled waiting peak 可能未捕捉短暫等待；所有 counter 都不包含 SQL、參數、URL 或 credential。`DB_POOL_TIMEOUT` 仍表示 SQL 執行前 acquisition 失敗；SQL timeout 與 Tool Action timeout 是獨立預算。
-
-validate、docs、snapshot 與 dry-run 都不會打開 DB Connection。dbhelper 文件路徑、ID、字段、SQL 文件和 template call 會在執行前校驗。
-
-DB/MQ/HTTP 共用 `evidence.output: {format: json, maxChars: 10000}` presentation policy；支援 `text`、`json`、`yaml`、`xml`、`sqlplus`，後者要求 DB query/update result。`maxChars` 預設 10000，範圍 1–1000000；formatted text 先遮蔽 credential，再按字元確定性截斷，並保留 `format`／`text`／`truncated`。Formatting failure 只寫入有界 `outputError`，不改變 typed `output.result` 或 operation status。Run/Debug 的正常 resource invocation 自動將 snapshot 寫入 Action evidence 和 Case log，不需要額外 Log Action；SQL、parameter、MQ payload metadata、HTTP status/header 等 diagnostics 維持各自契約。Load 不會在每個 iteration 立即 stringify；僅 retained iteration 在 `resource-output.yaml` materialize，`evidence.resources.output: none` 完全跳過。Credential 不會因 presentation 被新增到 evidence。
-
-以上 `waitForOrder` query 無需後續 Log Action。DBHelper 可作以下設定，自動保留 SQL*Plus-style row snapshot：
-
-```yaml
-evidence:
-  sql: full
-  parameters: masked
-  output:
-    format: sqlplus
-    maxChars: 10000
-```
-
-`sql` 決定 SQL evidence；`parameters` 僅接受 `values`、`types` 或 `masked`（沒有 `no_mask` 選項），預設為 `values`。任何 parameter mode 都會繼續遮蔽 configured credentials。`output` 只控制 presentation；Assertion 和後續 Action 仍讀取 typed rows，`db.<id>.query`／`scalar` 遵循相同 policy。`maxChars` 預設 10000，範圍為 1 至 1000000。大型 `SELECT` 可能需要提高上限，才能保留完整 formatted snapshot。
-
-### MQHelper
-
-MQHelper 是由多個 physical instances 組成的 IBM MQ logical resource。現行 descriptor 使用 att-mqhelper/v1.3。Connection settings、credentials、queue defaults 與 pool limits 屬於 resource，不會公開至 META。
-
-~~~yaml
-schemaVersion: att-mqhelper/v1.3
-id: payment
-name: Payment MQ
-description: Payment request/reply queues
-defaults:
-  connection:
-    queueManager: QM1
-    host: mq.example.internal
-    port: 1414
-    channel: APP.SVRCONN
-  message:
-    requestQueue: PAYMENT.REQUEST
-    replyQueue: PAYMENT.REPLY
-  requestReply:
-    waitMs: 5000
-    responseFormat: xml
-    maxResponseBytes: 10485760
-  pool:
-    maxSize: 20
-instances:
-  - id: primary
-evidence:
-  payload: none
-  output:
-    format: text
-    maxChars: 10000
-~~~
-
-Tool Action 以 primary operation 呼叫 mq.<id>.send、mq.<id>.receive 或 mq.<id>.request。MQ reply bytes 在收到 CCSID metadata 時優先按該編碼解碼，再依 responseFormat（text/json/yaml/xml）解析。Typed value 發布於 output.result。responseFormat 負責 ingress parsing；Log.format 和 evidence.output.format 只控制 presentation。
-
-#### Request queue 路由
-
-<!-- att-docs:historical -->
-`att-mqhelper/v1.3` 新增 `message.requestQueues` 及 `message.requestQueueSelection.strategy`。既有 `att-mqhelper/v1.2` scalar descriptor 仍可使用，並保留原有行為；新欄位須使用 v1.3。
-<!-- /att-docs:historical -->
-
-~~~yaml
-schemaVersion: att-mqhelper/v1.3
-id: payment
-name: Payment MQ
-description: Payment request queue routing
-defaults:
-  connection: {queueManager: QM1, host: mq.example.internal, port: 1414, channel: APP.SVRCONN}
-  message:
-    requestQueues: [PAYMENT.REQUEST.01, PAYMENT.REQUEST.02, PAYMENT.REQUEST.03]
-    requestQueueSelection: {strategy: roundRobin}
-    replyQueue: PAYMENT.REPLY
-instances:
-  - id: primary
-~~~
-
-清單須有 1–256 個不重複、非空白的 queue name，每項最多 48 個 `[A-Za-z0-9_.%/-]` 字元。`single`（預設）選第一項；`roundRobin` 依清單順序輪替；`random` 只會選已設定項目。同一 message object 不可同時宣告 scalar `requestQueue` 及清單 `requestQueues`。Instance 的 scalar 會取代繼承的清單及其 selection policy；instance 的清單會取代繼承的 scalar／清單，並在沒有自行宣告 policy 時重設為 `single`。只覆寫 `requestQueueSelection` 會保留繼承的清單；selection policy 必須有有效清單。Reply default 獨立繼承，仍是單一可選的 scalar `replyQueue`。
-
-Runtime 先以 `instance=` 或 physical `selection.strategy` 選擇 physical instance，再處理 request queue。`send(queue=...)` 或 `request(requestQueue=...)` 優先於自動路由。明確傳入空白／無效 queue 會在 MQ I/O 前回報 `MQ_ARGUMENT`，不會改用預設目的地。沒有明確 queue 時，使用已選 instance 的 scalar 或清單；缺少必要有效 queue 亦會在連線前失敗。`receive` 繼續使用明確 `queue` 或單一 reply default。每個 request queue 都屬於已選 instance 的 Queue Manager，不會跨 Queue Manager 路由。
-
-Queue round-robin counter 支援並行存取，範圍是單一 `MqHelperExecutor`、logical helper 及 physical instance。共用 executor 的 Run/Debug/Load 呼叫會共用 counter；不同 executor 或 Worker JVM 各自從頭開始，不保證 Server-wide 或跨 Worker 公平性。明確 queue override 及 receive 不會推進 counter。自動選擇只在 argument／payload 驗證後、連線前執行一次；其後 connection/open/PUT 失敗仍會推進 counter。成功 PUT 後（包括 correlated reply timeout）不會重新選擇或自動 failover；明確 Action retry 仍按下述 replay policy 處理。
-
-Action evidence 及 output metadata 包含 `requestQueue`、`queue`、`requestQueueSelectionStrategy`（`single`、`roundRobin`、`random` 或 `explicit`）、已選 physical instance、Queue Manager，以及 request 的有效 `replyQueue`。ReplyToQ/ReplyToQMgr 及已送 MsgId → reply CorrelId matching 維持。這些有界路由欄位會隨保留的 Run/Debug/Load evidence 提供，憑證仍受保護。
-
-#### 傳送 File-content string 或抽象值
-
-File-content expression output 是 String，可直接傳入 payload：
-
-~~~yaml
-prepareRequest:
-  type: assign
-  name: requestText
-  expression: "&{templates/payment/payload/request.xml}"
-send:
-  type: tool
-  call: "#{mq.payment.request(payload=${EXEC.VARS.requestText})}"
-~~~
-
-ATT 使用配置的 MQ charset/CCSID 編碼完全相同的 file text，不會 parse/serialize。String 不應提供 requestFormat。File-content expression 不會設定 MQMD.Format；MQ transport metadata 仍由 resource 管理。
-
-Map/List 是抽象結構化值，需指定 requestFormat（text/json/yaml/xml），例如 payload=${EXEC.INPUT.request}, requestFormat=json。String + requestFormat 會被拒絕。MQ send/request call 不接受 local file path；`file` 是 unknown argument。File-content expression 不建立檔案或 targetFiles。
-
-#### Evidence、response parsing 與 Load
-
-MQ evidence 可包含有界 transport metadata，例如 helper/instance identity、operation、安全 queue names、message IDs、CCSID、byte counts、response format、duration 與 failure classification。Payload capture 由 evidence.payload 控制；人類可讀 snapshot 由 evidence.output 獨立控制。Load 可用 evidence.resources.output: none 關閉 resource snapshots；否則等 iteration 保留後才格式化。Typed result 與 response parsing 不變。
-
-Call-level responseFormat 可覆蓋 receive/request 的 requestReply.responseFormat；send 不解析 reply。Instance selection 與 pool limits 屬於 descriptor。Schema migration 見 [Migration Notes](reference.zh/appendices/migrations.md)。
-
-MQ reply 上限為 10 MiB。IBM MQ adapter 會在讀取前設定 message receive limit，超限時回報 `MQ_RESPONSE_TOO_LARGE`。這是 transport 成功後的 size rejection，與 reply 遺失或 connection failure 分開處理。
-
-共用 typed-result 契約見[Action 與型別化值](reference.zh/actions.md)。
-
-#### Descriptor configuration
-
-| Object | Required/default | Contract |
-|---|---|---|
-| root | required | `schemaVersion`, `id`, `name`, `description`, non-empty `instances`; optional `defaults`, `selection`, `evidence`, `x-*` |
-| `defaults` / `instances[]` settings | inherited then overridden | `connection`, `message`, `requestReply`, `pool`; each instance has an `id` |
-| `connection` | effective fields required | queue manager, host, port and channel as required by transport; port 1–65535; optional username/password |
-| `message` | defaults | CCSID 1208; `format` supports MQSTR/MQHRF2/MQFMT_STRING/MQFMT_NONE/NONE or empty; persistence supports asQueue/persistent/notPersistent/nonPersistent or 0–2 |
-| `requestReply` | defaults | `waitMs` 10000, range 0–3600000; `responseFormat` controls receive/request parsing; `maxResponseBytes` defaults to 10485760 and accepts 1–1073741824 |
-| `pool` | defaults | maxSize 20 (1–10000), minIdle 0 (not above maxSize), borrowTimeout 2s |
-| `selection.strategy` | descriptor policy | `random` or `roundRobin` |
-| `evidence` | policy | `payload: none|metadata`; raw payload bytes are not structured evidence; optional `output` is human presentation |
-
-Connection credentials may be complete `${ENV:NAME}` references. Resolved secrets do not enter metadata, diagnostics or Case evidence. Queue names are non-blank, at most 48 characters, and use IBM MQ queue-name characters. Logical helper and physical instance IDs are resolved case-insensitively; duplicate IDs and descriptor paths fail validation.
-
-The machine-readable field constraints remain in [the active MQ schema](../schemas/att-mqhelper-v1.3.schema.json).
-
-DB/MQ/HTTP 共用 `evidence.output: {format: json, maxChars: 10000}` presentation policy；支援 `text`、`json`、`yaml`、`xml`、`sqlplus`，後者要求 DB query/update result。`maxChars` 預設 10000，範圍 1–1000000；formatted text 先遮蔽 credential，再按字元確定性截斷，並保留 `format`／`text`／`truncated`。Formatting failure 只寫入有界 `outputError`，不改變 typed `output.result` 或 operation status。Run/Debug 的正常 resource invocation 自動將 snapshot 寫入 Action evidence 和 Case log，不需要額外 Log Action；SQL、parameter、MQ payload metadata、HTTP status/header 等 diagnostics 維持各自契約。Load 不會在每個 iteration 立即 stringify；僅 retained iteration 在 `resource-output.yaml` materialize，`evidence.resources.output: none` 完全跳過。Credential 不會因 presentation 被新增到 evidence。
-
-##### Request/reply Timeout 與重播策略
-
-`mq.<id>.request(...)` 收到 correlated reply 時為 PASS。PUT 成功後，correlated GET 回傳 MQRC 2033（`MQRC_NO_MSG_AVAILABLE`）時，使用標準 TIMEOUT 與 `MQ_TIMEOUT` diagnostic，即使 outer Action deadline 尚未到期。原生 evidence 保留 `sent: true`、`replyReceived: false`、`completionCode: 2`、`reasonCode: 2033`、reason 名稱及有效 `waitMs`。其他 transport failure 維持既有 MQ ERROR 分類；outer deadline 與 pool borrow timeout 也走標準 TIMEOUT 路徑。
-
-Canonical Action outcome 為 `output.status: TIMEOUT`；suite/report 的 operation failure aggregate 仍為 ERROR，report message 與 Case log 顯示 TIMEOUT 及 MQRC 2033。當前 attempt 的原生 metadata 位於 `output.evidence.mq.invocations[0]`；完成後位於 `EXEC.ACTIONS.<actionId>.output.evidence.mq.invocations[0]`。
-
-未配置 `retry.when` 時，`retryOn: [TIMEOUT]` 可重新 PUT 整個 request。對有副作用的 request，使用 Boolean gate 排除已送出但無 reply 的情況：
-
-~~~yaml
-invokePayment:
-  type: tool
-  call: "#{mq.payment.request(payload=${EXEC.INPUT.requestText})}"
-  timeoutMs: 30000
-  retry:
-    maxAttempts: 3
-    intervalMs: 1000
-    retryOn: [TIMEOUT]
-    when: "#{${output.evidence.mq.invocations[0].reasonCode?} != 2033}"
-~~~
-
-Optional `?` path 在其他 timeout 沒有 MQ reason code 時回傳 null，因此允許一般 timeout retry；reasonCode 為 2033 時阻止第二次 PUT，最終 Action 仍是 TIMEOUT。ATT 不會推斷 idempotency 或去除重複訊息。需要反覆輪詢 reply 時，可使用 `send` 後執行 correlated `receive`。
-
-獨立 `receive` 明確保留非錯誤的 polling 契約：outer deadline 未到期時，即使 bounded wait 找不到訊息，2033 仍回傳 PASS 與 `received: false`；outer deadline 到期則為 TIMEOUT。此契約取代 先前為避免重播而不將 request/2033 分類為 TIMEOUT 的舊指引。請參閱[共用 retry 語義](reference.zh/actions.md)。
-
-### HTTPHelper
-
-HTTPHelper 是依環境綁定的 HTTP resource。選定的 config profile 將穩定 logical helper ID 綁定至 base URL。Descriptor 使用 att-httphelper/v1.1。
-
-~~~yaml
-schemaVersion: att-httphelper/v1.1
-id: payment
-name: Payment API
-description: Payment service
-baseUrl: https://payments.example.internal
-defaults:
-  responseFormat: auto
-  maxResponseBytes: 10485760
-  connectTimeoutMs: 5000
-  readTimeoutMs: 30000
-  followRedirects: false
-evidence:
-  output:
-    format: json
-    maxChars: 10000
-~~~
-
-HTTP connection pool 的預設值及限制如下：
-
-| Pool 欄位 | 預設值 | 契約 |
-|---|---:|---|
-| `maxConnections` | 50 | 總 connection 數，1–10000 |
-| `maxConnectionsPerRoute` | 20 | 每 route connection 數，1–10000 且不可大於 `maxConnections` |
-| `connectionRequestTimeoutMs` | 5000 ms | 等待 lease connection 的最長時間，1–3600000 ms |
-| `keepAliveMs` | 30000 ms | Keep-alive 時間，1–3600000 ms |
-| `idleEvictMs` | 60000 ms | Connection 閒置達此時間後符合 eviction 條件；ATT 在 request 前檢查，1–3600000 ms |
-
-請按預期 Load in-flight concurrency sizing。以下 tuning override 提高 per-route capacity 並縮短等待 lease 的時間；例中的值並非預設值：
-
-~~~yaml
-pool:
-  maxConnections: 50
-  maxConnectionsPerRoute: 40
-  connectionRequestTimeoutMs: 2000
-~~~
-
-`connectionRequestTimeoutMs` 限制等待取得 pooled connection 的時間。若 service latency 穩定但 pool 等候/timeout 增加，可能表示 generator pool 飽和；請查看 Load output 中按 helper 區分的 active/idle/waiting/peak metrics。
-
-以 type: tool Action 的 primary call 呼叫 http.<id>.get/post/request。Response bytes 由此 boundary 解析：使用 call responseFormat、helper default，或 auto 時依 Content-Type 判斷。支援 auto、text、json、yaml、xml。解析後的 native value 發布於 output.result。可選 evidence.output 是有長度上限的人類可讀 snapshot，不會改變該值。
-
-#### Request body 與 file-content string
-
-File-content expression 回傳 exact UTF-8 file content String，可先 Assign，再直接傳入 body：
-
-~~~yaml
-prepareRequest:
-  type: assign
-  name: requestText
-  expression: "&{templates/payment/payload/request.xml}"
-sendRequest:
-  type: tool
-  call: "#{http.payment.post(path='/v1/payments', body=${EXEC.VARS.requestText})}"
-~~~
-
-HTTP 在 charset encoding boundary 傳送完全相同的 String，不會 parse/serialize。String 不可搭配 requestFormat。
-
-Map/List 是抽象結構化值，需明確指定 requestFormat，例如 body=${EXEC.INPUT.request}, requestFormat=json。requestFormat 支援 text、json、yaml、xml，且只用於 Map/List。String + requestFormat 會被拒絕。HTTP call 不接受 local file path；`file` 是 unknown argument。File-content expression 不建立結果檔，也沒有 targetFiles。
-
-File-content String 不會覆蓋由 resource 管理的 HTTP Content-Type。需要特定 media type 時請配置 contentType/header。Request charset/header 與 response parsing 都由 HTTPHelper 管理，與 Action result/Log formatting 分開。
-
-#### Failure 與 Evidence
-
-Transport/protocol、response-parse failures 屬 operational error。已收到的 4xx/5xx 是 completed response，可對 statusCode 做 assertion。HTTP evidence 可包含 helper ID、method、安全 URL、response status、content type、byte counts、response format 與 duration。Credentials/payload 不會隱式保存。Load 可用 evidence.resources.output: none 略過可選 resource output formatting，或將其延至 iteration evidence 保留時。
-
-HTTP response 上限為 10 MiB。若宣告的 Content-Length 超過上限，會在讀取前拒絕；未知或錯誤長度則使用有界 stream，在超出上限的第一個 byte 停止。Operation 會回報 `HTTP_RESPONSE_TOO_LARGE`，並在 diagnostics 保留已收到的 status code。Load resource diagnostics 會依 helper 回報 HTTP connection pool 的 active、idle、waiting 與 peak 數量。
-
-HTTP helper descriptor 的 `defaults.maxResponseBytes` 可設為 1 到 1073741824，預設為 10485760（10 MiB）。
-
-共用 typed-result 契約見[Action 與型別化值](reference.zh/actions.md)。
-
-DB/MQ/HTTP 共用 `evidence.output: {format: json, maxChars: 10000}` presentation policy；支援 `text`、`json`、`yaml`、`xml`、`sqlplus`，後者要求 DB query/update result。`maxChars` 預設 10000，範圍 1–1000000；formatted text 先遮蔽 credential，再按字元確定性截斷，並保留 `format`／`text`／`truncated`。Formatting failure 只寫入有界 `outputError`，不改變 typed `output.result` 或 operation status。Run/Debug 的正常 resource invocation 自動將 snapshot 寫入 Action evidence 和 Case log，不需要額外 Log Action；SQL、parameter、MQ payload metadata、HTTP status/header 等 diagnostics 維持各自契約。Load 不會在每個 iteration 立即 stringify；僅 retained iteration 在 `resource-output.yaml` materialize，`evidence.resources.output: none` 完全跳過。Credential 不會因 presentation 被新增到 evidence。
-
-### SSHHelper：邏輯 SSH 目標
-
-#### SSH Resource helper operation
-
-SSHHelper 也支援在一般 `type: tool` Action 中使用共用 Resource Helper 形式：`ssh.<helperId>.execute`、`ssh.<helperId>.upload`、`ssh.<helperId>.stat`、`ssh.<helperId>.mkdirs`、`ssh.<helperId>.move` 及 `ssh.<helperId>.delete`。Helper ID 是邏輯 ID；native Resource Helper call 使用 `single`、`random` 或 `roundRobin` 選取一個實體 instance。Native Resource Helper call 不支援 `selection.strategy: all`，會在 validation 時拒絕；`all` 只供 command-backed Tool fan-out 使用。這些呼叫會在未建立 SSH connection 前完成驗證，並共用 helper 的並發上限及 identity 遮蔽規則。
-
-```yaml
-actions:
-  health:
-    type: tool
-    call: >-
-      #{ssh.application.execute(
-        command='systemctl is-active example.service',
-        stdoutFormat='text',
-        timeoutMs=5000
-      )}
-  uploadRequest:
-    type: tool
-    call: >-
-      #{ssh.application.upload(
-        remotePath='/srv/app/request.json',
-        payload=${EXEC.VARS.requestText},
-        overwrite=true
-      )}
-```
-
-`execute` 需要 `command`，可接受 `stdoutFormat: text|json|yaml|xml` 及 `timeoutMs`。`text` 原樣回傳 stdout String；structured format 會把 stdout 解析為原生 Map/List/scalar。Timeout、遠端 non-zero exit 或 parse failure 會回傳不同 category 的 operation error，並保留有界 stderr、exit code、byte count 及 transport evidence。Resource SSH 的 non-zero exit 會令 operation 失敗，與下文 legacy command-backed Tool 的 fan-out 契約不同。
-
-`upload` 需要 `remotePath` 及 String 或 byte array `payload`。上傳 package file 時，直接傳入 `&{...}` 回傳的 UTF-8 String；SSHHelper 不接受或解析 local filesystem path。Map/List 會被拒絕，不會隱式序列化。Remote absolute path 可用；upload 的 `overwrite` 預設為 `true`。
-
-SSHHelper 不提供 `download` operation，因下載必須定義 local destination path。若工作確實要從主機取回檔案，請使用明確配置的 command-backed Tool。
-
-所有 operation 只接受 named arguments。Unknown operation/helper/argument、重複 argument、錯誤 format／timeout、缺少 required field、upload source 衝突及不安全 local path 都會在外部執行前驗證失敗。Runtime evidence 包含 logical helper、選定 instance、host/port、operation、transport、時間及 transfer/command 詳情；command input 和 represented payload 不會複製到 evidence。由 environment 提供的 identity path 仍會遮蔽。
-
-Native SSH failure 在 invocation `error.category` 和 `SSH.error.category` 發布穩定分類：
-
-| Category | 意義 |
-|---|---|
-| `SSH_CONNECTION_ERROR` | 非 timeout 的 connection、host verification 或 channel setup 失敗；backend 無法可靠識別 authentication 時亦使用此類別。 |
-| `SSH_AUTH_ERROR` | Java backend 識別到 authentication rejection/cancellation，或無法初始化配置的 identity。 |
-| `SSH_TRANSPORT_ERROR` | OpenSSH 回傳 255；可能是 connection/authentication failure，亦可能是 remote command 自己 exit 255。ATT 保留 stderr 及 exit code，不依本地化訊息猜測。 |
-| `SSH_TIMEOUT` / `SSH_POOL_TIMEOUT` | Operation/connect deadline 或 concurrency wait 到期。 |
-| `SSH_REMOTE_EXIT` | Remote command 完成但 exit 非零（OpenSSH 255 使用上述類別）。 |
-| `SSH_RESULT_PARSE_ERROR` | stdout parsing 失敗。 |
-| `SSH_UPLOAD_ERROR` | Connection setup 後 upload 失敗，包括 remote permission、missing path 或 protocol error。 |
-| `SSH_ARGUMENT` | Argument validation 失敗。 |
-| `SSH_INTERRUPTED` | Caller 中斷 operation。 |
-
-Transfer connection/channel failure 保留 `phase: connect|channel`；timeout evidence 亦保留相應 timeout budget。所有 failure 都保留選定 operation 與實際 transport。Transfer error 仍不可自動 timeout replay。
-
-Native Resource Helper call 使用一個 absolute Action deadline，涵蓋 concurrency pool wait、connection 與 channel setup，以及 command 或 SFTP operation。Per-call `timeoutMs` 或 helper `timeouts.commandTimeoutMs` 只設定 operation limit，不能延長 enclosing Action deadline。`timeouts.connectTimeoutMs` 只在剩餘 deadline 內限制 connection establishment，不會額外增加 operation 時間。execute/upload/stat/mkdirs/move/delete 均遵守此契約。Native `execute`、read-only `stat` 與 idempotent `mkdirs` 的 `SSH_TIMEOUT`／`SSH_POOL_TIMEOUT` 可使用 Action `retryOn: [TIMEOUT]`，call-backed Tool 亦相同，並沿用共用 `retry.when` 控制重播。Native `upload`、`move`、`delete` 拒絕 timeout retry，因為 timeout 後的 mutation outcome 可能不確定。Validation 與 runtime 共用同一 operation policy。SFTP Action 會在 deadline 到達時返回，但 concurrency lease 會由 cleanup worker 持有，直到 transfer worker 與 transport 終止。
-
-SSHHelper 讓 command-backed Tool 使用穩定的邏輯應用伺服器 ID，而非在 Tool group 中寫入實體主機。`att-sshhelper/v1.0` YAML descriptor 含 `id`、可選 `name`／`description`、可選 `defaults`（`user`、`port`、`identityFile`）、非空有序 `instances`、可選 `selection.strategy` 和 `fanout.maxConcurrency`（預設 4、範圍 1–256）。每個 instance 需有 `id`／`host`，`user` 必須由 instance 或 defaults 提供。Instance 欄位覆蓋 defaults；port 預設 22，必須在 1–65535。Helper 和 instance ID 符合 `[A-Za-z_][A-Za-z0-9_-]*`，忽略大小寫後不可重複。無效 host/user、未知欄位、重複 ID、缺少 user、不安全路徑和無效 strategy 都會在 SSH 執行前失敗。
-
-```yaml
-# config/sshhelpers/sit/application.yaml
-schemaVersion: att-sshhelper/v1.0
-id: application
-name: Application servers
-description: SIT application tier
-defaults: {user: deploy, port: 22, identityFile: '${ENV:APP_SSH_KEY}'}
-selection: {strategy: roundRobin}
-fanout: {maxConcurrency: 2}
-timeouts: {connectTimeoutMs: 10000, commandTimeoutMs: 60000}
-instances:
-  - {id: app1, host: sit-app1.example}
-  - {id: app2, host: sit-app2.example, port: 2222}
-```
-
-在 `att-config/v2.13` 的全域或 `environments.<NAME>.sshhelpers` 列出 descriptor 路徑。目前 package 使用 config v2.13 與 Tool Group v2.9。選定環境的清單會整組取代全域清單；省略則繼承。Tool group 所綁定的相同邏輯 ID 必須在每個選定 profile 內存在。SIT 可綁定一臺，UAT 綁定兩臺，Tool／Action 不必修改：
-
-```yaml
-# config/config.yaml
-schemaVersion: att-config/v2.13
-environment: SIT
-toolGroups: [config/tools/application.yaml]
-environments:
-  SIT:
-    sshhelpers: [config/sshhelpers/sit/application.yaml]
-  UAT:
-    sshhelpers: [config/sshhelpers/uat/application.yaml]
-```
-
-```yaml
-# config/sshhelpers/uat/application.yaml
-schemaVersion: att-sshhelper/v1.0
-id: application
-defaults: {user: deploy, identityFile: '${ENV:APP_SSH_KEY}'}
-selection: {strategy: all} # 只供 command-backed Tool fan-out；native ssh.application.* 會拒絕 all
-fanout: {maxConcurrency: 2}
-instances:
-  - {id: app1, host: uat-app1.example}
-  - {id: app2, host: uat-app2.example}
-```
-
-```yaml
-# config/tools/application.yaml
-schemaVersion: att-tool-group/v2.9
-id: app
-name: Application tools
-description: Remote application inspection
-ssh:
-  helper: application
-  selection: {strategy: all} # 可選 group override
-tools:
-  status:
-    name: Status
-    description: Print service status
-    command: [systemctl, is-active, example.service]
-    result: {format: text}
-```
-
-Action 仍呼叫 `app.status`。先在本機／CI secret environment 把 `APP_SSH_KEY` 設為可讀私鑰的**路徑**，再分別以 `./att.sh validate --config config/config.yaml --env SIT --package` 及 UAT 驗證。完整 `${ENV:NAME}` identityFile reference 在載入時解析；缺失／空值會報錯而不揭露值。Tool group 的 `ssh` 只能是直接目標（`host`、`user`、可選 `port`／`identityFile`）或邏輯目標（`helper`、可選 `selection`），不可混用。Call-backed Tool 可在 primary `type: tool` operation 中呼叫 native SSH Resource Helper。現行 Tool Group schema 為 v2.9。Command-backed Tool 使用 `stdoutFormat`（`text|json|yaml|xml`）設定 stdout parsing；call-backed Tool 保留 native result type。舊 config/group schema 僅供 migration reference。SSH Resource Helper call 只發布 `META.SSHHELPER.id` 與 `.type`；endpoint、user、identity file、credentials 仍保持私有。Resource call 沒有 Action／per-call strategy override；selection 由 helper configuration 決定。
-
-Strategy 優先序：group override，再到 helper 預設。Native Resource Helper call 中，單 instance 不需 strategy（`single`）；多 instance 只支援 `random` 或 `roundRobin`，`all` 會被拒絕，不會靜默選一臺。Command-backed Tool routing 才支援 `all`：`random` 均勻選一臺，`roundRobin` 以 thread-safe 循環計數器選一臺，明確的 `all` 在並發上限內對每臺各執行一次。**Command-backed `all` 會在每臺主機產生副作用**；只用於整組執行均安全的命令。不會隱式 fan-out、跨主機重試或 failover。若作者設定 Action timeout retry，整個 `all` 呼叫會重做，並非只重試某臺。每臺依 Action／Tool／全域 timeout 執行；中斷會取消正在執行的 OpenSSH process 或 Java SSH session。兩種 transport 使用同一組標準化 host/user/port/key。優先 OpenSSH；mwiede/jsch fallback 仍嚴格驗證 host key，限制見 SSH 診斷章。
-
-單主機時解析後的 `output.result` 仍是舊有 scalar／object。Evidence 新增 `sshHelper`、`instance`、`host`、`selectionStrategy`、`selectionSource`（`helper` 或 `toolGroup`）、transport、起訖／持續時間、exit code、輸出及錯誤。只有 command-backed Tool fan-out 使用 `all`；此時 `output.result` 包含 `sshHelper`、有效 `selectionStrategy`、`selectionSource`，以及依 descriptor 順序以 ID 為 key 的 `instances`；每筆有 `instance`、`host`、`port`、`transport`、`startedAt`、`endedAt`、`durationMs`、`status`，在適用時另有 `exitCode`、`stdout`、`stderr`、`rawOutput`、解析後 `output` 或 `error`。命令正常完成時即使 `exitCode` 非零，仍是 `status: PASS`；exit code 是供 Action assertion 判斷的證據，不屬操作失敗。只有執行、輸出解析、取消或 timeout 錯誤才令 operation 失敗，其他主機證據仍會保留。Assertion 可查 `${output.result.instances.app1.exitCode}`、`${output.result.instances.app1.status}` 或 `${output.result.instances.app1.output}`。Evidence 不記錄認證內容或環境提供的私鑰路徑；私鑰應放在 package 外，命令中亦不要放祕密。
-
-單主機及 `all` 執行都會在 argv、transport stderr（包括串流寫入的 Case log 診斷）及 exception evidence 遮蔽環境提供的私鑰路徑。上述不記錄保證適用於 ATT metadata 和 transport 診斷；解析後的業務 stdout 不變，因此命令不可輸出私鑰路徑。
-
-遷移：若一個實體目標已足夠，直接 SSH 可維持原狀。否則把 host/user/port/key 搬到 helper descriptor，在每個環境綁定，將 group 升到 v2.9，以 `ssh: {helper: application}` 取代實體 `ssh`，逐一驗證環境。Action 不需重寫。Inventory discovery、Action 層指定主機、分散式交易、跨主機 failover 與 orchestration 均不在此 schema 範圍。
-
-`stat(remotePath='/srv/app/result.xml')` 透過 SFTP lstat 回傳 typed `{path, exists}`，存在時包含 `type: file|directory|other`、file `size` 與可用的 ISO `modifiedAt`；missing path 是正常 `exists: false`，permission/auth/transport error 仍失敗。`mkdirs(remotePath='/srv/app/archive')` 建立 parents，已有 directory 時冪等，遇到 non-directory 時失敗。`move(sourcePath='/srv/app/out.xml', targetPath='/srv/app/archive/out.xml', overwrite=false)` 在同一選定 host 上 rename，source 必須存在，已有 target 需明確允許 overwrite；不下載／上傳。明確 overwrite 會先移除已有且型別相同的 regular file 或 empty directory，再執行 SFTP rename，因此不依賴 server 的 rename-overwrite extension。Non-empty directory、special file 或型別不符會拒絕。Replacement 不是 atomic：移除失敗時保留兩個 path；之後 rename 失敗則 source 仍在，target 可能不存在。`delete(remotePath='/srv/app/tmp.xml', missingOk=false)` 支援 regular file 和 empty directory，missingOk 必須明確開啟；non-empty directory、recursive 參數、wildcard／backslash path 都拒絕。所有 operation 只接受具名參數及可選 `timeoutMs`，沿用 selection／concurrency／deadline／host verification／redacted identity／Run-Debug-Load execution。Filesystem operation error 使用 `SSH_STAT_ERROR`／`SSH_MKDIRS_ERROR`／`SSH_MOVE_ERROR`／`SSH_DELETE_ERROR`。沒有 remote copy API；需要 copy 時明確使用 `execute(command='cp /srv/app/a /srv/app/b')`。File-content expression 使用 `&{...}`，local output 由 ATT 管理。
-
-## 可靠性與執行控制
-
-本頁集中定義 cross-cutting public execution behavior。
-
-### Assertion 與 status
-
-Assertion 在文件規定的 assertion point、primary work 之後評估 boolean condition。False assertion 是 `FAIL`；exception/infrastructure problem 是 `ERROR`；authoring/configuration 無效是 `INVALID`；條件未選中是 `SKIPPED`；成功工作是 `PASS`。因此 operation failure 與 assertion failure 是不同概念。
-
-### `runWhen` 與 `onFailure`
-
-`runWhen` 決定 statically known Action/Stage 是否 eligible；`onFailure: stop|continue` 決定 failure 後是否繼續。`continue` 不會把 failed status 改成 PASS。Cleanup/diagnostic 應使用規範的 conditional execution semantics，而不是隱藏 failure。
-
-### Timeout
-
-Timeout 依 backend 支援能力終止或放棄 operation，並記錄 diagnostic/evidence。Timeout 是 operational failure，不是 assertion false。Tool timeout 與 resource-specific DB/MQ/HTTP/SSH limit 分別由其 resource contract 定義。
-
-### Retry 與 attempts
-
-在支援 retry 的位置，一個 logical Action 可以擁有多個 attempt。Retry policy 決定哪些 operation failure 可重試。最後／勝出的 operation 成為 top-level `output.result` / `output.evidence`；每次 attempt 保留在 `output.attempts[n]`。後續成功不會抹掉較早 attempt evidence。
-
-### Evidence collectors
-
-Tool evidence collector 在 primary operation 發布 typed `output.result` 後、該 attempt assertion 前執行。Action active 時可使用 `${output.evidence.collectors.<id>.result}` 與 `${output.evidence.collectors.<id>.status}`；發布後的 canonical path 是 `${EXEC.ACTIONS.<actionId>.output.evidence.collectors.<id>.result}` 和 `.status`。Collector 有獨立 `timeoutMs` 與 `onFailure: continue|stop`；collector output 屬於該 attempt evidence，不會取代或修改 primary operation result。
-
-每個 primary attempt 都會執行 collector。Top-level collector node 代表最後／勝出的 attempt，`output.attempts[n].evidence.collectors.<id>` 則保留各 attempt。`continue` 讓 primary/assertion outcome 在診斷收集失敗時仍可觀察；`stop` 令 collector failure 成為 Action error。若收集的值是 business/test data，而不是 pre-assertion 診斷資料，應使用普通 Tool/Log/Assign Action。
-
-### Transaction/Resource lifecycle
-
-DB transaction finalization 與 DB/MQ/HTTP/SSH resource cleanup 在相應 execution lifecycle boundary 進行。它們可能影響 operation success/diagnostic，但屬 internal resource state，不是 public Context namespace。
-
-### Aggregation
-
-多個 child outcome 聚合時保留嚴重度：
-
-```text
-ERROR > INVALID > FAIL > PASS > SKIPPED
-```
-
-### Stage execution controls
-
-| Setting | Values/default | 說明 |
-|---|---|---|
-| `required` | boolean / `false` | Blank selector 是否為 error |
-| `runWhen` | `normal`（default）、`onSuccess`、`onFailure`、`always` | Stage eligibility |
-| `onFailure` | `stop`（default）、`continue` | Failure 後是否允許後續 eligible work |
-
-`continue` 不會把 FAIL 或 ERROR 改成 PASS。
-
-| Earlier outcome | Later `normal` | `onSuccess` | `onFailure` | `always` |
-|---|---:|---:|---:|---:|
-| PASS | Run | Run | Skip | Run |
-| FAIL/ERROR with `stop` | Skip | Skip | Run | Run |
-| FAIL/ERROR with `continue` | Run | Skip | Run | Run |
-
-Rollback/diagnostics 使用 `onFailure`；cleanup 或 final Evidence 使用 `always`。
-
-### Tool Timeout precedence
-
-Tool Action timeout 優先於 Tool descriptor timeout，再優先於 global timeout。Sidecar、Stage 與 Template 不定義 timeout/retry defaults。Call-backed DB Tool 的 DBHelper statement timeout 仍是 backend ceiling。每次 supported primary retry attempt 都會在 assertion 前執行 collectors。
-
-### Direct DB timeout 與 retry eligibility
-
-Direct DB Action 可設定 `timeoutMs`，範圍為 1 至 3,600,000 ms。明確的 Action timeout 會覆蓋 DBHelper `statement.timeoutSeconds` 預設值；未設定時才使用 helper timeout。JDBC statement timeout 以秒向上取整，ATT 仍保留毫秒級 deadline cancellation；每次 retry attempt 都重新取得完整 Action timeout，`retry.intervalMs` 的等待時間不計入該 attempt timeout。
-
-Direct `query` Action 亦可使用標準 retry block：`maxAttempts` 2–10、`intervalMs` 0–3,600,000，`retryOn` 必須是非空且不重複的 `ASSERTION` / `TIMEOUT` 列表。使用 `ASSERTION` 時必須同時定義 Action `assert`。一般 SQL error 為 terminal，不會自動 retry。啟用 retry 後，每次 query attempt 會保留在 `output.attempts[n]`；top-level `output.result` / `output.evidence` 永遠代表 final 或 winning attempt，並以 `winningAttempt` 或 `finalAttempt` 記錄終止 attempt 編號。
-
-Direct `update` Action 支援 `timeoutMs`，但明確拒絕 `retry`。發生 timeout 或 database/transport failure 後，ATT 通常無法證明 mutation 是否已送達或 commit；自動重放可能造成重複業務變更。因此，需要 application-specific idempotent retry 時應由作者明確建模，而不是啟用通用 DB Action retry。
-
-## Configuration 與 environments
-
-本頁是作者編寫配置時的權威閱讀參考。[`schemas/`](../schemas) 目錄中的文件仍是機器可讀契約。模式校驗會先於跨字段和文件系統校驗執行。
-
-
-### Package ownership
-
-Package 預設值、根目錄與 Testdata 改由 [Package Manifest](reference.zh/package-manifest.md) 管理。Global inventories 已棄用，除非啟用暫時 legacy policy，否則不使用。Manifest 採嚴格驗證，不支援 `x-` extensions。
-
-### Studio 共用 Configuration
-
-在 **All packages** 下直接開啟 **Configuration**。Source、Declared、Effective 及 Compare 使用單一 `server.runtimeConfigPath`，不要求選取 Package，也不會回退至 default Package。Environment 只切換 effective values，不切換設定來源樹；設定無效或不可用時顯示明確狀態。
-
-只有 **Testdata** 要求選取已註冊 Package；records 和 Resource 連結保持 Package-local。共用檢視不解析 Testdata records，Declared 中的 Testdata 路徑只屬設定 metadata。變更全域 Package 選取不會重新載入或取代共用 Configuration。
-
-已驗證的 `/api/v1/configuration/{declared|effective|compare|files|source}` API 沿用 bounded inspector、source policy、遮蔽及額外欄位授權。回應使用 `Cache-Control: no-store`，瀏覽器不快取 projection。Worker parsed snapshot 按共用設定及 descriptor 內容 revision、Environment 和 access/redaction policy 隔離，不以任意 Package ID 作識別。既有 Package-scoped Configuration routes 保留相容性及 Testdata 用途。
-
-### 按任務查找配置
-
-| 任務 | 從這裡開始 |
-|---|---|
-| 選擇 SIT、UAT 或其他 Resource profile | [選擇 environment profile](#選擇-environment-profile) |
-| 設定輸出、Run ID 或報表默認值 | [設定 package-wide options](#設定-package-wide-options) |
-| 查找 Tool 或 Helper contract 的 owner | [Configuration owners](#configuration-owners) |
-| 遷移或校驗 schema | [Schema catalog](#schema-catalog) 和 [Migration notes](reference.zh/appendices/migrations.md) |
-
-### 配置層與優先級
-
-| 層級 | 來源 | 所管轄內容 |
-|---|---|---|
-| 共用 runtime configuration | `ATT_HOME/config/config.yaml` | 輸出/環境/runtime 默認值、package-relative Template 根、報告、XML 模式、全局 Tool、組路徑、Helper paths、可選 inline SSH |
-| DB helper | `dbhelpers` 引用的獨立 YAML | 一個 JDBC 實例的連接、statement timeout、交易、result limit 與 evidence policy |
-| MQ helper | `mqhelpers` 引用的獨立 YAML | v1.2 IBM MQ logical group、instances、transport、response parsing、pool 與 evidence policy |
-| SSHHelper | `sshhelpers` 引用的獨立 YAML | 邏輯 SSH ID、實體 instances、defaults、selection 與 fan-out 上限 |
-| HTTPHelper | `httphelpers` 引用的獨立 YAML | 邏輯 HTTP ID、base URL、預設值、連線池、認證與 TLS |
-| Tool group | 配置的 YAML 路徑 | 組身份、可選 script/SSH、分組 Tool |
-| Workbook | `<workbook>.yaml` | Excel 映射、Stage、Workbook 標簽 |
-| Template | `template.yaml` | Template 身份和有序 Action |
-| CLI | 命令選項 | 選擇、Run ID、輸出覆蓋、展示、CI 格式 |
-
-Timeout/Retry precedence 與 eligibility 見 [Reliability](reference.zh/reliability-execution-control.md)。CLI 的 `--output-dir` 和 `--run-id` 會在一次命令中覆蓋相應默認值。一個層級中合法的字段，若放在別的層級中也會被拒絕。
-
-### 使用 `X-` 忽略或停用 ATT 配置項
-
-在可選的 ATT 配置字段，或 ATT 擁有的 keyed collection 條目名稱前加上完全小寫的 `x-`，該項便會視為不存在。適用於現行配置物件和 keyed collection，例如 `tools`、environment profiles、Tool `arguments` declarations、`actions`、Action `evidence` collectors、report columns 及 Debug Tool overrides。YAML 本身仍須能解析；但 ATT 不會對停用項進行模式校驗、解析引用、探索依賴、求值、建立物件、執行或發布。對 keyed collection，請加在 key 上。此規則不會停用或改名 Tool 呼叫時傳入的 argument values：
-
-```yaml
-schemaVersion: att-config/v2.13
-x-debug-note: "#{missing.tool()}"      # 忽略的配置字段
-tools:
-  x-temporary: not-a-tool               # 忽略的 Tool 條目
-  smoke:
-    name: Smoke check
-    description: Check the local setup
-    call: "#{upper('ok')}"
-    x-retry: 0                           # 忽略的可選 Tool 字段
-```
-
-Action 和 evidence collector 也使用相同規則。停用的 Action 不會進入校驗或 runtime；停用的 collector 不會被呼叫，也不會加入 evidence。ATT 擁有的巢狀配置區塊中的 `x-` 字段同樣會被忽略：
-
-```yaml
-actions:
-  x-preview:
-    type: tool
-    call: "#{missing.tool()}"
-  verify:
-    type: tool
-    call: "#{upper('ok')}"
-    retry: {maxAttempts: 2, intervalMs: 0, retryOn: [TIMEOUT], x-note: ignored}
-    evidence:
-      x-snapshot: not-a-collector
-```
-
-停用項不能代替必填字段：`x-schemaVersion` 不能代替 `schemaVersion`，`x-type` 不能代替 Action 必填的 `type`。大寫 `X-` 沒有特殊含義，會按一般 key 校驗。若仍有啟用中的引用指向已停用 Action，該引用會因 Action 不存在而無法解析。`runWhen: "#{false}"` 則不同：Action 仍然存在，條件求值為 `false` 後會產生一般的 `SKIPPED` 結果。
-
-不要用此規則移除 user data 中的 key。HTTP headers、`EXEC.INPUT`、`EXEC.VARS`、任意 maps、DB `params`/`parameters` 和 Tool invocation argument values 中的 key 都是資料，名稱會原樣保留。例如，除非 `x-correlation-id` 本身是 ATT 擁有的配置 collection key，否則它仍是一般 HTTP header 或 input key。
-
-### 選擇 environment profile
-
-`att-config/v2.13` 是現行 profile 契約。Profile 可整組替換已配置的 DBHelper、MQHelper、SSHHelper 與 HTTPHelper lists；Package Testdata lists 由 `package.yaml` 管理。各 Helper 與 testdata descriptor 的設定方式及 [Testdata Registry 與 Input Mapping](reference.zh/test-authoring.md) 見對應頁面。
-
-ATT 使用一份 common `att-config/v2.13` 加上 `environments` map 選擇環境；不通過修改 Action 或增加環境專用 Tool ID 來選擇環境。SIT、UAT、PREPROD 及 production-like 環境之間，Action 只保留穩定的 logical ID：
-
-```text
-Action -> logical helper ID -> selected config -> physical descriptor -> endpoint
-```
-
-共用配置與 Package business files 使用不同 root：
-
-```text
-ATT_HOME/
-├── config/
-│   ├── config.yaml
-│   ├── tools/*.yaml
-│   ├── dbhelpers/{sit,uat}/orders.yaml
-│   └── mqhelpers/{sit,uat}/payment.yaml
-└── packages/<id>/
-    ├── package.yaml
-    ├── testcase/
-    ├── templates/
-    └── testdata/accounts.yaml
-```
-
-common config 保留 run/execution/report 設置、`toolGroups` 和 global `tools` registry。Tool/Helper descriptors 從 `ATT_HOME/config/` 解析；Testdata descriptors 則從選取的 Package 解析。Profile 層可配置 typed DB/MQ/SSH/HTTP descriptor lists；以下以 DB/MQ 示範：
-
-```yaml
-# config/config.yaml
-schemaVersion: att-config/v2.13
-environment: SIT                 # default；--env 会覆盖
-templates: {root: templates}
-testcase: {root: testcase}
-toolGroups:
-  - config/tools/sample.yaml
-  - config/tools/fpp.yaml
-  - config/tools/orders-db.yaml
-environments:
-  SIT:
-    dbhelpers: [config/dbhelpers/sit/orders.yaml]
-    mqhelpers: [config/mqhelpers/sit/payment.yaml]
-  UAT:
-    dbhelpers: [config/dbhelpers/uat/orders.yaml]
-    mqhelpers: [config/mqhelpers/uat/payment.yaml]
-```
-
-可把 `config/environments/sit.yaml` 和 `config/environments/uat.yaml` 作為 common registry 的遷移來源，包括 `invokePaymentApi` 以及 `examples/load/closed-smoke.yaml` 使用的 `sample.getAcDate`。實際 package 不要把共用 registry 縮減成 `tools: {}` 或 `toolGroups: []`。
-
-SIT 與 UAT 的 DBHelper 都保持 `id: orders`，只改變 JDBC URL 等 physical connection details；MQHelper 都保持 `id: payment`，只改變 host、queue manager、port 和 channel。包含完整 descriptor、pool 和安全 evidence policy 的可復制例子見 [`examples/environments/README.md`](../examples/environments/README.md)。
-
-兩種環境使用完全相同的 Action 定義：
-
-```yaml
-actions:
-  prepareRequest:
-    type: assign
-    name: requestText
-    expression: "&{templates/payment/request.json}"
-
-  queryOrder:
-    type: tool
-    call: >-
-      #{db.orders.query(
-        sql='select * from orders where order_id = ?',
-        params=[${EXEC.INPUT.orderId}]
-      )}
-
-  paymentRequest:
-    type: tool
-    call: >-
-      #{mq.payment.request(
-        requestQueue='PAYMENT.REQUEST',
-        replyQueue='PAYMENT.REPLY',
-        payload=${EXEC.VARS.requestText},
-        responseFormat='xml',
-        waitMs=5000
-      )}
-```
-
-根級 `environment` 是 default profile；大小寫不敏感的 `--env` 會覆蓋它。Profile 中的 `dbhelpers`、`mqhelpers`、`sshhelpers` 與 `httphelpers` 各自是整組 shallow replacement，省略才會繼承 common list；不支持 generic recursive merge，其他 profile 字段都會被拒絕。未知 profile 名稱會在 validation 或 external execution 前失敗。四種執行模式使用同一個 selector：
-
-```sh
-# SIT
-./att.sh validate --config config/config.yaml --env SIT --package
-./att.sh run --config config/config.yaml --env SIT --all
-./att.sh debug template PAYMENT_INVOKE --config config/config.yaml --env SIT
-./att.sh load ../examples/load/closed-smoke.yaml --config config/config.yaml --env SIT
-
-# UAT
-./att.sh validate --config config/config.yaml --env UAT --package
-./att.sh run --config config/config.yaml --env UAT --all
-./att.sh debug template PAYMENT_INVOKE --config config/config.yaml --env UAT
-./att.sh load ../examples/load/closed-smoke.yaml --config config/config.yaml --env UAT
-```
-
-CI 對每個目標環境分別執行 `validate --package` 和 `run --all`：
-
-```sh
-./att.sh validate --config config/config.yaml --env SIT --package
-./att.sh run --config config/config.yaml --env SIT --all
-./att.sh validate --config config/config.yaml --env UAT --package
-./att.sh run --config config/config.yaml --env UAT --all
-```
-
-這個設計使 Testcase、Template、Flow 和 Action 可以從 SIT promotion 到 UAT，不需要編輯；selected config 在 execution 前定義完整 resource registry，因此 validation 也是 deterministic 的。`orders`、`payment` 等 logical ID 表示能力，不表示 physical endpoint；topology 應屬於配置層。不要僅為選擇 endpoint 而創建 `orders_sit`、`orders_uat` 或在 Action 中加入環境條件。若 testcase/template root、report policy 或 package structure 確實不同，才使用不同 top-level config。
-
-YAML 中可保留非 secret topology：JDBC URL、MQ host/port、queue manager、channel、pool size 和 timeout。DB/MQ username/password 應使用 `${ENV:NAME}`，由本地環境或 CI secret store 提供。DBHelper 對 URL、username、password 及 string-valued connection properties 支持完整 `${ENV:NAME}`；MQHelper 僅對 username/password 支持該解析，host、queue manager、channel 和 numeric port 通常直接寫在 selected descriptor 中。resolved secret 不會進入 profile metadata、diagnostics、reports 或 generated docs。
-
-當同一 package 只在基礎設施綁定上不同，應使用 profiles；當 testcase/template root、report policy 或 package structure 有意不同，才使用不同 top-level config。完整 config migration 見 [Migration Notes](reference.zh/appendices/migrations.md)。
-
-### Schema catalog
-
-Repository `schemas/catalog.yaml` 是建立版本相符 ATT Engine JAR 內嵌 registry 的 build input。Runtime 唯一權威來源是該版本鎖定的 classpath registry；`ATT_HOME/schemas/` 和 Package-local `schemas/` 均不能新增或替換 schemas。Package validation 會檢查 Engine 登錄的 resources；封存 schema 只有在安裝的 Engine 明確支援時才是 runtime contract。完整矩陣見 [Schema and Version Matrix](reference.zh/appendices/schema-matrix.md)。
-
-### 設定 package-wide options
-
-以下 configuration example 與 field table 和英文版共用相同 contract；欄位名與 literal values 保留英文。
-
-```yaml
-schemaVersion: att-config/v2.13
-outputDirectory: output
-environment: SIT
-timeoutMs: 10000
-caseLog: {yamlAnchors: false}
-testcase: {root: testcase}
-templates: {root: templates}
-run: {id: {default: timestamp, timestampFormat: yyyyMMdd-HHmmss}}
-execution:
-  runIdFormat: "run-#{date.systimestamp(format='yyyyMMdd-HHmmss')}"
-  debugIdFormat: "debug-${META.TARGET.type}-${META.TARGET.id}-#{date.systimestamp(format='yyyyMMdd-HHmmss')}"
-  processOutput: {memoryLimitBytes: 65536, artifactLimitBytes: 104857600}
-report:
-  mode: append-to-copy
-  fileNamePattern: "${suiteName}.result.xlsx"
-  columns: {}
-  html: {caseLogInlineLimitBytes: 32768}
-  junit: {caseLogEmbedThresholdBytes: 10240}
-xml: {namespaceMode: ignore}
-toolGroups: [config/tools/database.yaml]
-dbhelpers: [config/dbhelpers/orders.yaml]
-mqhelpers: [config/mqhelpers/orders.yaml]
-tools: {}
-environments:
-  SIT:
-    dbhelpers: [config/dbhelpers/sit/orders.yaml]
-    mqhelpers: [config/mqhelpers/sit/payment.yaml]
-  UAT:
-    dbhelpers: [config/dbhelpers/uat/orders.yaml]
-    mqhelpers: [config/mqhelpers/uat/payment.yaml]
-```
-
-#### 設定 runtime 和 package 路徑
-
-| Path | Required/default | Constraints |
-|---|---|---|
-| `schemaVersion` | required | 現行版本：`att-config/v2.13`；上一版 schema 仍受支援。本例採用現行 schema。 |
-| `outputDirectory` | `output` | Non-empty package-relative output root |
-| `environment` | `SIT` | Non-empty default profile name when `environments` is present; otherwise exposed metadata only |
-| `timeoutMs` | `10000` | Integer 1–3600000 milliseconds |
-| `caseLog.yamlAnchors` | `false` | Boolean; false fully expands repeated YAML structures, true permits anchors/aliases |
-| `templates.root` | 已棄用 | 使用 Manifest `resources.templatesRoot`；省略時為 `templates` |
-| `testcase.root` | 已棄用 | 使用 Manifest `resources.testcaseRoot`；省略時為 `testcase` |
-| `run.id.default` | `timestamp` | Only `timestamp` is supported |
-| `run.id.timestampFormat` | `yyyyMMdd-HHmmss` | Non-empty Java date/time format |
-| `execution.runIdFormat` | unset | Optional outer Run/Load ID expression; exact `--run-id` wins |
-| `execution.debugIdFormat` | unset | Optional standalone Debug ID expression; exact `--debug-id` wins |
-| `execution.processOutput.memoryLimitBytes` | `65536` | Integer 1024–1048576; in-memory head/tail preview per stdout/stderr stream |
-| `execution.processOutput.artifactLimitBytes` | `104857600` | Integer from `memoryLimitBytes` through 1073741824; maximum bytes streamed to each process artifact |
-| `xml.namespaceMode` | `ignore` | `ignore` or `preserve` |
-
-`runIdFormat` 會產生外層 Run ID；Load 沒有指定 `--run-id` 時也會使用此 policy。它不會改變 Load 每個 iteration 的 engine-managed `EXEC.ID`。`debugIdFormat` 只產生 standalone Debug 目錄 identity。沒有設定時，Run/Load 維持原有 timestamp default，Debug 維持 `<type>-<targetId>` default。
-
-Format 在 identity 發布或建立 output directory 前只求值一次。Run/Load 可讀取 `META.SOURCE.type/path` 和 `EXEC.RUN_STARTED_AT`；不可讀取每個 Case 或 Load iteration 各自捕捉的 `EXEC.STARTED_AT`。生成 Run/Load ID 使用的外層開始時間，會與 runtime Context 的 `EXEC.RUN_STARTED_AT` 相同。Debug format 可讀取 `META.TARGET.type/id`、`EXEC.STARTED_AT` 和 `EXEC.RUN_STARTED_AT`；兩個 timestamp 都代表 standalone Debug 的開始時間。可使用純 identity-format built-ins，以及 `date.sysdate` / `date.systimestamp`；不可呼叫外部服務、random/sequence、filesystem 或 invocation state。正在生成的 identity 不可被讀取，例如 `${EXEC.RUN_ID}`、`${EXEC.ID}`、`${EXEC.OUTPUT_DIR}`、`${EXEC.VARS}` 和 `${EXEC.ACTIONS}` 會被拒絕。生成值必須本身是有效的單一路徑段，ATT 不會替它 sanitize。Run/Load 以及明確或配置的 Debug ID 發生 collision 時會 fail；legacy Debug default 仍會加 timestamp suffix。
-
-```yaml
-execution:
-  runIdFormat: "run-#{date.systimestamp(format='yyyyMMdd-HHmmss')}"
-  debugIdFormat: "debug-${META.TARGET.type}-${META.TARGET.id}-#{date.systimestamp(format='yyyyMMdd-HHmmss')}"
-```
-
-Run 和 Load 的 `--run-id <id>`，以及 standalone Debug 的 `--debug-id <id>` 都是 literal override，不會再當成 expression 求值。
-
-#### 配置報表輸出
-
-| Path | Required/default | Constraints |
-|---|---|---|
-| `report.mode` | `append-to-copy` | `append-to-copy` or `none`; `none` skips result-workbook creation |
-| `report.fileNamePattern` | `${suiteName}.result.xlsx` | Result workbook filename pattern |
-| `report.columns` | `{}` | Supported keys: `result`, `durationMs`, `expectedResult`, `actualResult`, `caseLog`, `reportLink`, `runTime`, `execId`; each value is a string column label |
-| `report.html.caseLogInlineLimitBytes` | `32768` | Integer 0–1048576 UTF-8 bytes; larger logs use a bounded head/tail preview plus artifact link |
-| `report.junit.caseLogEmbedThresholdBytes` | `10240` | Integer 0–1048576 UTF-8 bytes; 0 always links |
-
-#### 配置 Resource 和 environment registries
-
-| Path | Required/default | Constraints |
-|---|---|---|
-| `toolGroups` | `[]` | Unique safe package-relative tool-group YAML paths |
-| `dbhelpers` | `[]` | Unique package-contained `att-dbhelper/v2.6` YAML paths; normalized duplicates are rejected |
-| `mqhelpers` | `[]` | Unique package-contained `att-mqhelper/v1.3` YAML paths; normalized duplicates are rejected |
-| `sshhelpers` | `[]` | Unique package-contained `att-sshhelper/v1.0` YAML paths |
-| `httphelpers` | `[]` | Unique package-contained `att-httphelper/v1.1` YAML paths |
-| `environments` | absent | Non-empty map of profile names; profiles may contain configured shared Resource lists; Package Testdata belongs to the Manifest |
-| `environments.<profile>.testdata` | deprecated | Temporary `packagePolicy.legacyTestdata` only; migrate to Manifest `testdata.environments` |
-| `ssh` | absent | Optional SSH target for inline global tools |
-| `tools` | `{}` | Map of reusable tool contracts |
-
-
-Allowed global object properties are:
-
-| Object | Allowed properties |
-|---|---|
-| root | `schemaVersion`, `outputDirectory`, `environment`, `timeoutMs`, `caseLog`, `templates`, `testcase`, `run`, `execution`, `report`, `xml`, `toolGroups`, `dbhelpers`, `mqhelpers`, `sshhelpers`, `httphelpers`, `ssh`, `tools`, `environments`, `x-*` |
-| `environments.<profile>` | `dbhelpers`, `mqhelpers`, `sshhelpers`, `httphelpers`, `testdata`, `x-*` |
-| `caseLog` | `yamlAnchors`, `x-*` |
-| `templates` | `root`, `x-*` |
-| `testcase` | `root`, `x-*` |
-| `run` | `id`, `x-*` |
-| `run.id` | `default`, `timestampFormat`, `x-*` |
-| `execution` | `runIdFormat`, `debugIdFormat`, `processOutput`, `x-*` |
-| `execution.processOutput` | `memoryLimitBytes`, `artifactLimitBytes`, `x-*` |
-| `report` | `mode`, `fileNamePattern`, `columns`, `html`, `junit`, `x-*` |
-| `report.html` | `caseLogInlineLimitBytes`, `x-*` |
-| `report.junit` | `caseLogEmbedThresholdBytes`, `x-*` |
-| `xml` | `namespaceMode`, `x-*` |
-| `ssh` | `host`, `user`, `port`, `identityFile` |
-
-See [Migration Notes](reference.zh/appendices/migrations.md) for removed configuration fields.
-
-### 標識符和路徑約束
-
-Run ID 和完整 Case ID 會直接用作目錄名，ATT 不會對合法標識做 slug 化或哈希處理。
-
-Run ID 必須非空、最多 128 個 Unicode 碼點，不能是 `.` 或 `..`，不得含前導/尾隨空白或尾隨 `.`，且不能包含 `/`、`\`、`:`、`*`、`?`、`"`、`<`、`>`、`|`、NUL、控制字符。Windows 設備名（如 `CON`、`NUL`、`COM1`、`LPT1`）會按大小寫不敏感方式拒絕。
-
-`workbookId`、`groupId`、`rowCaseId` 同樣遵循相同字符規則。`workbookId` 與 `groupId` 不能含點號，因為點號用於分隔三個組件；`rowCaseId` 可含點號。Template 路徑相對 `templates.root`；file-content expression 只可讀取 package root 內一個 canonical、regular、UTF-8 file，並拒絕 absolute path、glob、dynamic locator 及 symlink escape。明確聲明的 resource file input 和 evidence output 路徑必須保持在各自配置根目錄內；ATT 會規範化並檢查包含性。
-
-### Topology 與 secrets
-
-Topology 可隨 descriptor/environment 改變。在 descriptor 支援處使用 `${ENV:NAME}` 注入 secret；不可提交，也不可將解析後的值公開在 META、report 或 diagnostic。缺少 required variable 時會指出 field/name，但不列印 secret。
-
-### Cross-mode consistency
-
-Run、Validate、Debug、Load 透過同一 effective configuration 解析所選 environment。`--env` 不是 Action branching，也不會產生 mode-specific helper ID。
-
-### 分開的 Configuration files
-
-若 package roots、report policy、Tool topology 或其他 config 刻意不同，可繼續使用 `--config config/environments/sit.yaml` 與 `uat.yaml`。若 package contract 相同而只改 resource binding，使用 profiles。
-
-
-### `config.report.fileNamePattern`
-
-#### Context and legal forms
-
-該配置使用統一表達式引擎，但擁有獨立的非 Case 作用域。它只支持一個大小寫敏感的值引用：
-
-| 佔位符 | 值 |
-|---|---|
-| `${suiteName}` | 源 Workbook basename，去掉結尾的小寫 `.xlsx` 後綴；例如 `testcase/payment_regression.xlsx` 變為 `payment_regression` |
-
-配置字符串必須顯式引用 `${suiteName}`，無論它用於文本插值還是內建函數參數。ATT 沒有定義其他通用 non-runtime/configuration expression roots。call 內的裸 `suiteName` 會被拒絕。合法示例包括：
-
-```yaml
-report:
-  fileNamePattern: "${suiteName}.result.xlsx"
-```
-
-以及：
-
-```yaml
-fileNamePattern: "result-${suiteName}.xlsx"
-fileNamePattern: "ATT-${suiteName}-report.xlsx"
-fileNamePattern: "${suiteName}-${suiteName}.xlsx"
-fileNamePattern: "#{upper(${suiteName})}.result.xlsx"
-fileNamePattern: "#{concat('ATT-', #{lower(${suiteName})})}.xlsx"
-```
-
-#### Illegal or unsupported forms
-
-但不支持如 `${RUN_ID}`、`${WORKBOOK_ID}`、`${ENVIRONMENT}`、`${EXEC.INPUT.caseId}` 等運行時值引用。
-
-
-### Configuration owners
-
-| Contract | Semantic owner |
-|---|---|
-| Workbook / Sidecar / Snapshot | [Test Authoring](reference.zh/test-authoring.md) |
-| Template / Flow / Action | [Test Authoring](reference.zh/test-authoring.md) / [Actions](reference.zh/actions.md) |
-| Tool command、call、arguments | [Tool](reference.zh/resources/tools.md) |
-| DB descriptor | [DBHelper](reference.zh/resources/dbhelper.md) |
-| MQ descriptor | [MQHelper](reference.zh/resources/mqhelper.md) |
-| HTTP descriptor | [HTTPHelper](reference.zh/resources/httphelper.md) |
-| SSH descriptor | [SSHHelper](reference.zh/resources/sshhelper.md) |
-| Timeout / Retry | [Reliability](reference.zh/reliability-execution-control.md) |
-
-## Package Manifest
-
-使用 `<PACKAGE_ROOT>/package.yaml` 為單一 Package 宣告預設值、業務Resource根目錄及 Testdata inventory。此檔案可省略，schema 為獨立的 `att-package/v1`；權威定義來自相符 Engine JAR 內嵌的 registry。
-
-Package ID 與實體根目錄來自可信註冊或既有 Local Package 選取。Manifest 不會註冊 Package、授權使用者或提供具特權的 runtime configuration。共用 Environment profiles、Tools 與 DB/MQ/HTTP/SSH Helpers 仍由 Global Configuration 管理。
-
-### 宣告 Package 預設值
-
-此範例選取中央既有 profile，並宣告 Package 自己的 Testdata。執行完整驗證前，先建立引用的 descriptor。
-
-```yaml
-schemaVersion: att-package/v1
-metadata:
-  name: Payments
-  description: Payment regression resources
-defaultEnvironment: SIT
-resources:
-  templatesRoot: templates
-  testcaseRoot: testcase
-testdata:
-  descriptors: [testdata/accounts.yaml]
-  environments:
-    UAT: [testdata/uat-accounts.yaml]
-    PROD: []
-defaults:
-  timeoutMs: 15000
-  report:
-    columns: {result: Result, durationMs: Duration}
-  xml: {namespaceMode: preserve}
-```
-
-中央 `environments` 必須定義 `SIT`、`UAT` 及 `PROD`。某個 Environment 未出現在 `testdata.environments` 時，繼承 `descriptors`；存在的 list 會整份取代 inventory，`[]` 代表清空。
-
-所有路徑使用 `/`，相對於已選取 Package。絕對路徑、`..`、不安全 symlink 及越界路徑均會被拒絕。檔案上限為 262144 UTF-8 bytes。未知欄位、重複 YAML keys、aliases、anchors 及 `x-` extensions 均不允許。
-
-沒有 Manifest 時，使用慣例根目錄 `templates`、`testcase`，Package Testdata inventory 為空。Global `templates.root`、`testcase.root` 不再決定 Package 業務根目錄。
-
-檢查時可省略慣例目錄 `templates/`、`testcase/` 及 `load/`。目錄不存在時，Explorer、LOAD Catalog 及 Quick Load 會為該根目錄回傳空 inventory。若已設定或慣例根目錄存在，但不是可讀目錄或解析後超出 canonical Package，檢查會回傳已淨化的 `ATT-RESOURCE-ROOT-INVALID` 診斷；不會跟隨不安全路徑，也不會把存在但無效的目錄當成空目錄。
-
-### 解析 Environment
-
-明確 request 或既有 CLI `--env` 優先；未指定時使用 Package 的 `defaultEnvironment`，再回退至中央預設值。名稱會解析成中央 profile 的正式拼寫。Effective 檢視顯示實際 Environment 及來源。
-
-Server 在解析後套用 policy。Package 預設值不能繞過允許清單或明確選取要求。新建 execution drafts、直接提交及 schedules 會保存已解析 Environment。從已驗證 draft 建立 schedule 而未提供 Environment 時，繼承 draft 的選取。日後修改預設值不能重新導向該 snapshot；來源 revision 檢查可能要求重新審閱。
-
-Registry adapter 可透過 `FrameworkConfigLoader.loadContext` 與明確的 `PackageContext` 提供選取內容；Environment 優先序為 request → Context → Package → Global。來源證據只採用 adapter 提供的已註冊 Package ID，不會由資料夾名稱或登入身分推導。CLI Context 的持久化指令仍屬另一項變更。
-
-執行結果在 `summary.configuration` 保留不含設定值的來源snapshot：標準 Environment、原始選取層、Global 與 Manifest 摘要、有效設定識別、Engine 版本與 revision、Schema Registry 摘要，以及欄位來源與邏輯撰寫路徑。RUN、Debug、Load 亦在受管理產物目錄寫入 `configuration.json`。Server Draft、排隊 Job、Schedule 定義保留核准snapshot，包含已註冊 Package ID 與驗證時的 Package revision；Job 歷史與結果在 Server 重啟後仍保留此資料。呼叫端不能提供這些內部核准欄位。
-
-Worker 在執行前核對已核准的有效設定識別。採用 `ignore` Package 變更政策的 Schedule 會以目前來源重新驗證執行副本；已儲存的核准內容保持不變，執行證據另保留原核准設定識別以供比較。此證據不包含設定值、descriptor 紀錄、憑證或主機路徑。
-
-### 套用 typed defaults
-
-只允許以下執行與呈現預設值；未提供的欄位繼承 Global Configuration。
-
-| Manifest path | 行為 |
-|---|---|
-| `defaults.timeoutMs` | 正整數，不得超過中央 `packagePolicy.maxTimeoutMs`；預設上限 300000 ms |
-| `defaults.run.id.default` | 只接受 `timestamp` |
-| `defaults.run.id.timestampFormat` | 使用既有 timestamp format 驗證 |
-| `defaults.execution.runIdFormat` | 使用既有 Run/Load ID expression 契約 |
-| `defaults.execution.debugIdFormat` | 使用既有 Debug ID expression 契約 |
-| `defaults.report.fileNamePattern` | 使用既有報表檔名契約 |
-| `defaults.report.columns` | 整份取代 column mapping；包括明確 `{}` |
-| `defaults.report.html.caseLogInlineLimitBytes` | 整數 0–1048576 |
-| `defaults.report.junit.caseLogEmbedThresholdBytes` | 整數 0–1048576 |
-| `defaults.caseLog.yamlAnchors` | Boolean |
-| `defaults.xml.namespaceMode` | `ignore` 或 `preserve` |
-
-Manifest 不可覆寫 output directories、process output limits、scheduling limits、authentication、credentials、helper definitions、worker settings 或 schema locations。完整欄位白名單由 Engine 內嵌 Manifest schema 定義。
-
-### 解析 invocation Testdata
-
-Base inventory 屬於已選取 Package 及 Environment。不同 Package 可使用相同 descriptor ID，但不共用 records，也不匯入鄰近 Package 的檔案。
-
-執行只驗證引用所需的 base Testdata dependency closure。未引用的缺失或無效 base descriptor 不會阻止 Quick Load。明確 invocation-local Debug/Load imports 仍採嚴格驗證：明確匯入的缺失或無效檔案會失敗。Invocation descriptor 以相同 ID 整份取代 base descriptor，不合併 fields 或 records；同一 layer 的重複 ID 仍屬錯誤。
-
-完整 Package validation 檢查 Manifest 宣告的所有 descriptor layers，包括各 Environment lists。內建 default Package 可執行：
-
-```bash
-./att.sh validate --package --format json
-```
-
-按 diagnostics 中的 Package ownership、logical path、layer 與 descriptor ID 修正問題，再發布或分發 Package。
-
-### 在 Studio 檢視及發布
-
-選取已註冊 Package 後，開啟 **Configuration**，再選 **Package Configuration**。**Source**、**Declared**、**Effective**、**Compare with Global** 分別檢視 Manifest；**Shared Configuration** 保留中央共用設定。All Packages 共用 inspector 仍只使用中央來源。
-
-Source reading 沿用既有 source browsing policy 及結構化遮蔽。已遮蔽 projection 只供閱讀。編輯需要 Server 明確啟用，以及已驗證、有效且 login 與明確註冊 Package ID 完全相同的 USER。其他 USER 保留一般操作；只有 ADMIN 的帳戶沒有隱含編輯權限。Login 相同不會自動註冊目錄。
-
-1. 在 **Source** 編輯可見 Manifest，或建立新的可選 Manifest。
-2. 選 **Create Manifest draft**，按目前 digest 暫存私有且會到期的 candidate。
-3. 選 **Validate Manifest draft**，由 Worker 驗證 candidate，期間不修改 live file。
-4. 審閱安全的 declaration、effective values、Environment 與 origins，再選 **Review validated Manifest**。
-5. 選 **Publish reviewed Manifest**。Server 重新檢查 ownership、live digest、Global/Package dependencies 與 schema revision，再以 atomic replacement 寫入 `package.yaml`。
-
-Manifest 發布的 fingerprint 涵蓋中央 Runtime Config、其所有已宣告 profiles 明列的 Tool/Helper descriptors、candidate 的每個 Testdata descriptor layer、business root bindings，以及內嵌 Schema Registry。系統在驗證前後及發布時檢查 fingerprint；不掃描無關的 business files、archives 或未被引用的中央檔案。驗證依賴集合最多包含 10000 個不同 descriptor paths，檔案內容總計最多 256 MiB；這是依賴集合限制，不是整個 Package 的大小上限。Execution 與 Job revisions 仍各自檢查 business dependencies。
-
-Studio 會保護已修改的 Manifest source 與尚未發佈的 Draft；建立 Draft 或明確捨棄 source 變更前，不能重新整理或切換檢視。離開頁面亦使用現有的未儲存變更確認流程。
-
-發生衝突時需建立新 draft。發布前保存 audit intent，發布後記錄完成狀態。History 位於私有 Server data，API 只回傳 revisions，不回傳歷史原始 source；按保存檔案的修改時間由新至舊排序，同時刻以 digest 升序排列。**Stage rollback** 只建立 candidate，仍需驗證與審閱。回復至沒有 Manifest 前的預設行為時，使用 canonical empty `att-package/v1` 檔案，審閱畫面會明確標示。
-
-以下可信部署 policy 可省略；預設不允許編輯：
-
-```yaml
-server:
-  packageConfiguration:
-    sourceEditingEnabled: false
-    maxDrafts: 128
-    maxDraftsPerUser: 8
-    draftTtlSeconds: 900
-    maxHistory: 50
-    allowedEnvironments: [SIT, UAT]
-    requireExplicitEnvironments: [UAT]
-```
-
-`allowedEnvironments: []` 允許中央定義的任何 profile。`requireExplicitEnvironments` 在 execution validation 前拒絕隱含選取其列出的 profile。Draft 數量、到期時間、history 與 source size 均設上限。Source editing 亦要求 inspection 及既有已驗證 USER 授權流程。
-
-### 遷移舊 Package inventory
-
-Global `testdata` 及 profile `testdata` lists 已棄用，預設不使用。中央可暫時設定 `packagePolicy.legacyTestdata: true`，只為沒有 Manifest 的 Package 恢復舊 inventory。存在 Manifest 時完全採用 Package ownership，包括明確空 inventory。Migration warnings 會指出舊 ownership；相容 switch 應只在有期限的遷移期間使用。
-
-Migration helper 依可信 Server 明確 registry 產生有版本的唯讀計畫。從 repository 執行，Python environment 需先安裝 `tools/requirements-migration.txt`：
-
-```bash
-python tools/migrate_package_config.py --config config/config.yaml --server-config /ABSOLUTE/PATH/att-server.yaml
-```
-
-將 `/ABSOLUTE/PATH/att-server.yaml` 換成部署 registry。Helper 掃描各已註冊 Package 的業務文字與受限 XLSX text，只建議屬於本 Package 且被引用的 descriptors；保留 Environment 明確空 lists，略過既有 Manifest，並報告缺失、未使用或不安全 imports。它只列出繼承預設值的欄位名稱，不輸出其值或 descriptor records。重複 mapping keys 或 YAML aliases 會令 inventory 失敗。工具不發布檔案，也不推斷註冊。
-
-審閱各 proposed Manifest，補齊所需 descriptors，再執行完整 Package validation。透過 source workflow 或受控部署流程發布後，移除舊 Global inventories 並停用 `legacyTestdata`。
-
-### API paths
-
-以下路徑相對於 `/api/v1`，沿用已驗證 USER、origin、CSRF、source policy 與 request size 限制。
-
-| Method 與 path | 結果 |
-|---|---|
-| `GET /packages/{id}/package-configuration/{source\|declared\|effective\|compare}` | 安全 projection；effective selection 可提供 `environment` query |
-| `POST /packages/{id}/package-configuration/drafts` | 暫存 `{source, expectedManifestDigest}` |
-| `POST /packages/{id}/package-configuration/drafts/{draftId}/{validate\|review\|publish\|discard}` | 以 `{}` 推進私有 draft |
-| `GET /packages/{id}/package-configuration/history` | 只供 owner 存取的有上限 revision list |
-| `POST /packages/{id}/package-configuration/rollback` | 暫存 `{revision, expectedManifestDigest}`，等待審閱 |
-
-來源 revision 衝突回傳 `409`；source 存取或 Environment policy 拒絕回傳 `403`；draft 到期或不可用回傳 `404`；draft 容量不足回傳 `429`。發布不會執行測試或修改中央 profile definitions。
-
-## CLI 參考
-
-<!-- att-doc-status: current release=4.2.6 -->
-
-
-### 選擇命令
-
-| 命令 | 目的 | 是否調用外部 Tool |
-|---|---|---:|
-| `help` | 顯示語法和選項；無命令時默認 | 否 |
-| `version` | 輸出 ATT 版本 | 否 |
-| `validate` | 校驗包或選中依賴閉包 | 否 |
-| `snapshot` | 生成同名規範 testcase XML | 否 |
-| `run` | 校驗並執行已選 Case | 是，dry-run 除外 |
-| `debug` | 使用 debug sidecar 執行一個 Template、Flow 或 Tool | 是 |
-| `load` | 執行已聲明的 scenario，或將 Debug sidecar promotion 為 Quick Load | 是 |
-| `docs` | 生成可搜索的包文檔 | 否 |
-| `report` | 為已完成 run 重新生成報表 | 否 |
-| `build` | 歸檔最新已完成 run | 否 |
-| `clean` | 刪除文檔化的 ATT 生成輸出 | 否 |
-| `remote` | 透過 ATT Server REST/SSE API 提交及管理工作 | ATT Server |
-
-上表列出 ATT 4.2.6 CLI command。獨立的 vNext proposal 尚未包含在此 release。
-
-### ATT 4.2.6 的可用性
-
-本 Reference 說明 ATT 4.2.6 已發行的 CLI。vNext grammar 是獨立的[規劃中 proposal](interfaces/cli/vnext-proposed.zh.md)，並非目前 command interface。本版本繼續支援 legacy command。
-
-### 編譯 source checkout
-
-Source checkout 的 launcher 只會執行已預先編譯的 classes，不會自行編譯。請使用 JDK 和 Maven 明確編譯支援 Java 8 的 CLI、Engine、Remote 及 Server API module：
-
-```sh
-mvn -DskipTests -pl att-cli -am compile
-```
-
-之後在 macOS/Linux 執行 `./att.sh`，在 Windows 執行 `att.bat`。若缺少所需 classes，launcher 會以錯誤訊息列出 build command，並停止執行。已打包的 release 內含 application JAR，只需要 Java 8 或以上的 runtime，無須 Maven。使用相關 integration 時，可把可選 JDBC 或 IBM MQ driver JAR 放入 `lib/`。Server WAR 需要 Java 17 或以上版本。
-
-### 按任務查閱語法、option 和範例
-
-#### 查看 help 和版本
-
-| 語法 | 說明 |
-|---|---|
-| `./att.sh` 或 `./att.sh help` | 顯示幫助 |
-| `./att.sh version` | 輸出版本 |
-
-#### 產生 Workbook snapshot
-
-| 語法 | 說明 |
-|---|---|
-| `./att.sh snapshot` | 未指定 selector 時遞歸生成 `testcase.root` 下所有 Snapshot；等同於 `--all` |
-| `./att.sh snapshot --suite <xlsx>` | 生成一個同名 XML Snapshot |
-| `./att.sh snapshot --all` | 遞歸生成 `testcase.root` 下所有 Snapshot |
-| `./att.sh snapshot --suite-dir <dir>` | 在某目錄下遞歸生成 Snapshot |
-
-#### 驗證 package
-
-| 語法 | 說明 |
-|---|---|
-| `./att.sh validate --package` | 校驗整個包；默認範圍 |
-| `./att.sh validate --selected <selection>` | 校驗選中依賴閉包 |
-| `./att.sh validate --package --format json` | 向 stdout 輸出單個校驗 JSON 文檔 |
-
-在 Windows 上，`att.bat snapshot`、`att.bat validate` 和 `att.bat docs` 不會調用已配置的 Testcase Tool。Validation 會檢查 `.sh` path 和文件是否存在，但不檢查 POSIX launch/executable compatibility；warning 會列出受影響的 Tool。Validation PASS 只確認這些腳本的配置，不能證明它們可在 Windows 執行。執行 `run` 前，請提供並測試 Windows-native equivalent。啟動器和 Tool 相容性見 [Windows launcher and Tool compatibility](reference.zh/appendices/limits-defaults.md)。
-
-#### 執行 Testcase
-
-| 語法 | 說明 |
-|---|---|
-| `./att.sh run --all` | 運行所有發現的 Case |
-| `./att.sh run --suite <xlsx>` | 運行一個 Workbook；可重復 |
-| `./att.sh run --suite-dir <dir>` | 在目錄下發現 Workbook |
-| `./att.sh run <selection> --case <workbookId.groupId.rowCaseId>` | 包含一個完整 Case ID |
-| `./att.sh run <selection> --tag <tag>` | 包含一個標簽 |
-| `./att.sh run <selection> --exclude-tag <tag>` | 排除一個標簽 |
-| `./att.sh run <selection> --dry-run` | 僅校驗/規劃，不執行 Tool |
-| `./att.sh run <selection> --update-snapshot` | 在校驗前顯式刷新已更改的完整 WorkbookSnapshot |
-| `./att.sh run <selection> --fail-fast` | 在首次 FAIL/ERROR 後停止調度 |
-| `./att.sh run <selection> --rerun-failed` | 重新選擇先前 FAIL/ERROR 的 Case |
-| `./att.sh run <selection> --run-id <id>` | 設置最終 run 目錄名 |
-| `./att.sh run <selection> --output-dir <dir>` | 覆蓋輸出根目錄 |
-| `./att.sh run <selection> --ci-output junit,json` | 寫出 CI XML/JSON 與 JUnit HTML |
-| `./att.sh run <selection> --format json` | 輸出機器可讀摘要 |
-| `./att.sh run <selection> --quiet` | 抑制詳細實時進度；保留最終摘要和錯誤 |
-| `./att.sh run <selection> --verbose` | 為兼容性保留；詳細實時進度已是默認行為 |
-
-#### Debug component
-
-| 語法 | 說明 |
-|---|---|
-| `./att.sh debug` | 發現可運行的 Tool、Template 和 Flow；只顯示實際存在的默認 sidecar |
-| `./att.sh debug template <id>` | 執行一個 Template；自動發現 `<template-dir>/debug.yaml` |
-| `./att.sh debug flow <id>` | 執行一個規範 Flow；自動發現 `<flow-dir>/debug.yaml` |
-| `./att.sh debug tool <id>` | 執行一個 Tool；自動發現 `config/tools/<group>.debug.yaml` |
-| `./att.sh debug <type> <id> --input <file>` | 覆蓋目標自動發現的 debug 輸入 |
-| `./att.sh debug <type> <id> --set input.path=<yaml-value>` | 覆蓋 typed `EXEC.INPUT` 值；可重復使用 |
-| `./att.sh debug tool <id> --set arg.name=<yaml-value>` | 覆蓋一個 Tool argument；可重復使用 |
-| `./att.sh debug <type> <id> --set vars.path=<yaml-value>` | 在 expression evaluation 前覆蓋 Template/Flow bootstrap `EXEC.VARS` |
-| `./att.sh debug <type> <id> --debug-id <id>` | 指定 standalone Debug 的 exact directory identity |
-| `./att.sh debug <type> <id> --unsafe-failure-details` | 為此次 standalone local Debug 展開 collector failure diagnostics；會先警告並保留 secret redaction |
-| `./att.sh debug <type> <id> --output-dir <dir>` | 將 debug 輸出隔離到 `<dir>/debug/<debugId>/` |
-| `./att.sh debug <type> <id> --profile` | 將 CLI 啟動及 Debug phase timing 寫入 `performance.json` |
-| `./att.sh debug <type> <id> --format json` | 輸出緊湊機器可讀摘要；完整證據仍在 `result.yaml` |
-| `./att.sh debug <type> <id> --quiet` | 抑制詳細實時進度；保留最終摘要和錯誤 |
-
-#### 執行 Load scenario
-
-| 語法 | 說明 |
-|---|---|
-| `./att.sh load` | 發現 `load/` 下有效的 `att-load/*` scenario；報告無效的已聲明 scenario |
-| `./att.sh load <scenario.yaml> --quiet` | 抑制定期實時進度；保留最終摘要和錯誤 |
-| `./att.sh load <scenario.yaml> --verbose` | 為兼容性保留；有界實時進度已是默認行為 |
-| `./att.sh load --debug <type> <id>` | 使用 `load/load.yaml` policy，將 Debug sidecar promotion 為普通單 workload Load run |
-| `./att.sh load <scenario.yaml> --set input.path=<yaml-value>` | 覆蓋單 workload `EXEC.INPUT`；多 workload scenario 不支持未限定覆蓋 |
-| `./att.sh load <scenario.yaml> --set arg.name=<yaml-value>` | 覆蓋單 workload Tool scenario 的 argument |
-| `./att.sh load <scenario.yaml> --set vars.path=<yaml-value>` | 覆蓋單 workload Template/Flow bootstrap vars |
-
-#### 管理報表和 package 輸出
-
-| 語法 | 說明 |
-|---|---|
-| `./att.sh report --run-id <id>` | 重建 `report/index.html` 和 `report/junit.html` |
-| `./att.sh docs` | 生成 `build/docs/index.html` |
-| `./att.sh build` | 在 `build/` 中歸檔最新完成 run |
-| `./att.sh clean` | 刪除文檔化生成輸出 |
-
-### 透過 CLI 使用 ATT Server
-
-Remote command 使用 ATT Server 公開的 `/api/v1` contract。現有 `run`、`debug`、`load` 及 `validate` 命令仍在本機執行，只有明確加入 `remote` 才會連接 Server。
-
-```sh
-./att.sh remote --server sit packages
-./att.sh remote --server sit --no-auth packages
-./att.sh remote --server https://att-sit.example.com/att packages
-ATT_SERVER=sit ./att.sh remote packages
-./att.sh remote --server sit run payments --suite testcase/smoke.xlsx --env SIT --tag smoke
-./att.sh remote --server sit --no-auth run payments --all --principal Bob
-./att.sh remote --server sit jobs --principal 'Bob(anonym)'
-./att.sh remote --server ci run payments --all --detach
-./att.sh remote --server sit watch J0123456789ABCDEF
-./att.sh remote --server sit load payments --scenario load/payment.yaml --users 2 --duration 30s
-./att.sh remote --server sit artifacts J0123456789ABCDEF --download ./results
-```
-
-`--server` 選擇 `~/.att/servers.yaml` 中的 profile；設定 `ATT_REMOTE_CONFIG` 可使用其他 profile 檔案。`ATT_SERVER_CONFIG` 保留給 Server deployment YAML。`ATT_SERVER` 會覆蓋 default profile 的 URL；明確指定的 `--server` profile 優先。Remote package、suite、config、scenario 及 Debug input 必須是 Server package 的相對邏輯名稱。CLI 不會傳送本機絕對路徑或 `--output-dir`。
-
-Profile 可保存 URL、Basic Auth username 及 CI secret 環境變數名稱，但不能保存 password。若沒有設定 `passwordEnv`，CLI 會在有 terminal 時隱藏輸入 password。Basic authentication 必須使用 HTTPS；TLS certificate 及 hostname 檢查維持啟用。
-
-Attached Run、Debug、Load 及 Validate 只提交一次工作，透過 SSE 追蹤進度，以 `Last-Event-ID` 重新連線，再取得 canonical result。`--detach` 會輸出已接受工作 ID 並結束。使用 `jobs`、`job`、`watch`、`result`、`artifacts`、`artifact` 或 `cancel` 管理已保留的工作。Artifact 只會下載到所選本機目錄，不會覆寫現有檔案。
-
-Remote exit code：PASS/成功為 `0`、ATT FAIL 為 `1`、INVALID 為 `2`、ATT ERROR/CANCELLED 為 `3`；若連線、驗證或 protocol 問題令 client 無法取得可信結果，則為 `4`。Profile、options、reconnect 及 troubleshooting 見 [ATT Remote client](remote-client.zh.md)。
-
-Remote-only option 包括 `--server <profile|url>`、`--no-auth`、`--principal <name>`、`--detach`、`--download <directory>` 及 `--scenario <package-relative-path>`。只有 Server 明確允許匿名存取時，`--no-auth` 才會略過 profile credentials。匿名模式下，`--principal` 只提供自我聲稱的 label，Server 會在既有 `principal` 欄位儲存 `<name>(anonym)`；不影響存取或授權。驗證模式會忽略此 option。`jobs --principal <text>` 會以不區分大小寫的子字串搜尋該欄位，因此搜尋 `alice` 亦會匹配 `alice(anonym)`。`--format human|json` 及已記錄的 ATT selection、environment、Debug、Load option，會在符合 remote job contract 時使用。Remote command list 見上述指南。
-
-
-### Typed overrides and quick Load
-
-`--set` 可重複使用，並且只接受一個 namespace：`input`、`arg` 或 `vars`。值使用安全 YAML 解析，例如 `42`、`true`、`null`、`[a, b]` 或 `{id: 7}`；nested path 可使用 map key 和數字 list index，例如 `input.customer.ids[0]=42`。重複賦值按順序套用，最後一個值生效。解析 override 時不會評估 ATT expression；若 shell 可能展開類似 expression 的值，請加上引號。`arg.*` 僅適用於 Tool，`vars.*` 僅適用於 Template/Flow。多 workload Load scenario 不接受未限定的 override。
-
-`load/load.yaml` 是可選的 policy-only `att-load/v1.9` 檔案，可包含 `load`、`execution`、`thresholds`、`evidence` 和 `seed`，但不包含 target 或 business inputs。`load --debug` 會將 sidecar `inputs` 提升為 `EXEC.INPUT`、Template/Flow `vars` 提升為 bootstrap `EXEC.VARS`，或將 Tool `arguments` 傳入 Tool call，然後使用一般 Load validator、scheduler 和 evidence pipeline 執行。若 sidecar 含 Debug-local `testdata` imports，`load --debug` 會拒絕；請把 imports 宣告於 Load scenario。明確的 CLI pacing fields 會覆蓋 policy；沒有 policy 時，請直接在 CLI 指定完整 policy。
-
-### Debug input 與 output
-
-CLI 的 target、`--input`、`--set` 與 `--env` 語法見本頁 option matrix。Input discovery、bootstrap vars、保護 roots 與 output lifecycle 見 [Debug](reference.zh/execution-modes/debug.md)。
-
-### 退出碼
-
-| 代碼 | 含義 |
-|---:|---|
-| 0 | 命令/運行成功，且無 FAIL、ERROR、INVALID |
-| 1 | 至少一個 FAIL，且無 ERROR/INVALID |
-| 2 | CLI/配置/校驗/INVALID 失敗 |
-| 3 | 至少一個 ERROR，或不可恢復運行時失敗 |
-
-### 完整 CLI option matrix
-
-`--config <file>` 選擇 base configuration；`--env <name>` 從 `att-config/v2.13` 選擇 environment profile，適用於 `run`、`validate`、`debug` 和 `load`。`--help` 顯示說明。`--case-id` 是 `--case` 的相容別名。`--parallel` 是已棄用的 `--allow-parallel-runs` 相容拼法，應優先使用後者。`--queue` 與 `--allow-parallel-runs` 控制共用 output root 的 process-level concurrency，不會在單一 run 內增加 Case worker。`--profile` 為 `run` 和 `load` 寫入 performance diagnostics，並為選定的 `debug` target 寫入啟動及執行 phase timing。
-
-Load 以 scenario 為基礎；明確提供的 workload option 會先覆蓋對應欄位，再重新驗證 effective scenario：
-
-```sh
-./att.sh load ../examples/load/closed-smoke.yaml --config config/config.yaml --env SIT --users 2 --duration 5s
-./att.sh load ../examples/load/arrival-smoke.yaml --config config/config.yaml --env UAT \
-  --arrival-rate 5/s --warmup 1s --ramp-up 1s --duration 5s --ramp-down 1s \
-  --max-concurrent 4 --overload-policy drop --format json
-```
-
-無 target 的 `debug` 和 `load` 是唯讀 discovery。Debug 會驗證可執行 target，但不呼叫 Tool，也不建立 output。Load 只掃描宣告 `att-load/*` 的 YAML、驗證 target，並回報無效的已宣告 descriptor；其他 YAML 會忽略。Discovery 模式支援 `--config`、`--env`、`--format`、`--quiet` 和 `--verbose`。
-
-### 路徑顯示
-
-本機 CLI 預設顯示絕對路徑。加入 `--substitute-package-root`，可將 package 內路徑顯示為 `$ATT_PACKAGE_ROOT` 或 `$ATT_PACKAGE_ROOT/<relative-path>`；加入 `--substitute-external-basename`，可將其他絕對路徑顯示為 `$EXTERNAL/<basename>`。兩個 option 可獨立使用，適用於 `run`、`validate`、`snapshot`、`debug` 及 `load` 的人類可讀診斷、結構化結果與顯示的報表路徑。這只會改變呈現方式，不會改變檔案存取或儲存的 package data。這些 CLI options 只適用於本機 CLI；為避免洩露 host path，Server Worker 在 API 和 Studio 輸出中一律強制啟用兩種替換，並優先於 CLI 設定。升級至 4.2.4 後，如要恢復舊有本機 CLI 呈現方式，請明確加入相應旗標。
-
-```sh
-./att.sh validate --package --substitute-package-root
-./att.sh debug template PAYMENT_INVOKE --substitute-external-basename
-```
-
-`--set` 可重複使用，namespace 只能是 `input`、`arg` 或 `vars`。值使用 safe YAML 解析並保留型別，例如 `42`、`true`、`null`、`[a, b]` 或 `{id: 7}`；nested path 可用 map key 及數字 list index，例如 `input.customer.ids[0]=42`。重複賦值依序套用，最後一個值生效。解析時不會執行 ATT expression；shell 可能展開的值要加引號。`arg.*` 僅適用 Tool，`vars.*` 僅適用 Template/Flow。多 workload Load scenario 會拒絕未限定的 override。
-
-可選的 `load/load.yaml` 使用現行 policy-only `att-load/v1.9`，不能包含 target 或 business inputs。它可設定 `load`，以及可選的 `execution`、`thresholds`、`evidence` 和 `seed`。`load --debug` 會將 sidecar `inputs` promotion 到 `EXEC.INPUT`、Template/Flow `vars` promotion 到 bootstrap `EXEC.VARS`，或將 Tool `arguments` 傳入 Tool call，之後使用正常 Load validator、scheduler 和 evidence pipeline；不會先執行 Debug。明確的 CLI pacing 會覆蓋 policy。沒有 policy 時，請在命令列提供完整 policy：
-
-```yaml
-schemaVersion: att-load/v1.9
-load: {users: 2, duration: 10s}
-execution: {thinkTime: 250ms}
-evidence: {mode: failures}
-```
-
-```sh
-./att.sh debug
-./att.sh load
-./att.sh load --debug template PAYMENT_INVOKE
-./att.sh load --debug tool fpp.invokeApi --users 1 --duration 10s --set arg.requestId=42
-./att.sh load --debug flow common.payment --users 4 --duration 5s --set input.customer.ids[0]=42
-```
-
-重複的 `--set <input|arg|vars>.<path>=<yaml-value>` 會在 expression evaluation 前以安全 YAML 型別覆寫 definition。`debug`、單 workload Load scenario，以及 `load --debug template|flow|tool <id>` 都支援。Quick Load 會使用可選的 `load/load.yaml`；若沒有 profile，請在 command line 提供完整 policy。例如：
-
-```sh
-./att.sh debug template PAYMENT_INVOKE --set 'vars.reference=${EXEC.INPUT.reference}'
-./att.sh load --debug flow common.payment --users 2 --duration 10s --set 'vars.reference=${EXEC.INPUT.reference}'
-```
-
-完整 workload override 為 `--users`、`--arrival-rate`、`--warmup`、`--ramp-up`、`--duration`、`--ramp-down`、`--think-time`、`--max-concurrent` 和 `--overload-policy`；`--think-time` 只適用 closed-VU。其餘 selection/output 選項仍受各 command 約束：`--suite`、`--suite-dir`、`--case`/`--case-id`、`--tag`、`--exclude-tag`、`--all`、`--run-id`（Run/Load identity）、`--debug-id`（standalone Debug identity）、`--output-dir`、`--format`、`--quiet`、`--verbose`、`--ci-output`、`--dry-run`、`--fail-fast`、`--rerun-failed`、`--update-snapshot`、`--package`、`--selected`、`--input`、`--set`、`--queue`、`--parallel`、`--allow-parallel-runs`、`--profile`、`--config`、`--env` 和 `--help` 只在對應 command contract 允許時有效。
-
-#### 診斷信任邊界與必要機密保護
-
-`att-security` 為 Engine、Worker、Server 與檢視器提供共同且不能關閉的 Secret
-Protection。password/passphrase、secret/token/credential、authorization、cookie、
-API/access/private key 與 identity-file 欄位屬保留分類，整個值（包括未知巢狀結構）
-均受保護。文字中的 Bearer/Basic、URL 憑證、PEM 私鑰、`!secret`、CSV 機密欄及
-XML/JSON/YAML 機密值同樣受保護。Resource adapter登記的機密字串在 Case Log 中持續遮蔽；
-`includeAllFields` 不會解除必要保護。未知物件、循環或過深結構採 fail-closed。
-
-| 輸出邊界 | 路徑政策 | 機密政策 |
-| --- | --- | --- |
-| CLI console | 兩種別名預設關閉；兩個選項可獨立啟用 | 必要保護持續啟用 |
-| CLI `case.log` | typed 路徑及完整絕對路徑診斷依選項顯示；命令、相對表達式、URL 及遠端路徑保留原文 | 必要保護與已登記機密 |
-| Server Worker `case.log` | 別名關閉，受信任本機證據保留原始診斷路徑 | 相同必要保護 |
-| Run/Debug/Load `case.yaml` 與失敗證據 | typed 本機路徑依程序政策呈現，相對表達式保留 | 結構化機密欄位與已登記機密受保護 |
-| Worker JSON Lines | 受信任程序通道保留位置資訊供 Server 使用 | 每個 event/result 套用共同必要保護 |
-| Server API、SSE、Job Result | 使用固定 `package:` / `artifact:` 或外部 basename；用戶不能關閉 | 每次公開投影均受必要保護 |
-| Source/Configuration | package-relative 位置，Server 隱藏外部主機路徑 | 必要保護與獨立可選欄位/PII 遮蔽 |
-| 公開 artifact 下載 | 最多 16 MiB 的 UTF-8 文字安全投影，磁碟原檔不變；二進位、無效 UTF-8 或過大檔案須經受信任檔案系統存取 | 下載前套用必要機密保護 |
-
-`&{./Pacs008.xml}`、`&{../request.xml}`、`${...}`、`#{...}`、XML 結束標籤、
-Unicode、URL 與 SSH 遠端路徑保持原文；另以 `file`、`line`、`column`/`sourceColumn`
-提供導覽。公開投影可重複套用而不持續改寫內容，下載內容因此是原始證據的安全檢視。
-
-`server.inspection.redaction.enabled: false` 時，獲授權使用者可查看普通 host/port/user、
-client ID、queue/channel、Content-Type、非機密 DB properties/evidence 設定及 email/address
-等可選 PII。`includeAllFields` 可顯示原本因展示政策隱藏的普通欄位，權限由 Server 的
-configuration-admin 角色驗證。必要機密永不解除：欄位回傳 `state: hidden`、
-`value: '[REDACTED]'`、`reasonCode: MANDATORY_SECRET`；政策不可用欄位使用 `[HIDDEN]`
-及 `UNAVAILABLE_BY_POLICY` 或 `OPTIONAL_FIELD_POLICY`。Source traversal、symlink、
-deny-glob、敏感檔名與大小限制維持啟用。
-
-Load Template CLI: `load --list-templates [--format json]`, `load --debug <type> <id> --load-template <id> [--preview]`, or `load --debug --load-template <id> --bindings <file> [--preview]`. See [Load Templates](reference.zh/execution-modes/load.md) for the versioned contract, precedence, migration and safe preview. Windows `att.bat` accepts the same arguments.
-
-## 結果、報告與 evidence
-
-### ATT Server Job artifact 發佈
-
-Worker 檔案在 Server 核准前會留在私有目錄。Artifact producer 在寫檔前套用敏感資料保護。Archive 不是遮罩邊界：它驗證路徑、檔案類型、大小及 UTF-8 文字，然後原樣保留擷取到的 producer bytes。此邊界適用於 RUN（含 Debug mode、Case、Template、Flow、Tool、batch）、LOAD 及保留的 legacy Jobs。
-
-執行結束後，Server 非同步建立唯一的 `artifacts.zip`。Archive 狀態為 `PENDING`、`ARCHIVING`、`READY` 或 `FAILED`，與 Job result 分開；PASS/FAIL/ERROR/INVALID/CANCELLED 不會因發佈未完成而改變。驗證及原子發佈成功後刪除 loose output。ZIP 是唯一持久 artifact payload；metadata、audit、events 及 archive-status 記錄另行保留。
-
-#### 發佈及敏感資料政策
-
-Archive 接納一般、非 symlink 的 UTF-8 文字檔，副檔名包括 `txt`、`log`、`json`、`yaml`、`yml`、`xml`、`html`、`htm`、`css`、`csv`、`md`。Binary、無效 UTF-8、NUL bytes、巢狀 archive 及不支援格式會被排除；公開 manifest 不會列出被拒絕的檔名。Archive 將 JSON/YAML 視為 producer 寫入的文字，不會在發佈時解析、遮罩或重新序列化。Studio 會顯示 omissions，不會把不完整匯出稱為完整 output。
-
-Logs、文字、XML、CSV 及生成的 structured results 由 producer 在寫檔前套用相關 secret、credential 及 path 保護；Archive 原樣保留結果 bytes。一般 business values（包括姓名或可能受規管的資料）若不符合 producer 的明確敏感規則便會保留；不提供任意 PII 自動偵測。操作 Job 的授權不等於 raw-secret 匯出權限，也沒有公開 raw-export 或 raw-file fallback。
-
-Producer 端保護的敏感名稱包括 password/passphrase、token、secret、credentials、API/access/private key、authorization、cookies。Structured field name 內符合明確 secret text 規則的內容亦會受保護；secret/path projection 後名稱衝突會由 producer 拒絕，不會靜默覆寫 business field。敏感 business data 應放在明確敏感的欄位，或把其所屬 structured record 分類為 `secret`。Producer 必須在資料進入 archive input tree 前完成保護。
-
-Engine 生成的 artifact data 會在寫檔前套用 path 及 secret projection。Archive 不檢查 semantic fields，也不改寫已知 paths。HTTP HTML preview 使用 opaque-origin sandbox、restrictive CSP、禁止 forms，且不授予 Studio-origin 權限。下載報告的 relative links 會依 archive 內檔案配置解析，前提是目標檔案存在。
-
-#### Manifest 及 Resource limits
-
-`export-manifest-v1.json` 使用 manifest version `1`、policy `att-export-approved-bytes-v1`；新 entry 的 decision 為 `preserved`（仍可讀取舊版 `att-export-safe-text-v2` ZIP）。ZIP 完整保留 producer 輸出的核准 bytes；敏感值必須在 artifact 生成前完成遮罩。每個 entry 記錄 logical path、media type、精確 byte size、SHA-256、report/preview eligibility、classification 及 publication decision。`complete` 和彙總 `omissions` 不包含被拒絕的檔名或值。ZIP、preview 及解壓檔案使用相同的已擷取 bytes；GET 不會再次獨立遮罩。
-
-Inventory 不受 `server.maxArtifacts` 限制：最多 50,000 filesystem candidates、深度 64、10,000 已發佈 entries、每項 16 MiB、總 bytes 128 MiB、manifest 8 MiB。超出總量上限會使發佈失敗並保留私有來源。ZIP 預設使用 STORED；Server 設定可選有界的逐 entry DEFLATE 或 AUTO，並維持 200:1 ratio 上限。Reader 拒絕不安全路徑、control characters、encoded traversal、重複或大小寫衝突名稱、過大或高壓縮比 entries、未列入 manifest 的 entries 及 integrity mismatch。Writer 為單一有界佇列，同時最多八個 artifact reads。
-
-Reader 在信任 manifest 前，亦會比較 ZIP central directory 與 local header。Link、special-file 或 Windows reparse attribute、file/directory prefix collision、覆寫 filename 的 extra field、comment、隱藏 prefix／record、重疊 entry、multipart archive 及 ZIP64 均會被拒絕。受限 export profile 只接受 STORED／Deflate entry 及 timestamp-only extra metadata；預設仍為 STORED。Manifest parsing 拒絕 duplicate key、尾隨 document、fractional version／size、未知 field，以及不符合 policy 的 omission 文字。ZIP 結構可讀並不代表已核准匯出。
-
-#### 分離及還原 Job 主控台
-
-Studio 可從 Live Output、Events 或 Job 詳情標題開啟非 modal floating console。使用者切換 Studio 其他頁面時它仍會保留；每個瀏覽器分頁只允許一個 console，切換至另一個 Job 必須明確確認。Minimize 會留下底部 chip，保留一條有界的分頁 SSE 訂閱，但不會渲染隱藏的事件列；Close 會釋放訂閱。兩者都不會取消 Job。主控台可用滑鼠或鍵盤移動及調整大小，小螢幕會改為全螢幕 sheet。
-
-**Open full Job Details in a new tab** 使用已編碼的同源 route `#/jobs/{jobId}?standalone=1&tab=events` 及 `noopener noreferrer`，包含 Overview、Live Output、Events、Results、Artifacts、Metrics，預選來源 tab。舊 `/console?view=live|events` 書籤仍相容；切換 tab 保持同一 Job ID 及共用 SSE 訂閱。支援重新整理、直接連結及非根 context path；未授權或缺少 Job 使用既有登入或安全 unavailable 訊息。Floating console 行為不變。
-
-#### 檢視及下載 Job archive
-
-在 Job Details 開啟 **Artifacts**。報告清單獨立於分頁；使用 **View Report** 或 **Preview** 開啟內容。文字 viewer 提供唯讀、search、copy、line numbers，顯示最多 200,000 characters；**Load more artifacts** 載入後續頁面。**Download Artifacts (.zip)** 是唯一下載操作。解壓後可直接開啟 HTML，relative links 保持相同 archive hierarchy。
-
-Index 亦會回報整份 archive 中 summaries/manifests、metrics/time series、execution evidence、recovery checkpoints 及其他檔案的 entry count 和 uncompressed bytes。Studio 會先顯示 primary report，再把其他項目放在預設收合的 categories；若安全 path 有 workload 與 execution 元件，execution evidence 會依 workload 和執行分組。搜尋會比對已載入頁面的 path 或 workload，載入更多頁面可擴大搜尋範圍。Artifact row 顯示精簡 filename，並可查看完整核准 archive path。
-
-Server 會分別驗證 report 完整性、execution status、performance verdict 及 archive status。只有 canonical report 通過完整性驗證而且 `executionStatus: PASS` 時，LOAD ZIP 才會排除一般 recovery checkpoint；`NOT_MET` performance verdict 會獨立呈現，不會改變此規則。Cancelled 或 runtime-error 的 run 即使已提交完整診斷 report，仍會保留每個 scope 最新兩代 integrity-verified checkpoints。Report 缺失、不完整、損壞、中斷或無法使用時，每個 scope 最多保留最新兩代 verified checkpoints。不完整或損壞的 report bundle 會整組省略，並保留可預覽的 verified checkpoints，同時如實回報 archive omissions。Report commit 驗證完成前不會刪除 source checkpoints。
-
-相同的大型 aggregate 與單一 workload series 共用 sidecar 時，版本化 detail manifest 會記錄重用的 sidecar 檔案數和精確省下的序列化 bytes。不同值或多 workload 執行仍保留各自 scoped files。
-
-Authenticated archive index 僅在 ZIP 已驗證且為 READY 時回傳 `archiveSizeBytes`。Studio 在 ZIP download 旁顯示 human-readable size，不會為計算大小下載 ZIP 或發送 HEAD request。
-
-ZIP download 在 JVM 的 OS temporary directory 建立 request-private snapshot，每份最多 140 MiB。Server 先驗證完整副本及所有 entry digest，再設定 download headers；response length 取自該副本，並從相同 open handle 串流。每個 64 KiB buffer 在寫出前比對已保存的 SHA-256，因此 published pathname 後續被替換或原地修改，都不能以其他 bytes 取代 response。既有八個 concurrent reader 上限亦限制同時存在的 download snapshot，部署時須預留 temporary disk space。正常完成、disconnect 或 approval 失敗會關閉及刪除副本；process 突然終止可能留下 temporary files，須由 OS 或 operator 清理。Entry preview 仍使用獨立 request-scoped verified ZIP handle 及逐 entry digest/CRC 檢查。
-
-**Jobs and results → Metrics** 的 **Artifact archive** 顯示獨立 Server 發佈指標，即使 terminal ERROR Job 沒有 Load result 亦可查看。Job detail 和 archive index 都提供 typed `archiveMetrics`（version 1），獨立持久化，不會混入 Worker execution metrics。Attempts/retries 跨重啟保留；時間和 resource 用量描述最新 writer attempt。Queue wait 至 writer 開始時結束；`publicationWallMs` 包括 writer finalization 和 cleanup，但不含 queue wait。Stage milliseconds 分別量度 scan、validation 和 byte capture、ZIP compression/write、verification/file-fsync 和 private/staging cleanup。Source file count/bytes 計入被拒絕的 regular file；included/omitted count 描述該次發佈。Ratio 為 approved uncompressed entry bytes 除以完整 ZIP bytes（包含 manifest），並非節省空間百分比。Source byte sum 最多為 signed 64-bit 上限。
-
-`writerCpuMs` 僅量度 Server writer thread，且須 JVM 已支援並啟用 thread CPU timing。`writerAllocatedBytes` 是該 thread 的 allocated-byte delta，不是 retained memory、JVM heap 或 peak memory；不會量度 Worker CPU 或主動啟用 JVM instrumentation。不支援／未啟用的量度或未執行的 stage（例如重用既有 verified ZIP）回傳 `null` 並顯示 Unavailable，不會填入假零。真正 empty input 的 file/entry count 為零，但 ZIP 仍有 manifest。Outcome 和 failure phase/reason 僅使用固定安全 code，不包含 filename、data 或 exception message。RUNNING 代表 attempt 尚未完成；cleanup 失敗時為 CLEANUP_PENDING，但已驗證 ZIP 仍可下載。Metrics store 失敗會記錄安全 warning，不會改變 publication safety 或回退至 raw output。
-
-解壓後的 `file://` 報告由瀏覽器決定如何開啟 linked file types；例如 Chromium 可能下載 linked YAML，而非直接顯示。Link 仍指向同一份已核准的解壓 bytes；Studio 會在 viewer 中以 inline text 提供這些 entries。
-
-| 方法 | 相對於 `/api/v1` 的路徑 | 結果 |
-|---|---|---|
-| GET | `/jobs/{jobId}/artifacts?offset=0&limit=100` | Archive 狀態、分頁 entries、完整 primary reports 及安全 omissions |
-| GET | `/jobs/{jobId}/artifacts/archive.zip` | 已驗證的最終 ZIP attachment |
-| GET | `/jobs/{jobId}/artifacts/view/{entryPath}` | Manifest 核准的 HTML/CSS 或 inline text，保留相對目錄 |
-| POST | `/jobs/{jobId}/artifacts/retry` | 私有來源仍存在時，安排 terminal Job 重試發佈 |
-
-所有路徑均要求共用 OPERATE capability。Active USER 可存取其他 USER 建立的已核准 Job archives；creator 僅作 audit metadata。ADMIN-only 沒有隱含操作權限。Authentication、disabled-account 檢查、local CSRF 及設定的 Origin 政策均適用。回應使用 private/no-store；loose-file download 回傳 404。未完成或不可用 archive 回傳 `ATT-SERVER-ARCHIVE-UNAVAILABLE`（409）；read capacity 已滿則回傳 `ATT-SERVER-ARTIFACT-CAPACITY`（503）。
-
-#### Recovery 及 expiry
-
-失敗時保留私有 output，並在可用時選擇 **Retry archive**。同時提出的 retry 會合併；若上一個 writer 正在結束，已接受的 retry 會保留為下一次 publication，不會被靜默丟棄。Startup 及每五分鐘的 reconciliation 使用持久化 recovery-needed flag 和 cursor，每次最多安排 64 個未完成的 terminal Jobs，並使用與 retention 分離的 maintenance executor。ZIP 驗證及 loose-output/staging cleanup 全部成功後才清除 flag；可重試的 FAILED 或中斷工作仍會納入；quarantined Jobs 不會自動納入。Database migration 只將既有 history 納入一次，再以相同有界批次處理，不會每次重掃已成功發佈的全部 history。Terminal legacy loose-output Jobs 使用相同發佈政策；recovery 會驗證已原子提交但狀態未更新的 ZIP，並清理 staging 及剩餘 loose output，不會直接提供 legacy raw files。若來源已不存在，損壞 ZIP 無法重建，archive 會維持不可用。
-
-Worker 的 terminal RESULT 不代表 execution cleanup 已完成。Publication 會等到記憶體中的 execution 結束並釋放 admission lease。Server 每個 Job 最多保留 1,024 個已觀察的 process identity，包括 terminal delivery 前及 cancellation/error cleanup 時發現的 child。Graceful stop 和 forced escalation 使用相同 identity，即使 parent 已退出亦然；所有已觀察的 process 退出前，admission 和 publication 仍受 fence 保護。Enumeration 或 identity persistence 失敗不會授權 publication。獨立確認所有已知 process 均停止後，Server 先持久化 quarantine，才釋放 admission（包括 LOAD capacity）及移除 active Job fence。每秒執行的有界 reconciliation 會重試延後的 release，包括暫時的 quarantine-store failure；quarantine 成功保存前仍保留 admission。Quarantine 跨 restart 保留，阻止 publication 和 retention，archive reason 為 `worker_unverified`。即使 filesystem status 為 READY，archive index/read routes 仍會遵守持久化 quarantine，並停用一般 archive retry。Retry 不會清除 quarantine：operator 必須獨立確認完整 process containment，才可進行 offline recovery；本版沒有清除 quarantine 或匯出 raw output 的 API。Restart 後，publication 和 retention 會檢查 Worker PID/start time 及已保存的 observed-process ledger；相符的 live process，或 start identity 未知的 live PID，會阻止 publication/deletion。Archive status `FAILED`、reason `worker_active` 會保留 private output；請在 Worker 及已記錄的 descendant 停止後 retry。已知但不同的 start time 表示 PID reuse，而非原本的 Worker。Observed-process fence 尚不能證明在 observation 前已逃離的任意 detached descendant 已被限制及停止；完整 OS-level containment 及跨平台 acceptance 仍待完成。
-
-選用的 `server.jobStorage` 配額可在 `dataDir/jobs` 超過高水位時刪除完整 Job。它預設關閉，只測量該目錄，不跟隨符號連結，測量未完成時不會清理。回收依最舊的已結束 Job 開始，並同時刪除 Job 目錄與 H2 列。`partial` 清掃會從上次檢查的最後一個候選之後繼續；隔離中與 artifact recovery 中的 Job 不會進入候選頁，因此受保護的前綴不能佔滿預算。已包含最舊候選的一輪若走到結尾且用量仍高於目標，結果為 `quota_unmet`。執行中、佇列中、隔離、復原中、使用中，以及仍在 `minRetentionHours` 內的 Job 會保留。配額不會壓縮 H2，也不會只因單一 Job 過大而刪除它。既有 `server.jobRetentionDays` 會連同 ZIP 一併到期刪除完整 Job；選取有界 expiry page 前會先排除 quarantined Jobs，避免其長期保留阻止其他已過期 Job 清理；active readers/writers 存在時會延後該次 sweep，不會阻塞 cleanup thread 或刪除使用中的 archive。Classification 及發佈結果寫入不含 raw values 的 audit。失敗的發佈不會刪除唯一未封存的來源。
-
-Run 會執行 authored Testcase，並為每個選中的 row 記錄一次 Case execution。Testcase 是 Workbook data；Case execution 是使用相同完整 Case ID 標識的 runtime result。閱讀 status、日誌、報表和 evidence 時使用 Case execution。
-
-| 任務 | 前往 |
-|---|---|
-| 查找 Run files 和 execution artifacts | [查找 Run artifacts](#查找-run-artifacts) |
-| 查看狀態或檢查失敗的 Action | [在 HTML 報表中查看 Case execution 結果](#在-html-報表中查看-case-execution-結果) |
-| 匯出 JUnit 或 CI 結果 | [匯出 JUnit 結果](#匯出-junit-結果)或[查看 CI JSON 彙總](#查看-ci-json-彙總) |
-| 重現已完成的 Run | [重現 Run](#重現-run) |
-
-### 查找 Run artifacts
-
-```text
-<outputDirectory>/<RunID>/
-├── run.yaml
-├── events.jsonl
-├── workbooks/
-├── ci/summary.json
-├── ci/junit.xml
-├── report/index.html
-├── report/junit.html
-└── executions/<EXEC.ID>/...
-```
-
-Run ID 和 Case ID 在校驗後保持原樣。只有 `run.yaml` 狀態為 `COMPLETE` 才表示運行完成；中斷工作會直接保留在已保留的 Run ID 目錄中供調試。
-
-### 在 HTML 報表中查看 Case execution 結果
-
-`report/index.html` 是主要終端用戶報表，可以直接從磁盤打開。組按 `workbookId.groupId` 彙總；界面把 `groupId` 標記為 Sheet。Cases view 支持 Workbook/Sheet/Status 下拉框、對 workbook/group/full Case ID/tag 的大小寫不敏感搜索，以及每列標題的升序/降序排序。Duration 按數值排序。
-
-展開的 Case 包含完整 Case ID、名稱、狀態、持續時間、Expected 和 Actual 結果、每條記錄 Action 結果的一行、詳細執行日誌，以及 `.log`/`case.yaml` 的顯式鏈接。Action Results 每行獨立顯示最終渲染的 Description，並寫入 `run.yaml` 與 CI JSON。為兼容既有報表，Expected 仍是所有 assert Action 非空最終 description 與 `expected` 的有序 LF 聯接；Actual 是所有非空運行時 `actual` 的有序 LF 聯接。
-
-### 診斷 Tool evidence collector 失敗
-
-Evidence collector 是 operation 完成後的 observability，不是 primary Tool result。使用 `onFailure: continue` 時，primary Action 可以維持 `PASS`，而 collector 會獨立記錄為 `ERROR`：
-
-```yaml
-evidence:
-  appLog:
-    call: >-
-      #{ssh.app.execute(command='grep "${EXEC.INPUT.txnId}" /app/log/payment.log | tail -100')}
-    timeoutMs: 5000
-    onFailure: continue
-```
-
-請查看 `EXEC.ACTIONS.<actionId>.output.evidence.collectors.<collectorId>`（或等價的 `ACTIONS` compatibility view）。Record 包含 `status`、`success`、`invocationId`、`result`、`error`，以及 bounded/redacted 的 underlying operation `evidence`；operation 有提供 structured diagnostics 時會在 `operationDiagnostic` 保留 native operation diagnostic 的安全 field。`diagnostic` 則記錄 collector failure 及其 source file/field。`error.message` 會從 underlying exception、operation status/exit code 或安全 fallback 填入。若 executor 有提供，SSH helper/instance、exit code、bounded stderr、MQ reason code、HTTP status 和 timeout detail 等 resource identity/field 會留在 `evidence`。Failed collector evidence 會被 bounded/redacted；raw input、payload、argv、output、resolved command text 與 failed `result` 不會發布。完整 projection、numeric budgets 與 security guarantees 見 [Limits, Security Guarantees, and Advanced Diagnostics](reference.zh/appendices/limits-defaults.md)。
-
-有 retry 時，請查看 `EXEC.ACTIONS.<actionId>.output.attempts[n].evidence.collectors.<collectorId>`。即使後一個 attempt 成功，較早的 failed collector record 仍會保留；top-level collector record 代表最後／勝出的 attempt。使用 `onFailure: stop` 時，Action 可以失敗，但其 diagnostic 仍會包含 collector root-cause message 和保留的 evidence。同一 structured record 也會寫入 `case.log` 的 `EVIDENCE <action> attempt=<n> collector=<id>` block，因此不必打開 internal exception trace，便可看到基本 resource、category、message、exit code 和 bounded stderr。既有 capture limit 與 secret redaction 仍然有效；collector wrapper 不會開放無上限 raw output。
-
-### 將 execution 結果寫入 Workbook
-
-ATT 會復制源 Workbook，並使用 `report.mode: append-to-copy` 追加配置的結果列。`report.mode: none` 跳過 result Workbook，適合不需要 copy 的 CI 或大型 run。Global `report.fileNamePattern` 控制檔名。Sidecar `report.columns` 只修改 Workbook 標簽。支持的映射包括 `result`、`durationMs`、`expectedResult`、`actualResult`、`caseLog`、`reportLink`、`runTime`；Expected/Actual 單元格保留 LF 字符並以換行文本顯示。結果回填使用與 testcase loader 相同的 Excel 顯示格式和空白規範化規則讀取 Case ID，因此帶前導零等數字格式的 ID 在執行與報表寫入時會匹配同一 Case。
-
-### 匯出 JUnit 結果
-
-每個 Case execution 對應一個 JUnit `<testcase>`：
-
-| ATT 狀態 | JUnit 表示 |
-|---|---|
-| PASS | 無 failure 子節點 |
-| FAIL | `<failure>` |
-| ERROR | `<error>` |
-| SKIPPED | `<skipped>` |
-| INVALID | `<error type="ATTValidationError">` |
-
-文本會被 XML 轉義。JUnit XML 與 HTML 使用 `report.junit.caseLogEmbedThresholdBytes`。低於或等於閾值的日誌會被嵌入；更大的日誌使用相對鏈接。`0` 始終使用鏈接。
-
-### 查看 CI JSON 彙總
-
-`ci/summary.json` 使用 `schemaVersion: att-ci-summary/v2.1`，包含 ATT/Run ID、環境、時間、聚合狀態/統計、持續時間統計、每個 Case 記錄、診斷計數、報表/產物路徑以及輸入清單哈希。
-
-### 重現 Run
-
-`run.yaml` 使用 `schemaVersion: att-run/v2.1`，記錄 ATT/構建身份、Java/OS/locale/timezone、校驗模式、環境、時間戳、狀態/摘要、輸出路徑，以及有效配置、Tool group 文件、call-backed Tool SQL 文件（`tool-sql`）、Workbook、Sidecar、解析 Template/負載、包內 Tool 文件和 schema/catalog 版本的 SHA-256 hash。
-
-### 生成文檔並管理 package 輸出
-
-| 命令 | 輸出/行為 |
-|---|---|
-| `docs` | 在 `build/docs/index.html` 生成可搜索離線包文檔；Testcases 按 Workbook 和 Sheet 分組 |
-| `report --run-id <id>` | 從完成證據重建兩個 HTML 報告 |
-| `build` | 歸檔最新完成 run，不執行測試 |
-| `clean` | 刪除配置輸出目錄、`build/docs` 與 `build/att-*.tar.gz` |
-
-### 從 execution identity 追蹤 artifact
-
-| Identity | 意義 | Scope | Artifact 用途 |
-|---|---|---|---|
-| EXEC.RUN_ID | 外層 ATT run。 | Run。 | Run root、summary、report。 |
-| EXEC.ID | 目前 Case/Debug/Load execution。 | Execution。 | Workspace 建立時作為 log/evidence key。 |
-| EXEC.OUTPUT_DIR | 與 EXEC.ID 關聯的 workspace。 | Execution。 | Run/Debug 實體 workspace 或 Load planned lazy workspace。 |
-
-一般 Run 的功能性 Case 位於 output/<RUN_ID>/executions/<EXEC.ID>/。Load 執行期間，EXEC.OUTPUT_DIR 固定指向 output/load/<RUN_ID>/executions/<EXEC.ID>/。Iteration 被保留時，artifact 也會複製到 samples/<EXEC.ID>/ 或 failures/<EXEC.ID>/。Metrics-only iteration 有 EXEC.ID；scheduler 清理暫存 workspace 後不保留 per-iteration 目錄。Load report 顯示 retained rows 的 EXEC.ID，有保留 case.log 時提供連結。Debug 使用同一 debug ID 作為 EXEC.RUN_ID 與 EXEC.ID。
-
-DIAG 是 evidence-only。Expression 不可讀取 DIAG、EXEC.MODE 或任意 scheduler counter；業務差異請透過 EXEC.INPUT 傳入。
-
-
-### 查閱 generated-output schemas
-
-| 產物 | 頂層必需契約 |
-|---|---|
-| `run.yaml` | `schemaVersion`、`att`、`runtime`、`run`、`validation`、`inputs`、`cases`、`summary`、`outputs` |
-| Validation JSON | `schemaVersion`、`attVersion`、`valid`、`mode`、`summary`、`diagnostics` |
-| CI summary JSON | `schemaVersion`、`attVersion`、`runId`、`environment`、`startedAt`、`endedAt`、`status`、`summary`、`durationStatistics`、`cases`、`diagnosticCounts`、`report`、`inputManifestHash` |
-| JUnit XML | 一個 testsuite，含 test/failure/error/skipped 計數，以及每個 Case execution 的 testcase |
-
-### Reading `case.log` and `case.yaml`
-
-Case log structured entries use YAML. The human log records each normal Action and each Tool/DB invocation once; duplicated attempt fields and persisted TOOL/DB subtrees are omitted from this projection. Complete final Stage/Template/Action/Tool/DB state remains in `case.yaml`. `caseLog.yamlAnchors: false` fully expands shared Map/List objects; `true` permits YAML anchor markers, which carry no ATT identifier semantics.
-
-巢狀 structured entry 中的 multiline String 會以易讀的 YAML block content 顯示。ATT 保留 LF、CRLF 或單獨 CR 分隔符，不會解析、修剪或重排 business text。Raw process 與 user content 也保留原始換行。Live console mirror 與已寫入的 `case.log` 使用相同的 render text。
-
-ATT prefixes Case log blocks whose section or nested status is ERROR, FAIL or INVALID with `【!!!!!】`. Search for that marker to find abnormal blocks; PASS, SKIPPED and informational blocks remain unmarked.
-
-## Validation 與 troubleshooting
-
-### 選擇第一個診斷步驟
-
-先執行 `validate --package` 並修正 diagnostic 的 file/field。**Testcase** 是作者編寫並正規化的 Workbook row；**Case execution** 是 Run 對該 row 的一次執行，兩者使用相同 Case ID。Runtime 失敗先看 Case execution 的 report status/message，再看其 `case.log`、`case.yaml` 與 Action evidence。`FAIL` 與 `ERROR` 的區分、continuation 與 Retry 見 [Reliability and Execution Control](reference.zh/reliability-execution-control.md)；collector failure path 見 [Results, Reports, and Evidence](reference.zh/results-reports-evidence.md)。[Limits, Security Guarantees, and Advanced Diagnostics](reference.zh/appendices/limits-defaults.md) 說明 Windows launcher、Java SSH negotiation 與 stack-trace policy。
-
-### 先從 Validation 開始
-
-每次修改 workbook、sidecar、template、helper 或 tool 後執行：
-
-```sh
-./att.sh validate --package
-```
-
-針對單一環境可執行 `./att.sh validate --config config/config.yaml --env SIT --package`。ATT 使用版本相符 Engine JAR 內嵌的 registry 驗證 descriptor，完整清單見 [Schema and Version Matrix](reference.zh/appendices/schema-matrix.md)。Repository `schemas/` 是 build input；舊 `ATT_HOME/schemas/` 或 package-local 目錄也不是 runtime schema 來源。`schemas/history/` 的舊 schema 僅在該 Engine 明確支援時才可作為 runtime contract，否則只供歷史參考。請先更新 `schemaVersion` 並將欄位遷移至現行契約，再執行 validation。診斷會保留原始違規、檔案及 YAML 欄位位置，並提供 migration guidance；ATT 不會改寫 descriptor。例如，將 historical Render Action 改為使用 `&{path}` 的 Assign，再依[Actions and Typed Values](reference.zh/actions.md)傳遞 resulting String。Unsupported version 會在執行前失敗。
-
-現行 schema 原始檔及歷史版本位於 repository `schemas/` build-input tree，不會安裝在 ATT_HOME。Runtime `validate --package` 會檢查 Engine 內嵌 catalog 登錄的每一份 schema，即使 Package 沒有使用。缺少、無法讀取、不安全或重複的嵌入 resource 會硬性回報 `PACKAGE_INVALID`。Engine 從 classpath 讀取 catalog 和 schema bytes；其 private SHA-256 cache 是經驗證的相容 materialization，不是另一個 source of truth。Validation 不會改寫 YAML。請檢視 migration guidance、更新檔案，再針對每個選定的 `--env` 重跑 package validation。
-
-Package validation 會依照 Debug execution 相同的 discovery 與 schema/input validation，檢查現有 Template、Flow、分組及未分組 Tool 的 `debug.yaml` sidecar。歷史 schema version 與不符合現行 schema 的結構會在執行 `att debug` 前回報；可選 sidecar 缺少時仍屬有效。
-
-然後根據診斷代碼和結構化位置排查。不要針對人類可讀消息做自動化判斷。
-
-| 類別 | 典型原因 | 修正措施 |
-|---|---|---|
-| `ATT-TC` | 缺失/過期 Snapshot、Sidecar/Sheet/表頭錯誤、重復 Case ID | 檢查 Snapshot/基名、sheet 映射、有效表頭和完整 ID |
-| `ATT-CTX` | 未知或歧義 Context 路徑 | 檢查請求/當前/缺失字段、最近建議或規範候選 |
-| `ATT-STG` | 必需選擇器為空白、選擇器 YAML 無效、Stage 鍵重復 | 檢查選擇器形式、`name`、別名和 required 標志 |
-| `ATT-TPL` | 未知/重復 Template、Action 或負載無效 | 檢查符號名/完整路徑、描述符、Action 類型和本地文件 |
-| `ATT-CFG` | 未知字段、重復鍵、schema 類型/枚舉錯誤 | 對照 [Configuration and Environments](reference.zh/configuration.md) 並移除不支持字段 |
-| `ATT-TOOL` | 未知/缺失參數、進程或解析失敗 | 對比調用契約，檢查退出碼和有界 stdout/stderr capture evidence |
-| `ATT-PATH` | 非法 ID 或路徑逃逸 | 移除非法字符，並保持內容在配置根目錄下 |
-| `ATT-RUN` | 超時、非零退出、渲染/運行時失敗 | 檢查 Case 日誌和 Action/Tool 證據 |
-
-### 常見問題
-
-#### 為什麼 Testcase ID 被拒絕，Excel 卻顯示正確？
-
-ATT 導入的是顯示單元格文本，然後應用嚴格的 ID 安全檢查。檢查隱藏的首尾空白、尾隨 `.`、路徑字符、控制字符以及 Windows 設備名。以文本形式保存標識符，以保留前導零。
-
-#### 兩張 Sheet 可以使用相同的 row ID 嗎？
-
-可以。給兩張 sheet 不同的 group ID，讓兩行形成不同 Testcase，例如 `payment.payment.TC001` 和 `payment.batch.TC001`；Run 會為它們各自建立 Case execution。
-
-#### 為什麼 `N/A` 變成空了？
-
-ATT 會在數據映射和 Stage 選擇前，把 `N/A`、`NA`、`NULL`、`NONE`、空和僅空白值歸一化為 blank。
-
-#### 為什麼 Context 變量失敗？
-
-ATT 會把缺失路徑視作作者/運行時錯誤，而不是靜默渲染成空字符串。遵循 `ATT-CTX-001` 的 `requestedPath`、`currentNode`、`missingSegment` 和最近建議，檢查大小寫敏感的作用域、物理表頭/別名、Stage key、Action ID，以及可用性時間點。後綴簡寫必須唯一識別一個可讀邏輯路徑；當 validation 能識別 canonical current-scope replacement 時，會以 `CONTEXT_LEGACY_PATH` 發出遷移 warning。`ATT-CTX-002` 會列出所有衝突候選，以便你加長後綴或使用規範路徑。聲明的可選字段即使值為空白，仍然是有效空字符串。
-
-#### 為什麼 Fail 變成 error？
-
-Assertion 為 false 會令 Case execution 變成 FAIL。無效表達式語法/導航、Tool 失敗、超時、解析失敗、I/O 失敗或運行時異常會令它變成 ERROR。應查看 Action 證據，而不只看最終 Run 狀態。
-
-#### 為什麼 Tool 跑了不止一次？
-
-它的 Action 啟用了重試，並收到了符合條件的非零退出碼。查看 Case 日誌中的嘗試列表和最終 Action 記錄。
-
-#### 我能在 `Command` 中使用 shell 管道嗎？
-
-不能。ATT 會把 `|`、`>`、`<` 按字面值傳遞。把 shell 行為放到審查過的 Tool 腳本中。
-
-#### 為什麼必需的 Array 參數會拒絕 `[]`？
-
-必需項驗證發生在 argv 擴展之前。空 typed List 被視為缺失；請至少傳入一個標量 item，或將參數設為 optional。
-
-#### 我應該使用包校驗還是選中校驗？
-
-本地快速反饋請用 selected 模式。發布前、CI 推進、或共享包時請用 package 模式。
-
-#### 報告能否不依賴服務器打開？
-
-可以。保持生成的 run 目錄完整即可，相關相對鏈接仍可工作。
-
-#### Build 會不會再次執行測試？
-
-不會。它只是歸檔一個已完成的持久化 run。
-
-### 安全提醒
-
-不要把密碼、token、私鑰或敏感客戶數據放進 Workbook 單元格、Template 描述符、命令字符串、stdout 或 stderr。優先使用 Tool 腳本中經批准的祕密注入方式。在共享報表和歸檔前進行審查。
-
-### Validation JSON 合約
-
-```json
-{
-  "schemaVersion": "att-validation/v2.1",
-  "attVersion": "4.2.6",
-  "valid": false,
-  "mode": "package",
-  "summary": {"errors": 1, "warnings": 0, "suites": 1, "cases": 22, "templates": 7, "tools": 7},
-  "diagnostics": [{
-    "code": "ATT-TPL-104",
-    "severity": "ERROR",
-    "message": "assert action requires a non-blank expression",
-    "file": "templates/PAYMENT_VERIFY/template.yaml",
-    "field": "actions.assertStatus.expression",
-    "sheet": null,
-    "row": null,
-    "column": null,
-    "template": "PAYMENT_VERIFY",
-    "action": "assertStatus",
-    "suggestion": "Add expression to the assert action"
-  }]
-}
-```
-
-每個診斷都包含 `code`、`severity`、`message`、`file`、`field`、`sheet`、`row`、`column`、`template`、`action` 和 `suggestion`。不適用的字段為 `null`。當 package 和 case 驗證發現同一個根本錯誤時，ATT 輸出一條診斷，並在適用時附帶 `occurrences` 和 `affectedCases`；`summary.errors` 統計唯一診斷，`summary.errorOccurrences` 保留原始出現次數。代碼穩定；自動化不能解析人類消息。
-
-ATT 可另外提供 `summary`、`detail`、`source`、`context` 和 `schemaViolations`。`source` 中的 `line`、`column`、`endLine`、`endColumn` 是 YAML 或 payload 文件的物理位置；頂層 `row` 和 `column` 仍表示 Excel 單元格。單行純文本及可直接對應的引號字符串，表達式語法錯誤會指向具體字符；摺疊、多行或經過轉義的 YAML 字符串若無法精確映射，則報告整個 scalar 範圍。每項 Schema 錯誤保留自己的路徑、關鍵字、消息及物理位置。`context` 可包含 Case、Stage、Flow ID 和嵌套調用鏈。表達式語法詳情在安全時會指出所在 Tool 調用參數（例如 `logFiles`）、意外 token 及帶 caret 的有限鄰近片段；可能含有憑據或敏感值的字段及整行不會顯示原文摘要。
-
-運行時 Action 錯誤的結構化診斷會傳入 Case YAML、`run.yaml`、重新生成的報表、CI JSON 和 JUnit 錯誤詳情。嵌套 Flow 錯誤會指出內部 `flow.yaml` 及 Action，調用鏈說明 Template 如何到達該位置。Tool 與 DB evidence 在適用時記錄嘗試次數、超時、解析／採集狀態、參數綁定及取消操作；文件保存錯誤包含配置路徑和允許的產物根目錄。
-
-## CI、打包與運維
-
-ATT 支援 source-tree development 以及 offline release package。
-
-### Development/release gates
-
-```sh
-mvn clean verify
-python3 tools/build_reference_manual.py --check
-python3 tools/validate_reference_content.py
-./att.sh validate --package
-```
-
-`build.sh` 會執行 release gate、重新生成 modular Reference Manual、建立 application jar 和 release archive，並 smoke-test 解壓後的 local package。Reference generation 另外需要 Python 3 與 Pandoc。它會輸出供 CLI 使用的 `att-4.2.6-local.tar.gz`、包含 WAR 和部署指南的 `att-4.2.6-server.tar.gz`，以及 source archive `att-4.2.6-src.tar.gz`。每個 binary archive 均須小於 25 MB。Local package 不再包含 WAR 或其中重複的 runtime library。
-
-### Runtime dependencies
-
-CLI、Engine 及 Worker 仍相容 Java 8。ATT Server WAR 需要 Java 17+ 及外部 Tomcat 10.1+。ATT 不內置 CLI integration 所需的 JDBC driver；請將 driver/dependency jar 放入 `lib/`。IBM MQ 是 optional integration：default CLI build 在沒有 MQ client class 時仍可使用；MQ deployment 需 package 支援的 IBM client jar/profile。
-
-### Studio inspection cache
-
-Resource metadata discovery 會延後處理 DB/MQ/SSH/HTTP Helper 支援的 `${ENV:NAME}`，不讀取 process secret。Resource summary 將 `metadataState` 與 `executionReadiness` 分開：`not-validated` 不代表允許 execution；`dependency-unresolved` 會為可探索的 transitive Helper reference 提供不含值的 `ATT-RESOURCE-ENV-REQUIRED` diagnostic。這些 diagnostic 只列出 requirement，並非已確認缺少 variable 或 network failure。Explorer 顯示有效 environment 與 remediation，同時保留安全 metadata。原有 Resource `state: ready` 只描述 metadata，不代表 execution readiness。
-
-Discovery 仍執行 root YAML/schema/profile 檢查及 shared-config path boundary。確認 boundary 後，DB/MQ/SSH/HTTP Helper descriptor 格式錯誤或缺失會獨立處理，保留正常 Helper 及不相關 resource metadata，並在 Explorer 提供不含值的 `ATT-RESOURCE-HELPER-INVALID` / `ATT-RESOURCE-HELPER-UNAVAILABLE` warning。失敗 descriptor 不會建立可用 Helper binding。Explorer 最多回傳四個個別 Helper failure diagnostic，另加其餘失敗數量。Discovery 每個 Helper type 最多 256 個 descriptor、每個 descriptor 3,000,000 bytes、每個 type 16 MiB；unsafe/symlink path、重複 path/Helper ID、trusted-schema failure 及超出限額仍會失敗。SSH Helper descriptor 缺失或無效時，Tool group 會保留 logical binding 供 discovery 使用。Explorer 將 SSH binding 和 ENV requirement 經 command-backed Tool 傳遞至相依 target；unresolved binding 不代表允許 execution。Tool-group 結構／schema failure 仍會失敗。Configuration Effective 和 Compare（包括 parsed snapshot cache）現在使用相同的 value-free discovery policy。Helper 缺失或格式無效時，仍保留有效 metadata 並顯示 structured dependency warning；`state: degraded` 和 `executionReadiness: not-validated` 均不允許 execution。ENV 名稱代表 requirement，不表示 variable 已確認缺失：這些 view 不會讀取 process secret value。Root configuration、profile、unsafe path、trusted-schema failure 和 inspection limit 仍 fail-closed。缺失的 Helper descriptor 亦參與 content reconciliation，新增或修復後會使 cached metadata 失效，毋須重啟。僅載入所選 target dependency 的 strict loading，以及統一 automatic/manual reindex operation 尚未實作。明確 validation 和 execution 仍使用 strict configuration loading，因此不相關的 active Helper 缺少 variable 時仍可能阻塞。Metadata-only configuration 不可執行。請在 Tomcat/Worker process environment 設定所需 variable，然後重新 validate；不要加入 production placeholder credential 只為了讓 browsing 成功。
-
-Studio 將 Resource 分頁、Detail、安全 Source 及一般 Configuration projection 保存在 session memory。共用 cache 最多保留 128 個 response 及 8 MiB encoded payload；單一 response 超過 1 MiB 不會加入 cache。資料在 15 秒內視為 fresh；重新開啟較舊 view 時先顯示 cached projection，再由 background read 更新。相同 in-flight read 會合併；取消一個 consumer 不會取消其他 consumer 的 request。返回 view 時保留搜尋、排序、分頁及捲動狀態。
-
-每次重用前先檢查 authenticated inspection context。Identity、session、role 或 inspection policy 改變會清除舊 response。Package/environment selection、明確 refresh、logout、頁面暫停、新觀察到的 package revision，以及 stale cursor 或存取錯誤，會使相關 memory 失效。Configuration 和 Source content 不會寫入 localStorage、IndexedDB、service worker 或 HTTP cache。Auth/CSRF response 及 `includeAllFields` administrator response 不會加入 query cache。HTTP response 仍遵守 `Cache-Control: no-store`。
-
-每個 inspection Worker 仍逐一處理 request，並保留兩個 Resource inspector。Dispatch 優先選擇已保留相同 package/config/environment 及 policy key 的 idle Worker，再使用其他 idle Worker。Parsed Configuration snapshot 另有每 JVM 四個 entry 的 LRU，以及 32 MiB weighted retention budget；Worker heap 設定仍是 JVM 的硬性上限。重用時會對 root configuration、所選 Helper/Tool Group/Testdata dependency 及 schema tree 作 bounded content reconciliation，因此 rename、delete、相同 timestamp 的內容替換及未知 dependency 改動均會重新載入。Cache 錯誤會回退至原有 uncached validation。每個 request 均重新建立 permission-checked projection；administrator projection 不會進入一般 cache。
-
-Optional `server.inspection.warmup` 預設為 `enabled: false`、`workers: 1`、`keys: []`。`workers` 範圍為 1 至 `server.inspection.maxConcurrent`。每個 key 包含 `packageId` 及 optional Engine `environment`；key 數量不得超過 warmup Worker 數量的兩倍，亦不可重複。不設定 `environment` 可預熱 Explorer 使用的 package-default index。Keys 分配至各 Worker，每個最多兩個；沒有 keys 時，所選 Worker 會預熱第一個 registered package。Package 缺失或 preload 失敗不會阻塞 Tomcat startup。Warmup 會避開 interactive demand，每個 key 最多 retry 三次並加入 backoff；daemon 更換後會重新預熱，shutdown 時停止。所有 Worker 均忙碌時，interactive traffic 可以取消 preload。
-
-`GET /api/v1/metrics` 遵循既有 Server authentication policy，包含 `inspection.server` 及最新的 bounded `inspection.workers` snapshot。Counter 與 total nanoseconds 涵蓋 HTTP handling、queue、process launch、dispatch、processing、Configuration load/parse、Source request、workbook/YAML parsing 及 index build，亦提供 cache hit/miss/eviction、watcher invalidation/overflow、watched directory、retained key、instrumented read bytes、protocol response bytes、heap-pool peak、GC 及 process CPU。每個 Worker 最多保留 16 個 opaque package/environment aggregate，記錄 request count、processing time、index build、Configuration load 及 instrumented read bytes。Package key 經 hash；counter 不包含 path、configuration value 或 file content。Byte counter 代表已 instrument 的 inspection read，不等於 OS physical I/O。Process-launch timing 不包含 JVM readiness；dispatch 包含 readiness 及 protocol transport。Benchmark 另行記錄 sample p50/p95。若 optional inspection telemetry 無法放入設定的 response-byte budget，Worker 會省略該 snapshot，Server 同時清除 routing hint；metrics 不會放寬 response limit，亦不會令原本有效的 response 超限。
-
-Display snapshot 不會授權 execution。Debug/Quick Load approval 及 Worker execution 仍保留 authoritative package revision check、`ATT-SERVER-DRAFT-STALE`、綁定 principal 的 cursor，以及 stale cursor HTTP `409`。設定例子見 [Server 部署](server-deployment.zh.md)；量測程序見 [inspection benchmark](system-design/web-ui-inspection-inline-jobs.md)。
-
-### Documentation operations
-
-`./att.sh docs` 從已驗證 ATT package model 生成 `build/docs/index.html`。Normative product Reference 則獨立由 `docs/reference*` 經 `tools/build_reference_manual.py` 生成。`./att.sh clean` 刪除文件規定的 generated runtime/build output，但保留 source input。
-
-### CI 與 environment promotion
-
-CI 應先 validate package，再執行 external integration test，並按需要保存 Run/Debug/Load evidence。Environment 透過明確 `--config`/`--env` policy 選擇。穩定 DB/MQ logical ID 讓相同 Template 在 SIT/UAT/PREPROD 間移動而不用改 Action。
-
-Parallel job 應使用唯一 Run ID；若需要獨立 retention/latest-run state，應使用不同 output root。對同一 shared output root 的 clean/report/archive 等 destructive operation 必須序列化。
-
-Maintainer implementation sequencing、scheduler internals、resource-owner detail 位於 `docs/system-design/`，不屬於本 end-user Reference。
-
-## Appendix A — schema 與 version matrix
-
-現行 active schemas（由版本相符 ATT Engine JAR 內嵌 registry 提供，repository `schemas/catalog.yaml` 為其 build input）：
-
-| Artifact | 現行 schema |
-|---|---|
-| 排程建立 | att-schedule/v2 |
-| RUN 定義 | att-execution/v1 |
-| Global configuration | att-config/v2.13 |
-| Package Manifest | att-package/v1 |
-| Testdata descriptor | att-testdata/v1.0 |
-| DBHelper | att-dbhelper/v2.6 |
-| MQHelper | att-mqhelper/v1.3 |
-| HTTPHelper | att-httphelper/v1.1 |
-| SSHHelper | att-sshhelper/v1.0 |
-| Tool group | att-tool-group/v2.9 |
-| Workbook sidecar | att-sidecar/v2.2 |
-| Testcase snapshot | att-testcases/v2.4 |
-| Template | att-template/v3.6 |
-| Flow | att-flow/v3.6 |
-| Debug input | att-debug/v1.2 |
-| Load scenario | att-load/v1.9 |
-| Load Template | `att-load-template/v1` | `schemas/att-load-template-v1.schema.json` |
-| Load bindings | `att-load-bindings/v1` | `schemas/att-load-bindings-v1.schema.json` |
-| Load summary | 直接 Engine／CLI：legacy summary contract (schema under `schemas/history/`)；封存報告：att-load-summary/v1.3 |
-| LOAD report detail files | att-load-detail-manifest/v1、att-load-detail-reference/v1、att-load-detail-series/v1、att-load-detail-series/v2（shared payload）、att-load-workload-detail/v1 |
-| Run manifest | att-run/v2.1 |
-| 舊版 Package validation JSON | `att-validation/v2.1` |
-| 精簡 CLI 階層式 validation report | `att-validation/v1` |
-| CI summary | att-ci-summary/v2.1 |
-| JUnit XML | att-junit/v2.1 |
-
-本次調整的 resource/config schema 舊版本位於 `schemas/history/`，除非嵌入的 Engine registry 登錄且支援，否則僅供歷史參考，不是 active execution contract。Unsupported version 會在 validation 失敗並提供 migration guidance。Repository `schemas/catalog.yaml` 僅為 build input；runtime 唯一權威來源是版本相符 ATT Engine JAR 內嵌 registry。Runtime 會從 classpath 讀取 schema files，並可在 private per-user temporary directory 建立經驗證、以內容 SHA-256 定位的相容快取。快取會保留目前及緊接上一版 registry 供 rollback；只有取得排他 OS lock 並確認沒有 Worker 使用後，才會刪除較舊版本。若清理中斷，下一次初始化會重試。不完整或遭竄改的快取只會在確認沒有程序持有 use lease 後重建；若仍有程序使用，validation 會 fail closed，並於 Worker 結束後重試。Validation revision 會綁定 Engine/registry identity、Package files、shared config files 及選定 Environment；Worker 處理請求前會驗證 Server 傳入的 registry identity。`ATT_HOME/schemas/` 及 package-local `schemas/` 不是 runtime 來源，也不能覆寫 registry。Package validation 會驗證 Engine 登錄的 schema resources；封存 schema 不會自動成為可用的 runtime contract。
-
-<!-- att-docs:historical -->
-Load v1.6 及 MQHelper v1.2 是 loader 支援的相容歷史 schema；既有 scalar routing 及 legacy evidence policy 維持。新路由／配額欄位須使用 active schema。
-<!-- /att-docs:historical -->
-
-## Appendix B — compatibility 與 deprecated aliases
-
-Compatibility 的目的，是讓既有 package 可讀，而不是維持第二套 current model。新 authoring 使用 canonical `EXEC`、`META`、Action-local `output`、current schema、`--env` 與目前 Tool/DB/MQ contract。
-
-Deterministic legacy alias 在可一對一映射時可以保留並產生 migration warning；若舊語義與 scope isolation 或 common result/evidence contract 衝突，就不建立 alias。Deprecated CLI/authoring form 只有在使用者仍需要 migration path 時才保留在其 owner page 或 CHANGELOG。
-
-## Appendix C — migration notes
-
-### Load 獨立 evidence 配額
-
-有限 Load evidence 配額須使用 `att-load/v1.7`。使用 `maxSamples`，或使用共用 `maxSuccessSamples`／`maxFailureSamples` 組合的 legacy scenario，均保留既有語義。Per-workload cap 必須明確設定 `evidence.quotaScope: perWorkload`。此模式下請設定 `evidence.defaults` 及可選的 cap-only `workloads[].evidence` override；不要加入 root `maxSamples`、`maxSuccessSamples` 或 `maxFailureSamples`。每個 workload 的 cap 互相獨立，不會出借、借用、收回容量，也不會因配額刪除已保留 artifact。限制、驗證及 reporting 見 [Load](reference.zh/execution-modes/load.md#獨立-evidence-配額)。
-
-
-### MQ request queue 路由
-
-`att-mqhelper/v1.2` scalar descriptor 仍受支援。使用 `message.requestQueues` 或 `requestQueueSelection` 時，須改為 `att-mqhelper/v1.3`，並以 1–256 項不重複 queue 清單取代 scalar `requestQueue`；`replyQueue` 維持單一可選 scalar。Instance 路由覆寫會取代繼承的 scalar／清單，未明確指定 strategy 時重設 queue strategy。Queue selection、counter 範圍、evidence 及 replay 行為見 [MQHelper](reference.zh/resources/mqhelper.md#request-queue-路由)。
-
-
-### File arguments 與 case log paths
-
-HTTPHelper call 不再接受 `file`；請直接將 `&{package-relative-file}` 傳入 `body`。MQHelper `send` 和 `request` 不再接受 `file`；請將 expression 傳入 `payload`。SSHHelper `upload` 現在要求 `payload` content，並拒絕 `localPath`；請直接傳入 `&{...}`。SSHHelper 不再支援 `download`，因為它需要 local destination path。若工作必須從主機取回檔案，請明確配置 command-backed Tool。這些變更移除 Resource API 原生的任意 binary local-file input；`&{...}` 提供 UTF-8 text。
-
-Case log、CLI output 和輸出的 case evidence 會將 canonical package root 下的 path 顯示為 `$ATT_HOME` 或 `$ATT_HOME/<relative-path>`，並統一使用 `/`。`$ATT_HOME` 只是在 presentation 中使用的 token，不是 environment variable、Context root 或 file-expression locator。Runtime resolution 和 filesystem access 仍使用 canonical absolute Path。package root 以外的 absolute path，不論是 Path value 或診斷訊息內的路徑，都會以受限的 `$EXTERNAL/<basename>` 顯示。明確的 remote-path 欄位及 URL 會保留原值。
-
-### Previous release Testdata migration
-
-將 global configuration 從 `att-config/v2.10` 升至 `att-config/v2.11`，並將 Load scenario 從 `att-load/v1.4` 升至 `att-load/v1.5`。舊 schema 仍登錄於 `schemas/history/`，供 migration diagnostics 使用。`att-testdata/v1.0` 是新增契約：在選定的 environment profile `testdata` list 加入 descriptor path，再於 Case/Stage、Debug 或 Load workload input map 使用 `@{id}`。Load scenario 可在頂層加入 package-relative `testdata` paths，形成僅適用於該次 Load 的 overlay。不同 layer 的同名 ID 會完整取代 descriptor；同一 layer 內的重複 ID 無效。多筆 records 的 descriptor 必須有明確 selection policy。沒有 testdata reference 的既有 package 不需要新增 descriptor。
-
-### Execution identity format migration
-
-`att-config/v2.13` 新增 execution identity formats；前一版 configuration schema 仍受支援。可用 `execution.runIdFormat` 設定 Run 和 Load 的外層 ID，並用 `execution.debugIdFormat` 設定 standalone Debug directory ID。未設定時仍使用既有 timestamp Run/Load ID 及 `<type>-<targetId>` Debug ID。Load 每次 iteration 的 `EXEC.ID` 現由 Engine 管理；請移除已停用的 `execution.execIdFormat`。Run/Load 的明確 ID 使用 `--run-id`；standalone Debug 的明確 ID 使用 `--debug-id`。
-
-Load workload `testdata.<id>` 設定控制 `scope`，並可選擇整份覆蓋 descriptor 的 `selection` policy。Scope 預設為 `iteration`；`user` 只適用 closed-VU workload。請明確選擇 `error`、`recycle` 或 `stop` exhaustion。Selection metadata 會記錄，但不包含 record value。
-
-ATT 3.6.2 將型別化 operation result、外部 parsing、file-content String、outbound transport 和人類可讀 evidence 分開。
-
-| 舊欄位／模型 | 3.6.2 遷移方式 |
-|---|---|
-| `att-template/v3.4` 或 `att-flow/v3.4` 的 `type: render` | 將 descriptor 改為 active v3.5 schema，並以使用 file-content expression 的 Assign 取代每個 Render Action。Historical v3.4 descriptor 只可經由 historical schema path 載入。 |
-| `type: render` / `payload: path` | 使用 `type: assign`、variable `name` 及 `expression: "&{package-relative-file}"`；將 `${EXEC.VARS.<name>}` 傳給 consumer。 |
-| Command Tool result.format | 將 parsing 設定移至 Tool descriptor 的 stdoutFormat。 |
-| 共用 Action result.format/path/overwrite | 移除。output.result 是 native logical typed value；沒有隱式檔案替代方案。 |
-| Render result.format/path 或 renderAs/saveAs | 移除舊欄位。File-content expression 回傳 exact UTF-8 String，不建立結果檔或 targetFiles。 |
-| 透過 targetFiles 傳遞 Render 檔案 | 直接將 file-content String 傳入 HTTP body、MQ payload 或 SSH upload payload。 |
-| 在 file-content String 使用 requestFormat | 移除。requestFormat 僅供抽象 Map/List；String + requestFormat 會失敗。 |
-| Dynamic 或不安全 file locator | 改為一個 static package-relative file。Absolute path、glob、dynamic locator、missing file、directory、非 UTF-8 bytes 及 symlink escape 都會被拒絕。 |
-| Log file | 直接將 value 傳入 Log.value。 |
-| Log fields | 將 typed map/list 放在 Log.value，並選擇 Log.format。 |
-| HTTP/MQ 共用 result 格式設定 | 使用 responseFormat 做 ingress parsing；可選 evidence.output.format 只控制人類可讀表示。 |
-| 舊 active resource/config schema | 使用 [Schema and Version Matrix](reference.zh/appendices/schema-matrix.md) 的 active schema，並遷移上述欄位。Historical schemas 不是 active contracts。 |
-
-File-content String 傳入 HTTP 的例子：
-
-~~~yaml
-prepareRequest:
-  type: assign
-  name: requestText
-  expression: "&{templates/payment/payload/request.xml}"
-send:
-  type: tool
-  call: "#{http.payment.post(body=${EXEC.VARS.requestText})}"
-~~~
-
-File 以 strict UTF-8 text 讀取。File 內的 `${...}` 與 `#{...}` 仍是 runtime expressions；validation 編譯時不會呼叫外部 resource。Run/Debug 會 cache compiled plan，並在 file fingerprint 改變時失效；Load 會為 scenario freeze 已驗證的 file identity、content 及 plan。File output 不會再被當作新的 expression source 解析。
-
-抽象 typed value 必須明確使用 requestFormat：
-
-~~~yaml
-send:
-  type: tool
-  call: "#{http.payment.post(body=${EXEC.INPUT.request}, requestFormat='json')}"
-~~~
-
-Load scenario 請將舊 single-target/v1.1 格式經由歷史 v1.2/v1.3 loader 遷移，再把 schemaVersion 升至 att-load/v1.6。Root defaults 可供多個 workload 共用；每個 workload 的 `inputs`、`vars`、load policy 及 execution 設定會覆蓋相應 root 值。Top-level thresholds 只屬於 aggregate；workload thresholds 必須在各 workload 宣告，不會從 root 繼承。`inputs` 仍對應 EXEC.INPUT；`vars` 在每個 execution 的 EXEC.ID 與 EXEC.OUTPUT_DIR 初始化後、target 啟動前評估。完整 reference 保留 native type，dependency 不受宣告順序影響；循環及 external/stateful calls 會在執行前拒絕。Load iteration identity 現由 Engine 管理；移除舊 `execution.execIdFormat`。Closed workload 可用 EXEC.LOAD.USER_ID，arrival-rate 沒有此欄位。
-
-歷史的 `att-load-profile/v1.0` policy file 僅供 migration 使用：使用前請改寫為現行 policy-only `att-load/v1.6` descriptor；它不是現行 `load/load.yaml` 範例。
-
-Unsupported schema version 會在 execution 前失敗並提供 migration guidance。ATT 不會自動改寫 package，也不會為產生診斷而呼叫外部 resource。詳見[Action 與型別化值](reference.zh/actions.md)、[Runtime 與 Context 模型](reference.zh/runtime-context.md)、[Load 模式](reference.zh/execution-modes/load.md)與[Schema 矩陣](reference.zh/appendices/schema-matrix.md)。
-
-### Load mix migration
-
-現有 `att-load/v1.5` 檔案仍相容。升級至 `att-load/v1.6` 後，可將 workload 的 `target` 改為 `mix`，設定 closed-user weighted target mix。每個 entry 需要唯一 `id`、正整數 `weight`，以及 Template、Flow 或 Tool target。現行 summary contract 為 `att-load-summary/v1.1`；v1.0 保留作歷史格式。
-
-### Historical schema migration
-
-ATT 3.6.2 使用 `att-template/v3.6` 與 `att-flow/v3.6` 作為 active schemas。已發布的 `att-template/v3.5`、`att-flow/v3.5` 及更舊定義保留於 `schemas/history/`；其中 historical DB 與 Render Action 只供 compatibility 使用，不是 active contract。遷移這些 descriptor 時，先將 schema version 改為 v3.6，再套用以下欄位變更。
-
-| Historical configuration | 3.6.2 形式 |
-|---|---|
-| `att-template/v3.3` 或 `att-flow/v3.3` | 先按 historical release migration 遷移至 v3.4，再改為 v3.6 並遷移 Render/DB Action。 |
-| Historical `type: db` 及 `query`/`update` | 改為普通 `type: tool` Action，使用 `#{db.<id>.query(...)}`、`scalar(...)` 或 `update(...)`；query/scalar 可 retry，update 不可 automatic retry。 |
-| Historical `sqlFile` | 改用單一 String argument `sql=&{package-relative-sql-file}`；`params` 與 `parameters` 互斥。 |
-| Historical `type: render` | 改為使用 `"&{package-relative-file}"` expression 的 Assign；後續 Action 使用 `${EXEC.VARS.<name>}`。 |
-| Command Tool result.format | Tool descriptor stdoutFormat |
-| Render result.format/path/overwrite 或 renderAs/saveAs | 移除舊 persistence 欄位。File-content expression 回傳 exact UTF-8 String，不會隱式建立結果檔。 |
-| Log file | 將 typed value 直接傳入 Log.value |
-| Log fields | 將 typed map/list 放入 Log.value，並指定 Log.format |
-| Render targetFiles handoff 至 HTTP/MQ/SSH | 將 file-content String 直接作為 HTTP body、MQ payload 或 SSH upload payload |
-| 在 Render result 使用 requestFormat | 移除；requestFormat 留給抽象 Map/List |
-
-File-content path 相對於 canonical package root。`./` 與 `../` 只有在 canonical target 仍位於該 root 內時才允許。v1 沒有 glob 或 dynamic locator；target 必須是 regular strict-UTF-8 file。
-
-Unsupported schemaVersion 會在 execution 前由 validation 拒絕並提供 migration guidance。ATT 不會靜默轉換舊欄位，也不會為產生 guidance 而呼叫 Tools/resources。
-
-[META Runtime and Context Model](reference.zh/runtime-context.md) 說明 META lifecycle；[Load Mode](reference.zh/execution-modes/load.md) 說明 execution identity 和 retained evidence 路徑。
-
-### Debug schema migration
-
-`att-debug/v1.0` 及 `att-debug/v1.1` 為 historical schema；請升級至 `att-debug/v1.2`。Template/Flow 可配置 `vars` 以 seed `EXEC.VARS`；Tool 不支援 `vars`。現行 schema 亦允許 package-relative `testdata` imports，並限定在 standalone Debug invocation。Input 與 arguments 的現行規則見 [Debug](reference.zh/execution-modes/debug.md)。
-
-### Environment profile migration
-
-從舊的 complete-config pattern 遷移時，保留 descriptor 與 Action，將 common settings 移至 `config/config.yaml`、各環境 descriptor lists 移至 `environments.<NAME>`，並以 `--config config/config.yaml --env <NAME>` 選擇環境。現行 contract 見 [Configuration](reference.zh/configuration.md)。
-
-### Load execution identity migration
-
-ATT 為每個 started iteration 配置唯一的 engine-managed `EXEC.ID`：`<runId>-execution-<sequence>`。同一 Run 的所有 Workload、Target、Mix entry 及 phase 共用一個 thread-safe、單調遞增的 allocator。ID 在 bootstrap vars 與 Target action 前發布；`EXEC.RUN_ID` 保持為外層 Run identity。Collision tracking 不會建立 per-iteration 檔案或持續增長的 ID registry。
-
-目前及歷史 Load Scenario、policy-only YAML、inline draft，以及已儲存的 Schedule／Worker snapshot，都拒絕 `execution.execIdFormat`，包括空值。請移除此欄位並遷移至 `att-load/v1.9`，檢查依賴 artifact path 的整合，改用獨立 input／variable 保存 business correlation。歷史 artifact 保留原路徑；歷史 schema 檔案仍供檢視。不含自訂 ID 的歷史資源會正規化至目前 contract。受影響的 immutable schedule 須透過一般 reviewed-draft 流程建立替代版本。
-
-生成 ID 沿用安全 path segment grammar 及 240 字元上限；Run ID 必須預留 `-execution-` 與 signed-long sequence 空間。Sequence 耗盡後持續失敗，不會 wrap。每個 Run output namespace 只透過 `.execution-owner` 原子 claim 一次；第二個 owner 或 restart 必須選用新的外層 Run ID。Claim 由安全的 completed-Job artifact retention 隨 Run 目錄清理。舊 reservation 目錄只可由 completed-Job retention 清理，不能在舊 process 仍可能使用時刪除。Metrics-only evidence 保持 lazy；單一 Run metadata 檔不會建立 iteration workspace。
-
-外層 `execution.runIdFormat`、`execution.debugIdFormat`、literal `--run-id` 與 `--debug-id` 行為不變。Diagnostic iteration／VU／Workload／Mix ID 與 scheduler event sequence 仍獨立於 `EXEC.ID`。分散式 Worker 必須使用互不重疊的 namespace 或共用 allocator；獨立 process-local counter 不能安全共用同一 Run namespace。
-
-### Load v1.9 readiness 與 windowed metrics
-
-`att-load/v1.8` Load scenario 仍可載入，並會正規化為 `att-load/v1.9`。目前 Load 啟動只會在 scheduler 放行前準備被引用的 DB／MQ／HTTP helper；RUN 和 Debug 維持 lazy resource 行為。`att-load-summary/v1.2` 新增 optional resource-preparation 及 `windowMetrics` data，並保留既有 summary 欄位。Report 預設使用 steady window；`thresholds.steady` 和 `thresholds.overall` 可選擇 window scope。Window 沒有足夠的完成 evidence 時回報 `NOT_EVALUATED`，不能當作 pass。Resource 限制及 metric 定義見 [Load 模式](reference.zh/execution-modes/load.md)。
-
-## Appendix D — limits、security guarantees 與 advanced diagnostics
-
-### Limits 與預設值
-
-Normative field default 以其 owner schema 或 configuration page 為準。重要 architecture limit 包括：
-
-- Load 必須二選一 workload model；
-- arrival-rate overload policy 為 `drop`；
-- 每次 Flow invocation 有新的 Action scope，返回後恢復 caller scope；
-- `DIAG` 是 framework-owned evidence，不屬於 expression tree；
-- resource lifecycle state 不是 public Context tree；
-- 除文件明確允許的 extension location（例如支援位置的 root `x-*`）外，未知 schema field 會被拒絕。
-
-Timeout range、evidence sample bound、result limit、pool size 等 operational numeric limit 仍由對應 schema/descriptor 定義，避免本附錄成為第二個 source of truth。
-
-### Collector projection 與 redaction guarantees
-
-所有失敗 collector（包括 returned operation error 和 thrown Tool exception）都會先經過同一 public projection 再發布或寫 log。Projection 省略 raw input、payload、argv、output、resolved command text 和失敗 record 的 `result`，且不保證保留 `parserDiagnostic`。Native error/diagnostic 只保留安全 field；每個保留的 text field 限制為 1024 字元。`inputOmitted` 和 truncation flag 表示省略或截斷的 evidence。 Free-form message、stderr、per-instance error 和 cleanup warning 會在固定 budget 內 redact string、typed text 和 array input；最多檢查 256 個 input node、8192 個 token 字元，每個 token 最多 1024 字元。Byte array 最多處理 128 byte（UTF-8、Base64、hex 和 Java decimal rendering），其他 array 最多 64 個 element；char array 最多 1024 字元。超出任一 budget、private token 少於 4 字元或遇到未知 input type 時，會用安全 marker 省略所有 free-form failure detail（包括 upstream-truncated secret prefix/head-tail echo），並設置 `inputRedactionLimited` 和 `failureDetailsOmitted`。超過 1024 字元的 free-form field 也會被省略並標記 truncated；structured metadata 繼續保留。Structured status、category 和 resource identity 只做長度限制。SSH fan-out 會保留最多 64 個 instance 的 bounded metadata、error 和 stderr，優先保留失敗 instance；`instanceCount` 和 `instancesTruncated` 表示總數和省略的 instance。 若有 private token，且 operation 或 instance record 標記了 capture/detail truncation（如 `stderrTruncated` 或 `stderrArtifactTruncated`），該 record 的 free-form failure detail 也會被省略，以避免短 secret 被切斷後泄漏 prefix/suffix。沒有 private token 時可保留 bounded preview。Primitive array 的完整 list rendering 和單獨 element 都會在相同 node/token budget 內 redact。 DB returned failure 會從 native `result.error` 提取安全 summary（`type`、bounded/redacted `message`、`sqlState`、`vendorCode` 和安全 cancellation metadata），保留於 DB evidence 的 `error` 並用於 collector 的 `error`；不會發布 rows、parameters、SQL text 或 raw result。失敗 command 的 `stdout` 可作為獨立 diagnostic evidence，按與 `stderr` 相同的 bounded/redacted/omission policy 處理；不會作為 `error.message` 或恢復失敗 `result`。 MQ evidence 的 root 和 error summary 會保留 `completionCode`、`reasonCode` 和 bounded symbolic `reason`。安全 location metadata 包括 HTTP `method` 和僅含 scheme/host/port 的 `url` origin，以及 MQ `queueManager`、`physicalInstance`、`host`、`port`、`channel` 和 `transport`。HTTP evidence 沒有 resolved request input，因此失敗 collector 的 URL 一律省略 path、query、fragment 和 user info，並設置 `urlPathOmitted`；不添加 raw input。無法安全解析或超過 budget 的 URL 會以安全 marker 省略。
-
-### Advanced diagnostics
-
-#### 哪些意外異常會附帶 Stack trace？
-
-意外內部故障（例如 `NullPointerException`、`ClassCastException`、反射查找／存取失敗、其他非預期 runtime exception，或非 domain `IllegalStateException`，包括包在 wrapper cause 內的情況）會在 `case.log` 寫入有界的 `[ATT INTERNAL ERROR]` 區塊、執行 phase 及原始 cause chain。Validation `IllegalArgumentException`、已識別的 domain／transport failure、timeout／cancellation、assertion failure 與一般 MQ no-message outcome 仍保持精簡。同一 Throwable 即使同時被 resource executor 和 Action boundary 看見，每個 Case log 也只會寫一次。Resource-specific redaction（包括由 environment 提供的 SSH identity-file path）會註冊到該 Case log，並套用至後續 log write，避免外層 Action diagnostic 洩漏未出現在 sanitized stack 的內容。Stack 最多 180 行／16 KB；configured secrets 與敏感 key/value assignment 也會遮蔽。Public Action evidence 只保留簡短錯誤類型／phase，不加入 stack。Run、Debug 及 reusable Tool/HTTP/MQ/DB 共用這條 logging path。
-
-#### 為什麼 `Att.bat` 會要求 Maven，或者為什麼 `.sh` Tool 在 windows 上失敗？
-
-在二進制發布中，`att.bat` 會找到有版本號的 runtime JAR，例如 `lib\att-local-4.2.6.jar`，只需要 Java 8+。每個 `ATT_HOME/lib` 只保留一個 `att-local-<version>.jar`，讓啟動器能明確選取 runtime。源碼樹中，`att.bat` 會在 Maven 位於 `PATH` 時使用 Maven；沒有 Maven 時，需要已有的 `target\classes`。先用 `att.bat version` 確認啟動器後再校驗套件。
-
-啟動器讓 ATT 自身跨平臺；它無法翻譯外部 Tool 可執行文件。請為 Windows 配置 `.bat`、`.cmd`、PowerShell 腳本（需要顯式 `powershell`/`pwsh` argv）或原生可執行文件，而不是 POSIX-only `.sh`。PATH 校驗遵循 Windows `PATHEXT`，因此如 `pwsh` 這類名稱可解析為 `pwsh.exe`。維護多平臺版本時，請保持參數契約和 stdout 輸出格式一致。
-
-#### 為什麼 ATT 說會使用 mwiede/jsch，或者 Java SSH 協商失敗？
-
-當 `PATH` 中存在可執行 `ssh` 時，ATT 會優先使用本地 `ssh`。如果不存在，ATT 會打印 `local ssh command not found; ATT will use Java SSH library mwiede/jsch`，並改用 Java exec channel。這是自動回退，不是遠程連通性測試。
-
-回退實現非常保守：ATT 包含 `com.github.mwiede:jsch:2.28.2`，但不捆綁 Bouncy Castle。它要求一個可讀、非符號鏈接的 `~/.ssh/known_hosts` 用作嚴格主機驗證。它不會讀取 `~/.ssh/config`，也不會自動使用 OpenSSH agent；需配置一個非交互可讀的 `identityFile`。密碼和交互式口令提示不支持。
-
-算法可用性取決於 Java 運行時：
-
-| 算法 | Java 回退限制 | 首選方案 |
-|---|---|---|
-| `ssh-ed25519`、`ssh-ed448` | 需要 Java 15+ 或 Bouncy Castle provider | 優先使用本地 OpenSSH 或 Java 15+；否則讓管理員把批准的 `bcprov-jdk18on` 加入運行時 classpath |
-| `curve25519-sha256`、`curve448-sha512` | 需要 Java 11+ 或 Bouncy Castle | 優先本地 OpenSSH 或 Java 11+；否則使用批准的 Bouncy Castle provider |
-| `chacha20-poly1305@openssh.com` | 在所有 Java 版本上都需要 Bouncy Castle | 優先本地 OpenSSH，或在服務端啟用 AES-GCM/CTR cipher，並添加 Bouncy Castle provider |
-| RSA/SHA-1 `ssh-rsa` 簽名 | 默認被 mwiede/jsch 禁用 | 更新服務端到 RSA/SHA-2 (`rsa-sha2-256`/`rsa-sha2-512`) 或其他現代 host/user-key 算法；不要在未經審查的情況下重啟 SHA-1 |
-
-協商失敗時，先用本地 `ssh -v` 復現連接，定位 host-key、key-exchange、cipher 或 user-key 不匹配。優先升級 Java 或服務端算法集合，而不是弱化 JSch 默認值。
+Y��x-���jם��i��+��j[h��ܢ���Nv�d赩h��n�X�z�H�U�����9/o��*9�b�a��"!�c��  �]]܎��Y���^H
+��]���\��[ێ�������]\Έ:)����9�)�/o��*: !y���.���&��,y�(y�a9c%�/����:!�b�y�'��$��KKH�S�T�UQ�SK�Y]���ܙY�\�[��J��[�[\���\���X�[�Y�]]�KO�������c!
+����H����)�z"!���X�[�[J����)�z"!�\��X�[[�[
+B�H��(�d�y�(yg��J��(�d�y�(yg��B�HԕS�:"!��Q9g��(c9�(yg��Jܝ[�z"!�[�Yyg��(c9�(yg��B�H�.�9�+��\��\��H9�+�d#9�&����o�WJ�.�9�+�\�\��\��Ky�+�d#9�&����o�JB�H�X��Y�H:`���cJ�X��Y�Kz`���c
+B�H�i��/ey/o��*9�+9�b�a��J�i��/ey/o��*9�+9�b�a��B�H�\�]]ܚ[��J�\�X]]ܚ[��B�H���9k��.)�g��(c\��\�WJ���9k��.)�g��(c]\��\�JB�H�c`9b!�\��\�H:"!��\�H^X�][ۗJ�c`9b!�]\��\�Kz"!�X�\�KY^X�][ۊB�H���9k��idy�!J���9k��idy�!
+B�H��ܚ؛���J��ܚ؛���B�H��Y�WJ��Y�JB�H�[\]WJ�[\]JB�Hћ��Jٛ��B�H�]]ܚ[��Y�X�X�WJ�]]ܚ[��[Y�X�X�JB�H�\�]H�ۙ\��\J�\�Y]K[�ۙ\��\
+B�H�\�]H�Y�\��H:"!�[�]X\[��J�\�]K\�Y�\��Kz"!�Z[�][X\[��B�H�`,�f���ܚ؛���:"!�ۘ\��9�,9��J�`,�f��]�ܚ؛���z"!�\ۘ\��y�,9��
+B�H�X�[ۜ�:"!�\Y�[Y\�J�X�[ۜ�z"!�]\Y]�[Y\�B�H�X�[ۈ:hg�g��J�X�[ۋzhg�g��B�H�c`9b!�`��/+�`/:"!�(j9�.���yo#�J�c`9b!�`��/+�`/:"!�(j9�.���yo#�B�Hњ[KX�۝[�^�\��[ۈ9f�`����[��Jٚ[KX�۝[�Y^�\��[ۋyf�`��\��[��B�H���8� Q�:"!����9�d9��J����z"!�Y���y�d9��
+B�H���]�Y[��H��X�ܗJ���Y]�Y[��KX��X�܊B�H����&�l!�g��b)yc%�`/:/by�$9.��hg�c��+�9��z*�J���l!�g��b)yc%�`/:/by�$9.��hg�c��+�9��z*�
+B�H�^�\��[ۜ�:"!�+���n���WJ�^�\��[ۜ�z"!�+���n\���JB�Hԙ\��\��H�]]]�Y[��WJܙ\��\��K[�]]Y]�Y[��JB�H�X�[ۈ�]]:"!�]�Y[��H]J�X�[ۋ[�]]z"!�Y]�Y[��K\]
+B�H�aly�*�]�H:"!����X[��ۙ][ۗJ�aly�*\�]�Kz"!�X���X[�X�ۙ][ۊB�Hԝ[�[YH:"!��۝^[�[Jܝ[�[YKz"!�X�۝^[[�[
+B�H�Y[�]H����J�Y[�]K\����B�H�QUH9�!9/cy�!ye��"!��'�doz`,y�'�J�Y]Ky�!9/cy�!ye��"!��'�doz`,y�'�B�H�[����][ۈ:"!����H:)��ba�J�[����][ۋz"!�\���Kz)��ba�B�H��[ۘ[���\:"!���9k�y�)�J��[ۘ[[���\z"!���9k�y�)�B�H�Y�X�X�H9l#�)�WJ�Y�X�X�Kyl#�)�JB�H�^�\��[ۜ�:"!��Z[Z[��J�^�\��[ۜ�z"!�X�Z[Z[��B�H��ly. ^�\��[ۈ[��[�WJ��ly. Y^�\��[ۋY[��[�JB�Hњ[KX�۝[�^�\��[ۗJٚ[KX�۝[�Y^�\��[ۊB�H�\��[Y[�9�d9��9g��b)WJ�\��[Y[�y�d9��9g��b)JB�H�\�]H[�]X\[��:*����WJ�\�]KZ[�][X\[��z*����JB�H���y/g9�)�J���y/g9�)�B�H�ai�n�a�y�nJ�ai�n�a�y�n
+B�Hԙ\��\��H[\�Y]��Jܙ\��\��KZ[\�[Y]��B�H�^�\��[ۈ���H:"!�c+�*�J�^�\��[ۋ\���Kz"!�c+�*�
+B�Hԙ]�H�ۙ][ۈ9�9�'�doz`,y�'�Jܙ]�KX�ۙ][ۋy�9�'�doz`,y�'�B�HԕS�:"!��Q9g��(cY\\�Jܝ[�z"!�[�Yyg��(cXY\\�B�H��ly. �S�:"!�����"�J��ly. \�[�z"!�����"�B�Hԝ[�9�(yo#�Jܝ[�y�(yo#�B�H��[�[ۙHX�Y�J��[�[ۙKYX�Y�B�H��Y9�(yo#�J��Yy�(yo#�B�Hԙ\��\��\�:"!�[�Yܘ][ۜ�Jܙ\��\��\�z"!�Z[�Yܘ][ۜ�B�H��\�][ۈ�\�[:"!�]�Y[��WJ��\�][ۋ\�\�[z"!�Y]�Y[��JB�H���J���
+B�H��[\�J��[\�LJB�H�TR[\�J�\Z[\�LJB�H�[\�J�[\�LJB�H���[\��&�`��/+���9�빪&WJ���[\�`��/+�\��y�빪&JB�H�c��gh9�)�"!�g��(c9���b-�J�c��gh9�)�"!�g��(c9���b-�B�H�\��\�[ۈ:"!��]\�J�\��\�[ۋz"!�\�]\�B�H��[��[�:"!�ۑ�Z[\�XJܝ[��[�z"!�[ۙ�Z[\�JB�H�[Y[�]J�[Y[�]
+B�Hԙ]�H:"!�][\�Jܙ]�Kz"!�X][\�B�H�]�Y[��H��X�ܜ�J�]�Y[��KX��X�ܜ�B�H��[��X�[ۋԙ\��\��HY�X�X�WJ��[��X�[ۜ�\��\��K[Y�X�X�JB�H�Y�ܙY�][ۗJ�Y�ܙY�][ۊB�H��Y�H^X�][ۈ�۝���J��Y�KY^X�][ۋX�۝���B�H���[Y[�]�X�Y[��WJ���][Y[�]\�X�Y[��JB�H�\�X��[Y[�]:"!��]�H[Y�X�[]WJ�\�X�Y�][Y[�]z"!�\�]�KY[Y�X�[]JB�H��ۙ�Y�\�][ۈ:"!�[��\�ۛY[��J��ۙ�Y�\�][ۋz"!�Y[��\�ۛY[��B�H�X��Y�H�ۙ\��\J�X��Y�K[�ۙ\��\
+B�H��Y[�9aly�*�ۙ�Y�\�][ۗJ��Y[�yaly�*X�ۙ�Y�\�][ۊB�H��"y.��b�y��y�o�acy�k�J��"y.��b�y��y�o�acy�k�B�H�acy�k�li:"!�a*�ab9�&�J�acy�k�li:"!�a*�ab9�&�B�H�/o��*X9o�y�iy�%�`g9�*U:acy�k�h!WJ�/o��*^yo�y�iy�%�`g9�*X]zacy�k�h!JB�H�`n9���[��\�ۛY[��ٚ[WJ�`n9���Y[��\�ۛY[�\�ٚ[JB�H���[XH�][��J���[XKX�][��B�H�*+yk��X��Y�K]�YH�[ۜ�J�*+yk��\X��Y�K]�YK[�[ۜ�B�H��&z+f9�)�d�:-��o�y�!9�g�J��&z+f9�)�d�:-��o�y�!9�g�B�H�����H:"!��Xܙ]�J�����Kz"!�\�Xܙ]�B�H�ܛ���[[�H�ۜ�\�[��WJ�ܛ���[[�KX�ۜ�\�[��JB�H�b!�e����ۙ�Y�\�][ۈ�[\�J�b!�e���X�ۙ�Y�\�][ۋY�[\�B�H��ۙ�Y˜�\ܝ��[S�[YT]\��J��ۙ�Yܙ\ܝ�[[�[Y\]\��B�H��ۙ�Y�\�][ۈ�ۙ\��J��ۙ�Y�\�][ۋ[�ۙ\��B�H�X��Y�HX[�Y�\�J�X��Y�K[X[�Y�\�
+B�H�k��db�X��Y�H:h$:*+y`/J�k��db�\X��Y�Kzh$:*+y`/
+B�H�)����[��\�ۛY[�J�)����Y[��\�ۛY[�
+B�H�ie��*\YY�][�J�ie��*]\YYY�][�B�H�)����[����][ۈ\�]WJ�)����Z[����][ۋ]\�]JB�H�g*�Y[�9���)��c��o9n �J�g*\�Y[�y���)��c��o9n �B�H�`m����""�X��Y�H[��[�ܞWJ�`m����""�\X��Y�KZ[��[�ܞJB�H�TH]�J�\K\]�B�H��H9c��  �J��Kyc��  �B�H�`n9���doy.�J�`n9���doy.�
+B�H�U����9�9c���*9�)�J�]M��y�9c���*9�)�B�H���:+k���\��H�X���]J���:+k�\��\��KX�X���]
+B�H��"y.��b�y��ze�z*����x� [�[ۈ9d�9��9/��J��"y.��b�y��ze�z*����[�[ۋyd�9��9/��B�H�`#�`c��H9/o��*U�\��\�J�`#�`c�X�Ky/o��*X]\�\��\�B�H�\Yݙ\��Y\�[�]ZX���YJ�\Y[ݙ\��Y\�X[�\]ZX��[�Y
+B�H�X�Y�[�]:"!��]]J�X�Y�Z[�]z"!�[�]]
+B�H�` 9a��J�` 9a��
+B�H�k�9�m�H�[ۈX]�^J�k�9�mX�K[�[ۋ[X]�^
+B�H�-��o�zhk��.�J�-��o�zhk��.�B�H��d9��8� yh,ydb�"!�]�Y[��WJ��d9��9h,ydb�"!�Y]�Y[��JB�H�U�\��\��؈\�Y�X�9�o9/bJ�]\�\��\�Z�؋X\�Y�X�y�o9/b
+B�H���y�o��[�\�Y�X��J���y�o�\�[�X\�Y�X��B�H�g*S9h,z(j9.+y��y�"��\�H^X�][ۈ9�d9��J�g*Z[yh,z(j9.+y��y�"�X�\�KY^X�][ۋy�d9��
+B�H�*.������]�Y[��H��X�܈9i,y�e�J�*.����]��Y]�Y[��KX��X�܋yi,y�e�B�H�l!�^X�][ۈ9�d9��9k��aiH�ܚ؛���J�l!�Y^X�][ۋy�d9��9k��aiK]�ܚ؛���B�H�c+�a��[�]9�d9��J�c+�a�Z�[�]y�d9��
+B�H���y�"��H��ӈ9ofy�/WJ���y�"�X�KZ��ۋyofy�/JB�H�a�y���[�J�a�y��\�[�B�H��'��$9�����9.)��y�!�X��Y�H:/.9a�J��'��$9�����9.)��y�!�\X��Y�Kz/.9a�B�H�o��^X�][ۈY[�]H:/�z.i\�Y�X�J�o��Y^X�][ۋZY[�]Kz/�z.iX\�Y�X�
+B�H���ze�H�[�\�]Y[�]]��[X\�J���ze�KY�[�\�]Y[�]]\��[X\�B�HԙXY[���\�K���[��\�K�X[[JܙXY[��X�\�[��X[�X�\�^X[[
+B�H՘[Y][ۈ:"!���X�\���[��Jݘ[Y][ۋz"!�]��X�\���[��B�H�`n9����+9. 9`"�*.�����izjg�J�`n9����+9. 9`"�*.�����izjg�B�H�ab9o���[Y][ۈ:e��i��J�ab9o��]�[Y][ۋze��i��B�H�n.:)��ec�hcJ�n.:)��ec�hc
+B�H�k�yaj9��:a��J�k�yaj9��:a��B�H՘[Y][ۈ��ӈ9d"9�!Jݘ[Y][ۋZ��ۋyd"9�!
+B�H��x� y�d�c!z"!�`b���WJ��y�d�c!z"!�`b���JB�H�]�[�Y[�ܙ[X\�H�]\�J�]�[�Y[��[X\�KY�]\�B�Hԝ[�[YH\[�[��Y\�Jܝ[�[YKY\[�[��Y\�B�H��Y[�[��X�[ۈ�X�WJ��Y[�Z[��X�[ۋX�X�JB�H���[Y[�][ۈ�\�][ۜ�J���[Y[�][ۋ[�\�][ۜ�B�H��H:"!�[��\�ۛY[���[�[ۗJ��Kz"!�Y[��\�ۛY[�\��[�[ۊB�H�\[�^H8�%��[XH:"!��\��[ۈX]�^J�\[�^XK\��[XKz"!�]�\��[ۋ[X]�^
+B�H�\[�^�8�%��\]X�[]H:"!�\�X�]Y[X\�\�J�\[�^X�X��\]X�[]Kz"!�Y\�X�]YX[X\�\�B�H�\[�^�8�%ZYܘ][ۈ��\�J�\[�^X�[ZYܘ][ۋ[��\�B�H��Y9�j9���]�Y[��H:aczhcWJ��Yy�j9���Y]�Y[��KzaczhcJB�H�TH�\]Y\�]Y]YH:-���,WJ�\K\�\]Y\�\]Y]YKz-���,JB�Hњ[H\��[Y[��:"!��\�H��]�Jٚ[KX\��[Y[��z"!�X�\�K[��\]�B�H��]�[�\��[X\�H\�]HZYܘ][ۗJ��]�[�\�\�[X\�K]\�]K[ZYܘ][ۊB�H�^X�][ۈY[�]H�ܛX]ZYܘ][ۗJ�^X�][ۋZY[�]KY�ܛX][ZYܘ][ۊB�H��YZ^ZYܘ][ۗJ��Y[Z^[ZYܘ][ۊB�H�\�ܚX�[��[XHZYܘ][ۗJ�\�ܚX�[\��[XK[ZYܘ][ۊB�H�X�Y���[XHZYܘ][ۗJ�X�Y�\��[XK[ZYܘ][ۊB�H�[��\�ۛY[��ٚ[HZYܘ][ۗJ�[��\�ۛY[�\�ٚ[K[ZYܘ][ۊB�H��Y^X�][ۈY[�]HZYܘ][ۗJ��YY^X�][ۋZY[�]K[ZYܘ][ۊB�H��Y�K�H�XY[�\��:"!��[���YY]�X��J��Y]�NK\�XY[�\��z"!�]�[���Y[Y]�X��B�H�\[�^8�%[Z]�� \�X�\�]H�X\�[�Y\�:"!�Y�[��YXYۛ��X��J�\[�^Y[[Z]��X�\�]KY�X\�[�Y\�z"!�XY�[��YYXYۛ��X��B�H�[Z]�:"!�h$:*+y`/J�[Z]�z"!�h$:*+y`/
+B�H���X�܈�ڙX�[ۈ:"!��YX�[ۈ�X\�[�Y\�J���X�܋\�ڙX�[ۋz"!�\�YX�[ۋY�X\�[�Y\�B�H�Y�[��YXYۛ��X��J�Y�[��YYXYۛ��X��B���9���)�z"!���X�[�[��U9����+:*i��#�g%�"!��m9d"9�g�b-�b!�f�� ��+:*i��n9��.�H�ܚ؛����#��YX�\��#�ۘ\��9�b9�+9c%��&�[\]H:"!����9k���yc��a�y�*:(c9஻�&ԙ\��\��H9���`&y.��(c9஺`(���yb,9i%�`�9����lx� ������9�(�d�y�(yg��^�\��\�B�KHܙ\�Y�Y�B�KH[\]B�KHX�[ۂ�KH�[KX�۝[�^�\��[ۈ�\��\�����\��Yۂ�KH���KH��KH���O�ܙ\�YX�[ۜ����\��\�J��9�+�/g: !y��9k��.)��h�)��c%���ܚ؛������� ����\�H^X�][ۊ��9�+��[�9l#z*l�\��\�H9�9. 9�(yg��(c;�&�am�k�9�m�\�HQ9�&z+f\��\�{�#9.)�����*9��9g��(c9�d9��9d�]�Y[��x� �*#�*��ܚ؛���]H9d�]]ܚ[��9�`�/o��*
+�\��\�J��&�*#�*��[�[YH�]\�� y��z*�8� yh,z(j9d�\�Y�X��9�`�/o��*
+��\�H^X�][ۊ�� ����Y�J��:`n9���[\]H9.)���9/���Y�K\�]�]H]{�&ʊ�[\]J��9�+�c��g��(c��[�\�[�:`���c;�&ʊ���ʊ�9�+�am��"y�j9���X�[ۈ���H9�9c��a�y�*[\]H:`��/+��&ʊ�X�[ۊ��9�+�. 9`"��"yn��m�y/g9e��a`��&ʊ��\��\��J��9�+�X�[ۈ9�%�a`z*,y�^�\��[ۈ�[9�`9/o��*9���8� Q�[\�� STR[\�� R[\�9�%���[\�� �������S�:"!��Q9g��(c9�(yg���S�9e���(yg��(c9b�� �y�빪&y�%��\�H�[X�[ۻ�&�X�Y�9஺*.����`n:h!{�&��Q9/�y�fy�b: �yo%y��� �*��c��e�V��ly. �S�:"!�����"�J�Y�\�[��K���^X�][ۋ[[�\��[�Y�YY\�[��Y
+x� �""�Y\\�9/�y�fyl"9�*:/.9aiyc�h,ydb��&���9�(yo#�9..�)�z/.9aiH:a�y�*9ai�k�H�KK_KK_KK_��[��ܚ؛���\��\�H:"!��Y�H�[X�܈[\]x� Q���� U��8� Q��TK�����X�Y�]YX�Y�݌K���YX�\�9�%�KZ[�]9e��. [\]x� Q���9�%���\��]��Y][�Y݌K�X��[�\�[�:a�z)!�g��(c9. 9`"��%�i&�`"�[\]x� Q���9�%����ܚ��Y��c��a�y�*[\]Kћ��9��y/�z,�VP˒S�U8� XVP˕�T��8� XVPːP�SӔ�8� XQUX9d�X�[ۋ[��[�]]8� �g��(c9�(yo#�"!���Y[\�Y[�]H9c�/�y�fyg*��[Y]�ܚ�]�Y[��{�#9.#y� ��$9ஈ^�\��[ۈ]x� ������9.�9�+��\��\��H9�+�d#9�&����o�B����8� Q�[\�� STR[\�� R[\�9d���[\�9�+��j9����\��\��H:hg�g��� �k��`$y�:acy�k�"!�Y�X�X�H9.#yd#;�#9/a�X�[ۈ9� �`#�`c��]]��\�[9�o9n �c���'�\Y�\�[;�#9.)�l!�c��`n9��\�[�][ۈ]�Y[��H9b!�e��/�ykf8� �ak:e��^�\��[ۈ9��z+�9c�X�[ۈ�\�[�]�Y[��{�#: #9.#y�+��\��\��H9ai�`��ۛ�X�[ۋ����\���]x� ���^���KKKKKW��[\�KKJTR[\�KKJ�KO�\Y�\�][ۈ�\�[KO�X�[ۈ�]]�[\�J��[\�KK�����X��Y�H:`���c�����`"�X��Y�H9c!yd*�!�m�y��\�[�\���[\��#9/��i��\��\�K�8� X[\]\��8� \X��Y�K[��[����8� X\�]K�9c��'��$9��]]�8� ��`9�"HX��Y�H9aly�*U��QK��ۙ�Y��9."���[�[YH�ۙ�Y�\�][ۻ�&�c��/�y.����[X\�9�,HU9ai�mc:/"yaix� �X��Y�H9.#zg :)�z!�m�y��ۙ�Y��9�%���[X\��9��c!8� �U9� �g*9g��(c9bczje�+bH]:"!�Y[�Y�Y\�� �ܙY[�X[9��y�/�g*9�9h��+���n9�%�i%�`��Xܙ]�9�y�!��#9.#y��y��9.�9b,PSS8� ���g :)�z`$9�iyn����. 9`"�c��m�y/g9�X��Y�{�#:*��/o��*����]ZX��\�\��Y;�&��+�Y�\�[��H9am�i&9ai�k�y�+�)����9�)���ze�y���.��� ������9i��/ey/o��*9�+9�b�a����9�빪&H9���.��KK_KK_�9n�����+9. 9`"�UX��Y�H�]ZX���\�J]ZX��\�\����Y
+H�9�!�)���.9o��U[�[���X�[�[J�Y�\�[��K���ݙ\��Y]˛Y
+x� V�\�]]ܚ[��J�Y�\�[��K���\�X]]ܚ[�˛Y
+x� V�X�[ۜ�J�Y�\�[��K���X�[ۜ˛Y
+x� Vԝ[�[YH[��۝^J�Y�\�[��K��ܝ[�[YKX�۝^�Y
+H9d�ԝ[�[�WJ�Y�\�[��K���^X�][ۋ[[�\�ܝ[��Y
+H�:acy�k���TK����ԙ\��\��\�J�Y�\�[��K��ܙ\��\��\��ݙ\��Y]˛Y
+H�9��ze�H�H�[ۈ��H�Y�\�[��WJ�Y�\�[��K����K�Y
+H�:*.����i,y�e�՘[Y][ۈ[���X�\���[��J�Y�\�[��K��ݘ[Y][ۋYXYۛ��X�˛Y
+H�9ca��&�""�X��Y�H�ZYܘ][ۈ��\�J�Y�\�[��K���\[�X�\��ZYܘ][ۜ˛Y
+H���Y�\�[��H9k���HX�X��۝�X�;�&ԑPQQx� T]ZX���\�:"!�^[\\�9�"y�nyk��.��b�z*���#�`&y.�H�۝�X�8� ����h!H�۝�X�9�,y. 9`"��[X[�X��ۙ\�9k���{�#9am�.��Y�\�[��H:h zgh���9/���f:)�y.)�`(��d:!���ۙ\�� �����\�]]ܚ[�����9��9k��.)�g��(c\��\�B��\��\�H9�+�. 9`"��h�)��c%��ܚ؛�������&ԝ[�9� �ஹ���`"�`n9.+y����9n����. 9�(H�\�H^X�][۸� ��"y.�y."��`y�"���9k��� zje�+byd�9g��(c:+����8� ���K�9��:/+��ܚ؛����#9.)�g*�YX�\�9.+y�(9l!9�!9/cx� ����9�(��'�ۘ\��9.)������ym��l8� ��ˈ9/o��*��]���[Y]HK\X��Y�H:je�+bHX��Y�x� ���9/o��*�X�Y�J�Y�\�[��K���^X�][ۋ[[�\��X�Y˛Y
+H:f�:f�[\]x� Q���9�%���;�#9a�y/o��*ԝ[�J�Y�\�[��K���^X�][ۋ[[�\�ܝ[��Y
+H9n�����\�H^X�][۸� ���.�y."�d!9��9k���H]]ܚ[���۝�X�8� �ak9o#�e��a`��/8� yi&�(c:(j:h+yd�S9n��b%�c%�*l���z)���`,�f���ܚ؛���:"!�ۘ\��9�,9��J�`,�f��]�ܚ؛���z"!�\ۘ\��y�,9��
+x� ������9c`9b!�\��\�H:"!��\�H^X�][ۂ����\��\�J��9�+��YX�\�X\[��9d�ۘ\���ܛX[^�][ۈ9o�9�,y/g: !y��9k����ܚ؛������� �k���9k�9�m�\�HQ9�/9o#�ஈ�ܚ؛���Y�ܛ�\Y�����\�RY8� ����\�H^X�][ۊ��9�+��[�9l#z*l�\��\�H9�9. 9�(H�[�[YH9g��(c;�#9.)��"z!�m�y��]\�9d�]�Y[��x� �ajz !yaly�*Y[�Y�Y\��#9/a����o�y.#yd#8� ��+:h y/o��*
+�\��\�J�:(j9�.��ܚ؛���9ai�k�{�#9/o��*
+��\�H^X�][ۊ�:(j9�.�g��(c9m�y/g8� ������9��9k��idy�!���+:h z*���#��h�n.9��yn.9m�y/g9�`y.+y�9�n9�湭`z/bzh!�n��� ���:g 9�`�9/o��*�KK_KK_��Y�H^X�][ۈ[��H�[�[\]H�9c��a�y�*[\]H��X�����9. 9`"��"yn���\�][ۈX�[ۈ�9i%�`�: �yb���\��\��H�\��\�K��Y�H�\�[�\��[�]VP˒S�U�:-�X�[ۈ]]X�H�]HVP˕�T��������ܚ؛��������ܚ؛���� T�YX�\�9d�ۘ\��9.b�e���:e�9������`"����ܚ؛���:`�z)�y�`��"y. 9`"�PSS�YX�\�9d�9. 9`"��'��$9�Sۘ\��;�#9k��`$yo�zh"9am��"y��9d#9�9g�d#y.%9/cy��9d#9. 9��c!;�&���^�\��\�K�^[Y[�ܙYܙ\��[ۋ���\��\�K�^[Y[�ܙYܙ\��[ۋ�X[[�\��\�K�^[Y[�ܙYܙ\��[ۋ�[����YX�\�9l!�^�[9�d9����(9l!9ஈU9���o�x� �k��,�:,��Y]9�(9l!8� z(j:h+x� U\��\�H9�n9��� y�"yn���Y�H9c�c��`n9h,ydb�b%��&y�/{�&�[Y[�]ܙ]�H9.#ylk9���ܚ؛���:acy�k�� ���X[[���[XU�\��[ێ�]\�YX�\�݌����Y�^[Y[��Yܙ\��[ۂ�^�[���Y]�^[Y[�y�+�.�9�+:*i��b9/��f��]�y�nza���+:*i��b9/��fႈXY\����Έ���\�RY�9�b9/����:&gY�Έ9�&y�i�]P��[[�Έ�\�S�[YOy�b9/��d#y�,K[[�[�za�zhcK^X�Yzh$9�'��d9��
+X[[
+B��Y�\΂�H�^N�[����B�[\]N�9g��(c9�(y�o]P��[[�Έ�[��[y�(:`d��[ۜ�yg��(c9c���n
+X[[
+B��\]Z\�Y��YB��[��[���ܛX[�ۑ�Z[\�N�������.HY9�+�o�zg 9�;�#9.)�.%9o�zh"9g*9�m9`"�c!y.+ye+�. 8� �^�[��Y]9c��.�y��yc��. 9`"��Y]9d#y�,{�#9�%�.�z`%�&g�b!�f�9�ܛ�\Y\�Y]�[YX9��y��� �i����9c��i�a�. 9`"��Y]9.%9����"Hܛ�\Q;�#U9� �/o��*Y�][8� �k�9�m�\�HQ9�9oh�o#�i���`��+��ܚ؛���Y�ܛ�\Y�����\�RY;�#9.)�.%9o�zh"9g*9�m9`"�c!y.+ye+�. 8� ���g*9/빥.H^�[9o�;�#9g��(c��]��ۘ\��K\�Z]H\��\�K�^[Y[�ܙYܙ\��[ۋ��8� ��'��$9�^[Y[�ܙYܙ\��[ۋ�[9/o��*9�(yo#�]]\��\�\�݌��;�#9.)�`�ykf9a,��n9. 9c%�o�9��YX�\�9�(9l!:*���x� �k��/�y�fHܛ�\8� P�\�x� y�&y�/x� [X\�\�9d��Y�H:h!�n���#9/o��*:hk�o#�`/:hg�g���#9.)����fi9�(�o#�d�9�(ze��ܚ؛���9ai�k�x� �*��k�y��y.)���9.�9�'��$9�S;�&�.#z)�y�b�m�y/빥.x� ����k�`&��[�9d�9���. 9�+��[Y]X9�(yo#�`�y� �/�y� yc�+�;�#9i����S9�.�i,x� y�(y�b8� zgg�)����9�%�`c��'��#9ba�� �g*:/.9a�bmyn�bcyi,y�e�� ��[�K]\]K\ۘ\��9� �hk�o#�a`z*,HU9g*9��y�*9��9d#:je�+bz"!��(zje�)��ba�bc{�#9`�y஺`n9.+y�9k�9�m�ܚ؛���9b-���9m칦�9�.y�ۘ\��8� �k��.#y� �k��aiz`�9b!��\�K��&y�/Hۘ\��;�#9.#y� �g*9��9��9�'�e��*���*��;�#9���eHۘ\��9�)�&g�c�9��{�#9.)�.%9�m�"!�KY�K\�[�9�a9d"9/o��*9�`�.�y� �g��(c9��9�"���9��8� �ke���9ai�k�yk�9aj9��9d#9�ۘ\��9.#y� �(��a�yk��� �������9�(9l!9�n9��b%�]P��[[��9c��.�y��yc���&���^���[[��[YB�[X\�P��[[��[YB���[[��[YJX[[
+B�[X\�P��[[��[YJX[[
+B����k�`&�b%�/g9ஹke��)�.,�`,�aiH�۝^8� �
+X[[
+X9b%�ba�� ����hk��.��9e��a`��/9`/:)����9ஈPSS9�&za��� yb%�(j9�%��(9l!8� ���f�yo%z&g�c��/�z+m�`%�&g�� y�bz&g�d�9��:&g��&���X[[�]P��[[�Έ[[�[�za�zhcK��OH�`�z*.�:(�9aaH��ܛ][OH�)��ba�y`/�^[�YH�*���`�X[[
+H�X[[
+B���� 9o�9�
+X[[
+X9�+�U9�:)����9�&z*&8� �g*9� 9o�9. 9`"�/��kd9.+{�#9�jy�!�^�[:(j:h+yd#y�+�:*���`�X[[
+X8� �������9�n��oy`/����X8� X�X8� X�S8� X�ӑX8� y�n�e��a`��/9d�9`�yc!yd*��n��oyke��)��9`/:`�y� ��n9. 9c%�ஹ�n��ox� ��k�`&��n��oy�n9��`/9� �+��ஹ�n�ke��)�.,�� ��n��oH
+X[[
+X9e��a`��/9ba�/�y� yஹ�n��o{�#9.#z`,�(c:)����8� ���o�zg �Y�H:`n9���fj9� ����ey�n��oy`/8� �c��`n�Y�H9i����:`n9���fj9ஹ�n��o{�#9ba�-��`c�� ��������ܚ؛�����YX�\���9l#z,hH9a`z*,ylk9�)�9o�yhj���!9�g��KK_KK_KK_�9�.yl#z,hH��[XU�\��[ۘ8� XY8� X^�[8� X�Y�\�8� X�\ܝ8� XJ���[XU�\��[ۘ8� yc!yai�e+�. Y8� X^�[8� zgg��n��Y�\�9o�zg �^�[�Y]8� XXY\�����8� X�\�RY8� XY��8� X]P��[[���Y]8� X�\�RY8� XY��9o�zg ;�&�XY\������HX��Y�\��X�^X8� X[\]X8� X]P��[[��8� X�\]Z\�Y8� X�[��[�8� Xۑ�Z[\�X�^X�[\]X9o�zg ;�&��^X9.#z �yd*�n�&g���\ܝ��[[��9`/9ஹke��)�.,���c깧"H�YX�\�9�.yl#z,hya`z*,HJ�;�&�^�[8� \�Y�\�9d��YX�\��\ܝ9���ey��9leyd�9am�.幧*���yke���x� ��YX�\�9.#z �z)��$��[Y[�]8� \�]�x� U��8� U[\]H9�.x� y�9h���%�/.9a.x� �������Y�B�����`"��YX�\��Y�H:`�y�"y. 9`"�.#yd*�n�&g���^X;�#9.�yc�. 9`"�doyd#y�jy�!�^�[:`n9���fj9b%��[\]X9ke���x� �`n9���fj9e��a`��/9c��.�yc!yd*��)�&g�[\]H9d#x� yk�9�m9��9l#H[\]H:-��o�{�#9�%�PSS9�(9l!;�&���9e��a`��/9`/9d*��H�KK_KK_�VSQS��S����X9�)�&g�d#y�,y�(yk���^[Y[����[��X9��9l#H[\]\˜���9�9k�9�m:-��o�y�(yk����[YN�VSQS��S����X9�#�讹�9�)�&g�d#y�,y�(9l!��[YN�VSQS��S����X9b�9am�.�cmH[\]H:`n9���
+��Y�H9��y�"z(c9�n9����U9� �ab9l!��[YX9/g9ஹaj9l`9e+�. 9�9�)�&g�d#z)����8� �c깧"yg*9����"y�)�&g�d#yc.zacy�`��#9�cy� �f%�*i�k�9�m9��9l#H[\]H:-��o�x� ��eyl#z-��o�x� z`�9b!�-��o�x� y.�yc�` �`.9a�[\]\˜���9�:-��o�z`�y�+�gg���y�8� ����`9�"z`n9���fj9�(9l!:cm{�"9c!y���[YX;�"z`�y� �o�yb-�b,�Y�H�۝^9.+x� ��Y�\��K�]P��[[��9� �h��b�9��9i&��Y�H9��y�"y`/8� �`n9���fj9�(9l!:"!��Y�H9�n9��b%�.b�e��i����9a���a�yo�zcm{�#9ba�h,zc+�� �����Y�H9��\]Z\�Y8� X�[��[�:"!�ۑ�Z[\�X:)��ba�)��ԙ[XX�[]WJ�Y�\�[��K��ܙ[XX�[]KY^X�][ۋX�۝���Y
+x� ������[\]B��c깧"y��9��yc!yd*�[\]K�X[[9�9��c!9�9�+�c��do9c��[\]x� �U9/o��*]][\]K݌ˍ�� ����`"�[\]H:`�zg :)�zgg��n�.%9�"yn���X�[ۜ�X\;�#9.�yc�\�ܚ\[۸� ������`"�X�[ۈ9/�zhg�g��/o��*9.#yd#9idy�!8� �	��[\]\��^[Y[�ܙ\]Y\��[X:`&zhg��[KX�۝[�^�\��[ۈ9� �l!�^X�U�N9��9�b9ai�k�y/g9ஈ��[��9f�`���#9.#y� �n������9�b8� �������TK���X�[ۈ9�o9n �c���'�g��b)yc%��\�][ۈ�\�[8� ���9l!�\Y�[YH9�/9o#�c%�ஹ.��hg�c��+�9ai�k�x� �\��Yۈ9l!�`/9�o9n �!��VP˕�T���&ћ��9g*9m���X�[ۈ���H9g��(c8� ���k�9�m9�!9/cx� y��9/��� ]\Y�\�[�]�Y[��H[�[8� R�TK�����[�\�H:"!�ZYܘ][ۈ�ZY[��{�#:*��c��e�V�X�[ۈ:"!�g��b)yc%�`/J�Y�\�[��K���X�[ۜ˛Y
+x� ��^�\��[ۜ�[��Z[Z[��J�Y�\�[��K���^�\��[ۜ˛Y
+H9k���yaly�*^�\��[ۈ[��XY�{�&���YJ�Y�\�[��K���^X�][ۋ[[�\���Y�Y
+H9k���HQ[�]X[^�][ۈ���x� ������������9�+�c��a�y�*9�[\]H��X��#9/o��*]Y���݌ˍ�;�#9.)��,H��˞X[[9k���x� �o�yhj��!9/cyஈ��[XU�\��[ۘ8� ]�\��[ۙY�[�ۚX�[Y;�"9/��i����[[ۋ�^[Y[���X;�"x� X�[YX8� X\�ܚ\[ۘ9c�gg��n��"yn��X�[ۜ�X\8� �[\]H9����X�[ۈ9.�H\�N���[[ۋ�^[Y[���X9do9c��k��� �����(H[����][ۈ9n������9�VPːP�SӔ����{�&�f�`��o�9�h�o�H�[\����x� �QUK����9c�g*[����][ۈ9�'�e��kf9g*8� ��X�[ۜ�J�Y�\�[��K���X�[ۜ˛Y
+H9k���H����\�[:"!�\��Yۈ�Z]�[ܻ�&���۝^J�Y�\�[��K��ܝ[�[YKX�۝^�Y
+H9k���HY�][Yx� ������]]ܚ[��Y�X�X�B����9���ܚ؛���9o�9�(��'�ۘ\��;�#9���)��.)���9.�9m��l;�&���:/+��YX�\�� U[\]x� Q���9�%��\��\��H9o�9g��(c��]���[Y]HK\X��Y�X8� ��*�X�Y�J�Y�\�[��K���^X�][ۋ[[�\��X�Y˛Y
+H:f�:f蹪����{�#9a�y.�Hԝ[�J�Y�\�[��K���^X�][ۋ[[�\�ܝ[��Y
+H9o��\��\�H9n�����\�H^X�][۸� �o��n��n�����+9. 9`"�X��Y�H:*��/o��*�]ZX���\�J]ZX��\�\����Y
+x� ������\�]H�ۙ\��\���ܚ؛�����YX�\��ۘ\��9k���H\��\�H]{�&�\��\�H:"!��Y�H9��\�[�\��[�]:`,�aiHVP˒S�U8� ���۝^J�Y�\�[��K��ܝ[�[YKX�۝^�Y
+H9k���H���H:"!�Y�][Y{�&ԝ[�9� �������`"�`n9.+y�\��\�H:/byஈ�\�H^X�][۸� �[��\�ۛY[��[X�[ۈ9�,H��ۙ�Y�\�][ۗJ�Y�\�[��K����ۙ�Y�\�][ۋ�Y
+H9k���x� ������\�]H�Y�\��H:"!�[�]X\[��c���*]]\�]K݌K�\�ܚ\܈9a,�kf9c��a�y�*�X�ܙ��&�c�g*�\�x� T�Y�x� QX�Y�[�]�9�%��Y�ܚ��Y[�]�X\[��9.+yo%y�*8� �k�9�m�YX9� �/�y�fH�X�ܙ9�9c���'�X\�\����[\�9g��b){�&��Y�]X9c��+�9c�m���9`/;�#9.g��+���9�n9ke�\�[�^8� �ai�mc9c���i��"9/��i���ԑP�X���[�˚YH�;�"y� ��(��'����ke��#9f�9�i9�`:`n�X�ܙ9�9�!9/cyo�zh"9�+���[\�� �X\[��9.+y�	ˋ��X9c� �z+�9c�*l�X\[��:)����9bcym�b'yi��c%���۝^���8� �a`z*,y����9/�HX\[��:f����z #9�l;�#9.)�� �g*^X�][ۈ:e��i��bczje�+b{�"�Y9ba�g*��Y[\�9eg�b�ybczje�+b{�"{�&���H�[��\�K��Y�HX\[��9c��+�9c�VP˒Q8� XVP˔�S��Q8� XVP˔�T�Q�U8� XVP˔�S���T�Q�U8� XVP˓�UU�T�;�#9.�yc�QUK���T��X9�%�QUK�T��U8� ��HX�Y�[�]�9c��+�9c���9d#9�^X�][ۈ���:"!�Y]Y]{�#9c�b�QUK�STUX8� ��H�Y�ܚ��Y[�]�9c��+�9c�VP˔�S��Q8� XVP˔�T�Q�U8� XVP˔�S���T�Q�U8� ym�b'yi��c%��VP˓�QY[�]H�Y[��#9.�yc�QUK���T��X8� XQUK�T��U9�%�QUK�STUX8� �VP˒Q:"!�VP˓�UU�T�9c깧 �g*[�]:)����9o�9b'yi��c%�� �\��]�[\�]H�ܚ��Y9.#y��9/��VP˓�Q�T�T��Q;�&�"�HX\[��:)�yd#9�`��+���9ajy�+��(yg���#:*��/o��*�[ۘ[]	�VP˓�Q�T�T��Q�X8� ����`9�"H[�H:`�y���eyo%y�*VP˒S�U;�"9�h�g*9n�����9`/;�"x� XVP˕�T��8� XVPːP�SӔ�8� PX�[ۈ�]]9c�[����][ۋ\���Y[\�Y]Y]x� ��HX\[��ܘ[[X\�9� �*ey/,]\�[8� \�[X�Y\�X�ܙˋ��X�Y�\�[��H9c�	ˋ��X�۝^�Y�\�[��{�&�.#y� �*ey/,�Z[Z[��[8� ��ˋ��X8� X	�ˋ��X9d�	^ˋ��X:`�y.#y�+�[�][X\[��^�\��[۸� ������X[[���[XU�\��[ێ�]]\�]K݌K��Y�X���[��X�ܙ΂�H�Y��KLL�Y\����B�H�Y��KL��Y\���[�\�B��[X�[ێ����]Y�N��\]Y[�X[^]\�[ێ��X�X�_B�������[�\�]Y�X�ܙ�9ஈ�\�X[9.)�c���"H[�^9kf9c��&�U9c��jyc%�(��`n9.+y��X�ܙ8� �[��\�]�H[�Y�\��[��H9."�fd9ஈK9�a��#9.%	^��\_X9�+�e+�. 9�+���9��[�\�]Y\�X�ܙ�X��]][ۻ�&������X[[���[XU�\��[ێ�]]\�]K݌K��Y��[�\�]YX���[��X�ܙ΂��[�\�]N���\N�ٜ��N�LΈNNNNNK�ܛX]��L��B��X�ܙ��Y��KI^��\_H�[[�[���B��[X�[ێ����]Y�N���[��ؚ[�^]\�[ێ���B�������X��Y�HX[�Y�\�J�Y�\�[��K���X��Y�K[X[�Y�\��Y
+H9k��db�X��Y�H\�]H�Y�\��{�#9.�yc�c��`n9�[��\�ۛY[��\X�[Y[�\��� ��Y��[�\�[�9c��g*:h �li9k��db��+9g,\�]X[\ܝ��&�d#Q9� �g*:*l��(H�Y9k�9�m9c�.��[��\�ۛY[�\�ܚ\ܸ� �e��. ^Y\�9ai��:a�z)!�Q9� �h,zc+�� �. :"+�[��X�Y�9c�n��`l�eg��*9k�f��o%y�*9�Q;�&��[Y]HK\X��Y�X9� ������yaj:`�X[�Y�\�\�ܚ\܈^Y\��� �[\]x� Q���:"!���9k���yc� �z`#�`c�VP˒S�U9c�o��m�)����:,����{�#9.#yc����9��yk��ˋ��X9�%�	^ˋ��X8� �*l�)���[��\�ۛY[�:"!�\�]WJ�Y�\�[��K����ۙ�Y�\�][ۋ�Y
+x� V��YJ�Y�\�[��K���^X�][ۋ[[�\���Y�Y
+H9c���z+m� !y��\�]H\�YۗJ�\�[KY\�Yۋ�\�]K���Y
+x� ������:`,�f���ܚ؛���:"!�ۘ\��9�,9��������9k�yaj9g,9�h�)��c%�S9���ke�c!yd*��9�%�S9�ny���ke��)�	�8� X8� X�9�9ke��)�.,�`/9� �/o��*�U{�&����ke�WO�9� �(����b!��$9��:a,�UH9��{�#9.)�g*:)����9�`�쯹论a�yn�� ��9bcy�9�n��/9�%�(�z(j9�)�� �/o��*	��̎��	��N�9��aiyajy`"��UH9��y.b�e���#9o�� #9/�y�fy`/: #9.#z)�9�o�]:(c9l/��n��oz+i�db�� �*��k�y��y.)���9.�:*l�S;�&�.#z)�y�b�m�y/빥.yk��� �������9ak9o#�� y��y�'�� y�o�b!���9d�9��ykn:*&9�n9��ye��a`��/�����9� ����eyg*:acy�k���\�HQ8� y�&y�/x� P�\�H9�n9��� T�Y�H:`n9���fj9d��Y�H9�n9��b%�.+y/o��*9ak9o#�e��a`��/8� �ak9o#�k���z"!���ykf�hk��.��d9��9c�� �y.#y. :!�;�#9f�9�i9.#z �y�*9��9�'��$9c��/�y�:*���Hۘ\��8� �*��g*^�[9.+za�y��:*"9��o�9l!��d9��9�:,�9ஹke�gh�`/;�#9�%� !yg*9l":e�9�U9�izjg�.+z`,�(c:*"9��� ���"!�acy�k�\��\�H9b%���9.�9.%9/cy��^�[�XY\�����9.�y."��9d"9.)�c`9g��.g�� �(�����ex� �k�9aj9/cy��:acy�k�(j:h+yc`9g��ai��9d"9.)�ley�.�e��a`��/9ba�a`z*,x� ���l#y��:gg�ak9o#�e��a`��/;�#U9l#�aizhk��.�����+8� �am�쯹论(j9�.�`myo���ܚ؛���9e��a`��/9�/9o#�d�:`b�(c9�`�c`9g��*+y�k��&���^�[9`/:"!��/9o#��۝^9`/�KK_KK_�L�L�9�/9o#�c%�ஈ^^^K[[KY��LKLX��L�X9�/9o#�c%�ஈ�	XL��IX�L��9�/9o#�c%�ஈ�J�K���J�X�L��9.�y����+9oh�o#�kf9a,���/9o#�c%�L�����k�`&�b%�.�y�-��+�ke��)�.,�� �
+X[[
+X9b%�c�� �yl!�hk��.�����+:/by���ஹam�.�PSS:hg�g��� �l#y��9��y�'�� y�o�b!���8� y��ykn:*"9�n8� z,�:&g��%�.���:`&zhg�����+;�#9��z*l�/o��*9o%z&g����PSS9�&za��c!z-m�/���#9.�y/��/�y� yஹke��)�.,�� �������9i&�(c:(j:h+B��XY\����Έ�:(j9�.��+x�$̈:(c9�+�(j:h+{�#9�n9��o���+�:(c:e��i��� �U9� ����������`"��jy�!�b%�o��."�b,9."��#9/o��*9� 9o�9. 9`"�gg��n�.%9m�c��fi:i��l/��n��oy�:(j:h+ye��a`��/;�&���^��+H:(c;�&�g��`9�l9�k�9�i�(c��+�:(c;�&��\�HQ�\�H�[YH[\]H\�[Y]\�¹�"y�b9`/;�&��\�HQ�\�H�[YK[\]K\�[Y]\���U9.#y� ���9��y�-�kd9�&y�/x� �(j:h+yc.zacy� ����fi9�n��/8� z(�z(j9�)�� y���(c9�)�� S���9.�yc�am�.�[�X��H9�n��oyke��)��&�c.zacyam�i&:`�9b!�.�yc`9b!�i)�l#�k��� �/��i���#9�b9/��9��:&g�8� X9�b9/�����:&g�8� X9�b9/����:&g�9� �(��)��ஹd#9. 9b%�� ����`"��"y�b:(j:h+yg*9�n9. 9c%�o�9o�zh"9e+�. ;�#9f�9�i9`�yf�9�n��oym��l: #9.#yd#9�9ajy`"��jy�!�(j:h+y� �(��*�yஹ�+�a�yo�z(j:h+zc+�*�8� �\��\�H9b�:/"yd�9�d9���ܚ؛���9k��f�/o��*9��9d#9�9��yolz`��/+��&��d9��9b%�i����9c���+9.#ykf9g*;�#9ba�� �k��aiy� 9�`�(j:h+z(c8� �����X�[ۜ�:"!�\Y�[Y\��+:h yk���HU9��(cX�[ۈ9idy�!8� �[\]H9/o��*]][\]K݌ˍ�� ����`"�k�9�$9�X�[ۈ:`�y� �g*�]]��\�[9�o9n �`��/+�g��b)yc%�`/;�&�X�[ۈ9.#y/o��*9aly�*9��\�[��ܛX]�]�ݙ\�ܚ]H9�jy.��� ��\��\��H:acy�k�*��o��ԙ\��\��\�J�Y�\�[��K��ܙ\��\��\��ݙ\��Y]˛Y
+ze��i����ze�x� ������X�[ۈ:hg�g��:hg�g��9o�yhj��!9/cH9�d9��:"!�(c9ஈ�KK_KK_KK_����[9do9c��m�acy�k���8� X�Z[Z[�9�%�[\��#9/�y�fyc���'�g��b)yc%��d9��;�&��]Y\�K���[\��\]H9.g��+��k�`&����[8� ��\��\�\��\�:*ey/,9n ������y.��.)�*&:c!T��9�%��RS8� �^X�Y8� XX�X[9�+�c��`n:*.����`/8� ����Y\��Y�H9�%��[YH9l!�g��b)yc%�`/9�/9o#�c%�o�9k��aiH�\�H9��z*�8� ��!9/cyஈY\��Y�x� ]�[Yx� Y�ܛX]8� ��\��Yۈ�[Yx� Y^�\��[ۈ9l!�^�\��[ۈ9�9g��b)yc%��d9��9�o9n �!��VP˕�T��� �����\�H9g*9m���X�[ۈ���H9g��(c9m�*.�a������#:/�9f繦`�`�9c���[\����x� ���X�[ۜ�9�"HPSS:h!�n��g��(c8� �/�zhg�g��a`z*,y�`��#9.g�c��k���HY8� Y\�ܚ\[۸� [ۑ�Z[\�x� \�[��[�� �X�[ۈQ9g*���H9ai�o�zh"9e+�. 8� �hg�g��.#y�+���9�9�!9/cy� �g*�[Y][ۈ9i,y�e�� �aly�*X�[ۈ�\�[8� S���[H:"!����Y[�9.#ylk9��9��(c9idy�!8� ���e�9��9.�yl#�k��X9g*�[Y][ۈ9�%�^X�][ۈ9bcy`g9�*U9��y�"y�X�[ۈ9ke���K��^YY[��Y\��#9.�yc�k��"!��[��[���[�X9�9m�b){�#:*��)����ۙ�Y�\�][ۗJ�Y�\�[��K����ۙ�Y�\�][ۋ�Y�/o��*^yo�y�iy�%�`g9�*X]zacy�k�h!Jx� ������9c`9b!�`��/+�`/:"!�(j9�.���yo#�U9l!��\�][ۈ9�:`��/+��d9��:"!�.��hg�c��+�9�%��\�H�\�\�[�][ۈ9b!�e���&�����[�\�H9�!9/cK�`/9�*:`%�KK_KK_KK_���[X[�����]��]�ܛX]9l!�i%�`���]:)����9ஹg��b)yc%��d9��8� ���TH�\�ۜ�H�\�ۜ�Q�ܛX]9l!�i%�`��\�ۜ�H�]\�:)����9ஹg��b)yc%��d9��8� ���[KX�۝[�^�\��[ۈ��[��:+�9c�k�yaj9�U�NX��Y�H�[{�#9.)�g*^�\��[ۈ]�[X][ۈ9o�9/�y�fyam�ke�a`�� ��:`#�`c��TH9`��` y��z,hHX\�\��\]Y\��ܛX]9g*�]��[���[�\�H9n��b%�c%�*l�`/8� ����9�%��\��\��H]�Y[��H�ܛX]�]�Y[��K��]]��ܛX]9�(��'�.��hg�c��+�:(j9�.�� �����\�[9�+:.��m칦+�g��b)yc%�`/8� ���8� PX�[۸� U[\]x� Q���9d�^�\��[ۈ�\�[�9g*U9.+y`��`g��`�ga�/�y�fyg��b)x� ����]Y\�x� \��[\�� ]\]H�\�][ۈ9g*9�k�`&�\N���X�[ۈ9ai�/o��*��[\���]Y\�J���X8� X��[\�����[\����X8� X��[\���\]J���X8� ���[9��yc��. 9`"���[���[;�#9.�yc�\�[\�9�%�\�[Y]\��9am�.+y. 9�+��&��[I��X��Y�K\�[]]�KY�[K��[X9c����9/��X��Y�H�S9ai�k�x� ��m�c�\N��X�[ۈ9c��,H\��]�Y��[XH9/�y�fx� �������[KX�۝[�^�\��[ۈ9f�`����[���m�c��[�\�X�[ۈ9�9��(c9���.����yo#��+�\Y�[KX�۝[��[YH^�\��[ۈ	��]X8� �k��. 9k��f�`��. 9`"���[��;�#9.#y� ���9�����[Y[��ܛX]8� \\��H9bk���9d#x� yleze���؈9�%�n����/.9a�;�&������X[[��\]Y\�^��\N�\��Yۂ��[YN��\]Y\�^�^�\��[ێ����[\]\��^[Y[��^[�Yܙ\]Y\��[H�������	ˋ��X9.�y�-��+��۝^�Y�\�[��{�#�ˋ��X9.�y�-��+�^�\��[ۋ��[;�#	�ˋ��X9�+��]X�� [ۙKY�[H��]ܻ�&݌H9����"H�؈9�%�[�[ZX���]ܸ� ���]܈9��9l#H�[�ۚX�[UX��Y�H���8� ���9�%����\�ܚ\܋\�[]]�H]9c깧"yg*�[�ۚX�[\��]9.�yg*:*l����9ai��cya`z*,x� �X���]H]8� [Z\��[���[x� Y\�X�ܞx� \�[[[��\��\x� zgg�U�N�]\�� ybcyo�9�n��oyd��؈�[�^:`�y� �g*�[Y][ۈ9i,y�e�� ����k�`&�U�N�[H9� �c���(�f�`��� �i�����[H9c!yd*�	ˋ��X9�%��ˋ��X;�#U9c���\[H9. 9�(z`&y.����{�#9.)�g*9����(H^X�][ۈ:*ey/,;�&���\[Y[�[[]]X�{�#[�[ZX��[YH9.#y� �(���m��$9�+9.�9.�H[\]H:a�y��\��x� ��[�9d�X�Y�9� �a�y�*[��#9��9b,�[H�[��\��[�9�.z+��� ��Y9� �g*��Y[[��9bcH�[Y][ۈ9.)��\\�H�[X�Y�[HY[�]x� X�۝[�9d���\[Y\[�[��H���\�{�#9f�9�iX�]�H]\�][ۈ9�"�b,9�jyk��ۘ\��8� ���"�z)�y�,yo�9�X�[ۈ:a�y�*��[���#9/o��*\��Yۻ�&������X[[��\]Y\�^��\N�\��Yۂ��[YN��\]Y\�^�^�\��[ێ����[\]\��^[Y[��^[�Yܙ\]Y\��[H����[��\]Y\���\N�����[�����^[Y[����
+��OI�VP˕�T�˜�\]Y\�^J_H��������TH:*��l!���[��9��9��y`���i���K�^[�Y8� ��\��\��H9/o��*9am�acy�k���\��]����Q9��9�9c������&��۝[�U\H:"!�TH�[��ܝY]Y]H9.�y�,H�\��\��H9�y�!�� �	�ˋ��X9c���*9�����[\��[\��[Y[�8� P\��Yۈ^�\��[۸� S���[YH9d�9am�.�\Y�[YH9/cy�k�� ����\]Y\��ܛX]9`�y/��X\9�%�\�9�by��z,hy�d9���c%�`/9/o��*8� ��i:hg���H9o�zh"9�#�讹�!�k���/9o#��#9/��i���\]Y\��ܛX]Z��۸� ���[��:"!��\]Y\��ܛX]9d#9�`�a��﹧ �i,y�e��#9讹/�H�[KX�۝[��\�[9.#y� �(��gg:n�\��K��\�X[^�x� �8� STx� T���\��\��H�[9� �l!��[KX�۝[��۝[�9/g9ஈ��[���[YH9��:,���#9.#y� �)������[�[K\]\��[Y[�8� ��������8� Q�:"!����9�d9������[X[�X�X��Y��9g*��\�ܚ\܈9k��db���]�ܛX];�&������X[[���΂��]ܙ\�����[X[��ˋ��][ܙ\���B���]�ܛX]���ۂ��������]�ܛX]9�+�[�ܙ\��\��\��&���]9c�)����9. 9�(y�$9ஈ�]]��\�[;�#9.)�gg�/.9a�n��b%�c%�*+yk��� ��[X�X��Y��9c����TK����\�][ۈ9/�y�fH�]]�H[\[Y[�][ۈ9f�`���9g��b)x� ����X�[ۈ9/o��*�9c�]Y\�H9�%�\]H9am�.+y. 9`"�c`9hb�� ��S8� X�[�\�[Y]\��� ]�[��X�[ۈ�۝���9d��]�Y[��H9/�H�X�[ۈ:"!��[\�9idy�!:&ey�!�� ������X�[ۈ9/o��*�[�ۚX�[���Q9�\�x� ����9g*9��9�VPːP�SӔ����H9g��(c;�#:/�9f繦`�l!��d9���]�Y[��H9�o9n ��i��[\�� �QUK����9c�g*:*l��(H[����][ۈ9g��(c9�'�e��kf9g*8� ��������]�Y[��H��X�܂����X�[ۈ9c��k���y�+9. 9�&�]�Y[��X��X�ܻ�#9�*9/��g*X�[ۈ\��\�[ۈ9bcy�-�f�*.����,����x� �g��(c:h!�n���+��&���^��[X\�H���[�O�\Y�[X\�H�]]��\�[�O�]�Y[��H��X�܈�[
+�B�O�X�[ۈ\��\�[ۂ�O�T����RS�T��Ԃ�����X�܈9�+�*.�����\�][ۻ�#9.#y�+����.��X�[۸� ����`"���X�܈9�"z!�m�y�9g��b)yc%��\�[;�#9.#y� �c�.���%�/빥.H�[X\�H�]]��\�[;�&���X[[��[^[Y[���\N�����[��B���\K�^[Y[���\]Y\�
+�^[�YI�VP˕�T�˜�\]Y\�^K��\�ۜ�Q�ܛX]I�[	
+_B�]�Y[��N��\�΂��[��B������\�^X�]J���[X[�I�ܙ\��VP˒S�U��YH��\����^[Y[����Z[LL	
+_B�[Y[�]\ΈL�ۑ�Z[\�N��۝[�YB�\��\���B�	��]]��\�[��\T�X�Z]�YHOH�YB���c!yd*�\��\�[ۈ9g*9ai��#X�[ۈX�]�H9�`�c��/o��*;�&���^���]]��\�[B���]]�]�Y[��K���X�ܜˏ��X�ܒY���\�[B���]]�]�Y[��K���X�ܜˏ��X�ܒY���]\�B���X�[ۈ9�o9n �o�;�#9l#y��y`/9/cy��VPːP�SӔ�;�&���^��VPːP�SӔ˘�[^[Y[���]]��\�[B��VPːP�SӔ˘�[^[Y[���]]�]�Y[��K���X�ܜ˘\�˜�\�[B��VPːP�SӔ˘�[^[Y[���]]�]�Y[��K���X�ܜ˘\�˜�]\�B���X�X��\H9� �l!��[X\�H�\��\��H]�Y[��H:"!���X�܈]�Y[��H9b!�e���&���^��]]��'8� 8� �\�[��[X\�H����X�[�\�[��'8� 8� ]�Y[��B�� �8�'8� 8� �\��\��KZ�[����[X\�H�\�][ۈ]�Y[��B�� �8�%8� 8� ��X�ܜ¸� �8�%8� 8� ��X�ܒY��� �8�'8� 8� �\�[�\Y��X�܈�\�[�� �8�'8� 8� �]\¸� �8�'8� 8� [����][ےY�� �8�%8� 8� \�][ۓ\¸�%8� 8� ][\8�%8� 8� ۗB�8�%8� 8� ]�Y[��K���X�ܜˏ��X�ܒY���\�[��]\�����]�H9�`��#9���`"��[X\�H][\:`�y� �g*:*l�][\\��\�[ۈ9bcyg��(c��X�ܸ� ��[]�[�]]�]�Y[��K���X�ܜˏY�9�+�� 9o�;�#�b�ya��][\;�&��]]�][\�ۗK�]�Y[��K���X�ܜˏY�9/�y�fy���`"�][\;�#9c!y��:/ ���y��Z[\�x� ��o9n �o�9�9�m�c�-��o�y�+�	�VPːP�SӔˏX�[ےY���]]�][\��K�]�Y[��K���X�ܜˏY���\�[X8� ����[9o�yhj�� �[Y[�]\�:"!��[X\�H��[Y[�]9�j9���� ���y�*9�"�o#���9�9. :"+:*.�����(yo#�/o��*ۑ�Z[\�N��۝[�YX;�#:`o�acy�-�f���9i,y�e���z$��c���+9��\�[�\��9�%�\��\�[ۈ�Z[\�{�&���9ba�.���X�܈�Z[\�H9�$9ஈX�[ۈ\��ܸ� ���X�܈9��]\�:"!�XYۛ��X�9.�yc��)�9k���#9.%��X�܈�Z[\�H9.#y� ��.z+���[X\�H��X�[�\�[8� �"�z,����y�+�o�9�\��\�[ۈ:)�y/o��*9�9�h�n.�\�[�\���\��[Y{�#9��y/o��*9�k�`&�������\��YۈX�[ۻ�#: #:gg�]�Y[��H��X�ܸ� �����X�܈�\�[:`myk�9. :"+\Y\�\�[:)��ba�� ��/�g*]�Y[��H9."�.#y.��(j9� �/by�$��[���&�X\8� S\�9d��[KX�۝[���[��9ga�/�y�fyg��b)x� �g*�Y9.+{�#9�#�论)�y�`����X�܈^X�][ۈ:"!�[\�]�Y[��K��]]�\�X[^�][ۈ9�+�ajy.��.���&ܙ\��\��K[�]]9�/9o#�c%�.�y�,H�Y]�Y[��H�X�H9���b-��#9.#y� �gg:n�9c�.���%�b*�fi]]܋\�\]Y\�Y��X�ܸ� ���������&�l!�g��b)yc%�`/:/by�$9.��hg�c��+�9��z*�����9�+��\�[�][ۈX�[ۻ�#9f�9�i9�"z!�m�y��ܛX]9�!9/c{�&������X[[���ܙ\���\N��Y\��Y�N��ܙ\��\�ۜ�H���[YN���VPːP�SӔ˘�[ܙ\���]]��\�[H���ܛX]�X[[��������9�+�. :"+�\�K[��[��{�#9����"H\�\�X]]ܙY�]�\�]{�&���(c�ˍ�9idy�!9���fi]�[;�#ZYܘ][ۈ9�`�*��b*�fi:*l��!9/cx� ��m�c��ˍ݌ˍH[\]{�#ћ��\�ܚ\܈9ஈ��\]X�[]H9.�y��yc��am���[XH9k���y���]�[8� �[�\��[XYۛ��X��]�\�]H9��y� y�j9���� �Y\��Y�H9�%��[YH:!��l$z)�y�"y. :h!x� �Y\��Y�H9.�y���ke��`�`/8� ��[YH9c����yc��.���#�g��b)yc%�`/;�#9c!y��9m���X\�\�8� �k�9�m9�	ˋ��H9d��ˋ��H^�\��[ۈ9/�y�fyc��i��g��b){�&�X\�\�9kd9��:n繧 �`g�/�9�`�`/;�#9.#y� �l!��n9ke�� yn ����� [�[9�%�m���9`/:/by�$9ke�.,�� ��ܛX]9�+���^8� Z��۸� ^X[[8� ^[8� \�[\��#9c깣��b-�k��aiH�\�H9��z*�9�9ke�.,�� ��!�k���ܛX]9�`�o�zh"9��9/���[Yx� ���d#9�`���9/��Y\��Y�H9d��[YH9�`��#��:/.9a�Y\��Y�x� y���(c;�#9a�z/.9a/9o#�c%��[Yx� ��]]��\�[9�+�� 9�`�ke�.,�� ��[KX�۝[���[��9� �c���(�/.9a��&���9.#y� ���9����%�fa9b���[Y[��ܛX];�#9.g�.#y� �+�9c幪�9�b9�%�/o��*�Y[�X\8� �g :)�y�d9���c%���z*�9�`��#9l!�\YX\�\�9�/�b,�[Yx� ������^�\��[ۜ�:"!�+���n���B��X�[ۈ^�\��[ۈ9/o��*9. :"+U^�\��[ۈ[��[�x� �k�9�m	ˋ��H9�%��ˋ��H^�\��[ۈ9/�y�fy�d9��9g��b){�&�^�\��[ۈ9�/�g*9. :"+9ke�.,�ai��cy� ��$9ஈ��[��� �*��c��e�V�^�\��[ۜ�[��Z[Z[��J�Y�\�[��K���^�\��[ۜ˛Y
+x� ���\��Yۈ9� �l!�\Y�[YH9�o9n �!��VP˕�T�ˏ�[YO�9. 9�(x� ��[YH9o�zh"9�)�d"�KV�K^��V�KV�K^�NW�J��#9.%9g*�\�H9.+ye+�. 8� �. 9`"��Y�H9�!��/��9`/9c��/��o�9��Y�H9/o��*8� �X�[ۈ9g��(c9�'�e��c��+�9c��]]���#9�o9n �o�9c��+�9c�VPːP�SӔˏY���]]��� ����9�"y����`�X�[ۈ�[Y\�X�{�&�"�H�[\�9g*���:/�9f�o�9.�zg :)�z*l�`/;�#:*���o9n �b,VP˕�T��� �������\��\��H�]]]�Y[��B���\��\��H]�Y[��H:"!�`��/+��\�[9b!�f�� �[\�9c��*+yk��c��`n9�]�Y[��K��]]�\�[�][ۈ�X�{�&������X[[�]�Y[��N���]]���ܛX]���ۂ�X^�\�ΈL�������i:*+yk��� �g*�\�][ۈY]Y]H9��yb�9aiy�"zem�n��."�fd9�9.��hg�c��+�ۘ\��;�#9.#y� ��.z+���]]��\�[9�%��\�ۜ�H\��[��� ��Y9�]�Y[��K��\��\��\˛�]]9c��*+H[�\�];�":h$:*+{�"y�%��ۙx� ��ۙH9� ��iz`c��\��\��K[�]]9�/9o#�c%�"!���9�b9�jyc%�� �Y]�X��[ۛH]\�][ۈ9.#yn����^X�][ۈ9��c!8� �]\�][ۈ]�Y[��H:(��/�y�fyo�;�#9�)�d"9��y.����\��\��H�]]9�cy� �n��`l��/9o#�c%�!��*l��ܚ��X�x� ������X�[ۈ�]]:"!�]�Y[��H]��]9�#��z"!�c���*9�`��g��KK_KK_��]]��\�[X�[ۈX�]�{�"9c!y��\��\�[ۻ�"y�'�e����[X\�H\Y�\�[8� ���]]�]�Y[��K���X�ܜˏY���\�[X�]�H��]�Y[��H��X�܈9�\Y�\�[8� ���]]�]�Y[��K���X�ܜˏY���]\���X�܈9�T��;�#�T��Ԙ�]\�� ���]]�]�Y[��K���X�ܜˏY��\��ܘ��X�܈9i,y�e��`����[�Y�Z[\�H�[[X\�{�&��"yc���*:*"��k��`�c!yd*�gg��n�Y\��Y�X8� ���]]�]�Y[��K���X�ܜˏY��]�Y[��X9/�y�fH��[�YܙYX�Y9�[�\�Z[����ܙ\��\��H]�Y[��{�#9c!y��^X�]܈9��9/����\��\��HY[�]H:"!��]]�H�Z[\�H�Y[�� ��VPːP�SӔˏX�[ےY���]]��\�[X�[ۈ9k�9�$9o�9�o9n ���[X\�H\Y�\�[8� ��VPːP�SӔˏX�[ےY���]]�]�Y[��K���X�ܜˏY���\�[9�o9n �o�9� 9o�;�#�b�ya����X�܈�\�[8� ��VPːP�SӔˏX�[ےY���]]�]�Y[��K���X�ܜˏY���]\�9�o9n �o�9� 9o�;�#�b�ya����X�܈�]\�� ��VPːP�SӔˏX�[ےY���]]�]�Y[��K���X�ܜˏY��\��܋�]�Y[��X9�o9n �o�9���X�܈�Z[\�H�[[X\�H:"!�/�y�fy��\�][ۈ]�Y[��x� ��VPːP�SӔˏX�[ےY���]]�][\�ۗK�]�Y[��K���X�ܜˏY���\�[��]\�9�!�k���]�H][\9���X�܈�\�[��]\��&�o�9�9�$9b��o�9.�y/�y�fz/ ���H][\8� ��VPːP�SӔˏX�[ےY���]]�][\�ۗK�]�Y[��K���X�ܜˏY��\��܋�]�Y[��X:*l���X�܈][\9��Z[\�H�[[X\�H:"!�[�\�Z[��]�Y[��x� �����[��� S�[X�\�� P���X[�� [�[8� SX\8� S\�9�by`/:-�:-��X�[ۋ�[\]Kћ����[�\�H9�`�`�y/�y�fyc��g��b)x� ������9aly�*�]�H:"!����X[��ۙ][ۂ����X�[ۻ�"9c!y��9c��a�z*i���]Y\�K���[\��[;�"yaly�*�]�X9idy�!8� �X^][\�;�"��$�L;�"x� X[�\��[\�;�"8�$�͌;�"yc�gg��n��]�Sۘ;�"T��T�SӋ�SQS�U;�"y.�yஹo�yhj��&��[�9�+�c��`n9�:gg��n����X[�^�\��[ۈ��[��� �]]][���\]H9c����[�ٙ\�9�9�蹧"H�]�H:fd9b-���y� y.#z+��� ������X[[��]�N��X^][\Έ[�\��[\ΈL��]�Sێ��SQS�UB��[�������]]�]�Y[��K�\K�[����][ۜ��K��X\�ې��O�HOH���H����������`"�][\9ab9g��(c�\�][۸� y�o9n ��m�bcH�\�[�]�Y[��K�XYۛ��X�� z*ey/,9c���*\��\�[ۻ�#9�-�o�9b!�hg��]�H�]Y�ܞx� �c깧"H�]�Sۘ9�)�d"9.%9l&��"H][\9c��g��(c9�`��#9�cz*ey/,�[�8� ��*�acy�k��`���y� y. :"+�]�H:(c9஻�&��YH9�cy�byo�H[�\��[9.)�a�z*i��#�[�H9/�y�fy�m�bcHSQS�UѐRS9.%9.#za�z*i�� �����"y�)�d"�]Y�ܞx� y�$9b���%�`e9b,X^][\�9�`�ga�.#z*ey/,�]x� ����[�9c��+�9c��]]��]\�8� X�]]��\�[8� X�]]�]�Y[��X8� X�]]�XYۛ��X�8� yo��H:e��i����]]�][\;�#9.�yc��m�bcH���H9a`z*,y�VP��QUH]8� ��[]�[�]]9g*9����(H][\:e��i���`��!zfi;�#9.#y� �+�9b,9bcy�(y��\�[�]�Y[��x� ��m�c�� :c!9/�y�fy���]]�][\�ۗX;�&��]�QX�\�[ۘ:*&:c!�]Y�ܞx� X�[�Y]x� ]�[�]�[X]Y8� ]�[��\�[;�"9�"z*ey/,9�`��"x� X[��Y:"!��X\�ۻ�"9/��i���S�ѐS�x� SPV�UST��"x� ����ۙ][ۈ9/o��*9�h�n.	ˋ��X��ˋ��X9g��b)z)��ba��#9o�zh"9f�`�����X[��&�ke�.,�	٘[�I�9�%��n9ke�.#y� �/by�$���X[�� ��[����٘[�_H�9c��`g9�h��]�x� ���X�Z\��[��]:"!�^�\��[ۈ\��܈9/o��*9. :"+XYۛ��X��#9k��/cz!���]�K��[�9.)�`g9�h�a�z*i�� �\�H]\�Z[�\�X��Z[Z[�9c��/o��*;�&������TK����8� Y�[Kٚ[KX�۝[�8� \�\]Y[��x� \�[��H:"!��\��[�][YH�\�][ۈ9ga��y�h�� �c��讹k����[�^�\H\��܈9g*�[Y][ۈ9�`����e{�&ܝ[�[YH�\�[9�9g��b)z"!�Z\��[��]9g*�]H:*ey/,9�`������x� ���SQS�U9�+��[�ۚX�[X�[ۈ�]��Y{�&��Z]Kܙ\ܝY�ܙY�]H9��\�][ۈ�Z[\�H9.�yஈT��Ը� �l#HTH�\]Y\�8� R��9�bzgg�a���by��y/g;�#9/g: !yo�zh"9�n�k���+�d)�c��a�y��x� ��*�b��[�9�SQS�U�]�H9c�� �za�z)!��\�[�\���[��X�[ۻ�&�U9.#y� �n�:n�9��yb-�TH�]�x� �*��c��e�H�TR[\�9��9/��J�Y�\�[��K��ܙ\��\��\��\Z[\��Y
+x� ������[�[YH:"!��۝^[�[���[�� QX�Y�� S�Y9aly�*�[�ۚX�[VP��QUH^�\��[ۈ[�[8� �VP�:`#�`c���[Y]�ܚ�Y�X�X�H9d�9�#�讹�[�]ݘ\�XX�K�X�[ۈX�X�][ۈ9��9��8� �QUH9�+��\�]Y8� Z[[]]X�x� \�Xܙ]\�Y�H9�9���/�:,��*"�� ����[�[ۙHX�Y������\�[YH9� ��(9l!9b,:`&y.���[�ۚX�[���;�&�[�]�9k��aiHVP˒S�U;�#[\]Kћ��9��\��9� �g*\��]:e��i��bcH�YYVP˕�T��8� ��K�H��[Xx� ]\Y]\�[:)��ba�c�c��/�z+m����[Y]�ܚ�����:*��c��  ���[�[ۙHX�Y�J�Y�\�[��K���^X�][ۋ[[�\��X�Y˛Y
+x� ������Y[�]H����:-��o�H9�#��z"!�g��b)H9c���*9�`��g��KK_KK_KK_�VP˒Q9��bcH�\�x� QX�Y�^X�][ۈ9�%��Y]\�][ۈQ;�&���[��� �^X�][ۈ[�]X[^�][ۈ9o�;�&��Y9g*�\�[�\��X�[ۈ9bcy�(��'�� ��VP˔�S��Q9i%�liU�[�Q;�&���[��� �9."y�+��(yo#�ga�c���*;�#9d#9. �[�9��\�\��]\�][ۜ�9aly�*8� ��VP˔�T�Q�U9��bcH^X�][ۈ:e��i���`�e���&�T��N�H��[��� �9."y�+��(yo#�ga�c���*8� ��VP˔�S���T�Q�U9i%�li�[�:e��i���`�e���&�T��N�H��[��� �9."y�+��(yo#�ga�c���*8� ��VP˓�UU�T�^X�][ۈ�ܚ��X�H9�eyl#z-��o�x� �9b'yi��c%�o�9c���*;�&��Y9.+yc�� �yab9�"H[��Y];�#9l&��*�k�f��n����� ��VP˒S�U�\�K��Y�x� QX�Y��YX�\�9�%��Y�ܚ��Y[�]X\8� �9."y�+��(yo#�ga�c���*;�&��Y�H[�]9����`�ݙ\�^H�\�H[�]8� ��VP˕�T��\��Yۈ9�o9n ��9g��b)yc%�`/8� �9."y�+��(yo#�ga�c���*;�&��!��/�bcyஹ�n�� ��VPːP�SӔ�X�]�H[\]Kћ�����H9m�k�9�$9�X�[ۜ�� �9�o9n �X�[ۈ9o�9c���*;�&ћ��9�"ym������x� ��VP˓�Q�S�S���Y9�%�\��]�[�]x� �9`�H�Y;�&�Q9�(��'�bcyc���*8� ��VP˓�Q��Ԓ��Q�Q:acy�k���ܚ��YQ8� �9`�H�Y;�&�Q9�(��'�bcyc���*8� ��VP˓�Q�T�T��Q9�jyk���\�X[\�\�Q8� �9`�H���Y�Y;�&�\��]�[\�]H9�.�n+x� ��VP˓�Q�UT�USӈ9�n9`/]\�][ۈ9n��&g�� �9`�H�Y;�&�Q9�(��'�bcyc���*8� ��VP˓�Q�T�H�ST�T8� U�T�UT8� T�PQH9�%��ST��Ӹ� �9`�H�Y;�&�Q9�(��'�bcyc���*8� ���VP˓�Q9c�ak:e���jyk��Y[�]x� ���Y[\���[�\�� \]Y]YH�]H:"!�[Z[��XYۛ��X��9�fyg*]�Y[��K[ۛHPQ˛�Y;�#9.#z �y/g9ஈ^�\��[ۈ���8� ������QUH9�!9/cy�!ye��"!��'�doz`,y�'�ak:e��QUH���9c!yd*���T��X8� XT��U8� XSTUX8� X���8� X��8� X�ST�8� XTRST�8� XST�9d���ST�8� �QUK�P��Q�Wԓ��9d��T�K��]]\�X�ܞX9m�o��]]܈�۝^9���fi8� �+�9c�X��Y�H�۝[�:*��/o��*	����X�[�X��Y�Kܙ\��\��_X;�&�^X�][ۈ�]]:*��/o��*VP˓�UU�T�8� �""��"HQUK��ґP��Y:"!�QUK��ґP�����9m����fi;�#9.#y��9/����9k�H[X\�� �X��Y�H�\��\��H9/o��*X��Y�K\�[]]�H��X�[�[Y{�&�c깧"HVP˓�UU�T�9ak:e��^X�][ۈ]8� �QUH9c�c!yd*����/�9�!9/c{�&�a`�.��g*9��bcH[�K����H9l&��*�X�]�H9�`��#9��9��z-��o�yc�� �y.#ykf9g*8� ���9ak:e��-��o�H9�#��x� ]\H:"!���9/��[�H:"!�c���*9�`��g����H:"!��.�n+y�`��g��KK_KK_KK_KK_�QUK���T��K�\H��\��H:hg�g���&���[���&�\��\�X8� XX�Y�9�%��Y8� ��[�� QX�Y�� S�Y;�m�����k�w��f��7F����BV6�F����D"��f�6F�����6S�GWƖ6FVBGFV�Bf�V�G2�BW'6�7FVBD����D"7V'G&VW2&R�֗GFVBg&��F��2&��V7F����6���WFRf���7FvR�FV��FR�7F����F����D"7FFR&V���2��66R����66T��r����6��'3�f�6VgV�ǒW��G26�&VB��Ɨ7B�&�V7G3�G'VVW&֗G2����6��"�&�W'2�v��6�6''���EB�FV�F�f�W"6V��F�72࠮[z.x�7G'V7GW&VBV�G'�K��y�B�V�F�Ɩ�R7G&��ri�>K�^i�>��y�B���&��6�6��FV�B��zK�8$EBK��yY��n85$�bh�nYj�xڂ5"X�n��Nz�n���K��i�>�z>i�8K��X��h�n�x�h�"'W6��W72FW�N8%&r&�6W72��rW6W"6��FV�BK��K��yY�X��Zx�h����8$ƗfR6��6��R֗'&�"��~[{.Z��XZ^y�B66R���vK��yJ�y��Y�y�B&V�FW"FW�N8 ��EB&Vf��W266R��r&��6�2v��6R6V7F����"�W7FVB7FGW2�2U%$�"�d���"��dĔBv�F�8	8	�6V&6�f�"F�B�&�W"F�f��B&��&��&��6�3�52�4��TB�B��f�&�F����&��6�2&V���V��&�VBࠢ22fƖFF�����rG&�V&�W6���F��p��222��i8~z��K�X����ik~j�^���XX�Y�~��fƖFFR��6�vVK�nK��j�2F�v��7F�2y�Bf��R�f�V�N8"��FW7F66R��i��K�Έ^{z�Z��K�nj�>�h�X�ny�Bv�&�&���&�~�ɲ��66RW�V7WF��⢢i��'V�[ފ�"&�ry�NK�j�Y�~�����XZ��^K��yJ�y��Y�66R�N8%'V�F��RZKiY~XX�yȲ66RW�V7WF���y�B&W�'B7FGW2��W76v^���Xh�yȾX[b66R���v866R�����r7F���Wf�FV�6^8&d����rU%$�&y�NX�X�n86��F��VF�����r&WG'��h��&VƖ&�ƗG��BW�V7WF���6��G&��҇&VfW&V�6R禂�&VƖ&�ƗG��W�V7WF����6��G&����B��ɶ6���V7F�"f��W&RF��h��&W7V�G2�&W�'G2��BWf�FV�6U҇&VfW&V�6R禂�&W7V�G2�&W�'G2�Wf�FV�6R��B�8%�Ɩ֗G2�6V7W&�G�wV&�FVW2��BGf�6VBF�v��7F�75҇&VfW&V�6R禂�V�F�6W2�Ɩ֗G2�FVfV�G2��B����i��v��F�w2�V�6�W.8�f54��Vv�F�F�����r7F6��G&6R�Ɩ7�8 ��222XX�[��fƖFF����h�Zx���j��j�K��iK�v�&�&���86�FV6.8FV��F^8�V�W"h�bF���[��Y�~���ɠ��6����GB�6�fƖFFR��6�vP� ���y�[�Yj�K�y+Z(>X��Y�~����GB�6�fƖFFR��6��f�r6��f�r�6��f�r�����V�b4�B��6�vV8$EBK��yJ�x��i��y��z�bV�v��R�"XZ~[X�y�B&Vv�7G'���~�ؒFW67&�F�.���Z��i[Nk�^Yj�h��66�V��BfW'6����G&��҇&VfW&V�6R禂�V�F�6W2�66�V���G&����B�8%&W�6�F�'�66�V�2�i��'V��B��WN�ɾ���EE���R�66�V�2�h�b6�vR���6�y���NK��K��i��'V�F��R66�V�K�nk�8&66�V�2���7F�'��y�N���66�V�X8^Yʎ��"V�v��Ri��z+�iJ�h�Ni�.h��X��K��x+�'V�F��R6��G&7N���Y
+nX�~X��K�j�~X�.X�>�>8.���XX�i�Nik66�V�fW'6���K�n[~j�NK�ޘ~z{��{>x���ZY{HN���Xh�Y�~��fƖFF���8.���ik~i�>K��yY�X��Zx��^�h�8j�Nj�X�����j�NK��K��{�����K�nh�K�֖w&F���wV�F�6^�ɴEBK��i�>iK�Z��FW67&�F�.8.K�Zh.���[r��7F�&�6�&V�FW"7F���iK�x+�K��yJ�g�F��y�B76�v����Xh�K�մ7F���2�BG�VBf�VW5҇&VfW&V�6R禂�7F���2��B�X+>��&W7V�F��r7G&��~8%V�7W�'FVBfW'6���i�>YʎY�~��X��ZKiY~8 ��x���66�V�X��Zx�j�NX��j�~X�.x��i��K��ik�&W�6�F�'�66�V�2�'V��B֖�WBG&V^���K��i�>Z螊9�YʂEE���^8%'V�F��RfƖFFR��6�vVi�>j�.i�RV�v��RXZ~[X�6F��ry����Ny�Nj��K�K��66�V����X�>K��6�vRk).iȞK��yJ�8.{ˮ[	8xJk9^��X�n8K��Z�XZ�h�n�xފH~y�N[X�XZR&W6�W&6Ri�>z�h
+~Y��Z4�tU���dĔF8$V�v��R[��6�77F���X�b6F��rY(�66�V�'�FW>�ɾX[b&�fFR4��#Sb66�Ri��{i>��~�؞y�Ny��Z��FW&�Ɨ�F������K��i��X�nK�X�6�W&6R�bG'WF�8%fƖFF���K��i�>iK�Z�����8.���j�.�ib֖w&F���wV�F�6^8i�Nikj�Nj����Xhޘy�[�j��X���Z�y�B��V�f�xދy6�vRfƖFF���8 ��6�vRfƖFF���i�>K��xZrFV'VrW�V7WF���y��Y�y�BF�66�fW'���r66�V����WBfƖFF������j�.i�^x��iȒFV��F^8f��~8X�n{XNX��iʮX�n{XBF���y�BFV'Vr���6�FV6.8.j�~X�"66�V�fW'6�����~K��z�nY�x���66�V�y�N{Yjx�i�>YʎY�~��GBFV'VvX��Y��Z�ɾX����6�FV6"{ˮ[	i�.K��[�iȞiX�8 ��xKn[��j�i9����ik~K�>z+�Y(�{Yjx�X�nK��{��h�.i�^8.K�ފh�y�[�K����X����kh�h�X��z�X�^X�nX�Nik~8 �����X�R�X[�Y�X��Y��K��j�>h�ik������������������EB�D6�{ˮZK���i��6�6��N86�FV6"�6�VWB����
+ޘ����N8�x�[�66R�B�j�.i�R6�6��B�Y��Y�86�VWBi�[N8iȞiX����
+�Y(�Z��i[B�B���EB�5E��iʮy�^h�nj�~{�6��FW�B�z�[��j�.i�^���k"�y[nX���{ˮZKZ�~j�^8i���[����h�n�h�z�NX	������EB�5Dv�[�^����i8~Y��x+�z��y��8��i8~Y�����xJiX�87FvR��^�x�[��j�.i�^��i8~Y��[�.[��8��V8X�^Y�Y(�&WV�&VBj��[�r���EB�E��iʮy�R��x�[�FV��F^87F���h�n�*�ȞxJiX��j�.i�^z�n���Y��Z��i[N�z�[�8h����z�n87F�����Y�Y(�i��Y�ih~K�b���EB�4dv�iʮy�^Z�~j�^8�x�[Ꞙ�^866�V���Y��i鮈�������B�[�xZr�6��f�wW&F����BV�f�&���V�G5҇&VfW&V�6R禂�6��f�wW&F�����B�K�nz{���NK��iJ�h�Z�~j�R���EB�D����iʮy�R�{ˮZKX�>i[�8�.z��h�n�z>i�ZKiYr�[�j�N���yJ�ZY{HN���j�.i�^�X{�z+�Y(�iȞyX�7FF�WB�7FFW'"6GW&RWf�FV�6R���EB�D�����k9R�Bh�n�z�[��>���z{���N���k9^Z�~z�n���K�nK��h�XZ~Z�Yʎ�X�{��j�y���NK�����EB�%T���h^i�.8��n�X{�8k�.i�2�����i�.ZKiYr�j�.i�R66Riz^���Y(�7F����F����؞i9����222[���h�YX�����2222x+�K����FW7F66R�B�*�h�.{Y^���W�6V�X۾��zK�j�>z+����EB[�XZ^y�Ni����zK�Yj�XX>j�ih~i�����xKn[��hx�yJ�Y�Nj�y�B�BZ�XZ�j�.i�^8.j�.i�^���x�y�N�in[�z��y��8[��8�z�[�Z�~z�n8h�~X�nZ�~z�nK�^X��v��F�w2���X)�Y�8.K�^ih~i��[�.[��K��Zَj���َz�n���K�^K��yY�X��[n8 ��2222XZ�[�R6�VWBX��K�^K��yJ�y��Y�y�B&�r�BYx����X��K�^8.{ZnXZ�[�R6�VWBK��Y�y�Bw&�W�N��Ί�>XZ���[�.h�K��Y�FW7F66^���K�Zh"��V�B���V�B�D3Y(���V�B�&F6��D3�ɵ'V�i�>x+�Z�>X	YN�z�[��z��66RW�V7WF���8 ��2222x+�K��������h�z��K�n���EBi�>Yʎi[�i9�i�[NY(�7FvR��i8~X�����h����8�8�T��8���V8z��Y(�X8^z��y��X�jێK�X�nx+�&��8 ��2222x+�K����6��FW�B�讘x�ZKiY~���EBi�>h��{ˮZK�z�[��inK��K�ΈR�����i�.�����N��Έ�K��i����Λ��k�.i�>h�z��Z�~z�nK�.8.�^[�EB�5E��y�B&WVW7FVEF�87W'&V�D��FV8֗76��u6Vv�V�FY(�i���[�������j�.i�^ZJ~[�Z��iX�hI�y�NK��yJ�Y��8x��yn���
+��X�^Y�87FvR�W�87F����N���K�^X��X��yJ�h
+~i�.�i>���8.[��{kN{
+Z��[�^��YJ�K��َX�^K�X�X�����(�����z�[��ɾy[bfƖFF����;ފَX�R6���6�7W'&V�B�66�R&W�6V�V�Bi�.���i�>K�R4��DU�E��Tt5��D�y��X{��~z{�v&��~8&EB�5E��&i�>X�~X{�h�iȞ��z�X	������K�^K��K�X��[~[��{kNh�nK��yJ��h�z�N�z�[�8.�.i��y�NX����Z�~j�^X�>K��X�x+�z��y�����K��xKni��iȞiX�z��Z�~z�nK�.8 ��2222x+�K����f����h�W'&�.���76W'F���x+�f�6Ri�>K�B66RW�V7WF�����h�d��8.xJiX����N[�����k9R�[�8F���ZKiY~8�h^i�.8�z>i�ZKiY~8���ZKiY~h�n����i�.y[[��i�>K�NZ�>��h�U%$�.8.hx�i�^yȲ7F����؞i9���Έ�K��X��yȾi�{X"'V�x�hX�8 ��2222x+�K����F����yK�nK��j�.K�j����Z�>y�B7F���YY�yJ�K�n�xފ�n���K�niKnX�K�nz�nY�j)�K�ny�N��n�X{�z+�8.i�^yȲ66Riz^���K��y�NY�~��nX�~��Y(�i�{X"7F��������N8 ��2222h��;�Yʂ6����FK��K��yJ�6�V��z��>Yx����K�ވ;�8$EBi�>h���8�8�hȞZ�~��.X�X+>��8.h��6�V����x+�iK�X�Z��i�^��y�BF����[>i��K��8 ��2222x+�K����[�^��y�B'&�X�>i[�i�>h�.{YR�����[�^���^��~�؞y��yI�Yʂ&wbi;N[^K��X��8.z��G�VBƗ7B�*��inx+�{ˮZK�ɾ����{>[	X+>XZ^K�X�j���x��FV����h�n[~X�>i[����x+��F����8 ��2222h�hx���.K��yJ�X�^j
+��~�(Ni����K��j
+��~���i��Y�[���	�X�ޚX����yJ�6V�V7FVBj�[��8.y��[�>X��84�hꎘ.8h�nX[K��X�^i�.���yJ�6�vRj�[��8 ��2222ZY��;�Y
+nK��K�ދ;Ni��X��Y��h�>�h����X��K�^8.K��h�yI�h�y�B'V�y���NZ��i[NX�>X�����y���y�y��[ޘ��h�^K��X��[z^K��8 ��2222'V��Bi�>K��i�>Xh�j�Y�~��k�Ί�n���K��i�>8.Z�>X��i��jێj�NK�X�[{.Z��h�y�Nh�K�^X�b'V�8 ��222Z�XZ�h��i ��K�ފhh��Z�nz+�8F��V�8zx�h�niX�hI�Z�.h�ni[�i9�iK�"v�&�&���Yj�XX>j�8FV��FRh����z�n8Y�K�NZ�~z�nK�.87FF�WBh�b7FFW'.8.XJ�XX�K��yJ�F����[>i��K��{i>h��Xxny�NzY^Z�nk:�XZ^ik�[��8.YʎX[K��Z��Y(�jێj�NX�ޘ.��Z��i�^8 ��222fƖFF����4��Y�{H@���6�ৰ�'66�V�fW'6���#�&GB�fƖFF����c"�"��&GEfW'6���#�#B�"�b"��'fƖB#�f�6R��&��FR#�'6�vR"��'7V��'�#��&W'&�'2#��'v&��w2#��'7V�FW2#��&66W2#�#"�'FV��FW2#�r�'F���2#�w���&F�v��7F�72#����&6�FR#�$EB�E��B"��'6WfW&�G�#�$U%$�""��&�W76vR#�&76W'B7F���&WV�&W2����&��W�&W76���"��&f��R#�'FV��FW2���T�E�dU$�e��FV��FR���"��&f�V�B#�&7F���2�76W'E7FGW2�W�&W76���"��'6�VWB#��V����'&�r#��V����&6��V��#��V����'FV��FR#�%��T�E�dU$�e�"��&7F���#�&76W'E7FGW2"��'7VvvW7F���#�$FBW�&W76���F�F�R76W'B7F��� ��ЧЦ ��j��X����ik~�;�X�^Y
+�6�FV86WfW&�G�8�W76vV8f��V8f�V�F86�VWF8&�v86��V��8FV��FV87F���Y(�7VvvW7F���8.K�ޘ�yJ�y�NZ�~j�^x+��V��8.y[b6�vRY(�66R��~�؞y��x��Y�K�X�j�i�Θ����Ni�.���EB�ˎX{�K�j)ފ��ik~���K�nYʎ��yJ�i�.��N[�b�67W'&V�6W6Y(�ffV7FVD66W6�ɶ7V��'��W'&�'6{[���YJ�K����ik~���7V��'��W'&�$�67W'&V�6W6K��yY�X��Zx�X{�x��j�i[�8.K�>z+�z��Z��ɾ�z�X�^X�nK�ވ;ފz>i�K����kh�h�8 ��EBX��X�nZInh�K�7V��'�8FWF��86�W&6V86��FW�FY(�66�V�f���F���68&6�W&6VK��y�BƖ�V86��V��8V�DƖ�V8V�D6��V��i�����h�b���Bih~K�ny�Nx��ynK��{���ɾ�.[B&�vY(�6��V��K�ފ�zK�W�6V�Yj�XX>j�8.Yj��{INih~i��X��X��y�Nh�^[�hx�y�N[�^���Z�~z�nK�.��Ί��N[�����k9^�����Ni�>h�~Y	X[~��NZ�~z�n�ɾi�yh�8ZI���h�n{i>��؞{�y�B���Z�~z�nK�.��^xJk9^{+�z+�i�[N���X�~ZY�i[NX�66�"z�NY��8.j���R66�V������NK��yY��z�[{y�N�z�[�8�yΘ�^Z�~8kh�h�X��x��ynK��{��8&6��FW�FX��X�^Y
+�66^87Fv^8f��r�BY(�[X�ZY~���yJ����8.���N[�����k9^��>h8^YʎZ�XZ�i�.i�>h�~X{�h�YʂF������yJ�X�>i[��ȎK�Zh"��tf��W6�Ȟ8hH�ZIbF��V�X��[�b6&WBy�NiȞ���K��x�~j�^�ɾX���;�Y
+�iȞhii9�h�niX�hI�X�y�NZ�~j�^X��i[N��K��i�>��zK�X��ih~i��h8 ������i�"7F��������Ny�N{Yjx�X�n���ik~i�>X+>XZR66R���8'V����8�x�ikyI�h�y�NZ��84��4��Y(��V�B�����N��>h8^8.[X�ZYrf��r�����Ni�>h�~X{�XZ~�:�f��r���X��7F�����Ί��yJ�������i��FV��FRZh.K�^X��N��.K��{��8%F�����rD"Wf�FV�6RYʎ��yJ�i�.�����NY�~��nj�i[�8�h^i�.8�z>i����h���nx�hX�8X�>i[�{hZ�X��X�nkh�i8�K���ɾih~K�nK��Zَ�����NX�^Y
+��X�{��z�[�Y(�XX��y�NyJ.x��j�y���N8 ��224�8h�>X�^��~��{jР�EBiJ�h�B6�W&6R�G&VRFWfV���V�BK�^X���ffƖ�R&V�V6R6�v^8 ��222FWfV���V�B�&V�V6RvFW0��6���f�6�V�fW&�g���F���2F���2�'V��E�&VfW&V�6U���V�����6�V6���F���2F���2�fƖFFU�&VfW&V�6U�6��FV�B�����GB�6�fƖFFR��6�vP� ��'V��B�6�i�>Y�~��&V�V6RvF^8�x�ikyI�h���GV�"&VfW&V�6R��V�8[��z��Ɩ6F����"Y(�&V�V6R&6��f^���K�b6���R�FW7B�z>Z9>[��y�B��6�6�v^8%&VfW&V�6RvV�W&F���X�nZIn���h�F���2��r�F�>8.Z�>i�>�ˎX{�K�4ĒK��yJ�y�BGB�B�"�b���6��F"�w�8X�^Y
+�t"Y(Θ:�{�.h�~X�~y�BGB�B�"�b�6W'fW"�F"�w����K�^X��6�W&6R&6��fRGB�B�"�b�7&2�F"�w�8.j��X�&��'�&6��fRY�~��[�ik�#R�.8$��6�6�vRK��Xh�X�^Y
+�t"h�nX[nK�ޘxފH~y�B'V�F��RƖ'&'�8 ��222'V�F��RFWV�FV�6�W0��4Ğ8V�v��RX��v�&�W"K��y��Z��f�8$EB6W'fW"t"���h�fr�X��ZIn�:�F��6B��8$EBK��XZ~{��4Ē��FVw&F���h���y�B�D$2G&�fW.�ɾ���[rG&�fW"�FWV�FV�7��"iK�XZRƖ"�8$�$��i���F������FVw&F����ɦFVfV�B4Ē'V��BYʎk).iȒ�6ƖV�B6�72i�.K��X��K��yJ��ɴ�FW����V�B��6�vRiJ�h�Ny�B�$�6ƖV�B�"�&�f��^8 ��2227GVF����7V7F���66�P��&W6�W&6R�WFFFF�66�fW'�i�>[�n[�Ή�^ybD"���54��EE�V�W"iJ�h�Ny�BG�T�c���W����K�ފ�X�b&�6W726V7&WN8%&W6�W&6R7V��'�[r�WFFF7FFV��rW�V7WF���&VF��W76X�n�h��ɦ��B�fƖFFVFK��K�>��XX��W�V7WF����ɶFWV�FV�7��V�&W6��fVFi�>x+�X��h�.{J.y�BG&�6�F�fR�V�W"&VfW&V�6Rh�K�K��Y
+�X�y�BEB�$U4�U$4R�T�b�$UT�$TFF�v��7F�>8.�	�K��F�v��7F�2X��X�~X{�&WV�&V�V�N���K�n���[{.z+����{ˮ[	f&�&�Rh�b�WGv�&�f��W&^8$W���&W"��zK�iȞiX�V�f�&���V�B��r&V�VF�F������Y�i�.K��yY�Z�XZ��WFFF8.X��iȒ&W6�W&6R7FFS�&VG�X��h�����WFFF���K��K�>��W�V7WF���&VF��W7>8 ��F�66�fW'�K��Y�~��&��B����66�V��&�f��Rj�.i�^X��6�&VB�6��f�rF�&�V�F'�8.z+����&�V�F'�[�����D"���54��EE�V�W"FW67&�F�"j�[�������Nh�n{ˮZKi�>xڎz����^yn���K��yY�j�>[���V�W"X��K��y���y�&W6�W&6R�WFFF���K�nYʂW���&W"h�K�K��Y
+�X�y�BEB�$U4�U$4RԄT�U"Ԕ�dĔF�EB�$U4�U$4RԄT�U"�T�d��$�Vv&��~8.ZKiYrFW67&�F�"K��i�>[��z��X��yJ��V�W"&��F��~8$W���&W"i�ZI�Y��X+>Y��X�X�X�R�V�W"f��W&RF�v��7F�>���X�nX�X[n�I�ZKiY~i[��x�8$F�66�fW'�j��X��V�W"G�Ri�ZI�#SbX�FW67&�F�.8j��X�FW67&�F�"2��'�FW>8j��X�G�Rb֔.�ɷV�6fR�7��Ɩ�F�8�xފHrF��V�W"�N8G'W7FVB�66�V�f��W&RX���h^X{�����K��i�>ZKiY~8%54��V�W"FW67&�F�"{ˮZKh�nxJiX�i�.���F���w&�Wi�>K��yY���v�6�&��F��rK�F�66�fW'�K��yJ�8$W���&W"[r54�&��F��rY(�T�b&WV�&V�V�B{i26����B�&6�VBF���X+>��{>y��K��F&vWN�ɷV�&W6��fVB&��F��rK��K�>��XX��W�V7WF���8%F����w&�W{Yjx����66�V�f��W&RK��i�>ZKiY~8$6��f�wW&F���VffV7F�fRY(�6��&^�ȎX�^h��'6VB6�6��B66�^�Ȟx��YʎK��yJ�y��Y�y�Bf�VR�g&VRF�66�fW'��Ɩ7�8$�V�W"{ˮZKh�nj�[��xJiX�i�.���K��K��yY�iȞiX��WFFFK�n��zK�7G'V7GW&VBFWV�FV�7�v&��~�ɶ7FFS�FVw&FVFY(�W�V7WF���&VF��W73���B�fƖFFVFY�~K��XX��W�V7WF���8$T�bY�z�K�>��&WV�&V�V�N���K�ފ�zK�f&�&�R[{.z+����{ˮZK�ɮ�	�K��f�WrK��i�>��X�b&�6W726V7&WBf�V^8%&��B6��f�wW&F���8&�f��^8V�6fRF�8G'W7FVB�66�V�f��W&RY(���7V7F���Ɩ֗BK��f���6��6VN8.{ˮZKy�B�V�W"FW67&�F�"K�nX�>��r6��FV�B&V6��6�ƖF������ikZ)�h�nK��[�[��i�>K��66�VB�WFFFZKiX����j�����x�YY�8.X8^�ȞXZ^h���F&vWBFWV�FV�7�y�B7G&�7B��F��~���K�^X��{[K�WF��F�2���V�&V��FW��W&F���[	�iʮZ�nK��8.i��z+�fƖFF���Y(�W�V7WF���K��K��yJ�7G&�7B6��f�wW&F�����F��~���Y�j�NK��y���y�y�B7F�fR�V�W"{ˮ[	f&�&�Ri�.K��X���;ޙ��Z�8$�WFFF���ǒ6��f�wW&F���K��X��Y�~��8.���YʂF��6B�v�&�W"&�6W72V�f�&���V�B���Z�h���f&�&�^���xKn[�Θx�ikfƖFF^�ɾK�ފhX�XZR&�GV7F����6V���FW"7&VFV�F��X��x+�K�n��2'&�w6��rh�X��8 ��7GVF��[r&W6�W&6RX�n�8FWF��8Z�XZ�6�W&6RX��K����6��f�wW&F���&��V7F���K��ZَYʂ6W76����V��'�8.X[yJ�66�Ri�ZI�K��yY�#�X�&W7��6RX���֔"V�6�FVB���N�ɾYj�K�&W7��6R�h^��֔"K��i�>X�XZR66�^8.�8~ii�YʂRzy.XZ~�inx+�g&W6��ɾ�x�ik�h�YY���>���f�Wri�.XX���zK�66�VB&��V7F������Xh�yK&6�w&�V�B&VBi�Nik8.y��Y����fƖv�B&VBi�>Y�K�^�ɾX�nkh�K�X�6��7V�W"K��i�>X�nkh�X[nK�b6��7V�W"y�B&WVW7N8.��NY��f�Wri�.K��yY�i	�[�8h�.[��8X�n�X��h�.X�^x�hX�8 ��j��j��x�yJ�X��XX�j�.i�RWF�V�F�6FVB��7V7F���6��FW�N8$�FV�F�G�86W76���8&��Rh�b��7V7F����Ɩ7�iK���i�>k�^��N���&W7��6^8%6�vR�V�f�&���V�B6V�V7F���8i��z+�&Vg&W6�8��v�WN8���.i��X�8ik�xZ��X�y�B6�vR&Wf�6������K�^X��7F�R7W'6�"h�nZَX�n�����N���i�>K��y���y��V��'�ZKiX�8$6��f�wW&F���Y(�6�W&6R6��FV�BK��i�>Z��XZR��6�7F�&v^8��FW�VDD.86W'f�6Rv�&�W"h�b�EE66�^8$WF��55$b&W7��6RX����6�VFT��f�V�G6F֖�7G&F�"&W7��6RK��i�>X�XZRVW'�66�^8$�EE&W7��6RK�ޘ^Z�66�R�6��G&�â���7F�&V8 ��j��X���7V7F���v�&�W"K�ޘ	K���^yb&WVW7N���K�nK��yY�XZ�X�&W6�W&6R��7V7F�.8$F�7F6�XJ�XX���i8~[{.K��yY�y��Y�6�vR�6��f�r�V�f�&���V�BX���Ɩ7��W�y�B�F�Rv�&�W.���Xh�K��yJ�X[nK�b�F�Rv�&�W.8%'6VB6��f�wW&F���6�6��BX�niȞj���d�Y��X�V�G'�y�B�%^���K�^X��3"֔"vV�v�FVB&WFV�F���'VFvWN�ɵv�&�W"�V���Z�K��i���d�y�Nz�h
+~K����8.�x�yJ�i�.i�>[�&��B6��f�wW&F���8h����V�W"�F���w&�W�FW7FFFFWV�FV�7�X��66�V�G&VRK��&�V�FVB6��FV�B&V6��6�ƖF������Y�j�B&V��^8FV�WF^8y��Y�F��W7F�y�NXZ~Z�i��h��X��iʮy�RFWV�FV�7�iK�X�^Y�~i�>�x�ik�ȞXZ^8$66�R�����Ni�>Y���{>X��iȒV�66�VBfƖFF���8.j��X�&WVW7BY�~�x�ik[��z��W&֗76����6�V6�VB&��V7F����ɶF֖�7G&F�"&��V7F���K��i�>�.XZ^K����66�^8 ���F����6W'fW"��7V7F����v&�W�	���x+�V�&�VC�f�6V8v�&�W'3�8�W�3���8&v�&�W'6z�NY��x+��{26W'fW"��7V7F������6��7W'&V�F8.j��X��W�X�^Y
+�6�vT�FX���F����V�v��RV�f�&���V�F�ɶ�W�i[��x�K��[�~�h^��v&�Wv�&�W"i[��x�y�NXZ�X����K�nK��X���xފH~8.K�ފ��Z�V�f�&���V�FX���	xkW���&W"K��yJ�y�B6�vR�FVfV�B��FW�8$�W�2X�n�Xވ{>YBv�&�W.���j��X�i�ZI�XZ�X��ɾk).iȒ�W�2i�.���h���v�&�W"i�>�	xkz��K�X�&Vv�7FW&VB6�v^8%6�vR{ˮZKh�b&V��BZKiY~K��i�>���Z�F��6B7F'GW8%v&�Wi�>���h���FW&7F�fRFV��N���j��X��W�i�ZI�&WG'�K��j�K�nX�XZR&6��fn�ɶFV���i�Nh��[��i�>�x�ik�	xk���6�WFF�v�i�.X�j�.8.h�iȒv�&�W"Y�~[��z(�i�.��Ɩ�FW&7F�fRG&ff�2X��K�^X�nkh�&V��N8 ��tUB���c��WG&�76�^[�iz.iȒ6W'fW"WF�V�F�6F����Ɩ7����X�^Y
+���7V7F����6W'fW&X��i�iky�B&�V�FVB��7V7F����v�&�W'66�6��N8$6�V�FW"��rF�F����6V6��G2kk^�8��EE��FƖ�~8VWV^8&�6W72�V�6�8F�7F6�8&�6W76��~86��f�wW&F�����B�'6^86�W&6R&WVW7N8v�&�&�������'6��rX����FW�'V��N���K�nh�K�66�R��B�֗72�Wf�7F���8vF6�W"��fƖFF�����fW&f��~8vF6�VBF�&V7F�'�8&WF��VB�W�8��7G'V�V�FVB&VB'�FW>8&�F�6��&W7��6R'�FW>8�V����V�8t2X��&�6W725^8.j��X�v�&�W"i�ZI�K��yY�bX��VR6�vR�V�f�&���V�Bvw&VvF^��Ί����B&WVW7B6�V�N8&�6W76��rF��^8��FW�'V��N86��f�wW&F�����BX����7G'V�V�FVB&VB'�FW>8%6�vR�W�{i2�6��ɶ6�V�FW"K��X�^Y
+�F�86��f�wW&F���f�VRh�bf��R6��FV�N8$'�FR6�V�FW"K�>��[{"��7G'V�V�By�B��7V7F���&VN���K��z؞ik��2��6�6����8%&�6W72��V�6�F�֖�rK��X�^Y
+��d�&VF��W7>�ɶF�7F6�X�^Y
+�&VF��W72X��&�F�6��G&�7�'N8$&V�6��&�X�n�Ί����B6��RS��^8.��R�F������7V7F���FV�V�WG'�xJk9^iK�XZ^���Z�y�B&W7��6R�'�FR'VFvWN���v�&�W"i�>y�yZ^��"6�6��N���6W'fW"Y�i�.k�^��B&�WF��r���N�ɶ�WG&�72K��i�>iK�Z��&W7��6RƖ֗N���K�nK��i�>K�NX��i��iȞiX�y�B&W7��6R�h^��8 ��F�7��6�6��BK��i�>h�jȢW�V7WF���8$FV'Vr�V�6���B&�f�X��v�&�W"W�V7WF���K��K��yY�WF��&�FF�fR6�vR&Wf�6���6�V6�8EB�4U%dU"�E$eB�5D�V8{hZ�&��6��y�B7W'6�.���K�^X��7F�R7W'6�"�EEC�8.���Z�K�Z��h��6W'fW"�:�{�%҇6W'fW"�FW����V�B禂��B��ɾ�x�k��z��[���h����7V7F���&V�6��&�҇7�7FV��FW6�v��vV"�V�֖�7V7F���֖�Ɩ�R֦�'2��B�8 ��222F�7V�V�FF����W&F���0����GB�6�F�76[��[{.��~�ؒEB6�vR��FV�yI�h�'V��B�F�72���FW��F��8$��&�F�fR&�GV7B&VfW&V�6RX�~xڎz��yKF�72�&VfW&V�6R�{i2F���2�'V��E�&VfW&V�6U���V���yI�h�8&��GB�6�6�V�X����Nih~K�n�h�Z�y�BvV�W&FVB'V�F��R�'V��B�WGWN���K�nK��yY�6�W&6R��WN8 ��2224���rV�f�&���V�B&���F��ࠤ4�hx�XX�fƖFFR6�v^���Xh�Y�~��W�FW&����FVw&F���FW7N���K�nhȞ���hK��Zق'V��FV'Vr���BWf�FV�6^8$V�f�&���V�B����i��z+���6��f�v���V�f�Ɩ7���i8~8.z��Z�D"����v�6��B��>y��Y�FV��FRYʂ4�B�TB�$U$�B�i>z{�X�^��K��yJ�iK�7F���8 ��&��V���"hx�K��yJ�YJ�K�'V��N�ɾ��^���hxڎz��&WFV�F�����FW7B�'V�7FF^���hx�K��yJ�K��Y��WGWB&��N8.[�Y�K�6�&VB�WGWB&��By�B6�V��&W�'B�&6��fRzؒFW7G'V7F�fR�W&F���[�^��[��X�~X�n8 �����F��W"���V�V�FF���6WVV�6��~866�VGV�W"��FW&��>8&W6�W&6R��v�W"FWF��K��ik�F�72�7�7FV��FW6�v�����K��[�ik�i��V�B�W6W"&VfW&V�6^8 ��22V�F��(	B66�V���rfW'6����G&����x���7F�fR66�V�>�ȎyKx��i��y��z�bEBV�v��R�"XZ~[X�&Vv�7G'�h�K����&W�6�F�'�66�V�2�6F��r���x+�X[b'V��B��WN�Ȟ�ɠ���'F�f7B�x���66�V��������������h�.z��[��z���GB�66�VGV�R�c"���%T�Z�{��GB�W�V7WF����c���v��&�6��f�wW&F����GB�6��f�r�c"�2���6�vR��fW7B�GB�6�vR�c���FW7FFFFW67&�F�"�GB�FW7FFF�c����D$�V�W"�GB�F&�V�W"�c"�b�����V�W"�GB���V�W"�c�2����EE�V�W"�GBևGG�V�W"�c����54��V�W"�GB�76��V�W"�c����F���w&�W�GB�F����w&�W�c"����v�&�&���6�FV6"�GB�6�FV6"�c"�"���FW7F66R6�6��B�GB�FW7F66W2�c"�B���FV��FR�GB�FV��FR�c2�b���f��r�GB�f��r�c2�b���FV'Vr��WB�GB�FV'Vr�c�"�����B66V�&���GB���B�c������BFV��FR�GB���B�FV��FR�c�66�V�2�GB���B�FV��FR�c�66�V��6�������B&��F��w2�GB���B�&��F��w2�c�66�V�2�GB���B�&��F��w2�c�66�V��6�������B7V��'��y�Nh�RV�v��^���4Ğ�ɦ�Vv7�7V��'�6��G&7B�66�V�V�FW"66�V�2���7F�'����ɾ[ZَZY��ɦGB���B�7V��'��c�2�����B&W�'BFWF��f��W2�GB���B�FWF�����fW7B�c8GB���B�FWF���&VfW&V�6R�c8GB���B�FWF���6W&�W2�c8GB���B�FWF���6W&�W2�c.�ȇ6�&VB���N�Ȟ8GB���B�v�&���B�FWF���c���'V���fW7B�GB�'V��c"�������x��6�vRfƖFF����4���GB�fƖFF����c"����{+�{
+4Ē���[N[��fƖFF���&W�'B�GB�fƖFF����c���4�7V��'��GB�6��7V��'��c"�����V�B����GB֧V�B�c"����i��j����i[Ny�B&W6�W&6R�6��f�r66�V����x��i��K��ik�66�V�2���7F�'����Ι�N���[X�XZ^y�BV�v��R&Vv�7G'�y����NK�NiJ�h�N���Y
+nX�~X8^K�j�~X�.X�>�>���K��i��7F�fRW�V7WF���6��G&7N8%V�7W�'FVBfW'6���i�>YʂfƖFF���ZKiY~K�nh�K�֖w&F���wV�F�6^8%&W�6�F�'�66�V�2�6F��r���X8^x+�'V��B��WN�ɷ'V�F��RYJ�K�jȮZ�K�nk�i��x��i��y��z�bEBV�v��R�"XZ~[X�&Vv�7G'�8%'V�F��Ri�>[��6�77F���X�b66�V�f��W>���K�nX��Yʂ&�fFRW"�W6W"FV��&'�F�&V7F�'�[��z��{i>��~�؞8K�^XZ~Z�4��#SbZ�K��y�Ny��Z�[��X�n8.[��X�ni�>K��yY�y��X��X��{x�h�^K��K�x��&Vv�7G'�K�&���&6��ɾX��iȞX�n[�~h�.K�b�2��6�K�nz+����k).iȒv�&�W"K��yJ�[�����h��i�>X����N��>���x��i��8.��^k�^ynK��ik~���K��K�j�X��Zx�X�ni�>�xފ�n8.K��Z��i[Nh�n��z�NiK�y�N[��X�nX��i�>Yʎz+����k).iȞz��[��h�iȒW6R�V6R[�Θx�[���ɾ��^K��iȞz��[��K��yJ����fƖFF���i�2f��6��6VN���K�nik�v�&�W"{Yi��[�Θxފ�n8%fƖFF���&Wf�6���i�>{hZ�V�v��R�&Vv�7G'��FV�F�G�86�vRf��W>86�&VB6��f�rf��W2X����Z�V�f�&���V�N�ɵv�&�W"��^yn���k.X��i�>��~�ؒ6W'fW"X+>XZ^y�B&Vv�7G'��FV�F�G�8&EE���R�66�V�2�X��6�vR���6�66�V�2�K��i��'V�F��RK�nk����K��K�ވ;ފhnZ��&Vv�7G'�8%6�vRfƖFF���i�>��~�ؒV�v��Ry����Ny�B66�V�&W6�W&6W>�ɾ[Zق66�V�K��i�>�z�X�^h�x+�X��yJ�y�B'V�F��R6��G&7N8 �����GB�F�73���7F�&�6������Bc�bX����V�W"c�"i����FW"iJ�h�Ny�Ny��Z�j�~X�"66�V��ɾiz.iȒ66�"&�WF��rX���Vv7�Wf�FV�6R�Ɩ7�{j�h�8.ik�z�yK����Xޚ�j�NK�ޚ�K��yJ�7F�fR66�V�8 �����GB�F�73���7F�&�6���ࠢ22V�F��"(	B6��F�&�ƗG���rFW&V6FVBƖ6W0��6��F�&�ƗG�y�Ny��y�N���i����>iz.iȒ6�vRX������Έ�K��i��{j�h�z��K��ZYr7W'&V�B��FV�8.ikWF��&��rK��yJ�6���6�U�T68�UD87F������6��WGWF87W'&V�B66�V�8��V�f��~y��X��F����D"��6��G&7N8 ��FWFW&֖�7F�2�Vv7�Ɩ2YʎX��K�[�K�i�[Ni�.X��K�^K��yY�K�nyJ.yI�֖w&F���v&��~�ɾ��^������{ꞈ�r66�R�6��F���h�b6�����&W7V�B�Wf�FV�6R6��G&7B��z����[K��[��z��Ɩ>8$FW&V6FVB4Ē�WF��&��rf�&�X��iȞYʎK��yJ��^K�ޙ��h֖w&F���F�i�.h��K��yY�YʎX[b�v�W"vRh�b4��tT��~8 ��22V�F��2(	B֖w&F�����FW0��222��Bxڎz��Wf�FV�6R�XޚР�iȞ����BWf�FV�6R�Xޚޚ�K��yJ�GB���B�c�v8.K��yJ���6��W6���h�nK��yJ�X[yJ���7V66W756��W6�����f��W&U6��W6{XNY�y�B�Vv7�66V�&�����Y�~K��yY�iz.iȞ���{�8%W"�v�&���B6[�^��i��z+����Z�Wf�FV�6R�V�F66�S�W%v�&���F8.j�Nj�[��K��������Z�Wf�FV�6R�FVfV�G6X��X����y�B6���ǒv�&���G5���Wf�FV�6V�fW'&�F^�ɾK�ފhX�XZR&��B��6��W68��7V66W756��W6h�b��f��W&U6��W68.j��X�v�&���By�B6K�.y��xڎz�����K��i�>X{�X	�8X	�yJ�8iKnY��Z래x����K��K��i�>Y��Xޚ�X����N[{.K��yY�'F�f7N8.��X�n8��~�؞X��&W�'F��r�h����E҇&VfW&V�6R禂�W�V7WF������FW2���B��B>xڎz���Wf�FV�6RޘXޚҞ8 ���222�&WVW7BVWVR�z�yK��GB���V�W"�c�&66�"FW67&�F�"K��X�~iJ�h�N8.K��yJ��W76vR�&WVW7EVWVW6h�b&WVW7EVWVU6V�V7F���i�.��Κ�iK�x+�GB���V�W"�c�6���K�nK�R(	3#Sb�^K�ޘxފHrVWVRk�^Yj�X�nK�266�"&WVW7EVWVV�ɶ&WǕVWVV{j�h�Yj�K�X����66�.8$��7F�6R�z�yK�hnZ��i�>X�nK�>{��h��y�B66�.���k�^Yj����iʮi��z+�h�~Z�7G&FVw�i�.�xފ��VWVR7G&FVw�8%VWVR6V�V7F���86�V�FW"z�NY��8Wf�FV�6RX��&W����x+��h����V�W%҇&VfW&V�6R禂�&W6�W&6W2���V�W"��B7&WVW7B�VWVRދz�yK�8 ���222f��R&wV�V�G2��r66R��rF�0���EE�V�W"6��K��Xh�h�^X�rf��V�ɾ���y�Nh�^[rg�6�vR�&V�F�fR�f��W�X+>XZR&�G�8$��V�W"6V�FY(�&WVW7FK��Xh�h�^X�rf��V�ɾ���[rW�&W76���X+>XZR���F8%54��V�W"W��Fx��Yʎ�hk"���F6��FV�N���K�nh�.{YR��6�F��ɾ���y�Nh�^X+>XZRg�����8%54��V�W"K��Xh�iJ�h�BF�v���F���Y�x+�Z�>���h��6�FW7F��F���F�8.��^[z^K��[�^��[��K��j��X�nY��j�Nj���Ί��i��z+��X�{��6����B�&6�VBF���8.�	�K����i�Nz{���B&W6�W&6R�X��yI�y�NK��hH�&��'���6��f��R��WN�ɶg�����h�K�UDbӂFW�N8 ��66R��~84Ē�WGWBY(΋ˎX{�y�B66RWf�FV�6Ri�>[r6���6�6�vR&��BK��y�BF���zK�x+�DEE���Vh�bDEE���R��&V�F�fR�F�����K�n{[K�K��yJ��8&DEE���VX��i��Yʂ&W6V�FF���K��K��yJ�y�BF��V����K��i��V�f�&���V�Bf&�&�^86��FW�B&��Bh�bf��R�W�&W76�����6F�.8%'V�F��R&W6��WF���Y(�f��W7�7FV�66W72K��K��yJ�6���6�'6��WFRF�8'6�vR&��BK�^ZIny�B'6��WFRF����K�ފ�ni��F�f�VRh�n���ik~���h�XZ~y�N�z�[���Θ;�i�>K�^X�~��y�BDU�DU$����&6V��S���zK�8.i��z+�y�B&V��FR�F�j�NK��X��U$�i�>K��yY�X��X�8 ��222&Wf��W2&V�V6RFW7FFF֖w&F��࠮[rv��&�6��f�wW&F���[��GB�6��f�r�c"�X�~�{2GB�6��f�r�c"����K�n[r��B66V�&��[��GB���B�c�FX�~�{2GB���B�c�V8.���66�V�K��y����Nik�66�V�2���7F�'�����K�֖w&F���F�v��7F�72K��yJ�8&GB�FW7FFF�c�i��ikZ)�ZY{HN�ɮYʎ��Z�y�BV�f�&���V�B&�f��RFW7FFFƗ7BX�XZRFW67&�F�"F����Xh�ik�66R�7Fv^8FV'Vrh�b��Bv�&���B��WB�K��yJ���G�8$��B66V�&��X��Yʎ�.[NX�XZR6�vR�&V�F�fRFW7FFFF�>���[�.h�X8^��yJ�ikΊ�.j���By�B�fW&��8.K��Y���W"y�NY�Y��Bi�>Z��i[NX�nK�2FW67&�F�.�ɾY�K���W"XZ~y�N�xފHr�BxJiX�8.ZI�z�b&V6�&G2y�BFW67&�F�"[�^��iȞi��z+�6V�V7F����Ɩ7�8.k).iȒFW7FFF&VfW&V�6Ry�Niz.iȒ6�vRK�ޙ��hikZ)�FW67&�F�.8 ��222W�V7WF����FV�F�G�f�&�B֖w&F��ࠦGB�6��f�r�c"�6ikZ)�W�V7WF����FV�F�G�f�&�G>�ɾX��K�x��6��f�wW&F���66�V�K��X�~iJ�h�N8.X��yJ�W�V7WF����'V�Df�&�F���Z�'V�Y(���By�NZIn[B�N���K�nyJ�W�V7WF����FV'Vt�Df�&�F���Z�7F�F���RFV'VrF�&V7F�'��N8.iʮ���Z�i�.K��K��yJ�iz.iȒF��W7F�'V����B�BX���G�S���F&vWD�C�FV'Vr�N8$��Bj��j��FW&F���y�BU�T2�Fx��yKV�v��Rz�yn�ɾ���z{���N[{.X�yJ�y�BW�V7WF����W�V4�Df�&�F8%'V����By�Ni��z+��BK��yJ���'V�֖F�ɷ7F�F���RFV'Vry�Ni��z+��BK��yJ���FV'Vr֖F8 ����Bv�&���BFW7FFF�ƖC����Z�h�~X�b66�V���K�nX����i8~i[NK�ފhn�8�FW67&�F�"y�B6V�V7F����Ɩ7�8%66�R�	���x+��FW&F����ɶW6W&X����yJ�6��6VB�eRv�&���N8.���i��z+���i8rW'&�&8&V7�6�Vh�b7F�W��W7F���8%6V�V7F����WFFFi�>�����N���K�nK��X�^Y
+�&V6�&Bf�V^8 ��EB2�b�"[~Y�X�^X�b�W&F���&W7V�N8ZIn�:�'6��~8f��R�6��FV�B7G&��~8�WF&�V�BG&�7�'BY(�K����X����Wf�FV�6RX�n�h�8 ������j�NK�����j�Y��2�b�"�~z{�ik�[���������������GB�FV��FR�c2�Fh�bGB�f��r�c2�Fy�BG�S�&V�FW&�[rFW67&�F�"iK�x+�7F�fRc2�R66�V����K�nK�^K��yJ�f��R�6��FV�BW�&W76���y�B76�v�X�nK�>j��X�&V�FW"7F���8$��7F�&�6�c2�BFW67&�F�"X��X��{i>yK��7F�&�6�66�V�F��ȞXZ^8"���G�S�&V�FW&����C�F��K��yJ�G�S�76�v�8f&�&�R��VX��W�&W76���"g�6�vR�&V�F�fR�f��W�&�ɾ[rG�U�T2�d%2����S��X+>{Zb6��7V�W.8"���6����BF���&W7V�B�f�&�B�[r'6��r���Z�z{��{2F���FW67&�F�"y�B7FF�WDf�&�N8"���X[yJ�7F���&W7V�B�f�&�B�F���fW'w&�FR�z{���N8&�WGWB�&W7V�Bi���F�fR��v�6�G�VBf�V^�ɾk).iȞ��[��j�Nj�i��K�>ik�j�8"���&V�FW"&W7V�B�f�&�B�F�h�b&V�FW$2�6fT2�z{���N���j�NK��8$f��R�6��FV�BW�&W76���Y��X+2W�7BUDbӂ7G&��~���K��[��z��{Yi��j�Nh�bF&vWDf��W>8"�������F&vWDf��W2X+>��&V�FW"j�Nj��y�Nh�^[rf��R�6��FV�B7G&��rX+>XZR�EE&�G�8����Bh�b54�W��B���N8"���Yʂf��R�6��FV�B7G&��rK��yJ�&WVW7Df�&�B�z{���N8'&WVW7Df�&�BX8^K�h�ދ��Ɨ7N�ɵ7G&��r�&WVW7Df�&�Bi�>ZKiY~8"���G��֖2h�nK��Z�XZ�f��R��6F�"�iK�x+�K�X�7FF�26�vR�&V�F�fRf��^8$'6��WFRF�8v��.8G��֖2��6F�.8֗76��rf��^8F�&V7F�'�8���UDbӂ'�FW2X��7��Ɩ�W66R�;�i�>�*�h�.{Y^8"�����rf��R�y�Nh�^[rf�VRX+>XZR��r�f�V^8"�����rf�V�G2�[rG�VB��Ɨ7BiK�Yʂ��r�f�V^���K�n��i8r��r�f�&�N8"����EE��X[yJ�&W7V�Bj�[�����Z��K��yJ�&W7��6Tf�&�BX���w&W72'6��~�ɾX����Wf�FV�6R��WGWB�f�&�BX��h�~X�nK����X������zK�8"������7F�fR&W6�W&6R�6��f�r66�V��K��yJ��66�V��BfW'6����G&��҇&VfW&V�6R禂�V�F�6W2�66�V���G&����B�y�B7F�fR66�V����K�n�~z{�K����j�NK��8$��7F�&�6�66�V�2K��i��7F�fR6��G&7G>8"���f��R�6��FV�B7G&��rX+>XZR�EEy�NK�Z��ɠ��������&W&U&WVW7C��G�S�76�v���S�&WVW7EFW�@�W�&W76���"g�FV��FW2���V�B����B�&WVW7B���� �6V�C��G�S�F����6�â"7��GG���V�B��7B�&�G��G�U�T2�d%2�&WVW7EFW�Gҗ� ���ࠤf��RK�R7G&�7BUDbӂFW�B��X�n8$f��RXZ~y�BG�������r7�����K��i��'V�F��RW�&W76���>�ɷfƖFF���{z����i�.K��i�>Y�X��ZIn�:�&W6�W&6^8%'V��FV'Vri�266�R6����VB�����K�nYʂf��Rf��vW'&��BiK���i�.ZKiX��ɴ��Bi�>x+�66V�&��g&VW�R[{.��~�؞y�Bf��R�FV�F�G�86��FV�BX����8$f��R�WGWBK��i�>Xhފ*�y[nK��iky�BW�&W76���6�W&6R�z>i�8 ��h�ދG�VBf�VR[�^��i��z+�K��yJ�&WVW7Df�&�N�ɠ��������6V�C��G�S�F����6�â"7��GG���V�B��7B�&�G��G�U�T2��UB�&WVW7G��&WVW7Df�&�C�v�6��r�� ���ࠤ��B66V�&�����[~���6��v�R�F&vWB�c�j�[��{i>yKj�~X�"c�"�c�2��FW"�~z{����Xh�h��66�V�fW'6���X�~�{2GB���B�c�n8%&��BFVfV�G2X��K�ZI�X�v�&���BX[yJ��ɾj��X�v�&���By�B��WG68f'68��B�Ɩ7�X��W�V7WF������Z�i�>�hn�8�y��hx�&��BX�8%F���WfV�F�&W6���G2X��[�ik�vw&VvF^�ɷv�&���BF�&W6���G2[�^��YʎYBv�&���BZ�>Y����K��i�>[��&��B{��h��8&��WG6K��[�hx�U�T2��UN�ɶf'6Yʎj��X�W�V7WF���y�BU�T2�B��rU�T2��UEUE�D�"X��Zx�X�n[��8F&vWBYY�X�^X�ފ�^K�8.Z��i[B&VfW&V�6RK��yY��F�fRG�^���FWV�FV�7�K��X�~Z�>Y��n[��[�����ɾ[�y+X��W�FW&���7FFVgV�6��2i�>YʎY�~��X��h�.{Y^8$��B�FW&F����FV�F�G�x��yKV�v��Rz�yn�ɾz{���N���W�V7WF����W�V4�Df�&�F8$6��6VBv�&���BX��yJ�U�T2���B�U4U%��N���'&�f��&FRk).iȞj�Nj�NK��8 ��j�~X�.y�BGB���B�&�f��R�c��Ɩ7�f��RX8^K�֖w&F���K��yJ��ɮK��yJ�X�ފ��iK�Z��x+�x����Ɩ7����ǒGB���B�c�fFW67&�F�.�ɾZ�>K��i��x�����B���B���z�NK�8 ��V�7W�'FVB66�V�fW'6���i�>YʂW�V7WF���X��ZKiY~K�nh�K�֖w&F���wV�F�6^8$EBK��i�>�z�X�^iK�Z��6�v^���K��K��i�>x+�yJ.yI����ik~��Y�X��ZIn�:�&W6�W&6^8.��>�h��7F�����~Y�X�^X�nX�҇&VfW&V�6R禂�7F���2��B�8�'V�F��R��r6��FW�Bj�Y�҇&VfW&V�6R禂�'V�F��R�6��FW�B��B�8���Bj�[��҇&VfW&V�6R禂�W�V7WF������FW2���B��B���u�66�V�y����5҇&VfW&V�6R禂�V�F�6W2�66�V���G&����B�8 ��222��B֗�֖w&F��࠮x��iȒGB���B�c�Vj�Nj�K��y��Z�8.X�~{I��{2GB���B�c�f[�����X��[rv�&���By�BF&vWFiK�x+�֗���Ί��Z�6��6VB�W6W"vV�v�FVBF&vWB֗�8.j��X�V�G'����hYJ�K��F8j�>i[Ni[�vV�v�F���K�^X��FV��F^8f��rh�bF���F&vWN8.x���7V��'�6��G&7Bx+�GB���B�7V��'��c��ɷc�K��yY�K��j�~X�.j�[��8 ��222��7F�&�6�66�V�֖w&F��ࠤEB2�b�"K��yJ�GB�FV��FR�c2�f��rGB�f��r�c2�fK��x+�7F�fR66�V�>8.[{.y��[�>y�BGB�FV��FR�c2�V8GB�f��r�c2�VX��i�N���Z�{�K��yY�ik�66�V�2���7F�'���ɾX[nK����7F�&�6�D"��r&V�FW"7F���X��K�6��F�&�ƗG�K��yJ����K��i��7F�fR6��G&7N8.�~z{��	�K��FW67&�F�"i�.���XX�[r66�V�fW'6���iK�x+�c2�n���Xh�ZY~yJ�K�^K��j�NK�ފ�i�N8 �����7F�&�6�6��f�wW&F����2�b�"[�.[���������������GB�FV��FR�c2�6h�bGB�f��r�c2�6�XX�hȒ��7F�&�6�&V�V6R֖w&F����~z{��{2c2�N���Xh�iK�x+�c2�bK�n�~z{�&V�FW"�D"7F���8"�����7F�&�6�G�S�F&X��VW'��WFFV�iK�x+�i��	�G�S�F���7F������K��yJ�7�F"�ƖC��VW'������866�"����h�bWFFR�����ɷVW'��66�"X��&WG'����WFFRK��X��WF��F�2&WG'�8"�����7F�&�6�7�f��V�iK�yJ�Yj�K�7G&��r&wV�V�B7��g�6�vR�&V�F�fR�7��f��W��ɶ&�6��r&�WFW'6K�.ij^8"�����7F�&�6�G�S�&V�FW&�iK�x+�K��yJ�"g�6�vR�&V�F�fR�f��W�&W�&W76���y�B76�v��ɾ[��{��7F���K��yJ�G�U�T2�d%2����S��8"���6����BF���&W7V�B�f�&�B�F���FW67&�F�"7FF�WDf�&�B���&V�FW"&W7V�B�f�&�B�F���fW'w&�FRh�b&V�FW$2�6fT2�z{���N���W'6�7FV�6Rj�NK��8$f��R�6��FV�BW�&W76���Y��X+2W�7BUDbӂ7G&��~���K��i�>��[��[��z��{Yi��j�N8"�����rf��R�[rG�VBf�VRy�Nh�^X+>XZR��r�f�VR�����rf�V�G2�[rG�VB��Ɨ7BiK�XZR��r�f�V^���K�nh�~Z���r�f�&�B���&V�FW"F&vWDf��W2��F�fb�{2�EE���54��[rf��R�6��FV�B7G&��ry�Nh�^K��x+��EE&�G�8����Bh�b54�W��B���B���Yʂ&V�FW"&W7V�BK��yJ�&WVW7Df�&�B�z{���N�ɷ&WVW7Df�&�ByY�{Znh�ދ��Ɨ7B���f��R�6��FV�BF�y��[�ik�6���6�6�vR&��N8&����r���X��iȞYʂ6���6�F&vWBK��K��ikΊ�"&��BXZ~i�.h��XX��8'ck).iȒv��"h�bG��֖2��6F�.�ɷF&vWB[�^��i��&VwV�"7G&�7B�UDbӂf��^8 ��V�7W�'FVB66�V�fW'6���i�>YʂW�V7WF���X��yKfƖFF���h�.{Y^K�nh�K�֖w&F���wV�F�6^8$EBK��i�>��Λ���؞h�����j�NK�����K��K��i�>x+�yJ.yI�wV�F�6R��Y�X��F���2�&W6�W&6W>8 ����UD'V�F��R�B6��FW�B��FV�҇&VfW&V�6R禂�'V�F��R�6��FW�B��B����i���UDƖfV7�6�^�ɵ���B��FU҇&VfW&V�6R禂�W�V7WF������FW2���B��B����i��W�V7WF����FV�F�G�Y(�&WF��VBWf�FV�6R�z�[�8 ��222FV'Vr66�V�֖w&F��ࠦGB�FV'Vr�c�X��GB�FV'Vr�c�x+���7F�&�6�66�V��ɾ���X�~{I��{2GB�FV'Vr�c�&8%FV��FR�f��rX���X�{��f'6K�R6VVBU�T2�d%6�ɵF���K��iJ�h�Bf'68.x���66�V�K�nXX��6�vR�&V�F�fRFW7FFF���'G>���K�n��Z�Yʂ7F�F���RFV'Vr��f�6F���8$��WB��r&wV�V�G2y�Nx��Ίh�X�~�h��FV'Vu҇&VfW&V�6R禂�W�V7WF������FW2�FV'Vr��B�8 ��222V�f�&���V�B&�f��R֖w&F��࠮[��y�B6���WFR�6��f�rGFW&��~z{�i�.���K��yY�FW67&�F�"��r7F������[r6�����6WGF��w2z{��{26��f�r�6��f�r���8YNy+Z(2FW67&�F�"Ɨ7G2z{��{2V�f�&���V�G2����S����K�nK�R��6��f�r6��f�r�6��f�r�����V�b���S���i8~y+Z(>8.x���6��G&7B�h��6��f�wW&F���҇&VfW&V�6R禂�6��f�wW&F�����B�8 ��222��BW�V7WF����FV�F�G�֖w&F��ࠤEBx+�j��X�7F'FVB�FW&F����X�{��YJ�K�y�BV�v��R���vVBU�T2�F�ɦ�'V�C��W�V7WF�����6WVV�6S�8.Y�K�'V�y�Nh�iȒv�&���N8F&vWN8֗�V�G'�X���6RX[yJ�K�X�F�&VB�6f^8Yj���Z)�y�B���6F�.8$�BYʂ&��G7G&f'2��rF&vWB7F���X��y��[�>�ɶU�T2�%T���FK��h�x+�ZIn[B'V��FV�F�G�8$6��Ɨ6���G&6���rK��i�>[��z��W"֗FW&F���j�Nj�h�nh�{��Z)�[~y�B�B&Vv�7G'�8 ��y��X��X��j�~X�"��B66V�&��8�Ɩ7����ǒ���8��Ɩ�RG&gN���K�^X��[{.XK.Zَy�B66�VGV�^���v�&�W"6�6��N��Θ;�h�.{YRW�V7WF����W�V4�Df�&�F���X�^h��z��X�8.���z{���Nj�Nj�NK��K�n�~z{��{2GB���B�c����j�.i�^K�ދ;B'F�f7BF�y�Ni[NY����iK�yJ�xڎz����WN���f&�&�RK��Zق'W6��W726�'&V�F���8.j�~X�"'F�f7BK��yY�X���z�[��ɾj�~X�"66�V�j�Nj�K��K�j�.�in8.K��Y
+��z���"�By�Nj�~X�.�8~k�i�>j�>�h�X�n�{>y��X��6��G&7N8.X�~[����y�B���WF&�R66�VGV�R������K����&Wf�WvVB�G&gBkXz��[��z��i��K�>x��i��8 ��yI�h��Bk+�yJ�Z�XZ�F�6Vv�V�Bw&��"X��#CZ�~XX>K�����ɵ'V��B[�^���	yY��W�V7WF������r6�v�VB����r6WVV�6Rz���i>8%6WVV�6R�	~y�[��h�{��ZKiY~���K��i�2w&8.j��X�'V��WGWB��W76RX�������W�V7WF�����v�W&X��Z�6���K�j��ɾz��K��X��v�W"h�b&W7F'B[�^����yJ�iky�NZIn[B'V��N8$6���yKZ�XZ�y�B6���WFVBԦ�"'F�f7B&WFV�F������'V�y���Nk�^yn8.���&W6W'fF���y���NX��X��yK6���WFVBԦ�"&WFV�F���k�^yn���K�ވ;�Yʎ���&�6W72K��X���;�K��yJ�i�.X����N8$�WG&�72���ǒWf�FV�6RK��h�����ɾYj�K�'V��WFFFj�NK��i�>[��z���FW&F���v�&�76^8 ��ZIn[BW�V7WF����'V�Df�&�F8W�V7WF����FV'Vt�Df�&�F8ƗFW&���'V�֖F��r��FV'Vr֖F��x+�K�ފ�8$F�v��7F�2�FW&F������e^���v�&���N���֗��B��r66�VGV�W"WfV�B6WVV�6RK��xڎz��ik�U�T2�F8.X�niZ>[��v�&�W"[�^��K��yJ�K�.K�ޘx�yh�y�B��W76Rh�nX[yJ����6F�.�ɾxڎz��&�6W72���6�6�V�FW"K�ވ;�Z�XZ�X[yJ�Y�K�'V���W76^8 ��222��Bc�&VF��W72��rv��F�vVB�WG&�70��GB���B�c���B66V�&��K��X���ȞXZ^���K�ni�>j�>�h�X�nx+�GB���B�c�8.y��X����BYY�X�^X��i�>Yʂ66�VGV�W"iK��X��k�nX)��*�[�^yJ�y�BD.�������EE�V�W.�ɵ%T�Y(�FV'Vr{j�h����&W6�W&6R��x+�8&GB���B�7V��'��c�&ikZ)��F����&W6�W&6R�&W&F���X��v��F�t�WG&�76FF���K�nK��yY�iz.iȒ7V��'�j�NK��8%&W�'B�	���K��yJ�7FVG�v��F�~�ɶF�&W6���G2�7FVG�Y(�F�&W6���G2��fW&��X����i8rv��F�r66�^8%v��F�rk).iȞ�k>ZJy�NZ��h�Wf�FV�6Ri�.Y��Z��E�Ud�TDTF���K�ވ;�y[nK��7>8%&W6�W&6R��X�nX���WG&�2Z�{꞊h����Bj�[��҇&VfW&V�6R禂�W�V7WF������FW2���B��B�8 ��22V�F��B(	BƖ֗G>86V7W&�G�wV&�FVW2��rGf�6VBF�v��7F�70��222Ɩ֗G2��~�	���X�����&�F�fRf�V�BFVfV�BK�^X[b�v�W"66�V�h�b6��f�wW&F���vRx+�k�n8.�xފh&6��FV7GW&RƖ֗BX�^h���ɠ�����B[�^��K�Θ�K�v�&���B��FV��ɰ��'&�f��&FR�fW&��B�Ɩ7�x+�G&��ɰ��j��j�f��r��f�6F���iȞiky�B7F���66�^��΋�NY��[��h.[�6��W"66�^�ɰ��D�vi��g&�Wv�&���v�VBWf�FV�6^���K��[�ik�W�&W76���G&V^�ɰ��&W6�W&6RƖfV7�6�R7FFRK��i��V&Ɩ26��FW�BG&V^�ɰ����Nih~K�ni��z+�XX��y�BW�FV�6�����6F����ȎK�Zh.iJ�h�NK��{��y�B&��B�Ҧ�ȞZIn���iʮy�R66�V�f�V�Bi�>�*�h�.{Y^8 ��F��V�WB&�v^8Wf�FV�6R6��R&�V�N8&W7V�BƖ֗N8���6��Rzؒ�W&F�����V�W&�2Ɩ֗BK��yK[�hx�66�V��FW67&�F�"Z�{���Θ�XX�i�Ι�N��Nh�x+�z��K��X�6�W&6R�bG'WF�8 ��2226���V7F�"&��V7F�����r&VF7F���wV&�FVW0��h�iȞZKiYr6���V7F�.�ȎX�^h��&WGW&�VB�W&F���W'&�"Y(�F�&�v�F���W�6WF����Ȟ�;�i�>XX�{i>��Y�K�V&Ɩ2&��V7F���Xh�y��[�>h�nZ����~8%&��V7F���y�yZR&r��WN8���N8&wn8�WGWN8&W6��fVB6����BFW�BY(�ZKiYr&V6�&By�B&W7V�F���K�NK��K�ފ؞K��yY�'6W$F�v��7F�68$�F�fRW'&�"�F�v��7F�2X��K��yY�Z�XZ�f�V�N�ɾj��X�K��yY�y�BFW�Bf�V�B��X�nx+�#BZ�~XX>8&��WD�֗GFVFY(�G'V�6F���f�r��zK�y�yZ^h�nh��ik~y�BWf�FV�6^8"g&VR�f�&��W76v^87FFW'.8W"֖�7F�6RW'&�"Y(�6�V�Wv&��ri�>YʎY��Z�'VFvWBXZr&VF7B7G&��~8G�VBFW�BY(�'&���WN�ɾi�ZI�j�.i�R#SbX���WB��F^8��"X�F��V�Z�~XX>���j��X�F��V�i�ZI�#BZ�~XX>8$'�FR'&�i�ZI���^yb#�'�F^�ȅUDbӎ8&6ScN8�W�Y(��fFV6���&V�FW&��~�Ȟ���X[nK�b'&�i�ZI�cBX�V�V�V�N�ɶ6�"'&�i�ZI�#BZ�~XX>8.�h^X{�K��K�'VFvWN8&�fFRF��V�[	ik�BZ�~XX>h�n�~X�iʮy�R��WBG�Ri�.���i�>yJ�Z�XZ��&�W"y�yZ^h�iȒg&VR�f�&�f��W&RFWF���ȎX�^h��W7G&V��G'V�6FVB6V7&WB&Vf����VB�F��V6���Ȟ���K�n���{����WE&VF7F���Ɩ֗FVFY(�f��W&TFWF��4�֗GFVF8.�h^��#BZ�~XX>y�Bg&VR�f�&�f�V�BK��i�>�*�y�yZ^K�nj�����G'V�6FVN�ɷ7G'V7GW&VB�WFFF{��{��K��yY�8%7G'V7GW&VB7FGW>86FVv�'�Y(�&W6�W&6R�FV�F�G�X��X��[~[�n��X�n8%54�f���WBi�>K��yY�i�ZI�cBX���7F�6Ry�B&�V�FVB�WFFF8W'&�"Y(�7FFW'.���XJ�XX�K��yY�ZKiYr��7F�6^�ɶ��7F�6T6�V�FY(���7F�6W5G'V�6FVF��zK�{��i[�Y(�y�yZ^y�B��7F�6^8"��^iȒ&�fFRF��V����K�B�W&F���h�b��7F�6R&V6�&Bj�����K�b6GW&R�FWF��G'V�6F����ȎZh"7FFW'%G'V�6FVFh�b7FFW'$'F�f7EG'V�6FVF�Ȟ��Ί�"&V6�&By�Bg&VR�f�&�f��W&RFWF��K��i�>�*�y�yZ^���K�^��XX�y��6V7&WB�*�X�~ik~[��k8Nk��&Vf���7Vff��8.k).iȒ&�fFRF��V�i�.X��K��yY�&�V�FVB&Wf�W~8%&�֗F�fR'&�y�NZ��i[BƗ7B&V�FW&��rY(�Yj�xڂV�V�V�B�;�i�>Yʎy��Y���FR�F��V�'VFvWBXZr&VF7N8"D"&WGW&�VBf��W&Ri�>[���F�fR&W7V�B�W'&�&h�X�nZ�XZ�7V��'��ȆG�V8&�V�FVB�&VF7FVB�W76vV87�7FFV8fV�F�$6�FVY(�Z�XZ�6�6V��F����WFFF�Ȟ���K��yY�ik�D"Wf�FV�6Ry�BW'&�&K�nyJ�ik�6���V7F�"y�BW'&�&�ɾK��i�>y��[�2&�w>8&�WFW'>85�FW�Bh�b&r&W7V�N8.ZKiYr6����By�B7FF�WFX��K��x+�xڎz��F�v��7F�2Wf�FV�6^���hȞ��r7FFW'&y��Y�y�B&�V�FVB�&VF7FVB��֗76����Ɩ7���^yn�ɾK��i�>K��x+�W'&�"��W76vVh�nh.[�ZKiYr&W7V�F8"�Wf�FV�6Ry�B&��BY(�W'&�"7V��'�i�>K��yY�6���WF���6�FV8&V6��6�FVY(�&�V�FVB7��&�Ɩ2&V6��8.Z�XZ���6F����WFFFX�^h���EE�WF��FY(�X8^Y
+�66�V�R���7B��'By�BW&��&�v�����K�^X���VWVT��vW&8��6�6Ė�7F�6V8��7F8�'F86���V�Y(�G&�7�'F8$�EEWf�FV�6Rk).iȒ&W6��fVB&WVW7B��WN���Y�j�NZKiYr6���V7F�"y�BU$�K�[�y�yZRF�8VW'�8g&v�V�BY(�W6W"��f����K�n���{��W&�F��֗GFVF�ɾK��k{�X�&r��WN8.xJk9^Z�XZ��z>i�h�n�h^��'VFvWBy�BU$�i�>K�^Z�XZ��&�W"y�yZ^8 ��222Gf�6VBF�v��7F�70��2222Y:�K��hH�ZIny[[��i�>��N[�b7F6�G&6^���hH�ZInXZ~�:�iX^����ȎK�Zh"�V�����FW$W�6WF���86�7467DW�6WF���8X��[Ni�^h�����ZَX�nZKiY~8X[nK�n���	i��'V�F��RW�6WF������h�n���F�������Vv�7FFTW�6WF������X�^h��X�^Yʂw&W"6W6RXZ~y�Nh8^k8�Ȟi�>Yʂ66R���vZ��XZ^iȞyX�y�B�EB��DU$��U%$�%�X�Z�8Y�~���6RX��X��Zx�6W6R6���8%fƖFF������Vv�&wV�V�DW�6WF���8[{.�َX�^y�BF�������G&�7�'Bf��W&^8F��V�WN���6�6V��F���876W'F���f��W&R��~K���������W76vR�WF6��RK��K��h�{+�{
+8.Y�K�F�&�v&�RX�>K��Y�i�.�*�&W6�W&6RW�V7WF�"Y(�7F���&�V�F'�yȾ�h����j��X�66R��rK��X��i�>Z��K�j�8%&W6�W&6R�7V6�f�2&VF7F����ȎX�^h��yKV�f�&���V�Bh�K�y�B54��FV�F�G��f��RF��Ȟi�>���Xh�X���"66R��~���K�nZY~yJ��{>[��{����rw&�F^��Θ�XX�ZIn[B7F���F�v��7F�2kJ�k��iʮX{�x��Yʂ6�F��VB7F6�y�NXZ~Z�8%7F6�i�ZI�������b�.�ɶ6��f�wW&VB6V7&WG2��~iX�hI��W��f�VR76�v��V�BK��i�>��K�8%V&Ɩ27F���Wf�FV�6RX��K��yY�{
+y�ޘ����N��Y�����6^���K��X�XZR7F6�8%'V�8FV'VrX��&WW6&�RF����EE���D"X[yJ��	�j)���vv��rF�8 ��2222x+�K����GB�&Fi�>�hk"�fV����h�n�^x+�K�����6�F���Yʂv��F�w2K��ZKiY~���YʎK�Θ.X�ny��[�>K�����GB�&Fi�>h��X�iȞx��i�Ή��y�B'V�F��R�.���K�Zh"Ɩ%�GB���6��B�"�b�&���X�����h�f��8.j��X�EE���R�Ɩ&X��K��yY�K�X�GB���6���fW'6�����&��Ί�>YY�X�^Y���;�i��z+���X�b'V�F��^8.k�z+�j��K�����GB�&Fi�>Yʂ�fV�K��ik�D�i�.K��yJ��fV��ɾk).iȒ�fV�i�.��Ι��h[{.iȞy�BF&vWE�6�76W68.XX�yJ�GB�&BfW'6���z+����YY�X�^Y��[��Xh�j
+��~ZY~K�n8 ��YY�X�^Y����2EB�z�����z�[�>�{��ɾZ�>xJk9^{�����ZIn�:�F���X��Y�~��ih~K�n8.���x+�v��F�w2�X�{���&F8�6�F8�vW%6�V���[>i���Ȏ���h��[���vW'6�V���w6�&wn�Ȟh�nX��yI�X��Y�~��ih~K�n��Έ�K��i���4�����ǒ�6�8%D�j
+��~�^[�v��F�w2D�U�F���Y�j�NZh"w6��	���Y�z�X���z>i�x+�w6��W�V8.{jފ�~ZI�[�>�{�x��i��i�.��Ί��K��h�X�>i[�ZY{HNY(�7FF�WB�ˎX{�j�[��K��{N8 ��2222x+�K����EB���i�>K��yJ��v�VFR��66����h�n�R�f54�X�NYXnZKiY~���y[bD�K��ZَYʎX��Y�~��76�i�.���EBi�>XJ�XX�K��yJ�i��Y�76�8.Zh.i��K��ZَYʎ���EBi�>h�>X���6�76�6����B��Bf�V�C�EBv���W6R�f54�Ɩ'&'��v�VFR��66����K�niK�yJ��fW�V26���V�8.�	�i���z�X�^Y�����K��i���z���
+>�	�h
+~k�Ί�n8 ��Y��Z�nx����[��K��Z��ɤEBX�^Y
+�6���v�F�V"��v�VFS��66��"�#��&���K�nK��h�n{h&�V�7�67F�^8.Z�>�hk.K�X�X����8���z�n������h�^y�B���76�����v����7G6yJ�K��Y�Nj�K��j����~�؞8.Z�>K��i�>��X�b���76��6��f�v���K��K��i�>�z�X�^K��yJ��V�54�vV�N�ɾ���X�{��K�X����K�NK�.X����y�B�FV�F�G�f��V8.Z�nz+�Y(�K�NK�.[��X�>K�Nh�zK�K��iJ�h�8 ��z�~k9^X��yJ�h
+~X�nk�ik��f����i�.�ɠ���z�~k9R��fY����X�b��in��ik�j������������������76��VC#SS�876��VCCC�����h�fR�h�b&�V�7�67F�R&�f�FW"�XJ�XX�K��yJ�i��Y��V�54�h�b�fR��ɾY
+nX�~��>z�ynY:h��h��Xxny�B&7&�b֦F����X�XZ^����i�"6�77F����7W'fS#SS��6�#Sf87W'fSCC��6�S&����h�f�h�b&�V�7�67F�R�XJ�XX�i��Y��V�54�h�b�f��ɾY
+nX�~K��yJ�h��Xxny�B&�V�7�67F�R&�f�FW"���6�6�#��Ǔ3T�V�76��6���Yʎh�iȒ�fx��i��K���;ޙ��h&�V�7�67F�R�XJ�XX�i��Y��V�54����h�nYʎi��X��z��YY�yJ�U2�t4��5E"6��W.���K�nk{�X�&�V�7�67F�R&�f�FW"���%4�4��76��'6{�Y�������ފ*��v�VFR��66�zhyJ��i�Niki��X��z��X�%4�4��"�'6�6�"�#Sf�'6�6�"�S&�h�nX[nK�nx��K�2��7B�W6W"ֶW�z�~k9^�ɾK�ފhYʎiʮ{i>Z��i�^y�Nh8^k8K���x�YY�4�����X�NYXnZKiY~i�.���XX�yJ�i��Y�76��f[�x��
+>h�^���Z�K����7BֶW�8�W��W�6��v^86��W"h�bW6W"ֶW�K��X˞�X�8.XJ�XX�X�~{I��fh�ni��X��z��z�~k9^��nY���Έ�K��i��[�X�b�66�������X�8 

@@ -75,8 +75,8 @@ workloads:
       reference: "REF-${EXEC.LOAD.USER_ID}-${EXEC.LOAD.ITERATION}"
     load:
       users: 20
-      warmup: 10s
       rampUp: 5s
+      warmup: 10s
       duration: 1m
       rampDown: 5s
     execution:
@@ -167,7 +167,7 @@ For DB work, use the connection-lease time in the same estimate: DB operations/s
 
 For MQ request/reply, 10 requests/second with a mean 3-second reply time likewise needs about 30 leased connections across the workload. Size `pool.maxSize` for the expected in-flight requests **per physical MQ instance**, not per logical helper. With a single instance (or calls pinned to one instance), that is about 30 plus headroom. With two evenly selected instances, it is about 15 per instance on average; account for selection skew and verify the actual distribution. `resources.mq` reports pool metrics per physical instance, so inspect each pool's waiting and timeout metrics alongside response latency. `minIdle` is applied when that physical pool is first created on use; it does not create or warm the pool before Load starts. To move connection creation out of measured steady-state latency, combine `minIdle` with a Load warm-up/first-use warm-up phase. Recalculate from observed mean latency as load changes; tail latency is useful for headroom, but is not the mean used by the estimate.
 
-duration is required. warmup, rampUp and rampDown default to zero. Warm-up sends real traffic but is excluded from measured threshold aggregates. Optional seed makes closed-VU think-time randomization deterministic.
+duration is required. rampUp, warmup and rampDown default to zero. Generation runs in Ramp-up → Warm-up → Steady → Ramp-down order, then DRAIN lets admitted work finish without new arrivals: ramp-up increases from zero to the configured target, warm-up sustains that full target, and ramp-down decreases it after steady duration. Ramp-up and warm-up send real traffic but both are excluded from measured metrics and threshold denominators; measured load is Steady + Ramp-down. For example, a 100/s target with 60s ramp-up, 60s warm-up, 180s steady duration and 60s ramp-down schedules 3,000 + 6,000 + 18,000 + 3,000 = 30,000 arrivals. Existing saved descriptors keep their values and history; rerunning one uses the new order and does not reproduce the old phase timing. Optional seed makes closed-VU think-time randomization deterministic.
 
 ## Identify iterations and find their artifacts
 
@@ -213,9 +213,9 @@ When checkpointing is enabled, ATT writes versioned aggregate and workload metri
 
 For long scenarios, the Engine performs a read-only preflight and records `resources.preflight` in the summary. It reports a planning estimate for retained event files and bytes, configured evidence quotas, retained Tool output, the artifact archive limit, and low or unavailable output disk space. The estimate uses 4 KiB per retained event and excludes Tool output; actual sizes vary. These warnings do not reject a run solely because of its duration. Browser inline drafts and package-backed scenarios follow the Server's configured effective-envelope cap (`server.inlineLoad.maxDurationSeconds`, up to 10 days). The opt-in manual CLI Local benchmark is documented in the [25-hour LOAD soak acceptance guide](../../operations/load-soak-acceptance.md).
 
-Load v1.9 adds event-time windows named `all`, `measured` and `steady`. `measured` starts after warm-up and includes ramp-up, steady and ramp-down; `steady` covers only the configured steady duration. The HTML report opens on `steady` and lets readers select another window. Scheduled, started and completed rates use the timestamp of each event and the configured window duration. `startedRate` therefore remains event-time. `admissionRate` instead uses the same scheduled cohort: arrivals scheduled in the window that start by run finish divided by all arrivals scheduled in that window; arrivals still unstarted at finish count as not admitted. Latency percentiles and outcome counts use the scheduled cohort, so a drained iteration remains attributed to the phase where it was scheduled. Existing top-level metric names and their legacy meanings remain available.
+Load v1.9 adds event-time windows named `all`, `measured` and `steady`. `measured` starts after ramp-up and warm-up and includes steady and ramp-down; `steady` covers only the configured steady duration. The HTML report opens on `steady` and lets readers select another window. Scheduled, started and completed rates use the timestamp of each event and the configured window duration. `startedRate` therefore remains event-time. `admissionRate` instead uses the same scheduled cohort: arrivals scheduled in the window that start by run finish divided by all arrivals scheduled in that window; arrivals still unstarted at finish count as not admitted. Latency percentiles and outcome counts use the scheduled cohort, so a drained iteration remains attributed to the phase where it was scheduled. Existing top-level metric names remain available; measured aggregates include scheduled STEADY and RAMP_DOWN work only.
 
-Nested `thresholds.steady` and `thresholds.overall` evaluate against the steady and all-execution windows. Existing top-level thresholds retain their previous measured-run semantics. An incomplete or unevaluable window returns `NOT_EVALUATED`; it is not a performance pass. Reports show execution status separately from the performance verdict and disclose the percentile sample and observation counts so sparse estimates are visible. Direct Engine/CLI summaries use legacy summary contract (schema under `schemas/history/`); archived reports use the additive `att-load-summary/v1.3` schema with optional detail-manifest and workload-sidecar references.
+Nested `thresholds.steady` and `thresholds.overall` evaluate against the steady and all-execution windows. Top-level measured thresholds use the corrected measured interval, `STEADY + RAMP_DOWN`; ramp-up and warm-up are excluded. An incomplete or unevaluable window returns `NOT_EVALUATED`; it is not a performance pass. Reports show execution status separately from the performance verdict and disclose the percentile sample and observation counts so sparse estimates are visible. Direct Engine/CLI summaries use legacy summary contract (schema under `schemas/history/`); archived reports use the additive `att-load-summary/v1.3` schema with optional detail-manifest and workload-sidecar references.
 
 In the summary's `thresholds` object, `status` and `performanceVerdict` are authoritative and use `MET`, `NOT_MET` or `NOT_EVALUATED`. `legacyPassed` is an optional compatibility boolean that retains the previous `passed()` semantics: it is false when configured thresholds are unevaluable and true when no thresholds are configured. Consumers should use the tri-state fields to distinguish incomplete evidence from a missed threshold.
 
@@ -247,7 +247,7 @@ Load startup also compiles the selected Template/Flow action sequence, primary T
 
 ## Override workload settings from the CLI
 
-For one workload, options such as --users, --arrival-rate, --warmup, --ramp-up, --duration, --ramp-down, --think-time and --max-concurrent can override matching YAML values. Unscoped load-model overrides fail for multi-workload scenarios.
+For one workload, options such as --users, --arrival-rate, --ramp-up, --warmup, --duration, --ramp-down, --think-time and --max-concurrent can override matching YAML values. Unscoped load-model overrides fail for multi-workload scenarios.
 
 Repeatable `--set` accepts `input.path=value`, Tool-only `arg.name=value`, or Template/Flow-only `vars.path=value`. Values use safe YAML parsing and remain typed; nested maps and numeric list indexes are supported where practical, for example `input.customer.ids[0]=42`. Duplicate assignments apply in order (last wins). ATT expressions are not evaluated during option parsing. Unqualified overrides are rejected for multi-workload scenarios.
 
@@ -288,7 +288,7 @@ Outer `execution.runIdFormat`, `execution.debugIdFormat`, exact `--run-id` and `
 
 ## Error rates and failure diagnosis (4.2.4)
 
-Measured completions are divided into PASS, SUT failures, and runtime ERROR/INVALID. Warm-up is excluded from measured rates; it can still make execution ERROR. Generator drops remain separate.
+Measured completions are divided into PASS, SUT failures, and runtime ERROR/INVALID. Ramp-up and warm-up are excluded from measured rates; either can still make execution ERROR. Generator drops remain separate.
 
 | Metric | Numerator / denominator |
 | --- | --- |

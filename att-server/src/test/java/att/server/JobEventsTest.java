@@ -235,6 +235,87 @@ class JobEventsTest {
         assertEquals("ATT-JOURNAL-PERSISTENCE-DEGRADED",journal.diagnostic().get("code"));
     }
 
+    @Test void liveListenerDeliveryStaysOrderedWhenConcurrentAppendOvertakesACallback() throws Exception {
+        java.util.concurrent.Executor dispatcher = command -> {
+            Thread worker = new Thread(command, "test-job-event-dispatch");
+            worker.setDaemon(true);
+            worker.start();
+        };
+        JobEvents journal = new JobEvents(temp.resolve("ordered-listeners.jsonl"), 32,
+                JobEvents.DEFAULT_MAX_JOURNAL_BYTES, JobEvents.MAX_RETAINED_MEMORY_BYTES, Runnable::run, dispatcher);
+        CountDownLatch firstCallbackEntered = new CountDownLatch(1);
+        CountDownLatch releaseFirstCallback = new CountDownLatch(1);
+        CountDownLatch bothCallbacksDelivered = new CountDownLatch(2);
+        List<Long> delivered = java.util.Collections.synchronizedList(new java.util.ArrayList<>());
+        AutoCloseable subscription = journal.listen(event -> {
+            long id = ((Number) event.get("id")).longValue();
+            if (id == 1L) {
+                firstCallbackEntered.countDown();
+                try {
+                    if (!releaseFirstCallback.await(5, TimeUnit.SECONDS)) throw new IllegalStateException("callback gate timed out");
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    throw new IllegalStateException(interrupted);
+                }
+            }
+            delivered.add(id);
+            bothCallbacksDelivered.countDown();
+        });
+        journal.append("progress", Map.of("sequence", 1));
+        assertTrue(firstCallbackEntered.await(5, TimeUnit.SECONDS));
+
+        Map<String, Object> second = journal.append("progress", Map.of("sequence", 2));
+        assertEquals(2L, second.get("id"), "the next append can persist while the earlier listener is blocked");
+        assertEquals(2L, ((Number) journal.after(1L, 1).get(0).get("id")).longValue(),
+                "a client reconnecting from the first delivered ID can replay the second event");
+        releaseFirstCallback.countDown();
+        assertTrue(bothCallbacksDelivered.await(5, TimeUnit.SECONDS));
+        subscription.close();
+
+        assertEquals(List.of(1L, 2L), delivered, "callbacks must follow durable cursor order");
+    }
+
+    @Test void durableIdGapRemainsDiagnosedButCanCompactAfterStorageRecovers() throws Exception {
+        Path file = temp.resolve("recoverable-id-gap.jsonl");
+        java.util.concurrent.atomic.AtomicLong usable = new java.util.concurrent.atomic.AtomicLong(64L * 1024L * 1024L);
+        JobEvents journal = new JobEvents(file, 3, 640, JobEvents.MAX_RETAINED_MEMORY_BYTES,
+                Runnable::run, () -> { }, usable::get);
+        journal.append("progress", Map.of("sequence", 1));
+        usable.set(0L);
+        journal.append("progress", Map.of("sequence", 2));
+        usable.set(64L * 1024L * 1024L);
+        java.lang.reflect.Field retry = JobEvents.class.getDeclaredField("nextPersistenceRetryNanos");
+        retry.setAccessible(true);
+        retry.setLong(journal, 0L);
+        journal.append("progress", Map.of("sequence", 3));
+
+        assertEquals(List.of(1L, 3L), Files.readAllLines(file).stream().map(line -> {
+            try { return ((Number) new com.fasterxml.jackson.databind.ObjectMapper().readValue(line, Map.class).get("id")).longValue(); }
+            catch (Exception failure) { throw new IllegalStateException(failure); }
+        }).toList());
+
+        JobEvents reopened = new JobEvents(file, 3, 640, JobEvents.MAX_RETAINED_MEMORY_BYTES,
+                Runnable::run, () -> { }, usable::get);
+        assertEquals(3L, reopened.latest());
+        assertEquals(true, reopened.metrics().get("sequenceGapDetected"));
+        assertTrue(reopened.historyDegraded(), "missing durable IDs remain visible as incomplete history");
+        for (int id = 4; id <= 40; id++) reopened.append("progress", Map.of("sequence", id));
+
+        assertTrue(Files.size(file) <= 640, "hard-cap compaction must recover the durable byte budget");
+        assertEquals(40L, reopened.latest(), "compaction must not reuse a missing ID");
+        List<Long> durableIds = Files.readAllLines(file).stream().map(line -> {
+            try { return ((Number) new com.fasterxml.jackson.databind.ObjectMapper().readValue(line, Map.class).get("id")).longValue(); }
+            catch (Exception failure) { throw new IllegalStateException(failure); }
+        }).toList();
+        assertTrue(durableIds.stream().allMatch(id -> id > 0L));
+        assertTrue(durableIds.get(durableIds.size() - 1) == 40L);
+        assertTrue(java.util.stream.IntStream.range(1, durableIds.size()).allMatch(i -> durableIds.get(i) > durableIds.get(i - 1)));
+        JobEvents recovered = new JobEvents(file, 3, 640, JobEvents.MAX_RETAINED_MEMORY_BYTES,
+                Runnable::run, () -> { }, usable::get);
+        assertEquals(40L, recovered.latest());
+        assertEquals(true, recovered.metrics().get("sequenceGapDetected"));
+    }
+
     @Test void memoryShareRetainsOneBoundedNewestEventAndReportsItsOverage() throws Exception {
         JobEvents journal=new JobEvents(temp.resolve("small-memory-share.jsonl"),100,1024*1024,1024,Runnable::run);
         journal.append("log",Map.of("console","x".repeat(5000)));
@@ -256,7 +337,10 @@ class JobEventsTest {
         subscription.close();
 
         assertEquals(140,journal.latest());
-        assertEquals(15,Files.readAllLines(file).size(),"ID 128 compacts to the retained three before later appends");
+        List<String> initialJournal = Files.readAllLines(file);
+        assertTrue(initialJournal.size() > 3, "compaction should wait until obsolete bytes approach a retained-window write");
+        assertEquals(140L, ((Number) new com.fasterxml.jackson.databind.ObjectMapper()
+                .readValue(initialJournal.get(initialJournal.size() - 1), Map.class).get("id")).longValue());
         JobEvents reopened=new JobEvents(file,3,Runnable::run);
         assertEquals(3,Files.readAllLines(file).size(),"Reopen compacts the trimmed retention window");
         AutoCloseable reopenedSubscription=reopened.listen(event->delivered.add(((Number)event.get("id")).longValue()));
@@ -389,47 +473,67 @@ class JobEventsTest {
             try {if(!allowReplace.await(5,TimeUnit.SECONDS))throw new IllegalStateException("test compaction gate timed out");}
             catch(InterruptedException interrupted){Thread.currentThread().interrupt();throw new IllegalStateException(interrupted);}
         });
-        for(int i=1;i<=128;i++)events.append("progress",Map.of("sequence",i));
+        for(int i=1;i<=512&&snapshotWritten.getCount()>0;i++)events.append("progress",Map.of("sequence",i));
         assertTrue(snapshotWritten.await(5,TimeUnit.SECONDS),"Compaction should run asynchronously after the append returns");
+        long snapshotId=events.latest();
+        assertTrue(snapshotId>128,"a snapshot is triggered by accumulated obsolete bytes after filling retention");
         JobEvents restartedDuringCompaction=new JobEvents(file,128,Runnable::run);
-        assertEquals(128,restartedDuringCompaction.latest());
+        assertEquals(snapshotId,restartedDuringCompaction.latest());
         assertEquals(128,restartedDuringCompaction.after(0).size());
 
-        for(int i=129;i<=144;i++)events.append("log",Map.of("sequence",i));
+        for(long i=snapshotId+1;i<=snapshotId+16;i++)events.append("log",Map.of("sequence",i));
         allowReplace.countDown();
 
         long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(5);
         while(Files.readAllLines(file).size()!=128&&System.nanoTime()<deadline)Thread.sleep(5);
         JobEvents recovered=new JobEvents(file,128,Runnable::run);
         assertEquals(128,Files.readAllLines(file).size(),"Compaction should retry from a fresh snapshot when the tail exceeds retention");
-        assertEquals(144,recovered.latest());
-        assertEquals(16,recovered.after(128).size());
+        assertEquals(snapshotId+16,recovered.latest());
+        assertEquals(16,recovered.after(snapshotId).size());
         assertEquals(128,Files.readAllLines(file).size());
     }
 
-    @Test void failedCatchUpWaitsForNextAppendThresholdAndThenMakesProgress() throws Exception {
+    @Test void failedCatchUpDefersUntilSynchronousHardCapCompaction() throws Exception {
         Path file=temp.resolve("bounded-compaction-retry.jsonl");
-        java.util.concurrent.atomic.AtomicInteger compactions=new java.util.concurrent.atomic.AtomicInteger();
+        long maxJournalBytes=20_000L;
+        java.util.concurrent.atomic.AtomicInteger snapshots=new java.util.concurrent.atomic.AtomicInteger();
         final JobEvents[] journal=new JobEvents[1];
-        journal[0]=new JobEvents(file,128,Runnable::run,()->{
-            if(compactions.getAndIncrement()==0) {
+        journal[0]=new JobEvents(file,128,maxJournalBytes,Runnable::run,()->{
+            if(snapshots.getAndIncrement()==0) {
                 try {
                     for(int i=1;i<=33;i++)journal[0].append("progress",Map.of("burst",i));
                 } catch(Exception failure) {throw new IllegalStateException(failure);}
             }
-        });
+        },()->Long.MAX_VALUE);
 
-        for(int i=1;i<=128;i++)journal[0].append("progress",Map.of("sequence",i));
-        assertEquals(1,compactions.get(),"An oversized catch-up must not immediately resubmit compaction");
-        assertEquals(161,journal[0].latest());
-        assertEquals(161,Files.readAllLines(file).size(),"A failed snapshot must leave the original journal intact");
+        for(int i=1;i<=512&&snapshots.get()==0;i++)journal[0].append("progress",Map.of("sequence",i));
+        assertEquals(1,snapshots.get(),"An oversized catch-up must not immediately resubmit compaction");
+        long firstLatest=journal[0].latest();
+        assertTrue(firstLatest>128,"size-based compaction waits for an obsolete retained-window worth of bytes");
+        Map<String,Object> afterFailedSnapshot=journal[0].metrics();
+        assertEquals(1L,((Number)afterFailedSnapshot.get("compactionAttempts")).longValue());
+        assertEquals(1L,((Number)afterFailedSnapshot.get("compactionFailures")).longValue());
+        assertEquals(true,afterFailedSnapshot.get("asyncCompactionDeferred"));
 
-        for(int i=162;i<=256;i++)journal[0].append("progress",Map.of("sequence",i));
-        assertEquals(2,compactions.get(),"The next event threshold should retry compaction once");
-        assertEquals(256,journal[0].latest());
-        assertEquals(128,Files.readAllLines(file).size(),"A later snapshot should restore the configured disk window");
+        long previousSize=Files.size(file);
+        boolean hardCapCompacted=false;
+        for(int i=1;i<=1000&&!hardCapCompacted;i++) {
+            journal[0].append("progress",Map.of("sequence",firstLatest+i));
+            long currentSize=Files.size(file);
+            hardCapCompacted=currentSize<previousSize;
+            previousSize=currentSize;
+        }
+        assertTrue(hardCapCompacted,"The byte limit should trigger synchronous compaction after async compaction is deferred");
+        assertEquals(1,snapshots.get(),"The failed asynchronous snapshot must not be retried before hard-cap compaction");
+        Map<String,Object> afterHardCap=journal[0].metrics();
+        assertEquals(2L,((Number)afterHardCap.get("compactionAttempts")).longValue());
+        assertEquals(1L,((Number)afterHardCap.get("compactionFailures")).longValue());
+        assertEquals(true,afterHardCap.get("asyncCompactionDeferred"),
+                "A failed catch-up should keep async snapshots deferred after synchronous hard-cap recovery");
+        assertTrue(Files.size(file)<=maxJournalBytes,"The synchronous compaction must keep the journal within its byte budget");
         JobEvents recovered=new JobEvents(file,128,Runnable::run);
-        assertEquals(256,recovered.latest());
-        assertEquals(128,recovered.after(128).size());
+        assertEquals(journal[0].latest(),recovered.latest());
+        assertTrue(recovered.after(0).size()<=128,"Recovery must stay within the configured retention count");
+        assertFalse(recovered.after(0).isEmpty(),"Recovery must retain the latest journal events");
     }
 }

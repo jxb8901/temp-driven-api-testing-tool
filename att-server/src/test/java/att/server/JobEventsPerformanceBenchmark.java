@@ -33,7 +33,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class JobEventsPerformanceBenchmark {
     private static final ObjectMapper JSON = new ObjectMapper();
     private static final int DEFAULT_CAPACITY = 2048;
-    private static final String PAYLOAD = "x".repeat(128);
+    private static final String PAYLOAD = "x".repeat(1024);
 
     @TempDir Path temp;
 
@@ -43,6 +43,7 @@ class JobEventsPerformanceBenchmark {
         int warmups = integerProperty("att.server.benchmark.warmups", 1, 0);
         int runs = integerProperty("att.server.benchmark.runs", 3, 1);
         int capacity = integerProperty("att.server.benchmark.capacity", DEFAULT_CAPACITY, 1);
+        int writerTimeoutMinutes = integerProperty("att.server.benchmark.writerTimeoutMinutes", 30, 1);
 
         Map<String, Object> results = new LinkedHashMap<>();
         int scenarioNumber = 0;
@@ -50,7 +51,7 @@ class JobEventsPerformanceBenchmark {
             for (int jobCount : concurrentJobs) {
                 String scenario = "events-" + eventCount + "-jobs-" + jobCount;
                 for (int sample = 0; sample < warmups + runs; sample++) {
-                    Map<String, Object> measurement = measure(eventCount, jobCount, capacity,
+                    Map<String, Object> measurement = measure(eventCount, jobCount, capacity, writerTimeoutMinutes,
                             temp.resolve("scenario-" + scenarioNumber++));
                     if (sample >= warmups) {
                         @SuppressWarnings("unchecked") List<Map<String, Object>> samples =
@@ -68,9 +69,12 @@ class JobEventsPerformanceBenchmark {
         report.put("schemaVersion", "att-server-events-benchmark/v1");
         report.put("environment", environment());
         report.put("settings", Map.of("warmups", warmups, "runs", runs, "capacity", capacity,
+                "writerTimeoutMinutes", writerTimeoutMinutes,
                 "payloadBytes", PAYLOAD.getBytes(java.nio.charset.StandardCharsets.UTF_8).length,
                 "eventsPerJournal", Arrays.stream(eventsPerJournal).boxed().toList(),
-                "concurrentJournals", Arrays.stream(concurrentJobs).boxed().toList()));
+                "concurrentJournals", Arrays.stream(concurrentJobs).boxed().toList(),
+                "equivalentHoursAt100EventsPerSecond", Arrays.stream(eventsPerJournal).mapToDouble(events -> events / 360000.0).toArray(),
+                "equivalentHoursAt500EventsPerSecond", Arrays.stream(eventsPerJournal).mapToDouble(events -> events / 1800000.0).toArray()));
         report.put("scenarios", scenarios);
 
         String baselineName = System.getProperty("att.server.benchmark.baseline");
@@ -83,7 +87,8 @@ class JobEventsPerformanceBenchmark {
         System.out.println("Server event benchmark written to " + output);
     }
 
-    private Map<String, Object> measure(int eventsPerJournal, int jobCount, int capacity, Path root) throws Exception {
+    private Map<String, Object> measure(int eventsPerJournal, int jobCount, int capacity,
+                                        int writerTimeoutMinutes, Path root) throws Exception {
         Files.createDirectories(root);
         CountingExecutor compactor = new CountingExecutor();
         List<JobEvents> journals = new ArrayList<>();
@@ -134,7 +139,7 @@ class JobEventsPerformanceBenchmark {
             }
             assertTrue(ready.await(10, TimeUnit.SECONDS), "Benchmark writer threads should be ready");
             start.countDown();
-            for (Future<?> writer : writers) writer.get(2, TimeUnit.MINUTES);
+            for (Future<?> writer : writers) writer.get(writerTimeoutMinutes, TimeUnit.MINUTES);
         } finally {
             start.countDown();
             writerPool.shutdownNow();
@@ -148,16 +153,26 @@ class JobEventsPerformanceBenchmark {
 
         int retainedPerJournal = Math.min(eventsPerJournal, capacity);
         long diskBytes = 0;
+        long appendBytesWritten = 0, compactionBytesWritten = 0, compactionAttempts = 0, compactionFailures = 0;
         long replayStart = System.nanoTime();
         long replayCursor = eventsPerJournal - Math.min(100, retainedPerJournal);
         for (int job = 0; job < jobCount; job++) {
             assertEquals(eventsPerJournal, journals.get(job).latest());
-            assertEquals(retainedPerJournal, Files.readAllLines(files.get(job)).size(),
-                    "On-disk journal should retain exactly maxEventsPerJob events");
             JobEvents recovered = new JobEvents(files.get(job), capacity, Runnable::run);
             assertEquals(eventsPerJournal, recovered.latest());
+            assertEquals(retainedPerJournal, Files.readAllLines(files.get(job)).size(),
+                    "Restart should compact to the configured retained event window");
             assertEquals(Math.min(100, retainedPerJournal), recovered.after(replayCursor, 100).size());
             diskBytes += Files.size(files.get(job));
+            Map<String,Object> beforeRecovery = journals.get(job).metrics();
+            Map<String,Object> afterRecovery = recovered.metrics();
+            appendBytesWritten += ((Number) beforeRecovery.get("appendBytesWritten")).longValue();
+            compactionBytesWritten += ((Number) beforeRecovery.get("compactionBytesWritten")).longValue()
+                    + ((Number) afterRecovery.get("compactionBytesWritten")).longValue();
+            compactionAttempts += ((Number) beforeRecovery.get("compactionAttempts")).longValue()
+                    + ((Number) afterRecovery.get("compactionAttempts")).longValue();
+            compactionFailures += ((Number) beforeRecovery.get("compactionFailures")).longValue()
+                    + ((Number) afterRecovery.get("compactionFailures")).longValue();
         }
         for (int replay = 0; replay < 100; replay++) {
             for (JobEvents journal : journals) journal.after(replayCursor, 100);
@@ -175,6 +190,13 @@ class JobEventsPerformanceBenchmark {
         result.put("firstEventMs", nanosToMs(Math.max(0L, firstEventNanos.get())));
         result.put("replay100PagesMs", nanosToMs(replayNanos));
         result.put("diskBytes", diskBytes);
+        result.put("appendBytesWritten", appendBytesWritten);
+        result.put("compactionBytesWritten", compactionBytesWritten);
+        result.put("totalBytesWritten", appendBytesWritten + compactionBytesWritten);
+        result.put("writeAmplification", appendBytesWritten == 0L ? 0.0
+                : 1.0 + ((double) compactionBytesWritten) / appendBytesWritten);
+        result.put("compactionAttempts", compactionAttempts);
+        result.put("compactionFailures", compactionFailures);
         result.put("processCpuMs", processCpuMs);
         result.put("writerAllocatedBytes", writerAllocatedBytes.get());
         result.put("writerAllocatedBytesPerEvent", appendNanos.length == 0 ? 0.0 : writerAllocatedBytes.get() / (double) appendNanos.length);

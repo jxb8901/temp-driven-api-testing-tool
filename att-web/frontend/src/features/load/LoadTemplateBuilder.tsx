@@ -37,7 +37,7 @@ export function LoadTemplateBuilder(props: LoadFeatureProps & { templateId: stri
   const [mixTarget, setMixTarget] = useState<{ slot: number; value: TargetDraft } | null>(null);
   const model: LoadModel = definition?.mode.endsWith('tps') ? 'arrivalRate' : 'virtualUsers';
   const effectiveWorkloadEnvelopes=workloads.map(workload=>{
-    const phases=['warmup','rampUp','duration','rampDown'].map(field=>String(workload.loadPolicy?.[field]??timing[field as keyof TimingDraft]??''));
+    const phases=['rampUp','warmup','duration','rampDown'].map(field=>String(workload.loadPolicy?.[field]??timing[field as keyof TimingDraft]??''));
     return {id:workload.id,milliseconds:phases[2]?.trim()?effectiveLoadEnvelopeMs(phases):null};
   });
   const effectiveEnvelopeMs=effectiveWorkloadEnvelopes.length&&effectiveWorkloadEnvelopes.every(item=>item.milliseconds!=null)
@@ -149,12 +149,12 @@ export function LoadTemplateBuilder(props: LoadFeatureProps & { templateId: stri
     <label>Environment <select value={environment} onChange={event => onEnvironmentChange(event.target.value)}><option value="">Default environment</option>{environments.map(value => <option key={value}>{value}</option>)}</select></label>
       <EnvironmentResolutionNotice packageId={packageId} environment={environment} />
     <aside className="att-help" role="note">
-      <p>Browser-created and package-backed LOAD scenarios follow the Server duration limit shown below (up to 10 days). The limit applies to warmup, ramp-up, steady duration, and ramp-down combined.</p>
+      <p>Browser-created and package-backed LOAD scenarios follow the Server duration limit shown below (up to 10 days). The limit applies to ramp-up, warmup, steady duration, and ramp-down combined.</p>
       <button className="button button-quiet" type="button" onClick={() => navigation.navigate({ kind: 'load', tab: 'scenarios', catalog: { packageFilter: packageId, environment } })}>Open package LOAD scenarios</button>
     </aside>
     <p>{workloads.length} Workloads · {targets.length} Target bindings · {unique} Unique targets · {model === 'virtualUsers' ? `${workloads.reduce((sum,row) => sum + Number(row.users),0)} total VU` : `${workloads.reduce((sum,row) => { const [rate,unit] = row.arrivalRate.split('/'); return sum + Number(rate) / (unit === 'm' ? 60 : 1); },0)} configured arrivals/sec`}</p>
     {limits.maxTotalUsers > 0 && <p className="att-help">Server limits: {limits.maxWorkloads} workloads · {limits.maxTargets} bindings · {limits.maxTotalUsers} users · {limits.maxAggregateArrivalRatePerSecond} arrivals/sec · {limits.maxTotalConcurrent} total concurrent · {plannedWorkloadDuration(limits.maxDurationSeconds*1000)} ({limits.maxDurationSeconds}s) effective duration</p>}
-    {definition && <p className="att-help">Current effective envelope: {effectiveEnvelopeMs==null?'requires valid phase values':`${plannedWorkloadDuration(effectiveEnvelopeMs)} maximum across ${effectiveWorkloadEnvelopes.length} workloads`} (warmup + ramp-up + steady duration + ramp-down).</p>}
+    {definition && <p className="att-help">Current effective envelope: {effectiveEnvelopeMs==null?'requires valid phase values':`${plannedWorkloadDuration(effectiveEnvelopeMs)} maximum across ${effectiveWorkloadEnvelopes.length} workloads`} (ramp-up + warmup + steady duration + ramp-down).</p>}
     {definition && <>
       <button className="button button-quiet" type="button" onClick={() => setEdit({ kind: 'settings', timing: clone(timing), advanced: clone(advanced) })}>⚙ Common Settings</button>
       {!multiple && mixed ? <><label>Shared users <input type="number" min="1" value={workloads[0]?.users || ''} onChange={event => update(0,{ ...workloads[0], users: event.target.value })} /></label>{workloads[0] && mixTable(workloads[0], value => update(0,value), slot => setEdit({ kind: 'target', index: 0, slot, value: clone(workloads[0].mix[slot]) }))}</> :
@@ -176,7 +176,7 @@ export function LoadTemplateBuilder(props: LoadFeatureProps & { templateId: stri
       </>}
       {edit.kind === 'mix' && mixTable(edit.value, value => setEdit({ ...edit,value }), slot => setMixTarget({ slot, value: clone(edit.value.mix[slot]) }))}
       {edit.kind === 'settings' && <>
-        {(Object.keys(edit.timing) as Array<keyof TimingDraft>).map(key => <DurationField key={key} label={key} value={edit.timing[key]} onChange={value => setEdit({ ...edit, timing: { ...edit.timing, [key]: value } })} />)}
+        {(['rampUp','warmup','duration','rampDown'] as Array<keyof TimingDraft>).map(key => <DurationField key={key} label={{ rampUp: 'Ramp-up', warmup: 'Warm-up', duration: 'Measured duration', rampDown: 'Ramp-down' }[key]} value={edit.timing[key]} onChange={value => setEdit({ ...edit, timing: { ...edit.timing, [key]: value } })} />)}
         {(['execution','thresholds','evidence'] as const).map(key => <JsonObjectField key={key} label={key} value={edit.advanced[key]} onChange={value => setEdit({ ...edit, advanced: { ...edit.advanced, [key]: value } })} />)}
         <JsonArrayField label="Package Testdata paths" value={edit.advanced.testdata} onChange={value => setEdit({ ...edit, advanced: { ...edit.advanced, testdata: value } })} />
         <label>Seed <input type="number" value={edit.advanced.seed} onChange={event => setEdit({ ...edit, advanced: { ...edit.advanced, seed: event.target.value } })} /></label>

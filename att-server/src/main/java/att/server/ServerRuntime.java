@@ -1,4915 +1,1327 @@
-package att.server;
+YªçŠx-®éÜj×¢ëiºÚ+Š§j[h‘éÜ¢éí×~5÷Äèµ©hºÚn¶X§zÍ\XÚØYÙH]œÙ\™\Â‚š[\Ü]›Y]šXÜË’[œÜXİ[Û“Y]šXÜÎÂš[\Üİ]XÈ]›Y]šXÜË’[œÜXİ[Û“Y]šXÜË”İYÙKŠÂ‚š[\Ü]œÙ\™\‹˜\K•ÛÜšÙ\”™\]Y\İÂš[\ÜÛÛK™˜\İ\[š˜XÚÜÛÛ‹™]Xš[™’œÛÛ“›ÙNÂš[\ÜÛÛK™˜\İ\[š˜XÚÜÛÛ‹™]Xš[™“Øš™XİX\\Âš[\ÜÛÛK™˜\İ\[š˜XÚÜÛÛ‹™]Xš[™››ÙK“Øš™Xİ›ÙNÂš[\ÜÜ™ËX[[œÛ˜ZÙ^X[[‘[\\“Ü[ÛœÎÂš[\ÜÜ™ËX[[œÛ˜ZÙ^X[[–X[[Â‚š[\Ü˜]˜Kš[Ë’[œ]İ™X[T™XY\Âš[\Ü˜]˜Kš[Ë“İ]]İ™X[NÂš[\Ü˜]˜K›š[Ë˜Ú\œÙ]”İ[™\™Ú\œÙ]ÎÂš[\Ü˜]˜K›š[Ë™š[K‘š[\ÎÂš[\Ü˜]˜K›š[Ë™š[K”]Âš[\Ü˜]˜K›š[Ë™š[K”]ÎÂš[\Ü˜]˜K[YKÛØÚÎÂš[\Ü˜]˜K[YK’[œİ[Âš[\Ü˜]˜KœÙXİ\š]K”ÙXİ\™T˜[™ÛNÂš[\Ü˜]˜^˜Ü\ËÚ\\Âš[\Ü˜]˜^˜Ü\ËœÜXË‘ĞÓT\˜[Y]\”ÜXÎÂš[\Ü˜]˜^˜Ü\ËœÜXË”ÙXÜ™]Ù^TÜXÎÂš[\Ü˜]˜K][˜\ÙMÂš[\Ü˜]˜K][\œ˜^S\İÂš[\Ü˜]˜K][ÛÛXİ[ÛœÎÂš[\Ü˜]˜K][“[šÙY\ÚX\Âš[\Ü˜]˜K][“\İÂš[\Ü˜]˜K][“X\Âš[\Ü˜]˜K][”Ù]Âš[\Ü˜]˜K][•™YSX\Âš[\Ü˜]˜K][•URQÂš[\Ü˜]˜K][˜ÛÛ˜İ\œ™[\œ˜^P›ØÚÚ[™Ô]Y]YNÂš[\Ü˜]˜K][˜ÛÛ˜İ\œ™[ÛÛ˜İ\œ™[\ÚX\Âš[\Ü˜]˜K][˜ÛÛ˜İ\œ™[‘^Xİ][Û‘^Ù\[ÛÂš[\Ü˜]˜K][˜ÛÛ˜İ\œ™[‘]\™NÂš[\Ü˜]˜K][˜ÛÛ˜İ\œ™[‘]\™U\ÚÎÂš[\Ü˜]˜K][˜ÛÛ˜İ\œ™[”š[Üš]P›ØÚÚ[™Ô]Y]YNÂš[\Ü˜]˜K][˜ÛÛ˜İ\œ™[”™Z™XİY^Xİ][Û‘^Ù\[ÛÂš[\Ü˜]˜K][˜ÛÛ˜İ\œ™[”ØÚY[Y^Xİ]Ü”Ù\šXÙNÂš[\Ü˜]˜K][˜ÛÛ˜İ\œ™[”ØÚY[Y]\™NÂš[\Ü˜]˜K][˜ÛÛ˜İ\œ™[”Ù[X\Ü™NÂš[\Ü˜]˜K][˜ÛÛ˜İ\œ™[”Ş[˜Ú›Û›İ\Ô]Y]YNÂš[\Ü˜]˜K][˜ÛÛ˜İ\œ™[•™XYÛÛ^Xİ]ÜÂš[\Ü˜]˜K][˜ÛÛ˜İ\œ™[•[YU[š]Âš[\Ü˜]˜K][˜ÛÛ˜İ\œ™[˜]ÛZXË]ÛZXÓÛ™ÎÂš[\Ü˜]˜K][˜ÛÛ˜İ\œ™[›ØÚÜË”™Y[˜[ØÚÎÂš[\Ü˜]˜K][œ™YÙ^”]\›Â‚‹ÊŠˆİÛœÈHÚ[™ÛK[›ÙH›Øˆ[™H[™]È›İ[™YÛÜšÙ\‹[œÜXİÜ‹[™ÔÑH^Xİ]ÜœËˆ
+‹Â™š[˜[Û\ÜÈÙ\™\”[[YH[\[Y[È]]ĞÛÜÙXX›HÂˆİ]XÈš[˜[Øš™XİX\\ˆ”ÓÓ[™]ÈØš™XİX\\Š
+K˜ÛÛ™šYİ\™JÛÛK™˜\İ\[š˜XÚÜÛÛ‹™]Xš[™‘\Ù\šX[^˜][Û‘™X]\™K‘RSÓÓ—ÕS’Ó“ÕÓ—Ô“ÔT•QTË˜[ÙJNÂˆš]˜]Hİ]XÈš[˜[Øš™XİX\\ˆT•QPÕÒ”ÓÓˆH™]ÈØš™XİX\\ŠÛÛK™˜\İ\[š˜XÚÜÛÛ‹˜ÛÜ™K’œÛÛ‘˜XİÜK˜Z[\Š
+Bˆ™[˜X›JÛÛK™˜\İ\[š˜XÚÜÛÛ‹˜ÛÜ™K”İ™X[T™XY™X]\™K”Õ’PÕÑTPĞUWÑUPÕSÓŠBˆœİ™X[T™XYÛÛœİ˜Z[ÊÛÛK™˜\İ\[š˜XÚÜÛÛ‹˜ÛÜ™K”İ™X[T™XYÛÛœİ˜Z[Ë˜Z[\Š
+Bˆ›X^™\İ[™Ñ\
+
+K›X^İš[™Ó[™İ
+Mˆ
+ˆL
+ˆL
+K›X^[X™\“[™İ
+L
+K˜Z[
 
-import att.metrics.InspectionMetrics;
-import static att.metrics.InspectionMetrics.Stage.*;
+JK˜Z[
 
-import att.server.api.WorkerRequest;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ObjectNode;
-import org.yaml.snakeyaml.DumperOptions;
-import org.yaml.snakeyaml.Yaml;
+JBˆ™[˜X›JÛÛK™˜\İ\[š˜XÚÜÛÛ‹™]Xš[™‘\Ù\šX[^˜][Û‘™X]\™K‘RSÓÓ—ÕRSS‘×ÕÒÑS”ÊBˆ™[˜X›JÛÛK™˜\İ\[š˜XÚÜÛÛ‹™]Xš[™‘\Ù\šX[^˜][Û‘™X]\™K•TÑWĞ’Q×ÑPÒSPSÑ“Ô—Ñ“ĞUÊBˆ™[˜X›JÛÛK™˜\İ\[š˜XÚÜÛÛ‹™]Xš[™‘\Ù\šX[^˜][Û‘™X]\™K•TÑWĞ’Q×ÒS•QÑT—Ñ“Ô—ÒS•ÊNÂˆİ]XÈš[˜[]\›ˆ“Ğ—ÒQT]\›‹˜ÛÛ\[J’–ÌNPKQ—^ÌMŸHŠNÂˆİ]XÈš[˜[]\›ˆQ•ÒQT]\›‹˜ÛÛ\[J‘ÌNPKQ—^ÌÌŸHŠNÂˆİ]XÈš[˜[]\›ˆURPÒ×ÓĞQÑQ•ÒQT]\›‹˜ÛÛ\[J“ÌNPKQ—^ÌÌŸHŠNÂˆİ]XÈš[˜[]\›ˆQSÑQÓĞQÑQ•ÒQT]\›‹˜ÛÛ\[JVÌNPKQ—^ÌÌŸHŠNÂˆİ]XÈš[˜[]\›ˆĞUSÑ×ÓĞQÑQ•ÒQT]\›‹˜ÛÛ\[JÖÌNPKQ—^ÌÌŸHŠNÂˆš]˜]Hİ]XÈš[˜[]\›ˆS“S‘WÓĞQÑTUSÓT]\›‹˜ÛÛ\[J—ŠÌNWJÊJ\ßß_
+IŠNÂˆš]˜]Hİ]XÈš[˜[]\›ˆS“S‘WÓĞQÔUOT]\›‹˜ÛÛ\[J—ŠÌKNWVÌNWJŠÎ—–ÌNWJÊOÊKÊßJIŠNÂˆİ]XÈš[˜[[PVĞPÕU‘WÑQ•ÏLLPVÑQ•×ÔT—Ô’SÒTSLMÂˆËÈX›XÈ[œÜXİ[Ûˆ[Z]ÎÈÙY\[YÛ™YÚ]XÚØYÙT™\Ûİ\˜ÙR[œÜXİÜˆ[ˆHØØ[[[YK‚ˆš]˜]Hİ]XÈš[˜[[‘TÓÕTÑWÑQUSÔQÑWÔÒV‘OML‘TÓÕTÑWÓPVÔQÑWÔÒV‘OLLÂˆš]˜]Hİ]XÈš[˜[[TÕUWÔ‘PÓÔ‘ÓPVÔQÑWÔÒV‘OLLÂˆİ]XÈš[˜[[PVĞT•QPÕÔ‘PQÔÓÕÏNÂˆš]˜]Hİ]XÈš[˜[[PVÕSQUSÓ—ÔPÒĞQÑWÑS•’QTÏLŒPVÕSQUSÓ—ÑS•’T“Ó“QS•ÏLLPVÕ“‘VÕSQUSÓ—ÔPÒĞQÑTÏLŒÂˆš]˜]Hİ]XÈš[˜[Û™ÈPVÕÕSÕ“‘VÕSQUSÓ—ÕÓÔ’×ÕS’UÏLLÂˆš]˜]Hİ]XÈš[˜[Û™ÈĞQÔ“ÑÔ‘TÔ×ÔT”ÒTÕSÑWÔ‘U–WÓS“ÔÏU[YU[š]”ÑPÓÓ‘ËÓ˜[›ÜÊJNÂˆİ]XÈš[˜[Û™ÈQ•ÕÓRSTÏU[YU[š]“RS•UTËÓZ[\ÊL
+NÂˆİ]XÈš[˜[[PVÔÕ‘PSWÓĞ”ÑT•‘T”ÏLÌÂˆš]˜]Hİ]XÈš[˜[[S”ÔPÕSÓ—ÑVÔ‘T—Ô’SÔ’UWĞ•T”ÕLÎÂˆš]˜]Hİ]XÈš[˜[Û\ÜÈ˜[Y]YØÚY[YØÙ[˜\š[ÈÂˆš[˜[X\İš[™ËØš™XİˆØÙ[˜\š[ÎÙš[˜[İš[™È™]š\Ú[Û‘YÙ\İ[Ù[Ùš[˜[›ÛÛX[ˆÛÛZ[œÔÙ[œÚ]]™U˜[Y\ÎÂˆ˜[Y]YØÚY[YØÙ[˜\š[ÊX\İš[™ËØš™XİˆØÙ[˜\š[Ëİš[™È™]š\Ú[Û‘YÙ\İİš[™È[Ù[›ÛÛX[ˆÛÛZ[œÔÙ[œÚ]]™U˜[Y\Ê^İ\ËœØÙ[˜\š[Ï\ØÙ[˜\š[Îİ\Ëœ™]š\Ú[Û‘YÙ\İ\™]š\Ú[Û‘YÙ\İİ\Ë›[Ù[[[Ù[İ\Ë˜ÛÛZ[œÔÙ[œÚ]]™U˜[Y\ÏXÛÛZ[œÔÙ[œÚ]]™U˜[Y\ÎßBˆBˆš[˜[Ù\™\ÛÛ™šYÈÛÛ™šYÎÂˆš[˜[›Ø”İÜ™HİÜ™NÂˆš]˜]Hš[˜[ØY›ÙÜ™\ÜÔ\œÚ\İ[˜ÙHØY›ÙÜ™\ÜÔ\œÚ\İ[˜ÙNÂˆš[˜[]]Ù\šXÙH]]Âˆš[˜[™XYÛÛ^Xİ]ÜˆÛÜšÙ\œËİ™X[\Ë[œÜXİÜœÎÂˆš]˜]Hš[˜[™XYÛÛ^Xİ]Üˆ]™[ÛÛ\Xİ[ÛœÏ[™]È™XYÛÛ^Xİ]ÜŠ‹‹[YU[š]“RSTÑPÓÓ‘Ë™]È\œ˜^P›ØÚÚ[™Ô]Y]YOŠL
+K‹OÕ™XY[™]È™XY
+‹˜]\Ù\™\‹Y]™[XÛÛ\XİÜˆŠNİœÙ]Y[[ÛŠYJNÜ™]\›ˆßK™]È™XYÛÛ^Xİ]Ü‹X›ÜÛXŞJ
+JNÂˆš]˜]Hš[˜[™XYÛÛ^Xİ]Üˆ]™[›İYšXØ][ÛœÏ[™]È™XYÛÛ^Xİ]ÜŠ‹‹[YU[š]“RSTÑPÓÓ‘Ë™]È\œ˜^P›ØÚÚ[™Ô]Y]YOŠMŠK‹OÕ™XY[™]È™XY
+‹˜]\Ù\™\‹Y]™[Y\Ü]ÚŠNİœÙ]Y[[ÛŠYJNÜ™]\›ˆßK™]È™XYÛÛ^Xİ]Ü‹X›ÜÛXŞJ
+JNÂˆš]˜]Hİ]XÈš[˜[[T“RSSÑU‘S•ĞĞPÒWÓPVÑS•’QTÏLMÂˆš]˜]Hİ]XÈš[˜[Û™ÈT“RSSÑU‘S•ĞĞPÒWÓPVÕÑRQÒLL
+ŒL
+ŒLÂˆš]˜]Hš[˜[Øš™Xİ\›Z[˜[]™[ØXÚSØÚÏ[™]ÈØš™Xİ
 
-import java.io.InputStreamReader;
-import java.io.OutputStream;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
-import java.time.Clock;
-import java.time.Instant;
-import java.security.SecureRandom;
-import javax.crypto.Cipher;
-import javax.crypto.spec.GCMParameterSpec;
-import javax.crypto.spec.SecretKeySpec;
-import java.util.Base64;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
-import java.util.TreeMap;
-import java.util.UUID;
-import java.util.concurrent.ArrayBlockingQueue;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.Future;
-import java.util.concurrent.FutureTask;
-import java.util.concurrent.PriorityBlockingQueue;
-import java.util.concurrent.RejectedExecutionException;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.ScheduledFuture;
-import java.util.concurrent.Semaphore;
-import java.util.concurrent.SynchronousQueue;
-import java.util.concurrent.ThreadPoolExecutor;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicLong;
-import java.util.concurrent.locks.ReentrantLock;
-import java.util.regex.Pattern;
+NÂˆš]˜]Hš[˜[Øš™Xİ×H\›Z[˜[]™[ØXÚTİš\\ÏY]™[ØXÚTİš\\Ê
+NÂˆš]˜]Hš[˜[˜]˜K][“[šÙY\ÚX\İš[™Ë›Ø‘]™[Ïˆ\›Z[˜[]™[ØXÚOBˆ™]È˜]˜K][“[šÙY\ÚX\ŠM‹ÍY‹YJNÂˆš]˜]HÛ™È\›Z[˜[]™[ØXÚUÙZYÚÂˆš]˜]Hİ]XÈØš™Xİ×H]™[ØXÚTİš\\Ê
+HÂˆØš™Xİ×Hİš\\Ï[™]ÈØš™XİÌM—NÂˆ›ÜŠ[OLÚOİš\\Ë›[™İÚJÊÊ\İš\\ÖÚWO[™]ÈØš™Xİ
 
-/** Owns the single-node job plane and its bounded Worker, inspector, and SSE executors. */
-final class ServerRuntime implements AutoCloseable {
-    static final ObjectMapper JSON=new ObjectMapper().configure(com.fasterxml.jackson.databind.DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES,false);
-    private static final ObjectMapper ARTIFACT_JSON = new ObjectMapper(com.fasterxml.jackson.core.JsonFactory.builder()
-            .enable(com.fasterxml.jackson.core.StreamReadFeature.STRICT_DUPLICATE_DETECTION)
-            .streamReadConstraints(com.fasterxml.jackson.core.StreamReadConstraints.builder()
-                    .maxNestingDepth(64).maxStringLength(16 * 1024 * 1024).maxNumberLength(1000).build()).build())
-            .enable(com.fasterxml.jackson.databind.DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
-            .enable(com.fasterxml.jackson.databind.DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS)
-            .enable(com.fasterxml.jackson.databind.DeserializationFeature.USE_BIG_INTEGER_FOR_INTS);
-    static final Pattern JOB_ID=Pattern.compile("J[0-9A-F]{16}");
-    static final Pattern DRAFT_ID=Pattern.compile("D[0-9A-F]{32}");
-    static final Pattern QUICK_LOAD_DRAFT_ID=Pattern.compile("L[0-9A-F]{32}");
-    static final Pattern ADVANCED_LOAD_DRAFT_ID=Pattern.compile("A[0-9A-F]{32}");
-    static final Pattern CATALOG_LOAD_DRAFT_ID=Pattern.compile("C[0-9A-F]{32}");
-    private static final Pattern INLINE_LOAD_DURATION=Pattern.compile("^([0-9]+)(ms|s|m|h)$");
-    private static final Pattern INLINE_LOAD_RATE=Pattern.compile("^([1-9][0-9]*(?:\\.[0-9]+)?)/(s|m)$");
-    static final int MAX_ACTIVE_DRAFTS=128, MAX_DRAFTS_PER_PRINCIPAL=16;
-    // Public inspection limits; keep aligned with PackageResourceInspector in the Local runtime.
-    private static final int RESOURCE_DEFAULT_PAGE_SIZE=50, RESOURCE_MAX_PAGE_SIZE=100;
-    private static final int TESTDATA_RECORD_MAX_PAGE_SIZE=100;
-    static final int MAX_ARTIFACT_READ_SLOTS=8;
-    private static final int MAX_VALIDATION_PACKAGE_ENTRIES=20000, MAX_VALIDATION_ENVIRONMENTS=100, MAX_VNEXT_VALIDATION_PACKAGES=200;
-    private static final long MAX_TOTAL_VNEXT_VALIDATION_WORK_UNITS=10000000L;
-    private static final long LOAD_PROGRESS_PERSISTENCE_RETRY_NANOS=TimeUnit.SECONDS.toNanos(5);
-    static final long DRAFT_TTL_MILLIS=TimeUnit.MINUTES.toMillis(10);
-    static final int MAX_STREAM_OBSERVERS=32;
-    private static final int INSPECTION_EXPLORER_PRIORITY_BURST=3;
-    private static final class ValidatedScheduledScenario {
-        final Map<String,Object> scenario;final String revisionDigest,model;final boolean containsSensitiveValues;
-        ValidatedScheduledScenario(Map<String,Object> scenario,String revisionDigest,String model,boolean containsSensitiveValues){this.scenario=scenario;this.revisionDigest=revisionDigest;this.model=model;this.containsSensitiveValues=containsSensitiveValues;}
-    }
-    final ServerConfig config;
-    final JobStore store;
-    private final LoadProgressPersistence loadProgressPersistence;
-    final AuthService auth;
-    final ThreadPoolExecutor workers,streams,inspectors;
-    private final ThreadPoolExecutor eventCompactions=new ThreadPoolExecutor(2,2,0,TimeUnit.MILLISECONDS,new ArrayBlockingQueue<>(1024),r->{Thread t=new Thread(r,"att-server-event-compactor");t.setDaemon(true);return t;},new ThreadPoolExecutor.AbortPolicy());
-    private static final int TERMINAL_EVENT_CACHE_MAX_ENTRIES=16;
-    private static final long TERMINAL_EVENT_CACHE_MAX_WEIGHT=128L*1024L*1024L;
-    private final Object terminalEventCacheLock=new Object();
-    private final Object[] terminalEventCacheStripes=eventCacheStripes();
-    private final java.util.LinkedHashMap<String,JobEvents> terminalEventCache=
-            new java.util.LinkedHashMap<>(16,0.75f,true);
-    private long terminalEventCacheWeight;
-    private static Object[] eventCacheStripes() {
-        Object[] stripes=new Object[16];
-        for(int i=0;i<stripes.length;i++)stripes[i]=new Object();
-        return stripes;
-    }
-    private final ThreadPoolExecutor artifactWriters;
-    private final ArtifactPublisher artifactPublisher;
-    private final Semaphore artifactReadSlots=new Semaphore(MAX_ARTIFACT_READ_SLOTS,true);
-    private final Set<String> pendingArtifactJobs=ConcurrentHashMap.newKeySet();
-    private final Set<String> requestedArtifactRetries=ConcurrentHashMap.newKeySet();
-    private final java.util.concurrent.locks.ReentrantReadWriteLock artifactLifecycle=new java.util.concurrent.locks.ReentrantReadWriteLock(true);
-    final ConcurrentHashMap<String,Job> jobs=new ConcurrentHashMap<>();
-    /** Pages of {@link JobStore#STORAGE_CANDIDATE_PAGE} examined in one size sweep. Tests lower this to hit the boundary. */
-    int storageCandidateBatchLimit=50;
-    /** Keyset resume point for a partial size sweep. Both null start at the oldest candidate. */
-    String storageScanAfterFinished;
-    String storageScanAfterId;
-    /** True once the current pass has examined the oldest candidate. Persisted with the resume cursor. */
-    boolean storageScanCoveredHead;
-    /** Tests set this so a restarted runtime can restore a cursor before the startup sweep. */
-    static boolean skipInitialStorageSweep;
-    private boolean storageCursorRestored;
-    private final ConcurrentHashMap<String,FutureTask<Void>> tasks=new ConcurrentHashMap<>();
-    private final ConcurrentHashMap<String,AdmissionLease> leases=new ConcurrentHashMap<>();
-    private final AtomicLong completed=new AtomicLong();
-    private final Semaphore loadSlots,admissionSlots;
-    private final Semaphore inspectionTaskSlots;
-    final Semaphore streamSlots=new Semaphore(MAX_STREAM_OBSERVERS,true);
-    private final ScheduledExecutorService retention;
-    private final ScheduledExecutorService artifactMaintenance;
-    private final ScheduledExecutorService targetIndexMaintenance;
-    private final java.util.concurrent.ConcurrentLinkedQueue<Job> deferredWorkerReleases=new java.util.concurrent.ConcurrentLinkedQueue<>();
-    private final Set<String> deferredWorkerReleaseIds=ConcurrentHashMap.newKeySet();
-    private String artifactRecoveryCursor="";
-    private final ScheduledExecutorService inspectionWatchdogs;
-    private LoadScheduleScheduler loadScheduleScheduler;
-    private final WorkerProcessLauncher processLauncher;
-    private final Clock clock;
-    final PackageManifestPublisher manifestPublisher;
-    private volatile Map<String,Object> jobStorageReport;
-    private final ConcurrentHashMap<Process,Boolean> inspectionProcesses=new ConcurrentHashMap<>();
-    private final Object draftLock=new Object();
-    private final ConcurrentHashMap<String,DebugDraft> debugDrafts=new ConcurrentHashMap<>();
-    private record RunDraft(String id,String principal,String packageId,String revision,JsonNode workerInput,
-                            Map<String,Object> preview,Instant expiresAt,DebugDraft resourceDebugDraft) { }
-    private final ConcurrentHashMap<String,RunDraft> runDrafts=new ConcurrentHashMap<>();
-    private final ConcurrentHashMap<String,QuickLoadDraft> quickLoadDrafts=new ConcurrentHashMap<>();
-    private final ConcurrentHashMap<String,AdvancedLoadDraftState> advancedLoadDrafts=new ConcurrentHashMap<>();
-    private final ConcurrentHashMap<String,CatalogLoadDraftState> catalogLoadDrafts=new ConcurrentHashMap<>();
-    private final List<InspectionWorker> inspectionWorkerPool=new ArrayList<>();
-    private final ScheduledExecutorService inspectionWarmup;
-    private volatile boolean closing;
-    private final java.util.concurrent.locks.ReentrantReadWriteLock admissionLifecycle=new java.util.concurrent.locks.ReentrantReadWriteLock(true);
-    private final ConcurrentHashMap<Thread,Process> stderrDrainers=new ConcurrentHashMap<>();
-    final InspectionMetrics inspectionMetrics=new InspectionMetrics();
-    private final AtomicLong inspectionWorkerSelection=new AtomicLong();
-    private final AtomicLong inspectionTaskSequence=new AtomicLong();
-    private final java.util.concurrent.atomic.AtomicInteger inspectionExplorerPriorityCredits=
-            new java.util.concurrent.atomic.AtomicInteger(INSPECTION_EXPLORER_PRIORITY_BURST);
-    private final byte[] cursorKey=new byte[32];
-    private final SecureRandom cursorRandom=new SecureRandom();
-    private final Path workerLibs;
-    private final String workerSchemaRegistryDigest;
-    ExecutionWorkerPool executionWorkers;
-    ServerRuntime(ServerConfig config,String workerLibs) throws Exception {
-        this(config,workerLibs,ProcessBuilder::start);
-    }
-    ServerRuntime(ServerConfig config,String workerLibs,WorkerProcessLauncher processLauncher) throws Exception {
-        this(config,workerLibs,processLauncher,Clock.systemUTC());
-    }
-    ServerRuntime(ServerConfig config,String workerLibs,WorkerProcessLauncher processLauncher,Clock clock) throws Exception {
-        this(config,workerLibs,processLauncher,clock,(output,archive,validator)->
-                ArtifactArchive.build(output,archive,validator,config.archiveCompression));
-    }
-    ServerRuntime(ServerConfig config,String workerLibs,WorkerProcessLauncher processLauncher,Clock clock,ArtifactPublisher artifactPublisher) throws Exception {
-        this(config,workerLibs,processLauncher,clock,artifactPublisher,null);
-    }
-    ServerRuntime(ServerConfig config,String workerLibs,WorkerProcessLauncher processLauncher,Clock clock,ArtifactPublisher artifactPublisher,
-                  LoadProgressPersistence loadProgressPersistence) throws Exception {
-        if(Runtime.version().feature()<17)throw new IllegalStateException("ATT Server requires Java 17 or later; detected Java "+Runtime.version().feature());
-        this.config=config;this.artifactPublisher=java.util.Objects.requireNonNull(artifactPublisher);this.workerLibs=workerLibs==null?null:Paths.get(workerLibs).toAbsolutePath().normalize();this.workerSchemaRegistryDigest=WorkerRuntimeClasspath.schemaRegistryDigestIfPresent(this.workerLibs);this.processLauncher=processLauncher;this.clock=java.util.Objects.requireNonNull(clock);this.store=new JobStore(config);this.loadProgressPersistence=loadProgressPersistence==null?this.store::updateLoadProgress:loadProgressPersistence;try{this.auth=new AuthService(config,store);}catch(Exception failed){store.close();throw failed;}this.loadSlots=new Semaphore(config.maxConcurrentLoad,true);this.admissionSlots=new Semaphore(config.maxConcurrent+config.queuedLimit,true);
-        manifestPublisher=new PackageManifestPublisher(config.dataDir,config.packageConfiguration,clock,
-                this::manifestEditableRoot,this::validateManifestCandidate,
-                (actor,action,packageId,detail)->store.audit(actor,action,null,packageId,detail));
-        cursorRandom.nextBytes(cursorKey);
-        java.util.concurrent.BlockingQueue<Runnable> queue=config.queuedLimit==0?new SynchronousQueue<>():new ArrayBlockingQueue<>(config.queuedLimit);
-        workers=new ThreadPoolExecutor(config.maxConcurrent,config.maxConcurrent,0,TimeUnit.MILLISECONDS,queue,r->{Thread t=new Thread(r,"att-server-worker");t.setDaemon(true);return t;},new ThreadPoolExecutor.AbortPolicy());
-        streams=new ThreadPoolExecutor(0,MAX_STREAM_OBSERVERS,30,TimeUnit.SECONDS,new SynchronousQueue<>(),r->{Thread t=new Thread(r,"att-server-sse");t.setDaemon(true);return t;},new ThreadPoolExecutor.AbortPolicy());
-        artifactWriters=new ThreadPoolExecutor(1,1,0,TimeUnit.MILLISECONDS,new ArrayBlockingQueue<>(Math.max(1,config.queuedLimit+config.maxConcurrent)),r->{Thread t=new Thread(r,"att-server-artifact-writer");t.setDaemon(true);return t;},new ThreadPoolExecutor.AbortPolicy());
-        inspectionTaskSlots=new Semaphore(config.inspection.maxConcurrent+config.inspection.queuedLimit,true);
-        java.util.concurrent.BlockingQueue<Runnable> inspectionQueue=new PriorityBlockingQueue<>();
-        inspectors=new ThreadPoolExecutor(config.inspection.maxConcurrent,config.inspection.maxConcurrent,0,TimeUnit.MILLISECONDS,inspectionQueue,r->{Thread t=new Thread(r,"att-server-inspector");t.setDaemon(true);return t;},new ThreadPoolExecutor.AbortPolicy());
-        for(int i=0;i<config.inspection.maxConcurrent;i++)inspectionWorkerPool.add(new InspectionWorker());
-        retention=java.util.concurrent.Executors.newSingleThreadScheduledExecutor(r->{Thread t=new Thread(r,"att-server-retention");t.setDaemon(true);return t;});
-        artifactMaintenance=java.util.concurrent.Executors.newSingleThreadScheduledExecutor(r->{Thread t=new Thread(r,"att-server-artifact-maintenance");t.setDaemon(true);return t;});
-        targetIndexMaintenance=java.util.concurrent.Executors.newSingleThreadScheduledExecutor(r->{Thread t=new Thread(r,"att-server-target-index");t.setDaemon(true);return t;});
-        inspectionWatchdogs=java.util.concurrent.Executors.newSingleThreadScheduledExecutor(r->{Thread t=new Thread(r,"att-server-inspector-watchdog");t.setDaemon(true);return t;});
-        inspectionWarmup=config.inspection.enabled&&config.inspection.warmup.enabled()
-                ?java.util.concurrent.Executors.newSingleThreadScheduledExecutor(r->{Thread t=new Thread(r,"att-server-inspector-warmup");t.setDaemon(true);return t;}):null;
-        try {
-        recover();reconcileDeletingJobsSafely();cleanupExpiredJobsSafely();recoverArtifactArchivesSafely();retention.scheduleWithFixedDelay(this::cleanupExpiredJobsSafely,1,1,TimeUnit.HOURS);
-        if(config.jobStorage.enabled){if(!skipInitialStorageSweep)cleanupJobStorageSafely();retention.scheduleWithFixedDelay(this::cleanupJobStorageSafely,config.jobStorage.cleanupIntervalMinutes,config.jobStorage.cleanupIntervalMinutes,TimeUnit.MINUTES);}
-        artifactMaintenance.scheduleWithFixedDelay(this::recoverArtifactArchivesSafely,5,5,TimeUnit.MINUTES);
-        artifactMaintenance.scheduleWithFixedDelay(this::reconcileWorkerReleases,1,1,TimeUnit.SECONDS);
-        retention.scheduleWithFixedDelay(this::expireDraftsSafely,1,1,TimeUnit.MINUTES);
-        retention.scheduleWithFixedDelay(this::cleanupRequestedDeletionsSafely,5,5,TimeUnit.SECONDS);
-        targetIndexMaintenance.scheduleWithFixedDelay(()->{
-            if(closing)return;
-            try {if(store.backfillSearchTargetsBatch()==0)targetIndexMaintenance.shutdown();}
-            catch(InterruptedException stopped){Thread.currentThread().interrupt();}
-            catch(Exception failed){if(!closing)java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).log(java.util.logging.Level.WARNING,"Historical target indexing will retry",failed);}
-        },100,100,TimeUnit.MILLISECONDS);
-        if(config.scheduling.enabled) {
-            store.recoverScheduleExecutions();
-            if(!config.authenticationRequired&&config.authorization.allowAnonymousOperations)java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).warning("ATT operations are enabled without authentication; anonymous clients share operational access");
-            loadScheduleScheduler=new LoadScheduleScheduler(config.scheduling,store,this::submitScheduledJob,clock);
-            loadScheduleScheduler.start();
-        } else loadScheduleScheduler=null;
-        executionWorkers=new ExecutionWorkerPool(config,id->workerBuilder(true,id),this::startWorkerProcess,
-                ()->ExecutionWorkerPool.fingerprint(this.workerLibs,config.workerLibraryDirs),workerSchemaRegistryDigest);
-        if(inspectionWarmup!=null)inspectionWarmup.scheduleWithFixedDelay(this::warmInspectionSafely,250,250,TimeUnit.MILLISECONDS);
-        if(config.inspection.enabled&&!config.inspection.redactionEnabled)java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).warning("Inspection masking is disabled; ordinary package values are visible to authorized callers, while classified secrets remain protected");
-        if(!config.security.checkCrossOrigin)java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).warning("server.security.checkCrossOrigin is disabled; configure trusted proxy origin handling and retain local-auth CSRF protection");
-        } catch(Exception failed) {close();throw failed;}
-    }
-    private void recover() throws Exception {
-        for(Map<String,Object> stale:store.staleWorkers()) {
-            try {
-                long pid=((Number)stale.get("pid")).longValue();ProcessHandle.of(pid).ifPresent(handle->{
-                    String expected=(String)stale.get("start");String actual=handle.info().startInstant().map(Instant::toString).orElse("");
-                    String command=handle.info().commandLine().orElse("");
-                    if(expected!=null&&expected.equals(actual)&&command.contains("att.worker.WorkerMain"))handle.destroyForcibly();
-                });
-            } catch(Exception ignored) { }
-        }
-        for(String id:store.staleJobIds()) {
-            Map<String,Object> row=store.get(id);
-            String mode=executionMode(row==null?null:String.valueOf(row.get("command")));
-            store.interruptStale(id);
-            Path journal=config.dataDir.resolve("jobs").resolve(id).resolve("events.jsonl");
-            JobEvents events=new JobEvents(journal,config.maxEventsPerJob,config.maxEventJournalBytes,
-                    config.maxEventJournalMemoryBytes,eventCompactions);
-            String summary="Job was interrupted by Server restart and was not rerun";
-            events.append("diagnostic",Map.of("code","ATT-SERVER-INTERRUPTED","summary",summary,"console",publishConsole(att.console.ExecutionConsoleFormatter.diagnostic(mode,"ATT-SERVER-INTERRUPTED",summary))));
-            events.append("result",Map.of("jobId",id,"status","ERROR","console",publishConsole(att.console.ExecutionConsoleFormatter.lifecycle(mode,id,"ERROR",null))));
-        }
-    }
-    /** Capture only validator-approved data; never serialize WorkerRequest or inspection previews. */
-    private JobExecutionSpec captureExecutionSpec(String command,JsonNode input,String principal,String scheduleOccurrenceId) throws Exception {
-        if(!config.inspection.enabled||!List.of("run","debug","load").contains(command))return null;
-        if(input.path("dryRun").asBoolean(false))throw new IllegalArgumentException("Validation-only execution cannot be replayed as a runnable job");
-        if(input.path("rerunFailed").asBoolean(false)||input.hasNonNull("overrides")&&input.path("overrides").size()>0)
-            throw new IllegalArgumentException("Legacy history selectors or raw overrides require a validated draft before safe retention");
-        String packageId=required(input,"packageId");Path root=packageRoot(packageId);
-        String environment=optionalText(input,"environment");
-        ObjectNode definition=JSON.createObjectNode();definition.put("executionType",Job.executionType(command));definition.put("packageId",packageId);
-        if(input.has("environment"))definition.set("environment",input.get("environment").deepCopy());
-        String revision;
-        if("load".equals(command)) {
-            LoadSchedule source=new LoadSchedule();source.packageId=packageId;source.environment=environment;
-            source.scenario=input.path("scenario").isTextual()?safeRelative(input.path("scenario").asText(),"scenario"):null;
-            if(input.has("inlineLoadScenario"))source.inlineScenario=JSON.convertValue(input.get("inlineLoadScenario"),Map.class);
-            if(input.has("load"))source.load=JSON.convertValue(input.get("load"),Map.class);
-            ValidatedScheduledScenario validated=validateScheduleScenario(root,source);
-            if(validated.containsSensitiveValues)throw new IllegalArgumentException("Sensitive execution inputs require secure re-entry");
-            definition.set("scenario",JSON.valueToTree(validated.scenario));revision=validated.revisionDigest;
-        } else {
-            definition.put("schemaVersion",RunDefinition.VERSION);
-            ObjectNode options=definition.putObject("options");options.put("debug","debug".equals(command)||input.path("diagnosticMode").asBoolean(false));
-            if(input.has("target")) {
-                ObjectNode debug=JSON.createObjectNode();debug.put("packageId",packageId);
-                if(environment!=null)debug.put("environment",environment);
-                debug.set("target",input.get("target"));
-                JsonNode submitted=input.get("inlineDebugInput");
-                // Prefer the original validated override, preserving omission, null and expressions.
-                for(RunDraft draft:runDrafts.values())if(draft.workerInput.equals(input)&&draft.resourceDebugDraft!=null)submitted=JSON.valueToTree(draft.resourceDebugDraft.scheduleInput);
-                for(DebugDraft draft:debugDrafts.values())if(draft.revisionDigest.equals(input.path("expectedRevisionDigest").asText())&&draft.resourceId.equals(input.path("draftResourceId").asText())&&draft.principal.equals(principal))submitted=JSON.valueToTree(draft.scheduleInput);
-                if(submitted==null)throw new IllegalArgumentException("Source inputs were not retained");
-                debug.set("input",submitted);DebugDraft validated=buildDebugDraft(debug,principal);
-                if(validated.containsSensitiveValues)throw new IllegalArgumentException("Sensitive execution inputs require secure re-entry");
-                definition.set("target",input.get("target").deepCopy());definition.set("input",JSON.valueToTree(validated.scheduleInput));revision=validated.revisionDigest;
-            } else {
-                WorkerRequest request=applyWorkerPolicy(JSON.treeToValue(input,WorkerRequest.class));
-                request.protocolVersion="att-worker/v1";request.command="inspect";request.packageRoot=root.toString();request.config=config.runtimeConfigPath.toString();
-                request.jobId="I"+UUID.randomUUID().toString().replace("-","");request.inspectionAction="run-input";
-                ObjectNode policy=JSON.createObjectNode();applyInspectionPolicy(policy,packageId);JSON.readerForUpdating(request).readValue(policy);
-                Map<String,Object> inspected=executeInspection(root,request);
-                Object selected=inspected.get("selectedCaseIds");if(!(selected instanceof List<?> ids)||ids.isEmpty())throw new IllegalArgumentException("Exact case selection is unavailable");
-                ObjectNode selection=definition.putObject("selection");selection.set("caseIds",JSON.valueToTree(selected));
-                for(String field:List.of("suites","suiteDirectory"))if(input.has(field))selection.set(field,input.get(field).deepCopy());
-                if(input.has("failFast"))options.set("failFast",input.get("failFast").deepCopy());
-                revision=String.valueOf(inspected.get("revisionDigest"));
-            }
-        }
-        if(input.hasNonNull("expectedRevisionDigest")&&!input.path("expectedRevisionDigest").asText().equals(revision))throw new StaleDraftException();
-        String sourcePath=input.path("scenario").isTextual()?input.path("scenario").asText():null;
-        if(sourcePath==null&&scheduleOccurrenceId!=null&&"load".equals(command)) {
-            Map<String,Object> occurrence=store.scheduleExecution(scheduleOccurrenceId);
-            LoadSchedule source=occurrence==null?null:store.schedule(String.valueOf(occurrence.get("scheduleId")));
-            if(source!=null) {
-                sourcePath=source.scenario;
-                if(sourcePath==null&&source.sourceJobId!=null) {
-                    Map<String,String> parent=store.executionSpec(source.sourceJobId);
-                    if(parent!=null&&parent.get("spec")!=null)sourcePath=JobExecutionSpec.parse(parent.get("spec")).value.path("sourcePath").asText(null);
-                }
-            }
-        }
-        return new JobExecutionSpec(definition,revision,sourcePath).withConfiguration(input.path("configurationProvenance").isObject()?configurationRevision(JSON.convertValue(input.get("configurationProvenance"),Map.class),revision):null);
-    }
+NÂˆ™]\›ˆİš\\ÎÂˆBˆš]˜]Hš[˜[™XYÛÛ^Xİ]Üˆ\Y˜XİÜš]\œÎÂˆš]˜]Hš[˜[\Y˜XİX›\Ú\ˆ\Y˜XİX›\Ú\Âˆš]˜]Hš[˜[Ù[X\Ü™H\Y˜Xİ™XYÛİÏ[™]ÈÙ[X\Ü™JPVĞT•QPÕÔ‘PQÔÓÕËYJNÂˆš]˜]Hš[˜[Ù]İš[™Ïˆ[™[™Ğ\Y˜Xİ›ØœÏPÛÛ˜İ\œ™[\ÚX\›™]ÒÙ^TÙ]
 
-    /** Builds the retained snapshot from a server-validated draft without re-running its inspection Worker. */
-    private JobExecutionSpec capturePrevalidatedExecutionSpec(String command,JsonNode input,String scheduleOccurrenceId) throws Exception {
-        if(!config.inspection.enabled||!List.of("run","debug","load").contains(command))return null;
-        String revision=input.path("expectedRevisionDigest").asText("");
-        if(!revision.matches("[a-f0-9]{64}"))throw new IllegalArgumentException("Validated execution revision is unavailable");
-        String packageId=required(input,"packageId");
-        ObjectNode definition=JSON.createObjectNode();definition.put("executionType",Job.executionType(command));definition.put("packageId",packageId);
-        if(input.has("environment"))definition.set("environment",input.get("environment").deepCopy());
-        String sourcePath=input.path("scenario").isTextual()?safeRelative(input.path("scenario").asText(),"scenario"):null;
-        if("load".equals(command)) {
-            JsonNode scenario=input.get("inlineLoadScenario");
-            if(scenario==null||!scenario.isObject())throw new IllegalArgumentException("Validated Load scenario is unavailable");
-            definition.set("scenario",scenario.deepCopy());
-        } else {
-            definition.put("schemaVersion",RunDefinition.VERSION);
-            ObjectNode options=definition.putObject("options");options.put("debug","debug".equals(command)||input.path("diagnosticMode").asBoolean(false));
-            if(input.path("target").isObject()) {
-                JsonNode debugInput=input.get("inlineDebugInput");
-                if(debugInput==null||!debugInput.isObject())throw new IllegalArgumentException("Validated resource input is unavailable");
-                definition.set("target",input.get("target").deepCopy());definition.set("input",debugInput.deepCopy());
-            } else {
-                JsonNode caseIds=input.get("caseIds");
-                if(caseIds==null||!caseIds.isArray()||caseIds.isEmpty())throw new IllegalArgumentException("Validated exact Case selection is unavailable");
-                ObjectNode selection=definition.putObject("selection");selection.set("caseIds",caseIds.deepCopy());
-                for(String field:List.of("suites","suiteDirectory"))if(input.has(field))selection.set(field,input.get(field).deepCopy());
-                if(input.has("failFast"))options.set("failFast",input.get("failFast").deepCopy());
-            }
-            RunDefinition.parseRetained(definition);
-        }
-        if(sourcePath==null&&scheduleOccurrenceId!=null&&"load".equals(command)) {
-            Map<String,Object> occurrence=store.scheduleExecution(scheduleOccurrenceId);
-            LoadSchedule source=occurrence==null?null:store.schedule(String.valueOf(occurrence.get("scheduleId")));
-            if(source!=null) {
-                sourcePath=source.scenario;
-                if(sourcePath==null&&source.sourceJobId!=null) {
-                    Map<String,String> parent=store.executionSpec(source.sourceJobId);
-                    if(parent!=null&&parent.get("spec")!=null)sourcePath=JobExecutionSpec.parse(parent.get("spec")).value.path("sourcePath").asText(null);
-                }
-            }
-        }
-        return new JobExecutionSpec(definition,revision,sourcePath).withConfiguration(input.path("configurationProvenance").isObject()?configurationRevision(JSON.convertValue(input.get("configurationProvenance"),Map.class),revision):null);
-    }
+NÂˆš]˜]Hš[˜[Ù]İš[™Ïˆ™\]Y\İY\Y˜Xİ™]šY\ÏPÛÛ˜İ\œ™[\ÚX\›™]ÒÙ^TÙ]
 
-    private void verifyStrictReplayRevision(String packageId,String environment,String revision) throws Exception {
-        try {verifyPackageRevision(packageId,environment,revision);}
-        catch(StaleCursorException stale){throw new JobConflictException("ATT-SERVER-REPLAY-REVISION-CONFLICT","The original Package revision is unavailable. Strict replay is blocked; review with the current Package or restore the original source separately.");}
-    }
+NÂˆš]˜]Hš[˜[˜]˜K][˜ÛÛ˜İ\œ™[›ØÚÜË”™Y[˜[™XYÜš]SØÚÈ\Y˜XİY™XŞXÛO[™]È˜]˜K][˜ÛÛ˜İ\œ™[›ØÚÜË”™Y[˜[™XYÜš]SØÚÊYJNÂˆš[˜[ÛÛ˜İ\œ™[\ÚX\İš[™Ë›Øˆ›ØœÏ[™]ÈÛÛ˜İ\œ™[\ÚX\Š
+NÂˆÊŠˆYÙ\ÈÙˆĞ[šÈ›Ø”İÜ™HÔÕÔQÑWĞĞS‘QUWÔQÑ_H^[Z[™Y[ˆÛ™HÚ^™HİÙY\ˆ\İÈİÙ\ˆ\ÈÈ]H›İ[™\Kˆ
+‹Âˆ[İÜ˜YÙPØ[™Y]P˜]Ú[Z]MLÂˆÊŠˆÙ^\Ù]™\İ[YHÚ[›ÜˆH\X[Ú^™HİÙY\ˆ›İ[İ\]HÛ\İØ[™Y]Kˆ
+‹Âˆİš[™ÈİÜ˜YÙTØØ[Y\‘š[š\ÚYÂˆİš[™ÈİÜ˜YÙTØØ[Y\’YÂˆÊŠˆYHÛ˜ÙHHİ\œ™[\ÜÈ\È^[Z[™YHÛ\İØ[™Y]Kˆ\œÚ\İYÚ]H™\İ[YHİ\œÛÜ‹ˆ
+‹Âˆ›ÛÛX[ˆİÜ˜YÙTØØ[Ûİ™\™YXYÂˆÊŠˆ\İÈÙ]\ÈÛÈH™\İ\Y[[YHØ[ˆ™\İÜ™HHİ\œÛÜˆ™Y›Ü™HHİ\\İÙY\ˆ
+‹Âˆİ]XÈ›ÛÛX[ˆÚÚ\[š]X[İÜ˜YÙTİÙY\Âˆš]˜]H›ÛÛX[ˆİÜ˜YÙPİ\œÛÜ”™\İÜ™YÂˆš]˜]Hš[˜[ÛÛ˜İ\œ™[\ÚX\İš[™Ë]\™U\ÚÏ›ÚYˆ\ÚÜÏ[™]ÈÛÛ˜İ\œ™[\ÚX\Š
+NÂˆš]˜]Hš[˜[ÛÛ˜İ\œ™[\ÚX\İš[™ËYZ\ÜÚ[Û“X\ÙOˆX\Ù\Ï[™]ÈÛÛ˜İ\œ™[\ÚX\Š
+NÂˆš]˜]Hš[˜[]ÛZXÓÛ™ÈÛÛ\]Y[™]È]ÛZXÓÛ™Ê
+NÂˆš]˜]Hš[˜[Ù[X\Ü™HØYÛİËYZ\ÜÚ[Û”ÛİÎÂˆš]˜]Hš[˜[Ù[X\Ü™H[œÜXİ[Û•\ÚÔÛİÎÂˆš[˜[Ù[X\Ü™Hİ™X[TÛİÏ[™]ÈÙ[X\Ü™JPVÔÕ‘PSWÓĞ”ÑT•‘T”ËYJNÂˆš]˜]Hš[˜[ØÚY[Y^Xİ]Ü”Ù\šXÙH™][[ÛÂˆš]˜]Hš[˜[ØÚY[Y^Xİ]Ü”Ù\šXÙH\Y˜XİXZ[[˜[˜ÙNÂˆš]˜]Hš[˜[ØÚY[Y^Xİ]Ü”Ù\šXÙH\™Ù][™^XZ[[˜[˜ÙNÂˆš]˜]Hš[˜[˜]˜K][˜ÛÛ˜İ\œ™[ÛÛ˜İ\œ™[[šÙY]Y]YO›ØˆY™\œ™YÛÜšÙ\”™[X\Ù\Ï[™]È˜]˜K][˜ÛÛ˜İ\œ™[ÛÛ˜İ\œ™[[šÙY]Y]YOŠ
+NÂˆš]˜]Hš[˜[Ù]İš[™ÏˆY™\œ™YÛÜšÙ\”™[X\ÙRYÏPÛÛ˜İ\œ™[\ÚX\›™]ÒÙ^TÙ]
 
-    private final Object replayLock=new Object();
-    private final Map<String,ReplayReview> replayReviews=new java.util.concurrent.ConcurrentHashMap<>();
-    private record ReplayReview(String source,String principal,String draftId,String packageId,String executionType,String sourcePolicy,
-                                String originalRevision,String selectedRevision,String configurationDigest,
-                                String sourcePath,ObjectNode originalDefinition,ObjectNode definition,Map<String,Object> originalConfiguration,
-                                Map<String,Object> configuration,String validationCode,List<Map<String,Object>> diagnostics,
-                                Instant expiresAt) {}
+NÂˆš]˜]Hİš[™È\Y˜Xİ™XÛİ™\Pİ\œÛÜHˆÂˆš]˜]Hš[˜[ØÚY[Y^Xİ]Ü”Ù\šXÙH[œÜXİ[Û•Ø]ÚÙÜÎÂˆš]˜]HØYØÚY[TØÚY[\ˆØYØÚY[TØÚY[\Âˆš]˜]Hš[˜[ÛÜšÙ\”›ØÙ\ÜÓ][˜Ú\ˆ›ØÙ\ÜÓ][˜Ú\Âˆš]˜]Hš[˜[ÛØÚÈÛØÚÎÂˆš[˜[XÚØYÙSX[šY™\İX›\Ú\ˆX[šY™\İX›\Ú\Âˆš]˜]H›Û][HX\İš[™ËØš™Xİˆ›Ø”İÜ˜YÙT™\ÜÂˆš]˜]Hš[˜[ÛÛ˜İ\œ™[\ÚX\›ØÙ\ÜË›ÛÛX[ˆ[œÜXİ[Û”›ØÙ\ÜÙ\Ï[™]ÈÛÛ˜İ\œ™[\ÚX\Š
+NÂˆš]˜]Hš[˜[Øš™Xİ˜YØÚÏ[™]ÈØš™Xİ
 
-    private Map<String,String> ownedExecutionSpec(String id,String principal) throws Exception {
-        requireLocalOperator(principal);requireJobOwner(id,principal);
-        Map<String,String> record=store.executionSpec(id);if(record==null)throw new NotFoundException();
-        boolean owned=principal.equals(record.get("principal"));
-        if(!owned&&record.get("occurrenceId")!=null) {
-            Map<String,Object> occurrence=store.scheduleExecution(record.get("occurrenceId"));
-            LoadSchedule schedule=occurrence==null?null:store.schedule(String.valueOf(occurrence.get("scheduleId")));
-            owned=schedule!=null&&(principal.equals(schedule.createdBy)||principal.equals(schedule.executionPrincipal));
-        }
-        if(!owned)throw new NotFoundException();
-        return record;
-    }
-    Map<String,Object> jobReplay(String id,String principal) throws Exception {
-        Map<String,String> record=ownedExecutionSpec(id,principal);Map<String,Object> view=new LinkedHashMap<>();
-        view.put("jobId",id);view.put("available",record.get("spec")!=null);
-        if(record.get("spec")==null)view.put("reason",record.get("reason")==null?"Rerun unavailable for this historical job. Configure a new run from the current package.":record.get("reason"));
-        else {
-            JobExecutionSpec spec=JobExecutionSpec.parse(record.get("spec"));
-            if(spec.configuration()!=null)view.put("configuration",spec.configuration());
-            view.put("definition",spec.definition());view.put("revisionPolicy","reject-package-changes");view.put("revision",spec.revision());
-            if(spec.value.has("sourcePath"))view.put("sourcePath",spec.value.get("sourcePath").asText());
-        }
-        if(record.get("rerunOfJobId")!=null)view.put("rerunOfJobId",record.get("rerunOfJobId"));
-        if((record.get("originatingScheduleId")!=null||record.get("occurrenceId")!=null)&&config.scheduling.enabled) {
-            Map<String,Object> occurrence=record.get("occurrenceId")==null?null:store.scheduleExecution(record.get("occurrenceId"));
-            String scheduleId=record.get("originatingScheduleId");
-            if(scheduleId==null&&occurrence!=null)scheduleId=String.valueOf(occurrence.get("scheduleId"));
-            LoadSchedule schedule=scheduleId==null?null:store.schedule(scheduleId);
-            if(schedule!=null&&(principal.equals(schedule.createdBy)||principal.equals(schedule.executionPrincipal)))view.put("originatingScheduleId",schedule.id);
-        }
-        return view;
-    }
-    Map<String,Object> createJobReplayDraft(String id,String principal) throws Exception {
-        return createJobReplayDraft(id,principal,JSON.createObjectNode());
-    }
-    Map<String,Object> createJobReplayDraft(String id,String principal,JsonNode request) throws Exception {
-        if(!config.inspection.enabled)throw new IllegalArgumentException("Replay requires package inspection to be enabled by the Server");
-        synchronized(replayLock) {
-            requireObject(request,"Replay draft options must be a JSON object");requireOnlyFields(request,"sourcePolicy","overrides");
-            String sourcePolicy=request.has("sourcePolicy")?required(request,"sourcePolicy"):"strict";
-            if(!Set.of("current","strict").contains(sourcePolicy))throw new IllegalArgumentException("sourcePolicy must be current or strict");
-            Map<String,String> record=ownedExecutionSpec(id,principal);
-            if(record.get("spec")==null)throw new ReplayInputMissingException("Rerun is unavailable because this Job has no safely retained execution definition. Re-enter the missing inputs in a new run.");
-            JobExecutionSpec spec=JobExecutionSpec.parse(record.get("spec"));ObjectNode originalDefinition=spec.definition();
-            requireReplayReviewCapacity(principal);
-            ObjectNode definition=JobReplayOverrides.apply(originalDefinition,request.get("overrides"));
-            boolean packageDefaultEnvironment=spec.configuration()!=null&&"package".equals(spec.configuration().get("environmentOrigin"));
-            JsonNode environmentOverride=request.path("overrides").path("environment");
-            if(packageDefaultEnvironment&&(!environmentOverride.isTextual()||environmentOverride.asText().isBlank()))definition.remove("environment");
-            String packageId=required(definition,"packageId"),environment=optionalText(definition,"environment");
-            if("strict".equals(sourcePolicy))verifyStrictReplayRevision(packageId,environment,spec.revision());
-            boolean run="run".equals(definition.path("executionType").asText());
-            Map<String,Object> draft=null;String validationCode=null;List<Map<String,Object>> diagnostics=Collections.emptyList();
-            try {
-                if(run)draft=createRunDraft(definition,principal,true,null);
-                else if(spec.value.has("sourcePath")) {
-                    String path=safeRelative(spec.value.path("sourcePath").asText(),"scenario");validatePackagePath(packageRoot(packageId),path,"scenario");
-                    LoadSchedule source=new LoadSchedule();source.packageId=packageId;source.environment=environment;
-                    source.inlineScenario=JSON.convertValue(definition.get("scenario"),Map.class);
-                    ValidatedScheduledScenario validated=validateScheduledScenario(packageRoot(packageId),source,source.inlineScenario,false);
-                    validatePackageBackedReplayLoadLimits(config.inlineLoad,validated.scenario);
-                    if(validated.containsSensitiveValues)throw new ReplayInputMissingException("Sensitive LOAD inputs were not retained. Enter them again through the authorized input controls.");
-                    definition.set("scenario",JSON.valueToTree(validated.scenario));
-                    Map<String,Object> configuration=configurationRevision(resolveExecutionConfiguration(packageId,packageRoot(packageId),environment),validated.revisionDigest);
-                    CatalogLoadDraftState retained=new CatalogLoadDraftState("C"+UUID.randomUUID().toString().replace("-","").toUpperCase(),principal,packageId,environment,path,validated.revisionDigest,validated.model,validated.scenario,null,configuration,clock.instant().plusMillis(DRAFT_TTL_MILLIS));
-                    synchronized(draftLock){expireDrafts();checkDraftCapacity(principal);catalogLoadDrafts.put(retained.id,retained);}
-                    draft=catalogLoadDraftView(retained);
-                } else {
-                    ObjectNode input=definition.deepCopy();input.remove("executionType");draft=createAdvancedLoadDraft(input,principal,null);
-                    JsonNode normalized=JSON.valueToTree(draft.get("scenario"));if(normalized.isObject())definition.set("scenario",normalized);
-                }
-            } catch(ReplayInputMissingException missing){validationCode="ATT-SERVER-REPLAY-INPUT-MISSING";diagnostics=List.of(replayDiagnostic(validationCode,"inputs",missing.getMessage()));}
-              catch(InlineLoadLimitException limit){validationCode="ATT-SERVER-INLINE-LOAD-LIMIT";diagnostics=List.of(replayDiagnostic(validationCode,"scenario.load",limit.getMessage()));}
-              catch(InspectionConfigurationException invalid){validationCode="ATT-SERVER-REPLAY-VALIDATION-FAILED";diagnostics=safeReplayDiagnostics(invalid.diagnostics,validationCode);}
-              catch(DraftValidationException invalid){
-                if(replayDiagnosticsShowMissingResource(invalid.diagnostics)){validationCode="ATT-SERVER-REPLAY-RESOURCE-MISSING";diagnostics=safeReplayDiagnostics(invalid.diagnostics,validationCode);}
-                else {validationCode="ATT-SERVER-REPLAY-VALIDATION-FAILED";diagnostics=safeReplayDiagnostics(invalid.diagnostics,validationCode);}
-              } catch(NotFoundException missing){validationCode="ATT-SERVER-REPLAY-RESOURCE-MISSING";diagnostics=List.of(replayDiagnostic(validationCode,"target or scenario","The retained resource is missing or no longer available in this Package. Choose an available resource, then validate again."));}
-              catch(StaleCursorException stale){validationCode="ATT-SERVER-REPLAY-DRAFT-STALE";diagnostics=List.of(replayDiagnostic(validationCode,"package","The Package changed during validation. Validate these edits again."));}
-              catch(IllegalArgumentException invalid){validationCode="ATT-SERVER-REPLAY-VALIDATION-FAILED";diagnostics=List.of(replayDiagnostic(validationCode,run?"target or selection":"scenario",invalid.getMessage()));}
-            if(validationCode!=null)return createInvalidReplayDraft(id,principal,spec,sourcePolicy,originalDefinition,definition,packageId,run,validationCode,diagnostics);
-            String draftId=String.valueOf(draft.get("draftId"));
-            String selectedRevision=String.valueOf(draft.get("revisionDigest"));
-            if(!selectedRevision.matches("[a-f0-9]{64}"))throw new IllegalStateException("Replay validation did not produce a current package revision");
-            Map<String,Object> configuration=JSON.convertValue(draft.get("configuration"),Map.class);
-            if(configuration==null||configuration.isEmpty())throw new IllegalStateException("Replay validation did not resolve current configuration");
-            String effectiveEnvironment=configuration.get("environment") instanceof String?(String)configuration.get("environment"):environment;
-            if(effectiveEnvironment!=null)definition.put("environment",effectiveEnvironment);
-            if("strict".equals(sourcePolicy)&&!selectedRevision.equals(spec.revision()))verifyStrictReplayRevision(packageId,effectiveEnvironment,spec.revision());
-            requireReplayReviewCapacity(principal);
-            String intent=UUID.randomUUID().toString();Instant expires=clock.instant().plusMillis(DRAFT_TTL_MILLIS);
-            replayReviews.put(intent,new ReplayReview(id,principal,draftId,packageId,run?"run":"load",sourcePolicy,spec.revision(),selectedRevision,
-                    replayConfigurationDigest(configuration),spec.value.path("sourcePath").asText(null),originalDefinition.deepCopy(),definition.deepCopy(),spec.configuration(),
-                    att.server.api.ConfigurationSnapshot.copy(configuration),null,Collections.emptyList(),expires));
-            Map<String,Object> result=new LinkedHashMap<>(jobReplay(id,principal));
-            Object oldConfiguration=result.remove("configuration");if(oldConfiguration!=null)result.put("originalConfiguration",oldConfiguration);
-            result.put("schemaVersion","att-job-replay-draft/v1");result.put("sourceJobId",id);result.put("definition",definition);result.put("originalDefinition",originalDefinition);result.put("sourcePolicy",sourcePolicy);
-            result.put("originalRevision",spec.revision());result.put("currentRevision",selectedRevision);result.put("configuration",configuration);
-            result.put("missingFields",replayMissingFields(definition));
-            result.put("intentId",intent);result.put("draftId",draftId);result.put("draftRef",draftId);result.put("expiresAt",expires.toString());result.put("preview",draft);return result;
-        }
-    }
-    private Map<String,Object> createInvalidReplayDraft(String id,String principal,JobExecutionSpec spec,String sourcePolicy,
-            ObjectNode originalDefinition,ObjectNode definition,String packageId,boolean run,String validationCode,
-            List<Map<String,Object>> diagnostics) throws Exception {
-        String environment=optionalText(definition,"environment"),selectedRevision="";Map<String,Object> configuration=Collections.emptyMap();
-        try {
-            Path root=packageRoot(packageId);if(root==null)throw new NotFoundException();
-            WorkerRequest revisionRequest=inspectionRequest(packageId,root,environment);revisionRequest.inspectionAction="revision";
-            Map<String,Object> inspected=executeInspection(root,revisionRequest);Object digest=inspected.get("revisionDigest");
-            if(digest instanceof String&&((String)digest).matches("[a-f0-9]{64}"))selectedRevision=(String)digest;
-        } catch(Exception ignored) { /* Keep the editor draft available when current Package inspection itself is unavailable. */ }
-        try {
-            Path root=packageRoot(packageId);if(root!=null)configuration=configurationRevision(resolveExecutionConfiguration(packageId,root,environment),selectedRevision.isEmpty()?null:selectedRevision);
-        } catch(Exception ignored) { /* Diagnostics below explain why the retained definition still needs editing. */ }
-        String effectiveEnvironment=configuration.get("environment") instanceof String?(String)configuration.get("environment"):environment;
-        if(effectiveEnvironment!=null)definition.put("environment",effectiveEnvironment);
-        String draftRef=(run?"R":"C")+UUID.randomUUID().toString().replace("-","").toUpperCase(java.util.Locale.ROOT);
-        Instant expires=clock.instant().plusMillis(DRAFT_TTL_MILLIS);requireReplayReviewCapacity(principal);
-        replayReviews.put(UUID.randomUUID().toString(),new ReplayReview(id,principal,draftRef,packageId,run?"run":"load",sourcePolicy,spec.revision(),selectedRevision,
-                null,spec.value.path("sourcePath").asText(null),originalDefinition.deepCopy(),definition.deepCopy(),spec.configuration(),
-                configuration,validationCode,safeReplayDiagnostics(diagnostics,validationCode),expires));
-        Map<String,Object> result=new LinkedHashMap<>(jobReplay(id,principal));Object oldConfiguration=result.remove("configuration");
-        if(oldConfiguration!=null)result.put("originalConfiguration",oldConfiguration);
-        result.put("schemaVersion","att-job-replay-draft/v1");result.put("draftRef",draftRef);result.put("draftId",draftRef);result.put("sourceJobId",id);
-        result.put("packageId",packageId);result.put("executionType",run?"run":"load");result.put("sourcePolicy",sourcePolicy);
-        result.put("originalRevision",spec.revision());result.put("currentRevision",selectedRevision);result.put("originalDefinition",originalDefinition);result.put("definition",definition);
-        result.put("sourcePath",spec.value.path("sourcePath").asText(null));result.put("configuration",configuration);result.put("expiresAt",expires.toString());
-        result.put("validationState","invalid");result.put("errorCode",validationCode);result.put("diagnostics",safeReplayDiagnostics(diagnostics,validationCode));
-        List<String> missing=new ArrayList<>(replayMissingFields(definition));if("ATT-SERVER-REPLAY-INPUT-MISSING".equals(validationCode)&&!missing.contains("sensitive inputs"))missing.add("sensitive inputs");
-        result.put("missingFields",missing);return result;
-    }
-    private void requireReplayReviewCapacity(String principal) {
-        Instant now=clock.instant();replayReviews.entrySet().removeIf(entry->!entry.getValue().expiresAt.isAfter(now));
-        long owned=replayReviews.values().stream().filter(review->java.util.Objects.equals(principal,review.principal)).count();
-        if(replayReviews.size()>=MAX_ACTIVE_DRAFTS||owned>=MAX_DRAFTS_PER_PRINCIPAL)throw new DraftCapacityException();
-    }
-    private static Map<String,Object> replayDiagnostic(String code,String field,String summary) {
-        Map<String,Object> result=new LinkedHashMap<>();result.put("code",code);result.put("field",field);result.put("summary",summary==null?"Replay validation failed against the current Package.":summary);return result;
-    }
-    private static List<Map<String,Object>> safeReplayDiagnostics(List<Map<String,Object>> diagnostics,String fallbackCode) {
-        List<Map<String,Object>> safe=new ArrayList<>();
-        if(diagnostics!=null)for(Map<String,Object> diagnostic:diagnostics) {
-            Map<String,Object> item=new LinkedHashMap<>();
-            for(String field:List.of("code","field","path","resourceId","severity","summary","message","suggestion")) {
-                Object value=diagnostic.get(field);if(value instanceof String) {
-                    String text=(String)value;if(text.length()>512||containsControl(text)||text.startsWith("/")||text.contains("..\\"))continue;
-                    item.put(field,text);
-                }
-            }
-            if(item.get("code")==null)item.put("code",fallbackCode);if(item.get("summary")==null)item.put("summary","Replay validation failed against the current Package.");safe.add(item);
-        }
-        if(safe.isEmpty())safe.add(replayDiagnostic(fallbackCode,"scenario","Replay validation failed against the current Package. Review the affected fields and validate again."));
-        return Collections.unmodifiableList(safe);
-    }
-    private static List<String> replayMissingFields(ObjectNode definition) {
-        List<String> missing=new ArrayList<>();
-        if("run".equals(definition.path("executionType").asText())) {
-            if(!definition.path("target").isObject()&&!definition.path("selection").isObject())missing.add("target or selection");
-            return missing;
-        }
-        JsonNode scenario=definition.path("scenario"),rootLoad=scenario.path("load"),rows=scenario.path("workloads");
-        if(!hasValue(rootLoad.path("duration"))&&!hasWorkloadPhase(rows,"duration"))missing.add("scenario.load.duration");
-        if(rows.isArray())for(int i=0;i<rows.size();i++) {
-            JsonNode workload=rows.get(i),load=workload.path("load");String prefix="scenario.workloads["+i+"]";
-            if(!hasValue(workload.path("id")))missing.add(prefix+".id");
-            boolean arrival=hasValue(load.path("arrivalRate"))||hasValue(rootLoad.path("arrivalRate"));
-            if(arrival) {
-                if(!hasValue(load.path("arrivalRate"))&&!hasValue(rootLoad.path("arrivalRate")))missing.add(prefix+".load.arrivalRate");
-                if(!hasValue(load.path("maxConcurrent"))&&!hasValue(rootLoad.path("maxConcurrent")))missing.add(prefix+".load.maxConcurrent");
-                if(!hasValue(load.path("overloadPolicy"))&&!hasValue(rootLoad.path("overloadPolicy")))missing.add(prefix+".load.overloadPolicy");
-            } else if(!hasValue(load.path("users"))&&!hasValue(rootLoad.path("users")))missing.add(prefix+".load.users");
-        }
-        return missing;
-    }
-    private static boolean hasWorkloadPhase(JsonNode rows,String phase) {
-        if(!rows.isArray())return false;
-        for(JsonNode row:rows)if(hasValue(row.path("load").path(phase)))return true;
-        return false;
-    }
-    private static boolean hasValue(JsonNode value) {return value!=null&&!value.isMissingNode()&&!value.isNull()&&(!value.isTextual()||!value.asText().isBlank());}
-    private String replayConfigurationDigest(Map<String,Object> configuration) throws Exception {
-        byte[] bytes=JSON.writeValueAsBytes(att.server.api.ConfigurationSnapshot.copy(configuration));
-        byte[] digest=java.security.MessageDigest.getInstance("SHA-256").digest(bytes);StringBuilder result=new StringBuilder(64);
-        for(byte value:digest)result.append(String.format(java.util.Locale.ROOT,"%02x",value&255));return result.toString();
-    }
-    Map<String,Object> getJobReplayEditorDraft(String jobId,String draftId,String principal) throws Exception {
-        synchronized(replayLock) {
-            ownedExecutionSpec(jobId,principal);
-            ReplayReview review=null;
-            for(ReplayReview candidate:replayReviews.values())if(candidate.source.equals(jobId)&&candidate.principal.equals(principal)&&candidate.draftId.equals(draftId)){review=candidate;break;}
-            if(review==null)throw new ReplayDraftExpiredException();
-            if(!review.expiresAt.isAfter(clock.instant())){replayReviews.values().remove(review);throw new ReplayDraftExpiredException();}
-            Map<String,Object> view=new LinkedHashMap<>();view.put("schemaVersion","att-job-replay-draft/v1");view.put("draftRef",draftId);view.put("sourceJobId",jobId);
-            view.put("packageId",review.packageId);view.put("executionType",review.executionType);view.put("sourcePolicy",review.sourcePolicy);
-            view.put("originalRevision",review.originalRevision);view.put("currentRevision",review.selectedRevision);
-            ObjectNode definition=review.definition.deepCopy(),originalDefinition=review.originalDefinition.deepCopy();
-            if(review.sourcePath!=null){definition.put("sourcePath",review.sourcePath);originalDefinition.put("sourcePath",review.sourcePath);}
-            view.put("definition",definition);view.put("originalDefinition",originalDefinition);view.put("sourcePath",review.sourcePath);
-            if(review.originalConfiguration!=null)view.put("originalConfiguration",att.server.api.ConfigurationSnapshot.copy(review.originalConfiguration));
-            view.put("configuration",review.configuration.isEmpty()?Collections.emptyMap():att.server.api.ConfigurationSnapshot.copy(review.configuration));view.put("expiresAt",review.expiresAt.toString());
-            view.put("missingFields",replayMissingFields(review.definition));view.put("validationState",review.validationCode==null?"valid":"invalid");
-            if(review.validationCode!=null){view.put("errorCode",review.validationCode);view.put("diagnostics",review.diagnostics);}
-            return view;
-        }
-    }
-    Map<String,Object> rerunJob(String id,JsonNode body,String principal) throws Exception {
-        requireOnlyFields(body,"intentId","confirm","sourcePolicy");
-        if(!body.path("confirm").isBoolean()||!body.path("confirm").booleanValue())throw new IllegalArgumentException("Positive replay confirmation is required");
-        String requestedPolicy=body.has("sourcePolicy")?required(body,"sourcePolicy"):null;
-        if(requestedPolicy!=null&&!Set.of("current","strict").contains(requestedPolicy))throw new IllegalArgumentException("sourcePolicy must be current or strict");
-        String intent=required(body,"intentId");if(!intent.matches("[a-f0-9-]{36}"))throw new IllegalArgumentException("Invalid replay intent");
-        synchronized(replayLock) {
-            ownedExecutionSpec(id,principal);
-            String accepted=store.replayJob(principal,intent,id);if(accepted!=null){requireJobOwner(accepted,principal);if(requestedPolicy!=null){Map<String,String> acceptedSpec=store.executionSpec(accepted);if(acceptedSpec==null||acceptedSpec.get("spec")==null||!requestedPolicy.equals(JobExecutionSpec.parse(acceptedSpec.get("spec")).value.path("replay").path("sourcePolicy").asText()))throw new JobConflictException("ATT-SERVER-REPLAY-INTENT-MISMATCH","The confirmation intent belongs to a different source policy.");}return jobRecord(accepted);}
-            ReplayReview review=replayReviews.get(intent);
-            if(review==null||!review.source.equals(id)||!review.principal.equals(principal)) {if(requestedPolicy!=null)throw new ReplayDraftExpiredException();throw new NotFoundException();}
-            if(!review.expiresAt.isAfter(clock.instant()))throw new ReplayDraftExpiredException();
-            if(requestedPolicy!=null&&!requestedPolicy.equals(review.sourcePolicy))throw new JobConflictException("ATT-SERVER-REPLAY-INTENT-MISMATCH","The confirmation intent belongs to a different source policy.");
-            Map<String,String> record=ownedExecutionSpec(id,principal);JobExecutionSpec spec=JobExecutionSpec.parse(record.get("spec"));
-            if("strict".equals(review.sourcePolicy))verifyStrictReplayRevision(review.packageId,optionalText(review.definition,"environment"),review.originalRevision);
-            else try {verifyPackageRevision(review.packageId,optionalText(review.definition,"environment"),review.selectedRevision);}
-                catch(StaleCursorException stale){throw new JobConflictException("ATT-SERVER-REPLAY-DRAFT-STALE","The Package changed after replay validation. Your edits are still available; validate them again.");}
-            if(!review.configurationDigest.equals(replayConfigurationDigest(review.configuration)))throw new JobConflictException("ATT-SERVER-REPLAY-DRAFT-STALE","The validated configuration changed. Review the draft again.");
-            ObjectNode input;
-            if("run".equals(review.executionType))input=runDraft(review.draftId,principal,review.packageId).workerInput.deepCopy();
-            else {
-                AdvancedLoadDraftState draft=advancedLoadDrafts.get(review.draftId);CatalogLoadDraftState catalog=catalogLoadDrafts.get(review.draftId);
-                if(draft==null&&catalog==null)throw new NotFoundException();
-                Instant expires=draft==null?catalog.expiresAt:draft.expiresAt;
-                if(!expires.isAfter(clock.instant()))throw new ReplayDraftExpiredException();
-                input=JSON.createObjectNode();input.put("packageId",review.packageId);
-                String environment=draft==null?catalog.environment:draft.environment;
-                if(environment!=null)input.put("environment",environment);
-                input.set("inlineLoadScenario",JSON.valueToTree(draft==null?catalog.scenario:draft.scenario));input.put("expectedRevisionDigest",review.selectedRevision);
-                if(draft==null&&catalog.resourceId!=null)input.put("scenario",catalog.resourceId);
-                input.set("configurationProvenance",JSON.valueToTree(review.configuration));
-            }
-            input.put("expectedRevisionDigest",review.selectedRevision);
-            input.set("configurationProvenance",JSON.valueToTree(review.configuration));
-            applyInspectionPolicy(input,review.packageId);
-            JobExecutionSpec retained=capturePrevalidatedExecutionSpec(review.executionType,input,null)
-                    .withReplaySource(id,review.sourcePolicy,review.originalRevision,review.selectedRevision);
-            Map<String,Object> result=submit(review.executionType,input,principal,true,null,"load".equals(review.executionType)&&review.definition.has("scenario")&&spec.value.has("sourcePath"),id,intent,retained,
-                    "load".equals(review.executionType)&&spec.value.has("sourcePath"));
-            store.audit(principal,"JOB_RERUN",String.valueOf(result.get("jobId")),review.packageId,"ACCEPTED");
-            runDrafts.remove(review.draftId);advancedLoadDrafts.remove(review.draftId);catalogLoadDrafts.remove(review.draftId);replayReviews.remove(intent);
-            return result;
-        }
-    }
-    private static boolean replayDiagnosticsShowMissingResource(List<Map<String,Object>> diagnostics) {
-        for(Map<String,Object> diagnostic:diagnostics) {
-            String code=String.valueOf(diagnostic.getOrDefault("code","" )).toUpperCase(java.util.Locale.ROOT);
-            String summary=String.valueOf(diagnostic.getOrDefault("summary","" )).toLowerCase(java.util.Locale.ROOT);
-            String detail=String.valueOf(diagnostic.getOrDefault("detail","" )).toLowerCase(java.util.Locale.ROOT);
-            if(code.contains("NOT-FOUND")||code.contains("RESOURCE-MISSING")||summary.contains("not found")||summary.contains("no longer exists")||detail.contains("not found"))return true;
-        }
-        return false;
-    }
-    static final class ReplayValidationException extends RuntimeException {
-        final List<Map<String,Object>> diagnostics;
-        ReplayValidationException(String summary){this(List.of(Map.of("code","ATT-SERVER-REPLAY-VALIDATION-FAILED","summary",summary==null?"Replay validation failed against the current Package.":summary)));}
-        ReplayValidationException(List<Map<String,Object>> diagnostics){super(diagnostics.isEmpty()?"Replay validation failed against the current Package.":String.valueOf(diagnostics.get(0).getOrDefault("summary","Replay validation failed against the current Package.")));this.diagnostics=Collections.unmodifiableList(new ArrayList<>(diagnostics));}
-    }
-    static final class ReplayResourceMissingException extends RuntimeException {ReplayResourceMissingException(){super("A retained Scenario or Target no longer resolves in the current Package. Edit the affected field or choose an available resource, then validate again.");}}
+NÂˆš]˜]Hš[˜[ÛÛ˜İ\œ™[\ÚX\İš[™ËXYÑ˜YˆXYÑ˜YÏ[™]ÈÛÛ˜İ\œ™[\ÚX\Š
+NÂˆš]˜]H™XÛÜ™[‘˜Y
+İš[™ÈYİš[™Èš[˜Ú\[İš[™ÈXÚØYÙRYİš[™È™]š\Ú[Û‹œÛÛ“›ÙHÛÜšÙ\’[œ]ˆX\İš[™ËØš™Xİˆ™]šY]Ë[œİ[^\™\Ğ]XYÑ˜Y™\Ûİ\˜ÙQXYÑ˜Y
+HÈBˆš]˜]Hš[˜[ÛÛ˜İ\œ™[\ÚX\İš[™Ë[‘˜Yˆ[‘˜YÏ[™]ÈÛÛ˜İ\œ™[\ÚX\Š
+NÂˆš]˜]Hš[˜[ÛÛ˜İ\œ™[\ÚX\İš[™Ë]ZXÚÓØY˜Yˆ]ZXÚÓØY˜YÏ[™]ÈÛÛ˜İ\œ™[\ÚX\Š
+NÂˆš]˜]Hš[˜[ÛÛ˜İ\œ™[\ÚX\İš[™ËY˜[˜ÙYØY˜Yİ]OˆY˜[˜ÙYØY˜YÏ[™]ÈÛÛ˜İ\œ™[\ÚX\Š
+NÂˆš]˜]Hš[˜[ÛÛ˜İ\œ™[\ÚX\İš[™ËØ][ÙÓØY˜Yİ]OˆØ][ÙÓØY˜YÏ[™]ÈÛÛ˜İ\œ™[\ÚX\Š
+NÂˆš]˜]Hš[˜[\İ[œÜXİ[Û•ÛÜšÙ\ˆ[œÜXİ[Û•ÛÜšÙ\”ÛÛ[™]È\œ˜^S\İŠ
+NÂˆš]˜]Hš[˜[ØÚY[Y^Xİ]Ü”Ù\šXÙH[œÜXİ[Û•Ø\›]\Âˆš]˜]H›Û][H›ÛÛX[ˆÛÜÚ[™ÎÂˆš]˜]Hš[˜[˜]˜K][˜ÛÛ˜İ\œ™[›ØÚÜË”™Y[˜[™XYÜš]SØÚÈYZ\ÜÚ[Û“Y™XŞXÛO[™]È˜]˜K][˜ÛÛ˜İ\œ™[›ØÚÜË”™Y[˜[™XYÜš]SØÚÊYJNÂˆš]˜]Hš[˜[ÛÛ˜İ\œ™[\ÚX\™XY›ØÙ\ÜÏˆİ\œ‘˜Z[™\œÏ[™]ÈÛÛ˜İ\œ™[\ÚX\Š
+NÂˆš[˜[[œÜXİ[Û“Y]šXÜÈ[œÜXİ[Û“Y]šXÜÏ[™]È[œÜXİ[Û“Y]šXÜÊ
+NÂˆš]˜]Hš[˜[]ÛZXÓÛ™È[œÜXİ[Û•ÛÜšÙ\”Ù[Xİ[Û[™]È]ÛZXÓÛ™Ê
+NÂˆš]˜]Hš[˜[]ÛZXÓÛ™È[œÜXİ[Û•\ÚÔÙ\]Y[˜ÙO[™]È]ÛZXÓÛ™Ê
+NÂˆš]˜]Hš[˜[˜]˜K][˜ÛÛ˜İ\œ™[˜]ÛZXË]ÛZXÒ[YÙ\ˆ[œÜXİ[Û‘^Ü™\”š[Üš]PÜ™Y]ÏBˆ™]È˜]˜K][˜ÛÛ˜İ\œ™[˜]ÛZXË]ÛZXÒ[YÙ\ŠS”ÔPÕSÓ—ÑVÔ‘T—Ô’SÔ’UWĞ•T”Õ
+NÂˆš]˜]Hš[˜[]V×Hİ\œÛÜ’Ù^O[™]È]VÌÌ—NÂˆš]˜]Hš[˜[ÙXİ\™T˜[™ÛHİ\œÛÜ”˜[™ÛO[™]ÈÙXİ\™T˜[™ÛJ
+NÂˆš]˜]Hš[˜[]ÛÜšÙ\“XœÎÂˆš]˜]Hš[˜[İš[™ÈÛÜšÙ\”ØÚ[XT™YÚ\İQYÙ\İÂˆ^Xİ][Û•ÛÜšÙ\”ÛÛ^Xİ][Û•ÛÜšÙ\œÎÂˆÙ\™\”[[YJÙ\™\ÛÛ™šYÈÛÛ™šYËİš[™ÈÛÜšÙ\“XœÊH›İÜÈ^Ù\[ÛˆÂˆ\ÊÛÛ™šYËÛÜšÙ\“XœË›ØÙ\ÜĞZ[\œİ\
+NÂˆBˆÙ\™\”[[YJÙ\™\ÛÛ™šYÈÛÛ™šYËİš[™ÈÛÜšÙ\“XœËÛÜšÙ\”›ØÙ\ÜÓ][˜Ú\ˆ›ØÙ\ÜÓ][˜Ú\ŠH›İÜÈ^Ù\[ÛˆÂˆ\ÊÛÛ™šYËÛÜšÙ\“XœË›ØÙ\ÜÓ][˜Ú\‹ÛØÚËœŞ\İ[UUÊ
+JNÂˆBˆÙ\™\”[[YJÙ\™\ÛÛ™šYÈÛÛ™šYËİš[™ÈÛÜšÙ\“XœËÛÜšÙ\”›ØÙ\ÜÓ][˜Ú\ˆ›ØÙ\ÜÓ][˜Ú\‹ÛØÚÈÛØÚÊH›İÜÈ^Ù\[ÛˆÂˆ\ÊÛÛ™šYËÛÜšÙ\“XœË›ØÙ\ÜÓ][˜Ú\‹ÛØÚË
+İ]]\˜Ú]™K˜[Y]ÜŠKO‚ˆ\Y˜Xİ\˜Ú]™K˜Z[
+İ]]\˜Ú]™K˜[Y]Ü‹ÛÛ™šYË˜\˜Ú]™PÛÛ\™\ÜÚ[ÛŠJNÂˆBˆÙ\™\”[[YJÙ\™\ÛÛ™šYÈÛÛ™šYËİš[™ÈÛÜšÙ\“XœËÛÜšÙ\”›ØÙ\ÜÓ][˜Ú\ˆ›ØÙ\ÜÓ][˜Ú\‹ÛØÚÈÛØÚË\Y˜XİX›\Ú\ˆ\Y˜XİX›\Ú\ŠH›İÜÈ^Ù\[ÛˆÂˆ\ÊÛÛ™šYËÛÜšÙ\“XœË›ØÙ\ÜÓ][˜Ú\‹ÛØÚË\Y˜XİX›\Ú\‹[
+NÂˆBˆÙ\™\”[[YJÙ\™\ÛÛ™šYÈÛÛ™šYËİš[™ÈÛÜšÙ\“XœËÛÜšÙ\”›ØÙ\ÜÓ][˜Ú\ˆ›ØÙ\ÜÓ][˜Ú\‹ÛØÚÈÛØÚË\Y˜XİX›\Ú\ˆ\Y˜XİX›\Ú\‹ˆØY›ÙÜ™\ÜÔ\œÚ\İ[˜ÙHØY›ÙÜ™\ÜÔ\œÚ\İ[˜ÙJH›İÜÈ^Ù\[ÛˆÂˆYŠ[[YK™\œÚ[ÛŠ
+K™™X]\™J
+OMÊ]›İÈ™]È[YØ[İ]Q^Ù\[ÛŠUÙ\™\ˆ™\]Z\™\È˜]˜HMÈÜˆ]\È]XİY˜]˜HŠÔ[[YK™\œÚ[ÛŠ
+K™™X]\™J
+JNÂˆ\Ë˜ÛÛ™šYÏXÛÛ™šYÎİ\Ë˜\Y˜XİX›\Ú\Z˜]˜K][“Øš™XİËœ™\]Z\™S›Û“[
+\Y˜XİX›\Ú\ŠNİ\ËÛÜšÙ\“XœÏ]ÛÜšÙ\“XœÏO[[Û[”]Ë™Ù]
+ÛÜšÙ\“XœÊKĞXœÛÛ]T]
 
-    Map<String,Object> submit(String command,JsonNode input,String principal) throws Exception {
-        return submit(command,input,principal,false);
-    }
-    private Map<String,Object> submit(String command,JsonNode input,String principal,boolean serverIssuedDraft) throws Exception {
-        return submit(command,input,principal,serverIssuedDraft,null,false);
-    }
-    private Map<String,Object> submit(String command,JsonNode input,String principal,boolean serverIssuedDraft,String scheduleOccurrenceId) throws Exception {
-        return submit(command,input,principal,serverIssuedDraft,scheduleOccurrenceId,false);
-    }
-    private Map<String,Object> submit(String command,JsonNode input,String principal,boolean serverIssuedDraft,String scheduleOccurrenceId,boolean scheduleIssued) throws Exception {
-        return submit(command,input,principal,serverIssuedDraft,scheduleOccurrenceId,scheduleIssued,null,null);
-    }
-    private Map<String,Object> submit(String command,JsonNode input,String principal,boolean serverIssuedDraft,String scheduleOccurrenceId,boolean scheduleIssued,String rerunOfJobId,String replayIntent) throws Exception {
-        return submit(command,input,principal,serverIssuedDraft,scheduleOccurrenceId,scheduleIssued,rerunOfJobId,replayIntent,null);
-    }
-    private Map<String,Object> submit(String command,JsonNode input,String principal,boolean serverIssuedDraft,String scheduleOccurrenceId,boolean scheduleIssued,String rerunOfJobId,String replayIntent,JobExecutionSpec prevalidatedSpec) throws Exception {
-        return submit(command,input,principal,serverIssuedDraft,scheduleOccurrenceId,scheduleIssued,rerunOfJobId,replayIntent,prevalidatedSpec,false);
-    }
-    private Map<String,Object> submit(String command,JsonNode input,String principal,boolean serverIssuedDraft,String scheduleOccurrenceId,boolean scheduleIssued,String rerunOfJobId,String replayIntent,JobExecutionSpec prevalidatedSpec,boolean fileBackedReplay) throws Exception {
-        return submit(command,input,principal,serverIssuedDraft,scheduleOccurrenceId,scheduleIssued,rerunOfJobId,replayIntent,prevalidatedSpec,fileBackedReplay,null);
-    }
-    private Map<String,Object> submit(String command,JsonNode input,String principal,boolean serverIssuedDraft,String scheduleOccurrenceId,boolean scheduleIssued,String rerunOfJobId,String replayIntent,JobExecutionSpec prevalidatedSpec,boolean fileBackedReplay,JobProvenance provenance) throws Exception {
-        admissionLifecycle.readLock().lock();
-        try {
-        if(closing)throw new QueueFullException("Server is shutting down");
-        long requestReceivedNanos=System.nanoTime();
-        if(!List.of("run","debug","load","validate").contains(command))throw new IllegalArgumentException("Unsupported job command");
-        String packageId=required(input,"packageId");
-        boolean loadAdmission="load".equals(command);
-        // Reject requests that already cannot be admitted before any legacy direct-request inspection runs.
-        // The final semaphore acquisition below remains authoritative when concurrent submissions race this check.
-        if(loadAdmission&&loadSlots.availablePermits()==0){store.audit(principal,"SUBMIT",null,packageId,"REJECTED_LOAD_CAPACITY");throw new QueueFullException("Load capacity is full; retry after a Load job completes");}
-        if(admissionSlots.availablePermits()==0){store.audit(principal,"SUBMIT",null,packageId,"REJECTED_QUEUE_FULL");throw new QueueFullException("Worker capacity is full; retry after a job completes");}
-        if(!serverIssuedDraft&&(input.has("draftId")||input.has("inlineDebugInput")||input.has("inlineLoadScenario")
-                ||input.has("expectedRevisionDigest")||input.has("expectedSchemaRegistryDigest")||input.has("draftResourceId")
-                ||input.has("configurationProvenance")||input.has("registeredPackageId")))
-            throw new IllegalArgumentException("Inline execution fields require a server-issued draft");
-        if(serverIssuedDraft&&"load".equals(command)) {
-            if(!scheduleIssued&&!fileBackedReplay)requireInlineLoadEnabled();
-            JsonNode scenarioNode=input.get("inlineLoadScenario");
-            if(scenarioNode==null||!scenarioNode.isObject())throw new IllegalArgumentException("A validated inline Load scenario is required");
-            @SuppressWarnings("unchecked") Map<String,Object> scenario=(Map<String,Object>)JSON.convertValue(scenarioNode,Map.class);
-            if(fileBackedReplay) {
-                String sourcePath=optionalText(input,"scenario");
-                if(sourcePath==null)throw new IllegalArgumentException("A package-file-backed replay requires its retained source path");
-                validatePackagePath(packageRoot(required(input,"packageId")),safeRelative(sourcePath,"scenario"),"scenario");
-                validatePackageBackedReplayLoadLimits(config.inlineLoad,scenario);
-            } else if(scheduleIssued)validateScheduledLoadLimits(config.inlineLoad,scenario);else enforceInlineLoadLimits(scenario);
-        }
-        Path root=packageRoot(packageId);
-        if(root==null)throw new IllegalArgumentException("Unknown packageId");
-        validatePackageRoot(root);
-        ObjectNode pinned=((ObjectNode)input).deepCopy();
-        String requestedEnvironment=optionalText(input,"environment");
-        Map<String,Object> configuration;
-        if(serverIssuedDraft&&input.path("configurationProvenance").isObject()) {
-            configuration=att.server.api.ConfigurationSnapshot.copy(JSON.convertValue(input.get("configurationProvenance"),Map.class));
-            if(!packageId.equals(configuration.get("packageId"))||!java.util.Objects.equals(requestedEnvironment,configuration.get("environment")))
-                throw new IllegalArgumentException("Configuration evidence differs from the approved execution");
-            authorizeConfiguration(configuration);
-        } else configuration=resolveExecutionConfiguration(packageId,root,requestedEnvironment);
-        pinned.put("environment",(String)configuration.get("environment"));
-        pinned.set("configurationProvenance",JSON.valueToTree(configuration));
-        input=pinned;
-        WorkerRequest request=applyWorkerPolicy(JSON.treeToValue(input,WorkerRequest.class));
-        request.configurationProvenance=configuration;request.registeredPackageId=packageId;
-        request.protocolVersion="att-worker/v1";request.command=command;request.packageRoot=root.toString();
-        request.outputDirectory=null;request.config=config.runtimeConfigPath.toString();request.environment=safeText(request.environment,128,"environment");
-        request.expectedSchemaRegistryDigest=workerSchemaRegistryDigest;
-        request.runId=safeText(request.runId,128,"runId");request.debugId=safeText(request.debugId,128,"debugId");request.suiteDirectory=safeRelative(request.suiteDirectory,"suiteDirectory");
-        request.scenario=safeRelative(request.scenario,"scenario");request.debugInput=safeRelative(request.debugInput,"debugInput");
-        request.unsafeFailureDetails=false;
-        request.suites=safePaths(request.suites,"suites");
-        validatePackagePath(root,request.suiteDirectory,"suiteDirectory");
-        validatePackagePath(root,request.scenario,"scenario");validatePackagePath(root,request.debugInput,"debugInput");
-        if(request.suites!=null)for(String suite:request.suites)validatePackagePath(root,suite,"suites");
-        if("debug".equals(command)||("run".equals(command)&&request.target!=null))validateTarget(request.target);
-        if("load".equals(command)&&request.target!=null)validateTarget(request.target);
+K››Ü›X[^™J
+Nİ\ËÛÜšÙ\”ØÚ[XT™YÚ\İQYÙ\İUÛÜšÙ\”[[YPÛ\ÜÜ]œØÚ[XT™YÚ\İQYÙ\İY”™\Ù[
+\ËÛÜšÙ\“XœÊNİ\Ëœ›ØÙ\ÜÓ][˜Ú\\›ØÙ\ÜÓ][˜Ú\İ\Ë˜ÛØÚÏZ˜]˜K][“Øš™XİËœ™\]Z\™S›Û“[
+ÛØÚÊNİ\ËœİÜ™O[™]È›Ø”İÜ™JÛÛ™šYÊNİ\Ë›ØY›ÙÜ™\ÜÔ\œÚ\İ[˜ÙO[ØY›ÙÜ™\ÜÔ\œÚ\İ[˜ÙOO[[İ\ËœİÜ™N\]SØY›ÙÜ™\ÜÎ›ØY›ÙÜ™\ÜÔ\œÚ\İ[˜ÙNİ^İ\Ë˜]][™]È]]Ù\šXÙJÛÛ™šYËİÜ™JNßXØ]Ú
+^Ù\[Ûˆ˜Z[Y
+^ÜİÜ™K˜ÛÜÙJ
+Nİ›İÈ˜Z[Yß]\Ë›ØYÛİÏ[™]ÈÙ[X\Ü™JÛÛ™šYË›X^ÛÛ˜İ\œ™[ØYYJNİ\Ë˜YZ\ÜÚ[Û”ÛİÏ[™]ÈÙ[X\Ü™JÛÛ™šYË›X^ÛÛ˜İ\œ™[
+ØÛÛ™šYËœ]Y]YY[Z]YJNÂˆX[šY™\İX›\Ú\[™]ÈXÚØYÙSX[šY™\İX›\Ú\ŠÛÛ™šYË™]Q\‹ÛÛ™šYËœXÚØYÙPÛÛ™šYİ\˜][Û‹ÛØÚËˆ\Î›X[šY™\İY]X›T›Ûİ\Î˜[Y]SX[šY™\İØ[™Y]Kˆ
+XİÜ‹Xİ[Û‹XÚØYÙRY]Z[
+KOœİÜ™K˜]Y]
+XİÜ‹Xİ[Û‹[XÚØYÙRY]Z[
+JNÂˆİ\œÛÜ”˜[™ÛK›™^]\Êİ\œÛÜ’Ù^JNÂˆ˜]˜K][˜ÛÛ˜İ\œ™[›ØÚÚ[™Ô]Y]YO[›˜X›Oˆ]Y]YOXÛÛ™šYËœ]Y]YY[Z]OLÛ™]ÈŞ[˜Ú›Û›İ\Ô]Y]YOŠ
+N›™]È\œ˜^P›ØÚÚ[™Ô]Y]YOŠÛÛ™šYËœ]Y]YY[Z]
+NÂˆÛÜšÙ\œÏ[™]È™XYÛÛ^Xİ]ÜŠÛÛ™šYË›X^ÛÛ˜İ\œ™[ÛÛ™šYË›X^ÛÛ˜İ\œ™[[YU[š]“RSTÑPÓÓ‘Ë]Y]YK‹OÕ™XY[™]È™XY
+‹˜]\Ù\™\‹]ÛÜšÙ\ˆŠNİœÙ]Y[[ÛŠYJNÜ™]\›ˆßK™]È™XYÛÛ^Xİ]Ü‹X›ÜÛXŞJ
+JNÂˆİ™X[\Ï[™]È™XYÛÛ^Xİ]ÜŠPVÔÕ‘PSWÓĞ”ÑT•‘T”ËÌ[YU[š]”ÑPÓÓ‘Ë™]ÈŞ[˜Ú›Û›İ\Ô]Y]YOŠ
+K‹OÕ™XY[™]È™XY
+‹˜]\Ù\™\‹\ÜÙHŠNİœÙ]Y[[ÛŠYJNÜ™]\›ˆßK™]È™XYÛÛ^Xİ]Ü‹X›ÜÛXŞJ
+JNÂˆ\Y˜XİÜš]\œÏ[™]È™XYÛÛ^Xİ]ÜŠKK[YU[š]“RSTÑPÓÓ‘Ë™]È\œ˜^P›ØÚÚ[™Ô]Y]YOŠX]›X^
+KÛÛ™šYËœ]Y]YY[Z]
+ØÛÛ™šYË›X^ÛÛ˜İ\œ™[
+JK‹OÕ™XY[™]È™XY
+‹˜]\Ù\™\‹X\Y˜Xİ]Üš]\ˆŠNİœÙ]Y[[ÛŠYJNÜ™]\›ˆßK™]È™XYÛÛ^Xİ]Ü‹X›ÜÛXŞJ
+JNÂˆ[œÜXİ[Û•\ÚÔÛİÏ[™]ÈÙ[X\Ü™JÛÛ™šYËš[œÜXİ[Û‹›X^ÛÛ˜İ\œ™[
+ØÛÛ™šYËš[œÜXİ[Û‹œ]Y]YY[Z]YJNÂˆ˜]˜K][˜ÛÛ˜İ\œ™[›ØÚÚ[™Ô]Y]YO[›˜X›Oˆ[œÜXİ[Û”]Y]YO[™]Èš[Üš]P›ØÚÚ[™Ô]Y]YOŠ
+NÂˆ[œÜXİÜœÏ[™]È™XYÛÛ^Xİ]ÜŠÛÛ™šYËš[œÜXİ[Û‹›X^ÛÛ˜İ\œ™[ÛÛ™šYËš[œÜXİ[Û‹›X^ÛÛ˜İ\œ™[[YU[š]“RSTÑPÓÓ‘Ë[œÜXİ[Û”]Y]YK‹OÕ™XY[™]È™XY
+‹˜]\Ù\™\‹Z[œÜXİÜˆŠNİœÙ]Y[[ÛŠYJNÜ™]\›ˆßK™]È™XYÛÛ^Xİ]Ü‹X›ÜÛXŞJ
+JNÂˆ›ÜŠ[OLÚOÛÛ™šYËš[œÜXİ[Û‹›X^ÛÛ˜İ\œ™[ÚJÊÊZ[œÜXİ[Û•ÛÜšÙ\”ÛÛ˜Y
+™]È[œÜXİ[Û•ÛÜšÙ\Š
+JNÂˆ™][[ÛZ˜]˜K][˜ÛÛ˜İ\œ™[‘^Xİ]ÜœË›™]ÔÚ[™ÛU™XYØÚY[Y^Xİ]ÜŠ‹OÕ™XY[™]È™XY
+‹˜]\Ù\™\‹\™][[ÛˆŠNİœÙ]Y[[ÛŠYJNÜ™]\›ˆßJNÂˆ\Y˜XİXZ[[˜[˜ÙOZ˜]˜K][˜ÛÛ˜İ\œ™[‘^Xİ]ÜœË›™]ÔÚ[™ÛU™XYØÚY[Y^Xİ]ÜŠ‹OÕ™XY[™]È™XY
+‹˜]\Ù\™\‹X\Y˜Xİ[XZ[[˜[˜ÙHŠNİœÙ]Y[[ÛŠYJNÜ™]\›ˆßJNÂˆ\™Ù][™^XZ[[˜[˜ÙOZ˜]˜K][˜ÛÛ˜İ\œ™[‘^Xİ]ÜœË›™]ÔÚ[™ÛU™XYØÚY[Y^Xİ]ÜŠ‹OÕ™XY[™]È™XY
+‹˜]\Ù\™\‹]\™Ù]Z[™^ŠNİœÙ]Y[[ÛŠYJNÜ™]\›ˆßJNÂˆ[œÜXİ[Û•Ø]ÚÙÜÏZ˜]˜K][˜ÛÛ˜İ\œ™[‘^Xİ]ÜœË›™]ÔÚ[™ÛU™XYØÚY[Y^Xİ]ÜŠ‹OÕ™XY[™]È™XY
+‹˜]\Ù\™\‹Z[œÜXİÜ‹]Ø]ÚÙÈŠNİœÙ]Y[[ÛŠYJNÜ™]\›ˆßJNÂˆ[œÜXİ[Û•Ø\›]\XÛÛ™šYËš[œÜXİ[Û‹™[˜X›Y	‰˜ÛÛ™šYËš[œÜXİ[Û‹Ø\›]\™[˜X›Y
 
-        String replayOwner=config.authenticationRequired?principal:RequestIdentity.ANONYMOUS,originatingScheduleId=null;
-        if(scheduleOccurrenceId!=null) {
-            Map<String,Object> occurrence=store.scheduleExecution(scheduleOccurrenceId);
-            LoadSchedule source=occurrence==null?null:store.schedule(String.valueOf(occurrence.get("scheduleId")));
-            if(source!=null){replayOwner=source.executionPrincipal==null?source.createdBy:source.executionPrincipal;originatingScheduleId=source.id;}
-        }
-        String executionSpec=null,replayUnavailable=null;
-        try {
-            if(prevalidatedSpec!=null)executionSpec=prevalidatedSpec.json();
-            else if(rerunOfJobId!=null)executionSpec=ownedExecutionSpec(rerunOfJobId,principal).get("spec");
-            else if(serverIssuedDraft) {
-                if(prevalidatedSpec!=null)executionSpec=prevalidatedSpec.json();
-                else replayUnavailable="Exact rerun is unavailable: sensitive execution inputs require secure re-entry.";
-            } else {JobExecutionSpec captured=captureExecutionSpec(command,input,replayOwner,scheduleOccurrenceId);if(captured!=null)executionSpec=captured.json();}
-        }
-        catch(Exception unavailable) {replayUnavailable="Exact rerun is unavailable: source validation or safe input retention failed. Configure a new run and supply missing inputs.";}
-        if(rerunOfJobId!=null&&executionSpec==null)throw new IllegalArgumentException("Safe execution snapshot is no longer available");
-        if(executionSpec!=null) {
-            JobExecutionSpec captured=JobExecutionSpec.parse(executionSpec);request.expectedRevisionDigest=captured.revision();
-            // Legacy direct submissions also need the policy used to compute the retained revision.
-            ObjectNode policy=JSON.createObjectNode();applyInspectionPolicy(policy,packageId);
-            JSON.readerForUpdating(request).readValue(policy);
-            JsonNode exact=captured.definition().path("selection").get("caseIds");
-            if(exact!=null) {request.caseIds=JSON.convertValue(exact,List.class);request.tags=null;request.excludeTags=null;request.all=false;request.rerunFailed=false;}
-        }
-        configuration=configurationRevision(configuration,request.expectedRevisionDigest);request.configurationProvenance=configuration;
-        if(executionSpec==null&&replayUnavailable==null)replayUnavailable="This job type or Server capability does not support safe replay. Configure a new run.";
-        if(rerunOfJobId!=null&&prevalidatedSpec!=null) {
-            JsonNode replay=prevalidatedSpec.value.path("replay");
-            String policy=replay.path("sourcePolicy").asText("strict");
-            String expected="strict".equals(policy)?replay.path("originalRevision").asText():replay.path("effectiveRevision").asText();
-            try {verifyPackageRevision(packageId,request.environment,expected);}
-            catch(StaleCursorException stale) {
-                if("strict".equals(policy))throw new JobConflictException("ATT-SERVER-REPLAY-REVISION-CONFLICT","The original Package revision is unavailable. Strict replay is blocked; review with the current Package or restore the original source separately.");
-                throw new JobConflictException("ATT-SERVER-REPLAY-DRAFT-STALE","The Package changed after replay validation. Your edits are still available; validate them again.");
-            }
-        }
-        if(loadAdmission&&!loadSlots.tryAcquire()){store.audit(principal,"SUBMIT",null,packageId,"REJECTED_LOAD_CAPACITY");throw new QueueFullException("Load capacity is full; retry after a Load job completes");}
-        if(!admissionSlots.tryAcquire()){if(loadAdmission)loadSlots.release();store.audit(principal,"SUBMIT",null,packageId,"REJECTED_QUEUE_FULL");throw new QueueFullException("Worker capacity is full; retry after a job completes");}
-        AdmissionLease lease=new AdmissionLease(admissionSlots,loadAdmission?loadSlots:null);
-        String id=null;Path jobPath=null;boolean persisted=false,handedOff=false;
-        try {
-            id="J"+UUID.randomUUID().toString().replace("-","").substring(0,16).toUpperCase();request.jobId=id;
-            jobPath=config.dataDir.resolve("jobs").resolve(id);Files.createDirectories(jobPath.resolve("output"));final Path activeJobPath=jobPath;
-            JobEvents events=new JobEvents(jobPath.resolve("events.jsonl"),config.maxEventsPerJob,config.maxEventJournalBytes,
-                    config.maxEventJournalMemoryBytes,eventCompactions);
-            Job job=new Job(id,command,packageId,principal,request,events);job.scheduleOccurrenceId=scheduleOccurrenceId;job.requestReceivedNanos=requestReceivedNanos;
-            if(provenance==null) {
-                job.submissionSource="manual";job.originatingScheduleId=originatingScheduleId;job.executionPrincipal=config.authenticationRequired?principal:null;job.submittedBy=config.authenticationRequired?principal:null;
-            } else {
-                job.submissionSource="scheduled";job.originatingScheduleId=provenance.scheduleId;job.scheduleOwner=config.authenticationRequired?provenance.scheduleOwner:null;
-                job.executionPrincipal=config.authenticationRequired?provenance.executionPrincipal:null;job.submittedBy=config.authenticationRequired?provenance.submittedBy:null;
-                job.triggeredBy=config.authenticationRequired?provenance.triggeredBy:null;
-            }
-            job.executionSpec=executionSpec;job.replayUnavailable=replayUnavailable;job.rerunOfJobId=rerunOfJobId;job.replayIntent=replayIntent;job.replayOwner=replayOwner;if(job.originatingScheduleId==null)job.originatingScheduleId=originatingScheduleId;
-            Map<String,Object> summaryFields=new LinkedHashMap<>();summaryFields.put("command",command);summaryFields.put("packageId",packageId);
-            summaryFields.put("configuration",configuration);
-            Files.write(jobPath.resolve("output/configuration.json"),JSON.writeValueAsBytes(configuration));
-            if(request.scenario!=null)summaryFields.put("scenario",request.scenario);
-            if(request.environment!=null&&!request.environment.isBlank())summaryFields.put("environment",request.environment);
-            if(request.loadModel!=null)summaryFields.put("model",request.loadModel);
-            JsonNode listDefinition=executionSpec==null?null:JobExecutionSpec.parse(executionSpec).definition();
-            if(listDefinition==null) {
-                ObjectNode fallback=JSON.createObjectNode();fallback.put("executionType","load".equals(command)?"load":"run");
-                if(request.inlineLoadScenario!=null)fallback.set("scenario",JSON.valueToTree(request.inlineLoadScenario));
-                if(request.target!=null)fallback.set("target",JSON.valueToTree(request.target));
-                else if(request.caseIds!=null)fallback.putObject("selection").set("caseIds",JSON.valueToTree(request.caseIds));
-                listDefinition=fallback;
-            }
-            job.targetIdentity=JobListIdentity.from(listDefinition);
-            summaryFields.put("targetIdentity",job.targetIdentity);
-            String summary=JSON.writeValueAsString(summaryFields);
-            store.insert(job,summary,JobListIdentity.searchTargets(listDefinition));persisted=true;jobs.put(id,job);append(job,"status",Map.of("jobId",id,"status","QUEUED"));
-            FutureTask<Void> task=new FutureTask<>(()->{execute(job,activeJobPath,lease);return null;});tasks.put(id,task);leases.put(id,lease);
-            job.admittedNanos=System.nanoTime();
-            try { workers.execute(task); }
-            catch(java.util.concurrent.RejectedExecutionException full){throw new QueueFullException("Worker capacity is full; retry after a job completes");}
-            handedOff=true;
-            try{store.audit(principal,"SUBMIT",id,packageId,"ACCEPTED");}catch(Exception auditFailure){java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).warning("Unable to persist accepted job audit record");}
-            return job.view();
-        } catch(Exception failure) {
-            if(!handedOff){if(id!=null){FutureTask<Void> task=tasks.remove(id);if(task!=null)task.cancel(false);jobs.remove(id);leases.remove(id);if(persisted)try{store.deleteJob(id);}catch(Exception ignored){}if(jobPath!=null)try{deleteTree(jobPath);}catch(Exception ignored){}}
-                lease.release();if(failure instanceof QueueFullException)try{store.audit(principal,"SUBMIT",id,packageId,"REJECTED_QUEUE_FULL");}catch(Exception ignored){} }
-            throw failure;
-        }
-        } finally {admissionLifecycle.readLock().unlock();}
-    }
-    Process startWorkerProcess(ProcessBuilder builder) throws java.io.IOException {
-        // JDK 17 process reapers inherit the spawning thread's context loader.
-        // They belong to the JVM and may outlive this WAR even after every child exits.
-        Thread caller=Thread.currentThread();ClassLoader previous=caller.getContextClassLoader();
-        caller.setContextClassLoader(ClassLoader.getPlatformClassLoader());
-        try {return processLauncher.start(builder);}
-        finally {caller.setContextClassLoader(previous);}
-    }
-    private void startStderrDrainer(Process process,String name) {
-        Thread thread=new Thread(()->{
-            try(var input=process.getErrorStream()){byte[] buffer=new byte[8192];while(input.read(buffer)>=0){} }
-            catch(Exception ignored){}finally{stderrDrainers.remove(Thread.currentThread());}
-        },name);
-        thread.setDaemon(true);stderrDrainers.put(thread,process);thread.start();
-    }
-    private void execute(Job job,Path jobPath,AdmissionLease lease) {
-        job.workerStartedNanos=System.nanoTime();
-        ExecutionWorkerPool.Lease warm=null;
-        try {
-            // Inspector work must not hold the cancellation/process-publication lock.
-            String warmRevision=prewarmRevision(job);
-            Process process;
-            OutputStream workerInput;
-            synchronized(job) {
-                // Publish the process while holding the same lock used by cancel(). A
-                // cancellation that wins before launch prevents the Worker from starting;
-                // one that follows launch always sees and terminates that exact process.
-                if(job.terminal())return;
-                if(closing){finishQuietly(job,"ERROR",143,"ATT-SERVER-INTERRUPTED","Server shutdown stopped the queued Worker");return;}
-                transition(job,"PREPARING");
-                validatePackageRoot(packageRoot(job.packageId));
-                job.request.outputDirectory=jobPath.resolve("output").toRealPath().toString();
-                if(warmRevision!=null) {
-                    long leaseStart=System.nanoTime();warm=executionWorkers.lease(job.packageId);
-                    job.prewarmLeaseMs=(System.nanoTime()-leaseStart)/1_000_000.0;
-                    if(warm!=null)job.request.expectedRevisionDigest=warmRevision;
-                    else job.prewarmFallbackReason="no_ready_worker";
-                }
-                ProcessBuilder coldBuilder=warm==null?workerBuilder(false,job.packageId):null;
-                job.workerSpawnStartedNanos=System.nanoTime();
-                process=warm==null?startWorkerProcess(coldBuilder):warm.process;
-                job.workerSpawnedNanos=System.nanoTime();job.process=process;job.processFence=warm==null?new WorkerProcessFence(process):warm.fence;
-                workerInput=process.getOutputStream();
-                if(warm!=null){job.workerDispatch="warm";job.prewarmBootstrapMs=(warm.readyNanos-warm.startedNanos)/1_000_000.0;}
-                job.workerPid=process.pid();job.workerStartTime=process.info().startInstant().orElse(Instant.now());job.startedAt=Instant.now();transition(job,"RUNNING");rememberWorkerProcesses(job,job.processFence);
-                if(warm!=null)warm.transferred();
-            }
-            startStderrDrainer(process,"att-server-worker-stderr");
-            workerInput.write(workerRequestBytes(job.request,warm!=null));workerInput.write('\n');workerInput.flush();
-            if(!"load".equals(job.command))workerInput.close();
-            else synchronized(job) {job.workerControlStream=workerInput;}
-            try(var reader=new java.io.BufferedInputStream(process.getInputStream())) {
-                att.server.api.internal.WorkerProtocol.Frame frame;
-                while((frame=att.server.api.internal.WorkerProtocol.read(reader,att.server.api.internal.WorkerProtocol.MAX_FRAME_BYTES))!=null) {
-                    if(frame.oversized()){recordProtocolLimit(job,frame);continue;}
-                    handleWorkerEvent(job,frame.text());
-                }
-            }
-            int exit=process.waitFor();job.workerTerminatedNanos=System.nanoTime();job.exitCode=exit;
-            if(!job.resultReceived&&!job.terminal()) {
-                if(job.cancelRequested)finish(job,"CANCELLED",143);
-                else {recordWorkerExit(job,exit);finish(job,"ERROR",exit==0?3:exit);}
-            }
-            else if(!job.terminal()) {String state=exit==0?"PASS":"FAIL";finish(job,state,exit);}
-        } catch(InterruptedException e){Thread.currentThread().interrupt();stopWorkerTree(job);if(!job.terminal())finishQuietly(job,"CANCELLED",143,"ATT-SERVER-CANCELLED","Worker was cancelled");}
-          catch(Exception e){stopWorkerTree(job);if(!job.terminal()){
-              if(job.cancelRequested)finishQuietly(job,"CANCELLED",143,"ATT-SERVER-CANCELLED","Worker was cancelled");
-              else finishQuietly(job,"ERROR",3,"ATT-SERVER-WORKER-FAILED",safeMessage(e));
-          }}
-        finally {
-            stopWorkerTree(job);
-            OutputStream workerInput=job.workerControlStream;job.workerControlStream=null;
-            if(workerInput!=null)try{workerInput.close();}catch(Exception ignored){}
-            if(warm!=null&&job.processFence!=null&&job.processFence.stopped())try{warm.transferred();}catch(Exception ignored) { }
-            boolean stopped=job.processFence==null ? job.process==null||!job.process.isAlive() : job.processFence.stopped();
-            if(stopped&&job.process!=null){if(job.workerTerminatedNanos==0)job.workerTerminatedNanos=System.nanoTime();job.process=null;if(!closing)try{store.update(job);}catch(Exception ignored){}}
-            tasks.remove(job.id);completed.incrementAndGet();
-            // A terminal RESULT is not the execution cleanup fence. Publish only
-            // after cleanup and admission release, never while this Job is active.
-            if(!releaseStoppedWorker(job,lease)&&!closing&&deferredWorkerReleaseIds.add(job.id))deferredWorkerReleases.add(job);
-        }
-    }
-    int reconcileWorkerReleases() {
-        int budget=Math.min(64,deferredWorkerReleases.size());
-        int attempted=0;
-        for(int i=0;i<budget&&!closing;i++) {
-            Job job=deferredWorkerReleases.poll();if(job==null)break;
-            attempted++;
-            AdmissionLease lease=leases.get(job.id);
-            if(lease==null||releaseStoppedWorker(job,lease))deferredWorkerReleaseIds.remove(job.id);
-            else deferredWorkerReleases.add(job);
-        }
-        return attempted;
-    }
-    private boolean releaseStoppedWorker(Job job,AdmissionLease lease) {
-        try {if((job.processFence!=null&&!job.processFence.observedStopped())||(job.process!=null&&job.process.isAlive()))return false;}
-        catch(RuntimeException unavailable){return false;}
-        if(job.processFence!=null&&!job.processFence.verified()) {
-            // Reclaim execution capacity only after known processes exit and a durable
-            // quarantine independently prohibits publication AND retention across restart.
-            try {store.quarantineWorker(job.id);}
-            catch(Exception unavailable){return false;}
-        }
-        if(job.workerTerminatedNanos==0)job.workerTerminatedNanos=System.nanoTime();
-        job.process=null;
-        if(!closing)try{store.update(job);}catch(Exception ignored){}
-        leases.remove(job.id,lease);lease.release();
-        if(job.terminal()){jobs.remove(job.id,job);scheduleArtifactArchive(job.id);}
-        return true;
-    }
-    private List<String> workerClasspath() {
-        return WorkerRuntimeClasspath.entries(workerLibs,config.workerLibraryDirs);
-    }
-    private ProcessBuilder workerBuilder(boolean prewarm,String packageId) {
-        List<String> command=new ArrayList<>();command.add(config.javaExecutable.toString());
-        if(config.workerHeapInitialMb>0)command.add("-Xms"+config.workerHeapInitialMb+"m");
-        if(config.workerHeapMaxMb>0)command.add("-Xmx"+config.workerHeapMaxMb+"m");
-        command.add("-cp");command.add(String.join(java.io.File.pathSeparator,workerClasspath()));command.add("att.worker.WorkerMain");
-        if(prewarm)command.add("--prewarmed-one-shot");
-        return new ProcessBuilder(command).directory(packageRoot(packageId).toFile());
-    }
-    private boolean environmentFitsPrewarm() {
-        // JVM bootstrap options cannot be applied after READY. Keep those
-        // deployments on the existing cold path with their original semantics.
-        for(String key:List.of("JAVA_TOOL_OPTIONS","JDK_JAVA_OPTIONS","_JAVA_OPTIONS","JAVA_FONTS","FONTCONFIG_FILE","FONTCONFIG_PATH"))
-            if(System.getenv(key)!=null&&!System.getenv(key).isBlank())return false;
-        long chars=0;
-        if(System.getenv().size()>4096)return false;
-        for(var entry:System.getenv().entrySet())chars+=entry.getKey().length()+(long)entry.getValue().length();
-        return chars<=131072;
-    }
-    String prewarmRevision(Job job) throws InterruptedException {
-        if(!config.executionPool.enabled||!config.executionPool.packageIds.contains(job.packageId)
-                ||!("run".equals(job.command)||"debug".equals(job.command)))return null;
-        if(!environmentFitsPrewarm()) {job.prewarmFallbackReason="startup_environment";return null;}
-        if(!config.workerLibraryDirs.isEmpty()) {job.prewarmFallbackReason="addon_libraries";return null;}
-        if(!config.inspection.enabled) {job.prewarmFallbackReason="inspection_disabled";return null;}
-        if(!executionWorkers.hasReadyCapacity(job.packageId)) {job.prewarmFallbackReason="no_ready_worker";return null;}
-        long before=System.nanoTime();
-        try {
-            WorkerRequest request=inspectionRequest(job.packageId,packageRoot(job.packageId),job.request.environment);
-            request.inspectionAction="prewarm-eligibility";
-            Map<String,Object> eligibility=executeInspection(packageRoot(job.packageId),request);
-            if(!Boolean.TRUE.equals(eligibility.get("eligible"))) {job.prewarmFallbackReason="native_resource_environment";return null;}
-            Object raw=eligibility.get("revisionDigest");
-            if(!(raw instanceof String revision)||!revision.matches("[a-f0-9]{64}")) {job.prewarmFallbackReason="unverified_revision";return null;}
-            if(job.request.expectedRevisionDigest!=null&&!job.request.expectedRevisionDigest.equals(revision)) {
-                job.prewarmFallbackReason="revision_changed";return null;
-            }
-            return revision;
-        } catch(InterruptedException interrupted) {throw interrupted;}
-        catch(Exception unavailable) {job.prewarmFallbackReason="inspection_unavailable";return null;}
-        finally {job.prewarmEligibilityMs=(System.nanoTime()-before)/1_000_000.0;}
-    }
-    private void stopWorkerTree(Job job) {
-        Process process=job.process;
-        if(process==null)return;
-        WorkerProcessFence fence=job.processFence;
-        if(fence==null){fence=new WorkerProcessFence(process);job.processFence=fence;}
-        fence.observe();
-        if(!closing)rememberWorkerProcesses(job,fence);
-        try {fence.stop(config.gracefulStopMs);}
-        catch(InterruptedException interrupted){fence.force();Thread.currentThread().interrupt();}
-        finally {if(!closing)rememberWorkerProcesses(job,fence);}
-    }
-    private void rememberWorkerProcesses(Job job,WorkerProcessFence fence) {
-        try {store.rememberWorkerProcesses(job.id,fence.identities());if(!fence.verified())store.quarantineWorker(job.id);}
-        catch(Exception unavailable){fence.unverified();}
-    }
-    void handleWorkerEvent(Job job,String line) throws Exception {
-        JsonNode event=JSON.readTree(line);if(event==null||!event.isObject())return;
-        String type=event.path("type").asText("").toUpperCase();Map<String,Object> data=JSON.convertValue(event,Map.class);data.remove("type");data.remove("jobId");Map<String,Object> safe=att.server.api.internal.DiagnosticSanitizer.sanitize(data);
-        long eventNanos=System.nanoTime();
-        if("STATUS".equals(type)&&job.workerReadyNanos==0)job.workerReadyNanos=eventNanos;
-        if(("PROGRESS".equals(type)||"LOG".equals(type))&&job.executionReadyNanos==0)job.executionReadyNanos=eventNanos;
-        switch(type){case "STATUS"->{String status=event.path("status").asText("");if("RUNNING".equals(status)&&"PREPARING".equals(job.status))transition(job,"RUNNING");}
-            case "PROGRESS"->{Object progress=safe.get("loadProgress");if("load".equals(job.command)&&progress instanceof Map) {
-                    Map<String,Object> sanitized=sanitizeLoadProgress((Map<?,?>)progress);
-                    Map<String,Object> recorded=sanitized==null?null:recordLoadProgress(job,sanitized);
-                    if(recorded==null)safe.remove("loadProgress");else safe.put("loadProgress",recorded);
-                } else safe.remove("loadProgress");append(job,"progress",safe);}
-            case "LOG"->append(job,"log",safe);case "DIAGNOSTIC"->{
-                String eventDiagnostic=JSON.writeValueAsString(safe);
-                if(hasClassifiedCause(eventDiagnostic)) {
-                    if(job.primaryDiagnosticJson==null)job.primaryDiagnosticJson=eventDiagnostic;
-                    if(job.primaryDiagnosticJson.equals(eventDiagnostic))job.diagnosticJson=eventDiagnostic;
-                    else addSecondaryDiagnostic(job,safe);
-                } else if(job.primaryDiagnosticJson!=null||job.protocolDiagnostic!=null) addSecondaryDiagnostic(job,safe);
-                else job.diagnosticJson=eventDiagnostic;
-                store.update(job);append(job,"diagnostic",safe);
-            }
-            case "RESULT"->{
-                if(job.processFence!=null){job.processFence.observe();rememberWorkerProcesses(job,job.processFence);}
-                job.resultReceivedNanos=eventNanos;
-                Object workerMetrics=safe.get("workerMetrics");
-                if(workerMetrics instanceof Map<?,?>)job.workerMetrics=new LinkedHashMap<>((Map<String,Object>)workerMetrics);
-                if(safe.get("loadResultTransport") instanceof Map<?,?> transport) {
-                    Map<String,Object> current=job.workerMetrics==null?new LinkedHashMap<>():new LinkedHashMap<>(job.workerMetrics);
-                    current.put("loadResultTransport",new LinkedHashMap<>((Map<String,Object>)transport));
-                    job.workerMetrics=current;
-                }
-                String status=event.path("status").asText("ERROR");
-                int code=event.path("exitCode").asInt(3);
-                if(job.cancelRequested){status="CANCELLED";code=143;}
-                Object result=safe.get("result");
-                if("load".equals(job.command)) {
-                    Map<String,Object> original=result instanceof Map<?,?>?(Map<String,Object>)result:new LinkedHashMap<>();
-                    original=loadResultWithProtocolWarning(original,job);
-                    Map<String,Object> enriched=new LinkedHashMap<>(original);
-                    if(job.request.configurationProvenance!=null) {
-                        Map<String,Object> summary=enriched.get("summary") instanceof Map<?,?> existing
-                                ?new LinkedHashMap<>((Map<String,Object>)existing):new LinkedHashMap<>();
-                        summary.put("configuration",job.request.configurationProvenance);enriched.put("summary",summary);
-                    }
-                    result=att.server.api.LoadTerminalResult.projectOperationResult(enriched,status,code);
-                    attachJobDiagnostics((Map<String,Object>)result,job);
-                } else if(result instanceof Map<?,?> original&&job.request.configurationProvenance!=null) {
-                    Map<String,Object> enriched=new LinkedHashMap<>((Map<String,Object>)original);
-                    Map<String,Object> summary=enriched.get("summary") instanceof Map<?,?> existing?new LinkedHashMap<>((Map<String,Object>)existing):new LinkedHashMap<>();
-                    summary.put("configuration",job.request.configurationProvenance);enriched.put("summary",summary);result=enriched;
-                }
-                job.resultJson=result==null?"{}":JSON.writeValueAsString(result);
-                job.resultReceived=true;
-                Object console=safe.get("console");
-                finish(job,normalizeTerminal(status),code,console instanceof String consoleLine?consoleLine:null);
-            }
-            default->append(job,"log",Map.of("message","Worker emitted an unrecognized event"));}
-    }
-    void recordProtocolLimit(Job job,att.server.api.internal.WorkerProtocol.Frame frame) throws Exception {
-        Map<String,Object> diagnostic=new LinkedHashMap<>(att.server.api.LimitDiagnostic.create(
-                "ATT-SERVER-WORKER-EVENT-TOO-LARGE","Worker event exceeded the UTF-8 protocol byte limit",
-                "worker.protocol.maxFrameBytes",frame.limitBytes,frame.sizeBytes,"worker.transport",
-                att.server.api.LimitOutcome.DATA_TRUNCATED,"transport",
-                "Reduce progress payloads or keep terminal results within the shared frame budget.",null));
-        diagnostic.put("eventType",frame.eventType());diagnostic.put("sizeBytes",frame.sizeBytes);diagnostic.put("limitBytes",frame.limitBytes);
-        job.protocolDiagnostic=diagnostic;
-        if(!hasPrimaryForJob(job))job.diagnosticJson=JSON.writeValueAsString(diagnostic);
-        store.update(job);append(job,"diagnostic",diagnostic);
-    }
-    void recordWorkerExit(Job job,int exit) throws Exception {
-        Map<String,Object> fallback=new LinkedHashMap<>(att.server.api.LimitDiagnostic.create(
-                "ATT-SERVER-WORKER-EXITED","Worker exited before delivering a terminal result",
-                "worker.processTermination",null,exit,"worker.process",att.server.api.LimitOutcome.EXECUTION_ERROR,
-                "execution","Review bounded worker diagnostics and heap pressure before changing process limits.",null));
-        fallback.put("exitCode",exit);
-        Map<String,Object> diagnostic=new LinkedHashMap<>(job.protocolDiagnostic==null?fallback:job.protocolDiagnostic);
-        if(job.protocolDiagnostic!=null)diagnostic.put("workerExit",fallback);
-        if(hasPrimaryForJob(job))append(job,"diagnostic",diagnostic);
-        else {job.diagnosticJson=JSON.writeValueAsString(diagnostic);append(job,"diagnostic",diagnostic);}
-    }
-    private boolean hasPrimaryForJob(Job job) {
-        return job.primaryDiagnosticJson!=null||(job.protocolDiagnostic==null&&hasPrimaryDiagnostic(job.diagnosticJson));
-    }
-    private void addSecondaryDiagnostic(Job job,Map<String,Object> diagnostic) {
-        if(job.secondaryDiagnostics.size()>=4)return;
-        Object code=diagnostic.get("code");
-        if(code instanceof String)for(Map<String,Object> existing:job.secondaryDiagnostics)if(code.equals(existing.get("code")))return;
-        job.secondaryDiagnostics.add(new LinkedHashMap<>(diagnostic));
-    }
-    private void attachJobDiagnostics(Map<String,Object> terminal,Job job) throws Exception {
-        Object rawSummary=terminal.get("summary");
-        if(!(rawSummary instanceof Map<?,?>))return;
-        @SuppressWarnings("unchecked") Map<String,Object> summary=(Map<String,Object>)rawSummary;
-        Object rawDiagnostics=summary.get("diagnostics");
-        Map<String,Object> diagnostics=rawDiagnostics instanceof Map<?,?>
-                ?new LinkedHashMap<>((Map<String,Object>)rawDiagnostics):new LinkedHashMap<String,Object>();
-        if(job.primaryDiagnosticJson!=null)diagnostics.put("primaryError",JSON.readValue(job.primaryDiagnosticJson,Map.class));
-        List<Map<String,Object>> notices=new ArrayList<>();
-        Object previous=diagnostics.get("secondaryNotices");
-        if(previous instanceof Iterable<?>)for(Object item:(Iterable<?>)previous)
-            if(item instanceof Map<?,?>&&notices.size()<2)notices.add(new LinkedHashMap<>((Map<String,Object>)item));
-        for(Map<String,Object> secondary:job.secondaryDiagnostics) {
-            if(notices.size()>=2)break;
-            Object code=secondary.get("code");boolean duplicate=false;
-            if(code instanceof String)for(Map<String,Object> notice:notices)if(code.equals(notice.get("code")))duplicate=true;
-            if(!duplicate)notices.add(new LinkedHashMap<>(secondary));
-        }
-        if(!notices.isEmpty())diagnostics.put("secondaryNotices",notices);
-        summary.put("diagnostics",diagnostics);
-    }
-    private boolean hasPrimaryDiagnostic(String diagnosticJson) {
-        if(diagnosticJson==null)return false;
-        try {
-            JsonNode value=JSON.readTree(diagnosticJson);String code=value.path("code").asText("");
-            return !code.isBlank()&&!code.startsWith("ATT-SERVER-WORKER-EVENT-TOO-LARGE")
-                    &&!code.startsWith("ATT-WORKER-EVENT-TRUNCATED")&&!code.startsWith("ATT-JOURNAL-EVENT-TRUNCATED");
-        } catch(Exception invalid){return false;}
-    }
-    private boolean hasClassifiedCause(String diagnosticJson) {
-        if(!hasPrimaryDiagnostic(diagnosticJson))return false;
-        try {
-            JsonNode value=JSON.readTree(diagnosticJson);
-            String outcome=value.path("outcome").asText("");
-            return att.server.api.LimitOutcome.EXECUTION_ERROR.name().equals(outcome)
-                    ||att.server.api.LimitOutcome.SUBMISSION_REJECTED.name().equals(outcome);
-        } catch(Exception invalid){return false;}
-    }
-    private Map<String,Object> loadResultWithProtocolWarning(Map<String,Object> original,Job job) throws Exception {
-        if(job.protocolDiagnostic==null&&job.journalDiagnostic==null&&job.primaryDiagnosticJson==null&&job.secondaryDiagnostics.isEmpty())return original;
-        Map<String,Object> result=new LinkedHashMap<String,Object>(original);
-        List<Map<String,Object>> diagnostics=new ArrayList<Map<String,Object>>();
-        Object existing=result.get("diagnostics");
-        if(existing instanceof Iterable<?>)for(Object item:(Iterable<?>)existing)if(item instanceof Map<?,?>&&diagnostics.size()<4)
-            diagnostics.add(new LinkedHashMap<String,Object>((Map<String,Object>)item));
-        if(hasPrimaryForJob(job)) {
-            String primary=job.primaryDiagnosticJson==null?job.diagnosticJson:job.primaryDiagnosticJson;
-            Map<?,?> current=JSON.readValue(primary,Map.class);
-            String code=String.valueOf(current.get("code"));
-            boolean present=false;for(Map<String,Object> item:diagnostics)if(code.equals(item.get("code")))present=true;
-            if(!present&&diagnostics.size()<4)diagnostics.add(new LinkedHashMap<String,Object>((Map<String,Object>)current));
-        }
-        for(Map<String,Object> secondary:job.secondaryDiagnostics)if(diagnostics.size()<4)diagnostics.add(new LinkedHashMap<>(secondary));
-        boolean workerNotice=false;
-        for(Map<String,Object> item:diagnostics)if("ATT-WORKER-EVENT-TRUNCATED".equals(item.get("code")))workerNotice=true;
-        if(job.protocolDiagnostic!=null&&!workerNotice&&diagnostics.size()<4) {
-            Number limit=job.protocolDiagnostic.get("limitBytes") instanceof Number?(Number)job.protocolDiagnostic.get("limitBytes"):null;
-            Number observed=job.protocolDiagnostic.get("sizeBytes") instanceof Number?(Number)job.protocolDiagnostic.get("sizeBytes"):null;
-            String eventType=job.protocolDiagnostic.get("eventType") instanceof String?(String)job.protocolDiagnostic.get("eventType"):"RESULT";
-            Map<String,Object> notice=att.server.api.LimitDiagnostic.create("ATT-WORKER-EVENT-TRUNCATED",
-                    "Large Worker event details were omitted from the protocol frame","worker.protocol.maxFrameBytes",limit,observed,
-                    "worker.protocol",att.server.api.LimitOutcome.DATA_TRUNCATED,"transport",
-                    "Inspect the retained report artifact for bounded details",null);
-            notice.put("eventType",eventType);diagnostics.add(notice);
-        }
-        boolean journalNotice=false;
-        for(Map<String,Object> item:diagnostics)if("ATT-JOURNAL-EVENT-TRUNCATED".equals(item.get("code")))journalNotice=true;
-        if(job.journalDiagnostic!=null&&!journalNotice&&diagnostics.size()<4)
-            diagnostics.add(new LinkedHashMap<String,Object>(job.journalDiagnostic));
-        if(!diagnostics.isEmpty())result.put("diagnostics",diagnostics);
-        return result;
-    }
-    private String normalizeTerminal(String s){return List.of("PASS","FAIL","ERROR","INVALID","CANCELLED").contains(s)?s:"ERROR";}
-    String cancel(String id,String principal) throws Exception {
-        if("local".equals(config.authMode))requireJobOwner(id,principal);
-        Job j=jobs.get(id);if(j==null){Map<String,Object> stored=store.get(id);if(stored==null||!JOB_ID.matcher(id).matches())throw new NotFoundException();return String.valueOf(stored.get("status"));}
-        boolean stopProcess=false;OutputStream controlStream=null;
-        synchronized(j){if(j.terminal())return j.status;append(j,"status",Map.of("jobId",id,"status","CANCEL_REQUESTED"));
-            Process p=j.process;if(p==null){FutureTask<Void> task=tasks.remove(id);if(task!=null){boolean cancelled=task.cancel(false);workers.remove(task);if(cancelled){AdmissionLease lease=leases.remove(id);if(lease!=null)lease.release();}}finish(j,"CANCELLED",143);jobs.remove(id,j);scheduleArtifactArchive(id);}
-            else {j.cancelRequested=true;controlStream=j.workerControlStream;stopProcess=true;}}
-        // Never hold the Job monitor while waiting for the Worker to exit. The
-        // protocol reader needs that same monitor to accept the final live LOAD
-        // snapshot and RESULT during graceful cancellation.
-        if(stopProcess) {
-            boolean workerStopped=false;
-            if("load".equals(j.command)) {
-                long readyDeadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(5);
-                while(controlStream==null&&System.nanoTime()<readyDeadline) {
-                    if(j.process==null||!j.process.isAlive())break;
-                    Thread.sleep(5L);controlStream=j.workerControlStream;
-                }
-            }
-            if("load".equals(j.command)&&controlStream!=null) {
-                try {controlStream.write(JSON.writeValueAsBytes(Map.of("type","CANCEL","jobId",id)));controlStream.write('\n');controlStream.flush();}
-                catch(Exception unavailable) { /* Fall back to process termination below. */ }
-                try {
-                    WorkerProcessFence fence=j.processFence;
-                    if(fence!=null)workerStopped=fence.awaitStopped(config.gracefulStopMs);
-                    else {Process process=j.process;workerStopped=process==null||process.waitFor(config.gracefulStopMs,TimeUnit.MILLISECONDS);}
-                } catch(InterruptedException interrupted) {Thread.currentThread().interrupt();}
-            }
-            if(!workerStopped)stopWorkerTree(j);
-            // Let the protocol reader consume any RESULT frame already written
-            // before the Worker exited. It owns terminal persistence for an
-            // active process; this fallback is only for a Worker that closed
-            // without a result.
-            long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(2);
-            while(!j.terminal()&&System.nanoTime()<deadline)Thread.sleep(5L);
-            synchronized(j){if(!j.terminal())finish(j,"CANCELLED",143);}
-        }
-        store.audit(principal,"CANCEL",id,j.packageId,"CANCELLED");return j.status;
-    }
-    Map<String,Object> pinJob(String id,boolean pinned,String actor) throws Exception {return pinJob(id,pinned,null,actor);}
-    Map<String,Object> pinJob(String id,boolean pinned,String reason,String actor) throws Exception {
-        if(id==null||!JOB_ID.matcher(id).matches())throw new NotFoundException();
-        if("local".equals(config.authMode)&&!store.isActiveUser(actor))throw new NotFoundException();
-        String safeReason=pinReason(pinned?reason:null);
-        if(!store.setPinned(id,pinned,actor,safeReason)){
-            if(!store.jobRowExists(id))throw new NotFoundException();
-            store.audit(actor,"JOB_PIN",id,null,"REJECTED");
-            throw new JobConflictException("ATT-SERVER-JOB-NOT-ELIGIBLE","Only terminal RUN/Debug/LOAD Jobs not being deleted can be pinned");
-        }
-        return jobRecord(id);
-    }
-    List<Map<String,Object>> pinJobs(List<String> ids,boolean pinned,String reason,String actor) throws Exception {
-        if(ids==null||ids.isEmpty()||ids.size()>100)throw new IllegalArgumentException("Select 1 to 100 Job IDs");
-        for(String id:ids)if(id==null||!JOB_ID.matcher(id).matches())throw new IllegalArgumentException("Invalid Job ID");
-        String safeReason=pinReason(pinned?reason:null);List<Map<String,Object>> outcomes=new ArrayList<>();
-        for(String id:new java.util.LinkedHashSet<>(ids)) {
-            try {
-                if("local".equals(config.authMode)&&!store.isActiveUser(actor))throw new NotFoundException();
-                String outcome=store.setPinnedOutcome(id,pinned,actor,safeReason);
-                if("NOT_ELIGIBLE".equals(outcome)&&!store.jobRowExists(id))outcome="UNAVAILABLE";
-                if(List.of("NOT_ELIGIBLE","UNAVAILABLE").contains(outcome))store.audit(actor,"JOB_PIN",id,null,outcome);
-                outcomes.add(Map.of("jobId",id,"outcome",outcome));
-            }
-            catch(NotFoundException missing){outcomes.add(Map.of("jobId",id,"outcome","UNAVAILABLE"));}
-            catch(Exception failed){store.audit(actor,"JOB_PIN",id,null,"FAILED");outcomes.add(Map.of("jobId",id,"outcome","FAILED"));}
-        }
-        return outcomes;
-    }
-    private static String pinReason(String reason) {
-        if(reason==null)return null;String trimmed=reason.trim();if(trimmed.isEmpty())return null;
-        if(trimmed.length()>200)throw new IllegalArgumentException("pinReason must be at most 200 characters");
-        for(int i=0;i<trimmed.length();i++)if(Character.isISOControl(trimmed.charAt(i)))throw new IllegalArgumentException("pinReason must not contain control characters");
-        String safe=att.security.SecretProtection.text(trimmed);
-        if(safe.length()>200)throw new IllegalArgumentException("pinReason must be at most 200 characters after secret redaction");
-        return safe;
-    }
-    List<Map<String,Object>> deleteJobs(List<String> ids,String actor) throws Exception {
-        if(ids==null||ids.isEmpty()||ids.size()>100)throw new IllegalArgumentException("Select 1 to 100 Job IDs");
-        for(String id:ids)if(id==null||!JOB_ID.matcher(id).matches())throw new IllegalArgumentException("Invalid Job ID");
-        List<Map<String,Object>> results=new ArrayList<>();
-        for(String id:new java.util.LinkedHashSet<>(ids)) {
-            try {results.add(deleteJob(id,actor));}
-            catch(NotFoundException unavailable){results.add(deletionOutcome(id,actor,"UNAVAILABLE"));}
-        }
-        return results;
-    }
-    private Map<String,Object> deletionOutcome(String id,String actor,String outcome) throws Exception {
-        store.audit(actor,"JOB_DELETE",id,null,outcome);
-        return Map.of("jobId",id,"outcome",outcome);
-    }
-    Map<String,Object> deleteJob(String id,String actor) throws Exception {
-        return setDeletionRequested(id,true,actor);
-    }
-    List<Map<String,Object>> setDeletionRequested(List<String> ids,boolean requested,String actor) throws Exception {
-        if(ids==null||ids.isEmpty()||ids.size()>100)throw new IllegalArgumentException("Provide 1 to 100 Job IDs");
-        for(String id:ids)if(id==null||!JOB_ID.matcher(id).matches())throw new IllegalArgumentException("Invalid Job ID");
-        List<Map<String,Object>> outcomes=new ArrayList<>();
-        for(String id:new java.util.LinkedHashSet<>(ids)) {
-            try {outcomes.add(setDeletionRequested(id,requested,actor));}
-            catch(NotFoundException unavailable){outcomes.add(deletionOutcome(id,actor,"UNAVAILABLE"));}
-            catch(Exception failed){outcomes.add(deletionOutcome(id,actor,"FAILED"));}
-        }return outcomes;
-    }
-    Map<String,Object> setDeletionRequested(String id,boolean requested,String actor) throws Exception {
-        if(id==null||!JOB_ID.matcher(id).matches())throw new IllegalArgumentException("Invalid Job ID");
-        if("local".equals(config.authMode)&&!store.isActiveUser(actor))throw new NotFoundException();
-        if(!artifactLifecycle.writeLock().tryLock())return deletionOutcome(id,actor,"ARCHIVE_BUSY");
-        try {
-            if(requested&&(jobs.containsKey(id)||pendingArtifactJobs.contains(id)||store.workerMayBeAlive(id)))return deletionOutcome(id,actor,"JOB_BUSY");
-            String outcome=store.setDeletionRequested(id,requested,actor,System.currentTimeMillis());
-            Map<String,Object> response=new LinkedHashMap<>();response.put("jobId",id);response.put("outcome",outcome);
-            Map<String,Object> current=store.get(id);response.put("deletionState",current==null?null:current.get("deletionState"));
-            return response;
-        } finally {artifactLifecycle.writeLock().unlock();}
-    }
-    /** Five-second bounded cadence, with at least thirty seconds to cancel a pending mark. */
-    void cleanupRequestedDeletions() throws Exception {
-        long before=System.currentTimeMillis()-30_000;
-        for(String id:store.requestedDeletionIds(before)) {
-            if(!artifactLifecycle.writeLock().tryLock())break;
-            try {
-                if(jobs.containsKey(id)||pendingArtifactJobs.contains(id)||store.workerMayBeAlive(id))continue;
-                store.claimRequestedDeletion(id,before);
-            } finally {artifactLifecycle.writeLock().unlock();}
-        }
-        reconcileDeletingJobs();
-    }
-    private void cleanupRequestedDeletionsSafely() {
-        try {cleanupRequestedDeletions();}
-        catch(Exception failed){java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).warning("Unable to clean pending deletions: "+safeMessage(failed));}
-    }
+BˆÚ˜]˜K][˜ÛÛ˜İ\œ™[‘^Xİ]ÜœË›™]ÔÚ[™ÛU™XYØÚY[Y^Xİ]ÜŠ‹OÕ™XY[™]È™XY
+‹˜]\Ù\™\‹Z[œÜXİÜ‹]Ø\›]\ŠNİœÙ]Y[[ÛŠYJNÜ™]\›ˆßJN›[ÂˆHÂˆ™XÛİ™\Š
+NÜ™XÛÛ˜Ú[Q[][™Ò›ØœÔØY™[J
+NØÛX[\^\™Y›ØœÔØY™[J
+NÜ™XÛİ™\\Y˜Xİ\˜Ú]™\ÔØY™[J
+NÜ™][[Û‹œØÚY[UÚ]š^Y[^J\Î˜ÛX[\^\™Y›ØœÔØY™[KKK[YU[š]’ÕT”ÊNÂˆYŠÛÛ™šYËš›Ø”İÜ˜YÙK™[˜X›Y
+^ÚYŠ\ÚÚ\[š]X[İÜ˜YÙTİÙY\
+XÛX[\›Ø”İÜ˜YÙTØY™[J
+NÜ™][[Û‹œØÚY[UÚ]š^Y[^J\Î˜ÛX[\›Ø”İÜ˜YÙTØY™[KÛÛ™šYËš›Ø”İÜ˜YÙK˜ÛX[\[\˜[Z[]\ËÛÛ™šYËš›Ø”İÜ˜YÙK˜ÛX[\[\˜[Z[]\Ë[YU[š]“RS•UTÊNßBˆ\Y˜XİXZ[[˜[˜ÙKœØÚY[UÚ]š^Y[^J\Îœ™XÛİ™\\Y˜Xİ\˜Ú]™\ÔØY™[KKK[YU[š]“RS•UTÊNÂˆ\Y˜XİXZ[[˜[˜ÙKœØÚY[UÚ]š^Y[^J\Îœ™XÛÛ˜Ú[UÛÜšÙ\”™[X\Ù\ËKK[YU[š]”ÑPÓÓ‘ÊNÂˆ™][[Û‹œØÚY[UÚ]š^Y[^J\Î™^\™Q˜YÔØY™[KKK[YU[š]“RS•UTÊNÂˆ™][[Û‹œØÚY[UÚ]š^Y[^J\Î˜ÛX[\™\]Y\İY[][ÛœÔØY™[KKK[YU[š]”ÑPÓÓ‘ÊNÂˆ\™Ù][™^XZ[[˜[˜ÙKœØÚY[UÚ]š^Y[^J
 
-    void requireJobOwner(String id,String principal) throws Exception {
-        if(!JOB_ID.matcher(id).matches())throw new NotFoundException();
-        if(store.get(id)==null)throw new NotFoundException();
-        if("local".equals(config.authMode)&&!store.isActiveUser(principal))throw new NotFoundException();
-    }
-    List<Map<String,Object>> jobsFor(String principal,String search) throws Exception {
-        return jobsFor(principal,search,false);
-    }
-    List<Map<String,Object>> jobsFor(String principal,String search,boolean pinnedOnly) throws Exception {
-        return store.list(100,search,pinnedOnly);
-    }
-    List<Map<String,Object>> loadJobsFor(String principal,int offset,int limit) throws Exception {
-        return loadJobsFor(principal,offset,limit,null,false);
-    }
-    List<Map<String,Object>> loadJobsFor(String principal,int offset,int limit,String search,boolean pinnedOnly) throws Exception {
-        if(principal==null||principal.isBlank())throw new IllegalArgumentException("A server-resolved request identity is required");
-        if(offset<0||offset>1000000||limit<1||limit>100)throw new IllegalArgumentException("Load job pagination is invalid");
-        int fetch=limit==Integer.MAX_VALUE?limit:limit+1;
-        if("local".equals(config.authMode)&&!store.isActiveUser(principal))throw new NotFoundException();
-        return store.listLoad(fetch,offset,search,pinnedOnly);
-    }
-    Job job(String id){if(!JOB_ID.matcher(id).matches())throw new NotFoundException();Job j=jobs.get(id);if(j==null)throw new NotFoundException();return j;}
-    Map<String,Object> jobRecord(String id) throws Exception {
-        if(!JOB_ID.matcher(id).matches())throw new NotFoundException();
-        Job active=jobs.get(id);
-        if(active!=null) {
-            // Terminal status must not become visible before finish() has persisted
-            // the result, diagnostic, and final event. All of these share the Job monitor.
-            synchronized(active) {
-                Map<String,Object> view=active.view();
-                view.put("pinned",false);
-                // Only terminal jobs can be pinned. Keep active polling independent
-                // of database connection/flush costs.
-                if(active.terminal()) {
-                    Map<String,Object> persisted=store.get(id);
-                    if(persisted!=null)for(String key:List.of("pinned","pinnedAt","pinnedBy","pinReason"))view.put(key,persisted.get(key));
-                }
-                return view;
-            }
-        }
-        Map<String,Object> record=store.get(id);if(record==null)throw new NotFoundException();
-        Map<String,String> replayMetadata=store.executionSpec(id);
-        if(replayMetadata!=null&&replayMetadata.get("rerunOfJobId")!=null)record.put("rerunOfJobId",replayMetadata.get("rerunOfJobId"));
-        record.put("executionType",Job.executionType(String.valueOf(record.get("command"))));
-        record.remove("resultJson");record.remove("diagnosticJson");
-        String performance=(String)record.remove("performanceJson");
-        if(performance!=null&&!performance.isBlank())record.put("performance",JSON.readValue(performance,Map.class));
-        record.put("archiveMetrics",store.archiveMetrics(id));
-        return record;
-    }
+KOÂˆYŠÛÜÚ[™Ê\™]\›ÂˆHÚYŠİÜ™K˜˜XÚÙš[ÙX\˜Ú\™Ù]Ğ˜]Ú
 
-    private static Map<String,Object> sanitizeLoadProgress(Map<?,?> raw) {
-        if(!"att-load-live-progress/v1".equals(raw.get("schemaVersion")))return null;
-        long elapsed=boundedLong(raw.get("elapsedMs"),0L,Long.MAX_VALUE);if(elapsed<0)return null;
-        Map<String,Object> snapshot=new LinkedHashMap<>();snapshot.put("schemaVersion","att-load-live-progress/v1");
-        String runId=safeProgressName(raw.get("runId"));if(!runId.isBlank())snapshot.put("runId",runId);
-        String captured=raw.get("capturedAt") instanceof String?(String)raw.get("capturedAt"):null;
-        if(captured==null||captured.length()>40||!validTimestamp(captured))return null;
-        snapshot.put("capturedAt",captured);snapshot.put("elapsedMs",elapsed);
-        String phase=raw.get("phase") instanceof String?((String)raw.get("phase")).toUpperCase(java.util.Locale.ROOT):"UNKNOWN";
-        if(!Set.of("PREPARING","WARMUP","RAMP_UP","STEADY","RAMP_DOWN","COMPLETE","UNKNOWN","PROGRESS").contains(phase))phase="UNKNOWN";
-        snapshot.put("phase",phase);
-        Map<String,Object> counts=progressCounts(raw.get("counts"));if(counts==null)return null;snapshot.put("counts",counts);
-        Map<String,Object> measured=progressCounts(raw.get("measuredCounts"));if(measured==null)return null;snapshot.put("measuredCounts",measured);
-        Map<String,Object> rates=progressNumbers(raw.get("rates"),Set.of("completedTps","successfulTps"));if(rates==null)return null;snapshot.put("rates",rates);
-        Map<String,Object> latency=progressLatency(raw.get("latency"));if(latency==null)return null;snapshot.put("latency",latency);
-        if(raw.get("latestFailure") instanceof Map<?,?>) {
-            Map<?,?> failure=(Map<?,?>)raw.get("latestFailure");Object status=failure.get("status"),time=failure.get("capturedAt"),code=failure.get("code");
-            if(status instanceof String && Set.of("DROPPED","FAIL","ERROR","INVALID","SKIPPED").contains(status) && time instanceof String && ((String)time).length()<=40 && validTimestamp((String)time)) {
-                Map<String,Object> projected=new LinkedHashMap<>();projected.put("status",status);projected.put("capturedAt",time);
-                if(code instanceof String && ((String)code).matches("[A-Za-z][A-Za-z0-9_.-]{0,63}"))projected.put("code",code);
-                snapshot.put("latestFailure",projected);
-            }
-        }
-        Map<String,Object> checkpoint=progressCheckpoint(raw.get("checkpointInterval"));
-        if(raw.containsKey("checkpointInterval") && checkpoint==null)checkpoint=Map.of("schemaVersion","att-load-checkpoint-interval/v1","state","DEGRADED");
-        if(checkpoint!=null)snapshot.put("checkpointInterval",checkpoint);
-        Map<String,Object> phases=new TreeMap<>();Object rawPhases=raw.get("phases");
-        if(rawPhases instanceof Map<?,?>)for(Map.Entry<?,?> entry:((Map<?,?>)rawPhases).entrySet()) {
-            if(phases.size()>=8)break;String name=safeProgressName(entry.getKey());if(!Set.of("WARMUP","RAMP_UP","STEADY","RAMP_DOWN","COMPLETE","PREPARING","UNKNOWN").contains(name))continue;
-            Map<String,Object> value=progressCounts(entry.getValue());if(value!=null)phases.put(name,value);
-        }
-        snapshot.put("phases",phases);
-        Map<String,Object> workloads=new TreeMap<>();Object rawWorkloads=raw.get("workloads");
-        if(rawWorkloads instanceof Map<?,?>)for(Map.Entry<?,?> entry:((Map<?,?>)rawWorkloads).entrySet()) {
-            if(workloads.size()>=32)break;String name=safeProgressName(entry.getKey());if(name.isBlank())continue;
-            Map<String,Object> value=progressCounts(entry.getValue());if(value!=null) {
-                if(entry.getValue() instanceof Map<?,?>) {
-                    Map<String,Object> workloadLatency=progressLatency(((Map<?,?>)entry.getValue()).get("latency"));
-                    if(workloadLatency!=null)value.put("latency",workloadLatency);
-                }
-                workloads.put(name,value);
-            }
-        }
-        snapshot.put("workloads",workloads);snapshot.put("workloadsTruncated",Boolean.TRUE.equals(raw.get("workloadsTruncated"))||workloads.size()<sizeOf(raw.get("workloads")));
-        snapshot.put("serverReceivedAt",Instant.now().toString());
-        return snapshot;
-    }
+OOL
+]\™Ù][™^XZ[[˜[˜ÙKœÚ]İÛŠ
+NßBˆØ]Ú
+[\œ\Y^Ù\[ÛˆİÜY
+^Õ™XY˜İ\œ™[™XY
 
-    private static Map<String,Object> progressCounts(Object raw) {
-        if(!(raw instanceof Map<?,?>))return null;Map<String,Object> result=new LinkedHashMap<>();Map<?,?> source=(Map<?,?>)raw;
-        for(String key:List.of("scheduled","started","completed","passed","sutFailures","runtimeErrors","dropped","other","active","queued")) {
-            Object value=source.get(key);if(value==null)continue;long count=boundedLong(value,0L,Long.MAX_VALUE);if(count<0)return null;result.put(key,count);
-        }
-        for(String key:List.of("schedulerLagMeanMs"))if(source.containsKey(key)) {
-            Object value=source.get(key);if(value==null){result.put(key,null);continue;}double number=boundedDouble(value);if(!Double.isFinite(number)||number<0)return null;result.put(key,number);
-        }
-        return result;
-    }
+Kš[\œ\
 
-    private static Map<String,Object> progressCheckpoint(Object raw) {
-        if(!(raw instanceof Map<?,?>))return null;Map<?,?> source=(Map<?,?>)raw;
-        if(!"att-load-checkpoint-interval/v1".equals(source.get("schemaVersion")))return null;
-        Object state=source.get("state");if(!(state instanceof String)||!Set.of("WAITING","DEGRADED","VERIFIED").contains(state))return null;
-        Map<String,Object> value=new LinkedHashMap<>();value.put("schemaVersion","att-load-checkpoint-interval/v1");value.put("state",state);
-        if(!"VERIFIED".equals(state))return value;
-        long start=boundedLong(source.get("startSequence"),1L,Long.MAX_VALUE-1L),end=boundedLong(source.get("endSequence"),2L,Long.MAX_VALUE);
-        long duration=boundedLong(source.get("durationMs"),1L,TimeUnit.DAYS.toMillis(11));
-        if(start<1L||end!=start+1L||duration<1L||!(source.get("startAt") instanceof String)||!(source.get("endAt") instanceof String))return null;
-        String startAt=(String)source.get("startAt"),endAt=(String)source.get("endAt");
-        if(startAt.length()>40||endAt.length()>40||!validTimestamp(startAt)||!validTimestamp(endAt))return null;
-        try {if(java.time.Duration.between(Instant.parse(startAt),Instant.parse(endAt)).toMillis()!=duration)return null;}catch(Exception invalid){return null;}
-        if(!(source.get("counts") instanceof Map<?,?>))return null;Map<?,?> rawCounts=(Map<?,?>)source.get("counts");Map<String,Object> counts=new LinkedHashMap<>();
-        for(String key:List.of("scheduled","started","completed","success","failure","runtimeError","otherOutcome","dropped","measuredScheduled","measuredStarted","measuredCompleted","measuredSuccess","measuredFailure","measuredRuntimeError","measuredOtherOutcome","measuredDropped")) {
-            long count=boundedLong(rawCounts.get(key),0L,Long.MAX_VALUE);if(count<0L)return null;counts.put(key,count);
-        }
-        value.put("startSequence",start);value.put("endSequence",end);value.put("startAt",startAt);value.put("endAt",endAt);value.put("durationMs",duration);value.put("counts",counts);
-        if(source.containsKey("latencySampleCount")) {
-            long samples=boundedLong(source.get("latencySampleCount"),0L,Long.MAX_VALUE);if(samples<0L)return null;
-            value.put("latencySampleCount",samples);
-            if(samples>0L) {double mean=boundedDouble(source.get("latencyMeanMs"));if(!Double.isFinite(mean)||mean<0.0)return null;value.put("latencyMeanMs",mean);}
-        }
-        return value;
-    }
+NßBˆØ]Ú
+^Ù\[Ûˆ˜Z[Y
+^ÚYŠXÛÜÚ[™ÊZ˜]˜K][›ÙÙÚ[™Ë“ÙÙÙ\‹™Ù]ÙÙÙ\ŠÙ\™\”[[YK˜Û\ÜË™Ù]˜[YJ
+JK›ÙÊ˜]˜K][›ÙÙÚ[™Ë“]™[•ĞT“’S‘Ë’\İÜšXØ[\™Ù][™^[™ÈÚ[™]H‹˜Z[Y
+NßBˆKLL[YU[š]“RSTÑPÓÓ‘ÊNÂˆYŠÛÛ™šYËœØÚY[[™Ë™[˜X›Y
+HÂˆİÜ™Kœ™XÛİ™\”ØÚY[Q^Xİ][ÛœÊ
+NÂˆYŠXÛÛ™šYË˜]][XØ][Û”™\]Z\™Y	‰˜ÛÛ™šYË˜]]Üš^˜][Û‹˜[İĞ[›Û[[İ\ÓÜ\˜][ÛœÊZ˜]˜K][›ÙÙÚ[™Ë“ÙÙÙ\‹™Ù]ÙÙÙ\ŠÙ\™\”[[YK˜Û\ÜË™Ù]˜[YJ
+JKØ\›š[™ÊUÜ\˜][ÛœÈ\™H[˜X›YÚ]İ]]][XØ][ÛÈ[›Û[[İ\ÈÛY[ÈÚ\™HÜ\˜][Û˜[XØÙ\ÜÈŠNÂˆØYØÚY[TØÚY[\[™]ÈØYØÚY[TØÚY[\ŠÛÛ™šYËœØÚY[[™ËİÜ™K\ÎœİX›Z]ØÚY[Y›Ø‹ÛØÚÊNÂˆØYØÚY[TØÚY[\‹œİ\
 
-    private static Map<String,Object> progressNumbers(Object raw,Set<String> allow) {
-        if(!(raw instanceof Map<?,?>))return null;Map<String,Object> result=new LinkedHashMap<>();
-        for(String key:allow) {Object value=((Map<?,?>)raw).get(key);if(value==null)continue;double number=boundedDouble(value);if(!Double.isFinite(number)||number<0)return null;result.put(key,number);}
-        return result;
-    }
+NÂˆH[ÙHØYØÚY[TØÚY[\[[Âˆ^Xİ][Û•ÛÜšÙ\œÏ[™]È^Xİ][Û•ÛÜšÙ\”ÛÛ
+ÛÛ™šYËYOÛÜšÙ\Z[\ŠYKY
+K\Îœİ\ÛÜšÙ\”›ØÙ\ÜËˆ
 
-    private static Map<String,Object> progressLatency(Object raw) {
-        if(!(raw instanceof Map<?,?>))return null;Map<?,?> source=(Map<?,?>)raw;Map<String,Object> result=new LinkedHashMap<>();
-        long samples=boundedLong(source.get("sampleCount"),0L,Long.MAX_VALUE);if(samples<0)return null;result.put("sampleCount",samples);
-        for(String key:List.of("meanMs","p95Ms","p99Ms")) {
-            Object value=source.get(key);if(value==null){result.put(key,null);continue;}
-            double number=boundedDouble(value);if(!Double.isFinite(number)||number<0)return null;result.put(key,number);
-        }
-        result.put("percentileMethod","bounded log histogram estimate");return result;
-    }
+KO‘^Xİ][Û•ÛÜšÙ\”ÛÛ™š[™Ù\œš[
+\ËÛÜšÙ\“XœËÛÛ™šYËÛÜšÙ\“Xœ˜\Q\œÊKÛÜšÙ\”ØÚ[XT™YÚ\İQYÙ\İ
+NÂˆYŠ[œÜXİ[Û•Ø\›]\O[[
+Z[œÜXİ[Û•Ø\›]\œØÚY[UÚ]š^Y[^J\ÎØ\›R[œÜXİ[Û”ØY™[KLL[YU[š]“RSTÑPÓÓ‘ÊNÂˆYŠÛÛ™šYËš[œÜXİ[Û‹™[˜X›Y	‰ˆXÛÛ™šYËš[œÜXİ[Û‹œ™YXİ[Û‘[˜X›Y
+Z˜]˜K][›ÙÙÚ[™Ë“ÙÙÙ\‹™Ù]ÙÙÙ\ŠÙ\™\”[[YK˜Û\ÜË™Ù]˜[YJ
+JKØ\›š[™Ê’[œÜXİ[ÛˆX\ÚÚ[™È\È\ØX›YÈÜ™[˜\HXÚØYÙH˜[Y\È\™Hš\ÚX›HÈ]]Üš^™YØ[\œËÚ[HÛ\ÜÚYšYYÙXÜ™]È™[XZ[ˆ›İXİYŠNÂˆYŠXÛÛ™šYËœÙXİ\š]K˜ÚXÚĞÜ›ÜÜÓÜšYÚ[ŠZ˜]˜K][›ÙÙÚ[™Ë“ÙÙÙ\‹™Ù]ÙÙÙ\ŠÙ\™\”[[YK˜Û\ÜË™Ù]˜[YJ
+JKØ\›š[™ÊœÙ\™\‹œÙXİ\š]K˜ÚXÚĞÜ›ÜÜÓÜšYÚ[ˆ\È\ØX›YÈÛÛ™šYİ\™H\İY›ŞHÜšYÚ[ˆ[™[™È[™™]Z[ˆØØ[X]]ÔÔ‘ˆ›İXİ[ÛˆŠNÂˆHØ]Ú
+^Ù\[Ûˆ˜Z[Y
+HØÛÜÙJ
+Nİ›İÈ˜Z[YßBˆBˆš]˜]H›ÚY™XÛİ™\Š
+H›İÜÈ^Ù\[ÛˆÂˆ›ÜŠX\İš[™ËØš™Xİˆİ[NœİÜ™Kœİ[UÛÜšÙ\œÊ
+JHÂˆHÂˆÛ™ÈYJ
+[X™\Š\İ[K™Ù]
+œYŠJK›Û™Õ˜[YJ
+NÔ›ØÙ\ÜÒ[™K›ÙŠY
+KšY”™\Ù[
+[™KOÂˆİš[™È^XİYJİš[™Ê\İ[K™Ù]
+œİ\ŠNÔİš[™ÈXİX[Z[™Kš[™›Ê
+Kœİ\[œİ[
 
-    private static String safeProgressName(Object raw) {
-        if(!(raw instanceof String))return "";String value=((String)raw).trim();return value.matches("[A-Za-z0-9][A-Za-z0-9._-]{0,127}")?value:"";
-    }
-    private static int sizeOf(Object value){return value instanceof Map<?,?>?((Map<?,?>)value).size():0;}
-    private static long boundedLong(Object value,long minimum,long maximum) {
-        if(!(value instanceof Number))return -1L;try{long number=new java.math.BigDecimal(String.valueOf(value)).longValueExact();return number<minimum||number>maximum?-1L:number;}catch(NumberFormatException|ArithmeticException invalid){return -1L;}
-    }
-    private static double boundedDouble(Object value) {if(!(value instanceof Number))return Double.NaN;try{return new java.math.BigDecimal(String.valueOf(value)).doubleValue();}catch(NumberFormatException invalid){return Double.NaN;}}
-    private static boolean validTimestamp(String value){try{Instant.parse(value);return true;}catch(Exception invalid){return false;}}
+K›X\
+[œİ[Ôİš[™ÊK›Ü‘[ÙJˆŠNÂˆİš[™ÈÛÛ[X[™Z[™Kš[™›Ê
+K˜ÛÛ[X[™[™J
+K›Ü‘[ÙJˆŠNÂˆYŠ^XİYO[[	‰™^XİY™\]X[ÊXİX[
+I‰˜ÛÛ[X[™˜ÛÛZ[œÊ˜]ÛÜšÙ\‹•ÛÜšÙ\“XZ[ˆŠJZ[™K™\İ›ŞQ›Ü˜ÚX›J
+NÂˆJNÂˆHØ]Ú
+^Ù\[ÛˆYÛ›Ü™Y
+HÈBˆBˆ›ÜŠİš[™ÈYœİÜ™Kœİ[R›Ø’YÊ
+JHÂˆX\İš[™ËØš™Xİˆ›İÏ\İÜ™K™Ù]
+Y
+NÂˆİš[™È[ÙOY^Xİ][Û“[ÙJ›İÏO[[Û[”İš[™Ë˜[YSÙŠ›İË™Ù]
+˜ÛÛ[X[™ŠJJNÂˆİÜ™Kš[\œ\İ[JY
+NÂˆ]›İ\›˜[XÛÛ™šYË™]Q\‹œ™\ÛÛ™Jš›ØœÈŠKœ™\ÛÛ™JY
+Kœ™\ÛÛ™J™]™[ËšœÛÛ›ŠNÂˆ›Ø‘]™[È]™[Ï[™]È›Ø‘]™[Ê›İ\›˜[ÛÛ™šYË›X^]™[Ô\’›Ø‹ÛÛ™šYË›X^]™[›İ\›˜[]\ËˆÛÛ™šYË›X^]™[›İ\›˜[Y[[ÜP]\Ë]™[ÛÛ\Xİ[ÛœË]™[›İYšXØ][ÛœÊNÂˆİš[™Èİ[[X\OH’›ØˆØ\È[\œ\YHÙ\™\ˆ™\İ\[™Ø\È›İ™\[ˆÂˆ]™[Ë˜\[™
+™XYÛ›ÜİXÈ‹X\›ÙŠ˜ÛÙH‹UTÑT•‘T‹RS•T”•TQ‹œİ[[X\H‹İ[[X\K˜ÛÛœÛÛH‹X›\ÚÛÛœÛÛJ]˜ÛÛœÛÛK‘^Xİ][ÛÛÛœÛÛQ›Ü›X]\‹™XYÛ›ÜİXÊ[ÙKUTÑT•‘T‹RS•T”•TQ‹İ[[X\JJJJNÂˆ]™[Ë˜\[™
+œ™\İ[‹X\›ÙŠš›Ø’Y‹Yœİ]\È‹‘T”“Ôˆ‹˜ÛÛœÛÛH‹X›\ÚÛÛœÛÛJ]˜ÛÛœÛÛK‘^Xİ][ÛÛÛœÛÛQ›Ü›X]\‹›Y™XŞXÛJ[ÙKY‘T”“Ôˆ‹[
+JJJNÂˆBˆBˆÊŠˆØ\\™HÛ›H˜[Y]Ü‹X\›İ™Y]NÈ™]™\ˆÙ\šX[^™HÛÜšÙ\”™\]Y\İÜˆ[œÜXİ[Ûˆ™]šY]ÜËˆ
+‹Âˆš]˜]H›Ø‘^Xİ][Û”ÜXÈØ\\™Q^Xİ][Û”ÜXÊİš[™ÈÛÛ[X[™œÛÛ“›ÙH[œ]İš[™Èš[˜Ú\[İš[™ÈØÚY[SØØİ\œ™[˜ÙRY
+H›İÜÈ^Ù\[ÛˆÂˆYŠXÛÛ™šYËš[œÜXİ[Û‹™[˜X›YS\İ›ÙŠœ[ˆ‹™XYÈ‹›ØYŠK˜ÛÛZ[œÊÛÛ[X[™
+J\™]\›ˆ[ÂˆYŠ[œ]œ]
+™T[ˆŠK˜\Ğ›ÛÛX[Š˜[ÙJJ]›İÈ™]È[YØ[\™İ[Y[^Ù\[ÛŠ•˜[Y][Û‹[Û›H^Xİ][ÛˆØ[››İ™H™\^YY\ÈH[›˜X›H›ØˆŠNÂˆYŠ[œ]œ]
+œ™\[‘˜Z[YŠK˜\Ğ›ÛÛX[Š˜[ÙJ_[œ]š\Ó›Û“[
+›İ™\œšY\ÈŠI‰š[œ]œ]
+›İ™\œšY\ÈŠKœÚ^™J
+OŒ
+Bˆ›İÈ™]È[YØ[\™İ[Y[^Ù\[ÛŠ“YØXŞH\İÜHÙ[XİÜœÈÜˆ˜]Èİ™\œšY\È™\]Z\™HH˜[Y]Y˜Y™Y›Ü™HØY™H™][[ÛˆŠNÂˆİš[™ÈXÚØYÙRY\™\]Z\™Y
+[œ]œXÚØYÙRYŠNÔ]›Ûİ\XÚØYÙT›Ûİ
+XÚØYÙRY
+NÂˆİš[™È[š\›Û›Y[[Ü[Û˜[^
+[œ]™[š\›Û›Y[ŠNÂˆØš™Xİ›ÙHYš[š][ÛR”ÓÓ‹˜Ü™X]SØš™Xİ›ÙJ
+NÙYš[š][Û‹œ]
+™^Xİ][Û•\H‹›Ø‹™^Xİ][Û•\JÛÛ[X[™
+JNÙYš[š][Û‹œ]
+œXÚØYÙRY‹XÚØYÙRY
+NÂˆYŠ[œ]š\Ê™[š\›Û›Y[ŠJYYš[š][Û‹œÙ]
+™[š\›Û›Y[‹[œ]™Ù]
+™[š\›Û›Y[ŠK™Y\ÛÜJ
+JNÂˆİš[™È™]š\Ú[ÛÂˆYŠ›ØY‹™\]X[ÊÛÛ[X[™
+JHÂˆØYØÚY[HÛİ\˜ÙO[™]ÈØYØÚY[J
+NÜÛİ\˜ÙKœXÚØYÙRY\XÚØYÙRYÜÛİ\˜ÙK™[š\›Û›Y[Y[š\›Û›Y[ÂˆÛİ\˜ÙKœØÙ[˜\š[ÏZ[œ]œ]
+œØÙ[˜\š[ÈŠKš\Õ^X[
 
-    private Map<String,Object> recordLoadProgress(Job job,Map<String,Object> progress) {
-        synchronized(job) {
-            if(job.loadProgress!=null) {
-                long previous=((Number)job.loadProgress.get("elapsedMs")).longValue();
-                long next=((Number)progress.get("elapsedMs")).longValue();if(next<previous)return null;
-                if(!monotonicProgressCounts(job.loadProgress.get("counts"),progress.get("counts")) ||
-                        !monotonicProgressCounts(job.loadProgress.get("measuredCounts"),progress.get("measuredCounts")))return null;
-            }
-            Map<String,Object> saved=new LinkedHashMap<>(progress);
-            Object incomingCheckpoint=saved.get("checkpointInterval");
-            if(incomingCheckpoint instanceof Map<?,?> && "VERIFIED".equals(((Map<?,?>)incomingCheckpoint).get("state")) && !job.loadCheckpointHistory.isEmpty()) {
-                long sequence=((Number)((Map<?,?>)incomingCheckpoint).get("endSequence")).longValue();
-                long previous=((Number)job.loadCheckpointHistory.get(job.loadCheckpointHistory.size()-1).get("endSequence")).longValue();
-                if(sequence<previous)saved.put("checkpointInterval",Map.of("schemaVersion","att-load-checkpoint-interval/v1","state","DEGRADED"));
-            }
-            job.loadProgress=saved;
-            Object checkpoint=saved.get("checkpointInterval");
-            if(checkpoint instanceof Map<?,?> && "VERIFIED".equals(((Map<?,?>)checkpoint).get("state"))) {
-                @SuppressWarnings("unchecked") Map<String,Object> interval=(Map<String,Object>)checkpoint;
-                long sequence=((Number)interval.get("endSequence")).longValue();
-                long previous=job.loadCheckpointHistory.isEmpty()?0L:((Number)job.loadCheckpointHistory.get(job.loadCheckpointHistory.size()-1).get("endSequence")).longValue();
-                if(sequence>previous) {
-                    Map<String,Object> entry=new LinkedHashMap<>(interval);
-                    if((previous==0L && sequence>2L)||(previous>0L && sequence>previous+1L))entry.put("coverageGap",true);
-                    saved.put("checkpointInterval",entry);
-                    job.loadCheckpointHistory.add(entry);if(job.loadCheckpointHistory.size()>64)job.loadCheckpointHistory.remove(0);
-                }
-            }
-            Map<String,Object> point=progressHistoryPoint(saved);
-            job.loadProgressHistory.add(point);if(job.loadProgressHistory.size()>60)job.loadProgressHistory.remove(0);
-            long elapsed=((Number)saved.get("elapsedMs")).longValue();long planned=plannedLoadDurationMs(job);
-            int bucket=(int)Math.max(0L,Math.min(255L,(long)(elapsed*256.0/Math.max(1L,planned))));
-            if(bucket%4==0) {
-                point=new LinkedHashMap<>(point);point.put("workloads",compactWorkloadTrend(saved.get("workloads")));
-            }
-            if(bucket==0)job.loadProgressTrend.putIfAbsent(bucket,point);else job.loadProgressTrend.put(bucket,point);
-            Map<String,Object> state=new LinkedHashMap<>();state.put("latest",saved);state.put("recent",new ArrayList<>(job.loadProgressHistory));state.put("trend",new ArrayList<>(job.loadProgressTrend.values()));state.put("checkpoints",new ArrayList<>(job.loadCheckpointHistory));
-            long now=System.nanoTime();
-            boolean retryDue=!job.loadProgressPersistenceDegraded||job.lastLoadProgressPersistenceAttemptNanos==0L
-                    ||now-job.lastLoadProgressPersistenceAttemptNanos>=LOAD_PROGRESS_PERSISTENCE_RETRY_NANOS;
-            if(retryDue) {
-                job.lastLoadProgressPersistenceAttemptNanos=now;
-                saved.put("telemetryPersistence",Map.of("state","HEALTHY"));
-                try {
-                    String candidate=JSON.writeValueAsString(state);
-                    loadProgressPersistence.update(job.id,candidate);
-                    job.loadProgressPersistenceDegraded=false;
-                    job.loadProgressJson=candidate;
-                } catch(Exception unavailable) {
-                    job.loadProgressPersistenceDegraded=true;
-                    saved.put("telemetryPersistence",loadProgressPersistenceHealth(job.lastLoadProgressPersistenceAttemptNanos,now));
-                    job.loadProgressJson=serializeLoadProgressState(state);
-                }
-            } else {
-                saved.put("telemetryPersistence",loadProgressPersistenceHealth(job.lastLoadProgressPersistenceAttemptNanos,now));
-                job.loadProgressJson=serializeLoadProgressState(state);
-            }
-            return new LinkedHashMap<>(saved);
-        }
-    }
+OÜØY™T™[]]™J[œ]œ]
+œØÙ[˜\š[ÈŠK˜\Õ^
 
-    private static Map<String,Object> loadProgressPersistenceHealth(long lastAttemptNanos,long nowNanos) {
-        long retryAfterMs=Math.max(0L,TimeUnit.NANOSECONDS.toMillis(LOAD_PROGRESS_PERSISTENCE_RETRY_NANOS-Math.max(0L,nowNanos-lastAttemptNanos)));
-        return Map.of("state","DEGRADED","diagnostic","Optional live LOAD telemetry persistence is degraded; the latest in-memory snapshot remains available and retries continue.","retryAfterMs",retryAfterMs);
-    }
+KœØÙ[˜\š[ÈŠN›[ÂˆYŠ[œ]š\Êš[›[™SØYØÙ[˜\š[ÈŠJ\Ûİ\˜ÙKš[›[™TØÙ[˜\š[ÏR”ÓÓ‹˜ÛÛ™\˜[YJ[œ]™Ù]
+š[›[™SØYØÙ[˜\š[ÈŠKX\˜Û\ÜÊNÂˆYŠ[œ]š\Ê›ØYŠJ\Ûİ\˜ÙK›ØYR”ÓÓ‹˜ÛÛ™\˜[YJ[œ]™Ù]
+›ØYŠKX\˜Û\ÜÊNÂˆ˜[Y]YØÚY[YØÙ[˜\š[È˜[Y]Y]˜[Y]TØÚY[TØÙ[˜\š[Ê›ÛİÛİ\˜ÙJNÂˆYŠ˜[Y]Y˜ÛÛZ[œÔÙ[œÚ]]™U˜[Y\Ê]›İÈ™]È[YØ[\™İ[Y[^Ù\[ÛŠ”Ù[œÚ]]™H^Xİ][Ûˆ[œ]È™\]Z\™HÙXİ\™H™KY[HŠNÂˆYš[š][Û‹œÙ]
+œØÙ[˜\š[È‹”ÓÓ‹˜[YUÕ™YJ˜[Y]YœØÙ[˜\š[ÊJNÜ™]š\Ú[Û]˜[Y]Yœ™]š\Ú[Û‘YÙ\İÂˆH[ÙHÂˆYš[š][Û‹œ]
+œØÚ[XU™\œÚ[Ûˆ‹[‘Yš[š][Û‹•‘T”ÒSÓŠNÂˆØš™Xİ›ÙHÜ[ÛœÏYYš[š][Û‹œ]Øš™Xİ
+›Ü[ÛœÈŠNÛÜ[ÛœËœ]
+™XYÈ‹™XYÈ‹™\]X[ÊÛÛ[X[™
+_[œ]œ]
+™XYÛ›ÜİXÓ[ÙHŠK˜\Ğ›ÛÛX[Š˜[ÙJJNÂˆYŠ[œ]š\Ê\™Ù]ŠJHÂˆØš™Xİ›ÙHXYÏR”ÓÓ‹˜Ü™X]SØš™Xİ›ÙJ
+NÙXYËœ]
+œXÚØYÙRY‹XÚØYÙRY
+NÂˆYŠ[š\›Û›Y[O[[
+YXYËœ]
+™[š\›Û›Y[‹[š\›Û›Y[
+NÂˆXYËœÙ]
+\™Ù]‹[œ]™Ù]
+\™Ù]ŠJNÂˆœÛÛ“›ÙHİX›Z]YZ[œ]™Ù]
+š[›[™QXYÒ[œ]ŠNÂˆËÈ™Y™\ˆHÜšYÚ[˜[˜[Y]Yİ™\œšYK™\Ù\š[™ÈÛZ\ÜÚ[Û‹[[™^™\ÜÚ[ÛœË‚ˆ›ÜŠ[‘˜Y˜Yœ[‘˜YË˜[Y\Ê
+JZYŠ˜YÛÜšÙ\’[œ]™\]X[Ê[œ]
+I‰™˜Yœ™\Ûİ\˜ÙQXYÑ˜YO[[
+\İX›Z]YR”ÓÓ‹˜[YUÕ™YJ˜Yœ™\Ûİ\˜ÙQXYÑ˜YœØÚY[R[œ]
+NÂˆ›ÜŠXYÑ˜Y˜Y™XYÑ˜YË˜[Y\Ê
+JZYŠ˜Yœ™]š\Ú[Û‘YÙ\İ™\]X[Ê[œ]œ]
+™^XİY™]š\Ú[Û‘YÙ\İŠK˜\Õ^
 
-    private static String serializeLoadProgressState(Map<String,Object> state) {
-        try {return JSON.writeValueAsString(state);}
-        catch(Exception unavailable) {return null;}
-    }
+JI‰™˜Yœ™\Ûİ\˜ÙRY™\]X[Ê[œ]œ]
+™˜Y™\Ûİ\˜ÙRYŠK˜\Õ^
 
-    private static boolean monotonicProgressCounts(Object before,Object after) {
-        if(!(before instanceof Map<?,?>)||!(after instanceof Map<?,?>))return false;
-        Map<?,?> old=(Map<?,?>)before,current=(Map<?,?>)after;
-        for(String key:List.of("scheduled","started","completed","passed","sutFailures","runtimeErrors","dropped","other")) {
-            Object left=old.get(key),right=current.get(key);
-            if(left instanceof Number && (!(right instanceof Number)||((Number)right).longValue()<((Number)left).longValue()))return false;
-        }
-        return true;
-    }
+JI‰™˜Yœš[˜Ú\[™\]X[Êš[˜Ú\[
+J\İX›Z]YR”ÓÓ‹˜[YUÕ™YJ˜YœØÚY[R[œ]
+NÂˆYŠİX›Z]YO[[
+]›İÈ™]È[YØ[\™İ[Y[^Ù\[ÛŠ”Ûİ\˜ÙH[œ]ÈÙ\™H›İ™]Z[™YŠNÂˆXYËœÙ]
+š[œ]‹İX›Z]Y
+NÑXYÑ˜Y˜[Y]YXZ[XYÑ˜Y
+XYËš[˜Ú\[
+NÂˆYŠ˜[Y]Y˜ÛÛZ[œÔÙ[œÚ]]™U˜[Y\Ê]›İÈ™]È[YØ[\™İ[Y[^Ù\[ÛŠ”Ù[œÚ]]™H^Xİ][Ûˆ[œ]È™\]Z\™HÙXİ\™H™KY[HŠNÂˆYš[š][Û‹œÙ]
+\™Ù]‹[œ]™Ù]
+\™Ù]ŠK™Y\ÛÜJ
+JNÙYš[š][Û‹œÙ]
+š[œ]‹”ÓÓ‹˜[YUÕ™YJ˜[Y]YœØÚY[R[œ]
+JNÜ™]š\Ú[Û]˜[Y]Yœ™]š\Ú[Û‘YÙ\İÂˆH[ÙHÂˆÛÜšÙ\”™\]Y\İ™\]Y\İX\UÛÜšÙ\”ÛXŞJ”ÓÓ‹™YUÕ˜[YJ[œ]ÛÜšÙ\”™\]Y\İ˜Û\ÜÊJNÂˆ™\]Y\İœ›İØÛÛ™\œÚ[ÛH˜]]ÛÜšÙ\‹İŒHÜ™\]Y\İ˜ÛÛ[X[™Hš[œÜXİÜ™\]Y\İœXÚØYÙT›Ûİ\›ÛİÔİš[™Ê
+NÜ™\]Y\İ˜ÛÛ™šYÏXÛÛ™šYËœ[[YPÛÛ™šYÔ]Ôİš[™Ê
+NÂˆ™\]Y\İš›Ø’YH’HŠÕURQœ˜[™ÛUURQ
 
-    private static Map<String,Object> progressHistoryPoint(Map<String,Object> snapshot) {
-        Map<String,Object> point=new LinkedHashMap<>();
-        for(String key:List.of("capturedAt","serverReceivedAt","elapsedMs","phase","counts","measuredCounts","rates","latency"))
-            if(snapshot.containsKey(key))point.put(key,snapshot.get(key));
-        return point;
-    }
+KÔİš[™Ê
+Kœ™\XÙJ‹H‹ˆŠNÜ™\]Y\İš[œÜXİ[ÛXİ[ÛHœ[‹Z[œ]ÂˆØš™Xİ›ÙHÛXŞOR”ÓÓ‹˜Ü™X]SØš™Xİ›ÙJ
+NØ\R[œÜXİ[Û”ÛXŞJÛXŞKXÚØYÙRY
+NÒ”ÓÓ‹œ™XY\‘›Ü•\][™Ê™\]Y\İ
+Kœ™XY˜[YJÛXŞJNÂˆX\İš[™ËØš™Xİˆ[œÜXİYY^Xİ]R[œÜXİ[ÛŠ›Ûİ™\]Y\İ
+NÂˆØš™XİÙ[XİYZ[œÜXİY™Ù]
+œÙ[XİYØ\ÙRYÈŠNÚYŠJÙ[XİY[œİ[˜Ù[Ùˆ\İÏˆYÊ_YËš\Ñ[\J
+J]›İÈ™]È[YØ[\™İ[Y[^Ù\[ÛŠ‘^XİØ\ÙHÙ[Xİ[Ûˆ\È[˜]˜Z[X›HŠNÂˆØš™Xİ›ÙHÙ[Xİ[ÛYYš[š][Û‹œ]Øš™Xİ
+œÙ[Xİ[ÛˆŠNÜÙ[Xİ[Û‹œÙ]
+˜Ø\ÙRYÈ‹”ÓÓ‹˜[YUÕ™YJÙ[XİY
+JNÂˆ›ÜŠİš[™ÈšY[“\İ›ÙŠœİZ]\È‹œİZ]Q\™XİÜHŠJZYŠ[œ]š\ÊšY[
+J\Ù[Xİ[Û‹œÙ]
+šY[[œ]™Ù]
+šY[
+K™Y\ÛÜJ
+JNÂˆYŠ[œ]š\Ê™˜Z[˜\İŠJ[Ü[ÛœËœÙ]
+™˜Z[˜\İ‹[œ]™Ù]
+™˜Z[˜\İŠK™Y\ÛÜJ
+JNÂˆ™]š\Ú[ÛTİš[™Ë˜[YSÙŠ[œÜXİY™Ù]
+œ™]š\Ú[Û‘YÙ\İŠJNÂˆBˆBˆYŠ[œ]š\Ó›Û“[
+™^XİY™]š\Ú[Û‘YÙ\İŠI‰ˆZ[œ]œ]
+™^XİY™]š\Ú[Û‘YÙ\İŠK˜\Õ^
 
-    private static Map<String,Object> compactWorkloadTrend(Object raw) {
-        Map<String,Object> output=new TreeMap<>();if(!(raw instanceof Map<?,?>))return output;
-        for(Map.Entry<?,?> entry:((Map<?,?>)raw).entrySet()) {
-            if(!(entry.getKey() instanceof String)||!(entry.getValue() instanceof Map<?,?>))continue;
-            Map<?,?> source=(Map<?,?>)entry.getValue();Map<String,Object> values=new LinkedHashMap<>();
-            for(String key:List.of("completed","passed","sutFailures","runtimeErrors","dropped","latency"))if(source.containsKey(key))values.put(key,source.get(key));
-            output.put((String)entry.getKey(),values);
-        }
-        return output;
-    }
+K™\]X[Ê™]š\Ú[ÛŠJ]›İÈ™]Èİ[Q˜Y^Ù\[ÛŠ
+NÂˆİš[™ÈÛİ\˜ÙT]Z[œ]œ]
+œØÙ[˜\š[ÈŠKš\Õ^X[
 
-    private static long plannedLoadDurationMs(Job job) {
-        long maximum=0L;Object raw=job.targetIdentity==null?null:job.targetIdentity.get("workloads");
-        if(raw instanceof List<?>)for(Object item:(List<?>)raw)if(item instanceof Map<?,?>) {
-            Object duration=((Map<?,?>)item).get("totalDurationMs");if(duration instanceof Number)maximum=Math.max(maximum,((Number)duration).longValue());
-        }
-        return maximum>0?maximum:TimeUnit.DAYS.toMillis(10);
-    }
-    Map<String,Object> resultRecord(String id) throws Exception {
-        if(!JOB_ID.matcher(id).matches())throw new NotFoundException();
-        Job active=jobs.get(id);
-        if(active!=null) {
-            synchronized(active) {
-                // Avoid mixing an uncommitted terminal Job view with an older H2 snapshot.
-                // Reading while holding the Job lock also waits for a concurrent finish().
-                Map<String,Object> record=store.get(id);
-                if(record==null)throw new NotFoundException();
-                String resultJson=active.resultJson!=null?active.resultJson:(String)record.get("resultJson");
-                String diagnosticJson=active.diagnosticJson!=null?active.diagnosticJson:(String)record.get("diagnosticJson");
-                Map<String,Object> out=new LinkedHashMap<>();
-                out.put("job",active.view());
-                out.put("result",resultJson==null?null:publicJobResult(id,active.command,active.status,
-                        active.exitCode==null?3:active.exitCode,resultJson));
-                out.put("diagnostic",diagnosticJson==null?null:publicJson(id,diagnosticJson));
-                return out;
-            }
-        }
-        Map<String,Object> record=store.get(id);if(record==null)throw new NotFoundException();
-        Map<String,Object> out=new LinkedHashMap<>();out.put("job",jobRecord(id));
-        String resultJson=(String)record.get("resultJson"),diagnosticJson=(String)record.get("diagnosticJson");
-        out.put("result",resultJson==null?null:publicJobResult(id,String.valueOf(record.get("command")),String.valueOf(record.get("status")),
-                record.get("exitCode") instanceof Number?((Number)record.get("exitCode")).intValue():3,resultJson));
-        out.put("diagnostic",diagnosticJson==null?null:publicJson(id,diagnosticJson));
-        return out;
-    }
-    List<Map<String,Object>> packages(String principal) throws Exception {
-        List<Map<String,Object>> out=new ArrayList<>();
-        for(Map.Entry<String,Path> entry:packageRoots().entrySet())out.add(packageMetadata(entry.getKey(),entry.getValue(),principal));
-        return out;
-    }
-    Map<String,Object> packageView(String id,String principal) throws Exception {
-        Path root=packageRoot(id);if(root==null)throw new NotFoundException();return packageMetadata(id,root,principal);
-    }
-    private Map<String,Object> packageMetadata(String id,Path root,String principal) throws Exception {
-        Map<String,Object> item=new LinkedHashMap<>();item.put("packageId",id);item.put("name",root.getFileName().toString());
-        item.put("canExecute",isOperationalPrincipal(principal));
-        return item;
-    }
-    private boolean isOperationalPrincipal(String principal) throws Exception {
-        if(principal==null||principal.isBlank()||RequestIdentity.ANONYMOUS.equals(principal))return config.authorization.allowAnonymousOperations&&!config.authenticationRequired;
-        if("local".equals(config.authMode))return store.isActiveUser(principal);
-        return true; // The servlet layer has already verified the configured trusted USER role.
-    }
-    private Path packageRoot(String id) {
-        return config.packages.get(id);
-    }
-    private Map<String,Path> packageRoots() {
-        return config.packages;
-    }
-    Map<String,Object> inspectResource(String packageId,String action,String type,String resourceId,String query,int requestedLimit,String cursor,String principal) throws Exception {
-        return inspectResource(packageId,action,type,resourceId,query,requestedLimit,cursor,"name","asc",null,principal);
-    }
-    Map<String,Object> inspectResource(String packageId,String action,String type,String resourceId,String query,int requestedLimit,String cursor,String sourceOriginPath,String principal) throws Exception {
-        return inspectResource(packageId,action,type,resourceId,query,requestedLimit,cursor,"name","asc",sourceOriginPath,principal);
-    }
-    Map<String,Object> inspectResource(String packageId,String action,String type,String resourceId,String query,int requestedLimit,String cursor,
-                                       String sort,String direction,String sourceOriginPath,String principal) throws Exception {
-        if(!config.inspection.enabled)throw new NotFoundException();
-        if(principal==null||principal.isBlank())throw new IllegalArgumentException("A server-resolved request identity is required");
-        Path root=packageRoot(packageId);if(root==null)throw new NotFoundException();validatePackageRoot(root);
-        if(!List.of("list","detail","source","source-file").contains(action))throw new IllegalArgumentException("Unsupported inspection action");
-        if(type!=null&&!List.of("case","template","flow","tool").contains(type))throw new IllegalArgumentException("Unsupported resource type");
-        String normalizedSort=sort==null||sort.isBlank()?"name":sort;
-        String normalizedDirection=direction==null||direction.isBlank()?"asc":direction;
-        if(!List.of("name","type","logicalId","state").contains(normalizedSort))throw new IllegalArgumentException("Unsupported resource sort field");
-        if(!List.of("asc","desc").contains(normalizedDirection))throw new IllegalArgumentException("Resource sort direction must be asc or desc");
-        if(!"list".equals(action)&&((sort!=null&& !"name".equals(sort))||(direction!=null&& !"asc".equals(direction))))
-            throw new IllegalArgumentException("Resource sorting is only valid for list requests");
-        if(sourceOriginPath!=null&&(sourceOriginPath.length()>1024||containsControl(sourceOriginPath)))throw new IllegalArgumentException("Source origin is invalid");
-        if(sourceOriginPath!=null&& !"source-file".equals(action))throw new IllegalArgumentException("Source origin is only valid for a referenced source file");
-        String normalizedQuery=query==null?"":query.trim();if(normalizedQuery.length()>200||containsControl(normalizedQuery))throw new IllegalArgumentException("query must contain at most 200 printable characters");
-        int limit=requestedLimit==0?RESOURCE_DEFAULT_PAGE_SIZE:requestedLimit;
-        if(limit<1||limit>RESOURCE_MAX_PAGE_SIZE)throw new IllegalArgumentException("limit must be between 1 and 100");
-        Cursor prior=cursor==null||cursor.isEmpty()?null:decodeCursor(cursor,packageId,type,normalizedQuery,normalizedSort,normalizedDirection,principal);
-        WorkerRequest request=inspectionRequest(packageId,root,null);
-        request.inspectionAction=action;request.inspectionType=type;request.inspectionResourceId=resourceId;request.inspectionQuery=normalizedQuery;request.inspectionOffset=prior==null?0:prior.offset;request.inspectionLimit=limit;
-        request.inspectionOrigin=sourceOriginPath;
-        request.inspectionSort=normalizedSort;request.inspectionDirection=normalizedDirection;
-        request.expectedRevisionDigest=prior==null?null:prior.revision;
-        Map<String,Object> result=executeInspection(root,request);
-        Object revision=result.remove("revisionDigest");
-        if(revision instanceof String)result.put("_cacheRevision",inspectionCacheToken(List.of(packageId,principal,revision)));
-        if("list".equals(action)) {
-            Object next=result.remove("nextOffset");
-            if(next instanceof Number&&revision instanceof String)result.put("nextCursor",encodeCursor(packageId,type,normalizedQuery,normalizedSort,normalizedDirection,((Number)next).intValue(),(String)revision,principal));
-            else result.put("nextCursor",null);
-        }
-        return result;
-    }
-    Map<String,Object> inspectLoadCatalog(String packageId,String query,int requestedLimit,String cursor,String principal) throws Exception {
-        if(!config.inspection.enabled)throw new NotFoundException();
-        if(principal==null||principal.isBlank())throw new IllegalArgumentException("A server-resolved request identity is required");
-        Path root=packageRoot(packageId);if(root==null)throw new NotFoundException();validatePackageRoot(root);
-        String normalizedQuery=query==null?"":query.trim();
-        if(normalizedQuery.length()>200||containsControl(normalizedQuery))throw new IllegalArgumentException("query must contain at most 200 printable characters");
-        int limit=requestedLimit==0?50:requestedLimit;if(limit<1||limit>100)throw new IllegalArgumentException("limit must be between 1 and 100");
-        Cursor prior=cursor==null||cursor.isEmpty()?null:decodeCursor(cursor,packageId,"load",normalizedQuery,"name","asc",principal);
-        WorkerRequest request=inspectionRequest(packageId,root,null);request.inspectionAction="load-catalog";
-        request.inspectionQuery=normalizedQuery;request.inspectionOffset=prior==null?0:prior.offset;request.inspectionLimit=limit;
-        request.expectedRevisionDigest=prior==null?null:prior.revision;
-        Map<String,Object> result=executeInspection(root,request);
-        Object rawItems=result.get("items");
-        if(rawItems instanceof List)for(Object rawItem:(List<?>)rawItems)if(rawItem instanceof Map) {
-            @SuppressWarnings("unchecked") Map<String,Object> item=(Map<String,Object>)rawItem;
-            boolean scenario="scenario".equals(item.get("kind"));
-            boolean template="template".equals(item.get("kind"));
-            item.put("runNow",scenario);
-            item.put("schedule",scenario&&config.scheduling.enabled);
-            item.put("createQuickLoad",template&&config.inlineLoad.enabled&&Boolean.TRUE.equals(item.get("createQuickLoad")));
-        }
-        Object revision=result.remove("revisionDigest");Object next=result.remove("nextOffset");
-        if(revision instanceof String)result.put("_cacheRevision",inspectionCacheToken(List.of(packageId,principal,revision)));
-        if(next instanceof Number&&revision instanceof String)
-            result.put("nextCursor",encodeCursor(packageId,"load",normalizedQuery,"name","asc",((Number)next).intValue(),(String)revision,principal));
-        else result.put("nextCursor",null);
-        return result;
-    }
-    Map<String,Object> inspectLoadSource(String packageId,String resourceId,String principal) throws Exception {
-        if(!config.inspection.enabled)throw new NotFoundException();
-        if(principal==null||principal.isBlank())throw new IllegalArgumentException("A server-resolved request identity is required");
-        if(resourceId==null||resourceId.isBlank()||resourceId.length()>1024)throw new IllegalArgumentException("resourceId is invalid");
-        Path root=packageRoot(packageId);if(root==null)throw new NotFoundException();validatePackageRoot(root);
-        WorkerRequest request=inspectionRequest(packageId,root,null);request.inspectionAction="load-source";request.inspectionPath=resourceId;
-        return executeInspection(root,request);
-    }
-    Map<String,Object> inspectLoadCatalogDetail(String packageId,String resourceId,String principal) throws Exception {
-        if(!config.inspection.enabled)throw new NotFoundException();
-        if(principal==null||principal.isBlank())throw new IllegalArgumentException("A server-resolved request identity is required");
-        if(resourceId==null||resourceId.isBlank()||resourceId.length()>1024)throw new IllegalArgumentException("resourceId is invalid");
-        Path root=packageRoot(packageId);if(root==null)throw new NotFoundException();validatePackageRoot(root);
-        WorkerRequest request=inspectionRequest(packageId,root,null);request.inspectionAction="load-detail";request.inspectionPath=resourceId;
-        Map<String,Object> result=executeInspection(root,request);
-        Object revision=result.remove("revisionDigest");
-        if(revision instanceof String)result.put("_cacheRevision",inspectionCacheToken(List.of(packageId,principal,revision)));
-        return result;
-    }
-    Map<String,Object> validateLoadCatalogScenario(String packageId,String resourceId,String environment,String principal) throws Exception {
-        if(!config.inspection.enabled)throw new NotFoundException();
-        if(principal==null||principal.isBlank())throw new IllegalArgumentException("A server-resolved request identity is required");
-        if(resourceId==null||resourceId.isBlank()||resourceId.length()>1024)throw new IllegalArgumentException("resourceId is invalid");
-        Path root=packageRoot(packageId);if(root==null)throw new NotFoundException();validatePackageRoot(root);
-        Map<String,Object> configuration=resolveExecutionConfiguration(packageId,root,environment);
-        String selected=(String)configuration.get("environment");
-        WorkerRequest request=inspectionRequest(packageId,root,selected);request.inspectionAction="load-scenario";request.inspectionPath=resourceId;
-        Map<String,Object> result=executeInspection(root,request);
-        Object rawScenario=result.remove("normalizedScenario"),rawRevision=result.remove("revisionDigest");
-        Object rawSensitive=result.remove("containsSensitiveValues"),rawModel=result.get("model");
-        if(!(rawScenario instanceof Map)||!(rawRevision instanceof String)||!((String)rawRevision).matches("[a-f0-9]{64}")
-                ||!(rawSensitive instanceof Boolean)||!(rawModel instanceof String)
-                ||!List.of("virtualUsers","arrivalRate").contains(rawModel))
-            throw new IllegalStateException("Load validation Worker returned an invalid response");
-        configuration=configurationRevision(configuration,(String)rawRevision);result.put("configuration",configuration);
-        result.put("validation","valid");
-        result.put("scheduleAvailable",Boolean.FALSE);
-        if(!config.scheduling.enabled) result.put("scheduleReason","Scheduling is disabled by Server policy.");
-        else if(((Boolean)rawSensitive).booleanValue())
-            result.put("scheduleReason","This scenario contains sensitive values and cannot be persisted as an immutable Schedule snapshot. Keep those values in protected package defaults.");
-        else {
-            @SuppressWarnings("unchecked") Map<String,Object> scenario=(Map<String,Object>)JSON.convertValue(rawScenario,Map.class);
-            CatalogLoadDraftState draft=new CatalogLoadDraftState("C"+UUID.randomUUID().toString().replace("-","").toUpperCase(),
-                    principal,packageId,selected,resourceId,(String)rawRevision,(String)rawModel,scenario,
-                    (String)result.get("previewYaml"),configuration,clock.instant().plusMillis(DRAFT_TTL_MILLIS));
-            try {
-                synchronized(draftLock) {
-                    expireDrafts();checkDraftCapacity(principal);catalogLoadDrafts.put(draft.id,draft);
-                }
-                result.put("scheduleAvailable",Boolean.TRUE);result.put("draftId",draft.id);result.put("expiresAt",draft.expiresAt.toString());
-            } catch(DraftCapacityException full) {
-                result.put("scheduleReason","Temporary Schedule draft capacity is full. Retry validation to try again.");
-            }
-        }
-        return result;
-    }
-    Map<String,Object> inspectDebugForm(String packageId,String type,String resourceId,String environment,String principal) throws Exception {
-        Map<String,Object> result=inspectDebugFormInternal(packageId,type,resourceId,environment,principal);
-        result.remove("revisionDigest");
-        return result;
-    }
-    Map<String,Object> inspectQuickLoadForm(String packageId,String type,String resourceId,String model,String environment,String principal) throws Exception {
-        if(!config.inspection.enabled)throw new NotFoundException();
-        requireInlineLoadEnabled();
-        if(principal==null||principal.isBlank())throw new IllegalArgumentException("A server-resolved request identity is required");
-        if(!"virtualUsers".equals(model)&&!"arrivalRate".equals(model))throw new IllegalArgumentException("model is invalid");
-        Path root=packageRoot(packageId);if(root==null)throw new NotFoundException();validatePackageRoot(root);
-        if(resourceId==null||resourceId.isBlank()||resourceId.length()>512)throw new IllegalArgumentException("resourceId is invalid");
-        if(environment!=null)environment=inspectionEnvironment(environment,"environment");
-        WorkerRequest request=inspectionRequest(packageId,root,environment);
-        request.inspectionAction="quick-load-form";request.inspectionType=type;request.inspectionResourceId=resourceId;request.loadModel=model;
-        Map<String,Object> result=executeInspection(root,request);result.remove("revisionDigest");result.remove("normalizedScenario");return result;
-    }
-    Map<String,Object> inspectQuickLoadPolicy(String packageId,String model,String environment,String templateId,String principal) throws Exception {
-        if(!config.inspection.enabled)throw new NotFoundException();
-        requireInlineLoadEnabled();
-        if(principal==null||principal.isBlank())throw new IllegalArgumentException("A server-resolved request identity is required");
-        if(!"virtualUsers".equals(model)&&!"arrivalRate".equals(model))throw new IllegalArgumentException("model is invalid");
-        Path root=packageRoot(packageId);if(root==null)throw new NotFoundException();validatePackageRoot(root);
-        if(environment!=null)environment=inspectionEnvironment(environment,"environment");
-        WorkerRequest request=inspectionRequest(packageId,root,environment);
-        request.inspectionAction="quick-load-policy";request.loadModel=model;request.inspectionPath=templateId;
-        Map<String,Object> result=executeInspection(root,request);result.remove("revisionDigest");result.put("limits",inlineLoadLimitView());return result;
-    }
-    Map<String,Object> inspectLoadTemplates(String packageId,String query,int offset,int limit,String principal) throws Exception {
-        if(!config.inspection.enabled)throw new NotFoundException();
-        requireInlineLoadEnabled();
-        if(principal==null||principal.isBlank())throw new IllegalArgumentException("A server-resolved request identity is required");
-        Path root=packageRoot(packageId);if(root==null)throw new NotFoundException();validatePackageRoot(root);
-        WorkerRequest request=inspectionRequest(packageId,root,null);
-        request.inspectionAction="load-templates";request.inspectionQuery=query;request.inspectionOffset=offset;request.inspectionLimit=limit;
-        Map<String,Object> result=executeInspection(root,request);
-        result.put("limits",inlineLoadLimitView());
-        return result;
-    }
-    private Map<String,Object> inlineLoadLimitView() {
-        return Map.of("maxWorkloads",config.inlineLoad.maxWorkloads,"maxTargets",config.inlineLoad.maxTargets,
-                "maxTotalUsers",config.inlineLoad.maxTotalUsers,"maxAggregateArrivalRatePerSecond",config.inlineLoad.maxAggregateArrivalRatePerSecond,
-                "maxConcurrentPerWorkload",config.inlineLoad.maxConcurrentPerWorkload,"maxTotalConcurrent",config.inlineLoad.maxTotalConcurrent,
-                "maxDurationSeconds",config.inlineLoad.maxDurationSeconds);
-    }
-    private Map<String,Object> inspectDebugFormInternal(String packageId,String type,String resourceId,String environment,
-                                                        String principal) throws Exception {
-        if(!config.inspection.enabled)throw new NotFoundException();
-        if(principal==null||principal.isBlank())throw new IllegalArgumentException("A server-resolved request identity is required");
-        Path root=packageRoot(packageId);if(root==null)throw new NotFoundException();validatePackageRoot(root);
-        if(resourceId==null||resourceId.isBlank()||resourceId.length()>512)throw new IllegalArgumentException("resourceId is invalid");
-        if(environment!=null)environment=inspectionEnvironment(environment,"environment");
-        WorkerRequest request=inspectionRequest(packageId,root,environment);
-        request.inspectionAction="debug-form";request.inspectionType=type;request.inspectionResourceId=resourceId;
-        return executeInspection(root,request);
-    }
-    Map<String,Object> createDebugDraft(JsonNode input,String principal) throws Exception {
-        DebugDraft draft=buildDebugDraft(input,principal);
-        synchronized(draftLock) {
-            expireDrafts();
-            checkDraftCapacity(principal);
-            debugDrafts.put(draft.id,draft);
-        }
-        return debugDraftView(draft);
-    }
-    private DebugDraft buildDebugDraft(JsonNode input,String principal) throws Exception {
-        if(principal==null||principal.isBlank())throw new IllegalArgumentException("A server-resolved request identity is required");
-        if(!config.inspection.enabled)throw new NotFoundException();
-        requireObject(input,"A JSON object is required");
-        requireOnlyFields(input,"packageId","environment","target","input");
-        String packageId=required(input,"packageId");Path root=packageRoot(packageId);if(root==null)throw new NotFoundException();validatePackageRoot(root);
-        Map<String,Object> configuration=resolveExecutionConfiguration(packageId,root,optionalText(input,"environment"));
-        String environment=(String)configuration.get("environment");
-        JsonNode targetNode=input.get("target");requireObject(targetNode,"target must be a JSON object");requireOnlyFields(targetNode,"type","id");
-        String type=required(targetNode,"type"),logicalId=required(targetNode,"id");
-        if(!List.of("template","flow","tool").contains(type)||logicalId.length()>512||containsControl(logicalId))
-            throw new IllegalArgumentException("target is invalid");
-        JsonNode inputNode=input.get("input");requireObject(inputNode,"input must be a JSON object");
-        Map<String,Object> submitted=JSON.convertValue(inputNode,Map.class);
-        if(!submitted.containsKey("schemaVersion"))submitted.put("schemaVersion","att-debug/v1.2");
-        WorkerRequest request=inspectionRequest(packageId,root,environment);
-        request.inspectionAction="debug-input";request.inspectionType=type;request.inspectionTargetId=logicalId;
-        request.inlineDebugInput=submitted;
-        Map<String,Object> inspected=executeInspection(root,request);
-        Object rawNormalized=inspected.remove("normalizedInput");
-        Object rawDigest=inspected.remove("revisionDigest");
-        inspected.put("configuration",configurationRevision(configuration,(String)rawDigest));
-        Object rawSensitive=inspected.remove("containsSensitiveValues");
-        if(!(rawNormalized instanceof Map)||!(rawDigest instanceof String)||!((String)rawDigest).matches("[a-f0-9]{64}")
-                ||!(rawSensitive instanceof Boolean))
-            throw new IllegalStateException("Debug validation Worker returned an invalid response");
-        @SuppressWarnings("unchecked") Map<String,Object> normalized=(Map<String,Object>)JSON.convertValue(rawNormalized,Map.class);
-        Object rawResource=inspected.get("resource"),rawTarget=inspected.get("target");
-        if(!(rawResource instanceof Map)||!(rawTarget instanceof Map))throw new IllegalStateException("Debug validation Worker returned an invalid target");
-        @SuppressWarnings("unchecked") Map<String,Object> resource=(Map<String,Object>)rawResource;
-        String resourceId=String.valueOf(resource.get("resourceId"));
-        @SuppressWarnings("unchecked") Map<String,Object> resolvedTarget=(Map<String,Object>)rawTarget;
-        String resolvedType=String.valueOf(resolvedTarget.get("type")),resolvedId=String.valueOf(resolvedTarget.get("id"));
-        DebugDraft draft=new DebugDraft("D"+UUID.randomUUID().toString().replace("-","").toUpperCase(),principal,packageId,
-                environment,resolvedType,resolvedId,resourceId,(String)rawDigest,normalized,submitted,((Boolean)rawSensitive).booleanValue(),inspected,
-                clock.instant().plusMillis(DRAFT_TTL_MILLIS));
-        return draft;
-    }
-    Map<String,Object> createQuickLoadDraft(JsonNode input,String principal) throws Exception {
-        if(principal==null||principal.isBlank())throw new IllegalArgumentException("A server-resolved request identity is required");
-        if(!config.inspection.enabled)throw new NotFoundException();
-        requireInlineLoadEnabled();
-        requireObject(input,"A JSON object is required");
-        requireOnlyFields(input,"packageId","environment","target","model","input","load","execution","testdata");
-        String packageId=required(input,"packageId");Path root=packageRoot(packageId);if(root==null)throw new NotFoundException();validatePackageRoot(root);
-        Map<String,Object> configuration=resolveExecutionConfiguration(packageId,root,optionalText(input,"environment"));
-        String environment=(String)configuration.get("environment");
-        JsonNode targetNode=input.get("target");requireObject(targetNode,"target must be a JSON object");requireOnlyFields(targetNode,"type","id");
-        String type=required(targetNode,"type"),logicalId=required(targetNode,"id");
-        if(!List.of("template","flow","tool").contains(type)||logicalId.length()>512||containsControl(logicalId))
-            throw new IllegalArgumentException("target is invalid");
-        String model=required(input,"model");
-        if(!List.of("virtualUsers","arrivalRate").contains(model))throw new IllegalArgumentException("model is invalid");
-        JsonNode inputNode=input.get("input");requireObject(inputNode,"input must be a JSON object");
-        Map<String,Object> business=JSON.convertValue(inputNode,Map.class);
-        Map<String,Object> load=objectMap(input.get("load"),"load must be a JSON object");
-        Map<String,Object> execution=objectMap(input.get("execution"),"execution must be a JSON object");
-        List<String> testdata=quickLoadTestdata(input.get("testdata"));
-        WorkerRequest request=inspectionRequest(packageId,root,environment);
-        request.inspectionAction="quick-load-input";request.inspectionType=type;request.inspectionTargetId=logicalId;
-        request.loadModel=model;request.inlineLoadInput=business;request.loadOverrides=load;request.workloadExecution=execution;
-        request.quickLoadTestdata=testdata;
-        Map<String,Object> inspected=executeInspection(root,request);
-        Object rawScenario=inspected.remove("normalizedScenario");
-        Object rawDigest=inspected.remove("revisionDigest");
-        inspected.put("configuration",configurationRevision(configuration,(String)rawDigest));
-        Object rawSensitive=inspected.remove("containsSensitiveValues");
-        if(!(rawScenario instanceof Map)||!(rawDigest instanceof String)||!((String)rawDigest).matches("[a-f0-9]{64}")||!(rawSensitive instanceof Boolean))
-            throw new IllegalStateException("Quick Load validation Worker returned an invalid response");
-        @SuppressWarnings("unchecked") Map<String,Object> scenario=(Map<String,Object>)JSON.convertValue(rawScenario,Map.class);
-        enforceInlineLoadLimits(scenario);
-        Object rawResource=inspected.get("resource"),rawTarget=inspected.get("target");
-        if(!(rawResource instanceof Map)||!(rawTarget instanceof Map))throw new IllegalStateException("Quick Load validation Worker returned an invalid target");
-        @SuppressWarnings("unchecked") Map<String,Object> resource=(Map<String,Object>)rawResource;
-        String resourceId=String.valueOf(resource.get("resourceId"));
-        @SuppressWarnings("unchecked") Map<String,Object> resolvedTarget=(Map<String,Object>)rawTarget;
-        String resolvedType=String.valueOf(resolvedTarget.get("type")),resolvedId=String.valueOf(resolvedTarget.get("id"));
-        QuickLoadDraft draft=new QuickLoadDraft("L"+UUID.randomUUID().toString().replace("-","").toUpperCase(),
-                principal,packageId,environment,resolvedType,resolvedId,resourceId,model,(String)rawDigest,
-                scenario,((Boolean)rawSensitive).booleanValue(),inspected,clock.instant().plusMillis(DRAFT_TTL_MILLIS));
-        synchronized(draftLock) {
-            expireDrafts();
-            checkDraftCapacity(principal);
-            quickLoadDrafts.put(draft.id,draft);
-        }
-        return quickLoadDraftView(draft);
-    }
-    Map<String,Object> createAdvancedLoadDraft(JsonNode input,String principal) throws Exception {
-        return createAdvancedLoadDraft(input,principal,null);
-    }
-    private Map<String,Object> createAdvancedLoadDraft(JsonNode input,String principal,Map<String,Object> approvedConfiguration) throws Exception {
-        if(principal==null||principal.isBlank())throw new IllegalArgumentException("A server-resolved request identity is required");
-        if(!config.inspection.enabled)throw new NotFoundException();
-        requireInlineLoadEnabled();
-        requireObject(input,"A JSON object is required");requireOnlyFields(input,"packageId","environment","scenario","templateComposition");
-        String packageId=required(input,"packageId");Path root=packageRoot(packageId);if(root==null)throw new NotFoundException();validatePackageRoot(root);
-        Map<String,Object> configuration=resolveExecutionConfiguration(packageId,root,optionalText(input,"environment"));
-        if(approvedConfiguration!=null)configuration=approvedConfiguration;
-        String environment=(String)configuration.get("environment");
-        if(input.has("scenario")&&input.has("templateComposition"))throw new IllegalArgumentException("Choose scenario or templateComposition");
-        JsonNode scenarioNode=input.has("templateComposition")?input.get("templateComposition"):input.get("scenario");requireObject(scenarioNode,"scenario must be a JSON object");
-        @SuppressWarnings("unchecked") Map<String,Object> scenarioInput=(Map<String,Object>)JSON.convertValue(scenarioNode,Map.class);
-        WorkerRequest request=inspectionRequest(packageId,root,environment);request.inspectionAction=input.has("templateComposition")?"load-template-compose":"load-scenario";request.inlineLoadScenario=scenarioInput;
-        Map<String,Object> inspected=executeInspection(root,request);
-        Object rawScenario=inspected.remove("normalizedScenario"),rawDigest=inspected.remove("revisionDigest");
-        inspected.put("configuration",configurationRevision(configuration,(String)rawDigest));
-        Object rawSensitive=inspected.remove("containsSensitiveValues");
-        Object rawModel=inspected.get("model");
-        if(!(rawScenario instanceof Map)||!(rawDigest instanceof String)||!((String)rawDigest).matches("[a-f0-9]{64}")
-                ||!(rawSensitive instanceof Boolean)||!(rawModel instanceof String)||!List.of("virtualUsers","arrivalRate").contains(rawModel))
-            throw new IllegalStateException("Load validation Worker returned an invalid response");
-        @SuppressWarnings("unchecked") Map<String,Object> scenario=(Map<String,Object>)JSON.convertValue(rawScenario,Map.class);
-        enforceInlineLoadLimits(scenario);
-        AdvancedLoadDraftState draft=new AdvancedLoadDraftState("A"+UUID.randomUUID().toString().replace("-","").toUpperCase(),
-                principal,packageId,environment,(String)rawModel,(String)rawDigest,scenario,((Boolean)rawSensitive).booleanValue(),inspected,
-                clock.instant().plusMillis(DRAFT_TTL_MILLIS));
-        synchronized(draftLock) {
-            expireDrafts();
-            checkDraftCapacity(principal);
-            advancedLoadDrafts.put(draft.id,draft);
-        }
-        return advancedLoadDraftView(draft);
-    }
-    Map<String,Object> getDebugDraft(String id,String principal) {
-        if(id==null||!DRAFT_ID.matcher(id).matches())throw new NotFoundException();
-        synchronized(draftLock) {
-            expireDrafts();DebugDraft draft=debugDrafts.get(id);
-            if(draft==null||!draft.principal.equals(principal))throw new NotFoundException();
-            return debugDraftView(draft);
-        }
-    }
-    Map<String,Object> getQuickLoadDraft(String id,String principal) {
-        requireInlineLoadEnabled();
-        if(id==null||!QUICK_LOAD_DRAFT_ID.matcher(id).matches())throw new NotFoundException();
-        synchronized(draftLock) {
-            expireDrafts();QuickLoadDraft draft=quickLoadDrafts.get(id);
-            if(draft==null||!draft.principal.equals(principal))throw new NotFoundException();
-            return quickLoadDraftView(draft);
-        }
-    }
-    Map<String,Object> getAdvancedLoadDraft(String id,String principal) {
-        requireInlineLoadEnabled();
-        if(id==null||!ADVANCED_LOAD_DRAFT_ID.matcher(id).matches())throw new NotFoundException();
-        synchronized(draftLock) {
-            expireDrafts();AdvancedLoadDraftState draft=advancedLoadDrafts.get(id);
-            if(draft==null||!draft.principal.equals(principal))throw new NotFoundException();
-            return advancedLoadDraftView(draft);
-        }
-    }
-    Map<String,Object> getCatalogLoadDraft(String id,String principal) {
-        synchronized(draftLock) {
-            expireDrafts();CatalogLoadDraftState draft=catalogLoadDrafts.get(id);
-            if(draft==null||!draft.principal.equals(principal))throw new NotFoundException();
-            return catalogLoadDraftView(draft);
-        }
-    }
-    Map<String,Object> createRunDraft(JsonNode body,String principal) throws Exception {return createRunDraft(body,principal,false);}
-    private Map<String,Object> createRunDraft(JsonNode body,String principal,boolean retainedSelection) throws Exception {
-        return createRunDraft(body,principal,retainedSelection,null);
-    }
-    private Map<String,Object> createRunDraft(JsonNode body,String principal,boolean retainedSelection,Map<String,Object> approvedConfiguration) throws Exception {
-        RunDefinition run=retainedSelection?RunDefinition.parseRetained(body):RunDefinition.parse(body);
-        if(principal==null||principal.isBlank())throw new IllegalArgumentException("A server-resolved request identity is required");
-        if(!config.inspection.enabled)throw new NotFoundException();
-        String packageId=run.workerInput.path("packageId").asText();
-        Path root=packageRoot(packageId);if(root==null)throw new NotFoundException();validatePackageRoot(root);
-        ObjectNode input=run.workerInput.deepCopy();
-        Map<String,Object> configuration=resolveExecutionConfiguration(packageId,root,optionalText(input,"environment"));
-        if(approvedConfiguration!=null)configuration=approvedConfiguration;
-        input.put("environment",(String)configuration.get("environment"));
-        // The request omits config when using the Server's shared runtime configuration.
-        // Persist its absolute canonical path so draft revision checks and scheduled RUNs
-        // keep resolving the same file outside the package root.
-        input.put("config",config.runtimeConfigPath.toString());
-        if(input.path("rerunFailed").asBoolean(false))resolveFailedCases(input,principal,packageId);
-        Map<String,Object> preview;DebugDraft resourceDebugDraft=null;String revision;
-        if(run.resourceTarget) {
-            ObjectNode debug=JSON.createObjectNode();debug.put("packageId",packageId);
-            debug.set("environment",input.get("environment"));
-            debug.set("target",body.get("target"));debug.set("input",body.get("input"));
-            resourceDebugDraft=buildDebugDraft(debug,principal);
-            preview=debugDraftView(resourceDebugDraft);preview.remove("draftId");
-            input.set("inlineDebugInput",JSON.valueToTree(resourceDebugDraft.input));
-            input.put("draftResourceId",resourceDebugDraft.resourceId);revision=resourceDebugDraft.revisionDigest;
-        } else {
-            WorkerRequest request=applyWorkerPolicy(JSON.treeToValue(input,WorkerRequest.class));
-            request.protocolVersion="att-worker/v1";request.command="inspect";request.packageRoot=root.toString();
-            request.jobId="I"+UUID.randomUUID().toString().replace("-","");request.inspectionAction="run-input";
-            request.config=config.runtimeConfigPath.toString();
-            request.suites=safePaths(request.suites,"suites");if(request.suites!=null)for(String suite:request.suites)validatePackagePath(root,suite,"suites");
-            request.suiteDirectory=safeRelative(request.suiteDirectory,"suiteDirectory");validatePackagePath(root,request.suiteDirectory,"suiteDirectory");
-            if(request.environment!=null)request.environment=inspectionEnvironment(request.environment,"environment");
-            ObjectNode policy=JSON.createObjectNode();applyInspectionPolicy(policy,packageId);
-            JSON.readerForUpdating(request).readValue(policy);
-            preview=executeInspection(root,request);revision=(String)preview.remove("revisionDigest");
-            Object ids=preview.get("selectedCaseIds");
-            if(!(ids instanceof List<?> selected)||selected.isEmpty()||selected.size()>10000)throw new IllegalArgumentException("RUN must select between 1 and 10000 cases");
-            // Freeze the resolved selection; never reevaluate tags or rerun history when a schedule fires.
-            input.set("caseIds",JSON.valueToTree(selected));input.remove("tags");input.remove("excludeTags");input.remove("rerunFailed");
-        }
-        if(revision==null||!revision.matches("[a-f0-9]{64}"))throw new IllegalStateException("RUN validation did not return a package revision");
-        configuration=configurationRevision(configuration,revision);
-        preview.put("configuration",configuration);input.set("configurationProvenance",JSON.valueToTree(configuration));
-        input.put("expectedRevisionDigest",revision);applyInspectionPolicy(input,packageId);
-        RunDraft draft=new RunDraft("R"+UUID.randomUUID().toString().replace("-","").toUpperCase(),principal,packageId,revision,input,
-                new LinkedHashMap<>(preview),clock.instant().plusMillis(DRAFT_TTL_MILLIS),resourceDebugDraft);
-        synchronized(draftLock) {
-            expireDrafts();
-            checkDraftCapacity(principal);
-            runDrafts.put(draft.id,draft);
-        }
-        return runDraftView(draft);
-    }
-    private void resolveFailedCases(ObjectNode input,String principal,String packageId) throws Exception {
-        byte[] selectedManifest=null;
-        for(Map<String,Object> previous:store.listOwned(100,principal)) {
-            if(!principal.equals(previous.get("principal"))||!packageId.equals(previous.get("packageId"))||!"run".equals(previous.get("command"))||!List.of("PASS","FAIL","ERROR","INVALID").contains(previous.get("status")))continue;
-            String previousJobId=String.valueOf(previous.get("jobId"));
-            Path output=config.dataDir.resolve("jobs").resolve(previousJobId).resolve("output");
-            if(Files.isDirectory(output)) {
-                List<Path> manifests=List.of();
-                try(var files=Files.walk(output,3)){manifests=files.filter(file->file.getFileName().toString().equals("run.yaml")&&Files.isRegularFile(file,java.nio.file.LinkOption.NOFOLLOW_LINKS)).toList();}
-                catch(java.nio.file.NoSuchFileException archivedDuringScan) {
-                    // The archive writer can remove the source after the directory check.
-                }
-                if(manifests.size()>1)throw new IllegalArgumentException("Previous Case RUN manifest is unavailable or exceeds the selection limit");
-                if(manifests.size()==1) {
-                    Path manifest=manifests.get(0);
-                    try {
-                        if(Files.size(manifest)>8*1024*1024)throw new IllegalArgumentException("Previous Case RUN manifest is unavailable or exceeds the selection limit");
-                        selectedManifest=Files.readAllBytes(manifest);
-                    } catch(java.nio.file.NoSuchFileException archivedDuringRead) {
-                        // Archive cleanup can remove the source between discovery and reading; use its verified ZIP copy below.
-                    }
-                }
-            }
-            if(selectedManifest==null)selectedManifest=archivedCaseRunManifest(previousJobId);
-            if(selectedManifest!=null)break;
-            // A Template/Flow/Tool RUN has a specialized report, not a Case manifest.
-        }
-        if(selectedManifest==null)throw new IllegalArgumentException("No completed owned Case RUN is available for rerunFailed");
-        Object document=new Yaml().load(new String(selectedManifest,StandardCharsets.UTF_8));
-        if(!(document instanceof Map<?,?> manifest)||!(manifest.get("cases") instanceof List<?> cases))throw new IllegalArgumentException("Previous Case RUN manifest is invalid");
-        List<String> failed=new ArrayList<>();
-        for(Object value:cases)if(value instanceof Map<?,?> row&&List.of("FAIL","ERROR","INVALID").contains(row.get("status"))&&row.get("caseId") instanceof String id) {
-            if(!input.has("caseIds")||JSON.convertValue(input.get("caseIds"),List.class).contains(id))failed.add(id);
-        }
-        if(failed.isEmpty())throw new IllegalArgumentException("Previous Case RUN has no failed cases matching this selection");
-        input.set("caseIds",JSON.valueToTree(failed));input.remove("rerunFailed");
-    }
-    private byte[] archivedCaseRunManifest(String jobId) throws Exception {
-        try(ArtifactRead archive=openArtifactArchive(jobId,false)) {
-            List<Map<?,?>> manifests=new ArrayList<>();
-            Object entries=archive.verified.manifest.get("entries");
-            if(entries instanceof List<?> rows)for(Object value:rows)if(value instanceof Map<?,?> row
-                    &&row.get("path") instanceof String path&&(path.equals("run.yaml")||path.endsWith("/run.yaml")))manifests.add(row);
-            if(manifests.isEmpty())return null;
-            if(manifests.size()!=1||!(manifests.get(0).get("size") instanceof Number size)||size.longValue()>8*1024*1024)
-                throw new IllegalArgumentException("Previous Case RUN manifest is unavailable or exceeds the selection limit");
-            return archive.verified.read(String.valueOf(manifests.get(0).get("path")));
-        } catch(ArchiveUnavailableException unavailable) {
-            return null;
-        }
-    }
-    private Map<String,Object> runDraftView(RunDraft draft) {
-        Map<String,Object> view=new LinkedHashMap<>(draft.preview);
-        view.put("draftId",draft.id);view.put("schemaVersion",RunDefinition.VERSION);view.put("executionType","run");
-        view.put("packageId",draft.packageId);view.put("revisionDigest",draft.revision);view.put("expiresAt",draft.expiresAt.toString());
-        view.put("options",Map.of("debug",draft.workerInput.path("diagnosticMode").asBoolean()));
-        return view;
-    }
-    private RunDraft runDraft(String id,String principal,String packageId) {
-        synchronized(draftLock) {
-            expireDrafts();RunDraft draft=runDrafts.get(id);
-            if(draft==null||!draft.principal.equals(principal)||!draft.packageId.equals(packageId))throw new NotFoundException();
-            return draft;
-        }
-    }
-    Map<String,Object> getRunDraft(String id,String principal) {
-        RunDraft draft=runDrafts.get(id);if(draft==null)throw new NotFoundException();
-        return runDraftView(runDraft(id,principal,draft.packageId));
-    }
-    Map<String,Object> submitRunDraft(JsonNode body,String principal,String persistedPrincipal) throws Exception {
-        requireOnlyFields(body,"packageId","draftId","principal");
-        String draftId=required(body,"draftId");requireReplayConfirmation(draftId,principal);
-        RunDraft draft=runDraft(draftId,principal,required(body,"packageId"));
-        synchronized(draft) {
-            if(runDrafts.get(draft.id)!=draft)throw new NotFoundException();
-            WorkerRequest revisionRequest=inspectionRequest(draft.packageId,packageRoot(draft.packageId),draft.workerInput.path("environment").isTextual()?draft.workerInput.path("environment").asText():null);
-            if(draft.workerInput.path("config").isTextual())revisionRequest.config=draft.workerInput.path("config").asText();
-            revisionRequest.inspectionAction="revision";revisionRequest.expectedRevisionDigest=draft.revision;
-            try { executeInspection(packageRoot(draft.packageId),revisionRequest); }
-            catch(StaleCursorException stale) {runDrafts.remove(draft.id,draft);throw new StaleDraftException();}
-            JobExecutionSpec retained=draft.resourceDebugDraft!=null&&draft.resourceDebugDraft.containsSensitiveValues
-                    ?null:capturePrevalidatedExecutionSpec("run",draft.workerInput,null);
-            Map<String,Object> accepted=submit("run",draft.workerInput,persistedPrincipal,true,null,false,null,null,retained);
-            runDrafts.remove(draft.id,draft);
-            return accepted;
-        }
-    }
-    Map<String,Object> getDraft(String id,String principal) {
-        if(id!=null&&id.matches("R[0-9A-F]{32}"))return getRunDraft(id,principal);
-        if(DRAFT_ID.matcher(id==null?"":id).matches())return getDebugDraft(id,principal);
-        if(QUICK_LOAD_DRAFT_ID.matcher(id==null?"":id).matches())return getQuickLoadDraft(id,principal);
-        if(ADVANCED_LOAD_DRAFT_ID.matcher(id==null?"":id).matches())return getAdvancedLoadDraft(id,principal);
-        if(CATALOG_LOAD_DRAFT_ID.matcher(id==null?"":id).matches())return getCatalogLoadDraft(id,principal);
-        throw new NotFoundException();
-    }
-    Map<String,Object> submitDebugDraft(JsonNode body,String principal) throws Exception {
-        return submitDebugDraft(body,principal,principal);
-    }
-    Map<String,Object> submitDebugDraft(JsonNode body,String principal,String persistedPrincipal) throws Exception {
-        if(principal==null||principal.isBlank())throw new IllegalArgumentException("A server-resolved request identity is required");
-        requireObject(body,"A JSON object is required");requireOnlyFields(body,"packageId","draftId","principal");
-        String packageId=required(body,"packageId"),draftId=required(body,"draftId");
-        DebugDraft draft;
-        synchronized(draftLock) {
-            expireDrafts();draft=debugDrafts.get(draftId);
-            if(draft==null||!draft.principal.equals(principal)||!draft.packageId.equals(packageId))throw new NotFoundException();
-            synchronized(draft){if(draft.submitting)throw new IllegalArgumentException("Draft submission is already in progress");draft.submitting=true;}
-        }
-        boolean submitted=false;
-        try {
-            requireLiveDraft(draft);
-            verifyPackageRevision(draft.packageId,draft.environment,draft.revisionDigest);
-            com.fasterxml.jackson.databind.node.ObjectNode internal=JSON.createObjectNode();
-            internal.set("configurationProvenance",JSON.valueToTree(retainedConfiguration(draft.preview)));
-            internal.put("packageId",draft.packageId);if(draft.environment!=null)internal.put("environment",draft.environment);
-            internal.set("target",JSON.valueToTree(Map.of("type",draft.targetType,"id",draft.targetId)));
-            internal.set("inlineDebugInput",JSON.valueToTree(draft.input));
-            internal.put("expectedRevisionDigest",draft.revisionDigest);internal.put("draftResourceId",draft.resourceId);
-            applyInspectionPolicy(internal,draft.packageId);
-            requireLiveDraft(draft);
-            JobExecutionSpec retained=draft.containsSensitiveValues?null:capturePrevalidatedExecutionSpec("debug",internal,null);
-            Map<String,Object> accepted=submit("debug",internal,persistedPrincipal,true,null,false,null,null,retained);
-            debugDrafts.remove(draft.id,draft);submitted=true;return accepted;
-        } catch(StaleDraftException stale) {
-            debugDrafts.remove(draft.id,draft);throw stale;
-        } catch(StaleCursorException|NotFoundException stale) {
-            debugDrafts.remove(draft.id,draft);throw new StaleDraftException();
-        } finally {
-            if(!submitted)synchronized(draft){draft.submitting=false;}
-        }
-    }
-    Map<String,Object> submitQuickLoadDraft(JsonNode body,String principal) throws Exception {
-        return submitQuickLoadDraft(body,principal,principal);
-    }
-    Map<String,Object> submitQuickLoadDraft(JsonNode body,String principal,String persistedPrincipal) throws Exception {
-        if(principal==null||principal.isBlank())throw new IllegalArgumentException("A server-resolved request identity is required");
-        requireInlineLoadEnabled();
-        requireObject(body,"A JSON object is required");requireOnlyFields(body,"packageId","draftId","principal");
-        String packageId=required(body,"packageId"),draftId=required(body,"draftId");
-        QuickLoadDraft draft;
-        synchronized(draftLock) {
-            expireDrafts();draft=quickLoadDrafts.get(draftId);
-            if(draft==null||!draft.principal.equals(principal)||!draft.packageId.equals(packageId))throw new NotFoundException();
-            synchronized(draft){if(draft.submitting)throw new IllegalArgumentException("Quick Load draft submission is already in progress");draft.submitting=true;}
-        }
-        boolean submitted=false;
-        try {
-            verifyQuickLoadDraftRevision(draft);
-            requireLiveDraft(draft.expiresAt);
-            com.fasterxml.jackson.databind.node.ObjectNode internal=JSON.createObjectNode();
-            internal.set("configurationProvenance",JSON.valueToTree(retainedConfiguration(draft.preview)));
-            internal.put("packageId",draft.packageId);if(draft.environment!=null)internal.put("environment",draft.environment);
-            internal.set("target",JSON.valueToTree(Map.of("type",draft.targetType,"id",draft.targetId)));
-            internal.put("loadModel",draft.model);internal.set("inlineLoadScenario",JSON.valueToTree(draft.scenario));
-            internal.put("expectedRevisionDigest",draft.revisionDigest);internal.put("draftResourceId",draft.resourceId);
-            applyInspectionPolicy(internal,draft.packageId);
-            requireLiveDraft(draft.expiresAt);
-            JobExecutionSpec retained=draft.containsSensitiveValues?null:capturePrevalidatedExecutionSpec("load",internal,null);
-            Map<String,Object> accepted=submit("load",internal,persistedPrincipal,true,null,false,null,null,retained);
-            quickLoadDrafts.remove(draft.id,draft);submitted=true;return accepted;
-        } catch(StaleDraftException stale) {
-            quickLoadDrafts.remove(draft.id,draft);throw stale;
-        } catch(StaleCursorException|NotFoundException stale) {
-            quickLoadDrafts.remove(draft.id,draft);throw new StaleDraftException();
-        } finally {
-            if(!submitted)synchronized(draft){draft.submitting=false;}
-        }
-    }
-    Map<String,Object> submitAdvancedLoadDraft(JsonNode body,String principal) throws Exception {
-        return submitAdvancedLoadDraft(body,principal,principal);
-    }
-    Map<String,Object> submitAdvancedLoadDraft(JsonNode body,String principal,String persistedPrincipal) throws Exception {
-        if(principal==null||principal.isBlank())throw new IllegalArgumentException("A server-resolved request identity is required");
-        requireInlineLoadEnabled();
-        requireObject(body,"A JSON object is required");requireOnlyFields(body,"packageId","draftId","principal");
-        String packageId=required(body,"packageId"),draftId=required(body,"draftId");
-        AdvancedLoadDraftState draft;
-        synchronized(draftLock) {
-            expireDrafts();draft=advancedLoadDrafts.get(draftId);
-            if(draft==null||!draft.principal.equals(principal)||!draft.packageId.equals(packageId))throw new NotFoundException();
-            synchronized(draft){if(draft.submitting)throw new IllegalArgumentException("Draft submission is already in progress");draft.submitting=true;}
-        }
-        boolean submitted=false;
-        try {
-            verifyPackageRevision(draft.packageId,draft.environment,draft.revisionDigest);
-            requireLiveDraft(draft.expiresAt);
-            com.fasterxml.jackson.databind.node.ObjectNode internal=JSON.createObjectNode();
-            internal.set("configurationProvenance",JSON.valueToTree(retainedConfiguration(draft.preview)));
-            internal.put("packageId",draft.packageId);if(draft.environment!=null)internal.put("environment",draft.environment);
-            internal.put("loadModel",draft.model);internal.set("inlineLoadScenario",JSON.valueToTree(draft.scenario));
-            internal.put("expectedRevisionDigest",draft.revisionDigest);
-            applyInspectionPolicy(internal,draft.packageId);
-            requireLiveDraft(draft.expiresAt);
-            JobExecutionSpec retained=draft.containsSensitiveValues?null:capturePrevalidatedExecutionSpec("load",internal,null);
-            Map<String,Object> accepted=submit("load",internal,persistedPrincipal,true,null,false,null,null,retained);
-            advancedLoadDrafts.remove(draft.id,draft);submitted=true;return accepted;
-        } catch(StaleDraftException stale) {
-            advancedLoadDrafts.remove(draft.id,draft);throw stale;
-        } catch(StaleCursorException|NotFoundException stale) {
-            advancedLoadDrafts.remove(draft.id,draft);throw new StaleDraftException();
-        } finally {
-            if(!submitted)synchronized(draft){draft.submitting=false;}
-        }
-    }
-    Map<String,Object> submitLoadDraft(JsonNode body,String principal) throws Exception {
-        return submitLoadDraft(body,principal,principal);
-    }
-    Map<String,Object> submitLoadDraft(JsonNode body,String principal,String persistedPrincipal) throws Exception {
-        requireObject(body,"A JSON object is required");
-        String draftId=required(body,"draftId");
-        requireReplayConfirmation(draftId,principal);
-        if(QUICK_LOAD_DRAFT_ID.matcher(draftId).matches())return submitQuickLoadDraft(body,principal,persistedPrincipal);
-        if(ADVANCED_LOAD_DRAFT_ID.matcher(draftId).matches())return submitAdvancedLoadDraft(body,principal,persistedPrincipal);
-        throw new NotFoundException();
-    }
-    private void requireReplayConfirmation(String draftId,String principal) {
-        synchronized(replayLock) {
-            for(ReplayReview review:replayReviews.values())if(review.draftId.equals(draftId)&&review.principal.equals(principal))
-                throw new JobConflictException("ATT-SERVER-REPLAY-CONFIRMATION-REQUIRED","Job-based editor drafts must be submitted through their source Job confirmation intent.");
-        }
-    }
-    private void verifyQuickLoadDraftRevision(QuickLoadDraft draft) throws Exception {
-        try { verifyPackageRevision(draft.packageId,draft.environment,draft.revisionDigest); }
-        catch(StaleCursorException|NotFoundException changed){throw new StaleDraftException();}
-    }
-    private void verifyPackageRevision(String packageId,String environment,String revision) throws Exception {
-        Path root=packageRoot(packageId);if(root==null)throw new NotFoundException();validatePackageRoot(root);
-        WorkerRequest request=inspectionRequest(packageId,root,environment);request.inspectionAction="revision";request.expectedRevisionDigest=revision;
-        executeInspection(root,request);
-    }
-    private void requireLiveDraft(DebugDraft draft) {
-        if(!draft.expiresAt.isAfter(clock.instant()))throw new StaleDraftException();
-    }
-    private void requireLiveDraft(Instant expiresAt) {
-        if(!expiresAt.isAfter(clock.instant()))throw new StaleDraftException();
-    }
-    WorkerRequest inspectionRequest(String packageId,Path root,String environment) {
-        WorkerRequest request=new WorkerRequest();request.protocolVersion="att-worker/v1";request.jobId="I"+UUID.randomUUID().toString().replace("-","");request.command="inspect";
-        request.packageRoot=root.toString();request.config=config.runtimeConfigPath.toString();request.environment=environment;request.registeredPackageId=packageId;
-        request.maxResponseBytes=config.inspection.maxResponseBytes;request.maxSourceBytes=config.inspection.maxSourceBytes;
-        request.safeTextSources=config.inspection.safeTextSources(packageId);
-        request.externalTextSources=config.inspection.externalTextSources(packageId);
-        request.externalSourceRoots=config.inspection.externalSourceRoots;
-        request.sourceBrowsingEnabled=config.inspection.sourceBrowsingEnabled;request.sourceBrowsingPolicy=config.inspection.sourcePolicy;
-        request.sourceDenyGlobs=config.inspection.sourceDenyGlobs;request.redactionEnabled=config.inspection.redactionEnabled;
-        request.sensitivePaths=config.inspection.sensitivePaths;request.sensitiveFieldPatterns=config.inspection.sensitiveFieldPatterns;
-        return applyWorkerPolicy(request);
-    }
+OÚ[œ]œ]
+œØÙ[˜\š[ÈŠK˜\Õ^
 
-    Map<String,Object> validateVNext(JsonNode input,String principal) throws Exception {
-        if(input==null||!input.isObject())throw new IllegalArgumentException("A JSON validation plan is required");
-        Set<String> allowedFields=Set.of("command","targetKind","target","packageId","environment","all");
-        java.util.Iterator<String> fields=input.fieldNames();while(fields.hasNext())if(!allowedFields.contains(fields.next()))
-            throw new IllegalArgumentException("Remote validation accepts only typed targets and always uses Server-owned configuration");
-        String command=optionalText(input,"command");
-        if(!"validate".equals(command))throw new IllegalArgumentException("Only validate plans are accepted by this endpoint");
-        boolean all=input.path("all").asBoolean(false);
-        String targetKind=optionalText(input,"targetKind"),target=optionalText(input,"target"),packageId=optionalText(input,"packageId"),environment=optionalText(input,"environment");
-        if(all) {
-            if(targetKind!=null||target!=null||packageId!=null||environment!=null)
-                throw new IllegalArgumentException("validate --all cannot be combined with a target, Package, or Environment");
-            return validateAllVNext();
-        }
-        String scope=targetKind==null?"config":targetKind;
-        if(!List.of("config","package","case","suite","template","flow","tool","load").contains(scope))
-            throw new IllegalArgumentException("Unsupported validation scope");
-        if("config".equals(scope)&&target!=null)throw new IllegalArgumentException("validate config does not take a target");
-        if(!"config".equals(scope)&&packageId==null)throw new IllegalArgumentException("Remote validation requires a registered -p/--package ID");
-        if(List.of("case","suite","template","flow","tool","load").contains(scope)&&(target==null||target.isBlank()))
-            throw new IllegalArgumentException("Selected validation requires a target");
-        if("config".equals(scope)&&target!=null)throw new IllegalArgumentException("validate config does not take a target");
-        Path root=null;
-        if(packageId!=null) {root=packageRoot(packageId);if(root==null)throw new NotFoundException();validatePackageRoot(root);}
-        if(environment!=null) {
-            if(root!=null)config.packageConfiguration.authorizeEnvironment(environment,true);
-        } else if(root!=null) {
-            try {Map<String,Object> effective=resolveExecutionConfiguration(packageId,root,null);environment=(String)effective.get("environment");}
-            catch(InspectionConfigurationException invalid) { /* The validation Worker returns the detailed read-only report. */ }
-        }
-        Path workerRoot=root==null?ServerConfig.runtimeConfigRoot(config.runtimeConfigPath):root;
-        WorkerRequest request=inspectionRequest(packageId,workerRoot,environment);
-        request.inspectionAction="cli-validation";request.validationScope=scope;request.inspectionSharedConfiguration=Boolean.valueOf(root==null);
-        request.validationAllowedEnvironments=null;
-        if("suite".equals(scope)||"load".equals(scope))request.inspectionPath=safeRelative(target,scope);
-        else if("case".equals(scope))request.inspectionResourceId=safeText(target,512,"target");
-        else if(List.of("template","flow","tool").contains(scope)){request.inspectionType=scope;request.inspectionResourceId=safeText(target,512,"target");}
-        Map<String,Object> result=validationWorkerReport(executeInspection(workerRoot,request));
-        result.put("requestId",request.jobId);
-        return result;
-    }
+N›[ÂˆYŠÛİ\˜ÙT]O[[	‰œØÚY[SØØİ\œ™[˜ÙRYO[[	‰ˆ›ØY‹™\]X[ÊÛÛ[X[™
+JHÂˆX\İš[™ËØš™XİˆØØİ\œ™[˜ÙO\İÜ™KœØÚY[Q^Xİ][ÛŠØÚY[SØØİ\œ™[˜ÙRY
+NÂˆØYØÚY[HÛİ\˜ÙO[ØØİ\œ™[˜ÙOO[[Û[œİÜ™KœØÚY[Jİš[™Ë˜[YSÙŠØØİ\œ™[˜ÙK™Ù]
+œØÚY[RYŠJJNÂˆYŠÛİ\˜ÙHO[[
+HÂˆÛİ\˜ÙT]\Ûİ\˜ÙKœØÙ[˜\š[ÎÂˆYŠÛİ\˜ÙT]O[[	‰œÛİ\˜ÙKœÛİ\˜ÙR›Ø’YO[[
+HÂˆX\İš[™Ëİš[™Ïˆ\™[\İÜ™K™^Xİ][Û”ÜXÊÛİ\˜ÙKœÛİ\˜ÙR›Ø’Y
+NÂˆYŠ\™[O[[	‰œ\™[™Ù]
+œÜXÈŠHO[[
+\Ûİ\˜ÙT]R›Ø‘^Xİ][Û”ÜXËœ\œÙJ\™[™Ù]
+œÜXÈŠJK˜[YKœ]
+œÛİ\˜ÙT]ŠK˜\Õ^
+[
+NÂˆBˆBˆBˆ™]\›ˆ™]È›Ø‘^Xİ][Û”ÜXÊYš[š][Û‹™]š\Ú[Û‹Ûİ\˜ÙT]
+KÚ]ÛÛ™šYİ\˜][ÛŠ[œ]œ]
+˜ÛÛ™šYİ\˜][Û”›İ™[˜[˜ÙHŠKš\ÓØš™Xİ
 
-    private Map<String,Object> validateAllVNext() throws Exception {
-        Path runtimeRoot=ServerConfig.runtimeConfigRoot(config.runtimeConfigPath);
-        att.server.api.AttValidationReport report=new att.server.api.AttValidationReport("ALL","SERVER");
-        report.context("runtimeConfig","config/config.yaml");report.context("serverConfig","att-server.yaml");
-        try {
-            WorkerRequest central=inspectionRequest(null,runtimeRoot,null);central.inspectionSharedConfiguration=Boolean.TRUE;
-            central.inspectionAction="cli-validation";central.validationScope="config";central.all=Boolean.TRUE;
-            Map<String,Object> checked=validationWorkerReport(executeInspection(runtimeRoot,central));appendValidationSections(report,checked);
-        } catch(Exception unavailable) {
-            report.incomplete();AttValidationReportSection(report,"Shared Runtime Config","config/config.yaml","ATT-VALIDATION-INCOMPLETE",safeMessage(unavailable));
-        }
-        Path serverFile=config.sourceFile;
-        if(serverFile==null) {
-            report.addSection("ATT Server Config","att-server.yaml","SKIP").diagnostic(validationDiagnostic("ATT-SERVER-CONFIG-SKIPPED","INFO","att-server.yaml","serverConfig","No active ATT Server Config path is configured",null));
-        } else {
-            att.server.api.AttValidationReport.Section server=report.addSection("ATT Server Config","att-server.yaml","PASS");
-            try {ServerConfig.validateReadOnly(serverFile);}
-            catch(Exception invalid) {
-                server.status("FAIL");server.diagnostic(validationDiagnostic("ATT-SERVER-CONFIG-INVALID","ERROR","att-server.yaml","server",
-                        att.server.api.internal.DiagnosticSanitizer.redactAbsolutePaths(att.server.api.internal.DiagnosticSanitizer.redactText(invalid.getMessage()),serverFile.getParent()),
-                        "Correct the active ATT Server Config and retry read-only validation."));report.exitCode(2);
-            }
-        }
-        List<Map.Entry<String,Path>> packages=new ArrayList<>(config.packages.entrySet());packages.sort(Map.Entry.comparingByKey());
-        packages=boundValidationPackages(packages,report);
-        long validationWorkUnits=0L;
-        for(int packageIndex=0;packageIndex<packages.size();packageIndex++) {
-            Map.Entry<String,Path> entry=packages.get(packageIndex);
-            String packageId=entry.getKey();Path root=entry.getValue();
-            try {
-                validatePackageRoot(root);
-                WorkerRequest request=inspectionRequest(packageId,root,null);request.inspectionAction="cli-validation";
-                request.validationScope="package";request.all=Boolean.TRUE;
-                if(!config.packageConfiguration.allowedEnvironments.isEmpty())
-                    request.validationAllowedEnvironments=new ArrayList<>(config.packageConfiguration.allowedEnvironments);
-                Map<String,Object> checked=validationWorkerReport(executeInspection(root,request));
-                validationWorkUnits=saturatedAdd(validationWorkUnits,validationWorkUnits(checked));
-                String status=reportExit(checked)==0?"PASS":reportExit(checked)==2?"FAIL":"WARN";
-                att.server.api.AttValidationReport.Section packageSection=report.addSection("Package "+packageId,"packages/"+packageId,status);
-                appendValidationSections(packageSection,checked);
-                appendValidationOutcome(report,checked);
-                if(validationWorkUnits>=MAX_TOTAL_VNEXT_VALIDATION_WORK_UNITS&&packageIndex+1<packages.size()) {
-                    report.incomplete();att.server.api.AttValidationReport.Section limit=report.addSection("Package Validation Work Limit",null,"WARN");
-                    Map<String,Object> diagnostic=new LinkedHashMap<String,Object>();diagnostic.put("code","ATT-VALIDATION-LIMIT");
-                    diagnostic.put("severity","WARNING");diagnostic.put("field","packages");
-                    diagnostic.put("message","The installation-wide Package/Environment work budget was reached; remaining Packages were skipped");
-                    limit.diagnostic(diagnostic);break;
-                }
-            } catch(Exception unavailable) {
-                validationWorkUnits=saturatedAdd(validationWorkUnits,
-                        (long)MAX_VALIDATION_PACKAGE_ENTRIES*(MAX_VALIDATION_ENVIRONMENTS+2L));
-                report.incomplete();AttValidationReportSection(report,"Package "+packageId,"packages/"+packageId,"ATT-VALIDATION-INCOMPLETE",safeMessage(unavailable));
-                if(validationWorkUnits>=MAX_TOTAL_VNEXT_VALIDATION_WORK_UNITS&&packageIndex+1<packages.size()) {
-                    report.incomplete();att.server.api.AttValidationReport.Section limit=report.addSection("Package Validation Work Limit",null,"WARN");
-                    Map<String,Object> diagnostic=new LinkedHashMap<String,Object>();diagnostic.put("code","ATT-VALIDATION-LIMIT");
-                    diagnostic.put("severity","WARNING");diagnostic.put("field","packages");
-                    diagnostic.put("message","The installation-wide Package/Environment work budget was reached; remaining Packages were skipped");
-                    limit.diagnostic(diagnostic);break;
-                }
-            }
-        }
-        report.context("validationWorkUnits",validationWorkUnits);
-        report.limitOutputBytes(config.inspection.maxResponseBytes);
-        Map<String,Object> result=report.toMap();result.put("requestId","validation");return result;
-    }
+OØÛÛ™šYİ\˜][Û”™]š\Ú[ÛŠ”ÓÓ‹˜ÛÛ™\˜[YJ[œ]™Ù]
+˜ÛÛ™šYİ\˜][Û”›İ™[˜[˜ÙHŠKX\˜Û\ÜÊK™]š\Ú[ÛŠN›[
+NÂˆB‚ˆÊŠˆZ[ÈH™]Z[™YÛ˜\Úİœ›ÛHHÙ\™\‹]˜[Y]Y˜YÚ]İ]™K\[›š[™È]È[œÜXİ[ÛˆÛÜšÙ\‹ˆ
+‹Âˆš]˜]H›Ø‘^Xİ][Û”ÜXÈØ\\™T™]˜[Y]Y^Xİ][Û”ÜXÊİš[™ÈÛÛ[X[™œÛÛ“›ÙH[œ]İš[™ÈØÚY[SØØİ\œ™[˜ÙRY
+H›İÜÈ^Ù\[ÛˆÂˆYŠXÛÛ™šYËš[œÜXİ[Û‹™[˜X›YS\İ›ÙŠœ[ˆ‹™XYÈ‹›ØYŠK˜ÛÛZ[œÊÛÛ[X[™
+J\™]\›ˆ[Âˆİš[™È™]š\Ú[ÛZ[œ]œ]
+™^XİY™]š\Ú[Û‘YÙ\İŠK˜\Õ^
+ˆŠNÂˆYŠ\™]š\Ú[Û‹›X]Ú\Ê–ØKYŒNW^ÍHŠJ]›İÈ™]È[YØ[\™İ[Y[^Ù\[ÛŠ•˜[Y]Y^Xİ][Ûˆ™]š\Ú[Ûˆ\È[˜]˜Z[X›HŠNÂˆİš[™ÈXÚØYÙRY\™\]Z\™Y
+[œ]œXÚØYÙRYŠNÂˆØš™Xİ›ÙHYš[š][ÛR”ÓÓ‹˜Ü™X]SØš™Xİ›ÙJ
+NÙYš[š][Û‹œ]
+™^Xİ][Û•\H‹›Ø‹™^Xİ][Û•\JÛÛ[X[™
+JNÙYš[š][Û‹œ]
+œXÚØYÙRY‹XÚØYÙRY
+NÂˆYŠ[œ]š\Ê™[š\›Û›Y[ŠJYYš[š][Û‹œÙ]
+™[š\›Û›Y[‹[œ]™Ù]
+™[š\›Û›Y[ŠK™Y\ÛÜJ
+JNÂˆİš[™ÈÛİ\˜ÙT]Z[œ]œ]
+œØÙ[˜\š[ÈŠKš\Õ^X[
 
-    static List<Map.Entry<String,Path>> boundValidationPackages(List<Map.Entry<String,Path>> packages,
-            att.server.api.AttValidationReport report) {
-        int total=packages.size();
-        report.context("packages",total);
-        if(total<=MAX_VNEXT_VALIDATION_PACKAGES)return packages;
-        int checked=MAX_VNEXT_VALIDATION_PACKAGES;
-        int skipped=total-checked;
-        List<Map.Entry<String,Path>> bounded=new ArrayList<Map.Entry<String,Path>>(packages.subList(0,checked));
-        report.incomplete();
-        att.server.api.AttValidationReport.Section limit=report.addSection("Package Scan Limit",null,"WARN");
-        Map<String,Object> diagnostic=new LinkedHashMap<String,Object>();
-        diagnostic.put("code","ATT-VALIDATION-LIMIT");
-        diagnostic.put("severity","WARNING");
-        diagnostic.put("field","packages");
-        diagnostic.put("message","Server Package scan limit of "+MAX_VNEXT_VALIDATION_PACKAGES
-                +" was reached; checked "+checked+" of "+total+" registered Packages and skipped "
-                +skipped+" remaining registered Packages");
-        limit.diagnostic(diagnostic);
-        return bounded;
-    }
+OÜØY™T™[]]™J[œ]œ]
+œØÙ[˜\š[ÈŠK˜\Õ^
 
-    private static Map<String,Object> validationWorkerReport(Map<String,Object> report) {
-        if(report==null||!"att-validation/v1".equals(report.get("schemaVersion")))
-            throw new IllegalStateException("Validation Worker returned no att-validation/v1 report");
-        return new LinkedHashMap<String,Object>(report);
-    }
+KœØÙ[˜\š[ÈŠN›[ÂˆYŠ›ØY‹™\]X[ÊÛÛ[X[™
+JHÂˆœÛÛ“›ÙHØÙ[˜\š[ÏZ[œ]™Ù]
+š[›[™SØYØÙ[˜\š[ÈŠNÂˆYŠØÙ[˜\š[ÏO[[\ØÙ[˜\š[Ëš\ÓØš™Xİ
 
-    @SuppressWarnings("unchecked") static void appendValidationSections(att.server.api.AttValidationReport report,Map<String,Object> source) {
-        Object raw=source.get("sections");
-        if(raw instanceof List)for(Object value:(List<?>)raw)if(value instanceof Map)copyValidationSection(report,(Map<String,Object>)value);
-        appendValidationOutcome(report,source);
-    }
-    @SuppressWarnings("unchecked") static void appendValidationSections(att.server.api.AttValidationReport.Section report,Map<String,Object> source) {
-        Object raw=source.get("sections");if(!(raw instanceof List))return;
-        for(Object value:(List<?>)raw)if(value instanceof Map)copyValidationSection(report,(Map<String,Object>)value);
-    }
-    @SuppressWarnings("unchecked") private static void copyValidationSection(att.server.api.AttValidationReport report,Map<String,Object> source) {
-        att.server.api.AttValidationReport.Section section=report.addSection(String.valueOf(source.get("name")),(String)source.get("source"),String.valueOf(source.get("status")));
-        copyValidationDetails(section,source);
-    }
-    @SuppressWarnings("unchecked") private static void copyValidationSection(att.server.api.AttValidationReport.Section report,Map<String,Object> source) {
-        att.server.api.AttValidationReport.Section section=report.child(String.valueOf(source.get("name")),(String)source.get("source"),String.valueOf(source.get("status")));
-        copyValidationDetails(section,source);
-    }
-    @SuppressWarnings("unchecked") private static void copyValidationDetails(att.server.api.AttValidationReport.Section section,Map<String,Object> source) {
-        Object diagnostics=source.get("diagnostics");if(diagnostics instanceof List)for(Object item:(List<?>)diagnostics)if(item instanceof Map)section.diagnostic((Map<String,Object>)item);
-        Object nested=source.get("sections");if(nested instanceof List)for(Object item:(List<?>)nested)if(item instanceof Map)copyValidationSection(section,(Map<String,Object>)item);
-    }
-    static void appendValidationOutcome(att.server.api.AttValidationReport report,Map<String,Object> source) {
-        if(Boolean.FALSE.equals(source.get("complete")))report.incomplete();
-        int exit=reportExit(source);if(exit==2)report.exitCode(2);else if(exit==3)report.incomplete();
-    }
-    private static int reportExit(Map<String,Object> report) {Object value=report.get("exitCode");return value instanceof Number?((Number)value).intValue():3;}
-    private static void AttValidationReportSection(att.server.api.AttValidationReport report,String name,String source,String code,String message) {
-        att.server.api.AttValidationReport.Section section=report.addSection(name,source,"WARN");
-        section.diagnostic(validationDiagnostic(code,"ERROR",source,"validation",message,null));
-    }
-    private static Map<String,Object> validationDiagnostic(String code,String severity,String source,String field,String message,String suggestion) {
-        Map<String,Object> out=new LinkedHashMap<>();out.put("code",code);out.put("severity",severity);out.put("source",source);out.put("field",field);out.put("message",message==null?"Validation failed":message);if(suggestion!=null)out.put("suggestion",suggestion);return out;
-    }
-    WorkerRequest applyWorkerPolicy(WorkerRequest request) {
-        request.executionEnvironment=null;
-        if(!"inspect".equals(request.command))request.packageManifestSource=null;
-        request.liveOutputMaxEntryChars=config.liveOutput.maxEntryChars;request.liveOutputMaxEntryLines=config.liveOutput.maxEntryLines;
-        return request;
-    }
-    byte[] workerRequestBytes(WorkerRequest request) throws Exception {
-        return JSON.writeValueAsBytes(applyWorkerPolicy(request));
-    }
-    private byte[] workerRequestBytes(WorkerRequest request,boolean warm) throws Exception {
-        if(!warm)return workerRequestBytes(request);
-        var value=JSON.valueToTree(applyWorkerPolicy(request));
-        ((com.fasterxml.jackson.databind.node.ObjectNode)value).set("executionEnvironment",JSON.valueToTree(System.getenv()));
-        return JSON.writeValueAsBytes(value);
-    }
-    private void applyInspectionPolicy(com.fasterxml.jackson.databind.node.ObjectNode request,String packageId) {
-        request.set("safeTextSources",JSON.valueToTree(config.inspection.safeTextSources(packageId)));
-        request.set("externalTextSources",JSON.valueToTree(config.inspection.externalTextSources(packageId)));
-        request.set("externalSourceRoots",JSON.valueToTree(config.inspection.externalSourceRoots));
-        request.put("maxSourceBytes",config.inspection.maxSourceBytes);request.put("maxResponseBytes",config.inspection.maxResponseBytes);
-        request.put("sourceBrowsingEnabled",config.inspection.sourceBrowsingEnabled);request.put("sourceBrowsingPolicy",config.inspection.sourcePolicy);
-        request.set("sourceDenyGlobs",JSON.valueToTree(config.inspection.sourceDenyGlobs));request.put("redactionEnabled",config.inspection.redactionEnabled);
-        request.set("sensitivePaths",JSON.valueToTree(config.inspection.sensitivePaths));request.set("sensitiveFieldPatterns",JSON.valueToTree(config.inspection.sensitiveFieldPatterns));
-    }
-    private Map<String,Object> debugDraftView(DebugDraft draft) {
-        Map<String,Object> view=new LinkedHashMap<String,Object>();view.put("draftId",draft.id);view.put("packageId",draft.packageId);
-        view.put("configuration",draft.preview.get("configuration"));view.put("environment",draft.environment);view.put("target",Map.of("type",draft.targetType,"id",draft.targetId));
-        view.put("preview",draft.preview.get("input"));view.put("redacted",Boolean.TRUE.equals(draft.preview.get("redacted")));
-        try {DumperOptions options=new DumperOptions();options.setDefaultFlowStyle(DumperOptions.FlowStyle.BLOCK);options.setPrettyFlow(true);options.setWidth(120);view.put("previewYaml",new Yaml(options).dump(draft.preview.get("input")));}catch(Exception ignored){view.put("previewYaml","{}");}
-        view.put("diagnostics",Collections.emptyList());view.put("expiresAt",draft.expiresAt.toString());return view;
-    }
-    private Map<String,Object> quickLoadDraftView(QuickLoadDraft draft) {
-        Map<String,Object> view=new LinkedHashMap<String,Object>();view.put("draftId",draft.id);view.put("packageId",draft.packageId);
-        view.put("configuration",draft.preview.get("configuration"));view.put("environment",draft.environment);view.put("target",Map.of("type",draft.targetType,"id",draft.targetId));
-        view.put("model",draft.model);view.put("preview",draft.preview.get("preview"));view.put("previewYaml",draft.preview.get("previewYaml"));
-        view.put("redacted",Boolean.TRUE.equals(draft.preview.get("redacted")));view.put("diagnostics",Collections.emptyList());
-        view.put("expiresAt",draft.expiresAt.toString());return view;
-    }
-    private Map<String,Object> advancedLoadDraftView(AdvancedLoadDraftState draft) {
-        Map<String,Object> view=new LinkedHashMap<String,Object>();view.put("draftId",draft.id);view.put("packageId",draft.packageId);
-        view.put("configuration",draft.preview.get("configuration"));view.put("environment",draft.environment);view.put("model",draft.model);view.put("revisionDigest",draft.revisionDigest);
-        view.put("preview",draft.preview.get("preview"));view.put("previewYaml",draft.preview.get("previewYaml"));
-        view.put("redacted",Boolean.TRUE.equals(draft.preview.get("redacted")));view.put("diagnostics",Collections.emptyList());
-        view.put("expiresAt",draft.expiresAt.toString());return view;
-    }
-    private Map<String,Object> catalogLoadDraftView(CatalogLoadDraftState draft) {
-        Map<String,Object> view=new LinkedHashMap<String,Object>();view.put("draftId",draft.id);view.put("packageId",draft.packageId);
-        view.put("configuration",draft.configuration);view.put("environment",draft.environment);view.put("model",draft.model);view.put("revisionDigest",draft.revisionDigest);view.put("previewYaml",draft.previewYaml);
-        view.put("redacted",Boolean.TRUE);view.put("diagnostics",Collections.emptyList());view.put("expiresAt",draft.expiresAt.toString());return view;
-    }
-    private void checkDraftCapacity(String principal) {
-        long total=debugDrafts.size()+quickLoadDrafts.size()+advancedLoadDrafts.size()+catalogLoadDrafts.size()+runDrafts.size();
-        long owned=debugDrafts.values().stream().filter(d->d.principal.equals(principal)).count()
-                +quickLoadDrafts.values().stream().filter(d->d.principal.equals(principal)).count()
-                +advancedLoadDrafts.values().stream().filter(d->d.principal.equals(principal)).count()
-                +catalogLoadDrafts.values().stream().filter(d->d.principal.equals(principal)).count()
-                +runDrafts.values().stream().filter(d->d.principal.equals(principal)).count();
-        if(total>=MAX_ACTIVE_DRAFTS||owned>=MAX_DRAFTS_PER_PRINCIPAL)throw new DraftCapacityException();
-    }
-    private void expireDrafts() {
-        Instant now=clock.instant();runDrafts.entrySet().removeIf(entry->!entry.getValue().expiresAt.isAfter(now));
-        debugDrafts.entrySet().removeIf(entry->!entry.getValue().expiresAt.isAfter(now));
-        quickLoadDrafts.entrySet().removeIf(entry->!entry.getValue().expiresAt.isAfter(now));
-        advancedLoadDrafts.entrySet().removeIf(entry->!entry.getValue().expiresAt.isAfter(now));
-        catalogLoadDrafts.entrySet().removeIf(entry->!entry.getValue().expiresAt.isAfter(now));
-    }
-    private void expireDraftsSafely() {
-        synchronized(draftLock){expireDrafts();}
-        try {store.expireReplayIntents(clock.instant().toEpochMilli());}
-        catch(Exception failure){java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).warning("Unable to expire old replay intents");}
-    }
-    private static void requireObject(JsonNode value,String message) {if(value==null||!value.isObject())throw new IllegalArgumentException(message);}
-    private static void requireOnlyFields(JsonNode object,String... allowed) {
-        java.util.Set<String> names=new java.util.HashSet<>(java.util.Arrays.asList(allowed));
-        java.util.Iterator<String> fields=object.fieldNames();while(fields.hasNext())if(!names.contains(fields.next()))throw new IllegalArgumentException("Unknown request field");
-    }
-    private void requireInlineLoadEnabled() {
-        if(!config.inlineLoad.enabled)throw new InlineLoadDisabledException();
-    }
-    private void enforceInlineLoadLimits(Map<String,Object> scenario) {
-        validateInlineLoadLimits(config.inlineLoad,scenario);
-    }
-    static void validateInlineLoadLimits(ServerConfig.InlineLoad limits,Map<String,Object> scenario) {
-        if(!limits.enabled)throw new InlineLoadDisabledException();
-        validateScheduledLoadLimits(limits,scenario);
-    }
-    static void validateScheduledLoadLimits(ServerConfig.InlineLoad limits,Map<String,Object> scenario) {
-        Object rawWorkloads=scenario.get("workloads");
-        if(!(rawWorkloads instanceof List)||((List<?>)rawWorkloads).isEmpty())
-            throw new IllegalArgumentException("Validated Load scenario must contain workloads");
-        List<?> workloads=(List<?>)rawWorkloads;
-        if(workloads.size()>limits.maxWorkloads)
-            throw new InlineLoadLimitException("Scenario exceeds server.inlineLoad.maxWorkloads");
-        long totalUsers=0L,totalTargets=0L,totalArrivalConcurrency=0L;
-        double totalArrivalRate=0.0;
-        long maximumEnvelopeMs=0L;
-        Map<?,?> rootLoad=scenario.get("load") instanceof Map?(Map<?,?>)scenario.get("load"):Collections.emptyMap();
-        for(int i=0;i<workloads.size();i++) {
-            Object raw=workloads.get(i);
-            if(!(raw instanceof Map))throw new IllegalArgumentException("Validated Load workload is invalid");
-            Map<?,?> workload=(Map<?,?>)raw;
-            Object mix=workload.get("mix");
-            if(mix instanceof List)totalTargets=addWithinLimit(totalTargets,((List<?>)mix).size(),limits.maxTargets,"Scenario exceeds server.inlineLoad.maxTargets");
-            else if(workload.get("target") instanceof Map)totalTargets=addWithinLimit(totalTargets,1,limits.maxTargets,"Scenario exceeds server.inlineLoad.maxTargets");
-            else throw new IllegalArgumentException("Validated Load target is invalid");
+J]›İÈ™]È[YØ[\™İ[Y[^Ù\[ÛŠ•˜[Y]YØYØÙ[˜\š[È\È[˜]˜Z[X›HŠNÂˆYš[š][Û‹œÙ]
+œØÙ[˜\š[È‹ØÙ[˜\š[Ë™Y\ÛÜJ
+JNÂˆH[ÙHÂˆYš[š][Û‹œ]
+œØÚ[XU™\œÚ[Ûˆ‹[‘Yš[š][Û‹•‘T”ÒSÓŠNÂˆØš™Xİ›ÙHÜ[ÛœÏYYš[š][Û‹œ]Øš™Xİ
+›Ü[ÛœÈŠNÛÜ[ÛœËœ]
+™XYÈ‹™XYÈ‹™\]X[ÊÛÛ[X[™
+_[œ]œ]
+™XYÛ›ÜİXÓ[ÙHŠK˜\Ğ›ÛÛX[Š˜[ÙJJNÂˆYŠ[œ]œ]
+\™Ù]ŠKš\ÓØš™Xİ
 
-            Object rawLoad=workload.get("load");
-            if(rawLoad!=null&&!(rawLoad instanceof Map))throw new IllegalArgumentException("Validated Load pacing is invalid");
-            Map<Object,Object> load=new LinkedHashMap<>();load.putAll(rootLoad);if(rawLoad instanceof Map)load.putAll((Map<?,?>)rawLoad);
-            if(load.get("users") instanceof Number) {
-                totalUsers=addWithinLimit(totalUsers,validatedCount(load.get("users"),"users"),limits.maxTotalUsers,
-                        "Scenario exceeds server.inlineLoad.maxTotalUsers");
-            } else {
-                double arrivalRate=validatedRatePerSecond(load.get("arrivalRate"));
-                if(arrivalRate>limits.maxAggregateArrivalRatePerSecond-totalArrivalRate)
-                    throw new InlineLoadLimitException("Scenario exceeds server.inlineLoad.maxAggregateArrivalRatePerSecond");
-                totalArrivalRate+=arrivalRate;
-                long concurrent=validatedCount(load.get("maxConcurrent"),"maxConcurrent");
-                if(concurrent>limits.maxConcurrentPerWorkload)
-                    throw new InlineLoadLimitException("Workload exceeds server.inlineLoad.maxConcurrentPerWorkload");
-                totalArrivalConcurrency=addWithinLimit(totalArrivalConcurrency,concurrent,limits.maxTotalConcurrent,
-                        "Scenario exceeds server.inlineLoad.maxTotalConcurrent");
-            }
-            long envelope=durationEnvelopeMillis(load);
-            maximumEnvelopeMs=Math.max(maximumEnvelopeMs,envelope);
-        }
-        if(maximumEnvelopeMs>TimeUnit.SECONDS.toMillis(limits.maxDurationSeconds))
-            throw new InlineLoadLimitException("Effective LOAD envelope is "+maximumEnvelopeMs+" ms; server.inlineLoad.maxDurationSeconds permits "+TimeUnit.SECONDS.toMillis(limits.maxDurationSeconds)+" ms");
-    }
-    static void validatePackageBackedReplayLoadLimits(ServerConfig.InlineLoad limits,Map<String,Object> scenario) {
-        validateScheduledLoadLimits(limits,scenario);
-    }
-    private static long addWithinLimit(long total,long value,long maximum,String message) {
-        if(value<0||total>maximum-value)throw new InlineLoadLimitException(message);
-        return total+value;
-    }
-    private static long validatedCount(Object value,String field) {
-        if(!(value instanceof Number))throw new IllegalArgumentException("Validated Load "+field+" is invalid");
-        try {
-            long count=new java.math.BigDecimal(String.valueOf(value)).longValueExact();
-            if(count<1)throw new IllegalArgumentException("Validated Load "+field+" is invalid");
-            return count;
-        } catch(NumberFormatException|ArithmeticException invalid) {
-            throw new IllegalArgumentException("Validated Load "+field+" is invalid");
-        }
-    }
-    private static double validatedRatePerSecond(Object value) {
-        if(!(value instanceof String))throw new IllegalArgumentException("Validated Load arrivalRate is invalid");
-        java.util.regex.Matcher matcher=INLINE_LOAD_RATE.matcher(((String)value).trim());
-        if(!matcher.matches())throw new IllegalArgumentException("Validated Load arrivalRate is invalid");
-        double rate=Double.parseDouble(matcher.group(1));
-        if("m".equals(matcher.group(2)))rate/=60.0;
-        if(!Double.isFinite(rate)||rate<=0.0)throw new IllegalArgumentException("Validated Load arrivalRate is invalid");
-        return rate;
-    }
-    private static long durationMillis(Object value,String field) {
-        if(value==null)return 0L;
-        if(value instanceof Number) {
-            try {long milliseconds=new java.math.BigDecimal(String.valueOf(value)).longValueExact();if(milliseconds<0)throw new IllegalArgumentException("Validated Load "+field+" is invalid");return milliseconds;}
-            catch(NumberFormatException|ArithmeticException invalid){throw new IllegalArgumentException("Validated Load "+field+" is invalid",invalid);}
-        }
-        if(!(value instanceof String))throw new IllegalArgumentException("Validated Load "+field+" is invalid");
-        java.util.regex.Matcher matcher=INLINE_LOAD_DURATION.matcher(((String)value).trim());
-        if(!matcher.matches())throw new IllegalArgumentException("Validated Load "+field+" is invalid");
-        long amount=Long.parseLong(matcher.group(1));
-        long multiplier="ms".equals(matcher.group(2))?1L:"s".equals(matcher.group(2))?1000L:"m".equals(matcher.group(2))?60000L:3600000L;
-        try{return Math.multiplyExact(amount,multiplier);}
-        catch(ArithmeticException overflow){throw new IllegalArgumentException("Validated Load "+field+" is too large");}
-    }
-    private static long durationEnvelopeMillis(Map<?,?> load) {
-        try {
-            return Math.addExact(Math.addExact(durationMillis(load.get("warmup"),"warmup"),durationMillis(load.get("rampUp"),"rampUp")),
-                    Math.addExact(durationMillis(load.get("duration"),"duration"),durationMillis(load.get("rampDown"),"rampDown")));
-        } catch(ArithmeticException overflow) { return Long.MAX_VALUE; }
-    }
-    private static String optionalText(JsonNode object,String name) {
-        JsonNode value=object.get(name);if(value==null||value.isNull())return null;
-        if(!value.isTextual()||value.asText().isBlank())throw new IllegalArgumentException(name+" must be a non-empty string");
-        String text=value.asText();if(text.length()>128||containsControl(text))throw new IllegalArgumentException(name+" is invalid");return text.trim();
-    }
-    private static Map<String,Object> objectMap(JsonNode value,String message) {
-        if(value==null||value.isNull())return Collections.emptyMap();
-        requireObject(value,message);
-        @SuppressWarnings("unchecked") Map<String,Object> result=(Map<String,Object>)JSON.convertValue(value,Map.class);
-        return result;
-    }
+JHÂˆœÛÛ“›ÙHXYÒ[œ]Z[œ]™Ù]
+š[›[™QXYÒ[œ]ŠNÂˆYŠXYÒ[œ]O[[YXYÒ[œ]š\ÓØš™Xİ
 
-    @SuppressWarnings("unchecked") private static long validationWorkUnits(Map<String,Object> report) {
-        Object context=report.get("context");Object value=context instanceof Map?((Map<String,Object>)context).get("validationWorkUnits"):null;
-        if(value instanceof Number)return Math.max(0L,((Number)value).longValue());
-        return (long)MAX_VALIDATION_PACKAGE_ENTRIES*(MAX_VALIDATION_ENVIRONMENTS+2L);
-    }
-    private static List<String> quickLoadTestdata(JsonNode value) {
-        if(value==null||value.isNull())return Collections.emptyList();
-        if(!value.isArray()||value.size()>64)throw new IllegalArgumentException("testdata must be an array of at most 64 package-relative paths");
-        List<String> paths=new ArrayList<>();
-        for(JsonNode item:value) {
-            if(!item.isTextual()||item.asText().isBlank()||item.asText().length()>512||containsControl(item.asText()))
-                throw new IllegalArgumentException("testdata entries must be non-empty package-relative paths");
-            paths.add(item.asText().trim());
-        }
-        return paths;
-    }
-    /** Resolve through the Engine before policy checks and persist the canonical selected profile. */
-    private Map<String,Object> resolveExecutionConfiguration(String packageId,Path root,String requested) throws Exception {
-        String selection=requested==null||requested.isBlank()?null:inspectionEnvironment(requested,"environment");
-        WorkerRequest request=inspectionRequest(packageId,root,selection);
-        request.inspectionType="package-configuration";request.inspectionAction="resolve";request.registeredPackageId=packageId;
-        Map<String,Object> effective=executeInspection(root,request);
-        Map<String,Object> evidence=new LinkedHashMap<>(att.server.api.ConfigurationSnapshot.copy(effective));
-        String canonical=inspectionEnvironment((String)evidence.get("environment"),"environment");
-        config.packageConfiguration.authorizeEnvironment(canonical,selection!=null);
-        evidence.put("packageId",packageId);
-        return deepMap(evidence);
-    }
-    private void authorizeConfiguration(Map<String,Object> configuration) {
-        String origin=(String)configuration.get("environmentOrigin");
-        config.packageConfiguration.authorizeEnvironment((String)configuration.get("environment"),"request".equals(origin)||"context".equals(origin));
-    }
-    private static Map<String,Object> configurationRevision(Map<String,Object> evidence,String revision) {
-        Map<String,Object> result=new LinkedHashMap<>(evidence);
-        if(revision!=null)result.put("packageRevision",revision);
-        return att.server.api.ConfigurationSnapshot.copy(result);
-    }
-    private static Map<String,Object> retainedConfiguration(Map<String,Object> preview) {
-        return att.server.api.ConfigurationSnapshot.copy((Map<?,?>)preview.get("configuration"));
-    }
-    private Path manifestEditableRoot(String packageId,String principal) throws Exception {
-        if(!config.authenticationRequired||!config.packageConfiguration.sourceEditingEnabled||principal==null||
-                !principal.equals(packageId)||!isOperationalPrincipal(principal)) {
-            store.audit(principal==null?"anonymous":principal,"PACKAGE_MANIFEST_DENIED",null,packageId,"source editing is not authorized");
-            throw new PackageManifestPublisher.Denied();
-        }
-        Path root=packageRoot(packageId);if(root==null)throw new PackageManifestPublisher.Missing();
-        validatePackageRoot(root);return root.toRealPath();
-    }
-    private Map<String,Object> validateManifestCandidate(String packageId,String source) throws Exception {
-        if(!config.inspection.enabled)throw new NotFoundException();
-        Path root=packageRoot(packageId);if(root==null)throw new NotFoundException();validatePackageRoot(root);
-        WorkerRequest request=inspectionRequest(packageId,root,null);
-        request.inspectionType="package-configuration";request.inspectionAction="validate";request.packageManifestSource=source;
-        return executeInspection(root,request);
-    }
-    Map<String,Object> inspectPackageConfiguration(String packageId,String action,String environment,String principal) throws Exception {
-        if(!config.inspection.enabled)throw new NotFoundException();
-        Path root=packageRoot(packageId);if(root==null)throw new NotFoundException();validatePackageRoot(root);
-        if(!List.of("declared","effective","compare","source").contains(action))throw new IllegalArgumentException("Unsupported Package Configuration view");
-        String selected=environment==null||environment.isBlank()?null:inspectionEnvironment(environment,"environment");
-        WorkerRequest request=inspectionRequest(packageId,root,selected);
-        request.inspectionType="package-configuration";request.inspectionAction=action;
-        Map<String,Object> result=executeInspection(root,request);result.put("packageId",packageId);
-        result.put("canEdit",config.authenticationRequired&&config.packageConfiguration.sourceEditingEnabled&&packageId.equals(principal)&&isOperationalPrincipal(principal));
-        return result;
-    }
+J]›İÈ™]È[YØ[\™İ[Y[^Ù\[ÛŠ•˜[Y]Y™\Ûİ\˜ÙH[œ]\È[˜]˜Z[X›HŠNÂˆYš[š][Û‹œÙ]
+\™Ù]‹[œ]™Ù]
+\™Ù]ŠK™Y\ÛÜJ
+JNÙYš[š][Û‹œÙ]
+š[œ]‹XYÒ[œ]™Y\ÛÜJ
+JNÂˆH[ÙHÂˆœÛÛ“›ÙHØ\ÙRYÏZ[œ]™Ù]
+˜Ø\ÙRYÈŠNÂˆYŠØ\ÙRYÏO[[XØ\ÙRYËš\Ğ\œ˜^J
+_Ø\ÙRYËš\Ñ[\J
+J]›İÈ™]È[YØ[\™İ[Y[^Ù\[ÛŠ•˜[Y]Y^XİØ\ÙHÙ[Xİ[Ûˆ\È[˜]˜Z[X›HŠNÂˆØš™Xİ›ÙHÙ[Xİ[ÛYYš[š][Û‹œ]Øš™Xİ
+œÙ[Xİ[ÛˆŠNÜÙ[Xİ[Û‹œÙ]
+˜Ø\ÙRYÈ‹Ø\ÙRYË™Y\ÛÜJ
+JNÂˆ›ÜŠİš[™ÈšY[“\İ›ÙŠœİZ]\È‹œİZ]Q\™XİÜHŠJZYŠ[œ]š\ÊšY[
+J\Ù[Xİ[Û‹œÙ]
+šY[[œ]™Ù]
+šY[
+K™Y\ÛÜJ
+JNÂˆYŠ[œ]š\Ê™˜Z[˜\İŠJ[Ü[ÛœËœÙ]
+™˜Z[˜\İ‹[œ]™Ù]
+™˜Z[˜\İŠK™Y\ÛÜJ
+JNÂˆBˆ[‘Yš[š][Û‹œ\œÙT™]Z[™Y
+Yš[š][ÛŠNÂˆBˆYŠÛİ\˜ÙT]O[[	‰œØÚY[SØØİ\œ™[˜ÙRYO[[	‰ˆ›ØY‹™\]X[ÊÛÛ[X[™
+JHÂˆX\İš[™ËØš™XİˆØØİ\œ™[˜ÙO\İÜ™KœØÚY[Q^Xİ][ÛŠØÚY[SØØİ\œ™[˜ÙRY
+NÂˆØYØÚY[HÛİ\˜ÙO[ØØİ\œ™[˜ÙOO[[Û[œİÜ™KœØÚY[Jİš[™Ë˜[YSÙŠØØİ\œ™[˜ÙK™Ù]
+œØÚY[RYŠJJNÂˆYŠÛİ\˜ÙHO[[
+HÂˆÛİ\˜ÙT]\Ûİ\˜ÙKœØÙ[˜\š[ÎÂˆYŠÛİ\˜ÙT]O[[	‰œÛİ\˜ÙKœÛİ\˜ÙR›Ø’YO[[
+HÂˆX\İš[™Ëİš[™Ïˆ\™[\İÜ™K™^Xİ][Û”ÜXÊÛİ\˜ÙKœÛİ\˜ÙR›Ø’Y
+NÂˆYŠ\™[O[[	‰œ\™[™Ù]
+œÜXÈŠHO[[
+\Ûİ\˜ÙT]R›Ø‘^Xİ][Û”ÜXËœ\œÙJ\™[™Ù]
+œÜXÈŠJK˜[YKœ]
+œÛİ\˜ÙT]ŠK˜\Õ^
+[
+NÂˆBˆBˆBˆ™]\›ˆ™]È›Ø‘^Xİ][Û”ÜXÊYš[š][Û‹™]š\Ú[Û‹Ûİ\˜ÙT]
+KÚ]ÛÛ™šYİ\˜][ÛŠ[œ]œ]
+˜ÛÛ™šYİ\˜][Û”›İ™[˜[˜ÙHŠKš\ÓØš™Xİ
 
-    Map<String,Object> inspectConfiguration(String packageId,String action,String environment,String otherEnvironment,String principal) throws Exception {
-        return inspectConfiguration(packageId,action,environment,otherEnvironment,null,0,0,principal);
-    }
-    Map<String,Object> inspectTestdataRecords(String packageId,String descriptorId,String environment,int offset,int limit,
-                                              boolean previewGenerated,String principal) throws Exception {
-        if(!config.inspection.enabled)throw new NotFoundException();
-        if(principal==null||principal.isBlank())throw new IllegalArgumentException("A server-resolved request identity is required");
-        if(offset<0||limit<1||limit>TESTDATA_RECORD_MAX_PAGE_SIZE)
-            throw new IllegalArgumentException("Testdata pagination is invalid");
-        Path root=packageRoot(packageId);if(root==null)throw new NotFoundException();validatePackageRoot(root);
-        String selected=environment==null||environment.isBlank()?null:inspectionEnvironment(environment,"environment");
-        WorkerRequest request=inspectionRequest(packageId,root,selected);request.inspectionType="configuration";
-        request.inspectionEnvironment=selected;
-        request.inspectionAction="testdata-records";request.inspectionResourceId=descriptorId;request.inspectionSection=descriptorId;
-        request.inspectionOffset=offset;request.inspectionLimit=limit;
-        request.inspectionQuery=previewGenerated?"preview-generated":null;
-        return executeInspection(root,request);
-    }
-    Map<String,Object> inspectConfiguration(String packageId,String action,String environment,String otherEnvironment,
-                                            String section,int offset,int limit,String principal) throws Exception {
-        return inspectConfiguration(packageId,action,environment,otherEnvironment,section,offset,limit,null,null,null,principal);
-    }
-    Map<String,Object> inspectConfiguration(String packageId,String action,String environment,String otherEnvironment,
-                                            String section,int offset,int limit,String inspectionPath,String inspectionOrigin,
-                                            String inspectionQuery,String principal) throws Exception {
-        return inspectConfiguration(packageId,action,environment,otherEnvironment,section,offset,limit,
-                inspectionPath,inspectionOrigin,inspectionQuery,false,principal);
-    }
-    Map<String,Object> inspectConfiguration(String packageId,String action,String environment,String otherEnvironment,
-                                            String section,int offset,int limit,String inspectionPath,String inspectionOrigin,
-                                            String inspectionQuery,boolean includeInherited,String principal) throws Exception {
-        return inspectConfiguration(packageId,action,environment,otherEnvironment,section,offset,limit,inspectionPath,
-                inspectionOrigin,inspectionQuery,includeInherited,null,principal);
-    }
-    Map<String,Object> inspectConfiguration(String packageId,String action,String environment,String otherEnvironment,
-                                            String section,int offset,int limit,String inspectionPath,String inspectionOrigin,
-                                            String inspectionQuery,boolean includeInherited,String inspectionReferenceId,String principal) throws Exception {
-        return inspectConfiguration(packageId,action,environment,otherEnvironment,section,offset,limit,inspectionPath,
-                inspectionOrigin,inspectionQuery,includeInherited,inspectionReferenceId,false,principal);
-    }
-    Map<String,Object> inspectConfiguration(String packageId,String action,String environment,String otherEnvironment,
-                                            String section,int offset,int limit,String inspectionPath,String inspectionOrigin,
-                                            String inspectionQuery,boolean includeInherited,String inspectionReferenceId,
-                                            boolean includeAllFields,String principal) throws Exception {
-        if(!config.inspection.enabled)throw new NotFoundException();
-        if(principal==null||principal.isBlank())throw new IllegalArgumentException("A server-resolved request identity is required");
-        boolean shared=packageId==null||packageId.isEmpty();
-        if(shared&&"testdata-records".equals(action))throw new NotFoundException();
-        Path root=shared?ServerConfig.runtimeConfigRoot(config.runtimeConfigPath):packageRoot(packageId);
-        if(root==null)throw new NotFoundException();
-        if(!shared)validatePackageRoot(root);
-        String scope=shared?"":packageId;
-        if(!List.of("declared","effective","compare","testdata-records","files","source").contains(action))
-            throw new IllegalArgumentException("Unsupported configuration inspection action");
-        if(offset<0||limit<0||limit>100||"testdata-records".equals(action)&&limit<1)
-            throw new IllegalArgumentException("Configuration pagination is invalid");
-        if(inspectionPath!=null&&(inspectionPath.length()>1024||containsControl(inspectionPath)))
-            throw new IllegalArgumentException("Configuration path is invalid");
-        if(inspectionOrigin!=null&&(inspectionOrigin.length()>1024||containsControl(inspectionOrigin)))
-            throw new IllegalArgumentException("Configuration source origin is invalid");
-        if(inspectionQuery!=null&&(inspectionQuery.length()>200||containsControl(inspectionQuery)))
-            throw new IllegalArgumentException("Configuration query must contain at most 200 printable characters");
-        if(("source".equals(action)||"files".equals(action))&&(inspectionPath!=null&&inspectionPath.isBlank()))
-            throw new IllegalArgumentException("Configuration path is invalid");
-        if("source".equals(action)&&(inspectionPath==null||inspectionPath.isBlank()))
-            throw new IllegalArgumentException("A package-relative source path is required");
-        if("source".equals(action)) {
-            if(shared&&(!Path.of(inspectionPath).normalize().startsWith(Path.of("config"))
-                    ||inspectionOrigin!=null&&!Path.of(inspectionOrigin).normalize().startsWith(Path.of("config"))))throw new NotFoundException();
-            if(inspectionReferenceId==null||inspectionReferenceId.isBlank()) {
-                if((inspectionOrigin!=null&&!inspectionOrigin.isBlank())||!inspectionPath.startsWith("config/"))throw new NotFoundException();
-            } else {
-                JsonNode claim=decodeConfigurationSourceReference(inspectionReferenceId);
-                if(!scope.equals(claim.path("packageId").asText())
-                        ||!java.util.Objects.equals(inspectionOrigin,claim.path("origin").asText())
-                        ||!java.util.Objects.equals(inspectionPath,claim.path("target").asText()))throw new NotFoundException();
-            }
-        }
-        String selected=null,other=null;
-        if(("effective".equals(action)||"testdata-records".equals(action))&&environment!=null&&!environment.isBlank())selected=inspectionEnvironment(environment,"environment");
-        if("compare".equals(action)){
-            selected=inspectionEnvironment(environment,"left environment");
-            other=inspectionEnvironment(otherEnvironment,"right environment");
-            if(selected.equalsIgnoreCase(other))throw new IllegalArgumentException("left and right environments must differ");
-        }
-        WorkerRequest request=inspectionRequest(scope,root,selected);
-        request.inspectionSharedConfiguration=shared;
-        if(shared) {
-            request.safeTextSources=config.inspection.safeTextSources.values().stream().flatMap(List::stream)
-                    .filter(path->path.startsWith("config/")).distinct().sorted().toList();
-            request.externalTextSources=List.of();request.externalSourceRoots=List.of();
-        }
-        request.inspectionAction=action;request.inspectionType="configuration";request.inspectionEnvironment=selected;request.inspectionOtherEnvironment=other;
-        request.inspectionSection=section;request.inspectionIncludeInherited=Boolean.valueOf(includeInherited);
-        request.inspectionIncludeAllFields=Boolean.valueOf(includeAllFields);
-        request.inspectionOffset=offset;request.inspectionLimit=limit;
-        request.redactionEnabled=config.inspection.redactionEnabled;request.sensitivePaths=config.inspection.sensitivePaths;request.sensitiveFieldPatterns=config.inspection.sensitiveFieldPatterns;
-        request.inspectionPath=inspectionPath;request.inspectionOrigin=inspectionOrigin;request.inspectionQuery=inspectionQuery;
-        request.inspectionReferenceId=inspectionReferenceId;
-        Map<String,Object> inspected=executeInspection(root,request);
-        if("source".equals(action))signConfigurationSourceReferences(scope,inspected);
-        return inspected;
-    }
-    private Map<String,Object> executeInspection(Path root,WorkerRequest request) throws Exception {
-        long queuedAt=System.nanoTime();
-        if(!inspectionTaskSlots.tryAcquire())throw new InspectionCapacityException();
-        InspectionTask task=new InspectionTask(request,inspectionTaskSequence.getAndIncrement(),queuedAt,root);
-        try { inspectors.execute(task); }
-        catch(RejectedExecutionException full){task.releaseSlot();throw new InspectionCapacityException();}
-        Map<String,Object> envelope;
-        try { envelope=task.get(config.inspection.timeoutMs,TimeUnit.MILLISECONDS); }
-        catch(java.util.concurrent.TimeoutException timeout){cancelInspectionTask(task);throw new InspectionTimeoutException();}
-        catch(InterruptedException interrupted){cancelInspectionTask(task);Thread.currentThread().interrupt();throw interrupted;}
-        catch(ExecutionException failure){Throwable cause=failure.getCause();if(cause instanceof Exception)throw (Exception)cause;throw new IllegalStateException("Package inspection failed",cause);}
-        finally {
-            // FutureTask can publish completion to get() callers before run() reaches its
-            // finally block. Release completed work here too, so an immediate next request
-            // does not observe a stale full-capacity slot. Timed-out/cancelled work keeps its
-            // slot until it is removed from the queue or its worker actually exits.
-            if(!task.isCancelled())task.releaseSlot();
-        }
-        String workerError=(String)envelope.get("errorCode");
-        if("package-configuration".equals(request.inspectionType)&&"ATT-CFG-001".equals(workerError)) {
-            Object raw=envelope.get("diagnostics");
-            throw new InspectionConfigurationException(safeInspectionDiagnostics(raw instanceof List?(List<?>)raw:List.of(),root));
-        }
-        if("ATT-RESOURCE-NOT-FOUND".equals(workerError))throw new NotFoundException();
-        if("ATT-RESOURCE-CURSOR-STALE".equals(workerError))throw new StaleCursorException();
-        if(List.of("load-catalog","load-detail","load-source").contains(request.inspectionAction)) {
-            Object rawDiagnostics=envelope.get("diagnostics");
-            List<Map<String,Object>> diagnostics=rawDiagnostics instanceof List
-                    ?safeInspectionDiagnostics((List<?>)rawDiagnostics,root):List.of();
-            if("ATT-CFG-001".equals(workerError)||diagnostics.stream().anyMatch(item -> "ATT-CFG-001".equals(item.get("code"))))
-                throw new InspectionConfigurationException(diagnostics.isEmpty()
-                        ?safeInspectionDiagnostics(List.of(),root):diagnostics);
-        }
-        boolean inspectorEndpoint=List.of("list","detail","source","source-file","debug-form","quick-load-form",
-                "load-catalog","load-detail","load-source","load-templates","quick-load-policy").contains(request.inspectionAction);
-        if(inspectorEndpoint&&("ATT-RESOURCE-ROOT-INVALID".equals(workerError)
-                ||"WORKER_REQUEST_INVALID".equals(workerError))) {
-            Object raw=envelope.get("diagnostics");
-            List<Map<String,Object>> diagnostics=raw instanceof List
-                    ?safeInspectionDiagnostics((List<?>)raw,root):new ArrayList<>();
-            if(diagnostics.isEmpty()||"ATT-CFG-001".equals(diagnostics.get(0).get("code"))) {
-                String code="ATT-RESOURCE-ROOT-INVALID".equals(workerError)
-                        ?"ATT-RESOURCE-ROOT-INVALID":"ATT-RESOURCE-VALIDATION-FAILED";
-                Object rawMessage=envelope.get("message");
-                String summary=rawMessage instanceof String?(String)rawMessage:"Package inspection input or configuration is invalid.";
-                summary=att.server.api.internal.DiagnosticSanitizer.redactAbsolutePaths(
-                        att.server.api.internal.DiagnosticSanitizer.redactText(summary),root);
-                diagnostics=List.of(Map.of("code",code,"summary",summary));
-            } else if("WORKER_REQUEST_INVALID".equals(workerError)) {
-                for(Map<String,Object> diagnostic:diagnostics)
-                    if("WORKER_REQUEST_INVALID".equals(diagnostic.get("code")))diagnostic.put("code","ATT-RESOURCE-VALIDATION-FAILED");
-            }
-            String code="ATT-RESOURCE-ROOT-INVALID".equals(workerError)
-                    ?"ATT-RESOURCE-ROOT-INVALID":"ATT-RESOURCE-VALIDATION-FAILED";
-            java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).warning(
-                    "ATT inspection validation rejected package="+String.valueOf(request.registeredPackageId)
-                            +" action="+String.valueOf(request.inspectionAction)+" code="+code);
-            throw new InspectionValidationException(code,diagnostics);
-        }
-        boolean draftInspection=("package-configuration".equals(request.inspectionType)&&"validate".equals(request.inspectionAction))||"run-input".equals(request.inspectionAction)||"debug-input".equals(request.inspectionAction)||"debug-form".equals(request.inspectionAction)
-                ||"quick-load-input".equals(request.inspectionAction)||"quick-load-form".equals(request.inspectionAction)
-                ||"load-templates".equals(request.inspectionAction)||"load-template-compose".equals(request.inspectionAction)
-                ||"quick-load-policy".equals(request.inspectionAction)||"load-scenario".equals(request.inspectionAction)
-                ||"load-detail".equals(request.inspectionAction);
-        if(draftInspection&&("WORKER_REQUEST_INVALID".equals(workerError)
-                ||workerError!=null&&(workerError.startsWith("ATT-DEBUG")||workerError.startsWith("ATT-LOAD"))
-                ||envelope.get("diagnostics") instanceof List&&!((List<?>)envelope.get("diagnostics")).isEmpty())) {
-            Object rawDiagnostics=envelope.get("diagnostics");
-            List<Map<String,Object>> diagnostics=new ArrayList<Map<String,Object>>();
-            if(rawDiagnostics instanceof List)for(Object raw:(List<?>)rawDiagnostics)if(raw instanceof Map) {
-                @SuppressWarnings("unchecked") Map<String,Object> value=(Map<String,Object>)raw;
-                Map<String,Object> safe=new LinkedHashMap<String,Object>();
-                for(String key:List.of("code","summary","detail","field","file","suggestion","resourceId","sourceFile","packageId")) {
-                    Object item=value.get(key);
-                    if(item instanceof String) {
-                        String text=att.server.api.internal.DiagnosticSanitizer.redactText((String)item);
-                        text=att.server.api.internal.DiagnosticSanitizer.redactAbsolutePaths(text,root);
-                        safe.put(key,text);
-                    }
-                }
-                for(String key:List.of("line","column","sourceColumn"))if(value.get(key) instanceof Number)safe.put(key,value.get(key));
-                if(!safe.isEmpty())diagnostics.add(safe);
-            }
-            if(diagnostics.isEmpty()) {
-                Map<String,Object> fallback=new LinkedHashMap<>();
-                fallback.put("code",workerError==null?"ATT-SERVER-DRAFT-INVALID":workerError);
-                Object message=envelope.get("message");
-                String summary=message instanceof String?String.valueOf(message):"Load or Debug input failed schema or target validation";
-                fallback.put("summary",att.server.api.internal.DiagnosticSanitizer.redactAbsolutePaths(att.server.api.internal.DiagnosticSanitizer.redactText(summary),root));
-                String resourceId=request.inspectionTargetId==null?request.inspectionResourceId:request.inspectionTargetId;
-                if(resourceId!=null)fallback.put("resourceId",resourceId);
-                diagnostics.add(fallback);
-            }
-            String packageId=request.registeredPackageId==null?configuredPackageId(root):request.registeredPackageId;
-            List<Map<String,String>> targets=diagnosticTargets(request);
-            for(Map<String,Object> diagnostic:diagnostics) {
-                if(packageId!=null)diagnostic.putIfAbsent("packageId",packageId);
-                String environment=request.inspectionEnvironment==null?request.environment:request.inspectionEnvironment;
-                if(environment!=null&&!environment.isBlank())diagnostic.putIfAbsent("environment",environment);
-                if(!targets.isEmpty())diagnostic.putIfAbsent("targets",targets);
-            }
-            throw new DraftValidationException(diagnostics);
-        }
-        if("ATT-RESOURCE-RESPONSE-TOO-LARGE".equals(workerError))throw new InspectionResponseTooLargeException();
-        if("ATT-RESOURCE-LIMIT".equals(workerError))
-            throw new InspectionLimitException(safeResourceLimitDiagnostics(envelope.get("diagnostics")));
-        if(workerError!=null)throw new IllegalStateException("Package inspection Worker failed: "+workerError);
-        Object raw=envelope.get("inspection");if(!(raw instanceof Map))throw new IllegalStateException("Package inspection Worker returned an invalid response");
-        JsonNode safe=projectInspectionPaths(JSON.valueToTree(att.server.api.internal.DiagnosticSanitizer.sanitizeValue(raw)),root,"");
-        @SuppressWarnings("unchecked") Map<String,Object> result=JSON.convertValue(safe,Map.class);
-        return result;
-    }
-    private List<Map<String,Object>> safeResourceLimitDiagnostics(Object raw) {
-        List<Map<String,Object>> result=new ArrayList<Map<String,Object>>();
-        if(raw instanceof List<?>)for(Object value:(List<?>)raw)if(value instanceof Map<?,?>) {
-            Map<?,?> source=(Map<?,?>)value;
-            if(!"ATT-RESOURCE-LIMIT".equals(source.get("code")))continue;
-            Object summary=source.get("summary");
-            if(!(summary instanceof String))summary=source.get("message");
-            String safeSummary=summary instanceof String
-                    ?att.server.api.internal.DiagnosticSanitizer.redactText((String)summary)
-                    :"Package inspection exceeded a deterministic scan limit.";
-            String name=source.get("limitName") instanceof String?(String)source.get("limitName"):null;
-            Number configured=source.get("configuredLimit") instanceof Number?(Number)source.get("configuredLimit"):null;
-            Number observed=source.get("observed") instanceof Number?(Number)source.get("observed"):null;
-            Map<String,Object> diagnostic=att.server.api.LimitDiagnostic.create("ATT-RESOURCE-LIMIT",safeSummary,
-                    name,configured,observed,"package",att.server.api.LimitOutcome.SUBMISSION_REJECTED,"inspection",
-                    "Reduce the package scan scope or split the package into bounded units; this is a deterministic limit and does not need a retry.",null);
-            if(!diagnostic.isEmpty())result.add(diagnostic);
-            if(result.size()>=2)break;
-        }
-        if(result.isEmpty())result.add(att.server.api.LimitDiagnostic.create("ATT-RESOURCE-LIMIT",
-                "Package inspection exceeded a deterministic scan limit.","resourceInspector.scan",null,null,
-                "package",att.server.api.LimitOutcome.SUBMISSION_REJECTED,"inspection",
-                "Reduce the package scan scope or split the package into bounded units; this is a deterministic limit and does not need a retry.",null));
-        return result;
-    }
-    private void cancelInspectionTask(InspectionTask task) {
-        task.cancel(true);
-        if(inspectors.remove(task))task.releaseSlot();
-    }
-    private final class InspectionTask extends FutureTask<Map<String,Object>> implements Comparable<Runnable> {
-        private final int priority;
-        private final long sequence;
-        private final boolean explorerList;
-        private final java.util.concurrent.atomic.AtomicBoolean slotReleased=new java.util.concurrent.atomic.AtomicBoolean();
-        InspectionTask(WorkerRequest request,long sequence,long queuedAt,Path root) {
-            super(()->{inspectionMetrics.record(QUEUE,System.nanoTime()-queuedAt);return runInspectionWorker(root,request);});
-            this.sequence=sequence;
-            this.explorerList="list".equals(request.inspectionAction);
-            // Give at most three short, read-only listings priority before normal work has a turn.
-            int credits=explorerList?inspectionExplorerPriorityCredits.getAndUpdate(value->Math.max(0,value-1)):0;
-            this.priority=credits>0?0:1;
-        }
-        @Override public int compareTo(Runnable other) {
-            if(this==other)return 0;
-            InspectionTask candidate=(InspectionTask)other;
-            int byPriority=Integer.compare(priority,candidate.priority);
-            return byPriority!=0?byPriority:Long.compare(sequence,candidate.sequence);
-        }
-        @Override public void run() {
-            if(!explorerList)inspectionExplorerPriorityCredits.set(INSPECTION_EXPLORER_PRIORITY_BURST);
-            try { super.run(); }
-            finally { releaseSlot(); }
-        }
-        void releaseSlot() { if(slotReleased.compareAndSet(false,true))inspectionTaskSlots.release(); }
-    }
-    static List<Map<String,Object>> safeInspectionDiagnostics(List<?> rawDiagnostics,Path root) {
-        List<Map<String,Object>> diagnostics=new ArrayList<>();
-        for(Object raw:rawDiagnostics)if(raw instanceof Map) {
-            @SuppressWarnings("unchecked") Map<String,Object> value=(Map<String,Object>)raw;
-            Map<String,Object> safe=new LinkedHashMap<>();
-            for(String key:List.of("code","summary","detail","field","file","sourceFile","resourceId","suggestion","packageId")) {
-                Object item=value.get(key);
-                if(item instanceof String) {
-                    String text=att.server.api.internal.DiagnosticSanitizer.redactText((String)item);
-                    safe.put(key,att.server.api.internal.DiagnosticSanitizer.redactAbsolutePaths(text,root));
-                }
-            }
-            for(String key:List.of("line","column","sourceColumn"))
-                if(value.get(key) instanceof Number)safe.put(key,value.get(key));
-            if(!safe.isEmpty())diagnostics.add(safe);
-        }
-        if(diagnostics.isEmpty())diagnostics.add(Map.of("code","ATT-CFG-001","summary","Package configuration is invalid or incomplete."));
-        return diagnostics;
-    }
-    private JsonNode projectInspectionPaths(JsonNode value,Path root,String field) {
-        if(value.isTextual() && "$attDebugKeepDefault".equals(field))return value;
-        if(value.isTextual())return JSON.getNodeFactory().textNode(semanticLocation(field)?value.asText():att.server.api.internal.DiagnosticSanitizer.redactAbsolutePaths(value.asText(),root));
-        if(value.isObject()){var copy=JSON.createObjectNode();value.fields().forEachRemaining(e->copy.set(e.getKey(),projectInspectionPaths(e.getValue(),root,semanticLocation(field)?field:e.getKey())));return copy;}
-        if(value.isArray()){var copy=JSON.createArrayNode();for(JsonNode item:value)copy.add(projectInspectionPaths(item,root,field));return copy;}
-        return value;
-    }
-    private String configuredPackageId(Path root) {
-        if(root==null)return null;
-        Path normalized=root.toAbsolutePath().normalize();
-        for(Map.Entry<String,Path> entry:packageRoots().entrySet())
-            if(entry.getValue().toAbsolutePath().normalize().equals(normalized))return entry.getKey();
-        return null;
-    }
-    private static List<Map<String,String>> diagnosticTargets(WorkerRequest request) {
-        List<Map<String,String>> targets=new ArrayList<>();
-        if(request.inspectionTargetId!=null) {
-            Map<String,String> target=new LinkedHashMap<>();
-            if(request.inspectionType!=null)target.put("type",request.inspectionType);
-            target.put("id",request.inspectionTargetId);targets.add(target);return targets;
-        }
-        Object rawWorkloads=request.inlineLoadScenario==null?null:request.inlineLoadScenario.get("workloads");
-        if(rawWorkloads instanceof List<?>)for(Object raw:(List<?>)rawWorkloads) {
-            if(!(raw instanceof Map<?,?>))continue;
-            Object rawTarget=((Map<?,?>)raw).get("target");if(!(rawTarget instanceof Map<?,?>))continue;
-            Map<?,?> source=(Map<?,?>)rawTarget;Object type=source.get("type"),id=source.get("id");
-            if(type instanceof String&&id instanceof String) {
-                Map<String,String> target=new LinkedHashMap<>();target.put("type",(String)type);target.put("id",(String)id);
-                if(!targets.contains(target))targets.add(target);
-                if(targets.size()>=32)break;
-            }
-        }
-        return targets;
-    }
-    private static String inspectionEnvironment(String value,String name) {
-        if(value==null||!value.trim().matches("[A-Za-z][A-Za-z0-9_-]{0,31}"))throw new IllegalArgumentException(name+" must be a valid profile name");
-        return value.trim();
-    }
-    private Map<String,Object> runInspectionWorker(Path root,WorkerRequest request) throws Exception {
-        String affinity=inspectionAffinity(root,request);
-        InspectionWorker worker=acquireInspectionWorker(affinity);
-        long started=System.nanoTime();
-        try {
-            Map<String,Object> response=worker.request(root,request);
-            return response;
-        }
-        finally { inspectionMetrics.record(DISPATCH,System.nanoTime()-started);worker.lock.unlock(); }
-    }
-    String inspectionCacheToken(Object context) throws Exception {
-        javax.crypto.Mac mac=javax.crypto.Mac.getInstance("HmacSHA256");
-        mac.init(new SecretKeySpec(cursorKey,"HmacSHA256"));
-        return java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(mac.doFinal(JSON.writeValueAsBytes(context)));
-    }
-    private void warmInspectionSafely() {
-        if(closing||inspectors.getActiveCount()>0||!inspectors.getQueue().isEmpty())return;
-        List<ServerConfig.WarmupKey> keys=config.inspection.warmup.keys();
-        for(int slot=0;slot<config.inspection.warmup.workers();slot++) {
-            InspectionWorker worker=inspectionWorkerPool.get(slot);
-            if(!worker.lock.tryLock())continue;
-            try {
-                if(closing||inspectors.getActiveCount()>0||!inspectors.getQueue().isEmpty())return;
-                if(worker.process!=null&&!worker.process.isAlive())worker.discard();
-                List<ServerConfig.WarmupKey> assigned=new ArrayList<>();
-                for(int i=slot;i<keys.size();i+=config.inspection.warmup.workers())assigned.add(keys.get(i));
-                if(assigned.isEmpty()&&!packageRoots().isEmpty())assigned.add(new ServerConfig.WarmupKey(packageRoots().keySet().iterator().next(),null));
-                for(ServerConfig.WarmupKey key:assigned) {
-                    int attempts=worker.warmAttempts.getOrDefault(key,0);
-                    if(worker.warmed.contains(key)||attempts>=3||System.nanoTime()<worker.warmRetryAt)continue;
-                    worker.warmAttempts.put(key,attempts+1);
-                    worker.warming=true;
-                    try {
-                        Path root=packageRoot(key.packageId());
-                        if(root==null)continue; // Missing packages never affect Server startup.
-                        WorkerRequest request=inspectionRequest(key.packageId(),root,key.environment());
-                        request.inspectionAction="list";request.inspectionType="template";request.inspectionLimit=1;request.inspectionOffset=0;
-                        Map<String,Object> response=worker.request(root,request);
-                        if(!response.containsKey("errorCode"))worker.warmed.add(key);
-                    } catch(Exception ignored) { /* No package contents or paths in background failure logs. */ }
-                    finally {worker.warming=false;worker.warmRetryAt=System.nanoTime()+TimeUnit.MILLISECONDS.toNanos(250L<<attempts);}
-                    return;
-                }
-            } finally {worker.lock.unlock();}
-        }
-    }
-    private String inspectionAffinity(Path root,WorkerRequest request) throws Exception {
-        return att.server.api.internal.InspectionCacheIdentity.requested(root,request);
-    }
-    private InspectionWorker acquireInspectionWorker(String affinity) throws InterruptedException {
-        int size=inspectionWorkerPool.size();
-        int first=(int)Math.floorMod(inspectionWorkerSelection.getAndIncrement(),(long)size);
-        for(int offset=0;offset<size;offset++) {
-            InspectionWorker worker=inspectionWorkerPool.get((first+offset)%size);
-            if(worker.lock.tryLock()) {
-                if(worker.process!=null&&worker.process.isAlive()&&worker.holds(affinity))return worker;
-                worker.lock.unlock();
-            }
-        }
-        for(int offset=0;offset<size;offset++) {
-            InspectionWorker worker=inspectionWorkerPool.get((first+offset)%size);
-            if(worker.lock.tryLock())return worker;
-        }
-        // Interactive demand may cancel a background preload when every Worker is occupied.
-        for(InspectionWorker candidate:inspectionWorkerPool)if(candidate.warming)candidate.kill();
-        InspectionWorker worker=inspectionWorkerPool.get(first);
-        worker.lock.lockInterruptibly();
-        return worker;
-    }
-    private final class InspectionWorker implements AutoCloseable {
-        final ReentrantLock lock=new ReentrantLock();
-        private volatile boolean warming;
-        private final Map<ServerConfig.WarmupKey,Integer> warmAttempts=new LinkedHashMap<>();
-        private final java.util.Set<ServerConfig.WarmupKey> warmed=new java.util.HashSet<>();
-        private long warmRetryAt;
-        private final java.util.LinkedHashSet<String> retained=new java.util.LinkedHashSet<>();
-        boolean holds(String key){synchronized(retained){return retained.contains(key);}}
-        void retainActualKeys(Map<String,Object> metrics) {
-            synchronized(retained) {
-                retained.clear();
-                Object keys=metrics.get("retainedAffinityKeys");
-                if(keys instanceof List)for(Object key:(List<?>)keys)
-                    if(key instanceof String&&((String)key).matches("[A-Za-z0-9_-]{43}")&&retained.size()<6)retained.add((String)key);
-            }
-        }
-        private volatile Map<String,Object> metrics=Collections.emptyMap();
-        private volatile Process process;
-        private volatile InspectionProtocolReader reader;
-        private volatile OutputStream writer;
+OØÛÛ™šYİ\˜][Û”™]š\Ú[ÛŠ”ÓÓ‹˜ÛÛ™\˜[YJ[œ]™Ù]
+˜ÛÛ™šYİ\˜][Û”›İ™[˜[˜ÙHŠKX\˜Û\ÜÊK™]š\Ú[ÛŠN›[
+NÂˆB‚ˆš]˜]H›ÚY™\šYTİšXİ™\^T™]š\Ú[ÛŠİš[™ÈXÚØYÙRYİš[™È[š\›Û›Y[İš[™È™]š\Ú[ÛŠH›İÜÈ^Ù\[ÛˆÂˆHİ™\šYTXÚØYÙT™]š\Ú[ÛŠXÚØYÙRY[š\›Û›Y[™]š\Ú[ÛŠNßBˆØ]Ú
+İ[Pİ\œÛÜ‘^Ù\[Ûˆİ[J^İ›İÈ™]È›ØÛÛ™›Xİ^Ù\[ÛŠUTÑT•‘T‹T‘TVKT‘U’TÒSÓ‹PÓÓ‘“PÕ‹•HÜšYÚ[˜[XÚØYÙH™]š\Ú[Ûˆ\È[˜]˜Z[X›KˆİšXİ™\^H\È›ØÚÙYÈ™]šY]ÈÚ]Hİ\œ™[XÚØYÙHÜˆ™\İÜ™HHÜšYÚ[˜[Ûİ\˜ÙHÙ\\˜][KˆŠNßBˆB‚ˆš]˜]Hš[˜[Øš™Xİ™\^SØÚÏ[™]ÈØš™Xİ
 
-        Map<String,Object> request(Path root,WorkerRequest request) throws Exception {
-            request.expectedSchemaRegistryDigest=workerSchemaRegistryDigest;
-            ensureStarted(root,Boolean.TRUE.equals(request.inspectionSharedConfiguration));
-            java.util.concurrent.atomic.AtomicBoolean timedOut=new java.util.concurrent.atomic.AtomicBoolean();
-            ScheduledFuture<?> watchdog=inspectionWatchdogs.schedule(()->{
-                timedOut.set(true);
-                kill();
-            },config.inspection.timeoutMs,TimeUnit.MILLISECONDS);
-            try {
-                writer.write(workerRequestBytes(request));
-                writer.write('\n');
-                writer.flush();
-                JsonNode result=null;
-                String errorCode=null;
-                Map<String,Object> workerDiagnostic=null;
-                long total=0;
-                while(result==null) {
-                    String line=reader.readLine(config.inspection.maxResponseBytes);
-                    if(line==null)throw new IllegalStateException("Package inspection Worker exited before completing the request");
-                    if("\u0000OVERSIZED".equals(line))throw new InspectionResponseTooLargeException();
-                    total+=line.getBytes(StandardCharsets.UTF_8).length+1L;
-                    if(total>config.inspection.maxResponseBytes)throw new InspectionResponseTooLargeException();
-                    JsonNode event=JSON.readTree(line);
-                    if(event==null||!event.isObject())continue;
-                    String eventJob=event.path("jobId").asText(null);
-                    if(eventJob!=null&&!eventJob.equals(request.jobId))
-                        throw new IllegalStateException("Package inspection Worker returned an event for another request");
-                    String kind=event.path("type").asText("");
-                    if("DIAGNOSTIC".equalsIgnoreCase(kind)) {
-                        errorCode=event.path("code").asText(null);
-                        workerDiagnostic=JSON.convertValue(event,Map.class);
-                    }
-                    if("RESULT".equalsIgnoreCase(kind))result=event;
-                }
-                if(timedOut.get())throw new InspectionTimeoutException();
-                if(result.path("exitCode").asInt(3)!=0&&errorCode==null)
-                    throw new IllegalStateException("Package inspection Worker did not complete successfully");
-                Map<String,Object> response=new LinkedHashMap<>();
-                if(result.path("inspectionMetrics").isObject()) {
-                    Map<String,Object> reported=JSON.convertValue(result.path("inspectionMetrics"),Map.class);
-                    if(result.path("inspectionMetricsDelta").asBoolean(false)) {
-                        Map<String,Object> merged=new LinkedHashMap<>(metrics);merged.putAll(reported);metrics=merged;
-                    } else metrics=reported;
-                    retainActualKeys(metrics);
-                }
-                else {metrics=Collections.emptyMap();synchronized(retained){retained.clear();}}
-                inspectionMetrics.add(RESPONSE_BYTES,total);
-                if(errorCode!=null) {
-                    response.put("errorCode",errorCode);
-                    if(workerDiagnostic!=null) {
-                        Map<String,Object> diagnostic=new LinkedHashMap<>();
-                        for(String key:List.of("code","summary","detail","field","file","suggestion","resourceId","sourceFile","packageId",
-                                "limitName","scope","outcome","stage","remediationHint","artifactRef")) {
-                            Object value=workerDiagnostic.get(key);
-                            if(value instanceof String)diagnostic.put(key,value);
-                        }
-                        for(String key:List.of("line","column","sourceColumn","configuredLimit","limit","observed","actual","usage"))
-                            if(workerDiagnostic.get(key) instanceof Number)diagnostic.put(key,workerDiagnostic.get(key));
-                        Object summary=diagnostic.get("summary");
-                        if(!(summary instanceof String)||((String)summary).isBlank()) {
-                            Object message=workerDiagnostic.get("message");
-                            if(message instanceof String&&!((String)message).isBlank())diagnostic.put("summary",message);
-                        }
-                        if(!diagnostic.isEmpty())response.put("diagnostics",Collections.singletonList(diagnostic));
-                    }
-                    return response;
-                }
-                JsonNode inspection=result.path("result").path("summary").path("inspection");
-                if(!inspection.isObject())throw new IllegalStateException("Package inspection Worker returned no inspection data");
-                response.put("inspection",JSON.convertValue(inspection,Map.class));
-                return response;
-            } catch(Exception error) {
-                discard();
-                if(timedOut.get())throw new InspectionTimeoutException();
-                throw error;
-            } finally {
-                watchdog.cancel(false);
-            }
-        }
+NÂˆš]˜]Hš[˜[X\İš[™Ë™\^T™]šY]Ïˆ™\^T™]šY]ÜÏ[™]È˜]˜K][˜ÛÛ˜İ\œ™[ÛÛ˜İ\œ™[\ÚX\Š
+NÂˆš]˜]H™XÛÜ™™\^T™]šY]Êİš[™ÈÛİ\˜ÙKİš[™Èš[˜Ú\[İš[™È˜YYİš[™ÈXÚØYÙRYİš[™È^Xİ][Û•\Kİš[™ÈÛİ\˜ÙTÛXŞKˆİš[™ÈÜšYÚ[˜[™]š\Ú[Û‹İš[™ÈÙ[XİY™]š\Ú[Û‹İš[™ÈÛÛ™šYİ\˜][Û‘YÙ\İˆİš[™ÈÛİ\˜ÙT]Øš™Xİ›ÙHÜšYÚ[˜[Yš[š][Û‹Øš™Xİ›ÙHYš[š][Û‹X\İš[™ËØš™XİˆÜšYÚ[˜[ÛÛ™šYİ\˜][Û‹ˆX\İš[™ËØš™XİˆÛÛ™šYİ\˜][Û‹İš[™È˜[Y][ÛÛÙK\İX\İš[™ËØš™XİˆXYÛ›ÜİXÜËˆ[œİ[^\™\Ğ]
+HßB‚ˆš]˜]HX\İš[™Ëİš[™ÏˆİÛ™Y^Xİ][Û”ÜXÊİš[™ÈYİš[™Èš[˜Ú\[
+H›İÜÈ^Ù\[ÛˆÂˆ™\]Z\™SØØ[Ü\˜]ÜŠš[˜Ú\[
+NÜ™\]Z\™R›Ø“İÛ™\ŠYš[˜Ú\[
+NÂˆX\İš[™Ëİš[™Ïˆ™XÛÜ™\İÜ™K™^Xİ][Û”ÜXÊY
+NÚYŠ™XÛÜ™O[[
+]›İÈ™]È›İ›İ[™^Ù\[ÛŠ
+NÂˆ›ÛÛX[ˆİÛ™Y\š[˜Ú\[™\]X[Ê™XÛÜ™™Ù]
+œš[˜Ú\[ŠJNÂˆYŠ[İÛ™Y	‰œ™XÛÜ™™Ù]
+›ØØİ\œ™[˜ÙRYŠHO[[
+HÂˆX\İš[™ËØš™XİˆØØİ\œ™[˜ÙO\İÜ™KœØÚY[Q^Xİ][ÛŠ™XÛÜ™™Ù]
+›ØØİ\œ™[˜ÙRYŠJNÂˆØYØÚY[HØÚY[O[ØØİ\œ™[˜ÙOO[[Û[œİÜ™KœØÚY[Jİš[™Ë˜[YSÙŠØØİ\œ™[˜ÙK™Ù]
+œØÚY[RYŠJJNÂˆİÛ™Y\ØÚY[HO[[	‰Šš[˜Ú\[™\]X[ÊØÚY[K˜Ü™X]YJ_š[˜Ú\[™\]X[ÊØÚY[K™^Xİ][Û”š[˜Ú\[
+JNÂˆBˆYŠ[İÛ™Y
+]›İÈ™]È›İ›İ[™^Ù\[ÛŠ
+NÂˆ™]\›ˆ™XÛÜ™ÂˆBˆX\İš[™ËØš™Xİˆ›Ø”™\^Jİš[™ÈYİš[™Èš[˜Ú\[
+H›İÜÈ^Ù\[ÛˆÂˆX\İš[™Ëİš[™Ïˆ™XÛÜ™[İÛ™Y^Xİ][Û”ÜXÊYš[˜Ú\[
+NÓX\İš[™ËØš™XİˆšY]Ï[™]È[šÙY\ÚX\Š
+NÂˆšY]Ëœ]
+š›Ø’Y‹Y
+NİšY]Ëœ]
+˜]˜Z[X›H‹™XÛÜ™™Ù]
+œÜXÈŠHO[[
+NÂˆYŠ™XÛÜ™™Ù]
+œÜXÈŠOO[[
+]šY]Ëœ]
+œ™X\ÛÛˆ‹™XÛÜ™™Ù]
+œ™X\ÛÛˆŠOO[[È”™\[ˆ[˜]˜Z[X›H›Üˆ\È\İÜšXØ[›Ø‹ˆÛÛ™šYİ\™HH™]È[ˆœ›ÛHHİ\œ™[XÚØYÙKˆœ™XÛÜ™™Ù]
+œ™X\ÛÛˆŠJNÂˆ[ÙHÂˆ›Ø‘^Xİ][Û”ÜXÈÜXÏR›Ø‘^Xİ][Û”ÜXËœ\œÙJ™XÛÜ™™Ù]
+œÜXÈŠJNÂˆYŠÜXË˜ÛÛ™šYİ\˜][ÛŠ
+HO[[
+]šY]Ëœ]
+˜ÛÛ™šYİ\˜][Ûˆ‹ÜXË˜ÛÛ™šYİ\˜][ÛŠ
+JNÂˆšY]Ëœ]
+™Yš[š][Ûˆ‹ÜXË™Yš[š][ÛŠ
+JNİšY]Ëœ]
+œ™]š\Ú[Û”ÛXŞH‹œ™Z™Xİ\XÚØYÙKXÚ[™Ù\ÈŠNİšY]Ëœ]
+œ™]š\Ú[Ûˆ‹ÜXËœ™]š\Ú[ÛŠ
+JNÂˆYŠÜXË˜[YKš\ÊœÛİ\˜ÙT]ŠJ]šY]Ëœ]
+œÛİ\˜ÙT]‹ÜXË˜[YK™Ù]
+œÛİ\˜ÙT]ŠK˜\Õ^
 
-        private void ensureStarted(Path root,boolean shared) throws Exception {
-            if(closing)throw new InterruptedException("Server is shutting down");
-            Process current=process;
-            if(current!=null&&current.isAlive())return;
-            discard();
-            if(shared) {
-                if(!root.equals(ServerConfig.runtimeConfigRoot(config.runtimeConfigPath)))throw new NotFoundException();
-            } else validatePackageRoot(root);
-            List<String> classpathEntries=workerClasspath();
-            String cp=String.join(java.io.File.pathSeparator,classpathEntries);
-            ProcessBuilder builder=new ProcessBuilder(config.javaExecutable.toString(),"-Xmx"+config.inspection.heapMaxMb+"m",
-                    "-cp",cp,"att.worker.WorkerMain","--inspection-daemon");
-            builder.directory(root.toFile());
-            long startupStarted=System.nanoTime();
-            Process started=startWorkerProcess(builder);
-            inspectionMetrics.record(STARTUP,System.nanoTime()-startupStarted);
-            process=started;
-            inspectionProcesses.put(started,Boolean.TRUE);
-            writer=started.getOutputStream();
-            reader=new InspectionProtocolReader(new InputStreamReader(started.getInputStream(),StandardCharsets.UTF_8));
-            if(closing){discard();throw new InterruptedException("Server is shutting down");}
-            startStderrDrainer(started,"att-server-inspector-stderr");
-        }
+JNÂˆBˆYŠ™XÛÜ™™Ù]
+œ™\[“Ù’›Ø’YŠHO[[
+]šY]Ëœ]
+œ™\[“Ù’›Ø’Y‹™XÛÜ™™Ù]
+œ™\[“Ù’›Ø’YŠJNÂˆYŠ
+™XÛÜ™™Ù]
+›ÜšYÚ[˜][™ÔØÚY[RYŠHO[[™XÛÜ™™Ù]
+›ØØİ\œ™[˜ÙRYŠHO[[
+I‰˜ÛÛ™šYËœØÚY[[™Ë™[˜X›Y
+HÂˆX\İš[™ËØš™XİˆØØİ\œ™[˜ÙO\™XÛÜ™™Ù]
+›ØØİ\œ™[˜ÙRYŠOO[[Û[œİÜ™KœØÚY[Q^Xİ][ÛŠ™XÛÜ™™Ù]
+›ØØİ\œ™[˜ÙRYŠJNÂˆİš[™ÈØÚY[RY\™XÛÜ™™Ù]
+›ÜšYÚ[˜][™ÔØÚY[RYŠNÂˆYŠØÚY[RYO[[	‰›ØØİ\œ™[˜ÙHO[[
+\ØÚY[RYTİš[™Ë˜[YSÙŠØØİ\œ™[˜ÙK™Ù]
+œØÚY[RYŠJNÂˆØYØÚY[HØÚY[O\ØÚY[RYO[[Û[œİÜ™KœØÚY[JØÚY[RY
+NÂˆYŠØÚY[HO[[	‰Šš[˜Ú\[™\]X[ÊØÚY[K˜Ü™X]YJ_š[˜Ú\[™\]X[ÊØÚY[K™^Xİ][Û”š[˜Ú\[
+JJ]šY]Ëœ]
+›ÜšYÚ[˜][™ÔØÚY[RY‹ØÚY[KšY
+NÂˆBˆ™]\›ˆšY]ÎÂˆBˆX\İš[™ËØš™XİˆÜ™X]R›Ø”™\^Q˜Y
+İš[™ÈYİš[™Èš[˜Ú\[
+H›İÜÈ^Ù\[ÛˆÂˆ™]\›ˆÜ™X]R›Ø”™\^Q˜Y
+Yš[˜Ú\[”ÓÓ‹˜Ü™X]SØš™Xİ›ÙJ
+JNÂˆBˆX\İš[™ËØš™XİˆÜ™X]R›Ø”™\^Q˜Y
+İš[™ÈYİš[™Èš[˜Ú\[œÛÛ“›ÙH™\]Y\İ
+H›İÜÈ^Ù\[ÛˆÂˆYŠXÛÛ™šYËš[œÜXİ[Û‹™[˜X›Y
+]›İÈ™]È[YØ[\™İ[Y[^Ù\[ÛŠ”™\^H™\]Z\™\ÈXÚØYÙH[œÜXİ[ÛˆÈ™H[˜X›YHHÙ\™\ˆŠNÂˆŞ[˜Ú›Ûš^™Y
+™\^SØÚÊHÂˆ™\]Z\™SØš™Xİ
+™\]Y\İ”™\^H˜YÜ[ÛœÈ]\İ™HH”ÓÓˆØš™XİŠNÜ™\]Z\™SÛ›QšY[Ê™\]Y\İœÛİ\˜ÙTÛXŞH‹›İ™\œšY\ÈŠNÂˆİš[™ÈÛİ\˜ÙTÛXŞO\™\]Y\İš\ÊœÛİ\˜ÙTÛXŞHŠOÜ™\]Z\™Y
+™\]Y\İœÛİ\˜ÙTÛXŞHŠNˆœİšXİÂˆYŠTÙ]›ÙŠ˜İ\œ™[‹œİšXİŠK˜ÛÛZ[œÊÛİ\˜ÙTÛXŞJJ]›İÈ™]È[YØ[\™İ[Y[^Ù\[ÛŠœÛİ\˜ÙTÛXŞH]\İ™Hİ\œ™[ÜˆİšXİŠNÂˆX\İš[™Ëİš[™Ïˆ™XÛÜ™[İÛ™Y^Xİ][Û”ÜXÊYš[˜Ú\[
+NÂˆYŠ™XÛÜ™™Ù]
+œÜXÈŠOO[[
+]›İÈ™]È™\^R[œ]Z\ÜÚ[™Ñ^Ù\[ÛŠ”™\[ˆ\È[˜]˜Z[X›H™XØ]\ÙH\È›Øˆ\È›ÈØY™[H™]Z[™Y^Xİ][ÛˆYš[š][Û‹ˆ™KY[\ˆHZ\ÜÚ[™È[œ]È[ˆH™]È[‹ˆŠNÂˆ›Ø‘^Xİ][Û”ÜXÈÜXÏR›Ø‘^Xİ][Û”ÜXËœ\œÙJ™XÛÜ™™Ù]
+œÜXÈŠJNÓØš™Xİ›ÙHÜšYÚ[˜[Yš[š][Û\ÜXË™Yš[š][ÛŠ
+NÂˆ™\]Z\™T™\^T™]šY]ĞØ\XÚ]Jš[˜Ú\[
+NÂˆØš™Xİ›ÙHYš[š][ÛR›Ø”™\^Sİ™\œšY\Ë˜\JÜšYÚ[˜[Yš[š][Û‹™\]Y\İ™Ù]
+›İ™\œšY\ÈŠJNÂˆ›ÛÛX[ˆXÚØYÙQY˜][[š\›Û›Y[\ÜXË˜ÛÛ™šYİ\˜][ÛŠ
+HO[[	‰ˆœXÚØYÙH‹™\]X[ÊÜXË˜ÛÛ™šYİ\˜][ÛŠ
+K™Ù]
+™[š\›Û›Y[ÜšYÚ[ˆŠJNÂˆœÛÛ“›ÙH[š\›Û›Y[İ™\œšYO\™\]Y\İœ]
+›İ™\œšY\ÈŠKœ]
+™[š\›Û›Y[ŠNÂˆYŠXÚØYÙQY˜][[š\›Û›Y[	‰ŠY[š\›Û›Y[İ™\œšYKš\Õ^X[
 
-        private void kill() {
-            Process current=process;
-            if(current!=null&&current.isAlive())forceTree(current);
-        }
+_[š\›Û›Y[İ™\œšYK˜\Õ^
 
-        private void discard() {
-            Process current=process;
-            process=null;
-            metrics=Collections.emptyMap();
-            synchronized(retained){retained.clear();}
-            warmed.clear();
-            if(!warming){warmAttempts.clear();warmRetryAt=0;}
-            InspectionProtocolReader input=reader;reader=null;
-            OutputStream output=writer;writer=null;
-            if(current!=null) {
-                if(current.isAlive())current.destroyForcibly();
-                inspectionProcesses.remove(current);
-            }
-            try { if(input!=null)input.close(); } catch(Exception ignored) { }
-            try { if(output!=null)output.close(); } catch(Exception ignored) { }
-        }
+Kš\Ğ›[šÊ
+JJYYš[š][Û‹œ™[[İ™J™[š\›Û›Y[ŠNÂˆİš[™ÈXÚØYÙRY\™\]Z\™Y
+Yš[š][Û‹œXÚØYÙRYŠK[š\›Û›Y[[Ü[Û˜[^
+Yš[š][Û‹™[š\›Û›Y[ŠNÂˆYŠœİšXİ‹™\]X[ÊÛİ\˜ÙTÛXŞJJ]™\šYTİšXİ™\^T™]š\Ú[ÛŠXÚØYÙRY[š\›Û›Y[ÜXËœ™]š\Ú[ÛŠ
+JNÂˆ›ÛÛX[ˆ[Hœ[ˆ‹™\]X[ÊYš[š][Û‹œ]
+™^Xİ][Û•\HŠK˜\Õ^
 
-        @Override public void close() {
-            Process current=process;
-            kill();
-            try {if(!lock.tryLock(5,TimeUnit.SECONDS)){java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).warning("Inspection Worker cleanup lock did not quiesce");return;}}
-            catch(InterruptedException interrupted){Thread.currentThread().interrupt();return;}
-            try {
-                discard();
-                if(current!=null)try{current.waitFor(config.gracefulStopMs,TimeUnit.MILLISECONDS);}
-                catch(InterruptedException interrupted){Thread.currentThread().interrupt();}
-            } finally {lock.unlock();}
-        }
-    }
-    private String encodeCursor(String packageId,String type,String query,String sort,String direction,int offset,String revision,String principal) throws Exception {
-        Map<String,Object> payload=new LinkedHashMap<>();payload.put("packageId",packageId);payload.put("type",type);payload.put("query",query);payload.put("sort",sort);payload.put("direction",direction);payload.put("offset",offset);payload.put("revision",revision);payload.put("principal",principal);
-        byte[] nonce=new byte[12];cursorRandom.nextBytes(nonce);
-        Cipher cipher=Cipher.getInstance("AES/GCM/NoPadding");cipher.init(Cipher.ENCRYPT_MODE,new SecretKeySpec(cursorKey,"AES"),new GCMParameterSpec(128,nonce));
-        byte[] ciphertext=cipher.doFinal(JSON.writeValueAsBytes(payload));byte[] token=new byte[nonce.length+ciphertext.length];
-        System.arraycopy(nonce,0,token,0,nonce.length);System.arraycopy(ciphertext,0,token,nonce.length,ciphertext.length);
-        return Base64.getUrlEncoder().withoutPadding().encodeToString(token);
-    }
-    private void signConfigurationSourceReferences(String packageId,Map<String,Object> source) throws Exception {
-        Object rawOrigin=source.get("logicalPath"),rawReferences=source.get("fileReferences");
-        if(!(rawOrigin instanceof String)||!(rawReferences instanceof List))return;
-        String origin=(String)rawOrigin;
-        if(packageId.isEmpty()) {
-            ((List<?>)rawReferences).removeIf(raw->!(raw instanceof Map)
-                    ||!String.valueOf(((Map<?,?>)raw).get("logicalPath")).startsWith("config/"));
-        }
-        for(Object raw:(List<?>)rawReferences)if(raw instanceof Map) {
-            @SuppressWarnings("unchecked") Map<String,Object> reference=(Map<String,Object>)raw;
-            Object target=reference.get("logicalPath");
-            if(target instanceof String)reference.put("referenceId",encodeConfigurationSourceReference(packageId,origin,(String)target));
-        }
-    }
-    private String encodeConfigurationSourceReference(String packageId,String origin,String target) throws Exception {
-        Map<String,Object> payload=new LinkedHashMap<>();payload.put("kind","configuration-source-reference");
-        payload.put("packageId",packageId);payload.put("origin",origin);payload.put("target",target);
-        if(packageId.isEmpty())payload.put("scope","shared-configuration");
-        byte[] nonce=new byte[12];cursorRandom.nextBytes(nonce);
-        Cipher cipher=Cipher.getInstance("AES/GCM/NoPadding");cipher.init(Cipher.ENCRYPT_MODE,new SecretKeySpec(cursorKey,"AES"),new GCMParameterSpec(128,nonce));
-        byte[] encrypted=cipher.doFinal(JSON.writeValueAsBytes(payload));byte[] token=new byte[nonce.length+encrypted.length];
-        System.arraycopy(nonce,0,token,0,nonce.length);System.arraycopy(encrypted,0,token,nonce.length,encrypted.length);
-        return Base64.getUrlEncoder().withoutPadding().encodeToString(token);
-    }
-    private JsonNode decodeConfigurationSourceReference(String token) {
-        try {
-            if(token==null||token.length()>4096)throw new IllegalArgumentException();
-            byte[] bytes=Base64.getUrlDecoder().decode(token);if(bytes.length<28)throw new IllegalArgumentException();
-            byte[] nonce=java.util.Arrays.copyOfRange(bytes,0,12),encrypted=java.util.Arrays.copyOfRange(bytes,12,bytes.length);
-            Cipher cipher=Cipher.getInstance("AES/GCM/NoPadding");cipher.init(Cipher.DECRYPT_MODE,new SecretKeySpec(cursorKey,"AES"),new GCMParameterSpec(128,nonce));
-            JsonNode claim=JSON.readTree(cipher.doFinal(encrypted));
-            if(!"configuration-source-reference".equals(claim.path("kind").asText())
-                    ||(claim.path("packageId").asText().isBlank()&&!"shared-configuration".equals(claim.path("scope").asText()))||claim.path("origin").asText().isBlank()
-                    ||claim.path("target").asText().isBlank())throw new IllegalArgumentException();
-            return claim;
-        } catch(Exception invalid) { throw new NotFoundException(); }
-    }
-    private Cursor decodeCursor(String token,String packageId,String type,String query,String sort,String direction,String principal) throws Exception {
-        if(token.length()>4096)throw new IllegalArgumentException("cursor is too long");byte[] bytes;
-        try{bytes=Base64.getUrlDecoder().decode(token);}catch(IllegalArgumentException bad){throw new IllegalArgumentException("cursor is invalid");}
-        if(bytes.length<28)throw new IllegalArgumentException("cursor is invalid");
-        byte[] nonce=java.util.Arrays.copyOfRange(bytes,0,12),ciphertext=java.util.Arrays.copyOfRange(bytes,12,bytes.length),payload;
-        try{Cipher cipher=Cipher.getInstance("AES/GCM/NoPadding");cipher.init(Cipher.DECRYPT_MODE,new SecretKeySpec(cursorKey,"AES"),new GCMParameterSpec(128,nonce));payload=cipher.doFinal(ciphertext);}
-        catch(Exception bad){throw new IllegalArgumentException("cursor is invalid");}
-        JsonNode value;try{value=JSON.readTree(payload);}catch(Exception bad){throw new IllegalArgumentException("cursor is invalid");}
-        if(!packageId.equals(value.path("packageId").asText())||!java.util.Objects.equals(type,value.path("type").isNull()?null:value.path("type").asText())||!query.equals(value.path("query").asText())||!sort.equals(value.path("sort").asText())||!direction.equals(value.path("direction").asText())||!principal.equals(value.path("principal").asText()))throw new IllegalArgumentException("cursor does not match this resource query");
-        int offset=value.path("offset").asInt(-1);String revision=value.path("revision").asText("");if(offset<1||offset>20000||!revision.matches("[a-f0-9]{64}"))throw new IllegalArgumentException("cursor is invalid");return new Cursor(offset,revision);
-    }
-    private static boolean containsControl(String value){for(int i=0;i<value.length();i++)if(Character.isISOControl(value.charAt(i)))return true;return false;}
-    List<LoadSchedule> loadSchedules() throws Exception {requireSchedulingEnabled();return store.schedules();}
-    LoadSchedule loadSchedule(String id) throws Exception {requireSchedulingEnabled();LoadSchedule schedule=store.schedule(id);if(schedule==null)throw new NotFoundException();return schedule;}
-    Map<String,Object> loadScheduleView(LoadSchedule schedule,String principal) {
-        Map<String,Object> view=loadScheduleView(schedule);
-        if(schedule.sourceJobId!=null)try {ownedExecutionSpec(schedule.sourceJobId,principal);view.put("sourceJobId",schedule.sourceJobId);}catch(Exception unavailable){}
-        return view;
-    }
-    Map<String,Object> loadScheduleView(LoadSchedule schedule) {
-        Map<String,Object> view=JSON.convertValue(schedule,Map.class);
-        view.remove("sourceJobId");view.remove("runInput");view.remove("listSummary");view.put("executionType","load".equals(schedule.effectiveJobType())?"load":"run");
-        view.put("revisionPolicy",schedule.expectedRevisionDigest!=null?effectivePackageChangePolicy(schedule):"validate-current-package");
-        view.put("effectivePackageChangePolicy",effectivePackageChangePolicy(schedule));view.put("serverPackageChangePolicy",config.scheduling.packageChangePolicy);
-        view.put("storedRevisionDigest",schedule.expectedRevisionDigest);view.remove("packageRootIdentity");
-        view.remove("inlineScenario");view.remove("inlineDebugInput");view.remove("debugResourceId");view.remove("expectedRevisionDigest");view.remove("catalogSnapshot");
-        view.put("jobType",schedule.effectiveJobType());
-        view.put("targetIdentity",schedule.listSummary==null?Map.of():schedule.listSummary);
-        view.put("inlineSnapshot",Boolean.valueOf(schedule.inlineScenario!=null||schedule.inlineDebugInput!=null||schedule.runInput!=null));
-        if(schedule.runInput!=null) {
-            Object target=schedule.runInput.get("target");
-            if(target instanceof Map)view.put("debugTarget",target);
-            else view.put("selectedCaseIds",schedule.runInput.get("caseIds"));
-        }
-        if("debug".equals(schedule.effectiveJobType()))view.put("debugTarget",Map.of("type",schedule.debugTargetType,"id",schedule.debugTargetId));
-        return view;
-    }
-    List<Map<String,Object>> loadScheduleExecutions(String id,int limit) throws Exception {requireSchedulingEnabled();if(store.schedule(id)==null&&store.scheduleExecutions(id,1).isEmpty())throw new NotFoundException();return store.scheduleExecutions(id,limit);}
-    LoadSchedule createLoadSchedule(JsonNode input,String principal) throws Exception {
-        requireSchedulingEnabled();
-        requireLocalOperator(principal);
-        LoadSchedule schedule=buildLoadSchedule(input,null,principal);schedule.id="S"+UUID.randomUUID().toString().replace("-","").toUpperCase();schedule.createdBy=principal;schedule.executionPrincipal=principal;schedule.createdAt=clock.instant().toString();
-        if(input.hasNonNull("draftId"))for(ReplayReview review:replayReviews.values())if(review.draftId.equals(input.path("draftId").asText())&&review.principal.equals(principal)) {
-            ownedExecutionSpec(review.source,principal);
-            if(!review.expiresAt.isAfter(clock.instant()))throw new NotFoundException();
-            schedule.sourceJobId=review.source;
-            JobExecutionSpec spec=JobExecutionSpec.parse(store.executionSpec(review.source).get("spec"));
-            verifyPackageRevision(schedule.packageId,schedule.environment,spec.revision());
-            schedule.expectedRevisionDigest=spec.revision();
-        }
-        store.createSchedule(schedule,config.scheduling.maxSchedules);store.audit(principal,"SCHEDULE_CREATE",null,schedule.packageId,"CREATED");return schedule;
-    }
-    Map<String,Object> previewLoadSchedule(JsonNode input) {
-        if(input==null||!input.isObject())throw new IllegalArgumentException("A JSON object is required");
-        input.fieldNames().forEachRemaining(key->{if(!Set.of("timezone","cron","runAt").contains(key))throw new IllegalArgumentException("Unknown preview field: "+key);});
-        if(input.hasNonNull("runAt")) {
-            if(input.hasNonNull("cron"))throw new IllegalArgumentException("Provide exactly one cron or runAt trigger");
-            String fire=futureRunAt(fieldText(input,"runAt",null,true));
-            String zone=fieldText(input,"timezone","UTC",false);scheduleZone(zone);
-            return Map.of("timezone",zone,"runAt",fire,"nextRunAt",fire,"nextOccurrences",List.of(fire));
-        }
-        String timezone=fieldText(input,"timezone",null,true),cronText=fieldText(input,"cron",null,true);
-        java.time.ZoneId zone=scheduleZone(timezone);CronExpression cron=CronExpression.parse(cronText,config.scheduling.minimumIntervalMinutes);
-        cron.validateTimezoneMinimumInterval(zone,config.scheduling.minimumIntervalMinutes,clock.instant());
-        List<String> nextOccurrences=new ArrayList<>();Instant cursor=clock.instant();
-        for(int i=0;i<5;i++){cursor=cron.nextAfter(cursor,zone);nextOccurrences.add(cursor.toString());}
-        return Map.of("timezone",timezone,"cron",cronText,"nextRunAt",nextOccurrences.get(0),"nextOccurrences",List.copyOf(nextOccurrences));
-    }
-    LoadSchedule updateLoadSchedule(String id,JsonNode input,String principal) throws Exception {
-        requireLocalOperator(principal);
-        requireSchedulingEnabled();LoadSchedule prior=store.schedule(id);if(prior==null)throw new NotFoundException();
-        LoadSchedule schedule=buildLoadSchedule(input,prior,principal);schedule.id=id;schedule.createdBy=prior.createdBy;schedule.createdAt=prior.createdAt;
-        schedule.updatedBy=principal;schedule.updatedAt=clock.instant().toString();
-        if(!prior.enabled&&schedule.enabled||!java.util.Objects.equals(prior.cron,schedule.cron)||!LoadSchedule.sameInstant(prior.runAt,schedule.runAt)||!prior.timezone.equals(schedule.timezone))
-            schedule.nextRunAt=schedule.runAt==null?nextRun(schedule.cron,schedule.timezone,clock.instant()).toString():futureRunAt(schedule.runAt);
-        else schedule.nextRunAt=prior.nextRunAt;
-        LoadSchedule updated=store.updateSchedule(schedule,prior.updatedAt);if(updated==null)throw new NotFoundException();
-        store.audit(principal,"SCHEDULE_UPDATE",null,schedule.packageId,"UPDATED");return updated;
-    }
-    LoadSchedule setLoadScheduleEnabled(String id,boolean enabled,String principal) throws Exception {
-        requireLocalOperator(principal);
-        requireSchedulingEnabled();Instant now=clock.instant();LoadSchedule schedule;
-        LoadSchedule current=store.schedule(id);if(current==null)throw new NotFoundException();
-        if(enabled)validateScheduleForActivation(current,principal);
-        String next=enabled?(current.runAt==null?nextRun(current.cron,current.timezone,now).toString():futureRunAt(current.runAt)):null;
-        synchronized(store) {
-            LoadSchedule latest=store.schedule(id);if(latest==null)throw new NotFoundException();
-            if(!java.util.Objects.equals(current.updatedAt,latest.updatedAt))throw new ScheduleConflictException();
-            schedule=store.setScheduleEnabled(id,enabled,principal,now.toString(),next);
-        }
-        if(schedule==null)throw new NotFoundException();
-        store.audit(principal,enabled?"SCHEDULE_RESUME":"SCHEDULE_PAUSE",null,schedule.packageId,enabled?"ENABLED":"PAUSED");
-        return schedule;
-    }
-    void deleteLoadSchedule(String id,String principal) throws Exception {requireSchedulingEnabled();requireLocalOperator(principal);LoadSchedule schedule=store.schedule(id);if(schedule==null)throw new NotFoundException();store.deleteSchedule(id);store.audit(principal,"SCHEDULE_DELETE",null,schedule.packageId,"DELETED");}
-    Map<String,Object> triggerLoadSchedule(String id,String principal) throws Exception {
-        requireSchedulingEnabled();requireLocalOperator(principal);
-        LoadSchedule schedule=store.authorizeManualScheduleExecution(id,principal,"local".equals(config.authMode),clock.instant().toString());
-        if(schedule==null)throw new NotFoundException();
-        String executionPrincipal=schedule.executionPrincipal==null||schedule.executionPrincipal.isBlank()?schedule.createdBy:schedule.executionPrincipal;
-        Map<String,Object> occurrence=loadScheduleScheduler.trigger(schedule,executionPrincipal,principal);
-        store.audit(principal,"SCHEDULE_TRIGGER",String.valueOf(occurrence.get("jobId")),schedule.packageId,String.valueOf(occurrence.get("status")));
-        return occurrence;
-    }
+JNÂˆX\İš[™ËØš™Xİˆ˜Y[[Ôİš[™È˜[Y][ÛÛÙO[[Ó\İX\İš[™ËØš™XİˆXYÛ›ÜİXÜÏPÛÛXİ[ÛœË™[\S\İ
 
-    private void requireLocalOperator(String principal) throws Exception {
-        if("local".equals(config.authMode)&&!store.isActiveUser(principal))throw new NotFoundException();
-    }
+NÂˆHÂˆYŠ[ŠY˜YXÜ™X]T[‘˜Y
+Yš[š][Û‹š[˜Ú\[YK[
+NÂˆ[ÙHYŠÜXË˜[YKš\ÊœÛİ\˜ÙT]ŠJHÂˆİš[™È]\ØY™T™[]]™JÜXË˜[YKœ]
+œÛİ\˜ÙT]ŠK˜\Õ^
 
-    private Map<String,Object> submitScheduledJob(LoadSchedule schedule,String occurrenceId,String executionPrincipal) throws Exception {
-        Map<String,Object> occurrence=store.scheduleExecution(occurrenceId);
-        String triggeredBy=occurrence==null?null:(String)occurrence.get("triggeredBy");
-        String actualExecutionPrincipal=executionPrincipal==null||executionPrincipal.isBlank()
-                ?(schedule.executionPrincipal==null||schedule.executionPrincipal.isBlank()?schedule.createdBy:schedule.executionPrincipal)
-                :executionPrincipal;
-        JobProvenance provenance=new JobProvenance(schedule.id,schedule.createdBy,actualExecutionPrincipal,triggeredBy,triggeredBy);
-        schedule=prepareScheduledExecution(schedule,executionPrincipal);
-        Map<String,Object> accepted="run".equals(schedule.effectiveJobType())
-                ?submitScheduledRun(schedule,occurrenceId,actualExecutionPrincipal,provenance)
-                :"debug".equals(schedule.effectiveJobType())
-                ? submitScheduledDebug(schedule,occurrenceId,actualExecutionPrincipal,provenance)
-                : submitScheduledLoad(schedule,occurrenceId,actualExecutionPrincipal,provenance);
-        store.audit(executionPrincipal,"SCHEDULE_EXECUTE",String.valueOf(accepted.get("jobId")),schedule.packageId,"ACCEPTED");
-        return accepted;
-    }
+KœØÙ[˜\š[ÈŠNİ˜[Y]TXÚØYÙT]
+XÚØYÙT›Ûİ
+XÚØYÙRY
+K]œØÙ[˜\š[ÈŠNÂˆØYØÚY[HÛİ\˜ÙO[™]ÈØYØÚY[J
+NÜÛİ\˜ÙKœXÚØYÙRY\XÚØYÙRYÜÛİ\˜ÙK™[š\›Û›Y[Y[š\›Û›Y[ÂˆÛİ\˜ÙKš[›[™TØÙ[˜\š[ÏR”ÓÓ‹˜ÛÛ™\˜[YJYš[š][Û‹™Ù]
+œØÙ[˜\š[ÈŠKX\˜Û\ÜÊNÂˆ˜[Y]YØÚY[YØÙ[˜\š[È˜[Y]Y]˜[Y]TØÚY[YØÙ[˜\š[ÊXÚØYÙT›Ûİ
+XÚØYÙRY
+KÛİ\˜ÙKÛİ\˜ÙKš[›[™TØÙ[˜\š[Ë˜[ÙJNÂˆ˜[Y]TXÚØYÙP˜XÚÙY™\^SØY[Z]ÊÛÛ™šYËš[›[™SØY˜[Y]YœØÙ[˜\š[ÊNÂˆYŠ˜[Y]Y˜ÛÛZ[œÔÙ[œÚ]]™U˜[Y\Ê]›İÈ™]È™\^R[œ]Z\ÜÚ[™Ñ^Ù\[ÛŠ”Ù[œÚ]]™HĞQ[œ]ÈÙ\™H›İ™]Z[™Yˆ[\ˆ[HYØZ[ˆ›İYÚH]]Üš^™Y[œ]ÛÛ›ÛËˆŠNÂˆYš[š][Û‹œÙ]
+œØÙ[˜\š[È‹”ÓÓ‹˜[YUÕ™YJ˜[Y]YœØÙ[˜\š[ÊJNÂˆX\İš[™ËØš™XİˆÛÛ™šYİ\˜][ÛXÛÛ™šYİ\˜][Û”™]š\Ú[ÛŠ™\ÛÛ™Q^Xİ][ÛÛÛ™šYİ\˜][ÛŠXÚØYÙRYXÚØYÙT›Ûİ
+XÚØYÙRY
+K[š\›Û›Y[
+K˜[Y]Yœ™]š\Ú[Û‘YÙ\İ
+NÂˆØ][ÙÓØY˜Yİ]H™]Z[™Y[™]ÈØ][ÙÓØY˜Yİ]JÈŠÕURQœ˜[™ÛUURQ
 
-    private Map<String,Object> submitScheduledRun(LoadSchedule schedule,String occurrenceId,String executionPrincipal,JobProvenance provenance) throws Exception {
-        ObjectNode input=JSON.valueToTree(schedule.runInput);input.set("configurationProvenance",JSON.valueToTree(schedule.configuration));applyInspectionPolicy(input,schedule.packageId);
-        JobExecutionSpec retained=capturePrevalidatedExecutionSpec("run",input,null);
-        return submit("run",input,executionPrincipal,true,occurrenceId,true,null,null,retained,false,provenance);
-    }
-    private void validateScheduledRun(LoadSchedule schedule) throws Exception {
-        Path root=packageRoot(schedule.packageId);if(root==null)throw new NotFoundException();validatePackageRoot(root);
-        if(schedule.runInput==null||schedule.expectedRevisionDigest==null)throw new IllegalArgumentException("Scheduled RUN snapshot is incomplete");
-        if(schedule.inlineDebugInput!=null){validateScheduledDebugInput(root,schedule);return;}
-        WorkerRequest request=JSON.convertValue(schedule.runInput,WorkerRequest.class);
-        request=applyWorkerPolicy(request);request.protocolVersion="att-worker/v1";request.command="inspect";
-        request.jobId="I"+UUID.randomUUID().toString().replace("-","");request.packageRoot=root.toString();
-        request.config=config.runtimeConfigPath.toString();request.inspectionAction="run-input";
-        ObjectNode policy=JSON.createObjectNode();applyInspectionPolicy(policy,schedule.packageId);JSON.readerForUpdating(request).readValue(policy);
-        Map<String,Object> inspected=executeInspection(root,request);
-        if(!(inspected.get("selectedCaseIds") instanceof List<?> ids)||!(schedule.runInput.get("caseIds") instanceof List<?> saved)
-                ||!new java.util.HashSet<>(ids).equals(new java.util.HashSet<>(saved)))throw new IllegalArgumentException("Scheduled RUN case selection changed; review a replacement schedule");
-        requireScheduleRevision(schedule,String.valueOf(inspected.get("revisionDigest")));
-    }
+KÔİš[™Ê
+Kœ™\XÙJ‹H‹ˆŠKÕ\\Ø\ÙJ
+Kš[˜Ú\[XÚØYÙRY[š\›Û›Y[]˜[Y]Yœ™]š\Ú[Û‘YÙ\İ˜[Y]Y›[Ù[˜[Y]YœØÙ[˜\š[Ë[ÛÛ™šYİ\˜][Û‹ÛØÚËš[œİ[
 
-    private String effectivePackageChangePolicy(LoadSchedule schedule){return schedule.packageChangePolicy==null?config.scheduling.packageChangePolicy:schedule.packageChangePolicy;}
-    private static String packageRootIdentity(Path root) throws Exception {
-        return java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256").digest(root.toRealPath().toString().getBytes(java.nio.charset.StandardCharsets.UTF_8)));
-    }
-    private void requireScheduleRevision(LoadSchedule schedule,String revision) {
-        if(schedule.expectedRevisionDigest!=null&&!schedule.expectedRevisionDigest.equals(revision))
-            throw new ScheduleSourceChangedException(schedule.expectedRevisionDigest,revision,effectivePackageChangePolicy(schedule));
-    }
-    private void validateScheduleForActivation(LoadSchedule schedule,String principal) throws Exception {LoadSchedule checked=prepareScheduledExecution(schedule,principal);schedule.listSummary=checked.listSummary;}
+Kœ\ÓZ[\ÊQ•ÕÓRSTÊJNÂˆŞ[˜Ú›Ûš^™Y
+˜YØÚÊ^Ù^\™Q˜YÊ
+NØÚXÚÑ˜YØ\XÚ]Jš[˜Ú\[
+NØØ][ÙÓØY˜YËœ]
+™]Z[™YšY™]Z[™Y
+NßBˆ˜YXØ][ÙÓØY˜YšY]Ê™]Z[™Y
+NÂˆH[ÙHÂˆØš™Xİ›ÙH[œ]YYš[š][Û‹™Y\ÛÜJ
+NÚ[œ]œ™[[İ™J™^Xİ][Û•\HŠNÙ˜YXÜ™X]PY˜[˜ÙYØY˜Y
+[œ]š[˜Ú\[[
+NÂˆœÛÛ“›ÙH›Ü›X[^™YR”ÓÓ‹˜[YUÕ™YJ˜Y™Ù]
+œØÙ[˜\š[ÈŠJNÚYŠ›Ü›X[^™Yš\ÓØš™Xİ
 
-    /** Returns an execution-only copy. Stored inputs and their original revision remain immutable. */
-    private LoadSchedule prepareScheduledExecution(LoadSchedule original,String principal) throws Exception {
-        if("local".equals(config.authMode)) {
-            if(!store.isActiveUser(principal))throw new IllegalArgumentException("Schedule owner is no longer authorized");
-            String automaticPrincipal=original.executionPrincipal==null||original.executionPrincipal.isBlank()?original.createdBy:original.executionPrincipal;
-            if(!store.isActiveUser(automaticPrincipal))
-                throw new IllegalArgumentException("Schedule owner is no longer authorized");
-            if(original.executionIdentityMigratedFrom==null&&!store.isActiveUser(original.createdBy))
-                throw new IllegalArgumentException("Schedule owner is no longer authorized");
-        }
-        Path root=packageRoot(original.packageId);
-        if(root==null||!Files.isDirectory(root,java.nio.file.LinkOption.NOFOLLOW_LINKS))throw new IllegalArgumentException("Configured schedule package is no longer available");
-        validatePackageRoot(root);
-        if(original.packageRootIdentity!=null&&!original.packageRootIdentity.equals(packageRootIdentity(root)))throw new IllegalArgumentException("Schedule package registration changed; review a replacement schedule");
-        LoadSchedule execution=original.copy();
-        if(original.expectedRevisionDigest!=null) {
-            WorkerRequest request=inspectionRequest(original.packageId,root,original.environment);
-            request.config=config.runtimeConfigPath.toString();request.inspectionAction="revision";
-            String current=String.valueOf(executeInspection(root,request).get("revisionDigest"));
-            if(!current.matches("[a-f0-9]{64}"))throw new IllegalStateException("Schedule revision validation did not return a revision");
-            if(!current.equals(original.expectedRevisionDigest)) {
-                String policy=effectivePackageChangePolicy(original);
-                if(!"ignore".equals(policy))throw new ScheduleSourceChangedException(original.expectedRevisionDigest,current,policy);
-                // Legacy records lack the registration identity needed to safely opt into a different source.
-                if(original.packageRootIdentity==null)throw new IllegalArgumentException("This legacy schedule requires a reviewed replacement before revalidating a changed package");
-                execution.expectedRevisionDigest=current;
-                if(execution.runInput!=null)execution.runInput.put("expectedRevisionDigest",current);
-                ValidatedScheduledScenario validated=validateScheduleInputs(root,execution);
-                if(validated!=null){execution.inlineScenario=deepMap(validated.scenario);execution.expectedRevisionDigest=validated.revisionDigest;execution.validatedSensitiveSource=validated.containsSensitiveValues;}
-                store.recordScheduleSourceChange(original,current,false,clock.instant().toString());
-                store.audit(principal,"SCHEDULE_SOURCE_REVALIDATED",null,original.packageId,"schedule="+original.id+";stored="+original.expectedRevisionDigest+";current="+current+";policy="+policy+";source="+(original.packageChangePolicy==null?"server":"schedule"));
-                refreshScheduleConfiguration(execution,original,root);
-                return execution;
-            }
-        }
-        ValidatedScheduledScenario validated=validateScheduleInputs(root,execution);
-        if(validated!=null){execution.inlineScenario=deepMap(validated.scenario);execution.expectedRevisionDigest=validated.revisionDigest;execution.validatedSensitiveSource=validated.containsSensitiveValues;}
-        if("package-revision-changed".equals(original.sourceStatus))
-            store.recordScheduleSourceRestored(original,original.expectedRevisionDigest,clock.instant().toString());
-        if(execution.configuration==null)refreshScheduleConfiguration(execution,original,root);
-        return execution;
-    }
-    private void refreshScheduleConfiguration(LoadSchedule execution,LoadSchedule approved,Path root) throws Exception {
-        Map<String,Object> current=new LinkedHashMap<>(resolveExecutionConfiguration(execution.packageId,root,execution.environment));
-        if(approved.configuration!=null){current.put("approvedConfigurationIdentity",approved.configuration.get("configurationIdentity"));current.put("environmentOrigin",approved.configuration.get("environmentOrigin"));Map<String,Object> origins=new LinkedHashMap<>((Map<String,Object>)current.get("origins"));origins.put("environment",approved.configuration.get("environmentOrigin"));current.put("origins",origins);Map<String,Object> paths=new LinkedHashMap<>((Map<String,Object>)current.get("authoredPaths"));paths.put("environment",((Map<?,?>)approved.configuration.get("authoredPaths")).get("environment"));current.put("authoredPaths",paths);}
-        execution.configuration=configurationRevision(current,execution.expectedRevisionDigest);
-    }
-    private ValidatedScheduledScenario validateScheduleInputs(Path root,LoadSchedule schedule) throws Exception {
-        if("run".equals(schedule.effectiveJobType()))validateScheduledRun(schedule);
-        else if("debug".equals(schedule.effectiveJobType()))validateScheduledDebugInput(root,schedule);
-        else return validateScheduleScenario(root,schedule);
-        return null;
-    }
+JYYš[š][Û‹œÙ]
+œØÙ[˜\š[È‹›Ü›X[^™Y
+NÂˆBˆHØ]Ú
+™\^R[œ]Z\ÜÚ[™Ñ^Ù\[ÛˆZ\ÜÚ[™Ê^İ˜[Y][ÛÛÙOHUTÑT•‘T‹T‘TVKRS”USRTÔÒS‘ÈÙXYÛ›ÜİXÜÏS\İ›ÙŠ™\^QXYÛ›ÜİXÊ˜[Y][ÛÛÙKš[œ]È‹Z\ÜÚ[™Ë™Ù]Y\ÜØYÙJ
+JJNßBˆØ]Ú
+[›[™SØY[Z]^Ù\[Ûˆ[Z]
+^İ˜[Y][ÛÛÙOHUTÑT•‘T‹RS“S‘KSĞQSSRUÙXYÛ›ÜİXÜÏS\İ›ÙŠ™\^QXYÛ›ÜİXÊ˜[Y][ÛÛÙKœØÙ[˜\š[Ë›ØY‹[Z]™Ù]Y\ÜØYÙJ
+JJNßBˆØ]Ú
+[œÜXİ[ÛÛÛ™šYİ\˜][Û‘^Ù\[Ûˆ[˜[Y
+^İ˜[Y][ÛÛÙOHUTÑT•‘T‹T‘TVKUSQUSÓ‹QRSQÙXYÛ›ÜİXÜÏ\ØY™T™\^QXYÛ›ÜİXÜÊ[˜[Y™XYÛ›ÜİXÜË˜[Y][ÛÛÙJNßBˆØ]Ú
+˜Y˜[Y][Û‘^Ù\[Ûˆ[˜[Y
+^ÂˆYŠ™\^QXYÛ›ÜİXÜÔÚİÓZ\ÜÚ[™Ô™\Ûİ\˜ÙJ[˜[Y™XYÛ›ÜİXÜÊJ^İ˜[Y][ÛÛÙOHUTÑT•‘T‹T‘TVKT‘TÓÕTÑKSRTÔÒS‘ÈÙXYÛ›ÜİXÜÏ\ØY™T™\^QXYÛ›ÜİXÜÊ[˜[Y™XYÛ›ÜİXÜË˜[Y][ÛÛÙJNßBˆ[ÙHİ˜[Y][ÛÛÙOHUTÑT•‘T‹T‘TVKUSQUSÓ‹QRSQÙXYÛ›ÜİXÜÏ\ØY™T™\^QXYÛ›ÜİXÜÊ[˜[Y™XYÛ›ÜİXÜË˜[Y][ÛÛÙJNßBˆHØ]Ú
+›İ›İ[™^Ù\[ÛˆZ\ÜÚ[™Ê^İ˜[Y][ÛÛÙOHUTÑT•‘T‹T‘TVKT‘TÓÕTÑKSRTÔÒS‘ÈÙXYÛ›ÜİXÜÏS\İ›ÙŠ™\^QXYÛ›ÜİXÊ˜[Y][ÛÛÙK\™Ù]ÜˆØÙ[˜\š[È‹•H™]Z[™Y™\Ûİ\˜ÙH\ÈZ\ÜÚ[™ÈÜˆ›ÈÛ™Ù\ˆ]˜Z[X›H[ˆ\ÈXÚØYÙKˆÚÛÜÙH[ˆ]˜Z[X›H™\Ûİ\˜ÙK[ˆ˜[Y]HYØZ[‹ˆŠJNßBˆØ]Ú
+İ[Pİ\œÛÜ‘^Ù\[Ûˆİ[J^İ˜[Y][ÛÛÙOHUTÑT•‘T‹T‘TVKQQ•TÕSHÙXYÛ›ÜİXÜÏS\İ›ÙŠ™\^QXYÛ›ÜİXÊ˜[Y][ÛÛÙKœXÚØYÙH‹•HXÚØYÙHÚ[™ÙY\š[™È˜[Y][Û‹ˆ˜[Y]H\ÙHY]ÈYØZ[‹ˆŠJNßBˆØ]Ú
+[YØ[\™İ[Y[^Ù\[Ûˆ[˜[Y
+^İ˜[Y][ÛÛÙOHUTÑT•‘T‹T‘TVKUSQUSÓ‹QRSQÙXYÛ›ÜİXÜÏS\İ›ÙŠ™\^QXYÛ›ÜİXÊ˜[Y][ÛÛÙK[È\™Ù]ÜˆÙ[Xİ[ÛˆˆœØÙ[˜\š[È‹[˜[Y™Ù]Y\ÜØYÙJ
+JJNßBˆYŠ˜[Y][ÛÛÙHO[[
+\™]\›ˆÜ™X]R[˜[Y™\^Q˜Y
+Yš[˜Ú\[ÜXËÛİ\˜ÙTÛXŞKÜšYÚ[˜[Yš[š][Û‹Yš[š][Û‹XÚØYÙRY[‹˜[Y][ÛÛÙKXYÛ›ÜİXÜÊNÂˆİš[™È˜YYTİš[™Ë˜[YSÙŠ˜Y™Ù]
+™˜YYŠJNÂˆİš[™ÈÙ[XİY™]š\Ú[ÛTİš[™Ë˜[YSÙŠ˜Y™Ù]
+œ™]š\Ú[Û‘YÙ\İŠJNÂˆYŠ\Ù[XİY™]š\Ú[Û‹›X]Ú\Ê–ØKYŒNW^ÍHŠJ]›İÈ™]È[YØ[İ]Q^Ù\[ÛŠ”™\^H˜[Y][ÛˆY›İ›ÙXÙHHİ\œ™[XÚØYÙH™]š\Ú[ÛˆŠNÂˆX\İš[™ËØš™XİˆÛÛ™šYİ\˜][ÛR”ÓÓ‹˜ÛÛ™\˜[YJ˜Y™Ù]
+˜ÛÛ™šYİ\˜][ÛˆŠKX\˜Û\ÜÊNÂˆYŠÛÛ™šYİ\˜][ÛO[[ÛÛ™šYİ\˜][Û‹š\Ñ[\J
+J]›İÈ™]È[YØ[İ]Q^Ù\[ÛŠ”™\^H˜[Y][ÛˆY›İ™\ÛÛ™Hİ\œ™[ÛÛ™šYİ\˜][ÛˆŠNÂˆİš[™ÈY™™Xİ]™Q[š\›Û›Y[XÛÛ™šYİ\˜][Û‹™Ù]
+™[š\›Û›Y[ŠH[œİ[˜Ù[Ùˆİš[™ÏÊİš[™ÊXÛÛ™šYİ\˜][Û‹™Ù]
+™[š\›Û›Y[ŠN™[š\›Û›Y[ÂˆYŠY™™Xİ]™Q[š\›Û›Y[O[[
+YYš[š][Û‹œ]
+™[š\›Û›Y[‹Y™™Xİ]™Q[š\›Û›Y[
+NÂˆYŠœİšXİ‹™\]X[ÊÛİ\˜ÙTÛXŞJI‰ˆ\Ù[XİY™]š\Ú[Û‹™\]X[ÊÜXËœ™]š\Ú[ÛŠ
+JJ]™\šYTİšXİ™\^T™]š\Ú[ÛŠXÚØYÙRYY™™Xİ]™Q[š\›Û›Y[ÜXËœ™]š\Ú[ÛŠ
+JNÂˆ™\]Z\™T™\^T™]šY]ĞØ\XÚ]Jš[˜Ú\[
+NÂˆİš[™È[[UURQœ˜[™ÛUURQ
 
-    private Map<String,Object> submitScheduledLoad(LoadSchedule schedule,String occurrenceId,String executionPrincipal,JobProvenance provenance) throws Exception {
-        Path root=packageRoot(schedule.packageId);
-        if(root==null||!Files.isDirectory(root,java.nio.file.LinkOption.NOFOLLOW_LINKS))
-            throw new IllegalArgumentException("Configured schedule package is no longer available");
-        validatePackageRoot(root);
-        Map<String,Object> scenario=schedule.inlineScenario;
-        if(scenario==null||schedule.expectedRevisionDigest==null)throw new IllegalArgumentException("Validated scheduled Load snapshot is incomplete");
-        com.fasterxml.jackson.databind.node.ObjectNode input=JSON.createObjectNode();input.put("packageId",schedule.packageId);
-        input.set("configurationProvenance",JSON.valueToTree(schedule.configuration));
-        if(schedule.config!=null)input.put("config",schedule.config);if(schedule.environment!=null)input.put("environment",schedule.environment);
-        input.set("inlineLoadScenario",JSON.valueToTree(scenario));input.put("expectedRevisionDigest",schedule.expectedRevisionDigest);
-        applyInspectionPolicy(input,schedule.packageId);
-        JobExecutionSpec retained=schedule.validatedSensitiveSource?null:capturePrevalidatedExecutionSpec("load",input,occurrenceId);
-        return submit("load",input,"load-schedule:"+schedule.id,true,occurrenceId,true,null,null,retained,false,provenance);
-    }
+KÔİš[™Ê
+NÒ[œİ[^\™\ÏXÛØÚËš[œİ[
 
-    private Map<String,Object> submitScheduledDebug(LoadSchedule schedule,String occurrenceId,String executionPrincipal,JobProvenance provenance) throws Exception {
-        Path root=packageRoot(schedule.packageId);
-        if(root==null||!Files.isDirectory(root,java.nio.file.LinkOption.NOFOLLOW_LINKS))
-            throw new IllegalArgumentException("Configured schedule package is no longer available");
-        validatePackageRoot(root);
-        String revisionDigest=schedule.expectedRevisionDigest;
-        if(revisionDigest==null)throw new IllegalArgumentException("Validated scheduled Debug snapshot is incomplete");
-        com.fasterxml.jackson.databind.node.ObjectNode input=JSON.createObjectNode();input.put("packageId",schedule.packageId);
-        input.set("configurationProvenance",JSON.valueToTree(schedule.configuration));
-        if(schedule.config!=null)input.put("config",schedule.config);if(schedule.environment!=null)input.put("environment",schedule.environment);
-        input.set("target",JSON.valueToTree(Map.of("type",schedule.debugTargetType,"id",schedule.debugTargetId)));
-        input.set("inlineDebugInput",JSON.valueToTree(schedule.inlineDebugInput));input.put("expectedRevisionDigest",revisionDigest);
-        input.put("draftResourceId",schedule.debugResourceId);applyInspectionPolicy(input,schedule.packageId);
-        JobExecutionSpec retained=capturePrevalidatedExecutionSpec("debug",input,null);
-        return submit("debug",input,"debug-schedule:"+schedule.id,true,occurrenceId,true,null,null,retained,false,provenance);
-    }
+Kœ\ÓZ[\ÊQ•ÕÓRSTÊNÂˆ™\^T™]šY]ÜËœ]
+[[™]È™\^T™]šY]ÊYš[˜Ú\[˜YYXÚØYÙRY[Èœ[ˆˆ›ØY‹Ûİ\˜ÙTÛXŞKÜXËœ™]š\Ú[ÛŠ
+KÙ[XİY™]š\Ú[Û‹ˆ™\^PÛÛ™šYİ\˜][Û‘YÙ\İ
+ÛÛ™šYİ\˜][ÛŠKÜXË˜[YKœ]
+œÛİ\˜ÙT]ŠK˜\Õ^
+[
+KÜšYÚ[˜[Yš[š][Û‹™Y\ÛÜJ
+KYš[š][Û‹™Y\ÛÜJ
+KÜXË˜ÛÛ™šYİ\˜][ÛŠ
+Kˆ]œÙ\™\‹˜\KÛÛ™šYİ\˜][Û”Û˜\Úİ˜ÛÜJÛÛ™šYİ\˜][ÛŠK[ÛÛXİ[ÛœË™[\S\İ
 
-    private String validateScheduledDebugInput(Path root,LoadSchedule schedule) throws Exception {
-        if(!config.inspection.enabled)throw new NotFoundException();
-        if(schedule.inlineDebugInput==null||!List.of("template","flow","tool").contains(schedule.debugTargetType)
-                ||schedule.debugTargetId==null||schedule.debugTargetId.isBlank()
-                ||schedule.debugResourceId==null||schedule.expectedRevisionDigest==null
-                ||!schedule.expectedRevisionDigest.matches("[a-f0-9]{64}"))
-            throw new IllegalArgumentException("Scheduled Debug snapshot is incomplete");
-        WorkerRequest request=inspectionRequest(schedule.packageId,root,schedule.environment);
-        request.config=config.runtimeConfigPath.toString();
-        request.inspectionAction="debug-input";request.inspectionType=schedule.debugTargetType;
-        request.inspectionTargetId=schedule.debugTargetId;request.inlineDebugInput=deepMap(schedule.inlineDebugInput);
-        Map<String,Object> inspected=executeInspection(root,request);
-        Object rawDigest=inspected.get("revisionDigest"),rawSensitive=inspected.get("containsSensitiveValues");
-        Object rawResource=inspected.get("resource"),rawTarget=inspected.get("target");
-        if(!(rawDigest instanceof String)||!((String)rawDigest).matches("[a-f0-9]{64}")
-                ||!(rawSensitive instanceof Boolean)||!(rawResource instanceof Map)||!(rawTarget instanceof Map))
-            throw new IllegalStateException("Debug validation Worker returned an invalid response");
-        @SuppressWarnings("unchecked") Map<String,Object> resource=(Map<String,Object>)rawResource;
-        @SuppressWarnings("unchecked") Map<String,Object> target=(Map<String,Object>)rawTarget;
-        if(!schedule.debugResourceId.equals(String.valueOf(resource.get("resourceId")))
-                ||!schedule.debugTargetType.equals(String.valueOf(target.get("type")))
-                ||!schedule.debugTargetId.equals(String.valueOf(target.get("id"))))
-            throw new IllegalArgumentException("Scheduled Debug target changed; create a new schedule from a fresh preview");
-        if(((Boolean)rawSensitive).booleanValue())
-            throw new IllegalArgumentException("A Debug schedule cannot store submitted credentials, private values, or other classified sensitive fields. Keep classified package defaults protected or remove them from the override.");
-        String digest=(String)rawDigest;
-        requireScheduleRevision(schedule,digest);
-        return digest;
-    }
+K^\™\ÊJNÂˆX\İš[™ËØš™Xİˆ™\İ[[™]È[šÙY\ÚX\Š›Ø”™\^JYš[˜Ú\[
+JNÂˆØš™XİÛÛÛ™šYİ\˜][Û\™\İ[œ™[[İ™J˜ÛÛ™šYİ\˜][ÛˆŠNÚYŠÛÛÛ™šYİ\˜][ÛˆO[[
+\™\İ[œ]
+›ÜšYÚ[˜[ÛÛ™šYİ\˜][Ûˆ‹ÛÛÛ™šYİ\˜][ÛŠNÂˆ™\İ[œ]
+œØÚ[XU™\œÚ[Ûˆ‹˜]Z›Ø‹\™\^KY˜YİŒHŠNÜ™\İ[œ]
+œÛİ\˜ÙR›Ø’Y‹Y
+NÜ™\İ[œ]
+™Yš[š][Ûˆ‹Yš[š][ÛŠNÜ™\İ[œ]
+›ÜšYÚ[˜[Yš[š][Ûˆ‹ÜšYÚ[˜[Yš[š][ÛŠNÜ™\İ[œ]
+œÛİ\˜ÙTÛXŞH‹Ûİ\˜ÙTÛXŞJNÂˆ™\İ[œ]
+›ÜšYÚ[˜[™]š\Ú[Ûˆ‹ÜXËœ™]š\Ú[ÛŠ
+JNÜ™\İ[œ]
+˜İ\œ™[™]š\Ú[Ûˆ‹Ù[XİY™]š\Ú[ÛŠNÜ™\İ[œ]
+˜ÛÛ™šYİ\˜][Ûˆ‹ÛÛ™šYİ\˜][ÛŠNÂˆ™\İ[œ]
+›Z\ÜÚ[™ÑšY[È‹™\^SZ\ÜÚ[™ÑšY[ÊYš[š][ÛŠJNÂˆ™\İ[œ]
+š[[Y‹[[
+NÜ™\İ[œ]
+™˜YY‹˜YY
+NÜ™\İ[œ]
+™˜Y™Yˆ‹˜YY
+NÜ™\İ[œ]
+™^\™\Ğ]‹^\™\ËÔİš[™Ê
+JNÜ™\İ[œ]
+œ™]šY]È‹˜Y
+NÜ™]\›ˆ™\İ[ÂˆBˆBˆš]˜]HX\İš[™ËØš™XİˆÜ™X]R[˜[Y™\^Q˜Y
+İš[™ÈYİš[™Èš[˜Ú\[›Ø‘^Xİ][Û”ÜXÈÜXËİš[™ÈÛİ\˜ÙTÛXŞKˆØš™Xİ›ÙHÜšYÚ[˜[Yš[š][Û‹Øš™Xİ›ÙHYš[š][Û‹İš[™ÈXÚØYÙRY›ÛÛX[ˆ[‹İš[™È˜[Y][ÛÛÙKˆ\İX\İš[™ËØš™XİˆXYÛ›ÜİXÜÊH›İÜÈ^Ù\[ÛˆÂˆİš[™È[š\›Û›Y[[Ü[Û˜[^
+Yš[š][Û‹™[š\›Û›Y[ŠKÙ[XİY™]š\Ú[ÛHˆÓX\İš[™ËØš™XİˆÛÛ™šYİ\˜][ÛPÛÛXİ[ÛœË™[\SX\
 
-    private ValidatedScheduledScenario validateScheduleScenario(Path root,LoadSchedule schedule) throws Exception {
-        Map<String,Object> requested=schedule.inlineScenario==null?readScheduledScenario(root,schedule.scenario):deepMap(schedule.inlineScenario);
-        ValidatedScheduledScenario validated=validateScheduledScenario(root,schedule,requested,schedule.inlineScenario==null);
-        if(schedule.load!=null&&!schedule.load.isEmpty()) {
-            Map<String,Object> overridden=withScheduledLoadOptions(validated.scenario,schedule.load);
-            validated=validateScheduledScenario(root,schedule,overridden,false);
-        }
-        if(schedule.inlineScenario!=null&&validated.containsSensitiveValues)
-            throw new IllegalArgumentException("An inline schedule cannot store credentials, private values, or other classified sensitive fields. Remove them from the Load draft or keep them in package-managed configuration.");
-        requireScheduleRevision(schedule,validated.revisionDigest);
-        validateScheduledLoadLimits(config.inlineLoad,validated.scenario);schedule.loadModel=validated.model;
-        schedule.listSummary=JobListIdentity.load(JSON.valueToTree(validated.scenario));return validated;
-    }
+NÂˆHÂˆ]›Ûİ\XÚØYÙT›Ûİ
+XÚØYÙRY
+NÚYŠ›ÛİO[[
+]›İÈ™]È›İ›İ[™^Ù\[ÛŠ
+NÂˆÛÜšÙ\”™\]Y\İ™]š\Ú[Û”™\]Y\İZ[œÜXİ[Û”™\]Y\İ
+XÚØYÙRY›Ûİ[š\›Û›Y[
+NÜ™]š\Ú[Û”™\]Y\İš[œÜXİ[ÛXİ[ÛHœ™]š\Ú[ÛˆÂˆX\İš[™ËØš™Xİˆ[œÜXİYY^Xİ]R[œÜXİ[ÛŠ›Ûİ™]š\Ú[Û”™\]Y\İ
+NÓØš™XİYÙ\İZ[œÜXİY™Ù]
+œ™]š\Ú[Û‘YÙ\İŠNÂˆYŠYÙ\İ[œİ[˜Ù[Ùˆİš[™É‰Š
+İš[™ÊYYÙ\İ
+K›X]Ú\Ê–ØKYŒNW^ÍHŠJ\Ù[XİY™]š\Ú[ÛJİš[™ÊYYÙ\İÂˆHØ]Ú
+^Ù\[ÛˆYÛ›Ü™Y
+HÈÊˆÙY\HY]Üˆ˜Y]˜Z[X›HÚ[ˆİ\œ™[XÚØYÙH[œÜXİ[Ûˆ]Ù[ˆ\È[˜]˜Z[X›Kˆ
+‹ÈBˆHÂˆ]›Ûİ\XÚØYÙT›Ûİ
+XÚØYÙRY
+NÚYŠ›ÛİO[[
+XÛÛ™šYİ\˜][ÛXÛÛ™šYİ\˜][Û”™]š\Ú[ÛŠ™\ÛÛ™Q^Xİ][ÛÛÛ™šYİ\˜][ÛŠXÚØYÙRY›Ûİ[š\›Û›Y[
+KÙ[XİY™]š\Ú[Û‹š\Ñ[\J
+OÛ[œÙ[XİY™]š\Ú[ÛŠNÂˆHØ]Ú
+^Ù\[ÛˆYÛ›Ü™Y
+HÈÊˆXYÛ›ÜİXÜÈ™[İÈ^Z[ˆÚHH™]Z[™YYš[š][Ûˆİ[™YYÈY][™Ëˆ
+‹ÈBˆİš[™ÈY™™Xİ]™Q[š\›Û›Y[XÛÛ™šYİ\˜][Û‹™Ù]
+™[š\›Û›Y[ŠH[œİ[˜Ù[Ùˆİš[™ÏÊİš[™ÊXÛÛ™šYİ\˜][Û‹™Ù]
+™[š\›Û›Y[ŠN™[š\›Û›Y[ÂˆYŠY™™Xİ]™Q[š\›Û›Y[O[[
+YYš[š][Û‹œ]
+™[š\›Û›Y[‹Y™™Xİ]™Q[š\›Û›Y[
+NÂˆİš[™È˜Y™YJ[È”ˆˆÈŠJÕURQœ˜[™ÛUURQ
 
-    private Map<String,Object> readScheduledScenario(Path root,String relative) throws Exception {
-        Path scenario=root.resolve(relative).normalize();validatePackagePath(root,relative,"scenario");
-        if(!Files.isRegularFile(scenario)||!scenario.toRealPath().startsWith(root.toRealPath()))throw new IllegalArgumentException("Scheduled Load scenario must be a regular package file");
-        if(Files.size(scenario)>config.maxRequestBytes)throw new IllegalArgumentException("Scheduled Load scenario exceeds server.maxRequestBytes");
-        org.yaml.snakeyaml.LoaderOptions options=new org.yaml.snakeyaml.LoaderOptions();options.setAllowDuplicateKeys(false);
-        options.setMaxAliasesForCollections(20);options.setCodePointLimit(config.maxRequestBytes);
-        Object raw;try(var stream=Files.newInputStream(scenario)){raw=new Yaml(new org.yaml.snakeyaml.constructor.SafeConstructor(options)).load(stream);}
-        if(!(raw instanceof Map<?,?>))throw new IllegalArgumentException("Scheduled Load scenario must be a YAML mapping");
-        @SuppressWarnings("unchecked") Map<String,Object> result=(Map<String,Object>)JSON.convertValue(raw,Map.class);
-        return result;
-    }
+KÔİš[™Ê
+Kœ™\XÙJ‹H‹ˆŠKÕ\\Ø\ÙJ˜]˜K][“ØØ[K”“ÓÕ
+NÂˆ[œİ[^\™\ÏXÛØÚËš[œİ[
 
-    private ValidatedScheduledScenario validateScheduledScenario(Path root,LoadSchedule schedule,Map<String,Object> scenario,
-                                                                  boolean packageFile) throws Exception {
-        WorkerRequest request=inspectionRequest(schedule.packageId,root,schedule.environment);
-        request.config=config.runtimeConfigPath.toString();
-        request.inspectionAction="load-scenario";request.inlineLoadScenario=scenario;
-        if(packageFile)request.inspectionPath=schedule.scenario;
-        Map<String,Object> inspected=executeInspection(root,request);
-        Object rawScenario=inspected.get("normalizedScenario"),rawDigest=inspected.get("revisionDigest"),rawModel=inspected.get("model"),rawSensitive=inspected.get("containsSensitiveValues");
-        if(!(rawScenario instanceof Map)||!(rawDigest instanceof String)||!((String)rawDigest).matches("[a-f0-9]{64}")
-                ||!(rawModel instanceof String)||!List.of("virtualUsers","arrivalRate").contains(rawModel)||!(rawSensitive instanceof Boolean))
-            throw new IllegalStateException("Load validation Worker returned an invalid response");
-        @SuppressWarnings("unchecked") Map<String,Object> normalized=(Map<String,Object>)JSON.convertValue(rawScenario,Map.class);
-        return new ValidatedScheduledScenario(normalized,(String)rawDigest,(String)rawModel,((Boolean)rawSensitive).booleanValue());
-    }
+Kœ\ÓZ[\ÊQ•ÕÓRSTÊNÜ™\]Z\™T™\^T™]šY]ĞØ\XÚ]Jš[˜Ú\[
+NÂˆ™\^T™]šY]ÜËœ]
+URQœ˜[™ÛUURQ
 
-    private static Map<String,Object> withScheduledLoadOptions(Map<String,Object> source,Map<String,String> options) {
-        @SuppressWarnings("unchecked") Map<String,Object> scenario=(Map<String,Object>)JSON.convertValue(source,Map.class);
-        Object raw=scenario.get("workloads");if(!(raw instanceof List<?> workloads)||workloads.isEmpty())throw new IllegalArgumentException("Scheduled Load scenario must contain workloads");
-        List<Object> normalized=new ArrayList<>();
-        for(Object value:workloads) {
-            if(!(value instanceof Map<?,?>))throw new IllegalArgumentException("Scheduled Load workload is invalid");
-            @SuppressWarnings("unchecked") Map<String,Object> workload=(Map<String,Object>)JSON.convertValue(value,Map.class);
-            Object prior=workload.get("load");if(!(prior instanceof Map<?,?>))throw new IllegalArgumentException("Scheduled Load pacing is invalid");
-            @SuppressWarnings("unchecked") Map<String,Object> load=(Map<String,Object>)JSON.convertValue(prior,Map.class);load.putAll(options);workload.put("load",load);normalized.add(workload);
-        }
-        scenario.put("workloads",normalized);return scenario;
-    }
+KÔİš[™Ê
+K™]È™\^T™]šY]ÊYš[˜Ú\[˜Y™Y‹XÚØYÙRY[Èœ[ˆˆ›ØY‹Ûİ\˜ÙTÛXŞKÜXËœ™]š\Ú[ÛŠ
+KÙ[XİY™]š\Ú[Û‹ˆ[ÜXË˜[YKœ]
+œÛİ\˜ÙT]ŠK˜\Õ^
+[
+KÜšYÚ[˜[Yš[š][Û‹™Y\ÛÜJ
+KYš[š][Û‹™Y\ÛÜJ
+KÜXË˜ÛÛ™šYİ\˜][ÛŠ
+KˆÛÛ™šYİ\˜][Û‹˜[Y][ÛÛÙKØY™T™\^QXYÛ›ÜİXÜÊXYÛ›ÜİXÜË˜[Y][ÛÛÙJK^\™\ÊJNÂˆX\İš[™ËØš™Xİˆ™\İ[[™]È[šÙY\ÚX\Š›Ø”™\^JYš[˜Ú\[
+JNÓØš™XİÛÛÛ™šYİ\˜][Û\™\İ[œ™[[İ™J˜ÛÛ™šYİ\˜][ÛˆŠNÂˆYŠÛÛÛ™šYİ\˜][ÛˆO[[
+\™\İ[œ]
+›ÜšYÚ[˜[ÛÛ™šYİ\˜][Ûˆ‹ÛÛÛ™šYİ\˜][ÛŠNÂˆ™\İ[œ]
+œØÚ[XU™\œÚ[Ûˆ‹˜]Z›Ø‹\™\^KY˜YİŒHŠNÜ™\İ[œ]
+™˜Y™Yˆ‹˜Y™YŠNÜ™\İ[œ]
+™˜YY‹˜Y™YŠNÜ™\İ[œ]
+œÛİ\˜ÙR›Ø’Y‹Y
+NÂˆ™\İ[œ]
+œXÚØYÙRY‹XÚØYÙRY
+NÜ™\İ[œ]
+™^Xİ][Û•\H‹[Èœ[ˆˆ›ØYŠNÜ™\İ[œ]
+œÛİ\˜ÙTÛXŞH‹Ûİ\˜ÙTÛXŞJNÂˆ™\İ[œ]
+›ÜšYÚ[˜[™]š\Ú[Ûˆ‹ÜXËœ™]š\Ú[ÛŠ
+JNÜ™\İ[œ]
+˜İ\œ™[™]š\Ú[Ûˆ‹Ù[XİY™]š\Ú[ÛŠNÜ™\İ[œ]
+›ÜšYÚ[˜[Yš[š][Ûˆ‹ÜšYÚ[˜[Yš[š][ÛŠNÜ™\İ[œ]
+™Yš[š][Ûˆ‹Yš[š][ÛŠNÂˆ™\İ[œ]
+œÛİ\˜ÙT]‹ÜXË˜[YKœ]
+œÛİ\˜ÙT]ŠK˜\Õ^
+[
+JNÜ™\İ[œ]
+˜ÛÛ™šYİ\˜][Ûˆ‹ÛÛ™šYİ\˜][ÛŠNÜ™\İ[œ]
+™^\™\Ğ]‹^\™\ËÔİš[™Ê
+JNÂˆ™\İ[œ]
+˜[Y][Û”İ]H‹š[˜[YŠNÜ™\İ[œ]
+™\œ›ÜÛÙH‹˜[Y][ÛÛÙJNÜ™\İ[œ]
+™XYÛ›ÜİXÜÈ‹ØY™T™\^Q5Ó}òÚ$z{-®éÜj×ÈŠJK›Û™Õ˜[YJ
+NÂˆYŠY]šXÜË™Ù]
+›\İÛÛ\Xİ[ÛYÙS\ÈŠH[œİ[˜Ù[Ùˆ[X™\ˆYÙJBˆ\İÛÛ\Xİ[ÛYÙS\ÏSX]›X^
+\İÛÛ\Xİ[ÛYÙS\ËYÙK›Û™Õ˜[YJ
+JNÂˆYŠ‘QÔQQ‹™\]X[ÊY]šXÜË™Ù]
+š›İ\›˜[\œÚ\İ[˜ÙHŠJJYYÜ˜YY
+ÊÎÂˆBˆX\İš[™ËØš™Xİˆ™\İ[[™]È[šÙY\ÚX\Š
+NÂˆ™\İ[œ]
+˜Xİ]™R›ØœÈ‹Xİ]™JNÜ™\İ[œ]
+™YÜ˜YYXİ]™R›ØœÈ‹YÜ˜YY
+NÂˆ™\İ[œ]
+˜Xİ]™R›İ\›˜[]\È‹Xİ]™P]\ÊNÜ™\İ[œ]
+˜Xİ]™T™]Z[™Y]™[È‹™]Z[™Y]™[ÊNÂˆ™\İ[œ]
+˜Xİ]™T™]Z[™YY[[ÜP]\È‹™]Z[™YY[[ÜP]\ÊNÂˆ™\İ[œ]
+˜Xİ]™SY[[ÜPYÙ]]\È‹Xİ]™JŠÛ™ÊXÛÛ™šYË›X^]™[›İ\›˜[Y[[ÜP]\ÊNÂˆ™\İ[œ]
+˜Xİ]™SY[[ÜSİ™\YÙ]]\È‹X]›X^
+™]Z[™YY[[ÜP]\ËXXİ]™JŠÛ™ÊXÛÛ™šYË›X^]™[›İ\›˜[Y[[ÜP]\ÊJNÂˆ™\İ[œ]
+˜Xİ]™PÛÛ\Xİ[Û][\È‹][\ÊNÜ™\İ[œ]
+˜Xİ]™PÛÛ\Xİ[Û‘˜Z[\™\È‹˜Z[\™\ÊNÂˆ™\İ[œ]
+›Û\İXİ]™PÛÛ\Xİ[ÛYÙS\È‹\İÛÛ\Xİ[ÛYÙS\ÊNÂˆ™\İ[œ]
+›X^›İ\›˜[]\Ô\’›Øˆ‹ÛÛ™šYË›X^]™[›İ\›˜[]\ÊNÂˆ™\İ[œ]
+›Y[[ÜPYÙ]]\Ô\’›Øˆ‹ÛÛ™šYË›X^]™[›İ\›˜[Y[[ÜP]\ÊNÂˆÛ™È\ØX›NÂˆ^İ\ØX›OQš[\Ë™Ù]š[TİÜ™JÛÛ™šYË™]Q\ŠK™Ù]\ØX›TÜXÙJ
+NßBˆØ]Ú
+^Ù\[Ûˆ[˜]˜Z[X›J^İ\ØX›OKLSßBˆ™\İ[œ]
+œİÜ˜YÙU\ØX›P]\È‹\ØX›JNÂˆ™\İ[œ]
+œİÜ˜YÙRXY›ÛÛSİÈ‹\ØX›OL	‰\ØX›O›Ø‘]™[Ë“RS—ÔÕÔQÑWÒPQ“ÓÓWĞ–UTÊNÂˆŞ[˜Ú›Ûš^™Y
+\›Z[˜[]™[ØXÚSØÚÊHÂˆ™\İ[œ]
+˜ØXÚY\›Z[˜[›ØœÈ‹\›Z[˜[]™[ØXÚKœÚ^™J
+JNÂˆ™\İ[œ]
+˜ØXÚY\›Z[˜[ÙZYÚ]\È‹\›Z[˜[]™[ØXÚUÙZYÚ
+NÂˆBˆ™]\›ˆ™\İ[ÂˆBˆ›ÛÛX[ˆ\›Z[˜[
+İš[™ÈY
+H›İÜÈ^Ù\[ÛˆÒ›ØˆXİ]™OZ›ØœË™Ù]
+Y
+NÚYŠXİ]™HO[[
+\™]\›ˆXİ]™K\›Z[˜[
 
-    private LoadSchedule buildLoadSchedule(JsonNode input,LoadSchedule prior,String principal) throws Exception {
-        if(input==null||!input.isObject())throw new IllegalArgumentException("A JSON object is required");
-        Set<String> allowed=Set.of("name","description","tags","packageId","jobType","executionType","schemaVersion","scenario","draftId","config","environment","timezone","cron","runAt","load","maxConcurrentRuns","enabled","packageChangePolicy");
-        input.fieldNames().forEachRemaining(key->{if(!allowed.contains(key))throw new IllegalArgumentException("Unknown schedule field: "+key);});
-        if(input.has("schemaVersion")&&!"att-schedule/v2".equals(fieldText(input,"schemaVersion",null,true)))throw new IllegalArgumentException("Unsupported schedule schemaVersion");
-        LoadSchedule s=prior==null?new LoadSchedule():prior.copy();
-        s.name=fieldText(input,"name",s.name,true);s.description=fieldText(input,"description",s.description,false);
-        if(input.has("tags"))s.tags=scheduleTags(input.get("tags"));else if(s.tags==null)s.tags=List.of();
-        s.packageId=fieldText(input,"packageId",s.packageId,true);
-        if(input.has("packageChangePolicy")) {
-            s.packageChangePolicy=fieldText(input,"packageChangePolicy",null,false);
-            if(s.packageChangePolicy!=null&&!Set.of("strict","pause","ignore").contains(s.packageChangePolicy))throw new IllegalArgumentException("packageChangePolicy must be strict, pause, ignore or null for the server default");
-        }
-        boolean validateExecution=prior==null||!prior.enabled&&input.path("enabled").asBoolean(false)||prior!=null&&(
-                input.has("scenario")&&!java.util.Objects.equals(input.path("scenario").asText(),prior.scenario)
-                ||input.has("load")&&!input.get("load").equals(JSON.valueToTree(prior.load))
-                ||!java.util.Objects.equals(s.packageId,prior.packageId)
-                ||input.has("environment")&&!sameOptionalText(fieldText(input,"environment",null,false),prior.environment));
-        String jobType=fieldText(input,"jobType",prior==null?"load":prior.effectiveJobType(),false);
-        if(jobType==null||jobType.isBlank())jobType="load";
-        if(input.has("executionType")) {
-            String type=fieldText(input,"executionType",null,true);
-            if(!List.of("run","load").contains(type))throw new IllegalArgumentException("executionType must be run or load");
-            if(input.has("jobType")&&!type.equals(jobType))throw new IllegalArgumentException("executionType and jobType disagree");
-            jobType=type;
-        }
-        if(!List.of("load","debug","run").contains(jobType))throw new IllegalArgumentException("jobType must be run, load or legacy debug");
-        if(prior!=null&&!prior.effectiveJobType().equals(jobType))throw new IllegalArgumentException("A schedule job type is immutable; create a new schedule to change it");
-        s.jobType=jobType;
-        String draftId=fieldText(input,"draftId",null,false);
-        if(draftId!=null) {
-            if(prior!=null)throw new IllegalArgumentException("A validated draft can only create a new schedule");
-            if(input.has("scenario")&&!input.get("scenario").isNull())throw new IllegalArgumentException("Provide either a validated draft or a package scenario path");
-            String draftEnvironment=input.has("environment")?fieldText(input,"environment",null,false):null;
-            draftEnvironment=draftEnvironment==null||draftEnvironment.isBlank()?retainedDraftEnvironment(draftId,principal,s.packageId):inspectionEnvironment(draftEnvironment,"environment");
-            s.environment=draftEnvironment;
-            if(runDrafts.containsKey(draftId))s.configuration=retainedConfiguration(runDrafts.get(draftId).preview);
-            else if(debugDrafts.containsKey(draftId))s.configuration=retainedConfiguration(debugDrafts.get(draftId).preview);
-            else if(quickLoadDrafts.containsKey(draftId))s.configuration=retainedConfiguration(quickLoadDrafts.get(draftId).preview);
-            else if(advancedLoadDrafts.containsKey(draftId))s.configuration=retainedConfiguration(advancedLoadDrafts.get(draftId).preview);
-            else if(catalogLoadDrafts.containsKey(draftId))s.configuration=catalogLoadDrafts.get(draftId).configuration;
-            if("run".equals(jobType)) {
-                RunDraft draft=runDraft(draftId,principal,s.packageId);
-                if(!java.util.Objects.equals(draftEnvironment,draft.workerInput.path("environment").isTextual()?draft.workerInput.path("environment").asText():null))throw new IllegalArgumentException("Schedule environment differs from the validated RUN draft");
-                s.runInput=JSON.convertValue(draft.workerInput,Map.class);s.expectedRevisionDigest=draft.revision;
-                s.config=draft.workerInput.path("config").isTextual()?draft.workerInput.path("config").asText():null;
-                s.scenario=null;s.inlineScenario=null;s.load=new LinkedHashMap<>();
-                if(draft.resourceDebugDraft!=null) {
-                    DebugDraft debug=draft.resourceDebugDraft;
-                    if(debug.containsSensitiveValues)throw new IllegalArgumentException("A RUN schedule cannot persist submitted sensitive values");
-                    s.inlineDebugInput=deepMap(debug.scheduleInput);s.runInput.put("inlineDebugInput",s.inlineDebugInput);
-                    s.debugTargetType=debug.targetType;s.debugTargetId=debug.targetId;s.debugResourceId=debug.resourceId;
-                }
-            } else if("debug".equals(jobType)) {
-                DebugDraft debug=scheduleDraftDebug(draftId,principal,s.packageId,draftEnvironment);
-                if(debug.containsSensitiveValues)throw new IllegalArgumentException("A Debug schedule cannot persist submitted credentials, private values, or other classified sensitive fields. Keep classified package defaults protected or remove them from the override.");
-                s.scenario=null;s.inlineScenario=null;s.inlineDebugInput=deepMap(debug.scheduleInput);
-                s.debugTargetType=debug.targetType;s.debugTargetId=debug.targetId;s.debugResourceId=debug.resourceId;
-                s.expectedRevisionDigest=debug.revisionDigest;s.loadModel=null;s.load=new LinkedHashMap<>();
-            } else {
-                s.scenario=null;s.inlineDebugInput=null;s.debugTargetType=null;s.debugTargetId=null;s.debugResourceId=null;s.expectedRevisionDigest=null;
-                CatalogLoadDraftState catalogDraft=scheduleCatalogLoadDraft(draftId,principal,s.packageId,draftEnvironment);
-                if(catalogDraft!=null) {
-                    s.inlineScenario=deepMap(catalogDraft.scenario);s.catalogSnapshot=true;
-                    s.expectedRevisionDigest=catalogDraft.revisionDigest;s.loadModel=catalogDraft.model;
-                } else {
-                    s.inlineScenario=scheduleDraftScenario(draftId,principal,s.packageId,draftEnvironment);
-                    s.catalogSnapshot=false;
-                }
-            }
-        } else if("run".equals(jobType)) {
-            if(s.runInput==null)throw new IllegalArgumentException("A RUN schedule requires a validated RUN draft");
-            if(input.has("scenario")||input.has("load"))throw new IllegalArgumentException("RUN schedules cannot use Load fields");
-        } else if("debug".equals(jobType)) {
-            if(s.inlineDebugInput==null||s.inlineScenario!=null)throw new IllegalArgumentException("A Debug schedule requires a validated Debug draft snapshot");
-            if(input.has("scenario")&&!input.get("scenario").isNull()&&!input.get("scenario").asText().isBlank())
-                throw new IllegalArgumentException("A Debug snapshot cannot be replaced by a Load scenario path");
-            if(!s.load.isEmpty())throw new IllegalArgumentException("Debug schedules cannot use Load option overrides");
-            s.scenario=null;
-        } else if(s.inlineScenario==null) {
-            if(s.inlineDebugInput!=null)throw new IllegalArgumentException("A Debug snapshot cannot be changed to a Load schedule");
-            s.scenario=fieldText(input,"scenario",s.scenario,true);
-        } else {
-            if(input.has("scenario")&&!input.get("scenario").isNull()&&!input.get("scenario").asText().isBlank())
-                throw new IllegalArgumentException("An inline scenario snapshot cannot be replaced by a package path");
-            if(input.has("draftId"))throw new IllegalArgumentException("An inline scenario snapshot cannot be replaced");
-        }
-        s.config=fieldText(input,"config",s.config,false);s.environment=fieldText(input,"environment",s.environment,false);
-        s.timezone=fieldText(input,"timezone",s.timezone, !input.hasNonNull("runAt")&&s.runAt==null);
-        if(input.hasNonNull("runAt")&&input.hasNonNull("cron"))throw new IllegalArgumentException("Provide exactly one cron or runAt trigger");
-        // A schedule holds exactly one trigger, so an update that supplies a new trigger replaces the stored one instead of retaining the field the request omits.
-        if(input.hasNonNull("runAt")) {s.runAt=fieldText(input,"runAt",null,true);s.cron=null;}
-        else if(input.hasNonNull("cron")) {s.cron=fieldText(input,"cron",null,true);s.runAt=null;}
-        else {s.runAt=fieldText(input,"runAt",s.runAt,false);s.cron=fieldText(input,"cron",s.cron,s.runAt==null);}
-        // Studio serializes timestamps with milliseconds; retain the persisted canonical value when it denotes the same instant.
-        if(prior!=null&&LoadSchedule.sameInstant(s.runAt,prior.runAt))s.runAt=prior.runAt;
-        if(s.runAt!=null&&s.cron!=null)throw new IllegalArgumentException("Provide exactly one cron or runAt trigger");
-        if(s.timezone==null)s.timezone="UTC";
-        if(input.has("enabled")){if(!input.get("enabled").isBoolean())throw new IllegalArgumentException("enabled must be true or false");s.enabled=input.get("enabled").booleanValue();}
-        if(input.has("maxConcurrentRuns")){
-            JsonNode limit=input.get("maxConcurrentRuns");if(!limit.isIntegralNumber()||!limit.canConvertToInt())throw new IllegalArgumentException("maxConcurrentRuns must be an integer");
-            int maximum=limit.intValue();if(maximum<1||maximum>config.scheduling.maxConcurrentRuns)throw new IllegalArgumentException("maxConcurrentRuns must be between 1 and server.scheduling.maxConcurrentRuns");s.maxConcurrentRuns=maximum;
-        }
-        if(input.has("load"))s.load=loadOptions(input.get("load"));else if(s.load==null)s.load=new LinkedHashMap<>();
-        if("debug".equals(s.effectiveJobType())&&s.load!=null&&!s.load.isEmpty())throw new IllegalArgumentException("Debug schedules cannot use Load option overrides");
-        if(s.name.isBlank()||s.name.length()>120||containsControl(s.name))throw new IllegalArgumentException("name must be 1 to 120 characters without control characters");
-        if(s.description!=null&&(s.description.length()>500||containsControl(s.description)))throw new IllegalArgumentException("description must be at most 500 characters without control characters");
-        if(packageRoot(s.packageId)==null)throw new IllegalArgumentException("Unknown packageId");
-        Path root=packageRoot(s.packageId);validatePackageRoot(root);
-        if(s.config!=null&&!s.config.isBlank()&&!("config/config.yaml".equals(s.config)||config.runtimeConfigPath.toString().equals(s.config)))
-            throw new IllegalArgumentException("A schedule must use the shared runtime configuration");
-        s.config="config/config.yaml";
-        s.environment=s.environment==null||s.environment.isBlank()?null:safeText(s.environment,128,"environment");
-        if("run".equals(s.effectiveJobType())) {
-            JsonNode snapshot=JSON.valueToTree(s.runInput);
-            String expectedEnvironment=snapshot.path("environment").isTextual()?snapshot.path("environment").asText():null;
-            String expectedConfig=snapshot.path("config").isTextual()?snapshot.path("config").asText():null;
-            boolean sameRuntimeConfig="config/config.yaml".equals(expectedConfig)||config.runtimeConfigPath.toString().equals(expectedConfig);
-            if(!s.packageId.equals(snapshot.path("packageId").asText())||!java.util.Objects.equals(s.environment,expectedEnvironment)||!sameRuntimeConfig)
-                throw new IllegalArgumentException("A RUN snapshot is immutable; create a new schedule for changed values");
-            if(input.has("scenario")||s.load!=null&&!s.load.isEmpty())throw new IllegalArgumentException("RUN schedules cannot use Load fields");
-            if(validateExecution&&prior==null)validateScheduledRun(s);
-        } else if("debug".equals(s.effectiveJobType())) {
-            if(s.config!=null&&!"config/config.yaml".equals(s.config))throw new IllegalArgumentException("A Debug schedule must use the configuration validated by the Debug draft");
-            if(prior!=null&&debugSnapshotInputChanged(prior,s,input))throw new IllegalArgumentException("A Debug snapshot is immutable; create a new schedule for changed values");
-            if(validateExecution&&prior==null)validateScheduledDebugInput(root,s);
-        } else if(s.inlineScenario==null) {
-            s.scenario=safeRelative(s.scenario,"scenario");if(s.scenario==null)throw new IllegalArgumentException("scenario or draftId is required");
-            if(validateExecution){validatePackagePath(root,s.scenario,"scenario");Path scenarioPath=root.resolve(s.scenario).normalize();
-            if(!Files.isRegularFile(scenarioPath)||!scenarioPath.toRealPath().startsWith(root.toRealPath()))throw new IllegalArgumentException("scenario must be a regular file inside the configured package");}
-            if(s.inlineDebugInput!=null)throw new IllegalArgumentException("A Debug snapshot cannot be changed to a Load schedule");
-        } else {
-            if(!config.inlineLoad.enabled&&!s.catalogSnapshot)throw new InlineLoadDisabledException();
-            if(scenarioInputChanged(prior,s,input))throw new IllegalArgumentException("An inline scenario snapshot is immutable; create a new schedule for changed values");
-            if(s.load!=null&&!s.load.isEmpty())throw new IllegalArgumentException("Inline scenario snapshots cannot use separate Load overrides");
-        }
-        if(validateExecution) {
-            if(s.configuration==null||!java.util.Objects.equals(s.environment,s.configuration.get("environment"))||!java.util.Objects.equals(s.packageId,s.configuration.get("packageId")))
-                s.configuration=resolveExecutionConfiguration(s.packageId,root,s.environment);
-            s.environment=(String)s.configuration.get("environment");
-            authorizeConfiguration(s.configuration);
-        }
-        java.time.ZoneId zone=scheduleZone(s.timezone);
-        if(s.runAt==null) {
-            CronExpression cron=CronExpression.parse(s.cron,config.scheduling.minimumIntervalMinutes);
-            cron.validateTimezoneMinimumInterval(zone,config.scheduling.minimumIntervalMinutes,clock.instant());
-        } else if(prior==null||!LoadSchedule.sameInstant(s.runAt,prior.runAt)||!prior.enabled&&s.enabled)
-            s.runAt=futureRunAt(s.runAt);
-        if(validateExecution&&prior==null&&"load".equals(s.effectiveJobType())) {
-            ValidatedScheduledScenario validated=validateScheduleScenario(root,s);
-            // New file-backed schedules need the same immutable baseline as draft-backed schedules.
-            // Legacy rows without a digest keep their grandfathered validate-current behavior.
-            s.expectedRevisionDigest=validated.revisionDigest;
-            s.listSummary=JobListIdentity.load(JSON.valueToTree(validated.scenario));
-            if(s.inlineScenario!=null)s.inlineScenario=deepMap(validated.scenario);
-        }
-        if(s.configuration!=null)s.configuration=configurationRevision(s.configuration,s.expectedRevisionDigest);
-        if(prior==null)s.packageRootIdentity=packageRootIdentity(root);
-        else if(validateExecution) {
-            if("load".equals(s.effectiveJobType())&&s.inlineScenario==null&&!java.util.Objects.equals(prior.packageId,s.packageId))s.packageRootIdentity=packageRootIdentity(root);
-            validateScheduleForActivation(s,principal);
-        }
-        s.nextRunAt=s.runAt==null?nextRun(s.cron,s.timezone,clock.instant()).toString():s.runAt;
-        s.updatedBy=principal;s.updatedAt=clock.instant().toString();return s;
-    }
-    private String futureRunAt(String runAt) {
-        Instant fire;
-        try { fire=Instant.parse(runAt); } catch(java.time.format.DateTimeParseException invalid) {throw new IllegalArgumentException("runAt must be an ISO-8601 instant with UTC offset");}
-        if(!fire.isAfter(clock.instant()))throw new IllegalArgumentException("runAt must be in the future");
-        return fire.toString();
-    }
-    private String retainedDraftEnvironment(String id,String principal,String packageId) {
-        if(id.startsWith("R"))return runDraft(id,principal,packageId).workerInput.path("environment").asText(null);
-        DebugDraft debug=debugDrafts.get(id);
-        if(debug!=null&&debug.principal.equals(principal)&&debug.packageId.equals(packageId))return debug.environment;
-        QuickLoadDraft quick=quickLoadDrafts.get(id);
-        if(quick!=null&&quick.principal.equals(principal)&&quick.packageId.equals(packageId))return quick.environment;
-        AdvancedLoadDraftState advanced=advancedLoadDrafts.get(id);
-        if(advanced!=null&&advanced.principal.equals(principal)&&advanced.packageId.equals(packageId))return advanced.environment;
-        CatalogLoadDraftState catalog=catalogLoadDrafts.get(id);
-        if(catalog!=null&&catalog.principal.equals(principal)&&catalog.packageId.equals(packageId))return catalog.environment;
-        throw new NotFoundException();
-    }
-    private Map<String,Object> scheduleDraftScenario(String draftId,String principal,String packageId,String environment) {
-        synchronized(draftLock) {
-            expireDrafts();
-            QuickLoadDraft quick=quickLoadDrafts.get(draftId);
-            if(quick!=null) {
-                requireLiveDraft(quick.expiresAt);
-                if(!quick.principal.equals(principal)||!quick.packageId.equals(packageId)||!java.util.Objects.equals(quick.environment,environment))throw new NotFoundException();
-                return deepMap(quick.scenario);
-            }
-            AdvancedLoadDraftState advanced=advancedLoadDrafts.get(draftId);
-            if(advanced!=null) {
-                requireLiveDraft(advanced.expiresAt);
-                if(!advanced.principal.equals(principal)||!advanced.packageId.equals(packageId)||!java.util.Objects.equals(advanced.environment,environment))throw new NotFoundException();
-                return deepMap(advanced.scenario);
-            }
-            throw new NotFoundException();
-        }
-    }
-    private CatalogLoadDraftState scheduleCatalogLoadDraft(String draftId,String principal,String packageId,String environment) {
-        if(!CATALOG_LOAD_DRAFT_ID.matcher(draftId==null?"":draftId).matches())return null;
-        synchronized(draftLock) {
-            expireDrafts();CatalogLoadDraftState draft=catalogLoadDrafts.get(draftId);
-            if(draft==null)throw new NotFoundException();
-            requireLiveDraft(draft.expiresAt);
-            if(!draft.principal.equals(principal)||!draft.packageId.equals(packageId)
-                    ||!java.util.Objects.equals(draft.environment,environment))throw new NotFoundException();
-            return draft;
-        }
-    }
-    private DebugDraft scheduleDraftDebug(String draftId,String principal,String packageId,String environment) {
-        synchronized(draftLock) {
-            expireDrafts();DebugDraft draft=debugDrafts.get(draftId);
-            if(draft==null)throw new NotFoundException();
-            requireLiveDraft(draft.expiresAt);
-            if(!draft.principal.equals(principal)||!draft.packageId.equals(packageId)||!java.util.Objects.equals(draft.environment,environment))throw new NotFoundException();
-            return draft;
-        }
-    }
-    private static boolean scenarioInputChanged(LoadSchedule prior,LoadSchedule current,JsonNode input) {
-        if(prior==null||prior.inlineScenario==null)return false;
-        if(input.has("draftId")||input.has("inlineScenario"))return true;
-        return !java.util.Objects.equals(prior.packageId,current.packageId)
-                ||!sameOptionalText(prior.environment,current.environment)
-                ||!sameOptionalText(prior.config,current.config);
-    }
-    private static boolean debugSnapshotInputChanged(LoadSchedule prior,LoadSchedule current,JsonNode input) {
-        if(prior==null||prior.inlineDebugInput==null)return false;
-        if(input.has("draftId")||input.has("inlineDebugInput"))return true;
-        return !java.util.Objects.equals(prior.packageId,current.packageId)
-                ||!sameOptionalText(prior.environment,current.environment)
-                ||!sameOptionalText(prior.config,current.config);
-    }
-    private static boolean sameOptionalText(String left,String right) {
-        String normalizedLeft=left==null||left.isBlank()?null:left.trim();
-        String normalizedRight=right==null||right.isBlank()?null:right.trim();
-        return java.util.Objects.equals(normalizedLeft,normalizedRight);
-    }
-    private static java.time.ZoneId scheduleZone(String timezone) {
-        try{java.time.ZoneId zone=java.time.ZoneId.of(timezone);if(!java.time.ZoneId.getAvailableZoneIds().contains(timezone))throw new IllegalArgumentException();return zone;}
-        catch(Exception invalid){throw new IllegalArgumentException("timezone must be a valid IANA timezone");}
-    }
-    private static String fieldText(JsonNode input,String name,String prior,boolean required) {
-        if(!input.has(name)) {if(required&&(prior==null||prior.isBlank()))throw new IllegalArgumentException(name+" is required");return prior;}
-        JsonNode node=input.get(name);if(node==null||node.isNull()){if(required)throw new IllegalArgumentException(name+" is required");return null;}
-        if(!node.isTextual())throw new IllegalArgumentException(name+" must be a string");String value=node.asText().trim();
-        if(value.length()>512||containsControl(value))throw new IllegalArgumentException(name+" is invalid");return value;
-    }
-    private static Map<String,String> loadOptions(JsonNode value) {
-        if(!value.isObject())throw new IllegalArgumentException("load must be an object of Load option strings");
-        Set<String> allowed=Set.of("users","arrivalRate","warmup","rampUp","duration","rampDown","thinkTime","maxConcurrent","overloadPolicy");
-        Map<String,String> result=new LinkedHashMap<>();value.fields().forEachRemaining(entry->{
-            if(!allowed.contains(entry.getKey()))throw new IllegalArgumentException("Unsupported Load option: "+entry.getKey());
-            if(!entry.getValue().isTextual())throw new IllegalArgumentException("Load option values must be strings");
-            String option=entry.getValue().asText();if(option.length()>128||containsControl(option))throw new IllegalArgumentException("Load option is invalid");result.put(entry.getKey(),option);
-        });return result;
-    }
-    private static List<String> scheduleTags(JsonNode value) {
-        if(!value.isArray()||value.size()>20)throw new IllegalArgumentException("tags must be an array of at most 20 labels");
-        java.util.LinkedHashSet<String> tags=new java.util.LinkedHashSet<>();
-        for(JsonNode tag:value){if(!tag.isTextual())throw new IllegalArgumentException("schedule tags must be strings");String label=tag.asText().trim();
-            if(!label.matches("[A-Za-z0-9][A-Za-z0-9._:-]{0,47}"))throw new IllegalArgumentException("each tag must be 1 to 48 letters, numbers, or . _ : - characters");tags.add(label);}
-        return List.copyOf(tags);
-    }
-    private static Instant nextRun(String cron,String timezone,Instant after) {return CronExpression.parse(cron,1).nextAfter(after,java.time.ZoneId.of(timezone));}
-    private void requireSchedulingEnabled(){if(!config.scheduling.enabled||loadScheduleScheduler==null)throw new NotFoundException();}
-    Map<String,Object> inspectionStatistics() {
-        Map<String,Object> result=new LinkedHashMap<>();
-        result.put("server",inspectionMetrics.snapshot());
-        List<Map<String,Object>> daemons=new ArrayList<>();
-        for(InspectionWorker worker:inspectionWorkerPool)daemons.add(worker.metrics);
-        result.put("workers",daemons);
-        return result;
-    }
-    Map<String,Object> executionPoolStatistics() { return executionWorkers==null?Map.of("enabled",false):executionWorkers.metrics(); }
-    Map<String,Object> counts() throws Exception {Map<String,Object> m=new LinkedHashMap<>();for(String s:List.of("QUEUED","PREPARING","RUNNING","PASS","FAIL","ERROR","INVALID","CANCELLED"))m.put(s.toLowerCase(),store.count(s));m.put("inspection",inspectionStatistics());m.put("executionPool",executionPoolStatistics());m.put("queueDepth",workers.getQueue().size());m.put("activeWorkers",workers.getActiveCount());m.put("completedSinceStart",completed.get());m.put("loadSchedulingEnabled",config.scheduling.enabled);if(config.scheduling.enabled){m.put("loadSchedules",store.scheduleCount());m.put("activeScheduledLoads",store.activeScheduledCount(null));m.put("loadScheduleMetrics",store.scheduleMetrics());}m.put("jobStorage",jobStorageSnapshot());m.put("eventJournal",eventJournalStatistics());return m;}
-    Path artifact(Job job,String requested) throws Exception {
-        if(requested==null||requested.isBlank())throw new IllegalArgumentException("artifact path is required");
-        Path base=config.dataDir.resolve("jobs").resolve(job.id).resolve("output").toRealPath();Path relative=Paths.get(requested);
-        if(relative.isAbsolute())throw new IllegalArgumentException("Artifact path must be relative to job output");
-        Path candidate=base.resolve(relative).normalize();if(!candidate.startsWith(base)||!Files.exists(candidate,java.nio.file.LinkOption.NOFOLLOW_LINKS))throw new NotFoundException();
-        Path walk=base;for(Path part:base.relativize(candidate)){walk=walk.resolve(part);if(Files.isSymbolicLink(walk))throw new NotFoundException();}
-        Path real=candidate.toRealPath();if(!real.startsWith(base)||!Files.isRegularFile(real))throw new NotFoundException();return real;
-    }
-    private void transition(Job j,String next) throws Exception {synchronized(j){if(j.terminal())return;j.status=next;if("RUNNING".equals(next))j.startedAt=Instant.now();store.update(j);append(j,"status",Map.of("jobId",j.id,"status",next));}}
-    // terminal() shares this monitor; SSE also waits for JobEvents' result marker before closing.
-    void finish(Job j,String status,int code) throws Exception {finish(j,status,code,null);}
-    void finish(Job j,String status,int code,String console) throws Exception {
-        synchronized(j) {
-            if(j.terminal())return;
-            if("load".equals(j.command)&&j.resultJson==null) {
-                List<Map<String,Object>> diagnostics=new ArrayList<>();
-                if(j.diagnosticJson!=null) {
-                    Object parsed=JSON.readValue(j.diagnosticJson,Object.class);
-                    if(parsed instanceof Map<?,?> diagnostic)diagnostics.add((Map<String,Object>)diagnostic);
-                }
-                for(Map<String,Object> secondary:j.secondaryDiagnostics)if(diagnostics.size()<4)diagnostics.add(new LinkedHashMap<>(secondary));
-                if(j.protocolDiagnostic!=null)diagnostics.add(new LinkedHashMap<String,Object>(j.protocolDiagnostic));
-                if(j.journalDiagnostic!=null)diagnostics.add(new LinkedHashMap<String,Object>(j.journalDiagnostic));
-                Map<String,Object> fallback=new LinkedHashMap<>();
-                fallback.put("executionId",j.id);fallback.put("status",status);fallback.put("exitCode",code);
-                fallback.put("diagnostics",diagnostics);fallback.put("summary",Map.of());
-                Map<String,Object> projected=att.server.api.LoadTerminalResult.projectOperationResult(fallback,status,code);
-                attachJobDiagnostics(projected,j);
-                j.resultJson=JSON.writeValueAsString(projected);
-            }
-            j.status=status;j.exitCode=code;j.finishedAt=Instant.now();store.update(j);
-            append(j,"status",Map.of("jobId",j.id,"status",status));
-            Map<String,Object> result=new LinkedHashMap<>();
-            result.put("jobId",j.id);result.put("status",status);result.put("exitCode",code);
-            result.put("result",j.resultJson==null?null:publicJson(j.id,j.resultJson));
-            if(console!=null&&!console.isBlank())result.put("console",console);
-            Map<String,Object> terminalEvent=append(j,"result",result);
-            if(j.journalDiagnostic!=null&&j.resultJson!=null) {
-                try {
-                    Object parsed=JSON.readValue(j.resultJson,Object.class);
-                    if(parsed instanceof Map<?,?> priorResult) {
-                        Map<String,Object> enriched=loadResultWithProtocolWarning((Map<String,Object>)priorResult,j);
-                        j.resultJson=JSON.writeValueAsString(enriched);
-                        Object eventData=terminalEvent.get("data");
-                        if(eventData instanceof Map<?,?> rawData)
-                            ((Map<String,Object>)rawData).put("result",publicJson(j.id,j.resultJson));
-                        store.update(j);
-                    }
-                } catch(Exception ignored) {
-                    // Preserve the original execution result if optional journal diagnostics cannot be projected.
-                }
-            }
-            if("load".equals(j.command)) {
-                Map<String,Object> worker=j.workerMetrics==null?new LinkedHashMap<>():new LinkedHashMap<>(j.workerMetrics);
-                Map<String,Object> sizes=new LinkedHashMap<>();
-                // Worker frame telemetry is carried outside the public result payload.
-                if(worker.get("loadResultTransport") instanceof Map<?,?> transport) {
-                    for(String key:new String[]{"workerFrameBytes","workerFrameLimitBytes","journalDataLimitBytes"})
-                        if(transport.get(key) instanceof Number)sizes.put(key,transport.get(key));
-                }
-                Object eventData=terminalEvent.get("data");
-                sizes.put("storedResultBytes",j.resultJson==null?0:j.resultJson.getBytes(StandardCharsets.UTF_8).length);
-                sizes.put("journalDataBytes",JSON.writeValueAsBytes(eventData).length);
-                sizes.put("journalEventBytes",JSON.writeValueAsBytes(terminalEvent).length);
-                Object sseData=publicEventData(eventData,config.dataDir.resolve("jobs").resolve(j.id).resolve("output"),packageRootForJob(j.id));
-                String ssePayload=JSON.writeValueAsString(sseData);
-                String sseEvent="id: "+terminalEvent.get("id")+"\nevent: result\ndata: "+ssePayload+"\n\n";
-                sizes.put("sseEventBytes",sseEvent.getBytes(StandardCharsets.UTF_8).length);
-                sizes.put("sseEventLimitBytes",JobEvents.MAX_EVENT_DATA_BYTES);
-                sizes.put("journalDataLimitBytes",JobEvents.MAX_EVENT_DATA_BYTES);
-                sizes.put("workerFrameLimitBytes",att.server.api.internal.WorkerProtocol.MAX_FRAME_BYTES);
-                worker.put("loadTerminalResult",sizes);
-                j.workerMetrics=worker;
-                store.update(j);
-            }
-        }
-    }
-    private void finishQuietly(Job j,String status,int code,String diagnostic,String message){try{j.diagnosticJson=JSON.writeValueAsString(Map.of("code",diagnostic,"summary",message));append(j,"diagnostic",JSON.readValue(j.diagnosticJson,Map.class));finish(j,status,code);}catch(Exception ignored){j.status=status;j.exitCode=code;j.finishedAt=Instant.now();}}
-    private Map<String,Object> append(Job j,String type,Map<String,?> data) throws Exception {
-        Map<String,Object> payload=new LinkedHashMap<>();if(data!=null)data.forEach(payload::put);
-        Object existing=payload.get("console");
-        if(existing instanceof String line&&!line.isBlank()) payload.put("console",publishConsole(line));
-        else {String line=lifecycleConsole(j,type,payload);if(line!=null&&!line.isBlank())payload.put("console",publishConsole(line));}
-        Map<String,Object> appended=j.events.append(type,payload);
-        Object bounded=appended.get("data");
-        if(bounded instanceof Map<?,?> eventData&&eventData.get("journalLimit") instanceof Map<?,?> notice
-                &&"ATT-JOURNAL-EVENT-TRUNCATED".equals(notice.get("code")))
-            j.journalDiagnostic=new LinkedHashMap<String,Object>((Map<String,Object>)notice);
-        Map<String,Object> journalNotice=j.events.diagnostic();
-        if(journalNotice!=null&&("ATT-JOURNAL-PERSISTENCE-DEGRADED".equals(journalNotice.get("code"))
-                ||j.journalDiagnostic==null))
-            j.journalDiagnostic=new LinkedHashMap<>(journalNotice);
-        return appended;
-    }
-    private static String lifecycleConsole(Job j,String type,Map<String,Object> payload) {
-        String mode=executionMode(j==null?null:j.command);
-        String jobId=payload.get("jobId") instanceof String id&&!id.isBlank()?id:j==null?"unknown":j.id;
-        if("status".equals(type)) return att.console.ExecutionConsoleFormatter.lifecycle(mode,jobId,String.valueOf(payload.get("status")),null);
-        if("result".equals(type)) return att.console.ExecutionConsoleFormatter.lifecycle(mode,jobId,String.valueOf(payload.get("status")),payload.get("exitCode") instanceof Number number?number.intValue():null);
-        if("diagnostic".equals(type)) return att.console.ExecutionConsoleFormatter.diagnostic(mode,payload.get("code") instanceof String code?code:null,payload.get("summary") instanceof String summary?summary:null);
-        return null;
-    }
-    private static String executionMode(String command) {
-        if("debug".equals(command)) return "DEBUG";
-        if("load".equals(command)) return "LOAD";
-        return "RUN";
-    }
-    private static String publishConsole(String line) {
-        return att.server.api.internal.DiagnosticSanitizer.redactAbsolutePaths(att.server.api.internal.DiagnosticSanitizer.redactText(line));
-    }
-    private static String required(JsonNode node,String name){JsonNode v=node.get(name);if(v==null||!v.isTextual()||v.asText().isBlank())throw new IllegalArgumentException(name+" is required");return v.asText();}
-    private static String safeText(String s,int max,String name){if(s!=null&&(s.length()>max||s.contains("\n")||s.contains("\r")))throw new IllegalArgumentException("Invalid "+name);return s;}
-    private static String safeRelative(String s,String name){if(s==null||s.isBlank())return null;Path p=Paths.get(s);if(p.isAbsolute()||p.normalize().startsWith("..")||s.indexOf('\0')>=0)throw new IllegalArgumentException(name+" must stay inside PACKAGE_ROOT");return p.normalize().toString();}
-    private static List<String> safePaths(List<String> paths,String name){if(paths==null)return null;List<String> out=new ArrayList<>();for(String p:paths){if(p==null)throw new IllegalArgumentException(name+" entries must be non-empty paths");out.add(safeRelative(p,name));}return out;}
-    private void validatePackageRoot(Path root) throws Exception {
-        Path current=root.toRealPath();
-        if(!current.equals(root)||!config.allowedRoots.stream().anyMatch(current::startsWith))
-            throw new IllegalArgumentException("Configured package root no longer resolves within its original allowed root");
-    }
-    private static void validatePackagePath(Path root,String relative,String name) throws Exception {if(relative==null)return;Path base=root.toRealPath();Path candidate=base.resolve(relative).normalize();if(!candidate.startsWith(base))throw new IllegalArgumentException(name+" escapes PACKAGE_ROOT");Path existing=candidate;while(existing!=null&&!Files.exists(existing))existing=existing.getParent();if(existing!=null&&!existing.toRealPath().startsWith(base))throw new IllegalArgumentException(name+" resolves outside PACKAGE_ROOT");}
-    private static void validateTarget(Map<String,Object> target){if(target==null)throw new IllegalArgumentException("target is required");Object type=target.get("type"),id=target.get("id");if(!(type instanceof String)||!(id instanceof String))throw new IllegalArgumentException("target.type and target.id are required");}
-    Path packageRootForJob(String id) throws Exception {
-        Job active=jobs.get(id);
-        if(active!=null)return packageRoot(active.packageId);
-        Map<String,Object> row=store.get(id);
-        if(row==null)throw new NotFoundException();
-        return packageRoot(String.valueOf(row.get("packageId")));
-    }
-    Path outputDirectoryForJob(String id) {
-        return config.dataDir.resolve("jobs").resolve(id).resolve("output").toAbsolutePath().normalize();
-    }
-    Path artifactArchivePath(String id) { return config.dataDir.resolve("jobs").resolve(id).resolve("artifacts.zip"); }
-    boolean acquireArtifactReadSlot() { return artifactReadSlots.tryAcquire(); }
-    void releaseArtifactReadSlot() { artifactReadSlots.release(); }
-    Map<String,Object> artifactIndex(String id) throws Exception { return artifactIndex(id,0,100); }
-    Map<String,Object> artifactIndex(String id,int offset,int limit) throws Exception {
-        if(offset<0||offset>1_000_000||limit<1||limit>100)throw new IllegalArgumentException("Artifact listing pagination is invalid");
-        if(!artifactReadSlots.tryAcquire())throw new ArtifactCapacityException();
-        artifactLifecycle.readLock().lock();
-        try {
-            if(store.get(id)==null)throw new NotFoundException();
-            Path archive=artifactArchivePath(id),statusFile=archive.resolveSibling("archive-status.json");
-            Map<String,Object> out=new LinkedHashMap<>();
-            JsonNode publication=readArchiveStatus(statusFile);
-            String state=publication.path("state").asText("FAILED");
-            out.put("reason",publication.path("reason").asText(""));
-            if(publication.path("diagnostic").isObject())out.put("diagnostic",JSON.convertValue(publication.path("diagnostic"),Map.class));
-            boolean quarantined=store.workerQuarantined(id);
-            if(quarantined){state="FAILED";out.put("reason","worker_unverified");}
-            if(Files.isRegularFile(archive)&&"READY".equals(state)) {
-                try {
-                    Map<String,Object> data=ArtifactArchive.verify(archive,false);
-                    long archiveSize=Files.size(archive);
-                    List<?> all=(List<?>)data.get("entries");
-                    int start=Math.min(offset,all.size()),end=Math.min(all.size(),start+limit);
-                    out.put("items",all.subList(start,end));out.put("nextOffset",end<all.size()?end:null);
-                    out.put("primaryReports",all.stream().filter(item->item instanceof Map<?,?> row&&Boolean.TRUE.equals(row.get("report"))).toList());
-                    Map<String,Map<String,Object>> categories=new LinkedHashMap<>();
-                    long itemBytes=0L;
-                    for(Object item:all)if(item instanceof Map<?,?> row) {
-                        String path=String.valueOf(row.get("path"));
-                        long size=row.get("size") instanceof Number number?Math.max(0L,number.longValue()):0L;
-                        itemBytes=size>Long.MAX_VALUE-itemBytes?Long.MAX_VALUE:itemBytes+size;
-                        String category=artifactCategory(path);
-                        Map<String,Object> tally=categories.computeIfAbsent(category,key->{Map<String,Object> value=new LinkedHashMap<>();value.put("count",0L);value.put("bytes",0L);return value;});
-                        tally.put("count",((Number)tally.get("count")).longValue()+1L);
-                        long current=((Number)tally.get("bytes")).longValue();tally.put("bytes",size>Long.MAX_VALUE-current?Long.MAX_VALUE:current+size);
-                    }
-                    out.put("categorySummary",categories);out.put("archiveItemsCount",all.size());out.put("archiveItemsBytes",itemBytes);
-                    out.put("archiveStatus","READY");out.put("omissions",data.get("omissions"));out.put("complete",data.get("complete"));
-                    if(data.get("diagnostics") instanceof List<?> notices&&!notices.isEmpty())out.put("omissionDiagnostics",notices);
-                    out.put("archiveSizeBytes",archiveSize);
-                } catch(Exception corrupt) { state="FAILED"; }
-            }
-            if(!out.containsKey("archiveStatus")) {
-                out.put("items",List.of());out.put("nextOffset",null);out.put("primaryReports",List.of());out.put("archiveStatus",state);
-            }
-            out.put("retryable",!quarantined&&"FAILED".equals(out.get("archiveStatus"))&&Files.isDirectory(outputDirectoryForJob(id)));
-            out.put("archiveMetrics",store.archiveMetrics(id));
-            out.put("downloadPath","archive.zip");return out;
-        } finally {artifactLifecycle.readLock().unlock();artifactReadSlots.release();}
-    }
+NÓX\İš[™ËØš™Xİˆ›İÏ\İÜ™K™Ù]
+Y
+NÚYŠ›İÏO[[
+]›İÈ™]È›İ›İ[™^Ù\[ÛŠ
+NÜ™]\›ˆ\İ›ÙŠ”TÔÈ‹‘RS‹‘T”“Ôˆ‹’S•SQ‹ĞSÑSQŠK˜ÛÛZ[œÊ›İË™Ù]
+œİ]\ÈŠJNßBˆÊŠˆ˜[Y]H›İ[™Y^\Y˜XİÈÚ]İ][ÙYZ[™È[H[™Ú[™KÕÛÜšÙ\‹YÙ[™\˜]Y]Kˆ
+‹Âˆİ]XÈ]V×H\›İ™Y\Y˜Xİ]\Ê]š[JH›İÜÈ^Ù\[ÛˆÂˆš[˜[[[Z]LMŠŒL
+ŒLÂˆ]V×H]\ÎÂˆJ˜\ˆ[œ]Qš[\Ë›™]Ò[œ]İ™X[Jš[JJ^Ø]\ÏZ[œ]œ™XY]\Ê[Z]
+ÌJNßBˆ˜[Y]P\›İ™Y\Y˜Xİ]\Êš[K]\ÊNÂˆ™]\›ˆ]\ÎÂˆBˆÊŠˆ™Z™Xİ[œØY™HØ\\™Yİ]]Ú[HX]š[™ÈXØÙ\Y]\ÈİÛ™YH\Y˜Xİ\˜Ú]™H[˜Ú[™ÙYˆ
+‹Âˆİ]XÈ›ÚY˜[Y]P\›İ™Y\Y˜Xİ]\Ê]š[K]V×H]\ÊHÂˆš[˜[[[Z]LMŠŒL
+ŒLÂˆYŠ]\Ë›[™İ›[Z]
+]›İÈ™]È[YØ[\™İ[Y[^Ù\[ÛŠ\Y˜Xİ^ÙYYÈHØY™H^İÛ›ØY[Z]
+MˆZPŠHŠNÂˆİš[™È^ÂˆHİ^Z˜]˜K›š[Ë˜Ú\œÙ]”İ[™\™Ú\œÙ]Ë•U—Î›™]ÑXÛÙ\Š
+Bˆ›Û“X[›Ü›YY[œ]
+˜]˜K›š[Ë˜Ú\œÙ]ÛÙ[™Ñ\œ›ÜXİ[Û‹”‘TÔ•
+Bˆ›Û•[›X\X›PÚ\˜Xİ\Š˜]˜K›š[Ë˜Ú\œÙ]ÛÙ[™Ñ\œ›ÜXİ[Û‹”‘TÔ•
+Bˆ™XÛÙJ˜]˜K›š[Ë]PY™™\‹Ü˜\
+]\ÊJKÔİš[™Ê
+NßBˆØ]Ú
+˜]˜K›š[Ë˜Ú\œÙ]Ú\˜Xİ\ÛÙ[™Ñ^Ù\[Ûˆ[˜[Y
+^İ›İÈ™]È[YØ[\™İ[Y[^Ù\[ÛŠš[˜\H\Y˜XİÈØ[››İ™H^ÜYŠNßBˆYŠ^š[™^ÙŠ
+OL
+]›İÈ™]È[YØ[\™İ[Y[^Ù\[ÛŠš[˜\H\Y˜XİÈØ[››İ™H^ÜYŠNÂˆËÈ™]™\ˆ[\ˆ›ÙXÙ\ˆ]\ÈÚ[ˆÜ™X][™È’TËˆZ[‹]^]šY[˜ÙH\ÈÚXÚÙY›Ü‚ˆËÈÜ™Y[X[È[™Üİ[ØØ[]ÎÈÙ[™\˜]YS[™İXİ\™Y”ÓÓ‹ÖPSS]™HZ\‚ˆËÈİÛˆŞ[^Ü™\Ù[][Ûˆ[\Ëˆ\Z[™Èœ™YK]^]™]Üš][™ÈÈİXİ\™YˆËÈ^[ØYÈ[˜ÛÜœ™XİHÛ\ÜÚYšY\ÈYÚ][X]H™[[İT]˜[Y\È[™™\ÜØÜš\Ë‚ˆİš[™È˜[YOYš[K™Ù]š[S˜[YJ
+KÔİš[™Ê
+KÓİÙ\Ø\ÙJ˜]˜K][“ØØ[K”“ÓÕ
+NÂˆ›ÛÛX[ˆ[[˜[YK™[™ÕÚ]
+‹š[Š_˜[YK™[™ÕÚ]
+‹šHŠNÂˆ›ÛÛX[ˆİXİ\™Y[˜[YK™[™ÕÚ]
+‹šœÛÛˆŠ_˜[YK™[™ÕÚ]
+‹X[[Š_˜[YK™[™ÕÚ]
+‹[[ŠNÂˆËÈİXİ\™YÛ˜\ÚİÈ\™H[™XYH›İXİYHH\Y^Ü˜[YHÚXÚÈ™[İË‚ˆËÈ^]\š\İXÜÈ\™H›İY[\İ[Ûˆ][İYPSS[™X^H\ØØ\™˜[YØ\ÙKX[[‚ˆYŠZ[	‰ˆ\İXİ\™Y	‰ˆX]œÙ\™\‹˜\Kš[\›˜[‘XYÛ›ÜİXÔØ[š]^™\‹œ™YXİ^
+^
+K™\]X[Ê^
+JBˆ›İÈ™]È[YØ[\™İ[Y[^Ù\[ÛŠ\Y˜XİÛÛZ[œÈ[˜\›İ™YÙ[œÚ]]™H^ŠNÂˆYŠ
+˜[YK™[™ÕÚ]
+‹›ÙÈŠ_˜[YK™[™ÕÚ]
+‹Š_˜[YK™[™ÕÚ]
+‹›YŠJBˆ	‰ˆX]œÙ\™\‹˜\Kš[\›˜[‘XYÛ›ÜİXÔØ[š]^™\‹œ™YXİXœÛÛ]T]Ê^
+K™\]X[Ê^
+JBˆ›İÈ™]È[YØ[\™İ[Y[^Ù\[ÛŠ\Y˜XİÛÛZ[œÈ[˜\›İ™YÜİ[ØØ[]ÈŠNÂˆYŠ˜[YK™[™ÕÚ]
+‹šœÛÛˆŠH˜[YK™[™ÕÚ]
+‹X[[ŠH˜[YK™[™ÕÚ]
+‹[[ŠJHÂˆHÂˆØš™XİÛİ\˜ÙNÂˆYŠ˜[YK™[™ÕÚ]
+‹šœÛÛˆŠJHÛİ\˜ÙOPT•QPÕÒ”ÓÓ‹œ™XY˜[YJ^Øš™Xİ˜Û\ÜÊNÂˆ[ÙHÂˆÜ™ËX[[œÛ˜ZÙ^X[[“ØY\“Ü[ÛœÈÜ[ÛœÏ[™]ÈÜ™ËX[[œÛ˜ZÙ^X[[“ØY\“Ü[ÛœÊ
+NÂˆÜ[ÛœËœÙ][İÑ\XØ]RÙ^\Ê˜[ÙJNÛÜ[ÛœËœÙ]X^[X\Ù\Ñ›ÜÛÛXİ[ÛœÊ
+NÂˆÜ[ÛœËœÙ]™\İ[™Ñ\[Z]
+
+NÛÜ[ÛœËœÙ]ÛÙTÚ[[Z]
+[Z]
+NÂˆÛİ\˜ÙO[™]ÈÜ™ËX[[œÛ˜ZÙ^X[[–X[[
+™]È\Y˜XİX[[ÛÛœİXİÜŠÜ[ÛœÊJK›ØY
+^
+NÂˆBˆØš™XİØY™OX]œÙXİ\š]K”ÙXÜ™]›İXİ[Û‹™^Ü˜[YJÛİ\˜ÙJNÂˆYŠZ˜]˜K][“Øš™XİË™\]X[ÊÛİ\˜ÙKØY™JJBˆ›İÈ™]È[YØ[\™İ[Y[^Ù\[ÛŠ\Y˜XİÛÛZ[œÈ[˜\›İ™YÙ[œÚ]]™HšY[ÈŠNÂˆHØ]Ú
+[YØ[\™İ[Y[^Ù\[Ûˆ™Z™XİY
+Hİ›İÈ™Z™XİYßBˆØ]Ú
+^Ù\[Ûˆ[˜[Y
+Hİ›İÈ™]È[YØ[\™İ[Y[^Ù\[ÛŠ’[˜[YİXİ\™Y\Y˜XİØ[››İ™H^ÜYŠNßBˆBˆBˆÊŠˆYØXŞHØ[š]^™Y^Ü›Ú™Xİ[ÛÈ™]Z[™YÛ›H›ÜˆÛÛ\]Xš[]H\İÈ[™Ø[\œËˆ
+‹Âˆ]V×HX›XĞ\Y˜Xİ
+İš[™ÈY]š[JH›İÜÈ^Ù\[ÛˆÂˆš[˜[[[Z]LMŠŒL
+ŒLÂˆ]V×H]\ÎÂˆJ˜\ˆ[œ]Qš[\Ë›™]Ò[œ]İ™X[Jš[JJ^Ø]\ÏZ[œ]œ™XY]\Ê[Z]
+ÌJNßBˆYŠ]\Ë›[™İ›[Z]
+]›İÈ™]È[YØ[\™İ[Y[^Ù\[ÛŠ\Y˜Xİ^ÙYYÈHØY™H^İÛ›ØY[Z]
+MˆZPŠHŠNÂˆİš[™È^ÂˆHÈ^Z˜]˜K›š[Ë˜Ú\œÙ]”İ[™\™Ú\œÙ]Ë•U—Î›™]ÑXÛÙ\Š
+K›Û“X[›Ü›YY[œ]
+˜]˜K›š[Ë˜Ú\œÙ]ÛÙ[™Ñ\œ›ÜXİ[Û‹”‘TÔ•
+Bˆ›Û•[›X\X›PÚ\˜Xİ\Š˜]˜K›š[Ë˜Ú\œÙ]ÛÙ[™Ñ\œ›ÜXİ[Û‹”‘TÔ•
+K™XÛÙJ˜]˜K›š[Ë]PY™™\‹Ü˜\
+]\ÊJKÔİš[™Ê
+NÈBˆØ]Ú
+˜]˜K›š[Ë˜Ú\œÙ]Ú\˜Xİ\ÛÙ[™Ñ^Ù\[Ûˆ[˜[Y
+^İ›İÈ™]È[YØ[\™İ[Y[^Ù\[ÛŠš[˜\H\Y˜XİÈ™\]Z\™H\İYš[\Ş\İ[HXØÙ\ÜÈŠNßBˆYŠ^š[™^ÙŠ	×	ÊOL
+]›İÈ™]È[YØ[\™İ[Y[^Ù\[ÛŠš[˜\H\Y˜XİÈ™\]Z\™H\İYš[\Ş\İ[HXØÙ\ÜÈŠNÂˆİš[™Èš[[˜[YOYš[K™Ù]š[S˜[YJ
+KÔİš[™Ê
+KÓİÙ\Ø\ÙJ˜]˜K][“ØØ[K”“ÓÕ
+NÂˆYŠš[[˜[YK™[™ÕÚ]
+‹šœÛÛˆŠ_š[[˜[YK™[™ÕÚ]
+‹X[[Š_š[[˜[YK™[™ÕÚ]
+‹[[ŠJHÂˆHÂˆ›ÛÛX[ˆœÛÛYš[[˜[YK™[™ÕÚ]
+‹šœÛÛˆŠNÂˆØš™Xİ˜]ÎÂˆYŠœÛÛŠ\˜]ÏPT•QPÕÒ”ÓÓ‹œ™XY˜[YJ^Øš™Xİ˜Û\ÜÊNÂˆ[ÙHÂˆÜ™ËX[[œÛ˜ZÙ^X[[“ØY\“Ü[ÛœÈÜ[ÛœÏ[™]ÈÜ™ËX[[œÛ˜ZÙ^X[[“ØY\“Ü[ÛœÊ
+NÂˆÜ[ÛœËœÙ][İÑ\XØ]RÙ^\Ê˜[ÙJNÛÜ[ÛœËœÙ]X^[X\Ù\Ñ›ÜÛÛXİ[ÛœÊ
+NÛÜ[ÛœËœÙ]™\İ[™Ñ\[Z]
+
+NÛÜ[ÛœËœÙ]ÛÙTÚ[[Z]
+[Z]
+NÂˆ˜]Ï[™]ÈÜ™ËX[[œÛ˜ZÙ^X[[–X[[
+™]È\Y˜XİX[[ÛÛœİXİÜŠÜ[ÛœÊJK›ØY
+^
+NÂˆBˆœÛÛ“›ÙH›Ú™XİY\Ø[š]^™J”ÓÓ‹˜[YUÕ™YJ]œÙXİ\š]K”ÙXÜ™]›İXİ[Û‹™^Ü˜[YJ˜]ÊJKİ]]\™XİÜQ›Ü’›ØŠY
+KXÚØYÙT›Ûİ›Ü’›ØŠY
+Kˆ‹˜[ÙJNÂˆYŠœÛÛŠ\™]\›ˆ”ÓÓ‹Üš]\•Ú]Y˜][™]Tš[\Š
+KÜš]U˜[YP\Ğ]\Ê›Ú™XİY
+NÂˆÜ™ËX[[œÛ˜ZÙ^X[[‘[\\“Ü[ÛœÈÜ[ÛœÏ[™]ÈÜ™ËX[[œÛ˜ZÙ^X[[‘[\\“Ü[ÛœÊ
+NÛÜ[ÛœËœÙ]Y˜][›İÔİ[JÜ™ËX[[œÛ˜ZÙ^X[[‘[\\“Ü[ÛœË‘›İÔİ[K“ĞÒÊNÂˆ™]\›ˆ™]ÈÜ™ËX[[œÛ˜ZÙ^X[[–X[[
+Ü[ÛœÊK™[\
+T•QPÕÒ”ÓÓ‹˜ÛÛ™\˜[YJ›Ú™XİYØš™Xİ˜Û\ÜÊJK™Ù]]\Êİ[™\™Ú\œÙ]Ë•U—Î
+NÂˆHØ]Ú
+^Ù\[Ûˆ[˜[Y
+^İ›İÈ™]È[YØ[\™İ[Y[^Ù\[ÛŠ”İXİ\™Y\Y˜XİØ[››İ™HØY™[HX›\ÚYŠNßBˆBˆYŠš[[˜[YK™[™ÕÚ]
+‹š[Š_š[[˜[YK™[™ÕÚ]
+‹šHŠJHÂˆ^\™YXİ\Y˜Xİ[
+^İ]]\™XİÜQ›Ü’›ØŠY
+KÔİš[™Ê
+KXÚØYÙT›Ûİ›Ü’›ØŠY
+JNÂˆH[ÙHÂˆ^X]œÙ\™\‹˜\Kš[\›˜[‘XYÛ›ÜİXÔØ[š]^™\‹œ™YXİ^
+^
+NÂˆ^\™\XÙT]™Yš^
+^İ]]\™XİÜQ›Ü’›ØŠY
+KÔİš[™Ê
+K˜\Y˜XİŠNÂˆ^X]œÙ\™\‹˜\Kš[\›˜[‘XYÛ›ÜİXÔØ[š]^™\‹œ™YXİXœÛÛ]T]Ê^XÚØYÙT›Ûİ›Ü’›ØŠY
+JNÂˆBˆ™]\›ˆ^™Ù]]\Ê˜]˜K›š[Ë˜Ú\œÙ]”İ[™\™Ú\œÙ]Ë•U—Î
+NÂˆBˆš]˜]Hİ]XÈİš[™È™YXİ\Y˜Xİ[
+İš[™È[İš[™Èİ]]›Ûİ]XÚØYÙT›Ûİ
+HÂˆ˜]˜K][œ™YÙ^”]\›ˆ]\›Z˜]˜K][œ™YÙ^”]\›‹˜ÛÛ\[JŠÚ\ÊOØÜš\Š×—JŠOŠŠÊOÜØÜš\ÊˆŠNÂˆ˜]˜K][œ™YÙ^“X]Ú\ˆX]Ú\\]\›‹›X]Ú\Š[
+NÔİš[™ĞY™™\ˆX\ÚÙY[™]Èİš[™ĞY™™\Š
+NÂˆ˜]˜K][“X\İš[™Ëİš[™Ïˆ^Xİ]X›TØÜš\Ï[™]È˜]˜K][“[šÙY\ÚX\Š
+NÚ[[™^LÂˆÚ[JX]Ú\‹™š[™
 
-    private static String artifactCategory(String path) {
-        String lower=path.toLowerCase(java.util.Locale.ROOT);
-        if(lower.contains("/checkpoints/")||lower.startsWith("checkpoints/"))return "recoveryCheckpoints";
-        String leaf=lower.substring(lower.lastIndexOf('/')+1);
-        if(lower.contains("/details/")||lower.contains("/timeseries/")||leaf.startsWith("series-")||leaf.contains("metric"))return "metricsTimeSeries";
-        if(leaf.contains("summary")||leaf.contains("manifest")||lower.endsWith("/report/index.html"))return "summaryManifests";
-        if(lower.contains("/evidence/")||lower.contains("/samples/")||lower.contains("/events/")
-                ||lower.contains("/failures/")||lower.contains("/iterations/")||lower.contains("/executions/")
-                ||leaf.contains("iteration"))return "executionEvidence";
-        return "other";
-    }
+JHÂˆİš[™È]šX]\Ï[X]Ú\‹™Ü›İ\
+JNÂˆ›ÛÛX[ˆœÛÛ‘]OZ˜]˜K][œ™YÙ^”]\›‹˜ÛÛ\[JŠÚJW\WÊWÊ–É×—OØ\XØ][Û‹ÚœÛÛ—ˆŠK›X]Ú\Š]šX]\ÊK™š[™
 
-    byte[] archiveEntry(String id,String requested) throws Exception {
-        if(!ArtifactArchive.safePath(requested)||ArtifactArchive.MANIFEST.equalsIgnoreCase(requested))throw new IllegalArgumentException("Invalid archive entry path");
-        try(ArtifactRead read=openArtifactArchive(id,false)) { return read.verified.read(requested); }
-        catch(java.io.FileNotFoundException missing){throw new NotFoundException();}
-    }
-    final class ArtifactRead implements AutoCloseable {
-        final Path path;
-        final ArtifactArchive.VerifiedRead verified;
-        final ArtifactDownload download;
-        ArtifactRead(Path path,ArtifactArchive.VerifiedRead verified,ArtifactDownload download){this.path=path;this.verified=verified;this.download=download;}
-        long length(){return download.length;}
-        void writeTo(java.io.OutputStream output) throws java.io.IOException {download.writeTo(output);}
-        @Override public void close() throws java.io.IOException {try {if(download!=null)download.close();else verified.close();} finally {artifactLifecycle.readLock().unlock();artifactReadSlots.release();}}
-    }
-    ArtifactRead openArtifactArchive(String id,boolean digests) throws Exception {
-        if(!artifactReadSlots.tryAcquire())throw new ArtifactCapacityException();
-        artifactLifecycle.readLock().lock();
-        try {
-            if(store.get(id)==null)throw new NotFoundException();
-            if(store.workerQuarantined(id))throw new ArchiveUnavailableException("FAILED");
-            Path archive=artifactArchivePath(id),status=archive.resolveSibling("archive-status.json");
-            String archiveState=readArchiveStatus(status).path("state").asText("FAILED");
-            if(!"READY".equals(archiveState))throw new ArchiveUnavailableException(archiveState);
-            ArtifactArchive.VerifiedRead verified=null;ArtifactDownload download=null;
-            try { if(digests)download=ArtifactDownload.open(archive);else verified=ArtifactArchive.openVerified(archive,false); }
-            catch(Exception invalid){throw new ArchiveUnavailableException("FAILED");}
-            return new ArtifactRead(archive,verified,download);
-        } catch(Exception failure){artifactLifecycle.readLock().unlock();artifactReadSlots.release();throw failure;}
-    }
-    private void archiveStatus(String id,String state,String reason) throws Exception { archiveStatus(id,state,reason,null); }
-    private void archiveStatus(String id,String state,String reason,Map<String,Object> diagnostic) throws Exception {
-        Path target=artifactArchivePath(id).resolveSibling("archive-status.json");
-        Files.createDirectories(target.getParent());
-        Path temporary=Files.createTempFile(target.getParent(),".archive-status-",".tmp");
-        try {
-            Map<String,Object> value=new LinkedHashMap<>();value.put("state",state);value.put("reason",reason);value.put("manifestVersion",1);
-            if(diagnostic!=null)value.put("diagnostic",diagnostic);
-            Files.write(temporary,JSON.writeValueAsBytes(value));
-            try(var channel=java.nio.channels.FileChannel.open(temporary,java.nio.file.StandardOpenOption.WRITE)){channel.force(true);}
-            Files.move(temporary,target,java.nio.file.StandardCopyOption.ATOMIC_MOVE,java.nio.file.StandardCopyOption.REPLACE_EXISTING);
-        } finally { Files.deleteIfExists(temporary); }
-    }
-    private static JsonNode readArchiveStatus(Path status) {
-        try {
-            if(!Files.isRegularFile(status))return JSON.valueToTree(Map.of("state","PENDING"));
-            if(Files.size(status)>4096)throw new IllegalArgumentException();
-            JsonNode value=JSON.readTree(status.toFile());
-            if(value==null||!Set.of("PENDING","ARCHIVING","READY","FAILED").contains(value.path("state").asText()))throw new IllegalArgumentException();
-            return value;
-        } catch(Exception invalid){return JSON.valueToTree(Map.of("state","FAILED","reason","invalid_metadata"));}
-    }
-    void retryArtifactArchive(String id) throws Exception {
-        if(!terminal(id))throw new IllegalArgumentException("Artifacts can be published after the Job has ended");
-        if(store.workerQuarantined(id))throw new IllegalArgumentException("Artifacts require independent recovery after Worker quarantine");
-        if(!Files.isDirectory(outputDirectoryForJob(id)))throw new IllegalArgumentException("Private source output is unavailable for retry");
-        store.artifactRecoveryNeeded(id,true);
-        requestedArtifactRetries.add(id);
-        scheduleArtifactArchive(id);
-    }
-    void scheduleArtifactArchive(String id) {
-        if(closing||!pendingArtifactJobs.add(id))return;
-        requestedArtifactRetries.remove(id);
-        final long queuedAt=System.nanoTime();
-        try { artifactWriters.execute(() -> {
-            artifactLifecycle.readLock().lock();
-            Path output=outputDirectoryForJob(id), archive=artifactArchivePath(id);
-            ArtifactMetricsRecorder metrics=null;
-            try {
-                if(store.get(id)==null||!terminal(id))return;
-                if(jobs.containsKey(id))return;
-                var previous=store.archiveMetrics(id);
-                metrics=new ArtifactMetricsRecorder(queuedAt,previous==null?1:Math.min(Long.MAX_VALUE-1,previous.attempts)+1);
-                metrics.phase("worker_fence");
-                ArtifactMetricsRecorder.CURRENT.set(metrics);
-                store.archiveMetrics(id,metrics.value);
-                store.artifactRecoveryNeeded(id,true);
-                if(store.workerQuarantined(id)) {
-                    metrics.fail("worker_unverified");
-                    finishArtifactFailure(id,"worker_unverified","FAILED_IO");
-                    return;
-                }
-                if(store.workerMayBeAlive(id)) {
-                    metrics.fail("worker_active");
-                    finishArtifactFailure(id,"worker_active","FAILED_IO");
-                    return;
-                }
-                if(Files.isRegularFile(archive)) {
-                    metrics.phase("verification_fsync");
-                    try { ArtifactArchive.verify(archive,true); }
-                    catch(Exception corrupt) {
-                        if(!Files.isDirectory(output))throw corrupt;
-                        Files.delete(archive);
-                    }
-                }
-                if(!Files.isRegularFile(archive)) {
-                    metrics.phase("publication");
-                    archiveStatus(id,"ARCHIVING","");
-                    if(!Files.isDirectory(output))throw new java.io.IOException("Worker output is unavailable");
-                    cleanupArtifactStaging(archive.getParent());
-                    // Preserve the exact bytes produced by the Engine/Worker; ZIP publication never rewrites them.
-                    artifactPublisher.publish(output,archive,ServerRuntime::validateApprovedArtifactBytes);
-                }
-                metrics.phase("publication");
-                archiveStatus(id,"READY","");
-                metrics.value.zipBytes=Files.size(archive);
-                metrics.value.outcome="READY";
-                metrics.phase("cleanup");
-                try {deleteTree(output);cleanupArtifactStaging(archive.getParent());store.artifactRecoveryNeeded(id,false);}
-                catch(Exception cleanupFailure){metrics.fail("cleanup_failed");metrics.value.outcome="CLEANUP_PENDING";java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).warning("Artifact cleanup will be retried for Job "+id);}
-                try {store.audit("SYSTEM","ARTIFACT_PUBLICATION",id,null,"READY");}
-                catch(Exception auditFailure){java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).warning("Unable to audit artifact publication for Job "+id);}
-            } catch(Exception failure) {
-                boolean policy=failure instanceof IllegalArgumentException;
-                if(metrics!=null&&metrics.value.failurePhase==null)metrics.fail(policy?"policy_limit":"publication_failed");
-                finishArtifactFailure(id,policy?"policy_limit":"publication_failed",policy?"REJECTED_POLICY":"FAILED_IO",failure);
-                java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).warning("Artifact publication failed for Job "+id);
-            } finally {
-                ArtifactMetricsRecorder.CURRENT.remove();
-                if(metrics!=null) {
-                    metrics.finish();
-                    try {store.archiveMetrics(id,metrics.value);}
-                    catch(Exception unavailable){java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).warning("Unable to persist artifact metrics for Job "+id);}
-                }
-                pendingArtifactJobs.remove(id);
-                // Transfer an accepted retry before releasing the retention
-                // fence, so expiry cannot delete its source between writers.
-                try {if(requestedArtifactRetries.remove(id))scheduleArtifactArchive(id);}
-                finally {artifactLifecycle.readLock().unlock();}
-            }
-        }); } catch(RejectedExecutionException full) {
-            pendingArtifactJobs.remove(id);
-            // Recovery retries when writer capacity becomes available; a retry cannot replace a READY state.
-        }
-    }
-    private void finishArtifactFailure(String id,String reason,String auditOutcome) {
-        finishArtifactFailure(id,reason,auditOutcome,null);
-    }
-    private void finishArtifactFailure(String id,String reason,String auditOutcome,Exception failure) {
-        Map<String,Object> diagnostic=null;
-        if(failure instanceof ArtifactArchive.LimitFailure){
-            ArtifactArchive.LimitFailure limited=(ArtifactArchive.LimitFailure)failure;
-            diagnostic=att.server.api.LimitDiagnostic.create("ATT-ARCHIVE-LIMIT-EXCEEDED","Artifact archive exceeded a configured publication limit",
-                    limited.limitName,limited.limit,limited.observed,"server.artifactPublication",att.server.api.LimitOutcome.ARCHIVE_FAILED,
-                    "publication","Reduce eligible artifact entry count or size and retry archive publication.","archive.zip");
-        }else if("policy_limit".equals(reason)){
-            diagnostic=att.server.api.LimitDiagnostic.create("ATT-ARCHIVE-POLICY-LIMIT","Artifact archive could not be published within its safe policy",
-                    "artifact.archivePolicy",null,null,"server.artifactPublication",att.server.api.LimitOutcome.ARCHIVE_FAILED,
-                    "publication","Reduce eligible artifact entry count or size and retry archive publication.","archive.zip");
-        }
-        try {archiveStatus(id,"FAILED",reason,diagnostic);}catch(Exception ignored){}
-        try {store.artifactRecoveryNeeded(id,false);}catch(Exception ignored){}
-        try {store.audit("SYSTEM","ARTIFACT_PUBLICATION",id,null,auditOutcome);}catch(Exception ignored){}
-    }
-    private static void cleanupArtifactStaging(Path jobDirectory) throws Exception {
-        try(var files=Files.list(jobDirectory)) {
-            for(Path file:files.filter(p->{String name=p.getFileName().toString();return name.startsWith(".artifact-export-")||name.startsWith(".artifact-")&&name.endsWith(".zip.tmp")||name.startsWith(".archive-status-")&&name.endsWith(".tmp");}).toList())deleteTree(file);
-        }
-    }
-    synchronized int recoverArtifactArchives() throws Exception {
-        List<String> ids=store.artifactRecoveryJobIds(artifactRecoveryCursor,64);
-        if(ids.isEmpty()){artifactRecoveryCursor="";return 0;}
-        for(String id:ids){artifactRecoveryCursor=id;scheduleArtifactArchive(id);}
-        return ids.size();
-    }
-    private void recoverArtifactArchivesSafely() {
-        try {recoverArtifactArchives();}
-        catch(Exception failure){java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).warning("Unable to recover pending artifact publications");}
-    }
-    Object publicEventData(Object data,Path output,Path packageRoot) throws Exception {
-        JsonNode node=JSON.valueToTree(att.server.api.internal.DiagnosticSanitizer.sanitizeValue(data));
-        JsonNode sanitized=sanitize(node,output,packageRoot);
-        if(sanitized instanceof ObjectNode object && !object.hasNonNull("console")) {
-            Map<String,Object> payload=JSON.convertValue(object,Map.class);
-            String line=att.console.ExecutionConsoleFormatter.formatPayload(payload,att.console.ExecutionConsoleFormatter.Options.published());
-            if(line!=null&&!line.isBlank()) object.put("console",publishConsole(line));
-        }
-        return sanitized;
-    }
-    private JsonNode publicJson(String id,String json) throws Exception {
-        JsonNode node=JSON.readTree(json);Object safe=att.server.api.internal.DiagnosticSanitizer.sanitizeValue(JSON.convertValue(node,Object.class));node=JSON.valueToTree(safe);Path output=config.dataDir.resolve("jobs").resolve(id).resolve("output").toAbsolutePath().normalize();
-        return sanitize(node,output,packageRootForJob(id));
-    }
-    private JsonNode publicJobResult(String id,String command,String status,int exitCode,String json) throws Exception {
-        if(!"load".equals(command))return publicJson(id,json);
-        Map<?,?> stored=JSON.readValue(json,Map.class);
-        Map<String,Object> compact=att.server.api.LoadTerminalResult.projectOperationResult(stored,status,exitCode);
-        JsonNode node=JSON.valueToTree(att.server.api.internal.DiagnosticSanitizer.sanitizeValue(compact));
-        Path output=config.dataDir.resolve("jobs").resolve(id).resolve("output").toAbsolutePath().normalize();
-        return sanitize(node,output,packageRootForJob(id));
-    }
-    private static boolean semanticLocation(String field) {
-        return Set.of("queue","requestQueue","requestQueues","requestQueueDefault","replyQueue","replyQueueDefault",
-                "channel","queueManager","replyQueueManager","remotePath","remoteDirectory","remoteFile","host","hostname","url","baseUrl").contains(field);
-    }
-    private JsonNode sanitize(JsonNode node,Path output,Path packageRoot) {return sanitize(node,output,packageRoot,"");}
-    private JsonNode sanitize(JsonNode node,Path output,Path packageRoot,String field) {
-        return sanitize(node,output,packageRoot,field,true);
-    }
-    private JsonNode sanitize(JsonNode node,Path output,Path packageRoot,String field,boolean protocolReferences) {
-        if(node==null)return null;
-        if(node.isTextual()) {
-            if(protocolReferences && ("$attDebugKeepDefault".equals(field) || semanticLocation(field)))return node;
-            String value=node.asText();value=replacePathPrefix(value,output.toString(),"artifact");
-            if(packageRoot!=null)value=replacePathPrefix(value,packageRoot.toString(),"package");
-            return JSON.getNodeFactory().textNode(semanticLocation(field)?value:att.server.api.internal.DiagnosticSanitizer.redactAbsolutePaths(value,packageRoot));
-        }
-        if(node.isObject()){
-            com.fasterxml.jackson.databind.node.ObjectNode copy=JSON.createObjectNode();
-            node.fields().forEachRemaining(e->{
-                String key=e.getKey();
-                if(!protocolReferences){
-                    key=replacePathPrefix(key,output.toString(),"artifact");
-                    if(packageRoot!=null)key=replacePathPrefix(key,packageRoot.toString(),"package");
-                    key=att.server.api.internal.DiagnosticSanitizer.redactAbsolutePaths(key,packageRoot);
-                    if(copy.has(key))throw new IllegalArgumentException("Export field names collide after path projection");
-                }
-                copy.set(key,sanitize(e.getValue(),output,packageRoot,protocolReferences && semanticLocation(field)?field:e.getKey(),protocolReferences));
-            });return copy;
-        }
-        if(node.isArray()){com.fasterxml.jackson.databind.node.ArrayNode copy=JSON.createArrayNode();for(JsonNode item:node)copy.add(sanitize(item,output,packageRoot,field,protocolReferences));return copy;}
-        return node.deepCopy();
-    }
-    private static String replacePathPrefix(String value,String prefix,String logical){if(value.equals(prefix))return logical+":";String separator=java.io.File.separator;value=value.replace(prefix+separator,logical+":");if("\\".equals(separator))value=value.replace(prefix+"/",logical+":");else value=value.replace(prefix+"\\",logical+":");return value;}
-    static String safeMessage(Exception e){String m=att.server.api.internal.DiagnosticSanitizer.redactAbsolutePaths(att.server.api.internal.DiagnosticSanitizer.redactText(e.getMessage()));return m.isEmpty()?"ATT Worker execution failed":m.length()>500?m.substring(0,500):m;}
-    JobEvents events(String id) throws Exception {
-        Map<String,Object> storedJob=JOB_ID.matcher(id).matches()?store.get(id):null;
-        if(storedJob==null)throw new NotFoundException();
-        Job active=jobs.get(id);if(active!=null)return active.events;
-        Object stripe=terminalEventCacheStripes[Math.floorMod(id.hashCode(),terminalEventCacheStripes.length)];
-        synchronized(stripe) {
-            synchronized(terminalEventCacheLock) {
-                JobEvents cached=terminalEventCache.get(id);
-                if(cached!=null)return cached;
-            }
-            JobEvents loaded=new JobEvents(config.dataDir.resolve("jobs").resolve(id).resolve("events.jsonl"),
-                    config.maxEventsPerJob,config.maxEventJournalBytes,config.maxEventJournalMemoryBytes,eventCompactions);
-            if(List.of("PASS","FAIL","ERROR","INVALID","CANCELLED").contains(storedJob.get("status"))) {
-                Map<String,Object> recoveredResult=new LinkedHashMap<>();
-                recoveredResult.put("jobId",id);
-                recoveredResult.put("status",storedJob.get("status"));
-                recoveredResult.put("exitCode",storedJob.get("exitCode"));
-                Object projectedResult=null;
-                if(storedJob.get("resultJson") instanceof String resultJson)
-                    try {projectedResult=publicJson(id,resultJson);}catch(Exception invalidStoredResult) { /* keep the durable status and exit code */ }
-                recoveredResult.put("result",projectedResult);
-                loaded.recoverMissingTerminalResult(recoveredResult);
-            }
-            long weight=loaded.cacheWeightBytes();
-            if(weight<=TERMINAL_EVENT_CACHE_MAX_WEIGHT) {
-                synchronized(terminalEventCacheLock) {
-                    JobEvents prior=terminalEventCache.put(id,loaded);
-                    if(prior!=null)terminalEventCacheWeight-=prior.cacheWeightBytes();
-                    terminalEventCacheWeight+=weight;
-                    while(terminalEventCache.size()>TERMINAL_EVENT_CACHE_MAX_ENTRIES
-                            ||terminalEventCacheWeight>TERMINAL_EVENT_CACHE_MAX_WEIGHT) {
-                        Map.Entry<String,JobEvents> eldest=terminalEventCache.entrySet().iterator().next();
-                        terminalEventCacheWeight-=eldest.getValue().cacheWeightBytes();
-                        terminalEventCache.remove(eldest.getKey());
-                    }
-                }
-            }
-            return loaded;
-        }
-    }
+NÂˆYŠœÛÛ‘]JXÛÛ[YNÂˆİš[™ÈÚÙ[H—×ĞUÔĞÔ’TĞ“ĞÒ×ÈŠÚ[™^
+È—ÈŠÚ˜]˜K][•URQœ˜[™ÛUURQ
 
-    private Map<String,Object> eventJournalStatistics() {
-        long activeBytes=0L,retainedEvents=0L,retainedMemoryBytes=0L,attempts=0L,failures=0L,lastCompactionAgeMs=0L;
-        int active=0,degraded=0;
-        for(Job job:jobs.values()) {
-            Map<String,Object> metrics=job.events.metrics();
-            active++;
-            activeBytes+=((Number)metrics.get("journalBytes")).longValue();
-            retainedEvents+=((Number)metrics.get("retainedEventCount")).longValue();
-            retainedMemoryBytes+=((Number)metrics.get("retainedMemoryBytes")).longValue();
-            attempts+=((Number)metrics.get("compactionAttempts")).longValue();
-            failures+=((Number)metrics.get("compactionFailures")).longValue();
-            if(metrics.get("lastCompactionAgeMs") instanceof Number age)
-                lastCompactionAgeMs=Math.max(lastCompactionAgeMs,age.longValue());
-            if("DEGRADED".equals(metrics.get("journalPersistence")))degraded++;
-        }
-        Map<String,Object> result=new LinkedHashMap<>();
-        result.put("activeJobs",active);result.put("degradedActiveJobs",degraded);
-        result.put("activeJournalBytes",activeBytes);result.put("activeRetainedEvents",retainedEvents);
-        result.put("activeRetainedMemoryBytes",retainedMemoryBytes);
-        result.put("activeMemoryBudgetBytes",active*(long)config.maxEventJournalMemoryBytes);
-        result.put("activeMemoryOverBudgetBytes",Math.max(0L,retainedMemoryBytes-active*(long)config.maxEventJournalMemoryBytes));
-        result.put("activeCompactionAttempts",attempts);result.put("activeCompactionFailures",failures);
-        result.put("oldestActiveCompactionAgeMs",lastCompactionAgeMs);
-        result.put("maxJournalBytesPerJob",config.maxEventJournalBytes);
-        result.put("memoryBudgetBytesPerJob",config.maxEventJournalMemoryBytes);
-        long usable;
-        try{usable=Files.getFileStore(config.dataDir).getUsableSpace();}
-        catch(Exception unavailable){usable=-1L;}
-        result.put("storageUsableBytes",usable);
-        result.put("storageHeadroomLow",usable>=0L&&usable<JobEvents.MIN_STORAGE_HEADROOM_BYTES);
-        synchronized(terminalEventCacheLock) {
-            result.put("cachedTerminalJobs",terminalEventCache.size());
-            result.put("cachedTerminalWeightBytes",terminalEventCacheWeight);
-        }
-        return result;
-    }
-    boolean terminal(String id) throws Exception {Job active=jobs.get(id);if(active!=null)return active.terminal();Map<String,Object> row=store.get(id);if(row==null)throw new NotFoundException();return List.of("PASS","FAIL","ERROR","INVALID","CANCELLED").contains(row.get("status"));}
-    /** Validate bounded text artifacts without modifying any Engine/Worker-generated byte. */
-    static byte[] approvedArtifactBytes(Path file) throws Exception {
-        final int limit=16*1024*1024;
-        byte[] bytes;
-        try(var input=Files.newInputStream(file)){bytes=input.readNBytes(limit+1);}
-        validateApprovedArtifactBytes(file,bytes);
-        return bytes;
-    }
-    /** Reject unsafe captured output while leaving accepted bytes owned by ArtifactArchive unchanged. */
-    static void validateApprovedArtifactBytes(Path file,byte[] bytes) {
-        final int limit=16*1024*1024;
-        if(bytes.length>limit)throw new IllegalArgumentException("Artifact exceeds the safe text download limit (16 MiB)");
-        String text;
-        try {text=java.nio.charset.StandardCharsets.UTF_8.newDecoder()
-                .onMalformedInput(java.nio.charset.CodingErrorAction.REPORT)
-                .onUnmappableCharacter(java.nio.charset.CodingErrorAction.REPORT)
-                .decode(java.nio.ByteBuffer.wrap(bytes)).toString();}
-        catch(java.nio.charset.CharacterCodingException invalid){throw new IllegalArgumentException("Binary artifacts cannot be exported");}
-        if(text.indexOf(0)>=0)throw new IllegalArgumentException("Binary artifacts cannot be exported");
-        // Never alter producer bytes when creating ZIPs. Plain-text evidence is checked for
-        // credentials and host-local paths; generated HTML and structured JSON/YAML have their
-        // own syntax/presentation rules. Applying free-text path rewriting to structured
-        // payloads incorrectly classifies legitimate remotePath values and report scripts.
-        String name=file.getFileName().toString().toLowerCase(java.util.Locale.ROOT);
-        boolean html=name.endsWith(".html")||name.endsWith(".htm");
-        boolean structured=name.endsWith(".json")||name.endsWith(".yaml")||name.endsWith(".yml");
-        // Structured snapshots are already protected by the typed exportValue check below.
-        // Text heuristics are not idempotent on quoted YAML and may discard valid case.yaml.
-        if(!html && !structured && !att.server.api.internal.DiagnosticSanitizer.redactText(text).equals(text))
-            throw new IllegalArgumentException("Artifact contains unapproved sensitive text");
-        if((name.endsWith(".log")||name.endsWith(".txt")||name.endsWith(".md"))
-                && !att.server.api.internal.DiagnosticSanitizer.redactAbsolutePaths(text).equals(text))
-            throw new IllegalArgumentException("Artifact contains unapproved host-local paths");
-        if(name.endsWith(".json") || name.endsWith(".yaml") || name.endsWith(".yml")) {
-            try {
-                Object source;
-                if(name.endsWith(".json")) source=ARTIFACT_JSON.readValue(text,Object.class);
-                else {
-                    org.yaml.snakeyaml.LoaderOptions options=new org.yaml.snakeyaml.LoaderOptions();
-                    options.setAllowDuplicateKeys(false);options.setMaxAliasesForCollections(0);
-                    options.setNestingDepthLimit(64);options.setCodePointLimit(limit);
-                    source=new org.yaml.snakeyaml.Yaml(new ArtifactYamlConstructor(options)).load(text);
-                }
-                Object safe=att.security.SecretProtection.exportValue(source);
-                if(!java.util.Objects.equals(source,safe))
-                    throw new IllegalArgumentException("Artifact contains unapproved sensitive fields");
-            } catch(IllegalArgumentException rejected) {throw rejected;}
-              catch(Exception invalid) {throw new IllegalArgumentException("Invalid structured artifact cannot be exported");}
-        }
-    }
-    /** Legacy sanitized export projection; retained only for compatibility tests and callers. */
-    byte[] publicArtifact(String id, Path file) throws Exception {
-        final int limit=16*1024*1024;
-        byte[] bytes;
-        try(var input=Files.newInputStream(file)){bytes=input.readNBytes(limit+1);}
-        if(bytes.length>limit)throw new IllegalArgumentException("Artifact exceeds the safe text download limit (16 MiB)");
-        String text;
-        try { text=java.nio.charset.StandardCharsets.UTF_8.newDecoder().onMalformedInput(java.nio.charset.CodingErrorAction.REPORT)
-                .onUnmappableCharacter(java.nio.charset.CodingErrorAction.REPORT).decode(java.nio.ByteBuffer.wrap(bytes)).toString(); }
-        catch(java.nio.charset.CharacterCodingException invalid){throw new IllegalArgumentException("Binary artifacts require trusted filesystem access");}
-        if(text.indexOf('\0')>=0)throw new IllegalArgumentException("Binary artifacts require trusted filesystem access");
-        String filename=file.getFileName().toString().toLowerCase(java.util.Locale.ROOT);
-        if(filename.endsWith(".json")||filename.endsWith(".yaml")||filename.endsWith(".yml")) {
-            try {
-                boolean json=filename.endsWith(".json");
-                Object raw;
-                if(json)raw=ARTIFACT_JSON.readValue(text,Object.class);
-                else {
-                    org.yaml.snakeyaml.LoaderOptions options=new org.yaml.snakeyaml.LoaderOptions();
-                    options.setAllowDuplicateKeys(false);options.setMaxAliasesForCollections(0);options.setNestingDepthLimit(64);options.setCodePointLimit(limit);
-                    raw=new org.yaml.snakeyaml.Yaml(new ArtifactYamlConstructor(options)).load(text);
-                }
-                JsonNode projected=sanitize(JSON.valueToTree(att.security.SecretProtection.exportValue(raw)),outputDirectoryForJob(id),packageRootForJob(id),"",false);
-                if(json)return JSON.writerWithDefaultPrettyPrinter().writeValueAsBytes(projected);
-                org.yaml.snakeyaml.DumperOptions options=new org.yaml.snakeyaml.DumperOptions();options.setDefaultFlowStyle(org.yaml.snakeyaml.DumperOptions.FlowStyle.BLOCK);
-                return new org.yaml.snakeyaml.Yaml(options).dump(ARTIFACT_JSON.convertValue(projected,Object.class)).getBytes(StandardCharsets.UTF_8);
-            } catch(Exception invalid){throw new IllegalArgumentException("Structured artifact cannot be safely published");}
-        }
-        if(filename.endsWith(".html")||filename.endsWith(".htm")) {
-            text=redactArtifactHtml(text,outputDirectoryForJob(id).toString(),packageRootForJob(id));
-        } else {
-            text=att.server.api.internal.DiagnosticSanitizer.redactText(text);
-            text=replacePathPrefix(text,outputDirectoryForJob(id).toString(),"artifact");
-            text=att.server.api.internal.DiagnosticSanitizer.redactAbsolutePaths(text,packageRootForJob(id));
-        }
-        return text.getBytes(java.nio.charset.StandardCharsets.UTF_8);
-    }
-    private static String redactArtifactHtml(String html,String outputRoot,Path packageRoot) {
-        java.util.regex.Pattern pattern=java.util.regex.Pattern.compile("(?is)<script\\b([^>]*)>(.*?)</script\\s*>");
-        java.util.regex.Matcher matcher=pattern.matcher(html);StringBuffer masked=new StringBuffer();
-        java.util.Map<String,String> executableScripts=new java.util.LinkedHashMap<>();int index=0;
-        while(matcher.find()) {
-            String attributes=matcher.group(1);
-            boolean jsonData=java.util.regex.Pattern.compile("(?i)\\btype\\s*=\\s*['\\\"]?application/json\\b").matcher(attributes).find();
-            if(jsonData)continue;
-            String token="__ATT_SCRIPT_BLOCK_"+index+"_"+java.util.UUID.randomUUID().toString().replace("-","")+"__";
-            executableScripts.put(token,matcher.group());
-            matcher.appendReplacement(masked,java.util.regex.Matcher.quoteReplacement(token));index++;
-        }
-        matcher.appendTail(masked);
-        String safe=att.server.api.internal.DiagnosticSanitizer.redactText(masked.toString());
-        safe=replacePathPrefix(safe,outputRoot,"artifact");
-        safe=att.server.api.internal.DiagnosticSanitizer.redactAbsolutePaths(safe,packageRoot);
-        for(java.util.Map.Entry<String,String> entry:executableScripts.entrySet())safe=safe.replace(entry.getKey(),entry.getValue());
-        return safe;
-    }
-    Path artifact(String id,String requested) throws Exception {Map<String,Object> row=store.get(id);if(row==null)throw new NotFoundException();Job j=jobs.get(id);if(j!=null)return artifact(j,requested);Path base=config.dataDir.resolve("jobs").resolve(id).resolve("output").toRealPath();Path relative=Paths.get(requested);if(relative.isAbsolute())throw new IllegalArgumentException("Artifact path must be relative to job output");Path candidate=base.resolve(relative).normalize();if(!candidate.startsWith(base)||!Files.exists(candidate,java.nio.file.LinkOption.NOFOLLOW_LINKS))throw new NotFoundException();Path walk=base;for(Path part:base.relativize(candidate)){walk=walk.resolve(part);if(Files.isSymbolicLink(walk))throw new NotFoundException();}Path real=candidate.toRealPath();if(!real.startsWith(base)||!Files.isRegularFile(real))throw new NotFoundException();return real;}
-    void cleanupExpiredJobs() throws Exception {
-        Instant cutoff=Instant.now().minus(java.time.Duration.ofDays(config.jobRetentionDays));
-        try {reconcileDeletingJobs();}
-        catch(Exception failure){java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).warning("Unable to reconcile deleting ATT Server jobs: "+safeMessage(failure));}
-        if(!artifactLifecycle.writeLock().tryLock())return;
-        try {
-            for(String id:store.expiredJobIds(cutoff))if(!jobs.containsKey(id)&&!pendingArtifactJobs.contains(id)&&!store.workerMayBeAlive(id))try{
-                if(store.markDeleting(id,cutoff)){deleteTree(config.dataDir.resolve("jobs").resolve(id));store.deleteJob(id);}
-            }catch(Exception failure){java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).warning("Unable to remove expired ATT Server job "+id);}
-        } finally {artifactLifecycle.writeLock().unlock();}
-    }
+KÔİš[™Ê
+Kœ™\XÙJ‹H‹ˆŠJÈ—×ÈÂˆ^Xİ]X›TØÜš\Ëœ]
+ÚÙ[‹X]Ú\‹™Ü›İ\
 
-    private void cleanupExpiredJobsSafely(){try{cleanupExpiredJobs();}catch(Exception e){java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).warning("Unable to clean expired ATT Server jobs: "+safeMessage(e));}}
-    private static void deleteTree(Path root)throws java.io.IOException {
-        if(!JobDirectoryUsage.deleteJobDirectory(root)) throw new java.io.IOException("Refusing to delete a symbolic link");
-    }
-    void cleanupJobStorage() throws Exception {
-        if(!config.jobStorage.enabled) return;
-        restoreStorageCursor();
-        invalidateStorageCursorIfStale();
-        if(!reconcileDeletingJobs()) { publishStorageReport("deferred",null,null,null,null,0,0L,false); return; }
-        Path jobsRoot=config.dataDir.resolve("jobs");
-        JobDirectoryUsage.Measurement measurement=JobDirectoryUsage.measure(jobsRoot);
-        if(!measurement.complete) { publishStorageReport("measurement_failed",null,false,null,null,0,0L,false); return; }
-        if(measurement.bytes<=config.jobStorage.maxTotalBytes) {
-            storageScanAfterFinished=null; storageScanAfterId=null; storageScanCoveredHead=false;
-            publishStorageReport("ok",measurement.bytes,true,0,0,0,0L,false); return;
-        }
-        if(storageScanAfterFinished==null) storageScanCoveredHead=true;
-        Instant cutoff=clock.instant().minus(java.time.Duration.ofHours(config.jobStorage.minRetentionHours));
-        long remaining=measurement.bytes;
-        int deleted=0, eligible=0, protectedJobs=0, batches=0;
-        long reclaimed=0L;
-        boolean deferred=false, candidatesExhausted=false, batchLimitReached=false, tailFinished=false;
-        String resumeFinished=storageScanAfterFinished, resumeId=storageScanAfterId;
-        String afterFinished=resumeFinished, afterId=resumeId;
-        boolean wrapped=false;
-        while(remaining>config.jobStorage.cleanupTargetBytes && batches<storageCandidateBatchLimit) {
-            List<Map<String,Object>> page=store.storageCandidates(afterFinished, afterId);
-            if(page.isEmpty()) {
-                if(!wrapped && afterFinished!=null) { wrapped=true; afterFinished=null; afterId=null; storageScanCoveredHead=true; continue; }
-                candidatesExhausted=true; break;
-            }
-            batches++;
-            int deletedAtStart=deleted;
-            for(Map<String,Object> candidate:page) {
-                String id=String.valueOf(candidate.get("jobId"));
-                afterFinished=String.valueOf(candidate.get("finishedAt")); afterId=id;
-                if(remaining<=config.jobStorage.cleanupTargetBytes) break;
-                if(storageProtected(candidate, cutoff, id)) { protectedJobs++; continue; }
-                eligible++;
-                if(!artifactLifecycle.writeLock().tryLock()) { deferred=true; break; }
-                try {
-                    if(storageProtected(candidate, cutoff, id) || jobs.containsKey(id) || pendingArtifactJobs.contains(id) || store.workerMayBeAlive(id)) { protectedJobs++; eligible--; continue; }
-                    Path directory=jobsRoot.resolve(id);
-                    if(Files.isSymbolicLink(directory)) { protectedJobs++; eligible--; continue; }
-                    Long measured=measurement.jobBytes.get(id);
-                    long bytes=measured!=null?measured:JobDirectoryUsage.directoryBytes(directory);
-                    if(!store.markDeleting(id, cutoff, bytes<0?null:bytes)) { protectedJobs++; eligible--; continue; }
-                    if(bytes<0 || !JobDirectoryUsage.deleteJobDirectory(directory)) { java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).warning("Job "+id+" was marked for storage deletion and will be reconciled"); continue; }
-                    store.deleteJobWithAudit(id,"system:job-retention","JOB_STORAGE_EVICT",deletedOutcome(bytes));
-                    deleted++; reclaimed=saturatedAdd(reclaimed, Math.max(0L, bytes)); remaining=Math.max(0L, remaining-Math.max(0L, bytes));
-                } finally { artifactLifecycle.writeLock().unlock(); }
-            }
-            if(deferred) break;
-            if(deleted==deletedAtStart && page.size()<store.storageCandidatePage) {
-                if(!wrapped && resumeFinished!=null) { wrapped=true; afterFinished=null; afterId=null; storageScanCoveredHead=true; continue; }
-                candidatesExhausted=true; break;
-            }
-        }
-        if(!deferred && !candidatesExhausted && batches>=storageCandidateBatchLimit && remaining>config.jobStorage.cleanupTargetBytes) {
-            tailFinished=store.storageCandidates(afterFinished, afterId).isEmpty();
-            if(tailFinished && storageScanCoveredHead) candidatesExhausted=true;
-            else batchLimitReached=true;
-        }
-        if(!deferred && remaining>config.jobStorage.cleanupTargetBytes) {
-            OrphanSweep orphans=deleteEligibleOrphans(jobsRoot, measurement, remaining);
-            if(orphans.deferred) deferred=true;
-            deleted+=orphans.deleted; reclaimed=saturatedAdd(reclaimed, orphans.reclaimed); remaining=orphans.remaining;
-        }
-        boolean stillOver=!deferred && remaining>config.jobStorage.cleanupTargetBytes;
-        if(deferred) { storageScanAfterFinished=resumeFinished; storageScanAfterId=resumeId; }
-        else if(stillOver && batchLimitReached && !tailFinished && afterFinished!=null && afterId!=null) { storageScanAfterFinished=afterFinished; storageScanAfterId=afterId; }
-        else { storageScanAfterFinished=null; storageScanAfterId=null; storageScanCoveredHead=false; }
-        boolean quotaUnmet=stillOver && !batchLimitReached;
-        String state=deferred?"deferred":stillOver && batchLimitReached?"partial":quotaUnmet?"quota_unmet":"ok";
-        publishStorageReport(state, measurement.complete?remaining:null, measurement.complete, eligible, protectedJobs, deleted, reclaimed, quotaUnmet);
-        if(quotaUnmet) store.audit("system:job-retention","JOB_STORAGE_EVICT",null,null,"QUOTA_UNMET");
-        else if(stillOver && batchLimitReached) store.audit("system:job-retention","JOB_STORAGE_EVICT",null,null,"SWEEP_PARTIAL");
-    }
-    private void restoreStorageCursor() {
-        if(storageCursorRestored) return;
-        storageCursorRestored=true;
-        if(storageScanAfterFinished!=null || storageScanAfterId!=null) return;
-        try {
-            Path status=storageStatusPath();
-            if(!Files.isRegularFile(status) || Files.size(status)>65536) return;
-            JsonNode node=JSON.readTree(status.toFile());
-            if(node==null || !node.isObject()) return;
-            String finished=node.path("candidateAfterFinishedAt").asText("");
-            String id=node.path("candidateAfterJobId").asText("");
-            if(finished.isBlank() || id.isBlank()) return;
-            storageScanAfterFinished=finished; storageScanAfterId=id;
-            storageScanCoveredHead=node.path("candidateCycleCoveredHead").asBoolean(false);
-        } catch(Exception ignored) { }
-    }
-    private void invalidateStorageCursorIfStale() throws Exception {
-        if(storageScanAfterFinished==null && storageScanAfterId==null) return;
-        if(storageScanAfterFinished==null || storageScanAfterId==null || storageScanAfterFinished.isBlank() || storageScanAfterId.isBlank()) {
-            storageScanAfterFinished=null; storageScanAfterId=null; return;
-        }
-        Map<String,Object> anchor=store.get(storageScanAfterId);
-        if(anchor==null) return;
-        Object finished=anchor.get("finishedAt");
-        if(!(finished instanceof String text) || !text.equals(storageScanAfterFinished)) { storageScanAfterFinished=null; storageScanAfterId=null; }
-    }
-    private boolean storageProtected(Map<String,Object> candidate, Instant cutoff, String id) {
-        if(Boolean.TRUE.equals(candidate.get("pinned")) || Boolean.TRUE.equals(candidate.get("artifactRecovery")) || Boolean.TRUE.equals(candidate.get("quarantined"))) return true;
-        if(jobs.containsKey(id) || pendingArtifactJobs.contains(id)) return true;
-        Object finished=candidate.get("finishedAt");
-        if(!(finished instanceof String text) || text.compareTo(cutoff.toString())>0) return true;
-        return false;
-    }
-    private OrphanSweep deleteEligibleOrphans(Path jobsRoot, JobDirectoryUsage.Measurement measurement, long remaining) throws Exception {
-        OrphanSweep sweep=new OrphanSweep(remaining);
-        if(!Files.isDirectory(jobsRoot, java.nio.file.LinkOption.NOFOLLOW_LINKS)) return sweep;
-        Instant staleBefore=clock.instant().minus(java.time.Duration.ofMinutes(15));
-        try(var children=Files.newDirectoryStream(jobsRoot)) {
-            for(Path child:children) {
-                if(remaining<=config.jobStorage.cleanupTargetBytes) break;
-                Path name=child.getFileName();
-                if(name==null || !JOB_ID.matcher(name.toString()).matches()) continue;
-                String id=name.toString();
-                if(jobs.containsKey(id) || store.jobRowExists(id) || Files.isSymbolicLink(child)) continue;
-                var attributes=Files.readAttributes(child, java.nio.file.attribute.BasicFileAttributes.class, java.nio.file.LinkOption.NOFOLLOW_LINKS);
-                if(attributes.isSymbolicLink() || attributes.lastModifiedTime().toInstant().isAfter(staleBefore)) continue;
-                long bytes=measurement.jobBytes.getOrDefault(id, -1L);
-                if(bytes<0) continue;
-                if(!artifactLifecycle.writeLock().tryLock()) { sweep.deferred=true; return sweep; }
-                try {
-                    if(jobs.containsKey(id) || pendingArtifactJobs.contains(id) || store.jobRowExists(id) || store.workerMayBeAlive(id)) continue;
-                    if(!JobDirectoryUsage.deleteJobDirectory(child)) continue;
-                    sweep.deleted++; sweep.reclaimed=saturatedAdd(sweep.reclaimed, bytes); sweep.remaining=Math.max(0L, sweep.remaining-bytes); remaining=sweep.remaining;
-                    store.auditStorageEviction(id, deletedOutcome(bytes));
-                } finally { artifactLifecycle.writeLock().unlock(); }
-            }
-        }
-        return sweep;
-    }
-    boolean reconcileDeletingJobs() throws Exception {
-        boolean complete=true;
-        for(String id:store.deletingJobIds()) {
-            if(jobs.containsKey(id) || pendingArtifactJobs.contains(id)) {complete=false;continue;}
-            if(!artifactLifecycle.writeLock().tryLock()) {complete=false;continue;}
-            try {
-                if(jobs.containsKey(id) || pendingArtifactJobs.contains(id) || store.workerMayBeAlive(id)) {complete=false;continue;}
-                Path directory=config.dataDir.resolve("jobs").resolve(id);
-                Long recorded=store.retentionBytes(id);
-                long bytes=recorded!=null?recorded:JobDirectoryUsage.directoryBytes(directory);
-                if(!JobDirectoryUsage.deleteJobDirectory(directory)) {complete=false;continue;}
-                String actor=store.deletionActor(id);
-                if(actor==null)store.deleteJobWithAudit(id,"system:job-retention","JOB_STORAGE_EVICT",deletedOutcome(bytes));
-                else store.deleteJobWithAudit(id,actor,"JOB_DELETE","DELETED_AFTER_RECOVERY");
-            } catch(Exception failure) {
-                complete=false;
-                java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).warning("Unable to reconcile deleting ATT Server job "+id+": "+safeMessage(failure));
-            } finally { artifactLifecycle.writeLock().unlock(); }
-        }
-        return complete;
-    }
-    private void reconcileDeletingJobsSafely(){try{reconcileDeletingJobs();}catch(Exception e){java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).warning("Unable to reconcile deleting ATT Server jobs: "+safeMessage(e));}}
-    private void cleanupJobStorageSafely(){try{cleanupJobStorage();}catch(Exception e){java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).warning("Unable to apply ATT Server job storage limits: "+safeMessage(e));}}
-    private void publishStorageReport(String state,Long totalBytes,Boolean complete,Integer eligible,Integer protectedJobs,int deletedJobs,long reclaimedBytes,boolean quotaUnmet) {
-        Map<String,Object> report=storageSnapshot(state,totalBytes,complete,eligible,protectedJobs,clock.instant().toString(),deletedJobs,reclaimedBytes,quotaUnmet);
-        jobStorageReport=report;
-        try { writeStorageStatus(report); } catch(Exception failure) { java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).warning("Unable to persist job storage status"); }
-    }
-    private Map<String,Object> jobStorageSnapshot() {
-        if(!config.jobStorage.enabled) return storageSnapshot("disabled",null,null,null,null,null,null,null,false);
-        Map<String,Object> current=jobStorageReport;
-        if(current!=null) return current;
-        Map<String,Object> loaded=readStorageStatus();
-        if(loaded!=null) { jobStorageReport=loaded; return loaded; }
-        return storageSnapshot("unknown",null,null,null,null,null,null,null,false);
-    }
-    private Map<String,Object> storageSnapshot(String state,Long totalBytes,Boolean complete,Integer eligible,Integer protectedJobs,String lastSweepAt,Integer deletedJobs,Long reclaimedBytes,boolean quotaUnmet) {
-        Map<String,Object> report=new LinkedHashMap<>();
-        ServerConfig.JobStorage quota=config.jobStorage;
-        report.put("enabled",quota.enabled);
-        report.put("maxTotalBytes",quota.enabled?quota.maxTotalBytes:null);
-        report.put("cleanupTargetBytes",quota.enabled?quota.cleanupTargetBytes:null);
-        report.put("minRetentionHours",quota.minRetentionHours);
-        report.put("cleanupIntervalMinutes",quota.cleanupIntervalMinutes);
-        report.put("maxSingleJobBytes",null);
-        report.put("state",state);
-        report.put("totalBytes",totalBytes);
-        report.put("measurementComplete",complete);
-        report.put("eligibleJobs",eligible);
-        report.put("protectedJobs",protectedJobs);
-        report.put("lastSweepAt",lastSweepAt);
-        report.put("deletedJobs",deletedJobs);
-        report.put("reclaimedBytes",reclaimedBytes);
-        report.put("quotaUnmet",quotaUnmet);
-        return report;
-    }
-    private Path storageStatusPath() { return config.dataDir.resolve("job-storage-status.json"); }
-    private void writeStorageStatus(Map<String,Object> report) throws Exception {
-        Path target=storageStatusPath();
-        Files.createDirectories(target.getParent());
-        Path temporary=Files.createTempFile(target.getParent(),".job-storage-status-",".tmp");
-        try {
-            Map<String,Object> persisted=new LinkedHashMap<>(report);
-            if(storageScanAfterFinished!=null && storageScanAfterId!=null) {
-                persisted.put("candidateAfterFinishedAt",storageScanAfterFinished);
-                persisted.put("candidateAfterJobId",storageScanAfterId);
-                persisted.put("candidateCycleCoveredHead",storageScanCoveredHead);
-            }
-            Files.write(temporary,JSON.writeValueAsBytes(persisted));
-            try(var channel=java.nio.channels.FileChannel.open(temporary,java.nio.file.StandardOpenOption.WRITE)){channel.force(true);}
-            Files.move(temporary,target,java.nio.file.StandardCopyOption.ATOMIC_MOVE,java.nio.file.StandardCopyOption.REPLACE_EXISTING);
-        } finally { Files.deleteIfExists(temporary); }
-    }
-    private Map<String,Object> readStorageStatus() {
-        try {
-            Path status=storageStatusPath();
-            if(!Files.isRegularFile(status) || Files.size(status)>65536) return null;
-            JsonNode node=JSON.readTree(status.toFile());
-            if(node==null || !node.isObject() || !"ok".equals(node.path("state").asText()) && !"quota_unmet".equals(node.path("state").asText()) && !"partial".equals(node.path("state").asText()) && !"measurement_failed".equals(node.path("state").asText()) && !"deferred".equals(node.path("state").asText()) && !"unknown".equals(node.path("state").asText())) return null;
-            Map<String,Object> loaded=JSON.convertValue(node,Map.class);
-            loaded.remove("candidateAfterFinishedAt");
-            loaded.remove("candidateAfterJobId");
-            loaded.remove("candidateCycleCoveredHead");
-            loaded.put("enabled",true);
-            loaded.put("maxTotalBytes",config.jobStorage.maxTotalBytes);
-            loaded.put("cleanupTargetBytes",config.jobStorage.cleanupTargetBytes);
-            loaded.put("minRetentionHours",config.jobStorage.minRetentionHours);
-            loaded.put("cleanupIntervalMinutes",config.jobStorage.cleanupIntervalMinutes);
-            loaded.put("maxSingleJobBytes",null);
-            if(loaded.get("totalBytes") instanceof Number number && number.longValue()<0) loaded.put("totalBytes",null);
-            return loaded;
-        } catch(Exception invalid) { return null; }
-    }
-    private static long saturatedAdd(long left,long right) { return right>0 && left>Long.MAX_VALUE-right ? Long.MAX_VALUE : left+Math.max(0L,right); }
-    private static String deletedOutcome(long bytes) {
-        if(bytes<0) return "DELETED";
-        String outcome="DELETED:"+bytes;
-        return outcome.length()<=32?outcome:"DELETED";
-    }
-    private static final class OrphanSweep {
-        int deleted; long reclaimed; long remaining; boolean deferred;
-        OrphanSweep(long remaining){this.remaining=remaining;}
-    }
-    @Override public synchronized void close() {
-        admissionLifecycle.writeLock().lock();
-        try {if(closing)return;closing=true;}finally{admissionLifecycle.writeLock().unlock();}
-        if(inspectionWarmup!=null)inspectionWarmup.shutdownNow();
-        manifestPublisher.close();
-        if(executionWorkers!=null)executionWorkers.close();
-        if(loadScheduleScheduler!=null)loadScheduleScheduler.close();
-        retention.shutdownNow();artifactMaintenance.shutdownNow();targetIndexMaintenance.shutdownNow();inspectionWatchdogs.shutdownNow();
-        synchronized(draftLock){runDrafts.clear();debugDrafts.clear();quickLoadDrafts.clear();advancedLoadDrafts.clear();catalogLoadDrafts.clear();replayReviews.clear();}
-        inspectors.shutdownNow();workers.shutdownNow();streams.shutdownNow();
-        for(InspectionWorker worker:inspectionWorkerPool)worker.close();
-        for(Job j:jobs.values())if(j.process!=null) {
-            try {if(j.processFence!=null){j.processFence.observe();rememberWorkerProcesses(j,j.processFence);}stopWorkerTree(j);finishQuietly(j,"ERROR",143,"ATT-SERVER-INTERRUPTED","Server shutdown interrupted the Worker");}
-            catch(Exception ignored){if(j.processFence!=null)j.processFence.force();else forceTree(j.process);}
-        }
-        for(Process process:inspectionProcesses.keySet())if(process.isAlive())forceTree(process);
-        terminateExecutor(workers,"workers");terminateExecutor(inspectors,"inspectors");terminateExecutor(streams,"SSE streams");
-        terminateExecutor(targetIndexMaintenance,"target indexing");terminateExecutor(retention,"retention");terminateExecutor(artifactMaintenance,"artifact maintenance");terminateExecutor(inspectionWatchdogs,"inspection watchdogs");
-        if(inspectionWarmup!=null)terminateExecutor(inspectionWarmup,"inspection warmup");
-        for(Job job:jobs.values())if(!job.terminal()) {
-            FutureTask<Void> task=tasks.remove(job.id);if(task!=null)task.cancel(false);
-            finishQuietly(job,"ERROR",143,"ATT-SERVER-INTERRUPTED","Server shutdown stopped the queued Worker");
-            AdmissionLease lease=leases.remove(job.id);if(lease!=null)lease.release();
-            jobs.remove(job.id,job);scheduleArtifactArchive(job.id);
-        }
-        long stderrDeadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(5);
-        for(var entry:stderrDrainers.entrySet()) {
-            try {entry.getValue().getErrorStream().close();long remaining=stderrDeadline-System.nanoTime();if(remaining>0)entry.getKey().join(Math.max(1,TimeUnit.NANOSECONDS.toMillis(remaining)));}
-            catch(InterruptedException interrupted){Thread.currentThread().interrupt();break;}catch(Exception ignored){}
-        }
-        // Worker/SSE producers are quiescent before artifact writers and journal compactions drain.
-        artifactWriters.shutdown();terminateExecutor(artifactWriters,"artifact writers");
-        eventCompactions.shutdown();terminateExecutor(eventCompactions,"event compactions");
-        synchronized(terminalEventCacheLock){terminalEventCache.clear();terminalEventCacheWeight=0L;}
-        try {store.close();}catch(Exception failed){java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).log(java.util.logging.Level.WARNING,"ATT database cleanup failed",failed);}
-    }
-    static void terminateExecutor(java.util.concurrent.ExecutorService executor,String name) {
-        boolean interrupted=false;
-        try {
-            if(!executor.awaitTermination(30,TimeUnit.SECONDS)) {
-                executor.shutdownNow();
-                if(!executor.awaitTermination(5,TimeUnit.SECONDS))java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).warning("ATT executor did not terminate: "+name);
-            }
-        } catch(InterruptedException stopped) {
-            interrupted=true;executor.shutdownNow();
-            try {if(!executor.awaitTermination(5,TimeUnit.SECONDS))java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).warning("ATT executor still active after interruption: "+name);}
-            catch(InterruptedException again){interrupted=true;}
-        } finally {if(interrupted)Thread.currentThread().interrupt();}
-    }
+JNÂˆX]Ú\‹˜\[™™\XÙ[Y[
+X\ÚÙY˜]˜K][œ™YÙ^“X]Ú\‹œ][İT™\XÙ[Y[
+ÚÙ[ŠJNÚ[™^
+ÊÎÂˆBˆX]Ú\‹˜\[™Z[
+X\ÚÙY
+NÂˆİš[™ÈØY™OX]œÙ\™\‹˜\Kš[\›˜[‘XYÛ›ÜİXÔØ[š]^™\‹œ™YXİ^
+X\ÚÙYÔİš[™Ê
+JNÂˆØY™O\™\XÙT]™Yš^
+ØY™Kİ]]›Ûİ˜\Y˜XİŠNÂˆØY™OX]œÙ\™\‹˜\Kš[\›˜[‘XYÛ›ÜİXÔØ[š]^™\‹œ™YXİXœÛÛ]T]ÊØY™KXÚØYÙT›Ûİ
+NÂˆ›ÜŠ˜]˜K][“X\‘[Oİš[™Ëİš[™Ïˆ[N™^Xİ]X›TØÜš\Ë™[TÙ]
 
-    private static void terminateTree(Process process){process.toHandle().descendants().forEach(ProcessHandle::destroy);process.destroy();}
-    private static void forceTree(Process process){process.toHandle().descendants().forEach(ProcessHandle::destroyForcibly);process.destroyForcibly();}
-    @FunctionalInterface interface WorkerProcessLauncher { Process start(ProcessBuilder builder) throws java.io.IOException; }
-    @FunctionalInterface interface ArtifactPublisher { Path publish(Path output,Path archive,ArtifactArchive.EntryValidator validator) throws Exception; }
-    @FunctionalInterface interface LoadProgressPersistence { void update(String jobId,String progressJson) throws Exception; }
-    private static final class AdmissionLease {
-        private final Semaphore admission,load;private final java.util.concurrent.atomic.AtomicBoolean released=new java.util.concurrent.atomic.AtomicBoolean();
-        AdmissionLease(Semaphore admission,Semaphore load){this.admission=admission;this.load=load;}
-        void release(){if(released.compareAndSet(false,true)){admission.release();if(load!=null)load.release();}}
-    }
-    static final class QueueFullException extends RuntimeException {QueueFullException(String m){super(m);}}
-    private static final class JobProvenance {
-        final String scheduleId,scheduleOwner,executionPrincipal,submittedBy,triggeredBy;
-        JobProvenance(String scheduleId,String scheduleOwner,String executionPrincipal,String submittedBy,String triggeredBy) {
-            this.scheduleId=provenanceText(scheduleId,40);this.scheduleOwner=provenanceText(scheduleOwner,256);
-            this.executionPrincipal=provenanceText(executionPrincipal,256);this.submittedBy=provenanceText(submittedBy,256);this.triggeredBy=provenanceText(triggeredBy,256);
-        }
-        private static String provenanceText(String value,int max) {
-            if(value==null||value.isBlank()||value.length()>max||value.chars().anyMatch(Character::isISOControl))return null;
-            return value;
-        }
-    }
-    static final class JobConflictException extends RuntimeException {final String code;JobConflictException(String code,String message){super(message);this.code=code;}}
-    static final class NotFoundException extends RuntimeException {}
-    static final class ReplayDraftExpiredException extends RuntimeException {}
-    static final class ReplayInputMissingException extends IllegalArgumentException {ReplayInputMissingException(String message){super(message);}}
-    static final class ScheduleSourceChangedException extends IllegalArgumentException {
-        final String storedRevision,currentRevision,policy;
-        ScheduleSourceChangedException(String stored,String current,String policy){super("package-revision-changed");this.storedRevision=stored;this.currentRevision=current;this.policy=policy;}
-    }
-    static final class ScheduleConflictException extends RuntimeException {}
-    static final class InspectionCapacityException extends RuntimeException {}
-    static final class InspectionLimitException extends RuntimeException {
-        final List<Map<String,Object>> diagnostics;
-        InspectionLimitException(List<Map<String,Object>> diagnostics) {
-            this.diagnostics=Collections.unmodifiableList(new ArrayList<Map<String,Object>>(diagnostics));
-        }
-    }
-    static final class InspectionConfigurationException extends RuntimeException {
-        final List<Map<String,Object>> diagnostics;
-        InspectionConfigurationException(List<Map<String,Object>> diagnostics){this.diagnostics=Collections.unmodifiableList(new ArrayList<>(diagnostics));}
-        String summary(){Object summary=diagnostics.get(0).get("summary");return summary instanceof String?(String)summary:"Package configuration is invalid or incomplete.";}
-    }
-    static final class InspectionValidationException extends RuntimeException {
-        final String code;
-        final List<Map<String,Object>> diagnostics;
-        InspectionValidationException(String code,List<Map<String,Object>> diagnostics) {
-            super(diagnostics.isEmpty()?"Package inspection input or configuration is invalid.":String.valueOf(diagnostics.get(0).get("summary")));
-            this.code=code;
-            this.diagnostics=Collections.unmodifiableList(new ArrayList<>(diagnostics));
-        }
-        String summary(){return getMessage();}
-    }
-    static final class InspectionTimeoutException extends RuntimeException {}
-    static final class InspectionResponseTooLargeException extends RuntimeException {}
-    static final class StaleCursorException extends RuntimeException {}
-    static final class StaleDraftException extends RuntimeException {}
-    static final class DraftCapacityException extends RuntimeException {}
-    static final class InlineLoadDisabledException extends RuntimeException {}
-    static final class ArtifactCapacityException extends RuntimeException {}
-    static final class ArchiveUnavailableException extends RuntimeException {
-        final String archiveState;
-        ArchiveUnavailableException(String archiveState) {
-            this.archiveState=Set.of("PENDING","ARCHIVING","READY","FAILED").contains(archiveState)?archiveState:"FAILED";
-        }
-    }
-    static final class InlineLoadLimitException extends IllegalArgumentException {
-        InlineLoadLimitException(String message){super(message);}
-    }
-    static final class DraftValidationException extends IllegalArgumentException {
-        final List<Map<String,Object>> diagnostics;
-        DraftValidationException(List<Map<String,Object>> diagnostics) {
-            super(firstDiagnosticSummary(diagnostics));
-            List<Map<String,Object>> copy=new ArrayList<Map<String,Object>>();
-            for(Map<String,Object> diagnostic:diagnostics)copy.add(Collections.unmodifiableMap(new LinkedHashMap<String,Object>(diagnostic)));
-            this.diagnostics=Collections.unmodifiableList(copy);
-        }
-        private static String firstDiagnosticSummary(List<Map<String,Object>> diagnostics) {
-            Object summary=diagnostics==null||diagnostics.isEmpty()?null:diagnostics.get(0).get("summary");
-            return summary instanceof String&&!((String)summary).isBlank()?(String)summary:"Load or Debug input failed schema or target validation";
-        }
-    }
-    private static final class DebugDraft {
-        final String id,principal,packageId,environment,targetType,targetId,resourceId,revisionDigest;
-        final Map<String,Object> input,scheduleInput,preview;
-        final boolean containsSensitiveValues;
-        final Instant expiresAt;
-        boolean submitting;
-        DebugDraft(String id,String principal,String packageId,String environment,String targetType,String targetId,
-                   String resourceId,String revisionDigest,Map<String,Object> input,Map<String,Object> scheduleInput,
-                   boolean containsSensitiveValues,Map<String,Object> preview,Instant expiresAt) {
-            this.id=id;this.principal=principal;this.packageId=packageId;this.environment=environment;
-            this.targetType=targetType;this.targetId=targetId;this.resourceId=resourceId;this.revisionDigest=revisionDigest;
-            this.input=deepMap(input);this.scheduleInput=deepMap(scheduleInput);this.containsSensitiveValues=containsSensitiveValues;
-            this.preview=deepMap(preview);this.expiresAt=expiresAt;
-        }
-    }
-    private static final class QuickLoadDraft {
-        final String id,principal,packageId,environment,targetType,targetId,resourceId,model,revisionDigest;
-        final Map<String,Object> scenario,preview;
-        final boolean containsSensitiveValues;
-        final Instant expiresAt;
-        boolean submitting;
-        QuickLoadDraft(String id,String principal,String packageId,String environment,String targetType,String targetId,
-                       String resourceId,String model,String revisionDigest,Map<String,Object> scenario,
-                       boolean containsSensitiveValues,Map<String,Object> preview,Instant expiresAt) {
-            this.id=id;this.principal=principal;this.packageId=packageId;this.environment=environment;
-            this.targetType=targetType;this.targetId=targetId;this.resourceId=resourceId;this.model=model;
-            this.revisionDigest=revisionDigest;this.scenario=deepMap(scenario);this.containsSensitiveValues=containsSensitiveValues;
-            this.preview=deepMap(preview);this.expiresAt=expiresAt;
-        }
-    }
-    private static final class AdvancedLoadDraftState {
-        final String id,principal,packageId,environment,model,revisionDigest;
-        final Map<String,Object> scenario,preview;
-        final boolean containsSensitiveValues;
-        final Instant expiresAt;
-        boolean submitting;
-        AdvancedLoadDraftState(String id,String principal,String packageId,String environment,String model,
-                               String revisionDigest,Map<String,Object> scenario,boolean containsSensitiveValues,Map<String,Object> preview,
-                               Instant expiresAt) {
-            this.id=id;this.principal=principal;this.packageId=packageId;this.environment=environment;
-            this.model=model;this.revisionDigest=revisionDigest;this.scenario=deepMap(scenario);
-            this.containsSensitiveValues=containsSensitiveValues;this.preview=deepMap(preview);this.expiresAt=expiresAt;
-        }
-    }
-    private static final class CatalogLoadDraftState {
-        final String id,principal,packageId,environment,resourceId,revisionDigest,model,previewYaml;
-        final Map<String,Object> scenario,configuration;
-        final Instant expiresAt;
-        CatalogLoadDraftState(String id,String principal,String packageId,String environment,String resourceId,
-                              String revisionDigest,String model,Map<String,Object> scenario,String previewYaml,Map<String,Object> configuration,Instant expiresAt) {
-            this.id=id;this.principal=principal;this.packageId=packageId;this.environment=environment;
-            this.resourceId=resourceId;this.revisionDigest=revisionDigest;this.model=model;
-            this.scenario=deepMap(scenario);this.previewYaml=previewYaml;this.configuration=deepMap(configuration);this.expiresAt=expiresAt;
-        }
-    }
-    private static Map<String,Object> deepMap(Map<String,Object> source) {
-        Map<String,Object> copy=new LinkedHashMap<>();
-        if(source!=null)for(Map.Entry<String,Object> entry:source.entrySet())copy.put(entry.getKey(),deepValue(entry.getValue()));
-        return Collections.unmodifiableMap(copy);
-    }
-    private static Object deepValue(Object value) {
-        if(value instanceof Map) {
-            Map<String,Object> copy=new LinkedHashMap<>();
-            for(Map.Entry<?,?> entry:((Map<?,?>)value).entrySet())copy.put(String.valueOf(entry.getKey()),deepValue(entry.getValue()));
-            return Collections.unmodifiableMap(copy);
-        }
-        if(value instanceof List) {
-            List<Object> copy=new ArrayList<>();for(Object item:(List<?>)value)copy.add(deepValue(item));return Collections.unmodifiableList(copy);
-        }
-        return value;
-    }
-    private static final class Cursor {final int offset;final String revision;Cursor(int offset,String revision){this.offset=offset;this.revision=revision;}}
-}
+J\ØY™O\ØY™Kœ™\XÙJ[K™Ù]Ù^J
+K[K™Ù]˜[YJ
+JNÂˆ™]\›ˆØY™NÂˆBˆ]\Y˜Xİ
+İš[™ÈYİš[™È™\]Y\İY
+H›İÜÈ^Ù\[ÛˆÓX\İš[™ËØš™Xİˆ›İÏ\İÜ™K™Ù]
+Y
+NÚYŠ›İÏO[[
+]›İÈ™]È›İ›İ[™^Ù\[ÛŠ
+NÒ›ØˆZ›ØœË™Ù]
+Y
+NÚYŠˆO[[
+\™]\›ˆ\Y˜Xİ
+‹™\]Y\İY
+NÔ]˜\ÙOXÛÛ™šYË™]Q\‹œ™\ÛÛ™Jš›ØœÈŠKœ™\ÛÛ™JY
+Kœ™\ÛÛ™J›İ]]ŠKÔ™X[]
+
+NÔ]™[]]™OT]Ë™Ù]
+™\]Y\İY
+NÚYŠ™[]]™Kš\ĞXœÛÛ]J
+J]›İÈ™]È[YØ[\™İ[Y[^Ù\[ÛŠ\Y˜Xİ]]\İ™H™[]]™HÈ›Øˆİ]]ŠNÔ]Ø[™Y]OX˜\ÙKœ™\ÛÛ™J™[]]™JK››Ü›X[^™J
+NÚYŠXØ[™Y]Kœİ\ÕÚ]
+˜\ÙJ_Qš[\Ë™^\İÊØ[™Y]K˜]˜K›š[Ë™š[K“[šÓÜ[Û‹““Ñ“ÓÕ×ÓS’ÔÊJ]›İÈ™]È›İ›İ[™^Ù\[ÛŠ
+NÔ]Ø[ÏX˜\ÙNÙ›ÜŠ]\˜˜\ÙKœ™[]]š^™JØ[™Y]JJ^İØ[Ï]Ø[Ëœ™\ÛÛ™J\
+NÚYŠš[\Ëš\ÔŞ[X›ÛXÓ[šÊØ[ÊJ]›İÈ™]È›İ›İ[™^Ù\[ÛŠ
+NßT]™X[XØ[™Y]KÔ™X[]
+
+NÚYŠ\™X[œİ\ÕÚ]
+˜\ÙJ_Qš[\Ëš\Ô™Yİ[\‘š[J™X[
+J]›İÈ™]È›İ›İ[™^Ù\[ÛŠ
+NÜ™]\›ˆ™X[ßBˆ›ÚYÛX[\^\™Y›ØœÊ
+H›İÜÈ^Ù\[ÛˆÂˆ[œİ[İ]Ù™R[œİ[››İÊ
+K›Z[\Ê˜]˜K[YK‘\˜][Û‹›Ù‘^\ÊÛÛ™šYËš›Ø”™][[Û‘^\ÊJNÂˆHÜ™XÛÛ˜Ú[Q[][™Ò›ØœÊ
+NßBˆØ]Ú
+^Ù\[Ûˆ˜Z[\™J^Ú˜]˜K][›ÙÙÚ[™Ë“ÙÙÙ\‹™Ù]ÙÙÙ\ŠÙ\™\”[[YK˜Û\ÜË™Ù]˜[YJ
+JKØ\›š[™Ê•[˜X›HÈ™XÛÛ˜Ú[H[][™ÈUÙ\™\ˆ›ØœÎˆŠÜØY™SY\ÜØYÙJ˜Z[\™JJNßBˆYŠX\Y˜XİY™XŞXÛKÜš]SØÚÊ
+KSØÚÊ
+J\™]\›ÂˆHÂˆ›ÜŠİš[™ÈYœİÜ™K™^\™Y›Ø’YÊİ]Ù™ŠJZYŠZ›ØœË˜ÛÛZ[œÒÙ^JY
+I‰ˆ\[™[™Ğ\Y˜Xİ›ØœË˜ÛÛZ[œÊY
+I‰ˆ\İÜ™KÛÜšÙ\“X^P™P[]™JY
+J]^ÂˆYŠİÜ™K›X\šÑ[][™ÊYİ]Ù™ŠJ^Ù[]U™YJÛÛ™šYË™]Q\‹œ™\ÛÛ™Jš›ØœÈŠKœ™\ÛÛ™JY
+JNÜİÜ™K™[]R›ØŠY
+NßBˆXØ]Ú
+^Ù\[Ûˆ˜Z[\™J^Ú˜]˜K][›ÙÙÚ[™Ë“ÙÙÙ\‹™Ù]ÙÙÙ\ŠÙ\™\”[[YK˜Û\ÜË™Ù]˜[YJ
+JKØ\›š[™Ê•[˜X›HÈ™[[İ™H^\™YUÙ\™\ˆ›ØˆŠÚY
+NßBˆHš[˜[HØ\Y˜XİY™XŞXÛKÜš]SØÚÊ
+K[›ØÚÊ
+NßBˆB‚ˆš]˜]H›ÚYÛX[\^\™Y›ØœÔØY™[J
+^İ^ØÛX[\^\™Y›ØœÊ
+NßXØ]Ú
+^Ù\[ÛˆJ^Ú˜]˜K][›ÙÙÚ[™Ë“ÙÙÙ\‹™Ù]ÙÙÙ\ŠÙ\™\”[[YK˜Û\ÜË™Ù]˜[YJ
+JKØ\›š[™Ê•[˜X›HÈÛX[ˆ^\™YUÙ\™\ˆ›ØœÎˆŠÜØY™SY\ÜØYÙJJJNß_Bˆš]˜]Hİ]XÈ›ÚY[]U™YJ]›Ûİ
+]›İÜÈ˜]˜Kš[Ë’SÑ^Ù\[ÛˆÂˆYŠR›Ø‘\™XİÜU\ØYÙK™[]R›Ø‘\™XİÜJ›Ûİ
+JH›İÈ™]È˜]˜Kš[Ë’SÑ^Ù\[ÛŠ”™Y\Ú[™ÈÈ[]HHŞ[X›ÛXÈ[šÈŠNÂˆBˆ›ÚYÛX[\›Ø”İÜ˜YÙJ
+H›İÜÈ^Ù\[ÛˆÂˆYŠXÛÛ™šYËš›Ø”İÜ˜YÙK™[˜X›Y
+H™]\›Âˆ™\İÜ™TİÜ˜YÙPİ\œÛÜŠ
+NÂˆ[˜[Y]TİÜ˜YÙPİ\œÛÜ’Y”İ[J
+NÂˆYŠ\™XÛÛ˜Ú[Q[][™Ò›ØœÊ
+JHÈX›\ÚİÜ˜YÙT™\Ü
+™Y™\œ™Y‹[[[[˜[ÙJNÈ™]\›ÈBˆ]›ØœÔ›ÛİXÛÛ™šYË™]Q\‹œ™\ÛÛ™Jš›ØœÈŠNÂˆ›Ø‘\™XİÜU\ØYÙK“YX\İ\™[Y[YX\İ\™[Y[R›Ø‘\™XİÜU\ØYÙK›YX\İ\™J›ØœÔ›Ûİ
+NÂˆYŠ[YX\İ\™[Y[˜ÛÛ\]JHÈX›\ÚİÜ˜YÙT™\Ü
+›YX\İ\™[Y[Ù˜Z[Y‹[˜[ÙK[[˜[ÙJNÈ™]\›ÈBˆYŠYX\İ\™[Y[˜]\ÏXÛÛ™šYËš›Ø”İÜ˜YÙK›X^İ[]\ÊHÂˆİÜ˜YÙTØØ[Y\‘š[š\ÚY[[ÈİÜ˜YÙTØØ[Y\’Y[[ÈİÜ˜YÙTØØ[Ûİ™\™YXYY˜[ÙNÂˆX›\ÚİÜ˜YÙT™\Ü
+›ÚÈ‹YX\İ\™[Y[˜]\ËYK˜[ÙJNÈ™]\›ÂˆBˆYŠİÜ˜YÙTØØ[Y\‘š[š\ÚYO[[
+HİÜ˜YÙTØØ[Ûİ™\™YXY]YNÂˆ[œİ[İ]Ù™XÛØÚËš[œİ[
+
+K›Z[\Ê˜]˜K[YK‘\˜][Û‹›Ù’İ\œÊÛÛ™šYËš›Ø”İÜ˜YÙK›Z[”™][[Û’İ\œÊJNÂˆÛ™È™[XZ[š[™Ï[YX\İ\™[Y[˜]\ÎÂˆ[[]YL[YÚX›OL›İXİY›ØœÏL˜]Ú\ÏLÂˆÛ™È™XÛZ[YYLÂˆ›ÛÛX[ˆY™\œ™YY˜[ÙKØ[™Y]\Ñ^]\İYY˜[ÙK˜]Ú[Z]™XXÚYY˜[ÙKZ[š[š\ÚYY˜[ÙNÂˆİš[™È™\İ[YQš[š\ÚY\İÜ˜YÙTØØ[Y\‘š[š\ÚY™\İ[YRY\İÜ˜YÙTØØ[Y\’YÂˆİš[™ÈY\‘š[š\ÚY\™\İ[YQš[š\ÚYY\’Y\™\İ[YRYÂˆ›ÛÛX[ˆÜ˜\YY˜[ÙNÂˆÚ[J™[XZ[š[™Ï˜ÛÛ™šYËš›Ø”İÜ˜YÙK˜ÛX[\\™Ù]]\È	‰ˆ˜]Ú\ÏİÜ˜YÙPØ[™Y]P˜]Ú[Z]
+HÂˆ\İX\İš[™ËØš™XİˆYÙO\İÜ™KœİÜ˜YÙPØ[™Y]\ÊY\‘š[š\ÚYY\’Y
+NÂˆYŠYÙKš\Ñ[\J
+JHÂˆYŠ]Ü˜\Y	‰ˆY\‘š[š\ÚYO[[
+HÈÜ˜\Y]YNÈY\‘š[š\ÚY[[ÈY\’Y[[ÈİÜ˜YÙTØØ[Ûİ™\™YXY]YNÈÛÛ[YNÈBˆØ[™Y]\Ñ^]\İY]YNÈœ™XZÎÂˆBˆ˜]Ú\ÊÊÎÂˆ[[]Y]İ\Y[]YÂˆ›ÜŠX\İš[™ËØš™XİˆØ[™Y]NœYÙJHÂˆİš[™ÈYTİš[™Ë˜[YSÙŠØ[™Y]K™Ù]
+š›Ø’YŠJNÂˆY\‘š[š\ÚYTİš[™Ë˜[YSÙŠØ[™Y]K™Ù]
+™š[š\ÚY]ŠJNÈY\’YZYÂˆYŠ™[XZ[š[™ÏXÛÛ™šYËš›Ø”İÜ˜YÙK˜ÛX[\\™Ù]]\ÊHœ™XZÎÂˆYŠİÜ˜YÙT›İXİY
+Ø[™Y]Kİ]Ù™‹Y
+JHÈ›İXİY›ØœÊÊÎÈÛÛ[YNÈBˆ[YÚX›JÊÎÂˆYŠX\Y˜XİY™XŞXÛKÜš]SØÚÊ
+KSØÚÊ
+JHÈY™\œ™Y]YNÈœ™XZÎÈBˆHÂˆYŠİÜ˜YÙT›İXİY
+Ø[™Y]Kİ]Ù™‹Y
+H›ØœË˜ÛÛZ[œÒÙ^JY
+H[™[™Ğ\Y˜Xİ›ØœË˜ÛÛZ[œÊY
+HİÜ™KÛÜšÙ\“X^P™P[]™JY
+JHÈ›İXİY›ØœÊÊÎÈ[YÚX›KKNÈÛÛ[YNÈBˆ]\™XİÜOZ›ØœÔ›Ûİœ™\ÛÛ™JY
+NÂˆYŠš[\Ëš\ÔŞ[X›ÛXÓ[šÊ\™XİÜJJHÈ›İXİY›ØœÊÊÎÈ[YÚX›KKNÈÛÛ[YNÈBˆÛ™ÈYX\İ\™Y[YX\İ\™[Y[š›Ø]\Ë™Ù]
+Y
+NÂˆÛ™È]\Ï[YX\İ\™YO[[ÛYX\İ\™Y’›Ø‘\™XİÜU\ØYÙK™\™XİÜP]\Ê\™XİÜJNÂˆYŠ\İÜ™K›X\šÑ[][™ÊYİ]Ù™‹]\ÏÛ[˜]\ÊJHÈ›İXİY›ØœÊÊÎÈ[YÚX›KKNÈÛÛ[YNÈBˆYŠ]\ÏR›Ø‘\™XİÜU\ØYÙK™[]R›Ø‘\™XİÜJ\™XİÜJJHÈ˜]˜K][›ÙÙÚ[™Ë“ÙÙÙ\‹™Ù]ÙÙÙ\ŠÙ\™\”[[YK˜Û\ÜË™Ù]˜[YJ
+JKØ\›š[™Ê’›ØˆŠÚY
+ÈˆØ\ÈX\šÙY›ÜˆİÜ˜YÙH[][Ûˆ[™Ú[™H™XÛÛ˜Ú[YŠNÈÛÛ[YNÈBˆİÜ™K™[]R›Ø•Ú]]Y]
+YœŞ\İ[Nš›Ø‹\™][[Ûˆ‹’“Ğ—ÔÕÔQÑWÑU’PÕ‹[]Yİ]ÛÛYJ]\ÊJNÂˆ[]Y
+ÊÎÈ™XÛZ[YY\Ø]\˜]YY
+™XÛZ[YYX]›X^
+]\ÊJNÈ™[XZ[š[™ÏSX]›X^
+™[XZ[š[™ËSX]›X^
+]\ÊJNÂˆHš[˜[HÈ\Y˜XİY™XŞXÛKÜš]SØÚÊ
+K[›ØÚÊ
+NÈBˆBˆYŠY™\œ™Y
+Hœ™XZÎÂˆYŠ[]YOY[]Y]İ\	‰ˆYÙKœÚ^™J
+OİÜ™KœİÜ˜YÙPØ[™Y]TYÙJHÂˆYŠ]Ü˜\Y	‰ˆ™\İ[YQš[š\ÚYO[[
+HÈÜ˜\Y]YNÈY\‘š[š\ÚY[[ÈY\’Y[[ÈİÜ˜YÙTØØ[Ûİ™\™YXY]YNÈÛÛ[YNÈBˆØ[™Y]\Ñ^]\İY]YNÈœ™XZÎÂˆBˆBˆYŠYY™\œ™Y	‰ˆXØ[™Y]\Ñ^]\İY	‰ˆ˜]Ú\Ï\İÜ˜YÙPØ[™Y]P˜]Ú[Z]	‰ˆ™[XZ[š[™Ï˜ÛÛ™šYËš›Ø”İÜ˜YÙK˜ÛX[\\™Ù]]\ÊHÂˆZ[š[š\ÚY\İÜ™KœİÜ˜YÙPØ[™Y]\ÊY\‘š[š\ÚYY\’Y
+Kš\Ñ[\J
+NÂˆYŠZ[š[š\ÚY	‰ˆİÜ˜YÙTØØ[Ûİ™\™YXY
+HØ[™Y]\Ñ^]\İY]YNÂˆ[ÙH˜]Ú[Z]™XXÚY]YNÂˆBˆYŠYY™\œ™Y	‰ˆ™[XZ[š[™Ï˜ÛÛ™šYËš›Ø”İÜ˜YÙK˜ÛX[\\™Ù]]\ÊHÂˆÜœ[”İÙY\Üœ[œÏY[]Q[YÚX›SÜœ[œÊ›ØœÔ›ÛİYX\İ\™[Y[™[XZ[š[™ÊNÂˆYŠÜœ[œË™Y™\œ™Y
+HY™\œ™Y]YNÂˆ[]Y
+Ï[Üœ[œË™[]YÈ™XÛZ[YY\Ø]\˜]YY
+™XÛZ[YYÜœ[œËœ™XÛZ[YY
+NÈ™[XZ[š[™Ï[Üœ[œËœ™[XZ[š[™ÎÂˆBˆ›ÛÛX[ˆİ[İ™\HYY™\œ™Y	‰ˆ™[XZ[š[™Ï˜ÛÛ™šYËš›Ø”İÜ˜YÙK˜ÛX[\\™Ù]]\ÎÂˆYŠY™\œ™Y
+HÈİÜ˜YÙTØØ[Y\‘š[š\ÚY\™\İ[YQš[š\ÚYÈİÜ˜YÙTØØ[Y\’Y\™\İ[YRYÈBˆ[ÙHYŠİ[İ™\ˆ	‰ˆ˜]Ú[Z]™XXÚY	‰ˆ]Z[š[š\ÚY	‰ˆY\‘š[š\ÚYO[[	‰ˆY\’YO[[
+HÈİÜ˜YÙTØØ[Y\‘š[š\ÚYXY\‘š[š\ÚYÈİÜ˜YÙTØØ[Y\’YXY\’YÈBˆ[ÙHÈİÜ˜YÙTØØ[Y\‘š[š\ÚY[[ÈİÜ˜YÙTØØ[Y\’Y[[ÈİÜ˜YÙTØØ[Ûİ™\™YXYY˜[ÙNÈBˆ›ÛÛX[ˆ][İU[›Y]\İ[İ™\ˆ	‰ˆX˜]Ú[Z]™XXÚYÂˆİš[™Èİ]OYY™\œ™YÈ™Y™\œ™Yœİ[İ™\ˆ	‰ˆ˜]Ú[Z]™XXÚYÈœ\X[œ][İU[›Y]Èœ][İWİ[›Y]ˆ›ÚÈÂˆX›\ÚİÜ˜YÙT™\Ü
+İ]KYX\İ\™[Y[˜ÛÛ\]OÜ™[XZ[š[™Î›[YX\İ\™[Y[˜ÛÛ\]K[YÚX›K›İXİY›ØœË[]Y™XÛZ[YY][İU[›Y]
+NÂˆYŠ][İU[›Y]
+HİÜ™K˜]Y]
+œŞ\İ[Nš›Ø‹\™][[Ûˆ‹’“Ğ—ÔÕÔQÑWÑU’PÕ‹[[”USÕWÕS“QUŠNÂˆ[ÙHYŠİ[İ™\ˆ	‰ˆ˜]Ú[Z]™XXÚY
+HİÜ™K˜]Y]
+œŞ\İ[Nš›Ø‹\™][[Ûˆ‹’“Ğ—ÔÕÔQÑWÑU’PÕ‹[[”ÕÑQTÔT•PSŠNÂˆBˆš]˜]H›ÚY™\İÜ™TİÜ˜YÙPİ\œÛÜŠ
+HÂˆYŠİÜ˜YÙPİ\œÛÜ”™\İÜ™Y
+H™]\›ÂˆİÜ˜YÙPİ\œÛÜ”™\İÜ™Y]YNÂˆYŠİÜ˜YÙTØØ[Y\‘š[š\ÚYO[[İÜ˜YÙTØØ[Y\’YO[[
+H™]\›ÂˆHÂˆ]İ]\Ï\İÜ˜YÙTİ]\Ô]
+
+NÂˆYŠQš[\Ëš\Ô™Yİ[\‘š[Jİ]\ÊHš[\ËœÚ^™Jİ]\ÊOMLÍŠH™]\›ÂˆœÛÛ“›ÙH›ÙOR”ÓÓ‹œ™XY™YJİ]\ËÑš[J
+JNÂˆYŠ›ÙOO[[[›ÙKš\ÓØš™Xİ
+
+JH™]\›Âˆİš[™Èš[š\ÚY[›ÙKœ]
+˜Ø[™Y]PY\‘š[š\ÚY]ŠK˜\Õ^
+ˆŠNÂˆİš[™ÈY[›ÙKœ]
+˜Ø[™Y]PY\’›Ø’YŠK˜\Õ^
+ˆŠNÂˆYŠš[š\ÚYš\Ğ›[šÊ
+HYš\Ğ›[šÊ
+JH™]\›ÂˆİÜ˜YÙTØØ[Y\‘š[š\ÚYYš[š\ÚYÈİÜ˜YÙTØØ[Y\’YZYÂˆİÜ˜YÙTØØ[Ûİ™\™YXY[›ÙKœ]
+˜Ø[™Y]PŞXÛPÛİ™\™YXYŠK˜\Ğ›ÛÛX[Š˜[ÙJNÂˆHØ]Ú
+^Ù\[ÛˆYÛ›Ü™Y
+HÈBˆBˆš]˜]H›ÚY[˜[Y]TİÜ˜YÙPİ\œÛÜ’Y”İ[J
+H›İÜÈ^Ù\[ÛˆÂˆYŠİÜ˜YÙTØØ[Y\‘š[š\ÚYO[[	‰ˆİÜ˜YÙTØØ[Y\’YO[[
+H™]\›ÂˆYŠİÜ˜YÙTØØ[Y\‘š[š\ÚYO[[İÜ˜YÙTØØ[Y\’YO[[İÜ˜YÙTØØ[Y\‘š[š\ÚYš\Ğ›[šÊ
+HİÜ˜YÙTØØ[Y\’Yš\Ğ›[šÊ
+JHÂˆİÜ˜YÙTØØ[Y\‘š[š\ÚY[[ÈİÜ˜YÙTØØ[Y\’Y[[È™]\›ÂˆBˆX\İš[™ËØš™Xİˆ[˜ÚÜ\İÜ™K™Ù]
+İÜ˜YÙTØØ[Y\’Y
+NÂˆYŠ[˜ÚÜO[[
+H™]\›ÂˆØš™Xİš[š\ÚYX[˜ÚÜ‹™Ù]
+™š[š\ÚY]ŠNÂˆYŠJš[š\ÚY[œİ[˜Ù[Ùˆİš[™È^
+H]^™\]X[ÊİÜ˜YÙTØØ[Y\‘š[š\ÚY
+JHÈİÜ˜YÙTØØ[Y\‘š[š\ÚY[[ÈİÜ˜YÙTØØ[Y\’Y[[ÈBˆBˆš]˜]H›ÛÛX[ˆİÜ˜YÙT›İXİY
+X\İš[™ËØš™XİˆØ[™Y]K[œİ[İ]Ù™‹İš[™ÈY
+HÂˆYŠ›ÛÛX[‹••QK™\]X[ÊØ[™Y]K™Ù]
+œ[›™YŠJH›ÛÛX[‹••QK™\]X[ÊØ[™Y]K™Ù]
+˜\Y˜Xİ™XÛİ™\HŠJH›ÛÛX[‹••QK™\]X[ÊØ[™Y]K™Ù]
+œ]X\˜[[™YŠJJH™]\›ˆYNÂˆYŠ›ØœË˜ÛÛZ[œÒÙ^JY
+H[™[™Ğ\Y˜Xİ›ØœË˜ÛÛZ[œÊY
+JH™]\›ˆYNÂˆØš™Xİš[š\ÚYXØ[™Y]K™Ù]
+™š[š\ÚY]ŠNÂˆYŠJš[š\ÚY[œİ[˜Ù[Ùˆİš[™È^
+H^˜ÛÛ\\™UÊİ]Ù™‹Ôİš[™Ê
+JOŒ
+H™]\›ˆYNÂˆ™]\›ˆ˜[ÙNÂˆBˆš]˜]HÜœ[”İÙY\[]Q[YÚX›SÜœ[œÊ]›ØœÔ›Ûİ›Ø‘\™XİÜU\ØYÙK“YX\İ\™[Y[YX\İ\™[Y[Û™È™[XZ[š[™ÊH›İÜÈ^Ù\[ÛˆÂˆÜœ[”İÙY\İÙY\[™]ÈÜœ[”İÙY\
+™[XZ[š[™ÊNÂˆYŠQš[\Ëš\Ñ\™XİÜJ›ØœÔ›Ûİ˜]˜K›š[Ë™š[K“[šÓÜ[Û‹““Ñ“ÓÕ×ÓS’ÔÊJH™]\›ˆİÙY\Âˆ[œİ[İ[P™Y›Ü™OXÛØÚËš[œİ[
+
+K›Z[\Ê˜]˜K[YK‘\˜][Û‹›Ù“Z[]\ÊMJJNÂˆJ˜\ˆÚ[™[Qš[\Ë›™]Ñ\™XİÜTİ™X[J›ØœÔ›Ûİ
+JHÂˆ›ÜŠ]Ú[˜Ú[™[ŠHÂˆYŠ™[XZ[š[™ÏXÛÛ™šYËš›Ø”İÜ˜YÙK˜ÛX[\\™Ù]]\ÊHœ™XZÎÂˆ]˜[YOXÚ[™Ù]š[S˜[YJ
+NÂˆYŠ˜[YOO[[R“Ğ—ÒQ›X]Ú\Š˜[YKÔİš[™Ê
+JK›X]Ú\Ê
+JHÛÛ[YNÂˆİš[™ÈY[˜[YKÔİš[™Ê
+NÂˆYŠ›ØœË˜ÛÛZ[œÒÙ^JY
+HİÜ™Kš›Ø”›İÑ^\İÊY
+Hš[\Ëš\ÔŞ[X›ÛXÓ[šÊÚ[
+JHÛÛ[YNÂˆ˜\ˆ]šX]\ÏQš[\Ëœ™XY]šX]\ÊÚ[˜]˜K›š[Ë™š[K˜]šX]K˜\ÚXÑš[P]šX]\Ë˜Û\ÜË˜]˜K›š[Ë™š[K“[šÓÜ[Û‹““Ñ“ÓÕ×ÓS’ÔÊNÂˆYŠ]šX]\Ëš\ÔŞ[X›ÛXÓ[šÊ
+H]šX]\Ë›\İ[ÙYšYY[YJ
+KÒ[œİ[
+
+Kš\ĞY\Šİ[P™Y›Ü™JJHÛÛ[YNÂˆÛ™È]\Ï[YX\İ\™[Y[š›Ø]\Ë™Ù]Ü‘Y˜][
+YLS
+NÂˆYŠ]\Ï
+HÛÛ[YNÂˆYŠX\Y˜XİY™XŞXÛKÜš]SØÚÊ
+KSØÚÊ
+JHÈİÙY\™Y™\œ™Y]YNÈ™]\›ˆİÙY\ÈBˆHÂˆYŠ›ØœË˜ÛÛZ[œÒÙ^JY
+H[™[™Ğ\Y˜Xİ›ØœË˜ÛÛZ[œÊY
+HİÜ™Kš›Ø”›İÑ^\İÊY
+HİÜ™KÛÜšÙ\“X^P™P[]™JY
+JHÛÛ[YNÂˆYŠR›Ø‘\™XİÜU\ØYÙK™[]R›Ø‘\™XİÜJÚ[
+JHÛÛ[YNÂˆİÙY\™[]Y
+ÊÎÈİÙY\œ™XÛZ[YY\Ø]\˜]YY
+İÙY\œ™XÛZ[YY]\ÊNÈİÙY\œ™[XZ[š[™ÏSX]›X^
+İÙY\œ™[XZ[š[™ËX]\ÊNÈ™[XZ[š[™Ï\İÙY\œ™[XZ[š[™ÎÂˆİÜ™K˜]Y]İÜ˜YÙQ]šXİ[ÛŠY[]Yİ]ÛÛYJ]\ÊJNÂˆHš[˜[HÈ\Y˜XİY™XŞXÛKÜš]SØÚÊ
+K[›ØÚÊ
+NÈBˆBˆBˆ™]\›ˆİÙY\ÂˆBˆ›ÛÛX[ˆ™XÛÛ˜Ú[Q[][™Ò›ØœÊ
+H›İÜÈ^Ù\[ÛˆÂˆ›ÛÛX[ˆÛÛ\]O]YNÂˆ›ÜŠİš[™ÈYœİÜ™K™[][™Ò›Ø’YÊ
+JHÂˆYŠ›ØœË˜ÛÛZ[œÒÙ^JY
+H[™[™Ğ\Y˜Xİ›ØœË˜ÛÛZ[œÊY
+JHØÛÛ\]OY˜[ÙNØÛÛ[YNßBˆYŠX\Y˜XİY™XŞXÛKÜš]SØÚÊ
+KSØÚÊ
+JHØÛÛ\]OY˜[ÙNØÛÛ[YNßBˆHÂˆYŠ›ØœË˜ÛÛZ[œÒÙ^JY
+H[™[™Ğ\Y˜Xİ›ØœË˜ÛÛZ[œÊY
+HİÜ™KÛÜšÙ\“X^P™P[]™JY
+JHØÛÛ\]OY˜[ÙNØÛÛ[YNßBˆ]\™XİÜOXÛÛ™šYË™]Q\‹œ™\ÛÛ™Jš›ØœÈŠKœ™\ÛÛ™JY
+NÂˆÛ™È™XÛÜ™Y\İÜ™Kœ™][[Û]\ÊY
+NÂˆÛ™È]\Ï\™XÛÜ™YO[[Ü™XÛÜ™Y’›Ø‘\™XİÜU\ØYÙK™\™XİÜP]\Ê\™XİÜJNÂˆYŠR›Ø‘\™XİÜU\ØYÙK™[]R›Ø‘\™XİÜJ\™XİÜJJHØÛÛ\]OY˜[ÙNØÛÛ[YNßBˆİš[™ÈXİÜ\İÜ™K™[][ÛXİÜŠY
+NÂˆYŠXİÜO[[
+\İÜ™K™[]R›Ø•Ú]]Y]
+YœŞ\İ[Nš›Ø‹\™][[Ûˆ‹’“Ğ—ÔÕÔQÑWÑU’PÕ‹[]Yİ]ÛÛYJ]\ÊJNÂˆ[ÙHİÜ™K™[]R›Ø•Ú]]Y]
+YXİÜ‹’“Ğ—ÑSUH‹‘SUQĞQ•T—Ô‘PÓÕ‘T–HŠNÂˆHØ]Ú
+^Ù\[Ûˆ˜Z[\™JHÂˆÛÛ\]OY˜[ÙNÂˆ˜]˜K][›ÙÙÚ[™Ë“ÙÙÙ\‹™Ù]ÙÙÙ\ŠÙ\™\”[[YK˜Û\ÜË™Ù]˜[YJ
+JKØ\›š[™Ê•[˜X›HÈ™XÛÛ˜Ú[H[][™ÈUÙ\™\ˆ›ØˆŠÚY
+ÈˆŠÜØY™SY\ÜØYÙJ˜Z[\™JJNÂˆHš[˜[HÈ\Y˜XİY™XŞXÛKÜš]SØÚÊ
+K[›ØÚÊ
+NÈBˆBˆ™]\›ˆÛÛ\]NÂˆBˆš]˜]H›ÚY™XÛÛ˜Ú[Q[][™Ò›ØœÔØY™[J
+^İ^Ü™XÛÛ˜Ú[Q[][™Ò›ØœÊ
+NßXØ]Ú
+^Ù\[ÛˆJ^Ú˜]˜K][›ÙÙÚ[™Ë“ÙÙÙ\‹™Ù]ÙÙÙ\ŠÙ\™\”[[YK˜Û\ÜË™Ù]˜[YJ
+JKØ\›š[™Ê•[˜X›HÈ™XÛÛ˜Ú[H[][™ÈUÙ\™\ˆ›ØœÎˆŠÜØY™SY\ÜØYÙJJJNß_Bˆš]˜]H›ÚYÛX[\›Ø”İÜ˜YÙTØY™[J
+^İ^ØÛX[\›Ø”İÜ˜YÙJ
+NßXØ]Ú
+^Ù\[ÛˆJ^Ú˜]˜K][›ÙÙÚ[™Ë“ÙÙÙ\‹™Ù]ÙÙÙ\ŠÙ\™\”[[YK˜Û\ÜË™Ù]˜[YJ
+JKØ\›š[™Ê•[˜X›HÈ\HUÙ\™\ˆ›ØˆİÜ˜YÙH[Z]ÎˆŠÜØY™SY\ÜØYÙJJJNß_Bˆš]˜]H›ÚYX›\ÚİÜ˜YÙT™\Ü
+İš[™Èİ]KÛ™Èİ[]\Ë›ÛÛX[ˆÛÛ\]K[YÙ\ˆ[YÚX›K[YÙ\ˆ›İXİY›ØœË[[]Y›ØœËÛ™È™XÛZ[YY]\Ë›ÛÛX[ˆ][İU[›Y]
+HÂˆX\İš[™ËØš™Xİˆ™\Ü\İÜ˜YÙTÛ˜\Úİ
+İ]Kİ[]\ËÛÛ\]K[YÚX›K›İXİY›ØœËÛØÚËš[œİ[
+
+KÔİš[™Ê
+K[]Y›ØœË™XÛZ[YY]\Ë][İU[›Y]
+NÂˆ›Ø”İÜ˜YÙT™\Ü\™\ÜÂˆHÈÜš]TİÜ˜YÙTİ]\Ê™\Ü
+NÈHØ]Ú
+^Ù\[Ûˆ˜Z[\™JHÈ˜]˜K][›ÙÙÚ[™Ë“ÙÙÙ\‹™Ù]ÙÙÙ\ŠÙ\™\”[[YK˜Û\ÜË™Ù]˜[YJ
+JKØ\›š[™Ê•[˜X›HÈ\œÚ\İ›ØˆİÜ˜YÙHİ]\ÈŠNÈBˆBˆš]˜]HX\İš[™ËØš™Xİˆ›Ø”İÜ˜YÙTÛ˜\Úİ
+
+HÂˆYŠXÛÛ™šYËš›Ø”İÜ˜YÙK™[˜X›Y
+H™]\›ˆİÜ˜YÙTÛ˜\Úİ
+™\ØX›Y‹[[[[[[[˜[ÙJNÂˆX\İš[™ËØš™Xİˆİ\œ™[Z›Ø”İÜ˜YÙT™\ÜÂˆYŠİ\œ™[O[[
+H™]\›ˆİ\œ™[ÂˆX\İš[™ËØš™XİˆØYY\™XYİÜ˜YÙTİ]\Ê
+NÂˆYŠØYYO[[
+HÈ›Ø”İÜ˜YÙT™\Ü[ØYYÈ™]\›ˆØYYÈBˆ™]\›ˆİÜ˜YÙTÛ˜\Úİ
+[šÛ›İÛˆ‹[[[[[[[˜[ÙJNÂˆBˆš]˜]HX\İš[™ËØš™XİˆİÜ˜YÙTÛ˜\Úİ
+İš[™Èİ]KÛ™Èİ[]\Ë›ÛÛX[ˆÛÛ\]K[YÙ\ˆ[YÚX›K[YÙ\ˆ›İXİY›ØœËİš[™È\İİÙY\][YÙ\ˆ[]Y›ØœËÛ™È™XÛZ[YY]\Ë›ÛÛX[ˆ][İU[›Y]
+HÂˆX\İš[™ËØš™Xİˆ™\Ü[™]È[šÙY\ÚX\Š
+NÂˆÙ\™\ÛÛ™šYË’›Ø”İÜ˜YÙH][İOXÛÛ™šYËš›Ø”İÜ˜YÙNÂˆ™\Üœ]
+™[˜X›Y‹][İK™[˜X›Y
+NÂˆ™\Üœ]
+›X^İ[]\È‹][İK™[˜X›YÜ][İK›X^İ[]\Î›[
+NÂˆ™\Üœ]
+˜ÛX[\\™Ù]]\È‹][İK™[˜X›YÜ][İK˜ÛX[\\™Ù]]\Î›[
+NÂˆ™\Üœ]
+›Z[”™][[Û’İ\œÈ‹][İK›Z[”™][[Û’İ\œÊNÂˆ™\Üœ]
+˜ÛX[\[\˜[Z[]\È‹][İK˜ÛX[\[\˜[Z[]\ÊNÂˆ™\Üœ]
+›X^Ú[™ÛR›Ø]\È‹[
+NÂˆ™\Üœ]
+œİ]H‹İ]JNÂˆ™\Üœ]
+İ[]\È‹İ[]\ÊNÂˆ™\Üœ]
+›YX\İ\™[Y[ÛÛ\]H‹ÛÛ\]JNÂˆ™\Üœ]
+™[YÚX›R›ØœÈ‹[YÚX›JNÂˆ™\Üœ]
+œ›İXİY›ØœÈ‹›İXİY›ØœÊNÂˆ™\Üœ]
+›\İİÙY\]‹\İİÙY\]
+NÂˆ™\Üœ]
+™[]Y›ØœÈ‹[]Y›ØœÊNÂˆ™\Üœ]
+œ™XÛZ[YY]\È‹™XÛZ[YY]\ÊNÂˆ™\Üœ]
+œ][İU[›Y]‹][İU[›Y]
+NÂˆ™]\›ˆ™\ÜÂˆBˆš]˜]H]İÜ˜YÙTİ]\Ô]
+
+HÈ™]\›ˆÛÛ™šYË™]Q\‹œ™\ÛÛ™Jš›Ø‹\İÜ˜YÙK\İ]\ËšœÛÛˆŠNÈBˆš]˜]H›ÚYÜš]TİÜ˜YÙTİ]\ÊX\İš[™ËØš™Xİˆ™\Ü
+H›İÜÈ^Ù\[ÛˆÂˆ]\™Ù]\İÜ˜YÙTİ]\Ô]
+
+NÂˆš[\Ë˜Ü™X]Q\™XİÜšY\Ê\™Ù]™Ù]\™[
+
+JNÂˆ][\Ü˜\OQš[\Ë˜Ü™X]U[\š[J\™Ù]™Ù]\™[
+
+K‹š›Ø‹\İÜ˜YÙK\İ]\ËH‹‹\ŠNÂˆHÂˆX\İš[™ËØš™Xİˆ\œÚ\İY[™]È[šÙY\ÚX\Š™\Ü
+NÂˆYŠİÜ˜YÙTØØ[Y\‘š[š\ÚYO[[	‰ˆİÜ˜YÙTØØ[Y\’YO[[
+HÂˆ\œÚ\İYœ]
+˜Ø[™Y]PY\‘š[š\ÚY]‹İÜ˜YÙTØØ[Y\‘š[š\ÚY
+NÂˆ\œÚ\İYœ]
+˜Ø[™Y]PY\’›Ø’Y‹İÜ˜YÙTØØ[Y\’Y
+NÂˆ\œÚ\İYœ]
+˜Ø[™Y]PŞXÛPÛİ™\™YXY‹İÜ˜YÙTØØ[Ûİ™\™YXY
+NÂˆBˆš[\ËÜš]J[\Ü˜\K”ÓÓ‹Üš]U˜[YP\Ğ]\Ê\œÚ\İY
+JNÂˆJ˜\ˆÚ[›™[Z˜]˜K›š[Ë˜Ú[›™[Ë‘š[PÚ[›™[›Ü[Š[\Ü˜\K˜]˜K›š[Ë™š[K”İ[™\™Ü[“Ü[Û‹•Ô’UJJ^ØÚ[›™[™›Ü˜ÙJYJNßBˆš[\Ë›[İ™J[\Ü˜\K\™Ù]˜]˜K›š[Ë™š[K”İ[™\™ÛÜSÜ[Û‹UÓRP×ÓSÕ‘K˜]˜K›š[Ë™š[K”İ[™\™ÛÜSÜ[Û‹”‘TPÑWÑVTÕS‘ÊNÂˆHš[˜[HÈš[\Ë™[]RY‘^\İÊ[\Ü˜\JNÈBˆBˆš]˜]HX\İš[™ËØš™Xİˆ™XYİÜ˜YÙTİ]\Ê
+HÂˆHÂˆ]İ]\Ï\İÜ˜YÙTİ]\Ô]
+
+NÂˆYŠQš[\Ëš\Ô™Yİ[\‘š[Jİ]\ÊHš[\ËœÚ^™Jİ]\ÊOMLÍŠH™]\›ˆ[ÂˆœÛÛ“›ÙH›ÙOR”ÓÓ‹œ™XY™YJİ]\ËÑš[J
+JNÂˆYŠ›ÙOO[[[›ÙKš\ÓØš™Xİ
+
+HH›ÚÈ‹™\]X[Ê›ÙKœ]
+œİ]HŠK˜\Õ^
+
+JH	‰ˆHœ][İWİ[›Y]‹™\]X[Ê›ÙKœ]
+œİ]HŠK˜\Õ^
+
+JH	‰ˆHœ\X[‹™\]X[Ê›ÙKœ]
+œİ]HŠK˜\Õ^
+
+JH	‰ˆH›YX\İ\™[Y[Ù˜Z[Y‹™\]X[Ê›ÙKœ]
+œİ]HŠK˜\Õ^
+
+JH	‰ˆH™Y™\œ™Y‹™\]X[Ê›ÙKœ]
+œİ]HŠK˜\Õ^
+
+JH	‰ˆH[šÛ›İÛˆ‹™\]X[Ê›ÙKœ]
+œİ]HŠK˜\Õ^
+
+JJH™]\›ˆ[ÂˆX\İš[™ËØš™XİˆØYYR”ÓÓ‹˜ÛÛ™\˜[YJ›ÙKX\˜Û\ÜÊNÂˆØYYœ™[[İ™J˜Ø[™Y]PY\‘š[š\ÚY]ŠNÂˆØYYœ™[[İ™J˜Ø[™Y]PY\’›Ø’YŠNÂˆØYYœ™[[İ™J˜Ø[™Y]PŞXÛPÛİ™\™YXYŠNÂˆØYYœ]
+™[˜X›Y‹YJNÂˆØYYœ]
+›X^İ[]\È‹ÛÛ™šYËš›Ø”İÜ˜YÙK›X^İ[]\ÊNÂˆØYYœ]
+˜ÛX[\\™Ù]]\È‹ÛÛ™šYËš›Ø”İÜ˜YÙK˜ÛX[\\™Ù]]\ÊNÂˆØYYœ]
+›Z[”™][[Û’İ\œÈ‹ÛÛ™šYËš›Ø”İÜ˜YÙK›Z[”™][[Û’İ\œÊNÂˆØYYœ]
+˜ÛX[\[\˜[Z[]\È‹ÛÛ™šYËš›Ø”İÜ˜YÙK˜ÛX[\[\˜[Z[]\ÊNÂˆØYYœ]
+›X^Ú[™ÛR›Ø]\È‹[
+NÂˆYŠØYY™Ù]
+İ[]\ÈŠH[œİ[˜Ù[Ùˆ[X™\ˆ[X™\ˆ	‰ˆ[X™\‹›Û™Õ˜[YJ
+O
+HØYYœ]
+İ[]\È‹[
+NÂˆ™]\›ˆØYYÂˆHØ]Ú
+^Ù\[Ûˆ[˜[Y
+HÈ™]\›ˆ[ÈBˆBˆš]˜]Hİ]XÈÛ™ÈØ]\˜]YY
+Û™ÈYÛ™ÈšYÚ
+HÈ™]\›ˆšYÚŒ	‰ˆY“Û™Ë“PVÕSQK\šYÚÈÛ™Ë“PVÕSQHˆY
+ÓX]›X^
+šYÚ
+NÈBˆš]˜]Hİ]XÈİš[™È[]Yİ]ÛÛYJÛ™È]\ÊHÂˆYŠ]\Ï
+H™]\›ˆ‘SUQÂˆİš[™Èİ]ÛÛYOH‘SUQˆŠØ]\ÎÂˆ™]\›ˆİ]ÛÛYK›[™İ
+
+OLÌÛİ]ÛÛYNˆ‘SUQÂˆBˆš]˜]Hİ]XÈš[˜[Û\ÜÈÜœ[”İÙY\Âˆ[[]YÈÛ™È™XÛZ[YYÈÛ™È™[XZ[š[™ÎÈ›ÛÛX[ˆY™\œ™YÂˆÜœ[”İÙY\
+Û™È™[XZ[š[™Ê^İ\Ëœ™[XZ[š[™Ï\™[XZ[š[™ÎßBˆBˆİ™\œšYHX›XÈŞ[˜Ú›Ûš^™Y›ÚYÛÜÙJ
+HÂˆYZ\ÜÚ[Û“Y™XŞXÛKÜš]SØÚÊ
+K›ØÚÊ
+NÂˆHÚYŠÛÜÚ[™Ê\™]\›ØÛÜÚ[™Ï]YNßYš[˜[^ØYZ\ÜÚ[Û“Y™XŞXÛKÜš]SØÚÊ
+K[›ØÚÊ
+NßBˆYŠ[œÜXİ[Û•Ø\›]\O[[
+Z[œÜXİ[Û•Ø\›]\œÚ]İÛ“›İÊ
+NÂˆX[šY™\İX›\Ú\‹˜ÛÜÙJ
+NÂˆYŠ^Xİ][Û•ÛÜšÙ\œÈO[[
+Y^Xİ][Û•ÛÜšÙ\œË˜ÛÜÙJ
+NÂˆYŠØYØÚY[TØÚY[\ˆO[[
+[ØYØÚY[TØÚY[\‹˜ÛÜÙJ
+NÂˆ™][[Û‹œÚ]İÛ“›İÊ
+NØ\Y˜XİXZ[[˜[˜ÙKœÚ]İÛ“›İÊ
+Nİ\™Ù][™^XZ[[˜[˜ÙKœÚ]İÛ“›İÊ
+NÚ[œÜXİ[Û•Ø]ÚÙÜËœÚ]İÛ“›İÊ
+NÂˆŞ[˜Ú›Ûš^™Y
+˜YØÚÊ^Ü[‘˜YË˜ÛX\Š
+NÙXYÑ˜YË˜ÛX\Š
+NÜ]ZXÚÓØY˜YË˜ÛX\Š
+NØY˜[˜ÙYØY˜YË˜ÛX\Š
+NØØ][ÙÓØY˜YË˜ÛX\Š
+NÜ™\^T™]šY]ÜË˜ÛX\Š
+NßBˆ[œÜXİÜœËœÚ]İÛ“›İÊ
+NİÛÜšÙ\œËœÚ]İÛ“›İÊ
+NÜİ™X[\ËœÚ]İÛ“›İÊ
+NÂˆ›ÜŠ[œÜXİ[Û•ÛÜšÙ\ˆÛÜšÙ\š[œÜXİ[Û•ÛÜšÙ\”ÛÛ
+]ÛÜšÙ\‹˜ÛÜÙJ
+NÂˆ›ÜŠ›Øˆš›ØœË˜[Y\Ê
+JZYŠ‹œ›ØÙ\ÜÈO[[
+HÂˆHÚYŠ‹œ›ØÙ\ÜÑ™[˜ÙHO[[
+^Ú‹œ›ØÙ\ÜÑ™[˜ÙK›ØœÙ\™J
+NÜ™[Y[X™\•ÛÜšÙ\”›ØÙ\ÜÙ\Ê‹‹œ›ØÙ\ÜÑ™[˜ÙJNß\İÜÛÜšÙ\•™YJŠNÙš[š\Ú]ZY]J‹‘T”“Ôˆ‹MËUTÑT•‘T‹RS•T”•TQ‹”Ù\™\ˆÚ]İÛˆ[\œ\YHÛÜšÙ\ˆŠNßBˆØ]Ú
+^Ù\[ÛˆYÛ›Ü™Y
+^ÚYŠ‹œ›ØÙ\ÜÑ™[˜ÙHO[[
+Z‹œ›ØÙ\ÜÑ™[˜ÙK™›Ü˜ÙJ
+NÙ[ÙH›Ü˜ÙU™YJ‹œ›ØÙ\ÜÊNßBˆBˆ›ÜŠ›ØÙ\ÜÈ›ØÙ\ÜÎš[œÜXİ[Û”›ØÙ\ÜÙ\ËšÙ^TÙ]
+
+JZYŠ›ØÙ\ÜËš\Ğ[]™J
+JY›Ü˜ÙU™YJ›ØÙ\ÜÊNÂˆ\›Z[˜]Q^Xİ]ÜŠÛÜšÙ\œËÛÜšÙ\œÈŠNİ\›Z[˜]Q^Xİ]ÜŠ[œÜXİÜœËš[œÜXİÜœÈŠNİ\›Z[˜]Q^Xİ]ÜŠİ™X[\Ë”ÔÑHİ™X[\ÈŠNÂˆ\›Z[˜]Q^Xİ]ÜŠ\™Ù][™^XZ[[˜[˜ÙK\™Ù][™^[™ÈŠNİ\›Z[˜]Q^Xİ]ÜŠ™][[Û‹œ™][[ÛˆŠNİ\›Z[˜]Q^Xİ]ÜŠ\Y˜XİXZ[[˜[˜ÙK˜\Y˜XİXZ[[˜[˜ÙHŠNİ\›Z[˜]Q^Xİ]ÜŠ[œÜXİ[Û•Ø]ÚÙÜËš[œÜXİ[ÛˆØ]ÚÙÜÈŠNÂˆYŠ[œÜXİ[Û•Ø\›]\O[[
+]\›Z[˜]Q^Xİ]ÜŠ[œÜXİ[Û•Ø\›]\š[œÜXİ[ÛˆØ\›]\ŠNÂˆ›ÜŠ›Øˆ›Øš›ØœË˜[Y\Ê
+JZYŠZ›Ø‹\›Z[˜[
+
+JHÂˆ]\™U\ÚÏ›ÚYˆ\ÚÏ]\ÚÜËœ™[[İ™J›Ø‹šY
+NÚYŠ\ÚÈO[[
+]\ÚË˜Ø[˜Ù[
+˜[ÙJNÂˆš[š\Ú]ZY]J›Ø‹‘T”“Ôˆ‹MËUTÑT•‘T‹RS•T”•TQ‹”Ù\™\ˆÚ]İÛˆİÜYH]Y]YYÛÜšÙ\ˆŠNÂˆYZ\ÜÚ[Û“X\ÙHX\ÙO[X\Ù\Ëœ™[[İ™J›Ø‹šY
+NÚYŠX\ÙHO[[
+[X\ÙKœ™[X\ÙJ
+NÂˆ›ØœËœ™[[İ™J›Ø‹šY›ØŠNÜØÚY[P\Y˜Xİ\˜Ú]™J›Ø‹šY
+NÂˆBˆÛ™Èİ\œ‘XY[™OTŞ\İ[K›˜[›Õ[YJ
+JÕ[YU[š]”ÑPÓÓ‘ËÓ˜[›ÜÊJNÂˆ›ÜŠ˜\ˆ[Nœİ\œ‘˜Z[™\œË™[TÙ]
+
+JHÂˆHÙ[K™Ù]˜[YJ
+K™Ù]\œ›Ü”İ™X[J
+K˜ÛÜÙJ
+NÛÛ™È™[XZ[š[™Ï\İ\œ‘XY[™KTŞ\İ[K›˜[›Õ[YJ
+NÚYŠ™[XZ[š[™ÏŒ
+Y[K™Ù]Ù^J
+Kš›Ú[ŠX]›X^
+K[YU[š]“S“ÔÑPÓÓ‘ËÓZ[\Ê™[XZ[š[™ÊJJNßBˆØ]Ú
+[\œ\Y^Ù\[Ûˆ[\œ\Y
+^Õ™XY˜İ\œ™[™XY
+
+Kš[\œ\
+
+NØœ™XZÎßXØ]Ú
+^Ù\[ÛˆYÛ›Ü™Y
+^ßBˆBˆËÈÛÜšÙ\‹ÔÔÑH›ÙXÙ\œÈ\™H]ZY\ØÙ[™Y›Ü™H\Y˜XİÜš]\œÈ[™›İ\›˜[ÛÛ\Xİ[ÛœÈ˜Z[‹‚ˆ\Y˜XİÜš]\œËœÚ]İÛŠ
+Nİ\›Z[˜]Q^Xİ]ÜŠ\Y˜XİÜš]\œË˜\Y˜XİÜš]\œÈŠNÂˆ]™[›İYšXØ][ÛœËœÚ]İÛŠ
+Nİ\›Z[˜]Q^Xİ]ÜŠ]™[›İYšXØ][ÛœË™]™[›İYšXØ][ÛœÈŠNÂˆ]™[ÛÛ\Xİ[ÛœËœÚ]İÛŠ
+Nİ\›Z[˜]Q^Xİ]ÜŠ]™[ÛÛ\Xİ[ÛœË™]™[ÛÛ\Xİ[ÛœÈŠNÂˆŞ[˜Ú›Ûš^™Y
+\›Z[˜[]™[ØXÚSØÚÊ^İ\›Z[˜[]™[ØXÚK˜ÛX\Š
+Nİ\›Z[˜[]™[ØXÚUÙZYÚLßBˆHÜİÜ™K˜ÛÜÙJ
+NßXØ]Ú
+^Ù\[Ûˆ˜Z[Y
+^Ú˜]˜K][›ÙÙÚ[™Ë“ÙÙÙ\‹™Ù]ÙÙÙ\ŠÙ\™\”[[YK˜Û\ÜË™Ù]˜[YJ
+JK›ÙÊ˜]˜K][›ÙÙÚ[™Ë“]™[•ĞT“’S‘ËU]X˜\ÙHÛX[\˜Z[Y‹˜Z[Y
+NßBˆBˆİ]XÈ›ÚY\›Z[˜]Q^Xİ]ÜŠ˜]˜K][˜ÛÛ˜İ\œ™[‘^Xİ]Ü”Ù\šXÙH^Xİ]Ü‹İš[™È˜[YJHÂˆ›ÛÛX[ˆ[\œ\YY˜[ÙNÂˆHÂˆYŠY^Xİ]Ü‹˜]ØZ]\›Z[˜][ÛŠÌ[YU[š]”ÑPÓÓ‘ÊJHÂˆ^Xİ]Ü‹œÚ]İÛ“›İÊ
+NÂˆYŠY^Xİ]Ü‹˜]ØZ]\›Z[˜][ÛŠK[YU[š]”ÑPÓÓ‘ÊJZ˜]˜K][›ÙÙÚ[™Ë“ÙÙÙ\‹™Ù]ÙÙÙ\ŠÙ\™\”[[YK˜Û\ÜË™Ù]˜[YJ
+JKØ\›š[™ÊU^Xİ]ÜˆY›İ\›Z[˜]NˆŠÛ˜[YJNÂˆBˆHØ]Ú
+[\œ\Y^Ù\[ÛˆİÜY
+HÂˆ[\œ\Y]YNÙ^Xİ]Ü‹œÚ]İÛ“›İÊ
+NÂˆHÚYŠY^Xİ]Ü‹˜]ØZ]\›Z[˜][ÛŠK[YU[š]”ÑPÓÓ‘ÊJZ˜]˜K][›ÙÙÚ[™Ë“ÙÙÙ\‹™Ù]ÙÙÙ\ŠÙ\™\”[[YK˜Û\ÜË™Ù]˜[YJ
+JKØ\›š[™ÊU^Xİ]Üˆİ[Xİ]™HY\ˆ[\œ\[ÛˆŠÛ˜[YJNßBˆØ]Ú
+[\œ\Y^Ù\[ÛˆYØZ[Š^Ú[\œ\Y]YNßBˆHš[˜[HÚYŠ[\œ\Y
+U™XY˜İ\œ™[™XY
+
+Kš[\œ\
+
+NßBˆB‚ˆš]˜]Hİ]XÈ›ÚY\›Z[˜]U™YJ›ØÙ\ÜÈ›ØÙ\ÜÊ^Ü›ØÙ\ÜËÒ[™J
+K™\ØÙ[™[Ê
+K™›Ü‘XXÚ
+›ØÙ\ÜÒ[™N™\İ›ŞJNÜ›ØÙ\ÜË™\İ›ŞJ
+NßBˆš]˜]Hİ]XÈ›ÚY›Ü˜ÙU™YJ›ØÙ\ÜÈ›ØÙ\ÜÊ^Ü›ØÙ\ÜËÒ[™J
+K™\ØÙ[™[Ê
+K™›Ü‘XXÚ
+›ØÙ\ÜÒ[™N™\İ›ŞQ›Ü˜ÚX›JNÜ›ØÙ\ÜË™\İ›ŞQ›Ü˜ÚX›J
+NßBˆ[˜İ[Û˜[[\™˜XÙH[\™˜XÙHÛÜšÙ\”›ØÙ\ÜÓ][˜Ú\ˆÈ›ØÙ\ÜÈİ\
+›ØÙ\ÜĞZ[\ˆZ[\ŠH›İÜÈ˜]˜Kš[Ë’SÑ^Ù\[ÛÈBˆ[˜İ[Û˜[[\™˜XÙH[\™˜XÙH\Y˜XİX›\Ú\ˆÈ]X›\Ú
+]İ]]]\˜Ú]™K\Y˜Xİ\˜Ú]™K‘[U˜[Y]Üˆ˜[Y]ÜŠH›İÜÈ^Ù\[ÛÈBˆ[˜İ[Û˜[[\™˜XÙH[\™˜XÙHØY›ÙÜ™\ÜÔ\œÚ\İ[˜ÙHÈ›ÚY\]Jİš[™È›Ø’Yİš[™È›ÙÜ™\ÜÒœÛÛŠH›İÜÈ^Ù\[ÛÈBˆš]˜]Hİ]XÈš[˜[Û\ÜÈYZ\ÜÚ[Û“X\ÙHÂˆš]˜]Hš[˜[Ù[X\Ü™HYZ\ÜÚ[Û‹ØYÜš]˜]Hš[˜[˜]˜K][˜ÛÛ˜İ\œ™[˜]ÛZXË]ÛZXĞ›ÛÛX[ˆ™[X\ÙY[™]È˜]˜K][˜ÛÛ˜İ\œ™[˜]ÛZXË]ÛZXĞ›ÛÛX[Š
+NÂˆYZ\ÜÚ[Û“X\ÙJÙ[X\Ü™HYZ\ÜÚ[Û‹Ù[X\Ü™HØY
+^İ\Ë˜YZ\ÜÚ[ÛXYZ\ÜÚ[Ûİ\Ë›ØY[ØYßBˆ›ÚY™[X\ÙJ
+^ÚYŠ™[X\ÙY˜ÛÛ\\™P[™Ù]
+˜[ÙKYJJ^ØYZ\ÜÚ[Û‹œ™[X\ÙJ
+NÚYŠØYO[[
+[ØYœ™[X\ÙJ
+Nß_BˆBˆİ]XÈš[˜[Û\ÜÈ]Y]YQ[^Ù\[Ûˆ^[™È[[YQ^Ù\[ÛˆÔ]Y]YQ[^Ù\[ÛŠİš[™ÈJ^Üİ\\ŠJNß_Bˆš]˜]Hİ]XÈš[˜[Û\ÜÈ›Ø”›İ™[˜[˜ÙHÂˆš[˜[İš[™ÈØÚY[RYØÚY[SİÛ™\‹^Xİ][Û”š[˜Ú\[İX›Z]YKšYÙÙ\™YNÂˆ›Ø”›İ™[˜[˜ÙJİš[™ÈØÚY[RYİš[™ÈØÚY[SİÛ™\‹İš[™È^Xİ][Û”š[˜Ú\[İš[™ÈİX›Z]YKİš[™ÈšYÙÙ\™YJHÂˆ\ËœØÚY[RY\›İ™[˜[˜ÙU^
+ØÚY[RY
+Nİ\ËœØÚY[SİÛ™\\›İ™[˜[˜ÙU^
+ØÚY[SİÛ™\‹MŠNÂˆ\Ë™^Xİ][Û”š[˜Ú\[\›İ™[˜[˜ÙU^
+^Xİ][Û”š[˜Ú\[MŠNİ\ËœİX›Z]YO\›İ™[˜[˜ÙU^
+İX›Z]YKMŠNİ\ËšYÙÙ\™YO\›İ™[˜[˜ÙU^
+šYÙÙ\™YKMŠNÂˆBˆš]˜]Hİ]XÈİš[™È›İ™[˜[˜ÙU^
+İš[™È˜[YK[X^
+HÂˆYŠ˜[YOO[[˜[YKš\Ğ›[šÊ
+_˜[YK›[™İ
+
+O›X^˜[YK˜Ú\œÊ
+K˜[SX]Ú
+Ú\˜Xİ\š\ÒTÓĞÛÛ›Û
+J\™]\›ˆ[Âˆ™]\›ˆ˜[YNÂˆBˆBˆİ]XÈš[˜[Û\ÜÈ›ØÛÛ™›Xİ^Ù\[Ûˆ^[™È[[YQ^Ù\[ÛˆÙš[˜[İš[™ÈÛÙNÒ›ØÛÛ™›Xİ^Ù\[ÛŠİš[™ÈÛÙKİš[™ÈY\ÜØYÙJ^Üİ\\ŠY\ÜØYÙJNİ\Ë˜ÛÙOXÛÙNß_Bˆİ]XÈš[˜[Û\ÜÈ›İ›İ[™^Ù\[Ûˆ^[™È[[YQ^Ù\[ÛˆßBˆİ]XÈš[˜[Û\ÜÈ™\^Q˜Y^\™Y^Ù\[Ûˆ^[™È[[YQ^Ù\[ÛˆßBˆİ]XÈš[˜[Û\ÜÈ™\^R[œ]Z\ÜÚ[™Ñ^Ù\[Ûˆ^[™È[YØ[\™İ[Y[^Ù\[ÛˆÔ™\^R[œ]Z\ÜÚ[™Ñ^Ù\[ÛŠİš[™ÈY\ÜØYÙJ^Üİ\\ŠY\ÜØYÙJNß_Bˆİ]XÈš[˜[Û\ÜÈØÚY[TÛİ\˜ÙPÚ[™ÙY^Ù\[Ûˆ^[™È[YØ[\™İ[Y[^Ù\[ÛˆÂˆš[˜[İš[™ÈİÜ™Y™]š\Ú[Û‹İ\œ™[™]š\Ú[Û‹ÛXŞNÂˆØÚY[TÛİ\˜ÙPÚ[™ÙY^Ù\[ÛŠİš[™ÈİÜ™Yİš[™Èİ\œ™[İš[™ÈÛXŞJ^Üİ\\ŠœXÚØYÙK\™]š\Ú[Û‹XÚ[™ÙYŠNİ\ËœİÜ™Y™]š\Ú[Û\İÜ™Yİ\Ë˜İ\œ™[™]š\Ú[ÛXİ\œ™[İ\ËœÛXŞO\ÛXŞNßBˆBˆİ]XÈš[˜[Û\ÜÈØÚY[PÛÛ™›Xİ^Ù\[Ûˆ^[™È[[YQ^Ù\[ÛˆßBˆİ]XÈš[˜[Û\ÜÈ[œÜXİ[ÛØ\XÚ]Q^Ù\[Ûˆ^[™È[[YQ^Ù\[ÛˆßBˆİ]XÈš[˜[Û\ÜÈ[œÜXİ[Û“[Z]^Ù\[Ûˆ^[™È[[YQ^Ù\[ÛˆÂˆš[˜[\İX\İš[™ËØš™XİˆXYÛ›ÜİXÜÎÂˆ[œÜXİ[Û“[Z]^Ù\[ÛŠ\İX\İš[™ËØš™XİˆXYÛ›ÜİXÜÊHÂˆ\Ë™XYÛ›ÜİXÜÏPÛÛXİ[ÛœË[›[ÙYšXX›S\İ
+™]È\œ˜^S\İX\İš[™ËØš™XİŠXYÛ›ÜİXÜÊJNÂˆBˆBˆİ]XÈš[˜[Û\ÜÈ[œÜXİ[ÛÛÛ™šYİ\˜][Û‘^Ù\[Ûˆ^[™È[[YQ^Ù\[ÛˆÂˆš[˜[\İX\İš[™ËØš™XİˆXYÛ›ÜİXÜÎÂˆ[œÜXİ[ÛÛÛ™šYİ\˜][Û‘^Ù\[ÛŠ\İX\İš[™ËØš™XİˆXYÛ›ÜİXÜÊ^İ\Ë™XYÛ›ÜİXÜÏPÛÛXİ[ÛœË[›[ÙYšXX›S\İ
+™]È\œ˜^S\İŠXYÛ›ÜİXÜÊJNßBˆİš[™Èİ[[X\J
+^ÓØš™Xİİ[[X\OYXYÛ›ÜİXÜË™Ù]
+
+K™Ù]
+œİ[[X\HŠNÜ™]\›ˆİ[[X\H[œİ[˜Ù[Ùˆİš[™ÏÊİš[™Ê\İ[[X\Nˆ”XÚØYÙHÛÛ™šYİ\˜][Ûˆ\È[˜[YÜˆ[˜ÛÛ\]KˆßBˆBˆİ]XÈš[˜[Û\ÜÈ[œÜXİ[Û•˜[Y][Û‘^Ù\[Ûˆ^[™È[[YQ^Ù\[ÛˆÂˆš[˜[İš[™ÈÛÙNÂˆš[˜[\İX\İš[™ËØš™XİˆXYÛ›ÜİXÜÎÂˆ[œÜXİ[Û•˜[Y][Û‘^Ù\[ÛŠİš[™ÈÛÙK\İX\İš[™ËØš™XİˆXYÛ›ÜİXÜÊHÂˆİ\\ŠXYÛ›ÜİXÜËš\Ñ[\J
+OÈ”XÚØYÙH[œÜXİ[Ûˆ[œ]ÜˆÛÛ™šYİ\˜][Ûˆ\È[˜[Yˆ”İš[™Ë˜[YSÙŠXYÛ›ÜİXÜË™Ù]
+
+K™Ù]
+œİ[[X\HŠJJNÂˆ\Ë˜ÛÙOXÛÙNÂˆ\Ë™XYÛ›ÜİXÜÏPÛÛXİ[ÛœË[›[ÙYšXX›S\İ
+™]È\œ˜^S\İŠXYÛ›ÜİXÜÊJNÂˆBˆİš[™Èİ[[X\J
+^Ü™]\›ˆÙ]Y\ÜØYÙJ
+NßBˆBˆİ]XÈš[˜[Û\ÜÈ[œÜXİ[Û•[Y[İ]^Ù\[Ûˆ^[™È[[YQ^Ù\[ÛˆßBˆİ]XÈš[˜[Û\ÜÈ[œÜXİ[Û”™\ÜÛœÙUÛÓ\™ÙQ^Ù\[Ûˆ^[™È[[YQ^Ù\[ÛˆßBˆİ]XÈš[˜[Û\ÜÈİ[Pİ\œÛÜ‘^Ù\[Ûˆ^[™È[[YQ^Ù\[ÛˆßBˆİ]XÈš[˜[Û\ÜÈİ[Q˜Y^Ù\[Ûˆ^[™È[[YQ^Ù\[ÛˆßBˆİ]XÈš[˜[Û\ÜÈ˜YØ\XÚ]Q^Ù\[Ûˆ^[™È[[YQ^Ù\[ÛˆßBˆİ]XÈš[˜[Û\ÜÈ[›[™SØY\ØX›Y^Ù\[Ûˆ^[™È[[YQ^Ù\[ÛˆßBˆİ]XÈš[˜[Û\ÜÈ\Y˜XİØ\XÚ]Q^Ù\[Ûˆ^[™È[[YQ^Ù\[ÛˆßBˆİ]XÈš[˜[Û\ÜÈ\˜Ú]™U[˜]˜Z[X›Q^Ù\[Ûˆ^[™È[[YQ^Ù\[ÛˆÂˆš[˜[İš[™È\˜Ú]™Tİ]NÂˆ\˜Ú]™U[˜]˜Z[X›Q^Ù\[ÛŠİš[™È\˜Ú]™Tİ]JHÂˆ\Ë˜\˜Ú]™Tİ]OTÙ]›ÙŠ”S‘S‘È‹TÒU’S‘È‹”‘PQH‹‘RSQŠK˜ÛÛZ[œÊ\˜Ú]™Tİ]JOØ\˜Ú]™Tİ]Nˆ‘RSQÂˆBˆBˆİ]XÈš[˜[Û\ÜÈ[›[™SØY[Z]^Ù\[Ûˆ^[™È[YØ[\™İ[Y[^Ù\[ÛˆÂˆ[›[™SØY[Z]^Ù\[ÛŠİš[™ÈY\ÜØYÙJ^Üİ\\ŠY\ÜØYÙJNßBˆBˆİ]XÈš[˜[Û\ÜÈ˜Y˜[Y][Û‘^Ù\[Ûˆ^[™È[YØ[\™İ[Y[^Ù\[ÛˆÂˆš[˜[\İX\İš[™ËØš™XİˆXYÛ›ÜİXÜÎÂˆ˜Y˜[Y][Û‘^Ù\[ÛŠ\İX\İš[™ËØš™XİˆXYÛ›ÜİXÜÊHÂˆİ\\Šš\œİXYÛ›ÜİXÔİ[[X\JXYÛ›ÜİXÜÊJNÂˆ\İX\İš[™ËØš™XİˆÛÜO[™]È\œ˜^S\İX\İš[™ËØš™XİŠ
+NÂˆ›ÜŠX\İš[™ËØš™XİˆXYÛ›ÜİXÎ™XYÛ›ÜİXÜÊXÛÜK˜Y
+ÛÛXİ[ÛœË[›[ÙYšXX›SX\
+™]È[šÙY\ÚX\İš[™ËØš™XİŠXYÛ›ÜİXÊJJNÂˆ\Ë™XYÛ›ÜİXÜÏPÛÛXİ[ÛœË[›[ÙYšXX›S\İ
+ÛÜJNÂˆBˆš]˜]Hİ]XÈİš[™Èš\œİXYÛ›ÜİXÔİ[[X\J\İX\İš[™ËØš™XİˆXYÛ›ÜİXÜÊHÂˆØš™Xİİ[[X\OYXYÛ›ÜİXÜÏO[[XYÛ›ÜİXÜËš\Ñ[\J
+OÛ[™XYÛ›ÜİXÜË™Ù]
+
+K™Ù]
+œİ[[X\HŠNÂˆ™]\›ˆİ[[X\H[œİ[˜Ù[Ùˆİš[™É‰ˆJ
+İš[™Ê\İ[[X\JKš\Ğ›[šÊ
+OÊİš[™Ê\İ[[X\Nˆ“ØYÜˆXYÈ[œ]˜Z[YØÚ[XHÜˆ\™Ù]˜[Y][ÛˆÂˆBˆBˆš]˜]Hİ]XÈš[˜[Û\ÜÈXYÑ˜YÂˆš[˜[İš[™ÈYš[˜Ú\[XÚØYÙRY[š\›Û›Y[\™Ù]\K\™Ù]Y™\Ûİ\˜ÙRY™]š\Ú[Û‘YÙ\İÂˆš[˜[X\İš[™ËØš™Xİˆ[œ]ØÚY[R[œ]™]šY]ÎÂˆš[˜[›ÛÛX[ˆÛÛZ[œÔÙ[œÚ]]™U˜[Y\ÎÂˆš[˜[[œİ[^\™\Ğ]Âˆ›ÛÛX[ˆİX›Z][™ÎÂˆXYÑ˜Y
+İš[™ÈYİš[™Èš[˜Ú\[İš[™ÈXÚØYÙRYİš[™È[š\›Û›Y[İš[™È\™Ù]\Kİš[™È\™Ù]Yˆİš[™È™\Ûİ\˜ÙRYİš[™È™]š\Ú[Û‘YÙ\İX\İš[™ËØš™Xİˆ[œ]X\İš[™ËØš™XİˆØÚY[R[œ]ˆ›ÛÛX[ˆÛÛZ[œÔÙ[œÚ]]™U˜[Y\ËX\İš[™ËØš™Xİˆ™]šY]Ë[œİ[^\™\Ğ]
+HÂˆ\ËšYZYİ\Ëœš[˜Ú\[\š[˜Ú\[İ\ËœXÚØYÙRY\XÚØYÙRYİ\Ë™[š\›Û›Y[Y[š\›Û›Y[Âˆ\Ë\™Ù]\O]\™Ù]\Nİ\Ë\™Ù]Y]\™Ù]Yİ\Ëœ™\Ûİ\˜ÙRY\™\Ûİ\˜ÙRYİ\Ëœ™]š\Ú[Û‘YÙ\İ\™]š\Ú[Û‘YÙ\İÂˆ\Ëš[œ]YY\X\
+[œ]
+Nİ\ËœØÚY[R[œ]YY\X\
+ØÚY[R[œ]
+Nİ\Ë˜ÛÛZ[œÔÙ[œÚ]]™U˜[Y\ÏXÛÛZ[œÔÙ[œÚ]]™U˜[Y\ÎÂˆ\Ëœ™]šY]ÏYY\X\
+™]šY]ÊNİ\Ë™^\™\Ğ]Y^\™\Ğ]ÂˆBˆBˆš]˜]Hİ]XÈš[˜[Û\ÜÈ]ZXÚÓØY˜YÂˆš[˜[İš[™ÈYš[˜Ú\[XÚØYÙRY[š\›Û›Y[\™Ù]\K\™Ù]Y™\Ûİ\˜ÙRY[Ù[™]š\Ú[Û‘YÙ\İÂˆš[˜[X\İš[™ËØš™XİˆØÙ[˜\š[Ë™]šY]ÎÂˆš[˜[›ÛÛX[ˆÛÛZ[œÔÙ[œÚ]]™U˜[Y\ÎÂˆš[˜[[œİ[^\™\Ğ]Âˆ›ÛÛX[ˆİX›Z][™ÎÂˆ]ZXÚÓØY˜Y
+İš[™ÈYİš[™Èš[˜Ú\[İš[™ÈXÚØYÙRYİš[™È[š\›Û›Y[İš[™È\™Ù]\Kİš[™È\™Ù]Yˆİš[™È™\Ûİ\˜ÙRYİš[™È[Ù[İš[™È™]š\Ú[Û‘YÙ\İX\İš[™ËØš™XİˆØÙ[˜\š[Ëˆ›ÛÛX[ˆÛÛZ[œÔÙ[œÚ]]™U˜[Y\ËX\İš[™ËØš™Xİˆ™]šY]Ë[œİ[^\™\Ğ]
+HÂˆ\ËšYZYİ\Ëœš[˜Ú\[\š[˜Ú\[İ\ËœXÚØYÙRY\XÚØYÙRYİ\Ë™[š\›Û›Y[Y[š\›Û›Y[Âˆ\Ë\™Ù]\O]\™Ù]\Nİ\Ë\™Ù]Y]\™Ù]Yİ\Ëœ™\Ûİ\˜ÙRY\™\Ûİ\˜ÙRYİ\Ë›[Ù[[[Ù[Âˆ\Ëœ™]š\Ú[Û‘YÙ\İ\™]š\Ú[Û‘YÙ\İİ\ËœØÙ[˜\š[ÏYY\X\
+ØÙ[˜\š[ÊNİ\Ë˜ÛÛZ[œÔÙ[œÚ]]™U˜[Y\ÏXÛÛZ[œÔÙ[œÚ]]™U˜[Y\ÎÂˆ\Ëœ™]šY]ÏYY\X\
+™]šY]ÊNİ\Ë™^\™\Ğ]Y^\™\Ğ]ÂˆBˆBˆš]˜]Hİ]XÈš[˜[Û\ÜÈY˜[˜ÙYØY˜Yİ]HÂˆš[˜[İš[™ÈYš[˜Ú\[XÚØYÙRY[š\›Û›Y[[Ù[™]š\Ú[Û‘YÙ\İÂˆš[˜[X\İš[™ËØš™XİˆØÙ[˜\š[Ë™]šY]ÎÂˆš[˜[›ÛÛX[ˆÛÛZ[œÔÙ[œÚ]]™U˜[Y\ÎÂˆš[˜[[œİ[^\™\Ğ]Âˆ›ÛÛX[ˆİX›Z][™ÎÂˆY˜[˜ÙYØY˜Yİ]Jİš[™ÈYİš[™Èš[˜Ú\[İš[™ÈXÚØYÙRYİš[™È[š\›Û›Y[İš[™È[Ù[ˆİš[™È™]š\Ú[Û‘YÙ\İX\İš[™ËØš™XİˆØÙ[˜\š[Ë›ÛÛX[ˆÛÛZ[œÔÙ[œÚ]]™U˜[Y\ËX\İš[™ËØš™Xİˆ™]šY]Ëˆ[œİ[^\™\Ğ]
+HÂˆ\ËšYZYİ\Ëœš[˜Ú\[\š[˜Ú\[İ\ËœXÚØYÙRY\XÚØYÙRYİ\Ë™[š\›Û›Y[Y[š\›Û›Y[Âˆ\Ë›[Ù[[[Ù[İ\Ëœ™]š\Ú[Û‘YÙ\İ\™]š\Ú[Û‘YÙ\İİ\ËœØÙ[˜\š[ÏYY\X\
+ØÙ[˜\š[ÊNÂˆ\Ë˜ÛÛZ[œÔÙ[œÚ]]™U˜[Y\ÏXÛÛZ[œÔÙ[œÚ]]™U˜[Y\Îİ\Ëœ™]šY]ÏYY\X\
+™]šY]ÊNİ\Ë™^\™\Ğ]Y^\™\Ğ]ÂˆBˆBˆš]˜]Hİ]XÈš[˜[Û\ÜÈØ][ÙÓØY˜Yİ]HÂˆš[˜[İš[™ÈYš[˜Ú\[XÚØYÙRY[š\›Û›Y[™\Ûİ\˜ÙRY™]š\Ú[Û‘YÙ\İ[Ù[™]šY]ÖX[[Âˆš[˜[X\İš[™ËØš™XİˆØÙ[˜\š[ËÛÛ™šYİ\˜][ÛÂˆš[˜[[œİ[^\™\Ğ]ÂˆØ][ÙÓØY˜Yİ]Jİš[™ÈYİš[™Èš[˜Ú\[İš[™ÈXÚØYÙRYİš[™È[š\›Û›Y[İš[™È™\Ûİ\˜ÙRYˆİš[™È™]š\Ú[Û‘YÙ\İİš[™È[Ù[X\İš[™ËØš™XİˆØÙ[˜\š[Ëİš[™È™]šY]ÖX[[X\İš[™ËØš™XİˆÛÛ™šYİ\˜][Û‹[œİ[^\™\Ğ]
+HÂˆ\ËšYZYİ\Ëœš[˜Ú\[\š[˜Ú\[İ\ËœXÚØYÙRY\XÚØYÙRYİ\Ë™[š\›Û›Y[Y[š\›Û›Y[Âˆ\Ëœ™\Ûİ\˜ÙRY\™\Ûİ\˜ÙRYİ\Ëœ™]š\Ú[Û‘YÙ\İ\™]š\Ú[Û‘YÙ\İİ\Ë›[Ù[[[Ù[Âˆ\ËœØÙ[˜\š[ÏYY\X\
+ØÙ[˜\š[ÊNİ\Ëœ™]šY]ÖX[[\™]šY]ÖX[[İ\Ë˜ÛÛ™šYİ\˜][ÛYY\X\
+ÛÛ™šYİ\˜][ÛŠNİ\Ë™^\™\Ğ]Y^\™\Ğ]ÂˆBˆBˆš]˜]Hİ]XÈX\İš[™ËØš™XİˆY\X\
+X\İš[™ËØš™XİˆÛİ\˜ÙJHÂˆX\İš[™ËØš™XİˆÛÜO[™]È[šÙY\ÚX\Š
+NÂˆYŠÛİ\˜ÙHO[[
+Y›ÜŠX\‘[Oİš[™ËØš™Xİˆ[NœÛİ\˜ÙK™[TÙ]
+
+JXÛÜKœ]
+[K™Ù]Ù^J
+KY\˜[YJ[K™Ù]˜[YJ
+JJNÂˆ™]\›ˆÛÛXİ[ÛœË[›[ÙYšXX›SX\
+ÛÜJNÂˆBˆš]˜]Hİ]XÈØš™XİY\˜[YJØš™Xİ˜[YJHÂˆYŠ˜[YH[œİ[˜Ù[ÙˆX\
+HÂˆX\İš[™ËØš™XİˆÛÜO[™]È[šÙY\ÚX\Š
+NÂˆ›ÜŠX\‘[OËÏˆ[NŠ
+X\ËÏŠ]˜[YJK™[TÙ]
+
+JXÛÜKœ]
+İš[™Ë˜[YSÙŠ[K™Ù]Ù^J
+JKY\˜[YJ[K™Ù]˜[YJ
+JJNÂˆ™]\›ˆÛÛXİ[ÛœË[›[ÙYšXX›SX\
+ÛÜJNÂˆBˆYŠ˜[YH[œİ[˜Ù[Ùˆ\İ
+HÂˆ\İØš™XİˆÛÜO[™]È\œ˜^S\İŠ
+NÙ›ÜŠØš™Xİ][NŠ\İÏŠ]˜[YJXÛÜK˜Y
+Y\˜[YJ][JJNÜ™]\›ˆÛÛXİ[ÛœË[›[ÙYšXX›S\İ
+ÛÜJNÂˆBˆ™]\›ˆ˜[YNÂˆBˆš]˜]Hİ]XÈš[˜[Û\ÜÈİ\œÛÜˆÙš[˜[[Ù™œÙ]Ùš[˜[İš[™È™]š\Ú[ÛĞİ\œÛÜŠ[Ù™œÙ]İš[™È™]š\Ú[ÛŠ^İ\Ë›Ù™œÙ][Ù™œÙ]İ\Ëœ™]š\Ú[Û\™]š\Ú[Ûß_BŸB

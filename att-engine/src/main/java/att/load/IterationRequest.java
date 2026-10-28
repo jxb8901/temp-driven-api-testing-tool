@@ -73,8 +73,8 @@ public final class IterationRequest {
         if (iterationId == null || iterationId.trim().isEmpty()) throw new IllegalArgumentException("LOAD.iterationId must not be blank");
         if (iteration < 0) throw new IllegalArgumentException("LOAD.iteration must be >= 0");
         if (phase == null || phase.trim().isEmpty()) throw new IllegalArgumentException("EXEC.LOAD.PHASE must not be blank");
-        if (!("WARMUP".equals(phase) || "RAMP_UP".equals(phase) || "STEADY".equals(phase) || "RAMP_DOWN".equals(phase)))
-            throw new IllegalArgumentException("EXEC.LOAD.PHASE must be WARMUP, RAMP_UP, STEADY, or RAMP_DOWN");
+        if (!("RAMP_UP".equals(phase) || "WARMUP".equals(phase) || "STEADY".equals(phase) || "RAMP_DOWN".equals(phase)))
+            throw new IllegalArgumentException("EXEC.LOAD.PHASE must be RAMP_UP, WARMUP, STEADY, or RAMP_DOWN");
         if (startedAt == null) throw new IllegalArgumentException("LOAD.startedAt is required");
         if ("closed".equals(model) && (userId == null || userId.trim().isEmpty())) throw new IllegalArgumentException("Closed iterations require a stable LOAD.userId");
         if ("arrivalRate".equals(model) && userId != null && !userId.trim().isEmpty()) throw new IllegalArgumentException("Arrival-rate iterations must not use a long-lived LOAD.userId");

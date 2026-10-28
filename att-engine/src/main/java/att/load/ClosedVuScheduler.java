@@ -268,9 +268,8 @@ public final class ClosedVuScheduler implements LoadScheduler {
         for (VuState user : users) {
             if (user.running || user.userNumber >= scenario.users()) continue;
             if (user.userNumber < active && user.readyAt > now) next = Math.min(next, user.readyAt);
-            else if (user.userNumber >= active && elapsed < scenario.warmup().toMillis() + scenario.rampUp().toMillis()) {
-                long activation = scenario.warmup().toMillis()
-                        + (long) Math.floor(((double) scenario.rampUp().toMillis() * user.userNumber) / scenario.users()) + 1L;
+            else if (user.userNumber >= active && LoadPhase.at(scenario, elapsed) == LoadPhase.RAMP_UP) {
+                long activation = (long) Math.floor(((double) scenario.rampUp().toMillis() * user.userNumber) / scenario.users()) + 1L;
                 next = Math.min(next, safeAdd(startedAt, activation));
             }
         }
@@ -309,11 +308,10 @@ public final class ClosedVuScheduler implements LoadScheduler {
     }
     int activeUsers(long elapsedMs) { return activeUsers(scenario, elapsedMs); }
     static int activeUsers(LoadScenario scenario, long elapsedMs) {
-        long warmup = scenario.warmup().toMillis(), rampUp = scenario.rampUp().toMillis();
-        if (elapsedMs < warmup) return scenario.users();
-        if (LoadPhase.at(scenario, elapsedMs) == LoadPhase.COMPLETE) return 0;
-        if (rampUp > 0L && elapsedMs < warmup + rampUp) return Math.max(1, (int) Math.ceil(scenario.users() * LoadPhase.fraction(scenario, elapsedMs)));
-        if (LoadPhase.at(scenario, elapsedMs) == LoadPhase.RAMP_DOWN) return Math.max(1, (int) Math.ceil(scenario.users() * LoadPhase.fraction(scenario, elapsedMs)));
+        LoadPhase phase = LoadPhase.at(scenario, elapsedMs);
+        if (phase == LoadPhase.COMPLETE) return 0;
+        if (phase == LoadPhase.RAMP_UP || phase == LoadPhase.RAMP_DOWN)
+            return Math.max(1, (int) Math.ceil(scenario.users() * LoadPhase.fraction(scenario, elapsedMs)));
         return scenario.users();
     }
     void forwardSchedulerMetricsTo(LoadMetrics aggregate) {

@@ -651,7 +651,7 @@ it('shows per-workload planned rates and durations while keeping Schedule IDs ou
   expect(host.textContent).toContain('2 workloads · 2 target bindings');
   expect(host.textContent).toContain('Configured target rate 10/s · Planned total 5m 30s');
   expect(host.textContent).toContain('20 VUs · Planned total 10m');
-  expect(host.textContent).toContain('Warmup 10s · Ramp-up 20s · Steady 5m');
+  expect(host.textContent).toContain('Ramp-up 20s · Warmup 10s · Steady 5m');
   expect(host.textContent).toContain('Load setup: Not available');
   expect(host.textContent).not.toContain('S-HISTORICAL');expect(host.textContent).not.toContain(sampleSchedule.id);
   expect(api.listSchedules).toHaveBeenCalledTimes(1);expect(api.getScheduleExecutions).not.toHaveBeenCalled();

@@ -41,7 +41,7 @@ Origin 以 scheme、忽略大小寫的 hostname/IP 及有效 port 精確比較�
 此共用規則適用於 local/container authentication 中所有需要 Origin 相等檢查的位置。拒絕時回傳 `ATT-SERVER-ORIGIN-MISMATCH`，並寫入不含原始 Origin 或憑證的 `ORIGIN_REJECT` audit。通過 Origin 規則不會授予權限：local cookie 及 Basic 狀態變更仍須提交 `X-ATT-CSRF`，authentication、role、憑證 HTTPS 傳輸、限速、Secure/HttpOnly/SameSite cookie，以及 draft ownership 規則均維持；active USER 共用符合資格的 package、run、job、結果、artifact 及 schedule 操作權限。此設定不會設定 CORS、發送 `Access-Control-Allow-Origin` 或啟用跨站 cookie；真正跨站的瀏覽器 API 存取須另行設計 CORS。
 
 
-瀏覽器建立的 Quick Load 及 Advanced Load draft 另有獨立 opt-in：`server.inlineLoad.enabled` 預設為 `false`。啟用後，Server 會在 Engine 驗證後及進入佇列前，再次檢查 workload 數、target 數、Virtual User 總數、Arrival Rate 總和、每個 workload 及整體並行數上限，以及完整時間窗口上限。以下範例設定保守預設值。時間窗口上限為 warmup、ramp-up、duration、ramp-down 的總和；target 數包含固定 target 及每個 VU mix entry。功能停用時回傳 `403 ATT-SERVER-INLINE-LOAD-DISABLED`；超出設定上限的 draft 會回傳 `400 ATT-SERVER-INLINE-LOAD-LIMIT`，並以摘要指出超出的設定。這些限制適用於瀏覽器建立的 draft；既有 path-based Load request 維持相容行為，並繼續受 `workers.maxConcurrentLoad` 限制。
+瀏覽器建立的 Quick Load 及 Advanced Load draft 另有獨立 opt-in：`server.inlineLoad.enabled` 預設為 `false`。啟用後，Server 會在 Engine 驗證後及進入佇列前，再次檢查 workload 數、target 數、Virtual User 總數、Arrival Rate 總和、每個 workload 及整體並行數上限，以及完整時間窗口上限。以下範例設定保守預設值。時間窗口上限依 ramp-up、warmup、duration、ramp-down 順序計算；target 數包含固定 target 及每個 VU mix entry。功能停用時回傳 `403 ATT-SERVER-INLINE-LOAD-DISABLED`；超出設定上限的 draft 會回傳 `400 ATT-SERVER-INLINE-LOAD-LIMIT`，並以摘要指出超出的設定。這些限制適用於瀏覽器建立的 draft；既有 path-based Load request 維持相容行為，並繼續受 `workers.maxConcurrentLoad` 限制。
 
 週期性 package-backed Load 排程另有獨立 opt-in：`server.scheduling.enabled` 預設為 `false`。所有已驗證的 USER 均可在共用操作範圍內管理 RUN/LOAD 排程；container-auth 使用 `server.authorization.userRole`，local-auth 要求 active `USER`。ADMIN role 不會取得排程操作權限。匿名操作只由 `server.authorization.allowAnonymousOperations` 控制，且僅在 `authenticationRequired: false` 時可用。舊版 `server.scheduling.adminRole` 及 `allowAnonymousManagement` 僅為設定相容性保留，不會改變權限。此功能需要有界 package inspection。排程定義及執行歷史保存在 `server.dataDir` 的 H2 資料庫；請在同一 dataDir 只執行一個 Server 程序。每個排程預設保留最新 10,000 筆 terminal occurrence（`maxExecutionsPerSchedule` 可設為 100–100,000）；執行中及處理中的 occurrence 會保留。本 scheduler 不提供多節點 leader election。
 
@@ -146,7 +146,7 @@ Inline Load 設定使用以下預設值及硬性範圍：
 | `maxAggregateArrivalRatePerSecond` | 100 | 大於 0 至 1,000,000 | 所有 Arrival Rate workload 轉為每秒請求數後的總和 |
 | `maxConcurrentPerWorkload` | 100 | 1–1,000,000 | 每個 Arrival Rate workload |
 | `maxTotalConcurrent` | 1,000 | 1–1,000,000 | 所有 Arrival Rate workload 的 `maxConcurrent` 總和 |
-| `maxDurationSeconds` | 3,600 | 1–864,000 | LOAD 完整 envelope 上限：warmup + ramp-up + duration + ramp-down，最多 10 日 |
+| `maxDurationSeconds` | 3,600 | 1–864,000 | LOAD 完整 envelope 上限：ramp-up + warmup + duration + ramp-down，最多 10 日 |
 
 `dataDir` 必須是絕對路徑。啟動時，allowed root、package root 及 Worker library directory 必須已存在。系統會將 package 路徑 canonicalize；若 symlink 指向 allowed root 以外，便會拒絕。Client 提交 `packageId`，不能指定 package 路徑、輸出路徑、Worker 執行檔或 classpath。v1 不提供 package 註冊或修改 API。
 
