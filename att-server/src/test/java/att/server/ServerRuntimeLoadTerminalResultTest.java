@@ -66,6 +66,46 @@ class ServerRuntimeLoadTerminalResultTest {
         }
     }
 
+    @Test void oversizedTerminalResultStaysBoundedAndReplayMatchesTheLiveEvent() throws Exception {
+        try (ServerRuntime runtime = runtime("oversized-terminal-journal-result")) {
+            String id = "J0000000000000350";
+            Job job = createJob(runtime, id);
+            String fullDetails = "full-result-canary-" + "x".repeat(JobEvents.MAX_EVENT_DATA_BYTES + 4096);
+            Map<String,Object> fullResult = fields("status", "ERROR", "exitCode", 3, "largeDetails", fullDetails);
+            job.resultJson = JSON.writeValueAsString(fullResult);
+            runtime.store.update(job);
+
+            List<Map<String,Object>> liveEvents = new java.util.concurrent.CopyOnWriteArrayList<>();
+            try (AutoCloseable subscription = job.events.listen(liveEvents::add)) {
+                runtime.finish(job, "ERROR", 3);
+            }
+            assertNotNull(job.journalDiagnostic, "The oversized terminal projection must set the Job journal diagnostic");
+
+            Map<String,Object> liveTerminal = liveEvents.stream().filter(event -> "result".equals(event.get("event")))
+                    .findFirst().orElseThrow();
+            Map<?,?> data = (Map<?,?>)liveTerminal.get("data");
+            assertTrue(JSON.writeValueAsBytes(data).length <= JobEvents.MAX_EVENT_DATA_BYTES);
+            assertEquals(true, data.get("truncated"));
+            assertFalse(JSON.writeValueAsString(liveTerminal).contains("full-result-canary"));
+            assertTrue(sseEventBytes(runtime, liveTerminal, id) <= JobEvents.MAX_EVENT_DATA_BYTES + 128,
+                    "The SSE envelope must remain bounded with the journal projection");
+
+            Map<String,Object> stored = runtime.store.get(id);
+            String storedResultJson = String.valueOf(stored.get("resultJson"));
+            assertTrue(storedResultJson.contains(fullDetails), "The full result remains available in the separate Job result record");
+            assertTrue(storedResultJson.contains("ATT-JOURNAL-EVENT-TRUNCATED"),
+                    "Known journal diagnostics are added before terminal-event projection");
+            assertTrue(((Number)job.events.metrics().get("retainedMemoryBytes")).longValue()
+                    <= ((Number)job.events.metrics().get("maxRetainedMemoryBytes")).longValue());
+
+            JobEvents replay = new JobEvents(runtime.config.dataDir.resolve("jobs").resolve(id).resolve("events.jsonl"), 100, Runnable::run);
+            Map<String,Object> replayedTerminal = replay.after(0).stream().filter(event -> "result".equals(event.get("event")))
+                    .findFirst().orElseThrow();
+            assertEquals(JSON.writeValueAsString(liveTerminal), JSON.writeValueAsString(replayedTerminal),
+                    "The persisted/replayed event must equal the bounded event sent to live listeners");
+        }
+    }
+
     @Test void normalizesHistoricalDetailedLoadResultsOnReadWithoutExposingHostPaths() throws Exception {
         try (ServerRuntime runtime = runtime("historical-result")) {
             String id = "J0000000000000298";

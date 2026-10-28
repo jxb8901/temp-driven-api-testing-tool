@@ -3887,26 +3887,19 @@ final class ServerRuntime implements AutoCloseable {
             }
             j.status=status;j.exitCode=code;j.finishedAt=Instant.now();store.update(j);
             append(j,"status",Map.of("jobId",j.id,"status",status));
+            enrichPersistedLoadResultWithJournalDiagnostic(j);
             Map<String,Object> result=new LinkedHashMap<>();
             result.put("jobId",j.id);result.put("status",status);result.put("exitCode",code);
             result.put("result",j.resultJson==null?null:publicJson(j.id,j.resultJson));
             if(console!=null&&!console.isBlank())result.put("console",console);
-            Map<String,Object> terminalEvent=append(j,"result",result);
-            if(j.journalDiagnostic!=null&&j.resultJson!=null) {
-                try {
-                    Object parsed=JSON.readValue(j.resultJson,Object.class);
-                    if(parsed instanceof Map<?,?> priorResult) {
-                        Map<String,Object> enriched=loadResultWithProtocolWarning((Map<String,Object>)priorResult,j);
-                        j.resultJson=JSON.writeValueAsString(enriched);
-                        Object eventData=terminalEvent.get("data");
-                        if(eventData instanceof Map<?,?> rawData)
-                            ((Map<String,Object>)rawData).put("result",publicJson(j.id,j.resultJson));
-                        store.update(j);
-                    }
-                } catch(Exception ignored) {
-                    // Preserve the original execution result if optional journal diagnostics cannot be projected.
-                }
+            Map<String,Object> terminalPayload=prepareEventPayload(j,"result",result);
+            Map<String,Object> boundedTerminalPayload=j.events.projectPayload(terminalPayload);
+            Object terminalLimit=boundedTerminalPayload.get("journalLimit");
+            if(terminalLimit instanceof Map<?,?> notice&&"ATT-JOURNAL-EVENT-TRUNCATED".equals(notice.get("code"))) {
+                j.journalDiagnostic=new LinkedHashMap<String,Object>((Map<String,Object>)notice);
+                enrichPersistedLoadResultWithJournalDiagnostic(j);
             }
+            Map<String,Object> terminalEvent=appendProjected(j,"result",boundedTerminalPayload);
             if("load".equals(j.command)) {
                 Map<String,Object> worker=j.workerMetrics==null?new LinkedHashMap<>():new LinkedHashMap<>(j.workerMetrics);
                 Map<String,Object> sizes=new LinkedHashMap<>();
@@ -3934,11 +3927,19 @@ final class ServerRuntime implements AutoCloseable {
     }
     private void finishQuietly(Job j,String status,int code,String diagnostic,String message){try{j.diagnosticJson=JSON.writeValueAsString(Map.of("code",diagnostic,"summary",message));append(j,"diagnostic",JSON.readValue(j.diagnosticJson,Map.class));finish(j,status,code);}catch(Exception ignored){j.status=status;j.exitCode=code;j.finishedAt=Instant.now();}}
     private Map<String,Object> append(Job j,String type,Map<String,?> data) throws Exception {
+        return recordAppendedEvent(j,type,j.events.append(type,prepareEventPayload(j,type,data)));
+    }
+    private Map<String,Object> appendProjected(Job j,String type,Map<String,Object> boundedPayload) throws Exception {
+        return recordAppendedEvent(j,type,j.events.appendProjected(type,boundedPayload));
+    }
+    private Map<String,Object> prepareEventPayload(Job j,String type,Map<String,?> data) {
         Map<String,Object> payload=new LinkedHashMap<>();if(data!=null)data.forEach(payload::put);
         Object existing=payload.get("console");
         if(existing instanceof String line&&!line.isBlank()) payload.put("console",publishConsole(line));
         else {String line=lifecycleConsole(j,type,payload);if(line!=null&&!line.isBlank())payload.put("console",publishConsole(line));}
-        Map<String,Object> appended=j.events.append(type,payload);
+        return payload;
+    }
+    private Map<String,Object> recordAppendedEvent(Job j,String type,Map<String,Object> appended) {
         Object bounded=appended.get("data");
         if(bounded instanceof Map<?,?> eventData&&eventData.get("journalLimit") instanceof Map<?,?> notice
                 &&"ATT-JOURNAL-EVENT-TRUNCATED".equals(notice.get("code")))
@@ -3948,6 +3949,21 @@ final class ServerRuntime implements AutoCloseable {
                 ||j.journalDiagnostic==null))
             j.journalDiagnostic=new LinkedHashMap<>(journalNotice);
         return appended;
+    }
+    private void enrichPersistedLoadResultWithJournalDiagnostic(Job job) {
+        if(job.journalDiagnostic==null||job.resultJson==null)return;
+        String originalResultJson=job.resultJson;
+        try {
+            Object parsed=JSON.readValue(job.resultJson,Object.class);
+            if(parsed instanceof Map<?,?> priorResult) {
+                Map<String,Object> enriched=loadResultWithProtocolWarning((Map<String,Object>)priorResult,job);
+                job.resultJson=JSON.writeValueAsString(enriched);
+                store.update(job);
+            }
+        } catch(Exception ignored) {
+            // Preserve the original execution result if optional journal diagnostics cannot be projected.
+            job.resultJson=originalResultJson;
+        }
     }
     private static String lifecycleConsole(Job j,String type,Map<String,Object> payload) {
         String mode=executionMode(j==null?null:j.command);

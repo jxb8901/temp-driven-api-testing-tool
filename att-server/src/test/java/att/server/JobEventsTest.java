@@ -67,11 +67,59 @@ class JobEventsTest {
         assertEquals("ATT-JOURNAL-EVENT-TRUNCATED",limit.get("code"));
         assertEquals("DATA_TRUNCATED",limit.get("outcome"));
         assertEquals("server.eventJournal.maxEventDataBytes",limit.get("limitName"));
+        assertEquals(true,limit.get("observedIsLowerBound"));
         assertTrue(((Number)limit.get("observed")).longValue()>((Number)limit.get("configuredLimit")).longValue());
         assertTrue(((List<?>)payload.get("droppedFields")).contains("largeDetails"));
         assertTrue(new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsBytes(payload).length<=65536);
         JobEvents replay=new JobEvents(temp.resolve("structured.jsonl"),10,Runnable::run);Map<?,?> replayed=(Map<?,?>)replay.after(0).get(0).get("data");
         assertEquals("FAIL",replayed.get("status"));assertEquals("CASE_FINISHED",replayed.get("executionEventType"));
+    }
+
+    @Test void oversizedNestedPayloadAndConsoleStopSerializationAtTheDataLimit() throws Exception {
+        JobEvents journal=new JobEvents(temp.resolve("early-bounded-serialization.jsonl"),10,Runnable::run);
+        SerializationProbeMap nestedProbe=new SerializationProbeMap();
+        CountingJsonSequence largeNestedValue=new CountingJsonSequence();
+        Map<String,Object> nestedPayload=new java.util.LinkedHashMap<>();
+        nestedPayload.put("result",Map.of("details",largeNestedValue));
+        nestedPayload.put("mustNotSerialize",nestedProbe);
+        Map<?,?> nested=(Map<?,?>)journal.append("result",nestedPayload).get("data");
+        assertEquals(0,nestedProbe.traversals.get(),"Serialization must stop before visiting fields after the byte cap");
+        assertTrue(largeNestedValue.valuesWritten.get()>0&&largeNestedValue.valuesWritten.get()<45_000,
+                "Streaming must stop near the 64-KiB limit instead of walking the multi-megabyte result");
+        assertEquals(true,nested.get("truncated"));
+        assertTrue(new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsBytes(nested).length<=JobEvents.MAX_EVENT_DATA_BYTES);
+
+        SerializationProbeMap consoleProbe=new SerializationProbeMap();
+        Map<String,Object> consolePayload=new java.util.LinkedHashMap<>();
+        consolePayload.put("console","\u0001界😀\"\\".repeat(1024*1024));
+        consolePayload.put("mustNotSerialize",consoleProbe);
+        Map<?,?> console=(Map<?,?>)journal.append("log",consolePayload).get("data");
+        assertEquals(0,consoleProbe.traversals.get(),"The console prefix search must not serialize later large fields");
+        assertEquals(true,console.get("consoleTruncated"));
+        assertTrue(console.get("console").toString().endsWith("[truncated by journal]"));
+        assertTrue(new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsBytes(console).length<=JobEvents.MAX_EVENT_DATA_BYTES);
+    }
+
+    @Test void failedAppendDiagnosticsAreIncludedInRetainedMemoryAccounting() throws Exception {
+        Path file=temp.resolve("failed-append-memory-accounting.jsonl");
+        JobEvents journal=new JobEvents(file,100,1024*1024,8192,Runnable::run,()->{},()->0L,Runnable::run);
+        for(int index=0;index<40;index++)journal.append("log",Map.of("sequence",index,"message","storage unavailable"));
+
+        List<Map<String,Object>> retained=journal.after(0);
+        assertFalse(Files.exists(file),"The injected storage outage must keep the records in memory only");
+        assertTrue(retained.size()<40,"Memory accounting must trim the retained diagnostic maps");
+        assertTrue(retained.stream().allMatch(event->event.containsKey("journalDiagnostic")));
+        long expectedMemory=retained.stream().mapToLong(event->{
+            try { return new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsBytes(event).length+512L; }
+            catch(Exception failure) { throw new IllegalStateException(failure); }
+        }).sum();
+        Map<String,Object> metrics=journal.metrics();
+        long retainedMemory=((Number)metrics.get("retainedMemoryBytes")).longValue();
+        long retainedRecordBytes=((Number)metrics.get("retainedBytes")).longValue();
+        assertEquals(expectedMemory,retainedMemory,"Retained memory must include the attached failure diagnostics");
+        assertTrue(retainedMemory>retainedRecordBytes+retained.size()*512L,
+                "The post-failure object is larger than its pre-diagnostic durable record");
+        assertTrue(retainedMemory<=((Number)metrics.get("maxRetainedMemoryBytes")).longValue());
     }
 
     @Test void retainedEventsUseIncreasingJobLocalIdsAndReplayAfterLastEventId() throws Exception {
@@ -584,5 +632,31 @@ class JobEventsTest {
         assertEquals(journal[0].latest(),recovered.latest());
         assertTrue(recovered.after(0).size()<=128,"Recovery must stay within the configured retention count");
         assertFalse(recovered.after(0).isEmpty(),"Recovery must retain the latest journal events");
+    }
+
+    private static final class SerializationProbeMap extends java.util.AbstractMap<String,Object> {
+        private final java.util.concurrent.atomic.AtomicInteger traversals=new java.util.concurrent.atomic.AtomicInteger();
+        @Override public java.util.Set<Map.Entry<String,Object>> entrySet() {
+            traversals.incrementAndGet();
+            return Map.<String,Object>of("probe","visited").entrySet();
+        }
+    }
+
+    private static final class CountingJsonSequence implements com.fasterxml.jackson.databind.JsonSerializable {
+        private final java.util.concurrent.atomic.AtomicInteger valuesWritten=new java.util.concurrent.atomic.AtomicInteger();
+        @Override public void serialize(com.fasterxml.jackson.core.JsonGenerator generator,
+                                        com.fasterxml.jackson.databind.SerializerProvider serializers) throws java.io.IOException {
+            generator.writeStartArray();
+            for(int index=0;index<1_000_000;index++) {
+                generator.writeNumber(1);
+                valuesWritten.incrementAndGet();
+            }
+            generator.writeEndArray();
+        }
+        @Override public void serializeWithType(com.fasterxml.jackson.core.JsonGenerator generator,
+                                                com.fasterxml.jackson.databind.SerializerProvider serializers,
+                                                com.fasterxml.jackson.databind.jsontype.TypeSerializer typeSerializer) throws java.io.IOException {
+            serialize(generator,serializers);
+        }
     }
 }

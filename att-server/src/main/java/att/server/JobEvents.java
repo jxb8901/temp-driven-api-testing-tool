@@ -1,5 +1,6 @@
 package att.server;
 
+import com.fasterxml.jackson.core.JsonGenerator;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.io.ByteArrayOutputStream;
@@ -70,7 +71,9 @@ final class JobEvents {
     private final AtomicLong appendBytesWritten = new AtomicLong();
     private final AtomicLong listenerDispatchFailures = new AtomicLong();
     private final NavigableMap<Long, Map<String, Object>> events = new TreeMap<>();
+    /** Durable record bytes and in-memory object size differ when failure diagnostics are attached. */
     private final NavigableMap<Long, Long> eventSizes = new TreeMap<>();
+    private final NavigableMap<Long, Long> eventMemorySizes = new TreeMap<>();
     private final java.util.concurrent.CopyOnWriteArrayList<Consumer<Map<String, Object>>> listeners =
             new java.util.concurrent.CopyOnWriteArrayList<>();
     private long listenerDeliveredThrough;
@@ -168,7 +171,7 @@ final class JobEvents {
                 fileUsableSpace(file), eventDispatcher);
     }
 
-    private JobEvents(Path file, int capacity, long maxJournalBytes, long maxRetainedMemoryBytes,
+    JobEvents(Path file, int capacity, long maxJournalBytes, long maxRetainedMemoryBytes,
               Executor compactionExecutor, Runnable afterSnapshotWrite, LongSupplier usableSpace,
               Executor eventDispatcher) throws Exception {
         if (capacity < 1) throw new IllegalArgumentException("Journal event capacity must be positive");
@@ -339,6 +342,7 @@ final class JobEvents {
             events.put(id, event);
             long normalizedSize = Math.max(1L, storedBytes);
             eventSizes.put(id, normalizedSize);
+            eventMemorySizes.put(id, normalizedSize);
             retainedBytes += normalizedSize;
             retainedMemoryCost += normalizedSize + RETAINED_RECORD_OVERHEAD_BYTES;
             trimRetainedEvents();
@@ -359,14 +363,29 @@ final class JobEvents {
         // A later valid monotonic row will clear sequenceUncertain during parseRecord.
     }
 
+    Map<String, Object> projectPayload(Map<String, ?> data) throws Exception {
+        return boundedPayload(data);
+    }
+
     Map<String, Object> append(String type, Map<String, ?> data) throws Exception {
+        return append(type, data, false);
+    }
+
+    Map<String, Object> appendProjected(String type, Map<String, Object> boundedData) throws Exception {
+        if (jsonSizeUpToLimit(boundedData, MAX_EVENT_DATA_BYTES) > MAX_EVENT_DATA_BYTES)
+            throw new IOException("Projected event data exceeded its configured byte limit");
+        return append(type, boundedData, true);
+    }
+
+    private Map<String, Object> append(String type, Map<String, ?> data, boolean alreadyProjected) throws Exception {
         Map<String, Object> event = new LinkedHashMap<>();
         boolean requestCompaction;
         boolean requestDispatch;
         Object journalLock = fileLock();
         synchronized (journalLock) {
             synchronized (this) {
-                Map<String, Object> payload = boundedPayload(data);
+                Map<String, Object> payload = alreadyProjected
+                        ? new LinkedHashMap<>(data) : boundedPayload(data);
                 event.put("event", type);
                 event.put("data", payload);
                 if (sequence.get() == Long.MAX_VALUE) {
@@ -404,10 +423,12 @@ final class JobEvents {
                     }
                     sequence.set(id);
                     long recordBytes = line.length;
+                    long memoryBytes = persisted ? recordBytes : jsonSizeUpToLimit(event, MAX_EVENT_LINE_BYTES);
                     events.put(id, event);
                     eventSizes.put(id, recordBytes);
+                    eventMemorySizes.put(id, memoryBytes);
                     retainedBytes += recordBytes;
-                    retainedMemoryCost += recordBytes + RETAINED_RECORD_OVERHEAD_BYTES;
+                    retainedMemoryCost += memoryBytes + RETAINED_RECORD_OVERHEAD_BYTES;
                     if ("result".equals(type)) resultEventId = id;
                     trimRetainedEvents();
                     requestDispatch = true;
@@ -551,6 +572,7 @@ final class JobEvents {
         if (encoded.length + 1 > MAX_EVENT_LINE_BYTES) throw new IOException("Recovered terminal result exceeded the journal line-size limit");
         events.put(id, recovered);
         eventSizes.put(id, (long) encoded.length + 1L);
+        eventMemorySizes.put(id, (long) encoded.length + 1L);
         retainedBytes += encoded.length + 1L;
         retainedMemoryCost += encoded.length + 1L + RETAINED_RECORD_OVERHEAD_BYTES;
         sequence.set(id);
@@ -622,39 +644,89 @@ final class JobEvents {
     }
 
     private Map<String, Object> boundedPayload(Map<String, ?> data) throws Exception {
-        Map<String, Object> payload = new LinkedHashMap<>(data);
-        int originalBytes=JSON.writeValueAsBytes(payload).length;
-        if (originalBytes > MAX_EVENT_DATA_BYTES) {
-            Object console = payload.get("console");
-            Map<String,Object> retained=new LinkedHashMap<>();
-            for(String key:new String[]{"status","code","message","executionId","caseId","stage","action","executionEventType"})if(payload.get(key) instanceof String)retained.put(key,boundedText(payload.get(key),512));
-            for(String key:new String[]{"exitCode","durationMs"})if(payload.get(key) instanceof Number number)retained.put(key,number.longValue());
-            List<String> dropped=new ArrayList<>();for(String key:payload.keySet())if(!retained.containsKey(key)&&!"console".equals(key)&&dropped.size()<32)dropped.add(boundedText(key,128));
-            payload.clear();
-            payload.putAll(retained);
-            payload.put("truncated", true);
-            payload.put("journalLimit",att.server.api.LimitDiagnostic.create("ATT-JOURNAL-EVENT-TRUNCATED",
-                    "Event details were omitted from the retained journal payload", "server.eventJournal.maxEventDataBytes",
-                    MAX_EVENT_DATA_BYTES, originalBytes, "server.eventJournal", att.server.api.LimitOutcome.DATA_TRUNCATED,
-                    "presentation", "Use bounded event details or open the retained report artifact", null));
-            payload.put("summary", "Event payload exceeded the retained event size limit");
-            if(!dropped.isEmpty())payload.put("droppedFields",dropped);
-            if (console instanceof String text && !text.isEmpty()) {
-                payload.put("console", text);
-                if (JSON.writeValueAsBytes(payload).length > MAX_EVENT_DATA_BYTES) {
-                    payload.put("consoleTruncated", true);
-                    int low=0, high=text.length();
-                    while(low<high) {
-                        int mid=(low+high+1)/2;
-                        payload.put("console", consolePrefix(text,mid));
-                        if(JSON.writeValueAsBytes(payload).length<=MAX_EVENT_DATA_BYTES)low=mid;
-                        else high=mid-1;
-                    }
-                    payload.put("console",consolePrefix(text,low));
+        int originalBytes = jsonSizeUpToLimit(data, MAX_EVENT_DATA_BYTES);
+        if (originalBytes <= MAX_EVENT_DATA_BYTES) return new LinkedHashMap<>(data);
+
+        Object console = data.get("console");
+        Map<String, Object> payload = new LinkedHashMap<>();
+        for(String key:new String[]{"status","code","message","executionId","caseId","stage","action","executionEventType"})
+            if(data.get(key) instanceof String)payload.put(key,boundedText(data.get(key),512));
+        for(String key:new String[]{"exitCode","durationMs"})
+            if(data.get(key) instanceof Number number)payload.put(key,number.longValue());
+        List<String> dropped=new ArrayList<>();
+        for(String key:data.keySet())
+            if(!payload.containsKey(key)&&!"console".equals(key)&&dropped.size()<32)dropped.add(boundedText(key,128));
+        payload.put("truncated", true);
+        Map<String,Object> limit=att.server.api.LimitDiagnostic.create("ATT-JOURNAL-EVENT-TRUNCATED",
+                "Event details were omitted from the retained journal payload", "server.eventJournal.maxEventDataBytes",
+                MAX_EVENT_DATA_BYTES, originalBytes, "server.eventJournal", att.server.api.LimitOutcome.DATA_TRUNCATED,
+                "presentation", "Use bounded event details or open the retained report artifact", null);
+        limit.put("observedIsLowerBound", true);
+        payload.put("journalLimit",limit);
+        payload.put("summary", "Event payload exceeded the retained event size limit");
+        if(!dropped.isEmpty())payload.put("droppedFields",dropped);
+        if (console instanceof String text && !text.isEmpty()) {
+            payload.put("console", text);
+            if (jsonSizeUpToLimit(payload, MAX_EVENT_DATA_BYTES) > MAX_EVENT_DATA_BYTES) {
+                payload.put("consoleTruncated", true);
+                int low=0, high=Math.min(text.length(), MAX_EVENT_DATA_BYTES);
+                while(low<high) {
+                    int mid=(low+high+1)/2;
+                    payload.put("console", consolePrefix(text,mid));
+                    if(jsonSizeUpToLimit(payload, MAX_EVENT_DATA_BYTES)<=MAX_EVENT_DATA_BYTES)low=mid;
+                    else high=mid-1;
                 }
+                payload.put("console",consolePrefix(text,low));
+                if (jsonSizeUpToLimit(payload, MAX_EVENT_DATA_BYTES) > MAX_EVENT_DATA_BYTES)
+                    payload.remove("console");
             }
         }
+        if (jsonSizeUpToLimit(payload, MAX_EVENT_DATA_BYTES) > MAX_EVENT_DATA_BYTES)
+            throw new IOException("Projected event data exceeded its configured byte limit");
         return payload;
+    }
+
+    /** Serialize to a capped sink and stop as soon as the byte budget is crossed. */
+    private static int jsonSizeUpToLimit(Object value, int maximumBytes) throws IOException {
+        CappedCountingOutputStream output = new CappedCountingOutputStream(maximumBytes);
+        try (JsonGenerator generator = JSON.getFactory().createGenerator(output)) {
+            generator.setCodec(JSON);
+            JSON.writeValue(generator, value);
+        } catch (IOException serializationFailure) {
+            if (causedBySizeLimit(serializationFailure)) return maximumBytes + 1;
+            throw serializationFailure;
+        }
+        return output.count();
+    }
+
+    private static boolean causedBySizeLimit(Throwable failure) {
+        for (Throwable cause = failure; cause != null; cause = cause.getCause())
+            if (cause instanceof JsonSizeLimitException) return true;
+        return false;
+    }
+
+    private static final class CappedCountingOutputStream extends OutputStream {
+        private final int limit;
+        private int count;
+
+        private CappedCountingOutputStream(int limit) { this.limit = limit; }
+
+        @Override public void write(int value) throws IOException {
+            if (count >= limit) throw new JsonSizeLimitException();
+            count++;
+        }
+
+        @Override public void write(byte[] bytes, int offset, int length) throws IOException {
+            if (length < 0 || offset < 0 || offset + length > bytes.length) throw new IndexOutOfBoundsException();
+            if (length > limit - count) throw new JsonSizeLimitException();
+            count += length;
+        }
+
+        private int count() { return count; }
+    }
+
+    private static final class JsonSizeLimitException extends IOException {
+        private JsonSizeLimitException() { super("JSON size limit reached"); }
     }
     private static String boundedText(Object value,int limit){String text=String.valueOf(value);if(text.length()<=limit)return text;if(limit>0&&Character.isHighSurrogate(text.charAt(limit-1)))limit--;return text.substring(0,limit);}
 
@@ -669,8 +741,10 @@ final class JobEvents {
             Map.Entry<Long, Map<String, Object>> removed = events.pollFirstEntry();
             Long size = eventSizes.remove(removed.getKey());
             long bytes = size == null ? 0L : size;
+            Long memorySize = eventMemorySizes.remove(removed.getKey());
+            long memoryBytes = memorySize == null ? bytes : memorySize;
             retainedBytes = Math.max(0L, retainedBytes - bytes);
-            retainedMemoryCost = Math.max(0L, retainedMemoryCost - bytes - RETAINED_RECORD_OVERHEAD_BYTES);
+            retainedMemoryCost = Math.max(0L, retainedMemoryCost - memoryBytes - RETAINED_RECORD_OVERHEAD_BYTES);
         }
     }
 
