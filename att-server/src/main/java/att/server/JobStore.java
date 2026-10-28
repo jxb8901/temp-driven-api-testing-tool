@@ -100,7 +100,7 @@ final class JobStore implements AutoCloseable {
             s.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS triggered_by VARCHAR(256)");
             s.execute("UPDATE jobs SET originating_schedule_id=CASE WHEN principal LIKE 'load-schedule:%' THEN SUBSTRING(principal,15) WHEN principal LIKE 'debug-schedule:%' THEN SUBSTRING(principal,16) ELSE originating_schedule_id END WHERE originating_schedule_id IS NULL AND (principal LIKE 'load-schedule:%' OR principal LIKE 'debug-schedule:%')");
             s.execute("UPDATE jobs SET submission_source=CASE WHEN originating_schedule_id IS NOT NULL OR principal LIKE 'load-schedule:%' OR principal LIKE 'debug-schedule:%' THEN 'scheduled' ELSE 'manual' END WHERE submission_source IS NULL");
-            s.execute("UPDATE jobs SET execution_principal=principal WHERE execution_principal IS NULL AND principal NOT LIKE 'load-schedule:%' AND principal NOT LIKE 'debug-schedule:%'");
+            s.execute("UPDATE jobs SET execution_principal=principal WHERE execution_principal IS NULL AND principal NOT LIKE 'load-schedule:%' AND principal NOT LIKE 'debug-schedule:%' AND principal<>'anonymous' AND principal NOT LIKE '%(anonym)'");
             s.execute("CREATE INDEX IF NOT EXISTS jobs_provenance_source_idx ON jobs(submission_source,created_at,job_id)");
             s.execute("CREATE INDEX IF NOT EXISTS jobs_provenance_execution_idx ON jobs(execution_principal,created_at,job_id)");
             s.execute("CREATE INDEX IF NOT EXISTS jobs_provenance_owner_idx ON jobs(schedule_owner,created_at,job_id)");

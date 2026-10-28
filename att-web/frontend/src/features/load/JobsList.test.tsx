@@ -25,6 +25,15 @@ it('renders target-first rows, exact navigation, copyable ID, Schedule principal
   await click(host.querySelector('[aria-label="Copy full Job ID J1234567890ABCDEF"]'));expect(writeText).toHaveBeenCalledWith(job.jobId);
   expect(host.querySelector('code')?.textContent).toBe('J12345…CDEF');
 });
+it('does not infer a manual submitter from an anonymous or legacy principal label',async()=>{
+  const anonymous={...job,jobId:'J-ANONYMOUS',submissionSource:'manual',principal:'Bob(anonym)',submittedBy:null};
+  const authenticated={...job,jobId:'J-AUTHENTICATED',submissionSource:'manual',principal:'legacy-label',submittedBy:'alice'};
+  await render({queryJobs:vi.fn(async()=>response([anonymous,authenticated]))});
+  expect(host.textContent).toContain('Manual · Submitted by Unknown');
+  expect(host.textContent).toContain('Manual · Submitted by alice');
+  expect(host.textContent).not.toContain('Bob(anonym)');
+  expect(host.textContent).not.toContain('legacy-label');
+});
 it('links an available Schedule ID to history by keyboard and keeps unavailable IDs inert',async()=>{
   const available={...job,submissionSource:'scheduled',scheduleId:'S-AVAILABLE',originatingScheduleId:'S-AVAILABLE',scheduleAvailable:true};
   await render({queryJobs:vi.fn(async()=>response([available]))},vi.fn(),true);

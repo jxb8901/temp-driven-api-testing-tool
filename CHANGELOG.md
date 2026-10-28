@@ -3,6 +3,12 @@ Total output lines: 281
 
 # Changelog
 
+# Unreleased
+
+- Treat missing optional Package resource roots as empty inventories and return sanitized typed diagnostics for invalid roots (#308).
+- Persist immutable Job provenance with separate source, execution identity and Schedule Owner filters, using the Schedules filter layout (#309).
+- Store language and theme preferences per authenticated account in Server H2, with one-time browser migration and visible persistence status (#310).
+
 # ATT 4.2.6 - 2026-10-27
 
 - Raise the configured LOAD envelope limit to 10 days and apply root plus workload timing consistently across drafts, schedules, and replay validation (#306).

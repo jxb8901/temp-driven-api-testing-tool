@@ -607,6 +607,7 @@ class AuthenticationIntegrationTest {
             JsonNode remoteJob=waitForTerminalJob(port,remoteJobId);
             assertEquals("Bob(anonym)",remoteJob.path("principal").asText());
             assertTrue(remoteJob.has("submittedBy"));assertTrue(remoteJob.path("submittedBy").isNull(),"Unverified anonymous display labels are not authenticated submitters");
+            assertTrue(remoteJob.path("executionPrincipal").isNull(),"Unverified anonymous display labels are not execution identities");
             JsonNode validateAccepted=postJson(port,"/att/api/v1/jobs/validate",null,
                     ServerRuntime.JSON.valueToTree(Map.of("packageId","debug","validationScope","package","principal","Alice")),202);
             assertEquals("Alice(anonym)",waitForTerminalJob(port,validateAccepted.path("jobId").asText()).path("principal").asText());

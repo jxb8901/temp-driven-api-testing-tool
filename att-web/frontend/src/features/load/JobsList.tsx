@@ -128,7 +128,7 @@ export function JobsList({ api, onOpenJob, onSchedule, onEditSchedule, execution
           ? <a href={formatRoute({kind:'schedules',view:'history',scheduleId})} aria-label={`View history for Schedule ${scheduleId}`}>{scheduleId}</a>
           : <><code>{scheduleId}</code> <span>· history unavailable</span></>;
       })()}</span>{job.triggeredBy && <span className="att-job-secondary">Triggered by: {job.triggeredBy}</span>}</details>
-        : <span className="att-job-secondary">Manual · Submitted by {job.submittedBy || job.principal || 'Unknown'}</span>}
+        : <span className="att-job-secondary">Manual · Submitted by {job.submittedBy || 'Unknown'}</span>}
       {job.deletionState === 'DELETE_REQUESTED' && <span className="att-job-secondary">Pending deletion</span>}</td>
     <td data-label="Timing" className="att-job-timing">{[['Created',job.createdAt],['Started',job.startedAt],['Finished',job.finishedAt]].map(([label,value]) => <span key={label}>{label} <time dateTime={value || undefined} title={value || undefined}>{timestamp(value)}</time></span>)}<strong>Elapsed {elapsed(job,now)}</strong></td>
     <td data-label="Actions"><div className="att-jobs-row-actions"><JobStateIcons job={job} busy={blocked} onPin={api.pinJobs ? () => void mutate([job.jobId],job.pinned?'unpin':'pin') : undefined} onDelete={api.setDeletionRequested ? () => void mutate([job.jobId],job.deletionState==='DELETE_REQUESTED'?'unmark':'mark') : undefined} /><JobReplayActions api={api} configuration={{executionType:job.executionType || job.command,packageId:job.packageId}} jobId={job.jobId} onOpenJob={onOpenJob} onSchedule={onSchedule} onEditSchedule={onEditSchedule} /></div></td>

@@ -799,7 +799,18 @@ export const JobOverview = memo(function JobOverview({ job, status, statusText, 
       <div><dt>Job ID</dt><dd>{job.jobId}</dd></div><div><dt>Status</dt><dd><StatusBadge status={status} /></dd></div>
       <div><dt>Execution type</dt><dd>{executionType(job)}</dd></div><div><dt>Command</dt><dd>{job.command || 'Not reported'}</dd></div><div><dt>Package</dt><dd>{job.packageId || 'Not reported'}</dd></div>
       {job.rerunOfJobId && <div><dt>Rerun of</dt><dd><a href={formatRoute({ kind: 'jobs', jobId: job.rerunOfJobId })}>{job.rerunOfJobId}</a></dd></div>}
-      <div><dt>Principal</dt><dd>{job.principal || 'Not reported'}</dd></div><div><dt>Created</dt><dd><time dateTime={job.createdAt || undefined}>{dateTime(job.createdAt)}</time></dd></div>
+      <div><dt>Submission source</dt><dd>{job.submissionSource === 'scheduled' ? 'Scheduled' : job.submissionSource === 'manual' ? 'Manual' : 'Unknown'}</dd></div>
+      <div><dt>Legacy principal</dt><dd>{job.principal || 'Not reported'}</dd></div>
+      {job.submissionSource === 'scheduled' ? <>
+        <div><dt>Schedule ID</dt><dd>{job.scheduleId || job.originatingScheduleId || 'Unknown'}</dd></div>
+        <div><dt>Schedule owner</dt><dd>{job.scheduleOwner || 'Unknown'}</dd></div>
+        <div><dt>Execution principal</dt><dd>{job.executionPrincipal || 'Unknown'}</dd></div>
+        {job.triggeredBy && <div><dt>Triggered by</dt><dd>{job.triggeredBy}</dd></div>}
+      </> : <>
+        <div><dt>Execution principal</dt><dd>{job.executionPrincipal || 'Unknown'}</dd></div>
+        <div><dt>Submitted by</dt><dd>{job.submittedBy || 'Unknown'}</dd></div>
+      </>}
+      <div><dt>Created</dt><dd><time dateTime={job.createdAt || undefined}>{dateTime(job.createdAt)}</time></dd></div>
       <div><dt>Started</dt><dd><time dateTime={job.startedAt || undefined}>{dateTime(job.startedAt)}</time></dd></div><div><dt>Finished</dt><dd><time dateTime={job.finishedAt || undefined}>{dateTime(job.finishedAt)}</time></dd></div>
       <div><dt>Exit code</dt><dd>{job.exitCode ?? 'Not reported'}</dd></div>
       {job.pinned && <div><dt>Pin reason</dt><dd>{job.pinReason || 'Not provided'}</dd></div>}

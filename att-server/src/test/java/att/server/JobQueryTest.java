@@ -57,6 +57,7 @@ class JobQueryTest {
             var p=c.prepareStatement("UPDATE jobs SET submitted_by=NULL WHERE job_id=?")){p.setString(1,jobId);assertEquals(1,p.executeUpdate());}
         try(JobStore reopened=new JobStore(config)) {
             assertNull(reopened.get(jobId).get("submittedBy"),"Schema upgrades must preserve unknown historical submitter provenance");
+            assertNull(reopened.get(jobId).get("executionPrincipal"),"Schema upgrades must not promote anonymous labels into execution identities");
         }
     }
     @SuppressWarnings("unchecked")

@@ -114,6 +114,16 @@ describe('JobsPage React feature', () => {
     expect(profilerCommits).toEqual(before);
   });
 
+  it('distinguishes the legacy principal label from missing authenticated provenance', async () => {
+    const anonymousJob: JobView = { ...sampleJob, submissionSource: 'manual', principal: 'Bob(anonym)', executionPrincipal: null, submittedBy: null };
+    await act(async () => root.render(<JobOverview job={anonymousJob} status={anonymousJob.status} jobState="ready" hidden={false} />));
+    const fields = Object.fromEntries([...host.querySelectorAll('dt')].map(field => [field.textContent, field.nextElementSibling?.textContent]));
+    expect(fields['Legacy principal']).toBe('Bob(anonym)');
+    expect(fields['Execution principal']).toBe('Unknown');
+    expect(fields['Submitted by']).toBe('Unknown');
+    expect(fields['Submission source']).toBe('Manual');
+  });
+
   it('paginates 4096 exact buckets without mounting all rows and keeps keyboard paging accessible', async () => {
     const buckets: MetricBucket[] = Array.from({ length: 4096 }, (_, index) => ({
       key: String(index), epochMs: 1_800_000_000_000 + index * 1000,
