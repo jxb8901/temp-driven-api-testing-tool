@@ -737,10 +737,11 @@ final class ServerRuntime implements AutoCloseable {
             JobEvents events=new JobEvents(jobPath.resolve("events.jsonl"),config.maxEventsPerJob,eventCompactions);
             Job job=new Job(id,command,packageId,principal,request,events);job.scheduleOccurrenceId=scheduleOccurrenceId;job.requestReceivedNanos=requestReceivedNanos;
             if(provenance==null) {
-                job.submissionSource="manual";job.originatingScheduleId=originatingScheduleId;job.executionPrincipal=principal;job.submittedBy=principal;
+                job.submissionSource="manual";job.originatingScheduleId=originatingScheduleId;job.executionPrincipal=principal;job.submittedBy=config.authenticationRequired?principal:null;
             } else {
                 job.submissionSource="scheduled";job.originatingScheduleId=provenance.scheduleId;job.scheduleOwner=provenance.scheduleOwner;
-                job.executionPrincipal=provenance.executionPrincipal;job.submittedBy=provenance.submittedBy;job.triggeredBy=provenance.triggeredBy;
+                job.executionPrincipal=provenance.executionPrincipal;job.submittedBy=config.authenticationRequired?provenance.submittedBy:null;
+                job.triggeredBy=config.authenticationRequired?provenance.triggeredBy:null;
             }
             job.executionSpec=executionSpec;job.replayUnavailable=replayUnavailable;job.rerunOfJobId=rerunOfJobId;job.replayIntent=replayIntent;job.replayOwner=replayOwner;if(job.originatingScheduleId==null)job.originatingScheduleId=originatingScheduleId;
             Map<String,Object> summaryFields=new LinkedHashMap<>();summaryFields.put("command",command);summaryFields.put("packageId",packageId);

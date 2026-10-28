@@ -18,6 +18,7 @@ class JobQueryTest {
     @Test void provenanceIsPersistedAndFilteredAsIndependentServerSideIdentityDimensions() throws Exception {
         ServerConfig config=config();String scheduledId;
         try(JobStore store=new JobStore(config)) {
+            LoadSchedule schedule=new LoadSchedule();schedule.id="SCHEDULE-1";schedule.name="Query test schedule";schedule.updatedAt=Instant.now().toString();store.saveSchedule(schedule);
             Job manual=new Job("JMANUAL000000001","run","p","alice",new WorkerRequest(),new JobEvents(config.dataDir.resolve("events/manual"),10));
             manual.submittedBy="alice";store.insert(manual,"{}");
             Job scheduled=new Job("JSCHED0000000001","load","p","load-schedule:SCHEDULE-1",new WorkerRequest(),new JobEvents(config.dataDir.resolve("events/scheduled"),10));
@@ -35,10 +36,27 @@ class JobQueryTest {
             assertEquals(List.of("bob"),combined.get("executionPrincipalSuggestions"));assertEquals(List.of("alice"),combined.get("scheduleOwnerSuggestions"));
             assertEquals(List.of("charlie"),combined.get("triggeredBySuggestions"));
             Map<String,Object> details=store.get(scheduledId);assertEquals("alice",details.get("scheduleOwner"));assertEquals("bob",details.get("executionPrincipal"));assertEquals("charlie",details.get("triggeredBy"));
+            assertEquals(true,((List<Map<String,Object>>)combined.get("items")).get(0).get("scheduleAvailable"));
+            store.deleteSchedule("SCHEDULE-1");
+            var deletedSchedule=store.queryJobs(JobQuery.parse(Map.of("submissionSource","scheduled"),"alice"));
+            assertEquals(false,((List<Map<String,Object>>)deletedSchedule.get("items")).get(0).get("scheduleAvailable"));
         }
         try(JobStore reopened=new JobStore(config)) {
             Map<String,Object> details=reopened.get(scheduledId);assertEquals("SCHEDULE-1",details.get("scheduleId"));assertEquals("scheduled",details.get("submissionSource"));
             assertEquals(1L,reopened.queryJobs(JobQuery.parse(Map.of("scheduleOwner","alice","scheduleOwnerMode","text","scheduleOwnerExact","true"),"alice")).get("total"));
+        }
+    }
+    @Test void migrationLeavesHistoricalSubmittedByUnknownInsteadOfTrustingLegacyPrincipal() throws Exception {
+        ServerConfig config=config();String jobId="JLEGACY000000001";
+        try(JobStore store=new JobStore(config)) {
+            Job job=new Job(jobId,"run","p","Bob(anonym)",new WorkerRequest(),new JobEvents(config.dataDir.resolve("events/legacy"),10));
+            store.insert(job,"{}");
+        }
+        var properties=new Properties();properties.setProperty("user","sa");properties.setProperty("password","");
+        try(var c=new org.h2.Driver().connect("jdbc:h2:file:"+config.dataDir.resolve("db/att-server")+";DB_CLOSE_ON_EXIT=FALSE",properties);
+            var p=c.prepareStatement("UPDATE jobs SET submitted_by=NULL WHERE job_id=?")){p.setString(1,jobId);assertEquals(1,p.executeUpdate());}
+        try(JobStore reopened=new JobStore(config)) {
+            assertNull(reopened.get(jobId).get("submittedBy"),"Schema upgrades must preserve unknown historical submitter provenance");
         }
     }
     @SuppressWarnings("unchecked")

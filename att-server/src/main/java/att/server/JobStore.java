@@ -101,7 +101,6 @@ final class JobStore implements AutoCloseable {
             s.execute("UPDATE jobs SET originating_schedule_id=CASE WHEN principal LIKE 'load-schedule:%' THEN SUBSTRING(principal,15) WHEN principal LIKE 'debug-schedule:%' THEN SUBSTRING(principal,16) ELSE originating_schedule_id END WHERE originating_schedule_id IS NULL AND (principal LIKE 'load-schedule:%' OR principal LIKE 'debug-schedule:%')");
             s.execute("UPDATE jobs SET submission_source=CASE WHEN originating_schedule_id IS NOT NULL OR principal LIKE 'load-schedule:%' OR principal LIKE 'debug-schedule:%' THEN 'scheduled' ELSE 'manual' END WHERE submission_source IS NULL");
             s.execute("UPDATE jobs SET execution_principal=principal WHERE execution_principal IS NULL AND principal NOT LIKE 'load-schedule:%' AND principal NOT LIKE 'debug-schedule:%'");
-            s.execute("UPDATE jobs SET submitted_by=principal WHERE submitted_by IS NULL AND submission_source='manual'");
             s.execute("CREATE INDEX IF NOT EXISTS jobs_provenance_source_idx ON jobs(submission_source,created_at,job_id)");
             s.execute("CREATE INDEX IF NOT EXISTS jobs_provenance_execution_idx ON jobs(execution_principal,created_at,job_id)");
             s.execute("CREATE INDEX IF NOT EXISTS jobs_provenance_owner_idx ON jobs(schedule_owner,created_at,job_id)");
@@ -666,7 +665,7 @@ final class JobStore implements AutoCloseable {
                     bind(p,parameters);try(ResultSet r=p.executeQuery()){r.next();total=r.getLong(1);}
                 }
                 List<Map<String,Object>> items=new ArrayList<>();
-                String projection="job_id,command,package_id,principal,status,created_at,started_at,finished_at,exit_code,request_summary,pinned,pinned_at,pinned_by,pin_reason,retention_state,target_identity,target_group,environment,originating_schedule_id,submission_source,schedule_owner,execution_principal,submitted_by,triggered_by";
+                String projection="job_id,command,package_id,principal,status,created_at,started_at,finished_at,exit_code,request_summary,pinned,pinned_at,pinned_by,pin_reason,retention_state,target_identity,target_group,environment,originating_schedule_id,submission_source,schedule_owner,execution_principal,submitted_by,triggered_by,CASE WHEN originating_schedule_id IS NOT NULL AND EXISTS (SELECT 1 FROM load_schedules s WHERE s.schedule_id=jobs.originating_schedule_id) THEN TRUE ELSE FALSE END";
                 try(PreparedStatement p=c.prepareStatement("SELECT "+projection+" FROM jobs WHERE "+where+" ORDER BY "+query.order()+" LIMIT ? OFFSET ?")) {
                     bind(p,parameters);p.setInt(parameters.size()+1,query.limit);p.setInt(parameters.size()+2,query.offset);
                     try(ResultSet r=p.executeQuery()){while(r.next()) {
@@ -675,7 +674,8 @@ final class JobStore implements AutoCloseable {
                         if(identity!=null)try {item.put("targetIdentity",ServerRuntime.JSON.readValue(identity,Map.class));}
                         catch(com.fasterxml.jackson.core.JsonProcessingException invalid) { /* Legacy malformed display metadata: retain Job-ID fallback. */ }
                         item.put("scheduled","scheduled".equals(r.getString(20))||r.getString(19)!=null||scheduledScheduleId(r.getString(4))!=null);
-                        item.put("submissionSource",r.getString(20)==null?"manual":r.getString(20));item.put("originatingScheduleId",r.getString(19));item.put("scheduleId",r.getString(19));
+                        String scheduleId=r.getString(19);
+                        item.put("submissionSource",r.getString(20)==null?"manual":r.getString(20));item.put("originatingScheduleId",scheduleId);item.put("scheduleId",scheduleId);item.put("scheduleAvailable",r.getBoolean(25));
                         item.put("scheduleOwner",r.getString(21));item.put("executionPrincipal",r.getString(22));item.put("submittedBy",r.getString(23));item.put("triggeredBy",r.getString(24));
                         item.put("targetGroup",r.getString(17));item.put("environment",r.getString(18));items.add(item);
                     }}

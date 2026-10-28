@@ -196,7 +196,7 @@ export interface JobsQueryResult {
 }
 export interface JobSummary {
   scheduled?: boolean; targetIdentity?: TargetIdentity; targetGroup?: string; deletionState?: string | null;
-  submissionSource?: 'manual' | 'scheduled' | string; scheduleId?: string | null; originatingScheduleId?: string | null;
+  submissionSource?: 'manual' | 'scheduled' | string; scheduleId?: string | null; originatingScheduleId?: string | null; scheduleAvailable?: boolean;
   scheduleOwner?: string | null; executionPrincipal?: string | null; submittedBy?: string | null; triggeredBy?: string | null;
   rerunOfJobId?: string;
   pinned?: boolean;
@@ -369,6 +369,7 @@ export interface JobsFeatureProps {
   onTabChange?(tab: 'overview' | 'live' | 'events' | 'results' | 'artifacts' | 'metrics'): void;
   standalone?: boolean;
   executionType?: 'load';
+  schedulingEnabled?: boolean;
   onExecutionTypeChange?(value: 'load' | undefined): void;
   onSchedule?(intent: ValidatedScheduleIntent): void;
   onEditSchedule?(id: string): void;

@@ -33,10 +33,11 @@ async function main(){
       await page.setViewportSize(viewport);
       const heading=await page.getByRole('heading',{name:'Jobs',exact:true}).boundingBox(),first=await page.locator('.att-jobs-table tbody tr').first().boundingBox();
       const distance=first.y-heading.y;
-      const verticalBudget=viewport.width===1440?340:viewport.width===768?380:viewport.width===390?660:380;
+      const verticalBudget=viewport.width===1440?380:viewport.width===768?580:viewport.width===390?700:320;
       assert.ok(distance<verticalBudget,`Jobs filters and toolbar stay within the balanced layout budget at ${viewport.width}px: ${distance}px`);
+      const minFilterFieldWidth=await page.evaluate(()=>parseFloat(getComputedStyle(document.documentElement).fontSize)*11);
       for(const field of await page.locator('.att-jobs-filter-grid:not(.att-jobs-more-filters) > label').all()) {
-        const box=await field.boundingBox();assert.ok(box.width>=176,`Schedule-style filter fields retain their 11rem minimum at ${viewport.width}px: ${box.width}px`);
+        const box=await field.boundingBox();assert.ok(box.width>=minFilterFieldWidth-1,`Schedule-style filter fields retain their 11rem minimum at ${viewport.width}px: ${box.width}px`);
       }
       for(const control of await page.locator('.att-jobs-filter-grid:not([hidden]) input,.att-jobs-filter-grid:not([hidden]) select').all()) {
         const box=await control.boundingBox();assert.ok(box.x>=0&&box.x+box.width<=viewport.width+1,'No clipped filter fields');

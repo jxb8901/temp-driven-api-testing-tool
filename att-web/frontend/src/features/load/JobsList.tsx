@@ -40,7 +40,7 @@ function FooterMenu({ label, disabled, actions }: { label: string; disabled: boo
   </div>;
 }
 
-export function JobsList({ api, onOpenJob, onSchedule, onEditSchedule, executionType, onExecutionTypeChange }: JobsFeatureProps) {
+export function JobsList({ api, onOpenJob, onSchedule, onEditSchedule, executionType, onExecutionTypeChange, schedulingEnabled }: JobsFeatureProps) {
   const [saved] = useState(savedFilters);
   const [moreFilters, setMoreFilters] = useState(false);
   const [result, setResult] = useState<JobsQueryResult>({items: [], total: 0, offset: 0, limit: 100, groups: [], principalSuggestions: [], packageSuggestions: []});
@@ -121,7 +121,13 @@ export function JobsList({ api, onOpenJob, onSchedule, onEditSchedule, execution
       <span className="att-job-tertiary"><code title={job.jobId}>{job.jobId.length > 12 ? `${job.jobId.slice(0,6)}…${job.jobId.slice(-4)}` : job.jobId}</code> <button type="button" className="att-link-button" aria-label={`Copy full Job ID ${job.jobId}`} title="Copy full Job ID" onClick={() => { void navigator.clipboard.writeText(job.jobId).then(() => setCopyState(`Copied ${job.jobId}`)).catch(() => setCopyState(`Copy unavailable: ${job.jobId}`)); }}>⧉</button></span>
     </th>
     <td data-label="Type / Status"><strong>{job.executionType || (job.command === 'debug' ? 'run' : job.command)}</strong> <StatusBadge status={job.status} />
-      {scheduled(job) ? <details className="att-job-provenance"><summary>Scheduled · Owner: {job.scheduleOwner || 'Unknown'} · Execution Principal: {job.executionPrincipal || 'Unknown'}</summary><span className="att-job-secondary">Schedule ID: {job.scheduleId || job.originatingScheduleId || 'Unknown'}</span>{job.triggeredBy && <span className="att-job-secondary">Triggered by: {job.triggeredBy}</span>}</details>
+      {scheduled(job) ? <details className="att-job-provenance"><summary>Scheduled · Owner: {job.scheduleOwner || 'Unknown'} · Execution Principal: {job.executionPrincipal || 'Unknown'}</summary><span className="att-job-secondary">Schedule ID: {(() => {
+        const scheduleId=job.scheduleId||job.originatingScheduleId;
+        if(!scheduleId)return 'Unknown';
+        return schedulingEnabled&&job.scheduleAvailable===true
+          ? <a href={formatRoute({kind:'schedules',view:'history',scheduleId})} aria-label={`View history for Schedule ${scheduleId}`}>{scheduleId}</a>
+          : <><code>{scheduleId}</code> <span>· history unavailable</span></>;
+      })()}</span>{job.triggeredBy && <span className="att-job-secondary">Triggered by: {job.triggeredBy}</span>}</details>
         : <span className="att-job-secondary">Manual · Submitted by {job.submittedBy || job.principal || 'Unknown'}</span>}
       {job.deletionState === 'DELETE_REQUESTED' && <span className="att-job-secondary">Pending deletion</span>}</td>
     <td data-label="Timing" className="att-job-timing">{[['Created',job.createdAt],['Started',job.startedAt],['Finished',job.finishedAt]].map(([label,value]) => <span key={label}>{label} <time dateTime={value || undefined} title={value || undefined}>{timestamp(value)}</time></span>)}<strong>Elapsed {elapsed(job,now)}</strong></td>

@@ -13,7 +13,7 @@ async function advance(){await act(async()=>{await vi.advanceTimersByTimeAsync(2
 async function click(element: Element | null){expect(element).not.toBeNull();await act(async()=>{element!.dispatchEvent(new MouseEvent('click',{bubbles:true}));});}
 function button(text: string){return [...host.querySelectorAll('button')].find(button=>button.textContent===text)!;}
 async function select(label: string,value: string){const field=[...host.querySelectorAll('label')].find(labelElement=>labelElement.firstChild?.textContent===label)?.querySelector('select')!;expect(field).toBeTruthy();await act(async()=>{field.value=value;field.dispatchEvent(new Event('change',{bubbles:true}));});}
-async function render(api: Partial<LoadJobsApi>, onOpenJob=vi.fn()){await act(async()=>root.render(<JobsList api={api as LoadJobsApi} onOpenJob={onOpenJob} onShowList={vi.fn()} />));await advance();}
+async function render(api: Partial<LoadJobsApi>, onOpenJob=vi.fn(), schedulingEnabled=false){await act(async()=>root.render(<JobsList api={api as LoadJobsApi} schedulingEnabled={schedulingEnabled} onOpenJob={onOpenJob} onShowList={vi.fn()} />));await advance();}
 
 it('renders target-first rows, exact navigation, copyable ID, Schedule principal and execution-only elapsed',async()=>{
   const onOpenJob=vi.fn(),writeText=vi.fn(async()=>{});Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText}});
@@ -24,6 +24,19 @@ it('renders target-first rows, exact navigation, copyable ID, Schedule principal
   await click(host.querySelector('.att-job-target'));expect(onOpenJob).toHaveBeenCalledWith(job.jobId);
   await click(host.querySelector('[aria-label="Copy full Job ID J1234567890ABCDEF"]'));expect(writeText).toHaveBeenCalledWith(job.jobId);
   expect(host.querySelector('code')?.textContent).toBe('J12345…CDEF');
+});
+it('links an available Schedule ID to history by keyboard and keeps unavailable IDs inert',async()=>{
+  const available={...job,submissionSource:'scheduled',scheduleId:'S-AVAILABLE',originatingScheduleId:'S-AVAILABLE',scheduleAvailable:true};
+  await render({queryJobs:vi.fn(async()=>response([available]))},vi.fn(),true);
+  const link=host.querySelector<HTMLAnchorElement>('.att-job-provenance a');
+  expect(link?.getAttribute('href')).toBe('#/schedules/S-AVAILABLE/history');
+  expect(link?.getAttribute('aria-label')).toBe('View history for Schedule S-AVAILABLE');
+  link?.focus();expect(document.activeElement).toBe(link);
+  const enter=new KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true});link?.dispatchEvent(enter);expect(enter.defaultPrevented).toBe(false);
+  await act(async()=>root.render(<JobsList api={{queryJobs:vi.fn(async()=>response([{...available,scheduleAvailable:false}]))} as unknown as LoadJobsApi} schedulingEnabled onOpenJob={vi.fn()} onShowList={vi.fn()} />));
+  await advance();
+  expect(host.querySelector('.att-job-provenance a')).toBeNull();
+  expect(host.querySelector('.att-job-provenance')?.textContent).toContain('history unavailable');
 });
 it('shows the immutable LOAD pacing plan on the Job row and expands workload details on demand',async()=>{
   const planned={...job,targetIdentity:{type:'load',id:'2 workloads / 2 target bindings',workloadCount:2,bindingCount:2,workloads:[

@@ -257,6 +257,26 @@ describe('AppShell', () => {
     expect(host.querySelector('[data-theme-preference="dark"][data-preference-status="saved"]')).not.toBeNull();
   });
 
+  it('preserves the untouched legacy preference after a transient read failure and a one-field save', async () => {
+    vi.spyOn(api,'getCurrentUser').mockResolvedValue({loginId:'jane',displayName:'Jane Tester',role:'USER'});
+    vi.spyOn(api,'getUserPreferences').mockRejectedValue(new Error('temporary preference read failure'));
+    localStorage.setItem('att-ui-language','zh-Hant');
+    localStorage.setItem('att-ui-theme','light');
+    host=document.createElement('div');document.body.append(host);root=createRoot(host);
+    const navigation:RouteState={route:{kind:'dashboard'},pendingNavigation:null,pendingDescription:'',isDirty:false,
+      navigate:vi.fn(),registerUnsavedChanges:vi.fn(()=>()=>{}),confirmNavigation:vi.fn(),cancelNavigation:vi.fn()};
+    await act(async()=>{root?.render(<AppShell route={navigation.route} navigation={navigation}
+      serverVersion={{status:'ready',data:{apiVersion:'1',authMode:'local',inlineLoadEnabled:false}}}
+      selectedPackage="" selectedEnvironment="" onPackageChange={vi.fn()} onEnvironmentChange={vi.fn()} onJobAccepted={vi.fn()}>
+      <PreferenceProbe /></AppShell>);await new Promise(resolve=>setTimeout(resolve,0));});
+    expect(host.querySelector('[data-preference-status="failed"]')).not.toBeNull();
+    await act(async()=>{(host?.querySelector('[data-theme-preference] button') as HTMLButtonElement).click();await new Promise(resolve=>setTimeout(resolve,0));});
+    expect(api.putUserPreferences).toHaveBeenCalledWith({theme:'dark'});
+    expect(host.querySelector('[data-theme-preference="dark"][data-preference-status="saved"]')).not.toBeNull();
+    expect(localStorage.getItem('att-ui-theme')).toBeNull();
+    expect(localStorage.getItem('att-ui-language')).toBe('zh-Hant');
+  });
+
   it('keeps preferences in browser storage when no authenticated account exists', async () => {
     host=document.createElement('div');document.body.append(host);root=createRoot(host);
     const navigation:RouteState={route:{kind:'dashboard'},pendingNavigation:null,pendingDescription:'',isDirty:false,

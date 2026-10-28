@@ -271,8 +271,10 @@ export function AppShell({
   const applyLocalePreference = (preference: UiLocalePreference) => {
     setUiLocalePreference(preference);setUiLocale(preference==='browser'?detectUiLocale():preference);
   };
+  const clearLegacyLanguagePreference = () => { clearStoredUiLocalePreference(); };
+  const clearLegacyThemePreference = () => { try{localStorage.removeItem('att-ui-theme');}catch{/* Storage can be unavailable. */} };
   const clearLegacyPreferences = () => {
-    clearStoredUiLocalePreference();try{localStorage.removeItem('att-ui-theme');}catch{/* Storage can be unavailable. */}
+    clearLegacyLanguagePreference();clearLegacyThemePreference();
   };
   const saveLocalThemePreference = (preference:ThemePreference) => {
     try{if(preference==='system')localStorage.removeItem('att-ui-theme');else localStorage.setItem('att-ui-theme',preference);return true;}catch{return false;}
@@ -286,7 +288,10 @@ export function AppShell({
     });
     preferenceWriteChain.current=write.then(result=>{
       if(result)setPreferenceStatus('saved');
-      if(result?.available&&languageEdit===preferenceEdits.current.language&&themeEdit===preferenceEdits.current.theme)clearLegacyPreferences();
+      if(result?.available) {
+        if(input.language!==undefined&&languageEdit===preferenceEdits.current.language)clearLegacyLanguagePreference();
+        if(input.theme!==undefined&&themeEdit===preferenceEdits.current.theme)clearLegacyThemePreference();
+      }
     }).catch(()=>{
       setPreferenceStatus('failed');
     });
