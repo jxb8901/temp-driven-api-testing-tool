@@ -43,7 +43,7 @@ class LoadReportTest {
         assertEquals(1L,((Number)detailManifest.get("sharedSeriesReusedFileCount")).longValue());
         assertEquals(Files.size(shared.resolve(sharedPath)),((Number)detailManifest.get("sharedSeriesSavingsBytes")).longValue());
 
-        Map<String,Object> mismatch=bucketSeries(40);mismatch.put("bucket-17",Map.of("completedTps",-1));
+        Map<String,Object> mismatch=bucketSeries(40);mismatch.put("bucket-17",Collections.<String,Object>singletonMap("completedTps",-1));
         Path separate=temp.resolve("mismatched-series");Map<String,Object> mismatchSummary=detailSummary(identical,mismatch,1);
         LoadReportDetailWriter.write(separate,mismatchSummary);
         Map<?,?> mismatchedAggregate=firstSeries(mismatchSummary,"aggregate",null);
@@ -61,22 +61,22 @@ class LoadReportTest {
 
     @Test void sharesIdenticalWindowTimeSeriesPointsWithoutChangingThresholds() throws Exception {
         List<Map<String,Object>> points=new ArrayList<>();
-        for(int index=0;index<40;index++)points.add(Map.of("windowStartEpochMs",(long)index*1000,"completed",index,"p95Ms",index+1));
+        for(int index=0;index<40;index++)points.add(mapOf("windowStartEpochMs",(long)index*1000,"completed",index,"p95Ms",index+1));
         Map<String,Object> aggregateMetrics=windowTimeSeries(points);
         List<Map<String,Object>> workloadPoints=new ArrayList<>(points);
         Map<String,Object> workloadMetrics=windowTimeSeries(workloadPoints);
         Map<String,Object> workload=new LinkedHashMap<>();workload.put("metrics",workloadMetrics);
-        workload.put("thresholds",Map.of("p95Ms","FAIL"));
+        workload.put("thresholds",Collections.<String,Object>singletonMap("p95Ms","FAIL"));
         Map<String,Object> summary=new LinkedHashMap<>();summary.put("metrics",aggregateMetrics);
-        summary.put("thresholds",Map.of("p95Ms","NOT_MET"));summary.put("workloads",Map.of("one",workload));
+        summary.put("thresholds",Collections.<String,Object>singletonMap("p95Ms","NOT_MET"));summary.put("workloads",Collections.<String,Object>singletonMap("one",workload));
 
         Path directory=temp.resolve("shared-window-points");LoadReportDetailWriter.write(directory,summary);
         Map<?,?> aggregate=seriesForTarget(summary,"aggregate",null,"metrics/windowMetrics/timeSeries/points");
         Map<?,?> perWorkload=seriesForTarget(summary,"workload","one","metrics/windowMetrics/timeSeries/points");
         assertEquals(Boolean.TRUE,aggregate.get("sharedContent"));
         assertEquals(aggregate.get("files"),perWorkload.get("files"));
-        assertEquals(Map.of("p95Ms","NOT_MET"),summary.get("thresholds"));
-        assertEquals(Map.of("p95Ms","FAIL"),((Map<?,?>)((Map<?,?>)summary.get("workloads")).get("one")).get("thresholds"));
+        assertEquals(Collections.<String,Object>singletonMap("p95Ms","NOT_MET"),summary.get("thresholds"));
+        assertEquals(Collections.<String,Object>singletonMap("p95Ms","FAIL"),((Map<?,?>)((Map<?,?>)summary.get("workloads")).get("one")).get("thresholds"));
         String path=(String)((List<?>)aggregate.get("files")).get(0);
         @SuppressWarnings("unchecked") Map<String,Object> chunk=att.validation.JsonSupport.mapper().readValue(directory.resolve(path).toFile(),Map.class);
         assertEquals(LoadReportDetailWriter.SHARED_SERIES_SCHEMA,chunk.get("schemaVersion"));
@@ -85,15 +85,21 @@ class LoadReportTest {
 
     private static Map<String,Object> bucketSeries(int count) {
         Map<String,Object> buckets=new LinkedHashMap<>();
-        for(int index=0;index<count;index++)buckets.put("bucket-"+index,Map.of("completedTps",index,"p95Ms",index+1));
+        for(int index=0;index<count;index++)buckets.put("bucket-"+index,mapOf("completedTps",index,"p95Ms",index+1));
         return buckets;
+    }
+
+    private static Map<String,Object> mapOf(Object... entries) {
+        Map<String,Object> result=new LinkedHashMap<>();
+        for(int index=0;index<entries.length;index+=2)result.put((String)entries[index],entries[index+1]);
+        return result;
     }
 
     private static Map<String,Object> detailSummary(Map<String,Object> aggregate,Map<String,Object> workload,int workloadCount) {
         Map<String,Object> workloads=new LinkedHashMap<>();
         for(int index=0;index<workloadCount;index++)workloads.put(index==0?"one":"two",
-                Map.of("metrics",Map.of("buckets",index==0?workload:aggregate)));
-        Map<String,Object> summary=new LinkedHashMap<>();summary.put("metrics",Map.of("buckets",aggregate));summary.put("workloads",workloads);
+                mapOf("metrics",mapOf("buckets",index==0?workload:aggregate)));
+        Map<String,Object> summary=new LinkedHashMap<>();summary.put("metrics",mapOf("buckets",aggregate));summary.put("workloads",workloads);
         return summary;
     }
 
@@ -110,11 +116,12 @@ class LoadReportTest {
         if("aggregate".equals(scope))metrics=(Map<?,?>)summary.get("metrics");
         else metrics=(Map<?,?>)((Map<?,?>)((Map<?,?>)summary.get("workloads")).get(workloadId)).get("metrics");
         Map<?,?> reference=(Map<?,?>)metrics.get("detailSeries");
-        return ((List<Map<?,?>>)reference.get("series")).stream().filter(series->target.equals(series.get("target"))).findFirst().orElseThrow();
+        return ((List<Map<?,?>>)reference.get("series")).stream().filter(series->target.equals(series.get("target")))
+                .findFirst().orElseThrow(() -> new AssertionError("Missing detail series target: "+target));
     }
 
     private static Map<String,Object> windowTimeSeries(List<Map<String,Object>> points) {
-        return Map.of("windowMetrics",Map.of("timeSeries",Map.of("points",points)));
+        return mapOf("windowMetrics",mapOf("timeSeries",mapOf("points",points)));
     }
 
     @Test void publishesReportBundleManifestWithVerifiedFileChecksums() throws Exception {
