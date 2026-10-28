@@ -44,8 +44,8 @@ class LoadWindowMetricsTest {
 
         @SuppressWarnings("unchecked") Map<String,Object> windows = (Map<String,Object>) snapshot.value("windowMetrics");
         @SuppressWarnings("unchecked") List<Map<String,Object>> boundaries = (List<Map<String,Object>>) windows.get("phaseBoundaries");
-        assertEquals(List.of("RAMP_UP", "WARMUP", "STEADY", "RAMP_DOWN", "DRAIN"),
-                boundaries.stream().map(row -> row.get("phase")).toList());
+        assertEquals(java.util.Arrays.asList("RAMP_UP", "WARMUP", "STEADY", "RAMP_DOWN", "DRAIN"),
+                boundaries.stream().map(row -> row.get("phase")).collect(java.util.stream.Collectors.toList()));
         assertEquals(start + 2_000L, boundaries.get(2).get("windowStartEpochMs"));
     }
 
