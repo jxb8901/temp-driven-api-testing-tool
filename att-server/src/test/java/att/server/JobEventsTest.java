@@ -275,6 +275,40 @@ class JobEventsTest {
         assertEquals(List.of(1L, 2L), delivered, "callbacks must follow durable cursor order");
     }
 
+    @Test void rejectedListenerDispatchRetriesTerminalEventWithoutAnotherAppend() throws Exception {
+        java.util.concurrent.atomic.AtomicBoolean available = new java.util.concurrent.atomic.AtomicBoolean();
+        java.util.concurrent.Executor dispatcher = task -> {
+            if (!available.get()) throw new java.util.concurrent.RejectedExecutionException("test dispatcher is full");
+            task.run();
+        };
+        JobEvents journal = new JobEvents(temp.resolve("rejected-listener.jsonl"), 16,
+                JobEvents.DEFAULT_MAX_JOURNAL_BYTES, JobEvents.MAX_RETAINED_MEMORY_BYTES,
+                Runnable::run, dispatcher);
+        List<Long> delivered = java.util.Collections.synchronizedList(new java.util.ArrayList<>());
+        CountDownLatch terminalDelivered = new CountDownLatch(1);
+        AutoCloseable subscription = journal.listen(event -> {
+            delivered.add(((Number) event.get("id")).longValue());
+            terminalDelivered.countDown();
+        });
+        try {
+            Map<String, Object> result = journal.append("result", Map.of("status", "PASS"));
+            assertEquals(1L, result.get("id"));
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+            while (((Number) journal.metrics().get("listenerDispatchFailures")).longValue() < 2L
+                    && System.nanoTime() < deadline) Thread.sleep(10L);
+            assertTrue(((Number) journal.metrics().get("listenerDispatchFailures")).longValue() >= 2L,
+                    "a bounded delayed retry should occur while the dispatcher is unavailable");
+
+            available.set(true);
+            assertTrue(terminalDelivered.await(5, TimeUnit.SECONDS),
+                    "the final result must be delivered when dispatch capacity returns without another append");
+            Thread.sleep(150L);
+            assertEquals(List.of(1L), delivered, "retries must deliver the terminal cursor once and in order");
+        } finally {
+            subscription.close();
+        }
+    }
+
     @Test void durableIdGapRemainsDiagnosedButCanCompactAfterStorageRecovers() throws Exception {
         Path file = temp.resolve("recoverable-id-gap.jsonl");
         java.util.concurrent.atomic.AtomicLong usable = new java.util.concurrent.atomic.AtomicLong(64L * 1024L * 1024L);
@@ -493,12 +527,13 @@ class JobEventsTest {
         assertEquals(128,Files.readAllLines(file).size());
     }
 
-    @Test void failedCatchUpDefersUntilSynchronousHardCapCompaction() throws Exception {
+    @Test void failedCatchUpDefersUntilHardCapThenReenablesAsyncCompaction() throws Exception {
         Path file=temp.resolve("bounded-compaction-retry.jsonl");
         long maxJournalBytes=20_000L;
         java.util.concurrent.atomic.AtomicInteger snapshots=new java.util.concurrent.atomic.AtomicInteger();
+        java.util.Queue<Runnable> queuedCompactions=new java.util.ArrayDeque<>();
         final JobEvents[] journal=new JobEvents[1];
-        journal[0]=new JobEvents(file,128,maxJournalBytes,Runnable::run,()->{
+        journal[0]=new JobEvents(file,128,maxJournalBytes,queuedCompactions::add,()->{
             if(snapshots.getAndIncrement()==0) {
                 try {
                     for(int i=1;i<=33;i++)journal[0].append("progress",Map.of("burst",i));
@@ -506,7 +541,9 @@ class JobEventsTest {
             }
         },()->Long.MAX_VALUE);
 
-        for(int i=1;i<=512&&snapshots.get()==0;i++)journal[0].append("progress",Map.of("sequence",i));
+        for(int i=1;i<=512&&queuedCompactions.isEmpty();i++)journal[0].append("progress",Map.of("sequence",i));
+        assertEquals(1,queuedCompactions.size(),"an eligible snapshot should be queued off the append path");
+        queuedCompactions.remove().run();
         assertEquals(1,snapshots.get(),"An oversized catch-up must not immediately resubmit compaction");
         long firstLatest=journal[0].latest();
         assertTrue(firstLatest>128,"size-based compaction waits for an obsolete retained-window worth of bytes");
@@ -528,9 +565,21 @@ class JobEventsTest {
         Map<String,Object> afterHardCap=journal[0].metrics();
         assertEquals(2L,((Number)afterHardCap.get("compactionAttempts")).longValue());
         assertEquals(1L,((Number)afterHardCap.get("compactionFailures")).longValue());
-        assertEquals(true,afterHardCap.get("asyncCompactionDeferred"),
-                "A failed catch-up should keep async snapshots deferred after synchronous hard-cap recovery");
+        assertEquals(false,afterHardCap.get("asyncCompactionDeferred"),
+                "A verified synchronous hard-cap rewrite should re-enable background compaction");
         assertTrue(Files.size(file)<=maxJournalBytes,"The synchronous compaction must keep the journal within its byte budget");
+
+        for(int i=0;i<512&&queuedCompactions.isEmpty();i++)
+            journal[0].append("progress",Map.of("sequence",journal[0].latest()+1L));
+        assertEquals(1,queuedCompactions.size(),"later backlog should schedule another asynchronous snapshot");
+        assertEquals(2L,((Number)journal[0].metrics().get("compactionAttempts")).longValue(),
+                "the triggering append must return before the queued background snapshot runs");
+        queuedCompactions.remove().run();
+        Map<String,Object> afterAsyncRecovery=journal[0].metrics();
+        assertEquals(3L,((Number)afterAsyncRecovery.get("compactionAttempts")).longValue());
+        assertEquals(1L,((Number)afterAsyncRecovery.get("compactionFailures")).longValue());
+        assertEquals(false,afterAsyncRecovery.get("asyncCompactionDeferred"));
+        assertTrue(Files.size(file)<=maxJournalBytes,"the resumed asynchronous rewrite must preserve the byte budget");
         JobEvents recovered=new JobEvents(file,128,Runnable::run);
         assertEquals(journal[0].latest(),recovered.latest());
         assertTrue(recovered.after(0).size()<=128,"Recovery must stay within the configured retention count");

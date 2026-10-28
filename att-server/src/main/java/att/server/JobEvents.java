@@ -28,6 +28,7 @@ import java.util.Map;
 import java.util.NavigableMap;
 import java.util.TreeMap;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -75,6 +76,7 @@ final class JobEvents {
     private long listenerDeliveredThrough;
     private boolean listenerDispatchScheduled;
     private boolean listenerDispatchRequested;
+    private boolean listenerDispatchRetryScheduled;
     private Map<String, Object> pendingListenerNotice;
     private long resultEventId = -1L;
     private long journalBytes;
@@ -515,6 +517,9 @@ final class JobEvents {
 
     AutoCloseable listen(Consumer<Map<String, Object>> listener) {
         listeners.add(listener);
+        boolean resume;
+        synchronized (this) { resume = listenerDispatchRequested && !listenerDispatchScheduled; }
+        if (resume) scheduleListenerDispatch();
         return () -> listeners.remove(listener);
     }
 
@@ -581,6 +586,7 @@ final class JobEvents {
         result.put("sequenceGapDetected", sequenceGapDetected);
         result.put("asyncCompactionDeferred", asyncCompactionDeferred);
         result.put("listenerDispatchFailures", listenerDispatchFailures.get());
+        result.put("listenerDispatchRetryScheduled", listenerDispatchRetryScheduled);
         result.put("oldestEventId", oldestId());
         result.put("latestEventId", sequence.get());
         result.put("historyTruncated", truncatedHistory());
@@ -693,6 +699,28 @@ final class JobEvents {
                 listenerDispatchRequested = true;
                 listenerDispatchFailures.incrementAndGet();
             }
+            scheduleListenerRetry();
+        }
+    }
+
+    /** One delayed retry per journal; ServerRuntime caps active SSE observers, bounding pending retries. */
+    private void scheduleListenerRetry() {
+        synchronized (this) {
+            if (!listenerDispatchRequested || listenerDispatchScheduled || listenerDispatchRetryScheduled
+                    || listeners.isEmpty()) return;
+            listenerDispatchRetryScheduled = true;
+        }
+        try {
+            CompletableFuture.delayedExecutor(100L, java.util.concurrent.TimeUnit.MILLISECONDS).execute(() -> {
+                boolean retry;
+                synchronized (JobEvents.this) {
+                    listenerDispatchRetryScheduled = false;
+                    retry = listenerDispatchRequested && !listenerDispatchScheduled && !listeners.isEmpty();
+                }
+                if (retry) scheduleListenerDispatch();
+            });
+        } catch (RejectedExecutionException shuttingDown) {
+            synchronized (this) { listenerDispatchRetryScheduled = false; }
         }
     }
 
@@ -841,6 +869,7 @@ final class JobEvents {
                 replaced = true;
                 journalBytes = written;
                 needsNewline = false;
+                asyncCompactionDeferred = false;
                 lastCompactionAt = System.currentTimeMillis();
                 lastCompactionDurationMs = java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started);
             }
