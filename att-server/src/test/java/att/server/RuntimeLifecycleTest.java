@@ -31,7 +31,7 @@ class RuntimeLifecycleTest {
                 JobEvents events=new JobEvents(temp.resolve("journal-"+j+"/events.jsonl"),64,executor,()->{
                     started.countDown();try {release.await();}catch(InterruptedException e){Thread.currentThread().interrupt();throw new RuntimeException(e);}
                 });
-                for(int i=0;i<128;i++)events.append("log",Map.of("console","line "+i));
+                for(int i=0;i<512;i++)events.append("log",Map.of("console","line "+i));
             }
             assertTrue(started.await(5,TimeUnit.SECONDS));assertFalse(executor.getQueue().isEmpty());
             ExecutorService closing=Executors.newSingleThreadExecutor();
@@ -46,7 +46,7 @@ class RuntimeLifecycleTest {
             assertThrows(RejectedExecutionException.class,()->executor.execute(()->{}));
             for(int j=0;j<3;j++) {
                 JobEvents replay=new JobEvents(temp.resolve("journal-"+j+"/events.jsonl"),64);
-                assertEquals(128,replay.latest());assertEquals(64,replay.after(0).size());
+                assertEquals(512,replay.latest());assertEquals(64,replay.after(0).size());
                 assertFalse(Files.exists(temp.resolve("journal-"+j+"/events.jsonl.tmp")));
             }
             try(ServerRuntime reopened=new ServerRuntime(config,null)){assertFalse(compactions(reopened).isShutdown());}
