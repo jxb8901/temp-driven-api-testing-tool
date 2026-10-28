@@ -99,6 +99,8 @@ final class JobEvents {
     private boolean repairBlocked;
     private boolean sequenceGapDetected;
     private boolean asyncCompactionDeferred;
+    /** Successful replacements supersede failures from older snapshots. Guarded by this. */
+    private long successfulCompactionGeneration;
     private boolean legacyOversized;
     private boolean persistenceDegraded;
     private String degradationReason;
@@ -842,19 +844,31 @@ final class JobEvents {
             compactionAgain.set(true);
             return;
         }
+        long requestedGeneration;
+        synchronized (this) { requestedGeneration = successfulCompactionGeneration; }
         try {
             compactionExecutor.execute(() -> {
                 boolean retryOnNextTrigger = false;
+                Exception compactionFailure = null;
+                AtomicLong snapshotGeneration = new AtomicLong(-1L);
                 try {
-                    retryOnNextTrigger = !compactSnapshot();
-                    if(retryOnNextTrigger)compactionFailures.incrementAndGet();
+                    retryOnNextTrigger = !compactSnapshot(snapshotGeneration);
                 } catch (Exception failure) {
                     retryOnNextTrigger = true;
-                    compactionFailures.incrementAndGet();
-                    java.util.logging.Logger.getLogger(JobEvents.class.getName())
-                            .warning("Event journal compaction failed; bounded appends remain enabled");
+                    compactionFailure = failure;
                 } finally {
-                    if (retryOnNextTrigger) synchronized (this) { asyncCompactionDeferred = true; }
+                    synchronized (this) {
+                        if (retryOnNextTrigger && snapshotGeneration.get() != successfulCompactionGeneration)
+                            retryOnNextTrigger = false;
+                        if (retryOnNextTrigger) asyncCompactionDeferred = true;
+                    }
+                    if (retryOnNextTrigger) {
+                        compactionFailures.incrementAndGet();
+                        java.util.logging.Logger logger = java.util.logging.Logger.getLogger(JobEvents.class.getName());
+                        String message = "Event journal compaction failed; bounded appends remain enabled";
+                        if (compactionFailure == null) logger.warning(message);
+                        else logger.log(java.util.logging.Level.WARNING, message, compactionFailure);
+                    }
                     compactionScheduled.set(false);
                     boolean requestedAgain = compactionAgain.getAndSet(false);
                     // A failed snapshot is deferred until synchronous byte-budget compaction,
@@ -865,21 +879,28 @@ final class JobEvents {
         } catch (RejectedExecutionException full) {
             compactionScheduled.set(false);
             compactionAgain.set(false);
-            synchronized (this) { asyncCompactionDeferred = true; }
-            compactionFailures.incrementAndGet();
-            java.util.logging.Logger.getLogger(JobEvents.class.getName())
-                    .warning("Event journal compaction deferred; the byte budget is still enforced");
+            boolean deferred;
+            synchronized (this) {
+                deferred = requestedGeneration == successfulCompactionGeneration;
+                if (deferred) asyncCompactionDeferred = true;
+            }
+            if (deferred) {
+                compactionFailures.incrementAndGet();
+                java.util.logging.Logger.getLogger(JobEvents.class.getName())
+                        .warning("Event journal compaction deferred; the byte budget is still enforced");
+            }
         }
     }
 
     /** Snapshot write runs outside the append lock; the final bounded tail and rename are serialized. */
-    private boolean compactSnapshot() throws Exception {
+    private boolean compactSnapshot(AtomicLong snapshotGeneration) throws Exception {
         long started = System.nanoTime();
         compactionAttempts.incrementAndGet();
         List<Map<String, Object>> snapshot;
         long snapshotFirstId;
         long snapshotLastId;
         synchronized (this) {
+            snapshotGeneration.set(successfulCompactionGeneration);
             if(repairBlocked||appendBlocked||legacyOversized||sequenceUncertain)return false;
             if (events.isEmpty()) return true;
             snapshot = new ArrayList<>(events.values());
@@ -912,6 +933,7 @@ final class JobEvents {
                     replaced = true;
                     journalBytes = written;
                     needsNewline = false;
+                    successfulCompactionGeneration++;
                     lastCompactionAt = System.currentTimeMillis();
                     lastCompactionDurationMs = java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started);
                     return true;
@@ -944,6 +966,7 @@ final class JobEvents {
                 journalBytes = written;
                 needsNewline = false;
                 asyncCompactionDeferred = false;
+                successfulCompactionGeneration++;
                 lastCompactionAt = System.currentTimeMillis();
                 lastCompactionDurationMs = java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started);
             }

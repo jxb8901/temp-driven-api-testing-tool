@@ -634,6 +634,75 @@ class JobEventsTest {
         assertFalse(recovered.after(0).isEmpty(),"Recovery must retain the latest journal events");
     }
 
+    @Test void staleAsyncSnapshotFailureCannotDeferHardCapRecovery() throws Exception {
+        Path file=temp.resolve("stale-async-compaction.jsonl");
+        CountDownLatch firstSnapshotWritten=new CountDownLatch(1),releaseFirstSnapshot=new CountDownLatch(1);
+        CountDownLatch firstTaskFinished=new CountDownLatch(1),secondTaskSubmitted=new CountDownLatch(1);
+        CountDownLatch secondSnapshotWritten=new CountDownLatch(1),secondTaskFinished=new CountDownLatch(1);
+        java.util.concurrent.atomic.AtomicInteger taskCount=new java.util.concurrent.atomic.AtomicInteger();
+        java.util.concurrent.Executor executor=command->{
+            int ordinal=taskCount.getAndIncrement();
+            if(ordinal==1)secondTaskSubmitted.countDown();
+            Thread worker=new Thread(()->{
+                try {command.run();}
+                finally {
+                    if(ordinal==0)firstTaskFinished.countDown();
+                    else if(ordinal==1)secondTaskFinished.countDown();
+                }
+            },"test-stale-event-compactor-"+ordinal);
+            worker.setDaemon(true);
+            worker.start();
+        };
+        java.util.concurrent.atomic.AtomicInteger snapshots=new java.util.concurrent.atomic.AtomicInteger();
+        JobEvents journal=new JobEvents(file,32,20_000,JobEvents.MAX_RETAINED_MEMORY_BYTES,executor,()->{
+            int ordinal=snapshots.getAndIncrement();
+            if(ordinal==0) {
+                firstSnapshotWritten.countDown();
+                try {
+                    if(!releaseFirstSnapshot.await(5,TimeUnit.SECONDS))
+                        throw new IllegalStateException("first snapshot gate timed out");
+                } catch(InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    throw new IllegalStateException(interrupted);
+                }
+            } else if(ordinal==1) secondSnapshotWritten.countDown();
+        },()->Long.MAX_VALUE);
+
+        try {
+            for(int index=0;index<1024&&firstSnapshotWritten.getCount()>0;index++)
+                journal.append("progress",Map.of("sequence",index));
+            assertTrue(firstSnapshotWritten.await(5,TimeUnit.SECONDS),"The first async snapshot should reach its gate");
+            assertEquals(1L,((Number)journal.metrics().get("compactionAttempts")).longValue());
+
+            for(int index=0;index<1024&&((Number)journal.metrics().get("compactionAttempts")).longValue()<2L;index++)
+                journal.append("progress",Map.of("sequence",journal.latest()+1L));
+            assertEquals(2L,((Number)journal.metrics().get("compactionAttempts")).longValue(),
+                    "The byte ceiling should run a synchronous hard-cap rewrite while the older snapshot is blocked");
+            assertEquals(false,journal.metrics().get("asyncCompactionDeferred"));
+
+            releaseFirstSnapshot.countDown();
+            assertTrue(firstTaskFinished.await(5,TimeUnit.SECONDS),"The stale snapshot should finish after recovery");
+            Map<String,Object> afterStaleFailure=journal.metrics();
+            assertEquals(false,afterStaleFailure.get("asyncCompactionDeferred"),
+                    "A stale failure must not undo the later verified hard-cap recovery");
+            assertEquals(0L,((Number)afterStaleFailure.get("compactionFailures")).longValue(),
+                    "A snapshot superseded by a verified replacement is not a current compaction failure");
+
+            for(int index=0;index<1024&&secondTaskSubmitted.getCount()>0;index++)
+                journal.append("progress",Map.of("sequence",journal.latest()+1L));
+            assertTrue(secondTaskSubmitted.await(5,TimeUnit.SECONDS),
+                    "New backlog should schedule background compaction after the stale snapshot completes");
+            assertTrue(secondSnapshotWritten.await(5,TimeUnit.SECONDS),"The resumed async snapshot should write its snapshot");
+            assertTrue(secondTaskFinished.await(5,TimeUnit.SECONDS),"The resumed async snapshot should complete");
+            Map<String,Object> afterResumedAsync=journal.metrics();
+            assertEquals(3L,((Number)afterResumedAsync.get("compactionAttempts")).longValue());
+            assertEquals(false,afterResumedAsync.get("asyncCompactionDeferred"));
+            assertEquals(0L,((Number)afterResumedAsync.get("compactionFailures")).longValue());
+        } finally {
+            releaseFirstSnapshot.countDown();
+        }
+    }
+
     private static final class SerializationProbeMap extends java.util.AbstractMap<String,Object> {
         private final java.util.concurrent.atomic.AtomicInteger traversals=new java.util.concurrent.atomic.AtomicInteger();
         @Override public java.util.Set<Map.Entry<String,Object>> entrySet() {
