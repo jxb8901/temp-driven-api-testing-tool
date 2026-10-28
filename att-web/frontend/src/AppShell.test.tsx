@@ -32,10 +32,13 @@ describe('AppShell', () => {
 
   function PreferenceProbe() {
     const context = useAppShellContext();
-    return <div data-theme-preference={context.themePreference} data-language-preference={context.uiLocalePreference}
-      data-preference-status={context.preferenceStatus}>
-      <button type="button" onClick={() => context.onThemePreferenceChange('dark')}>Choose dark</button>
-      <button type="button" onClick={() => context.onUiLocaleChange('zh-Hant')}>Choose Traditional Chinese</button>
+    return <div data-preference-status={context.preferenceStatus}>
+      <div data-theme-preference={context.themePreference}>
+        <button type="button" onClick={() => context.onThemePreferenceChange('dark')}>Choose dark</button>
+      </div>
+      <div data-language-preference={context.uiLocalePreference}>
+        <button type="button" onClick={() => context.onUiLocaleChange('zh-Hant')}>Choose Traditional Chinese</button>
+      </div>
     </div>;
   }
 
@@ -219,7 +222,8 @@ describe('AppShell', () => {
       serverVersion={{status:'ready',data:{apiVersion:'1',authMode:'local',inlineLoadEnabled:false}}}
       selectedPackage="" selectedEnvironment="" onPackageChange={vi.fn()} onEnvironmentChange={vi.fn()} onJobAccepted={vi.fn()}>
       <PreferenceProbe /></AppShell>);await new Promise(resolve=>setTimeout(resolve,0));});
-    expect(host.querySelector('[data-theme-preference="dark"][data-language-preference="zh-Hant"]')).not.toBeNull();
+    expect(host.querySelector('[data-theme-preference="dark"]')).not.toBeNull();
+    expect(host.querySelector('[data-language-preference="zh-Hant"]')).not.toBeNull();
     expect(localStorage.getItem('att-ui-theme')).toBeNull();
     expect(localStorage.getItem('att-ui-language')).toBeNull();
     expect(api.putUserPreferences).not.toHaveBeenCalled();
@@ -238,7 +242,8 @@ describe('AppShell', () => {
       selectedPackage="" selectedEnvironment="" onPackageChange={vi.fn()} onEnvironmentChange={vi.fn()} onJobAccepted={vi.fn()}>
       <PreferenceProbe /></AppShell>);await new Promise(resolve=>setTimeout(resolve,0));});
     expect(api.putUserPreferences).toHaveBeenCalledWith({language:'zh-Hant',theme:'dark',migrateIfAbsent:true});
-    expect(host.querySelector('[data-theme-preference="dark"][data-language-preference="zh-Hant"]')).not.toBeNull();
+    expect(host.querySelector('[data-theme-preference="dark"]')).not.toBeNull();
+    expect(host.querySelector('[data-language-preference="zh-Hant"]')).not.toBeNull();
     expect(localStorage.getItem('att-ui-theme')).toBeNull();
     expect(localStorage.getItem('att-ui-language')).toBeNull();
   });
@@ -255,7 +260,8 @@ describe('AppShell', () => {
       <PreferenceProbe /></AppShell>);await new Promise(resolve=>setTimeout(resolve,0));});
     await act(async()=>{(host?.querySelector('[data-theme-preference] button') as HTMLButtonElement).click();await Promise.resolve();});
     expect(api.putUserPreferences).toHaveBeenCalledWith({theme:'dark'});
-    expect(host.querySelector('[data-theme-preference="dark"][data-preference-status="saved"]')).not.toBeNull();
+    expect(host.querySelector('[data-theme-preference="dark"]')).not.toBeNull();
+    expect(host.querySelector('[data-preference-status="saved"]')).not.toBeNull();
   });
 
   it('keeps save status pending until the latest queued preference edit completes', async () => {
@@ -290,6 +296,57 @@ describe('AppShell', () => {
     expect(host.querySelector('[data-preference-status="failed"]')).not.toBeNull();
   });
 
+  it('keeps an earlier failed preference edit failed and retries it after reload', async () => {
+    localStorage.clear();
+    vi.spyOn(api,'getCurrentUser').mockResolvedValue({loginId:'jane',displayName:'Jane Tester',role:'USER'});
+    const getPreferences=vi.spyOn(api,'getUserPreferences').mockResolvedValue({available:true,language:'en',theme:'light',version:1});
+    let rejectLanguage: (reason?:unknown)=>void = () => undefined;
+    let resolveTheme: (value:{available:boolean})=>void = () => undefined;
+    const languagePut=new Promise<{available:boolean}>((_,reject)=>{rejectLanguage=reject;});
+    const themePut=new Promise<{available:boolean}>(resolve=>{resolveTheme=resolve;});
+    const put=vi.spyOn(api,'putUserPreferences').mockReturnValueOnce(languagePut).mockReturnValueOnce(themePut)
+      .mockResolvedValue({available:true});
+    host=document.createElement('div');document.body.append(host);
+    const navigation:RouteState={route:{kind:'dashboard'},pendingNavigation:null,pendingDescription:'',isDirty:false,
+      navigate:vi.fn(),registerUnsavedChanges:vi.fn(()=>()=>{}),confirmNavigation:vi.fn(),cancelNavigation:vi.fn()};
+    const renderShell=async()=>{
+      root=createRoot(host!);
+      await act(async()=>{root?.render(<AppShell route={navigation.route} navigation={navigation}
+        serverVersion={{status:'ready',data:{apiVersion:'1',authMode:'local',inlineLoadEnabled:false}}}
+        selectedPackage="" selectedEnvironment="" onPackageChange={vi.fn()} onEnvironmentChange={vi.fn()} onJobAccepted={vi.fn()}>
+        <PreferenceProbe /></AppShell>);
+        await new Promise(resolve=>setTimeout(resolve,0));await new Promise(resolve=>setTimeout(resolve,0));});
+    };
+    await renderShell();
+
+    await act(async()=>{
+      (host?.querySelector('[data-language-preference] button') as HTMLButtonElement).click();
+      await new Promise(resolve=>setTimeout(resolve,0));
+    });
+    expect(put).toHaveBeenCalledTimes(1);
+    await act(async()=>{(host?.querySelector('[data-theme-preference] button') as HTMLButtonElement).click();});
+    rejectLanguage(new Error('language write failed'));
+    await act(async()=>{await new Promise(resolve=>setTimeout(resolve,0));});
+    expect(put).toHaveBeenCalledTimes(2);
+    expect(host.querySelector('[data-preference-status="saving"]')).not.toBeNull();
+    await act(async()=>{resolveTheme({available:true});await new Promise(resolve=>setTimeout(resolve,0));});
+    expect(host.querySelector('[data-language-preference="zh-Hant"]')).not.toBeNull();
+    expect(host.querySelector('[data-preference-status="failed"]')).not.toBeNull();
+    expect(JSON.parse(localStorage.getItem('att-ui-language-pending')||'{}')['local:jane']).toBe('zh-Hant');
+
+    await act(async()=>{root?.unmount();});
+    root=undefined;
+    getPreferences.mockResolvedValue({available:true,language:'en',theme:'dark',version:2});
+    await renderShell();
+
+    expect(put).toHaveBeenCalledTimes(3);
+    expect(put).toHaveBeenLastCalledWith({language:'zh-Hant'});
+    expect(host.querySelector('[data-language-preference="zh-Hant"]')).not.toBeNull();
+    expect(host.querySelector('[data-theme-preference="dark"]')).not.toBeNull();
+    expect(host.querySelector('[data-preference-status="saved"]')).not.toBeNull();
+    expect(localStorage.getItem('att-ui-language-pending')).toBeNull();
+  });
+
   it('preserves the untouched legacy preference after a transient read failure and a one-field save', async () => {
     vi.spyOn(api,'getCurrentUser').mockResolvedValue({loginId:'jane',displayName:'Jane Tester',role:'USER'});
     vi.spyOn(api,'getUserPreferences').mockRejectedValue(new Error('temporary preference read failure'));
@@ -305,7 +362,8 @@ describe('AppShell', () => {
     expect(host.querySelector('[data-preference-status="failed"]')).not.toBeNull();
     await act(async()=>{(host?.querySelector('[data-theme-preference] button') as HTMLButtonElement).click();await new Promise(resolve=>setTimeout(resolve,0));});
     expect(api.putUserPreferences).toHaveBeenCalledWith({theme:'dark'});
-    expect(host.querySelector('[data-theme-preference="dark"][data-preference-status="saved"]')).not.toBeNull();
+    expect(host.querySelector('[data-theme-preference="dark"]')).not.toBeNull();
+    expect(host.querySelector('[data-preference-status="saved"]')).not.toBeNull();
     expect(localStorage.getItem('att-ui-theme')).toBeNull();
     expect(localStorage.getItem('att-ui-language')).toBe('zh-Hant');
   });
@@ -319,7 +377,8 @@ describe('AppShell', () => {
       selectedPackage="" selectedEnvironment="" onPackageChange={vi.fn()} onEnvironmentChange={vi.fn()} onJobAccepted={vi.fn()}>
       <PreferenceProbe /></AppShell>);await Promise.resolve();});
     await act(async()=>{(host?.querySelector('[data-theme-preference] button') as HTMLButtonElement).click();await Promise.resolve();});
-    expect(host.querySelector('[data-theme-preference="dark"][data-preference-status="browser-only"]')).not.toBeNull();
+    expect(host.querySelector('[data-theme-preference="dark"]')).not.toBeNull();
+    expect(host.querySelector('[data-preference-status="browser-only"]')).not.toBeNull();
     expect(localStorage.getItem('att-ui-theme')).toBe('dark');
     expect(api.getUserPreferences).not.toHaveBeenCalled();
     expect(api.putUserPreferences).not.toHaveBeenCalled();
@@ -336,7 +395,8 @@ describe('AppShell', () => {
       selectedPackage="" selectedEnvironment="" onPackageChange={vi.fn()} onEnvironmentChange={vi.fn()} onJobAccepted={vi.fn()}>
       <PreferenceProbe /></AppShell>);await new Promise(resolve=>setTimeout(resolve,0));});
     await act(async()=>{(host?.querySelector('[data-theme-preference] button') as HTMLButtonElement).click();await Promise.resolve();});
-    expect(host.querySelector('[data-theme-preference="dark"][data-preference-status="browser-only"]')).not.toBeNull();
+    expect(host.querySelector('[data-theme-preference="dark"]')).not.toBeNull();
+    expect(host.querySelector('[data-preference-status="browser-only"]')).not.toBeNull();
     expect(localStorage.getItem('att-ui-theme')).toBe('dark');
     expect(api.putUserPreferences).not.toHaveBeenCalled();
   });

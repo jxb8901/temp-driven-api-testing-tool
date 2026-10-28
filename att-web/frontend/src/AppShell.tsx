@@ -16,6 +16,39 @@ export type ThemePreference = 'system' | 'light' | 'dark';
 export type PreferenceStatus = 'loading'|'idle'|'saving'|'saved'|'failed'|'browser-only';
 export interface AccessCapabilities { operate: boolean; accountManage: boolean; systemSettingsWrite: boolean; configurationAdmin: boolean }
 
+type PreferenceField = 'language'|'theme';
+type PreferenceWriteState = 'idle'|'pending'|'failed';
+const pendingPreferenceKeys:Record<PreferenceField,string>={language:'att-ui-language-pending',theme:'att-ui-theme-pending'};
+
+function readPendingPreference<T extends string>(field:PreferenceField,identity:string,allowed:readonly T[]):T|undefined {
+  try {
+    const stored=JSON.parse(localStorage.getItem(pendingPreferenceKeys[field])||'null') as unknown;
+    if(!stored||typeof stored!=='object'||Array.isArray(stored))return undefined;
+    const value=(stored as Record<string,unknown>)[identity];
+    return typeof value==='string'&&allowed.includes(value as T)?value as T:undefined;
+  } catch { return undefined; }
+}
+
+function writePendingPreference(field:PreferenceField,identity:string,value:string):void {
+  try {
+    const parsed=JSON.parse(localStorage.getItem(pendingPreferenceKeys[field])||'{}') as unknown;
+    const stored=parsed&&typeof parsed==='object'&&!Array.isArray(parsed)?{...parsed as Record<string,unknown>}:{};
+    stored[identity]=value;
+    localStorage.setItem(pendingPreferenceKeys[field],JSON.stringify(stored));
+  } catch { /* Keep the in-memory selection when browser storage is unavailable. */ }
+}
+
+function clearPendingPreference(field:PreferenceField,identity:string):void {
+  try {
+    const parsed=JSON.parse(localStorage.getItem(pendingPreferenceKeys[field])||'null') as unknown;
+    if(!parsed||typeof parsed!=='object'||Array.isArray(parsed))return;
+    const stored={...parsed as Record<string,unknown>};
+    delete stored[identity];
+    if(Object.keys(stored).length)localStorage.setItem(pendingPreferenceKeys[field],JSON.stringify(stored));
+    else localStorage.removeItem(pendingPreferenceKeys[field]);
+  } catch { /* Browser storage can be unavailable. */ }
+}
+
 export interface AppShellProps {
   route: AppRoute;
   navigation: RouteState;
@@ -232,6 +265,7 @@ export function AppShell({
   const [preferenceStatus,setPreferenceStatus]=useState<PreferenceStatus>('loading');
   const preferencesAvailableRef=useRef<boolean|null>(null);
   const preferenceEdits=useRef({language:0,theme:0});
+  const preferenceWriteStates=useRef<Record<PreferenceField,PreferenceWriteState>>({language:'idle',theme:'idle'});
   const pendingPreferenceWrite=useRef<{language?:UiLocalePreference;theme?:ThemePreference}>({});
   const preferenceWriteChain=useRef<Promise<void>>(Promise.resolve());
   const preferenceStatusGeneration=useRef(0);
@@ -280,22 +314,51 @@ export function AppShell({
   const saveLocalThemePreference = (preference:ThemePreference) => {
     try{if(preference==='system')localStorage.removeItem('att-ui-theme');else localStorage.setItem('att-ui-theme',preference);return true;}catch{return false;}
   };
+  const updatePreferenceWriteStatus = (whenClean:'idle'|'saved'='saved') => {
+    const states=Object.values(preferenceWriteStates.current);
+    if(states.includes('pending'))setPreferenceStatus('saving');
+    else if(states.includes('failed'))setPreferenceStatus('failed');
+    else setPreferenceStatus(whenClean);
+  };
   const queuePreferenceWrite = (input:{language?:UiLocalePreference;theme?:ThemePreference},migrateIfAbsent=false) => {
-    const statusGeneration=++preferenceStatusGeneration.current;
+    ++preferenceStatusGeneration.current;
     const languageEdit=preferenceEdits.current.language,themeEdit=preferenceEdits.current.theme;
     const identity=lastPreferenceIdentity.current;
+    if(input.language!==undefined) {
+      preferenceWriteStates.current.language='pending';
+      if(identity)writePendingPreference('language',identity,input.language);
+    }
+    if(input.theme!==undefined) {
+      preferenceWriteStates.current.theme='pending';
+      if(identity)writePendingPreference('theme',identity,input.theme);
+    }
     setPreferenceStatus('saving');
     const write=preferenceWriteChain.current.catch(()=>undefined).then(()=>{
       return identity===lastPreferenceIdentity.current?api.putUserPreferences({...input,...(migrateIfAbsent?{migrateIfAbsent:true}:{})}):null;
     });
     preferenceWriteChain.current=write.then(result=>{
-      if(result&&statusGeneration===preferenceStatusGeneration.current)setPreferenceStatus('saved');
-      if(result?.available) {
-        if(input.language!==undefined&&languageEdit===preferenceEdits.current.language)clearLegacyLanguagePreference();
-        if(input.theme!==undefined&&themeEdit===preferenceEdits.current.theme)clearLegacyThemePreference();
+      if(!result||!identity||identity!==lastPreferenceIdentity.current)return;
+      if(!result.available) {
+        preferencesAvailableRef.current=false;
+        if(input.language!==undefined&&languageEdit===preferenceEdits.current.language)preferenceWriteStates.current.language='idle';
+        if(input.theme!==undefined&&themeEdit===preferenceEdits.current.theme)preferenceWriteStates.current.theme='idle';
+        setPreferenceStatus('browser-only');
+        return;
       }
+      if(input.language!==undefined&&languageEdit===preferenceEdits.current.language) {
+        preferenceWriteStates.current.language='idle';
+        clearLegacyLanguagePreference();clearPendingPreference('language',identity);
+      }
+      if(input.theme!==undefined&&themeEdit===preferenceEdits.current.theme) {
+        preferenceWriteStates.current.theme='idle';
+        clearLegacyThemePreference();clearPendingPreference('theme',identity);
+      }
+      updatePreferenceWriteStatus();
     }).catch(()=>{
-      if(statusGeneration===preferenceStatusGeneration.current)setPreferenceStatus('failed');
+      if(!identity||identity!==lastPreferenceIdentity.current)return;
+      if(input.language!==undefined&&languageEdit===preferenceEdits.current.language)preferenceWriteStates.current.language='failed';
+      if(input.theme!==undefined&&themeEdit===preferenceEdits.current.theme)preferenceWriteStates.current.theme='failed';
+      updatePreferenceWriteStatus();
     });
     return preferenceWriteChain.current;
   };
@@ -305,11 +368,17 @@ export function AppShell({
     else pendingPreferenceWrite.current.theme=value as ThemePreference;
     const hasIdentity=!!currentUser||(versionData?.authMode==='container'&&versionData.authenticationRequired!==false);
     if(!hasIdentity||preferencesAvailableRef.current===false) {
-      delete pendingPreferenceWrite.current[kind];setPreferenceStatus(localSaved?'browser-only':'failed');
-    } else if(preferencesAvailableRef.current===true) {
-      const input=kind==='language'?{language:value as UiLocalePreference}:{theme:value as ThemePreference};
-      delete pendingPreferenceWrite.current[kind];void queuePreferenceWrite(input);
-    } else setPreferenceStatus('saving');
+      delete pendingPreferenceWrite.current[kind];preferenceWriteStates.current[kind]='idle';setPreferenceStatus(localSaved?'browser-only':'failed');
+    } else {
+      preferenceWriteStates.current[kind]='pending';
+      const identity=lastPreferenceIdentity.current;
+      if(identity)writePendingPreference(kind,identity,value);
+      setPreferenceStatus('saving');
+      if(preferencesAvailableRef.current===true) {
+        const input=kind==='language'?{language:value as UiLocalePreference}:{theme:value as ThemePreference};
+        delete pendingPreferenceWrite.current[kind];void queuePreferenceWrite(input);
+      }
+    }
   };
   useEffect(() => {
     if (!versionData) { setCurrentUser(null);setAuthContextKey('');setCanRevealConfigurationFields(false); setAccessCapabilities({ operate: false, accountManage: false, systemSettingsWrite: false, configurationAdmin: false }); setCapabilitiesResolved(false); return; }
@@ -337,7 +406,7 @@ export function AppShell({
     if(!authContextKey)return;
     const controller=new AbortController();
     const identity=versionData.authMode==='local'?`local:${currentUser?.loginId||''}`:`container:${authContextKey}`;
-    if(lastPreferenceIdentity.current&&lastPreferenceIdentity.current!==identity){preferenceStatusGeneration.current++;clearLegacyPreferences();applyThemePreference('system');applyLocalePreference('browser');pendingPreferenceWrite.current={};preferenceEdits.current={language:preferenceEdits.current.language+1,theme:preferenceEdits.current.theme+1};}
+    if(lastPreferenceIdentity.current&&lastPreferenceIdentity.current!==identity){preferenceStatusGeneration.current++;clearLegacyPreferences();applyThemePreference('system');applyLocalePreference('browser');pendingPreferenceWrite.current={};preferenceWriteStates.current={language:'idle',theme:'idle'};preferenceEdits.current={language:preferenceEdits.current.language+1,theme:preferenceEdits.current.theme+1};}
     lastPreferenceIdentity.current=identity;
     preferencesAvailableRef.current=null;
     const statusGeneration=++preferenceStatusGeneration.current;
@@ -349,15 +418,20 @@ export function AppShell({
       preferencesAvailableRef.current=true;
       const legacyLanguage=readStoredUiLocalePreference();let legacyTheme:ThemePreference|undefined;
       try{const value=localStorage.getItem('att-ui-theme');if(value==='light'||value==='dark')legacyTheme=value;}catch{/* Migration is unavailable when browser storage is blocked. */}
-      const pending={...pendingPreferenceWrite.current};
+      const recoverable:{language?:UiLocalePreference;theme?:ThemePreference}={};
+      const recoveredLanguage=readPendingPreference('language',identity,['browser','en','zh-Hant'] as const);
+      const recoveredTheme=readPendingPreference('theme',identity,['system','light','dark'] as const);
+      if(recoveredLanguage!==undefined)recoverable.language=recoveredLanguage;
+      if(recoveredTheme!==undefined)recoverable.theme=recoveredTheme;
+      const pending={...recoverable,...pendingPreferenceWrite.current};
       pendingPreferenceWrite.current={};
       const canApplyLanguage=languageEdit===preferenceEdits.current.language,canApplyTheme=themeEdit===preferenceEdits.current.theme;
       const migration:{language?:UiLocalePreference;theme?:ThemePreference}={};
-      if(canApplyLanguage){if(remote.language)applyLocalePreference(remote.language);else if(legacyLanguage){migration.language=legacyLanguage;applyLocalePreference(legacyLanguage);}}
-      if(canApplyTheme){if(remote.theme)applyThemePreference(remote.theme);else if(legacyTheme){migration.theme=legacyTheme;applyThemePreference(legacyTheme);}}
+      if(canApplyLanguage){if(pending.language!==undefined)applyLocalePreference(pending.language);else if(remote.language)applyLocalePreference(remote.language);else if(legacyLanguage){migration.language=legacyLanguage;applyLocalePreference(legacyLanguage);}}
+      if(canApplyTheme){if(pending.theme!==undefined)applyThemePreference(pending.theme);else if(remote.theme)applyThemePreference(remote.theme);else if(legacyTheme){migration.theme=legacyTheme;applyThemePreference(legacyTheme);}}
       if(Object.keys(migration).length)void queuePreferenceWrite(migration,true);
       if(Object.keys(pending).length)void queuePreferenceWrite(pending);
-      if(!Object.keys(migration).length&&!Object.keys(pending).length){clearLegacyPreferences();if(statusGeneration===preferenceStatusGeneration.current)setPreferenceStatus(remote.language||remote.theme?'saved':'idle');}
+      if(!Object.keys(migration).length&&!Object.keys(pending).length){clearLegacyPreferences();if(statusGeneration===preferenceStatusGeneration.current)updatePreferenceWriteStatus(remote.language||remote.theme?'saved':'idle');}
     }).catch((reason:unknown)=>{
       if(controller.signal.aborted)return;
       if(reason instanceof ApiError&&reason.status===404){preferencesAvailableRef.current=false;pendingPreferenceWrite.current={};if(statusGeneration===preferenceStatusGeneration.current)setPreferenceStatus('browser-only');return;}

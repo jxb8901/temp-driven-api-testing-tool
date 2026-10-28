@@ -184,11 +184,6 @@ public final class FixedArrivalRateScheduler implements LoadScheduler {
             FutureTask<Void> task = new FutureTask<Void>(() -> {
                 boolean cancelledBeforeStart = taskHandle.begin();
                 long iterationStarted = timing.now();
-                if (iterationStarted >= generationDeadline) {
-                    rejectBeforeAdmission(metrics, phase, id, sequenceValue, dueAt, iterationStarted,
-                            taskHandle, cancelledBeforeStart ? "CANCELLED_BEFORE_ADMISSION" : "GENERATION_DEADLINE_EXPIRED");
-                    return null;
-                }
                 int queueDepth = workers.getQueue().size();
                 metrics.recordSubmitLagAt(iterationStarted, iterationStarted - dueAt, queueDepth);
                 LoadMetrics aggregate = aggregateSchedulerMetrics;
@@ -303,18 +298,6 @@ public final class FixedArrivalRateScheduler implements LoadScheduler {
                     sequence, dueAt, observedAt, "GENERATION_DEADLINE_EXPIRED")));
         }
         return scheduledCount;
-    }
-
-    private void rejectBeforeAdmission(LoadMetrics metrics, String phase, String id, long sequenceValue,
-                                       long dueAt, long observedAt, TaskHandle taskHandle, String reason) {
-        try {
-            LoadSchedulerSupport.emit(metrics, listener, tag(LoadEvent.rejected(runId, "arrivalRate", phase, id,
-                    sequenceValue, dueAt, observedAt, reason)));
-        } finally {
-            inFlight.decrementAndGet();
-            admittedTasks.remove(id, taskHandle);
-            signalWorkerChange();
-        }
     }
 
     private void signalWorkerChange() {

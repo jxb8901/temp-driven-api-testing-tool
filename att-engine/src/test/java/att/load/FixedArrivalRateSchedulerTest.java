@@ -20,6 +20,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -284,6 +285,109 @@ class FixedArrivalRateSchedulerTest {
             scheduler.close();
             control.shutdownNow();
             control.awaitTermination(5L, TimeUnit.SECONDS);
+        }
+    }
+
+    @Test
+    void queuedArrivalAdmittedBeforeDeadlineRunsAndCompletesDuringDrain() throws Exception {
+        LoadScenario scenario = scenario(10.0, "10/s", 0L, 0L, 250L, 0L, 2);
+        long generationDeadline = 10_250L;
+        AtomicLong now = new AtomicLong(10_000L);
+        AtomicInteger submitCalls = new AtomicInteger();
+        AtomicInteger workerEnqueues = new AtomicInteger();
+        AtomicInteger postDeadlineEnqueues = new AtomicInteger();
+        CountDownLatch firstStarted = new CountDownLatch(1);
+        CountDownLatch secondSubmitHook = new CountDownLatch(1);
+        CountDownLatch deadlineReached = new CountDownLatch(1);
+        CountDownLatch resumeScheduler = new CountDownLatch(1);
+        CountDownLatch releaseFirst = new CountDownLatch(1);
+        CountDownLatch secondStarted = new CountDownLatch(1);
+        List<IterationRequest> requests = Collections.synchronizedList(new ArrayList<IterationRequest>());
+        List<LoadEvent> events = Collections.synchronizedList(new ArrayList<LoadEvent>());
+        LoadSchedulerTiming timing = new LoadSchedulerTiming(now::get, millis -> {
+            if (millis > 0L) now.addAndGet(millis);
+            if (now.get() >= generationDeadline) {
+                deadlineReached.countDown();
+                resumeScheduler.await();
+            }
+            Thread.yield();
+        });
+        Runnable beforeSubmit = () -> {
+            if (submitCalls.incrementAndGet() != 2) return;
+            try {
+                if (!firstStarted.await(2L, TimeUnit.SECONDS)) throw new IllegalStateException("first arrival did not start");
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                throw new IllegalStateException(interrupted);
+            }
+            secondSubmitHook.countDown();
+        };
+        ThreadPoolExecutor sharedWorkers = new ThreadPoolExecutor(1, 1, 0L, TimeUnit.MILLISECONDS,
+                new ArrayBlockingQueue<Runnable>(2), runnable -> new Thread(runnable, "queued-arrival-drain-test")) {
+            @Override public void execute(Runnable command) {
+                workerEnqueues.incrementAndGet();
+                if (now.get() >= generationDeadline) postDeadlineEnqueues.incrementAndGet();
+                super.execute(command);
+            }
+        };
+        FixedArrivalRateScheduler scheduler = new FixedArrivalRateScheduler(scenario, request -> {
+            requests.add(request);
+            if (request.iteration() == 1L) {
+                firstStarted.countDown();
+                try { releaseFirst.await(); }
+                catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    throw new IllegalStateException(interrupted);
+                }
+            } else if (request.iteration() == 2L) secondStarted.countDown();
+            return result(request.iterationId());
+        }, "queued-arrival-drain", events::add, timing, beforeSubmit);
+        scheduler.useSharedWorkers(sharedWorkers);
+        ExecutorService control = Executors.newSingleThreadExecutor();
+        Future<LoadRunResult> future = control.submit(scheduler::run);
+        try {
+            assertTrue(firstStarted.await(2L, TimeUnit.SECONDS));
+            assertTrue(secondSubmitHook.await(2L, TimeUnit.SECONDS));
+            assertTrue(deadlineReached.await(2L, TimeUnit.SECONDS));
+            assertEquals(1, sharedWorkers.getQueue().size(), "the second arrival was accepted before the deadline and queued");
+            assertEquals(2, workerEnqueues.get());
+            assertEquals(0, postDeadlineEnqueues.get(), "the scheduler must not enqueue new work after generation ends");
+
+            releaseFirst.countDown();
+            assertTrue(secondStarted.await(2L, TimeUnit.SECONDS), "the queued arrival must start during DRAIN");
+            resumeScheduler.countDown();
+            LoadRunResult result = future.get(5L, TimeUnit.SECONDS);
+
+            assertEquals(3L, result.metrics().longValue("scheduled"));
+            assertEquals(2L, result.metrics().longValue("started"));
+            assertEquals(2L, result.metrics().longValue("completed"));
+            assertEquals(1L, result.metrics().longValue("dropped"));
+            assertEquals(0L, result.metrics().longValue("runtimeError"));
+            assertEquals(0L, result.metrics().longValue("currentInFlight"));
+            assertEquals(2, requests.size(), "both pre-deadline admissions must reach the iteration runner");
+            LoadEvent queuedStart = events.stream().filter(LoadEvent::started)
+                    .filter(event -> event.sequence() == 2L).findFirst().orElseThrow(AssertionError::new);
+            assertTrue(queuedStart.startedAtEpochMs() >= generationDeadline);
+            LoadEvent queuedCompletion = events.stream().filter(LoadEvent::completed)
+                    .filter(event -> event.sequence() == 2L).findFirst().orElseThrow(AssertionError::new);
+            assertTrue(queuedCompletion.scheduledAtEpochMs() < generationDeadline);
+            assertTrue(queuedCompletion.completedAtEpochMs() >= generationDeadline);
+            @SuppressWarnings("unchecked") Map<String, Object> windowMetrics =
+                    (Map<String, Object>) result.metrics().value("windowMetrics");
+            @SuppressWarnings("unchecked") Map<String, Object> windows = (Map<String, Object>) windowMetrics.get("windows");
+            @SuppressWarnings("unchecked") Map<String, Object> drain = (Map<String, Object>) windows.get("DRAIN");
+            assertEquals(0L, drain.get("scheduled"));
+            assertEquals(2L, drain.get("completed"));
+            assertEquals(2L, drain.get("successful"));
+            assertFalse(sharedWorkers.isShutdown(), "the child scheduler must not shut down the coordinator's pool");
+        } finally {
+            releaseFirst.countDown();
+            resumeScheduler.countDown();
+            scheduler.close();
+            control.shutdownNow();
+            control.awaitTermination(5L, TimeUnit.SECONDS);
+            sharedWorkers.shutdownNow();
+            sharedWorkers.awaitTermination(5L, TimeUnit.SECONDS);
         }
     }
 
