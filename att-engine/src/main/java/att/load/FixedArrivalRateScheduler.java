@@ -1,5 +1,8 @@
 package att.load;
 
+import java.math.BigDecimal;
+import java.math.BigInteger;
+import java.math.MathContext;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.concurrent.ExecutorService;
@@ -17,7 +20,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 
-/** Fixed-rate open workload scheduler using absolute planned arrival counts. */
+/** Fixed-rate open workload scheduler; the generation window is half-open, [start, deadline). */
 public final class FixedArrivalRateScheduler implements LoadScheduler {
     private final LoadScenario scenario;
     private final LoadIterationRunner executor;
@@ -120,8 +123,14 @@ public final class FixedArrivalRateScheduler implements LoadScheduler {
                 long total = LoadPhase.totalMs(scenario);
                 long desired = elapsed >= total ? arrivalsBeforeDeadline(scenario) : arrivalsDueAt(scenario, elapsed);
                 while (scheduledCount < desired) {
-                    long plannedSequence = ++scheduledCount; long dueAt = plannedDue(scenario, startedAt, plannedSequence);
-                    String phase = LoadPhase.at(scenario, Math.max(0L, dueAt - startedAt)).name();
+                    long plannedSequence = scheduledCount + 1L;
+                    long dueOffset = plannedDueOffset(scenario, plannedSequence);
+                    if (dueOffset >= total) break; // Generation is the half-open interval [start, end).
+                    LoadPhase arrivalPhase = LoadPhase.at(scenario, dueOffset);
+                    if (arrivalPhase == LoadPhase.COMPLETE) break; // COMPLETE is control state, never an iteration phase.
+                    long dueAt = safeDue(startedAt, dueOffset);
+                    String phase = arrivalPhase.name();
+                    scheduledCount = plannedSequence;
                     String prefix = scenario.legacyV10() ? runId : runId + "-" + safe(scenario.workloadId());
                     String iterationId = prefix + "-arrival-" + plannedSequence;
                     if (inFlight.get() >= scenario.maxConcurrent()) {
@@ -274,18 +283,37 @@ public final class FixedArrivalRateScheduler implements LoadScheduler {
     private long remainingRunMillis(long startedAt) {
         return LoadPhase.totalMs(scenario) - (timing.now() - startedAt);
     }
+    /** Counts arrival thresholds reached by this elapsed millisecond, excluding the generation end. */
     static long arrivalsDueAt(LoadScenario scenario, long elapsedMs) {
         if (elapsedMs < 0L) return 0L;
-        double cumulative = cumulativeArrivals(scenario, elapsedMs);
+        long total = LoadPhase.totalMs(scenario);
+        if (total <= 0L) return 0L;
+        if (elapsedMs >= total) return arrivalsBeforeDeadline(scenario);
+        double cumulative = approximateCumulativeArrivals(scenario, elapsedMs);
         if (Double.isInfinite(cumulative) || cumulative >= Long.MAX_VALUE - 1.0) return Long.MAX_VALUE;
+        double nearestInteger = Math.rint(cumulative);
+        double tolerance = Math.max(1.0e-12, 64.0 * Math.ulp(Math.max(Math.abs(cumulative), Math.abs(nearestInteger))));
+        if (Math.abs(cumulative - nearestInteger) <= tolerance) {
+            Fraction exact = exactCumulativeArrivals(scenario, elapsedMs);
+            if (exact != null) return exact.floorPlusOneSaturated();
+        }
         return (long) Math.floor(Math.max(0.0, cumulative)) + 1L;
     }
+    /** Counts thresholds reached strictly before the generation deadline; a threshold at the end is excluded. */
     static long arrivalsBeforeDeadline(LoadScenario scenario) {
-        double cumulative = cumulativeArrivals(scenario, LoadPhase.totalMs(scenario));
+        long total = LoadPhase.totalMs(scenario);
+        if (total <= 0L) return 0L;
+        Fraction exact = exactCumulativeArrivals(scenario, total);
+        if (exact != null) return exact.ceilSaturated();
+        double cumulative = approximateCumulativeArrivals(scenario, total);
         if (Double.isInfinite(cumulative) || cumulative >= Long.MAX_VALUE) return Long.MAX_VALUE;
         return (long) Math.ceil(Math.max(0.0, cumulative));
     }
     static double cumulativeArrivals(LoadScenario scenario, long elapsedMs) {
+        Fraction exact = exactCumulativeArrivals(scenario, elapsedMs);
+        return exact == null ? approximateCumulativeArrivals(scenario, elapsedMs) : exact.doubleValue();
+    }
+    private static double approximateCumulativeArrivals(LoadScenario scenario, long elapsedMs) {
         long total = LoadPhase.totalMs(scenario); long step = Math.max(0L, Math.min(total, elapsedMs));
         double rate = scenario.arrivalRatePerSecond(); double result = 0.0; long cursor = 0L;
         long warmup = scenario.warmup().toMillis(); long rampUp = scenario.rampUp().toMillis(); long steady = scenario.duration().toMillis(); long rampDown = scenario.rampDown().toMillis();
@@ -295,8 +323,17 @@ public final class FixedArrivalRateScheduler implements LoadScheduler {
         long downElapsed = Math.min(step - cursor, rampDown); result += rampArea(rate, rampDown, downElapsed, false); return result;
     }
     private static double rampArea(double rate, long duration, long elapsed, boolean up) { if (duration <= 0 || elapsed <= 0) return 0.0; double fraction = Math.min(1.0, ((double) elapsed) / duration); return rate * elapsed / 1000.0 * (up ? fraction / 2.0 : 1.0 - fraction / 2.0); }
+    /**
+     * Returns the first integer-millisecond offset where cumulative area reaches sequence - 1.
+     * The final threshold may map to the exclusive end; callers must not admit it.
+     */
     static long plannedDue(LoadScenario scenario, long start, long sequenceValue) {
+        return safeDue(start, plannedDueOffset(scenario, sequenceValue));
+    }
+    private static long plannedDueOffset(LoadScenario scenario, long sequenceValue) {
         if (sequenceValue < 1L) throw new IllegalArgumentException("Arrival sequence must be >= 1");
+        if (sequenceValue == 1L) return 0L;
+        long total = LoadPhase.totalMs(scenario);
         double target = sequenceValue - 1.0;
         double rate = scenario.arrivalRatePerSecond();
         long cursor = 0L;
@@ -305,16 +342,166 @@ public final class FixedArrivalRateScheduler implements LoadScheduler {
         long steady = scenario.duration().toMillis();
         long rampDown = scenario.rampDown().toMillis();
         double area = rate * warmup / 1000.0;
-        if (target <= area) return safeDue(start, inverseLinear(target, rate));
-        target -= area; cursor += warmup;
-        area = rate * rampUp / 2000.0;
-        if (target <= area && rampUp > 0L)
-            return safeDue(start, cursor + inverseRampUp(target, rate, rampUp));
-        target -= area; cursor += rampUp;
-        area = rate * steady / 1000.0;
-        if (target <= area) return safeDue(start, cursor + inverseLinear(target, rate));
-        target -= area; cursor += steady;
-        return safeDue(start, cursor + inverseRampDown(target, rate, rampDown));
+        long approximate;
+        if (target <= area) approximate = inverseLinear(target, rate);
+        else {
+            target -= area; cursor += warmup;
+            area = rate * rampUp / 2000.0;
+            if (target <= area && rampUp > 0L) approximate = saturatedOffsetAdd(cursor, inverseRampUp(target, rate, rampUp));
+            else {
+                target -= area; cursor += rampUp;
+                area = rate * steady / 1000.0;
+                if (target <= area) approximate = saturatedOffsetAdd(cursor, inverseLinear(target, rate));
+                else {
+                    target -= area; cursor += steady;
+                    approximate = saturatedOffsetAdd(cursor, inverseRampDown(target, rate, rampDown));
+                }
+            }
+        }
+        return correctedDueOffset(scenario, sequenceValue - 1L, approximate, total);
+    }
+    private static long saturatedOffsetAdd(long left, long right) {
+        try { return Math.addExact(left, right); } catch (ArithmeticException overflow) { return Long.MAX_VALUE; }
+    }
+    /**
+     * Correct the analytic inverse against the exact configured-rate integral. The inverse is
+     * normally within one millisecond; a bounded local search handles rounding, with a binary
+     * search fallback so valid pre-deadline arrivals are never lost.
+     */
+    private static long correctedDueOffset(LoadScenario scenario, long target, long approximate, long total) {
+        if (target <= 0L) return 0L;
+        Fraction rate = exactArrivalRate(scenario);
+        if (rate == null) return Math.min(Math.max(0L, approximate), total);
+        ArrivalArea area = new ArrivalArea(scenario, rate, total);
+        long candidate = Math.min(Math.max(0L, approximate), total);
+        long low = Math.max(0L, candidate - 4L);
+        long high = candidate > Long.MAX_VALUE - 4L ? total : Math.min(total, candidate + 4L);
+        if (area.at(low).compareTo(target) >= 0)
+            return firstOffsetAtOrAfter(area, target, 0L, low);
+        if (area.at(high).compareTo(target) >= 0)
+            return firstOffsetAtOrAfter(area, target, low + 1L, high);
+        if (area.at(total).compareTo(target) < 0)
+            return total == Long.MAX_VALUE ? Long.MAX_VALUE : total + 1L;
+        return firstOffsetAtOrAfter(area, target, high + 1L, total);
+    }
+    private static long firstOffsetAtOrAfter(ArrivalArea area, long target, long low, long high) {
+        while (low < high) {
+            long middle = low + (high - low) / 2L;
+            if (area.at(middle).compareTo(target) >= 0) high = middle;
+            else low = middle + 1L;
+        }
+        return low;
+    }
+    private static Fraction exactCumulativeArrivals(LoadScenario scenario, long elapsedMs) {
+        Fraction rate = exactArrivalRate(scenario);
+        return rate == null ? null : new ArrivalArea(scenario, rate, LoadPhase.totalMs(scenario)).at(elapsedMs);
+    }
+    private static Fraction exactArrivalRate(LoadScenario scenario) {
+        String configured = scenario.arrivalRate();
+        if (configured != null) {
+            int slash = configured.lastIndexOf('/');
+            if (slash > 0 && slash < configured.length() - 1) {
+                String unit = configured.substring(slash + 1).trim();
+                if ("s".equals(unit) || "m".equals(unit)) {
+                    try {
+                        Fraction value = Fraction.fromDecimal(new BigDecimal(configured.substring(0, slash).trim()));
+                        return "m".equals(unit) ? value.multiplyDivide(BigInteger.ONE, BigInteger.valueOf(60L)) : value;
+                    } catch (NumberFormatException ignored) {
+                        // Older in-memory scenarios may carry a display label instead of a rate literal.
+                    }
+                }
+            }
+        }
+        double rate = scenario.arrivalRatePerSecond();
+        return Double.isNaN(rate) || Double.isInfinite(rate) ? null : Fraction.fromDecimal(BigDecimal.valueOf(rate));
+    }
+
+    private static final class ArrivalArea {
+        private final LoadScenario scenario;
+        private final Fraction rate;
+        private final long total;
+        ArrivalArea(LoadScenario scenario, Fraction rate, long total) {
+            this.scenario = scenario; this.rate = rate; this.total = total;
+        }
+        Fraction at(long elapsedMs) {
+            long step = Math.max(0L, Math.min(total, elapsedMs));
+            long warmup = scenario.warmup().toMillis();
+            long rampUp = scenario.rampUp().toMillis();
+            long steady = scenario.duration().toMillis();
+            long rampDown = scenario.rampDown().toMillis();
+            long cursor = 0L;
+            Fraction result = Fraction.ZERO;
+            long warmupElapsed = Math.min(step, warmup);
+            result = result.add(rate.multiplyDivide(BigInteger.valueOf(warmupElapsed), BigInteger.valueOf(1000L)));
+            cursor += warmup;
+            if (step <= cursor) return result;
+            long upElapsed = Math.min(step - cursor, rampUp);
+            if (rampUp > 0L) {
+                BigInteger elapsed = BigInteger.valueOf(upElapsed);
+                BigInteger divisor = BigInteger.valueOf(rampUp).multiply(BigInteger.valueOf(2000L));
+                result = result.add(rate.multiplyDivide(elapsed.multiply(elapsed), divisor));
+            }
+            cursor += rampUp;
+            if (step <= cursor) return result;
+            long steadyElapsed = Math.min(step - cursor, steady);
+            result = result.add(rate.multiplyDivide(BigInteger.valueOf(steadyElapsed), BigInteger.valueOf(1000L)));
+            cursor += steady;
+            if (step <= cursor) return result;
+            long downElapsed = Math.min(step - cursor, rampDown);
+            if (rampDown > 0L) {
+                BigInteger duration = BigInteger.valueOf(rampDown);
+                BigInteger elapsed = BigInteger.valueOf(downElapsed);
+                BigInteger numerator = duration.multiply(elapsed).shiftLeft(1).subtract(elapsed.multiply(elapsed));
+                BigInteger divisor = duration.multiply(BigInteger.valueOf(2000L));
+                result = result.add(rate.multiplyDivide(numerator, divisor));
+            }
+            return result;
+        }
+    }
+
+    private static final class Fraction {
+        static final Fraction ZERO = new Fraction(BigInteger.ZERO, BigInteger.ONE);
+        private final BigInteger numerator;
+        private final BigInteger denominator;
+        private Fraction(BigInteger numerator, BigInteger denominator) {
+            if (denominator.signum() == 0) throw new IllegalArgumentException("Fraction denominator must not be zero");
+            if (denominator.signum() < 0) { numerator = numerator.negate(); denominator = denominator.negate(); }
+            BigInteger gcd = numerator.gcd(denominator);
+            this.numerator = numerator.divide(gcd);
+            this.denominator = denominator.divide(gcd);
+        }
+        static Fraction fromDecimal(BigDecimal value) {
+            BigInteger numerator = value.unscaledValue();
+            int scale = value.scale();
+            return scale < 0
+                    ? new Fraction(numerator.multiply(BigInteger.TEN.pow(-scale)), BigInteger.ONE)
+                    : new Fraction(numerator, BigInteger.TEN.pow(scale));
+        }
+        Fraction add(Fraction other) {
+            BigInteger gcd = denominator.gcd(other.denominator);
+            BigInteger leftScale = other.denominator.divide(gcd);
+            BigInteger rightScale = denominator.divide(gcd);
+            return new Fraction(numerator.multiply(leftScale).add(other.numerator.multiply(rightScale)),
+                    denominator.multiply(leftScale));
+        }
+        Fraction multiplyDivide(BigInteger value, BigInteger divisor) {
+            return new Fraction(numerator.multiply(value), denominator.multiply(divisor));
+        }
+        int compareTo(long integer) {
+            return numerator.compareTo(denominator.multiply(BigInteger.valueOf(integer)));
+        }
+        long floorPlusOneSaturated() {
+            BigInteger value = numerator.divide(denominator).add(BigInteger.ONE);
+            return value.compareTo(BigInteger.valueOf(Long.MAX_VALUE)) >= 0 ? Long.MAX_VALUE : value.longValue();
+        }
+        long ceilSaturated() {
+            BigInteger[] division = numerator.divideAndRemainder(denominator);
+            BigInteger value = division[1].signum() > 0 ? division[0].add(BigInteger.ONE) : division[0];
+            return value.compareTo(BigInteger.valueOf(Long.MAX_VALUE)) >= 0 ? Long.MAX_VALUE : value.longValue();
+        }
+        double doubleValue() {
+            return new BigDecimal(numerator).divide(new BigDecimal(denominator), MathContext.DECIMAL128).doubleValue();
+        }
     }
     private static long inverseLinear(double arrivals, double rate) {
         if (arrivals <= 0.0 || rate <= 0.0) return 0L;

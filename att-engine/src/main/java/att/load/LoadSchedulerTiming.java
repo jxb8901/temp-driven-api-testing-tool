@@ -53,8 +53,10 @@ final class LoadSchedulerTiming {
 
     <T> T await(BlockingQueue<T> completed, long millis) throws InterruptedException {
         if (completed == null) throw new IllegalArgumentException("Completion queue is required");
-        if (realtime) return completed.poll(Math.max(0L, millis), TimeUnit.MILLISECONDS);
-        T ready = completed.poll(Math.max(0L, millis), TimeUnit.MILLISECONDS);
+        // Virtual-clock tests advance through the injected sleeper; only briefly poll real time
+        // for worker completions so a simulated multi-hour run does not wait for hours.
+        long pollMillis = realtime ? millis : Math.min(1L, Math.max(0L, millis));
+        T ready = completed.poll(Math.max(0L, pollMillis), TimeUnit.MILLISECONDS);
         if (ready != null) return ready;
         sleep(Math.max(0L, millis));
         return completed.poll();

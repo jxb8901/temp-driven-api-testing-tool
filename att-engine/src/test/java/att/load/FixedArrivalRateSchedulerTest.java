@@ -92,6 +92,132 @@ class FixedArrivalRateSchedulerTest {
     }
 
     @Test
+    void fourHourMinuteRateReproducerExcludesTheExactGenerationDeadline() throws Exception {
+        // The configured minute rate is exact, but converting it to a double per-second rate
+        // produces 0.9600000000000001 and used to ceil the final area to 13,825 arrivals.
+        LoadScenario scenario = scenario(57.6 / 60.0, "57.6/m", 0L, 0L, 14_400_000L, 0L, 16,
+                Collections.<String, Object>singletonMap("achievedArrivalRate", ">= 100%"));
+        long generationEnd = LoadPhase.totalMs(scenario);
+        assertEquals(13_824.0, FixedArrivalRateScheduler.cumulativeArrivals(scenario, generationEnd), 0.0);
+        assertEquals(13_824L, FixedArrivalRateScheduler.arrivalsBeforeDeadline(scenario));
+        assertEquals(13_824L, FixedArrivalRateScheduler.arrivalsDueAt(scenario, generationEnd));
+        assertEquals(generationEnd, FixedArrivalRateScheduler.plannedDue(scenario, 0L, 13_825L));
+        for (long sequence = 1L; sequence <= 13_824L; sequence++) {
+            assertTrue(FixedArrivalRateScheduler.plannedDue(scenario, 0L, sequence) < generationEnd,
+                    "valid arrival " + sequence + " must be before the exclusive end");
+        }
+
+        List<LoadEvent> events = Collections.synchronizedList(new ArrayList<LoadEvent>());
+        LoadRunResult result = new FixedArrivalRateScheduler(scenario, request -> {
+            assertTrue("WARMUP".equals(request.phase()) || "RAMP_UP".equals(request.phase())
+                    || "STEADY".equals(request.phase()) || "RAMP_DOWN".equals(request.phase()));
+            return result(request.iterationId());
+        }, "four-hour-boundary", events::add, new FakeTiming().timing()).run();
+
+        assertEquals(ResultStatus.PASS, result.status());
+        assertEquals("PASS", result.executionStatus());
+        assertEquals(0L, result.metrics().longValue("failure"));
+        assertEquals(0L, result.metrics().longValue("runtimeError"));
+        assertEquals(13_824L, result.metrics().longValue("scheduled"));
+        assertEquals(13_824L, result.metrics().longValue("started"));
+        assertEquals(13_824L, result.metrics().longValue("completed"));
+        assertEquals(0L, result.metrics().longValue("dropped"));
+        assertEquals(0L, result.metrics().longValue("currentInFlight"));
+        result = result.withThresholds(new LoadThresholdEvaluator().evaluate(scenario, result.metrics()));
+        assertEquals(ResultStatus.PASS, result.status());
+        assertEquals("PASS", result.executionStatus());
+        assertEquals("MET", result.performanceVerdict());
+        assertFalse(events.stream().anyMatch(event -> event.phase() == null || "COMPLETE".equals(event.phase())
+                || event.scheduledAtEpochMs() >= generationEnd));
+    }
+
+    @Test
+    void halfOpenArrivalCountsStayConsistentAcrossRatesPhasesAndWorkloadViews() {
+        List<LoadScenario> scenarios = new ArrayList<LoadScenario>();
+        scenarios.add(scenario(0.1, "0.1/s", 0L, 0L, 10_001L, 0L, 4));
+        scenarios.add(scenario(0.96, "0.96/s", 0L, 0L, 14_400_000L, 0L, 4));
+        scenarios.add(scenario(1.0, "1/s", 0L, 0L, 1_000L, 0L, 4));
+        scenarios.add(scenario(1.0, "1/s", 0L, 0L, 1_001L, 0L, 4));
+        scenarios.add(scenario(1.5, "1.5/s", 0L, 0L, 1_001L, 0L, 4));
+        scenarios.add(scenario(10.1, "10.1/s", 3L, 101L, 997L, 1L, 4));
+        scenarios.add(scenario(7.3, "7.3/s", 17L, 113L, 89L, 71L, 4));
+
+        LoadWorkload first = arrivalWorkload("first", 57.6 / 60.0, "57.6/m", 14_400_000L);
+        LoadWorkload second = arrivalWorkload("second", 10.1, "10.1/s", 10_001L);
+        LoadScenario multi = new LoadScenario(Paths.get("multi-boundary.yaml"), "att-load/v1.9",
+                Arrays.asList(first, second), null, Collections.<String, Object>emptyMap(),
+                Collections.<String, Object>emptyMap());
+        for (LoadWorkload workload : multi.workloads()) scenarios.add(multi.forWorkload(workload));
+
+        for (LoadScenario scenario : scenarios) {
+            long end = LoadPhase.totalMs(scenario);
+            long count = FixedArrivalRateScheduler.arrivalsBeforeDeadline(scenario);
+            assertEquals(count, FixedArrivalRateScheduler.arrivalsDueAt(scenario, end), scenario.arrivalRate());
+            assertEquals(count, FixedArrivalRateScheduler.arrivalsDueAt(scenario, end + 1L), scenario.arrivalRate());
+            for (long sequence = 1L; sequence <= count; sequence++) {
+                long due = FixedArrivalRateScheduler.plannedDue(scenario, 500L, sequence) - 500L;
+                assertTrue(due >= 0L && due < end, scenario.arrivalRate() + " sequence " + sequence);
+                assertTrue(LoadPhase.at(scenario, due) != LoadPhase.COMPLETE,
+                        scenario.arrivalRate() + " sequence " + sequence);
+                if (due > 0L) assertTrue(FixedArrivalRateScheduler.arrivalsDueAt(scenario, due - 1L) < sequence,
+                        "inverse must not move a valid arrival earlier than its cumulative threshold");
+            }
+            if (count < Long.MAX_VALUE)
+                assertTrue(FixedArrivalRateScheduler.plannedDue(scenario, 0L, count + 1L) >= end,
+                        "next arrival must be at or after the exclusive end for " + scenario.arrivalRate());
+        }
+    }
+
+    @Test
+    void admittedArrivalCanCompleteDuringDrainWithoutASecondAdmission() throws Exception {
+        LoadScenario scenario = scenario(1.0, "1/s", 0L, 0L, 1_000L, 0L, 1);
+        AtomicLong now = new AtomicLong(10_000L);
+        CountDownLatch entered = new CountDownLatch(1);
+        CountDownLatch crossedDeadline = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        LoadSchedulerTiming timing = new LoadSchedulerTiming(now::get, millis -> {
+            now.addAndGet(millis + 5L);
+            crossedDeadline.countDown();
+        });
+        List<LoadEvent> events = Collections.synchronizedList(new ArrayList<LoadEvent>());
+        FixedArrivalRateScheduler scheduler = new FixedArrivalRateScheduler(scenario, request -> {
+            entered.countDown();
+            try { release.await(); }
+            catch (InterruptedException interrupted) { Thread.currentThread().interrupt(); throw new IllegalStateException(interrupted); }
+            return result(request.iterationId());
+        }, "drain-boundary", events::add, timing);
+        ExecutorService control = Executors.newSingleThreadExecutor();
+        Future<LoadRunResult> future = control.submit(scheduler::run);
+        try {
+            assertTrue(entered.await(2L, TimeUnit.SECONDS));
+            assertTrue(crossedDeadline.await(2L, TimeUnit.SECONDS));
+            release.countDown();
+            LoadRunResult result = future.get(5L, TimeUnit.SECONDS);
+            assertEquals(1L, result.metrics().longValue("scheduled"));
+            assertEquals(1L, result.metrics().longValue("started"));
+            assertEquals(1L, result.metrics().longValue("completed"));
+            assertEquals(0L, result.metrics().longValue("runtimeError"));
+            assertEquals(0L, result.metrics().longValue("currentInFlight"));
+            LoadEvent completion = events.stream().filter(LoadEvent::completed).findFirst().orElseThrow(AssertionError::new);
+            assertEquals("STEADY", completion.phase());
+            assertTrue(completion.scheduledAtEpochMs() < 11_000L);
+            assertTrue(completion.completedAtEpochMs() > 11_000L);
+            @SuppressWarnings("unchecked") Map<String, Object> windowMetrics =
+                    (Map<String, Object>) result.metrics().value("windowMetrics");
+            @SuppressWarnings("unchecked") Map<String, Object> windows = (Map<String, Object>) windowMetrics.get("windows");
+            @SuppressWarnings("unchecked") Map<String, Object> drain = (Map<String, Object>) windows.get("DRAIN");
+            assertEquals(0L, drain.get("scheduled"));
+            assertEquals(1L, drain.get("completed"));
+            assertEquals(1L, drain.get("successful"));
+        } finally {
+            release.countDown();
+            scheduler.close();
+            control.shutdownNow();
+            control.awaitTermination(5L, TimeUnit.SECONDS);
+        }
+    }
+
+    @Test
     void directArrivalDeadlinesMatchThePhaseIntegralAcrossEveryPhase() {
         LoadScenario scenario = scenario(7.3, 17L, 113L, 89L, 71L, 4);
         long start = 5000L;
@@ -389,11 +515,30 @@ class FixedArrivalRateSchedulerTest {
 
     private static LoadScenario scenario(double rate, long warmupMs, long rampUpMs, long durationMs,
                                          long rampDownMs, int maxConcurrent) {
+        return scenario(rate, rate + "/s", warmupMs, rampUpMs, durationMs, rampDownMs, maxConcurrent);
+    }
+
+    private static LoadScenario scenario(double rate, String rateText, long warmupMs, long rampUpMs, long durationMs,
+                                         long rampDownMs, int maxConcurrent) {
+        return scenario(rate, rateText, warmupMs, rampUpMs, durationMs, rampDownMs, maxConcurrent,
+                Collections.<String, Object>emptyMap());
+    }
+
+    private static LoadScenario scenario(double rate, String rateText, long warmupMs, long rampUpMs, long durationMs,
+                                         long rampDownMs, int maxConcurrent, Map<String, Object> thresholds) {
         return new LoadScenario(Paths.get("issue-26.yaml"), "flow", "common.compose.v1",
                 Collections.emptyMap(), Collections.<String, Object>singletonMap("source", "issue-26"),
-                LoadScenario.Model.ARRIVAL_RATE, 0, rate, rate + "/s", Duration.ofMillis(warmupMs),
+                LoadScenario.Model.ARRIVAL_RATE, 0, rate, rateText, Duration.ofMillis(warmupMs),
                 Duration.ofMillis(rampUpMs), Duration.ofMillis(durationMs), Duration.ofMillis(rampDownMs),
-                Duration.ZERO, maxConcurrent, "drop", Collections.emptyMap(), Collections.emptyMap());
+                Duration.ZERO, maxConcurrent, "drop", thresholds, Collections.emptyMap());
+    }
+
+    private static LoadWorkload arrivalWorkload(String id, double rate, String rateText, long durationMs) {
+        return new LoadWorkload(id, "flow", "common.compose.v1", Collections.<String, Object>emptyMap(),
+                Collections.<String, Object>emptyMap(), Collections.<String, Object>emptyMap(),
+                LoadScenario.Model.ARRIVAL_RATE, 0, rate, rateText, Duration.ZERO, Duration.ZERO,
+                Duration.ofMillis(durationMs), Duration.ZERO, ThinkTimePolicy.fixed(Duration.ZERO), 4, "drop",
+                Collections.<String, Object>emptyMap());
     }
 
     private static IterationResult result(String iterationId) {
