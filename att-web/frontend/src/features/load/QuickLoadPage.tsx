@@ -171,7 +171,7 @@ export function QuickLoadPage({ api, packageId, target, initialTemplateId = '', 
     try { return logicalTargetId ? makeScenario(policy, model, logicalTargetId, targetType, users, tps, maxConcurrent, duration, timing, business, advanced) : null; }
     catch { return null; }
   }, [policy, model, logicalTargetId, targetType, environment, users, tps, maxConcurrent, duration, timing, business, advanced]);
-  const effectiveEnvelopeMs = duration.trim() ? effectiveLoadEnvelopeMs([timing.warmup, timing.rampUp, duration, timing.rampDown]) : null;
+  const effectiveEnvelopeMs = duration.trim() ? effectiveLoadEnvelopeMs([timing.rampUp, timing.warmup, duration, timing.rampDown]) : null;
   const rawJson = scenario ? JSON.stringify(scenario, null, 2) : '';
   const scenarioFingerprint = JSON.stringify([identityKey, environment, model, templateId, preset, rawJson]);
   const scenarioFingerprintRef = useRef(scenarioFingerprint);
@@ -397,7 +397,7 @@ export function QuickLoadPage({ api, packageId, target, initialTemplateId = '', 
           : <label>Target TPS<input value={tps} onChange={event => change(setTps, event.currentTarget.value)} placeholder="e.g. 5/s" /></label>}
         {model === 'arrivalRate' && <label>Maximum concurrent<input type="number" min="1" step="1" value={maxConcurrent} onChange={event => change(setMaxConcurrent, event.currentTarget.value)} /></label>}
         <label>Duration<input value={duration} onChange={event => change(setDuration, event.currentTarget.value)} placeholder="e.g. 30s or 5m" /></label>
-        {serverLimits && <p className="att-help">Server duration limit: {serverLimits.maxDurationSeconds}s. Planned effective envelope: {effectiveEnvelopeMs == null ? 'enter valid ms, s, m, or h phases' : plannedWorkloadDuration(effectiveEnvelopeMs)} (warm-up + ramp-up + measured duration + ramp-down).</p>}
+        {serverLimits && <p className="att-help">Server duration limit: {serverLimits.maxDurationSeconds}s. Planned effective envelope: {effectiveEnvelopeMs == null ? 'enter valid ms, s, m, or h phases' : plannedWorkloadDuration(effectiveEnvelopeMs)} (ramp-up + warm-up + measured duration + ramp-down).</p>}
         {serverLimits && effectiveEnvelopeMs != null && effectiveEnvelopeMs > serverLimits.maxDurationSeconds * 1000 && <p role="alert" className="att-inline-error">Planned effective envelope {plannedWorkloadDuration(effectiveEnvelopeMs)} exceeds the Server limit {plannedWorkloadDuration(serverLimits.maxDurationSeconds * 1000)}. Reduce one or more phases before validating.</p>}
       </div>
       <EnvironmentResolutionNotice packageId={packageId} environment={environment} />
@@ -423,8 +423,8 @@ export function QuickLoadPage({ api, packageId, target, initialTemplateId = '', 
     <section className="att-load-section" aria-labelledby="quick-load-advanced">
       <button className="att-quick-load-disclosure" type="button" aria-expanded={advancedOpen} onClick={() => setAdvancedOpen(value => !value)}>Advanced Settings {advancedOpen ? '−' : '+'}</button>
       {advancedOpen && <div className="att-load-grid">
-        <label>Warm-up<input value={timing.warmup} onChange={event => change(setTiming, { ...timing, warmup: event.currentTarget.value })} placeholder="Optional duration" /></label>
         <label>Ramp-up<input value={timing.rampUp} onChange={event => change(setTiming, { ...timing, rampUp: event.currentTarget.value })} placeholder="Optional duration" /></label>
+        <label>Warm-up<input value={timing.warmup} onChange={event => change(setTiming, { ...timing, warmup: event.currentTarget.value })} placeholder="Optional duration" /></label>
         <label>Ramp-down<input value={timing.rampDown} onChange={event => change(setTiming, { ...timing, rampDown: event.currentTarget.value })} placeholder="Optional duration" /></label>
         <label>Seed<input type="number" step="1" value={advanced.seed} onChange={event => updateAdvanced('seed', event.currentTarget.value)} /></label>
         {(['thresholds', 'evidence', 'execution'] as const).map(key => <label className="att-json-field" key={key}>{key === 'thresholds' ? 'Thresholds JSON' : key === 'evidence' ? 'Evidence settings JSON' : 'Execution defaults JSON'}

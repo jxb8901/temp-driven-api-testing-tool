@@ -90,9 +90,13 @@ final class LoadScheduleScheduler implements AutoCloseable {
     }
 
     synchronized Map<String,Object> trigger(LoadSchedule schedule,String executionPrincipal) throws Exception {
+        return trigger(schedule,executionPrincipal,null);
+    }
+
+    synchronized Map<String,Object> trigger(LoadSchedule schedule,String executionPrincipal,String triggeredBy) throws Exception {
         Instant now=clock.instant();String occurrence= schedule.id+"-manual-"+UUID.randomUUID().toString().replace("-","");
         Instant previous=store.lastManualTrigger(schedule.id);
-        store.insertManualOccurrence(schedule.id,occurrence,now);
+        store.insertManualOccurrence(schedule.id,occurrence,now,triggeredBy);
         if(previous!=null&&Duration.between(previous,now).compareTo(Duration.ofMinutes(config.minimumIntervalMinutes))<0) {
             store.updateOccurrence(occurrence,"skipped","manual-trigger-rate-limit",null);
             return store.scheduleExecution(occurrence);

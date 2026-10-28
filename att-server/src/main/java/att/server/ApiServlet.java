@@ -53,7 +53,7 @@ public final class ApiServlet extends HttpServlet {
         try {
             if(path.startsWith("/auth/")){authGet(req,res,path,requestId);return;}
             if("/health".equals(path)){json(res,200,Map.of("status","UP","version",ServerBuildInfo.PRODUCT,"apiVersion",ServerApi.VERSION,"requestId",requestId));return;}
-            if("/version".equals(path)){Map<String,Object> version=new LinkedHashMap<>();version.put("version",ServerBuildInfo.PRODUCT);version.put("apiVersion",ServerApi.VERSION);version.put("buildTime",ServerBuildInfo.BUILD_TIME);version.put("gitCommit",ServerBuildInfo.GIT_COMMIT);version.put("javaMinimum",17);version.put("inlineLoadEnabled",runtime.config.inlineLoad.enabled);version.put("loadSchedulingEnabled",runtime.config.scheduling.enabled);version.put("unifiedRunVersion",RunDefinition.VERSION);version.put("authMode",runtime.config.authMode);version.put("requestId",requestId);json(res,200,version);return;}
+            if("/version".equals(path)){Map<String,Object> version=new LinkedHashMap<>();version.put("version",ServerBuildInfo.PRODUCT);version.put("apiVersion",ServerApi.VERSION);version.put("buildTime",ServerBuildInfo.BUILD_TIME);version.put("gitCommit",ServerBuildInfo.GIT_COMMIT);version.put("javaMinimum",17);version.put("inlineLoadEnabled",runtime.config.inlineLoad.enabled);version.put("loadSchedulingEnabled",runtime.config.scheduling.enabled);version.put("unifiedRunVersion",RunDefinition.VERSION);version.put("authMode",runtime.config.authMode);version.put("authenticationRequired",runtime.config.authenticationRequired);version.put("requestId",requestId);json(res,200,version);return;}
             boolean resourceRequest=resourcePath(path);
             boolean loadCatalogRequest=path.matches("/packages/[^/]+/load-catalog(?:/(?:source|validate|detail))?");
             boolean configurationRequest=configurationPath(path);
@@ -88,7 +88,7 @@ public final class ApiServlet extends HttpServlet {
             if(path.startsWith("/packages/")){String id=segment(path,2);Map<String,Object> view=runtime.packageView(id,principal);view.put("requestId",requestId);json(res,200,view);return;}
             if("/jobs".equals(path)){
                 Map<String,String> parameters=new LinkedHashMap<>();
-                for(String key:List.of("offset","limit","principal","principalMode","packageId","executionType","status","from","to","search","sort","deletion","pinnedOnly","groupBy")) {
+                for(String key:List.of("offset","limit","principal","principalMode","submissionSource","executionPrincipal","executionPrincipalMode","executionPrincipalExact","scheduleOwner","scheduleOwnerMode","scheduleOwnerExact","triggeredBy","triggeredByMode","triggeredByExact","packageId","executionType","status","from","to","search","sort","deletion","pinnedOnly","groupBy")) {
                     String value=req.getParameter(key);if(value!=null)parameters.put(key,value);
                 }
                 Map<String,Object> response=runtime.store.queryJobs(JobQuery.parse(parameters,principal));response.put("requestId",requestId);
@@ -140,6 +140,7 @@ public final class ApiServlet extends HttpServlet {
           catch(ServerRuntime.InlineLoadLimitException e){error(res,400,"ATT-SERVER-INLINE-LOAD-LIMIT",safeDetail(e),requestId);}
           catch(ServerRuntime.DraftValidationException e){error(res,400,"ATT-SERVER-INVALID-REQUEST",e.getMessage(),requestId,e.diagnostics);}
           catch(ServerRuntime.InspectionConfigurationException e){error(res,422,"ATT-CFG-001",e.summary(),requestId,e.diagnostics);}
+          catch(ServerRuntime.InspectionValidationException e){error(res,422,e.code,e.summary(),requestId,e.diagnostics);}
           catch(ServerRuntime.JobConflictException e){error(res,409,e.code,safeDetail(new IllegalArgumentException(e.getMessage())),requestId);}
           catch(ServerRuntime.ReplayDraftExpiredException e){error(res,410,"ATT-SERVER-REPLAY-DRAFT-EXPIRED","The replay draft expired or was lost after Server restart. Reopen the source Job and create a new draft.",requestId);}
           catch(ServerRuntime.NotFoundException e){error(res,404,"ATT-SERVER-NOT-FOUND","API resource was not found",requestId);}
@@ -282,10 +283,21 @@ public final class ApiServlet extends HttpServlet {
         catch(ServerRuntime.NotFoundException e){error(res,404,"ATT-SERVER-NOT-FOUND","API resource was not found",requestId);}
         catch(Exception e){error(res,500,"ATT-SERVER-CANCEL-FAILED","The job could not be cancelled",requestId);}
     }
-    @Override protected void doPut(HttpServletRequest req,HttpServletResponse res) throws IOException {error(res,405,"ATT-SERVER-METHOD-NOT-ALLOWED","Package administration is read-only in v1",requestId(req,res));}
+    @Override protected void doPut(HttpServletRequest req,HttpServletResponse res) throws IOException {
+        String path=path(req),requestId=requestId(req,res);
+        if("/auth/me/preferences".equals(path)){authPreferencesPut(req,res,requestId);return;}
+        error(res,405,"ATT-SERVER-METHOD-NOT-ALLOWED","Package administration is read-only in v1",requestId);
+    }
 
     private void authGet(HttpServletRequest req,HttpServletResponse res,String path,String requestId)throws IOException {
         try {
+            if("/auth/me/preferences".equals(path)) {
+                res.setHeader("Cache-Control","no-store");
+                if(!runtime.config.authenticationRequired){json(res,200,Map.of("available",false,"reason","stable-user-identity-required","requestId",requestId));return;}
+                String identity=principal(req);if(identity==null){error(res,401,"ATT-SERVER-AUTHENTICATION-REQUIRED","Authentication is required",requestId);return;}
+                String subject=preferenceSubject(identity);if(subject==null){error(res,401,"ATT-SERVER-AUTHENTICATION-REQUIRED","Authentication is required",requestId);return;}
+                Map<String,Object> preferences=runtime.store.userPreferences(subject);preferences.put("requestId",requestId);json(res,200,preferences);return;
+            }
             if("/auth/capabilities".equals(path)) {
                 String login=principal(req);
                 if(login==null){error(res,401,"ATT-SERVER-AUTHENTICATION-REQUIRED","Authentication is required",requestId);return;}
@@ -312,6 +324,40 @@ public final class ApiServlet extends HttpServlet {
             error(res,404,"ATT-SERVER-NOT-FOUND","Authentication resource was not found",requestId);
         }catch(Exception failure){error(res,500,"ATT-SERVER-REQUEST-FAILED","The authentication request could not be completed",requestId);}
     }
+    private void authPreferencesPut(HttpServletRequest req,HttpServletResponse res,String requestId)throws IOException {
+        res.setHeader("Cache-Control","no-store");
+        if(!isJson(req.getContentType())){error(res,415,"ATT-SERVER-UNSUPPORTED-MEDIA-TYPE","Content-Type must be application/json",requestId);return;}
+        if(runtime.config.authenticationRequired&&!runtime.auth.local(runtime.config)&&!hasOrigin(req)){error(res,403,"ATT-SERVER-ORIGIN-MISMATCH","Preference updates require a same-origin request",requestId);return;}
+        if(!checkOrigin(req,res,requestId,true))return;
+        String identity=principal(req);
+        if(identity==null){error(res,401,"ATT-SERVER-AUTHENTICATION-REQUIRED","Authentication is required",requestId);return;}
+        if(!runtime.config.authenticationRequired){error(res,409,"ATT-PREFERENCES-NO-STABLE-IDENTITY","Browser-only deployments cannot store account preferences",requestId);return;}
+        try {
+            JsonNode body=authBody(req);if(body==null||!body.isObject())throw new IllegalArgumentException("A JSON object is required");
+            Set<String> allowed=Set.of("language","theme","migrateIfAbsent");body.fieldNames().forEachRemaining(key->{if(!allowed.contains(key))throw new IllegalArgumentException("Unknown preference field");});
+            String language=optionalPreference(body,"language",Set.of("browser","en","zh-Hant"));
+            String theme=optionalPreference(body,"theme",Set.of("system","light","dark"));
+            boolean migrate=false;
+            if(body.has("migrateIfAbsent")){if(!body.get("migrateIfAbsent").isBoolean())throw new IllegalArgumentException("migrateIfAbsent must be a boolean");migrate=body.get("migrateIfAbsent").asBoolean();}
+            boolean setLanguage=body.has("language"),setTheme=body.has("theme");
+            if(!setLanguage&&!setTheme)throw new IllegalArgumentException("At least one preference is required");
+            String subject=preferenceSubject(identity);if(subject==null){error(res,401,"ATT-SERVER-AUTHENTICATION-REQUIRED","Authentication is required",requestId);return;}
+            Map<String,Object> result=runtime.store.updateUserPreferences(subject,language,setLanguage,theme,setTheme,migrate);result.put("requestId",requestId);json(res,200,result);
+        } catch(IllegalArgumentException invalid){error(res,400,"ATT-SERVER-INVALID-REQUEST",safeDetail(invalid),requestId);}
+          catch(Exception failure){error(res,500,"ATT-SERVER-REQUEST-FAILED","User preferences could not be stored",requestId);}
+    }
+    private String preferenceSubject(String identity)throws Exception {
+        if(runtime.auth.local(runtime.config))return runtime.store.localPreferenceSubject(identity);
+        if(identity==null||identity.isBlank()||identity.length()>256||identity.chars().anyMatch(Character::isISOControl))return null;
+        return "container:"+identity;
+    }
+    private static String optionalPreference(JsonNode body,String field,Set<String> allowed) {
+        if(!body.has(field))return null;JsonNode value=body.get(field);
+        if(!value.isTextual()||value.asText().length()>16||!allowed.contains(value.asText()))throw new IllegalArgumentException("Invalid "+field+" preference");
+        return value.asText();
+    }
+    private static boolean hasOrigin(HttpServletRequest request) {java.util.Enumeration<String> origins=request.getHeaders("Origin");return origins!=null&&origins.hasMoreElements()&&!hasSecond(origins);}
+    private static boolean hasSecond(java.util.Enumeration<String> values){values.nextElement();return values.hasMoreElements();}
     private void authPost(HttpServletRequest req,HttpServletResponse res,String path,String requestId)throws IOException {
         try {
             if(!runtime.auth.local(runtime.config)){error(res,404,"ATT-SERVER-NOT-FOUND","Authentication resource was not found",requestId);return;}
@@ -491,17 +537,26 @@ public final class ApiServlet extends HttpServlet {
         } finally {if(!handedOff)runtime.streamSlots.release();}
     }
     private void stream(AsyncContext async,String jobId,JobEvents journal,long cursor,Path outputDirectory,Path packageRoot,String sessionHash){
-        long lastWrite=System.nanoTime();java.util.concurrent.ArrayBlockingQueue<Boolean> wakeup=new java.util.concurrent.ArrayBlockingQueue<>(1);
+        long lastWrite=System.nanoTime();String lastJournalNotice=null;java.util.concurrent.ArrayBlockingQueue<Boolean> wakeup=new java.util.concurrent.ArrayBlockingQueue<>(1);
         AutoCloseable subscription=journal.listen(event->wakeup.offer(Boolean.TRUE));wakeup.offer(Boolean.TRUE);
         try(PrintWriter out=async.getResponse().getWriter()){
             while(true){
                 wakeup.poll(15,TimeUnit.SECONDS);
                 if(sessionHash!=null&&!runtime.auth.sessionStillValid(sessionHash))break;
+                Map<String,Object> journalNotice=journal.diagnostic();
+                if(journalNotice!=null) {
+                    String fingerprint=journalNotice.get("code")+"|"+journalNotice.get("journalPersistence")+"|"+journalNotice.get("summary");
+                    if(!fingerprint.equals(lastJournalNotice)) {
+                        out.print("event: diagnostic\ndata: "+ServerRuntime.JSON.writeValueAsString(journalNotice)+"\n\n");
+                        out.flush();if(out.checkError())return;lastWrite=System.nanoTime();lastJournalNotice=fingerprint;
+                    }
+                }
                 List<Map<String,Object>> events=journal.after(cursor,100);
                 for(Map<String,Object> event:events){long id=((Number)event.get("id")).longValue();Object projected=runtime.publicEventData(event.get("data"),outputDirectory,packageRoot);if(projected instanceof com.fasterxml.jackson.databind.node.ObjectNode node && journal.truncatedHistory() && id==journal.oldestId()){node.put("historyTruncated",true);node.set("historyLimit",ServerRuntime.JSON.valueToTree(att.server.api.LimitDiagnostic.create("ATT-JOURNAL-HISTORY-EVICTED","Earlier Job events are outside the retained journal window","server.maxEventsPerJob",runtime.config.maxEventsPerJob,journal.oldestId()-1,"server.eventJournal",att.server.api.LimitOutcome.HISTORY_EVICTED,"presentation","Use pagination or retained report artifacts for longer history",null)));}out.print("id: "+id+"\nevent: "+event.get("event")+"\ndata: "+ServerRuntime.JSON.writeValueAsString(projected)+"\n\n");cursor=id;}
                 if(!events.isEmpty()){out.flush();if(out.checkError())return;lastWrite=System.nanoTime();}
                 if(journal.hasMore(cursor)){wakeup.offer(Boolean.TRUE);continue;}
-                if(runtime.terminal(jobId)&&journal.resultDeliveredThrough(cursor)&&!journal.hasMore(cursor))break;
+                if(runtime.terminal(jobId)&&!journal.hasMore(cursor)
+                        &&(journal.resultDeliveredThrough(cursor)||journal.historyDegraded()))break;
                 if(System.nanoTime()-lastWrite>TimeUnit.SECONDS.toNanos(15)){out.print(": keepalive\n\n");out.flush();if(out.checkError())return;lastWrite=System.nanoTime();}
             }
         }catch(Exception ignored){}finally{
@@ -555,6 +610,7 @@ public final class ApiServlet extends HttpServlet {
           catch(ServerRuntime.InspectionTimeoutException e){throw e;}
           catch(ServerRuntime.InspectionResponseTooLargeException e){throw e;}
           catch(ServerRuntime.InspectionConfigurationException e){throw e;}
+          catch(ServerRuntime.InspectionValidationException e){throw e;}
           catch(ServerRuntime.InlineLoadDisabledException e){throw e;}
           catch(IllegalArgumentException e){throw e;}
           catch(Exception e){throw new IOException(e);}
@@ -578,6 +634,7 @@ public final class ApiServlet extends HttpServlet {
           catch(ServerRuntime.InspectionTimeoutException e){throw e;}
           catch(ServerRuntime.InspectionResponseTooLargeException e){throw e;}
           catch(ServerRuntime.InspectionConfigurationException e){throw e;}
+          catch(ServerRuntime.InspectionValidationException e){throw e;}
           catch(IllegalArgumentException e){throw e;}
           catch(Exception e){throw new IOException(e);}
     }

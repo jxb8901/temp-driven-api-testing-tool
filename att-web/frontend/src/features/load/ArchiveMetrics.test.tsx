@@ -18,7 +18,7 @@ describe('ArchiveMetrics presentation', () => {
     expect(rows.find(row => row.textContent?.includes('ZIP bytes') && row.textContent?.includes('Unavailable'))).toBeDefined();
     expect(host.querySelector('td[title="1099511627776 bytes"]')?.textContent).toBe('1 TB');
     expect(host.textContent).toContain('not retained or peak heap');
-    expect(host.querySelectorAll('th[scope="row"]').length).toBe(17);
+    expect(host.querySelectorAll('th[scope="row"]').length).toBe(30);
     expect(host.textContent).toContain('CPU / memory allocation');
   });
   it('keeps unavailable measurements separate from zero', () => {

@@ -1,10 +1,13 @@
 package att.resource;
 
 import java.io.File;
+import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
+import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.nio.file.attribute.BasicFileAttributes;
 
 /** Resolves authored package resource names inside one canonical package namespace. */
 public final class PackageResourceResolver {
@@ -62,7 +65,7 @@ public final class PackageResourceResolver {
         }
         if (!relative.startsWith(packageRoot)) throw unsafe(authored);
         try {
-            if (!Files.exists(relative, LinkOption.NOFOLLOW_LINKS))
+            if (readAttributesIfPresent(relative) == null)
                 throw new IllegalArgumentException("Package resource not found: " + authored);
             Path canonical = relative.toRealPath();
             if (!canonical.startsWith(packageRoot)) throw unsafe(authored);
@@ -108,15 +111,23 @@ public final class PackageResourceResolver {
     public Path internalCandidate(Path path) {
         if (path == null) throw new IllegalArgumentException("Internal package path is required");
         Path normalized = path.toAbsolutePath().normalize();
-        Path ancestor = normalized;
-        while (ancestor != null && !Files.exists(ancestor, LinkOption.NOFOLLOW_LINKS)) ancestor = ancestor.getParent();
-        if (ancestor == null) throw unsafe(logicalNameOrName(normalized));
         try {
+            Path ancestor = normalized;
+            BasicFileAttributes normalizedAttributes = null;
+            while (ancestor != null) {
+                BasicFileAttributes attributes = readAttributesIfPresent(ancestor);
+                if (attributes != null) {
+                    if (ancestor.equals(normalized)) normalizedAttributes = attributes;
+                    break;
+                }
+                ancestor = ancestor.getParent();
+            }
+            if (ancestor == null) throw unsafe(logicalNameOrName(normalized));
             Path canonicalAncestor = ancestor.toRealPath();
             if (!canonicalAncestor.startsWith(packageRoot)) throw unsafe(logicalNameOrName(normalized));
             Path candidate = canonicalAncestor.resolve(ancestor.relativize(normalized)).normalize();
             if (!candidate.startsWith(packageRoot)) throw unsafe(logicalNameOrName(normalized));
-            if (Files.exists(normalized, LinkOption.NOFOLLOW_LINKS)) {
+            if (normalizedAttributes != null) {
                 Path canonical = normalized.toRealPath();
                 if (!canonical.startsWith(packageRoot)) throw unsafe(logicalNameOrName(normalized));
                 return canonical;
@@ -126,6 +137,15 @@ public final class PackageResourceResolver {
             throw error;
         } catch (Exception error) {
             throw new IllegalArgumentException("Unable to resolve internal package path", error);
+        }
+    }
+
+    /** Returns attributes only when the path is proven absent; permission and metadata errors propagate. */
+    static BasicFileAttributes readAttributesIfPresent(Path path) throws IOException {
+        try {
+            return Files.readAttributes(path, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
+        } catch (NoSuchFileException missing) {
+            return null;
         }
     }
 

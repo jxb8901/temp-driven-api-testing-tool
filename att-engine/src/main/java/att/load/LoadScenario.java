@@ -220,8 +220,8 @@ public final class LoadScenario {
         Map<String, Object> load = new LinkedHashMap<String, Object>();
         if (workload.model() == Model.CLOSED) load.put("users", workload.users());
         else load.put("arrivalRate", workload.arrivalRate());
-        load.put("warmup", ThinkTimePolicy.format(workload.warmup().toMillis()));
         load.put("rampUp", ThinkTimePolicy.format(workload.rampUp().toMillis()));
+        load.put("warmup", ThinkTimePolicy.format(workload.warmup().toMillis()));
         load.put("duration", ThinkTimePolicy.format(workload.duration().toMillis()));
         load.put("rampDown", ThinkTimePolicy.format(workload.rampDown().toMillis()));
         if (workload.model() == Model.ARRIVAL_RATE) {

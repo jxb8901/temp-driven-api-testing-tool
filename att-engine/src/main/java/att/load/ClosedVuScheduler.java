@@ -88,6 +88,7 @@ public final class ClosedVuScheduler implements LoadScheduler {
             loadExecutor.markSchedulerStart(runId, LoadPhase.at(scenario, 0L).name(), scenario.model().wireName());
         }
         final long startedAt = startGate == null ? timing.now() : startGate.awaitStart();
+        if (evidenceStore != null) evidenceStore.registerRunTimeline(scenario.workloadId(), startedAt, LoadPhase.totalMs(scenario));
         final Instant start = LoadSchedulerSupport.instant(startedAt);
         final long runSeed = LoadRandomization.effectiveSeed(scenario, runId);
         final LoadMetrics metrics = LoadMetrics.forScenario(scenario, startedAt, 0L);
@@ -189,11 +190,11 @@ public final class ClosedVuScheduler implements LoadScheduler {
                 selectedInputs, null);
         request = request.withTestdataWaitAllowed(() -> !cancelled.get() && remainingRunMillis(startedAt) > 0L);
         if (!scenario.legacyV10()) request = request.withWorkloadId(scenario.workloadId());
-        Path evidenceRoot = evidenceOutputRoot(iterationId);
+        Path evidenceRoot = evidenceOutputRoot(iterationId, scheduledAt);
         if (evidenceRoot != null) request = request.withOutputDirectory(evidenceRoot).withEvidenceRetention(true, false);
         else if (evidenceStore != null) request = request.withEvidenceRetention(false, false);
         if (evidenceStore != null)
-            request = request.withFailureLogCapture(evidenceStore.retainsFailureEvidence(scenario.workloadId()));
+            request = request.withFailureLogCapture(evidenceStore.retainsFailureEvidence(scenario.workloadId(), scheduledAt));
         if (selectedMix != null) request = request.withMixIdentity(selectedMix.id(), selectedMix.targetType(), selectedMix.targetId());
         final IterationRequest iterationRequest = request;
         final TaskHandle taskHandle = new TaskHandle();
@@ -212,7 +213,7 @@ public final class ClosedVuScheduler implements LoadScheduler {
             } else {
                 try {
                     IterationResult result = executor.execute(iterationRequest);
-                    if (result.status() != att.core.ResultStatus.PASS && evidenceStore != null && evidenceStore.claimFailureEvidence(iterationId, scenario.workloadId()))
+                    if (result.status() != att.core.ResultStatus.PASS && evidenceStore != null && evidenceStore.claimFailureEvidence(iterationId, scenario.workloadId(), scheduledAt))
                         result = result.materializeEvidence();
                     else if (result.status() != att.core.ResultStatus.PASS && evidenceStore != null) evidenceStore.releaseEvidence(iterationId);
                     if (result.evidenceRef() == null) result.discardTransientWorkspace();
@@ -220,7 +221,7 @@ public final class ClosedVuScheduler implements LoadScheduler {
                     status = result.status(); errorType = LoadSchedulerSupport.errorType(result); evidence = result.evidenceRef();
                     if(status!=att.core.ResultStatus.PASS)failureDiagnostic=LoadFailureDiagnostic.result(result);
                 } catch (RuntimeException failure) {
-                    if (evidenceStore != null && !evidenceStore.claimFailureEvidence(iterationId, scenario.workloadId())) evidenceStore.releaseEvidence(iterationId);
+                    if (evidenceStore != null && !evidenceStore.claimFailureEvidence(iterationId, scenario.workloadId(), scheduledAt)) evidenceStore.releaseEvidence(iterationId);
                     status = att.core.ResultStatus.ERROR; errorType = "LOAD_ITERATION_EXCEPTION";failureDiagnostic=LoadFailureDiagnostic.exception(failure);
                 }
             }
@@ -267,9 +268,8 @@ public final class ClosedVuScheduler implements LoadScheduler {
         for (VuState user : users) {
             if (user.running || user.userNumber >= scenario.users()) continue;
             if (user.userNumber < active && user.readyAt > now) next = Math.min(next, user.readyAt);
-            else if (user.userNumber >= active && elapsed < scenario.warmup().toMillis() + scenario.rampUp().toMillis()) {
-                long activation = scenario.warmup().toMillis()
-                        + (long) Math.floor(((double) scenario.rampUp().toMillis() * user.userNumber) / scenario.users()) + 1L;
+            else if (user.userNumber >= active && LoadPhase.at(scenario, elapsed) == LoadPhase.RAMP_UP) {
+                long activation = (long) Math.floor(((double) scenario.rampUp().toMillis() * user.userNumber) / scenario.users()) + 1L;
                 next = Math.min(next, safeAdd(startedAt, activation));
             }
         }
@@ -300,19 +300,18 @@ public final class ClosedVuScheduler implements LoadScheduler {
         }
     }
     private long remainingRunMillis(long startedAt) { return LoadPhase.totalMs(scenario) - (timing.now() - startedAt); }
-    private Path evidenceOutputRoot(String iterationId) {
-        if (evidenceStore == null || evidenceOutputRoot == null || !evidenceStore.reserveSuccessEvidence(iterationId, scenario.workloadId())) return null;
+    private Path evidenceOutputRoot(String iterationId, long plannedAtEpochMs) {
+        if (evidenceStore == null || evidenceOutputRoot == null || !evidenceStore.reserveSuccessEvidence(iterationId, scenario.workloadId(), plannedAtEpochMs)) return null;
         Path root = evidenceOutputRoot.resolve("load").resolve(runId).resolve("iterations");
         return scenario.legacyV10() ? root : root.resolve(
                 LoadMetricsCheckpointStore.workloadCheckpointDirectoryName(scenario.workloadId()));
     }
     int activeUsers(long elapsedMs) { return activeUsers(scenario, elapsedMs); }
     static int activeUsers(LoadScenario scenario, long elapsedMs) {
-        long warmup = scenario.warmup().toMillis(), rampUp = scenario.rampUp().toMillis();
-        if (elapsedMs < warmup) return scenario.users();
-        if (LoadPhase.at(scenario, elapsedMs) == LoadPhase.COMPLETE) return 0;
-        if (rampUp > 0L && elapsedMs < warmup + rampUp) return Math.max(1, (int) Math.ceil(scenario.users() * LoadPhase.fraction(scenario, elapsedMs)));
-        if (LoadPhase.at(scenario, elapsedMs) == LoadPhase.RAMP_DOWN) return Math.max(1, (int) Math.ceil(scenario.users() * LoadPhase.fraction(scenario, elapsedMs)));
+        LoadPhase phase = LoadPhase.at(scenario, elapsedMs);
+        if (phase == LoadPhase.COMPLETE) return 0;
+        if (phase == LoadPhase.RAMP_UP || phase == LoadPhase.RAMP_DOWN)
+            return Math.max(1, (int) Math.ceil(scenario.users() * LoadPhase.fraction(scenario, elapsedMs)));
         return scenario.users();
     }
     void forwardSchedulerMetricsTo(LoadMetrics aggregate) {

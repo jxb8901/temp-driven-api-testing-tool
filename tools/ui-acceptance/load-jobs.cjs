@@ -276,7 +276,8 @@ async function main() {
     await page.getByText(/Server result returned/i).waitFor();
     await page.getByRole('tab', { name: 'Artifacts' }).click();
     await page.getByRole('status').filter({ hasText: 'Artifact Archive: READY' }).waitFor();
-    await page.getByRole('button', { name: 'Preview: load-summary.json', exact: true }).waitFor();
+    await page.getByText('Summaries and manifests · 1 files', { exact: true }).click();
+    await page.getByRole('button', { name: 'Preview load-summary.json', exact: true }).waitFor();
 
     await page.getByRole('button', { name: 'Cancel job' }).click();
     await page.waitForFunction(() => document.querySelector('.att-job-actions .att-status-badge')?.textContent?.trim() === 'CANCELLED', null, { timeout: 10_000 });

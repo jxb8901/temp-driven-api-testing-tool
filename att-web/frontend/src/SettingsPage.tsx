@@ -13,8 +13,10 @@ const themeOptions: Array<{ value: ThemePreference; label: string; description: 
 ];
 
 export function SettingsPage() {
-  const { themePreference, onThemePreferenceChange, uiLocale, uiLocalePreference, onUiLocaleChange, authMode, accessCapabilities } = useAppShellContext();
+  const { themePreference, onThemePreferenceChange, uiLocale, uiLocalePreference, onUiLocaleChange, authMode, accessCapabilities, preferenceStatus } = useAppShellContext();
   const locale = uiLocale;
+  const zh=locale==='zh-Hant';
+  const preferenceMessage=preferenceStatus==='saving'?(zh?'正在將偏好儲存至您的帳戶…':'Saving preferences to your account…'):preferenceStatus==='saved'?(zh?'偏好已儲存至您的帳戶。':'Preferences saved to your account.'):preferenceStatus==='failed'?(zh?'無法將偏好儲存至帳戶；所選值仍在本機生效。請檢查 Server 連線，然後再次變更以重試。':'Could not save preferences to your account. The current value remains active locally; check the Server connection and change it again to retry.'):preferenceStatus==='browser-only'?(zh?'帳戶偏好儲存區不可用；偏好只會儲存在此瀏覽器。':'Account preference storage is unavailable. Preferences use this browser only.'):preferenceStatus==='idle'?(zh?'尚未儲存帳戶偏好；目前使用瀏覽器及系統預設值。':'No account preference is saved yet; browser and system defaults are active.'):(zh?'正在載入帳戶偏好…':'Loading account preferences…');
 
   return (
     <section className="page-content att-settings-page" aria-labelledby="settings-title">
@@ -28,6 +30,7 @@ export function SettingsPage() {
 
       {(accessCapabilities.accountManage || authMode === 'container') && <UserManagementPanel />}
       {accessCapabilities.systemSettingsWrite && <ServerStoragePanel />}
+      <p className="att-settings-persistence" role="status" aria-live="polite">{preferenceMessage}</p>
 
       <section className="panel att-settings-section" aria-labelledby="appearance-title">
         <div className="att-settings-section-heading">
@@ -55,7 +58,7 @@ export function SettingsPage() {
             </label>
           ))}
         </fieldset>
-        <p className="att-settings-storage-note">The selected preference is stored in this browser. Selecting System removes the saved override.</p>
+        <p className="att-settings-storage-note">{zh?'「系統」會跟隨作業系統；伺服器支援時，會儲存為帳戶偏好。':'System follows the operating system and is saved as an account preference when the Server supports it.'}</p>
       </section>
 
       <section className="panel att-settings-section" aria-labelledby="language-title">
@@ -90,7 +93,7 @@ export function SettingsPage() {
             </label>
           ))}
         </fieldset>
-        <p className="att-settings-storage-note">Your choice is stored in this browser and updates the Studio immediately.</p>
+        <p className="att-settings-storage-note">{zh?'「瀏覽器預設」會跟隨此瀏覽器；伺服器支援時，會儲存為帳戶偏好。':'Browser default follows this browser and is saved as an account preference when the Server supports it.'}</p>
       </section>
 
       <section className="panel att-settings-section" aria-labelledby="keyboard-settings-title">

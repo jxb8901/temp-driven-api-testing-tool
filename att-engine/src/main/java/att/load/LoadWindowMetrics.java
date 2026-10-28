@@ -11,7 +11,7 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicLongArray;
 import java.util.concurrent.atomic.LongAdder;
 
-/** Explicit configured windows. Legacy LoadMetrics fields retain their original meaning.
+/** Explicit configured windows. Aggregate measured metrics include STEADY and RAMP_DOWN.
  * Event rates use event timestamps; latency trends and outcome SLOs follow scheduled
  * cohorts, including their eventual outcomes in later phases or drain. */
 final class LoadWindowMetrics {
@@ -26,17 +26,18 @@ final class LoadWindowMetrics {
 
     LoadWindowMetrics(long start, long warmup, long rampUp, long steady, long rampDown) {
         this.start = start;
-        long measured = Math.addExact(start, warmup);
-        long steadyStart = Math.addExact(measured, rampUp);
+        long rampUpEnd = Math.addExact(start, rampUp);
+        long warmupEnd = Math.addExact(rampUpEnd, warmup);
+        long steadyStart = warmupEnd;
         long steadyEnd = Math.addExact(steadyStart, steady);
         generationEnd = Math.addExact(steadyEnd, rampDown);
-        measuredSeries = new WindowSeries(measured, generationEnd);
+        measuredSeries = new WindowSeries(warmupEnd, generationEnd);
         steadySeries = new WindowSeries(steadyStart, steadyEnd);
         windows.add(new Window("all", start, Long.MAX_VALUE));
-        windows.add(new Window("measured", measured, generationEnd));
+        windows.add(new Window("measured", warmupEnd, generationEnd));
         windows.add(new Window("steady", steadyStart, steadyEnd));
-        windows.add(new Window("WARMUP", start, measured));
-        windows.add(new Window("RAMP_UP", measured, steadyStart));
+        windows.add(new Window("RAMP_UP", start, rampUpEnd));
+        windows.add(new Window("WARMUP", rampUpEnd, warmupEnd));
         windows.add(new Window("STEADY", steadyStart, steadyEnd));
         windows.add(new Window("RAMP_DOWN", steadyEnd, generationEnd));
         windows.add(new Window("DRAIN", generationEnd, Long.MAX_VALUE));
@@ -73,7 +74,7 @@ final class LoadWindowMetrics {
             Map<String, Object> phase = new LinkedHashMap<String, Object>();
             phase.put("phase", window.name); phase.put("windowStartEpochMs", window.start);
             phase.put("windowEndEpochMs", window.end == Long.MAX_VALUE ? Math.max(window.start, actualEnd) : window.end);
-            phase.put("measured", !"WARMUP".equals(window.name)); phaseBoundaries.add(phase);
+            phase.put("measured", "STEADY".equals(window.name) || "RAMP_DOWN".equals(window.name)); phaseBoundaries.add(phase);
         }
         result.put("phaseBoundaries", phaseBoundaries);
         result.put("timeSeries", seriesSnapshot(actualEnd));

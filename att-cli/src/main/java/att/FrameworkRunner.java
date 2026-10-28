@@ -405,7 +405,7 @@ public final class FrameworkRunner {
         System.out.println("Path display: absolute paths are shown by default; --substitute-package-root and --substitute-external-basename independently enable $ATT_PACKAGE_ROOT and $EXTERNAL/<basename> aliases.");
         System.out.println("Load Templates (also att.bat): load --list-templates [--format json]; load --debug <type> <id> --load-template <builtin:single-vu|builtin:single-tps|path> [--preview]; load --debug --load-template <path|builtin:mode> --bindings <file> [--preview] [--format json]");
         System.out.println("Template preview/list starts no traffic. Multi-target input, set, users, arrival-rate and other unscoped pacing overrides are rejected; put scoped values in the template/bindings descriptor.");
-        System.out.println("Load options: --warmup <duration> --ramp-up <duration> --ramp-down <duration> --think-time <duration> --overload-policy drop --output-dir <dir> --profile --quiet|--verbose");
+        System.out.println("Load options: --ramp-up <duration> --warmup <duration> --ramp-down <duration> --think-time <duration> --overload-policy drop --output-dir <dir> --profile --quiet|--verbose");
         System.out.println("Load output: <output-dir>/load/<runId>/load-summary.json|yaml and report/index.html; exit codes PASS=0, threshold FAIL=1, validation=2, runtime=3");
         System.out.println("Environment profiles: use --env <name> with run, validate, debug, or load; --config selects the common config.");
         System.out.println("Profile output: run/load write runtime diagnostics; debug <type> <id> --profile records startup and Debug phases.");

@@ -42,6 +42,11 @@ let localAuthMode = false;
 let unifiedRunSupported = false;
 const schedulesPath = () => unifiedRunSupported ? 'schedules' : 'load-schedules';
 
+export interface UserPreferences {
+  available: boolean; reason?: string; language?: 'browser'|'en'|'zh-Hant'|null; theme?: 'system'|'light'|'dark'|null;
+  version?: number; updatedAt?: string|null;
+}
+
 /** Resolve the API below the current UI context (for example /att/ui/ -> /att/api/v1/). */
 export function apiBaseUrl(): URL {
   return new URL('../api/v1/', document.baseURI);
@@ -227,8 +232,15 @@ export const api = {
   getCurrentUser(signal?: AbortSignal): Promise<{ loginId: string; displayName: string; role: 'ADMIN' | 'USER'; csrfToken?: string }> {
     return request('auth/me', { signal });
   },
+  getUserPreferences(signal?: AbortSignal): Promise<UserPreferences> {
+    return request('auth/me/preferences', { signal });
+  },
+  putUserPreferences(input: { language?: 'browser'|'en'|'zh-Hant'; theme?: 'system'|'light'|'dark'; migrateIfAbsent?: boolean }): Promise<UserPreferences> {
+    return request('auth/me/preferences', { method: 'PUT', body: JSON.stringify(input) });
+  },
   getAuthCapabilities(signal?: AbortSignal): Promise<{
     configurationAdmin: boolean;
+    inspectionCacheContext?: string;
     capabilities?: { operate?: boolean; accountManage?: boolean; systemSettingsWrite?: boolean; configurationAdmin?: boolean };
   }> {
     return request('auth/capabilities', { signal });

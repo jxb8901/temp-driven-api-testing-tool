@@ -93,6 +93,18 @@ final class JobStore implements AutoCloseable {
             s.execute("CREATE INDEX IF NOT EXISTS job_targets_identifier_idx ON job_targets(target_id,job_id)");
             s.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS replay_owner VARCHAR(256)");
             s.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS originating_schedule_id VARCHAR(40)");
+            s.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS submission_source VARCHAR(16)");
+            s.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS schedule_owner VARCHAR(256)");
+            s.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS execution_principal VARCHAR(256)");
+            s.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS submitted_by VARCHAR(256)");
+            s.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS triggered_by VARCHAR(256)");
+            s.execute("UPDATE jobs SET originating_schedule_id=CASE WHEN principal LIKE 'load-schedule:%' THEN SUBSTRING(principal,15) WHEN principal LIKE 'debug-schedule:%' THEN SUBSTRING(principal,16) ELSE originating_schedule_id END WHERE originating_schedule_id IS NULL AND (principal LIKE 'load-schedule:%' OR principal LIKE 'debug-schedule:%')");
+            s.execute("UPDATE jobs SET submission_source=CASE WHEN originating_schedule_id IS NOT NULL OR principal LIKE 'load-schedule:%' OR principal LIKE 'debug-schedule:%' THEN 'scheduled' ELSE 'manual' END WHERE submission_source IS NULL");
+            s.execute("UPDATE jobs SET execution_principal=principal WHERE execution_principal IS NULL AND principal NOT LIKE 'load-schedule:%' AND principal NOT LIKE 'debug-schedule:%' AND principal<>'anonymous' AND principal NOT LIKE '%(anonym)'");
+            s.execute("CREATE INDEX IF NOT EXISTS jobs_provenance_source_idx ON jobs(submission_source,created_at,job_id)");
+            s.execute("CREATE INDEX IF NOT EXISTS jobs_provenance_execution_idx ON jobs(execution_principal,created_at,job_id)");
+            s.execute("CREATE INDEX IF NOT EXISTS jobs_provenance_owner_idx ON jobs(schedule_owner,created_at,job_id)");
+            s.execute("CREATE INDEX IF NOT EXISTS jobs_provenance_trigger_idx ON jobs(triggered_by,created_at,job_id)");
             s.execute("CREATE TABLE IF NOT EXISTS job_replay_intents (principal VARCHAR(256) NOT NULL, intent_id VARCHAR(80) NOT NULL, source_job_id VARCHAR(80) NOT NULL, job_id VARCHAR(80) NOT NULL, expires_at BIGINT, PRIMARY KEY(principal,intent_id))");
             s.execute("ALTER TABLE job_replay_intents ADD COLUMN IF NOT EXISTS expires_at BIGINT");
             s.execute("UPDATE job_replay_intents SET expires_at="+(System.currentTimeMillis()+REPLAY_INTENT_RETENTION.toMillis())+" WHERE expires_at IS NULL");
@@ -107,10 +119,15 @@ final class JobStore implements AutoCloseable {
             s.execute("CREATE TABLE IF NOT EXISTS load_schedules (schedule_id VARCHAR(40) PRIMARY KEY, schedule_json CLOB NOT NULL, enabled BOOLEAN NOT NULL, next_run_at VARCHAR(40), updated_at VARCHAR(40) NOT NULL)");
             s.execute("CREATE INDEX IF NOT EXISTS load_schedules_due_idx ON load_schedules(enabled,next_run_at)");
             s.execute("CREATE TABLE IF NOT EXISTS load_schedule_executions (occurrence_id VARCHAR(160) PRIMARY KEY, schedule_id VARCHAR(40) NOT NULL, scheduled_for VARCHAR(40) NOT NULL, status VARCHAR(32) NOT NULL, reason VARCHAR(240), job_id VARCHAR(80), trigger_type VARCHAR(16) NOT NULL, created_at VARCHAR(40) NOT NULL)");
+            s.execute("ALTER TABLE load_schedule_executions ADD COLUMN IF NOT EXISTS triggered_by VARCHAR(256)");
             s.execute("CREATE TABLE IF NOT EXISTS auth_users (login_id VARCHAR(120) PRIMARY KEY, display_name VARCHAR(120) NOT NULL, password_hash VARCHAR(512) NOT NULL, role VARCHAR(16) NOT NULL, active BOOLEAN NOT NULL, updated_at VARCHAR(40) NOT NULL)");
             s.execute("ALTER TABLE auth_users ADD COLUMN IF NOT EXISTS csrf_token VARCHAR(64)");
+            s.execute("ALTER TABLE auth_users ADD COLUMN IF NOT EXISTS account_id VARCHAR(36)");
+            s.execute("UPDATE auth_users SET account_id=RANDOM_UUID() WHERE account_id IS NULL");
             s.execute("CREATE TABLE IF NOT EXISTS auth_sessions (token_hash VARCHAR(64) PRIMARY KEY, login_id VARCHAR(120) NOT NULL, csrf_token VARCHAR(64) NOT NULL, created_at BIGINT NOT NULL, last_seen BIGINT NOT NULL, absolute_expiry BIGINT NOT NULL)");
             s.execute("CREATE TABLE IF NOT EXISTS auth_bootstrap_claim (claim_id INT PRIMARY KEY, claimed_at VARCHAR(40) NOT NULL)");
+            s.execute("CREATE TABLE IF NOT EXISTS user_preferences (subject_id VARCHAR(320) PRIMARY KEY, language VARCHAR(16), theme VARCHAR(16), version BIGINT NOT NULL, updated_at VARCHAR(40) NOT NULL)");
+            s.execute("CREATE INDEX IF NOT EXISTS user_preferences_updated_idx ON user_preferences(updated_at)");
             s.execute("CREATE INDEX IF NOT EXISTS load_schedule_execution_history_idx ON load_schedule_executions(schedule_id,scheduled_for)");
         } catch(Exception failed){close();throw failed;}
     }
@@ -176,15 +193,18 @@ final class JobStore implements AutoCloseable {
         insert(job,summary,targets);
     }
     synchronized void insert(Job job,String summary,Set<Map<String,String>> targets) throws Exception {
+        if(job.originatingScheduleId==null)job.originatingScheduleId=scheduledScheduleId(job.principal);
+        if(job.originatingScheduleId!=null)job.submissionSource="scheduled";
         try(Connection c=connect()) {
             c.setAutoCommit(false);
             try {
-                try(PreparedStatement p=c.prepareStatement("INSERT INTO jobs(job_id,command,package_id,principal,status,created_at,att_version,request_summary,schedule_occurrence_id,execution_spec,replay_unavailable,rerun_of_job_id,replay_intent,replay_owner,originating_schedule_id,target_identity,target_sort,target_group,environment) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)")) {
+                try(PreparedStatement p=c.prepareStatement("INSERT INTO jobs(job_id,command,package_id,principal,status,created_at,att_version,request_summary,schedule_occurrence_id,execution_spec,replay_unavailable,rerun_of_job_id,replay_intent,replay_owner,originating_schedule_id,target_identity,target_sort,target_group,environment,submission_source,schedule_owner,execution_principal,submitted_by,triggered_by) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)")) {
                     p.setString(1,job.id);p.setString(2,job.command);p.setString(3,job.packageId);p.setString(4,job.principal);p.setString(5,job.status);p.setString(6,job.createdAt.toString());p.setString(7,ServerBuildInfo.PRODUCT);p.setString(8,summary);p.setString(9,job.scheduleOccurrenceId);p.setString(10,job.executionSpec);p.setString(11,job.replayUnavailable);p.setString(12,job.rerunOfJobId);p.setString(13,job.replayIntent);p.setString(14,job.replayOwner);p.setString(15,job.originatingScheduleId);
                     var metadata=ServerRuntime.JSON.readTree(summary);var identity=metadata.path("targetIdentity");
                     p.setString(16,identity.isObject()?identity.toString():null);
                     p.setString(17,identity.hasNonNull("type")?identity.path("type").asText()+" · "+identity.path("id").asText():"Unknown target");
-                    p.setString(18,identity.path("signature").asText("legacy"));p.setString(19,metadata.path("environment").asText(""));p.executeUpdate();
+                    p.setString(18,identity.path("signature").asText("legacy"));p.setString(19,metadata.path("environment").asText(""));
+                    p.setString(20,job.submissionSource);p.setString(21,job.scheduleOwner);p.setString(22,job.executionPrincipal);p.setString(23,job.submittedBy);p.setString(24,job.triggeredBy);p.executeUpdate();
                 }
                 writeSearchTargets(c,job.id,targets);
                 if(job.replayIntent!=null)try(PreparedStatement p=c.prepareStatement("INSERT INTO job_replay_intents(principal,intent_id,source_job_id,job_id,expires_at) VALUES(?,?,?,?,?)")) {
@@ -445,9 +465,10 @@ final class JobStore implements AutoCloseable {
             c.commit();return true;
         }
     }
-    synchronized void insertManualOccurrence(String scheduleId,String occurrenceId,Instant at) throws Exception {
-        try(Connection c=connect();PreparedStatement p=c.prepareStatement("INSERT INTO load_schedule_executions(occurrence_id,schedule_id,scheduled_for,status,trigger_type,created_at) VALUES(?,?,?,'scheduled','manual',?)")){
-            p.setString(1,occurrenceId);p.setString(2,scheduleId);p.setString(3,at.toString());p.setString(4,Instant.now().toString());p.executeUpdate();
+    synchronized void insertManualOccurrence(String scheduleId,String occurrenceId,Instant at) throws Exception {insertManualOccurrence(scheduleId,occurrenceId,at,null);}
+    synchronized void insertManualOccurrence(String scheduleId,String occurrenceId,Instant at,String triggeredBy) throws Exception {
+        try(Connection c=connect();PreparedStatement p=c.prepareStatement("INSERT INTO load_schedule_executions(occurrence_id,schedule_id,scheduled_for,status,trigger_type,created_at,triggered_by) VALUES(?,?,?,'scheduled','manual',?,?)")){
+            p.setString(1,occurrenceId);p.setString(2,scheduleId);p.setString(3,at.toString());p.setString(4,Instant.now().toString());p.setString(5,triggeredBy);p.executeUpdate();
         }
     }
     synchronized Instant lastManualTrigger(String scheduleId) throws Exception {
@@ -474,7 +495,7 @@ final class JobStore implements AutoCloseable {
     }
     synchronized List<Map<String,Object>> scheduleExecutions(String scheduleId,int limit) throws Exception {
         List<Map<String,Object>> out=new ArrayList<>();
-        String sql="SELECT e.occurrence_id,e.schedule_id,e.scheduled_for,e.status,e.reason,e.job_id,e.trigger_type,e.created_at,j.status "
+        String sql="SELECT e.occurrence_id,e.schedule_id,e.scheduled_for,e.status,e.reason,e.job_id,e.trigger_type,e.created_at,j.status,e.triggered_by "
                 +"FROM load_schedule_executions e LEFT JOIN jobs j ON j.job_id=e.job_id AND (j.retention_state IS NULL OR j.retention_state<>'DELETING') WHERE e.schedule_id=? ORDER BY e.scheduled_for DESC LIMIT ?";
         try(Connection c=connect();PreparedStatement p=c.prepareStatement(sql)){
             p.setString(1,scheduleId);p.setInt(2,limit);
@@ -483,15 +504,15 @@ final class JobStore implements AutoCloseable {
                     Map<String,Object> row=new LinkedHashMap<>();
                     row.put("occurrenceId",r.getString(1));row.put("scheduleId",r.getString(2));row.put("scheduledFor",r.getString(3));
                     row.put("status",r.getString(4));row.put("reason",r.getString(5));row.put("jobId",r.getString(6));
-                    row.put("triggerType",r.getString(7));row.put("createdAt",r.getString(8));row.put("jobStatus",r.getString(9));
+                    row.put("triggerType",r.getString(7));row.put("createdAt",r.getString(8));row.put("jobStatus",r.getString(9));row.put("triggeredBy",r.getString(10));
                     out.add(row);
                 }
             }
         }return out;
     }
     synchronized Map<String,Object> scheduleExecution(String occurrenceId) throws Exception {
-        try(Connection c=connect();PreparedStatement p=c.prepareStatement("SELECT e.occurrence_id,e.schedule_id,e.scheduled_for,e.status,e.reason,e.job_id,e.trigger_type,e.created_at,j.status FROM load_schedule_executions e LEFT JOIN jobs j ON j.job_id=e.job_id AND (j.retention_state IS NULL OR j.retention_state<>'DELETING') WHERE e.occurrence_id=?")){
-            p.setString(1,occurrenceId);try(ResultSet r=p.executeQuery()){if(!r.next())return null;Map<String,Object> row=new LinkedHashMap<>();row.put("occurrenceId",r.getString(1));row.put("scheduleId",r.getString(2));row.put("scheduledFor",r.getString(3));row.put("status",r.getString(4));row.put("reason",r.getString(5));row.put("jobId",r.getString(6));row.put("triggerType",r.getString(7));row.put("createdAt",r.getString(8));row.put("jobStatus",r.getString(9));return row;}
+        try(Connection c=connect();PreparedStatement p=c.prepareStatement("SELECT e.occurrence_id,e.schedule_id,e.scheduled_for,e.status,e.reason,e.job_id,e.trigger_type,e.created_at,j.status,e.triggered_by FROM load_schedule_executions e LEFT JOIN jobs j ON j.job_id=e.job_id AND (j.retention_state IS NULL OR j.retention_state<>'DELETING') WHERE e.occurrence_id=?")){
+            p.setString(1,occurrenceId);try(ResultSet r=p.executeQuery()){if(!r.next())return null;Map<String,Object> row=new LinkedHashMap<>();row.put("occurrenceId",r.getString(1));row.put("scheduleId",r.getString(2));row.put("scheduledFor",r.getString(3));row.put("status",r.getString(4));row.put("reason",r.getString(5));row.put("jobId",r.getString(6));row.put("triggerType",r.getString(7));row.put("createdAt",r.getString(8));row.put("jobStatus",r.getString(9));row.put("triggeredBy",r.getString(10));return row;}
         }
     }
     synchronized int activeScheduledCount(String scheduleId) throws Exception {
@@ -559,6 +580,51 @@ final class JobStore implements AutoCloseable {
     synchronized Map<String,Object> authUser(String login) throws Exception {
         try(Connection c=connect();PreparedStatement p=c.prepareStatement("SELECT login_id,display_name,password_hash,role,active,csrf_token FROM auth_users WHERE login_id=?")){p.setString(1,login);try(ResultSet r=p.executeQuery()){if(!r.next())return null;Map<String,Object> m=new LinkedHashMap<>();m.put("loginId",r.getString(1));m.put("displayName",r.getString(2));m.put("passwordHash",r.getString(3));m.put("role",r.getString(4));m.put("active",r.getBoolean(5));m.put("csrfToken",r.getString(6));return m;}}
     }
+    synchronized String localPreferenceSubject(String login) throws Exception {
+        try(Connection c=connect();PreparedStatement p=c.prepareStatement("SELECT account_id FROM auth_users WHERE login_id=? AND active=TRUE")) {
+            p.setString(1,login);try(ResultSet r=p.executeQuery()){return r.next()?"local:"+r.getString(1):null;}
+        }
+    }
+    synchronized Map<String,Object> userPreferences(String subject) throws Exception {
+        validatePreferenceSubject(subject);
+        try(Connection c=connect();PreparedStatement p=c.prepareStatement("SELECT language,theme,version,updated_at FROM user_preferences WHERE subject_id=?")) {
+            p.setString(1,subject);try(ResultSet r=p.executeQuery()) {
+                Map<String,Object> result=new LinkedHashMap<>();result.put("available",true);
+                if(!r.next()){result.put("language",null);result.put("theme",null);result.put("version",0L);result.put("updatedAt",null);return result;}
+                result.put("language",r.getString(1));result.put("theme",r.getString(2));result.put("version",r.getLong(3));result.put("updatedAt",r.getString(4));return result;
+            }
+        }
+    }
+    synchronized Map<String,Object> updateUserPreferences(String subject,String language,boolean setLanguage,String theme,boolean setTheme,boolean migrateIfAbsent) throws Exception {
+        validatePreferenceSubject(subject);if(!setLanguage&&!setTheme)throw new IllegalArgumentException("At least one preference is required");
+        if(setLanguage&&!Set.of("browser","en","zh-Hant").contains(language))throw new IllegalArgumentException("Invalid language preference");
+        if(setTheme&&!Set.of("system","light","dark").contains(theme))throw new IllegalArgumentException("Invalid theme preference");
+        try(Connection c=connect()) {
+            c.setAutoCommit(false);
+            try {
+                String oldLanguage=null,oldTheme=null;long oldVersion=0;boolean exists=false;
+                try(PreparedStatement p=c.prepareStatement("SELECT language,theme,version FROM user_preferences WHERE subject_id=? FOR UPDATE")) {
+                    p.setString(1,subject);try(ResultSet r=p.executeQuery()){if(r.next()){exists=true;oldLanguage=r.getString(1);oldTheme=r.getString(2);oldVersion=r.getLong(3);}}
+                }
+                String nextLanguage=setLanguage?language:oldLanguage,nextTheme=setTheme?theme:oldTheme;
+                if(migrateIfAbsent&&exists) {
+                    if(oldLanguage!=null)nextLanguage=oldLanguage;else if(!setLanguage)nextLanguage=null;
+                    if(oldTheme!=null)nextTheme=oldTheme;else if(!setTheme)nextTheme=null;
+                }
+                boolean changed=!exists||!java.util.Objects.equals(oldLanguage,nextLanguage)||!java.util.Objects.equals(oldTheme,nextTheme);
+                long nextVersion=changed?oldVersion+1:oldVersion;String updatedAt=changed?Instant.now().toString():null;
+                if(!exists)try(PreparedStatement p=c.prepareStatement("INSERT INTO user_preferences(subject_id,language,theme,version,updated_at) VALUES(?,?,?,?,?)")) {
+                    p.setString(1,subject);p.setString(2,nextLanguage);p.setString(3,nextTheme);p.setLong(4,nextVersion);p.setString(5,updatedAt);p.executeUpdate();
+                } else if(changed)try(PreparedStatement p=c.prepareStatement("UPDATE user_preferences SET language=?,theme=?,version=?,updated_at=? WHERE subject_id=?")) {
+                    p.setString(1,nextLanguage);p.setString(2,nextTheme);p.setLong(3,nextVersion);p.setString(4,updatedAt);p.setString(5,subject);p.executeUpdate();
+                }
+                c.commit();return userPreferences(subject);
+            } catch(Exception failure){c.rollback();throw failure;}
+        }
+    }
+    private static void validatePreferenceSubject(String subject) {
+        if(subject==null||subject.isBlank()||subject.length()>320||subject.chars().anyMatch(Character::isISOControl))throw new IllegalArgumentException("Authenticated user identity is unavailable");
+    }
     synchronized List<Map<String,Object>> authUsers() throws Exception {
         List<Map<String,Object>> users=new ArrayList<>();try(Connection c=connect();Statement s=c.createStatement();ResultSet r=s.executeQuery("SELECT login_id,display_name,role,active,updated_at FROM auth_users ORDER BY login_id")){while(r.next()){Map<String,Object> u=new LinkedHashMap<>();u.put("loginId",r.getString(1));u.put("displayName",r.getString(2));u.put("role",r.getString(3));u.put("active",r.getBoolean(4));u.put("updatedAt",r.getString(5));users.add(u);}}return users;
     }
@@ -599,7 +665,7 @@ final class JobStore implements AutoCloseable {
                     bind(p,parameters);try(ResultSet r=p.executeQuery()){r.next();total=r.getLong(1);}
                 }
                 List<Map<String,Object>> items=new ArrayList<>();
-                String projection="job_id,command,package_id,principal,status,created_at,started_at,finished_at,exit_code,request_summary,pinned,pinned_at,pinned_by,pin_reason,retention_state,target_identity,target_group,environment,originating_schedule_id";
+                String projection="job_id,command,package_id,principal,status,created_at,started_at,finished_at,exit_code,request_summary,pinned,pinned_at,pinned_by,pin_reason,retention_state,target_identity,target_group,environment,originating_schedule_id,submission_source,schedule_owner,execution_principal,submitted_by,triggered_by,CASE WHEN originating_schedule_id IS NOT NULL AND EXISTS (SELECT 1 FROM load_schedules s WHERE s.schedule_id=jobs.originating_schedule_id) THEN TRUE ELSE FALSE END";
                 try(PreparedStatement p=c.prepareStatement("SELECT "+projection+" FROM jobs WHERE "+where+" ORDER BY "+query.order()+" LIMIT ? OFFSET ?")) {
                     bind(p,parameters);p.setInt(parameters.size()+1,query.limit);p.setInt(parameters.size()+2,query.offset);
                     try(ResultSet r=p.executeQuery()){while(r.next()) {
@@ -607,7 +673,10 @@ final class JobStore implements AutoCloseable {
                         String identity=r.getString(16);
                         if(identity!=null)try {item.put("targetIdentity",ServerRuntime.JSON.readValue(identity,Map.class));}
                         catch(com.fasterxml.jackson.core.JsonProcessingException invalid) { /* Legacy malformed display metadata: retain Job-ID fallback. */ }
-                        item.put("scheduled",r.getString(19)!=null||scheduledScheduleId(r.getString(4))!=null);
+                        item.put("scheduled","scheduled".equals(r.getString(20))||r.getString(19)!=null||scheduledScheduleId(r.getString(4))!=null);
+                        String scheduleId=r.getString(19);
+                        item.put("submissionSource",r.getString(20)==null?"manual":r.getString(20));item.put("originatingScheduleId",scheduleId);item.put("scheduleId",scheduleId);item.put("scheduleAvailable",r.getBoolean(25));
+                        item.put("scheduleOwner",r.getString(21));item.put("executionPrincipal",r.getString(22));item.put("submittedBy",r.getString(23));item.put("triggeredBy",r.getString(24));
                         item.put("targetGroup",r.getString(17));item.put("environment",r.getString(18));items.add(item);
                     }}
                 }
@@ -630,10 +699,19 @@ final class JobStore implements AutoCloseable {
                     p.setString(1,"text".equals(query.principalMode)&&query.principal!=null?query.principal:"");
                     try(ResultSet r=p.executeQuery()){while(r.next())principals.add(r.getString(1));}
                 }
+                List<String> executionPrincipals=identitySuggestions(c,"execution_principal","text".equals(query.executionPrincipalMode)?query.executionPrincipal:null);
+                List<String> scheduleOwners=identitySuggestions(c,"schedule_owner","text".equals(query.scheduleOwnerMode)?query.scheduleOwner:null);
+                List<String> triggerActors=identitySuggestions(c,"triggered_by","text".equals(query.triggeredByMode)?query.triggeredBy:null);
                 try(PreparedStatement p=c.prepareStatement("SELECT DISTINCT package_id FROM jobs WHERE (retention_state IS NULL OR retention_state<>'DELETING') ORDER BY package_id LIMIT 100");ResultSet r=p.executeQuery()){while(r.next())packages.add(r.getString(1));}
-                c.commit();Map<String,Object> response=new LinkedHashMap<>();response.put("items",items);response.put("total",total);response.put("offset",query.offset);response.put("limit",query.limit);response.put("nextOffset",query.offset+(long)items.size()<total?query.offset+items.size():null);response.put("groups",groups);response.put("principalSuggestions",principals);response.put("packageSuggestions",packages);return response;
+                c.commit();Map<String,Object> response=new LinkedHashMap<>();response.put("items",items);response.put("total",total);response.put("offset",query.offset);response.put("limit",query.limit);response.put("nextOffset",query.offset+(long)items.size()<total?query.offset+items.size():null);response.put("groups",groups);response.put("principalSuggestions",principals);response.put("executionPrincipalSuggestions",executionPrincipals);response.put("scheduleOwnerSuggestions",scheduleOwners);response.put("triggeredBySuggestions",triggerActors);response.put("packageSuggestions",packages);return response;
             } catch(Exception failure){c.rollback();throw failure;}
         }
+    }
+    private static List<String> identitySuggestions(Connection c,String column,String search) throws Exception {
+        if(!Set.of("execution_principal","schedule_owner","triggered_by").contains(column))throw new IllegalArgumentException("Unsupported identity column");
+        List<String> values=new ArrayList<>();String sql="SELECT DISTINCT "+column+" FROM jobs WHERE (retention_state IS NULL OR retention_state<>'DELETING') AND "+column+" IS NOT NULL"+(search==null?"":" AND LOCATE(LOWER(?),LOWER("+column+"))>0")+" ORDER BY "+column+" LIMIT 30";
+        try(PreparedStatement p=c.prepareStatement(sql)){if(search!=null)p.setString(1,search);try(ResultSet r=p.executeQuery()){while(r.next())values.add(r.getString(1));}}
+        return values;
     }
     private static void bind(PreparedStatement p,List<Object> parameters) throws Exception {for(int i=0;i<parameters.size();i++)p.setObject(i+1,parameters.get(i));}
 
@@ -650,14 +728,14 @@ final class JobStore implements AutoCloseable {
         } catch(Exception ignored) { /* Older or malformed summaries do not make job history unavailable. */ }
         return m;
     }
-    synchronized void createAuthUser(String login,String display,String hash,String role,String csrf) throws Exception {try(Connection c=connect();PreparedStatement p=c.prepareStatement("INSERT INTO auth_users(login_id,display_name,password_hash,role,active,updated_at,csrf_token) VALUES(?,?,?,?,TRUE,?,?)")){p.setString(1,login);p.setString(2,display);p.setString(3,hash);p.setString(4,role);p.setString(5,Instant.now().toString());p.setString(6,csrf);p.executeUpdate();}}
+    synchronized void createAuthUser(String login,String display,String hash,String role,String csrf) throws Exception {try(Connection c=connect();PreparedStatement p=c.prepareStatement("INSERT INTO auth_users(login_id,display_name,password_hash,role,active,updated_at,csrf_token,account_id) VALUES(?,?,?,?,TRUE,?,?,?)")){p.setString(1,login);p.setString(2,display);p.setString(3,hash);p.setString(4,role);p.setString(5,Instant.now().toString());p.setString(6,csrf);p.setString(7,java.util.UUID.randomUUID().toString());p.executeUpdate();}}
     void createBootstrapAdmin(String login,String display,String hash,String csrf) throws Exception {
         try(Connection c=connect()) {
             c.setAutoCommit(false);
             try {
                 try(Statement s=c.createStatement();ResultSet r=s.executeQuery("SELECT COUNT(*) FROM auth_users")){r.next();if(r.getLong(1)>0)throw new AuthService.AuthFailure(409,"ATT-AUTH-BOOTSTRAP-CLOSED");}
                 try(PreparedStatement claim=c.prepareStatement("INSERT INTO auth_bootstrap_claim(claim_id,claimed_at) VALUES(1,?)")){claim.setString(1,Instant.now().toString());claim.executeUpdate();}
-                try(PreparedStatement user=c.prepareStatement("INSERT INTO auth_users(login_id,display_name,password_hash,role,active,updated_at,csrf_token) VALUES(?,?,?,'ADMIN',TRUE,?,?)")){user.setString(1,login);user.setString(2,display);user.setString(3,hash);user.setString(4,Instant.now().toString());user.setString(5,csrf);user.executeUpdate();}
+                try(PreparedStatement user=c.prepareStatement("INSERT INTO auth_users(login_id,display_name,password_hash,role,active,updated_at,csrf_token,account_id) VALUES(?,?,?,'ADMIN',TRUE,?,?,?)")){user.setString(1,login);user.setString(2,display);user.setString(3,hash);user.setString(4,Instant.now().toString());user.setString(5,csrf);user.setString(6,java.util.UUID.randomUUID().toString());user.executeUpdate();}
                 c.commit();
             } catch(Exception failure) {
                 c.rollback();
@@ -1012,8 +1090,9 @@ final class JobStore implements AutoCloseable {
     }
     // Job reads own their connection and result data; allow API polling alongside writes.
     java.util.Map<String,Object> get(String id) throws Exception {
-        try(Connection c=connect();PreparedStatement p=c.prepareStatement("SELECT job_id,command,package_id,principal,status,created_at,started_at,finished_at,worker_pid,exit_code,result_json,diagnostic_json,att_version,performance_json,retention_state,pinned,pinned_at,pinned_by,pin_reason,request_summary,target_identity,load_progress_json FROM jobs WHERE job_id=?")) {
+        try(Connection c=connect();PreparedStatement p=c.prepareStatement("SELECT job_id,command,package_id,principal,status,created_at,started_at,finished_at,worker_pid,exit_code,result_json,diagnostic_json,att_version,performance_json,retention_state,pinned,pinned_at,pinned_by,pin_reason,request_summary,target_identity,load_progress_json,originating_schedule_id,submission_source,schedule_owner,execution_principal,submitted_by,triggered_by FROM jobs WHERE job_id=?")) {
             p.setString(1,id);try(ResultSet r=p.executeQuery()){if(!r.next()||"DELETING".equals(r.getString(15)))return null;var m=new java.util.LinkedHashMap<String,Object>();m.put("jobId",r.getString(1));m.put("command",r.getString(2));m.put("executionType",Job.executionType(r.getString(2)));m.put("packageId",r.getString(3));m.put("principal",r.getString(4));m.put("status",r.getString(5));m.put("createdAt",r.getString(6));m.put("startedAt",r.getString(7));m.put("finishedAt",r.getString(8));m.put("workerPid",r.getObject(9));m.put("exitCode",r.getObject(10));m.put("resultJson",r.getString(11));m.put("diagnosticJson",r.getString(12));m.put("attVersion",r.getString(13));m.put("performanceJson",r.getString(14));m.put("pinned",r.getBoolean(16));m.put("pinnedAt",r.getString(17));m.put("pinnedBy",r.getString(18));m.put("pinReason",r.getString(19));m.put("deletionState",r.getString(15));
+                m.put("originatingScheduleId",r.getString(23));m.put("scheduleId",r.getString(23));m.put("submissionSource",r.getString(24)==null?"manual":r.getString(24));m.put("scheduleOwner",r.getString(25));m.put("executionPrincipal",r.getString(26));m.put("submittedBy",r.getString(27));m.put("triggeredBy",r.getString(28));
                 String summary=r.getString(20);if(summary!=null)try{Map<?,?> details=ServerRuntime.JSON.readValue(summary,Map.class);for(String key:List.of("environment","configuration"))if(details.get(key)!=null)m.put(key,details.get(key));}catch(Exception ignored){}
                 String identity=r.getString(21);if(identity!=null)try{m.put("targetIdentity",ServerRuntime.JSON.readValue(identity,Map.class));}catch(Exception ignored){}
                 String progress=r.getString(22);if(progress!=null)try{Map<?,?> state=ServerRuntime.JSON.readValue(progress,Map.class);for(String key:List.of("latest","recent","trend","checkpoints"))if(state.get(key)!=null)m.put(switch(key){case "latest"->"loadProgress";case "recent"->"loadProgressHistory";case "trend"->"loadProgressTrend";default->"loadCheckpointHistory";},state.get(key));}catch(Exception ignored){}

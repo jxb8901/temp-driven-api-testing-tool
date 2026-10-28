@@ -9,6 +9,7 @@ import { api as serverApi } from '../../api';
 import { artifactApi } from './artifactApi';
 import { memo, Profiler, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import './load.css';
+import './JobsPage.css';
 import { JobArtifacts } from './JobArtifacts';
 import type { JobResultResponse, JobStatus, JobSummary, JobView, JobsFeatureProps, LoadJobsApi, LoadLiveProgressPoint, LoadLiveProgressSnapshot } from './types';
 import { JobConsoleView } from './JobConsoleView';
@@ -227,7 +228,8 @@ async function restoreMetricSeries(metrics: Record<string, unknown>, api: Pick<L
     const record = rawRecord as Record<string, unknown>;
     if (record.scope !== 'aggregate' || record.complete !== true || typeof record.target !== 'string'
         || !['map', 'list'].includes(String(record.kind)) || !Number.isSafeInteger(record.count)
-        || !Array.isArray(record.files) || record.files.length === 0)
+        || !Array.isArray(record.files) || record.files.length === 0
+        || (record.sharedContent !== undefined && record.sharedContent !== true))
       throw new Error('The archived LOAD metric-series entry is incomplete.');
     // Metrics charts consume buckets. Other series are loaded only via their authorized artifact links,
     // rather than eagerly fetching every diagnostic and workload collection.
@@ -256,8 +258,11 @@ async function restoreMetricSeries(metrics: Record<string, unknown>, api: Pick<L
         const chunk = parsed as Record<string, unknown>;
         const validItems = record.kind === 'list' ? Array.isArray(chunk.items)
           : Boolean(chunk.items && typeof chunk.items === 'object' && !Array.isArray(chunk.items));
-        if (chunk.schemaVersion !== 'att-load-detail-series/v1' || chunk.scope !== 'aggregate'
-            || chunk.target !== record.target || chunk.kind !== record.kind || !Number.isSafeInteger(chunk.part)
+        const shared = record.sharedContent === true;
+        if ((shared
+          ? chunk.schemaVersion !== 'att-load-detail-series/v2' || !/^[a-f0-9]{64}$/.test(String(chunk.contentSha256 ?? ''))
+          : chunk.schemaVersion !== 'att-load-detail-series/v1' || chunk.scope !== 'aggregate' || chunk.target !== record.target)
+            || chunk.kind !== record.kind || !Number.isSafeInteger(chunk.part)
             || !Number.isSafeInteger(chunk.parts) || chunk.total !== record.count
             || !validItems)
           throw new Error('An archived LOAD metric-series chunk does not match its reference.');
@@ -315,40 +320,60 @@ function EvidenceQuotaSummary({ payload, jobId, archiveRoot, evidence: archivedE
     : [];
   const defaults = policy.defaults && typeof policy.defaults === 'object' && !Array.isArray(policy.defaults)
     ? policy.defaults as Record<string, unknown> : {};
+  const rawCoverage = evidence.retentionCoverage;
+  const coverage = rawCoverage && typeof rawCoverage === 'object' && !Array.isArray(rawCoverage)
+    ? rawCoverage as Record<string, unknown> : {};
+  const coverageText = (value: unknown) => value && typeof value === 'object' && !Array.isArray(value)
+    ? Object.entries(value as Record<string, unknown>).map(([key, count]) => `${key}: ${displayValue(count)}`).join(', ')
+    : '';
   const perWorkload = policy.quotaMode === 'perWorkload';
   const labels: Record<string, string> = {
     maxSamples: 'Combined limit', maxSuccessSamples: 'Success limit', maxFailureSamples: 'Failure limit',
     retainedSuccessCount: 'Success samples retained', retainedFailureCount: 'Failure samples retained',
     successQuotaExceeded: 'Success limit reached', failureQuotaExceeded: 'Failure limit reached',
     skippedSuccessQuotaCount: 'Success samples skipped at limit', skippedFailureQuotaCount: 'Failure samples skipped at limit',
+    skippedUnclassifiedQuotaCount: 'Outcome-unclassified reservations skipped',
     skippedMissingEvidenceCount: 'Unavailable evidence skipped',
+    completedSuccessCount: 'Completed successes', hashQualifiedSuccessCount: 'Hash-qualified successes',
+    samplingIneligibleSuccessCount: 'Sampling-ineligible successes', combinedQuotaExceeded: 'Legacy combined cap reached',
   };
   return <section aria-label="Retained evidence quotas">
     <h3>Retained evidence quotas</h3>
     <p>{perWorkload ? 'Independent per-workload success and failure caps; unused capacity is never transferred or reclaimed.'
       : policy.quotaMode === 'independent' ? 'Independent success and failure quotas shared across the run'
-        : 'Legacy combined cap'}</p>
+        : 'Legacy combined cap shared by successful samples and failure evidence'}</p>
     <dl>
       {perWorkload && defaults.maxSuccessSamples != null && <div><dt>Default success cap</dt><dd>{displayValue(defaults.maxSuccessSamples)}</dd></div>}
       {perWorkload && defaults.maxFailureSamples != null && <div><dt>Default failure cap</dt><dd>{displayValue(defaults.maxFailureSamples)}</dd></div>}
+    {typeof policy.successSamplingHash === 'string' && <p>
+      Success sampling eligibility uses {policy.successSamplingHash} over {displayValue(policy.successSamplingEncoding)} iteration IDs;
+      hash-qualified successes are candidates, and quota retention is a separate decision.
+    </p>}
       {['maxSamples', 'maxSuccessSamples', 'maxFailureSamples'].filter(key => policy[key] != null)
         .map(key => <div key={key}><dt>{labels[key]}</dt><dd>{displayValue(policy[key])}</dd></div>)}
-      {['retainedSuccessCount', 'retainedFailureCount', 'successQuotaExceeded', 'failureQuotaExceeded', 'skippedSuccessQuotaCount', 'skippedFailureQuotaCount', 'skippedMissingEvidenceCount']
+      {['completedSuccessCount', 'hashQualifiedSuccessCount', 'samplingIneligibleSuccessCount', 'retainedSuccessCount', 'retainedFailureCount', 'successQuotaExceeded', 'failureQuotaExceeded', 'combinedQuotaExceeded', 'skippedSuccessQuotaCount', 'skippedFailureQuotaCount', 'skippedUnclassifiedQuotaCount', 'skippedMissingEvidenceCount']
         .filter(key => evidence[key] != null).map(key => <div key={key}><dt>{labels[key]}</dt><dd>{displayValue(evidence[key])}</dd></div>)}
     </dl>
     {typeof evidence.warning === 'string' && <p role="alert">{evidence.warning}</p>}
+    {Object.keys(coverage).length > 0 && <p>
+      Retention selection: {displayValue(coverage.strategy)}; {displayValue(coverage.populatedTimeWindowCount)} time windows contain retained evidence.
+      Retained entries are append-only; candidates use first-come slots within each window.
+      {coverageText(coverage.retainedByTimeWindow) && <> By time window: {coverageText(coverage.retainedByTimeWindow)}.</>}
+      {coverageText(coverage.retainedByPhase) && <> By phase: {coverageText(coverage.retainedByPhase)}.</>}
+    </p>}
     {Object.keys(workloadStats).length > 0 && <>
       <h4>Evidence coverage by workload</h4>
-      <div className="att-table-scroll"><table><thead><tr><th>Workload</th><th>Target</th>{perWorkload && <><th>Success cap</th><th>Failure cap</th></>}<th>Eligible successes</th><th>Sampling ineligible</th><th>Success retained</th><th>Failure retained</th><th>Quota skips</th><th>Missing evidence</th></tr></thead>
+      <div className="att-table-scroll"><table><thead><tr><th>Workload</th><th>Target</th>{perWorkload && <><th>Success cap</th><th>Failure cap</th></>}<th>Completed successes</th><th>Hash-qualified successes</th><th>Sampling ineligible</th><th>Success retained</th><th>Failure retained</th><th>Quota skips</th><th>Missing evidence</th></tr></thead>
         <tbody>{Object.entries(workloadStats).map(([workload, stats]) => <tr key={workload}>
           <th scope="row">{workload}</th>
           <td>{displayValue(stats.targetId)}</td>
           {perWorkload && <><td>{displayValue(stats.maxSuccessSamples)}</td><td>{displayValue(stats.maxFailureSamples)}</td></>}
-          <td>{displayValue(stats.eligibleSuccessCount)}</td>
+          <td>{displayValue(stats.completedSuccessCount ?? stats.eligibleSuccessCount)}</td>
+          <td>{displayValue(stats.hashQualifiedSuccessCount ?? 'Not reported')}</td>
           <td>{displayValue(stats.samplingIneligibleSuccessCount)}</td>
           <td>{displayValue(stats.retainedSuccessCount)}</td>
           <td>{displayValue(stats.retainedFailureCount)}</td>
-          <td>Success: {displayValue(stats.skippedSuccessQuotaCount)} · Failure: {displayValue(stats.skippedFailureQuotaCount)}</td>
+          <td>Success: {displayValue(stats.skippedSuccessQuotaCount)} · Failure: {displayValue(stats.skippedFailureQuotaCount)} · Unclassified: {displayValue(stats.skippedUnclassifiedQuotaCount ?? 'Not reported')}</td>
           <td>{displayValue(stats.skippedMissingEvidenceCount)}</td>
         </tr>)}</tbody>
       </table></div>
@@ -626,7 +651,7 @@ function LiveSampleChart({ label, unit, points, series }: {
     <svg viewBox="0 0 620 112" role="img" aria-label={`${label} trend`}>
       {valid.slice(0, -1).map((point, index) => {
         const next = valid[index + 1]!;
-        const fill = point.phase === 'WARMUP' ? '#fff0c2' : point.phase === 'RAMP_UP' || point.phase === 'RAMP_DOWN' ? '#e7edff' : undefined;
+        const fill = point.phase === 'WARMUP' ? '#fff0c2' : point.phase === 'RAMP_UP' ? '#e7edff' : point.phase === 'RAMP_DOWN' ? '#fff7ed' : point.phase === 'DRAIN' ? '#f8fafc' : undefined;
         return fill ? <rect key={`${point.elapsedMs}-${index}`} x={24 + (point.elapsedMs - first) * 580 / span} y="16" width={(next.elapsedMs - point.elapsedMs) * 580 / span} height="84" fill={fill} aria-hidden="true" /> : null;
       })}
       <path d="M 24 100 H 604" className="att-live-load-axis" />
@@ -714,11 +739,11 @@ function LiveLoadSummary({ job, active, progress, history, trend, streamHistory,
         <div><dt>Measured-window PASS rate</dt><dd>{measuredRate(measured?.passed)}</dd></div>
         <div><dt>Measured-window SUT FAIL / runtime ERROR rate</dt><dd>{measuredRate(measured?.sutFailures)} / {measuredRate(measured?.runtimeErrors)}</dd></div>
       </dl>
-      <p>The counters above are all-phase totals. Rates marked measured-window exclude warmup.</p>
+      <p>The counters above are all-phase totals. Measured-window rates exclude ramp-up and warm-up.</p>
       {progress.phases && Object.keys(progress.phases).length > 0 && <details><summary>Phase totals</summary>
         <div className="att-table-scroll" tabIndex={0} role="region" aria-label="Actual counters by phase"><table><caption>Actual counters by phase</caption><thead><tr><th>Phase</th><th>Measurement scope</th><th>Completed / PASS</th><th>FAIL / ERROR / drop</th></tr></thead>
           <tbody>{Object.entries(progress.phases).map(([phase, phaseCounts]) => <tr key={phase}>
-            <th scope="row">{phase.replaceAll('_', ' ')}</th><td>{phase === 'WARMUP' ? 'Unmeasured' : ['RAMP_UP', 'STEADY', 'RAMP_DOWN'].includes(phase) ? 'Measured' : 'Unknown'}</td>
+            <th scope="row">{phase.replaceAll('_', ' ')}</th><td>{['WARMUP', 'RAMP_UP', 'DRAIN'].includes(phase) ? 'Unmeasured' : ['STEADY', 'RAMP_DOWN'].includes(phase) ? 'Measured' : 'Unknown'}</td>
             <td>{countText(phaseCounts.completed)} / {countText(phaseCounts.passed)}</td>
             <td>{countText(phaseCounts.sutFailures)} / {countText(phaseCounts.runtimeErrors)} / {countText(phaseCounts.dropped)}</td>
           </tr>)}</tbody></table></div></details>}
@@ -798,7 +823,18 @@ export const JobOverview = memo(function JobOverview({ job, status, statusText, 
       <div><dt>Job ID</dt><dd>{job.jobId}</dd></div><div><dt>Status</dt><dd><StatusBadge status={status} /></dd></div>
       <div><dt>Execution type</dt><dd>{executionType(job)}</dd></div><div><dt>Command</dt><dd>{job.command || 'Not reported'}</dd></div><div><dt>Package</dt><dd>{job.packageId || 'Not reported'}</dd></div>
       {job.rerunOfJobId && <div><dt>Rerun of</dt><dd><a href={formatRoute({ kind: 'jobs', jobId: job.rerunOfJobId })}>{job.rerunOfJobId}</a></dd></div>}
-      <div><dt>Principal</dt><dd>{job.principal || 'Not reported'}</dd></div><div><dt>Created</dt><dd><time dateTime={job.createdAt || undefined}>{dateTime(job.createdAt)}</time></dd></div>
+      <div><dt>Submission source</dt><dd>{job.submissionSource === 'scheduled' ? 'Scheduled' : job.submissionSource === 'manual' ? 'Manual' : 'Unknown'}</dd></div>
+      <div><dt>Legacy principal</dt><dd>{job.principal || 'Not reported'}</dd></div>
+      {job.submissionSource === 'scheduled' ? <>
+        <div><dt>Schedule ID</dt><dd>{job.scheduleId || job.originatingScheduleId || 'Unknown'}</dd></div>
+        <div><dt>Schedule owner</dt><dd>{job.scheduleOwner || 'Unknown'}</dd></div>
+        <div><dt>Execution principal</dt><dd>{job.executionPrincipal || 'Unknown'}</dd></div>
+        {job.triggeredBy && <div><dt>Triggered by</dt><dd>{job.triggeredBy}</dd></div>}
+      </> : <>
+        <div><dt>Execution principal</dt><dd>{job.executionPrincipal || 'Unknown'}</dd></div>
+        <div><dt>Submitted by</dt><dd>{job.submittedBy || 'Unknown'}</dd></div>
+      </>}
+      <div><dt>Created</dt><dd><time dateTime={job.createdAt || undefined}>{dateTime(job.createdAt)}</time></dd></div>
       <div><dt>Started</dt><dd><time dateTime={job.startedAt || undefined}>{dateTime(job.startedAt)}</time></dd></div><div><dt>Finished</dt><dd><time dateTime={job.finishedAt || undefined}>{dateTime(job.finishedAt)}</time></dd></div>
       <div><dt>Exit code</dt><dd>{job.exitCode ?? 'Not reported'}</dd></div>
       {job.pinned && <div><dt>Pin reason</dt><dd>{job.pinReason || 'Not provided'}</dd></div>}

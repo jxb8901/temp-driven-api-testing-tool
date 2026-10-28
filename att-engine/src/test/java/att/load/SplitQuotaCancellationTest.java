@@ -14,7 +14,7 @@ class SplitQuotaCancellationTest {
             Path file=temp.resolve(arrival?"arrival.yaml":"closed.yaml");
             Files.write(file,("schemaVersion: att-load/v1.7\nworkloads:\n- id: cancellation\n  target: {type: template, id: T}\n"
                     +"  load: {"+(arrival?"arrivalRate: 1000/s, maxConcurrent: 8, overloadPolicy: drop":"users: 8")+", duration: 60s}\n"
-                    +"evidence: {mode: all, maxSuccessSamples: 8, maxFailureSamples: 8}\n").getBytes("UTF-8"));
+                    +"evidence: {mode: all, maxSuccessSamples: 80, maxFailureSamples: 8}\n").getBytes("UTF-8"));
             LoadScenario scenario=new LoadScenarioLoader(temp).load(file);
             LoadEvidenceStore store=new LoadEvidenceStore(LoadEvidencePolicy.from(scenario));
             CountDownLatch entered=new CountDownLatch(1);

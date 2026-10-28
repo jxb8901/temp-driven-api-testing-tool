@@ -641,8 +641,30 @@ public final class LoadReportWriter {
                         .append(escape(String.valueOf(defaults.get("maxSuccessSamples"))))
                         .append(", failure ").append(escape(String.valueOf(defaults.get("maxFailureSamples"))))
                         .append(". Workload overrides and retained coverage are shown below.");
-            } else html.append("Legacy combined cap: ").append(escape(String.valueOf(policy.get("maxSamples"))));
+            } else html.append("Legacy combined cap: ").append(escape(String.valueOf(policy.get("maxSamples"))))
+                    .append(" shared by successful samples and failure evidence");
             html.append(".</p>");
+            if(policy.get("successSamplingHash")!=null)
+                html.append("<p>Success sample eligibility uses ").append(escape(String.valueOf(policy.get("successSamplingHash"))))
+                        .append(" over ").append(escape(String.valueOf(policy.get("successSamplingEncoding"))))
+                        .append(" iteration IDs. Hash-qualified successes are candidates; quota retention is a separate decision.</p>");
+            Object coverageValue=evidence.get("retentionCoverage");
+            if(coverageValue instanceof Map) {
+                Map<?,?> coverage=(Map<?,?>)coverageValue;
+                html.append("<p>Retention selection: ").append(escape(String.valueOf(coverage.get("strategy"))))
+                        .append("; ").append(escape(display(coverage.get("populatedTimeWindowCount"))))
+                        .append(" time windows contain evidence. Retained entries are append-only; slots are first-come within each window.");
+                if(coverage.get("retainedByTimeWindow") instanceof Map && !((Map<?,?>)coverage.get("retainedByTimeWindow")).isEmpty())
+                    html.append(" By time window: ").append(escape(displayCounts((Map<?,?>)coverage.get("retainedByTimeWindow")))).append(".");
+                if(coverage.get("retainedByPhase") instanceof Map && !((Map<?,?>)coverage.get("retainedByPhase")).isEmpty())
+                    html.append(" By phase: ").append(escape(displayCounts((Map<?,?>)coverage.get("retainedByPhase")))).append(".");
+                html.append("</p>");
+            }
+            if(evidence.get("completedSuccessCount")!=null)
+                html.append("<p>Completed successes: ").append(escape(display(evidence.get("completedSuccessCount"))))
+                        .append("; hash-qualified: ").append(escape(display(evidence.get("hashQualifiedSuccessCount"))))
+                        .append("; sampling-ineligible: ").append(escape(display(evidence.get("samplingIneligibleSuccessCount"))))
+                        .append("; quota skips and missing evidence are reported separately below.</p>");
             if(evidence.get("warning")!=null)html.append("<p class=\"warning\" role=\"alert\">").append(escape(String.valueOf(evidence.get("warning")))).append("</p>");
             Object workloadValue=evidence.get("workloads");
             if(workloadValue instanceof Map && !((Map<?,?>)workloadValue).isEmpty()) {
@@ -650,7 +672,7 @@ public final class LoadReportWriter {
                 html.append("<h3>Evidence coverage by workload</h3><div class=\"scroll\"><table><thead><tr><th>Workload</th>");
                 html.append("<th>Target</th>");
                 if(perWorkload)html.append("<th>Success cap</th><th>Failure cap</th>");
-                html.append("<th>Eligible successes</th><th>Sampling ineligible</th><th>Success retained</th><th>Failure retained</th><th>Success quota skips</th><th>Failure quota skips</th><th>Missing evidence</th></tr></thead><tbody>");
+                html.append("<th>Completed successes</th><th>Hash-qualified successes</th><th>Sampling ineligible</th><th>Success retained</th><th>Failure retained</th><th>Success quota skips</th><th>Failure quota skips</th><th>Outcome-unclassified quota skips</th><th>Missing evidence</th></tr></thead><tbody>");
                 for(Map.Entry<?,?> entry:((Map<?,?>)workloadValue).entrySet()) {
                     if(!(entry.getValue() instanceof Map))continue;
                     Map<?,?> row=(Map<?,?>)entry.getValue();
@@ -658,7 +680,7 @@ public final class LoadReportWriter {
                     html.append("<td>").append(escape(display(row.get("targetId")))).append("</td>");
                     if(perWorkload)for(String key:new String[]{"maxSuccessSamples","maxFailureSamples"})
                         html.append("<td>").append(escape(display(row.get(key)))).append("</td>");
-                    for(String key:new String[]{"eligibleSuccessCount","samplingIneligibleSuccessCount","retainedSuccessCount","retainedFailureCount","skippedSuccessQuotaCount","skippedFailureQuotaCount","skippedMissingEvidenceCount"})
+                    for(String key:new String[]{"completedSuccessCount","hashQualifiedSuccessCount","samplingIneligibleSuccessCount","retainedSuccessCount","retainedFailureCount","skippedSuccessQuotaCount","skippedFailureQuotaCount","skippedUnclassifiedQuotaCount","skippedMissingEvidenceCount"})
                         html.append("<td>").append(escape(display(row.get(key)))).append("</td>");
                     html.append("</tr>");
                 }
@@ -775,7 +797,7 @@ public final class LoadReportWriter {
                 .append("card('Configured target',target,arrival?(k==='steady'?'configured steady target':'phase-specific arrival schedule'):'closed virtual-user model; no configured TPS');card('Delivered started TPS',rate(x.startedRate),'event-time starts / configured '+text(x.durationMs)+' ms');card('Actual completed TPS',rate(x.completedRate),'event-time completions / configured window');card('Successful TPS',rate(x.successfulRate),'event-time PASS completions / configured window');")
                 .append("card('Latency p50 / p95 / p99',number(l.p50Ms)+' / '+number(l.p95Ms)+' / '+number(l.p99Ms)+' ms',text(l.sampleCount)+' samples from '+text(l.observationCount)+' cohort completions; '+text(l.confidence));card('Generator drops',text(x.dropped)+' ('+pct(x.droppedRate)+')','dropped / scheduled arrivals');card('SUT FAIL',text(c.sutFailure)+' ('+pct(c.sutErrorRate)+')','scheduled cohort outcomes');card('Runtime ERROR',text(c.runtimeError)+' ('+pct(c.runtimeErrorRate)+')','scheduled cohort outcomes');var chartNote=k==='all'?'Trend charts show the full execution; rates use full bucket durations.':windowSeries[k]?'Trend charts use buckets aligned to this configured window; the final bucket is clipped at the boundary and rates use its clipped duration.':'Trend charts omit buckets that cross this window boundary to avoid mixing out-of-window events.';definition.textContent=text(x.durationMs)+' ms configured '+text(x.phase)+' window; rates use in-window event timestamps and this fixed duration. '+chartNote+' Cohort outcomes include drain.';renderCharts()}if(select)select.addEventListener('change',function(){show(select.value)});")
                 .append("function duration(v){if(typeof v==='number')return v;var a=String(v||'0ms').match(/^([0-9.]+)(ms|s|m|h)$/);return a?Number(a[1])*({ms:1,s:1000,m:60000,h:3600000}[a[2]]):0}function configuredRate(load){var a=String(load.arrivalRate||'0/s').match(/^([0-9.]+)\\/(s|m)$/);return a?Number(a[1])*(a[2]==='m'?1/60:1):0}")
-                .append("function targetFor(load,at){var r=configuredRate(load),t=at-startMs,wu=duration(load.warmup),up=duration(load.rampUp),steady=duration(load.duration),down=duration(load.rampDown);if(t<wu)return 0;if(t<wu+up)return up?r*(t-wu)/up:r;if(t<wu+up+steady)return r;if(t<wu+up+steady+down)return down?r*(1-(t-wu-up-steady)/down):0;return 0}function target(p){if(m.model!=='arrivalRate')return null;var at=p.windowStartEpochMs+p.durationMs/2,workloads=scenario.workloads||[];if(workloads.length){var sum=0;workloads.forEach(function(x){sum+=targetFor(x.load||scenario.load||{},at)});return sum}return targetFor(scenario.load||{},at)}")
+                .append("function targetFor(load,at){var r=configuredRate(load),t=at-startMs,up=duration(load.rampUp),wu=duration(load.warmup),steady=duration(load.duration),down=duration(load.rampDown);if(t<up)return up?r*t/up:r;if(t<up+wu)return r;if(t<up+wu+steady)return r;if(t<up+wu+steady+down)return down?r*(1-(t-up-wu-steady)/down):0;return 0}function target(p){if(m.model!=='arrivalRate')return null;var at=p.windowStartEpochMs+p.durationMs/2,workloads=scenario.workloads||[];if(workloads.length){var sum=0;workloads.forEach(function(x){sum+=targetFor(x.load||scenario.load||{},at)});return sum}return targetFor(scenario.load||{},at)}")
                 .append("var palette=['#64748b','#2563eb','#0f766e','#16a34a','#d97706','#7c3aed','#be123c'];function el(tag,attrs){var e=document.createElementNS('http://www.w3.org/2000/svg',tag);Object.keys(attrs||{}).forEach(function(k){e.setAttribute(k,attrs[k])});return e}function legend(id,lines){var ul=document.getElementById(id);if(!ul)return;ul.textContent='';lines.forEach(function(line){var li=document.createElement('li'),sw=document.createElement('span'),label=document.createElement('span');sw.className='chart-swatch';sw.style.setProperty('--c',line.color);sw.setAttribute('aria-hidden','true');label.textContent=line.name;li.title=line.description;li.appendChild(sw);li.appendChild(label);ul.appendChild(li)})}")
                 .append("function inWindow(p,win){return p.windowStartEpochMs>=win.windowStartEpochMs&&p.windowStartEpochMs+p.durationMs<=win.windowEndEpochMs}function overlapsWindow(p,win){return p.windowStartEpochMs<win.windowEndEpochMs&&p.windowStartEpochMs+p.durationMs>win.windowStartEpochMs}function currentPoints(){var key=select?select.value:'steady',win=w[key],scoped=windowSeries[key];if(key==='all')return points;if(scoped&&scoped.points)return scoped.points;if(!win)return points;return points.filter(function(p){return inWindow(p,win)})}function hasPartialBuckets(){var key=select?select.value:'steady',win=w[key];if(!win||key==='all'||windowSeries[key])return false;return points.some(function(p){return overlapsWindow(p,win)&&!inWindow(p,win)})}function sloValue(){var thresholds=scenario.thresholds||{},scope=thresholds.steady||{},expr=scope.p95;if(typeof expr!=='string')return null;var match=expr.match(/[0-9.]+\\s*ms/i);return match?parseFloat(match[0]):null}")
                 .append("function chart(id,legendId,series,unit,baseMax,opts){var svg=document.getElementById(id),pts=currentPoints();if(!svg)return;if(!svg.getAttribute('data-original-aria-label'))svg.setAttribute('data-original-aria-label',svg.getAttribute('aria-label')||'Load trend');svg.textContent='';var legendList=document.getElementById(legendId);if(legendList)legendList.textContent='';if(!pts.length){var message=hasPartialBuckets()?'No complete time-series buckets inside selected window; partial boundary buckets are omitted.':'No data for selected window';svg.setAttribute('aria-label',message);var empty=el('text',{x:450,y:130,'text-anchor':'middle',fill:'#64748b','font-size':'14'});empty.textContent=message;svg.appendChild(empty);if(legendList){var item=document.createElement('li');item.textContent=message;legendList.appendChild(item)}return}svg.setAttribute('aria-label',svg.getAttribute('data-original-aria-label'));var W=900,H=240,L=55,R=15,T=20,B=34,iw=W-L-R,ih=H-T-B,lo=pts[0].windowStartEpochMs,hi=pts[pts.length-1].windowStartEpochMs+pts[pts.length-1].durationMs,span=Math.max(1,hi-lo),win=w[select?select.value:'steady'];if(win){lo=Math.max(lo,win.windowStartEpochMs);hi=Math.min(hi,win.windowEndEpochMs);span=Math.max(1,hi-lo)}function x(t){return L+Math.max(0,Math.min(1,(t-lo)/span))*iw}function y(v,max){return T+ih-ih*v/max}function labelValue(v){return unit==='%'?(v*100).toFixed(0)+'%':unit==='s'?v.toFixed(0):v.toFixed(0)}")
@@ -826,6 +848,11 @@ public final class LoadReportWriter {
                     .stripTrailingZeros().toPlainString();
         }
         return String.valueOf(value);
+    }
+    private String displayCounts(Map<?,?> values) {
+        List<String> parts=new ArrayList<String>();
+        for(Map.Entry<?,?> entry:values.entrySet())parts.add(String.valueOf(entry.getKey())+": "+display(entry.getValue()));
+        return String.join(", ",parts);
     }
     private String escape(String value) {
         if (value == null) return "";

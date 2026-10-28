@@ -28,7 +28,7 @@ function effectiveDuration(definition: NonNullable<JobReplay['definition']> | un
   if (!definition || definition.executionType !== 'load') return 'Not applicable';
   const scenario = definition.scenario as { load?: Record<string, unknown>; workloads?: Array<{ load?: Record<string, unknown> }> } | undefined;
   let total = 0;
-  for (const phase of ['warmup', 'rampUp', 'duration', 'rampDown']) {
+  for (const phase of ['rampUp', 'warmup', 'duration', 'rampDown']) {
     const root = durationMillis(scenario?.load?.[phase]);
     const values = (scenario?.workloads || []).map(row => durationMillis(row.load?.[phase])).filter((value): value is number => value !== null);
     total += root ?? (values.length ? Math.max(...values) : 0);
@@ -167,6 +167,7 @@ export function JobReplayActions({ api, jobId, onOpenJob, onSchedule, onEditSche
       {mode === 'run' && sourcePolicy === 'strict' && error && <button type="button" disabled={busy} onClick={() => void reviewWithPolicy('current')}>Review with current Package</button>}
       {review && !review.available && <p role="status">{review.reason}</p>}
       {review?.missingFields?.length ? <p role="alert">Some retained fields are missing: {review.missingFields.join(', ')}. Choose Configure &amp; Rerun to enter them before execution.</p> : null}
+      {review?.definition?.executionType === 'load' && <p role="note">LOAD phase order is Ramp-up → Warm-up → Steady → Ramp-down. Rerunning a saved LOAD configuration uses this order; the original job history is unchanged.</p>}
       {review?.definition && <dl className="att-replay-summary">
         <div><dt>Type</dt><dd>{review.definition.executionType.toUpperCase()}</dd></div>
         <div><dt>Package</dt><dd>{review.definition.packageId}</dd></div>

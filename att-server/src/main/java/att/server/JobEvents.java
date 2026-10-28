@@ -1,33 +1,53 @@
 package att.server;
 
+import com.fasterxml.jackson.core.JsonGenerator;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
-import java.io.BufferedReader;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
 import java.nio.ByteBuffer;
+import java.nio.channels.FileChannel;
 import java.nio.channels.SeekableByteChannel;
+import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
+import java.security.DigestInputStream;
+import java.security.DigestOutputStream;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.time.Instant;
+import java.math.BigInteger;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.NavigableMap;
 import java.util.TreeMap;
+import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
+import java.util.function.LongSupplier;
 
 /** Retained, job-local event journal. Client delivery runs independently from the Worker consumer. */
 final class JobEvents {
     private static final ObjectMapper JSON = new ObjectMapper();
     static final int MAX_EVENT_DATA_BYTES = 65536;
-    private static final int COMPACT_EVERY_EVENTS = 128;
+    static final int MAX_EVENT_LINE_BYTES = 131072;
+    static final long DEFAULT_MAX_JOURNAL_BYTES = 64L * 1024L * 1024L;
+    static final long MAX_RETAINED_MEMORY_BYTES = 16L * 1024L * 1024L;
+    static final long MIN_STORAGE_HEADROOM_BYTES = 8L * 1024L * 1024L;
+    private static final long COMPACTION_MIN_BACKLOG_BYTES = 4096L;
     private static final int MAX_COMPACTION_TAIL_EVENTS = 32;
+    private static final int RETAINED_RECORD_OVERHEAD_BYTES = 512;
     private static final Object[] COMPACTION_LOCKS = new Object[64];
 
     static {
@@ -36,93 +56,461 @@ final class JobEvents {
 
     private final Path file;
     private final int capacity;
+    private final long maxJournalBytes;
+    private final long maxRetainedMemoryBytes;
     private final Executor compactionExecutor;
+    private final Executor eventDispatcher;
     private final Runnable afterSnapshotWrite;
+    private final LongSupplier usableSpace;
     private final AtomicLong sequence = new AtomicLong();
-    private long resultEventId = -1L;
     private final AtomicBoolean compactionScheduled = new AtomicBoolean();
     private final AtomicBoolean compactionAgain = new AtomicBoolean();
+    private final AtomicLong compactionAttempts = new AtomicLong();
+    private final AtomicLong compactionFailures = new AtomicLong();
+    private final AtomicLong compactionBytesWritten = new AtomicLong();
+    private final AtomicLong appendBytesWritten = new AtomicLong();
+    private final AtomicLong listenerDispatchFailures = new AtomicLong();
     private final NavigableMap<Long, Map<String, Object>> events = new TreeMap<>();
+    /** Durable record bytes and in-memory object size differ when failure diagnostics are attached. */
+    private final NavigableMap<Long, Long> eventSizes = new TreeMap<>();
+    private final NavigableMap<Long, Long> eventMemorySizes = new TreeMap<>();
     private final java.util.concurrent.CopyOnWriteArrayList<Consumer<Map<String, Object>>> listeners =
             new java.util.concurrent.CopyOnWriteArrayList<>();
+    private long listenerDeliveredThrough;
+    private boolean listenerDispatchScheduled;
+    private boolean listenerDispatchRequested;
+    private boolean listenerDispatchRetryScheduled;
+    private Map<String, Object> pendingListenerNotice;
+    private long resultEventId = -1L;
+    private long journalBytes;
+    private long retainedBytes;
+    private long retainedMemoryCost;
+    private long bytesScanned;
+    private long recordsRead;
+    private long lastScannedId = -1L;
+    private long lastCompactionAt;
+    private long lastCompactionDurationMs;
+    private long nextPersistenceRetryNanos;
+    private int consecutivePersistenceFailures;
+    private boolean needsNewline;
+    private boolean historyDegraded;
+    private boolean sequenceUncertain;
+    private boolean appendBlocked;
+    private boolean repairBlocked;
+    private boolean sequenceGapDetected;
+    private boolean asyncCompactionDeferred;
+    /** Successful replacements supersede failures from older snapshots. Guarded by this. */
+    private long successfulCompactionGeneration;
+    private boolean legacyOversized;
+    private boolean persistenceDegraded;
+    private String degradationReason;
 
     JobEvents(Path file, int capacity) throws Exception {
-        this(file, capacity, Runnable::run, () -> { });
+        this(file, capacity, DEFAULT_MAX_JOURNAL_BYTES, Runnable::run, () -> { });
     }
 
     JobEvents(Path file, int capacity, Executor compactionExecutor) throws Exception {
-        this(file, capacity, compactionExecutor, () -> { });
+        this(file, capacity, DEFAULT_MAX_JOURNAL_BYTES, compactionExecutor, () -> { });
     }
 
     JobEvents(Path file, int capacity, Executor compactionExecutor, Runnable afterSnapshotWrite) throws Exception {
-        this.file = file;
+        this(file, capacity, DEFAULT_MAX_JOURNAL_BYTES, compactionExecutor, afterSnapshotWrite);
+    }
+
+    JobEvents(Path file, int capacity, long maxJournalBytes, Executor compactionExecutor) throws Exception {
+        this(file, capacity, maxJournalBytes, MAX_RETAINED_MEMORY_BYTES, compactionExecutor, () -> { },
+                fileUsableSpace(file));
+    }
+
+    JobEvents(Path file, int capacity, long maxJournalBytes, long maxRetainedMemoryBytes,
+              Executor compactionExecutor) throws Exception {
+        this(file, capacity, maxJournalBytes, maxRetainedMemoryBytes, compactionExecutor, () -> { },
+                fileUsableSpace(file));
+    }
+
+    JobEvents(Path file, int capacity, long maxJournalBytes, Executor compactionExecutor,
+              Runnable afterSnapshotWrite) throws Exception {
+        this(file, capacity, maxJournalBytes, MAX_RETAINED_MEMORY_BYTES, compactionExecutor, afterSnapshotWrite,
+                fileUsableSpace(file));
+    }
+
+    private static LongSupplier fileUsableSpace(Path file) {
+        return () -> {
+            try {
+                return Files.getFileStore(file.getParent()).getUsableSpace();
+            } catch (Exception unavailable) {
+                return -1L;
+            }
+        };
+    }
+
+    JobEvents(Path file, int capacity, long maxJournalBytes, Executor compactionExecutor,
+              Runnable afterSnapshotWrite, LongSupplier usableSpace) throws Exception {
+        this(file, capacity, maxJournalBytes, MAX_RETAINED_MEMORY_BYTES,
+                compactionExecutor, afterSnapshotWrite, usableSpace);
+    }
+
+    JobEvents(Path file, int capacity, long maxJournalBytes, long maxRetainedMemoryBytes,
+              Executor compactionExecutor, Runnable afterSnapshotWrite, LongSupplier usableSpace) throws Exception {
+        if (capacity < 1) throw new IllegalArgumentException("Journal event capacity must be positive");
+        if (maxJournalBytes < 1) throw new IllegalArgumentException("Journal byte budget must be positive");
+        if (maxRetainedMemoryBytes < 1) throw new IllegalArgumentException("Journal memory budget must be positive");
+        this.file = file.toAbsolutePath().normalize();
         this.capacity = capacity;
+        this.maxJournalBytes = maxJournalBytes;
+        this.maxRetainedMemoryBytes = maxRetainedMemoryBytes;
         this.compactionExecutor = compactionExecutor;
         this.afterSnapshotWrite = afterSnapshotWrite;
-        Files.createDirectories(file.getParent());
-        if (Files.isRegularFile(file)) {
-            try (BufferedReader reader = Files.newBufferedReader(file, StandardCharsets.UTF_8)) {
-                String line;
-                while ((line = reader.readLine()) != null) {
-                    try {
-                        @SuppressWarnings("unchecked") Map<String, Object> event = JSON.readValue(line, Map.class);
-                        sequence.set(Math.max(sequence.get(), ((Number) event.get("id")).longValue()));
-                        long id = ((Number) event.get("id")).longValue();
-                        events.put(id, event);
-                        if ("result".equals(event.get("event"))) resultEventId = id;
-                    } catch (Exception ignored) {
-                        // Ignore an incomplete or malformed final line and keep the valid journal prefix.
+        this.usableSpace = usableSpace;
+        this.eventDispatcher = Runnable::run;
+        loadBoundedHistory();
+        listenerDeliveredThrough = sequence.get();
+    }
+
+    JobEvents(Path file, int capacity, long maxJournalBytes, long maxRetainedMemoryBytes,
+              Executor compactionExecutor, Executor eventDispatcher) throws Exception {
+        this(file, capacity, maxJournalBytes, maxRetainedMemoryBytes, compactionExecutor, () -> { },
+                fileUsableSpace(file), eventDispatcher);
+    }
+
+    JobEvents(Path file, int capacity, long maxJournalBytes, long maxRetainedMemoryBytes,
+              Executor compactionExecutor, Runnable afterSnapshotWrite, LongSupplier usableSpace,
+              Executor eventDispatcher) throws Exception {
+        if (capacity < 1) throw new IllegalArgumentException("Journal event capacity must be positive");
+        if (maxJournalBytes < 1) throw new IllegalArgumentException("Journal byte budget must be positive");
+        if (maxRetainedMemoryBytes < 1) throw new IllegalArgumentException("Journal memory budget must be positive");
+        this.file = file.toAbsolutePath().normalize();
+        this.capacity = capacity;
+        this.maxJournalBytes = maxJournalBytes;
+        this.maxRetainedMemoryBytes = maxRetainedMemoryBytes;
+        this.compactionExecutor = compactionExecutor;
+        this.afterSnapshotWrite = afterSnapshotWrite;
+        this.usableSpace = usableSpace;
+        this.eventDispatcher = eventDispatcher == null ? Runnable::run : eventDispatcher;
+        loadBoundedHistory();
+        listenerDeliveredThrough = sequence.get();
+    }
+
+    /**
+     * Rehydrate at most the configured tail window. A too-large historical file is left untouched:
+     * the retained tail remains readable, while writes stop until an operator has preserved and
+     * repaired the original evidence.
+     */
+    private void loadBoundedHistory() {
+        try {
+            Files.createDirectories(file.getParent());
+            if (!Files.exists(file, java.nio.file.LinkOption.NOFOLLOW_LINKS)) return;
+            if (Files.isSymbolicLink(file) || !Files.isRegularFile(file, java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
+                historyDegraded = true;
+                appendBlocked = true;
+                degradationReason = "The journal path is not a regular file.";
+                return;
+            }
+            journalBytes = Files.size(file);
+            long start = Math.max(0L, journalBytes - maxJournalBytes);
+            scanTail(file, start, journalBytes - start);
+            if (journalBytes > maxJournalBytes) {
+                historyDegraded = true;
+                appendBlocked = true;
+                legacyOversized = true;
+                degradationReason = "The existing journal exceeds its byte budget; only a bounded tail was loaded and the original file was left unchanged.";
+            } else if (sequenceUncertain) {
+                appendBlocked = true;
+                historyDegraded = true;
+                degradationReason = "The latest journal sequence could not be verified; appends are disabled to avoid reusing an event ID.";
+            } else if (!repairBlocked && !sequenceUncertain && (recordsRead > events.size() || journalBytes > retainedBytes)) {
+                // A normal, valid journal can be compacted to its configured count/byte window.
+                scheduleCompaction();
+            }
+        } catch (Exception failure) {
+            historyDegraded = true;
+            appendBlocked = true;
+            persistenceDegraded = true;
+            degradationReason = "The journal could not be read safely; event history is unavailable for this Job.";
+            java.util.logging.Logger.getLogger(JobEvents.class.getName())
+                    .warning("A Job event journal could not be read; the Server will keep serving other requests");
+        }
+    }
+
+    private void scanTail(Path source, long start, long length) throws Exception {
+        bytesScanned = length;
+        if (length <= 0) return;
+        boolean skipPartialFirstLine = start > 0;
+        boolean lineTooLong = false;
+        long lineBytes = 0L;
+        ByteArrayOutputStream line = new ByteArrayOutputStream(Math.min(MAX_EVENT_LINE_BYTES, (int) Math.min(length, 8192L)));
+        try (SeekableByteChannel channel = Files.newByteChannel(source, StandardOpenOption.READ)) {
+            channel.position(start);
+            ByteBuffer buffer = ByteBuffer.allocate(8192);
+            while (channel.read(buffer) >= 0) {
+                buffer.flip();
+                while (buffer.hasRemaining()) {
+                    int value = buffer.get() & 0xff;
+                    if (skipPartialFirstLine) {
+                        if (value == '\n') {
+                            skipPartialFirstLine = false;
+                            historyDegraded = true;
+                            sequenceUncertain = true;
+                        }
+                        continue;
+                    }
+                    if (value == '\n') {
+                        if (lineTooLong) {
+                            malformedRecord(true);
+                        } else if (lineBytes > 0) {
+                            byte[] row = line.toByteArray();
+                            int lengthWithoutCr = row.length > 0 && row[row.length - 1] == '\r' ? row.length - 1 : row.length;
+                            parseRecord(row, lengthWithoutCr, lineBytes + 1L, true);
+                        }
+                        line.reset();
+                        lineBytes = 0L;
+                        lineTooLong = false;
+                        continue;
+                    }
+                    lineBytes++;
+                    if (!lineTooLong) {
+                        if (lineBytes > MAX_EVENT_LINE_BYTES) {
+                            lineTooLong = true;
+                            line.reset();
+                        } else {
+                            line.write(value);
+                        }
                     }
                 }
+                buffer.clear();
             }
-            terminatePartialFinalLine(file);
-            if (events.size() > capacity) {
-                trimRetainedEvents();
-                scheduleCompaction();
+            if (skipPartialFirstLine) {
+                historyDegraded = true;
+                sequenceUncertain = true;
+            } else if (lineTooLong) {
+                // The original line may begin outside the scanned tail; its ID cannot be trusted.
+                malformedRecord(start > 0);
+                sequenceUncertain = true;
+            } else if (lineBytes > 0) {
+                byte[] row = line.toByteArray();
+                int lengthWithoutCr = row.length > 0 && row[row.length - 1] == '\r' ? row.length - 1 : row.length;
+                boolean parsed = parseRecord(row, lengthWithoutCr, lineBytes + 1L, false);
+                needsNewline = parsed;
+                if (!parsed) {
+                    sequenceUncertain = true;
+                    appendBlocked = true;
+                    degradationReason = "The final journal record is unterminated and could not be verified; appends are disabled to preserve the original bytes.";
+                }
             }
         }
     }
 
-    /** Keeps a skipped torn final record from absorbing the next valid append. */
-    private static void terminatePartialFinalLine(Path file) throws Exception {
-        try (SeekableByteChannel channel = Files.newByteChannel(file, StandardOpenOption.READ)) {
-            long size = channel.size();
-            if (size == 0L) return;
-            channel.position(size - 1L);
-            ByteBuffer lastByte = ByteBuffer.allocate(1);
-            if (channel.read(lastByte) != 1) return;
-            byte value = lastByte.array()[0];
-            if (value != '\n' && value != '\r') {
-                Files.writeString(file, "\n", StandardCharsets.UTF_8, StandardOpenOption.APPEND);
-            }
+    private boolean parseRecord(byte[] row, int length, long storedBytes, boolean terminated) {
+        if (length <= 0) {
+            malformedRecord(terminated);
+            return false;
         }
+        try {
+            String json = StandardCharsets.UTF_8.newDecoder()
+                    .onMalformedInput(CodingErrorAction.REPORT)
+                    .onUnmappableCharacter(CodingErrorAction.REPORT)
+                    .decode(ByteBuffer.wrap(row, 0, length)).toString();
+            @SuppressWarnings("unchecked") Map<String, Object> event = JSON.readValue(json, Map.class);
+            Object rawJournalDiagnostic = event.get("journalDiagnostic");
+            if (rawJournalDiagnostic instanceof Map<?, ?>
+                    && "ATT-JOURNAL-SEQUENCE-GAP".equals(((Map<?, ?>) rawJournalDiagnostic).get("code"))) {
+                sequenceGapDetected = true;
+                historyDegraded = true;
+                degradationReason = "One or more event IDs were missing from the durable journal; compaction preserved the remaining monotonic IDs without reusing them.";
+            }
+            Object rawId = event.get("id");
+            long id;
+            if (rawId instanceof BigInteger bigInteger) id = bigInteger.longValueExact();
+            else if (rawId instanceof Byte || rawId instanceof Short || rawId instanceof Integer || rawId instanceof Long)
+                id = ((Number) rawId).longValue();
+            else throw new IOException("Missing integral event ID");
+            if (id <= 0L) throw new IOException("Invalid event ID");
+            long prior = sequence.get();
+            if (lastScannedId > 0L) {
+                if (id <= lastScannedId) {
+                    malformedRecord(terminated);
+                    return false;
+                }
+                if (id > lastScannedId + 1L) {
+                    historyDegraded = true;
+                    sequenceGapDetected = true;
+                    degradationReason = "One or more event IDs are missing from the durable journal; the remaining records are valid and monotonic, so compaction can preserve them without reusing IDs.";
+                }
+            }
+            lastScannedId = id;
+            sequence.set(Math.max(prior, id));
+            recordsRead++;
+            if ("result".equals(event.get("event"))) resultEventId = Math.max(resultEventId, id);
+            events.put(id, event);
+            long normalizedSize = Math.max(1L, storedBytes);
+            eventSizes.put(id, normalizedSize);
+            eventMemorySizes.put(id, normalizedSize);
+            retainedBytes += normalizedSize;
+            retainedMemoryCost += normalizedSize + RETAINED_RECORD_OVERHEAD_BYTES;
+            trimRetainedEvents();
+            if (id >= prior) sequenceUncertain = false;
+            return true;
+        } catch (Exception malformed) {
+            malformedRecord(terminated);
+            return false;
+        }
+    }
+
+    private void malformedRecord(boolean terminated) {
+        historyDegraded = true;
+        if (terminated) {
+            sequenceUncertain = true;
+            repairBlocked = true;
+        }
+        // A later valid monotonic row will clear sequenceUncertain during parseRecord.
+    }
+
+    Map<String, Object> projectPayload(Map<String, ?> data) throws Exception {
+        return boundedPayload(data);
     }
 
     Map<String, Object> append(String type, Map<String, ?> data) throws Exception {
+        return append(type, data, false);
+    }
+
+    Map<String, Object> appendProjected(String type, Map<String, Object> boundedData) throws Exception {
+        if (jsonSizeUpToLimit(boundedData, MAX_EVENT_DATA_BYTES) > MAX_EVENT_DATA_BYTES)
+            throw new IOException("Projected event data exceeded its configured byte limit");
+        return append(type, boundedData, true);
+    }
+
+    private Map<String, Object> append(String type, Map<String, ?> data, boolean alreadyProjected) throws Exception {
         Map<String, Object> event = new LinkedHashMap<>();
-        boolean scheduleCompaction;
-        synchronized (this) {
-            Map<String, Object> payload = boundedPayload(data);
-            long id = sequence.incrementAndGet();
-            event.put("id", id);
-            event.put("event", type);
-            event.put("data", payload);
-            Files.writeString(file, JSON.writeValueAsString(event) + "\n", StandardCharsets.UTF_8,
-                    StandardOpenOption.CREATE, StandardOpenOption.APPEND);
-            events.put(id, event);
-            if ("result".equals(type)) resultEventId = id;
-            trimRetainedEvents();
-            for (Consumer<Map<String, Object>> listener : listeners) {
-                try {
-                    listener.accept(event);
-                } catch (RuntimeException ignored) {
-                    // Observer failures must not stop durable journal writes or Worker consumption.
+        boolean requestCompaction;
+        boolean requestDispatch;
+        Object journalLock = fileLock();
+        synchronized (journalLock) {
+            synchronized (this) {
+                Map<String, Object> payload = alreadyProjected
+                        ? new LinkedHashMap<>(data) : boundedPayload(data);
+                event.put("event", type);
+                event.put("data", payload);
+                if (sequence.get() == Long.MAX_VALUE) {
+                    sequenceUncertain = true;
+                    appendBlocked = true;
+                    historyDegraded = true;
+                    degradationReason = "The event ID sequence reached its maximum value; no further cursor IDs can be assigned safely.";
+                }
+                if (sequenceUncertain) {
+                    // There is no safe cursor ID after an unparseable tail. Wake observers so they
+                    // can receive the separate degraded-history notice, but never invent or reuse
+                    // an ID that could collide with an event hidden in the original bytes.
+                    event.put("journalPersistence", "DEGRADED");
+                    Map<String, Object> notice = diagnostic();
+                    if (notice != null) event.put("journalDiagnostic", notice);
+                    pendingListenerNotice = event;
+                    requestDispatch = true;
+                    requestCompaction = false;
+                } else {
+                    long id = sequence.get() + 1L;
+                    event.put("id", id);
+                    byte[] encoded = JSON.writeValueAsBytes(event);
+                    if (encoded.length + 1 > MAX_EVENT_LINE_BYTES) {
+                        throw new IOException("Event journal record exceeded its line-size limit");
+                    }
+                    byte[] line = new byte[encoded.length + 1];
+                    System.arraycopy(encoded, 0, line, 0, encoded.length);
+                    line[line.length - 1] = '\n';
+                    boolean persisted = persistAppend(line);
+                    if (!persisted) {
+                        historyDegraded = true;
+                        Map<String, Object> notice = diagnostic();
+                        event.put("journalPersistence", "DEGRADED");
+                        if (notice != null) event.put("journalDiagnostic", notice);
+                    }
+                    sequence.set(id);
+                    long recordBytes = line.length;
+                    long memoryBytes = persisted ? recordBytes : jsonSizeUpToLimit(event, MAX_EVENT_LINE_BYTES);
+                    events.put(id, event);
+                    eventSizes.put(id, recordBytes);
+                    eventMemorySizes.put(id, memoryBytes);
+                    retainedBytes += recordBytes;
+                    retainedMemoryCost += memoryBytes + RETAINED_RECORD_OVERHEAD_BYTES;
+                    if ("result".equals(type)) resultEventId = id;
+                    trimRetainedEvents();
+                    requestDispatch = true;
+                    requestCompaction = persisted && shouldCompactForBacklog();
                 }
             }
-            scheduleCompaction = id % COMPACT_EVERY_EVENTS == 0;
         }
-        if (scheduleCompaction) scheduleCompaction();
+        if (requestDispatch) scheduleListenerDispatch();
+        if (requestCompaction) scheduleCompaction();
         return event;
+    }
+
+    /** Writes the complete record or truncates a partial ENOSPC write back to the old boundary. */
+    private boolean persistAppend(byte[] line) {
+        long now = System.nanoTime();
+        if (appendBlocked || (persistenceDegraded && now < nextPersistenceRetryNanos)) return false;
+        try {
+            long actualSize = Files.exists(file, java.nio.file.LinkOption.NOFOLLOW_LINKS) ? Files.size(file) : 0L;
+            if (actualSize > maxJournalBytes) {
+                legacyOversized = true;
+                appendBlocked = true;
+                historyDegraded = true;
+                degradationReason = "The journal exceeds its byte budget; the original file was left unchanged.";
+                return false;
+            }
+            journalBytes = actualSize;
+            long delimiterBytes = needsNewline ? 1L : 0L;
+            if (journalBytes + delimiterBytes + line.length > maxJournalBytes) {
+                if (!compactCurrentUnderFileLock()) throw new IOException("Bounded journal compaction did not complete");
+                delimiterBytes = 0L;
+            }
+            long available = usableSpace.getAsLong();
+            if (available >= 0L && available < MIN_STORAGE_HEADROOM_BYTES + line.length) {
+                throw new IOException("Journal storage headroom is below the safety threshold");
+            }
+            long originalSize = Files.exists(file, java.nio.file.LinkOption.NOFOLLOW_LINKS) ? Files.size(file) : 0L;
+            try (FileChannel channel = FileChannel.open(file, StandardOpenOption.CREATE, StandardOpenOption.WRITE)) {
+                channel.position(originalSize);
+                if (delimiterBytes > 0L) {
+                    ByteBuffer delimiter = ByteBuffer.wrap(new byte[]{'\n'});
+                    while (delimiter.hasRemaining()) channel.write(delimiter);
+                }
+                ByteBuffer bytes = ByteBuffer.wrap(line);
+                while (bytes.hasRemaining()) channel.write(bytes);
+            } catch (IOException writeFailure) {
+                try (FileChannel repair = FileChannel.open(file, StandardOpenOption.WRITE)) {
+                    repair.truncate(originalSize);
+                } catch (Exception truncateFailure) {
+                    appendBlocked = true;
+                    degradationReason = "A failed journal append could not be rolled back safely.";
+                }
+                throw writeFailure;
+            }
+            journalBytes = originalSize + delimiterBytes + line.length;
+            appendBytesWritten.addAndGet(delimiterBytes + line.length);
+            needsNewline = false;
+            persistenceDegraded = false;
+            if (!historyDegraded) degradationReason = null;
+            consecutivePersistenceFailures = 0;
+            nextPersistenceRetryNanos = 0L;
+            return true;
+        } catch (Exception failure) {
+            markPersistenceFailure(failure);
+            return false;
+        }
+    }
+
+    private void markPersistenceFailure(Exception failure) {
+        persistenceDegraded = true;
+        historyDegraded = true;
+        if (degradationReason == null || (!appendBlocked && !sequenceGapDetected)) {
+            degradationReason = failure instanceof java.nio.file.FileSystemException
+                    ? "Journal storage is unavailable or out of space."
+                    : "The event journal could not be written safely.";
+        }
+        consecutivePersistenceFailures = Math.min(8, consecutivePersistenceFailures + 1);
+        long delaySeconds = Math.min(300L, 5L << Math.min(6, consecutivePersistenceFailures - 1));
+        nextPersistenceRetryNanos = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(delaySeconds);
+        java.util.logging.Logger.getLogger(JobEvents.class.getName())
+                .warning("Event journal persistence degraded; retries are rate-limited and this Job remains available");
     }
 
     synchronized List<Map<String, Object>> after(long id) {
@@ -152,55 +540,195 @@ final class JobEvents {
 
     AutoCloseable listen(Consumer<Map<String, Object>> listener) {
         listeners.add(listener);
+        boolean resume;
+        synchronized (this) { resume = listenerDispatchRequested && !listenerDispatchScheduled; }
+        if (resume) scheduleListenerDispatch();
         return () -> listeners.remove(listener);
     }
 
     boolean isClosed() { return false; }
 
     synchronized boolean truncatedHistory() {
-        return !events.isEmpty() && events.firstKey() > 1L;
+        return historyDegraded || (!events.isEmpty() && events.firstKey() > 1L);
+    }
+
+    synchronized boolean historyDegraded() { return historyDegraded; }
+
+    /** Recover a missing terminal cursor from the separately persisted Job result, without rewriting the journal. */
+    synchronized void recoverMissingTerminalResult(Map<String, ?> resultData) throws Exception {
+        if (resultEventId >= 0L) return;
+        historyDegraded = true;
+        appendBlocked = true;
+        repairBlocked = true;
+        degradationReason = "The terminal result marker is missing from the event journal; the Job result was recovered from metadata when available.";
+        if (sequenceUncertain || sequence.get() == Long.MAX_VALUE || resultData == null) return;
+
+        long id = sequence.get() + 1L;
+        Map<String, Object> recovered = new LinkedHashMap<>();
+        recovered.put("id", id);
+        recovered.put("event", "result");
+        recovered.put("data", boundedPayload(resultData));
+        recovered.put("journalPersistence", "DEGRADED");
+        recovered.put("journalDiagnostic", diagnostic());
+        byte[] encoded = JSON.writeValueAsBytes(recovered);
+        if (encoded.length + 1 > MAX_EVENT_LINE_BYTES) throw new IOException("Recovered terminal result exceeded the journal line-size limit");
+        events.put(id, recovered);
+        eventSizes.put(id, (long) encoded.length + 1L);
+        eventMemorySizes.put(id, (long) encoded.length + 1L);
+        retainedBytes += encoded.length + 1L;
+        retainedMemoryCost += encoded.length + 1L + RETAINED_RECORD_OVERHEAD_BYTES;
+        sequence.set(id);
+        resultEventId = id;
+        trimRetainedEvents();
     }
 
     synchronized long oldestId() {
         return events.isEmpty() ? -1L : events.firstKey();
     }
 
+    synchronized long cacheWeightBytes() {
+        return retainedMemoryCost;
+    }
+
+    synchronized Map<String, Object> metrics() {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("journalPersistence", persistenceDegraded || appendBlocked ? "DEGRADED" : "HEALTHY");
+        result.put("journalBytes", journalBytes);
+        result.put("maxJournalBytes", maxJournalBytes);
+        result.put("recordsRead", recordsRead);
+        result.put("bytesScanned", bytesScanned);
+        result.put("retainedEventCount", events.size());
+        result.put("retainedBytes", retainedBytes);
+        result.put("retainedMemoryBytes", retainedMemoryCost);
+        result.put("maxRetainedMemoryBytes", Math.min(maxJournalBytes, maxRetainedMemoryBytes));
+        result.put("newestRecordExceedsMemoryShare",retainedMemoryCost>Math.min(maxJournalBytes,maxRetainedMemoryBytes));
+        result.put("compactionBacklogBytes", Math.max(0L, journalBytes-retainedBytes));
+        result.put("appendBytesWritten", appendBytesWritten.get());
+        result.put("compactionBytesWritten", compactionBytesWritten.get());
+        result.put("journalWriteAmplification", appendBytesWritten.get() == 0L ? 0.0
+                : 1.0 + ((double) compactionBytesWritten.get()) / appendBytesWritten.get());
+        result.put("sequenceGapDetected", sequenceGapDetected);
+        result.put("asyncCompactionDeferred", asyncCompactionDeferred);
+        result.put("listenerDispatchFailures", listenerDispatchFailures.get());
+        result.put("listenerDispatchRetryScheduled", listenerDispatchRetryScheduled);
+        result.put("oldestEventId", oldestId());
+        result.put("latestEventId", sequence.get());
+        result.put("historyTruncated", truncatedHistory());
+        result.put("compactionAttempts", compactionAttempts.get());
+        result.put("compactionFailures", compactionFailures.get());
+        result.put("lastCompactionAt", lastCompactionAt == 0L ? null : Instant.ofEpochMilli(lastCompactionAt).toString());
+        result.put("lastCompactionDurationMs", lastCompactionDurationMs);
+        result.put("lastCompactionAgeMs", lastCompactionAt == 0L ? null : Math.max(0L,System.currentTimeMillis()-lastCompactionAt));
+        long available = usableSpace.getAsLong();
+        result.put("storageUsableBytes", available);
+        result.put("storageHeadroomLow", available >= 0L && available < MIN_STORAGE_HEADROOM_BYTES);
+        return result;
+    }
+
+    synchronized Map<String, Object> diagnostic() {
+        boolean nearLimit = journalBytes >= Math.ceil(maxJournalBytes * 0.8);
+        if (!historyDegraded && !persistenceDegraded && !appendBlocked && !nearLimit) return null;
+        Map<String, Object> result = new LinkedHashMap<>();
+        String code = legacyOversized ? "ATT-JOURNAL-LIMIT-EXCEEDED"
+                : persistenceDegraded || appendBlocked ? "ATT-JOURNAL-PERSISTENCE-DEGRADED"
+                : historyDegraded ? "ATT-JOURNAL-HISTORY-TRUNCATED" : "ATT-JOURNAL-STORAGE-NEAR-LIMIT";
+        result.put("code", code);
+        result.put("severity", "warning");
+        result.put("summary", degradationReason != null ? degradationReason
+                : nearLimit ? "The event journal is approaching its configured byte limit." : "The event history is incomplete.");
+        result.putAll(metrics());
+        return result;
+    }
+
+    private Object fileLock() {
+        int index = Math.floorMod(file.hashCode(), COMPACTION_LOCKS.length);
+        return COMPACTION_LOCKS[index];
+    }
+
     private Map<String, Object> boundedPayload(Map<String, ?> data) throws Exception {
-        Map<String, Object> payload = new LinkedHashMap<>(data);
-        int originalBytes=JSON.writeValueAsBytes(payload).length;
-        if (originalBytes > MAX_EVENT_DATA_BYTES) {
-            Object console = payload.get("console");
-            Map<String,Object> retained=new LinkedHashMap<>();
-            for(String key:new String[]{"status","code","message","executionId","caseId","stage","action","executionEventType"})if(payload.get(key) instanceof String)retained.put(key,boundedText(payload.get(key),512));
-            for(String key:new String[]{"exitCode","durationMs"})if(payload.get(key) instanceof Number number)retained.put(key,number.longValue());
-            List<String> dropped=new ArrayList<>();for(String key:payload.keySet())if(!retained.containsKey(key)&&!"console".equals(key)&&dropped.size()<32)dropped.add(boundedText(key,128));
-            payload.clear();
-            payload.putAll(retained);
-            payload.put("truncated", true);
-            payload.put("journalLimit",att.server.api.LimitDiagnostic.create("ATT-JOURNAL-EVENT-TRUNCATED",
-                    "Event details were omitted from the retained journal payload", "server.eventJournal.maxEventDataBytes",
-                    MAX_EVENT_DATA_BYTES, originalBytes, "server.eventJournal", att.server.api.LimitOutcome.DATA_TRUNCATED,
-                    "presentation", "Use bounded event details or open the retained report artifact", null));
-            payload.put("summary", "Event payload exceeded the retained event size limit");
-            if(!dropped.isEmpty())payload.put("droppedFields",dropped);
-            if (console instanceof String text && !text.isEmpty()) {
-                // Keep the full published projection when it fits. JSON escaping and UTF-8,
-                // rather than Java character count, determine the retained byte budget.
-                payload.put("console", text);
-                if (JSON.writeValueAsBytes(payload).length > MAX_EVENT_DATA_BYTES) {
-                    payload.put("consoleTruncated", true);
-                    int low=0, high=text.length();
-                    while(low<high) {
-                        int mid=(low+high+1)/2;
-                        payload.put("console", consolePrefix(text,mid));
-                        if(JSON.writeValueAsBytes(payload).length<=MAX_EVENT_DATA_BYTES)low=mid;
-                        else high=mid-1;
-                    }
-                    payload.put("console",consolePrefix(text,low));
+        int originalBytes = jsonSizeUpToLimit(data, MAX_EVENT_DATA_BYTES);
+        if (originalBytes <= MAX_EVENT_DATA_BYTES) return new LinkedHashMap<>(data);
+
+        Object console = data.get("console");
+        Map<String, Object> payload = new LinkedHashMap<>();
+        for(String key:new String[]{"status","code","message","executionId","caseId","stage","action","executionEventType"})
+            if(data.get(key) instanceof String)payload.put(key,boundedText(data.get(key),512));
+        for(String key:new String[]{"exitCode","durationMs"})
+            if(data.get(key) instanceof Number number)payload.put(key,number.longValue());
+        List<String> dropped=new ArrayList<>();
+        for(String key:data.keySet())
+            if(!payload.containsKey(key)&&!"console".equals(key)&&dropped.size()<32)dropped.add(boundedText(key,128));
+        payload.put("truncated", true);
+        Map<String,Object> limit=att.server.api.LimitDiagnostic.create("ATT-JOURNAL-EVENT-TRUNCATED",
+                "Event details were omitted from the retained journal payload", "server.eventJournal.maxEventDataBytes",
+                MAX_EVENT_DATA_BYTES, originalBytes, "server.eventJournal", att.server.api.LimitOutcome.DATA_TRUNCATED,
+                "presentation", "Use bounded event details or open the retained report artifact", null);
+        limit.put("observedIsLowerBound", true);
+        payload.put("journalLimit",limit);
+        payload.put("summary", "Event payload exceeded the retained event size limit");
+        if(!dropped.isEmpty())payload.put("droppedFields",dropped);
+        if (console instanceof String text && !text.isEmpty()) {
+            payload.put("console", text);
+            if (jsonSizeUpToLimit(payload, MAX_EVENT_DATA_BYTES) > MAX_EVENT_DATA_BYTES) {
+                payload.put("consoleTruncated", true);
+                int low=0, high=Math.min(text.length(), MAX_EVENT_DATA_BYTES);
+                while(low<high) {
+                    int mid=(low+high+1)/2;
+                    payload.put("console", consolePrefix(text,mid));
+                    if(jsonSizeUpToLimit(payload, MAX_EVENT_DATA_BYTES)<=MAX_EVENT_DATA_BYTES)low=mid;
+                    else high=mid-1;
                 }
+                payload.put("console",consolePrefix(text,low));
+                if (jsonSizeUpToLimit(payload, MAX_EVENT_DATA_BYTES) > MAX_EVENT_DATA_BYTES)
+                    payload.remove("console");
             }
         }
+        if (jsonSizeUpToLimit(payload, MAX_EVENT_DATA_BYTES) > MAX_EVENT_DATA_BYTES)
+            throw new IOException("Projected event data exceeded its configured byte limit");
         return payload;
+    }
+
+    /** Serialize to a capped sink and stop as soon as the byte budget is crossed. */
+    private static int jsonSizeUpToLimit(Object value, int maximumBytes) throws IOException {
+        CappedCountingOutputStream output = new CappedCountingOutputStream(maximumBytes);
+        try (JsonGenerator generator = JSON.getFactory().createGenerator(output)) {
+            generator.setCodec(JSON);
+            JSON.writeValue(generator, value);
+        } catch (IOException serializationFailure) {
+            if (causedBySizeLimit(serializationFailure)) return maximumBytes + 1;
+            throw serializationFailure;
+        }
+        return output.count();
+    }
+
+    private static boolean causedBySizeLimit(Throwable failure) {
+        for (Throwable cause = failure; cause != null; cause = cause.getCause())
+            if (cause instanceof JsonSizeLimitException) return true;
+        return false;
+    }
+
+    private static final class CappedCountingOutputStream extends OutputStream {
+        private final int limit;
+        private int count;
+
+        private CappedCountingOutputStream(int limit) { this.limit = limit; }
+
+        @Override public void write(int value) throws IOException {
+            if (count >= limit) throw new JsonSizeLimitException();
+            count++;
+        }
+
+        @Override public void write(byte[] bytes, int offset, int length) throws IOException {
+            if (length < 0 || offset < 0 || offset + length > bytes.length) throw new IndexOutOfBoundsException();
+            if (length > limit - count) throw new JsonSizeLimitException();
+            count += length;
+        }
+
+        private int count() { return count; }
+    }
+
+    private static final class JsonSizeLimitException extends IOException {
+        private JsonSizeLimitException() { super("JSON size limit reached"); }
     }
     private static String boundedText(Object value,int limit){String text=String.valueOf(value);if(text.length()<=limit)return text;if(limit>0&&Character.isHighSurrogate(text.charAt(limit-1)))limit--;return text.substring(0,limit);}
 
@@ -210,7 +738,105 @@ final class JobEvents {
     }
 
     private void trimRetainedEvents() {
-        while (events.size() > capacity) events.pollFirstEntry();
+        long memoryBudget=Math.min(maxJournalBytes,maxRetainedMemoryBytes);
+        while (!events.isEmpty() && (events.size() > capacity || (retainedMemoryCost > memoryBudget && events.size() > 1))) {
+            Map.Entry<Long, Map<String, Object>> removed = events.pollFirstEntry();
+            Long size = eventSizes.remove(removed.getKey());
+            long bytes = size == null ? 0L : size;
+            Long memorySize = eventMemorySizes.remove(removed.getKey());
+            long memoryBytes = memorySize == null ? bytes : memorySize;
+            retainedBytes = Math.max(0L, retainedBytes - bytes);
+            retainedMemoryCost = Math.max(0L, retainedMemoryCost - memoryBytes - RETAINED_RECORD_OVERHEAD_BYTES);
+        }
+    }
+
+    /** Compact only after obsolete bytes have accumulated to roughly one retained-window write. */
+    private synchronized boolean shouldCompactForBacklog() {
+        if (asyncCompactionDeferred) return false;
+        long backlog = Math.max(0L, journalBytes - retainedBytes);
+        long amortizedThreshold = Math.min(Math.max(1L, retainedBytes), Math.max(1L, maxJournalBytes / 4L));
+        return backlog >= Math.max(COMPACTION_MIN_BACKLOG_BYTES, amortizedThreshold);
+    }
+
+    private void scheduleListenerDispatch() {
+        synchronized (this) {
+            if (listenerDispatchScheduled) {
+                listenerDispatchRequested = true;
+                return;
+            }
+            listenerDispatchScheduled = true;
+            listenerDispatchRequested = false;
+        }
+        try {
+            eventDispatcher.execute(this::drainListenerDispatch);
+        } catch (RejectedExecutionException full) {
+            synchronized (this) {
+                listenerDispatchScheduled = false;
+                listenerDispatchRequested = true;
+                listenerDispatchFailures.incrementAndGet();
+            }
+            scheduleListenerRetry();
+        }
+    }
+
+    /** One delayed retry per journal; ServerRuntime caps active SSE observers, bounding pending retries. */
+    private void scheduleListenerRetry() {
+        synchronized (this) {
+            if (!listenerDispatchRequested || listenerDispatchScheduled || listenerDispatchRetryScheduled
+                    || listeners.isEmpty()) return;
+            listenerDispatchRetryScheduled = true;
+        }
+        try {
+            CompletableFuture.delayedExecutor(100L, java.util.concurrent.TimeUnit.MILLISECONDS).execute(() -> {
+                boolean retry;
+                synchronized (JobEvents.this) {
+                    listenerDispatchRetryScheduled = false;
+                    retry = listenerDispatchRequested && !listenerDispatchScheduled && !listeners.isEmpty();
+                }
+                if (retry) scheduleListenerDispatch();
+            });
+        } catch (RejectedExecutionException shuttingDown) {
+            synchronized (this) { listenerDispatchRetryScheduled = false; }
+        }
+    }
+
+    /** One coalesced drainer per Job delivers retained IDs in strict ascending order. */
+    private void drainListenerDispatch() {
+        while (true) {
+            Map<String, Object> event;
+            List<Consumer<Map<String, Object>>> observers;
+            long eventId;
+            synchronized (this) {
+                Map.Entry<Long, Map<String, Object>> next = events.higherEntry(listenerDeliveredThrough);
+                if (next != null) {
+                    event = next.getValue();
+                    eventId = next.getKey();
+                } else if (pendingListenerNotice != null) {
+                    event = pendingListenerNotice;
+                    pendingListenerNotice = null;
+                    eventId = -1L;
+                } else {
+                    listenerDispatchScheduled = false;
+                    if (listenerDispatchRequested) {
+                        listenerDispatchRequested = false;
+                        listenerDispatchScheduled = true;
+                        continue;
+                    }
+                    return;
+                }
+                observers = List.copyOf(listeners);
+            }
+            for (Consumer<Map<String, Object>> listener : observers) {
+                try {
+                    listener.accept(event);
+                } catch (RuntimeException ignored) {
+                    // Observer failures must not stop journal persistence or Worker consumption.
+                }
+            }
+            if (eventId > 0L) synchronized (this) {
+                listenerDeliveredThrough = Math.max(listenerDeliveredThrough, eventId);
+            }
+        }
     }
 
     private void scheduleCompaction() {
@@ -218,82 +844,229 @@ final class JobEvents {
             compactionAgain.set(true);
             return;
         }
+        long requestedGeneration;
+        synchronized (this) { requestedGeneration = successfulCompactionGeneration; }
         try {
             compactionExecutor.execute(() -> {
                 boolean retryOnNextTrigger = false;
+                Exception compactionFailure = null;
+                AtomicLong snapshotGeneration = new AtomicLong(-1L);
                 try {
-                    retryOnNextTrigger = !compactSnapshot();
+                    retryOnNextTrigger = !compactSnapshot(snapshotGeneration);
                 } catch (Exception failure) {
                     retryOnNextTrigger = true;
-                    java.util.logging.Logger.getLogger(JobEvents.class.getName())
-                            .fine("Event journal compaction will be retried after a later event batch");
+                    compactionFailure = failure;
                 } finally {
+                    synchronized (this) {
+                        if (retryOnNextTrigger && snapshotGeneration.get() != successfulCompactionGeneration)
+                            retryOnNextTrigger = false;
+                        if (retryOnNextTrigger) asyncCompactionDeferred = true;
+                    }
+                    if (retryOnNextTrigger) {
+                        compactionFailures.incrementAndGet();
+                        java.util.logging.Logger logger = java.util.logging.Logger.getLogger(JobEvents.class.getName());
+                        String message = "Event journal compaction failed; bounded appends remain enabled";
+                        if (compactionFailure == null) logger.warning(message);
+                        else logger.log(java.util.logging.Level.WARNING, message, compactionFailure);
+                    }
                     compactionScheduled.set(false);
                     boolean requestedAgain = compactionAgain.getAndSet(false);
-                    // A failed catch-up must wait for a later append threshold. Immediate retries
-                    // can repeatedly serialize the same oversized tail while producers are active.
-                    if (!retryOnNextTrigger && requestedAgain) {
-                        scheduleCompaction();
-                    }
+                    // A failed snapshot is deferred until synchronous byte-budget compaction,
+                    // avoiding repeated full-window writes while the retained window is static.
+                    if (!retryOnNextTrigger && requestedAgain && shouldCompactForBacklog()) scheduleCompaction();
                 }
             });
         } catch (RejectedExecutionException full) {
             compactionScheduled.set(false);
             compactionAgain.set(false);
-            // The append-only journal is durable; a later append or restart retries compaction.
-            java.util.logging.Logger.getLogger(JobEvents.class.getName()).fine("Compaction deferred: executor unavailable; journal remains recoverable");
+            boolean deferred;
+            synchronized (this) {
+                deferred = requestedGeneration == successfulCompactionGeneration;
+                if (deferred) asyncCompactionDeferred = true;
+            }
+            if (deferred) {
+                compactionFailures.incrementAndGet();
+                java.util.logging.Logger.getLogger(JobEvents.class.getName())
+                        .warning("Event journal compaction deferred; the byte budget is still enforced");
+            }
         }
     }
 
-    /** Writes a snapshot outside the append lock, then atomically catches up with a short tail. */
-    private boolean compactSnapshot() throws Exception {
-        int lockIndex = Math.floorMod(file.toAbsolutePath().normalize().hashCode(), COMPACTION_LOCKS.length);
-        synchronized (COMPACTION_LOCKS[lockIndex]) {
-            return compactSnapshotUnderFileLock();
-        }
-    }
-
-    private boolean compactSnapshotUnderFileLock() throws Exception {
+    /** Snapshot write runs outside the append lock; the final bounded tail and rename are serialized. */
+    private boolean compactSnapshot(AtomicLong snapshotGeneration) throws Exception {
+        long started = System.nanoTime();
+        compactionAttempts.incrementAndGet();
         List<Map<String, Object>> snapshot;
+        long snapshotFirstId;
         long snapshotLastId;
         synchronized (this) {
+            snapshotGeneration.set(successfulCompactionGeneration);
+            if(repairBlocked||appendBlocked||legacyOversized||sequenceUncertain)return false;
             if (events.isEmpty()) return true;
             snapshot = new ArrayList<>(events.values());
+            snapshotFirstId = events.firstKey();
             snapshotLastId = events.lastKey();
         }
 
-        Path temporary = file.resolveSibling(file.getFileName() + ".tmp");
+        Path temporary = temporaryPath();
         boolean replaced = false;
         try {
-            StringBuilder snapshotText = new StringBuilder();
-            for (Map<String, Object> event : snapshot) snapshotText.append(JSON.writeValueAsString(event)).append('\n');
-            Files.writeString(temporary, snapshotText, StandardCharsets.UTF_8,
-                    StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
+            MessageDigest digest = sha256();
+            long written = writeSnapshot(temporary, snapshot, digest);
             afterSnapshotWrite.run();
-
-            synchronized (this) {
-                List<Map<String, Object>> tail = new ArrayList<>();
-                tail.addAll(events.tailMap(snapshotLastId, false).values());
-                if (tail.size() > MAX_COMPACTION_TAIL_EVENTS) return false;
-                if (snapshot.size() + tail.size() > capacity) return false;
-                if (!tail.isEmpty()
-                        && ((Number) tail.get(0).get("id")).longValue() != snapshotLastId + 1L) return false;
-
-                if (!tail.isEmpty()) {
-                    StringBuilder tailText = new StringBuilder();
-                    for (Map<String, Object> event : tail) tailText.append(JSON.writeValueAsString(event)).append('\n');
-                    Files.writeString(temporary, tailText, StandardCharsets.UTF_8, StandardOpenOption.APPEND);
+            synchronized (fileLock()) {
+                synchronized (this) {
+                    if(repairBlocked||appendBlocked||legacyOversized||sequenceUncertain)return false;
+                    if (events.isEmpty() || events.firstKey() > snapshotFirstId) return false;
+                    List<Map<String, Object>> tail = new ArrayList<>(events.tailMap(snapshotLastId, false).values());
+                    if (tail.size() > MAX_COMPACTION_TAIL_EVENTS || snapshot.size() + tail.size() > capacity) return false;
+                    long lastTailId = snapshotLastId;
+                    for (Map<String, Object> event : tail) {
+                        Object rawId = event.get("id");
+                        if (!(rawId instanceof Number) || ((Number) rawId).longValue() <= lastTailId) return false;
+                        lastTailId = ((Number) rawId).longValue();
+                        written = writeEvent(temporary, event, digest, written);
+                    }
+                    if (written > maxJournalBytes) return false;
+                    verifyDigest(temporary, digest.digest());
+                    atomicReplace(temporary);
+                    replaced = true;
+                    journalBytes = written;
+                    needsNewline = false;
+                    successfulCompactionGeneration++;
+                    lastCompactionAt = System.currentTimeMillis();
+                    lastCompactionDurationMs = java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started);
+                    return true;
                 }
-                try {
-                    Files.move(temporary, file, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
-                } catch (java.nio.file.AtomicMoveNotSupportedException unsupported) {
-                    Files.move(temporary, file, StandardCopyOption.REPLACE_EXISTING);
-                }
-                replaced = true;
             }
-            return true;
         } finally {
             if (!replaced) Files.deleteIfExists(temporary);
+        }
+    }
+
+    /** Hard-cap fallback: the path lock blocks writers, so the latest retained window always fits. */
+    private boolean compactCurrentUnderFileLock() throws Exception {
+        long started = System.nanoTime();
+        compactionAttempts.incrementAndGet();
+        List<Map<String, Object>> snapshot;
+        synchronized (this) {
+            if(repairBlocked||appendBlocked||legacyOversized||sequenceUncertain)return false;
+            snapshot = new ArrayList<>(events.values());
+        }
+        Path temporary = temporaryPath();
+        boolean replaced = false;
+        try {
+            MessageDigest digest = sha256();
+            long written = writeSnapshot(temporary, snapshot, digest);
+            if (written > maxJournalBytes) throw new IOException("Retained event window exceeds the byte budget");
+            verifyDigest(temporary, digest.digest());
+            synchronized (this) {
+                atomicReplace(temporary);
+                replaced = true;
+                journalBytes = written;
+                needsNewline = false;
+                asyncCompactionDeferred = false;
+                successfulCompactionGeneration++;
+                lastCompactionAt = System.currentTimeMillis();
+                lastCompactionDurationMs = java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started);
+            }
+            return true;
+        } catch (Exception failure) {
+            compactionFailures.incrementAndGet();
+            throw failure;
+        } finally {
+            if (!replaced) Files.deleteIfExists(temporary);
+        }
+    }
+
+    private long writeSnapshot(Path temporary, List<Map<String, Object>> snapshot,
+                               MessageDigest digest) throws Exception {
+        long available=usableSpace.getAsLong();
+        long estimatedBytes=Math.max(1L,Math.min(maxJournalBytes,retainedBytes));
+        if(available>=0L&&available<estimatedBytes+MIN_STORAGE_HEADROOM_BYTES)
+            throw new IOException("Insufficient storage headroom for a verified journal snapshot");
+        Files.deleteIfExists(temporary);
+        long written = 0L;
+        try (OutputStream raw = Files.newOutputStream(temporary, StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE);
+             DigestOutputStream output = new DigestOutputStream(raw, digest)) {
+            for (int index = 0; index < snapshot.size(); index++) {
+                Map<String, Object> event = snapshot.get(index);
+                if (index == 0 && sequenceGapDetected) {
+                    event = new LinkedHashMap<>(event);
+                    event.put("journalDiagnostic", Map.of("code", "ATT-JOURNAL-SEQUENCE-GAP",
+                            "summary", "One or more event IDs were missing from the durable journal; the retained records keep their original IDs."));
+                }
+                byte[] encoded = JSON.writeValueAsBytes(event);
+                if (encoded.length + 1 > MAX_EVENT_LINE_BYTES || written + encoded.length + 1L > maxJournalBytes)
+                    throw new IOException("Retained event snapshot exceeds the configured budget");
+                output.write(encoded);
+                written += encoded.length;
+                output.write('\n');
+                written++;
+            }
+        } finally {
+            try {
+                if (Files.exists(temporary, java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
+                    compactionBytesWritten.addAndGet(Files.size(temporary));
+                }
+            } catch (IOException unavailable) {
+                compactionBytesWritten.addAndGet(written);
+            }
+        }
+        return written;
+    }
+
+    private long writeEvent(Path temporary, Map<String, Object> event, MessageDigest digest,
+                            long written) throws Exception {
+        byte[] encoded = JSON.writeValueAsBytes(event);
+        if (encoded.length + 1 > MAX_EVENT_LINE_BYTES || written + encoded.length + 1L > maxJournalBytes)
+            throw new IOException("Compaction tail exceeds the configured byte budget");
+        try (OutputStream raw = Files.newOutputStream(temporary, StandardOpenOption.APPEND, StandardOpenOption.WRITE);
+             DigestOutputStream output = new DigestOutputStream(raw, digest)) {
+            output.write(encoded);
+            output.write('\n');
+        } catch (Exception failure) {
+            try {
+                compactionBytesWritten.addAndGet(Math.max(0L, Files.size(temporary) - written));
+            } catch (IOException ignored) {
+                // The snapshot write metric falls back to completed bytes if the temp file is gone.
+            }
+            throw failure;
+        }
+        compactionBytesWritten.addAndGet(encoded.length + 1L);
+        return written + encoded.length + 1L;
+    }
+
+    private void verifyDigest(Path temporary, byte[] expectedDigest) throws Exception {
+        MessageDigest actual = sha256();
+        long size = 0L;
+        try (InputStream raw = Files.newInputStream(temporary);
+             DigestInputStream input = new DigestInputStream(raw, actual)) {
+            byte[] buffer = new byte[16 * 1024];
+            int count;
+            while ((count = input.read(buffer)) >= 0) {
+                size += count;
+                if (size > maxJournalBytes) throw new IOException("Compaction verification exceeded the byte budget");
+            }
+        }
+        if (!MessageDigest.isEqual(expectedDigest, actual.digest())) {
+            throw new IOException("Compaction verification failed");
+        }
+    }
+
+    private void atomicReplace(Path temporary) throws IOException {
+        Files.move(temporary, file, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+    }
+
+    private Path temporaryPath() {
+        return file.resolveSibling(file.getFileName() + ".tmp-" + UUID.randomUUID());
+    }
+
+    private static MessageDigest sha256() {
+        try {
+            return MessageDigest.getInstance("SHA-256");
+        } catch (NoSuchAlgorithmException impossible) {
+            throw new IllegalStateException(impossible);
         }
     }
 }

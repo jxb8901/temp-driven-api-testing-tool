@@ -3,6 +3,18 @@ Total output lines: 281
 
 # Changelog
 
+# Unreleased
+
+- Treat missing optional Package resource roots as empty inventories, including fail-closed handling for inaccessible roots, and return sanitized typed diagnostics for invalid roots (#308).
+- Persist immutable Job provenance with separate source, execution identity and Schedule Owner filters, using the Schedules filter layout (#309).
+- Store language and theme preferences per authenticated account in Server H2, report save state for every edited field, and retain failed edits for retry (#310).
+- Enforce an exclusive LOAD arrival-generation deadline at admission, reject overdue arrivals, and drain all admitted work even when a queued task starts after generation ends (#312).
+- Use versioned MurmurHash3 sampling, append-only time-window retention, and accurate LOAD evidence quota/disposition coverage across JSON, HTML, and Studio reports (#313).
+- Add bounded per-entry STORED/DEFLATE/AUTO artifact compression with a safe 200:1 fallback and publication metrics (#314).
+- Exclude routine checkpoints only for a verified complete report with `executionStatus: PASS`, retain recovery evidence for cancelled/error or unavailable-report runs, share exactly equal single-workload detail payloads with measured byte savings, and categorize artifact browsing (#315).
+- Bound Job event journal reload, line size, retained memory, cache size, and on-disk growth; stop oversized payload serialization at the byte cap, account for in-memory failure diagnostics, keep terminal results bounded and immutable after append, use gap-aware amortized compaction with generation-guarded recovery from stale async snapshots, and retry rejected listener dispatch without blocking appends (#316).
+- Run LOAD phases in Ramp-up → Warm-up → Steady → Ramp-down order, exclude both preparation phases from measured metrics, and warn that saved LOAD reruns use the corrected order (#317).
+
 # ATT 4.2.6 - 2026-10-27
 
 - Raise the configured LOAD envelope limit to 10 days and apply root plus workload timing consistently across drafts, schedules, and replay validation (#306).

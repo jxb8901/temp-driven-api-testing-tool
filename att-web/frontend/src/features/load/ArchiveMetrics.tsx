@@ -5,24 +5,35 @@ const fields: Array<[keyof ArtifactArchiveMetrics, string]> = [
   ['queueWaitMs', 'Queue wait (ms)'], ['publicationWallMs', 'Writer wall time, including cleanup (ms)'],
   ['scanClassificationRedactionMs', 'Scan / classification / redaction (ms)'], ['zipWriteMs', 'ZIP compression / write (ms)'],
   ['verificationFsyncMs', 'Verification / file fsync (ms)'], ['cleanupMs', 'Private / staging cleanup (ms)'],
+  ['compressionDurationMs', 'DEFLATE CPU wall duration (ms)'],
   ['writerCpuMs', 'Server writer-thread CPU (ms)'], ['writerAllocatedBytes', 'Server writer-thread allocated bytes (not retained heap / peak)'],
   ['sourceFiles', 'Source files'], ['sourceBytes', 'Source bytes'], ['includedEntries', 'Included entries'],
   ['omittedEntries', 'Omitted entries'], ['includedBytes', 'Included uncompressed bytes'], ['zipBytes', 'ZIP bytes'],
-  ['compressionRatio', 'Included bytes / ZIP bytes'], ['attempts', 'Attempts'], ['retries', 'Retries'],
+  ['compressionRatio', 'Included bytes / ZIP bytes'], ['configuredCompressionMode', 'Configured compression mode'],
+  ['effectiveCompressionMode', 'Effective compression mode'], ['compressionLevel', 'DEFLATE level'],
+  ['storedEntries', 'STORED entries'], ['deflatedEntries', 'DEFLATED entries'],
+  ['compressedPayloadBytes', 'Compressed payload bytes'], ['archiveOverheadBytes', 'ZIP headers and manifest overhead'],
+  ['compressionSavingsPercent', 'Payload size saved (%)'], ['compressionFallbackCount', 'Per-entry STORED fallbacks'],
+  ['compressionFallbackReasons', 'Fallback reasons'], ['intentionallyExcludedRecoveryCheckpointFiles', 'Intentionally excluded recovery checkpoints'],
+  ['intentionallyExcludedRecoveryCheckpointBytes', 'Bytes in intentionally excluded checkpoints'],
+  ['attempts', 'Attempts'], ['retries', 'Retries'],
 ];
 
 function metricValue(key: keyof ArtifactArchiveMetrics, value: unknown): string {
+  if (typeof value === 'string' && value.length > 0) return value;
+  if (key === 'compressionFallbackReasons' && value && typeof value === 'object') return JSON.stringify(value);
   if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) return 'Unavailable';
   if (String(key).endsWith('Bytes')) {
     const units = ['B', 'KB', 'MB', 'GB', 'TB'];
     const index = value === 0 ? 0 : Math.max(0, Math.min(4, Math.floor(Math.log(value) / Math.log(1024))));
     return `${(value / 1024 ** index).toLocaleString(undefined, { maximumFractionDigits: 2 })} ${units[index]}`;
   }
-  return value.toLocaleString(undefined, { maximumFractionDigits: 3 });
+  const formatted = value.toLocaleString(undefined, { maximumFractionDigits: 3 });
+  return key === 'compressionSavingsPercent' ? `${formatted}%` : formatted;
 }
 const groups: Array<[string, typeof fields]> = [
-  ['Timing', fields.slice(0, 6)], ['CPU / memory allocation', fields.slice(6, 8)],
-  ['Files / size / compression', fields.slice(8, 15)], ['Retries / outcome', fields.slice(15)],
+  ['Timing', fields.slice(0, 7)], ['CPU / memory allocation', fields.slice(7, 9)],
+  ['Files / size / compression', fields.slice(9, 28)], ['Retries / outcome', fields.slice(28)],
 ];
 
 export function ArchiveMetrics({ value }: { value?: ArtifactArchiveMetrics | null }) {

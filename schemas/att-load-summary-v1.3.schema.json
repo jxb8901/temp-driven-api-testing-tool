@@ -160,10 +160,11 @@
       "properties": {
         "phase": {
           "enum": [
-            "WARMUP",
             "RAMP_UP",
+            "WARMUP",
             "STEADY",
-            "RAMP_DOWN"
+            "RAMP_DOWN",
+            "DRAIN"
           ]
         },
         "startAt": {
@@ -580,8 +581,8 @@
         },
         "phase": {
           "enum": [
-            "WARMUP",
             "RAMP_UP",
+            "WARMUP",
             "STEADY",
             "RAMP_DOWN"
           ]
@@ -655,8 +656,8 @@
       "properties": {
         "phase": {
           "enum": [
-            "WARMUP",
             "RAMP_UP",
+            "WARMUP",
             "STEADY",
             "RAMP_DOWN"
           ]

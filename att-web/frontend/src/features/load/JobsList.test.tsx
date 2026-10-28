@@ -5,7 +5,7 @@ import { beforeEach, afterEach, it, expect, vi } from 'vitest';
 import { JobsList } from './JobsList';
 import type { JobSummary, JobsQueryResult, LoadJobsApi } from './types';
 const job: JobSummary = {jobId:'J1234567890ABCDEF',command:'load',executionType:'load',packageId:'p',environment:'prod',status:'PASS',principal:'load-schedule:PRIVATE',createdAt:'2026-10-23T00:00:00Z',startedAt:'2026-10-23T00:00:05Z',finishedAt:'2026-10-23T00:00:15Z',targetGroup:'sig',targetIdentity:{type:'flow',id:'common.flow'}};
-const response = (items: JobSummary[] = [job], extra: Partial<JobsQueryResult> = {}): JobsQueryResult => ({items,total:items.length,offset:0,limit:100,groups:[],principalSuggestions:['alice','bob'],packageSuggestions:['p'],...extra});
+const response = (items: JobSummary[] = [job], extra: Partial<JobsQueryResult> = {}): JobsQueryResult => ({items,total:items.length,offset:0,limit:100,groups:[],principalSuggestions:['alice','bob'],executionPrincipalSuggestions:['alice','bob'],scheduleOwnerSuggestions:['alice','bob'],triggeredBySuggestions:['alice','bob'],packageSuggestions:['p'],...extra});
 let host: HTMLDivElement, root: Root;
 beforeEach(()=>{vi.useFakeTimers();localStorage.clear();sessionStorage.clear();host=document.createElement('div');document.body.append(host);root=createRoot(host);(globalThis as typeof globalThis & {IS_REACT_ACT_ENVIRONMENT?:boolean}).IS_REACT_ACT_ENVIRONMENT=true;});
 afterEach(async()=>{await act(async()=>root.unmount());host.remove();vi.useRealTimers();vi.restoreAllMocks();});
@@ -13,7 +13,7 @@ async function advance(){await act(async()=>{await vi.advanceTimersByTimeAsync(2
 async function click(element: Element | null){expect(element).not.toBeNull();await act(async()=>{element!.dispatchEvent(new MouseEvent('click',{bubbles:true}));});}
 function button(text: string){return [...host.querySelectorAll('button')].find(button=>button.textContent===text)!;}
 async function select(label: string,value: string){const field=[...host.querySelectorAll('label')].find(labelElement=>labelElement.firstChild?.textContent===label)?.querySelector('select')!;expect(field).toBeTruthy();await act(async()=>{field.value=value;field.dispatchEvent(new Event('change',{bubbles:true}));});}
-async function render(api: Partial<LoadJobsApi>, onOpenJob=vi.fn()){await act(async()=>root.render(<JobsList api={api as LoadJobsApi} onOpenJob={onOpenJob} onShowList={vi.fn()} />));await advance();}
+async function render(api: Partial<LoadJobsApi>, onOpenJob=vi.fn(), schedulingEnabled=false){await act(async()=>root.render(<JobsList api={api as LoadJobsApi} schedulingEnabled={schedulingEnabled} onOpenJob={onOpenJob} onShowList={vi.fn()} />));await advance();}
 
 it('renders target-first rows, exact navigation, copyable ID, Schedule principal and execution-only elapsed',async()=>{
   const onOpenJob=vi.fn(),writeText=vi.fn(async()=>{});Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText}});
@@ -24,6 +24,28 @@ it('renders target-first rows, exact navigation, copyable ID, Schedule principal
   await click(host.querySelector('.att-job-target'));expect(onOpenJob).toHaveBeenCalledWith(job.jobId);
   await click(host.querySelector('[aria-label="Copy full Job ID J1234567890ABCDEF"]'));expect(writeText).toHaveBeenCalledWith(job.jobId);
   expect(host.querySelector('code')?.textContent).toBe('J12345…CDEF');
+});
+it('does not infer a manual submitter from an anonymous or legacy principal label',async()=>{
+  const anonymous={...job,jobId:'J-ANONYMOUS',submissionSource:'manual',principal:'Bob(anonym)',submittedBy:null};
+  const authenticated={...job,jobId:'J-AUTHENTICATED',submissionSource:'manual',principal:'legacy-label',submittedBy:'alice'};
+  await render({queryJobs:vi.fn(async()=>response([anonymous,authenticated]))});
+  expect(host.textContent).toContain('Manual · Submitted by Unknown');
+  expect(host.textContent).toContain('Manual · Submitted by alice');
+  expect(host.textContent).not.toContain('Bob(anonym)');
+  expect(host.textContent).not.toContain('legacy-label');
+});
+it('links an available Schedule ID to history by keyboard and keeps unavailable IDs inert',async()=>{
+  const available={...job,submissionSource:'scheduled',scheduleId:'S-AVAILABLE',originatingScheduleId:'S-AVAILABLE',scheduleAvailable:true};
+  await render({queryJobs:vi.fn(async()=>response([available]))},vi.fn(),true);
+  const link=host.querySelector<HTMLAnchorElement>('.att-job-provenance a');
+  expect(link?.getAttribute('href')).toBe('#/schedules/S-AVAILABLE/history');
+  expect(link?.getAttribute('aria-label')).toBe('View history for Schedule S-AVAILABLE');
+  link?.focus();expect(document.activeElement).toBe(link);
+  const enter=new KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true});link?.dispatchEvent(enter);expect(enter.defaultPrevented).toBe(false);
+  await act(async()=>root.render(<JobsList api={{queryJobs:vi.fn(async()=>response([{...available,scheduleAvailable:false}]))} as unknown as LoadJobsApi} schedulingEnabled onOpenJob={vi.fn()} onShowList={vi.fn()} />));
+  await advance();
+  expect(host.querySelector('.att-job-provenance a')).toBeNull();
+  expect(host.querySelector('.att-job-provenance')?.textContent).toContain('history unavailable');
 });
 it('shows the immutable LOAD pacing plan on the Job row and expands workload details on demand',async()=>{
   const planned={...job,targetIdentity:{type:'load',id:'2 workloads / 2 target bindings',workloadCount:2,bindingCount:2,workloads:[
@@ -71,22 +93,33 @@ it('pins on the first icon click, prevents overlapping actions, and refreshes au
 it('keeps legacy unknown targets openable and does not fabricate missing timestamps',async()=>{
   await render({queryJobs:vi.fn(async()=>response([{...job,targetIdentity:undefined,startedAt:null,finishedAt:null}]))});expect(host.textContent).toContain('Unknown target');expect(host.querySelector('.att-job-target')?.getAttribute('href')).toContain(job.jobId);expect(host.textContent).toContain('Elapsed —');
 });
-it('selects Schedule with keyboard and sends a typed server predicate, then supports Mine and literal free text',async()=>{
+it('filters source and execution identity server-side, including Mine, suggestions, and literal text',async()=>{
   const queryJobs=vi.fn(async()=>response());await render({queryJobs});
-  const input=host.querySelector<HTMLInputElement>('[role="combobox"]')!;
+  await select('Source','scheduled');await advance();
+  expect(queryJobs).toHaveBeenLastCalledWith(expect.objectContaining({submissionSource:'scheduled',executionPrincipalMode:'all'}));
+  const input=host.querySelector<HTMLInputElement>('[aria-label="Execution Principal"]')!;
   await act(async()=>{input.focus();});
   expect(input.getAttribute('aria-expanded')).toBe('true');
   await act(async()=>{input.dispatchEvent(new KeyboardEvent('keydown',{key:'End',bubbles:true}));input.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowUp',bubbles:true}));});
-  const schedule=[...host.querySelectorAll('[role="option"]')].find(option=>option.textContent==='Schedule')!;await click(schedule);await advance();
-  expect(queryJobs).toHaveBeenLastCalledWith(expect.objectContaining({principalMode:'schedule',principal:undefined,offset:0}));
-  await click(host.querySelector('[aria-label="Clear Principal"]'));await advance();expect(queryJobs).toHaveBeenLastCalledWith(expect.objectContaining({principalMode:'all'}));
-  await act(async()=>input.focus());await click([...host.querySelectorAll('[role="option"]')].find(option=>option.textContent==='Mine')!);await advance();expect(queryJobs).toHaveBeenLastCalledWith(expect.objectContaining({principalMode:'mine'}));
+  await click([...host.querySelectorAll('[role="option"]')].find(option=>option.textContent==='alice')!);await advance();
+  expect(queryJobs).toHaveBeenLastCalledWith(expect.objectContaining({executionPrincipal:'alice',executionPrincipalMode:'text',executionPrincipalExact:true}));
+  await click(host.querySelector('[aria-label="Clear Execution Principal"]'));await advance();expect(queryJobs).toHaveBeenLastCalledWith(expect.objectContaining({executionPrincipalMode:'all'}));
+  await act(async()=>input.focus());await click([...host.querySelectorAll('[role="option"]')].find(option=>option.textContent==='Mine')!);await advance();
+  expect(queryJobs).toHaveBeenLastCalledWith(expect.objectContaining({executionPrincipalMode:'mine'}));
+  await act(async()=>{const setter=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')?.set;setter?.call(input,'ali');input.dispatchEvent(new Event('input',{bubbles:true}));});await advance();
+  expect(queryJobs).toHaveBeenLastCalledWith(expect.objectContaining({executionPrincipal:'ali',executionPrincipalMode:'text',executionPrincipalExact:undefined}));
 });
 
 it('restores filters after navigating back to Jobs',async()=>{
   sessionStorage.setItem('att.jobs.filters',JSON.stringify({principal:'alice',principalMode:'text',status:'PASS',sort:'target-desc',type:'run',grouped:'true'}));
   const queryJobs=vi.fn(async()=>response());await render({queryJobs});
-  expect(queryJobs).toHaveBeenLastCalledWith(expect.objectContaining({principal:'alice',principalMode:'text',status:'PASS',sort:'target-asc',executionType:'run',groupBy:'target'}));
+  expect(queryJobs).toHaveBeenLastCalledWith(expect.objectContaining({submissionSource:undefined,executionPrincipal:undefined,executionPrincipalMode:'all',status:'PASS',sort:'target-asc',executionType:'run',groupBy:'target'}));
+});
+
+it('maps the legacy Schedule filter to the new Scheduled source',async()=>{
+  sessionStorage.setItem('att.jobs.filters',JSON.stringify({principalMode:'schedule'}));
+  const queryJobs=vi.fn(async()=>response());await render({queryJobs});
+  expect(queryJobs).toHaveBeenLastCalledWith(expect.objectContaining({submissionSource:'scheduled'}));
 });
 
 it('keeps advanced filters collapsed with restored active values visible and Clear next to Refresh',async()=>{

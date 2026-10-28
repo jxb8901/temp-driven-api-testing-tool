@@ -196,6 +196,20 @@ class AuthenticationIntegrationTest {
             assertEquals(201,sendBasicViaTrustedProxy(client,port,"POST","/att/api/v1/auth/users","https://att.example.test",secondUser,basic,basicCsrf).statusCode());
             HttpResponse<String> localLogin=send(client,port,"POST","/att/api/v1/auth/login",origin,null,"{\"loginId\":\"owner\",\"password\":\"correct horse battery staple\"}");assertEquals(200,localLogin.statusCode());String ownerCookie=localLogin.headers().firstValue("Set-Cookie").orElseThrow().split(";",2)[0];
             HttpResponse<String> me=sendWithCookie(client,port,"GET","/att/api/v1/auth/me",ownerCookie,null,null,null);assertEquals(200,me.statusCode(),me.body());assertFalse(me.body().contains("passwordHash"));String csrf=me.headers().firstValue("X-ATT-CSRF").orElseThrow();
+            assertFalse(me.body().contains("accountId"),"Stable account IDs remain private to Server persistence");
+            HttpResponse<String> emptyPreferences=sendWithCookie(client,port,"GET","/att/api/v1/auth/me/preferences",ownerCookie,null,null,null);
+            assertEquals(200,emptyPreferences.statusCode());assertTrue(ServerRuntime.JSON.readTree(emptyPreferences.body()).path("available").asBoolean());
+            assertTrue(ServerRuntime.JSON.readTree(emptyPreferences.body()).path("language").isNull());assertTrue(ServerRuntime.JSON.readTree(emptyPreferences.body()).path("theme").isNull());
+            assertEquals(403,sendWithCookie(client,port,"PUT","/att/api/v1/auth/me/preferences",ownerCookie,origin,null,"{\"language\":\"zh-Hant\"}").statusCode(),"Local-auth preference updates require CSRF");
+            HttpResponse<String> crossOriginPreferences=sendWithCookie(client,port,"PUT","/att/api/v1/auth/me/preferences",ownerCookie,"https://attacker.example",csrf,"{\"language\":\"zh-Hant\"}");
+            assertEquals(403,crossOriginPreferences.statusCode(),"Preference writes enforce same-origin even when general cross-origin checks are disabled");
+            HttpResponse<String> savedPreferences=sendWithCookie(client,port,"PUT","/att/api/v1/auth/me/preferences",ownerCookie,origin,csrf,"{\"language\":\"zh-Hant\",\"theme\":\"dark\"}");
+            assertEquals(200,savedPreferences.statusCode(),savedPreferences.body());assertEquals("zh-Hant",ServerRuntime.JSON.readTree(savedPreferences.body()).path("language").asText());
+            assertEquals(1,ServerRuntime.JSON.readTree(savedPreferences.body()).path("version").asInt());
+            HttpResponse<String> ignoredMigration=sendWithCookie(client,port,"PUT","/att/api/v1/auth/me/preferences",ownerCookie,origin,csrf,"{\"language\":\"en\",\"theme\":\"light\",\"migrateIfAbsent\":true}");
+            assertEquals(200,ignoredMigration.statusCode());assertEquals("zh-Hant",ServerRuntime.JSON.readTree(ignoredMigration.body()).path("language").asText());assertEquals("dark",ServerRuntime.JSON.readTree(ignoredMigration.body()).path("theme").asText());
+            HttpResponse<String> persistedPreferences=sendWithCookie(client,port,"GET","/att/api/v1/auth/me/preferences",ownerCookie,null,null,null);
+            assertEquals("dark",ServerRuntime.JSON.readTree(persistedPreferences.body()).path("theme").asText());
             JsonNode ownerCapabilities=ServerRuntime.JSON.readTree(sendWithCookie(client,port,"GET","/att/api/v1/auth/capabilities",ownerCookie,null,null,null).body());
             assertTrue(ownerCapabilities.path("configurationAdmin").asBoolean());
             HttpResponse<String> adminConfiguration=sendWithCookie(client,port,"GET","/att/api/v1/packages/p/configuration/effective?includeAllFields=true",ownerCookie,null,null,null);
@@ -592,6 +606,8 @@ class AuthenticationIntegrationTest {
             String remoteJobId=remoteAccepted.path("jobId").asText();
             JsonNode remoteJob=waitForTerminalJob(port,remoteJobId);
             assertEquals("Bob(anonym)",remoteJob.path("principal").asText());
+            assertTrue(remoteJob.has("submittedBy"));assertTrue(remoteJob.path("submittedBy").isNull(),"Unverified anonymous display labels are not authenticated submitters");
+            assertTrue(remoteJob.path("executionPrincipal").isNull(),"Unverified anonymous display labels are not execution identities");
             JsonNode validateAccepted=postJson(port,"/att/api/v1/jobs/validate",null,
                     ServerRuntime.JSON.valueToTree(Map.of("packageId","debug","validationScope","package","principal","Alice")),202);
             assertEquals("Alice(anonym)",waitForTerminalJob(port,validateAccepted.path("jobId").asText()).path("principal").asText());

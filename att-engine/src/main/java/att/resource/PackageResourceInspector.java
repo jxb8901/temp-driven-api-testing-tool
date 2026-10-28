@@ -764,12 +764,14 @@ public final class PackageResourceInspector implements AutoCloseable {
         index.prewarmCompatible=config.helperDiscoveryFailures().isEmpty()
                 &&config.dbHelpers().isEmpty()&&config.mqHelpers().isEmpty()
                 &&config.sshHelpers().isEmpty()&&config.httpHelpers().isEmpty();
-        Path templatesRoot = config.templatesRoot().isAbsolute()
+        Path templatesCandidate = config.templatesRoot().isAbsolute()
                 ? config.templatesRoot() : packageRoot.resolve(config.templatesRoot());
-        templatesRoot = resources.fromInternalPath(templatesRoot, PackageResourceResolver.Kind.DIRECTORY).canonicalPath();
+        Path templatesRoot = optionalPackageDirectory(templatesCandidate, "resources.templatesRoot");
 
-        indexTemplates(index, config, templatesRoot);
-        indexFlows(index, config, templatesRoot);
+        if (templatesRoot != null) {
+            indexTemplates(index, config, templatesRoot);
+            indexFlows(index, config, templatesRoot);
+        }
         indexTools(index, config);
         indexRuntimeConfigFiles(index);
         indexCases(index, config);
@@ -1024,16 +1026,17 @@ public final class PackageResourceInspector implements AutoCloseable {
         Index index = index();
         if (expectedRevisionDigest != null && !expectedRevisionDigest.equals(index.revisionDigest))
             throw new StaleResourceCursorException();
-        Path loadRoot = packageRoot.resolve("load").normalize();
+        Path loadRoot = optionalPackageDirectory(packageRoot.resolve("load").normalize(), "load");
         List<Path> candidates = new ArrayList<Path>();
-        if (Files.isDirectory(loadRoot, LinkOption.NOFOLLOW_LINKS) && !Files.isSymbolicLink(loadRoot)) {
-            PackageResourceResolver.PackageResource directory = resources.fromInternalPath(loadRoot, PackageResourceResolver.Kind.DIRECTORY);
-            try (Stream<Path> paths = Files.walk(directory.canonicalPath(), 32)) {
+        if (loadRoot != null) {
+            try (Stream<Path> paths = Files.walk(loadRoot, 32)) {
                 paths.filter(path -> Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS) && !Files.isSymbolicLink(path))
                         .filter(path -> {
                             String name = path.getFileName().toString().toLowerCase(Locale.ROOT);
                             return name.endsWith(".yaml") || name.endsWith(".yml");
                         }).limit(MAX_YAML_CANDIDATES + 1L).forEach(candidates::add);
+            } catch (Exception unreadable) {
+                throw invalidResourceRoot("load");
             }
         }
         candidates.sort(Comparator.comparing(path -> path.toString().toLowerCase(Locale.ROOT)));
@@ -1595,7 +1598,7 @@ public final class PackageResourceInspector implements AutoCloseable {
         } catch (ResourceLimitException error) {
             throw error;
         } catch (Exception error) {
-            index.diagnostics.add(diagnostic("ATT-RESOURCE-TEMPLATE-INDEX-FAILED", "Template resources could not be indexed"));
+            throw invalidResourceRoot("resources.templatesRoot");
         }
     }
 
@@ -1628,7 +1631,7 @@ public final class PackageResourceInspector implements AutoCloseable {
         } catch (ResourceLimitException error) {
             throw error;
         } catch (Exception error) {
-            index.diagnostics.add(diagnostic("ATT-RESOURCE-FLOW-INDEX-FAILED", "Flow resources could not be indexed"));
+            throw invalidResourceRoot("resources.templatesRoot");
         }
     }
 
@@ -1665,12 +1668,8 @@ public final class PackageResourceInspector implements AutoCloseable {
     private void indexCases(Index index, FrameworkConfig config) {
         Path testcasesRoot = config.testcasesRoot().isAbsolute()
                 ? config.testcasesRoot() : packageRoot.resolve(config.testcasesRoot());
-        try {
-            testcasesRoot = resources.fromInternalPath(testcasesRoot, PackageResourceResolver.Kind.DIRECTORY).canonicalPath();
-        } catch (Exception error) {
-            index.diagnostics.add(diagnostic("ATT-RESOURCE-CASE-ROOT-UNAVAILABLE", "Configured testcase root is unavailable"));
-            return;
-        }
+        testcasesRoot = optionalPackageDirectory(testcasesRoot, "resources.testcaseRoot");
+        if (testcasesRoot == null) return;
         List<Path> workbooks = new ArrayList<Path>();
         try (Stream<Path> paths = Files.walk(testcasesRoot)) {
             paths.filter(path -> Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS))
@@ -1683,8 +1682,7 @@ public final class PackageResourceInspector implements AutoCloseable {
         } catch (ResourceLimitException limit) {
             throw limit;
         } catch (Exception error) {
-            index.diagnostics.add(diagnostic("ATT-RESOURCE-CASE-INDEX-FAILED", "Test Case resources could not be indexed"));
-            return;
+            throw invalidResourceRoot("resources.testcaseRoot");
         }
         Collections.sort(workbooks);
         long totalWorkbookBytes = 0;
@@ -2602,10 +2600,9 @@ public final class PackageResourceInspector implements AutoCloseable {
 
     private void indexQuickLoadPolicies(Index index) {
         try {
-            Path loadRoot=packageRoot.resolve("load").normalize();
-            if(Files.isDirectory(loadRoot,LinkOption.NOFOLLOW_LINKS)&&!Files.isSymbolicLink(loadRoot)) {
-                Path canonical=resources.fromInternalPath(loadRoot,PackageResourceResolver.Kind.DIRECTORY).canonicalPath();
-                try(Stream<Path> paths=Files.walk(canonical,32)) {
+            Path loadRoot=optionalPackageDirectory(packageRoot.resolve("load").normalize(), "load");
+            if(loadRoot!=null) {
+                try(Stream<Path> paths=Files.walk(loadRoot,32)) {
                     paths.filter(path->Files.isRegularFile(path,LinkOption.NOFOLLOW_LINKS)&&!Files.isSymbolicLink(path))
                             .filter(path->{String name=path.getFileName().toString().toLowerCase(Locale.ROOT);return name.endsWith(".yaml")||name.endsWith(".yml");})
                             .limit(20001).forEach(path->{
@@ -2621,7 +2618,11 @@ public final class PackageResourceInspector implements AutoCloseable {
                 index.files.add(resource.canonicalPath());
                 index.quickLoadPolicies.put(resource.logicalName(), resource.canonicalPath());
             }
-        } catch (Exception unavailable) { /* An unavailable catalog contributes no selectable policy files. */ }
+        } catch (InvalidResourceRootException invalid) {
+            throw invalid;
+        } catch (Exception unavailable) {
+            throw invalidResourceRoot("load");
+        }
         for (String filename : new String[]{"load.visualuser.yaml", "load.arrivalrate.yaml"}) {
             String logicalName = "load/" + filename;
             if (!index.quickLoadPolicies.containsKey(logicalName)) index.quickLoadPolicies.put(logicalName, null);
@@ -2636,6 +2637,29 @@ public final class PackageResourceInspector implements AutoCloseable {
     private Path resolveConfigFile() throws Exception {
         Path selected = RuntimeConfigPath.resolve(configPath, packageRoot);
         return configResources.fromInternalPath(selected, PackageResourceResolver.Kind.FILE).canonicalPath();
+    }
+
+    /**
+     * Resolves an optional Package inventory root without weakening containment checks.
+     * A missing root is an empty inventory. Existing but unreadable, non-directory, or
+     * escaping roots are configuration errors and must not look like a successful empty scan.
+     */
+    private Path optionalPackageDirectory(Path candidate, String field) {
+        try {
+            Path safe = resources.internalCandidate(candidate);
+            if (PackageResourceResolver.readAttributesIfPresent(safe) == null) return null;
+            PackageResourceResolver.PackageResource directory = resources.fromInternalPath(safe, PackageResourceResolver.Kind.DIRECTORY);
+            if (!Files.isReadable(directory.canonicalPath())) throw invalidResourceRoot(field);
+            return directory.canonicalPath();
+        } catch (InvalidResourceRootException invalid) {
+            throw invalid;
+        } catch (Exception invalid) {
+            throw invalidResourceRoot(field);
+        }
+    }
+
+    private static InvalidResourceRootException invalidResourceRoot(String field) {
+        return new InvalidResourceRootException(field);
     }
 
     private PackageResourceResolver.PackageResource resolveInternal(Path path, PackageResourceResolver.Kind kind) {
@@ -2960,6 +2984,16 @@ public final class PackageResourceInspector implements AutoCloseable {
     }
 
     public static final class ResourceNotFoundException extends RuntimeException { }
+
+    /** Safe, typed failure for an optional root that exists but cannot be inspected securely. */
+    public static final class InvalidResourceRootException extends IllegalArgumentException {
+        private final String field;
+        private InvalidResourceRootException(String field) {
+            super("A configured Package resource root is invalid or unavailable");
+            this.field = field;
+        }
+        public String field() { return field; }
+    }
     public static final class ResourceLimitException extends RuntimeException {
         public final String limitName;
         public final Long configuredLimit;

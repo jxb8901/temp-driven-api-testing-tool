@@ -25,7 +25,15 @@ server:
     maxEntryChars: 4000
     maxEntryLines: 40
   maxEventsPerJob: 10000
+  # Hard per-Job JSONL journal byte cap (1–256 MiB); default 64 MiB.
+  maxEventJournalBytes: 67108864
   maxArtifacts: 1000
+  # Published ZIP compression. STORED preserves legacy behavior; DEFLATE and AUTO
+  # are per-entry bounded by the archive verifier's 200:1 expansion ratio.
+  artifacts:
+    compression:
+      mode: store
+      level: 3
   # Unpinned terminal Job metadata, journals and artifacts are removed after this many days.
   jobRetentionDays: 30
   # Optional size quota for dataDir/jobs only. Disabled unless enabled is true.

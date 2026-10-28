@@ -123,7 +123,7 @@ export function makeScenario(
 ): JsonObject {
   const scenario: JsonObject = { ...policy, schemaVersion: String(policy.schemaVersion || 'att-load/v1.9') };
   const rootLoad = { ...asObject(policy.load) };
-  for (const field of ['warmup', 'rampUp', 'duration', 'rampDown'] as const) {
+  for (const field of ['rampUp', 'warmup', 'duration', 'rampDown'] as const) {
     const value = timing[field].trim();
     if (value) rootLoad[field] = value;
     else delete rootLoad[field];
@@ -236,7 +236,7 @@ export function retainedScenarioToEditor(value: unknown): { model: LoadModel; ti
   const firstLoad={...rootLoad,...asObject(asObject(rows[0]).load)};
   const isArrival=firstLoad.arrivalRate!=null;
   const model:LoadModel=isArrival?'arrivalRate':'virtualUsers';
-  const phaseFields=['warmup','rampUp','duration','rampDown'] as const;
+  const phaseFields=['rampUp','warmup','duration','rampDown'] as const;
   const firstEffective={...rootLoad,...asObject(asObject(rows[0]).load)};
   const timing=Object.fromEntries(phaseFields.map(field=>[field,String(firstEffective[field]??'')])) as TimingDraft;
   for(const raw of rows){const effective={...rootLoad,...asObject(asObject(raw).load)};for(const field of phaseFields){
@@ -273,15 +273,15 @@ export function retainedScenarioToEditor(value: unknown): { model: LoadModel; ti
 }
 
 function effectiveDuration(timing:TimingDraft):string {
-  const total=timing.duration.trim()?effectiveLoadEnvelopeMs([timing.warmup,timing.rampUp,timing.duration,timing.rampDown]):null;
-  return total==null?'Requires validation':`${plannedWorkloadDuration(total)} (sum of warm-up, ramp-up, measured duration and ramp-down)`;
+  const total=timing.duration.trim()?effectiveLoadEnvelopeMs([timing.rampUp,timing.warmup,timing.duration,timing.rampDown]):null;
+  return total==null?'Requires validation':`${plannedWorkloadDuration(total)} (sum of ramp-up, warm-up, measured duration and ramp-down)`;
 }
 
 function effectiveWorkloadDuration(scenarioValue:unknown,workloadValue:unknown):string {
   const scenario=asObject(scenarioValue),workload=asObject(workloadValue);
   const effective={...asObject(scenario.load),...asObject(workload.load)};
   if(effective.duration==null||String(effective.duration).trim()==='')return 'Requires validation';
-  const total=effectiveLoadEnvelopeMs(['warmup','rampUp','duration','rampDown'].map(field=>effective[field]==null?'':String(effective[field])));
+  const total=effectiveLoadEnvelopeMs(['rampUp','warmup','duration','rampDown'].map(field=>effective[field]==null?'':String(effective[field])));
   return total==null?'Requires validation':plannedWorkloadDuration(total);
 }
 
@@ -296,7 +296,7 @@ export function LoadPage(props: LoadFeatureProps): React.JSX.Element {
   const [policyState, setPolicyState] = useState<'idle' | 'loading' | 'ready' | 'error' | 'disabled'>('idle');
   const [policyMessage, setPolicyMessage] = useState('Choose a package to load the Server policy.');
   const [timing, setTiming] = useState<TimingDraft>({ warmup: '', rampUp: '', duration: '', rampDown: '' });
-  const effectiveEnvelopeMs = timing.duration.trim() ? effectiveLoadEnvelopeMs([timing.warmup, timing.rampUp, timing.duration, timing.rampDown]) : null;
+  const effectiveEnvelopeMs = timing.duration.trim() ? effectiveLoadEnvelopeMs([timing.rampUp, timing.warmup, timing.duration, timing.rampDown]) : null;
   const [workloads, setWorkloads] = useState<WorkloadDraft[]>([]);
   const [advanced, setAdvanced] = useState({ execution: '{}', testdata: '[]', thresholds: '{}', evidence: '{}', seed: '' });
   const [draft, setDraft] = useState<import('./types').LoadDraftResponse | null>(null);
@@ -471,7 +471,7 @@ export function LoadPage(props: LoadFeatureProps): React.JSX.Element {
         const scenarioLoad=asObject(scenario.load),scenarioWorkloads=Array.isArray(scenario.workloads)?scenario.workloads:[];
         const environmentOverride=replayEnvironmentOrigin.current==='package'&&selectedEnvironment===replayPackageDefaultEnvironment.current?'':selectedEnvironment||'';
         const overrides:Record<string,unknown>={environment:environmentOverride,
-          load:Object.fromEntries(['warmup','rampUp','duration','rampDown'].map(field=>[field,scenarioLoad[field]??null])),
+          load:Object.fromEntries(['rampUp','warmup','duration','rampDown'].map(field=>[field,scenarioLoad[field]??null])),
           workloads:scenarioWorkloads.map(raw=>{
             const row=asObject(raw),load=asObject(row.load);
             const pacing=model==='arrivalRate'
@@ -666,8 +666,8 @@ export function LoadPage(props: LoadFeatureProps): React.JSX.Element {
         {environmentState === 'error' && <p className="att-inline-error" role="status">Package environments could not be loaded. Only the Server default environment is available in this view.{onRetryEnvironments && <> <button type="button" onClick={onRetryEnvironments}>Retry</button></>}</p>}
         <fieldset className="att-timing-fieldset">
           <legend>Shared timing envelope</legend>
-          <DurationField label="Warm-up" value={timing.warmup} onChange={value => setTiming(current => ({ ...current, warmup: value }))} />
           <DurationField label="Ramp-up" value={timing.rampUp} onChange={value => setTiming(current => ({ ...current, rampUp: value }))} />
+          <DurationField label="Warm-up" value={timing.warmup} onChange={value => setTiming(current => ({ ...current, warmup: value }))} />
           <DurationField label="Measured duration" required value={timing.duration} onChange={value => setTiming(current => ({ ...current, duration: value }))} />
           <DurationField label="Ramp-down" value={timing.rampDown} onChange={value => setTiming(current => ({ ...current, rampDown: value }))} />
           <p className="att-help">Use integer ms, s, m, or h values. The Server checks duration bounds and the shared timing envelope.</p>

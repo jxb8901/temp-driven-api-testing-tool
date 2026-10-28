@@ -40,7 +40,7 @@ class ServerWarUiIT {
         Path home=createScheduledLocalRuntime(),packages=Files.createDirectories(temp.resolve("redeploy-packages")),pkg=Files.createDirectory(packages.resolve("payments"));
         writeScheduledPackage(pkg,home);copySchemas(pkg);
         Path scenario=pkg.resolve("load/scenario.yaml");Files.writeString(scenario,Files.readString(scenario).replace("duration: 30s","duration: 1s"));
-        Path config=Files.writeString(temp.resolve("redeploy-server.yaml"),"server:\n  runtimeConfigPath: "+yaml(home.resolve("config/config.yaml"))+"\n  dataDir: "+yaml(temp.resolve("redeploy-data"))+"\n  authenticationRequired: true\n  inspection: {enabled: true}\n  scheduling: {enabled: true}\nworkers:\n  maxConcurrent: 1\n  queuedLimit: 1\n  heapMaxMb: 128\n  executionPool: {enabled: true, minIdle: 1, maxIdle: 1, heapBudgetMb: 128, packageIds: [payments]}\npackages:\n  allowedRoots: ["+yaml(packages)+"]\n  entries: {payments: "+yaml(pkg)+"}\n");
+        Path config=Files.writeString(temp.resolve("redeploy-server.yaml"),"server:\n  runtimeConfigPath: "+yaml(home.resolve("config/config.yaml"))+"\n  dataDir: "+yaml(temp.resolve("redeploy-data"))+"\n  authenticationRequired: true\n  maxEventsPerJob: 100\n  inspection: {enabled: true}\n  scheduling: {enabled: true}\nworkers:\n  maxConcurrent: 1\n  queuedLimit: 1\n  heapMaxMb: 128\n  executionPool: {enabled: true, minIdle: 1, maxIdle: 1, heapBudgetMb: 128, packageIds: [payments]}\npackages:\n  allowedRoots: ["+yaml(packages)+"]\n  entries: {payments: "+yaml(pkg)+"}\n");
         Path users=Files.writeString(temp.resolve("redeploy-users.xml"),"<tomcat-users><role rolename=\"ATT_USER\"/><user username=\"att\" password=\"secret\" roles=\"ATT_USER\"/></tomcat-users>");
         String oldConfig=System.getProperty("att.server.config"),oldHome=System.getProperty("att.home");
         System.setProperty("att.server.config",config.toString());System.setProperty("att.home",home.toString());
@@ -545,6 +545,7 @@ class ServerWarUiIT {
         writeScheduledPackage(packageRoot, localHome);
         // Keep Flow-link inspection in this isolated browser fixture, away from the scheduler capacity fixture.
         writeReferenceFlowSource(packageRoot);
+        Path emptyPackage=Files.createDirectory(packages.resolve("lilyzhou"));
         // Three package catalogs and environment discovery share this inspection queue.
         // Keep one worker, but admit the browser's normal parallel discovery burst.
         Path config = Files.writeString(temp.resolve("server.yaml"),
@@ -553,7 +554,7 @@ class ServerWarUiIT {
                         + "\n    safeTextSources:\n      payments:\n        - config/tools/att-helper.sh\n"
                         + "  scheduling:\n    enabled: true\n    adminRole: ATT_SCHEDULE_ADMIN\n"
                         + "workers:\n  maxConcurrent: 1\n  queuedLimit: 1\n  maxConcurrentLoad: 1\n"
-                        + "packages:\n  allowedRoots:\n    - " + yaml(packages) + "\n  entries:\n    payments: " + yaml(packageRoot) + "\n    default: "+yaml(Files.createDirectory(packages.resolve("default")))+"\n    jeffreyjiang: "+yaml(Files.createDirectory(packages.resolve("jeffreyjiang")))+"\n");
+                        + "packages:\n  allowedRoots:\n    - " + yaml(packages) + "\n  entries:\n    payments: " + yaml(packageRoot) + "\n    default: "+yaml(Files.createDirectory(packages.resolve("default")))+"\n    jeffreyjiang: "+yaml(Files.createDirectory(packages.resolve("jeffreyjiang")))+"\n    lilyzhou: "+yaml(emptyPackage)+"\n");
         String oldConfig = System.getProperty("att.server.config");
         String oldHome = System.getProperty("att.home");
         System.setProperty("att.server.config", config.toString());
@@ -595,6 +596,22 @@ class ServerWarUiIT {
                     "opaque Origins must be rejected");
             assertEquals(200, postJson(port, previewPath, scheduleAdminAuth, "http://127.0.0.1:" + port, previewBody),
                     "same-origin schedule preview may proceed");
+            String api = "/tools/att/api/v1";
+            HttpURLConnection emptyCatalogResponse=open(port,api+"/packages/lilyzhou/load-catalog?limit=100",auth);
+            JsonNode emptyCatalog;
+            try(var input=emptyCatalogResponse.getInputStream()) { emptyCatalog=ServerRuntime.JSON.readTree(input.readAllBytes()); }
+            assertEquals(200,emptyCatalogResponse.getResponseCode(),emptyCatalog.toString());
+            assertEquals(0,emptyCatalog.path("items").size(),emptyCatalog.toString());
+            assertEquals(0,emptyCatalog.path("total").asInt(),emptyCatalog.toString());
+            assertTrue(emptyCatalog.path("nextCursor").isNull()||emptyCatalog.path("nextCursor").isMissingNode(),emptyCatalog.toString());
+            assertTrue(emptyCatalogResponse.getHeaderField("X-ATT-Inspection-Revision").matches("[A-Za-z0-9_-]{43}"),emptyCatalogResponse.getHeaderFields().toString());
+            emptyCatalogResponse.disconnect();
+            JsonNode emptyExplorer=getJson(port,api+"/packages/lilyzhou/resources?type=template",auth);
+            assertEquals(0,emptyExplorer.path("items").size(),emptyExplorer.toString());
+            assertFalse(Files.exists(emptyPackage.resolve("templates"))||Files.exists(emptyPackage.resolve("testcase"))||Files.exists(emptyPackage.resolve("load")),
+                    "Inspection must not create missing optional directories.");
+            assertTrue(getJson(port,api+"/packages/payments/resources?type=flow",auth).path("items").size()>0,
+                    "The authenticated Worker must continue serving another Package.");
             assertEquals(403,postJson(port,"/tools/att/api/v1/drafts/run",scheduleAdminAuth,"https://attacker.example","{}"),
                     "Canonical RUN drafts retain the configured same-origin boundary.");
             assertEquals(403, delete(port, "/tools/att/api/v1/load-schedules/unknown", scheduleAdminAuth, "https://attacker.example"),
@@ -624,7 +641,6 @@ class ServerWarUiIT {
                     connection.disconnect();
                 }
             }
-            String api = "/tools/att/api/v1";
             assertCliAndTomcatDiagnosticFidelity(port, api, auth, origin, packageRoot, localHome);
             JsonNode cacheCapabilities=getJson(port,api+"/auth/capabilities",auth);
             String cacheContext=cacheCapabilities.path("inspectionCacheContext").asText();

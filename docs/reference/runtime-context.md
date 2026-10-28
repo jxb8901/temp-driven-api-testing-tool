@@ -20,7 +20,7 @@ Standalone Debug bootstrap values are mapped into these canonical roots: `inputs
 | EXEC.LOAD.WORKLOAD_ID | Configured workload ID. | Load only; available before ID generation. |
 | EXEC.LOAD.USER_ID | Stable virtual-user ID. | Closed Load only; absent for arrival-rate. |
 | EXEC.LOAD.ITERATION | Numeric iteration sequence. | Load only; available before ID generation. |
-| EXEC.LOAD.PHASE | WARMUP, RAMP_UP, STEADY or RAMP_DOWN. | Load only; available before ID generation. |
+| EXEC.LOAD.PHASE | RAMP_UP, WARMUP, STEADY or RAMP_DOWN. | Load only; available before ID generation. |
 
 EXEC.LOAD exposes stable identity. Scheduler counters, queue state and timing diagnostics stay in evidence-only DIAG.load, which is not an expression root.
 

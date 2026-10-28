@@ -86,6 +86,19 @@ final class ServerRuntime implements AutoCloseable {
     final AuthService auth;
     final ThreadPoolExecutor workers,streams,inspectors;
     private final ThreadPoolExecutor eventCompactions=new ThreadPoolExecutor(2,2,0,TimeUnit.MILLISECONDS,new ArrayBlockingQueue<>(1024),r->{Thread t=new Thread(r,"att-server-event-compactor");t.setDaemon(true);return t;},new ThreadPoolExecutor.AbortPolicy());
+    private final ThreadPoolExecutor eventNotifications=new ThreadPoolExecutor(2,2,0,TimeUnit.MILLISECONDS,new ArrayBlockingQueue<>(4096),r->{Thread t=new Thread(r,"att-server-event-dispatch");t.setDaemon(true);return t;},new ThreadPoolExecutor.AbortPolicy());
+    private static final int TERMINAL_EVENT_CACHE_MAX_ENTRIES=16;
+    private static final long TERMINAL_EVENT_CACHE_MAX_WEIGHT=128L*1024L*1024L;
+    private final Object terminalEventCacheLock=new Object();
+    private final Object[] terminalEventCacheStripes=eventCacheStripes();
+    private final java.util.LinkedHashMap<String,JobEvents> terminalEventCache=
+            new java.util.LinkedHashMap<>(16,0.75f,true);
+    private long terminalEventCacheWeight;
+    private static Object[] eventCacheStripes() {
+        Object[] stripes=new Object[16];
+        for(int i=0;i<stripes.length;i++)stripes[i]=new Object();
+        return stripes;
+    }
     private final ThreadPoolExecutor artifactWriters;
     private final ArtifactPublisher artifactPublisher;
     private final Semaphore artifactReadSlots=new Semaphore(MAX_ARTIFACT_READ_SLOTS,true);
@@ -152,7 +165,8 @@ final class ServerRuntime implements AutoCloseable {
         this(config,workerLibs,processLauncher,Clock.systemUTC());
     }
     ServerRuntime(ServerConfig config,String workerLibs,WorkerProcessLauncher processLauncher,Clock clock) throws Exception {
-        this(config,workerLibs,processLauncher,clock,ArtifactArchive::build);
+        this(config,workerLibs,processLauncher,clock,(output,archive,validator)->
+                ArtifactArchive.build(output,archive,validator,config.archiveCompression));
     }
     ServerRuntime(ServerConfig config,String workerLibs,WorkerProcessLauncher processLauncher,Clock clock,ArtifactPublisher artifactPublisher) throws Exception {
         this(config,workerLibs,processLauncher,clock,artifactPublisher,null);
@@ -220,7 +234,8 @@ final class ServerRuntime implements AutoCloseable {
             String mode=executionMode(row==null?null:String.valueOf(row.get("command")));
             store.interruptStale(id);
             Path journal=config.dataDir.resolve("jobs").resolve(id).resolve("events.jsonl");
-            JobEvents events=new JobEvents(journal,config.maxEventsPerJob,eventCompactions);
+            JobEvents events=new JobEvents(journal,config.maxEventsPerJob,config.maxEventJournalBytes,
+                    config.maxEventJournalMemoryBytes,eventCompactions,eventNotifications);
             String summary="Job was interrupted by Server restart and was not rerun";
             events.append("diagnostic",Map.of("code","ATT-SERVER-INTERRUPTED","summary",summary,"console",publishConsole(att.console.ExecutionConsoleFormatter.diagnostic(mode,"ATT-SERVER-INTERRUPTED",summary))));
             events.append("result",Map.of("jobId",id,"status","ERROR","console",publishConsole(att.console.ExecutionConsoleFormatter.lifecycle(mode,id,"ERROR",null))));
@@ -630,6 +645,9 @@ final class ServerRuntime implements AutoCloseable {
         return submit(command,input,principal,serverIssuedDraft,scheduleOccurrenceId,scheduleIssued,rerunOfJobId,replayIntent,prevalidatedSpec,false);
     }
     private Map<String,Object> submit(String command,JsonNode input,String principal,boolean serverIssuedDraft,String scheduleOccurrenceId,boolean scheduleIssued,String rerunOfJobId,String replayIntent,JobExecutionSpec prevalidatedSpec,boolean fileBackedReplay) throws Exception {
+        return submit(command,input,principal,serverIssuedDraft,scheduleOccurrenceId,scheduleIssued,rerunOfJobId,replayIntent,prevalidatedSpec,fileBackedReplay,null);
+    }
+    private Map<String,Object> submit(String command,JsonNode input,String principal,boolean serverIssuedDraft,String scheduleOccurrenceId,boolean scheduleIssued,String rerunOfJobId,String replayIntent,JobExecutionSpec prevalidatedSpec,boolean fileBackedReplay,JobProvenance provenance) throws Exception {
         admissionLifecycle.readLock().lock();
         try {
         if(closing)throw new QueueFullException("Server is shutting down");
@@ -731,9 +749,17 @@ final class ServerRuntime implements AutoCloseable {
         try {
             id="J"+UUID.randomUUID().toString().replace("-","").substring(0,16).toUpperCase();request.jobId=id;
             jobPath=config.dataDir.resolve("jobs").resolve(id);Files.createDirectories(jobPath.resolve("output"));final Path activeJobPath=jobPath;
-            JobEvents events=new JobEvents(jobPath.resolve("events.jsonl"),config.maxEventsPerJob,eventCompactions);
+            JobEvents events=new JobEvents(jobPath.resolve("events.jsonl"),config.maxEventsPerJob,config.maxEventJournalBytes,
+                    config.maxEventJournalMemoryBytes,eventCompactions,eventNotifications);
             Job job=new Job(id,command,packageId,principal,request,events);job.scheduleOccurrenceId=scheduleOccurrenceId;job.requestReceivedNanos=requestReceivedNanos;
-            job.executionSpec=executionSpec;job.replayUnavailable=replayUnavailable;job.rerunOfJobId=rerunOfJobId;job.replayIntent=replayIntent;job.replayOwner=replayOwner;job.originatingScheduleId=originatingScheduleId;
+            if(provenance==null) {
+                job.submissionSource="manual";job.originatingScheduleId=originatingScheduleId;job.executionPrincipal=config.authenticationRequired?principal:null;job.submittedBy=config.authenticationRequired?principal:null;
+            } else {
+                job.submissionSource="scheduled";job.originatingScheduleId=provenance.scheduleId;job.scheduleOwner=config.authenticationRequired?provenance.scheduleOwner:null;
+                job.executionPrincipal=config.authenticationRequired?provenance.executionPrincipal:null;job.submittedBy=config.authenticationRequired?provenance.submittedBy:null;
+                job.triggeredBy=config.authenticationRequired?provenance.triggeredBy:null;
+            }
+            job.executionSpec=executionSpec;job.replayUnavailable=replayUnavailable;job.rerunOfJobId=rerunOfJobId;job.replayIntent=replayIntent;job.replayOwner=replayOwner;if(job.originatingScheduleId==null)job.originatingScheduleId=originatingScheduleId;
             Map<String,Object> summaryFields=new LinkedHashMap<>();summaryFields.put("command",command);summaryFields.put("packageId",packageId);
             summaryFields.put("configuration",configuration);
             Files.write(jobPath.resolve("output/configuration.json"),JSON.writeValueAsBytes(configuration));
@@ -1290,7 +1316,7 @@ final class ServerRuntime implements AutoCloseable {
         if(captured==null||captured.length()>40||!validTimestamp(captured))return null;
         snapshot.put("capturedAt",captured);snapshot.put("elapsedMs",elapsed);
         String phase=raw.get("phase") instanceof String?((String)raw.get("phase")).toUpperCase(java.util.Locale.ROOT):"UNKNOWN";
-        if(!Set.of("PREPARING","WARMUP","RAMP_UP","STEADY","RAMP_DOWN","COMPLETE","UNKNOWN","PROGRESS").contains(phase))phase="UNKNOWN";
+        if(!Set.of("PREPARING","RAMP_UP","WARMUP","STEADY","RAMP_DOWN","DRAIN","COMPLETE","UNKNOWN","PROGRESS").contains(phase))phase="UNKNOWN";
         snapshot.put("phase",phase);
         Map<String,Object> counts=progressCounts(raw.get("counts"));if(counts==null)return null;snapshot.put("counts",counts);
         Map<String,Object> measured=progressCounts(raw.get("measuredCounts"));if(measured==null)return null;snapshot.put("measuredCounts",measured);
@@ -1307,10 +1333,12 @@ final class ServerRuntime implements AutoCloseable {
         Map<String,Object> checkpoint=progressCheckpoint(raw.get("checkpointInterval"));
         if(raw.containsKey("checkpointInterval") && checkpoint==null)checkpoint=Map.of("schemaVersion","att-load-checkpoint-interval/v1","state","DEGRADED");
         if(checkpoint!=null)snapshot.put("checkpointInterval",checkpoint);
-        Map<String,Object> phases=new TreeMap<>();Object rawPhases=raw.get("phases");
-        if(rawPhases instanceof Map<?,?>)for(Map.Entry<?,?> entry:((Map<?,?>)rawPhases).entrySet()) {
-            if(phases.size()>=8)break;String name=safeProgressName(entry.getKey());if(!Set.of("WARMUP","RAMP_UP","STEADY","RAMP_DOWN","COMPLETE","PREPARING","UNKNOWN").contains(name))continue;
-            Map<String,Object> value=progressCounts(entry.getValue());if(value!=null)phases.put(name,value);
+        Map<String,Object> phases=new LinkedHashMap<>();Object rawPhases=raw.get("phases");
+        if(rawPhases instanceof Map<?,?>) {
+            Map<?,?> source=(Map<?,?>)rawPhases;
+            for(String name:List.of("RAMP_UP","WARMUP","STEADY","RAMP_DOWN","DRAIN","COMPLETE","PREPARING","UNKNOWN")) {
+                Map<String,Object> value=progressCounts(source.get(name));if(value!=null)phases.put(name,value);
+            }
         }
         snapshot.put("phases",phases);
         Map<String,Object> workloads=new TreeMap<>();Object rawWorkloads=raw.get("workloads");
@@ -2736,6 +2764,13 @@ final class ServerRuntime implements AutoCloseable {
         catch(java.util.concurrent.TimeoutException timeout){cancelInspectionTask(task);throw new InspectionTimeoutException();}
         catch(InterruptedException interrupted){cancelInspectionTask(task);Thread.currentThread().interrupt();throw interrupted;}
         catch(ExecutionException failure){Throwable cause=failure.getCause();if(cause instanceof Exception)throw (Exception)cause;throw new IllegalStateException("Package inspection failed",cause);}
+        finally {
+            // FutureTask can publish completion to get() callers before run() reaches its
+            // finally block. Release completed work here too, so an immediate next request
+            // does not observe a stale full-capacity slot. Timed-out/cancelled work keeps its
+            // slot until it is removed from the queue or its worker actually exits.
+            if(!task.isCancelled())task.releaseSlot();
+        }
         String workerError=(String)envelope.get("errorCode");
         if("package-configuration".equals(request.inspectionType)&&"ATT-CFG-001".equals(workerError)) {
             Object raw=envelope.get("diagnostics");
@@ -2750,6 +2785,32 @@ final class ServerRuntime implements AutoCloseable {
             if("ATT-CFG-001".equals(workerError)||diagnostics.stream().anyMatch(item -> "ATT-CFG-001".equals(item.get("code"))))
                 throw new InspectionConfigurationException(diagnostics.isEmpty()
                         ?safeInspectionDiagnostics(List.of(),root):diagnostics);
+        }
+        boolean inspectorEndpoint=List.of("list","detail","source","source-file","debug-form","quick-load-form",
+                "load-catalog","load-detail","load-source","load-templates","quick-load-policy").contains(request.inspectionAction);
+        if(inspectorEndpoint&&("ATT-RESOURCE-ROOT-INVALID".equals(workerError)
+                ||"WORKER_REQUEST_INVALID".equals(workerError))) {
+            Object raw=envelope.get("diagnostics");
+            List<Map<String,Object>> diagnostics=raw instanceof List
+                    ?safeInspectionDiagnostics((List<?>)raw,root):new ArrayList<>();
+            if(diagnostics.isEmpty()||"ATT-CFG-001".equals(diagnostics.get(0).get("code"))) {
+                String code="ATT-RESOURCE-ROOT-INVALID".equals(workerError)
+                        ?"ATT-RESOURCE-ROOT-INVALID":"ATT-RESOURCE-VALIDATION-FAILED";
+                Object rawMessage=envelope.get("message");
+                String summary=rawMessage instanceof String?(String)rawMessage:"Package inspection input or configuration is invalid.";
+                summary=att.server.api.internal.DiagnosticSanitizer.redactAbsolutePaths(
+                        att.server.api.internal.DiagnosticSanitizer.redactText(summary),root);
+                diagnostics=List.of(Map.of("code",code,"summary",summary));
+            } else if("WORKER_REQUEST_INVALID".equals(workerError)) {
+                for(Map<String,Object> diagnostic:diagnostics)
+                    if("WORKER_REQUEST_INVALID".equals(diagnostic.get("code")))diagnostic.put("code","ATT-RESOURCE-VALIDATION-FAILED");
+            }
+            String code="ATT-RESOURCE-ROOT-INVALID".equals(workerError)
+                    ?"ATT-RESOURCE-ROOT-INVALID":"ATT-RESOURCE-VALIDATION-FAILED";
+            java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).warning(
+                    "ATT inspection validation rejected package="+String.valueOf(request.registeredPackageId)
+                            +" action="+String.valueOf(request.inspectionAction)+" code="+code);
+            throw new InspectionValidationException(code,diagnostics);
         }
         boolean draftInspection=("package-configuration".equals(request.inspectionType)&&"validate".equals(request.inspectionAction))||"run-input".equals(request.inspectionAction)||"debug-input".equals(request.inspectionAction)||"debug-form".equals(request.inspectionAction)
                 ||"quick-load-input".equals(request.inspectionAction)||"quick-load-form".equals(request.inspectionAction)
@@ -2864,13 +2925,15 @@ final class ServerRuntime implements AutoCloseable {
         for(Object raw:rawDiagnostics)if(raw instanceof Map) {
             @SuppressWarnings("unchecked") Map<String,Object> value=(Map<String,Object>)raw;
             Map<String,Object> safe=new LinkedHashMap<>();
-            for(String key:List.of("code","summary","detail","field","file","suggestion","packageId")) {
+            for(String key:List.of("code","summary","detail","field","file","sourceFile","resourceId","suggestion","packageId")) {
                 Object item=value.get(key);
                 if(item instanceof String) {
                     String text=att.server.api.internal.DiagnosticSanitizer.redactText((String)item);
                     safe.put(key,att.server.api.internal.DiagnosticSanitizer.redactAbsolutePaths(text,root));
                 }
             }
+            for(String key:List.of("line","column","sourceColumn"))
+                if(value.get(key) instanceof Number)safe.put(key,value.get(key));
             if(!safe.isEmpty())diagnostics.add(safe);
         }
         if(diagnostics.isEmpty())diagnostics.add(Map.of("code","ATT-CFG-001","summary","Package configuration is invalid or incomplete."));
@@ -3286,7 +3349,8 @@ final class ServerRuntime implements AutoCloseable {
         requireSchedulingEnabled();requireLocalOperator(principal);
         LoadSchedule schedule=store.authorizeManualScheduleExecution(id,principal,"local".equals(config.authMode),clock.instant().toString());
         if(schedule==null)throw new NotFoundException();
-        Map<String,Object> occurrence=loadScheduleScheduler.trigger(schedule,principal);
+        String executionPrincipal=schedule.executionPrincipal==null||schedule.executionPrincipal.isBlank()?schedule.createdBy:schedule.executionPrincipal;
+        Map<String,Object> occurrence=loadScheduleScheduler.trigger(schedule,executionPrincipal,principal);
         store.audit(principal,"SCHEDULE_TRIGGER",String.valueOf(occurrence.get("jobId")),schedule.packageId,String.valueOf(occurrence.get("status")));
         return occurrence;
     }
@@ -3296,20 +3360,26 @@ final class ServerRuntime implements AutoCloseable {
     }
 
     private Map<String,Object> submitScheduledJob(LoadSchedule schedule,String occurrenceId,String executionPrincipal) throws Exception {
+        Map<String,Object> occurrence=store.scheduleExecution(occurrenceId);
+        String triggeredBy=occurrence==null?null:(String)occurrence.get("triggeredBy");
+        String actualExecutionPrincipal=executionPrincipal==null||executionPrincipal.isBlank()
+                ?(schedule.executionPrincipal==null||schedule.executionPrincipal.isBlank()?schedule.createdBy:schedule.executionPrincipal)
+                :executionPrincipal;
+        JobProvenance provenance=new JobProvenance(schedule.id,schedule.createdBy,actualExecutionPrincipal,triggeredBy,triggeredBy);
         schedule=prepareScheduledExecution(schedule,executionPrincipal);
         Map<String,Object> accepted="run".equals(schedule.effectiveJobType())
-                ?submitScheduledRun(schedule,occurrenceId,executionPrincipal)
+                ?submitScheduledRun(schedule,occurrenceId,actualExecutionPrincipal,provenance)
                 :"debug".equals(schedule.effectiveJobType())
-                ? submitScheduledDebug(schedule,occurrenceId)
-                : submitScheduledLoad(schedule,occurrenceId);
+                ? submitScheduledDebug(schedule,occurrenceId,actualExecutionPrincipal,provenance)
+                : submitScheduledLoad(schedule,occurrenceId,actualExecutionPrincipal,provenance);
         store.audit(executionPrincipal,"SCHEDULE_EXECUTE",String.valueOf(accepted.get("jobId")),schedule.packageId,"ACCEPTED");
         return accepted;
     }
 
-    private Map<String,Object> submitScheduledRun(LoadSchedule schedule,String occurrenceId,String executionPrincipal) throws Exception {
+    private Map<String,Object> submitScheduledRun(LoadSchedule schedule,String occurrenceId,String executionPrincipal,JobProvenance provenance) throws Exception {
         ObjectNode input=JSON.valueToTree(schedule.runInput);input.set("configurationProvenance",JSON.valueToTree(schedule.configuration));applyInspectionPolicy(input,schedule.packageId);
         JobExecutionSpec retained=capturePrevalidatedExecutionSpec("run",input,null);
-        return submit("run",input,executionPrincipal,true,occurrenceId,true,null,null,retained);
+        return submit("run",input,executionPrincipal,true,occurrenceId,true,null,null,retained,false,provenance);
     }
     private void validateScheduledRun(LoadSchedule schedule) throws Exception {
         Path root=packageRoot(schedule.packageId);if(root==null)throw new NotFoundException();validatePackageRoot(root);
@@ -3390,7 +3460,7 @@ final class ServerRuntime implements AutoCloseable {
         return null;
     }
 
-    private Map<String,Object> submitScheduledLoad(LoadSchedule schedule,String occurrenceId) throws Exception {
+    private Map<String,Object> submitScheduledLoad(LoadSchedule schedule,String occurrenceId,String executionPrincipal,JobProvenance provenance) throws Exception {
         Path root=packageRoot(schedule.packageId);
         if(root==null||!Files.isDirectory(root,java.nio.file.LinkOption.NOFOLLOW_LINKS))
             throw new IllegalArgumentException("Configured schedule package is no longer available");
@@ -3403,10 +3473,10 @@ final class ServerRuntime implements AutoCloseable {
         input.set("inlineLoadScenario",JSON.valueToTree(scenario));input.put("expectedRevisionDigest",schedule.expectedRevisionDigest);
         applyInspectionPolicy(input,schedule.packageId);
         JobExecutionSpec retained=schedule.validatedSensitiveSource?null:capturePrevalidatedExecutionSpec("load",input,occurrenceId);
-        return submit("load",input,"load-schedule:"+schedule.id,true,occurrenceId,true,null,null,retained);
+        return submit("load",input,"load-schedule:"+schedule.id,true,occurrenceId,true,null,null,retained,false,provenance);
     }
 
-    private Map<String,Object> submitScheduledDebug(LoadSchedule schedule,String occurrenceId) throws Exception {
+    private Map<String,Object> submitScheduledDebug(LoadSchedule schedule,String occurrenceId,String executionPrincipal,JobProvenance provenance) throws Exception {
         Path root=packageRoot(schedule.packageId);
         if(root==null||!Files.isDirectory(root,java.nio.file.LinkOption.NOFOLLOW_LINKS))
             throw new IllegalArgumentException("Configured schedule package is no longer available");
@@ -3420,7 +3490,7 @@ final class ServerRuntime implements AutoCloseable {
         input.set("inlineDebugInput",JSON.valueToTree(schedule.inlineDebugInput));input.put("expectedRevisionDigest",revisionDigest);
         input.put("draftResourceId",schedule.debugResourceId);applyInspectionPolicy(input,schedule.packageId);
         JobExecutionSpec retained=capturePrevalidatedExecutionSpec("debug",input,null);
-        return submit("debug",input,"debug-schedule:"+schedule.id,true,occurrenceId,true,null,null,retained);
+        return submit("debug",input,"debug-schedule:"+schedule.id,true,occurrenceId,true,null,null,retained,false,provenance);
     }
 
     private String validateScheduledDebugInput(Path root,LoadSchedule schedule) throws Exception {
@@ -3784,7 +3854,7 @@ final class ServerRuntime implements AutoCloseable {
         return result;
     }
     Map<String,Object> executionPoolStatistics() { return executionWorkers==null?Map.of("enabled",false):executionWorkers.metrics(); }
-    Map<String,Object> counts() throws Exception {Map<String,Object> m=new LinkedHashMap<>();for(String s:List.of("QUEUED","PREPARING","RUNNING","PASS","FAIL","ERROR","INVALID","CANCELLED"))m.put(s.toLowerCase(),store.count(s));m.put("inspection",inspectionStatistics());m.put("executionPool",executionPoolStatistics());m.put("queueDepth",workers.getQueue().size());m.put("activeWorkers",workers.getActiveCount());m.put("completedSinceStart",completed.get());m.put("loadSchedulingEnabled",config.scheduling.enabled);if(config.scheduling.enabled){m.put("loadSchedules",store.scheduleCount());m.put("activeScheduledLoads",store.activeScheduledCount(null));m.put("loadScheduleMetrics",store.scheduleMetrics());}m.put("jobStorage",jobStorageSnapshot());return m;}
+    Map<String,Object> counts() throws Exception {Map<String,Object> m=new LinkedHashMap<>();for(String s:List.of("QUEUED","PREPARING","RUNNING","PASS","FAIL","ERROR","INVALID","CANCELLED"))m.put(s.toLowerCase(),store.count(s));m.put("inspection",inspectionStatistics());m.put("executionPool",executionPoolStatistics());m.put("queueDepth",workers.getQueue().size());m.put("activeWorkers",workers.getActiveCount());m.put("completedSinceStart",completed.get());m.put("loadSchedulingEnabled",config.scheduling.enabled);if(config.scheduling.enabled){m.put("loadSchedules",store.scheduleCount());m.put("activeScheduledLoads",store.activeScheduledCount(null));m.put("loadScheduleMetrics",store.scheduleMetrics());}m.put("jobStorage",jobStorageSnapshot());m.put("eventJournal",eventJournalStatistics());return m;}
     Path artifact(Job job,String requested) throws Exception {
         if(requested==null||requested.isBlank())throw new IllegalArgumentException("artifact path is required");
         Path base=config.dataDir.resolve("jobs").resolve(job.id).resolve("output").toRealPath();Path relative=Paths.get(requested);
@@ -3817,11 +3887,19 @@ final class ServerRuntime implements AutoCloseable {
             }
             j.status=status;j.exitCode=code;j.finishedAt=Instant.now();store.update(j);
             append(j,"status",Map.of("jobId",j.id,"status",status));
+            enrichPersistedLoadResultWithJournalDiagnostic(j);
             Map<String,Object> result=new LinkedHashMap<>();
             result.put("jobId",j.id);result.put("status",status);result.put("exitCode",code);
             result.put("result",j.resultJson==null?null:publicJson(j.id,j.resultJson));
             if(console!=null&&!console.isBlank())result.put("console",console);
-            Map<String,Object> terminalEvent=append(j,"result",result);
+            Map<String,Object> terminalPayload=prepareEventPayload(j,"result",result);
+            Map<String,Object> boundedTerminalPayload=j.events.projectPayload(terminalPayload);
+            Object terminalLimit=boundedTerminalPayload.get("journalLimit");
+            if(terminalLimit instanceof Map<?,?> notice&&"ATT-JOURNAL-EVENT-TRUNCATED".equals(notice.get("code"))) {
+                j.journalDiagnostic=new LinkedHashMap<String,Object>((Map<String,Object>)notice);
+                enrichPersistedLoadResultWithJournalDiagnostic(j);
+            }
+            Map<String,Object> terminalEvent=appendProjected(j,"result",boundedTerminalPayload);
             if("load".equals(j.command)) {
                 Map<String,Object> worker=j.workerMetrics==null?new LinkedHashMap<>():new LinkedHashMap<>(j.workerMetrics);
                 Map<String,Object> sizes=new LinkedHashMap<>();
@@ -3849,16 +3927,43 @@ final class ServerRuntime implements AutoCloseable {
     }
     private void finishQuietly(Job j,String status,int code,String diagnostic,String message){try{j.diagnosticJson=JSON.writeValueAsString(Map.of("code",diagnostic,"summary",message));append(j,"diagnostic",JSON.readValue(j.diagnosticJson,Map.class));finish(j,status,code);}catch(Exception ignored){j.status=status;j.exitCode=code;j.finishedAt=Instant.now();}}
     private Map<String,Object> append(Job j,String type,Map<String,?> data) throws Exception {
+        return recordAppendedEvent(j,type,j.events.append(type,prepareEventPayload(j,type,data)));
+    }
+    private Map<String,Object> appendProjected(Job j,String type,Map<String,Object> boundedPayload) throws Exception {
+        return recordAppendedEvent(j,type,j.events.appendProjected(type,boundedPayload));
+    }
+    private Map<String,Object> prepareEventPayload(Job j,String type,Map<String,?> data) {
         Map<String,Object> payload=new LinkedHashMap<>();if(data!=null)data.forEach(payload::put);
         Object existing=payload.get("console");
         if(existing instanceof String line&&!line.isBlank()) payload.put("console",publishConsole(line));
         else {String line=lifecycleConsole(j,type,payload);if(line!=null&&!line.isBlank())payload.put("console",publishConsole(line));}
-        Map<String,Object> appended=j.events.append(type,payload);
+        return payload;
+    }
+    private Map<String,Object> recordAppendedEvent(Job j,String type,Map<String,Object> appended) {
         Object bounded=appended.get("data");
         if(bounded instanceof Map<?,?> eventData&&eventData.get("journalLimit") instanceof Map<?,?> notice
                 &&"ATT-JOURNAL-EVENT-TRUNCATED".equals(notice.get("code")))
             j.journalDiagnostic=new LinkedHashMap<String,Object>((Map<String,Object>)notice);
+        Map<String,Object> journalNotice=j.events.diagnostic();
+        if(journalNotice!=null&&("ATT-JOURNAL-PERSISTENCE-DEGRADED".equals(journalNotice.get("code"))
+                ||j.journalDiagnostic==null))
+            j.journalDiagnostic=new LinkedHashMap<>(journalNotice);
         return appended;
+    }
+    private void enrichPersistedLoadResultWithJournalDiagnostic(Job job) {
+        if(job.journalDiagnostic==null||job.resultJson==null)return;
+        String originalResultJson=job.resultJson;
+        try {
+            Object parsed=JSON.readValue(job.resultJson,Object.class);
+            if(parsed instanceof Map<?,?> priorResult) {
+                Map<String,Object> enriched=loadResultWithProtocolWarning((Map<String,Object>)priorResult,job);
+                job.resultJson=JSON.writeValueAsString(enriched);
+                store.update(job);
+            }
+        } catch(Exception ignored) {
+            // Preserve the original execution result if optional journal diagnostics cannot be projected.
+            job.resultJson=originalResultJson;
+        }
     }
     private static String lifecycleConsole(Job j,String type,Map<String,Object> payload) {
         String mode=executionMode(j==null?null:j.command);
@@ -3923,6 +4028,18 @@ final class ServerRuntime implements AutoCloseable {
                     int start=Math.min(offset,all.size()),end=Math.min(all.size(),start+limit);
                     out.put("items",all.subList(start,end));out.put("nextOffset",end<all.size()?end:null);
                     out.put("primaryReports",all.stream().filter(item->item instanceof Map<?,?> row&&Boolean.TRUE.equals(row.get("report"))).toList());
+                    Map<String,Map<String,Object>> categories=new LinkedHashMap<>();
+                    long itemBytes=0L;
+                    for(Object item:all)if(item instanceof Map<?,?> row) {
+                        String path=String.valueOf(row.get("path"));
+                        long size=row.get("size") instanceof Number number?Math.max(0L,number.longValue()):0L;
+                        itemBytes=size>Long.MAX_VALUE-itemBytes?Long.MAX_VALUE:itemBytes+size;
+                        String category=artifactCategory(path);
+                        Map<String,Object> tally=categories.computeIfAbsent(category,key->{Map<String,Object> value=new LinkedHashMap<>();value.put("count",0L);value.put("bytes",0L);return value;});
+                        tally.put("count",((Number)tally.get("count")).longValue()+1L);
+                        long current=((Number)tally.get("bytes")).longValue();tally.put("bytes",size>Long.MAX_VALUE-current?Long.MAX_VALUE:current+size);
+                    }
+                    out.put("categorySummary",categories);out.put("archiveItemsCount",all.size());out.put("archiveItemsBytes",itemBytes);
                     out.put("archiveStatus","READY");out.put("omissions",data.get("omissions"));out.put("complete",data.get("complete"));
                     if(data.get("diagnostics") instanceof List<?> notices&&!notices.isEmpty())out.put("omissionDiagnostics",notices);
                     out.put("archiveSizeBytes",archiveSize);
@@ -3936,6 +4053,19 @@ final class ServerRuntime implements AutoCloseable {
             out.put("downloadPath","archive.zip");return out;
         } finally {artifactLifecycle.readLock().unlock();artifactReadSlots.release();}
     }
+
+    private static String artifactCategory(String path) {
+        String lower=path.toLowerCase(java.util.Locale.ROOT);
+        if(lower.contains("/checkpoints/")||lower.startsWith("checkpoints/"))return "recoveryCheckpoints";
+        String leaf=lower.substring(lower.lastIndexOf('/')+1);
+        if(lower.contains("/details/")||lower.contains("/timeseries/")||leaf.startsWith("series-")||leaf.contains("metric"))return "metricsTimeSeries";
+        if(leaf.contains("summary")||leaf.contains("manifest")||lower.endsWith("/report/index.html"))return "summaryManifests";
+        if(lower.contains("/evidence/")||lower.contains("/samples/")||lower.contains("/events/")
+                ||lower.contains("/failures/")||lower.contains("/iterations/")||lower.contains("/executions/")
+                ||leaf.contains("iteration"))return "executionEvidence";
+        return "other";
+    }
+
     byte[] archiveEntry(String id,String requested) throws Exception {
         if(!ArtifactArchive.safePath(requested)||ArtifactArchive.MANIFEST.equalsIgnoreCase(requested))throw new IllegalArgumentException("Invalid archive entry path");
         try(ArtifactRead read=openArtifactArchive(id,false)) { return read.verified.read(requested); }
@@ -4160,7 +4290,83 @@ final class ServerRuntime implements AutoCloseable {
     }
     private static String replacePathPrefix(String value,String prefix,String logical){if(value.equals(prefix))return logical+":";String separator=java.io.File.separator;value=value.replace(prefix+separator,logical+":");if("\\".equals(separator))value=value.replace(prefix+"/",logical+":");else value=value.replace(prefix+"\\",logical+":");return value;}
     static String safeMessage(Exception e){String m=att.server.api.internal.DiagnosticSanitizer.redactAbsolutePaths(att.server.api.internal.DiagnosticSanitizer.redactText(e.getMessage()));return m.isEmpty()?"ATT Worker execution failed":m.length()>500?m.substring(0,500):m;}
-    JobEvents events(String id) throws Exception {if(!JOB_ID.matcher(id).matches()||store.get(id)==null)throw new NotFoundException();Job active=jobs.get(id);return active==null?new JobEvents(config.dataDir.resolve("jobs").resolve(id).resolve("events.jsonl"),config.maxEventsPerJob,eventCompactions):active.events;}
+    JobEvents events(String id) throws Exception {
+        Map<String,Object> storedJob=JOB_ID.matcher(id).matches()?store.get(id):null;
+        if(storedJob==null)throw new NotFoundException();
+        Job active=jobs.get(id);if(active!=null)return active.events;
+        Object stripe=terminalEventCacheStripes[Math.floorMod(id.hashCode(),terminalEventCacheStripes.length)];
+        synchronized(stripe) {
+            synchronized(terminalEventCacheLock) {
+                JobEvents cached=terminalEventCache.get(id);
+                if(cached!=null)return cached;
+            }
+            JobEvents loaded=new JobEvents(config.dataDir.resolve("jobs").resolve(id).resolve("events.jsonl"),
+                    config.maxEventsPerJob,config.maxEventJournalBytes,config.maxEventJournalMemoryBytes,eventCompactions,eventNotifications);
+            if(List.of("PASS","FAIL","ERROR","INVALID","CANCELLED").contains(storedJob.get("status"))) {
+                Map<String,Object> recoveredResult=new LinkedHashMap<>();
+                recoveredResult.put("jobId",id);
+                recoveredResult.put("status",storedJob.get("status"));
+                recoveredResult.put("exitCode",storedJob.get("exitCode"));
+                Object projectedResult=null;
+                if(storedJob.get("resultJson") instanceof String resultJson)
+                    try {projectedResult=publicJson(id,resultJson);}catch(Exception invalidStoredResult) { /* keep the durable status and exit code */ }
+                recoveredResult.put("result",projectedResult);
+                loaded.recoverMissingTerminalResult(recoveredResult);
+            }
+            long weight=loaded.cacheWeightBytes();
+            if(weight<=TERMINAL_EVENT_CACHE_MAX_WEIGHT) {
+                synchronized(terminalEventCacheLock) {
+                    JobEvents prior=terminalEventCache.put(id,loaded);
+                    if(prior!=null)terminalEventCacheWeight-=prior.cacheWeightBytes();
+                    terminalEventCacheWeight+=weight;
+                    while(terminalEventCache.size()>TERMINAL_EVENT_CACHE_MAX_ENTRIES
+                            ||terminalEventCacheWeight>TERMINAL_EVENT_CACHE_MAX_WEIGHT) {
+                        Map.Entry<String,JobEvents> eldest=terminalEventCache.entrySet().iterator().next();
+                        terminalEventCacheWeight-=eldest.getValue().cacheWeightBytes();
+                        terminalEventCache.remove(eldest.getKey());
+                    }
+                }
+            }
+            return loaded;
+        }
+    }
+
+    private Map<String,Object> eventJournalStatistics() {
+        long activeBytes=0L,retainedEvents=0L,retainedMemoryBytes=0L,attempts=0L,failures=0L,lastCompactionAgeMs=0L;
+        int active=0,degraded=0;
+        for(Job job:jobs.values()) {
+            Map<String,Object> metrics=job.events.metrics();
+            active++;
+            activeBytes+=((Number)metrics.get("journalBytes")).longValue();
+            retainedEvents+=((Number)metrics.get("retainedEventCount")).longValue();
+            retainedMemoryBytes+=((Number)metrics.get("retainedMemoryBytes")).longValue();
+            attempts+=((Number)metrics.get("compactionAttempts")).longValue();
+            failures+=((Number)metrics.get("compactionFailures")).longValue();
+            if(metrics.get("lastCompactionAgeMs") instanceof Number age)
+                lastCompactionAgeMs=Math.max(lastCompactionAgeMs,age.longValue());
+            if("DEGRADED".equals(metrics.get("journalPersistence")))degraded++;
+        }
+        Map<String,Object> result=new LinkedHashMap<>();
+        result.put("activeJobs",active);result.put("degradedActiveJobs",degraded);
+        result.put("activeJournalBytes",activeBytes);result.put("activeRetainedEvents",retainedEvents);
+        result.put("activeRetainedMemoryBytes",retainedMemoryBytes);
+        result.put("activeMemoryBudgetBytes",active*(long)config.maxEventJournalMemoryBytes);
+        result.put("activeMemoryOverBudgetBytes",Math.max(0L,retainedMemoryBytes-active*(long)config.maxEventJournalMemoryBytes));
+        result.put("activeCompactionAttempts",attempts);result.put("activeCompactionFailures",failures);
+        result.put("oldestActiveCompactionAgeMs",lastCompactionAgeMs);
+        result.put("maxJournalBytesPerJob",config.maxEventJournalBytes);
+        result.put("memoryBudgetBytesPerJob",config.maxEventJournalMemoryBytes);
+        long usable;
+        try{usable=Files.getFileStore(config.dataDir).getUsableSpace();}
+        catch(Exception unavailable){usable=-1L;}
+        result.put("storageUsableBytes",usable);
+        result.put("storageHeadroomLow",usable>=0L&&usable<JobEvents.MIN_STORAGE_HEADROOM_BYTES);
+        synchronized(terminalEventCacheLock) {
+            result.put("cachedTerminalJobs",terminalEventCache.size());
+            result.put("cachedTerminalWeightBytes",terminalEventCacheWeight);
+        }
+        return result;
+    }
     boolean terminal(String id) throws Exception {Job active=jobs.get(id);if(active!=null)return active.terminal();Map<String,Object> row=store.get(id);if(row==null)throw new NotFoundException();return List.of("PASS","FAIL","ERROR","INVALID","CANCELLED").contains(row.get("status"));}
     /** Validate bounded text artifacts without modifying any Engine/Worker-generated byte. */
     static byte[] approvedArtifactBytes(Path file) throws Exception {
@@ -4553,7 +4759,9 @@ final class ServerRuntime implements AutoCloseable {
         }
         // Worker/SSE producers are quiescent before artifact writers and journal compactions drain.
         artifactWriters.shutdown();terminateExecutor(artifactWriters,"artifact writers");
+        eventNotifications.shutdown();terminateExecutor(eventNotifications,"event notifications");
         eventCompactions.shutdown();terminateExecutor(eventCompactions,"event compactions");
+        synchronized(terminalEventCacheLock){terminalEventCache.clear();terminalEventCacheWeight=0L;}
         try {store.close();}catch(Exception failed){java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).log(java.util.logging.Level.WARNING,"ATT database cleanup failed",failed);}
     }
     static void terminateExecutor(java.util.concurrent.ExecutorService executor,String name) {
@@ -4581,6 +4789,17 @@ final class ServerRuntime implements AutoCloseable {
         void release(){if(released.compareAndSet(false,true)){admission.release();if(load!=null)load.release();}}
     }
     static final class QueueFullException extends RuntimeException {QueueFullException(String m){super(m);}}
+    private static final class JobProvenance {
+        final String scheduleId,scheduleOwner,executionPrincipal,submittedBy,triggeredBy;
+        JobProvenance(String scheduleId,String scheduleOwner,String executionPrincipal,String submittedBy,String triggeredBy) {
+            this.scheduleId=provenanceText(scheduleId,40);this.scheduleOwner=provenanceText(scheduleOwner,256);
+            this.executionPrincipal=provenanceText(executionPrincipal,256);this.submittedBy=provenanceText(submittedBy,256);this.triggeredBy=provenanceText(triggeredBy,256);
+        }
+        private static String provenanceText(String value,int max) {
+            if(value==null||value.isBlank()||value.length()>max||value.chars().anyMatch(Character::isISOControl))return null;
+            return value;
+        }
+    }
     static final class JobConflictException extends RuntimeException {final String code;JobConflictException(String code,String message){super(message);this.code=code;}}
     static final class NotFoundException extends RuntimeException {}
     static final class ReplayDraftExpiredException extends RuntimeException {}
@@ -4601,6 +4820,16 @@ final class ServerRuntime implements AutoCloseable {
         final List<Map<String,Object>> diagnostics;
         InspectionConfigurationException(List<Map<String,Object>> diagnostics){this.diagnostics=Collections.unmodifiableList(new ArrayList<>(diagnostics));}
         String summary(){Object summary=diagnostics.get(0).get("summary");return summary instanceof String?(String)summary:"Package configuration is invalid or incomplete.";}
+    }
+    static final class InspectionValidationException extends RuntimeException {
+        final String code;
+        final List<Map<String,Object>> diagnostics;
+        InspectionValidationException(String code,List<Map<String,Object>> diagnostics) {
+            super(diagnostics.isEmpty()?"Package inspection input or configuration is invalid.":String.valueOf(diagnostics.get(0).get("summary")));
+            this.code=code;
+            this.diagnostics=Collections.unmodifiableList(new ArrayList<>(diagnostics));
+        }
+        String summary(){return getMessage();}
     }
     static final class InspectionTimeoutException extends RuntimeException {}
     static final class InspectionResponseTooLargeException extends RuntimeException {}

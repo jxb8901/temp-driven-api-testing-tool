@@ -26,7 +26,7 @@ att [--local | --server <profile|url>] [-p <packageId>] [-e <profile>] \
 
 Validation 只讀：不執行 Tool、不發送 Load traffic、不連線探測 DB/MQ，也不修改 Config、Package 檔案或輸出。Human 輸出使用階層式 `PASS`/`FAIL`/`WARN`/`SKIP` 區段；`--format json` 會向 stdout 輸出單一 `att-validation/v1` report。Exit code：PASS 為 `0`、RUN/LOAD 功能失敗為 `1`、輸入或 validation 無效為 `2`、執行錯誤/取消為 `3`、Remote transport 或不可信結果為 `4`。持續性 Local Job 管理及背景提交不屬於此提案語法。
 
-常用 vNext option：`-p, --package`、`-e, --env`、`--format`、`--quiet`、`--verbose`、`--help` 和 `--version`。`--config <path>` 只適用 Local。RUN 選擇 option 包括 `--suite`、`--suite-dir`、`--case`（亦可用 `--case-id`）、`--tag`、`--exclude-tag`、`--all`、`--rerun-failed`、`--dry-run`（只適用於 Case/Suite RUN）、`--fail-fast`、`--run-id`，以及僅限 Local 的 `--output-dir`。Template、Flow 及 Tool RUN 會拒絕 `--dry-run`，並支援 `--input <path>`；Resource RUN 和 LOAD 可重複使用 `--set`。直接 LOAD 會拒絕 `--input`。LOAD 可使用 `--users` 或 `--arrival-rate`，並可設定 `--duration`、`--warmup`、`--ramp-up`、`--ramp-down`、`--think-time`、`--max-concurrent` 和 `--overload-policy`。`--users` 與 `--arrival-rate` 不能同時使用。未支援的 option 和無效組合會在提交工作或發送 traffic 前報錯。
+常用 vNext option：`-p, --package`、`-e, --env`、`--format`、`--quiet`、`--verbose`、`--help` 和 `--version`。`--config <path>` 只適用 Local。RUN 選擇 option 包括 `--suite`、`--suite-dir`、`--case`（亦可用 `--case-id`）、`--tag`、`--exclude-tag`、`--all`、`--rerun-failed`、`--dry-run`（只適用於 Case/Suite RUN）、`--fail-fast`、`--run-id`，以及僅限 Local 的 `--output-dir`。Template、Flow 及 Tool RUN 會拒絕 `--dry-run`，並支援 `--input <path>`；Resource RUN 和 LOAD 可重複使用 `--set`。直接 LOAD 會拒絕 `--input`。LOAD 可使用 `--users` 或 `--arrival-rate`，並可設定 `--ramp-up`、`--warmup`、`--duration`、`--ramp-down`、`--think-time`、`--max-concurrent` 和 `--overload-policy`。`--users` 與 `--arrival-rate` 不能同時使用。未支援的 option 和無效組合會在提交工作或發送 traffic 前報錯。
 
 ### 遷移既有命令
 

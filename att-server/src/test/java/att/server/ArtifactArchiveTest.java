@@ -10,6 +10,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -51,6 +52,46 @@ class ArtifactArchiveTest {
             byte[] extracted=ArtifactArchive.read(zip,path);
             assertArrayEquals(original,extracted,path);
             assertEquals(ArtifactArchive.sha256(original),manifestEntry(zip,path).get("sha256"),path);
+        }
+    }
+
+    @Test void configuredCompressionPreservesBytesAndFallsBackPerEntryAtTheRatioBound() throws Exception {
+        Path output=Files.createDirectory(temporary.resolve("compression-output"));
+        StringBuilder records=new StringBuilder();
+        for(int index=0;index<1500;index++)records.append("request_id=").append(index)
+                .append(" status=200 duration_ms=").append(index%97).append("\n");
+        StringBuilder noise=new StringBuilder();java.util.Random random=new java.util.Random(8128L);
+        for(int index=0;index<8192;index++)noise.append((char)(33+random.nextInt(90)));
+        Map<String,byte[]> payloads=Map.of("repetitive.log","x".repeat(100_000).getBytes(StandardCharsets.UTF_8),
+                "records.log",records.toString().getBytes(StandardCharsets.UTF_8),
+                "noise.log",noise.toString().getBytes(StandardCharsets.UTF_8),
+                "tiny.log","ok\n".getBytes(StandardCharsets.UTF_8));
+        for(var entry:payloads.entrySet())Files.write(output.resolve(entry.getKey()),entry.getValue());
+
+        for(String mode:List.of("deflate","auto")) {
+            Path archive=temporary.resolve(mode+"-compression.zip");
+            ArtifactMetricsRecorder recorder=new ArtifactMetricsRecorder(System.nanoTime(),1);
+            ArtifactMetricsRecorder.CURRENT.set(recorder);
+            try { ArtifactArchive.build(output,archive,null,new ServerConfig.ArchiveCompression(mode,3)); }
+            finally { ArtifactMetricsRecorder.CURRENT.remove(); }
+            assertEquals(mode,recorder.value.configuredCompressionMode);
+            assertTrue(recorder.value.compressionDurationMs>0.0d);
+            assertTrue(recorder.value.compressionFallbackCount>=1L);
+            assertTrue(recorder.value.compressionFallbackReasons.containsKey("ratio_limit"));
+            assertTrue(recorder.value.storedEntries>0L);
+            try(ZipFile zip=new ZipFile(archive.toFile())) {
+                for(var payload:payloads.entrySet()) {
+                    var entry=zip.getEntry(payload.getKey());assertNotNull(entry);
+                    assertTrue(payload.getValue().length<=Math.max(1L,entry.getCompressedSize())*200L);
+                    try(var input=zip.getInputStream(entry)) { assertArrayEquals(payload.getValue(),input.readAllBytes(),payload.getKey()); }
+                }
+                assertEquals(ZipEntry.STORED,zip.getEntry("repetitive.log").getMethod());
+                if("auto".equals(mode)) {
+                    assertEquals(ZipEntry.STORED,zip.getEntry("tiny.log").getMethod());
+                    assertEquals(ZipEntry.DEFLATED,zip.getEntry("records.log").getMethod());
+                }
+            }
+            assertTrue(ArtifactArchive.verify(archive,true).get("complete").equals(Boolean.TRUE));
         }
     }
 
@@ -309,26 +350,72 @@ class ArtifactArchiveTest {
         }
     }
 
-    @Test void loadArchiveRejectsMissingOrCorruptReportCommit() throws Exception {
+    @Test void incompleteOrCorruptLoadReportKeepsVerifiedRecoveryCheckpointAndOmitsFalseReport() throws Exception {
         Path missing=Files.createDirectory(temporary.resolve("missing-report-commit"));
         Files.createDirectories(missing.resolve("load/run/report"));
         Files.writeString(missing.resolve("load/run/report/index.html"),"<html>report</html>");
         Files.writeString(missing.resolve("load/run/load-summary.json"),"{\"report\":\"report/index.html\"}");
-        assertThrows(java.io.IOException.class,()->ArtifactArchive.build(missing,temporary.resolve("missing.zip")));
+        Path missingCheckpoint=writeCheckpoint(missing.resolve("load/run"),"run","aggregate",1);
+        Path missingZip=temporary.resolve("missing.zip");ArtifactArchive.build(missing,missingZip);
+        assertFalse(ArtifactArchive.verify(missingZip,true).get("complete").equals(Boolean.TRUE));
+        assertArrayEquals(Files.readAllBytes(missingCheckpoint),ArtifactArchive.read(missingZip,
+                "load/run/checkpoints/aggregate/checkpoint-00000000000000000001.json"));
+        assertThrows(java.io.FileNotFoundException.class,()->ArtifactArchive.read(missingZip,"load/run/load-summary.json"));
 
         Path corrupt=Files.createDirectory(temporary.resolve("corrupt-report-commit"));
         writeCanonicalLoadReport(corrupt.resolve("load/run"),"run");
+        Path corruptCheckpoint=writeCheckpoint(corrupt.resolve("load/run"),"run","aggregate",1);
         Files.writeString(corrupt.resolve("load/run/report/index.html"),"<html>tampered</html>");
-        assertThrows(java.io.IOException.class,()->ArtifactArchive.build(corrupt,temporary.resolve("corrupt.zip")));
-        assertFalse(Files.exists(temporary.resolve("missing.zip")));
-        assertFalse(Files.exists(temporary.resolve("corrupt.zip")));
+        Path corruptZip=temporary.resolve("corrupt.zip");ArtifactArchive.build(corrupt,corruptZip);
+        assertFalse(ArtifactArchive.verify(corruptZip,true).get("complete").equals(Boolean.TRUE));
+        assertArrayEquals(Files.readAllBytes(corruptCheckpoint),ArtifactArchive.read(corruptZip,
+                "load/run/checkpoints/aggregate/checkpoint-00000000000000000001.json"));
+        assertThrows(java.io.FileNotFoundException.class,()->ArtifactArchive.read(corruptZip,"load/run/load-summary.json"));
+    }
+
+    @Test void verifiedSuccessfulReportExcludesCheckpointsWithoutChangingArchiveCompleteness() throws Exception {
+        Path output=Files.createDirectory(temporary.resolve("complete-load-output"));
+        Path run=output.resolve("load/run");writeCanonicalLoadReport(run,"run","PASS","NOT_MET");
+        Path checkpoint1=writeCheckpoint(run,"run","aggregate",1);
+        Path checkpoint2=writeCheckpoint(run,"run","aggregate",2);
+        ArtifactMetricsRecorder recorder=new ArtifactMetricsRecorder(System.nanoTime(),1);ArtifactMetricsRecorder.CURRENT.set(recorder);
+        Path archive=temporary.resolve("complete-load.zip");
+        try { ArtifactArchive.build(output,archive); } finally { ArtifactMetricsRecorder.CURRENT.remove(); }
+        assertEquals(Boolean.TRUE,ArtifactArchive.verify(archive,true).get("complete"));
+        assertThrows(java.io.FileNotFoundException.class,()->ArtifactArchive.read(archive,
+                "load/run/checkpoints/aggregate/checkpoint-00000000000000000001.json"));
+        assertEquals(2L,recorder.value.intentionallyExcludedRecoveryCheckpointFiles);
+        assertEquals(Files.size(checkpoint1)+Files.size(checkpoint2),recorder.value.intentionallyExcludedRecoveryCheckpointBytes);
+    }
+
+    @Test void errorAndCancelledLoadReportsRetainTwoVerifiedGenerationsPerWorkloadScope() throws Exception {
+        for(String executionStatus:List.of("FAIL","ERROR","CANCELLED")) {
+            String folder=executionStatus.toLowerCase(java.util.Locale.ROOT);
+            Path output=Files.createDirectory(temporary.resolve(folder+"-load-output"));
+            Path run=output.resolve("load/run");writeCanonicalLoadReport(run,"run",executionStatus,"NOT_EVALUATED");
+            for(String scope:List.of("aggregate","workload-Blue"))for(int sequence=1;sequence<=3;sequence++)
+                writeCheckpoint(run,"run",scope,sequence);
+            Path archive=temporary.resolve(folder+"-load.zip");ArtifactArchive.build(output,archive);
+            Map<String,Object> manifest=ArtifactArchive.verify(archive,true);
+            assertEquals(Boolean.TRUE,manifest.get("complete"));
+            for(String scope:List.of("aggregate","workload-Blue")) {
+                String directory="aggregate".equals(scope)?"aggregate":checkpointWorkloadDirectory(scope);
+                assertThrows(java.io.FileNotFoundException.class,()->ArtifactArchive.read(archive,"load/run/checkpoints/"+directory+"/checkpoint-00000000000000000001.json"));
+                for(int sequence=2;sequence<=3;sequence++)assertNotNull(ArtifactArchive.read(archive,
+                        "load/run/checkpoints/"+directory+"/checkpoint-"+String.format(java.util.Locale.ROOT,"%020d",sequence)+".json"));
+            }
+        }
     }
 
     private static void writeCanonicalLoadReport(Path run,String runId) throws Exception {
+        writeCanonicalLoadReport(run,runId,"PASS","NOT_EVALUATED");
+    }
+
+    private static void writeCanonicalLoadReport(Path run,String runId,String executionStatus,String performanceVerdict) throws Exception {
         Files.createDirectories(run.resolve("report"));
         Files.createDirectories(run.resolve("details/v1"));
         Files.writeString(run.resolve("report/index.html"),"<a href=\"../load-summary.json\">Summary</a>");
-        Files.writeString(run.resolve("load-summary.json"),"{\"runId\":\"run\",\"durationMs\":1000,\"executionStatus\":\"PASS\",\"performanceVerdict\":\"NOT_EVALUATED\",\"report\":\"report/index.html\",\"reportManifest\":\"load-report-manifest.json\",\"businessValue\":\"keep-me\"}");
+        Files.writeString(run.resolve("load-summary.json"),"{\"runId\":\""+runId+"\",\"durationMs\":1000,\"executionStatus\":\""+executionStatus+"\",\"performanceVerdict\":\""+performanceVerdict+"\",\"report\":\"report/index.html\",\"reportManifest\":\"load-report-manifest.json\",\"businessValue\":\"keep-me\"}");
         Files.writeString(run.resolve("load-summary.yaml"),"report: report/index.html\n");
         Files.writeString(run.resolve("details/v1/manifest.json"),"{\"complete\":true}");
         List<Map<String,Object>> files=new ArrayList<>();
@@ -339,11 +426,29 @@ class ArtifactArchiveTest {
         Map<String,Object> manifest=new LinkedHashMap<>();
         manifest.put("schemaVersion",ArtifactArchive.LOAD_REPORT_MANIFEST_SCHEMA);
         manifest.put("state","COMPLETE");manifest.put("complete",true);manifest.put("runId",runId);
-        manifest.put("executionStatus","PASS");manifest.put("performanceVerdict","NOT_EVALUATED");
+        manifest.put("executionStatus",executionStatus);manifest.put("performanceVerdict",performanceVerdict);
         manifest.put("startedAt","2026-10-26T00:00:00Z");manifest.put("endedAt","2026-10-26T00:00:01Z");
         manifest.put("durationMs",1000L);manifest.put("files",files);
         Files.write(run.resolve(ArtifactArchive.LOAD_REPORT_MANIFEST),
                 new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsBytes(manifest));
+    }
+
+    private static Path writeCheckpoint(Path run,String runId,String scope,long sequence) throws Exception {
+        String directory="aggregate".equals(scope)?"aggregate":checkpointWorkloadDirectory(scope);
+        Path path=run.resolve("checkpoints").resolve(directory).resolve("checkpoint-"+String.format(java.util.Locale.ROOT,"%020d",sequence)+".json");
+        Files.createDirectories(path.getParent());
+        Map<String,Object> checkpoint=new LinkedHashMap<>();checkpoint.put("schemaVersion","att-load-metrics-checkpoint/v2");
+        checkpoint.put("state",sequence==3?"FINAL_CHECKPOINT":"CHECKPOINT");checkpoint.put("runId",runId);checkpoint.put("scope",scope);
+        checkpoint.put("sequence",sequence);checkpoint.put("capturedAt","2026-10-28T01:00:00Z");checkpoint.put("finalized",sequence==3);
+        checkpoint.put("payload",Map.of("metrics",Map.of("completed",sequence)));
+        com.fasterxml.jackson.databind.ObjectMapper mapper=new com.fasterxml.jackson.databind.ObjectMapper();
+        checkpoint.put("integritySha256",ArtifactArchive.sha256(mapper.writeValueAsBytes(checkpoint)));
+        Files.write(path,mapper.writeValueAsBytes(checkpoint));return path;
+    }
+
+    private static String checkpointWorkloadDirectory(String workloadId) throws Exception {
+        return "workload-"+workloadId.replaceAll("[^A-Za-z0-9_.-]","_")+"-"+
+                ArtifactArchive.sha256(workloadId.getBytes(StandardCharsets.UTF_8));
     }
 
     @Test void archiveWriteFailureLeavesRawOutputAndNoPublishedOrStagingArchive() throws Exception {

@@ -20,6 +20,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -89,6 +90,320 @@ class FixedArrivalRateSchedulerTest {
         assertEquals(3000L, FixedArrivalRateScheduler.plannedDue(scenario, 0L, 201L));
         assertTrue(FixedArrivalRateScheduler.plannedDue(scenario, 0L, 1L)
                 < FixedArrivalRateScheduler.plannedDue(scenario, 0L, 2L));
+    }
+
+    @Test void rampUpWarmupSteadyRampDownScheduleExactExampleCounts() {
+        LoadScenario scenario = scenario(100.0, "100/s", 60_000L, 60_000L, 180_000L, 60_000L, 1000);
+        assertEquals(3_000.0, FixedArrivalRateScheduler.cumulativeArrivals(scenario, 60_000L), 0.000001);
+        assertEquals(9_000.0, FixedArrivalRateScheduler.cumulativeArrivals(scenario, 120_000L), 0.000001);
+        assertEquals(27_000.0, FixedArrivalRateScheduler.cumulativeArrivals(scenario, 300_000L), 0.000001);
+        assertEquals(30_000.0, FixedArrivalRateScheduler.cumulativeArrivals(scenario, 360_000L), 0.000001);
+        assertEquals(30_000L, FixedArrivalRateScheduler.arrivalsBeforeDeadline(scenario));
+        assertEquals(LoadPhase.RAMP_UP, LoadPhase.at(scenario, 0L));
+        assertEquals(LoadPhase.WARMUP, LoadPhase.at(scenario, 60_000L));
+        assertEquals(LoadPhase.STEADY, LoadPhase.at(scenario, 120_000L));
+        assertEquals(LoadPhase.RAMP_DOWN, LoadPhase.at(scenario, 300_000L));
+        assertTrue(FixedArrivalRateScheduler.plannedDue(scenario, 0L, 30_000L) < 360_000L);
+        assertTrue(FixedArrivalRateScheduler.plannedDue(scenario, 0L, 30_001L) >= 360_000L);
+    }
+
+    @Test
+    void fourHourMinuteRateReproducerExcludesTheExactGenerationDeadline() throws Exception {
+        // The configured minute rate is exact, but converting it to a double per-second rate
+        // produces 0.9600000000000001 and used to ceil the final area to 13,825 arrivals.
+        LoadScenario scenario = scenario(57.6 / 60.0, "57.6/m", 0L, 0L, 14_400_000L, 0L, 16,
+                Collections.<String, Object>singletonMap("achievedArrivalRate", ">= 100%"));
+        long generationEnd = LoadPhase.totalMs(scenario);
+        assertEquals(13_824.0, FixedArrivalRateScheduler.cumulativeArrivals(scenario, generationEnd), 0.0);
+        assertEquals(13_824L, FixedArrivalRateScheduler.arrivalsBeforeDeadline(scenario));
+        assertEquals(13_824L, FixedArrivalRateScheduler.arrivalsDueAt(scenario, generationEnd));
+        assertEquals(generationEnd, FixedArrivalRateScheduler.plannedDue(scenario, 0L, 13_825L));
+        for (long sequence = 1L; sequence <= 13_824L; sequence++) {
+            assertTrue(FixedArrivalRateScheduler.plannedDue(scenario, 0L, sequence) < generationEnd,
+                    "valid arrival " + sequence + " must be before the exclusive end");
+        }
+
+        List<LoadEvent> events = Collections.synchronizedList(new ArrayList<LoadEvent>());
+        LoadRunResult result = new FixedArrivalRateScheduler(scenario, request -> {
+            assertTrue("WARMUP".equals(request.phase()) || "RAMP_UP".equals(request.phase())
+                    || "STEADY".equals(request.phase()) || "RAMP_DOWN".equals(request.phase()));
+            return result(request.iterationId());
+        }, "four-hour-boundary", events::add, new FakeTiming().timing()).run();
+
+        assertEquals(ResultStatus.PASS, result.status());
+        assertEquals("PASS", result.executionStatus());
+        assertEquals(0L, result.metrics().longValue("failure"));
+        assertEquals(0L, result.metrics().longValue("runtimeError"));
+        assertEquals(13_824L, result.metrics().longValue("scheduled"));
+        assertEquals(13_824L, result.metrics().longValue("started"));
+        assertEquals(13_824L, result.metrics().longValue("completed"));
+        assertEquals(0L, result.metrics().longValue("dropped"));
+        assertEquals(0L, result.metrics().longValue("currentInFlight"));
+        result = result.withThresholds(new LoadThresholdEvaluator().evaluate(scenario, result.metrics()));
+        assertEquals(ResultStatus.PASS, result.status());
+        assertEquals("PASS", result.executionStatus());
+        assertEquals("MET", result.performanceVerdict());
+        assertFalse(events.stream().anyMatch(event -> event.phase() == null || "COMPLETE".equals(event.phase())
+                || event.scheduledAtEpochMs() >= generationEnd));
+    }
+
+    @Test
+    void halfOpenArrivalCountsStayConsistentAcrossRatesPhasesAndWorkloadViews() {
+        List<LoadScenario> scenarios = new ArrayList<LoadScenario>();
+        scenarios.add(scenario(0.1, "0.1/s", 0L, 0L, 10_001L, 0L, 4));
+        scenarios.add(scenario(0.96, "0.96/s", 0L, 0L, 14_400_000L, 0L, 4));
+        scenarios.add(scenario(1.0, "1/s", 0L, 0L, 1_000L, 0L, 4));
+        scenarios.add(scenario(1.0, "1/s", 0L, 0L, 1_001L, 0L, 4));
+        scenarios.add(scenario(1.5, "1.5/s", 0L, 0L, 1_001L, 0L, 4));
+        scenarios.add(scenario(10.1, "10.1/s", 3L, 101L, 997L, 1L, 4));
+        scenarios.add(scenario(7.3, "7.3/s", 17L, 113L, 89L, 71L, 4));
+
+        LoadWorkload first = arrivalWorkload("first", 57.6 / 60.0, "57.6/m", 14_400_000L);
+        LoadWorkload second = arrivalWorkload("second", 10.1, "10.1/s", 10_001L);
+        LoadScenario multi = new LoadScenario(Paths.get("multi-boundary.yaml"), "att-load/v1.9",
+                Arrays.asList(first, second), null, Collections.<String, Object>emptyMap(),
+                Collections.<String, Object>emptyMap());
+        for (LoadWorkload workload : multi.workloads()) scenarios.add(multi.forWorkload(workload));
+
+        for (LoadScenario scenario : scenarios) {
+            long end = LoadPhase.totalMs(scenario);
+            long count = FixedArrivalRateScheduler.arrivalsBeforeDeadline(scenario);
+            assertEquals(count, FixedArrivalRateScheduler.arrivalsDueAt(scenario, end), scenario.arrivalRate());
+            assertEquals(count, FixedArrivalRateScheduler.arrivalsDueAt(scenario, end + 1L), scenario.arrivalRate());
+            for (long sequence = 1L; sequence <= count; sequence++) {
+                long due = FixedArrivalRateScheduler.plannedDue(scenario, 500L, sequence) - 500L;
+                assertTrue(due >= 0L && due < end, scenario.arrivalRate() + " sequence " + sequence);
+                assertTrue(LoadPhase.at(scenario, due) != LoadPhase.COMPLETE,
+                        scenario.arrivalRate() + " sequence " + sequence);
+                if (due > 0L) assertTrue(FixedArrivalRateScheduler.arrivalsDueAt(scenario, due - 1L) < sequence,
+                        "inverse must not move a valid arrival earlier than its cumulative threshold");
+            }
+            if (count < Long.MAX_VALUE)
+                assertTrue(FixedArrivalRateScheduler.plannedDue(scenario, 0L, count + 1L) >= end,
+                        "next arrival must be at or after the exclusive end for " + scenario.arrivalRate());
+        }
+    }
+
+    @Test
+    void admittedArrivalCanCompleteDuringDrainWithoutASecondAdmission() throws Exception {
+        LoadScenario scenario = scenario(1.0, "1/s", 0L, 0L, 1_000L, 0L, 1);
+        AtomicLong now = new AtomicLong(10_000L);
+        CountDownLatch entered = new CountDownLatch(1);
+        CountDownLatch crossedDeadline = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        LoadSchedulerTiming timing = new LoadSchedulerTiming(now::get, millis -> {
+            now.addAndGet(millis + 5L);
+            crossedDeadline.countDown();
+        });
+        List<LoadEvent> events = Collections.synchronizedList(new ArrayList<LoadEvent>());
+        FixedArrivalRateScheduler scheduler = new FixedArrivalRateScheduler(scenario, request -> {
+            entered.countDown();
+            try { release.await(); }
+            catch (InterruptedException interrupted) { Thread.currentThread().interrupt(); throw new IllegalStateException(interrupted); }
+            return result(request.iterationId());
+        }, "drain-boundary", events::add, timing);
+        ExecutorService control = Executors.newSingleThreadExecutor();
+        Future<LoadRunResult> future = control.submit(scheduler::run);
+        try {
+            assertTrue(entered.await(2L, TimeUnit.SECONDS));
+            assertTrue(crossedDeadline.await(2L, TimeUnit.SECONDS));
+            release.countDown();
+            LoadRunResult result = future.get(5L, TimeUnit.SECONDS);
+            assertEquals(1L, result.metrics().longValue("scheduled"));
+            assertEquals(1L, result.metrics().longValue("started"));
+            assertEquals(1L, result.metrics().longValue("completed"));
+            assertEquals(0L, result.metrics().longValue("runtimeError"));
+            assertEquals(0L, result.metrics().longValue("currentInFlight"));
+            LoadEvent completion = events.stream().filter(LoadEvent::completed).findFirst().orElseThrow(AssertionError::new);
+            assertEquals("STEADY", completion.phase());
+            assertTrue(completion.scheduledAtEpochMs() < 11_000L);
+            assertTrue(completion.completedAtEpochMs() > 11_000L);
+            @SuppressWarnings("unchecked") Map<String, Object> windowMetrics =
+                    (Map<String, Object>) result.metrics().value("windowMetrics");
+            @SuppressWarnings("unchecked") Map<String, Object> windows = (Map<String, Object>) windowMetrics.get("windows");
+            @SuppressWarnings("unchecked") Map<String, Object> drain = (Map<String, Object>) windows.get("DRAIN");
+            assertEquals(0L, drain.get("scheduled"));
+            assertEquals(1L, drain.get("completed"));
+            assertEquals(1L, drain.get("successful"));
+        } finally {
+            release.countDown();
+            scheduler.close();
+            control.shutdownNow();
+            control.awaitTermination(5L, TimeUnit.SECONDS);
+        }
+    }
+
+    @Test
+    void stalledSchedulerRejectsOverdueAdmissionsAndDrainsAlreadyStartedWork() throws Exception {
+        LoadScenario scenario = scenario(10.0, "10/s", 0L, 0L, 1_000L, 0L, 2);
+        AtomicLong now = new AtomicLong(10_000L);
+        AtomicInteger submitCalls = new AtomicInteger();
+        CountDownLatch firstEntered = new CountDownLatch(1);
+        CountDownLatch deadlineCrossed = new CountDownLatch(1);
+        CountDownLatch releaseFirst = new CountDownLatch(1);
+        List<IterationRequest> requests = Collections.synchronizedList(new ArrayList<IterationRequest>());
+        List<LoadEvent> events = Collections.synchronizedList(new ArrayList<LoadEvent>());
+        Runnable beforeSubmit = () -> {
+            if (submitCalls.incrementAndGet() != 2) return;
+            try {
+                if (!firstEntered.await(2L, TimeUnit.SECONDS)) throw new IllegalStateException("first arrival did not start");
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                throw new IllegalStateException(interrupted);
+            }
+            now.set(11_500L);
+            deadlineCrossed.countDown();
+        };
+        LoadSchedulerTiming timing = new LoadSchedulerTiming(now::get, millis -> {
+            if (millis > 0L) now.addAndGet(millis);
+            Thread.yield();
+        });
+        FixedArrivalRateScheduler scheduler = new FixedArrivalRateScheduler(scenario, request -> {
+            requests.add(request);
+            firstEntered.countDown();
+            try { releaseFirst.await(); }
+            catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                throw new IllegalStateException(interrupted);
+            }
+            return result(request.iterationId());
+        }, "stalled-arrival-deadline", events::add, timing, beforeSubmit);
+        ExecutorService control = Executors.newSingleThreadExecutor();
+        Future<LoadRunResult> future = control.submit(scheduler::run);
+        try {
+            assertTrue(firstEntered.await(2L, TimeUnit.SECONDS));
+            assertTrue(deadlineCrossed.await(2L, TimeUnit.SECONDS));
+            releaseFirst.countDown();
+            LoadRunResult result = future.get(5L, TimeUnit.SECONDS);
+
+            assertEquals(10L, result.metrics().longValue("scheduled"));
+            assertEquals(1L, result.metrics().longValue("started"));
+            assertEquals(1L, result.metrics().longValue("completed"));
+            assertEquals(9L, result.metrics().longValue("dropped"));
+            assertEquals(0L, result.metrics().longValue("runtimeError"));
+            assertEquals(0L, result.metrics().longValue("currentInFlight"));
+            assertEquals(1, requests.size(), "no overdue request reaches an iteration worker");
+            assertTrue(events.stream().filter(LoadEvent::started)
+                    .allMatch(event -> event.startedAtEpochMs() < 11_000L));
+            assertTrue(events.stream().filter(LoadEvent::dropped)
+                    .allMatch(event -> "GENERATION_DEADLINE_EXPIRED".equals(event.errorType())
+                            && event.scheduledAtEpochMs() < 11_000L));
+            @SuppressWarnings("unchecked") Map<String, Object> classifications =
+                    (Map<String, Object>) result.metrics().value("dropClassifications");
+            assertEquals(9L, ((Number) classifications.get("GENERATION_DEADLINE_EXPIRED")).longValue());
+            LoadEvent completion = events.stream().filter(LoadEvent::completed).findFirst().orElseThrow(AssertionError::new);
+            assertTrue(completion.scheduledAtEpochMs() < 11_000L);
+            assertTrue(completion.completedAtEpochMs() > 11_000L,
+                    "the iteration admitted before the deadline must remain eligible to finish during DRAIN");
+        } finally {
+            releaseFirst.countDown();
+            scheduler.close();
+            control.shutdownNow();
+            control.awaitTermination(5L, TimeUnit.SECONDS);
+        }
+    }
+
+    @Test
+    void queuedArrivalAdmittedBeforeDeadlineRunsAndCompletesDuringDrain() throws Exception {
+        LoadScenario scenario = scenario(10.0, "10/s", 0L, 0L, 250L, 0L, 2);
+        long generationDeadline = 10_250L;
+        AtomicLong now = new AtomicLong(10_000L);
+        AtomicInteger submitCalls = new AtomicInteger();
+        AtomicInteger workerEnqueues = new AtomicInteger();
+        AtomicInteger postDeadlineEnqueues = new AtomicInteger();
+        CountDownLatch firstStarted = new CountDownLatch(1);
+        CountDownLatch secondSubmitHook = new CountDownLatch(1);
+        CountDownLatch deadlineReached = new CountDownLatch(1);
+        CountDownLatch resumeScheduler = new CountDownLatch(1);
+        CountDownLatch releaseFirst = new CountDownLatch(1);
+        CountDownLatch secondStarted = new CountDownLatch(1);
+        List<IterationRequest> requests = Collections.synchronizedList(new ArrayList<IterationRequest>());
+        List<LoadEvent> events = Collections.synchronizedList(new ArrayList<LoadEvent>());
+        LoadSchedulerTiming timing = new LoadSchedulerTiming(now::get, millis -> {
+            if (millis > 0L) now.addAndGet(millis);
+            if (now.get() >= generationDeadline) {
+                deadlineReached.countDown();
+                resumeScheduler.await();
+            }
+            Thread.yield();
+        });
+        Runnable beforeSubmit = () -> {
+            if (submitCalls.incrementAndGet() != 2) return;
+            try {
+                if (!firstStarted.await(2L, TimeUnit.SECONDS)) throw new IllegalStateException("first arrival did not start");
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                throw new IllegalStateException(interrupted);
+            }
+            secondSubmitHook.countDown();
+        };
+        ThreadPoolExecutor sharedWorkers = new ThreadPoolExecutor(1, 1, 0L, TimeUnit.MILLISECONDS,
+                new ArrayBlockingQueue<Runnable>(2), runnable -> new Thread(runnable, "queued-arrival-drain-test")) {
+            @Override public void execute(Runnable command) {
+                workerEnqueues.incrementAndGet();
+                if (now.get() >= generationDeadline) postDeadlineEnqueues.incrementAndGet();
+                super.execute(command);
+            }
+        };
+        FixedArrivalRateScheduler scheduler = new FixedArrivalRateScheduler(scenario, request -> {
+            requests.add(request);
+            if (request.iteration() == 1L) {
+                firstStarted.countDown();
+                try { releaseFirst.await(); }
+                catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    throw new IllegalStateException(interrupted);
+                }
+            } else if (request.iteration() == 2L) secondStarted.countDown();
+            return result(request.iterationId());
+        }, "queued-arrival-drain", events::add, timing, beforeSubmit);
+        scheduler.useSharedWorkers(sharedWorkers);
+        ExecutorService control = Executors.newSingleThreadExecutor();
+        Future<LoadRunResult> future = control.submit(scheduler::run);
+        try {
+            assertTrue(firstStarted.await(2L, TimeUnit.SECONDS));
+            assertTrue(secondSubmitHook.await(2L, TimeUnit.SECONDS));
+            assertTrue(deadlineReached.await(2L, TimeUnit.SECONDS));
+            assertEquals(1, sharedWorkers.getQueue().size(), "the second arrival was accepted before the deadline and queued");
+            assertEquals(2, workerEnqueues.get());
+            assertEquals(0, postDeadlineEnqueues.get(), "the scheduler must not enqueue new work after generation ends");
+
+            releaseFirst.countDown();
+            assertTrue(secondStarted.await(2L, TimeUnit.SECONDS), "the queued arrival must start during DRAIN");
+            resumeScheduler.countDown();
+            LoadRunResult result = future.get(5L, TimeUnit.SECONDS);
+
+            assertEquals(3L, result.metrics().longValue("scheduled"));
+            assertEquals(2L, result.metrics().longValue("started"));
+            assertEquals(2L, result.metrics().longValue("completed"));
+            assertEquals(1L, result.metrics().longValue("dropped"));
+            assertEquals(0L, result.metrics().longValue("runtimeError"));
+            assertEquals(0L, result.metrics().longValue("currentInFlight"));
+            assertEquals(2, requests.size(), "both pre-deadline admissions must reach the iteration runner");
+            LoadEvent queuedStart = events.stream().filter(LoadEvent::started)
+                    .filter(event -> event.sequence() == 2L).findFirst().orElseThrow(AssertionError::new);
+            assertTrue(queuedStart.startedAtEpochMs() >= generationDeadline);
+            LoadEvent queuedCompletion = events.stream().filter(LoadEvent::completed)
+                    .filter(event -> event.sequence() == 2L).findFirst().orElseThrow(AssertionError::new);
+            assertTrue(queuedCompletion.scheduledAtEpochMs() < generationDeadline);
+            assertTrue(queuedCompletion.completedAtEpochMs() >= generationDeadline);
+            @SuppressWarnings("unchecked") Map<String, Object> windowMetrics =
+                    (Map<String, Object>) result.metrics().value("windowMetrics");
+            @SuppressWarnings("unchecked") Map<String, Object> windows = (Map<String, Object>) windowMetrics.get("windows");
+            @SuppressWarnings("unchecked") Map<String, Object> drain = (Map<String, Object>) windows.get("DRAIN");
+            assertEquals(0L, drain.get("scheduled"));
+            assertEquals(2L, drain.get("completed"));
+            assertEquals(2L, drain.get("successful"));
+            assertFalse(sharedWorkers.isShutdown(), "the child scheduler must not shut down the coordinator's pool");
+        } finally {
+            releaseFirst.countDown();
+            resumeScheduler.countDown();
+            scheduler.close();
+            control.shutdownNow();
+            control.awaitTermination(5L, TimeUnit.SECONDS);
+            sharedWorkers.shutdownNow();
+            sharedWorkers.awaitTermination(5L, TimeUnit.SECONDS);
+        }
     }
 
     @Test
@@ -389,11 +704,30 @@ class FixedArrivalRateSchedulerTest {
 
     private static LoadScenario scenario(double rate, long warmupMs, long rampUpMs, long durationMs,
                                          long rampDownMs, int maxConcurrent) {
+        return scenario(rate, rate + "/s", warmupMs, rampUpMs, durationMs, rampDownMs, maxConcurrent);
+    }
+
+    private static LoadScenario scenario(double rate, String rateText, long warmupMs, long rampUpMs, long durationMs,
+                                         long rampDownMs, int maxConcurrent) {
+        return scenario(rate, rateText, warmupMs, rampUpMs, durationMs, rampDownMs, maxConcurrent,
+                Collections.<String, Object>emptyMap());
+    }
+
+    private static LoadScenario scenario(double rate, String rateText, long warmupMs, long rampUpMs, long durationMs,
+                                         long rampDownMs, int maxConcurrent, Map<String, Object> thresholds) {
         return new LoadScenario(Paths.get("issue-26.yaml"), "flow", "common.compose.v1",
                 Collections.emptyMap(), Collections.<String, Object>singletonMap("source", "issue-26"),
-                LoadScenario.Model.ARRIVAL_RATE, 0, rate, rate + "/s", Duration.ofMillis(warmupMs),
+                LoadScenario.Model.ARRIVAL_RATE, 0, rate, rateText, Duration.ofMillis(warmupMs),
                 Duration.ofMillis(rampUpMs), Duration.ofMillis(durationMs), Duration.ofMillis(rampDownMs),
-                Duration.ZERO, maxConcurrent, "drop", Collections.emptyMap(), Collections.emptyMap());
+                Duration.ZERO, maxConcurrent, "drop", thresholds, Collections.emptyMap());
+    }
+
+    private static LoadWorkload arrivalWorkload(String id, double rate, String rateText, long durationMs) {
+        return new LoadWorkload(id, "flow", "common.compose.v1", Collections.<String, Object>emptyMap(),
+                Collections.<String, Object>emptyMap(), Collections.<String, Object>emptyMap(),
+                LoadScenario.Model.ARRIVAL_RATE, 0, rate, rateText, Duration.ZERO, Duration.ZERO,
+                Duration.ofMillis(durationMs), Duration.ZERO, ThinkTimePolicy.fixed(Duration.ZERO), 4, "drop",
+                Collections.<String, Object>emptyMap());
     }
 
     private static IterationResult result(String iterationId) {

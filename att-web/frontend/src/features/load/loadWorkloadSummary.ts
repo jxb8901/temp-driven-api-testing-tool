@@ -65,8 +65,8 @@ export function plannedWorkloadDuration(milliseconds?: number): string {
 
 export function workloadPhaseSummary(workload: LoadWorkloadIdentity): string {
   return [
-    workload.warmup != null && `Warmup ${workload.warmup}`,
     workload.rampUp != null && `Ramp-up ${workload.rampUp}`,
+    workload.warmup != null && `Warmup ${workload.warmup}`,
     `Steady ${workload.duration || 'Not available'}`,
     workload.rampDown != null && `Ramp-down ${workload.rampDown}`,
   ].filter((value): value is string => typeof value === 'string').join(' · ');

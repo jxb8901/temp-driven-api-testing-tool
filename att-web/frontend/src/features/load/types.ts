@@ -183,15 +183,21 @@ export interface LoadCheckpointInterval {
 }
 export interface JobsQuery {
   offset?: number; limit?: number; principal?: string; principalMode?: string; packageId?: string; executionType?: string;
+  submissionSource?: 'manual' | 'scheduled';
+  executionPrincipal?: string; executionPrincipalMode?: 'all' | 'mine' | 'text'; executionPrincipalExact?: boolean;
+  scheduleOwner?: string; scheduleOwnerMode?: 'all' | 'mine' | 'text'; scheduleOwnerExact?: boolean;
+  triggeredBy?: string; triggeredByMode?: 'all' | 'mine' | 'text'; triggeredByExact?: boolean;
   status?: string; from?: string; to?: string; search?: string; sort?: string; deletion?: string; pinnedOnly?: boolean; groupBy?: string; signal?: AbortSignal;
 }
 export interface JobsQueryResult {
   items: JobSummary[]; total: number; offset: number; limit: number; nextOffset?: number | null;
   groups: Array<{ packageId: string; environment: string; targetGroup: string; total: number; lastCreatedAt: string; statuses: Record<string,number> }>;
-  principalSuggestions: string[]; packageSuggestions: string[];
+  principalSuggestions: string[]; executionPrincipalSuggestions?: string[]; scheduleOwnerSuggestions?: string[]; triggeredBySuggestions?: string[]; packageSuggestions: string[];
 }
 export interface JobSummary {
   scheduled?: boolean; targetIdentity?: TargetIdentity; targetGroup?: string; deletionState?: string | null;
+  submissionSource?: 'manual' | 'scheduled' | string; scheduleId?: string | null; originatingScheduleId?: string | null; scheduleAvailable?: boolean;
+  scheduleOwner?: string | null; executionPrincipal?: string | null; submittedBy?: string | null; triggeredBy?: string | null;
   rerunOfJobId?: string;
   pinned?: boolean;
   pinnedAt?: string | null;
@@ -268,10 +274,26 @@ export interface ArtifactArchiveMetrics {
   includedBytes?: number | null;
   zipBytes?: number | null;
   compressionRatio?: number | null;
+  configuredCompressionMode?: string | null;
+  effectiveCompressionMode?: string | null;
+  compressionLevel?: number | null;
+  compressionDurationMs?: number | null;
+  storedEntries?: number | null;
+  deflatedEntries?: number | null;
+  compressedPayloadBytes?: number | null;
+  archiveOverheadBytes?: number | null;
+  compressionSavingsPercent?: number | null;
+  compressionFallbackCount?: number | null;
+  compressionFallbackReasons?: Record<string, number> | null;
+  intentionallyExcludedRecoveryCheckpointFiles?: number | null;
+  intentionallyExcludedRecoveryCheckpointBytes?: number | null;
 }
 
 export interface JobArtifactArchive {
   archiveSizeBytes?: number | null;
+  archiveItemsCount?: number | null;
+  archiveItemsBytes?: number | null;
+  categorySummary?: Partial<Record<'summaryManifests' | 'metricsTimeSeries' | 'executionEvidence' | 'recoveryCheckpoints' | 'other', { count: number; bytes: number }>>;
   archiveMetrics?: ArtifactArchiveMetrics | null;
   archiveStatus: 'PENDING' | 'ARCHIVING' | 'READY' | 'FAILED' | 'EXPIRED';
   items: JobArtifact[];
@@ -363,6 +385,7 @@ export interface JobsFeatureProps {
   onTabChange?(tab: 'overview' | 'live' | 'events' | 'results' | 'artifacts' | 'metrics'): void;
   standalone?: boolean;
   executionType?: 'load';
+  schedulingEnabled?: boolean;
   onExecutionTypeChange?(value: 'load' | undefined): void;
   onSchedule?(intent: ValidatedScheduleIntent): void;
   onEditSchedule?(id: string): void;

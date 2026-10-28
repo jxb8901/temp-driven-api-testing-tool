@@ -41,7 +41,7 @@ Origin 以 scheme、忽略大小寫的 hostname/IP 及有效 port 精確比較�
 此共用規則適用於 local/container authentication 中所有需要 Origin 相等檢查的位置。拒絕時回傳 `ATT-SERVER-ORIGIN-MISMATCH`，並寫入不含原始 Origin 或憑證的 `ORIGIN_REJECT` audit。通過 Origin 規則不會授予權限：local cookie 及 Basic 狀態變更仍須提交 `X-ATT-CSRF`，authentication、role、憑證 HTTPS 傳輸、限速、Secure/HttpOnly/SameSite cookie，以及 draft ownership 規則均維持；active USER 共用符合資格的 package、run、job、結果、artifact 及 schedule 操作權限。此設定不會設定 CORS、發送 `Access-Control-Allow-Origin` 或啟用跨站 cookie；真正跨站的瀏覽器 API 存取須另行設計 CORS。
 
 
-瀏覽器建立的 Quick Load 及 Advanced Load draft 另有獨立 opt-in：`server.inlineLoad.enabled` 預設為 `false`。啟用後，Server 會在 Engine 驗證後及進入佇列前，再次檢查 workload 數、target 數、Virtual User 總數、Arrival Rate 總和、每個 workload 及整體並行數上限，以及完整時間窗口上限。以下範例設定保守預設值。時間窗口上限為 warmup、ramp-up、duration、ramp-down 的總和；target 數包含固定 target 及每個 VU mix entry。功能停用時回傳 `403 ATT-SERVER-INLINE-LOAD-DISABLED`；超出設定上限的 draft 會回傳 `400 ATT-SERVER-INLINE-LOAD-LIMIT`，並以摘要指出超出的設定。這些限制適用於瀏覽器建立的 draft；既有 path-based Load request 維持相容行為，並繼續受 `workers.maxConcurrentLoad` 限制。
+瀏覽器建立的 Quick Load 及 Advanced Load draft 另有獨立 opt-in：`server.inlineLoad.enabled` 預設為 `false`。啟用後，Server 會在 Engine 驗證後及進入佇列前，再次檢查 workload 數、target 數、Virtual User 總數、Arrival Rate 總和、每個 workload 及整體並行數上限，以及完整時間窗口上限。以下範例設定保守預設值。時間窗口上限依 ramp-up、warmup、duration、ramp-down 順序計算；target 數包含固定 target 及每個 VU mix entry。功能停用時回傳 `403 ATT-SERVER-INLINE-LOAD-DISABLED`；超出設定上限的 draft 會回傳 `400 ATT-SERVER-INLINE-LOAD-LIMIT`，並以摘要指出超出的設定。這些限制適用於瀏覽器建立的 draft；既有 path-based Load request 維持相容行為，並繼續受 `workers.maxConcurrentLoad` 限制。
 
 週期性 package-backed Load 排程另有獨立 opt-in：`server.scheduling.enabled` 預設為 `false`。所有已驗證的 USER 均可在共用操作範圍內管理 RUN/LOAD 排程；container-auth 使用 `server.authorization.userRole`，local-auth 要求 active `USER`。ADMIN role 不會取得排程操作權限。匿名操作只由 `server.authorization.allowAnonymousOperations` 控制，且僅在 `authenticationRequired: false` 時可用。舊版 `server.scheduling.adminRole` 及 `allowAnonymousManagement` 僅為設定相容性保留，不會改變權限。此功能需要有界 package inspection。排程定義及執行歷史保存在 `server.dataDir` 的 H2 資料庫；請在同一 dataDir 只執行一個 Server 程序。每個排程預設保留最新 10,000 筆 terminal occurrence（`maxExecutionsPerSchedule` 可設為 100–100,000）；執行中及處理中的 occurrence 會保留。本 scheduler 不提供多節點 leader election。
 
@@ -146,8 +146,22 @@ Inline Load 設定使用以下預設值及硬性範圍：
 | `maxAggregateArrivalRatePerSecond` | 100 | 大於 0 至 1,000,000 | 所有 Arrival Rate workload 轉為每秒請求數後的總和 |
 | `maxConcurrentPerWorkload` | 100 | 1–1,000,000 | 每個 Arrival Rate workload |
 | `maxTotalConcurrent` | 1,000 | 1–1,000,000 | 所有 Arrival Rate workload 的 `maxConcurrent` 總和 |
-| `maxDurationSeconds` | 3,600 | 1–864,000 | LOAD 完整 envelope 上限：warmup + ramp-up + duration + ramp-down，最多 10 日 |
+| `maxDurationSeconds` | 3,600 | 1–864,000 | LOAD 完整 envelope 上限：ramp-up + warmup + duration + ramp-down，最多 10 日 |
 
 `dataDir` 必須是絕對路徑。啟動時，allowed root、package root 及 Worker library directory 必須已存在。系統會將 package 路徑 canonicalize；若 symlink 指向 allowed root 以外，便會拒絕。Client 提交 `packageId`，不能指定 package 路徑、輸出路徑、Worker 執行檔或 classpath。v1 不提供 package 註冊或修改 API。
 
 Server 狀態存放於 `dataDir/db/`。每項工作在 `dataDir/jobs/<jobId>/` 保存有上限的事件日誌及執行輸出。Server 重啟後會將舊的排隊或執行中工作標記為 `ERROR`，診斷碼為 `ATT-SERVER-INTERRUPTED`，不會重新執行。
+
+### Event journal 上限及磁碟空間耗盡
+
+`server.maxEventsPerJob` 限制保留記錄數量（預設 10,000；範圍 100–1,000,000）。`server.maxEventJournalBytes` 獨立限制新建或健康日誌的磁碟大小（預設 64 MiB；範圍 1–256 MiB）。每個 event payload 最多 65,536 個 JSON 編碼 UTF-8 位元組；每行最多 131,072 位元組；每個記憶體內 Job journal 會將每筆記錄開銷計入，最多保留 16 MiB。Runtime 會按 `workers.maxConcurrent + workers.queuedLimit` 分配 128 MiB 已計量記憶體預算（每個 Job 最少 1 KiB）。每個日誌會保留最新一筆 event，即使超過單一 Job 的預算；超額幅度最多一行，並會在 `eventJournal.activeMemoryOverBudgetBytes` 顯示。背景壓縮每 128 個 event 執行一次，並會在達到位元組上限時同步執行。壓縮會寫入有界的暫存檔、核對 SHA-256，並只會透過同一 filesystem 的 atomic move 取代原檔；不會把整份 snapshot 拼成單一字串。
+
+Server 最多只會重新載入設定位元組窗口內的尾段，並跳過超過行長上限的記錄。Terminal journal 使用有界 LRU 快取，最多 16 個 Job 並以 128 MiB 的已計量保留記憶體為總上限。`GET /api/v1/metrics` 的 `eventJournal` 包含 active Job 的 journal bytes、保留記錄／記憶體、壓縮嘗試／失敗數、degraded Job 數及 terminal 快取大小。當 journal 超過位元組上限的 80% 或持久化降級時，Job event stream 會發出 `diagnostic` event。
+
+如果既有 journal 已超過設定上限，Server 啟動時不會改寫它：只會讀取有界尾段，保留原始檔，並將該 Job 的 journal persistence 標示為 `DEGRADED`。格式錯誤的最後一行、超大記錄或無法確認的序列也會產生該 Job 專屬的 history 診斷。當可用空間低於 8 MiB 加下一筆記錄大小時，Server 會停止寫入該 journal、維持有界的記憶體事件傳送，並以遞增間隔重試，最長五分鐘。此 headroom 檢查並不會預留檔案系統空間；並行寫入仍可能耗盡磁碟。Job 的執行狀態／結果與 journal 警告分開處理。
+
+磁碟空間耗盡時，先確認大檔案的確切路徑及 filesystem，再判斷是否由 `events.jsonl` 增長造成；本次來源修正未能確認事故中 6.3 GB 檔案的路徑。修復前請先將原始檔複製到其他儲存空間並驗證備份，恢復可用空間後，再檢查 Job stream/result 及 `GET /api/v1/metrics` 中的 `journalPersistence`、`journalBytes` 和壓縮診斷。請記錄 journal 路徑、大小及增長時間、可用位元組／inode、`server.maxEventsPerJob`、`server.maxEventJournalBytes`、JVM Heap 設定、GC/OOM log，以及相關 Worker/archive 錯誤。確認另有可驗證備份前，不要刪除 Job 目錄或 journal。
+
+### Artifact archive 壓縮
+
+`server.artifacts.compression.mode` 可選 `store`（預設）、`deflate` 或 `auto`；`level` 範圍為 1–9，預設 3。STORED 保留舊有 archive 格式。DEFLATE 與 AUTO 會對每個核准 entry 單次壓縮至有界的私有 staging file。AUTO 對小於 256 bytes 的檔案使用 STORED，只有節省至少 5% 才使用 DEFLATE。若 entry 的壓縮擴展比例會超過 verifier 的 200:1 上限，即使明確設定 DEFLATE 也會安全退回 STORED。原有 16 MiB 單 entry、128 MiB 總量、entry 數、CRC/SHA、路徑及 atomic publication 限制保持不變。Archive metrics 記錄設定及實際模式、level、payload size、節省量、耗時、entry 方法及有界 fallback 原因。

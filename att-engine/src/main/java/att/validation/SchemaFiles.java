@@ -139,6 +139,9 @@ public final class SchemaFiles {
     private static String family(String version) {
         // The minimal CLI report is a separate wire contract from legacy package validation JSON.
         if ("att-validation/v1".equals(version)) return "att-cli-validation-report";
+        // Detail-series v1 and v2 can coexist in one LOAD report: v2 is the
+        // shared-payload envelope while v1 remains valid for separately scoped files.
+        if (version.startsWith("att-load-detail-series/v")) return version;
         int marker = version.lastIndexOf("/v");
         return marker < 0 ? version : version.substring(0, marker);
     }

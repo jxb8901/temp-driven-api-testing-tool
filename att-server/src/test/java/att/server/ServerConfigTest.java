@@ -8,6 +8,45 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.*;
 
 class ServerConfigTest {
+    @Test void eventJournalByteBudgetDefaultsAndRejectsOutOfRangeValues() throws Exception {
+        Path pkg=Files.createDirectories(temp.resolve("journal-package")),file=temp.resolve("journal-config.yaml");
+        String head="server:\n  dataDir: "+yaml(temp.resolve("journal-data"))+"\n";
+        String tail="workers: {}\npackages:\n  allowedRoots: ["+yaml(pkg)+"]\n  entries: {p: "+yaml(pkg)+"}\n";
+        Files.writeString(file,head+tail);
+        ServerConfig defaults=ServerConfig.load(file);
+        assertEquals(64L*1024L*1024L,defaults.maxEventJournalBytes);
+        assertTrue(defaults.maxEventJournalMemoryBytes*(8L+100L)<=128L*1024L*1024L,
+                "journal memory allowance includes active and queued Jobs");
+        Files.writeString(file,head+"workers: {maxConcurrent: 256, queuedLimit: 100000}\npackages:\n  allowedRoots: ["+yaml(pkg)+"]\n  entries: {p: "+yaml(pkg)+"}\n");
+        ServerConfig largeQueue=ServerConfig.load(file);
+        assertTrue(largeQueue.maxEventJournalMemoryBytes<512L*1024L);
+        assertTrue(largeQueue.maxEventJournalMemoryBytes*(256L+100000L)<=128L*1024L*1024L);
+        Files.writeString(file,head+"  maxEventJournalBytes: 1048576\n"+tail);
+        assertEquals(1024L*1024L,ServerConfig.load(file).maxEventJournalBytes);
+        for(String value:List.of("1048575","268435457","1.5","'1048576'","true")) {
+            Files.writeString(file,head+"  maxEventJournalBytes: "+value+"\n"+tail);
+            assertThrows(IllegalArgumentException.class,()->ServerConfig.load(file),value);
+        }
+    }
+
+    @Test void archiveCompressionDefaultsToStoreAndValidatesModeAndLevel() throws Exception {
+        Path pkg=Files.createDirectories(temp.resolve("compression-package")),file=temp.resolve("compression.yaml");
+        String head="server:\n  dataDir: "+yaml(temp.resolve("compression-data"))+"\n";
+        String tail="workers: {}\npackages:\n  allowedRoots: ["+yaml(pkg)+"]\n  entries: {p: "+yaml(pkg)+"}\n";
+        Files.writeString(file,head+tail);
+        ServerConfig defaults=ServerConfig.load(file);
+        assertEquals("store",defaults.archiveCompression.mode);assertEquals(3,defaults.archiveCompression.level);
+        for(String mode:List.of("store","deflate","auto")) {
+            Files.writeString(file,head+"  artifacts:\n    compression: {mode: "+mode+", level: 6}\n"+tail);
+            ServerConfig parsed=ServerConfig.load(file);
+            assertEquals(mode,parsed.archiveCompression.mode);assertEquals(6,parsed.archiveCompression.level);
+        }
+        for(String compression:List.of("{mode: zip}","{mode: auto, level: 0}","{mode: store, level: 10}","{mode: store, unknown: 1}")) {
+            Files.writeString(file,head+"  artifacts:\n    compression: "+compression+"\n"+tail);
+            assertThrows(IllegalArgumentException.class,()->ServerConfig.load(file),compression);
+        }
+    }
+
     @Test void prewarmIsOptInAndRequiresBoundedHeapAndRegisteredAffinity() throws Exception {
         Path pkg=Files.createDirectories(temp.resolve("prewarm-package"));Path file=temp.resolve("prewarm.yaml");
         String head="server:\n  dataDir: "+yaml(temp.resolve("prewarm-data"))+"\n";

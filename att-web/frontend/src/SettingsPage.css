@@ -3,6 +3,7 @@
 .att-settings-section-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--att-space-4); }
 .att-settings-help { max-width: 680px; margin: var(--att-space-2) 0 0; color: var(--att-color-muted); font-size: 0.88rem; line-height: 1.5; }
 .att-settings-current { color: var(--att-color-muted); font-size: 0.78rem; }
+.att-settings-persistence { margin: 0; padding: var(--att-space-3); border-left: 3px solid var(--att-color-primary); background: var(--att-color-canvas); color: var(--att-color-text); font-size: .84rem; line-height: 1.45; }
 .att-settings-options { display: grid; gap: var(--att-space-2); margin: var(--att-space-4) 0 0; padding: 0; border: 0; }
 .att-settings-option { display: flex; min-height: 62px; align-items: flex-start; gap: var(--att-space-3); padding: var(--att-space-3); border: 1px solid var(--att-color-border); border-radius: var(--att-radius-control); background: var(--att-color-surface); cursor: pointer; }
 .att-settings-option:has(input:checked) { border-color: var(--att-color-primary); box-shadow: inset 3px 0 0 var(--att-color-primary); }

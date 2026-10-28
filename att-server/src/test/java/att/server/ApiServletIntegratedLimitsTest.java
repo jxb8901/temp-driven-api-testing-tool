@@ -35,6 +35,46 @@ class ApiServletIntegratedLimitsTest {
     private static final int DEFAULT_INSPECTION_TIMEOUT_MS=30_000;
     @TempDir Path temp;
 
+    @Test void emptyRegisteredPackageReturnsEmptyInspectorInventoryAndDoesNotAffectAnotherPackage() throws Exception {
+        Path packages=Files.createDirectories(temp.resolve("empty-package-packages"));
+        Files.createDirectory(packages.resolve("lilyzhou"));
+        createPackage(packages.resolve("healthy"));
+        Path broken=createPackage(packages.resolve("broken"));
+        Files.delete(broken.resolve("templates"));
+        Files.writeString(broken.resolve("templates"),"not a directory");
+        try(ServerRuntime runtime=runtime(packages,sharedRuntimeConfig(),"empty-package-data",DEFAULT_INSPECTION_TIMEOUT_MS,null,workerLibraries("empty-package-libs"))) {
+            ApiServlet servlet=servlet(runtime);
+            Captured catalogResponse=invoke(servlet,"GET","/packages/lilyzhou/load-catalog",Map.of("limit","100"),new byte[0]);
+            JsonNode catalog=ServerRuntime.JSON.readTree(catalogResponse.body());
+            assertEquals(200,catalogResponse.status,new String(catalogResponse.body(),StandardCharsets.UTF_8));
+            assertTrue(catalog.path("items").isArray());assertEquals(0,catalog.path("items").size());
+            assertEquals(0,catalog.path("total").asInt());assertTrue(catalog.path("nextCursor").isMissingNode()||catalog.path("nextCursor").isNull(),catalog.toString());
+            assertTrue(catalogResponse.headers.get("X-ATT-Inspection-Revision").matches("[A-Za-z0-9_-]{43}"),catalogResponse.headers.toString());
+
+            Captured resourcesResponse=invoke(servlet,"GET","/packages/lilyzhou/resources",Map.of("type","template"),new byte[0]);
+            JsonNode resources=ServerRuntime.JSON.readTree(resourcesResponse.body());
+            assertEquals(200,resourcesResponse.status,new String(resourcesResponse.body(),StandardCharsets.UTF_8));
+            assertTrue(resources.path("items").isArray());assertEquals(0,resources.path("items").size());
+            assertFalse(Files.exists(packages.resolve("lilyzhou/templates")));
+            assertFalse(Files.exists(packages.resolve("lilyzhou/testcase")));
+            assertFalse(Files.exists(packages.resolve("lilyzhou/load")));
+
+            Captured invalidRoot=invoke(servlet,"GET","/packages/broken/resources",Map.of("type","template"),new byte[0]);
+            JsonNode invalidBody=ServerRuntime.JSON.readTree(invalidRoot.body());
+            assertEquals(422,invalidRoot.status,new String(invalidRoot.body(),StandardCharsets.UTF_8));
+            assertEquals("ATT-RESOURCE-ROOT-INVALID",invalidBody.path("diagnostics").path(0).path("code").asText());
+            assertEquals("resources.templatesRoot",invalidBody.path("diagnostics").path(0).path("field").asText());
+            assertFalse(new String(invalidRoot.body(),StandardCharsets.UTF_8).contains(packages.toString()));
+
+            Captured nextPackage=invoke(servlet,"GET","/packages/healthy/resources",Map.of("type","template"),new byte[0]);
+            assertEquals(200,nextPackage.status,new String(nextPackage.body(),StandardCharsets.UTF_8));
+            Captured retried=invoke(servlet,"GET","/packages/lilyzhou/load-catalog",Map.of("limit","100"),new byte[0]);
+            assertEquals(200,retried.status,new String(retried.body(),StandardCharsets.UTF_8));
+            assertEquals(0,ServerRuntime.JSON.readTree(retried.body()).path("items").size());
+            stopInspectionProcesses(runtime);
+        }
+    }
+
     @Test void inspectionEndpointRejectsDeterministicWorkbookCountLimit() throws Exception {
         Path packages=Files.createDirectories(temp.resolve("packages"));
         Path counted=createPackage(packages.resolve("counted"));

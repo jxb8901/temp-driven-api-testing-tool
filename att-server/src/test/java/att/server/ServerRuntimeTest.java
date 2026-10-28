@@ -104,7 +104,20 @@ class ServerRuntimeTest {
             JsonNode request=ServerRuntime.JSON.readTree("{\"packageId\":\"p\",\"target\":{\"type\":\"template\",\"id\":\"missing\"}}");
             Map<String,Object> submitted=runtime.submit("debug",request,"ci-test");String id=(String)submitted.get("jobId");
             long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(20);Map<String,Object> record=runtime.jobRecord(id);while(!List.of("PASS","FAIL","ERROR","INVALID","CANCELLED").contains(record.get("status"))&&System.nanoTime()<deadline){Thread.sleep(20);record=runtime.jobRecord(id);}
-            assertTrue(List.of("PASS","FAIL","ERROR","INVALID","CANCELLED").contains(record.get("status")),"Worker must produce a terminal result");while(!runtime.jobs.isEmpty()&&System.nanoTime()<deadline)Thread.sleep(20);assertTrue(runtime.jobs.isEmpty(),"Completed Job objects should be evicted from memory");assertTrue(runtime.events(id).after(0).stream().anyMatch(e->"result".equals(e.get("event"))));
+            assertTrue(List.of("PASS","FAIL","ERROR","INVALID","CANCELLED").contains(record.get("status")),"Worker must produce a terminal result");while(!runtime.jobs.isEmpty()&&System.nanoTime()<deadline)Thread.sleep(20);assertTrue(runtime.jobs.isEmpty(),"Completed Job objects should be evicted from memory");
+            Path eventFile=config.dataDir.resolve("jobs").resolve(id).resolve("events.jsonl");
+            List<String> persisted=Files.readAllLines(eventFile);
+            assertTrue(persisted.stream().anyMatch(line->line.contains("\"event\":\"result\"")));
+            List<String> withoutResult=persisted.stream().filter(line->!line.contains("\"event\":\"result\"")).toList();
+            Files.write(eventFile,withoutResult,java.nio.charset.StandardCharsets.UTF_8);
+            long degradedJournalSize=Files.size(eventFile);
+            JobEvents terminalHistory=runtime.events(id);
+            assertTrue(terminalHistory.after(0).stream().anyMatch(e->"result".equals(e.get("event"))));
+            assertTrue(terminalHistory.historyDegraded(),"missing durable result marker must be reported independently");
+            assertEquals(degradedJournalSize,Files.size(eventFile),"result recovery must not rewrite historical evidence");
+            assertSame(terminalHistory,runtime.events(id),"terminal journal rehydration is reused from the bounded cache");
+            Map<?,?> journalMetrics=(Map<?,?>)runtime.counts().get("eventJournal");
+            assertEquals(1,journalMetrics.get("cachedTerminalJobs"));
             assertEquals("debug",record.get("command"));
         } finally {runtime.close();}
     }

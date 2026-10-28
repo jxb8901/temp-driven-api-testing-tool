@@ -678,7 +678,7 @@ Standalone Debug bootstrap values are mapped into these canonical roots: `inputs
 | EXEC.LOAD.WORKLOAD_ID | Configured workload ID. | Load only; available before ID generation. |
 | EXEC.LOAD.USER_ID | Stable virtual-user ID. | Closed Load only; absent for arrival-rate. |
 | EXEC.LOAD.ITERATION | Numeric iteration sequence. | Load only; available before ID generation. |
-| EXEC.LOAD.PHASE | WARMUP, RAMP_UP, STEADY or RAMP_DOWN. | Load only; available before ID generation. |
+| EXEC.LOAD.PHASE | RAMP_UP, WARMUP, STEADY or RAMP_DOWN. | Load only; available before ID generation. |
 
 EXEC.LOAD exposes stable identity. Scheduler counters, queue state and timing diagnostics stay in evidence-only DIAG.load, which is not an expression root.
 
@@ -1325,7 +1325,7 @@ Preparation is bounded to 64 initial DB/MQ sessions per run and 256 per Worker J
 
 #### Independent evidence quotas
 
-`att-load/v1.9` supports two quota models. Legacy scenarios keep their exact previous behavior: an explicit `maxSamples` is one combined run cap, and an explicit `maxFailureSamples` enables shared success/failure caps across the whole run. A scenario that omits both keys also keeps the existing mode defaults, including uncapped-by-default `all`.
+`att-load/v1.9` supports two quota models. Legacy scenarios keep their existing quota scopes and hard-cap sizes: `maxSamples` is one combined run cap, and `maxFailureSamples` enables shared success/failure caps across the whole run. A scenario that omits both keys also keeps the existing mode defaults, including uncapped-by-default `all`. For capped runs, the retained set now follows fixed run-time windows, so which iterations are retained can differ from earlier releases while the configured cap and outcome-sharing rules stay the same.
 
 The optional `evidence.quotaScope: perWorkload` selects the independent model. It is explicit so an existing scenario is never silently reinterpreted:
 
@@ -1358,7 +1358,11 @@ Each workload owns its caps. Reaching one workload's success or failure cap neve
 
 `sampleRate` applies only to sampled PASS iterations; FAIL/ERROR (including operational TIMEOUT) use the failure cap without sampling. `failure: full` is bounded by the effective failure cap and does not guarantee that every failure is retained. Failure log capture keeps the existing 65,536-character tail, mandatory secret protection and deferred resource formatting.
 
-`load-summary.json` / YAML, the HTML report and Studio job results expose the resolved `evidence.policy`, aggregate retained counts, category exhaustion flags and skipped quota/missing-evidence counters. Per-workload coverage includes the workload and target IDs, effective `maxSuccessSamples` and `maxFailureSamples`, completed PASS iterations, PASS iterations excluded by the sampling hash, retained samples, quota skips and missing evidence. The report and Studio warn when one or more failure quotas are reached; aggregate metrics, thresholds and failure events continue. Retained links remain under `samples/` and `failures/` with EXEC.ID, case.log and case.yaml. Studio separates legacy/shared caps from the explicit per-workload scope, shows effective defaults and workload overrides, and keeps advanced JSON synchronized. See [the per-workload example](../examples/load/independent-evidence.yaml).
+Sampled-success eligibility uses MurmurHash3 x86 32-bit, seed 0, over the iteration ID encoded as UTF-8. ATT interprets the 32-bit result as unsigned and selects it when it is below `floor(sampleRate × 2^32)`; the resolved policy reports `murmur3-32-v1`. Hash qualification is not retention: an eligible success still needs an available quota slot and an evidence artifact.
+
+Capped evidence slots are allocated across up to ten equal windows of the planned run duration, separately for each outcome cap and workload cap. The windows use scheduled arrival time; a cap below ten uses one window per slot. Slots are append-only: there is no replacement, revocation, borrowing from empty windows, or deletion of already retained artifacts. Candidates are first-come within each window, so a small cap, an empty window, or an uneven candidate rate can still limit representativeness. Legacy `maxSamples` keeps its single combined cap; successes and failures share each window's slots. Uncapped retention and direct store callers without a scheduler timeline keep their existing behavior.
+
+`load-summary.json` / YAML, the HTML report and Studio job results expose the resolved sampling hash and retention strategy, completed successes, hash-qualified successes, sampling-ineligible successes, retained evidence, success/failure quota denials, outcome-unclassified compatibility reservations, and missing artifacts. For sampled runs, completed successes equal hash-qualified plus sampling-ineligible successes. Quota denials are counted once for the final outcome when a sampled success later fails; missing artifacts count only an already reserved completed outcome. These fields describe different stages and are not an additive retention funnel. Workload rows also include target IDs and effective per-workload caps. Reports show retained coverage by time window and phase, and warn when a legacy combined or category quota denies candidates; aggregate metrics, thresholds and failure events continue. Retained links remain under `samples/` and `failures/` with EXEC.ID, case.log and case.yaml. Studio separates legacy/shared caps from the explicit per-workload scope, shows effective defaults and workload overrides, and keeps advanced JSON synchronized. See [the per-workload example](../examples/load/independent-evidence.yaml).
 
 
 #### Define a Load scenario
@@ -1380,8 +1384,8 @@ workloads:
       reference: "REF-${EXEC.LOAD.USER_ID}-${EXEC.LOAD.ITERATION}"
     load:
       users: 20
-      warmup: 10s
       rampUp: 5s
+      warmup: 10s
       duration: 1m
       rampDown: 5s
     execution:
@@ -1472,7 +1476,7 @@ For DB work, use the connection-lease time in the same estimate: DB operations/s
 
 For MQ request/reply, 10 requests/second with a mean 3-second reply time likewise needs about 30 leased connections across the workload. Size `pool.maxSize` for the expected in-flight requests **per physical MQ instance**, not per logical helper. With a single instance (or calls pinned to one instance), that is about 30 plus headroom. With two evenly selected instances, it is about 15 per instance on average; account for selection skew and verify the actual distribution. `resources.mq` reports pool metrics per physical instance, so inspect each pool's waiting and timeout metrics alongside response latency. `minIdle` is applied when that physical pool is first created on use; it does not create or warm the pool before Load starts. To move connection creation out of measured steady-state latency, combine `minIdle` with a Load warm-up/first-use warm-up phase. Recalculate from observed mean latency as load changes; tail latency is useful for headroom, but is not the mean used by the estimate.
 
-duration is required. warmup, rampUp and rampDown default to zero. Warm-up sends real traffic but is excluded from measured threshold aggregates. Optional seed makes closed-VU think-time randomization deterministic.
+duration is required. rampUp, warmup and rampDown default to zero. Generation runs in Ramp-up → Warm-up → Steady → Ramp-down order, then DRAIN lets admitted work finish without new arrivals: ramp-up increases from zero to the configured target, warm-up sustains that full target, and ramp-down decreases it after steady duration. Ramp-up and warm-up send real traffic but both are excluded from measured metrics and threshold denominators; measured load is Steady + Ramp-down. For example, a 100/s target with 60s ramp-up, 60s warm-up, 180s steady duration and 60s ramp-down schedules 3,000 + 6,000 + 18,000 + 3,000 = 30,000 arrivals. Existing saved descriptors keep their values and history; rerunning one uses the new order and does not reproduce the old phase timing. Optional seed makes closed-VU think-time randomization deterministic.
 
 #### Identify iterations and find their artifacts
 
@@ -1498,7 +1502,7 @@ A metrics-only iteration still has `EXEC.ID` but does not create a per-iteration
 
 #### Choose which iteration evidence to retain
 
-`evidence.mode` accepts `metrics`, `failures`, `samples` or `all`; the default is `failures`. These modes set the default effective success/failure policies to `none/none`, `none/full`, `sample/full` and `full/full`, respectively. Explicit `evidence.success` and `evidence.failure` values override those defaults independently. `sampleRate` and the selected legacy/shared or per-workload caps bound retained evidence. Dropped arrivals do not create iteration evidence.
+`evidence.mode` accepts `metrics`, `failures`, `samples` or `all`; the default is `failures`. These modes set the default effective success/failure policies to `none/none`, `none/full`, `sample/full` and `full/full`, respectively. Explicit `evidence.success` and `evidence.failure` values override those defaults independently. `sampleRate` determines hash eligibility; quota slots separately determine retention, and dropped arrivals do not create iteration evidence. Capped selections use up to ten append-only time windows, with first-come selection inside each window; see [Independent evidence quotas](#independent-evidence-quotas) for the sampling and representativeness limits.
 
 Case-log capture follows the effective success/failure policies and remaining retention capacity. With failure policy `full` and a `maxSamples` slot available, eligible failures—including unselected successes under `samples`—retain a redacted rolling log tail of at most 65,536 characters. ATT materializes the failure log only when the failure claims a retention slot. If the tail is truncated, a marker identifies the omitted earlier events, and the latest action and runtime failure details remain at the end. Failure logs are not retained after capacity is exhausted. Sampled successes and full-success policies retain full deferred logs. For example, `mode: metrics, failure: full` enables bounded failure capture while capacity remains, while `mode: failures, failure: none` disables it. See [Load scheduler design](system-design/load-scheduler.md) for implementation and storage details.
 
@@ -1518,9 +1522,9 @@ When checkpointing is enabled, ATT writes versioned aggregate and workload metri
 
 For long scenarios, the Engine performs a read-only preflight and records `resources.preflight` in the summary. It reports a planning estimate for retained event files and bytes, configured evidence quotas, retained Tool output, the artifact archive limit, and low or unavailable output disk space. The estimate uses 4 KiB per retained event and excludes Tool output; actual sizes vary. These warnings do not reject a run solely because of its duration. Browser inline drafts and package-backed scenarios follow the Server's configured effective-envelope cap (`server.inlineLoad.maxDurationSeconds`, up to 10 days). The opt-in manual CLI Local benchmark is documented in the [25-hour LOAD soak acceptance guide](operations/load-soak-acceptance.md).
 
-Load v1.9 adds event-time windows named `all`, `measured` and `steady`. `measured` starts after warm-up and includes ramp-up, steady and ramp-down; `steady` covers only the configured steady duration. The HTML report opens on `steady` and lets readers select another window. Scheduled, started and completed rates use the timestamp of each event and the configured window duration. `startedRate` therefore remains event-time. `admissionRate` instead uses the same scheduled cohort: arrivals scheduled in the window that start by run finish divided by all arrivals scheduled in that window; arrivals still unstarted at finish count as not admitted. Latency percentiles and outcome counts use the scheduled cohort, so a drained iteration remains attributed to the phase where it was scheduled. Existing top-level metric names and their legacy meanings remain available.
+Load v1.9 adds event-time windows named `all`, `measured` and `steady`. `measured` starts after ramp-up and warm-up and includes steady and ramp-down; `steady` covers only the configured steady duration. The HTML report opens on `steady` and lets readers select another window. Scheduled, started and completed rates use the timestamp of each event and the configured window duration. `startedRate` therefore remains event-time. `admissionRate` instead uses the same scheduled cohort: arrivals scheduled in the window that start by run finish divided by all arrivals scheduled in that window; arrivals still unstarted at finish count as not admitted. Latency percentiles and outcome counts use the scheduled cohort, so a drained iteration remains attributed to the phase where it was scheduled. Existing top-level metric names remain available; measured aggregates include scheduled STEADY and RAMP_DOWN work only.
 
-Nested `thresholds.steady` and `thresholds.overall` evaluate against the steady and all-execution windows. Existing top-level thresholds retain their previous measured-run semantics. An incomplete or unevaluable window returns `NOT_EVALUATED`; it is not a performance pass. Reports show execution status separately from the performance verdict and disclose the percentile sample and observation counts so sparse estimates are visible. Direct Engine/CLI summaries use legacy summary contract (schema under `schemas/history/`); archived reports use the additive `att-load-summary/v1.3` schema with optional detail-manifest and workload-sidecar references.
+Nested `thresholds.steady` and `thresholds.overall` evaluate against the steady and all-execution windows. Top-level measured thresholds use the corrected measured interval, `STEADY + RAMP_DOWN`; ramp-up and warm-up are excluded. An incomplete or unevaluable window returns `NOT_EVALUATED`; it is not a performance pass. Reports show execution status separately from the performance verdict and disclose the percentile sample and observation counts so sparse estimates are visible. Direct Engine/CLI summaries use legacy summary contract (schema under `schemas/history/`); archived reports use the additive `att-load-summary/v1.3` schema with optional detail-manifest and workload-sidecar references.
 
 In the summary's `thresholds` object, `status` and `performanceVerdict` are authoritative and use `MET`, `NOT_MET` or `NOT_EVALUATED`. `legacyPassed` is an optional compatibility boolean that retains the previous `passed()` semantics: it is false when configured thresholds are unevaluable and true when no thresholds are configured. Consumers should use the tri-state fields to distinguish incomplete evidence from a missed threshold.
 
@@ -1552,7 +1556,7 @@ Load startup also compiles the selected Template/Flow action sequence, primary T
 
 #### Override workload settings from the CLI
 
-For one workload, options such as --users, --arrival-rate, --warmup, --ramp-up, --duration, --ramp-down, --think-time and --max-concurrent can override matching YAML values. Unscoped load-model overrides fail for multi-workload scenarios.
+For one workload, options such as --users, --arrival-rate, --ramp-up, --warmup, --duration, --ramp-down, --think-time and --max-concurrent can override matching YAML values. Unscoped load-model overrides fail for multi-workload scenarios.
 
 Repeatable `--set` accepts `input.path=value`, Tool-only `arg.name=value`, or Template/Flow-only `vars.path=value`. Values use safe YAML parsing and remain typed; nested maps and numeric list indexes are supported where practical, for example `input.customer.ids[0]=42`. Duplicate assignments apply in order (last wins). ATT expressions are not evaluated during option parsing. Unqualified overrides are rejected for multi-workload scenarios.
 
@@ -1593,7 +1597,7 @@ Outer `execution.runIdFormat`, `execution.debugIdFormat`, exact `--run-id` and `
 
 #### Error rates and failure diagnosis (4.2.4)
 
-Measured completions are divided into PASS, SUT failures, and runtime ERROR/INVALID. Warm-up is excluded from measured rates; it can still make execution ERROR. Generator drops remain separate.
+Measured completions are divided into PASS, SUT failures, and runtime ERROR/INVALID. Ramp-up and warm-up are excluded from measured rates; either can still make execution ERROR. Generator drops remain separate.
 
 | Metric | Numerator / denominator |
 | --- | --- |
@@ -2853,6 +2857,8 @@ Paths use forward slashes and stay relative to the selected Package. Absolute pa
 
 Without a Manifest, the Package uses conventional `templates` and `testcase` roots and an empty Package Testdata inventory. Global `templates.root` and `testcase.root` no longer choose business roots.
 
+The conventional `templates/`, `testcase/`, and `load/` directories are optional for inspection. If a directory is absent, Explorer, LOAD Catalog, and Quick Load return an empty inventory for that root. If a configured or conventional root exists but is not a readable directory, or resolves outside the canonical Package, inspection fails with a sanitized `ATT-RESOURCE-ROOT-INVALID` diagnostic; it never follows an unsafe path or treats an invalid present root as empty.
+
 ### Resolve an Environment
 
 An explicit request or supported CLI `--env` selects the profile first. Otherwise, `defaultEnvironment` selects an existing central profile; the central default applies when the Manifest omits it. Profile names resolve to their canonical central spelling. The Effective view shows the selected profile and its origin.
@@ -3176,7 +3182,7 @@ Load uses the scenario as the base and explicit workload options override the co
 ```sh
 ./att.sh load ../examples/load/closed-smoke.yaml --config config/config.yaml --env SIT --users 2 --duration 5s
 ./att.sh load ../examples/load/arrival-smoke.yaml --config config/config.yaml --env UAT \
-  --arrival-rate 5/s --warmup 1s --ramp-up 1s --duration 5s --ramp-down 1s \
+  --arrival-rate 5/s --ramp-up 1s --warmup 1s --duration 5s --ramp-down 1s \
   --max-concurrent 4 --overload-policy drop --format json
 ```
 
@@ -3187,7 +3193,7 @@ Repeatable `--set <input|arg|vars>.<path>=<yaml-value>` applies safe-YAML typed 
 ./att.sh load --debug flow common.payment --users 2 --duration 10s --set 'vars.reference=${EXEC.INPUT.reference}'
 ```
 
-The complete workload override set is `--users`, `--arrival-rate`, `--warmup`, `--ramp-up`, `--duration`, `--ramp-down`, `--think-time`, `--max-concurrent`, and `--overload-policy`. `--think-time` is closed-VU only. Common selection/output options remain command-specific: `--suite`, `--suite-dir`, `--case`/`--case-id`, `--tag`, `--exclude-tag`, `--all`, `--run-id` (outer Run/Load identity), `--debug-id` (standalone Debug identity), `--output-dir`, `--format`, `--quiet`, `--verbose`, `--ci-output`, `--dry-run`, `--fail-fast`, `--rerun-failed`, `--update-snapshot`, `--package`, `--selected`, `--input`, `--set`, `--queue`, `--parallel`, `--allow-parallel-runs`, `--profile`, `--config`, `--env`, and `--help` are accepted only where the command contract permits them. Both identity options are literal overrides.
+The complete workload override set is `--users`, `--arrival-rate`, `--ramp-up`, `--warmup`, `--duration`, `--ramp-down`, `--think-time`, `--max-concurrent`, and `--overload-policy`. `--think-time` is closed-VU only. Common selection/output options remain command-specific: `--suite`, `--suite-dir`, `--case`/`--case-id`, `--tag`, `--exclude-tag`, `--all`, `--run-id` (outer Run/Load identity), `--debug-id` (standalone Debug identity), `--output-dir`, `--format`, `--quiet`, `--verbose`, `--ci-output`, `--dry-run`, `--fail-fast`, `--rerun-failed`, `--update-snapshot`, `--package`, `--selected`, `--input`, `--set`, `--queue`, `--parallel`, `--allow-parallel-runs`, `--profile`, `--config`, `--env`, and `--help` are accepted only where the command contract permits them. Both identity options are literal overrides.
 
 #### Diagnostic trust boundaries and secret protection
 
@@ -3256,9 +3262,9 @@ Engine-generated artifact data applies path and secret projection before writing
 
 `export-manifest-v1.json` uses manifest version `1` and policy `att-export-approved-bytes-v1`; new entries use decision `preserved` (legacy `att-export-safe-text-v2` ZIPs remain readable). Approved producer bytes are preserved exactly; producers must mask sensitive values before emitting artifacts. Each entry records its logical path, media type, exact byte size, SHA-256, report/preview eligibility, classification and publication decision. `complete` and aggregate `omissions` describe excluded output without rejected filenames or values. ZIP, preview and extracted files use the same captured bytes; GET requests never independently redact them.
 
-Inventory is independent of `server.maxArtifacts`: up to 50,000 filesystem candidates, depth 64, 10,000 published entries, 16 MiB per entry and 128 MiB total published bytes. The manifest is limited to 8 MiB. Crossing aggregate limits fails publication and preserves private source output. ZIP entries use STORED encoding to avoid compression-ratio ambiguity for repetitive logs. Readers reject unsafe paths, control characters, encoded traversal, duplicate/case-colliding names, oversized or high-ratio entries, unmanifested entries and integrity mismatches. Publication uses one writer with a bounded queue; at most eight artifact reads run concurrently.
+Inventory is independent of `server.maxArtifacts`: up to 50,000 filesystem candidates, depth 64, 10,000 published entries, 16 MiB per entry and 128 MiB total published bytes. The manifest is limited to 8 MiB. Crossing aggregate limits fails publication and preserves private source output. The default ZIP method is STORED; server configuration may select bounded per-entry DEFLATE or AUTO while respecting the 200:1 ratio limit. Readers reject unsafe paths, control characters, encoded traversal, duplicate/case-colliding names, oversized or high-ratio entries, unmanifested entries and integrity mismatches. Publication uses one writer with a bounded queue; at most eight artifact reads run concurrently.
 
-Readers also check the ZIP central directory against local headers before trusting the manifest. Link, special-file and Windows reparse attributes, file/directory prefix collisions, filename-override extra fields, comments, hidden prefixes or records, overlapping entries, multipart archives and ZIP64 are rejected. The bounded export profile permits STORED or Deflate entries and timestamp-only extra metadata; ATT writes STORED entries. Manifest parsing rejects duplicate keys, trailing documents, fractional versions/sizes, unknown fields and non-policy omission text. A structurally readable ZIP is not sufficient proof of an approved export.
+Readers also check the ZIP central directory against local headers before trusting the manifest. Link, special-file and Windows reparse attributes, file/directory prefix collisions, filename-override extra fields, comments, hidden prefixes or records, overlapping entries, multipart archives and ZIP64 are rejected. The bounded export profile permits STORED or Deflate entries and timestamp-only extra metadata; STORED remains the default. Manifest parsing rejects duplicate keys, trailing documents, fractional versions/sizes, unknown fields and non-policy omission text. A structurally readable ZIP is not sufficient proof of an approved export.
 
 ZIP downloads use a request-private snapshot in the JVM's OS temporary directory. The Server copies at most 140 MiB per download, verifies the complete copied ZIP and all entry digests before setting download headers, and streams the same open snapshot with its captured length. Each 64 KiB buffer is checked against its captured SHA-256 before writing, so later replacement or in-place modification of the published pathname cannot substitute response bytes. The existing eight-reader limit also bounds concurrent download snapshots; allow temporary disk space for these copies. Normal completion, disconnect and failed approval close/delete the copy. Abrupt process termination can leave temporary files for OS or operator cleanup. Entry previews retain their separate request-scoped verified ZIP handle and per-entry digest/CRC checks.
 
@@ -3274,9 +3280,17 @@ In Job Details, open **Artifacts**. Reports appear independently of listing pagi
 
 The authenticated archive index returns `archiveSizeBytes` only for a READY, verified ZIP. Studio shows its human-readable size beside the ZIP download; it does not download the ZIP or make a HEAD request to calculate size.
 
+The index also reports full-archive entry counts and uncompressed bytes for summaries/manifests, metrics/time series, execution evidence, recovery checkpoints, and other files. Studio keeps the primary report visible, groups the remaining entries in collapsed categories, nests execution evidence under workload and execution groups when those path components are available, and searches the loaded pages by path or workload; load more pages to extend a search. Entry previews show compact filenames and keep the full approved archive path available in the row.
+
+The Server validates report completeness independently from execution status, performance verdict and archive status. Routine recovery checkpoints are omitted only when the canonical report is verified complete and `executionStatus: PASS`; a `NOT_MET` performance verdict remains separate and does not change this policy. Cancelled or runtime-error runs retain up to the latest two integrity-verified checkpoint generations per scope even if they committed a complete diagnostic report. If the report is absent, incomplete, corrupt, interrupted, or unavailable, up to the latest two verified generations per scope are retained. An incomplete or corrupt report bundle is omitted as a bundle, while verified checkpoints remain previewable and the archive reports its omissions. Source checkpoints are not deleted before report-commit validation.
+
+When identical large aggregate and single-workload series are shared, the versioned detail manifest reports the exact number of reused sidecar files and serialized bytes saved. Values that differ or belong to multi-workload runs keep their separately scoped files.
+
 **Artifact archive metrics** appear under **Jobs and results → Metrics**, including terminal ERROR Jobs without Load results. Both Job detail and archive index expose the typed `archiveMetrics` object (version 1), persisted independently of Worker execution metrics. Attempts/retries survive restart; timings and resource measurements describe the latest writer attempt. Queue wait ends when the writer starts; `publicationWallMs` includes the writer's finalization and cleanup, not queue wait. Stage milliseconds cover scan, validation and byte capture, ZIP compression/write, verification/file-fsync, and private/staging cleanup. Regular source file count/bytes include rejected regular files; included/omitted counts describe the attempted publication. The ratio is approved uncompressed entry bytes divided by complete ZIP bytes (including the manifest), not percentage space saved. Source byte sums saturate at the signed 64-bit maximum.
 
 `writerCpuMs` measures only the Server writer thread when JVM thread CPU timing is already supported/enabled. `writerAllocatedBytes` is that thread's allocated-byte delta, not retained memory, JVM heap use, or peak memory. Telemetry does not enable JVM instrumentation or measure Worker CPU. Unsupported/disabled measurements and stages not executed (for example, reusing an existing verified ZIP) are `null` and displayed as Unavailable, never fabricated zeros. Real empty input has zero file/entry counts but a nonempty manifest ZIP. Outcome and failure phase/reason use fixed safe codes, never filenames, data or exception messages. RUNNING metrics identify an unfinished attempt; cleanup failure is CLEANUP_PENDING while an already verified ZIP stays downloadable. A metrics-store failure is logged without changing publication safety or falling back to raw output.
+
+`server.artifacts.compression.mode` defaults to `store`; `deflate` and `auto` are opt-in, with levels 1–9 (default 3). AUTO leaves entries under 256 bytes stored and deflates only with at least 5% savings. Every entry remains subject to the 200:1 expansion-ratio verifier; highly repetitive entries fall back to STORED even in explicit DEFLATE mode. Metrics report configured/effective mode, level, compression duration, stored/deflated counts, compressed payload and ZIP overhead bytes, savings, and bounded fallback reasons.
 
 For extracted `file://` reports, the browser controls how linked file types open. For example, Chromium may download a linked YAML file instead of displaying it. The link still targets the same approved extracted bytes; Studio serves those entries as inline text in its viewer.
 
@@ -3608,7 +3622,7 @@ Active schemas (the matching ATT Engine JAR's embedded registry, built from `sch
 | Load Template | `att-load-template/v1` | `schemas/att-load-template-v1.schema.json` |
 | Load bindings | `att-load-bindings/v1` | `schemas/att-load-bindings-v1.schema.json` |
 | Load summary | direct Engine/CLI: legacy summary contract (schema under `schemas/history/`); archived report: att-load-summary/v1.3 |
-| LOAD report detail files | att-load-detail-manifest/v1, att-load-detail-reference/v1, att-load-detail-series/v1, att-load-workload-detail/v1 |
+| LOAD report detail files | att-load-detail-manifest/v1, att-load-detail-reference/v1, att-load-detail-series/v1, att-load-detail-series/v2 (shared payload), att-load-workload-detail/v1 |
 | Run manifest | att-run/v2.1 |
 | Legacy package validation JSON | `att-validation/v2.1` |
 | Minimal CLI hierarchical validation report | `att-validation/v1` |

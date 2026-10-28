@@ -191,11 +191,16 @@ public final class LoadConsoleSampler {
         snapshot.put("latency",liveCounters.latencyMap());
         if(latestFailure!=null)snapshot.put("latestFailure",latestFailure);
         Map<String,Object> measured=new LinkedHashMap<>();
-        for(String phase:new String[]{"RAMP_UP","STEADY","RAMP_DOWN"}) {
+        for(String phase:new String[]{"STEADY","RAMP_DOWN"}) {
             Counters counters=livePhases.get(phase);if(counters!=null)mergeCounters(measured,counters);
         }
         snapshot.put("measuredCounts",measured);
-        Map<String,Object> phases=new TreeMap<>();livePhases.forEach((key,value)->phases.put(key,value.toMap()));snapshot.put("phases",phases);
+        Map<String,Object> phases=new LinkedHashMap<>();
+        for(String name:new String[]{"RAMP_UP","WARMUP","STEADY","RAMP_DOWN","DRAIN","COMPLETE"}) {
+            Counters counters=livePhases.get(name);if(counters!=null)phases.put(name,counters.toMap());
+        }
+        if(phases.size()<8) new TreeMap<>(livePhases).forEach((key,value)->{if(phases.size()<8)phases.putIfAbsent(key,value.toMap());});
+        snapshot.put("phases",phases);
         Map<String,Object> workloads=new TreeMap<>();liveWorkloads.forEach((key,value)->{
             Map<String,Object> workload=value.toMap();workload.put("latency",value.latencyMap());
             workloads.put(key,workload);
@@ -227,8 +232,8 @@ public final class LoadConsoleSampler {
         int order;
         switch(name) {
             case "PREPARING": order=0;break;
-            case "WARMUP": order=1;break;
-            case "RAMP_UP": order=2;break;
+            case "RAMP_UP": order=1;break;
+            case "WARMUP": order=2;break;
             case "STEADY": order=3;break;
             case "RAMP_DOWN": order=4;break;
             case "DRAIN":

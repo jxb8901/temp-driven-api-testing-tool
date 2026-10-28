@@ -20,7 +20,7 @@ Standalone Debug bootstrap value 會映射到這些 canonical root：`inputs` �
 | EXEC.LOAD.WORKLOAD_ID | 配置的 workload ID。 | 僅 Load；ID 產生前可用。 |
 | EXEC.LOAD.USER_ID | 穩定 virtual user ID。 | 僅 closed Load；arrival-rate 缺席。 |
 | EXEC.LOAD.ITERATION | 數值 iteration 序號。 | 僅 Load；ID 產生前可用。 |
-| EXEC.LOAD.PHASE | WARMUP、RAMP_UP、STEADY 或 RAMP_DOWN。 | 僅 Load；ID 產生前可用。 |
+| EXEC.LOAD.PHASE | RAMP_UP、WARMUP、STEADY 或 RAMP_DOWN。 | 僅 Load；ID 產生前可用。 |
 
 EXEC.LOAD 只公開穩定 identity。Scheduler counter、queue state 與 timing diagnostics 留在 evidence-only DIAG.load，不能作為 expression root。
 

@@ -9,6 +9,9 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Random;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -30,7 +33,18 @@ class RandomThinkTimeSchedulerTest {
                     Collections.emptyList(), null, null);
         };
 
-        LoadRunResult result = new ClosedVuScheduler(scenario, runner, "random-run", events::add, fake.timing()).run();
+        ThreadPoolExecutor inlineWorkers = new ThreadPoolExecutor(1, 1, 0L, TimeUnit.MILLISECONDS,
+                new LinkedBlockingQueue<Runnable>()) {
+            @Override public void execute(Runnable task) { task.run(); }
+        };
+        LoadRunResult result;
+        try {
+            ClosedVuScheduler scheduler = new ClosedVuScheduler(scenario, runner, "random-run", events::add, fake.timing());
+            scheduler.useSharedWorkers(inlineWorkers);
+            result = scheduler.run();
+        } finally {
+            inlineWorkers.shutdownNow();
+        }
         List<LoadEvent> completions = new ArrayList<LoadEvent>();
         for (LoadEvent event : events) if (event.completed()) completions.add(event);
 

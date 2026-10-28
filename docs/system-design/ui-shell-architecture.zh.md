@@ -23,7 +23,7 @@ Vite 將靜態輸出寫入 `att-web/frontend/dist`。Maven 將這些檔案複製
 ## State 和整合邊界
 
 - `types.ts`、`api.ts`、`state.ts` 和 `router.ts` 是共用 TypeScript 基礎。Feature operations 可集中加入 `api.ts`；pages 不自行建構 API URLs。
-- `ServerVersion.inlineLoadEnabled` 和 `loadSchedulingEnabled` 會保存在 server capability state，並傳入 shell 和 feature routes。API 不會提供目前 principal，因此 identity chip 明確顯示「Server managed」和「not exposed by API」。
+- `ServerVersion.inlineLoadEnabled`、`loadSchedulingEnabled` 和 `authenticationRequired` 會保存在 server capability state，並傳入 shell 和 feature routes。API 不會提供目前 principal，因此 identity chip 明確顯示「Server managed」和「not exposed by API」。
 - `AppRoute` 包含 dashboard、package list、package/resource、第一層 Configuration、單一 target Quick Load、jobs/job、Advanced Load/package、Scheduled Load 及 Settings。`useNavigationGuard()` 提供 `navigate()` 和 `registerUnsavedChanges()`；Shell 使用 keyboard-accessible discard dialog 確認內部或 browser-history navigation。
 - Shell context 會提供 package、environment 和 accepted-job callbacks，讓後續 modules 由 app root 管理狀態。
 - Dashboard summary 和 lists 只使用 `/version`、`/packages` 和 `/jobs` responses。數量只描述回傳 rows；API error 不會顯示為零。
@@ -49,7 +49,11 @@ Scheduled Load 使用 lazy-loaded React route。只有 `/api/v1/version` 回報 
 
 Quick 和 Advanced Load 可在目前編輯器上以 dialog 開啟排程建立表單。取消後會返回已驗證的 Load draft；Server 會在儲存前拒絕含已分類敏感值的 inline snapshot。
 
-Shell 會跟隨 `prefers-color-scheme`，直到使用者選擇主題。Settings 頁提供 System、Light 和 Dark 選項；明確選擇會保存在此 browser，System 則移除 override。按 `/` 或 `Ctrl K`/`⌘ K` 開啟頁面 palette，按 `?` 開啟快捷鍵說明，Escape 關閉對話框及手機導覽。在 Advanced Load 頁面，`Ctrl Enter`/`⌘ Enter` 會對有效且已驗證的 draft 呼叫既有確認流程。
+`uiLocale.ts` 會轉譯 English 和 Traditional Chinese 的文字及 accessibility attributes。`/api/v1/auth/me/preferences` 依 authenticated account 的穩定 server identity 儲存語言及主題。Studio 先載入帳戶值，再使用舊 browser 值作後備，之後才依 browser 語言和系統主題預設。只會在帳戶尚無儲存值時遷移既有明確 browser 選擇；後續 browser 編輯不會覆蓋帳戶值。匿名部署或不支援此 endpoint 的舊 Server 會使用 browser local storage，並在 Settings 顯示持久化狀態。切換帳戶時，載入新帳戶前會清除共用的舊 browser keys。Login page 獨立訊息會讀取 browser 語言偏好。語言選擇不會更改 API payload、resource identifier、source text 或 code examples。
+
+Browser-only 設定屬於 browser profile 及 origin。Origin 由 scheme、hostname 及 port 組成；由 `http` 改為 `https`，或改變 hostname 或 port，會使用不同的 local storage。Context path 不會改變 origin。若要診斷遺失的舊 browser 語言值，請在相同 origin 及 browser profile 的 DevTools 執行 `localStorage.getItem('att-ui-language')`。
+
+Shell 會跟隨 `prefers-color-scheme`，直到使用者選擇主題。Settings 頁提供 System、Light 和 Dark 選項；可用帳戶儲存時會保存至 authenticated account，否則保留在 browser storage，並在 Settings 顯示後備狀態。按 `/` 或 `Ctrl K`/`⌘ K` 開啟頁面 palette，按 `?` 開啟快捷鍵說明，Escape 關閉對話框及手機導覽。在 Advanced Load 頁面，`Ctrl Enter`/`⌘ Enter` 會對有效且已驗證的 draft 呼叫既有確認流程。
 
 ## 各 Phase 截圖
 

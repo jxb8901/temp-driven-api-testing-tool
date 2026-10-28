@@ -31,7 +31,7 @@ class RuntimeLifecycleTest {
                 JobEvents events=new JobEvents(temp.resolve("journal-"+j+"/events.jsonl"),64,executor,()->{
                     started.countDown();try {release.await();}catch(InterruptedException e){Thread.currentThread().interrupt();throw new RuntimeException(e);}
                 });
-                for(int i=0;i<128;i++)events.append("log",Map.of("console","line "+i));
+                for(int i=0;i<512;i++)events.append("log",Map.of("console","line "+i));
             }
             assertTrue(started.await(5,TimeUnit.SECONDS));assertFalse(executor.getQueue().isEmpty());
             ExecutorService closing=Executors.newSingleThreadExecutor();
@@ -46,7 +46,7 @@ class RuntimeLifecycleTest {
             assertThrows(RejectedExecutionException.class,()->executor.execute(()->{}));
             for(int j=0;j<3;j++) {
                 JobEvents replay=new JobEvents(temp.resolve("journal-"+j+"/events.jsonl"),64);
-                assertEquals(128,replay.latest());assertEquals(64,replay.after(0).size());
+                assertEquals(512,replay.latest());assertEquals(64,replay.after(0).size());
                 assertFalse(Files.exists(temp.resolve("journal-"+j+"/events.jsonl.tmp")));
             }
             try(ServerRuntime reopened=new ServerRuntime(config,null)){assertFalse(compactions(reopened).isShutdown());}
@@ -80,17 +80,25 @@ class RuntimeLifecycleTest {
         } finally {first.close();second.close();}
         try(JobStore reopened=new JobStore(config)){assertEquals("Persisted",reopened.schedule("S1").name);}
     }
-    @Test void failedStartupReleasesStoreAndAllRuntimeThreads() throws Exception {
+    @Test void corruptRecoveredJournalDoesNotBlockStartupAndReleasesResources() throws Exception {
         ServerConfig config=config();
         Files.createDirectories(config.dataDir.resolve("jobs"));
-        Files.writeString(config.dataDir.resolve("jobs/not-a-directory"),"blocked");
-        // Corrupt a recovered job journal parent so recovery fails after executor allocation.
         try(JobStore store=new JobStore(config)) {
             Job job=new Job("J0000000000000001","run","p","alice",null,null);
             store.insert(job,"{}");
         }
+        // A path collision makes this recovered Job's event journal unreadable.
         Files.writeString(config.dataDir.resolve("jobs/J0000000000000001"),"blocked");
-        assertThrows(Exception.class,()->new ServerRuntime(config,null));
+
+        ServerRuntime runtime=new ServerRuntime(config,null);
+        try {
+            assertEquals("ERROR",runtime.store.get("J0000000000000001").get("status"));
+            assertEquals(1,runtime.store.list(100).size(),"The damaged Job metadata should remain available");
+            JobEvents history=runtime.events("J0000000000000001");
+            assertTrue(history.historyDegraded());
+            assertEquals("ATT-JOURNAL-PERSISTENCE-DEGRADED",history.diagnostic().get("code"));
+        } finally {runtime.close();}
+
         try(JobStore store=new JobStore(config)){assertNotNull(store.get("J0000000000000001"));}
         assertTimeoutPreemptively(Duration.ofSeconds(5),()->{
             while(Thread.getAllStackTraces().keySet().stream().anyMatch(t->t.isAlive()&&t.getName().startsWith("att-server-")))Thread.sleep(10);

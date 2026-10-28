@@ -183,8 +183,8 @@ public final class LoadWorkload {
         Map<String, Object> load = new LinkedHashMap<String, Object>();
         if (model == LoadScenario.Model.CLOSED) load.put("users", users);
         else load.put("arrivalRate", arrivalRate);
-        load.put("warmup", ThinkTimePolicy.format(warmup.toMillis()));
         load.put("rampUp", ThinkTimePolicy.format(rampUp.toMillis()));
+        load.put("warmup", ThinkTimePolicy.format(warmup.toMillis()));
         load.put("duration", ThinkTimePolicy.format(duration.toMillis()));
         load.put("rampDown", ThinkTimePolicy.format(rampDown.toMillis()));
         if (model == LoadScenario.Model.ARRIVAL_RATE) {

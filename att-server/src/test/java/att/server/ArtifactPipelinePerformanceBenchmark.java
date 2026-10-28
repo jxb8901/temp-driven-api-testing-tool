@@ -31,8 +31,16 @@ class ArtifactPipelinePerformanceBenchmark {
                 Path file=output.resolve("load/run/samples/workload-"+(i%4)+"/"+i+".log");
                 Files.createDirectories(file.getParent());Files.write(file,bytes);
             }
+            byte[] structured=("time=2026-10-28T08:00:00Z method=GET path=/api/v1/jobs status=200 latency_ms=12\n").repeat(8192).getBytes(StandardCharsets.UTF_8);
+            byte[] repetitive=("OK\n").repeat(32768).getBytes(StandardCharsets.UTF_8);
+            for(Map.Entry<String,byte[]> fixture:Map.of("structured.log",structured,"repetitive.log",repetitive).entrySet()) {
+                digest.update(fixture.getValue());sourceBytes+=fixture.getValue().length;
+                Path file=output.resolve("load/run/samples/"+fixture.getKey());Files.createDirectories(file.getParent());Files.write(file,fixture.getValue());
+            }
             Path html=output.resolve("load/run/report/index.html");Files.createDirectories(html.getParent());
             Files.writeString(html,"<html><a href=\"../samples/workload-0/0.log\">Evidence</a></html>");
+            writeSuccessfulLoadBundleWithCheckpoints(output);
+            long privateSourceBytesBeforePublication=sourceTreeBytes(output);
             List<Map<String,Object>> measurements=new ArrayList<>();
             for(int iteration=-2;iteration<samples;iteration++) {
                 for(var pool:ManagementFactory.getMemoryPoolMXBeans())pool.resetPeakUsage();
@@ -42,7 +50,7 @@ class ArtifactPipelinePerformanceBenchmark {
                 try {
                     ArtifactArchive.build(output,archive);
                 } finally {metrics.finish();ArtifactMetricsRecorder.CURRENT.remove();}
-                assertEquals(files+1,((List<?>)ArtifactArchive.verify(archive,true).get("entries")).size());
+                assertEquals(files+8,((List<?>)ArtifactArchive.verify(archive,true).get("entries")).size());
                 String text=new String(ArtifactArchive.read(archive,"load/run/samples/workload-0/0.log"),StandardCharsets.UTF_8);
                 assertFalse(text.contains("synthetic-secret"));assertTrue(text.contains("[REDACTED_SECRET]"));
                 String publishedHtml=new String(ArtifactArchive.read(archive,"load/run/report/index.html"),StandardCharsets.UTF_8);
@@ -56,12 +64,13 @@ class ArtifactPipelinePerformanceBenchmark {
                     row.put("heapPoolsPeakBytes",heapPeak);measurements.add(row);
                 }
             }
-            Map<String,Object> row=new LinkedHashMap<>();row.put("files",files+1);row.put("sourceBytesWithoutHtml",sourceBytes);
+            Map<String,Object> row=new LinkedHashMap<>();row.put("files",files+8);row.put("sourceBytesWithoutHtml",sourceBytes);
             row.put("fixtureBodySha256",HexFormat.of().formatHex(digest.digest()));row.put("samples",measurements);
             for(String metric:List.of("publicationWallMs","scanValidationPreservationMs","zipWriteMs","verificationFsyncMs","cleanupMs","writerCpuMs")) {
                 double[] values=measurements.stream().map(m->m.get(metric)).filter(Objects::nonNull).mapToDouble(v->((Number)v).doubleValue()).sorted().toArray();
                 if(values.length>0)row.put(metric,Map.of("p50",values[(values.length-1)/2],"p95",values[(int)Math.ceil(values.length*.95)-1]));
             }
+            row.put("compressionModes",measureCompressionModes(output,files));
             // Keep the resource pass outside the timed sample series. The sampler observes
             // OS RSS for the benchmark JVM and descendants while a representative archive is built.
             ArtifactMetricsRecorder resourceMetrics=new ArtifactMetricsRecorder(System.nanoTime(),1,false);
@@ -81,6 +90,11 @@ class ArtifactPipelinePerformanceBenchmark {
             ioVolume.put("zipEntryInputBytes",optionalMetric(resourceMetrics.value,"zipWriteInputBytes"));
             ioVolume.put("verificationPayloadBytesRead",optionalMetric(resourceMetrics.value,"verificationBytesRead"));
             ioVolume.put("zipBytesWritten",resourceMetrics.value.zipBytes==null?0:resourceMetrics.value.zipBytes);
+            ioVolume.put("sourceTreeBytesBeforePublication",privateSourceBytesBeforePublication);
+            ioVolume.put("sourceTreeBytesAfterPublication",sourceTreeBytes(output));
+            ioVolume.put("verifiedCheckpointsExcludedCount",resourceMetrics.value.intentionallyExcludedRecoveryCheckpointFiles);
+            ioVolume.put("verifiedCheckpointBytesExcluded",resourceMetrics.value.intentionallyExcludedRecoveryCheckpointBytes);
+            ioVolume.put("archivePayloadBytesAfterClassification",resourceMetrics.value.includedBytes);
             ioVolume.put("measurement", "application-level bytes; not physical device I/O");
             ioVolume.put("nullCounterMeaning", "counter is not available in this revision's metrics API");
             row.put("ioVolume",ioVolume);
@@ -95,6 +109,74 @@ class ArtifactPipelinePerformanceBenchmark {
         Files.createDirectories(destination.toAbsolutePath().getParent());
         ServerRuntime.JSON.writerWithDefaultPrettyPrinter().writeValue(destination.toFile(),report);
         System.out.println("Artifact pipeline benchmark written to "+destination.toAbsolutePath());
+    }
+
+    private List<Map<String,Object>> measureCompressionModes(Path output,int files) throws Exception {
+        int samples=Integer.getInteger("att.archive.compressionSamples",5);
+        assertTrue(samples>=1&&samples<=1000);
+        List<Map<String,Object>> modes=new ArrayList<>();
+        for(String mode:List.of("store","deflate","auto")) {
+            List<Map<String,Object>> observations=new ArrayList<>();
+            for(int iteration=-1;iteration<samples;iteration++) {
+                ArtifactMetricsRecorder metrics=new ArtifactMetricsRecorder(System.nanoTime(),1);
+                Path archive=temp.resolve("compression-"+files+"-"+mode+"-"+iteration+"/archive.zip");
+                ArtifactMetricsRecorder.CURRENT.set(metrics);
+                try { ArtifactArchive.build(output,archive,null,new ServerConfig.ArchiveCompression(mode,3)); }
+                finally { metrics.finish();ArtifactMetricsRecorder.CURRENT.remove(); }
+                Map<String,Object> manifest=ArtifactArchive.verify(archive,true);
+                assertEquals(files+8,((List<?>)manifest.get("entries")).size());
+                if(iteration>=0)observations.add(ServerRuntime.JSON.convertValue(metrics.value,Map.class));
+            }
+            Map<String,Object> modeRow=new LinkedHashMap<>();modeRow.put("mode",mode);modeRow.put("level",3);modeRow.put("samples",observations);
+            for(String metric:List.of("zipBytes","compressedPayloadBytes","compressionDurationMs","compressionSavingsPercent",
+                    "storedEntries","deflatedEntries","compressionFallbackCount","writerCpuMs","writerAllocatedBytes")) {
+                double[] values=observations.stream().map(item->item.get(metric)).filter(Number.class::isInstance)
+                        .mapToDouble(item->((Number)item).doubleValue()).sorted().toArray();
+                if(values.length>0)modeRow.put(metric,Map.of("p50",values[(values.length-1)/2],"p95",values[(int)Math.ceil(values.length*.95)-1]));
+            }
+            modes.add(modeRow);
+        }
+        return modes;
+    }
+
+    private static void writeSuccessfulLoadBundleWithCheckpoints(Path output) throws Exception {
+        Path run=output.resolve("load/benchmark");Files.createDirectories(run.resolve("report"));Files.createDirectories(run.resolve("details/v1"));
+        Map<String,Object> summary=new LinkedHashMap<>();summary.put("runId","benchmark");summary.put("durationMs",1000L);
+        summary.put("executionStatus","PASS");summary.put("performanceVerdict","NOT_MET");summary.put("report","report/index.html");
+        summary.put("reportManifest","load-report-manifest.json");
+        Files.write(run.resolve("load-summary.json"),ServerRuntime.JSON.writeValueAsBytes(summary));
+        Files.writeString(run.resolve("load-summary.yaml"),"runId: benchmark\nexecutionStatus: PASS\n",StandardCharsets.UTF_8);
+        Files.writeString(run.resolve("report/index.html"),"<html>complete report</html>",StandardCharsets.UTF_8);
+        Files.writeString(run.resolve("details/v1/manifest.json"),"{\"complete\":true}",StandardCharsets.UTF_8);
+        List<Map<String,Object>> listed=new ArrayList<>();
+        for(String relative:List.of("load-summary.json","load-summary.yaml","report/index.html","details/v1/manifest.json")) {
+            byte[] bytes=Files.readAllBytes(run.resolve(relative));
+            listed.add(Map.of("path",relative,"lengthBytes",bytes.length,"sha256",ArtifactArchive.sha256(bytes)));
+        }
+        Map<String,Object> manifest=new LinkedHashMap<>();manifest.put("schemaVersion",ArtifactArchive.LOAD_REPORT_MANIFEST_SCHEMA);
+        manifest.put("state","COMPLETE");manifest.put("complete",Boolean.TRUE);manifest.put("runId","benchmark");
+        manifest.put("executionStatus","PASS");manifest.put("performanceVerdict","NOT_MET");manifest.put("durationMs",1000L);manifest.put("files",listed);
+        Files.write(run.resolve(ArtifactArchive.LOAD_REPORT_MANIFEST),ServerRuntime.JSON.writeValueAsBytes(manifest));
+        Path checkpointDirectory=run.resolve("checkpoints/aggregate");Files.createDirectories(checkpointDirectory);
+        for(long sequence=1;sequence<=2;sequence++) {
+            Map<String,Object> checkpoint=new LinkedHashMap<>();checkpoint.put("schemaVersion","att-load-metrics-checkpoint/v2");
+            checkpoint.put("state",sequence==2?"FINAL_CHECKPOINT":"CHECKPOINT");checkpoint.put("runId","benchmark");
+            checkpoint.put("scope","aggregate");checkpoint.put("sequence",sequence);checkpoint.put("capturedAt","2026-10-28T08:00:00Z");
+            checkpoint.put("finalized",sequence==2);checkpoint.put("payload",Map.of("metrics",Map.of("completed",sequence)));
+            checkpoint.put("integritySha256",ArtifactArchive.sha256(ServerRuntime.JSON.writeValueAsBytes(checkpoint)));
+            Files.write(checkpointDirectory.resolve("checkpoint-"+String.format(Locale.ROOT,"%020d",sequence)+".json"),
+                    ServerRuntime.JSON.writeValueAsBytes(checkpoint));
+        }
+    }
+
+    private static long sourceTreeBytes(Path root) throws Exception {
+        try(var paths=Files.walk(root)) {
+            long total=0L;
+            for(Path path:(Iterable<Path>)paths.filter(item->Files.isRegularFile(item,LinkOption.NOFOLLOW_LINKS))::iterator) {
+                long size=Files.size(path);total=size>Long.MAX_VALUE-total?Long.MAX_VALUE:total+size;
+            }
+            return total;
+        }
     }
 
     private static Object optionalMetric(Object metrics,String name) {
