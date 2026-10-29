@@ -22,6 +22,7 @@ describe('authenticated isolated report preview', () => {
       'JngTyYfak/+hWviebrkpXD20Pdm7CCCZsual7sBCLrQ=',
     ]) expect(policy).toContain(`'sha256-${hash}'`);
     expect(policy).not.toContain("script-src 'unsafe-inline'");
+    expect(policy).toContain("style-src-attr 'unsafe-inline'");
   });
 
   it('accepts only relative archive paths, never credentials-bearing external links', () => {
@@ -36,9 +37,17 @@ describe('authenticated isolated report preview', () => {
   it('retains opaque-origin sandbox, inherits the Studio nonce, and prevents fallback link navigation', async () => {
     const html = await prepareReportHtml(report, 'run/report/index.html', 'STUDIO_NONCE');
     const document = new DOMParser().parseFromString(html, 'text/html');
+    const policy = document.querySelector('meta[http-equiv="Content-Security-Policy"]')?.getAttribute('content') || '';
+    expect(policy).toContain("style-src 'unsafe-inline' 'nonce-STUDIO_NONCE'");
+    expect(policy).toContain("style-src-attr 'unsafe-inline'");
     expect(document.querySelector('meta[http-equiv="Content-Security-Policy"]')?.getAttribute('content'))
-      .toContain("'sha256-zhg8uc2ehLr1YOtvIswiYT86nszYQvE88Tg1hupHR80='");
-    expect(document.querySelector('style')?.getAttribute('nonce')).toBe('STUDIO_NONCE');
+      .toContain("'sha256-ziKzIL4i4zPg6m2UvoYD8Jkb6Rj2S+c1hIS6rC1s4O0='");
+    expect(document.querySelector('style')).toBeNull();
+    const styleData = document.querySelector<HTMLTemplateElement>('#att-report-style-data');
+    expect(styleData).not.toBeNull();
+    expect(styleData?.dataset.attStyleNonce).toBe('STUDIO_NONCE');
+    expect(JSON.parse(styleData?.content.textContent || '[]')).toEqual(['body{color:green}']);
+    expect(html).toContain("style.nonce=nonce");
     expect(document.querySelector('script')?.getAttribute('nonce')).toBe('STUDIO_NONCE');
     const log = document.querySelector<HTMLAnchorElement>('a[data-att-report-link]');
     expect(log?.getAttribute('data-att-report-link')).toBe('../../case.log');
@@ -52,6 +61,13 @@ describe('authenticated isolated report preview', () => {
     expect(unsafe).not.toContain('alert(2)');
     expect(sanitized.querySelector('img')?.hasAttribute('src')).toBe(false);
     expect(sanitized.querySelector('meta[http-equiv="Content-Security-Policy"]')?.getAttribute('content')).toContain("default-src 'none'");
+  });
+
+  it('extracts only actual style blocks before parsing report markup', async () => {
+    const html = await prepareReportHtml('<script>const sample = "<style>not css</style>";</script><style media="screen">body{color:green}</style>', 'report/index.html', 'NONCE');
+    const document = new DOMParser().parseFromString(html, 'text/html');
+    const styles = document.querySelector<HTMLTemplateElement>('#att-report-style-data');
+    expect(JSON.parse(styles?.content.textContent || '[]')).toEqual(['body{color:green}']);
   });
 
   let host: HTMLDivElement;

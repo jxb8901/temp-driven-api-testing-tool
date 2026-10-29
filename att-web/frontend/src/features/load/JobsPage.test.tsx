@@ -55,6 +55,7 @@ beforeEach(() => {
 afterEach(async () => {
   await act(async () => root.unmount());
   host.remove();
+  Reflect.deleteProperty(document, 'hidden');
   vi.useRealTimers();
 });
 
@@ -803,7 +804,9 @@ describe('JobsPage React feature', () => {
       schemaVersion: 'att-load-terminal-result/v1', execution: { status: 'PASS' }, performance: { verdict: 'NOT_EVALUATED' },
       metrics: { scheduled: 20, started: 20, completed: 19, success: 18, runtimeError: 0 },
       thresholds: { verdict: 'NOT_MET', total: 2 },
-      workloads: { fast: { thresholds: { total: 1 } }, slow: { thresholds: { total: 3 } } },
+      workloads: { total: 2, items: [
+        { id: 'fast', thresholds: { total: 1 } }, { id: 'slow', thresholds: { total: 3 } },
+      ], omittedCount: 0 },
       archive: { status: 'PENDING', reportAvailability: 'PENDING', paths: { report: 'load/JOB-208/old-report.html' } },
     } } };
     const overview = vi.fn(async () => ({ archiveStatus: 'READY' as const, summaryVerified: true,
@@ -855,11 +858,46 @@ describe('JobsPage React feature', () => {
     await advance();
     await advance(62_000);
     expect(status).toHaveBeenCalledTimes(31);
-    const lastSignal = status.mock.calls.at(-1)?.[1];
     await click(host.querySelector('#job-tab-live')!);
-    expect(lastSignal?.aborted).toBe(true);
     await advance(10_000);
     expect(status).toHaveBeenCalledTimes(31);
+  });
+
+  it('pauses archive status requests while the document is hidden and resumes when visible', async () => {
+    Object.defineProperty(document, 'hidden', { configurable: true, value: true });
+    const status = vi.fn(async (_jobId: string, _signal?: AbortSignal) => ({ archiveStatus: 'PENDING' as const,
+      summaryVerified: false, reportAvailability: 'UNVERIFIED' as const, omissionReasonsAvailable: false }));
+    const api = makeApi({ getJob: vi.fn(async () => ({ ...sampleJob, status: 'PASS' })), getJobArtifactOverview: status });
+    await act(async () => root.render(<JobsPage api={api} jobId="JOB-204" onOpenJob={vi.fn()} onShowList={vi.fn()} />));
+    await advance(10_000);
+    expect(status).not.toHaveBeenCalled();
+
+    Object.defineProperty(document, 'hidden', { configurable: true, value: false });
+    await act(async () => { document.dispatchEvent(new Event('visibilitychange')); await Promise.resolve(); });
+    await advance();
+    expect(status).toHaveBeenCalledTimes(1);
+    await advance(2_000);
+    expect(status).toHaveBeenCalledTimes(2);
+  });
+
+  it('aborts an in-flight archive status request when the document becomes hidden', async () => {
+    const first = deferred<{ archiveStatus: 'PENDING'; summaryVerified: false; reportAvailability: 'UNVERIFIED'; omissionReasonsAvailable: false }>();
+    const status = vi.fn()
+      .mockImplementationOnce((_jobId: string, _signal?: AbortSignal) => first.promise)
+      .mockResolvedValue({ archiveStatus: 'PENDING' as const, summaryVerified: false,
+        reportAvailability: 'UNVERIFIED' as const, omissionReasonsAvailable: false });
+    const api = makeApi({ getJob: vi.fn(async () => ({ ...sampleJob, status: 'PASS' })), getJobArtifactOverview: status });
+    await act(async () => root.render(<JobsPage api={api} jobId="JOB-204" onOpenJob={vi.fn()} onShowList={vi.fn()} />));
+    await advance();
+    expect(status).toHaveBeenCalledTimes(1);
+    const signal = status.mock.calls[0][1] as AbortSignal;
+
+    Object.defineProperty(document, 'hidden', { configurable: true, value: true });
+    await act(async () => { document.dispatchEvent(new Event('visibilitychange')); await Promise.resolve(); });
+    expect(signal.aborted).toBe(true);
+    first.resolve({ archiveStatus: 'PENDING', summaryVerified: false, reportAvailability: 'UNVERIFIED', omissionReasonsAvailable: false });
+    await advance();
+    expect(status).toHaveBeenCalledTimes(1);
   });
 
   it.each([

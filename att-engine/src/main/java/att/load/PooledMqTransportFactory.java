@@ -115,7 +115,7 @@ public final class PooledMqTransportFactory implements MqTransport.Factory, Auto
                         throw new IllegalStateException("MQ_CONNECTION_DISCONNECT_FAILED", failure);
                     }
                 });
-        PoolEntry candidate = new PoolEntry(created, config.id(), preparationConnect, deadlineNanos);
+        PoolEntry candidate = new PoolEntry(created, diagnosticIdentity(config), preparationConnect, deadlineNanos);
         PoolEntry raced = pools.putIfAbsent(poolKey, candidate);
         if (raced != null) {
             created.close();
@@ -127,6 +127,14 @@ public final class PooledMqTransportFactory implements MqTransport.Factory, Auto
             throw new IllegalStateException("MQ resource factory is closed");
         }
         return candidate;
+    }
+
+    private static String diagnosticIdentity(MqHelperConfig config) {
+        String logical = config.logicalId();
+        String instance = config.instanceId();
+        if (logical == null || logical.trim().isEmpty()) return config.id();
+        if (instance == null || instance.trim().isEmpty() || logical.equals(instance)) return logical;
+        return logical + ":" + instance;
     }
 
     @Override public void close() {

@@ -5,8 +5,8 @@ import { contextRelativeReturnTo } from '../../contextPaths';
 
 type ReadText = (jobId: string, path: string, signal?: AbortSignal) => Promise<string>;
 
-const BRIDGE = "(()=>{function navigate(event){const target=event.target;if(!(target instanceof Element))return;const link=target.closest('a[data-att-report-link]');if(!link)return;const href=link.getAttribute('data-att-report-link');if(!href)return;event.preventDefault();parent.postMessage({type:'att-report-navigation',href},'*')}document.addEventListener('click',navigate);document.addEventListener('keydown',event=>{if(event.key==='Enter')navigate(event)});})();";
-const BRIDGE_HASH = "'sha256-zhg8uc2ehLr1YOtvIswiYT86nszYQvE88Tg1hupHR80='";
+const BRIDGE = "(()=>{const data=document.getElementById('att-report-style-data'),nonce=data?.dataset.attStyleNonce||'';if(data){try{const styles=JSON.parse(data.content.textContent||'[]');if(Array.isArray(styles))styles.forEach(css=>{if(typeof css!=='string')return;const style=document.createElement('style');if(nonce)style.nonce=nonce;style.textContent=css;document.head.appendChild(style)})}catch{}data.remove()}function navigate(event){const target=event.target;if(!(target instanceof Element))return;const link=target.closest('a[data-att-report-link]');if(!link)return;const href=link.getAttribute('data-att-report-link');if(!href)return;event.preventDefault();parent.postMessage({type:'att-report-navigation',href},'*')}document.addEventListener('click',navigate);document.addEventListener('keydown',event=>{if(event.key==='Enter')navigate(event)});})();";
+const BRIDGE_HASH = "'sha256-ziKzIL4i4zPg6m2UvoYD8Jkb6Rj2S+c1hIS6rC1s4O0='";
 const REPORT_ORIGIN = 'https://att-report.invalid';
 const APPROVED_REPORT_SCRIPTS = [
   { producer: 'legacy-report-v1', hash: 'DmkzPdiGxyCfiKKZtr34jiaf1ukqUeAK8RSwFF19ryg=' },
@@ -34,7 +34,13 @@ export function resolveReportHref(currentPath: string, href: string): string | n
  * Unreviewed scripts, external resources and event handlers must not gain the Studio nonce.
  */
 export async function prepareReportHtml(source: string, currentPath: string, studioNonce: string): Promise<string> {
-  const document = new DOMParser().parseFromString(source, 'text/html');
+  const reportStyles: string[] = [];
+  const htmlWithoutStyles = source.replace(/<!--[\s\S]*?(?:-->|$)|<script\b[^>]*>[\s\S]*?(?:<\/script\s*>|$)|<style\b[^>]*>([\s\S]*?)(?:<\/style\s*>|$)/gi,
+    (block, css: string | undefined) => {
+      if (css !== undefined) { reportStyles.push(css); return ''; }
+      return block;
+    });
+  const document = new DOMParser().parseFromString(htmlWithoutStyles, 'text/html');
   document.querySelectorAll('iframe, object, embed, form, base, link, meta[http-equiv], foreignObject').forEach(node => node.remove());
   for (const element of document.querySelectorAll('*')) {
     for (const attribute of Array.from(element.attributes)) {
@@ -71,12 +77,17 @@ export async function prepareReportHtml(source: string, currentPath: string, stu
     if (!trusted) script.remove();
     else if (studioNonce) script.setAttribute('nonce', studioNonce);
   }
-  if (studioNonce) document.querySelectorAll('style').forEach(element => element.setAttribute('nonce', studioNonce));
+  const styleData = document.createElement('template');
+  styleData.id = 'att-report-style-data';
+  if (studioNonce) styleData.dataset.attStyleNonce = studioNonce;
+  styleData.content.appendChild(document.createTextNode(JSON.stringify(reportStyles)));
+  document.head.appendChild(styleData);
   const policy = document.createElement('meta');
   policy.setAttribute('http-equiv', 'Content-Security-Policy');
   policy.setAttribute('content', "default-src 'none'; script-src " + APPROVED_REPORT_SCRIPTS.map(script => "'sha256-" + script.hash + "'").join(' ') + ' ' + BRIDGE_HASH
     + (studioNonce ? " 'nonce-" + studioNonce + "'" : '')
     + "; style-src 'unsafe-inline'" + (studioNonce ? " 'nonce-" + studioNonce + "'" : '')
+    + "; style-src-attr 'unsafe-inline'"
     + "; img-src data:; form-action 'none'; base-uri 'none'; connect-src 'none'");
   document.head.prepend(policy);
 

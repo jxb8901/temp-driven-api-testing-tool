@@ -212,26 +212,47 @@ function useJobArtifactOverview(api: LoadJobsApi, jobId: string, enabled: boolea
   const features = api === serverApi ? artifactApi : api;
   useEffect(() => {
     if (!enabled) { setLoading(false); setValue(null); setError(''); return; }
-    const controller = new AbortController();
+    let stopped = false;
+    let visible = !document.hidden;
     let timer: ReturnType<typeof setTimeout> | undefined;
     let polls = 0;
-    let running = false;
+    let pending = true;
+    let request: AbortController | null = null;
+    const cancelTimer = () => { if (timer) clearTimeout(timer); timer = undefined; };
     const load = async () => {
-      if (controller.signal.aborted || running || !features.getJobArtifactOverview) return;
-      running = true; setLoading(true);
+      if (stopped || !visible || request || !features.getJobArtifactOverview || polls >= 31) return;
+      const controller = new AbortController();
+      request = controller; polls++; setLoading(true);
       try {
         const next = await features.getJobArtifactOverview(jobId, controller.signal);
-        if (controller.signal.aborted) return;
+        if (stopped || controller.signal.aborted || request !== controller) return;
         setValue(next); setError('');
-        if ((next.archiveStatus === 'PENDING' || next.archiveStatus === 'ARCHIVING') && polls < 30) {
-          polls++; timer = setTimeout(() => void load(), 2000);
+        pending = next.archiveStatus === 'PENDING' || next.archiveStatus === 'ARCHIVING';
+        if (pending && polls < 31 && visible) {
+          timer = setTimeout(() => { timer = undefined; void load(); }, 2000);
         }
       } catch (reason) {
-        if (!controller.signal.aborted) setError(reason instanceof Error ? reason.message : 'Archive status could not be verified.');
-      } finally { running = false; if (!controller.signal.aborted) setLoading(false); }
+        if (!stopped && !controller.signal.aborted && request === controller)
+          setError(reason instanceof Error ? reason.message : 'Archive status could not be verified.');
+      } finally {
+        if (request === controller) { request = null; if (!stopped) setLoading(false); }
+      }
     };
-    setValue(null); setError(''); void load();
-    return () => { controller.abort(); if (timer) clearTimeout(timer); };
+    const onVisibilityChange = () => {
+      visible = !document.hidden;
+      if (!visible) {
+        cancelTimer(); request?.abort(); request = null; setLoading(false);
+      } else if (pending) {
+        void load();
+      }
+    };
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    setValue(null); setError('');
+    if (visible) void load();
+    return () => {
+      stopped = true; cancelTimer(); request?.abort(); request = null;
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+    };
   }, [api, features, jobId, enabled, refreshKey, attempt]);
   return { value, error, loading, retry: () => setAttempt(current => current + 1) };
 }
@@ -591,8 +612,16 @@ function CompactLoadSummary({ payload, archiveState, archiveMessage, archiveOver
       <div><dt>Completed / successful TPS</dt><dd>{metric(metrics.completedThroughput)} / {metric(metrics.successfulThroughput)} TPS</dd></div>
       <div><dt>Aggregate threshold verdict</dt><dd>{String(thresholds.verdict || 'NOT_EVALUATED')}{typeof thresholds.total === 'number' && Number.isFinite(thresholds.total) ? ` (${metric(thresholds.total)} aggregate checks)` : ''}</dd></div>
       {(() => {
-        const workloads = summary.workloads && typeof summary.workloads === 'object' && !Array.isArray(summary.workloads)
-          ? Object.values(summary.workloads as Record<string, unknown>) : [];
+        const raw = summary.workloads && typeof summary.workloads === 'object' && !Array.isArray(summary.workloads)
+          ? summary.workloads as Record<string, unknown> : null;
+        const hasItems = Boolean(raw && Array.isArray(raw.items));
+        const workloads = raw ? hasItems ? raw.items as unknown[]
+          : Object.values(raw).filter(item => item && typeof item === 'object' && !Array.isArray(item)) : [];
+        const totalValue = hasItems ? raw?.total : workloads.length;
+        const total = typeof totalValue === 'number' && Number.isSafeInteger(totalValue) && totalValue >= 0 ? totalValue : workloads.length;
+        const omittedValue = hasItems ? raw?.omittedCount : 0;
+        const omitted = typeof omittedValue === 'number' && Number.isSafeInteger(omittedValue) && omittedValue >= 0
+          ? omittedValue : Math.max(0, total - workloads.length);
         const checks = workloads.reduce<number>((total, item) => {
           if (!item || typeof item !== 'object' || Array.isArray(item)) return total;
           const threshold = (item as Record<string, unknown>).thresholds;
@@ -600,7 +629,10 @@ function CompactLoadSummary({ payload, archiveState, archiveMessage, archiveOver
             ? (threshold as Record<string, unknown>).total : null;
           return total + (typeof count === 'number' && Number.isFinite(count) ? count : 0);
         }, 0);
-        return <div><dt>Workload threshold checks</dt><dd>{metric(checks)} across {metric(workloads.length)} workloads</dd></div>;
+        const workloadLabel = omitted > 0
+          ? `${metric(checks)} across ${metric(workloads.length)} listed of ${metric(total)} workloads (${metric(omitted)} omitted)`
+          : `${metric(checks)} across ${metric(total)} workloads`;
+        return <div><dt>Workload threshold checks</dt><dd>{raw ? workloadLabel : 'Not available'}</dd></div>;
       })()}
       <div><dt>Detailed report</dt><dd>{availabilityText[reportedState] || reportedState}</dd></div>
     </dl>

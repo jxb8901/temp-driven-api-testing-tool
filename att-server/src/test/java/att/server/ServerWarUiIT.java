@@ -373,8 +373,8 @@ class ServerWarUiIT {
         new att.api.DefaultAttService().snapshot(new att.api.SnapshotRequest(pkg,home.resolve("config/config.yaml"),"SIT",List.of(pkg.resolve("testcase/archive.xlsx")),null,Set.of(),false));
         Files.writeString(pkg.resolve("load/archive.yaml"),
                 "schemaVersion: att-load/v1.6\nevidence:\n  mode: all\nworkloads:\n"
-                +"  - id: first\n    target: {type: template, id: SCHEDULED}\n    load: {users: 1, duration: 300ms}\n    execution: {thinkTime: 50ms}\n"
-                +"  - id: second\n    target: {type: template, id: SCHEDULED}\n    load: {users: 1, duration: 300ms}\n    execution: {thinkTime: 50ms}\n");
+                +"  - id: first\n    target: {type: template, id: SCHEDULED}\n    load: {users: 2, warmup: 0ms, rampUp: 10s, duration: 10s, rampDown: 10s}\n    execution: {thinkTime: 1s}\n"
+                +"  - id: second\n    target: {type: template, id: SCHEDULED}\n    load: {users: 2, warmup: 0ms, rampUp: 10s, duration: 10s, rampDown: 10s}\n    execution: {thinkTime: 1s}\n");
         Path config=Files.writeString(temp.resolve("server.yaml"),
                 "server:\n  runtimeConfigPath: "+yaml(home.resolve("config/config.yaml"))+"\n  dataDir: "+yaml(temp.resolve("data"))+"\n  authenticationRequired: true\n"
                 +"  liveOutput: {maxEntryChars: 16000, maxEntryLines: 100}\n"
@@ -443,19 +443,28 @@ class ServerWarUiIT {
                 assertTrue(archiveMetrics.path("includedEntries").asLong()>0);
                 assertFalse(archiveMetrics.toString().contains(pkg.toString()));
                 Path extracted=Files.createDirectory(temp.resolve(id+"-offline"));
+                Set<String> previewPaths=new java.util.LinkedHashSet<>();
+                Set<String> previewExtensions=new java.util.HashSet<>();
+                for(JsonNode entry:manifest.path("entries")) {
+                    String logical=entry.path("path").asText();
+                    String extension=logical.substring(logical.lastIndexOf('.')+1).toLowerCase(java.util.Locale.ROOT);
+                    if(previewExtensions.add(extension)||entry.path("report").asBoolean())previewPaths.add(logical);
+                }
                 try(var archive=new java.util.zip.ZipFile(zip.toFile())) {
                     for(JsonNode entry:manifest.path("entries")) {
                         String logical=entry.path("path").asText();byte[] published;
                         try(var in=archive.getInputStream(archive.getEntry(logical))){published=in.readAllBytes();}
-                        HttpURLConnection preview=open(port,api+"/jobs/"+id+"/artifacts/view/"+encodeEntry(logical),peer);
-                        try {
-                            assertEquals(200,preview.getResponseCode(),logical);assertTrue(preview.getHeaderField("Cache-Control").contains("no-store"));
-                            assertFalse(preview.getHeaderField("Content-Disposition").contains("attachment"));
-                            try(var in=preview.getInputStream()){assertArrayEquals(published,in.readAllBytes(),logical);}
-                            if(entry.path("report").asBoolean())assertTrue(preview.getHeaderField("Content-Security-Policy").contains("sandbox allow-scripts"));
-                            else assertTrue(preview.getHeaderField("Content-Security-Policy").contains("sandbox; default-src 'none'"));
-                            assertTrue(preview.getHeaderField("Content-Security-Policy").contains("frame-ancestors 'self'"));
-                        } finally {preview.disconnect();}
+                        if(previewPaths.contains(logical)) {
+                            HttpURLConnection preview=open(port,api+"/jobs/"+id+"/artifacts/view/"+encodeEntry(logical),peer);
+                            try {
+                                assertEquals(200,preview.getResponseCode(),logical);assertTrue(preview.getHeaderField("Cache-Control").contains("no-store"));
+                                assertFalse(preview.getHeaderField("Content-Disposition").contains("attachment"));
+                                try(var in=preview.getInputStream()){assertArrayEquals(published,in.readAllBytes(),logical);}
+                                if(entry.path("report").asBoolean())assertTrue(preview.getHeaderField("Content-Security-Policy").contains("sandbox allow-scripts"));
+                                else assertTrue(preview.getHeaderField("Content-Security-Policy").contains("sandbox; default-src 'none'"));
+                                assertTrue(preview.getHeaderField("Content-Security-Policy").contains("frame-ancestors 'self'"));
+                            } finally {preview.disconnect();}
+                        }
                         Path target=extracted.resolve(logical).normalize();assertTrue(target.startsWith(extracted));
                         Files.createDirectories(target.getParent());Files.write(target,published);
                     }

@@ -2,15 +2,18 @@ package att.load;
 
 import java.lang.reflect.Method;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /** Creates a bounded, content-free diagnostic for failed LOAD resource cleanup. */
 final class LoadTeardownDiagnostics {
-    private static final Pattern CODE = Pattern.compile("^([A-Z][A-Z0-9_.:-]{2,95})(?:\\s|:|$)");
+    private static final Pattern CODE = Pattern.compile("^([A-Z][A-Z0-9_.:-]{1,94}[A-Z0-9_])(?:\\s|:|$)");
     private static final int MAX_RESOURCES = 16;
     private static final int MAX_CAUSES = 8;
 
@@ -57,14 +60,27 @@ final class LoadTeardownDiagnostics {
         item.put("failedCloseCount", Math.max(1L, Math.min(1000L, count)));
         List<String> codes = new ArrayList<>();
         Long completion = null, reason = null;
-        Throwable current = cause;
-        for (int depth = 0; current != null && depth < MAX_CAUSES && codes.size() < MAX_CAUSES; depth++, current = current.getCause()) {
+        List<Throwable> pending = new ArrayList<>();
+        Set<Throwable> visited = Collections.newSetFromMap(new IdentityHashMap<Throwable, Boolean>());
+        if (cause != null) pending.add(cause);
+        for (int cursor = 0; cursor < pending.size() && visited.size() < MAX_CAUSES; cursor++) {
+            Throwable current = pending.get(cursor);
+            if (current == null || !visited.add(current)) continue;
             String code = messageCode(current.getMessage());
-            if (code != null && !codes.contains(code)) codes.add(code);
+            if (code != null && !codes.contains(code) && codes.size() < MAX_CAUSES) codes.add(code);
+            if (current instanceof att.exec.MqTransport.Exception) {
+                att.exec.MqTransport.Exception mq = (att.exec.MqTransport.Exception) current;
+                String reasonCode = messageCode(mq.reason());
+                if (reasonCode != null && !codes.contains(reasonCode) && codes.size() < MAX_CAUSES) codes.add(reasonCode);
+                if (mq.completionCode() != null) completion = mq.completionCode().longValue();
+                if (mq.reasonCode() != null) reason = mq.reasonCode().longValue();
+            }
             if (current.getClass().getName().equals("com.ibm.mq.MQException")) {
                 completion = numericMethod(current, "getCompCode");
                 reason = numericMethod(current, "getReason");
             }
+            if (current.getCause() != null) pending.add(current.getCause());
+            for (Throwable suppressed : current.getSuppressed()) if (suppressed != null) pending.add(suppressed);
         }
         if (!codes.isEmpty()) item.put("causeCodes", codes);
         if (completion != null) item.put("mqCompletionCode", completion);
