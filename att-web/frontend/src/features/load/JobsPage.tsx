@@ -11,7 +11,7 @@ import { memo, Profiler, useEffect, useMemo, useRef, useState, type KeyboardEven
 import './load.css';
 import './JobsPage.css';
 import { JobArtifacts } from './JobArtifacts';
-import type { JobResultResponse, JobStatus, JobSummary, JobView, JobsFeatureProps, LoadJobsApi, LoadLiveProgressPoint, LoadLiveProgressSnapshot } from './types';
+import type { JobArtifactOverview, JobResultResponse, JobStatus, JobSummary, JobView, JobsFeatureProps, LoadJobsApi, LoadLiveProgressPoint, LoadLiveProgressSnapshot } from './types';
 import { JobConsoleView } from './JobConsoleView';
 import { useJobConsole } from './JobConsoleContext';
 import { useJobEventStatus, useJobEventStream, type JobStreamConnection } from './useJobEventStream';
@@ -202,6 +202,38 @@ function useLoadArchiveSummary(api: LoadJobsApi, jobId: string, enabled: boolean
   }, [api, features, jobId, enabled, includeSummary, includeMetricSeries, attempt]);
 
   return { availability, detailMetrics, detailEvidence, detailWorkloads, detailRoot, archiveMetrics, error, retry: () => setAttempt(value => value + 1) };
+}
+
+function useJobArtifactOverview(api: LoadJobsApi, jobId: string, enabled: boolean, refreshKey: number) {
+  const [value, setValue] = useState<JobArtifactOverview | null>(null);
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [attempt, setAttempt] = useState(0);
+  const features = api === serverApi ? artifactApi : api;
+  useEffect(() => {
+    if (!enabled) { setLoading(false); setValue(null); setError(''); return; }
+    const controller = new AbortController();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let polls = 0;
+    let running = false;
+    const load = async () => {
+      if (controller.signal.aborted || running || !features.getJobArtifactOverview) return;
+      running = true; setLoading(true);
+      try {
+        const next = await features.getJobArtifactOverview(jobId, controller.signal);
+        if (controller.signal.aborted) return;
+        setValue(next); setError('');
+        if ((next.archiveStatus === 'PENDING' || next.archiveStatus === 'ARCHIVING') && polls < 30) {
+          polls++; timer = setTimeout(() => void load(), 2000);
+        }
+      } catch (reason) {
+        if (!controller.signal.aborted) setError(reason instanceof Error ? reason.message : 'Archive status could not be verified.');
+      } finally { running = false; if (!controller.signal.aborted) setLoading(false); }
+    };
+    setValue(null); setError(''); void load();
+    return () => { controller.abort(); if (timer) clearTimeout(timer); };
+  }, [api, features, jobId, enabled, refreshKey, attempt]);
+  return { value, error, loading, retry: () => setAttempt(current => current + 1) };
 }
 
 const MAX_DETAIL_SERIES_FILES = 9000;
@@ -528,7 +560,7 @@ function unique(values: Array<string | undefined>): string[] {
   return [...new Set(values.filter((value): value is string => Boolean(value)))].sort((a, b) => a.localeCompare(b));
 }
 
-function CompactLoadSummary({ payload, archiveState, archiveMessage }: { payload: JobResultResponse | null; archiveState?: ReportAvailability; archiveMessage?: string }) {
+function CompactLoadSummary({ payload, archiveState, archiveMessage, archiveOverview, archiveHint }: { payload: JobResultResponse | null; archiveState?: ReportAvailability; archiveMessage?: string; archiveOverview?: JobArtifactOverview | null; archiveHint?: string }) {
   const summary = loadTerminalSummary(payload);
   if (!summary) return null;
   const execution = summary.execution && typeof summary.execution === 'object' ? summary.execution as Record<string, unknown> : {};
@@ -538,11 +570,13 @@ function CompactLoadSummary({ payload, archiveState, archiveMessage }: { payload
   const root = primaryLoadError(payload);
   const secondaryWarnings = secondaryLoadWarnings(payload);
   const archive = summary.archive && typeof summary.archive === 'object' ? summary.archive as Record<string, unknown> : {};
-  const reportedState = typeof archiveState === 'string' && archiveState !== 'idle' ? archiveState : String(archive.reportAvailability || archive.status || 'PENDING');
+  const overviewState = archiveOverview?.archiveStatus === 'READY' ? archiveOverview.reportAvailability : archiveOverview?.archiveStatus;
+  const reportedState = overviewState || (typeof archiveState === 'string' && archiveState !== 'idle' ? archiveState : String(archive.reportAvailability || archive.status || 'PENDING'));
   const availabilityText: Record<string, string> = {
-    loading: 'Checking archive availability…', PENDING: 'PENDING — initial hint; open Results or Metrics to check the current archive state.',
+    loading: 'Checking archive availability…', PENDING: archiveOverview ? 'PENDING — current archive state from the Server; any report path hint is unverified.' : 'PENDING — initial status hint only; the archive state is unverified.',
     ARCHIVING: 'ARCHIVING — the report archive is being published.', READY: 'READY — approved report artifacts are available.',
     FAILED: 'FAILED — the inline result remains available.', EXPIRED: 'EXPIRED — the archive is no longer available.', OMITTED: 'OMITTED — the report was not included in the archive.',
+    NOT_PRESENT: 'The archive is verified and contains no primary report.', UNVERIFIED: 'Archive state was read, but this archive version has no verified report summary.',
     ERROR: 'Archive status could not be checked.', UNAVAILABLE: 'Open Artifacts to check the report archive.',
   };
   const metric = (value: unknown) => typeof value === 'number' && Number.isFinite(value) ? METRIC_NUMBER_FORMATTER.format(value) : 'Not available';
@@ -555,9 +589,29 @@ function CompactLoadSummary({ payload, archiveState, archiveMessage }: { payload
       <div><dt>Completed / successful</dt><dd>{metric(metrics.completed)} / {metric(metrics.success)}</dd></div>
       <div><dt>Runtime ERROR / SUT FAIL</dt><dd>{metric(metrics.runtimeError)} / {metric(metrics.failure)}</dd></div>
       <div><dt>Completed / successful TPS</dt><dd>{metric(metrics.completedThroughput)} / {metric(metrics.successfulThroughput)} TPS</dd></div>
-      <div><dt>Threshold verdict</dt><dd>{String(thresholds.verdict || 'NOT_EVALUATED')}{typeof thresholds.total === 'number' && Number.isFinite(thresholds.total) ? ` (${metric(thresholds.total)} checks)` : ''}</dd></div>
+      <div><dt>Aggregate threshold verdict</dt><dd>{String(thresholds.verdict || 'NOT_EVALUATED')}{typeof thresholds.total === 'number' && Number.isFinite(thresholds.total) ? ` (${metric(thresholds.total)} aggregate checks)` : ''}</dd></div>
+      {(() => {
+        const workloads = summary.workloads && typeof summary.workloads === 'object' && !Array.isArray(summary.workloads)
+          ? Object.values(summary.workloads as Record<string, unknown>) : [];
+        const checks = workloads.reduce<number>((total, item) => {
+          if (!item || typeof item !== 'object' || Array.isArray(item)) return total;
+          const threshold = (item as Record<string, unknown>).thresholds;
+          const count = threshold && typeof threshold === 'object' && !Array.isArray(threshold)
+            ? (threshold as Record<string, unknown>).total : null;
+          return total + (typeof count === 'number' && Number.isFinite(count) ? count : 0);
+        }, 0);
+        return <div><dt>Workload threshold checks</dt><dd>{metric(checks)} across {metric(workloads.length)} workloads</dd></div>;
+      })()}
       <div><dt>Detailed report</dt><dd>{availabilityText[reportedState] || reportedState}</dd></div>
     </dl>
+    {archiveOverview?.reportPath && archiveOverview.summaryVerified && <p><a href={formatRoute({ kind: 'job-artifact', jobId: payload?.job?.jobId || '', path: archiveOverview.reportPath })}>Open approved report</a></p>}
+    {archiveOverview && <>
+      {archiveOverview.approvedArtifactCount != null && <p>{archiveOverview.approvedArtifactCount.toLocaleString()} approved files; {archiveOverview.omittedCandidateCount == null ? 'omitted count unavailable' : `${archiveOverview.omittedCandidateCount.toLocaleString()} omitted candidates`}.</p>}
+      {archiveOverview.omissions?.length ? <p>{archiveOverview.omissions.map(item => `${item.count}: ${item.category === 'reason_unavailable' ? 'reason unavailable in this archive version' : item.category.replaceAll('_', ' ')}`).join('; ')}</p> : null}
+      {archiveOverview.archiveStatus === 'READY' && !archiveOverview.omissionReasonsAvailable && <p>Omission reasons are unavailable in this archive version.</p>}
+    </>}
+    {!archiveOverview?.summaryVerified && archiveHint && <p>Initial report path hint (unverified): <code>{archiveHint}</code></p>}
+    <p className="att-load-performance-note">Execution status and performance verdict are separate. PASS describes execution; configured performance checks have their own verdict.</p>
     {root && <section aria-label="LOAD root-cause diagnosis" role="alert">
       <h4>{String(root.code || 'LOAD runtime error')}</h4><p>{String(root.summary || 'The LOAD ended with ERROR.')}</p>
     </section>}
@@ -817,7 +871,7 @@ function LiveLoadSummary({ job, active, progress, history, trend, streamHistory,
   </section>;
 }
 
-export const JobOverview = memo(function JobOverview({ job, status, statusText, jobState, result, reportAvailability, reportMessage, hidden, onProfilerCommit }: { job: JobView | null; status: JobStatus; statusText?: string; jobState: LoadState; result?: JobResultResponse | null; reportAvailability?: ReportAvailability; reportMessage?: string; hidden: boolean; onProfilerCommit?: () => void }) {
+export const JobOverview = memo(function JobOverview({ job, status, statusText, jobState, result, reportAvailability, reportMessage, archiveOverview, archiveOverviewError, archiveHint, hidden, onProfilerCommit }: { job: JobView | null; status: JobStatus; statusText?: string; jobState: LoadState; result?: JobResultResponse | null; reportAvailability?: ReportAvailability; reportMessage?: string; archiveOverview?: JobArtifactOverview | null; archiveOverviewError?: string; archiveHint?: string; hidden: boolean; onProfilerCommit?: () => void }) {
   return <section className="att-job-panel" role="tabpanel" id="job-panel-overview" aria-labelledby="job-tab-overview" hidden={hidden} tabIndex={0}>
     <Profiler id="job-overview-content" onRender={() => onProfilerCommit?.()}>{job ? <dl className="att-job-overview">
       <div><dt>Job ID</dt><dd>{job.jobId}</dd></div><div><dt>Status</dt><dd><StatusBadge status={status} /></dd></div>
@@ -839,7 +893,7 @@ export const JobOverview = memo(function JobOverview({ job, status, statusText, 
       <div><dt>Exit code</dt><dd>{job.exitCode ?? 'Not reported'}</dd></div>
       {job.pinned && <div><dt>Pin reason</dt><dd>{job.pinReason || 'Not provided'}</dd></div>}
     </dl> : jobState !== 'loading' && <p>Job details are unavailable.</p>}</Profiler>
-    <CompactLoadSummary payload={result || null} archiveState={reportAvailability} archiveMessage={reportMessage} />
+    <CompactLoadSummary payload={result || null} archiveState={reportAvailability} archiveMessage={archiveOverviewError || reportMessage} archiveOverview={archiveOverview} archiveHint={archiveHint} />
     {statusText && <p className="att-live-status" role="status">Latest live status event: {statusText}</p>}
   </section>;
 });
@@ -1046,6 +1100,12 @@ function JobDetail({ api, jobId, onShowList, confirmCancel, onOpenJob, onSchedul
   const isLoadResult = job?.command === 'load' || loadTerminalSummary(result) !== null;
   const report = useLoadArchiveSummary(api, jobId, isLoadResult && !activeLoad && (activeTab === 'results' || activeTab === 'metrics'),
     activeTab === 'results' || activeTab === 'metrics', activeTab === 'metrics');
+  const archiveOverview = useJobArtifactOverview(api, jobId, isLoadResult && !activeLoad && activeTab === 'overview', detailRefresh);
+  const terminalArchive = loadTerminalSummary(result)?.archive;
+  const archiveHint = terminalArchive && typeof terminalArchive === 'object' && !Array.isArray(terminalArchive)
+    ? (terminalArchive as Record<string, unknown>).paths : null;
+  const initialReportHint = archiveHint && typeof archiveHint === 'object' && !Array.isArray(archiveHint)
+    && typeof (archiveHint as Record<string, unknown>).report === 'string' ? (archiveHint as Record<string, string>).report : undefined;
   const inlineMetrics = useMemo(() => resultMetrics(result), [result]);
   const metrics = useMemo(() => report.detailMetrics ? { ...(inlineMetrics || {}), ...report.detailMetrics } : inlineMetrics, [inlineMetrics, report.detailMetrics]);
   const buckets = useMemo(() => metricBuckets(metrics?.buckets).slice(0, MAX_BUCKET_ROWS), [metrics]);
@@ -1088,7 +1148,9 @@ function JobDetail({ api, jobId, onShowList, confirmCancel, onOpenJob, onSchedul
       {tabs.map(tab => <button key={tab.id} type="button" role="tab" id={`job-tab-${tab.id}`} aria-controls={`job-panel-${tab.id}`} aria-selected={activeTab === tab.id} tabIndex={activeTab === tab.id ? 0 : -1} onClick={() => setActiveTab(tab.id)}>{tab.label}</button>)}
     </div>
     <JobOverview job={job} status={jobStatus} statusText={statusSnapshot.text} jobState={jobState} result={result}
-      reportAvailability={report.availability} reportMessage={report.error} hidden={activeTab !== 'overview'} />
+      reportAvailability={archiveOverview.loading ? 'loading' : report.availability} reportMessage={report.error}
+      archiveOverview={archiveOverview.value} archiveOverviewError={archiveOverview.error} archiveHint={initialReportHint}
+      hidden={activeTab !== 'overview'} />
     <LiveOutputPanel api={api} jobId={jobId} job={displayedJob} hidden={activeTab !== 'live'} />
     <StructuredEventsPanel api={api} jobId={jobId} job={displayedJob} hidden={activeTab !== 'events'} />
     <section className="att-job-panel" role="tabpanel" id="job-panel-results" aria-labelledby="job-tab-results" hidden={activeTab !== 'results'} tabIndex={0}>

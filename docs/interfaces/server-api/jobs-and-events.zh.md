@@ -1,4 +1,4 @@
-<!-- att-doc-status: current release=4.2.6 -->
+<!-- att-doc-status: current release=4.2.7 -->
 
 # Jobs、event 及復原 API
 

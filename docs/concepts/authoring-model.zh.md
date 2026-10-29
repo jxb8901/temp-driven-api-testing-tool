@@ -18,7 +18,7 @@ Workbook 是撰寫 Case 的其中一種方式，並非完整 ATT resource model�
 
 對 workbook-based Case，Snapshot generation 會為所選 workbook 建立 canonical XML representation。這是明確的 authoring 操作。VALIDATE 會讀取現有 authored input 並檢查，但不會以副作用建立或更新 Snapshot。
 
-目前 4.2.6 Quick Start 保留明確步驟：產生 Snapshot、驗證 Package，然後執行 Case。請參閱 [Quick Start](../quick-start.zh.md) 及 [Test Authoring Reference](../reference.zh/test-authoring.md)。
+目前 4.2.7 Quick Start 保留明確步驟：產生 Snapshot、驗證 Package，然後執行 Case。請參閱 [Quick Start](../quick-start.zh.md) 及 [Test Authoring Reference](../reference.zh/test-authoring.md)。
 
 ## 資料邊界
 

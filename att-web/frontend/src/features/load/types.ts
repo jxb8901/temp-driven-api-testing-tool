@@ -304,6 +304,19 @@ export interface JobArtifactArchive {
   retryable?: boolean;
 }
 
+export interface JobArtifactOverview {
+  archiveStatus: 'PENDING' | 'ARCHIVING' | 'READY' | 'FAILED' | 'EXPIRED';
+  summaryVerified: boolean;
+  reportAvailability: 'READY' | 'OMITTED' | 'NOT_PRESENT' | 'UNVERIFIED' | 'FAILED';
+  reportPath?: string | null;
+  approvedArtifactCount?: number | null;
+  approvedReportCount?: number | null;
+  omittedCandidateCount?: number | null;
+  complete?: boolean | null;
+  omissions?: Array<{ count: number; category: string }> | null;
+  omissionReasonsAvailable: boolean;
+}
+
 export interface JobEvent {
   id?: string;
   type: 'status' | 'progress' | 'log' | 'diagnostic' | 'result' | string;
@@ -348,6 +361,7 @@ export interface LoadJobsApi {
   getJobResult(jobId: string, signal?: AbortSignal): Promise<JobResultResponse>;
   getJobArtifacts(jobId: string, signal?: AbortSignal): Promise<JobArtifact[]>;
   getJobArtifactArchive?(jobId: string, offset?: number, signal?: AbortSignal): Promise<JobArtifactArchive>;
+  getJobArtifactOverview?(jobId: string, signal?: AbortSignal): Promise<JobArtifactOverview>;
   getJobArtifactText?(jobId: string, path: string, signal?: AbortSignal): Promise<string>;
   retryJobArtifactArchive?(jobId: string): Promise<unknown>;
   artifactArchiveHref?(jobId: string): string;

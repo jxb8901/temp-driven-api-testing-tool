@@ -350,6 +350,41 @@ class ArtifactArchiveTest {
         }
     }
 
+    @Test void overviewSummaryUsesOnlyTheCommittedLoadReportAndSafeOmissionCounts() throws Exception {
+        Path output=Files.createDirectory(temporary.resolve("overview-load-output"));
+        Path run=output.resolve("load/run");writeCanonicalLoadReport(run,"run");
+        Files.writeString(output.resolve("load/run/other.html"),"<html>unrelated</html>");
+        Files.writeString(output.resolve("private.bin"),"not publishable");
+        Path archive=temporary.resolve("overview-load.zip");ArtifactArchive.build(output,archive);
+
+        Map<String,Object> overview=ArtifactArchive.overviewSummary(archive);
+        assertEquals("load/run/report/index.html",overview.get("approvedReportPath"));
+        assertEquals(1,overview.get("approvedReportCount"));
+        assertEquals(false,overview.get("complete"));
+        assertEquals(1L,overview.get("omittedCandidateCount"));
+        List<?> omissions=(List<?>)overview.get("omissionCategories");
+        assertEquals("unsupported_type",((Map<?,?>)omissions.get(0)).get("category"));
+        assertFalse(overview.toString().contains("private.bin"));
+    }
+
+    @Test void overviewSummaryMarksLegacyGenericOmissionReasonsUnavailable() throws Exception {
+        Path archive=temporary.resolve("legacy-overview.zip");
+        byte[] payload="kept".getBytes(StandardCharsets.UTF_8);
+        Map<String,Object> row=Map.of("path","case.log","mediaType","text/plain","size",payload.length,
+                "sha256",ArtifactArchive.sha256(payload),"classification","textual-output","decision","sanitized-once",
+                "report",false,"preview",true);
+        Map<String,Object> manifest=Map.of("version",1,"policy","att-export-safe-text-v2","entries",List.of(row),
+                "complete",false,"omissions",List.of(Map.of("count",1,"reason","unsupported, unsafe, duplicate, binary, oversized, or unapproved output")));
+        try(var zip=new java.util.zip.ZipOutputStream(Files.newOutputStream(archive))) {
+            zip.putNextEntry(new java.util.zip.ZipEntry("case.log"));zip.write(payload);zip.closeEntry();
+            zip.putNextEntry(new java.util.zip.ZipEntry(ArtifactArchive.MANIFEST));
+            zip.write(ServerRuntime.JSON.writeValueAsBytes(manifest));zip.closeEntry();
+        }
+        Map<String,Object> overview=ArtifactArchive.overviewSummary(archive);
+        assertEquals(1L,overview.get("omittedCandidateCount"));
+        assertEquals("reason_unavailable",((Map<?,?>)((List<?>)overview.get("omissionCategories")).get(0)).get("category"));
+    }
+
     @Test void incompleteOrCorruptLoadReportKeepsVerifiedRecoveryCheckpointAndOmitsFalseReport() throws Exception {
         Path missing=Files.createDirectory(temporary.resolve("missing-report-commit"));
         Files.createDirectories(missing.resolve("load/run/report"));

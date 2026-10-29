@@ -42,6 +42,8 @@ final class ArtifactArchive {
     static final long MAX_ARCHIVE_BYTES = MAX_TOTAL_BYTES + MAX_MANIFEST_BYTES + 4L * 1024 * 1024;
     private static final Set<String> SAFE_EXTENSIONS = Set.of("txt", "log", "json", "yaml", "yml", "xml", "html", "htm", "css", "csv", "md");
     private static final String OMISSION_REASON = "unsupported, unsafe, duplicate, binary, oversized, or unapproved output";
+    private static final Set<String> OMISSION_CATEGORIES = Set.of("unsafe_path", "unsafe_entry", "incomplete_load_report",
+            "recovery_checkpoint", "reserved_manifest", "unsupported_type", "duplicate_path", "entry_limit", "oversized", "rejected_text");
     private static final int AUTO_MIN_BYTES = 256;
     private static final int AUTO_MIN_SAVINGS_PERCENT = 5;
     private static final long DEFLATE_STAGING_OVERHEAD_BYTES = 64L * 1024L;
@@ -133,11 +135,12 @@ final class ArtifactArchive {
             if(metrics!=null){metrics.value.candidateCount=(long)candidates.size();usage(metrics.value.limitUsage,"artifact.inventory.candidates",candidates.size(),maxCandidates);}
             LoadReportInventory loadReports=validateLoadReportBundles(root,candidates);
             Set<String> names=new HashSet<>();List<String> approved=new ArrayList<>();long total=0;int omitted=0;long oversizedOmission=0L;long largestEntryBytes=0L;int entryCapOmissions=0;
+            Map<String,Integer> omissionCategories=new LinkedHashMap<>();
             Map<String,byte[]> memoryExports=new LinkedHashMap<>();long retained=0;
             for(Path candidate:candidates) {
                 if(root.relativize(candidate).getNameCount()>=64&&Files.isDirectory(candidate,LinkOption.NOFOLLOW_LINKS))throw new IllegalArgumentException("Artifact directory depth exceeds limits");
                 if(candidate.equals(root)||Files.isDirectory(candidate,LinkOption.NOFOLLOW_LINKS))continue;
-                if(Files.isSymbolicLink(candidate)||!Files.isRegularFile(candidate,LinkOption.NOFOLLOW_LINKS)){omitted++;if(metrics!=null)metrics.value.omittedEntries=(long)omitted;continue;}
+                if(Files.isSymbolicLink(candidate)||!Files.isRegularFile(candidate,LinkOption.NOFOLLOW_LINKS)){omitted++;omissionCategories.merge("unsafe_entry",1,Integer::sum);if(metrics!=null)metrics.value.omittedEntries=(long)omitted;continue;}
                 if(!candidate.toRealPath().startsWith(root))throw new IllegalArgumentException("Artifact escaped its private directory");
                 long sourceSize=Files.size(candidate);
                 if(metrics!=null)metrics.source(sourceSize);
@@ -152,24 +155,27 @@ final class ArtifactArchive {
                     continue;
                 }
                 if(checkpointRun!=null&&!loadReports.verifiedCheckpoints.contains(relative)) {
-                    omitted++;if(metrics!=null)metrics.value.omittedEntries=(long)omitted;continue;
+                    omitted++;omissionCategories.merge("recovery_checkpoint",1,Integer::sum);if(metrics!=null)metrics.value.omittedEntries=(long)omitted;continue;
                 }
                 if(isLoadReportPayload(relative)&&loadReports.incompleteRuns.contains(loadRunId(relative))) {
-                    omitted++;if(metrics!=null)metrics.value.omittedEntries=(long)omitted;continue;
+                    omitted++;omissionCategories.merge("incomplete_load_report",1,Integer::sum);if(metrics!=null)metrics.value.omittedEntries=(long)omitted;continue;
                 }
                 String lower=relative.toLowerCase(Locale.ROOT);
-                if(!safePath(relative)||lower.equals(MANIFEST)||!SAFE_EXTENSIONS.contains(extension(relative))||names.contains(lower)){omitted++;if(metrics!=null)metrics.value.omittedEntries=(long)omitted;continue;}
-                if(approved.size()>=MAX_ENTRIES){omitted++;entryCapOmissions++;if(metrics!=null)metrics.value.omittedEntries=(long)omitted;continue;}
+                if(!safePath(relative)){omitted++;omissionCategories.merge("unsafe_path",1,Integer::sum);if(metrics!=null)metrics.value.omittedEntries=(long)omitted;continue;}
+                if(lower.equals(MANIFEST)){omitted++;omissionCategories.merge("reserved_manifest",1,Integer::sum);if(metrics!=null)metrics.value.omittedEntries=(long)omitted;continue;}
+                if(!SAFE_EXTENSIONS.contains(extension(relative))){omitted++;omissionCategories.merge("unsupported_type",1,Integer::sum);if(metrics!=null)metrics.value.omittedEntries=(long)omitted;continue;}
+                if(names.contains(lower)){omitted++;omissionCategories.merge("duplicate_path",1,Integer::sum);if(metrics!=null)metrics.value.omittedEntries=(long)omitted;continue;}
+                if(approved.size()>=MAX_ENTRIES){omitted++;entryCapOmissions++;omissionCategories.merge("entry_limit",1,Integer::sum);if(metrics!=null)metrics.value.omittedEntries=(long)omitted;continue;}
                 largestEntryBytes=Math.max(largestEntryBytes,sourceSize);
-                if(sourceSize>MAX_ENTRY_BYTES){omitted++;oversizedOmission=Math.max(oversizedOmission,sourceSize);if(metrics!=null)metrics.value.omittedEntries=(long)omitted;continue;}
+                if(sourceSize>MAX_ENTRY_BYTES){omitted++;oversizedOmission=Math.max(oversizedOmission,sourceSize);omissionCategories.merge("oversized",1,Integer::sum);if(metrics!=null)metrics.value.omittedEntries=(long)omitted;continue;}
                 byte[] bytes;
                 try {
                     bytes=readProducerBytes(candidate);
                     if(validator!=null)validator.validate(candidate,bytes.clone());
                 } catch(IllegalArgumentException rejected) {
-                    omitted++;if(metrics!=null)metrics.value.omittedEntries=(long)omitted;continue;
+                    omitted++;omissionCategories.merge("rejected_text",1,Integer::sum);if(metrics!=null)metrics.value.omittedEntries=(long)omitted;continue;
                 }
-                if(bytes.length>MAX_ENTRY_BYTES){omitted++;oversizedOmission=Math.max(oversizedOmission,bytes.length);if(metrics!=null)metrics.value.omittedEntries=(long)omitted;continue;}
+                if(bytes.length>MAX_ENTRY_BYTES){omitted++;oversizedOmission=Math.max(oversizedOmission,bytes.length);omissionCategories.merge("oversized",1,Integer::sum);if(metrics!=null)metrics.value.omittedEntries=(long)omitted;continue;}
                 ReportFile committed=loadReports.required.get(relative);
                 if(committed!=null&&(bytes.length!=committed.size()||!sha256(bytes).equals(committed.sha256())))
                     throw new java.io.IOException("A committed LOAD report file changed while it was captured.");
@@ -213,7 +219,9 @@ final class ArtifactArchive {
                 }
                 Map<String,Object> manifest=new LinkedHashMap<>();
                 manifest.put("version",1);manifest.put("policy","att-export-approved-bytes-v1");manifest.put("entries",entries);manifest.put("complete",omitted==0);
-                manifest.put("omissions",omitted==0?List.of():List.of(Map.of("count",omitted,"reason",OMISSION_REASON)));
+                List<Map<String,Object>> omissionRows=new ArrayList<>();
+                omissionCategories.forEach((category,count)->omissionRows.add(Map.of("count",count,"reason",category)));
+                manifest.put("omissions",omissionRows);
                 if(omitted>0){
                     Map<String,Object> notice=entryCapOmissions>0
                             ? LimitDiagnostic.create("ATT-ARTIFACT-OMITTED","Some output entries exceeded the bounded ZIP entry budget",
@@ -564,6 +572,36 @@ final class ArtifactArchive {
         try (VerifiedRead read = openVerified(archive, digests)) { return read.manifest; }
     }
 
+    /** Small publication-time projection used by Overview without opening or enumerating the archive later. */
+    static Map<String,Object> overviewSummary(Path archive) throws Exception {
+        Map<String,Object> manifest=verify(archive,false);
+        List<Map<?,?>> entries=(List<Map<?,?>>)(List<?>)manifest.get("entries");
+        List<String> reports=new ArrayList<>();
+        for(Map<?,?> entry:entries)if(Boolean.TRUE.equals(entry.get("report"))&&entry.get("path") instanceof String path
+                &&safePath(path)&&isLoadReportIndex(path))reports.add(path);
+        reports.sort(Comparator.comparingInt((String path)->path.endsWith("/report/index.html")||"report/index.html".equals(path)?0:1).thenComparing(String::compareTo));
+        List<Map<?,?>> rawOmissions=(List<Map<?,?>>)(List<?>)manifest.get("omissions");
+        List<Map<String,Object>> omissions=new ArrayList<>();long omitted=0L;
+        for(Map<?,?> item:rawOmissions) {
+            long count=((Number)item.get("count")).longValue();
+            String reason=String.valueOf(item.get("reason"));
+            String category=OMISSION_CATEGORIES.contains(reason)?reason:"reason_unavailable";
+            omissions.add(Map.of("count",count,"category",category));
+            omitted=count>Long.MAX_VALUE-omitted?Long.MAX_VALUE:omitted+count;
+        }
+        Map<String,Object> summary=new LinkedHashMap<>();
+        summary.put("complete",manifest.get("complete"));summary.put("approvedArtifactCount",entries.size());
+        summary.put("approvedReportCount",reports.size());summary.put("approvedReportPath",reports.isEmpty()?null:reports.get(0));
+        summary.put("omittedCandidateCount",omitted);summary.put("omissionCategories",omissions);
+        return summary;
+    }
+
+    private static boolean isLoadReportIndex(String path) {
+        String[] parts=path.split("/");
+        return parts.length==4&&"load".equals(parts[0])&&!parts[1].isEmpty()
+                &&"report".equals(parts[2])&&"index.html".equals(parts[3]);
+    }
+
     @SuppressWarnings("unchecked")
     private static Map<String,Object> verifyManifest(ZipFile zip, boolean digests) throws Exception {
         Set<String> names = new HashSet<>();
@@ -626,11 +664,17 @@ final class ArtifactArchive {
     private static boolean validOmissions(Map<String, Object> manifest) {
         if (!(manifest.get("complete") instanceof Boolean complete) || !(manifest.get("omissions") instanceof List<?> omissions)) return false;
         if (complete) return omissions.isEmpty();
-        if (omissions.size() != 1 || !(omissions.get(0) instanceof Map<?, ?> omission)
-                || !omission.keySet().equals(Set.of("count", "reason")) || !OMISSION_REASON.equals(omission.get("reason"))
-                || !integral(omission.get("count"))) return false;
-        long count = ((Number) omission.get("count")).longValue();
-        return count > 0 && count <= MAX_CANDIDATES;
+        if (omissions.isEmpty()||omissions.size()>OMISSION_CATEGORIES.size())return false;
+        long total=0L;Set<String> seen=new HashSet<>();
+        for(Object value:omissions) {
+            if(!(value instanceof Map<?,?> omission)||!omission.keySet().equals(Set.of("count","reason"))||!integral(omission.get("count")))return false;
+            long count=((Number)omission.get("count")).longValue();Object rawReason=omission.get("reason");
+            if(count<=0||count>MAX_CANDIDATES||!(rawReason instanceof String reason))return false;
+            boolean legacy=OMISSION_REASON.equals(reason)&&omissions.size()==1;
+            if(!legacy&&!OMISSION_CATEGORIES.contains(reason)||!seen.add(reason))return false;
+            if(total>MAX_CANDIDATES-count)return false;total+=count;
+        }
+        return total>0;
     }
 
     private static boolean validDiagnostics(Object value) {

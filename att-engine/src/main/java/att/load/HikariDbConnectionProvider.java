@@ -33,5 +33,18 @@ public final class HikariDbConnectionProvider implements DbConnectionProvider {
         for (Map.Entry<String, HikariDbPool> entry : pools.entrySet()) result.put(entry.getKey(), entry.getValue().metrics());
         return result;
     }
-    @Override public void close() { for (HikariDbPool pool : pools.values()) pool.close(); pools.clear(); }
+    @Override public void close() {
+        RuntimeException failure=null;
+        for(Map.Entry<String,HikariDbPool> entry:pools.entrySet()) {
+            HikariDbPool pool=entry.getValue();
+            try { pool.close(); }
+            catch(RuntimeException | Error problem) {
+                LoadResourceTeardownException identified=new LoadResourceTeardownException("DB",entry.getKey(),
+                        Math.max(1,pool.total()),problem);
+                if(failure==null)failure=identified;else failure.addSuppressed(identified);
+            }
+        }
+        pools.clear();
+        if(failure!=null)throw new IllegalStateException("DB_RESOURCE_TEARDOWN_FAILED",failure);
+    }
 }

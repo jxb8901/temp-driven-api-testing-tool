@@ -119,6 +119,10 @@ final class ServerRuntime implements AutoCloseable {
     private final ConcurrentHashMap<String,FutureTask<Void>> tasks=new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String,AdmissionLease> leases=new ConcurrentHashMap<>();
     private final AtomicLong completed=new AtomicLong();
+    private final AtomicLong loadCapacityRejections=new AtomicLong();
+    private final AtomicLong queueCapacityRejections=new AtomicLong();
+    private final AtomicLong archiveFailures=new AtomicLong();
+    private final AtomicLong archiveRetries=new AtomicLong();
     private final Semaphore loadSlots,admissionSlots;
     private final Semaphore inspectionTaskSlots;
     final Semaphore streamSlots=new Semaphore(MAX_STREAM_OBSERVERS,true);
@@ -132,6 +136,12 @@ final class ServerRuntime implements AutoCloseable {
     private LoadScheduleScheduler loadScheduleScheduler;
     private final WorkerProcessLauncher processLauncher;
     private final Clock clock;
+    private final long startedAtNanos=System.nanoTime();
+    private static final long MONITORING_SNAPSHOT_CACHE_NANOS=TimeUnit.SECONDS.toNanos(1);
+    private final Object monitoringSnapshotLock=new Object();
+    private volatile MonitoringSnapshot cachedMonitoringSnapshot;
+    private volatile long cachedMonitoringSnapshotAtNanos;
+    final MonitoringRequestMetrics monitoringRequests=new MonitoringRequestMetrics();
     final PackageManifestPublisher manifestPublisher;
     private volatile Map<String,Object> jobStorageReport;
     private final ConcurrentHashMap<Process,Boolean> inspectionProcesses=new ConcurrentHashMap<>();
@@ -657,8 +667,8 @@ final class ServerRuntime implements AutoCloseable {
         boolean loadAdmission="load".equals(command);
         // Reject requests that already cannot be admitted before any legacy direct-request inspection runs.
         // The final semaphore acquisition below remains authoritative when concurrent submissions race this check.
-        if(loadAdmission&&loadSlots.availablePermits()==0){store.audit(principal,"SUBMIT",null,packageId,"REJECTED_LOAD_CAPACITY");throw new QueueFullException("Load capacity is full; retry after a Load job completes");}
-        if(admissionSlots.availablePermits()==0){store.audit(principal,"SUBMIT",null,packageId,"REJECTED_QUEUE_FULL");throw new QueueFullException("Worker capacity is full; retry after a job completes");}
+        if(loadAdmission&&loadSlots.availablePermits()==0){loadCapacityRejections.incrementAndGet();store.audit(principal,"SUBMIT",null,packageId,"REJECTED_LOAD_CAPACITY");throw new QueueFullException("Load capacity is full; retry after a Load job completes");}
+        if(admissionSlots.availablePermits()==0){queueCapacityRejections.incrementAndGet();store.audit(principal,"SUBMIT",null,packageId,"REJECTED_QUEUE_FULL");throw new QueueFullException("Worker capacity is full; retry after a job completes");}
         if(!serverIssuedDraft&&(input.has("draftId")||input.has("inlineDebugInput")||input.has("inlineLoadScenario")
                 ||input.has("expectedRevisionDigest")||input.has("expectedSchemaRegistryDigest")||input.has("draftResourceId")
                 ||input.has("configurationProvenance")||input.has("registeredPackageId")))
@@ -742,8 +752,8 @@ final class ServerRuntime implements AutoCloseable {
                 throw new JobConflictException("ATT-SERVER-REPLAY-DRAFT-STALE","The Package changed after replay validation. Your edits are still available; validate them again.");
             }
         }
-        if(loadAdmission&&!loadSlots.tryAcquire()){store.audit(principal,"SUBMIT",null,packageId,"REJECTED_LOAD_CAPACITY");throw new QueueFullException("Load capacity is full; retry after a Load job completes");}
-        if(!admissionSlots.tryAcquire()){if(loadAdmission)loadSlots.release();store.audit(principal,"SUBMIT",null,packageId,"REJECTED_QUEUE_FULL");throw new QueueFullException("Worker capacity is full; retry after a job completes");}
+        if(loadAdmission&&!loadSlots.tryAcquire()){loadCapacityRejections.incrementAndGet();store.audit(principal,"SUBMIT",null,packageId,"REJECTED_LOAD_CAPACITY");throw new QueueFullException("Load capacity is full; retry after a Load job completes");}
+        if(!admissionSlots.tryAcquire()){if(loadAdmission)loadSlots.release();queueCapacityRejections.incrementAndGet();store.audit(principal,"SUBMIT",null,packageId,"REJECTED_QUEUE_FULL");throw new QueueFullException("Worker capacity is full; retry after a job completes");}
         AdmissionLease lease=new AdmissionLease(admissionSlots,loadAdmission?loadSlots:null);
         String id=null;Path jobPath=null;boolean persisted=false,handedOff=false;
         try {
@@ -3855,6 +3865,187 @@ final class ServerRuntime implements AutoCloseable {
     }
     Map<String,Object> executionPoolStatistics() { return executionWorkers==null?Map.of("enabled",false):executionWorkers.metrics(); }
     Map<String,Object> counts() throws Exception {Map<String,Object> m=new LinkedHashMap<>();for(String s:List.of("QUEUED","PREPARING","RUNNING","PASS","FAIL","ERROR","INVALID","CANCELLED"))m.put(s.toLowerCase(),store.count(s));m.put("inspection",inspectionStatistics());m.put("executionPool",executionPoolStatistics());m.put("queueDepth",workers.getQueue().size());m.put("activeWorkers",workers.getActiveCount());m.put("completedSinceStart",completed.get());m.put("loadSchedulingEnabled",config.scheduling.enabled);if(config.scheduling.enabled){m.put("loadSchedules",store.scheduleCount());m.put("activeScheduledLoads",store.activeScheduledCount(null));m.put("loadScheduleMetrics",store.scheduleMetrics());}m.put("jobStorage",jobStorageSnapshot());m.put("eventJournal",eventJournalStatistics());return m;}
+    MonitoringSnapshot monitoringSnapshot(String requestId) throws Exception {
+        long now=System.nanoTime();MonitoringSnapshot cached=cachedMonitoringSnapshot;
+        if(cached!=null&&now-cachedMonitoringSnapshotAtNanos<MONITORING_SNAPSHOT_CACHE_NANOS)return monitoringRequest(cached,requestId);
+        synchronized(monitoringSnapshotLock) {
+            now=System.nanoTime();cached=cachedMonitoringSnapshot;
+            if(cached!=null&&now-cachedMonitoringSnapshotAtNanos<MONITORING_SNAPSHOT_CACHE_NANOS)return monitoringRequest(cached,requestId);
+            MonitoringSnapshot fresh=captureMonitoringSnapshot(requestId);
+            cachedMonitoringSnapshot=fresh;cachedMonitoringSnapshotAtNanos=System.nanoTime();return fresh;
+        }
+    }
+    private static MonitoringSnapshot monitoringRequest(MonitoringSnapshot snapshot,String requestId) {
+        return new MonitoringSnapshot(snapshot.schemaVersion(),snapshot.capturedAt(),snapshot.origin(),requestId,
+                snapshot.health(),snapshot.process(),snapshot.workers(),snapshot.http(),snapshot.journal(),snapshot.storage(),
+                snapshot.inspection(),snapshot.executionPool(),snapshot.scheduledLoad(),snapshot.jobs());
+    }
+    private MonitoringSnapshot captureMonitoringSnapshot(String requestId) throws Exception {
+        Instant captured=clock.instant();
+        java.lang.management.MemoryMXBean memory=java.lang.management.ManagementFactory.getMemoryMXBean();
+        java.lang.management.MemoryUsage heap=memory.getHeapMemoryUsage(),nonHeap=memory.getNonHeapMemoryUsage();
+        java.lang.management.ThreadMXBean threads=java.lang.management.ManagementFactory.getThreadMXBean();
+        Long gcCount=0L,gcTime=0L;boolean gcCountAvailable=false,gcTimeAvailable=false;
+        for(var gc:java.lang.management.ManagementFactory.getGarbageCollectorMXBeans()) {
+            if(gc.getCollectionCount()>=0L){gcCount+=gc.getCollectionCount();gcCountAvailable=true;}
+            if(gc.getCollectionTime()>=0L){gcTime+=gc.getCollectionTime();gcTimeAvailable=true;}
+        }
+        if(!gcCountAvailable)gcCount=null;if(!gcTimeAvailable)gcTime=null;
+        java.lang.management.OperatingSystemMXBean operating=java.lang.management.ManagementFactory.getOperatingSystemMXBean();
+        Double cpuLoad=null;Long cpuTime=null;
+        if(operating instanceof com.sun.management.OperatingSystemMXBean extended) {
+            double load=extended.getProcessCpuLoad();if(Double.isFinite(load)&&load>=0d)cpuLoad=load;
+            long nanos=extended.getProcessCpuTime();if(nanos>=0L)cpuTime=nanos/1_000_000L;
+        }
+        int processors=Math.max(1,operating.getAvailableProcessors());
+        MonitoringSnapshot.Process process=new MonitoringSnapshot.Process(
+                nonnegative(heap.getUsed()),nonnegative(heap.getCommitted()),nonnegativeOrNull(heap.getMax()),
+                nonnegative(nonHeap.getUsed()),nonnegative(nonHeap.getCommitted()),threads.getThreadCount(),
+                threads.getDaemonThreadCount(),threads.getPeakThreadCount(),gcCount,gcTime,processors,cpuLoad,cpuTime,null);
+
+        MonitoringSnapshot.Workers workerView=new MonitoringSnapshot.Workers(workers.getActiveCount(),config.maxConcurrent,
+                workers.getQueue().size(),config.queuedLimit,config.maxConcurrent+config.queuedLimit,completed.get(),
+                Math.max(0,config.maxConcurrent+config.queuedLimit-admissionSlots.availablePermits()),
+                Math.max(0,config.maxConcurrentLoad-loadSlots.availablePermits()),store.activeLoadCount(),config.maxConcurrentLoad,
+                loadCapacityRejections.get(),queueCapacityRejections.get(),null,null,
+                Math.max(0,MAX_STREAM_OBSERVERS-streamSlots.availablePermits()),MAX_STREAM_OBSERVERS,null,null);
+        MonitoringSnapshot.Http http=new MonitoringSnapshot.Http(monitoringRequests.requests(),monitoringRequests.successfulRequests(),
+                monitoringRequests.redirectRequests(),monitoringRequests.clientErrors(),monitoringRequests.serverErrors(),
+                monitoringRequests.percentile(.50),monitoringRequests.percentile(.95));
+
+        Map<String,Object> journalData=eventJournalStatistics();
+        MonitoringSnapshot.Journal journal=new MonitoringSnapshot.Journal(
+                number(journalData,"activeJobs"),number(journalData,"degradedActiveJobs"),numberLong(journalData,"activeJournalBytes"),
+                numberLong(journalData,"activeRetainedEvents"),numberLong(journalData,"activeRetainedMemoryBytes"),
+                numberLong(journalData,"activeMemoryOverBudgetBytes"),numberLong(journalData,"activeCompactionAttempts"),
+                numberLong(journalData,"activeCompactionFailures"),numberLong(journalData,"activeListenerDispatchFailures"),
+                numberLong(journalData,"appendBytesWritten"),numberLong(journalData,"compactionBytesWritten"),
+                nullableDouble(journalData,"writeAmplification"),
+                nullableLong(journalData,"oldestActiveCompactionAgeMs"),numberLong(journalData,"maxJournalBytesPerJob"),
+                numberLong(journalData,"memoryBudgetBytesPerJob"),nullableLong(journalData,"storageUsableBytes"),
+                bool(journalData,"storageHeadroomLow"),number(journalData,"cachedTerminalJobs"),numberLong(journalData,"cachedTerminalWeightBytes"));
+
+        Map<String,Object> quota=jobStorageSnapshot();
+        Long storeUsable=null,storeTotal=null;
+        try {var fileStore=Files.getFileStore(config.dataDir);storeUsable=fileStore.getUsableSpace();storeTotal=fileStore.getTotalSpace();}
+        catch(Exception unavailable) { /* unavailable storage stays null in this read model */ }
+        MonitoringSnapshot.Storage storage=new MonitoringSnapshot.Storage(
+                text(quota,"state","unknown"),storeUsable,storeTotal,bool(quota,"enabled"),nullableLong(quota,"maxTotalBytes"),
+                nullableLong(quota,"totalBytes"),nullableBoolean(quota,"measurementComplete"),nullableInt(quota,"eligibleJobs"),
+                nullableInt(quota,"protectedJobs"),nullableInt(quota,"deletedJobs"),nullableLong(quota,"reclaimedBytes"),
+                nullableBoolean(quota,"quotaUnmet"),nullableLong(quota,"cleanupTargetBytes"),nullableText(quota,"lastSweepAt"),
+                nullableLong(quota,"maxSingleJobBytes"),artifactWriters.getActiveCount(),artifactWriters.getQueue().size(),
+                artifactWriters.getQueue().size()+artifactWriters.getQueue().remainingCapacity(),pendingArtifactJobs.size(),
+                archiveFailures.get(),archiveRetries.get(),null);
+
+        Map<String,Object> inspectionData=inspectionMetrics.snapshot();
+        long inspectionNanos=stageNanos(inspectionData,"DISPATCH")+stageNanos(inspectionData,"PROCESSING");
+        int busy=0,live=0;
+        List<MonitoringSnapshot.InspectionWorkerSnapshot> inspectionWorkers=new ArrayList<>();
+        for(int slot=0;slot<inspectionWorkerPool.size();slot++) {
+            InspectionWorker worker=inspectionWorkerPool.get(slot);
+            if(worker.lock.isLocked())busy++;
+            Process child=worker.process;if(child!=null&&child.isAlive())live++;
+            boolean alive=child!=null&&child.isAlive();
+            Long workerCpuNanos=nullableLong(worker.metrics,"processCpuNanos");
+            inspectionWorkers.add(new MonitoringSnapshot.InspectionWorkerSnapshot(slot,worker.lock.isLocked(),alive,
+                    nullableLong(worker.metrics,"heapUsedBytes"),workerCpuNanos==null?null:workerCpuNanos/1_000_000L,
+                    workerMetricCount(worker.metrics,"INDEX_HIT"),workerMetricCount(worker.metrics,"INDEX_MISS"),
+                    workerMetricCount(worker.metrics,"CONFIG_HIT"),workerMetricCount(worker.metrics,"CONFIG_MISS"),
+                    workerMetricCount(worker.metrics,"INSPECTOR_HIT"),workerMetricCount(worker.metrics,"INSPECTOR_MISS")));
+        }
+        Map<String,MonitoringSnapshot.StageMetric> inspectionStages=new LinkedHashMap<>();
+        for(att.metrics.InspectionMetrics.Stage stage:att.metrics.InspectionMetrics.Stage.values()) {
+            String name=stage.name();inspectionStages.put(name,new MonitoringSnapshot.StageMetric(
+                    stageCount(inspectionData,name),stageNanos(inspectionData,name)/1_000_000L));
+        }
+        MonitoringSnapshot.Inspection inspection=new MonitoringSnapshot.Inspection(config.inspection.enabled,
+                inspectionWorkerPool.size(),busy,live,config.inspection.enabled?stageCount(inspectionData,"DISPATCH"):null,
+                null,config.inspection.enabled?inspectionNanos/1_000_000L:null,
+                config.inspection.enabled?stageCount(inspectionData,"STARTUP"):null,
+                aggregateInspectionWorkerMetric("INDEX_HIT"),aggregateInspectionWorkerMetric("INDEX_MISS"),
+                aggregateInspectionWorkerMetric("CONFIG_HIT"),aggregateInspectionWorkerMetric("CONFIG_MISS"),
+                aggregateInspectionWorkerMetric("INSPECTOR_HIT"),aggregateInspectionWorkerMetric("INSPECTOR_MISS"),
+                Map.copyOf(inspectionStages),List.copyOf(inspectionWorkers));
+
+        Map<String,Object> executionData=executionPoolStatistics();
+        MonitoringSnapshot.ExecutionPool executionPool=new MonitoringSnapshot.ExecutionPool(
+                bool(executionData,"enabled"),nullableInt(executionData,"owned"),nullableInt(executionData,"ready"),nullableInt(executionData,"maxIdle"),
+                nullableLong(executionData,"starts"),nullableLong(executionData,"leases"),nullableLong(executionData,"coldFallbacks"),
+                nullableLong(executionData,"startupFailures"),nullableBoolean(executionData,"recoveryUncertain"),
+                multiply(nullableLong(executionData,"idleHeapCapMb"),1024L*1024L),
+                nullableBoolean(executionData,"idleCpuMetricsAvailable"),nullableDouble(executionData,"idleCpuMs"));
+
+        Integer scheduleCount=null,activeSchedules=null;String nextDue=null;Map<String,Long> occurrenceCounts=null;
+        if(config.scheduling.enabled) {
+            scheduleCount=store.scheduleCount();activeSchedules=store.activeScheduledCount(null);
+            Map<String,Object> scheduleData=store.scheduleMetrics();nextDue=scheduleData.get("nextDueAt") instanceof String value?value:null;
+            occurrenceCounts=new LinkedHashMap<>();
+            if(scheduleData.get("occurrences") instanceof Map<?,?> rows)for(String key:List.of("scheduled","submitted","skipped","failed-to-submit")) {
+                Object value=rows.get(key);if(value instanceof Number count)occurrenceCounts.put(key,count.longValue());
+            }
+        }
+        MonitoringSnapshot.ScheduledLoad scheduled=new MonitoringSnapshot.ScheduledLoad(config.scheduling.enabled,
+                scheduleCount,activeSchedules,config.scheduling.enabled?config.scheduling.maxConcurrentRuns:null,
+                nextDue,occurrenceCounts);
+        Map<String,Long> jobStates=new LinkedHashMap<>();
+        for(String state:List.of("QUEUED","PREPARING","RUNNING","PASS","FAIL","ERROR","INVALID","CANCELLED"))
+            jobStates.put(state,store.count(state));
+        return new MonitoringSnapshot("att-monitoring/v1",captured.toString(),"server-runtime",requestId,
+                new MonitoringSnapshot.Health("UP",ServerBuildInfo.PRODUCT,
+                        TimeUnit.NANOSECONDS.toMillis(Math.max(0L,System.nanoTime()-startedAtNanos))),
+                process,workerView,http,journal,storage,inspection,executionPool,scheduled,Map.copyOf(jobStates));
+    }
+    MonitoringSnapshot.JobJournal monitoringJobJournal(String id) throws Exception {
+        Job active=jobs.get(id);JobEvents source=active==null?cachedTerminalEvents(id):active.events;
+        if(source==null)return new MonitoringSnapshot.JobJournal(id,false,null,null,null,null,null,null,null,
+                null,null,null,null,null,null,null,null,null);
+        Map<String,Object> values=source.metrics();
+        return new MonitoringSnapshot.JobJournal(id,true,text(values,"journalPersistence","unknown"),
+                nullableLong(values,"journalBytes"),nullableLong(values,"maxJournalBytes"),nullableLong(values,"retainedEventCount"),
+                nullableLong(values,"retainedBytes"),nullableLong(values,"retainedMemoryBytes"),nullableLong(values,"compactionBacklogBytes"),
+                nullableBoolean(values,"historyTruncated"),nullableBoolean(values,"sequenceGapDetected"),
+                nullableLong(values,"compactionAttempts"),nullableLong(values,"compactionFailures"),
+                nullableLong(values,"listenerDispatchFailures"),nullableDouble(values,"journalWriteAmplification"),
+                nullableText(values,"lastCompactionAt"),nullableLong(values,"lastCompactionDurationMs"),
+                nullableLong(values,"lastCompactionAgeMs"));
+    }
+    private JobEvents cachedTerminalEvents(String id) {
+        synchronized(terminalEventCacheLock){return terminalEventCache.get(id);}
+    }
+    void requireMonitoringJob(String id,String principal,boolean systemAdmin) throws Exception {
+        if(systemAdmin) {
+            if(!JOB_ID.matcher(id).matches()||store.get(id)==null)throw new NotFoundException();
+        } else requireJobOwner(id,principal);
+    }
+    void recordApiRequest(int status,long durationNanos) { monitoringRequests.record(status,durationNanos); }
+    private static long stageCount(Map<String,Object> data,String stage) {Object value=data.get(stage);return value instanceof Map<?,?> row&&row.get("count") instanceof Number n?n.longValue():0L;}
+    private static long stageNanos(Map<String,Object> data,String stage) {Object value=data.get(stage);return value instanceof Map<?,?> row&&row.get("totalNanos") instanceof Number n?n.longValue():0L;}
+    private static int number(Map<String,Object> values,String key) {return (int)Math.max(0L,numberLong(values,key));}
+    private static long numberLong(Map<String,Object> values,String key) {Object value=values.get(key);return value instanceof Number n?Math.max(0L,n.longValue()):0L;}
+    private static Long nullableLong(Map<String,Object> values,String key) {Object value=values.get(key);return value instanceof Number n&&n.longValue()>=0L?n.longValue():null;}
+    private static Double nullableDouble(Map<String,Object> values,String key) {Object value=values.get(key);return value instanceof Number n&&Double.isFinite(n.doubleValue())&&n.doubleValue()>=0d?n.doubleValue():null;}
+    private static String nullableText(Map<String,Object> values,String key) {Object value=values.get(key);return value instanceof String s?s:null;}
+    private static Long multiply(Long value,long factor) {return value==null||value>Long.MAX_VALUE/factor?null:value*factor;}
+    private static Integer nullableInt(Map<String,Object> values,String key) {Object value=values.get(key);return value instanceof Number n&&n.longValue()>=0L?(int)Math.min(Integer.MAX_VALUE,n.longValue()):null;}
+    private static Boolean nullableBoolean(Map<String,Object> values,String key) {Object value=values.get(key);return value instanceof Boolean b?b:null;}
+    private static boolean bool(Map<String,Object> values,String key) {return Boolean.TRUE.equals(values.get(key));}
+    private static String text(Map<String,Object> values,String key,String fallback) {Object value=values.get(key);return value instanceof String s?s:fallback;}
+    private static Long nonnegative(long value) {return Math.max(0L,value);}
+    private static Long nonnegativeOrNull(long value) {return value<0L?null:value;}
+    private static Long workerMetricCount(Map<String,Object> values,String stage) {
+        Object value=values.get(stage);
+        return value instanceof Map<?,?> row&&row.get("count") instanceof Number count&&count.longValue()>=0L?count.longValue():null;
+    }
+    private Long aggregateInspectionWorkerMetric(String stage) {
+        long total=0L;boolean observed=false;
+        for(InspectionWorker worker:inspectionWorkerPool) {
+            Long count=workerMetricCount(worker.metrics,stage);
+            if(count!=null){observed=true;total=saturatedAdd(total,count);}
+        }
+        return observed?total:null;
+    }
+    private static Integer nodeInt(JsonNode node,String field) {JsonNode value=node.path(field);return value.isIntegralNumber()&&value.canConvertToInt()&&value.asInt()>=0?value.asInt():null;}
     Path artifact(Job job,String requested) throws Exception {
         if(requested==null||requested.isBlank())throw new IllegalArgumentException("artifact path is required");
         Path base=config.dataDir.resolve("jobs").resolve(job.id).resolve("output").toRealPath();Path relative=Paths.get(requested);
@@ -4006,6 +4197,30 @@ final class ServerRuntime implements AutoCloseable {
     boolean acquireArtifactReadSlot() { return artifactReadSlots.tryAcquire(); }
     void releaseArtifactReadSlot() { artifactReadSlots.release(); }
     Map<String,Object> artifactIndex(String id) throws Exception { return artifactIndex(id,0,100); }
+    JobArtifactOverview artifactOverview(String id) throws Exception {
+        if(store.get(id)==null)throw new NotFoundException();
+        JsonNode publication=readArchiveStatus(artifactArchivePath(id).resolveSibling("archive-status.json"));
+        String state=publication.path("state").asText("PENDING");
+        if(store.workerQuarantined(id))state="FAILED";
+        if("READY".equals(state)&&!Files.isRegularFile(artifactArchivePath(id)))state="FAILED";
+        if(!"READY".equals(state))return new JobArtifactOverview(state,false,"UNVERIFIED",null,null,null,null,null,null,false);
+        JsonNode value=publication.path("overview");
+        if(publication.path("overviewVersion").asInt()!=1||!value.isObject())
+            return new JobArtifactOverview(state,false,"UNVERIFIED",null,null,null,null,null,null,false);
+        String report=value.path("approvedReportPath").isTextual()?value.path("approvedReportPath").asText():null;
+        boolean complete=value.path("complete").asBoolean(false);
+        long omitted=Math.max(0L,value.path("omittedCandidateCount").asLong(0L));
+        String availability=report!=null?"READY":!complete&&omitted>0L?"OMITTED":"NOT_PRESENT";
+        List<JobArtifactOverview.OmissionCategory> omissions=new ArrayList<>();
+        JsonNode rows=value.path("omissionCategories");
+        if(rows.isArray())for(JsonNode row:rows) {
+            String category=row.path("category").asText("");long count=row.path("count").asLong(-1L);
+            if(count>0L&&Set.of("unsafe_path","unsafe_entry","incomplete_load_report","recovery_checkpoint","reserved_manifest","unsupported_type","duplicate_path","entry_limit","oversized","rejected_text","reason_unavailable").contains(category))
+                omissions.add(new JobArtifactOverview.OmissionCategory(count,category));
+        }
+        return new JobArtifactOverview(state,true,availability,report,nodeInt(value,"approvedArtifactCount"),
+                nodeInt(value,"approvedReportCount"),omitted,complete,List.copyOf(omissions),true);
+    }
     Map<String,Object> artifactIndex(String id,int offset,int limit) throws Exception {
         if(offset<0||offset>1_000_000||limit<1||limit>100)throw new IllegalArgumentException("Artifact listing pagination is invalid");
         if(!artifactReadSlots.tryAcquire())throw new ArtifactCapacityException();
@@ -4097,12 +4312,16 @@ final class ServerRuntime implements AutoCloseable {
     }
     private void archiveStatus(String id,String state,String reason) throws Exception { archiveStatus(id,state,reason,null); }
     private void archiveStatus(String id,String state,String reason,Map<String,Object> diagnostic) throws Exception {
+        archiveStatus(id,state,reason,diagnostic,null);
+    }
+    private void archiveStatus(String id,String state,String reason,Map<String,Object> diagnostic,Map<String,Object> overview) throws Exception {
         Path target=artifactArchivePath(id).resolveSibling("archive-status.json");
         Files.createDirectories(target.getParent());
         Path temporary=Files.createTempFile(target.getParent(),".archive-status-",".tmp");
         try {
             Map<String,Object> value=new LinkedHashMap<>();value.put("state",state);value.put("reason",reason);value.put("manifestVersion",1);
             if(diagnostic!=null)value.put("diagnostic",diagnostic);
+            if(overview!=null){value.put("overviewVersion",1);value.put("overview",overview);}
             Files.write(temporary,JSON.writeValueAsBytes(value));
             try(var channel=java.nio.channels.FileChannel.open(temporary,java.nio.file.StandardOpenOption.WRITE)){channel.force(true);}
             Files.move(temporary,target,java.nio.file.StandardCopyOption.ATOMIC_MOVE,java.nio.file.StandardCopyOption.REPLACE_EXISTING);
@@ -4121,6 +4340,7 @@ final class ServerRuntime implements AutoCloseable {
         if(!terminal(id))throw new IllegalArgumentException("Artifacts can be published after the Job has ended");
         if(store.workerQuarantined(id))throw new IllegalArgumentException("Artifacts require independent recovery after Worker quarantine");
         if(!Files.isDirectory(outputDirectoryForJob(id)))throw new IllegalArgumentException("Private source output is unavailable for retry");
+        archiveRetries.incrementAndGet();
         store.artifactRecoveryNeeded(id,true);
         requestedArtifactRetries.add(id);
         scheduleArtifactArchive(id);
@@ -4169,7 +4389,8 @@ final class ServerRuntime implements AutoCloseable {
                     artifactPublisher.publish(output,archive,ServerRuntime::validateApprovedArtifactBytes);
                 }
                 metrics.phase("publication");
-                archiveStatus(id,"READY","");
+                Map<String,Object> overview=ArtifactArchive.overviewSummary(archive);
+                archiveStatus(id,"READY","",null,overview);
                 metrics.value.zipBytes=Files.size(archive);
                 metrics.value.outcome="READY";
                 metrics.phase("cleanup");
@@ -4204,6 +4425,7 @@ final class ServerRuntime implements AutoCloseable {
         finishArtifactFailure(id,reason,auditOutcome,null);
     }
     private void finishArtifactFailure(String id,String reason,String auditOutcome,Exception failure) {
+        archiveFailures.incrementAndGet();
         Map<String,Object> diagnostic=null;
         if(failure instanceof ArtifactArchive.LimitFailure){
             ArtifactArchive.LimitFailure limited=(ArtifactArchive.LimitFailure)failure;
@@ -4333,15 +4555,19 @@ final class ServerRuntime implements AutoCloseable {
 
     private Map<String,Object> eventJournalStatistics() {
         long activeBytes=0L,retainedEvents=0L,retainedMemoryBytes=0L,attempts=0L,failures=0L,lastCompactionAgeMs=0L;
+        long dispatchFailures=0L,appendBytes=0L,compactionBytes=0L;
         int active=0,degraded=0;
         for(Job job:jobs.values()) {
             Map<String,Object> metrics=job.events.metrics();
             active++;
-            activeBytes+=((Number)metrics.get("journalBytes")).longValue();
-            retainedEvents+=((Number)metrics.get("retainedEventCount")).longValue();
-            retainedMemoryBytes+=((Number)metrics.get("retainedMemoryBytes")).longValue();
-            attempts+=((Number)metrics.get("compactionAttempts")).longValue();
-            failures+=((Number)metrics.get("compactionFailures")).longValue();
+            activeBytes=saturatedAdd(activeBytes,((Number)metrics.get("journalBytes")).longValue());
+            retainedEvents=saturatedAdd(retainedEvents,((Number)metrics.get("retainedEventCount")).longValue());
+            retainedMemoryBytes=saturatedAdd(retainedMemoryBytes,((Number)metrics.get("retainedMemoryBytes")).longValue());
+            attempts=saturatedAdd(attempts,((Number)metrics.get("compactionAttempts")).longValue());
+            failures=saturatedAdd(failures,((Number)metrics.get("compactionFailures")).longValue());
+            dispatchFailures=saturatedAdd(dispatchFailures,((Number)metrics.get("listenerDispatchFailures")).longValue());
+            appendBytes=saturatedAdd(appendBytes,((Number)metrics.get("appendBytesWritten")).longValue());
+            compactionBytes=saturatedAdd(compactionBytes,((Number)metrics.get("compactionBytesWritten")).longValue());
             if(metrics.get("lastCompactionAgeMs") instanceof Number age)
                 lastCompactionAgeMs=Math.max(lastCompactionAgeMs,age.longValue());
             if("DEGRADED".equals(metrics.get("journalPersistence")))degraded++;
@@ -4353,6 +4579,9 @@ final class ServerRuntime implements AutoCloseable {
         result.put("activeMemoryBudgetBytes",active*(long)config.maxEventJournalMemoryBytes);
         result.put("activeMemoryOverBudgetBytes",Math.max(0L,retainedMemoryBytes-active*(long)config.maxEventJournalMemoryBytes));
         result.put("activeCompactionAttempts",attempts);result.put("activeCompactionFailures",failures);
+        result.put("activeListenerDispatchFailures",dispatchFailures);result.put("appendBytesWritten",appendBytes);
+        result.put("compactionBytesWritten",compactionBytes);
+        result.put("writeAmplification",appendBytes==0L?null:1d+((double)compactionBytes)/appendBytes);
         result.put("oldestActiveCompactionAgeMs",lastCompactionAgeMs);
         result.put("maxJournalBytesPerJob",config.maxEventJournalBytes);
         result.put("memoryBudgetBytesPerJob",config.maxEventJournalMemoryBytes);

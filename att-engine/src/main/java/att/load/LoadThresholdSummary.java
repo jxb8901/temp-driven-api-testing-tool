@@ -24,6 +24,7 @@ public final class LoadThresholdSummary {
         result.put("status", verdict);
         result.put("performanceVerdict", verdict);
         result.put("legacyPassed", passed);
+        result.put("total", results.size());
         List<Map<String, Object>> items = new ArrayList<Map<String, Object>>();
         for (ThresholdResult item : results) items.add(item.toMap());
         result.put("results", items);

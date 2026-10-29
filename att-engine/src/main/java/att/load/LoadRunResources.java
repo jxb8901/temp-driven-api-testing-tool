@@ -552,14 +552,26 @@ public final class LoadRunResources implements AutoCloseable {
 
     private void closeOwnedResources() {
         Throwable failure = null;
-        for (Runnable close : new Runnable[] {http::close, mqFactory::close, db::closeAll, dbProvider::close}) {
-            try { close.run(); }
+        String[] resourceTypes={"HTTP","MQ","DB","DB"};
+        Runnable[] owners={http::close,mqFactory::close,db::closeAll,dbProvider::close};
+        for (int index=0;index<owners.length;index++) {
+            try { owners[index].run(); }
             catch (RuntimeException | Error problem) {
-                if (failure == null) failure = problem;
-                else failure.addSuppressed(problem);
+                Throwable classified=containsTypedTeardown(problem)?problem:
+                        new LoadResourceTeardownException(resourceTypes[index],null,1L,problem);
+                if (failure == null) failure = classified;
+                else failure.addSuppressed(classified);
             }
         }
         if (failure instanceof Error) throw (Error) failure;
         if (failure instanceof RuntimeException) throw (RuntimeException) failure;
+    }
+
+    private static boolean containsTypedTeardown(Throwable failure) {
+        if(failure==null)return false;
+        if(failure instanceof LoadResourceTeardownException)return true;
+        if(containsTypedTeardown(failure.getCause()))return true;
+        for(Throwable suppressed:failure.getSuppressed())if(containsTypedTeardown(suppressed))return true;
+        return false;
     }
 }

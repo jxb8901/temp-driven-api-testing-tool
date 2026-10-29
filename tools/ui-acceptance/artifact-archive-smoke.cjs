@@ -109,6 +109,18 @@ async function main() {
         await frame.waitForFunction(() => location.href === 'about:srcdoc');
         await frame.locator('body').waitFor();
         assert.equal(await frame.evaluate(() => location.href), 'about:srcdoc');
+        if (/\/report\/index\.html$/i.test(reportPath)) {
+          await frame.waitForFunction(() => !!document.querySelector('#rate-chart'));
+          const chart = await frame.evaluate(() => {
+            const svg = document.querySelector('#rate-chart');
+            const lines = Array.from(svg.querySelectorAll('polyline'));
+            return { label: svg.getAttribute('aria-label'), count: lines.length,
+              points: lines.map(line => line.getAttribute('points') || '') };
+          });
+          assert.ok(chart.label.includes('rate'), 'The generated LOAD chart must keep its accessible label');
+          assert.ok(chart.count > 0, 'The reviewed trend script must draw actual SVG geometry');
+          assert.ok(chart.points.some(value => /\d/.test(value)), 'The SVG geometry must contain plotted coordinates');
+        }
         process.stdout.write(`  Online report loaded: ${reportPath}\n`);
         assert.equal(await frame.evaluate(() => { try { return !!parent.document.body; } catch { return false; } }), false,
           'The report must not read the application DOM');

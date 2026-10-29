@@ -195,6 +195,49 @@ class AttServiceTest {
         assertFalse(((Map<?,?>)compact.get("diagnostics")).containsKey("primaryError"));
     }
 
+    @Test void cleanupFailureKeepsCompletedLoadMetricsAndPublishesSafeTeardownDiagnostic() throws Exception {
+        Path root=temp.resolve("load-cleanup-failure");
+        Files.createDirectories(root.resolve("config"));Files.createDirectories(root.resolve("templates/SIMPLE"));
+        Files.createDirectories(root.resolve("testcase"));Files.createDirectories(root.resolve("tools"));Files.createDirectories(root.resolve("load"));
+        att.TestSchemas.install(root);
+        Files.write(root.resolve("config/config.yaml"),("schemaVersion: att-config/v2.11\n"
+                +"outputDirectory: output\nenvironment: SIT\ntemplates: {root: templates}\n"
+                +"testcase: {root: testcase}\ntools: {}\n").getBytes("UTF-8"));
+        Files.write(root.resolve("templates/SIMPLE/template.yaml"),("schemaVersion: att-template/v3.4\n"
+                +"name: SIMPLE\ndescription: cleanup failure result preservation\nactions:\n"
+                +"  show: {type: log, message: completed-before-cleanup}\n").getBytes("UTF-8"));
+        Path scenario=root.resolve("load/scenario.yaml");
+        Files.write(scenario,("schemaVersion: att-load/v1.9\nworkloads:\n"
+                +"  - id: cleanup\n    target: {type: template, id: SIMPLE}\n"
+                +"    load: {users: 1, duration: 100ms}\n    execution: {thinkTime: 0ms}\n"
+                +"evidence: {mode: metrics}\n").getBytes("UTF-8"));
+
+        DefaultAttService service=new DefaultAttService((outputRoot,loadResult) ->
+                new att.load.LoadReportWriter().write(outputRoot,loadResult),att.load.LoadRunResources::new,resources -> {
+                    resources.close();
+                    throw new att.load.LoadResourceTeardownException("DB","orders-db",2L,
+                            new java.io.IOException("DB_CLOSE_FAILED /Users/alice/private/connection"));
+                });
+        LoadResult result=service.load(new LoadRequest(root,Paths.get("config/config.yaml"),null,null,"cleanup-failed",
+                scenario,null,null,null,null,null,null,null,null,null,null,null,Collections.<String>emptyList()));
+
+        assertEquals("ERROR",result.status());
+        assertEquals(3,result.exitCode());
+        assertTrue(result.paths().containsKey("report"));
+        assertTrue(Files.isRegularFile(Paths.get(result.paths().get("report"))));
+        Map<?,?> summary=(Map<?,?>)result.toMap().get("summary");
+        Map<?,?> metrics=(Map<?,?>)summary.get("metrics");
+        assertTrue(((Number)metrics.get("completed")).longValue()>0L,"completed scheduler metrics must survive cleanup failure");
+        Map<?,?> diagnostics=(Map<?,?>)summary.get("diagnostics");
+        Map<?,?> primary=(Map<?,?>)diagnostics.get("primaryError");
+        assertEquals("DB_RESOURCE_TEARDOWN_FAILED",primary.get("code"));
+        assertEquals("TEARDOWN",primary.get("phase"));
+        assertFalse(result.toMap().toString().contains("/Users/alice/private"));
+        String reportSummary=Files.readString(Paths.get(result.paths().get("report")).getParent().getParent().resolve("load-summary.json"));
+        com.fasterxml.jackson.databind.JsonNode reportJson=new com.fasterxml.jackson.databind.ObjectMapper().readTree(reportSummary);
+        assertEquals("TEARDOWN",reportJson.path("teardown").path("phase").asText());
+    }
+
     @Test void configuredLoadIdentityUsesTheSameEnclosingTimestampAsIterationContext() throws Exception {
         Path root=temp.resolve("load-identity-time-package");
         Files.createDirectories(root.resolve("config")); Files.createDirectories(root.resolve("templates/SIMPLE"));

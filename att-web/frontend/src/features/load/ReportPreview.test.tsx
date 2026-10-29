@@ -12,6 +12,18 @@ const report = '<!doctype html><html><head>'
   + '<a href="https://evil.example/">External</a></body></html>';
 
 describe('authenticated isolated report preview', () => {
+  it('keeps the current generated report script and both legacy script hashes explicitly approved', async () => {
+    const html = await prepareReportHtml('<!doctype html><html><head></head><body></body></html>', 'load/run/report/index.html', 'NONCE');
+    const policy = new DOMParser().parseFromString(html, 'text/html')
+      .querySelector('meta[http-equiv="Content-Security-Policy"]')?.getAttribute('content') || '';
+    for (const hash of [
+      'DmkzPdiGxyCfiKKZtr34jiaf1ukqUeAK8RSwFF19ryg=',
+      '2n13XsaCAniqXDGJgtRR2kgh8VlBPDQQ3kb5BQLyzq4=',
+      'JngTyYfak/+hWviebrkpXD20Pdm7CCCZsual7sBCLrQ=',
+    ]) expect(policy).toContain(`'sha256-${hash}'`);
+    expect(policy).not.toContain("script-src 'unsafe-inline'");
+  });
+
   it('accepts only relative archive paths, never credentials-bearing external links', () => {
     expect(resolveReportHref('run/report/index.html', '../../case.log')).toBe('case.log');
     expect(resolveReportHref('run/report/index.html', '../summary.yaml#top')).toBe('run/summary.yaml');

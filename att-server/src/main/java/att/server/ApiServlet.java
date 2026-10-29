@@ -38,10 +38,14 @@ public final class ApiServlet extends HttpServlet {
     private ServerRuntime runtime;
     @Override public void init() throws ServletException {Object r=getServletContext().getAttribute(ServerBootstrap.RUNTIME);if(!(r instanceof ServerRuntime))throw new ServletException("ATT Server runtime did not initialize");runtime=(ServerRuntime)r;}
     @Override protected void service(HttpServletRequest req,HttpServletResponse res) throws ServletException,IOException {
+        long requestStarted=System.nanoTime();
         long inspectionStarted=System.nanoTime();
         boolean inspection=resourcePath(path(req))||configurationPath(path(req))||path(req).matches("/packages/[^/]+/load-catalog(?:/(?:source|validate|detail))?");
         try { serviceRequest(req,res); }
-        finally { if(inspection)runtime.inspectionMetrics.record(att.metrics.InspectionMetrics.Stage.HTTP,System.nanoTime()-inspectionStarted); }
+        finally {
+            runtime.recordApiRequest(res.getStatus(),System.nanoTime()-requestStarted);
+            if(inspection)runtime.inspectionMetrics.record(att.metrics.InspectionMetrics.Stage.HTTP,System.nanoTime()-inspectionStarted);
+        }
     }
     private void serviceRequest(HttpServletRequest req,HttpServletResponse res) throws ServletException,IOException {
         if(path(req).startsWith("/auth/")){super.service(req,res);return;}
@@ -61,6 +65,18 @@ public final class ApiServlet extends HttpServlet {
             if(loadSchedulePath(path)){scheduleGet(req,res,path,requestId);return;}
             boolean draftRequest=path.matches("/drafts/[DLAR][0-9A-F]{32}");
             String principal=principal(req);if(principal==null){error(res,401,"ATT-SERVER-AUTHENTICATION-REQUIRED","An authenticated Servlet Principal is required",requestId);return;}
+            if("/monitoring".equals(path)) {
+                if(!requireMonitoringRead(req,res,requestId))return;
+                res.setHeader("Cache-Control","no-store");json(res,200,runtime.monitoringSnapshot(requestId));return;
+            }
+            if(path.matches("/monitoring/jobs/[^/]+/journal")) {
+                if(!requireMonitoringRead(req,res,requestId))return;
+                String id=segment(path,3);boolean admin;
+                try { admin=systemAdminCapability(req,principal); }
+                catch(Exception unavailable){error(res,500,"ATT-SERVER-REQUEST-FAILED","The authorization request could not be completed",requestId);return;}
+                runtime.requireMonitoringJob(id,principal,admin);
+                res.setHeader("Cache-Control","no-store");json(res,200,runtime.monitoringJobJournal(id));return;
+            }
             if("/metrics".equals(path)){if(!requireSystemAdmin(req,res,requestId))return;Map<String,Object> metrics=runtime.counts();metrics.put("requestId",requestId);json(res,200,metrics);return;}
             if(!requireOperator(req,res,requestId))return;
             if(path.matches("/packages/[^/]+/load-templates")) {
@@ -95,6 +111,10 @@ public final class ApiServlet extends HttpServlet {
                 res.setHeader("Cache-Control","no-store");json(res,200,response);return;
             }
             if(path.startsWith("/jobs/"))runtime.requireJobOwner(segment(path,2),principal);
+            if(path.matches("/jobs/[^/]+/artifacts/status")) {
+                Map<String,Object> response=ServerRuntime.JSON.convertValue(runtime.artifactOverview(segment(path,2)),Map.class);
+                response.put("requestId",requestId);res.setHeader("Cache-Control","private, no-store");json(res,200,response);return;
+            }
             if(path.matches("/jobs/[^/]+/replay-draft/[^/]+")){
                 Map<String,Object> draft=runtime.getJobReplayEditorDraft(segment(path,2),segment(path,4),principal);draft.put("requestId",requestId);
                 res.setHeader("Cache-Control","private, no-store");json(res,200,draft);return;
@@ -398,6 +418,19 @@ public final class ApiServlet extends HttpServlet {
         try {
             if(systemAdminCapability(req,login))return true;
             error(res,403,"ATT-SERVER-FORBIDDEN","System administrator access is required",requestId);return false;
+        } catch(Exception failure){error(res,500,"ATT-SERVER-REQUEST-FAILED","The authorization request could not be completed",requestId);return false;}
+    }
+    private boolean requireMonitoringRead(HttpServletRequest req,HttpServletResponse res,String requestId)throws IOException {
+        String login=principal(req);
+        if(login==null||RequestIdentity.ANONYMOUS.equals(login)){
+            error(res,401,"ATT-SERVER-AUTHENTICATION-REQUIRED","Authentication is required",requestId);return false;
+        }
+        try {
+            if(runtime.auth.local(runtime.config)) {
+                Map<String,Object> user=runtime.store.authUser(login);
+                if(user!=null&&Boolean.TRUE.equals(user.get("active"))&&Set.of("USER","ADMIN").contains(user.get("role")))return true;
+            } else if(systemAdminCapability(req,login)||operatorCapability(req,login))return true;
+            error(res,403,"ATT-SERVER-FORBIDDEN","Monitoring access is required",requestId);return false;
         } catch(Exception failure){error(res,500,"ATT-SERVER-REQUEST-FAILED","The authorization request could not be completed",requestId);return false;}
     }
     private boolean requireOperator(HttpServletRequest req,HttpServletResponse res,String requestId)throws IOException {

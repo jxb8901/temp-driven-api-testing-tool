@@ -21,6 +21,7 @@ export interface ResourceSourceReferenceRoute { type: 'case' | 'template' | 'flo
 
 export type AppRoute =
   | { kind: 'dashboard' }
+  | { kind: 'monitoring' }
   | { kind: 'packages' }
   | { kind: 'package'; packageId: string; resource?: ResourceRoute }
   | { kind: 'configuration'; packageId?: string; environment?: string; filePath?: string; fileOrigin?: string; sourceReference?: ResourceSourceReferenceRoute; configurationReferenceId?: string; tab?: ConfigurationTab }
@@ -47,6 +48,7 @@ export function parseRoute(hash: string): AppRoute {
     return { kind: 'dashboard' };
   }
   if (parts.length === 0) return { kind: 'dashboard' };
+  if (parts[0] === 'monitoring' && parts.length === 1) return { kind: 'monitoring' };
   if (parts[0] === 'packages' && parts.length === 1) return { kind: 'packages' };
   if (parts[0] === 'packages' && parts[1]) {
     if (parts.length === 5 && parts[2] === 'resources') {
@@ -148,6 +150,7 @@ export function parseRoute(hash: string): AppRoute {
 export function formatRoute(route: AppRoute): string {
   switch (route.kind) {
     case 'dashboard': return '#/';
+    case 'monitoring': return '#/monitoring';
     case 'run': {
       const root=route.packageId?'#/run/'+encodeURIComponent(route.packageId):'#/run';
       const target=route.target?'/'+encodeURIComponent(route.target.type)+'/'+encodeURIComponent(route.target.resourceId):'';

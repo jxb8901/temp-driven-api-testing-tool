@@ -1,8 +1,8 @@
-<!-- att-doc-status: current release=4.2.6 -->
+<!-- att-doc-status: current release=4.2.7 -->
 
 # Documentation architecture and truth matrix
 
-This page records the current documentation owners, feature/interface availability and migration decisions for ATT 4.2.6. Product claims are checked against released source, schemas, tests and merged behavior. An open issue or an unmerged implementation does not make a feature Current.
+This page records the current documentation owners, feature/interface availability and migration decisions for ATT 4.2.7. Product claims are checked against released source, schemas, tests and merged behavior. An open issue or an unmerged implementation does not make a feature Current.
 
 ## Inventory and link impact
 
@@ -17,7 +17,7 @@ The documentation release gate checks local links and anchors from current entry
 
 ## Feature, interface and availability matrix
 
-| Capability | ATT 4.2.6 Local CLI | ATT Remote compatibility CLI | Studio and REST | Engine or Server | Status |
+| Capability | ATT 4.2.7 Local CLI | ATT Remote compatibility CLI | Studio and REST | Engine or Server | Status |
 |---|---|---|---|---|---|
 | Functional Case execution | Current run command selects workbook Cases | Current remote run submits Server work | Current unified RUN supports Case and selected Case batches | Engine executes Case work; Server validates drafts and owns Jobs | Current |
 | Template, Flow and Tool execution | Current standalone debug command | Current remote debug command | Current unified RUN targets these resources; Debug is optional diagnostic mode | Shared execution and Action contracts | Current; local CLI verb is legacy |
@@ -25,7 +25,7 @@ The documentation release gate checks local links and anchors from current entry
 | VALIDATE | Current package and selected dependency validation | Current remote validation | Current Studio and REST validation flows | Read-only validation; no business execution | Current |
 | Shared Configuration and Package Manifest | Current config and Package validation | Server-owned configuration for remote work | Current inspectors and Package authoring flows | Global Runtime Configuration; optional Package Manifest and Package Testdata | Current |
 | Jobs and Schedules | Local Run IDs and output only | Current Job listing, watch, result, cancel and artifact commands | Current Job, Schedule and history views | Server persists Jobs and Schedule definitions | Server capability; no Local Job store |
-| CLI vNext common run, load and validate grammar | Not released in 4.2.6 | Proposed Local/Server selection syntax | No Studio or REST capability is removed by this proposal | Parser implementation is present on PR #296's unmerged branch | Planned; promote only after release verification |
+| CLI vNext common run, load and validate grammar | Not released in 4.2.7 | Proposed Local/Server selection syntax | No Studio or REST capability is removed by this proposal | Parser implementation is present on PR #296's unmerged branch | Planned; promote only after release verification |
 | #294 CLI management resources | Not available | Not included in the proposed grammar | Server and Studio resources remain separately available | Future P3 proposal | Planned future work |
 | Workbook Snapshot generation | Current explicit snapshot authoring command | Not applicable | Studio authoring tools are separate | Snapshot generation is not a VALIDATE side effect | Current |
 
@@ -57,15 +57,15 @@ The product feature, interface and release status are separate facts. A Server o
 
 | Existing source | Decision | Current destination |
 |---|---|---|
-| Root README | Rewrite around the Package-oriented platform and a runnable 4.2.6 workflow | [README](../../README.md) |
+| Root README | Rewrite around the Package-oriented platform and a runnable 4.2.7 workflow | [README](../../README.md) |
 | docs/README.md | Replace single workflow navigation with audiences, tasks and availability | [Documentation map](../README.md) |
-| docs/reference/cli.md and Chinese pair | Keep shipped 4.2.6 verbs Current; remove proposed grammar from the current Reference | [CLI Reference](../reference/cli.md) |
+| docs/reference/cli.md and Chinese pair | Keep shipped 4.2.7 verbs Current; remove proposed grammar from the current Reference | [CLI Reference](../reference/cli.md) |
 | vNext portion of CLI Reference and proposed examples | Move and label Planned until a release is verified | [Proposed CLI vNext](../interfaces/cli/vnext-proposed.md) |
 | docs/remote-client.md and Chinese pair | Keep as the legacy ATT Remote profile, Job and artifact guide | [ATT Remote guide](../remote-client.md) |
 | docs/server-deployment.md and Chinese pair | Keep old paths and heading anchors as compatibility stubs | [Deployment](../operations/server-deployment.md), [configuration](../operations/server-configuration.md), [security](../operations/security.md), and [API v1](../interfaces/server-api/README.md) |
 | docs/att-server-web-ui.md and Chinese pair | Keep old paths and heading anchors as compatibility stubs | [Studio interface pages](../interfaces/studio/README.md) |
 | REST API and SSE sections | Split by route concern without changing request contract content | [Versioned Server API](../interfaces/server-api/README.md) |
-| Server release-specific operational sections | Keep current 4.2.6 policies under Operations | [Jobs and Schedules operations](../operations/server-jobs-schedules.md) |
+| Server release-specific operational sections | Keep current 4.2.7 policies under Operations | [Jobs and Schedules operations](../operations/server-jobs-schedules.md) |
 | Issue #176 rollout checklist | Preserve as a historical record | [Archived checklist](../history/issue-176-server-rollout.md) |
 | Load mode introduction and task navigation | Add a task guide and six-mode concept page; keep schema/execution ownership in Reference | [Load guide](../guides/load-testing.md), [Load model](../concepts/load-model.md), [Load Reference](../reference/execution-modes/load.md) |
 | docs/reference/ and docs/reference.zh/ | Preserve paired editable normative modules and their manifest | [Reference sources](../reference/README.md) and [繁體中文 sources](../reference.zh/README.md) |
@@ -74,7 +74,7 @@ The product feature, interface and release status are separate facts. A Server o
 
 ## Current and Planned CLI migration
 
-ATT 4.2.6 keeps explicit workbook Snapshot authoring, package validation and legacy Case execution. The current Quick Start remains runnable with that interface. VALIDATE reads and checks authored files; it never generates or refreshes a Snapshot.
+ATT 4.2.7 keeps explicit workbook Snapshot authoring, package validation and legacy Case execution. The current Quick Start remains runnable with that interface. VALIDATE reads and checks authored files; it never generates or refreshes a Snapshot.
 
 | 4.2.4 compatibility syntax | Proposed vNext syntax | Status |
 |---|---|---|

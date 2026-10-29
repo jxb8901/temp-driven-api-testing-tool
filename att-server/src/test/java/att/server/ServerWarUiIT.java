@@ -390,12 +390,32 @@ class ServerWarUiIT {
         try {
             tomcat.start();int port=tomcat.getConnector().getLocalPort();String origin="http://127.0.0.1:"+port,api="/tools/att/api/v1";
             String auth=basic("att"),peer=basic("colleague"),admin=basic("admin");
+            JsonNode monitoring=getJson(port,api+"/monitoring",auth);
+            assertEquals("att-monitoring/v1",monitoring.path("schemaVersion").asText(),monitoring.toString());
+            assertTrue(monitoring.path("capturedAt").isTextual());assertTrue(monitoring.path("process").isObject());
+            assertTrue(monitoring.path("journal").isObject());assertTrue(monitoring.path("storage").isObject());
+            assertFalse(monitoring.toString().contains(temp.resolve("data").toString()),"Monitoring must not expose Server data paths");
+            assertEquals(200,get(port,api+"/monitoring",admin),"Container ADMIN can read the safe Monitoring projection");
+            assertEquals(401,get(port,api+"/monitoring",null));
+            assertEquals(403,get(port,api+"/metrics",auth),"The raw metrics endpoint remains system-admin-only");
+            assertEquals(200,get(port,api+"/metrics",admin));
             var fixtures=new java.util.ArrayList<Map<String,Object>>();
             for(String command:List.of("run","load")) {
                 Object input="run".equals(command)?Map.of("packageId","payments","suites",List.of("testcase/archive.xlsx"),"liveOutputMaxEntryChars",1,"liveOutputMaxEntryLines",1)
                         :Map.of("packageId","payments","scenario","load/archive.yaml");
                 String id=apiJsonResponse(port,"POST",api+"/jobs/"+command,auth,origin,input,202).path("jobId").asText();
                 JsonNode index=awaitArchive(port,api,id,peer);
+                JsonNode overview=getJson(port,api+"/jobs/"+id+"/artifacts/status",peer);
+                assertEquals("READY",overview.path("archiveStatus").asText(),overview.toString());
+                assertTrue(overview.path("summaryVerified").asBoolean(),overview.toString());
+                if("load".equals(command)) {
+                    assertTrue(overview.path("reportPath").isTextual(),overview.toString());
+                    assertTrue(index.path("primaryReports").findValuesAsText("path").contains(overview.path("reportPath").asText()),overview.toString());
+                } else assertTrue(overview.path("reportPath").isNull(),overview.toString());
+                JsonNode journal=getJson(port,api+"/monitoring/jobs/"+id+"/journal",peer);
+                assertEquals(id,journal.path("jobId").asText());assertTrue(journal.path("metricsAvailable").isBoolean());
+                if(journal.path("metricsAvailable").asBoolean())assertTrue(journal.path("journalBytes").isIntegralNumber(),journal.toString());
+                else assertTrue(journal.path("journalBytes").isNull(),journal.toString());
                 if("run".equals(command)) {
                     String replay=sseDataUntil(port,api+"/jobs/"+id+"/events",peer,"EXPANDED_ENTRY_END");
                     assertTrue(replay.contains(expandedMessage),"Configured console preview must survive Worker, journal and SSE replay: "+replay);

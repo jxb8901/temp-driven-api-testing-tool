@@ -239,6 +239,7 @@ public final class LoadTerminalResult {
                 putText(item, "status", workload.get("status"), 24);
                 putText(item, "executionStatus", workload.get("executionStatus"), 24);
                 putText(item, "performanceVerdict", workload.get("performanceVerdict"), 24);
+                item.put("thresholds", thresholdSummary(map(workload.get("thresholds"))));
                 Map<?, ?> metrics = map(workload.get("metrics"));
                 Map<String, Object> counters = new LinkedHashMap<String, Object>();
                 for (String key : new String[] {"scheduled", "started", "completed", "success", "failure", "runtimeError", "otherOutcome", "dropped"})
@@ -262,6 +263,7 @@ public final class LoadTerminalResult {
             putText(item, "status", workload.get("status"), 24);
             putText(item, "executionStatus", workload.get("executionStatus"), 24);
             putText(item, "performanceVerdict", workload.get("performanceVerdict"), 24);
+            item.put("thresholds", thresholdSummary(map(workload.get("thresholds"))));
             Map<?, ?> metrics = map(workload.get("metrics"));
             Map<String, Object> counters = new LinkedHashMap<String, Object>();
             for (String key : new String[] {"scheduled", "started", "completed", "success", "failure", "runtimeError", "otherOutcome", "dropped"})
@@ -437,6 +439,28 @@ public final class LoadTerminalResult {
         putText(result, "summary", summary, MAX_TEXT);
         putText(result, "workloadId", source.get("workloadId"), 96);
         putText(result, "phase", source.get("phase"), 24);
+        putText(result, "resourceType", source.get("resourceType"), 12);
+        putNumber(result, "failedCloseCount", source.get("failedCloseCount"));
+        Object resources=source.get("resources");
+        if(resources instanceof Iterable) {
+            List<Map<String,Object>> safeResources=new ArrayList<>();
+            for(Object value:(Iterable<?>)resources) {
+                if(!(value instanceof Map)||safeResources.size()>=8)continue;
+                Map<?,?> row=(Map<?,?>)value;Map<String,Object> safe=new LinkedHashMap<>();
+                putText(safe,"resourceType",row.get("resourceType"),12);
+                putText(safe,"logicalId",row.get("logicalId"),64);
+                putNumber(safe,"failedCloseCount",row.get("failedCloseCount"));
+                List<String> codes=new ArrayList<>();Object rawCodes=row.get("causeCodes");
+                if(rawCodes instanceof Iterable)for(Object raw:(Iterable<?>)rawCodes) {
+                    String causeCode=text(raw,96);if(causeCode.matches("[A-Z][A-Z0-9_.:-]{2,95}")&&!codes.contains(causeCode)&&codes.size()<8)codes.add(causeCode);
+                }
+                if(!codes.isEmpty())safe.put("causeCodes",codes);
+                putNumber(safe,"mqCompletionCode",row.get("mqCompletionCode"));
+                putNumber(safe,"mqReasonCode",row.get("mqReasonCode"));
+                if(!safe.isEmpty())safeResources.add(safe);
+            }
+            if(!safeResources.isEmpty())result.put("resources",safeResources);
+        }
         putNumber(result, "failedCount", source.get("failedCount"));
         putText(result, "limitName", source.get("limitName"), 96);
         putNumber(result, "configuredLimit", source.get("configuredLimit"));

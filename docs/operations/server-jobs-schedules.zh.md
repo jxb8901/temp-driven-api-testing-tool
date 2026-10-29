@@ -1,4 +1,4 @@
-<!-- att-doc-status: current release=4.2.6 -->
+<!-- att-doc-status: current release=4.2.7 -->
 
 # ATT Server Job 與 Schedule 操作
 

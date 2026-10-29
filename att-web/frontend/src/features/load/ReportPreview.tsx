@@ -8,6 +8,11 @@ type ReadText = (jobId: string, path: string, signal?: AbortSignal) => Promise<s
 const BRIDGE = "(()=>{function navigate(event){const target=event.target;if(!(target instanceof Element))return;const link=target.closest('a[data-att-report-link]');if(!link)return;const href=link.getAttribute('data-att-report-link');if(!href)return;event.preventDefault();parent.postMessage({type:'att-report-navigation',href},'*')}document.addEventListener('click',navigate);document.addEventListener('keydown',event=>{if(event.key==='Enter')navigate(event)});})();";
 const BRIDGE_HASH = "'sha256-zhg8uc2ehLr1YOtvIswiYT86nszYQvE88Tg1hupHR80='";
 const REPORT_ORIGIN = 'https://att-report.invalid';
+const APPROVED_REPORT_SCRIPTS = [
+  { producer: 'legacy-report-v1', hash: 'DmkzPdiGxyCfiKKZtr34jiaf1ukqUeAK8RSwFF19ryg=' },
+  { producer: 'legacy-report-v2', hash: '2n13XsaCAniqXDGJgtRR2kgh8VlBPDQQ3kb5BQLyzq4=' },
+  { producer: 'load-report-4.2.7', hash: 'JngTyYfak/+hWviebrkpXD20Pdm7CCCZsual7sBCLrQ=' },
+] as const;
 
 /** Resolve only package-archive-relative URLs. Never pass untrusted links to fetch. */
 export function resolveReportHref(currentPath: string, href: string): string | null {
@@ -43,7 +48,7 @@ export async function prepareReportHtml(source: string, currentPath: string, stu
   }
   // Hash the actual producer script bytes, not names or attributes. Only scripts already
   // reviewed by ATT may inherit the parent page's script nonce. Others are removed.
-  const approved = new Set(['DmkzPdiGxyCfiKKZtr34jiaf1ukqUeAK8RSwFF19ryg=', '2n13XsaCAniqXDGJgtRR2kgh8VlBPDQQ3kb5BQLyzq4=']);
+  const approved = new Set<string>(APPROVED_REPORT_SCRIPTS.map(script => script.hash));
   for (const script of Array.from(document.querySelectorAll('script'))) {
     if (script.hasAttribute('src')) { script.remove(); continue; }
     if (script.getAttribute('type') === 'application/json' && script.id === 'att-load-summary-data') {
@@ -69,7 +74,7 @@ export async function prepareReportHtml(source: string, currentPath: string, stu
   if (studioNonce) document.querySelectorAll('style').forEach(element => element.setAttribute('nonce', studioNonce));
   const policy = document.createElement('meta');
   policy.setAttribute('http-equiv', 'Content-Security-Policy');
-  policy.setAttribute('content', "default-src 'none'; script-src 'sha256-DmkzPdiGxyCfiKKZtr34jiaf1ukqUeAK8RSwFF19ryg=' 'sha256-2n13XsaCAniqXDGJgtRR2kgh8VlBPDQQ3kb5BQLyzq4=' " + BRIDGE_HASH
+  policy.setAttribute('content', "default-src 'none'; script-src " + APPROVED_REPORT_SCRIPTS.map(script => "'sha256-" + script.hash + "'").join(' ') + ' ' + BRIDGE_HASH
     + (studioNonce ? " 'nonce-" + studioNonce + "'" : '')
     + "; style-src 'unsafe-inline'" + (studioNonce ? " 'nonce-" + studioNonce + "'" : '')
     + "; img-src data:; form-action 'none'; base-uri 'none'; connect-src 'none'");
