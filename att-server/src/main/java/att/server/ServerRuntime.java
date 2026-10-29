@@ -119,6 +119,7 @@ final class ServerRuntime implements AutoCloseable {
     private final ConcurrentHashMap<String,FutureTask<Void>> tasks=new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String,AdmissionLease> leases=new ConcurrentHashMap<>();
     private final AtomicLong completed=new AtomicLong();
+    private final AtomicLong compactionFailuresSinceStart=new AtomicLong();
     private final AtomicLong loadCapacityRejections=new AtomicLong();
     private final AtomicLong queueCapacityRejections=new AtomicLong();
     private final AtomicLong archiveFailures=new AtomicLong();
@@ -245,7 +246,7 @@ final class ServerRuntime implements AutoCloseable {
             store.interruptStale(id);
             Path journal=config.dataDir.resolve("jobs").resolve(id).resolve("events.jsonl");
             JobEvents events=new JobEvents(journal,config.maxEventsPerJob,config.maxEventJournalBytes,
-                    config.maxEventJournalMemoryBytes,eventCompactions,eventNotifications);
+                    config.maxEventJournalMemoryBytes,eventCompactions,eventNotifications,this::recordCompactionFailure);
             String summary="Job was interrupted by Server restart and was not rerun";
             events.append("diagnostic",Map.of("code","ATT-SERVER-INTERRUPTED","summary",summary,"console",publishConsole(att.console.ExecutionConsoleFormatter.diagnostic(mode,"ATT-SERVER-INTERRUPTED",summary))));
             events.append("result",Map.of("jobId",id,"status","ERROR","console",publishConsole(att.console.ExecutionConsoleFormatter.lifecycle(mode,id,"ERROR",null))));
@@ -760,7 +761,7 @@ final class ServerRuntime implements AutoCloseable {
             id="J"+UUID.randomUUID().toString().replace("-","").substring(0,16).toUpperCase();request.jobId=id;
             jobPath=config.dataDir.resolve("jobs").resolve(id);Files.createDirectories(jobPath.resolve("output"));final Path activeJobPath=jobPath;
             JobEvents events=new JobEvents(jobPath.resolve("events.jsonl"),config.maxEventsPerJob,config.maxEventJournalBytes,
-                    config.maxEventJournalMemoryBytes,eventCompactions,eventNotifications);
+                    config.maxEventJournalMemoryBytes,eventCompactions,eventNotifications,this::recordCompactionFailure);
             Job job=new Job(id,command,packageId,principal,request,events);job.scheduleOccurrenceId=scheduleOccurrenceId;job.requestReceivedNanos=requestReceivedNanos;
             if(provenance==null) {
                 job.submissionSource="manual";job.originatingScheduleId=originatingScheduleId;job.executionPrincipal=config.authenticationRequired?principal:null;job.submittedBy=config.authenticationRequired?principal:null;
@@ -3918,7 +3919,8 @@ final class ServerRuntime implements AutoCloseable {
                 number(journalData,"activeJobs"),number(journalData,"degradedActiveJobs"),numberLong(journalData,"activeJournalBytes"),
                 numberLong(journalData,"activeRetainedEvents"),numberLong(journalData,"activeRetainedMemoryBytes"),
                 numberLong(journalData,"activeMemoryOverBudgetBytes"),numberLong(journalData,"activeCompactionAttempts"),
-                numberLong(journalData,"activeCompactionFailures"),numberLong(journalData,"activeListenerDispatchFailures"),
+                numberLong(journalData,"activeCompactionFailures"),numberLong(journalData,"compactionFailuresSinceStart"),
+                numberLong(journalData,"activeListenerDispatchFailures"),
                 numberLong(journalData,"appendBytesWritten"),numberLong(journalData,"compactionBytesWritten"),
                 nullableDouble(journalData,"writeAmplification"),
                 nullableLong(journalData,"oldestActiveCompactionAgeMs"),numberLong(journalData,"maxJournalBytesPerJob"),
@@ -4210,7 +4212,6 @@ final class ServerRuntime implements AutoCloseable {
         String report=value.path("approvedReportPath").isTextual()?value.path("approvedReportPath").asText():null;
         boolean complete=value.path("complete").asBoolean(false);
         long omitted=Math.max(0L,value.path("omittedCandidateCount").asLong(0L));
-        String availability=report!=null?"READY":!complete&&omitted>0L?"OMITTED":"NOT_PRESENT";
         List<JobArtifactOverview.OmissionCategory> omissions=new ArrayList<>();
         JsonNode rows=value.path("omissionCategories");
         if(rows.isArray())for(JsonNode row:rows) {
@@ -4218,6 +4219,8 @@ final class ServerRuntime implements AutoCloseable {
             if(count>0L&&Set.of("unsafe_path","unsafe_entry","incomplete_load_report","recovery_checkpoint","reserved_manifest","unsupported_type","duplicate_path","entry_limit","oversized","rejected_text","reason_unavailable").contains(category))
                 omissions.add(new JobArtifactOverview.OmissionCategory(count,category));
         }
+        boolean reportOmitted=omissions.stream().anyMatch(omission->"incomplete_load_report".equals(omission.category()));
+        String availability=report!=null?"READY":reportOmitted?"OMITTED":"NOT_PRESENT";
         return new JobArtifactOverview(state,true,availability,report,nodeInt(value,"approvedArtifactCount"),
                 nodeInt(value,"approvedReportCount"),omitted,complete,List.copyOf(omissions),true);
     }
@@ -4523,7 +4526,8 @@ final class ServerRuntime implements AutoCloseable {
                 if(cached!=null)return cached;
             }
             JobEvents loaded=new JobEvents(config.dataDir.resolve("jobs").resolve(id).resolve("events.jsonl"),
-                    config.maxEventsPerJob,config.maxEventJournalBytes,config.maxEventJournalMemoryBytes,eventCompactions,eventNotifications);
+                    config.maxEventsPerJob,config.maxEventJournalBytes,config.maxEventJournalMemoryBytes,
+                    eventCompactions,eventNotifications,this::recordCompactionFailure);
             if(List.of("PASS","FAIL","ERROR","INVALID","CANCELLED").contains(storedJob.get("status"))) {
                 Map<String,Object> recoveredResult=new LinkedHashMap<>();
                 recoveredResult.put("jobId",id);
@@ -4579,6 +4583,7 @@ final class ServerRuntime implements AutoCloseable {
         result.put("activeMemoryBudgetBytes",active*(long)config.maxEventJournalMemoryBytes);
         result.put("activeMemoryOverBudgetBytes",Math.max(0L,retainedMemoryBytes-active*(long)config.maxEventJournalMemoryBytes));
         result.put("activeCompactionAttempts",attempts);result.put("activeCompactionFailures",failures);
+        result.put("compactionFailuresSinceStart",compactionFailuresSinceStart.get());
         result.put("activeListenerDispatchFailures",dispatchFailures);result.put("appendBytesWritten",appendBytes);
         result.put("compactionBytesWritten",compactionBytes);
         result.put("writeAmplification",appendBytes==0L?null:1d+((double)compactionBytes)/appendBytes);
@@ -4596,6 +4601,8 @@ final class ServerRuntime implements AutoCloseable {
         }
         return result;
     }
+
+    void recordCompactionFailure() { compactionFailuresSinceStart.updateAndGet(value->value==Long.MAX_VALUE?value:value+1L); }
     boolean terminal(String id) throws Exception {Job active=jobs.get(id);if(active!=null)return active.terminal();Map<String,Object> row=store.get(id);if(row==null)throw new NotFoundException();return List.of("PASS","FAIL","ERROR","INVALID","CANCELLED").contains(row.get("status"));}
     /** Validate bounded text artifacts without modifying any Engine/Worker-generated byte. */
     static byte[] approvedArtifactBytes(Path file) throws Exception {

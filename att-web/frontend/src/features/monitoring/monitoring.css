@@ -10,6 +10,7 @@
 .att-monitor-error, .att-monitor-alerts { border: 1px solid #f59e0b; border-radius: .6rem; padding: .8rem 1rem; background: color-mix(in srgb, #f59e0b 9%, var(--surface, white)); }
 .att-monitor-alerts-healthy { border-color: #16a34a; background: color-mix(in srgb, #16a34a 8%, var(--surface, white)); }
 .att-monitor-alerts-critical { border-color: #dc2626; background: color-mix(in srgb, #dc2626 10%, var(--surface, white)); }
+.att-monitor-alerts-stale, .att-monitor-alerts-unavailable { border-color: #b45309; background: color-mix(in srgb, #f59e0b 12%, var(--surface, white)); }
 .att-monitor-alerts h2, .att-monitor-alerts ul { margin-top: 0; }
 .att-monitor-alerts ul { margin-bottom: 0; }
 .att-monitor-group-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 22rem), 1fr)); gap: .85rem; }

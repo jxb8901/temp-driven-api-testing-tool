@@ -20,7 +20,7 @@ function snapshot(capturedAt: string, heapUsedBytes: number): MonitoringSnapshot
       sseErrors: null, sseReconnects: null },
     http: { requests: 20, successfulRequests: 18, redirectRequests: 0, clientErrors: 1, serverErrors: 0, recentP50Ms: null, recentP95Ms: null },
     journal: { activeJobs: 1, degradedActiveJobs: 0, activeJournalBytes: 4096, activeRetainedEvents: 12,
-      activeRetainedMemoryBytes: 2048, activeMemoryOverBudgetBytes: 0, activeCompactionAttempts: 2, activeCompactionFailures: 0,
+      activeRetainedMemoryBytes: 2048, activeMemoryOverBudgetBytes: 0, activeCompactionAttempts: 2, activeCompactionFailures: 0, compactionFailuresSinceStart: 0,
       activeListenerDispatchFailures: 0, appendBytesWritten: 4096, compactionBytesWritten: 0, writeAmplification: 1,
       oldestActiveCompactionAgeMs: null, maxJournalBytesPerJob: 65536, memoryBudgetBytesPerJob: 8192,
       storageUsableBytes: null, storageHeadroomLow: false, cachedTerminalJobs: 2, cachedTerminalWeightBytes: 1024 },
@@ -65,9 +65,9 @@ describe('MonitoringPage', () => {
       snapshot('2026-10-29T12:00:10Z', 3072),
     ];
     const rows = [
-      baseRows[0],
-      { ...baseRows[1], process: { ...baseRows[1].process, gcCount: 2 }, http: { ...baseRows[1].http, serverErrors: 1 }, journal: { ...baseRows[1].journal, activeCompactionFailures: 1 } },
-      { ...baseRows[2], process: { ...baseRows[2].process, gcCount: 3 }, http: { ...baseRows[2].http, serverErrors: 2 }, journal: { ...baseRows[2].journal, activeCompactionFailures: 3 } },
+      { ...baseRows[0], journal: { ...baseRows[0].journal, activeCompactionFailures: 5, compactionFailuresSinceStart: 5 } },
+      { ...baseRows[1], process: { ...baseRows[1].process, gcCount: 2 }, http: { ...baseRows[1].http, serverErrors: 1 }, journal: { ...baseRows[1].journal, activeCompactionFailures: 0, compactionFailuresSinceStart: 5 } },
+      { ...baseRows[2], process: { ...baseRows[2].process, gcCount: 3 }, http: { ...baseRows[2].http, serverErrors: 2 }, journal: { ...baseRows[2].journal, activeCompactionFailures: 1, compactionFailuresSinceStart: 6 } },
     ];
     const read = vi.spyOn(api, 'getServerMonitoring').mockImplementation(async () => rows.shift()!);
     await act(async () => root.render(<AppShellContext.Provider value={context}><MonitoringPage /></AppShellContext.Provider>));
@@ -84,10 +84,47 @@ describe('MonitoringPage', () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(5_000); });
     expect(read).toHaveBeenCalledTimes(3);
     expect(host.textContent).toContain('Journal compaction failures increased since the previous snapshot.');
+    expect(host.textContent).toContain('6 / +1');
     const points = host.querySelector('.att-monitor-chart polyline')?.getAttribute('points') || '';
     expect(points).toMatch(/^\d+(\.\d+)?,\d+(\.\d+)? \d+(\.\d+)?,\d+(\.\d+)?/);
     expect(host.textContent).toContain('Session trends');
     expect(host.querySelectorAll('.att-monitor-chart polyline').length).toBeGreaterThanOrEqual(4);
+  });
+
+  it('shows Unavailable when no successful snapshot has been captured', async () => {
+    vi.spyOn(api, 'getServerMonitoring').mockRejectedValue(new Error('Server is offline'));
+    await act(async () => root.render(<AppShellContext.Provider value={context}><MonitoringPage /></AppShellContext.Provider>));
+    await act(async () => { await Promise.resolve(); });
+    expect(host.querySelector('.att-monitor-alerts')?.textContent).toContain('Status: Unavailable');
+    expect(host.textContent).toContain('No successful snapshot is available');
+  });
+
+  it('marks an old healthy snapshot stale after polling failures and returns to Healthy after recovery', async () => {
+    const healthy = snapshot('2026-10-29T12:02:00Z', 1024);
+    const read = vi.spyOn(api, 'getServerMonitoring')
+      .mockResolvedValueOnce(healthy)
+      .mockRejectedValueOnce(new Error('Server is offline'))
+      .mockRejectedValueOnce(new Error('Server is still offline'))
+      .mockResolvedValue(snapshot('2026-10-29T12:03:00Z', 2048));
+    await act(async () => root.render(<AppShellContext.Provider value={context}><MonitoringPage /></AppShellContext.Provider>));
+    await act(async () => { await Promise.resolve(); });
+    expect(host.querySelector('.att-monitor-alerts')?.textContent).toContain('Status: Healthy');
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(15_000); });
+    expect(read).toHaveBeenCalledTimes(2);
+    expect(host.querySelector('.att-monitor-alerts')?.textContent).toContain('Status: Stale');
+    expect(host.textContent).toContain('displayed readings are historical and current health is unknown');
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(15_000); });
+    expect(read).toHaveBeenCalledTimes(3);
+    await act(async () => {
+      host.querySelector<HTMLButtonElement>('.att-monitor-controls button')!.click();
+      await Promise.resolve();
+    });
+    expect(read).toHaveBeenCalledTimes(4);
+    expect(host.querySelector('.att-monitor-alerts')?.textContent).toContain('Status: Healthy');
+    expect(host.querySelector('.att-monitor-alerts')?.textContent).not.toContain('Status: Stale');
+    expect(host.textContent).not.toContain('displayed readings are historical and current health is unknown');
   });
 
   it('aborts an in-flight request while hidden and refreshes immediately when visible again', async () => {

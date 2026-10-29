@@ -61,6 +61,7 @@ final class JobEvents {
     private final Executor compactionExecutor;
     private final Executor eventDispatcher;
     private final Runnable afterSnapshotWrite;
+    private final Runnable compactionFailureObserver;
     private final LongSupplier usableSpace;
     private final AtomicLong sequence = new AtomicLong();
     private final AtomicBoolean compactionScheduled = new AtomicBoolean();
@@ -152,19 +153,8 @@ final class JobEvents {
 
     JobEvents(Path file, int capacity, long maxJournalBytes, long maxRetainedMemoryBytes,
               Executor compactionExecutor, Runnable afterSnapshotWrite, LongSupplier usableSpace) throws Exception {
-        if (capacity < 1) throw new IllegalArgumentException("Journal event capacity must be positive");
-        if (maxJournalBytes < 1) throw new IllegalArgumentException("Journal byte budget must be positive");
-        if (maxRetainedMemoryBytes < 1) throw new IllegalArgumentException("Journal memory budget must be positive");
-        this.file = file.toAbsolutePath().normalize();
-        this.capacity = capacity;
-        this.maxJournalBytes = maxJournalBytes;
-        this.maxRetainedMemoryBytes = maxRetainedMemoryBytes;
-        this.compactionExecutor = compactionExecutor;
-        this.afterSnapshotWrite = afterSnapshotWrite;
-        this.usableSpace = usableSpace;
-        this.eventDispatcher = Runnable::run;
-        loadBoundedHistory();
-        listenerDeliveredThrough = sequence.get();
+        this(file, capacity, maxJournalBytes, maxRetainedMemoryBytes, compactionExecutor, afterSnapshotWrite,
+                usableSpace, Runnable::run, () -> { });
     }
 
     JobEvents(Path file, int capacity, long maxJournalBytes, long maxRetainedMemoryBytes,
@@ -174,8 +164,21 @@ final class JobEvents {
     }
 
     JobEvents(Path file, int capacity, long maxJournalBytes, long maxRetainedMemoryBytes,
+              Executor compactionExecutor, Executor eventDispatcher, Runnable compactionFailureObserver) throws Exception {
+        this(file, capacity, maxJournalBytes, maxRetainedMemoryBytes, compactionExecutor, () -> { },
+                fileUsableSpace(file), eventDispatcher, compactionFailureObserver);
+    }
+
+    JobEvents(Path file, int capacity, long maxJournalBytes, long maxRetainedMemoryBytes,
               Executor compactionExecutor, Runnable afterSnapshotWrite, LongSupplier usableSpace,
               Executor eventDispatcher) throws Exception {
+        this(file, capacity, maxJournalBytes, maxRetainedMemoryBytes, compactionExecutor, afterSnapshotWrite,
+                usableSpace, eventDispatcher, () -> { });
+    }
+
+    JobEvents(Path file, int capacity, long maxJournalBytes, long maxRetainedMemoryBytes,
+              Executor compactionExecutor, Runnable afterSnapshotWrite, LongSupplier usableSpace,
+              Executor eventDispatcher, Runnable compactionFailureObserver) throws Exception {
         if (capacity < 1) throw new IllegalArgumentException("Journal event capacity must be positive");
         if (maxJournalBytes < 1) throw new IllegalArgumentException("Journal byte budget must be positive");
         if (maxRetainedMemoryBytes < 1) throw new IllegalArgumentException("Journal memory budget must be positive");
@@ -187,8 +190,19 @@ final class JobEvents {
         this.afterSnapshotWrite = afterSnapshotWrite;
         this.usableSpace = usableSpace;
         this.eventDispatcher = eventDispatcher == null ? Runnable::run : eventDispatcher;
+        this.compactionFailureObserver = compactionFailureObserver == null ? () -> { } : compactionFailureObserver;
         loadBoundedHistory();
         listenerDeliveredThrough = sequence.get();
+    }
+
+    /** Records a current compaction failure and notifies the owning Server's cumulative counter. */
+    void recordCompactionFailure() {
+        compactionFailures.incrementAndGet();
+        try { compactionFailureObserver.run(); }
+        catch (RuntimeException observerFailure) {
+            java.util.logging.Logger.getLogger(JobEvents.class.getName())
+                    .log(java.util.logging.Level.FINE, "Compaction failure observer could not record a metric", observerFailure);
+        }
     }
 
     /**
@@ -863,7 +877,7 @@ final class JobEvents {
                         if (retryOnNextTrigger) asyncCompactionDeferred = true;
                     }
                     if (retryOnNextTrigger) {
-                        compactionFailures.incrementAndGet();
+                        recordCompactionFailure();
                         java.util.logging.Logger logger = java.util.logging.Logger.getLogger(JobEvents.class.getName());
                         String message = "Event journal compaction failed; bounded appends remain enabled";
                         if (compactionFailure == null) logger.warning(message);
@@ -885,7 +899,7 @@ final class JobEvents {
                 if (deferred) asyncCompactionDeferred = true;
             }
             if (deferred) {
-                compactionFailures.incrementAndGet();
+                recordCompactionFailure();
                 java.util.logging.Logger.getLogger(JobEvents.class.getName())
                         .warning("Event journal compaction deferred; the byte budget is still enforced");
             }
@@ -972,7 +986,7 @@ final class JobEvents {
             }
             return true;
         } catch (Exception failure) {
-            compactionFailures.incrementAndGet();
+            recordCompactionFailure();
             throw failure;
         } finally {
             if (!replaced) Files.deleteIfExists(temporary);

@@ -39,6 +39,7 @@ public record MonitoringSnapshot(
                           long activeRetainedEvents, long activeRetainedMemoryBytes,
                           long activeMemoryOverBudgetBytes,
                           long activeCompactionAttempts, long activeCompactionFailures,
+                          long compactionFailuresSinceStart,
                           long activeListenerDispatchFailures, long appendBytesWritten,
                           long compactionBytesWritten, Double writeAmplification,
                           Long oldestActiveCompactionAgeMs, long maxJournalBytesPerJob,

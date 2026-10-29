@@ -89,6 +89,31 @@ class ArtifactLifecycleTest {
         assertNotNull(unavailable.value.publicationWallMs);
     }
 
+    @Test void unrelatedArchiveOmissionDoesNotImplyLoadReportWasOmitted() throws Exception {
+        try(ServerRuntime runtime=runtime()) {
+            String id="J0000000000000001";
+            job(runtime,id,"PASS");
+            ArtifactArchive.build(runtime.outputDirectoryForJob(id),runtime.artifactArchivePath(id));
+            Path status=runtime.artifactArchivePath(id).resolveSibling("archive-status.json");
+            Map<String,Object> overview=new java.util.LinkedHashMap<>();
+            overview.put("complete",false);overview.put("approvedArtifactCount",0);overview.put("approvedReportCount",0);
+            overview.put("omittedCandidateCount",1);
+            overview.put("omissionCategories",List.of(Map.of("count",1,"category","unsupported_type")));
+            Files.writeString(status,ServerRuntime.JSON.writeValueAsString(Map.of("state","READY","overviewVersion",1,"overview",overview)));
+
+            JobArtifactOverview unrelated=runtime.artifactOverview(id);
+            assertEquals("NOT_PRESENT",unrelated.reportAvailability());
+            assertEquals(0,unrelated.approvedReportCount());
+            assertEquals(1L,unrelated.omittedCandidateCount());
+            assertEquals("unsupported_type",unrelated.omissions().get(0).category());
+
+            overview.put("omissionCategories",List.of(Map.of("count",1,"category","incomplete_load_report")));
+            Files.writeString(status,ServerRuntime.JSON.writeValueAsString(Map.of("state","READY","overviewVersion",1,"overview",overview)));
+            assertEquals("OMITTED",runtime.artifactOverview(id).reportAvailability(),
+                    "Only a report-specific publication outcome should mark the report as omitted");
+        }
+    }
+
     private att.server.api.ArtifactArchiveMetrics awaitMetrics(ServerRuntime runtime,String id,String outcome) throws Exception {
         long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(20);
         do {

@@ -86,6 +86,39 @@ class ServerRuntimeTest {
         return new java.util.LinkedHashMap<>(Map.of("id",id,"target",Map.of("type","template","id","T"),"load",load));
     }
 
+    @Test void compactionFailureAlertCounterSurvivesActiveJobEviction() throws Exception {
+        Path allowed=Files.createDirectory(temp.resolve("compaction-counter-packages"));
+        Path pkg=Files.createDirectory(allowed.resolve("p"));
+        Path yaml=Files.writeString(temp.resolve("compaction-counter-server.yaml"),"server:\n  dataDir: "+temp.resolve("compaction-counter-data")
+                +"\nworkers: {}\npackages:\n  allowedRoots:\n    - "+allowed+"\n  entries:\n    p: "+pkg+"\n");
+        try(ServerRuntime runtime=new ServerRuntime(ServerConfig.load(yaml),Files.createDirectory(temp.resolve("compaction-counter-libs")).toString())) {
+            Job first=monitoringJob(runtime,"J0000000000000001");
+            runtime.jobs.put(first.id,first);
+            first.events.recordCompactionFailure();
+            first.events.recordCompactionFailure();
+            first.events.recordCompactionFailure();
+            MonitoringSnapshot before=runtime.monitoringSnapshot("before-eviction");
+            assertEquals(3L,before.journal().activeCompactionFailures());
+            assertEquals(3L,before.journal().compactionFailuresSinceStart());
+
+            runtime.jobs.remove(first.id);
+            Job second=monitoringJob(runtime,"J0000000000000002");
+            runtime.jobs.put(second.id,second);
+            second.events.recordCompactionFailure();
+            Thread.sleep(1_050L); // Expire the bounded one-second snapshot cache.
+            MonitoringSnapshot after=runtime.monitoringSnapshot("after-new-failure");
+            assertEquals(1L,after.journal().activeCompactionFailures(),"The active aggregate should reflect only the remaining Job");
+            assertEquals(4L,after.journal().compactionFailuresSinceStart(),"The lifetime counter must retain the evicted Job's failures and include the new one");
+        }
+    }
+
+    private Job monitoringJob(ServerRuntime runtime,String id) throws Exception {
+        Path journal=runtime.config.dataDir.resolve("jobs").resolve(id).resolve("events.jsonl");
+        JobEvents events=new JobEvents(journal,runtime.config.maxEventsPerJob,runtime.config.maxEventJournalBytes,
+                runtime.config.maxEventJournalMemoryBytes,Runnable::run,Runnable::run,runtime::recordCompactionFailure);
+        return new Job(id,"run","p","monitoring-test",new att.server.api.WorkerRequest(),events);
+    }
+
     @Test void launchesOneStructuredWorkerProcessForAnAcceptedJob() throws Exception {
         Path allowed=Files.createDirectory(temp.resolve("packages"));Path pkg=Files.createDirectory(allowed.resolve("broken-package"));
         Path javaBin=Path.of(System.getProperty("java.home"),"bin",System.getProperty("os.name","").toLowerCase().contains("win")?"java.exe":"java");
