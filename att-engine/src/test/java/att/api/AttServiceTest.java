@@ -4,6 +4,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -233,7 +234,8 @@ class AttServiceTest {
         assertEquals("DB_RESOURCE_TEARDOWN_FAILED",primary.get("code"));
         assertEquals("TEARDOWN",primary.get("phase"));
         assertFalse(result.toMap().toString().contains("/Users/alice/private"));
-        String reportSummary=Files.readString(Paths.get(result.paths().get("report")).getParent().getParent().resolve("load-summary.json"));
+        String reportSummary=new String(Files.readAllBytes(Paths.get(result.paths().get("report")).getParent().getParent()
+                .resolve("load-summary.json")),StandardCharsets.UTF_8);
         com.fasterxml.jackson.databind.JsonNode reportJson=new com.fasterxml.jackson.databind.ObjectMapper().readTree(reportSummary);
         assertEquals("TEARDOWN",reportJson.path("teardown").path("phase").asText());
     }
