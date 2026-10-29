@@ -109,7 +109,7 @@ async function main() {
         await frame.waitForFunction(() => location.href === 'about:srcdoc');
         await frame.locator('body').waitFor();
         assert.equal(await frame.evaluate(() => location.href), 'about:srcdoc');
-        if (/\/report\/index\.html$/i.test(reportPath)) {
+        if (fixture.executionType === 'load' && /\/report\/index\.html$/i.test(reportPath)) {
           await frame.waitForFunction(() => !!document.querySelector('#rate-chart'));
           const chart = await frame.evaluate(() => {
             const svg = document.querySelector('#rate-chart');

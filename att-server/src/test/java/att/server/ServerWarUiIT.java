@@ -477,7 +477,7 @@ class ServerWarUiIT {
                 while(Files.exists(output)&&System.nanoTime()<deadline)Thread.sleep(10);
                 assertFalse(Files.exists(output),"Verified publication must remove loose output");
                 assertEquals(404,get(port,api+"/jobs/"+id+"/artifacts/"+encodeEntry(index.path("primaryReports").get(0).path("path").asText()),peer));
-                fixtures.add(Map.of("jobId",id,"archivePath",zip.toString(),"offlineRoot",extracted.toString(),"reports",index.path("primaryReports"),"entries",manifest.path("entries")));
+                fixtures.add(Map.of("jobId",id,"executionType",command,"archivePath",zip.toString(),"offlineRoot",extracted.toString(),"reports",index.path("primaryReports"),"entries",manifest.path("entries")));
             }
             if("1".equals(System.getenv("ATT_UI_SERVER_PLAYWRIGHT"))) {
                 Path fixture=Files.write(temp.resolve("archive-browser.json"),ServerRuntime.JSON.writeValueAsBytes(fixtures));
