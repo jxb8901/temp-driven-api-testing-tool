@@ -22,8 +22,17 @@ public final class LoadResourceTeardownException extends RuntimeException {
     public long failedCloseCount() { return failedCloseCount; }
 
     private static String safeLogicalId(String value) {
-        if (value == null || value.isBlank()) return null;
+        if (value == null || isBlank(value)) return null;
         String sanitized = value.replaceAll("[^A-Za-z0-9._:-]", "_");
         return sanitized.length() <= 64 ? sanitized : sanitized.substring(0, 64);
+    }
+
+    private static boolean isBlank(String value) {
+        for (int offset = 0; offset < value.length();) {
+            int codePoint = value.codePointAt(offset);
+            if (!Character.isWhitespace(codePoint)) return false;
+            offset += Character.charCount(codePoint);
+        }
+        return true;
     }
 }

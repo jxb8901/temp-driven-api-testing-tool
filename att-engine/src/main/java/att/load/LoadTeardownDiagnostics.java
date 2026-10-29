@@ -74,8 +74,24 @@ final class LoadTeardownDiagnostics {
 
     private static String messageCode(String message) {
         if (message == null || message.length() > 4096) return null;
-        Matcher matcher = CODE.matcher(message.strip());
+        Matcher matcher = CODE.matcher(strip(message));
         return matcher.find() ? matcher.group(1) : null;
+    }
+
+    private static String strip(String value) {
+        int start = 0;
+        int end = value.length();
+        while (start < end) {
+            int codePoint = value.codePointAt(start);
+            if (!Character.isWhitespace(codePoint)) break;
+            start += Character.charCount(codePoint);
+        }
+        while (start < end) {
+            int codePoint = value.codePointBefore(end);
+            if (!Character.isWhitespace(codePoint)) break;
+            end -= Character.charCount(codePoint);
+        }
+        return value.substring(start, end);
     }
 
     private static Long numericMethod(Throwable failure, String methodName) {
