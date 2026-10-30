@@ -77,8 +77,8 @@ final class ServerRuntime implements AutoCloseable {
     static final int MAX_STREAM_OBSERVERS=32;
     private static final int INSPECTION_EXPLORER_PRIORITY_BURST=3;
     private static final class ValidatedScheduledScenario {
-        final Map<String,Object> scenario;final String revisionDigest,model;final boolean containsSensitiveValues;
-        ValidatedScheduledScenario(Map<String,Object> scenario,String revisionDigest,String model,boolean containsSensitiveValues){this.scenario=scenario;this.revisionDigest=revisionDigest;this.model=model;this.containsSensitiveValues=containsSensitiveValues;}
+        final Map<String,Object> scenario;final String revisionDigest,model;final boolean containsSensitiveValues,containsSensitiveAuthoredValues;
+        ValidatedScheduledScenario(Map<String,Object> scenario,String revisionDigest,String model,boolean containsSensitiveValues,boolean containsSensitiveAuthoredValues){this.scenario=scenario;this.revisionDigest=revisionDigest;this.model=model;this.containsSensitiveValues=containsSensitiveValues;this.containsSensitiveAuthoredValues=containsSensitiveAuthoredValues;}
     }
     final ServerConfig config;
     final JobStore store;
@@ -3526,7 +3526,6 @@ final class ServerRuntime implements AutoCloseable {
             result.put("preview",Map.of("previewYaml",JSON.writeValueAsString(candidate.listSummary==null?Map.of():candidate.listSummary)));return result;
         }
         if(input.has("packageEdit"))throw new IllegalArgumentException("Snapshot schedules cannot switch to a package source");
-        if(source.catalogSnapshot)throw new IllegalArgumentException("Package-catalog snapshots require a reviewed package-source editor");
         if(source.expectedRevisionDigest==null)throw new IllegalArgumentException("This legacy schedule has no retained revision; create a new schedule");
         ObjectNode definition;
         if("run".equals(source.effectiveJobType())) {
@@ -3539,11 +3538,11 @@ final class ServerRuntime implements AutoCloseable {
         ObjectNode proposed=JobReplayOverrides.apply(definition,input.get("overrides"));
         Map<String,Object> originalPreview,validated;
         if("run".equals(source.effectiveJobType()))originalPreview=createRunDraft(definition,principal,true,null);
-        else {ObjectNode originalInput=definition.deepCopy();originalInput.remove("executionType");originalPreview=createAdvancedLoadDraft(originalInput,principal,null);}
+        else {ObjectNode originalInput=definition.deepCopy();originalInput.remove("executionType");originalPreview=source.catalogSnapshot?createCatalogScheduleReviewDraft(originalInput,source,principal):createAdvancedLoadDraft(originalInput,principal,null);}
         String originalDraftId=String.valueOf(originalPreview.remove("draftId"));
-        synchronized(draftLock) {runDrafts.remove(originalDraftId);advancedLoadDrafts.remove(originalDraftId);}
+        synchronized(draftLock) {runDrafts.remove(originalDraftId);advancedLoadDrafts.remove(originalDraftId);catalogLoadDrafts.remove(originalDraftId);}
         if("run".equals(source.effectiveJobType()))validated=createRunDraft(proposed,principal,true,null);
-        else {proposed.remove("executionType");validated=createAdvancedLoadDraft(proposed,principal,null);}
+        else {proposed.remove("executionType");validated=source.catalogSnapshot?createCatalogScheduleReviewDraft(proposed,source,principal):createAdvancedLoadDraft(proposed,principal,null);}
         String draftId=String.valueOf(validated.get("draftId"));String revision=String.valueOf(validated.get("revisionDigest"));
         if(!revision.equals(String.valueOf(originalPreview.get("revisionDigest"))))throw new StaleDraftException();
         if(!revision.matches("[a-f0-9]{64}"))throw new IllegalStateException("Schedule validation did not return a revision");
@@ -3556,6 +3555,28 @@ final class ServerRuntime implements AutoCloseable {
         Map<String,Object> result=new LinkedHashMap<>();result.put("draftId",draftId);result.put("expiresAt",expires.toString());result.put("definitionVersion",source.definitionVersion);
         result.put("snapshotVersion",source.snapshotVersion);result.put("nextRunAt",source.nextRunAt);result.put("revisionDigest",revision);
         result.put("sourcePolicy",effectivePackageChangePolicy(source));result.put("originalPreview",originalPreview);result.put("preview",validated);return result;
+    }
+
+    /** Revalidates edits to an existing catalog snapshot under the package-backed replay limits. */
+    private Map<String,Object> createCatalogScheduleReviewDraft(ObjectNode definition,LoadSchedule source,String principal) throws Exception {
+        String packageId=required(definition,"packageId");
+        if(!source.packageId.equals(packageId))throw new IllegalArgumentException("Schedule package cannot be changed here");
+        JsonNode scenarioNode=definition.get("scenario");requireObject(scenarioNode,"A retained Load scenario is required");
+        Path root=packageRoot(packageId);if(root==null)throw new NotFoundException();validatePackageRoot(root);
+        Map<String,Object> configuration=resolveExecutionConfiguration(packageId,root,optionalText(definition,"environment"));
+        String environment=(String)configuration.get("environment");
+        LoadSchedule context=source.copy();context.environment=environment;
+        @SuppressWarnings("unchecked") Map<String,Object> scenario=(Map<String,Object>)JSON.convertValue(scenarioNode,Map.class);
+        ValidatedScheduledScenario validated=validateScheduledScenario(root,context,scenario,false);
+        validatePackageBackedReplayLoadLimits(config.inlineLoad,validated.scenario);
+        if(validated.containsSensitiveValues||validated.containsSensitiveAuthoredValues)throw new IllegalArgumentException("A schedule cannot store classified sensitive values");
+        Map<String,Object> safeSummary=JobListIdentity.load(JSON.valueToTree(validated.scenario));
+        configuration=configurationRevision(configuration,validated.revisionDigest);
+        CatalogLoadDraftState draft=new CatalogLoadDraftState("C"+UUID.randomUUID().toString().replace("-","").toUpperCase(),
+                principal,packageId,environment,null,validated.revisionDigest,validated.model,validated.scenario,
+                JSON.writeValueAsString(safeSummary),configuration,clock.instant().plusMillis(DRAFT_TTL_MILLIS));
+        synchronized(draftLock){expireDrafts();checkDraftCapacity(principal);catalogLoadDrafts.put(draft.id,draft);}
+        return catalogLoadDraftView(draft);
     }
 
     LoadSchedule replaceScheduleExecution(String id,JsonNode input,String principal) throws Exception {
@@ -3854,12 +3875,12 @@ final class ServerRuntime implements AutoCloseable {
         request.inspectionAction="load-scenario";request.inlineLoadScenario=scenario;
         if(packageFile)request.inspectionPath=schedule.scenario;
         Map<String,Object> inspected=executeInspection(root,request);
-        Object rawScenario=inspected.get("normalizedScenario"),rawDigest=inspected.get("revisionDigest"),rawModel=inspected.get("model"),rawSensitive=inspected.get("containsSensitiveValues");
+        Object rawScenario=inspected.get("normalizedScenario"),rawDigest=inspected.get("revisionDigest"),rawModel=inspected.get("model"),rawSensitive=inspected.get("containsSensitiveValues"),rawAuthoredSensitive=inspected.get("containsSensitiveAuthoredValues");
         if(!(rawScenario instanceof Map)||!(rawDigest instanceof String)||!((String)rawDigest).matches("[a-f0-9]{64}")
-                ||!(rawModel instanceof String)||!List.of("virtualUsers","arrivalRate").contains(rawModel)||!(rawSensitive instanceof Boolean))
+                ||!(rawModel instanceof String)||!List.of("virtualUsers","arrivalRate").contains(rawModel)||!(rawSensitive instanceof Boolean)||(!packageFile&&!(rawAuthoredSensitive instanceof Boolean)))
             throw new IllegalStateException("Load validation Worker returned an invalid response");
         @SuppressWarnings("unchecked") Map<String,Object> normalized=(Map<String,Object>)JSON.convertValue(rawScenario,Map.class);
-        return new ValidatedScheduledScenario(normalized,(String)rawDigest,(String)rawModel,((Boolean)rawSensitive).booleanValue());
+        return new ValidatedScheduledScenario(normalized,(String)rawDigest,(String)rawModel,((Boolean)rawSensitive).booleanValue(),Boolean.TRUE.equals(rawAuthoredSensitive));
     }
 
     private static Map<String,Object> withScheduledLoadOptions(Map<String,Object> source,Map<String,String> options) {

@@ -333,6 +333,32 @@ class ServerRuntimeScheduleTest {
             snapshotRequest.put("environment","SIT");snapshotRequest.put("timezone","UTC");snapshotRequest.put("cron","0 2 * * *");
             LoadSchedule fileSnapshot=noInlineRuntime.createLoadSchedule(snapshotRequest,"alice");
             assertTrue(fileSnapshot.catalogSnapshot);assertNotNull(fileSnapshot.inlineScenario);
+            JsonNode catalogEdit=ServerRuntime.JSON.readTree("{\"expectedDefinitionVersion\":"+fileSnapshot.definitionVersion+",\"overrides\":{\"workloads\":[{\"id\":\"scheduled-smoke\",\"load\":{\"users\":2}}]}}");
+            assertThrows(ServerRuntime.NotFoundException.class,()->noInlineRuntime.createScheduleExecutionDraft(fileSnapshot.id,catalogEdit,"bob"));
+            JsonNode sensitiveCatalogEdit=ServerRuntime.JSON.readTree("{\"expectedDefinitionVersion\":"+fileSnapshot.definitionVersion+",\"overrides\":{\"workloads\":[{\"id\":\"scheduled-smoke\",\"inputs\":{\"password\":\"catalog-secret\"}}]}}");
+            assertThrows(IllegalArgumentException.class,()->noInlineRuntime.createScheduleExecutionDraft(fileSnapshot.id,sensitiveCatalogEdit,"alice"));
+            assertEquals(fileSnapshot.snapshotVersion,noInlineRuntime.store.schedule(fileSnapshot.id).snapshotVersion);
+            Map<String,Object> catalogReview=noInlineRuntime.createScheduleExecutionDraft(fileSnapshot.id,catalogEdit,"alice");
+            Map<String,Object> competingCatalogReview=noInlineRuntime.createScheduleExecutionDraft(fileSnapshot.id,catalogEdit,"alice");
+            assertFalse(catalogReview.toString().contains("package-sidecar-secret"));
+            JsonNode catalogApply=ServerRuntime.JSON.readTree("{\"draftId\":\""+catalogReview.get("draftId")+"\",\"expectedDefinitionVersion\":"+fileSnapshot.definitionVersion+",\"confirm\":true}");
+            LoadSchedule catalogReplacement=noInlineRuntime.replaceScheduleExecution(fileSnapshot.id,catalogApply,"alice");
+            assertTrue(catalogReplacement.catalogSnapshot);assertNull(catalogReplacement.scenario);
+            assertEquals(fileSnapshot.nextRunAt,catalogReplacement.nextRunAt);assertEquals(2,catalogReplacement.snapshotVersion);
+            assertEquals(2,ServerRuntime.JSON.valueToTree(catalogReplacement.inlineScenario).path("workloads").get(0).path("load").path("users").asInt());
+            JsonNode staleCatalogApply=ServerRuntime.JSON.readTree("{\"draftId\":\""+competingCatalogReview.get("draftId")+"\",\"expectedDefinitionVersion\":"+fileSnapshot.definitionVersion+",\"confirm\":true}");
+            assertThrows(ServerRuntime.ScheduleConflictException.class,()->noInlineRuntime.replaceScheduleExecution(fileSnapshot.id,staleCatalogApply,"alice"));
+            Map<String,Object> catalogOccurrence=noInlineRuntime.triggerLoadSchedule(fileSnapshot.id,"alice");
+            assertEquals("submitted",catalogOccurrence.get("status"),catalogOccurrence.toString());
+            String catalogJobId=String.valueOf(catalogOccurrence.get("jobId"));
+            long catalogDeadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(30);Map<String,Object> catalogRecord=noInlineRuntime.jobRecord(catalogJobId);
+            while(!List.of("PASS","FAIL","ERROR","INVALID","CANCELLED").contains(catalogRecord.get("status"))&&System.nanoTime()<catalogDeadline) {
+                Thread.sleep(20);catalogRecord=noInlineRuntime.jobRecord(catalogJobId);
+            }
+            assertEquals("PASS",catalogRecord.get("status"),String.valueOf(noInlineRuntime.resultRecord(catalogJobId)));
+            JsonNode catalogSpec=ServerRuntime.JSON.readTree(noInlineRuntime.store.executionSpec(catalogJobId).get("spec"));
+            assertEquals(2,catalogSpec.path("definition").path("scenario").path("workloads").get(0).path("load").path("users").asInt());
+            assertEquals(2,catalogSpec.path("scheduleSnapshot").path("version").asInt());
             assertThrows(ServerRuntime.InlineLoadDisabledException.class,()->noInlineRuntime.createAdvancedLoadDraft(
                     ServerRuntime.JSON.readTree("{\"packageId\":\"p\",\"scenario\":{\"schemaVersion\":\"att-load/v1.7\",\"workloads\":[]}}"),"alice"));
         } finally {noInlineRuntime.close();}
