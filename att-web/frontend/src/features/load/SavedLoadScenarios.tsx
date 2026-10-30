@@ -36,6 +36,12 @@ export function SavedLoadScenarios({ onJobAccepted, onSchedule, enabled, editorA
     if (next == null) return;
     await action(async () => { const page = await api.listSavedLoadScenarios(next); setItems(current => [...current, ...page.items]); setNext(page.nextOffset ?? null); });
   }
+  function exportYaml() {
+    if (!draft?.previewYaml || draft.redacted !== false) return;
+    const url = URL.createObjectURL(new Blob([draft.previewYaml], { type: 'application/yaml' }));
+    const link = document.createElement('a'); link.href = url; link.download = 'att-saved-scenario.yaml'; link.click();
+    URL.revokeObjectURL(url);
+  }
   if (editor) return <LoadTemplateBuilder templateId={String((editor.definition.templateComposition as Record<string, unknown>)?.templateId || '')} savedScenario={editor} api={editorApi} packages={packages} selectedPackage={editor.packageId} selectedEnvironment={environment} environments={environments} inlineLoadEnabled={enabled} schedulingEnabled={Boolean(onSchedule)} onPackageChange={() => {}} onEnvironmentChange={setEnvironment} onJobAccepted={onJobAccepted} onSchedule={onSchedule} onClose={() => { setEditor(null); setRefresh(value => value + 1); }} />;
   return <section className="page-content att-query-workspace" aria-label="Saved scenarios">
     <h2>Saved scenarios</h2><p>Your private saved definitions must be validated again before use.</p>
@@ -54,6 +60,7 @@ export function SavedLoadScenarios({ onJobAccepted, onSchedule, enabled, editorA
       {message && <p role="alert">{message}</p>}
       <p>Revision {selected.revision} · {draft.packageId} · {draft.environment || 'default environment'}</p>
       <CodeEditor language="yaml" value={draft.previewYaml || ''} readOnly label="Validated scenario preview" />
+      <button className="button button-quiet" type="button" disabled={!draft.previewYaml || draft.redacted !== false} onClick={exportYaml}>Export YAML</button>
       <button className="button button-primary" type="button" disabled={busy || Date.parse(draft.expiresAt) <= Date.now()} onClick={() => { if (window.confirm(`Start LOAD for ${selected.name}?`)) void action(async () => { const result = await api.submitLoadDraft({ packageId: draft.packageId, draftId: draft.draftId }); onJobAccepted(result.jobId); }); }}>Run</button>
       {onSchedule && <button className="button button-quiet" type="button" disabled={busy || Date.parse(draft.expiresAt) <= Date.now()} onClick={() => onSchedule({ packageId: draft.packageId, environment: draft.environment, draftId: draft.draftId, previewYaml: draft.previewYaml, expiresAt: draft.expiresAt })}>Schedule</button>}
     </LoadDialog>}

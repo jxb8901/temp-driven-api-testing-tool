@@ -149,3 +149,19 @@ it('avoids reusing workload and mix IDs retained in a saved scenario', async () 
  expect(dialog.textContent).toContain('slot-104');
  expect([...dialog.querySelectorAll('input[aria-label]')].filter(input=>input.getAttribute('aria-label')==='slot-103 weight')).toHaveLength(1);
 });
+
+it('updates the same saved scenario on subsequent saves and requires revision-bound validation to run', async () => {
+ endpoints.createLoadTemplateDraft.mockResolvedValue({draftId:'A1',expiresAt:new Date(Date.now()+60000).toISOString(),previewYaml:'safe'});
+ endpoints.saveLoadScenario.mockResolvedValue({id:'LS1',name:'Traffic',revision:1});
+ endpoints.updateSavedLoadScenario.mockResolvedValue({id:'LS1',name:'Traffic',revision:2});
+ await render();await bindAllTargets();await click('Validate');await click('Save Scenario');
+ const name=host.querySelector<HTMLInputElement>('input[aria-label="Scenario name"]')!;
+ await act(async()=>{Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!.call(name,'Traffic');name.dispatchEvent(new Event('input',{bubbles:true}));});
+ await click('Save',host.querySelector('dialog[aria-label="Save Scenario"]')!);
+ expect(endpoints.saveLoadScenario).toHaveBeenCalledTimes(1);
+ expect([...host.querySelectorAll('button')].find(button=>button.textContent?.includes('Run Now'))?.disabled).toBe(true);
+ expect(host.textContent).toContain('Open Saved Scenarios');
+ await click('Save Scenario');await click('Save',host.querySelector('dialog[aria-label="Save Scenario"]')!);
+ expect(endpoints.saveLoadScenario).toHaveBeenCalledTimes(1);
+ expect(endpoints.updateSavedLoadScenario).toHaveBeenCalledWith('LS1',expect.objectContaining({expectedRevision:1,draftId:'A1'}));
+});

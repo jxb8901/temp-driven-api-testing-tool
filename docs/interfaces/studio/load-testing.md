@@ -40,6 +40,6 @@ Select **New Schedule** (`#/schedules/new`) or **Edit** (`#/schedules/<id>/edit`
 
 ## Save a private scenario
 
-After validating a Load Template composition, select **Save Scenario** and enter a name. Saving creates a private Server record; it does not start a Job, create a Schedule, or write a Package file. In **Load testing → Scenarios**, use **Saved scenarios** to search, reopen, duplicate, validate, or delete your records. Editing and saving creates a new revision. A conflicting revision requires reloading the record.
+After validating a Load Template composition, select **Save Scenario** and enter a name. Saving creates a private Server record; it does not start a Job, create a Schedule, or write a Package file. In **Load testing → Scenarios**, use **Saved scenarios** to search, reopen, duplicate, validate, or delete your records. Editing and saving creates a new revision, including subsequent saves in the same builder. A conflicting revision requires reloading the record. After saving, return to the library and validate the saved revision before running or scheduling. The review dialog offers **Export YAML** only when the validated preview is explicitly unredacted.
 
 Validation is temporary. Validate the saved revision again before choosing **Run** or **Schedule**. A Schedule stores its own validated snapshot; later edits or deletion of the saved record do not change that Schedule. Saving is unavailable for definitions containing protected authored or resolved values. Remove those values or use an approved reference.

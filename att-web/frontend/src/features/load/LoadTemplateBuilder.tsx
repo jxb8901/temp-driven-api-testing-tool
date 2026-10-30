@@ -33,6 +33,7 @@ export function LoadTemplateBuilder(props: LoadFeatureProps & { templateId: stri
   const [busy, setBusy] = useState(false);
   const [dirty, setDirty] = useState(false);
   const [saveOpen, setSaveOpen] = useState(false);
+  const [savedId, setSavedId] = useState(props.savedScenario?.id);
   const [savedRevision, setSavedRevision] = useState(props.savedScenario?.revision);
   const [saveName, setSaveName] = useState(props.savedScenario?.name || '');
   const [saveDescription, setSaveDescription] = useState(props.savedScenario?.description || '');
@@ -166,8 +167,8 @@ export function LoadTemplateBuilder(props: LoadFeatureProps & { templateId: stri
     const version = sequence.current; setBusy(true); setSaveError('');
     try {
       const metadata = { draftId: draft.draftId, name: saveName.trim(), description: saveDescription.trim(), tags: saveTags.split(',').map(tag => tag.trim()).filter(Boolean) };
-      const saved = props.savedScenario ? await api.updateSavedLoadScenario(props.savedScenario.id, { ...metadata, expectedRevision: savedRevision ?? props.savedScenario.revision }) : await api.saveLoadScenario(metadata);
-      if (version === sequence.current) { setSavedRevision(saved.revision); setDirty(false); setSaveOpen(false); setMessage(`Saved ${saved.name} (revision ${saved.revision}). Validate again before a later run.`); }
+      const saved = savedId ? await api.updateSavedLoadScenario(savedId, { ...metadata, expectedRevision: savedRevision! }) : await api.saveLoadScenario(metadata);
+      if (version === sequence.current) { setSavedId(saved.id); setSavedRevision(saved.revision); setDirty(false); setSaveOpen(false); setMessage(`Saved ${saved.name} (revision ${saved.revision}). Return to Saved Scenarios and validate this revision before running or scheduling.`); }
     } catch (error) { if (version === sequence.current) setSaveError(error instanceof Error ? error.message : 'Scenario could not be saved.'); }
     finally { setBusy(false); }
   }
@@ -190,6 +191,7 @@ export function LoadTemplateBuilder(props: LoadFeatureProps & { templateId: stri
   };
   return <div className="page-content att-query-workspace att-template-builder">
     {props.onClose && <button className="button button-quiet" type="button" onClick={() => { if (!dirty && !edit && !saveOpen || window.confirm('Discard unsaved changes and return to Saved Scenarios?')) { unregisterDirty.current?.(); props.onClose?.(); } }}>Back to Saved Scenarios</button>}
+    {savedId && !props.onClose && <button className="button button-quiet" type="button" onClick={() => navigation.navigate('#/advanced-load?tab=scenarios')}>Open Saved Scenarios</button>}
     <h1>{definition?.name || 'Load Template'}</h1><p>{packageId} · {definition?.mode} · {message}</p>
     {!definition && <button className="button button-quiet" type="button" onClick={() => setReload(value => value + 1)}>Retry</button>}
     <label>Environment <select value={environment} onChange={event => { setDirty(true); onEnvironmentChange(event.target.value); }}><option value="">Default environment</option>{environments.map(value => <option key={value}>{value}</option>)}</select></label>
@@ -212,7 +214,7 @@ export function LoadTemplateBuilder(props: LoadFeatureProps & { templateId: stri
             <button className="button button-quiet" type="button" disabled={workloads.length <= 2} onClick={() => change(workloads.filter((_,i) => i !== index))}>− Remove</button><button className="button button-quiet" type="button" disabled={index === 0} onClick={() => { const next = [...workloads]; [next[index-1],next[index]] = [next[index],next[index-1]]; change(next); }}>↑ Move up</button><button className="button button-quiet" type="button" disabled={workloads.length >= Math.min(128,limits.maxWorkloads) || targets.length + (mixed ? workloads[0]?.mix.length || 2 : 1) > limits.maxTargets} onClick={() => change([...workloads,{ ...clone(row),id: nextId("workload", workloads.map(item => item.id)) }])}>⧉ Duplicate</button></td>
         </tr>)}</tbody></table></div>}
       {multiple && <button className="button button-quiet" type="button" disabled={workloads.length >= Math.min(128,limits.maxWorkloads) || targets.length + (mixed ? workloads[0]?.mix.length || 2 : 1) > limits.maxTargets} onClick={() => { const row = clone(workloads[0]); row.id = nextId("workload", workloads.map(item => item.id)); row.target = newTarget(); row.mix = row.mix.map(slot => ({ ...slot, ...newTarget() })); change([...workloads,row]); }}>＋ Add Workload</button>}
-      <footer className="att-load-actions"><button className="button button-quiet" type="button" onClick={() => void validate()} disabled={busy || !props.inlineLoadEnabled}>✓ Validate</button><button className="button button-quiet" type="button" disabled={!valid} onClick={() => setEdit({ kind: 'review' })}>▤ Review YAML</button><button className="button button-quiet" type="button" disabled={!valid || busy} onClick={() => setSaveOpen(true)}>Save Scenario…</button><button className="button button-quiet" type="button" disabled={!valid || busy || Boolean(props.savedScenario)} onClick={() => void run()}>▶ Run Now</button><button className="button button-quiet" type="button" disabled={!valid || !props.schedulingEnabled || !props.onSchedule || busy || Boolean(props.savedScenario)} onClick={schedule}>◷ Schedule…</button></footer>
+      <footer className="att-load-actions"><button className="button button-quiet" type="button" onClick={() => void validate()} disabled={busy || !props.inlineLoadEnabled}>✓ Validate</button><button className="button button-quiet" type="button" disabled={!valid} onClick={() => setEdit({ kind: 'review' })}>▤ Review YAML</button><button className="button button-quiet" type="button" disabled={!valid || busy} onClick={() => setSaveOpen(true)}>Save Scenario…</button><button className="button button-quiet" type="button" disabled={!valid || busy || Boolean(savedId)} onClick={() => void run()}>▶ Run Now</button><button className="button button-quiet" type="button" disabled={!valid || !props.schedulingEnabled || !props.onSchedule || busy || Boolean(savedId)} onClick={schedule}>◷ Schedule…</button></footer>
     </>}
     {edit && <LoadDialog title={edit.kind === 'review' ? 'Review Scenario' : edit.kind === 'settings' ? 'Common Settings' : edit.kind === 'mix' ? 'Edit Mix' : edit.kind === 'target' ? 'Configure Target' : 'Configure Workload'} onCancel={close} onSave={edit.kind === 'review' ? undefined : save}>
       {edit.kind === 'review' && <CodeEditor label="Validated scenario YAML" language="yaml" value={draft?.previewYaml || ''} readOnly />}

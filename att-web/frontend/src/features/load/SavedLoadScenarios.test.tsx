@@ -17,8 +17,19 @@ it('validates a saved revision before allowing a run or schedule', async () => {
   await act(async () => [...host.querySelectorAll('button')].find(button => button.textContent?.includes('Validate / Review'))!.click());
   expect(endpoints.validateSavedLoadScenario).toHaveBeenCalledWith('LS1',2);
   expect(host.textContent).toContain('approved');
+  expect([...host.querySelectorAll('button')].find(button => button.textContent === 'Export YAML')?.disabled).toBe(true);
   await act(async () => [...host.querySelectorAll('button')].find(button => button.textContent === 'Schedule')!.click());
   expect(schedule).toHaveBeenCalledWith(expect.objectContaining({packageId:'p',draftId:'A1'}));
   expect(endpoints.submitLoadDraft).not.toHaveBeenCalled();
   await act(async () => root.unmount()); host.remove();
+});
+it('allows YAML export only when the validated preview is explicitly unredacted', async () => {
+  (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+  const host=document.createElement('div');document.body.append(host);const root=createRoot(host);
+  endpoints.listSavedLoadScenarios.mockResolvedValue({items:[{id:'LS2',name:'Safe',packageId:'p',model:'virtualUsers',revision:1,description:'',tags:[],updatedAt:''}],nextOffset:null});
+  endpoints.validateSavedLoadScenario.mockResolvedValue({draftId:'A2',packageId:'p',previewYaml:'safe: true',redacted:false,expiresAt:new Date(Date.now()+60000).toISOString()});
+  await act(async()=>root.render(<SavedLoadScenarios editorApi={{} as never} packages={[]} enabled onJobAccepted={vi.fn()} />));
+  await act(async()=>[...host.querySelectorAll('button')].find(button=>button.textContent?.includes('Validate / Review'))!.click());
+  expect([...host.querySelectorAll('button')].find(button=>button.textContent==='Export YAML')?.disabled).toBe(false);
+  await act(async()=>root.unmount());host.remove();
 });
