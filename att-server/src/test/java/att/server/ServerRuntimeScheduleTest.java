@@ -107,6 +107,7 @@ class ServerRuntimeScheduleTest {
 
             Map<String,Object> safeScenario=Map.of("schemaVersion","att-load/v1.6","workloads",List.of(
                     Map.of("id","saved","target",Map.of("type","template","id","SCHEDULED"),
+                            "vars",Map.of("reference","private-reference-xyz"),
                             "load",Map.of("arrivalRate","100/s","maxConcurrent",2,"overloadPolicy","drop","duration","1s"))));
             com.fasterxml.jackson.databind.node.ObjectNode authored=ServerRuntime.JSON.createObjectNode();
             authored.put("packageId","p");authored.put("environment","SIT");authored.set("scenario",ServerRuntime.JSON.valueToTree(safeScenario));
@@ -171,6 +172,20 @@ class ServerRuntimeScheduleTest {
             assertThrows(ServerRuntime.NotFoundException.class,()->setupRuntime.replaceScheduleExecution(retainedSchedule.id,apply,"alice"));
             JsonNode staleApply=ServerRuntime.JSON.readTree("{\"draftId\":\""+competingReview.get("draftId")+"\",\"expectedDefinitionVersion\":"+originalDefinition.definitionVersion+",\"confirm\":true}");
             assertThrows(ServerRuntime.ScheduleConflictException.class,()->setupRuntime.replaceScheduleExecution(retainedSchedule.id,staleApply,"alice"));
+            JsonNode sharedEdit=ServerRuntime.JSON.readTree("{\"expectedDefinitionVersion\":"+replacement.definitionVersion+",\"overrides\":{\"workloads\":[{\"id\":\"saved\",\"load\":{\"arrivalRate\":\"160/s\"}}]}}");
+            Map<String,Object> sharedReview=setupRuntime.createScheduleExecutionDraft(retainedSchedule.id,sharedEdit,"bob");
+            assertTrue(String.valueOf(sharedReview.get("draftId")).startsWith("P"));
+            assertFalse(sharedReview.toString().contains("draftId=A"));
+            assertFalse(sharedReview.toString().contains("package-sidecar-secret"));
+            assertFalse(sharedReview.toString().contains("private-reference-xyz"));
+            assertTrue(String.valueOf(sharedReview.get("preview")).contains("160/s"));
+            assertThrows(ServerRuntime.NotFoundException.class,()->setupRuntime.getDraft(String.valueOf(sharedReview.get("draftId")),"bob"));
+            JsonNode sharedApply=ServerRuntime.JSON.readTree("{\"draftId\":\""+sharedReview.get("draftId")+"\",\"expectedDefinitionVersion\":"+replacement.definitionVersion+",\"confirm\":true}");
+            assertThrows(ServerRuntime.NotFoundException.class,()->setupRuntime.replaceScheduleExecution(retainedSchedule.id,sharedApply,"alice"));
+            LoadSchedule sharedReplacement=setupRuntime.replaceScheduleExecution(retainedSchedule.id,sharedApply,"bob");
+            assertEquals(retainedSchedule.id,sharedReplacement.id);assertEquals(originalDefinition.nextRunAt,sharedReplacement.nextRunAt);
+            assertEquals("alice",sharedReplacement.executionPrincipal);assertEquals("bob",sharedReplacement.updatedBy);
+            assertTrue(sharedReplacement.inlineScenario.toString().contains("160/s"));
             setupRuntime.deleteLoadSchedule(retainedSchedule.id,"alice");
 
             LoadSchedule packageSchedule=setupRuntime.createLoadSchedule(request,"alice");
@@ -334,7 +349,9 @@ class ServerRuntimeScheduleTest {
             LoadSchedule fileSnapshot=noInlineRuntime.createLoadSchedule(snapshotRequest,"alice");
             assertTrue(fileSnapshot.catalogSnapshot);assertNotNull(fileSnapshot.inlineScenario);
             JsonNode catalogEdit=ServerRuntime.JSON.readTree("{\"expectedDefinitionVersion\":"+fileSnapshot.definitionVersion+",\"overrides\":{\"workloads\":[{\"id\":\"scheduled-smoke\",\"load\":{\"users\":2}}]}}");
-            assertThrows(ServerRuntime.NotFoundException.class,()->noInlineRuntime.createScheduleExecutionDraft(fileSnapshot.id,catalogEdit,"bob"));
+            Map<String,Object> sharedCatalogReview=noInlineRuntime.createScheduleExecutionDraft(fileSnapshot.id,catalogEdit,"bob");
+            assertFalse(sharedCatalogReview.toString().contains("package-sidecar-secret"));
+            assertThrows(ServerRuntime.NotFoundException.class,()->noInlineRuntime.getDraft(String.valueOf(sharedCatalogReview.get("draftId")),"bob"));
             JsonNode sensitiveCatalogEdit=ServerRuntime.JSON.readTree("{\"expectedDefinitionVersion\":"+fileSnapshot.definitionVersion+",\"overrides\":{\"workloads\":[{\"id\":\"scheduled-smoke\",\"inputs\":{\"password\":\"catalog-secret\"}}]}}");
             assertThrows(IllegalArgumentException.class,()->noInlineRuntime.createScheduleExecutionDraft(fileSnapshot.id,sensitiveCatalogEdit,"alice"));
             assertEquals(fileSnapshot.snapshotVersion,noInlineRuntime.store.schedule(fileSnapshot.id).snapshotVersion);
@@ -362,6 +379,31 @@ class ServerRuntimeScheduleTest {
             assertThrows(ServerRuntime.InlineLoadDisabledException.class,()->noInlineRuntime.createAdvancedLoadDraft(
                     ServerRuntime.JSON.readTree("{\"packageId\":\"p\",\"scenario\":{\"schemaVersion\":\"att-load/v1.7\",\"workloads\":[]}}"),"alice"));
         } finally {noInlineRuntime.close();}
+
+        Path localConfigFile=temp.resolve("scheduled-local-auth.yaml");
+        Files.writeString(localConfigFile,Files.readString(configFile).replace("server:\n","server:\n  auth:\n    mode: local\n")
+                .replace(ServerRuntimeTestSupport.yaml(data),ServerRuntimeTestSupport.yaml(temp.resolve("scheduled-local-auth-data"))));
+        ServerRuntime localRuntime=new ServerRuntime(ServerConfig.load(localConfigFile),libs.toString(),
+                builder->{builder.redirectError(ProcessBuilder.Redirect.INHERIT);return builder.start();},clock);
+        try {
+            localRuntime.store.createAuthUser("alice","Alice","unused","USER","csrf");
+            localRuntime.store.createAuthUser("bob","Bob","unused","USER","csrf");
+            localRuntime.store.createAuthUser("admin","Admin","unused","ADMIN","csrf");
+            LoadSchedule localSchedule=localRuntime.createLoadSchedule(request,"alice");
+            JsonNode localEdit=ServerRuntime.JSON.readTree("{\"expectedDefinitionVersion\":"+localSchedule.definitionVersion+",\"packageEdit\":{\"load\":{\"duration\":\"2s\"}}}");
+            assertThrows(ServerRuntime.NotFoundException.class,()->localRuntime.createScheduleExecutionDraft(localSchedule.id,localEdit,"admin"));
+            Map<String,Object> localReview=localRuntime.createScheduleExecutionDraft(localSchedule.id,localEdit,"bob");
+            JsonNode localApply=ServerRuntime.JSON.readTree("{\"draftId\":\""+localReview.get("draftId")+"\",\"expectedDefinitionVersion\":"+localSchedule.definitionVersion+",\"confirm\":true}");
+            localRuntime.store.setAuthActive("bob",false);
+            assertThrows(ServerRuntime.NotFoundException.class,()->localRuntime.replaceScheduleExecution(localSchedule.id,localApply,"bob"));
+            localRuntime.store.setAuthActive("bob",true);localRuntime.store.setAuthActive("alice",false);
+            assertThrows(IllegalArgumentException.class,()->localRuntime.replaceScheduleExecution(localSchedule.id,localApply,"bob"));
+            assertEquals(localSchedule.definitionVersion,localRuntime.store.schedule(localSchedule.id).definitionVersion);
+            localRuntime.store.setAuthActive("alice",true);
+            LoadSchedule updated=localRuntime.replaceScheduleExecution(localSchedule.id,localApply,"bob");
+            assertEquals("alice",updated.executionPrincipal);assertEquals("bob",updated.updatedBy);
+            assertEquals(localSchedule.nextRunAt,updated.nextRunAt);assertEquals("2s",updated.load.get("duration"));
+        } finally {localRuntime.close();}
 
         ServerRuntime runtime=new ServerRuntime(config,libs.toString(),builder->{builder.redirectError(ProcessBuilder.Redirect.INHERIT);return builder.start();},clock);
         try {

@@ -3505,8 +3505,20 @@ final class ServerRuntime implements AutoCloseable {
         if(expected==null||!expected.isIntegralNumber()||!expected.canConvertToLong()||expected.longValue()<0)
             throw new IllegalArgumentException("expectedDefinitionVersion must be a non-negative integer");
         LoadSchedule source=store.schedule(id);if(source==null)throw new NotFoundException();
-        if(!principal.equals(source.createdBy)&&!principal.equals(source.executionPrincipal))throw new NotFoundException();
-        if(source.definitionVersion!=expected.longValue())throw new ScheduleConflictException();
+        boolean shared=!principal.equals(source.createdBy)&&!principal.equals(source.executionPrincipal);
+        try { return createScheduleExecutionDraftForSource(id,input,principal,expected.longValue(),source,shared); }
+        catch(ScheduleSourceChangedException conflict) { throw conflict; }
+        catch(InspectionConfigurationException | InspectionValidationException invalid) {
+            if(!shared)throw invalid;
+            throw new IllegalArgumentException("The proposed execution settings could not be validated. Check the edited fields and package configuration.");
+        }
+        catch(IllegalArgumentException invalid) {
+            if(!shared)throw invalid;
+            throw new IllegalArgumentException("The proposed execution settings could not be validated. Check the edited fields and package configuration.");
+        }
+    }
+    private Map<String,Object> createScheduleExecutionDraftForSource(String id,JsonNode input,String principal,long expected,LoadSchedule source,boolean shared) throws Exception {
+        if(source.definitionVersion!=expected)throw new ScheduleConflictException();
         if(!Set.of("run","load").contains(source.effectiveJobType()))throw new IllegalArgumentException("This legacy schedule type cannot be edited here");
         if("load".equals(source.effectiveJobType())&&source.inlineScenario==null) {
             if(input.has("overrides"))throw new IllegalArgumentException("Package-backed schedules use packageEdit, not snapshot overrides");
@@ -3550,9 +3562,17 @@ final class ServerRuntime implements AutoCloseable {
         LoadSchedule latest=store.schedule(id);
         if(latest==null||latest.definitionVersion!=source.definitionVersion)throw new ScheduleConflictException();
         Instant expires=Instant.parse(String.valueOf(validated.get("expiresAt")));
+        String reviewId="P"+UUID.randomUUID().toString().replace("-","").toUpperCase();
         ScheduleExecutionReview review=new ScheduleExecutionReview(id,principal,source.definitionVersion,source.updatedAt,draftId,source.packageId,source.effectiveJobType(),revision,expires,null);
-        synchronized(draftLock) {scheduleExecutionReviews.entrySet().removeIf(entry->!entry.getValue().expiresAt().isAfter(clock.instant()));scheduleExecutionReviews.put(draftId,review);}
-        Map<String,Object> result=new LinkedHashMap<>();result.put("draftId",draftId);result.put("expiresAt",expires.toString());result.put("definitionVersion",source.definitionVersion);
+        synchronized(draftLock) {scheduleExecutionReviews.entrySet().removeIf(entry->!entry.getValue().expiresAt().isAfter(clock.instant()));scheduleExecutionReviews.put(reviewId,review);}
+        validated.remove("draftId");
+        if(shared) {
+            originalPreview=Map.of("previewYaml",JSON.writeValueAsString(source.listSummary==null?Map.of():source.listSummary));
+            JsonNode candidateDefinition=proposed.deepCopy();
+            if("load".equals(source.effectiveJobType())) ((ObjectNode)candidateDefinition).put("executionType","load");
+            validated=Map.of("previewYaml",JSON.writeValueAsString(JobListIdentity.from(candidateDefinition)));
+        }
+        Map<String,Object> result=new LinkedHashMap<>();result.put("draftId",reviewId);result.put("expiresAt",expires.toString());result.put("definitionVersion",source.definitionVersion);
         result.put("snapshotVersion",source.snapshotVersion);result.put("nextRunAt",source.nextRunAt);result.put("revisionDigest",revision);
         result.put("sourcePolicy",effectivePackageChangePolicy(source));result.put("originalPreview",originalPreview);result.put("preview",validated);return result;
     }
@@ -3585,16 +3605,31 @@ final class ServerRuntime implements AutoCloseable {
         if(!input.path("confirm").isBoolean()||!input.path("confirm").booleanValue())throw new IllegalArgumentException("Review confirmation is required");
         String draftId=required(input,"draftId");JsonNode expected=input.get("expectedDefinitionVersion");
         if(expected==null||!expected.isIntegralNumber()||!expected.canConvertToLong())throw new IllegalArgumentException("expectedDefinitionVersion must be an integer");
+        LoadSchedule source=store.schedule(id);if(source==null)throw new NotFoundException();
+        boolean shared=!principal.equals(source.createdBy)&&!principal.equals(source.executionPrincipal);
+        try { return replaceScheduleExecutionReviewed(id,principal,draftId,expected.longValue()); }
+        catch(ScheduleSourceChangedException conflict) { throw conflict; }
+        catch(InspectionConfigurationException | InspectionValidationException invalid) {
+            if(!shared)throw invalid;
+            throw new IllegalArgumentException("The proposed execution settings could not be validated. Check the edited fields and package configuration.");
+        }
+        catch(IllegalArgumentException invalid) {
+            if(!shared)throw invalid;
+            throw new IllegalArgumentException("The proposed execution settings could not be validated. Check the edited fields and package configuration.");
+        }
+    }
+    private LoadSchedule replaceScheduleExecutionReviewed(String id,String principal,String draftId,long expected) throws Exception {
         synchronized(draftLock) {
             ScheduleExecutionReview review=scheduleExecutionReviews.get(draftId);
             if(review==null||!review.scheduleId().equals(id)||!review.principal().equals(principal))throw new NotFoundException();
             requireLiveDraft(review.expiresAt());
             LoadSchedule prior=store.schedule(id);if(prior==null)throw new NotFoundException();
-            if(!principal.equals(prior.createdBy)&&!principal.equals(prior.executionPrincipal))throw new NotFoundException();
-            if(expected.longValue()!=review.definitionVersion()||prior.definitionVersion!=review.definitionVersion()||!java.util.Objects.equals(prior.updatedAt,review.updatedAt()))throw new ScheduleConflictException();
+            if(expected!=review.definitionVersion()||prior.definitionVersion!=review.definitionVersion()||!java.util.Objects.equals(prior.updatedAt,review.updatedAt()))throw new ScheduleConflictException();
             if(review.packageEdit()!=null) {
                 LoadSchedule replacement=buildLoadSchedule(review.packageEdit(),prior,principal);
                 if(replacement.inlineScenario!=null||!review.revision().equals(replacement.expectedRevisionDigest))throw new StaleDraftException();
+                String executionPrincipal=prior.executionPrincipal==null||prior.executionPrincipal.isBlank()?prior.createdBy:prior.executionPrincipal;
+                validateScheduleForActivation(replacement,executionPrincipal);
                 verifyPackageRevision(review.packageId(),replacement.environment,review.revision());
                 replacement.snapshotVersion=prior.snapshotVersion+1;replacement.updatedAt=clock.instant().toString();replacement.updatedBy=principal;
                 List<Map<String,Object>> history=new ArrayList<>(prior.snapshotHistory==null?List.of():prior.snapshotHistory);
@@ -3604,9 +3639,10 @@ final class ServerRuntime implements AutoCloseable {
                 LoadSchedule saved=store.updateScheduleAuthorized(replacement,prior.updatedAt,"local".equals(config.authMode)?principal:null);if(saved==null)throw new NotFoundException();
                 scheduleExecutionReviews.remove(draftId);store.audit(principal,"SCHEDULE_EXECUTION_REPLACE",null,saved.packageId,"version="+prior.snapshotVersion+"->"+saved.snapshotVersion);return saved;
             }
-            verifyPackageRevision(review.packageId(),retainedDraftEnvironment(draftId,principal,review.packageId()),review.revision());
+            String executionDraftId=review.draftId();
+            verifyPackageRevision(review.packageId(),retainedDraftEnvironment(executionDraftId,principal,review.packageId()),review.revision());
             ObjectNode build=JSON.createObjectNode();build.put("name",prior.name);build.put("packageId",prior.packageId);build.put("jobType",prior.effectiveJobType());
-            build.put("draftId",draftId);build.put("timezone",prior.timezone);build.put("runAt",clock.instant().plusSeconds(86400).toString());build.put("enabled",false);
+            build.put("draftId",executionDraftId);build.put("timezone",prior.timezone);build.put("runAt",clock.instant().plusSeconds(86400).toString());build.put("enabled",false);
             LoadSchedule execution=buildLoadSchedule(build,null,principal);
             if(!review.executionType().equals(execution.effectiveJobType())||!review.revision().equals(execution.expectedRevisionDigest))throw new StaleDraftException();
             LoadSchedule replacement=prior.copy();replacement.runInput=execution.runInput;replacement.inlineScenario=execution.inlineScenario;
