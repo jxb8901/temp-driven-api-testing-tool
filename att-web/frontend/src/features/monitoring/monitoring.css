@@ -1,0 +1,37 @@
+.att-monitoring { display: grid; gap: 1rem; }
+.att-monitor-heading { display: flex; align-items: end; justify-content: space-between; gap: 1.5rem; }
+.att-monitor-heading h1 { margin: .1rem 0 .4rem; }
+.att-monitor-heading p { margin: 0; color: var(--text-muted, #64748b); }
+.att-monitor-heading .eyebrow { font-size: .75rem; text-transform: uppercase; letter-spacing: .08em; }
+.att-monitor-controls { display: flex; align-items: end; gap: .6rem; }
+.att-monitor-controls label, .att-monitor-job-journal form { display: flex; align-items: center; gap: .5rem; }
+.att-monitor-controls select, .att-monitor-controls button, .att-monitor-job-journal input, .att-monitor-job-journal button { min-height: 2.4rem; }
+.att-monitor-freshness { display: flex; flex-wrap: wrap; justify-content: space-between; gap: .5rem 1rem; padding: .7rem .9rem; border-radius: .6rem; background: var(--surface-subtle, #f1f5f9); font-size: .9rem; }
+.att-monitor-error, .att-monitor-alerts { border: 1px solid #f59e0b; border-radius: .6rem; padding: .8rem 1rem; background: color-mix(in srgb, #f59e0b 9%, var(--surface, white)); }
+.att-monitor-alerts-healthy { border-color: #16a34a; background: color-mix(in srgb, #16a34a 8%, var(--surface, white)); }
+.att-monitor-alerts-critical { border-color: #dc2626; background: color-mix(in srgb, #dc2626 10%, var(--surface, white)); }
+.att-monitor-alerts-stale, .att-monitor-alerts-unavailable { border-color: #b45309; background: color-mix(in srgb, #f59e0b 12%, var(--surface, white)); }
+.att-monitor-alerts h2, .att-monitor-alerts ul { margin-top: 0; }
+.att-monitor-alerts ul { margin-bottom: 0; }
+.att-monitor-group-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 22rem), 1fr)); gap: .85rem; }
+.att-monitor-group, .att-monitor-trends, .att-monitor-job-journal, .att-monitor-chart { min-width: 0; border: 1px solid var(--border-subtle, #d8dee8); border-radius: .75rem; background: var(--surface, white); padding: .9rem 1rem; }
+.att-monitor-group h2, .att-monitor-trends h2, .att-monitor-job-journal h2 { margin: 0 0 .7rem; font-size: 1.05rem; }
+.att-monitor-group dl, .att-monitor-job-result { display: grid; gap: .55rem; margin: 0; }
+.att-monitor-group dl > div, .att-monitor-job-result > div { display: flex; justify-content: space-between; gap: 1rem; border-bottom: 1px solid var(--border-subtle, #e2e8f0); padding-bottom: .4rem; }
+.att-monitor-group dt, .att-monitor-job-result dt { color: var(--text-muted, #64748b); }
+.att-monitor-group dd, .att-monitor-job-result dd { margin: 0; text-align: right; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+.att-monitor-group small { display: block; margin-top: .7rem; color: var(--text-muted, #64748b); }
+.att-monitor-details { margin-top: .85rem; padding-top: .75rem; border-top: 1px solid var(--border-subtle, #e2e8f0); }
+.att-monitor-details summary { cursor: pointer; font-weight: 600; }
+.att-monitor-details h3 { margin: .8rem 0 .5rem; font-size: .9rem; }
+.att-monitor-details dl { max-height: 18rem; overflow: auto; }
+.att-monitor-job-journal > a { display: inline-block; margin-top: .8rem; }
+.att-monitor-trends > p, .att-monitor-job-journal > p { color: var(--text-muted, #64748b); }
+.att-monitor-chart-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 19rem), 1fr)); gap: .75rem; }
+.att-monitor-chart h3 { margin: 0 0 .5rem; font-size: .95rem; }
+.att-monitor-chart p { color: var(--text-muted, #64748b); }
+.att-monitor-chart svg { display: block; width: 100%; height: auto; overflow: visible; color: var(--text-muted, #64748b); font: 11px system-ui, sans-serif; }
+.att-monitor-job-journal form { flex-wrap: wrap; }
+.att-monitor-job-journal input { width: min(100%, 19rem); padding: .35rem .55rem; }
+.att-monitor-job-result { margin-top: 1rem; grid-template-columns: repeat(auto-fit, minmax(min(100%, 17rem), 1fr)); }
+@media (max-width: 720px) { .att-monitor-heading { align-items: stretch; flex-direction: column; } .att-monitor-controls { align-items: stretch; flex-wrap: wrap; } .att-monitor-controls label { justify-content: space-between; } }

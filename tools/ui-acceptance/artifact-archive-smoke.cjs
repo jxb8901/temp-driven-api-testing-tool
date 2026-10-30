@@ -28,11 +28,20 @@ async function main() {
     context.setDefaultNavigationTimeout(20_000);
   }
   const unexpectedNetwork = [];
+  const cspErrors = [];
+  let cspErrorCount = 0;
+  const collectCspError = (message, pageKind) => {
+    if (message.type() === 'error' && /content security policy|refused to (?:execute|load)|blocked by csp/i.test(message.text())) {
+      cspErrorCount++;
+      if (cspErrors.length < 30) cspErrors.push({ page: pageKind, location: message.location(), text: message.text() });
+    }
+  };
   await offline.route(/^https?:/, route => { unexpectedNetwork.push(route.request().url()); return route.abort(); });
   try {
     const page = await online.newPage();
     const errors = [];
     page.on('pageerror', error => errors.push(error.message));
+    page.on('console', message => collectCspError(message, 'Studio'));
     for (const fixture of fixtures) {
       process.stdout.write(`Checking archive ${fixture.jobId}\n`);
       await page.goto(`${origin}/tools/att/ui/index.html#/jobs/${fixture.jobId}`);
@@ -96,6 +105,21 @@ async function main() {
         const reportPath = report.path;
         process.stdout.write(`Checking online/offline report ${reportPath}\n`);
         const reportUrl = `${origin}/tools/att/api/v1/jobs/${fixture.jobId}/artifacts/view/${reportPath.split('/').map(encodeURIComponent).join('/')}`;
+        let injectedUnapprovedScript = false;
+        const isLoadReport = fixture.executionType === 'load' && /\/report\/index\.html$/i.test(reportPath);
+        if (isLoadReport) {
+          // Add a malicious script to the authenticated archived-HTML response to prove the
+          // Studio sanitizer drops it before the opaque-origin browser frame can execute it.
+          await page.route(reportUrl, async route => {
+            if (injectedUnapprovedScript) return route.continue();
+            const response = await route.fetch();
+            const source = await response.text();
+            assert.match(source, /<\/body>/i, 'The archived report fixture has a body insertion point');
+            await route.fulfill({ response, body: source.replace(/<\/body>/i,
+              '<script>window.__unapprovedAttReportScriptExecuted = true;</script></body>') });
+            injectedUnapprovedScript = true;
+          });
+        }
         const reportResponse = page.waitForResponse(response => response.url() === reportUrl && response.status() === 200);
         await archive.getByRole('button', { name: `View report ${reportPath}`, exact: true }).click();
         await reportResponse;
@@ -109,6 +133,46 @@ async function main() {
         await frame.waitForFunction(() => location.href === 'about:srcdoc');
         await frame.locator('body').waitFor();
         assert.equal(await frame.evaluate(() => location.href), 'about:srcdoc');
+        if (isLoadReport) {
+          await frame.waitForFunction(() => !!document.querySelector('#rate-chart'));
+          assert.equal(injectedUnapprovedScript, true, 'The browser fixture injected an unapproved archived script');
+          assert.equal(await frame.evaluate(() => window.__unapprovedAttReportScriptExecuted === true), false,
+            'The unapproved archived script must not execute in the preview');
+          assert.equal((await iframe.getAttribute('srcdoc')).includes('__unapprovedAttReportScriptExecuted'), false,
+            'The unapproved archived script must be removed before iframe rendering');
+          const charts = ['rate', 'latency', 'concurrency', 'lag', 'failure'];
+          const inspectCharts = () => frame.evaluate(ids => ids.map(id => {
+            const svg = document.querySelector(`#${id}-chart`);
+            const legend = document.querySelector(`#${id}-legend`);
+            const paths = Array.from(svg?.querySelectorAll('path') || []).map(path => path.getAttribute('d') || '');
+            const polylines = Array.from(svg?.querySelectorAll('polyline') || []);
+            const plottedPoints = polylines.flatMap(line => (line.getAttribute('points') || '').trim().split(/\s+/))
+              .filter(point => {
+                const values = point.split(',').map(Number);
+                return values.length === 2 && values.every(Number.isFinite);
+              }).length;
+            return { id, label: svg?.getAttribute('aria-label') || '', axes: paths.some(path => path.includes('V') && path.includes('H')),
+              legendItems: legend?.querySelectorAll('li').length || 0,
+              plottedPoints, polylines: polylines.length };
+          }), charts);
+          const select = frame.locator('#load-window');
+          assert.equal(await select.inputValue(), 'steady', 'The report opens with the STEADY window selected');
+          const steadyCharts = await inspectCharts();
+          await select.selectOption('all');
+          await frame.waitForFunction(() => document.querySelector('#load-window')?.value === 'all'
+            && document.querySelector('#window-definition')?.textContent?.includes('full execution'));
+          const allCharts = await inspectCharts();
+          await select.selectOption('steady');
+          await frame.waitForFunction(() => document.querySelector('#load-window')?.value === 'steady');
+          for (const state of [steadyCharts, allCharts]) for (const chart of state) {
+            assert.ok(chart.label.length > 0, `${chart.id} chart keeps its accessible label`);
+            assert.equal(chart.axes, true, `${chart.id} chart has visible axes`);
+            assert.ok(chart.legendItems > 0, `${chart.id} chart has a legend`);
+            assert.ok(chart.polylines > 0 && chart.plottedPoints > 0, `${chart.id} chart has finite plotted points`);
+          }
+          assert.equal(await select.inputValue(), 'steady', 'The report can return from ALL to STEADY');
+          await page.unroute(reportUrl);
+        }
         process.stdout.write(`  Online report loaded: ${reportPath}\n`);
         assert.equal(await frame.evaluate(() => { try { return !!parent.document.body; } catch { return false; } }), false,
           'The report must not read the application DOM');
@@ -133,6 +197,26 @@ async function main() {
         await reportViewer.getByText(destinationPath, { exact: true }).waitFor();
         process.stdout.write(`  Online relative navigation and history passed: ${reportPath}\n`);
         await viewer.getByRole('button', { name: 'Close preview', exact: true }).click();
+        if (isLoadReport) {
+          const standaloneLink = archive.locator(`a[target="_blank"][title=${JSON.stringify(reportPath)}]`);
+          assert.equal(await standaloneLink.count(), 1, 'The approved report has one standalone viewer link');
+          const popupPromise = page.waitForEvent('popup');
+          await standaloneLink.click();
+          const standalone = await popupPromise;
+          standalone.on('pageerror', error => errors.push(error.message));
+          standalone.on('console', message => collectCspError(message, 'standalone'));
+          await standalone.locator('main[aria-label="Standalone Job artifact"]').waitFor();
+          const standaloneIframe = standalone.locator(`iframe[title=${JSON.stringify(`Report: ${reportPath}`)}]`);
+          await standaloneIframe.waitFor();
+          assert.equal(await standaloneIframe.getAttribute('sandbox'), 'allow-scripts');
+          const standaloneFrame = await standaloneIframe.elementHandle().then(handle => handle.contentFrame());
+          await standaloneFrame.waitForFunction(() => Boolean(document.querySelector('#rate-chart polyline')?.getAttribute('points')));
+          assert.equal(await standaloneFrame.locator('#load-window').inputValue(), 'steady');
+          assert.equal(await standaloneFrame.locator('#rate-chart polyline').count() > 0, true,
+            'The standalone preview runs the approved offline report chart script');
+          await standalone.close();
+          process.stdout.write(`  Standalone report preview passed: ${reportPath}\n`);
+        }
 
         const file = await offline.newPage();
         const offlineErrors = [];
@@ -177,6 +261,7 @@ async function main() {
       }
     }
     assert.deepEqual(errors, [], 'The real archive viewer must not throw browser errors');
+    assert.deepEqual(cspErrors, [], `Reviewed report scripts must not trigger browser CSP errors (observed ${cspErrorCount}; first 30 include source locations)`);
     assert.deepEqual(unexpectedNetwork, [], 'Extracted reports must not need a running ATT Server');
     process.stdout.write('RUN/LOAD archive browser smoke passed: cross-USER ZIP, text viewer, sandboxed reports, back/forward, extracted offline links and controls.\n');
   } finally {

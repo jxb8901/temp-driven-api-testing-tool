@@ -373,8 +373,8 @@ class ServerWarUiIT {
         new att.api.DefaultAttService().snapshot(new att.api.SnapshotRequest(pkg,home.resolve("config/config.yaml"),"SIT",List.of(pkg.resolve("testcase/archive.xlsx")),null,Set.of(),false));
         Files.writeString(pkg.resolve("load/archive.yaml"),
                 "schemaVersion: att-load/v1.6\nevidence:\n  mode: all\nworkloads:\n"
-                +"  - id: first\n    target: {type: template, id: SCHEDULED}\n    load: {users: 1, duration: 300ms}\n    execution: {thinkTime: 50ms}\n"
-                +"  - id: second\n    target: {type: template, id: SCHEDULED}\n    load: {users: 1, duration: 300ms}\n    execution: {thinkTime: 50ms}\n");
+                +"  - id: first\n    target: {type: template, id: SCHEDULED}\n    load: {users: 2, warmup: 0ms, rampUp: 10s, duration: 10s, rampDown: 10s}\n    execution: {thinkTime: 1s}\n"
+                +"  - id: second\n    target: {type: template, id: SCHEDULED}\n    load: {users: 2, warmup: 0ms, rampUp: 10s, duration: 10s, rampDown: 10s}\n    execution: {thinkTime: 1s}\n");
         Path config=Files.writeString(temp.resolve("server.yaml"),
                 "server:\n  runtimeConfigPath: "+yaml(home.resolve("config/config.yaml"))+"\n  dataDir: "+yaml(temp.resolve("data"))+"\n  authenticationRequired: true\n"
                 +"  liveOutput: {maxEntryChars: 16000, maxEntryLines: 100}\n"
@@ -390,12 +390,32 @@ class ServerWarUiIT {
         try {
             tomcat.start();int port=tomcat.getConnector().getLocalPort();String origin="http://127.0.0.1:"+port,api="/tools/att/api/v1";
             String auth=basic("att"),peer=basic("colleague"),admin=basic("admin");
+            JsonNode monitoring=getJson(port,api+"/monitoring",auth);
+            assertEquals("att-monitoring/v1",monitoring.path("schemaVersion").asText(),monitoring.toString());
+            assertTrue(monitoring.path("capturedAt").isTextual());assertTrue(monitoring.path("process").isObject());
+            assertTrue(monitoring.path("journal").isObject());assertTrue(monitoring.path("storage").isObject());
+            assertFalse(monitoring.toString().contains(temp.resolve("data").toString()),"Monitoring must not expose Server data paths");
+            assertEquals(200,get(port,api+"/monitoring",admin),"Container ADMIN can read the safe Monitoring projection");
+            assertEquals(401,get(port,api+"/monitoring",null));
+            assertEquals(403,get(port,api+"/metrics",auth),"The raw metrics endpoint remains system-admin-only");
+            assertEquals(200,get(port,api+"/metrics",admin));
             var fixtures=new java.util.ArrayList<Map<String,Object>>();
             for(String command:List.of("run","load")) {
                 Object input="run".equals(command)?Map.of("packageId","payments","suites",List.of("testcase/archive.xlsx"),"liveOutputMaxEntryChars",1,"liveOutputMaxEntryLines",1)
                         :Map.of("packageId","payments","scenario","load/archive.yaml");
                 String id=apiJsonResponse(port,"POST",api+"/jobs/"+command,auth,origin,input,202).path("jobId").asText();
                 JsonNode index=awaitArchive(port,api,id,peer);
+                JsonNode overview=getJson(port,api+"/jobs/"+id+"/artifacts/status",peer);
+                assertEquals("READY",overview.path("archiveStatus").asText(),overview.toString());
+                assertTrue(overview.path("summaryVerified").asBoolean(),overview.toString());
+                if("load".equals(command)) {
+                    assertTrue(overview.path("reportPath").isTextual(),overview.toString());
+                    assertTrue(index.path("primaryReports").findValuesAsText("path").contains(overview.path("reportPath").asText()),overview.toString());
+                } else assertTrue(overview.path("reportPath").isNull(),overview.toString());
+                JsonNode journal=getJson(port,api+"/monitoring/jobs/"+id+"/journal",peer);
+                assertEquals(id,journal.path("jobId").asText());assertTrue(journal.path("metricsAvailable").isBoolean());
+                if(journal.path("metricsAvailable").asBoolean())assertTrue(journal.path("journalBytes").isIntegralNumber(),journal.toString());
+                else assertTrue(journal.path("journalBytes").isNull(),journal.toString());
                 if("run".equals(command)) {
                     String replay=sseDataUntil(port,api+"/jobs/"+id+"/events",peer,"EXPANDED_ENTRY_END");
                     assertTrue(replay.contains(expandedMessage),"Configured console preview must survive Worker, journal and SSE replay: "+replay);
@@ -423,19 +443,28 @@ class ServerWarUiIT {
                 assertTrue(archiveMetrics.path("includedEntries").asLong()>0);
                 assertFalse(archiveMetrics.toString().contains(pkg.toString()));
                 Path extracted=Files.createDirectory(temp.resolve(id+"-offline"));
+                Set<String> previewPaths=new java.util.LinkedHashSet<>();
+                Set<String> previewExtensions=new java.util.HashSet<>();
+                for(JsonNode entry:manifest.path("entries")) {
+                    String logical=entry.path("path").asText();
+                    String extension=logical.substring(logical.lastIndexOf('.')+1).toLowerCase(java.util.Locale.ROOT);
+                    if(previewExtensions.add(extension)||entry.path("report").asBoolean())previewPaths.add(logical);
+                }
                 try(var archive=new java.util.zip.ZipFile(zip.toFile())) {
                     for(JsonNode entry:manifest.path("entries")) {
                         String logical=entry.path("path").asText();byte[] published;
                         try(var in=archive.getInputStream(archive.getEntry(logical))){published=in.readAllBytes();}
-                        HttpURLConnection preview=open(port,api+"/jobs/"+id+"/artifacts/view/"+encodeEntry(logical),peer);
-                        try {
-                            assertEquals(200,preview.getResponseCode(),logical);assertTrue(preview.getHeaderField("Cache-Control").contains("no-store"));
-                            assertFalse(preview.getHeaderField("Content-Disposition").contains("attachment"));
-                            try(var in=preview.getInputStream()){assertArrayEquals(published,in.readAllBytes(),logical);}
-                            if(entry.path("report").asBoolean())assertTrue(preview.getHeaderField("Content-Security-Policy").contains("sandbox allow-scripts"));
-                            else assertTrue(preview.getHeaderField("Content-Security-Policy").contains("sandbox; default-src 'none'"));
-                            assertTrue(preview.getHeaderField("Content-Security-Policy").contains("frame-ancestors 'self'"));
-                        } finally {preview.disconnect();}
+                        if(previewPaths.contains(logical)) {
+                            HttpURLConnection preview=open(port,api+"/jobs/"+id+"/artifacts/view/"+encodeEntry(logical),peer);
+                            try {
+                                assertEquals(200,preview.getResponseCode(),logical);assertTrue(preview.getHeaderField("Cache-Control").contains("no-store"));
+                                assertFalse(preview.getHeaderField("Content-Disposition").contains("attachment"));
+                                try(var in=preview.getInputStream()){assertArrayEquals(published,in.readAllBytes(),logical);}
+                                if(entry.path("report").asBoolean())assertTrue(preview.getHeaderField("Content-Security-Policy").contains("sandbox allow-scripts"));
+                                else assertTrue(preview.getHeaderField("Content-Security-Policy").contains("sandbox; default-src 'none'"));
+                                assertTrue(preview.getHeaderField("Content-Security-Policy").contains("frame-ancestors 'self'"));
+                            } finally {preview.disconnect();}
+                        }
                         Path target=extracted.resolve(logical).normalize();assertTrue(target.startsWith(extracted));
                         Files.createDirectories(target.getParent());Files.write(target,published);
                     }
@@ -457,7 +486,7 @@ class ServerWarUiIT {
                 while(Files.exists(output)&&System.nanoTime()<deadline)Thread.sleep(10);
                 assertFalse(Files.exists(output),"Verified publication must remove loose output");
                 assertEquals(404,get(port,api+"/jobs/"+id+"/artifacts/"+encodeEntry(index.path("primaryReports").get(0).path("path").asText()),peer));
-                fixtures.add(Map.of("jobId",id,"archivePath",zip.toString(),"offlineRoot",extracted.toString(),"reports",index.path("primaryReports"),"entries",manifest.path("entries")));
+                fixtures.add(Map.of("jobId",id,"executionType",command,"archivePath",zip.toString(),"offlineRoot",extracted.toString(),"reports",index.path("primaryReports"),"entries",manifest.path("entries")));
             }
             if("1".equals(System.getenv("ATT_UI_SERVER_PLAYWRIGHT"))) {
                 Path fixture=Files.write(temp.resolve("archive-browser.json"),ServerRuntime.JSON.writeValueAsBytes(fixtures));

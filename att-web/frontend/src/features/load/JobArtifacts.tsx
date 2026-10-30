@@ -154,10 +154,10 @@ export function JobArtifacts({ api, jobId, refresh, onMetrics }: { api: LoadJobs
       {archive.archiveStatus === 'FAILED' && <p>The archive could not be published. {archive.retryable && features.retryJobArtifactArchive && <button type="button" disabled={busy} onClick={() => void retry()}>Retry archive</button>}</p>}
       {archive.archiveStatus === 'READY' && <>
         {features.artifactArchiveHref && <a href={features.artifactArchiveHref(jobId)} title={formatArchiveSize(archive.archiveSizeBytes) ? `${archive.archiveSizeBytes} bytes` : undefined}>Download Artifacts (.zip){formatArchiveSize(archive.archiveSizeBytes) && ` — ${formatArchiveSize(archive.archiveSizeBytes)}`}</a>}
-        <p aria-label="Archive contents">{archive.items.length.toLocaleString()} loaded of {(archive.archiveItemsCount ?? archive.items.length).toLocaleString()} files
+        <p aria-label="Archive contents">{archive.items.length.toLocaleString()} loaded of {(archive.archiveItemsCount ?? archive.items.length).toLocaleString()} approved files
           {archive.archiveItemsBytes != null && ` · ${formatArchiveSize(archive.archiveItemsBytes)} approved payload`}
           {archive.archiveSizeBytes != null && ` · ZIP ${formatArchiveSize(archive.archiveSizeBytes)}`}</p>
-        {archive.complete === false && <p role="note">Some output was excluded by the publication policy. {archive.omissions?.map(item => `${item.count}: ${item.reason}`).join('; ')}</p>}
+        {archive.complete === false && <p role="note">Some output was excluded by the publication policy. Omitted candidates: {archive.omissions?.reduce((sum, item) => sum + item.count, 0).toLocaleString() ?? 'Not available'}. {archive.omissions?.map(item => `${item.count}: ${item.reason === 'unsupported, unsafe, duplicate, binary, oversized, or unapproved output' ? 'reason unavailable in this archive version' : item.reason.replaceAll('_', ' ')}`).join('; ') || 'reason unavailable in this archive version'}.</p>}
         <label>Search path or workload <input type="search" value={search} onChange={event => setSearch(event.target.value)} /></label>
         {query && archive.nextOffset != null && <p role="note">Search covers the loaded files. Load more to search the rest of the archive.</p>}
         {archive.primaryReports.filter(matches).length > 0 && <><h3>Reports</h3><ul>{archive.primaryReports.filter(matches).map(entry)}</ul></>}

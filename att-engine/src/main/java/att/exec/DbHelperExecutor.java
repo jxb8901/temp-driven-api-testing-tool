@@ -299,8 +299,16 @@ public final class DbHelperExecutor implements AutoCloseable {
 
     /** Closes every worker-thread scope owned by a load/run resource owner. */
     public void closeAll() {
-        for (Scope scope : allScopes.values()) for (ManagedConnection managed : scope.connections.values()) managed.close();
+        Throwable failure=null;
+        for (Scope scope : allScopes.values()) for (ManagedConnection managed : scope.connections.values()) {
+            try { managed.close(); }
+            catch (RuntimeException | Error problem) {
+                if(failure==null)failure=problem;else failure.addSuppressed(problem);
+            }
+        }
         allScopes.clear(); scopes.remove();
+        if(failure instanceof Error)throw (Error)failure;
+        if(failure instanceof RuntimeException)throw (RuntimeException)failure;
     }
 
     private Scope scope() {

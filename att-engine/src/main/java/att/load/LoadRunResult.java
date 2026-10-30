@@ -24,6 +24,7 @@ public final class LoadRunResult {
     private final Map<String, Object> resources;
     private final Map<String, LoadRunResult> workloads;
     private final boolean cancelled;
+    private final Map<String, Object> teardownDiagnostic;
 
     public LoadRunResult(String runId, LoadScenario scenario, Instant startedAt, Instant endedAt,
                          LoadMetricsSnapshot metrics) {
@@ -50,6 +51,13 @@ public final class LoadRunResult {
     private LoadRunResult(String runId, LoadScenario scenario, Instant startedAt, Instant endedAt,
                           LoadMetricsSnapshot metrics, LoadThresholdSummary thresholds, Map<String, Object> evidence,
                           Map<String, Object> resources, Map<String, LoadRunResult> workloads, boolean cancelled) {
+        this(runId, scenario, startedAt, endedAt, metrics, thresholds, evidence, resources, workloads, cancelled,
+                Collections.<String, Object>emptyMap());
+    }
+    private LoadRunResult(String runId, LoadScenario scenario, Instant startedAt, Instant endedAt,
+                          LoadMetricsSnapshot metrics, LoadThresholdSummary thresholds, Map<String, Object> evidence,
+                          Map<String, Object> resources, Map<String, LoadRunResult> workloads, boolean cancelled,
+                          Map<String, Object> teardownDiagnostic) {
         this.runId = runId; this.scenario = scenario; this.startedAt = startedAt; this.endedAt = endedAt;
         this.metrics = metrics; this.thresholds = thresholds == null ? LoadThresholdSummary.empty() : thresholds;
         this.evidence = immutable(evidence); this.resources = immutable(resources);
@@ -57,6 +65,7 @@ public final class LoadRunResult {
                 ? Collections.<String, LoadRunResult>emptyMap()
                 : Collections.unmodifiableMap(new LinkedHashMap<String, LoadRunResult>(workloads));
         this.cancelled = cancelled;
+        this.teardownDiagnostic = immutable(teardownDiagnostic);
     }
 
     public String runId() { return runId; }
@@ -70,8 +79,10 @@ public final class LoadRunResult {
     public Map<String, LoadRunResult> workloads() { return workloads; }
     public boolean multiWorkload() { return !workloads.isEmpty(); }
     public boolean cancelled() { return cancelled; }
+    public boolean teardownFailed() { return !teardownDiagnostic.isEmpty(); }
 
     public ResultStatus status() {
+        if (teardownFailed()) return ResultStatus.ERROR;
         if (preparationFailed()) return ResultStatus.ERROR;
         if (accountingFailed()) return ResultStatus.ERROR;
         if (runtimeErrorCount() > 0L) return ResultStatus.ERROR;
@@ -82,6 +93,7 @@ public final class LoadRunResult {
     }
     /** Existing execution outcome, kept distinct from the configured performance verdict. */
     public String executionStatus() {
+        if (teardownFailed()) return "ERROR";
         if (cancelled) return "CANCELLED";
         if (preparationFailed()) return "ERROR";
         if (accountingFailed()) return "ERROR";
@@ -113,31 +125,36 @@ public final class LoadRunResult {
         for (LoadRunResult workload : workloads.values()) if (workload.thresholdsConfigured()) return true;
         return false;
     }
-    public int exitCode() { return cancelled ? 143 : ResultAggregator.exitCode(status()); }
+    public int exitCode() { return cancelled && !teardownFailed() ? 143 : ResultAggregator.exitCode(status()); }
     public boolean passed() { return !cancelled && status() == ResultStatus.PASS; }
     public LoadRunResult withThresholds(LoadThresholdSummary value) {
-        return new LoadRunResult(runId, scenario, startedAt, endedAt, metrics, cancelled ? LoadThresholdSummary.empty() : value, evidence, resources, workloads, cancelled);
+        return new LoadRunResult(runId, scenario, startedAt, endedAt, metrics, cancelled ? LoadThresholdSummary.empty() : value, evidence, resources, workloads, cancelled, teardownDiagnostic);
     }
     public LoadRunResult withEvidence(Map<String, Object> value) {
-        return new LoadRunResult(runId, scenario, startedAt, endedAt, metrics, thresholds, value, resources, workloads, cancelled);
+        return new LoadRunResult(runId, scenario, startedAt, endedAt, metrics, thresholds, value, resources, workloads, cancelled, teardownDiagnostic);
     }
     public LoadRunResult withResources(Map<String, Object> value) {
         Map<String, Object> combined = new LinkedHashMap<String, Object>(resources);
         if (value != null) combined.putAll(value);
-        return new LoadRunResult(runId, scenario, startedAt, endedAt, metrics, thresholds, evidence, combined, workloads, cancelled);
+        return new LoadRunResult(runId, scenario, startedAt, endedAt, metrics, thresholds, evidence, combined, workloads, cancelled, teardownDiagnostic);
+    }
+    public LoadRunResult withTeardownFailure(Throwable failure) {
+        if (failure == null) return this;
+        return new LoadRunResult(runId, scenario, startedAt, endedAt, metrics, thresholds, evidence, resources, workloads,
+                cancelled, LoadTeardownDiagnostics.from(failure));
     }
     public LoadRunResult withCancelled() {
         if (cancelled) return this;
         Map<String, LoadRunResult> cancelledWorkloads = new LinkedHashMap<String, LoadRunResult>();
         workloads.forEach((id, workload) -> cancelledWorkloads.put(id, workload.withCancelled()));
         return new LoadRunResult(runId, scenario, startedAt, endedAt, metrics, LoadThresholdSummary.empty(), evidence,
-                resources, cancelledWorkloads, true);
+                resources, cancelledWorkloads, true, teardownDiagnostic);
     }
 
     public Map<String, Object> toMap() {
         Map<String, Object> result = new LinkedHashMap<String, Object>();
         result.put("schemaVersion", Version.LOAD_SUMMARY_SCHEMA);
-        result.put("status", cancelled ? "CANCELLED" : status().name()); result.put("executionStatus", executionStatus());
+        result.put("status", cancelled && !teardownFailed() ? "CANCELLED" : status().name()); result.put("executionStatus", executionStatus());
         result.put("performanceVerdict", performanceVerdict()); result.put("exitCode", exitCode());
         result.put("runId", runId); result.put("startedAt", startedAt.toString()); result.put("endedAt", endedAt.toString());
         result.put("durationMs", Math.max(0L, Duration.between(startedAt, endedAt).toMillis()));
@@ -149,6 +166,7 @@ public final class LoadRunResult {
         result.put("metrics", metricMap); result.put("thresholds", thresholds.toMap());
         if (!workloads.isEmpty()) result.put("workloads", workloadMaps());
         result.put("resources", resources);
+        if (teardownFailed()) result.put("teardown", teardownDiagnostic);
         if (!evidence.isEmpty()) result.put("evidence", evidence);
         result.put("report", "report/index.html");
         return result;
@@ -172,7 +190,7 @@ public final class LoadRunResult {
     public Map<String, Object> toTerminalSummary(Map<String, Object> configuration, String reportAvailability) {
         Map<String, Object> source = new LinkedHashMap<String, Object>();
         long durationMs = Math.max(0L, Duration.between(startedAt, endedAt).toMillis());
-        source.put("executionId", runId); source.put("runId", runId); source.put("status", cancelled ? "CANCELLED" : status().name());
+        source.put("executionId", runId); source.put("runId", runId); source.put("status", cancelled && !teardownFailed() ? "CANCELLED" : status().name());
         source.put("exitCode", exitCode()); source.put("durationMs", durationMs);
         source.put("startedAt", startedAt.toString()); source.put("endedAt", endedAt.toString());
         source.put("executionStatus", executionStatus()); source.put("performanceVerdict", performanceVerdict());
@@ -186,10 +204,12 @@ public final class LoadRunResult {
             Map<String, Object> summary = new LinkedHashMap<String, Object>();
             summary.put("status", workload.cancelled() ? "CANCELLED" : workload.status().name()); summary.put("executionStatus", workload.executionStatus());
             summary.put("performanceVerdict", workload.performanceVerdict()); summary.put("metrics", workload.metrics().values());
+            summary.put("thresholds", workload.thresholds().toMap());
             workloadSummaries.put(entry.getKey(), summary);
         }
         source.put("workloads", workloadSummaries);
         source.put("resources", resources);
+        if (teardownFailed()) source.put("teardown", teardownDiagnostic);
         source.put("evidence", evidence);
         source.put("diagnostics", terminalDiagnostics(reportAvailability));
         source.put("metricCoverage", terminalMetricCoverage(durationMs));
@@ -213,9 +233,10 @@ public final class LoadRunResult {
             paths.put("report", "load/" + runId + "/report/index.html");
             paths.put("reportManifest", "load/" + runId + "/load-report-manifest.json");
         }
-        String archiveState = reportProduced ? "PENDING" : "FAILED";
+        String archiveState = reportProduced ? "PENDING" : "OMITTED".equals(reportAvailability) ? "OMITTED" : "FAILED";
         archive.put("paths", paths); archive.put("status", archiveState); archive.put("reportAvailability", archiveState);
-        if (!reportProduced) archive.put("omissionReason", "LOAD_REPORT_WRITE_FAILED");
+        if (!reportProduced) archive.put("omissionReason", "OMITTED".equals(reportAvailability)
+                ? "LOAD_MEASUREMENT_NOT_AVAILABLE" : "LOAD_REPORT_WRITE_FAILED");
         source.put("archive", archive); source.put("reportProduced", reportProduced);
         if (configuration != null) source.put("configuration", configuration);
         return LoadTerminalResult.compact(source);
@@ -245,6 +266,13 @@ public final class LoadRunResult {
         Map<String, Object> evidenceNotice = evidenceQuotaNotice();
         if (evidenceNotice != null) secondary.add(evidenceNotice);
         for (Map<String, Object> notice : preflightNotices()) if (secondary.size() < 16) secondary.add(notice);
+        if (teardownFailed()) {
+            Map<String, Object> teardown = new LinkedHashMap<>(teardownDiagnostic);
+            if (primary instanceof Map || preparationFailureDiagnostic() != null) {
+                teardown.putIfAbsent("scope", "teardown");
+                secondary.add(teardown);
+            } else result.put("primaryError", teardown);
+        }
         if ("FAILED".equals(reportAvailability)) {
             secondary.add(att.server.api.LimitDiagnostic.create("LOAD_REPORT_WRITE_FAILED",
                     "LOAD execution completed, but report artifacts could not be published.", null, null, null,

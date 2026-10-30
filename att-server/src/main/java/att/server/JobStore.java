@@ -1074,6 +1074,7 @@ final class JobStore implements AutoCloseable {
     }
     // Status-count polling owns its connection and result data; do not serialize it on the JobStore writer monitor.
     long count(String status) throws Exception { try(Connection c=connect();PreparedStatement p=c.prepareStatement("SELECT COUNT(*) FROM jobs WHERE status=?")){p.setString(1,status);try(ResultSet r=p.executeQuery()){r.next();return r.getLong(1);}} }
+    long activeLoadCount() throws Exception { try(Connection c=connect();PreparedStatement p=c.prepareStatement("SELECT COUNT(*) FROM jobs WHERE command='load' AND status IN ('QUEUED','PREPARING','RUNNING')")){try(ResultSet r=p.executeQuery()){r.next();return r.getLong(1);}} }
     synchronized List<java.util.Map<String,Object>> list(int limit) throws Exception {
         return list(limit,null);
     }

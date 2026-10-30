@@ -159,12 +159,14 @@ describe('App Dashboard job refresh', () => {
 
     await act(async () => root.render(<App />));
     await settle();
-    expect(host.querySelector<HTMLInputElement>('input[placeholder="e.g. 30s or 5m"]')?.value).toBe('30s');
+    const durationInput = () => host.querySelector<HTMLInputElement>('input[placeholder="e.g. 30s or 5m"]');
+    await act(async () => { await vi.waitFor(() => expect(durationInput()?.value).toBe('30s'), { timeout: 5000 }); });
+    expect(durationInput()?.value).toBe('30s');
     const environmentText = () => [...host.querySelectorAll<HTMLElement>('.context-chip')]
       .find(item => item.querySelector('span')?.textContent === 'Environment')?.querySelector('strong')?.textContent;
     const initialSharedEnvironment = environmentText();
 
-    const duration = host.querySelector<HTMLInputElement>('input[placeholder="e.g. 30s or 5m"]')!;
+    const duration = durationInput()!;
     await act(async () => {
       Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(duration, '5m');
       duration.dispatchEvent(new Event('input', { bubbles: true }));

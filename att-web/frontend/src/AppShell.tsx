@@ -96,6 +96,7 @@ function routeLink(event: MouseEvent<HTMLAnchorElement>, action: () => void) {
 
 function routeTitle(route: AppRoute): string {
   if (route.kind === 'dashboard') return 'Dashboard';
+  if (route.kind === 'monitoring') return 'Monitoring';
   if (route.kind === 'run') return 'Run';
   if (route.kind === 'packages') return 'Explorer';
   if (route.kind === 'package') return route.resource ? route.resource.resourceId : route.packageId;
@@ -112,6 +113,7 @@ function routeTitle(route: AppRoute): string {
 }
 
 function activeNavigation(route: AppRoute): string {
+  if (route.kind === 'monitoring') return 'monitoring';
   if (route.kind === 'run' || route.kind === 'packages' || route.kind === 'package') return 'explorer';
   if (route.kind === 'configuration') return 'configuration';
   if (route.kind === 'quick-load') return 'load-testing';
@@ -137,6 +139,7 @@ function KeyboardDialog({ open, mode, showScheduledLoad, selectedPackage, access
   const [query, setQuery] = useState('');
   const commands: Array<{ label: string; description: string; route: AppRoute }> = accessCapabilities.operate ? [
     { label: 'Dashboard', description: 'Dashboard overview', route: { kind: 'dashboard' } },
+    { label: 'Monitoring', description: 'Live server health and capacity', route: { kind: 'monitoring' } },
     { label: 'Explorer', description: 'Choose a package, browse resources, and run targets', route: selectedPackage ? { kind: 'package', packageId: selectedPackage } : { kind: 'packages' } },
     { label: 'Configuration', description: 'Inspect shared runtime configuration and Package-local Testdata', route: selectedPackage ? { kind: 'configuration', packageId: selectedPackage } : { kind: 'configuration' } },
     { label: 'Load testing', description: 'Create a validated Load job', route: { kind: 'load' } },
@@ -144,6 +147,7 @@ function KeyboardDialog({ open, mode, showScheduledLoad, selectedPackage, access
     ...(showScheduledLoad ? [{ label: 'Schedules', description: 'Manage RUN and LOAD schedules', route: { kind: 'schedules' } as AppRoute }] : []),
     { label: 'Settings', description: 'Appearance and keyboard help', route: { kind: 'settings' } },
   ] : accessCapabilities.accountManage ? [
+    { label: 'Monitoring', description: 'Live server health and capacity', route: { kind: 'monitoring' } },
     { label: 'Settings', description: 'Manage accounts and administration settings', route: { kind: 'settings' } },
   ] : [];
   const matches = commands.filter(command => `${command.label} ${command.description}`.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()));
@@ -600,11 +604,14 @@ export function AppShell({
               <span className="nav-icon" aria-hidden="true">◷</span><span className="nav-label">Schedules</span>
             </a>}
             </>}
+            {(accessCapabilities.operate||accessCapabilities.accountManage) && <a className="nav-link" href="#/monitoring" data-nav="monitoring" aria-current={activeNav === 'monitoring' ? 'page' : undefined} onClick={link('#/monitoring')}>
+              <span className="nav-icon" aria-hidden="true">◌</span><span className="nav-label">{uiLocale === 'zh-Hant' ? '監控' : 'Monitoring'}</span>
+            </a>}
             {(accessCapabilities.operate||accessCapabilities.accountManage) && <a className="nav-link" href="#/settings" data-nav="settings" aria-current={activeNav === 'settings' ? 'page' : undefined} onClick={link('#/settings')}>
               <span className="nav-icon" aria-hidden="true">⚙</span><span className="nav-label">Settings</span>
             </a>}
           </nav>
-          <div className="sidebar-footer"><span>ATT Server</span><span className="sidebar-version">{versionData?.version || '4.2.6'}</span></div>
+          <div className="sidebar-footer"><span>ATT Server</span><span className="sidebar-version">{versionData?.version || '4.2.7'}</span></div>
         </aside>
 
         <div className="app-frame">
@@ -635,6 +642,7 @@ export function AppShell({
             <nav id="breadcrumbs" className="breadcrumbs" aria-label="Breadcrumb">
               <ol>
                 <Breadcrumb label="Dashboard" href={route.kind === 'dashboard' ? undefined : '#/'} navigate={navigate} />
+                {route.kind === 'monitoring' && <Breadcrumb label={uiLocale === 'zh-Hant' ? '監控' : 'Monitoring'} navigate={navigate} />}
                 {route.kind === 'packages' && <Breadcrumb label="Packages" navigate={navigate} />}
                 {route.kind === 'package' && <>
                   <Breadcrumb label="Packages" href="#/packages" navigate={navigate} />

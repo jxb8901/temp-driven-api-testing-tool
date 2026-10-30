@@ -1,5 +1,12 @@
 # Changelog
 
+# ATT 4.2.7 - 2026-10-29
+
+- Preserve completed LOAD metrics and report publication when teardown fails, expose typed safe cleanup diagnostics, and keep execution failures primary (#319).
+- Add authorized read-only Monitoring snapshots and a responsive Studio page with bounded polling, safe availability states, and per-job journal detail (#320).
+- Allowlist the current offline report script hash in Server and Studio, with generated-byte parity and rendered SVG geometry coverage (#321).
+- Add compact verified archive overview metadata for Jobs, and keep result status, performance thresholds, approved files, and omissions distinct (#322).
+
 # ATT 4.2.6 - 2026-10-29
 
 - Treat missing optional Package resource roots as empty inventories, including fail-closed handling for inaccessible roots, and return sanitized typed diagnostics for invalid roots (#308).

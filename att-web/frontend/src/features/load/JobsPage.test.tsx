@@ -55,6 +55,7 @@ beforeEach(() => {
 afterEach(async () => {
   await act(async () => root.unmount());
   host.remove();
+  Reflect.deleteProperty(document, 'hidden');
   vi.useRealTimers();
 });
 
@@ -390,7 +391,7 @@ describe('JobsPage React feature', () => {
         executionEvidence:{count:1,bytes:10},summaryManifests:{count:1,bytes:100}}}))});
     await act(async()=>root.render(<JobArtifacts api={api} jobId="JOB-204" refresh={0}/>));
     await advance();
-    expect(host.textContent).toContain('3 loaded of 4 files');
+    expect(host.textContent).toContain('3 loaded of 4 approved files');
     expect(host.textContent).toContain('Recovery checkpoints · 1 files');
     expect(host.textContent).toContain('workload-0001 · 1 files');
     expect(host.textContent).toContain('Execution EXEC-100 · 1 files');
@@ -798,8 +799,109 @@ describe('JobsPage React feature', () => {
     expect(textRead).not.toHaveBeenCalled();
   });
 
+  it('uses only verified archive overview metadata for the approved report link and separate threshold counts', async () => {
+    const compact: JobResultResponse = { job: { jobId: 'JOB-208', command: 'load', status: 'PASS' }, result: { status: 'PASS', summary: {
+      schemaVersion: 'att-load-terminal-result/v1', execution: { status: 'PASS' }, performance: { verdict: 'NOT_EVALUATED' },
+      metrics: { scheduled: 20, started: 20, completed: 19, success: 18, runtimeError: 0 },
+      thresholds: { verdict: 'NOT_MET', total: 2 },
+      workloads: { total: 2, items: [
+        { id: 'fast', thresholds: { total: 1 } }, { id: 'slow', thresholds: { total: 3 } },
+      ], omittedCount: 0 },
+      archive: { status: 'PENDING', reportAvailability: 'PENDING', paths: { report: 'load/JOB-208/old-report.html' } },
+    } } };
+    const overview = vi.fn(async () => ({ archiveStatus: 'READY' as const, summaryVerified: true,
+      reportAvailability: 'READY' as const, reportPath: 'load/run-208/report/index.html', approvedArtifactCount: 14,
+      approvedReportCount: 1, omittedCandidateCount: 2, complete: false,
+      omissions: [{ count: 2, category: 'unsupported_type' }], omissionReasonsAvailable: true }));
+    const archiveRead = vi.fn();
+    const textRead = vi.fn();
+    const api = makeApi({ getJob: vi.fn(async () => ({ ...sampleJob, jobId: 'JOB-208', status: 'PASS' })),
+      getJobResult: vi.fn(async () => compact), getJobArtifactOverview: overview,
+      getJobArtifactArchive: archiveRead, getJobArtifactText: textRead });
+
+    await act(async () => root.render(<JobsPage api={api} jobId="JOB-208" onOpenJob={vi.fn()} onShowList={vi.fn()} />));
+    await advance();
+    const panel = host.querySelector('#job-panel-overview')!;
+    expect(overview).toHaveBeenCalledWith('JOB-208', expect.any(AbortSignal));
+    expect(panel.textContent).toContain('2 aggregate checks');
+    expect(panel.textContent).toContain('4 across 2 workloads');
+    expect(panel.textContent).toContain('14 approved files; 2 omitted candidates');
+    expect(panel.textContent).toContain('unsupported type');
+    expect(panel.querySelector('a')?.textContent).toBe('Open approved report');
+    expect(panel.querySelector('a')?.getAttribute('href')).toContain('report');
+    expect(archiveRead).not.toHaveBeenCalled();
+    expect(textRead).not.toHaveBeenCalled();
+  });
+
+  it('labels an initial report path as unverified until the status endpoint verifies it', async () => {
+    const compact: JobResultResponse = { job: { jobId: 'JOB-209', command: 'load', status: 'PASS' }, result: { status: 'PASS', summary: {
+      schemaVersion: 'att-load-terminal-result/v1', execution: { status: 'PASS' }, performance: { verdict: 'NOT_EVALUATED' },
+      metrics: { completed: 1, success: 1 }, archive: { status: 'PENDING', reportAvailability: 'PENDING',
+        paths: { report: 'load/JOB-209/report/index.html' } },
+    } } };
+    const api = makeApi({ getJob: vi.fn(async () => ({ ...sampleJob, jobId: 'JOB-209', status: 'PASS' })),
+      getJobResult: vi.fn(async () => compact), getJobArtifactOverview: vi.fn(async () => ({ archiveStatus: 'PENDING' as const,
+        summaryVerified: false, reportAvailability: 'UNVERIFIED' as const, omissionReasonsAvailable: false })) });
+    await act(async () => root.render(<JobsPage api={api} jobId="JOB-209" onOpenJob={vi.fn()} onShowList={vi.fn()} />));
+    await advance();
+    const panel = host.querySelector('#job-panel-overview')!;
+    expect(panel.textContent).toContain('current archive state from the Server');
+    expect(panel.textContent).toContain('Initial report path hint (unverified)');
+    expect(panel.querySelector('a')).toBeNull();
+  });
+
+  it('bounds Overview status polling and cancels it when the user changes tabs', async () => {
+    const status = vi.fn(async (_jobId: string, _signal?: AbortSignal) => ({ archiveStatus: 'PENDING' as const, summaryVerified: false,
+      reportAvailability: 'UNVERIFIED' as const, omissionReasonsAvailable: false }));
+    const api = makeApi({ getJob: vi.fn(async () => ({ ...sampleJob, status: 'PASS' })), getJobArtifactOverview: status });
+    await act(async () => root.render(<JobsPage api={api} jobId="JOB-204" onOpenJob={vi.fn()} onShowList={vi.fn()} />));
+    await advance();
+    await advance(62_000);
+    expect(status).toHaveBeenCalledTimes(31);
+    await click(host.querySelector('#job-tab-live')!);
+    await advance(10_000);
+    expect(status).toHaveBeenCalledTimes(31);
+  });
+
+  it('pauses archive status requests while the document is hidden and resumes when visible', async () => {
+    Object.defineProperty(document, 'hidden', { configurable: true, value: true });
+    const status = vi.fn(async (_jobId: string, _signal?: AbortSignal) => ({ archiveStatus: 'PENDING' as const,
+      summaryVerified: false, reportAvailability: 'UNVERIFIED' as const, omissionReasonsAvailable: false }));
+    const api = makeApi({ getJob: vi.fn(async () => ({ ...sampleJob, status: 'PASS' })), getJobArtifactOverview: status });
+    await act(async () => root.render(<JobsPage api={api} jobId="JOB-204" onOpenJob={vi.fn()} onShowList={vi.fn()} />));
+    await advance(10_000);
+    expect(status).not.toHaveBeenCalled();
+
+    Object.defineProperty(document, 'hidden', { configurable: true, value: false });
+    await act(async () => { document.dispatchEvent(new Event('visibilitychange')); await Promise.resolve(); });
+    await advance();
+    expect(status).toHaveBeenCalledTimes(1);
+    await advance(2_000);
+    expect(status).toHaveBeenCalledTimes(2);
+  });
+
+  it('aborts an in-flight archive status request when the document becomes hidden', async () => {
+    const first = deferred<{ archiveStatus: 'PENDING'; summaryVerified: false; reportAvailability: 'UNVERIFIED'; omissionReasonsAvailable: false }>();
+    const status = vi.fn()
+      .mockImplementationOnce((_jobId: string, _signal?: AbortSignal) => first.promise)
+      .mockResolvedValue({ archiveStatus: 'PENDING' as const, summaryVerified: false,
+        reportAvailability: 'UNVERIFIED' as const, omissionReasonsAvailable: false });
+    const api = makeApi({ getJob: vi.fn(async () => ({ ...sampleJob, status: 'PASS' })), getJobArtifactOverview: status });
+    await act(async () => root.render(<JobsPage api={api} jobId="JOB-204" onOpenJob={vi.fn()} onShowList={vi.fn()} />));
+    await advance();
+    expect(status).toHaveBeenCalledTimes(1);
+    const signal = status.mock.calls[0][1] as AbortSignal;
+
+    Object.defineProperty(document, 'hidden', { configurable: true, value: true });
+    await act(async () => { document.dispatchEvent(new Event('visibilitychange')); await Promise.resolve(); });
+    expect(signal.aborted).toBe(true);
+    first.resolve({ archiveStatus: 'PENDING', summaryVerified: false, reportAvailability: 'UNVERIFIED', omissionReasonsAvailable: false });
+    await advance();
+    expect(status).toHaveBeenCalledTimes(1);
+  });
+
   it.each([
-    ['PENDING', 'PENDING — initial hint; open Results or Metrics to check the current archive state.'],
+    ['PENDING', 'PENDING — initial status hint only; the archive state is unverified.'],
     ['ARCHIVING', 'ARCHIVING — the report archive is being published.'],
     ['FAILED', 'FAILED — the inline result remains available.'],
     ['READY', 'OMITTED — the report was not included in the archive.'],

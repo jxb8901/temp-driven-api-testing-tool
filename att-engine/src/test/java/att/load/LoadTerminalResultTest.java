@@ -137,6 +137,47 @@ class LoadTerminalResultTest {
         assertEquals(1L, legacyNotice.get("observed"));
     }
 
+    @Test void teardownFailureKeepsPartialMultiWorkloadMetricsAndChangesCancelledOutcomeToError() {
+        LoadScenario scenario = new LoadScenario(Paths.get("load.yaml"), "template", "T", Collections.emptyMap(),
+                Collections.emptyMap(), LoadScenario.Model.CLOSED, 1, 0.0, null, Duration.ZERO,
+                Duration.ZERO, Duration.ofSeconds(1), Duration.ZERO, Duration.ZERO, 0, "",
+                Collections.emptyMap(), Collections.emptyMap());
+        LoadMetrics aggregate=LoadMetrics.forScenario(scenario,1_000L,1_000L);
+        aggregate.onEvent(LoadEvent.completed("multi-run","default","STEADY","aggregate-1","VU-1",1L,
+                1_000L,1_001L,1_010L,ResultStatus.PASS));
+        aggregate.finish(2_000L);
+        LoadMetrics workload=LoadMetrics.forScenario(scenario,1_000L,1_000L);
+        workload.onEvent(LoadEvent.completed("multi-run","work-a","STEADY","work-a-1","VU-1",1L,
+                1_000L,1_001L,1_010L,ResultStatus.PASS));
+        workload.finish(2_000L);
+        LoadRunResult child=new LoadRunResult("multi-run",scenario,Instant.ofEpochMilli(1_000L),
+                Instant.ofEpochMilli(2_000L),workload.snapshot());
+        LoadRunResult complete=new LoadRunResult("multi-run",scenario,Instant.ofEpochMilli(1_000L),
+                Instant.ofEpochMilli(2_000L),aggregate.snapshot(),LoadThresholdSummary.empty(),Collections.emptyMap(),
+                Collections.emptyMap(),Collections.singletonMap("work-a",child));
+
+        LoadRunResult interrupted=complete.withCancelled().withTeardownFailure(
+                new LoadResourceTeardownException("MQ","shared-client",2L,new java.io.IOException("MQ_DISCONNECT_FAILED")));
+        Map<?,?> terminal=interrupted.toTerminalSummary(null);
+        Map<?,?> execution=(Map<?,?>)terminal.get("execution");
+        Map<?,?> metrics=(Map<?,?>)terminal.get("metrics");
+        Map<?,?> diagnostics=(Map<?,?>)terminal.get("diagnostics");
+        Map<?,?> primary=(Map<?,?>)diagnostics.get("primaryError");
+        Map<?,?> workloads=(Map<?,?>)terminal.get("workloads");
+        Map<?,?> workloadA=null;
+        for(Object item:(Iterable<?>)workloads.get("items")) {
+            Map<?,?> candidate=(Map<?,?>)item;
+            if("work-a".equals(candidate.get("id"))) { workloadA=candidate; break; }
+        }
+        assertNotNull(workloadA);
+        assertEquals("ERROR",execution.get("status"));
+        assertEquals("NOT_EVALUATED",((Map<?,?>)terminal.get("performance")).get("verdict"));
+        assertEquals(1L,((Number)metrics.get("completed")).longValue());
+        assertEquals("TEARDOWN",primary.get("phase"));
+        assertEquals(1L,((Number)((Map<?,?>)workloadA.get("metrics")).get("completed")).longValue());
+        assertEquals("CANCELLED",workloadA.get("status"));
+    }
+
     @Test void preparationDeadlineAndConnectionBudgetArePrimaryExecutionErrors() {
         LoadScenario scenario = new LoadScenario(Paths.get("load.yaml"), "template", "T", Collections.emptyMap(),
                 Collections.emptyMap(), LoadScenario.Model.CLOSED, 1, 0.0, null, Duration.ZERO,

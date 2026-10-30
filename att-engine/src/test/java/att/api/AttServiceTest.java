@@ -4,6 +4,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -193,6 +194,106 @@ class AttServiceTest {
         assertEquals("LOAD_REPORT_WRITE_FAILED",archive.get("omissionReason"));
         assertTrue(((Map<?,?>)archive.get("paths")).isEmpty(), "failed report writes must not advertise missing paths");
         assertFalse(((Map<?,?>)compact.get("diagnostics")).containsKey("primaryError"));
+    }
+
+    @Test void cleanupFailureKeepsCompletedLoadMetricsAndPublishesSafeTeardownDiagnostic() throws Exception {
+        Path root=temp.resolve("load-cleanup-failure");
+        Files.createDirectories(root.resolve("config"));Files.createDirectories(root.resolve("templates/SIMPLE"));
+        Files.createDirectories(root.resolve("testcase"));Files.createDirectories(root.resolve("tools"));Files.createDirectories(root.resolve("load"));
+        att.TestSchemas.install(root);
+        Path mqHelper=Files.createDirectories(root.resolve("config/mqhelpers")).resolve("broker.yaml");
+        Files.write(mqHelper,("schemaVersion: att-mqhelper/v1.3\nid: broker\nname: Broker\ndescription: teardown test\n"
+                +"defaults:\n  connection: {queueManager: QM1, host: localhost, port: 1414, channel: CH}\n"
+                +"  message: {requestQueues: [REQUEST.Q]}\ninstances: [{id: primary}]\n").getBytes("UTF-8"));
+        Files.write(root.resolve("config/config.yaml"),("schemaVersion: att-config/v2.11\n"
+                +"outputDirectory: output\nenvironment: SIT\ntemplates: {root: templates}\n"
+                +"testcase: {root: testcase}\ntools: {}\nmqhelpers: [config/mqhelpers/broker.yaml]\n").getBytes("UTF-8"));
+        Files.write(root.resolve("templates/SIMPLE/template.yaml"),("schemaVersion: att-template/v3.4\n"
+                +"name: SIMPLE\ndescription: cleanup failure result preservation\nactions:\n"
+                +"  show: {type: log, message: completed-before-cleanup}\n"
+                +"  send:\n    type: tool\n    call: \"#{mq.broker.send(queue='REQUEST.Q', payload='completed-before-cleanup')}\"\n").getBytes("UTF-8"));
+        Path scenario=root.resolve("load/scenario.yaml");
+        Files.write(scenario,("schemaVersion: att-load/v1.9\nworkloads:\n"
+                +"  - id: cleanup-a\n    target: {type: template, id: SIMPLE}\n"
+                +"    load: {users: 1, duration: 100ms}\n    execution: {thinkTime: 0ms}\n"
+                +"    thresholds: {p95: '<= 5000ms'}\n"
+                +"  - id: cleanup-b\n    target: {type: template, id: SIMPLE}\n"
+                +"    load: {users: 1, duration: 100ms}\n    execution: {thinkTime: 0ms}\n"
+                +"    thresholds: {p95: '<= 5000ms'}\n"
+                +"evidence: {mode: metrics}\n").getBytes("UTF-8"));
+
+        AtomicInteger disconnectAttempts=new AtomicInteger();
+        att.exec.MqTransport.Factory mqTransport=helper -> new att.exec.MqTransport.Connection() {
+            @Override public att.exec.MqTransport.Queue open(String queue,boolean input,boolean output) {
+                return new att.exec.MqTransport.Queue() {
+                    @Override public att.exec.MqTransport.Message put(byte[] payload,att.exec.MqTransport.PutRequest request) {
+                        return new att.exec.MqTransport.Message(new byte[]{1},null,payload);
+                    }
+                    @Override public att.exec.MqTransport.Message get(att.exec.MqTransport.GetRequest request) {
+                        return new att.exec.MqTransport.Message(new byte[]{1},null,new byte[0]);
+                    }
+                    @Override public void close() { }
+                };
+            }
+            @Override public void disconnect() throws Exception {
+                disconnectAttempts.incrementAndGet();
+                throw new att.exec.MqTransport.Exception(
+                        "MQRC_Q_MGR_NOT_AVAILABLE /Users/alice/private/connection",2,2059,
+                        "MQRC_Q_MGR_NOT_AVAILABLE",new java.io.IOException("/Users/alice/private/connection"));
+            }
+            @Override public void close() throws Exception { disconnect(); }
+        };
+        DefaultAttService service=new DefaultAttService((outputRoot,loadResult) ->
+                new att.load.LoadReportWriter().write(outputRoot,loadResult),
+                (packageRoot,config) -> att.load.LoadRunResourcesTestSupport.withMqTransport(packageRoot,config,mqTransport));
+        LoadResult result=service.load(new LoadRequest(root,Paths.get("config/config.yaml"),null,null,"cleanup-failed",
+                scenario,null,null,null,null,null,null,null,null,null,null,null,Collections.<String>emptyList()));
+
+        assertEquals("ERROR",result.status());
+        assertEquals(3,result.exitCode());
+        assertTrue(result.paths().containsKey("report"));
+        assertTrue(Files.isRegularFile(Paths.get(result.paths().get("report"))));
+        Map<?,?> summary=(Map<?,?>)result.toMap().get("summary");
+        Map<?,?> metrics=(Map<?,?>)summary.get("metrics");
+        assertTrue(((Number)metrics.get("completed")).longValue()>0L,"completed scheduler metrics must survive cleanup failure");
+        assertEquals("ERROR",summary.get("executionStatus"));
+        assertEquals("MET",summary.get("performanceVerdict"),"evaluated workload thresholds remain independent from teardown status");
+        Map<?,?> workloads=(Map<?,?>)summary.get("workloads");
+        assertEquals(2,workloads.size());
+        for(String id:java.util.Arrays.asList("cleanup-a","cleanup-b")) {
+            Map<?,?> workload=(Map<?,?>)workloads.get(id);
+            assertTrue(((Number)((Map<?,?>)workload.get("metrics")).get("completed")).longValue()>0L,id);
+            assertEquals("MET",workload.get("performanceVerdict"),id);
+        }
+        Map<?,?> diagnostics=(Map<?,?>)summary.get("diagnostics");
+        Map<?,?> primary=(Map<?,?>)diagnostics.get("primaryError");
+        assertEquals("MQ_RESOURCE_TEARDOWN_FAILED",primary.get("code"));
+        assertEquals("TEARDOWN",primary.get("phase"));
+        assertTrue(primary.toString().contains("broker:primary"),primary.toString());
+        assertTrue(((Number)primary.get("failedCloseCount")).longValue()>=1L);
+        assertTrue(disconnectAttempts.get()>0,"the fake physical MQ connection must fail during disconnect");
+        Map<?,?> failedResource=(Map<?,?>)((java.util.List<?>)primary.get("resources")).get(0);
+        assertEquals(2L,((Number)failedResource.get("mqCompletionCode")).longValue());
+        assertEquals(2059L,((Number)failedResource.get("mqReasonCode")).longValue());
+        assertTrue(failedResource.toString().contains("MQRC_Q_MGR_NOT_AVAILABLE"));
+        assertFalse(result.toMap().toString().contains("/Users/alice/private"));
+        String reportSummary=new String(Files.readAllBytes(Paths.get(result.paths().get("report")).getParent().getParent()
+                .resolve("load-summary.json")),StandardCharsets.UTF_8);
+        com.fasterxml.jackson.databind.JsonNode reportJson=new com.fasterxml.jackson.databind.ObjectMapper().readTree(reportSummary);
+        assertEquals("TEARDOWN",reportJson.path("teardown").path("phase").asText());
+        assertTrue(reportJson.path("workloads").path("cleanup-a").path("metrics").path("completed").asLong()>0L);
+        assertTrue(reportJson.path("workloads").path("cleanup-b").path("metrics").path("completed").asLong()>0L);
+
+        Map<?,?> worker=(Map<?,?>)result.toWorkerMap();
+        assertEquals("ERROR",worker.get("status"));
+        Map<?,?> workerSummary=(Map<?,?>)worker.get("summary");
+        assertEquals("ERROR",((Map<?,?>)workerSummary.get("execution")).get("status"));
+        assertEquals("MET",((Map<?,?>)workerSummary.get("performance")).get("verdict"));
+        assertTrue(((Number)((Map<?,?>)workerSummary.get("metrics")).get("completed")).longValue()>0L);
+        Map<?,?> workerWorkloads=(Map<?,?>)workerSummary.get("workloads");
+        assertEquals(2,((Number)workerWorkloads.get("total")).intValue());
+        assertEquals(0,((Number)workerWorkloads.get("omittedCount")).intValue());
+        assertEquals(2,((java.util.List<?>)workerWorkloads.get("items")).size());
     }
 
     @Test void configuredLoadIdentityUsesTheSameEnclosingTimestampAsIterationContext() throws Exception {

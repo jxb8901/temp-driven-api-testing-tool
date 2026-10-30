@@ -1,6 +1,6 @@
 import type { ManifestView, ManifestProjection, ManifestDraft, ManifestHistory } from './features/explorer/packageManifest';
 import type { JobReplay, JobReplayEditorDraft } from "./features/load/types";
-import { ApiError, type ApiEnvelope, type ApiErrorBody, type JobSummary, type LocalAuthUser, type PackageSummary, type ServerVersion } from './types';
+import { ApiError, type ApiEnvelope, type ApiErrorBody, type JobSummary, type LocalAuthUser, type MonitoringJobJournal, type MonitoringSnapshot, type PackageSummary, type ServerVersion } from './types';
 import type {
   AcceptedJob, ConfigurationComparisonQuery, ConfigurationFilePage, ConfigurationResponse, DebugDraftRequest, DraftResponse,
   DebugFormResponse, EffectiveConfigurationQuery, ResourceDetail, ResourceIdentity, SourceProjection, TestdataRecordsResponse,
@@ -519,6 +519,12 @@ export const api = {
   },
   getServerMetrics(signal?: AbortSignal): Promise<{ jobStorage?: ServerJobStorageMetrics }> {
     return request<{ jobStorage?: ServerJobStorageMetrics }>('metrics', { signal });
+  },
+  getServerMonitoring(signal?: AbortSignal): Promise<MonitoringSnapshot> {
+    return request<MonitoringSnapshot>('monitoring', { signal });
+  },
+  getMonitoringJobJournal(jobId: string, signal?: AbortSignal): Promise<MonitoringJobJournal> {
+    return request<MonitoringJobJournal>('monitoring/jobs/' + encodeURIComponent(jobId) + '/journal', { signal });
   },
   getScheduleExecutions(id: string, limit = 100, signal?: AbortSignal): Promise<ApiEnvelope<ScheduleOccurrence>> {
     return request<ApiEnvelope<ScheduleOccurrence>>(

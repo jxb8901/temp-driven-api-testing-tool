@@ -1,6 +1,6 @@
 # 執行 Load test
 
-可在 Studio 使用六種 Load Template catalog 及 validated builder，或使用目前 4.2.6 Local CLI 執行已撰寫的 scenario。
+可在 Studio 使用六種 Load Template catalog 及 validated builder，或使用目前 4.2.7 Local CLI 執行已撰寫的 scenario。
 
 ## Studio workflow
 
@@ -12,7 +12,7 @@
 
 六種 mode 定義請參閱 [Load model](../concepts/load-model.zh.md)。[Load Reference](../reference.zh/execution-modes/load.md) 定義 template、binding 及 execution rules。
 
-## 目前 4.2.6 CLI
+## 目前 4.2.7 CLI
 
 執行已撰寫的 scenario，或將一個支援的 Debug sidecar 提升為 Load workload：
 
@@ -28,4 +28,4 @@ List 和 preview operation 不會啟動 traffic。從有效的 execution command
 
 Browser Quick／Advanced Load draft 及 package-backed scenario 均使用 Server 設定的上限 `server.inlineLoad.maxDurationSeconds`，最多 864,000 秒（10 日）。完整 envelope 依 ramp-up、warmup、steady duration 及 ramp-down 順序執行。長時間 run 會執行唯讀 preflight，估算保留 evidence、Tool output、artifact archive 及輸出磁碟空間；這些風險以 warning 顯示，duration 本身不會拒絕 run。
 
-目前 4.2.6 Load CLI 與 proposed CLI vNext 是不同 interface。請參閱 [CLI Reference](../reference/cli.md) 及[規劃中的 vNext 頁面](../interfaces/cli/vnext-proposed.zh.md)。
+目前 4.2.7 Load CLI 與 proposed CLI vNext 是不同 interface。請參閱 [CLI Reference](../reference/cli.md) 及[規劃中的 vNext 頁面](../interfaces/cli/vnext-proposed.zh.md)。

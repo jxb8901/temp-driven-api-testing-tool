@@ -48,6 +48,9 @@ class UserPreferencesStoreTest {
     @Test void existingLocalAccountsReceiveOneStableOpaquePreferenceIdentityDuringMigration() throws Exception {
         ServerConfig config=config(temp.resolve("legacy-data"));String url="jdbc:h2:file:"+config.dataDir.resolve("db/att-server").toString().replace('\\','/')+";DB_CLOSE_ON_EXIT=FALSE";
         Files.createDirectories(config.dataDir.resolve("db"));
+        java.sql.Driver driver=org.h2.Driver.load();boolean registered=false;
+        var drivers=DriverManager.getDrivers();while(drivers.hasMoreElements())if(drivers.nextElement()==driver)registered=true;
+        if(!registered)DriverManager.registerDriver(driver);
         try(var connection=DriverManager.getConnection(url,"sa","");var statement=connection.createStatement()) {
             statement.execute("CREATE TABLE auth_users(login_id VARCHAR(120) PRIMARY KEY,display_name VARCHAR(120) NOT NULL,password_hash VARCHAR(512) NOT NULL,role VARCHAR(16) NOT NULL,active BOOLEAN NOT NULL,updated_at VARCHAR(40) NOT NULL)");
             statement.execute("INSERT INTO auth_users VALUES('legacy','Legacy User','hash','USER',TRUE,'2026-01-01T00:00:00Z')");

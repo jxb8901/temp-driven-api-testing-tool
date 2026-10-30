@@ -736,6 +736,11 @@
           "description": "Compatibility boolean retaining the previous passed() semantics; it is false for configured unevaluable results.",
           "type": "boolean"
         },
+        "total": {
+          "description": "Number of threshold checks configured for this aggregate or workload scope.",
+          "type": "integer",
+          "minimum": 0
+        },
         "results": {
           "type": "array",
           "items": {

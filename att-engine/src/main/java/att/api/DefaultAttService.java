@@ -26,19 +26,40 @@ import java.util.Map;
 /** Default implementation backed by ATT's established execution/runtime components. */
 public final class DefaultAttService implements AttService {
     private final LoadReportPublisher loadReportPublisher;
+    private final LoadResourcesFactory loadResourcesFactory;
+    private final LoadResourcesCloser loadResourcesCloser;
 
     public DefaultAttService() {
-        this((outputRoot, result) -> new LoadReportWriter().write(outputRoot, result));
+        this((outputRoot, result) -> new LoadReportWriter().write(outputRoot, result), LoadRunResources::new);
     }
 
     DefaultAttService(LoadReportPublisher loadReportPublisher) {
+        this(loadReportPublisher, LoadRunResources::new);
+    }
+
+    DefaultAttService(LoadReportPublisher loadReportPublisher, LoadResourcesFactory loadResourcesFactory) {
+        this(loadReportPublisher,loadResourcesFactory,LoadRunResources::close);
+    }
+
+    DefaultAttService(LoadReportPublisher loadReportPublisher, LoadResourcesFactory loadResourcesFactory,
+                      LoadResourcesCloser loadResourcesCloser) {
         this.loadReportPublisher = loadReportPublisher == null
                 ? (outputRoot, result) -> new LoadReportWriter().write(outputRoot, result)
                 : loadReportPublisher;
+        this.loadResourcesFactory = loadResourcesFactory == null ? LoadRunResources::new : loadResourcesFactory;
+        this.loadResourcesCloser = loadResourcesCloser == null ? LoadRunResources::close : loadResourcesCloser;
     }
 
     interface LoadReportPublisher {
         Path write(Path outputRoot, LoadRunResult result) throws Exception;
+    }
+
+    interface LoadResourcesFactory {
+        LoadRunResources create(Path packageRoot, FrameworkConfig config);
+    }
+
+    interface LoadResourcesCloser {
+        void close(LoadRunResources resources);
     }
 
     private static ExecutionOptions options(AttRequest request, String command, List<Path> suites, Path suiteDirectory,
@@ -203,26 +224,54 @@ public final class DefaultAttService implements AttService {
         }
         att.config.ConfigurationEvidence.write(runDir,cfg);
         LoadEvidenceStore evidence=new LoadEvidenceStore(LoadEvidencePolicy.from(scenario),request.listener());
-        LoadRunResult result; Map<String,Object> resourceMetrics;
+        LoadRunResult result=null;
+        Map<String,Object> resourceMetrics=Collections.emptyMap();
+        boolean reportEligible=false;
+        Throwable executionFailure=null;
+        Throwable cleanupFailure=null;
         long executionPhase=profile.begin();
-        try(LoadRunResources resources=new LoadRunResources(request.packageRoot(),cfg)){
+        LoadRunResources resources=loadResourcesFactory.create(request.packageRoot(),cfg);
+        try {
             if (request.listener() != null) resources.setPreparationObserver(request.listener()::onPreparationEvent);
-            if(scenario.coordinatorRequired()) result=LoadRunCoordinator.runFrom(request.packageRoot(),cfg,scenario,resources,id,evidence,outputRoot,identitySeed.startedAt());
-            else {
+            if(scenario.coordinatorRequired()) {
+                result=LoadRunCoordinator.runFrom(request.packageRoot(),cfg,scenario,resources,id,evidence,outputRoot,identitySeed.startedAt());
+                reportEligible=true;
+            } else {
                 IterationExecutor iterations=new IterationExecutor(request.packageRoot(),cfg,target,resources,outputRoot,null,identitySeed.startedAt());
                 LoadScheduler scheduler=scenario.model()==LoadScenario.Model.CLOSED?new ClosedVuScheduler(scenario,iterations,id,evidence,outputRoot):new FixedArrivalRateScheduler(scenario,iterations,id,evidence,outputRoot);
-                try { result=scheduler.run(); }
-                catch (att.load.LoadResourcePreparationException failure) {
-                    long failedAt=System.currentTimeMillis();
-                    LoadMetrics failedMetrics=LoadMetrics.forScenario(scenario,failedAt,LoadPhase.totalMs(scenario));
-                    failedMetrics.finish(failedAt);
-                    result=new LoadRunResult(id,scenario,Instant.ofEpochMilli(failedAt),Instant.ofEpochMilli(failedAt),
-                            failedMetrics.snapshot(),LoadThresholdSummary.empty(),Collections.<String,Object>emptyMap(),resources.metrics());
+                try {
+                    try { result=scheduler.run(); reportEligible=true; }
+                    catch (att.load.LoadResourcePreparationException failure) {
+                        long failedAt=System.currentTimeMillis();
+                        LoadMetrics failedMetrics=LoadMetrics.forScenario(scenario,failedAt,LoadPhase.totalMs(scenario));
+                        failedMetrics.finish(failedAt);
+                        result=new LoadRunResult(id,scenario,Instant.ofEpochMilli(failedAt),Instant.ofEpochMilli(failedAt),
+                                failedMetrics.snapshot(),LoadThresholdSummary.empty(),Collections.<String,Object>emptyMap(),resources.metrics());
+                    }
+                } catch (Throwable failure) {
+                    executionFailure=failure;
+                } finally {
+                    try { scheduler.close(); }
+                    catch (Throwable closeFailure) {
+                        LoadResourceTeardownException typed=new LoadResourceTeardownException("SCHEDULER",null,1L,closeFailure);
+                        cleanupFailure=merge(cleanupFailure,typed);
+                    }
                 }
-                finally { scheduler.close(); }
             }
-            resourceMetrics=resources.metrics();
+        } catch (Throwable failure) {
+            executionFailure=merge(executionFailure,failure);
+        } finally {
+            try { resourceMetrics=resources.metrics(); }
+            catch (Throwable metricsFailure) { cleanupFailure=merge(cleanupFailure,metricsFailure); }
+            try { loadResourcesCloser.close(resources); }
+            catch (Throwable closeFailure) { cleanupFailure=merge(cleanupFailure,closeFailure); }
         }
+        if (executionFailure!=null) {
+            if(cleanupFailure!=null&&cleanupFailure!=executionFailure) executionFailure.addSuppressed(cleanupFailure);
+            rethrow(executionFailure);
+        }
+        if(result==null) throw new IllegalStateException("LOAD completed without a scheduler result.");
+        if(cleanupFailure!=null) result=result.withTeardownFailure(cleanupFailure);
         profile.end("loadExecutionMs",executionPhase);
         Map<String,Object> retained=evidence.write(runDir);
         Map<String,Object> preflightResources=new LinkedHashMap<String,Object>(resourceMetrics);
@@ -230,13 +279,15 @@ public final class DefaultAttService implements AttService {
         result=result.withResources(preflightResources).withThresholds(new LoadThresholdEvaluator().evaluate(scenario,result.metrics())).withEvidence(retained);
         long reportPhase=profile.begin();
         Path report=null;
-        String reportAvailability="PENDING";
-        try {
-            report=loadReportPublisher.write(outputRoot,result);
-            if(report==null) reportAvailability="FAILED";
-        } catch(Exception reportFailure) {
-            reportAvailability="FAILED";
-            profile.counter("loadReportWriteFailures",1L);
+        String reportAvailability=reportEligible?"PENDING":"OMITTED";
+        if(reportEligible) {
+            try {
+                report=loadReportPublisher.write(outputRoot,result);
+                if(report==null) reportAvailability="FAILED";
+            } catch(Exception reportFailure) {
+                reportAvailability="FAILED";
+                profile.counter("loadReportWriteFailures",1L);
+            }
         }
         profile.end("loadReportMs",reportPhase);
         profile.counter("loadScheduled",result.metrics().longValue("scheduled"));
@@ -253,8 +304,18 @@ public final class DefaultAttService implements AttService {
             resultPaths.put("report",OperationResult.display(report,request.packageRoot()));
             resultPaths.put("reportManifest",OperationResult.display(runDir.resolve("load-report-manifest.json"),request.packageRoot()));
         }
-        return new LoadResult(id,result.cancelled()?"CANCELLED":result.status().name(),result.exitCode(),elapsed(started),Collections.<Diagnostic>emptyList(),
+        return new LoadResult(id,result.cancelled()&&!result.teardownFailed()?"CANCELLED":result.status().name(),result.exitCode(),elapsed(started),Collections.<Diagnostic>emptyList(),
                 resultPaths,result,att.config.ConfigurationEvidence.metadata(cfg),reportAvailability);
+    }
+    private static Throwable merge(Throwable primary,Throwable secondary) {
+        if(primary==null)return secondary;
+        if(secondary!=null&&secondary!=primary)primary.addSuppressed(secondary);
+        return primary;
+    }
+    private static void rethrow(Throwable failure) throws Exception {
+        if(failure instanceof Exception)throw (Exception)failure;
+        if(failure instanceof Error)throw (Error)failure;
+        throw new IllegalStateException("LOAD execution failed",failure);
     }
     private static Map<String,Object> withConfiguration(Map<String,Object> summary, FrameworkConfig config) {
         Map<String,Object> value = new LinkedHashMap<String,Object>(summary);

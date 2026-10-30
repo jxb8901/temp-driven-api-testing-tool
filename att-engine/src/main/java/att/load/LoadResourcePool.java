@@ -229,6 +229,7 @@ public final class LoadResourcePool<T> implements AutoCloseable {
     public int created() { return created.get(); }
     public int discarded() { return discarded.get(); }
     public int failures() { return failures.get(); }
+    public int closeFailureCount() { synchronized (closeFailures) { return closeFailures.size(); } }
     public long waitDurationMs() { return TimeUnit.NANOSECONDS.toMillis(waitNanos.get()); }
     public Map<String, Object> metrics() {
         Map<String, Object> result = new LinkedHashMap<String, Object>();

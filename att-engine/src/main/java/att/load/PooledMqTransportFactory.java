@@ -17,11 +17,12 @@ public final class PooledMqTransportFactory implements MqTransport.Factory, Auto
 
     private static final class PoolEntry {
         final LoadResourcePool<MqTransport.Connection> pool;
+        final String logicalId;
         final java.util.concurrent.atomic.AtomicBoolean preparationConnect;
         final long preparationDeadlineNanos;
-        PoolEntry(LoadResourcePool<MqTransport.Connection> pool,
+        PoolEntry(LoadResourcePool<MqTransport.Connection> pool, String logicalId,
                   java.util.concurrent.atomic.AtomicBoolean preparationConnect, long preparationDeadlineNanos) {
-            this.pool = pool; this.preparationConnect = preparationConnect; this.preparationDeadlineNanos = preparationDeadlineNanos;
+            this.pool = pool; this.logicalId = logicalId; this.preparationConnect = preparationConnect; this.preparationDeadlineNanos = preparationDeadlineNanos;
         }
     }
 
@@ -114,7 +115,7 @@ public final class PooledMqTransportFactory implements MqTransport.Factory, Auto
                         throw new IllegalStateException("MQ_CONNECTION_DISCONNECT_FAILED", failure);
                     }
                 });
-        PoolEntry candidate = new PoolEntry(created, preparationConnect, deadlineNanos);
+        PoolEntry candidate = new PoolEntry(created, diagnosticIdentity(config), preparationConnect, deadlineNanos);
         PoolEntry raced = pools.putIfAbsent(poolKey, candidate);
         if (raced != null) {
             created.close();
@@ -128,19 +129,29 @@ public final class PooledMqTransportFactory implements MqTransport.Factory, Auto
         return candidate;
     }
 
+    private static String diagnosticIdentity(MqHelperConfig config) {
+        String logical = config.logicalId();
+        String instance = config.instanceId();
+        if (logical == null || logical.trim().isEmpty()) return config.id();
+        if (instance == null || instance.trim().isEmpty() || logical.equals(instance)) return logical;
+        return logical + ":" + instance;
+    }
+
     @Override public void close() {
         if (!closed.compareAndSet(false, true)) return;
         RuntimeException failure = null;
         for (PoolEntry entry : pools.values()) {
             try { entry.pool.close(); }
-            catch (RuntimeException problem) {
-                if (failure == null) failure = problem;
-                else failure.addSuppressed(problem);
+            catch (RuntimeException | Error problem) {
+                LoadResourceTeardownException identified=new LoadResourceTeardownException("MQ",entry.logicalId,
+                        Math.max(1,entry.pool.closeFailureCount()),problem);
+                if (failure == null) failure = identified;
+                else failure.addSuppressed(identified);
             }
         }
         pools.clear();
         if (failure != null) throw new IllegalStateException(
-                "MQ_RESOURCE_TEARDOWN_FAILED: one or more physical MQ connections did not confirm disconnect", failure);
+                "MQ_RESOURCE_TEARDOWN_FAILED", failure);
     }
 
     private static final class PoolFactoryException extends RuntimeException {
