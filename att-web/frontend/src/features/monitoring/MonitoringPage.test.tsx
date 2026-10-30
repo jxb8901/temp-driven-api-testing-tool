@@ -10,7 +10,7 @@ import { MonitoringPage } from './MonitoringPage';
 function snapshot(capturedAt: string, heapUsedBytes: number): MonitoringSnapshot {
   return {
     schemaVersion: 'att-monitoring/v1', capturedAt, origin: 'server-runtime', requestId: 'request-1',
-    health: { status: 'UP', version: '4.2.7', uptimeMs: 120_000 },
+    health: { status: 'UP', version: '4.2.8', uptimeMs: 120_000 },
     process: { heapUsedBytes, heapCommittedBytes: 4_194_304, heapMaxBytes: 8_388_608,
       nonHeapUsedBytes: 2_097_152, nonHeapCommittedBytes: 4_194_304, threadCount: 20, daemonThreadCount: 15, peakThreadCount: 24,
       gcCount: null, gcTimeMs: null, availableProcessors: 8, processCpuLoad: null, processCpuTimeMs: null, processRssBytes: null },

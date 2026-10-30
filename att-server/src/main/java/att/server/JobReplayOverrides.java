@@ -83,7 +83,7 @@ final class JobReplayOverrides {
                 if(workload==null)throw new IllegalArgumentException("Workload identity changed; select an existing workload ID");
                 if(patch.has("load")) {
                     JsonNode load=patch.get("load");requireObject(load,"workload load override must be an object");
-                    allowFields(load,Set.of("users","arrivalRate","maxConcurrent","overloadPolicy"));
+                    allowFields(load,Set.of("users","arrivalRate","maxConcurrent","overloadPolicy","warmup","rampUp","duration","rampDown"));
                     boolean arrival=isArrivalModel(scenario,workload);
                     if(arrival&&load.has("users")||!arrival&&load.has("arrivalRate"))
                         throw new IllegalArgumentException("Replay cannot convert between Arrival Rate and Virtual Users models");

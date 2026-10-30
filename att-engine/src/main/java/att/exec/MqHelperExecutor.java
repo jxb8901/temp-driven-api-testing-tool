@@ -248,12 +248,12 @@ public final class MqHelperExecutor {
             detail.put("message", "MQ reply body is not valid " + effectiveResponseFormat);
             result.put("error", detail); evidence.put("error", detail);
         } catch (MqTransport.Exception error) {
-            success = false; addError(result, evidence, error, helper);
+            success = false; addError(result, evidence, error, helper, context, phase);
             markInternalFailure(result, evidence, error, phase, helper, log);
         } catch (MqActionDeadlineException error) {
             success = false; addDeadlineError(result, evidence, error.getMessage());
         } catch (Exception error) {
-            success = false; addError(result, evidence, error, helper);
+            success = false; addError(result, evidence, error, helper, context, phase);
             markInternalFailure(result, evidence, error, phase, helper, log);
         } finally {
             String cleanup = closeQueue(requestQueue, helper, log, "mq.closeRequestQueue");
@@ -522,7 +522,7 @@ public final class MqHelperExecutor {
         if (error.reason() != null) { result.put("reason", error.reason()); evidence.put("reason", error.reason()); }
     }
 
-    private void addError(Map<String, Object> result, Map<String, Object> evidence, Exception error, MqHelperConfig helper) {
+    private void addError(Map<String, Object> result, Map<String, Object> evidence, Exception error, MqHelperConfig helper, CaseRuntimeContext context, String phase) {
         Map<String, Object> detail = new LinkedHashMap<String, Object>();
         if (error instanceof MqTransport.Exception) {
             MqTransport.Exception mq = (MqTransport.Exception) error;
@@ -533,6 +533,15 @@ public final class MqHelperExecutor {
             if (mq.reasonCode() != null) detail.put("reasonCode", mq.reasonCode());
             if (mq.reason() != null) detail.put("reason", mq.reason());
             if ("MQ_POOL_TIMEOUT".equals(type)) {
+                detail.put("phase", phase);
+                Object loadPhase = context == null ? null : CaseRuntimeContext.getPath(context.diagnosticsTree(), "load.phase");
+                if (loadPhase instanceof String && java.util.Arrays.asList("RAMP_UP", "WARMUP", "STEADY", "RAMP_DOWN", "DRAIN").contains(loadPhase)) detail.put("loadPhase", loadPhase);
+                Throwable cause = mq.getCause();
+                if (cause instanceof att.load.LoadResourcePool.PoolTimeoutException) {
+                    detail.put("pool", ((att.load.LoadResourcePool.PoolTimeoutException) cause).snapshot());
+                    detail.put("helperId", safePoolIdentity(helper.logicalId()));
+                    detail.put("instanceId", safePoolIdentity(helper.instanceId()));
+                }
                 detail.putAll(att.server.api.LimitDiagnostic.create(type, "MQ connection pool wait timed out",
                         "mq.pool.borrowTimeoutMs", helper.poolBorrowTimeoutMs(), null, "engine.mq",
                         att.server.api.LimitOutcome.EXECUTION_ERROR, "execution",
@@ -545,6 +554,12 @@ public final class MqHelperExecutor {
             }
         } else { detail.put("type", error.getClass().getName()); detail.put("message", safe(error, helper)); }
         result.put("error", detail); evidence.put("error", detail);
+    }
+
+    private static String safePoolIdentity(String value) {
+        if (value == null) return "";
+        String safe = value.replaceAll("[^A-Za-z0-9_.-]", "_");
+        return safe.length() <= 80 ? safe : safe.substring(0, 80);
     }
 
     @SuppressWarnings("unchecked")

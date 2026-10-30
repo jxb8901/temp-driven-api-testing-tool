@@ -151,7 +151,7 @@ export interface JobAccepted {
 export interface TargetIdentity {
   type?: string; id?: string; signature?: string; targets?: Array<{ type: string; id: string }>;
   workloadCount?: number; bindingCount?: number; truncated?: boolean;
-  workloads?: Array<{ name: string; targets: Array<{type: string; id: string}>; model: string; users?: number; arrivalRate?: number | string; maxConcurrent?: number; duration?: string; totalDurationMs?: number; warmup?: string; rampUp?: string; rampDown?: string }>;
+  workloads?: Array<{ name: string; mix?: boolean; targets: Array<{type: string; id: string}>; model: string; users?: number; arrivalRate?: number | string; maxConcurrent?: number; duration?: string; totalDurationMs?: number; warmup?: string; rampUp?: string; rampDown?: string }>;
 }
 export interface LoadLiveProgressCounts {
   scheduled?: number; started?: number; completed?: number; passed?: number; sutFailures?: number;

@@ -191,6 +191,20 @@ class LoadScheduleSchedulerTest {
         }
     }
 
+    @Test void manualClaimRejectsAnOlderDefinitionEvenWhenEditTimestampIsUnchanged() throws Exception {
+        Instant now=Instant.parse("2026-01-01T00:00:00Z");ServerConfig config=config("manual-version",1,"continue",1);
+        try(JobStore store=new JobStore(config)) {
+            LoadSchedule original=schedule("SVERSION",now);store.saveSchedule(original);
+            LoadSchedule replacement=original.copy();replacement.description="new configuration";
+            LoadSchedule updated=store.updateSchedule(replacement,original.updatedAt);
+            assertEquals(original.updatedAt,updated.updatedAt);
+            assertEquals(original.definitionVersion+1,updated.definitionVersion);
+            assertFalse(store.claimManualOccurrence(original,"SVERSION-old",now,"operator"));
+            assertTrue(store.claimManualOccurrence(updated,"SVERSION-new",now,"operator"));
+            assertEquals(1,store.scheduleExecutions(original.id,10).size());
+        }
+    }
+
     @Test void concurrentStoreInstancesClaimOneScheduledOccurrenceAtMostOnce() throws Exception {
         Instant fire=Instant.parse("2026-01-01T00:00:00Z");ServerConfig config=config("concurrent-claim",1,"continue",1);
         try(JobStore first=new JobStore(config);JobStore second=new JobStore(config)) {

@@ -1,4 +1,4 @@
-<!-- att-doc-status: current release=4.2.7 -->
+<!-- att-doc-status: current release=4.2.8 -->
 
 # RUN and LOAD APIs
 
@@ -103,3 +103,9 @@ Content-Type: application/json
 The Server validates the full scenario and resolves every target without scheduling traffic. It restores redacted values only from each selected target's package-local `debug.yaml` business fields; Debug `case`, `stage`, and local Testdata are excluded. The response contains an opaque draft ID beginning with `A`, a safe effective YAML preview, the selected model, a redaction flag, and expiry. Advanced Load shares the 128-active-draft Server limit, 16-draft per-identity limit, and 10-minute expiry with Debug and Quick Load.
 
 Submit only the package and draft ID to `POST /api/v1/jobs/load`. The Server checks the package revision at submission and before Worker start, then passes the same immutable normalized scenario validated for preview through the existing Worker, Engine, scheduler, event, and evidence paths. A stale draft returns `409 ATT-SERVER-DRAFT-STALE`; a change detected after job acceptance marks the job `INVALID`. The browser disables YAML copy and export when any preview field is redacted. Existing path-based Load requests remain supported.
+
+### Private saved LOAD scenarios
+
+Authenticated operational users can use `/api/v1/saved-load-scenarios` to create a private record from a validated advanced LOAD `draftId`. The collection supports paged `GET`; individual records support `GET`, revision-checked `PATCH` and `DELETE`, and `POST` actions `validate` and `duplicate`. Updates provide `expectedRevision` and a fresh validated `draftId`; validation and duplication provide `expectedRevision`. Deletion also requires that revision. A conflict returns HTTP 409 and requires a reload and, for execution, revalidation.
+
+The Server keeps the authored definition in its H2 database, subject to a 256 KiB definition limit and 100 records per owner. List responses contain summaries, not definitions. Protected authored or resolved values cannot be persisted through this API. A validated Saved Scenario can create a Job or a Schedule through the existing draft endpoints. A Schedule stores an independent snapshot and source revision; deleting the record does not remove the Schedule or its history. Back up the Server data directory, including H2 files, using the normal Server database backup procedure.

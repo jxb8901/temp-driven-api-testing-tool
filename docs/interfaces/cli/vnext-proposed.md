@@ -1,7 +1,7 @@
 <!-- att-doc-status: planned release=unreleased issue=287 -->
 # Proposed CLI vNext
 
-> **Planned, not released.** This grammar is not available in ATT 4.2.7. Use the current [CLI Reference](../../reference/cli.md) for released commands. Promote this contract to Current only with a released and verified #287 implementation.
+> **Planned, not released.** This grammar is not available in ATT 4.2.8. Use the current [CLI Reference](../../reference/cli.md) for released commands. Promote this contract to Current only with a released and verified #287 implementation.
 
 ## Proposed grammar and behavior
 
@@ -42,7 +42,7 @@ Legacy verbs remain on the compatibility path during migration. They are not add
 
 ## Remote examples
 
-These examples use the proposed grammar and are not runnable with ATT 4.2.7. The existing ATT Remote command and Job-management interface remains the current compatibility path.
+These examples use the proposed grammar and are not runnable with ATT 4.2.8. The existing ATT Remote command and Job-management interface remains the current compatibility path.
 
 
 The vNext syntax puts backend and Package selection before one of the three commands `run`, `load`, or `validate`. It uses the existing Server profile and authentication transport. Remote target paths stay Package-relative; `--config` and `--output-dir` are Local-only.

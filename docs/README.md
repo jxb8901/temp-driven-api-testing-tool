@@ -1,6 +1,6 @@
 # ATT documentation
 
-This is the canonical documentation map for ATT 4.2.7. It separates task guidance from normative Reference contracts and identifies which interfaces are shipped, legacy-compatible or planned.
+This is the canonical documentation map for ATT 4.2.8. It separates task guidance from normative Reference contracts and identifies which interfaces are shipped, legacy-compatible or planned.
 
 ## Start here
 
@@ -15,7 +15,7 @@ This is the canonical documentation map for ATT 4.2.7. It separates task guidanc
 | Integrator | [Server API v1](interfaces/server-api/README.md) |
 | Contributor | [Documentation architecture](system-design/documentation-architecture.md) · [Reference source guide](reference/README.md) |
 
-The Quick Start is a current 4.2.7 workflow. Snapshot generation is explicit authoring; VALIDATE is read-only and does not create or update snapshots.
+The Quick Start is a current 4.2.8 workflow. Snapshot generation is explicit authoring; VALIDATE is read-only and does not create or update snapshots.
 
 ~~~sh
 ./att.sh snapshot --suite testcase/quick_start.xlsx
@@ -39,7 +39,7 @@ The Quick Start is a current 4.2.7 workflow. Snapshot generation is explicit aut
 | Choose one of the six LOAD modes | [Load model](concepts/load-model.md) · [Load Reference](reference/execution-modes/load.md) |
 | Run a Load test | [Load testing guide](guides/load-testing.md) |
 | See how a Local Run ID differs from a Server Job | [Run and Job lifecycle](concepts/jobs-and-runs.md) |
-| Use the current 4.2.7 CLI | [CLI Reference](reference/cli.md) |
+| Use the current 4.2.8 CLI | [CLI Reference](reference/cli.md) |
 | Review future vNext CLI syntax | [Proposed vNext CLI](interfaces/cli/vnext-proposed.md) — planned, not released |
 | Use ATT Server from the existing client | [Legacy ATT Remote guide](remote-client.md) |
 | Find REST, Jobs, events, or Schedule contracts | [Server API map](interfaces/server-api/README.md) |
@@ -52,13 +52,13 @@ The Quick Start is a current 4.2.7 workflow. Snapshot generation is explicit aut
 
 ## Product and interface status
 
-| Capability | Local CLI in 4.2.7 | ATT Remote | Studio / REST | Availability note |
+| Capability | Local CLI in 4.2.8 | ATT Remote | Studio / REST | Availability note |
 |---|---|---|---|---|
 | Functional Case RUN | Current legacy run | Current legacy remote run | Current | Local CLI selection is workbook-based |
 | Template, Flow and Tool execution | Current legacy debug | Current legacy remote debug | Current unified RUN | Standalone Debug remains a compatibility command |
 | LOAD | Current legacy load | Current legacy remote load | Current | Six workload shapes are documented in the Load model |
 | VALIDATE | Current local validate | Current remote validate | Current | Read-only checks; no business execution |
-| CLI vNext run, load, validate | Planned | Planned contract | Not a Studio or REST removal | Implemented in PR #296's branch, not released in 4.2.7 |
+| CLI vNext run, load, validate | Planned | Planned contract | Not a Studio or REST removal | Implemented in PR #296's branch, not released in 4.2.8 |
 | Jobs and Schedules | Not Local CLI resources | Current att remote Job management | Current Server lifecycle | Local Run IDs are not Server Job IDs |
 | #294 management CLI resources | Not available | Not part of vNext proposal | Server/Studio capabilities are separate | Future P3 proposal |
 

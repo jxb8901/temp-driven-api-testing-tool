@@ -738,6 +738,12 @@ class PackageResourceInspectorTest {
 
         PackageResourceInspector inspector=new PackageResourceInspector(root,Paths.get("config/config.yaml"),"SIT",Collections.<String>emptyList(),65536,262144);
         Map<String,Object> result=inspector.validateLoadScenario(request);
+        assertEquals(Boolean.FALSE,result.get("containsSensitiveAuthoredValues"));
+        Map<String,Object> sensitiveRequest=mapOf("schemaVersion","att-load/v1.6","load",mapOf("users",2,"duration","5s"),
+                "workloads",java.util.Arrays.asList(mapOf("id","tool","load",mapOf("users",2),
+                        "target",mapOf("type","tool","id","echo","arguments",mapOf("value","safe")),
+                        "inputs",mapOf("password","private-value"))));
+        assertEquals(Boolean.TRUE,inspector.validateLoadScenario(sensitiveRequest).get("containsSensitiveAuthoredValues"));
         @SuppressWarnings("unchecked") Map<String,Object> normalized=(Map<String,Object>)result.get("normalizedScenario");
         @SuppressWarnings("unchecked") List<Map<String,Object>> workloads=(List<Map<String,Object>>)normalized.get("workloads");
         Map<String,Object> workload=workloads.get(0);

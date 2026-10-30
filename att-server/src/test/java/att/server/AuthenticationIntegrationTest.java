@@ -246,7 +246,7 @@ class AuthenticationIntegrationTest {
             assertEquals(200,userMonitoring.statusCode(),userMonitoring.body());
             JsonNode monitoring=ServerRuntime.JSON.readTree(userMonitoring.body());
             assertEquals("att-monitoring/v1",monitoring.path("schemaVersion").asText());
-            assertEquals("4.2.7",monitoring.path("health").path("version").asText());
+            assertEquals("4.2.8",monitoring.path("health").path("version").asText());
             assertTrue(monitoring.path("workers").path("maxConcurrent").isIntegralNumber());
             assertTrue(monitoring.path("workers").path("activeLoadJobs").isIntegralNumber());
             assertTrue(monitoring.path("http").path("successfulRequests").isIntegralNumber());
@@ -309,6 +309,11 @@ class AuthenticationIntegrationTest {
         } finally {try{tomcat.stop();}finally{tomcat.destroy();if(oldConfig==null)System.clearProperty("att.server.config");else System.setProperty("att.server.config",oldConfig);}}
     }
 
+    private static HttpResponse<String> savedRequest(HttpClient client,int port,String method,String path,String authorization,String body) throws Exception {
+        HttpRequest request=HttpRequest.newBuilder(URI.create("http://127.0.0.1:"+port+path)).header("Authorization",authorization)
+                .header("Content-Type","application/json").method(method,HttpRequest.BodyPublishers.ofString(body)).build();
+        return client.send(request,HttpResponse.BodyHandlers.ofString());
+    }
     private static HttpResponse<String> send(HttpClient client,int port,String method,String path,String origin,String csrf,String body)throws Exception {
         URI uri=URI.create("http://localhost:"+port+path);HttpRequest.Builder request=HttpRequest.newBuilder(uri);
         if(origin!=null)request.header("Origin",origin);if(csrf!=null)request.header("X-ATT-CSRF",csrf);
@@ -366,7 +371,7 @@ class AuthenticationIntegrationTest {
         Files.writeString(loadDirectory.resolve("path-based.yaml"),"schemaVersion: att-load/v1.6\nworkloads:\n- id: path-based\n  target:\n    type: template\n    id: FORM\n  load:\n    users: 1\n    duration: 1s\n");
         Files.writeString(template.resolve("debug.yaml"),"schemaVersion: att-debug/v1.2\ninputs:\n  value: safe\n"
                 +"  payload: {account: 'customer account 123456789', secret: 'temporary credential violet-123'}\n");
-        Path users=Files.writeString(temp.resolve("tomcat-users.xml"),"<tomcat-users><role rolename=\"ATT_USER\"/><role rolename=\"OTHER\"/><user username=\"att\" password=\"secret\" roles=\"ATT_USER\"/><user username=\"other\" password=\"secret\" roles=\"OTHER\"/></tomcat-users>");
+        Path users=Files.writeString(temp.resolve("tomcat-users.xml"),"<tomcat-users><role rolename=\"ATT_USER\"/><role rolename=\"OTHER\"/><user username=\"att\" password=\"secret\" roles=\"ATT_USER\"/><user username=\"peer\" password=\"secret\" roles=\"ATT_USER\"/><user username=\"other\" password=\"secret\" roles=\"OTHER\"/></tomcat-users>");
         Path config=Files.writeString(temp.resolve("server.yaml"),"server:\n  dataDir: "+yaml(temp.resolve("data"))+"\n  authenticationRequired: true\n  security:\n    checkCrossOrigin: true\n  inlineLoad:\n    enabled: true\n    maxWorkloads: 1\nworkers:\n  maxConcurrent: 2\n  queuedLimit: 2\n  maxConcurrentLoad: 2\npackages:\n  allowedRoots:\n    - "+yaml(packages)+"\n  entries:\n    p: "+yaml(packages.resolve("p"))+"\n    debug: "+yaml(debugPackage)+"\n");
         String old=System.getProperty("att.server.config");System.setProperty("att.server.config",config.toString());
         Tomcat tomcat=start(users,appDirectory("authenticated"),true);
@@ -418,6 +423,26 @@ class AuthenticationIntegrationTest {
             String advancedDraftId=advancedDraft.path("draftId").asText();assertTrue(advancedDraftId.startsWith("A"));
             assertEquals(200,get(port,"/att/api/v1/drafts/"+advancedDraftId,basic));
             assertEquals(403,get(port,"/att/api/v1/drafts/"+advancedDraftId,other),"Non-USER container principals cannot access operational API resources");
+            String savedRoute="/att/api/v1/saved-load-scenarios";
+            JsonNode saved=postJson(port,savedRoute,basic,ServerRuntime.JSON.valueToTree(Map.of("draftId",advancedDraftId,"name","Saved API test")));
+            String savedId=saved.path("id").asText();assertTrue(savedId.matches("LS[A-F0-9]{32}"));
+            String peer="Basic "+Base64.getEncoder().encodeToString("peer:secret".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            assertEquals(401,get(port,savedRoute+"/"+savedId,null));
+            assertEquals(404,get(port,savedRoute+"/"+savedId,peer));
+            assertEquals(0,getJson(port,savedRoute,peer).path("items").size());
+            assertEquals(1,getJson(port,savedRoute,basic).path("items").size());
+            assertFalse(getJson(port,savedRoute,basic).toString().contains("from-advanced-load"));
+            assertTrue(getJson(port,savedRoute+"/"+savedId,basic).path("definition").toString().contains("from-advanced-load"));
+            JsonNode validatedSaved=postJson(port,savedRoute+"/"+savedId+"/validate",basic,ServerRuntime.JSON.valueToTree(Map.of("expectedRevision",1)));
+            HttpClient apiClient=HttpClient.newHttpClient();
+            String patch=ServerRuntime.JSON.writeValueAsString(Map.of("draftId",validatedSaved.path("draftId").asText(),"expectedRevision",1,"name","Updated"));
+            HttpResponse<String> updated=savedRequest(apiClient,port,"PATCH",savedRoute+"/"+savedId,basic,patch);
+            assertEquals(200,updated.statusCode(),updated.body());assertEquals(2,ServerRuntime.JSON.readTree(updated.body()).path("revision").asInt());
+            assertEquals(409,savedRequest(apiClient,port,"PATCH",savedRoute+"/"+savedId,basic,patch).statusCode());
+            assertEquals(404,savedRequest(apiClient,port,"DELETE",savedRoute+"/"+savedId,peer,"{\"expectedRevision\":2}").statusCode());
+            JsonNode copied=postJson(port,savedRoute+"/"+savedId+"/duplicate",basic,ServerRuntime.JSON.valueToTree(Map.of("expectedRevision",2)));
+            assertEquals(1,copied.path("revision").asInt());
+            assertEquals(200,savedRequest(apiClient,port,"DELETE",savedRoute+"/"+savedId,basic,"{\"expectedRevision\":2}").statusCode());
             Map<String,Object> firstWorkload=Map.of("id","auth-load-one","load",Map.of("users",1),
                     "target",Map.of("type","template","id","FORM"),"inputs",Map.of("value","within-limit"));
             Map<String,Object> secondWorkload=Map.of("id","auth-load-two","load",Map.of("users",1),
@@ -561,7 +586,7 @@ class AuthenticationIntegrationTest {
             assertEquals(200,request(port,null));assertEquals(200,get(port,"/att/ui/index.html",null));
             assertEquals(200,get(port,"/att/ui/app.js",null));
             assertEquals(200,get(port,"/att/api/v1/health",null));
-            assertEquals("4.2.7",getJson(port,"/att/api/v1/version",null).path("version").asText());
+            assertEquals("4.2.8",getJson(port,"/att/api/v1/version",null).path("version").asText());
             assertEquals("debug",getJson(port,"/att/api/v1/packages/debug",null).path("packageId").asText());
             JsonNode resources=getJson(port,"/att/api/v1/packages/debug/resources?type=template",null);
             String resourceId=resources.path("items").get(0).path("resourceId").asText();

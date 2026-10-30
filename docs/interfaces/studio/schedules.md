@@ -1,4 +1,4 @@
-<!-- att-doc-status: current release=4.2.7 -->
+<!-- att-doc-status: current release=4.2.8 -->
 
 # Schedules in Studio
 
@@ -14,3 +14,9 @@ History → Back to list → Edit resolves both the route view and schedule ID. 
 From a Job, **Schedule / Reschedule…** opens a new Schedule draft; **View / Edit originating schedule** is a separate action. **Run now** remains independent of both. Schedule `strict`/`pause`/`ignore` policy applies to scheduled submissions only; manual Job Rerun has its own current-versus-strict source choice.
 
 **Open full Job Details in a new tab** opens `#/jobs/{encodedJobId}?standalone=1&tab=live` (or `events`) with Overview, Live Output, Events, Results, Artifacts and Metrics. Tab switching updates the URL while keeping the Job fixed. Old `#/jobs/{jobId}/console?view=live|events` bookmarks adapt to the full Details workspace. Same-origin `target="_blank" rel="noopener noreferrer"` links support `/att/ui/`, refresh and browser navigation. One Job stream is shared within each tab; floating/docked/minimized consoles keep their existing behavior. Inaccessible Jobs show safe unavailable or sign-in messages.
+
+## Review an execution change
+
+Open an existing Schedule and select **Edit execution settings**. Save or discard pending Schedule Settings changes first. For an inline LOAD snapshot, the current editor supports workload users or arrival rate and concurrency, individual or common phase overrides, and single-workload targets. Mix bindings and advanced settings require a different workflow. For a RUN case-selection snapshot, it supports case IDs. Package-backed LOAD schedules retain their package scenario path and Load overrides. Resource-target RUN snapshots and package-catalog snapshots require a different workflow.
+
+Select **Validate changes** to compare the safe before-and-after previews, package revision, policy, and next occurrence. Select **Save as new snapshot** only after review. The Schedule ID, trigger, next run, and earlier Jobs remain unchanged. A stale review or a concurrent Schedule edit must be validated again. The current execution-review workflow is restricted to the Schedule owner or execution principal.

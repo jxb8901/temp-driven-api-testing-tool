@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """Render the paired operator limits matrices from the verified JSON inventory."""
 import argparse
 import json

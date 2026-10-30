@@ -21,4 +21,4 @@ Engine 要求 scenario 內所有 workload 使用共同 phase timing envelope。M
 
 ## Contract 所在位置
 
-[Load Reference](../reference.zh/execution-modes/load.md) 定義 schema、composition、scheduler、telemetry、threshold 及 evidence。[Load guide](../guides/load-testing.zh.md) 說明目前 4.2.7 workflow。本頁是 model 概覽，不會重複建立 schema specification。
+[Load Reference](../reference.zh/execution-modes/load.md) 定義 schema、composition、scheduler、telemetry、threshold 及 evidence。[Load guide](../guides/load-testing.zh.md) 說明目前 4.2.8 workflow。本頁是 model 概覽，不會重複建立 schema specification。

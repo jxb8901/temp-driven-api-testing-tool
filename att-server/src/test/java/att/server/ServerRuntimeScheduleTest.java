@@ -39,7 +39,7 @@ class ServerRuntimeScheduleTest {
         Path javaBin=Path.of(System.getProperty("java.home"),"bin",System.getProperty("os.name","").toLowerCase().contains("win")?"java.exe":"java");
         Path data=temp.resolve("scheduled-load-data");Path configFile=temp.resolve("scheduled-load-server.yaml");
         Files.writeString(configFile,"server:\n  runtimeConfigPath: "+ServerRuntimeTestSupport.yaml(runtimeConfig)+"\n  dataDir: "+ServerRuntimeTestSupport.yaml(data)+"\n  javaExecutable: "+ServerRuntimeTestSupport.yaml(javaBin)
-                +"\n  inspection:\n    enabled: true\n    maxConcurrent: 1\n    queuedLimit: 2\n    timeoutMs: 30000\n    heapMaxMb: 256\n    redaction:\n      enabled: true\n  scheduling:\n    enabled: true\n    minimumIntervalMinutes: 1\n    maxConcurrentRuns: 1\n  inlineLoad:\n    enabled: true\nworkers:\n  maxConcurrent: 1\n  queuedLimit: 1\n  maxConcurrentLoad: 1\npackages:\n  allowedRoots:\n    - "+ServerRuntimeTestSupport.yaml(allowed)+"\n  entries:\n    p: "+ServerRuntimeTestSupport.yaml(packageRoot)+"\n");
+                +"\n  inspection:\n    enabled: true\n    maxConcurrent: 1\n    queuedLimit: 2\n    timeoutMs: 30000\n    heapMaxMb: 256\n    redaction:\n      enabled: true\n  scheduling:\n    enabled: true\n    minimumIntervalMinutes: 1\n    maxConcurrentRuns: 1\n  inlineLoad:\n    enabled: true\n    maxAggregateArrivalRatePerSecond: 200\nworkers:\n  maxConcurrent: 1\n  queuedLimit: 1\n  maxConcurrentLoad: 1\npackages:\n  allowedRoots:\n    - "+ServerRuntimeTestSupport.yaml(allowed)+"\n  entries:\n    p: "+ServerRuntimeTestSupport.yaml(packageRoot)+"\n");
         ServerConfig config=ServerConfig.load(configFile);Path libs=Files.createDirectory(temp.resolve("scheduled-load-WEB-INF-lib"));
         ServerRuntimeTestSupport.addModuleJar(libs,"att-worker",Path.of("att-worker/target/classes"));ServerRuntimeTestSupport.addModuleJar(libs,"att-engine",Path.of("att-engine/target/classes"));
         ServerRuntimeTestSupport.addModuleJar(libs,"att-server-api",Path.of("att-server-api/target/classes"));ServerRuntimeTestSupport.addModuleJar(libs,"att-security",Path.of("att-security/target/classes"));
@@ -104,6 +104,79 @@ class ServerRuntimeScheduleTest {
                     ()->setupRuntime.createLoadSchedule(sensitiveScheduleRequest,"alice"));
             assertTrue(sensitiveScheduleError.getMessage().contains("cannot store credentials"));
             assertTrue(setupRuntime.loadSchedules().isEmpty(),"Sensitive inline values must be rejected before the schedule definition is persisted.");
+
+            Map<String,Object> safeScenario=Map.of("schemaVersion","att-load/v1.6","workloads",List.of(
+                    Map.of("id","saved","target",Map.of("type","template","id","SCHEDULED"),
+                            "load",Map.of("arrivalRate","100/s","maxConcurrent",2,"overloadPolicy","drop","duration","1s"))));
+            com.fasterxml.jackson.databind.node.ObjectNode authored=ServerRuntime.JSON.createObjectNode();
+            authored.put("packageId","p");authored.put("environment","SIT");authored.set("scenario",ServerRuntime.JSON.valueToTree(safeScenario));
+            Map<String,Object> validated;
+            try { validated=setupRuntime.createAdvancedLoadDraft(authored,"alice"); }
+            catch(ServerRuntime.DraftValidationException invalid) { throw new AssertionError(invalid.diagnostics.toString(),invalid); }
+            com.fasterxml.jackson.databind.node.ObjectNode save=ServerRuntime.JSON.createObjectNode();save.put("name","Saved");save.put("draftId",String.valueOf(validated.get("draftId")));
+            String savedId=String.valueOf(setupRuntime.saveLoadScenario(save,"alice").get("id"));
+            assertThrows(ServerRuntime.NotFoundException.class,()->setupRuntime.validateSavedLoadScenario(savedId,1,"bob"));
+            Map<String,Object> savedDraft=setupRuntime.validateSavedLoadScenario(savedId,1,"alice");
+            JsonNode savedScheduleRequest=ServerRuntime.JSON.readTree("{\"name\":\"Saved snapshot\",\"packageId\":\"p\",\"draftId\":\""+savedDraft.get("draftId")+"\",\"timezone\":\"UTC\",\"cron\":\"0 2 * * *\"}");
+            LoadSchedule retainedSchedule=setupRuntime.createLoadSchedule(savedScheduleRequest,"alice");
+            assertEquals(savedId,retainedSchedule.savedScenarioId);assertEquals(1L,retainedSchedule.savedScenarioRevision);
+            SavedLoadScenario changedSaved=setupRuntime.store.savedLoadScenario(savedId,"container:alice");changedSaved.revision=2;
+            changedSaved.authoredJson=changedSaved.authoredJson.replace("100/s","150/s");
+            assertTrue(setupRuntime.store.updateSavedLoadScenario(changedSaved,1));
+            JsonNode staleRun=ServerRuntime.JSON.readTree("{\"packageId\":\"p\",\"draftId\":\""+savedDraft.get("draftId")+"\"}");
+            assertThrows(ServerRuntime.SavedScenarioConflictException.class,()->setupRuntime.submitAdvancedLoadDraft(staleRun,"alice"));
+            assertThrows(ServerRuntime.SavedScenarioConflictException.class,()->setupRuntime.createLoadSchedule(savedScheduleRequest,"alice"));
+            assertEquals(1,setupRuntime.loadSchedules().size());
+            Map<String,Object> currentDraft=setupRuntime.validateSavedLoadScenario(savedId,2,"alice");
+            assertTrue(String.valueOf(currentDraft.get("previewYaml")).contains("150/s"));
+            assertNotNull(retainedSchedule.expectedRevisionDigest);assertNotNull(retainedSchedule.inlineScenario);
+            assertEquals(savedId,setupRuntime.loadScheduleView(retainedSchedule,"alice").get("savedScenarioId"));
+            assertFalse(setupRuntime.loadScheduleView(retainedSchedule,"bob").containsKey("savedScenarioId"));
+            assertTrue(setupRuntime.store.deleteSavedLoadScenario(savedId,"container:alice",2));
+            assertEquals(retainedSchedule.inlineScenario,setupRuntime.store.schedule(retainedSchedule.id).inlineScenario);
+            long idleDeadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(10);
+            while(((Number)setupRuntime.counts().get("activeWorkers")).intValue()>0&&System.nanoTime()<idleDeadline)Thread.sleep(10);
+            assertEquals(0,((Number)setupRuntime.counts().get("activeWorkers")).intValue());
+            Map<String,Object> retainedOccurrence=setupRuntime.triggerLoadSchedule(retainedSchedule.id,"alice");
+            assertEquals("submitted",retainedOccurrence.get("status"),retainedOccurrence.toString());
+            String retainedJobId=String.valueOf(retainedOccurrence.get("jobId"));
+            long retainedDeadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(30);
+            Map<String,Object> retainedRecord=setupRuntime.jobRecord(retainedJobId);
+            while(!List.of("PASS","FAIL","ERROR","INVALID","CANCELLED").contains(retainedRecord.get("status"))&&System.nanoTime()<retainedDeadline) {
+                Thread.sleep(20);retainedRecord=setupRuntime.jobRecord(retainedJobId);
+            }
+            assertEquals("PASS",retainedRecord.get("status"),String.valueOf(setupRuntime.resultRecord(retainedJobId)));
+            assertTrue(String.valueOf(setupRuntime.store.executionSpec(retainedJobId).get("spec")).contains("100/s"));
+            idleDeadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(10);
+            while(((Number)setupRuntime.counts().get("activeWorkers")).intValue()>0&&System.nanoTime()<idleDeadline)Thread.sleep(10);
+            assertEquals(0,((Number)setupRuntime.counts().get("activeWorkers")).intValue());
+            LoadSchedule originalDefinition=setupRuntime.store.schedule(retainedSchedule.id);
+            JsonNode edit=ServerRuntime.JSON.readTree("{\"expectedDefinitionVersion\":"+originalDefinition.definitionVersion+",\"overrides\":{\"workloads\":[{\"id\":\"saved\",\"load\":{\"arrivalRate\":\"150/s\"}}]}}");
+            Map<String,Object> review=setupRuntime.createScheduleExecutionDraft(retainedSchedule.id,edit,"alice");
+            Map<String,Object> competingReview=setupRuntime.createScheduleExecutionDraft(retainedSchedule.id,edit,"alice");
+            assertTrue(String.valueOf(review.get("preview")).contains("150/s"));
+            JsonNode apply=ServerRuntime.JSON.readTree("{\"draftId\":\""+review.get("draftId")+"\",\"expectedDefinitionVersion\":"+originalDefinition.definitionVersion+",\"confirm\":true}");
+            assertThrows(ServerRuntime.NotFoundException.class,()->setupRuntime.replaceScheduleExecution(retainedSchedule.id,apply,"bob"));
+            LoadSchedule replacement=setupRuntime.replaceScheduleExecution(retainedSchedule.id,apply,"alice");
+            assertEquals(originalDefinition.id,replacement.id);assertEquals(originalDefinition.nextRunAt,replacement.nextRunAt);
+            assertEquals(originalDefinition.enabled,replacement.enabled);assertEquals(2,replacement.snapshotVersion);
+            assertTrue(replacement.inlineScenario.toString().contains("150/s"));
+            String originalSpec=setupRuntime.store.executionSpec(retainedJobId).get("spec");
+            assertTrue(originalSpec.contains("100/s"));
+            assertEquals(1,ServerRuntime.JSON.readTree(originalSpec).path("scheduleSnapshot").path("version").asLong());
+            assertThrows(ServerRuntime.NotFoundException.class,()->setupRuntime.replaceScheduleExecution(retainedSchedule.id,apply,"alice"));
+            JsonNode staleApply=ServerRuntime.JSON.readTree("{\"draftId\":\""+competingReview.get("draftId")+"\",\"expectedDefinitionVersion\":"+originalDefinition.definitionVersion+",\"confirm\":true}");
+            assertThrows(ServerRuntime.ScheduleConflictException.class,()->setupRuntime.replaceScheduleExecution(retainedSchedule.id,staleApply,"alice"));
+            setupRuntime.deleteLoadSchedule(retainedSchedule.id,"alice");
+
+            LoadSchedule packageSchedule=setupRuntime.createLoadSchedule(request,"alice");
+            JsonNode packageEdit=ServerRuntime.JSON.readTree("{\"expectedDefinitionVersion\":"+packageSchedule.definitionVersion+",\"packageEdit\":{\"load\":{\"duration\":\"2s\"}}}");
+            Map<String,Object> packageReview=setupRuntime.createScheduleExecutionDraft(packageSchedule.id,packageEdit,"alice");
+            JsonNode packageApply=ServerRuntime.JSON.readTree("{\"draftId\":\""+packageReview.get("draftId")+"\",\"expectedDefinitionVersion\":"+packageSchedule.definitionVersion+",\"confirm\":true}");
+            LoadSchedule editedPackage=setupRuntime.replaceScheduleExecution(packageSchedule.id,packageApply,"alice");
+            assertEquals("load/scenario.yaml",editedPackage.scenario);assertNull(editedPackage.inlineScenario);
+            assertEquals("2s",editedPackage.load.get("duration"));assertEquals(packageSchedule.nextRunAt,editedPackage.nextRunAt);
+            assertEquals(2,editedPackage.snapshotVersion);setupRuntime.deleteLoadSchedule(packageSchedule.id,"alice");
 
             Map<String,Object> preview=setupRuntime.previewLoadSchedule(ServerRuntime.JSON.readTree("{\"timezone\":\"Asia/Hong_Kong\",\"cron\":\"0 2 * * *\"}"));
             assertEquals("Asia/Hong_Kong",preview.get("timezone"));assertEquals("2026-10-12T18:00:00Z",preview.get("nextRunAt"));
@@ -174,6 +247,15 @@ class ServerRuntimeScheduleTest {
             }
             assertEquals("PASS",runRecord.get("status"),setupRuntime.resultRecord(runJobId).toString());
             assertEquals("run",runRecord.get("command"));assertEquals("alice",runRecord.get("principal"));
+            LoadSchedule runCurrent=setupRuntime.store.schedule(runSchedule.id);
+            JsonNode runEdit=ServerRuntime.JSON.readTree("{\"expectedDefinitionVersion\":"+runCurrent.definitionVersion+",\"overrides\":{\"options\":{\"debug\":false}}}");
+            Map<String,Object> runReview=setupRuntime.createScheduleExecutionDraft(runSchedule.id,runEdit,"alice");
+            assertFalse(runReview.toString().contains("package-sidecar-secret"));
+            JsonNode runApply=ServerRuntime.JSON.readTree("{\"draftId\":\""+runReview.get("draftId")+"\",\"expectedDefinitionVersion\":"+runCurrent.definitionVersion+",\"confirm\":true}");
+            LoadSchedule runReplacement=setupRuntime.replaceScheduleExecution(runSchedule.id,runApply,"alice");
+            assertEquals("run",runReplacement.effectiveJobType());assertEquals(2,runReplacement.snapshotVersion);
+            assertEquals(runCurrent.nextRunAt,runReplacement.nextRunAt);
+            assertFalse(runReplacement.runInput.toString().contains("package-sidecar-secret"));
             setupRuntime.deleteLoadSchedule(runSchedule.id,"alice");
 
             com.fasterxml.jackson.databind.node.ObjectNode overrideDraftRequest=ServerRuntime.JSON.createObjectNode();overrideDraftRequest.put("packageId","p");overrideDraftRequest.put("environment","SIT");

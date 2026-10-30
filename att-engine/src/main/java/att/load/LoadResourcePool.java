@@ -112,23 +112,19 @@ public final class LoadResourcePool<T> implements AutoCloseable {
                 closedDuringConnect = closed;
                 closeValue = closedDuringConnect || timedOut || interrupted;
                 if (closeValue) {
-                    total.decrementAndGet();
                     closing++;
                 }
                 else {
                     created.incrementAndGet();
                     if (!idle.offer(value)) {
-                        total.decrementAndGet();
                         closing++;
                         closeValue = true;
                     } else value = null;
                 }
-                if (!closeValue) { creating--; notifyAll(); }
+                creating--;
+                notifyAll();
             }
-            if (closeValue) {
-                try { closeTracked(value); }
-                finally { synchronized (this) { creating--; notifyAll(); } }
-            }
+            if (closeValue) closeTracked(value);
             if (interrupted) throw new InterruptedException("resource preparation cancelled");
             if (timedOut) throw new java.util.concurrent.TimeoutException("LOAD_PREPARATION_TIMEOUT");
             if (closedDuringConnect) throw new IllegalStateException("resource pool is closed");
@@ -140,32 +136,58 @@ public final class LoadResourcePool<T> implements AutoCloseable {
         waiting.incrementAndGet();
         boolean acquired;
         long started = System.nanoTime();
-        try { acquired = permits.tryAcquire(borrowTimeoutMs, TimeUnit.MILLISECONDS); }
-        finally {
+        long budget = TimeUnit.MILLISECONDS.toNanos(borrowTimeoutMs);
+        try {
+            acquired = false;
+            do {
+                if (closed) throw new IllegalStateException("resource pool is closed");
+                long remaining = Math.max(0L, budget - (System.nanoTime() - started));
+                acquired = permits.tryAcquire(Math.min(remaining, TimeUnit.MILLISECONDS.toNanos(100)), TimeUnit.NANOSECONDS);
+                if (acquired || remaining == 0L) break;
+            } while (System.nanoTime() - started < budget);
+        } catch (InterruptedException | RuntimeException failure) {
             waiting.decrementAndGet();
             waitNanos.addAndGet(System.nanoTime() - started);
+            throw failure;
         }
         if (!acquired) {
-            timeoutCount.incrementAndGet();
-            throw new PoolTimeoutException("POOL_TIMEOUT", "Timed out waiting for a load resource");
+            waiting.decrementAndGet();
+            waitNanos.addAndGet(System.nanoTime() - started);
+            throw timeout(started);
         }
         T value = null;
         boolean reserved = false;
         boolean reservationReleased = false;
+        boolean waitingRecorded = false;
         try {
             synchronized (this) {
-                if (closed) throw new IllegalStateException("resource pool is closed");
-                value = idle.poll();
-                if (value == null) {
-                    // The permit bounds active borrowers; reserve the pool slot
-                    // before releasing the monitor so concurrent cold growth
-                    // cannot exceed maxSize.
-                    if (total.get() >= maxSize) throw new IllegalStateException("resource pool capacity invariant violated");
-                    total.incrementAndGet();
-                    creating++;
-                    reserved = true;
+                boolean waitedForCapacity = false;
+                while (true) {
+                    if (closed) throw new IllegalStateException("resource pool is closed");
+                    if (waitedForCapacity && System.nanoTime() - started >= budget) throw timeout(started);
+                    value = idle.poll();
+                    if (value != null) {
+                        leased.add(value);
+                        break;
+                    }
+                    if (total.get() < maxSize) {
+                        total.incrementAndGet();
+                        creating++;
+                        reserved = true;
+                        break;
+                    }
+                    long remaining = budget - (System.nanoTime() - started);
+                    if (remaining <= 0L) {
+                        throw timeout(started);
+                    }
+                    waitedForCapacity = true;
+                    TimeUnit.NANOSECONDS.timedWait(this, remaining);
                 }
             }
+            waiting.decrementAndGet();
+            waitNanos.addAndGet(System.nanoTime() - started);
+            waitingRecorded = true;
+            if (!reserved) return new Lease(value);
             if (reserved) {
                 try { value = factory.get(); }
                 catch (RuntimeException error) {
@@ -187,7 +209,6 @@ public final class LoadResourcePool<T> implements AutoCloseable {
             synchronized (this) {
                 if (reserved) { creating--; reservationReleased = true; }
                 if (closed) {
-                    if (reserved) total.decrementAndGet();
                     if (value != null) { closing++; closeCreated = true; }
                     notifyAll();
                 } else {
@@ -200,24 +221,39 @@ public final class LoadResourcePool<T> implements AutoCloseable {
             if (closeCreated) closeTracked(value);
             throw new IllegalStateException("resource pool is closed");
         } catch (RuntimeException error) {
+            if (!waitingRecorded) { waiting.decrementAndGet(); waitNanos.addAndGet(System.nanoTime() - started); }
             if (reserved && !reservationReleased) synchronized (this) {
                 creating--; total.decrementAndGet(); notifyAll();
             }
             permits.release();
             throw error;
         } catch (Exception error) {
+            if (!waitingRecorded) { waiting.decrementAndGet(); waitNanos.addAndGet(System.nanoTime() - started); }
             if (reserved && !reservationReleased) synchronized (this) {
                 creating--; total.decrementAndGet(); notifyAll();
             }
             permits.release();
             throw error;
         } catch (Error error) {
+            if (!waitingRecorded) { waiting.decrementAndGet(); waitNanos.addAndGet(System.nanoTime() - started); }
             if (reserved && !reservationReleased) synchronized (this) {
                 creating--; total.decrementAndGet(); notifyAll();
             }
             permits.release();
             throw error;
         }
+    }
+
+    private synchronized PoolTimeoutException timeout(long started) {
+        timeoutCount.incrementAndGet();
+        Map<String, Object> snapshot = new LinkedHashMap<String, Object>();
+        snapshot.put("maxSize", maxSize); snapshot.put("total", total.get());
+        snapshot.put("idle", idle.size()); snapshot.put("active", leased.size());
+        snapshot.put("creating", creating); snapshot.put("closing", closing);
+        snapshot.put("waiting", waiting.get()); snapshot.put("timeoutCount", timeoutCount.get());
+        snapshot.put("closed", closed); snapshot.put("budgetMs", borrowTimeoutMs);
+        snapshot.put("elapsedMs", TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started));
+        return new PoolTimeoutException("POOL_TIMEOUT", "Timed out waiting for a load resource", snapshot);
     }
 
     public int maxSize() { return maxSize; }
@@ -231,10 +267,11 @@ public final class LoadResourcePool<T> implements AutoCloseable {
     public int failures() { return failures.get(); }
     public int closeFailureCount() { synchronized (closeFailures) { return closeFailures.size(); } }
     public long waitDurationMs() { return TimeUnit.NANOSECONDS.toMillis(waitNanos.get()); }
-    public Map<String, Object> metrics() {
+    public synchronized Map<String, Object> metrics() {
         Map<String, Object> result = new LinkedHashMap<String, Object>();
         result.put("maxSize", maxSize); result.put("active", active()); result.put("idle", idle());
-        result.put("total", total()); result.put("waiting", waiting()); result.put("waitDurationMs", waitDurationMs());
+        result.put("total", total()); result.put("creating", creating); result.put("closing", closing);
+        result.put("closed", closed); result.put("waiting", waiting()); result.put("waitDurationMs", waitDurationMs());
         result.put("timeoutCount", timeoutCount()); result.put("created", created()); result.put("discarded", discarded());
         result.put("replacementCount", discarded()); result.put("failures", failures());
         Map<String, Object> saturation = new LinkedHashMap<String, Object>();
@@ -248,21 +285,28 @@ public final class LoadResourcePool<T> implements AutoCloseable {
         synchronized (this) {
             if (!leased.remove(value)) return;
             if (invalidate || closed || !idle.offer(value)) {
-                total.decrementAndGet();
                 if (invalidate || !closed) discarded.incrementAndGet();
                 closing++;
                 closeValue = true;
             }
+            notifyAll();
         }
         if (closeValue) closeTracked(value);
         permits.release();
     }
 
     private void closeTracked(T value) {
-        try { closer.accept(value); }
+        boolean confirmed = false;
+        try { closer.accept(value); confirmed = true; }
         catch (RuntimeException | Error failure) { closeFailures.add(new IllegalStateException("LOAD_RESOURCE_TEARDOWN_FAILED", failure)); }
         finally {
-            synchronized (this) { closing--; notifyAll(); }
+            synchronized (this) {
+                // A failed physical disconnect remains charged: opening a replacement
+                // could otherwise exceed the configured physical-session limit.
+                if (confirmed) total.decrementAndGet();
+                closing--;
+                notifyAll();
+            }
         }
     }
 
@@ -274,11 +318,9 @@ public final class LoadResourcePool<T> implements AutoCloseable {
                 idle.drainTo(values);
                 values.addAll(leased);
                 leased.clear();
-                // Keep capacity charged for factories and physical closers that
-                // have not settled; their resulting sessions are part of teardown.
-                total.set(creating);
+                // Keep each physical session charged until its close succeeds.
                 closing += values.size();
-                permits.release(maxSize);
+                notifyAll();
             }
         }
         for (T value : values) closeTracked(value);
@@ -324,7 +366,12 @@ public final class LoadResourcePool<T> implements AutoCloseable {
 
     public static final class PoolTimeoutException extends Exception {
         private final String code;
-        public PoolTimeoutException(String code, String message) { super(message); this.code = code; }
+        private final Map<String, Object> snapshot;
+        public PoolTimeoutException(String code, String message) { this(code, message, Collections.<String, Object>emptyMap()); }
+        private PoolTimeoutException(String code, String message, Map<String, Object> snapshot) {
+            super(message); this.code = code; this.snapshot = Collections.unmodifiableMap(snapshot);
+        }
         public String code() { return code; }
+        public Map<String, Object> snapshot() { return snapshot; }
     }
 }

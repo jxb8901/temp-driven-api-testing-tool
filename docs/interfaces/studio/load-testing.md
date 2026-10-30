@@ -1,4 +1,4 @@
-<!-- att-doc-status: current release=4.2.7 -->
+<!-- att-doc-status: current release=4.2.8 -->
 
 # Studio Load testing
 
@@ -37,3 +37,9 @@ Select **New Schedule** (`#/schedules/new`) or **Edit** (`#/schedules/<id>/edit`
 **Cancel** and **Back to Schedules** protect unsaved changes. Reloading or closing a tab prompts when a schedule form is dirty; switching tabs keeps the in-memory form. Drafts and credentials are never written to browser storage. A refresh cannot restore an unsaved validated draft: return to its source and validate again. Edit and History deep links reload saved definitions from the Server. Legacy `#/load-schedules` and `#/scheduled-load` links still open Schedules.
 
 **History** opens `#/schedules/<id>/history`; individual occurrences link to `#/schedules/<id>/history/<occurrenceId>`. The view covers the latest 100 retained occurrences and identifies unavailable older records. Job links appear only when the Server provides an available job status; job/report permissions are rechecked by the Jobs API. **Run Now**, **Pause/Resume**, and **Delete** require confirmation. A manually triggered LOAD definition remains LOAD. Existing Scheduled Debug definitions appear as RUN with Debug mode and retain their legacy backend identity through the compatibility adapter. Misfire, retention, capacity, revision checks and DST remain governed by the existing unified Scheduler; this UI does not introduce another scheduler.
+
+## Save a private scenario
+
+After validating a Load Template composition, select **Save Scenario** and enter a name. Saving creates a private Server record; it does not start a Job, create a Schedule, or write a Package file. In **Load testing → Scenarios**, use **Saved scenarios** to search, reopen, duplicate, validate, or delete your records. Editing and saving creates a new revision. A conflicting revision requires reloading the record.
+
+Validation is temporary. Validate the saved revision again before choosing **Run** or **Schedule**. A Schedule stores its own validated snapshot; later edits or deletion of the saved record do not change that Schedule. Saving is unavailable for definitions containing protected authored or resolved values. Remove those values or use an approved reference.

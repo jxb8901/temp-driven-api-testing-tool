@@ -38,8 +38,6 @@ public final class PooledMqTransportFactory implements MqTransport.Factory, Auto
         if (config == null) throw new IllegalArgumentException("MQ helper configuration is required");
         final PoolEntry entry = poolFor(config, Long.MAX_VALUE, false);
         final LoadResourcePool<MqTransport.Connection> pool = entry.pool;
-        try { pool.ensureMinIdle(config.poolMinIdle()); }
-        catch (PoolFactoryException wrapped) { throw wrapped.cause; }
         final LoadResourcePool<MqTransport.Connection>.Lease lease;
         try {
             lease = pool.borrow();

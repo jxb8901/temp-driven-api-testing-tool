@@ -1,4 +1,4 @@
-<!-- att-doc-status: current release=4.2.7 -->
+<!-- att-doc-status: current release=4.2.8 -->
 
 # Schedule API
 
@@ -8,4 +8,12 @@ Schedule 是由 Server 擁有的定義，可於稍後提交 Job，但它不是 L
 
 Package revision policy、保留的 history、overlap limit、shutdown 及 recovery 行為請參閱 [Jobs and Schedules operations](../../operations/server-jobs-schedules.zh.md)。
 
-Legacy path 名稱 /load-schedules 仍受目前 4.2.7 REST API 支援。本 interface 不會宣告 #294 未來 CLI management command 已提供。
+Legacy path 名稱 /load-schedules 仍受目前 4.2.8 REST API 支援。本 interface 不會宣告 #294 未來 CLI management command 已提供。
+
+## 審閱並替換執行設定
+
+`POST /api/v1/schedules/{id}/execution-draft` 驗證執行設定變更，不會提交 Job。傳入 `expectedDefinitionVersion`，以及 RUN 或 inline LOAD 快照的 `overrides`，或 package-path LOAD Schedule 的 `packageEdit`。回應包含短期有效的 `draftId`、安全的變更前後預覽、Package 版本、政策及下次執行時間。審閱會綁定已驗證的 Schedule 擁有者或執行身分。
+
+使用 `PATCH /api/v1/schedules/{id}/execution` 確認審閱，JSON 內容包括 `draftId`、`expectedDefinitionVersion` 和 `confirm: true`。成功後，Schedule ID 與觸發條件不變，`snapshotVersion` 遞增，新設定用於其後領取的執行。已領取的 occurrence 和已接受的 Job 保留原有輸入。定義、draft 或 Package 版本過期時，須重新審閱。Schedule 最多保留 20 筆安全的快照歷史；Job 自身的執行證據依 Job 保留政策處理。
+
+Package 路徑編輯仍以 Package 路徑執行。Package Catalog 快照及沒有保留 Package 版本的舊 Schedule 不能使用此替換端點。

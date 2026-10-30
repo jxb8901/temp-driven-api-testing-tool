@@ -1,5 +1,10 @@
 # Changelog
 
+# ATT 4.2.8 - 2026-10-31
+
+- Improve MQ load pool capacity accounting and timeout diagnostics.
+- Add private saved load scenarios and versioned schedule execution reviews.
+
 # ATT 4.2.7 - 2026-10-29
 
 - Preserve completed LOAD metrics and report publication when teardown fails, expose typed safe cleanup diagnostics, and keep execution failures primary (#319).

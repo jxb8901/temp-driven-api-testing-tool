@@ -52,6 +52,159 @@ class LoadResourcePoolGrowthTest {
         }
     }
 
+    @Test
+    void borrowerWaitsForReservedIdleCreationAndTimesOutOnce() throws Exception {
+        CountDownLatch creating = new CountDownLatch(1);
+        CountDownLatch finish = new CountDownLatch(1);
+        AtomicInteger ids = new AtomicInteger();
+        LoadResourcePool<Integer> pool = new LoadResourcePool<Integer>(2, 150L, () -> {
+            int id = ids.incrementAndGet();
+            if (id == 2) {
+                creating.countDown();
+                try { finish.await(); } catch (InterruptedException e) { Thread.currentThread().interrupt(); throw new IllegalStateException(e); }
+            }
+            return id;
+        }, ignored -> {});
+        ExecutorService workers = Executors.newFixedThreadPool(2);
+        try (LoadResourcePool<Integer>.Lease first = pool.borrow()) {
+            Future<?> refill = workers.submit(() -> pool.ensureMinIdle(1));
+            assertTrue(creating.await(1, TimeUnit.SECONDS));
+            Future<Boolean> timed = workers.submit(() -> {
+                try { pool.borrow(); return false; }
+                catch (LoadResourcePool.PoolTimeoutException expected) { return true; }
+            });
+            assertTrue(timed.get(1, TimeUnit.SECONDS));
+            assertEquals(1, pool.timeoutCount());
+            assertEquals(2, ids.get());
+            Future<?> waitingBorrow = workers.submit(() -> borrowAndRelease(pool));
+            finish.countDown();
+            refill.get(1, TimeUnit.SECONDS);
+            waitingBorrow.get(1, TimeUnit.SECONDS);
+            assertEquals(0, pool.waiting());
+        } finally {
+            finish.countDown();
+            workers.shutdownNow();
+            workers.awaitTermination(2, TimeUnit.SECONDS);
+            pool.close();
+        }
+    }
+
+    @Test
+    void failedCloseQuarantinesCapacityAndDoesNotCreateReplacement() throws Exception {
+        AtomicInteger created = new AtomicInteger();
+        AtomicInteger closes = new AtomicInteger();
+        LoadResourcePool<Integer> pool = new LoadResourcePool<Integer>(1, 40L,
+                created::incrementAndGet, value -> { closes.incrementAndGet(); throw new IllegalStateException("disconnect failed"); });
+        LoadResourcePool<Integer>.Lease lease = pool.borrow();
+        lease.invalidate();
+        lease.close();
+        LoadResourcePool.PoolTimeoutException timeout = org.junit.jupiter.api.Assertions.assertThrows(
+                LoadResourcePool.PoolTimeoutException.class, pool::borrow);
+        assertEquals(1, timeout.snapshot().get("total"));
+        assertEquals(1, timeout.snapshot().get("timeoutCount"));
+        assertEquals(1, created.get());
+        assertEquals(1, closes.get());
+        org.junit.jupiter.api.Assertions.assertThrows(IllegalStateException.class, pool::close);
+    }
+
+    @Test
+    void shutdownWakesBorrowerWaitingOnCreation() throws Exception {
+        CountDownLatch entered = new CountDownLatch(1);
+        CountDownLatch finish = new CountDownLatch(1);
+        LoadResourcePool<Integer> pool = new LoadResourcePool<Integer>(1, 5000L, () -> {
+            entered.countDown();
+            try { finish.await(); } catch (InterruptedException e) { Thread.currentThread().interrupt(); throw new IllegalStateException(e); }
+            return 1;
+        }, ignored -> {});
+        ExecutorService workers = Executors.newFixedThreadPool(3);
+        try {
+            Future<?> refill = workers.submit(() -> pool.ensureMinIdle(1));
+            assertTrue(entered.await(1, TimeUnit.SECONDS));
+            Future<?> borrower = workers.submit(() -> borrowAndRelease(pool));
+            long until = System.nanoTime() + TimeUnit.SECONDS.toNanos(1);
+            while (pool.waiting() == 0 && System.nanoTime() < until) Thread.yield();
+            assertEquals(1, pool.waiting());
+            Future<?> closing = workers.submit(pool::close);
+            org.junit.jupiter.api.Assertions.assertThrows(java.util.concurrent.ExecutionException.class,
+                    () -> borrower.get(1, TimeUnit.SECONDS));
+            finish.countDown();
+            org.junit.jupiter.api.Assertions.assertThrows(java.util.concurrent.ExecutionException.class,
+                    () -> refill.get(1, TimeUnit.SECONDS));
+            closing.get(1, TimeUnit.SECONDS);
+            assertEquals(0, pool.total());
+            assertEquals(0, pool.waiting());
+        } finally {
+            finish.countDown();
+            workers.shutdownNow();
+            workers.awaitTermination(2, TimeUnit.SECONDS);
+        }
+    }
+
+    @Test
+    void invalidationRetainsSlotUntilPhysicalCloseCompletes() throws Exception {
+        CountDownLatch closing = new CountDownLatch(1);
+        CountDownLatch finishClose = new CountDownLatch(1);
+        AtomicInteger created = new AtomicInteger();
+        LoadResourcePool<Integer> pool = new LoadResourcePool<Integer>(2, 1000L, created::incrementAndGet, value -> {
+            if (value == 1) {
+                closing.countDown();
+                try { finishClose.await(); } catch (InterruptedException e) { Thread.currentThread().interrupt(); throw new IllegalStateException(e); }
+            }
+        });
+        ExecutorService workers = Executors.newFixedThreadPool(2);
+        try (LoadResourcePool<Integer>.Lease first = pool.borrow();
+             LoadResourcePool<Integer>.Lease second = pool.borrow()) {
+            Future<?> invalidation = workers.submit(first::invalidate);
+            assertTrue(closing.await(1, TimeUnit.SECONDS));
+            Future<?> borrower = workers.submit(() -> borrowAndRelease(pool));
+            long until = System.nanoTime() + TimeUnit.SECONDS.toNanos(1);
+            while (pool.waiting() == 0 && System.nanoTime() < until) Thread.yield();
+            assertEquals(1, pool.waiting());
+            assertEquals(2, pool.total());
+            assertEquals(2, created.get());
+            finishClose.countDown();
+            invalidation.get(1, TimeUnit.SECONDS);
+            borrower.get(1, TimeUnit.SECONDS);
+            assertEquals(3, created.get());
+        } finally {
+            finishClose.countDown(); workers.shutdownNow();
+            workers.awaitTermination(2, TimeUnit.SECONDS); pool.close();
+        }
+    }
+
+    @Test
+    void concurrentBurstsDrainWithoutExceedingPhysicalCapacity() throws Exception {
+        AtomicInteger live = new AtomicInteger(), peak = new AtomicInteger(), ids = new AtomicInteger();
+        LoadResourcePool<Integer> pool = new LoadResourcePool<Integer>(8, 5000L, () -> {
+            int count = live.incrementAndGet(); peak.accumulateAndGet(count, Math::max);
+            return ids.incrementAndGet();
+        }, ignored -> live.decrementAndGet());
+        ExecutorService workers = Executors.newFixedThreadPool(32);
+        try {
+            for (int burst = 0; burst < 4; burst++) {
+                CountDownLatch start = new CountDownLatch(1);
+                java.util.List<Future<?>> futures = new java.util.ArrayList<>();
+                for (int i = 0; i < 128; i++) futures.add(workers.submit(() -> {
+                    try {
+                        start.await();
+                        try (LoadResourcePool<Integer>.Lease lease = pool.borrow()) {
+                            if (lease.value() == null) throw new AssertionError("missing resource");
+                            Thread.sleep(2L);
+                        }
+                    } catch (Exception failure) { throw new RuntimeException(failure); }
+                }));
+                start.countDown();
+                for (Future<?> future : futures) future.get(10L, TimeUnit.SECONDS);
+                assertEquals(0, pool.active()); assertEquals(0, pool.waiting());
+                assertEquals(pool.total(), pool.idle());
+            }
+            assertTrue(peak.get() <= 8); assertEquals(0, pool.timeoutCount());
+        } finally {
+            workers.shutdownNow(); workers.awaitTermination(2L, TimeUnit.SECONDS); pool.close();
+        }
+        assertEquals(0, live.get());
+    }
+
     private void borrowAndRelease(LoadResourcePool<Integer> pool) {
         try (LoadResourcePool<Integer>.Lease lease = pool.borrow()) {
             if (lease.value() == null) throw new AssertionError("missing resource");
