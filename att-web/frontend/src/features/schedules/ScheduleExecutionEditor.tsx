@@ -3,13 +3,14 @@ import { useNavigationGuard } from '../../router';
 import { LoadDialog } from '../load/LoadDialog';
 import type { ScheduleDefinition, ScheduleExecutionReview, SchedulesApi } from './types';
 
-type Workload = { id: string; model: string; rate: string; users: string; maxConcurrent: string; targetType: string; targetId: string; mix: boolean; rampUp: string; warmup: string; duration: string; rampDown: string };
+type MixEntry = { id: string; weight: string; targetType: string; targetId: string };
+type Workload = { id: string; model: string; rate: string; users: string; maxConcurrent: string; targetType: string; targetId: string; mix: boolean; mixEntries: MixEntry[]; rampUp: string; warmup: string; duration: string; rampDown: string };
 /** A bounded editor for the safe schedule summary; validation retains all unedited values server-side. */
 export function ScheduleExecutionEditor({ schedule, api, onClose, onSaved }: {
   schedule: ScheduleDefinition; api: SchedulesApi; onClose(): void; onSaved(value: ScheduleDefinition): void;
 }) {
   const navigation=useNavigationGuard();
-  const [workloads,setWorkloads]=useState<Workload[]>(() => (schedule.targetIdentity?.workloads || []).map(row => ({ id:row.name,model:row.model,rate:String(row.arrivalRate ?? ''),users:String(row.users ?? ''),maxConcurrent:String(row.maxConcurrent ?? ''), targetType:row.targets[0]?.type || '', targetId:row.targets[0]?.id || '', mix:row.mix !== false, rampUp:String(row.rampUp ?? ''),warmup:String(row.warmup ?? ''),duration:String(row.duration ?? ''),rampDown:String(row.rampDown ?? '') })));
+  const [workloads,setWorkloads]=useState<Workload[]>(() => (schedule.targetIdentity?.workloads || []).map(row => ({ id:row.name,model:row.model,rate:String(row.arrivalRate ?? ''),users:String(row.users ?? ''),maxConcurrent:String(row.maxConcurrent ?? ''), targetType:row.targets[0]?.type || '', targetId:row.targets[0]?.id || '', mix:row.mix !== false, mixEntries:(row.mixEntries || []).map(item=>({id:item.id,weight:String(item.weight ?? ''),targetType:item.target.type || '',targetId:item.target.id || ''})), rampUp:String(row.rampUp ?? ''),warmup:String(row.warmup ?? ''),duration:String(row.duration ?? ''),rampDown:String(row.rampDown ?? '') })));
   const initialWorkloads=useRef(workloads);
   const [scenario,setScenario]=useState(schedule.scenario || '');
   const [packageLoad,setPackageLoad]=useState(JSON.stringify(schedule.load || {},null,2));
@@ -43,7 +44,12 @@ export function ScheduleExecutionEditor({ schedule, api, onClose, onSaved }: {
           else if(row.users!==before.users)load.users=Number(row.users);
           for(const phase of ['rampUp','warmup','duration','rampDown'] as const)if(row[phase]!==before[phase])load[phase]=row[phase];
           const target=!row.mix&&(row.targetType!==before.targetType||row.targetId!==before.targetId)?{type:row.targetType,id:row.targetId}:undefined;
-          return Object.keys(load).length||target?[{id:row.id,...(Object.keys(load).length?{load}:{}),...(target?{target}:{})}]:[];
+          const mixEdits=row.mixEntries.flatMap((item,mixIndex)=>{const original=before.mixEntries[mixIndex];
+            const weight=item.weight!==original.weight?Number(item.weight):undefined;
+            const mixTarget=item.targetType!==original.targetType||item.targetId!==original.targetId?{type:item.targetType,id:item.targetId}:undefined;
+            return weight!==undefined||mixTarget?[{id:item.id,...(weight!==undefined?{weight}:{}),...(mixTarget?{target:mixTarget}:{})}]:[];
+          });
+          return Object.keys(load).length||target||mixEdits.length?[{id:row.id,...(Object.keys(load).length?{load}:{}),...(target?{target}:{}),...(mixEdits.length?{mixEdits}:{})}]:[];
         });
         if(edits.length)overrides.workloads=edits;
       }
@@ -63,6 +69,11 @@ export function ScheduleExecutionEditor({ schedule, api, onClose, onSaved }: {
         {row.model==='arrivalRate'?<><label>Arrival rate <input value={row.rate} onChange={event=>{edit();setWorkloads(current=>current.map((item,i)=>i===index?{...item,rate:event.target.value}:item));}} /></label>
         <label>Maximum concurrent <input type="number" min="1" value={row.maxConcurrent} onChange={event=>{edit();setWorkloads(current=>current.map((item,i)=>i===index?{...item,maxConcurrent:event.target.value}:item));}} /></label></>:<label>Users <input type="number" min="1" value={row.users} onChange={event=>{edit();setWorkloads(current=>current.map((item,i)=>i===index?{...item,users:event.target.value}:item));}} /></label>}
         {!row.mix && <><label>Target type <select value={row.targetType} onChange={event=>{edit();setWorkloads(current=>current.map((item,i)=>i===index?{...item,targetType:event.target.value}:item));}}>{['case','template','flow','tool'].map(type=><option key={type}>{type}</option>)}</select></label><label>Target ID <input value={row.targetId} onChange={event=>{edit();setWorkloads(current=>current.map((item,i)=>i===index?{...item,targetId:event.target.value}:item));}} /></label></>}
+        {row.mix && row.mixEntries.length>0 && <fieldset><legend>Mix bindings</legend><p>Changing a target clears that binding's previous inputs and variables.</p>{row.mixEntries.map((item,mixIndex)=><div key={item.id}>
+          <strong>{item.id}</strong><label>Weight <input type="number" min="1" value={item.weight} onChange={event=>{edit();setWorkloads(current=>current.map((entry,i)=>i===index?{...entry,mixEntries:entry.mixEntries.map((member,j)=>j===mixIndex?{...member,weight:event.target.value}:member)}:entry));}} /></label>
+          <label>Target type <select value={item.targetType} onChange={event=>{edit();setWorkloads(current=>current.map((entry,i)=>i===index?{...entry,mixEntries:entry.mixEntries.map((member,j)=>j===mixIndex?{...member,targetType:event.target.value}:member)}:entry));}}>{['case','template','flow','tool'].map(type=><option key={type}>{type}</option>)}</select></label>
+          <label>Target ID <input value={item.targetId} onChange={event=>{edit();setWorkloads(current=>current.map((entry,i)=>i===index?{...entry,mixEntries:entry.mixEntries.map((member,j)=>j===mixIndex?{...member,targetId:event.target.value}:member)}:entry));}} /></label>
+        </div>)}</fieldset>}
         {(['rampUp','warmup','duration','rampDown'] as const).map(field=><label key={field}>{field} <input value={row[field]} onChange={event=>{edit();setWorkloads(current=>current.map((item,i)=>i===index?{...item,[field]:event.target.value}:item));}} /></label>)}
       </fieldset>)}
       <p>Leave phase fields empty to keep the existing timing.</p>{(['rampUp','warmup','duration','rampDown'] as const).map(field=><label key={field}>{field} <input value={phases[field]} onChange={event=>{edit();setPhases(current=>({...current,[field]:event.target.value}));}} /></label>)}

@@ -507,6 +507,27 @@ class ServerRuntimeJobReplayTest {
                 "workloads",List.of(Map.of("id","primary","load",Map.of("users",10)))))));
     }
 
+    @Test void replayMixEditsPreserveUnchangedInputsAndClearInputsWhenTargetChanges() throws Exception {
+        var source=(com.fasterxml.jackson.databind.node.ObjectNode)ServerRuntime.JSON.readTree("""
+                {"executionType":"load","scenario":{"workloads":[{"id":"mixed","mix":[
+                  {"id":"a","weight":40,"target":{"type":"template","id":"A"},"inputs":{"reference":"private-value"}},
+                  {"id":"b","weight":60,"target":{"type":"flow","id":"B"},"vars":{"customer":"keep-value"}}
+                ]}]}}
+                """);
+        var weights=ServerRuntime.JSON.readTree("{\"workloads\":[{\"id\":\"mixed\",\"mixEdits\":[{\"id\":\"a\",\"weight\":50}]}]}");
+        var result=JobReplayOverrides.apply(source,weights).path("scenario").path("workloads").get(0).path("mix");
+        assertEquals(50,result.get(0).path("weight").asInt());assertEquals("private-value",result.get(0).path("inputs").path("reference").asText());
+        assertEquals("keep-value",result.get(1).path("vars").path("customer").asText());
+        var target=ServerRuntime.JSON.readTree("{\"workloads\":[{\"id\":\"mixed\",\"mixEdits\":[{\"id\":\"a\",\"target\":{\"type\":\"flow\",\"id\":\"NEW\"}}]}]}");
+        var changed=JobReplayOverrides.apply(source,target).path("scenario").path("workloads").get(0).path("mix");
+        assertFalse(changed.get(0).has("inputs"));assertEquals("NEW",changed.get(0).path("target").path("id").asText());
+        assertEquals("private-value",source.path("scenario").path("workloads").get(0).path("mix").get(0).path("inputs").path("reference").asText());
+        Map<String,Object> safe=JobListIdentity.load(source.path("scenario"));assertFalse(safe.toString().contains("private-value"));assertFalse(safe.toString().contains("keep-value"));
+        assertTrue(safe.toString().contains("weight=40"));assertTrue(safe.toString().contains("id=a"));
+        var unknown=ServerRuntime.JSON.readTree("{\"workloads\":[{\"id\":\"mixed\",\"mixEdits\":[{\"id\":\"unknown\",\"weight\":10}]}]}");
+        assertThrows(IllegalArgumentException.class,()->JobReplayOverrides.apply(source,unknown));
+    }
+
     @Test void replayComparesEditedTimingWithEffectiveWorkloadTiming() {
         var source=ServerRuntime.JSON.createObjectNode();source.put("executionType","load");source.put("packageId","p");
         var scenario=source.putObject("scenario");scenario.putObject("load").put("duration","30m");

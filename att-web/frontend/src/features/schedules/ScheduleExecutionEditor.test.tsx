@@ -46,3 +46,16 @@ it('reviews a changed RUN resource target', async () => {
  expect(host.textContent).toContain('clears its previous input bindings');
  await act(async()=>root.unmount());host.remove();
 });
+
+it('updates a mix weight without replacing other bindings', async () => {
+ (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT=true;
+ const host=document.createElement('div');document.body.append(host);const root=createRoot(host);
+ const schedule={id:'S4',name:'Mix',packageId:'p',executionType:'load' as const,timezone:'UTC',maxConcurrentRuns:1,enabled:true,inlineSnapshot:true,definitionVersion:1,targetIdentity:{workloads:[{name:'mixed',model:'virtualUsers',users:2,mix:true,targets:[{type:'template',id:'A'},{type:'flow',id:'B'}],mixEntries:[{id:'a',weight:40,target:{type:'template',id:'A'}},{id:'b',weight:60,target:{type:'flow',id:'B'}}]}]}};
+ const api={createScheduleExecutionDraft:vi.fn().mockResolvedValue({draftId:'P1',definitionVersion:1,snapshotVersion:1,revisionDigest:'abc',sourcePolicy:'strict',expiresAt:new Date(Date.now()+60000).toISOString(),originalPreview:{},preview:{}})};
+ await act(async()=>root.render(<NavigationGuardContext.Provider value={{navigate:vi.fn(),registerUnsavedChanges:()=>vi.fn()}}><ScheduleExecutionEditor schedule={schedule} api={api as never} onClose={vi.fn()} onSaved={vi.fn()} /></NavigationGuardContext.Provider>));
+ const weight=[...host.querySelectorAll('label')].find(label=>label.textContent?.startsWith('Weight'))!.querySelector('input')!;
+ await act(async()=>{Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!.call(weight,'50');weight.dispatchEvent(new Event('input',{bubbles:true}));});
+ await act(async()=>[...host.querySelectorAll('button')].find(button=>button.textContent?.includes('Validate changes'))!.click());
+ expect(api.createScheduleExecutionDraft).toHaveBeenCalledWith('S4',{expectedDefinitionVersion:1,overrides:{workloads:[{id:'mixed',mixEdits:[{id:'a',weight:50}]}]}});
+ await act(async()=>root.unmount());host.remove();
+});

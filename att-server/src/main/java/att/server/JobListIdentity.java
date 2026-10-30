@@ -34,7 +34,18 @@ final class JobListIdentity {
             List<String> normalized=new ArrayList<>();for(var member:members)normalized.add(json(List.of(member.get("type"),member.get("id"))));Collections.sort(normalized);
             signature.add(json(List.of(text(workload.path("id")),normalized)));
             if(summaries.size()<32) {
-                Map<String,Object> summary=new LinkedHashMap<>();summary.put("name",text(workload.path("id")));summary.put("mix",mix.isArray());summary.put("targets",members.stream().limit(Math.max(0,32-previewBindings)).toList());previewBindings+=Math.min(members.size(),Math.max(0,32-previewBindings));
+                Map<String,Object> summary=new LinkedHashMap<>();summary.put("name",text(workload.path("id")));summary.put("mix",mix.isArray());summary.put("targets",members.stream().limit(Math.max(0,32-previewBindings)).toList());
+                if(mix.isArray()) {
+                    List<Map<String,Object>> mixEntries=new ArrayList<>();
+                    for(JsonNode item:mix) {
+                        if(mixEntries.size()>=Math.max(0,32-previewBindings))break;
+                        Map<String,Object> entry=new LinkedHashMap<>();entry.put("id",text(item.path("id")));
+                        JsonNode weight=item.path("weight");if(weight.isNumber())entry.put("weight",weight.numberValue());
+                        entry.put("target",target(item.path("target")));mixEntries.add(entry);
+                    }
+                    summary.put("mixEntries",mixEntries);
+                }
+                previewBindings+=Math.min(members.size(),Math.max(0,32-previewBindings));
                 JsonNode rootLoad=scenario.path("load"), workloadLoad=workload.path("load");
                 for(String key:List.of("users","arrivalRate","maxConcurrent","duration","warmup","rampUp","rampDown")) {
                     JsonNode value=effectiveLoadValue(rootLoad,workloadLoad,key);if(value!=null&&value.isValueNode()&&!value.isNull()&&value.asText().length()<=128)summary.put(key,value.isNumber()?value.numberValue():value.asText());

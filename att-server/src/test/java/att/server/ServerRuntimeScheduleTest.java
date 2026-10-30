@@ -188,6 +188,28 @@ class ServerRuntimeScheduleTest {
             assertTrue(sharedReplacement.inlineScenario.toString().contains("160/s"));
             setupRuntime.deleteLoadSchedule(retainedSchedule.id,"alice");
 
+            Map<String,Object> mixScenario=Map.of("schemaVersion","att-load/v1.6","workloads",List.of(Map.of(
+                    "id","mixed","mix",List.of(
+                            Map.of("id","first","weight",40,"target",Map.of("type","template","id","SCHEDULED"),"vars",Map.of("reference","mix-private-value")),
+                            Map.of("id","second","weight",60,"target",Map.of("type","template","id","SCHEDULED"))),
+                    "load",Map.of("users",1,"duration","1s"))));
+            var mixRequest=ServerRuntime.JSON.createObjectNode();mixRequest.put("packageId","p");mixRequest.set("scenario",ServerRuntime.JSON.valueToTree(mixScenario));
+            Map<String,Object> mixDraft=setupRuntime.createAdvancedLoadDraft(mixRequest,"alice");
+            JsonNode mixScheduleRequest=ServerRuntime.JSON.readTree("{\"name\":\"Mix snapshot\",\"packageId\":\"p\",\"draftId\":\""+mixDraft.get("draftId")+"\",\"timezone\":\"UTC\",\"cron\":\"0 2 * * *\"}");
+            LoadSchedule mixSchedule=setupRuntime.createLoadSchedule(mixScheduleRequest,"alice");
+            mixSchedule.listSummary=Map.of(); // Older stored schedules lack the new mix projection.
+            String view=setupRuntime.loadScheduleView(mixSchedule,"bob").toString();
+            assertTrue(view.contains("mixEntries"));assertTrue(view.contains("weight=40"));assertFalse(view.contains("mix-private-value"));
+            JsonNode mixEdit=ServerRuntime.JSON.readTree("{\"expectedDefinitionVersion\":"+mixSchedule.definitionVersion+",\"overrides\":{\"workloads\":[{\"id\":\"mixed\",\"mixEdits\":[{\"id\":\"first\",\"weight\":50}]}]}}");
+            Map<String,Object> mixReview=setupRuntime.createScheduleExecutionDraft(mixSchedule.id,mixEdit,"bob");
+            assertFalse(mixReview.toString().contains("mix-private-value"));assertTrue(mixReview.toString().contains("weight"));
+            JsonNode mixApply=ServerRuntime.JSON.readTree("{\"draftId\":\""+mixReview.get("draftId")+"\",\"expectedDefinitionVersion\":"+mixSchedule.definitionVersion+",\"confirm\":true}");
+            LoadSchedule mixedReplacement=setupRuntime.replaceScheduleExecution(mixSchedule.id,mixApply,"bob");
+            JsonNode mixedResult=ServerRuntime.JSON.valueToTree(mixedReplacement.inlineScenario).path("workloads").get(0).path("mix");
+            assertEquals(50,mixedResult.get(0).path("weight").asInt());assertEquals("mix-private-value",mixedResult.get(0).path("vars").path("reference").asText());
+            assertEquals(60,mixedResult.get(1).path("weight").asInt());assertEquals(mixSchedule.nextRunAt,mixedReplacement.nextRunAt);
+            setupRuntime.deleteLoadSchedule(mixSchedule.id,"alice");
+
             LoadSchedule packageSchedule=setupRuntime.createLoadSchedule(request,"alice");
             JsonNode packageEdit=ServerRuntime.JSON.readTree("{\"expectedDefinitionVersion\":"+packageSchedule.definitionVersion+",\"packageEdit\":{\"load\":{\"duration\":\"2s\"}}}");
             Map<String,Object> packageReview=setupRuntime.createScheduleExecutionDraft(packageSchedule.id,packageEdit,"alice");

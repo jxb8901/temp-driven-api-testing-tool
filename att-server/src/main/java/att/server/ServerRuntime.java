@@ -3444,7 +3444,7 @@ final class ServerRuntime implements AutoCloseable {
         view.put("storedRevisionDigest",schedule.expectedRevisionDigest);view.remove("packageRootIdentity");
         view.remove("inlineScenario");view.remove("inlineDebugInput");view.remove("debugResourceId");view.remove("expectedRevisionDigest");view.remove("catalogSnapshot");
         view.put("jobType",schedule.effectiveJobType());
-        view.put("targetIdentity",schedule.listSummary==null?Map.of():schedule.listSummary);
+        view.put("targetIdentity",schedule.inlineScenario==null?(schedule.listSummary==null?Map.of():schedule.listSummary):JobListIdentity.load(JSON.valueToTree(schedule.inlineScenario)));
         view.put("inlineSnapshot",Boolean.valueOf(schedule.inlineScenario!=null||schedule.inlineDebugInput!=null||schedule.runInput!=null));
         if(schedule.runInput!=null) {
             Object target=schedule.runInput.get("target");
@@ -3567,7 +3567,7 @@ final class ServerRuntime implements AutoCloseable {
         synchronized(draftLock) {scheduleExecutionReviews.entrySet().removeIf(entry->!entry.getValue().expiresAt().isAfter(clock.instant()));scheduleExecutionReviews.put(reviewId,review);}
         validated.remove("draftId");
         if(shared) {
-            originalPreview=Map.of("previewYaml",JSON.writeValueAsString(source.listSummary==null?Map.of():source.listSummary));
+            originalPreview=Map.of("previewYaml",JSON.writeValueAsString(JobListIdentity.from(definition)));
             JsonNode candidateDefinition=proposed.deepCopy();
             if("load".equals(source.effectiveJobType())) ((ObjectNode)candidateDefinition).put("executionType","load");
             validated=Map.of("previewYaml",JSON.writeValueAsString(JobListIdentity.from(candidateDefinition)));
