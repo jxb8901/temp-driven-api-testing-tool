@@ -415,7 +415,7 @@
       "scope": "One MQ pool borrow",
       "configurable": true,
       "hardCoded": false,
-      "enforcingBoundary": "MQ pool semaphore deadline",
+      "enforcingBoundary": "MQ pool admission, physical capacity and connection-creation deadline",
       "resultingStatus": {
         "executionStatus": "ERROR",
         "exitCode": 3,

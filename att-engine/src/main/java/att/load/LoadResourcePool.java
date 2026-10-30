@@ -131,116 +131,99 @@ public final class LoadResourcePool<T> implements AutoCloseable {
         }
     }
 
+    /** A creation remains charged to total until it succeeds or fails, even if its borrower leaves. */
+    private final class PendingCreation {
+        boolean done;
+        Throwable failure;
+    }
+
+    /** Called with the pool monitor held. At most maxSize such daemon threads can be in flight. */
+    private PendingCreation startCreation() {
+        final PendingCreation pending = new PendingCreation();
+        total.incrementAndGet();
+        creating++;
+        try {
+            Thread thread = new Thread(() -> {
+                T value = null;
+                Throwable failure = null;
+                try {
+                    value = factory.get();
+                    if (value == null) failure = new IllegalStateException("resource factory returned null");
+                } catch (Throwable error) {
+                    failure = error;
+                }
+                boolean closeValue = false;
+                synchronized (LoadResourcePool.this) {
+                    creating--;
+                    if (failure != null) {
+                        failures.incrementAndGet();
+                        total.decrementAndGet();
+                        pending.failure = failure;
+                    } else if (closed || !idle.offer(value)) {
+                        closing++;
+                        closeValue = true;
+                    } else {
+                        created.incrementAndGet();
+                    }
+                    pending.done = true;
+                    LoadResourcePool.this.notifyAll();
+                }
+                if (closeValue) closeTracked(value);
+            }, "att-load-resource-connect");
+            thread.setDaemon(true);
+            thread.start();
+        } catch (RuntimeException | Error failure) {
+            creating--;
+            total.decrementAndGet();
+            notifyAll();
+            throw failure;
+        }
+        return pending;
+    }
+
     public Lease borrow() throws Exception {
         if (closed) throw new IllegalStateException("resource pool is closed");
         waiting.incrementAndGet();
-        boolean acquired;
         long started = System.nanoTime();
         long budget = TimeUnit.MILLISECONDS.toNanos(borrowTimeoutMs);
+        boolean acquired = false;
         try {
-            acquired = false;
             do {
                 if (closed) throw new IllegalStateException("resource pool is closed");
                 long remaining = Math.max(0L, budget - (System.nanoTime() - started));
                 acquired = permits.tryAcquire(Math.min(remaining, TimeUnit.MILLISECONDS.toNanos(100)), TimeUnit.NANOSECONDS);
                 if (acquired || remaining == 0L) break;
             } while (System.nanoTime() - started < budget);
-        } catch (InterruptedException | RuntimeException failure) {
-            waiting.decrementAndGet();
-            waitNanos.addAndGet(System.nanoTime() - started);
-            throw failure;
-        }
-        if (!acquired) {
-            waiting.decrementAndGet();
-            waitNanos.addAndGet(System.nanoTime() - started);
-            throw timeout(started);
-        }
-        T value = null;
-        boolean reserved = false;
-        boolean reservationReleased = false;
-        boolean waitingRecorded = false;
-        try {
+            if (!acquired) throw timeout(started);
             synchronized (this) {
-                boolean waitedForCapacity = false;
+                PendingCreation pending = null;
+                boolean waited = false;
                 while (true) {
                     if (closed) throw new IllegalStateException("resource pool is closed");
-                    if (waitedForCapacity && System.nanoTime() - started >= budget) throw timeout(started);
-                    value = idle.poll();
+                    if (waited && System.nanoTime() - started >= budget) throw timeout(started);
+                    T value = idle.poll();
                     if (value != null) {
                         leased.add(value);
-                        break;
+                        acquired = false; // the lease owns the permit
+                        return new Lease(value);
                     }
-                    if (total.get() < maxSize) {
-                        total.incrementAndGet();
-                        creating++;
-                        reserved = true;
-                        break;
+                    if (pending != null && pending.done) {
+                        Throwable failure = pending.failure;
+                        pending = null;
+                        if (failure instanceof RuntimeException) throw (RuntimeException) failure;
+                        if (failure instanceof Error) throw (Error) failure;
                     }
                     long remaining = budget - (System.nanoTime() - started);
-                    if (remaining <= 0L) {
-                        throw timeout(started);
-                    }
-                    waitedForCapacity = true;
+                    if (remaining <= 0L) throw timeout(started);
+                    if (pending == null && total.get() < maxSize) pending = startCreation();
+                    waited = true;
                     TimeUnit.NANOSECONDS.timedWait(this, remaining);
                 }
             }
+        } finally {
+            if (acquired) permits.release();
             waiting.decrementAndGet();
             waitNanos.addAndGet(System.nanoTime() - started);
-            waitingRecorded = true;
-            if (!reserved) return new Lease(value);
-            if (reserved) {
-                try { value = factory.get(); }
-                catch (RuntimeException error) {
-                    failures.incrementAndGet();
-                    synchronized (this) { creating--; total.decrementAndGet(); reservationReleased = true; notifyAll(); }
-                    throw error;
-                } catch (Error error) {
-                    failures.incrementAndGet();
-                    synchronized (this) { creating--; total.decrementAndGet(); reservationReleased = true; notifyAll(); }
-                    throw error;
-                }
-                if (value == null) {
-                    failures.incrementAndGet();
-                    synchronized (this) { creating--; total.decrementAndGet(); reservationReleased = true; notifyAll(); }
-                    throw new IllegalStateException("resource factory returned null");
-                }
-            }
-            boolean closeCreated = false;
-            synchronized (this) {
-                if (reserved) { creating--; reservationReleased = true; }
-                if (closed) {
-                    if (value != null) { closing++; closeCreated = true; }
-                    notifyAll();
-                } else {
-                    if (reserved) created.incrementAndGet();
-                    leased.add(value);
-                    notifyAll();
-                    return new Lease(value);
-                }
-            }
-            if (closeCreated) closeTracked(value);
-            throw new IllegalStateException("resource pool is closed");
-        } catch (RuntimeException error) {
-            if (!waitingRecorded) { waiting.decrementAndGet(); waitNanos.addAndGet(System.nanoTime() - started); }
-            if (reserved && !reservationReleased) synchronized (this) {
-                creating--; total.decrementAndGet(); notifyAll();
-            }
-            permits.release();
-            throw error;
-        } catch (Exception error) {
-            if (!waitingRecorded) { waiting.decrementAndGet(); waitNanos.addAndGet(System.nanoTime() - started); }
-            if (reserved && !reservationReleased) synchronized (this) {
-                creating--; total.decrementAndGet(); notifyAll();
-            }
-            permits.release();
-            throw error;
-        } catch (Error error) {
-            if (!waitingRecorded) { waiting.decrementAndGet(); waitNanos.addAndGet(System.nanoTime() - started); }
-            if (reserved && !reservationReleased) synchronized (this) {
-                creating--; total.decrementAndGet(); notifyAll();
-            }
-            permits.release();
-            throw error;
         }
     }
 
