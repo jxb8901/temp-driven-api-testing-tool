@@ -112,4 +112,6 @@ The general dashboard and workflow smoke scripts use a local Python API fixture.
 
 The template-specific check `npm run smoke:load-templates` verifies the six built-ins, no legacy/history requests on Templates, nested modal Save/Cancel boundaries, Escape and mobile dialog bounds under `/att/ui/`. The Tomcat `server-api-smoke.cjs` check verifies the default Templates tab and resource-only Scenarios against real APIs.
 
+`npm run smoke:saved-scenario-review` uses fixture responses to check that the private library opens a review for the selected saved revision without starting a LOAD job.
+
 `npm run smoke:package-manifest` checks the Package Configuration views, Draft → Validate → Review → Publish gates, refresh after publication, stale-source conflicts, masked source, and desktop/mobile layout. It uses API fixtures with the built Studio assets and saves `att-package-manifest-desktop.png` and `att-package-manifest-mobile.png` in `ATT_UI_SCREENSHOT_DIR` (default `/tmp`). Server authorization and publication atomicity are covered separately by the Java integration tests.
