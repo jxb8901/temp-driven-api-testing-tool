@@ -160,6 +160,10 @@ class ServerRuntimeScheduleTest {
             LoadSchedule replacement=setupRuntime.replaceScheduleExecution(retainedSchedule.id,apply,"alice");
             assertEquals(originalDefinition.id,replacement.id);assertEquals(originalDefinition.nextRunAt,replacement.nextRunAt);
             assertEquals(originalDefinition.enabled,replacement.enabled);assertEquals(2,replacement.snapshotVersion);
+            Map<String,Object> change=replacement.snapshotHistory.get(replacement.snapshotHistory.size()-1);
+            assertEquals(1,((Number)change.get("previousVersion")).intValue());assertEquals(2,((Number)change.get("version")).intValue());
+            assertEquals("LOAD execution snapshot replaced",change.get("changeSummary"));
+            assertFalse(change.toString().contains("150/s"));assertFalse(change.toString().contains("inline-secret"));
             assertTrue(replacement.inlineScenario.toString().contains("150/s"));
             String originalSpec=setupRuntime.store.executionSpec(retainedJobId).get("spec");
             assertTrue(originalSpec.contains("100/s"));
@@ -176,7 +180,12 @@ class ServerRuntimeScheduleTest {
             LoadSchedule editedPackage=setupRuntime.replaceScheduleExecution(packageSchedule.id,packageApply,"alice");
             assertEquals("load/scenario.yaml",editedPackage.scenario);assertNull(editedPackage.inlineScenario);
             assertEquals("2s",editedPackage.load.get("duration"));assertEquals(packageSchedule.nextRunAt,editedPackage.nextRunAt);
-            assertEquals(2,editedPackage.snapshotVersion);setupRuntime.deleteLoadSchedule(packageSchedule.id,"alice");
+            assertEquals(2,editedPackage.snapshotVersion);
+            Map<String,Object> packageChange=editedPackage.snapshotHistory.get(editedPackage.snapshotHistory.size()-1);
+            assertEquals(1,((Number)packageChange.get("previousVersion")).intValue());
+            assertEquals("Package scenario settings replaced",packageChange.get("changeSummary"));
+            assertFalse(packageChange.toString().contains("scenario.yaml"));
+            setupRuntime.deleteLoadSchedule(packageSchedule.id,"alice");
 
             Map<String,Object> preview=setupRuntime.previewLoadSchedule(ServerRuntime.JSON.readTree("{\"timezone\":\"Asia/Hong_Kong\",\"cron\":\"0 2 * * *\"}"));
             assertEquals("Asia/Hong_Kong",preview.get("timezone"));assertEquals("2026-10-12T18:00:00Z",preview.get("nextRunAt"));

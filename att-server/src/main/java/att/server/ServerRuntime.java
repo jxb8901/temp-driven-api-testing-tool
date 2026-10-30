@@ -3577,11 +3577,11 @@ final class ServerRuntime implements AutoCloseable {
                 verifyPackageRevision(review.packageId(),replacement.environment,review.revision());
                 replacement.snapshotVersion=prior.snapshotVersion+1;replacement.updatedAt=clock.instant().toString();replacement.updatedBy=principal;
                 List<Map<String,Object>> history=new ArrayList<>(prior.snapshotHistory==null?List.of():prior.snapshotHistory);
-                history.add(Map.of("version",replacement.snapshotVersion,"actor",principal,"at",replacement.updatedAt,"revisionDigest",review.revision()));
+                history.add(Map.of("previousVersion",prior.snapshotVersion,"version",replacement.snapshotVersion,"actor",principal,"at",replacement.updatedAt,"revisionDigest",review.revision(),"changeSummary","Package scenario settings replaced"));
                 if(history.size()>20)history=new ArrayList<>(history.subList(history.size()-20,history.size()));replacement.snapshotHistory=history;
                 requireLiveDraft(review.expiresAt());verifyPackageRevision(review.packageId(),replacement.environment,review.revision());
                 LoadSchedule saved=store.updateScheduleAuthorized(replacement,prior.updatedAt,"local".equals(config.authMode)?principal:null);if(saved==null)throw new NotFoundException();
-                scheduleExecutionReviews.remove(draftId);store.audit(principal,"SCHEDULE_EXECUTION_REPLACE",null,saved.packageId,"version="+saved.snapshotVersion);return saved;
+                scheduleExecutionReviews.remove(draftId);store.audit(principal,"SCHEDULE_EXECUTION_REPLACE",null,saved.packageId,"version="+prior.snapshotVersion+"->"+saved.snapshotVersion);return saved;
             }
             verifyPackageRevision(review.packageId(),retainedDraftEnvironment(draftId,principal,review.packageId()),review.revision());
             ObjectNode build=JSON.createObjectNode();build.put("name",prior.name);build.put("packageId",prior.packageId);build.put("jobType",prior.effectiveJobType());
@@ -3597,11 +3597,11 @@ final class ServerRuntime implements AutoCloseable {
             validateScheduleForActivation(replacement,executionPrincipal);
             replacement.snapshotVersion=prior.snapshotVersion+1;replacement.updatedAt=clock.instant().toString();replacement.updatedBy=principal;
             List<Map<String,Object>> history=new ArrayList<>(prior.snapshotHistory==null?List.of():prior.snapshotHistory);
-            history.add(Map.of("version",replacement.snapshotVersion,"actor",principal,"at",replacement.updatedAt,"revisionDigest",review.revision()));
+            history.add(Map.of("previousVersion",prior.snapshotVersion,"version",replacement.snapshotVersion,"actor",principal,"at",replacement.updatedAt,"revisionDigest",review.revision(),"changeSummary",review.executionType().toUpperCase(java.util.Locale.ROOT)+" execution snapshot replaced"));
             if(history.size()>20)history=new ArrayList<>(history.subList(history.size()-20,history.size()));replacement.snapshotHistory=history;
             requireLiveDraft(review.expiresAt());verifyPackageRevision(review.packageId(),replacement.environment,review.revision());
             LoadSchedule saved=store.updateScheduleAuthorized(replacement,prior.updatedAt,"local".equals(config.authMode)?principal:null);if(saved==null)throw new NotFoundException();
-            scheduleExecutionReviews.remove(draftId);store.audit(principal,"SCHEDULE_EXECUTION_REPLACE",null,saved.packageId,"version="+saved.snapshotVersion);return saved;
+            scheduleExecutionReviews.remove(draftId);store.audit(principal,"SCHEDULE_EXECUTION_REPLACE",null,saved.packageId,"version="+prior.snapshotVersion+"->"+saved.snapshotVersion);return saved;
         }
     }
 
@@ -3615,7 +3615,7 @@ final class ServerRuntime implements AutoCloseable {
                  ||!java.util.Objects.equals(prior.packageId,schedule.packageId)||!java.util.Objects.equals(prior.environment,schedule.environment))) {
             schedule.snapshotVersion=prior.snapshotVersion+1;
             List<Map<String,Object>> history=new ArrayList<>(prior.snapshotHistory==null?List.of():prior.snapshotHistory);
-            Map<String,Object> event=new LinkedHashMap<>();event.put("version",schedule.snapshotVersion);event.put("actor",principal);event.put("at",schedule.updatedAt);
+            Map<String,Object> event=new LinkedHashMap<>();event.put("previousVersion",prior.snapshotVersion);event.put("version",schedule.snapshotVersion);event.put("actor",principal);event.put("at",schedule.updatedAt);event.put("changeSummary","Package scenario settings replaced");
             if(schedule.expectedRevisionDigest!=null)event.put("revisionDigest",schedule.expectedRevisionDigest);history.add(event);
             if(history.size()>20)history=new ArrayList<>(history.subList(history.size()-20,history.size()));schedule.snapshotHistory=history;
         }

@@ -38,6 +38,7 @@ it('reviews a changed RUN resource target', async () => {
  const schedule={id:'S3',name:'Run',packageId:'p',executionType:'run' as const,timezone:'UTC',maxConcurrentRuns:1,enabled:true,inlineSnapshot:true,definitionVersion:1,debugTarget:{type:'template',id:'old'}};
  const api={createScheduleExecutionDraft:vi.fn().mockResolvedValue({draftId:'A2',definitionVersion:1,snapshotVersion:1,revisionDigest:'abc',sourcePolicy:'strict',expiresAt:new Date(Date.now()+60000).toISOString(),originalPreview:{},preview:{}})};
  await act(async()=>root.render(<NavigationGuardContext.Provider value={{navigate:vi.fn(),registerUnsavedChanges:()=>vi.fn()}}><ScheduleExecutionEditor schedule={schedule} api={api as never} onClose={vi.fn()} onSaved={vi.fn()} /></NavigationGuardContext.Provider>));
+ expect([...host.querySelectorAll('select option')].map(option=>option.value)).toEqual(['template','flow','tool']);
  const input=host.querySelector<HTMLInputElement>('input')!;
  await act(async()=>{Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!.call(input,'new');input.dispatchEvent(new Event('input',{bubbles:true}));});
  await act(async()=>[...host.querySelectorAll('button')].find(button=>button.textContent?.includes('Validate changes'))!.click());

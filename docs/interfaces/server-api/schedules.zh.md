@@ -14,6 +14,6 @@ Legacy path 名稱 /load-schedules 仍受目前 4.2.8 REST API 支援。本 inte
 
 `POST /api/v1/schedules/{id}/execution-draft` 驗證執行設定變更，不會提交 Job。傳入 `expectedDefinitionVersion`，以及 RUN 或 inline LOAD 快照的 `overrides`，或 package-path LOAD Schedule 的 `packageEdit`。回應包含短期有效的 `draftId`、安全的變更前後預覽、Package 版本、政策及下次執行時間。審閱會綁定已驗證的 Schedule 擁有者或執行身分。
 
-使用 `PATCH /api/v1/schedules/{id}/execution` 確認審閱，JSON 內容包括 `draftId`、`expectedDefinitionVersion` 和 `confirm: true`。成功後，Schedule ID 與觸發條件不變，`snapshotVersion` 遞增，新設定用於其後領取的執行。已領取的 occurrence 和已接受的 Job 保留原有輸入。定義、draft 或 Package 版本過期時，須重新審閱。Schedule 最多保留 20 筆安全的快照歷史；Job 自身的執行證據依 Job 保留政策處理。
+使用 `PATCH /api/v1/schedules/{id}/execution` 確認審閱，JSON 內容包括 `draftId`、`expectedDefinitionVersion` 和 `confirm: true`。成功後，Schedule ID 與觸發條件不變，`snapshotVersion` 遞增，新設定用於其後領取的執行。已領取的 occurrence 和已接受的 Job 保留原有輸入。定義、draft 或 Package 版本過期時，須重新審閱。Schedule 最多保留 20 筆安全的快照歷史，包括前後版本、操作者、時間、revision 與概括的變更摘要；較舊記錄可能沒有新增欄位。Job 自身的執行證據依 Job 保留政策處理。
 
 Package 路徑編輯仍以 Package 路徑執行。Package Catalog 快照及沒有保留 Package 版本的舊 Schedule 不能使用此替換端點。
