@@ -19,7 +19,8 @@
     "perf": "node ui-perf.cjs",
     "smoke:load-templates": "node load-templates.cjs",
     "smoke:saved-scenario-review": "node saved-scenario-review.cjs",
-    "smoke:package-manifest": "node package-manifest.cjs"
+    "smoke:package-manifest": "node package-manifest.cjs",
+    "smoke:saved-scenario-lifecycle": "node saved-scenario-lifecycle.cjs"
   },
   "devDependencies": {
     "axe-core": "4.11.4",
