@@ -14,6 +14,7 @@ export function ScheduleExecutionEditor({ schedule, api, onClose, onSaved }: {
   const [scenario,setScenario]=useState(schedule.scenario || '');
   const [packageLoad,setPackageLoad]=useState(JSON.stringify(schedule.load || {},null,2));
   const [cases,setCases]=useState((schedule.selectedCaseIds || []).join(', '));
+  const [runTarget,setRunTarget]=useState(schedule.debugTarget || {type:'',id:''});
   const [phases,setPhases]=useState({rampUp:'',warmup:'',duration:'',rampDown:''});
   const [changed,setChanged]=useState(false),[busy,setBusy]=useState(false);
   const [review,setReview]=useState<ScheduleExecutionReview | null>(null);
@@ -30,7 +31,11 @@ export function ScheduleExecutionEditor({ schedule, api, onClose, onSaved }: {
         const parsed: unknown=JSON.parse(packageLoad); if(!parsed || typeof parsed!=='object' || Array.isArray(parsed))throw new Error('Load overrides must be a JSON object.');
         setReview(await api.createScheduleExecutionDraft(schedule.id,{expectedDefinitionVersion:schedule.definitionVersion ?? 0,packageEdit:{scenario,load:parsed}}));return;
       }
-      if(schedule.executionType==='run') { if(cases.trim())overrides.selection={caseIds:cases.split(',').map(value=>value.trim()).filter(Boolean)}; }
+      if(schedule.executionType==='run') {
+        if(schedule.debugTarget) {
+          if(runTarget.type!==schedule.debugTarget.type || runTarget.id!==schedule.debugTarget.id) overrides.target=runTarget;
+        } else if(cases.trim()) overrides.selection={caseIds:cases.split(',').map(value=>value.trim()).filter(Boolean)};
+      }
       else {
         const load=Object.fromEntries(Object.entries(phases).filter(([,value])=>value.trim()));if(Object.keys(load).length)overrides.load=load;
         const edits=workloads.flatMap((row,index)=>{ const before=initialWorkloads.current[index]; const load: Record<string,unknown>={};
@@ -61,9 +66,11 @@ export function ScheduleExecutionEditor({ schedule, api, onClose, onSaved }: {
         {(['rampUp','warmup','duration','rampDown'] as const).map(field=><label key={field}>{field} <input value={row[field]} onChange={event=>{edit();setWorkloads(current=>current.map((item,i)=>i===index?{...item,[field]:event.target.value}:item));}} /></label>)}
       </fieldset>)}
       <p>Leave phase fields empty to keep the existing timing.</p>{(['rampUp','warmup','duration','rampDown'] as const).map(field=><label key={field}>{field} <input value={phases[field]} onChange={event=>{edit();setPhases(current=>({...current,[field]:event.target.value}));}} /></label>)}
-    </>: schedule.selectedCaseIds?.length ? <label>Selected case IDs <input value={cases} onChange={event=>{edit();setCases(event.target.value);}} /></label> : <p>This RUN target needs the full RUN editor.</p>}
+    </>: schedule.debugTarget ? <><p>Changing the target clears its previous input bindings; validate the new target before saving.</p>
+      <label>Target type <select value={runTarget.type} onChange={event=>{edit();setRunTarget(current=>({...current,type:event.target.value}));}}>{['case','template','flow','tool'].map(type=><option key={type}>{type}</option>)}</select></label>
+      <label>Target ID <input value={runTarget.id} onChange={event=>{edit();setRunTarget(current=>({...current,id:event.target.value}));}} /></label></> : schedule.selectedCaseIds?.length ? <label>Selected case IDs <input value={cases} onChange={event=>{edit();setCases(event.target.value);}} /></label> : <p>This RUN target needs the full RUN editor.</p>}
     {error&&<p role="alert">{error}</p>}
-    <button type="button" className="button button-quiet" disabled={busy || (schedule.inlineSnapshot && schedule.executionType==='load' && (!workloads.length || Boolean(schedule.targetIdentity?.truncated))) || (schedule.inlineSnapshot && schedule.executionType==='run'&&!schedule.selectedCaseIds?.length)} onClick={() => void validate()}>Validate changes</button>
+    <button type="button" className="button button-quiet" disabled={busy || (schedule.inlineSnapshot && schedule.executionType==='load' && (!workloads.length || Boolean(schedule.targetIdentity?.truncated))) || (schedule.inlineSnapshot && schedule.executionType==='run'&&!schedule.selectedCaseIds?.length&&!schedule.debugTarget)} onClick={() => void validate()}>Validate changes</button>
     {review && <section aria-label="Review execution changes"><h3>Review future snapshot {review.snapshotVersion+1}</h3>
       <p>Package revision {review.revisionDigest} · policy {review.sourcePolicy} · next occurrence {review.nextRunAt || 'none'}</p>
       <h4>Before</h4><pre>{review.originalPreview.previewYaml || JSON.stringify(review.originalPreview,null,2)}</pre><h4>After</h4><pre>{review.preview.previewYaml || JSON.stringify(review.preview,null,2)}</pre>

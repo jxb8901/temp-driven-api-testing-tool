@@ -17,6 +17,6 @@ History → Back to list → Edit 會同時按 route view 及 schedule ID 載入
 
 ## 審閱執行設定變更
 
-開啟現有 Schedule，選擇 **Edit execution settings**。請先儲存或放棄未儲存的 Schedule Settings。對 inline LOAD 快照，目前編輯器支援工作負載的 users、arrival rate、concurrency、個別或共用階段覆寫值，以及單一 target。Mix bindings 和進階設定須使用其他流程。對 RUN case selection 快照，可編輯 case ID。Package-backed LOAD Schedule 保留 Package scenario 路徑與 Load overrides。Resource-target RUN 快照及 Package Catalog 快照須使用其他流程。
+開啟現有 Schedule，選擇 **Edit execution settings**。請先儲存或放棄未儲存的 Schedule Settings。對 inline LOAD 快照，目前編輯器支援工作負載的 users、arrival rate、concurrency、個別或共用階段覆寫值，以及單一 target。Mix bindings 和進階設定須使用其他流程。對 RUN 快照，可編輯 case ID 或 resource target。變更 resource target 會清除原有的 input bindings。Package-backed LOAD Schedule 保留 Package scenario 路徑與 Load overrides。Package Catalog 快照須使用其他流程。
 
 選擇 **Validate changes**，比較安全的變更前後預覽、Package 版本、政策與下次執行時間。審閱後才選擇 **Save as new snapshot**。Schedule ID、觸發條件、下次執行時間和既有 Job 均保持不變。審閱過期或 Schedule 同時被修改時，須重新驗證。目前執行設定審閱僅限 Schedule 擁有者或執行身分。

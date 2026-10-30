@@ -32,3 +32,16 @@ it('keeps package-backed schedules in package mode during review', async () => {
  expect(host.textContent).toContain('continue to resolve its package scenario');
  await act(async()=>root.unmount());host.remove();
 });
+it('reviews a changed RUN resource target', async () => {
+ (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT=true;
+ const host=document.createElement('div');document.body.append(host);const root=createRoot(host);
+ const schedule={id:'S3',name:'Run',packageId:'p',executionType:'run' as const,timezone:'UTC',maxConcurrentRuns:1,enabled:true,inlineSnapshot:true,definitionVersion:1,debugTarget:{type:'template',id:'old'}};
+ const api={createScheduleExecutionDraft:vi.fn().mockResolvedValue({draftId:'A2',definitionVersion:1,snapshotVersion:1,revisionDigest:'abc',sourcePolicy:'strict',expiresAt:new Date(Date.now()+60000).toISOString(),originalPreview:{},preview:{}})};
+ await act(async()=>root.render(<NavigationGuardContext.Provider value={{navigate:vi.fn(),registerUnsavedChanges:()=>vi.fn()}}><ScheduleExecutionEditor schedule={schedule} api={api as never} onClose={vi.fn()} onSaved={vi.fn()} /></NavigationGuardContext.Provider>));
+ const input=host.querySelector<HTMLInputElement>('input')!;
+ await act(async()=>{Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!.call(input,'new');input.dispatchEvent(new Event('input',{bubbles:true}));});
+ await act(async()=>[...host.querySelectorAll('button')].find(button=>button.textContent?.includes('Validate changes'))!.click());
+ expect(api.createScheduleExecutionDraft).toHaveBeenCalledWith('S3',{expectedDefinitionVersion:1,overrides:{target:{type:'template',id:'new'}}});
+ expect(host.textContent).toContain('clears its previous input bindings');
+ await act(async()=>root.unmount());host.remove();
+});
