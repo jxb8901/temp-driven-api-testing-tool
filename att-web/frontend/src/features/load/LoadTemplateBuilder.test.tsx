@@ -135,3 +135,17 @@ it.each(['single-vu','single-tps','single-workload-mix','multi-vu','multi-tps','
  await click('Validate');
  expect(endpoints.createLoadTemplateDraft.mock.calls[0][2].bindings.bindings.w).toMatchObject(bound);
 });
+
+it('avoids reusing workload and mix IDs retained in a saved scenario', async () => {
+ const savedDefinition={...definition,workloads:[{id:'workload-101',mix:[{id:'slot-103',weight:1},{id:'b',weight:1}]},{id:'w2',mix:[{id:'a',weight:1},{id:'b',weight:1}]}]};
+ const bindings=Object.fromEntries(savedDefinition.workloads.map(row=>[row.id,{mix:Object.fromEntries(row.mix.map(slot=>[slot.id,{type:'template',id:'PAY'}]))}]));
+ const saved={id:'LS1',packageId:'p',name:'Saved',description:'',tags:[],model:'virtualUsers',revision:1,updatedAt:'',definition:{templateComposition:{templateId:'builtin:multi-workload-mix',revision:'source-revision',definition:savedDefinition,bindings:{schemaVersion:'att-load-bindings/v1',bindings}}}};
+ await act(async () => root.render(<NavigationGuardContext.Provider value={{navigate,registerUnsavedChanges:()=>vi.fn()}}><LoadTemplateBuilder api={{} as never} packages={[{packageId:'p'}]} selectedPackage="p" selectedEnvironment="" onPackageChange={vi.fn()} onEnvironmentChange={vi.fn()} onJobAccepted={vi.fn()} inlineLoadEnabled templateId="builtin:multi-workload-mix" savedScenario={saved} /></NavigationGuardContext.Provider>));
+ await click('Add Workload');
+ expect(host.textContent).toContain('workload-102');
+ await click('Edit Mix');
+ const dialog=host.querySelector('dialog[aria-label="Edit Mix"]')!;
+ await click('Add Target',dialog);
+ expect(dialog.textContent).toContain('slot-104');
+ expect([...dialog.querySelectorAll('input[aria-label]')].filter(input=>input.getAttribute('aria-label')==='slot-103 weight')).toHaveLength(1);
+});
