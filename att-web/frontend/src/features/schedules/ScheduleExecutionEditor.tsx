@@ -7,10 +7,28 @@ type MixEntry = { id: string; weight: string; targetType: string; targetId: stri
 type Workload = { id: string; model: string; rate: string; users: string; maxConcurrent: string; targetType: string; targetId: string; mix: boolean; mixEntries: MixEntry[]; rampUp: string; warmup: string; duration: string; rampDown: string };
 type Preview = ScheduleExecutionReview['preview'];
 type AdvancedJson = { thresholds: string; evidence: string; testdata: string; execution: string; seed: string };
+type RunOptions = { debug: boolean; failFast: boolean };
 
 function previewText(preview: Preview): string {
   const value=preview.previewYaml || JSON.stringify(preview,null,2);
   try { return JSON.stringify(JSON.parse(value),null,2); } catch { return value; }
+}
+function jsonField(value: unknown, fallback = ''): string {
+  if(value==null)return fallback;
+  try { return JSON.stringify(value,null,2); } catch { return fallback; }
+}
+function initialAdvanced(schedule: ScheduleDefinition): AdvancedJson {
+  const settings=schedule.executionSettings || {};
+  return {
+    thresholds:jsonField(settings.thresholds),
+    evidence:jsonField(settings.evidence),
+    testdata:jsonField(settings.testdata),
+    execution:jsonField(settings.execution),
+    seed:settings.seed==null?'':String(settings.seed),
+  };
+}
+function initialRunOptions(schedule: ScheduleDefinition): RunOptions {
+  return { debug:Boolean(schedule.runOptions?.debug), failFast:Boolean(schedule.runOptions?.failFast) };
 }
 /** Compare only Server-sanitized previews and bound the quadratic line comparison. */
 export function previewChanges(before: string, after: string): {kind:'removed'|'added'; line:string}[] | null {
@@ -28,17 +46,22 @@ export function previewChanges(before: string, after: string): {kind:'removed'|'
   }
   return changes;
 }
-function parseObjectField(label: string, value: string): Record<string, unknown> | undefined {
-  const trimmed=value.trim(); if(!trimmed)return undefined;
+function parseObjectField(label: string, value: string): Record<string, unknown> {
+  const trimmed=value.trim(); if(!trimmed)throw new Error(`${label} must be a JSON object.`);
   const parsed: unknown=JSON.parse(trimmed);
   if(!parsed || typeof parsed!=='object' || Array.isArray(parsed))throw new Error(`${label} must be a JSON object.`);
   return parsed as Record<string, unknown>;
 }
 function parseArrayOrObject(label: string, value: string): unknown {
-  const trimmed=value.trim(); if(!trimmed)return undefined;
+  const trimmed=value.trim(); if(!trimmed)throw new Error(`${label} must be JSON.`);
   const parsed: unknown=JSON.parse(trimmed);
   if(parsed==null || (typeof parsed!=='object'))throw new Error(`${label} must be JSON.`);
   return parsed;
+}
+function changedAdvanced(label: string, current: string, initial: string, parse: (label: string, value: string) => unknown): unknown | undefined {
+  if(current===initial)return undefined;
+  if(!current.trim())throw new Error(`${label} cannot be cleared here; restore the retained JSON or keep the previous value.`);
+  return parse(label, current);
 }
 /** Reviewable execution editor covering the override fields accepted by schedule execution drafts. */
 export function ScheduleExecutionEditor({ schedule, api, onClose, onSaved }: {
@@ -53,10 +76,12 @@ export function ScheduleExecutionEditor({ schedule, api, onClose, onSaved }: {
   const initialEnvironment=useRef(environment);
   const [cases,setCases]=useState((schedule.selectedCaseIds || []).join(', '));
   const [runTarget,setRunTarget]=useState(schedule.debugTarget || {type:'',id:''});
-  const [runOptions,setRunOptions]=useState({debug:false,failFast:false});
+  const [runOptions,setRunOptions]=useState<RunOptions>(() => initialRunOptions(schedule));
+  const initialRunOptionsRef=useRef(runOptions);
   const [runInput,setRunInput]=useState('');
   const [phases,setPhases]=useState({rampUp:'',warmup:'',duration:'',rampDown:''});
-  const [advanced,setAdvanced]=useState<AdvancedJson>({thresholds:'',evidence:'',testdata:'',execution:'',seed:''});
+  const [advanced,setAdvanced]=useState<AdvancedJson>(() => initialAdvanced(schedule));
+  const initialAdvancedRef=useRef(advanced);
   const [changed,setChanged]=useState(false),[busy,setBusy]=useState(false);
   const [review,setReview]=useState<ScheduleExecutionReview | null>(null);
   const [error,setError]=useState('');
@@ -79,9 +104,11 @@ export function ScheduleExecutionEditor({ schedule, api, onClose, onSaved }: {
       if(schedule.executionType==='run') {
         if(schedule.debugTarget) {
           if(runTarget.type!==schedule.debugTarget.type || runTarget.id!==schedule.debugTarget.id) overrides.target=runTarget;
-          const input=parseObjectField('RUN input',runInput); if(input)overrides.input=input;
+          if(runInput.trim())overrides.input=parseObjectField('RUN input',runInput);
         } else if(cases.trim()) overrides.selection={caseIds:cases.split(',').map(value=>value.trim()).filter(Boolean)};
-        const options=Object.fromEntries(Object.entries(runOptions).filter(([,value])=>value));
+        const options: Record<string,boolean>={};
+        if(runOptions.debug!==initialRunOptionsRef.current.debug)options.debug=runOptions.debug;
+        if(runOptions.failFast!==initialRunOptionsRef.current.failFast)options.failFast=runOptions.failFast;
         if(Object.keys(options).length)overrides.options=options;
       }
       else {
@@ -99,11 +126,14 @@ export function ScheduleExecutionEditor({ schedule, api, onClose, onSaved }: {
           return Object.keys(load).length||target||mixEdits.length?[{id:row.id,...(Object.keys(load).length?{load}:{}),...(target?{target}:{}),...(mixEdits.length?{mixEdits}:{})}]:[];
         });
         if(edits.length)overrides.workloads=edits;
-        const thresholds=parseObjectField('Thresholds',advanced.thresholds); if(thresholds)overrides.thresholds=thresholds;
-        const evidence=parseObjectField('Evidence',advanced.evidence); if(evidence)overrides.evidence=evidence;
-        const testdata=parseArrayOrObject('Testdata',advanced.testdata); if(testdata!==undefined)overrides.testdata=testdata;
-        const execution=parseObjectField('Execution',advanced.execution); if(execution)overrides.execution=execution;
-        if(advanced.seed.trim())overrides.seed=Number(advanced.seed);
+        const thresholds=changedAdvanced('Thresholds',advanced.thresholds,initialAdvancedRef.current.thresholds,parseObjectField); if(thresholds!==undefined)overrides.thresholds=thresholds;
+        const evidence=changedAdvanced('Evidence',advanced.evidence,initialAdvancedRef.current.evidence,parseObjectField); if(evidence!==undefined)overrides.evidence=evidence;
+        const testdata=changedAdvanced('Testdata',advanced.testdata,initialAdvancedRef.current.testdata,parseArrayOrObject); if(testdata!==undefined)overrides.testdata=testdata;
+        const execution=changedAdvanced('Execution',advanced.execution,initialAdvancedRef.current.execution,parseObjectField); if(execution!==undefined)overrides.execution=execution;
+        if(advanced.seed!==initialAdvancedRef.current.seed) {
+          if(!advanced.seed.trim())throw new Error('Seed cannot be cleared here; restore the retained value or keep the previous seed.');
+          overrides.seed=Number(advanced.seed);
+        }
       }
       setReview(await api.createScheduleExecutionDraft(schedule.id,{expectedDefinitionVersion:schedule.definitionVersion ?? 0,overrides}));
     } catch(failure) {setError(failure instanceof Error?failure.message:'Validation failed.');} finally {setBusy(false);}
@@ -114,6 +144,7 @@ export function ScheduleExecutionEditor({ schedule, api, onClose, onSaved }: {
     try {const saved=await api.replaceScheduleExecution(schedule.id,{draftId:review.draftId,expectedDefinitionVersion:review.definitionVersion,confirm:true});setChanged(false);onSaved(saved);}
     catch(failure){setError(failure instanceof Error?failure.message:'The schedule could not be updated.');setReview(null);}finally{setBusy(false);}
   }
+  const advancedAvailable=Boolean(schedule.executionSettings);
   return <LoadDialog title="Edit execution settings" onCancel={close}>
     <p>Schedule {schedule.name} · snapshot {schedule.snapshotVersion ?? 1}. These fields change future executions only.</p>
     <label>Environment <input value={environment} onChange={event=>{edit();setEnvironment(event.target.value);}} placeholder="Package default" /></label>
@@ -131,7 +162,9 @@ export function ScheduleExecutionEditor({ schedule, api, onClose, onSaved }: {
       </fieldset>)}
       <p>Leave phase fields empty to keep the existing timing.</p>{(['rampUp','warmup','duration','rampDown'] as const).map(field=><label key={field}>{field} <input value={phases[field]} onChange={event=>{edit();setPhases(current=>({...current,[field]:event.target.value}));}} /></label>)}
       <fieldset><legend>Common advanced settings</legend>
-        <p>Leave a field empty to keep the retained value. Values must be valid JSON for object or array fields.</p>
+        {advancedAvailable
+          ? <p>These fields are prefilled with the retained complete values. Saving a changed field replaces that whole object; leave a field unchanged to keep it.</p>
+          : <p>Retained advanced settings are unavailable for safe prefill on this schedule. Leave these fields empty to keep the retained values.</p>}
         <label>Thresholds (JSON) <textarea aria-label="Thresholds JSON" value={advanced.thresholds} onChange={event=>setAdvancedField('thresholds',event.target.value)} /></label>
         <label>Evidence (JSON) <textarea aria-label="Evidence JSON" value={advanced.evidence} onChange={event=>setAdvancedField('evidence',event.target.value)} /></label>
         <label>Testdata (JSON) <textarea aria-label="Testdata JSON" value={advanced.testdata} onChange={event=>setAdvancedField('testdata',event.target.value)} /></label>

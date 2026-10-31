@@ -3454,6 +3454,25 @@ final class ServerRuntime implements AutoCloseable {
             Object target=schedule.runInput.get("target");
             if(target instanceof Map)view.put("debugTarget",target);
             else view.put("selectedCaseIds",schedule.runInput.get("caseIds"));
+            Map<String,Object> runOptions=new LinkedHashMap<>();
+            Object options=schedule.runInput.get("options");
+            if(options instanceof Map<?,?> map) {
+                Object debug=map.get("debug"); if(debug instanceof Boolean)runOptions.put("debug",debug);
+                Object failFast=map.get("failFast"); if(failFast instanceof Boolean)runOptions.put("failFast",failFast);
+            }
+            Object diagnostic=schedule.runInput.get("diagnosticMode");
+            if(diagnostic instanceof Boolean && !runOptions.containsKey("debug"))runOptions.put("debug",diagnostic);
+            if(!runOptions.containsKey("debug"))runOptions.put("debug",Boolean.FALSE);
+            if(!runOptions.containsKey("failFast"))runOptions.put("failFast",Boolean.FALSE);
+            view.put("runOptions",runOptions);
+        }
+        if(schedule.inlineScenario!=null) {
+            Map<String,Object> settings=new LinkedHashMap<>();
+            for(String field:List.of("thresholds","evidence","testdata","execution","seed")) {
+                Object value=schedule.inlineScenario.get(field);
+                if(value!=null)settings.put(field,value);
+            }
+            if(!settings.isEmpty())view.put("executionSettings",settings);
         }
         if("debug".equals(schedule.effectiveJobType()))view.put("debugTarget",Map.of("type",schedule.debugTargetType,"id",schedule.debugTargetId));
         return view;

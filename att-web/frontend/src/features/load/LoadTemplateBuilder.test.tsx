@@ -123,6 +123,31 @@ it('reopens a saved mix with its bindings and saves an optimistic new revision',
  expect(endpoints.updateSavedLoadScenario).toHaveBeenCalledWith('LS1',expect.objectContaining({draftId:'A2',expectedRevision:3,name:'Saved'}));
 });
 
+it('applies Server limits stricter than the defaults when reopening a saved scenario', async () => {
+ const savedDefinition = { ...definition, workloads: definition.workloads.map(row => ({ ...row, load:{users:10} })) };
+ const bindings = Object.fromEntries(savedDefinition.workloads.map(row => [row.id, { mix: { 'slot-a': {type:'template',id:'PAY'}, 'slot-b': {type:'flow',id:'REFUND'} } }]));
+ const saved = { id:'LS1',packageId:'p',name:'Saved',description:'',tags:[],model:'virtualUsers',revision:1,updatedAt:'',definition:{packageId:'p',environment:'SIT',templateComposition:{templateId:'builtin:multi-workload-mix',revision:'source-revision',definition:savedDefinition,bindings:{schemaVersion:'att-load-bindings/v1',bindings}}} };
+ const limits = { maxWorkloads: 2, maxTargets: 4, maxTotalUsers: 50, maxAggregateArrivalRatePerSecond: 10, maxConcurrentPerWorkload: 5, maxTotalConcurrent: 8, maxDurationSeconds: 120 };
+ endpoints.listLoadTemplates.mockResolvedValue({ items: [{ id: 'builtin:multi-workload-mix', validation: 'valid', definition }], revisionDigest: 'source-revision', limits });
+ await act(async () => root.render(<NavigationGuardContext.Provider value={{navigate,registerUnsavedChanges:()=>vi.fn()}}><LoadTemplateBuilder api={{} as never} packages={[{packageId:'p'}]} selectedPackage="p" selectedEnvironment="SIT" onPackageChange={vi.fn()} onEnvironmentChange={vi.fn()} onJobAccepted={vi.fn()} inlineLoadEnabled schedulingEnabled templateId="builtin:multi-workload-mix" savedScenario={saved} /></NavigationGuardContext.Provider>));
+ await act(async () => { await Promise.resolve(); });
+ expect(endpoints.listLoadTemplates).toHaveBeenCalledWith('p', 'builtin:multi-workload-mix', 0, expect.any(AbortSignal));
+ expect(host.textContent).toContain('Server limits: 2 workloads · 4 bindings · 50 users');
+ expect(host.textContent).toContain('Saved revision loaded. Validate changes before saving.');
+ expect([...host.querySelectorAll('button')].find(button => button.textContent?.includes('Add Workload'))!.disabled).toBe(true);
+});
+
+it('warns when Server limits are unavailable while reopening a saved scenario', async () => {
+ const savedDefinition = { ...definition, workloads: definition.workloads.map(row => ({ ...row, load:{users:10} })) };
+ const bindings = Object.fromEntries(savedDefinition.workloads.map(row => [row.id, { mix: { 'slot-a': {type:'template',id:'PAY'}, 'slot-b': {type:'flow',id:'REFUND'} } }]));
+ const saved = { id:'LS1',packageId:'p',name:'Saved',description:'',tags:[],model:'virtualUsers',revision:1,updatedAt:'',definition:{packageId:'p',environment:'SIT',templateComposition:{templateId:'builtin:multi-workload-mix',revision:'source-revision',definition:savedDefinition,bindings:{schemaVersion:'att-load-bindings/v1',bindings}}} };
+ endpoints.listLoadTemplates.mockRejectedValue(new Error('offline'));
+ await act(async () => root.render(<NavigationGuardContext.Provider value={{navigate,registerUnsavedChanges:()=>vi.fn()}}><LoadTemplateBuilder api={{} as never} packages={[{packageId:'p'}]} selectedPackage="p" selectedEnvironment="SIT" onPackageChange={vi.fn()} onEnvironmentChange={vi.fn()} onJobAccepted={vi.fn()} inlineLoadEnabled schedulingEnabled templateId="builtin:multi-workload-mix" savedScenario={saved} /></NavigationGuardContext.Provider>));
+ await act(async () => { await Promise.resolve(); });
+ expect(host.textContent).toContain('Current Server limits are unavailable; validate before saving.');
+ expect(host.textContent).not.toContain('Server limits:');
+});
+
 it.each(['single-vu','single-tps','single-workload-mix','multi-vu','multi-tps','multi-workload-mix'])('preserves bound Targets when reopening %s', async mode => {
  const mixed=mode.endsWith('mix'), arrival=mode.endsWith('tps');
  const policy={load:arrival?{arrivalRate:'100/s',maxConcurrent:10,overloadPolicy:'drop',duration:'30s'}:{users:2,duration:'30s'}};

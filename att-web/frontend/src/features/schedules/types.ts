@@ -32,6 +32,14 @@ export interface ScheduleDefinition {
   revisionPolicy?: string;
   recentStatus?: string;
   debugTarget?: { type: string; id: string } | null;
+  runOptions?: { debug?: boolean; failFast?: boolean } | null;
+  executionSettings?: {
+    thresholds?: Record<string, unknown>;
+    evidence?: Record<string, unknown>;
+    testdata?: unknown;
+    execution?: Record<string, unknown>;
+    seed?: number | string;
+  } | null;
   scenario?: string | null;
   inlineSnapshot?: boolean;
   loadModel?: string | null;

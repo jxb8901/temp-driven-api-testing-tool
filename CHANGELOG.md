@@ -2,9 +2,9 @@
 
 # ATT 4.2.8 - 2026-10-31
 
-- Improve MQ load pool capacity accounting and timeout diagnostics.
+- Improve MQ load pool capacity accounting and timeout diagnostics, including bounded shutdown with residual reservation reporting.
 - Add private saved load scenarios and versioned schedule execution reviews.
-- Complete schedule execution editing for environment, thresholds, evidence, testdata and related overrides; reopen API-authored saved scenarios in the Advanced Load editor.
+- Complete schedule execution editing for environment, thresholds, evidence, testdata and related overrides; prefill retained advanced/RUN values; refresh Server limits when reopening saved template scenarios; reopen API-authored saved scenarios in the Advanced Load editor.
 
 # ATT 4.2.7 - 2026-10-29
 

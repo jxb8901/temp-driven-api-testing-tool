@@ -281,6 +281,7 @@ class ServerRuntimeScheduleTest {
             assertFalse(runSchedule.runInput.toString().contains("package-sidecar-secret"));
             assertTrue(runSchedule.runInput.toString().contains("$attDebugKeepDefault"));
             assertEquals("run",setupRuntime.loadScheduleView(runSchedule).get("executionType"));
+            assertEquals(Map.of("debug",Boolean.FALSE,"failFast",Boolean.FALSE),setupRuntime.loadScheduleView(runSchedule).get("runOptions"));
             assertEquals("RUN renamed",setupRuntime.updateLoadSchedule(runSchedule.id,ServerRuntime.JSON.readTree("{\"name\":\"RUN renamed\"}"),"alice").name);
             assertThrows(IllegalArgumentException.class,()->setupRuntime.updateLoadSchedule(runSchedule.id,ServerRuntime.JSON.readTree("{\"environment\":\"UAT\"}"),"alice"));
             Map<String,Object> runOccurrence=setupRuntime.triggerLoadSchedule(runSchedule.id,"alice");

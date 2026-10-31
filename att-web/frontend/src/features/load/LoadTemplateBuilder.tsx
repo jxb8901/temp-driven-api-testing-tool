@@ -78,7 +78,17 @@ export function LoadTemplateBuilder(props: LoadFeatureProps & { templateId: stri
             mixDefaultsJson: JSON.stringify({ inputs: object(bound.inputs), vars: object(bound.vars) }), target: toTarget(bound.target),
             mix: (row.mix || []).map(slot => ({ ...toTarget(mix[slot.id]), entryId: slot.id, weight: String(slot.weight) })) };
         }));
-        setMessage('Saved revision loaded. Validate changes before saving.'); return;
+        let limitsMessage = '';
+        try {
+          const page = await api.listLoadTemplates(packageId, templateId, 0, controller.signal);
+          if (controller.signal.aborted || version !== loadSequence.current) return;
+          if (page.limits) setLimits(page.limits);
+          else limitsMessage = ' Current Server limits are unavailable; validate before saving.';
+        } catch {
+          if (controller.signal.aborted || version !== loadSequence.current) return;
+          limitsMessage = ' Current Server limits are unavailable; validate before saving.';
+        }
+        setMessage(`Saved revision loaded. Validate changes before saving.${limitsMessage}`); return;
       }
       let offset = 0;
       do {

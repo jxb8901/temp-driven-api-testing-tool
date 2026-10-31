@@ -2,6 +2,7 @@ package att.load;
 
 import org.junit.jupiter.api.Test;
 
+import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -183,6 +184,38 @@ class LoadResourcePoolGrowthTest {
             pool.ensureMinIdle(1);
             try (LoadResourcePool<Integer>.Lease lease = pool.borrow()) { assertEquals(1, lease.value()); }
         } finally { pool.close(); }
+    }
+
+    @Test
+    void shutdownTerminatesWhenPhysicalConnectNeverReturns() throws Exception {
+        CountDownLatch entered = new CountDownLatch(1);
+        AtomicInteger closes = new AtomicInteger();
+        LoadResourcePool<Integer> pool = new LoadResourcePool<Integer>(1, 40L, () -> {
+            entered.countDown();
+            try { new CountDownLatch(1).await(); }
+            catch (InterruptedException interrupted) { Thread.currentThread().interrupt(); throw new IllegalStateException(interrupted); }
+            return 1;
+        }, value -> closes.incrementAndGet());
+        ExecutorService workers = Executors.newSingleThreadExecutor();
+        try {
+            Future<?> preparation = workers.submit(() -> pool.ensureMinIdle(1));
+            assertTrue(entered.await(1, TimeUnit.SECONDS));
+            long started = System.nanoTime();
+            IllegalStateException timeout = org.junit.jupiter.api.Assertions.assertThrows(IllegalStateException.class, pool::close);
+            long elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started);
+            assertTrue(timeout.getMessage().contains("LOAD_RESOURCE_TEARDOWN_TIMEOUT"), timeout.getMessage());
+            assertTrue(elapsedMs < 15_000L, "shutdown must honor its deadline, elapsedMs=" + elapsedMs);
+            Map<String, Object> metrics = pool.metrics();
+            assertEquals(1, metrics.get("residualCreating"));
+            assertEquals(0, metrics.get("residualClosing"));
+            assertEquals(1, metrics.get("creating"));
+            assertEquals(1, metrics.get("total"));
+            assertEquals(0, closes.get());
+            preparation.cancel(true);
+        } finally {
+            workers.shutdownNow();
+            workers.awaitTermination(2, TimeUnit.SECONDS);
+        }
     }
 
     @Test

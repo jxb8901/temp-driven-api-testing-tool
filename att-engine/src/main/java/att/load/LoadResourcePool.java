@@ -38,6 +38,10 @@ public final class LoadResourcePool<T> implements AutoCloseable {
     private final AtomicLong waitNanos = new AtomicLong();
     private final List<RuntimeException> closeFailures = Collections.synchronizedList(new ArrayList<RuntimeException>());
     private volatile boolean closed;
+    /** Residual physical reservations after a bounded shutdown wait. */
+    private int residualCreating;
+    private int residualClosing;
+    private static final long SHUTDOWN_WAIT_FLOOR_MS = 5_000L;
 
     public LoadResourcePool(int maxSize, long borrowTimeoutMs, Supplier<T> factory, Consumer<T> closer) {
         this(maxSize, 0, borrowTimeoutMs, factory, closer);
@@ -257,6 +261,7 @@ public final class LoadResourcePool<T> implements AutoCloseable {
         result.put("closed", closed); result.put("waiting", waiting()); result.put("waitDurationMs", waitDurationMs());
         result.put("timeoutCount", timeoutCount()); result.put("created", created()); result.put("discarded", discarded());
         result.put("replacementCount", discarded()); result.put("failures", failures());
+        result.put("residualCreating", residualCreating); result.put("residualClosing", residualClosing);
         Map<String, Object> saturation = new LinkedHashMap<String, Object>();
         saturation.put("usage", active()); saturation.put("limit", maxSize); saturation.put("threshold", 0.8d);
         result.put("limitUsage", java.util.Collections.<String, Object>singletonMap("mq.pool.activeConnections", saturation));
@@ -308,13 +313,30 @@ public final class LoadResourcePool<T> implements AutoCloseable {
         }
         for (T value : values) closeTracked(value);
         boolean interrupted = false;
+        long budgetMs = Math.max(borrowTimeoutMs, SHUTDOWN_WAIT_FLOOR_MS);
+        long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(budgetMs);
         synchronized (this) {
             while (creating > 0 || closing > 0) {
-                try { wait(); }
-                catch (InterruptedException cancelled) { interrupted = true; }
+                long remaining = deadline - System.nanoTime();
+                if (remaining <= 0L) break;
+                try { TimeUnit.NANOSECONDS.timedWait(this, remaining); }
+                catch (InterruptedException cancelled) {
+                    interrupted = true;
+                    // Keep waiting only until the shutdown deadline; never block unboundedly.
+                }
+            }
+            if (creating > 0 || closing > 0) {
+                residualCreating = creating;
+                residualClosing = closing;
             }
         }
         if (interrupted) Thread.currentThread().interrupt();
+        if (residualCreating > 0 || residualClosing > 0) {
+            Map<String, Object> snapshot = metrics();
+            throw new IllegalStateException("LOAD_RESOURCE_TEARDOWN_TIMEOUT: outstanding physical reservations remain "
+                    + "creating=" + residualCreating + " closing=" + residualClosing + " total=" + total.get()
+                    + " snapshot=" + snapshot);
+        }
         if (!closeFailures.isEmpty()) {
             IllegalStateException failure = new IllegalStateException(
                     "LOAD_RESOURCE_TEARDOWN_FAILED: one or more pooled resources did not confirm close");
