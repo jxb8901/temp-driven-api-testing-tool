@@ -6,6 +6,8 @@ import type { ScheduleDefinition, ScheduleExecutionReview, SchedulesApi } from '
 type MixEntry = { id: string; weight: string; targetType: string; targetId: string };
 type Workload = { id: string; model: string; rate: string; users: string; maxConcurrent: string; targetType: string; targetId: string; mix: boolean; mixEntries: MixEntry[]; rampUp: string; warmup: string; duration: string; rampDown: string };
 type Preview = ScheduleExecutionReview['preview'];
+type AdvancedJson = { thresholds: string; evidence: string; testdata: string; execution: string; seed: string };
+
 function previewText(preview: Preview): string {
   const value=preview.previewYaml || JSON.stringify(preview,null,2);
   try { return JSON.stringify(JSON.parse(value),null,2); } catch { return value; }
@@ -26,7 +28,19 @@ export function previewChanges(before: string, after: string): {kind:'removed'|'
   }
   return changes;
 }
-/** A bounded editor for the safe schedule summary; validation retains all unedited values server-side. */
+function parseObjectField(label: string, value: string): Record<string, unknown> | undefined {
+  const trimmed=value.trim(); if(!trimmed)return undefined;
+  const parsed: unknown=JSON.parse(trimmed);
+  if(!parsed || typeof parsed!=='object' || Array.isArray(parsed))throw new Error(`${label} must be a JSON object.`);
+  return parsed as Record<string, unknown>;
+}
+function parseArrayOrObject(label: string, value: string): unknown {
+  const trimmed=value.trim(); if(!trimmed)return undefined;
+  const parsed: unknown=JSON.parse(trimmed);
+  if(parsed==null || (typeof parsed!=='object'))throw new Error(`${label} must be JSON.`);
+  return parsed;
+}
+/** Reviewable execution editor covering the override fields accepted by schedule execution drafts. */
 export function ScheduleExecutionEditor({ schedule, api, onClose, onSaved }: {
   schedule: ScheduleDefinition; api: SchedulesApi; onClose(): void; onSaved(value: ScheduleDefinition): void;
 }) {
@@ -35,15 +49,21 @@ export function ScheduleExecutionEditor({ schedule, api, onClose, onSaved }: {
   const initialWorkloads=useRef(workloads);
   const [scenario,setScenario]=useState(schedule.scenario || '');
   const [packageLoad,setPackageLoad]=useState(JSON.stringify(schedule.load || {},null,2));
+  const [environment,setEnvironment]=useState(schedule.environment || '');
+  const initialEnvironment=useRef(environment);
   const [cases,setCases]=useState((schedule.selectedCaseIds || []).join(', '));
   const [runTarget,setRunTarget]=useState(schedule.debugTarget || {type:'',id:''});
+  const [runOptions,setRunOptions]=useState({debug:false,failFast:false});
+  const [runInput,setRunInput]=useState('');
   const [phases,setPhases]=useState({rampUp:'',warmup:'',duration:'',rampDown:''});
+  const [advanced,setAdvanced]=useState<AdvancedJson>({thresholds:'',evidence:'',testdata:'',execution:'',seed:''});
   const [changed,setChanged]=useState(false),[busy,setBusy]=useState(false);
   const [review,setReview]=useState<ScheduleExecutionReview | null>(null);
   const [error,setError]=useState('');
   useEffect(() => navigation.registerUnsavedChanges(changed, 'Schedule execution settings'), [changed,navigation.registerUnsavedChanges]);
   function edit() { setChanged(true); setReview(null); setError(''); }
   function close() { if (!changed || window.confirm('Discard execution settings changes?')) onClose(); }
+  function setAdvancedField(field: keyof AdvancedJson, value: string) { edit(); setAdvanced(current=>({...current,[field]:value})); }
   async function validate() {
     if (!api.createScheduleExecutionDraft) return;
     setBusy(true);setError('');setReview(null);
@@ -51,12 +71,18 @@ export function ScheduleExecutionEditor({ schedule, api, onClose, onSaved }: {
       const overrides: Record<string,unknown>={};
       if(!schedule.inlineSnapshot) {
         const parsed: unknown=JSON.parse(packageLoad); if(!parsed || typeof parsed!=='object' || Array.isArray(parsed))throw new Error('Load overrides must be a JSON object.');
-        setReview(await api.createScheduleExecutionDraft(schedule.id,{expectedDefinitionVersion:schedule.definitionVersion ?? 0,packageEdit:{scenario,load:parsed}}));return;
+        const packageEdit: Record<string,unknown>={scenario,load:parsed};
+        if(environment!==initialEnvironment.current)packageEdit.environment=environment;
+        setReview(await api.createScheduleExecutionDraft(schedule.id,{expectedDefinitionVersion:schedule.definitionVersion ?? 0,packageEdit}));return;
       }
+      if(environment!==initialEnvironment.current)overrides.environment=environment;
       if(schedule.executionType==='run') {
         if(schedule.debugTarget) {
           if(runTarget.type!==schedule.debugTarget.type || runTarget.id!==schedule.debugTarget.id) overrides.target=runTarget;
+          const input=parseObjectField('RUN input',runInput); if(input)overrides.input=input;
         } else if(cases.trim()) overrides.selection={caseIds:cases.split(',').map(value=>value.trim()).filter(Boolean)};
+        const options=Object.fromEntries(Object.entries(runOptions).filter(([,value])=>value));
+        if(Object.keys(options).length)overrides.options=options;
       }
       else {
         const load=Object.fromEntries(Object.entries(phases).filter(([,value])=>value.trim()));if(Object.keys(load).length)overrides.load=load;
@@ -73,6 +99,11 @@ export function ScheduleExecutionEditor({ schedule, api, onClose, onSaved }: {
           return Object.keys(load).length||target||mixEdits.length?[{id:row.id,...(Object.keys(load).length?{load}:{}),...(target?{target}:{}),...(mixEdits.length?{mixEdits}:{})}]:[];
         });
         if(edits.length)overrides.workloads=edits;
+        const thresholds=parseObjectField('Thresholds',advanced.thresholds); if(thresholds)overrides.thresholds=thresholds;
+        const evidence=parseObjectField('Evidence',advanced.evidence); if(evidence)overrides.evidence=evidence;
+        const testdata=parseArrayOrObject('Testdata',advanced.testdata); if(testdata!==undefined)overrides.testdata=testdata;
+        const execution=parseObjectField('Execution',advanced.execution); if(execution)overrides.execution=execution;
+        if(advanced.seed.trim())overrides.seed=Number(advanced.seed);
       }
       setReview(await api.createScheduleExecutionDraft(schedule.id,{expectedDefinitionVersion:schedule.definitionVersion ?? 0,overrides}));
     } catch(failure) {setError(failure instanceof Error?failure.message:'Validation failed.');} finally {setBusy(false);}
@@ -85,6 +116,7 @@ export function ScheduleExecutionEditor({ schedule, api, onClose, onSaved }: {
   }
   return <LoadDialog title="Edit execution settings" onCancel={close}>
     <p>Schedule {schedule.name} · snapshot {schedule.snapshotVersion ?? 1}. These fields change future executions only.</p>
+    <label>Environment <input value={environment} onChange={event=>{edit();setEnvironment(event.target.value);}} placeholder="Package default" /></label>
     {!schedule.inlineSnapshot ? <><p>The schedule will continue to resolve its package scenario when it fires.</p><label>Package scenario path <input value={scenario} onChange={event=>{edit();setScenario(event.target.value);}} /></label><label>Load overrides (JSON) <textarea value={packageLoad} onChange={event=>{edit();setPackageLoad(event.target.value);}} /></label></> : schedule.executionType==='load' ? <>
       {workloads.map((row,index)=><fieldset key={row.id}><legend>{row.id}</legend>
         {row.model==='arrivalRate'?<><label>Arrival rate <input value={row.rate} onChange={event=>{edit();setWorkloads(current=>current.map((item,i)=>i===index?{...item,rate:event.target.value}:item));}} /></label>
@@ -98,9 +130,24 @@ export function ScheduleExecutionEditor({ schedule, api, onClose, onSaved }: {
         {(['rampUp','warmup','duration','rampDown'] as const).map(field=><label key={field}>{field} <input value={row[field]} onChange={event=>{edit();setWorkloads(current=>current.map((item,i)=>i===index?{...item,[field]:event.target.value}:item));}} /></label>)}
       </fieldset>)}
       <p>Leave phase fields empty to keep the existing timing.</p>{(['rampUp','warmup','duration','rampDown'] as const).map(field=><label key={field}>{field} <input value={phases[field]} onChange={event=>{edit();setPhases(current=>({...current,[field]:event.target.value}));}} /></label>)}
+      <fieldset><legend>Common advanced settings</legend>
+        <p>Leave a field empty to keep the retained value. Values must be valid JSON for object or array fields.</p>
+        <label>Thresholds (JSON) <textarea aria-label="Thresholds JSON" value={advanced.thresholds} onChange={event=>setAdvancedField('thresholds',event.target.value)} /></label>
+        <label>Evidence (JSON) <textarea aria-label="Evidence JSON" value={advanced.evidence} onChange={event=>setAdvancedField('evidence',event.target.value)} /></label>
+        <label>Testdata (JSON) <textarea aria-label="Testdata JSON" value={advanced.testdata} onChange={event=>setAdvancedField('testdata',event.target.value)} /></label>
+        <label>Execution defaults (JSON) <textarea aria-label="Execution JSON" value={advanced.execution} onChange={event=>setAdvancedField('execution',event.target.value)} /></label>
+        <label>Seed <input type="number" aria-label="Seed" value={advanced.seed} onChange={event=>setAdvancedField('seed',event.target.value)} /></label>
+      </fieldset>
     </>: schedule.debugTarget ? <><p>Changing the target clears its previous input bindings; validate the new target before saving.</p>
       <label>Target type <select value={runTarget.type} onChange={event=>{edit();setRunTarget(current=>({...current,type:event.target.value}));}}>{['template','flow','tool'].map(type=><option key={type}>{type}</option>)}</select></label>
-      <label>Target ID <input value={runTarget.id} onChange={event=>{edit();setRunTarget(current=>({...current,id:event.target.value}));}} /></label></> : schedule.selectedCaseIds?.length ? <label>Selected case IDs <input value={cases} onChange={event=>{edit();setCases(event.target.value);}} /></label> : <p>This RUN target needs the full RUN editor.</p>}
+      <label>Target ID <input value={runTarget.id} onChange={event=>{edit();setRunTarget(current=>({...current,id:event.target.value}));}} /></label>
+      <label>Input bindings (JSON) <textarea aria-label="RUN input JSON" value={runInput} onChange={event=>{edit();setRunInput(event.target.value);}} /></label>
+      <label><input type="checkbox" checked={runOptions.debug} onChange={event=>{edit();setRunOptions(current=>({...current,debug:event.target.checked}));}} /> Debug</label>
+      <label><input type="checkbox" checked={runOptions.failFast} onChange={event=>{edit();setRunOptions(current=>({...current,failFast:event.target.checked}));}} /> Fail fast</label>
+    </> : schedule.selectedCaseIds?.length ? <><label>Selected case IDs <input value={cases} onChange={event=>{edit();setCases(event.target.value);}} /></label>
+      <label><input type="checkbox" checked={runOptions.debug} onChange={event=>{edit();setRunOptions(current=>({...current,debug:event.target.checked}));}} /> Debug</label>
+      <label><input type="checkbox" checked={runOptions.failFast} onChange={event=>{edit();setRunOptions(current=>({...current,failFast:event.target.checked}));}} /> Fail fast</label>
+    </> : <p>This RUN target needs the full RUN editor.</p>}
     {error&&<p role="alert">{error}</p>}
     <button type="button" className="button button-quiet" disabled={busy || (schedule.inlineSnapshot && schedule.executionType==='load' && (!workloads.length || Boolean(schedule.targetIdentity?.truncated))) || (schedule.inlineSnapshot && schedule.executionType==='run'&&!schedule.selectedCaseIds?.length&&!schedule.debugTarget)} onClick={() => void validate()}>Validate changes</button>
     {review && <section aria-label="Review execution changes"><h3>Review future snapshot {review.snapshotVersion+1}</h3>

@@ -96,6 +96,75 @@ class LoadMqPoolingTest {
     }
 
     @Test
+    void multiWorkloadMqPoolsPrepareChurnAndDrainWithoutCapacityInvariantErrors() throws Exception {
+        MqHelperConfig primary=MqHelperConfig.physical(config(3,0,2000L).mqHelpers().get("broker"),"broker","primary");
+        MqHelperConfig secondary=MqHelperConfig.physical(config(3,1,2000L).mqHelpers().get("broker"),"broker","secondary");
+        AtomicInteger live=new AtomicInteger(), peak=new AtomicInteger(), disconnects=new AtomicInteger();
+        AtomicInteger invariantErrors=new AtomicInteger(), timeouts=new AtomicInteger(), completed=new AtomicInteger();
+        MqTransport.Factory delegate=helper -> {
+            int current=live.incrementAndGet();peak.accumulateAndGet(current,Math::max);
+            java.util.concurrent.atomic.AtomicBoolean open=new java.util.concurrent.atomic.AtomicBoolean();
+            return new MqTransport.Connection() {
+                @Override public MqTransport.Queue open(String name,boolean input,boolean output) {
+                    if(!open.compareAndSet(false,true))throw new AssertionError("physical connection leased concurrently");
+                    return new MqTransport.Queue() {
+                        @Override public MqTransport.Message put(byte[] payload,MqTransport.PutRequest request) { return null; }
+                        @Override public MqTransport.Message get(MqTransport.GetRequest request) { return null; }
+                        @Override public void close() { if(!open.compareAndSet(true,false))throw new AssertionError("duplicate queue close"); }
+                    };
+                }
+                @Override public void disconnect() { if(open.get())throw new AssertionError("connection closed while in use");live.decrementAndGet();disconnects.incrementAndGet(); }
+                @Override public void close() { disconnect(); }
+            };
+        };
+        ExecutorService workers=Executors.newFixedThreadPool(12);
+        try(PooledMqTransportFactory pools=new PooledMqTransportFactory(delegate,3,2000L)) {
+            assertEquals(1,pools.prepareInitialReady(primary));
+            assertEquals(1,pools.prepareInitialReady(secondary));
+            CountDownLatch start=new CountDownLatch(1);
+            List<Future<?>> tasks=new ArrayList<Future<?>>();
+            for(int workload=0;workload<2;workload++)for(int worker=0;worker<4;worker++) {
+                final int group=workload;
+                tasks.add(workers.submit(()->{
+                    start.await();
+                    for(int i=0;i<80;i++) {
+                        MqHelperConfig helper=((i+group)&1)==0?primary:secondary;
+                        try {
+                            try(MqTransport.Connection connection=pools.connect(helper);
+                                MqTransport.Queue queue=connection.open("fixture",false,true)) {
+                                Thread.yield();
+                            }
+                            completed.incrementAndGet();
+                        } catch(IllegalStateException invariant) {
+                            if(String.valueOf(invariant.getMessage()).contains("capacity invariant"))invariantErrors.incrementAndGet();
+                            else throw invariant;
+                        } catch(MqTransport.Exception timeout) {
+                            if("MQ_POOL_TIMEOUT".equals(timeout.reason()))timeouts.incrementAndGet();
+                            else throw timeout;
+                        }
+                    }
+                    return null;
+                }));
+            }
+            start.countDown();
+            for(Future<?> task:tasks)task.get(30L,TimeUnit.SECONDS);
+            assertEquals(0,invariantErrors.get(),"borrow must wait instead of raising capacity invariant errors");
+            assertEquals(0,timeouts.get(),String.valueOf(timeouts.get()));
+            assertEquals(640,completed.get());
+            for(MqHelperConfig helper:new MqHelperConfig[]{primary,secondary}) {
+                Map<String,Object> metrics=pools.pool(helper.poolKey()).metrics();
+                assertEquals(0,metrics.get("active"),metrics.toString());
+                assertEquals(0,metrics.get("waiting"),metrics.toString());
+                assertEquals(0,metrics.get("timeoutCount"),metrics.toString());
+                assertTrue(((Number)metrics.get("total")).intValue()<=3,metrics.toString());
+            }
+            assertTrue(peak.get()<=6);
+        } finally {workers.shutdownNow();assertTrue(workers.awaitTermination(5L,TimeUnit.SECONDS));}
+        assertEquals(0,live.get());
+        assertEquals(disconnects.get()>0,true);
+    }
+
+    @Test
     void concurrentIterationsUseOneExclusiveLeaseAndPublishPoolTimeout() throws Exception {
         BlockingFactory delegate = new BlockingFactory();
         FrameworkConfig config = config(1, 0, 50L);

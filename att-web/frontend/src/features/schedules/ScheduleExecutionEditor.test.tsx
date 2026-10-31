@@ -67,3 +67,19 @@ it('updates a mix weight without replacing other bindings', async () => {
  expect(api.createScheduleExecutionDraft).toHaveBeenCalledWith('S4',{expectedDefinitionVersion:1,overrides:{workloads:[{id:'mixed',mixEdits:[{id:'a',weight:50}]}]}});
  await act(async()=>root.unmount());host.remove();
 });
+it('reviews environment and advanced LOAD overrides', async () => {
+ (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT=true;
+ const host=document.createElement('div');document.body.append(host);const root=createRoot(host);
+ const schedule={id:'S5',name:'Advanced',packageId:'p',executionType:'load' as const,environment:'SIT',timezone:'UTC',maxConcurrentRuns:1,enabled:true,inlineSnapshot:true,definitionVersion:2,targetIdentity:{workloads:[{name:'payments',model:'arrivalRate',arrivalRate:'100/s',maxConcurrent:20,targets:[]}]}};
+ const api={createScheduleExecutionDraft:vi.fn().mockResolvedValue({draftId:'A5',definitionVersion:2,snapshotVersion:1,revisionDigest:'abc',sourcePolicy:'strict',expiresAt:new Date(Date.now()+60000).toISOString(),originalPreview:{},preview:{}})};
+ await act(async()=>root.render(<NavigationGuardContext.Provider value={{navigate:vi.fn(),registerUnsavedChanges:()=>vi.fn()}}><ScheduleExecutionEditor schedule={schedule} api={api as never} onClose={vi.fn()} onSaved={vi.fn()} /></NavigationGuardContext.Provider>));
+ const environment=[...host.querySelectorAll('label')].find(label=>label.textContent?.startsWith('Environment'))!.querySelector('input') as HTMLInputElement;
+ const thresholds=host.querySelector('textarea[aria-label="Thresholds JSON"]') as HTMLTextAreaElement;
+ const evidence=host.querySelector('textarea[aria-label="Evidence JSON"]') as HTMLTextAreaElement;
+ const testdata=host.querySelector('textarea[aria-label="Testdata JSON"]') as HTMLTextAreaElement;
+ const setValue=(element:HTMLInputElement|HTMLTextAreaElement,value:string)=>act(async()=>{Object.getOwnPropertyDescriptor(element instanceof HTMLTextAreaElement?HTMLTextAreaElement.prototype:HTMLInputElement.prototype,'value')!.set!.call(element,value);element.dispatchEvent(new Event('input',{bubbles:true}));});
+ await setValue(environment,'UAT'); await setValue(thresholds,'{"passRate":0.99}'); await setValue(evidence,'{"mode":"failures"}'); await setValue(testdata,'["data/cases.csv"]');
+ await act(async()=>[...host.querySelectorAll('button')].find(button=>button.textContent?.includes('Validate changes'))!.click());
+ expect(api.createScheduleExecutionDraft).toHaveBeenCalledWith('S5',{expectedDefinitionVersion:2,overrides:{environment:'UAT',thresholds:{passRate:0.99},evidence:{mode:'failures'},testdata:['data/cases.csv']}});
+ await act(async()=>root.unmount());host.remove();
+});

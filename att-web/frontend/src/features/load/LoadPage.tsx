@@ -1,8 +1,10 @@
 import { EnvironmentResolutionNotice } from '../explorer/EnvironmentResolutionNotice';
 import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import './load.css';
+import { api as serverApi } from '../../api';
 import { TypedSidecarForm, type SidecarGroup } from '../explorer/TypedSidecarForm';
 import { ThresholdEvidenceEditor } from './ThresholdEvidenceEditor';
+import { LoadDialog } from './LoadDialog';
 import { CodeEditor } from '../code/CodeEditor';
 import type { JsonObject as SidecarJsonObject } from '../explorer/types';
 import type {
@@ -288,7 +290,7 @@ function effectiveWorkloadDuration(scenarioValue:unknown,workloadValue:unknown):
 export function LoadPage(props: LoadFeatureProps): React.JSX.Element {
   const {
     api, packages, selectedPackage, selectedEnvironment, environments = [], environmentState, inlineLoadEnabled,
-    schedulingEnabled = false, principal, replayDraftId, replaySourceJobId, onPackageChange, onEnvironmentChange, onJobAccepted, onSchedule, confirmStart, onRetryEnvironments,
+    schedulingEnabled = false, principal, replayDraftId, replaySourceJobId, savedScenario, onPackageChange, onEnvironmentChange, onJobAccepted, onSchedule, confirmStart, onRetryEnvironments, onClose,
   } = props;
   const [model, setModel] = useState<LoadModel>('virtualUsers');
   const [policy, setPolicy] = useState<JsonObject | null>(null);
@@ -316,6 +318,14 @@ export function LoadPage(props: LoadFeatureProps): React.JSX.Element {
   const [replayDraftError, setReplayDraftError] = useState('');
   const [replayDirty, setReplayDirty] = useState(false);
   const [missingReplayFields, setMissingReplayFields] = useState<string[]>([]);
+  const [savedId, setSavedId] = useState(savedScenario?.id);
+  const [savedRevision, setSavedRevision] = useState(savedScenario?.revision);
+  const [saveOpen, setSaveOpen] = useState(false);
+  const [saveName, setSaveName] = useState(savedScenario?.name || '');
+  const [saveDescription, setSaveDescription] = useState(savedScenario?.description || '');
+  const [saveTags, setSaveTags] = useState((savedScenario?.tags || []).join(', '));
+  const [saveError, setSaveError] = useState('');
+  const [savedDirty, setSavedDirty] = useState(false);
   const navigation=useNavigationGuard();
   const requestSequence = useRef(0);
   const replayValidationGeneration = useRef(0);
@@ -323,14 +333,18 @@ export function LoadPage(props: LoadFeatureProps): React.JSX.Element {
   const submitLock = useRef(false);
   const releaseReplayNavigationGuard = useRef<() => void>(() => {});
   const replaySeeded = useRef(false);
+  const savedSeeded = useRef(false);
   const replayEnvironmentOrigin = useRef('');
   const replayPackageDefaultEnvironment = useRef('');
   useEffect(()=>{
-    const release=navigation.registerUnsavedChanges(Boolean(replaySourceJobId&&replayDirty),'Edited Job replay settings');
+    const release=navigation.registerUnsavedChanges(Boolean((replaySourceJobId&&replayDirty)||(savedScenario&&savedDirty)),replaySourceJobId?'Edited Job replay settings':'Saved scenario edits');
     releaseReplayNavigationGuard.current=release;
     return()=>{release();if(releaseReplayNavigationGuard.current===release)releaseReplayNavigationGuard.current=()=>{};};
-  },[navigation.registerUnsavedChanges,replayDirty,replaySourceJobId]);
-  function markReplayDirty(){if(replaySourceJobId){replayValidationGeneration.current++;setReplayDirty(true);setReplayReview(null);setDraft(null);setDraftState('idle');}}
+  },[navigation.registerUnsavedChanges,replayDirty,replaySourceJobId,savedDirty,savedScenario]);
+  function markReplayDirty(){
+    if(replaySourceJobId){replayValidationGeneration.current++;setReplayDirty(true);setReplayReview(null);setDraft(null);setDraftState('idle');}
+    if(savedScenario){setSavedDirty(true);setDraft(null);setDraftState('idle');}
+  }
 
   useEffect(() => {
     if(!replayDraftId||!replaySourceJobId)return;
@@ -423,6 +437,17 @@ export function LoadPage(props: LoadFeatureProps): React.JSX.Element {
       setReplayDraftLoading(false);
     } catch(error) {setReplayDraftError(error instanceof Error?error.message:'The retained LOAD definition cannot be edited safely.');setReplayDraftLoading(false);}
   },[policy,replayEditorDefinition]);
+
+  useEffect(()=>{
+    if(!savedScenario||!policy||savedSeeded.current||replaySourceJobId)return;
+    try {
+      const seeded=retainedScenarioToEditor(savedScenario.definition.scenario);
+      savedSeeded.current=true;setModel(seeded.model);setTiming(seeded.timing);setWorkloads(seeded.workloads);setAdvanced(seeded.advanced);
+      if(seeded.diagnostics.length)setDiagnostics(current=>[...current,...seeded.diagnostics]);
+      setDraft(null);setDraftState('idle');setDraftMessage('Saved scenario loaded. Edit the fields, validate, then save a new revision.');
+      setSavedDirty(false);
+    } catch(error) {setRequestError(error instanceof Error?error.message:'This saved scenario cannot be opened in the Advanced Load editor.');}
+  },[policy,replaySourceJobId,savedScenario]);
 
   useEffect(() => {
     if (!policy) { setRawScenarioJson(''); return; }
@@ -586,6 +611,22 @@ export function LoadPage(props: LoadFeatureProps): React.JSX.Element {
     URL.revokeObjectURL(blobUrl);
   }
 
+  async function saveSavedScenario() {
+    if (!savedScenario || !draft || Date.parse(draft.expiresAt) <= Date.now()) { setSaveError('The draft expired. Validate again.'); return; }
+    if (!saveName.trim()) { setSaveError('Enter a Scenario name.'); return; }
+    setSaveError('');
+    try {
+      const metadata = { draftId: draft.draftId, name: saveName.trim(), description: saveDescription.trim(), tags: saveTags.split(',').map(tag => tag.trim()).filter(Boolean) };
+      const saved = savedId
+        ? await serverApi.updateSavedLoadScenario(savedId, { ...metadata, expectedRevision: savedRevision! })
+        : await serverApi.saveLoadScenario(metadata);
+      setSavedId(saved.id); setSavedRevision(saved.revision); setSavedDirty(false); setSaveOpen(false);
+      setDraftMessage(`Saved ${saved.name} (revision ${saved.revision}). Return to Saved Scenarios and validate this revision before running or scheduling.`);
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : 'Scenario could not be saved.');
+    }
+  }
+
   function updateAdvanced<K extends keyof typeof advanced>(key: K, value: (typeof advanced)[K]) {
     markReplayDirty();setAdvanced(current => ({ ...current, [key]: value }));
   }
@@ -620,15 +661,17 @@ export function LoadPage(props: LoadFeatureProps): React.JSX.Element {
       <header className="att-feature-header">
         <div>
           <p className="att-eyebrow">Load testing</p>
-          <h1>{replaySourceJobId?'Configure & Rerun LOAD':'New Load scenario'}</h1>
-          <p>Build a shared timing plan, configure workloads, then validate the complete scenario on the Server.</p>
+          <h1>{replaySourceJobId?'Configure & Rerun LOAD':savedScenario?`Edit saved scenario · ${savedScenario.name}`:'New Load scenario'}</h1>
+          <p>{savedScenario?'Edit the authored scenario, validate it, and save a new private revision.':'Build a shared timing plan, configure workloads, then validate the complete scenario on the Server.'}</p>
         </div>
         <span className={`att-feature-state att-state-${policyState}`} role="status" aria-live="polite">{policyMessage}</span>
       </header>
+      {onClose && <button type="button" className="button button-quiet" onClick={() => { if (!savedDirty || window.confirm('Discard unsaved changes and return to Saved Scenarios?')) { releaseReplayNavigationGuard.current(); onClose(); } }}>Back to Saved Scenarios</button>}
       {replayDraftLoading&&<p role="status">Loading the authorized Job draft…</p>}
       {replayDraftError&&<p role="alert">{replayDraftError}</p>}
       {replaySourceJobId&&<div role="note"><p>New LOAD from Job {replaySourceJobId}. Schedule package-change policy does not control this manual rerun.</p>
         <button type="button" onClick={()=>navigation.navigate({kind:'jobs',jobId:replaySourceJobId})}>Back to source Job</button></div>}
+      {savedScenario&&<p role="note">Save creates a new Saved Scenario revision. Validate that revision again from Saved Scenarios before Run or Schedule.</p>}
       {missingReplayFields.length>0&&<p role="note">These fields were not safely retained and need an explicit value before this LOAD can run: {missingReplayFields.join(', ')}.</p>}
 
       <div hidden={replayDraftLoading}>
@@ -643,7 +686,7 @@ export function LoadPage(props: LoadFeatureProps): React.JSX.Element {
         <h2 id="load-model-title">Scenario</h2>
         <div className="att-load-grid">
           <label>Package
-            <select value={selectedPackage} onChange={event => onPackageChange(event.target.value)} disabled={!inlineLoadEnabled||Boolean(replaySourceJobId)}>
+            <select value={selectedPackage} onChange={event => onPackageChange(event.target.value)} disabled={!inlineLoadEnabled||Boolean(replaySourceJobId)||Boolean(savedScenario)}>
               <option value="">Choose a package</option>
               {packages.map(item => <option key={item.packageId} value={item.packageId}>{item.displayName || item.packageId}</option>)}
             </select>
@@ -656,7 +699,7 @@ export function LoadPage(props: LoadFeatureProps): React.JSX.Element {
           </label>
       <EnvironmentResolutionNotice packageId={selectedPackage} environment={selectedEnvironment} />
           <label>Load model
-          <select value={model} onChange={event => {markReplayDirty();setModel(event.target.value as LoadModel);}} disabled={!inlineLoadEnabled||Boolean(replaySourceJobId)}>
+          <select value={model} onChange={event => {markReplayDirty();setModel(event.target.value as LoadModel);}} disabled={!inlineLoadEnabled||Boolean(replaySourceJobId)||Boolean(savedScenario)}>
               <option value="virtualUsers">Virtual Users</option>
               <option value="arrivalRate">Arrival Rate</option>
             </select>
@@ -759,18 +802,26 @@ export function LoadPage(props: LoadFeatureProps): React.JSX.Element {
         {preview && <CodeEditor value={preview} language="yaml" label="Server-validated scenario preview" readOnly />}
         <div className="att-review-actions">
           <button type="button" onClick={() => void validateScenario()} disabled={replayDraftLoading || !policy || (!inlineLoadEnabled&&!replaySourceJobId) || draftState === 'validating' || draftState === 'submitting'}>Validate scenario</button>
-          {!replaySourceJobId&&<button type="button" onClick={() => draft?.draftId && onSchedule?.({ packageId: selectedPackage, environment: selectedEnvironment || undefined, draftId: draft.draftId, previewYaml: draft.previewYaml })}
+          {savedScenario&&<button type="button" onClick={() => setSaveOpen(true)} disabled={!hasLiveDraft || draftState !== 'valid'}>Save Scenario…</button>}
+          {!replaySourceJobId&&!savedScenario&&<button type="button" onClick={() => draft?.draftId && onSchedule?.({ packageId: selectedPackage, environment: selectedEnvironment || undefined, draftId: draft.draftId, previewYaml: draft.previewYaml })}
             disabled={!schedulingEnabled || !draft?.draftId || draftState !== 'valid' || !onSchedule}
             title={!schedulingEnabled ? 'Scheduled Load is disabled by Server configuration.' : !draft?.draftId ? 'Validate the scenario before scheduling.' : undefined}>Schedule…</button>
           }
           <button type="button" onClick={() => void copyYaml()} disabled={!draft?.previewYaml || Boolean(draft.redacted)}>Copy YAML</button>
           <button type="button" onClick={exportYaml} disabled={!draft?.previewYaml || Boolean(draft.redacted)}>Export YAML</button>
-          <button type="button" className="att-primary-action" onClick={() => void startLoad()} disabled={!hasLiveDraft || draftState === 'submitting' || confirmationPending || Boolean(replayReview?.missingFields?.length) || (!inlineLoadEnabled&&!replaySourceJobId)}>
+          {!savedScenario&&<button type="button" className="att-primary-action" onClick={() => void startLoad()} disabled={!hasLiveDraft || draftState === 'submitting' || confirmationPending || Boolean(replayReview?.missingFields?.length) || (!inlineLoadEnabled&&!replaySourceJobId)}>
             {confirmationPending ? 'Waiting for confirmation…' : draftState === 'submitting' ? 'Starting…' : replaySourceJobId?'Run new LOAD Job':'Review and start Load'}
-          </button>
+          </button>}
         </div>
-        {draftState === 'valid' && draft?.draftId && <p className="att-help">Scheduling creates a recurring job from this validated immutable scenario snapshot.</p>}
+        {draftState === 'valid' && draft?.draftId && !savedScenario && <p className="att-help">Scheduling creates a recurring job from this validated immutable scenario snapshot.</p>}
       </section>
+      {saveOpen && <LoadDialog title="Save Scenario" onCancel={() => setSaveOpen(false)} onSave={() => void saveSavedScenario()}>
+        <p>Save a private authored definition for {selectedPackage}. This does not run a Job or create a Schedule.</p>
+        {saveError && <p role="alert">{saveError}</p>}
+        <label>Name <input aria-label="Scenario name" maxLength={120} value={saveName} onChange={event => setSaveName(event.target.value)} /></label>
+        <label>Description <textarea aria-label="Scenario description" maxLength={512} value={saveDescription} onChange={event => setSaveDescription(event.target.value)} /></label>
+        <label>Tags (comma-separated) <input aria-label="Scenario tags" value={saveTags} onChange={event => setSaveTags(event.target.value)} /></label>
+      </LoadDialog>}
     </div>
   );
 }

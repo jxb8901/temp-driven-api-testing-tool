@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { api, type SavedLoadScenario } from '../../api';
 import type { LoadDraftResponse, LoadFeatureProps, LoadJobsApi, PackageOption } from './types';
 import { LoadTemplateBuilder } from './LoadTemplateBuilder';
+import { LoadPage } from './LoadPage';
 import { LoadDialog } from './LoadDialog';
 import { CodeEditor } from '../code/CodeEditor';
 
@@ -42,14 +43,28 @@ export function SavedLoadScenarios({ onJobAccepted, onSchedule, enabled, editorA
     const link = document.createElement('a'); link.href = url; link.download = 'att-saved-scenario.yaml'; link.click();
     URL.revokeObjectURL(url);
   }
-  if (editor) return <LoadTemplateBuilder templateId={String((editor.definition.templateComposition as Record<string, unknown>)?.templateId || '')} savedScenario={editor} api={editorApi} packages={packages} selectedPackage={editor.packageId} selectedEnvironment={environment} environments={environments} inlineLoadEnabled={enabled} schedulingEnabled={Boolean(onSchedule)} onPackageChange={() => {}} onEnvironmentChange={setEnvironment} onJobAccepted={onJobAccepted} onSchedule={onSchedule} onClose={() => { setEditor(null); setRefresh(value => value + 1); }} />;
+  function closeEditor() { setEditor(null); setRefresh(value => value + 1); }
+  if (editor?.definition.templateComposition) {
+    return <LoadTemplateBuilder templateId={String((editor.definition.templateComposition as Record<string, unknown>)?.templateId || '')} savedScenario={editor} api={editorApi} packages={packages} selectedPackage={editor.packageId} selectedEnvironment={environment} environments={environments} inlineLoadEnabled={enabled} schedulingEnabled={Boolean(onSchedule)} onPackageChange={() => {}} onEnvironmentChange={setEnvironment} onJobAccepted={onJobAccepted} onSchedule={onSchedule} onClose={closeEditor} />;
+  }
+  if (editor?.definition.scenario) {
+    return <LoadPage api={editorApi} packages={packages} selectedPackage={editor.packageId} selectedEnvironment={environment} environments={environments} inlineLoadEnabled={enabled} schedulingEnabled={Boolean(onSchedule)} savedScenario={editor} onPackageChange={() => {}} onEnvironmentChange={setEnvironment} onJobAccepted={onJobAccepted} onSchedule={onSchedule} onClose={closeEditor} />;
+  }
   return <section className="page-content att-query-workspace" aria-label="Saved scenarios">
     <h2>Saved scenarios</h2><p>Your private saved definitions must be validated again before use.</p>
     {message && <p role="status">{message}</p>}
     <label>Search saved scenarios <input value={query} onChange={event => setQuery(event.target.value)} /></label>
     <div className="att-table-scroll"><table className="att-data-table"><thead><tr><th>Name / private</th><th>Package</th><th>Model / workloads</th><th>Revision / modified</th><th>Actions</th></tr></thead><tbody>
       {items.filter(item => [item.name,item.description,item.packageId,item.model,...item.tags].join(' ').toLocaleLowerCase().includes(query.toLocaleLowerCase())).map(item => <tr key={item.id}><td>{item.name}<small>{item.description}</small><small>Private · Needs validation</small></td><td>{item.packageId}</td><td>{item.model} · {item.workloadCount ?? '—'} workloads</td><td>{item.revision}<small>{item.updatedAt}</small></td><td>
-        <button className="button button-quiet" type="button" disabled={busy || !enabled} onClick={() => void action(async () => { const record = await api.getSavedLoadScenario(item.id); if (!record.definition.templateComposition) throw new Error('This definition cannot be opened in the template editor.'); const current = String(record.definition.environment || ''); setEnvironment(current); const config = await api.getDeclaredConfiguration(record.packageId); setEnvironments((config.environments || []).filter(value => value.state === 'active').map(value => value.name)); setEditor(record); })}>Open / Edit</button>
+        <button className="button button-quiet" type="button" disabled={busy || !enabled} onClick={() => void action(async () => {
+          const record = await api.getSavedLoadScenario(item.id);
+          if (!record.definition.templateComposition && !record.definition.scenario) throw new Error('This definition cannot be opened in Studio.');
+          const current = String(record.definition.environment || '');
+          setEnvironment(current);
+          const config = await api.getDeclaredConfiguration(record.packageId);
+          setEnvironments((config.environments || []).filter(value => value.state === 'active').map(value => value.name));
+          setEditor(record);
+        })}>Open / Edit</button>
         <button className="button button-quiet" type="button" disabled={busy || !enabled} onClick={() => void action(async () => { setSelected(item); setDraft(null); setDraft(await api.validateSavedLoadScenario(item.id,item.revision)); })}>Validate / Review</button>
         <button className="button button-quiet" type="button" disabled={busy} onClick={() => void action(async () => { await api.duplicateSavedLoadScenario(item.id,item.revision); setRefresh(value => value + 1); })}>Duplicate</button>
         <button className="button button-quiet" type="button" disabled={busy} onClick={() => { if (window.confirm(`Delete saved scenario ${item.name}?`)) void action(async () => { await api.deleteSavedLoadScenario(item.id,item.revision); setRefresh(value => value + 1); }); }}>Delete</button>

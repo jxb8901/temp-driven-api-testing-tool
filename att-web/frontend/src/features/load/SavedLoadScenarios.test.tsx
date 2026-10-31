@@ -3,9 +3,12 @@ import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { expect, it, vi } from 'vitest';
 import { SavedLoadScenarios } from './SavedLoadScenarios';
-const endpoints = vi.hoisted(() => ({ listSavedLoadScenarios: vi.fn(), validateSavedLoadScenario: vi.fn(), submitLoadDraft: vi.fn(), duplicateSavedLoadScenario: vi.fn(), deleteSavedLoadScenario: vi.fn() }));
+const endpoints = vi.hoisted(() => ({ listSavedLoadScenarios: vi.fn(), validateSavedLoadScenario: vi.fn(), submitLoadDraft: vi.fn(), duplicateSavedLoadScenario: vi.fn(), deleteSavedLoadScenario: vi.fn(), getSavedLoadScenario: vi.fn(), getDeclaredConfiguration: vi.fn() }));
 vi.mock('../../api', () => ({ api: endpoints }));
 vi.mock('../code/CodeEditor', () => ({ CodeEditor: ({ value }: { value: string }) => <pre>{value}</pre> }));
+vi.mock('./LoadPage', () => ({ LoadPage: ({ savedScenario }: { savedScenario?: { name: string } }) => <div>Advanced editor for {savedScenario?.name}</div> }));
+vi.mock('./LoadTemplateBuilder', () => ({ LoadTemplateBuilder: ({ savedScenario }: { savedScenario?: { name: string } }) => <div>Template editor for {savedScenario?.name}</div> }));
+vi.mock('../../router', () => ({ useNavigationGuard: () => ({ navigate: vi.fn(), registerUnsavedChanges: () => vi.fn() }), NavigationGuardContext: { Provider: ({ children }: { children: unknown }) => children } }));
 it('validates a saved revision before allowing a run or schedule', async () => {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   const host = document.createElement('div'); document.body.append(host); const root = createRoot(host);
@@ -31,5 +34,17 @@ it('allows YAML export only when the validated preview is explicitly unredacted'
   await act(async()=>root.render(<SavedLoadScenarios editorApi={{} as never} packages={[]} enabled onJobAccepted={vi.fn()} />));
   await act(async()=>[...host.querySelectorAll('button')].find(button=>button.textContent?.includes('Validate / Review'))!.click());
   expect([...host.querySelectorAll('button')].find(button=>button.textContent==='Export YAML')?.disabled).toBe(false);
+  await act(async()=>root.unmount());host.remove();
+});
+it('opens API-authored scenario definitions in the Advanced Load editor', async () => {
+  (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+  const host=document.createElement('div');document.body.append(host);const root=createRoot(host);
+  endpoints.listSavedLoadScenarios.mockResolvedValue({items:[{id:'LS3',name:'ApiTraffic',packageId:'p',model:'arrivalRate',revision:1,description:'',tags:[],updatedAt:''}],nextOffset:null});
+  endpoints.getSavedLoadScenario.mockResolvedValue({id:'LS3',name:'ApiTraffic',packageId:'p',model:'arrivalRate',revision:1,description:'',tags:[],updatedAt:'',definition:{environment:'SIT',scenario:{schemaVersion:'att-load/v1.9',load:{duration:'30s',arrivalRate:'10/s'},workloads:[{id:'w1',target:{type:'template',id:'checkout'},load:{arrivalRate:'10/s',maxConcurrent:2}}]}}});
+  endpoints.getDeclaredConfiguration.mockResolvedValue({environments:[{name:'SIT',state:'active'}]});
+  await act(async()=>root.render(<SavedLoadScenarios editorApi={{} as never} packages={[{packageId:'p'}]} enabled onJobAccepted={vi.fn()} />));
+  await act(async()=>[...host.querySelectorAll('button')].find(button=>button.textContent?.includes('Open / Edit'))!.click());
+  expect(endpoints.getSavedLoadScenario).toHaveBeenCalledWith('LS3');
+  expect(host.textContent).toContain('Advanced editor for ApiTraffic');
   await act(async()=>root.unmount());host.remove();
 });

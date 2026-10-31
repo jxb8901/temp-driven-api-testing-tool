@@ -46,6 +46,6 @@ Explorer 是 React 與 TypeScript 單頁 UI，於 `att-web` Maven resource 階�
 
 ## 儲存私人 Scenario
 
-驗證 Load Template 組合後，選擇 **Save Scenario** 並輸入名稱。儲存會在 Server 建立私人記錄，不會啟動 Job、建立 Schedule 或寫入 Package 檔案。在 **Load testing → Scenarios** 的 **Saved scenarios** 中，可以搜尋、重新開啟、複製、驗證或刪除自己的記錄。編輯並儲存會建立新版本，在同一個編輯器再次儲存亦然；版本衝突時須重新載入。儲存後須返回清單並驗證已儲存的版本，才可執行或排程。只有經驗證的預覽明確標示為未遮蔽時，檢視對話框才提供 **Export YAML**。
+驗證 Load Template 組合後，選擇 **Save Scenario** 並輸入名稱。儲存會在 Server 建立私人記錄，不會啟動 Job、建立 Schedule 或寫入 Package 檔案。在 **Load testing → Scenarios** 的 **Saved scenarios** 中，可以搜尋、重新開啟、複製、驗證或刪除自己的記錄。Template 組合會在 Load Template 編輯器重新開啟；API 撰寫的 scenario 定義則在 Advanced Load 編輯器開啟。編輯並儲存會建立新版本，在同一個編輯器再次儲存亦然；版本衝突時須重新載入。儲存後須返回清單並驗證已儲存的版本，才可執行或排程。只有經驗證的預覽明確標示為未遮蔽時，檢視對話框才提供 **Export YAML**。
 
 驗證結果有時效。選擇 **Run** 或 **Schedule** 前，須再次驗證已儲存的版本。Schedule 會儲存獨立的已驗證快照；其後編輯或刪除已儲存的記錄不會改變該 Schedule。若定義包含受保護的輸入值或解析後的值，系統會拒絕儲存；請移除該值或使用核准的參照。

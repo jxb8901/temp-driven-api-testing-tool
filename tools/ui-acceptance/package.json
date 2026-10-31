@@ -12,6 +12,7 @@
     "smoke:load-jobs": "node load-jobs.cjs",
     "smoke:scheduled-load": "node scheduled-load.cjs",
     "smoke:schedules": "node schedules-unified.cjs",
+    "smoke:schedule-execution": "node schedule-execution-edit.cjs",
     "smoke:auth": "node auth-smoke.cjs",
     "smoke:cross-browser": "node cross-browser.cjs",
     "screenshots": "node screenshots.cjs",
