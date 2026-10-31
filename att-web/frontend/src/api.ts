@@ -517,6 +517,9 @@ export const api = {
     const response = await request<ApiEnvelope<ScheduleDefinition>>(schedulesPath(), { signal });
     return { ...response, items: response.items.map(normalizeSchedule) };
   },
+  getSchedule(id: string, signal?: AbortSignal): Promise<ScheduleDefinition> {
+    return request<ScheduleDefinition>(schedulesPath() + '/' + encodeURIComponent(id), { signal }).then(normalizeSchedule);
+  },
   createScheduleExecutionDraft(id: string, input: { expectedDefinitionVersion: number; overrides?: Record<string, unknown>; packageEdit?: Record<string, unknown> }): Promise<import('./features/schedules/types').ScheduleExecutionReview> {
     return postJson(schedulesPath() + '/' + encodeURIComponent(id) + '/execution-draft', input);
   },

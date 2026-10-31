@@ -478,7 +478,7 @@ public final class ApiServlet extends HttpServlet {
         if(!requireOperator(req,res,requestId))return;
         try {
             String[] parts=path.split("/");
-            if(parts.length==2){String type=req.getParameter("executionType");if(type!=null&&!List.of("run","load").contains(type))throw new IllegalArgumentException("executionType must be run or load");json(res,200,Map.of("items",runtime.loadSchedules().stream().filter(schedule->type==null||type.equals("load".equals(schedule.effectiveJobType())?"load":"run")).map(schedule->runtime.loadScheduleView(schedule,principal)).toList(),"requestId",requestId));return;}
+            if(parts.length==2){String type=req.getParameter("executionType");if(type!=null&&!List.of("run","load").contains(type))throw new IllegalArgumentException("executionType must be run or load");json(res,200,Map.of("items",runtime.loadSchedules().stream().filter(schedule->type==null||type.equals("load".equals(schedule.effectiveJobType())?"load":"run")).map(schedule->runtime.loadScheduleListView(schedule,principal)).toList(),"requestId",requestId));return;}
             String id=parts[2];
             if(parts.length==3){LoadSchedule item=runtime.loadSchedule(id);Map<String,Object> view=runtime.loadScheduleView(item,principal);view.put("requestId",requestId);json(res,200,view);return;}
             if(parts.length==4&&"executions".equals(parts[3])){int limit=parseScheduleLimit(req.getParameter("limit"));json(res,200,Map.of("items",runtime.loadScheduleExecutions(id,limit),"scheduleId",id,"requestId",requestId));return;}

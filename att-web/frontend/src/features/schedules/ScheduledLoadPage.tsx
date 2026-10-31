@@ -775,7 +775,19 @@ export function ScheduledLoadPage({ api, packages, enabled, onOpenJob, initialDr
         <button type="button" className="button button-quiet" onClick={closeEditor} disabled={saving}>Cancel</button>
       </div>
       <p><strong>{draft.executionType.toUpperCase()}</strong>{draft.legacyDebug ? ' · Debug mode' : ''} · {draft.inlineSnapshot ? 'Immutable validated snapshot' : 'Package scenario'}. Saving never triggers a job immediately.</p>
-      {editingId && (draft.inlineSnapshot || draft.executionType === 'load') && !draft.legacyDebug && api.createScheduleExecutionDraft && api.replaceScheduleExecution && <button type="button" className="button button-quiet" disabled={dirty || saving} title={dirty ? 'Save or discard Schedule Settings first.' : undefined} onClick={() => setExecutionEditor(schedules.find(item => item.id === editingId) || null)}>Edit execution settings</button>}
+      {editingId && (draft.inlineSnapshot || draft.executionType === 'load') && !draft.legacyDebug && api.createScheduleExecutionDraft && api.replaceScheduleExecution && <button type="button" className="button button-quiet" disabled={dirty || saving} title={dirty ? 'Save or discard Schedule Settings first.' : undefined} onClick={() => {
+        const fallback = schedules.find(item => item.id === editingId) || null;
+        if (!fallback) return;
+        setMutationError('');
+        if (!api.getSchedule) { setExecutionEditor(fallback); return; }
+        void api.getSchedule(editingId).then(detail => {
+          setSchedules(current => current.map(item => item.id === detail.id ? { ...item, ...detail } : item));
+          setExecutionEditor(detail);
+        }).catch(error => {
+          setMutationError(errorMessage(error, 'Load schedule details'));
+          setExecutionEditor(fallback);
+        });
+      }}>Edit execution settings</button>}
       {executionEditor && <ScheduleExecutionEditor schedule={executionEditor} api={api} onClose={() => setExecutionEditor(null)} onSaved={saved => { setSchedules(current => current.map(item => item.id === saved.id ? saved : item)); setExecutionEditor(null); loadEditor(saved); setNotice('Execution snapshot updated for future occurrences.'); }} />}
       {!editingId && !draft.inlineSnapshot && <label>Execution type
         <select value={draft.executionType} onChange={event => updateDraft('executionType', event.currentTarget.value as 'run' | 'load')}>

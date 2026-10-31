@@ -3430,7 +3430,14 @@ final class ServerRuntime implements AutoCloseable {
     private static boolean containsControl(String value){for(int i=0;i<value.length();i++)if(Character.isISOControl(value.charAt(i)))return true;return false;}
     List<LoadSchedule> loadSchedules() throws Exception {requireSchedulingEnabled();return store.schedules();}
     LoadSchedule loadSchedule(String id) throws Exception {requireSchedulingEnabled();LoadSchedule schedule=store.schedule(id);if(schedule==null)throw new NotFoundException();return schedule;}
+    /** List responses stay summary-only; detail may add an owner-scoped editable projection. */
+    Map<String,Object> loadScheduleListView(LoadSchedule schedule,String principal) {
+        return loadScheduleView(schedule,principal,false);
+    }
     Map<String,Object> loadScheduleView(LoadSchedule schedule,String principal) {
+        return loadScheduleView(schedule,principal,true);
+    }
+    private Map<String,Object> loadScheduleView(LoadSchedule schedule,String principal,boolean detail) {
         Map<String,Object> view=loadScheduleView(schedule);
         if(schedule.sourceJobId!=null)try {ownedExecutionSpec(schedule.sourceJobId,principal);view.put("sourceJobId",schedule.sourceJobId);}catch(Exception unavailable){}
         if(schedule.savedScenarioId!=null)try {
@@ -3438,7 +3445,22 @@ final class ServerRuntime implements AutoCloseable {
                 view.put("savedScenarioId",schedule.savedScenarioId);view.put("savedScenarioRevision",schedule.savedScenarioRevision);
             }
         } catch(Exception unavailable) { /* provenance is private and optional */ }
+        if(detail && canDiscloseExecutionSettings(schedule,principal)) putExecutionSettings(view,schedule);
         return view;
+    }
+    private static boolean canDiscloseExecutionSettings(LoadSchedule schedule,String principal) {
+        if(principal==null || principal.isBlank()) return false;
+        if(principal.equals(schedule.createdBy)) return true;
+        return schedule.executionPrincipal!=null && !schedule.executionPrincipal.isBlank() && principal.equals(schedule.executionPrincipal);
+    }
+    private static void putExecutionSettings(Map<String,Object> view,LoadSchedule schedule) {
+        if(schedule.inlineScenario==null) return;
+        Map<String,Object> settings=new LinkedHashMap<>();
+        for(String field:List.of("thresholds","evidence","testdata","execution","seed")) {
+            Object value=schedule.inlineScenario.get(field);
+            if(value!=null)settings.put(field,value);
+        }
+        if(!settings.isEmpty())view.put("executionSettings",settings);
     }
     Map<String,Object> loadScheduleView(LoadSchedule schedule) {
         Map<String,Object> view=JSON.convertValue(schedule,Map.class);
@@ -3465,14 +3487,6 @@ final class ServerRuntime implements AutoCloseable {
             if(!runOptions.containsKey("debug"))runOptions.put("debug",Boolean.FALSE);
             if(!runOptions.containsKey("failFast"))runOptions.put("failFast",Boolean.FALSE);
             view.put("runOptions",runOptions);
-        }
-        if(schedule.inlineScenario!=null) {
-            Map<String,Object> settings=new LinkedHashMap<>();
-            for(String field:List.of("thresholds","evidence","testdata","execution","seed")) {
-                Object value=schedule.inlineScenario.get(field);
-                if(value!=null)settings.put(field,value);
-            }
-            if(!settings.isEmpty())view.put("executionSettings",settings);
         }
         if("debug".equals(schedule.effectiveJobType()))view.put("debugTarget",Map.of("type",schedule.debugTargetType,"id",schedule.debugTargetId));
         return view;

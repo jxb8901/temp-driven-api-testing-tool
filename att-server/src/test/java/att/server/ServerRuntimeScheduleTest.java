@@ -8,6 +8,7 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
@@ -198,8 +199,20 @@ class ServerRuntimeScheduleTest {
             JsonNode mixScheduleRequest=ServerRuntime.JSON.readTree("{\"name\":\"Mix snapshot\",\"packageId\":\"p\",\"draftId\":\""+mixDraft.get("draftId")+"\",\"timezone\":\"UTC\",\"cron\":\"0 2 * * *\"}");
             LoadSchedule mixSchedule=setupRuntime.createLoadSchedule(mixScheduleRequest,"alice");
             mixSchedule.listSummary=Map.of(); // Older stored schedules lack the new mix projection.
+            mixSchedule.inlineScenario=new LinkedHashMap<>(mixSchedule.inlineScenario);
+            mixSchedule.inlineScenario.put("thresholds",Map.of("passRate",0.91));
+            mixSchedule.inlineScenario.put("evidence",Map.of("mode","failures"));
+            assertFalse(setupRuntime.loadScheduleListView(mixSchedule,"alice").containsKey("executionSettings"),
+                    "List responses must stay summary-only even for the schedule owner");
+            @SuppressWarnings("unchecked") Map<String,Object> ownerSettings=(Map<String,Object>)setupRuntime.loadScheduleView(mixSchedule,"alice").get("executionSettings");
+            assertNotNull(ownerSettings);assertEquals(0.91,((Number)((Map<?,?>)ownerSettings.get("thresholds")).get("passRate")).doubleValue());
+            assertEquals("failures",((Map<?,?>)ownerSettings.get("evidence")).get("mode"));
+            assertFalse(setupRuntime.loadScheduleView(mixSchedule,"bob").containsKey("executionSettings"),
+                    "Shared operators must not receive another principal's private advanced settings");
+            assertFalse(setupRuntime.loadScheduleListView(mixSchedule,"bob").containsKey("executionSettings"));
             String view=setupRuntime.loadScheduleView(mixSchedule,"bob").toString();
             assertTrue(view.contains("mixEntries"));assertTrue(view.contains("weight=40"));assertFalse(view.contains("mix-private-value"));
+            assertFalse(view.contains("passRate"));assertFalse(view.contains("failures"));
             JsonNode mixEdit=ServerRuntime.JSON.readTree("{\"expectedDefinitionVersion\":"+mixSchedule.definitionVersion+",\"overrides\":{\"workloads\":[{\"id\":\"mixed\",\"mixEdits\":[{\"id\":\"first\",\"weight\":50}]}]}}");
             Map<String,Object> mixReview=setupRuntime.createScheduleExecutionDraft(mixSchedule.id,mixEdit,"bob");
             assertFalse(mixReview.toString().contains("mix-private-value"));assertTrue(mixReview.toString().contains("weight"));

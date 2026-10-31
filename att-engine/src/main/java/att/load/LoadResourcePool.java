@@ -298,8 +298,22 @@ public final class LoadResourcePool<T> implements AutoCloseable {
         }
     }
 
+    /** Runs a physical disconnect outside the shutdown waiter so one hung closer cannot block the deadline. */
+    private void closeAsync(T value) {
+        try {
+            Thread thread = new Thread(() -> closeTracked(value), "att-load-resource-disconnect");
+            thread.setDaemon(true);
+            thread.start();
+        } catch (RuntimeException | Error failure) {
+            // Thread start failure is rare; fall back to the tracked closer on this thread.
+            closeTracked(value);
+        }
+    }
+
     @Override public void close() {
         List<T> values = new ArrayList<T>();
+        long budgetMs = Math.max(borrowTimeoutMs, SHUTDOWN_WAIT_FLOOR_MS);
+        long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(budgetMs);
         synchronized (this) {
             if (!closed) {
                 closed = true;
@@ -311,10 +325,8 @@ public final class LoadResourcePool<T> implements AutoCloseable {
                 notifyAll();
             }
         }
-        for (T value : values) closeTracked(value);
+        for (T value : values) closeAsync(value);
         boolean interrupted = false;
-        long budgetMs = Math.max(borrowTimeoutMs, SHUTDOWN_WAIT_FLOOR_MS);
-        long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(budgetMs);
         synchronized (this) {
             while (creating > 0 || closing > 0) {
                 long remaining = deadline - System.nanoTime();

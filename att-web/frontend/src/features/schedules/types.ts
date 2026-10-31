@@ -127,6 +127,7 @@ export interface SchedulesApi {
   createScheduleExecutionDraft?(id: string, input: { expectedDefinitionVersion: number; overrides?: Record<string, unknown>; packageEdit?: Record<string, unknown> }): Promise<ScheduleExecutionReview>;
   replaceScheduleExecution?(id: string, input: { draftId: string; expectedDefinitionVersion: number; confirm: true }): Promise<ScheduleDefinition>;
   listSchedules(signal?: AbortSignal): Promise<ApiEnvelope<ScheduleDefinition>>;
+  getSchedule?(id: string, signal?: AbortSignal): Promise<ScheduleDefinition>;
   previewSchedule(input: SchedulePreviewInput, signal?: AbortSignal): Promise<SchedulePreview>;
   createSchedule(input: ScheduleInput, signal?: AbortSignal): Promise<ScheduleDefinition>;
   updateSchedule(id: string, input: ScheduleInput, signal?: AbortSignal): Promise<ScheduleDefinition>;

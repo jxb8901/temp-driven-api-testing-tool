@@ -219,6 +219,59 @@ class LoadResourcePoolGrowthTest {
     }
 
     @Test
+    void shutdownTerminatesWhenPhysicalDisconnectNeverReturns() throws Exception {
+        CountDownLatch enteredClose = new CountDownLatch(1);
+        AtomicInteger closes = new AtomicInteger();
+        LoadResourcePool<Integer> pool = new LoadResourcePool<Integer>(1, 40L, () -> 1, value -> {
+            enteredClose.countDown();
+            try { new CountDownLatch(1).await(); }
+            catch (InterruptedException interrupted) { Thread.currentThread().interrupt(); throw new IllegalStateException(interrupted); }
+            closes.incrementAndGet();
+        });
+        pool.ensureMinIdle(1);
+        long started = System.nanoTime();
+        IllegalStateException timeout = org.junit.jupiter.api.Assertions.assertThrows(IllegalStateException.class, pool::close);
+        long elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started);
+        assertTrue(enteredClose.await(1, TimeUnit.SECONDS));
+        assertTrue(timeout.getMessage().contains("LOAD_RESOURCE_TEARDOWN_TIMEOUT"), timeout.getMessage());
+        assertTrue(elapsedMs < 15_000L, "shutdown must honor its deadline while a closer is stuck, elapsedMs=" + elapsedMs);
+        Map<String, Object> metrics = pool.metrics();
+        assertEquals(0, metrics.get("residualCreating"));
+        assertEquals(1, metrics.get("residualClosing"));
+        assertEquals(1, metrics.get("closing"));
+        assertEquals(1, metrics.get("total"));
+        assertEquals(0, closes.get());
+    }
+
+    @Test
+    void lateDisconnectAfterShutdownDeadlineRetainsThenReleasesReservation() throws Exception {
+        CountDownLatch enteredClose = new CountDownLatch(1);
+        CountDownLatch finishClose = new CountDownLatch(1);
+        AtomicInteger closes = new AtomicInteger();
+        LoadResourcePool<Integer> pool = new LoadResourcePool<Integer>(1, 40L, () -> 1, value -> {
+            enteredClose.countDown();
+            try { finishClose.await(); }
+            catch (InterruptedException interrupted) { Thread.currentThread().interrupt(); throw new IllegalStateException(interrupted); }
+            closes.incrementAndGet();
+        });
+        pool.ensureMinIdle(1);
+        IllegalStateException timeout = org.junit.jupiter.api.Assertions.assertThrows(IllegalStateException.class, pool::close);
+        assertTrue(timeout.getMessage().contains("LOAD_RESOURCE_TEARDOWN_TIMEOUT"), timeout.getMessage());
+        assertTrue(enteredClose.await(1, TimeUnit.SECONDS));
+        assertEquals(1, pool.metrics().get("residualClosing"));
+        assertEquals(1, pool.total());
+        assertEquals(0, closes.get());
+        org.junit.jupiter.api.Assertions.assertThrows(IllegalStateException.class, pool::borrow);
+        finishClose.countDown();
+        long until = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
+        while ((Integer) pool.metrics().get("closing") > 0 && System.nanoTime() < until) Thread.yield();
+        assertEquals(0, pool.metrics().get("closing"));
+        assertEquals(0, pool.total());
+        assertEquals(1, closes.get());
+        org.junit.jupiter.api.Assertions.assertThrows(IllegalStateException.class, pool::borrow);
+    }
+
+    @Test
     void shutdownClosesConnectionThatArrivesAfterBorrowTimeout() throws Exception {
         CountDownLatch entered = new CountDownLatch(1), finish = new CountDownLatch(1);
         AtomicInteger closes = new AtomicInteger();
