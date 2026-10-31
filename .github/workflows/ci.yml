@@ -374,6 +374,8 @@ jobs:
           npm run smoke:package-manifest
           npm run smoke:archive-metrics
           npm run smoke:load-templates
+          npm run smoke:saved-scenario-review
+          npm run smoke:saved-scenario-lifecycle
           npm run smoke:load-jobs
           npm run smoke:jobs-schedules
           npm run smoke:job-replay
@@ -381,6 +383,7 @@ jobs:
           npm run smoke:auth
           npm run smoke:scheduled-load
           npm run smoke:schedules
+          npm run smoke:schedule-execution
           if [ "$FULL_BROWSER_SUITE" = "true" ]; then
             npm run smoke:cross-browser
             npm run screenshots

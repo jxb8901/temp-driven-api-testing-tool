@@ -78,7 +78,7 @@ async function main() {
       const path = decodeURIComponent(url.pathname.split('/api/v1/')[1] || '');
       if (path === 'jobs' || path === 'packages') broadRequests.push(path);
       const json = (body, status = 200) => route.fulfill({ status, json: body });
-      if (path === 'version') return json({ version: '4.2.7', apiVersion: '1', inlineLoadEnabled: true, loadSchedulingEnabled: true, unifiedRunVersion: 'att-execution/v1' });
+      if (path === 'version') return json({ version: '4.2.8', apiVersion: '1', inlineLoadEnabled: true, loadSchedulingEnabled: true, unifiedRunVersion: 'att-execution/v1' });
       if (path === 'packages') return json({ items: [{ packageId: 'payments', name: 'Payments' }] });
       if (path === 'packages/payments/configuration') return json({ view: 'declared', environments: [{ name: 'SIT', state:'active' }] });
       if (path === 'packages/payments/package-configuration/effective') return json({packageId:'payments',present:true,canEdit:false,manifestDigest:'b'.repeat(64),environment:url.searchParams.get('environment')||'SIT',environmentOrigin:url.searchParams.has('environment')?'request':'package'});
@@ -380,7 +380,7 @@ async function main() {
     await page.getByRole('heading', { name: 'Job Details unavailable' }).waitFor();
     assert.equal(await page.locator('aside, nav, .app-header, footer').count(), 0);
     assert.deepEqual(errors, []); await context.close();
-    console.log('4.2.7 acceptance passed: RUN/LOAD replay and Schedule, History/List/Edit, standalone fixed-Job navigation, virtualized Events, viewport fill, mobile, reload and safe missing-Job state.');
+    console.log('4.2.8 acceptance passed: RUN/LOAD replay and Schedule, History/List/Edit, standalone fixed-Job navigation, virtualized Events, viewport fill, mobile, reload and safe missing-Job state.');
   } finally { await browser.close(); await stopFixture(fixture); }
 }
 main().catch(error => { console.error(error); process.exitCode = 1; });

@@ -507,6 +507,58 @@ class ServerRuntimeJobReplayTest {
                 "workloads",List.of(Map.of("id","primary","load",Map.of("users",10)))))));
     }
 
+    @Test void runOptionOnlyOverridesPreserveCompleteCaseSelection() throws Exception {
+        var source=(com.fasterxml.jackson.databind.node.ObjectNode)ServerRuntime.JSON.readTree("""
+                {"schemaVersion":"att-execution/v1","executionType":"run","packageId":"p","selection":{"caseIds":["cases.default.C1","cases.default.C2"],"suites":["testcase/cases.xlsx"],"tags":["smoke"]},"options":{"debug":false,"failFast":false}}
+                """);
+        assertDoesNotThrow(() -> RunDefinition.parseRetained(source));
+        var updated=JobReplayOverrides.apply(source,ServerRuntime.JSON.readTree("{\"options\":{\"failFast\":true}}"));
+        assertEquals(true,updated.path("options").path("failFast").asBoolean());
+        assertEquals(false,updated.path("options").path("debug").asBoolean());
+        assertEquals(List.of("cases.default.C1","cases.default.C2"),ServerRuntime.JSON.convertValue(updated.path("selection").path("caseIds"),List.class));
+        assertEquals(List.of("testcase/cases.xlsx"),ServerRuntime.JSON.convertValue(updated.path("selection").path("suites"),List.class));
+        assertFalse(updated.path("selection").has("suiteDirectory"));
+        assertEquals(List.of("smoke"),ServerRuntime.JSON.convertValue(updated.path("selection").path("tags"),List.class));
+        assertDoesNotThrow(() -> RunDefinition.parseRetained(updated));
+        assertEquals(List.of("cases.default.C1","cases.default.C2"),ServerRuntime.JSON.convertValue(source.path("selection").path("caseIds"),List.class));
+    }
+
+    @Test void replayMixEditsPreserveUnchangedInputsAndClearInputsWhenTargetChanges() throws Exception {
+        var source=(com.fasterxml.jackson.databind.node.ObjectNode)ServerRuntime.JSON.readTree("""
+                {"executionType":"load","scenario":{"workloads":[{"id":"mixed","mix":[
+                  {"id":"a","weight":40,"target":{"type":"template","id":"A"},"inputs":{"reference":"private-value"}},
+                  {"id":"b","weight":60,"target":{"type":"flow","id":"B"},"vars":{"customer":"keep-value"}}
+                ]}]}}
+                """);
+        var weights=ServerRuntime.JSON.readTree("{\"workloads\":[{\"id\":\"mixed\",\"mixEdits\":[{\"id\":\"a\",\"weight\":50}]}]}");
+        var result=JobReplayOverrides.apply(source,weights).path("scenario").path("workloads").get(0).path("mix");
+        assertEquals(50,result.get(0).path("weight").asInt());assertEquals("private-value",result.get(0).path("inputs").path("reference").asText());
+        assertEquals("keep-value",result.get(1).path("vars").path("customer").asText());
+        var target=ServerRuntime.JSON.readTree("{\"workloads\":[{\"id\":\"mixed\",\"mixEdits\":[{\"id\":\"a\",\"target\":{\"type\":\"flow\",\"id\":\"NEW\"}}]}]}");
+        var changed=JobReplayOverrides.apply(source,target).path("scenario").path("workloads").get(0).path("mix");
+        assertFalse(changed.get(0).has("inputs"));assertEquals("NEW",changed.get(0).path("target").path("id").asText());
+        assertEquals("private-value",source.path("scenario").path("workloads").get(0).path("mix").get(0).path("inputs").path("reference").asText());
+        Map<String,Object> safe=JobListIdentity.load(source.path("scenario"));assertFalse(safe.toString().contains("private-value"));assertFalse(safe.toString().contains("keep-value"));
+        assertTrue(safe.toString().contains("weight=40"));assertTrue(safe.toString().contains("id=a"));
+        var unknown=ServerRuntime.JSON.readTree("{\"workloads\":[{\"id\":\"mixed\",\"mixEdits\":[{\"id\":\"unknown\",\"weight\":10}]}]}");
+        assertThrows(IllegalArgumentException.class,()->JobReplayOverrides.apply(source,unknown));
+    }
+
+    @Test void changingDirectWorkloadTargetDoesNotReuseOldBindings() throws Exception {
+        var source=ServerRuntime.JSON.readTree("""
+                {"executionType":"load","scenario":{"workloads":[{"id":"one","target":{"type":"template","id":"OLD"},"load":{"users":1},"inputs":{"account":"old-private"},"vars":{"customer":"old-value"}}]}}
+                """);
+        var same=ServerRuntime.JSON.readTree("{\"workloads\":[{\"id\":\"one\",\"target\":{\"type\":\"template\",\"id\":\"OLD\"}}]}");
+        var retained=JobReplayOverrides.apply((com.fasterxml.jackson.databind.node.ObjectNode)source,same).path("scenario").path("workloads").get(0);
+        assertEquals("old-private",retained.path("inputs").path("account").asText());
+        var edit=ServerRuntime.JSON.readTree("{\"workloads\":[{\"id\":\"one\",\"target\":{\"type\":\"flow\",\"id\":\"NEW\"}}]}");
+        var changed=JobReplayOverrides.apply((com.fasterxml.jackson.databind.node.ObjectNode)source,edit).path("scenario").path("workloads").get(0);
+        assertFalse(changed.has("inputs"));assertFalse(changed.has("vars"));assertEquals("NEW",changed.path("target").path("id").asText());
+        assertEquals("old-private",source.path("scenario").path("workloads").get(0).path("inputs").path("account").asText());
+        var explicit=ServerRuntime.JSON.readTree("{\"workloads\":[{\"id\":\"one\",\"target\":{\"type\":\"flow\",\"id\":\"NEW\"},\"inputs\":{\"account\":\"new-value\"}}]}");
+        assertEquals("new-value",JobReplayOverrides.apply((com.fasterxml.jackson.databind.node.ObjectNode)source,explicit).path("scenario").path("workloads").get(0).path("inputs").path("account").asText());
+    }
+
     @Test void replayComparesEditedTimingWithEffectiveWorkloadTiming() {
         var source=ServerRuntime.JSON.createObjectNode();source.put("executionType","load");source.put("packageId","p");
         var scenario=source.putObject("scenario");scenario.putObject("load").put("duration","30m");

@@ -1,6 +1,6 @@
 # ATT Remote client
 
-<!-- att-doc-status: legacy-current release=4.2.7 -->
+<!-- att-doc-status: legacy-current release=4.2.8 -->
 
 
 ATT Remote lets you use an ATT Server from the existing `att.sh` or `att.bat` launcher. It sends requests to the Server's public REST API, watches job events over SSE, and returns the canonical result as an ATT exit code. Local commands remain local.

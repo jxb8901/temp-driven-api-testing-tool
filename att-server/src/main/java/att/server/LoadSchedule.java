@@ -13,6 +13,9 @@ final class LoadSchedule {
     public String id;
     public String name;
     public String sourceJobId;
+    /** Informational provenance only; execution always uses this schedule's own snapshot. */
+    public String savedScenarioId;
+    public Long savedScenarioRevision;
     public String description;
     public List<String> tags=List.of();
     public String packageId;
@@ -59,6 +62,11 @@ final class LoadSchedule {
     public String createdAt;
     public String updatedBy;
     public String updatedAt;
+    /** Monotonic definition revision, including legacy records whose initial value is zero. */
+    public long definitionVersion;
+    /** Current immutable execution snapshot revision; legacy rows start at one. */
+    public long snapshotVersion=1;
+    public List<Map<String,Object>> snapshotHistory=List.of();
     public String nextRunAt;
     /** Execution-only result from the latest inspection; never persisted with the schedule definition. */
     transient boolean validatedSensitiveSource;
@@ -67,8 +75,8 @@ final class LoadSchedule {
         LoadSchedule copy=new LoadSchedule();
         copy.schemaVersion=schemaVersion;copy.runInput=runInput==null?null:ServerRuntime.JSON.convertValue(runInput,Map.class);
         copy.listSummary=listSummary==null?null:new LinkedHashMap<>(listSummary);
-        copy.sourceJobId=sourceJobId;copy.id=id;copy.name=name;copy.description=description;copy.packageId=packageId;copy.jobType=jobType==null?"load":jobType;copy.scenario=scenario;
-        copy.inlineScenario=inlineScenario==null?null:new LinkedHashMap<>(inlineScenario);copy.catalogSnapshot=catalogSnapshot;copy.loadModel=loadModel;
+        copy.sourceJobId=sourceJobId;copy.savedScenarioId=savedScenarioId;copy.savedScenarioRevision=savedScenarioRevision;copy.id=id;copy.name=name;copy.description=description;copy.packageId=packageId;copy.jobType=jobType==null?"load":jobType;copy.scenario=scenario;
+        copy.inlineScenario=inlineScenario==null?null:ServerRuntime.JSON.convertValue(inlineScenario,Map.class);copy.catalogSnapshot=catalogSnapshot;copy.loadModel=loadModel;
         copy.inlineDebugInput=inlineDebugInput==null?null:new LinkedHashMap<>(inlineDebugInput);
         copy.debugTargetType=debugTargetType;copy.debugTargetId=debugTargetId;copy.debugResourceId=debugResourceId;
         copy.expectedRevisionDigest=expectedRevisionDigest;copy.packageChangePolicy=packageChangePolicy;copy.packageRootIdentity=packageRootIdentity;
@@ -80,7 +88,7 @@ final class LoadSchedule {
         copy.createdBy=createdBy;copy.executionPrincipal=executionPrincipal;
         copy.executionIdentityMigratedFrom=executionIdentityMigratedFrom;copy.executionIdentityMigratedBy=executionIdentityMigratedBy;
         copy.executionIdentityMigratedAt=executionIdentityMigratedAt;
-        copy.createdAt=createdAt;copy.updatedBy=updatedBy;copy.updatedAt=updatedAt;copy.nextRunAt=nextRunAt;
+        copy.createdAt=createdAt;copy.updatedBy=updatedBy;copy.updatedAt=updatedAt;copy.definitionVersion=definitionVersion;copy.snapshotVersion=snapshotVersion;copy.snapshotHistory=snapshotHistory==null?List.of():ServerRuntime.JSON.convertValue(snapshotHistory,List.class);copy.nextRunAt=nextRunAt;
         copy.validatedSensitiveSource=validatedSensitiveSource;
         return copy;
     }

@@ -572,6 +572,7 @@ class ServerWarUiIT {
         Path packages = Files.createDirectories(temp.resolve("packages"));
         Path packageRoot = Files.createDirectories(packages.resolve("payments"));
         writeScheduledPackage(packageRoot, localHome);
+        Files.writeString(packageRoot.resolve("templates/SCHEDULED/debug.yaml"), "schemaVersion: att-debug/v1.2\ninputs: {}\n");
         // Keep Flow-link inspection in this isolated browser fixture, away from the scheduler capacity fixture.
         writeReferenceFlowSource(packageRoot);
         Path emptyPackage=Files.createDirectory(packages.resolve("lilyzhou"));
@@ -1161,9 +1162,14 @@ class ServerWarUiIT {
     }
 
     private void runServerUiPlaywright(String origin) throws Exception {
-        Path harness = Path.of("tools", "ui-acceptance").toAbsolutePath();
         Path output = temp.resolve("server-ui-playwright.log");
-        ProcessBuilder builder = new ProcessBuilder("node", "server-api-smoke.cjs")
+        runServerUiPlaywrightScript(origin, "server-api-smoke.cjs", output);
+        runServerUiPlaywrightScript(origin, "saved-scenario-server.cjs", temp.resolve("saved-scenario-playwright.log"));
+    }
+
+    private void runServerUiPlaywrightScript(String origin, String script, Path output) throws Exception {
+        Path harness = Path.of("tools", "ui-acceptance").toAbsolutePath();
+        ProcessBuilder builder = new ProcessBuilder("node", script)
                 .directory(harness.toFile()).redirectErrorStream(true).redirectOutput(output.toFile());
         builder.environment().put("ATT_UI_SERVER_ORIGIN", origin);
         builder.environment().put("ATT_UI_SERVER_USERNAME", "schedule-admin");
@@ -1171,7 +1177,7 @@ class ServerWarUiIT {
         Process process = builder.start();
         if (!process.waitFor(120, TimeUnit.SECONDS)) {
             process.destroyForcibly();
-            fail("Playwright did not finish its packaged-WAR API smoke within 120 seconds. "
+            fail("Playwright did not finish " + script + " within 120 seconds. "
                     + (Files.exists(output) ? Files.readString(output) : ""));
         }
         String log = Files.exists(output) ? Files.readString(output) : "";

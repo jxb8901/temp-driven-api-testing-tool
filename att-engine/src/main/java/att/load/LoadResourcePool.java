@@ -38,6 +38,12 @@ public final class LoadResourcePool<T> implements AutoCloseable {
     private final AtomicLong waitNanos = new AtomicLong();
     private final List<RuntimeException> closeFailures = Collections.synchronizedList(new ArrayList<RuntimeException>());
     private volatile boolean closed;
+    /** Residual physical reservations after a bounded shutdown wait. */
+    private int residualCreating;
+    private int residualClosing;
+    private static final long SHUTDOWN_WAIT_FLOOR_MS = 5_000L;
+    /** Package-visible so tests can inject a failing disconnect-worker starter. */
+    volatile java.util.function.Consumer<Runnable> disconnectStarter = LoadResourcePool::startDisconnectWorker;
 
     public LoadResourcePool(int maxSize, long borrowTimeoutMs, Supplier<T> factory, Consumer<T> closer) {
         this(maxSize, 0, borrowTimeoutMs, factory, closer);
@@ -112,112 +118,131 @@ public final class LoadResourcePool<T> implements AutoCloseable {
                 closedDuringConnect = closed;
                 closeValue = closedDuringConnect || timedOut || interrupted;
                 if (closeValue) {
-                    total.decrementAndGet();
                     closing++;
                 }
                 else {
                     created.incrementAndGet();
                     if (!idle.offer(value)) {
-                        total.decrementAndGet();
                         closing++;
                         closeValue = true;
                     } else value = null;
                 }
-                if (!closeValue) { creating--; notifyAll(); }
+                creating--;
+                notifyAll();
             }
-            if (closeValue) {
-                try { closeTracked(value); }
-                finally { synchronized (this) { creating--; notifyAll(); } }
-            }
+            if (closeValue) closeTracked(value);
             if (interrupted) throw new InterruptedException("resource preparation cancelled");
             if (timedOut) throw new java.util.concurrent.TimeoutException("LOAD_PREPARATION_TIMEOUT");
             if (closedDuringConnect) throw new IllegalStateException("resource pool is closed");
         }
     }
 
+    /** A creation remains charged to total until it succeeds or fails, even if its borrower leaves. */
+    private final class PendingCreation {
+        boolean done;
+        Throwable failure;
+    }
+
+    /** Called with the pool monitor held. At most maxSize such daemon threads can be in flight. */
+    private PendingCreation startCreation() {
+        final PendingCreation pending = new PendingCreation();
+        total.incrementAndGet();
+        creating++;
+        try {
+            Thread thread = new Thread(() -> {
+                T value = null;
+                Throwable failure = null;
+                try {
+                    value = factory.get();
+                    if (value == null) failure = new IllegalStateException("resource factory returned null");
+                } catch (Throwable error) {
+                    failure = error;
+                }
+                boolean closeValue = false;
+                synchronized (LoadResourcePool.this) {
+                    creating--;
+                    if (failure != null) {
+                        failures.incrementAndGet();
+                        total.decrementAndGet();
+                        pending.failure = failure;
+                    } else if (closed || !idle.offer(value)) {
+                        closing++;
+                        closeValue = true;
+                    } else {
+                        created.incrementAndGet();
+                    }
+                    pending.done = true;
+                    LoadResourcePool.this.notifyAll();
+                }
+                if (closeValue) closeTracked(value);
+            }, "att-load-resource-connect");
+            thread.setDaemon(true);
+            thread.start();
+        } catch (RuntimeException | Error failure) {
+            creating--;
+            total.decrementAndGet();
+            notifyAll();
+            throw failure;
+        }
+        return pending;
+    }
+
     public Lease borrow() throws Exception {
         if (closed) throw new IllegalStateException("resource pool is closed");
         waiting.incrementAndGet();
-        boolean acquired;
         long started = System.nanoTime();
-        try { acquired = permits.tryAcquire(borrowTimeoutMs, TimeUnit.MILLISECONDS); }
-        finally {
+        long budget = TimeUnit.MILLISECONDS.toNanos(borrowTimeoutMs);
+        boolean acquired = false;
+        try {
+            do {
+                if (closed) throw new IllegalStateException("resource pool is closed");
+                long remaining = Math.max(0L, budget - (System.nanoTime() - started));
+                acquired = permits.tryAcquire(Math.min(remaining, TimeUnit.MILLISECONDS.toNanos(100)), TimeUnit.NANOSECONDS);
+                if (acquired || remaining == 0L) break;
+            } while (System.nanoTime() - started < budget);
+            if (!acquired) throw timeout(started);
+            synchronized (this) {
+                PendingCreation pending = null;
+                boolean waited = false;
+                while (true) {
+                    if (closed) throw new IllegalStateException("resource pool is closed");
+                    if (waited && System.nanoTime() - started >= budget) throw timeout(started);
+                    T value = idle.poll();
+                    if (value != null) {
+                        leased.add(value);
+                        acquired = false; // the lease owns the permit
+                        return new Lease(value);
+                    }
+                    if (pending != null && pending.done) {
+                        Throwable failure = pending.failure;
+                        pending = null;
+                        if (failure instanceof RuntimeException) throw (RuntimeException) failure;
+                        if (failure instanceof Error) throw (Error) failure;
+                    }
+                    long remaining = budget - (System.nanoTime() - started);
+                    if (remaining <= 0L) throw timeout(started);
+                    if (pending == null && total.get() < maxSize) pending = startCreation();
+                    waited = true;
+                    TimeUnit.NANOSECONDS.timedWait(this, remaining);
+                }
+            }
+        } finally {
+            if (acquired) permits.release();
             waiting.decrementAndGet();
             waitNanos.addAndGet(System.nanoTime() - started);
         }
-        if (!acquired) {
-            timeoutCount.incrementAndGet();
-            throw new PoolTimeoutException("POOL_TIMEOUT", "Timed out waiting for a load resource");
-        }
-        T value = null;
-        boolean reserved = false;
-        boolean reservationReleased = false;
-        try {
-            synchronized (this) {
-                if (closed) throw new IllegalStateException("resource pool is closed");
-                value = idle.poll();
-                if (value == null) {
-                    // The permit bounds active borrowers; reserve the pool slot
-                    // before releasing the monitor so concurrent cold growth
-                    // cannot exceed maxSize.
-                    if (total.get() >= maxSize) throw new IllegalStateException("resource pool capacity invariant violated");
-                    total.incrementAndGet();
-                    creating++;
-                    reserved = true;
-                }
-            }
-            if (reserved) {
-                try { value = factory.get(); }
-                catch (RuntimeException error) {
-                    failures.incrementAndGet();
-                    synchronized (this) { creating--; total.decrementAndGet(); reservationReleased = true; notifyAll(); }
-                    throw error;
-                } catch (Error error) {
-                    failures.incrementAndGet();
-                    synchronized (this) { creating--; total.decrementAndGet(); reservationReleased = true; notifyAll(); }
-                    throw error;
-                }
-                if (value == null) {
-                    failures.incrementAndGet();
-                    synchronized (this) { creating--; total.decrementAndGet(); reservationReleased = true; notifyAll(); }
-                    throw new IllegalStateException("resource factory returned null");
-                }
-            }
-            boolean closeCreated = false;
-            synchronized (this) {
-                if (reserved) { creating--; reservationReleased = true; }
-                if (closed) {
-                    if (reserved) total.decrementAndGet();
-                    if (value != null) { closing++; closeCreated = true; }
-                    notifyAll();
-                } else {
-                    if (reserved) created.incrementAndGet();
-                    leased.add(value);
-                    notifyAll();
-                    return new Lease(value);
-                }
-            }
-            if (closeCreated) closeTracked(value);
-            throw new IllegalStateException("resource pool is closed");
-        } catch (RuntimeException error) {
-            if (reserved && !reservationReleased) synchronized (this) {
-                creating--; total.decrementAndGet(); notifyAll();
-            }
-            permits.release();
-            throw error;
-        } catch (Exception error) {
-            if (reserved && !reservationReleased) synchronized (this) {
-                creating--; total.decrementAndGet(); notifyAll();
-            }
-            permits.release();
-            throw error;
-        } catch (Error error) {
-            if (reserved && !reservationReleased) synchronized (this) {
-                creating--; total.decrementAndGet(); notifyAll();
-            }
-            permits.release();
-            throw error;
-        }
+    }
+
+    private synchronized PoolTimeoutException timeout(long started) {
+        timeoutCount.incrementAndGet();
+        Map<String, Object> snapshot = new LinkedHashMap<String, Object>();
+        snapshot.put("maxSize", maxSize); snapshot.put("total", total.get());
+        snapshot.put("idle", idle.size()); snapshot.put("active", leased.size());
+        snapshot.put("creating", creating); snapshot.put("closing", closing);
+        snapshot.put("waiting", waiting.get()); snapshot.put("timeoutCount", timeoutCount.get());
+        snapshot.put("closed", closed); snapshot.put("budgetMs", borrowTimeoutMs);
+        snapshot.put("elapsedMs", TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started));
+        return new PoolTimeoutException("POOL_TIMEOUT", "Timed out waiting for a load resource", snapshot);
     }
 
     public int maxSize() { return maxSize; }
@@ -231,12 +256,14 @@ public final class LoadResourcePool<T> implements AutoCloseable {
     public int failures() { return failures.get(); }
     public int closeFailureCount() { synchronized (closeFailures) { return closeFailures.size(); } }
     public long waitDurationMs() { return TimeUnit.NANOSECONDS.toMillis(waitNanos.get()); }
-    public Map<String, Object> metrics() {
+    public synchronized Map<String, Object> metrics() {
         Map<String, Object> result = new LinkedHashMap<String, Object>();
         result.put("maxSize", maxSize); result.put("active", active()); result.put("idle", idle());
-        result.put("total", total()); result.put("waiting", waiting()); result.put("waitDurationMs", waitDurationMs());
+        result.put("total", total()); result.put("creating", creating); result.put("closing", closing);
+        result.put("closed", closed); result.put("waiting", waiting()); result.put("waitDurationMs", waitDurationMs());
         result.put("timeoutCount", timeoutCount()); result.put("created", created()); result.put("discarded", discarded());
         result.put("replacementCount", discarded()); result.put("failures", failures());
+        result.put("residualCreating", residualCreating); result.put("residualClosing", residualClosing);
         Map<String, Object> saturation = new LinkedHashMap<String, Object>();
         saturation.put("usage", active()); saturation.put("limit", maxSize); saturation.put("threshold", 0.8d);
         result.put("limitUsage", java.util.Collections.<String, Object>singletonMap("mq.pool.activeConnections", saturation));
@@ -248,48 +275,87 @@ public final class LoadResourcePool<T> implements AutoCloseable {
         synchronized (this) {
             if (!leased.remove(value)) return;
             if (invalidate || closed || !idle.offer(value)) {
-                total.decrementAndGet();
                 if (invalidate || !closed) discarded.incrementAndGet();
                 closing++;
                 closeValue = true;
             }
+            notifyAll();
         }
         if (closeValue) closeTracked(value);
         permits.release();
     }
 
     private void closeTracked(T value) {
-        try { closer.accept(value); }
+        boolean confirmed = false;
+        try { closer.accept(value); confirmed = true; }
         catch (RuntimeException | Error failure) { closeFailures.add(new IllegalStateException("LOAD_RESOURCE_TEARDOWN_FAILED", failure)); }
         finally {
-            synchronized (this) { closing--; notifyAll(); }
+            synchronized (this) {
+                // A failed physical disconnect remains charged: opening a replacement
+                // could otherwise exceed the configured physical-session limit.
+                if (confirmed) total.decrementAndGet();
+                closing--;
+                notifyAll();
+            }
+        }
+    }
+
+    private static void startDisconnectWorker(Runnable task) {
+        Thread thread = new Thread(task, "att-load-resource-disconnect");
+        thread.setDaemon(true);
+        thread.start();
+    }
+
+    /** Runs a physical disconnect outside the shutdown waiter so one hung closer cannot block the deadline. */
+    private void closeAsync(T value) {
+        try {
+            disconnectStarter.accept(() -> closeTracked(value));
+        } catch (RuntimeException | Error failure) {
+            // Keep the reservation charged and surface the start failure; never block the shutdown waiter.
+            closeFailures.add(new IllegalStateException("LOAD_RESOURCE_TEARDOWN_FAILED: disconnect worker could not start", failure));
+            synchronized (this) { notifyAll(); }
         }
     }
 
     @Override public void close() {
         List<T> values = new ArrayList<T>();
+        long budgetMs = Math.max(borrowTimeoutMs, SHUTDOWN_WAIT_FLOOR_MS);
+        long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(budgetMs);
         synchronized (this) {
             if (!closed) {
                 closed = true;
                 idle.drainTo(values);
                 values.addAll(leased);
                 leased.clear();
-                // Keep capacity charged for factories and physical closers that
-                // have not settled; their resulting sessions are part of teardown.
-                total.set(creating);
+                // Keep each physical session charged until its close succeeds.
                 closing += values.size();
-                permits.release(maxSize);
+                notifyAll();
             }
         }
-        for (T value : values) closeTracked(value);
+        for (T value : values) closeAsync(value);
         boolean interrupted = false;
         synchronized (this) {
             while (creating > 0 || closing > 0) {
-                try { wait(); }
-                catch (InterruptedException cancelled) { interrupted = true; }
+                long remaining = deadline - System.nanoTime();
+                if (remaining <= 0L) break;
+                try { TimeUnit.NANOSECONDS.timedWait(this, remaining); }
+                catch (InterruptedException cancelled) {
+                    interrupted = true;
+                    // Keep waiting only until the shutdown deadline; never block unboundedly.
+                }
+            }
+            if (creating > 0 || closing > 0) {
+                residualCreating = creating;
+                residualClosing = closing;
             }
         }
         if (interrupted) Thread.currentThread().interrupt();
+        if (residualCreating > 0 || residualClosing > 0) {
+            Map<String, Object> snapshot = metrics();
+            throw new IllegalStateException("LOAD_RESOURCE_TEARDOWN_TIMEOUT: outstanding physical reservations remain "
+                    + "creating=" + residualCreating + " closing=" + residualClosing + " total=" + total.get()
+                    + " snapshot=" + snapshot);
+        }
         if (!closeFailures.isEmpty()) {
             IllegalStateException failure = new IllegalStateException(
                     "LOAD_RESOURCE_TEARDOWN_FAILED: one or more pooled resources did not confirm close");
@@ -324,7 +390,12 @@ public final class LoadResourcePool<T> implements AutoCloseable {
 
     public static final class PoolTimeoutException extends Exception {
         private final String code;
-        public PoolTimeoutException(String code, String message) { super(message); this.code = code; }
+        private final Map<String, Object> snapshot;
+        public PoolTimeoutException(String code, String message) { this(code, message, Collections.<String, Object>emptyMap()); }
+        private PoolTimeoutException(String code, String message, Map<String, Object> snapshot) {
+            super(message); this.code = code; this.snapshot = Collections.unmodifiableMap(snapshot);
+        }
         public String code() { return code; }
+        public Map<String, Object> snapshot() { return snapshot; }
     }
 }

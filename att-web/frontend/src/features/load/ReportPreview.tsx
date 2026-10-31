@@ -11,7 +11,7 @@ const REPORT_ORIGIN = 'https://att-report.invalid';
 const APPROVED_REPORT_SCRIPTS = [
   { producer: 'legacy-report-v1', hash: 'DmkzPdiGxyCfiKKZtr34jiaf1ukqUeAK8RSwFF19ryg=' },
   { producer: 'legacy-report-v2', hash: '2n13XsaCAniqXDGJgtRR2kgh8VlBPDQQ3kb5BQLyzq4=' },
-  { producer: 'load-report-4.2.7', hash: 'JngTyYfak/+hWviebrkpXD20Pdm7CCCZsual7sBCLrQ=' },
+  { producer: 'load-report-4.2.8', hash: 'JngTyYfak/+hWviebrkpXD20Pdm7CCCZsual7sBCLrQ=' },
 ] as const;
 
 /** Resolve only package-archive-relative URLs. Never pass untrusted links to fetch. */

@@ -1,6 +1,6 @@
 # Run a Load test
 
-Use Studio for the six-mode Load Template catalog and its validated builder, or use the current 4.2.7 Local CLI for an authored scenario.
+Use Studio for the six-mode Load Template catalog and its validated builder, or use the current 4.2.8 Local CLI for an authored scenario.
 
 ## Studio workflow
 
@@ -12,7 +12,7 @@ Use Studio for the six-mode Load Template catalog and its validated builder, or 
 
 For the six mode definitions, see the [Load model](../concepts/load-model.md). The [Load Reference](../reference/execution-modes/load.md) owns template, binding and execution rules.
 
-## Current 4.2.7 CLI
+## Current 4.2.8 CLI
 
 Run an authored scenario or promote one supported Debug sidecar into a Load workload:
 
@@ -34,4 +34,8 @@ Browser-created Quick and Advanced Load drafts use the Server's configured inlin
 
 In Studio, open **Package LOAD scenarios** from the template builder, select the saved scenario, then validate and submit it. Long runs receive a read-only preflight that estimates retained evidence files and bytes, checks quotas, Tool output retention, artifact archive capacity, and available output disk space. It reports risks as warnings and does not reject a run solely because of its duration.
 
-Current 4.2.7 Load CLI and proposed CLI vNext are different interfaces. See the [CLI Reference](../reference/cli.md) and [Planned vNext page](../interfaces/cli/vnext-proposed.md).
+Current 4.2.8 Load CLI and proposed CLI vNext are different interfaces. See the [CLI Reference](../reference/cli.md) and [Planned vNext page](../interfaces/cli/vnext-proposed.md).
+
+### MQ pool wait diagnosis
+
+A LOAD MQ borrow uses one wait budget for admission, physical capacity and connection creation. A zero timeout only acquires an immediately idle connection. If a connection attempt outlives the budget, its physical slot remains reserved until it completes; a late connection can be reused or is closed during shutdown. Pool shutdown starts physical disconnects asynchronously and waits at most the borrow timeout (with a short floor) for outstanding creates and closes; if reservations remain, teardown fails with `LOAD_RESOURCE_TEARDOWN_TIMEOUT` and diagnostics retain `residualCreating` / `residualClosing` without releasing unconfirmed physical slots. A late disconnect confirmation still updates reservation accounting without admitting over-capacity replacements. If the pool is exhausted while a physical connection is being created or closed, the borrower waits for availability and reports `MQ_POOL_TIMEOUT` when the budget expires. The diagnostic includes bounded helper and instance identifiers and a pool snapshot. Check active, idle, creating, closing, and waiting counts alongside the configured pool size and borrow timeout. A failed physical disconnect remains charged until teardown can be confirmed. Increasing ramp-down or setting `minIdle` to zero is not required for pool correctness.

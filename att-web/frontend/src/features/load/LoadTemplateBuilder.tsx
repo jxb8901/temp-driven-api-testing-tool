@@ -1,6 +1,6 @@
 import { EnvironmentResolutionNotice } from '../explorer/EnvironmentResolutionNotice';
 import { useEffect, useRef, useState } from 'react';
-import { api } from '../../api';
+import { api, type SavedLoadScenario } from '../../api';
 import { useNavigationGuard } from '../../router';
 import { LoadDialog } from './LoadDialog';
 import { CodeEditor } from '../code/CodeEditor';
@@ -18,7 +18,7 @@ type Edit = { kind: 'workload'; index: number; value: WorkloadDraft } | { kind: 
 type Advanced = { execution: string; testdata: string; thresholds: string; evidence: string; seed: string };
 
 /** UI projection of the existing Advanced Load draft, using the shared Engine template composer on validation. */
-export function LoadTemplateBuilder(props: LoadFeatureProps & { templateId: string }) {
+export function LoadTemplateBuilder(props: LoadFeatureProps & { templateId: string; savedScenario?: SavedLoadScenario & { definition: Record<string, unknown> }; onClose?: () => void }) {
   const { templateId, selectedPackage: packageId, selectedEnvironment: environment, onEnvironmentChange, environments = [] } = props;
   const navigation = useNavigationGuard();
   const [definition, setDefinition] = useState<LoadTemplateDefinition | null>(null);
@@ -32,6 +32,13 @@ export function LoadTemplateBuilder(props: LoadFeatureProps & { templateId: stri
   const [message, setMessage] = useState('Loading template…');
   const [busy, setBusy] = useState(false);
   const [dirty, setDirty] = useState(false);
+  const [saveOpen, setSaveOpen] = useState(false);
+  const [savedId, setSavedId] = useState(props.savedScenario?.id);
+  const [savedRevision, setSavedRevision] = useState(props.savedScenario?.revision);
+  const [saveName, setSaveName] = useState(props.savedScenario?.name || '');
+  const [saveDescription, setSaveDescription] = useState(props.savedScenario?.description || '');
+  const [saveTags, setSaveTags] = useState(props.savedScenario?.tags.join(', ') || '');
+  const [saveError, setSaveError] = useState('');
   const [reload, setReload] = useState(0);
   const sequence = useRef(0), loadSequence = useRef(0), slots = useRef(100);
   const [mixTarget, setMixTarget] = useState<{ slot: number; value: TargetDraft } | null>(null);
@@ -45,12 +52,44 @@ export function LoadTemplateBuilder(props: LoadFeatureProps & { templateId: stri
   const mixed = Boolean(definition?.mode.endsWith('mix'));
   const multiple = Boolean(definition?.mode.startsWith('multi-'));
   const unregisterDirty = useRef<(() => void) | null>(null);
-  useEffect(() => { const unregister = navigation.registerUnsavedChanges(dirty || Boolean(edit && edit.kind !== 'review'), 'Load Template draft'); unregisterDirty.current = unregister; return unregister; }, [dirty, edit, navigation.registerUnsavedChanges]);
+  useEffect(() => { const unregister = navigation.registerUnsavedChanges(dirty || saveOpen || Boolean(edit && edit.kind !== 'review'), 'Load Template draft'); unregisterDirty.current = unregister; return unregister; }, [dirty, edit, saveOpen, navigation.registerUnsavedChanges]);
   useEffect(() => {
     const controller = new AbortController(); const version = ++loadSequence.current;
     ++sequence.current; setBusy(false);
     setDefinition(null); setDraft(null); setDirty(false); setEdit(null); setMessage('Loading template…');
     (async () => {
+      if (props.savedScenario) {
+        const composition = object(props.savedScenario.definition.templateComposition);
+        const value = composition.definition as LoadTemplateDefinition | undefined;
+        const bindings = object(object(composition.bindings).bindings);
+        if (!value || !Array.isArray(value.workloads) || typeof composition.revision !== 'string') throw new Error('This saved definition cannot be opened in the template editor.');
+        const toTarget = (raw: unknown): TargetDraft => {
+          const target = object(raw); const type = String(target.type || 'template') as TargetDraft['type'];
+          if (!['case','template','flow','tool'].includes(type)) throw new Error('A saved target type is no longer supported.');
+          return { type, id: String(target.id || ''), businessValid: true, businessJson: JSON.stringify({ inputs: object(target.inputs), ...(type === 'tool' ? { arguments: object(target.arguments) } : { vars: object(target.vars) }) }) };
+        };
+        setDefinition(value); setRevision(composition.revision); setTiming(initialTiming(value.policy));
+        setAdvanced({ execution: JSON.stringify(value.policy.execution || {}), testdata: JSON.stringify(value.policy.testdata || []), thresholds: JSON.stringify(value.policy.thresholds || {}), evidence: JSON.stringify(value.policy.evidence || {}), seed: String(value.policy.seed ?? '') });
+        setWorkloads(value.workloads.map((row, index) => {
+          const bound = object(bindings[row.id]); const policy = { ...value.policy, load: { ...object(value.policy.load), ...object(row.load) }, execution: { ...object(value.policy.execution), ...object(row.execution) } };
+          const mix = object(bound.mix);
+          return { ...newWorkload(index + 1, policy), loadPolicy: clone(object(row.load)), executionPolicy: clone(object(row.execution)), id: row.id, structure: value.mode.endsWith('mix') ? 'mix' : 'single',
+            testdataJson: JSON.stringify(bound.testdata || {}), thresholdsJson: JSON.stringify(row.thresholds || {}), evidenceJson: JSON.stringify(row.evidence || {}),
+            mixDefaultsJson: JSON.stringify({ inputs: object(bound.inputs), vars: object(bound.vars) }), target: toTarget(bound.target),
+            mix: (row.mix || []).map(slot => ({ ...toTarget(mix[slot.id]), entryId: slot.id, weight: String(slot.weight) })) };
+        }));
+        let limitsMessage = '';
+        try {
+          const page = await api.listLoadTemplates(packageId, templateId, 0, controller.signal);
+          if (controller.signal.aborted || version !== loadSequence.current) return;
+          if (page.limits) setLimits(page.limits);
+          else limitsMessage = ' Current Server limits are unavailable; validate before saving.';
+        } catch {
+          if (controller.signal.aborted || version !== loadSequence.current) return;
+          limitsMessage = ' Current Server limits are unavailable; validate before saving.';
+        }
+        setMessage(`Saved revision loaded. Validate changes before saving.${limitsMessage}`); return;
+      }
       let offset = 0;
       do {
         const page = await api.listLoadTemplates(packageId, templateId, offset, controller.signal);
@@ -74,7 +113,7 @@ export function LoadTemplateBuilder(props: LoadFeatureProps & { templateId: stri
       } while (true);
     })().catch(error => { if (!controller.signal.aborted) setMessage(error.message || 'Template could not be loaded.'); });
     return () => { controller.abort(); ++loadSequence.current; };
-  }, [packageId, templateId, reload]);
+  }, [packageId, templateId, reload, props.savedScenario]);
   useEffect(() => { ++sequence.current; setDraft(null); }, [environment, workloads, timing, advanced]);
   useEffect(() => {
     if (!draft) return;
@@ -82,6 +121,11 @@ export function LoadTemplateBuilder(props: LoadFeatureProps & { templateId: stri
     return () => clearTimeout(timer);
   }, [draft]);
   function change(next: WorkloadDraft[]) { setWorkloads(next); setDirty(true); setDraft(null); }
+  function nextId(prefix: string, existing: string[]) {
+    let id: string;
+    do { id = `${prefix}-${++slots.current}`; } while (existing.includes(id));
+    return id;
+  }
   function update(index: number, value: WorkloadDraft) { change(workloads.map((row, i) => i === index ? value : row)); }
   function close() { setMixTarget(null); setEdit(null); }
   function save() {
@@ -126,6 +170,18 @@ export function LoadTemplateBuilder(props: LoadFeatureProps & { templateId: stri
     catch (error) { setDraft(null); setMessage(error instanceof Error ? error.message : 'Run was not accepted.'); }
     finally { setBusy(false); }
   }
+  async function saveScenario() {
+    if (busy) return;
+    if (!draft || Date.parse(draft.expiresAt) <= Date.now()) { setSaveError('The draft expired. Validate again.'); return; }
+    if (!saveName.trim()) { setSaveError('Enter a Scenario name.'); return; }
+    const version = sequence.current; setBusy(true); setSaveError('');
+    try {
+      const metadata = { draftId: draft.draftId, name: saveName.trim(), description: saveDescription.trim(), tags: saveTags.split(',').map(tag => tag.trim()).filter(Boolean) };
+      const saved = savedId ? await api.updateSavedLoadScenario(savedId, { ...metadata, expectedRevision: savedRevision! }) : await api.saveLoadScenario(metadata);
+      if (version === sequence.current) { setSavedId(saved.id); setSavedRevision(saved.revision); setDirty(false); setSaveOpen(false); setMessage(`Saved ${saved.name} (revision ${saved.revision}). Return to Saved Scenarios and validate this revision before running or scheduling.`); }
+    } catch (error) { if (version === sequence.current) setSaveError(error instanceof Error ? error.message : 'Scenario could not be saved.'); }
+    finally { setBusy(false); }
+  }
   function schedule() {
     if (!draft || Date.parse(draft.expiresAt) <= Date.now() || busy || !props.onSchedule) return;
     unregisterDirty.current?.();
@@ -140,13 +196,15 @@ export function LoadTemplateBuilder(props: LoadFeatureProps & { templateId: stri
     const total = row.mix.reduce((sum, slot) => sum + Number(slot.weight), 0);
     return <><div className="att-mix-distribution" role="img" aria-label={row.mix.map(slot => `${slot.entryId}: ${total > 0 ? (100 * Number(slot.weight) / total).toFixed(1) : 0}%`).join(", ")}>{row.mix.map((slot,index) => <span key={slot.entryId} style={{ flexGrow: Math.max(0, Number(slot.weight) || 0), background: `hsl(${index * 83 % 360} 55% 45%)` }} />)}</div><div className="att-table-scroll"><table className="att-data-table"><thead><tr><th>Target</th><th>Weight / probability</th><th>Readiness</th><th>Actions</th></tr></thead><tbody>{row.mix.map((slot,index) => <tr key={slot.entryId}>
       <td>{slot.entryId}: {slot.id || 'Unbound'}</td><td><input aria-label={`${slot.entryId} weight`} type="number" min="1" value={slot.weight} onChange={event => onChange({ ...row, mix: row.mix.map((entry,i) => i === index ? { ...entry, weight: event.target.value } : entry) })} /> {total > 0 ? (100 * Number(slot.weight) / total).toFixed(1) : '0'}%</td>
-      <td>{slot.id ? 'Bound; validate' : 'Choose Target'}</td><td><button className="button button-quiet" type="button" onClick={() => configure(index)}>⚙ Choose / Configure</button><button className="button button-quiet" type="button" disabled={row.mix.length <= 2} onClick={() => onChange({ ...row, mix: row.mix.filter((_,i) => i !== index) })}>− Remove</button><button className="button button-quiet" type="button" disabled={index === 0} onClick={() => { const mix = [...row.mix]; [mix[index-1],mix[index]] = [mix[index],mix[index-1]]; onChange({ ...row,mix }); }}>↑ Move up</button><button className="button button-quiet" type="button" disabled={row.mix.length >= 128 || targets.length - (workloads.find(item => item.id === row.id)?.mix.length || 0) + row.mix.length >= limits.maxTargets} onClick={() => onChange({ ...row,mix: [...row.mix,{ ...clone(slot),entryId: `slot-${++slots.current}` }] })}>⧉ Duplicate</button></td>
-    </tr>)}</tbody></table></div><button className="button button-quiet" type="button" disabled={row.mix.length >= 128 || targets.length - (workloads.find(item => item.id === row.id)?.mix.length || 0) + row.mix.length >= limits.maxTargets} onClick={() => onChange({ ...row, mix: [...row.mix, { ...newTarget(), entryId: `slot-${++slots.current}`, weight: '1' }] })}>＋ Add Target</button><p>Weights are iteration selection probabilities within this workload.</p></>;
+      <td>{slot.id ? 'Bound; validate' : 'Choose Target'}</td><td><button className="button button-quiet" type="button" onClick={() => configure(index)}>⚙ Choose / Configure</button><button className="button button-quiet" type="button" disabled={row.mix.length <= 2} onClick={() => onChange({ ...row, mix: row.mix.filter((_,i) => i !== index) })}>− Remove</button><button className="button button-quiet" type="button" disabled={index === 0} onClick={() => { const mix = [...row.mix]; [mix[index-1],mix[index]] = [mix[index],mix[index-1]]; onChange({ ...row,mix }); }}>↑ Move up</button><button className="button button-quiet" type="button" disabled={row.mix.length >= 128 || targets.length - (workloads.find(item => item.id === row.id)?.mix.length || 0) + row.mix.length >= limits.maxTargets} onClick={() => onChange({ ...row,mix: [...row.mix,{ ...clone(slot),entryId: nextId("slot", row.mix.map(entry => entry.entryId)) }] })}>⧉ Duplicate</button></td>
+    </tr>)}</tbody></table></div><button className="button button-quiet" type="button" disabled={row.mix.length >= 128 || targets.length - (workloads.find(item => item.id === row.id)?.mix.length || 0) + row.mix.length >= limits.maxTargets} onClick={() => onChange({ ...row, mix: [...row.mix, { ...newTarget(), entryId: nextId("slot", row.mix.map(entry => entry.entryId)), weight: '1' }] })}>＋ Add Target</button><p>Weights are iteration selection probabilities within this workload.</p></>;
   };
   return <div className="page-content att-query-workspace att-template-builder">
+    {props.onClose && <button className="button button-quiet" type="button" onClick={() => { if (!dirty && !edit && !saveOpen || window.confirm('Discard unsaved changes and return to Saved Scenarios?')) { unregisterDirty.current?.(); props.onClose?.(); } }}>Back to Saved Scenarios</button>}
+    {savedId && !props.onClose && <button className="button button-quiet" type="button" onClick={() => navigation.navigate('#/advanced-load?tab=scenarios')}>Open Saved Scenarios</button>}
     <h1>{definition?.name || 'Load Template'}</h1><p>{packageId} · {definition?.mode} · {message}</p>
     {!definition && <button className="button button-quiet" type="button" onClick={() => setReload(value => value + 1)}>Retry</button>}
-    <label>Environment <select value={environment} onChange={event => onEnvironmentChange(event.target.value)}><option value="">Default environment</option>{environments.map(value => <option key={value}>{value}</option>)}</select></label>
+    <label>Environment <select value={environment} onChange={event => { setDirty(true); onEnvironmentChange(event.target.value); }}><option value="">Default environment</option>{environments.map(value => <option key={value}>{value}</option>)}</select></label>
       <EnvironmentResolutionNotice packageId={packageId} environment={environment} />
     <aside className="att-help" role="note">
       <p>Browser-created and package-backed LOAD scenarios follow the Server duration limit shown below (up to 10 days). The limit applies to ramp-up, warmup, steady duration, and ramp-down combined.</p>
@@ -155,6 +213,7 @@ export function LoadTemplateBuilder(props: LoadFeatureProps & { templateId: stri
     <p>{workloads.length} Workloads · {targets.length} Target bindings · {unique} Unique targets · {model === 'virtualUsers' ? `${workloads.reduce((sum,row) => sum + Number(row.users),0)} total VU` : `${workloads.reduce((sum,row) => { const [rate,unit] = row.arrivalRate.split('/'); return sum + Number(rate) / (unit === 'm' ? 60 : 1); },0)} configured arrivals/sec`}</p>
     {limits.maxTotalUsers > 0 && <p className="att-help">Server limits: {limits.maxWorkloads} workloads · {limits.maxTargets} bindings · {limits.maxTotalUsers} users · {limits.maxAggregateArrivalRatePerSecond} arrivals/sec · {limits.maxTotalConcurrent} total concurrent · {plannedWorkloadDuration(limits.maxDurationSeconds*1000)} ({limits.maxDurationSeconds}s) effective duration</p>}
     {definition && <p className="att-help">Current effective envelope: {effectiveEnvelopeMs==null?'requires valid phase values':`${plannedWorkloadDuration(effectiveEnvelopeMs)} maximum across ${effectiveWorkloadEnvelopes.length} workloads`} (ramp-up + warmup + steady duration + ramp-down).</p>}
+    {definition && props.savedScenario && <p>Save changes, then return to Saved Scenarios and validate the saved revision to run or schedule it.</p>}
     {definition && <>
       <button className="button button-quiet" type="button" onClick={() => setEdit({ kind: 'settings', timing: clone(timing), advanced: clone(advanced) })}>⚙ Common Settings</button>
       {!multiple && mixed ? <><label>Shared users <input type="number" min="1" value={workloads[0]?.users || ''} onChange={event => update(0,{ ...workloads[0], users: event.target.value })} /></label>{workloads[0] && mixTable(workloads[0], value => update(0,value), slot => setEdit({ kind: 'target', index: 0, slot, value: clone(workloads[0].mix[slot]) }))}</> :
@@ -162,10 +221,10 @@ export function LoadTemplateBuilder(props: LoadFeatureProps & { templateId: stri
           <td>{row.id}</td><td>{mixed ? <>{row.mix.length} bindings · {row.mix.map(slot => slot.weight).join(' / ')}<div className="att-mix-distribution" role="img" aria-label={`Weights for ${row.id}: ${row.mix.map(slot => slot.weight).join(' / ')}`}>{row.mix.map((slot,index) => <span key={slot.entryId} style={{ flexGrow: Math.max(0,Number(slot.weight) || 0),background: `hsl(${index * 83 % 360} 55% 45%)` }} />)}</div></> : row.target.id || 'Unbound'}</td><td>{model === 'virtualUsers' ? row.users : `${row.arrivalRate} / ${row.maxConcurrent}`}</td>
           <td>{(mixed ? row.mix.every(slot => slot.id) : row.target.id) ? (valid ? 'Validated' : 'Bound; validate') : 'Choose Target'}</td>
           <td><button className="button button-quiet" type="button" onClick={() => setEdit({ kind: mixed ? 'mix' : 'target', index, value: clone(mixed ? row : row.target) } as Edit)}>{mixed ? '⤨ Edit Mix' : '⚙ Choose Target'}</button><button className="button button-quiet" type="button" onClick={() => setEdit({ kind: 'workload', index, value: clone(row) })}>⚙ Configure</button>
-            <button className="button button-quiet" type="button" disabled={workloads.length <= 2} onClick={() => change(workloads.filter((_,i) => i !== index))}>− Remove</button><button className="button button-quiet" type="button" disabled={index === 0} onClick={() => { const next = [...workloads]; [next[index-1],next[index]] = [next[index],next[index-1]]; change(next); }}>↑ Move up</button><button className="button button-quiet" type="button" disabled={workloads.length >= Math.min(128,limits.maxWorkloads) || targets.length + (mixed ? workloads[0]?.mix.length || 2 : 1) > limits.maxTargets} onClick={() => change([...workloads,{ ...clone(row),id: `workload-${++slots.current}` }])}>⧉ Duplicate</button></td>
+            <button className="button button-quiet" type="button" disabled={workloads.length <= 2} onClick={() => change(workloads.filter((_,i) => i !== index))}>− Remove</button><button className="button button-quiet" type="button" disabled={index === 0} onClick={() => { const next = [...workloads]; [next[index-1],next[index]] = [next[index],next[index-1]]; change(next); }}>↑ Move up</button><button className="button button-quiet" type="button" disabled={workloads.length >= Math.min(128,limits.maxWorkloads) || targets.length + (mixed ? workloads[0]?.mix.length || 2 : 1) > limits.maxTargets} onClick={() => change([...workloads,{ ...clone(row),id: nextId("workload", workloads.map(item => item.id)) }])}>⧉ Duplicate</button></td>
         </tr>)}</tbody></table></div>}
-      {multiple && <button className="button button-quiet" type="button" disabled={workloads.length >= Math.min(128,limits.maxWorkloads) || targets.length + (mixed ? workloads[0]?.mix.length || 2 : 1) > limits.maxTargets} onClick={() => { const row = clone(workloads[0]); row.id = `workload-${++slots.current}`; row.target = newTarget(); row.mix = row.mix.map(slot => ({ ...slot, ...newTarget() })); change([...workloads,row]); }}>＋ Add Workload</button>}
-      <footer className="att-load-actions"><button className="button button-quiet" type="button" onClick={() => void validate()} disabled={busy || !props.inlineLoadEnabled}>✓ Validate</button><button className="button button-quiet" type="button" disabled={!valid} onClick={() => setEdit({ kind: 'review' })}>▤ Review YAML</button><button className="button button-quiet" type="button" disabled={!valid || busy} onClick={() => void run()}>▶ Run Now</button><button className="button button-quiet" type="button" disabled={!valid || !props.schedulingEnabled || !props.onSchedule || busy} onClick={schedule}>◷ Schedule…</button></footer>
+      {multiple && <button className="button button-quiet" type="button" disabled={workloads.length >= Math.min(128,limits.maxWorkloads) || targets.length + (mixed ? workloads[0]?.mix.length || 2 : 1) > limits.maxTargets} onClick={() => { const row = clone(workloads[0]); row.id = nextId("workload", workloads.map(item => item.id)); row.target = newTarget(); row.mix = row.mix.map(slot => ({ ...slot, ...newTarget() })); change([...workloads,row]); }}>＋ Add Workload</button>}
+      <footer className="att-load-actions"><button className="button button-quiet" type="button" onClick={() => void validate()} disabled={busy || !props.inlineLoadEnabled}>✓ Validate</button><button className="button button-quiet" type="button" disabled={!valid} onClick={() => setEdit({ kind: 'review' })}>▤ Review YAML</button><button className="button button-quiet" type="button" disabled={!valid || busy} onClick={() => setSaveOpen(true)}>Save Scenario…</button><button className="button button-quiet" type="button" disabled={!valid || busy || Boolean(savedId)} onClick={() => void run()}>▶ Run Now</button><button className="button button-quiet" type="button" disabled={!valid || !props.schedulingEnabled || !props.onSchedule || busy || Boolean(savedId)} onClick={schedule}>◷ Schedule…</button></footer>
     </>}
     {edit && <LoadDialog title={edit.kind === 'review' ? 'Review Scenario' : edit.kind === 'settings' ? 'Common Settings' : edit.kind === 'mix' ? 'Edit Mix' : edit.kind === 'target' ? 'Configure Target' : 'Configure Workload'} onCancel={close} onSave={edit.kind === 'review' ? undefined : save}>
       {edit.kind === 'review' && <CodeEditor label="Validated scenario YAML" language="yaml" value={draft?.previewYaml || ''} readOnly />}
@@ -181,6 +240,13 @@ export function LoadTemplateBuilder(props: LoadFeatureProps & { templateId: stri
         <JsonArrayField label="Package Testdata paths" value={edit.advanced.testdata} onChange={value => setEdit({ ...edit, advanced: { ...edit.advanced, testdata: value } })} />
         <label>Seed <input type="number" value={edit.advanced.seed} onChange={event => setEdit({ ...edit, advanced: { ...edit.advanced, seed: event.target.value } })} /></label>
       </>}
+    </LoadDialog>}
+    {saveOpen && <LoadDialog title="Save Scenario" onCancel={() => setSaveOpen(false)} onSave={() => void saveScenario()}>
+      <p>Save a private authored definition for {packageId}. This does not run a Job or create a Schedule.</p>
+      {saveError && <p role="alert">{saveError}</p>}
+      <label>Name <input aria-label="Scenario name" maxLength={120} value={saveName} onChange={event => setSaveName(event.target.value)} /></label>
+      <label>Description <textarea aria-label="Scenario description" maxLength={512} value={saveDescription} onChange={event => setSaveDescription(event.target.value)} /></label>
+      <label>Tags (comma-separated) <input aria-label="Scenario tags" value={saveTags} onChange={event => setSaveTags(event.target.value)} /></label>
     </LoadDialog>}
     {mixTarget && edit?.kind === 'mix' && <LoadDialog title="Configure Mix Target" onCancel={() => setMixTarget(null)} onSave={() => {
       setEdit({ ...edit, value: { ...edit.value, mix: edit.value.mix.map((slot,index) => index === mixTarget.slot ? { ...slot, ...mixTarget.value } : slot) } }); setMixTarget(null);

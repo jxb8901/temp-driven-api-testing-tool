@@ -2,6 +2,8 @@ import type { ApiEnvelope } from '../../types';
 export type PackageChangePolicy = 'strict' | 'pause' | 'ignore';
 
 export interface ScheduleDefinition {
+  definitionVersion?: number;
+  snapshotVersion?: number;
   targetIdentity?: import('../load/types').TargetIdentity;
   packageChangePolicy?: PackageChangePolicy | null;
   effectivePackageChangePolicy?: PackageChangePolicy;
@@ -30,6 +32,15 @@ export interface ScheduleDefinition {
   revisionPolicy?: string;
   recentStatus?: string;
   debugTarget?: { type: string; id: string } | null;
+  runOptions?: { debug?: boolean; failFast?: boolean } | null;
+  canEditAdvancedSettings?: boolean | null;
+  executionSettings?: {
+    thresholds?: Record<string, unknown>;
+    evidence?: Record<string, unknown>;
+    testdata?: unknown;
+    execution?: Record<string, unknown>;
+    seed?: number | string;
+  } | null;
   scenario?: string | null;
   inlineSnapshot?: boolean;
   loadModel?: string | null;
@@ -107,8 +118,17 @@ export interface DeleteScheduleResponse {
   status: 'DELETED' | string;
 }
 
+export interface ScheduleExecutionReview {
+  draftId: string; definitionVersion: number; snapshotVersion: number; nextRunAt?: string | null;
+  revisionDigest: string; sourcePolicy: string; expiresAt: string;
+  originalPreview: { previewYaml?: string; [key: string]: unknown }; preview: { previewYaml?: string; [key: string]: unknown };
+}
+
 export interface SchedulesApi {
+  createScheduleExecutionDraft?(id: string, input: { expectedDefinitionVersion: number; overrides?: Record<string, unknown>; packageEdit?: Record<string, unknown> }): Promise<ScheduleExecutionReview>;
+  replaceScheduleExecution?(id: string, input: { draftId: string; expectedDefinitionVersion: number; confirm: true }): Promise<ScheduleDefinition>;
   listSchedules(signal?: AbortSignal): Promise<ApiEnvelope<ScheduleDefinition>>;
+  getSchedule?(id: string, signal?: AbortSignal): Promise<ScheduleDefinition>;
   previewSchedule(input: SchedulePreviewInput, signal?: AbortSignal): Promise<SchedulePreview>;
   createSchedule(input: ScheduleInput, signal?: AbortSignal): Promise<ScheduleDefinition>;
   updateSchedule(id: string, input: ScheduleInput, signal?: AbortSignal): Promise<ScheduleDefinition>;

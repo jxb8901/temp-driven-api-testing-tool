@@ -61,12 +61,24 @@ class PooledMqHelperExecutorTest {
         Path payload = caseDir.resolve("request.bin");
         Files.write(payload, new byte[]{1});
         MqTransport.Connection held = factory.connect(helper);
+        CaseRuntimeContext loadContext = new CaseRuntimeContext(new TestCase(2, "g", "sheet", "TC1", Collections.<String>emptyList(),
+                Collections.<String, Object>emptyMap(), Collections.emptyMap(), null), caseDir, "R", tempDir, caseDir.resolve("case.log"), "load");
+        loadContext.setLoad("R", "virtualUsers", "I1", 1, "RAMP_DOWN", "2026-01-01T00:00:00Z", "VU1", "2026-01-01T00:00:00Z");
         try {
             Map<String, Object> result = executor.execute("broker", "send",
-                    map("queue", "REQUEST.Q", "payload", text(payload)), context(caseDir), null, "timeout-1").result();
+                    map("queue", "REQUEST.Q", "payload", text(payload)), loadContext, null, "timeout-1").result();
             assertFalse(Boolean.TRUE.equals(result.get("sent")));
             Map<?, ?> poolError = (Map<?, ?>) result.get("error");
             assertEquals("MQ_POOL_TIMEOUT", poolError.get("type"));
+            assertEquals("broker", poolError.get("helperId"));
+            assertEquals("mq.connect", poolError.get("phase"));
+            assertEquals("RAMP_DOWN", poolError.get("loadPhase"));
+            Map<?, ?> snapshot = (Map<?, ?>) poolError.get("pool");
+            assertEquals(1, snapshot.get("maxSize"));
+            assertEquals(1, snapshot.get("active"));
+            assertEquals(1, snapshot.get("timeoutCount"));
+            assertEquals(25L, snapshot.get("budgetMs"));
+            assertFalse(snapshot.toString().contains("REQUEST.Q"));
             assertEquals("mq.pool.borrowTimeoutMs", poolError.get("limitName"));
             assertEquals(25, ((Number) poolError.get("configuredLimit")).intValue());
             assertEquals("EXECUTION_ERROR", poolError.get("outcome"));

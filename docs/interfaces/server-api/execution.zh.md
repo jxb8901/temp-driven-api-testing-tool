@@ -1,4 +1,4 @@
-<!-- att-doc-status: current release=4.2.7 -->
+<!-- att-doc-status: current release=4.2.8 -->
 
 # RUN 與 LOAD API
 
@@ -103,3 +103,9 @@ Content-Type: application/json
 Server 會驗證完整 scenario 並 resolve 所有 target，不會排程流量。只會從所選 target package-local `debug.yaml` 的 business 欄位還原已遮蔽值；不會複製 Debug `case`、`stage` 或 local Testdata。回應包含以 `A` 開頭的不透明 draft ID、安全 effective YAML 預覽、model、遮蔽標記及過期時間。Advanced Load 與 Debug、Quick Load 共用每個 Server 最多 128 個、每個身份最多 16 個 draft 及 10 分鐘有效期限制。
 
 向 `POST /api/v1/jobs/load` 只提交 package 及 draft ID。Server 會在提交及 Worker 啟動前檢查 package revision，再透過既有 Worker、Engine、scheduler、event 及 evidence 流程傳遞相同的不可變 normalized scenario。若 package revision 已變更，會回傳 `409 ATT-SERVER-DRAFT-STALE`；工作接納後才發現變更，工作會標示為 `INVALID`。若預覽有任何遮蔽欄位，瀏覽器會停用 YAML 複製及匯出。舊有 path-based Load request 仍受支援。
+
+### 私人已儲存 LOAD Scenario
+
+已驗證的操作使用者可透過 `/api/v1/saved-load-scenarios`，以已驗證的 advanced LOAD `draftId` 建立私人記錄。集合支援分頁 `GET`；個別記錄支援 `GET`、版本檢查的 `PATCH` 和 `DELETE`，以及 `POST` 的 `validate` 和 `duplicate` 操作。更新須提供 `expectedRevision` 和新的已驗證 `draftId`；驗證、複製與刪除也須提供 `expectedRevision`。版本衝突會回傳 HTTP 409；請重新載入，如要執行則須重新驗證。
+
+Server 將撰寫的定義儲存在 H2 資料庫，每筆定義上限為 256 KiB，每位擁有者最多 100 筆。清單回應只包含摘要，不包含定義。此 API 不會儲存受保護的輸入值或解析後的值。已驗證的 Saved Scenario 可透過現有 draft 端點建立 Job 或 Schedule。Schedule 會儲存獨立快照和來源版本；刪除記錄不會刪除 Schedule 或其歷史。請依正常的 Server 資料庫備份程序備份 Server data directory，包括 H2 檔案。

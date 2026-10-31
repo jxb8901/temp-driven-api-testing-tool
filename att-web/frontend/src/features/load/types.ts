@@ -151,7 +151,7 @@ export interface JobAccepted {
 export interface TargetIdentity {
   type?: string; id?: string; signature?: string; targets?: Array<{ type: string; id: string }>;
   workloadCount?: number; bindingCount?: number; truncated?: boolean;
-  workloads?: Array<{ name: string; targets: Array<{type: string; id: string}>; model: string; users?: number; arrivalRate?: number | string; maxConcurrent?: number; duration?: string; totalDurationMs?: number; warmup?: string; rampUp?: string; rampDown?: string }>;
+  workloads?: Array<{ name: string; mix?: boolean; mixEntries?: Array<{id: string; weight?: number; target: {type?: string; id?: string}}>; targets: Array<{type: string; id: string}>; model: string; users?: number; arrivalRate?: number | string; maxConcurrent?: number; duration?: string; totalDurationMs?: number; warmup?: string; rampUp?: string; rampDown?: string }>;
 }
 export interface LoadLiveProgressCounts {
   scheduled?: number; started?: number; completed?: number; passed?: number; sutFailures?: number;
@@ -374,6 +374,16 @@ export interface LoadJobsApi {
   artifactHref(jobId: string, path: string): string;
 }
 
+export interface SavedScenarioEditorRecord {
+  id: string;
+  name: string;
+  description: string;
+  tags: string[];
+  revision: number;
+  packageId: string;
+  definition: Record<string, unknown>;
+}
+
 export interface LoadFeatureProps {
   api: LoadJobsApi;
   packages: PackageOption[];
@@ -385,11 +395,13 @@ export interface LoadFeatureProps {
   schedulingEnabled?: boolean;
   replayDraftId?: string;
   replaySourceJobId?: string;
+  savedScenario?: SavedScenarioEditorRecord;
   principal?: string;
   onRetryEnvironments?: () => void;
   onPackageChange: (packageId: string) => void;
   onEnvironmentChange: (environment: string) => void;
   onJobAccepted: (jobId: string) => void;
+  onClose?: () => void;
   onSchedule?: (input: { packageId: string; environment?: string; draftId: string; previewYaml?: string; expiresAt?: string }) => boolean | void;
   confirmStart?: (message: string) => boolean | Promise<boolean>;
 }

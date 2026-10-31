@@ -1,6 +1,6 @@
 # 執行 Load test
 
-可在 Studio 使用六種 Load Template catalog 及 validated builder，或使用目前 4.2.7 Local CLI 執行已撰寫的 scenario。
+可在 Studio 使用六種 Load Template catalog 及 validated builder，或使用目前 4.2.8 Local CLI 執行已撰寫的 scenario。
 
 ## Studio workflow
 
@@ -12,7 +12,7 @@
 
 六種 mode 定義請參閱 [Load model](../concepts/load-model.zh.md)。[Load Reference](../reference.zh/execution-modes/load.md) 定義 template、binding 及 execution rules。
 
-## 目前 4.2.7 CLI
+## 目前 4.2.8 CLI
 
 執行已撰寫的 scenario，或將一個支援的 Debug sidecar 提升為 Load workload：
 
@@ -28,4 +28,8 @@ List 和 preview operation 不會啟動 traffic。從有效的 execution command
 
 Browser Quick／Advanced Load draft 及 package-backed scenario 均使用 Server 設定的上限 `server.inlineLoad.maxDurationSeconds`，最多 864,000 秒（10 日）。完整 envelope 依 ramp-up、warmup、steady duration 及 ramp-down 順序執行。長時間 run 會執行唯讀 preflight，估算保留 evidence、Tool output、artifact archive 及輸出磁碟空間；這些風險以 warning 顯示，duration 本身不會拒絕 run。
 
-目前 4.2.7 Load CLI 與 proposed CLI vNext 是不同 interface。請參閱 [CLI Reference](../reference/cli.md) 及[規劃中的 vNext 頁面](../interfaces/cli/vnext-proposed.zh.md)。
+目前 4.2.8 Load CLI 與 proposed CLI vNext 是不同 interface。請參閱 [CLI Reference](../reference/cli.md) 及[規劃中的 vNext 頁面](../interfaces/cli/vnext-proposed.zh.md)。
+
+### 診斷 MQ pool 等候
+
+LOAD MQ borrow 以同一個等候預算處理 admission、實體容量及連線建立。timeout 為零時，只會取得立即可用的 idle 連線。連線建立超過預算後，實體容量仍會保留至建立完成；遲到的連線可供重用，或在關閉時釋放。Pool shutdown 會非同步啟動實體 disconnect，並最多等候 borrow timeout（含短暫下限）處理未完成的 create/close；若仍有 reservation，teardown 會以 `LOAD_RESOURCE_TEARDOWN_TIMEOUT` 失敗，並在診斷中保留 `residualCreating` / `residualClosing`，不會把未確認的實體容量當成已釋放。逾時後才完成的 disconnect 仍會更新 reservation 計數，且不會允許超容量替換。若 pool 已滿，而實體連線正在建立或關閉，borrower 會等候可用容量；預算到期時回報 `MQ_POOL_TIMEOUT`。診斷包含受限長度的 helper、instance 識別及 pool 快照。請連同設定的 pool 大小與 borrow timeout 檢查 active、idle、creating、closing 和 waiting 數值。實體 disconnect 失敗時，容量會維持佔用，直到能確認 teardown。Pool 正確運作不需要延長 ramp-down 或將 `minIdle` 設為零。

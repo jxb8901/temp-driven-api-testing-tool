@@ -979,7 +979,9 @@ public final class PackageResourceInspector implements AutoCloseable {
         DebugEngine engine = debugEngine(frameworkConfig());
         att.load.LoadScenario scenario = catalog.compose(definition, bindings,
                 (type,id) -> engine.loadBootstrapInputForLoad(type,id));
-        return validateLoadScenario(scenario.toMap());
+        Map<String,Object> result = validateLoadScenario(scenario.toMap());
+        result.put("containsSensitiveAuthoredValues", Boolean.valueOf(engine.containsSensitiveValue(input)));
+        return result;
     }
 
     /** Validates a full inline Load scenario and every target closure without scheduling traffic. */
@@ -1002,7 +1004,9 @@ public final class PackageResourceInspector implements AutoCloseable {
         Map<String, Object> composed = new att.load.LoadScenarioBuilder(new att.load.LoadScenarioLoader(packageRoot))
                 .composeScenario(policy, workloads);
         att.load.LoadScenario scenario = new att.load.LoadScenarioLoader(packageRoot).loadInline(composed);
-        return validatedLoadScenario(index, config, engine, scenario);
+        Map<String,Object> result = validatedLoadScenario(index, config, engine, scenario);
+        result.put("containsSensitiveAuthoredValues", Boolean.valueOf(engine.containsSensitiveValue(requested)));
+        return result;
     }
 
     /** Validates a package-backed Load scenario while retaining source locations from its YAML file. */

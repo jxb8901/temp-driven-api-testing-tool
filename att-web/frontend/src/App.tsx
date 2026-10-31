@@ -22,6 +22,7 @@ const SettingsPage = lazy(() => import('./SettingsPage').then(module => ({ defau
 import { ConfigurationWorkspace } from './features/explorer/ConfigurationWorkspace';
 import { PackageManifestWorkspace } from './features/explorer/PackageManifestWorkspace';
 const LoadTestingPage = lazy(() => import('./features/load/LoadTestingPage').then(module => ({ default: module.LoadTestingPage })));
+const SavedLoadScenarios = lazy(() => import('./features/load/SavedLoadScenarios').then(module => ({ default: module.SavedLoadScenarios })));
 const LoadTemplateBuilder = lazy(() => import('./features/load/LoadTemplateBuilder').then(module => ({ default: module.LoadTemplateBuilder })));
 import type { ValidatedScheduleIntent } from './features/schedules/types';
 
@@ -486,9 +487,8 @@ export default function App() {
           onTab={tab => navigation.navigate({ kind: 'load', tab })}
           onBlank={packageId => navigation.navigate({ kind: 'load', packageId })}
           onJobs={() => navigation.navigate({ kind: 'jobs', executionType: 'load' })}
-          onCreate={(packageId, item) => navigation.navigate(item.mode === 'single-vu' || item.mode === 'single-tps'
-            ? { kind: 'quick-load', packageId, templateId: 'catalog:' + item.id, model: item.mode === 'single-tps' ? 'arrivalRate' : 'virtualUsers' }
-            : { kind: 'load', packageId, templateId: item.id })}>
+          onCreate={(packageId, item) => navigation.navigate({ kind: 'load', packageId, templateId: item.id })}>
+        <SavedLoadScenarios editorApi={loadJobsApi} packages={packageOptions} enabled={capabilities.inlineLoadEnabled} onJobAccepted={jobId => onJobAccepted({ jobId, packageId: undefined })} onSchedule={capabilities.loadSchedulingEnabled ? onSchedule : undefined} />
         <LoadCatalogPage api={api}
           packages={state.packages.status === 'ready'
             ? { status: 'ready', data: packageOptions }

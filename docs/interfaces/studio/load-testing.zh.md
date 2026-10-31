@@ -1,4 +1,4 @@
-<!-- att-doc-status: current release=4.2.7 -->
+<!-- att-doc-status: current release=4.2.8 -->
 
 # Studio Load testing
 
@@ -43,3 +43,9 @@ Advanced Load route 使用有型別的控制項設定 duration 單位、Virtual 
 Jobs 在 Server 對完整 matching history 執行 filter、Target 排序／分組及真正分頁。Target 連結開啟指定 Job Details；每列保留 Package/Environment、可複製的縮短 Job ID、Schedule principal、Created/Started/Finished/elapsed。Recent Jobs 預設最新優先。Rows per page 支援 25/50/100（初次預設 100，保存在瀏覽器）。Pin/Delete 圖示立即生效。兩個 footer 選單對當頁所有 Job（包括收合群組）設定 pin/unpin 或 mark/unmark；逐 ID 結果解釋部分失敗。Deletion mark 在至少 30 秒後的背景 claim 前可取消；pinned、active、busy、quarantined Job 仍受保護。Job Details 保留 Overview、Live Output、Events、Results、Artifacts、Metrics；取消執行仍需確認。
 
 Explorer 是 React 與 TypeScript 單頁 UI，於 `att-web` Maven resource 階段使用 Vite 建置。Maven 會把產生的靜態資源複製至 `META-INF/resources/ui/`；Server WAR 再將它們封裝供 Tomcat 提供。Node.js 只用於建置階段。部署後的 UI 呼叫同源公開 REST API，無需額外 Node 程序或前端服務。
+
+## 儲存私人 Scenario
+
+驗證 Load Template 組合後，選擇 **Save Scenario** 並輸入名稱。儲存會在 Server 建立私人記錄，不會啟動 Job、建立 Schedule 或寫入 Package 檔案。在 **Load testing → Scenarios** 的 **Saved scenarios** 中，可以搜尋、重新開啟、複製、驗證或刪除自己的記錄。Template 組合會在 Load Template 編輯器重新開啟；API 撰寫的 scenario 定義則在 Advanced Load 編輯器開啟。編輯並儲存會建立新版本，在同一個編輯器再次儲存亦然；版本衝突時須重新載入。儲存後須返回清單並驗證已儲存的版本，才可執行或排程。只有經驗證的預覽明確標示為未遮蔽時，檢視對話框才提供 **Export YAML**。
+
+驗證結果有時效。選擇 **Run** 或 **Schedule** 前，須再次驗證已儲存的版本。Schedule 會儲存獨立的已驗證快照；其後編輯或刪除已儲存的記錄不會改變該 Schedule。若定義包含受保護的輸入值或解析後的值，系統會拒絕儲存；請移除該值或使用核准的參照。

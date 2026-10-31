@@ -44,9 +44,15 @@ final class JobExecutionSpec {
         if((!currentVersion&&!legacyVersion)||!"reject-package-changes".equals(value.path("revisionPolicy").asText())
                 ||!value.path("revision").asText().matches("[a-f0-9]{64}")||!value.path("definition").isObject())
             throw new IllegalArgumentException("Unsupported execution snapshot");
-        value.fieldNames().forEachRemaining(field->{if(!Set.of("schemaVersion","revisionPolicy","revision","definition","sourcePath","configuration","replay").contains(field))throw new IllegalArgumentException("Unknown execution snapshot field");});
+        value.fieldNames().forEachRemaining(field->{if(!Set.of("schemaVersion","revisionPolicy","revision","definition","sourcePath","configuration","replay","scheduleSnapshot").contains(field))throw new IllegalArgumentException("Unknown execution snapshot field");});
         if(value.has("configuration"))configuration();
         if(value.has("replay"))validateReplay(value.path("replay"),currentVersion);
+        if(value.has("scheduleSnapshot")) {
+            JsonNode snapshot=value.path("scheduleSnapshot");
+            if(!snapshot.isObject()||!snapshot.path("scheduleId").asText("").matches("S[A-Za-z0-9_-]{1,79}")||!snapshot.path("version").isIntegralNumber()||snapshot.path("version").longValue()<1)
+                throw new IllegalArgumentException("Invalid schedule snapshot provenance");
+            snapshot.fieldNames().forEachRemaining(field->{if(!Set.of("scheduleId","version").contains(field))throw new IllegalArgumentException("Unknown schedule snapshot provenance field");});
+        }
         JsonNode definition=value.get("definition");
         if(!Set.of("run","load").contains(definition.path("executionType").asText())||definition.path("packageId").asText().isBlank())
             throw new IllegalArgumentException("Invalid execution identity");
@@ -58,6 +64,9 @@ final class JobExecutionSpec {
         String path=value.path("sourcePath").asText("");
         if(path.length()>1024||path.chars().anyMatch(Character::isISOControl)||path.contains(":")||path.startsWith("/")||path.contains("\\")||java.util.Arrays.asList(path.split("/")).contains(".."))
             throw new IllegalArgumentException("Execution source must be package-relative");
+    }
+    JobExecutionSpec withScheduleSnapshot(String id,long version) {
+        ObjectNode snapshot=value.putObject("scheduleSnapshot");snapshot.put("scheduleId",id);snapshot.put("version",version);validate();return this;
     }
     JobExecutionSpec withReplaySource(String sourceJobId,String sourcePolicy,String originalRevision,String effectiveRevision) {
         if(!"current".equals(sourcePolicy)&&!"strict".equals(sourcePolicy))throw new IllegalArgumentException("Unsupported replay source policy");

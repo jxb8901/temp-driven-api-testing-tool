@@ -133,6 +133,54 @@ class ServerRuntimeUnifiedRunTest {
         }
     }
 
+    @Test void caseRunScheduleProjectsTopLevelFailFastAndAllowsDisable() throws Exception {
+        Path root=Files.createDirectories(temp.resolve("failfast-package"));
+        Files.createDirectories(root.resolve("testcase"));
+        Files.createDirectories(root.resolve("templates/SIMPLE"));
+        Path javaBin=Path.of(System.getProperty("java.home"),"bin",System.getProperty("os.name","").toLowerCase().contains("win")?"java.exe":"java");
+        Path runtimeConfig=temp.resolve("failfast-runtime/config/config.yaml");Files.createDirectories(runtimeConfig.getParent());
+        Files.writeString(runtimeConfig,"schemaVersion: att-config/v2.12\nenvironment: SIT\nenvironments: {SIT: {}}\ntemplates: {root: templates}\ntestcase: {root: testcase}\n");
+        Files.writeString(root.resolve("templates/SIMPLE/template.yaml"),"schemaVersion: att-template/v3.6\nname: SIMPLE\ndescription: Fail-fast fixture\nactions:\n  show: {type: log, message: once}\n");
+        Path workbook=root.resolve("testcase/cases.xlsx");
+        try(var book=new org.apache.poi.xssf.usermodel.XSSFWorkbook();var out=Files.newOutputStream(workbook)) {
+            var sheet=book.createSheet("Cases");String[] columns={"ID","Tags","Template"};var header=sheet.createRow(0);
+            for(int i=0;i<columns.length;i++)header.createCell(i).setCellValue(columns[i]);
+            var row=sheet.createRow(1);row.createCell(0).setCellValue("C1");row.createCell(1).setCellValue("smoke");row.createCell(2).setCellValue("name: SIMPLE");
+            book.write(out);
+        }
+        Files.writeString(root.resolve("testcase/cases.yaml"),"schemaVersion: att-sidecar/v2.2\nid: cases\nexcel:\n  sheet: default=Cases\n  caseId: ID\n  tags: Tags\nstages:\n  - key: main\n    template: Template\n    required: true\n");
+        new att.api.DefaultAttService().snapshot(new att.api.SnapshotRequest(root,runtimeConfig,"SIT",List.of(workbook),null,java.util.Set.of(),false));
+        Path server=temp.resolve("failfast-server.yaml");
+        Files.writeString(server,"server:\n  runtimeConfigPath: "+ServerRuntimeTestSupport.yaml(runtimeConfig)+"\n  dataDir: "+ServerRuntimeTestSupport.yaml(temp.resolve("failfast-data"))+"\n  javaExecutable: "+ServerRuntimeTestSupport.yaml(javaBin)+"\n  auth: {mode: local}\n  inspection:\n    enabled: true\n    timeoutMs: 30000\n  scheduling:\n    enabled: true\nworkers:\n  maxConcurrent: 1\n  queuedLimit: 2\npackages:\n  allowedRoots: ["+ServerRuntimeTestSupport.yaml(root)+"]\n  entries:\n    p: "+ServerRuntimeTestSupport.yaml(root)+"\n");
+        Path libs=Files.createDirectory(temp.resolve("failfast-libs"));
+        for(String module:List.of("att-worker","att-engine","att-server-api","att-security"))ServerRuntimeTestSupport.addModuleJar(libs,module,Path.of(module+"/target/classes"));
+        ServerRuntimeTestSupport.addWorkerClasspathJars(libs);
+        try(ServerRuntime runtime=new ServerRuntime(ServerConfig.load(server),libs.toString())) {
+            runtime.store.createAuthUser("alice","Alice","unused","USER","csrf");
+            Map<String,Object> draft=runtime.createRunDraft(ServerRuntime.JSON.readTree(
+                    "{\"schemaVersion\":\"att-execution/v1\",\"executionType\":\"run\",\"packageId\":\"p\",\"selection\":{\"all\":true},\"options\":{\"failFast\":true}}"),"alice");
+            LoadSchedule schedule=runtime.createLoadSchedule(ServerRuntime.JSON.valueToTree(Map.of(
+                    "name","Fail fast Case RUN","packageId","p","environment","SIT","executionType","run","draftId",draft.get("draftId"),
+                    "timezone","UTC","cron","0 2 * * *","enabled",false)),"alice");
+            assertEquals(Boolean.TRUE,schedule.runInput.get("failFast"));
+            assertFalse(schedule.runInput.containsKey("options"),"Persisted WorkerRequest keeps failFast at the top level");
+            assertEquals(Map.of("debug",Boolean.FALSE,"failFast",Boolean.TRUE),runtime.loadScheduleView(schedule).get("runOptions"));
+
+            JsonNode disable=ServerRuntime.JSON.readTree("{\"expectedDefinitionVersion\":"+schedule.definitionVersion+",\"overrides\":{\"options\":{\"failFast\":false}}}");
+            Map<String,Object> review=runtime.createScheduleExecutionDraft(schedule.id,disable,"alice");
+            LoadSchedule replaced=runtime.replaceScheduleExecution(schedule.id,ServerRuntime.JSON.readTree(
+                    "{\"draftId\":\""+review.get("draftId")+"\",\"expectedDefinitionVersion\":"+schedule.definitionVersion+",\"confirm\":true}"),"alice");
+            assertEquals(Boolean.FALSE,replaced.runInput.get("failFast"));
+            assertEquals(Map.of("debug",Boolean.FALSE,"failFast",Boolean.FALSE),runtime.loadScheduleView(replaced).get("runOptions"));
+
+            Map<String,Object> occurrence=runtime.triggerLoadSchedule(replaced.id,"alice");
+            String jobId=String.valueOf(occurrence.get("jobId"));
+            Job submitted=runtime.jobs.get(jobId);
+            assertNotNull(submitted);assertEquals(Boolean.FALSE,submitted.request.failFast);
+            assertEquals("PASS",((Map<?,?>)ServerRuntimeTestSupport.awaitUnifiedJob(runtime,jobId).get("job")).get("status"));
+        }
+    }
+
     private static void awaitArchivedOutput(ServerRuntime runtime,String jobId,Path output) throws Exception {
         long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(30);
         while(System.nanoTime()<deadline) {

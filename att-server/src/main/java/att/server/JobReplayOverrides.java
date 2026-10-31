@@ -78,18 +78,43 @@ final class JobReplayOverrides {
                 requireObject(patch,"each workload override must be an object");
                 String id=patch.path("id").asText("");
                 if(id.isBlank()||!seen.add(id))throw new IllegalArgumentException("Each workload edit must name a unique retained workload ID");
-                allowFields(patch,Set.of("id","load","execution","target","mix","inputs","vars","testdata","thresholds","evidence"));
+                allowFields(patch,Set.of("id","load","execution","target","mix","mixEdits","inputs","vars","testdata","thresholds","evidence"));
                 ObjectNode workload=findWorkload(existing,id);
                 if(workload==null)throw new IllegalArgumentException("Workload identity changed; select an existing workload ID");
                 if(patch.has("load")) {
                     JsonNode load=patch.get("load");requireObject(load,"workload load override must be an object");
-                    allowFields(load,Set.of("users","arrivalRate","maxConcurrent","overloadPolicy"));
+                    allowFields(load,Set.of("users","arrivalRate","maxConcurrent","overloadPolicy","warmup","rampUp","duration","rampDown"));
                     boolean arrival=isArrivalModel(scenario,workload);
                     if(arrival&&load.has("users")||!arrival&&load.has("arrivalRate"))
                         throw new IllegalArgumentException("Replay cannot convert between Arrival Rate and Virtual Users models");
                     merge(workload.with("load"),load);
                 }
-                for(String field:Set.of("execution","target","mix","inputs","vars","testdata","thresholds","evidence"))
+                if(patch.has("mixEdits")) {
+                    if(patch.has("mix"))throw new IllegalArgumentException("Choose mix or mixEdits, not both");
+                    JsonNode edits=patch.get("mixEdits"),mix=workload.path("mix");
+                    if(!edits.isArray()||edits.size()>100||!mix.isArray())throw new IllegalArgumentException("mixEdits requires a retained mix and at most 100 entries");
+                    Set<String> edited=new HashSet<>();
+                    for(JsonNode edit:edits) {
+                        requireObject(edit,"Each mix edit must be an object");allowFields(edit,Set.of("id","weight","target"));
+                        String mixId=edit.path("id").asText("");
+                        if(mixId.isBlank()||!edited.add(mixId))throw new IllegalArgumentException("Each mix edit must name a unique retained mix ID");
+                        ObjectNode member=findWorkload(mix,mixId);
+                        if(member==null)throw new IllegalArgumentException("Mix identity changed; select an existing mix ID");
+                        if(edit.has("weight"))member.set("weight",edit.get("weight").deepCopy());
+                        if(edit.has("target")) {
+                            JsonNode target=edit.get("target");requireObject(target,"Mix target must be an object");allowFields(target,Set.of("type","id"));
+                            if(!target.path("type").equals(member.path("target").path("type"))||!target.path("id").equals(member.path("target").path("id"))) { member.set("target",target.deepCopy());member.remove("inputs");member.remove("vars"); }
+                        }
+                    }
+                }
+                if(patch.has("target")) {
+                    JsonNode target=patch.get("target");requireObject(target,"Workload target must be an object");
+                    if(!target.path("type").equals(workload.path("target").path("type"))||!target.path("id").equals(workload.path("target").path("id"))) {
+                        workload.remove("inputs");workload.remove("vars");
+                    }
+                    workload.set("target",target.deepCopy());
+                }
+                for(String field:Set.of("execution","mix","inputs","vars","testdata","thresholds","evidence"))
                     if(patch.has(field))workload.set(field,patch.get(field).deepCopy());
             }
         }

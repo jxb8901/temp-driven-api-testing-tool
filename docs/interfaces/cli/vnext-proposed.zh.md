@@ -1,7 +1,7 @@
 <!-- att-doc-status: planned release=unreleased issue=287 -->
 # Proposed CLI vNext
 
-> **規劃中，尚未發行。** 此語法不適用於 ATT 4.2.7。已發行的 command 請使用目前的 [CLI Reference](../../reference.zh/cli.md)。只有在 #287 implementation 發行並完成核實後，才可將本 contract 標示為 Current。
+> **規劃中，尚未發行。** 此語法不適用於 ATT 4.2.8。已發行的 command 請使用目前的 [CLI Reference](../../reference.zh/cli.md)。只有在 #287 implementation 發行並完成核實後，才可將本 contract 標示為 Current。
 
 ## Proposed grammar and behavior
 

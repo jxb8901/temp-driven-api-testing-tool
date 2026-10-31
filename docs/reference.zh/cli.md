@@ -1,6 +1,6 @@
 # CLI 參考
 
-<!-- att-doc-status: current release=4.2.7 -->
+<!-- att-doc-status: current release=4.2.8 -->
 
 
 ## 選擇命令
@@ -20,11 +20,11 @@
 | `clean` | 刪除文檔化的 ATT 生成輸出 | 否 |
 | `remote` | 透過 ATT Server REST/SSE API 提交及管理工作 | ATT Server |
 
-上表列出 ATT 4.2.7 CLI command。獨立的 vNext proposal 尚未包含在此 release。
+上表列出 ATT 4.2.8 CLI command。獨立的 vNext proposal 尚未包含在此 release。
 
-## ATT 4.2.7 的可用性
+## ATT 4.2.8 的可用性
 
-本 Reference 說明 ATT 4.2.7 已發行的 CLI。vNext grammar 是獨立的[規劃中 proposal](../interfaces/cli/vnext-proposed.zh.md)，並非目前 command interface。本版本繼續支援 legacy command。
+本 Reference 說明 ATT 4.2.8 已發行的 CLI。vNext grammar 是獨立的[規劃中 proposal](../interfaces/cli/vnext-proposed.zh.md)，並非目前 command interface。本版本繼續支援 legacy command。
 
 ## 編譯 source checkout
 

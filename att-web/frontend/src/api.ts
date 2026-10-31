@@ -1,3 +1,4 @@
+export interface SavedLoadScenario { id: string; packageId: string; name: string; description: string; tags: string[]; model: string; revision: number; updatedAt: string; workloadCount?: number }
 import type { ManifestView, ManifestProjection, ManifestDraft, ManifestHistory } from './features/explorer/packageManifest';
 import type { JobReplay, JobReplayEditorDraft } from "./features/load/types";
 import { ApiError, type ApiEnvelope, type ApiErrorBody, type JobSummary, type LocalAuthUser, type MonitoringJobJournal, type MonitoringSnapshot, type PackageSummary, type ServerVersion } from './types';
@@ -276,6 +277,27 @@ export const api = {
   listLoadTemplates(packageId: string, query = '', offset = 0, signal?: AbortSignal): Promise<import('./features/load/templateTypes').LoadTemplatePage> {
     return request('packages/' + encodeURIComponent(packageId) + '/load-templates' + queryString({ query, offset, limit: 100 }), { signal });
   },
+  saveLoadScenario(input: { draftId: string; name: string; description?: string; tags?: string[] }): Promise<{ id: string; revision: number; name: string }> {
+    return postJson('saved-load-scenarios', input);
+  },
+  updateSavedLoadScenario(id: string, input: { draftId: string; expectedRevision: number; name: string; description: string; tags: string[] }): Promise<SavedLoadScenario> {
+    return request('saved-load-scenarios/' + encodeURIComponent(id), { method: 'PATCH', body: JSON.stringify(input) });
+  },
+  listSavedLoadScenarios(offset = 0, signal?: AbortSignal): Promise<{ items: SavedLoadScenario[]; nextOffset?: number | null }> {
+    return request('saved-load-scenarios' + queryString({ offset, limit: 100 }), { signal });
+  },
+  getSavedLoadScenario(id: string): Promise<SavedLoadScenario & { definition: Record<string, unknown> }> {
+    return request('saved-load-scenarios/' + encodeURIComponent(id));
+  },
+  validateSavedLoadScenario(id: string, expectedRevision: number): Promise<LoadDraftResponse> {
+    return postJson('saved-load-scenarios/' + encodeURIComponent(id) + '/validate', { expectedRevision });
+  },
+  duplicateSavedLoadScenario(id: string, expectedRevision: number): Promise<SavedLoadScenario> {
+    return postJson('saved-load-scenarios/' + encodeURIComponent(id) + '/duplicate', { expectedRevision });
+  },
+  deleteSavedLoadScenario(id: string, expectedRevision: number): Promise<unknown> {
+    return request('saved-load-scenarios/' + encodeURIComponent(id), { method: 'DELETE', body: JSON.stringify({ expectedRevision }) });
+  },
   createLoadTemplateDraft(packageId: string, environment: string, templateComposition: Record<string, unknown>, signal?: AbortSignal): Promise<LoadDraftResponse> {
     return postJson('drafts/load', { packageId, environment: environment || undefined, templateComposition }, signal);
   },
@@ -494,6 +516,15 @@ export const api = {
   async listSchedules(signal?: AbortSignal): Promise<ApiEnvelope<ScheduleDefinition>> {
     const response = await request<ApiEnvelope<ScheduleDefinition>>(schedulesPath(), { signal });
     return { ...response, items: response.items.map(normalizeSchedule) };
+  },
+  getSchedule(id: string, signal?: AbortSignal): Promise<ScheduleDefinition> {
+    return request<ScheduleDefinition>(schedulesPath() + '/' + encodeURIComponent(id), { signal }).then(normalizeSchedule);
+  },
+  createScheduleExecutionDraft(id: string, input: { expectedDefinitionVersion: number; overrides?: Record<string, unknown>; packageEdit?: Record<string, unknown> }): Promise<import('./features/schedules/types').ScheduleExecutionReview> {
+    return postJson(schedulesPath() + '/' + encodeURIComponent(id) + '/execution-draft', input);
+  },
+  replaceScheduleExecution(id: string, input: { draftId: string; expectedDefinitionVersion: number; confirm: true }): Promise<ScheduleDefinition> {
+    return request<ScheduleDefinition>(schedulesPath() + '/' + encodeURIComponent(id) + '/execution', { method: 'PATCH', body: JSON.stringify(input) }).then(normalizeSchedule);
   },
   previewSchedule(input: SchedulePreviewInput, signal?: AbortSignal): Promise<SchedulePreview> {
     return postJson<SchedulePreview>(schedulesPath() + '/preview', input, signal);

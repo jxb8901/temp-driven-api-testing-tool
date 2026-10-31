@@ -49,7 +49,11 @@ public final class ApiServlet extends HttpServlet {
     }
     private void serviceRequest(HttpServletRequest req,HttpServletResponse res) throws ServletException,IOException {
         if(path(req).startsWith("/auth/")){super.service(req,res);return;}
-        if("PATCH".equalsIgnoreCase(req.getMethod())){schedulePatch(req,res);return;}
+        if("PATCH".equalsIgnoreCase(req.getMethod())){
+            if(savedLoadScenarioPath(path(req)))savedLoadScenarioAction(req,res,path(req),requestId(req,res),principal(req));
+            else schedulePatch(req,res);
+            return;
+        }
         super.service(req,res);
     }
     @Override protected void doGet(HttpServletRequest req,HttpServletResponse res) throws IOException {
@@ -79,6 +83,7 @@ public final class ApiServlet extends HttpServlet {
             }
             if("/metrics".equals(path)){if(!requireSystemAdmin(req,res,requestId))return;Map<String,Object> metrics=runtime.counts();metrics.put("requestId",requestId);json(res,200,metrics);return;}
             if(!requireOperator(req,res,requestId))return;
+            if(savedLoadScenarioPath(path)){savedLoadScenarioAction(req,res,path,requestId,principal);return;}
             if(path.matches("/packages/[^/]+/load-templates")) {
                 Map<String,Object> response=runtime.inspectLoadTemplates(segment(path,2),req.getParameter("query"),
                         parseOffset(req.getParameter("offset")),parseLimit(req.getParameter("limit")),principal);
@@ -165,6 +170,7 @@ public final class ApiServlet extends HttpServlet {
           catch(ServerRuntime.ReplayDraftExpiredException e){error(res,410,"ATT-SERVER-REPLAY-DRAFT-EXPIRED","The replay draft expired or was lost after Server restart. Reopen the source Job and create a new draft.",requestId);}
           catch(ServerRuntime.NotFoundException e){error(res,404,"ATT-SERVER-NOT-FOUND","API resource was not found",requestId);}
           catch(ServerRuntime.StaleCursorException e){error(res,409,"ATT-RESOURCE-CURSOR-STALE","The package resources changed; refresh the Explorer",requestId);}
+          catch(ServerRuntime.SavedScenarioConflictException e){error(res,409,"ATT-SAVED-SCENARIO-CHANGED","Saved Scenario changed; review and validate it again",requestId);}
           catch(ServerRuntime.StaleDraftException e){error(res,409,"ATT-SERVER-DRAFT-STALE","Package content changed after preview; rebuild the draft",requestId);}
           catch(ServerRuntime.InspectionCapacityException e){error(res,503,"ATT-SERVER-INSPECTION-CAPACITY","Package inspection capacity is full; retry shortly",requestId);}
           catch(ServerRuntime.DraftCapacityException e){error(res,429,"ATT-SERVER-DRAFT-CAPACITY","Draft capacity is full; retry after an existing draft expires",requestId);}
@@ -182,6 +188,7 @@ public final class ApiServlet extends HttpServlet {
         if(loadSchedulePath(path)){schedulePost(req,res,path,requestId,authorizationPrincipal);return;}
         if("/validation".equals(path)){validationPost(req,res,requestId,authorizationPrincipal);return;}
         if(!requireOperator(req,res,requestId))return;
+        if(savedLoadScenarioPath(path)){savedLoadScenarioAction(req,res,path,requestId,authorizationPrincipal);return;}
         if(path.matches("/packages/[^/]+/package-configuration/(?:drafts(?:/[^/]+/(?:validate|review|publish|discard))?|rollback)")) {
             manifestPost(req,res,path,requestId,authorizationPrincipal);return;
         }
@@ -260,6 +267,7 @@ public final class ApiServlet extends HttpServlet {
           catch(ServerRuntime.QueueFullException e){error(res,429,"ATT-SERVER-CAPACITY-EXCEEDED",e.getMessage(),requestId);}
           catch(ServerRuntime.DraftValidationException e){error(res,400,"ATT-SERVER-INVALID-REQUEST",e.getMessage(),requestId,e.diagnostics);}
           catch(ServerRuntime.NotFoundException e){error(res,404,"ATT-SERVER-NOT-FOUND","API resource was not found",requestId);}
+          catch(ServerRuntime.SavedScenarioConflictException e){error(res,409,"ATT-SAVED-SCENARIO-CHANGED","Saved Scenario changed; review and validate it again",requestId);}
           catch(ServerRuntime.StaleDraftException e){error(res,409,"ATT-SERVER-DRAFT-STALE","Package content changed after preview; rebuild the draft",requestId);}
           catch(ServerRuntime.DraftCapacityException e){error(res,429,"ATT-SERVER-DRAFT-CAPACITY","Draft capacity is full; retry after an existing draft expires",requestId);}
           catch(ServerRuntime.InspectionCapacityException e){error(res,503,"ATT-SERVER-INSPECTION-CAPACITY","Package inspection capacity is full; retry shortly",requestId);}
@@ -297,6 +305,7 @@ public final class ApiServlet extends HttpServlet {
         if(principal==null){error(res,401,"ATT-SERVER-AUTHENTICATION-REQUIRED","An authenticated Servlet Principal is required",requestId);return;}
         if(loadSchedulePath(path)){scheduleDelete(req,res,path,requestId,principal);return;}
         if(!requireOperator(req,res,requestId))return;
+        if(savedLoadScenarioPath(path)){savedLoadScenarioAction(req,res,path,requestId,principal);return;}
         if(!path.matches("/jobs/[^/]+")){error(res,404,"ATT-SERVER-NOT-FOUND","API resource was not found",requestId);return;}
         if(!checkOrigin(req,res,requestId,false))return;
         try{String id=segment(path,2);String status=runtime.cancel(id,principal);json(res,200,Map.of("jobId",id,"status",status,"requestId",requestId));}
@@ -469,13 +478,14 @@ public final class ApiServlet extends HttpServlet {
         if(!requireOperator(req,res,requestId))return;
         try {
             String[] parts=path.split("/");
-            if(parts.length==2){String type=req.getParameter("executionType");if(type!=null&&!List.of("run","load").contains(type))throw new IllegalArgumentException("executionType must be run or load");json(res,200,Map.of("items",runtime.loadSchedules().stream().filter(schedule->type==null||type.equals("load".equals(schedule.effectiveJobType())?"load":"run")).map(schedule->runtime.loadScheduleView(schedule,principal)).toList(),"requestId",requestId));return;}
+            if(parts.length==2){String type=req.getParameter("executionType");if(type!=null&&!List.of("run","load").contains(type))throw new IllegalArgumentException("executionType must be run or load");json(res,200,Map.of("items",runtime.loadSchedules().stream().filter(schedule->type==null||type.equals("load".equals(schedule.effectiveJobType())?"load":"run")).map(schedule->runtime.loadScheduleListView(schedule,principal)).toList(),"requestId",requestId));return;}
             String id=parts[2];
             if(parts.length==3){LoadSchedule item=runtime.loadSchedule(id);Map<String,Object> view=runtime.loadScheduleView(item,principal);view.put("requestId",requestId);json(res,200,view);return;}
             if(parts.length==4&&"executions".equals(parts[3])){int limit=parseScheduleLimit(req.getParameter("limit"));json(res,200,Map.of("items",runtime.loadScheduleExecutions(id,limit),"scheduleId",id,"requestId",requestId));return;}
             error(res,404,"ATT-SERVER-NOT-FOUND","API resource was not found",requestId);
         } catch(ServerRuntime.NotFoundException e){error(res,404,"ATT-SERVER-NOT-FOUND","API resource was not found",requestId);}
           catch(ServerRuntime.DraftValidationException e){error(res,400,"ATT-SERVER-INVALID-REQUEST",e.getMessage(),requestId,e.diagnostics);}
+          catch(ServerRuntime.SavedScenarioConflictException e){error(res,409,"ATT-SAVED-SCENARIO-CHANGED","Saved Scenario changed; review and validate it again",requestId);}
           catch(ServerRuntime.StaleDraftException e){error(res,409,"ATT-SERVER-DRAFT-STALE","The validated execution draft expired or changed; validate it again",requestId);}
           catch(ServerRuntime.InspectionCapacityException e){error(res,503,"ATT-SERVER-INSPECTION-CAPACITY","Package inspection capacity is full; retry shortly",requestId);}
           catch(ServerRuntime.InspectionTimeoutException e){error(res,504,"ATT-SERVER-INSPECTION-TIMEOUT","Package inspection exceeded its time limit",requestId);}
@@ -493,15 +503,19 @@ public final class ApiServlet extends HttpServlet {
         try {
             if(parts.length==2){JsonNode body=scheduleBody(req,res,requestId);if(body==null)return;LoadSchedule item=runtime.createLoadSchedule(body,principal);res.setHeader("Location",req.getContextPath()+"/api/v1/load-schedules/"+item.id);Map<String,Object> view=runtime.loadScheduleView(item,principal);view.put("requestId",requestId);json(res,201,view);return;}
             if(parts.length==3&&"preview".equals(parts[2])){JsonNode body=scheduleBody(req,res,requestId);if(body==null)return;Map<String,Object> preview=new LinkedHashMap<>(runtime.previewLoadSchedule(body));preview.put("requestId",requestId);json(res,200,preview);return;}
+            if(parts.length==4&&"execution-draft".equals(parts[3])){JsonNode body=scheduleBody(req,res,requestId);if(body==null)return;Map<String,Object> review=runtime.createScheduleExecutionDraft(parts[2],body,principal);review.put("requestId",requestId);json(res,201,review);return;}
             if(parts.length==4&&"trigger".equals(parts[3])){Map<String,Object> result=runtime.triggerLoadSchedule(parts[2],principal);result.put("requestId",requestId);json(res,202,result);return;}
             if(parts.length==4&&("pause".equals(parts[3])||"resume".equals(parts[3]))) {
                 LoadSchedule item=runtime.setLoadScheduleEnabled(parts[2],"resume".equals(parts[3]),principal);Map<String,Object> view=runtime.loadScheduleView(item,principal);view.put("requestId",requestId);json(res,200,view);return;
             }
             error(res,404,"ATT-SERVER-NOT-FOUND","API resource was not found",requestId);
         } catch(ServerRuntime.NotFoundException e){error(res,404,"ATT-SERVER-NOT-FOUND","API resource was not found",requestId);}
+          catch(ServerRuntime.ScheduleConflictException e){error(res,409,"ATT-SERVER-SCHEDULE-CHANGED","The schedule changed; reload it and retry",requestId);}
           catch(ServerRuntime.ScheduleSourceChangedException e){error(res,409,"ATT-SERVER-SCHEDULE-SOURCE-CHANGED","package-revision-changed",requestId);}
           catch(ServerRuntime.DraftValidationException e){error(res,400,"ATT-SERVER-INVALID-REQUEST",e.getMessage(),requestId,e.diagnostics);}
+          catch(ServerRuntime.SavedScenarioConflictException e){error(res,409,"ATT-SAVED-SCENARIO-CHANGED","Saved Scenario changed; review and validate it again",requestId);}
           catch(ServerRuntime.StaleDraftException e){error(res,409,"ATT-SERVER-DRAFT-STALE","The validated execution draft expired or changed; validate it again",requestId);}
+          catch(ServerRuntime.DraftCapacityException e){error(res,429,"ATT-SERVER-DRAFT-CAPACITY","Draft capacity is full; retry later",requestId);}
           catch(ServerRuntime.InspectionCapacityException e){error(res,503,"ATT-SERVER-INSPECTION-CAPACITY","Package inspection capacity is full; retry shortly",requestId);}
           catch(ServerRuntime.InspectionTimeoutException e){error(res,504,"ATT-SERVER-INSPECTION-TIMEOUT","Package inspection exceeded its time limit",requestId);}
           catch(ServerRuntime.InspectionResponseTooLargeException e){error(res,413,"ATT-SERVER-INSPECTION-RESPONSE-TOO-LARGE","Package inspection response exceeded the configured limit",requestId);}
@@ -517,12 +531,13 @@ public final class ApiServlet extends HttpServlet {
         if(principal==null){error(res,401,"ATT-SERVER-AUTHENTICATION-REQUIRED","An authenticated Servlet Principal is required",requestId);return;}
         if(!requireOperator(req,res,requestId))return;
         if(!checkOrigin(req,res,requestId,false))return;
-        String[] parts=path.split("/");if(parts.length!=3){error(res,404,"ATT-SERVER-NOT-FOUND","API resource was not found",requestId);return;}
+        String[] parts=path.split("/");if(parts.length!=3&&(parts.length!=4||!"execution".equals(parts[3]))){error(res,404,"ATT-SERVER-NOT-FOUND","API resource was not found",requestId);return;}
         JsonNode body=scheduleBody(req,res,requestId);if(body==null)return;
-        try{LoadSchedule item=runtime.updateLoadSchedule(parts[2],body,principal);Map<String,Object> view=runtime.loadScheduleView(item,principal);view.put("requestId",requestId);json(res,200,view);}
+        try{LoadSchedule item=parts.length==4?runtime.replaceScheduleExecution(parts[2],body,principal):runtime.updateLoadSchedule(parts[2],body,principal);Map<String,Object> view=runtime.loadScheduleView(item,principal);view.put("requestId",requestId);json(res,200,view);}
         catch(ServerRuntime.NotFoundException e){error(res,404,"ATT-SERVER-NOT-FOUND","API resource was not found",requestId);}
         catch(ServerRuntime.ScheduleSourceChangedException e){error(res,409,"ATT-SERVER-SCHEDULE-SOURCE-CHANGED","package-revision-changed",requestId);}
         catch(ServerRuntime.ScheduleConflictException e){error(res,409,"ATT-SERVER-SCHEDULE-CHANGED","The schedule changed while it was being edited; reload it and retry",requestId);}
+        catch(ServerRuntime.StaleDraftException|ServerRuntime.StaleCursorException e){error(res,409,"ATT-SERVER-DRAFT-STALE","The validated draft or package changed; validate it again",requestId);}
         catch(ServerRuntime.DraftValidationException e){error(res,400,"ATT-SERVER-INVALID-REQUEST",e.getMessage(),requestId,e.diagnostics);}
         catch(ServerRuntime.InspectionCapacityException e){error(res,503,"ATT-SERVER-INSPECTION-CAPACITY","Package inspection capacity is full; retry shortly",requestId);}
         catch(ServerRuntime.InspectionTimeoutException e){error(res,504,"ATT-SERVER-INSPECTION-TIMEOUT","Package inspection exceeded its time limit",requestId);}
@@ -550,7 +565,55 @@ public final class ApiServlet extends HttpServlet {
     }
 
     private static int parseScheduleLimit(String raw){if(raw==null||raw.isBlank())return 100;if(!raw.matches("[0-9]{1,3}"))throw new IllegalArgumentException("limit must be between 1 and 500");int limit=Integer.parseInt(raw);if(limit<1||limit>500)throw new IllegalArgumentException("limit must be between 1 and 500");return limit;}
-    private static boolean loadSchedulePath(String path){return path.matches("/(?:load-schedules|schedules)(?:/[^/]+(?:/(?:executions|trigger|pause|resume))?)?");}
+    private static boolean savedLoadScenarioPath(String path) {
+        return path.matches("/saved-load-scenarios(?:/LS[A-F0-9]{32}(?:/(?:validate|duplicate))?)?");
+    }
+    private void savedLoadScenarioAction(HttpServletRequest req,HttpServletResponse res,String path,String requestId,String principal) throws IOException {
+        if(principal==null||RequestIdentity.ANONYMOUS.equals(principal)){error(res,401,"ATT-SERVER-AUTHENTICATION-REQUIRED","Authentication is required",requestId);return;}
+        if(!requireOperator(req,res,requestId))return;
+        String method=req.getMethod().toUpperCase(java.util.Locale.ROOT);String[] parts=path.split("/");
+        if(!"GET".equals(method)&&!checkOrigin(req,res,requestId,false))return;
+        try {
+            res.setHeader("Cache-Control","private, no-store");
+            if("GET".equals(method)&&parts.length==2) {
+                int limit=req.getParameter("limit")==null?50:parseLimit(req.getParameter("limit")),offset=parseOffset(req.getParameter("offset"));
+                List<Map<String,Object>> items=runtime.savedLoadScenarios(principal,limit,offset);
+                Map<String,Object> view=new LinkedHashMap<>();view.put("items",items);view.put("offset",offset);view.put("limit",limit);
+                view.put("nextOffset",items.size()==limit?offset+limit:null);view.put("requestId",requestId);json(res,200,view);return;
+            }
+            if("GET".equals(method)&&parts.length==3) {Map<String,Object> view=runtime.getSavedLoadScenario(parts[2],principal);view.put("requestId",requestId);json(res,200,view);return;}
+            JsonNode body=scheduleBody(req,res,requestId);if(body==null)return;
+            Map<String,Object> result;
+            if("POST".equals(method)&&parts.length==2) {result=runtime.saveLoadScenario(body,principal);res.setHeader("Location",req.getContextPath()+"/api/v1/saved-load-scenarios/"+result.get("id"));result.put("requestId",requestId);json(res,201,result);return;}
+            if("PATCH".equals(method)&&parts.length==3) {result=runtime.updateSavedLoadScenario(parts[2],body,principal);result.put("requestId",requestId);json(res,200,result);return;}
+            if(parts.length==4&&"POST".equals(method)&&("validate".equals(parts[3])||"duplicate".equals(parts[3]))) {
+                if(body.size()!=1||!body.has("expectedRevision"))throw new IllegalArgumentException("Only expectedRevision is permitted");
+                long revision=ServerRuntime.savedScenarioRevision(body);
+                result="validate".equals(parts[3])?runtime.validateSavedLoadScenario(parts[2],revision,principal):runtime.duplicateSavedLoadScenario(parts[2],revision,principal);
+                result.put("requestId",requestId);json(res,201,result);return;
+            }
+            if("DELETE".equals(method)&&parts.length==3) {
+                if(body.size()!=1||!body.has("expectedRevision"))throw new IllegalArgumentException("Only expectedRevision is permitted");
+                runtime.deleteSavedLoadScenario(parts[2],ServerRuntime.savedScenarioRevision(body),principal);
+                json(res,200,Map.of("id",parts[2],"status","DELETED","requestId",requestId));return;
+            }
+            error(res,404,"ATT-SERVER-NOT-FOUND","API resource was not found",requestId);
+        } catch(ServerRuntime.NotFoundException e){error(res,404,"ATT-SERVER-NOT-FOUND","API resource was not found",requestId);}
+          catch(ServerRuntime.SavedScenarioConflictException|ServerRuntime.StaleDraftException e){error(res,409,"ATT-SAVED-SCENARIO-CHANGED","Saved Scenario or draft changed; review and validate it again",requestId);}
+          catch(ServerRuntime.StaleCursorException e){error(res,409,"ATT-SERVER-DRAFT-STALE","Package content changed; validate again",requestId);}
+          catch(ServerRuntime.DraftValidationException e){error(res,400,"ATT-SERVER-INVALID-REQUEST",e.getMessage(),requestId,e.diagnostics);}
+          catch(ServerRuntime.InlineLoadDisabledException e){error(res,403,"ATT-SERVER-INLINE-LOAD-DISABLED","Browser-submitted Load is disabled by Server configuration",requestId);}
+          catch(ServerRuntime.InlineLoadLimitException e){error(res,400,"ATT-SERVER-INLINE-LOAD-LIMIT",safeDetail(e),requestId);}
+          catch(ServerRuntime.DraftCapacityException e){error(res,429,"ATT-SERVER-DRAFT-CAPACITY","Draft capacity is full; retry later",requestId);}
+          catch(ServerRuntime.InspectionCapacityException e){error(res,503,"ATT-SERVER-INSPECTION-CAPACITY","Package inspection capacity is full",requestId);}
+          catch(ServerRuntime.InspectionTimeoutException e){error(res,504,"ATT-SERVER-INSPECTION-TIMEOUT","Package inspection exceeded its time limit",requestId);}
+          catch(PackageConfigurationPolicy.EnvironmentDeniedException e){error(res,403,"ATT-PACKAGE-ENVIRONMENT-DENIED",safeDetail(e),requestId);}
+          catch(ResourcePageLimitException e){error(res,400,"ATT-RESOURCE-LIMIT","Invalid page size",requestId);}
+          catch(IllegalArgumentException e){error(res,400,"ATT-SERVER-INVALID-REQUEST",safeDetail(e),requestId);}
+          catch(Exception e){error(res,500,"ATT-SERVER-REQUEST-FAILED","Saved Scenario request could not be completed",requestId);getServletContext().log("Saved Scenario request failed id="+requestId,e);}
+    }
+
+    private static boolean loadSchedulePath(String path){return path.matches("/(?:load-schedules|schedules)(?:/[^/]+(?:/(?:executions|trigger|pause|resume|execution-draft|execution))?)?");}
 
     private void sse(HttpServletRequest req,HttpServletResponse res,String jobId) throws IOException {
         String sessionHash=null;Object localSession=req.getAttribute(AuthService.SESSION);if(localSession instanceof Map<?,?> session&&session.get("tokenHash") instanceof String hash)sessionHash=hash;

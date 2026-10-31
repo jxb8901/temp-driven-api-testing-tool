@@ -1,4 +1,4 @@
-<!-- att-doc-status: current release=4.2.7 -->
+<!-- att-doc-status: current release=4.2.8 -->
 
 # Schedules in Studio
 
@@ -14,3 +14,9 @@ History → Back to list → Edit resolves both the route view and schedule ID. 
 From a Job, **Schedule / Reschedule…** opens a new Schedule draft; **View / Edit originating schedule** is a separate action. **Run now** remains independent of both. Schedule `strict`/`pause`/`ignore` policy applies to scheduled submissions only; manual Job Rerun has its own current-versus-strict source choice.
 
 **Open full Job Details in a new tab** opens `#/jobs/{encodedJobId}?standalone=1&tab=live` (or `events`) with Overview, Live Output, Events, Results, Artifacts and Metrics. Tab switching updates the URL while keeping the Job fixed. Old `#/jobs/{jobId}/console?view=live|events` bookmarks adapt to the full Details workspace. Same-origin `target="_blank" rel="noopener noreferrer"` links support `/att/ui/`, refresh and browser navigation. One Job stream is shared within each tab; floating/docked/minimized consoles keep their existing behavior. Inaccessible Jobs show safe unavailable or sign-in messages.
+
+## Review an execution change
+
+Open an existing Schedule and select **Edit execution settings**. Save or discard pending Schedule Settings changes first. For an inline LOAD snapshot, the editor supports workload users or arrival rate and concurrency, individual or common phase overrides, single-workload targets, existing mix weights and targets, environment, and common advanced JSON for thresholds, evidence, testdata, execution defaults and seed. Changing a mix target clears that binding’s inputs and variables. For a RUN snapshot, it supports case IDs or a resource target, optional input bindings, and debug/fail-fast options. Changing a resource target clears its previous input bindings. Package-backed LOAD schedules retain their package scenario path, Load overrides and optional environment. Package-catalog snapshots use the same supported LOAD controls and remain frozen snapshots after review.
+
+Select **Validate changes** to compare the safe before-and-after previews, package revision, policy, and next occurrence. Select **Save as new snapshot** only after review. The Schedule ID, trigger, next run, and earlier Jobs remain unchanged. A stale review or a concurrent Schedule edit must be validated again. An authorized operator can edit a shared Schedule; their review shows the safe Schedule summary and keeps the original execution identity.
