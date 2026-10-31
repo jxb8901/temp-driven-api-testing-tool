@@ -11,7 +11,7 @@ it('validates, reviews, and applies an execution update without changing schedul
  const review={draftId:'A1',definitionVersion:4,snapshotVersion:2,revisionDigest:'abc',sourcePolicy:'strict',expiresAt:new Date(Date.now()+60000).toISOString(),originalPreview:{previewYaml:'100/s'},preview:{previewYaml:'150/s'}};
  const api={createScheduleExecutionDraft:vi.fn().mockResolvedValue(review),replaceScheduleExecution:vi.fn().mockResolvedValue({...schedule,snapshotVersion:3})};const onSaved=vi.fn();
  await act(async()=>root.render(<NavigationGuardContext.Provider value={{navigate:vi.fn(),registerUnsavedChanges:()=>vi.fn()}}><ScheduleExecutionEditor schedule={schedule} api={api as never} onClose={vi.fn()} onSaved={onSaved} /></NavigationGuardContext.Provider>));
- const rate=host.querySelector<HTMLInputElement>('input')!;
+ const rate=[...host.querySelectorAll('label')].find(label=>label.textContent?.startsWith('Arrival rate'))!.querySelector('input')!;
  await act(async()=>{Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!.call(rate,'150/s');rate.dispatchEvent(new Event('input',{bubbles:true}));});
  const click=async(text:string)=>act(async()=>[...host.querySelectorAll('button')].find(button=>button.textContent?.includes(text))!.click());
  await click('Validate changes');
@@ -39,7 +39,7 @@ it('reviews a changed RUN resource target', async () => {
  const api={createScheduleExecutionDraft:vi.fn().mockResolvedValue({draftId:'A2',definitionVersion:1,snapshotVersion:1,revisionDigest:'abc',sourcePolicy:'strict',expiresAt:new Date(Date.now()+60000).toISOString(),originalPreview:{},preview:{}})};
  await act(async()=>root.render(<NavigationGuardContext.Provider value={{navigate:vi.fn(),registerUnsavedChanges:()=>vi.fn()}}><ScheduleExecutionEditor schedule={schedule} api={api as never} onClose={vi.fn()} onSaved={vi.fn()} /></NavigationGuardContext.Provider>));
  expect([...host.querySelectorAll<HTMLOptionElement>('select option')].map(option=>option.value)).toEqual(['template','flow','tool']);
- const input=host.querySelector<HTMLInputElement>('input')!;
+ const input=[...host.querySelectorAll('label')].find(label=>label.textContent?.startsWith('Target ID'))!.querySelector('input')!;
  await act(async()=>{Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!.call(input,'new');input.dispatchEvent(new Event('input',{bubbles:true}));});
  await act(async()=>[...host.querySelectorAll('button')].find(button=>button.textContent?.includes('Validate changes'))!.click());
  expect(api.createScheduleExecutionDraft).toHaveBeenCalledWith('S3',{expectedDefinitionVersion:1,overrides:{target:{type:'template',id:'new'}}});

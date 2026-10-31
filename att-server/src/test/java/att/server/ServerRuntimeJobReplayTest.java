@@ -528,6 +528,21 @@ class ServerRuntimeJobReplayTest {
         assertThrows(IllegalArgumentException.class,()->JobReplayOverrides.apply(source,unknown));
     }
 
+    @Test void changingDirectWorkloadTargetDoesNotReuseOldBindings() throws Exception {
+        var source=ServerRuntime.JSON.readTree("""
+                {"executionType":"load","scenario":{"workloads":[{"id":"one","target":{"type":"template","id":"OLD"},"load":{"users":1},"inputs":{"account":"old-private"},"vars":{"customer":"old-value"}}]}}
+                """);
+        var same=ServerRuntime.JSON.readTree("{\"workloads\":[{\"id\":\"one\",\"target\":{\"type\":\"template\",\"id\":\"OLD\"}}]}");
+        var retained=JobReplayOverrides.apply((com.fasterxml.jackson.databind.node.ObjectNode)source,same).path("scenario").path("workloads").get(0);
+        assertEquals("old-private",retained.path("inputs").path("account").asText());
+        var edit=ServerRuntime.JSON.readTree("{\"workloads\":[{\"id\":\"one\",\"target\":{\"type\":\"flow\",\"id\":\"NEW\"}}]}");
+        var changed=JobReplayOverrides.apply((com.fasterxml.jackson.databind.node.ObjectNode)source,edit).path("scenario").path("workloads").get(0);
+        assertFalse(changed.has("inputs"));assertFalse(changed.has("vars"));assertEquals("NEW",changed.path("target").path("id").asText());
+        assertEquals("old-private",source.path("scenario").path("workloads").get(0).path("inputs").path("account").asText());
+        var explicit=ServerRuntime.JSON.readTree("{\"workloads\":[{\"id\":\"one\",\"target\":{\"type\":\"flow\",\"id\":\"NEW\"},\"inputs\":{\"account\":\"new-value\"}}]}");
+        assertEquals("new-value",JobReplayOverrides.apply((com.fasterxml.jackson.databind.node.ObjectNode)source,explicit).path("scenario").path("workloads").get(0).path("inputs").path("account").asText());
+    }
+
     @Test void replayComparesEditedTimingWithEffectiveWorkloadTiming() {
         var source=ServerRuntime.JSON.createObjectNode();source.put("executionType","load");source.put("packageId","p");
         var scenario=source.putObject("scenario");scenario.putObject("load").put("duration","30m");

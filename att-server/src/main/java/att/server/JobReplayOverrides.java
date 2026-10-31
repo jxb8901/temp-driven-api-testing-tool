@@ -107,7 +107,14 @@ final class JobReplayOverrides {
                         }
                     }
                 }
-                for(String field:Set.of("execution","target","mix","inputs","vars","testdata","thresholds","evidence"))
+                if(patch.has("target")) {
+                    JsonNode target=patch.get("target");requireObject(target,"Workload target must be an object");
+                    if(!target.path("type").equals(workload.path("target").path("type"))||!target.path("id").equals(workload.path("target").path("id"))) {
+                        workload.remove("inputs");workload.remove("vars");
+                    }
+                    workload.set("target",target.deepCopy());
+                }
+                for(String field:Set.of("execution","mix","inputs","vars","testdata","thresholds","evidence"))
                     if(patch.has(field))workload.set(field,patch.get(field).deepCopy());
             }
         }
