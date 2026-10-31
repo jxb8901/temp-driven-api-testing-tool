@@ -15,6 +15,7 @@ async function main() {
     let schedules = [{
       ...common, id: 'S-LOAD', name: 'Nightly load', executionType: 'load', loadModel: 'arrival-rate', createdBy: 'alice',
       targetIdentity: { workloads: [{ name: 'payments', model: 'arrivalRate', arrivalRate: '100/s', maxConcurrent: 20, targets: [], mix: false }] },
+      executionSettings: { thresholds: { passRate: 0.95 }, evidence: { mode: 'failures' } },
     }];
     const mutations = [];
     await context.route('**/api/v1/version', route => route.fulfill({ json: {
@@ -32,6 +33,7 @@ async function main() {
         assert.equal(body.expectedDefinitionVersion, 4);
         assert.equal(body.overrides.environment, 'UAT');
         assert.deepEqual(body.overrides.thresholds, { passRate: 0.99 });
+        assert.equal(body.overrides.evidence, undefined);
         assert.equal(body.overrides.workloads[0].load.arrivalRate, '150/s');
         return route.fulfill({ json: {
           draftId: 'A-EXEC', definitionVersion: 4, snapshotVersion: 2, revisionDigest: 'abc', sourcePolicy: 'strict',
@@ -48,7 +50,13 @@ async function main() {
           targetIdentity: { workloads: [{ name: 'payments', model: 'arrivalRate', arrivalRate: '150/s', maxConcurrent: 20, targets: [], mix: false }] } } : item);
         return route.fulfill({ json: schedules[0] });
       }
-      if (method === 'GET') return route.fulfill({ json: { items: schedules } });
+      if (method === 'GET') {
+        if (!path || path === '/') return route.fulfill({ json: { items: schedules.map(({ executionSettings, ...summary }) => summary) } });
+        const id = path.replace(/^\//, '').split('/')[0];
+        const item = schedules.find(schedule => schedule.id === id);
+        if (!item) return route.fulfill({ status: 404, json: { code: 'ATT-SERVER-NOT-FOUND', message: 'API resource was not found' } });
+        return route.fulfill({ json: item });
+      }
       if (method === 'PATCH') {
         const id = path.slice(1);
         schedules = schedules.map(item => item.id === id ? { ...item, ...request.postDataJSON() } : item);
@@ -68,7 +76,10 @@ async function main() {
     await dialog.waitFor();
     await dialog.getByLabel('Arrival rate').fill('150/s');
     await dialog.getByLabel('Environment', { exact: true }).fill('UAT');
-    await dialog.getByLabel('Thresholds JSON').fill('{"passRate":0.99}');
+    const thresholds = dialog.getByLabel('Thresholds JSON');
+    assert.match(await thresholds.inputValue(), /"passRate": 0\.95/);
+    assert.match(await dialog.getByLabel('Evidence JSON').inputValue(), /"mode": "failures"/);
+    await thresholds.fill(JSON.stringify({ passRate: 0.99 }, null, 2));
     await dialog.getByRole('button', { name: 'Validate changes', exact: true }).click();
     await dialog.getByText('Review future snapshot 3').waitFor();
     assert.match(await dialog.innerText(), /− Before: arrivalRate: 100\/s/);
