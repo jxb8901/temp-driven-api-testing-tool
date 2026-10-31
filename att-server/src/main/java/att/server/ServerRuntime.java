@@ -3507,6 +3507,9 @@ final class ServerRuntime implements AutoCloseable {
             }
             Object diagnostic=schedule.runInput.get("diagnosticMode");
             if(diagnostic instanceof Boolean && !runOptions.containsKey("debug"))runOptions.put("debug",diagnostic);
+            // Case RUN WorkerRequests store failFast at the top level after RunDefinition.parse().
+            Object retainedFailFast=schedule.runInput.get("failFast");
+            if(retainedFailFast instanceof Boolean && !runOptions.containsKey("failFast"))runOptions.put("failFast",retainedFailFast);
             if(!runOptions.containsKey("debug"))runOptions.put("debug",Boolean.FALSE);
             if(!runOptions.containsKey("failFast"))runOptions.put("failFast",Boolean.FALSE);
             view.put("runOptions",runOptions);
