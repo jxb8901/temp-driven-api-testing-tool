@@ -100,3 +100,30 @@ it('sends explicit false when disabling retained RUN options', async () => {
  expect(api.createScheduleExecutionDraft).toHaveBeenCalledWith('S6',{expectedDefinitionVersion:3,overrides:{options:{debug:false}}});
  await act(async()=>root.unmount());host.remove();
 });
+it('does not emit selection when only RUN options change for a case selection', async () => {
+ (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT=true;
+ const host=document.createElement('div');document.body.append(host);const root=createRoot(host);
+ const schedule={id:'S7',name:'Cases',packageId:'p',executionType:'run' as const,timezone:'UTC',maxConcurrentRuns:1,enabled:true,inlineSnapshot:true,definitionVersion:2,selectedCaseIds:['C1','C2'],runOptions:{debug:false,failFast:false}};
+ const api={createScheduleExecutionDraft:vi.fn().mockResolvedValue({draftId:'A7',definitionVersion:2,snapshotVersion:1,revisionDigest:'abc',sourcePolicy:'strict',expiresAt:new Date(Date.now()+60000).toISOString(),originalPreview:{},preview:{}})};
+ await act(async()=>root.render(<NavigationGuardContext.Provider value={{navigate:vi.fn(),registerUnsavedChanges:()=>vi.fn()}}><ScheduleExecutionEditor schedule={schedule} api={api as never} onClose={vi.fn()} onSaved={vi.fn()} /></NavigationGuardContext.Provider>));
+ const failFast=[...host.querySelectorAll('label')].find(label=>label.textContent?.includes('Fail fast'))!.querySelector('input') as HTMLInputElement;
+ await act(async()=>{failFast.click();});
+ await act(async()=>[...host.querySelectorAll('button')].find(button=>button.textContent?.includes('Validate changes'))!.click());
+ expect(api.createScheduleExecutionDraft).toHaveBeenCalledWith('S7',{expectedDefinitionVersion:2,overrides:{options:{failFast:true}}});
+ expect(api.createScheduleExecutionDraft.mock.calls[0][1].overrides.selection).toBeUndefined();
+ await act(async()=>root.unmount());host.remove();
+});
+it('rejects advanced LOAD edits when retained settings are undisclosed', async () => {
+ (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT=true;
+ const host=document.createElement('div');document.body.append(host);const root=createRoot(host);
+ const schedule={id:'S8',name:'Shared',packageId:'p',executionType:'load' as const,environment:'SIT',timezone:'UTC',maxConcurrentRuns:1,enabled:true,inlineSnapshot:true,definitionVersion:2,targetIdentity:{workloads:[{name:'payments',model:'arrivalRate',arrivalRate:'100/s',maxConcurrent:20,targets:[]}]}};
+ const api={createScheduleExecutionDraft:vi.fn()};
+ await act(async()=>root.render(<NavigationGuardContext.Provider value={{navigate:vi.fn(),registerUnsavedChanges:()=>vi.fn()}}><ScheduleExecutionEditor schedule={schedule} api={api as never} onClose={vi.fn()} onSaved={vi.fn()} /></NavigationGuardContext.Provider>));
+ expect((host.querySelector('textarea[aria-label="Thresholds JSON"]') as HTMLTextAreaElement).disabled).toBe(true);
+ const rate=[...host.querySelectorAll('label')].find(label=>label.textContent?.startsWith('Arrival rate'))!.querySelector('input') as HTMLInputElement;
+ await act(async()=>{Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!.call(rate,'150/s');rate.dispatchEvent(new Event('input',{bubbles:true}));});
+ await act(async()=>[...host.querySelectorAll('button')].find(button=>button.textContent?.includes('Validate changes'))!.click());
+ expect(api.createScheduleExecutionDraft).toHaveBeenCalledWith('S8',{expectedDefinitionVersion:2,overrides:{workloads:[{id:'payments',load:{arrivalRate:'150/s'}}]}});
+ expect(api.createScheduleExecutionDraft.mock.calls[0][1].overrides.thresholds).toBeUndefined();
+ await act(async()=>root.unmount());host.remove();
+});

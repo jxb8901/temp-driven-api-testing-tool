@@ -75,6 +75,7 @@ export function ScheduleExecutionEditor({ schedule, api, onClose, onSaved }: {
   const [environment,setEnvironment]=useState(schedule.environment || '');
   const initialEnvironment=useRef(environment);
   const [cases,setCases]=useState((schedule.selectedCaseIds || []).join(', '));
+  const initialCaseIds=useRef([...(schedule.selectedCaseIds || [])]);
   const [runTarget,setRunTarget]=useState(schedule.debugTarget || {type:'',id:''});
   const [runOptions,setRunOptions]=useState<RunOptions>(() => initialRunOptions(schedule));
   const initialRunOptionsRef=useRef(runOptions);
@@ -105,7 +106,11 @@ export function ScheduleExecutionEditor({ schedule, api, onClose, onSaved }: {
         if(schedule.debugTarget) {
           if(runTarget.type!==schedule.debugTarget.type || runTarget.id!==schedule.debugTarget.id) overrides.target=runTarget;
           if(runInput.trim())overrides.input=parseObjectField('RUN input',runInput);
-        } else if(cases.trim()) overrides.selection={caseIds:cases.split(',').map(value=>value.trim()).filter(Boolean)};
+        } else if(schedule.selectedCaseIds?.length) {
+          const next=cases.split(',').map(value=>value.trim()).filter(Boolean);
+          const initial=initialCaseIds.current;
+          if(next.length!==initial.length || next.some((id,index)=>id!==initial[index])) overrides.selection={caseIds:next};
+        }
         const options: Record<string,boolean>={};
         if(runOptions.debug!==initialRunOptionsRef.current.debug)options.debug=runOptions.debug;
         if(runOptions.failFast!==initialRunOptionsRef.current.failFast)options.failFast=runOptions.failFast;
@@ -126,13 +131,19 @@ export function ScheduleExecutionEditor({ schedule, api, onClose, onSaved }: {
           return Object.keys(load).length||target||mixEdits.length?[{id:row.id,...(Object.keys(load).length?{load}:{}),...(target?{target}:{}),...(mixEdits.length?{mixEdits}:{})}]:[];
         });
         if(edits.length)overrides.workloads=edits;
-        const thresholds=changedAdvanced('Thresholds',advanced.thresholds,initialAdvancedRef.current.thresholds,parseObjectField); if(thresholds!==undefined)overrides.thresholds=thresholds;
-        const evidence=changedAdvanced('Evidence',advanced.evidence,initialAdvancedRef.current.evidence,parseObjectField); if(evidence!==undefined)overrides.evidence=evidence;
-        const testdata=changedAdvanced('Testdata',advanced.testdata,initialAdvancedRef.current.testdata,parseArrayOrObject); if(testdata!==undefined)overrides.testdata=testdata;
-        const execution=changedAdvanced('Execution',advanced.execution,initialAdvancedRef.current.execution,parseObjectField); if(execution!==undefined)overrides.execution=execution;
-        if(advanced.seed!==initialAdvancedRef.current.seed) {
-          if(!advanced.seed.trim())throw new Error('Seed cannot be cleared here; restore the retained value or keep the previous seed.');
-          overrides.seed=Number(advanced.seed);
+        const advancedAvailable=Boolean(schedule.executionSettings);
+        if(!advancedAvailable) {
+          const touched=(['thresholds','evidence','testdata','execution','seed'] as const).some(field => advanced[field].trim());
+          if(touched) throw new Error('Advanced settings cannot be replaced here because retained values are unavailable for safe prefill. Leave those fields empty and edit pacing, targets, or environment instead.');
+        } else {
+          const thresholds=changedAdvanced('Thresholds',advanced.thresholds,initialAdvancedRef.current.thresholds,parseObjectField); if(thresholds!==undefined)overrides.thresholds=thresholds;
+          const evidence=changedAdvanced('Evidence',advanced.evidence,initialAdvancedRef.current.evidence,parseObjectField); if(evidence!==undefined)overrides.evidence=evidence;
+          const testdata=changedAdvanced('Testdata',advanced.testdata,initialAdvancedRef.current.testdata,parseArrayOrObject); if(testdata!==undefined)overrides.testdata=testdata;
+          const execution=changedAdvanced('Execution',advanced.execution,initialAdvancedRef.current.execution,parseObjectField); if(execution!==undefined)overrides.execution=execution;
+          if(advanced.seed!==initialAdvancedRef.current.seed) {
+            if(!advanced.seed.trim())throw new Error('Seed cannot be cleared here; restore the retained value or keep the previous seed.');
+            overrides.seed=Number(advanced.seed);
+          }
         }
       }
       setReview(await api.createScheduleExecutionDraft(schedule.id,{expectedDefinitionVersion:schedule.definitionVersion ?? 0,overrides}));
@@ -164,12 +175,12 @@ export function ScheduleExecutionEditor({ schedule, api, onClose, onSaved }: {
       <fieldset><legend>Common advanced settings</legend>
         {advancedAvailable
           ? <p>These fields are prefilled with the retained complete values. Saving a changed field replaces that whole object; leave a field unchanged to keep it.</p>
-          : <p>Retained advanced settings are unavailable for safe prefill on this schedule. Leave these fields empty to keep the retained values.</p>}
-        <label>Thresholds (JSON) <textarea aria-label="Thresholds JSON" value={advanced.thresholds} onChange={event=>setAdvancedField('thresholds',event.target.value)} /></label>
-        <label>Evidence (JSON) <textarea aria-label="Evidence JSON" value={advanced.evidence} onChange={event=>setAdvancedField('evidence',event.target.value)} /></label>
-        <label>Testdata (JSON) <textarea aria-label="Testdata JSON" value={advanced.testdata} onChange={event=>setAdvancedField('testdata',event.target.value)} /></label>
-        <label>Execution defaults (JSON) <textarea aria-label="Execution JSON" value={advanced.execution} onChange={event=>setAdvancedField('execution',event.target.value)} /></label>
-        <label>Seed <input type="number" aria-label="Seed" value={advanced.seed} onChange={event=>setAdvancedField('seed',event.target.value)} /></label>
+          : <p>Retained advanced settings are unavailable for safe prefill on this schedule. Root-object replacement is disabled so undisclosed settings cannot be erased; edit pacing, targets, or environment instead.</p>}
+        <label>Thresholds (JSON) <textarea aria-label="Thresholds JSON" value={advanced.thresholds} disabled={!advancedAvailable} onChange={event=>setAdvancedField('thresholds',event.target.value)} /></label>
+        <label>Evidence (JSON) <textarea aria-label="Evidence JSON" value={advanced.evidence} disabled={!advancedAvailable} onChange={event=>setAdvancedField('evidence',event.target.value)} /></label>
+        <label>Testdata (JSON) <textarea aria-label="Testdata JSON" value={advanced.testdata} disabled={!advancedAvailable} onChange={event=>setAdvancedField('testdata',event.target.value)} /></label>
+        <label>Execution defaults (JSON) <textarea aria-label="Execution JSON" value={advanced.execution} disabled={!advancedAvailable} onChange={event=>setAdvancedField('execution',event.target.value)} /></label>
+        <label>Seed <input type="number" aria-label="Seed" value={advanced.seed} disabled={!advancedAvailable} onChange={event=>setAdvancedField('seed',event.target.value)} /></label>
       </fieldset>
     </>: schedule.debugTarget ? <><p>Changing the target clears its previous input bindings; validate the new target before saving.</p>
       <label>Target type <select value={runTarget.type} onChange={event=>{edit();setRunTarget(current=>({...current,type:event.target.value}));}}>{['template','flow','tool'].map(type=><option key={type}>{type}</option>)}</select></label>

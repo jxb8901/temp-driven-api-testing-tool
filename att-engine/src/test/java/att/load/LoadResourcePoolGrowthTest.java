@@ -244,6 +244,23 @@ class LoadResourcePoolGrowthTest {
     }
 
     @Test
+    void shutdownRetainsReservationWhenDisconnectWorkerCannotStart() throws Exception {
+        AtomicInteger closes = new AtomicInteger();
+        LoadResourcePool<Integer> pool = new LoadResourcePool<Integer>(1, 40L, () -> 1, value -> closes.incrementAndGet());
+        pool.ensureMinIdle(1);
+        pool.disconnectStarter = task -> { throw new IllegalStateException("no disconnect workers"); };
+        long started = System.nanoTime();
+        IllegalStateException timeout = org.junit.jupiter.api.Assertions.assertThrows(IllegalStateException.class, pool::close);
+        long elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started);
+        assertTrue(timeout.getMessage().contains("LOAD_RESOURCE_TEARDOWN_TIMEOUT"), timeout.getMessage());
+        assertTrue(elapsedMs < 15_000L, "shutdown must not block on a failed worker start, elapsedMs=" + elapsedMs);
+        assertEquals(1, pool.metrics().get("residualClosing"));
+        assertEquals(1, pool.total());
+        assertEquals(0, closes.get());
+        assertEquals(1, pool.closeFailureCount());
+    }
+
+    @Test
     void lateDisconnectAfterShutdownDeadlineRetainsThenReleasesReservation() throws Exception {
         CountDownLatch enteredClose = new CountDownLatch(1);
         CountDownLatch finishClose = new CountDownLatch(1);

@@ -3576,6 +3576,12 @@ final class ServerRuntime implements AutoCloseable {
         }
         if(input.has("packageEdit"))throw new IllegalArgumentException("Snapshot schedules cannot switch to a package source");
         if(source.expectedRevisionDigest==null)throw new IllegalArgumentException("This legacy schedule has no retained revision; create a new schedule");
+        JsonNode overrides=input.get("overrides");
+        if("load".equals(source.effectiveJobType())&&overrides!=null&&overrides.isObject()&&!canDiscloseExecutionSettings(source,principal)) {
+            for(String field:List.of("thresholds","evidence","testdata","execution","seed")) {
+                if(overrides.has(field))throw new IllegalArgumentException("Advanced LOAD settings cannot be replaced without access to the retained values");
+            }
+        }
         ObjectNode definition;
         if("run".equals(source.effectiveJobType())) {
             ObjectNode retained=JSON.valueToTree(source.runInput);retained.put("expectedRevisionDigest",source.expectedRevisionDigest);
@@ -3584,7 +3590,7 @@ final class ServerRuntime implements AutoCloseable {
             definition=JSON.createObjectNode();definition.put("executionType","load");definition.put("packageId",source.packageId);
             if(source.environment!=null)definition.put("environment",source.environment);definition.set("scenario",JSON.valueToTree(source.inlineScenario));
         }
-        ObjectNode proposed=JobReplayOverrides.apply(definition,input.get("overrides"));
+        ObjectNode proposed=JobReplayOverrides.apply(definition,overrides);
         Map<String,Object> originalPreview,validated;
         if("run".equals(source.effectiveJobType()))originalPreview=createRunDraft(definition,principal,true,null);
         else {ObjectNode originalInput=definition.deepCopy();originalInput.remove("executionType");originalPreview=source.catalogSnapshot?createCatalogScheduleReviewDraft(originalInput,source,principal):createAdvancedLoadDraft(originalInput,principal,null);}

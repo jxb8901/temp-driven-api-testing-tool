@@ -42,6 +42,8 @@ public final class LoadResourcePool<T> implements AutoCloseable {
     private int residualCreating;
     private int residualClosing;
     private static final long SHUTDOWN_WAIT_FLOOR_MS = 5_000L;
+    /** Package-visible so tests can inject a failing disconnect-worker starter. */
+    volatile java.util.function.Consumer<Runnable> disconnectStarter = LoadResourcePool::startDisconnectWorker;
 
     public LoadResourcePool(int maxSize, long borrowTimeoutMs, Supplier<T> factory, Consumer<T> closer) {
         this(maxSize, 0, borrowTimeoutMs, factory, closer);
@@ -298,15 +300,20 @@ public final class LoadResourcePool<T> implements AutoCloseable {
         }
     }
 
+    private static void startDisconnectWorker(Runnable task) {
+        Thread thread = new Thread(task, "att-load-resource-disconnect");
+        thread.setDaemon(true);
+        thread.start();
+    }
+
     /** Runs a physical disconnect outside the shutdown waiter so one hung closer cannot block the deadline. */
     private void closeAsync(T value) {
         try {
-            Thread thread = new Thread(() -> closeTracked(value), "att-load-resource-disconnect");
-            thread.setDaemon(true);
-            thread.start();
+            disconnectStarter.accept(() -> closeTracked(value));
         } catch (RuntimeException | Error failure) {
-            // Thread start failure is rare; fall back to the tracked closer on this thread.
-            closeTracked(value);
+            // Keep the reservation charged and surface the start failure; never block the shutdown waiter.
+            closeFailures.add(new IllegalStateException("LOAD_RESOURCE_TEARDOWN_FAILED: disconnect worker could not start", failure));
+            synchronized (this) { notifyAll(); }
         }
     }
 

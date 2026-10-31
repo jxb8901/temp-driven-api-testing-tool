@@ -200,19 +200,26 @@ class ServerRuntimeScheduleTest {
             LoadSchedule mixSchedule=setupRuntime.createLoadSchedule(mixScheduleRequest,"alice");
             mixSchedule.listSummary=Map.of(); // Older stored schedules lack the new mix projection.
             mixSchedule.inlineScenario=new LinkedHashMap<>(mixSchedule.inlineScenario);
-            mixSchedule.inlineScenario.put("thresholds",Map.of("passRate",0.91));
+            mixSchedule.inlineScenario.put("thresholds",Map.of("errorRate","<= 1%"));
             mixSchedule.inlineScenario.put("evidence",Map.of("mode","failures"));
+            setupRuntime.store.saveSchedule(mixSchedule);
             assertFalse(setupRuntime.loadScheduleListView(mixSchedule,"alice").containsKey("executionSettings"),
                     "List responses must stay summary-only even for the schedule owner");
             @SuppressWarnings("unchecked") Map<String,Object> ownerSettings=(Map<String,Object>)setupRuntime.loadScheduleView(mixSchedule,"alice").get("executionSettings");
-            assertNotNull(ownerSettings);assertEquals(0.91,((Number)((Map<?,?>)ownerSettings.get("thresholds")).get("passRate")).doubleValue());
+            assertNotNull(ownerSettings);assertEquals("<= 1%",((Map<?,?>)ownerSettings.get("thresholds")).get("errorRate"));
             assertEquals("failures",((Map<?,?>)ownerSettings.get("evidence")).get("mode"));
             assertFalse(setupRuntime.loadScheduleView(mixSchedule,"bob").containsKey("executionSettings"),
                     "Shared operators must not receive another principal's private advanced settings");
             assertFalse(setupRuntime.loadScheduleListView(mixSchedule,"bob").containsKey("executionSettings"));
             String view=setupRuntime.loadScheduleView(mixSchedule,"bob").toString();
             assertTrue(view.contains("mixEntries"));assertTrue(view.contains("weight=40"));assertFalse(view.contains("mix-private-value"));
-            assertFalse(view.contains("passRate"));assertFalse(view.contains("failures"));
+            assertFalse(view.contains("errorRate"));assertFalse(view.contains("failures"));
+            JsonNode bobAdvanced=ServerRuntime.JSON.readTree("{\"expectedDefinitionVersion\":"+mixSchedule.definitionVersion+",\"overrides\":{\"thresholds\":{\"errorRate\":\"<= 0.1%\"}}}");
+            IllegalArgumentException bobAdvancedDenied=assertThrows(IllegalArgumentException.class,
+                    ()->setupRuntime.createScheduleExecutionDraft(mixSchedule.id,bobAdvanced,"bob"));
+            assertTrue(bobAdvancedDenied.getMessage().contains("could not be validated")||bobAdvancedDenied.getMessage().contains("Advanced LOAD"),
+                    bobAdvancedDenied.getMessage());
+            assertEquals("<= 1%",((Map<?,?>)setupRuntime.store.schedule(mixSchedule.id).inlineScenario.get("thresholds")).get("errorRate"));
             JsonNode mixEdit=ServerRuntime.JSON.readTree("{\"expectedDefinitionVersion\":"+mixSchedule.definitionVersion+",\"overrides\":{\"workloads\":[{\"id\":\"mixed\",\"mixEdits\":[{\"id\":\"first\",\"weight\":50}]}]}}");
             Map<String,Object> mixReview=setupRuntime.createScheduleExecutionDraft(mixSchedule.id,mixEdit,"bob");
             assertFalse(mixReview.toString().contains("mix-private-value"));assertTrue(mixReview.toString().contains("weight"));
@@ -221,6 +228,8 @@ class ServerRuntimeScheduleTest {
             JsonNode mixedResult=ServerRuntime.JSON.valueToTree(mixedReplacement.inlineScenario).path("workloads").get(0).path("mix");
             assertEquals(50,mixedResult.get(0).path("weight").asInt());assertEquals("mix-private-value",mixedResult.get(0).path("vars").path("reference").asText());
             assertEquals(60,mixedResult.get(1).path("weight").asInt());assertEquals(mixSchedule.nextRunAt,mixedReplacement.nextRunAt);
+            assertEquals("<= 1%",((Map<?,?>)mixedReplacement.inlineScenario.get("thresholds")).get("errorRate"));
+            assertEquals("failures",((Map<?,?>)mixedReplacement.inlineScenario.get("evidence")).get("mode"));
             setupRuntime.deleteLoadSchedule(mixSchedule.id,"alice");
 
             LoadSchedule packageSchedule=setupRuntime.createLoadSchedule(request,"alice");
