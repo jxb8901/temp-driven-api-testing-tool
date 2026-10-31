@@ -2,7 +2,7 @@
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { expect, it, vi } from 'vitest';
-import { ScheduleExecutionEditor } from './ScheduleExecutionEditor';
+import { ScheduleExecutionEditor, previewChanges } from './ScheduleExecutionEditor';
 import { NavigationGuardContext } from '../../router';
 it('validates, reviews, and applies an execution update without changing schedule settings', async () => {
  (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT=true;
@@ -17,9 +17,17 @@ it('validates, reviews, and applies an execution update without changing schedul
  await click('Validate changes');
  expect(api.createScheduleExecutionDraft).toHaveBeenCalledWith('S1',{expectedDefinitionVersion:4,overrides:{workloads:[{id:'payments',load:{arrivalRate:'150/s'}}]}});
  expect(host.textContent).toContain('100/s');expect(host.textContent).toContain('150/s');
+ expect(host.querySelector('[aria-label="Changed preview lines"]')?.textContent).toContain('− Before: 100/s');
+ expect(host.querySelector('[aria-label="Changed preview lines"]')?.textContent).toContain('+ After: 150/s');
  await click('Save as new snapshot');
  expect(api.replaceScheduleExecution).toHaveBeenCalledWith('S1',{draftId:'A1',expectedDefinitionVersion:4,confirm:true});expect(onSaved).toHaveBeenCalledOnce();
  await act(async()=>root.unmount());host.remove();
+});
+it('compares bounded safe previews without displaying unchanged lines', () => {
+ expect(previewChanges('same\nold\nend','same\nnew\nend')).toEqual([{kind:'removed',line:'old'},{kind:'added',line:'new'}]);
+ expect(previewChanges('same','same')).toEqual([]);
+ expect(previewChanges('x\n'.repeat(301),'x')).toBeNull();
+ expect(previewChanges('x'.repeat(50001),'x')).toBeNull();
 });
 it('keeps package-backed schedules in package mode during review', async () => {
  (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT=true;

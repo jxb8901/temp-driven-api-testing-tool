@@ -5,6 +5,27 @@ import type { ScheduleDefinition, ScheduleExecutionReview, SchedulesApi } from '
 
 type MixEntry = { id: string; weight: string; targetType: string; targetId: string };
 type Workload = { id: string; model: string; rate: string; users: string; maxConcurrent: string; targetType: string; targetId: string; mix: boolean; mixEntries: MixEntry[]; rampUp: string; warmup: string; duration: string; rampDown: string };
+type Preview = ScheduleExecutionReview['preview'];
+function previewText(preview: Preview): string {
+  const value=preview.previewYaml || JSON.stringify(preview,null,2);
+  try { return JSON.stringify(JSON.parse(value),null,2); } catch { return value; }
+}
+/** Compare only Server-sanitized previews and bound the quadratic line comparison. */
+export function previewChanges(before: string, after: string): {kind:'removed'|'added'; line:string}[] | null {
+  if(before.length>50000||after.length>50000)return null;
+  const left=before.split('\n'),right=after.split('\n');
+  if(left.length>300||right.length>300)return null;
+  const lengths=Array.from({length:left.length+1},()=>new Uint16Array(right.length+1));
+  for(let i=left.length-1;i>=0;i--)for(let j=right.length-1;j>=0;j--)
+    lengths[i][j]=left[i]===right[j]?lengths[i+1][j+1]+1:Math.max(lengths[i+1][j],lengths[i][j+1]);
+  const changes: {kind:'removed'|'added';line:string}[]=[];let i=0,j=0;
+  while(i<left.length||j<right.length) {
+    if(i<left.length&&j<right.length&&left[i]===right[j]) {i++;j++;}
+    else if(j<right.length&&(i===left.length||lengths[i][j+1]>lengths[i+1][j])) changes.push({kind:'added',line:right[j++]});
+    else changes.push({kind:'removed',line:left[i++]});
+  }
+  return changes;
+}
 /** A bounded editor for the safe schedule summary; validation retains all unedited values server-side. */
 export function ScheduleExecutionEditor({ schedule, api, onClose, onSaved }: {
   schedule: ScheduleDefinition; api: SchedulesApi; onClose(): void; onSaved(value: ScheduleDefinition): void;
@@ -84,8 +105,18 @@ export function ScheduleExecutionEditor({ schedule, api, onClose, onSaved }: {
     <button type="button" className="button button-quiet" disabled={busy || (schedule.inlineSnapshot && schedule.executionType==='load' && (!workloads.length || Boolean(schedule.targetIdentity?.truncated))) || (schedule.inlineSnapshot && schedule.executionType==='run'&&!schedule.selectedCaseIds?.length&&!schedule.debugTarget)} onClick={() => void validate()}>Validate changes</button>
     {review && <section aria-label="Review execution changes"><h3>Review future snapshot {review.snapshotVersion+1}</h3>
       <p>Package revision {review.revisionDigest} · policy {review.sourcePolicy} · next occurrence {review.nextRunAt || 'none'}</p>
-      <h4>Before</h4><pre>{review.originalPreview.previewYaml || JSON.stringify(review.originalPreview,null,2)}</pre><h4>After</h4><pre>{review.preview.previewYaml || JSON.stringify(review.preview,null,2)}</pre>
+      <ReviewChanges before={previewText(review.originalPreview)} after={previewText(review.preview)} />
+      <details><summary>View complete safe previews</summary><h4>Before</h4><pre>{previewText(review.originalPreview)}</pre><h4>After</h4><pre>{previewText(review.preview)}</pre></details>
       <button type="button" className="button button-primary" disabled={busy} onClick={() => void apply()}>Save as new snapshot</button>
     </section>}
   </LoadDialog>;
+}
+
+function ReviewChanges({before,after}:{before:string;after:string}) {
+  const changes=previewChanges(before,after);
+  return <div><h4>Changes in the safe preview</h4>
+    <p>Only values visible in the Server's safe preview are compared. Redacted or withheld values may not appear.</p>
+    {changes===null?<p>The preview is too large for an inline comparison. Review the complete safe previews below.</p>:
+      changes.length===0?<p>No visible changes.</p>:<pre aria-label="Changed preview lines">{changes.map((change,index)=><span key={index}>{change.kind==='removed'?'− Before: ':'+ After: '}{change.line}{'\n'}</span>)}</pre>}
+  </div>;
 }
