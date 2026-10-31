@@ -70,7 +70,7 @@ it('updates a mix weight without replacing other bindings', async () => {
 it('reviews environment and advanced LOAD overrides', async () => {
  (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT=true;
  const host=document.createElement('div');document.body.append(host);const root=createRoot(host);
- const schedule={id:'S5',name:'Advanced',packageId:'p',executionType:'load' as const,environment:'SIT',timezone:'UTC',maxConcurrentRuns:1,enabled:true,inlineSnapshot:true,definitionVersion:2,targetIdentity:{workloads:[{name:'payments',model:'arrivalRate',arrivalRate:'100/s',maxConcurrent:20,targets:[]}]},executionSettings:{thresholds:{passRate:0.95,errorRate:0.01},evidence:{mode:'failures',maxSamples:2},testdata:['data/cases.csv'],execution:{thinkTime:'10ms'},seed:7}};
+ const schedule={id:'S5',name:'Advanced',packageId:'p',executionType:'load' as const,environment:'SIT',timezone:'UTC',maxConcurrentRuns:1,enabled:true,inlineSnapshot:true,definitionVersion:2,canEditAdvancedSettings:true,targetIdentity:{workloads:[{name:'payments',model:'arrivalRate',arrivalRate:'100/s',maxConcurrent:20,targets:[]}]},executionSettings:{thresholds:{passRate:0.95,errorRate:0.01},evidence:{mode:'failures',maxSamples:2},testdata:['data/cases.csv'],execution:{thinkTime:'10ms'},seed:7}};
  const api={createScheduleExecutionDraft:vi.fn().mockResolvedValue({draftId:'A5',definitionVersion:2,snapshotVersion:1,revisionDigest:'abc',sourcePolicy:'strict',expiresAt:new Date(Date.now()+60000).toISOString(),originalPreview:{},preview:{}})};
  await act(async()=>root.render(<NavigationGuardContext.Provider value={{navigate:vi.fn(),registerUnsavedChanges:()=>vi.fn()}}><ScheduleExecutionEditor schedule={schedule} api={api as never} onClose={vi.fn()} onSaved={vi.fn()} /></NavigationGuardContext.Provider>));
  const environment=[...host.querySelectorAll('label')].find(label=>label.textContent?.startsWith('Environment'))!.querySelector('input') as HTMLInputElement;
@@ -116,7 +116,7 @@ it('does not emit selection when only RUN options change for a case selection', 
 it('rejects advanced LOAD edits when retained settings are undisclosed', async () => {
  (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT=true;
  const host=document.createElement('div');document.body.append(host);const root=createRoot(host);
- const schedule={id:'S8',name:'Shared',packageId:'p',executionType:'load' as const,environment:'SIT',timezone:'UTC',maxConcurrentRuns:1,enabled:true,inlineSnapshot:true,definitionVersion:2,targetIdentity:{workloads:[{name:'payments',model:'arrivalRate',arrivalRate:'100/s',maxConcurrent:20,targets:[]}]}};
+ const schedule={id:'S8',name:'Shared',packageId:'p',executionType:'load' as const,environment:'SIT',timezone:'UTC',maxConcurrentRuns:1,enabled:true,inlineSnapshot:true,definitionVersion:2,canEditAdvancedSettings:false,targetIdentity:{workloads:[{name:'payments',model:'arrivalRate',arrivalRate:'100/s',maxConcurrent:20,targets:[]}]}};
  const api={createScheduleExecutionDraft:vi.fn()};
  await act(async()=>root.render(<NavigationGuardContext.Provider value={{navigate:vi.fn(),registerUnsavedChanges:()=>vi.fn()}}><ScheduleExecutionEditor schedule={schedule} api={api as never} onClose={vi.fn()} onSaved={vi.fn()} /></NavigationGuardContext.Provider>));
  expect((host.querySelector('textarea[aria-label="Thresholds JSON"]') as HTMLTextAreaElement).disabled).toBe(true);
@@ -125,5 +125,18 @@ it('rejects advanced LOAD edits when retained settings are undisclosed', async (
  await act(async()=>[...host.querySelectorAll('button')].find(button=>button.textContent?.includes('Validate changes'))!.click());
  expect(api.createScheduleExecutionDraft).toHaveBeenCalledWith('S8',{expectedDefinitionVersion:2,overrides:{workloads:[{id:'payments',load:{arrivalRate:'150/s'}}]}});
  expect(api.createScheduleExecutionDraft.mock.calls[0][1].overrides.thresholds).toBeUndefined();
+ await act(async()=>root.unmount());host.remove();
+});
+it('lets an authorized owner add the first advanced LOAD thresholds', async () => {
+ (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT=true;
+ const host=document.createElement('div');document.body.append(host);const root=createRoot(host);
+ const schedule={id:'S9',name:'Owner',packageId:'p',executionType:'load' as const,environment:'SIT',timezone:'UTC',maxConcurrentRuns:1,enabled:true,inlineSnapshot:true,definitionVersion:1,canEditAdvancedSettings:true,executionSettings:{},targetIdentity:{workloads:[{name:'payments',model:'arrivalRate',arrivalRate:'100/s',maxConcurrent:20,targets:[]}]}};
+ const api={createScheduleExecutionDraft:vi.fn().mockResolvedValue({draftId:'A9',definitionVersion:1,snapshotVersion:1,revisionDigest:'abc',sourcePolicy:'strict',expiresAt:new Date(Date.now()+60000).toISOString(),originalPreview:{},preview:{}})};
+ await act(async()=>root.render(<NavigationGuardContext.Provider value={{navigate:vi.fn(),registerUnsavedChanges:()=>vi.fn()}}><ScheduleExecutionEditor schedule={schedule} api={api as never} onClose={vi.fn()} onSaved={vi.fn()} /></NavigationGuardContext.Provider>));
+ const thresholds=host.querySelector('textarea[aria-label="Thresholds JSON"]') as HTMLTextAreaElement;
+ expect(thresholds.disabled).toBe(false);
+ await act(async()=>{Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value')!.set!.call(thresholds,JSON.stringify({errorRate:'<= 1%'},null,2));thresholds.dispatchEvent(new Event('input',{bubbles:true}));});
+ await act(async()=>[...host.querySelectorAll('button')].find(button=>button.textContent?.includes('Validate changes'))!.click());
+ expect(api.createScheduleExecutionDraft).toHaveBeenCalledWith('S9',{expectedDefinitionVersion:1,overrides:{thresholds:{errorRate:'<= 1%'}}});
  await act(async()=>root.unmount());host.remove();
 });

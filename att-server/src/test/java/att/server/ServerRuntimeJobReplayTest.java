@@ -509,15 +509,17 @@ class ServerRuntimeJobReplayTest {
 
     @Test void runOptionOnlyOverridesPreserveCompleteCaseSelection() throws Exception {
         var source=(com.fasterxml.jackson.databind.node.ObjectNode)ServerRuntime.JSON.readTree("""
-                {"executionType":"run","packageId":"p","selection":{"caseIds":["cases.default.C1","cases.default.C2"],"suites":["testcase/cases.xlsx"],"suiteDirectory":"testcase","tags":["smoke"]},"options":{"debug":false,"failFast":false}}
+                {"schemaVersion":"att-execution/v1","executionType":"run","packageId":"p","selection":{"caseIds":["cases.default.C1","cases.default.C2"],"suites":["testcase/cases.xlsx"],"tags":["smoke"]},"options":{"debug":false,"failFast":false}}
                 """);
+        assertDoesNotThrow(() -> RunDefinition.parseRetained(source));
         var updated=JobReplayOverrides.apply(source,ServerRuntime.JSON.readTree("{\"options\":{\"failFast\":true}}"));
         assertEquals(true,updated.path("options").path("failFast").asBoolean());
         assertEquals(false,updated.path("options").path("debug").asBoolean());
         assertEquals(List.of("cases.default.C1","cases.default.C2"),ServerRuntime.JSON.convertValue(updated.path("selection").path("caseIds"),List.class));
         assertEquals(List.of("testcase/cases.xlsx"),ServerRuntime.JSON.convertValue(updated.path("selection").path("suites"),List.class));
-        assertEquals("testcase",updated.path("selection").path("suiteDirectory").asText());
+        assertFalse(updated.path("selection").has("suiteDirectory"));
         assertEquals(List.of("smoke"),ServerRuntime.JSON.convertValue(updated.path("selection").path("tags"),List.class));
+        assertDoesNotThrow(() -> RunDefinition.parseRetained(updated));
         assertEquals(List.of("cases.default.C1","cases.default.C2"),ServerRuntime.JSON.convertValue(source.path("selection").path("caseIds"),List.class));
     }
 

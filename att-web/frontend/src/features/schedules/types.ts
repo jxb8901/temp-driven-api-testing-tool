@@ -33,6 +33,7 @@ export interface ScheduleDefinition {
   recentStatus?: string;
   debugTarget?: { type: string; id: string } | null;
   runOptions?: { debug?: boolean; failFast?: boolean } | null;
+  canEditAdvancedSettings?: boolean | null;
   executionSettings?: {
     thresholds?: Record<string, unknown>;
     evidence?: Record<string, unknown>;

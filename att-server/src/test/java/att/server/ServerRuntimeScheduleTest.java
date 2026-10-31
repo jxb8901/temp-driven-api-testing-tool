@@ -205,13 +205,18 @@ class ServerRuntimeScheduleTest {
             setupRuntime.store.saveSchedule(mixSchedule);
             assertFalse(setupRuntime.loadScheduleListView(mixSchedule,"alice").containsKey("executionSettings"),
                     "List responses must stay summary-only even for the schedule owner");
-            @SuppressWarnings("unchecked") Map<String,Object> ownerSettings=(Map<String,Object>)setupRuntime.loadScheduleView(mixSchedule,"alice").get("executionSettings");
+            assertFalse(setupRuntime.loadScheduleListView(mixSchedule,"alice").containsKey("canEditAdvancedSettings"));
+            Map<String,Object> aliceDetail=setupRuntime.loadScheduleView(mixSchedule,"alice");
+            assertEquals(Boolean.TRUE,aliceDetail.get("canEditAdvancedSettings"));
+            @SuppressWarnings("unchecked") Map<String,Object> ownerSettings=(Map<String,Object>)aliceDetail.get("executionSettings");
             assertNotNull(ownerSettings);assertEquals("<= 1%",((Map<?,?>)ownerSettings.get("thresholds")).get("errorRate"));
             assertEquals("failures",((Map<?,?>)ownerSettings.get("evidence")).get("mode"));
-            assertFalse(setupRuntime.loadScheduleView(mixSchedule,"bob").containsKey("executionSettings"),
+            Map<String,Object> bobDetail=setupRuntime.loadScheduleView(mixSchedule,"bob");
+            assertEquals(Boolean.FALSE,bobDetail.get("canEditAdvancedSettings"));
+            assertFalse(bobDetail.containsKey("executionSettings"),
                     "Shared operators must not receive another principal's private advanced settings");
             assertFalse(setupRuntime.loadScheduleListView(mixSchedule,"bob").containsKey("executionSettings"));
-            String view=setupRuntime.loadScheduleView(mixSchedule,"bob").toString();
+            String view=bobDetail.toString();
             assertTrue(view.contains("mixEntries"));assertTrue(view.contains("weight=40"));assertFalse(view.contains("mix-private-value"));
             assertFalse(view.contains("errorRate"));assertFalse(view.contains("failures"));
             JsonNode bobAdvanced=ServerRuntime.JSON.readTree("{\"expectedDefinitionVersion\":"+mixSchedule.definitionVersion+",\"overrides\":{\"thresholds\":{\"errorRate\":\"<= 0.1%\"}}}");
@@ -219,6 +224,11 @@ class ServerRuntimeScheduleTest {
                     ()->setupRuntime.createScheduleExecutionDraft(mixSchedule.id,bobAdvanced,"bob"));
             assertTrue(bobAdvancedDenied.getMessage().contains("could not be validated")||bobAdvancedDenied.getMessage().contains("Advanced LOAD"),
                     bobAdvancedDenied.getMessage());
+            JsonNode bobWorkloadAdvanced=ServerRuntime.JSON.readTree("{\"expectedDefinitionVersion\":"+mixSchedule.definitionVersion+",\"overrides\":{\"workloads\":[{\"id\":\"mixed\",\"thresholds\":{\"errorRate\":\"<= 0.1%\"}}]}}");
+            IllegalArgumentException bobWorkloadDenied=assertThrows(IllegalArgumentException.class,
+                    ()->setupRuntime.createScheduleExecutionDraft(mixSchedule.id,bobWorkloadAdvanced,"bob"));
+            assertTrue(bobWorkloadDenied.getMessage().contains("could not be validated")||bobWorkloadDenied.getMessage().contains("Advanced LOAD"),
+                    bobWorkloadDenied.getMessage());
             assertEquals("<= 1%",((Map<?,?>)setupRuntime.store.schedule(mixSchedule.id).inlineScenario.get("thresholds")).get("errorRate"));
             JsonNode mixEdit=ServerRuntime.JSON.readTree("{\"expectedDefinitionVersion\":"+mixSchedule.definitionVersion+",\"overrides\":{\"workloads\":[{\"id\":\"mixed\",\"mixEdits\":[{\"id\":\"first\",\"weight\":50}]}]}}");
             Map<String,Object> mixReview=setupRuntime.createScheduleExecutionDraft(mixSchedule.id,mixEdit,"bob");
@@ -230,6 +240,19 @@ class ServerRuntimeScheduleTest {
             assertEquals(60,mixedResult.get(1).path("weight").asInt());assertEquals(mixSchedule.nextRunAt,mixedReplacement.nextRunAt);
             assertEquals("<= 1%",((Map<?,?>)mixedReplacement.inlineScenario.get("thresholds")).get("errorRate"));
             assertEquals("failures",((Map<?,?>)mixedReplacement.inlineScenario.get("evidence")).get("mode"));
+            LoadSchedule bare=mixedReplacement.copy();
+            bare.inlineScenario=new LinkedHashMap<>(bare.inlineScenario);
+            bare.inlineScenario.remove("thresholds");bare.inlineScenario.remove("evidence");
+            setupRuntime.store.saveSchedule(bare);
+            Map<String,Object> ownerEmpty=setupRuntime.loadScheduleView(bare,"alice");
+            assertEquals(Boolean.TRUE,ownerEmpty.get("canEditAdvancedSettings"));
+            assertTrue(ownerEmpty.containsKey("executionSettings"));
+            assertTrue(((Map<?,?>)ownerEmpty.get("executionSettings")).isEmpty());
+            JsonNode ownerAdd=ServerRuntime.JSON.readTree("{\"expectedDefinitionVersion\":"+bare.definitionVersion+",\"overrides\":{\"thresholds\":{\"errorRate\":\"<= 2%\"}}}");
+            Map<String,Object> ownerReview=setupRuntime.createScheduleExecutionDraft(bare.id,ownerAdd,"alice");
+            JsonNode ownerApply=ServerRuntime.JSON.readTree("{\"draftId\":\""+ownerReview.get("draftId")+"\",\"expectedDefinitionVersion\":"+bare.definitionVersion+",\"confirm\":true}");
+            LoadSchedule ownerAdded=setupRuntime.replaceScheduleExecution(bare.id,ownerApply,"alice");
+            assertEquals("<= 2%",((Map<?,?>)ownerAdded.inlineScenario.get("thresholds")).get("errorRate"));
             setupRuntime.deleteLoadSchedule(mixSchedule.id,"alice");
 
             LoadSchedule packageSchedule=setupRuntime.createLoadSchedule(request,"alice");

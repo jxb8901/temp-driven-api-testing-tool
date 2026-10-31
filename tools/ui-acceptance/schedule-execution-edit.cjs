@@ -15,6 +15,7 @@ async function main() {
     let schedules = [{
       ...common, id: 'S-LOAD', name: 'Nightly load', executionType: 'load', loadModel: 'arrival-rate', createdBy: 'alice',
       targetIdentity: { workloads: [{ name: 'payments', model: 'arrivalRate', arrivalRate: '100/s', maxConcurrent: 20, targets: [], mix: false }] },
+      canEditAdvancedSettings: true,
       executionSettings: { thresholds: { passRate: 0.95 }, evidence: { mode: 'failures' } },
     }];
     const mutations = [];

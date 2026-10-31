@@ -86,6 +86,8 @@ export function ScheduleExecutionEditor({ schedule, api, onClose, onSaved }: {
   const [changed,setChanged]=useState(false),[busy,setBusy]=useState(false);
   const [review,setReview]=useState<ScheduleExecutionReview | null>(null);
   const [error,setError]=useState('');
+  const canEditAdvanced=schedule.canEditAdvancedSettings===true
+    || (schedule.canEditAdvancedSettings==null && schedule.executionSettings!=null);
   useEffect(() => navigation.registerUnsavedChanges(changed, 'Schedule execution settings'), [changed,navigation.registerUnsavedChanges]);
   function edit() { setChanged(true); setReview(null); setError(''); }
   function close() { if (!changed || window.confirm('Discard execution settings changes?')) onClose(); }
@@ -131,8 +133,7 @@ export function ScheduleExecutionEditor({ schedule, api, onClose, onSaved }: {
           return Object.keys(load).length||target||mixEdits.length?[{id:row.id,...(Object.keys(load).length?{load}:{}),...(target?{target}:{}),...(mixEdits.length?{mixEdits}:{})}]:[];
         });
         if(edits.length)overrides.workloads=edits;
-        const advancedAvailable=Boolean(schedule.executionSettings);
-        if(!advancedAvailable) {
+        if(!canEditAdvanced) {
           const touched=(['thresholds','evidence','testdata','execution','seed'] as const).some(field => advanced[field].trim());
           if(touched) throw new Error('Advanced settings cannot be replaced here because retained values are unavailable for safe prefill. Leave those fields empty and edit pacing, targets, or environment instead.');
         } else {
@@ -155,7 +156,6 @@ export function ScheduleExecutionEditor({ schedule, api, onClose, onSaved }: {
     try {const saved=await api.replaceScheduleExecution(schedule.id,{draftId:review.draftId,expectedDefinitionVersion:review.definitionVersion,confirm:true});setChanged(false);onSaved(saved);}
     catch(failure){setError(failure instanceof Error?failure.message:'The schedule could not be updated.');setReview(null);}finally{setBusy(false);}
   }
-  const advancedAvailable=Boolean(schedule.executionSettings);
   return <LoadDialog title="Edit execution settings" onCancel={close}>
     <p>Schedule {schedule.name} · snapshot {schedule.snapshotVersion ?? 1}. These fields change future executions only.</p>
     <label>Environment <input value={environment} onChange={event=>{edit();setEnvironment(event.target.value);}} placeholder="Package default" /></label>
@@ -173,14 +173,14 @@ export function ScheduleExecutionEditor({ schedule, api, onClose, onSaved }: {
       </fieldset>)}
       <p>Leave phase fields empty to keep the existing timing.</p>{(['rampUp','warmup','duration','rampDown'] as const).map(field=><label key={field}>{field} <input value={phases[field]} onChange={event=>{edit();setPhases(current=>({...current,[field]:event.target.value}));}} /></label>)}
       <fieldset><legend>Common advanced settings</legend>
-        {advancedAvailable
-          ? <p>These fields are prefilled with the retained complete values. Saving a changed field replaces that whole object; leave a field unchanged to keep it.</p>
+        {canEditAdvanced
+          ? <p>These fields are prefilled with retained values when present. Saving a changed field replaces that whole object; leave a field unchanged to keep it. Empty authorized fields may be filled to add the first setting.</p>
           : <p>Retained advanced settings are unavailable for safe prefill on this schedule. Root-object replacement is disabled so undisclosed settings cannot be erased; edit pacing, targets, or environment instead.</p>}
-        <label>Thresholds (JSON) <textarea aria-label="Thresholds JSON" value={advanced.thresholds} disabled={!advancedAvailable} onChange={event=>setAdvancedField('thresholds',event.target.value)} /></label>
-        <label>Evidence (JSON) <textarea aria-label="Evidence JSON" value={advanced.evidence} disabled={!advancedAvailable} onChange={event=>setAdvancedField('evidence',event.target.value)} /></label>
-        <label>Testdata (JSON) <textarea aria-label="Testdata JSON" value={advanced.testdata} disabled={!advancedAvailable} onChange={event=>setAdvancedField('testdata',event.target.value)} /></label>
-        <label>Execution defaults (JSON) <textarea aria-label="Execution JSON" value={advanced.execution} disabled={!advancedAvailable} onChange={event=>setAdvancedField('execution',event.target.value)} /></label>
-        <label>Seed <input type="number" aria-label="Seed" value={advanced.seed} disabled={!advancedAvailable} onChange={event=>setAdvancedField('seed',event.target.value)} /></label>
+        <label>Thresholds (JSON) <textarea aria-label="Thresholds JSON" value={advanced.thresholds} disabled={!canEditAdvanced} onChange={event=>setAdvancedField('thresholds',event.target.value)} /></label>
+        <label>Evidence (JSON) <textarea aria-label="Evidence JSON" value={advanced.evidence} disabled={!canEditAdvanced} onChange={event=>setAdvancedField('evidence',event.target.value)} /></label>
+        <label>Testdata (JSON) <textarea aria-label="Testdata JSON" value={advanced.testdata} disabled={!canEditAdvanced} onChange={event=>setAdvancedField('testdata',event.target.value)} /></label>
+        <label>Execution defaults (JSON) <textarea aria-label="Execution JSON" value={advanced.execution} disabled={!canEditAdvanced} onChange={event=>setAdvancedField('execution',event.target.value)} /></label>
+        <label>Seed <input type="number" aria-label="Seed" value={advanced.seed} disabled={!canEditAdvanced} onChange={event=>setAdvancedField('seed',event.target.value)} /></label>
       </fieldset>
     </>: schedule.debugTarget ? <><p>Changing the target clears its previous input bindings; validate the new target before saving.</p>
       <label>Target type <select value={runTarget.type} onChange={event=>{edit();setRunTarget(current=>({...current,type:event.target.value}));}}>{['template','flow','tool'].map(type=><option key={type}>{type}</option>)}</select></label>

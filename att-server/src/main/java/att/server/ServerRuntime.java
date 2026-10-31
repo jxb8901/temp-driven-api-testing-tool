@@ -3445,22 +3445,45 @@ final class ServerRuntime implements AutoCloseable {
                 view.put("savedScenarioId",schedule.savedScenarioId);view.put("savedScenarioRevision",schedule.savedScenarioRevision);
             }
         } catch(Exception unavailable) { /* provenance is private and optional */ }
-        if(detail && canDiscloseExecutionSettings(schedule,principal)) putExecutionSettings(view,schedule);
+        if(detail) {
+            boolean canEditAdvanced=canEditAdvancedSettings(schedule,principal);
+            view.put("canEditAdvancedSettings",Boolean.valueOf(canEditAdvanced));
+            if(canEditAdvanced) putExecutionSettings(view,schedule);
+        }
         return view;
     }
-    private static boolean canDiscloseExecutionSettings(LoadSchedule schedule,String principal) {
+    private static boolean canEditAdvancedSettings(LoadSchedule schedule,String principal) {
         if(principal==null || principal.isBlank()) return false;
         if(principal.equals(schedule.createdBy)) return true;
         return schedule.executionPrincipal!=null && !schedule.executionPrincipal.isBlank() && principal.equals(schedule.executionPrincipal);
     }
+    /** @deprecated use {@link #canEditAdvancedSettings}; kept as an alias for call sites that mean ownership. */
+    private static boolean canDiscloseExecutionSettings(LoadSchedule schedule,String principal) {
+        return canEditAdvancedSettings(schedule,principal);
+    }
     private static void putExecutionSettings(Map<String,Object> view,LoadSchedule schedule) {
-        if(schedule.inlineScenario==null) return;
         Map<String,Object> settings=new LinkedHashMap<>();
-        for(String field:List.of("thresholds","evidence","testdata","execution","seed")) {
-            Object value=schedule.inlineScenario.get(field);
-            if(value!=null)settings.put(field,value);
+        if(schedule.inlineScenario!=null) {
+            for(String field:List.of("thresholds","evidence","testdata","execution","seed")) {
+                Object value=schedule.inlineScenario.get(field);
+                if(value!=null)settings.put(field,value);
+            }
         }
-        if(!settings.isEmpty())view.put("executionSettings",settings);
+        view.put("executionSettings",settings);
+    }
+    private static void rejectUnauthorizedAdvancedOverrides(JsonNode overrides) {
+        if(overrides==null || !overrides.isObject()) return;
+        for(String field:List.of("thresholds","evidence","testdata","execution","seed")) {
+            if(overrides.has(field))throw new IllegalArgumentException("Advanced LOAD settings cannot be replaced without access to the retained values");
+        }
+        JsonNode workloads=overrides.get("workloads");
+        if(workloads==null || !workloads.isArray()) return;
+        for(JsonNode patch:workloads) {
+            if(patch==null || !patch.isObject()) continue;
+            for(String field:List.of("thresholds","evidence","testdata","execution","inputs","vars","mix")) {
+                if(patch.has(field))throw new IllegalArgumentException("Advanced LOAD settings cannot be replaced without access to the retained values");
+            }
+        }
     }
     Map<String,Object> loadScheduleView(LoadSchedule schedule) {
         Map<String,Object> view=JSON.convertValue(schedule,Map.class);
@@ -3577,11 +3600,7 @@ final class ServerRuntime implements AutoCloseable {
         if(input.has("packageEdit"))throw new IllegalArgumentException("Snapshot schedules cannot switch to a package source");
         if(source.expectedRevisionDigest==null)throw new IllegalArgumentException("This legacy schedule has no retained revision; create a new schedule");
         JsonNode overrides=input.get("overrides");
-        if("load".equals(source.effectiveJobType())&&overrides!=null&&overrides.isObject()&&!canDiscloseExecutionSettings(source,principal)) {
-            for(String field:List.of("thresholds","evidence","testdata","execution","seed")) {
-                if(overrides.has(field))throw new IllegalArgumentException("Advanced LOAD settings cannot be replaced without access to the retained values");
-            }
-        }
+        if("load".equals(source.effectiveJobType())&&!canEditAdvancedSettings(source,principal)) rejectUnauthorizedAdvancedOverrides(overrides);
         ObjectNode definition;
         if("run".equals(source.effectiveJobType())) {
             ObjectNode retained=JSON.valueToTree(source.runInput);retained.put("expectedRevisionDigest",source.expectedRevisionDigest);
