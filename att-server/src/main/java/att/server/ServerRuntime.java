@@ -794,11 +794,15 @@ final class ServerRuntime implements AutoCloseable {
             store.insert(job,summary,JobListIdentity.searchTargets(listDefinition));persisted=true;jobs.put(id,job);append(job,"status",Map.of("jobId",id,"status","QUEUED"));
             FutureTask<Void> task=new FutureTask<>(()->{execute(job,activeJobPath,lease);return null;});tasks.put(id,task);leases.put(id,lease);
             job.admittedNanos=System.nanoTime();
+            // Saved-revision submission holds the store monitor until admission is complete.
+            // Snapshot the queued response before the Worker can acquire the Job monitor and
+            // then wait for that store monitor while persisting its first transition.
+            Map<String,Object> acceptedView=job.view();
             try { workers.execute(task); }
             catch(java.util.concurrent.RejectedExecutionException full){throw new QueueFullException("Worker capacity is full; retry after a job completes");}
             handedOff=true;
             try{store.audit(principal,"SUBMIT",id,packageId,"ACCEPTED");}catch(Exception auditFailure){java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).warning("Unable to persist accepted job audit record");}
-            return job.view();
+            return acceptedView;
         } catch(Exception failure) {
             if(!handedOff){if(id!=null){FutureTask<Void> task=tasks.remove(id);if(task!=null)task.cancel(false);jobs.remove(id);leases.remove(id);if(persisted)try{store.deleteJob(id);}catch(Exception ignored){}if(jobPath!=null)try{deleteTree(jobPath);}catch(Exception ignored){}}
                 lease.release();if(failure instanceof QueueFullException)try{store.audit(principal,"SUBMIT",id,packageId,"REJECTED_QUEUE_FULL");}catch(Exception ignored){} }
