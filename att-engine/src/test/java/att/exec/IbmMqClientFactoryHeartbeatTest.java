@@ -26,9 +26,9 @@ class IbmMqClientFactoryHeartbeatTest {
         Probe broken = new Probe(false, inquiries);
         MqTransport.Exception failure = assertThrows(MqTransport.Exception.class,
                 () -> IbmMqClientFactory.validateManager(broken, null, 200L));
-        assertEquals(Integer.valueOf(2009), failure.reasonCode());
-        assertEquals(Integer.valueOf(2), failure.completionCode());
-        assertEquals("MQRC_CONNECTION_BROKEN", failure.reason());
+        assertEquals(null, failure.reasonCode());
+        assertEquals(null, failure.completionCode());
+        assertEquals("MQ_IDLE_NOT_CONNECTED", failure.reason());
         assertEquals(0, inquiries.get());
 
         Probe healthy = new Probe(true, inquiries);

@@ -168,13 +168,9 @@ public final class PooledMqTransportFactory implements MqTransport.Factory, Auto
                 catch (RuntimeException | Error problem) {
                     Map<String, Object> details = new LinkedHashMap<String, Object>(entry.pool.teardownDetails());
                     details.put("poolKey", item.getKey());
-                    long count = entry.pool.closeFailureCount()
-                            + count(details.get("residualCreating"))
-                            + count(details.get("residualClosing"))
-                            + count(details.get("residualValidating"))
-                            - entry.pool.disconnectStartFailureCount();
+                    long count = entry.pool.failedCloseCount();
                     LoadResourceTeardownException identified = new LoadResourceTeardownException("MQ", entry.logicalId,
-                            Math.max(1L, count), problem, details);
+                            count, problem, details);
                     if (failure == null) failure = identified;
                     else failure.addSuppressed(identified);
                 }
@@ -190,10 +186,6 @@ public final class PooledMqTransportFactory implements MqTransport.Factory, Auto
             pools.clear();
         }
         if (failure != null) throw new IllegalStateException("MQ_RESOURCE_TEARDOWN_FAILED", failure);
-    }
-
-    private static long count(Object value) {
-        return value instanceof Number ? Math.max(0L, ((Number) value).longValue()) : 0L;
     }
 
     private static final class PoolFactoryException extends RuntimeException {

@@ -240,7 +240,7 @@ public final class IbmMqClientFactory implements MqTransport.Factory {
             sawConnected = true;
             Object value = connected.invoke(manager);
             if (Boolean.FALSE.equals(value))
-                throw new MqTransport.Exception("MQRC_CONNECTION_BROKEN", Integer.valueOf(2), Integer.valueOf(2009), "MQRC_CONNECTION_BROKEN", null);
+                throw new MqTransport.Exception("MQ_IDLE_NOT_CONNECTED", null, null, "MQ_IDLE_NOT_CONNECTED", null);
         } catch (NoSuchMethodException ignored) {
             sawConnected = false;
         } catch (InvocationTargetException error) {

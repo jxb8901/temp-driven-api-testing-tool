@@ -276,7 +276,7 @@ public final class DefaultAttService implements AttService {
         Map<String,Object> retained=evidence.write(runDir);
         Map<String,Object> preflightResources=new LinkedHashMap<String,Object>(resourceMetrics);
         preflightResources.put("observation","PRE_TEARDOWN");
-        preflightResources.put("observationNote","PRE_TEARDOWN counters are sampled before disconnect. The failures field does not include cleanup disconnect failures. postTeardown is the separate confirmation sample.");
+        preflightResources.put("observationNote","PRE_TEARDOWN counters are sampled before disconnect. failures counts creation failures only. Idle-validation problems are validationFailures. Neither includes cleanup disconnect failures. cleanupFailuresIncluded is false. postTeardown is the separate confirmation sample.");
         Map<String,Object> postTeardown=resources.postTeardownMetrics();
         if(postTeardown!=null && !postTeardown.isEmpty()) preflightResources.put("postTeardown",postTeardown);
         preflightResources.put("preflight",longRunPreflight);

@@ -24,7 +24,7 @@ public final class LoadResourceTeardownException extends RuntimeException {
         }
         this.resourceType = resourceType;
         this.logicalId = safeLogicalId(logicalId);
-        this.failedCloseCount = Math.max(1L, Math.min(1000L, failedCloseCount));
+        this.failedCloseCount = Math.max(0L, Math.min(1000L, failedCloseCount));
         this.details = details == null || details.isEmpty()
                 ? Collections.<String, Object>emptyMap()
                 : Collections.unmodifiableMap(new LinkedHashMap<String, Object>(details));

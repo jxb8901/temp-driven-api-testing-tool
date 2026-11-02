@@ -37,7 +37,7 @@ final class LoadTeardownDiagnostics {
                 : http ? "HTTP_RESOURCE_TEARDOWN_FAILED" : "LOAD_RESOURCE_TEARDOWN_FAILED");
         result.put("phase", "TEARDOWN");
         result.put("resourceType", primaryType);
-        result.put("failedCloseCount", Math.max(1L, Math.min(1000L, total)));
+        result.put("failedCloseCount", Math.max(0L, Math.min(1000L, total)));
         result.put("summary", "LOAD resource teardown failed; collected execution metrics remain available where produced.");
         result.put("resources", resources);
         List<String> classes = new ArrayList<String>();
@@ -74,7 +74,7 @@ final class LoadTeardownDiagnostics {
         Map<String, Object> item = new LinkedHashMap<>();
         item.put("resourceType", type);
         if (logicalId != null) item.put("logicalId", logicalId);
-        item.put("failedCloseCount", Math.max(1L, Math.min(1000L, count)));
+        item.put("failedCloseCount", Math.max(0L, Math.min(1000L, count)));
         List<String> codes = new ArrayList<>();
         Long completion = null, reason = null;
         List<Throwable> pending = new ArrayList<>();

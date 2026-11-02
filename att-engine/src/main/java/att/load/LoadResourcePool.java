@@ -57,6 +57,8 @@ public final class LoadResourcePool<T> implements AutoCloseable {
     private final AtomicInteger recycled = new AtomicInteger();
     private final AtomicLong waitNanos = new AtomicLong();
     private final List<RuntimeException> closeFailures = Collections.synchronizedList(new ArrayList<RuntimeException>());
+    /** Validation workers close() can interrupt without interrupting a later disconnect. */
+    private final Set<Thread> validationWorkers = Collections.newSetFromMap(new IdentityHashMap<Thread, Boolean>());
     private final List<Map<String, Object>> healthEvents = new ArrayList<Map<String, Object>>();
     private int suppressedHealthEvents;
     private long lastHealthEventNanos;
@@ -355,6 +357,7 @@ public final class LoadResourcePool<T> implements AutoCloseable {
             try { idleValidator.validate(value, timeoutMs); }
             catch (Throwable failure) { error = failure; }
             synchronized (LoadResourcePool.this) {
+                validationWorkers.remove(Thread.currentThread());
                 if (session.validationHandled) {
                     validating = Math.max(0, validating - 1);
                     session.lastValidationOutcome = "TIMED_OUT";
@@ -375,10 +378,12 @@ public final class LoadResourcePool<T> implements AutoCloseable {
             if (closeAfter[0]) closeTracked(value);
         }, "att-load-resource-validate");
         worker.setDaemon(true);
+        synchronized (this) { validationWorkers.add(worker); }
         try { worker.start(); }
         catch (RuntimeException | Error failure) {
             boolean closeValue;
             synchronized (this) {
+                validationWorkers.remove(worker);
                 validating = Math.max(0, validating - 1);
                 session.validationHandled = true;
                 closeValue = queueClose(session);
@@ -471,6 +476,17 @@ public final class LoadResourcePool<T> implements AutoCloseable {
     public int closeFailureCount() { synchronized (closeFailures) { return closeFailures.size(); } }
     /** Start failures are also counted by {@link #closeFailureCount()} and stay in {@code closing}. */
     int disconnectStartFailureCount() { return disconnectStartFailures.get(); }
+
+    /**
+     * One unconfirmed connect or disconnect per physical session.
+     * A session frozen at the shutdown deadline stays one record when its closer finishes later.
+     * Idle validation that has not reached {@code disconnect()} is not included.
+     */
+    long failedCloseCount() {
+        long residuals;
+        synchronized (this) { residuals = (long) residualCreating + residualClosing; }
+        return Math.max(0L, closeFailureCount() - disconnectStartFailureCount() + residuals);
+    }
     public long waitDurationMs() { return TimeUnit.NANOSECONDS.toMillis(waitNanos.get()); }
 
     /** Records an externally observed queue-manager or network outage. This does not prove sessions were released. */
@@ -512,9 +528,9 @@ public final class LoadResourcePool<T> implements AutoCloseable {
         result.put("residualValidating", residualValidating);
         result.put("observation", closed ? "POST_TEARDOWN" : "PRE_TEARDOWN");
         result.put("observationNote", closed
-                ? "POST_TEARDOWN sample taken after disconnect attempts. It is separate from the pre-teardown resources.mq counters. Unconfirmed sessions remain quarantined."
-                : "PRE_TEARDOWN sample taken before disconnect. failures counts creation and validation problems only and does not include cleanup disconnect failures.");
-        result.put("cleanupFailuresIncluded", Boolean.valueOf(closed));
+                ? "POST_TEARDOWN sample taken after disconnect attempts. failures counts creation failures only. Idle-validation problems are validationFailures. Disconnect results are disconnectFailureCount and failureClass. cleanupFailuresIncluded is false because those results are not folded into failures."
+                : "PRE_TEARDOWN sample taken before disconnect. failures counts creation failures only. Idle-validation problems are validationFailures. Neither includes cleanup disconnect failures. cleanupFailuresIncluded is false.");
+        result.put("cleanupFailuresIncluded", Boolean.FALSE);
         Map<String, Object> policy = new LinkedHashMap<String, Object>();
         policy.put("staleIdleValidation", health.staleIdleValidation);
         policy.put("staleIdleThresholdMs", health.staleIdleThresholdMs);
@@ -601,18 +617,20 @@ public final class LoadResourcePool<T> implements AutoCloseable {
         boolean confirmed = false;
         Throwable failure = null;
         try { closer.accept(value); confirmed = true; }
-        catch (RuntimeException | Error error) {
-            failure = error;
-            closeFailures.add(new IllegalStateException("LOAD_RESOURCE_TEARDOWN_FAILED", error));
-        }
+        catch (RuntimeException | Error error) { failure = error; }
         synchronized (this) {
-            if (confirmed) {
+            if (session.deadlineFrozen) {
+                if (confirmed) total.decrementAndGet();
+                else attachLateFailure(session, failure);
+                remember(session);
+            } else if (confirmed) {
                 session.confirmation = "CONFIRMED_CLOSED";
                 session.state = "CONFIRMED_CLOSED";
                 session.failureClass = null;
                 remember(session);
                 total.decrementAndGet();
             } else {
+                closeFailures.add(new IllegalStateException("LOAD_RESOURCE_TEARDOWN_FAILED", failure));
                 classifyFailure(session, failure);
                 remember(session);
             }
@@ -640,6 +658,7 @@ public final class LoadResourcePool<T> implements AutoCloseable {
 
     @Override public void close() {
         List<T> values = new ArrayList<T>();
+        List<Thread> validators = new ArrayList<Thread>();
         long budgetMs = Math.max(borrowTimeoutMs, SHUTDOWN_WAIT_FLOOR_MS);
         long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(budgetMs);
         synchronized (this) {
@@ -657,9 +676,11 @@ public final class LoadResourcePool<T> implements AutoCloseable {
                     if (queueClose(session)) closable.add(value);
                 }
                 values = closable;
+                validators.addAll(validationWorkers);
                 notifyAll();
             } else values = Collections.emptyList();
         }
+        for (Thread validator : validators) validator.interrupt();
         for (T value : values) closeAsync(value);
         boolean interrupted = false;
         synchronized (this) {
@@ -674,7 +695,7 @@ public final class LoadResourcePool<T> implements AutoCloseable {
             if (creating > 0 || closing > 0 || validating > 0) stampResidualsLocked();
         }
         if (interrupted) Thread.currentThread().interrupt();
-        if (residualCreating > 0 || residualClosing > 0 || residualValidating > 0) {
+        if (residualCreating > 0 || residualClosing > 0) {
             IllegalStateException timeout = new IllegalStateException("LOAD_RESOURCE_TEARDOWN_TIMEOUT: outstanding physical reservations remain "
                     + "creating=" + residualCreating + " closing=" + residualClosing + " validating=" + residualValidating
                     + " total=" + total.get() + " failureClass=LOAD_RESOURCE_TEARDOWN_TIMEOUT snapshot=" + metrics());
@@ -691,6 +712,11 @@ public final class LoadResourcePool<T> implements AutoCloseable {
             }
             throw failure;
         }
+        if (residualValidating > 0) {
+            throw new IllegalStateException("MQ_IDLE_VALIDATION_INCOMPLETE: idle validation still running and disconnect was not attempted "
+                    + "validating=" + residualValidating + " total=" + total.get()
+                    + " failureClass=MQ_IDLE_VALIDATION_INCOMPLETE snapshot=" + metrics());
+        }
     }
 
     private void stampResidualsLocked() {
@@ -698,7 +724,13 @@ public final class LoadResourcePool<T> implements AutoCloseable {
         residualClosing = closing;
         residualValidating = validating;
         for (Session session : sessions.values()) {
-            if (!"CLOSING".equals(session.state) && !"VALIDATING".equals(session.state) && !"CREATED".equals(session.state)) continue;
+            if (session.deadlineFrozen) continue;
+            if ("VALIDATING".equals(session.state) && !session.closeQueued) {
+                if ("NOT_RUN".equals(session.lastValidationOutcome)) session.lastValidationOutcome = "TIMED_OUT";
+                continue;
+            }
+            if (!"CLOSING".equals(session.state) && !"CREATED".equals(session.state)) continue;
+            session.deadlineFrozen = true;
             if (session.failureClass == null) session.failureClass = "LOAD_RESOURCE_TEARDOWN_TIMEOUT";
             session.confirmation = "TIMED_OUT";
             session.state = "TIMED_OUT";
@@ -772,10 +804,34 @@ public final class LoadResourcePool<T> implements AutoCloseable {
             session.ownershipUncertain = true;
             return;
         }
-        if (invalidate) {
-            session.knownDead = true;
-            if (session.knownDeadCode == null) session.knownDeadCode = "INVALIDATED";
-        } else if (cause != null) session.ownershipUncertain = true;
+        if (!invalidate && cause == null) return;
+        if (session.exclusionCode == null) session.exclusionCode = "INVALIDATED";
+    }
+
+    /** Records IBM completion and reason on the timeout record without counting the session again. */
+    private void attachLateFailure(Session session, Throwable failure) {
+        session.disconnectFailures++;
+        observedDisconnectFailures++;
+        if (session.knownDeadBeforeDisconnect) knownDeadBeforeCount++;
+        MqTransport.Exception mq = findMq(failure);
+        if (mq != null) {
+            if (mq.completionCode() != null) session.mqCompletion = mq.completionCode();
+            if (mq.reasonCode() != null) session.mqReason = mq.reasonCode();
+            String reason = safeCode(mq.reason());
+            if (reason != null) session.failureCode = reason;
+            if (mq.connectionFailure()) session.knownDead = true;
+            else {
+                session.ownershipUncertain = true;
+                uncertainCloseCount++;
+            }
+        } else if (failure != null) {
+            session.ownershipUncertain = true;
+            uncertainCloseCount++;
+        }
+        String messageCode = leadingCode(failure);
+        if (session.failureCode == null) session.failureCode = messageCode;
+        if (messageCode != null) addCode(session, messageCode);
+        if (session.failureCode != null && !session.failureCode.equals(messageCode)) addCode(session, session.failureCode);
     }
 
     private void classifyFailure(Session session, Throwable failure) {
@@ -878,6 +934,7 @@ public final class LoadResourcePool<T> implements AutoCloseable {
         if (session.mqReason != null) row.put("mqReasonCode", session.mqReason);
         if (session.ownershipUncertain) row.put("ownershipUncertain", Boolean.TRUE);
         if (session.knownDeadCode != null) row.put("knownDeadCode", session.knownDeadCode);
+        if (session.exclusionCode != null) row.put("exclusionCode", session.exclusionCode);
         if (!session.codeCounts.isEmpty()) row.put("codeCounts", new LinkedHashMap<String, Integer>(session.codeCounts));
         if (session.disconnectFailures > 0) row.put("firstObserved", session.knownDeadBeforeDisconnect ? "BEFORE_TEARDOWN" : "TEARDOWN");
         else if (session.knownDead) row.put("firstObserved", "BEFORE_TEARDOWN");
@@ -971,6 +1028,8 @@ public final class LoadResourcePool<T> implements AutoCloseable {
         boolean discardCounted;
         boolean closeQueued;
         boolean closeInvoked;
+        boolean deadlineFrozen;
+        String exclusionCode;
         boolean validationFinished;
         boolean validationHandled;
         boolean remembered;

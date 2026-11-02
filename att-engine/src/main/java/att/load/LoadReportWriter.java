@@ -574,7 +574,7 @@ public final class LoadReportWriter {
     }
 
     private void appendResourceTable(StringBuilder html, Map<String, Object> resources) {
-        html.append("<section class=\"panel\"><h2>Resource and generator diagnostics</h2><p class=\"note\">Pool saturation and ATT generator pressure are reported separately from application/SUT failures. Credentials and live resource objects are never included. PRE_TEARDOWN counters are sampled before disconnect; the failures field does not include cleanup disconnect failures. POST_TEARDOWN is a separate confirmation sample, and an unconfirmed disconnect stays quarantined.</p>");
+        html.append("<section class=\"panel\"><h2>Resource and generator diagnostics</h2><p class=\"note\">Pool saturation and ATT generator pressure are reported separately from application/SUT failures. Credentials and live resource objects are never included. PRE_TEARDOWN counters are sampled before disconnect. failures counts creation failures only; idle-validation problems are validationFailures, and cleanupFailuresIncluded is false. POST_TEARDOWN is a separate confirmation sample, and an unconfirmed disconnect stays quarantined.</p>");
         if (resources == null || resources.isEmpty()) { html.append("<p class=\"empty\">No resource diagnostics were collected for this run.</p></section>"); return; }
         Object preparationValue = resources.get("preparation");
         if (preparationValue instanceof Map) {

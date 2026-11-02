@@ -2,7 +2,7 @@
 
 # ATT 4.2.8 - 2026-10-31
 
-- Diagnose broken idle MQ connections at LOAD teardown (MQRC 2009): keep the job ERROR, record per-physical-session confirmation separately from pre-teardown pool counters, and add optional idle validation, max-idle and max-lifetime recycling without an extra MQ call on the default borrow path (#329).
+- Diagnose broken idle MQ connections at LOAD teardown (MQRC 2009): keep the job ERROR, record per-physical-session confirmation separately from pre-teardown pool counters, and add optional idle validation, max-idle and max-lifetime recycling without an extra MQ call on the default borrow path. A disconnect that finishes after the shutdown wait stays one frozen timeout record; idle validation still running at shutdown is not counted as a failed disconnect (#329).
 - Improve MQ load pool capacity accounting and timeout diagnostics, including bounded async shutdown for stuck creates and disconnects with residual reservation reporting.
 - Add private saved load scenarios and versioned schedule execution reviews.
 - Complete schedule execution editing for environment, thresholds, evidence, testdata and related overrides; prefill retained advanced/RUN values for authorized editors only; refresh Server limits when reopening saved template scenarios; reopen API-authored saved scenarios in the Advanced Load editor.

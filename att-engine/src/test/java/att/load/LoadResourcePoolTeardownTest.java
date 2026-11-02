@@ -15,6 +15,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 
@@ -403,6 +404,177 @@ class LoadResourcePoolTeardownTest {
             pool.close();
         }
         assertEquals(0, pool.total());
+    }
+
+    @Test void lateConnectionBrokenAfterDeadlineCountsOnceAndKeepsTimeoutClass() throws Exception {
+        CountDownLatch entered = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        AtomicInteger closes = new AtomicInteger();
+        LoadResourcePool<Handle> pool = new LoadResourcePool<Handle>(1, 40L, () -> new Handle(1), value -> {
+            closes.incrementAndGet();
+            entered.countDown();
+            try { release.await(); }
+            catch (InterruptedException interrupted) { Thread.currentThread().interrupt(); }
+            throw disconnectFailed();
+        });
+        pool.ensureMinIdle(1);
+        IllegalStateException timeout = assertThrows(IllegalStateException.class, pool::close);
+        assertTrue(entered.await(1, TimeUnit.SECONDS));
+        assertTrue(timeout.getMessage().contains("LOAD_RESOURCE_TEARDOWN_TIMEOUT"), timeout.getMessage());
+        assertEquals(1, number(pool.metrics().get("residualClosing")));
+        assertEquals(1L, pool.failedCloseCount());
+        release.countDown();
+        awaitClosing(pool);
+        assertEquals(1, closes.get());
+        assertEquals(1L, pool.failedCloseCount());
+        assertEquals(1, pool.total());
+        Map<String, Object> metrics = pool.metrics();
+        assertEquals(1, number(metrics.get("disconnectAttemptCount")));
+        assertEquals(1, number(metrics.get("disconnectFailureCount")));
+        assertEquals("LOAD_RESOURCE_TEARDOWN_TIMEOUT", metrics.get("failureClass"));
+        assertFalse(String.valueOf(metrics.get("failureClassCounts")).contains("PHYSICAL_DISCONNECT_FAILED"));
+        Map<String, Object> session = onlySession(metrics);
+        assertEquals("TIMED_OUT", session.get("confirmationState"));
+        assertEquals("LOAD_RESOURCE_TEARDOWN_TIMEOUT", session.get("failureClass"));
+        assertEquals(2, number(session.get("mqCompletionCode")));
+        assertEquals(2009, number(session.get("mqReasonCode")));
+        assertEquals(Boolean.FALSE, metrics.get("cleanupFailuresIncluded"));
+    }
+
+    @Test void lateSuccessfulDisconnectAfterDeadlineStillCountsOneFrozenTimeout() throws Exception {
+        CountDownLatch entered = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        AtomicInteger closes = new AtomicInteger();
+        LoadResourcePool<Handle> pool = new LoadResourcePool<Handle>(1, 40L, () -> new Handle(1), value -> {
+            closes.incrementAndGet();
+            entered.countDown();
+            try { release.await(); }
+            catch (InterruptedException interrupted) { Thread.currentThread().interrupt(); }
+        });
+        pool.ensureMinIdle(1);
+        IllegalStateException timeout = assertThrows(IllegalStateException.class, pool::close);
+        assertTrue(entered.await(1, TimeUnit.SECONDS));
+        assertTrue(timeout.getMessage().contains("LOAD_RESOURCE_TEARDOWN_TIMEOUT"), timeout.getMessage());
+        release.countDown();
+        awaitClosing(pool);
+        assertEquals(1, closes.get());
+        assertEquals(0, pool.total());
+        assertEquals(1L, pool.failedCloseCount());
+        Map<String, Object> metrics = pool.metrics();
+        assertEquals(1, number(metrics.get("disconnectAttemptCount")));
+        assertEquals(0, number(metrics.get("disconnectFailureCount")));
+        assertEquals("LOAD_RESOURCE_TEARDOWN_TIMEOUT", failureClass(metrics));
+        Map<String, Object> session = onlySession(metrics);
+        assertEquals("TIMED_OUT", session.get("confirmationState"));
+        assertEquals("LOAD_RESOURCE_TEARDOWN_TIMEOUT", session.get("failureClass"));
+        assertEquals("NOT_APPLIED", metrics.get("safeCloseClassification"));
+    }
+
+    @Test void closeInterruptsIdleValidationBeforeDisconnect() throws Exception {
+        CountDownLatch started = new CountDownLatch(1);
+        AtomicInteger closes = new AtomicInteger();
+        AtomicBoolean sawInterrupt = new AtomicBoolean();
+        LoadResourcePool.IdleValidator<Handle> validator = new LoadResourcePool.IdleValidator<Handle>() {
+            @Override public void validate(Handle value, long timeoutMs) throws Exception {
+                started.countDown();
+                try { new CountDownLatch(1).await(); }
+                catch (InterruptedException interrupted) {
+                    sawInterrupt.set(true);
+                    Thread.currentThread().interrupt();
+                }
+            }
+        };
+        LoadResourcePool<Handle> pool = new LoadResourcePool<Handle>(1, 2_000L, () -> new Handle(1),
+                value -> closes.incrementAndGet(),
+                LoadResourcePool.Health.from(new MqPoolLifecycle(true, 0L, 5_000L, 0L, 0L, 0)), validator);
+        pool.ensureMinIdle(1);
+        ExecutorService workers = Executors.newSingleThreadExecutor();
+        try {
+            Future<?> borrower = workers.submit(new Runnable() {
+                @Override public void run() {
+                    try { pool.borrow(); }
+                    catch (Exception ignored) { }
+                }
+            });
+            assertTrue(started.await(1, TimeUnit.SECONDS));
+            long began = System.nanoTime();
+            pool.close();
+            long elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - began);
+            assertTrue(sawInterrupt.get());
+            assertEquals(1, closes.get());
+            assertEquals(0L, pool.failedCloseCount());
+            assertTrue(elapsedMs < 4_000L, "elapsedMs=" + elapsedMs);
+            borrower.get(2, TimeUnit.SECONDS);
+        } finally {
+            workers.shutdownNow();
+        }
+    }
+
+    @Test void validationStillRunningAtShutdownIsNotADisconnectTimeout() throws Exception {
+        CountDownLatch started = new CountDownLatch(1);
+        AtomicBoolean release = new AtomicBoolean();
+        AtomicInteger closes = new AtomicInteger();
+        LoadResourcePool.IdleValidator<Handle> validator = new LoadResourcePool.IdleValidator<Handle>() {
+            @Override public void validate(Handle value, long timeoutMs) {
+                started.countDown();
+                while (!release.get()) {
+                    try { Thread.sleep(20L); }
+                    catch (InterruptedException interrupted) { Thread.currentThread().interrupt(); }
+                }
+            }
+        };
+        LoadResourcePool<Handle> pool = new LoadResourcePool<Handle>(1, 500L, () -> new Handle(1),
+                value -> closes.incrementAndGet(),
+                LoadResourcePool.Health.from(new MqPoolLifecycle(true, 0L, 50L, 0L, 0L, 0)), validator);
+        pool.ensureMinIdle(1);
+        ExecutorService workers = Executors.newSingleThreadExecutor();
+        try {
+            workers.submit(new Runnable() {
+                @Override public void run() {
+                    try { pool.borrow(); }
+                    catch (Exception ignored) { }
+                }
+            });
+            assertTrue(started.await(1, TimeUnit.SECONDS));
+            long began = System.nanoTime();
+            IllegalStateException incomplete = assertThrows(IllegalStateException.class, pool::close);
+            long elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - began);
+            assertTrue(incomplete.getMessage().startsWith("MQ_IDLE_VALIDATION_INCOMPLETE"), incomplete.getMessage());
+            assertFalse(incomplete.getMessage().contains("LOAD_RESOURCE_TEARDOWN_TIMEOUT"), incomplete.getMessage());
+            assertTrue(elapsedMs < 15_000L, "elapsedMs=" + elapsedMs);
+            assertEquals(0, closes.get());
+            assertEquals(0L, pool.failedCloseCount());
+            assertEquals(1, number(pool.metrics().get("residualValidating")));
+            Map<String, Object> session = onlySession(pool.metrics());
+            assertEquals(null, session.get("failureClass"));
+            assertEquals("VALIDATING", session.get("confirmationState"));
+        } finally {
+            release.set(true);
+            workers.shutdownNow();
+        }
+    }
+
+    @Test void cancellationStaysOutOfIdleWithoutMarkingKnownDead() throws Exception {
+        AtomicInteger closes = new AtomicInteger();
+        LoadResourcePool<Handle> pool = pool(1, 80L, closes, true);
+        try (LoadResourcePool<Handle>.Lease lease = pool.borrow()) { lease.invalidate(); }
+        assertEquals(1, closes.get());
+        assertThrows(LoadResourcePool.PoolTimeoutException.class, pool::borrow);
+        assertThrows(IllegalStateException.class, pool::close);
+        assertEquals(1, closes.get());
+        Map<String, Object> metrics = pool.metrics();
+        assertEquals(Boolean.FALSE, metrics.get("knownDeadBeforeTeardown"));
+        Map<String, Object> session = onlySession(metrics);
+        assertEquals(Boolean.FALSE, session.get("knownDeadBeforeTeardown"));
+        assertEquals("INVALIDATED", session.get("exclusionCode"));
+        assertEquals("TEARDOWN", session.get("firstObserved"));
+        assertEquals(2009, number(session.get("mqReasonCode")));
+    }
+
+    private static void awaitClosing(LoadResourcePool<Handle> pool) throws InterruptedException {
+        long until = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
+        while (number(pool.metrics().get("closing")) > 0 && System.nanoTime() < until) Thread.yield();
+        assertEquals(0, number(pool.metrics().get("closing")));
     }
 
     private static LoadResourcePool<Handle> pool(int maxSize, long timeoutMs, final AtomicInteger closes, final boolean fail) {
