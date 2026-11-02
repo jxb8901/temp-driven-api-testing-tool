@@ -249,13 +249,15 @@ public final class MqHelperConfigLoader {
         int poolMaxSize = integer(pool.get("maxSize"), 20, 1, 10000, "mqhelper.instances[" + instanceId + "].pool.maxSize");
         int poolMinIdle = integer(pool.get("minIdle"), 0, 0, poolMaxSize, "mqhelper.instances[" + instanceId + "].pool.minIdle");
         long borrowTimeout = durationMs(pool.get("borrowTimeout"), 2000L, "mqhelper.instances[" + instanceId + "].pool.borrowTimeout");
+        MqPoolLifecycle lifecycle = poolLifecycle(pool, "mqhelper.instances[" + instanceId + "].pool");
         MqHelperConfig flat = new MqHelperConfig(instanceId, name, description, queueManager, host, port, channel,
                 username, password, charset, encoding, expiry, format, persistence, requestQueue, replyQueue,
                 transport, waitMs, responseFormat, payload, poolMaxSize, poolMinIdle, borrowTimeout, maxResponseBytes, file);
         List<String> queues = requestQueues(message, "mqhelper.instances[" + instanceId + "].message");
         Map<?, ?> routing = optionalMap(message.get("requestQueueSelection"), "message.requestQueueSelection");
         String queueStrategy = choice(routing.get("strategy"), "single", "message.requestQueueSelection.strategy", "single", "roundRobin", "random");
-        return MqHelperConfig.physical(flat.withRequestQueueRouting(queues, queueStrategy), logicalId, instanceId);
+        return MqHelperConfig.physical(flat.withRequestQueueRouting(queues, queueStrategy), logicalId, instanceId)
+                .withPoolLifecycle(lifecycle);
     }
 
     private void requireSupportedVersion(Map<?, ?> map) {
@@ -352,10 +354,52 @@ public final class MqHelperConfigLoader {
     }
 
     private void validatePoolFields(Map<?, ?> pool, String owner) {
-        SchemaSupport.rejectUnknown(pool, owner, "maxSize", "minIdle", "borrowTimeout");
+        SchemaSupport.rejectUnknown(pool, owner, "maxSize", "minIdle", "borrowTimeout",
+                "maxIdle", "maxLifetime", "staleIdleValidation", "staleIdleThreshold", "validationTimeout", "heartbeatInterval");
         if (pool.get("maxSize") != null) integer(pool.get("maxSize"), 0, 1, 10000, owner + ".maxSize");
         if (pool.get("minIdle") != null) integer(pool.get("minIdle"), 0, 0, 10000, owner + ".minIdle");
         if (pool.get("borrowTimeout") != null) durationMs(pool.get("borrowTimeout"), 2000L, owner + ".borrowTimeout");
+        poolLifecycle(pool, owner);
+    }
+
+    private MqPoolLifecycle poolLifecycle(Map<?, ?> pool, String owner) {
+        boolean validate = bool(pool.get("staleIdleValidation"), false, owner + ".staleIdleValidation");
+        long threshold = boundedDuration(pool.get("staleIdleThreshold"), validate ? 60_000L : 60_000L, owner + ".staleIdleThreshold");
+        long validationTimeout = boundedDuration(pool.get("validationTimeout"), 200L, owner + ".validationTimeout");
+        if (pool.get("validationTimeout") != null && (validationTimeout < 1L || validationTimeout > 5_000L))
+            throw new IllegalArgumentException(owner + ".validationTimeout must be from 1ms to 5000ms");
+        if (pool.get("validationTimeout") == null) validationTimeout = 200L;
+        long maxIdle = boundedDuration(pool.get("maxIdle"), 0L, owner + ".maxIdle");
+        long maxLifetime = boundedDuration(pool.get("maxLifetime"), 0L, owner + ".maxLifetime");
+        int heartbeat = heartbeatSeconds(pool.get("heartbeatInterval"), owner + ".heartbeatInterval");
+        return new MqPoolLifecycle(validate, threshold, validationTimeout, maxIdle, maxLifetime, heartbeat);
+    }
+
+    private long boundedDuration(Object value, long fallback, String owner) {
+        long duration = durationMs(value, fallback, owner);
+        if (duration < 0L || duration > 864_000_000L)
+            throw new IllegalArgumentException(owner + " must be from 0ms to 864000000ms");
+        return duration;
+    }
+
+    private int heartbeatSeconds(Object value, String owner) {
+        if (value == null) return 0;
+        long seconds;
+        if (value instanceof Number) seconds = ((Number) value).longValue();
+        else {
+            long millis = durationMs(value, 0L, owner);
+            if (millis % 1000L != 0L) throw new IllegalArgumentException(owner + " must be a whole number of seconds");
+            seconds = millis / 1000L;
+        }
+        if (seconds < 0L || seconds > 999_999L)
+            throw new IllegalArgumentException(owner + " must be from 0 to 999999 seconds");
+        return (int) seconds;
+    }
+
+    private boolean bool(Object value, boolean fallback, String owner) {
+        if (value == null) return fallback;
+        if (value instanceof Boolean) return ((Boolean) value).booleanValue();
+        throw new IllegalArgumentException(owner + " must be a boolean");
     }
 
     private Map<?, ?> optionalMap(Object value, String owner) {

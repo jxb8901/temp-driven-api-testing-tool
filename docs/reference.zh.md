@@ -1479,7 +1479,7 @@ Closed workload 會在 iteration 同步執行時保留配置的 virtual user 數
 
 DB workload 可用相同估算，將 DB operations/second 乘以 connection lease 平均時間（connection 借出後仍被使用的時間）。例如每秒 40 次 operation、平均 lease 100 ms，約需四條 concurrent connection。每個 DB helper 的 `pool.maxSize` 可按此 concurrency 加上 headroom 設定，再查看其 `resources.db` active/idle/waiting、borrow timeout 及 total borrow wait metrics。每個 helper 預設 maximum 為 20；這是 client-side 上限，並非建議的目標 database 容量。
 
-MQ request/reply 若每秒 10 個 request、平均 reply time 為 3 秒，整個 workload 約需 30 條 leased connection。`pool.maxSize` 應按每個**實體 MQ instance** 的預期 in-flight request 數 sizing，而非按 logical helper。單一 instance（或 request 固定送往一個 instance）約需 30 條再加 headroom。兩個平均分配的 instance 平均各需約 15 條；亦要考慮 selection skew 並確認實際分佈。`resources.mq` 按實體 instance 顯示 pool metrics，請逐一查看 waiting、timeout 及 response latency。`minIdle` 會在該實體 pool 首次被使用並建立時套用，不會在 Load 開始前建立或預熱 pool。若要避免 connection creation 影響 measured steady state，請配合 Load warm-up / first-use warm-up phase 使用 `minIdle`。負載變化時，請依觀察到的平均 latency 重新估算；tail latency 可用於 headroom 規劃，但不是公式中的平均值。
+MQ request/reply 若每秒 10 個 request、平均 reply time 為 3 秒，整個 workload 約需 30 條 leased connection。`pool.maxSize` 應按每個**實體 MQ instance** 的預期 in-flight request 數 sizing，而非按 logical helper。單一 instance（或 request 固定送往一個 instance）約需 30 條再加 headroom。兩個平均分配的 instance 平均各需約 15 條；亦要考慮 selection skew 並確認實際分佈。`resources.mq` 按實體 instance（`logicalId::instanceId`）顯示 PRE_TEARDOWN pool metrics，請逐一查看 waiting、timeout 及 response latency。Disconnect 確認是另一份 `resources.postTeardown` 樣本；見 [閒置 MQ 連線與 teardown](reference.zh/resources/mqhelper.md#閒置-mq-連線與-teardown)。`minIdle` 會在該實體 pool 首次被使用並建立時套用，不會在 Load 開始前建立或預熱 pool。若要避免 connection creation 影響 measured steady state，請配合 Load warm-up / first-use warm-up phase 使用 `minIdle`。負載變化時，請依觀察到的平均 latency 重新估算；tail latency 可用於 headroom 規劃，但不是公式中的平均值。
 
 duration 必填。rampUp、warmup、rampDown 預設為零。執行順序為 Ramp-up → Warm-up → Steady → Ramp-down，然後進入 DRAIN，等待已 admitted work 完成而不再排程新 arrival：Ramp-up 由零增加至設定目標，Warm-up 維持完整目標，Steady 結束後 Ramp-down 逐步降低流量。Ramp-up 與 Warm-up 都會送出真實 traffic，但不納入 measured metrics 及 threshold denominator；measured load 為 Steady + Ramp-down。例如 100/s 目標、Ramp-up 60s、Warm-up 60s、Steady 180s、Ramp-down 60s，分別排定 3,000 + 6,000 + 18,000 + 3,000 = 30,000 次 arrival。既有儲存描述會保留原值與歷史；重新執行時採用新順序，不會重現舊 phase timing。可選 seed 使 closed-VU think-time randomization 可重複。
 
@@ -2044,13 +2044,27 @@ MQ reply 上限為 10 MiB。IBM MQ adapter 會在讀取前設定 message receive
 | `connection` | effective fields required | queue manager, host, port and channel as required by transport; port 1–65535; optional username/password |
 | `message` | defaults | CCSID 1208; `format` supports MQSTR/MQHRF2/MQFMT_STRING/MQFMT_NONE/NONE or empty; persistence supports asQueue/persistent/notPersistent/nonPersistent or 0–2 |
 | `requestReply` | defaults | `waitMs` 10000, range 0–3600000; `responseFormat` controls receive/request parsing; `maxResponseBytes` defaults to 10485760 and accepts 1–1073741824 |
-| `pool` | defaults | maxSize 20 (1–10000), minIdle 0 (not above maxSize), borrowTimeout 2s |
+| `pool` | defaults | maxSize 20（1–10000），minIdle 0（不可大於 maxSize），borrowTimeout 2s。`att-mqhelper/v1.3` 可選生命週期欄位預設關閉：`maxIdle`、`maxLifetime`、`staleIdleValidation`、`staleIdleThreshold`（60s）、`validationTimeout`（200ms，1–5000ms）、`heartbeatInterval`（0） |
 | `selection.strategy` | descriptor policy | `random` or `roundRobin` |
 | `evidence` | policy | `payload: none|metadata`; raw payload bytes are not structured evidence; optional `output` is human presentation |
 
 Connection credentials may be complete `${ENV:NAME}` references. Resolved secrets do not enter metadata, diagnostics or Case evidence. Queue names are non-blank, at most 48 characters, and use IBM MQ queue-name characters. Logical helper and physical instance IDs are resolved case-insensitively; duplicate IDs and descriptor paths fail validation.
 
 The machine-readable field constraints remain in [the active MQ schema](../schemas/att-mqhelper-v1.3.schema.json).
+
+##### 閒置 MQ 連線與 teardown
+
+LOAD pool key 是 `logicalId::instanceId`（例如 `fromeaimqhk::mq01`）。Teardown 診斷使用單冒號 `fromeaimqhk:mq01`。兩者指同一個實體 pool。`fromeaimqhk::mq01` 的失敗不會歸到 `fromeaimqcb::mq01` 或 `toeaimq::hk02`。
+
+`resources.mq` 是 disconnect 之前的 PRE_TEARDOWN 樣本。其中 `failures` 只計算建立連線與 idle validation 的問題。`failures: 0` 且 `idle: 2` 不代表 disconnect 已成功。`resources.postTeardown` 是 disconnect 嘗試之後的另一份確認樣本。未確認的 session 會隔離：容量繼續佔用、連線不會再被借出，MQRC 2009 也不能證明 queue manager 已釋放該 session。Job 維持 ERROR。
+
+`PHYSICAL_DISCONNECT_FAILED` 表示 disconnect 已返回或拋出錯誤。`LOAD_RESOURCE_TEARDOWN_TIMEOUT` 表示關閉等待結束時（`max(borrowTimeout, 5s)`）connect 或 disconnect 仍在執行。Validation timeout 不是這兩個分類：該連線不會再被提供；若之後 disconnect 回 2009，仍是 disconnect 失敗。
+
+最終 disconnect 的 reason 2009 不能說明 socket 何時失效。請用失敗時間對照 queue manager、channel、client 與 network 日誌。2026-10-30 開始、於 2026-11-01 10:52:35Z 結束的那次執行，當地時間是 2026-11-01 18:52:35 HKT（UTC+8）。行程結束不能證明 MQ 已正常斷線。
+
+預設 borrow 路徑不會呼叫 MQ。只有在 `staleIdleValidation` 為 true，且 idle 時間達到 `staleIdleThreshold` 時，才會呼叫 IBM `isConnected()`；若 client 提供 `inquire`，接著查詢 `MQIA_PLATFORM`。這不是業務 put/get。`staleIdleThreshold: 0` 會在每次借用 idle 連線時都做檢查。Client 沒有這些方法時記為 unsupported，連線仍會被提供。`maxIdle` 與 `maxLifetime` 會關閉並回收 idle 連線；`0` 表示停用該限制。ATT 不會自動重試業務呼叫。
+
+`pool.heartbeatInterval` 只有在 `com.ibm.mq.constants.MQConstants` 真的提供 `HEARTBEAT_INTERVAL_PROPERTY` 且值大於 0 時才會套用。IBM MQ classes for Java 9.4 沒有這個連線屬性，因此該設定不會覆寫該 client 的 SVRCONN channel HBINT。`0` 不會設定任何 client 屬性。若 idle session 被防火牆切斷，請把 channel HBINT 設得短於防火牆的 idle timeout。TCP keepalive 屬於作業系統與 IBM client（`com.ibm.mq.cfg.TCP.KeepAlive`、channel KAINT），ATT 不會啟用它。只有在成功的 disconnect 確實需要更長時間時才提高 `borrowTimeout`；卡住的 disconnect 仍是 `LOAD_RESOURCE_TEARDOWN_TIMEOUT`，並維持隔離。
 
 DB/MQ/HTTP 共用 `evidence.output: {format: json, maxChars: 10000}` presentation policy；支援 `text`、`json`、`yaml`、`xml`、`sqlplus`，後者要求 DB query/update result。`maxChars` 預設 10000，範圍 1–1000000；formatted text 先遮蔽 credential，再按字元確定性截斷，並保留 `format`／`text`／`truncated`。Formatting failure 只寫入有界 `outputError`，不改變 typed `output.result` 或 operation status。Run/Debug 的正常 resource invocation 自動將 snapshot 寫入 Action evidence 和 Case log，不需要額外 Log Action；SQL、parameter、MQ payload metadata、HTTP status/header 等 diagnostics 維持各自契約。Load 不會在每個 iteration 立即 stringify；僅 retained iteration 在 `resource-output.yaml` materialize，`evidence.resources.output: none` 完全跳過。Credential 不會因 presentation 被新增到 evidence。
 
@@ -3524,6 +3538,8 @@ Deterministic legacy alias 在可一對一映射時可以保留並產生 migrati
 
 
 ### MQ request queue 路由
+
+可選的 pool 生命週期欄位（`maxIdle`、`maxLifetime`、`staleIdleValidation`、`staleIdleThreshold`、`validationTimeout`、`heartbeatInterval`）必須使用 `att-mqhelper/v1.3`。v1.2 descriptor 若加入這些欄位，schema 驗證會失敗。省略它們會保留原本的 borrow 路徑：不做 idle validation、不依 max-idle 或 max-lifetime 回收，也不設定 client heartbeat property。
 
 `att-mqhelper/v1.2` scalar descriptor 仍受支援。使用 `message.requestQueues` 或 `requestQueueSelection` 時，須改為 `att-mqhelper/v1.3`，並以 1–256 項不重複 queue 清單取代 scalar `requestQueue`；`replyQueue` 維持單一可選 scalar。Instance 路由覆寫會取代繼承的 scalar／清單，未明確指定 strategy 時重設 queue strategy。Queue selection、counter 範圍、evidence 及 replay 行為見 [MQHelper](reference.zh/resources/mqhelper.md#request-queue-路由)。
 

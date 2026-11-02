@@ -7,6 +7,8 @@ Use `att-load/v1.7` for finite Load evidence quotas. Legacy scenarios with `maxS
 
 ## MQ request queue routing
 
+Optional pool lifecycle keys (`maxIdle`, `maxLifetime`, `staleIdleValidation`, `staleIdleThreshold`, `validationTimeout`, `heartbeatInterval`) require `att-mqhelper/v1.3`. A v1.2 descriptor that adds them fails schema validation. Omitting them preserves the previous borrow path: no idle validation, no max-idle or max-lifetime recycling, and no client heartbeat property.
+
 `att-mqhelper/v1.2` scalar descriptors remain supported. To use `message.requestQueues` or `requestQueueSelection`, change the descriptor to `att-mqhelper/v1.3` and replace the scalar `requestQueue` with a 1–256-item unique queue list. Keep one optional scalar `replyQueue`. Instance routing overrides replace inherited scalar/list keys and reset the queue strategy unless explicitly configured. See [MQHelper](../resources/mqhelper.md#request-queue-routing) for queue selection, counter scope, evidence and replay behavior.
 
 

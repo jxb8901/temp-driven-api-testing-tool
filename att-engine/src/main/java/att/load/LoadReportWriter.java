@@ -574,7 +574,7 @@ public final class LoadReportWriter {
     }
 
     private void appendResourceTable(StringBuilder html, Map<String, Object> resources) {
-        html.append("<section class=\"panel\"><h2>Resource and generator diagnostics</h2><p class=\"note\">Pool saturation and ATT generator pressure are reported separately from application/SUT failures. Credentials and live resource objects are never included.</p>");
+        html.append("<section class=\"panel\"><h2>Resource and generator diagnostics</h2><p class=\"note\">Pool saturation and ATT generator pressure are reported separately from application/SUT failures. Credentials and live resource objects are never included. PRE_TEARDOWN counters are sampled before disconnect; the failures field does not include cleanup disconnect failures. POST_TEARDOWN is a separate confirmation sample, and an unconfirmed disconnect stays quarantined.</p>");
         if (resources == null || resources.isEmpty()) { html.append("<p class=\"empty\">No resource diagnostics were collected for this run.</p></section>"); return; }
         Object preparationValue = resources.get("preparation");
         if (preparationValue instanceof Map) {
@@ -606,9 +606,11 @@ public final class LoadReportWriter {
                 html.append("</tbody></table></div>");
             }
         }
+        Object postTeardown = resources.get("postTeardown");
+        if (postTeardown instanceof Map) appendPostTeardown(html, (Map<?, ?>) postTeardown);
         html.append("<div class=\"scroll\"><table><thead><tr><th>Resource</th><th>Helper</th><th>Metric</th><th>Value</th></tr></thead><tbody>");
         for (Map.Entry<String, Object> resource : resources.entrySet()) {
-            if (!(resource.getValue() instanceof Map)) continue;
+            if ("postTeardown".equals(resource.getKey()) || !(resource.getValue() instanceof Map)) continue;
             Map<?, ?> helpers = (Map<?, ?>) resource.getValue();
             if (helpers.isEmpty()) { html.append("<tr><td>").append(escape(resource.getKey())).append("</td><td colspan=\"3\">none opened</td></tr>"); continue; }
             for (Map.Entry<?, ?> helper : helpers.entrySet()) {
@@ -621,6 +623,43 @@ public final class LoadReportWriter {
             }
         }
         html.append("</tbody></table></div></section>");
+    }
+
+    private void appendPostTeardown(StringBuilder html, Map<?, ?> postTeardown) {
+        html.append("<h3>POST_TEARDOWN confirmation</h3><p class=\"note\">This sample is separate from the PRE_TEARDOWN resource counters below. It records disconnect attempts after business iterations finished. Reason 2009 does not prove that the queue manager released the session.</p>");
+        Object pools = postTeardown.get("mq");
+        if (!(pools instanceof Map) || ((Map<?, ?>) pools).isEmpty()) {
+            html.append("<p class=\"empty\">No MQ post-teardown sample was recorded.</p>");
+            return;
+        }
+        html.append("<div class=\"scroll\"><table><thead><tr><th>Pool key</th><th>Observation</th><th>Disconnect attempts</th><th>Disconnect failures</th><th>Failure classes</th><th>Safe close</th><th>Physical sessions</th></tr></thead><tbody>");
+        for (Map.Entry<?, ?> entry : ((Map<?, ?>) pools).entrySet()) {
+            if (!(entry.getValue() instanceof Map)) continue;
+            Map<?, ?> pool = (Map<?, ?>) entry.getValue();
+            html.append("<tr><td>").append(escape(String.valueOf(entry.getKey()))).append("</td><td>")
+                    .append(escape(String.valueOf(pool.get("observation")))).append("</td><td>")
+                    .append(display(pool.get("disconnectAttemptCount"))).append("</td><td>")
+                    .append(display(pool.get("disconnectFailureCount"))).append("</td><td>")
+                    .append(escape(display(pool.get("failureClassCounts")))).append("</td><td>")
+                    .append(escape(String.valueOf(pool.get("safeCloseClassification")))).append("</td><td>")
+                    .append(escape(physicalIds(pool.get("physicalSessions")))).append("</td></tr>");
+        }
+        html.append("</tbody></table></div>");
+    }
+
+    private static String physicalIds(Object value) {
+        if (!(value instanceof List)) return "";
+        StringBuilder ids = new StringBuilder();
+        int count = 0;
+        for (Object row : (List<?>) value) {
+            if (!(row instanceof Map) || count >= 8) continue;
+            Object id = ((Map<?, ?>) row).get("physicalId");
+            if (!(id instanceof String) || !((String) id).matches("p[0-9]{1,6}")) continue;
+            if (count > 0) ids.append(", ");
+            ids.append(id);
+            count++;
+        }
+        return ids.toString();
     }
 
     @SuppressWarnings("unchecked")

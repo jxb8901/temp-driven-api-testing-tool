@@ -99,13 +99,27 @@ MQ reply 上限為 10 MiB。IBM MQ adapter 會在讀取前設定 message receive
 | `connection` | effective fields required | queue manager, host, port and channel as required by transport; port 1–65535; optional username/password |
 | `message` | defaults | CCSID 1208; `format` supports MQSTR/MQHRF2/MQFMT_STRING/MQFMT_NONE/NONE or empty; persistence supports asQueue/persistent/notPersistent/nonPersistent or 0–2 |
 | `requestReply` | defaults | `waitMs` 10000, range 0–3600000; `responseFormat` controls receive/request parsing; `maxResponseBytes` defaults to 10485760 and accepts 1–1073741824 |
-| `pool` | defaults | maxSize 20 (1–10000), minIdle 0 (not above maxSize), borrowTimeout 2s |
+| `pool` | defaults | maxSize 20（1–10000），minIdle 0（不可大於 maxSize），borrowTimeout 2s。`att-mqhelper/v1.3` 可選生命週期欄位預設關閉：`maxIdle`、`maxLifetime`、`staleIdleValidation`、`staleIdleThreshold`（60s）、`validationTimeout`（200ms，1–5000ms）、`heartbeatInterval`（0） |
 | `selection.strategy` | descriptor policy | `random` or `roundRobin` |
 | `evidence` | policy | `payload: none|metadata`; raw payload bytes are not structured evidence; optional `output` is human presentation |
 
 Connection credentials may be complete `${ENV:NAME}` references. Resolved secrets do not enter metadata, diagnostics or Case evidence. Queue names are non-blank, at most 48 characters, and use IBM MQ queue-name characters. Logical helper and physical instance IDs are resolved case-insensitively; duplicate IDs and descriptor paths fail validation.
 
 The machine-readable field constraints remain in [the active MQ schema](../../../schemas/att-mqhelper-v1.3.schema.json).
+
+### 閒置 MQ 連線與 teardown
+
+LOAD pool key 是 `logicalId::instanceId`（例如 `fromeaimqhk::mq01`）。Teardown 診斷使用單冒號 `fromeaimqhk:mq01`。兩者指同一個實體 pool。`fromeaimqhk::mq01` 的失敗不會歸到 `fromeaimqcb::mq01` 或 `toeaimq::hk02`。
+
+`resources.mq` 是 disconnect 之前的 PRE_TEARDOWN 樣本。其中 `failures` 只計算建立連線與 idle validation 的問題。`failures: 0` 且 `idle: 2` 不代表 disconnect 已成功。`resources.postTeardown` 是 disconnect 嘗試之後的另一份確認樣本。未確認的 session 會隔離：容量繼續佔用、連線不會再被借出，MQRC 2009 也不能證明 queue manager 已釋放該 session。Job 維持 ERROR。
+
+`PHYSICAL_DISCONNECT_FAILED` 表示 disconnect 已返回或拋出錯誤。`LOAD_RESOURCE_TEARDOWN_TIMEOUT` 表示關閉等待結束時（`max(borrowTimeout, 5s)`）connect 或 disconnect 仍在執行。Validation timeout 不是這兩個分類：該連線不會再被提供；若之後 disconnect 回 2009，仍是 disconnect 失敗。
+
+最終 disconnect 的 reason 2009 不能說明 socket 何時失效。請用失敗時間對照 queue manager、channel、client 與 network 日誌。2026-10-30 開始、於 2026-11-01 10:52:35Z 結束的那次執行，當地時間是 2026-11-01 18:52:35 HKT（UTC+8）。行程結束不能證明 MQ 已正常斷線。
+
+預設 borrow 路徑不會呼叫 MQ。只有在 `staleIdleValidation` 為 true，且 idle 時間達到 `staleIdleThreshold` 時，才會呼叫 IBM `isConnected()`；若 client 提供 `inquire`，接著查詢 `MQIA_PLATFORM`。這不是業務 put/get。`staleIdleThreshold: 0` 會在每次借用 idle 連線時都做檢查。Client 沒有這些方法時記為 unsupported，連線仍會被提供。`maxIdle` 與 `maxLifetime` 會關閉並回收 idle 連線；`0` 表示停用該限制。ATT 不會自動重試業務呼叫。
+
+`pool.heartbeatInterval` 只有在 `com.ibm.mq.constants.MQConstants` 真的提供 `HEARTBEAT_INTERVAL_PROPERTY` 且值大於 0 時才會套用。IBM MQ classes for Java 9.4 沒有這個連線屬性，因此該設定不會覆寫該 client 的 SVRCONN channel HBINT。`0` 不會設定任何 client 屬性。若 idle session 被防火牆切斷，請把 channel HBINT 設得短於防火牆的 idle timeout。TCP keepalive 屬於作業系統與 IBM client（`com.ibm.mq.cfg.TCP.KeepAlive`、channel KAINT），ATT 不會啟用它。只有在成功的 disconnect 確實需要更長時間時才提高 `borrowTimeout`；卡住的 disconnect 仍是 `LOAD_RESOURCE_TEARDOWN_TIMEOUT`，並維持隔離。
 
 DB/MQ/HTTP 共用 `evidence.output: {format: json, maxChars: 10000}` presentation policy；支援 `text`、`json`、`yaml`、`xml`、`sqlplus`，後者要求 DB query/update result。`maxChars` 預設 10000，範圍 1–1000000；formatted text 先遮蔽 credential，再按字元確定性截斷，並保留 `format`／`text`／`truncated`。Formatting failure 只寫入有界 `outputError`，不改變 typed `output.result` 或 operation status。Run/Debug 的正常 resource invocation 自動將 snapshot 寫入 Action evidence 和 Case log，不需要額外 Log Action；SQL、parameter、MQ payload metadata、HTTP status/header 等 diagnostics 維持各自契約。Load 不會在每個 iteration 立即 stringify；僅 retained iteration 在 `resource-output.yaml` materialize，`evidence.resources.output: none` 完全跳過。Credential 不會因 presentation 被新增到 evidence。
 

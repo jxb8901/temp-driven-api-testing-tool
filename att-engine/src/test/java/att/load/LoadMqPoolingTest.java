@@ -2,6 +2,7 @@ package att.load;
 
 import att.config.FrameworkConfig;
 import att.config.MqHelperConfig;
+import att.config.MqPoolLifecycle;
 import att.config.ProcessOutputConfig;
 import att.core.ResultStatus;
 import att.exec.MqTransport;
@@ -540,6 +541,136 @@ class LoadMqPoolingTest {
                         .filter(path -> path.getFileName().toString().startsWith("mq-failures-"))
                         .count());
             }
+        }
+    }
+
+    @Test void twoIdleSessionsPassBorrowsThenBothFinalDisconnectsReportConnectionBroken() throws Exception {
+        MqHelperConfig helper = MqHelperConfig.physical(config(2, 2, 1000L).mqHelpers().get("broker"), "fromeaimqhk", "mq01");
+        AtomicInteger validations = new AtomicInteger();
+        AtomicInteger disconnects = new AtomicInteger();
+        MqTransport.Factory delegate = ignored -> new MqTransport.Connection() {
+            @Override public void validateIdle(long timeoutMs) { validations.incrementAndGet(); }
+            @Override public MqTransport.Queue open(String name, boolean input, boolean output) {
+                return new MqTransport.Queue() {
+                    @Override public MqTransport.Message put(byte[] payload, MqTransport.PutRequest request) { return null; }
+                    @Override public MqTransport.Message get(MqTransport.GetRequest request) { return null; }
+                    @Override public void close() { }
+                };
+            }
+            @Override public void disconnect() throws Exception {
+                disconnects.incrementAndGet();
+                throw new MqTransport.Exception("MQJE001: Completion Code '2', Reason '2009'", 2, 2009, "MQRC_CONNECTION_BROKEN", null);
+            }
+            @Override public void close() throws Exception { disconnect(); }
+        };
+        PooledMqTransportFactory pools = new PooledMqTransportFactory(delegate, 2, 1000L);
+        assertEquals(2, pools.prepareInitialReady(helper));
+        for (int i = 0; i < 20; i++) {
+            try (MqTransport.Connection connection = pools.connect(helper);
+                 MqTransport.Queue queue = connection.open("fixture", false, true)) {
+                assertNotNull(queue);
+            }
+        }
+        assertEquals(0, validations.get());
+        Map<String, Object> pre = pools.pool(helper.poolKey()).metrics();
+        assertEquals("PRE_TEARDOWN", pre.get("observation"));
+        assertEquals(0, pre.get("failures"));
+        assertEquals(2, pre.get("idle"));
+        assertEquals(0, pre.get("validationAttempts"));
+        IllegalStateException failure = assertThrows(IllegalStateException.class, pools::close);
+        assertEquals(2, disconnects.get());
+        Map<String, Object> diagnostic = LoadTeardownDiagnostics.from(failure);
+        assertEquals("MQ_RESOURCE_TEARDOWN_FAILED", diagnostic.get("code"));
+        assertEquals(2L, diagnostic.get("failedCloseCount"));
+        assertEquals("fromeaimqhk:mq01", diagnostic.get("logicalId"));
+        assertEquals("fromeaimqhk::mq01", diagnostic.get("poolKey"));
+        assertEquals("PHYSICAL_DISCONNECT_FAILED", diagnostic.get("failureClass"));
+        assertEquals("NOT_APPLIED", diagnostic.get("safeCloseClassification"));
+        assertEquals("DISCONNECT_NOT_CONFIRMED", diagnostic.get("safeCloseReason"));
+        Map<?, ?> resource = (Map<?, ?>) ((List<?>) diagnostic.get("resources")).get(0);
+        assertEquals(2L, resource.get("mqCompletionCode"));
+        assertEquals(2009L, resource.get("mqReasonCode"));
+        String causes = String.valueOf(resource.get("causeCodes"));
+        assertTrue(causes.contains("LOAD_RESOURCE_TEARDOWN_FAILED"), causes);
+        assertTrue(causes.contains("MQ_CONNECTION_DISCONNECT_FAILED"), causes);
+        assertTrue(causes.contains("MQJE001"), causes);
+        assertTrue(causes.contains("MQRC_CONNECTION_BROKEN"), causes);
+        Map<String, Object> post = pools.postTeardownMetrics().get("fromeaimqhk::mq01");
+        assertEquals("POST_TEARDOWN", post.get("observation"));
+        assertEquals(2, ((Number) post.get("disconnectFailureCount")).intValue());
+        assertEquals(2, ((List<?>) post.get("physicalSessions")).size());
+        pools.close();
+        assertEquals(2, disconnects.get());
+    }
+
+    @Test void teardownAttributesOnlyThePoolWhoseDisconnectFailed() throws Exception {
+        MqHelperConfig failed = MqHelperConfig.physical(config(2, 1, 1000L).mqHelpers().get("broker"), "fromeaimqhk", "mq01");
+        MqHelperConfig other = MqHelperConfig.physical(config(2, 1, 1000L).mqHelpers().get("broker"), "fromeaimqcb", "mq01");
+        MqHelperConfig third = MqHelperConfig.physical(config(2, 1, 1000L).mqHelpers().get("broker"), "toeaimq", "hk02");
+        MqTransport.Factory delegate = helper -> new MqTransport.Connection() {
+            private final boolean fail = "fromeaimqhk::mq01".equals(helper.poolKey());
+            @Override public MqTransport.Queue open(String name, boolean input, boolean output) {
+                return new MqTransport.Queue() {
+                    @Override public MqTransport.Message put(byte[] payload, MqTransport.PutRequest request) { return null; }
+                    @Override public MqTransport.Message get(MqTransport.GetRequest request) { return null; }
+                    @Override public void close() { }
+                };
+            }
+            @Override public void disconnect() throws Exception {
+                if (fail) throw new MqTransport.Exception("MQJE001: Completion Code '2', Reason '2009'", 2, 2009, "MQRC_CONNECTION_BROKEN", null);
+            }
+            @Override public void close() throws Exception { disconnect(); }
+        };
+        PooledMqTransportFactory pools = new PooledMqTransportFactory(delegate, 2, 1000L);
+        for (MqHelperConfig helper : new MqHelperConfig[] {failed, other, third}) {
+            assertEquals(1, pools.prepareInitialReady(helper));
+            try (MqTransport.Connection connection = pools.connect(helper)) { assertNotNull(connection); }
+        }
+        IllegalStateException failure = assertThrows(IllegalStateException.class, pools::close);
+        Map<String, Object> diagnostic = LoadTeardownDiagnostics.from(failure);
+        List<?> resources = (List<?>) diagnostic.get("resources");
+        assertEquals(1, resources.size(), diagnostic.toString());
+        assertEquals("fromeaimqhk:mq01", ((Map<?, ?>) resources.get(0)).get("logicalId"));
+        assertEquals("fromeaimqhk::mq01", diagnostic.get("poolKey"));
+        assertFalse(diagnostic.toString().contains("fromeaimqcb:mq01"), diagnostic.toString());
+        assertFalse(diagnostic.toString().contains("toeaimq:hk02"), diagnostic.toString());
+        assertEquals(0, ((Number) pools.postTeardownMetrics().get("fromeaimqcb::mq01").get("disconnectFailureCount")).intValue());
+        assertEquals(0, ((Number) pools.postTeardownMetrics().get("toeaimq::hk02").get("disconnectFailureCount")).intValue());
+        assertEquals(1, ((Number) pools.postTeardownMetrics().get("fromeaimqhk::mq01").get("disconnectFailureCount")).intValue());
+    }
+
+    @Test void staleIdleValidationDoesNotRunOnEveryBorrow() throws Exception {
+        MqHelperConfig helper = MqHelperConfig.physical(config(1, 1, 1000L).mqHelpers().get("broker"), "fromeaimqhk", "mq01")
+                .withPoolLifecycle(new MqPoolLifecycle(true, 60_000L, 200L, 0L, 0L, 0));
+        AtomicInteger validations = new AtomicInteger();
+        MqTransport.Factory delegate = ignored -> new MqTransport.Connection() {
+            @Override public void validateIdle(long timeoutMs) { validations.incrementAndGet(); }
+            @Override public MqTransport.Queue open(String name, boolean input, boolean output) {
+                return new MqTransport.Queue() {
+                    @Override public MqTransport.Message put(byte[] payload, MqTransport.PutRequest request) { return null; }
+                    @Override public MqTransport.Message get(MqTransport.GetRequest request) { return null; }
+                    @Override public void close() { }
+                };
+            }
+            @Override public void disconnect() { }
+            @Override public void close() { disconnect(); }
+        };
+        try (PooledMqTransportFactory pools = new PooledMqTransportFactory(delegate, 1, 1000L)) {
+            pools.prepareInitialReady(helper);
+            LoadResourcePool<MqTransport.Connection> pool = pools.pool(helper.poolKey());
+            final long[] extra = new long[] {0L};
+            pool.nanoClock = () -> System.nanoTime() + extra[0];
+            for (int i = 0; i < 30; i++) {
+                try (MqTransport.Connection connection = pools.connect(helper)) { assertNotNull(connection); }
+            }
+            assertEquals(0, validations.get());
+            extra[0] = TimeUnit.MILLISECONDS.toNanos(60_000L);
+            try (MqTransport.Connection connection = pools.connect(helper)) { assertNotNull(connection); }
+            assertEquals(1, validations.get());
+            for (int i = 0; i < 30; i++) {
+                try (MqTransport.Connection connection = pools.connect(helper)) { assertNotNull(connection); }
+            }
+            assertEquals(1, validations.get());
         }
     }
 

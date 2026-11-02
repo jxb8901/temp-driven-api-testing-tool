@@ -66,6 +66,60 @@ class ServerRuntimeLoadTerminalResultTest {
         }
     }
 
+    @Test void secondProjectionKeepsMqTeardownIdentityAndDropsSecrets() throws Exception {
+        try (ServerRuntime runtime = runtime("mq-teardown-identity")) {
+            String id = "J0000000000000329";
+            Job job = createJob(runtime, id);
+            Map<String, Object> session = fields("physicalId", "p1", "failureClass", "PHYSICAL_DISCONNECT_FAILED",
+                    "confirmationState", "QUARANTINED", "firstObserved", "TEARDOWN", "mqReasonCode", 2009,
+                    "mqCompletionCode", 2, "payload", "secret-bytes", "queue", "SECRET.QUEUE");
+            Map<String, Object> resource = fields("resourceType", "MQ", "logicalId", "fromeaimqhk:mq01",
+                    "poolKey", "fromeaimqhk::mq01", "failedCloseCount", 2, "failureClass", "PHYSICAL_DISCONNECT_FAILED",
+                    "mqCompletionCode", 2, "mqReasonCode", 2009, "safeCloseClassification", "NOT_APPLIED",
+                    "safeCloseReason", "DISCONNECT_NOT_CONFIRMED", "queue", "SECRET.QUEUE",
+                    "path", "/tmp/secret/connection", "causeCodes", List.of("LOAD_RESOURCE_TEARDOWN_FAILED",
+                            "MQ_CONNECTION_DISCONNECT_FAILED", "MQJE001", "MQRC_CONNECTION_BROKEN"),
+                    "physicalSessions", List.of(session));
+            Map<String, Object> primary = fields("code", "MQ_RESOURCE_TEARDOWN_FAILED", "phase", "TEARDOWN",
+                    "resourceType", "MQ", "failedCloseCount", 2, "summary", "LOAD resource teardown failed",
+                    "failureClass", "PHYSICAL_DISCONNECT_FAILED", "poolKey", "fromeaimqhk::mq01",
+                    "logicalId", "fromeaimqhk:mq01", "mqCompletionCode", 2, "mqReasonCode", 2009,
+                    "safeCloseClassification", "NOT_APPLIED", "resources", List.of(resource));
+            Map<String, Object> summary = fields("schemaVersion", "att-load-terminal-result/v1",
+                    "execution", fields("executionId", "load-329", "runId", "load-329", "status", "ERROR", "exitCode", 3, "durationMs", 10),
+                    "performance", fields("executionStatus", "PASS", "verdict", "NOT_EVALUATED"),
+                    "metrics", fields("completed", 4, "success", 4, "runtimeError", 0),
+                    "diagnostics", fields("primaryError", primary),
+                    "workloads", fields("total", 1, "omittedCount", 0, "items", List.of()),
+                    "thresholds", fields("verdict", "NOT_EVALUATED", "results", List.of()),
+                    "archive", fields("status", "PENDING", "reportAvailability", "PENDING"),
+                    "detailCompleteness", fields("state", "OMITTED", "truncated", Boolean.TRUE),
+                    "metricCoverage", fields("runDurationMs", 10));
+            Map<String, Object> once = att.server.api.LoadTerminalResult.projectOperationResult(
+                    fields("executionId", "load-329", "status", "ERROR", "exitCode", 3, "summary", summary), "ERROR", 3);
+            sendTerminal(runtime, job, once, "ERROR", 3);
+
+            Map<String, Object> stored = runtime.store.get(id);
+            Map<?, ?> storedResult = JSON.readValue((String) stored.get("resultJson"), Map.class);
+            Map<?, ?> cause = (Map<?, ?>) ((Map<?, ?>) ((Map<?, ?>) storedResult.get("summary")).get("diagnostics")).get("primaryError");
+            String published = JSON.writeValueAsString(storedResult);
+            assertEquals("MQ_RESOURCE_TEARDOWN_FAILED", cause.get("code"));
+            assertEquals("fromeaimqhk::mq01", cause.get("poolKey"));
+            assertEquals("fromeaimqhk:mq01", cause.get("logicalId"));
+            assertEquals(2009, ((Number) cause.get("mqReasonCode")).intValue());
+            assertEquals(2, ((Number) cause.get("mqCompletionCode")).intValue());
+            assertEquals(2, ((Number) cause.get("failedCloseCount")).intValue());
+            assertEquals("PHYSICAL_DISCONNECT_FAILED", cause.get("failureClass"));
+            assertEquals("NOT_APPLIED", cause.get("safeCloseClassification"));
+            assertFalse(published.contains("fromeaimqcb"));
+            assertFalse(published.contains("toeaimq"));
+            assertFalse(published.contains("SECRET.QUEUE"));
+            assertFalse(published.contains("/tmp/secret"));
+            assertFalse(published.contains("secret-bytes"));
+            assertTrue(published.contains("\"physicalId\":\"p1\"") || published.contains("\"physicalId\": \"p1\""));
+        }
+    }
+
     @Test void oversizedTerminalResultStaysBoundedAndReplayMatchesTheLiveEvent() throws Exception {
         try (ServerRuntime runtime = runtime("oversized-terminal-journal-result")) {
             String id = "J0000000000000350";

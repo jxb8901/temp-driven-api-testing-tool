@@ -379,7 +379,7 @@ class LoadResourcePoolGrowthTest {
         ExecutorService workers = Executors.newFixedThreadPool(2);
         try (LoadResourcePool<Integer>.Lease first = pool.borrow();
              LoadResourcePool<Integer>.Lease second = pool.borrow()) {
-            Future<?> invalidation = workers.submit(first::invalidate);
+            Future<?> invalidation = workers.submit(() -> first.invalidate());
             assertTrue(closing.await(1, TimeUnit.SECONDS));
             Future<?> borrower = workers.submit(() -> borrowAndRelease(pool));
             long until = System.nanoTime() + TimeUnit.SECONDS.toNanos(1);

@@ -47,6 +47,7 @@ public final class MqHelperConfig {
     private final String selectionStrategy;
     private final Map<String, MqHelperConfig> instances;
     private final boolean group;
+    private MqPoolLifecycle poolLifecycle = MqPoolLifecycle.DISABLED;
 
     public MqHelperConfig(String id, String name, String description, String queueManager,
                           String host, int port, String channel, String username, String password,
@@ -171,21 +172,31 @@ public final class MqHelperConfig {
 
     /** Loader-only immutable copy after validated queue routing has been resolved. */
     MqHelperConfig withRequestQueueRouting(List<String> queues, String strategy) {
-        return new MqHelperConfig(id, name, description, queueManager, host, port, channel, username, password,
+        MqHelperConfig copy = new MqHelperConfig(id, name, description, queueManager, host, port, channel, username, password,
                 charset, encoding, expiry, format, persistence, requestQueue, replyQueue, transport,
                 requestReplyWaitMs, responseFormat, evidencePayload, poolMaxSize, poolMinIdle, poolBorrowTimeoutMs,
                 maxResponseBytes, sourceFile, logicalId, instanceId, selectionStrategy, group, instances, queues, strategy);
+        copy.poolLifecycle = poolLifecycle;
+        return copy;
+    }
+
+    /** Attaches optional idle-health settings. Defaults do not add an MQ operation on borrow. */
+    public MqHelperConfig withPoolLifecycle(MqPoolLifecycle lifecycle) {
+        this.poolLifecycle = lifecycle == null ? MqPoolLifecycle.DISABLED : lifecycle;
+        return this;
     }
 
     /** Creates a physical immutable configuration with a logical helper identity. */
     public static MqHelperConfig physical(MqHelperConfig base, String logicalId, String instanceId) {
         if (base == null) throw new IllegalArgumentException("MQ helper configuration is required");
-        return new MqHelperConfig(base.id(), base.name(), base.description(), base.queueManager(), base.host(), base.port(),
+        MqHelperConfig created = new MqHelperConfig(base.id(), base.name(), base.description(), base.queueManager(), base.host(), base.port(),
                 base.channel(), base.username(), base.password(), base.charset(), base.encoding(), base.expiry(),
                 base.format(), base.persistence(), base.requestQueue(), base.replyQueue(), base.transport(),
                 base.requestReplyWaitMs(), base.responseFormat(),
                 base.evidencePayload(), base.poolMaxSize(), base.poolMinIdle(), base.poolBorrowTimeoutMs(), base.maxResponseBytes(), base.sourceFile(),
                 logicalId, instanceId, "single", false, Collections.<String, MqHelperConfig>emptyMap(), base.requestQueues(), base.requestQueueSelectionStrategy());
+        created.poolLifecycle = base.poolLifecycle;
+        return created;
     }
 
     /** Creates a logical v1.1 group whose instances are already fully materialized. */
@@ -254,6 +265,7 @@ public final class MqHelperConfig {
     public int poolMaxSize() { return poolMaxSize; }
     public int poolMinIdle() { return poolMinIdle; }
     public long poolBorrowTimeoutMs() { return poolBorrowTimeoutMs; }
+    public MqPoolLifecycle poolLifecycle() { return poolLifecycle; }
 
     /** Safe diagnostic metadata; credentials are deliberately absent. */
     public Map<String, Object> metadata() {

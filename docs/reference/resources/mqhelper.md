@@ -99,13 +99,27 @@ See [Actions and Typed Values](../actions.md) for the shared typed-result contra
 | `connection` | effective fields required | queue manager, host, port and channel as required by transport; port 1–65535; optional username/password |
 | `message` | defaults | CCSID 1208; `format` supports MQSTR/MQHRF2/MQFMT_STRING/MQFMT_NONE/NONE or empty; persistence supports asQueue/persistent/notPersistent/nonPersistent or 0–2 |
 | `requestReply` | defaults | `waitMs` 10000, range 0–3600000; `responseFormat` controls receive/request parsing; `maxResponseBytes` defaults to 10485760 and accepts 1–1073741824 |
-| `pool` | defaults | maxSize 20 (1–10000), minIdle 0 (not above maxSize), borrowTimeout 2s |
+| `pool` | defaults | maxSize 20 (1–10000), minIdle 0 (not above maxSize), borrowTimeout 2s. Optional `att-mqhelper/v1.3` lifecycle keys default off: `maxIdle`, `maxLifetime`, `staleIdleValidation`, `staleIdleThreshold` (60s), `validationTimeout` (200ms, 1–5000ms), `heartbeatInterval` (0) |
 | `selection.strategy` | descriptor policy | `random` or `roundRobin` |
 | `evidence` | policy | `payload: none|metadata`; raw payload bytes are not structured evidence; optional `output` is human presentation |
 
 Connection credentials may be complete `${ENV:NAME}` references. Resolved secrets do not enter metadata, diagnostics or Case evidence. Queue names are non-blank, at most 48 characters, and use IBM MQ queue-name characters. Logical helper and physical instance IDs are resolved case-insensitively; duplicate IDs and descriptor paths fail validation.
 
 The machine-readable field constraints remain in [the active MQ schema](../../../schemas/att-mqhelper-v1.3.schema.json).
+
+### Idle connections and teardown
+
+A LOAD pool key is `logicalId::instanceId` (for example `fromeaimqhk::mq01`). Teardown diagnostics use a single colon, `fromeaimqhk:mq01`. Those strings name the same physical pool. A failure for `fromeaimqhk::mq01` is not a failure of `fromeaimqcb::mq01` or `toeaimq::hk02`.
+
+`resources.mq` is a PRE_TEARDOWN sample taken before disconnect. Its `failures` count covers creation and idle-validation problems only. `failures: 0` with `idle: 2` does not mean disconnect succeeded. `resources.postTeardown` is the separate confirmation sample taken after disconnect attempts. Unconfirmed sessions stay quarantined: the slot remains charged, the connection is not borrowed again, and MQRC 2009 does not prove the queue manager released it. The job stays ERROR.
+
+`PHYSICAL_DISCONNECT_FAILED` means disconnect returned or threw. `LOAD_RESOURCE_TEARDOWN_TIMEOUT` means disconnect or connect was still running when the shutdown wait ended (`max(borrowTimeout, 5s)`). A validation timeout is neither of those: that connection is not offered, and a later 2009 is still a failed disconnect.
+
+Reason 2009 at final disconnect does not say when the socket stopped working. Correlate queue-manager, channel, client and network logs at the failure time. For the 2026-10-30 run that finished 2026-11-01 10:52:35Z, that local time is 2026-11-01 18:52:35 HKT (UTC+8). Process exit does not prove a graceful MQ disconnect.
+
+The default borrow path does not call MQ. Optional stale validation, when `staleIdleValidation` is true and the idle age is at least `staleIdleThreshold`, calls IBM `isConnected()` and, when the client exposes it, `inquire` of `MQIA_PLATFORM`. It does not put or get a business message. `staleIdleThreshold: 0` validates every idle borrow. A transport without those methods is counted as unsupported and is still offered. `maxIdle` and `maxLifetime` recycle an idle connection by closing it; `0` disables each limit. ATT does not retry the business call.
+
+`pool.heartbeatInterval` is applied only when `com.ibm.mq.constants.MQConstants` actually exposes `HEARTBEAT_INTERVAL_PROPERTY` and the value is greater than 0. IBM MQ classes for Java 9.4 do not publish that connection property, so the setting does not override the SVRCONN channel HBINT on that client. `0` never sets a client property. Set the channel HBINT below the firewall idle timeout when idle sessions are being dropped. TCP keepalive is an operating-system and IBM client setting (`com.ibm.mq.cfg.TCP.KeepAlive`, channel KAINT). ATT does not enable it. Raise `borrowTimeout` only when a successful disconnect genuinely needs longer; a hung disconnect remains `LOAD_RESOURCE_TEARDOWN_TIMEOUT` and stays quarantined.
 
 DB/MQ/HTTP share the optional `evidence.output: {format: json, maxChars: 10000}` presentation policy. Supported formats are `text`, `json`, `yaml`, `xml`, and `sqlplus`; `sqlplus` requires a DB query/update result. `maxChars` defaults to 10000 and accepts 1–1000000. Credentials are redacted before deterministic character truncation; snapshots contain `format`, `text`, and `truncated`. Formatting failure adds only a bounded `outputError` and changes neither typed `output.result` nor operation status. Normal Run/Debug invocations automatically include the snapshot in Action evidence and the Case log, without an extra Log Action; SQL, parameters, MQ payload metadata, and HTTP status/header diagnostics keep their own contracts. Load defers formatting until an iteration is retained, then materializes `resource-output.yaml`; `evidence.resources.output: none` skips it entirely. Presentation never introduces credential values into evidence.
 
