@@ -7,6 +7,8 @@
 
 ## MQ request queue 路由
 
+可選的 pool 生命週期欄位（`maxIdle`、`maxLifetime`、`staleIdleValidation`、`staleIdleThreshold`、`validationTimeout`、`heartbeatInterval`）必須使用 `att-mqhelper/v1.3`。v1.2 descriptor 若加入這些欄位，schema 驗證會失敗。省略它們會保留原本的 borrow 路徑：不做 idle validation、不依 max-idle 或 max-lifetime 回收，也不設定 client heartbeat property。
+
 `att-mqhelper/v1.2` scalar descriptor 仍受支援。使用 `message.requestQueues` 或 `requestQueueSelection` 時，須改為 `att-mqhelper/v1.3`，並以 1–256 項不重複 queue 清單取代 scalar `requestQueue`；`replyQueue` 維持單一可選 scalar。Instance 路由覆寫會取代繼承的 scalar／清單，未明確指定 strategy 時重設 queue strategy。Queue selection、counter 範圍、evidence 及 replay 行為見 [MQHelper](../resources/mqhelper.md#request-queue-路由)。
 
 

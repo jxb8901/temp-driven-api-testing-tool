@@ -26,6 +26,13 @@ public final class MqTransport {
         }
         void disconnect() throws java.lang.Exception;
         @Override void close() throws java.lang.Exception;
+        /**
+         * Optional IBM-supported liveness check for a connection that has already been idle.
+         * The default performs no network I/O. Pools call this only when stale-idle validation is enabled.
+         */
+        default void validateIdle(long timeoutMs) throws java.lang.Exception {
+            throw new MqTransport.Exception("MQ_IDLE_VALIDATION_UNSUPPORTED", null, null, "MQ_IDLE_VALIDATION_UNSUPPORTED", null);
+        }
     }
 
     public interface Queue extends AutoCloseable {

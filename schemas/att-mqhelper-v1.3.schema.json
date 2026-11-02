@@ -276,6 +276,37 @@
               "pattern": "^[0-9]+(ms|s|m)$"
             }
           ]
+        },
+        "maxIdle": {
+          "anyOf": [
+            {"type": "integer", "minimum": 0, "maximum": 864000000},
+            {"type": "string", "pattern": "^[0-9]+(ms|s|m)$"}
+          ]
+        },
+        "maxLifetime": {
+          "anyOf": [
+            {"type": "integer", "minimum": 0, "maximum": 864000000},
+            {"type": "string", "pattern": "^[0-9]+(ms|s|m)$"}
+          ]
+        },
+        "staleIdleValidation": {"type": "boolean"},
+        "staleIdleThreshold": {
+          "anyOf": [
+            {"type": "integer", "minimum": 0, "maximum": 864000000},
+            {"type": "string", "pattern": "^[0-9]+(ms|s|m)$"}
+          ]
+        },
+        "validationTimeout": {
+          "anyOf": [
+            {"type": "integer", "minimum": 1, "maximum": 5000},
+            {"type": "string", "pattern": "^[0-9]+(ms|s|m)$"}
+          ]
+        },
+        "heartbeatInterval": {
+          "anyOf": [
+            {"type": "integer", "minimum": 0, "maximum": 999999},
+            {"type": "string", "pattern": "^[0-9]+(ms|s|m)$"}
+          ]
         }
       },
       "patternProperties": {

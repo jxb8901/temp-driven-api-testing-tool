@@ -43,6 +43,7 @@ public final class LoadRunResources implements AutoCloseable {
     private final MqHelperExecutor mq;
     private final att.exec.HttpHelperExecutor http;
     private final PooledMqTransportFactory mqFactory;
+    private volatile Map<String, Object> postTeardownSnapshot = java.util.Collections.emptyMap();
     private final AtomicBoolean closed = new AtomicBoolean(false);
     private final AtomicLong executionSequence = new AtomicLong();
     private static final class ExecutionIdentity {
@@ -505,6 +506,8 @@ public final class LoadRunResources implements AutoCloseable {
     }
     long resourceMetricSamples() { return resourceMetricSamples.get(); }
     public boolean isClosed() { return closed.get(); }
+    /** Separate from {@link #metrics()}. Empty until owned pools have been closed. */
+    public Map<String, Object> postTeardownMetrics() { return postTeardownSnapshot; }
     static int availablePreparationPermits() { return PREPARATION_PROCESS_LIMIT.availablePermits(); }
     public void ensureOpen() { if (closed.get()) throw new IllegalStateException("Load run resources are closed"); }
 
@@ -552,15 +555,26 @@ public final class LoadRunResources implements AutoCloseable {
 
     private void closeOwnedResources() {
         Throwable failure = null;
-        String[] resourceTypes={"HTTP","MQ","DB","DB"};
-        Runnable[] owners={http::close,mqFactory::close,db::closeAll,dbProvider::close};
-        for (int index=0;index<owners.length;index++) {
-            try { owners[index].run(); }
-            catch (RuntimeException | Error problem) {
-                Throwable classified=containsTypedTeardown(problem)?problem:
-                        new LoadResourceTeardownException(resourceTypes[index],null,1L,problem);
-                if (failure == null) failure = classified;
-                else failure.addSuppressed(classified);
+        try {
+            String[] resourceTypes={"HTTP","MQ","DB","DB"};
+            Runnable[] owners={http::close,mqFactory::close,db::closeAll,dbProvider::close};
+            for (int index=0;index<owners.length;index++) {
+                try { owners[index].run(); }
+                catch (RuntimeException | Error problem) {
+                    Throwable classified=containsTypedTeardown(problem)?problem:
+                            new LoadResourceTeardownException(resourceTypes[index],null,1L,problem);
+                    if (failure == null) failure = classified;
+                    else failure.addSuppressed(classified);
+                }
+            }
+        } finally {
+            Map<String, Map<String, Object>> mq = mqFactory.postTeardownMetrics();
+            if (mq != null && !mq.isEmpty()) {
+                Map<String, Object> snapshot = new LinkedHashMap<String, Object>();
+                snapshot.put("observation", "POST_TEARDOWN");
+                snapshot.put("observationNote", "POST_TEARDOWN is separate from the pre-teardown resources.mq counters. Unconfirmed sessions remain quarantined and are not treated as released.");
+                snapshot.put("mq", mq);
+                postTeardownSnapshot = java.util.Collections.unmodifiableMap(snapshot);
             }
         }
         if (failure instanceof Error) throw (Error) failure;

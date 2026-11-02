@@ -60,6 +60,7 @@ public final class IbmMqClientFactory implements MqTransport.Factory {
                 if (!config.username().isEmpty()) properties.put(stringConstant(constants, "USER_ID_PROPERTY", "userID"), config.username());
                 if (!config.password().isEmpty()) properties.put(stringConstant(constants, "PASSWORD_PROPERTY", "password"), config.password());
             }
+            applyHeartbeat(properties, optionalConstant(constants, "HEARTBEAT_INTERVAL_PROPERTY"), config.poolLifecycle().heartbeatIntervalSeconds());
             Object queueManager = manager.getConstructor(String.class, Hashtable.class)
                     .newInstance(config.queueManager(), properties);
             return new ReflectiveConnection(queueManager, constants);
@@ -103,6 +104,7 @@ public final class IbmMqClientFactory implements MqTransport.Factory {
         }
         @Override public void disconnect() throws Exception { try { invoke(manager, "disconnect", new Class<?>[0]); } catch (Exception error) { throw translate(error); } }
         @Override public void close() throws Exception { disconnect(); }
+        @Override public void validateIdle(long timeoutMs) throws Exception { validateManager(manager, constants, timeoutMs); }
     }
 
     private static final class ReflectiveQueue implements MqTransport.Queue {
@@ -217,6 +219,53 @@ public final class IbmMqClientFactory implements MqTransport.Factory {
                     + "'; supported values: MQSeries Client, MQSeries, MQSeries Bindings");
         return requiredConstant(constants, constantName);
     }
+    /** Sets the IBM client heartbeat only when the client exposes the property and the descriptor requests one. */
+    static void applyHeartbeat(java.util.Map<String, Object> properties, Object propertyName, int seconds) {
+        if (properties == null || seconds <= 0 || !(propertyName instanceof String)) return;
+        String name = ((String) propertyName).trim();
+        if (name.isEmpty()) return;
+        properties.put(name, Integer.valueOf(seconds));
+    }
+
+    /**
+     * IBM-supported idle check: {@code isConnected()} first, then a queue-manager inquire when the client provides one.
+     * Neither step opens a business queue or puts a message. A missing check is reported as unsupported.
+     */
+    static void validateManager(Object manager, Class<?> constants, long timeoutMs) throws Exception {
+        if (manager == null) throw new MqTransport.Exception("MQ_IDLE_VALIDATION_UNSUPPORTED", null, null, "MQ_IDLE_VALIDATION_UNSUPPORTED", null);
+        if (timeoutMs < 1L) throw new MqTransport.Exception("MQ_IDLE_VALIDATION_TIMEOUT", null, null, "MQ_IDLE_VALIDATION_TIMEOUT", null);
+        boolean sawConnected = false;
+        try {
+            Method connected = manager.getClass().getMethod("isConnected");
+            sawConnected = true;
+            Object value = connected.invoke(manager);
+            if (Boolean.FALSE.equals(value))
+                throw new MqTransport.Exception("MQ_IDLE_NOT_CONNECTED", null, null, "MQ_IDLE_NOT_CONNECTED", null);
+        } catch (NoSuchMethodException ignored) {
+            sawConnected = false;
+        } catch (InvocationTargetException error) {
+            throw translate(error);
+        }
+        Method inquire;
+        try {
+            inquire = manager.getClass().getMethod("inquire", int[].class, int[].class, byte[].class);
+        } catch (NoSuchMethodException missing) {
+            if (sawConnected) return;
+            throw new MqTransport.Exception("MQ_IDLE_VALIDATION_UNSUPPORTED", null, null, "MQ_IDLE_VALIDATION_UNSUPPORTED", missing);
+        }
+        int platform = constants == null ? 32 : constant(constants, "MQIA_PLATFORM", 32);
+        try {
+            inquire.invoke(manager, new int[] { platform }, new int[1], new byte[0]);
+        } catch (InvocationTargetException error) {
+            throw translate(error);
+        }
+    }
+
+    private static Object optionalConstant(Class<?> type, String name) {
+        try { return type.getField(name).get(null); }
+        catch (Exception ignored) { return null; }
+    }
+
     private static Object requiredConstant(Class<?> type, String name) {
         try {
             Object value = type.getField(name).get(null);

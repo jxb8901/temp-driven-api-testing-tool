@@ -14,6 +14,7 @@ public final class PooledMqTransportFactory implements MqTransport.Factory, Auto
     private final long defaultBorrowTimeoutMs;
     private final ConcurrentHashMap<String, PoolEntry> pools = new ConcurrentHashMap<String, PoolEntry>();
     private final java.util.concurrent.atomic.AtomicBoolean closed = new java.util.concurrent.atomic.AtomicBoolean();
+    private volatile Map<String, Map<String, Object>> postTeardown = java.util.Collections.emptyMap();
 
     private static final class PoolEntry {
         final LoadResourcePool<MqTransport.Connection> pool;
@@ -87,6 +88,21 @@ public final class PooledMqTransportFactory implements MqTransport.Factory, Auto
         return result;
     }
 
+    /** Confirmation sample taken after disconnect attempts. Empty until {@link #close()} runs. */
+    public Map<String, Map<String, Object>> postTeardownMetrics() {
+        Map<String, Map<String, Object>> copy = new LinkedHashMap<String, Map<String, Object>>();
+        for (Map.Entry<String, Map<String, Object>> entry : postTeardown.entrySet()) {
+            copy.put(entry.getKey(), new LinkedHashMap<String, Object>(entry.getValue()));
+        }
+        return copy;
+    }
+
+    /** Records an externally observed queue-manager or network outage for one physical pool. */
+    public void noteIndependentOutage(String poolKey, String code) {
+        PoolEntry entry = poolKey == null ? null : pools.get(poolKey);
+        if (entry != null) entry.pool.noteIndependentOutage(code);
+    }
+
     private PoolEntry poolFor(final MqHelperConfig config, final long deadlineNanos, boolean bounded) throws Exception {
         if (closed.get()) throw new IllegalStateException("MQ resource factory is closed");
         final String poolKey = config.poolKey();
@@ -95,6 +111,13 @@ public final class PooledMqTransportFactory implements MqTransport.Factory, Auto
         int maxSize = config.poolMaxSize() < 1 ? defaultMaxSize : config.poolMaxSize();
         long borrowTimeoutMs = config.poolBorrowTimeoutMs() < 0L ? defaultBorrowTimeoutMs : config.poolBorrowTimeoutMs();
         final java.util.concurrent.atomic.AtomicBoolean preparationConnect = new java.util.concurrent.atomic.AtomicBoolean(bounded);
+        final LoadResourcePool.Health health = LoadResourcePool.Health.from(config.poolLifecycle());
+        final LoadResourcePool.IdleValidator<MqTransport.Connection> validator = health.validates()
+                ? new LoadResourcePool.IdleValidator<MqTransport.Connection>() {
+                    @Override public void validate(MqTransport.Connection connection, long timeoutMs) throws Exception {
+                        connection.validateIdle(timeoutMs);
+                    }
+                } : null;
         LoadResourcePool<MqTransport.Connection> created = new LoadResourcePool<MqTransport.Connection>(maxSize, borrowTimeoutMs,
                 () -> {
                     try {
@@ -112,7 +135,7 @@ public final class PooledMqTransportFactory implements MqTransport.Factory, Auto
                     catch (Exception failure) {
                         throw new IllegalStateException("MQ_CONNECTION_DISCONNECT_FAILED", failure);
                     }
-                });
+                }, health, validator);
         PoolEntry candidate = new PoolEntry(created, diagnosticIdentity(config), preparationConnect, deadlineNanos);
         PoolEntry raced = pools.putIfAbsent(poolKey, candidate);
         if (raced != null) {
@@ -138,18 +161,31 @@ public final class PooledMqTransportFactory implements MqTransport.Factory, Auto
     @Override public void close() {
         if (!closed.compareAndSet(false, true)) return;
         RuntimeException failure = null;
-        for (PoolEntry entry : pools.values()) {
-            try { entry.pool.close(); }
-            catch (RuntimeException | Error problem) {
-                LoadResourceTeardownException identified=new LoadResourceTeardownException("MQ",entry.logicalId,
-                        Math.max(1,entry.pool.closeFailureCount()),problem);
-                if (failure == null) failure = identified;
-                else failure.addSuppressed(identified);
+        try {
+            for (Map.Entry<String, PoolEntry> item : pools.entrySet()) {
+                PoolEntry entry = item.getValue();
+                try { entry.pool.close(); }
+                catch (RuntimeException | Error problem) {
+                    Map<String, Object> details = new LinkedHashMap<String, Object>(entry.pool.teardownDetails());
+                    details.put("poolKey", item.getKey());
+                    long count = entry.pool.failedCloseCount();
+                    LoadResourceTeardownException identified = new LoadResourceTeardownException("MQ", entry.logicalId,
+                            count, problem, details);
+                    if (failure == null) failure = identified;
+                    else failure.addSuppressed(identified);
+                }
             }
+        } finally {
+            Map<String, Map<String, Object>> snapshot = new LinkedHashMap<String, Map<String, Object>>();
+            for (Map.Entry<String, PoolEntry> item : pools.entrySet()) {
+                Map<String, Object> values = new LinkedHashMap<String, Object>(item.getValue().pool.metrics());
+                values.put("helperId", item.getKey());
+                snapshot.put(item.getKey(), values);
+            }
+            postTeardown = snapshot;
+            pools.clear();
         }
-        pools.clear();
-        if (failure != null) throw new IllegalStateException(
-                "MQ_RESOURCE_TEARDOWN_FAILED", failure);
+        if (failure != null) throw new IllegalStateException("MQ_RESOURCE_TEARDOWN_FAILED", failure);
     }
 
     private static final class PoolFactoryException extends RuntimeException {
@@ -169,7 +205,7 @@ public final class PooledMqTransportFactory implements MqTransport.Factory, Auto
         @Override public MqTransport.Queue open(String queue, boolean input, boolean output, boolean bindNotFixed) throws Exception {
             try { return new PooledQueue(lease.value().open(queue, input, output, bindNotFixed), lease); }
             catch (MqTransport.Exception error) { invalidateIfBroken(error); throw error; }
-            catch (Exception error) { broken = true; lease.invalidate(); throw error; }
+            catch (Exception error) { broken = true; lease.invalidate(error); throw error; }
         }
 
         @Override public void disconnect() {
@@ -179,7 +215,7 @@ public final class PooledMqTransportFactory implements MqTransport.Factory, Auto
         @Override public void close() { disconnect(); }
 
         private void invalidateIfBroken(MqTransport.Exception error) {
-            if (error.connectionFailure()) { broken = true; lease.invalidate(); }
+            if (error.connectionFailure()) { broken = true; lease.invalidate(error); }
         }
     }
 
@@ -192,21 +228,21 @@ public final class PooledMqTransportFactory implements MqTransport.Factory, Auto
 
         @Override public MqTransport.Message put(byte[] payload, MqTransport.PutRequest request) throws Exception {
             try { return delegate.put(payload, request); }
-            catch (MqTransport.Exception error) { if (error.connectionFailure()) lease.invalidate(); throw error; }
-            catch (Exception error) { lease.invalidate(); throw error; }
+            catch (MqTransport.Exception error) { if (error.connectionFailure()) lease.invalidate(error); throw error; }
+            catch (Exception error) { lease.invalidate(error); throw error; }
         }
 
         @Override public MqTransport.Message get(MqTransport.GetRequest request) throws Exception {
             try { return delegate.get(request); }
             catch (MqTransport.Exception error) {
-                if (error.connectionFailure()) lease.invalidate();
+                if (error.connectionFailure()) lease.invalidate(error);
                 throw error;
-            } catch (Exception error) { lease.invalidate(); throw error; }
+            } catch (Exception error) { lease.invalidate(error); throw error; }
         }
 
         @Override public void close() throws Exception {
             try { delegate.close(); }
-            catch (Exception error) { lease.invalidate(); throw error; }
+            catch (Exception error) { lease.invalidate(error); throw error; }
         }
 
     }

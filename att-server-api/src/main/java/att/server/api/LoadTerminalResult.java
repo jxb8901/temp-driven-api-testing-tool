@@ -441,6 +441,7 @@ public final class LoadTerminalResult {
         putText(result, "phase", source.get("phase"), 24);
         putText(result, "resourceType", source.get("resourceType"), 12);
         putNumber(result, "failedCloseCount", source.get("failedCloseCount"));
+        copyTeardownIdentity(result, source);
         Object resources=source.get("resources");
         if(resources instanceof Iterable) {
             List<Map<String,Object>> safeResources=new ArrayList<>();
@@ -450,6 +451,7 @@ public final class LoadTerminalResult {
                 putText(safe,"resourceType",row.get("resourceType"),12);
                 putText(safe,"logicalId",row.get("logicalId"),64);
                 putNumber(safe,"failedCloseCount",row.get("failedCloseCount"));
+                copyTeardownIdentity(safe, row);
                 List<String> codes=new ArrayList<>();Object rawCodes=row.get("causeCodes");
                 if(rawCodes instanceof Iterable)for(Object raw:(Iterable<?>)rawCodes) {
                     String causeCode=text(raw,96);if(causeCode.matches("[A-Z][A-Z0-9_.:-]{2,95}")&&!codes.contains(causeCode)&&codes.size()<8)codes.add(causeCode);
@@ -478,6 +480,87 @@ public final class LoadTerminalResult {
         String artifactRef = safeRelative(source.get("artifactRef"), null);
         if (artifactRef != null) result.put("artifactRef", artifactRef);
         return result;
+    }
+
+    private static void copyTeardownIdentity(Map<String, Object> target, Map<?, ?> source) {
+        putText(target, "logicalId", source.get("logicalId"), 64);
+        putCode(target, "failureClass", source.get("failureClass"));
+        putPoolKey(target, source.get("poolKey"));
+        putToken(target, "confirmationState", source.get("confirmationState"),
+                "CONFIRMED_CLOSED", "QUARANTINED", "UNCERTAIN", "TIMED_OUT");
+        putToken(target, "safeCloseClassification", source.get("safeCloseClassification"), "NOT_APPLIED", "CONFIRMED");
+        putToken(target, "safeCloseReason", source.get("safeCloseReason"), "DISCONNECT_NOT_CONFIRMED");
+        putToken(target, "observation", source.get("observation"), "PRE_TEARDOWN", "POST_TEARDOWN");
+        putBoolean(target, "knownDeadBeforeTeardown", source.get("knownDeadBeforeTeardown"));
+        putBoolean(target, "independentOutage", source.get("independentOutage"));
+        putNumber(target, "disconnectAttemptCount", source.get("disconnectAttemptCount"));
+        putNumber(target, "disconnectFailureCount", source.get("disconnectFailureCount"));
+        putNumber(target, "residualCreating", source.get("residualCreating"));
+        putNumber(target, "residualClosing", source.get("residualClosing"));
+        putNumber(target, "residualValidating", source.get("residualValidating"));
+        putNumber(target, "uncertainOwnershipCount", source.get("uncertainOwnershipCount"));
+        putNumber(target, "validationAttempts", source.get("validationAttempts"));
+        putNumber(target, "validationFailures", source.get("validationFailures"));
+        putNumber(target, "mqCompletionCode", source.get("mqCompletionCode"));
+        putNumber(target, "mqReasonCode", source.get("mqReasonCode"));
+        Object classes = source.get("failureClasses");
+        if (classes instanceof Iterable) {
+            List<String> safe = new ArrayList<String>();
+            for (Object value : (Iterable<?>) classes) {
+                String code = text(value, 64);
+                if (code.matches("[A-Z][A-Z0-9_]{0,63}") && !safe.contains(code) && safe.size() < 8) safe.add(code);
+            }
+            if (!safe.isEmpty()) target.put("failureClasses", safe);
+        }
+        Object counts = source.get("failureClassCounts");
+        if (counts instanceof Map) {
+            Map<String, Object> safe = new LinkedHashMap<String, Object>();
+            for (Map.Entry<?, ?> entry : ((Map<?, ?>) counts).entrySet()) {
+                if (!(entry.getKey() instanceof String) || safe.size() >= 8 || !(entry.getValue() instanceof Number)) continue;
+                String code = text(entry.getKey(), 64);
+                if (code.matches("[A-Z][A-Z0-9_]{0,63}")) safe.put(code, Long.valueOf(((Number) entry.getValue()).longValue()));
+            }
+            if (!safe.isEmpty()) target.put("failureClassCounts", safe);
+        }
+        Object sessions = source.get("physicalSessions");
+        if (sessions instanceof Iterable) {
+            List<Map<String, Object>> rows = new ArrayList<Map<String, Object>>();
+            for (Object value : (Iterable<?>) sessions) {
+                if (!(value instanceof Map) || rows.size() >= 8) continue;
+                Map<String, Object> row = new LinkedHashMap<String, Object>();
+                copyTeardownIdentity(row, (Map<?, ?>) value);
+                Object id = ((Map<?, ?>) value).get("physicalId");
+                if (id instanceof String && ((String) id).matches("p[0-9]{1,6}")) row.put("physicalId", id);
+                putCode(row, "failureCode", ((Map<?, ?>) value).get("failureCode"));
+                putToken(row, "firstObserved", ((Map<?, ?>) value).get("firstObserved"), "BEFORE_TEARDOWN", "TEARDOWN", "NOT_FAILED");
+                putToken(row, "lastValidationOutcome", ((Map<?, ?>) value).get("lastValidationOutcome"),
+                        "PASSED", "FAILED", "UNSUPPORTED", "TIMED_OUT", "NOT_RUN");
+                putNumber(row, "idleAgeMs", ((Map<?, ?>) value).get("idleAgeMs"));
+                putNumber(row, "lifetimeMs", ((Map<?, ?>) value).get("lifetimeMs"));
+                if (!row.isEmpty()) rows.add(row);
+            }
+            if (!rows.isEmpty()) target.put("physicalSessions", rows);
+        }
+    }
+
+    private static void putCode(Map<String, Object> target, String key, Object value) {
+        String code = text(value, 64);
+        if (code.matches("[A-Z][A-Z0-9_]{0,63}")) target.put(key, code);
+    }
+
+    private static void putPoolKey(Map<String, Object> target, Object value) {
+        String key = text(value, 128);
+        if (key.isEmpty() || key.contains("..") || key.indexOf('/') >= 0 || key.indexOf('\\') >= 0) return;
+        if (key.matches("[A-Za-z0-9_.:-]{1,128}")) target.put("poolKey", key);
+    }
+
+    private static void putToken(Map<String, Object> target, String key, Object value, String... allowed) {
+        String token = text(value, 32);
+        for (String candidate : allowed) if (candidate.equals(token)) { target.put(key, candidate); return; }
+    }
+
+    private static void putBoolean(Map<String, Object> target, String key, Object value) {
+        if (value instanceof Boolean) target.put(key, value);
     }
 
     private static boolean isLimitOutcome(String value) {

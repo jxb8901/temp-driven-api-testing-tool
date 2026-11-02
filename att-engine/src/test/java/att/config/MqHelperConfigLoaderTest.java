@@ -257,4 +257,38 @@ class MqHelperConfigLoaderTest {
         assertTrue(error.detail().contains("selection"));
         assertFalse(error.schemaViolations().isEmpty());
     }
+
+    @Test void loadsOptionalPoolLifecycleOnV13AndRejectsItOnV12() throws Exception {
+        Path directory = tempDir.resolve("config/mqhelpers");
+        Files.createDirectories(directory);
+        Path helper = directory.resolve("broker.yaml");
+        Path config = tempDir.resolve("config/config.yaml");
+        Files.write(config, "schemaVersion: att-config/v2.11\nmqhelpers: [config/mqhelpers/broker.yaml]\n".getBytes("UTF-8"));
+        Files.write(helper, ("schemaVersion: att-mqhelper/v1.3\nid: broker\nname: Broker\ndescription: lifecycle\n"
+                + "defaults:\n  connection: {queueManager: QM1, host: localhost, port: 1414, channel: CH}\n"
+                + "  message: {requestQueues: [REQUEST.Q]}\n"
+                + "instances:\n  - id: mq01\n    pool:\n      maxIdle: 30s\n      maxLifetime: 1m\n"
+                + "      staleIdleValidation: true\n      staleIdleThreshold: 0ms\n      validationTimeout: 250ms\n"
+                + "      heartbeatInterval: 15\n").getBytes("UTF-8"));
+        MqPoolLifecycle lifecycle = new FrameworkConfigLoader().load(config).mqHelper("broker").instance("mq01").poolLifecycle();
+        assertTrue(lifecycle.active());
+        assertTrue(lifecycle.staleIdleValidation());
+        assertEquals(0L, lifecycle.staleIdleThresholdMs());
+        assertEquals(250L, lifecycle.validationTimeoutMs());
+        assertEquals(30_000L, lifecycle.maxIdleMs());
+        assertEquals(60_000L, lifecycle.maxLifetimeMs());
+        assertEquals(15, lifecycle.heartbeatIntervalSeconds());
+
+        Files.write(helper, ("schemaVersion: att-mqhelper/v1.3\nid: broker\nname: Broker\ndescription: defaults\n"
+                + "defaults:\n  connection: {queueManager: QM1, host: localhost, port: 1414, channel: CH}\n"
+                + "  message: {requestQueues: [REQUEST.Q]}\ninstances: [{id: mq01}]\n").getBytes("UTF-8"));
+        MqPoolLifecycle defaults = new FrameworkConfigLoader().load(config).mqHelper("broker").instance("mq01").poolLifecycle();
+        assertFalse(defaults.active());
+        assertEquals(0, defaults.heartbeatIntervalSeconds());
+
+        Files.write(helper, ("schemaVersion: att-mqhelper/v1.2\nid: broker\nname: Broker\ndescription: rejected\n"
+                + "defaults:\n  connection: {queueManager: QM1, host: localhost, port: 1414, channel: CH}\n"
+                + "instances: [{id: mq01, pool: {maxIdle: 30s}}]\n").getBytes("UTF-8"));
+        assertThrows(Exception.class, () -> new FrameworkConfigLoader().load(config));
+    }
 }
