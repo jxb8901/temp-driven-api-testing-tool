@@ -6,6 +6,7 @@ import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
@@ -36,6 +37,8 @@ class LoadResourcePoolTeardownTest {
         try (LoadResourcePool<Handle>.Lease lease = pool.borrow()) {
             lease.invalidate(broken());
         }
+        awaitCount(closes, 1);
+        awaitClosing(pool);
         assertEquals(1, closes.get());
         assertEquals(1, pool.total());
         assertThrows(LoadResourcePool.PoolTimeoutException.class, pool::borrow);
@@ -221,6 +224,71 @@ class LoadResourcePoolTeardownTest {
         assertTrue(pool.total() <= 2);
         assertTrue(peak.get() <= 2);
         assertThrows(IllegalStateException.class, pool::close);
+    }
+
+    @Test void invalidateWithHungDisconnectReturnsTheWorkerAndKeepsTheSlot() throws Exception {
+        CountDownLatch entered = new CountDownLatch(1);
+        CountDownLatch releaseClose = new CountDownLatch(1);
+        AtomicInteger closes = new AtomicInteger();
+        AtomicInteger ids = new AtomicInteger();
+        LoadResourcePool<Handle> pool = new LoadResourcePool<Handle>(2, 200L, () -> new Handle(ids.incrementAndGet()), value -> {
+            closes.incrementAndGet();
+            if (value.id != 1) return;
+            entered.countDown();
+            try { releaseClose.await(); }
+            catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                throw new IllegalStateException(interrupted);
+            }
+            throw disconnectFailed();
+        });
+        ExecutorService workers = Executors.newSingleThreadExecutor();
+        try {
+            LoadResourcePool<Handle>.Lease first = pool.borrow();
+            long began = System.nanoTime();
+            Future<?> invalidated = workers.submit(new Runnable() {
+                @Override public void run() { first.invalidate(broken()); }
+            });
+            assertTrue(entered.await(1, TimeUnit.SECONDS));
+            invalidated.get(1, TimeUnit.SECONDS);
+            long returnMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - began);
+            assertTrue(returnMs < 1_000L, "workerReturnMs=" + returnMs);
+            assertEquals(1, closes.get());
+            assertEquals(0, pool.active());
+            assertEquals(0, pool.idle());
+            assertEquals(1, pool.total());
+            assertEquals(1, number(pool.metrics().get("closing")));
+            try (LoadResourcePool<Handle>.Lease second = pool.borrow()) {
+                assertEquals(2, second.value().id);
+                assertEquals(2, pool.total());
+                assertEquals(2, pool.maxSize());
+                assertThrows(LoadResourcePool.PoolTimeoutException.class, pool::borrow);
+                assertEquals(2, ids.get());
+                assertEquals(1, closes.get());
+            }
+            try (LoadResourcePool<Handle>.Lease again = pool.borrow()) {
+                assertEquals(2, again.value().id);
+            }
+            assertEquals(2, ids.get());
+            assertEquals(2, pool.total());
+            assertTrue(pool.total() <= pool.maxSize());
+            releaseClose.countDown();
+            awaitClosing(pool);
+            assertEquals(1, closes.get());
+            assertEquals(2, pool.total());
+            IllegalStateException teardown = assertThrows(IllegalStateException.class, pool::close);
+            assertTrue(teardown.getMessage().contains("LOAD_RESOURCE_TEARDOWN_FAILED"), teardown.getMessage());
+            assertEquals(1L, pool.failedCloseCount());
+            assertEquals(1, pool.total());
+            assertEquals(2, closes.get());
+            assertEquals(2, ids.get());
+        } finally {
+            releaseClose.countDown();
+            workers.shutdownNow();
+            workers.awaitTermination(2, TimeUnit.SECONDS);
+            try { pool.close(); }
+            catch (RuntimeException ignored) { }
+        }
     }
 
     @Test void permitsAreReusedAcrossWavesAndClosersRunOnce() throws Exception {
@@ -1028,6 +1096,65 @@ class LoadResourcePoolTeardownTest {
         assertFalse(pool.idleEvictorAlive());
     }
 
+    @Test void backgroundEvictionBoundsConcurrentDisconnects() throws Exception {
+        final int sessions = 12;
+        final long[] now = new long[] {1_000_000_000L};
+        CountDownLatch releaseClose = new CountDownLatch(1);
+        AtomicInteger closes = new AtomicInteger();
+        AtomicInteger running = new AtomicInteger();
+        AtomicInteger peak = new AtomicInteger();
+        Set<Integer> closedIds = Collections.synchronizedSet(new HashSet<Integer>());
+        LoadResourcePool<Handle> pool = new LoadResourcePool<Handle>(sessions, 200L, handles(), value -> {
+            int current = running.incrementAndGet();
+            peak.accumulateAndGet(current, Math::max);
+            closes.incrementAndGet();
+            closedIds.add(value.id);
+            try { releaseClose.await(); }
+            catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                throw new IllegalStateException(interrupted);
+            } finally {
+                running.decrementAndGet();
+            }
+        }, LoadResourcePool.Health.from(new MqPoolLifecycle(false, 60_000L, 200L, 1_000L, 0L, 0)), null);
+        pool.nanoClock = new java.util.function.LongSupplier() {
+            @Override public long getAsLong() { return now[0]; }
+        };
+        try {
+            pool.ensureMinIdle(sessions);
+            now[0] += TimeUnit.MILLISECONDS.toNanos(1_000L);
+            pool.idleEvictIntervalNanos = TimeUnit.MILLISECONDS.toNanos(15);
+            long until = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
+            while ((pool.idle() > 0 || closes.get() < LoadResourcePool.DISCONNECT_PARALLELISM) && System.nanoTime() < until) {
+                synchronized (pool) { pool.notifyAll(); }
+                Thread.yield();
+            }
+            assertEquals(0, pool.idle());
+            assertEquals(LoadResourcePool.DISCONNECT_PARALLELISM, closes.get());
+            Thread.sleep(150L);
+            assertEquals(LoadResourcePool.DISCONNECT_PARALLELISM, closes.get());
+            assertEquals(LoadResourcePool.DISCONNECT_PARALLELISM, closedIds.size());
+            assertTrue(peak.get() <= LoadResourcePool.DISCONNECT_PARALLELISM);
+            assertEquals(sessions, pool.total());
+            assertEquals(sessions, pool.created());
+            assertEquals(0, pool.active());
+            assertTrue(pool.total() <= pool.maxSize());
+            releaseClose.countDown();
+            long done = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
+            while (pool.total() > 0 && System.nanoTime() < done) Thread.yield();
+            assertEquals(0, pool.total());
+            assertEquals(sessions, closes.get());
+            assertEquals(sessions, closedIds.size());
+            assertTrue(peak.get() <= LoadResourcePool.DISCONNECT_PARALLELISM, "peak=" + peak.get());
+            pool.close();
+            assertEquals(sessions, closes.get());
+        } finally {
+            releaseClose.countDown();
+            try { pool.close(); }
+            catch (RuntimeException ignored) { }
+        }
+    }
+
     @Test void closeInterruptsIdleValidationBeforeDisconnect() throws Exception {
         CountDownLatch started = new CountDownLatch(1);
         AtomicInteger closes = new AtomicInteger();
@@ -1116,6 +1243,8 @@ class LoadResourcePoolTeardownTest {
         AtomicInteger closes = new AtomicInteger();
         LoadResourcePool<Handle> pool = pool(1, 80L, closes, true);
         try (LoadResourcePool<Handle>.Lease lease = pool.borrow()) { lease.invalidate(); }
+        awaitCount(closes, 1);
+        awaitClosing(pool);
         assertEquals(1, closes.get());
         assertThrows(LoadResourcePool.PoolTimeoutException.class, pool::borrow);
         assertThrows(IllegalStateException.class, pool::close);

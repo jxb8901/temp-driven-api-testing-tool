@@ -13,7 +13,11 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.Semaphore;
+import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
@@ -83,8 +87,14 @@ public final class LoadResourcePool<T> implements AutoCloseable {
     private static final Pattern LEADING_CODE = Pattern.compile("^([A-Z][A-Z0-9_]{1,94})(?:\\s|:|$)");
     /** Package-visible so tests can age idle sessions without sleeping or calling MQ. */
     volatile LongSupplier nanoClock = System::nanoTime;
+    /**
+     * At most this many physical disconnects run at once in one pool. Further closes stay queued and keep their slots.
+     * Shutdown counts queued and running closes together.
+     */
+    static final int DISCONNECT_PARALLELISM = 4;
+    private final ExecutorService disconnects = newDisconnectExecutor();
     /** Package-visible so tests can inject a failing disconnect-worker starter. */
-    volatile java.util.function.Consumer<Runnable> disconnectStarter = LoadResourcePool::startDisconnectWorker;
+    volatile java.util.function.Consumer<Runnable> disconnectStarter = this::enqueueDisconnect;
     /**
      * Package-visible sweep period. The default is about 30s and the task exists only when maxIdle or maxLifetime is set.
      * Borrow and return notifications do not run a sweep before this interval elapses. {@code close()} still wakes the
@@ -675,7 +685,9 @@ public final class LoadResourcePool<T> implements AutoCloseable {
             }
             notifyAll();
         }
-        if (closeValue) closeTracked(value);
+        // A hung IBM disconnect must not pin the LOAD worker or its borrow permit.
+        // The physical slot stays charged until closeTracked confirms the close.
+        if (closeValue) closeAsync(value);
         permits.release();
     }
 
@@ -718,13 +730,26 @@ public final class LoadResourcePool<T> implements AutoCloseable {
         }
     }
 
-    private static void startDisconnectWorker(Runnable task) {
-        Thread thread = new Thread(task, "att-load-resource-disconnect");
-        thread.setDaemon(true);
-        thread.start();
+    private ExecutorService newDisconnectExecutor() {
+        ThreadFactory factory = new ThreadFactory() {
+            @Override public Thread newThread(Runnable task) {
+                Thread thread = new Thread(task, "att-load-resource-disconnect");
+                thread.setDaemon(true);
+                return thread;
+            }
+        };
+        ThreadPoolExecutor executor = new ThreadPoolExecutor(DISCONNECT_PARALLELISM, DISCONNECT_PARALLELISM,
+                30L, TimeUnit.SECONDS, new LinkedBlockingQueue<Runnable>(), factory);
+        executor.allowCoreThreadTimeOut(true);
+        return executor;
     }
 
-    /** Runs a physical disconnect outside the shutdown waiter so one hung closer cannot block the deadline. */
+    /** Queues one physical disconnect. At most {@link #DISCONNECT_PARALLELISM} run; the rest wait in this pool's queue. */
+    private void enqueueDisconnect(Runnable task) {
+        disconnects.execute(task);
+    }
+
+    /** Runs a physical disconnect outside the caller so one hung closer cannot block a worker or the shutdown deadline. */
     private void closeAsync(T value) {
         try {
             disconnectStarter.accept(() -> closeTracked(value));
@@ -736,6 +761,14 @@ public final class LoadResourcePool<T> implements AutoCloseable {
     }
 
     @Override public void close() {
+        try {
+            closeWithinBudget();
+        } finally {
+            disconnects.shutdown();
+        }
+    }
+
+    private void closeWithinBudget() {
         List<T> values = new ArrayList<T>();
         List<Thread> validators = new ArrayList<Thread>();
         Thread evictorThread = null;

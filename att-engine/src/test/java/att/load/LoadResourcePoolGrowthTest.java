@@ -323,6 +323,8 @@ class LoadResourcePoolGrowthTest {
         LoadResourcePool<Integer>.Lease lease = pool.borrow();
         lease.invalidate();
         lease.close();
+        long until = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
+        while (closes.get() < 1 && System.nanoTime() < until) Thread.yield();
         LoadResourcePool.PoolTimeoutException timeout = org.junit.jupiter.api.Assertions.assertThrows(
                 LoadResourcePool.PoolTimeoutException.class, pool::borrow);
         assertEquals(1, timeout.snapshot().get("total"));
