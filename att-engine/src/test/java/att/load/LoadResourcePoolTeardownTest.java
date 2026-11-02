@@ -18,6 +18,7 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -736,6 +737,140 @@ class LoadResourcePoolTeardownTest {
         }
     }
 
+    @Test void cancelledValidationWakesBorrowerWaitingBehindAHungClose() throws Exception {
+        final long[] now = new long[] {1_000_000_000L};
+        final CountDownLatch closeEntered = new CountDownLatch(1);
+        final CountDownLatch releaseClose = new CountDownLatch(1);
+        final CountDownLatch validationEntered = new CountDownLatch(1);
+        final CountDownLatch releaseValidation = new CountDownLatch(1);
+        final CountDownLatch gotLease = new CountDownLatch(1);
+        final CountDownLatch releaseLease = new CountDownLatch(1);
+        final AtomicInteger closes = new AtomicInteger();
+        final AtomicInteger validations = new AtomicInteger();
+        final AtomicReference<Handle> validated = new AtomicReference<Handle>();
+        final AtomicReference<Handle> borrowed = new AtomicReference<Handle>();
+        final AtomicReference<Thread> waiterThread = new AtomicReference<Thread>();
+        LoadResourcePool.IdleValidator<Handle> validator = new LoadResourcePool.IdleValidator<Handle>() {
+            @Override public void validate(Handle value, long timeoutMs) throws Exception {
+                if (validations.incrementAndGet() == 1) {
+                    validated.set(value);
+                    validationEntered.countDown();
+                    assertTrue(releaseValidation.await(3, TimeUnit.SECONDS));
+                }
+            }
+        };
+        final LoadResourcePool<Handle> pool = new LoadResourcePool<Handle>(2, 2_000L, handles(), new Consumer<Handle>() {
+            @Override public void accept(Handle value) {
+                closes.incrementAndGet();
+                closeEntered.countDown();
+                try { releaseClose.await(); }
+                catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    throw new IllegalStateException(interrupted);
+                }
+            }
+        }, LoadResourcePool.Health.from(new MqPoolLifecycle(true, 0L, 5_000L, 1_000L, 0L, 0)), validator);
+        pool.nanoClock = new java.util.function.LongSupplier() {
+            @Override public long getAsLong() { return now[0]; }
+        };
+        ExecutorService workers = Executors.newFixedThreadPool(2);
+        try {
+            pool.ensureMinIdle(1);
+            now[0] += TimeUnit.MILLISECONDS.toNanos(1_000L);
+            pool.idleEvictIntervalNanos = TimeUnit.MILLISECONDS.toNanos(15);
+            long sweepUntil = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
+            while (closeEntered.getCount() > 0 && System.nanoTime() < sweepUntil) {
+                synchronized (pool) { pool.notifyAll(); }
+                Thread.yield();
+            }
+            assertTrue(closeEntered.await(1, TimeUnit.SECONDS));
+            pool.idleEvictIntervalNanos = TimeUnit.SECONDS.toNanos(30);
+            pool.ensureMinIdle(1);
+            Future<?> validating = workers.submit(new Runnable() {
+                @Override public void run() {
+                    try (LoadResourcePool<Handle>.Lease lease = pool.borrow()) {
+                        throw new AssertionError("cancelled borrow returned " + lease.value().id);
+                    } catch (InterruptedException expected) {
+                        Thread.currentThread().interrupt();
+                    } catch (Exception failure) {
+                        throw new IllegalStateException(failure);
+                    }
+                }
+            });
+            assertTrue(validationEntered.await(2, TimeUnit.SECONDS));
+            final long waiterStarted = System.nanoTime();
+            Future<?> waiter = workers.submit(new Runnable() {
+                @Override public void run() {
+                    waiterThread.set(Thread.currentThread());
+                    try (LoadResourcePool<Handle>.Lease lease = pool.borrow()) {
+                        borrowed.set(lease.value());
+                        gotLease.countDown();
+                        assertTrue(releaseLease.await(3, TimeUnit.SECONDS));
+                    } catch (Exception failure) {
+                        throw new IllegalStateException(failure);
+                    }
+                }
+            });
+            long parkUntil = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
+            long stableSince = -1L;
+            while (System.nanoTime() < parkUntil) {
+                Thread parked = waiterThread.get();
+                boolean waiting = parked != null && parked.getState() == Thread.State.TIMED_WAITING && pool.waiting() >= 2;
+                long at = System.nanoTime();
+                if (!waiting) stableSince = -1L;
+                else if (stableSince < 0L) stableSince = at;
+                else if (at - stableSince >= TimeUnit.MILLISECONDS.toNanos(40)) break;
+                Thread.yield();
+            }
+            Thread parked = waiterThread.get();
+            assertNotNull(parked);
+            assertEquals(Thread.State.TIMED_WAITING, parked.getState());
+            assertTrue(pool.waiting() >= 2);
+            final AtomicBoolean interruptOnce = new AtomicBoolean(true);
+            pool.beforeValidationCommit = new Runnable() {
+                @Override public void run() {
+                    if (!interruptOnce.compareAndSet(true, false)) return;
+                    // Drop the pool lock so the waiter can consume the validation worker's notify,
+                    // observe the still-empty queue, and wait again. The offer below has to notify it.
+                    long until = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(500);
+                    try {
+                        pool.wait(30L);
+                        while (parked.getState() != Thread.State.TIMED_WAITING && System.nanoTime() < until) pool.wait(20L);
+                    } catch (InterruptedException interrupted) {
+                        Thread.currentThread().interrupt();
+                        return;
+                    }
+                    Thread.currentThread().interrupt();
+                }
+            };
+            releaseValidation.countDown();
+            validating.get(2, TimeUnit.SECONDS);
+            assertTrue(gotLease.await(1, TimeUnit.SECONDS), "waiter did not receive the idle session inside the borrow budget");
+            long handoffMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - waiterStarted);
+            assertTrue(handoffMs < 2_000L, "handoffMs=" + handoffMs);
+            assertNotNull(validated.get());
+            assertEquals(validated.get().id, borrowed.get().id);
+            assertEquals(1, pool.active());
+            assertEquals(0, pool.idle());
+            assertEquals(1, closes.get());
+            assertEquals(2, pool.total());
+            releaseLease.countDown();
+            waiter.get(2, TimeUnit.SECONDS);
+            assertEquals(0, pool.active());
+            assertEquals(1, pool.idle());
+            assertEquals(1, closes.get());
+            assertEquals(2, pool.total());
+        } finally {
+            releaseValidation.countDown();
+            releaseLease.countDown();
+            releaseClose.countDown();
+            pool.beforeValidationCommit = null;
+            workers.shutdownNow();
+            workers.awaitTermination(2, TimeUnit.SECONDS);
+            pool.close();
+        }
+    }
+
     @Test void backgroundMaxIdleEvictsAnIdleSessionNobodyBorrows() throws Exception {
         final long[] now = new long[] {1_000_000_000L};
         AtomicInteger closes = new AtomicInteger();
@@ -749,6 +884,7 @@ class LoadResourcePoolTeardownTest {
         pool.nanoClock = new java.util.function.LongSupplier() {
             @Override public long getAsLong() { return now[0]; }
         };
+        pool.idleEvictIntervalNanos = TimeUnit.MILLISECONDS.toNanos(15);
         assertTrue(pool.idleEvictorAlive());
         pool.ensureMinIdle(1);
         now[0] += TimeUnit.MILLISECONDS.toNanos(1_000L);
@@ -775,6 +911,7 @@ class LoadResourcePoolTeardownTest {
         pool.nanoClock = new java.util.function.LongSupplier() {
             @Override public long getAsLong() { return now[0]; }
         };
+        pool.idleEvictIntervalNanos = TimeUnit.MILLISECONDS.toNanos(15);
         pool.ensureMinIdle(1);
         now[0] += TimeUnit.MILLISECONDS.toNanos(1_000L);
         awaitEviction(pool, closes, 1);
@@ -838,6 +975,7 @@ class LoadResourcePoolTeardownTest {
         pool.nanoClock = new java.util.function.LongSupplier() {
             @Override public long getAsLong() { return now[0]; }
         };
+        pool.idleEvictIntervalNanos = TimeUnit.MILLISECONDS.toNanos(15);
         pool.ensureMinIdle(1);
         now[0] += TimeUnit.MILLISECONDS.toNanos(1_000L);
         ExecutorService workers = Executors.newSingleThreadExecutor();
@@ -861,6 +999,33 @@ class LoadResourcePoolTeardownTest {
             workers.shutdownNow();
             workers.awaitTermination(2, TimeUnit.SECONDS);
         }
+    }
+
+    @Test void frequentNotificationsDoNotSweepBeforeTheInterval() throws Exception {
+        final long[] now = new long[] {1_000_000_000L};
+        AtomicInteger closes = new AtomicInteger();
+        LoadResourcePool<Handle> pool = new LoadResourcePool<Handle>(1, 200L, handles(),
+                value -> closes.incrementAndGet(),
+                LoadResourcePool.Health.from(new MqPoolLifecycle(false, 60_000L, 200L, 1_000L, 0L, 0)), null);
+        pool.nanoClock = new java.util.function.LongSupplier() {
+            @Override public long getAsLong() { return now[0]; }
+        };
+        assertTrue(pool.idleEvictorAlive());
+        assertEquals(TimeUnit.SECONDS.toNanos(30), pool.idleEvictIntervalNanos);
+        pool.ensureMinIdle(1);
+        now[0] += TimeUnit.MILLISECONDS.toNanos(1_000L);
+        int before = pool.idleSweepCount();
+        long until = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(200);
+        while (System.nanoTime() < until) {
+            synchronized (pool) { pool.notifyAll(); }
+            Thread.yield();
+        }
+        assertEquals(before, pool.idleSweepCount());
+        assertEquals(0, closes.get());
+        assertEquals(1, pool.idle());
+        assertEquals(1, pool.total());
+        pool.close();
+        assertFalse(pool.idleEvictorAlive());
     }
 
     @Test void closeInterruptsIdleValidationBeforeDisconnect() throws Exception {

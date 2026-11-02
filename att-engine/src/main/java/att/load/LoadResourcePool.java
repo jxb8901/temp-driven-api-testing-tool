@@ -85,7 +85,11 @@ public final class LoadResourcePool<T> implements AutoCloseable {
     volatile LongSupplier nanoClock = System::nanoTime;
     /** Package-visible so tests can inject a failing disconnect-worker starter. */
     volatile java.util.function.Consumer<Runnable> disconnectStarter = LoadResourcePool::startDisconnectWorker;
-    /** Package-visible sweep period. The default is 30s and the task exists only when maxIdle or maxLifetime is set. */
+    /**
+     * Package-visible sweep period. The default is about 30s and the task exists only when maxIdle or maxLifetime is set.
+     * Borrow and return notifications do not run a sweep before this interval elapses. {@code close()} still wakes the
+     * task immediately because the pool is closed.
+     */
     volatile long idleEvictIntervalNanos = IDLE_EVICT_INTERVAL_NANOS;
     /**
      * Package-visible hook on the borrower, inside the pool lock, after validation finishes and before a lease is taken.
@@ -93,6 +97,8 @@ public final class LoadResourcePool<T> implements AutoCloseable {
      */
     volatile Runnable beforeValidationCommit;
     private volatile Thread evictor;
+    /** Sweeps that actually scanned the idle queue. A notification before the deadline does not increment this. */
+    private int idleSweepCount;
 
     public LoadResourcePool(int maxSize, long borrowTimeoutMs, Supplier<T> factory, Consumer<T> closer) {
         this(maxSize, 0, borrowTimeoutMs, factory, closer);
@@ -500,6 +506,10 @@ public final class LoadResourcePool<T> implements AutoCloseable {
                     borrowerInterrupted = true;
                     if (!idle.offer(value)) closeNow = queueClose(session);
                     else session.state = "IDLE";
+                    // The validation worker already notified when it stored the result, before this offer.
+                    // A borrower parked in borrow() has since gone back to sleep on an empty queue.
+                    // Do not markIdle: that would reset idleSince and hide a session that crossed maxIdle during validation.
+                    notifyAll();
                 } else {
                     session.state = "LEASED";
                     leased.add(value);
@@ -857,20 +867,38 @@ public final class LoadResourcePool<T> implements AutoCloseable {
         return thread != null && thread.isAlive();
     }
 
+    /** How many times the background sweep has scanned idle sessions. */
+    synchronized int idleSweepCount() { return idleSweepCount; }
+
     private void evictLoop() {
+        long nextSweep = System.nanoTime() + sweepInterval();
         while (true) {
             List<T> drop;
             synchronized (this) {
-                if (closed) return;
-                long pause = idleEvictIntervalNanos;
-                if (pause < 1_000_000L) pause = 1_000_000L;
-                try { TimeUnit.NANOSECONDS.timedWait(this, pause); }
-                catch (InterruptedException ignored) { }
+                while (!closed) {
+                    long interval = sweepInterval();
+                    long remaining = nextSweep - System.nanoTime();
+                    if (remaining > interval) {
+                        nextSweep = System.nanoTime() + interval;
+                        remaining = interval;
+                    }
+                    if (remaining <= 0L) break;
+                    try { TimeUnit.NANOSECONDS.timedWait(this, remaining); }
+                    catch (InterruptedException ignored) { }
+                }
                 if (closed) return;
                 drop = evictExpiredLocked();
+                idleSweepCount++;
+                nextSweep = System.nanoTime() + sweepInterval();
             }
             for (T value : drop) closeAsync(value);
         }
+    }
+
+    private long sweepInterval() {
+        long pause = idleEvictIntervalNanos;
+        if (pause < 1_000_000L) pause = 1_000_000L;
+        return pause;
     }
 
     /** Called with the pool monitor held. Closes idle sessions past maxIdle or maxLifetime. No validation and no MQ call here. */
