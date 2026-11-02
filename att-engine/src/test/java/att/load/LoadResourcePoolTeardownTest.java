@@ -164,7 +164,8 @@ class LoadResourcePoolTeardownTest {
                 });
         pool.ensureMinIdle(1);
         pool.noteIndependentOutage("MQ_QM_UNAVAILABLE");
-        assertEquals(1, closes.get());
+        awaitCount(closes, 1);
+        awaitClosing(pool);
         assertEquals(1, pool.total());
         assertEquals(1, ids.get());
         assertThrows(LoadResourcePool.PoolTimeoutException.class, pool::borrow);
@@ -182,6 +183,9 @@ class LoadResourcePoolTeardownTest {
                 () -> new Handle(ids.incrementAndGet()), value -> { });
         pool.ensureMinIdle(1);
         pool.noteIndependentOutage("MQ_NETWORK_OUTAGE");
+        long until = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
+        while (pool.total() != 0 && System.nanoTime() < until) Thread.yield();
+        assertEquals(0, pool.total());
         try (LoadResourcePool<Handle>.Lease lease = pool.borrow()) {
             assertEquals(2, lease.value().id);
         }
@@ -617,6 +621,248 @@ class LoadResourcePoolTeardownTest {
         }
     }
 
+    @Test void outageDuringValidationDoesNotLeaseKnownDeadSession() throws Exception {
+        CountDownLatch started = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        AtomicInteger closes = new AtomicInteger();
+        LoadResourcePool.IdleValidator<Handle> validator = new LoadResourcePool.IdleValidator<Handle>() {
+            @Override public void validate(Handle value, long timeoutMs) throws Exception {
+                started.countDown();
+                release.await();
+            }
+        };
+        LoadResourcePool<Handle> pool = new LoadResourcePool<Handle>(2, 2_000L, handles(),
+                value -> closes.incrementAndGet(),
+                LoadResourcePool.Health.from(new MqPoolLifecycle(true, 0L, 2_000L, 0L, 0L, 0)), validator);
+        pool.ensureMinIdle(1);
+        ExecutorService workers = Executors.newSingleThreadExecutor();
+        try {
+            Future<Handle> borrowed = workers.submit(() -> {
+                try (LoadResourcePool<Handle>.Lease lease = pool.borrow()) { return lease.value(); }
+                catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    throw new IllegalStateException(interrupted);
+                }
+            });
+            assertTrue(started.await(1, TimeUnit.SECONDS));
+            pool.noteIndependentOutage("MQ_QM_UNAVAILABLE");
+            release.countDown();
+            Handle handle = borrowed.get(2, TimeUnit.SECONDS);
+            assertNotEquals(1, handle.id);
+            awaitCount(closes, 1);
+            assertEquals(0, pool.active());
+        } finally {
+            release.countDown();
+            workers.shutdownNow();
+            workers.awaitTermination(2, TimeUnit.SECONDS);
+            pool.close();
+        }
+    }
+
+    @Test void independentOutageReturnsWhileDisconnectIsHung() throws Exception {
+        CountDownLatch entered = new CountDownLatch(1);
+        AtomicInteger closes = new AtomicInteger();
+        LoadResourcePool<Handle> pool = new LoadResourcePool<Handle>(1, 40L, () -> new Handle(1), value -> {
+            closes.incrementAndGet();
+            entered.countDown();
+            try { new CountDownLatch(1).await(); }
+            catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                throw new IllegalStateException(interrupted);
+            }
+        });
+        pool.ensureMinIdle(1);
+        long started = System.nanoTime();
+        pool.noteIndependentOutage("MQ_QM_UNAVAILABLE");
+        long elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started);
+        assertTrue(elapsedMs < 1_000L, "noteIndependentOutage blocked, elapsedMs=" + elapsedMs);
+        assertTrue(entered.await(1, TimeUnit.SECONDS));
+        assertEquals(1, pool.total());
+        assertEquals(1, number(pool.metrics().get("closing")));
+        assertEquals(0, number(pool.metrics().get("disconnectFailureCount")));
+        long began = System.nanoTime();
+        IllegalStateException timeout = assertThrows(IllegalStateException.class, pool::close);
+        long closeMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - began);
+        assertTrue(timeout.getMessage().contains("LOAD_RESOURCE_TEARDOWN_TIMEOUT"), timeout.getMessage());
+        assertTrue(closeMs < 15_000L, "closeMs=" + closeMs);
+        Map<String, Object> metrics = pool.metrics();
+        assertEquals(1, number(metrics.get("residualClosing")));
+        assertEquals(1, pool.total());
+        assertEquals(1L, pool.failedCloseCount());
+        assertEquals("NOT_APPLIED", metrics.get("safeCloseClassification"));
+        Map<String, Object> session = onlySession(metrics);
+        assertEquals(Boolean.TRUE, session.get("independentOutage"));
+        assertEquals("TIMED_OUT", session.get("confirmationState"));
+    }
+
+    @Test void interruptBeforeLeaseReturnsValidatedSessionToIdle() throws Exception {
+        AtomicInteger closes = new AtomicInteger();
+        LoadResourcePool.IdleValidator<Handle> validator = new LoadResourcePool.IdleValidator<Handle>() {
+            @Override public void validate(Handle value, long timeoutMs) { }
+        };
+        LoadResourcePool<Handle> pool = new LoadResourcePool<Handle>(1, 2_000L, handles(),
+                value -> closes.incrementAndGet(),
+                LoadResourcePool.Health.from(new MqPoolLifecycle(true, 0L, 2_000L, 0L, 0L, 0)), validator);
+        pool.ensureMinIdle(1);
+        pool.beforeValidationCommit = new Runnable() {
+            @Override public void run() { Thread.currentThread().interrupt(); }
+        };
+        ExecutorService workers = Executors.newSingleThreadExecutor();
+        try {
+            Future<?> borrower = workers.submit(new Runnable() {
+                @Override public void run() {
+                    try (LoadResourcePool<Handle>.Lease lease = pool.borrow()) {
+                        throw new AssertionError("cancelled borrow returned " + lease.value().id);
+                    } catch (InterruptedException expected) {
+                        Thread.currentThread().interrupt();
+                    } catch (Exception failure) {
+                        throw new IllegalStateException(failure);
+                    }
+                }
+            });
+            borrower.get(2, TimeUnit.SECONDS);
+            assertEquals(0, pool.active());
+            assertEquals(1, pool.idle());
+            assertEquals(1, pool.total());
+            assertEquals(0, closes.get());
+            pool.beforeValidationCommit = null;
+            try (LoadResourcePool<Handle>.Lease lease = pool.borrow()) { assertNotNull(lease.value()); }
+            assertEquals(0, closes.get());
+        } finally {
+            pool.beforeValidationCommit = null;
+            workers.shutdownNow();
+            workers.awaitTermination(2, TimeUnit.SECONDS);
+            pool.close();
+        }
+    }
+
+    @Test void backgroundMaxIdleEvictsAnIdleSessionNobodyBorrows() throws Exception {
+        final long[] now = new long[] {1_000_000_000L};
+        AtomicInteger closes = new AtomicInteger();
+        AtomicInteger validations = new AtomicInteger();
+        LoadResourcePool.IdleValidator<Handle> validator = new LoadResourcePool.IdleValidator<Handle>() {
+            @Override public void validate(Handle value, long timeoutMs) { validations.incrementAndGet(); }
+        };
+        LoadResourcePool<Handle> pool = new LoadResourcePool<Handle>(1, 500L, handles(),
+                value -> closes.incrementAndGet(),
+                LoadResourcePool.Health.from(new MqPoolLifecycle(true, 0L, 200L, 1_000L, 0L, 0)), validator);
+        pool.nanoClock = new java.util.function.LongSupplier() {
+            @Override public long getAsLong() { return now[0]; }
+        };
+        assertTrue(pool.idleEvictorAlive());
+        pool.ensureMinIdle(1);
+        now[0] += TimeUnit.MILLISECONDS.toNanos(1_000L);
+        awaitEviction(pool, closes, 1);
+        assertEquals(0, validations.get());
+        assertEquals(0, number(pool.metrics().get("validationAttempts")));
+        awaitClosing(pool);
+        assertEquals(0, pool.idle());
+        assertEquals(0, pool.total());
+        pool.close();
+        assertFalse(pool.idleEvictorAlive());
+    }
+
+    @Test void backgroundMaxLifetimeEvictsWithoutValidationOrABorrow() throws Exception {
+        final long[] now = new long[] {1_000_000_000L};
+        AtomicInteger closes = new AtomicInteger();
+        AtomicInteger validations = new AtomicInteger();
+        LoadResourcePool.IdleValidator<Handle> validator = new LoadResourcePool.IdleValidator<Handle>() {
+            @Override public void validate(Handle value, long timeoutMs) { validations.incrementAndGet(); }
+        };
+        LoadResourcePool<Handle> pool = new LoadResourcePool<Handle>(1, 500L, handles(),
+                value -> closes.incrementAndGet(),
+                LoadResourcePool.Health.from(new MqPoolLifecycle(false, 60_000L, 200L, 0L, 1_000L, 0)), validator);
+        pool.nanoClock = new java.util.function.LongSupplier() {
+            @Override public long getAsLong() { return now[0]; }
+        };
+        pool.ensureMinIdle(1);
+        now[0] += TimeUnit.MILLISECONDS.toNanos(1_000L);
+        awaitEviction(pool, closes, 1);
+        assertEquals(0, validations.get());
+        assertEquals(0, number(pool.metrics().get("validationAttempts")));
+        awaitClosing(pool);
+        assertEquals(0, pool.total());
+        pool.close();
+        assertFalse(pool.idleEvictorAlive());
+    }
+
+    @Test void idleEvictorStaysOffUnlessMaxIdleOrMaxLifetimeIsSet() {
+        AtomicInteger closes = new AtomicInteger();
+        LoadResourcePool<Handle> plain = pool(1, 200L, closes, false);
+        assertFalse(plain.idleEvictorAlive());
+        plain.ensureMinIdle(1);
+        plain.close();
+        assertEquals(1, closes.get());
+        assertFalse(plain.idleEvictorAlive());
+        LoadResourcePool<Handle> validating = new LoadResourcePool<Handle>(1, 200L, handles(), value -> { },
+                LoadResourcePool.Health.from(new MqPoolLifecycle(true, 0L, 200L, 0L, 0L, 0)),
+                new LoadResourcePool.IdleValidator<Handle>() {
+                    @Override public void validate(Handle value, long timeoutMs) { }
+                });
+        assertFalse(validating.idleEvictorAlive());
+        validating.close();
+        assertFalse(validating.idleEvictorAlive());
+    }
+
+    @Test void closeStopsTheIdleEvictor() {
+        final long[] now = new long[] {1_000_000_000L};
+        AtomicInteger closes = new AtomicInteger();
+        LoadResourcePool<Handle> pool = new LoadResourcePool<Handle>(1, 200L, handles(),
+                value -> closes.incrementAndGet(),
+                LoadResourcePool.Health.from(new MqPoolLifecycle(false, 60_000L, 200L, 60_000L, 0L, 0)), null);
+        pool.nanoClock = new java.util.function.LongSupplier() {
+            @Override public long getAsLong() { return now[0]; }
+        };
+        pool.ensureMinIdle(1);
+        assertTrue(pool.idleEvictorAlive());
+        pool.close();
+        assertFalse(pool.idleEvictorAlive());
+        assertEquals(1, closes.get());
+        assertEquals(0, pool.total());
+    }
+
+    @Test void closeDuringBackgroundEvictionDisconnectsOnce() throws Exception {
+        final long[] now = new long[] {1_000_000_000L};
+        CountDownLatch entered = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        AtomicInteger closes = new AtomicInteger();
+        LoadResourcePool<Handle> pool = new LoadResourcePool<Handle>(1, 40L, handles(), value -> {
+            closes.incrementAndGet();
+            entered.countDown();
+            try { release.await(); }
+            catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                throw new IllegalStateException(interrupted);
+            }
+        }, LoadResourcePool.Health.from(new MqPoolLifecycle(false, 60_000L, 200L, 1_000L, 0L, 0)), null);
+        pool.nanoClock = new java.util.function.LongSupplier() {
+            @Override public long getAsLong() { return now[0]; }
+        };
+        pool.ensureMinIdle(1);
+        now[0] += TimeUnit.MILLISECONDS.toNanos(1_000L);
+        ExecutorService workers = Executors.newSingleThreadExecutor();
+        try {
+            long until = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
+            while (entered.getCount() > 0 && System.nanoTime() < until) {
+                synchronized (pool) { pool.notifyAll(); }
+                Thread.yield();
+            }
+            assertTrue(entered.await(1, TimeUnit.SECONDS));
+            Future<?> shutdown = workers.submit(new Runnable() {
+                @Override public void run() { pool.close(); }
+            });
+            release.countDown();
+            shutdown.get(2, TimeUnit.SECONDS);
+            assertEquals(1, closes.get());
+            assertEquals(0, pool.total());
+            assertFalse(pool.idleEvictorAlive());
+        } finally {
+            release.countDown();
+            workers.shutdownNow();
+            workers.awaitTermination(2, TimeUnit.SECONDS);
+        }
+    }
+
     @Test void closeInterruptsIdleValidationBeforeDisconnect() throws Exception {
         CountDownLatch started = new CountDownLatch(1);
         AtomicInteger closes = new AtomicInteger();
@@ -716,6 +962,21 @@ class LoadResourcePoolTeardownTest {
         assertEquals("INVALIDATED", session.get("exclusionCode"));
         assertEquals("TEARDOWN", session.get("firstObserved"));
         assertEquals(2009, number(session.get("mqReasonCode")));
+    }
+
+    private static void awaitCount(AtomicInteger counter, int expected) throws InterruptedException {
+        long until = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
+        while (counter.get() < expected && System.nanoTime() < until) Thread.yield();
+        assertEquals(expected, counter.get());
+    }
+
+    private static void awaitEviction(LoadResourcePool<Handle> pool, AtomicInteger closes, int expected) throws InterruptedException {
+        long until = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
+        while (closes.get() < expected && System.nanoTime() < until) {
+            synchronized (pool) { pool.notifyAll(); }
+            Thread.yield();
+        }
+        assertEquals(expected, closes.get());
     }
 
     private static void awaitClosing(LoadResourcePool<Handle> pool) throws InterruptedException {

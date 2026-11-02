@@ -75,6 +75,8 @@ public final class LoadResourcePool<T> implements AutoCloseable {
     private int residualClosing;
     private int residualValidating;
     private static final long SHUTDOWN_WAIT_FLOOR_MS = 5_000L;
+    /** Background idle sweep. Borrow still recycles immediately; this only covers sessions nobody borrows again. */
+    private static final long IDLE_EVICT_INTERVAL_NANOS = TimeUnit.SECONDS.toNanos(30);
     private static final int MAX_RETAINED_CONFIRMED = 32;
     private static final int MAX_EXPORTED_SESSIONS = 16;
     private static final long HEALTH_EVENT_INTERVAL_NANOS = 10_000_000_000L;
@@ -83,6 +85,14 @@ public final class LoadResourcePool<T> implements AutoCloseable {
     volatile LongSupplier nanoClock = System::nanoTime;
     /** Package-visible so tests can inject a failing disconnect-worker starter. */
     volatile java.util.function.Consumer<Runnable> disconnectStarter = LoadResourcePool::startDisconnectWorker;
+    /** Package-visible sweep period. The default is 30s and the task exists only when maxIdle or maxLifetime is set. */
+    volatile long idleEvictIntervalNanos = IDLE_EVICT_INTERVAL_NANOS;
+    /**
+     * Package-visible hook on the borrower, inside the pool lock, after validation finishes and before a lease is taken.
+     * Tests use it to interrupt at that commit point.
+     */
+    volatile Runnable beforeValidationCommit;
+    private volatile Thread evictor;
 
     public LoadResourcePool(int maxSize, long borrowTimeoutMs, Supplier<T> factory, Consumer<T> closer) {
         this(maxSize, 0, borrowTimeoutMs, factory, closer);
@@ -117,6 +127,7 @@ public final class LoadResourcePool<T> implements AutoCloseable {
             try { ensureMinIdle(minIdle); }
             catch (RuntimeException error) { close(); throw error; }
         }
+        startIdleEvictor();
     }
 
     /** Creates the configured idle floor without borrowing or sharing a resource. */
@@ -470,14 +481,25 @@ public final class LoadResourcePool<T> implements AutoCloseable {
                     applyCause(session, error, false);
                     recordHealthLocked(session.knownDead ? "MQ_CONNECTION_NOT_REUSED" : "MQ_IDLE_VALIDATION_FAILED");
                 }
-                if (closed || (error != null && !unsupported)) {
+                Runnable commit = beforeValidationCommit;
+                if (commit != null) commit.run();
+                boolean cancelled = borrowerInterrupted || Thread.currentThread().isInterrupted();
+                boolean reject = closed || session.knownDead || session.independentOutage || session.closeQueued
+                        || (error != null && !unsupported);
+                if (reject) {
                     if (!session.discardCounted && !closed) {
                         discarded.incrementAndGet();
                         session.discardCounted = true;
                         recycled.incrementAndGet();
                     }
+                    if (error == null && (session.knownDead || session.independentOutage || session.closeQueued))
+                        recordHealthLocked("MQ_CONNECTION_NOT_REUSED");
                     closeNow = queueClose(session);
                     if (closed) closedNow = new IllegalStateException("resource pool is closed");
+                } else if (cancelled) {
+                    borrowerInterrupted = true;
+                    if (!idle.offer(value)) closeNow = queueClose(session);
+                    else session.state = "IDLE";
                 } else {
                     session.state = "LEASED";
                     leased.add(value);
@@ -559,7 +581,7 @@ public final class LoadResourcePool<T> implements AutoCloseable {
             recordHealthLocked(safe);
             notifyAll();
         }
-        for (T value : drop) closeTracked(value);
+        for (T value : drop) closeAsync(value);
     }
 
     public synchronized Map<String, Object> metrics() {
@@ -706,11 +728,14 @@ public final class LoadResourcePool<T> implements AutoCloseable {
     @Override public void close() {
         List<T> values = new ArrayList<T>();
         List<Thread> validators = new ArrayList<Thread>();
+        Thread evictorThread = null;
+        boolean interrupted = false;
         long budgetMs = Math.max(borrowTimeoutMs, SHUTDOWN_WAIT_FLOOR_MS);
         long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(budgetMs);
         synchronized (this) {
             if (!closed) {
                 closed = true;
+                evictorThread = evictor;
                 Set<T> unique = Collections.newSetFromMap(new IdentityHashMap<T, Boolean>());
                 idle.drainTo(values);
                 unique.addAll(values);
@@ -727,9 +752,13 @@ public final class LoadResourcePool<T> implements AutoCloseable {
                 notifyAll();
             } else values = Collections.emptyList();
         }
+        if (evictorThread != null) {
+            evictorThread.interrupt();
+            try { evictorThread.join(1_000L); }
+            catch (InterruptedException cancelled) { interrupted = true; }
+        }
         for (Thread validator : validators) validator.interrupt();
         for (T value : values) closeAsync(value);
-        boolean interrupted = false;
         synchronized (this) {
             while (creating > 0 || closing > 0 || validating > 0) {
                 long remaining = deadline - System.nanoTime();
@@ -814,6 +843,57 @@ public final class LoadResourcePool<T> implements AutoCloseable {
         return true;
     }
 
+    private void startIdleEvictor() {
+        if (health.maxIdleMs <= 0L && health.maxLifetimeMs <= 0L) return;
+        Thread thread = new Thread(this::evictLoop, "att-load-resource-evict");
+        thread.setDaemon(true);
+        evictor = thread;
+        thread.start();
+    }
+
+    /** True while the optional max-idle / max-lifetime sweep is alive. */
+    boolean idleEvictorAlive() {
+        Thread thread = evictor;
+        return thread != null && thread.isAlive();
+    }
+
+    private void evictLoop() {
+        while (true) {
+            List<T> drop;
+            synchronized (this) {
+                if (closed) return;
+                long pause = idleEvictIntervalNanos;
+                if (pause < 1_000_000L) pause = 1_000_000L;
+                try { TimeUnit.NANOSECONDS.timedWait(this, pause); }
+                catch (InterruptedException ignored) { }
+                if (closed) return;
+                drop = evictExpiredLocked();
+            }
+            for (T value : drop) closeAsync(value);
+        }
+    }
+
+    /** Called with the pool monitor held. Closes idle sessions past maxIdle or maxLifetime. No validation and no MQ call here. */
+    private List<T> evictExpiredLocked() {
+        List<T> drop = new ArrayList<T>();
+        if (closed || (health.maxIdleMs <= 0L && health.maxLifetimeMs <= 0L)) return drop;
+        for (T value : new ArrayList<T>(idle)) {
+            Session session = sessions.get(value);
+            if (session == null || !"IDLE".equals(session.state) || session.closeQueued || !expired(session)) continue;
+            if (!idle.remove(value)) continue;
+            recycleLocked(session);
+            drop.add(value);
+        }
+        return drop;
+    }
+
+    private boolean expired(Session session) {
+        long life = ageMs(session.createdNanos);
+        long idleAge = ageMs(session.idleSinceNanos);
+        return (health.maxLifetimeMs > 0L && life >= health.maxLifetimeMs)
+                || (health.maxIdleMs > 0L && idleAge >= health.maxIdleMs);
+    }
+
     private void recycleLocked(Session session) {
         if (!session.discardCounted && !closed) {
             discarded.incrementAndGet();
@@ -827,10 +907,8 @@ public final class LoadResourcePool<T> implements AutoCloseable {
     private IdleAction classify(Session session) {
         if (session.knownDead) return IdleAction.RECYCLE;
         if (!health.active()) return IdleAction.OFFER;
-        long life = ageMs(session.createdNanos);
         long idleAge = ageMs(session.idleSinceNanos);
-        if (health.maxLifetimeMs > 0L && life >= health.maxLifetimeMs) return IdleAction.RECYCLE;
-        if (health.maxIdleMs > 0L && idleAge >= health.maxIdleMs) return IdleAction.RECYCLE;
+        if (expired(session)) return IdleAction.RECYCLE;
         if (health.staleIdleValidation && idleAge >= health.staleIdleThresholdMs) {
             if (idleValidator == null) {
                 session.lastValidationOutcome = "UNSUPPORTED";
