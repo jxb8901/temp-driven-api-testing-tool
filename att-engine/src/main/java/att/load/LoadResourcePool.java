@@ -35,6 +35,8 @@ public final class LoadResourcePool<T> implements AutoCloseable {
     private final Semaphore permits;
     private final Set<T> leased = Collections.newSetFromMap(new IdentityHashMap<T, Boolean>());
     private final Map<T, Session> sessions = new IdentityHashMap<T, Session>();
+    /** Sessions reserved before {@code factory.get()} returns a connection object. */
+    private final ArrayDeque<Session> creatingSessions = new ArrayDeque<Session>();
     private final ArrayDeque<Session> confirmedHistory = new ArrayDeque<Session>();
     private final ArrayDeque<Session> failedHistory = new ArrayDeque<Session>();
     private final AtomicInteger total = new AtomicInteger();
@@ -140,24 +142,23 @@ public final class LoadResourcePool<T> implements AutoCloseable {
         while (true) {
             if (Thread.currentThread().isInterrupted()) throw new InterruptedException("resource preparation cancelled");
             if (System.nanoTime() >= deadlineNanos) throw new java.util.concurrent.TimeoutException("LOAD_PREPARATION_TIMEOUT");
+            final Session reserved;
             synchronized (this) {
                 if (closed) throw new IllegalStateException("resource pool is closed");
                 if (idle.size() + creating >= minIdle || total.get() >= maxSize) return;
-                total.incrementAndGet();
-                creating++;
+                reserved = reserveCreationLocked();
             }
             T value;
             try { value = factory.get(); }
             catch (RuntimeException error) {
-                synchronized (this) { creating--; total.decrementAndGet(); notifyAll(); }
-                failures.incrementAndGet(); throw error;
+                synchronized (this) { failCreationLocked(reserved); }
+                throw error;
             } catch (Error error) {
-                synchronized (this) { creating--; total.decrementAndGet(); notifyAll(); }
-                failures.incrementAndGet(); throw error;
+                synchronized (this) { failCreationLocked(reserved); }
+                throw error;
             }
             if (value == null) {
-                synchronized (this) { creating--; total.decrementAndGet(); notifyAll(); }
-                failures.incrementAndGet();
+                synchronized (this) { failCreationLocked(reserved); }
                 throw new IllegalStateException("resource factory returned null");
             }
             boolean interrupted = Thread.currentThread().isInterrupted();
@@ -166,8 +167,8 @@ public final class LoadResourcePool<T> implements AutoCloseable {
             boolean closeValue;
             synchronized (this) {
                 closedDuringConnect = closed;
-                closeValue = closedDuringConnect || timedOut || interrupted;
-                Session session = registerLocked(value);
+                Session session = materializeLocked(reserved, value);
+                closeValue = session.deadlineFrozen || closedDuringConnect || timedOut || interrupted;
                 if (closeValue) {
                     closeValue = queueClose(session);
                 }
@@ -199,8 +200,7 @@ public final class LoadResourcePool<T> implements AutoCloseable {
     /** Called with the pool monitor held. At most maxSize such daemon threads can be in flight. */
     private PendingCreation startCreation() {
         final PendingCreation pending = new PendingCreation();
-        total.incrementAndGet();
-        creating++;
+        final Session reserved = reserveCreationLocked();
         try {
             Thread thread = new Thread(() -> {
                 T value = null;
@@ -213,17 +213,17 @@ public final class LoadResourcePool<T> implements AutoCloseable {
                 }
                 boolean closeValue = false;
                 synchronized (LoadResourcePool.this) {
-                    creating--;
                     if (failure != null) {
-                        failures.incrementAndGet();
-                        total.decrementAndGet();
+                        failCreationLocked(reserved);
                         pending.failure = failure;
-                    } else if (closed || !idle.offer(value)) {
-                        Session session = registerLocked(value);
-                        closeValue = queueClose(session);
                     } else {
-                        created.incrementAndGet();
-                        markIdle(registerLocked(value));
+                        Session session = materializeLocked(reserved, value);
+                        creating--;
+                        if (session.deadlineFrozen || closed || !idle.offer(value)) closeValue = queueClose(session);
+                        else {
+                            created.incrementAndGet();
+                            markIdle(session);
+                        }
                     }
                     pending.done = true;
                     LoadResourcePool.this.notifyAll();
@@ -233,12 +233,53 @@ public final class LoadResourcePool<T> implements AutoCloseable {
             thread.setDaemon(true);
             thread.start();
         } catch (RuntimeException | Error failure) {
-            creating--;
-            total.decrementAndGet();
-            notifyAll();
+            abandonCreationLocked(reserved);
             throw failure;
         }
         return pending;
+    }
+
+    /** Called with the pool monitor held. The record exists before {@code factory.get()} returns. */
+    private Session reserveCreationLocked() {
+        total.incrementAndGet();
+        creating++;
+        Session session = new Session(++nextSessionId, null, nanoClock.getAsLong());
+        creatingSessions.addLast(session);
+        return session;
+    }
+
+    /** Called with the pool monitor held. The factory never ran, so the reservation leaves no record. */
+    private void abandonCreationLocked(Session session) {
+        creating--;
+        total.decrementAndGet();
+        creatingSessions.remove(session);
+        notifyAll();
+    }
+
+    /**
+     * Called with the pool monitor held. A connect already frozen at the shutdown deadline keeps that
+     * one timeout record and does not add a close failure. No connection object was returned, so the slot is released.
+     */
+    private void failCreationLocked(Session session) {
+        creating--;
+        creatingSessions.remove(session);
+        total.decrementAndGet();
+        failures.incrementAndGet();
+        if (session.deadlineFrozen) remember(session);
+        notifyAll();
+    }
+
+    /** Called with the pool monitor held. Binds the connection object to the session reserved for this create. */
+    private Session materializeLocked(Session reserved, T value) {
+        creatingSessions.remove(reserved);
+        Session existing = sessions.get(value);
+        if (existing != null) {
+            if (reserved != existing && reserved.deadlineFrozen) remember(reserved);
+            return existing;
+        }
+        reserved.value = value;
+        sessions.put(value, reserved);
+        return reserved;
     }
 
     public Lease borrow() throws Exception {
@@ -375,7 +416,11 @@ public final class LoadResourcePool<T> implements AutoCloseable {
                     LoadResourcePool.this.notifyAll();
                 }
             }
-            if (closeAfter[0]) closeTracked(value);
+            if (closeAfter[0]) {
+                // close() and the borrow timeout interrupt this same worker. Drop that flag before disconnect.
+                Thread.interrupted();
+                closeTracked(value);
+            }
         }, "att-load-resource-validate");
         worker.setDaemon(true);
         synchronized (this) { validationWorkers.add(worker); }
@@ -479,7 +524,8 @@ public final class LoadResourcePool<T> implements AutoCloseable {
 
     /**
      * One unconfirmed connect or disconnect per physical session.
-     * A session frozen at the shutdown deadline stays one record when its closer finishes later.
+     * A connect still inside the factory, or a disconnect still running, is one frozen record at the deadline.
+     * A later completion attaches to that record and does not add another close failure.
      * Idle validation that has not reached {@code disconnect()} is not included.
      */
     long failedCloseCount() {
@@ -546,6 +592,7 @@ public final class LoadResourcePool<T> implements AutoCloseable {
         if (!healthEvents.isEmpty()) result.put("healthEvents", new ArrayList<Map<String, Object>>(healthEvents));
         Map<String, Integer> classes = new LinkedHashMap<String, Integer>();
         List<Session> exported = exportSessions();
+        countFailureClasses(classes, creatingSessions);
         countFailureClasses(classes, sessions.values());
         countFailureClasses(classes, failedHistory);
         countFailureClasses(classes, confirmedHistory);
@@ -723,7 +770,13 @@ public final class LoadResourcePool<T> implements AutoCloseable {
         residualCreating = creating;
         residualClosing = closing;
         residualValidating = validating;
-        for (Session session : sessions.values()) {
+        freezeInFlightLocked(creatingSessions);
+        freezeInFlightLocked(sessions.values());
+    }
+
+    /** One frozen timeout record for a connect or disconnect still running at the shutdown deadline. */
+    private void freezeInFlightLocked(Iterable<Session> rows) {
+        for (Session session : rows) {
             if (session.deadlineFrozen) continue;
             if ("VALIDATING".equals(session.state) && !session.closeQueued) {
                 if ("NOT_RUN".equals(session.lastValidationOutcome)) session.lastValidationOutcome = "TIMED_OUT";
@@ -875,6 +928,7 @@ public final class LoadResourcePool<T> implements AutoCloseable {
     private void remember(Session session) {
         if (session.remembered) return;
         session.remembered = true;
+        creatingSessions.remove(session);
         if (session.value != null && sessions.get(session.value) == session) sessions.remove(session.value);
         ArrayDeque<Session> bucket = interesting(session) ? failedHistory : confirmedHistory;
         bucket.addLast(session);
@@ -894,6 +948,11 @@ public final class LoadResourcePool<T> implements AutoCloseable {
         List<Session> other = new ArrayList<Session>();
         Set<Session> seen = Collections.newSetFromMap(new IdentityHashMap<Session, Boolean>());
         for (Session session : failedHistory) if (seen.add(session)) failed.add(session);
+        for (Session session : creatingSessions) {
+            if (!seen.add(session)) continue;
+            if (interesting(session)) failed.add(session);
+            else other.add(session);
+        }
         for (Session session : sessions.values()) {
             seen.add(session);
             if (interesting(session)) failed.add(session);
@@ -1007,7 +1066,7 @@ public final class LoadResourcePool<T> implements AutoCloseable {
 
     private final class Session {
         final int id;
-        final T value;
+        T value;
         final long createdNanos;
         long idleSinceNanos;
         long lastSuccessfulUseNanos;
