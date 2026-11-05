@@ -135,7 +135,7 @@ class LoadReportTest {
         LoadRunResult result = new LoadRunResult("report-manifest", scenario, started, started.plusSeconds(2), metrics.snapshot());
 
         Path report = new LoadReportWriter().write(temp, result);
-        String reportHtml = Files.readString(report);
+        String reportHtml = new String(Files.readAllBytes(report), StandardCharsets.UTF_8);
         assertTrue(reportHtml.contains("aria-label=\"Report sections\""));
         java.util.regex.Matcher anchors = java.util.regex.Pattern.compile("href=\"#([a-z-]+)\"").matcher(reportHtml);
         int anchorCount=0;
