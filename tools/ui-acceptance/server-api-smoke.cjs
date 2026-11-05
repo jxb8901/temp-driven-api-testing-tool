@@ -264,6 +264,7 @@ async function main() {
 
     await page.goto(`${origin}/tools/att/ui/index.html#/advanced-load`);
     await page.getByRole('heading', { name: 'Load testing', level: 1, exact: true }).waitFor();
+    await page.getByLabel('Workspace Package').selectOption('payments');
     await page.locator('.att-template-presets article').nth(5).waitFor();
     assert.equal(await page.locator('.att-template-presets article').count(), 6);
     const catalogResponse = page.waitForResponse(response =>
