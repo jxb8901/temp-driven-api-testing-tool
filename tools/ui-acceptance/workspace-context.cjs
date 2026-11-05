@@ -12,6 +12,7 @@ async function main() {
       const json=body=>route.fulfill({json:body});
       if(path==='packages')return json({items:[{packageId:'payments'},{packageId:'ledger'}]});
       if(/^packages\/[^/]+\/configuration$/.test(path))return json({state:'ready',environments:[{name:'UAT',state:'active'},{name:'SIT',state:'active'}]});
+      if(/^packages\/[^/]+\/package-configuration\/effective$/.test(path))return json({environment:url.searchParams.get('environment')||'SIT',environmentOrigin:url.searchParams.has('environment')?'request':'package'});
       if(path==='jobs') {queries.push(Object.fromEntries(url.searchParams));return json({items:[],total:0,offset:0,limit:100,groups:[],principalSuggestions:[],packageSuggestions:['payments','ledger']});}
       if(path==='jobs/J1234567890ABCDEF')return json({jobId:'J1234567890ABCDEF',packageId:'ledger',environment:'SIT',command:'run',executionType:'run',status:'PASS',targetIdentity:{type:'flow',id:'ledger-flow'}});
       if(path==='jobs/J1234567890ABCDEF/result')return json({job:{jobId:'J1234567890ABCDEF',status:'PASS'},result:{}});
@@ -33,7 +34,11 @@ async function main() {
     await page.waitForTimeout(300);assert.ok(queries.some(q=>q.packageId==='payments'&&q.environment==='UAT'));
     await page.getByLabel('Jobs list scope').selectOption('all');await pkg.selectOption('ledger');
     await page.waitForTimeout(300);assert.equal(await env.inputValue(),'');assert.equal(queries.at(-1).packageId,undefined);
-    await page.getByLabel('Jobs list scope').selectOption('follow');await page.waitForTimeout(300);assert.equal(queries.at(-1).packageId,'ledger');
+    await page.getByLabel('Jobs list scope').selectOption('follow');await page.waitForTimeout(300);assert.equal(queries.at(-1).packageId,'ledger');assert.equal(queries.at(-1).environment,'SIT');
+    const second=await context.newPage();await second.goto(base+'#/jobs');await second.getByLabel('Workspace Package').waitFor();
+    assert.equal(await second.getByLabel('Workspace Package').inputValue(),'');
+    await second.getByLabel('Workspace Package').selectOption('payments');assert.equal(await pkg.inputValue(),'ledger');
+    await second.close();
     await page.setViewportSize({width:390,height:844});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),true);
     assert.deepEqual(errors,[]);console.log('Workspace context isolation and list scope browser checks passed.');
   } finally {await browser.close();await stopFixture(fixture);}
