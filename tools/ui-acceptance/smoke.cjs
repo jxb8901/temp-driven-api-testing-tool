@@ -38,6 +38,7 @@ async function main() {
     assert.equal(await page.locator('.package-list li').count(), 2, 'the Explorer package list should load');
     assert.equal(await page.locator('.package-list li').filter({ hasText: 'payments' }).count(), 1,
       'the Explorer list should include the payments Package');
+    await page.getByLabel('Workspace Package').selectOption('payments');
 
     for (const [route, title, activeNav] of [
       ['#/packages', 'Explorer', 'explorer'],
