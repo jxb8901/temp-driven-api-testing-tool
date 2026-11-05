@@ -159,6 +159,8 @@ it('prefills a safe RUN replay from an opaque draft reference and validates type
   await act(async () => root.render(<NavigationGuardContext.Provider value={guard}><RunPage packageId="payments" replayDraftId="R0123456789ABCDEF0123456789ABCDEF" replaySourceJobId="J0123456789ABCDEF" onAccepted={onAccepted} onSchedule={onSchedule} schedulingEnabled /></NavigationGuardContext.Provider>));
   await settleDebugForm();
   expect(api.getJobReplayEditorDraft).toHaveBeenCalledWith('J0123456789ABCDEF','R0123456789ABCDEF0123456789ABCDEF');
+  expect((control('Package ID') as HTMLInputElement).disabled).toBe(true);
+  expect(host.textContent).toContain("Replay uses the source Job's Package");
   expect((control('Target ID') as HTMLInputElement).value).toBe('lookup-customer');
   expect((control('Environment') as HTMLSelectElement).value).toBe('');
   expect(host.textContent).toContain('Resolved Environment: SIT · Origin: Package Manifest');
