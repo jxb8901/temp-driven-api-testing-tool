@@ -22,7 +22,8 @@
     "smoke:saved-scenario-review": "node saved-scenario-review.cjs",
     "smoke:package-manifest": "node package-manifest.cjs",
     "smoke:saved-scenario-lifecycle": "node saved-scenario-lifecycle.cjs",
-    "smoke:workspace-context": "node workspace-context.cjs"
+    "smoke:workspace-context": "node workspace-context.cjs",
+    "smoke:report-fragments": "node report-fragments.cjs"
   },
   "devDependencies": {
     "axe-core": "4.11.4",
