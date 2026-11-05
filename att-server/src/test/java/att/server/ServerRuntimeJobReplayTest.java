@@ -225,7 +225,7 @@ class ServerRuntimeJobReplayTest {
                         "Draft submission should perform only its freshness check, not re-inspect the validated RUN input");
                 Map<String,Object> metadata=runtime.jobReplay(original,"alice");assertEquals(true,metadata.get("available"),type+": "+metadata);
                 assertFalse(metadata.toString().contains(fixture.root.toString()),"No host roots in browser replay data");
-                assertThrows(ServerRuntime.NotFoundException.class,()->runtime.jobReplay(original,"bob"));
+                assertEquals(true,runtime.jobReplay(original,"bob").get("available"));
                 JsonNode retained=ServerRuntime.JSON.valueToTree(metadata.get("definition"));
                 assertEquals(!"case".equals(type),retained.path("options").path("debug").asBoolean());
                 if("batch".equals(type))assertEquals(List.of("cases.default.C1"),ServerRuntime.JSON.convertValue(retained.path("selection").path("caseIds"),List.class));
@@ -239,6 +239,13 @@ class ServerRuntimeJobReplayTest {
                 String rerun=String.valueOf(runtime.rerunJob(original,confirmation,"alice").get("jobId"));
                 assertNotEquals(original,rerun);assertEquals(rerun,runtime.rerunJob(original,confirmation,"alice").get("jobId"));await(runtime,rerun);
                 assertEquals(original,runtime.jobRecord(rerun).get("rerunOfJobId"));assertEquals(before.get("finishedAt"),runtime.jobRecord(original).get("finishedAt"));assertEquals(originalResult,runtime.store.get(original).get("resultJson"));
+                Map<String,Object> peerReview=runtime.createJobReplayDraft(original,"bob");
+                var peerConfirmation=ServerRuntime.JSON.valueToTree(Map.of("confirm",true,"intentId",peerReview.get("intentId")));
+                assertThrows(ServerRuntime.NotFoundException.class,()->runtime.rerunJob(original,peerConfirmation,"alice"));
+                String peerRerun=String.valueOf(runtime.rerunJob(original,peerConfirmation,"bob").get("jobId"));
+                await(runtime,peerRerun);
+                assertEquals(original,runtime.jobRecord(peerRerun).get("rerunOfJobId"));
+                assertEquals("bob",runtime.jobRecord(peerRerun).get("executionPrincipal"));
                 Map<String,Object> scheduleReview=runtime.createJobReplayDraft(original,"alice");
                 LoadSchedule schedule=runtime.createLoadSchedule(ServerRuntime.JSON.valueToTree(Map.of("name",type,"executionType","run","packageId","p","environment","SIT","draftId",scheduleReview.get("draftId"),"timezone","UTC","cron","0 2 * * *","enabled",false)),"alice");
                 assertEquals(original,schedule.sourceJobId);
@@ -272,9 +279,13 @@ class ServerRuntimeJobReplayTest {
         }
         try(ServerRuntime runtime=fixture.open()) {
             for(String source:List.of(original,inlineJob,quickJob)) {
-                assertEquals(true,runtime.jobReplay(source,"alice").get("available"));
-                Map<String,Object> review=runtime.createJobReplayDraft(source,"alice");
-                String id=String.valueOf(runtime.rerunJob(source,ServerRuntime.JSON.valueToTree(Map.of("confirm",true,"intentId",review.get("intentId"))),"alice").get("jobId"));await(runtime,id);
+                assertEquals(true,runtime.jobReplay(source,"bob").get("available"));
+                assertEquals(200,apiRequest(runtime,"GET","/jobs/"+source+"/replay","bob",Map.of()).get("status"));
+                Map<String,Object> review=runtime.createJobReplayDraft(source,"bob");
+                assertNotNull(runtime.getJobReplayEditorDraft(source,String.valueOf(review.get("draftRef")),"bob"));
+                assertThrows(ServerRuntime.NotFoundException.class,()->runtime.getJobReplayEditorDraft(source,String.valueOf(review.get("draftRef")),"alice"));
+                String id=String.valueOf(runtime.rerunJob(source,ServerRuntime.JSON.valueToTree(Map.of("confirm",true,"intentId",review.get("intentId"))),"bob").get("jobId"));await(runtime,id);
+                assertEquals("bob",runtime.jobRecord(id).get("executionPrincipal"));assertEquals(source,runtime.jobRecord(id).get("rerunOfJobId"));
                 assertEquals("load",runtime.jobRecord(id).get("executionType"));
                 Map<String,Object> scheduleReview=runtime.createJobReplayDraft(source,"alice");
                 LoadSchedule schedule=runtime.createLoadSchedule(ServerRuntime.JSON.valueToTree(Map.of("name","LOAD replay","executionType","load","packageId","p","environment","SIT","draftId",scheduleReview.get("draftId"),"timezone","UTC","cron","0 2 * * *","enabled",false)),"alice");
@@ -282,8 +293,8 @@ class ServerRuntimeJobReplayTest {
                 String scheduled=String.valueOf(runtime.triggerLoadSchedule(schedule.id,"alice").get("jobId"));await(runtime,scheduled);
                 runtime.deleteLoadSchedule(schedule.id,"alice");
                 assertFalse(runtime.jobReplay(scheduled,"alice").containsKey("originatingScheduleId"));
-                assertEquals(true,runtime.jobReplay(scheduled,"alice").get("available"));
-                assertNotNull(runtime.createJobReplayDraft(scheduled,"alice").get("draftId"));
+                assertEquals(true,runtime.jobReplay(scheduled,"bob").get("available"));
+                assertNotNull(runtime.createJobReplayDraft(scheduled,"bob").get("draftId"));
             }
             Map<String,Object> review=runtime.createJobReplayDraft(original,"alice");
             runtime.store.setAuthActive("alice",false);
@@ -469,6 +480,10 @@ class ServerRuntimeJobReplayTest {
             original=String.valueOf(runtime.submitRunDraft(submit(String.valueOf(validated.get("draftId"))),"alice","alice").get("jobId"));await(runtime,original);
             Map<String,String> stored=runtime.store.executionSpec(original);JobExecutionSpec spec=JobExecutionSpec.parse(stored.get("spec"));
             assertEquals("package",spec.configuration().get("environmentOrigin"));assertEquals("UAT",spec.configuration().get("environment"));
+            assertEquals("UAT",runtime.jobRecord(original).get("environment"));
+            assertEquals("UAT",runtime.store.get(original).get("environment"));
+            assertEquals(1L,runtime.store.queryJobs(JobQuery.parse(Map.of("packageId","p","environment","UAT"),"alice")).get("total"));
+            assertEquals(0L,runtime.store.queryJobs(JobQuery.parse(Map.of("environment","SIT"),"alice")).get("total"));
             String config=Files.readString(runtimeConfig);Files.writeString(runtimeConfig,config.replace("environments: {SIT: {}, UAT: {}}","environments: {SIT: {}}"));
             Map<String,Object> invalid=runtime.createJobReplayDraft(original,"alice",ServerRuntime.JSON.valueToTree(Map.of("sourcePolicy","current")));
             assertEquals("invalid",invalid.get("validationState"));assertEquals("ATT-SERVER-REPLAY-VALIDATION-FAILED",invalid.get("errorCode"));

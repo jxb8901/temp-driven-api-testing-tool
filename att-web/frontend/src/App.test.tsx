@@ -19,6 +19,7 @@ describe('App Dashboard job refresh', () => {
   let root: Root;
 
   beforeEach(() => {
+    sessionStorage.clear();
     localStorage.setItem('att-ui-language', 'en');
     localStorage.setItem('att-ui-theme', 'light');
     window.history.replaceState(null, '', window.location.pathname + window.location.search);
@@ -50,6 +51,23 @@ describe('App Dashboard job refresh', () => {
     if (!link) throw new Error(`Missing ${name} navigation link`);
     act(() => link.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 })));
   }
+
+  it('preserves Workspace while a different historical Job is opened and reloaded', async () => {
+    sessionStorage.setItem('att.workspace.context', JSON.stringify({packageId:'payments', environment:'UAT'}));
+    window.history.replaceState(null, '', window.location.pathname + '#/jobs/J1234567890ABCDEF');
+    vi.spyOn(api, 'getDeclaredConfiguration').mockResolvedValue({environments:[{name:'UAT',state:'active'}]});
+    vi.spyOn(api, 'getJob').mockResolvedValue({jobId:'J1234567890ABCDEF',command:'run',packageId:'legacy',environment:'SIT',status:'PASS',targetIdentity:{type:'flow',id:'checkout'}});
+    await act(async () => root.render(<App />)); await settle();
+    const packageSelect = host.querySelector<HTMLSelectElement>('[aria-label="Workspace Package"]')!;
+    const envSelect = host.querySelector<HTMLSelectElement>('[aria-label="Workspace Environment"]')!;
+    expect(packageSelect.value).toBe('payments'); expect(envSelect.value).toBe('UAT');
+    expect(packageSelect.disabled).toBe(true); expect(envSelect.disabled).toBe(true);
+    expect(JSON.parse(sessionStorage.getItem('att.workspace.context')!)).toEqual({packageId:'payments',environment:'UAT'});
+    act(() => root.unmount()); root=createRoot(host);
+    await act(async () => root.render(<App />)); await settle();
+    expect(host.querySelector<HTMLSelectElement>('[aria-label="Workspace Package"]')?.value).toBe('payments');
+    expect(host.querySelector<HTMLSelectElement>('[aria-label="Workspace Environment"]')?.value).toBe('UAT');
+  });
 
   it('refreshes after returning to Dashboard and shows newly completed Debug and Load rows', async () => {
     const updatedRows: JobSummary[] = [
@@ -162,8 +180,7 @@ describe('App Dashboard job refresh', () => {
     const durationInput = () => host.querySelector<HTMLInputElement>('input[placeholder="e.g. 30s or 5m"]');
     await act(async () => { await vi.waitFor(() => expect(durationInput()?.value).toBe('30s'), { timeout: 5000 }); });
     expect(durationInput()?.value).toBe('30s');
-    const environmentText = () => [...host.querySelectorAll<HTMLElement>('.context-chip')]
-      .find(item => item.querySelector('span')?.textContent === 'Environment')?.querySelector('strong')?.textContent;
+    const environmentText = () => host.querySelector<HTMLSelectElement>('select[aria-label="Workspace Environment"]')?.value;
     const initialSharedEnvironment = environmentText();
 
     const duration = durationInput()!;
@@ -171,7 +188,7 @@ describe('App Dashboard job refresh', () => {
       Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(duration, '5m');
       duration.dispatchEvent(new Event('input', { bubbles: true }));
     });
-    const environment = () => host.querySelectorAll('select')[2] as HTMLSelectElement;
+    const environment = () => [...host.querySelectorAll('label')].find(label => label.textContent?.startsWith('Environment'))!.querySelector('select') as HTMLSelectElement;
     await act(async () => {
       environment().value = 'UAT';
       environment().dispatchEvent(new Event('change', { bubbles: true }));
@@ -194,7 +211,7 @@ describe('App Dashboard job refresh', () => {
     await settle();
 
     expect(window.location.hash).toContain('environment=UAT');
-    expect(environmentText()).toBe('UAT');
+    expect(environmentText()).toBe(initialSharedEnvironment);
     expect(host.querySelector<HTMLInputElement>('input[placeholder="e.g. 30s or 5m"]')?.value).toBe('90s');
     expect(host.querySelector<HTMLInputElement>('input[type="number"]')?.value).toBe('9');
     expect(host.querySelector<HTMLInputElement>('input[aria-label="region value"]')?.value).toBe('uat-region');

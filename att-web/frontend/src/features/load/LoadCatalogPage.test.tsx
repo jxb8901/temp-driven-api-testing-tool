@@ -11,6 +11,7 @@ const openDetail = vi.fn();
 let host: HTMLDivElement;
 let root: Root;
 beforeEach(() => {
+  sessionStorage.setItem('att.catalog.scope', JSON.stringify({mode:'custom', packageId:'payments'}));
   host = document.createElement('div'); document.body.append(host); root = createRoot(host);
   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 });
@@ -23,6 +24,7 @@ function unverifiedScenario(path = 'load/nightly.yaml') {
 
 describe('LoadCatalogPage', () => {
   it('discovers package catalogs with a concurrency cap of four while preserving package order', async () => {
+    sessionStorage.setItem('att.catalog.scope', JSON.stringify({mode:'all'}));
     let active = 0;
     let maximumActive = 0;
     const pending = new Map<string, (page: unknown) => void>();
@@ -87,7 +89,7 @@ describe('LoadCatalogPage', () => {
     expect(onSchedule).toHaveBeenCalledWith({ packageId: 'payments', environment: 'SIT', draftId: `C${'a'.repeat(32)}`,
       previewYaml: 'schemaVersion: att-load/v1.9\n', expiresAt: expect.any(String), executionType: 'load' });
     await act(async () => [...host.querySelectorAll('button')].find(button => button.textContent === 'Clear filters')!.click());
-    expect((host.querySelector('[aria-label="Catalog Environment for payments"]') as HTMLSelectElement).value).toBe('SIT');
+    expect((host.querySelector('[aria-label="Catalog Environment for selected package"]') as HTMLSelectElement).disabled).toBe(true);
   });
 
   it('disables Schedule and requests revalidation when the catalog draft is already expired', async () => {
@@ -312,6 +314,7 @@ describe('LoadCatalogPage', () => {
   });
 
   it('keeps healthy package resources available without fetching job history when one package fails, with package retry', async () => {
+    sessionStorage.setItem('att.catalog.scope', JSON.stringify({mode:'all'}));
     let brokenAttempts = 0;
     let healthyPages = 0;
     const api = {
@@ -348,6 +351,7 @@ describe('LoadCatalogPage', () => {
   });
 
   it('clears old-query retry controls and ignores a detached retry while the new search is loading', async () => {
+    sessionStorage.setItem('att.catalog.scope', JSON.stringify({mode:'all'}));
     let resolveSearchPackage: ((page: unknown) => void) | undefined;
     let brokenAttempts = 0;
     const api = {

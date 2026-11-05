@@ -246,7 +246,7 @@ class AuthenticationIntegrationTest {
             assertEquals(200,userMonitoring.statusCode(),userMonitoring.body());
             JsonNode monitoring=ServerRuntime.JSON.readTree(userMonitoring.body());
             assertEquals("att-monitoring/v1",monitoring.path("schemaVersion").asText());
-            assertEquals("4.2.8",monitoring.path("health").path("version").asText());
+            assertEquals("4.2.9",monitoring.path("health").path("version").asText());
             assertTrue(monitoring.path("workers").path("maxConcurrent").isIntegralNumber());
             assertTrue(monitoring.path("workers").path("activeLoadJobs").isIntegralNumber());
             assertTrue(monitoring.path("http").path("successfulRequests").isIntegralNumber());
@@ -586,7 +586,7 @@ class AuthenticationIntegrationTest {
             assertEquals(200,request(port,null));assertEquals(200,get(port,"/att/ui/index.html",null));
             assertEquals(200,get(port,"/att/ui/app.js",null));
             assertEquals(200,get(port,"/att/api/v1/health",null));
-            assertEquals("4.2.8",getJson(port,"/att/api/v1/version",null).path("version").asText());
+            assertEquals("4.2.9",getJson(port,"/att/api/v1/version",null).path("version").asText());
             assertEquals("debug",getJson(port,"/att/api/v1/packages/debug",null).path("packageId").asText());
             JsonNode resources=getJson(port,"/att/api/v1/packages/debug/resources?type=template",null);
             String resourceId=resources.path("items").get(0).path("resourceId").asText();
@@ -792,6 +792,8 @@ class AuthenticationIntegrationTest {
                             "environment","SIT","timezone","UTC","cron","0 2 * * *","enabled",false)),201);
             String scheduleId=schedule.path("id").asText();assertFalse(scheduleId.isBlank());
             assertEquals(scheduleId,getJson(port,"/att/api/v1/load-schedules",null).path("items").get(0).path("id").asText());
+            assertEquals(0,getJson(port,"/att/api/v1/load-schedules?packageId=debug&environmentDefault=true",null).path("items").size());
+            assertEquals(scheduleId,getJson(port,"/att/api/v1/load-schedules?packageId=debug&environment=SIT",null).path("items").get(0).path("id").asText());
             assertEquals(scheduleId,getJson(port,"/att/api/v1/load-schedules/"+scheduleId,null).path("id").asText());
             assertEquals(200,send(client,port,"DELETE","/att/api/v1/load-schedules/"+scheduleId,"https://att.example.test",null,"{}").statusCode());
         } finally {

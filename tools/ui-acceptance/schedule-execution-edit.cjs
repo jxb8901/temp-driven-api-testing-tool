@@ -20,7 +20,7 @@ async function main() {
     }];
     const mutations = [];
     await context.route('**/api/v1/version', route => route.fulfill({ json: {
-      version: '4.2.8', apiVersion: '1', inlineLoadEnabled: true, loadSchedulingEnabled: true, unifiedRunVersion: 'att-execution/v1',
+      version: '4.2.9', apiVersion: '1', inlineLoadEnabled: true, loadSchedulingEnabled: true, unifiedRunVersion: 'att-execution/v1',
     } }));
     await context.route('**/api/v1/schedules**', async route => {
       const request = route.request();

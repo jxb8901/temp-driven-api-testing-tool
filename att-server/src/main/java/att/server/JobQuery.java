@@ -6,7 +6,7 @@ import java.util.*;
 /** Validated SQL predicate inputs; no caller text is interpolated as SQL. */
 final class JobQuery {
     int offset,limit=100;
-    String principal,principalMode="all",actor,packageId,type,status,from,to,search,exactJobId,sort="newest",deletion="all";
+    String principal,principalMode="all",actor,packageId,environment,type,status,from,to,search,exactJobId,sort="newest",deletion="all";
     String submissionSource,executionPrincipal,executionPrincipalMode="all",scheduleOwner,scheduleOwnerMode="all",triggeredBy,triggeredByMode="all";
     boolean executionPrincipalExact,scheduleOwnerExact,triggeredByExact;
     boolean pinnedOnly,grouped;
@@ -19,7 +19,7 @@ final class JobQuery {
         q.scheduleOwner=bounded(values.get("scheduleOwner"),256);q.scheduleOwnerMode=choice(values.get("scheduleOwnerMode"),q.scheduleOwner==null?"all":"text","all","mine","text");
         q.triggeredBy=bounded(values.get("triggeredBy"),256);q.triggeredByMode=choice(values.get("triggeredByMode"),q.triggeredBy==null?"all":"text","all","mine","text");
         q.executionPrincipalExact=bool(values.get("executionPrincipalExact"));q.scheduleOwnerExact=bool(values.get("scheduleOwnerExact"));q.triggeredByExact=bool(values.get("triggeredByExact"));
-        q.packageId=bounded(values.get("packageId"),64);q.type=choice(values.get("executionType"),null,"run","debug","load","validate");
+        q.packageId=bounded(values.get("packageId"),64);q.environment=bounded(values.get("environment"),128);q.type=choice(values.get("executionType"),null,"run","debug","load","validate");
         q.status=choice(values.get("status"),null,"QUEUED","PREPARING","RUNNING","CANCEL_REQUESTED","PASS","FAIL","ERROR","INVALID","CANCELLED");
         q.sort=choice(values.get("sort"),"newest","newest","oldest","target-asc","target-desc");
         q.deletion=choice(values.get("deletion"),"all","all","pending","unmarked");
@@ -43,6 +43,7 @@ final class JobQuery {
         identityPredicate(sql,parameters,"schedule_owner",scheduleOwnerMode,scheduleOwner,scheduleOwnerExact,actor);
         identityPredicate(sql,parameters,"triggered_by",triggeredByMode,triggeredBy,triggeredByExact,actor);
         if(packageId!=null){sql.append(" AND package_id=?");parameters.add(packageId);}
+        if(environment!=null){sql.append(" AND environment=?");parameters.add(environment);}
         if(type!=null){sql.append(" AND ").append("run".equals(type)?"command IN ('run','debug')":"command=?");if(!"run".equals(type))parameters.add(type);}
         if(status!=null){sql.append(" AND status=?");parameters.add(status);}
         if(from!=null){sql.append(" AND CAST(created_at AS TIMESTAMP WITH TIME ZONE)>=CAST(? AS TIMESTAMP WITH TIME ZONE)");parameters.add(from);}

@@ -108,7 +108,7 @@ describe('ScheduledLoadPage', () => {
     await change(host.querySelectorAll('.att-schedule-filters select')[0] as HTMLSelectElement, 'run');
     expect(host.textContent).toContain('Reconciliation');
     expect(host.textContent).not.toContain('Nightly payments');
-    await change(host.querySelectorAll('.att-schedule-filters select')[3] as HTMLSelectElement, 'alice');
+    await change([...host.querySelectorAll<HTMLLabelElement>('.att-schedule-filters label')].find(label => label.textContent?.startsWith('Owner'))!.querySelector('select')!, 'alice');
     expect(host.textContent).toContain('No schedules match');
     await click([...host.querySelectorAll('button')].find(button => button.textContent === 'Clear filters')!);
     expect(host.textContent).toContain('2 of 2 schedules shown.');
@@ -135,7 +135,7 @@ describe('ScheduledLoadPage', () => {
     await click([...host.querySelectorAll('button')].find(button => button.textContent === 'Back to Schedules')!);
     await click([...host.querySelectorAll('button')].find(button => button.textContent === 'Discard changes')!);
     expect(host.querySelector('form')).toBeNull();
-    expect(setStorage).not.toHaveBeenCalled();
+    expect(setStorage.mock.calls.every(([key]) => key === 'att.schedules.scope')).toBe(true);
   });
 
   it.each(['run', 'load'] as const)('saves a validated %s draft ID without reconstructing its execution inputs', async executionType => {

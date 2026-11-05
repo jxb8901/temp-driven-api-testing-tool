@@ -1,4 +1,5 @@
-import { Fragment, useEffect, useRef, useState, type KeyboardEvent } from 'react';
+import { Fragment, useContext, useEffect, useRef, useState, type KeyboardEvent } from 'react';
+import { AppShellContext } from '../../AppShell';
 import { IdentityCombobox, type IdentityFilter } from './IdentityCombobox';
 import type { JobsFeatureProps, JobsQueryResult, JobSummary } from './types';
 import { JobReplayActions } from './JobReplayActions';
@@ -42,6 +43,9 @@ function FooterMenu({ label, disabled, actions }: { label: string; disabled: boo
 
 export function JobsList({ api, onOpenJob, onSchedule, onEditSchedule, executionType, onExecutionTypeChange, schedulingEnabled }: JobsFeatureProps) {
   const [saved] = useState(savedFilters);
+  const workspace = useContext(AppShellContext);
+  const [scope, setScope] = useState<'follow'|'all'|'custom'>(saved.scope === 'all' || saved.scope === 'custom' ? saved.scope : saved.packageId ? 'custom' : 'follow');
+  const [customEnvironment, setCustomEnvironment] = useState(saved.environment || '');
   const [moreFilters, setMoreFilters] = useState(false);
   const [result, setResult] = useState<JobsQueryResult>({items: [], total: 0, offset: 0, limit: 100, groups: [], principalSuggestions: [], packageSuggestions: []});
   const [source, setSource] = useState<'manual'|'scheduled'|''>((saved.submissionSource==='manual'||saved.submissionSource==='scheduled'?saved.submissionSource:saved.principalMode==='schedule'?'scheduled':''));
@@ -49,26 +53,36 @@ export function JobsList({ api, onOpenJob, onSchedule, onEditSchedule, execution
   const [ownerIdentity,setOwnerIdentity]=useState<IdentityFilter>(()=>savedIdentity(saved,'scheduleOwner'));
   const [triggerIdentity,setTriggerIdentity]=useState<IdentityFilter>(()=>savedIdentity(saved,'triggeredBy'));
   const [packageId, setPackage] = useState(saved.packageId || ''); const [type, setType] = useState(executionType || saved.type || '');
+  const effectivePackage = scope === 'follow' ? workspace?.selectedPackage || '' : scope === 'custom' ? packageId : '';
+  const effectiveEnvironment = scope === 'follow' ? workspace?.selectedEnvironment || '' : scope === 'custom' ? customEnvironment : '';
+  const queryEnvironment = scope === 'follow' && effectivePackage && !effectiveEnvironment
+    ? workspace?.workspaceResolvedEnvironment : effectiveEnvironment;
   const [status, setStatus] = useState(saved.status || ''); const [from, setFrom] = useState(saved.from || ''); const [to, setTo] = useState(saved.to || '');
   const [pinned, setPinned] = useState(saved.pinned === 'true'); const [deletion, setDeletion] = useState(saved.deletion || 'all'); const [search, setSearch] = useState(saved.search || '');
   const [sort, setSort] = useState(saved.sort || 'newest'); const [grouped, setGrouped] = useState(saved.grouped === 'true'); const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [pageSize, setPageSize] = useState(storedSize); const [page, setPage] = useState(0); const [version, setVersion] = useState(0);
+  useEffect(() => { setPage(0); }, [effectivePackage, effectiveEnvironment]);
   const [loading, setLoading] = useState(true); const [error, setError] = useState(''); const [busy, setBusy] = useState(false);
   const [outcomes, setOutcomes] = useState<Array<{jobId: string; outcome: string}>>([]); const [now, setNow] = useState(Date.now());
   const mutationLock = useRef(false); const sequence = useRef(0); const [copyState, setCopyState] = useState('');
   const previousType = useRef(executionType);
   useEffect(() => { if (previousType.current !== executionType) { previousType.current = executionType; setType(executionType || ''); setPage(0); } }, [executionType]);
-  useEffect(() => { try { sessionStorage.setItem('att.jobs.filters', JSON.stringify({submissionSource:source,executionPrincipal:executionIdentity.value,executionPrincipalMode:executionIdentity.mode,executionPrincipalExact:String(executionIdentity.exact),scheduleOwner:ownerIdentity.value,scheduleOwnerMode:ownerIdentity.mode,scheduleOwnerExact:String(ownerIdentity.exact),triggeredBy:triggerIdentity.value,triggeredByMode:triggerIdentity.mode,triggeredByExact:String(triggerIdentity.exact),packageId,type,status,from,to,deletion,search,sort,pinned:String(pinned),grouped:String(grouped)})); } catch { /* Storage can be unavailable. */ } }, [source,executionIdentity,ownerIdentity,triggerIdentity,packageId,type,status,from,to,deletion,search,sort,pinned,grouped]);
+  useEffect(() => { try { sessionStorage.setItem('att.jobs.filters', JSON.stringify({submissionSource:source,executionPrincipal:executionIdentity.value,executionPrincipalMode:executionIdentity.mode,executionPrincipalExact:String(executionIdentity.exact),scheduleOwner:ownerIdentity.value,scheduleOwnerMode:ownerIdentity.mode,scheduleOwnerExact:String(ownerIdentity.exact),triggeredBy:triggerIdentity.value,triggeredByMode:triggerIdentity.mode,triggeredByExact:String(triggerIdentity.exact),packageId,environment:customEnvironment,scope,type,status,from,to,deletion,search,sort,pinned:String(pinned),grouped:String(grouped)})); } catch { /* Storage can be unavailable. */ } }, [source,executionIdentity,ownerIdentity,triggerIdentity,packageId,customEnvironment,scope,type,status,from,to,deletion,search,sort,pinned,grouped]);
   useEffect(() => { const timer = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(timer); }, []);
   useEffect(() => {
     const controller = new AbortController(); const current = ++sequence.current; setLoading(true); setError('');
+    if (scope === 'follow' && effectivePackage && !effectiveEnvironment && queryEnvironment === null) {
+      setResult({items: [], total: 0, offset: 0, limit: pageSize, groups: [], principalSuggestions: [], packageSuggestions: []});
+      if (workspace?.workspaceResolutionError) { setLoading(false); setError('Workspace Package default could not be resolved. Choose a valid Package or Environment.'); }
+      return () => controller.abort();
+    }
     const timer = setTimeout(async () => {
       try {
         const query = { offset: page * pageSize, limit: pageSize, submissionSource:source||undefined,
           executionPrincipal:executionIdentity.mode==='text'?executionIdentity.value:undefined,executionPrincipalMode:executionIdentity.mode,executionPrincipalExact:executionIdentity.exact||undefined,
           scheduleOwner:ownerIdentity.mode==='text'?ownerIdentity.value:undefined,scheduleOwnerMode:ownerIdentity.mode,scheduleOwnerExact:ownerIdentity.exact||undefined,
           triggeredBy:triggerIdentity.mode==='text'?triggerIdentity.value:undefined,triggeredByMode:triggerIdentity.mode,triggeredByExact:triggerIdentity.exact||undefined,
-          packageId: packageId || undefined, executionType: type || undefined, status: status || undefined, from: from ? new Date(`${from}T00:00:00`).toISOString() : undefined, to: to ? new Date(`${to}T23:59:59.999`).toISOString() : undefined, search: search || undefined, sort: grouped ? 'target-asc' : sort, pinnedOnly: pinned, deletion, groupBy: grouped ? 'target' : undefined, signal: controller.signal };
+          packageId: effectivePackage || undefined, environment: queryEnvironment || undefined, executionType: type || undefined, status: status || undefined, from: from ? new Date(`${from}T00:00:00`).toISOString() : undefined, to: to ? new Date(`${to}T23:59:59.999`).toISOString() : undefined, search: search || undefined, sort: grouped ? 'target-asc' : sort, pinnedOnly: pinned, deletion, groupBy: grouped ? 'target' : undefined, signal: controller.signal };
         if (!api.queryJobs) throw new Error('This Server does not support paginated Jobs. Refresh Studio and Server together.');
         const response = await api.queryJobs(query);
         if (controller.signal.aborted || sequence.current !== current) return;
@@ -78,7 +92,7 @@ export function JobsList({ api, onOpenJob, onSchedule, onEditSchedule, execution
       finally { if (!controller.signal.aborted && sequence.current === current) setLoading(false); }
     }, 180);
     return () => { clearTimeout(timer); controller.abort(); };
-  }, [api, page, pageSize, source, executionIdentity, ownerIdentity, triggerIdentity, packageId, type, status, from, to, pinned, deletion, search, sort, grouped, version]);
+  }, [api, page, pageSize, source, executionIdentity, ownerIdentity, triggerIdentity, effectivePackage, effectiveEnvironment, queryEnvironment, scope, workspace?.workspaceResolutionError, type, status, from, to, pinned, deletion, search, sort, grouped, version]);
   async function mutate(ids: string[], action: 'pin' | 'unpin' | 'mark' | 'unmark') {
     if (mutationLock.current || loading || !ids.length) return;
     mutationLock.current = true; setBusy(true); setOutcomes([]); setError('');
@@ -138,7 +152,7 @@ export function JobsList({ api, onOpenJob, onSchedule, onEditSchedule, execution
     <section className="att-query-filter-panel att-jobs-filter-panel" aria-label="Job filters"><fieldset disabled={busy} className="att-jobs-filter-grid">
       <label>Source<select aria-label="Source" value={source} onChange={event=>{setSource(event.currentTarget.value as 'manual'|'scheduled'|'');setPage(0);}}><option value="">All sources</option><option value="manual">Manual</option><option value="scheduled">Scheduled</option></select></label>
       <label title="Server-filtered by the saved Worker execution identity">Execution Principal<IdentityCombobox label="Execution Principal" value={executionIdentity.value} mode={executionIdentity.mode} suggestions={result.executionPrincipalSuggestions||[]} disabled={busy} onChange={filter=>{setExecutionIdentity(filter);setPage(0);}} /></label>
-      <label>Package<select aria-label="Package" value={packageId} onChange={update(setPackage)}><option value="">All packages</option>{[...new Set([...result.packageSuggestions,...(packageId?[packageId]:[])])].map(value => <option key={value}>{value}</option>)}</select></label>
+      <label>List scope<select aria-label="Jobs list scope" value={scope} onChange={event => {setScope(event.currentTarget.value as 'follow'|'all'|'custom');setPage(0);}}><option value="follow">Follow Workspace</option><option value="all">All</option><option value="custom">Custom</option></select></label>
       <label>Type<select aria-label="Type" value={type} onChange={event => {setType(event.currentTarget.value);setPage(0);onExecutionTypeChange?.(event.currentTarget.value==='load'?'load':undefined);}}><option value="">All types</option><option value="run">RUN / Debug</option><option value="load">LOAD</option><option value="validate">Validate</option></select></label>
       <label>Status<select aria-label="Status" value={status} onChange={update(setStatus)}><option value="">All statuses</option>{['QUEUED','PREPARING','RUNNING','CANCEL_REQUESTED',...terminalStatuses].map(value => <option key={value}>{value}</option>)}</select></label>
       <label>Target or Job ID<input type="search" title="Substring search; use job: followed by the full Job ID for exact lookup, including during target indexing" placeholder="Target, ID, or job:full-ID" value={search} onChange={update(setSearch)} /></label>
@@ -146,9 +160,12 @@ export function JobsList({ api, onOpenJob, onSchedule, onEditSchedule, execution
     <div className="att-jobs-filter-actions">
       <button type="button" disabled={busy} aria-expanded={moreFilters} aria-controls="jobs-more-filters" onClick={() => setMoreFilters(value => !value)}>More filters{extraFilters.length ? ` (${extraFilters.length})` : ''}</button>
       {extraFilters.length > 0 && <span className="att-jobs-active-filters">{extraFilters.join(' · ')}</span>}
-      <div className="att-query-filter-actions"><button type="button" disabled={busy} onClick={() => {setSource('');setExecutionIdentity({mode:'all',value:'',exact:false});setOwnerIdentity({mode:'all',value:'',exact:false});setTriggerIdentity({mode:'all',value:'',exact:false});setPackage('');setType('');setStatus('');setFrom('');setTo('');setPinned(false);setDeletion('all');setSearch('');setSort('newest');setPage(0);onExecutionTypeChange?.(undefined);}}>Clear filters</button><button type="button" disabled={busy || loading} onClick={() => setVersion(value=>value+1)}>Refresh jobs</button></div>
+      <div className="att-query-filter-actions"><button type="button" disabled={busy} onClick={() => {setSource('');setExecutionIdentity({mode:'all',value:'',exact:false});setOwnerIdentity({mode:'all',value:'',exact:false});setTriggerIdentity({mode:'all',value:'',exact:false});setPackage('');setCustomEnvironment('');setScope('follow');setType('');setStatus('');setFrom('');setTo('');setPinned(false);setDeletion('all');setSearch('');setSort('newest');setPage(0);onExecutionTypeChange?.(undefined);}}>Clear filters</button><button type="button" disabled={busy || loading} onClick={() => setVersion(value=>value+1)}>Refresh jobs</button></div>
     </div>
     <fieldset id="jobs-more-filters" disabled={busy} hidden={!moreFilters} className="att-jobs-filter-grid att-jobs-more-filters">
+      <label>Package<select aria-label="Package" value={effectivePackage} onChange={event => {setPackage(event.currentTarget.value);setCustomEnvironment(effectiveEnvironment);setScope('custom');setPage(0);}}><option value="">All packages</option>{[...new Set([...result.packageSuggestions,...(effectivePackage?[effectivePackage]:[])])].map(value => <option key={value}>{value}</option>)}</select></label>
+      <label>Environment<input aria-label="Jobs Environment filter" value={effectiveEnvironment} onChange={event => {setPackage(effectivePackage);setCustomEnvironment(event.currentTarget.value);setScope('custom');setPage(0);}} placeholder="All environments" /></label>
+
       <label>Schedule Owner<IdentityCombobox label="Schedule Owner" value={ownerIdentity.value} mode={ownerIdentity.mode} suggestions={result.scheduleOwnerSuggestions||[]} disabled={busy} onChange={filter=>{setOwnerIdentity(filter);setPage(0);}} /></label>
       <label>Triggered by<IdentityCombobox label="Triggered by" value={triggerIdentity.value} mode={triggerIdentity.mode} suggestions={result.triggeredBySuggestions||[]} disabled={busy} onChange={filter=>{setTriggerIdentity(filter);setPage(0);}} /></label>
       <label>Created from<input type="date" value={from} onChange={update(setFrom)} /></label><label>Created to<input type="date" value={to} onChange={update(setTo)} /></label>

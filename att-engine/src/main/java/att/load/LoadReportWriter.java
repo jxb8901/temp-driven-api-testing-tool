@@ -250,6 +250,7 @@ public final class LoadReportWriter {
         html.append(".concepts{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:10px}.concept{border-radius:8px;padding:12px;background:#eef4ff;border-left:5px solid #356ae6}.concept.drop{background:#fff5e8;border-left-color:#d97706}.concept.error{background:#fff0f0;border-left-color:#c2413a}.concept strong{display:block;font-size:1.25em}.badge{display:inline-block;border-radius:999px;padding:2px 8px;font-weight:650}.badge.pass{background:#dcfce7}.badge.fail{background:#fee2e2}.badge.info{background:#e0e7ff;color:#243b82}.badge.drop{background:#ffedd5;color:#9a3412}");
         html.append(".chart-grid{display:grid;grid-template-columns:minmax(0,1fr);gap:12px}.chart-card{box-sizing:border-box;min-width:0;width:100%;border:1px solid #e5e9f0;border-radius:7px;padding:10px}.chart-card h3{margin:0 0 8px}.chart-card svg{display:block;width:100%;height:auto;background:#fff}.chart-legend{display:flex;flex-wrap:wrap;justify-content:flex-start;gap:8px 14px;margin:8px 0 0;padding:0;list-style:none}.chart-legend li{display:flex;align-items:center;gap:5px}.chart-swatch{display:inline-block;width:15px;height:3px;background:var(--c)}");
         html.append("pre{white-space:pre-wrap;word-break:break-word;background:#f7f9fc;padding:10px;border-radius:5px;max-height:420px;overflow:auto}.scroll{overflow:auto}a{color:#2459b8}.empty{color:#68758a;font-style:italic}.note{font-size:.92em;color:#5d687b}");
+        html.append(".section-nav{display:flex;flex-wrap:wrap;gap:.5rem 1rem}.section-nav a{white-space:nowrap}");
         html.append("</style></head><body><main>");
         html.append("<header class=\"panel\"><h1>ATT Load ").append(escape(result.runId())).append("</h1>");
         html.append("<p class=\"muted\">Model: <b>").append(escape(result.scenario().model().wireName())).append("</b> · ");
@@ -257,6 +258,7 @@ public final class LoadReportWriter {
         html.append("<p class=\"note\">Run ").append(escape(result.startedAt().toString())).append(" to ").append(escape(result.endedAt().toString()));
         html.append(" (duration ").append(display(summary.get("durationMs"))).append(" ms). Load output is isolated below this run directory.</p></header>");
 
+        int navigationPosition=html.length();
         List<ThresholdResult> thresholdResults=result.thresholds().results();
         String thresholdSummary;
         if(thresholdResults.isEmpty())thresholdSummary="none configured";
@@ -283,12 +285,20 @@ public final class LoadReportWriter {
         appendEvidenceTable(html, runDirectory, result.evidence());
         appendTimeSeries(html, result);
 
-        html.append("<section class=\"panel\"><h2>Machine-readable summary</h2><p class=\"note\">Aggregate counters and thresholds are exact. Detailed per-workload series are stored in versioned, relative sidecars. Read ");
+        html.append("<section class=\"panel\" id=\"summary\"><h2>Machine-readable summary</h2><p class=\"note\">Aggregate counters and thresholds are exact. Detailed per-workload series are stored in versioned, relative sidecars. Read ");
         html.append("<a href=\"../load-summary.json\">load-summary.json</a>, <a href=\"../load-summary.yaml\">load-summary.yaml</a>, <a href=\"../details/v1/manifest.json\">details/v1/manifest.json</a> and <a href=\"../load-report-manifest.json\">load-report-manifest.json</a>.</p></section>");
         String embedded = JsonSupport.write(summary).replace("<", "\\u003c");
         html.append("<script type=\"application/json\" id=\"att-load-summary-data\">").append(embedded).append("</script>");
         appendTrendScript(html);
         html.append("</main></body></html>");
+        StringBuilder navigation=new StringBuilder("<nav class=\"panel section-nav\" aria-label=\"Report sections\">");
+        String[][] sections={{"overview","Overview"},{"failures","Runtime failures"},{"semantics","Workload semantics"},
+                {"phases","Phases"},{"metrics","Metrics"},{"workloads","Workloads"},{"thresholds","Thresholds"},
+                {"resources","Resources"},{"evidence","Evidence"},{"trends","Trends"},{"summary","Summary"}};
+        for(String[] section:sections) if(html.indexOf("id=\""+section[0]+"\"")>=0)
+            navigation.append("<a href=\"#").append(section[0]).append("\">").append(section[1]).append("</a>");
+        navigation.append("</nav>");
+        html.insert(navigationPosition,navigation);
         return html.toString();
     }
 
@@ -303,7 +313,7 @@ public final class LoadReportWriter {
         return numeric(metrics,"measuredCompleted")==0?"N/A":percent(metrics.get(key));
     }
     private void appendFailureDiagnosis(StringBuilder html,LoadRunResult result,Map<String,Object> metrics) {
-        html.append("<section class=\"panel\"><h2>Runtime failures / Failure diagnosis</h2><p>Runtime errors (all phases): ")
+        html.append("<section class=\"panel\" id=\"failures\"><h2>Runtime failures / Failure diagnosis</h2><p>Runtime errors (all phases): ")
                 .append(count(metrics.get("runtimeError"))).append("; measured runtime errors: ")
                 .append(count(metrics.get("measuredRuntimeError"))).append(". Warm-up errors affect execution outcome, but are excluded from measured rates.</p>");
         html.append("<p>Classifications: ").append(escape(display(metrics.get("errorClassifications")))).append("</p>");
@@ -328,7 +338,7 @@ public final class LoadReportWriter {
             @SuppressWarnings("unchecked") Map<String, Object> windows = (Map<String, Object>) windowMetrics.get("windows");
             if (windows != null) { appendWindowOverview(html, result, metrics, windows); return; }
         }
-        html.append("<section class=\"panel\"><h2>Run overview</h2><div class=\"kpis\">");
+        html.append("<section class=\"panel\" id=\"overview\"><h2>Run overview</h2><div class=\"kpis\">");
         kpi(html, "Completed TPS", rate(metrics.get("completedThroughput")), "measured completed iterations per second");
         kpi(html, "p95 latency", metrics.get("p95Ms"), "milliseconds, bounded reservoir");
         kpi(html, "Successful TPS", rate(metrics.get("successfulThroughput")), "measured PASS iterations per second");
@@ -351,7 +361,7 @@ public final class LoadReportWriter {
         @SuppressWarnings("unchecked") Map<String, Object> steady = (Map<String, Object>) windows.get("steady");
         String execution = result.executionStatus();
         String verdict = result.performanceVerdict();
-        html.append("<section class=\"panel\"><h2>Run overview</h2><p>Execution status: <span class=\"badge ")
+        html.append("<section class=\"panel\" id=\"overview\"><h2>Run overview</h2><p>Execution status: <span class=\"badge ")
                 .append("ERROR".equals(execution) ? "fail" : "pass").append("\">").append(escape(execution))
                 .append("</span> · Performance verdict: <span class=\"badge ")
                 .append("MET".equals(verdict) ? "pass" : "NOT_MET".equals(verdict) ? "fail" : "info").append("\">").append(escape(verdict)).append("</span>");
@@ -392,7 +402,7 @@ public final class LoadReportWriter {
     }
 
     private void appendModelSemantics(StringBuilder html, LoadRunResult result, Map<String, Object> metrics) {
-        html.append("<section class=\"panel\"><h2>Workload semantics</h2><div class=\"concepts\">");
+        html.append("<section class=\"panel\" id=\"semantics\"><h2>Workload semantics</h2><div class=\"concepts\">");
         Map<?, ?> steady = steadyWindow(metrics);
         Object completedRate = steady.isEmpty() ? metrics.get("completedThroughput") : steady.get("completedRate");
         Object successfulRate = steady.isEmpty() ? metrics.get("successfulThroughput") : steady.get("successfulRate");
@@ -415,7 +425,7 @@ public final class LoadReportWriter {
     }
 
     private void appendPhaseTable(StringBuilder html, LoadRunResult result, Map<String, Object> summary) {
-        html.append("<section class=\"panel\"><h2>Phase windows and event-time completion rates</h2>");
+        html.append("<section class=\"panel\" id=\"phases\"><h2>Phase windows and event-time completion rates</h2>");
         html.append("<p class=\"note\">Counts and rates use event timestamps inside each phase window. Cohort outcomes and latency follow scheduled timestamps, including completions during later phases or drain. DRAIN has no configured duration; its rates use the observed post-generation interval.</p>");
         Map<?, ?> windows = Collections.emptyMap();
         Object windowMetricsValue = result.metrics().values().get("windowMetrics");
@@ -469,7 +479,7 @@ public final class LoadReportWriter {
     }
 
     private void appendMetricsTable(StringBuilder html, Map<String, Object> metrics) {
-        html.append("<section class=\"panel\"><h2>Aggregate metrics</h2><div class=\"scroll\"><table><thead><tr><th>Metric</th><th>Value</th></tr></thead><tbody>");
+        html.append("<section class=\"panel\" id=\"metrics\"><h2>Aggregate metrics</h2><div class=\"scroll\"><table><thead><tr><th>Metric</th><th>Value</th></tr></thead><tbody>");
         for (Map.Entry<String, Object> entry : metrics.entrySet()) {
             if ("buckets".equals(entry.getKey()) || "phases".equals(entry.getKey())) continue;
             html.append("<tr><td>").append(escape(entry.getKey())).append("</td><td>").append(escape(display(entry.getValue()))).append("</td></tr>");
@@ -479,7 +489,7 @@ public final class LoadReportWriter {
 
     private void appendWorkloadTable(StringBuilder html, LoadRunResult result) {
         if (result.workloads().isEmpty()) return;
-        html.append("<section class=\"panel\"><h2>Workloads</h2>");
+        html.append("<section class=\"panel\" id=\"workloads\"><h2>Workloads</h2>");
         html.append("<p class=\"note\">Each workload is independently paced. Steady rates use actual event timestamps and the configured steady duration; latency and error percentages follow scheduled cohorts. Aggregate latency is not an average of workload percentiles.</p>");
         html.append("<div class=\"scroll\"><table><thead><tr><th>Workload</th><th>Target</th><th>Model</th><th>Configured load</th><th>Steady started/s</th><th>Steady completed/s</th><th>Steady successful/s</th><th>Steady p95</th><th>SUT Fail %</th><th>Runtime Error %</th><th>Total Error %</th><th>Drop</th><th>Thresholds</th><th>Execution</th><th>Performance</th></tr></thead><tbody>");
         for (Map.Entry<String, LoadRunResult> entry : result.workloads().entrySet()) {
@@ -560,7 +570,7 @@ public final class LoadReportWriter {
     }
 
     private void appendThresholdTable(StringBuilder html, List<ThresholdResult> thresholds) {
-        html.append("<section class=\"panel\"><h2>Thresholds</h2>");
+        html.append("<section class=\"panel\" id=\"thresholds\"><h2>Thresholds</h2>");
         if (thresholds.isEmpty()) { html.append("<p class=\"empty\">No thresholds configured.</p></section>"); return; }
         html.append("<div class=\"scroll\"><table><thead><tr><th>Name</th><th>Expected</th><th>Actual</th><th>Status</th><th>Diagnostic</th></tr></thead><tbody>");
         for (ThresholdResult threshold : thresholds) {
@@ -574,7 +584,7 @@ public final class LoadReportWriter {
     }
 
     private void appendResourceTable(StringBuilder html, Map<String, Object> resources) {
-        html.append("<section class=\"panel\"><h2>Resource and generator diagnostics</h2><p class=\"note\">Pool saturation and ATT generator pressure are reported separately from application/SUT failures. Credentials and live resource objects are never included. PRE_TEARDOWN counters are sampled before disconnect. failures counts creation failures only; idle-validation problems are validationFailures, and cleanupFailuresIncluded is false. POST_TEARDOWN is a separate confirmation sample, and an unconfirmed disconnect stays quarantined.</p>");
+        html.append("<section class=\"panel\" id=\"resources\"><h2>Resource and generator diagnostics</h2><p class=\"note\">Pool saturation and ATT generator pressure are reported separately from application/SUT failures. Credentials and live resource objects are never included. PRE_TEARDOWN counters are sampled before disconnect. failures counts creation failures only; idle-validation problems are validationFailures, and cleanupFailuresIncluded is false. POST_TEARDOWN is a separate confirmation sample, and an unconfirmed disconnect stays quarantined.</p>");
         if (resources == null || resources.isEmpty()) { html.append("<p class=\"empty\">No resource diagnostics were collected for this run.</p></section>"); return; }
         Object preparationValue = resources.get("preparation");
         if (preparationValue instanceof Map) {
@@ -664,7 +674,7 @@ public final class LoadReportWriter {
 
     @SuppressWarnings("unchecked")
     private void appendEvidenceTable(StringBuilder html, Path runDirectory, Map<String, Object> evidence) {
-        html.append("<section class=\"panel\"><h2>Retained evidence</h2>");
+        html.append("<section class=\"panel\" id=\"evidence\"><h2>Retained evidence</h2>");
         if(evidence!=null && evidence.get("policy") instanceof Map) {
             Map<?,?> policy=(Map<?,?>)evidence.get("policy");
             html.append("<p>Evidence quota mode: ").append(escape(String.valueOf(policy.get("quotaMode")))).append(". ");
@@ -803,7 +813,7 @@ public final class LoadReportWriter {
         @SuppressWarnings("unchecked") Map<String, Object> contract = (Map<String, Object>) result.metrics().value("windowMetrics");
         @SuppressWarnings("unchecked") Map<String, Object> series = contract == null ? null : (Map<String, Object>) contract.get("timeSeries");
         @SuppressWarnings("unchecked") List<Map<String, Object>> points = series == null ? Collections.<Map<String, Object>>emptyList() : (List<Map<String, Object>>) series.get("points");
-        html.append("<section class=\"panel\"><h2>Trends</h2><p class=\"note\">Offline charts use event timestamps and configured phase boundaries. Rates use full-bin duration; the window selector filters both the summary and charts. Hover or focus a legend entry for its definition. Latency follows scheduled cohorts, including completions in later phases or drain; bins disclose reservoir sample and observation counts.</p>");
+        html.append("<section class=\"panel\" id=\"trends\"><h2>Trends</h2><p class=\"note\">Offline charts use event timestamps and configured phase boundaries. Rates use full-bin duration; the window selector filters both the summary and charts. Hover or focus a legend entry for its definition. Latency follows scheduled cohorts, including completions in later phases or drain; bins disclose reservoir sample and observation counts.</p>");
         if (points.isEmpty()) { html.append("<p class=\"empty\">No time-series buckets were observed. No event-time series events were observed.</p></section>"); return; }
         html.append("<div class=\"chart-grid\"><section class=\"chart-card\"><h3>Rate (iterations/s)</h3><svg id=\"rate-chart\" viewBox=\"0 0 900 240\" role=\"img\" aria-label=\"Scheduled, started, completed, successful and target rates\"></svg><ul id=\"rate-legend\" class=\"chart-legend\"></ul></section>")
                 .append("<section class=\"chart-card\"><h3>Latency (ms)</h3><svg id=\"latency-chart\" viewBox=\"0 0 900 240\" role=\"img\" aria-label=\"Iteration latency percentile trend\"></svg><ul id=\"latency-legend\" class=\"chart-legend\"></ul><p class=\"note\">Iteration latency includes framework and helper waiting; it is not SUT-only response time.</p></section>")

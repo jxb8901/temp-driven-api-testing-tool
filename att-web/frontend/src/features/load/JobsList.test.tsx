@@ -3,6 +3,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { beforeEach, afterEach, it, expect, vi } from 'vitest';
 import { JobsList } from './JobsList';
+import { AppShellContext, type AppShellContextValue } from '../../AppShell';
 import type { JobSummary, JobsQueryResult, LoadJobsApi } from './types';
 const job: JobSummary = {jobId:'J1234567890ABCDEF',command:'load',executionType:'load',packageId:'p',environment:'prod',status:'PASS',principal:'load-schedule:PRIVATE',createdAt:'2026-10-23T00:00:00Z',startedAt:'2026-10-23T00:00:05Z',finishedAt:'2026-10-23T00:00:15Z',targetGroup:'sig',targetIdentity:{type:'flow',id:'common.flow'}};
 const response = (items: JobSummary[] = [job], extra: Partial<JobsQueryResult> = {}): JobsQueryResult => ({items,total:items.length,offset:0,limit:100,groups:[],principalSuggestions:['alice','bob'],executionPrincipalSuggestions:['alice','bob'],scheduleOwnerSuggestions:['alice','bob'],triggeredBySuggestions:['alice','bob'],packageSuggestions:['p'],...extra});
@@ -168,4 +169,35 @@ it('can replace pending substring search with explicit exact Job ID without clea
   await advance();
   expect(queryJobs).toHaveBeenLastCalledWith(expect.objectContaining({search:`job:${job.jobId}`,packageId:'p',status:'PASS',offset:0}));
   expect(host.querySelector('[role="alert"]')).toBeNull();expect(host.querySelector('.att-job-target')).not.toBeNull();
+});
+
+it('keeps list scope independent when Workspace changes', async () => {
+  const queryJobs=vi.fn(async()=>response());
+  const renderWorkspace = async (packageId:string, environment:string) => {
+    const context = {selectedPackage:packageId, selectedEnvironment:environment} as AppShellContextValue;
+    await act(async()=>root.render(<AppShellContext.Provider value={context}><JobsList api={{queryJobs} as unknown as LoadJobsApi} onOpenJob={vi.fn()} onShowList={vi.fn()} /></AppShellContext.Provider>));
+    await advance();
+  };
+  await renderWorkspace('payments','UAT');
+  expect(queryJobs).toHaveBeenLastCalledWith(expect.objectContaining({packageId:'payments',environment:'UAT'}));
+  const scope=host.querySelector<HTMLSelectElement>('[aria-label="Jobs list scope"]')!;
+  await act(async()=>{scope.value='all';scope.dispatchEvent(new Event('change',{bubbles:true}));});await advance();
+  await renderWorkspace('tommyho','SIT');
+  expect(queryJobs).toHaveBeenLastCalledWith(expect.objectContaining({packageId:undefined,environment:undefined}));
+  await act(async()=>{scope.value='follow';scope.dispatchEvent(new Event('change',{bubbles:true}));});await advance();
+  expect(queryJobs).toHaveBeenLastCalledWith(expect.objectContaining({packageId:'tommyho',environment:'SIT'}));
+});
+it('waits for the Workspace default to resolve and filters Jobs by its effective environment', async () => {
+  const queryJobs = vi.fn(async () => response());
+  const renderContext = async (resolved: string | null, error = false) => {
+    const context = {selectedPackage: 'payments', selectedEnvironment: '', workspaceResolvedEnvironment: resolved, workspaceResolutionError: error} as AppShellContextValue;
+    await act(async () => root.render(<AppShellContext.Provider value={context}><JobsList api={{queryJobs} as unknown as LoadJobsApi} onOpenJob={vi.fn()} onShowList={vi.fn()} /></AppShellContext.Provider>));
+    await advance();
+  };
+  await renderContext(null);
+  expect(queryJobs).not.toHaveBeenCalled();
+  await renderContext('SIT');
+  expect(queryJobs).toHaveBeenLastCalledWith(expect.objectContaining({packageId: 'payments', environment: 'SIT'}));
+  await renderContext(null, true);
+  expect(host.textContent).toContain('Workspace Package default could not be resolved');
 });

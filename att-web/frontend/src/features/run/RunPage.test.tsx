@@ -52,6 +52,16 @@ it('validates before submit and clears review when the environment changes', asy
   expect(api.submitRun).toHaveBeenCalledTimes(1); expect(api.submitRun).toHaveBeenCalledWith({ packageId: 'payments', draftId: 'R123' });
   expect(onAccepted).toHaveBeenCalledWith({ packageId: 'payments', jobId: 'J123' });
 });
+it('clears package-specific environment and target when changing the RUN package', async () => {
+  await change('Environment', 'UAT');
+  await change('Target ID', 'cases.default.C1');
+  await click('Validate');
+  expect(host.querySelector('[aria-label="Review RUN"]')).not.toBeNull();
+  await change('Package ID', 'ledger');
+  expect(control('Environment').value).toBe('');
+  expect(control('Target ID').value).toBe('');
+  expect(host.querySelector('[aria-label="Review RUN"]')).toBeNull();
+});
 it('schedules the reviewed snapshot and diagnostic changes do not execute', async () => {
   await change('Target type', 'flow'); await change('Target ID', 'payment.flow');
   await settleDebugForm();

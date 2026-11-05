@@ -1,4 +1,4 @@
-<!-- att-doc-status: current release=4.2.8 -->
+<!-- att-doc-status: current release=4.2.9 -->
 
 # Jobs 與 results
 
@@ -41,3 +41,7 @@ Jobs 的精簡工具列保留 Principal、Package、Type、Status 及 Target 搜
 在 Jobs List、Job Details 或 LOAD History 選擇 **Rerun with same settings**，會開啟 review，提供預設的 **Use current Package** 及 **Require original revision (strict)**。Current mode 沿用舊 Job 的安全參數，但依目前 Package 及 configuration 驗證。Strict mode 在 revision 改變時阻止執行，並提供 **Review with current Package**。Schedule package-change policy 不控制手動 Rerun。
 
 **Configure & Rerun** 會建立短期獲授權的 Server draft，並開啟預填支援安全欄位的標準 RUN／LOAD editor。URL 只含不透明 `draftRef`；定義透過授權且使用 `private, no-store` 的 request 載入。修改後按 **Validate → Review changes → Run**，檢查前後定義、目前 revision 及 LOAD timing／rate 細節。Back／Cancel 不修改 Job、報告、Schedule 或 package source。**Schedule / Reschedule…** 維持獨立，提供新增 Schedule 或開啟獲授權的來源 Schedule；不會啟動 Job。
+
+任何啟用的 operational USER 均可重新執行共用 Job，包括其他 USER 的 Job 或排程 occurrence。新 Job 記錄目前 USER 及來源 Job；原 Job 和 Schedule 不會改變。Review draft 與確認 intent 仍只供提出者使用。只有 ADMIN 身分的帳戶不會因此取得操作權限。Package 授權、敏感輸入重新填寫、有效期限、revision 檢查及容量限制仍然適用。此行為遵循 #246 的共用操作政策及 #237、#300 的 replay 保護。
+
+Job Overview 的 **Executed Package**、**Executed Environment** 和 **Execution Target** 使用 Job 儲存的執行身分。歷史值缺失時顯示 **Not recorded**；LOAD target 可展開 workload 明細。Workspace selector 是獨立情境，檢視 Job 不會改變它。LOAD HTML 報告提供可離線使用的頁內章節連結。

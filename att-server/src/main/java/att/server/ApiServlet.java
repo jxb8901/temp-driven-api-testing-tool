@@ -109,7 +109,7 @@ public final class ApiServlet extends HttpServlet {
             if(path.startsWith("/packages/")){String id=segment(path,2);Map<String,Object> view=runtime.packageView(id,principal);view.put("requestId",requestId);json(res,200,view);return;}
             if("/jobs".equals(path)){
                 Map<String,String> parameters=new LinkedHashMap<>();
-                for(String key:List.of("offset","limit","principal","principalMode","submissionSource","executionPrincipal","executionPrincipalMode","executionPrincipalExact","scheduleOwner","scheduleOwnerMode","scheduleOwnerExact","triggeredBy","triggeredByMode","triggeredByExact","packageId","executionType","status","from","to","search","sort","deletion","pinnedOnly","groupBy")) {
+                for(String key:List.of("offset","limit","principal","principalMode","submissionSource","executionPrincipal","executionPrincipalMode","executionPrincipalExact","scheduleOwner","scheduleOwnerMode","scheduleOwnerExact","triggeredBy","triggeredByMode","triggeredByExact","packageId","environment","executionType","status","from","to","search","sort","deletion","pinnedOnly","groupBy")) {
                     String value=req.getParameter(key);if(value!=null)parameters.put(key,value);
                 }
                 Map<String,Object> response=runtime.store.queryJobs(JobQuery.parse(parameters,principal));response.put("requestId",requestId);
@@ -478,7 +478,15 @@ public final class ApiServlet extends HttpServlet {
         if(!requireOperator(req,res,requestId))return;
         try {
             String[] parts=path.split("/");
-            if(parts.length==2){String type=req.getParameter("executionType");if(type!=null&&!List.of("run","load").contains(type))throw new IllegalArgumentException("executionType must be run or load");json(res,200,Map.of("items",runtime.loadSchedules().stream().filter(schedule->type==null||type.equals("load".equals(schedule.effectiveJobType())?"load":"run")).map(schedule->runtime.loadScheduleListView(schedule,principal)).toList(),"requestId",requestId));return;}
+            if(parts.length==2){String type=req.getParameter("executionType"),packageId=req.getParameter("packageId"),environment=req.getParameter("environment"),environmentDefault=req.getParameter("environmentDefault");if(type!=null&&!List.of("run","load").contains(type))throw new IllegalArgumentException("executionType must be run or load");
+                if((packageId!=null&&packageId.length()>64)||(environment!=null&&environment.length()>128))throw new IllegalArgumentException("Invalid Schedule filter");
+                if(environmentDefault!=null&&!List.of("true","false").contains(environmentDefault))throw new IllegalArgumentException("Invalid Schedule environmentDefault filter");
+                if("true".equals(environmentDefault)&&environment!=null&&!environment.isEmpty())throw new IllegalArgumentException("Schedule environment filters cannot be combined");
+                json(res,200,Map.of("items",runtime.loadSchedules().stream().filter(schedule->type==null||type.equals("load".equals(schedule.effectiveJobType())?"load":"run"))
+                    .filter(schedule->packageId==null||packageId.isEmpty()||packageId.equals(schedule.packageId))
+                    .filter(schedule->environment==null||environment.isEmpty()||environment.equals(schedule.environment))
+                    .filter(schedule->!"true".equals(environmentDefault)||schedule.environment==null||schedule.environment.isEmpty())
+                    .map(schedule->runtime.loadScheduleListView(schedule,principal)).toList(),"requestId",requestId));return;}
             String id=parts[2];
             if(parts.length==3){LoadSchedule item=runtime.loadSchedule(id);Map<String,Object> view=runtime.loadScheduleView(item,principal);view.put("requestId",requestId);json(res,200,view);return;}
             if(parts.length==4&&"executions".equals(parts[3])){int limit=parseScheduleLimit(req.getParameter("limit"));json(res,200,Map.of("items",runtime.loadScheduleExecutions(id,limit),"scheduleId",id,"requestId",requestId));return;}

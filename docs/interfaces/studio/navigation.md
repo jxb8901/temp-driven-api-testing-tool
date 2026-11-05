@@ -1,4 +1,4 @@
-<!-- att-doc-status: current release=4.2.8 -->
+<!-- att-doc-status: current release=4.2.9 -->
 
 # Studio navigation
 
@@ -23,3 +23,5 @@ The UI checks the Server API version before loading job data. Terminal SSE resul
 The console is delivered as static `att-web` JAR resources under `META-INF/resources/ui/` and packaged in the Server WAR. Relative URLs support non-root Tomcat context paths without a separate frontend service or runtime Node.js dependency. The Server applies a same-origin content security policy and rejects state-changing browser requests with an unexpected `Origin`; no credentialed CORS policy is needed. Browser-rendered API text is inserted as text, and the event list is bounded to 500 entries.
 
 For fields without a public discovery schema, the UI uses safe sidecar data for typed scalar controls and provides Advanced JSON for nested values. Server validation remains authoritative; browser-side validation and filtering are not authorization boundaries.
+
+**Workspace Package** and **Workspace Environment** are independent of the current route and are retained for the current browser tab. Changing the Workspace Package resets its Environment to **Package default**. Editors and historical Job or Schedule views lock these controls while showing their own execution or saved context. Opening a different Package in Explorer does not switch Workspace; use **Use this Package as Workspace** to switch explicitly. Jobs, Schedules and LOAD Catalog offer **Follow Workspace**, **All**, and **Custom** list scopes. Custom filters stay local to the list. In all-package LOAD Catalog browsing, select a Package before choosing one of its Environment profiles.

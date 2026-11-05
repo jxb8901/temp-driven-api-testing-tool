@@ -125,6 +125,23 @@ describe('JobsPage React feature', () => {
     expect(fields['Submission source']).toBe('Manual');
   });
 
+  it('shows saved execution identity without inventing legacy context', async () => {
+    const job: JobView = { ...sampleJob, packageId: 'payments', environment: 'SIT', targetIdentity: { type: 'load', id: 'scenario', workloadCount: 2, workloads: [
+      { name: 'one', model: 'closed', targets: [{type: 'template', id: 'A'}] },
+      { name: 'two', model: 'closed', targets: [{type: 'flow', id: 'B'}] },
+    ] } };
+    await act(async () => root.render(<JobOverview job={job} status={job.status} jobState="ready" hidden={false} />));
+    const fields = Object.fromEntries([...host.querySelectorAll('dt')].map(field => [field.textContent, field.nextElementSibling?.textContent]));
+    expect(fields['Executed Package']).toBe('payments');
+    expect(fields['Executed Environment']).toBe('SIT');
+    expect(fields['Execution Target']).toContain('LOAD · scenario');
+    expect(fields['Execution Target']).toContain('flow · B');
+    await act(async () => root.render(<JobOverview job={{...job, environment: undefined, targetIdentity: undefined}} status={job.status} jobState="ready" hidden={false} />));
+    const legacy = Object.fromEntries([...host.querySelectorAll('dt')].map(field => [field.textContent, field.nextElementSibling?.textContent]));
+    expect(legacy['Executed Environment']).toBe('Not recorded');
+    expect(legacy['Execution Target']).toBe('Not recorded');
+  });
+
   it('paginates 4096 exact buckets without mounting all rows and keeps keyboard paging accessible', async () => {
     const buckets: MetricBucket[] = Array.from({ length: 4096 }, (_, index) => ({
       key: String(index), epochMs: 1_800_000_000_000 + index * 1000,
@@ -951,6 +968,8 @@ describe('JobsPage React feature', () => {
     await act(async () => { await Promise.resolve(); });
 
     const summary = host.querySelector('[aria-label="Retained evidence quotas"]')!;
+    expect(summary.classList.contains('att-load-terminal-summary')).toBe(true);
+    expect(summary.querySelector('dl p')).toBeNull();
     expect(summary.textContent).toContain('Independent per-workload success and failure caps');
     expect(summary.textContent).toContain('Default success cap10');
     expect(summary.textContent).toContain('Success cap');

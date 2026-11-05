@@ -390,18 +390,18 @@ function EvidenceQuotaSummary({ payload, jobId, archiveRoot, evidence: archivedE
     completedSuccessCount: 'Completed successes', hashQualifiedSuccessCount: 'Hash-qualified successes',
     samplingIneligibleSuccessCount: 'Sampling-ineligible successes', combinedQuotaExceeded: 'Legacy combined cap reached',
   };
-  return <section aria-label="Retained evidence quotas">
+  return <section className="att-load-terminal-summary" aria-label="Retained evidence quotas">
     <h3>Retained evidence quotas</h3>
     <p>{perWorkload ? 'Independent per-workload success and failure caps; unused capacity is never transferred or reclaimed.'
       : policy.quotaMode === 'independent' ? 'Independent success and failure quotas shared across the run'
         : 'Legacy combined cap shared by successful samples and failure evidence'}</p>
-    <dl>
-      {perWorkload && defaults.maxSuccessSamples != null && <div><dt>Default success cap</dt><dd>{displayValue(defaults.maxSuccessSamples)}</dd></div>}
-      {perWorkload && defaults.maxFailureSamples != null && <div><dt>Default failure cap</dt><dd>{displayValue(defaults.maxFailureSamples)}</dd></div>}
     {typeof policy.successSamplingHash === 'string' && <p>
       Success sampling eligibility uses {policy.successSamplingHash} over {displayValue(policy.successSamplingEncoding)} iteration IDs;
       hash-qualified successes are candidates, and quota retention is a separate decision.
     </p>}
+    <dl>
+      {perWorkload && defaults.maxSuccessSamples != null && <div><dt>Default success cap</dt><dd>{displayValue(defaults.maxSuccessSamples)}</dd></div>}
+      {perWorkload && defaults.maxFailureSamples != null && <div><dt>Default failure cap</dt><dd>{displayValue(defaults.maxFailureSamples)}</dd></div>}
       {['maxSamples', 'maxSuccessSamples', 'maxFailureSamples'].filter(key => policy[key] != null)
         .map(key => <div key={key}><dt>{labels[key]}</dt><dd>{displayValue(policy[key])}</dd></div>)}
       {['completedSuccessCount', 'hashQualifiedSuccessCount', 'samplingIneligibleSuccessCount', 'retainedSuccessCount', 'retainedFailureCount', 'successQuotaExceeded', 'failureQuotaExceeded', 'combinedQuotaExceeded', 'skippedSuccessQuotaCount', 'skippedFailureQuotaCount', 'skippedUnclassifiedQuotaCount', 'skippedMissingEvidenceCount']
@@ -907,7 +907,13 @@ export const JobOverview = memo(function JobOverview({ job, status, statusText, 
   return <section className="att-job-panel" role="tabpanel" id="job-panel-overview" aria-labelledby="job-tab-overview" hidden={hidden} tabIndex={0}>
     <Profiler id="job-overview-content" onRender={() => onProfilerCommit?.()}>{job ? <dl className="att-job-overview">
       <div><dt>Job ID</dt><dd>{job.jobId}</dd></div><div><dt>Status</dt><dd><StatusBadge status={status} /></dd></div>
-      <div><dt>Execution type</dt><dd>{executionType(job)}</dd></div><div><dt>Command</dt><dd>{job.command || 'Not reported'}</dd></div><div><dt>Package</dt><dd>{job.packageId || 'Not reported'}</dd></div>
+      <div><dt>Execution type</dt><dd>{executionType(job)}</dd></div><div><dt>Command</dt><dd>{job.command || 'Not reported'}</dd></div>
+      <div><dt>Executed Package</dt><dd>{job.packageId || 'Not recorded'}</dd></div>
+      <div><dt>Executed Environment</dt><dd>{job.environment || 'Not recorded'}</dd></div>
+      <div><dt>Execution Target</dt><dd>{job.targetIdentity?.type && job.targetIdentity.id ? `${job.targetIdentity.type === 'load' ? 'LOAD' : job.targetIdentity.type[0].toUpperCase() + job.targetIdentity.type.slice(1)} · ${job.targetIdentity.id}` : 'Not recorded'}
+        {!!job.targetIdentity?.workloads?.length && <details><summary>{job.targetIdentity.workloadCount || job.targetIdentity.workloads.length} workload breakdown</summary><ul>{job.targetIdentity.workloads.map((workload, index) => <li key={`${workload.name}-${index}`}>{workload.name || `Workload ${index + 1}`}: {workload.targets.map(target => `${target.type} · ${target.id}`).join(', ') || 'Not recorded'}</li>)}</ul>{job.targetIdentity.truncated && <p>First 32 workload / target summaries shown.</p>}</details>}
+        {!job.targetIdentity?.workloads?.length && !!job.targetIdentity?.targets?.length && <details><summary>Target bindings</summary><ul>{job.targetIdentity.targets.map((target, index) => <li key={index}>{target.type} · {target.id}</li>)}</ul>{job.targetIdentity.truncated && <p>First 32 bindings shown.</p>}</details>}
+      </dd></div>
       {job.rerunOfJobId && <div><dt>Rerun of</dt><dd><a href={formatRoute({ kind: 'jobs', jobId: job.rerunOfJobId })}>{job.rerunOfJobId}</a></dd></div>}
       <div><dt>Submission source</dt><dd>{job.submissionSource === 'scheduled' ? 'Scheduled' : job.submissionSource === 'manual' ? 'Manual' : 'Unknown'}</dd></div>
       <div><dt>Legacy principal</dt><dd>{job.principal || 'Not reported'}</dd></div>

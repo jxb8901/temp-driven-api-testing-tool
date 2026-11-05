@@ -1,4 +1,4 @@
-<!-- att-doc-status: current release=4.2.8 -->
+<!-- att-doc-status: current release=4.2.9 -->
 
 # Jobs and results
 
@@ -47,3 +47,7 @@ Jobs keeps Principal, Package, Type, Status and Target search in a compact toolb
 From Jobs List, Job Details or LOAD History, **Rerun with same settings** opens a review with **Use current Package** (default) and **Require original revision (strict)**. Current mode reuses the prior safe parameters but validates them against the current Package and configuration. Strict mode blocks a changed revision and offers **Review with current Package**. Schedule package-change policy does not control manual Rerun.
 
 **Configure & Rerun** creates a short-lived authorized server draft and opens the standard RUN/LOAD editor with supported retained values prefilled. The URL contains only an opaque `draftRef`; the definition is fetched with an authorized, `private, no-store` request. After edits, **Validate → Review changes → Run** shows the before/after definition, current revision, and LOAD timing/rate details. Back/Cancel leaves the Job, report, Schedule and package source unchanged. **Schedule / Reschedule…** stays separate and offers new Schedule creation or the authorized originating Schedule; it never starts a Job.
+
+Any active operational USER may rerun a shared Job, including another USER's Job or a scheduled occurrence. The new Job records the requesting USER and its source Job; the original Job and Schedule remain unchanged. Review drafts and confirmation intents remain private to their requester. An ADMIN-only account does not gain operational permissions. Package authorization, sensitive-input re-entry, expiry, revision checks and capacity limits still apply. This follows the shared operation policy in #246 and the replay safeguards in #237 and #300.
+
+Job Overview groups **Executed Package**, **Executed Environment** and **Execution Target** from the Job's saved identity. A missing historical value is **Not recorded**. LOAD targets can include an expandable workload breakdown. The Workspace selectors describe a separate context; viewing a Job does not change it. The LOAD HTML report includes in-page section links that also work offline.

@@ -135,6 +135,16 @@ class LoadReportTest {
         LoadRunResult result = new LoadRunResult("report-manifest", scenario, started, started.plusSeconds(2), metrics.snapshot());
 
         Path report = new LoadReportWriter().write(temp, result);
+        String reportHtml = Files.readString(report);
+        assertTrue(reportHtml.contains("aria-label=\"Report sections\""));
+        java.util.regex.Matcher anchors = java.util.regex.Pattern.compile("href=\"#([a-z-]+)\"").matcher(reportHtml);
+        int anchorCount=0;
+        while(anchors.find()) {
+            String id=anchors.group(1);
+            assertEquals(1, reportHtml.split("id=\""+id+"\"",-1).length-1, id);
+            anchorCount++;
+        }
+        assertTrue(anchorCount >= 8);
         Path runDirectory = temp.resolve("load/report-manifest");
         @SuppressWarnings("unchecked") Map<String, Object> manifest = att.validation.JsonSupport.mapper()
                 .readValue(runDirectory.resolve(LoadReportWriter.REPORT_MANIFEST).toFile(), Map.class);

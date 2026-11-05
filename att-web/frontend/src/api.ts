@@ -513,8 +513,8 @@ export const api = {
     if (input.principal) body.principal = input.principal;
     return postJson<AcceptedJob>('jobs/run', body, signal);
   },
-  async listSchedules(signal?: AbortSignal): Promise<ApiEnvelope<ScheduleDefinition>> {
-    const response = await request<ApiEnvelope<ScheduleDefinition>>(schedulesPath(), { signal });
+  async listSchedules(signal?: AbortSignal, filters: {packageId?: string; environment?: string; environmentDefault?: boolean} = {}): Promise<ApiEnvelope<ScheduleDefinition>> {
+    const response = await request<ApiEnvelope<ScheduleDefinition>>(schedulesPath() + queryString(filters), { signal });
     return { ...response, items: response.items.map(normalizeSchedule) };
   },
   getSchedule(id: string, signal?: AbortSignal): Promise<ScheduleDefinition> {

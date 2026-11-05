@@ -1,4 +1,4 @@
-<!-- att-doc-status: current release=4.2.8 -->
+<!-- att-doc-status: current release=4.2.9 -->
 
 # Studio 導覽
 
@@ -23,3 +23,5 @@ UI 會在載入工作資料前檢查 Server API 版本。工作到達最終狀�
 主控台以 `att-web` JAR 中 `META-INF/resources/ui/` 的靜態資源提供，並封裝於 Server WAR。相對 URL 支援非根 Tomcat context path，無需額外前端服務或執行期 Node.js。Server 套用同源 Content Security Policy，並拒絕帶有非預期 `Origin` 的狀態變更瀏覽器請求；無需設定含憑證的 CORS。API 文字以純文字方式插入 DOM，事件清單最多保留 500 筆。
 
 對尚無公開 discovery schema 的欄位，UI 會使用安全 sidecar 資料提供 typed scalar 控制項，並以 Advanced JSON 編輯巢狀值。Server 驗證仍是權威來源；瀏覽器端驗證與篩選不構成授權邊界。
+
+**Workspace Package** 及 **Workspace Environment** 獨立於目前 route，並保留在目前瀏覽器分頁。更改 Workspace Package 會將 Environment 重設為 **Package default**。Editor 和歷史 Job／Schedule 畫面會鎖定這些控制項，並顯示各自的執行或儲存情境。在 Explorer 開啟其他 Package 不會切換 Workspace；可明確選擇 **Use this Package as Workspace**。Jobs、Schedules 及 LOAD Catalog 提供 **Follow Workspace**、**All** 和 **Custom** 清單範圍；Custom 篩選只屬於該清單。在 LOAD Catalog 瀏覽所有 Package 時，請先選擇 Package 才可選取其 Environment profile。

@@ -1,5 +1,6 @@
+import { AppShellContext } from '../../AppShell';
 import { EnvironmentResolutionNotice } from '../explorer/EnvironmentResolutionNotice';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { ApiError, type AsyncState } from '../../types';
 import type { LoadCatalogItem, PackageOption, ServerDiagnostic } from './types';
 import type { api } from '../../api';
@@ -41,10 +42,14 @@ export function LoadCatalogPage({ api, packages, inlineLoadEnabled, schedulingEn
   onNewLoad, onQuickLoad, onJobAccepted, onSchedule, onOpenDetail }: {
   api: CatalogApi; packages: AsyncState<PackageOption[]>; inlineLoadEnabled: boolean; schedulingEnabled: boolean;
   environment: string; catalogState?: LoadCatalogRouteState; onEnvironmentChange(value: string): void; onNewLoad(packageId?: string): void;
-  onQuickLoad(packageId: string, template: LoadCatalogItem): void; onJobAccepted(jobId: string): void;
+  onQuickLoad(packageId: string, template: LoadCatalogItem, environment: string): void; onJobAccepted(jobId: string): void;
   onOpenJob(jobId: string): void; onSchedule(intent: ScheduleIntent): void;
   onOpenDetail(item: LoadCatalogItem, environment: string, returnTo: string): void;
 }) {
+  const workspace = useContext(AppShellContext);
+  const [savedScope] = useState(() => { try { return JSON.parse(sessionStorage.getItem('att.catalog.scope') || '{}') as {mode?: string; packageId?: string; environment?: string}; } catch { return {}; } });
+  const [scope, setScope] = useState<'follow'|'all'|'custom'>(savedScope.mode === 'all' || savedScope.mode === 'custom' ? savedScope.mode : initialCatalogState?.packageFilter ? 'custom' : 'follow');
+  const [customEnvironment, setCustomEnvironment] = useState(initialCatalogState?.environment ?? savedScope.environment ?? environment);
   const [catalog, setCatalog] = useState<LoadCatalogItem[]>([]);
   const [catalogState, setCatalogState] = useState<'loading' | 'ready' | 'error'>('loading');
   const [catalogMoreLoading, setCatalogMoreLoading] = useState(false);
@@ -60,7 +65,7 @@ export function LoadCatalogPage({ api, packages, inlineLoadEnabled, schedulingEn
   const [query, setQuery] = useState(initialCatalogState?.query || '');
   const queryRef = useRef(query);
   queryRef.current = query;
-  const [packageFilter, setPackageFilter] = useState(initialCatalogState?.packageFilter || 'all');
+  const [packageFilter, setPackageFilter] = useState(initialCatalogState?.packageFilter || savedScope.packageId || 'all');
   const [kindFilter, setKindFilter] = useState(initialCatalogState?.kindFilter || 'all');
   const [modelFilter, setModelFilter] = useState(initialCatalogState?.modelFilter || 'all');
   const [validationFilter, setValidationFilter] = useState(initialCatalogState?.validationFilter || 'all');
@@ -73,9 +78,9 @@ export function LoadCatalogPage({ api, packages, inlineLoadEnabled, schedulingEn
   const [notice, setNotice] = useState('');
   const environmentDraftRef = useRef(environmentDraft);
   environmentDraftRef.current = environmentDraft;
-  const selectedPackage = packageFilter === 'all'
-    ? packages.status === 'ready' ? packages.data[0]?.packageId : undefined
-    : packageFilter;
+  const effectivePackage = scope === 'follow' ? workspace?.selectedPackage || 'all' : scope === 'custom' ? packageFilter : 'all';
+  const selectedPackage = effectivePackage === 'all' ? undefined : effectivePackage;
+  useEffect(() => { try { sessionStorage.setItem('att.catalog.scope', JSON.stringify({mode: scope, packageId: packageFilter, environment: customEnvironment})); } catch { /* Keep current tab state. */ } }, [scope, packageFilter, customEnvironment]);
 
   useEffect(() => {
     const scrollY = initialCatalogState?.scrollY;
@@ -94,9 +99,18 @@ export function LoadCatalogPage({ api, packages, inlineLoadEnabled, schedulingEn
       : item));
   }, [actionKey]);
 
+  const previousPackage = useRef(selectedPackage);
   useEffect(() => {
-    if (environment !== environmentDraftRef.current) invalidateEnvironmentValidation(environment);
-  }, [environment, invalidateEnvironmentValidation]);
+    if (previousPackage.current !== selectedPackage) {
+      previousPackage.current = selectedPackage;
+      invalidateEnvironmentValidation(scope === 'follow' && selectedPackage ? workspace?.selectedEnvironment || '' : scope === 'custom' ? customEnvironment : '');
+    }
+  }, [selectedPackage, scope, workspace?.selectedEnvironment, customEnvironment, invalidateEnvironmentValidation]);
+
+  useEffect(() => {
+    const desired = scope === 'follow' ? (selectedPackage ? workspace?.selectedEnvironment || '' : '') : scope === 'custom' ? customEnvironment : '';
+    if (desired !== environmentDraftRef.current) invalidateEnvironmentValidation(desired);
+  }, [scope, selectedPackage, workspace?.selectedEnvironment, customEnvironment, invalidateEnvironmentValidation]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -121,13 +135,13 @@ export function LoadCatalogPage({ api, packages, inlineLoadEnabled, schedulingEn
       setEnvironmentProfilesState('ready');
       if (environmentDraftRef.current && !names.includes(environmentDraftRef.current)) {
         invalidateEnvironmentValidation('');
-        onEnvironmentChange('');
+        if(scope === 'custom') setCustomEnvironment('');
       }
     }).catch(() => {
       if (!controller.signal.aborted) setEnvironmentProfilesState('error');
     });
     return () => controller.abort();
-  }, [api, selectedPackage, environmentReload, invalidateEnvironmentValidation, onEnvironmentChange]);
+  }, [api, selectedPackage, environmentReload, invalidateEnvironmentValidation, scope]);
 
   const loadCatalog = useCallback(async (signal: AbortSignal, append = false) => {
     if (packages.status !== 'ready') return;
@@ -235,10 +249,10 @@ export function LoadCatalogPage({ api, packages, inlineLoadEnabled, schedulingEn
   }, [packages.status, packages.status === 'ready' ? packages.data : null, loadCatalog, refreshKey]);
 
   const visible = useMemo(() => catalog.filter(item =>
-    (packageFilter === 'all' || item.packageId === packageFilter)
+    (effectivePackage === 'all' || item.packageId === effectivePackage)
     && (kindFilter === 'all' || item.kind === kindFilter)
     && (modelFilter === 'all' || item.model === modelFilter)
-    && (validationFilter === 'all' || item.validation === validationFilter)), [catalog, packageFilter, kindFilter, modelFilter, validationFilter]);
+    && (validationFilter === 'all' || item.validation === validationFilter)), [catalog, effectivePackage, kindFilter, modelFilter, validationFilter]);
 
   async function runNow(item: LoadCatalogItem) {
     if (!item.runNow || actionKey) return;
@@ -254,7 +268,7 @@ export function LoadCatalogPage({ api, packages, inlineLoadEnabled, schedulingEn
   }
 
   async function showSource(item: LoadCatalogItem) {
-    const state: LoadCatalogRouteState = { query: query || undefined, packageFilter, kindFilter, modelFilter, validationFilter,
+    const state: LoadCatalogRouteState = { query: query || undefined, packageFilter: effectivePackage, kindFilter, modelFilter, validationFilter,
       environment: environmentDraft, scrollY: window.scrollY };
     const returnTo = formatRoute({ kind: 'load', tab: 'scenarios', catalog: state });
     window.history.replaceState(window.history.state, '', window.location.pathname + window.location.search + returnTo);
@@ -313,6 +327,7 @@ export function LoadCatalogPage({ api, packages, inlineLoadEnabled, schedulingEn
   }
 
   function changeEnvironment(value: string) {
+    setPackageFilter(effectivePackage); setCustomEnvironment(value); setScope('custom');
     invalidateEnvironmentValidation(value);
     onEnvironmentChange(value);
   }
@@ -341,7 +356,7 @@ export function LoadCatalogPage({ api, packages, inlineLoadEnabled, schedulingEn
   const environmentNotApplicable = (item: LoadCatalogItem) => Boolean(environmentDraft && item.packageId !== selectedPackage);
   const clearCatalogFilters = () => {
     queryRef.current = ''; catalogFailuresRef.current = {}; setCatalogFailures({}); setQuery('');
-    setPackageFilter('all'); setKindFilter('all'); setModelFilter('all'); setValidationFilter('all');
+    setPackageFilter('all'); setCustomEnvironment(''); setScope('follow'); setKindFilter('all'); setModelFilter('all'); setValidationFilter('all');
   };
   return <div className="page-content att-load-catalog">
     <header className="att-feature-header"><div><p className="att-eyebrow">Package resource definitions</p><h1>Scenarios</h1>
@@ -356,12 +371,13 @@ export function LoadCatalogPage({ api, packages, inlineLoadEnabled, schedulingEn
           const value = event.currentTarget.value;
           queryRef.current = value; catalogFailuresRef.current = {}; setCatalogFailures({}); setQuery(value);
         }} placeholder="Package-relative YAML path" /></label>
-        <label>Package<select value={packageFilter} onChange={event => setPackageFilter(event.currentTarget.value)}><option value="all">All packages</option>{packages.status === 'ready' && packages.data.map(pkg => <option key={pkg.packageId} value={pkg.packageId}>{pkg.displayName || pkg.packageId}</option>)}</select></label>
+        <label>List scope<select aria-label="LOAD Catalog list scope" value={scope} onChange={event => setScope(event.currentTarget.value as 'follow'|'all'|'custom')}><option value="follow">Follow Workspace</option><option value="all">All</option><option value="custom">Custom</option></select></label>
+        <label>Package<select value={effectivePackage} onChange={event => {setPackageFilter(event.currentTarget.value);setCustomEnvironment('');setScope('custom');}}><option value="all">All packages</option>{packages.status === 'ready' && packages.data.map(pkg => <option key={pkg.packageId} value={pkg.packageId}>{pkg.displayName || pkg.packageId}</option>)}</select></label>
         <label>Kind<select value={kindFilter} onChange={event => setKindFilter(event.currentTarget.value)}><option value="all">All kinds</option><option value="scenario">Scenario</option><option value="template">Legacy Quick Load Policy</option><option value="invalid">Invalid</option></select></label>
         <label>Model<select value={modelFilter} onChange={event => setModelFilter(event.currentTarget.value)}><option value="all">All models</option><option value="virtualUsers">Virtual Users</option><option value="arrivalRate">Arrival Rate</option></select></label>
         <label>Validation<select value={validationFilter} onChange={event => setValidationFilter(event.currentTarget.value)}><option value="all">All validation states</option><option value="unverified">Unverified</option><option value="valid">Valid</option><option value="invalid">Invalid</option></select></label>
         <label>Environment for {selectedPackage || 'selected package'}<select aria-label={`Catalog Environment for ${selectedPackage || 'selected package'}`}
-          value={environmentDraft} disabled={environmentProfilesState === 'loading'} onChange={event => changeEnvironment(event.currentTarget.value)}>
+          value={environmentDraft} disabled={!selectedPackage || environmentProfilesState === 'loading'} onChange={event => changeEnvironment(event.currentTarget.value)}>
           <option value="">Package default</option>{environmentProfiles.map(name => <option key={name} value={name}>{name}</option>)}
         </select></label>
       </div>
@@ -398,7 +414,7 @@ export function LoadCatalogPage({ api, packages, inlineLoadEnabled, schedulingEn
             onValidateTemplate={() => void validateTemplate(item)} onRunNow={() => void runNow(item)}
             onSchedule={() => onSchedule({ packageId: item.packageId, environment: environmentDraft || undefined,
               draftId: item.scheduleDraftId!, previewYaml: item.schedulePreviewYaml, expiresAt: item.scheduleDraftExpiresAt, executionType: 'load' })}
-            onQuickLoad={() => onQuickLoad(item.packageId, item)} onView={() => void showSource(item)} />
+            onQuickLoad={() => onQuickLoad(item.packageId, item, item.packageId === selectedPackage ? environmentDraft : '')} onView={() => void showSource(item)} />
         </article>)}
       </div>}
       {Object.keys(catalogCursors).length > 0 && <button className="button button-quiet" type="button" disabled={catalogMoreLoading || catalogState === 'loading'}

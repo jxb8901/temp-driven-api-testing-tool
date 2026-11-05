@@ -375,15 +375,9 @@ final class ServerRuntime implements AutoCloseable {
                                 Instant expiresAt) {}
 
     private Map<String,String> ownedExecutionSpec(String id,String principal) throws Exception {
+        if(principal==null||principal.isBlank()||RequestIdentity.ANONYMOUS.equals(principal))throw new NotFoundException();
         requireLocalOperator(principal);requireJobOwner(id,principal);
         Map<String,String> record=store.executionSpec(id);if(record==null)throw new NotFoundException();
-        boolean owned=principal.equals(record.get("principal"));
-        if(!owned&&record.get("occurrenceId")!=null) {
-            Map<String,Object> occurrence=store.scheduleExecution(record.get("occurrenceId"));
-            LoadSchedule schedule=occurrence==null?null:store.schedule(String.valueOf(occurrence.get("scheduleId")));
-            owned=schedule!=null&&(principal.equals(schedule.createdBy)||principal.equals(schedule.executionPrincipal));
-        }
-        if(!owned)throw new NotFoundException();
         return record;
     }
     Map<String,Object> jobReplay(String id,String principal) throws Exception {
@@ -565,7 +559,11 @@ final class ServerRuntime implements AutoCloseable {
             ownedExecutionSpec(jobId,principal);
             ReplayReview review=null;
             for(ReplayReview candidate:replayReviews.values())if(candidate.source.equals(jobId)&&candidate.principal.equals(principal)&&candidate.draftId.equals(draftId)){review=candidate;break;}
-            if(review==null)throw new ReplayDraftExpiredException();
+            if(review==null) {
+                for(ReplayReview candidate:replayReviews.values())
+                    if(candidate.source.equals(jobId)&&candidate.draftId.equals(draftId))throw new NotFoundException();
+                throw new ReplayDraftExpiredException();
+            }
             if(!review.expiresAt.isAfter(clock.instant())){replayReviews.values().remove(review);throw new ReplayDraftExpiredException();}
             Map<String,Object> view=new LinkedHashMap<>();view.put("schemaVersion","att-job-replay-draft/v1");view.put("draftRef",draftId);view.put("sourceJobId",jobId);
             view.put("packageId",review.packageId);view.put("executionType",review.executionType);view.put("sourcePolicy",review.sourcePolicy);
@@ -590,7 +588,8 @@ final class ServerRuntime implements AutoCloseable {
             ownedExecutionSpec(id,principal);
             String accepted=store.replayJob(principal,intent,id);if(accepted!=null){requireJobOwner(accepted,principal);if(requestedPolicy!=null){Map<String,String> acceptedSpec=store.executionSpec(accepted);if(acceptedSpec==null||acceptedSpec.get("spec")==null||!requestedPolicy.equals(JobExecutionSpec.parse(acceptedSpec.get("spec")).value.path("replay").path("sourcePolicy").asText()))throw new JobConflictException("ATT-SERVER-REPLAY-INTENT-MISMATCH","The confirmation intent belongs to a different source policy.");}return jobRecord(accepted);}
             ReplayReview review=replayReviews.get(intent);
-            if(review==null||!review.source.equals(id)||!review.principal.equals(principal)) {if(requestedPolicy!=null)throw new ReplayDraftExpiredException();throw new NotFoundException();}
+            if(review!=null&&(!review.source.equals(id)||!review.principal.equals(principal)))throw new NotFoundException();
+            if(review==null) {if(requestedPolicy!=null)throw new ReplayDraftExpiredException();throw new NotFoundException();}
             if(!review.expiresAt.isAfter(clock.instant()))throw new ReplayDraftExpiredException();
             if(requestedPolicy!=null&&!requestedPolicy.equals(review.sourcePolicy))throw new JobConflictException("ATT-SERVER-REPLAY-INTENT-MISMATCH","The confirmation intent belongs to a different source policy.");
             Map<String,String> record=ownedExecutionSpec(id,principal);JobExecutionSpec spec=JobExecutionSpec.parse(record.get("spec"));
@@ -619,6 +618,7 @@ final class ServerRuntime implements AutoCloseable {
                     .withReplaySource(id,review.sourcePolicy,review.originalRevision,review.selectedRevision);
             Map<String,Object> result=submit(review.executionType,input,principal,true,null,"load".equals(review.executionType)&&review.definition.has("scenario")&&spec.value.has("sourcePath"),id,intent,retained,
                     "load".equals(review.executionType)&&spec.value.has("sourcePath"));
+            store.audit(principal,"JOB_RERUN_SOURCE",id,review.packageId,review.sourcePolicy);
             store.audit(principal,"JOB_RERUN",String.valueOf(result.get("jobId")),review.packageId,"ACCEPTED");
             runDrafts.remove(review.draftId);advancedLoadDrafts.remove(review.draftId);catalogLoadDrafts.remove(review.draftId);replayReviews.remove(intent);
             return result;
@@ -778,7 +778,8 @@ final class ServerRuntime implements AutoCloseable {
             summaryFields.put("configuration",configuration);
             Files.write(jobPath.resolve("output/configuration.json"),JSON.writeValueAsBytes(configuration));
             if(request.scenario!=null)summaryFields.put("scenario",request.scenario);
-            if(request.environment!=null&&!request.environment.isBlank())summaryFields.put("environment",request.environment);
+            Object resolvedEnvironment=configuration.get("environment");
+            if(resolvedEnvironment instanceof String&&!((String)resolvedEnvironment).isBlank())summaryFields.put("environment",resolvedEnvironment);
             if(request.loadModel!=null)summaryFields.put("model",request.loadModel);
             JsonNode listDefinition=executionSpec==null?null:JobExecutionSpec.parse(executionSpec).definition();
             if(listDefinition==null) {
