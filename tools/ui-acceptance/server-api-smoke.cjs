@@ -324,6 +324,7 @@ async function main() {
 
     await page.goto(`${origin}/tools/att/ui/index.html#/schedules`);
     await page.getByRole('heading', { name: 'Schedules', level: 1, exact: true }).waitFor();
+    await page.getByLabel('Schedule list scope').selectOption('all');
     await page.getByText('1 of 1 schedules shown.', { exact: true }).waitFor();
     assert.equal(await page.locator('.att-query-filter-panel[aria-label="Schedule filters"]').count(), 1,
       'Schedules must use the shared query filter panel');
