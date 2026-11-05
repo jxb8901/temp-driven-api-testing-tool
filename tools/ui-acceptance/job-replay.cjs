@@ -198,7 +198,7 @@ async function main() {
     const runStorage=await page.evaluate(()=>JSON.stringify({local:Object.keys(localStorage).map(key=>[key,localStorage.getItem(key)]),session:Object.keys(sessionStorage).map(key=>[key,sessionStorage.getItem(key)])}));
     for(const forbidden of ['requestId','arguments','scenario','password'])assert.ok(!runStorage.includes(forbidden),`Raw replay definition leaked to storage: ${forbidden}`);
     await page.getByLabel('Target ID').waitFor();assert.equal(await page.getByLabel('Target ID').inputValue(),'lookup-customer');
-    assert.equal(await page.getByLabel('Environment').inputValue(),'');
+    assert.equal(await page.locator('#main-content').getByLabel('Environment').inputValue(),'');
     await page.getByText('Resolved Environment: SIT',{exact:false}).waitFor();await page.getByText('Origin: Package Manifest',{exact:false}).waitFor();
     assert.equal(await page.getByLabel('Debug diagnostics').isChecked(),true);assert.equal(await page.getByLabel('Stop after the first failed Case').isChecked(),true);
     assert.equal(await page.locator('input[aria-label="limit value"]').inputValue(),'3');
@@ -223,7 +223,7 @@ async function main() {
     await page.waitForURL(url=>url.hash.startsWith('#/advanced-load/payments?'));
     await page.getByText('Job settings loaded. Edit the fields',{exact:false}).waitFor();
     assert.equal(new URLSearchParams(new URL(page.url()).hash.split('?')[1]||'').has('environment'),false,'Package-default LOAD replay leaves the environment to current Package resolution');
-    assert.equal(await page.getByLabel('Environment').inputValue(),'');
+    assert.equal(await page.locator('#main-content').getByLabel('Environment').inputValue(),'');
     await page.getByText('Resolved Environment: SIT',{exact:false}).waitFor();await page.getByText('Origin: Package Manifest',{exact:false}).waitFor();
     await page.getByLabel('Measured duration value').waitFor();
     assert.equal(await page.getByLabel('Measured duration value').inputValue(),'30');
@@ -317,7 +317,7 @@ async function main() {
     await page.waitForURL(url=>url.hash.startsWith('#/advanced-load/payments?'));
     await page.getByText('Job settings loaded. Edit the fields',{exact:false}).waitFor();
     assert.equal(new URLSearchParams(new URL(page.url()).hash.split('?')[1]||'').has('environment'),false);
-    assert.equal(await page.getByLabel('Environment').inputValue(),'');
+    assert.equal(await page.locator('#main-content').getByLabel('Environment').inputValue(),'');
     await page.getByText('Resolved Environment: SIT',{exact:false}).waitFor();await page.getByText('Origin: Package Manifest',{exact:false}).waitFor();
     await page.getByLabel('Measured duration value').waitFor();assert.equal(await page.getByLabel('Measured duration value').inputValue(),'30');
     await page.getByRole('button',{name:'Back to source Job'}).click();

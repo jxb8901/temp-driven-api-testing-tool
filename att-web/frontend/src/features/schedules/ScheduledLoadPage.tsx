@@ -299,12 +299,9 @@ export function ScheduledLoadPage({ api, packages, enabled, onOpenJob, initialDr
 
   useEffect(() => {
     void loadSchedules();
-    return () => {
-      listController.current?.abort();
-      historyController.current?.abort();
-      previewController.current?.abort();
-    };
+    return () => { listController.current?.abort(); };
   }, [loadSchedules]);
+  useEffect(() => () => { historyController.current?.abort(); previewController.current?.abort(); }, []);
 
   useEffect(() => {
     const release = navigation.registerUnsavedChanges(editorOpen && dirty, 'Schedules changes');

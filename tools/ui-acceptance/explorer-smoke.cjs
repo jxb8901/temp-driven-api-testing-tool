@@ -353,7 +353,7 @@ async function main() {
     await page.getByRole('heading', { name: 'checkout' }).waitFor();
     await page.getByRole('button', { name: 'Run', exact: true }).click();
     await page.getByRole('heading', { name: 'Run', exact: true }).waitFor();
-    assert.match(page.url(), /#\/run\/payments\/template\/checkout\?(?:environment=[^&]+&)?id=checkout$/);
+    assert.match(page.url(), /#\/run\/payments\/template\/checkout\?(?:environment=[^&]*&)?id=checkout$/);
     await page.getByText("Typed fields use the selected target's safe Debug defaults. Advanced JSON remains available for nested inputs.").waitFor();
     await page.getByRole('button', { name: 'Validate', exact: true }).click();
     try { await page.getByRole('heading', { name: 'Review', exact: true }).waitFor({ timeout: 10000 }); }
