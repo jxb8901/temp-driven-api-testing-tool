@@ -130,6 +130,38 @@ class AuthoringSourceSupportTest {
         assertThrows(PackageResourceInspector.ResourceNotFoundException.class,
                 ()->AuthoringSourceSupport.read(root,escaped,"escaped.yaml",4096));
 
+        Path xmlText=root.resolve("xml-text.yaml");
+        Files.write(xmlText,("schemaVersion: att-package/v1\npayload: |\n"
+                +"  <payload>{&quot;classification&quot;:&quot;secret&quot;,&quot;value&quot;:&quot;xml-text-canary&quot;}</payload>\n")
+                .getBytes(StandardCharsets.UTF_8));
+        assertThrows(PackageResourceInspector.ResourceNotFoundException.class,
+                ()->AuthoringSourceSupport.read(root,xmlText,"xml-text.yaml",4096));
+
+        Path xmlAttribute=root.resolve("xml-attribute.yaml");
+        Files.write(xmlAttribute,("schemaVersion: att-package/v1\npayload: |\n"
+                +"  <payload value=\"{&quot;classification&quot;:&quot;secret&quot;,&quot;value&quot;:&quot;xml-attribute-canary&quot;}\"/>\n")
+                .getBytes(StandardCharsets.UTF_8));
+        assertThrows(PackageResourceInspector.ResourceNotFoundException.class,
+                ()->AuthoringSourceSupport.read(root,xmlAttribute,"xml-attribute.yaml",4096));
+
+        Path xmlCdata=root.resolve("xml-cdata.yaml");
+        Files.write(xmlCdata,("schemaVersion: att-package/v1\npayload: |\n"
+                +"  <payload><![CDATA[{\"classification\":\"secret\",\"value\":\"xml-cdata-canary\"}]]></payload>\n")
+                .getBytes(StandardCharsets.UTF_8));
+        assertThrows(PackageResourceInspector.ResourceNotFoundException.class,
+                ()->AuthoringSourceSupport.read(root,xmlCdata,"xml-cdata.yaml",4096));
+
+        StringBuilder deepXml=new StringBuilder();
+        for(int index=0;index<66;index++)deepXml.append("<node>");
+        deepXml.append("safe");
+        for(int index=0;index<66;index++)deepXml.append("</node>");
+        Path deepXmlSource=root.resolve("deep-xml.yaml");
+        Files.write(deepXmlSource,("schemaVersion: att-package/v1\npayload: |\n  "+deepXml+"\n")
+                .getBytes(StandardCharsets.UTF_8));
+        assertThrows(PackageResourceInspector.ResourceNotFoundException.class,
+                ()->AuthoringSourceSupport.read(root,deepXmlSource,"deep-xml.yaml",8192),
+                "Embedded XML nesting beyond the inspection limit must fail closed");
+
         Path configured=root.resolve("configured-block.yaml");
         Files.write(configured,("schemaVersion: att-package/v1\npayload: |\n"
                 +"  records:\n    opaqueConfigValue: configured-block-canary\n").getBytes(StandardCharsets.UTF_8));

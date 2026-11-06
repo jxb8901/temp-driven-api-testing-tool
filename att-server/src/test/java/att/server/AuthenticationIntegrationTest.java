@@ -149,6 +149,9 @@ class AuthenticationIntegrationTest {
             List<String> embeddedProtectedRecords=List.of(
                     "schemaVersion: att-package/v1\npayload: |\n  classification: secret\n  value: route-block-canary\n",
                     "schemaVersion: att-package/v1\npayload: >\n  classification: secret\n  value: route-folded-canary\n",
+                    "schemaVersion: att-package/v1\npayload: |\n  <payload>{&quot;classification&quot;:&quot;secret&quot;,&quot;value&quot;:&quot;route-xml-text-canary&quot;}</payload>\n",
+                    "schemaVersion: att-package/v1\npayload: |\n  <payload value=\"{&quot;classification&quot;:&quot;secret&quot;,&quot;value&quot;:&quot;route-xml-attribute-canary&quot;}\"/>\n",
+                    "schemaVersion: att-package/v1\npayload: |\n  <payload><![CDATA[{\"classification\":\"secret\",\"value\":\"route-xml-cdata-canary\"}]]></payload>\n",
                     "schemaVersion: att-package/v1\npayload: |\n  records:\n    opaqueConfigValue: route-configured-canary\n",
                     "schemaVersion: att-package/v1\npayload: \"{\\\"classification\\\":\\\"secret\\\",\\\"value\\\":\\\"route-escaped-canary\\\"}\"\n");
             for(String embedded:embeddedProtectedRecords) {

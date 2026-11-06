@@ -141,7 +141,7 @@ final class AuthoringSourceSupport {
                 Object parsed=JSON.readValue(text,Object.class);
                 return protectedValue(parsed,"",sensitivePaths,sensitiveFieldPatterns,new IdentityHashMap<Object,Boolean>(),0);
             }
-            if(lower.endsWith(".xml"))return protectedXml(text,sensitivePaths,sensitiveFieldPatterns);
+            if(lower.endsWith(".xml"))return protectedXml(text,sensitivePaths,sensitiveFieldPatterns,0);
             if(lower.endsWith(".csv"))return protectedCsv(text,sensitivePaths,sensitiveFieldPatterns,0);
             return protectedText(text,sensitivePaths,sensitiveFieldPatterns);
         } catch(Exception malformedOrUnknown) {
@@ -211,7 +211,7 @@ final class AuthoringSourceSupport {
                 &&protectedScalar(unescaped,sensitivePaths,sensitiveFieldPatterns,depth+1))return true;
         if(!looksLikeEmbeddedStructure(candidate))return false;
         try {
-            if(looksLikeXml(candidate))return protectedXml(candidate,sensitivePaths,sensitiveFieldPatterns);
+            if(looksLikeXml(candidate))return protectedXml(candidate,sensitivePaths,sensitiveFieldPatterns,depth+1);
             if(looksLikeCsv(candidate)&&protectedCsv(candidate,sensitivePaths,sensitiveFieldPatterns,depth+1))return true;
             LoaderOptions options=new LoaderOptions();
             options.setAllowDuplicateKeys(false);options.setMaxAliasesForCollections(50);options.setCodePointLimit(3_000_000);
@@ -261,7 +261,9 @@ final class AuthoringSourceSupport {
         return text.indexOf(',')>=0&&(text.indexOf('\n')>=0||text.indexOf('\r')>=0);
     }
 
-    private static boolean protectedXml(String text,List<String> sensitivePaths,List<String> sensitiveFieldPatterns) throws Exception {
+    private static boolean protectedXml(String text,List<String> sensitivePaths,List<String> sensitiveFieldPatterns,
+                                        int depth) throws Exception {
+        if(depth>64)return true;
         String parseable=XML_REFERENCE.matcher(text).replaceAll("ATT_REFERENCE");
         DocumentBuilderFactory factory=DocumentBuilderFactory.newInstance();
         factory.setNamespaceAware(true);factory.setXIncludeAware(false);factory.setExpandEntityReferences(false);
@@ -277,7 +279,7 @@ final class AuthoringSourceSupport {
             @Override public void fatalError(SAXParseException failure) throws SAXException {throw failure;}
         });
         Document document=builder.parse(new InputSource(new StringReader(parseable)));
-        return protectedXmlNode(document.getDocumentElement(),"",sensitivePaths,sensitiveFieldPatterns,0);
+        return protectedXmlNode(document.getDocumentElement(),"",sensitivePaths,sensitiveFieldPatterns,depth);
     }
 
     private static boolean protectedXmlNode(Node node,String parentPath,List<String> sensitivePaths,
@@ -289,6 +291,7 @@ final class AuthoringSourceSupport {
         if("classification".equalsIgnoreCase(name)&&protectedClassification(node.getTextContent()))return true;
         if((SecretProtection.sensitiveName(name)||matchesConfiguredField(name,sensitiveFieldPatterns)
                 ||matchesConfiguredPath(path,sensitivePaths))&&hasText(node.getTextContent()))return true;
+        if(protectedScalar(node.getTextContent(),sensitivePaths,sensitiveFieldPatterns,depth+1))return true;
         NamedNodeMap attributes=node.getAttributes();
         if(attributes!=null)for(int index=0;index<attributes.getLength();index++) {
             Node attribute=attributes.item(index);String key=attribute.getLocalName()==null?attribute.getNodeName():attribute.getLocalName();
@@ -297,9 +300,14 @@ final class AuthoringSourceSupport {
             if("secret".equalsIgnoreCase(key)&&"true".equalsIgnoreCase(value==null?"":value.trim()))return true;
             if((SecretProtection.sensitiveName(key)||matchesConfiguredField(key,sensitiveFieldPatterns)
                     ||matchesConfiguredPath(appendPath(path,"@"+key),sensitivePaths))&&hasText(value))return true;
+            if(protectedScalar(value,sensitivePaths,sensitiveFieldPatterns,depth+1))return true;
         }
-        for(Node child=node.getFirstChild();child!=null;child=child.getNextSibling())
-            if(child.getNodeType()==Node.ELEMENT_NODE&&protectedXmlNode(child,path,sensitivePaths,sensitiveFieldPatterns,depth+1))return true;
+        for(Node child=node.getFirstChild();child!=null;child=child.getNextSibling()) {
+            if(child.getNodeType()==Node.ELEMENT_NODE
+                    &&protectedXmlNode(child,path,sensitivePaths,sensitiveFieldPatterns,depth+1))return true;
+            if((child.getNodeType()==Node.TEXT_NODE||child.getNodeType()==Node.CDATA_SECTION_NODE)
+                    &&protectedScalar(child.getNodeValue(),sensitivePaths,sensitiveFieldPatterns,depth+1))return true;
+        }
         return false;
     }
 
