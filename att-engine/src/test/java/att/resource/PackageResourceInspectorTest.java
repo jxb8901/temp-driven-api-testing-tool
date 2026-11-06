@@ -391,7 +391,7 @@ class PackageResourceInspectorTest {
                 +"  inspectAllowed:\n    type: log\n    message: '&{./allowed.txt}'\n"
                 +"  inspectBlocked:\n    type: log\n    message: '&{./blocked.txt}'\n");
         PackageResourceInspector inspector=new PackageResourceInspector(root,Paths.get("config/config.yaml"),"SIT",
-                List.of("templates/POLICY/template.yaml","templates/POLICY/allowed.txt"),65536,262144,
+                Arrays.asList("templates/POLICY/template.yaml","templates/POLICY/allowed.txt"),65536,262144,
                 false,true,"allowlist-only",Collections.<String>emptyList(),false,
                 Collections.<String>emptyList(),Collections.<String>emptyList());
         @SuppressWarnings("unchecked") List<Map<String,Object>> items=(List<Map<String,Object>>)inspector.inspect("list","template",null,null,0,10).get("items");
