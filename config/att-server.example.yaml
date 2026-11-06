@@ -9,6 +9,11 @@ server:
     mode: container
   # Legacy container-mode setting. false enables shared anonymous access; never use with local mode.
   authenticationRequired: true
+  # Central Runtime Config owner authoring is disabled unless explicitly enabled.
+  centralConfigurationEditingEnabled: false
+  packageConfiguration:
+    # A Package owner is an active USER whose exact login ID matches a registered Package ID.
+    sourceEditingEnabled: false
   # Operations require a trusted Servlet Principal in userRole. adminRole is reserved for account and system administration.
   authorization:
     adminRole: ATT_ADMIN

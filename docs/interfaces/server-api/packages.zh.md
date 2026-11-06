@@ -56,6 +56,23 @@ GET /api/v1/packages/payments/resources/template/{resourceId}/source-file?refere
 
 無效清單參數會回傳 `400`；未知 package/resource 使用相同的 `404` 格式。過期 cursor 回傳 `409`，超大回應回傳 `413`，探索佇列已滿回傳 `503`，Inspector 逾時回傳 `504`。錯誤回應使用既有的 `error.code`、`error.summary` 及 `requestId` 格式，不會包含實體路徑或 parser exception 訊息。
 
+## Lossless authoring-source reads
+
+上方的安全 source inspection 仍供獲授權的 USER operator 使用，並回傳既有的 redacted projection；該 projection 不可當作可寫入來源。Package authoring 使用獨立 endpoint，要求已驗證的 active USER，其 login ID 必須與已登錄 Package ID 完全相同；`default` 永不允許編輯。亦必須啟用可信部署設定 `server.packageConfiguration.sourceEditingEnabled: true`。ADMIN 不會取得 Package USER operations 或 owner 權限；Package owner 亦不會取得 central configuration 權限。
+
+```http
+GET /api/v1/packages/{packageId}/authoring-source?type=manifest
+GET /api/v1/packages/{packageId}/authoring-source?type=resource&resourceType=template&resourceId={resourceId}
+GET /api/v1/packages/{packageId}/authoring-source?type=file&resourceType=template&resourceId={resourceId}&referenceId={opaque}
+GET /api/v1/packages/{packageId}/authoring-source?type=load&path=load%2Fscenario.yaml
+GET /api/v1/packages/{packageId}/authoring-source?type=testdata&resourceId={descriptorId}&environment=SIT
+GET /api/v1/configuration/authoring-source?path=config%2Fconfig.yaml
+```
+
+Package source 僅限固定 `package.yaml`、ready Template/Flow YAML、允許的 `load/*.yaml` 與 `load/*.yml`、已設定的 Package Testdata descriptor，以及由授權 Template/Flow 的靜態 `&{path}` reference 到達的合資格 UTF-8 文字檔。`file` request 必須重用安全 source inspection 簽發的不透明 reference 與 origin。Central source 僅限目前的 Runtime Config 及其宣告的 YAML Helper/Tool descriptor；必須具有 active `SYSTEM_SETTINGS_WRITE` (ADMIN)，並啟用獨立部署 switch `server.centralConfigurationEditingEnabled: true`，預設為 `false`。
+
+成功回應包含完整 UTF-8 `text`、`logicalPath`、`present`、SHA-256 `revision` 及 quoted `sourceEtag`；HTTP `ETag` header 使用相同的內容 ETag。回應使用 `Cache-Control: private, no-store`。每次讀取都會重新檢查身份／角色、canonical root、registry、path allowlist、symlink、大小、UTF-8 及受保護秘密。即使關閉一般 masking，憑證與金鑰仍會 fail closed。不可使用 `redacted` query parameter。未驗證或無權限回傳 `401`／`403`；不可用或不允許的路徑回傳 `404`；來源／root 競態回傳 `409`；超出大小上限回傳 `413`。
+
 Package inspection 將不存在的選填 `templates/`、`testcase/` 及 `load/` 根目錄視為空 inventory。若根目錄存在但不是可讀目錄，或解析後超出 canonical Package，會回傳 HTTP `422 ATT-RESOURCE-ROOT-INVALID`，並以安全的 `field` 指出受影響根目錄。其他 Worker validation errors 回傳 `422 ATT-RESOURCE-VALIDATION-FAILED`；兩種回應都不會包含絕對路徑或 parser 細節。
 
 ## Package configuration inspection
@@ -84,7 +101,7 @@ Declared view 會回傳 schema version、安全的 global 欄位、已設定 pro
 
 Compare 預設比較 profile-sourced values；`includeInherited=true` 會一併包括 inherited/global values 及其來源。Section filter 會在分頁前套用。比較結果會列出可顯示的 effective 欄位及其來源。敏感欄位會以 `state: "hidden"` 和 `change: "hidden"` 回傳；回應不會洩露其值是否相同。系統不回傳絕對本機路徑、憑證、Server 自身的秘密或未限制的 descriptor 內容。關閉 masking 時，非憑證 URL 和 MQ host／port 可在 Effective／Compare 顯示；HTTP header maps 及 SSH host／user／port／identity-file 在各 view 始終受保護。啟用 masking 後，設定的操作欄位及路徑亦會遮蔽。
 
-`includeAllFields=true` 只適用於 effective 或 compare view，並加入其他非秘密 DB properties、evidence SQL／parameters 及平常會遮蔽的 DB 運作設定。Caller 必須具備 `server.inspection.configurationAdminRole`，local-auth mode 則必須是本地 `ADMIN`。回應不會快取並會寫入 audit log。Username、password、token、個人資料、HTTP header maps、MQ evidence payload、SSH 連線資料及 identity-file 路徑、已分類欄位及設定的敏感值仍會遮蔽。Source 保持安全淨化；Declared 只提供宣告狀態和數量。
+`includeAllFields=true` 只適用於 effective 或 compare view，並加入其他非秘密 DB properties、evidence SQL／parameters 及平常會遮蔽的 DB 運作設定。Caller 必須具備 active `SYSTEM_SETTINGS_WRITE` (ADMIN)。回應不會快取並會寫入 audit log。Username、password、token、個人資料、HTTP header maps、MQ evidence payload、SSH 連線資料及 identity-file 路徑、已分類欄位及設定的敏感值仍會遮蔽。Source 保持安全淨化；Declared 只提供宣告狀態和數量。
 
 `source` endpoint 在 `safe-package-files` policy 下可依 origin 解析合資格的 package-local 文字參照；`allowlist-only` 則要求既有 `server.inspection.safeTextSources` 精確 package-relative 路徑。連結請求必須包含已授權 parent source 回傳的 Server 不透明 `referenceId`；caller 自行提供 path 和 origin 並不足以授權。External scripts 只會透過設定 external root 下每 package 的 canonical 精確 allowlist 提供，且不會回傳其絕對路徑。這仍是有界 source endpoint，並非任意檔案瀏覽器。Testdata records endpoint 需要 effective descriptor ID。Literal records 使用 `limit` 1–100 分頁（UI 每次讀取 50 筆）。Generated descriptor 預設回傳 `state: "preview-required"` 且不含 records；只有明確設定 `previewGenerated=true` 才會回傳有界 generated preview。此 endpoint 使用相同身份、redaction policy、bounded inspection worker、source/response 大小、佇列和逾時限制。
 

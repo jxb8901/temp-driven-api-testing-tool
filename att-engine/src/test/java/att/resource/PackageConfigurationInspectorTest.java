@@ -20,6 +20,38 @@ class PackageConfigurationInspectorTest {
     @org.junit.jupiter.api.BeforeEach void enableServerPathPresentation() { att.core.PathPresentation.configure(true, true); }
     @org.junit.jupiter.api.AfterEach void restoreDefaultPathPresentation() { att.core.PathPresentation.configure(false, false); }
 
+    @Test void ownerSourceReadsAllowOnlyConfiguredPackageTestdataAndCentralDescriptors() throws Exception {
+        Path packageRoot=packageRoot("authoring-testdata-source");
+        Path packageDescriptor=write(packageRoot.resolve("testdata/sit.yaml"),
+                "# preserve descriptor comments\nschemaVersion: att-testdata/v1.0\nid: accounts\nrecords: [{accountId: A}]\n");
+        write(packageRoot.resolve("package.yaml"),"schemaVersion: att-package/v1\ntestdata: {descriptors: [testdata/sit.yaml]}\n");
+        Map<String,Object> packageSource=inspector(packageRoot).forPackageTestdata()
+                .inspectAuthoringTestdataSource("accounts","SIT",65536);
+        assertEquals(Files.readString(packageDescriptor),packageSource.get("text"));
+        assertEquals("testdata/sit.yaml",packageSource.get("logicalPath"));
+
+        Path tools=Files.createDirectories(packageRoot.resolve("config/tools"));
+        String central="# central config comment\nschemaVersion: att-config/v2.12\n"
+                +"environment: SIT\ntoolGroups: [config/tools/group.yaml]\n";
+        Path centralFile=write(packageRoot.resolve("config/config.yaml"),central);
+        String group="# approved global descriptor\nschemaVersion: att-tool-group/v2.9\nid: group\nname: Group\ndescription: Safe\n"
+                +"tools:\n  echo:\n    name: Echo\n    description: Echo\n    command: [echo]\n";
+        Path groupFile=write(tools.resolve("group.yaml"),group);
+        write(tools.resolve("unreferenced.yaml"),group.replace("id: group","id: other"));
+        PackageConfigurationInspector shared=inspector(packageRoot).forSharedRuntime();
+        assertEquals(central,shared.inspectAuthoringSharedSource("config/config.yaml",65536).get("text"));
+        assertEquals(group,shared.inspectAuthoringSharedSource("config/tools/group.yaml",65536).get("text"));
+        assertThrows(PackageResourceInspector.ResourceNotFoundException.class,
+                ()->shared.inspectAuthoringSharedSource("config/tools/unreferenced.yaml",65536));
+        assertFalse(groupFile.toString().isEmpty());assertTrue(Files.isRegularFile(centralFile));
+
+        Path standalone=Files.createDirectories(temp.resolve("standalone-home/config"));
+        Path standaloneConfig=write(standalone.resolve("config.yaml"),"schemaVersion: att-config/v2.12\nenvironment: SIT\n");
+        PackageConfigurationInspector absolute=new PackageConfigurationInspector(standalone.getParent(),standaloneConfig,262144)
+                .forSharedRuntime();
+        assertEquals(Files.readString(standaloneConfig),absolute.inspectAuthoringSharedSource("config/config.yaml",65536).get("text"));
+    }
+
     @Test void packageTestdataUsesPackageDefaultsAndRefreshesManifestWithoutSharingCachedGlobalState() throws Exception {
         Path a=packageRoot("manifest-preview-a"), b=packageRoot("manifest-preview-b");
         Files.createDirectories(a.resolve("testdata"));Files.createDirectories(b.resolve("testdata"));

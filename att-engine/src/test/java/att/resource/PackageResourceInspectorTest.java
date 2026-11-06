@@ -100,6 +100,23 @@ class PackageResourceInspectorTest {
                 ()->inspector.inspect("list","template",null,null,1,1,"stale-revision"));
     }
 
+    @Test void ownerAuthoringSourcePreservesExactTemplateBytesAndUsesContentEtag() throws Exception {
+        Path root=packageWithTemplate("lossless-authoring-source","SOURCE","description: authored source");
+        String authored="# keep this comment and key order\nschemaVersion: att-template/v3.6\nname: SOURCE\n"
+                +"description: authored source\nactions:\n  note: {type: log, message: safe}\n";
+        writeUtf8(root.resolve("templates/SOURCE/template.yaml"),authored);
+        PackageResourceInspector inspector=new PackageResourceInspector(root,Paths.get("config/config.yaml"),"SIT",
+                Collections.singletonList("templates/SOURCE/template.yaml"),65536,262144);
+        @SuppressWarnings("unchecked") List<Map<String,Object>> items=(List<Map<String,Object>>)inspector.inspect("list","template",null,null,0,10).get("items");
+        String resourceId=String.valueOf(items.get(0).get("resourceId"));
+        Map<String,Object> raw=inspector.inspectAuthoringResourceSource("template",resourceId);
+        String digest=java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256")
+                .digest(authored.getBytes(StandardCharsets.UTF_8)));
+        assertEquals(authored,raw.get("text"));assertEquals(digest,raw.get("revision"));
+        assertEquals("\"sha256:"+digest+"\"",raw.get("sourceEtag"));
+        assertEquals("templates/SOURCE/template.yaml",raw.get("logicalPath"));
+    }
+
     @Test void detailProjectionCarriesAuthoredActionOrderWhenJsonWouldReorderNumericKeys() throws Exception {
         Path root=packageWithTemplate("numeric-action-order","ORDERED","description: authored order");
         writeUtf8(root.resolve("templates/ORDERED/template.yaml"),"schemaVersion: att-template/v3.6\nname: ORDERED\n"
@@ -353,6 +370,8 @@ class PackageResourceInspectorTest {
         Map<String,Object> nestedFile=inspector.inspect("source-file","template",resourceId,nestedId,0,1,null,"templates/SOURCE/payload/request.xml");
         assertEquals(Boolean.TRUE,nestedFile.get("available"));assertEquals("text",nestedFile.get("format"));
         assertTrue(String.valueOf(nestedFile.get("text")).contains("café"));
+        Map<String,Object> rawFile=inspector.inspectAuthoringSourceFile("template",resourceId,firstId,null);
+        assertEquals("<request>&{./nested.sql}</request>\n",rawFile.get("text"),"Owner source must preserve exact referenced-file bytes");
     }
 
     @Test void discoversActionFileReferencesFromTemplateAndFlowOriginsWithoutEvaluatingExpressions() throws Exception {

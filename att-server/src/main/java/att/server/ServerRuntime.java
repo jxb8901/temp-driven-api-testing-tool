@@ -159,6 +159,7 @@ final class ServerRuntime implements AutoCloseable {
                                            String draftId,String packageId,String executionType,String revision,Instant expiresAt,JsonNode packageEdit) { }
     private final ConcurrentHashMap<String,ScheduleExecutionReview> scheduleExecutionReviews=new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String,String> registryBoundDrafts=new ConcurrentHashMap<>();
+    private final ThreadLocal<PackageSourceAuthority> packageSourceAuthority=new ThreadLocal<>();
     private final List<InspectionWorker> inspectionWorkerPool=new ArrayList<>();
     private final ScheduledExecutorService inspectionWarmup;
     private volatile boolean closing;
@@ -1626,7 +1627,7 @@ final class ServerRuntime implements AutoCloseable {
     Map<String,Object> packageRegistryView() { return packageRegistry.snapshot().view(); }
     private Map<String,Object> packageMetadata(String id,Path root,String principal,PackageRegistry.Snapshot registry) throws Exception {
         Map<String,Object> item=new LinkedHashMap<>();item.put("packageId",id);item.put("name",root.getFileName().toString());
-        item.put("canExecute",isOperationalPrincipal(principal));item.put("registryRevision",registry.revision);
+        item.put("canExecute",isOperationalPrincipal(principal));item.put("canEditPackageContent",canEditPackageContent(id,principal));item.put("registryRevision",registry.revision);
         item.put("state",registry.packageStates.getOrDefault(id,"Registered"));
         return item;
     }
@@ -2931,13 +2932,82 @@ final class ServerRuntime implements AutoCloseable {
         return att.server.api.ConfigurationSnapshot.copy((Map<?,?>)preview.get("configuration"));
     }
     private Path manifestEditableRoot(String packageId,String principal) throws Exception {
-        if(!config.authenticationRequired||!config.packageConfiguration.sourceEditingEnabled||principal==null||
-                !principal.equals(packageId)||!isOperationalPrincipal(principal)) {
+        if(!canEditPackageContent(packageId,principal)) {
             store.audit(principal==null?"anonymous":principal,"PACKAGE_MANIFEST_DENIED",null,packageId,"source editing is not authorized");
             throw new PackageManifestPublisher.Denied();
         }
         Path root=packageRoot(packageId);if(root==null)throw new PackageManifestPublisher.Missing();
         validatePackageRoot(root);return root.toRealPath();
+    }
+
+    boolean canEditPackageContent(String packageId,String loginId) throws Exception {
+        boolean activeUser=false;
+        if(config.authenticationRequired&&loginId!=null&&!loginId.isBlank()
+                &&!RequestIdentity.ANONYMOUS.equals(loginId)) {
+            if("local".equals(config.authMode))activeUser=store.isActiveUser(loginId);
+            else {
+                PackageSourceAuthority authority=packageSourceAuthority.get();
+                activeUser=authority!=null&&authority.loginId.equals(loginId)
+                        ?authority.activeUserCheck.isActiveUser(loginId):isOperationalPrincipal(loginId);
+            }
+        }
+        return SourceAuthorizationPolicy.canEditPackageContent(config.authenticationRequired,
+                config.packageConfiguration.sourceEditingEnabled,packageId,loginId,activeUser);
+    }
+
+    <T> T withPackageSourceAuthority(String loginId,PackageSourceActiveUserCheck activeUserCheck,
+                                     PackageSourceAction<T> action) throws Exception {
+        PackageSourceAuthority previous=packageSourceAuthority.get();
+        admissionLifecycle.readLock().lock();
+        packageSourceAuthority.set(new PackageSourceAuthority(loginId,activeUserCheck));
+        try{return action.run();}
+        finally {
+            if(previous==null)packageSourceAuthority.remove();else packageSourceAuthority.set(previous);
+            admissionLifecycle.readLock().unlock();
+        }
+    }
+
+    @FunctionalInterface interface PackageSourceActiveUserCheck { boolean isActiveUser(String loginId) throws Exception; }
+    @FunctionalInterface interface PackageSourceAction<T> { T run() throws Exception; }
+    private record PackageSourceAuthority(String loginId,PackageSourceActiveUserCheck activeUserCheck) { }
+
+    Map<String,Object> inspectAuthoringPackageSource(String packageId,String kind,String resourceType,String resourceId,
+                                                      String path,String origin,String referenceId,String environment,String principal) throws Exception {
+        if(!canEditPackageContent(packageId,principal))throw new AuthoringSourceDeniedException();
+        admissionLifecycle.readLock().lock();
+        try {
+            PackageRegistry.Snapshot registry=packageRegistry.snapshot();Path root=registry.packages.get(packageId);
+            if(root==null)throw new NotFoundException();validatePackageRoot(root);root=root.toRealPath();
+            WorkerRequest request=inspectionRequest(packageId,root,null);request.inspectionAction="authoring-source";
+            request.authoringSourceKind=kind;request.authoringResourceType=resourceType;
+            request.inspectionResourceId=resourceId;request.inspectionPath=path;request.inspectionOrigin=origin;
+            request.inspectionReferenceId=referenceId;
+            if("testdata".equals(kind)&&environment!=null&&!environment.isBlank())
+                request.inspectionEnvironment=inspectionEnvironment(environment,"environment");
+            Map<String,Object> source=executeInspection(root,request);
+            PackageRegistry.Snapshot current=packageRegistry.snapshot();
+            if(!registry.revision.equals(current.revision)||!root.equals(current.packages.get(packageId))
+                    ||!canEditPackageContent(packageId,principal))throw new StaleDraftException();
+            validatePackageRoot(root);
+            return source;
+        } finally {admissionLifecycle.readLock().unlock();}
+    }
+
+    Map<String,Object> inspectAuthoringCentralSource(String logicalPath) throws Exception {
+        if(!config.centralConfigurationEditingEnabled)throw new NotFoundException();
+        Path root=ServerConfig.runtimeConfigRoot(config.runtimeConfigPath).toRealPath();
+        Path selected=config.runtimeConfigPath.toRealPath();
+        if(!selected.startsWith(root)||!Files.isRegularFile(selected,java.nio.file.LinkOption.NOFOLLOW_LINKS)
+                ||Files.isSymbolicLink(config.runtimeConfigPath))throw new NotFoundException();
+        WorkerRequest request=inspectionRequest(null,root,null);request.inspectionAction="authoring-source";
+        request.authoringSourceKind="central";request.inspectionPath=logicalPath;
+        request.inspectionSharedConfiguration=Boolean.TRUE;
+        Map<String,Object> source=executeInspection(root,request);
+        Path currentRoot=ServerConfig.runtimeConfigRoot(config.runtimeConfigPath).toRealPath();
+        Path currentConfig=config.runtimeConfigPath.toRealPath();
+        if(!root.equals(currentRoot)||!selected.equals(currentConfig)||Files.isSymbolicLink(config.runtimeConfigPath))
+            throw new StaleDraftException();
+        return source;
     }
     private Map<String,Object> validateManifestCandidate(String packageId,String source) throws Exception {
         if(!config.inspection.enabled)throw new NotFoundException();
@@ -2954,7 +3024,7 @@ final class ServerRuntime implements AutoCloseable {
         WorkerRequest request=inspectionRequest(packageId,root,selected);
         request.inspectionType="package-configuration";request.inspectionAction=action;
         Map<String,Object> result=executeInspection(root,request);result.put("packageId",packageId);
-        result.put("canEdit",config.authenticationRequired&&config.packageConfiguration.sourceEditingEnabled&&packageId.equals(principal)&&isOperationalPrincipal(principal));
+        result.put("canEdit",canEditPackageContent(packageId,principal));
         return result;
     }
 
@@ -5676,6 +5746,7 @@ final class ServerRuntime implements AutoCloseable {
     }
     static final class InspectionTimeoutException extends RuntimeException {}
     static final class InspectionResponseTooLargeException extends RuntimeException {}
+    static final class AuthoringSourceDeniedException extends RuntimeException {}
     static final class StaleCursorException extends RuntimeException {}
     static final class StaleDraftException extends RuntimeException {}
     static final class DraftCapacityException extends RuntimeException {}

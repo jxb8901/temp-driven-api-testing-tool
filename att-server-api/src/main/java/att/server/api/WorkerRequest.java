@@ -71,6 +71,9 @@ public class WorkerRequest {
     public String inspectionQuery;
     public String inspectionSort;
     public String inspectionDirection;
+    /** Internal Server-authorized lossless source read; never populated from an untrusted public body. */
+    public String authoringSourceKind;
+    public String authoringResourceType;
     public Integer inspectionOffset;
     public Integer inspectionLimit;
     public String expectedRevisionDigest;

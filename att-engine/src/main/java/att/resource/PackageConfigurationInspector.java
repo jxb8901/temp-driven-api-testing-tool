@@ -217,6 +217,78 @@ public final class PackageConfigurationInspector {
         return result;
     }
 
+    /** Complete descriptor bytes for the Package owner authoring-source contract only. */
+    public Map<String,Object> inspectAuthoringTestdataSource(String descriptorId,String environment,int maxSourceBytes) throws Exception {
+        if(!packageTestdata||descriptorId==null||!descriptorId.matches("[A-Za-z][A-Za-z0-9_-]{0,127}"))
+            throw new PackageResourceInspector.ResourceNotFoundException();
+        String safeEnvironment=normalizedEnvironment(environment);
+        Path file=configFile();
+        FrameworkConfig config=new FrameworkConfigLoader().loadDiscovery(file,RuntimeConfigPath.root(file),packageRoot,safeEnvironment);
+        TestdataDescriptor selected=new att.testdata.TestdataRegistry(packageRoot,config.testdataDescriptors(),Collections.<Path>emptyList()).resolve(descriptorId);
+        Path authored=selected.source();
+        PackageResourceResolver.PackageResource resolved=resources.fromInternalPath(authored,PackageResourceResolver.Kind.FILE);
+        String logical=resolved.logicalName();
+        if(!logical.toLowerCase(Locale.ROOT).endsWith(".yaml")&&!logical.toLowerCase(Locale.ROOT).endsWith(".yml"))
+            throw new PackageResourceInspector.ResourceNotFoundException();
+        return AuthoringSourceSupport.read(packageRoot,authored,logical,maxSourceBytes);
+    }
+
+    /** Central Runtime Config and only its approved referenced global Helper/Tool descriptors. */
+    public Map<String,Object> inspectAuthoringSharedSource(String logicalPath,int maxSourceBytes) throws Exception {
+        if(!sharedRuntime||logicalPath==null||logicalPath.length()>1024||logicalPath.indexOf('\\')>=0
+                ||!logicalPath.startsWith("config/")||logicalPath.contains("//")||!logicalPath.equals(logicalPath.trim()))
+            throw new PackageResourceInspector.ResourceNotFoundException();
+        Path configFile=configFile();Path configDirectory=configFile.getParent();
+        Path authored=configResources.packageRoot().resolve(logicalPath).normalize();
+        Path safeCandidate;
+        try {safeCandidate=configResources.internalCandidate(authored);}
+        catch(Exception unavailable) {throw new PackageResourceInspector.ResourceNotFoundException();}
+        if(!safeCandidate.equals(authored)||!authored.startsWith(configDirectory))
+            throw new PackageResourceInspector.ResourceNotFoundException();
+        Path selectedConfig=configFile.toAbsolutePath().normalize();
+        boolean allowed=authored.equals(selectedConfig);
+        if(!allowed)allowed=referencedCentralDescriptor(logicalPath);
+        if(!allowed||!logicalPath.toLowerCase(Locale.ROOT).endsWith(".yaml")&&!logicalPath.toLowerCase(Locale.ROOT).endsWith(".yml"))
+            throw new PackageResourceInspector.ResourceNotFoundException();
+        if(!Files.exists(authored,LinkOption.NOFOLLOW_LINKS))return AuthoringSourceSupport.absent(logicalPath);
+        PackageResourceResolver.PackageResource resolved;
+        try {resolved=configResources.fromInternalPath(authored,PackageResourceResolver.Kind.FILE);}
+        catch(Exception unavailable) {throw new PackageResourceInspector.ResourceNotFoundException();}
+        if(!resolved.logicalName().equals(logicalPath)||!resolved.canonicalPath().startsWith(configDirectory))
+            throw new PackageResourceInspector.ResourceNotFoundException();
+        return AuthoringSourceSupport.read(configDirectory,authored,logicalPath,maxSourceBytes);
+    }
+
+    private boolean referencedCentralDescriptor(String logicalPath) throws Exception {
+        Map<?,?> raw=readConfig();Set<String> configured=new LinkedHashSet<>();
+        for(String field:List.of("toolGroups","dbhelpers","mqhelpers","sshhelpers","httphelpers"))
+            addConfiguredDescriptorPaths(configured,raw.get(field));
+        Object rawEnvironments=raw.get("environments");
+        if(rawEnvironments instanceof Map<?,?>) {
+            Map<?,?> environments=(Map<?,?>)rawEnvironments;
+            if(environments.size()>100)throw new PackageResourceInspector.ResourceNotFoundException();
+            for(Object profileValue:environments.values())if(profileValue instanceof Map<?,?>) {
+                Map<?,?> profile=(Map<?,?>)profileValue;
+                for(String field:List.of("dbhelpers","mqhelpers","sshhelpers","httphelpers"))
+                    addConfiguredDescriptorPaths(configured,profile.get(field));
+            }
+        }
+        return configured.contains(logicalPath);
+    }
+
+    private static void addConfiguredDescriptorPaths(Set<String> configured,Object raw) {
+        if(!(raw instanceof Iterable<?>))return;
+        for(Object item:(Iterable<?>)raw) {
+            if(!(item instanceof String))continue;
+            String path=(String)item;
+            if(path.length()<=1024&&path.equals(path.trim())&&path.startsWith("config/")
+                    &&path.indexOf('\\')<0&&!path.contains("//")
+                    &&(path.toLowerCase(Locale.ROOT).endsWith(".yaml")||path.toLowerCase(Locale.ROOT).endsWith(".yml")))
+                configured.add(path);
+            if(configured.size()>512)throw new PackageResourceInspector.ResourceNotFoundException();
+        }
+    }
+
     /** The Package Manifest view uses exactly the established secret and source projection policy. */
     Object projectPackageValue(Object value, String field, boolean[] redacted) {
         int dot = field.lastIndexOf('.');
