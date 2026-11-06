@@ -65,6 +65,8 @@ export interface ResourcePage {
 export interface ResourceDetail {
   resource: ResourceSummary;
   definition?: JsonValue;
+  /** Present when numeric action keys need an explicit order across JSON parsing. */
+  actionOrder?: string[];
   diagnostics?: Diagnostic[];
 }
 

@@ -20,6 +20,9 @@ describe('ATT hash route contract', () => {
     expect(parseRoute('#/packages/payments/resources/flow/checkout?detail=source')).toEqual({
       kind: 'package', packageId: 'payments', resource: { type: 'flow', resourceId: 'checkout', tab: 'source' },
     });
+    expect(parseRoute('#/packages/payments/resources/template/checkout?tab=definition')).toEqual({
+      kind: 'package', packageId: 'payments', resource: { type: 'template', resourceId: 'checkout' },
+    });
     expect(parseRoute('#/advanced-load/payments')).toEqual({ kind: 'load', packageId: 'payments' });
     expect(parseRoute('#/jobs/J10045')).toEqual({ kind: 'jobs', jobId: 'J10045' });
     expect(parseRoute('#/jobs/J10045/console?view=events')).toEqual({ kind: 'job-console', jobId: 'J10045', view: 'events' });

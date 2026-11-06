@@ -7,7 +7,7 @@ import { SourceViewer, sourceViewerLimits } from './SourceViewer';
 import { ConfigurationExplorer } from './ConfigurationExplorer';
 import { TypedSidecarForm } from './TypedSidecarForm';
 import { inspectionCache } from '../../inspectionCache';
-import type { ConfigurationResponse, ExplorerApi, JsonObject, ResourceIdentity, ResourceSummary } from './types';
+import type { ConfigurationResponse, ExplorerApi, JsonObject, ResourceDetail, ResourceIdentity, ResourceSummary } from './types';
 
 vi.mock('../code/CodeEditor', () => ({
   CodeEditor: ({ value, label, readOnly = true, onChange, sourcePath, fileReferences, onFileReference }: {
@@ -109,7 +109,43 @@ describe('Explorer source viewer', () => {
     expect(readiness?.textContent).toContain('Metadata available');
     expect(readiness?.textContent).toContain('Execution dependencies unresolved (SIT)');
     expect(readiness?.textContent).toContain('ORDERS_DB_PASSWORD');
+    expect(container.querySelector('[data-tab="definition"]')?.textContent).toBe('Visual');
+    expect(container.querySelector('[aria-label="Visual action inspector"]')).not.toBeNull();
+  });
+
+  it('maps the legacy definition tab to Template Visual and retains Tool Definition', async () => {
+    const api = apiWith({ getResource: vi.fn(async (identity: ResourceIdentity) => (identity.type === 'template'
+      ? { resource: resource('template', identity.resourceId), definition: { actions: { first: { type: 'log', message: 'safe' } } } }
+      : { resource: resource('tool', identity.resourceId), definition: { toolId: 'lookup', executionKind: 'call' } }) as ResourceDetail) });
+    await render(<ExplorerPage api={api} packageId="payments" resourceRoute={{ type: 'template', resourceId: 'checkout', tab: 'definition' }} environment="SIT"
+      registerUnsavedChanges={() => () => {}} onResourceRouteChange={() => {}} onJobAccepted={() => {}} />);
+    expect(container.querySelector('[data-tab="definition"]')?.textContent).toBe('Visual');
+    expect(container.querySelector('.att-action-list .att-action-name')?.textContent).toBe('first');
+
+    await render(<ExplorerPage api={api} packageId="payments" resourceRoute={{ type: 'tool', resourceId: 'lookup', tab: 'definition' }} environment="SIT"
+      registerUnsavedChanges={() => () => {}} onResourceRouteChange={() => {}} onJobAccepted={() => {}} />);
+    expect(container.querySelector('[data-tab="definition"]')?.textContent).toBe('Definition');
     expect(container.querySelector('[aria-label="Safe resource definition"]')).not.toBeNull();
+  });
+
+  it('routes a selected resolved Flow action to its detail and leaves unresolved targets inert', async () => {
+    const flow = resource('template', 'flow-caller', { references: [{ type: 'flow', logicalId: 'common.compose.v1', resourceId: 'flow-target',
+      resolution: 'resolved', callSite: { actionId: 'compose' } }] });
+    const api = apiWith({ getResource: vi.fn(async () => ({ resource: flow,
+      definition: { actions: { compose: { type: 'flow', use: 'common.compose.v1' } } } })) });
+    const onResourceRouteChange = vi.fn();
+    await render(<ExplorerPage api={api} packageId="payments" resourceRoute={{ type: 'template', resourceId: 'flow-caller' }} environment="SIT"
+      registerUnsavedChanges={() => () => {}} onResourceRouteChange={onResourceRouteChange} onJobAccepted={() => {}} />);
+    click(button('Open referenced Flow · common.compose.v1'));
+    expect(onResourceRouteChange).toHaveBeenLastCalledWith({ type: 'flow', resourceId: 'flow-target', tab: 'definition' });
+
+    const unresolvedApi = apiWith({ getResource: vi.fn(async () => ({ resource: resource('template', 'flow-caller', {
+      references: [{ type: 'flow', logicalId: 'common.compose.v1', resolution: 'unresolved', callSite: { actionId: 'compose' } }],
+    }), definition: { actions: { compose: { type: 'flow', use: 'common.compose.v1' } } } })) });
+    await render(<ExplorerPage api={unresolvedApi} packageId="payments" resourceRoute={{ type: 'template', resourceId: 'flow-caller' }} environment="SIT"
+      registerUnsavedChanges={() => () => {}} onResourceRouteChange={onResourceRouteChange} onJobAccepted={() => {}} />);
+    expect(container.textContent).toContain('Referenced Flow is unresolved or invalid');
+    expect([...container.querySelectorAll('button')].some(item => item.textContent?.includes('Open referenced Flow'))).toBe(false);
   });
 
   it('uses the shared query panels and exposes Clear filters and Refresh resources', async () => {
