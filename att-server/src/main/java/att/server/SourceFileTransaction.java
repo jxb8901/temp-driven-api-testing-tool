@@ -28,10 +28,31 @@ import java.util.concurrent.TimeUnit;
 /** Durable, recoverable multi-file replacement used by Manifest and Change Set publication. */
 final class SourceFileTransaction {
     interface RevisionCheck { void verify() throws Exception; }
-    interface RecoveryAudit {
-        void record(String actor, String domain, String scopeId, String outcome, String revision) throws Exception;
+    interface RecoveryAudit { void record(AuditRecord record) throws Exception; }
+    interface CommitAudit { void record(AuditRecord record) throws Exception; }
+    interface FaultInjector {
+        void afterApply(int appliedCount) throws IOException;
+        default void afterPointerSwitch() throws IOException { }
     }
-    interface FaultInjector { void afterApply(int appliedCount) throws IOException; }
+
+    static final class AuditRecord {
+        final String transactionId, actor, domain, scopeId, action, outcome;
+        final String beforeRevision, afterRevision, requestId;
+        final List<String> resources;
+        AuditRecord(String transactionId, String actor, String domain, String scopeId, String action, String outcome,
+                    String beforeRevision, String afterRevision, String requestId, List<String> resources) {
+            this.transactionId = transactionId; this.actor = actor; this.domain = domain; this.scopeId = scopeId;
+            this.action = action; this.outcome = outcome; this.beforeRevision = beforeRevision;
+            this.afterRevision = afterRevision; this.requestId = requestId;
+            this.resources = Collections.unmodifiableList(new ArrayList<String>(resources));
+        }
+    }
+
+    static final class CommitResult {
+        final String revision;
+        final boolean auditConfirmed;
+        CommitResult(String revision, boolean auditConfirmed) { this.revision = revision; this.auditConfirmed = auditConfirmed; }
+    }
 
     static final class Write {
         final String logicalPath;
@@ -57,11 +78,13 @@ final class SourceFileTransaction {
     }
 
     private static final String JOURNAL_VERSION = "att-source-transaction-v1";
+    private static final String REVISION_JOURNAL_VERSION = "att-source-revision-transaction-v2";
     static final long MAX_FILE_BYTES = 16L * 1024L * 1024L;
     static final long MAX_BACKUP_BYTES = 64L * 1024L * 1024L;
     private final Path transactionRoot;
     private final SourcePublicationBarrier barrier;
     private final FaultInjector faultInjector;
+    private final SourceRevisionStore revisions = new SourceRevisionStore();
 
     SourceFileTransaction(Path dataDirectory, SourcePublicationBarrier barrier) throws IOException {
         this(dataDirectory, barrier, null);
@@ -76,55 +99,85 @@ final class SourceFileTransaction {
 
     Lock readLock() { return barrier.readLock(); }
 
+    void registerRoot(String domain, String scopeId, Path root) throws Exception { revisions.register(domain, scopeId, root); }
+
+    Path pin(String domain, String scopeId, Path root) throws Exception { return revisions.pin(domain, scopeId, root).root; }
+
+    Path registeredRoot(String domain, String scopeId) { return revisions.registeredRoot(domain, scopeId); }
+
+    boolean ownsRevision(String domain, String scopeId, Path configuredRoot, Path candidate) {
+        return revisions.ownsRevision(domain, scopeId, configuredRoot, candidate);
+    }
+
     String commit(String domain, String scopeId, Path root, String actor, String beforeRevision,
                   String afterRevision, Map<String, Write> writes, RevisionCheck revisionCheck) throws Exception {
+        return commitWithAudit(domain, scopeId, root, actor, beforeRevision, afterRevision, writes,
+                revisionCheck, null, Collections.emptyList(), auditAction(domain), null).revision;
+    }
+
+    CommitResult commitWithAudit(String domain, String scopeId, Path root, String actor, String beforeRevision,
+                                 String afterRevision, Map<String, Write> writes, RevisionCheck revisionCheck,
+                                 String requestId, List<String> resources, String action, CommitAudit audit) throws Exception {
         if (writes == null || writes.isEmpty()) throw new IllegalArgumentException("A non-empty source change set is required");
-        Lock writeLock = barrier.writeLock();
-        boolean acquired;
-        try { acquired = writeLock.tryLock(10, TimeUnit.SECONDS); }
-        catch (InterruptedException interrupted) { Thread.currentThread().interrupt(); throw interrupted; }
-        if (!acquired) throw new Busy();
-        Path transaction = null;
+        if (revisions.registeredRoot(domain, scopeId) == null) registerRoot(domain, scopeId, root);
+        Path sourceRoot = revisions.registeredRoot(domain, scopeId);
+        if (sourceRoot == null) throw new IOException("Source revision root is unavailable");
+        String transactionId = "T" + UUID.randomUUID().toString().replace("-", "").toUpperCase(java.util.Locale.ROOT);
+        Path transaction = transactionRoot.resolve(transactionId);
+        Path candidate = null;
         boolean journalReady = false;
-        boolean committed = false;
-        try {
-            revisionCheck.verify();
-            Path canonicalRoot = canonicalRoot(root);
-            List<PreparedWrite> prepared = prepare(canonicalRoot, writes);
-            transaction = transactionRoot.resolve("T" + UUID.randomUUID().toString().replace("-", "").toUpperCase(java.util.Locale.ROOT));
+        boolean pointerSwitched = false;
+        String beforeId = null;
+        String afterId = null;
+        try (SourceRevisionStore.WriterLock ignored = revisions.lock(domain, scopeId, sourceRoot)) {
+            SourceRevisionStore.Revision active = revisions.readActive(domain, scopeId, sourceRoot);
+            ensurePriorSwitchRecoverable(active);
+            beforeId = active.id;
+            List<PreparedWrite> prepared = prepare(active.root, writes);
             privateDirectory(transaction);
-            prepareFiles(transaction, canonicalRoot, prepared);
-            revisionCheck.verify();
-            writeJournal(transaction, domain, scopeId, canonicalRoot, actor, beforeRevision, afterRevision, prepared);
+            afterId = "R" + UUID.randomUUID().toString().replace("-", "").toUpperCase(java.util.Locale.ROOT);
+            AuditRecord record = new AuditRecord(transactionId, actor, domain, scopeId,
+                    action == null ? auditAction(domain) : action, "COMMITTED", beforeRevision, afterRevision, requestId,
+                    resources == null ? Collections.emptyList() : resources);
+            writeRevisionJournal(transaction, sourceRoot, beforeId, afterId, null, record);
             journalReady = true;
-            int applied = 0;
-            for (int index = 0; index < prepared.size(); index++) {
-                apply(transaction, canonicalRoot, prepared.get(index), index);
-                applied++;
-                if (faultInjector != null) faultInjector.afterApply(applied);
+            if (revisionCheck != null) revisionCheck.verify();
+            candidate = revisions.createCandidate(domain, scopeId, sourceRoot, active, afterId, writes, faultInjector);
+            String actualId = candidate.getFileName().toString();
+            if (!afterId.equals(actualId)) throw new IOException("Prepared source revision identity changed");
+            revisions.freezeCandidate(candidate, candidate);
+            String afterTreeDigest = SourceRevisionStore.treeDigest(candidate);
+            writeRevisionJournal(transaction, sourceRoot, beforeId, afterId, afterTreeDigest, record);
+            if (revisionCheck != null) revisionCheck.verify(); // Last source, authorization, and gate freshness fence before the pointer swap.
+            revisions.switchTo(domain, scopeId, sourceRoot, afterId, afterRevision, transactionId);
+            pointerSwitched = true;
+            if (faultInjector != null) faultInjector.afterPointerSwitch();
+            writeForcedAtomically(transaction.resolve("COMMITTED"), (transactionId + "\n" + afterRevision + "\n").getBytes(StandardCharsets.UTF_8));
+            boolean auditConfirmed = true;
+            if (audit != null) {
+                try { audit.record(record); }
+                catch (Exception auditFailure) { auditConfirmed = false; }
             }
-            writeForcedAtomically(transaction.resolve("COMMITTED"), (afterRevision + "\n").getBytes(StandardCharsets.UTF_8));
-            committed = true;
-            return afterRevision;
+            if (auditConfirmed) {
+                writeForcedAtomically(transaction.resolve("AUDITED"), (transactionId + "\n").getBytes(StandardCharsets.UTF_8));
+                cleanupRevisionTransaction(transaction);
+            }
+            return new CommitResult(afterRevision, auditConfirmed);
         } catch (SimulatedCrash interrupted) {
             throw interrupted;
         } catch (Exception failure) {
-            if (journalReady && transaction != null && !committed) {
-                try {
-                    rollback(transaction);
-                    cleanupRolledBack(transaction);
-                } catch (Exception recoveryFailure) {
-                    failure.addSuppressed(recoveryFailure);
-                }
-            } else if (transaction != null && !journalReady) {
+            if (pointerSwitched) {
+                // The complete revision is already active. Keep the journal for startup audit replay.
+                return new CommitResult(afterRevision, false);
+            }
+            if (transaction != null && journalReady) {
+                try { if (afterId != null) revisions.deleteRevision(domain, scopeId, sourceRoot, afterId); }
+                catch (Exception cleanupFailure) { failure.addSuppressed(cleanupFailure); }
+                try { deleteTree(transaction); } catch (Exception cleanupFailure) { failure.addSuppressed(cleanupFailure); }
+            } else if (transaction != null) {
                 try { deleteTree(transaction); } catch (Exception ignored) { }
             }
             throw failure;
-        } finally {
-            writeLock.unlock();
-            if (committed && transaction != null) {
-                try { cleanupCommitted(transaction); } catch (Exception ignored) { }
-            }
         }
     }
 
@@ -150,22 +203,68 @@ final class SourceFileTransaction {
                     deleteTree(entry); // A crash before the durable journal never changed published files.
                     continue;
                 }
-                Journal parsed = readJournal(journal);
-                Path trusted = trustedRoots.get(parsed.domain + ":" + parsed.scopeId);
-                if (trusted == null || !canonicalRoot(trusted).equals(parsed.root))
-                    throw new IOException("Source recovery root no longer matches trusted registration");
-                boolean isCommitted = validCommitMarker(entry.resolve("COMMITTED"), parsed.afterRevision)
-                        && committedFilesMatch(parsed);
-                if (!isCommitted) rollback(entry);
-                if (audit != null) audit.record(parsed.actor, parsed.domain, parsed.scopeId,
-                        isCommitted ? "COMMITTED" : "ROLLED_BACK", parsed.afterRevision);
-                if (isCommitted) cleanupCommitted(entry); else cleanupRolledBack(entry);
+                String firstLine = Files.readAllLines(journal, StandardCharsets.UTF_8).stream().findFirst().orElse("");
+                if (firstLine.startsWith(REVISION_JOURNAL_VERSION + "\t")) {
+                    recoverRevisionTransaction(entry, trustedRoots, audit);
+                } else {
+                    recoverLegacyTransaction(entry, trustedRoots, audit);
+                }
                 recovered++;
             }
             return recovered;
         } finally {
             writeLock.unlock();
         }
+    }
+
+    private void recoverRevisionTransaction(Path transaction, Map<String, Path> trustedRoots, RecoveryAudit audit) throws Exception {
+        RevisionJournal parsed = readRevisionJournal(transaction.resolve("journal"));
+        Path trusted = trustedRoots.get(parsed.domain + ":" + parsed.scopeId);
+        if (trusted == null || !canonicalRoot(trusted).equals(parsed.sourceRoot))
+            throw new IOException("Source recovery root no longer matches trusted registration");
+        registerRoot(parsed.domain, parsed.scopeId, parsed.sourceRoot);
+        SourceRevisionStore.Revision active = revisions.readActive(parsed.domain, parsed.scopeId, parsed.sourceRoot);
+        boolean markedCommitted = validRevisionCommitMarker(transaction.resolve("COMMITTED"), parsed.transactionId, parsed.afterRevision);
+        boolean activeCommit = parsed.transactionId.equals(active.transactionId);
+        boolean committed = markedCommitted || activeCommit;
+        if (committed) {
+            if (parsed.afterTreeDigest == null || !revisions.revisionTreeMatches(parsed.domain, parsed.scopeId,
+                    parsed.sourceRoot, parsed.afterId, parsed.afterTreeDigest))
+                throw new IOException("Committed source revision failed its integrity check");
+            AuditRecord record = parsed.record("COMMITTED");
+            if (audit != null) audit.record(record);
+            writeForcedAtomically(transaction.resolve("AUDITED"), (parsed.transactionId + "\n").getBytes(StandardCharsets.UTF_8));
+            cleanupRevisionTransaction(transaction);
+            return;
+        }
+        if (!parsed.beforeId.equals(active.id))
+            throw new IOException("Active source revision cannot be reconciled with its transaction journal");
+        revisions.deleteRevision(parsed.domain, parsed.scopeId, parsed.sourceRoot, parsed.afterId);
+        if (audit != null) audit.record(parsed.record("ROLLED_BACK"));
+        cleanupRevisionTransaction(transaction);
+    }
+
+    private void recoverLegacyTransaction(Path transaction, Map<String, Path> trustedRoots, RecoveryAudit audit) throws Exception {
+        Journal parsed = readJournal(transaction.resolve("journal"));
+        Path trusted = trustedRoots.get(parsed.domain + ":" + parsed.scopeId);
+        if (trusted == null || !canonicalRoot(trusted).equals(parsed.root))
+            throw new IOException("Source recovery root no longer matches trusted registration");
+        boolean isCommitted = validCommitMarker(transaction.resolve("COMMITTED"), parsed.afterRevision)
+                && committedFilesMatch(parsed);
+        if (!isCommitted) rollback(transaction); // Startup is blocked if every backup cannot be restored.
+        if (audit != null) audit.record(new AuditRecord(transaction.getFileName().toString(), parsed.actor, parsed.domain,
+                parsed.scopeId, auditAction(parsed.domain), isCommitted ? "COMMITTED" : "ROLLED_BACK",
+                parsed.beforeRevision, parsed.afterRevision, null,
+                parsed.files.stream().map(file -> file.path).toList()));
+        if (isCommitted) cleanupCommitted(transaction); else cleanupRolledBack(transaction);
+    }
+
+    private void ensurePriorSwitchRecoverable(SourceRevisionStore.Revision active) throws IOException {
+        if (active.transactionId == null) return;
+        Path previous = transactionRoot.resolve(active.transactionId);
+        if (Files.exists(previous.resolve("journal"), LinkOption.NOFOLLOW_LINKS)
+                && !validRevisionCommitMarker(previous.resolve("COMMITTED"), active.transactionId, active.sourceRevision))
+            throw new IOException("The active source revision has an unfinished publication journal");
     }
 
     private static List<PreparedWrite> prepare(Path root, Map<String, Write> writes) throws Exception {
@@ -225,6 +324,73 @@ final class SourceFileTransaction {
                     .append(write.bytes == null ? "-" : hash(write.bytes)).append('\n');
         }
         writeForcedAtomically(transaction.resolve("journal"), value.toString().getBytes(StandardCharsets.UTF_8));
+    }
+
+    private static void writeRevisionJournal(Path transaction, Path sourceRoot, String beforeId, String afterId,
+                                             String afterTreeDigest, AuditRecord record) throws Exception {
+        StringBuilder value = new StringBuilder();
+        value.append(REVISION_JOURNAL_VERSION).append('\t').append(encoded(record.transactionId))
+                .append('\t').append(encoded(record.domain)).append('\t').append(encoded(record.scopeId))
+                .append('\t').append(encoded(sourceRoot.toString())).append('\t').append(encoded(record.actor))
+                .append('\t').append(encoded(record.action)).append('\t').append(encoded(record.beforeRevision))
+                .append('\t').append(encoded(record.afterRevision)).append('\t').append(encoded(beforeId))
+                .append('\t').append(encoded(afterId)).append('\t')
+                .append(afterTreeDigest == null ? "-" : afterTreeDigest).append('\t')
+                .append(record.requestId == null ? "-" : encoded(record.requestId)).append('\n');
+        for (String resource : record.resources) value.append("R\t").append(encoded(resource)).append('\n');
+        writeForcedAtomically(transaction.resolve("journal"), value.toString().getBytes(StandardCharsets.UTF_8));
+    }
+
+    private static RevisionJournal readRevisionJournal(Path path) throws Exception {
+        if (Files.isSymbolicLink(path) || !Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS) || Files.size(path) > 1024 * 1024)
+            throw new IOException("Source transaction journal is unavailable");
+        List<String> lines = Files.readAllLines(path, StandardCharsets.UTF_8);
+        if (lines.isEmpty()) throw new IOException("Source transaction journal is invalid");
+        String[] fields = lines.get(0).split("\\t", -1);
+        if (fields.length != 13 || !REVISION_JOURNAL_VERSION.equals(fields[0]))
+            throw new IOException("Source transaction journal is invalid");
+        String transactionId = decoded(fields[1]);
+        String beforeId = decoded(fields[9]), afterId = decoded(fields[10]);
+        String treeDigest = "-".equals(fields[11]) ? null : fields[11];
+        String requestId = "-".equals(fields[12]) ? null : decoded(fields[12]);
+        if (!transactionId.matches("T[A-F0-9]{32}") || !beforeId.matches("R[A-F0-9]{32}")
+                || !afterId.matches("R[A-F0-9]{32}") || treeDigest != null && !isDigest(treeDigest))
+            throw new IOException("Source transaction journal is invalid");
+        String beforeRevision = decoded(fields[7]), afterRevision = decoded(fields[8]);
+        if (!isDigest(beforeRevision) || !isDigest(afterRevision)) throw new IOException("Source transaction journal is invalid");
+        List<String> resources = new ArrayList<>();
+        for (int index = 1; index < lines.size(); index++) {
+            String[] resource = lines.get(index).split("\\t", -1);
+            if (resource.length != 2 || !"R".equals(resource[0]) || resources.size() >= 64)
+                throw new IOException("Source transaction journal is invalid");
+            resources.add(safeRelative(decoded(resource[1])));
+        }
+        return new RevisionJournal(transactionId, decoded(fields[2]), decoded(fields[3]),
+                canonicalRoot(java.nio.file.Paths.get(decoded(fields[4]))), decoded(fields[5]), decoded(fields[6]),
+                beforeRevision, afterRevision, beforeId, afterId, treeDigest, requestId, resources);
+    }
+
+    private static boolean validRevisionCommitMarker(Path marker, String transactionId, String revision) throws IOException {
+        if (!Files.exists(marker, LinkOption.NOFOLLOW_LINKS)) return false;
+        if (Files.isSymbolicLink(marker) || !Files.isRegularFile(marker, LinkOption.NOFOLLOW_LINKS) || Files.size(marker) > 512)
+            return false;
+        List<String> lines = Files.readAllLines(marker, StandardCharsets.UTF_8);
+        return lines.size() == 2 && transactionId.equals(lines.get(0)) && revision.equals(lines.get(1));
+    }
+
+    private static String auditAction(String domain) {
+        return "SOURCE_CHANGE_SET_PUBLISH";
+    }
+
+    private void cleanupRevisionTransaction(Path transaction) throws IOException {
+        // The durable DB audit is committed before AUDITED is written; journal removal is last.
+        Files.deleteIfExists(transaction.resolve("journal"));
+        forceDirectory(transaction);
+        Files.deleteIfExists(transaction.resolve("COMMITTED"));
+        Files.deleteIfExists(transaction.resolve("AUDITED"));
+        forceDirectory(transaction);
+        Files.deleteIfExists(transaction);
+        forceDirectory(transactionRoot);
     }
 
     private static void apply(Path transaction, Path root, PreparedWrite write, int index) throws Exception {
@@ -541,6 +707,26 @@ final class SourceFileTransaction {
         final String path, beforeHash, afterHash;
         JournalFile(String path, String beforeHash, String afterHash) {
             this.path = path; this.beforeHash = beforeHash; this.afterHash = afterHash;
+        }
+    }
+
+    private static final class RevisionJournal {
+        final String transactionId, domain, scopeId, actor, action, beforeRevision, afterRevision;
+        final String beforeId, afterId, afterTreeDigest, requestId;
+        final Path sourceRoot;
+        final List<String> resources;
+        RevisionJournal(String transactionId, String domain, String scopeId, Path sourceRoot, String actor,
+                        String action, String beforeRevision, String afterRevision, String beforeId, String afterId,
+                        String afterTreeDigest, String requestId, List<String> resources) {
+            this.transactionId = transactionId; this.domain = domain; this.scopeId = scopeId;
+            this.sourceRoot = sourceRoot; this.actor = actor; this.action = action;
+            this.beforeRevision = beforeRevision; this.afterRevision = afterRevision; this.beforeId = beforeId;
+            this.afterId = afterId; this.afterTreeDigest = afterTreeDigest; this.requestId = requestId;
+            this.resources = Collections.unmodifiableList(new ArrayList<>(resources));
+        }
+        AuditRecord record(String outcome) {
+            return new AuditRecord(transactionId, actor, domain, scopeId, action, outcome,
+                    beforeRevision, afterRevision, requestId, resources);
         }
     }
 }

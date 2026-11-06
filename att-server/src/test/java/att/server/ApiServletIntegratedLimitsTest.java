@@ -25,6 +25,7 @@ import java.security.Principal;
 import java.time.Instant;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.locks.ReentrantLock;
@@ -221,6 +222,52 @@ class ApiServletIntegratedLimitsTest {
             Captured protectedPath=invokeAs(servlet,"admin","GET","/configuration/authoring-source",
                     Collections.singletonMap("path","config/att-server.yaml"),new byte[0]);
             assertSafeSourceFailure(protectedPath,404,"ATT-SERVER-NOT-FOUND");
+        }
+    }
+
+    @Test void authoringSourceReadsReturnRequiredChangeSetRevisionPreconditions() throws Exception {
+        Path packages=Files.createDirectories(temp.resolve("authoring-revisions-packages"));
+        Path ownerPackage=createPackage(packages.resolve("alice"));
+        Path runtimeConfig=sharedRuntimeConfig();
+        try(ServerRuntime runtime=authoringRuntime(packages,ownerPackage,runtimeConfig,"authoring-revisions-data",
+                DEFAULT_INSPECTION_TIMEOUT_MS,null,workerLibraries("authoring-revisions-libs"))) {
+            addAuthoringUsers(runtime);ApiServlet servlet=servlet(runtime);
+            Captured packageSource=invokeAs(servlet,"alice","GET","/packages/alice/authoring-source",
+                    Collections.singletonMap("type","manifest"),new byte[0]);
+            JsonNode packageBody=ServerRuntime.JSON.readTree(packageSource.body());
+            assertEquals(200,packageSource.status,new String(packageSource.body(),StandardCharsets.UTF_8));
+            assertTrue(packageBody.path("baseSourceRevision").asText().matches("[a-f0-9]{64}"),packageBody.toString());
+            assertTrue(packageBody.path("registryRevision").asText().matches("[a-f0-9]{64}"),packageBody.toString());
+
+            Captured centralSource=invokeAs(servlet,"admin","GET","/configuration/authoring-source",
+                    Collections.singletonMap("path","config/config.yaml"),new byte[0]);
+            JsonNode centralBody=ServerRuntime.JSON.readTree(centralSource.body());
+            assertEquals(200,centralSource.status,new String(centralSource.body(),StandardCharsets.UTF_8));
+            assertTrue(centralBody.path("baseSourceRevision").asText().matches("[a-f0-9]{64}"),centralBody.toString());
+            assertTrue(centralBody.path("registryRevision").isMissingNode(),centralBody.toString());
+
+            String baseRevision=packageBody.path("baseSourceRevision").asText();
+            String registryRevision=packageBody.path("registryRevision").asText();
+            Map<String,Object> operation=Map.of("operation","create","path","templates/stale-editor.yaml","content","id: stale\n");
+            Captured missingBase=invokeAs(servlet,"alice","POST","/packages/alice/change-sets",Collections.emptyMap(),
+                    ServerRuntime.JSON.writeValueAsBytes(Map.of("registryRevision",registryRevision,"operations",List.of(operation))));
+            assertEquals(400,missingBase.status,new String(missingBase.body(),StandardCharsets.UTF_8));
+            Captured missingRegistry=invokeAs(servlet,"alice","POST","/packages/alice/change-sets",Collections.emptyMap(),
+                    ServerRuntime.JSON.writeValueAsBytes(Map.of("baseSourceRevision",baseRevision,"operations",List.of(operation))));
+            assertEquals(400,missingRegistry.status,new String(missingRegistry.body(),StandardCharsets.UTF_8));
+
+            Field transactionField=ServerRuntime.class.getDeclaredField("sourceFileTransaction");transactionField.setAccessible(true);
+            SourceFileTransaction transaction=(SourceFileTransaction)transactionField.get(runtime);
+            Path configuredPackage=runtime.packageRegistry.snapshot().packages.get("alice").toRealPath();
+            Path active=transaction.pin(ChangeSetPublisher.PACKAGE_SOURCE,"alice",configuredPackage);
+            byte[] external= "id: external\n".getBytes(StandardCharsets.UTF_8);
+            transaction.commit(ChangeSetPublisher.PACKAGE_SOURCE,"alice",active,"alice",baseRevision,"c".repeat(64),
+                    Map.of("templates/external.yaml",new SourceFileTransaction.Write("templates/external.yaml",external,null)),()->{});
+            Captured stale=invokeAs(servlet,"alice","POST","/packages/alice/change-sets",Collections.emptyMap(),
+                    ServerRuntime.JSON.writeValueAsBytes(Map.of("baseSourceRevision",baseRevision,
+                            "registryRevision",registryRevision,"operations",List.of(operation))));
+            assertEquals(409,stale.status,new String(stale.body(),StandardCharsets.UTF_8));
+            stopInspectionProcesses(runtime);
         }
     }
 

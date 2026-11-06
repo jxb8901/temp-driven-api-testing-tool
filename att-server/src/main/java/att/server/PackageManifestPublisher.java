@@ -25,7 +25,14 @@ final class PackageManifestPublisher implements AutoCloseable {
     static final int MAX_SOURCE_BYTES=262144;
     interface Access { Path root(String packageId,String actor) throws Exception; }
     interface Validator { Map<String,Object> validate(String packageId,String source) throws Exception; }
-    interface Audit { void record(String actor,String action,String packageId,String detail) throws Exception; }
+    interface Audit {
+        void record(String actor,String action,String packageId,String detail) throws Exception;
+        default void recordCommitted(SourceFileTransaction.AuditRecord record) throws Exception {
+            record(record.actor,record.action,record.scopeId,"transactionId="+record.transactionId
+                    +" before="+record.beforeRevision+" after="+record.afterRevision+" outcome="+record.outcome
+                    +" requestId="+String.valueOf(record.requestId)+" resources="+String.join(",",record.resources));
+        }
+    }
     private record Draft(String id,String packageId,String actor,Path root,String source,String beforeDigest,
                          Instant expires,Map<String,Object> validation,boolean reviewed) { }
     private final PackageConfigurationPolicy policy;
@@ -79,6 +86,9 @@ final class PackageManifestPublisher implements AutoCloseable {
     }
 
     synchronized Map<String,Object> publish(String packageId,String actor,String id) throws Exception {
+        return publish(packageId,actor,id,null);
+    }
+    synchronized Map<String,Object> publish(String packageId,String actor,String id,String requestId) throws Exception {
         Draft draft=draft(packageId,actor,id);unchanged(draft);
         if(!draft.reviewed||draft.validation==null)throw new IllegalArgumentException("Validate and review the Manifest draft before publication");
         Map<String,Object> fresh=validator.validate(packageId,draft.source);
@@ -102,19 +112,19 @@ final class PackageManifestPublisher implements AutoCloseable {
         boolean manifestExists=Files.exists(commitRoot.resolve("package.yaml"),LinkOption.NOFOLLOW_LINKS);
         Map<String,SourceFileTransaction.Write> writes=new LinkedHashMap<>();
         writes.put("package.yaml",new SourceFileTransaction.Write("package.yaml",after,manifestExists?draft.beforeDigest:null));
+        SourceFileTransaction.CommitResult commitResult;
         try {
-            sourceTransaction.commit("PACKAGE_SOURCE",packageId,commitRoot,actor,draft.beforeDigest,afterDigest,writes,()->{
+            commitResult=sourceTransaction.commitWithAudit("PACKAGE_SOURCE",packageId,commitRoot,actor,draft.beforeDigest,
+                    afterDigest,writes,()->{
                 unchanged(draft);
                 Path current=authorizedRoot(packageId,actor);
                 if(!commitRoot.equals(current))throw new Conflict();
-            });
+            },requestId,List.of("package.yaml"),"PACKAGE_MANIFEST_PUBLISH",audit::recordCommitted);
         } catch(SourceFileTransaction.RevisionConflict changed) {
             throw new Conflict();
         }
         drafts.remove(id);
-        boolean auditConfirmed=true;
-        try {audit.record(actor,"PACKAGE_MANIFEST_PUBLISH",packageId,draft.beforeDigest+" -> "+afterDigest);}
-        catch(Exception pending) {auditConfirmed=false;} // The durable intent records the committed revision; never report a completed rename as a failed publication.
+        boolean auditConfirmed=commitResult.auditConfirmed;
         Map<String,Object> result=new LinkedHashMap<>();result.put("auditConfirmed",auditConfirmed);result.put("published",true);result.put("packageId",packageId);
         result.put("beforeDigest",draft.beforeDigest);result.put("manifestDigest",afterDigest);result.put("refreshRequired",true);
         result.put("environment",fresh.get("environment"));result.put("configurationIdentity",fresh.get("configurationIdentity"));

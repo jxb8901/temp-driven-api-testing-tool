@@ -51,6 +51,8 @@ final class ChangeSetPublisher implements AutoCloseable {
     private static final int MAX_WORKBOOK_ENTRIES = 512;
     private static final long MAX_WORKBOOK_EXPANDED_BYTES = 32L * 1024L * 1024L;
     private static final long MAX_WORKBOOK_EXPANSION_RATIO = 200L;
+    private static final int MAX_REVIEW_DIFF_BYTES = 32 * 1024;
+    private static final int MAX_REVIEW_DIFF_LINES = 400;
     private static final Pattern FILE_EXPRESSION = Pattern.compile("&\\{([^{}\\r\\n]{1,512})\\}");
     private static final Set<String> TEXT_EXTENSIONS = set("yaml", "yml", "xml", "json", "csv", "tsv", "txt", "sql", "properties", "md", "xlsx", "xls");
     private static final Set<String> BINARY_EXTENSIONS = set("xlsx", "xls");
@@ -60,7 +62,15 @@ final class ChangeSetPublisher implements AutoCloseable {
     }
     interface CandidateValidator { ValidationResult validate(Candidate candidate) throws Exception; }
     interface ConfigPublishGate { GateDecision authorize(Candidate candidate, Map<String, Object> review) throws Exception; }
-    interface Audit { void record(String actor, String action, String domain, String scopeId, String detail) throws Exception; }
+    interface Audit {
+        void record(String actor, String action, String domain, String scopeId, String detail) throws Exception;
+        default void recordCommitted(SourceFileTransaction.AuditRecord record) throws Exception {
+            record(record.actor, record.action, record.domain, record.scopeId,
+                    "transactionId=" + record.transactionId + " before=" + record.beforeRevision
+                            + " after=" + record.afterRevision + " outcome=" + record.outcome
+                            + " requestId=" + String.valueOf(record.requestId) + " resources=" + String.join(",", record.resources));
+        }
+    }
 
     static final class Scope {
         final String domain;
@@ -210,8 +220,10 @@ final class ChangeSetPublisher implements AutoCloseable {
     }
 
     private static final class Diff {
-        final String operation, path, targetPath, oldHash, newHash;
-        final long oldBytes, newBytes;
+        final String operation, path, targetPath, oldHash;
+        String newHash;
+        final long oldBytes;
+        long newBytes;
         final boolean automatic;
         int referenceUpdates;
         Diff(String operation, String path, String targetPath, String oldHash, String newHash,
@@ -283,9 +295,14 @@ final class ChangeSetPublisher implements AutoCloseable {
         expire();
         if (operations == null || operations.isEmpty() || operations.size() > MAX_OPERATIONS)
             throw new IllegalArgumentException("A Change Set must contain between 1 and 32 file operations");
+        if (expectedSourceRevision == null) throw new IllegalArgumentException("baseSourceRevision is required");
+        if (PACKAGE_SOURCE.equals(domain) && expectedRegistryRevision == null)
+            throw new IllegalArgumentException("registryRevision is required for package source edits");
+        if (!PACKAGE_SOURCE.equals(domain) && expectedRegistryRevision != null)
+            throw new IllegalArgumentException("registryRevision does not apply to central source edits");
         RevisionState base = state(scope);
-        if (expectedSourceRevision != null && !base.sourceRevision.equals(requireDigest(expectedSourceRevision))) throw new Conflict();
-        if (expectedRegistryRevision != null && !equal(expectedRegistryRevision, base.registryRevision)) throw new Conflict();
+        if (!base.sourceRevision.equals(requireDigest(expectedSourceRevision))) throw new Conflict();
+        if (!equal(expectedRegistryRevision, base.registryRevision)) throw new Conflict();
         if (drafts.size() >= maxDrafts || actorDraftCount(actor) >= maxDraftsPerActor) throw new Capacity();
 
         Normalized normalized = normalizeOperations(scope, base, operations);
@@ -298,6 +315,17 @@ final class ChangeSetPublisher implements AutoCloseable {
                         + " outcome=STAGED paths=" + pathList(draft.diff)));
         drafts.put(id, draft); stagedBytes += normalized.byteCount;
         return view(draft, "draft");
+        } finally { sourceReadLock.unlock(); }
+    }
+
+    synchronized Map<String,String> currentRevisions(String domain,String scopeId,String actor,boolean systemSettingsWrite) throws Exception {
+        sourceReadLock.lock();
+        try {
+            RevisionState current=state(authorizedScope(domain,scopeId,actor,systemSettingsWrite));
+            Map<String,String> result=new LinkedHashMap<>();
+            result.put("baseSourceRevision",current.sourceRevision);
+            if(current.registryRevision!=null)result.put("registryRevision",current.registryRevision);
+            return Collections.unmodifiableMap(result);
         } finally { sourceReadLock.unlock(); }
     }
 
@@ -380,14 +408,15 @@ final class ChangeSetPublisher implements AutoCloseable {
             draft.publishing = true;
         }
         boolean committed = false;
+        boolean auditConfirmed = false;
         try {
             String approvalRevision = null;
             String afterRevision;
             Map<String, SourceFileTransaction.Write> writes;
+            Candidate candidate = new Candidate(draft);
             sourceReadLock.lock();
             try {
                 requireCurrent(draft, systemSettingsWrite);
-                Candidate candidate = new Candidate(draft);
                 validateFileReferences(candidate, draft.diff);
                 ValidationResult validated;
                 try { validated = validator.validate(candidate); }
@@ -404,6 +433,7 @@ final class ChangeSetPublisher implements AutoCloseable {
                     if (decision == null || !decision.allowed)
                         throw new ValidationRejected(decision == null ? "ATT-CONFIG-PRECOMMIT-UNAVAILABLE" : decision.code);
                     approvalRevision = decision.approvalRevision == null ? null : requireDigest(decision.approvalRevision);
+                    if (approvalRevision == null) throw new ValidationRejected("ATT-CONFIG-IMPACT-STALE");
                 }
 
                 afterRevision = publishedRevision(candidate);
@@ -416,22 +446,30 @@ final class ChangeSetPublisher implements AutoCloseable {
                                 + (approvalRevision == null ? "none" : approvalRevision)
                                 + " paths=" + pathList(draft.diff)));
             } finally { sourceReadLock.unlock(); }
+            final String approvedRevision=approvalRevision;
             try {
-                transaction.commit(domain, scopeId, draft.scope.root, actor, draft.base.sourceRevision, afterRevision, writes, () -> {
+                SourceFileTransaction.CommitResult commitResult=transaction.commitWithAudit(domain, scopeId, draft.scope.root,
+                        actor,draft.base.sourceRevision,afterRevision,writes,() -> {
                     Scope currentScope = authorizedScope(domain, scopeId, actor, systemSettingsWrite);
                     if (!draft.base.same(state(currentScope))) throw new Conflict();
-                });
+                    if (CENTRAL_RUNTIME_CONFIG.equals(domain)) {
+                        GateDecision fresh;
+                        try { fresh=configGate.authorize(candidate,view(draft,"reviewed")); }
+                        catch(Exception failure) { throw new ValidationRejected("ATT-CONFIG-PRECOMMIT-BLOCKED"); }
+                        if(fresh==null||!fresh.allowed)
+                            throw new ValidationRejected(fresh==null?"ATT-CONFIG-PRECOMMIT-UNAVAILABLE":fresh.code);
+                        String freshRevision=fresh.approvalRevision==null?null:requireDigest(fresh.approvalRevision);
+                        if(!java.util.Objects.equals(approvedRevision,freshRevision))
+                            throw new ValidationRejected("ATT-CONFIG-IMPACT-STALE");
+                    }
+                },requestId,new ArrayList<>(draft.changes.keySet()),"SOURCE_CHANGE_SET_PUBLISH",audit::recordCommitted);
+                committed = true;
+                auditConfirmed=commitResult.auditConfirmed;
             } catch (SourceFileTransaction.RevisionConflict changed) {
                 throw new Conflict();
             } catch (SourceFileTransaction.Busy busy) {
                 throw new Busy();
             }
-            committed = true;
-            boolean auditConfirmed = true;
-            try { audit.record(actor, "SOURCE_CHANGE_SET_PUBLISH", domain, scopeId,
-                    auditDetail(requestId, "changeSetId=" + id + " before=" + draft.base.sourceRevision
-                            + " after=" + afterRevision + " outcome=COMMITTED paths=" + pathList(draft.diff))); }
-            catch (Exception ignored) { auditConfirmed = false; }
             synchronized (this) { removeDraft(draft); }
             Map<String, Object> result = new LinkedHashMap<String, Object>();
             result.put("published", Boolean.TRUE); result.put("domain", domain); result.put("scopeId", scopeId);
@@ -439,7 +477,7 @@ final class ChangeSetPublisher implements AutoCloseable {
             result.put("revision", afterRevision); result.put("validationRevision", draft.validationRevision);
             result.put("auditConfirmed", Boolean.valueOf(auditConfirmed));
             if (approvalRevision != null) result.put("configGateRevision", approvalRevision);
-            result.put("changedFiles", diffView(draft.diff));
+            result.put("changedFiles", draftDiffView(draft));
             return result;
         } catch (Exception failure) {
             String outcome = failure instanceof Conflict ? "CONFLICT"
@@ -585,7 +623,11 @@ final class ChangeSetPublisher implements AutoCloseable {
                     Diff diff = new Diff("replace", descriptor, null, oldHash, hash(rewrittenBytes), current.length, rewrittenBytes.length, true);
                     diff.referenceUpdates = count; diffs.add(diff);
                 } else {
-                    for (Diff diff : diffs) if (descriptor.equals(diff.path)) diff.referenceUpdates += count;
+                    for (Diff diff : diffs) if (descriptor.equals(diff.path)||descriptor.equals(diff.targetPath)) {
+                        diff.referenceUpdates += count;
+                        diff.newHash = hash(rewrittenBytes);
+                        diff.newBytes = rewrittenBytes.length;
+                    }
                 }
                 changes.put(descriptor, rewrittenBytes);
             }
@@ -921,7 +963,7 @@ final class ChangeSetPublisher implements AutoCloseable {
         for (Draft draft : expired) removeDraft(draft);
     }
 
-    private Map<String, Object> view(Draft draft, String state) {
+    private Map<String, Object> view(Draft draft, String state) throws Exception {
         Map<String, Object> result = new LinkedHashMap<String, Object>();
         result.put("changeSetId", draft.id); result.put("domain", draft.scope.domain); result.put("scopeId", draft.scope.scopeId);
         result.put("state", draft.reviewed ? "reviewed" : draft.validationRevision == null ? state : "validated");
@@ -929,7 +971,7 @@ final class ChangeSetPublisher implements AutoCloseable {
         if (draft.base.registryRevision != null) result.put("registryRevision", draft.base.registryRevision);
         if (draft.base.manifestRevision != null) result.put("manifestRevision", draft.base.manifestRevision);
         result.put("configRevision", draft.base.configRevision); result.put("schemaRevision", draft.base.schemaRevision);
-        result.put("expiresAt", draft.expires.toString()); result.put("changedFiles", diffView(draft.diff));
+        result.put("expiresAt", draft.expires.toString()); result.put("changedFiles", draftDiffView(draft));
         if (draft.validationRevision != null) result.put("validationRevision", draft.validationRevision);
         return result;
     }
@@ -947,6 +989,104 @@ final class ChangeSetPublisher implements AutoCloseable {
             result.add(item);
         }
         return result;
+    }
+
+    private List<Map<String,Object>> draftDiffView(Draft draft) throws Exception {
+        Map<String,List<Map<String,Object>>> inbound=inboundReferenceMap(draft);
+        List<Map<String,Object>> result=new ArrayList<>();
+        for(Diff diff:draft.diff) {
+            Map<String,Object> item=new LinkedHashMap<>(diffView(Collections.singletonList(diff)).get(0));
+            item.put("inboundReferences",inbound.getOrDefault(diff.path,Collections.emptyList()));
+            addReviewContent(draft,diff,item);
+            result.add(item);
+        }
+        return result;
+    }
+
+    private Map<String,List<Map<String,Object>>> inboundReferenceMap(Draft draft) throws Exception {
+        Map<String,List<Map<String,Object>>> result=new LinkedHashMap<>();
+        if(!PACKAGE_SOURCE.equals(draft.scope.domain)
+                ||draft.diff.stream().noneMatch(diff->"move".equals(diff.operation)||"delete".equals(diff.operation)))return result;
+        Set<String> affected=new HashSet<>();
+        for(Diff diff:draft.diff)if("move".equals(diff.operation)||"delete".equals(diff.operation))affected.add(diff.path);
+        Map<String,Map<String,Integer>> counts=new LinkedHashMap<>();
+        for(String descriptor:descriptorPaths(draft.scope.root,Collections.emptyMap())) {
+            byte[] bytes=candidateBytes(draft.scope.root,Collections.emptyMap(),descriptor);
+            if(bytes==null)continue;
+            Matcher matcher=FILE_EXPRESSION.matcher(decodeUtf8(bytes));
+            while(matcher.find()) {
+                String resolved=resolveLocator(draft.scope.root,descriptor,matcher.group(1));
+                if(!affected.contains(resolved))continue;
+                counts.computeIfAbsent(resolved,ignored->new LinkedHashMap<>()).merge(descriptor,1,Integer::sum);
+            }
+        }
+        for(Map.Entry<String,Map<String,Integer>> target:counts.entrySet()) {
+            List<Map<String,Object>> references=new ArrayList<>();
+            for(Map.Entry<String,Integer> reference:target.getValue().entrySet())
+                references.add(Map.of("descriptorPath",reference.getKey(),"referenceCount",reference.getValue()));
+            result.put(target.getKey(),references);
+        }
+        return result;
+    }
+
+    private void addReviewContent(Draft draft,Diff diff,Map<String,Object> item) throws Exception {
+        if("move".equals(diff.operation)) {
+            item.put("contentSummary","Moved without changing file content");
+            return;
+        }
+        byte[] before=diff.oldHash==null?new byte[0]:readBounded(checkedPath(draft.scope.root,diff.path));
+        byte[] after=draft.changes.get(diff.path);
+        if((long)before.length+(after==null?0:after.length)>MAX_REVIEW_DIFF_BYTES) {
+            item.put("contentSummary","Content change exceeds the inline review limit; replace-only summary");
+            return;
+        }
+        String oldText,newText;
+        try { oldText=decodeUtf8(before);newText=after==null?"":decodeUtf8(after); }
+        catch(IllegalArgumentException binary) {
+            item.put("contentSummary","Binary content changed; replace-only summary");
+            return;
+        }
+        if(hasProtectedReviewContent(diff.path,oldText)||hasProtectedReviewContent(diff.path,newText)) {
+            item.put("contentSummary","Protected or unparseable content changed; replace-only summary");
+            return;
+        }
+        String[] oldLines=oldText.split("\\n",-1),newLines=newText.split("\\n",-1);
+        if(oldLines.length+newLines.length>MAX_REVIEW_DIFF_LINES) {
+            item.put("contentSummary","Content change exceeds the inline review limit; replace-only summary");
+            return;
+        }
+        int prefix=0;
+        while(prefix<oldLines.length&&prefix<newLines.length&&oldLines[prefix].equals(newLines[prefix]))prefix++;
+        int suffix=0;
+        while(suffix<oldLines.length-prefix&&suffix<newLines.length-prefix
+                &&oldLines[oldLines.length-1-suffix].equals(newLines[newLines.length-1-suffix]))suffix++;
+        List<String> patch=new ArrayList<>();
+        patch.add("--- "+diff.path);patch.add("+++ "+(diff.targetPath==null?diff.path:diff.targetPath));
+        int oldCount=oldLines.length-prefix-suffix,newCount=newLines.length-prefix-suffix;
+        int oldStart=prefix+(oldCount==0?0:1),newStart=prefix+(newCount==0?0:1);
+        patch.add("@@ -"+oldStart+","+oldCount+" +"+newStart+","+newCount+" @@");
+        for(int index=prefix;index<oldLines.length-suffix;index++)patch.add("-"+oldLines[index]);
+        for(int index=prefix;index<newLines.length-suffix;index++)patch.add("+"+newLines[index]);
+        item.put("contentDiff",patch);
+    }
+
+    private static boolean hasProtectedReviewContent(String path,String text) {
+        String safeText=att.server.api.internal.DiagnosticSanitizer.redactText(text);
+        String safePaths=att.server.api.internal.DiagnosticSanitizer.redactAbsolutePaths(text);
+        if(!safeText.equals(text)||!safePaths.equals(text)
+                ||text.matches("(?is).*\\bclassification\\s*[:=]\\s*['\"]?secret\\b.*"))return true;
+        String lower=path.toLowerCase(Locale.ROOT);
+        try {
+            Object raw;
+            if(lower.endsWith(".json"))raw=ServerRuntime.JSON.readValue(text,Object.class);
+            else if(lower.endsWith(".yaml")||lower.endsWith(".yml")) {
+                org.yaml.snakeyaml.LoaderOptions options=new org.yaml.snakeyaml.LoaderOptions();
+                options.setAllowDuplicateKeys(false);options.setMaxAliasesForCollections(0);
+                options.setNestingDepthLimit(64);options.setCodePointLimit(MAX_REVIEW_DIFF_BYTES);
+                raw=new org.yaml.snakeyaml.Yaml(new org.yaml.snakeyaml.constructor.SafeConstructor(options)).load(text);
+            } else return false;
+            return !java.util.Objects.equals(raw,att.security.SecretProtection.exportValue(raw));
+        } catch(Exception invalidStructuredText) { return true; }
     }
 
     private static List<Diff> immutableDiff(List<Diff> source) {

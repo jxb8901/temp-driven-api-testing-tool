@@ -888,7 +888,7 @@ public final class ApiServlet extends HttpServlet {
         String logicalPath=req.getParameter("path");
         if(logicalPath==null||logicalPath.length()>1024){error(res,404,"ATT-SERVER-NOT-FOUND","API resource was not found",requestId);return;}
         try {
-            Map<String,Object> result=runtime.inspectAuthoringCentralSource(logicalPath);
+            Map<String,Object> result=runtime.inspectAuthoringCentralSource(logicalPath,principalExact(req));
             if(!requireSystemSettingsWrite(req,res,requestId))return;
             Object etag=result.get("sourceEtag");if(etag instanceof String)res.setHeader("ETag",(String)etag);
             result.put("requestId",requestId);json(res,200,result);
@@ -977,8 +977,9 @@ public final class ApiServlet extends HttpServlet {
                 Set<String> fields=new java.util.HashSet<>(java.util.Arrays.asList("baseSourceRevision","registryRevision","operations"));
                 java.util.Iterator<String> names=input.fieldNames();
                 while(names.hasNext())if(!fields.contains(names.next()))throw new IllegalArgumentException("Unsupported Change Set field");
-                String baseRevision=optionalChangeText(input,"baseSourceRevision");
-                String registryRevision=optionalChangeText(input,"registryRevision");
+                String baseRevision=requiredChangeText(input,"baseSourceRevision");
+                String registryRevision=central?optionalChangeText(input,"registryRevision"):
+                        requiredChangeText(input,"registryRevision");
                 JsonNode raw=input.get("operations");
                 if(raw==null||!raw.isArray()||raw.size()<1||raw.size()>ChangeSetPublisher.MAX_OPERATIONS)
                     throw new IllegalArgumentException("A Change Set must contain between 1 and 32 file operations");
@@ -1105,7 +1106,7 @@ public final class ApiServlet extends HttpServlet {
                 result=switch(parts[6]) {
                     case "validate" -> runtime.manifestPublisher.validate(packageId,actor,id);
                     case "review" -> runtime.manifestPublisher.review(packageId,actor,id);
-                    case "publish" -> runtime.manifestPublisher.publish(packageId,actor,id);
+                    case "publish" -> runtime.manifestPublisher.publish(packageId,actor,id,requestId);
                     case "discard" -> {runtime.manifestPublisher.discard(packageId,actor,id);yield new java.util.LinkedHashMap<>(Map.of("discarded",true));}
                     default -> throw new IllegalArgumentException("Unsupported Manifest action");
                 };

@@ -32,6 +32,7 @@ class ChangeSetPublisherTest {
     private Path packageRoot;
     private Path centralRoot;
     private Path dataRoot;
+    private SourceFileTransaction transaction;
     private AtomicReference<String> registryRevision;
     private final List<String> audit = new ArrayList<String>();
     private AtomicInteger validatorCalls;
@@ -57,12 +58,12 @@ class ChangeSetPublisherTest {
                     ChangeSetPublisher.OperationInput.create("templates/payment/request.xml", bytes("<request/>\n")),
                     ChangeSetPublisher.OperationInput.create("flows/payment.yaml", bytes("schemaVersion: att-flow/v1\n")));
             Map<String, Object> draft = stagePackage(publisher, operations);
-            assertFalse(Files.exists(packageRoot.resolve("templates/payment.yaml")));
-            assertFalse(Files.exists(packageRoot.resolve("templates/payment/request.xml")));
+            assertFalse(Files.exists(activePackageRoot().resolve("templates/payment.yaml")));
+            assertFalse(Files.exists(activePackageRoot().resolve("templates/payment/request.xml")));
             String id = String.valueOf(draft.get("changeSetId"));
             publisher.validate(ChangeSetPublisher.PACKAGE_SOURCE, "owner", "owner", false, id);
-            assertFalse(Files.exists(packageRoot.resolve("templates/payment.yaml")));
-            assertFalse(Files.exists(packageRoot.resolve("flows/payment.yaml")));
+            assertFalse(Files.exists(activePackageRoot().resolve("templates/payment.yaml")));
+            assertFalse(Files.exists(activePackageRoot().resolve("flows/payment.yaml")));
             publisher.review(ChangeSetPublisher.PACKAGE_SOURCE, "owner", "owner", false, id);
             Map<String, Object> result = publisher.publish(ChangeSetPublisher.PACKAGE_SOURCE, "owner", "owner", false, id);
             assertEquals(Boolean.TRUE, result.get("published"));
@@ -94,12 +95,36 @@ class ChangeSetPublisherTest {
             start.countDown();
             int successes = (one.get(15, TimeUnit.SECONDS) ? 1 : 0) + (two.get(15, TimeUnit.SECONDS) ? 1 : 0);
             assertEquals(1, successes);
-            assertTrue(Files.exists(packageRoot.resolve("templates/first.yaml"))
-                    ^ Files.exists(packageRoot.resolve("templates/second.yaml")));
+            Path active=activePackageRoot();
+            assertTrue(Files.exists(active.resolve("templates/first.yaml"))
+                    ^ Files.exists(active.resolve("templates/second.yaml")));
         } finally {
             executor.shutdownNow();
             publisher.close();
         }
+    }
+
+    @Test void requiresObservedSourceAndRegistryRevisionsAndRejectsStaleEditorAtDraftCreation() throws Exception {
+        ChangeSetPublisher publisher = publisher(acceptingValidator(), allowingGate());
+        try {
+            Map<String,String> observed=publisher.currentRevisions(ChangeSetPublisher.PACKAGE_SOURCE,"owner","owner",false);
+            assertThrows(IllegalArgumentException.class,()->publisher.stage(ChangeSetPublisher.PACKAGE_SOURCE,"owner","owner",false,
+                    null,observed.get("registryRevision"),List.of(ChangeSetPublisher.OperationInput.create("templates/omitted-base.yaml",bytes("id: omitted\n")))));
+            assertThrows(IllegalArgumentException.class,()->publisher.stage(ChangeSetPublisher.PACKAGE_SOURCE,"owner","owner",false,
+                    observed.get("baseSourceRevision"),null,List.of(ChangeSetPublisher.OperationInput.create("templates/omitted-registry.yaml",bytes("id: omitted\n")))));
+
+            Map<String,Object> first=publisher.stage(ChangeSetPublisher.PACKAGE_SOURCE,"owner","owner",false,
+                    observed.get("baseSourceRevision"),observed.get("registryRevision"),
+                    List.of(ChangeSetPublisher.OperationInput.create("templates/first-editor.yaml",bytes("id: first\n"))));
+            String firstId=String.valueOf(first.get("changeSetId"));
+            validateReview(publisher,firstId);
+            publisher.publish(ChangeSetPublisher.PACKAGE_SOURCE,"owner","owner",false,firstId);
+
+            assertThrows(ChangeSetPublisher.Conflict.class,()->publisher.stage(ChangeSetPublisher.PACKAGE_SOURCE,"owner","owner",false,
+                    observed.get("baseSourceRevision"),observed.get("registryRevision"),
+                    List.of(ChangeSetPublisher.OperationInput.create("templates/stale-editor.yaml",bytes("id: stale\n")))));
+            assertFalse(Files.exists(activePackageRoot().resolve("templates/stale-editor.yaml")));
+        } finally { publisher.close(); }
     }
 
     @Test void invalidatesApprovalWhenPackageOrRegistryRevisionChanges() throws Exception {
@@ -109,11 +134,10 @@ class ChangeSetPublisherTest {
                     ChangeSetPublisher.OperationInput.create("templates/candidate.yaml", bytes("id: candidate\n"))));
             String id = String.valueOf(draft.get("changeSetId"));
             validateReview(publisher, id);
-            Files.createDirectories(packageRoot.resolve("templates"));
-            Files.write(packageRoot.resolve("templates/external.yaml"), bytes("id: outside-change\n"));
+            externalPackageWrite("templates/external.yaml",bytes("id: outside-change\n"));
             assertThrows(ChangeSetPublisher.Conflict.class,
                     () -> publisher.publish(ChangeSetPublisher.PACKAGE_SOURCE, "owner", "owner", false, id));
-            assertFalse(Files.exists(packageRoot.resolve("templates/candidate.yaml")));
+            assertFalse(Files.exists(activePackageRoot().resolve("templates/candidate.yaml")));
 
             Map<String, Object> next = stagePackage(publisher, Arrays.asList(
                     ChangeSetPublisher.OperationInput.create("templates/next.yaml", bytes("id: next\n"))));
@@ -142,7 +166,7 @@ class ChangeSetPublisherTest {
         } finally { publisher.close(); }
     }
 
-    @Test void rejectsUnsafePathsSymlinksAndCaseCollisions() throws Exception {
+    @Test void rejectsUnsafePaths() throws Exception {
         ChangeSetPublisher publisher = publisher(acceptingValidator(), allowingGate());
         try {
             List<String> rejected = Arrays.asList("../outside.yaml", "/etc/passwd.yaml", "C:/temp/out.yaml",
@@ -151,16 +175,27 @@ class ChangeSetPublisherTest {
             for (String path : rejected) assertThrows(IllegalArgumentException.class, () -> stagePackage(publisher,
                     Arrays.asList(ChangeSetPublisher.OperationInput.create(path, bytes("id: rejected\n")))), path);
 
-            Files.createDirectories(packageRoot.resolve("Templates"));
-            Files.write(packageRoot.resolve("Templates/Existing.yaml"), bytes("id: existing\n"));
-            assertThrows(IllegalArgumentException.class, () -> stagePackage(publisher,
-                    Arrays.asList(ChangeSetPublisher.OperationInput.create("templates/new.yaml", bytes("id: new\n")))));
+        } finally { publisher.close(); }
+    }
 
-            Files.createDirectories(packageRoot.resolve("templates"));
-            Path target = packageRoot.resolve("templates/real.yaml");
-            Files.write(target, bytes("id: real\n"));
-            Path link = packageRoot.resolve("templates/linked.yaml");
-            Files.createSymbolicLink(link, target.getFileName());
+    @Test void rejectsCaseCollisionsInPublishedTree() throws Exception {
+        Files.createDirectories(packageRoot.resolve("Templates"));
+        Files.write(packageRoot.resolve("Templates/Existing.yaml"), bytes("id: existing\n"));
+        ChangeSetPublisher publisher = publisher(acceptingValidator(), allowingGate());
+        try {
+            assertThrows(Exception.class, () -> stagePackage(publisher,
+                    Arrays.asList(ChangeSetPublisher.OperationInput.create("templates/new.yaml", bytes("id: new\n")))));
+        } finally { publisher.close(); }
+    }
+
+    @Test void rejectsManagedSymlinkSources() throws Exception {
+        Files.createDirectories(packageRoot.resolve("templates"));
+        Path target = packageRoot.resolve("templates/real.yaml");
+        Files.write(target, bytes("id: real\n"));
+        Path link = packageRoot.resolve("templates/linked.yaml");
+        Files.createSymbolicLink(link, target.getFileName());
+        ChangeSetPublisher publisher = publisher(acceptingValidator(), allowingGate());
+        try {
             assertThrows(Exception.class, () -> stagePackage(publisher,
                     Arrays.asList(ChangeSetPublisher.OperationInput.replace("templates/linked.yaml", bytes("id: changed\n")))));
         } finally { publisher.close(); }
@@ -179,19 +214,32 @@ class ChangeSetPublisherTest {
             String id = String.valueOf(moved.get("changeSetId"));
             List<?> changed = (List<?>) moved.get("changedFiles");
             assertEquals(3, changed.size());
+            Map<?,?> moveRow=(Map<?,?>)changed.stream().map(Map.class::cast)
+                    .filter(row->"templates/shared/payload.txt".equals(row.get("path"))).findFirst().orElseThrow();
+            List<?> inbound=(List<?>)moveRow.get("inboundReferences");
+            assertEquals(2,inbound.size());
+            assertTrue(inbound.toString().contains("templates/one.yaml"));
+            assertTrue(inbound.toString().contains("flows/two.yaml"));
+            Map<?,?> rewrittenRow=(Map<?,?>)changed.stream().map(Map.class::cast)
+                    .filter(row->"templates/one.yaml".equals(row.get("path"))).findFirst().orElseThrow();
+            String rewritten="actions:\n  a: {type: assign, expression: '&{templates/shared/moved.txt}'}\n";
+            assertEquals(digest(rewritten),rewrittenRow.get("newHash"));
+            assertEquals((long)rewritten.getBytes(StandardCharsets.UTF_8).length,rewrittenRow.get("newBytes"));
+            assertTrue(rewrittenRow.get("contentDiff").toString().contains("&{./shared/payload.txt}"));
+            assertTrue(rewrittenRow.get("contentDiff").toString().contains("&{templates/shared/moved.txt}"));
             validateReview(publisher, id);
             publisher.publish(ChangeSetPublisher.PACKAGE_SOURCE, "owner", "owner", false, id);
             assertTrue(read("templates/one.yaml").contains("&{templates/shared/moved.txt}"));
             assertTrue(read("flows/two.yaml").contains("&{templates/shared/moved.txt}"));
-            assertFalse(Files.exists(packageRoot.resolve("templates/shared/payload.txt")));
-            assertTrue(Files.exists(packageRoot.resolve("templates/shared/moved.txt")));
+            assertFalse(Files.exists(activePackageRoot().resolve("templates/shared/payload.txt")));
+            assertTrue(Files.exists(activePackageRoot().resolve("templates/shared/moved.txt")));
 
             Map<String, Object> deleting = stagePackage(publisher, Arrays.asList(ChangeSetPublisher.OperationInput.delete(
                     "templates/shared/moved.txt")));
             assertThrows(ChangeSetPublisher.ValidationRejected.class,
                     () -> publisher.validate(ChangeSetPublisher.PACKAGE_SOURCE, "owner", "owner", false,
                             String.valueOf(deleting.get("changeSetId"))));
-            assertTrue(Files.exists(packageRoot.resolve("templates/shared/moved.txt")));
+            assertTrue(Files.exists(activePackageRoot().resolve("templates/shared/moved.txt")));
         } finally { publisher.close(); }
     }
 
@@ -204,6 +252,7 @@ class ChangeSetPublisherTest {
             Map<String, Object> draft = stagePackage(publisher, Arrays.asList(ChangeSetPublisher.OperationInput.replace(
                     "templates/secret.yaml", bytes("password: " + secret + "\n"))));
             String id = String.valueOf(draft.get("changeSetId"));
+            assertTrue(draft.toString().contains("Protected or unparseable content changed; replace-only summary"));
             Map<String, Object> validated = publisher.validate(ChangeSetPublisher.PACKAGE_SOURCE, "owner", "owner", false, id);
             Map<String, Object> reviewed = publisher.review(ChangeSetPublisher.PACKAGE_SOURCE, "owner", "owner", false, id);
             String safe = draft.toString() + validated.toString() + reviewed.toString() + audit.toString();
@@ -245,8 +294,8 @@ class ChangeSetPublisherTest {
                     () -> blocked.publish(ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG, ChangeSetPublisher.CENTRAL_SCOPE_ID, "admin", true, id));
             assertEquals("ATT-CONFIG-IMPACT-STALE", rejected.code);
             assertEquals(1, gateCalls.get());
-            assertEquals("schemaVersion: att-config/v2.13\n", new String(Files.readAllBytes(centralRoot.resolve("config/config.yaml")), StandardCharsets.UTF_8));
-            assertEquals("schemaVersion: att-tool/v1\n", new String(Files.readAllBytes(centralRoot.resolve("config/tools/orders.yaml")), StandardCharsets.UTF_8));
+            assertEquals("schemaVersion: att-config/v2.13\n", new String(Files.readAllBytes(activeCentralRoot().resolve("config/config.yaml")), StandardCharsets.UTF_8));
+            assertEquals("schemaVersion: att-tool/v1\n", new String(Files.readAllBytes(activeCentralRoot().resolve("config/tools/orders.yaml")), StandardCharsets.UTF_8));
         } finally { blocked.close(); }
 
         ChangeSetPublisher allowed = publisher(acceptingValidator(), (candidate, review) -> {
@@ -263,9 +312,27 @@ class ChangeSetPublisherTest {
                     ChangeSetPublisher.CENTRAL_SCOPE_ID, "admin", true, String.valueOf(draft.get("changeSetId")));
             assertEquals(Boolean.TRUE, result.get("published"));
             assertEquals("schemaVersion: att-config/v2.13\nname: final\n",
-                    new String(Files.readAllBytes(centralRoot.resolve("config/config.yaml")), StandardCharsets.UTF_8));
+                    new String(Files.readAllBytes(activeCentralRoot().resolve("config/config.yaml")), StandardCharsets.UTF_8));
             assertTrue(gateCalls.get() >= 2);
         } finally { allowed.close(); }
+    }
+
+    @Test void configApprovalFreshnessIsRecheckedAtTheCommitFence() throws Exception {
+        Files.createDirectories(centralRoot.resolve("config/tools"));
+        AtomicInteger approvals=new AtomicInteger();
+        ChangeSetPublisher publisher=publisher(acceptingValidator(),(candidate,review)->
+                ChangeSetPublisher.GateDecision.allow(approvals.incrementAndGet()==1?VALIDATION_REVISION:digest("revoked-approval")));
+        try {
+            Map<String,Object> draft=stageCentral(publisher,List.of(ChangeSetPublisher.OperationInput.replace(
+                    "config/config.yaml",bytes("schemaVersion: att-config/v2.13\nname: revised\n"))));
+            String id=String.valueOf(draft.get("changeSetId"));
+            validateReview(publisher,id,ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,ChangeSetPublisher.CENTRAL_SCOPE_ID,"admin",true);
+            ChangeSetPublisher.ValidationRejected stale=assertThrows(ChangeSetPublisher.ValidationRejected.class,
+                    ()->publisher.publish(ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,ChangeSetPublisher.CENTRAL_SCOPE_ID,"admin",true,id));
+            assertEquals("ATT-CONFIG-IMPACT-STALE",stale.code);
+            assertTrue(approvals.get()>=2);
+            assertEquals("schemaVersion: att-config/v2.13\n",Files.readString(activeCentralRoot().resolve("config/config.yaml")));
+        } finally { publisher.close(); }
     }
 
     @Test void safeDefaultValidatorAndConfigGateFailClosedUntilTheirOwningIssuesSupplyHooks() throws Exception {
@@ -277,7 +344,7 @@ class ChangeSetPublisherTest {
                     () -> validatorMissing.validate(ChangeSetPublisher.PACKAGE_SOURCE, "owner", "owner", false,
                             String.valueOf(draft.get("changeSetId"))));
             assertEquals("ATT-CHANGESET-VALIDATOR-UNAVAILABLE", rejected.code);
-            assertFalse(Files.exists(packageRoot.resolve("templates/new.yaml")));
+            assertFalse(Files.exists(activePackageRoot().resolve("templates/new.yaml")));
         } finally { validatorMissing.close(); }
 
         ChangeSetPublisher gateMissing = publisher(acceptingValidator(), ChangeSetPublisher.unavailableConfigGate());
@@ -290,7 +357,7 @@ class ChangeSetPublisherTest {
                     () -> gateMissing.publish(ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,
                             ChangeSetPublisher.CENTRAL_SCOPE_ID, "admin", true, String.valueOf(draft.get("changeSetId"))));
             assertEquals("ATT-CONFIG-PRECOMMIT-UNAVAILABLE", rejected.code);
-            assertEquals("schemaVersion: att-config/v2.13\n", new String(Files.readAllBytes(centralRoot.resolve("config/config.yaml")), StandardCharsets.UTF_8));
+            assertEquals("schemaVersion: att-config/v2.13\n", new String(Files.readAllBytes(activeCentralRoot().resolve("config/config.yaml")), StandardCharsets.UTF_8));
         } finally { gateMissing.close(); }
     }
 
@@ -303,12 +370,16 @@ class ChangeSetPublisherTest {
     }
 
     private Map<String, Object> stagePackage(ChangeSetPublisher publisher, List<ChangeSetPublisher.OperationInput> operations) throws Exception {
-        return publisher.stage(ChangeSetPublisher.PACKAGE_SOURCE, "owner", "owner", false, null, null, operations);
+        Map<String,String> revisions=publisher.currentRevisions(ChangeSetPublisher.PACKAGE_SOURCE,"owner","owner",false);
+        return publisher.stage(ChangeSetPublisher.PACKAGE_SOURCE,"owner","owner",false,
+                revisions.get("baseSourceRevision"),revisions.get("registryRevision"),operations);
     }
 
     private Map<String, Object> stageCentral(ChangeSetPublisher publisher, List<ChangeSetPublisher.OperationInput> operations) throws Exception {
+        Map<String,String> revisions=publisher.currentRevisions(ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,
+                ChangeSetPublisher.CENTRAL_SCOPE_ID,"admin",true);
         return publisher.stage(ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG, ChangeSetPublisher.CENTRAL_SCOPE_ID,
-                "admin", true, null, null, operations);
+                "admin", true, revisions.get("baseSourceRevision"), null, operations);
     }
 
     private void validateReview(ChangeSetPublisher publisher, String id) throws Exception {
@@ -331,24 +402,39 @@ class ChangeSetPublisherTest {
 
     private ChangeSetPublisher publisher(ChangeSetPublisher.CandidateValidator validator,
                                          ChangeSetPublisher.ConfigPublishGate gate) throws Exception {
-        SourceFileTransaction transaction = new SourceFileTransaction(dataRoot, new SourcePublicationBarrier());
+        transaction = new SourceFileTransaction(dataRoot, new SourcePublicationBarrier());
         return new ChangeSetPublisher(Clock.systemUTC(), 128, 8, 900,
                 (domain, scope, actor, systemSettingsWrite) -> {
                     if (ChangeSetPublisher.PACKAGE_SOURCE.equals(domain)) {
                         if (!"owner".equals(scope) || !"owner".equals(actor)) throw new ChangeSetPublisher.Denied();
-                        return new ChangeSetPublisher.Scope(domain, scope, packageRoot, centralRoot,
+                        return new ChangeSetPublisher.Scope(domain, scope,
+                                transaction.pin(ChangeSetPublisher.PACKAGE_SOURCE,scope,packageRoot),
+                                transaction.pin(ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,ChangeSetPublisher.CENTRAL_SCOPE_ID,centralRoot),
                                 registryRevision.get(), SCHEMA_REVISION);
                     }
                     if (!ChangeSetPublisher.CENTRAL_SCOPE_ID.equals(scope) || !"admin".equals(actor) || !systemSettingsWrite)
                         throw new ChangeSetPublisher.Denied();
-                    return new ChangeSetPublisher.Scope(domain, scope, centralRoot, centralRoot, null, SCHEMA_REVISION);
+                    Path active=transaction.pin(ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,scope,centralRoot);
+                    return new ChangeSetPublisher.Scope(domain, scope, active, active, null, SCHEMA_REVISION);
                 }, validator, gate,
                 (actor, action, domain, scope, detail) -> audit.add(actor + " " + action + " " + domain + " " + scope + " " + detail),
                 transaction);
     }
 
     private String read(String path) throws Exception {
-        return new String(Files.readAllBytes(packageRoot.resolve(path)), StandardCharsets.UTF_8);
+        return new String(Files.readAllBytes(activePackageRoot().resolve(path)), StandardCharsets.UTF_8);
+    }
+
+    private Path activePackageRoot() throws Exception { return transaction.pin(ChangeSetPublisher.PACKAGE_SOURCE,"owner",packageRoot); }
+    private Path activeCentralRoot() throws Exception { return transaction.pin(ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,
+            ChangeSetPublisher.CENTRAL_SCOPE_ID,centralRoot); }
+    private void externalPackageWrite(String path,byte[] bytes) throws Exception {
+        Path active=activePackageRoot();Path target=active.resolve(path);
+        String old=Files.exists(target)?digest(Files.readAllBytes(target)):null;
+        Map<String,SourceFileTransaction.Write> writes=new LinkedHashMap<>();
+        writes.put(path,new SourceFileTransaction.Write(path,bytes,old));
+        transaction.commit(ChangeSetPublisher.PACKAGE_SOURCE,"owner",active,"external",digest("test-before"),
+                digest("test-after"),writes,()->{});
     }
 
     private static byte[] bytes(String value) { return value.getBytes(StandardCharsets.UTF_8); }
