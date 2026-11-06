@@ -3,6 +3,7 @@ import { act, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NavigationGuardContext, type NavigationGuardApi } from '../../router';
+import { AppShellContext, type AppShellContextValue } from '../../AppShell';
 import { ApiError, type AsyncState, type PackageSummary } from '../../types';
 import { ScheduledLoadPage } from './ScheduledLoadPage';
 import type { ScheduleDefinition, ScheduleOccurrence, SchedulesApi } from './types';
@@ -95,6 +96,39 @@ async function change(element: HTMLInputElement | HTMLTextAreaElement | HTMLSele
 }
 
 describe('ScheduledLoadPage', () => {
+  it('clears the inherited Environment when the custom Package changes and keeps explicit cross-Package filters', async () => {
+    sessionStorage.setItem('att.schedules.scope', JSON.stringify({ mode: 'follow', packageId: '', environment: '' }));
+    const api = makeApi({ listSchedules: vi.fn(async () => ({ items: [] })) });
+    const packageState: AsyncState<PackageSummary[]> = { status: 'ready', data: [
+      { packageId: 'payments', name: 'Payments' }, { packageId: 'ledger', name: 'Ledger' },
+    ] };
+    const context = { selectedPackage: 'payments', selectedEnvironment: 'UAT' } as AppShellContextValue;
+    await act(async () => root.render(<NavigationGuardContext.Provider value={navigation}>
+      <AppShellContext.Provider value={context}>
+        <ScheduledLoadPage api={api} packages={packageState} enabled onOpenJob={vi.fn()} />
+      </AppShellContext.Provider>
+    </NavigationGuardContext.Provider>));
+    await advance(300);
+    expect(api.listSchedules).toHaveBeenLastCalledWith(expect.any(AbortSignal), expect.objectContaining({
+      packageId: 'payments', environment: 'UAT',
+    }));
+
+    const packageFilter = [...host.querySelectorAll<HTMLLabelElement>('.att-schedule-filters label')]
+      .find(label => label.textContent?.startsWith('Package'))!.querySelector('select')!;
+    await change(packageFilter, 'ledger');
+    await advance(300);
+    expect(host.querySelector<HTMLInputElement>('[aria-label="Schedule Environment filter"]')?.value).toBe('');
+    expect(api.listSchedules).toHaveBeenLastCalledWith(expect.any(AbortSignal), expect.objectContaining({
+      packageId: 'ledger', environment: undefined,
+    }));
+
+    await change(host.querySelector<HTMLInputElement>('[aria-label="Schedule Environment filter"]')!, 'UAT');
+    await advance(300);
+    expect(api.listSchedules).toHaveBeenLastCalledWith(expect.any(AbortSignal), expect.objectContaining({
+      packageId: 'ledger', environment: 'UAT',
+    }));
+  });
+
   it('lands on definitions only, filters RUN/LOAD and owners, and opens a separate New view', async () => {
     const api = makeApi({ listSchedules: vi.fn(async () => ({ items: [
       { ...sampleSchedule, createdBy: 'alice' },
@@ -108,7 +142,7 @@ describe('ScheduledLoadPage', () => {
     await change(host.querySelectorAll('.att-schedule-filters select')[0] as HTMLSelectElement, 'run');
     expect(host.textContent).toContain('Reconciliation');
     expect(host.textContent).not.toContain('Nightly payments');
-    await change(host.querySelectorAll('.att-schedule-filters select')[3] as HTMLSelectElement, 'alice');
+    await change([...host.querySelectorAll<HTMLLabelElement>('.att-schedule-filters label')].find(label => label.textContent?.startsWith('Owner'))!.querySelector('select')!, 'alice');
     expect(host.textContent).toContain('No schedules match');
     await click([...host.querySelectorAll('button')].find(button => button.textContent === 'Clear filters')!);
     expect(host.textContent).toContain('2 of 2 schedules shown.');
@@ -135,7 +169,7 @@ describe('ScheduledLoadPage', () => {
     await click([...host.querySelectorAll('button')].find(button => button.textContent === 'Back to Schedules')!);
     await click([...host.querySelectorAll('button')].find(button => button.textContent === 'Discard changes')!);
     expect(host.querySelector('form')).toBeNull();
-    expect(setStorage).not.toHaveBeenCalled();
+    expect(setStorage.mock.calls.every(([key]) => key === 'att.schedules.scope')).toBe(true);
   });
 
   it.each(['run', 'load'] as const)('saves a validated %s draft ID without reconstructing its execution inputs', async executionType => {

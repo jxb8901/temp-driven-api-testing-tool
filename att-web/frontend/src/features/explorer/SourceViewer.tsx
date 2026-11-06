@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { resourceSourcePath } from '../../api';
 import { inspectionCache } from '../../inspectionCache';
 import { useInspectionRefresh } from '../../useInspectionRefresh';
-import type { ExplorerApi, ResourceIdentity, ResourceSourceReference, SourceProjection } from './types';
+import type { ExplorerApi, ResourceIdentity, ResourceSourceReference, SafeSourceFileReference, SourceProjection } from './types';
 import { CodeEditor, detectCodeLanguage } from '../code/CodeEditor';
 
 const MAX_SOURCE_CHARACTERS = 200_000;
@@ -58,6 +58,13 @@ export function SourceViewer({ api, identity, available, active, onFileReference
   const lineCapped = sourceLines.length > MAX_SOURCE_LINES;
   const shown = sourceLines.slice(0, MAX_SOURCE_LINES).join('\n');
   const capped = characterCapped || lineCapped;
+  const openReference = (reference: SafeSourceFileReference, origin?: string) => {
+    if (reference.available === false) return;
+    const sourceOrigin = projection?.logicalPath || origin;
+    if (identity.type === 'template' || identity.type === 'flow')
+      onFileReference?.(reference.logicalPath, sourceOrigin, { type: identity.type, resourceId: identity.resourceId, referenceId: reference.referenceId });
+    else onFileReference?.(reference.logicalPath, sourceOrigin);
+  };
 
   return <section className="att-explorer-source" aria-label="Safe source projection">
     <div className="att-source-toolbar">
@@ -81,14 +88,22 @@ export function SourceViewer({ api, identity, available, active, onFileReference
       onFileReference={(_path, origin, referenceId) => {
         const reference = projection.fileReferences?.find(item => item.referenceId === referenceId && item.available !== false);
         if (!reference) return;
-        const sourceOrigin = projection.logicalPath || origin;
-        if (identity.type === 'template' || identity.type === 'flow')
-          onFileReference?.(reference.logicalPath, sourceOrigin, { type: identity.type, resourceId: identity.resourceId, referenceId: reference.referenceId });
-        else onFileReference?.(reference.logicalPath, sourceOrigin);
+        openReference(reference, origin);
       }}
       sourcePath={projection.logicalPath}
       maxCharacters={MAX_SOURCE_CHARACTERS}
     />}
+    {projection && ((projection.fileReferences?.length || 0) > 0 || projection.fileReferencesUnavailable) ? <section className="att-source-file-references" aria-label="Package files referenced in source">
+      <h3>Package files referenced in source</h3>
+      {projection.fileReferencesUnavailable && <p role="status">Some file references could not be verified because they are missing, invalid, or blocked by the Server safe-source policy. Their literal expressions remain visible in the source; no file contents were loaded.</p>}
+      {projection.fileReferences?.length ? <ul>{projection.fileReferences.map(reference => <li key={reference.referenceId}>
+        <code>&amp;{'{'}{reference.logicalPath}{'}'}</code>
+        {reference.available === false
+          ? <span role="status">Unavailable under the Server safe-source policy</span>
+          : <button type="button" onClick={() => openReference(reference)}>View referenced file</button>}
+      </li>)}</ul> : null}
+      {projection.fileReferencesTruncated && <p role="status">Additional references were omitted by the Server safety limit.</p>}
+    </section> : null}
   </section>;
 }
 

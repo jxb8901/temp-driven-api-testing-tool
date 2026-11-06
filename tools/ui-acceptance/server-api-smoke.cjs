@@ -55,6 +55,10 @@ async function main() {
     await page.getByRole('button', { name: 'Clear filters' }).click();
     await page.getByRole('button', { name: 'Refresh resources' }).click();
     await page.getByRole('button', { name: 'Reference Flow' }).waitFor();
+    await page.getByRole('button', { name: 'Testdata', exact: true }).click();
+    await page.getByRole('heading', { name: 'Testdata', level: 1 }).waitFor();
+    await page.getByRole('button', { name: 'Back to resources', exact: true }).click();
+    await page.getByRole('button', { name: 'Reference Flow' }).waitFor();
     await page.getByRole('button', { name: 'Reference Flow' }).click();
     await page.getByRole('heading', { name: 'Reference Flow' }).waitFor();
 
@@ -100,7 +104,7 @@ async function main() {
         editorColor: content ? getComputedStyle(content).color : '',
       };
     });
-    assert.ok(editorState.text.includes('&{templates/SCHEDULED/payload/request.xml}'), 'CodeMirror must show the source text under the production CSP');
+    assert.ok(editorState.text.includes('&{../../SCHEDULED/payload/request.xml}'), 'CodeMirror must preserve the Flow-authored relative reference');
     assert.ok(editorState.height > 0, 'CodeMirror must have visible layout under the production CSP');
     assert.ok(editorState.generatedStyles.length > 0 && editorState.generatedStyles.every(nonce => nonce === pageNonce), 'generated editor styles must carry the page nonce');
     assert.ok(editorState.keyText && editorState.keyColor !== editorState.editorColor,
@@ -111,13 +115,14 @@ async function main() {
     await page.getByRole('button', { name: 'Switch to dark theme' }).click();
     await page.waitForFunction(() => document.documentElement.dataset.theme === 'dark');
     const yamlDark = await inspectEditor(editor, '.att-token-property');
-    assert.ok(yamlDark.text.includes('&{templates/SCHEDULED/payload/request.xml}') && yamlDark.height > 0, 'YAML Source text and layout must remain visible in the dark theme');
+    assert.ok(yamlDark.text.includes('&{../../SCHEDULED/payload/request.xml}') && yamlDark.height > 0, 'YAML Source text and layout must remain visible in the dark theme');
     assert.ok(yamlDark.tokenText && yamlDark.tokenColor !== yamlDark.editorColor, 'YAML keys must have visible syntax color in the dark theme');
+    await page.getByText(/Some file references could not be verified/).waitFor();
     await page.getByRole('button', { name: 'Switch to light theme' }).click();
     await page.waitForFunction(() => document.documentElement.dataset.theme === 'light');
     const fileLink = page.locator('.att-explorer-source [data-att-reference]');
     await fileLink.waitFor();
-    assert.equal(await fileLink.getAttribute('data-att-file'), 'templates/SCHEDULED/payload/request.xml');
+    assert.equal(await fileLink.getAttribute('data-att-file'), '../../SCHEDULED/payload/request.xml');
     const referenceLine = await fileLink.evaluate(element => {
       const lines = Array.from(element.closest('.cm-content')?.querySelectorAll('.cm-line') || []);
       return lines.findIndex(line => line.contains(element)) + 1;
@@ -130,7 +135,7 @@ async function main() {
       response.request().method() === 'GET' && new URL(response.url()).pathname.endsWith('/source-file'));
     await fileLink.click();
     try {
-      await page.getByRole('heading', { name: 'Configuration', level: 1 }).waitFor({ timeout: 10000 });
+      await page.getByRole('heading', { name: 'templates/SCHEDULED/payload/request.xml', level: 1 }).waitFor({ timeout: 10000 });
     } catch (error) {
       const headings = await page.locator('h1').allTextContents();
       const body = (await page.locator('body').innerText()).slice(0, 1200);
@@ -140,14 +145,16 @@ async function main() {
     }
     const payloadResponse = await payloadResponsePromise;
     assert.equal(payloadResponse.status(), 200, 'the authorized payload source request must succeed');
+    assert.equal(new URL(payloadResponse.url()).searchParams.get('origin'), 'templates/flows/reference/flow.yaml',
+      'the safe file lookup must carry the authored Flow descriptor origin');
     const payloadProjection = await payloadResponse.json();
     assert.equal(payloadProjection.available, true, 'the payload source must be available before rendering');
-    const payloadSource = page.locator('.att-config-source-view .att-code-editor .cm-content');
+    const payloadSource = page.locator('.att-package-source-file .att-code-editor .cm-content');
     try {
       await payloadSource.waitFor();
     } catch (error) {
-      const view = (await page.locator('.att-config-source-view').allTextContents()).join(' | ');
-      throw new Error(`${error.stack || error}\nConfiguration source view: ${view}\nPage errors: ${pageErrors.join(' | ')}`);
+      const view = (await page.locator('.att-package-source-file').allTextContents()).join(' | ');
+      throw new Error(`${error.stack || error}\nPackage safe source view: ${view}\nPage errors: ${pageErrors.join(' | ')}`);
     }
     const payloadSourceText = await payloadSource.evaluate(element => element.textContent || '');
     assert.ok(payloadSourceText.includes('<request>safe payload</request>'),
@@ -161,6 +168,10 @@ async function main() {
       await page.goto(`${origin}/tools/att/ui/index.html#/configuration${packageId ? '/' + packageId : ''}?tab=source`);
       await page.getByRole('heading', { name: 'Configuration', level: 1 }).waitFor();
       assert.equal(await page.getByRole('combobox', { name: 'Package', exact: true }).count(), 0);
+      assert.equal(await page.getByRole('tab', { name: 'Testdata', exact: true }).count(), 0,
+        'Shared Runtime Configuration must not own the Package Testdata catalog');
+      assert.equal(await page.getByRole('combobox', { name: 'Testdata package', exact: true }).count(), 0,
+        'Shared Runtime Configuration must not offer a Testdata Package selector');
       await page.getByRole('treeitem', { name: /config/ }).waitFor();
     }
     await page.locator('a[data-nav="configuration"]').click();
@@ -176,12 +187,17 @@ async function main() {
     await configSource.getByText('testcase:', { exact: false }).waitFor();
     await page.getByText(/Safe read-only source/).waitFor();
 
-    await page.getByRole('tab', { name: 'Testdata' }).click();
-    await page.getByRole('combobox', { name: 'Testdata package', exact: true }).selectOption('payments');
-    await page.getByRole('heading', { name: 'Testdata' }).waitFor();
-    await page.getByRole('button', { name: 'generatedAccounts' }).click();
+    await page.goto(`${origin}/tools/att/ui/index.html#/packages/payments/testdata?environment=SIT&descriptor=generatedAccounts`);
+    await page.getByRole('heading', { name: 'Testdata', level: 1 }).waitFor();
+    assert.match(page.url(), /#\/packages\/payments\/testdata\?environment=SIT&descriptor=generatedAccounts$/,
+      'Testdata should support a Package, Environment, and descriptor deep link');
+    await page.getByRole('button', { name: /generatedAccounts/ }).click();
     await page.getByRole('button', { name: 'Preview first 50 generated records' }).click();
     await page.getByRole('table').getByText('A-001000', { exact: true }).waitFor();
+    await page.getByRole('button', { name: 'Package Configuration', exact: true }).click();
+    await page.getByRole('region', { name: 'Package Configuration', exact: true }).waitFor();
+    assert.match(page.url(), /#\/configuration\/payments\?environment=SIT&view=package-manifest$/,
+      'the Package Testdata view should link to its Manifest owner');
 
     await page.setViewportSize({ width: 1440, height: 1000 });
     await page.goto(`${origin}/tools/att/ui/index.html#/packages/payments`);
@@ -264,6 +280,7 @@ async function main() {
 
     await page.goto(`${origin}/tools/att/ui/index.html#/advanced-load`);
     await page.getByRole('heading', { name: 'Load testing', level: 1, exact: true }).waitFor();
+    await page.getByLabel('Workspace Package').selectOption('payments');
     await page.locator('.att-template-presets article').nth(5).waitFor();
     assert.equal(await page.locator('.att-template-presets article').count(), 6);
     const catalogResponse = page.waitForResponse(response =>
@@ -323,6 +340,7 @@ async function main() {
 
     await page.goto(`${origin}/tools/att/ui/index.html#/schedules`);
     await page.getByRole('heading', { name: 'Schedules', level: 1, exact: true }).waitFor();
+    await page.getByLabel('Schedule list scope').selectOption('all');
     await page.getByText('1 of 1 schedules shown.', { exact: true }).waitFor();
     assert.equal(await page.locator('.att-query-filter-panel[aria-label="Schedule filters"]').count(), 1,
       'Schedules must use the shared query filter panel');

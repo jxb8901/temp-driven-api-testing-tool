@@ -422,6 +422,7 @@ public final class PackageResourceInspector implements AutoCloseable {
                 SourceFileReferences references = sourceFileReferences(resource, safe);
                 result.put("fileReferences", references.items);
                 result.put("fileReferencesTruncated", Boolean.valueOf(references.truncated));
+                result.put("fileReferencesUnavailable", Boolean.valueOf(references.unavailable));
                 return bounded(result);
             } catch (ResponseTooLargeException oversized) {
                 result.put("available", Boolean.FALSE);
@@ -460,6 +461,7 @@ public final class PackageResourceInspector implements AutoCloseable {
                         : packageFileSourceReferences(resource.textSource, logicalPath, projected);
                 result.put("fileReferences", references.items);
                 result.put("fileReferencesTruncated", Boolean.valueOf(references.truncated));
+                result.put("fileReferencesUnavailable", Boolean.valueOf(references.unavailable));
                 return bounded(result);
             } catch (ResponseTooLargeException oversized) {
                 result.put("available", Boolean.FALSE);
@@ -521,6 +523,7 @@ public final class PackageResourceInspector implements AutoCloseable {
             SourceFileReferences nested = sourceFileReferences(resource, selected.path, projected);
             result.put("fileReferences", nested.items);
             result.put("fileReferencesTruncated", Boolean.valueOf(nested.truncated));
+            result.put("fileReferencesUnavailable", Boolean.valueOf(nested.unavailable));
             result.put("revisionDigest", index.revisionDigest);
             return bounded(result);
         } catch (ResourceNotFoundException missing) {
@@ -545,15 +548,20 @@ public final class PackageResourceInspector implements AutoCloseable {
     }
 
     private SourceFileReferences sourceFileReferences(Resource parent, Object projectedYaml) {
-        Map<String, SourceFileReference> resolved = resolveSourceFileReferences(parent, projectedYaml);
-        return sourceFileReferences(resolved);
+        SourceReferenceDiscovery discovery = discoverSourceFileReferences(parent, projectedYaml);
+        return sourceFileReferences(discovery);
     }
 
     private SourceFileReferences sourceFileReferences(Resource parent, Path sourcePath, String projectedText) {
-        return sourceFileReferences(resolveSourceFileReferences(parent, sourcePath, projectedText));
+        SourceReferenceDiscovery discovery = discoverSourceFileReferences(parent, sourcePath, projectedText);
+        return sourceFileReferences(discovery);
     }
 
     private SourceFileReferences sourceFileReferences(Map<String, SourceFileReference> resolved) {
+        return sourceFileReferences(resolved, false);
+    }
+
+    private SourceFileReferences sourceFileReferences(Map<String, SourceFileReference> resolved, boolean unavailable) {
         List<Map<String, Object>> items = new ArrayList<Map<String, Object>>();
         int count = 0;
         for (SourceFileReference reference : resolved.values()) {
@@ -564,79 +572,98 @@ public final class PackageResourceInspector implements AutoCloseable {
             item.put("available", Boolean.TRUE);
             items.add(item);
         }
-        return new SourceFileReferences(items, resolved.size() > MAX_SOURCE_REFERENCES);
+        return new SourceFileReferences(items, resolved.size() > MAX_SOURCE_REFERENCES, unavailable);
+    }
+
+    private SourceFileReferences sourceFileReferences(SourceReferenceDiscovery discovery) {
+        return sourceFileReferences(discovery.references, discovery.unavailable);
     }
 
     private SourceFileReferences packageFileSourceReferences(Path sourcePath, String sourceLogicalPath, String projectedText) {
-        Map<String, SourceFileReference> resolved = new LinkedHashMap<String, SourceFileReference>();
+        SourceReferenceDiscovery discovery = new SourceReferenceDiscovery();
         FileExpressionResolver resolver = new FileExpressionResolver(packageRoot);
         List<String> authoredPaths;
         try { authoredPaths = resolver.extractReferences(projectedText); }
-        catch (Exception invalidExpression) { return sourceFileReferences(resolved); }
+        catch (Exception invalidExpression) { discovery.unavailable = true; return sourceFileReferences(discovery); }
         for (String authoredPath : authoredPaths) {
-            if (resolved.size() >= MAX_SOURCE_REFERENCES + 1) break;
+            if (discovery.references.size() >= MAX_SOURCE_REFERENCES + 1) break;
             try {
                 Path canonical = resolver.resolve(authoredPath, sourcePath.getParent());
                 PackageResourceResolver.PackageResource target = resources.fromInternalPath(canonical, PackageResourceResolver.Kind.FILE);
                 String logical = target.logicalName();
                 if (!packageSourceAllowed(logical,target.canonicalPath()) || !referencedTextPathAllowed(logical) || sourceGlobDenied(logical)
-                        || Files.size(target.canonicalPath()) > maxSourceBytes || !isUtf8Text(target.canonicalPath())) continue;
+                        || Files.size(target.canonicalPath()) > maxSourceBytes || !isUtf8Text(target.canonicalPath())) {
+                    discovery.unavailable = true;
+                    continue;
+                }
                 String id = sourceReferenceId(sourceLogicalPath, logical);
-                if (!resolved.containsKey(id)) resolved.put(id, new SourceFileReference(id, logical, target.canonicalPath()));
-            } catch (Exception unavailable) { /* Unlisted, denied, missing, binary and oversized files are not navigable. */ }
+                if (!discovery.references.containsKey(id)) discovery.references.put(id, new SourceFileReference(id, logical, target.canonicalPath()));
+            } catch (Exception unavailable) { discovery.unavailable = true; }
         }
-        return sourceFileReferences(resolved);
+        return sourceFileReferences(discovery);
     }
 
     private Map<String, SourceFileReference> resolveSourceFileReferences(Resource parent, Object projectedYaml) {
-        Map<String, SourceFileReference> result = new LinkedHashMap<String, SourceFileReference>();
-        if (parent == null || parent.yamlSource == null || !("template".equals(parent.type) || "flow".equals(parent.type))) return result;
+        return discoverSourceFileReferences(parent, projectedYaml).references;
+    }
+
+    private SourceReferenceDiscovery discoverSourceFileReferences(Resource parent, Object projectedYaml) {
+        SourceReferenceDiscovery discovery = new SourceReferenceDiscovery();
+        if (parent == null || parent.yamlSource == null || !("template".equals(parent.type) || "flow".equals(parent.type))) return discovery;
         FileExpressionResolver resolver = new FileExpressionResolver(packageRoot);
-        collectSourceFileReferences(parent, projectedYaml, resolver, result);
-        return result;
+        collectSourceFileReferences(parent, projectedYaml, resolver, discovery);
+        return discovery;
     }
 
     private Map<String, SourceFileReference> resolveSourceFileReferences(Resource parent, Path sourcePath, String projectedText) {
-        Map<String, SourceFileReference> result = new LinkedHashMap<String, SourceFileReference>();
-        if (parent == null || sourcePath == null || !sourceAllowed(parent)) return result;
+        return discoverSourceFileReferences(parent, sourcePath, projectedText).references;
+    }
+
+    private SourceReferenceDiscovery discoverSourceFileReferences(Resource parent, Path sourcePath, String projectedText) {
+        SourceReferenceDiscovery discovery = new SourceReferenceDiscovery();
+        if (parent == null || sourcePath == null || !sourceAllowed(parent)) return discovery;
         FileExpressionResolver resolver = new FileExpressionResolver(packageRoot);
-        collectSourceFileReferences(parent, projectedText, sourcePath.getParent(), resolver, result);
-        return result;
+        collectSourceFileReferences(parent, projectedText, sourcePath.getParent(), resolver, discovery);
+        return discovery;
     }
 
     private void collectSourceFileReferences(Resource parent, Object value, FileExpressionResolver resolver,
-                                             Map<String, SourceFileReference> result) {
-        if (result.size() >= MAX_SOURCE_REFERENCES + 1) return;
+                                             SourceReferenceDiscovery discovery) {
+        if (discovery.references.size() >= MAX_SOURCE_REFERENCES + 1) return;
         if (value instanceof Map) {
-            for (Object child : ((Map<?, ?>) value).values()) collectSourceFileReferences(parent, child, resolver, result);
+            for (Object child : ((Map<?, ?>) value).values()) collectSourceFileReferences(parent, child, resolver, discovery);
             return;
         }
         if (value instanceof Iterable) {
-            for (Object child : (Iterable<?>) value) collectSourceFileReferences(parent, child, resolver, result);
+            for (Object child : (Iterable<?>) value) collectSourceFileReferences(parent, child, resolver, discovery);
             return;
         }
         if (!(value instanceof String)) return;
-        collectSourceFileReferences(parent, (String) value, parent.yamlSource.getParent(), resolver, result);
+        collectSourceFileReferences(parent, (String) value, parent.yamlSource.getParent(), resolver, discovery);
     }
 
     private void collectSourceFileReferences(Resource parent, String text, Path originDirectory,
-                                             FileExpressionResolver resolver, Map<String, SourceFileReference> result) {
-        if (result.size() >= MAX_SOURCE_REFERENCES + 1) return;
+                                             FileExpressionResolver resolver, SourceReferenceDiscovery discovery) {
+        if (discovery.references.size() >= MAX_SOURCE_REFERENCES + 1) return;
         List<String> paths;
         try { paths = resolver.extractReferences(text); }
-        catch (Exception invalidExpression) { return; }
+        catch (Exception invalidExpression) { discovery.unavailable = true; return; }
         for (String authoredPath : paths) {
-            if (result.size() >= MAX_SOURCE_REFERENCES + 1) return;
+            if (discovery.references.size() >= MAX_SOURCE_REFERENCES + 1) return;
             try {
                 Path canonical = resolver.resolve(authoredPath, originDirectory);
                 PackageResourceResolver.PackageResource target = resources.fromInternalPath(canonical, PackageResourceResolver.Kind.FILE);
                 String logical = target.logicalName();
-                if (!referencedTextPathAllowed(logical) || deniedSourcePath(logical)
+                if (!packageSourceAllowed(logical, target.canonicalPath())
+                        || !referencedTextPathAllowed(logical) || deniedSourcePath(logical)
                         || Files.size(target.canonicalPath()) > maxSourceBytes
-                        || !isUtf8Text(target.canonicalPath())) continue;
+                        || !isUtf8Text(target.canonicalPath())) {
+                    discovery.unavailable = true;
+                    continue;
+                }
                 String id = sourceReferenceId(parent.resourceId, logical);
-                if (!result.containsKey(id)) result.put(id, new SourceFileReference(id, logical, target.canonicalPath()));
-            } catch (Exception unavailable) { /* Missing, unsafe, binary, and oversize targets are not projected. */ }
+                if (!discovery.references.containsKey(id)) discovery.references.put(id, new SourceFileReference(id, logical, target.canonicalPath()));
+            } catch (Exception unavailable) { discovery.unavailable = true; }
         }
     }
 
@@ -2973,10 +3000,15 @@ public final class PackageResourceInspector implements AutoCloseable {
 
     private static final class SourceFileReferences {
         final List<Map<String, Object>> items;
-        final boolean truncated;
-        SourceFileReferences(List<Map<String, Object>> items, boolean truncated) {
-            this.items = items; this.truncated = truncated;
+        final boolean truncated, unavailable;
+        SourceFileReferences(List<Map<String, Object>> items, boolean truncated, boolean unavailable) {
+            this.items = items; this.truncated = truncated; this.unavailable = unavailable;
         }
+    }
+
+    private static final class SourceReferenceDiscovery {
+        final Map<String, SourceFileReference> references = new LinkedHashMap<String, SourceFileReference>();
+        boolean unavailable;
     }
 
     private static final class Relation {

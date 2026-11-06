@@ -182,7 +182,7 @@ export interface LoadCheckpointInterval {
   latencySampleCount?: number; latencyMeanMs?: number;
 }
 export interface JobsQuery {
-  offset?: number; limit?: number; principal?: string; principalMode?: string; packageId?: string; executionType?: string;
+  offset?: number; limit?: number; principal?: string; principalMode?: string; packageId?: string; environment?: string; executionType?: string;
   submissionSource?: 'manual' | 'scheduled';
   executionPrincipal?: string; executionPrincipalMode?: 'all' | 'mine' | 'text'; executionPrincipalExact?: boolean;
   scheduleOwner?: string; scheduleOwnerMode?: 'all' | 'mine' | 'text'; scheduleOwnerExact?: boolean;

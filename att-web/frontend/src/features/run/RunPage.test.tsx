@@ -52,6 +52,16 @@ it('validates before submit and clears review when the environment changes', asy
   expect(api.submitRun).toHaveBeenCalledTimes(1); expect(api.submitRun).toHaveBeenCalledWith({ packageId: 'payments', draftId: 'R123' });
   expect(onAccepted).toHaveBeenCalledWith({ packageId: 'payments', jobId: 'J123' });
 });
+it('clears package-specific environment and target when changing the RUN package', async () => {
+  await change('Environment', 'UAT');
+  await change('Target ID', 'cases.default.C1');
+  await click('Validate');
+  expect(host.querySelector('[aria-label="Review RUN"]')).not.toBeNull();
+  await change('Package ID', 'ledger');
+  expect(control('Environment').value).toBe('');
+  expect(control('Target ID').value).toBe('');
+  expect(host.querySelector('[aria-label="Review RUN"]')).toBeNull();
+});
 it('schedules the reviewed snapshot and diagnostic changes do not execute', async () => {
   await change('Target type', 'flow'); await change('Target ID', 'payment.flow');
   await settleDebugForm();
@@ -149,6 +159,8 @@ it('prefills a safe RUN replay from an opaque draft reference and validates type
   await act(async () => root.render(<NavigationGuardContext.Provider value={guard}><RunPage packageId="payments" replayDraftId="R0123456789ABCDEF0123456789ABCDEF" replaySourceJobId="J0123456789ABCDEF" onAccepted={onAccepted} onSchedule={onSchedule} schedulingEnabled /></NavigationGuardContext.Provider>));
   await settleDebugForm();
   expect(api.getJobReplayEditorDraft).toHaveBeenCalledWith('J0123456789ABCDEF','R0123456789ABCDEF0123456789ABCDEF');
+  expect((control('Package ID') as HTMLInputElement).disabled).toBe(true);
+  expect(host.textContent).toContain("Replay uses the source Job's Package");
   expect((control('Target ID') as HTMLInputElement).value).toBe('lookup-customer');
   expect((control('Environment') as HTMLSelectElement).value).toBe('');
   expect(host.textContent).toContain('Resolved Environment: SIT · Origin: Package Manifest');

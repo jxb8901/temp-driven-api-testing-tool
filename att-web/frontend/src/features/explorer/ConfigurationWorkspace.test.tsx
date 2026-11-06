@@ -38,9 +38,9 @@ function Harness({ api, sourceReference, canRevealAdminFields = false }: { api: 
   const [fileOrigin, setFileOrigin] = useState<string | undefined>(sourceReference ? 'templates/payment/flow.yaml' : undefined);
   const [activeSourceReference, setActiveSourceReference] = useState(sourceReference);
   const [configurationReferenceId, setConfigurationReferenceId] = useState<string | undefined>();
-  const [tab, setTab] = useState<'source' | 'declared' | 'effective' | 'compare' | 'testdata'>('source');
-  return <ConfigurationWorkspace api={api} packages={[{ packageId: 'payments' }]} packageId="payments" environment=""
-    filePath={filePath} fileOrigin={fileOrigin} sourceReference={activeSourceReference} configurationReferenceId={configurationReferenceId} tab={tab} onPackageChange={vi.fn()} onEnvironmentChange={vi.fn()}
+  const [tab, setTab] = useState<'source' | 'declared' | 'effective' | 'compare'>('source');
+  return <ConfigurationWorkspace api={api} packageId="payments" environment=""
+    filePath={filePath} fileOrigin={fileOrigin} sourceReference={activeSourceReference} configurationReferenceId={configurationReferenceId} tab={tab} onEnvironmentChange={vi.fn()}
     onFileChange={(path, origin, reference, configurationReference) => { setFilePath(path); setFileOrigin(origin); setActiveSourceReference(reference); setConfigurationReferenceId(configurationReference); }} onTabChange={setTab} onOpenResource={vi.fn()} canRevealAdminFields={canRevealAdminFields} />;
 }
 
@@ -50,12 +50,12 @@ describe('ConfigurationWorkspace', () => {
       getDeclaredConfiguration: vi.fn(async () => ({ environments: [{ name: 'SIT', state: 'active' }], sections: [] })),
       listConfigurationFiles: vi.fn(async () => ({ items: [], total: 0 })),
     } as unknown as ExplorerApi;
-    const render = (packageId: string, tab: 'source' | 'testdata' = 'source') => <ConfigurationWorkspace api={api}
-      packages={[{ packageId: 'default' }, { packageId: 'jeffreyjiang' }]} packageId={packageId} environment="SIT"
-      tab={tab} onPackageChange={vi.fn()} onEnvironmentChange={vi.fn()} onFileChange={vi.fn()} onTabChange={vi.fn()} onOpenResource={vi.fn()} />;
+    const render = (packageId: string) => <ConfigurationWorkspace api={api}
+      packageId={packageId} environment="SIT"
+      tab="source" onEnvironmentChange={vi.fn()} onFileChange={vi.fn()} onTabChange={vi.fn()} onOpenResource={vi.fn()} />;
     await act(async () => root.render(render('')));
     await flush();
-    expect(host.textContent).not.toContain('Choose a package');
+    expect(host.textContent).not.toContain('Testdata');
     expect(host.querySelector('select[aria-label="Testdata package"]')).toBeNull();
     expect(api.getDeclaredConfiguration).toHaveBeenCalledWith('', expect.any(AbortSignal));
     const reads = vi.mocked(api.getDeclaredConfiguration).mock.calls.length;
@@ -66,9 +66,6 @@ describe('ConfigurationWorkspace', () => {
     }
     expect(api.getDeclaredConfiguration).toHaveBeenCalledTimes(reads);
     expect(api.listConfigurationFiles).toHaveBeenCalledTimes(listings);
-    await act(async () => root.render(render('', 'testdata')));
-    expect(host.querySelector('select[aria-label="Testdata package"]')).not.toBeNull();
-    expect(host.textContent).toContain('Package-local records');
   });
 
   it('limits the additional DB fields option to Effective and Compare and explains protected views', async () => {
@@ -279,86 +276,4 @@ describe('ConfigurationWorkspace', () => {
     expect(api.getConfigurationFileSource).not.toHaveBeenCalled();
   });
 
-  it('keeps safe descriptor metadata visible when a Server does not expose the records endpoint', async () => {
-    const api = {
-      listResources: vi.fn(async () => ({ items: [], total: 0 })),
-      getResource: vi.fn(async () => ({ resource: { type: 'template', resourceId: 'checkout' } })),
-      getSafeSource: vi.fn(async () => ({ available: false })),
-      getDeclaredConfiguration: vi.fn(async () => ({
-        environments: [{ name: 'dev', state: 'active', default: true }],
-        sections: [{ id: 'testdata', title: 'Testdata' }],
-      })),
-      getEffectiveConfiguration: vi.fn(async () => ({
-        state: 'ready',
-        environment: 'dev',
-        sections: [{
-          id: 'testdata',
-          entries: [{
-            id: 'accounts', source: 'testdata/accounts.yaml',
-            fields: {
-              recordCount: { state: 'visible' as const, value: 3 },
-              'selection.strategy': { state: 'visible' as const, value: 'roundRobin' },
-            },
-          }],
-        }],
-      })),
-      compareConfiguration: vi.fn(async () => ({ fields: [] })),
-      listConfigurationFiles: vi.fn(async () => ({ items: [], total: 0 })),
-      getConfigurationFileSource: vi.fn(async () => ({ available: false })),
-      getTestdataRecords: vi.fn(async () => { throw Object.assign(new Error('not found'), { status: 404 }); }),
-      getDebugForm: vi.fn(), previewDebug: vi.fn(), submitDebug: vi.fn(), runCase: vi.fn(),
-    } as unknown as ExplorerApi;
-
-    await act(async () => root.render(<Harness api={api} />));
-    await flush();
-    await act(async () => [...host.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find(button => button.textContent === 'Testdata')?.click());
-    await flush();
-    expect(host.textContent).toContain('accounts');
-    expect(host.textContent).toContain('3');
-    expect(host.textContent).toContain('Testdata record preview is not available from this Server version');
-  });
-
-  it('requires an explicit request before showing a bounded generated-record preview', async () => {
-    const api = {
-      listResources: vi.fn(async () => ({ items: [], total: 0 })),
-      getResource: vi.fn(async () => ({ resource: { type: 'template', resourceId: 'checkout' } })),
-      getSafeSource: vi.fn(async () => ({ available: false })),
-      getDeclaredConfiguration: vi.fn(async () => ({ environments: [{ name: 'dev', state: 'active', default: true }] })),
-      getEffectiveConfiguration: vi.fn(async () => ({
-        state: 'ready', environment: 'dev',
-        sections: [{ id: 'testdata', entries: [{ id: 'generatedAccounts', source: 'testdata/generated.yaml', fields: {
-          generated: { state: 'visible' as const, value: true },
-          recordCount: { state: 'visible' as const, value: 120 },
-          'selection.strategy': { state: 'visible' as const, value: 'sequential' },
-        } }] }],
-      })),
-      compareConfiguration: vi.fn(async () => ({ fields: [] })),
-      listConfigurationFiles: vi.fn(async () => ({ items: [], total: 0 })),
-      getConfigurationFileSource: vi.fn(async () => ({ available: false })),
-      getTestdataRecords: vi.fn(async (_packageId: string, _descriptorId: string, query: { previewGenerated?: boolean }) => query.previewGenerated
-        ? ({ descriptorId: 'generatedAccounts', generated: true, previewGenerated: true, previewRequired: false, offset: 0, limit: 50, total: 120, recordCount: 120,
-            generation: { generate: { seq: { from: 1000, to: 1119, format: '%06d' } }, record: { id: 'A-%{seq}' } },
-            records: [{ index: 0, sequence: 1000, value: { id: 'A-001000' } }] })
-        : ({ descriptorId: 'generatedAccounts', generated: true, previewGenerated: false, previewRequired: true, offset: 0, limit: 50, total: 120, recordCount: 120,
-            generation: { generate: { seq: { from: 1000, to: 1119, format: '%06d' } }, record: { id: 'A-%{seq}' } }, records: [] })),
-      getDebugForm: vi.fn(), previewDebug: vi.fn(), submitDebug: vi.fn(), runCase: vi.fn(),
-    } as unknown as ExplorerApi;
-
-    await act(async () => root.render(<Harness api={api} />));
-    await flush();
-    await act(async () => [...host.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find(button => button.textContent === 'Testdata')?.click());
-    await flush();
-    expect(host.textContent).toContain('120');
-    expect(host.textContent).toContain('Choose');
-    expect(host.textContent).not.toContain('A-001000');
-    expect(api.getTestdataRecords).toHaveBeenCalledWith('payments', 'generatedAccounts',
-      { environment: undefined, offset: 0, limit: 50, previewGenerated: false }, expect.any(AbortSignal));
-
-    await act(async () => [...host.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Preview first 50 generated records')?.click());
-    await flush();
-    expect(api.getTestdataRecords).toHaveBeenLastCalledWith('payments', 'generatedAccounts',
-      { environment: undefined, offset: 0, limit: 50, previewGenerated: true }, expect.any(AbortSignal));
-    expect(host.textContent).toContain('A-001000');
-    expect(host.textContent).toContain('seq 1000');
-  });
 });

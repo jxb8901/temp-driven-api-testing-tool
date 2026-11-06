@@ -56,6 +56,11 @@ export interface AppShellProps {
   showScheduledLoad?: boolean;
   selectedPackage: string;
   selectedEnvironment: string;
+  workspacePackages?: string[];
+  workspaceEnvironments?: string[];
+  workspaceNotice?: string;
+  workspaceResolvedEnvironment?: string | null;
+  workspaceResolutionError?: boolean;
   onPackageChange(packageId: string): void;
   onEnvironmentChange(environment: string): void;
   onJobAccepted(job: { jobId: string; packageId?: string }): void;
@@ -65,6 +70,8 @@ export interface AppShellProps {
 export interface AppShellContextValue {
   selectedPackage: string;
   selectedEnvironment: string;
+  workspaceResolvedEnvironment?: string | null;
+  workspaceResolutionError?: boolean;
   themePreference: ThemePreference;
   uiLocale: UiLocale;
   uiLocalePreference: UiLocalePreference;
@@ -73,6 +80,7 @@ export interface AppShellContextValue {
   accessCapabilities: AccessCapabilities;
   preferenceStatus: PreferenceStatus;
   canRevealConfigurationFields: boolean;
+  setWorkspaceEditorLock?(locked: boolean): void;
   onPackageChange(packageId: string): void;
   onEnvironmentChange(environment: string): void;
   onThemePreferenceChange(preference: ThemePreference): void;
@@ -99,8 +107,8 @@ function routeTitle(route: AppRoute): string {
   if (route.kind === 'monitoring') return 'Monitoring';
   if (route.kind === 'run') return 'Run';
   if (route.kind === 'packages') return 'Explorer';
-  if (route.kind === 'package') return route.resource ? route.resource.resourceId : route.packageId;
-  if (route.kind === 'configuration') return route.filePath?.split('/').filter(Boolean).pop() || 'Configuration';
+  if (route.kind === 'package') return route.view === 'testdata' ? 'Testdata' : route.view === 'source-file' ? route.filePath?.split('/').pop() || 'Package source' : route.resource ? route.resource.resourceId : route.packageId;
+  if (route.kind === 'configuration') return route.view === 'package-manifest' ? 'Package Configuration' : route.filePath?.split('/').filter(Boolean).pop() || 'Configuration';
   if (route.kind === 'quick-load') return 'Quick Load';
   if (route.kind === 'jobs') return route.jobId ? 'Job ' + route.jobId : 'Jobs and results';
   if (route.kind === 'job-console') return 'Job ' + route.jobId + ' console';
@@ -141,7 +149,7 @@ function KeyboardDialog({ open, mode, showScheduledLoad, selectedPackage, access
     { label: 'Dashboard', description: 'Dashboard overview', route: { kind: 'dashboard' } },
     { label: 'Monitoring', description: 'Live server health and capacity', route: { kind: 'monitoring' } },
     { label: 'Explorer', description: 'Choose a package, browse resources, and run targets', route: selectedPackage ? { kind: 'package', packageId: selectedPackage } : { kind: 'packages' } },
-    { label: 'Configuration', description: 'Inspect shared runtime configuration and Package-local Testdata', route: selectedPackage ? { kind: 'configuration', packageId: selectedPackage } : { kind: 'configuration' } },
+    { label: 'Configuration', description: 'Inspect shared runtime configuration', route: selectedPackage ? { kind: 'configuration', packageId: selectedPackage } : { kind: 'configuration' } },
     { label: 'Load testing', description: 'Create a validated Load job', route: { kind: 'load' } },
     { label: 'Jobs and results', description: 'Inspect recent jobs', route: { kind: 'jobs' } },
     ...(showScheduledLoad ? [{ label: 'Schedules', description: 'Manage RUN and LOAD schedules', route: { kind: 'schedules' } as AppRoute }] : []),
@@ -239,7 +247,7 @@ function DiscardChangesDialog({ navigation }: { navigation: RouteState }) {
 }
 
 export function AppShell({
-  route, navigation, serverVersion, showScheduledLoad = false, selectedPackage, selectedEnvironment,
+  route, navigation, serverVersion, showScheduledLoad = false, selectedPackage, selectedEnvironment, workspacePackages = [], workspaceEnvironments = [], workspaceNotice = '', workspaceResolvedEnvironment, workspaceResolutionError,
   onPackageChange, onEnvironmentChange, onJobAccepted, children,
 }: AppShellProps) {
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
@@ -552,9 +560,14 @@ export function AppShell({
     navigate(to);
     setMobileNavigationOpen(false);
   });
+  const [workspaceEditorLock, setWorkspaceEditorLock] = useState(false);
+  const workspaceLocked = workspaceEditorLock || route.kind === 'run' || route.kind === 'quick-load' || route.kind === 'load-resource'
+    || (route.kind === 'load' && Boolean(route.packageId)) || (route.kind === 'jobs' && Boolean(route.jobId))
+    || route.kind === 'job-console' || route.kind === 'job-artifact'
+    || (route.kind === 'schedules' && Boolean(route.view));
   const packageHref = selectedPackage ? '#/packages/' + encodeURIComponent(selectedPackage) : '#/packages';
   const loadHref = '#/advanced-load';
-  const configurationHref = formatRoute({ kind: 'configuration', environment: selectedEnvironment });
+  const configurationHref = formatRoute({ kind: 'configuration', packageId: selectedPackage || undefined, environment: selectedEnvironment });
   const changeThemePreference = (preference: ThemePreference) => {
     applyThemePreference(preference);recordPreferenceEdit('theme',preference,saveLocalThemePreference(preference));
   };
@@ -565,7 +578,7 @@ export function AppShell({
 
   return (
     <NavigationGuardContext.Provider value={navigation}>
-      <AppShellContext.Provider value={{ selectedPackage, selectedEnvironment, themePreference, uiLocale, uiLocalePreference, authMode: versionData?.authMode, currentUser, accessCapabilities, preferenceStatus, canRevealConfigurationFields, onPackageChange, onEnvironmentChange, onThemePreferenceChange: changeThemePreference, onUiLocaleChange: changeUiLocale, onJobAccepted }}>
+      <AppShellContext.Provider value={{ selectedPackage, selectedEnvironment, workspaceResolvedEnvironment, workspaceResolutionError, themePreference, uiLocale, uiLocalePreference, authMode: versionData?.authMode, currentUser, accessCapabilities, preferenceStatus, canRevealConfigurationFields, setWorkspaceEditorLock, onPackageChange, onEnvironmentChange, onThemePreferenceChange: changeThemePreference, onUiLocaleChange: changeUiLocale, onJobAccepted }}>
       {(route.kind === 'job-console' || route.kind === 'job-artifact' || (route.kind === 'jobs' && route.standalone)) ? <main key={inspectionSessionEpoch} id="main-content" className="att-standalone-console-shell" tabIndex={-1}>
         {capabilitiesResolved ? children : <div role="status" aria-busy="true">Checking ATT access…</div>}
       </main> : <JobConsoleProvider jobsApi={api}>
@@ -611,7 +624,7 @@ export function AppShell({
               <span className="nav-icon" aria-hidden="true">⚙</span><span className="nav-label">Settings</span>
             </a>}
           </nav>
-          <div className="sidebar-footer"><span>ATT Server</span><span className="sidebar-version">{versionData?.version || '4.2.8'}</span></div>
+          <div className="sidebar-footer"><span>ATT Server</span><span className="sidebar-version">{versionData?.version || '4.2.9'}</span></div>
         </aside>
 
         <div className="app-frame">
@@ -646,8 +659,10 @@ export function AppShell({
                 {route.kind === 'packages' && <Breadcrumb label="Packages" navigate={navigate} />}
                 {route.kind === 'package' && <>
                   <Breadcrumb label="Packages" href="#/packages" navigate={navigate} />
-                  <Breadcrumb label={route.packageId} href={route.resource ? packageHref : undefined} navigate={navigate} />
+                  <Breadcrumb label={route.packageId} href={route.resource || route.view ? packageHref : undefined} navigate={navigate} />
                   {route.resource && <Breadcrumb label={route.resource.resourceId} navigate={navigate} />}
+                  {route.view === 'testdata' && <Breadcrumb label="Testdata" navigate={navigate} />}
+                  {route.view === 'source-file' && <Breadcrumb label={route.filePath?.split('/').pop() || 'Safe source'} navigate={navigate} />}
                 </>}
                 {route.kind === 'configuration' && <>
                   <Breadcrumb label="Configuration" href={route.packageId ? '#/configuration' : undefined} navigate={navigate} />
@@ -672,8 +687,14 @@ export function AppShell({
               </ol>
             </nav>
             <div className="context-toolbar" role="group" aria-label="Workspace context and actions">
-              <div className="context-chip"><span>Package</span><strong>{selectedPackage || 'All packages'}</strong></div>
-              <div className="context-chip"><span>Environment</span><strong>{selectedEnvironment || 'Per run'}</strong></div>
+              <label className="context-chip"><span>Workspace Package</span><select aria-label="Workspace Package" value={selectedPackage} disabled={workspaceLocked} aria-describedby={workspaceLocked ? 'workspace-lock-reason' : undefined} onChange={event => onPackageChange(event.currentTarget.value)}>
+                <option value="">Select a Package</option>{[...new Set([...workspacePackages, ...(selectedPackage ? [selectedPackage] : [])])].map(id => <option key={id} value={id}>{id}</option>)}
+              </select></label>
+              <label className="context-chip"><span>Workspace Environment</span><select aria-label="Workspace Environment" value={selectedEnvironment} disabled={workspaceLocked || !selectedPackage} aria-describedby={workspaceLocked ? 'workspace-lock-reason' : undefined} onChange={event => onEnvironmentChange(event.currentTarget.value)}>
+                <option value="">Package default</option>{[...new Set([...workspaceEnvironments, ...(selectedEnvironment ? [selectedEnvironment] : [])])].map(id => <option key={id} value={id}>{id}</option>)}
+              </select></label>
+              {workspaceLocked && <small id="workspace-lock-reason">Workspace is locked while viewing history or editing an execution.</small>}
+              {workspaceNotice && <small role="status">{workspaceNotice}</small>}
               <div className="context-chip context-identity"><span>Identity</span>
                 {versionData?.authMode === 'local'
                   ? <><strong>{currentUser?.displayName || currentUser?.loginId || 'Loading identity…'}</strong><small>{currentUser ? `${currentUser.loginId} · ${currentUser.role}` : 'Loading authenticated identity'}</small></>

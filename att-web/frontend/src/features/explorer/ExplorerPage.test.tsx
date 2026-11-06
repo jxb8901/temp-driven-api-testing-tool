@@ -200,6 +200,26 @@ describe('Explorer source viewer', () => {
     });
   });
 
+  it('offers an accessible reference-list action for nested Action expressions and reports unavailable references', async () => {
+    const referenceId = 'c'.repeat(64);
+    const openReference = vi.fn();
+    const api = apiWith({ getSafeSource: vi.fn(async () => ({
+      available: true, format: 'yaml', logicalPath: 'flows/checkout/flow.yaml',
+      text: 'argument: #{request(&{./request.xml})}',
+      fileReferences: [
+        { referenceId, logicalPath: 'flows/checkout/request.xml', available: true },
+        { referenceId: 'd'.repeat(64), logicalPath: 'flows/private/secret.xml', available: false },
+      ],
+    })) });
+    await render(<SourceViewer api={api} identity={{ packageId: 'payments', type: 'flow', resourceId: 'checkout' }} available active onFileReference={openReference} />);
+    expect(container.querySelector('.att-code-editor pre')?.textContent).toContain('#{request(&{./request.xml})}');
+    expect(container.textContent).toContain('Unavailable under the Server safe-source policy');
+    click(button('View referenced file'));
+    expect(openReference).toHaveBeenCalledWith('flows/checkout/request.xml', 'flows/checkout/flow.yaml', {
+      type: 'flow', resourceId: 'checkout', referenceId,
+    });
+  });
+
   it('caps the safe source projection before rendering', async () => {
     const text = 'x'.repeat(sourceViewerLimits.maxCharacters + 100);
     const api = apiWith({ getSafeSource: vi.fn(async () => ({ available: true, text })) });

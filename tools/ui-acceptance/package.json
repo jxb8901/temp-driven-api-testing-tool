@@ -1,7 +1,7 @@
 {
   "name": "att-ui-acceptance",
   "private": true,
-  "version": "4.2.8",
+  "version": "4.2.9",
   "description": "Development-only browser smoke, accessibility, and screenshot checks for ATT's static UI.",
   "scripts": {
     "smoke": "node smoke.cjs",
@@ -21,7 +21,9 @@
     "smoke:load-templates": "node load-templates.cjs",
     "smoke:saved-scenario-review": "node saved-scenario-review.cjs",
     "smoke:package-manifest": "node package-manifest.cjs",
-    "smoke:saved-scenario-lifecycle": "node saved-scenario-lifecycle.cjs"
+    "smoke:saved-scenario-lifecycle": "node saved-scenario-lifecycle.cjs",
+    "smoke:workspace-context": "node workspace-context.cjs",
+    "smoke:report-fragments": "node report-fragments.cjs"
   },
   "devDependencies": {
     "axe-core": "4.11.4",

@@ -320,9 +320,9 @@ async function main() {
     const firstReference = page.getByRole('link', { name: 'Open package file ./payloads/request.xml' });
     await firstReference.waitFor();
     await firstReference.click();
-    await page.getByRole('heading', { name: 'Configuration', level: 1 }).waitFor();
-    assert.equal(await page.locator('.att-config-source-view .att-code-language').innerText(), 'XML');
-    await page.locator('.att-config-source-view .att-code-status').getByText('Code viewer ready.').waitFor();
+    await page.getByRole('heading', { name: 'templates/checkout/payloads/request.xml', level: 1 }).waitFor();
+    assert.equal(await page.locator('.att-package-source-file .att-code-language').innerText(), 'XML');
+    await page.locator('.att-package-source-file .att-code-status').getByText('Code viewer ready.').waitFor();
     const nestedReference = page.getByRole('link', { name: 'Open package file ./refs/child.json' });
     await nestedReference.waitFor();
     await nestedReference.click();
@@ -335,7 +335,7 @@ async function main() {
     await page.getByRole('link', { name: 'Open package file ./refs/child.json' }).waitFor();
     await page.goBack();
     await page.getByRole('heading', { name: 'Resource details', exact: true }).waitFor();
-    assert.match(page.url(), /#\/packages\/payments\/resources\/template\/checkout(?:\?detail=source&id=checkout)?$/);
+    assert.match(page.url(), /#\/packages\/payments\/resources\/template\/checkout(?:\?detail=source&id=checkout(?:&environment=[^&]*)?)?$/);
 
     await page.goto(`${base}#/packages/payments/resources/template/empty`);
     await page.getByRole('heading', { name: 'empty' }).waitFor();
@@ -353,7 +353,7 @@ async function main() {
     await page.getByRole('heading', { name: 'checkout' }).waitFor();
     await page.getByRole('button', { name: 'Run', exact: true }).click();
     await page.getByRole('heading', { name: 'Run', exact: true }).waitFor();
-    assert.match(page.url(), /#\/run\/payments\/template\/checkout\?(?:environment=[^&]+&)?id=checkout$/);
+    assert.match(page.url(), /#\/run\/payments\/template\/checkout\?(?:environment=[^&]*&)?id=checkout$/);
     await page.getByText("Typed fields use the selected target's safe Debug defaults. Advanced JSON remains available for nested inputs.").waitFor();
     await page.getByRole('button', { name: 'Validate', exact: true }).click();
     try { await page.getByRole('heading', { name: 'Review', exact: true }).waitFor({ timeout: 10000 }); }
@@ -429,8 +429,15 @@ async function main() {
     assert.equal(await page.locator('.att-config-source-view img').count(), 0, 'configuration source is rendered as text');
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth), true, 'the Configuration workspace has no horizontal overflow at tablet width');
     await page.setViewportSize({ width: 1440, height: 1000 });
-    await page.getByRole('tab', { name: 'Testdata' }).click();
-    await page.getByRole('combobox', { name: 'Testdata package', exact: true }).selectOption('payments');
+    assert.equal(await page.getByRole('tab', { name: 'Testdata', exact: true }).count(), 0,
+      'Shared Runtime Configuration must not own the Package Testdata catalog');
+    await page.goto(`${base}#/packages/payments`);
+    await page.getByRole('heading', { name: 'Package Explorer' }).waitFor();
+    await page.getByRole('button', { name: 'Testdata', exact: true }).click();
+    await page.getByRole('heading', { name: 'Testdata', level: 1 }).waitFor();
+    assert.match(page.url(), /#\/packages\/payments\/testdata(?:\?.*)?$/,
+      'Package Testdata should be owned by the selected Package Explorer route');
+    assert.equal(await page.getByRole('combobox', { name: 'Testdata environment', exact: true }).count(), 1);
     await page.getByRole('table').filter({ hasText: 'account-001' }).waitFor();
     assert.equal(await page.locator('.att-testdata-table-scroll').last().innerText().then(text => text.includes('account-001')), true);
     await page.getByRole('button', { name: /generatedAccounts/ }).click();

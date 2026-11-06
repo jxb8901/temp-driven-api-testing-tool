@@ -41,7 +41,7 @@ describe('authenticated isolated report preview', () => {
     expect(policy).toContain("style-src 'unsafe-inline' 'nonce-STUDIO_NONCE'");
     expect(policy).toContain("style-src-attr 'unsafe-inline'");
     expect(document.querySelector('meta[http-equiv="Content-Security-Policy"]')?.getAttribute('content'))
-      .toContain("'sha256-ziKzIL4i4zPg6m2UvoYD8Jkb6Rj2S+c1hIS6rC1s4O0='");
+      .toContain("'sha256-5D0Nk+9R92sIUEfD470JAsKJSZlaian81v7W8d7dsCI='");
     expect(document.querySelector('style')).toBeNull();
     const styleData = document.querySelector<HTMLTemplateElement>('#att-report-style-data');
     expect(styleData).not.toBeNull();

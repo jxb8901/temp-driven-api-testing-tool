@@ -48,6 +48,8 @@
 .att-explorer-inspector { border-left: 1px solid var(--att-color-border, #cbd5e1); }
 .att-explorer-navigation > label,
 .att-explorer-inspector > label { display: grid; gap: var(--att-space-1, .25rem); margin-block: var(--att-space-2, .5rem); }
+.att-explorer-view-nav { display:flex; justify-content:flex-end; margin-block-end:var(--att-space-3,.75rem); }
+.att-explorer-view-nav button { border-color:var(--att-color-primary,#0866c6); }
 .att-explorer-page input,
 .att-explorer-page select,
 .att-explorer-page textarea,
@@ -85,6 +87,12 @@
 .att-explorer-total,
 .att-debug-status,
 .att-source-status { color: var(--att-color-muted, #526171); font-size: .875rem; }
+.att-source-file-references { margin-block-start:var(--att-space-3,.75rem); padding:.75rem; border:1px solid var(--att-color-border,#cbd5e1); border-radius:.5rem; }
+.att-source-file-references h3 { margin:.1rem 0 .5rem; font-size:.95rem; }
+.att-source-file-references ul { display:grid; gap:.45rem; margin:.4rem 0; padding-inline-start:1.2rem; }
+.att-source-file-references li { display:flex; flex-wrap:wrap; align-items:center; gap:.5rem; }
+.att-source-file-references code { overflow-wrap:anywhere; }
+.att-source-file-references span { color:var(--att-color-muted,#526171); font-size:.8rem; }
 
 .att-explorer-categories { display: flex; flex-wrap: wrap; gap: .35rem; margin-block: var(--att-space-3, .75rem); }
 .att-explorer-categories [aria-selected="true"] { color: var(--att-color-primary, #0866c6); border-color: var(--att-color-primary, #0866c6); box-shadow: inset 0 -2px var(--att-color-primary, #0866c6); font-weight: 650; }

@@ -210,7 +210,12 @@ export function RunPage({ packageId: initialPackage = '', initialTarget, initial
     {missingReplayFields.length>0&&<p role="note">These fields were not safely retained and need an explicit value before this RUN can start: {missingReplayFields.join(', ')}.</p>}
     <fieldset className="att-run-definition" disabled={busy||replayDraftLoading}><legend>Execution definition</legend>
       {initialTarget ? <p><strong>Package:</strong> {packageId}<br /><strong>Target:</strong> {initialTarget.type} · {initialTarget.resourceId}</p>
-        : <label>Package ID<input value={packageId} onChange={e => changed(() => setPackage(e.target.value))} /></label>}
+        : <label>Package ID<input value={packageId} disabled={Boolean(replaySourceJobId)} onChange={e => changed(() => {
+          setPackage(e.target.value); setEnvironment(''); setId(''); setInput('{}');
+          setSelection('{"all": true}'); setDebugForm(null); setValidationDiagnostics([]);
+          replayInputRef.current = undefined;
+        })} /></label>}
+      {replaySourceJobId && <p>Replay uses the source Job's Package. Start a new RUN to use a different Package.</p>}
       <label>Environment<select value={environment} onChange={e => { setEnvironmentNotice(''); changed(() => setEnvironment(e.target.value)); }} disabled={environmentState !== 'ready'}>
         <option value="">Package default</option>{environments.map(name => <option key={name} value={name}>{name}</option>)}
       </select></label>

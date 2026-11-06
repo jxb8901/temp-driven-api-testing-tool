@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react';
+import { useContext, useEffect, useState } from 'react';
+import { AppShellContext } from '../../AppShell';
 import { api, type SavedLoadScenario } from '../../api';
 import type { LoadDraftResponse, LoadFeatureProps, LoadJobsApi, PackageOption } from './types';
 import { LoadTemplateBuilder } from './LoadTemplateBuilder';
@@ -10,6 +11,7 @@ import { CodeEditor } from '../code/CodeEditor';
 export function SavedLoadScenarios({ onJobAccepted, onSchedule, enabled, editorApi, packages }: {
   onJobAccepted(jobId: string): void; onSchedule?: LoadFeatureProps['onSchedule']; enabled: boolean; editorApi: LoadJobsApi; packages: PackageOption[];
 }) {
+  const workspace = useContext(AppShellContext);
   const [items, setItems] = useState<SavedLoadScenario[]>([]);
   const [next, setNext] = useState<number | null>(null);
   const [message, setMessage] = useState('Loading saved scenarios…');
@@ -21,6 +23,7 @@ export function SavedLoadScenarios({ onJobAccepted, onSchedule, enabled, editorA
   const [environment, setEnvironment] = useState('');
   const [environments, setEnvironments] = useState<string[]>([]);
   const [draft, setDraft] = useState<LoadDraftResponse | null>(null);
+  useEffect(() => { workspace?.setWorkspaceEditorLock?.(Boolean(editor)); return () => workspace?.setWorkspaceEditorLock?.(false); }, [editor, workspace?.setWorkspaceEditorLock]);
   useEffect(() => {
     const controller = new AbortController(); setMessage('Loading saved scenarios…');
     api.listSavedLoadScenarios(0, controller.signal).then(page => {

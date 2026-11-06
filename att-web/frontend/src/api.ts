@@ -180,6 +180,10 @@ function resourcePath(identity: ResourceIdentity): string {
     + '/' + encodeURIComponent(identity.resourceId);
 }
 
+export function resourceSourceFilePath(identity: ResourceIdentity, referenceId: string, origin?: string): string {
+  return resourcePath(identity) + '/source-file' + queryString({ referenceId, origin });
+}
+
 export function resourceSourcePath(identity: ResourceIdentity): string {
   return resourcePath(identity) + '/source';
 }
@@ -421,7 +425,7 @@ export const api = {
     return request<SourceProjection>(resourceSourcePath(identity), { signal });
   },
   getResourceSourceFile(identity: ResourceIdentity, referenceId: string, signal?: AbortSignal, origin?: string): Promise<SourceProjection> {
-    return request<SourceProjection>(resourcePath(identity) + '/source-file' + queryString({ referenceId, origin }), { signal });
+    return request<SourceProjection>(resourceSourceFilePath(identity, referenceId, origin), { signal });
   },
   getPackageManifest(packageId: string, view: ManifestView, environment?: string, signal?: AbortSignal): Promise<ManifestProjection> {
     return request('packages/' + encodeURIComponent(packageId) + '/package-configuration/' + view + queryString({ environment }), { signal });
@@ -513,8 +517,8 @@ export const api = {
     if (input.principal) body.principal = input.principal;
     return postJson<AcceptedJob>('jobs/run', body, signal);
   },
-  async listSchedules(signal?: AbortSignal): Promise<ApiEnvelope<ScheduleDefinition>> {
-    const response = await request<ApiEnvelope<ScheduleDefinition>>(schedulesPath(), { signal });
+  async listSchedules(signal?: AbortSignal, filters: {packageId?: string; environment?: string; environmentDefault?: boolean} = {}): Promise<ApiEnvelope<ScheduleDefinition>> {
+    const response = await request<ApiEnvelope<ScheduleDefinition>>(schedulesPath() + queryString(filters), { signal });
     return { ...response, items: response.items.map(normalizeSchedule) };
   },
   getSchedule(id: string, signal?: AbortSignal): Promise<ScheduleDefinition> {

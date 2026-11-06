@@ -85,7 +85,7 @@ function ExplorerReference({ reference, onOpen }: { reference: ResourceReference
 
 export function ExplorerPage({ api, packageId, resourceRoute, environment,
   principalLabel = '', onResourceRouteChange, onJobAccepted, onPrincipalLabelChange, onOpenQuickLoad,
-  onRunTarget, onRunBatch, onScheduleDebug, onOpenConfigurationFile, registerUnsavedChanges }: ExplorerPageProps) {
+  onRunTarget, onRunBatch, onScheduleDebug, onOpenConfigurationFile, onOpenTestdata, registerUnsavedChanges }: ExplorerPageProps) {
   const initialListState = useRef(savedExplorerList(packageId)).current;
   const [query, setQuery] = useState(initialListState.query);
   const [typeFilter, setTypeFilter] = useState<ResourceSummary['type'] | 'all'>(initialListState.typeFilter);
@@ -441,6 +441,7 @@ export function ExplorerPage({ api, packageId, resourceRoute, environment,
 
     <div className={`att-explorer-workspace${identity ? ' has-selected-resource' : ' is-list-first'}${identity ? '' : ' att-query-workspace'}`}>
       <aside className="att-explorer-navigation" aria-label="Resource navigation" hidden={Boolean(identity)}>
+        {onOpenTestdata && <nav className="att-explorer-view-nav" aria-label="Package Explorer views"><button type="button" onClick={onOpenTestdata}>Testdata</button></nav>}
         <section className="att-query-filter-panel" aria-label="Resource filters">
           <h2>Resources</h2>
           <div className="att-query-filter-grid">

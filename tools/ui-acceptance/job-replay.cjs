@@ -78,7 +78,7 @@ async function main() {
       const path = decodeURIComponent(url.pathname.split('/api/v1/')[1] || '');
       if (path === 'jobs' || path === 'packages') broadRequests.push(path);
       const json = (body, status = 200) => route.fulfill({ status, json: body });
-      if (path === 'version') return json({ version: '4.2.8', apiVersion: '1', inlineLoadEnabled: true, loadSchedulingEnabled: true, unifiedRunVersion: 'att-execution/v1' });
+      if (path === 'version') return json({ version: '4.2.9', apiVersion: '1', inlineLoadEnabled: true, loadSchedulingEnabled: true, unifiedRunVersion: 'att-execution/v1' });
       if (path === 'packages') return json({ items: [{ packageId: 'payments', name: 'Payments' }] });
       if (path === 'packages/payments/configuration') return json({ view: 'declared', environments: [{ name: 'SIT', state:'active' }] });
       if (path === 'packages/payments/package-configuration/effective') return json({packageId:'payments',present:true,canEdit:false,manifestDigest:'b'.repeat(64),environment:url.searchParams.get('environment')||'SIT',environmentOrigin:url.searchParams.has('environment')?'request':'package'});
@@ -198,7 +198,7 @@ async function main() {
     const runStorage=await page.evaluate(()=>JSON.stringify({local:Object.keys(localStorage).map(key=>[key,localStorage.getItem(key)]),session:Object.keys(sessionStorage).map(key=>[key,sessionStorage.getItem(key)])}));
     for(const forbidden of ['requestId','arguments','scenario','password'])assert.ok(!runStorage.includes(forbidden),`Raw replay definition leaked to storage: ${forbidden}`);
     await page.getByLabel('Target ID').waitFor();assert.equal(await page.getByLabel('Target ID').inputValue(),'lookup-customer');
-    assert.equal(await page.getByLabel('Environment').inputValue(),'');
+    assert.equal(await page.locator('#main-content').getByLabel('Environment').inputValue(),'');
     await page.getByText('Resolved Environment: SIT',{exact:false}).waitFor();await page.getByText('Origin: Package Manifest',{exact:false}).waitFor();
     assert.equal(await page.getByLabel('Debug diagnostics').isChecked(),true);assert.equal(await page.getByLabel('Stop after the first failed Case').isChecked(),true);
     assert.equal(await page.locator('input[aria-label="limit value"]').inputValue(),'3');
@@ -223,7 +223,7 @@ async function main() {
     await page.waitForURL(url=>url.hash.startsWith('#/advanced-load/payments?'));
     await page.getByText('Job settings loaded. Edit the fields',{exact:false}).waitFor();
     assert.equal(new URLSearchParams(new URL(page.url()).hash.split('?')[1]||'').has('environment'),false,'Package-default LOAD replay leaves the environment to current Package resolution');
-    assert.equal(await page.getByLabel('Environment').inputValue(),'');
+    assert.equal(await page.locator('#main-content').getByLabel('Environment').inputValue(),'');
     await page.getByText('Resolved Environment: SIT',{exact:false}).waitFor();await page.getByText('Origin: Package Manifest',{exact:false}).waitFor();
     await page.getByLabel('Measured duration value').waitFor();
     assert.equal(await page.getByLabel('Measured duration value').inputValue(),'30');
@@ -317,7 +317,7 @@ async function main() {
     await page.waitForURL(url=>url.hash.startsWith('#/advanced-load/payments?'));
     await page.getByText('Job settings loaded. Edit the fields',{exact:false}).waitFor();
     assert.equal(new URLSearchParams(new URL(page.url()).hash.split('?')[1]||'').has('environment'),false);
-    assert.equal(await page.getByLabel('Environment').inputValue(),'');
+    assert.equal(await page.locator('#main-content').getByLabel('Environment').inputValue(),'');
     await page.getByText('Resolved Environment: SIT',{exact:false}).waitFor();await page.getByText('Origin: Package Manifest',{exact:false}).waitFor();
     await page.getByLabel('Measured duration value').waitFor();assert.equal(await page.getByLabel('Measured duration value').inputValue(),'30');
     await page.getByRole('button',{name:'Back to source Job'}).click();
@@ -380,7 +380,7 @@ async function main() {
     await page.getByRole('heading', { name: 'Job Details unavailable' }).waitFor();
     assert.equal(await page.locator('aside, nav, .app-header, footer').count(), 0);
     assert.deepEqual(errors, []); await context.close();
-    console.log('4.2.8 acceptance passed: RUN/LOAD replay and Schedule, History/List/Edit, standalone fixed-Job navigation, virtualized Events, viewport fill, mobile, reload and safe missing-Job state.');
+    console.log('4.2.9 acceptance passed: RUN/LOAD replay and Schedule, History/List/Edit, standalone fixed-Job navigation, virtualized Events, viewport fill, mobile, reload and safe missing-Job state.');
   } finally { await browser.close(); await stopFixture(fixture); }
 }
 main().catch(error => { console.error(error); process.exitCode = 1; });

@@ -1,6 +1,7 @@
+import { AppShellContext } from '../../AppShell';
 import { ScheduleExecutionEditor } from './ScheduleExecutionEditor';
 import { EnvironmentResolutionNotice } from '../explorer/EnvironmentResolutionNotice';
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
+import { useCallback, useContext, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { ApiError, type AsyncState, type PackageSummary } from '../../types';
 import { formatRoute, useNavigationGuard, type AppRoute } from '../../router';
 import { useCountdownNow } from '../../useCountdownNow';
@@ -205,10 +206,15 @@ function hasActiveJob(items: ScheduleOccurrence[]): boolean {
 
 export function ScheduledLoadPage({ api, packages, enabled, onOpenJob, initialDraft, onInitialDraftConsumed, onSaved, onCancel, route }: ScheduledLoadPageProps): React.JSX.Element {
   const navigation = useNavigationGuard();
+  const workspace = useContext(AppShellContext);
+  const [savedScope] = useState(() => { try { return JSON.parse(sessionStorage.getItem('att.schedules.scope') || '{}') as {mode?: string; packageId?: string; environment?: string}; } catch { return {}; } });
+  const [scope, setScope] = useState<'follow'|'all'|'custom'>(savedScope.mode === 'all' || savedScope.mode === 'custom' ? savedScope.mode : 'follow');
+  const [scopeEnvironment, setScopeEnvironment] = useState(savedScope.environment || '');
   const [localView, setLocalView] = useState<'list' | 'new' | 'edit' | 'history'>(route?.view || 'list');
   const view = route ? route.view || 'list' : localView;
   const editorOpen = view === 'new' || view === 'edit';
   const [executionEditor, setExecutionEditor] = useState<ScheduleDefinition | null>(null);
+  useEffect(() => { workspace?.setWorkspaceEditorLock?.(Boolean(executionEditor)); return () => workspace?.setWorkspaceEditorLock?.(false); }, [executionEditor, workspace?.setWorkspaceEditorLock]);
   const [discardRequested, setDiscardRequested] = useState(false);
   const releaseGuard = useRef<() => void>(() => {});
   const loadedRoute = useRef('');
@@ -226,15 +232,18 @@ export function ScheduledLoadPage({ api, packages, enabled, onOpenJob, initialDr
   const [validationRequestId, setValidationRequestId] = useState('');
   const [filter, setFilter] = useState('');
   const [stateFilter, setStateFilter] = useState<'all' | ScheduleState>('all');
-  const [packageFilter, setPackageFilter] = useState('');
+  const [packageFilter, setPackageFilter] = useState(savedScope.packageId || '');
+  const effectivePackage = scope === 'follow' ? workspace?.selectedPackage || '' : scope === 'custom' ? packageFilter : '';
+  const effectiveEnvironment = scope === 'follow' ? workspace?.selectedEnvironment || '' : scope === 'custom' ? scopeEnvironment : '';
+  useEffect(() => { try { sessionStorage.setItem('att.schedules.scope', JSON.stringify({mode: scope, packageId: packageFilter, environment: scopeEnvironment})); } catch { /* Keep current tab state. */ } }, [scope, packageFilter, scopeEnvironment]);
   const [executionFilter, setExecutionFilter] = useState('all');
   const [ownerFilter, setOwnerFilter] = useState('');
   const [occurrenceCopyStatus, setOccurrenceCopyStatus] = useState('');
-  const [draft, setDraft] = useState<ScheduleDraft>(() => createScheduleDraft());
+  const [draft, setDraft] = useState<ScheduleDraft>(() => { const value = createScheduleDraft(); value.packageId = workspace?.selectedPackage || ''; value.environment = workspace?.selectedEnvironment || ''; return value; });
   const [scenarioPreviewYaml, setScenarioPreviewYaml] = useState('');
   const [editingId, setEditingId] = useState('');
   const [editingNextRunAt, setEditingNextRunAt] = useState<string | undefined>(undefined);
-  const [baseline, setBaseline] = useState(() => JSON.stringify(createScheduleDraft()));
+  const [baseline, setBaseline] = useState(() => JSON.stringify(draft));
   const [preview, setPreview] = useState<PreviewState>({ status: 'idle', signature: '' });
   const [saving, setSaving] = useState(false);
   const [pendingConfirmation, setPendingConfirmation] = useState<Confirmation | null>(null);
@@ -275,7 +284,7 @@ export function ScheduledLoadPage({ api, packages, enabled, onOpenJob, initialDr
     setLoadState('loading');
     setLoadError('');
     try {
-      const response = await api.listSchedules(controller.signal);
+      const response = await api.listSchedules(controller.signal, view === 'list' ? {packageId: effectivePackage || undefined, environment: effectiveEnvironment || undefined, environmentDefault: scope === 'follow' && Boolean(effectivePackage) && !effectiveEnvironment || undefined} : {});
       if (controller.signal.aborted || sequence !== listSequence.current) return;
       setSchedules(Array.isArray(response.items) ? response.items : []);
       setLoadState('ready');
@@ -286,16 +295,13 @@ export function ScheduledLoadPage({ api, packages, enabled, onOpenJob, initialDr
       setLoadError(errorMessage(error, 'Loading schedules'));
       setLoadState('error');
     }
-  }, [api, enabled]);
+  }, [api, enabled, effectivePackage, effectiveEnvironment, scope, view]);
 
   useEffect(() => {
     void loadSchedules();
-    return () => {
-      listController.current?.abort();
-      historyController.current?.abort();
-      previewController.current?.abort();
-    };
+    return () => { listController.current?.abort(); };
   }, [loadSchedules]);
+  useEffect(() => () => { historyController.current?.abort(); previewController.current?.abort(); }, []);
 
   useEffect(() => {
     const release = navigation.registerUnsavedChanges(editorOpen && dirty, 'Schedules changes');
@@ -447,12 +453,14 @@ export function ScheduledLoadPage({ api, packages, enabled, onOpenJob, initialDr
       const matchesText = !query || [schedule.name, schedule.description, schedule.packageId, schedule.environment, schedule.createdBy, jobSummary(schedule), schedule.cron]
         .some(value => String(value || '').toLocaleLowerCase().includes(query));
       const matchesState = stateFilter === 'all' || scheduleState(schedule) === stateFilter;
-      return matchesText && matchesState && (executionFilter === 'all' || executionFilter === schedule.executionType) && (!packageFilter || schedule.packageId === packageFilter) && (!ownerFilter || schedule.createdBy === ownerFilter);
+      return matchesText && matchesState && (executionFilter === 'all' || executionFilter === schedule.executionType) && (!ownerFilter || schedule.createdBy === ownerFilter);
     });
-  }, [executionFilter, filter, ownerFilter, packageFilter, schedules, stateFilter]);
+  }, [executionFilter, filter, ownerFilter, schedules, stateFilter]);
 
   function updateDraft<K extends keyof ScheduleDraft>(key: K, value: ScheduleDraft[K]) {
-    setDraft(current => ({ ...current, [key]: value }));
+    setDraft(current => key === 'packageId' && current.packageId !== value
+      ? { ...current, [key]: value, environment: '' }
+      : { ...current, [key]: value });
     setMutationError('');
     setValidationDiagnostics([]); setValidationRequestId('');
     setNotice('');
@@ -460,6 +468,8 @@ export function ScheduledLoadPage({ api, packages, enabled, onOpenJob, initialDr
 
   function resetForm() {
     const fresh = createScheduleDraft();
+    fresh.packageId = workspace?.selectedPackage || '';
+    fresh.environment = workspace?.selectedEnvironment || '';
     setDraft(fresh);
     setBaseline(JSON.stringify(fresh));
     setEditingId('');
@@ -603,7 +613,7 @@ export function ScheduledLoadPage({ api, packages, enabled, onOpenJob, initialDr
   const packageItems = packages.status === 'ready' ? packages.data : [];
   const missingValidatedIntent = Boolean(route?.view === 'new' && route.intent === 'validated' && !initialDraft && !validatedIntentReady);
   const clearScheduleFilters = () => {
-    setFilter(''); setStateFilter('all'); setPackageFilter(''); setExecutionFilter('all'); setOwnerFilter('');
+    setFilter(''); setStateFilter('all'); setPackageFilter(''); setScopeEnvironment(''); setScope('follow'); setExecutionFilter('all'); setOwnerFilter('');
   };
   const copyOccurrenceId = async (occurrenceId: string) => {
     try {
@@ -667,12 +677,14 @@ export function ScheduledLoadPage({ api, packages, enabled, onOpenJob, initialDr
             <option value="all">All schedules</option><option value="enabled">Enabled</option><option value="paused">Paused</option><option value="completed">Completed</option>
           </select>
         </label>
+        <label>List scope<select aria-label="Schedule list scope" value={scope} onChange={event => setScope(event.currentTarget.value as 'follow'|'all'|'custom')}><option value="follow">Follow Workspace</option><option value="all">All</option><option value="custom">Custom</option></select></label>
         <label>Package
-          <select value={packageFilter} onChange={event => setPackageFilter(event.currentTarget.value)}>
+          <select value={effectivePackage} onChange={event => { const nextPackage = event.currentTarget.value; setPackageFilter(nextPackage); if (nextPackage !== effectivePackage) setScopeEnvironment(''); setScope('custom'); }}>
             <option value="">All packages</option>
-            {Array.from(new Set(schedules.map(item => item.packageId))).sort().map(packageId => <option key={packageId} value={packageId}>{packageId}</option>)}
+            {Array.from(new Set([...schedules.map(item => item.packageId), ...(packages.status === 'ready' ? packages.data.map(item => item.packageId) : []), ...(effectivePackage ? [effectivePackage] : [])])).sort().map(packageId => <option key={packageId} value={packageId}>{packageId}</option>)}
           </select>
         </label>
+        <label>Environment<input aria-label="Schedule Environment filter" value={effectiveEnvironment} onChange={event => {setPackageFilter(effectivePackage);setScopeEnvironment(event.currentTarget.value);setScope('custom');}} placeholder="All environments" /></label>
         {schedules.some(item => item.createdBy) && <label>Owner
           <select value={ownerFilter} onChange={event => setOwnerFilter(event.currentTarget.value)}>
             <option value="">All owners</option>
