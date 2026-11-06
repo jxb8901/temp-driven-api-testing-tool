@@ -44,6 +44,48 @@ class AuthenticationIntegrationTest {
         restore(previousServerConfig);
     }
 
+    @Test void trustedPackageRegistryHotReloadsWhileTomcatServesAndRetainsLastKnownGood() throws Exception {
+        previousAttHome=System.getProperty("att.home");Path home=createLocalRuntime();System.setProperty("att.home",home.toString());
+        Path packages=Files.createDirectories(temp.resolve("registry-packages"));
+        Path first=Files.createDirectory(packages.resolve("first"));
+        Path second=Files.createDirectory(packages.resolve("second"));
+        Path repointed=Files.createDirectory(packages.resolve("repointed"));
+        Files.createDirectory(packages.resolve("unregistered"));
+        Path config=Files.writeString(temp.resolve("registry-server.yaml"),registryServerYaml(temp.resolve("registry-data"),packages,Map.of("alpha",first)));
+        System.setProperty("att.server.config",config.toString());
+        Path users=Files.writeString(temp.resolve("registry-users.xml"),"<tomcat-users></tomcat-users>");
+        Tomcat tomcat=start(users,appDirectory("registry-hot-reload"),true);
+        try {
+            int port=tomcat.getConnector().getLocalPort();
+            JsonNode initial=waitForRegistry(port,node->node.path("status").asText().equals("Ready")&&node.path("packages").size()==1);
+            long initialGeneration=initial.path("generation").asLong();String initialRevision=initial.path("revision").asText();
+            assertEquals(List.of("alpha"),registryIds(initial));
+            assertTrue(getJson(port,"/att/api/v1/packages",null).toString().contains("alpha"));
+
+            Files.writeString(config,registryServerYaml(temp.resolve("registry-data"),packages,Map.of("alpha",first,"beta",second)));
+            JsonNode added=waitForRegistry(port,node->node.path("status").asText().equals("Ready")&&registryIds(node).equals(List.of("alpha","beta")));
+            assertEquals(initialGeneration+1,added.path("generation").asLong());
+            assertNotEquals(initialRevision,added.path("revision").asText());
+            assertEquals(200,get(port,"/att/api/v1/health",null),"Tomcat continues serving throughout registry reload");
+            assertEquals(404,get(port,"/att/api/v1/packages/unregistered",null),"An unregistered directory remains invisible");
+
+            Path candidate=temp.resolve("registry-server.next.yaml");
+            Files.writeString(candidate,registryServerYaml(temp.resolve("registry-data"),packages,Map.of("alpha",repointed)));
+            Files.move(candidate,config,StandardCopyOption.ATOMIC_MOVE,StandardCopyOption.REPLACE_EXISTING);
+            JsonNode changed=waitForRegistry(port,node->node.path("status").asText().equals("Ready")&&registryIds(node).equals(List.of("alpha"))
+                    &&node.path("generation").asLong()==initialGeneration+2);
+            assertNotEquals(added.path("revision").asText(),changed.path("revision").asText());
+
+            String lastKnownGood=changed.path("revision").asText();
+            Files.writeString(config,"server: [partial");
+            JsonNode invalid=waitForRegistry(port,node->node.path("status").asText().equals("Invalid"));
+            assertEquals(lastKnownGood,invalid.path("revision").asText());
+            assertEquals(List.of("alpha"),registryIds(invalid));
+            assertFalse(invalid.toString().contains(temp.toString()),"Registry status must not leak server paths");
+            assertEquals(200,get(port,"/att/api/v1/health",null));
+        } finally {tomcat.stop();tomcat.destroy();restore(previousServerConfig);}
+    }
+
     @Test void packageManifestHttpPublicationEnforcesCsrfOwnerRevocationAndConflict() throws Exception {
         previousAttHome=System.getProperty("att.home");Path home=createLocalRuntime();System.setProperty("att.home",home.toString());
         Path packages=Files.createDirectories(temp.resolve("manifest-packages"));Path pkg=Files.createDirectories(packages.resolve("business-folder"));
@@ -246,7 +288,7 @@ class AuthenticationIntegrationTest {
             assertEquals(200,userMonitoring.statusCode(),userMonitoring.body());
             JsonNode monitoring=ServerRuntime.JSON.readTree(userMonitoring.body());
             assertEquals("att-monitoring/v1",monitoring.path("schemaVersion").asText());
-            assertEquals("4.2.9",monitoring.path("health").path("version").asText());
+            assertEquals("4.3.0",monitoring.path("health").path("version").asText());
             assertTrue(monitoring.path("workers").path("maxConcurrent").isIntegralNumber());
             assertTrue(monitoring.path("workers").path("activeLoadJobs").isIntegralNumber());
             assertTrue(monitoring.path("http").path("successfulRequests").isIntegralNumber());
@@ -586,7 +628,17 @@ class AuthenticationIntegrationTest {
             assertEquals(200,request(port,null));assertEquals(200,get(port,"/att/ui/index.html",null));
             assertEquals(200,get(port,"/att/ui/app.js",null));
             assertEquals(200,get(port,"/att/api/v1/health",null));
-            assertEquals("4.2.9",getJson(port,"/att/api/v1/version",null).path("version").asText());
+            assertEquals("4.3.0",getJson(port,"/att/api/v1/version",null).path("version").asText());
+            JsonNode registry=getJson(port,"/att/api/v1/registry",null);
+            assertEquals("att-package-registry/v1",registry.path("schemaVersion").asText());
+            assertEquals("Ready",registry.path("status").asText());
+            assertTrue(registry.path("generation").asLong()>0);
+            assertFalse(registry.toString().contains(temp.toString()),"Registry responses expose logical IDs only");
+            JsonNode scope=getJson(port,"/att/api/v1/packages/debug/scope",null);
+            assertEquals("att-source-scope/v1",scope.path("schemaVersion").asText());
+            for(String revision:List.of("registryRevision","packageSourceRevision","packageManifestRevision","centralConfigSourceRevision",
+                    "activeEffectiveConfigRevision","embeddedEngineSchemaRevision"))assertTrue(scope.path(revision).asText().matches("[a-f0-9]{64}"),revision);
+            assertFalse(scope.toString().contains(temp.toString()),"Source scope responses must not reveal paths");
             assertEquals("debug",getJson(port,"/att/api/v1/packages/debug",null).path("packageId").asText());
             JsonNode resources=getJson(port,"/att/api/v1/packages/debug/resources?type=template",null);
             String resourceId=resources.path("items").get(0).path("resourceId").asText();
@@ -933,6 +985,22 @@ class AuthenticationIntegrationTest {
         HttpURLConnection connection=(HttpURLConnection)new URL("http://127.0.0.1:"+port+uri).openConnection();connection.setConnectTimeout(5000);connection.setReadTimeout(30000);
         if(authorization!=null)connection.setRequestProperty("Authorization",authorization);
         assertEquals(200,connection.getResponseCode());try{return ServerRuntime.JSON.readTree(connection.getInputStream());}finally{connection.disconnect();}
+    }
+    private String registryServerYaml(Path data,Path allowedRoot,Map<String,Path> entries) {
+        StringBuilder yaml=new StringBuilder("server:\n  dataDir: ").append(yaml(data)).append("\n  authenticationRequired: false\n")
+                .append("  authorization:\n    allowAnonymousOperations: true\nworkers: {}\npackages:\n  allowedRoots:\n    - ")
+                .append(yaml(allowedRoot)).append("\n  entries:\n");
+        new java.util.TreeMap<>(entries).forEach((id,path)->yaml.append("    ").append(id).append(": ").append(yaml(path)).append('\n'));
+        return yaml.toString();
+    }
+    private static List<String> registryIds(JsonNode registry) {
+        List<String> result=new ArrayList<>();for(JsonNode item:registry.path("packages"))result.add(item.path("packageId").asText());return result;
+    }
+    private static JsonNode waitForRegistry(int port,java.util.function.Predicate<JsonNode> condition)throws Exception {
+        long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(8);JsonNode registry=getJson(port,"/att/api/v1/registry",null);
+        while(!condition.test(registry)&&System.nanoTime()<deadline) {Thread.sleep(100);registry=getJson(port,"/att/api/v1/registry",null);}
+        assertTrue(condition.test(registry),"Registry did not converge before timeout: "+registry);
+        return registry;
     }
     private static JsonNode postJson(int port,String uri,String authorization,JsonNode body)throws Exception {
         return postJson(port,uri,authorization,body,201);
