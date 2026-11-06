@@ -89,12 +89,16 @@ class AuthenticationIntegrationTest {
     @Test void packageManifestHttpPublicationEnforcesCsrfOwnerRevocationAndConflict() throws Exception {
         previousAttHome=System.getProperty("att.home");Path home=createLocalRuntime();System.setProperty("att.home",home.toString());
         Path packages=Files.createDirectories(temp.resolve("manifest-packages"));Path pkg=Files.createDirectories(packages.resolve("business-folder"));
+        Path adminPackage=Files.createDirectories(packages.resolve("admin-business"));
         Files.createDirectories(pkg.resolve("templates"));Files.createDirectories(pkg.resolve("testcase"));
-        String original="schemaVersion: att-package/v1\ndefaultEnvironment: SIT\n";
+        Files.createDirectories(adminPackage.resolve("templates"));Files.createDirectories(adminPackage.resolve("testcase"));
+        String original="# keep this comment and authored ordering\nschemaVersion: att-package/v1\ndefaultEnvironment: SIT\n";
         Files.writeString(pkg.resolve("package.yaml"),original);
+        Files.writeString(adminPackage.resolve("package.yaml"),original);
         Path data=temp.resolve("manifest-data");Path config=Files.writeString(temp.resolve("manifest-server.yaml"),
-                "server:\n  dataDir: "+yaml(data)+"\n  auth: {mode: local}\n  security: {checkCrossOrigin: true}\n"
-                +"  packageConfiguration: {sourceEditingEnabled: true}\nworkers: {}\npackages:\n  allowedRoots: ["+yaml(packages)+"]\n  entries: {owner: "+yaml(pkg)+"}\n");
+                "server:\n  dataDir: "+yaml(data)+"\n  auth: {mode: local}\n  centralConfigurationEditingEnabled: true\n  security: {checkCrossOrigin: true}\n"
+                +"  packageConfiguration: {sourceEditingEnabled: true}\n  inspection: {redaction: {sensitiveFieldPatterns: [\"^opaqueConfigValue$\"]}}\n"
+                +"workers: {}\npackages:\n  allowedRoots: ["+yaml(packages)+"]\n  entries: {owner: "+yaml(pkg)+", admin: "+yaml(adminPackage)+"}\n");
         System.setProperty("att.server.config",config.toString());
         Path users=Files.writeString(temp.resolve("manifest-users.xml"),"<tomcat-users></tomcat-users>");
         Tomcat tomcat=start(users,appDirectory("manifest-http"));
@@ -114,6 +118,51 @@ class AuthenticationIntegrationTest {
             HttpResponse<String> source=sendWithCookie(client,port,"GET",base+"/source",owner.cookie,null,null,null);
             assertEquals(200,source.statusCode(),source.body());
             String digest=ServerRuntime.JSON.readTree(source.body()).path("manifestDigest").asText();assertTrue(digest.matches("[a-f0-9]{64}"));
+            String rawPath="/att/api/v1/packages/owner/authoring-source?type=manifest";
+            HttpResponse<String> raw=sendWithCookie(client,port,"GET",rawPath,owner.cookie,null,null,null);
+            assertEquals(200,raw.statusCode(),raw.body());assertEquals(original,ServerRuntime.JSON.readTree(raw.body()).path("text").asText());
+            assertEquals(ServerRuntime.JSON.readTree(raw.body()).path("sourceEtag").asText(),raw.headers().firstValue("ETag").orElseThrow());
+            assertEquals("private, no-store",raw.headers().firstValue("Cache-Control").orElseThrow());
+            assertEquals(403,sendWithCookie(client,port,"GET",rawPath,other.cookie,null,null,null).statusCode());
+            assertEquals(403,sendWithCookie(client,port,"GET",rawPath,admin.cookie,null,null,null).statusCode(),"ADMIN does not receive Package USER or owner access");
+            assertEquals(403,sendWithCookie(client,port,"GET","/att/api/v1/packages/admin/authoring-source?type=manifest",admin.cookie,null,null,null).statusCode(),
+                    "A matching ADMIN login remains outside Package USER owner permissions");
+            assertEquals(403,sendWithCookie(client,port,"POST","/att/api/v1/jobs/run",admin.cookie,origin,admin.csrf,"{}").statusCode(),
+                    "A local ADMIN does not acquire RUN permission from being active");
+            assertEquals(403,sendWithCookie(client,port,"POST","/att/api/v1/jobs/load",admin.cookie,origin,admin.csrf,"{}").statusCode(),
+                    "A local ADMIN does not acquire LOAD permission from being active");
+            assertEquals(202,sendWithCookie(client,port,"POST","/att/api/v1/jobs/run",other.cookie,origin,other.csrf,
+                    "{\"packageId\":\"owner\",\"all\":true}").statusCode(),
+                    "Another active USER retains operational RUN rights for the registered Package");
+            assertEquals(401,send(client,port,"GET",rawPath,null,null,null).statusCode());
+            assertEquals(404,sendWithCookie(client,port,"GET",rawPath+"&redacted=false",owner.cookie,null,null,null).statusCode());
+            assertEquals(200,sendWithCookie(client,port,"GET","/att/api/v1/configuration/declared",admin.cookie,null,null,null).statusCode(),
+                    "ADMIN may inspect the safe Central Runtime Config projection");
+            assertEquals(403,sendWithCookie(client,port,"GET","/att/api/v1/configuration/authoring-source?path=config%2Fconfig.yaml",owner.cookie,null,null,null).statusCode(),
+                    "Package owners do not receive Central Runtime Config authoring access");
+            String centralPath="/att/api/v1/configuration/authoring-source?path=config%2Fconfig.yaml";
+            Path centralSource=home.resolve("config/config.yaml");String centralText=Files.readString(centralSource);
+            HttpResponse<String> central=sendWithCookie(client,port,"GET",centralPath,admin.cookie,null,null,null);
+            assertEquals(200,central.statusCode(),central.body());
+            assertEquals(centralText,ServerRuntime.JSON.readTree(central.body()).path("text").asText());
+            assertEquals("private, no-store",central.headers().firstValue("Cache-Control").orElseThrow());
+            List<String> embeddedProtectedRecords=List.of(
+                    "schemaVersion: att-package/v1\npayload: |\n  classification: secret\n  value: route-block-canary\n",
+                    "schemaVersion: att-package/v1\npayload: >\n  classification: secret\n  value: route-folded-canary\n",
+                    "schemaVersion: att-package/v1\npayload: |\n  <payload>{&quot;classification&quot;:&quot;secret&quot;,&quot;value&quot;:&quot;route-xml-text-canary&quot;}</payload>\n",
+                    "schemaVersion: att-package/v1\npayload: |\n  <payload value=\"{&quot;classification&quot;:&quot;secret&quot;,&quot;value&quot;:&quot;route-xml-attribute-canary&quot;}\"/>\n",
+                    "schemaVersion: att-package/v1\npayload: |\n  <payload><![CDATA[{\"classification\":\"secret\",\"value\":\"route-xml-cdata-canary\"}]]></payload>\n",
+                    "schemaVersion: att-package/v1\npayload: |\n  records:\n    opaqueConfigValue: route-configured-canary\n",
+                    "schemaVersion: att-package/v1\npayload: \"{\\\"classification\\\":\\\"secret\\\",\\\"value\\\":\\\"route-escaped-canary\\\"}\"\n");
+            for(String embedded:embeddedProtectedRecords) {
+                Files.writeString(pkg.resolve("package.yaml"),embedded);
+                assertEquals(404,sendWithCookie(client,port,"GET",rawPath,owner.cookie,null,null,null).statusCode(),
+                        "The owner-only Package source route must withhold protected embedded scalar content");
+                Files.writeString(centralSource,embedded);
+                assertEquals(404,sendWithCookie(client,port,"GET",centralPath,admin.cookie,null,null,null).statusCode(),
+                        "The ADMIN-only Central source route must withhold protected embedded scalar content");
+            }
+            Files.writeString(pkg.resolve("package.yaml"),original);Files.writeString(centralSource,centralText);
             String candidate="schemaVersion: att-package/v1\ndefaultEnvironment: SIT\ndefaults: {timeoutMs: 12000}\n";
             String body=ServerRuntime.JSON.writeValueAsString(Map.of("source",candidate,"expectedManifestDigest",digest));
             assertEquals(403,sendWithCookie(client,port,"POST",base+"/drafts",owner.cookie,origin,null,body).statusCode());

@@ -58,6 +58,9 @@ public final class ApiServlet extends HttpServlet {
     }
     @Override protected void doGet(HttpServletRequest req,HttpServletResponse res) throws IOException {
         String path=path(req);String requestId=requestId(req,res);
+        if("/configuration/authoring-source".equals(path)||path.matches("/packages/[^/]+/authoring-source")) {
+            res.setHeader("Cache-Control","private, no-store");res.setHeader("X-Content-Type-Options","nosniff");
+        }
         try {
             if(path.startsWith("/auth/")){authGet(req,res,path,requestId);return;}
             if("/health".equals(path)){json(res,200,Map.of("status","UP","version",ServerBuildInfo.PRODUCT,"apiVersion",ServerApi.VERSION,"requestId",requestId));return;}
@@ -82,8 +85,12 @@ public final class ApiServlet extends HttpServlet {
                 res.setHeader("Cache-Control","no-store");json(res,200,runtime.monitoringJobJournal(id));return;
             }
             if("/metrics".equals(path)){if(!requireSystemAdmin(req,res,requestId))return;Map<String,Object> metrics=runtime.counts();metrics.put("requestId",requestId);json(res,200,metrics);return;}
-            if(!requireOperator(req,res,requestId))return;
+            if("/configuration/authoring-source".equals(path)) {centralAuthoringSourceGet(req,res,requestId);return;}
+            if(path.startsWith("/configuration/")||"/configuration".equals(path)) {
+                if(!requireSharedConfigurationRead(req,res,requestId))return;
+            } else if(!requireOperator(req,res,requestId))return;
             if(savedLoadScenarioPath(path)){savedLoadScenarioAction(req,res,path,requestId,principal);return;}
+            if(path.matches("/packages/[^/]+/authoring-source")) {packageAuthoringSourceGet(req,res,path,requestId);return;}
             if(path.matches("/packages/[^/]+/load-templates")) {
                 Map<String,Object> response=runtime.inspectLoadTemplates(segment(path,2),req.getParameter("query"),
                         parseOffset(req.getParameter("offset")),parseLimit(req.getParameter("limit")),principal);
@@ -92,7 +99,7 @@ public final class ApiServlet extends HttpServlet {
             if(resourceRequest){resourceGet(req,res,path,requestId,principal);return;}
             if(loadCatalogRequest){loadCatalogGet(req,res,path,requestId,principal);return;}
             if(path.matches("/packages/[^/]+/package-configuration(?:/(?:declared|effective|compare|source|history))?")) {
-                manifestGet(req,res,path,requestId,principal);return;
+                manifestGet(req,res,path,requestId,principalExact(req));return;
             }
             if("/registry".equals(path)) {
                 Map<String,Object> response=runtime.packageRegistryView();response.put("requestId",requestId);
@@ -113,8 +120,8 @@ public final class ApiServlet extends HttpServlet {
                 else {DebugDraft response=ServerRuntime.JSON.convertValue(runtime.getDebugDraft(draftId,principal),DebugDraft.class);response.requestId=requestId;json(res,200,response);}
                 return;
             }
-            if("/packages".equals(path)){json(res,200,Map.of("items",runtime.packages(principal),"requestId",requestId));return;}
-            if(path.startsWith("/packages/")){String id=segment(path,2);Map<String,Object> view=runtime.packageView(id,principal);view.put("requestId",requestId);json(res,200,view);return;}
+            if("/packages".equals(path)){json(res,200,Map.of("items",runtime.packages(principalExact(req)),"requestId",requestId));return;}
+            if(path.startsWith("/packages/")){String id=segment(path,2);Map<String,Object> view=runtime.packageView(id,principalExact(req));view.put("requestId",requestId);json(res,200,view);return;}
             if("/jobs".equals(path)){
                 Map<String,String> parameters=new LinkedHashMap<>();
                 for(String key:List.of("offset","limit","principal","principalMode","submissionSource","executionPrincipal","executionPrincipalMode","executionPrincipalExact","scheduleOwner","scheduleOwnerMode","scheduleOwnerExact","triggeredBy","triggeredByMode","triggeredByExact","packageId","environment","executionType","status","from","to","search","sort","deletion","pinnedOnly","groupBy")) {
@@ -198,7 +205,7 @@ public final class ApiServlet extends HttpServlet {
         if(!requireOperator(req,res,requestId))return;
         if(savedLoadScenarioPath(path)){savedLoadScenarioAction(req,res,path,requestId,authorizationPrincipal);return;}
         if(path.matches("/packages/[^/]+/package-configuration/(?:drafts(?:/[^/]+/(?:validate|review|publish|discard))?|rollback)")) {
-            manifestPost(req,res,path,requestId,authorizationPrincipal);return;
+            manifestPost(req,res,path,requestId,principalExact(req));return;
         }
         if(path.matches("/jobs/[^/]+/artifacts/retry")){if(!checkOrigin(req,res,requestId,false))return;try{String id=segment(path,2);runtime.requireJobOwner(id,authorizationPrincipal);runtime.retryArtifactArchive(id);json(res,202,Map.of("archiveStatus","PENDING","requestId",requestId));return;}catch(ServerRuntime.NotFoundException missing){error(res,404,"ATT-SERVER-NOT-FOUND","API resource was not found",requestId);return;}catch(IllegalArgumentException invalid){error(res,409,"ATT-SERVER-ARCHIVE-NOT-READY",safeDetail(invalid),requestId);return;}catch(Exception failure){error(res,500,"ATT-SERVER-REQUEST-FAILED","The archive retry could not be scheduled",requestId);return;}}
         if("/jobs/delete".equals(path)||"/jobs/pin".equals(path)||path.matches("/jobs/[^/]+/(pin|delete)")) {
@@ -340,16 +347,12 @@ public final class ApiServlet extends HttpServlet {
                 if(login==null){error(res,401,"ATT-SERVER-AUTHENTICATION-REQUIRED","Authentication is required",requestId);return;}
                 boolean accountManage=systemAdminCapability(req,login);
                 boolean operate=operatorCapability(req,login);
-                boolean configurationAdmin;
-                if(runtime.auth.local(runtime.config)) {
-                    Map<String,Object> user=runtime.store.authUser(login);
-                    configurationAdmin=user!=null&&"ADMIN".equals(user.get("role"));
-                } else configurationAdmin=req.isUserInRole(runtime.config.inspection.configurationAdminRole);
+                boolean configurationAdmin=systemSettingsWriteCapability(req,login);
                 res.setHeader("Cache-Control","no-store");
                 @SuppressWarnings("unchecked") Map<String,String> session=(Map<String,String>)req.getAttribute(AuthService.SESSION);
                 String sessionKey=session==null?(req.getSession(false)==null?"container":req.getSession(false).getId()):session.getOrDefault("tokenHash","");
                 String cacheContext=runtime.inspectionCacheToken(java.util.Arrays.asList(login,configurationAdmin,operate,accountManage,sessionKey,runtime.config.inspection));
-                Map<String,Object> capabilities=new LinkedHashMap<>();capabilities.put("operate",operate);capabilities.put("accountManage",accountManage);capabilities.put("systemSettingsWrite",accountManage);capabilities.put("configurationAdmin",configurationAdmin);
+                Map<String,Object> capabilities=new LinkedHashMap<>();capabilities.put("operate",operate);capabilities.put("accountManage",accountManage);capabilities.put("systemSettingsWrite",configurationAdmin);capabilities.put("configurationAdmin",configurationAdmin);
                 json(res,200,Map.of("capabilities",capabilities,"configurationAdmin",configurationAdmin,"inspectionCacheContext",cacheContext,"requestId",requestId));return;
             }
             if(!runtime.auth.local(runtime.config)){error(res,404,"ATT-SERVER-NOT-FOUND","Authentication resource was not found",requestId);return;}
@@ -459,6 +462,28 @@ public final class ApiServlet extends HttpServlet {
             error(res,403,"ATT-SERVER-OPERATIONS-REQUIRED","An active USER account with operational access is required",requestId);return false;
         } catch(Exception failure){error(res,500,"ATT-SERVER-REQUEST-FAILED","The authorization request could not be completed",requestId);return false;}
     }
+    private boolean requireSystemSettingsWrite(HttpServletRequest req,HttpServletResponse res,String requestId)throws IOException {
+        String login=principalExact(req);
+        if(login==null||RequestIdentity.ANONYMOUS.equals(login)){
+            error(res,401,"ATT-SERVER-AUTHENTICATION-REQUIRED","Authentication is required",requestId);return false;
+        }
+        try {
+            if(systemSettingsWriteCapability(req,login))return true;
+            error(res,403,"ATT-SERVER-FORBIDDEN","SYSTEM_SETTINGS_WRITE is required",requestId);return false;
+        } catch(Exception failure){error(res,500,"ATT-SERVER-REQUEST-FAILED","The authorization request could not be completed",requestId);return false;}
+    }
+    private boolean requireSharedConfigurationRead(HttpServletRequest req,HttpServletResponse res,String requestId)throws IOException {
+        String login=principal(req);
+        if(login==null){error(res,401,"ATT-SERVER-AUTHENTICATION-REQUIRED","Authentication is required",requestId);return false;}
+        try {
+            if(operatorCapability(req,login)||systemSettingsWriteCapability(req,login))return true;
+            error(res,403,"ATT-SERVER-FORBIDDEN","Configuration inspection access is required",requestId);return false;
+        } catch(Exception failure){error(res,500,"ATT-SERVER-REQUEST-FAILED","The authorization request could not be completed",requestId);return false;}
+    }
+    private boolean systemSettingsWriteCapability(HttpServletRequest req,String login)throws Exception {
+        boolean admin=login!=null&&!RequestIdentity.ANONYMOUS.equals(login)&&systemAdminCapability(req,login);
+        return SourceAuthorizationPolicy.canWriteSystemSettings(runtime.config.authenticationRequired,admin);
+    }
     private boolean systemAdminCapability(HttpServletRequest req,String login)throws Exception {
         if(runtime.auth.local(runtime.config)) {
             Map<String,Object> user=runtime.store.authUser(login);
@@ -467,7 +492,7 @@ public final class ApiServlet extends HttpServlet {
         return !RequestIdentity.ANONYMOUS.equals(login)&&req.isUserInRole(runtime.config.authorization.adminRole);
     }
     private boolean operatorCapability(HttpServletRequest req,String login)throws Exception {
-        if(runtime.auth.local(runtime.config))return runtime.store.isActiveUser(login);
+        if(runtime.auth.local(runtime.config))return runtime.isActiveUserOperator(login);
         if(RequestIdentity.ANONYMOUS.equals(login))return !runtime.config.authenticationRequired&&runtime.config.authorization.allowAnonymousOperations;
         return !req.isUserInRole(runtime.config.authorization.adminRole)&&req.isUserInRole(runtime.config.authorization.userRole);
     }
@@ -813,20 +838,70 @@ public final class ApiServlet extends HttpServlet {
           catch(IllegalArgumentException e){throw e;}
           catch(Exception e){throw new IOException(e);}
     }
+    private void packageAuthoringSourceGet(HttpServletRequest req,HttpServletResponse res,String path,String requestId)throws IOException {
+        res.setHeader("Cache-Control","private, no-store");res.setHeader("X-Content-Type-Options","nosniff");
+        String login=principalExact(req);
+        if(login==null){error(res,401,"ATT-SERVER-AUTHENTICATION-REQUIRED","Authentication is required",requestId);return;}
+        if(req.getParameter("redacted")!=null){error(res,404,"ATT-SERVER-NOT-FOUND","API resource was not found",requestId);return;}
+        String packageId=segment(path,2),kind=req.getParameter("type"),resourceType=req.getParameter("resourceType");
+        String resourceId=req.getParameter("resourceId"),sourcePath=req.getParameter("path"),origin=req.getParameter("origin"),referenceId=req.getParameter("referenceId");
+        try {
+            // Resolve registration first so unknown ids stay 404; content access itself remains owner-only.
+            runtime.packageView(packageId,principal(req));
+            if(!runtime.canEditPackageContent(packageId,login)) {
+                error(res,403,"ATT-PACKAGE-SOURCE-DENIED","Package source editing is not authorized",requestId);return;
+            }
+            Map<String,Object> result=runtime.withPackageSourceAuthority(login,
+                    id -> id.equals(principalExact(req))&&operatorCapability(req,id),() -> switch(kind==null?"":kind) {
+                        case "manifest" -> runtime.inspectAuthoringPackageSource(packageId,"manifest",null,null,null,null,null,null,login);
+                        case "resource" -> runtime.inspectAuthoringPackageSource(packageId,"resource",resourceType,resourceId,null,null,null,null,login);
+                        case "file" -> runtime.inspectAuthoringPackageSource(packageId,"file",resourceType,resourceId,null,origin,referenceId,null,login);
+                        case "load" -> runtime.inspectAuthoringPackageSource(packageId,"load",null,null,sourcePath,null,null,null,login);
+                        case "testdata" -> runtime.inspectAuthoringPackageSource(packageId,"testdata",null,resourceId,null,null,null,req.getParameter("environment"),login);
+                        default -> throw new ServerRuntime.NotFoundException();
+                    });
+            // A trusted container role may change while the Worker reads. Recheck USER and exact owner at return.
+            if(!requireOperator(req,res,requestId))return;
+            if(!login.equals(principalExact(req))||!runtime.canEditPackageContent(packageId,login)) {
+                error(res,403,"ATT-PACKAGE-SOURCE-DENIED","Package source editing is not authorized",requestId);return;
+            }
+            Object etag=result.get("sourceEtag");if(etag instanceof String)res.setHeader("ETag",(String)etag);
+            result.put("requestId",requestId);json(res,200,result);
+        } catch(ServerRuntime.AuthoringSourceDeniedException e){error(res,403,"ATT-PACKAGE-SOURCE-DENIED","Package source editing is not authorized",requestId);}
+          catch(ServerRuntime.NotFoundException e){error(res,404,"ATT-SERVER-NOT-FOUND","API resource was not found",requestId);}
+          catch(ServerRuntime.StaleDraftException e){error(res,409,"ATT-PACKAGE-SOURCE-CONFLICT","Package source changed while it was being read",requestId);}
+          catch(ServerRuntime.InspectionCapacityException e){error(res,503,"ATT-SERVER-INSPECTION-CAPACITY","Package inspection capacity is full; retry shortly",requestId);}
+          catch(ServerRuntime.InspectionTimeoutException e){error(res,504,"ATT-SERVER-INSPECTION-TIMEOUT","Package inspection exceeded its time limit",requestId);}
+          catch(ServerRuntime.InspectionResponseTooLargeException e){error(res,413,"ATT-SERVER-INSPECTION-RESPONSE-TOO-LARGE","Package source exceeds the configured size limit",requestId);}
+          catch(IllegalArgumentException e){error(res,404,"ATT-SERVER-NOT-FOUND","API resource was not found",requestId);}
+          catch(Exception e){error(res,500,"ATT-SERVER-REQUEST-FAILED","The package source request could not be completed",requestId);}
+    }
+    private void centralAuthoringSourceGet(HttpServletRequest req,HttpServletResponse res,String requestId)throws IOException {
+        res.setHeader("Cache-Control","private, no-store");res.setHeader("X-Content-Type-Options","nosniff");
+        if(!requireSystemSettingsWrite(req,res,requestId))return;
+        if(req.getParameter("redacted")!=null){error(res,404,"ATT-SERVER-NOT-FOUND","API resource was not found",requestId);return;}
+        String logicalPath=req.getParameter("path");
+        if(logicalPath==null||logicalPath.length()>1024){error(res,404,"ATT-SERVER-NOT-FOUND","API resource was not found",requestId);return;}
+        try {
+            Map<String,Object> result=runtime.inspectAuthoringCentralSource(logicalPath);
+            if(!requireSystemSettingsWrite(req,res,requestId))return;
+            Object etag=result.get("sourceEtag");if(etag instanceof String)res.setHeader("ETag",(String)etag);
+            result.put("requestId",requestId);json(res,200,result);
+        } catch(ServerRuntime.NotFoundException e){error(res,404,"ATT-SERVER-NOT-FOUND","API resource was not found",requestId);}
+          catch(ServerRuntime.StaleDraftException e){error(res,409,"ATT-CFG-SOURCE-CONFLICT","Central Configuration changed while it was being read",requestId);}
+          catch(ServerRuntime.InspectionCapacityException e){error(res,503,"ATT-SERVER-INSPECTION-CAPACITY","Package inspection capacity is full; retry shortly",requestId);}
+          catch(ServerRuntime.InspectionTimeoutException e){error(res,504,"ATT-SERVER-INSPECTION-TIMEOUT","Package inspection exceeded its time limit",requestId);}
+          catch(ServerRuntime.InspectionResponseTooLargeException e){error(res,413,"ATT-SERVER-INSPECTION-RESPONSE-TOO-LARGE","Configuration source exceeds the configured size limit",requestId);}
+          catch(IllegalArgumentException e){error(res,404,"ATT-SERVER-NOT-FOUND","API resource was not found",requestId);}
+          catch(Exception e){error(res,500,"ATT-SERVER-REQUEST-FAILED","The configuration source request could not be completed",requestId);}
+    }
     private boolean configurationAdmin(HttpServletRequest req,HttpServletResponse res,String requestId)throws IOException {
         String login=principal(req);
-        if("local".equals(runtime.config.authMode)) {
-            if(login==null){error(res,401,"ATT-SERVER-AUTHENTICATION-REQUIRED","Authentication is required",requestId);return false;}
-            try {
-                Map<String,Object> user=runtime.store.authUser(login);
-                if(user!=null&&"ADMIN".equals(user.get("role")))return true;
-            } catch(Exception failure) {
-                error(res,500,"ATT-SERVER-REQUEST-FAILED","The configuration request could not be completed",requestId);return false;
-            }
-            error(res,403,"ATT-SERVER-FORBIDDEN","Administrator access is required",requestId);return false;
-        }
-        if(login!=null&&req.isUserInRole(runtime.config.inspection.configurationAdminRole))return true;
-        error(res,403,"ATT-SERVER-FORBIDDEN","The configured configuration administrator role is required",requestId);return false;
+        if(login==null){error(res,401,"ATT-SERVER-AUTHENTICATION-REQUIRED","Authentication is required",requestId);return false;}
+        try {
+            if(systemSettingsWriteCapability(req,login))return true;
+            error(res,403,"ATT-SERVER-FORBIDDEN","SYSTEM_SETTINGS_WRITE is required",requestId);return false;
+        } catch(Exception failure){error(res,500,"ATT-SERVER-REQUEST-FAILED","The configuration request could not be completed",requestId);return false;}
     }
     private void loadPolicyGet(HttpServletRequest req,HttpServletResponse res,String path,String requestId,String principal)throws IOException {
         String[] parts=path.split("/");
@@ -862,7 +937,9 @@ public final class ApiServlet extends HttpServlet {
     private void manifestGet(HttpServletRequest req,HttpServletResponse res,String path,String requestId,String actor) throws IOException {
         String[] parts=path.split("/");String action=parts.length==4?"effective":parts[4];
         try {
-            Map<String,Object> result="history".equals(action)?new java.util.LinkedHashMap<>(Map.of("items",runtime.manifestPublisher.history(segment(path,2),actor))):
+            Map<String,Object> result="history".equals(action)?new java.util.LinkedHashMap<>(Map.of("items",runtime.withPackageSourceAuthority(actor,
+                    login -> login!=null&&login.equals(principalExact(req))&&operatorCapability(req,login),
+                    () -> runtime.manifestPublisher.history(segment(path,2),actor)))):
                     runtime.inspectPackageConfiguration(segment(path,2),action,req.getParameter("environment"),actor);
             result.put("requestId",requestId);res.setHeader("Cache-Control","no-store");json(res,200,result);
         } catch(PackageManifestPublisher.Denied e){error(res,403,"ATT-PACKAGE-SOURCE-DENIED","Package source editing is not authorized",requestId);}
@@ -875,6 +952,15 @@ public final class ApiServlet extends HttpServlet {
           catch(Exception e){error(res,500,"ATT-PACKAGE-SOURCE-FAILED","Package configuration could not be read",requestId);getServletContext().log("ATT Package Configuration failed id="+requestId,e);}
     }
     private void manifestPost(HttpServletRequest req,HttpServletResponse res,String path,String requestId,String actor) throws IOException {
+        if(actor==null){error(res,401,"ATT-SERVER-AUTHENTICATION-REQUIRED","Authentication is required",requestId);return;}
+        try {
+            runtime.withPackageSourceAuthority(actor,login -> login.equals(principalExact(req))&&operatorCapability(req,login),() -> {
+                manifestPostAuthorized(req,res,path,requestId,actor);return null;
+            });
+        } catch(IOException failure){throw failure;}
+          catch(Exception failure){error(res,500,"ATT-PACKAGE-SOURCE-FAILED","Manifest action could not be completed",requestId);}
+    }
+    private void manifestPostAuthorized(HttpServletRequest req,HttpServletResponse res,String path,String requestId,String actor) throws IOException {
         if(!isJson(req.getContentType())){error(res,415,"ATT-SERVER-UNSUPPORTED-MEDIA-TYPE","Content-Type must be application/json",requestId);return;}
         if(!checkOrigin(req,res,requestId,false))return;
         try {
@@ -928,6 +1014,17 @@ public final class ApiServlet extends HttpServlet {
     private static String path(HttpServletRequest r){String p=r.getPathInfo();return p==null||p.isEmpty()?"/":p;}
     private static String segment(String path,int index){String[] parts=path.split("/");return parts.length>index?parts[index]:"";}
     static String principal(HttpServletRequest req){Object value=req.getServletContext().getAttribute(ServerBootstrap.RUNTIME);if(value instanceof ServerRuntime runtime&&"local".equals(runtime.config.authMode)){Object identity=req.getAttribute(AuthService.IDENTITY);return identity instanceof String?(String)identity:null;}if(value instanceof ServerRuntime runtime&&!runtime.config.authenticationRequired)return RequestIdentity.ANONYMOUS;Principal p=req.getUserPrincipal();if(p==null)return null;String name=p.getName();if(name==null||name.isBlank()||name.length()>256)return null;for(int i=0;i<name.length();i++)if(Character.isISOControl(name.charAt(i)))return null;return name.trim();}
+    private static String principalExact(HttpServletRequest req){
+        Object value=req.getServletContext().getAttribute(ServerBootstrap.RUNTIME);
+        if(value instanceof ServerRuntime runtime&&"local".equals(runtime.config.authMode)) {
+            Object identity=req.getAttribute(AuthService.IDENTITY);return identity instanceof String?(String)identity:null;
+        }
+        if(value instanceof ServerRuntime runtime&&!runtime.config.authenticationRequired)return null;
+        Principal principal=req.getUserPrincipal();if(principal==null)return null;
+        String name=principal.getName();if(name==null||name.isEmpty()||name.length()>256||!name.equals(name.strip()))return null;
+        for(int i=0;i<name.length();i++)if(Character.isISOControl(name.charAt(i)))return null;
+        return name;
+    }
     private static String requestId(HttpServletRequest req,HttpServletResponse res){String value=req.getHeader("X-Request-ID");if(value==null||!value.matches("[A-Za-z0-9._-]{1,80}"))value=UUID.randomUUID().toString();res.setHeader("X-Request-ID",value);return value;}
     private static void json(HttpServletResponse res,int status,Object body)throws IOException{res.setStatus(status);res.setCharacterEncoding("UTF-8");res.setContentType("application/json");ServerRuntime.JSON.writeValue(res.getOutputStream(),body);}
     static void error(HttpServletResponse res,int status,String code,String summary,String requestId)throws IOException{

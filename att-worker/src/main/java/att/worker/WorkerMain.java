@@ -378,6 +378,40 @@ public final class WorkerMain {
         if("snapshot".equals(r.command)) return service.snapshot(new SnapshotRequest(root,config,r.environment,paths(r.suites),path(r.suiteDirectory),set(r.caseIds),bool(r.all)));
         if("inspect".equals(r.command)) {
             if("cli-validation".equals(r.inspectionAction)) return validateVNext(r,root,config);
+            if("authoring-source".equals(r.inspectionAction)) {
+                int maxSourceBytes=r.maxSourceBytes==null?65536:r.maxSourceBytes;
+                int maxResponseBytes=r.maxResponseBytes==null?262144:r.maxResponseBytes;
+                Map<String,Object> source;
+                switch(String.valueOf(r.authoringSourceKind)) {
+                    case "resource":
+                        source=resourceInspector(root,config,r).inspectAuthoringResourceSource(r.authoringResourceType,r.inspectionResourceId);
+                        break;
+                    case "file":
+                        source=resourceInspector(root,config,r).inspectAuthoringSourceFile(
+                                r.authoringResourceType,r.inspectionResourceId,r.inspectionReferenceId,r.inspectionOrigin);
+                        break;
+                    case "load":
+                        source=resourceInspector(root,config,r).inspectAuthoringLoadSource(r.inspectionPath);
+                        break;
+                    case "manifest":
+                        source=resourceInspector(root,config,r).inspectAuthoringManifestSource();
+                        break;
+                    case "testdata":
+                        source=new PackageConfigurationInspector(root,config,maxResponseBytes,
+                                !Boolean.FALSE.equals(r.redactionEnabled),r.sensitivePaths,r.sensitiveFieldPatterns)
+                                .forPackageTestdata().inspectAuthoringTestdataSource(r.inspectionResourceId,r.inspectionEnvironment,maxSourceBytes);
+                        break;
+                    case "central":
+                        source=new PackageConfigurationInspector(root,config,maxResponseBytes,
+                                !Boolean.FALSE.equals(r.redactionEnabled),r.sensitivePaths,r.sensitiveFieldPatterns)
+                                .forSharedRuntime().inspectAuthoringSharedSource(r.inspectionPath,maxSourceBytes);
+                        break;
+                    default:
+                        throw new PackageResourceInspector.ResourceNotFoundException();
+                }
+                return new OperationResult(null,"PASS",0,0,Collections.<att.validation.Diagnostic>emptyList(),
+                        Collections.<String,String>emptyMap(),Collections.<String,Object>singletonMap("inspection",source));
+            }
             if ("package-configuration".equals(r.inspectionType)) {
                 att.resource.PackageManifestInspector manifest = new att.resource.PackageManifestInspector(root, config, !Boolean.FALSE.equals(r.redactionEnabled), r.sensitivePaths, r.sensitiveFieldPatterns);
                 Map<String,Object> inspected = "validate".equals(r.inspectionAction)
