@@ -97,7 +97,8 @@ class AuthenticationIntegrationTest {
         Files.writeString(adminPackage.resolve("package.yaml"),original);
         Path data=temp.resolve("manifest-data");Path config=Files.writeString(temp.resolve("manifest-server.yaml"),
                 "server:\n  dataDir: "+yaml(data)+"\n  auth: {mode: local}\n  centralConfigurationEditingEnabled: true\n  security: {checkCrossOrigin: true}\n"
-                +"  packageConfiguration: {sourceEditingEnabled: true}\nworkers: {}\npackages:\n  allowedRoots: ["+yaml(packages)+"]\n  entries: {owner: "+yaml(pkg)+", admin: "+yaml(adminPackage)+"}\n");
+                +"  packageConfiguration: {sourceEditingEnabled: true}\n  inspection: {redaction: {sensitiveFieldPatterns: [\"^opaqueConfigValue$\"]}}\n"
+                +"workers: {}\npackages:\n  allowedRoots: ["+yaml(packages)+"]\n  entries: {owner: "+yaml(pkg)+", admin: "+yaml(adminPackage)+"}\n");
         System.setProperty("att.server.config",config.toString());
         Path users=Files.writeString(temp.resolve("manifest-users.xml"),"<tomcat-users></tomcat-users>");
         Tomcat tomcat=start(users,appDirectory("manifest-http"));
@@ -139,10 +140,26 @@ class AuthenticationIntegrationTest {
                     "ADMIN may inspect the safe Central Runtime Config projection");
             assertEquals(403,sendWithCookie(client,port,"GET","/att/api/v1/configuration/authoring-source?path=config%2Fconfig.yaml",owner.cookie,null,null,null).statusCode(),
                     "Package owners do not receive Central Runtime Config authoring access");
-            HttpResponse<String> central=sendWithCookie(client,port,"GET","/att/api/v1/configuration/authoring-source?path=config%2Fconfig.yaml",admin.cookie,null,null,null);
+            String centralPath="/att/api/v1/configuration/authoring-source?path=config%2Fconfig.yaml";
+            Path centralSource=home.resolve("config/config.yaml");String centralText=Files.readString(centralSource);
+            HttpResponse<String> central=sendWithCookie(client,port,"GET",centralPath,admin.cookie,null,null,null);
             assertEquals(200,central.statusCode(),central.body());
-            assertEquals(Files.readString(home.resolve("config/config.yaml")),ServerRuntime.JSON.readTree(central.body()).path("text").asText());
+            assertEquals(centralText,ServerRuntime.JSON.readTree(central.body()).path("text").asText());
             assertEquals("private, no-store",central.headers().firstValue("Cache-Control").orElseThrow());
+            List<String> embeddedProtectedRecords=List.of(
+                    "schemaVersion: att-package/v1\npayload: |\n  classification: secret\n  value: route-block-canary\n",
+                    "schemaVersion: att-package/v1\npayload: >\n  classification: secret\n  value: route-folded-canary\n",
+                    "schemaVersion: att-package/v1\npayload: |\n  records:\n    opaqueConfigValue: route-configured-canary\n",
+                    "schemaVersion: att-package/v1\npayload: \"{\\\"classification\\\":\\\"secret\\\",\\\"value\\\":\\\"route-escaped-canary\\\"}\"\n");
+            for(String embedded:embeddedProtectedRecords) {
+                Files.writeString(pkg.resolve("package.yaml"),embedded);
+                assertEquals(404,sendWithCookie(client,port,"GET",rawPath,owner.cookie,null,null,null).statusCode(),
+                        "The owner-only Package source route must withhold protected embedded scalar content");
+                Files.writeString(centralSource,embedded);
+                assertEquals(404,sendWithCookie(client,port,"GET",centralPath,admin.cookie,null,null,null).statusCode(),
+                        "The ADMIN-only Central source route must withhold protected embedded scalar content");
+            }
+            Files.writeString(pkg.resolve("package.yaml"),original);Files.writeString(centralSource,centralText);
             String candidate="schemaVersion: att-package/v1\ndefaultEnvironment: SIT\ndefaults: {timeoutMs: 12000}\n";
             String body=ServerRuntime.JSON.writeValueAsString(Map.of("source",candidate,"expectedManifestDigest",digest));
             assertEquals(403,sendWithCookie(client,port,"POST",base+"/drafts",owner.cookie,origin,null,body).statusCode());

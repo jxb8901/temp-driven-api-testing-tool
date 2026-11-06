@@ -43,6 +43,8 @@ import javax.xml.parsers.DocumentBuilderFactory;
 final class AuthoringSourceSupport {
     private static final Pattern ASSIGNMENT = Pattern.compile(
             "(?im)(?<![A-Za-z0-9_.-])[\"']?([A-Za-z_][A-Za-z0-9_.-]*(?:\\[[0-9]+\\])?)[\"']?\\s*[:=]\\s*(\"[^\"\\r\\n]*\"|'[^'\\r\\n]*'|[^\\r\\n,;#]+)");
+    private static final Pattern YAML_MAPPING = Pattern.compile(
+            "(?im)(?<![A-Za-z0-9_.-])[\"']?[A-Za-z_][A-Za-z0-9_.-]*(?:\\[[0-9]+\\])?[\"']?\\s*:");
     private static final Pattern XML_REFERENCE = Pattern.compile("&\\{[^{}\\r\\n]{1,1024}\\}");
     private static final ObjectMapper JSON = new ObjectMapper(jsonFactory())
             .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
@@ -140,7 +142,7 @@ final class AuthoringSourceSupport {
                 return protectedValue(parsed,"",sensitivePaths,sensitiveFieldPatterns,new IdentityHashMap<Object,Boolean>(),0);
             }
             if(lower.endsWith(".xml"))return protectedXml(text,sensitivePaths,sensitiveFieldPatterns);
-            if(lower.endsWith(".csv"))return protectedCsv(text,sensitivePaths,sensitiveFieldPatterns);
+            if(lower.endsWith(".csv"))return protectedCsv(text,sensitivePaths,sensitiveFieldPatterns,0);
             return protectedText(text,sensitivePaths,sensitiveFieldPatterns);
         } catch(Exception malformedOrUnknown) {
             return true;
@@ -163,6 +165,7 @@ final class AuthoringSourceSupport {
                                           List<String> sensitiveFieldPatterns,IdentityHashMap<Object,Boolean> active,
                                           int depth) {
         if(depth>64)return true;
+        if(value instanceof CharSequence)return protectedScalar(value.toString(),sensitivePaths,sensitiveFieldPatterns,depth);
         if(value instanceof Map<?,?>) {
             if(active.put(value,Boolean.TRUE)!=null)return true;
             try {
@@ -195,6 +198,67 @@ final class AuthoringSourceSupport {
                     path+"["+index+"]",sensitivePaths,sensitiveFieldPatterns,active,depth+1))return true;
         }
         return false;
+    }
+
+    private static boolean protectedScalar(String text,List<String> sensitivePaths,List<String> sensitiveFieldPatterns,
+                                           int depth) {
+        if(depth>64)return true;
+        if(protectedAssignments(text,sensitivePaths,sensitiveFieldPatterns))return true;
+        String candidate=text==null?"":text.trim();
+        if(candidate.isEmpty())return false;
+        String unescaped=candidate.replace("\\\"", "\"");
+        if(!unescaped.equals(candidate)&&looksLikeEmbeddedStructure(unescaped)
+                &&protectedScalar(unescaped,sensitivePaths,sensitiveFieldPatterns,depth+1))return true;
+        if(!looksLikeEmbeddedStructure(candidate))return false;
+        try {
+            if(looksLikeXml(candidate))return protectedXml(candidate,sensitivePaths,sensitiveFieldPatterns);
+            if(looksLikeCsv(candidate)&&protectedCsv(candidate,sensitivePaths,sensitiveFieldPatterns,depth+1))return true;
+            LoaderOptions options=new LoaderOptions();
+            options.setAllowDuplicateKeys(false);options.setMaxAliasesForCollections(50);options.setCodePointLimit(3_000_000);
+            Iterable<Object> documents=new Yaml(new SafeConstructor(options)).loadAll(new StringReader(candidate));
+            int count=0;
+            for(Object document:documents) {
+                if(++count>64)return true;
+                if(document instanceof String) {
+                    String nested=(String)document;
+                    if(!nested.equals(candidate)&&protectedScalar(nested,sensitivePaths,sensitiveFieldPatterns,depth+1))return true;
+                } else if(protectedValue(document,"",sensitivePaths,sensitiveFieldPatterns,
+                        new IdentityHashMap<Object,Boolean>(),depth+1))return true;
+            }
+            return false;
+        } catch(Exception malformedOrUnknown) {
+            return true;
+        }
+    }
+
+    private static boolean protectedAssignments(String text,List<String> sensitivePaths,List<String> sensitiveFieldPatterns) {
+        Matcher matcher=ASSIGNMENT.matcher(text==null?"":text);
+        while(matcher.find()) {
+            String key=matcher.group(1);String value=unquote(matcher.group(2));
+            if("classification".equalsIgnoreCase(key)&&protectedClassification(value))return true;
+            if("secret".equalsIgnoreCase(key)&&"true".equalsIgnoreCase(value.trim()))return true;
+            if((SecretProtection.sensitiveName(key)||matchesConfiguredField(key,sensitiveFieldPatterns)
+                    ||matchesConfiguredPath(key,sensitivePaths))&&hasText(value))return true;
+        }
+        return false;
+    }
+
+    private static boolean looksLikeEmbeddedStructure(String text) {
+        String candidate=text==null?"":text.trim();
+        if(candidate.isEmpty())return false;
+        if(candidate.charAt(0)=='{'||candidate.charAt(0)=='['||candidate.charAt(0)=='<')return true;
+        if(candidate.charAt(0)=='\''||candidate.charAt(0)=='"')return true;
+        return YAML_MAPPING.matcher(candidate).find();
+    }
+
+    private static boolean looksLikeXml(String text) {
+        String candidate=text.trim();
+        return candidate.startsWith("<")&&candidate.length()>1
+                &&(candidate.charAt(1)=='?'||candidate.charAt(1)=='!'||Character.isLetter(candidate.charAt(1)));
+    }
+
+    private static boolean looksLikeCsv(String text) {
+        return text.indexOf(',')>=0&&(text.indexOf('\n')>=0||text.indexOf('\r')>=0);
     }
 
     private static boolean protectedXml(String text,List<String> sensitivePaths,List<String> sensitiveFieldPatterns) throws Exception {
@@ -239,7 +303,8 @@ final class AuthoringSourceSupport {
         return false;
     }
 
-    private static boolean protectedCsv(String text,List<String> sensitivePaths,List<String> sensitiveFieldPatterns) {
+    private static boolean protectedCsv(String text,List<String> sensitivePaths,List<String> sensitiveFieldPatterns,int depth) {
+        if(depth>64)return true;
         List<List<String>> rows=parseCsv(text);
         if(rows.isEmpty())return false;
         List<String> header=rows.get(0);
@@ -253,6 +318,8 @@ final class AuthoringSourceSupport {
                 if("classification".equalsIgnoreCase(key)?protectedClassification(value):hasText(value))return true;
             }
         }
+        for(int row=1;row<rows.size();row++)for(String value:rows.get(row))
+            if(protectedScalar(value,sensitivePaths,sensitiveFieldPatterns,depth+1))return true;
         return false;
     }
 
@@ -275,25 +342,21 @@ final class AuthoringSourceSupport {
     }
 
     private static boolean protectedText(String text,List<String> sensitivePaths,List<String> sensitiveFieldPatterns) {
-        try {
-            if(protectedYaml(text,sensitivePaths,sensitiveFieldPatterns))return true;
-        } catch(RuntimeException notYaml) { /* Plain text still receives the assignment-level policy below. */ }
-        Matcher matcher=ASSIGNMENT.matcher(text);
-        while(matcher.find()) {
-            String key=matcher.group(1);String value=unquote(matcher.group(2));
-            if("classification".equalsIgnoreCase(key)&&protectedClassification(value))return true;
-            if("secret".equalsIgnoreCase(key)&&"true".equalsIgnoreCase(value.trim()))return true;
-            if((matchesConfiguredField(key,sensitiveFieldPatterns)||matchesConfiguredPath(key,sensitivePaths))&&hasText(value))return true;
-        }
-        return false;
+        return protectedScalar(text,sensitivePaths,sensitiveFieldPatterns,0);
     }
 
     private static boolean protectedClassification(Object value) {
         if(!(value instanceof CharSequence))return false;
         String label=value.toString().trim().toLowerCase(Locale.ROOT).replace('_','-');
-        return "secret".equals(label)||"credential".equals(label)||"credentials".equals(label)
-                ||"private".equals(label)||"private-key".equals(label)||"confidential".equals(label)
-                ||"restricted".equals(label);
+        String[] protectedLabels={"secret","credential","credentials","private-key","private","confidential","restricted"};
+        for(String protectedLabel:protectedLabels) {
+            if(protectedLabel.equals(label))return true;
+            if(label.startsWith(protectedLabel)&&label.length()>protectedLabel.length()) {
+                char boundary=label.charAt(protectedLabel.length());
+                if(Character.isWhitespace(boundary)||boundary==':'||boundary==','||boundary==';')return true;
+            }
+        }
+        return false;
     }
 
     private static boolean matchesConfiguredField(String key,List<String> expressions) {

@@ -109,4 +109,44 @@ class AuthoringSourceSupportTest {
                 ()->AuthoringSourceSupport.read(root,csv,"field-protected.csv",4096,
                         Collections.<String>emptyList(),Collections.singletonList("custom.*")));
     }
+
+    @Test void failsClosedForProtectedRecordsEmbeddedInScalarContent() throws Exception {
+        Path root=Files.createDirectories(temp.resolve("embedded-scalar-sources"));
+        Path block=root.resolve("block.yaml");
+        Files.write(block,("schemaVersion: att-package/v1\npayload: |\n"
+                +"  classification: secret\n  value: block-classified-canary\n").getBytes(StandardCharsets.UTF_8));
+        assertThrows(PackageResourceInspector.ResourceNotFoundException.class,
+                ()->AuthoringSourceSupport.read(root,block,"block.yaml",4096));
+
+        Path folded=root.resolve("folded.yaml");
+        Files.write(folded,("schemaVersion: att-package/v1\npayload: >\n"
+                +"  classification: secret\n  value: folded-classified-canary\n").getBytes(StandardCharsets.UTF_8));
+        assertThrows(PackageResourceInspector.ResourceNotFoundException.class,
+                ()->AuthoringSourceSupport.read(root,folded,"folded.yaml",4096));
+
+        Path escaped=root.resolve("escaped.yaml");
+        Files.write(escaped,("schemaVersion: att-package/v1\npayload: \"{\\\"classification\\\":\\\"secret\\\","
+                +"\\\"value\\\":\\\"escaped-classified-canary\\\"}\"\n").getBytes(StandardCharsets.UTF_8));
+        assertThrows(PackageResourceInspector.ResourceNotFoundException.class,
+                ()->AuthoringSourceSupport.read(root,escaped,"escaped.yaml",4096));
+
+        Path configured=root.resolve("configured-block.yaml");
+        Files.write(configured,("schemaVersion: att-package/v1\npayload: |\n"
+                +"  records:\n    opaqueConfigValue: configured-block-canary\n").getBytes(StandardCharsets.UTF_8));
+        assertThrows(PackageResourceInspector.ResourceNotFoundException.class,
+                ()->AuthoringSourceSupport.read(root,configured,"configured-block.yaml",4096,
+                        Collections.<String>emptyList(),Collections.singletonList("^opaqueConfigValue$")));
+
+        Path configuredFolded=root.resolve("configured-folded.yaml");
+        Files.write(configuredFolded,("schemaVersion: att-package/v1\npayload: >\n"
+                +"  records:\n    opaqueConfigValue: configured-folded-canary\n").getBytes(StandardCharsets.UTF_8));
+        assertThrows(PackageResourceInspector.ResourceNotFoundException.class,
+                ()->AuthoringSourceSupport.read(root,configuredFolded,"configured-folded.yaml",4096,
+                        Collections.<String>emptyList(),Collections.singletonList("^opaqueConfigValue$")));
+
+        Path sql=root.resolve("safe-query.sql");
+        Files.write(sql,"SELECT * FROM payments WHERE sequence = 7;\n".getBytes(StandardCharsets.UTF_8));
+        assertEquals("SELECT * FROM payments WHERE sequence = 7;\n",
+                AuthoringSourceSupport.read(root,sql,"safe-query.sql",4096).get("text"));
+    }
 }
