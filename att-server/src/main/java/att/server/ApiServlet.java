@@ -94,6 +94,14 @@ public final class ApiServlet extends HttpServlet {
             if(path.matches("/packages/[^/]+/package-configuration(?:/(?:declared|effective|compare|source|history))?")) {
                 manifestGet(req,res,path,requestId,principal);return;
             }
+            if("/registry".equals(path)) {
+                Map<String,Object> response=runtime.packageRegistryView();response.put("requestId",requestId);
+                res.setHeader("Cache-Control","no-store");json(res,200,response);return;
+            }
+            if(path.matches("/packages/[^/]+/scope")) {
+                Map<String,Object> response=runtime.packageScope(segment(path,2));response.put("requestId",requestId);
+                res.setHeader("Cache-Control","no-store");json(res,200,response);return;
+            }
             if(configurationRequest){configurationGet(req,res,path,requestId,principal);return;}
             if(loadPolicyRequest){loadPolicyGet(req,res,path,requestId,principal);return;}
             if(draftRequest){

@@ -1,4 +1,4 @@
-<!-- att-doc-status: current release=4.2.9 -->
+<!-- att-doc-status: current release=4.3.0 -->
 
 # ATT Server configuration
 
@@ -11,7 +11,7 @@ The Server validates `min(workers.maxConcurrent, workers.maxConcurrentLoad) <= 4
 
 `server.authorization.adminRole` and `userRole` are distinct container roles. A `USER` operator role grants access to package browsing, execution, jobs, and schedules; the `ADMIN` role grants Settings and account/system administration only. Accounts with both roles retain the admin-only policy. In local-auth mode, ATT applies the equivalent rule to active `USER` and `ADMIN` accounts. `allowAnonymousOperations` is available only when `authenticationRequired: false`; it grants anonymous callers the same operational API access as a USER and should be enabled only on a trusted isolated network. Health and version endpoints remain public.
 
-Every Package must be explicitly listed under `packages.entries`. A directory below an allowed root is never registered because its name matches a user account. Package IDs are ordinary labels; matching a login ID grants no ownership or extra permissions. Each Package resolves business resources only from its own root, while all packages use the same trusted runtime configuration and schema registry. To add or remove a Package, update `packages.entries` in the Server configuration and restart the Server.
+Every Package must be explicitly listed under `packages.entries`. A directory below an allowed root is never registered because its name matches a user account. Package IDs are ordinary labels; matching a login ID grants no ownership or extra permissions. Each Package resolves business resources only from its own root, while all packages use the same trusted runtime configuration and schema registry. ATT 4.3.0 polls the selected `att-server.yaml` for changes to `packages.entries`; valid additions, removals, and repoints apply while Tomcat remains online. Write the complete candidate with an atomic rename where possible. The Server also handles in-place edits with bounded debounce and stability checks. Invalid or unreadable candidates keep the last-known-good registry and expose a sanitized `Invalid` status at `GET /api/v1/registry`. Changes outside `packages` are deployment policy and require restart; they are not partially hot-applied. `GET /api/v1/packages/{packageId}/scope` exposes safe logical revision identities, not physical paths. Source editing and Runtime Config administration remain separate future work.
 
 ```yaml
 server:
