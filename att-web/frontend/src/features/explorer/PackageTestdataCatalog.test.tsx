@@ -257,6 +257,65 @@ describe('PackageTestdataWorkspace', () => {
     expect(host.textContent).not.toContain('sit-stale-second-page');
   });
 
+  it('reconciles deep-linked descriptors across same-mounted Back/Forward routes without replacing manual search', async () => {
+    const descriptors = [
+      { id: 'accounts', source: 'testdata/accounts.yaml' },
+      { id: 'payments', source: 'testdata/payments.yaml' },
+    ];
+    const api = {
+      getDeclaredConfiguration: vi.fn(async () => ({ environments: [] })),
+      getEffectiveConfiguration: vi.fn(async (_packageId: string, query: { query?: string }) => {
+        const normalizedQuery = query.query?.toLocaleLowerCase();
+        const matches = descriptors.filter(item => !normalizedQuery
+          || item.id.toLocaleLowerCase().includes(normalizedQuery)
+          || item.source.toLocaleLowerCase().includes(normalizedQuery));
+        return { total: matches.length, sections: [{ id: 'testdata', entries: matches }] };
+      }),
+      getTestdataRecords: vi.fn(async (_packageId: string, descriptorId: string) => ({ descriptorId, offset: 0, limit: 50, total: 0, records: [] })),
+    } as unknown as ExplorerApi;
+    const renderRoute = async (descriptorId?: string) => {
+      await act(async () => root.render(<RoutedHarness api={api} descriptorId={descriptorId} />));
+      await flush();
+    };
+
+    await renderRoute('accounts');
+    expect(api.getEffectiveConfiguration).toHaveBeenLastCalledWith('payments', {
+      environment: undefined, section: 'testdata', query: 'accounts', offset: 0, limit: 50,
+    }, expect.any(AbortSignal));
+    expect(api.getTestdataRecords).toHaveBeenLastCalledWith('payments', 'accounts',
+      { environment: undefined, offset: 0, limit: 50, previewGenerated: false }, expect.any(AbortSignal));
+
+    await renderRoute('payments');
+    expect(api.getEffectiveConfiguration).toHaveBeenLastCalledWith('payments', {
+      environment: undefined, section: 'testdata', query: 'payments', offset: 0, limit: 50,
+    }, expect.any(AbortSignal));
+    expect(api.getTestdataRecords).toHaveBeenLastCalledWith('payments', 'payments',
+      { environment: undefined, offset: 0, limit: 50, previewGenerated: false }, expect.any(AbortSignal));
+
+    await renderRoute('accounts');
+    expect(api.getEffectiveConfiguration).toHaveBeenLastCalledWith('payments', {
+      environment: undefined, section: 'testdata', query: 'accounts', offset: 0, limit: 50,
+    }, expect.any(AbortSignal));
+    expect(api.getTestdataRecords).toHaveBeenLastCalledWith('payments', 'accounts',
+      { environment: undefined, offset: 0, limit: 50, previewGenerated: false }, expect.any(AbortSignal));
+
+    await act(async () => setSearchValue('acc'));
+    await renderRoute(undefined);
+    expect(host.querySelector<HTMLInputElement>('input[aria-label="Search Testdata descriptors"]')?.value).toBe('acc');
+    expect(api.getEffectiveConfiguration).toHaveBeenLastCalledWith('payments', {
+      environment: undefined, section: 'testdata', query: 'acc', offset: 0, limit: 50,
+    }, expect.any(AbortSignal));
+
+    await renderRoute('payments');
+    expect(host.querySelector<HTMLInputElement>('input[aria-label="Search Testdata descriptors"]')?.value).toBe('acc');
+    expect(api.getEffectiveConfiguration).toHaveBeenLastCalledWith('payments', {
+      environment: undefined, section: 'testdata', query: 'payments', offset: 0, limit: 50,
+    }, expect.any(AbortSignal));
+    expect(api.getTestdataRecords).toHaveBeenLastCalledWith('payments', 'payments',
+      { environment: undefined, offset: 0, limit: 50, previewGenerated: false }, expect.any(AbortSignal));
+    expect(host.textContent).not.toContain('descriptor payments is unavailable');
+  });
+
   it('does not fall back to shared or another Package when the route Package is unregistered', async () => {
     const api = { getDeclaredConfiguration: vi.fn(), getEffectiveConfiguration: vi.fn(), getTestdataRecords: vi.fn() } as unknown as ExplorerApi;
     await act(async () => root.render(<Harness api={api} registered={false} />)); await flush();

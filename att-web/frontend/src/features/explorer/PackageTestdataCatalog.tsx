@@ -92,15 +92,18 @@ export function TestdataCatalog({ api, packageId, environment, defaultEnvironmen
   const [copyStatus, setCopyStatus] = useState('');
   const [recordLoadingKey, setRecordLoadingKey] = useState('');
   const [revision, setRevision] = useState(0);
-  const [catalogSearch, setCatalogSearch] = useState(descriptorId ?? '');
+  const [catalogSearch, setCatalogSearch] = useState('');
+  const [routeLookupQuery, setRouteLookupQuery] = useState(descriptorId ?? '');
   const [catalogNextOffset, setCatalogNextOffset] = useState<number | null>(null);
   const [catalogTotal, setCatalogTotal] = useState<number | null>(null);
   const [catalogLoading, setCatalogLoading] = useState(false);
-  const catalogQueryKey = JSON.stringify([packageId, environment, catalogSearch.trim(), inspectionRefresh, refreshKey]);
+  const catalogQuery = routeLookupQuery || catalogSearch.trim();
+  const catalogQueryKey = JSON.stringify([packageId, environment, catalogQuery, inspectionRefresh, refreshKey]);
   const catalogQueryKeyRef = useRef(catalogQueryKey);
   const catalogGenerationRef = useRef(0);
   const catalogFirstPageControllerRef = useRef<AbortController | null>(null);
   const catalogLoadMoreControllerRef = useRef<AbortController | null>(null);
+  const routeDescriptorRef = useRef(descriptorId);
   const recordIdentityRef = useRef(recordIdentity);
   const recordsRequestKey = JSON.stringify([recordIdentity, offset, previewGenerated, revision, inspectionRefresh, refreshKey]);
   const response = recordResponseState?.key === recordsRequestKey ? recordResponseState.value : null;
@@ -132,6 +135,12 @@ export function TestdataCatalog({ api, packageId, environment, defaultEnvironmen
     setCatalogLoading(false);
   }, [api, catalogQueryKey]);
 
+  useLayoutEffect(() => {
+    if (routeDescriptorRef.current === descriptorId) return;
+    routeDescriptorRef.current = descriptorId;
+    setRouteLookupQuery(descriptorId && !entries.some(item => item.id === descriptorId) ? descriptorId : '');
+  }, [descriptorId, entries]);
+
   useLayoutEffect(() => { setSelectedIdState(descriptorId || ''); }, [packageId, environment, descriptorId]);
 
   useEffect(() => {
@@ -141,7 +150,7 @@ export function TestdataCatalog({ api, packageId, environment, defaultEnvironmen
     catalogFirstPageControllerRef.current = controller;
     setEntries([]); setRecordResponseState(null); setError(''); setStatus('Loading resolved Testdata catalog…');
     setCatalogNextOffset(null); setCatalogTotal(null); setCatalogLoading(false);
-    api.getEffectiveConfiguration(packageId, { environment: environment || undefined, section: 'testdata', query: catalogSearch.trim() || undefined, offset: 0, limit: 50 }, controller.signal)
+    api.getEffectiveConfiguration(packageId, { environment: environment || undefined, section: 'testdata', query: catalogQuery || undefined, offset: 0, limit: 50 }, controller.signal)
       .then(result => {
         const data = result.sections?.find(section => section.id === 'testdata')?.entries || [];
         if (controller.signal.aborted || generation !== catalogGenerationRef.current || queryKey !== catalogQueryKeyRef.current) return;
@@ -167,7 +176,7 @@ export function TestdataCatalog({ api, packageId, environment, defaultEnvironmen
       catalogLoadMoreControllerRef.current?.abort();
       catalogLoadMoreControllerRef.current = null;
     };
-  }, [api, packageId, environment, catalogSearch, inspectionRefresh, refreshKey]);
+  }, [api, packageId, environment, catalogQuery, inspectionRefresh, refreshKey]);
 
   async function loadMoreCatalog() {
     if (catalogNextOffset == null || catalogLoading) return;
@@ -178,7 +187,7 @@ export function TestdataCatalog({ api, packageId, environment, defaultEnvironmen
     catalogLoadMoreControllerRef.current = controller;
     setCatalogLoading(true); setError('');
     try {
-      const result = await api.getEffectiveConfiguration(packageId, { environment: environment || undefined, section: 'testdata', query: catalogSearch.trim() || undefined, offset: catalogNextOffset, limit: 50 }, controller.signal);
+      const result = await api.getEffectiveConfiguration(packageId, { environment: environment || undefined, section: 'testdata', query: catalogQuery || undefined, offset: catalogNextOffset, limit: 50 }, controller.signal);
       if (controller.signal.aborted || generation !== catalogGenerationRef.current || queryKey !== catalogQueryKeyRef.current) return;
       const next = result.sections?.find(section => section.id === 'testdata')?.entries || [];
       setEntries(current => generation === catalogGenerationRef.current && queryKey === catalogQueryKeyRef.current ? [...current, ...next] : current);
