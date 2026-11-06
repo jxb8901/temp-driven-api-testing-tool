@@ -145,8 +145,8 @@ export function TestdataCatalog({ api, packageId, environment, defaultEnvironmen
     if (!scopeChanged && !routeChanged) return;
     catalogScopeRef.current = { api, packageId, environment, inspectionRefresh, refreshKey };
     routeDescriptorRef.current = descriptorId;
-    setRouteLookupQuery(descriptorId && (scopeChanged || !entries.some(item => item.id === descriptorId)) ? descriptorId : '');
-  }, [api, packageId, environment, inspectionRefresh, refreshKey, descriptorId, entries]);
+    setRouteLookupQuery(descriptorId || '');
+  }, [api, packageId, environment, inspectionRefresh, refreshKey, descriptorId]);
 
   useLayoutEffect(() => { setSelectedIdState(descriptorId || ''); }, [packageId, environment, descriptorId]);
 

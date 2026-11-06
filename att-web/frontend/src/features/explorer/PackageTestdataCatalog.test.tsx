@@ -325,6 +325,52 @@ describe('PackageTestdataWorkspace', () => {
     expect(host.textContent).not.toContain('descriptor payments is unavailable');
   });
 
+  it('resolves successive deep links from the new route query, not prior fuzzy results', async () => {
+    const descriptors = [
+      { id: 'accounts', source: 'testdata/accounts.yaml' },
+      { id: 'pay', source: 'testdata/pay.yaml' },
+      { id: 'pay-v2', source: 'testdata/pay-v2.yaml' },
+    ];
+    const api = {
+      getDeclaredConfiguration: vi.fn(async () => ({ environments: [] })),
+      getEffectiveConfiguration: vi.fn(async (_packageId: string, query: { query?: string }) => {
+        const normalizedQuery = query.query?.toLocaleLowerCase();
+        const matches = descriptors.filter(item => !normalizedQuery
+          || item.id.toLocaleLowerCase().includes(normalizedQuery)
+          || item.source.toLocaleLowerCase().includes(normalizedQuery));
+        return { total: matches.length, sections: [{ id: 'testdata', entries: matches }] };
+      }),
+      getTestdataRecords: vi.fn(async (_packageId: string, descriptorId: string) => ({ descriptorId, offset: 0, limit: 50, total: 0, records: [] })),
+    } as unknown as ExplorerApi;
+    const renderRoute = async (descriptorId?: string) => {
+      await act(async () => root.render(<RoutedHarness api={api} descriptorId={descriptorId} />));
+      await flush();
+    };
+
+    await renderRoute();
+    await act(async () => setSearchValue('acc'));
+    await flush();
+    expect(api.getEffectiveConfiguration).toHaveBeenLastCalledWith('payments', {
+      environment: undefined, section: 'testdata', query: 'acc', offset: 0, limit: 50,
+    }, expect.any(AbortSignal));
+
+    await renderRoute('pay');
+    expect(api.getEffectiveConfiguration).toHaveBeenLastCalledWith('payments', {
+      environment: undefined, section: 'testdata', query: 'pay', offset: 0, limit: 50,
+    }, expect.any(AbortSignal));
+    expect(host.textContent).toContain('2 Testdata descriptors match this search');
+
+    await renderRoute('pay-v2');
+    expect(host.querySelector<HTMLInputElement>('input[aria-label="Search Testdata descriptors"]')?.value).toBe('acc');
+    expect(api.getEffectiveConfiguration).toHaveBeenLastCalledWith('payments', {
+      environment: undefined, section: 'testdata', query: 'pay-v2', offset: 0, limit: 50,
+    }, expect.any(AbortSignal));
+    expect(api.getTestdataRecords).toHaveBeenLastCalledWith('payments', 'pay-v2',
+      { environment: undefined, offset: 0, limit: 50, previewGenerated: false }, expect.any(AbortSignal));
+    expect(host.textContent).toContain('testdata/pay-v2.yaml');
+    expect(host.textContent).not.toContain('Testdata descriptor pay-v2 is unavailable');
+  });
+
   it('pages a deep-link fuzzy lookup until its exact descriptor appears', async () => {
     const descriptors = [
       ...Array.from({ length: 60 }, (_, index) => ({
