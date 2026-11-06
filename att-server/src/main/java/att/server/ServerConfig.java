@@ -4,7 +4,7 @@ import org.yaml.snakeyaml.LoaderOptions;
 import org.yaml.snakeyaml.Yaml;
 import org.yaml.snakeyaml.constructor.SafeConstructor;
 
-import java.io.InputStream;
+import java.io.ByteArrayInputStream;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
@@ -23,6 +23,8 @@ public final class ServerConfig {
     private static final int LOAD_PREPARATION_SERVER_CONNECTIONS = 256;
     private static final int MAX_SERVER_LOAD_WORKERS = LOAD_PREPARATION_SERVER_CONNECTIONS / LOAD_PREPARATION_PER_WORKER_CONNECTIONS;
     public final Path sourceFile;
+    final String sourceDigest;
+    final Map<?,?> sourceDocument;
     public final Path dataDir;
     public final Path runtimeConfigPath;
     public final Path javaExecutable;
@@ -49,8 +51,9 @@ public final class ServerConfig {
     private ServerConfig(Path sourceFile, Path dataDir, Path runtimeConfigPath, Path javaExecutable, int maxConcurrent, int queuedLimit,
                          int maxConcurrentLoad, int gracefulStopMs, int jobRetentionDays,
                          int workerHeapInitialMb, int workerHeapMaxMb, int maxRequestBytes,
-                         int maxEventsPerJob, long maxEventJournalBytes, int maxArtifacts, boolean authenticationRequired, String authMode, Security security, Map<String, Path> packages, List<Path> allowedRoots, List<Path> workerLibraryDirs, Inspection inspection, InlineLoad inlineLoad, Scheduling scheduling, Authorization authorization, JobStorage jobStorage, LiveOutput liveOutput, ArchiveCompression archiveCompression, ExecutionPool executionPool, PackageConfigurationPolicy packageConfiguration) {
+                         int maxEventsPerJob, long maxEventJournalBytes, int maxArtifacts, boolean authenticationRequired, String authMode, Security security, Map<String, Path> packages, List<Path> allowedRoots, List<Path> workerLibraryDirs, Inspection inspection, InlineLoad inlineLoad, Scheduling scheduling, Authorization authorization, JobStorage jobStorage, LiveOutput liveOutput, ArchiveCompression archiveCompression, ExecutionPool executionPool, PackageConfigurationPolicy packageConfiguration, String sourceDigest, Map<?,?> sourceDocument) {
         this.sourceFile=sourceFile;this.dataDir=dataDir; this.runtimeConfigPath=runtimeConfigPath; this.javaExecutable=javaExecutable; this.maxConcurrent=maxConcurrent;
+        this.sourceDigest=sourceDigest;this.sourceDocument=Collections.unmodifiableMap(new LinkedHashMap<>(sourceDocument));
         this.queuedLimit=queuedLimit; this.maxConcurrentLoad=maxConcurrentLoad; this.gracefulStopMs=gracefulStopMs;this.jobRetentionDays=jobRetentionDays;
         this.workerHeapInitialMb=workerHeapInitialMb;this.workerHeapMaxMb=workerHeapMaxMb;
         this.maxRequestBytes=maxRequestBytes; this.maxEventsPerJob=maxEventsPerJob;this.maxEventJournalBytes=maxEventJournalBytes; this.maxArtifacts=maxArtifacts;this.authenticationRequired=authenticationRequired;this.authMode=authMode;this.security=security;
@@ -88,9 +91,11 @@ public final class ServerConfig {
         if (!Files.isReadable(configFile))
             throw new IllegalStateException("ATT Server configuration is not readable: "+configFile);
         LoaderOptions options=new LoaderOptions(); options.setAllowDuplicateKeys(false); options.setMaxAliasesForCollections(20);
+        byte[] sourceBytes;
         Object raw;
-        try (InputStream in=Files.newInputStream(configFile)) {
-            raw=new Yaml(new SafeConstructor(options)).load(in);
+        try {
+            sourceBytes=Files.readAllBytes(configFile);
+            raw=new Yaml(new SafeConstructor(options)).load(new ByteArrayInputStream(sourceBytes));
         } catch (Exception invalid) {
             throw new IllegalArgumentException("Unable to read or parse ATT Server configuration at "+configFile+": "+invalid.getMessage(), invalid);
         }
@@ -167,7 +172,11 @@ public final class ServerConfig {
         if (initializeDataDirectory) {
             privateDirectory(realData);privateDirectory(realData.resolve("db"));privateDirectory(realData.resolve("jobs"));
         }
-        return new ServerConfig(configFile,realData,runtimeConfig,java,max,queue,load,stop,retention,heapInitial,heapMax,request,events,eventJournalBytes,artifacts,authenticationRequired,authMode,security,resolved,allowed,workerLibraries,inspection,inlineLoad,scheduling,authorization,jobStorage,liveOutput,archiveCompression,executionPool,PackageConfigurationPolicy.load(server.get("packageConfiguration")));
+        return new ServerConfig(configFile,realData,runtimeConfig,java,max,queue,load,stop,retention,heapInitial,heapMax,request,events,eventJournalBytes,artifacts,authenticationRequired,authMode,security,resolved,allowed,workerLibraries,inspection,inlineLoad,scheduling,authorization,jobStorage,liveOutput,archiveCompression,executionPool,PackageConfigurationPolicy.load(server.get("packageConfiguration")),digest(sourceBytes),root);
+    }
+
+    private static String digest(byte[] bytes) throws Exception {
+        return java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256").digest(bytes));
     }
 
     public static final class ArchiveCompression {

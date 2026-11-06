@@ -75,6 +75,64 @@ class PackageRegistryTest {
         } finally { registry.close(); }
     }
 
+    @Test void observesAtomicReplacementBetweenConfigLoadAndRegistryConstruction() throws Exception {
+        Fixture fixture=fixture();
+        String replacement=registryYaml(fixture,Map.of("alpha",fixture.beta));
+        replaceConfigAtomically(fixture,replacement);
+
+        try(PackageRegistry registry=new PackageRegistry(fixture.config,Clock.systemUTC(),Duration.ofMillis(15),Duration.ofMillis(300),
+                Runnable::run,(before,after)->{})) {
+            assertEquals(fixture.alpha.toRealPath(),registry.snapshot().packages.get("alpha"),
+                    "The running startup config remains the one ServerConfig validated");
+            settle(registry);
+            PackageRegistry.Snapshot updated=registry.snapshot();
+            assertEquals("Ready",updated.status);
+            assertEquals(2,updated.generation);
+            assertEquals(fixture.beta.toRealPath(),updated.packages.get("alpha"),
+                    "The replacement must be evaluated instead of being pinned as already processed");
+        }
+    }
+
+    @Test void startupReplacementCannotChangeTheBootstrapDeploymentPolicy() throws Exception {
+        Fixture fixture=fixture();
+        String replacement=registryYaml(fixture,Map.of("alpha",fixture.beta))
+                .replace("server:\n", "server:\n  authenticationRequired: false\n");
+        replaceConfigAtomically(fixture,replacement);
+
+        try(PackageRegistry registry=new PackageRegistry(fixture.config,Clock.systemUTC(),Duration.ofMillis(15),Duration.ofMillis(300),
+                Runnable::run,(before,after)->{})) {
+            settle(registry);
+            PackageRegistry.Snapshot snapshot=registry.snapshot();
+            assertEquals("Invalid",snapshot.status);
+            assertEquals("ATT-DEPLOYMENT-POLICY-RESTART-REQUIRED",snapshot.diagnostic.code());
+            assertEquals(fixture.alpha.toRealPath(),snapshot.packages.get("alpha"));
+            assertEquals(1,snapshot.generation);
+        }
+    }
+
+    @Test void retriesInvalidCandidateWhenMissingPackageDirectoryAppears() throws Exception {
+        Fixture fixture=fixture();
+        Path recovering=fixture.packageRoot.resolve("recovering");
+        String candidate=registryYaml(fixture,Map.of("alpha",recovering));
+        try(PackageRegistry registry=new PackageRegistry(fixture.config,Clock.systemUTC(),Duration.ofMillis(15),Duration.ofMillis(300),
+                Runnable::run,(before,after)->{})) {
+            String initialRevision=registry.snapshot().revision;
+            writeYaml(fixture,candidate);
+            settle(registry);
+            assertInvalidWithLastKnownGood(registry,initialRevision,fixture.alpha.toRealPath(),"ATT-SOURCE-REGISTRY-INVALID");
+
+            Files.createDirectory(recovering);
+            Thread.sleep(25);
+            registry.pollNow();
+
+            PackageRegistry.Snapshot recovered=registry.snapshot();
+            assertEquals("Ready",recovered.status);
+            assertEquals(2,recovered.generation);
+            assertEquals(recovering.toRealPath(),recovered.packages.get("alpha"));
+            assertEquals(candidate,Files.readString(fixture.configFile),"Filesystem recovery must not require a YAML rewrite");
+        }
+    }
+
     @Test void malformedUnauthorizedSymlinkPermissionAndPartialWritesRetainLastKnownGood() throws Exception {
         Fixture fixture=fixture();
         try(PackageRegistry registry=new PackageRegistry(fixture.config,Clock.systemUTC(),Duration.ofMillis(15),Duration.ofMillis(120),
@@ -164,8 +222,12 @@ class PackageRegistryTest {
     private void writeYaml(Fixture fixture,String yaml) throws Exception { Files.writeString(fixture.configFile,yaml); }
 
     private void replaceConfigAtomically(Fixture fixture) throws Exception {
+        replaceConfigAtomically(fixture,Files.readString(fixture.configFile));
+    }
+
+    private void replaceConfigAtomically(Fixture fixture,String yaml) throws Exception {
         Path replacement=temp.resolve("att-server.yaml.new");
-        Files.writeString(replacement,Files.readString(fixture.configFile));
+        Files.writeString(replacement,yaml);
         Files.move(replacement,fixture.configFile,StandardCopyOption.ATOMIC_MOVE,StandardCopyOption.REPLACE_EXISTING);
     }
 

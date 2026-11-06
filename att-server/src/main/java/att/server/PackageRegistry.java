@@ -38,6 +38,7 @@ final class PackageRegistry implements AutoCloseable {
     static final long MAX_OBSERVATION_MILLIS = 5000;
     static final int MAX_OBSERVATIONS = 20;
     static final int MAX_CONFIG_BYTES = 1024 * 1024;
+    static final long MAX_INVALID_RETRY_MILLIS = 5000;
 
     interface Coordinator { void apply(Runnable atomicInstall); }
     interface ChangeListener { void beforeRegistryChange(Snapshot previous,Snapshot next); }
@@ -85,13 +86,17 @@ final class PackageRegistry implements AutoCloseable {
     private final Path sourceFile;
     private final Clock clock;
     private final Duration debounce,maximumObservation;
+    private final long invalidRetryInitialMillis;
     private final Coordinator coordinator;
     private final ChangeListener changeListener;
     private final String deploymentPolicyFingerprint;
     private final AtomicReference<Snapshot> active;
     private ScheduledExecutorService watcher;
     private String lastEvaluatedDigest,pendingDigest;
+    private String retryDigest;
     private Instant pendingSince,firstObservedAt,unstableSince;
+    private Instant retryAt;
+    private int retryCount;
     private int observations;
     private boolean unstableReported;
 
@@ -105,12 +110,13 @@ final class PackageRegistry implements AutoCloseable {
         this.config=java.util.Objects.requireNonNull(config);this.clock=java.util.Objects.requireNonNull(clock);
         this.sourceFile=java.util.Objects.requireNonNull(config.sourceFile).toAbsolutePath().normalize();
         this.debounce=java.util.Objects.requireNonNull(debounce);this.maximumObservation=java.util.Objects.requireNonNull(maximumObservation);
+        this.invalidRetryInitialMillis=Math.max(1,Math.min(250,debounce.toMillis()));
         this.coordinator=java.util.Objects.requireNonNull(coordinator);this.changeListener=java.util.Objects.requireNonNull(changeListener);
-        Observation initial=readObservation();
-        Object parsed=parseYaml(initial.bytes());
-        Map<?,?> root=requireMap(parsed,"ATT Server configuration must be a YAML mapping");
+        Map<?,?> root=config.sourceDocument;
         this.deploymentPolicyFingerprint=fingerprint(withoutPackages(root));
-        lastEvaluatedDigest=initial.digest();
+        // ServerConfig has already validated this exact source document. Pin its digest so a
+        // replacement between ServerConfig.load and construction remains an unevaluated change.
+        lastEvaluatedDigest=config.sourceDigest;
         String revision=revision(config.packages,config.allowedRoots);
         Map<String,String> states=new LinkedHashMap<>();config.packages.keySet().stream().sorted().forEach(id->states.put(id,"Registered"));
         Instant now=clock.instant();
@@ -149,21 +155,23 @@ final class PackageRegistry implements AutoCloseable {
         String digest=observation.digest();
         if(digest.equals(lastEvaluatedDigest)) {
             pendingDigest=null;pendingSince=null;firstObservedAt=null;observations=0;
-            return;
+            if(!retryDue(digest,now))return;
+        } else {
+            if(!digest.equals(pendingDigest)) {
+                if(pendingDigest==null) {firstObservedAt=now;observations=1;}
+                else observations++;
+                pendingDigest=digest;pendingSince=now;
+            }
+            if(firstObservedAt!=null&&(Duration.between(firstObservedAt,now).compareTo(maximumObservation)>=0
+                    ||observations>MAX_OBSERVATIONS)&&!unstableReported) {
+                lastEvaluatedDigest=digest;pendingDigest=null;pendingSince=null;firstObservedAt=null;observations=0;
+                scheduleRetry(digest,now);
+                recordInvalid(now,"ATT-SOURCE-REGISTRY-UNSTABLE","The selected Server Config exceeded the bounded observation limit.");
+                unstableReported=true;
+                return;
+            }
+            if(pendingSince==null||Duration.between(pendingSince,now).compareTo(debounce)<0)return;
         }
-        if(!digest.equals(pendingDigest)) {
-            if(pendingDigest==null) {firstObservedAt=now;observations=1;}
-            else observations++;
-            pendingDigest=digest;pendingSince=now;
-        }
-        if(firstObservedAt!=null&&(Duration.between(firstObservedAt,now).compareTo(maximumObservation)>=0
-                ||observations>MAX_OBSERVATIONS)&&!unstableReported) {
-            lastEvaluatedDigest=digest;pendingDigest=null;pendingSince=null;firstObservedAt=null;observations=0;
-            recordInvalid(now,"ATT-SOURCE-REGISTRY-UNSTABLE","The selected Server Config exceeded the bounded observation limit.");
-            unstableReported=true;
-            return;
-        }
-        if(pendingSince==null||Duration.between(pendingSince,now).compareTo(debounce)<0)return;
 
         try {
             Map<?,?> document=requireMap(parseYaml(observation.bytes()),"ATT Server configuration must be a YAML mapping");
@@ -177,10 +185,29 @@ final class PackageRegistry implements AutoCloseable {
             ServerConfig.PackageRoots roots=ServerConfig.validatePackageRoots(rawPackages,config.dataDir,config.runtimeConfigPath,true);
             install(roots,now);
             lastEvaluatedDigest=digest;pendingDigest=null;pendingSince=null;firstObservedAt=null;observations=0;unstableReported=false;
+            clearRetry();
         } catch(Exception invalid) {
             lastEvaluatedDigest=digest;pendingDigest=null;pendingSince=null;firstObservedAt=null;observations=0;
+            scheduleRetry(digest,now);
             recordInvalid(now,"ATT-SOURCE-REGISTRY-INVALID","The Package Registry candidate is invalid; the last-known-good registry remains active.");
         }
+    }
+
+    private boolean retryDue(String digest,Instant now) {
+        return digest.equals(retryDigest)&&retryAt!=null&&!now.isBefore(retryAt);
+    }
+
+    private void scheduleRetry(String digest,Instant now) {
+        if(!digest.equals(retryDigest)) {retryDigest=digest;retryCount=0;}
+        long delay=invalidRetryInitialMillis;
+        for(int i=0;i<retryCount&&delay<MAX_INVALID_RETRY_MILLIS;i++)
+            delay=Math.min(MAX_INVALID_RETRY_MILLIS,delay*2);
+        retryCount++;
+        retryAt=now.plusMillis(delay);
+    }
+
+    private void clearRetry() {
+        retryDigest=null;retryAt=null;retryCount=0;
     }
 
     void markWarming(String packageId,String expectedRevision) { updatePackageState(packageId,expectedRevision,"Warming"); }
