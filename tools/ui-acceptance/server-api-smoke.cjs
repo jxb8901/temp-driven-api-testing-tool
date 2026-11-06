@@ -62,29 +62,30 @@ async function main() {
     await page.getByRole('button', { name: 'Reference Flow' }).click();
     await page.getByRole('heading', { name: 'Reference Flow' }).waitFor();
 
-    const definitionEditor = page.locator('#att-explorer-panel-definition .cm-editor');
-    await definitionEditor.waitFor();
-    const inspectEditor = (locator, tokenSelector) => locator.evaluate((element, selector) => {
-      const content = element.querySelector('.cm-content');
-      const token = content?.querySelector(selector);
-      return {
-        text: Array.from(content?.querySelectorAll('.cm-line') || []).map(line => line.textContent || '').join('\n'),
-        height: element.getBoundingClientRect().height,
-        tokenText: token?.textContent || '',
-        tokenColor: token ? getComputedStyle(token).color : '',
-        editorColor: content ? getComputedStyle(content).color : '',
-      };
-    }, tokenSelector);
-    const jsonLight = await inspectEditor(definitionEditor, '.att-token-string');
-    assert.ok(jsonLight.text.includes('reference.flow.v1'), 'the JSON Definition source must be visible under the production CSP');
-    assert.ok(jsonLight.height > 0, 'the JSON Definition editor must have visible layout under the production CSP');
-    assert.ok(jsonLight.tokenText && jsonLight.tokenColor !== jsonLight.editorColor,
-      `JSON string tokens must have visible syntax color in the light theme: ${JSON.stringify(jsonLight)}`);
+    await page.getByRole('tab', { name: 'Visual' }).waitFor();
+    const actionNodes = page.locator('.att-action-list li > button');
+    await actionNodes.first().waitFor();
+    assert.deepEqual(await page.locator('.att-action-list .att-action-name').allTextContents(), ['inspectPayload', 'policyBlockedPayload'],
+      'Flow action nodes should preserve their authored order');
+    const inspectVisualNode = async () => actionNodes.first().evaluate(element => {
+      const rect = element.getBoundingClientRect();
+      return { text: element.innerText, width: rect.width, height: rect.height,
+        color: getComputedStyle(element.querySelector('.att-action-name')).color,
+        background: getComputedStyle(element.closest('.att-action-list')).backgroundColor };
+    });
+    const visualLight = await inspectVisualNode();
+    assert.ok(visualLight.text.includes('Log · Request &{../../SCHEDULED/payload/request.xml}'),
+      `the Flow Visual node should show its type-specific summary: ${JSON.stringify(visualLight)}`);
+    assert.ok(visualLight.width > 0 && visualLight.height > 0 && visualLight.color !== visualLight.background,
+      `Flow Visual nodes must be visible under the production CSP in the light theme: ${JSON.stringify(visualLight)}`);
+    assert.ok((await page.locator('.att-action-properties').innerText()).includes('&{../../SCHEDULED/payload/request.xml}'),
+      'the selected Flow action should show its authored property value');
     await page.getByRole('button', { name: 'Switch to dark theme' }).click();
     await page.waitForFunction(() => document.documentElement.dataset.theme === 'dark');
-    const jsonDark = await inspectEditor(definitionEditor, '.att-token-string');
-    assert.ok(jsonDark.text.includes('reference.flow.v1') && jsonDark.height > 0, 'JSON Definition text and layout must remain visible in the dark theme');
-    assert.ok(jsonDark.tokenColor && jsonDark.tokenColor !== jsonDark.editorColor, 'JSON string tokens must have visible syntax color in the dark theme');
+    const visualDark = await inspectVisualNode();
+    assert.ok(visualDark.text.includes('inspectPayload') && visualDark.width > 0 && visualDark.height > 0
+      && visualDark.color !== visualDark.background,
+    `Flow Visual nodes must remain visible under the production CSP in the dark theme: ${JSON.stringify(visualDark)}`);
     await page.getByRole('button', { name: 'Switch to light theme' }).click();
     await page.waitForFunction(() => document.documentElement.dataset.theme === 'light');
 

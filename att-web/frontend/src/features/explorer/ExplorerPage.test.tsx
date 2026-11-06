@@ -128,6 +128,27 @@ describe('Explorer source viewer', () => {
     expect(container.querySelector('[aria-label="Safe resource definition"]')).not.toBeNull();
   });
 
+  it('shows a loading state before an action projection arrives and distinguishes malformed from missing projections', async () => {
+    let resolveDetail!: (detail: ResourceDetail) => void;
+    const pendingDetail = new Promise<ResourceDetail>(resolve => { resolveDetail = resolve; });
+    const delayedApi = apiWith({ getResource: vi.fn(() => pendingDetail) });
+    await render(<ExplorerPage api={delayedApi} packageId="payments" resourceRoute={{ type: 'template', resourceId: 'slow' }} environment="SIT"
+      registerUnsavedChanges={() => () => {}} onResourceRouteChange={() => {}} onJobAccepted={() => {}} />);
+    expect(container.textContent).toContain('Loading action definition…');
+    expect(container.querySelector('[aria-label="Visual action inspector"]')).toBeNull();
+    expect(container.textContent).not.toContain('Actions are unavailable');
+
+    await act(async () => resolveDetail({ resource: resource('template', 'slow'), definition: {} }));
+    await settle();
+    expect(container.textContent).toContain('Actions are unavailable because the safe definition does not contain an action map');
+
+    const missingApi = apiWith({ getResource: vi.fn(async () => ({ resource: resource('template', 'missing') })) });
+    await render(<ExplorerPage api={missingApi} packageId="payments" resourceRoute={{ type: 'template', resourceId: 'missing' }} environment="SIT"
+      registerUnsavedChanges={() => () => {}} onResourceRouteChange={() => {}} onJobAccepted={() => {}} />);
+    expect(container.textContent).toContain('No definition projection is available.');
+    expect(container.textContent).not.toContain('Actions are unavailable');
+  });
+
   it('routes a selected resolved Flow action to its detail and leaves unresolved targets inert', async () => {
     const flow = resource('template', 'flow-caller', { references: [{ type: 'flow', logicalId: 'common.compose.v1', resourceId: 'flow-target',
       resolution: 'resolved', callSite: { actionId: 'compose' } }] });

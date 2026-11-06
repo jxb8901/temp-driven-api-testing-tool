@@ -97,13 +97,26 @@ async function main() {
           ], total: 2, nextCursor: null,
         });
       }
-      const detailMatch = path.match(/^packages\/payments\/resources\/template\/(checkout|empty)$/);
+      const detailMatch = path.match(/^packages\/payments\/resources\/(template|tool|case)\/(checkout|empty|lookup|smoke-case)$/);
       if (method === 'GET' && detailMatch) {
         detailCalls++;
-        const id = detailMatch[1];
+        const [, type, id] = detailMatch;
+        if ((type === 'template' && !['checkout', 'empty'].includes(id))
+            || (type === 'tool' && id !== 'lookup')
+            || (type === 'case' && id !== 'smoke-case')) return jsonResponse(route, 404, { error: { code: 'FIXTURE_NOT_FOUND', summary: `No Explorer fixture route: ${method} ${path}` } });
+        const definition = type === 'tool' ? { toolId: id, executionKind: 'call' }
+          : type === 'case' ? { caseId: id, steps: [] }
+            : { template: id, inputs: ['credential'], actions: id === 'checkout' ? {
+              prepare: { type: 'assign', description: 'Prepare the request from authored inputs.', name: 'request', expression: '${EXEC.INPUT.credential}',
+                runWhen: '${EXEC.INPUT.enabled}', onFailure: 'continue', retry: { maxAttempts: 2 }, evidence: { collectors: ['response'] } },
+              lookup: { type: 'tool', call: 'billing.lookup.v2' },
+              verify: { type: 'assert', assert: '${EXEC.VARS.account} != null', expected: true, actual: '${EXEC.VARS.account}' },
+              'x-disabled': { type: 'log', message: 'extension action remains disabled' },
+            } : {} };
         return jsonResponse(route, 200, {
-          resource: { type: 'template', resourceId: id, logicalId: id, name: id, state: 'ready', sourceAvailable: true, references: [], referencedBy: [] },
-          definition: { template: id, inputs: ['credential'] },
+          resource: { type, resourceId: id, logicalId: id, name: id, state: 'ready', sourceAvailable: type === 'template', references: [], referencedBy: [] },
+          definition,
+          ...(type === 'template' && id === 'checkout' ? { actionOrder: ['prepare', 'lookup', 'verify', 'x-disabled'] } : {}),
         });
       }
       const sourceMatch = path.match(/^packages\/payments\/resources\/template\/(checkout|empty)\/source$/);
@@ -267,7 +280,53 @@ async function main() {
     await page.goto(`${base}#/packages/payments/resources/template/checkout`);
     await page.getByRole('heading', { name: 'Resource details', exact: true }).waitFor();
     await page.getByRole('heading', { name: 'checkout' }).waitFor();
-    await page.getByRole('tab', { name: 'Definition' }).focus();
+    await page.getByRole('tab', { name: 'Visual' }).waitFor();
+    const actionButtons = page.locator('.att-action-list li > button');
+    await actionButtons.first().waitFor();
+    assert.deepEqual(await page.locator('.att-action-list .att-action-name').allTextContents(), ['prepare', 'lookup', 'verify', 'x-disabled'],
+      'Template action nodes should follow the authored action order');
+    const visualLight = await actionButtons.first().evaluate(element => {
+      const rect = element.getBoundingClientRect();
+      return { width: rect.width, height: rect.height, color: getComputedStyle(element.querySelector('.att-action-name')).color,
+        background: getComputedStyle(element.closest('.att-action-list')).backgroundColor, text: element.innerText };
+    });
+    assert.ok(visualLight.width > 0 && visualLight.height > 0 && visualLight.color !== visualLight.background,
+      `Template Visual nodes must be visible in the light theme: ${JSON.stringify(visualLight)}`);
+    assert.match(visualLight.text, /Prepare the request from authored inputs/);
+    assert.match(visualLight.text, /Conditional/);
+    await actionButtons.nth(1).click();
+    const actionProperties = page.locator('.att-action-properties');
+    await actionProperties.getByRole('heading', { name: 'Type-specific' }).waitFor();
+    await actionProperties.getByText('billing.lookup.v2', { exact: true }).waitFor();
+    await page.getByRole('button', { name: 'Switch to dark theme' }).click();
+    await page.waitForFunction(() => document.documentElement.dataset.theme === 'dark');
+    const visualDark = await actionButtons.first().evaluate(element => {
+      const rect = element.getBoundingClientRect();
+      return { width: rect.width, height: rect.height, color: getComputedStyle(element.querySelector('.att-action-name')).color,
+        background: getComputedStyle(element.closest('.att-action-list')).backgroundColor };
+    });
+    assert.ok(visualDark.width > 0 && visualDark.height > 0 && visualDark.color !== visualDark.background,
+      `Template Visual nodes must be visible in the dark theme: ${JSON.stringify(visualDark)}`);
+    await page.getByRole('button', { name: 'Switch to light theme' }).click();
+    await page.waitForFunction(() => document.documentElement.dataset.theme === 'light');
+    await page.setViewportSize({ width: 390, height: 844 });
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true,
+      'the Template Visual inspector should fit a mobile viewport without horizontal overflow');
+    assert.ok(await actionButtons.first().evaluate(element => element.getBoundingClientRect().width > 0),
+      'ordered action nodes should remain visible at mobile width');
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    for (const [type, id, field] of [['tool', 'lookup', 'toolId'], ['case', 'smoke-case', 'caseId']]) {
+      await page.goto(`${base}#/packages/payments/resources/${type}/${id}`);
+      await page.getByRole('heading', { name: id }).waitFor();
+      await page.getByRole('tab', { name: 'Definition' }).waitFor();
+      const definitionEditor = page.locator('#att-explorer-panel-definition .cm-editor');
+      await definitionEditor.waitFor();
+      assert.equal(await page.locator('.att-action-inspector').count(), 0, `${type} should retain the read-only Definition view`);
+      assert.ok((await definitionEditor.innerText()).includes(field), `${type} Definition should remain visible through CodeMirror`);
+    }
+    await page.goto(`${base}#/packages/payments/resources/template/checkout`);
+    await page.getByRole('tab', { name: 'Visual' }).waitFor();
+    await page.getByRole('tab', { name: 'Visual' }).focus();
     await page.keyboard.press('ArrowRight');
     await page.getByRole('tab', { name: 'Source' }).waitFor({ state: 'visible' });
     await page.waitForFunction(() => document.querySelector('[role="tab"][data-tab="source"]')?.getAttribute('aria-selected') === 'true');
@@ -282,7 +341,7 @@ async function main() {
     assert.equal((await page.evaluate(() => navigator.clipboard.readText())).includes('step-5000: safe'), true);
     // A completed revisit must hit session memory while still verifying capabilities.
     const sourceBeforeRevisit = sourceCalls;
-    await page.getByRole('tab', { name: 'Definition', exact: true }).click();
+    await page.getByRole('tab', { name: 'Visual', exact: true }).click();
     const capabilityResponse = page.waitForResponse(response => response.url().endsWith('/api/v1/auth/capabilities'));
     await page.getByRole('tab', { name: 'Source', exact: true }).click();
     await capabilityResponse;
@@ -304,7 +363,7 @@ async function main() {
 
     // Simulate another tab changing the account: the next live capability check
     // must replace the old session and fetch the same source for the new identity.
-    await page.getByRole('tab', { name: 'Definition', exact: true }).click();
+    await page.getByRole('tab', { name: 'Visual', exact: true }).click();
     identityVersion = 2;
     const identityResponse = page.waitForResponse(response => response.url().endsWith('/resources/template/checkout/source'));
     await page.getByRole('tab', { name: 'Source', exact: true }).click();
@@ -339,7 +398,7 @@ async function main() {
 
     await page.goto(`${base}#/packages/payments/resources/template/empty`);
     await page.getByRole('heading', { name: 'empty' }).waitFor();
-    await page.getByRole('tab', { name: 'Definition' }).focus();
+    await page.getByRole('tab', { name: 'Visual' }).focus();
     await page.keyboard.press('ArrowRight');
     await page.getByText('Safe source is empty.').waitFor();
     assert.equal(await page.locator('.att-explorer-source .att-code-editor').count(), 0, 'an empty source does not mount a copy toolbar');
@@ -504,7 +563,7 @@ async function main() {
     authFailure = true;
     await page.goto(`${base}#/packages/payments/resources/template/checkout`);
     await page.getByRole('heading', { name: 'checkout' }).waitFor();
-    await page.getByRole('tab', { name: 'Definition' }).focus();
+    await page.getByRole('tab', { name: 'Visual' }).focus();
     await page.keyboard.press('ArrowRight');
     await page.getByText('Your session has expired. Sign in again, then refresh safe source.').waitFor();
     assert.equal(await page.locator('body').innerText().then(text => text.includes('canary-401-secret')), false, 'auth errors must not expose response bodies');

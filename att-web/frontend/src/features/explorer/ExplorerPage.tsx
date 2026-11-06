@@ -297,7 +297,7 @@ export function ExplorerPage({ api, packageId, resourceRoute, environment,
     if (identityChanged) { setDetail(null); setDefinition(null); setActionOrder(undefined); }
     api.getResource(identity, controller.signal).then(response => {
       if (controller.signal.aborted) return;
-      setDetail(response.resource); setDefinition(response.definition ?? {}); setActionOrder(response.actionOrder); setDetailError('');
+      setDetail(response.resource); setDefinition(response.definition); setActionOrder(response.actionOrder); setDetailError('');
     }).catch(error => {
       if (!controller.signal.aborted) setDetailError(userError(error, 'resource detail'));
     }).finally(() => { if (!controller.signal.aborted) setDetailLoading(false); });
@@ -420,6 +420,8 @@ export function ExplorerPage({ api, packageId, resourceRoute, environment,
   const previewText = draft?.previewYaml || (draft?.preview ? JSON.stringify(draft.preview, null, 2) : '');
   const detailText = safeProjection(definition);
   const hasVisualActions = identity?.type === 'template' || identity?.type === 'flow';
+  const requestedDetailIdentityKey = identity ? `${identity.packageId}:${identity.type}:${identity.resourceId}` : '';
+  const detailRequestPending = Boolean(identity && (detailLoading || detailIdentityKey.current !== requestedDetailIdentityKey));
   const sourceIdentity = identity;
   const onTabsKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
@@ -507,10 +509,13 @@ export function ExplorerPage({ api, packageId, resourceRoute, environment,
           </div>
           <section id="att-explorer-panel-definition" role="tabpanel" aria-labelledby="att-explorer-tab-definition" hidden={tab !== 'definition'}>
             {hasVisualActions
-              ? <ActionInspector definition={definition} actionOrder={actionOrder} resourceType={identity.type === 'flow' ? 'flow' : 'template'}
-                  resourceId={identity.resourceId} references={detail?.references}
-                  onOpenFlow={targetId => onResourceRouteChange({ type: 'flow', resourceId: targetId, tab: 'definition' })} />
-              : definition == null && !detailLoading ? <p>No definition projection is available.</p>
+              ? definition == null && detailRequestPending ? <p role="status">Loading action definition…</p>
+                : definition == null && detailError ? <p role="status">The action definition could not be loaded.</p>
+                  : definition == null ? <p>No definition projection is available.</p>
+                    : <ActionInspector definition={definition} actionOrder={actionOrder} resourceType={identity.type === 'flow' ? 'flow' : 'template'}
+                        resourceId={identity.resourceId} references={detail?.references}
+                        onOpenFlow={targetId => onResourceRouteChange({ type: 'flow', resourceId: targetId, tab: 'definition' })} />
+              : definition == null && !detailRequestPending ? <p>No definition projection is available.</p>
                 : <CodeEditor value={detailText} language="json" label="Safe resource definition" readOnly sourcePath={detail?.sourcePath} fileReferences={[]} />}
           </section>
           {sourceIdentity && <section id="att-explorer-panel-source" role="tabpanel" aria-labelledby="att-explorer-tab-source" hidden={tab !== 'source'}>

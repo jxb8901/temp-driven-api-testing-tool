@@ -6,7 +6,8 @@ const MAX_STRUCTURED_CHARACTERS = 100_000;
 const INITIAL_ACTIONS = 200;
 const MORE_ACTIONS = 200;
 
-const COMMON_FIELDS = new Set(['type', 'description', 'runWhen', 'onFailure', 'timeoutMs', 'retry', 'evidence']);
+const COMMON_FIELDS = new Set(['description', 'runWhen', 'onFailure', 'timeoutMs']);
+const SPECIAL_FIELDS = new Set(['retry', 'evidence']);
 const TYPE_FIELDS: Record<string, ReadonlySet<string>> = {
   tool: new Set(['call']),
   assert: new Set(['assert', 'expected', 'actual']),
@@ -56,6 +57,71 @@ function displayValue(value: unknown): string {
 
 function clippedLabel(value: string): string {
   return value.length > 120 ? `${value.slice(0, 117)}…` : value;
+}
+
+function clippedText(value: string, limit: number): string {
+  return value.length > limit ? `${value.slice(0, Math.max(0, limit - 1))}…` : value;
+}
+
+function summaryValue(value: unknown, limit = 72): string {
+  if (typeof value === 'string') return clippedText(value.trim(), limit);
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  if (value === null) return 'null';
+  if (Array.isArray(value)) return `List (${value.length} items)`;
+  const record = objectRecord(value);
+  return record ? `Object (${Object.keys(record).length} fields)` : '';
+}
+
+function actionSummary(type: string, action: Record<string, unknown> | null): string {
+  const details = (() => {
+    switch (type) {
+      case 'tool': return { label: 'Tool call', value: action?.call };
+      case 'flow': return { label: 'Flow target', value: action?.use };
+      case 'assert': return { label: 'Assert', value: action?.assert };
+      case 'log': return { label: 'Log', value: action?.message ?? action?.value ?? action?.format };
+      case 'assign': return { label: 'Assign', value: action?.name ?? action?.expression ?? action?.value };
+      default: return { label: type === 'unknown' ? 'Unsupported action' : type, value: undefined };
+    }
+  })();
+  const value = summaryValue(details.value);
+  return value ? `${details.label} · ${value}` : details.label;
+}
+
+interface ActionModifier {
+  kind: 'conditional' | 'failure' | 'retry' | 'evidence';
+  label: string;
+}
+
+function actionModifiers(action: Record<string, unknown> | null): ActionModifier[] {
+  if (!action) return [];
+  const modifiers: ActionModifier[] = [];
+  if (action.runWhen != null) modifiers.push({ kind: 'conditional', label: 'Conditional' });
+  if (action.onFailure != null) {
+    const value = summaryValue(action.onFailure, 36);
+    modifiers.push({ kind: 'failure', label: value ? `On failure · ${value}` : 'On failure' });
+  }
+  if (action.retry != null) {
+    const retry = objectRecord(action.retry);
+    const maximumAttempts = retry?.maxAttempts;
+    const attempts = maximumAttempts ?? retry?.attempts;
+    modifiers.push({ kind: 'retry', label: attempts == null ? 'Retry configured'
+      : maximumAttempts != null ? `Retry · up to ${summaryValue(maximumAttempts, 20)} attempts` : `Retry · ${summaryValue(attempts, 20)} attempts` });
+  }
+  if (action.evidence != null) modifiers.push({ kind: 'evidence', label: 'Evidence collectors' });
+  return modifiers;
+}
+
+function PropertyGroup({ title, properties }: { title: string; properties: Array<[string, unknown]> }) {
+  if (!properties.length) return null;
+  return <section className="att-action-property-group" aria-label={`${title} properties`}>
+    <h4>{title}</h4>
+    <dl className="att-action-property-list">{properties.map(([key, value]) => <div key={key}>
+      <dt>{key}</dt><dd><ValueView value={value} label={key} />
+        {key === 'runWhen' && <span className="att-action-note">Expression shown as authored; it is not evaluated in this view.</span>}
+        {key === 'assert' && <span className="att-action-note">Assertion expression shown as authored; it is not evaluated in this view.</span>}
+      </dd>
+    </div>)}</dl>
+  </section>;
 }
 
 function actionEntries(definition: unknown, actionOrder?: string[]): ActionEntry[] | null {
@@ -118,8 +184,12 @@ export function ActionInspector({ definition, actionOrder, resourceType, resourc
   const selected = entries[Math.min(selectedIndex, entries.length - 1)];
   const action = objectRecord(selected.value);
   const type = typeof action?.type === 'string' ? action.type : 'unknown';
-  const knownFields = new Set([...COMMON_FIELDS, ...(TYPE_FIELDS[type] || [])]);
-  const properties = Object.entries(action || {}).filter(([key]) => knownFields.has(key));
+  const typeFields = TYPE_FIELDS[type] || new Set<string>();
+  const commonProperties = Object.entries(action || {}).filter(([key]) => COMMON_FIELDS.has(key));
+  const typeProperties = Object.entries(action || {}).filter(([key]) => typeFields.has(key));
+  const retryProperties = Object.entries(action || {}).filter(([key]) => key === 'retry');
+  const evidenceProperties = Object.entries(action || {}).filter(([key]) => key === 'evidence');
+  const knownFields = new Set([...COMMON_FIELDS, ...typeFields, ...SPECIAL_FIELDS, 'type']);
   const extraProperties = Object.entries(action || {}).filter(([key]) => !knownFields.has(key));
   const target = type === 'flow' ? flowReference(selected, action?.use, references) : null;
   const selfTarget = target?.state === 'resolved' && target.resourceId === resourceId;
@@ -134,14 +204,25 @@ export function ActionInspector({ definition, actionOrder, resourceType, resourc
           {entries.slice(0, visibleCount).map((entry, index) => {
             const item = objectRecord(entry.value);
             const itemType = typeof item?.type === 'string' ? item.type : 'unknown';
+            const description = typeof item?.description === 'string' ? item.description.trim() : '';
+            const modifiers = actionModifiers(item);
             return <li key={`${entry.id}:${index}`}>
               <button type="button" aria-pressed={index === selectedIndex} aria-current={index === selectedIndex ? 'step' : undefined}
                 className={entry.disabled ? 'is-disabled-action' : undefined}
-                onClick={() => setSelectedIndex(index)} title={clippedLabel(entry.id)}>
+                onClick={() => setSelectedIndex(index)} title={entry.id}>
                 <span className="att-action-number">{index + 1}</span>
-                <span className="att-action-name">{clippedLabel(entry.id)}</span>
-                <span className="att-action-type">{itemType}</span>
-                {entry.disabled && <span className="att-action-disabled">Disabled</span>}
+                <span className="att-action-card">
+                  <span className="att-action-title-line">
+                    <span className="att-action-name">{clippedLabel(entry.id)}</span>
+                    <span className="att-action-type">{itemType}</span>
+                    {entry.disabled && <span className="att-action-disabled">Disabled</span>}
+                  </span>
+                  {description && <span className="att-action-description" title={clippedText(description, 500)}>{clippedText(description, 120)}</span>}
+                  <span className="att-action-summary">{actionSummary(itemType, item)}</span>
+                  {modifiers.length > 0 && <span className="att-action-modifiers" aria-label={`Execution modifiers: ${modifiers.map(modifier => modifier.label).join(', ')}`}>
+                    {modifiers.map(modifier => <span key={modifier.kind} className="att-action-modifier" data-modifier={modifier.kind}>{modifier.label}</span>)}
+                  </span>}
+                </span>
               </button>
             </li>;
           })}
@@ -158,14 +239,10 @@ export function ActionInspector({ definition, actionOrder, resourceType, resourc
           {selected.disabled && <span className="att-action-disabled">Disabled extension entry</span>}
         </header>
         {!action && <p role="status">This action entry is not an object. Its authored value remains available below.</p>}
-        {properties.length > 0 && <dl className="att-action-property-list">
-          {properties.filter(([key]) => key !== 'type').map(([key, value]) => <div key={key}>
-            <dt>{key}</dt><dd><ValueView value={value} label={key} />
-              {key === 'runWhen' && <span className="att-action-note">Expression shown as authored; it is not evaluated in this view.</span>}
-              {key === 'assert' && <span className="att-action-note">Assertion expression shown as authored; it is not evaluated in this view.</span>}
-            </dd>
-          </div>)}
-        </dl>}
+        <PropertyGroup title="Common" properties={commonProperties} />
+        <PropertyGroup title="Type-specific" properties={typeProperties} />
+        <PropertyGroup title="Retry" properties={retryProperties} />
+        <PropertyGroup title="Evidence collectors" properties={evidenceProperties} />
         {type === 'flow' && <div className="att-flow-target" aria-live="polite">
           {target?.state === 'resolved' && selfTarget
             ? <p role="status">This Flow references itself. Recursive Flow navigation is disabled.</p>

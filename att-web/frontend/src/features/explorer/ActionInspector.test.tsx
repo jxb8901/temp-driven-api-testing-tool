@@ -84,6 +84,36 @@ describe('ActionInspector', () => {
     expect(host.querySelector('.att-action-properties')?.textContent).toContain("concat(${EXEC.INPUT.id}, '-done')");
   });
 
+  it('summarizes action types, authored descriptions, execution modifiers, and grouped properties', async () => {
+    const onOpenFlow = vi.fn();
+    const longDescription = 'A'.repeat(150);
+    const definition = { actions: {
+      invoke: { type: 'tool', description: longDescription, call: 'billing.lookup.v2', runWhen: '${EXEC.INPUT.enabled}',
+        onFailure: 'continue', retry: { maxAttempts: 3 }, evidence: { collectors: ['response'] }, customFlag: true },
+      compose: { type: 'flow', use: 'common.compose.v1' },
+      verify: { type: 'assert', assert: '${EXEC.VARS.count} > 0' },
+    } };
+    await render(<ActionInspector definition={definition} resourceType="template" resourceId="template-1" onOpenFlow={onOpenFlow} />);
+
+    const invoke = actionButton('invoke');
+    expect(invoke.textContent).toContain('Tool call · billing.lookup.v2');
+    expect(invoke.textContent).toContain('Conditional');
+    expect(invoke.textContent).toContain('On failure · continue');
+    expect(invoke.textContent).toContain('Retry · up to 3 attempts');
+    expect(invoke.textContent).toContain('Evidence collectors');
+    const clippedDescription = invoke.querySelector('.att-action-description')?.textContent || '';
+    expect(clippedDescription).toHaveLength(120);
+    expect(clippedDescription.endsWith('…')).toBe(true);
+    expect(host.querySelector('[aria-label="Common properties"] h4')?.textContent).toBe('Common');
+    expect(host.querySelector('[aria-label="Type-specific properties"] h4')?.textContent).toBe('Type-specific');
+    expect(host.querySelector('[aria-label="Retry properties"] h4')?.textContent).toBe('Retry');
+    expect(host.querySelector('[aria-label="Evidence collectors properties"] h4')?.textContent).toBe('Evidence collectors');
+    expect(host.querySelector('[aria-label="Additional action properties"]')?.textContent).toContain('customFlag');
+
+    expect(actionButton('compose').textContent).toContain('Flow target · common.compose.v1');
+    expect(actionButton('verify').textContent).toContain('Assert · ${EXEC.VARS.count} > 0');
+  });
+
   it('opens only a resolved Flow reference and guards unresolved and recursive targets', async () => {
     const onOpenFlow = vi.fn();
     const definition = { actions: { compose: { type: 'flow', use: 'common.compose.v1' } } };
