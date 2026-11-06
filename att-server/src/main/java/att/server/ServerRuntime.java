@@ -82,6 +82,8 @@ final class ServerRuntime implements AutoCloseable {
     }
     final ServerConfig config;
     final PackageRegistry packageRegistry;
+    private final SourcePublicationBarrier sourcePublicationBarrier;
+    private final SourceFileTransaction sourceFileTransaction;
     final JobStore store;
     private final LoadProgressPersistence loadProgressPersistence;
     final AuthService auth;
@@ -145,6 +147,7 @@ final class ServerRuntime implements AutoCloseable {
     private volatile long cachedMonitoringSnapshotAtNanos;
     final MonitoringRequestMetrics monitoringRequests=new MonitoringRequestMetrics();
     final PackageManifestPublisher manifestPublisher;
+    final ChangeSetPublisher changeSetPublisher;
     private volatile Map<String,Object> jobStorageReport;
     private final ConcurrentHashMap<Process,Boolean> inspectionProcesses=new ConcurrentHashMap<>();
     private final Object draftLock=new Object();
@@ -192,14 +195,44 @@ final class ServerRuntime implements AutoCloseable {
                   LoadProgressPersistence loadProgressPersistence) throws Exception {
         if(Runtime.version().feature()<17)throw new IllegalStateException("ATT Server requires Java 17 or later; detected Java "+Runtime.version().feature());
         this.config=config;this.artifactPublisher=java.util.Objects.requireNonNull(artifactPublisher);this.workerLibs=workerLibs==null?null:Paths.get(workerLibs).toAbsolutePath().normalize();this.workerSchemaRegistryDigest=WorkerRuntimeClasspath.schemaRegistryDigestIfPresent(this.workerLibs);this.processLauncher=processLauncher;this.clock=java.util.Objects.requireNonNull(clock);this.store=new JobStore(config);this.loadProgressPersistence=loadProgressPersistence==null?this.store::updateLoadProgress:loadProgressPersistence;try{this.auth=new AuthService(config,store);}catch(Exception failed){store.close();throw failed;}this.loadSlots=new Semaphore(config.maxConcurrentLoad,true);this.admissionSlots=new Semaphore(config.maxConcurrent+config.queuedLimit,true);
-        manifestPublisher=new PackageManifestPublisher(config.dataDir,config.packageConfiguration,clock,
-                this::manifestEditableRoot,this::validateManifestCandidate,
-                (actor,action,packageId,detail)->store.audit(actor,action,null,packageId,detail));
+        sourcePublicationBarrier=new SourcePublicationBarrier();
+        sourceFileTransaction=new SourceFileTransaction(config.dataDir,sourcePublicationBarrier);
         packageRegistry=new PackageRegistry(config,clock,
                 java.time.Duration.ofMillis(PackageRegistry.DEBOUNCE_MILLIS),
                 java.time.Duration.ofMillis(PackageRegistry.MAX_OBSERVATION_MILLIS),
                 mutation->{admissionLifecycle.writeLock().lock();try{mutation.run();}finally{admissionLifecycle.writeLock().unlock();}},
                 (previous,next)->invalidateRegistryBoundState());
+        Map<String,Path> sourceRecoveryRoots=new LinkedHashMap<String,Path>();
+        for(Map.Entry<String,Path> entry:config.packages.entrySet())
+            sourceRecoveryRoots.put(ChangeSetPublisher.PACKAGE_SOURCE+":"+entry.getKey(),entry.getValue().toRealPath());
+        Path centralRoot=ServerConfig.runtimeConfigRoot(config.runtimeConfigPath).toRealPath();
+        sourceRecoveryRoots.put(ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG+":"+ChangeSetPublisher.CENTRAL_SCOPE_ID,centralRoot);
+        sourceFileTransaction.recover(sourceRecoveryRoots,(actor,domain,scopeId,outcome,revision)->
+                store.audit(actor,"SOURCE_CHANGE_SET_RECOVERY",null,ChangeSetPublisher.PACKAGE_SOURCE.equals(domain)?scopeId:null,
+                        domain+" "+outcome+" revision="+revision));
+        manifestPublisher=new PackageManifestPublisher(config.dataDir,config.packageConfiguration,clock,
+                this::manifestEditableRoot,this::validateManifestCandidate,
+                (actor,action,packageId,detail)->store.audit(actor,action,null,packageId,detail),sourceFileTransaction);
+        changeSetPublisher=new ChangeSetPublisher(clock,config.packageConfiguration.maxDrafts,
+                config.packageConfiguration.maxDraftsPerUser,config.packageConfiguration.draftTtlSeconds,
+                (domain,scopeId,actor,systemSettingsWrite)->{
+                    if(ChangeSetPublisher.PACKAGE_SOURCE.equals(domain)) {
+                        if(!canEditPackageContent(scopeId,actor))throw new ChangeSetPublisher.Denied();
+                        Path root=packageRoot(scopeId);if(root==null)throw new ChangeSetPublisher.Missing();
+                        return new ChangeSetPublisher.Scope(domain,scopeId,root,
+                                ServerConfig.runtimeConfigRoot(config.runtimeConfigPath),packageRegistry.snapshot().revision,
+                                workerSchemaRegistryDigest);
+                    }
+                    if(!config.centralConfigurationEditingEnabled
+                            ||!SourceAuthorizationPolicy.canWriteSystemSettings(config.authenticationRequired,systemSettingsWrite))
+                        throw new ChangeSetPublisher.Denied();
+                    return new ChangeSetPublisher.Scope(domain,scopeId,centralRoot,centralRoot,null,workerSchemaRegistryDigest);
+                },
+                ChangeSetPublisher.unavailableValidator(),
+                ChangeSetPublisher.unavailableConfigGate(),
+                (actor,action,domain,scopeId,detail)->store.audit(actor,action,null,
+                        ChangeSetPublisher.PACKAGE_SOURCE.equals(domain)?scopeId:null,domain+" "+scopeId+" "+detail),
+                sourceFileTransaction);
         cursorRandom.nextBytes(cursorKey);
         java.util.concurrent.BlockingQueue<Runnable> queue=config.queuedLimit==0?new SynchronousQueue<>():new ArrayBlockingQueue<>(config.queuedLimit);
         workers=new ThreadPoolExecutor(config.maxConcurrent,config.maxConcurrent,0,TimeUnit.MILLISECONDS,queue,r->{Thread t=new Thread(r,"att-server-worker");t.setDaemon(true);return t;},new ThreadPoolExecutor.AbortPolicy());
@@ -856,6 +889,7 @@ final class ServerRuntime implements AutoCloseable {
         thread.setDaemon(true);stderrDrainers.put(thread,process);thread.start();
     }
     private void execute(Job job,Path jobPath,AdmissionLease lease) {
+        sourcePublicationBarrier.readLock().lock();
         job.workerStartedNanos=System.nanoTime();
         ExecutionWorkerPool.Lease warm=null;
         try {
@@ -919,16 +953,18 @@ final class ServerRuntime implements AutoCloseable {
               else finishQuietly(job,"ERROR",3,"ATT-SERVER-WORKER-FAILED",safeMessage(e));
           }}
         finally {
-            stopWorkerTree(job);
-            OutputStream workerInput=job.workerControlStream;job.workerControlStream=null;
-            if(workerInput!=null)try{workerInput.close();}catch(Exception ignored){}
-            if(warm!=null&&job.processFence!=null&&job.processFence.stopped())try{warm.transferred();}catch(Exception ignored) { }
-            boolean stopped=job.processFence==null ? job.process==null||!job.process.isAlive() : job.processFence.stopped();
-            if(stopped&&job.process!=null){if(job.workerTerminatedNanos==0)job.workerTerminatedNanos=System.nanoTime();job.process=null;if(!closing)try{store.update(job);}catch(Exception ignored){}}
-            tasks.remove(job.id);completed.incrementAndGet();
-            // A terminal RESULT is not the execution cleanup fence. Publish only
-            // after cleanup and admission release, never while this Job is active.
-            if(!releaseStoppedWorker(job,lease)&&!closing&&deferredWorkerReleaseIds.add(job.id))deferredWorkerReleases.add(job);
+            try {
+                stopWorkerTree(job);
+                OutputStream workerInput=job.workerControlStream;job.workerControlStream=null;
+                if(workerInput!=null)try{workerInput.close();}catch(Exception ignored){}
+                if(warm!=null&&job.processFence!=null&&job.processFence.stopped())try{warm.transferred();}catch(Exception ignored) { }
+                boolean stopped=job.processFence==null ? job.process==null||!job.process.isAlive() : job.processFence.stopped();
+                if(stopped&&job.process!=null){if(job.workerTerminatedNanos==0)job.workerTerminatedNanos=System.nanoTime();job.process=null;if(!closing)try{store.update(job);}catch(Exception ignored){}}
+                tasks.remove(job.id);completed.incrementAndGet();
+                // A terminal RESULT is not the execution cleanup fence. Publish only
+                // after cleanup and admission release, never while this Job is active.
+                if(!releaseStoppedWorker(job,lease)&&!closing&&deferredWorkerReleaseIds.add(job.id))deferredWorkerReleases.add(job);
+            } finally { sourcePublicationBarrier.readLock().unlock(); }
         }
     }
     int reconcileWorkerReleases() {
@@ -1676,6 +1712,7 @@ final class ServerRuntime implements AutoCloseable {
             registryBoundDrafts.clear();
         }
         manifestPublisher.invalidateDrafts();
+        changeSetPublisher.invalidateDrafts();
     }
 
     private void publishRegistryBoundDraft(String draftId,String registryRevision,Runnable publish) {
@@ -3299,8 +3336,9 @@ final class ServerRuntime implements AutoCloseable {
         }
         @Override public void run() {
             if(!explorerList)inspectionExplorerPriorityCredits.set(INSPECTION_EXPLORER_PRIORITY_BURST);
+            sourcePublicationBarrier.readLock().lock();
             try { super.run(); }
-            finally { releaseSlot(); }
+            finally { try { releaseSlot(); } finally { sourcePublicationBarrier.readLock().unlock(); } }
         }
         void releaseSlot() { if(slotReleased.compareAndSet(false,true))inspectionTaskSlots.release(); }
     }
@@ -5652,6 +5690,7 @@ final class ServerRuntime implements AutoCloseable {
         packageRegistry.close();
         if(inspectionWarmup!=null)inspectionWarmup.shutdownNow();
         manifestPublisher.close();
+        changeSetPublisher.close();
         if(executionWorkers!=null)executionWorkers.close();
         if(loadScheduleScheduler!=null)loadScheduleScheduler.close();
         retention.shutdownNow();artifactMaintenance.shutdownNow();targetIndexMaintenance.shutdownNow();inspectionWatchdogs.shutdownNow();

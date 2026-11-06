@@ -37,7 +37,8 @@ class PackageManifestPublisherTest {
                 (id,actor)->{if(!authorized.get()||!"owner".equals(id)||!"owner".equals(actor))throw new PackageManifestPublisher.Denied();return root;},
                 (id,source)->Map.of("valid",true,"manifestDigest",sha(source),"validationRevision",sha(source+dependencies.get()),
                         "environment","UAT","configurationIdentity",sha(source+"identity")),
-                (actor,action,id,detail)->audits.add(action));
+                (actor,action,id,detail)->audits.add(action),
+                new SourceFileTransaction(temporary.resolve("private"),new SourcePublicationBarrier()));
     }
     private String staged(PackageManifestPublisher publisher,String source,String before) throws Exception {
         return (String)publisher.stage("owner","owner",source,sha(before)).get("draftId");
