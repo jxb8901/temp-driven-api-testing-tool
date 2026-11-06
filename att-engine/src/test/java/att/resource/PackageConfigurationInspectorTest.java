@@ -50,6 +50,13 @@ class PackageConfigurationInspectorTest {
         PackageConfigurationInspector absolute=new PackageConfigurationInspector(standalone.getParent(),standaloneConfig,262144)
                 .forSharedRuntime();
         assertEquals(Files.readString(standaloneConfig),absolute.inspectAuthoringSharedSource("config/config.yaml",65536).get("text"));
+
+        Path bootstrapConfig=write(standalone.resolve("att-server.yaml"),"server: {authenticationRequired: true}\n");
+        PackageConfigurationInspector bootstrap=new PackageConfigurationInspector(standalone.getParent(),bootstrapConfig,262144)
+                .forSharedRuntime();
+        assertThrows(PackageResourceInspector.ResourceNotFoundException.class,
+                ()->bootstrap.inspectAuthoringSharedSource("config/att-server.yaml",65536),
+                "The Server bootstrap configuration is not an editable Central Runtime Config source");
     }
 
     @Test void packageTestdataUsesPackageDefaultsAndRefreshesManifestWithoutSharingCachedGlobalState() throws Exception {

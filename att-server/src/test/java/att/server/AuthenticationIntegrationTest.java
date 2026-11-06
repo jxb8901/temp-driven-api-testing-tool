@@ -89,12 +89,15 @@ class AuthenticationIntegrationTest {
     @Test void packageManifestHttpPublicationEnforcesCsrfOwnerRevocationAndConflict() throws Exception {
         previousAttHome=System.getProperty("att.home");Path home=createLocalRuntime();System.setProperty("att.home",home.toString());
         Path packages=Files.createDirectories(temp.resolve("manifest-packages"));Path pkg=Files.createDirectories(packages.resolve("business-folder"));
+        Path adminPackage=Files.createDirectories(packages.resolve("admin-business"));
         Files.createDirectories(pkg.resolve("templates"));Files.createDirectories(pkg.resolve("testcase"));
+        Files.createDirectories(adminPackage.resolve("templates"));Files.createDirectories(adminPackage.resolve("testcase"));
         String original="# keep this comment and authored ordering\nschemaVersion: att-package/v1\ndefaultEnvironment: SIT\n";
         Files.writeString(pkg.resolve("package.yaml"),original);
+        Files.writeString(adminPackage.resolve("package.yaml"),original);
         Path data=temp.resolve("manifest-data");Path config=Files.writeString(temp.resolve("manifest-server.yaml"),
                 "server:\n  dataDir: "+yaml(data)+"\n  auth: {mode: local}\n  centralConfigurationEditingEnabled: true\n  security: {checkCrossOrigin: true}\n"
-                +"  packageConfiguration: {sourceEditingEnabled: true}\nworkers: {}\npackages:\n  allowedRoots: ["+yaml(packages)+"]\n  entries: {owner: "+yaml(pkg)+"}\n");
+                +"  packageConfiguration: {sourceEditingEnabled: true}\nworkers: {}\npackages:\n  allowedRoots: ["+yaml(packages)+"]\n  entries: {owner: "+yaml(pkg)+", admin: "+yaml(adminPackage)+"}\n");
         System.setProperty("att.server.config",config.toString());
         Path users=Files.writeString(temp.resolve("manifest-users.xml"),"<tomcat-users></tomcat-users>");
         Tomcat tomcat=start(users,appDirectory("manifest-http"));
@@ -121,6 +124,15 @@ class AuthenticationIntegrationTest {
             assertEquals("private, no-store",raw.headers().firstValue("Cache-Control").orElseThrow());
             assertEquals(403,sendWithCookie(client,port,"GET",rawPath,other.cookie,null,null,null).statusCode());
             assertEquals(403,sendWithCookie(client,port,"GET",rawPath,admin.cookie,null,null,null).statusCode(),"ADMIN does not receive Package USER or owner access");
+            assertEquals(403,sendWithCookie(client,port,"GET","/att/api/v1/packages/admin/authoring-source?type=manifest",admin.cookie,null,null,null).statusCode(),
+                    "A matching ADMIN login remains outside Package USER owner permissions");
+            assertEquals(403,sendWithCookie(client,port,"POST","/att/api/v1/jobs/run",admin.cookie,origin,admin.csrf,"{}").statusCode(),
+                    "A local ADMIN does not acquire RUN permission from being active");
+            assertEquals(403,sendWithCookie(client,port,"POST","/att/api/v1/jobs/load",admin.cookie,origin,admin.csrf,"{}").statusCode(),
+                    "A local ADMIN does not acquire LOAD permission from being active");
+            assertEquals(202,sendWithCookie(client,port,"POST","/att/api/v1/jobs/run",other.cookie,origin,other.csrf,
+                    "{\"packageId\":\"owner\",\"all\":true}").statusCode(),
+                    "Another active USER retains operational RUN rights for the registered Package");
             assertEquals(401,send(client,port,"GET",rawPath,null,null,null).statusCode());
             assertEquals(404,sendWithCookie(client,port,"GET",rawPath+"&redacted=false",owner.cookie,null,null,null).statusCode());
             assertEquals(200,sendWithCookie(client,port,"GET","/att/api/v1/configuration/declared",admin.cookie,null,null,null).statusCode(),

@@ -9,7 +9,15 @@ final class SourceAuthorizationPolicy {
         return authenticationRequired && sourceEditingEnabled && activeUser
                 && packageId != null && !"default".equals(packageId)
                 && loginId != null && !RequestIdentity.ANONYMOUS.equals(loginId)
+                && canonicalOwnerIdentity(packageId) && canonicalOwnerIdentity(loginId)
                 && packageId.equals(loginId);
+    }
+
+    /** Local IDs are NFKC/lowercase ASCII; trusted identities must already use that canonical form. */
+    static boolean canonicalOwnerIdentity(String identity) {
+        if(identity==null)return false;
+        try { return identity.equals(AuthService.normalize(identity)); }
+        catch(IllegalArgumentException invalid) { return false; }
     }
 
     static boolean canWriteSystemSettings(boolean authenticationRequired, boolean systemSettingsWrite) {

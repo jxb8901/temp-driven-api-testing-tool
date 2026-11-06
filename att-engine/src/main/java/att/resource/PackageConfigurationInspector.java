@@ -246,7 +246,8 @@ public final class PackageConfigurationInspector {
         if(!safeCandidate.equals(authored)||!authored.startsWith(configDirectory))
             throw new PackageResourceInspector.ResourceNotFoundException();
         Path selectedConfig=configFile.toAbsolutePath().normalize();
-        boolean allowed=authored.equals(selectedConfig);
+        String selectedLogical=configResources.packageRoot().relativize(selectedConfig).toString().replace(java.io.File.separatorChar,'/');
+        boolean allowed="config/config.yaml".equals(logicalPath)&&logicalPath.equals(selectedLogical)&&authored.equals(selectedConfig);
         if(!allowed)allowed=referencedCentralDescriptor(logicalPath);
         if(!allowed||!logicalPath.toLowerCase(Locale.ROOT).endsWith(".yaml")&&!logicalPath.toLowerCase(Locale.ROOT).endsWith(".yml"))
             throw new PackageResourceInspector.ResourceNotFoundException();

@@ -21,6 +21,7 @@ final class AuthoringSourceSupport {
     private AuthoringSourceSupport() { }
 
     static Map<String,Object> read(Path trustedRoot, Path authoredPath, String logicalPath, int maxBytes) throws Exception {
+        if(protectedSourcePath(logicalPath))throw new PackageResourceInspector.ResourceNotFoundException();
         Path root=trustedRoot.toRealPath();
         Path lexicalRoot=trustedRoot.toAbsolutePath().normalize();
         Path path=authoredPath.toAbsolutePath().normalize();
@@ -37,6 +38,7 @@ final class AuthoringSourceSupport {
     }
 
     static Map<String,Object> absent(String logicalPath) throws Exception {
+        if(protectedSourcePath(logicalPath))throw new PackageResourceInspector.ResourceNotFoundException();
         return result(logicalPath,new byte[0],"",false);
     }
 
@@ -89,5 +91,17 @@ final class AuthoringSourceSupport {
         if(lower.endsWith(".xml"))return "xml";
         if(lower.endsWith(".sql"))return "sql";
         return "text";
+    }
+
+    private static boolean protectedSourcePath(String logicalPath) {
+        if(logicalPath==null)return true;
+        String normalized=logicalPath.replace('\\','/').toLowerCase(Locale.ROOT);
+        for(String segment:normalized.split("/")) {
+            if(segment.startsWith("att-server")||segment.startsWith(".env")||segment.contains("secret")
+                    ||segment.contains("credential")||segment.contains("password")||segment.contains("token")
+                    ||segment.endsWith(".pem")||segment.endsWith(".key")||segment.endsWith(".p12")
+                    ||segment.endsWith(".pfx")||segment.endsWith(".jks")||segment.endsWith(".keystore"))return true;
+        }
+        return false;
     }
 }

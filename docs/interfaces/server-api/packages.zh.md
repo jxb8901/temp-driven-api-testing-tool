@@ -58,7 +58,7 @@ GET /api/v1/packages/payments/resources/template/{resourceId}/source-file?refere
 
 ## Lossless authoring-source reads
 
-上方的安全 source inspection 仍供獲授權的 USER operator 使用，並回傳既有的 redacted projection；該 projection 不可當作可寫入來源。Package authoring 使用獨立 endpoint，要求已驗證的 active USER，其 login ID 必須與已登錄 Package ID 完全相同；`default` 永不允許編輯。亦必須啟用可信部署設定 `server.packageConfiguration.sourceEditingEnabled: true`。ADMIN 不會取得 Package USER operations 或 owner 權限；Package owner 亦不會取得 central configuration 權限。
+上方的安全 source inspection 仍供獲授權的 USER operator 使用，並回傳既有的 redacted projection；該 projection 不可當作可寫入來源。Package authoring 使用獨立 endpoint，要求已驗證的 active USER，其 canonical login ID 必須與已登錄 Package ID 完全相同；`default` 永不允許編輯。本機 login ID 會先經 NFKC 正規化及 `Locale.ROOT` 小寫轉換，再限制為小寫 ASCII 字母、數字、點、底線及連字號。Trusted container/SSO principal 必須已使用相同 canonical 格式；source API 不會轉換大小寫或 Unicode，也不會合併 identity。亦必須啟用可信部署設定 `server.packageConfiguration.sourceEditingEnabled: true`。ADMIN 不會取得 Package USER operations 或 owner 權限；Package owner 亦不會取得 central configuration 權限。
 
 ```http
 GET /api/v1/packages/{packageId}/authoring-source?type=manifest
@@ -69,7 +69,7 @@ GET /api/v1/packages/{packageId}/authoring-source?type=testdata&resourceId={desc
 GET /api/v1/configuration/authoring-source?path=config%2Fconfig.yaml
 ```
 
-Package source 僅限固定 `package.yaml`、ready Template/Flow YAML、允許的 `load/*.yaml` 與 `load/*.yml`、已設定的 Package Testdata descriptor，以及由授權 Template/Flow 的靜態 `&{path}` reference 到達的合資格 UTF-8 文字檔。`file` request 必須重用安全 source inspection 簽發的不透明 reference 與 origin。Central source 僅限目前的 Runtime Config 及其宣告的 YAML Helper/Tool descriptor；必須具有 active `SYSTEM_SETTINGS_WRITE` (ADMIN)，並啟用獨立部署 switch `server.centralConfigurationEditingEnabled: true`，預設為 `false`。
+Package source 僅限固定 `package.yaml`、ready Template/Flow YAML、允許的 `load/*.yaml` 與 `load/*.yml`、已設定的 Package Testdata descriptor，以及由授權 Template/Flow 的靜態 `&{path}` reference 到達的合資格 UTF-8 文字檔。`file` request 必須重用安全 source inspection 簽發的不透明 reference 與 origin。Central source 僅限所選的 `config/config.yaml` Runtime Config 及其宣告的 YAML Helper/Tool descriptor；不允許 `att-server.yaml` 或敏感憑證／金鑰路徑。必須具有 active `SYSTEM_SETTINGS_WRITE` (ADMIN)，並啟用獨立部署 switch `server.centralConfigurationEditingEnabled: true`，預設為 `false`。
 
 成功回應包含完整 UTF-8 `text`、`logicalPath`、`present`、SHA-256 `revision` 及 quoted `sourceEtag`；HTTP `ETag` header 使用相同的內容 ETag。回應使用 `Cache-Control: private, no-store`。每次讀取都會重新檢查身份／角色、canonical root、registry、path allowlist、symlink、大小、UTF-8 及受保護秘密。即使關閉一般 masking，憑證與金鑰仍會 fail closed。不可使用 `redacted` query parameter。未驗證或無權限回傳 `401`／`403`；不可用或不允許的路徑回傳 `404`；來源／root 競態回傳 `409`；超出大小上限回傳 `413`。
 

@@ -1702,8 +1702,12 @@ final class ServerRuntime implements AutoCloseable {
     }
     private boolean isOperationalPrincipal(String principal) throws Exception {
         if(principal==null||principal.isBlank()||RequestIdentity.ANONYMOUS.equals(principal))return config.authorization.allowAnonymousOperations&&!config.authenticationRequired;
-        if("local".equals(config.authMode))return store.isActiveUser(principal);
+        if("local".equals(config.authMode))return isActiveUserOperator(principal);
         return true; // The servlet layer has already verified the configured trusted USER role.
+    }
+    boolean isActiveUserOperator(String loginId) throws Exception {
+        Map<String,Object> user=loginId==null?null:store.authUser(loginId);
+        return user!=null&&Boolean.TRUE.equals(user.get("active"))&&"USER".equals(user.get("role"));
     }
     private Path packageRoot(String id) {
         return packageRegistry.snapshot().packages.get(id);
@@ -2944,7 +2948,7 @@ final class ServerRuntime implements AutoCloseable {
         boolean activeUser=false;
         if(config.authenticationRequired&&loginId!=null&&!loginId.isBlank()
                 &&!RequestIdentity.ANONYMOUS.equals(loginId)) {
-            if("local".equals(config.authMode))activeUser=store.isActiveUser(loginId);
+            if("local".equals(config.authMode))activeUser=isActiveUserOperator(loginId);
             else {
                 PackageSourceAuthority authority=packageSourceAuthority.get();
                 activeUser=authority!=null&&authority.loginId.equals(loginId)
@@ -2998,7 +3002,9 @@ final class ServerRuntime implements AutoCloseable {
         Path root=ServerConfig.runtimeConfigRoot(config.runtimeConfigPath).toRealPath();
         Path selected=config.runtimeConfigPath.toRealPath();
         if(!selected.startsWith(root)||!Files.isRegularFile(selected,java.nio.file.LinkOption.NOFOLLOW_LINKS)
-                ||Files.isSymbolicLink(config.runtimeConfigPath))throw new NotFoundException();
+                ||Files.isSymbolicLink(config.runtimeConfigPath)
+                ||!"config/config.yaml".equals(root.relativize(selected).toString().replace(java.io.File.separatorChar,'/')))
+            throw new NotFoundException();
         WorkerRequest request=inspectionRequest(null,root,null);request.inspectionAction="authoring-source";
         request.authoringSourceKind="central";request.inspectionPath=logicalPath;
         request.inspectionSharedConfiguration=Boolean.TRUE;
@@ -3545,7 +3551,9 @@ final class ServerRuntime implements AutoCloseable {
             if(current!=null&&current.isAlive())return;
             discard();
             if(shared) {
-                if(!root.equals(ServerConfig.runtimeConfigRoot(config.runtimeConfigPath)))throw new NotFoundException();
+                Path requestedRoot=root.toRealPath();
+                Path configuredRoot=ServerConfig.runtimeConfigRoot(config.runtimeConfigPath).toRealPath();
+                if(!requestedRoot.equals(configuredRoot))throw new NotFoundException();
             } else validatePackageRoot(root);
             List<String> classpathEntries=workerClasspath();
             String cp=String.join(java.io.File.pathSeparator,classpathEntries);

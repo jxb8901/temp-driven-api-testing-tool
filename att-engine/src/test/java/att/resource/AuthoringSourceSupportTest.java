@@ -27,6 +27,13 @@ class AuthoringSourceSupportTest {
         assertThrows(PackageResourceInspector.ResourceNotFoundException.class,
                 ()->AuthoringSourceSupport.read(root,source,"source.yaml",128));
 
+        Path protectedStore=Files.writeString(root.resolve("credentials.yaml"),"private: arbitrary opaque value\n");
+        assertThrows(PackageResourceInspector.ResourceNotFoundException.class,
+                ()->AuthoringSourceSupport.read(root,protectedStore,"credentials.yaml",128));
+        assertThrows(PackageResourceInspector.ResourceNotFoundException.class,
+                ()->AuthoringSourceSupport.absent("credentials.yaml"),
+                "An absent protected path must not disclose existence through a different response");
+
         Path target=Files.writeString(temp.resolve("outside.yaml"),"schemaVersion: att-template/v1\n");
         Path link=root.resolve("linked.yaml");
         try {

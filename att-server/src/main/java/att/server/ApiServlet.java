@@ -463,7 +463,7 @@ public final class ApiServlet extends HttpServlet {
         } catch(Exception failure){error(res,500,"ATT-SERVER-REQUEST-FAILED","The authorization request could not be completed",requestId);return false;}
     }
     private boolean requireSystemSettingsWrite(HttpServletRequest req,HttpServletResponse res,String requestId)throws IOException {
-        String login=principal(req);
+        String login=principalExact(req);
         if(login==null||RequestIdentity.ANONYMOUS.equals(login)){
             error(res,401,"ATT-SERVER-AUTHENTICATION-REQUIRED","Authentication is required",requestId);return false;
         }
@@ -492,7 +492,7 @@ public final class ApiServlet extends HttpServlet {
         return !RequestIdentity.ANONYMOUS.equals(login)&&req.isUserInRole(runtime.config.authorization.adminRole);
     }
     private boolean operatorCapability(HttpServletRequest req,String login)throws Exception {
-        if(runtime.auth.local(runtime.config))return runtime.store.isActiveUser(login);
+        if(runtime.auth.local(runtime.config))return runtime.isActiveUserOperator(login);
         if(RequestIdentity.ANONYMOUS.equals(login))return !runtime.config.authenticationRequired&&runtime.config.authorization.allowAnonymousOperations;
         return !req.isUserInRole(runtime.config.authorization.adminRole)&&req.isUserInRole(runtime.config.authorization.userRole);
     }
@@ -889,7 +889,7 @@ public final class ApiServlet extends HttpServlet {
           catch(ServerRuntime.StaleDraftException e){error(res,409,"ATT-CFG-SOURCE-CONFLICT","Central Configuration changed while it was being read",requestId);}
           catch(ServerRuntime.InspectionResponseTooLargeException e){error(res,413,"ATT-SERVER-INSPECTION-RESPONSE-TOO-LARGE","Configuration source exceeds the configured size limit",requestId);}
           catch(IllegalArgumentException e){error(res,404,"ATT-SERVER-NOT-FOUND","API resource was not found",requestId);}
-          catch(Exception e){getServletContext().log("DEBUG central source failure id="+requestId,e);error(res,404,"ATT-SERVER-NOT-FOUND","API resource was not found",requestId);}
+          catch(Exception e){error(res,404,"ATT-SERVER-NOT-FOUND","API resource was not found",requestId);}
     }
     private boolean configurationAdmin(HttpServletRequest req,HttpServletResponse res,String requestId)throws IOException {
         String login=principal(req);
