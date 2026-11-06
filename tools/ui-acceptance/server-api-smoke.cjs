@@ -1,6 +1,20 @@
 const assert = require('node:assert/strict');
 const { launchBrowser } = require('./browser-support.cjs');
 
+async function inspectEditor(locator, tokenSelector) {
+  return locator.evaluate((element, selector) => {
+    const content = element.querySelector('.cm-content');
+    const token = content?.querySelector(selector);
+    return {
+      text: Array.from(content?.querySelectorAll('.cm-line') || []).map(line => line.textContent || '').join('\n'),
+      height: element.getBoundingClientRect().height,
+      tokenText: token?.textContent || '',
+      tokenColor: token ? getComputedStyle(token).color : '',
+      editorColor: content ? getComputedStyle(content).color : '',
+    };
+  }, tokenSelector);
+}
+
 async function main() {
   const origin = process.env.ATT_UI_SERVER_ORIGIN;
   const username = process.env.ATT_UI_SERVER_USERNAME;
