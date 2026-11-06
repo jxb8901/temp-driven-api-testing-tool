@@ -567,7 +567,7 @@ export function AppShell({
     || (route.kind === 'schedules' && Boolean(route.view));
   const packageHref = selectedPackage ? '#/packages/' + encodeURIComponent(selectedPackage) : '#/packages';
   const loadHref = '#/advanced-load';
-  const configurationHref = formatRoute({ kind: 'configuration', environment: selectedEnvironment });
+  const configurationHref = formatRoute({ kind: 'configuration', packageId: selectedPackage || undefined, environment: selectedEnvironment });
   const changeThemePreference = (preference: ThemePreference) => {
     applyThemePreference(preference);recordPreferenceEdit('theme',preference,saveLocalThemePreference(preference));
   };

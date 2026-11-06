@@ -69,6 +69,55 @@ describe('App Dashboard job refresh', () => {
     expect(host.querySelector<HTMLSelectElement>('[aria-label="Workspace Environment"]')?.value).toBe('UAT');
   });
 
+  it('seeds a new RUN from the selected Workspace Package and Environment', async () => {
+    sessionStorage.setItem('att.workspace.context', JSON.stringify({ packageId: 'payments', environment: 'UAT' }));
+    window.history.replaceState(null, '', window.location.pathname + window.location.search + '#/run');
+    vi.mocked(api.getPackages).mockResolvedValue({ items: [{ packageId: 'payments', name: 'Payments' }] });
+    vi.spyOn(api, 'getDeclaredConfiguration').mockResolvedValue({ environments: [{ name: 'UAT', state: 'active' }] });
+    vi.spyOn(api, 'getPackageManifest').mockResolvedValue({
+      packageId: 'payments', present: true, canEdit: false, manifestDigest: 'a'.repeat(64),
+      environment: 'UAT', environmentOrigin: 'request',
+    });
+
+    await act(async () => root.render(<App />));
+    await settle();
+
+    const runForm = host.querySelector<HTMLElement>('.att-run-definition')!;
+    expect(runForm.querySelector<HTMLInputElement>('input')?.value).toBe('payments');
+    const environmentLabel = [...runForm.querySelectorAll('label')].find(label => label.textContent?.startsWith('Environment'))!;
+    expect(environmentLabel.querySelector<HTMLSelectElement>('select')?.value).toBe('UAT');
+  });
+
+  it('keeps Workspace context when navigating to Configuration and returning with Back', async () => {
+    sessionStorage.setItem('att.workspace.context', JSON.stringify({ packageId: 'payments', environment: 'UAT' }));
+    window.history.replaceState(null, '', window.location.pathname + window.location.search + '#/');
+    vi.mocked(api.getPackages).mockResolvedValue({ items: [{ packageId: 'payments', name: 'Payments' }] });
+    vi.spyOn(api, 'getDeclaredConfiguration').mockResolvedValue({ environments: [{ name: 'UAT', state: 'active' }] });
+    vi.spyOn(api, 'getPackageManifest').mockResolvedValue({
+      packageId: 'payments', present: true, canEdit: false, manifestDigest: 'a'.repeat(64),
+      environment: 'UAT', environmentOrigin: 'request',
+    });
+    vi.spyOn(api, 'listConfigurationFiles').mockResolvedValue({ items: [], truncated: false, nextOffset: null });
+
+    await act(async () => root.render(<App />));
+    await settle();
+    const configurationLink = host.querySelector<HTMLAnchorElement>('[data-nav="configuration"]')!;
+    expect(configurationLink.getAttribute('href')).toBe('#/configuration/payments?environment=UAT');
+    await act(async () => {
+      configurationLink.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 }));
+      await vi.waitFor(() => expect(window.location.hash).toBe('#/configuration/payments?environment=UAT'));
+    });
+    expect(parseRoute(window.location.hash)).toMatchObject({ kind: 'configuration', packageId: 'payments', environment: 'UAT' });
+
+    await act(async () => {
+      window.history.back();
+      await vi.waitFor(() => expect(window.location.hash).toBe('#/'));
+    });
+    await settle();
+    expect(host.querySelector<HTMLSelectElement>('[aria-label="Workspace Package"]')?.value).toBe('payments');
+    expect(host.querySelector<HTMLSelectElement>('[aria-label="Workspace Environment"]')?.value).toBe('UAT');
+  });
+
   it('refreshes after returning to Dashboard and shows newly completed Debug and Load rows', async () => {
     const updatedRows: JobSummary[] = [
       { jobId: 'J-LOAD', command: 'load', packageId: 'payments', status: 'ERROR', createdAt: '2026-10-15T10:00:00Z' },

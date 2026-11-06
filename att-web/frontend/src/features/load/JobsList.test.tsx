@@ -187,6 +187,24 @@ it('keeps list scope independent when Workspace changes', async () => {
   await act(async()=>{scope.value='follow';scope.dispatchEvent(new Event('change',{bubbles:true}));});await advance();
   expect(queryJobs).toHaveBeenLastCalledWith(expect.objectContaining({packageId:'tommyho',environment:'SIT'}));
 });
+it('clears the inherited Environment when a custom Package changes and allows explicit cross-Package filters', async () => {
+  const queryJobs=vi.fn(async()=>response([],{packageSuggestions:['payments','ledger']}));
+  const context={selectedPackage:'payments',selectedEnvironment:'UAT'} as AppShellContextValue;
+  await act(async()=>root.render(<AppShellContext.Provider value={context}><JobsList api={{queryJobs} as unknown as LoadJobsApi} onOpenJob={vi.fn()} onShowList={vi.fn()} /></AppShellContext.Provider>));
+  await advance();
+  expect(queryJobs).toHaveBeenLastCalledWith(expect.objectContaining({packageId:'payments',environment:'UAT'}));
+
+  await click(button('More filters'));
+  await select('Package','ledger');
+  await advance();
+  expect(host.querySelector<HTMLInputElement>('[aria-label="Jobs Environment filter"]')?.value).toBe('');
+  expect(queryJobs).toHaveBeenLastCalledWith(expect.objectContaining({packageId:'ledger',environment:undefined}));
+
+  const environment=host.querySelector<HTMLInputElement>('[aria-label="Jobs Environment filter"]')!;
+  await act(async()=>{Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!.call(environment,'UAT');environment.dispatchEvent(new Event('input',{bubbles:true}));});
+  await advance();
+  expect(queryJobs).toHaveBeenLastCalledWith(expect.objectContaining({packageId:'ledger',environment:'UAT'}));
+});
 it('waits for the Workspace default to resolve and filters Jobs by its effective environment', async () => {
   const queryJobs = vi.fn(async () => response());
   const renderContext = async (resolved: string | null, error = false) => {

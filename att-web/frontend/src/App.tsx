@@ -441,6 +441,15 @@ export default function App() {
   const capabilities = serverCapabilities(state);
 
 
+  const runRoute = navigation.route.kind === 'run' ? navigation.route : null;
+  const runUsesWorkspaceDefaults = Boolean(runRoute && !runRoute.replayDraftId && !runRoute.replaySourceJobId);
+  const runPackageId = runRoute?.packageId ?? (runUsesWorkspaceDefaults ? selectedPackage : undefined);
+  const runCanUseWorkspaceEnvironment = Boolean(runRoute && (!runRoute.packageId || runRoute.packageId === selectedPackage));
+  const runEnvironment = runRoute?.environment ?? (
+    runUsesWorkspaceDefaults && runCanUseWorkspaceEnvironment
+      ? selectedEnvironment : ''
+  );
+
   let content;
   if (navigation.route.kind === 'dashboard') {
     content = <DashboardPage view="dashboard" state={state} onPackageChange={onPackageChange} onJobChange={onJobChange} onRetryPackages={() => void loadPackages()} onRetryJobs={() => void loadJobs()} jobsRefreshing={jobsRefreshing} jobsUpdatedAt={jobsUpdatedAt} />;
@@ -448,7 +457,7 @@ export default function App() {
     content = <Suspense fallback={<div className="page-content" role="status" aria-busy="true">Loading Monitoring…</div>}><MonitoringPage /></Suspense>;
   } else if (navigation.route.kind === 'run') {
     content = <RunPage key={`${navigation.route.packageId || ''}:${navigation.route.target?.type || ''}:${navigation.route.target?.resourceId || ''}:${navigation.route.environment || ''}:${navigation.route.batch ? 'batch' : ''}:${navigation.route.replaySourceJobId || ''}:${navigation.route.replayDraftId || ''}`}
-      packageId={navigation.route.packageId} initialTarget={navigation.route.target} initialBatchMode={navigation.route.batch} initialEnvironment={navigation.route.environment ?? (navigation.route.packageId === selectedPackage ? selectedEnvironment : '')}
+      packageId={runPackageId} initialTarget={navigation.route.target} initialBatchMode={navigation.route.batch} initialEnvironment={runEnvironment}
       replayDraftId={navigation.route.replayDraftId} replaySourceJobId={navigation.route.replaySourceJobId}
       onAccepted={onJobAccepted} onSchedule={onSchedule} schedulingEnabled={capabilities.loadSchedulingEnabled} />;
   } else if (navigation.route.kind === 'packages') {

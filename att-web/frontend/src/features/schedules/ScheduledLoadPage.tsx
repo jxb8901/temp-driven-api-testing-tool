@@ -679,7 +679,7 @@ export function ScheduledLoadPage({ api, packages, enabled, onOpenJob, initialDr
         </label>
         <label>List scope<select aria-label="Schedule list scope" value={scope} onChange={event => setScope(event.currentTarget.value as 'follow'|'all'|'custom')}><option value="follow">Follow Workspace</option><option value="all">All</option><option value="custom">Custom</option></select></label>
         <label>Package
-          <select value={effectivePackage} onChange={event => { setPackageFilter(event.currentTarget.value); setScopeEnvironment(effectiveEnvironment); setScope('custom'); }}>
+          <select value={effectivePackage} onChange={event => { const nextPackage = event.currentTarget.value; setPackageFilter(nextPackage); if (nextPackage !== effectivePackage) setScopeEnvironment(''); setScope('custom'); }}>
             <option value="">All packages</option>
             {Array.from(new Set([...schedules.map(item => item.packageId), ...(packages.status === 'ready' ? packages.data.map(item => item.packageId) : []), ...(effectivePackage ? [effectivePackage] : [])])).sort().map(packageId => <option key={packageId} value={packageId}>{packageId}</option>)}
           </select>
