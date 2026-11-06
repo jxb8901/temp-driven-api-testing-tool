@@ -27,7 +27,7 @@ class PackageConfigurationInspectorTest {
         write(packageRoot.resolve("package.yaml"),"schemaVersion: att-package/v1\ntestdata: {descriptors: [testdata/sit.yaml]}\n");
         Map<String,Object> packageSource=inspector(packageRoot).forPackageTestdata()
                 .inspectAuthoringTestdataSource("accounts","SIT",65536);
-        assertEquals(Files.readString(packageDescriptor),packageSource.get("text"));
+        assertEquals(new String(Files.readAllBytes(packageDescriptor),StandardCharsets.UTF_8),packageSource.get("text"));
         assertEquals("testdata/sit.yaml",packageSource.get("logicalPath"));
 
         Path tools=Files.createDirectories(packageRoot.resolve("config/tools"));
@@ -49,7 +49,7 @@ class PackageConfigurationInspectorTest {
         Path standaloneConfig=write(standalone.resolve("config.yaml"),"schemaVersion: att-config/v2.12\nenvironment: SIT\n");
         PackageConfigurationInspector absolute=new PackageConfigurationInspector(standalone.getParent(),standaloneConfig,262144)
                 .forSharedRuntime();
-        assertEquals(Files.readString(standaloneConfig),absolute.inspectAuthoringSharedSource("config/config.yaml",65536).get("text"));
+        assertEquals(new String(Files.readAllBytes(standaloneConfig),StandardCharsets.UTF_8),absolute.inspectAuthoringSharedSource("config/config.yaml",65536).get("text"));
 
         Path bootstrapConfig=write(standalone.resolve("att-server.yaml"),"server: {authenticationRequired: true}\n");
         PackageConfigurationInspector bootstrap=new PackageConfigurationInspector(standalone.getParent(),bootstrapConfig,262144)
@@ -57,6 +57,38 @@ class PackageConfigurationInspectorTest {
         assertThrows(PackageResourceInspector.ResourceNotFoundException.class,
                 ()->bootstrap.inspectAuthoringSharedSource("config/att-server.yaml",65536),
                 "The Server bootstrap configuration is not an editable Central Runtime Config source");
+    }
+
+    @Test void authoringSourcesRejectClassifiedRecordsAndConfiguredFieldsForPackageAndCentralConfig() throws Exception {
+        Path packageRoot=packageRoot("authoring-source-classification");
+        Path descriptor=write(packageRoot.resolve("testdata/accounts.yaml"),
+                "schemaVersion: att-testdata/v1.0\nid: accounts\nrecords: [{classification: secret, value: classified-testdata-canary}]\n");
+        write(packageRoot.resolve("package.yaml"),"schemaVersion: att-package/v1\ntestdata: {descriptors: [testdata/accounts.yaml]}\n");
+        assertThrows(PackageResourceInspector.ResourceNotFoundException.class,
+                ()->inspector(packageRoot).forPackageTestdata().inspectAuthoringTestdataSource("accounts","SIT",65536));
+
+        write(descriptor,"schemaVersion: att-testdata/v1.0\nid: accounts\nrecords: [{payload: configured-testdata-canary}]\n");
+        PackageConfigurationInspector packageFields=new PackageConfigurationInspector(packageRoot,Paths.get("config/config.yaml"),262144,
+                false,Collections.singletonList("testdata.accounts.records[0].payload"),Collections.<String>emptyList()).forPackageTestdata();
+        assertThrows(PackageResourceInspector.ResourceNotFoundException.class,
+                ()->packageFields.inspectAuthoringTestdataSource("accounts","SIT",65536));
+
+        Path config=write(packageRoot.resolve("config/config.yaml"),baseConfig("config/dbhelpers/sit.yaml","config/dbhelpers/uat.yaml")
+                +"customCentralField: configured-central-canary\n");
+        PackageConfigurationInspector centralFields=new PackageConfigurationInspector(packageRoot,config,262144,
+                false,Collections.singletonList("globals.customCentralField"),Collections.<String>emptyList()).forSharedRuntime();
+        assertThrows(PackageResourceInspector.ResourceNotFoundException.class,
+                ()->centralFields.inspectAuthoringSharedSource("config/config.yaml",65536));
+
+        Path group=write(packageRoot.resolve("config/tools/group.yaml"),
+                "schemaVersion: att-tool-group/v2.9\nid: group\nname: Group\ntools: {}\ncustomArchiveValue: configured-helper-canary\n");
+        write(config,"schemaVersion: att-config/v2.12\nenvironment: SIT\ntoolGroups: [config/tools/group.yaml]\n"
+                +"environments: {SIT: {}}\n");
+        PackageConfigurationInspector centralDescriptor=new PackageConfigurationInspector(packageRoot,config,262144,
+                false,Collections.<String>emptyList(),Collections.singletonList("custom.*")).forSharedRuntime();
+        assertThrows(PackageResourceInspector.ResourceNotFoundException.class,
+                ()->centralDescriptor.inspectAuthoringSharedSource("config/tools/group.yaml",65536));
+        assertTrue(Files.isRegularFile(group));
     }
 
     @Test void packageTestdataUsesPackageDefaultsAndRefreshesManifestWithoutSharingCachedGlobalState() throws Exception {

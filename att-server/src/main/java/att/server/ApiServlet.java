@@ -870,9 +870,11 @@ public final class ApiServlet extends HttpServlet {
         } catch(ServerRuntime.AuthoringSourceDeniedException e){error(res,403,"ATT-PACKAGE-SOURCE-DENIED","Package source editing is not authorized",requestId);}
           catch(ServerRuntime.NotFoundException e){error(res,404,"ATT-SERVER-NOT-FOUND","API resource was not found",requestId);}
           catch(ServerRuntime.StaleDraftException e){error(res,409,"ATT-PACKAGE-SOURCE-CONFLICT","Package source changed while it was being read",requestId);}
+          catch(ServerRuntime.InspectionCapacityException e){error(res,503,"ATT-SERVER-INSPECTION-CAPACITY","Package inspection capacity is full; retry shortly",requestId);}
+          catch(ServerRuntime.InspectionTimeoutException e){error(res,504,"ATT-SERVER-INSPECTION-TIMEOUT","Package inspection exceeded its time limit",requestId);}
           catch(ServerRuntime.InspectionResponseTooLargeException e){error(res,413,"ATT-SERVER-INSPECTION-RESPONSE-TOO-LARGE","Package source exceeds the configured size limit",requestId);}
           catch(IllegalArgumentException e){error(res,404,"ATT-SERVER-NOT-FOUND","API resource was not found",requestId);}
-          catch(Exception e){error(res,404,"ATT-SERVER-NOT-FOUND","API resource was not found",requestId);}
+          catch(Exception e){error(res,500,"ATT-SERVER-REQUEST-FAILED","The package source request could not be completed",requestId);}
     }
     private void centralAuthoringSourceGet(HttpServletRequest req,HttpServletResponse res,String requestId)throws IOException {
         res.setHeader("Cache-Control","private, no-store");res.setHeader("X-Content-Type-Options","nosniff");
@@ -887,9 +889,11 @@ public final class ApiServlet extends HttpServlet {
             result.put("requestId",requestId);json(res,200,result);
         } catch(ServerRuntime.NotFoundException e){error(res,404,"ATT-SERVER-NOT-FOUND","API resource was not found",requestId);}
           catch(ServerRuntime.StaleDraftException e){error(res,409,"ATT-CFG-SOURCE-CONFLICT","Central Configuration changed while it was being read",requestId);}
+          catch(ServerRuntime.InspectionCapacityException e){error(res,503,"ATT-SERVER-INSPECTION-CAPACITY","Package inspection capacity is full; retry shortly",requestId);}
+          catch(ServerRuntime.InspectionTimeoutException e){error(res,504,"ATT-SERVER-INSPECTION-TIMEOUT","Package inspection exceeded its time limit",requestId);}
           catch(ServerRuntime.InspectionResponseTooLargeException e){error(res,413,"ATT-SERVER-INSPECTION-RESPONSE-TOO-LARGE","Configuration source exceeds the configured size limit",requestId);}
           catch(IllegalArgumentException e){error(res,404,"ATT-SERVER-NOT-FOUND","API resource was not found",requestId);}
-          catch(Exception e){error(res,404,"ATT-SERVER-NOT-FOUND","API resource was not found",requestId);}
+          catch(Exception e){error(res,500,"ATT-SERVER-REQUEST-FAILED","The configuration source request could not be completed",requestId);}
     }
     private boolean configurationAdmin(HttpServletRequest req,HttpServletResponse res,String requestId)throws IOException {
         String login=principal(req);

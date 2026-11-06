@@ -47,6 +47,7 @@ import java.nio.file.WatchService;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.security.MessageDigest;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Base64;
 import java.util.Collection;
 import java.util.Collections;
@@ -88,6 +89,8 @@ public final class PackageResourceInspector implements AutoCloseable {
     private static final int MAX_YAML_CANDIDATES = 20000;
     private static final int MAX_CONFIG_TREE_ENTRIES = 5000;
     private static final long MAX_CONFIG_TREE_BYTES = 256L * 1024L * 1024L;
+    private static final Set<String> AUTHORING_ACTION_REFERENCE_FIELDS = new HashSet<String>(Arrays.asList(
+            "assert", "actual", "call", "expected", "expression", "message", "payload", "query", "sql", "update", "value"));
     private static final Pattern TOOL_CALL = Pattern.compile("#\\{\\s*([A-Za-z_][A-Za-z0-9_.-]*)\\s*\\(");
     private static final Pattern KEY_VALUE_SECRET = Pattern.compile(
             "(?i)([\"']?(?:password|passwd|passphrase|token|secret|authorization|credential|api[_-]?key|access[_-]?key|private[_-]?key|client[_-]?secret|refresh[_-]?token)[\"']?\\s*(?::|=|\\bis\\b)\\s*[\"']?)([^\\s,'\";}<>]+)");
@@ -285,7 +288,8 @@ public final class PackageResourceInspector implements AutoCloseable {
         String logical=resolved.logicalName();
         if(!authoringYamlPath(logical)||!logical.equals(resources.fromInternalPath(resource.yamlSource,PackageResourceResolver.Kind.FILE).logicalName()))
             throw new ResourceNotFoundException();
-        Map<String,Object> result=AuthoringSourceSupport.read(packageRoot,authored,logical,maxSourceBytes);
+        Map<String,Object> result=AuthoringSourceSupport.read(packageRoot,authored,logical,maxSourceBytes,
+                sensitivePaths,sensitiveFieldPatterns);
         result.put("resourceId",resource.resourceId);result.put("revisionDigest",index.revisionDigest);
         return result;
     }
@@ -302,25 +306,15 @@ public final class PackageResourceInspector implements AutoCloseable {
             throw new ResourceNotFoundException();
         try {
             Path originPath=resource.yamlSource;String originLogical=resources.fromInternalPath(originPath,PackageResourceResolver.Kind.FILE).logicalName();
-            String parentLogical=originLogical;
-            Object safeOrigin;
-            if(sourceOriginPath!=null&&!sourceOriginPath.isBlank()&&!originLogical.equals(sourceOriginPath)) {
-                PackageResourceResolver.PackageResource origin=resources.resolvePackageRelative(sourceOriginPath,PackageResourceResolver.Kind.FILE);
-                if(!isReachableSourceFile(resource,origin.canonicalPath())||!authoringTextPath(origin.logicalName()))throw new ResourceNotFoundException();
-                originPath=origin.canonicalPath();originLogical=origin.logicalName();
-                String originText=decodeUtf8(readBounded(originPath,maxSourceBytes));
-                safeOrigin=scrubSourceText(originText,originLogical);
-            } else {
-                safeOrigin=sourceYamlProjection(yamlMapping(loadYaml(resource.yamlSource,maxSourceBytes)),"",parentLogical);
-            }
-            Map<String,SourceFileReference> references=resolveSourceFileReferences(resource,originPath,
-                    safeOrigin instanceof String?(String)safeOrigin:null);
-            if(!(safeOrigin instanceof String))references=resolveSourceFileReferences(resource,safeOrigin);
+            if(sourceOriginPath!=null&&!sourceOriginPath.trim().isEmpty()&&!originLogical.equals(sourceOriginPath))
+                throw new ResourceNotFoundException();
+            Map<String,SourceFileReference> references=resolveAuthoringActionFileReferences(resource,originPath);
             SourceFileReference selected=null;
             for(SourceFileReference candidate:references.values())if(referenceId.equals(candidate.id)){selected=candidate;break;}
             if(selected==null||!authoringTextPath(selected.logicalPath))throw new ResourceNotFoundException();
             Path target=selected.authoredPath==null?selected.path:selected.authoredPath;
-            Map<String,Object> result=AuthoringSourceSupport.read(packageRoot,target,selected.logicalPath,maxSourceBytes);
+            Map<String,Object> result=AuthoringSourceSupport.read(packageRoot,target,selected.logicalPath,maxSourceBytes,
+                    sensitivePaths,sensitiveFieldPatterns);
             result.put("resourceId",resource.resourceId);result.put("revisionDigest",index.revisionDigest);
             return result;
         } catch(ResourceNotFoundException|ResponseTooLargeException failure) {throw failure;}
@@ -336,7 +330,8 @@ public final class PackageResourceInspector implements AutoCloseable {
                 ||relativePath.startsWith("load/bindings/")||!authoringYamlPath(relativePath))throw new ResourceNotFoundException();
         PackageResourceResolver.PackageResource resolved=resources.resolvePackageRelative(relativePath,PackageResourceResolver.Kind.FILE);
         if(!resolved.logicalName().equals(relativePath)||!loadSourceAllowed(resolved.canonicalPath(),resolved.logicalName()))throw new ResourceNotFoundException();
-        return AuthoringSourceSupport.read(packageRoot,authored,resolved.logicalName(),maxSourceBytes);
+        return AuthoringSourceSupport.read(packageRoot,authored,resolved.logicalName(),maxSourceBytes,
+                sensitivePaths,sensitiveFieldPatterns);
     }
 
     /** Fixed package Manifest source; an absent file is represented by its exact empty byte sequence. */
@@ -344,7 +339,8 @@ public final class PackageResourceInspector implements AutoCloseable {
         Path authored=packageRoot.resolve("package.yaml");
         if(!Files.exists(authored,LinkOption.NOFOLLOW_LINKS))return AuthoringSourceSupport.absent("package.yaml");
         PackageResourceResolver.PackageResource resolved=resources.resolvePackageRelative("package.yaml",PackageResourceResolver.Kind.FILE);
-        Map<String,Object> result=AuthoringSourceSupport.read(packageRoot,authored,resolved.logicalName(),maxSourceBytes);
+        Map<String,Object> result=AuthoringSourceSupport.read(packageRoot,authored,resolved.logicalName(),maxSourceBytes,
+                sensitivePaths,sensitiveFieldPatterns);
         return result;
     }
 
@@ -726,6 +722,26 @@ public final class PackageResourceInspector implements AutoCloseable {
 
     private Map<String, SourceFileReference> resolveSourceFileReferences(Resource parent, Object projectedYaml) {
         return discoverSourceFileReferences(parent, projectedYaml).references;
+    }
+
+    /** Authoring source grants only direct scalar references in authored Template/Flow Action fields. */
+    private Map<String,SourceFileReference> resolveAuthoringActionFileReferences(Resource parent,Path descriptorPath) throws Exception {
+        if(parent==null||descriptorPath==null||!sourceAllowed(parent))return Collections.emptyMap();
+        Map<?,?> descriptor=yamlMapping(loadYaml(descriptorPath,maxSourceBytes));
+        Object rawActions=descriptor.get("actions");
+        if(!(rawActions instanceof Map<?,?>))return Collections.emptyMap();
+        SourceReferenceDiscovery discovery=new SourceReferenceDiscovery();
+        FileExpressionResolver resolver=new FileExpressionResolver(packageRoot);
+        for(Object actionValue:((Map<?,?>)rawActions).values()) {
+            if(!(actionValue instanceof Map<?,?>))continue;
+            for(Map.Entry<?,?> field:((Map<?,?>)actionValue).entrySet()) {
+                Object key=field.getKey();Object fieldValue=field.getValue();
+                if(key instanceof String&&AUTHORING_ACTION_REFERENCE_FIELDS.contains(((String)key).toLowerCase(Locale.ROOT))
+                        &&fieldValue instanceof String)
+                    collectSourceFileReferences(parent,(String)fieldValue,descriptorPath.getParent(),resolver,discovery);
+            }
+        }
+        return discovery.references;
     }
 
     private SourceReferenceDiscovery discoverSourceFileReferences(Resource parent, Object projectedYaml) {

@@ -202,6 +202,107 @@ class ApiServletIntegratedLimitsTest {
         }
     }
 
+    @Test void privilegedAuthoringSourceCapacityIs503ForPackageAndCentralRoutes() throws Exception {
+        Path packages=Files.createDirectories(temp.resolve("authoring-capacity-packages"));
+        Path ownerPackage=createPackage(packages.resolve("alice"));
+        Path runtimeConfig=sharedRuntimeConfig();
+        try(ServerRuntime runtime=authoringRuntime(packages,ownerPackage,runtimeConfig,"authoring-capacity-data",
+                DEFAULT_INSPECTION_TIMEOUT_MS,null,workerLibraries("authoring-capacity-libs"))) {
+            addAuthoringUsers(runtime);
+            ApiServlet servlet=servlet(runtime);Semaphore inspections=semaphore(runtime,"inspectionTaskSlots");inspections.acquire();
+            try {
+                Captured packageSource=invokeAs(servlet,"alice","GET","/packages/alice/authoring-source",
+                        Collections.singletonMap("type","manifest"),new byte[0]);
+                Captured centralSource=invokeAs(servlet,"admin","GET","/configuration/authoring-source",
+                        Collections.singletonMap("path","config/config.yaml"),new byte[0]);
+                assertSafeSourceFailure(packageSource,503,"ATT-SERVER-INSPECTION-CAPACITY");
+                assertSafeSourceFailure(centralSource,503,"ATT-SERVER-INSPECTION-CAPACITY");
+            } finally {inspections.release();}
+            Captured protectedPath=invokeAs(servlet,"admin","GET","/configuration/authoring-source",
+                    Collections.singletonMap("path","config/att-server.yaml"),new byte[0]);
+            assertSafeSourceFailure(protectedPath,404,"ATT-SERVER-NOT-FOUND");
+        }
+    }
+
+    @Test void packageAuthoringSourceTimeoutIs504() throws Exception {
+        assertAuthoringSourceTimeout(false,"package-authoring-timeout");
+    }
+
+    @Test void centralAuthoringSourceTimeoutIs504() throws Exception {
+        assertAuthoringSourceTimeout(true,"central-authoring-timeout");
+    }
+
+    @Test void privilegedAuthoringSourceUnexpectedWorkerFailuresAreSafe500ForBothRoutes() throws Exception {
+        Path packages=Files.createDirectories(temp.resolve("authoring-failure-packages"));
+        Path ownerPackage=createPackage(packages.resolve("alice"));
+        Path runtimeConfig=sharedRuntimeConfig();
+        ServerRuntime.WorkerProcessLauncher brokenLauncher=builder->{throw new java.io.IOException("source-error-excerpt-canary");};
+        try(ServerRuntime runtime=authoringRuntime(packages,ownerPackage,runtimeConfig,"authoring-failure-data",
+                DEFAULT_INSPECTION_TIMEOUT_MS,brokenLauncher,workerLibraries("authoring-failure-libs"))) {
+            addAuthoringUsers(runtime);ApiServlet servlet=servlet(runtime);
+            Captured packageSource=invokeAs(servlet,"alice","GET","/packages/alice/authoring-source",
+                    Collections.singletonMap("type","manifest"),new byte[0]);
+            Captured centralSource=invokeAs(servlet,"admin","GET","/configuration/authoring-source",
+                    Collections.singletonMap("path","config/config.yaml"),new byte[0]);
+            assertSafeSourceFailure(packageSource,500,"ATT-SERVER-REQUEST-FAILED");
+            assertSafeSourceFailure(centralSource,500,"ATT-SERVER-REQUEST-FAILED");
+            assertFalse(new String(packageSource.body(),StandardCharsets.UTF_8).contains("source-error-excerpt-canary"));
+            assertFalse(new String(centralSource.body(),StandardCharsets.UTF_8).contains("source-error-excerpt-canary"));
+        }
+    }
+
+    private void assertAuthoringSourceTimeout(boolean central,String dataName) throws Exception {
+        Path packages=Files.createDirectories(temp.resolve(dataName+"-packages"));
+        Path ownerPackage=createPackage(packages.resolve("alice"));
+        Path runtimeConfig=sharedRuntimeConfig();
+        try(ServerRuntime runtime=authoringRuntime(packages,ownerPackage,runtimeConfig,dataName+"-data",100,null,
+                workerLibraries(dataName+"-libs"))) {
+            addAuthoringUsers(runtime);ApiServlet servlet=servlet(runtime);
+            java.util.List<ReentrantLock> held=new java.util.ArrayList<ReentrantLock>();
+            for(Object worker:inspectionWorkers(runtime)) {
+                Field lockField=worker.getClass().getDeclaredField("lock");lockField.setAccessible(true);
+                ReentrantLock lock=(ReentrantLock)lockField.get(worker);lock.lock();held.add(lock);
+            }
+            Captured response;
+            try {
+                response=central
+                        ?invokeAs(servlet,"admin","GET","/configuration/authoring-source",
+                                Collections.singletonMap("path","config/config.yaml"),new byte[0])
+                        :invokeAs(servlet,"alice","GET","/packages/alice/authoring-source",
+                                Collections.singletonMap("type","manifest"),new byte[0]);
+            } finally {for(int index=held.size()-1;index>=0;index--)held.get(index).unlock();}
+            assertSafeSourceFailure(response,504,"ATT-SERVER-INSPECTION-TIMEOUT");
+            stopInspectionProcesses(runtime);
+        }
+    }
+
+    private ServerRuntime authoringRuntime(Path packages,Path ownerPackage,Path runtimeConfig,String dataName,int timeout,
+                                            ServerRuntime.WorkerProcessLauncher launcher,Path libs) throws Exception {
+        Path yaml=temp.resolve(dataName+".yaml");
+        String config="server:\n  dataDir: "+ServerRuntimeTestSupport.yaml(temp.resolve(dataName))
+                +"\n  runtimeConfigPath: "+ServerRuntimeTestSupport.yaml(runtimeConfig)
+                +"\n  authenticationRequired: true\n  auth: {mode: local}\n  centralConfigurationEditingEnabled: true\n"
+                +"  packageConfiguration: {sourceEditingEnabled: true}\n  inspection:\n    enabled: true\n    maxConcurrent: 1\n"
+                +"    queuedLimit: 0\n    timeoutMs: "+timeout+"\nworkers:\n  maxConcurrent: 1\n  queuedLimit: 0\n"
+                +"packages:\n  allowedRoots: ["+ServerRuntimeTestSupport.yaml(packages)+"]\n  entries:\n    alice: "
+                +ServerRuntimeTestSupport.yaml(ownerPackage)+"\n";
+        ServerConfig serverConfig=ServerConfig.load(Files.writeString(yaml,config));
+        return new ServerRuntime(serverConfig,libs.toString(),launcher==null?ProcessBuilder::start:launcher);
+    }
+
+    private static void addAuthoringUsers(ServerRuntime runtime) throws Exception {
+        runtime.auth.createUser("alice","Alice","alice source access password","USER");
+        runtime.auth.createUser("admin","Admin","admin source access password","ADMIN");
+    }
+
+    private static void assertSafeSourceFailure(Captured response,int status,String code) throws Exception {
+        JsonNode body=ServerRuntime.JSON.readTree(response.body());
+        assertEquals(status,response.status,new String(response.body(),StandardCharsets.UTF_8));
+        assertEquals(code,body.path("error").path("code").asText(),body.toString());
+        assertFalse(new String(response.body(),StandardCharsets.UTF_8).contains("schemaVersion"),
+                "Source failures must not include source excerpts");
+    }
+
     @Test void packageConfigurationByteLimitHasStructuredFieldsOnTheRealInspectionRoute() throws Exception {
         Path packages=Files.createDirectories(temp.resolve("configuration-limit-packages"));createPackage(packages.resolve("p"));
         Path config=sharedRuntimeConfig();
@@ -348,17 +449,22 @@ class ApiServletIntegratedLimitsTest {
     }
 
     private Captured invoke(ApiServlet servlet,String method,String path,Map<String,String> parameters,byte[] body) throws Exception {
+        return invokeAs(servlet,"alice",method,path,parameters,body);
+    }
+
+    private Captured invokeAs(ApiServlet servlet,String login,String method,String path,Map<String,String> parameters,byte[] body) throws Exception {
         ServletContext context=servlet.getServletContext();
         HttpServletRequest request=proxy(HttpServletRequest.class,(self,called,args)->{
             switch(called.getName()) {
                 case "getServletContext": return context;
+                case "getAttribute": return AuthService.IDENTITY.equals(args[0])?login:null;
                 case "getMethod": return method;
                 case "getPathInfo": return path;
                 case "getContextPath": return "";
                 case "getParameter": return parameters.get(args[0]);
                 case "getHeader": return "X-Request-ID".equals(args[0])?"limits-test":null;
                 case "getContentType": return "application/json";
-                case "getUserPrincipal": return (Principal)()->"alice";
+                case "getUserPrincipal": return (Principal)()->login;
                 case "isUserInRole": return runtimeRole(servlet,args[0]);
                 case "getInputStream": return input(body);
                 case "getRemoteAddr": return "127.0.0.1";

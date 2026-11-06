@@ -230,7 +230,7 @@ public final class PackageConfigurationInspector {
         String logical=resolved.logicalName();
         if(!logical.toLowerCase(Locale.ROOT).endsWith(".yaml")&&!logical.toLowerCase(Locale.ROOT).endsWith(".yml"))
             throw new PackageResourceInspector.ResourceNotFoundException();
-        return AuthoringSourceSupport.read(packageRoot,authored,logical,maxSourceBytes);
+        return AuthoringSourceSupport.read(packageRoot,authored,logical,maxSourceBytes,sensitivePaths,sensitiveFieldPatterns);
     }
 
     /** Central Runtime Config and only its approved referenced global Helper/Tool descriptors. */
@@ -257,12 +257,12 @@ public final class PackageConfigurationInspector {
         catch(Exception unavailable) {throw new PackageResourceInspector.ResourceNotFoundException();}
         if(!resolved.logicalName().equals(logicalPath)||!resolved.canonicalPath().startsWith(configDirectory))
             throw new PackageResourceInspector.ResourceNotFoundException();
-        return AuthoringSourceSupport.read(configDirectory,authored,logicalPath,maxSourceBytes);
+        return AuthoringSourceSupport.read(configDirectory,authored,logicalPath,maxSourceBytes,sensitivePaths,sensitiveFieldPatterns);
     }
 
     private boolean referencedCentralDescriptor(String logicalPath) throws Exception {
         Map<?,?> raw=readConfig();Set<String> configured=new LinkedHashSet<>();
-        for(String field:List.of("toolGroups","dbhelpers","mqhelpers","sshhelpers","httphelpers"))
+        for(String field:Arrays.asList("toolGroups","dbhelpers","mqhelpers","sshhelpers","httphelpers"))
             addConfiguredDescriptorPaths(configured,raw.get(field));
         Object rawEnvironments=raw.get("environments");
         if(rawEnvironments instanceof Map<?,?>) {
@@ -270,7 +270,7 @@ public final class PackageConfigurationInspector {
             if(environments.size()>100)throw new PackageResourceInspector.ResourceNotFoundException();
             for(Object profileValue:environments.values())if(profileValue instanceof Map<?,?>) {
                 Map<?,?> profile=(Map<?,?>)profileValue;
-                for(String field:List.of("dbhelpers","mqhelpers","sshhelpers","httphelpers"))
+                for(String field:Arrays.asList("dbhelpers","mqhelpers","sshhelpers","httphelpers"))
                     addConfiguredDescriptorPaths(configured,profile.get(field));
             }
         }
