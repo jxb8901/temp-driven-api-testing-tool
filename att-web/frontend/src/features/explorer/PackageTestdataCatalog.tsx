@@ -100,6 +100,7 @@ export function TestdataCatalog({ api, packageId, environment, defaultEnvironmen
   const catalogQuery = routeLookupQuery || catalogSearch.trim();
   const catalogQueryKey = JSON.stringify([packageId, environment, catalogQuery, inspectionRefresh, refreshKey]);
   const catalogQueryKeyRef = useRef(catalogQueryKey);
+  const catalogEntriesQueryRef = useRef(catalogQuery);
   const catalogGenerationRef = useRef(0);
   const catalogFirstPageControllerRef = useRef<AbortController | null>(null);
   const catalogLoadMoreControllerRef = useRef<AbortController | null>(null);
@@ -145,8 +146,11 @@ export function TestdataCatalog({ api, packageId, environment, defaultEnvironmen
     if (!scopeChanged && !routeChanged) return;
     catalogScopeRef.current = { api, packageId, environment, inspectionRefresh, refreshKey };
     routeDescriptorRef.current = descriptorId;
-    setRouteLookupQuery(descriptorId || '');
-  }, [api, packageId, environment, inspectionRefresh, refreshKey, descriptorId]);
+    const nextQuery = catalogSearch.trim();
+    const alreadyInNextQueryResults = !scopeChanged && catalogEntriesQueryRef.current === nextQuery
+      && entries.some(item => item.id === descriptorId);
+    setRouteLookupQuery(descriptorId && !alreadyInNextQueryResults ? descriptorId : '');
+  }, [api, packageId, environment, inspectionRefresh, refreshKey, descriptorId, catalogSearch, entries]);
 
   useLayoutEffect(() => { setSelectedIdState(descriptorId || ''); }, [packageId, environment, descriptorId]);
 
@@ -162,6 +166,7 @@ export function TestdataCatalog({ api, packageId, environment, defaultEnvironmen
         const data = result.sections?.find(section => section.id === 'testdata')?.entries || [];
         const isCurrent = () => !controller.signal.aborted && generation === catalogGenerationRef.current && queryKey === catalogQueryKeyRef.current;
         if (!isCurrent()) return;
+        catalogEntriesQueryRef.current = catalogQuery;
         setEntries(current => generation === catalogGenerationRef.current && queryKey === catalogQueryKeyRef.current ? data : current);
         const firstPageNextOffset = result.nextOffset ?? null;
         const firstPageTotal = result.total ?? data.length;
