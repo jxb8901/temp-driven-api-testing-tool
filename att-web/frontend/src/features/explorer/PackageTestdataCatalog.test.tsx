@@ -37,6 +37,13 @@ function RoutedHarness({ api, packageId = 'payments', environment = '', descript
     onBackToResources={vi.fn()} onOpenResource={vi.fn()} onOpenPackageConfiguration={vi.fn()} />;
 }
 
+function SelectedDescriptorHarness({ api, environment = '' }: { api: ExplorerApi; environment?: string }) {
+  const [descriptorId, setDescriptorId] = useState<string>();
+  return <PackageTestdataWorkspace api={api} packageId="payments" packageLabel="payments" registrationState="ready" registered
+    environment={environment} descriptorId={descriptorId} onEnvironmentChange={vi.fn()} onDescriptorChange={setDescriptorId}
+    onBackToResources={vi.fn()} onOpenResource={vi.fn()} onOpenPackageConfiguration={vi.fn()} />;
+}
+
 function generatedDescriptors() {
   return ['generated-a', 'generated-b'].map(id => ({ id, source: `testdata/${id}.yaml`, generated: true,
     fields: { generated: { state: 'visible' as const, value: true }, recordCount: { state: 'visible' as const, value: 100 } },
@@ -250,6 +257,8 @@ describe('PackageTestdataWorkspace', () => {
     await flush();
     expect(host.textContent).not.toContain('sit-stale-second-page');
     expect(host.textContent).toContain('fresh-first-page');
+    expect(vi.mocked(api.getEffectiveConfiguration).mock.calls
+      .filter(call => call[1].query === 'fresh').map(call => call[1].offset)).toEqual([0]);
     const currentLoadMore = [...host.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Load more descriptors');
     expect(currentLoadMore?.disabled).toBe(false);
     await act(async () => currentLoadMore?.click()); await flush();
@@ -347,6 +356,84 @@ describe('PackageTestdataWorkspace', () => {
       { environment: undefined, offset: 0, limit: 50, previewGenerated: false }, expect.any(AbortSignal));
     expect(host.textContent).toContain('testdata/accounts.yaml');
     expect(host.textContent).not.toContain('Testdata descriptor accounts is unavailable');
+  });
+
+  it('re-resolves a selected later-page descriptor after refreshing the catalog', async () => {
+    const descriptors = Array.from({ length: 100 }, (_, index) => ({
+      id: `data-${String(index).padStart(3, '0')}`, source: `testdata/data-${String(index).padStart(3, '0')}.yaml`,
+    }));
+    const selected = descriptors[75];
+    const api = {
+      getDeclaredConfiguration: vi.fn(async () => ({ environments: [] })),
+      getEffectiveConfiguration: vi.fn(async (_packageId: string, query: { query?: string; offset?: number; limit?: number }) => {
+        if (query.query === selected.id) return { total: 1, sections: [{ id: 'testdata', entries: [selected] }] };
+        const offset = query.offset ?? 0;
+        const page = descriptors.slice(offset, offset + (query.limit ?? 50));
+        const nextOffset = offset + page.length < descriptors.length ? offset + page.length : null;
+        return { total: descriptors.length, nextOffset, sections: [{ id: 'testdata', entries: page }] };
+      }),
+      getTestdataRecords: vi.fn(async (_packageId: string, descriptorId: string) => ({ descriptorId, offset: 0, limit: 50, total: 0, records: [] })),
+    } as unknown as ExplorerApi;
+
+    await act(async () => root.render(<SelectedDescriptorHarness api={api} />)); await flush();
+    await act(async () => [...host.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Load more descriptors')?.click()); await flush();
+    await act(async () => [...host.querySelectorAll<HTMLButtonElement>('nav.att-testdata-catalog button')].find(button => button.textContent?.includes(selected.id))?.click()); await flush();
+    expect(host.textContent).toContain(selected.source);
+
+    await act(async () => [...host.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Refresh Testdata')?.click());
+    await flush(); await flush();
+
+    expect(vi.mocked(api.getEffectiveConfiguration).mock.calls.some(call => call[1].query === selected.id && call[1].offset === 0)).toBe(true);
+    expect(host.textContent).toContain(selected.source);
+    expect(host.textContent).not.toContain(`Testdata descriptor ${selected.id} is unavailable`);
+  });
+
+  it('re-resolves the selected descriptor in a new environment when it is on a later result page', async () => {
+    const uatDescriptors = Array.from({ length: 100 }, (_, index) => ({
+      id: `data-${String(index).padStart(3, '0')}`, source: `testdata/data-${String(index).padStart(3, '0')}.yaml`,
+    }));
+    const selected = uatDescriptors[75];
+    const sitMatches = [
+      ...Array.from({ length: 60 }, (_, index) => ({
+        id: `a-variant-${String(index).padStart(2, '0')}`, source: `testdata/${selected.id}-${String(index).padStart(2, '0')}.yaml`,
+      })),
+      selected,
+    ].sort((left, right) => left.id.localeCompare(right.id, undefined, { sensitivity: 'base' }));
+    const page = (items: typeof sitMatches, offset: number, limit: number) => {
+      const entries = items.slice(offset, offset + limit);
+      return { total: items.length, nextOffset: offset + entries.length < items.length ? offset + entries.length : null,
+        sections: [{ id: 'testdata', entries }] };
+    };
+    const api = {
+      getDeclaredConfiguration: vi.fn(async () => ({ environments: [
+        { name: 'UAT', state: 'active' as const, default: true }, { name: 'SIT', state: 'active' as const },
+      ] })),
+      getEffectiveConfiguration: vi.fn(async (_packageId: string, query: { environment?: string; query?: string; offset?: number; limit?: number }) => {
+        const offset = query.offset ?? 0;
+        const limit = query.limit ?? 50;
+        if (query.environment === 'SIT' && query.query === selected.id) {
+          const matches = sitMatches.filter(item => item.id.toLocaleLowerCase().includes(selected.id)
+            || item.source.toLocaleLowerCase().includes(selected.id));
+          return page(matches, offset, limit);
+        }
+        return page(uatDescriptors, offset, limit);
+      }),
+      getTestdataRecords: vi.fn(async (_packageId: string, descriptorId: string) => ({ descriptorId, offset: 0, limit: 50, total: 0, records: [] })),
+    } as unknown as ExplorerApi;
+
+    await act(async () => root.render(<SelectedDescriptorHarness api={api} environment="UAT" />)); await flush();
+    await act(async () => [...host.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Load more descriptors')?.click()); await flush();
+    await act(async () => [...host.querySelectorAll<HTMLButtonElement>('nav.att-testdata-catalog button')].find(button => button.textContent?.includes(selected.id))?.click()); await flush();
+    expect(host.textContent).toContain(selected.source);
+
+    await act(async () => root.render(<SelectedDescriptorHarness api={api} environment="SIT" />));
+    await flush(); await flush();
+
+    const sitLookupOffsets = vi.mocked(api.getEffectiveConfiguration).mock.calls
+      .filter(call => call[1].environment === 'SIT' && call[1].query === selected.id).map(call => call[1].offset);
+    expect(sitLookupOffsets).toEqual([0, 50]);
+    expect(host.textContent).toContain(selected.source);
+    expect(host.textContent).not.toContain(`Testdata descriptor ${selected.id} is unavailable`);
   });
 
   it('does not fall back to shared or another Package when the route Package is unregistered', async () => {

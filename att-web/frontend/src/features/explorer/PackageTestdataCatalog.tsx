@@ -104,6 +104,7 @@ export function TestdataCatalog({ api, packageId, environment, defaultEnvironmen
   const catalogFirstPageControllerRef = useRef<AbortController | null>(null);
   const catalogLoadMoreControllerRef = useRef<AbortController | null>(null);
   const routeDescriptorRef = useRef(descriptorId);
+  const catalogScopeRef = useRef({ api, packageId, environment, inspectionRefresh, refreshKey });
   const recordIdentityRef = useRef(recordIdentity);
   const recordsRequestKey = JSON.stringify([recordIdentity, offset, previewGenerated, revision, inspectionRefresh, refreshKey]);
   const response = recordResponseState?.key === recordsRequestKey ? recordResponseState.value : null;
@@ -136,10 +137,16 @@ export function TestdataCatalog({ api, packageId, environment, defaultEnvironmen
   }, [api, catalogQueryKey]);
 
   useLayoutEffect(() => {
-    if (routeDescriptorRef.current === descriptorId) return;
+    const previousScope = catalogScopeRef.current;
+    const scopeChanged = previousScope.api !== api || previousScope.packageId !== packageId
+      || previousScope.environment !== environment || previousScope.inspectionRefresh !== inspectionRefresh
+      || previousScope.refreshKey !== refreshKey;
+    const routeChanged = routeDescriptorRef.current !== descriptorId;
+    if (!scopeChanged && !routeChanged) return;
+    catalogScopeRef.current = { api, packageId, environment, inspectionRefresh, refreshKey };
     routeDescriptorRef.current = descriptorId;
-    setRouteLookupQuery(descriptorId && !entries.some(item => item.id === descriptorId) ? descriptorId : '');
-  }, [descriptorId, entries]);
+    setRouteLookupQuery(descriptorId && (scopeChanged || !entries.some(item => item.id === descriptorId)) ? descriptorId : '');
+  }, [api, packageId, environment, inspectionRefresh, refreshKey, descriptorId, entries]);
 
   useLayoutEffect(() => { setSelectedIdState(descriptorId || ''); }, [packageId, environment, descriptorId]);
 
