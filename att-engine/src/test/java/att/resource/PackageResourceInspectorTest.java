@@ -100,6 +100,23 @@ class PackageResourceInspectorTest {
                 ()->inspector.inspect("list","template",null,null,1,1,"stale-revision"));
     }
 
+    @Test void detailProjectionCarriesAuthoredActionOrderWhenJsonWouldReorderNumericKeys() throws Exception {
+        Path root=packageWithTemplate("numeric-action-order","ORDERED","description: authored order");
+        writeUtf8(root.resolve("templates/ORDERED/template.yaml"),"schemaVersion: att-template/v3.6\nname: ORDERED\n"
+                +"description: authored order\nactions:\n  \"10\": {type: log, message: ten}\n"
+                +"  \"2\": {type: log, message: two}\n  x-disabled: {type: unsupported, note: preserved}\n");
+        PackageResourceInspector inspector=new PackageResourceInspector(root,Paths.get("config/config.yaml"),"SIT",
+                Collections.<String>emptyList(),65536,262144);
+        @SuppressWarnings("unchecked") Map<String,Object> page=inspector.inspect("list","template",null,null,0,1);
+        @SuppressWarnings("unchecked") List<Map<String,Object>> items=(List<Map<String,Object>>)page.get("items");
+        String resourceId=String.valueOf(items.get(0).get("resourceId"));
+        Map<String,Object> detail=inspector.inspect("detail","template",resourceId,null,0,1);
+        assertEquals(Arrays.asList("10","2","x-disabled"),detail.get("actionOrder"));
+        @SuppressWarnings("unchecked") Map<String,Object> definition=(Map<String,Object>)detail.get("definition");
+        @SuppressWarnings("unchecked") Map<String,Object> actions=(Map<String,Object>)definition.get("actions");
+        assertEquals(Arrays.asList("10","2","x-disabled"),new java.util.ArrayList<String>(actions.keySet()));
+    }
+
     @Test void resourceSortingIsAppliedBeforeStableServerPagination() throws Exception {
         Path root=packageWithTemplate("server-sorted-resources","MID","description: middle");
         for(String name:java.util.Arrays.asList("AAA","ZZZ")) {

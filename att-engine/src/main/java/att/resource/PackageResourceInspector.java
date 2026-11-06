@@ -389,9 +389,38 @@ public final class PackageResourceInspector implements AutoCloseable {
         Map<String, Object> result = new LinkedHashMap<String, Object>();
         result.put("resource", summary(resource, index));
         result.put("definition", resource.definition);
+        List<String> actionOrder = explicitActionOrder(resource.definition);
+        if (actionOrder != null) result.put("actionOrder", actionOrder);
         result.put("diagnostics", resource.diagnostics);
         result.put("revisionDigest", index.revisionDigest);
         return bounded(result);
+    }
+
+    /**
+     * JavaScript sorts integer-like object keys ahead of other keys when parsing
+     * JSON. Include the YAML authored order only when that behavior could change
+     * an actions map's order; ordinary action maps retain their JSON insertion order.
+     */
+    private static List<String> explicitActionOrder(Map<String, Object> definition) {
+        Object rawActions = definition == null ? null : definition.get("actions");
+        if (!(rawActions instanceof Map)) return null;
+        Map<?, ?> actions = (Map<?, ?>) rawActions;
+        boolean hasArrayIndex = false;
+        for (Object key : actions.keySet()) {
+            if (javascriptArrayIndex(String.valueOf(key))) { hasArrayIndex = true; break; }
+        }
+        if (!hasArrayIndex) return null;
+        List<String> order = new ArrayList<String>();
+        for (Object key : actions.keySet()) order.add(String.valueOf(key));
+        return order;
+    }
+
+    private static boolean javascriptArrayIndex(String key) {
+        if ("0".equals(key)) return true;
+        if (key == null || key.isEmpty() || key.charAt(0) < '1' || key.charAt(0) > '9') return false;
+        for (int i = 1; i < key.length(); i++) if (key.charAt(i) < '0' || key.charAt(i) > '9') return false;
+        try { return Long.parseLong(key) < 4294967295L; }
+        catch (NumberFormatException tooLarge) { return false; }
     }
 
     private Map<String, Object> source(Index index, Resource resource) {

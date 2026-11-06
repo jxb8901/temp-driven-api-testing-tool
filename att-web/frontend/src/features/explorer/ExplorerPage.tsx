@@ -3,6 +3,7 @@ import { inspectionCache } from '../../inspectionCache';
 import { useInspectionRefresh } from '../../useInspectionRefresh';
 import { ResourceTree, resourceKey } from './ResourceTree';
 import { SourceViewer } from './SourceViewer';
+import { ActionInspector } from './ActionInspector';
 import { CodeEditor } from '../code/CodeEditor';
 import { TypedSidecarForm } from './TypedSidecarForm';
 import type { DebugDraftRequest, Diagnostic, DraftResponse, ExplorerApi, ExplorerPageProps, JsonObject, ResourceIdentity, ResourceReference, ResourceSortField, ResourceSummary } from './types';
@@ -98,6 +99,7 @@ export function ExplorerPage({ api, packageId, resourceRoute, environment,
   const [resourceError, setResourceError] = useState('');
   const [resourceStatus, setResourceStatus] = useState('');
   const [detail, setDetail] = useState<ResourceSummary | null>(null);
+  const [actionOrder, setActionOrder] = useState<string[] | undefined>();
   const [definition, setDefinition] = useState<unknown>(null);
   const [detailError, setDetailError] = useState('');
   const [detailLoading, setDetailLoading] = useState(false);
@@ -284,7 +286,7 @@ export function ExplorerPage({ api, packageId, resourceRoute, environment,
   };
 
   useEffect(() => {
-    if (!identity) { detailIdentityKey.current = ''; setDetail(null); setDefinition(null); setDetailError(''); return; }
+    if (!identity) { detailIdentityKey.current = ''; setDetail(null); setDefinition(null); setActionOrder(undefined); setDetailError(''); return; }
     const controller = new AbortController();
     // Revalidation refreshes a projection in place, but clearing detail on every
     // cache invalidation would drop the open Debug form and its authored inputs.
@@ -292,10 +294,10 @@ export function ExplorerPage({ api, packageId, resourceRoute, environment,
     const identityChanged = detailIdentityKey.current !== identityKey;
     detailIdentityKey.current = identityKey;
     setDetailLoading(true); setDetailError('');
-    if (identityChanged) { setDetail(null); setDefinition(null); }
+    if (identityChanged) { setDetail(null); setDefinition(null); setActionOrder(undefined); }
     api.getResource(identity, controller.signal).then(response => {
       if (controller.signal.aborted) return;
-      setDetail(response.resource); setDefinition(response.definition ?? {}); setDetailError('');
+      setDetail(response.resource); setDefinition(response.definition); setActionOrder(response.actionOrder); setDetailError('');
     }).catch(error => {
       if (!controller.signal.aborted) setDetailError(userError(error, 'resource detail'));
     }).finally(() => { if (!controller.signal.aborted) setDetailLoading(false); });
@@ -304,6 +306,8 @@ export function ExplorerPage({ api, packageId, resourceRoute, environment,
 
   useEffect(() => {
     const requestedTab = resourceRoute?.tab;
+    // `definition` remains the route identifier for compatibility. Template and
+    // Flow details now present that panel as the Visual action inspector.
     setTab(requestedTab === 'source' || requestedTab === 'relations' || requestedTab === 'definition' ? requestedTab : 'definition');
   }, [selectedRouteKey, resourceRoute?.tab]);
 
@@ -415,6 +419,9 @@ export function ExplorerPage({ api, packageId, resourceRoute, environment,
   const groups = debugGroups(debugForm?.target.type || selectedType);
   const previewText = draft?.previewYaml || (draft?.preview ? JSON.stringify(draft.preview, null, 2) : '');
   const detailText = safeProjection(definition);
+  const hasVisualActions = identity?.type === 'template' || identity?.type === 'flow';
+  const requestedDetailIdentityKey = identity ? `${identity.packageId}:${identity.type}:${identity.resourceId}` : '';
+  const detailRequestPending = Boolean(identity && (detailLoading || detailIdentityKey.current !== requestedDetailIdentityKey));
   const sourceIdentity = identity;
   const onTabsKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
@@ -498,10 +505,18 @@ export function ExplorerPage({ api, packageId, resourceRoute, environment,
           <div className="att-explorer-tabs" role="tablist" aria-label="Resource content" onKeyDown={onTabsKeyDown}>
             {(['definition', 'source', 'relations'] as const).map(name => <button key={name} type="button" role="tab" data-tab={name}
               id={`att-explorer-tab-${name}`} aria-selected={tab === name} aria-controls={`att-explorer-panel-${name}`}
-              tabIndex={tab === name ? 0 : -1} onClick={() => selectDetailTab(name)}>{name === 'definition' ? 'Definition' : name === 'source' ? 'Source' : 'Dependencies'}</button>)}
+              tabIndex={tab === name ? 0 : -1} onClick={() => selectDetailTab(name)}>{name === 'definition' ? hasVisualActions ? 'Visual' : 'Definition' : name === 'source' ? 'Source' : 'Dependencies'}</button>)}
           </div>
           <section id="att-explorer-panel-definition" role="tabpanel" aria-labelledby="att-explorer-tab-definition" hidden={tab !== 'definition'}>
-            {definition == null && !detailLoading ? <p>No definition projection is available.</p> : <CodeEditor value={detailText} language="json" label="Safe resource definition" readOnly sourcePath={detail?.sourcePath} fileReferences={[]} />}
+            {hasVisualActions
+              ? definition == null && detailRequestPending ? <p role="status">Loading action definition…</p>
+                : definition == null && detailError ? <p role="status">The action definition could not be loaded.</p>
+                  : definition == null ? <p>No definition projection is available.</p>
+                    : <ActionInspector definition={definition} actionOrder={actionOrder} resourceType={identity.type === 'flow' ? 'flow' : 'template'}
+                        resourceId={identity.resourceId} references={detail?.references}
+                        onOpenFlow={targetId => onResourceRouteChange({ type: 'flow', resourceId: targetId, tab: 'definition' })} />
+              : definition == null && !detailRequestPending ? <p>No definition projection is available.</p>
+                : <CodeEditor value={detailText} language="json" label="Safe resource definition" readOnly sourcePath={detail?.sourcePath} fileReferences={[]} />}
           </section>
           {sourceIdentity && <section id="att-explorer-panel-source" role="tabpanel" aria-labelledby="att-explorer-tab-source" hidden={tab !== 'source'}>
             <SourceViewer api={api} identity={sourceIdentity} available={detail?.sourceAvailable === true} active={tab === 'source'} onFileReference={onOpenConfigurationFile} />

@@ -101,7 +101,8 @@ export function parseRoute(hash: string): AppRoute {
       };
     }
     if (parts.length === 5 && parts[2] === 'resources') {
-      const rawDetailTab = query.get('detail');
+      // Older links may use `tab`; `detail` remains the canonical hash key.
+      const rawDetailTab = query.get('detail') || query.get('tab');
       const detailTab = rawDetailTab === 'definition' || rawDetailTab === 'source' || rawDetailTab === 'relations'
         ? rawDetailTab : undefined;
       return { kind: 'package', packageId: parts[1], ...(query.has('environment') ? { environment: query.get('environment') || '' } : {}), resource: {
