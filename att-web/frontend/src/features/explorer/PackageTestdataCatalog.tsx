@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { inspectionCache } from '../../inspectionCache';
 import { useInspectionRefresh } from '../../useInspectionRefresh';
 import type { ConfigurationEntry, ExplorerApi, JsonValue, ResourceReference, TestdataRecordsResponse } from './types';
@@ -61,25 +61,50 @@ function observedType(value: unknown): string {
   return typeof value;
 }
 
+interface RecordControls {
+  identity: string;
+  offset: number;
+  previewGenerated: boolean;
+  copiedRecord: number | null;
+}
+
+interface KeyedRecordResponse {
+  key: string;
+  value: TestdataRecordsResponse;
+}
+
 export function TestdataCatalog({ api, packageId, environment, defaultEnvironment, descriptorId, refreshKey, onDescriptorChange, onOpenResource, onRefresh }: {
   api: ExplorerApi; packageId: string; environment: string; defaultEnvironment?: string; descriptorId?: string; refreshKey: number;
   onDescriptorChange(descriptorId?: string): void; onOpenResource(resource: { type: string; resourceId: string }): void; onRefresh(): void;
 }) {
   const inspectionRefresh = useInspectionRefresh();
   const [entries, setEntries] = useState<ConfigurationEntry[]>([]);
-  const [selectedId, setSelectedId] = useState(descriptorId || '');
-  const [response, setResponse] = useState<TestdataRecordsResponse | null>(null);
+  const [selectedIdState, setSelectedIdState] = useState(descriptorId || '');
+  const selectedId = descriptorId ?? selectedIdState;
+  const recordIdentity = JSON.stringify([packageId, environment, selectedId]);
+  const [recordControls, setRecordControls] = useState<RecordControls>({ identity: '', offset: 0, previewGenerated: false, copiedRecord: null });
+  const activeRecordControls = recordControls.identity === recordIdentity
+    ? recordControls : { identity: recordIdentity, offset: 0, previewGenerated: false, copiedRecord: null };
+  const { offset, previewGenerated, copiedRecord } = activeRecordControls;
+  const [recordResponseState, setRecordResponseState] = useState<KeyedRecordResponse | null>(null);
   const [error, setError] = useState('');
   const [status, setStatus] = useState('Loading resolved Testdata catalog…');
-  const [offset, setOffset] = useState(0);
-  const [loading, setLoading] = useState(false);
+  const [copyStatus, setCopyStatus] = useState('');
+  const [recordLoadingKey, setRecordLoadingKey] = useState('');
   const [revision, setRevision] = useState(0);
   const [catalogSearch, setCatalogSearch] = useState(descriptorId ?? '');
   const [catalogNextOffset, setCatalogNextOffset] = useState<number | null>(null);
   const [catalogTotal, setCatalogTotal] = useState<number | null>(null);
   const [catalogLoading, setCatalogLoading] = useState(false);
-  const [previewGenerated, setPreviewGenerated] = useState(false);
-  const [copiedRecord, setCopiedRecord] = useState<number | null>(null);
+  const catalogQueryKey = JSON.stringify([packageId, environment, catalogSearch.trim(), inspectionRefresh, refreshKey]);
+  const catalogQueryKeyRef = useRef(catalogQueryKey);
+  const catalogGenerationRef = useRef(0);
+  const catalogFirstPageControllerRef = useRef<AbortController | null>(null);
+  const catalogLoadMoreControllerRef = useRef<AbortController | null>(null);
+  const recordIdentityRef = useRef(recordIdentity);
+  const recordsRequestKey = JSON.stringify([recordIdentity, offset, previewGenerated, revision, inspectionRefresh, refreshKey]);
+  const response = recordResponseState?.key === recordsRequestKey ? recordResponseState.value : null;
+  const loading = recordLoadingKey === recordsRequestKey;
   const selectedEntry = entries.find(item => item.id === selectedId);
   const visibleEntries = useMemo(() => entries
     .filter(item => !catalogSearch.trim() || item.id.toLocaleLowerCase().includes(catalogSearch.trim().toLocaleLowerCase())
@@ -88,46 +113,111 @@ export function TestdataCatalog({ api, packageId, environment, defaultEnvironmen
   [entries, catalogSearch]);
   const isGenerated = selectedEntry?.generated === true || displayField(selectedEntry || { id: '' }, 'generated') === 'true';
 
-  useEffect(() => { setSelectedId(descriptorId || ''); }, [descriptorId]);
+  useLayoutEffect(() => {
+    recordIdentityRef.current = recordIdentity;
+    setRecordControls({ identity: recordIdentity, offset: 0, previewGenerated: false, copiedRecord: null });
+    setRecordResponseState(null);
+    setRecordLoadingKey('');
+    setCopyStatus('');
+    setError('');
+  }, [recordIdentity]);
+
+  useLayoutEffect(() => {
+    catalogQueryKeyRef.current = catalogQueryKey;
+    catalogGenerationRef.current += 1;
+    catalogFirstPageControllerRef.current?.abort();
+    catalogFirstPageControllerRef.current = null;
+    catalogLoadMoreControllerRef.current?.abort();
+    catalogLoadMoreControllerRef.current = null;
+    setCatalogLoading(false);
+  }, [api, catalogQueryKey]);
+
+  useLayoutEffect(() => { setSelectedIdState(descriptorId || ''); }, [packageId, environment, descriptorId]);
 
   useEffect(() => {
-    const controller = new AbortController(); setEntries([]); setResponse(null); setError(''); setStatus('Loading resolved Testdata catalog…'); setCatalogNextOffset(null); setCatalogTotal(null); setOffset(0); setPreviewGenerated(false);
+    const generation = catalogGenerationRef.current;
+    const queryKey = catalogQueryKey;
+    const controller = new AbortController();
+    catalogFirstPageControllerRef.current = controller;
+    setEntries([]); setRecordResponseState(null); setError(''); setStatus('Loading resolved Testdata catalog…');
+    setCatalogNextOffset(null); setCatalogTotal(null); setCatalogLoading(false);
     api.getEffectiveConfiguration(packageId, { environment: environment || undefined, section: 'testdata', query: catalogSearch.trim() || undefined, offset: 0, limit: 50 }, controller.signal)
       .then(result => {
         const data = result.sections?.find(section => section.id === 'testdata')?.entries || [];
-        if (controller.signal.aborted) return;
-        setEntries(data); setCatalogNextOffset(result.nextOffset ?? null);
-        setSelectedId(current => current && data.some(item => item.id === current) ? current : descriptorId && !data.some(item => item.id === descriptorId) ? descriptorId : data[0]?.id || '');
-        setCatalogTotal(result.total ?? data.length);
-        setStatus(data.length ? `${result.total ?? data.length} Testdata descriptors match this search for ${environment || result.environment || 'package default'}.` : 'No Testdata descriptors match this search.');
-      }).catch(reason => { if (!controller.signal.aborted) { setError(errorText(reason, 'load the Testdata catalog')); setStatus('Testdata catalog unavailable.'); } });
-    return () => controller.abort();
+        if (controller.signal.aborted || generation !== catalogGenerationRef.current || queryKey !== catalogQueryKeyRef.current) return;
+        setEntries(current => generation === catalogGenerationRef.current && queryKey === catalogQueryKeyRef.current ? data : current);
+        setCatalogNextOffset(current => generation === catalogGenerationRef.current && queryKey === catalogQueryKeyRef.current ? result.nextOffset ?? null : current);
+        setSelectedIdState(current => {
+          if (generation !== catalogGenerationRef.current || queryKey !== catalogQueryKeyRef.current) return current;
+          return current && data.some(item => item.id === current) ? current
+            : descriptorId && !data.some(item => item.id === descriptorId) ? descriptorId : data[0]?.id || '';
+        });
+        setCatalogTotal(current => generation === catalogGenerationRef.current && queryKey === catalogQueryKeyRef.current ? result.total ?? data.length : current);
+        setStatus(current => generation === catalogGenerationRef.current && queryKey === catalogQueryKeyRef.current
+          ? data.length ? `${result.total ?? data.length} Testdata descriptors match this search for ${environment || result.environment || 'package default'}.` : 'No Testdata descriptors match this search.'
+          : current);
+      }).catch(reason => {
+        if (!controller.signal.aborted && generation === catalogGenerationRef.current && queryKey === catalogQueryKeyRef.current) {
+          setError(errorText(reason, 'load the Testdata catalog')); setStatus('Testdata catalog unavailable.');
+        }
+      });
+    return () => {
+      controller.abort();
+      if (catalogFirstPageControllerRef.current === controller) catalogFirstPageControllerRef.current = null;
+      catalogLoadMoreControllerRef.current?.abort();
+      catalogLoadMoreControllerRef.current = null;
+    };
   }, [api, packageId, environment, catalogSearch, inspectionRefresh, refreshKey]);
 
   async function loadMoreCatalog() {
     if (catalogNextOffset == null || catalogLoading) return;
+    const generation = catalogGenerationRef.current;
+    const queryKey = catalogQueryKey;
+    const controller = new AbortController();
+    catalogLoadMoreControllerRef.current?.abort();
+    catalogLoadMoreControllerRef.current = controller;
     setCatalogLoading(true); setError('');
     try {
-      const result = await api.getEffectiveConfiguration(packageId, { environment: environment || undefined, section: 'testdata', query: catalogSearch.trim() || undefined, offset: catalogNextOffset, limit: 50 });
+      const result = await api.getEffectiveConfiguration(packageId, { environment: environment || undefined, section: 'testdata', query: catalogSearch.trim() || undefined, offset: catalogNextOffset, limit: 50 }, controller.signal);
+      if (controller.signal.aborted || generation !== catalogGenerationRef.current || queryKey !== catalogQueryKeyRef.current) return;
       const next = result.sections?.find(section => section.id === 'testdata')?.entries || [];
-      setEntries(current => [...current, ...next]); setCatalogNextOffset(result.nextOffset ?? null); setCatalogTotal(result.total ?? entries.length + next.length);
-    } catch (reason) { setError(errorText(reason, 'load more Testdata descriptors')); }
-    finally { setCatalogLoading(false); }
+      setEntries(current => generation === catalogGenerationRef.current && queryKey === catalogQueryKeyRef.current ? [...current, ...next] : current);
+      setCatalogNextOffset(current => generation === catalogGenerationRef.current && queryKey === catalogQueryKeyRef.current ? result.nextOffset ?? null : current);
+      setCatalogTotal(current => generation === catalogGenerationRef.current && queryKey === catalogQueryKeyRef.current ? result.total ?? entries.length + next.length : current);
+    } catch (reason) {
+      if (!controller.signal.aborted && generation === catalogGenerationRef.current && queryKey === catalogQueryKeyRef.current)
+        setError(errorText(reason, 'load more Testdata descriptors'));
+    } finally {
+      if (catalogLoadMoreControllerRef.current === controller) {
+        catalogLoadMoreControllerRef.current = null;
+        if (generation === catalogGenerationRef.current && queryKey === catalogQueryKeyRef.current) setCatalogLoading(false);
+      }
+    }
   }
 
   useEffect(() => {
     if (selectedId && visibleEntries.length && !visibleEntries.some(item => item.id === selectedId) && selectedId !== descriptorId) {
-      const next = visibleEntries[0].id; setSelectedId(next); setDescriptorChange(next);
-    } else if (!selectedId && visibleEntries.length) setSelectedId(visibleEntries[0].id);
+      const next = visibleEntries[0].id; setSelectedIdState(next); setDescriptorChange(next);
+    } else if (!selectedId && visibleEntries.length) setSelectedIdState(visibleEntries[0].id);
   }, [visibleEntries, selectedId]);
 
   function setDescriptorChange(value?: string) { onDescriptorChange(value); }
 
+  function updateRecordControls(patch: Partial<Pick<RecordControls, 'offset' | 'previewGenerated' | 'copiedRecord'>>) {
+    setRecordControls(current => {
+      if (recordIdentityRef.current !== recordIdentity) return current;
+      const base = current.identity === recordIdentity ? current
+        : { identity: recordIdentity, offset: 0, previewGenerated: false, copiedRecord: null };
+      return { ...base, ...patch, identity: recordIdentity };
+    });
+  }
+
   useEffect(() => {
-    if (!selectedId || !selectedEntry || !api.getTestdataRecords) { setResponse(null); return; }
-    const controller = new AbortController(); setLoading(true); setError('');
+    const requestKey = recordsRequestKey;
+    if (!selectedId || !selectedEntry || !api.getTestdataRecords) { setRecordResponseState(null); setRecordLoadingKey(''); return; }
+    const controller = new AbortController(); setRecordLoadingKey(requestKey); setError('');
     api.getTestdataRecords(packageId, selectedId, { environment: environment || undefined, offset, limit: 50, previewGenerated }, controller.signal)
-      .then(result => { if (!controller.signal.aborted) setResponse(result); })
+      .then(result => { if (!controller.signal.aborted) setRecordResponseState({ key: requestKey, value: result }); })
       .catch(reason => {
         if (controller.signal.aborted) return;
         const status = typeof reason === 'object' && reason !== null && 'status' in reason
@@ -136,13 +226,18 @@ export function TestdataCatalog({ api, packageId, environment, defaultEnvironmen
           ? 'Testdata record preview is not available from this Server version; safe descriptor metadata remains visible.'
           : errorText(reason, 'load Testdata records'));
       })
-      .finally(() => { if (!controller.signal.aborted) setLoading(false); });
+      .finally(() => { if (!controller.signal.aborted) setRecordLoadingKey(current => current === requestKey ? '' : current); });
     return () => controller.abort();
-  }, [api, packageId, selectedId, selectedEntry, environment, offset, isGenerated, previewGenerated, revision, inspectionRefresh, refreshKey]);
+  }, [api, packageId, selectedId, selectedEntry, environment, offset, previewGenerated, revision, inspectionRefresh, refreshKey, recordsRequestKey]);
 
   async function copyRecord(index: number, value: JsonValue) {
-    try { await navigator.clipboard.writeText(JSON.stringify(value)); setCopiedRecord(index); setStatus(`Copied Testdata row ${index + 1}.`); }
-    catch { setStatus('Copy is unavailable in this browser context.'); }
+    const identity = recordIdentity;
+    try {
+      await navigator.clipboard.writeText(JSON.stringify(value));
+      if (recordIdentityRef.current === identity) { updateRecordControls({ copiedRecord: index }); setCopyStatus(`Copied Testdata row ${index + 1}.`); }
+    } catch {
+      if (recordIdentityRef.current === identity) setCopyStatus('Copy is unavailable in this browser context.');
+    }
   }
 
   const records = response?.records || [];
@@ -150,15 +245,18 @@ export function TestdataCatalog({ api, packageId, environment, defaultEnvironmen
   if (error && !selectedId) return <section className="att-testdata-workspace"><h2>Testdata</h2><p className="att-error" role="alert">{error}<button type="button" onClick={onRefresh}>Retry</button></p></section>;
   return <section className="att-testdata-workspace" aria-label="Structured Testdata catalog">
     <header><div><h2>Descriptors</h2><p>Resolved metadata and bounded records for {environment || defaultEnvironment || 'the Package default environment'}.</p></div>
-      {(catalogTotal !== 0 || entries.length > 0 || catalogSearch) && <label>Search descriptors<input type="search" aria-label="Search Testdata descriptors" value={catalogSearch} onChange={event => { setCatalogSearch(event.currentTarget.value); setSelectedId(''); setOffset(0); setPreviewGenerated(false); onDescriptorChange(undefined); }} placeholder="Search descriptor IDs and sources" /></label>}
+      {(catalogTotal !== 0 || entries.length > 0 || catalogSearch) && <label>Search descriptors<input type="search" aria-label="Search Testdata descriptors" value={catalogSearch} onChange={event => {
+        setCatalogSearch(event.currentTarget.value); setSelectedIdState(''); updateRecordControls({ offset: 0, previewGenerated: false, copiedRecord: null });
+        setRecordResponseState(null); onDescriptorChange(undefined);
+      }} placeholder="Search descriptor IDs and sources" /></label>}
     </header>
-    <p role="status" aria-live="polite">{status}{loading ? ' Loading records…' : ''}</p>
+    <p role="status" aria-live="polite">{copyStatus || status}{loading ? ' Loading records…' : ''}</p>
     {error && <p className="att-error" role="alert">{error}<button type="button" onClick={onRefresh}>Retry</button></p>}
     <div className="att-testdata-layout">
       <nav className="att-testdata-catalog" aria-label="Testdata descriptors">
         <h3>Catalog</h3><p>{visibleEntries.length} shown of {catalogTotal ?? entries.length} matching descriptors ({entries.length} loaded)</p>
         <ul>{visibleEntries.map(item => <li key={item.id}><button type="button" aria-current={selectedId === item.id ? 'true' : undefined}
-          onClick={() => { setSelectedId(item.id); setDescriptorChange(item.id); setOffset(0); setPreviewGenerated(false); setRevision(value => value + 1); }}>
+          onClick={() => { setSelectedIdState(item.id); setDescriptorChange(item.id); updateRecordControls({ offset: 0, previewGenerated: false, copiedRecord: null }); setRecordResponseState(null); setRevision(value => value + 1); }}>
           <span>{item.id}</span><small>{item.source || displayField(item, 'source')}</small></button></li>)}</ul>
         {catalogNextOffset != null && <button type="button" onClick={() => void loadMoreCatalog()} disabled={catalogLoading}>{catalogLoading ? 'Loading…' : 'Load more descriptors'}</button>}
         {entries.length > 0 && !visibleEntries.length && <p>No descriptors match this search.</p>}
@@ -176,7 +274,7 @@ export function TestdataCatalog({ api, packageId, environment, defaultEnvironmen
           <div><dt>Sequence end</dt><dd>{String(((((response?.generation as Record<string, JsonValue> | undefined)?.generate as Record<string, JsonValue> | undefined)?.seq as Record<string, JsonValue> | undefined)?.to) ?? 'Not provided')}</dd></div>
           <div><dt>Format</dt><dd>{String(((((response?.generation as Record<string, JsonValue> | undefined)?.generate as Record<string, JsonValue> | undefined)?.seq as Record<string, JsonValue> | undefined)?.format) ?? 'Not provided')}</dd></div></dl>
         {response?.generation && <details><summary>Record template</summary><CodeEditor value={JSON.stringify((response.generation as Record<string, JsonValue>).record ?? null, null, 2)} language="json" label="Generated Testdata record template" readOnly /></details>}
-        {!previewGenerated && <button type="button" onClick={() => { setOffset(0); setPreviewGenerated(true); }} disabled={loading}>Preview first 50 generated records</button>}
+        {!previewGenerated && <button type="button" onClick={() => updateRecordControls({ offset: 0, previewGenerated: true, copiedRecord: null })} disabled={loading}>Preview first 50 generated records</button>}
       </div>}
       <div className="att-testdata-record-heading"><h3>{isGenerated ? 'Record preview' : 'Records'}</h3><span>{response ? `${(response.recordCount ?? response.total).toLocaleString()} total` : 'Records withheld or unavailable'}</span></div>
       {response?.previewRequired ? <p className="att-config-empty">Generated records are not loaded automatically. Choose <strong>Preview first 50 generated records</strong> to request a bounded preview.</p>
@@ -193,7 +291,7 @@ export function TestdataCatalog({ api, packageId, environment, defaultEnvironmen
             {columns.map(column => { const value = record.value && typeof record.value === 'object' && !Array.isArray(record.value) ? (record.value as Record<string, unknown>)[column] : column === 'value' ? record.value : undefined; return <td key={column}><TestdataCell value={value} /></td>; })}
             <td>{record.redacted ? 'Some fields redacted' : 'Visible by Server policy'}</td><td><button type="button" onClick={() => void copyRecord(record.index, record.value)}>{copiedRecord === record.index ? 'Copied' : 'Copy row'}</button></td></tr>)}</tbody></table></div>
           : <p className="att-config-empty">{loading ? 'Loading records…' : response ? 'This descriptor contains no records.' : 'No records are available for this descriptor.'}</p>)}
-      {response?.nextOffset != null && <button type="button" onClick={() => setOffset(response.nextOffset || 0)} disabled={loading}>Load next 50 records</button>}
+      {response?.nextOffset != null && <button type="button" onClick={() => updateRecordControls({ offset: response.nextOffset || 0, copiedRecord: null })} disabled={loading}>Load next 50 records</button>}
       <details className="att-testdata-source"><summary>Advanced descriptor metadata</summary><CodeEditor value={JSON.stringify(Object.fromEntries(Object.entries(selectedEntry.fields || {}).map(([key, field]) => [key, field.state === 'visible' ? field.value : field.state])), null, 2)} language="json" label="Advanced Testdata descriptor metadata" readOnly /></details>
     </> : <p className="att-config-empty">{descriptorId ? `Testdata descriptor ${descriptorId} is unavailable for this Package or Environment.` : 'No Testdata descriptors were returned for the selected environment.'}</p>}
       </div>
