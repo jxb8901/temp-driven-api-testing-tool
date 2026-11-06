@@ -316,6 +316,39 @@ describe('PackageTestdataWorkspace', () => {
     expect(host.textContent).not.toContain('descriptor payments is unavailable');
   });
 
+  it('pages a deep-link fuzzy lookup until its exact descriptor appears', async () => {
+    const descriptors = [
+      ...Array.from({ length: 60 }, (_, index) => ({
+        id: `a-variant-${String(index).padStart(2, '0')}`,
+        source: `testdata/accounts-${String(index).padStart(2, '0')}.yaml`,
+      })),
+      { id: 'accounts', source: 'testdata/accounts.yaml' },
+    ].sort((left, right) => left.id.localeCompare(right.id, undefined, { sensitivity: 'base' }));
+    const api = {
+      getDeclaredConfiguration: vi.fn(async () => ({ environments: [] })),
+      getEffectiveConfiguration: vi.fn(async (_packageId: string, query: { query?: string; offset?: number; limit?: number }) => {
+        const normalizedQuery = query.query?.toLocaleLowerCase();
+        const matches = descriptors.filter(item => !normalizedQuery
+          || item.id.toLocaleLowerCase().includes(normalizedQuery)
+          || item.source.toLocaleLowerCase().includes(normalizedQuery));
+        const offset = query.offset ?? 0;
+        const page = matches.slice(offset, offset + (query.limit ?? 50));
+        const nextOffset = offset + page.length < matches.length ? offset + page.length : null;
+        return { total: matches.length, nextOffset, sections: [{ id: 'testdata', entries: page }] };
+      }),
+      getTestdataRecords: vi.fn(async (_packageId: string, descriptorId: string) => ({ descriptorId, offset: 0, limit: 50, total: 0, records: [] })),
+    } as unknown as ExplorerApi;
+
+    await act(async () => root.render(<RoutedHarness api={api} descriptorId="accounts" />));
+    await flush(); await flush();
+
+    expect(vi.mocked(api.getEffectiveConfiguration).mock.calls.map(call => call[1].offset)).toEqual([0, 50]);
+    expect(api.getTestdataRecords).toHaveBeenLastCalledWith('payments', 'accounts',
+      { environment: undefined, offset: 0, limit: 50, previewGenerated: false }, expect.any(AbortSignal));
+    expect(host.textContent).toContain('testdata/accounts.yaml');
+    expect(host.textContent).not.toContain('Testdata descriptor accounts is unavailable');
+  });
+
   it('does not fall back to shared or another Package when the route Package is unregistered', async () => {
     const api = { getDeclaredConfiguration: vi.fn(), getEffectiveConfiguration: vi.fn(), getTestdataRecords: vi.fn() } as unknown as ExplorerApi;
     await act(async () => root.render(<Harness api={api} registered={false} />)); await flush();

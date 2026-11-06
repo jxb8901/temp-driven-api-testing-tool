@@ -151,20 +151,54 @@ export function TestdataCatalog({ api, packageId, environment, defaultEnvironmen
     setEntries([]); setRecordResponseState(null); setError(''); setStatus('Loading resolved Testdata catalog…');
     setCatalogNextOffset(null); setCatalogTotal(null); setCatalogLoading(false);
     api.getEffectiveConfiguration(packageId, { environment: environment || undefined, section: 'testdata', query: catalogQuery || undefined, offset: 0, limit: 50 }, controller.signal)
-      .then(result => {
+      .then(async result => {
         const data = result.sections?.find(section => section.id === 'testdata')?.entries || [];
-        if (controller.signal.aborted || generation !== catalogGenerationRef.current || queryKey !== catalogQueryKeyRef.current) return;
+        const isCurrent = () => !controller.signal.aborted && generation === catalogGenerationRef.current && queryKey === catalogQueryKeyRef.current;
+        if (!isCurrent()) return;
         setEntries(current => generation === catalogGenerationRef.current && queryKey === catalogQueryKeyRef.current ? data : current);
-        setCatalogNextOffset(current => generation === catalogGenerationRef.current && queryKey === catalogQueryKeyRef.current ? result.nextOffset ?? null : current);
+        const firstPageNextOffset = result.nextOffset ?? null;
+        const firstPageTotal = result.total ?? data.length;
+        let nextOffset = firstPageNextOffset;
+        let total = firstPageTotal;
+        setCatalogNextOffset(current => generation === catalogGenerationRef.current && queryKey === catalogQueryKeyRef.current ? firstPageNextOffset : current);
         setSelectedIdState(current => {
           if (generation !== catalogGenerationRef.current || queryKey !== catalogQueryKeyRef.current) return current;
           return current && data.some(item => item.id === current) ? current
             : descriptorId && !data.some(item => item.id === descriptorId) ? descriptorId : data[0]?.id || '';
         });
-        setCatalogTotal(current => generation === catalogGenerationRef.current && queryKey === catalogQueryKeyRef.current ? result.total ?? data.length : current);
+        setCatalogTotal(current => generation === catalogGenerationRef.current && queryKey === catalogQueryKeyRef.current ? firstPageTotal : current);
         setStatus(current => generation === catalogGenerationRef.current && queryKey === catalogQueryKeyRef.current
-          ? data.length ? `${result.total ?? data.length} Testdata descriptors match this search for ${environment || result.environment || 'package default'}.` : 'No Testdata descriptors match this search.'
+          ? data.length ? `${firstPageTotal} Testdata descriptors match this search for ${environment || result.environment || 'package default'}.` : 'No Testdata descriptors match this search.'
           : current);
+
+        // A route descriptor ID is exact, but the server query also matches sources.
+        // Keep paging only this deep-link lookup until its exact entry is found; manual
+        // catalog searches continue to use the existing Load more control.
+        if (!descriptorId || routeLookupQuery !== descriptorId || data.some(item => item.id === descriptorId) || nextOffset == null) return;
+        setCatalogLoading(true);
+        let loaded = data;
+        try {
+          while (nextOffset != null && !loaded.some(item => item.id === descriptorId)) {
+            const pageOffset = nextOffset;
+            const page = await api.getEffectiveConfiguration(packageId, {
+              environment: environment || undefined, section: 'testdata', query: descriptorId, offset: pageOffset, limit: 50,
+            }, controller.signal);
+            if (!isCurrent()) return;
+            const pageEntries = page.sections?.find(section => section.id === 'testdata')?.entries || [];
+            const loadedIds = new Set(loaded.map(item => item.id));
+            const nextLoaded = [...loaded, ...pageEntries.filter(item => !loadedIds.has(item.id))];
+            const pageNextOffset = page.nextOffset ?? null;
+            const pageTotal = page.total ?? total;
+            loaded = nextLoaded; nextOffset = pageNextOffset; total = pageTotal;
+            setEntries(current => isCurrent() ? nextLoaded : current);
+            setCatalogNextOffset(current => isCurrent() ? pageNextOffset : current);
+            setCatalogTotal(current => isCurrent() ? pageTotal : current);
+          }
+        } catch (reason) {
+          if (isCurrent()) setError(errorText(reason, 'continue searching for the linked Testdata descriptor'));
+        } finally {
+          if (isCurrent()) setCatalogLoading(false);
+        }
       }).catch(reason => {
         if (!controller.signal.aborted && generation === catalogGenerationRef.current && queryKey === catalogQueryKeyRef.current) {
           setError(errorText(reason, 'load the Testdata catalog')); setStatus('Testdata catalog unavailable.');
