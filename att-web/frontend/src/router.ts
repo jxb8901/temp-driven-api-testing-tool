@@ -16,15 +16,15 @@ export interface LoadCatalogRouteState {
   scrollY?: number;
 }
 
-export type ConfigurationTab = 'source' | 'declared' | 'effective' | 'compare' | 'testdata';
+export type ConfigurationTab = 'source' | 'declared' | 'effective' | 'compare';
 export interface ResourceSourceReferenceRoute { type: 'case' | 'template' | 'flow' | 'tool'; resourceId: string; referenceId: string }
 
 export type AppRoute =
   | { kind: 'dashboard' }
   | { kind: 'monitoring' }
   | { kind: 'packages' }
-  | { kind: 'package'; packageId: string; resource?: ResourceRoute }
-  | { kind: 'configuration'; packageId?: string; environment?: string; filePath?: string; fileOrigin?: string; sourceReference?: ResourceSourceReferenceRoute; configurationReferenceId?: string; tab?: ConfigurationTab }
+  | { kind: 'package'; packageId: string; resource?: ResourceRoute; view?: 'testdata' | 'source-file'; environment?: string; testdataDescriptorId?: string; filePath?: string; fileOrigin?: string; sourceReference?: ResourceSourceReferenceRoute; returnTo?: string }
+  | { kind: 'configuration'; packageId?: string; environment?: string; filePath?: string; fileOrigin?: string; sourceReference?: ResourceSourceReferenceRoute; configurationReferenceId?: string; tab?: ConfigurationTab; view?: 'package-manifest' }
   | { kind: 'quick-load'; packageId: string; target?: ResourceRoute; environment?: string; templateId?: string; model?: 'virtualUsers' | 'arrivalRate' }
   | { kind: 'run'; packageId?: string; target?: ResourceRoute; environment?: string; batch?: boolean; replayDraftId?: string; replaySourceJobId?: string }
   | { kind: 'jobs'; jobId?: string; executionType?: 'load'; standalone?: boolean; tab?: 'overview' | 'live' | 'events' | 'results' | 'artifacts' | 'metrics' }
@@ -34,6 +34,33 @@ export type AppRoute =
   | { kind: 'load-resource'; packageId: string; resourceId: string; environment?: string; returnTo?: string }
   | { kind: 'schedules'; view?: 'new' | 'edit' | 'history'; scheduleId?: string; occurrenceId?: string; intent?: 'validated'; returnTo?: string }
   | { kind: 'settings' };
+
+function safeRouteValue(value: string | null, maxLength: number): string | undefined {
+  return value && value.length <= maxLength && !/[\u0000-\u001f\u007f]/.test(value) ? value : undefined;
+}
+
+function safePackageLogicalPath(value: string | null): string | undefined {
+  const path = safeRouteValue(value, 2048);
+  if (!path || path.startsWith('/') || path.includes('\\') || /^[a-z][a-z\d+.-]*:/i.test(path)) return undefined;
+  const segments = path.split('/');
+  if (segments.some(segment => !segment || segment === '.' || segment === '..')) return undefined;
+  return path;
+}
+
+function safePackageReturnTo(value: string | null, packageId: string): string | undefined {
+  if (!value || value.length > 4096 || /[\u0000-\u001f\u007f]/.test(value) || value.indexOf('#', 1) >= 0) return undefined;
+  const root = '#/packages/' + encodeURIComponent(packageId);
+  if (!value.startsWith(root)) return undefined;
+  const suffix = value.slice(root.length);
+  return !suffix || suffix.startsWith('/resources/') || suffix === '/source-file' || suffix.startsWith('/source-file?')
+    ? value : undefined;
+}
+
+function isLegacyTestdataRoute(hash: string): boolean {
+  const queryIndex = hash.indexOf('?');
+  if (queryIndex < 0 || !/^#?\/?configuration(?:\/|$)/.test(hash.slice(0, queryIndex))) return false;
+  return new URLSearchParams(hash.slice(queryIndex + 1)).get('tab') === 'testdata';
+}
 
 export function parseRoute(hash: string): AppRoute {
   let parts: string[];
@@ -51,11 +78,33 @@ export function parseRoute(hash: string): AppRoute {
   if (parts[0] === 'monitoring' && parts.length === 1) return { kind: 'monitoring' };
   if (parts[0] === 'packages' && parts.length === 1) return { kind: 'packages' };
   if (parts[0] === 'packages' && parts[1]) {
+    if (parts.length === 3 && parts[2] === 'testdata') return {
+      kind: 'package', packageId: parts[1], view: 'testdata',
+      ...(query.has('environment') ? { environment: query.get('environment') || '' } : {}),
+      ...(safeRouteValue(query.get('descriptor'), 512) ? { testdataDescriptorId: safeRouteValue(query.get('descriptor'), 512)! } : {}),
+    };
+    if (parts.length === 3 && parts[2] === 'source-file') {
+      const sourceType = query.get('sourceType');
+      const sourceResourceId = safeRouteValue(query.get('sourceResourceId'), 512);
+      const referenceId = query.get('sourceReferenceId');
+      const sourceReference = sourceType && ['template', 'flow'].includes(sourceType) && sourceResourceId
+        && referenceId && /^[0-9a-f]{64}$/.test(referenceId)
+        ? { type: sourceType as ResourceSourceReferenceRoute['type'], resourceId: sourceResourceId, referenceId } : undefined;
+      const filePath = safePackageLogicalPath(query.get('file'));
+      const fileOrigin = safePackageLogicalPath(query.get('origin'));
+      const returnTo = safePackageReturnTo(query.get('returnTo'), parts[1]);
+      return {
+        kind: 'package', packageId: parts[1], view: 'source-file',
+        ...(query.has('environment') ? { environment: query.get('environment') || '' } : {}),
+        ...(filePath ? { filePath } : {}), ...(fileOrigin ? { fileOrigin } : {}),
+        ...(sourceReference ? { sourceReference } : {}), ...(returnTo ? { returnTo } : {}),
+      };
+    }
     if (parts.length === 5 && parts[2] === 'resources') {
       const rawDetailTab = query.get('detail');
       const detailTab = rawDetailTab === 'definition' || rawDetailTab === 'source' || rawDetailTab === 'relations'
         ? rawDetailTab : undefined;
-      return { kind: 'package', packageId: parts[1], resource: {
+      return { kind: 'package', packageId: parts[1], ...(query.has('environment') ? { environment: query.get('environment') || '' } : {}), resource: {
         type: parts[3], resourceId: parts[4], ...(query.get('id') ? { logicalId: query.get('id')! } : {}),
         ...(detailTab && detailTab !== 'definition' ? { tab: detailTab } : {}),
       } };
@@ -64,7 +113,16 @@ export function parseRoute(hash: string): AppRoute {
   }
   if (parts[0] === 'configuration') {
     const rawTab = query.get('tab');
-    const tab: ConfigurationTab | undefined = rawTab === 'source' || rawTab === 'declared' || rawTab === 'effective' || rawTab === 'compare' || rawTab === 'testdata' ? rawTab : undefined;
+    if (rawTab === 'testdata') {
+      const packageId = parts[1];
+      if (!packageId) return { kind: 'packages' };
+      const descriptorId = safeRouteValue(query.get('descriptorId') || query.get('descriptor') || query.get('id'), 512);
+      return { kind: 'package', packageId, view: 'testdata',
+        ...(query.has('environment') ? { environment: query.get('environment') || '' } : {}),
+        ...(descriptorId ? { testdataDescriptorId: descriptorId } : {}),
+      };
+    }
+    const tab: ConfigurationTab | undefined = rawTab === 'source' || rawTab === 'declared' || rawTab === 'effective' || rawTab === 'compare' ? rawTab : undefined;
     const sourceType = query.get('sourceType');
     const sourceResourceId = query.get('sourceResourceId');
     const sourceReferenceId = query.get('sourceReferenceId');
@@ -81,6 +139,7 @@ export function parseRoute(hash: string): AppRoute {
       ...(query.get('origin') ? { fileOrigin: query.get('origin')! } : {}),
       ...(sourceReference ? { sourceReference } : {}),
       ...(configurationReferenceId&&/^[A-Za-z0-9_-]{1,4096}$/.test(configurationReferenceId)?{configurationReferenceId}:{}),
+      ...(query.get('view') === 'package-manifest' ? { view: 'package-manifest' as const } : {}),
       tab,
     };
   }
@@ -161,12 +220,32 @@ export function formatRoute(route: AppRoute): string {
     case 'packages': return '#/packages';
     case 'package': {
       const root = '#/packages/' + encodeURIComponent(route.packageId);
+      if (route.view === 'testdata') {
+        const query = new URLSearchParams();
+        if (route.environment !== undefined) query.set('environment', route.environment);
+        if (route.testdataDescriptorId) query.set('descriptor', route.testdataDescriptorId);
+        return root + '/testdata' + (query.size ? '?' + query.toString() : '');
+      }
+      if (route.view === 'source-file') {
+        const query = new URLSearchParams();
+        if (route.environment !== undefined) query.set('environment', route.environment);
+        if (route.filePath) query.set('file', route.filePath);
+        if (route.fileOrigin) query.set('origin', route.fileOrigin);
+        if (route.sourceReference) {
+          query.set('sourceType', route.sourceReference.type);
+          query.set('sourceResourceId', route.sourceReference.resourceId);
+          query.set('sourceReferenceId', route.sourceReference.referenceId);
+        }
+        if (route.returnTo) query.set('returnTo', route.returnTo);
+        return root + '/source-file' + (query.size ? '?' + query.toString() : '');
+      }
       if (!route.resource) return root;
       const resource = root + '/resources/' + encodeURIComponent(route.resource.type) + '/' + encodeURIComponent(route.resource.resourceId);
-      if ((!route.resource.tab || route.resource.tab === 'definition') && !route.resource.logicalId) return resource;
+      if ((!route.resource.tab || route.resource.tab === 'definition') && !route.resource.logicalId && route.environment === undefined) return resource;
       const query = new URLSearchParams();
       if (route.resource.tab && route.resource.tab !== 'definition') query.set('detail', route.resource.tab);
       if (route.resource.logicalId) query.set('id', route.resource.logicalId);
+      if (route.environment !== undefined) query.set('environment', route.environment);
       return resource + '?' + query.toString();
     }
     case 'configuration': {
@@ -181,6 +260,7 @@ export function formatRoute(route: AppRoute): string {
       }
       if(route.configurationReferenceId)query.set('configurationReferenceId',route.configurationReferenceId);
       if (route.tab) query.set('tab', route.tab);
+      if (route.view === 'package-manifest') query.set('view', route.view);
       const suffix = query.toString();
       return '#/configuration' + (route.packageId ? '/' + encodeURIComponent(route.packageId) : '') + (suffix ? '?' + suffix : '');
     }
@@ -293,6 +373,16 @@ export function useRouteState(): RouteState {
   const allowedHash = useRef<string | null>(null);
   const dirtyEntries = useRef(new Map<symbol, string>());
   const isDirty = dirtyEntries.current.size > 0;
+
+  useEffect(() => {
+    const current = window.location.hash || '#/';
+    if (!isLegacyTestdataRoute(current)) return;
+    const canonical = formatRoute(parseRoute(current));
+    if (canonical === current) return;
+    window.history.replaceState(null, '', window.location.pathname + window.location.search + canonical);
+    committedHash.current = canonical;
+    setRoute(parseRoute(canonical));
+  }, [route]);
 
   const registerUnsavedChanges = useCallback((dirty: boolean, description = 'unsaved changes') => {
     const token = Symbol(description);

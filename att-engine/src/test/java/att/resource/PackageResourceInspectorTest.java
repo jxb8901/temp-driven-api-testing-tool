@@ -338,6 +338,77 @@ class PackageResourceInspectorTest {
         assertTrue(String.valueOf(nestedFile.get("text")).contains("café"));
     }
 
+    @Test void discoversActionFileReferencesFromTemplateAndFlowOriginsWithoutEvaluatingExpressions() throws Exception {
+        Path root=packageWithTemplate("source-expression-origins","FORM","description: safe source reference test");
+        Path templateDir=root.resolve("templates/FORM");
+        writeUtf8(templateDir.resolve("request.xml"),"<request>${EXEC.INPUT.account} #{notEvaluated()}</request>\n");
+        writeUtf8(templateDir.resolve("template.yaml"),"schemaVersion: att-template/v3.6\nname: FORM\ndescription: safe\nactions:\n"
+                +"  inspect:\n    type: log\n    message: '&{./request.xml}'\n");
+        Path flowDir=Files.createDirectories(root.resolve("templates/flows/payment"));
+        Path retryDir=Files.createDirectories(root.resolve("templates/flows/retry"));
+        Path shared=Files.createDirectories(root.resolve("templates/flows/shared"));
+        writeUtf8(shared.resolve("AFT19222.xml"),"<request>shared safe source</request>\n");
+        writeUtf8(flowDir.resolve("flow.yaml"),"schemaVersion: att-flow/v3.6\nid: checkout-flow.v1\nname: Checkout\ndescription: Checkout source references\nactions:\n"
+                +"  inspect:\n    type: log\n    message: '#{call(&{../shared/AFT19222.xml})}'\n");
+        writeUtf8(retryDir.resolve("flow.yaml"),"schemaVersion: att-flow/v3.6\nid: retry-flow.v1\nname: Retry\ndescription: Retry source references\nactions:\n"
+                +"  inspect:\n    type: log\n    message: '&{../shared/AFT19222.xml}'\n");
+        PackageResourceInspector inspector=new PackageResourceInspector(root,Paths.get("config/config.yaml"),"SIT",
+                Collections.<String>emptyList(),65536,262144,false,true,"safe-package-files",
+                Collections.<String>emptyList(),false,Collections.<String>emptyList(),Collections.<String>emptyList());
+
+        @SuppressWarnings("unchecked") List<Map<String,Object>> templates=(List<Map<String,Object>>)inspector.inspect("list","template",null,null,0,20).get("items");
+        String templateId=String.valueOf(templates.get(0).get("resourceId"));
+        Map<String,Object> templateSource=inspector.inspect("source","template",templateId,null,0,1);
+        @SuppressWarnings("unchecked") List<Map<String,Object>> templateReferences=(List<Map<String,Object>>)templateSource.get("fileReferences");
+        Map<String,Object> templateReference=templateReferences.stream().filter(item->"templates/FORM/request.xml".equals(item.get("logicalPath")))
+                .findFirst().orElseThrow(AssertionError::new);
+        Map<String,Object> templateFile=inspector.inspect("source-file","template",templateId,String.valueOf(templateReference.get("referenceId")),0,1);
+        assertEquals("templates/FORM/request.xml",templateFile.get("logicalPath"));
+        assertTrue(String.valueOf(templateFile.get("text")).contains("${EXEC.INPUT.account} #{notEvaluated()}")
+                ,"safe inspection must return literal file text without evaluating expressions");
+
+        @SuppressWarnings("unchecked") List<Map<String,Object>> flows=(List<Map<String,Object>>)inspector.inspect("list","flow",null,null,0,20).get("items");
+        assertEquals(2,flows.size());
+        List<String> referenceIds=new java.util.ArrayList<String>();
+        for(Map<String,Object> flow:flows) {
+            Map<String,Object> flowSource=inspector.inspect("source","flow",String.valueOf(flow.get("resourceId")),null,0,1);
+            @SuppressWarnings("unchecked") List<Map<String,Object>> flowReferences=(List<Map<String,Object>>)flowSource.get("fileReferences");
+            Map<String,Object> flowReference=flowReferences.stream().filter(item->"templates/flows/shared/AFT19222.xml".equals(item.get("logicalPath")))
+                    .findFirst().orElseThrow(()->new AssertionError(flowSource.toString()));
+            referenceIds.add(String.valueOf(flowReference.get("referenceId")));
+            Map<String,Object> flowFile=inspector.inspect("source-file","flow",String.valueOf(flow.get("resourceId")),String.valueOf(flowReference.get("referenceId")),0,1);
+            assertTrue(String.valueOf(flowFile.get("text")).contains("shared safe source"));
+        }
+        assertNotEquals(referenceIds.get(0),referenceIds.get(1),"Each Flow receives a distinct opaque token for its own reachable reference");
+    }
+
+    @Test void reportsAllowlistBlockedActionFileReferencesWithoutExposingThemAsLinks() throws Exception {
+        Path root=packageWithTemplate("source-reference-allowlist-policy","POLICY","description: safe source policy test");
+        Path templateDir=root.resolve("templates/POLICY");
+        writeUtf8(templateDir.resolve("allowed.txt"),"allowed source payload\n");
+        writeUtf8(templateDir.resolve("blocked.txt"),"must not be loaded by source inspection\n");
+        writeUtf8(templateDir.resolve("template.yaml"),"schemaVersion: att-template/v3.6\nname: POLICY\ndescription: safe\nactions:\n"
+                +"  inspectAllowed:\n    type: log\n    message: '&{./allowed.txt}'\n"
+                +"  inspectBlocked:\n    type: log\n    message: '&{./blocked.txt}'\n");
+        PackageResourceInspector inspector=new PackageResourceInspector(root,Paths.get("config/config.yaml"),"SIT",
+                List.of("templates/POLICY/template.yaml","templates/POLICY/allowed.txt"),65536,262144,
+                false,true,"allowlist-only",Collections.<String>emptyList(),false,
+                Collections.<String>emptyList(),Collections.<String>emptyList());
+        @SuppressWarnings("unchecked") List<Map<String,Object>> items=(List<Map<String,Object>>)inspector.inspect("list","template",null,null,0,10).get("items");
+        Map<String,Object> source=inspector.inspect("source","template",String.valueOf(items.get(0).get("resourceId")),null,0,1);
+        assertEquals(Boolean.TRUE,source.get("available"),source.toString());
+        assertEquals(Boolean.TRUE,source.get("fileReferencesUnavailable"),source.toString());
+        @SuppressWarnings("unchecked") List<Map<String,Object>> references=(List<Map<String,Object>>)source.get("fileReferences");
+        assertEquals(1,references.size(),source.toString());
+        assertEquals("templates/POLICY/allowed.txt",references.get(0).get("logicalPath"));
+        assertTrue(String.valueOf(source.get("text")).contains("&{./blocked.txt}"),"The safe source projection keeps the authored locator literal.");
+        assertFalse(source.toString().contains("must not be loaded"),"Blocked file contents must not enter the source response.");
+        Map<String,Object> opened=inspector.inspect("source-file","template",String.valueOf(items.get(0).get("resourceId")),
+                String.valueOf(references.get(0).get("referenceId")),0,1);
+        assertEquals("templates/POLICY/allowed.txt",opened.get("logicalPath"));
+        assertTrue(String.valueOf(opened.get("text")).contains("allowed source payload"));
+    }
+
     @Test void marksAllowlistedBinaryToolSourceUnavailableWithAStableReason() throws Exception {
         Path root=packageWithTemplate("binary-tool-source","FORM","description: safe");
         Path script=Files.createDirectories(root.resolve("tools")).resolve("binary.sh");
@@ -528,6 +599,8 @@ class PackageResourceInspectorTest {
         Map<String,Object> source=inspector.inspect("source","template",resourceId,null,0,1);
         @SuppressWarnings("unchecked") List<Map<String,Object>> files=(List<Map<String,Object>>)source.get("fileReferences");
         assertEquals(3,files.size());assertEquals("payloads/request.xml",files.get(0).get("logicalPath"));
+        assertEquals(Boolean.TRUE,source.get("fileReferencesUnavailable"),
+                "Missing, escaped, and oversized locators should be explained without exposing their authored paths or contents");
         Map<String,Object> unicodeFile=files.stream().filter(file->"payloads/請求.json".equals(file.get("logicalPath"))).findFirst().orElseThrow(AssertionError::new);
         Map<String,Object> csvFile=files.stream().filter(file->"payloads/customers.csv".equals(file.get("logicalPath"))).findFirst().orElseThrow(AssertionError::new);
         String referenceId=String.valueOf(files.get(0).get("referenceId"));

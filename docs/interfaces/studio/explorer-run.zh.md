@@ -14,7 +14,9 @@ Debug 只能從已選取的 Template、Flow 或 Tool 詳細資料開啟。表單
 
 React Explorer 以三欄工作區呈現套件資源、所選定義及資源操作。選擇 Case、Template、Flow 或 Tool 即可開啟詳細資料。`#/packages/{packageId}/resources/{type}/{resourceId}` hash route 會在重新載入時還原所選資源，並支援瀏覽器導覽。Definition、Source 及 Dependencies 分頁可使用方向鍵、Home 及 End 鍵盤操作。
 
-Source 分頁只載入 Server 提供的安全 source projection。畫面最多顯示前 200,000 個字元及 12,000 行，並只渲染視窗內的行；source 內容會以純文字呈現。Package 更新後可重新整理。**Copy displayed source** 只會複製上述上限內已顯示的文字。空白或不可用的 projection 會明確顯示；驗證及權限錯誤不會包含原始回應細節。
+Package Testdata 是唯讀 Explorer 檢視，route 為 `#/packages/{packageId}/testdata`。它使用該 route 的 Package 與 Environment，並可透過選用的 `descriptor` query 還原所選 descriptor。每次請求最多讀取 50 筆 record；Generated records 會在使用者選擇 **Preview first 50 generated records** 前保持隱藏。Testdata 不是可執行的 resource，不會出現在 Run 或 Quick LOAD target 清單。Shared Configuration 只包含全域 Source、Declared、Effective 及 Compare 檢視；Package Testdata metadata 與 origin 仍保留於 Package Configuration。
+
+Source 分頁只載入 Server 提供的安全 source projection。符合條件的 Action `&{path}` reference 會在 source panel 顯示 **View referenced file**，並保留原始 expression。導覽會使用 Server 簽發的 opaque reference，並重新檢查 Package、origin、可達性及 safe-source policy。Package-relative source 檢視唯讀、設有大小上限並經過遮蔽；只會提供安全的巢狀 reference 導覽，並可返回呼叫端 source。檢視時不會評估 `${...}` 或 `#{...}` expression。畫面最多顯示前 200,000 個字元及 12,000 行，並只渲染視窗內的行；source 內容會以純文字呈現。Package 更新後可重新整理。**Copy displayed source** 只會複製上述上限內已顯示的文字。空白或不可用的 projection 會明確顯示；驗證及權限錯誤不會包含原始回應細節。
 
 可從資源 Inspector 執行 Debug 或 Case。Sidecar 提供的 scalar 欄位會使用文字、數字、布林值及 null 等型別控制項。巢狀值及完整 business input 可在 **Advanced JSON** 編輯。提交驗證前，請修正無效 JSON 或 scalar 值。**Reset defaults** 會還原從 sidecar 載入的值。若 Server 將 sidecar 值標示為 redacted，表單會顯示 keep-default 標記，不會揭露隱藏值。保留標記即可沿用 package 值；如需覆寫，請選擇型別並輸入明確值。開始 Debug 前請先驗證並檢視安全預覽。Server 仍是驗證及存取檢查的權威來源。
 

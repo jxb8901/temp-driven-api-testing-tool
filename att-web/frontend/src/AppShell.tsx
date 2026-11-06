@@ -107,8 +107,8 @@ function routeTitle(route: AppRoute): string {
   if (route.kind === 'monitoring') return 'Monitoring';
   if (route.kind === 'run') return 'Run';
   if (route.kind === 'packages') return 'Explorer';
-  if (route.kind === 'package') return route.resource ? route.resource.resourceId : route.packageId;
-  if (route.kind === 'configuration') return route.filePath?.split('/').filter(Boolean).pop() || 'Configuration';
+  if (route.kind === 'package') return route.view === 'testdata' ? 'Testdata' : route.view === 'source-file' ? route.filePath?.split('/').pop() || 'Package source' : route.resource ? route.resource.resourceId : route.packageId;
+  if (route.kind === 'configuration') return route.view === 'package-manifest' ? 'Package Configuration' : route.filePath?.split('/').filter(Boolean).pop() || 'Configuration';
   if (route.kind === 'quick-load') return 'Quick Load';
   if (route.kind === 'jobs') return route.jobId ? 'Job ' + route.jobId : 'Jobs and results';
   if (route.kind === 'job-console') return 'Job ' + route.jobId + ' console';
@@ -149,7 +149,7 @@ function KeyboardDialog({ open, mode, showScheduledLoad, selectedPackage, access
     { label: 'Dashboard', description: 'Dashboard overview', route: { kind: 'dashboard' } },
     { label: 'Monitoring', description: 'Live server health and capacity', route: { kind: 'monitoring' } },
     { label: 'Explorer', description: 'Choose a package, browse resources, and run targets', route: selectedPackage ? { kind: 'package', packageId: selectedPackage } : { kind: 'packages' } },
-    { label: 'Configuration', description: 'Inspect shared runtime configuration and Package-local Testdata', route: selectedPackage ? { kind: 'configuration', packageId: selectedPackage } : { kind: 'configuration' } },
+    { label: 'Configuration', description: 'Inspect shared runtime configuration', route: selectedPackage ? { kind: 'configuration', packageId: selectedPackage } : { kind: 'configuration' } },
     { label: 'Load testing', description: 'Create a validated Load job', route: { kind: 'load' } },
     { label: 'Jobs and results', description: 'Inspect recent jobs', route: { kind: 'jobs' } },
     ...(showScheduledLoad ? [{ label: 'Schedules', description: 'Manage RUN and LOAD schedules', route: { kind: 'schedules' } as AppRoute }] : []),
@@ -659,8 +659,10 @@ export function AppShell({
                 {route.kind === 'packages' && <Breadcrumb label="Packages" navigate={navigate} />}
                 {route.kind === 'package' && <>
                   <Breadcrumb label="Packages" href="#/packages" navigate={navigate} />
-                  <Breadcrumb label={route.packageId} href={route.resource ? packageHref : undefined} navigate={navigate} />
+                  <Breadcrumb label={route.packageId} href={route.resource || route.view ? packageHref : undefined} navigate={navigate} />
                   {route.resource && <Breadcrumb label={route.resource.resourceId} navigate={navigate} />}
+                  {route.view === 'testdata' && <Breadcrumb label="Testdata" navigate={navigate} />}
+                  {route.view === 'source-file' && <Breadcrumb label={route.filePath?.split('/').pop() || 'Safe source'} navigate={navigate} />}
                 </>}
                 {route.kind === 'configuration' && <>
                   <Breadcrumb label="Configuration" href={route.packageId ? '#/configuration' : undefined} navigate={navigate} />

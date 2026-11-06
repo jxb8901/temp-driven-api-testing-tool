@@ -32,6 +32,7 @@ public final class ResourceInspection {
         public Boolean redacted;
         public List<SourceReference> fileReferences;
         public Boolean fileReferencesTruncated;
+        public Boolean fileReferencesUnavailable;
         public String requestId;
     }
 

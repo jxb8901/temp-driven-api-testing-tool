@@ -118,6 +118,52 @@ describe('App Dashboard job refresh', () => {
     expect(host.querySelector<HTMLSelectElement>('[aria-label="Workspace Environment"]')?.value).toBe('UAT');
   });
 
+  it('redirects a legacy Testdata link into the Package route without changing Workspace context', async () => {
+    sessionStorage.setItem('att.workspace.context', JSON.stringify({ packageId: 'payments', environment: 'SIT' }));
+    window.history.replaceState(null, '', window.location.pathname + window.location.search + '#/configuration/payments?tab=testdata&environment=UAT&descriptorId=accounts');
+    vi.mocked(api.getPackages).mockResolvedValue({ items: [{ packageId: 'payments', name: 'Payments' }] });
+    vi.spyOn(api, 'getDeclaredConfiguration').mockResolvedValue({ environments: [
+      { name: 'SIT', state: 'active' }, { name: 'UAT', state: 'active' },
+    ] });
+    vi.spyOn(api, 'getEffectiveConfiguration').mockImplementation(async (_packageId, query) => query.section === 'testdata'
+      ? { environment: 'UAT', total: 1, sections: [{ id: 'testdata', entries: [{ id: 'accounts', source: 'testdata/accounts.yaml' }] }] }
+      : { environment: 'SIT', sections: [] });
+    vi.spyOn(api, 'getTestdataRecords').mockResolvedValue({ descriptorId: 'accounts', offset: 0, limit: 50, total: 1,
+      records: [{ index: 0, value: { id: 'A-1' } }] });
+
+    await act(async () => root.render(<App />)); await settle();
+    expect(window.location.hash).toBe('#/packages/payments/testdata?environment=UAT&descriptor=accounts');
+    expect(host.textContent).toContain('Package: Payments');
+    expect(host.textContent).toContain('accounts');
+    expect(host.querySelector<HTMLSelectElement>('[aria-label="Workspace Environment"]')?.value).toBe('SIT');
+    expect(JSON.parse(sessionStorage.getItem('att.workspace.context')!)).toEqual({ packageId: 'payments', environment: 'SIT' });
+    expect(api.getEffectiveConfiguration).toHaveBeenCalledWith('payments', expect.objectContaining({ section: 'testdata', environment: 'UAT' }), expect.any(AbortSignal));
+  });
+
+  it('inspects another Package Testdata without changing Workspace Package or Environment', async () => {
+    sessionStorage.setItem('att.workspace.context', JSON.stringify({ packageId: 'payments', environment: 'UAT' }));
+    window.history.replaceState(null, '', window.location.pathname + window.location.search + '#/packages/ledger/testdata?environment=QA&descriptor=accounts');
+    vi.mocked(api.getPackages).mockResolvedValue({ items: [
+      { packageId: 'payments', name: 'Payments' }, { packageId: 'ledger', name: 'Ledger' },
+    ] });
+    vi.spyOn(api, 'getDeclaredConfiguration').mockImplementation(async packageId => ({ environments: packageId === 'ledger'
+      ? [{ name: 'QA', state: 'active', default: true }]
+      : [{ name: 'UAT', state: 'active' }] }));
+    vi.spyOn(api, 'getEffectiveConfiguration').mockImplementation(async (packageId, query) => ({
+      environment: query.environment || (packageId === 'ledger' ? 'QA' : 'UAT'), total: 1,
+      sections: [{ id: 'testdata', entries: [{ id: 'accounts', source: 'testdata/accounts.yaml' }] }],
+    }));
+    vi.spyOn(api, 'getTestdataRecords').mockResolvedValue({ descriptorId: 'accounts', offset: 0, limit: 50, total: 0, records: [] });
+
+    await act(async () => root.render(<App />)); await settle();
+    expect(host.textContent).toContain('Package: Ledger');
+    expect(host.querySelector<HTMLSelectElement>('[aria-label="Testdata environment"]')?.value).toBe('QA');
+    expect(host.querySelector<HTMLSelectElement>('[aria-label="Workspace Package"]')?.value).toBe('payments');
+    expect(host.querySelector<HTMLSelectElement>('[aria-label="Workspace Environment"]')?.value).toBe('UAT');
+    expect(JSON.parse(sessionStorage.getItem('att.workspace.context')!)).toEqual({ packageId: 'payments', environment: 'UAT' });
+    expect(window.location.hash).toBe('#/packages/ledger/testdata?environment=QA&descriptor=accounts');
+  });
+
   it('refreshes after returning to Dashboard and shows newly completed Debug and Load rows', async () => {
     const updatedRows: JobSummary[] = [
       { jobId: 'J-LOAD', command: 'load', packageId: 'payments', status: 'ERROR', createdAt: '2026-10-15T10:00:00Z' },

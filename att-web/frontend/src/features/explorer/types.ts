@@ -76,6 +76,7 @@ export interface SourceProjection {
   reason?: string;
   fileReferences?: SafeSourceFileReference[];
   fileReferencesTruncated?: boolean;
+  fileReferencesUnavailable?: boolean;
 }
 
 export interface SafeSourceFileReference {
@@ -291,4 +292,5 @@ export interface ExplorerPageProps {
   onOpenQuickLoad?: (identity: ResourceIdentity & { logicalId?: string }) => void;
   onScheduleDebug?: (input: { packageId: string; environment?: string; draftId: string; previewYaml?: string; executionType: 'run' | 'load'; legacyDebug?: boolean; target: { type: DebugResourceType; id: string } }) => boolean | void;
   onOpenConfigurationFile?: (path: string, origin?: string, reference?: ResourceSourceReference) => void;
+  onOpenTestdata?: () => void;
 }

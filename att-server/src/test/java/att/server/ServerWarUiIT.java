@@ -581,9 +581,10 @@ class ServerWarUiIT {
         Path config = Files.writeString(temp.resolve("server.yaml"),
                 "server:\n  runtimeConfigPath: " + yaml(localHome.resolve("config/config.yaml")) + "\n  dataDir: " + yaml(temp.resolve("data")) + "\n  authenticationRequired: true\n  security:\n    checkCrossOrigin: true\n"
                         + "  inlineLoad:\n    enabled: true\n  inspection:\n    enabled: true\n    maxConcurrent: 1\n    queuedLimit: 8\n    timeoutMs: 30000\n    heapMaxMb: 256"
-                        + "\n    safeTextSources:\n      payments:\n        - config/tools/att-helper.sh\n"
+                        + "\n    sourceBrowsing:\n      denyGlobs:\n        - templates/SCHEDULED/payload/unlisted-request.xml\n"
+                        + "    safeTextSources:\n      payments:\n        - config/tools/att-helper.sh\n"
                         + "  scheduling:\n    enabled: true\n    adminRole: ATT_SCHEDULE_ADMIN\n"
-                        + "workers:\n  maxConcurrent: 1\n  queuedLimit: 1\n  maxConcurrentLoad: 1\n"
+                        + "workers:\n  maxConcurrent: 1\n  queuedLimit: 1\n  maxConcurrentLoad: 2\n"
                         + "packages:\n  allowedRoots:\n    - " + yaml(packages) + "\n  entries:\n    payments: " + yaml(packageRoot) + "\n    default: "+yaml(Files.createDirectory(packages.resolve("default")))+"\n    jeffreyjiang: "+yaml(Files.createDirectory(packages.resolve("jeffreyjiang")))+"\n    lilyzhou: "+yaml(emptyPackage)+"\n");
         String oldConfig = System.getProperty("att.server.config");
         String oldHome = System.getProperty("att.home");
@@ -698,10 +699,17 @@ class ServerWarUiIT {
                     + referenceFlow.path("resourceId").asText() + "/source", scheduleAdminAuth);
             assertTrue(referenceFlowSource.path("available").asBoolean(), referenceFlowSource.toString());
             assertEquals("templates/flows/reference/flow.yaml", referenceFlowSource.path("logicalPath").asText());
-            assertTrue(referenceFlowSource.path("text").asText().contains("&{templates/SCHEDULED/payload/request.xml}"),
+            assertTrue(referenceFlowSource.path("text").asText().contains("&{../../SCHEDULED/payload/request.xml}"),
                     referenceFlowSource.toString());
+            assertTrue(referenceFlowSource.path("text").asText().contains("&{../../SCHEDULED/payload/unlisted-request.xml}"),
+                    "The safe source view retains the policy-blocked literal locator.");
             assertEquals("templates/SCHEDULED/payload/request.xml",
                     referenceFlowSource.path("fileReferences").get(0).path("logicalPath").asText(), referenceFlowSource.toString());
+            assertEquals(1, referenceFlowSource.path("fileReferences").size(), referenceFlowSource.toString());
+            assertTrue(referenceFlowSource.path("fileReferencesUnavailable").asBoolean(),
+                    "A policy-blocked Flow locator should have a safe unavailable signal alongside the navigable reference.");
+            assertFalse(referenceFlowSource.toString().contains("policy-blocked payload"),
+                    "The unavailable referenced file contents must not enter the source response.");
             JsonNode toolResources = getJson(port, api + "/packages/payments/resources?type=tool", auth);
             JsonNode checkQueue = null;
             for (JsonNode item : toolResources.path("items"))
@@ -1155,10 +1163,12 @@ class ServerWarUiIT {
                 "schemaVersion: att-flow/v3.6\nid: diagnostic.fidelity.v1\nname: Diagnostic fidelity\ndescription: Missing payload regression\nactions:\n"
                 +"  payload:\n    type: log\n    message: \"&{./Pacs008.xml}\"\n");
         Files.writeString(payload.resolve("request.xml"), "<request>safe payload</request>\n");
+        Files.writeString(payload.resolve("unlisted-request.xml"), "<request>policy-blocked payload</request>\n");
         Files.writeString(referenceFlow.resolve("flow.yaml"),
                 "schemaVersion: att-flow/v3.6\nid: reference.flow.v1\nname: Reference Flow\n"
                         + "description: Exercises safe package file links in a Flow source.\nactions:\n"
-                        + "  inspectPayload:\n    type: log\n    message: \"Request &{templates/SCHEDULED/payload/request.xml}\"\n");
+                        + "  inspectPayload:\n    type: log\n    message: \"Request &{../../SCHEDULED/payload/request.xml}\"\n"
+                        + "  policyBlockedPayload:\n    type: log\n    message: \"Request &{../../SCHEDULED/payload/unlisted-request.xml}\"\n");
     }
 
     private void runServerUiPlaywright(String origin) throws Exception {

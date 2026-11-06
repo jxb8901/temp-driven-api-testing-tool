@@ -1,15 +1,13 @@
 import { useInspectionRefresh } from '../../useInspectionRefresh';
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
-import type { PackageOption } from '../load/types';
 import { CodeEditor, detectCodeLanguage } from '../code/CodeEditor';
 import { ConfigurationExplorer } from './ConfigurationExplorer';
-import type { ConfigurationEntry, ConfigurationFileNode, ExplorerApi, JsonValue, ResourceReference, ResourceSourceReference, SourceProjection, TestdataRecordsResponse } from './types';
+import type { ConfigurationFileNode, ExplorerApi, ResourceReference, ResourceSourceReference, SourceProjection } from './types';
 import './configuration-workspace.css';
 
-type WorkspaceTab = 'source' | 'declared' | 'effective' | 'compare' | 'testdata';
+type WorkspaceTab = 'source' | 'declared' | 'effective' | 'compare';
 interface ConfigurationWorkspaceProps {
   api: ExplorerApi;
-  packages: PackageOption[];
   packageId: string;
   environment: string;
   filePath?: string;
@@ -17,7 +15,6 @@ interface ConfigurationWorkspaceProps {
   sourceReference?: ResourceSourceReference;
   configurationReferenceId?: string;
   tab: WorkspaceTab;
-  onPackageChange(packageId: string): void;
   onEnvironmentChange(environment: string): void;
   onFileChange(filePath?: string, origin?: string, reference?: ResourceSourceReference, configurationReferenceId?: string): void;
   onTabChange(tab: WorkspaceTab): void;
@@ -36,20 +33,7 @@ function errorText(error: unknown, action: string): string {
   if (status) return `${action} failed (HTTP ${status}).`;
   return `Could not ${action}. Check the connection and retry.`;
 }
-function displayField(entry: ConfigurationEntry, name: string): string {
-  const field = entry.fields?.[name];
-  if (!field) return '—';
-  if (field.state !== 'visible') return field.state;
-  return typeof field.value === 'string' ? field.value : JSON.stringify(field.value ?? null);
-}
-function safeCell(value: unknown): string {
-  if (value === null) return 'null';
-  if (typeof value === 'string') return value;
-  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
-  try { return JSON.stringify(value, null, 2); } catch { return '[unavailable]'; }
-}
-
-export function ConfigurationWorkspace({ api, packages, packageId, environment, filePath, fileOrigin, sourceReference, configurationReferenceId, tab, onPackageChange, onEnvironmentChange, onFileChange, onTabChange, onOpenResource, canRevealAdminFields = false }: ConfigurationWorkspaceProps) {
+export function ConfigurationWorkspace({ api, packageId, environment, filePath, fileOrigin, sourceReference, configurationReferenceId, tab, onEnvironmentChange, onFileChange, onTabChange, onOpenResource, canRevealAdminFields = false }: ConfigurationWorkspaceProps) {
   const inspectionRefresh = useInspectionRefresh(true);
   const [declared, setDeclared] = useState<Awaited<ReturnType<ExplorerApi['getDeclaredConfiguration']>> | null>(null);
   const [directoryMap, setDirectoryMap] = useState<Record<string, DirectoryState>>({});
@@ -225,17 +209,14 @@ export function ConfigurationWorkspace({ api, packages, packageId, environment, 
 
   const tabs: Array<{ id: WorkspaceTab; label: string }> = [
     { id: 'source', label: 'Source' }, { id: 'declared', label: 'Declared' }, { id: 'effective', label: 'Effective' },
-    { id: 'compare', label: 'Compare' }, { id: 'testdata', label: 'Testdata' },
+    { id: 'compare', label: 'Compare' },
   ];
   const refs = selectedFile?.references || [];
 
   return <div className="page-content att-configuration-page">
     <header className="att-configuration-page-heading">
-      <div><p className="eyebrow">Shared runtime configuration</p><h1>Configuration</h1><p>Inspect centrally managed configuration and package Testdata safely. This view is read-only.</p></div>
+      <div><p className="eyebrow">Shared Runtime Configuration</p><h1>Configuration</h1><p>Inspect centrally managed runtime configuration safely. This view is read-only.</p></div>
       <div className="att-configuration-context">
-        {tab === 'testdata' && <label>Testdata package<select aria-label="Testdata package" value={packageId} onChange={event => onPackageChange(event.currentTarget.value)}>
-          <option value="">Choose a package</option>{packages.map(item => <option key={item.packageId} value={item.packageId}>{item.displayName || item.packageId}</option>)}
-        </select></label>}
         <label>Environment<select aria-label="Configuration environment" value={environment} onChange={event => onEnvironmentChange(event.currentTarget.value)}>
           <option value="">Runtime default</option>{profiles.map(item => <option key={item.name} value={item.name}>{item.name}{item.default ? ' · default' : ''}</option>)}
         </select></label>
@@ -295,8 +276,6 @@ export function ConfigurationWorkspace({ api, packages, packageId, environment, 
           api={api} packageId="" environment={environment} onEnvironmentChange={onEnvironmentChange}
           initialMode={tab} showEnvironmentSelector={false} onViewChange={onTabChange} includeAllFields={includeAllFields}
         />}
-        {tab === 'testdata' && !packageId && <p>Choose a Testdata package to inspect Package-local records. Shared configuration does not require a Package.</p>}
-        {tab === 'testdata' && packageId && <TestdataCatalog api={api} packageId={packageId} environment={environment} onOpenResource={onOpenResource} />}
       </section>
       {inspectorOpen && <aside className="att-configuration-inspector" aria-label="Configuration inspector">
         <h2>Inspector</h2>
@@ -317,161 +296,4 @@ export function ConfigurationWorkspace({ api, packages, packageId, environment, 
 function ReferenceLink({ reference, onOpen }: { reference: ResourceReference; onOpen(resource: { type: string; resourceId: string }): void }) {
   if (!reference.type || !['case', 'template', 'flow', 'tool'].includes(reference.type) || !reference.resourceId || reference.resolution === 'unresolved') return <li>{reference.logicalId || reference.name || reference.resourceId || 'Unresolved reference'} <span>{reference.resolution || 'unresolved'}</span></li>;
   return <li><button type="button" onClick={() => onOpen({ type: reference.type!, resourceId: reference.resourceId! })}>{reference.logicalId || reference.name || reference.resourceId}</button> <span>{reference.type}</span></li>;
-}
-
-
-function TestdataCell({ value }: { value: unknown }) {
-  const [copied, setCopied] = useState(false);
-  const nested = value !== null && typeof value === 'object';
-  const copyText = typeof value === 'string' ? value : JSON.stringify(value);
-  const display = value === undefined ? 'Not present' : value === null ? 'null'
-    : value === '' ? '(empty string)' : nested ? Array.isArray(value) ? 'List (' + value.length + ' items)' : 'Object (' + Object.keys(value as object).length + ' fields)' : String(value);
-  async function copy() {
-    try { await navigator.clipboard.writeText(copyText ?? 'null'); setCopied(true); window.setTimeout(() => setCopied(false), 1500); }
-    catch { setCopied(false); }
-  }
-  return <div className="att-testdata-cell">
-    <span>{display}</span>
-    {value !== undefined && <button type="button" onClick={() => void copy()} aria-label="Copy Testdata value">Copy</button>}
-    {copied && <span role="status">Copied</span>}
-    {nested && <details><summary>Inspect nested value</summary>
-      <CodeEditor value={JSON.stringify(value, null, 2)} language="json" label="Nested Testdata value" readOnly />
-    </details>}
-  </div>;
-}
-
-function observedType(value: unknown): string {
-  if (value === null) return 'null';
-  if (Array.isArray(value)) return 'list';
-  if (typeof value === 'object') return 'object';
-  return typeof value;
-}
-
-function TestdataCatalog({ api, packageId, environment, onOpenResource }: { api: ExplorerApi; packageId: string; environment: string; onOpenResource(resource: { type: string; resourceId: string }): void }) {
-  const [entries, setEntries] = useState<ConfigurationEntry[]>([]);
-  const [selectedId, setSelectedId] = useState('');
-  const [response, setResponse] = useState<TestdataRecordsResponse | null>(null);
-  const [error, setError] = useState('');
-  const [status, setStatus] = useState('Loading resolved Testdata catalog…');
-  const [offset, setOffset] = useState(0);
-  const [loading, setLoading] = useState(false);
-  const [revision, setRevision] = useState(0);
-  const [catalogSearch, setCatalogSearch] = useState('');
-  const [catalogNextOffset, setCatalogNextOffset] = useState<number | null>(null);
-  const [catalogTotal, setCatalogTotal] = useState<number | null>(null);
-  const [catalogLoading, setCatalogLoading] = useState(false);
-  const [previewGenerated, setPreviewGenerated] = useState(false);
-  const [copiedRecord, setCopiedRecord] = useState<number | null>(null);
-  const selectedEntry = entries.find(item => item.id === selectedId);
-  const visibleEntries = useMemo(() => entries
-    .filter(item => !catalogSearch.trim() || item.id.toLocaleLowerCase().includes(catalogSearch.trim().toLocaleLowerCase())
-      || (item.source || displayField(item, 'source')).toLocaleLowerCase().includes(catalogSearch.trim().toLocaleLowerCase()))
-    .sort((left, right) => left.id.localeCompare(right.id, undefined, { numeric: true, sensitivity: 'base' })),
-  [entries, catalogSearch]);
-  const isGenerated = selectedEntry?.generated === true || displayField(selectedEntry || { id: '' }, 'generated') === 'true';
-
-  useEffect(() => {
-    const controller = new AbortController(); setEntries([]); setSelectedId(''); setResponse(null); setError(''); setStatus('Loading resolved Testdata catalog…'); setCatalogNextOffset(null); setCatalogTotal(null); setOffset(0); setPreviewGenerated(false);
-    api.getEffectiveConfiguration(packageId, { environment: environment || undefined, section: 'testdata', query: catalogSearch.trim() || undefined, offset: 0, limit: 50 }, controller.signal)
-      .then(result => {
-        const data = result.sections?.find(section => section.id === 'testdata')?.entries || [];
-        if (controller.signal.aborted) return;
-        setEntries(data); setSelectedId(data[0]?.id || ''); setCatalogNextOffset(result.nextOffset ?? null);
-        setCatalogTotal(result.total ?? data.length);
-        setStatus(data.length ? `${result.total ?? data.length} Testdata descriptors match this search for ${environment || result.environment || 'package default'}.` : 'No Testdata descriptors match this search.');
-      }).catch(reason => { if (!controller.signal.aborted) { setError(errorText(reason, 'load the Testdata catalog')); setStatus('Testdata catalog unavailable.'); } });
-    return () => controller.abort();
-  }, [api, packageId, environment, catalogSearch]);
-
-  async function loadMoreCatalog() {
-    if (catalogNextOffset == null || catalogLoading) return;
-    setCatalogLoading(true); setError('');
-    try {
-      const result = await api.getEffectiveConfiguration(packageId, { environment: environment || undefined, section: 'testdata', query: catalogSearch.trim() || undefined, offset: catalogNextOffset, limit: 50 });
-      const next = result.sections?.find(section => section.id === 'testdata')?.entries || [];
-      setEntries(current => [...current, ...next]); setCatalogNextOffset(result.nextOffset ?? null); setCatalogTotal(result.total ?? entries.length + next.length);
-    } catch (reason) { setError(errorText(reason, 'load more Testdata descriptors')); }
-    finally { setCatalogLoading(false); }
-  }
-
-  useEffect(() => {
-    if (visibleEntries.length && !visibleEntries.some(item => item.id === selectedId)) setSelectedId(visibleEntries[0].id);
-  }, [visibleEntries, selectedId]);
-
-  useEffect(() => {
-    if (!selectedId || !api.getTestdataRecords) { setResponse(null); return; }
-    const controller = new AbortController(); setLoading(true); setError('');
-    api.getTestdataRecords(packageId, selectedId, { environment: environment || undefined, offset, limit: 50, previewGenerated }, controller.signal)
-      .then(result => { if (!controller.signal.aborted) setResponse(result); })
-      .catch(reason => {
-        if (controller.signal.aborted) return;
-        const status = typeof reason === 'object' && reason !== null && 'status' in reason
-          ? Number((reason as { status?: unknown }).status) : 0;
-        setError(status === 404
-          ? 'Testdata record preview is not available from this Server version; safe descriptor metadata remains visible.'
-          : errorText(reason, 'load Testdata records'));
-      })
-      .finally(() => { if (!controller.signal.aborted) setLoading(false); });
-    return () => controller.abort();
-  }, [api, packageId, selectedId, environment, offset, isGenerated, previewGenerated, revision]);
-
-  async function copyRecord(index: number, value: JsonValue) {
-    try { await navigator.clipboard.writeText(JSON.stringify(value)); setCopiedRecord(index); setStatus(`Copied Testdata row ${index + 1}.`); }
-    catch { setStatus('Copy is unavailable in this browser context.'); }
-  }
-
-  const records = response?.records || [];
-  const columns = useMemo(() => [...new Set(records.flatMap(record => record.value && typeof record.value === 'object' && !Array.isArray(record.value) ? Object.keys(record.value) : ['value']))], [records]);
-  if (error && !selectedId) return <section className="att-testdata-workspace"><h2>Testdata</h2><p className="att-error" role="alert">{error}</p></section>;
-  return <section className="att-testdata-workspace" aria-label="Structured Testdata catalog">
-    <header><div><h2>Testdata</h2><p>Resolved descriptor metadata and bounded records for {environment || 'the package default environment'}.</p></div>
-      {(catalogTotal !== 0 || entries.length > 0 || catalogSearch) && <label>Search descriptors<input type="search" aria-label="Search Testdata descriptors" value={catalogSearch} onChange={event => setCatalogSearch(event.currentTarget.value)} placeholder="Search descriptor IDs and sources" /></label>}
-    </header>
-    <p role="status" aria-live="polite">{status}{loading ? ' Loading records…' : ''}</p>
-    {error && <p className="att-error" role="alert">{error}<button type="button" onClick={() => setRevision(value => value + 1)}>Retry</button></p>}
-    <div className="att-testdata-layout">
-      <nav className="att-testdata-catalog" aria-label="Testdata descriptors">
-        <h3>Catalog</h3><p>{visibleEntries.length} shown of {catalogTotal ?? entries.length} matching descriptors ({entries.length} loaded)</p>
-        <ul>{visibleEntries.map(item => <li key={item.id}><button type="button" aria-current={selectedId === item.id ? 'true' : undefined}
-          onClick={() => { setSelectedId(item.id); setOffset(0); setPreviewGenerated(false); setRevision(value => value + 1); }}>
-          <span>{item.id}</span><small>{item.source || displayField(item, 'source')}</small></button></li>)}</ul>
-        {catalogNextOffset != null && <button type="button" onClick={() => void loadMoreCatalog()} disabled={catalogLoading}>{catalogLoading ? 'Loading…' : 'Load more descriptors'}</button>}
-        {entries.length > 0 && !visibleEntries.length && <p>No descriptors match this search.</p>}
-      </nav>
-      <div className="att-testdata-detail">
-    {selectedEntry ? <>
-      <dl className="att-testdata-meta"><div><dt>Descriptor</dt><dd>{selectedEntry.id}</dd></div><div><dt>Source</dt><dd>{selectedEntry.source ? <span title="Package-local descriptor, not a shared Configuration source">{packageId}: {selectedEntry.source}</span> : 'Not provided'}</dd></div>
-        <div><dt>Generated</dt><dd>{isGenerated ? 'Yes' : 'No'}</dd></div><div><dt>Records</dt><dd>{response?.recordCount?.toLocaleString() || displayField(selectedEntry, 'recordCount')}</dd></div>
-        <div><dt>Selection</dt><dd>{displayField(selectedEntry, 'selection.strategy')}</dd></div><div><dt>Exhaustion</dt><dd>{displayField(selectedEntry, 'selection.exhaustion')}</dd></div>
-        <div><dt>Environment origin</dt><dd>{selectedEntry.fields?.['selection.strategy']?.origin || 'Server projection'}</dd></div></dl>
-      {selectedEntry.references?.length ? <><h3>Referenced by</h3><ul>{selectedEntry.references.map((reference, index) =>
-        <ReferenceLink key={index} reference={reference} onOpen={onOpenResource} />)}</ul></> : null}
-      {isGenerated && <div className="att-testdata-generated"><h3>Generated Testdata</h3><p>This descriptor creates records at runtime. Previewing generated records is bounded and starts only when you request it.</p>
-        <dl><div><dt>Sequence start</dt><dd>{String(((((response?.generation as Record<string, JsonValue> | undefined)?.generate as Record<string, JsonValue> | undefined)?.seq as Record<string, JsonValue> | undefined)?.from) ?? 'Not provided')}</dd></div>
-          <div><dt>Sequence end</dt><dd>{String(((((response?.generation as Record<string, JsonValue> | undefined)?.generate as Record<string, JsonValue> | undefined)?.seq as Record<string, JsonValue> | undefined)?.to) ?? 'Not provided')}</dd></div>
-          <div><dt>Format</dt><dd>{String(((((response?.generation as Record<string, JsonValue> | undefined)?.generate as Record<string, JsonValue> | undefined)?.seq as Record<string, JsonValue> | undefined)?.format) ?? 'Not provided')}</dd></div></dl>
-        {response?.generation && <details><summary>Record template</summary><CodeEditor value={JSON.stringify((response.generation as Record<string, JsonValue>).record ?? null, null, 2)} language="json" label="Generated Testdata record template" readOnly /></details>}
-        {!previewGenerated && <button type="button" onClick={() => { setOffset(0); setPreviewGenerated(true); }} disabled={loading}>Preview first 50 generated records</button>}
-      </div>}
-      <div className="att-testdata-record-heading"><h3>{isGenerated ? 'Record preview' : 'Records'}</h3><span>{response ? `${(response.recordCount ?? response.total).toLocaleString()} total` : 'Records withheld or unavailable'}</span></div>
-      {response?.previewRequired ? <p className="att-config-empty">Generated records are not loaded automatically. Choose <strong>Preview first 50 generated records</strong> to request a bounded preview.</p>
-        : records.length > 0 && <details className="att-testdata-schema"><summary>Fields observed in this page</summary><p>Requiredness and authored descriptions are not provided by this record preview.</p>
-          <div className="att-testdata-table-scroll"><table><thead><tr><th scope="col">Field</th><th scope="col">Observed type</th><th scope="col">Example</th></tr></thead><tbody>{columns.map(column => {
-            const values = records.map(record => record.value && typeof record.value === 'object' && !Array.isArray(record.value)
-              ? (record.value as Record<string, unknown>)[column] : column === 'value' ? record.value : undefined).filter(value => value !== undefined);
-            const typeSet = [...new Set(values.map(observedType))];
-            return <tr key={column}><th scope="row">{column}</th><td>{typeSet.join(', ') || 'Not observed'}</td><td>{values.length ? safeCell(values[0]) : '—'}</td></tr>;
-          })}</tbody></table></div>
-        </details>}
-      {!response?.previewRequired && (records.length > 0 ? <div className="att-testdata-table-scroll"><table><thead><tr><th scope="col">Index</th>{columns.map(column => <th scope="col" key={column}>{column}</th>)}<th scope="col">Visibility</th><th scope="col">Actions</th></tr></thead>
-          <tbody>{records.map(record => <tr key={`${record.index}:${record.sequence ?? ''}`}><th scope="row">{record.index + 1}{record.sequence != null ? <small>seq {record.sequence}</small> : null}</th>
-            {columns.map(column => { const value = record.value && typeof record.value === 'object' && !Array.isArray(record.value) ? (record.value as Record<string, unknown>)[column] : column === 'value' ? record.value : undefined; return <td key={column}><TestdataCell value={value} /></td>; })}
-            <td>{record.redacted ? 'Some fields redacted' : 'Visible by Server policy'}</td><td><button type="button" onClick={() => void copyRecord(record.index, record.value)}>{copiedRecord === record.index ? 'Copied' : 'Copy row'}</button></td></tr>)}</tbody></table></div>
-          : <p className="att-config-empty">{loading ? 'Loading records…' : response ? 'This descriptor contains no records.' : 'No records are available for this descriptor.'}</p>)}
-      {response?.nextOffset != null && <button type="button" onClick={() => setOffset(response.nextOffset || 0)} disabled={loading}>Load next 50 records</button>}
-      <details className="att-testdata-source"><summary>Advanced descriptor metadata</summary><CodeEditor value={JSON.stringify(Object.fromEntries(Object.entries(selectedEntry.fields || {}).map(([key, field]) => [key, field.state === 'visible' ? field.value : field.state])), null, 2)} language="json" label="Advanced Testdata descriptor metadata" readOnly /></details>
-    </> : <p className="att-config-empty">No Testdata descriptors were returned for the selected environment.</p>}
-      </div>
-    </div>
-  </section>;
 }

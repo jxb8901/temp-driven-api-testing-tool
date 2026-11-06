@@ -21,6 +21,8 @@ import type { LoadJobsApi, PackageOption } from './features/load/types';
 const SettingsPage = lazy(() => import('./SettingsPage').then(module => ({ default: module.SettingsPage })));
 import { ConfigurationWorkspace } from './features/explorer/ConfigurationWorkspace';
 import { PackageManifestWorkspace } from './features/explorer/PackageManifestWorkspace';
+import { PackageTestdataWorkspace } from './features/explorer/PackageTestdataCatalog';
+import { PackageSafeSourceFileViewer } from './features/explorer/PackageSafeSourceFileViewer';
 const LoadTestingPage = lazy(() => import('./features/load/LoadTestingPage').then(module => ({ default: module.LoadTestingPage })));
 const SavedLoadScenarios = lazy(() => import('./features/load/SavedLoadScenarios').then(module => ({ default: module.SavedLoadScenarios })));
 const LoadTemplateBuilder = lazy(() => import('./features/load/LoadTemplateBuilder').then(module => ({ default: module.LoadTemplateBuilder })));
@@ -35,45 +37,81 @@ function asError(value: unknown): Error {
 
 const loadJobsApi: LoadJobsApi = api;
 
-function ExplorerRouteView({ packageId, resourceRoute, inlineLoadEnabled, schedulingEnabled, onSchedule }: {
-  packageId: string;
-  resourceRoute: ExplorerPageProps['resourceRoute'];
+function ExplorerRouteView({ route, inlineLoadEnabled, schedulingEnabled, onSchedule, packageRegistrationState, registered, packageLabel }: {
+  route: Extract<AppRoute, { kind: 'package' }>;
   inlineLoadEnabled: boolean;
   schedulingEnabled: boolean;
   onSchedule(input: ValidatedScheduleIntent): boolean;
+  packageRegistrationState: 'loading' | 'ready' | 'error';
+  registered: boolean;
+  packageLabel: string;
 }) {
   const workspace = useAppShellContext();
   const navigation = useNavigationGuard();
+  const packageId = route.packageId;
+  const resourceRoute = route.resource || null;
+  const environment = route.environment ?? (packageId === workspace.selectedPackage ? workspace.selectedEnvironment : '');
   const onResourceRouteChange = useCallback((resource: ExplorerPageProps['resourceRoute']) => {
     navigation.navigate(resource
-      ? { kind: 'package', packageId, resource }
-      : { kind: 'package', packageId });
-  }, [navigation.navigate, packageId]);
+      ? { kind: 'package', packageId, resource, environment }
+      : { kind: 'package', packageId, environment });
+  }, [navigation.navigate, packageId, environment]);
+  const onTestdataEnvironmentChange = useCallback((nextEnvironment: string) => {
+    navigation.navigate({ ...route, environment: nextEnvironment });
+  }, [navigation.navigate, route]);
+  const onTestdataDescriptorChange = useCallback((descriptorId?: string) => {
+    navigation.navigate({ ...route, testdataDescriptorId: descriptorId });
+  }, [navigation.navigate, route]);
+  const onOpenTestdata = useCallback(() => {
+    navigation.navigate({ kind: 'package', packageId, view: 'testdata', environment });
+  }, [navigation.navigate, packageId, environment]);
+  const onOpenPackageConfiguration = useCallback(() => {
+    navigation.navigate({ kind: 'configuration', packageId, environment, view: 'package-manifest' });
+  }, [navigation.navigate, packageId, environment]);
+  const onOpenTestdataResource = useCallback((resource: { type: string; resourceId: string }) => {
+    navigation.navigate({ kind: 'package', packageId, resource, environment });
+  }, [navigation.navigate, packageId, environment]);
   const onJobAccepted = useCallback((jobId: string) => {
     workspace.onJobAccepted({ jobId, packageId });
   }, [packageId, workspace.onJobAccepted]);
   const onOpenQuickLoad = useCallback((identity: { packageId: string; type: string; resourceId: string; logicalId?: string }) => {
     navigation.navigate({ kind: 'quick-load', packageId: identity.packageId,
-      target: { type: identity.type, resourceId: identity.resourceId, logicalId: identity.logicalId }, environment: packageId === workspace.selectedPackage ? workspace.selectedEnvironment : '' });
-  }, [navigation.navigate, workspace.selectedEnvironment]);
+      target: { type: identity.type, resourceId: identity.resourceId, logicalId: identity.logicalId }, environment });
+  }, [navigation.navigate, environment]);
   const onRunTarget = useCallback((identity: { packageId: string; type: string; resourceId: string; logicalId?: string }) => {
     navigation.navigate({ kind: 'run', packageId: identity.packageId,
-      target: { type: identity.type, resourceId: identity.resourceId, logicalId: identity.logicalId }, environment: packageId === workspace.selectedPackage ? workspace.selectedEnvironment : '' });
-  }, [navigation.navigate, workspace.selectedEnvironment]);
+      target: { type: identity.type, resourceId: identity.resourceId, logicalId: identity.logicalId }, environment });
+  }, [navigation.navigate, environment]);
   const onRunBatch = useCallback(() => {
-    navigation.navigate({ kind: 'run', packageId, environment: packageId === workspace.selectedPackage ? workspace.selectedEnvironment : '', batch: true });
-  }, [navigation.navigate, packageId, workspace.selectedEnvironment]);
+    navigation.navigate({ kind: 'run', packageId, environment, batch: true });
+  }, [navigation.navigate, packageId, environment]);
   const onScheduleDebug = useCallback<NonNullable<ExplorerPageProps['onScheduleDebug']>>((input) => {
     return onSchedule(input);
   }, [onSchedule]);
 
+  const contextNotice = packageId !== workspace.selectedPackage && <div className="page-content"><p>Browsing Package {packageId}; Workspace is {workspace.selectedPackage || 'unselected'}.</p><button type="button" onClick={() => workspace.onPackageChange(packageId)}>Use this Package as Workspace</button></div>;
+  if (route.view === 'testdata') return <>
+    {contextNotice}
+    <PackageTestdataWorkspace api={api} packageId={packageId} packageLabel={packageLabel} registrationState={packageRegistrationState} registered={registered}
+      environment={environment} descriptorId={route.testdataDescriptorId} onEnvironmentChange={onTestdataEnvironmentChange}
+      onDescriptorChange={onTestdataDescriptorChange} onBackToResources={() => navigation.navigate({ kind: 'package', packageId, environment })}
+      onOpenResource={onOpenTestdataResource} onOpenPackageConfiguration={onOpenPackageConfiguration} />
+  </>;
+  if (route.view === 'source-file') return <>
+    {contextNotice}
+    <PackageSafeSourceFileViewer api={api} packageId={packageId} filePath={route.filePath} fileOrigin={route.fileOrigin}
+      sourceReference={route.sourceReference} onBack={() => navigation.navigate(route.returnTo || formatRoute({ kind: 'package', packageId,
+        ...(route.sourceReference ? { resource: { type: route.sourceReference.type, resourceId: route.sourceReference.resourceId, tab: 'source' as const } } : {}) }))}
+      onOpenFile={(path, origin, sourceReference) => navigation.navigate({ kind: 'package', packageId, view: 'source-file', environment,
+        filePath: path, fileOrigin: origin, sourceReference, returnTo: formatRoute(route) })} />
+  </>;
   return <>
-    {packageId !== workspace.selectedPackage && <div className="page-content"><p>Browsing Package {packageId}; Workspace is {workspace.selectedPackage || 'unselected'}.</p><button type="button" onClick={() => workspace.onPackageChange(packageId)}>Use this Package as Workspace</button></div>}
+    {contextNotice}
     <ExplorerPage key={packageId}
     api={api}
     packageId={packageId}
     resourceRoute={resourceRoute}
-    environment={packageId === workspace.selectedPackage ? workspace.selectedEnvironment : ''}
+    environment={environment}
     registerUnsavedChanges={navigation.registerUnsavedChanges}
     onResourceRouteChange={onResourceRouteChange}
     onJobAccepted={onJobAccepted}
@@ -81,7 +119,13 @@ function ExplorerRouteView({ packageId, resourceRoute, inlineLoadEnabled, schedu
     onRunBatch={onRunBatch}
     onOpenQuickLoad={inlineLoadEnabled ? onOpenQuickLoad : undefined}
     onScheduleDebug={schedulingEnabled ? onScheduleDebug : undefined}
-    onOpenConfigurationFile={(path, origin, sourceReference) => navigation.navigate({ kind: 'configuration', packageId, environment: packageId === workspace.selectedPackage ? workspace.selectedEnvironment : '', filePath: path, fileOrigin: origin, sourceReference, tab: 'source' })}
+    onOpenConfigurationFile={(path, origin, sourceReference) => {
+      if (sourceReference) navigation.navigate({ kind: 'package', packageId, view: 'source-file', environment, filePath: path, fileOrigin: origin,
+        sourceReference, returnTo: formatRoute({ kind: 'package', packageId, environment,
+          ...(resourceRoute ? { resource: { ...resourceRoute, tab: 'source' } } : {}) }) });
+      else navigation.navigate({ kind: 'configuration', packageId, environment, filePath: path, fileOrigin: origin, tab: 'source' });
+    }}
+    onOpenTestdata={onOpenTestdata}
   /></>;
 }
 
@@ -154,26 +198,22 @@ function LoadRouteView({ packageId, templateId, environment: initialEnvironment,
   </Suspense>;
 }
 
-function ConfigurationRouteView({ route, packages }: {
+function ConfigurationRouteView({ route }: {
   route: Extract<ReturnType<typeof useRouteState>['route'], { kind: 'configuration' }>;
-  packages: PackageOption[];
 }) {
   const workspace = useAppShellContext();
-  const [showManifest, setShowManifest] = useState(false);
+  const [showManifest, setShowManifest] = useState(route.view === 'package-manifest');
   const [manifestDirty, setManifestDirty] = useState(false);
-  useEffect(() => { setShowManifest(false); }, [route.filePath, route.packageId]);
+  useEffect(() => { setShowManifest(route.view === 'package-manifest'); }, [route.filePath, route.packageId, route.view]);
   const navigation = useNavigationGuard();
   const selectedEnvironment = route.environment ?? (route.packageId === workspace.selectedPackage ? workspace.selectedEnvironment : '');
-  const onPackageChange = useCallback((packageId: string) => {
-    navigation.navigate({ kind: 'configuration', packageId, environment: packageId === route.packageId ? selectedEnvironment : '', tab: route.tab });
-  }, [navigation.navigate, route.packageId, route.tab, selectedEnvironment]);
   const onEnvironmentChange = useCallback((environment: string) => {
     navigation.navigate({ ...route, environment });
   }, [navigation.navigate, route]);
   const onFileChange = useCallback((filePath?: string, fileOrigin?: string, sourceReference?: ResourceSourceReference, configurationReferenceId?: string) => {
     navigation.navigate({ ...route, filePath, fileOrigin, sourceReference, configurationReferenceId, tab: filePath ? 'source' : route.tab });
   }, [navigation.navigate, route]);
-  const onTabChange = useCallback((tab: 'source' | 'declared' | 'effective' | 'compare' | 'testdata') => {
+  const onTabChange = useCallback((tab: 'source' | 'declared' | 'effective' | 'compare') => {
     navigation.navigate({ ...route, tab });
   }, [navigation.navigate, route]);
   const onOpenResource = useCallback((resource: { type: string; resourceId: string }) => {
@@ -181,12 +221,11 @@ function ConfigurationRouteView({ route, packages }: {
   }, [navigation.navigate, route.packageId]);
   return <>
     <nav className="configuration-scope" aria-label="Configuration ownership">
-      <button type="button" aria-pressed={showManifest} disabled={!route.packageId} onClick={() => setShowManifest(true)}>Package Configuration</button>
-      <button type="button" aria-pressed={!showManifest} disabled={manifestDirty} onClick={() => setShowManifest(false)}>Shared Configuration</button>
+      <button type="button" aria-pressed={showManifest} disabled={!route.packageId} onClick={() => navigation.navigate({ ...route, view: 'package-manifest' })}>Package Configuration</button>
+      <button type="button" aria-pressed={!showManifest} disabled={manifestDirty} onClick={() => navigation.navigate({ ...route, view: undefined })}>Shared Runtime Configuration</button>
     </nav>
     {showManifest && route.packageId ? <PackageManifestWorkspace key={route.packageId} api={api} packageId={route.packageId} registerUnsavedChanges={navigation.registerUnsavedChanges} onDirtyChange={setManifestDirty} /> : <ConfigurationWorkspace
     api={api}
-    packages={packages}
     packageId={route.packageId || ''}
     environment={selectedEnvironment}
     filePath={route.filePath}
@@ -195,7 +234,6 @@ function ConfigurationRouteView({ route, packages }: {
     configurationReferenceId={route.configurationReferenceId}
     canRevealAdminFields={workspace.canRevealConfigurationFields}
     tab={route.tab || (route.filePath ? 'source' : 'declared')}
-    onPackageChange={onPackageChange}
     onEnvironmentChange={onEnvironmentChange}
     onFileChange={onFileChange}
     onTabChange={onTabChange}
@@ -487,10 +525,7 @@ export default function App() {
   } else if (navigation.route.kind === 'settings') {
     content = <Suspense fallback={<div role="status">Loading settings...</div>}><SettingsPage /></Suspense>;
   } else if (navigation.route.kind === 'configuration') {
-    const packageOptions = state.packages.status === 'ready'
-      ? state.packages.data.map(item => ({ packageId: item.packageId, displayName: item.name }))
-      : [];
-    content = <ConfigurationRouteView route={navigation.route} packages={packageOptions} />;
+    content = <ConfigurationRouteView route={navigation.route} />;
   } else if (navigation.route.kind === 'quick-load') {
     content = <QuickLoadRouteView key={`${navigation.route.packageId}:${navigation.route.target?.type || ''}:${navigation.route.target?.resourceId || ''}:${navigation.route.templateId || ''}:${navigation.route.model || ''}`}
       route={navigation.route} inlineLoadEnabled={capabilities.inlineLoadEnabled}
@@ -499,13 +534,19 @@ export default function App() {
     content = <LoadResourceRouteView key={`${navigation.route.packageId}:${navigation.route.resourceId}`} route={navigation.route}
       inlineLoadEnabled={capabilities.inlineLoadEnabled} />;
   } else if (navigation.route.kind === 'package') {
+    const packageRoute = navigation.route;
+    const registeredPackage = state.packages.status === 'ready'
+      ? state.packages.data.find(item => item.packageId === packageRoute.packageId)
+      : undefined;
     content = <Suspense fallback={<div className="page-content" role="status" aria-busy="true">Loading Explorer…</div>}>
-      <ExplorerRouteView
-        packageId={navigation.route.packageId}
-        resourceRoute={navigation.route.resource || null}
+      <ExplorerRouteView key={packageRoute.packageId}
+        route={packageRoute}
         inlineLoadEnabled={capabilities.inlineLoadEnabled}
         schedulingEnabled={capabilities.loadSchedulingEnabled}
         onSchedule={onSchedule}
+        packageRegistrationState={state.packages.status}
+        registered={Boolean(registeredPackage)}
+        packageLabel={registeredPackage?.name || packageRoute.packageId}
       />
     </Suspense>;
   } else {

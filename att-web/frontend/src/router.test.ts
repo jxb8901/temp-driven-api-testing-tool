@@ -35,6 +35,28 @@ describe('ATT hash route contract', () => {
     });
   });
 
+  it('owns Package Testdata routes and redirects legacy Configuration Testdata links', () => {
+    const route = { kind: 'package', packageId: 'payments', view: 'testdata', environment: 'SIT', testdataDescriptorId: 'accounts' } as const;
+    expect(parseRoute(formatRoute(route))).toEqual(route);
+    expect(parseRoute('#/configuration/payments?tab=testdata&environment=SIT&descriptorId=accounts')).toEqual(route);
+    expect(parseRoute('#/configuration?tab=testdata&environment=SIT')).toEqual({ kind: 'packages' });
+    expect(parseRoute('#/packages/payments/testdata?descriptor=' + 'x'.repeat(513))).not.toHaveProperty('testdataDescriptorId');
+    const manifest = { kind: 'configuration', packageId: 'payments', environment: 'UAT', view: 'package-manifest' } as const;
+    expect(parseRoute(formatRoute(manifest))).toEqual(manifest);
+  });
+
+  it('round-trips safe Package source-file navigation and rejects forged route data', () => {
+    const caller = formatRoute({ kind: 'package', packageId: 'payments', resource: { type: 'flow', resourceId: 'checkout', tab: 'source' } });
+    const route = { kind: 'package', packageId: 'payments', view: 'source-file', filePath: 'templates/payment/request.xml',
+      fileOrigin: 'templates/payment/flow.yaml', sourceReference: { type: 'flow', resourceId: 'checkout', referenceId: 'a'.repeat(64) }, returnTo: caller } as const;
+    expect(parseRoute(formatRoute(route))).toEqual(route);
+    const nested = { ...route, filePath: 'templates/payment/headers.json', fileOrigin: route.filePath,
+      sourceReference: { ...route.sourceReference, referenceId: 'b'.repeat(64) }, returnTo: formatRoute(route) } as const;
+    expect(parseRoute(formatRoute(nested))).toEqual(nested);
+    const forged = parseRoute('#/packages/payments/source-file?file=%2Fetc%2Fpasswd&sourceType=flow&sourceResourceId=checkout&sourceReferenceId=bad&returnTo=https%3A%2F%2Fevil.example');
+    expect(forged).toEqual({ kind: 'package', packageId: 'payments', view: 'source-file' });
+  });
+
   it('round-trips safe resource-source references and rejects malformed reference tokens', () => {
     const route = {
       kind: 'configuration', packageId: 'payments', filePath: 'templates/payment/payload/request.xml',
