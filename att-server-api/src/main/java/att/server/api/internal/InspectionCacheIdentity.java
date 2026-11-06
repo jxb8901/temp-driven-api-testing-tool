@@ -18,7 +18,7 @@ public final class InspectionCacheIdentity {
                 request.maxResponseBytes==null?262144:request.maxResponseBytes,
                 Boolean.TRUE.equals(request.sourceBrowsingEnabled),request.sourceBrowsingPolicy,Boolean.TRUE.equals(request.redactionEnabled),
                 Boolean.TRUE.equals(request.inspectionSharedConfiguration),Boolean.TRUE.equals(request.inspectionIncludeAllFields));
-        if(request.packageRegistryRevision!=null&&!request.packageRegistryRevision.isBlank())
+        if(request.packageRegistryRevision!=null&&!request.packageRegistryRevision.trim().isEmpty())
             inputs.add(request.packageRegistryRevision);
         for(List<String> values:Arrays.asList(request.safeTextSources,request.externalTextSources,request.externalSourceRoots,
                 request.sourceDenyGlobs,request.sensitivePaths,request.sensitiveFieldPatterns)) {

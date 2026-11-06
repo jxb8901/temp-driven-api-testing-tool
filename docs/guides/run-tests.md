@@ -1,6 +1,6 @@
 # Run functional tests
 
-This guide uses the current ATT 4.2.9 Local CLI. It keeps Snapshot creation explicit and runs the checked-in offline Case.
+This guide uses the current ATT 4.3.0 Local CLI. It keeps Snapshot creation explicit and runs the checked-in offline Case.
 
 ## Build the source checkout
 
