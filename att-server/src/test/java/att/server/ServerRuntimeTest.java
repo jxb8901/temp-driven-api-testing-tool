@@ -194,8 +194,8 @@ class ServerRuntimeTest {
         try {
             new Thread(submission,"config-fence-submit").start();
             long inspectorDeadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(10);
-            while(!Files.exists(ready)&&System.nanoTime()<inspectorDeadline)Thread.sleep(10);
-            assertTrue(Files.exists(ready),"configuration resolver did not reach its inspection fence");
+            while((!Files.isRegularFile(ready)||Files.size(ready)==0)&&System.nanoTime()<inspectorDeadline)Thread.sleep(10);
+            assertTrue(Files.isRegularFile(ready)&&Files.size(ready)>0,"configuration resolver did not publish its inspection fence");
             String resolvedAgainst=Files.readString(ready);
             SourceFileTransaction otherServer=new SourceFileTransaction(data,new SourcePublicationBarrier());
             Path active=otherServer.pin(ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,ChangeSetPublisher.CENTRAL_SCOPE_ID,runtimeRoot.toRealPath());
@@ -238,7 +238,9 @@ class ServerRuntimeTest {
                             ||!"resolve".equals(request.path("inspectionAction").asText()))
                         throw new IllegalArgumentException("Unexpected inspection request");
                     Path config=Path.of(request.path("config").asText());
-                    Files.writeString(ready,config.toString());
+                    Path readyTemp=ready.resolveSibling(ready.getFileName()+".tmp");
+                    Files.writeString(readyTemp,config.toString());
+                    Files.move(readyTemp,ready,java.nio.file.StandardCopyOption.ATOMIC_MOVE);
                     long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(15);
                     while(!Files.exists(release)&&System.nanoTime()<deadline)Thread.sleep(10);
                     if(!Files.exists(release))throw new java.io.IOException("configuration resolver fence timed out");
